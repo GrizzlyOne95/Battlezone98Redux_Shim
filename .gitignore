@@ -1,0 +1,25 @@
+# Visual Studio
+.vs/
+[Bb]in/
+[Oo]bj/
+*.user
+*.userosscache
+*.sln.docstates
+
+# Memory Dumps
+*.DMP
+
+# Python scripts and artifacts
+*.py
+__pycache__/
+
+# Analysis results
+*.txt
+architecture_reference.md
+
+# Tools and references
+tools/
+ref/
+
+# VS Extensions
+*.vsix
