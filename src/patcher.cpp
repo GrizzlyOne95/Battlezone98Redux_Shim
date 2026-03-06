@@ -20,7 +20,9 @@
 #include "scroll_helper.h"
 #include "trampolines.h"
 
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <Windows.h>
 #include <cstdio>
 #include <cstring>
@@ -193,7 +195,7 @@ namespace BZROpenShim
     // Resolve internal BZR.exe pointers for trampolines/helpers.
     // Now uses dynamic addresses found by pattern scanning.
     // -----------------------------------------------------------------------
-    static void ResolvePointers(uint32_t hopFix1Addr, uint32_t hopFix2Addr, uint32_t hopFix3Addr, uint32_t probeMapSortingAddr, uint32_t probeMapFilter1Addr, uint32_t versionNoticeAddr)
+    static void ResolvePointers(uint32_t hopFix1Addr, uint32_t hopFix2Addr, uint32_t hopFix3Addr, uint32_t probeMapSortingAddr, uint32_t probeMapFilter1Addr)
     {
         Log(L"=========== RESOLVING POINTERS ===========\n");
 
@@ -205,11 +207,11 @@ namespace BZROpenShim
             Log(L"[PTR] Hop-Fix 1 return: 0x%08X\n", hopFix1Addr + 0x0E);
         }
 
-        // Hop-Fix 2 - _bzcp jumps back to patch site + 0x13.
+        // Hop-Fix 2 - _bzcp jumps back to patch site + 0x13 after its
+        // restore-selection helper replaces the original select-by-index call.
         if (hopFix2Addr) {
             g_RetAddr_HopFix2 = reinterpret_cast<void*>(hopFix2Addr + 0x13);
             g_MapListObject = reinterpret_cast<void**>(0x0094555C);
-            // Stability mode: replay original call site target from 0x00799279 context.
             g_BZRFnPtr_HopFix2 = reinterpret_cast<void (*)()>(0x007CAFA0);
             Log(L"[PTR] Hop-Fix 2 return: 0x%08X\n", hopFix2Addr + 0x13);
         }
@@ -230,15 +232,11 @@ namespace BZROpenShim
             Log(L"[PTR] Probe MapFilter1 return: 0x%08X\n", probeMapFilter1Addr + 0x05);
         }
 
-        if (versionNoticeAddr) {
-            g_RetAddr_VersionNotice = reinterpret_cast<void*>(versionNoticeAddr + 0x05);
-            Log(L"[PTR] Version Notice return: 0x%08X\n", versionNoticeAddr + 0x05);
-        }
-
-        // Scroll Helpers (these may need adjustment for Steam)
-        g_BZRFn_GetScrollState   = reinterpret_cast<uint32_t (*)()>(0x007D3360);
-        g_BZRFn_ScrollUp         = reinterpret_cast<void (*)()>(0x007CB540);
-        g_BZRFn_ScrollDown       = reinterpret_cast<void (*)()>(0x007CB500);
+        // Native list-step and redraw helpers used by the restored viewport path.
+        g_MapListScrollState = reinterpret_cast<void**>(0x00945578);
+        g_MapListRedrawState = reinterpret_cast<void**>(0x00945574);
+        g_BZRFn_MapListStepDown = reinterpret_cast<void (*)()>(0x007CB540);
+        g_BZRFn_MapListRedraw   = reinterpret_cast<void (*)()>(0x007A4260);
 
         Log(L"[OK]   Pointers resolved\n");
     }
@@ -440,11 +438,18 @@ namespace BZROpenShim
                 p.expected_original = { 0x89, 0x4D, 0xF8, 0x0F, 0xB6 };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
-            else if (strcmp(p.name, "Version Notice OpenShim") == 0)
+            else if (strcmp(p.name, "Version Notice 1/2 (OpenShim)") == 0)
             {
-                p.bzr_address = 0x0062480B;
+                p.bzr_address = 0x0078DD4E;
                 p.verified = true;
-                p.expected_original = { 0x68, 0x3C, 0xD5, 0x88, 0x00 };
+                p.expected_original = { 0xE4, 0x84, 0x87, 0x00 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Version Notice 2/2 (OpenShim)") == 0)
+            {
+                p.bzr_address = 0x00618C2F;
+                p.verified = true;
+                p.expected_original = { 0xE4, 0x84, 0x87, 0x00 };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
             else if (strcmp(p.name, "Probe Refresh Path MapFilter1") == 0)
@@ -454,7 +459,7 @@ namespace BZROpenShim
                 p.expected_original = { 0x52, 0x6A, 0x20, 0x6A, 0x00 };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
-            else if (strcmp(p.name, "Map Jump Fix Branch Override") == 0)
+            else if (strcmp(p.name, "Vehicle List Mod Fix 3/4 (Always Update Vehicle Control)") == 0)
             {
                 p.bzr_address = 0x007AA5A1;
                 p.verified = true;
@@ -474,7 +479,6 @@ namespace BZROpenShim
             { "Map List Rewrite for Hop-Fix 3/3",              (void*)Trampoline_HopFix3 },
             { "Probe Refresh Path MapSorting",                 (void*)Trampoline_Probe_MapSorting },
             { "Probe Refresh Path MapFilter1",                 (void*)Trampoline_Probe_MapFilter1 },
-            { "Version Notice OpenShim",                       (void*)Trampoline_VersionNotice },
         };
 
         for (auto& p : patches)
@@ -556,7 +560,7 @@ namespace BZROpenShim
         ScanForPatchAddresses(patches);
 
         // 6. Extract found addresses for pointer resolution
-        uint32_t hopFix1Addr = 0, hopFix2Addr = 0, hopFix3Addr = 0, probeMapSortingAddr = 0, probeMapFilter1Addr = 0, versionNoticeAddr = 0;
+        uint32_t hopFix1Addr = 0, hopFix2Addr = 0, hopFix3Addr = 0, probeMapSortingAddr = 0, probeMapFilter1Addr = 0;
         for (const auto& p : patches)
         {
             if (strcmp(p.name, "Map List Rewrite for Hop-Fix 1/3") == 0) hopFix1Addr = p.bzr_address;
@@ -564,11 +568,10 @@ namespace BZROpenShim
             else if (strcmp(p.name, "Map List Rewrite for Hop-Fix 3/3") == 0) hopFix3Addr = p.bzr_address;
             else if (strcmp(p.name, "Probe Refresh Path MapSorting") == 0) probeMapSortingAddr = p.bzr_address;
             else if (strcmp(p.name, "Probe Refresh Path MapFilter1") == 0) probeMapFilter1Addr = p.bzr_address;
-            else if (strcmp(p.name, "Version Notice OpenShim") == 0) versionNoticeAddr = p.bzr_address;
         }
 
         // 7. Resolve pointers using found addresses
-        ResolvePointers(hopFix1Addr, hopFix2Addr, hopFix3Addr, probeMapSortingAddr, probeMapFilter1Addr, versionNoticeAddr);
+        ResolvePointers(hopFix1Addr, hopFix2Addr, hopFix3Addr, probeMapSortingAddr, probeMapFilter1Addr);
 
         // 8. Build JMP payloads
         FillJmp5Payloads(patches);

@@ -10,13 +10,14 @@
 //
 // The patch thread (FUN_1000eb30) runs on a background thread, waits for
 // BZR.exe bytes at 0x00868300 to match a known signature (256 bytes),
-// then applies all patches via WriteProcessMemory JMP hooks.
+// then applies the selected JMP/DWORD/BYTE patches via WriteProcessMemory.
 //
-// Each JMP hook is:
+// For detours, the original _bzcp.dll uses:
 //   E9 [rel32]   -- relative jump to replacement code inside _bzcp.dll
 //
-// We replicate this by applying the same JMP patches pointing to our own
-// replacement trampolines defined here.
+// We replicate those with our own replacement trampolines where the behavior
+// has been reversed confidently. For pointer/immediate rewrites we patch the
+// original instruction operand directly.
 //
 // --- Version lock ---
 // ALL addresses in this file are STRICTLY for BZR.exe v2.2.301 (GOG).
@@ -71,8 +72,16 @@ namespace BZROpenShim
         return buf;
     }
 
+    inline std::vector<uint8_t> MakeDwordPatch(uint32_t value)
+    {
+        std::vector<uint8_t> buf(4);
+        memcpy(buf.data(), &value, sizeof(value));
+        return buf;
+    }
+
     // Signature check block - 256 bytes at this address must match before patching
     static constexpr uint32_t BZR_SIGNATURE_ADDR = 0x00868300;
+    inline constexpr char kOpenShimVersionTag[] = "2.2.301 + OpenShim";
 
     // -----------------------------------------------------------------------
     // Hop-fix trampoline addresses in this DLL.
@@ -82,7 +91,6 @@ namespace BZROpenShim
     extern void __cdecl Trampoline_HopFix3();
     extern void __cdecl Trampoline_Probe_MapSorting();
     extern void __cdecl Trampoline_Probe_MapFilter1();
-    extern void __cdecl Trampoline_VersionNotice();
 
     // -----------------------------------------------------------------------
     // Return-jump pointer storage (filled at patch time by the loader)
@@ -93,15 +101,20 @@ namespace BZROpenShim
     inline void* g_RetAddr_HopFix3           = nullptr;
     inline void* g_RetAddr_Probe_MapSorting  = nullptr;
     inline void* g_RetAddr_Probe_MapFilter1  = nullptr;
-    inline void* g_RetAddr_VersionNotice     = nullptr;
 
     // -----------------------------------------------------------------------
-    // Build the active hop-fix patch list.
+    // Build the active patch list.
+    //
+    // We intentionally keep the custom /help and /ban command intercept hooks
+    // disabled until their control flow is reimplemented clean-room. The atlas
+    // confirmed that 0x0062480B is that command hook, not a version string site.
     // -----------------------------------------------------------------------
     inline std::vector<PatchDef> BuildPatchList()
     {
         using PT = PatchType;
-        // Hop-fix only mode: keep the patch surface minimal and reliable.
+        const uint32_t versionTagPtr =
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(kOpenShimVersionTag));
+
         return
         {
             // -- Hop-Fix 1/3 --
@@ -113,10 +126,10 @@ namespace BZROpenShim
             // -- Refresh path probe (log-only) --
             { 0x0, PT::JMP5, {}, "Probe Refresh Path MapSorting", false },
             { 0x0, PT::JMP5, {}, "Probe Refresh Path MapFilter1", false },
-            // -- Main-menu version transparency --
-            { 0x0, PT::JMP5, {}, "Version Notice OpenShim", false },
-            // -- Known map-jump fix (conditional -> unconditional branch) --
-            { 0x0, PT::BYTE1, { 0xEB }, "Map Jump Fix Branch Override", false },
+            // -- Operand-only rewrites confirmed by the patch atlas --
+            { 0x0, PT::DWORD, MakeDwordPatch(versionTagPtr), "Version Notice 1/2 (OpenShim)", false },
+            { 0x0, PT::DWORD, MakeDwordPatch(versionTagPtr), "Version Notice 2/2 (OpenShim)", false },
+            { 0x0, PT::BYTE1, { 0xEB }, "Vehicle List Mod Fix 3/4 (Always Update Vehicle Control)", false },
         };
     }
 } // namespace BZROpenShim
