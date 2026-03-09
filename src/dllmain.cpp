@@ -11,7 +11,9 @@
 //   3. Spawn background patch thread
 
 #include "winmm_proxy.h"
+#include "net_optimizer.h"
 #include "patcher.h"
+#include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -48,7 +50,13 @@ static uintptr_t g_PatchThread  = 0;
 // Patch thread - wraps BZROpenShim::RunPatcher
 static unsigned __stdcall PatchThreadProc(void*)
 {
-    BZROpenShim::RunPatcher(SHIM_VERSION);
+    BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread started (bzcpLoaded=%d)", g_hBZCP ? 1 : 0);
+    BZROpenShim::InitializeNetworkOptimizer();
+    if (!g_hBZCP)
+        BZROpenShim::RunPatcher(SHIM_VERSION);
+    else
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "_bzcp.dll already loaded; skipping open-source patcher thread work");
+    BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread exiting");
     return 0;
 }
 
@@ -61,8 +69,13 @@ static unsigned __stdcall PatchThreadProc(void*)
 static HMODULE TryLoadBZCP()
 {
     // 1. Adjacent to BZR.exe
+    BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Trying to load adjacent _bzcp.dll");
     HMODULE h = LoadLibraryA("_bzcp.dll");
-    if (h) return h;
+    if (h)
+    {
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Loaded adjacent _bzcp.dll at 0x%p", h);
+        return h;
+    }
 
     // 2. Workshop paths
     char exePath[MAX_PATH] = {};
@@ -76,6 +89,7 @@ static HMODULE TryLoadBZCP()
     // Build workshop base: <exedir>\..\workshop\content\301650
     char workshopBase[MAX_PATH] = {};
     _snprintf_s(workshopBase, MAX_PATH, "%s..\\workshop\\content\\301650\\", exePath);
+    BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Searching workshop path for _bzcp.dll under %s", workshopBase);
 
     // Glob subdirectories
     char searchPath[MAX_PATH] = {};
@@ -83,7 +97,11 @@ static HMODULE TryLoadBZCP()
 
     WIN32_FIND_DATAA fd = {};
     HANDLE hFind = FindFirstFileA(searchPath, &fd);
-    if (hFind == INVALID_HANDLE_VALUE) return nullptr;
+    if (hFind == INVALID_HANDLE_VALUE)
+    {
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "dllmain", "Workshop search path unavailable: %s (err=%lu)", searchPath, GetLastError());
+        return nullptr;
+    }
 
     do
     {
@@ -92,26 +110,40 @@ static HMODULE TryLoadBZCP()
 
         char candidate[MAX_PATH] = {};
         _snprintf_s(candidate, MAX_PATH, "%s%s\\_bzcp.dll", workshopBase, fd.cFileName);
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Debug, "dllmain", "Trying workshop candidate %s", candidate);
         h = LoadLibraryA(candidate);
-        if (h) break;
+        if (h)
+        {
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Loaded workshop _bzcp.dll from %s at 0x%p", candidate, h);
+            break;
+        }
 
     } while (FindNextFileA(hFind, &fd));
 
     FindClose(hFind);
+    if (!h)
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "No _bzcp.dll found; OpenShim patcher will handle patching");
     return h;
 }
 
 // ---------------------------------------------------------------------------
 // DLL entry point
 // ---------------------------------------------------------------------------
-BOOL WINAPI DllMain(HINSTANCE /*hModule*/, DWORD reason, LPVOID)
+BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
 {
     switch (reason)
     {
     case DLL_PROCESS_ATTACH:
+        BZROpenShim::InitializeShimLogger();
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "DLL_PROCESS_ATTACH hModule=0x%p reserved=0x%p shimVersion=%u", hModule, reserved, SHIM_VERSION);
+        DisableThreadLibraryCalls(hModule);
+
         // Load real winmm.dll so our proxy exports actually work
         if (!LoadRealWinmm())
+        {
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Error, "dllmain", "LoadRealWinmm failed; aborting attach");
             return FALSE;
+        }
 
         // Verify we are loading
         OutputDebugStringA("BZR-OpenShim: DLL_PROCESS_ATTACH\n");
@@ -124,26 +156,30 @@ BOOL WINAPI DllMain(HINSTANCE /*hModule*/, DWORD reason, LPVOID)
         // When _bzcp.dll is absent, fall through to our open-source patcher.
         g_hBZCP = TryLoadBZCP();
 
-        // Only spawn our patch thread if _bzcp.dll was NOT loaded.
-        // Once all patches are implemented and verified, remove TryLoadBZCP()
-        // entirely and always run our thread.
-        if (!g_hBZCP)
+        g_PatchThread = _beginthreadex(nullptr, 0, PatchThreadProc, nullptr, 0, nullptr);
+        if (!g_PatchThread)
         {
-            g_PatchThread = _beginthreadex(nullptr, 0, PatchThreadProc, nullptr, 0, nullptr);
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Error, "dllmain", "_beginthreadex failed (err=%lu)", GetLastError());
+            return FALSE;
         }
-        else
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread handle created: 0x%p", reinterpret_cast<void*>(g_PatchThread));
+        if (g_hBZCP)
         {
             OutputDebugStringA("BZR-OpenShim: _bzcp.dll loaded, deferring patching to it.\n");
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "_bzcp.dll loaded; compatibility mode active");
         }
         break;
 
     case DLL_PROCESS_DETACH:
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "DLL_PROCESS_DETACH reserved=0x%p", reserved);
         if (g_hBZCP)
         {
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Freeing loaded _bzcp.dll handle 0x%p", g_hBZCP);
             FreeLibrary(g_hBZCP);
             g_hBZCP = nullptr;
         }
         FreeRealWinmm();
+        BZROpenShim::ShutdownShimLogger();
         break;
     }
     return TRUE;

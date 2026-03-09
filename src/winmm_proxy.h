@@ -20,3 +20,4 @@ extern HMODULE g_hRealWinmm;
 // Load the real winmm.dll - called once in DllMain DLL_PROCESS_ATTACH
 bool LoadRealWinmm();
 void FreeRealWinmm();
+FARPROC ResolveRealWinmmProc(const char* name);

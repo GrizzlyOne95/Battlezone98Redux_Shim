@@ -17,6 +17,7 @@
 
 #include "patcher.h"
 #include "patches.h"
+#include "shim_log.h"
 #include "scroll_helper.h"
 #include "trampolines.h"
 
@@ -33,21 +34,17 @@ namespace BZROpenShim
     // -----------------------------------------------------------------------
     // Internal log helper
     // -----------------------------------------------------------------------
-    static FILE* g_Log = nullptr;
-
     void Log(const wchar_t* fmt, ...)
     {
-        if (!g_Log) return;
         va_list args;
         va_start(args, fmt);
-        vfwprintf(g_Log, fmt, args);
+        LogShimVW(LogLevel::Info, "patcher", fmt, args);
         va_end(args);
-        fflush(g_Log);
     }
 
     extern "C" void LogHit(const char* name)
     {
-        Log(L"[HIT]  %hs\n", name);
+        LogShimA(LogLevel::Debug, "patcher", "[HIT] %s", name);
     }
 
     // -----------------------------------------------------------------------
@@ -503,14 +500,9 @@ namespace BZROpenShim
     // -----------------------------------------------------------------------
     void RunPatcher(uint32_t shimVersion)
     {
-        // 1. Open log
-        _wfopen_s(&g_Log, L"bzcp.log", L"w");
-        if (g_Log)
-        {
-            Log(L"=========== BZR Open Shim ===========\n");
-            Log(L"Open source replacement for _bzcp.dll / winmm.bin\n");
-            Log(L"Shim Version: %u\n", shimVersion);
-        }
+        LogShimA(LogLevel::Info, "patcher", "=========== BZR Open Shim ===========");
+        LogShimA(LogLevel::Info, "patcher", "Open source replacement for _bzcp.dll / winmm.bin");
+        LogShimA(LogLevel::Info, "patcher", "Shim Version: %u", shimVersion);
 
         // 2. Check BZR.exe version
         uint32_t gameVer = GetBZRVersion();
@@ -519,7 +511,6 @@ namespace BZROpenShim
         if (gameVer != BZR_EXPECTED_VERSION)
         {
             Log(L"Game Version Incorrect. Patch Load Aborted\n");
-            if (g_Log) { fclose(g_Log); g_Log = nullptr; }
             return;
         }
 
@@ -549,7 +540,6 @@ namespace BZROpenShim
         if (!sigOk)
         {
             Log(L"Patch Failed, game byte test never passed.\n");
-            if (g_Log) { fclose(g_Log); g_Log = nullptr; }
             return;
         }
 
@@ -603,8 +593,7 @@ namespace BZROpenShim
         Log(L"=========== DONE ===========\n");
         Log(L"Applied: %d  Skipped: %d  Failed: %d\n", applied, skipped, failed);
         Log(L"=========== ACTIVITY ===========\n");
-        // Keep the log file open for runtime hook telemetry (LogHit in trampolines).
-        // Closing here leaves g_Log dangling while hooks are still active.
+        LogShimA(LogLevel::Info, "patcher", "Patcher initialization complete; runtime hook telemetry remains active");
     }
 
 } // namespace BZROpenShim
