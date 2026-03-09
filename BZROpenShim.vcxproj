@@ -112,11 +112,15 @@
 
   <ItemGroup>
     <ClCompile Include="src\dllmain.cpp" />
+    <ClCompile Include="src\net_optimizer.cpp" />
+    <ClCompile Include="src\shim_log.cpp" />
     <ClCompile Include="src\winmm_proxy.cpp" />
     <ClCompile Include="src\patcher.cpp" />
     <ClCompile Include="src\trampolines.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\net_optimizer.h" />
+    <ClInclude Include="src\shim_log.h" />
     <ClInclude Include="src\winmm_proxy.h" />
     <ClInclude Include="src\patches.h" />
     <ClInclude Include="src\patcher.h" />

@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "winmm_proxy.h"
+#include "shim_log.h"
 #include <cstdio>
 
 HMODULE g_hRealWinmm = nullptr;
@@ -33,20 +34,47 @@ HMODULE g_hRealWinmm = nullptr;
 LEGACY_NAKED_EXPORTS(DECL_LEGACY_SLOT)
 #undef DECL_LEGACY_SLOT
 
+FARPROC ResolveRealWinmmProc(const char* name)
+{
+    if (!g_hRealWinmm)
+    {
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Error, "winmm", "Attempted to resolve %s before real winmm.dll was loaded", name ? name : "<null>");
+        return nullptr;
+    }
+
+    FARPROC proc = GetProcAddress(g_hRealWinmm, name);
+    if (!proc)
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Error, "winmm", "GetProcAddress failed for %s (err=%lu)", name ? name : "<null>", GetLastError());
+    return proc;
+}
+
 bool LoadRealWinmm()
 {
-    char path[MAX_PATH];
-    GetSystemDirectoryA(path, MAX_PATH);
+    char path[MAX_PATH] = {};
+    const UINT len = GetSystemDirectoryA(path, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH)
+    {
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Error, "winmm", "GetSystemDirectoryA failed (len=%u err=%lu)", len, GetLastError());
+        return false;
+    }
+
     strncat_s(path, "\\winmm.dll", MAX_PATH);
+    BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "winmm", "Loading real winmm.dll from %s", path);
 
     g_hRealWinmm = LoadLibraryA(path);
     if (!g_hRealWinmm)
+    {
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Error, "winmm", "LoadLibraryA failed for %s (err=%lu)", path, GetLastError());
         return false;
+    }
 
-#define RESOLVE_LEGACY_SLOT(name) g_fp_##name = GetProcAddress(g_hRealWinmm, #name);
+#define RESOLVE_LEGACY_SLOT(name) \
+    g_fp_##name = ResolveRealWinmmProc(#name); \
+    if (!g_fp_##name) BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "winmm", "Legacy export %s was not found", #name);
     LEGACY_NAKED_EXPORTS(RESOLVE_LEGACY_SLOT)
 #undef RESOLVE_LEGACY_SLOT
 
+    BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "winmm", "Real winmm.dll loaded successfully at 0x%p", g_hRealWinmm);
     return true;
 }
 
@@ -54,6 +82,7 @@ void FreeRealWinmm()
 {
     if (g_hRealWinmm)
     {
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "winmm", "Freeing real winmm.dll handle 0x%p", g_hRealWinmm);
         FreeLibrary(g_hRealWinmm);
         g_hRealWinmm = nullptr;
     }
@@ -64,7 +93,7 @@ void FreeRealWinmm()
 // ---------------------------------------------------------------------------
 #define FORWARD(name) \
     static decltype(&::name) _fn_##name = nullptr; \
-    if (!_fn_##name) _fn_##name = reinterpret_cast<decltype(&::name)>(GetProcAddress(g_hRealWinmm, #name)); \
+    if (!_fn_##name) _fn_##name = reinterpret_cast<decltype(&::name)>(ResolveRealWinmmProc(#name)); \
     return _fn_##name
 
 #if defined(_M_IX86)
