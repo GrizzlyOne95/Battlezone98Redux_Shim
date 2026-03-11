@@ -82,6 +82,8 @@ namespace BZROpenShim
     extern void __cdecl Trampoline_HopFix3();
     extern void __cdecl Trampoline_Probe_MapSorting();
     extern void __cdecl Trampoline_Probe_MapFilter1();
+    extern void __cdecl Trampoline_Probe_MapListFix1();
+    extern void __cdecl Trampoline_Probe_MapListFix2();
     extern void __cdecl Trampoline_VersionNotice();
 
     // -----------------------------------------------------------------------
@@ -93,6 +95,8 @@ namespace BZROpenShim
     inline void* g_RetAddr_HopFix3           = nullptr;
     inline void* g_RetAddr_Probe_MapSorting  = nullptr;
     inline void* g_RetAddr_Probe_MapFilter1  = nullptr;
+    inline void* g_RetAddr_Probe_MapListFix1 = nullptr;
+    inline void* g_RetAddr_Probe_MapListFix2 = nullptr;
     inline void* g_RetAddr_VersionNotice     = nullptr;
 
     // -----------------------------------------------------------------------
@@ -113,6 +117,9 @@ namespace BZROpenShim
             // -- Refresh path probe (log-only) --
             { 0x0, PT::JMP5, {}, "Probe Refresh Path MapSorting", false },
             { 0x0, PT::JMP5, {}, "Probe Refresh Path MapFilter1", false },
+            // -- Additional map list fix probes (may be manual refresh path) --
+            { 0x0, PT::JMP5, {}, "Probe MapListFix1", false },
+            { 0x0, PT::JMP5, {}, "Probe MapListFix2", false },
             // -- Main-menu version transparency --
             { 0x0, PT::JMP5, {}, "Version Notice OpenShim", false },
             // -- Known map-jump fix (conditional -> unconditional branch) --
