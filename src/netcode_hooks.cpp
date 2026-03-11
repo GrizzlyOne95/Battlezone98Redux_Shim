@@ -38,7 +38,7 @@ namespace BZROpenShim
 
     // Buffer sizes from manifest (defaults if missing)
     static uint32_t g_SendSize = 524288;   // 512 KB
-    static uint32_t g_RecvSize = 2097152;  // 2 MB
+    static uint32_t g_RecvSize = 524288;   // 512 KB
 
     // -----------------------------------------------------------------------
     // Our hook that gets called instead of the real WSASocketW
@@ -79,6 +79,29 @@ namespace BZROpenShim
                 {
                     Log(L"[NET]  Hooked socket %p: setsockopt(SO_RCVBUF, %u) FAILED. error=%d\n", (void*)s, g_RecvSize, WSAGetLastError());
                 }
+
+                // 4. Read back effective values for verification
+                int sndRead = -1;
+                int rcvRead = -1;
+                int sndLen = sizeof(sndRead);
+                int rcvLen = sizeof(rcvRead);
+                if (getsockopt(s, SOL_SOCKET, SO_SNDBUF, (char*)&sndRead, &sndLen) == 0)
+                {
+                    Log(L"[NET]  Hooked socket %p: effective SO_SNDBUF=%d\n", (void*)s, sndRead);
+                }
+                else
+                {
+                    Log(L"[NET]  Hooked socket %p: getsockopt(SO_SNDBUF) FAILED. error=%d\n", (void*)s, WSAGetLastError());
+                }
+
+                if (getsockopt(s, SOL_SOCKET, SO_RCVBUF, (char*)&rcvRead, &rcvLen) == 0)
+                {
+                    Log(L"[NET]  Hooked socket %p: effective SO_RCVBUF=%d\n", (void*)s, rcvRead);
+                }
+                else
+                {
+                    Log(L"[NET]  Hooked socket %p: getsockopt(SO_RCVBUF) FAILED. error=%d\n", (void*)s, WSAGetLastError());
+                }
             }
         }
 
@@ -116,7 +139,7 @@ namespace BZROpenShim
             {
                 // Found the correct DLL import block. Now find the function.
                 auto originalFirstThunk = reinterpret_cast<IMAGE_THUNK_DATA*>(
-                    reinterpret_cast<uint8_t*>(targetModule) + importDesc->OriginalFirstThunk);
+                    reinterpret_cast<uint8_t*>(targetModule) + (importDesc->OriginalFirstThunk ? importDesc->OriginalFirstThunk : importDesc->FirstThunk));
                 auto firstThunk = reinterpret_cast<IMAGE_THUNK_DATA*>(
                     reinterpret_cast<uint8_t*>(targetModule) + importDesc->FirstThunk);
 

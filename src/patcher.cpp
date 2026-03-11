@@ -548,11 +548,11 @@ namespace BZROpenShim
     void RunPatcher(uint32_t shimVersion)
     {
         // 1. Open log
-        _wfopen_s(&g_Log, L"[third-party patch].log", L"w");
+        _wfopen_s(&g_Log, L"winmm_shim.log", L"w");
         if (g_Log)
         {
             Log(L"=========== BZR Open Shim ===========\n");
-            Log(L"Open source replacement for [third-party patch DLL] / [third-party proxy DLL]\n");
+            Log(L"Open source DLL patcher\n");
             Log(L"Shim Version: %u\n", shimVersion);
         }
 

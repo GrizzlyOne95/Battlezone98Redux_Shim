@@ -14,7 +14,7 @@ namespace BZROpenShim
 {
     // Default buffer sizes (used when no manifest is present)
     static constexpr int DEFAULT_SEND_BUFFER  = 524288;   // 512 KB
-    static constexpr int DEFAULT_RECV_BUFFER  = 2097152;  // 2 MB
+    static constexpr int DEFAULT_RECV_BUFFER  = 524288;   // 512 KB
 
     // Apply netcode patches from netcode_manifest.json.
     // Call this from RunPatcher() after the main patches are applied.
