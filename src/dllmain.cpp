@@ -23,10 +23,10 @@
 // _bzcp.dll checks "Expected Shim Version" against this value.
 // From bzcp_hopfix_decompiled.txt: the shim version is passed as param_1
 // to FUN_1000eb30 and compared to a minimum expected value.
-// Version 4: Extended frame candidate search for manual refresh
+// Version 5: Added MapListFix1/2 probes for manual refresh path
 // ---------------------------------------------------------------------------
-static constexpr uint32_t SHIM_VERSION = 4;
-static constexpr const char* SHIM_VERSION_STRING = "2";
+static constexpr uint32_t SHIM_VERSION = 5;
+static constexpr const char* SHIM_VERSION_STRING = "5";
 
 // ---------------------------------------------------------------------------
 // _bzcp.dll load path logic (reconstructed from winmm.bin analysis and
