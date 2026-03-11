@@ -1,0 +1,28 @@
+{
+  "name": "battlezone98redux-net-fix-send512k-recv512k",
+  "target": "battlezone98redux.exe",
+  "expected_sha256": "d298782fc9a13edb0665db934110440c45461031db5f7fe1a76c8784b61cc90d",
+  "profile": {
+    "send_buffer_bytes": 524288,
+    "receive_buffer_bytes": 524288
+  },
+  "notes": [
+    "RVA offsets validated against runtime_patch_windows.ps1 reference patcher.",
+    "Place this file next to battlezone98redux.exe (or winmm.dll).",
+    "Each patch entry includes original bytes to guarantee safe application."
+  ],
+  "patches": [
+    {
+      "name": "send_buffer_32k_to_512k",
+      "rva": "0x12D96A",
+      "original_hex": "00800000",
+      "patched_hex": "00000800"
+    },
+    {
+      "name": "recv_buffer_1m_to_512k",
+      "rva": "0x12DB5E",
+      "original_hex": "00001000",
+      "patched_hex": "00000800"
+    }
+  ]
+}
