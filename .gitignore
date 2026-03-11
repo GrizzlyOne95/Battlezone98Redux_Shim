@@ -15,7 +15,9 @@ __pycache__/
 
 # Analysis results
 *.txt
+*.log
 architecture_reference.md
+reverse_engineering/
 
 # Tools and references
 tools/
