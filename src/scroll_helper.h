@@ -41,6 +41,10 @@ namespace BZROpenShim
     // BZR.exe function pointer for hop-fix 2 internal call
     inline void (*g_BZRFnPtr_HopFix2)() = nullptr;
 
+    // Steam build uses different internal addresses for scroll helpers.
+    // When false, HopFix3 will skip scroll-restore helpers entirely.
+    inline bool g_EnableScrollRestore = true;
+
     // -----------------------------------------------------------------------
     // ScrollUpdateHelper
     // Reconstructed from HOPFIX_ANALYSIS.md support function
