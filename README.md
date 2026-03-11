@@ -1,8 +1,8 @@
 # BZR Open Shim
 
-Open-source clean-room replacement for the closed-source `winmm.dll` / `_bzcp.dll` shims from the Battlezone 98 Redux Community Patch.
+Open-source clean-room replacement for closed-source shims.
 
-**Target**: BZR.exe v2.2.301 (GOG release)
+**Target**: BZR.exe v2.2.301 (GOG primary target)
 
 ## Architecture
 
@@ -10,8 +10,6 @@ Open-source clean-room replacement for the closed-source `winmm.dll` / `_bzcp.dl
 winmm.dll (this project)
   │
   ├── Proxies all winmm.dll exports → C:\Windows\System32\winmm.dll
-  │
-  ├── Loads _bzcp.dll (optional, for compatibility during development)
   │
   └── Spawns patch thread → patcher.cpp::RunPatcher()
         │
@@ -22,26 +20,15 @@ winmm.dll (this project)
 
 ## What is patched
 
-All 27+ patches from `_bzcp.dll` are reimplemented here as clean-room code:
-
-| Category | Count | Status |
-|---|---|---|
-| Map Sorting | 1 | TODO: address |
-| Map Filters | 8 | TODO: addresses |
-| Hop-Fix (scroll preservation) | 3 | TODO: addresses |
-| Map List UI | 6 | TODO: addresses |
-| Version Notice | 2 | TODO: addresses |
-| Vehicle List Mod Fix | 4 | Partial (1 address hardcoded) |
-| BZRNET hooks | 2 | TODO: addresses |
-| Ban Button hooks | 2 | TODO: addresses |
-| Misc (Joiner, Icons, CLI) | 4+ | TODO: addresses |
-
 ### Hop-Fix (primary target)
 
-The hop-fix prevents the multiplayer map list from jumping (resetting scroll
-position) when Steam workshop updates or data checks occur. It works by
-installing 3 inline hooks that preserve and restore scroll state around map
-list rebuilds.
+The hop-fix prevents the multiplayer map list from jumping back to the top
+when the list rebuilds. The current clean-room port follows the same
+three-stage method confirmed in `_bzcp.dll`:
+
+1. save the selected entry and visible row before rebuild
+2. reselect the matching entry after rebuild
+3. replay the native row-step routine to restore the viewport
 
 Reconstruction of the replacement code is in `trampolines.cpp` / `scroll_helper.h`.
 
@@ -52,24 +39,17 @@ Reconstruction of the replacement code is in `trampolines.cpp` / `scroll_helper.
 3. Build → output is `bin\Release\winmm.dll`
 4. Copy `winmm.dll` to the BZR.exe directory
 
+## Workshop RE Workflow
+
+Use [docs/WORKSHOP_RE_SETUP.md](docs/WORKSHOP_RE_SETUP.md) and
+`scripts/Download-WorkshopItem.ps1` to fetch and snapshot Workshop mods via
+SteamCMD for repeatable reverse-engineering analysis.
+
+Latest hop-fix reverse-engineering findings are tracked in
+[docs/HOPFIX_METHOD_RE.md](docs/HOPFIX_METHOD_RE.md).
+
 ## Completing the TODO addresses
-
-The BZR.exe addresses are stored at runtime in `_bzcp.dll`'s data section and
-are not static. To extract them, attach x64dbg to a running patched BZR v2.2.301
-(GOG) and set a breakpoint on `WriteProcessMemory`. Each call logs:
-- The target address in BZR.exe
-- The patch bytes written
-
-Match these to the patch names printed in `bzcp.log` and fill in `patches.h`.
-
-See `C:\Users\iestu\Documents\ref\X64DBG_VERIFICATION_GUIDE.md` for detailed instructions.
 
 ## License
 
 MIT - see LICENSE file
-
-## Credits
-
-- Reverse engineering analysis in `C:\Users\iestu\Documents\ref\` 
-- Original Community Patch by Nielk1
-- ExtraUtilities infrastructure by VTrider (LGPL, used as reference)
