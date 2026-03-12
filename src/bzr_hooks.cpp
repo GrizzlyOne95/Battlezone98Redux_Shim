@@ -28,6 +28,13 @@ namespace BZROpenShim
     float g_BanX = 0.0f;
     float g_BanY = 0.0f;
 
+    uint8_t g_MapFilterFlag11 = 0;
+    uint8_t g_MapFilterFlag12 = 0;
+
+    void* g_BzrFn_MapFilter8Check = nullptr;
+    void* g_BzrFn_MapFilterCreate = nullptr;
+    void* g_MapFilterListPtr = nullptr;
+
     void* g_BzrFn_VehicleFixPre = nullptr;
     void* g_BzrFn_VehicleFixOrig = nullptr;
 
@@ -59,6 +66,8 @@ namespace BZROpenShim
     using FnHelpUi = void(__cdecl*)(int channel, const char* text);
     using FnBanLookup = void* (__cdecl*)(uint16_t id);
     using FnIsHost = int(__cdecl*)();
+    using FnMapFilter6 = uint32_t(__thiscall*)(void* thisPtr);
+    using FnMapFilterScroll = void(__cdecl*)();
 
     static void** g_BzrPtr_945478 = nullptr;
     static void** g_BzrPtr_94548C = nullptr;
@@ -92,6 +101,9 @@ namespace BZROpenShim
     static FnHelpUi g_BzrFn_HelpUi = nullptr;   // 0x007A47B0
     static FnBanLookup g_BzrFn_BanLookup = nullptr; // 0x005771B0
     static FnIsHost g_BzrFn_IsHost = nullptr; // 0x00572A60
+    static FnMapFilter6 g_BzrFn_MapFilter6 = nullptr; // 0x004200B0
+    static FnMapFilterScroll g_BzrFn_MapFilterScrollUp = nullptr; // 0x007CB500
+    static FnMapFilterScroll g_BzrFn_MapFilterScrollDown = nullptr; // 0x007CB540
 
     // ---------------------------------------------------------------------
     // Helpers
@@ -130,6 +142,12 @@ namespace BZROpenShim
         g_BzrFn_HelpUi = reinterpret_cast<FnHelpUi>(0x007A47B0);
         g_BzrFn_BanLookup = reinterpret_cast<FnBanLookup>(0x005771B0);
         g_BzrFn_IsHost = reinterpret_cast<FnIsHost>(0x00572A60);
+        g_BzrFn_MapFilter6 = reinterpret_cast<FnMapFilter6>(0x004200B0);
+
+        g_BzrFn_MapFilter8Check = reinterpret_cast<void*>(0x007D3360);
+        g_BzrFn_MapFilterCreate = reinterpret_cast<void*>(0x007C9DE0);
+        g_BzrFn_MapFilterScrollUp = reinterpret_cast<FnMapFilterScroll>(0x007CB500);
+        g_BzrFn_MapFilterScrollDown = reinterpret_cast<FnMapFilterScroll>(0x007CB540);
 
         g_BzrFn_VehicleFixPre = reinterpret_cast<void*>(0x00481EA0);
         g_BzrFn_VehicleFixOrig = reinterpret_cast<void*>(0x00481AF0);
@@ -305,6 +323,27 @@ namespace BZROpenShim
             std::fprintf(f, "%s\n", id);
         }
         std::fclose(f);
+    }
+
+    uint32_t __fastcall MapFilters6Rel32(void* thisPtr, void* /*edx*/)
+    {
+        if (!thisPtr || !g_BzrFn_MapFilter6)
+            return 0;
+
+        auto target = reinterpret_cast<uint8_t*>(thisPtr) + 0x168;
+        return g_BzrFn_MapFilter6(target);
+    }
+
+    void __cdecl MapFilterOnScrollUp()
+    {
+        if (g_MapFilterListPtr && g_BzrFn_MapFilterScrollUp)
+            g_BzrFn_MapFilterScrollUp();
+    }
+
+    void __cdecl MapFilterOnScrollDown()
+    {
+        if (g_MapFilterListPtr && g_BzrFn_MapFilterScrollDown)
+            g_BzrFn_MapFilterScrollDown();
     }
 
     bool __cdecl HandleCommandHelpBan(uint16_t id, const char* cmd)

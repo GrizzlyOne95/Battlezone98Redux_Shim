@@ -86,6 +86,11 @@ namespace BZROpenShim
     extern void __cdecl Trampoline_Probe_MapFilter1();
     extern void __cdecl Trampoline_Probe_MapListFix1();
     extern void __cdecl Trampoline_Probe_MapListFix2();
+    extern void __cdecl Trampoline_MapFilters3();
+    extern void __cdecl Trampoline_MapFilters4();
+    extern void __cdecl Trampoline_MapFilters5();
+    extern void __cdecl Trampoline_MapFilters7();
+    extern void __cdecl Trampoline_MapFilters8();
     extern void __cdecl Trampoline_VehicleListModFix1();
     extern void __cdecl Trampoline_VehicleListModFix4();
     extern void __cdecl Trampoline_BzrnetHost();
@@ -107,6 +112,13 @@ namespace BZROpenShim
     inline void* g_RetAddr_Probe_MapListFix1 = nullptr;
     inline void* g_RetAddr_Probe_MapListFix2 = nullptr;
     inline void* g_RetAddr_VersionNotice     = nullptr;
+    inline void* g_RetAddr_MapFilters3       = nullptr;
+    inline void* g_RetAddr_MapFilters4       = nullptr;
+    inline void* g_RetAddr_MapFilters5       = nullptr;
+    inline void* g_RetAddr_MapFilters7       = nullptr;
+    inline void* g_RetAddr_MapFilters8_A     = nullptr;
+    inline void* g_RetAddr_MapFilters8_B     = nullptr;
+    inline void* g_RetAddr_MapFilters8_C     = nullptr;
     inline void* g_RetAddr_VehicleListModFix1 = nullptr;
     inline void* g_RetAddr_VehicleListModFix4 = nullptr;
     inline void* g_RetAddr_BzrnetHost         = nullptr;
@@ -136,6 +148,13 @@ namespace BZROpenShim
             { 0x0, PT::DWORD, {}, "Version Notice 2/2 OpenShim", false },
             // -- Known map-jump fix (conditional -> unconditional branch) --
             { 0x0, PT::BYTE1, { 0xEB }, "Map Jump Fix Branch Override", false },
+            // -- Map filters (partial set) --
+            { 0x0, PT::JMP5, {}, "Map Filters 3/8", false },
+            { 0x0, PT::JMP5, {}, "Map Filters 4/8", false },
+            { 0x0, PT::JMP5, {}, "Map Filters 5/8", false },
+            { 0x0, PT::REL32, {}, "Map Filters 6/8", false },
+            { 0x0, PT::JMP5, {}, "Map Filters 7/8", false },
+            { 0x0, PT::JMP5, {}, "Map Filters 8/8", false },
             // -- Vehicle list / mod asset scoping --
             { 0x0, PT::JMP5, {}, "Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)", false },
             { 0x0, PT::REL32, {}, "Vehicle List Mod Fix 2/4 (Force Mod-Scoped Assets 2/3)", false },
