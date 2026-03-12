@@ -265,10 +265,61 @@ void __declspec(naked) __cdecl Trampoline_Probe_MapListFix2()
     }
 }
 
-// -----------------------------------------------------------------------
-// Map Filters 3/8
-// Site: 0x0079D6B1
-// -----------------------------------------------------------------------
+    // -----------------------------------------------------------------------
+    // Map Filters 1/8
+    // Site: 0x007A31D9
+    // -----------------------------------------------------------------------
+    void __declspec(naked) __cdecl Trampoline_MapFilters1()
+    {
+        static const char* name = "Trampoline_MapFilters1";
+        __asm
+        {
+            pushfd
+            pushad
+            push name
+            call LogHit
+            add  esp, 4
+            popad
+            popfd
+
+            mov  eax, [ebp - 0x1C4]
+            push eax
+            call MapFilters1Rebuild
+            add  esp, 4
+            jmp  [g_RetAddr_MapFilters1]
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Map Filters 2/8
+    // Site: 0x00752A82
+    // -----------------------------------------------------------------------
+    void __declspec(naked) __cdecl Trampoline_MapFilters2()
+    {
+        static const char* name = "Trampoline_MapFilters2";
+        __asm
+        {
+            pushfd
+            pushad
+            push name
+            call LogHit
+            add  esp, 4
+            popad
+            popfd
+
+            mov  eax, [ebp + 0x8]
+            push eax
+            push ecx
+            call MapFilters2Filter
+            add  esp, 8
+            jmp  [g_RetAddr_MapFilters2]
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Map Filters 3/8
+    // Site: 0x0079D6B1
+    // -----------------------------------------------------------------------
 void __declspec(naked) __cdecl Trampoline_MapFilters3()
 {
     static const char* name = "Trampoline_MapFilters3";

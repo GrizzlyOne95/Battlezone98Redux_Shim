@@ -86,6 +86,8 @@ namespace BZROpenShim
     extern void __cdecl Trampoline_Probe_MapFilter1();
     extern void __cdecl Trampoline_Probe_MapListFix1();
     extern void __cdecl Trampoline_Probe_MapListFix2();
+    extern void __cdecl Trampoline_MapFilters1();
+    extern void __cdecl Trampoline_MapFilters2();
     extern void __cdecl Trampoline_MapFilters3();
     extern void __cdecl Trampoline_MapFilters4();
     extern void __cdecl Trampoline_MapFilters5();
@@ -112,6 +114,8 @@ namespace BZROpenShim
     inline void* g_RetAddr_Probe_MapListFix1 = nullptr;
     inline void* g_RetAddr_Probe_MapListFix2 = nullptr;
     inline void* g_RetAddr_VersionNotice     = nullptr;
+    inline void* g_RetAddr_MapFilters1       = nullptr;
+    inline void* g_RetAddr_MapFilters2       = nullptr;
     inline void* g_RetAddr_MapFilters3       = nullptr;
     inline void* g_RetAddr_MapFilters4       = nullptr;
     inline void* g_RetAddr_MapFilters5       = nullptr;
@@ -149,6 +153,8 @@ namespace BZROpenShim
             // -- Known map-jump fix (conditional -> unconditional branch) --
             { 0x0, PT::BYTE1, { 0xEB }, "Map Jump Fix Branch Override", false },
             // -- Map filters (partial set) --
+            { 0x0, PT::JMP5, {}, "Map Filters 1/8", false },
+            { 0x0, PT::JMP5, {}, "Map Filters 2/8", false },
             { 0x0, PT::JMP5, {}, "Map Filters 3/8", false },
             { 0x0, PT::JMP5, {}, "Map Filters 4/8", false },
             { 0x0, PT::JMP5, {}, "Map Filters 5/8", false },
