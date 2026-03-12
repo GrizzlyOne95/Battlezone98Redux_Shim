@@ -28,6 +28,8 @@ namespace BZROpenShim
     uint32_t __fastcall MapFilters6Rel32(void* thisPtr, void* edx);
     void __cdecl MapFilterOnScrollUp();
     void __cdecl MapFilterOnScrollDown();
+    void __cdecl MapFilters1Rebuild(void* listPtr);
+    void __cdecl MapFilters2Filter(void* listPtr, BzrString* filter);
 
     // Shared state for trampolines.
     extern void* g_VehicleListContext;
@@ -53,6 +55,7 @@ namespace BZROpenShim
     extern void* g_BzrFn_MapFilter8Check;
     extern void* g_BzrFn_MapFilterCreate;
     extern void* g_MapFilterListPtr;
+    extern const char* (__cdecl* g_BzrFn_Localize)(const char* section, const char* key);
 
     // Direct call targets for Vehicle Mod Fix 1/4 stub.
     extern void* g_BzrFn_VehicleFixPre;

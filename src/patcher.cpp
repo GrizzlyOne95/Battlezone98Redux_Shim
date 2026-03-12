@@ -443,6 +443,8 @@ namespace BZROpenShim
         }
 
         // Map Filters partial set.
+        g_RetAddr_MapFilters1 = reinterpret_cast<void*>(0x007A35C0);
+        g_RetAddr_MapFilters2 = reinterpret_cast<void*>(0x00752D00);
         g_RetAddr_MapFilters3 = reinterpret_cast<void*>(0x0079D6B9);
         g_RetAddr_MapFilters4 = reinterpret_cast<void*>(0x0079D699);
         g_RetAddr_MapFilters5 = reinterpret_cast<void*>(0x0079916B);
@@ -450,6 +452,8 @@ namespace BZROpenShim
         g_RetAddr_MapFilters8_A = reinterpret_cast<void*>(0x007997B2);
         g_RetAddr_MapFilters8_B = reinterpret_cast<void*>(0x007997B7);
         g_RetAddr_MapFilters8_C = reinterpret_cast<void*>(0x0079987C);
+        Log(L"[PTR] MapFilters1 return: 0x%08X\n", 0x007A35C0);
+        Log(L"[PTR] MapFilters2 return: 0x%08X\n", 0x00752D00);
         Log(L"[PTR] MapFilters3 return: 0x%08X\n", 0x0079D6B9);
         Log(L"[PTR] MapFilters4 return: 0x%08X\n", 0x0079D699);
         Log(L"[PTR] MapFilters5 return: 0x%08X\n", 0x0079916B);
@@ -710,6 +714,20 @@ namespace BZROpenShim
                 p.expected_original = { 0x8B, 0xEC, 0x8B, 0x0D, 0x64 };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
+            else if (strcmp(p.name, "Map Filters 1/8") == 0)
+            {
+                p.bzr_address = 0x007A31D9;
+                p.verified = true;
+                p.expected_original = { 0x68, 0xE0, 0xB3, 0x89, 0x00 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Map Filters 2/8") == 0)
+            {
+                p.bzr_address = 0x00752A82;
+                p.verified = true;
+                p.expected_original = { 0xE8, 0x49, 0x04, 0x00, 0x00 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
             else if (strcmp(p.name, "Map Filters 4/8") == 0)
             {
                 p.bzr_address = 0x0079D691;
@@ -799,6 +817,8 @@ namespace BZROpenShim
             { "Probe Refresh Path MapFilter1",                 (void*)Trampoline_Probe_MapFilter1 },
             { "Probe MapListFix1",                              (void*)Trampoline_Probe_MapListFix1 },
             { "Probe MapListFix2",                              (void*)Trampoline_Probe_MapListFix2 },
+            { "Map Filters 1/8",                                (void*)Trampoline_MapFilters1 },
+            { "Map Filters 2/8",                                (void*)Trampoline_MapFilters2 },
             { "Map Filters 3/8",                                (void*)Trampoline_MapFilters3 },
             { "Map Filters 4/8",                                (void*)Trampoline_MapFilters4 },
             { "Map Filters 5/8",                                (void*)Trampoline_MapFilters5 },
