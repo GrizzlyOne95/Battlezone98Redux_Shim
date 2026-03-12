@@ -18,10 +18,13 @@ __pycache__/
 *.log
 architecture_reference.md
 reverse_engineering/
+pyghidra_mcp_projects/
 
 # Tools and references
 tools/
 ref/
+scripts/
+docs/
 
 # VS Extensions
 *.vsix
