@@ -41,15 +41,6 @@ Reconstruction of the replacement code is in `trampolines.cpp` / `scroll_helper.
 3. Build → output is `bin\Release\winmm.dll`
 4. Copy `winmm.dll` to the BZR.exe directory
 
-## Workshop RE Workflow
-
-Use `docs/WORKSHOP_RE_SETUP.md` and `scripts/Download-WorkshopItem.ps1`
-to fetch and snapshot Workshop mods via SteamCMD for repeatable
-reverse-engineering analysis.
-
-Latest hop-fix reverse-engineering findings are tracked in
-`docs/HOPFIX_METHOD_RE.md`.
-
 ## License
 
 MIT - see LICENSE file
