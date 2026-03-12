@@ -144,6 +144,124 @@ KEY_FUNCTIONS = [
             "chat.obj",
         ),
     ),
+    FunctionTarget(
+        title="Map list fix support 1/3",
+        address="0x007A3110",
+        pdb_hints=(
+            "UI_Multiplayer_Create.obj",
+        ),
+    ),
+    FunctionTarget(
+        title="Map list fix support 2/3 (HopFix3 step)",
+        address="0x007A3130",
+        pdb_hints=(
+            "UI_Multiplayer_Create.obj",
+        ),
+    ),
+    FunctionTarget(
+        title="Map list fix support 3/3",
+        address="0x007A3D20",
+        pdb_hints=(
+            "UI_Multiplayer_Create.obj",
+        ),
+    ),
+    FunctionTarget(
+        title="Map list coloring",
+        address="0x007A4400",
+        pdb_hints=(
+            "UI_Multiplayer_MapSelect.obj",
+        ),
+    ),
+    FunctionTarget(
+        title="Map list filter scrolling",
+        address="0x00799770",
+        pdb_hints=(
+            "UI_Multiplayer_MapSelect.obj",
+        ),
+    ),
+    FunctionTarget(
+        title="Map filter support (3/8)",
+        address="0x0079D6B0",
+        pdb_hints=(
+            "UI_Multiplayer_MapSelect.obj",
+            "filters.obj",
+        ),
+    ),
+    FunctionTarget(
+        title="Map filter support (4/8)",
+        address="0x0079D690",
+        pdb_hints=(
+            "UI_Multiplayer_MapSelect.obj",
+            "filters.obj",
+        ),
+    ),
+    FunctionTarget(
+        title="Vehicle list mod fix 1/4",
+        address="0x00766900",
+        pdb_hints=(
+            "UI_Multiplayer_Create.obj",
+        ),
+    ),
+    FunctionTarget(
+        title="Vehicle list mod fix 2/4",
+        address="0x00799D70",
+        pdb_hints=(
+            "UI_Multiplayer_Create.obj",
+        ),
+    ),
+    FunctionTarget(
+        title="BZRNET integration host",
+        address="0x007436C0",
+        pdb_hints=(
+            "UI_MultiPlayer_Lobby.obj",
+            "lobby.obj",
+        ),
+    ),
+    FunctionTarget(
+        title="BZRNET integration client",
+        address="0x0073E240",
+        pdb_hints=(
+            "UI_MultiPlayer_Lobby.obj",
+            "lobby.obj",
+        ),
+    ),
+    FunctionTarget(
+        title="Ban button hook target",
+        address="0x007A4B60",
+        pdb_hints=(
+            "UI_UserBar.obj",
+            "lobby.obj",
+        ),
+    ),
+    FunctionTarget(
+        title="Map icon hook (map select)",
+        address="0x007A4260",
+        pdb_hints=(
+            "UI_Multiplayer_MapSelect.obj",
+        ),
+    ),
+    FunctionTarget(
+        title="Map icon hook (lobby)",
+        address="0x007A1E20",
+        pdb_hints=(
+            "UI_MultiPlayer_Lobby.obj",
+        ),
+    ),
+    FunctionTarget(
+        title="Ogre resource loader",
+        address="0x00664110",
+        pdb_hints=(
+            "ogre",
+            "resource",
+        ),
+    ),
+    FunctionTarget(
+        title="Lobby map name for unknown map",
+        address="0x007A11E0",
+        pdb_hints=(
+            "UI_MultiPlayer_Lobby.obj",
+        ),
+    ),
 ]
 
 PDB_SYMBOL_GROUPS = {

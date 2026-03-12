@@ -22,6 +22,17 @@ KEY_FUNCTIONS = {
         ("save selection helper", "0x1000CAF0"),
         ("restore selection helper", "0x1000CB40"),
         ("restore scroll helper", "0x1000CCA0"),
+        ("vehicle list mod fix helper A", "0x1000D0D0"),
+        ("vehicle list mod fix 1/4", "0x1000D460"),
+        ("vehicle list mod fix 2/4", "0x1000D330"),
+        ("vehicle list mod fix helper B", "0x1000D340"),
+        ("vehicle list mod fix 4/4", "0x1000D440"),
+        ("BZRNET integration host", "0x1000D7B0"),
+        ("BZRNET integration client", "0x1000D850"),
+        ("ban button helper A", "0x1000DF80"),
+        ("ban button hook 1/2", "0x1000E110"),
+        ("ban button helper B", "0x1000E1F0"),
+        ("ban button hook 2/2", "0x1000E360"),
     ],
 }
 def pdb_filename(path: Path) -> str | None:
@@ -39,6 +50,34 @@ def pdb_filename(path: Path) -> str | None:
 
 def sanitize_excerpt(text: str, limit: int) -> str:
     return text.replace("\r", "").strip()[:limit].rstrip()
+
+
+def _decompile_with_fallback(tools: GhidraTools, program_info, name_or_addr: str):
+    try:
+        return tools.decompile_function_by_name_or_addr(name_or_addr)
+    except Exception:
+        # If not a function entry point, try function containing the address,
+        # and if still missing, attempt to create a function at that address.
+        program = program_info.program
+        af = program.getAddressFactory()
+        addr = af.getAddress(name_or_addr)
+        fm = program.getFunctionManager()
+
+        func = fm.getFunctionContaining(addr)
+        if func:
+            return tools.decompile_function(func)
+
+        try:
+            from ghidra.app.cmd.function import CreateFunctionCmd
+        except Exception:
+            raise
+
+        cmd = CreateFunctionCmd(addr)
+        cmd.applyTo(program)
+        func = fm.getFunctionAt(addr)
+        if not func:
+            raise
+        return tools.decompile_function(func)
 
 
 def analyze_dlls(bzcp_path: Path, winmm_path: Path) -> str:
@@ -94,7 +133,7 @@ def analyze_dlls(bzcp_path: Path, winmm_path: Path) -> str:
             lines.append("")
 
             for label, addr in KEY_FUNCTIONS[binary_name]:
-                decompiled = tools.decompile_function_by_name_or_addr(addr)
+                decompiled = _decompile_with_fallback(tools, program_info, addr)
                 lines.append(f"### {label}")
                 lines.append("")
                 lines.append(f"- Address: `{addr}`")
