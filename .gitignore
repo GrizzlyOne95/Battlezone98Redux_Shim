@@ -28,3 +28,4 @@ docs/
 # VS Extensions
 *.vsix
 .db/
+pyghidra_mcp_projects/
