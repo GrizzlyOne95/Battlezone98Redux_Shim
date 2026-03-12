@@ -27,3 +27,4 @@ docs/
 
 # VS Extensions
 *.vsix
+.db/
