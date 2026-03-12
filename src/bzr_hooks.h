@@ -24,6 +24,11 @@ namespace BZROpenShim
     // Custom /help + /ban command intercept.
     bool __cdecl HandleCommandHelpBan(uint16_t id, const char* cmd);
 
+    // Map filter helpers (rel32 patch target).
+    uint32_t __fastcall MapFilters6Rel32(void* thisPtr, void* edx);
+    void __cdecl MapFilterOnScrollUp();
+    void __cdecl MapFilterOnScrollDown();
+
     // Shared state for trampolines.
     extern void* g_VehicleListContext;
     extern void* g_VehicleListParam;
@@ -41,6 +46,13 @@ namespace BZROpenShim
     extern uint32_t g_BanFlag;
     extern float g_BanX;
     extern float g_BanY;
+
+    // Map filter state flags (mirrors _bzcp DAT_1002ab11/ab12).
+    extern uint8_t g_MapFilterFlag11;
+    extern uint8_t g_MapFilterFlag12;
+    extern void* g_BzrFn_MapFilter8Check;
+    extern void* g_BzrFn_MapFilterCreate;
+    extern void* g_MapFilterListPtr;
 
     // Direct call targets for Vehicle Mod Fix 1/4 stub.
     extern void* g_BzrFn_VehicleFixPre;

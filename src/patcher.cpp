@@ -442,6 +442,22 @@ namespace BZROpenShim
             Log(L"[PTR] Probe MapListFix2 return: 0x%08X\n", probeMapListFix2Addr + 0x05);
         }
 
+        // Map Filters partial set.
+        g_RetAddr_MapFilters3 = reinterpret_cast<void*>(0x0079D6B9);
+        g_RetAddr_MapFilters4 = reinterpret_cast<void*>(0x0079D699);
+        g_RetAddr_MapFilters5 = reinterpret_cast<void*>(0x0079916B);
+        g_RetAddr_MapFilters7 = reinterpret_cast<void*>(0x007998B4);
+        g_RetAddr_MapFilters8_A = reinterpret_cast<void*>(0x007997B2);
+        g_RetAddr_MapFilters8_B = reinterpret_cast<void*>(0x007997B7);
+        g_RetAddr_MapFilters8_C = reinterpret_cast<void*>(0x0079987C);
+        Log(L"[PTR] MapFilters3 return: 0x%08X\n", 0x0079D6B9);
+        Log(L"[PTR] MapFilters4 return: 0x%08X\n", 0x0079D699);
+        Log(L"[PTR] MapFilters5 return: 0x%08X\n", 0x0079916B);
+        Log(L"[PTR] MapFilters7 return: 0x%08X\n", 0x007998B4);
+        Log(L"[PTR] MapFilters8 return A: 0x%08X\n", 0x007997B2);
+        Log(L"[PTR] MapFilters8 return B: 0x%08X\n", 0x007997B7);
+        Log(L"[PTR] MapFilters8 return C: 0x%08X\n", 0x0079987C);
+
         // Vehicle list mod fix returns.
         g_RetAddr_VehicleListModFix1 = reinterpret_cast<void*>(0x00766C52);
         g_RetAddr_VehicleListModFix4 = reinterpret_cast<void*>(0x00798BE6);
@@ -687,6 +703,48 @@ namespace BZROpenShim
                 p.expected_original = { 0x51, 0xE8, 0xA1, 0xBB, 0xFC };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
+            else if (strcmp(p.name, "Map Filters 3/8") == 0)
+            {
+                p.bzr_address = 0x0079D6B1;
+                p.verified = true;
+                p.expected_original = { 0x8B, 0xEC, 0x8B, 0x0D, 0x64 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Map Filters 4/8") == 0)
+            {
+                p.bzr_address = 0x0079D691;
+                p.verified = true;
+                p.expected_original = { 0x8B, 0xEC, 0x8B, 0x0D, 0x64 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Map Filters 5/8") == 0)
+            {
+                p.bzr_address = 0x00799116;
+                p.verified = true;
+                p.expected_original = { 0x52, 0x6A, 0x20, 0x6A, 0x00 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Map Filters 6/8") == 0)
+            {
+                p.bzr_address = 0x0079920A;
+                p.verified = true;
+                p.expected_original = { 0x92, 0x23, 0x03, 0x00 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Map Filters 7/8") == 0)
+            {
+                p.bzr_address = 0x007998AB;
+                p.verified = true;
+                p.expected_original = { 0x8B, 0x45, 0xBC, 0x8B, 0x88 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Map Filters 8/8") == 0)
+            {
+                p.bzr_address = 0x007997A9;
+                p.verified = true;
+                p.expected_original = { 0x8B, 0x45, 0xF8, 0x8B, 0x88 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
             else if (strcmp(p.name, "BZCP BZRNET Integration HOST") == 0)
             {
                 p.bzr_address = 0x00743C05;
@@ -741,6 +799,11 @@ namespace BZROpenShim
             { "Probe Refresh Path MapFilter1",                 (void*)Trampoline_Probe_MapFilter1 },
             { "Probe MapListFix1",                              (void*)Trampoline_Probe_MapListFix1 },
             { "Probe MapListFix2",                              (void*)Trampoline_Probe_MapListFix2 },
+            { "Map Filters 3/8",                                (void*)Trampoline_MapFilters3 },
+            { "Map Filters 4/8",                                (void*)Trampoline_MapFilters4 },
+            { "Map Filters 5/8",                                (void*)Trampoline_MapFilters5 },
+            { "Map Filters 7/8",                                (void*)Trampoline_MapFilters7 },
+            { "Map Filters 8/8",                                (void*)Trampoline_MapFilters8 },
             { "Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)", (void*)Trampoline_VehicleListModFix1 },
             { "Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)", (void*)Trampoline_VehicleListModFix4 },
             { "BZCP BZRNET Integration HOST",                   (void*)Trampoline_BzrnetHost },
@@ -779,6 +842,15 @@ namespace BZROpenShim
                 uint32_t instrAddr = p.bzr_address - 1;
                 uint32_t target = static_cast<uint32_t>(
                     reinterpret_cast<uintptr_t>(VehicleListModFix2));
+                int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(instrAddr + 5);
+                p.payload.resize(4);
+                memcpy(p.payload.data(), &rel, sizeof(rel));
+            }
+            else if (strcmp(p.name, "Map Filters 6/8") == 0)
+            {
+                uint32_t instrAddr = p.bzr_address - 1;
+                uint32_t target = static_cast<uint32_t>(
+                    reinterpret_cast<uintptr_t>(MapFilters6Rel32));
                 int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(instrAddr + 5);
                 p.payload.resize(4);
                 memcpy(p.payload.data(), &rel, sizeof(rel));

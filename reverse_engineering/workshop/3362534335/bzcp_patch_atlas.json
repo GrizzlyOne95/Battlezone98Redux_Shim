@@ -1,0 +1,3384 @@
+{
+  "inputs": {
+    "bzcp_dll": "reverse_engineering\\workshop\\3362534335\\latest\\_bzcp.dll",
+    "winmm_bin": "reverse_engineering\\workshop\\3362534335\\latest\\winmm.bin",
+    "gog_exe": "C:\\GOG Games\\Battlezone 98 Redux\\battlezone98redux.exe",
+    "addr_table": "reverse_engineering\\workshop\\3362534335\\bzcp_addr_table.csv"
+  },
+  "metadata": {
+    "bzcp_pdb": "F:\\Battlezone\\Janne DLL Shim and Lua\\bzpre\\Release\\_bzcp.pdb",
+    "winmm_pdb": "F:\\Battlezone\\Janne DLL Shim and Lua\\bzpre\\Release\\winmm.pdb",
+    "patch_count": 36,
+    "kind_counts": {
+      "jmp5": 29,
+      "rel32": 2,
+      "u32": 4,
+      "u8": 1
+    },
+    "category_counts": {
+      "Lobby / network / commands": 6,
+      "Map UI / filters / hop-fix": 22,
+      "Ogre / resources": 1,
+      "Vehicle list / mod assets": 4,
+      "Version / CLI constants": 3
+    },
+    "dll_hook_target_count": 30
+  },
+  "patches": [
+    {
+      "index": 1,
+      "name": "Map Sorting",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x007680D6",
+      "dest_slot_va": "0x1002AD0C",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000A1E0",
+      "payload_desc": "jmp5 -> _bzcp+0x0A1E0",
+      "call_va": "0x1000EFF4",
+      "original_bytes": "894df80fb6",
+      "instruction": {
+        "address": "007680d6",
+        "text": "MOV dword ptr [EBP + -0x8],ECX",
+        "bytes": "894df8",
+        "length": 3,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "007680d6",
+            "text": "MOV dword ptr [EBP + -0x8],ECX",
+            "bytes": "894df8",
+            "length": 3
+          },
+          {
+            "address": "007680d9",
+            "text": "MOVZX EAX,byte ptr [EBP + -0x1]",
+            "bytes": "0fb645ff",
+            "length": 4
+          },
+          {
+            "address": "007680dd",
+            "text": "PUSH EAX",
+            "bytes": "50",
+            "length": 1
+          },
+          {
+            "address": "007680de",
+            "text": "SUB ESP,0xc",
+            "bytes": "83ec0c",
+            "length": 3
+          }
+        ]
+      },
+      "function": {
+        "entry": "007680d0",
+        "name": "FUN_007680d0",
+        "signature": "undefined FUN_007680d0(void)"
+      },
+      "patch_bytes": "e905218a0f",
+      "open_shim_status": "probe_only",
+      "open_shim_note": "Clean-room shim treats this original patch site as a probe-only refresh hook."
+    },
+    {
+      "index": 2,
+      "name": "Map Filters 1/8",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x007A31D9",
+      "dest_slot_va": "0x1002AD14",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000BF50",
+      "payload_desc": "jmp5 -> _bzcp+0x0BF50",
+      "call_va": "0x1000F071",
+      "original_bytes": "68e0b38900",
+      "instruction": {
+        "address": "007a31d9",
+        "text": "PUSH 0x89b3e0",
+        "bytes": "68e0b38900",
+        "length": 5,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "007a31d9",
+            "text": "PUSH 0x89b3e0",
+            "bytes": "68e0b38900",
+            "length": 5
+          },
+          {
+            "address": "007a31de",
+            "text": "LEA ECX,[EBP + -0x70]",
+            "bytes": "8d4d90",
+            "length": 3
+          },
+          {
+            "address": "007a31e1",
+            "text": "CALL 0x00416ef0",
+            "bytes": "e80a3dc7ff",
+            "length": 5
+          },
+          {
+            "address": "007a31e6",
+            "text": "MOV byte ptr [EBP + -0x4],0x3",
+            "bytes": "c645fc03",
+            "length": 4
+          }
+        ]
+      },
+      "function": {
+        "entry": "007a3160",
+        "name": "FUN_007a3160",
+        "signature": "undefined FUN_007a3160(void)"
+      },
+      "patch_bytes": "e9728d860f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 3,
+      "name": "Map Filters 2/8",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x00752A82",
+      "dest_slot_va": "0x1002AD1C",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000C9D0",
+      "payload_desc": "jmp5 -> _bzcp+0x0C9D0",
+      "call_va": "0x1000F0EE",
+      "original_bytes": "e849040000",
+      "instruction": {
+        "address": "00752a82",
+        "text": "CALL 0x00752ed0",
+        "bytes": "e849040000",
+        "length": 5,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "00752a82",
+            "text": "CALL 0x00752ed0",
+            "bytes": "e849040000",
+            "length": 5
+          },
+          {
+            "address": "00752a87",
+            "text": "LEA EAX,[EBP + -0x28]",
+            "bytes": "8d45d8",
+            "length": 3
+          },
+          {
+            "address": "00752a8a",
+            "text": "PUSH EAX",
+            "bytes": "50",
+            "length": 1
+          },
+          {
+            "address": "00752a8b",
+            "text": "CALL 0x00764790",
+            "bytes": "e8001d0100",
+            "length": 5
+          }
+        ]
+      },
+      "function": {
+        "entry": "00752a50",
+        "name": "FUN_00752a50",
+        "signature": "undefined FUN_00752a50(void)"
+      },
+      "patch_bytes": "e9499f8b0f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 4,
+      "name": "Map Filters 3/8",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x0079D6B1",
+      "dest_slot_va": "0x1002AD88",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000A040",
+      "payload_desc": "jmp5 -> _bzcp+0x0A040",
+      "call_va": "0x1000F16B",
+      "original_bytes": "8bec8b0d64",
+      "instruction": {
+        "address": "0079d6b1",
+        "text": "MOV EBP,ESP",
+        "bytes": "8bec",
+        "length": 2,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "0079d6b1",
+            "text": "MOV EBP,ESP",
+            "bytes": "8bec",
+            "length": 2
+          },
+          {
+            "address": "0079d6b3",
+            "text": "MOV ECX,dword ptr [0x00945564]",
+            "bytes": "8b0d64559400",
+            "length": 6
+          },
+          {
+            "address": "0079d6b9",
+            "text": "CALL 0x0079e4f0",
+            "bytes": "e8320e0000",
+            "length": 5
+          },
+          {
+            "address": "0079d6be",
+            "text": "POP EBP",
+            "bytes": "5d",
+            "length": 1
+          }
+        ]
+      },
+      "function": {
+        "entry": "0079d6b0",
+        "name": "FUN_0079d6b0",
+        "signature": "undefined FUN_0079d6b0(void)"
+      },
+      "patch_bytes": "e98ac9860f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 5,
+      "name": "Map Filters 4/8",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x0079D691",
+      "dest_slot_va": "0x1002AD90",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000A060",
+      "payload_desc": "jmp5 -> _bzcp+0x0A060",
+      "call_va": "0x1000F1E8",
+      "original_bytes": "8bec8b0d64",
+      "instruction": {
+        "address": "0079d691",
+        "text": "MOV EBP,ESP",
+        "bytes": "8bec",
+        "length": 2,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "0079d691",
+            "text": "MOV EBP,ESP",
+            "bytes": "8bec",
+            "length": 2
+          },
+          {
+            "address": "0079d693",
+            "text": "MOV ECX,dword ptr [0x00945564]",
+            "bytes": "8b0d64559400",
+            "length": 6
+          },
+          {
+            "address": "0079d699",
+            "text": "CALL 0x0079de20",
+            "bytes": "e882070000",
+            "length": 5
+          },
+          {
+            "address": "0079d69e",
+            "text": "POP EBP",
+            "bytes": "5d",
+            "length": 1
+          }
+        ]
+      },
+      "function": {
+        "entry": "0079d690",
+        "name": "FUN_0079d690",
+        "signature": "undefined FUN_0079d690(void)"
+      },
+      "patch_bytes": "e9cac9860f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 6,
+      "name": "Map Filters 5/8",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x00799116",
+      "dest_slot_va": "0x1002AD28",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000C9F0",
+      "payload_desc": "jmp5 -> _bzcp+0x0C9F0",
+      "call_va": "0x1000F265",
+      "original_bytes": "526a206a00",
+      "instruction": {
+        "address": "00799116",
+        "text": "PUSH EDX",
+        "bytes": "52",
+        "length": 1,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "00799116",
+            "text": "PUSH EDX",
+            "bytes": "52",
+            "length": 1
+          },
+          {
+            "address": "00799117",
+            "text": "PUSH 0x20",
+            "bytes": "6a20",
+            "length": 2
+          },
+          {
+            "address": "00799119",
+            "text": "PUSH 0x0",
+            "bytes": "6a00",
+            "length": 2
+          },
+          {
+            "address": "0079911b",
+            "text": "PUSH 0x0",
+            "bytes": "6a00",
+            "length": 2
+          }
+        ]
+      },
+      "function": {
+        "entry": "00796880",
+        "name": "FUN_00796880",
+        "signature": "undefined FUN_00796880(void)"
+      },
+      "patch_bytes": "e9d538870f",
+      "open_shim_status": "probe_only",
+      "open_shim_note": "Clean-room shim treats this original patch site as a probe-only refresh hook."
+    },
+    {
+      "index": 7,
+      "name": "Map Filters 6/8",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x0079920A",
+      "dest_slot_va": "0x1002ADA0",
+      "length": 4,
+      "kind": "rel32",
+      "payload_value": "0x1000CAD0",
+      "payload_desc": "rel32 -> _bzcp+0x0CAD0",
+      "call_va": "0x1000F2ED",
+      "original_bytes": "92230300",
+      "instruction": {
+        "address": "00799209",
+        "text": "CALL 0x007cb5a0",
+        "bytes": "e892230300",
+        "length": 5,
+        "field_offset": 1,
+        "preview": [
+          {
+            "address": "00799209",
+            "text": "CALL 0x007cb5a0",
+            "bytes": "e892230300",
+            "length": 5
+          },
+          {
+            "address": "0079920e",
+            "text": "CMP dword ptr [EBP + 0xffffff4c],EAX",
+            "bytes": "39854cffffff",
+            "length": 6
+          },
+          {
+            "address": "00799214",
+            "text": "JNC 0x00799279",
+            "bytes": "7363",
+            "length": 2
+          },
+          {
+            "address": "00799216",
+            "text": "PUSH 0x0",
+            "bytes": "6a00",
+            "length": 2
+          }
+        ]
+      },
+      "function": {
+        "entry": "00796880",
+        "name": "FUN_00796880",
+        "signature": "undefined FUN_00796880(void)"
+      },
+      "patch_bytes": "c238870f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 8,
+      "name": "Map Filters 7/8",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x007998AB",
+      "dest_slot_va": "0x1002AD48",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000CA60",
+      "payload_desc": "jmp5 -> _bzcp+0x0CA60",
+      "call_va": "0x1000F36A",
+      "original_bytes": "8b45bc8b88",
+      "instruction": {
+        "address": "007998ab",
+        "text": "MOV EAX,dword ptr [EBP + -0x44]",
+        "bytes": "8b45bc",
+        "length": 3,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "007998ab",
+            "text": "MOV EAX,dword ptr [EBP + -0x44]",
+            "bytes": "8b45bc",
+            "length": 3
+          },
+          {
+            "address": "007998ae",
+            "text": "MOV ECX,dword ptr [EAX + 0x17c]",
+            "bytes": "8b887c010000",
+            "length": 6
+          },
+          {
+            "address": "007998b4",
+            "text": "CALL 0x007cb0c0",
+            "bytes": "e807180300",
+            "length": 5
+          },
+          {
+            "address": "007998b9",
+            "text": "PUSH EAX",
+            "bytes": "50",
+            "length": 1
+          }
+        ]
+      },
+      "function": {
+        "entry": "00799880",
+        "name": "FUN_00799880",
+        "signature": "undefined FUN_00799880(void)"
+      },
+      "patch_bytes": "e9b031870f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 9,
+      "name": "Map Filters 8/8",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x007997A9",
+      "dest_slot_va": "0x1002AD50",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000CA80",
+      "payload_desc": "jmp5 -> _bzcp+0x0CA80",
+      "call_va": "0x1000F3E7",
+      "original_bytes": "8b45f88b88",
+      "instruction": {
+        "address": "007997a9",
+        "text": "MOV EAX,dword ptr [EBP + -0x8]",
+        "bytes": "8b45f8",
+        "length": 3,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "007997a9",
+            "text": "MOV EAX,dword ptr [EBP + -0x8]",
+            "bytes": "8b45f8",
+            "length": 3
+          },
+          {
+            "address": "007997ac",
+            "text": "MOV ECX,dword ptr [EAX + 0x164]",
+            "bytes": "8b8864010000",
+            "length": 6
+          },
+          {
+            "address": "007997b2",
+            "text": "CALL 0x007d3360",
+            "bytes": "e8a99b0300",
+            "length": 5
+          },
+          {
+            "address": "007997b7",
+            "text": "MOVZX ECX,AL",
+            "bytes": "0fb6c8",
+            "length": 3
+          }
+        ]
+      },
+      "function": {
+        "entry": "007997a0",
+        "name": "FUN_007997a0",
+        "signature": "undefined FUN_007997a0(void)"
+      },
+      "patch_bytes": "e9d232870f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 10,
+      "name": "Map List Rewrite for Hop-Fix 1/3",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x0079B85F",
+      "dest_slot_va": "0x1002ACF4",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000CD10",
+      "payload_desc": "jmp5 -> _bzcp+0x0CD10",
+      "call_va": "0x1000F464",
+      "original_bytes": "8b45fc8b88",
+      "instruction": {
+        "address": "0079b85f",
+        "text": "MOV EAX,dword ptr [EBP + -0x4]",
+        "bytes": "8b45fc",
+        "length": 3,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "0079b85f",
+            "text": "MOV EAX,dword ptr [EBP + -0x4]",
+            "bytes": "8b45fc",
+            "length": 3
+          },
+          {
+            "address": "0079b862",
+            "text": "MOV ECX,dword ptr [EAX + 0x138]",
+            "bytes": "8b8838010000",
+            "length": 6
+          },
+          {
+            "address": "0079b868",
+            "text": "CALL 0x005d4260",
+            "bytes": "e8f389e3ff",
+            "length": 5
+          },
+          {
+            "address": "0079b86d",
+            "text": "MOV ESP,EBP",
+            "bytes": "8be5",
+            "length": 2
+          }
+        ]
+      },
+      "function": {
+        "entry": "0079b850",
+        "name": "FUN_0079b850",
+        "signature": "undefined FUN_0079b850(void)"
+      },
+      "patch_bytes": "e9ac14870f",
+      "open_shim_status": "implemented",
+      "open_shim_note": "Clean-room shim models this as Hop-Fix 1/3."
+    },
+    {
+      "index": 11,
+      "name": "Map List Rewrite for Hop-Fix 2/3",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x00799279",
+      "dest_slot_va": "0x1002AD00",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000CD40",
+      "payload_desc": "jmp5 -> _bzcp+0x0CD40",
+      "call_va": "0x1000F4E1",
+      "original_bytes": "6a008b855c",
+      "instruction": {
+        "address": "00799279",
+        "text": "PUSH 0x0",
+        "bytes": "6a00",
+        "length": 2,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "00799279",
+            "text": "PUSH 0x0",
+            "bytes": "6a00",
+            "length": 2
+          },
+          {
+            "address": "0079927b",
+            "text": "MOV EAX,dword ptr [EBP + 0xffffff5c]",
+            "bytes": "8b855cffffff",
+            "length": 6
+          },
+          {
+            "address": "00799281",
+            "text": "MOV ECX,dword ptr [EAX + 0x17c]",
+            "bytes": "8b887c010000",
+            "length": 6
+          },
+          {
+            "address": "00799287",
+            "text": "CALL 0x007cafa0",
+            "bytes": "e8141d0300",
+            "length": 5
+          }
+        ]
+      },
+      "function": {
+        "entry": "00796880",
+        "name": "FUN_00796880",
+        "signature": "undefined FUN_00796880(void)"
+      },
+      "patch_bytes": "e9c23a870f",
+      "open_shim_status": "implemented",
+      "open_shim_note": "Clean-room shim models this as Hop-Fix 2/3."
+    },
+    {
+      "index": 12,
+      "name": "Map List Rewrite for Hop-Fix 3/3",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x00799377",
+      "dest_slot_va": "0x1002AD30",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000CD60",
+      "payload_desc": "jmp5 -> _bzcp+0x0CD60",
+      "call_va": "0x1000F55E",
+      "original_bytes": "ffd2683009",
+      "instruction": {
+        "address": "00799377",
+        "text": "CALL EDX",
+        "bytes": "ffd2",
+        "length": 2,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "00799377",
+            "text": "CALL EDX",
+            "bytes": "ffd2",
+            "length": 2
+          },
+          {
+            "address": "00799379",
+            "text": "PUSH 0x930",
+            "bytes": "6830090000",
+            "length": 5
+          },
+          {
+            "address": "0079937e",
+            "text": "CALL dword ptr [0x00869428]",
+            "bytes": "ff1528948600",
+            "length": 6
+          },
+          {
+            "address": "00799384",
+            "text": "ADD ESP,0x4",
+            "bytes": "83c404",
+            "length": 3
+          }
+        ]
+      },
+      "function": {
+        "entry": "00796880",
+        "name": "FUN_00796880",
+        "signature": "undefined FUN_00796880(void)"
+      },
+      "patch_bytes": "e9e439870f",
+      "open_shim_status": "implemented",
+      "open_shim_note": "Clean-room shim models this as Hop-Fix 3/3."
+    },
+    {
+      "index": 13,
+      "name": "Map List Filter Scrolling",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x00799774",
+      "dest_slot_va": "0x1002ADB4",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000CE20",
+      "payload_desc": "jmp5 -> _bzcp+0x0CE20",
+      "call_va": "0x1000F5DB",
+      "original_bytes": "894dfc8b45",
+      "instruction": {
+        "address": "00799774",
+        "text": "MOV dword ptr [EBP + -0x4],ECX",
+        "bytes": "894dfc",
+        "length": 3,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "00799774",
+            "text": "MOV dword ptr [EBP + -0x4],ECX",
+            "bytes": "894dfc",
+            "length": 3
+          },
+          {
+            "address": "00799777",
+            "text": "MOV EAX,dword ptr [EBP + 0x8]",
+            "bytes": "8b4508",
+            "length": 3
+          },
+          {
+            "address": "0079977a",
+            "text": "PUSH EAX",
+            "bytes": "50",
+            "length": 1
+          },
+          {
+            "address": "0079977b",
+            "text": "MOV ECX,dword ptr [EBP + -0x4]",
+            "bytes": "8b4dfc",
+            "length": 3
+          }
+        ]
+      },
+      "function": {
+        "entry": "00799770",
+        "name": "FUN_00799770",
+        "signature": "undefined FUN_00799770(void)"
+      },
+      "patch_bytes": "e9a736870f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 14,
+      "name": "Map List Coloring",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x007A4440",
+      "dest_slot_va": "0x1002AD68",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000CEF0",
+      "payload_desc": "jmp5 -> _bzcp+0x0CEF0",
+      "call_va": "0x1000F658",
+      "original_bytes": "83c0208bc8",
+      "instruction": {
+        "address": "007a4440",
+        "text": "ADD EAX,0x20",
+        "bytes": "83c020",
+        "length": 3,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "007a4440",
+            "text": "ADD EAX,0x20",
+            "bytes": "83c020",
+            "length": 3
+          },
+          {
+            "address": "007a4443",
+            "text": "MOV ECX,EAX",
+            "bytes": "8bc8",
+            "length": 2
+          },
+          {
+            "address": "007a4445",
+            "text": "CALL 0x0041f870",
+            "bytes": "e826b4c7ff",
+            "length": 5
+          },
+          {
+            "address": "007a444a",
+            "text": "PUSH EAX",
+            "bytes": "50",
+            "length": 1
+          }
+        ]
+      },
+      "function": {
+        "entry": "007a4400",
+        "name": "FUN_007a4400",
+        "signature": "undefined FUN_007a4400(void)"
+      },
+      "patch_bytes": "e9ab8a860f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 15,
+      "name": "Map List Fix Support 1/3",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x007A311E",
+      "dest_slot_va": "0x1002ADC8",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000D090",
+      "payload_desc": "jmp5 -> _bzcp+0x0D090",
+      "call_va": "0x1000F6D7",
+      "original_bytes": "8b0d745594",
+      "instruction": {
+        "address": "007a311e",
+        "text": "MOV ECX,dword ptr [0x00945574]",
+        "bytes": "8b0d74559400",
+        "length": 6,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "007a311e",
+            "text": "MOV ECX,dword ptr [0x00945574]",
+            "bytes": "8b0d74559400",
+            "length": 6
+          },
+          {
+            "address": "007a3124",
+            "text": "CALL 0x007a4260",
+            "bytes": "e837110000",
+            "length": 5
+          },
+          {
+            "address": "007a3129",
+            "text": "POP EBP",
+            "bytes": "5d",
+            "length": 1
+          },
+          {
+            "address": "007a312a",
+            "text": "RET",
+            "bytes": "c3",
+            "length": 1
+          }
+        ]
+      },
+      "function": {
+        "entry": "007a3110",
+        "name": "FUN_007a3110",
+        "signature": "undefined FUN_007a3110(void)"
+      },
+      "patch_bytes": "e96d9f860f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 16,
+      "name": "Map List Fix Support 2/3",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x007A313E",
+      "dest_slot_va": "0x1002ADCC",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000D090",
+      "payload_desc": "jmp5 -> _bzcp+0x0D090",
+      "call_va": "0x1000F74F",
+      "original_bytes": "8b0d745594",
+      "instruction": {
+        "address": "007a313e",
+        "text": "MOV ECX,dword ptr [0x00945574]",
+        "bytes": "8b0d74559400",
+        "length": 6,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "007a313e",
+            "text": "MOV ECX,dword ptr [0x00945574]",
+            "bytes": "8b0d74559400",
+            "length": 6
+          },
+          {
+            "address": "007a3144",
+            "text": "CALL 0x007a4260",
+            "bytes": "e817110000",
+            "length": 5
+          },
+          {
+            "address": "007a3149",
+            "text": "POP EBP",
+            "bytes": "5d",
+            "length": 1
+          },
+          {
+            "address": "007a314a",
+            "text": "RET",
+            "bytes": "c3",
+            "length": 1
+          }
+        ]
+      },
+      "function": {
+        "entry": "007a3130",
+        "name": "FUN_007a3130",
+        "signature": "undefined FUN_007a3130(void)"
+      },
+      "patch_bytes": "e94d9f860f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 17,
+      "name": "Map List Fix Support 3/3",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x007A3D63",
+      "dest_slot_va": "0x1002ADD0",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000D0B0",
+      "payload_desc": "jmp5 -> _bzcp+0x0D0B0",
+      "call_va": "0x1000F7CC",
+      "original_bytes": "8b4df8e8f5",
+      "instruction": {
+        "address": "007a3d63",
+        "text": "MOV ECX,dword ptr [EBP + -0x8]",
+        "bytes": "8b4df8",
+        "length": 3,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "007a3d63",
+            "text": "MOV ECX,dword ptr [EBP + -0x8]",
+            "bytes": "8b4df8",
+            "length": 3
+          },
+          {
+            "address": "007a3d66",
+            "text": "CALL 0x007a4260",
+            "bytes": "e8f5040000",
+            "length": 5
+          },
+          {
+            "address": "007a3d6b",
+            "text": "MOV ESP,EBP",
+            "bytes": "8be5",
+            "length": 2
+          },
+          {
+            "address": "007a3d6d",
+            "text": "POP EBP",
+            "bytes": "5d",
+            "length": 1
+          }
+        ]
+      },
+      "function": {
+        "entry": "007a3d20",
+        "name": "FUN_007a3d20",
+        "signature": "undefined FUN_007a3d20(void)"
+      },
+      "patch_bytes": "e94893860f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 18,
+      "name": "Map Filter UI Height",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x00798EAC",
+      "dest_slot_va": "0x1002ACF0",
+      "length": 4,
+      "kind": "u32",
+      "payload_value": "0x1002A1D0",
+      "payload_desc": "u32 0x1002A1D0",
+      "call_va": "0x1000F84F",
+      "original_bytes": "bc2a8a00",
+      "instruction": {
+        "address": "00798ea8",
+        "text": "MOVSS XMM0,dword ptr [0x008a2abc]",
+        "bytes": "f30f1005bc2a8a00",
+        "length": 8,
+        "field_offset": 4,
+        "preview": [
+          {
+            "address": "00798ea8",
+            "text": "MOVSS XMM0,dword ptr [0x008a2abc]",
+            "bytes": "f30f1005bc2a8a00",
+            "length": 8
+          },
+          {
+            "address": "00798eb0",
+            "text": "MOVSS dword ptr [ESP],XMM0",
+            "bytes": "f30f110424",
+            "length": 5
+          },
+          {
+            "address": "00798eb5",
+            "text": "PUSH ECX",
+            "bytes": "51",
+            "length": 1
+          },
+          {
+            "address": "00798eb6",
+            "text": "MOVSS XMM0,dword ptr [0x008a2b18]",
+            "bytes": "f30f1005182b8a00",
+            "length": 8
+          }
+        ]
+      },
+      "function": {
+        "entry": "00796880",
+        "name": "FUN_00796880",
+        "signature": "undefined FUN_00796880(void)"
+      },
+      "patch_bytes": "d0a10210",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 19,
+      "name": "Version Notice 1/2",
+      "category": "Version / CLI constants",
+      "dest_va": "0x0078DD4E",
+      "dest_slot_va": "0x1002ACE4",
+      "length": 4,
+      "kind": "u32",
+      "payload_value": "0x100244D0",
+      "payload_desc": "u32 0x100244D0 (\"2.2.301CP (Community Patch 0.2)\")",
+      "call_va": "0x1000F8DD",
+      "original_bytes": "e4848700",
+      "instruction": {
+        "address": "0078dd4d",
+        "text": "PUSH 0x8784e4",
+        "bytes": "68e4848700",
+        "length": 5,
+        "field_offset": 1,
+        "preview": [
+          {
+            "address": "0078dd4d",
+            "text": "PUSH 0x8784e4",
+            "bytes": "68e4848700",
+            "length": 5
+          },
+          {
+            "address": "0078dd52",
+            "text": "LEA ECX,[EBP + -0x28]",
+            "bytes": "8d4dd8",
+            "length": 3
+          },
+          {
+            "address": "0078dd55",
+            "text": "CALL 0x0041f7b0",
+            "bytes": "e8561ac9ff",
+            "length": 5
+          },
+          {
+            "address": "0078dd5a",
+            "text": "LEA ECX,[EBP + -0x28]",
+            "bytes": "8d4dd8",
+            "length": 3
+          }
+        ]
+      },
+      "function": {
+        "entry": "0078d000",
+        "name": "FUN_0078d000",
+        "signature": "undefined FUN_0078d000(void)"
+      },
+      "patch_bytes": "d0440210",
+      "open_shim_status": "implemented",
+      "open_shim_note": "Clean-room shim now patches this real version-string operand site with its own OpenShim tag."
+    },
+    {
+      "index": 20,
+      "name": "Version Notice 2/2",
+      "category": "Version / CLI constants",
+      "dest_va": "0x00618C2F",
+      "dest_slot_va": "0x1002ACE8",
+      "length": 4,
+      "kind": "u32",
+      "payload_value": "0x100244D0",
+      "payload_desc": "u32 0x100244D0 (\"2.2.301CP (Community Patch 0.2)\")",
+      "call_va": "0x1000F95C",
+      "original_bytes": "e4848700",
+      "instruction": {
+        "address": "00618c2e",
+        "text": "PUSH 0x8784e4",
+        "bytes": "68e4848700",
+        "length": 5,
+        "field_offset": 1,
+        "preview": [
+          {
+            "address": "00618c2e",
+            "text": "PUSH 0x8784e4",
+            "bytes": "68e4848700",
+            "length": 5
+          },
+          {
+            "address": "00618c33",
+            "text": "PUSH 0x88bba4",
+            "bytes": "68a4bb8800",
+            "length": 5
+          },
+          {
+            "address": "00618c38",
+            "text": "CALL 0x0081e0c0",
+            "bytes": "e883542000",
+            "length": 5
+          },
+          {
+            "address": "00618c3d",
+            "text": "ADD ESP,0xc",
+            "bytes": "83c40c",
+            "length": 3
+          }
+        ]
+      },
+      "function": {
+        "entry": "00618c10",
+        "name": "FUN_00618c10",
+        "signature": "undefined FUN_00618c10(void)"
+      },
+      "patch_bytes": "d0440210",
+      "open_shim_status": "implemented",
+      "open_shim_note": "Clean-room shim now patches this real version-string operand site with its own OpenShim tag."
+    },
+    {
+      "index": 21,
+      "name": "CLI Fix",
+      "category": "Version / CLI constants",
+      "dest_va": "0x008F068C",
+      "dest_slot_va": "0x1002ACEC",
+      "length": 4,
+      "kind": "u32",
+      "payload_value": "0x00000920",
+      "payload_desc": "u32 0x00000920",
+      "call_va": "0x1000F9B9",
+      "original_bytes": "202c0900",
+      "instruction": null,
+      "function": null,
+      "patch_bytes": null,
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 22,
+      "name": "Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)",
+      "category": "Vehicle list / mod assets",
+      "dest_va": "0x00766C4A",
+      "dest_slot_va": "0x1002AE04",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000D460",
+      "payload_desc": "jmp5 -> _bzcp+0x0D460",
+      "call_va": "0x1000FA36",
+      "original_bytes": "e8a1aed1ff",
+      "instruction": {
+        "address": "00766c4a",
+        "text": "CALL 0x00481af0",
+        "bytes": "e8a1aed1ff",
+        "length": 5,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "00766c4a",
+            "text": "CALL 0x00481af0",
+            "bytes": "e8a1aed1ff",
+            "length": 5
+          },
+          {
+            "address": "00766c4f",
+            "text": "ADD ESP,0x4",
+            "bytes": "83c404",
+            "length": 3
+          },
+          {
+            "address": "00766c52",
+            "text": "MOV dword ptr [EBP + 0xffffff2c],EAX",
+            "bytes": "89852cffffff",
+            "length": 6
+          },
+          {
+            "address": "00766c58",
+            "text": "CMP dword ptr [EBP + 0xffffff20],0x0",
+            "bytes": "83bd20ffffff00",
+            "length": 7
+          }
+        ]
+      },
+      "function": {
+        "entry": "00766900",
+        "name": "FUN_00766900",
+        "signature": "undefined FUN_00766900(void)"
+      },
+      "patch_bytes": "e911688a0f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 23,
+      "name": "Vehicle List Mod Fix 2/4 (Force Mod-Scoped Assets 2/3)",
+      "category": "Vehicle list / mod assets",
+      "dest_va": "0x0079A4F4",
+      "dest_slot_va": "0x1002ADF0",
+      "length": 4,
+      "kind": "rel32",
+      "payload_value": "0x1000D330",
+      "payload_desc": "rel32 -> _bzcp+0x0D330",
+      "call_va": "0x1000FABE",
+      "original_bytes": "68990000",
+      "instruction": {
+        "address": "0079a4f3",
+        "text": "CALL 0x007a3e60",
+        "bytes": "e868990000",
+        "length": 5,
+        "field_offset": 1,
+        "preview": [
+          {
+            "address": "0079a4f3",
+            "text": "CALL 0x007a3e60",
+            "bytes": "e868990000",
+            "length": 5
+          },
+          {
+            "address": "0079a4f8",
+            "text": "PUSH 0x0",
+            "bytes": "6a00",
+            "length": 2
+          },
+          {
+            "address": "0079a4fa",
+            "text": "MOV EAX,dword ptr [EBP + 0xfffffe34]",
+            "bytes": "8b8534feffff",
+            "length": 6
+          },
+          {
+            "address": "0079a500",
+            "text": "MOV ECX,dword ptr [EAX + 0x1cc]",
+            "bytes": "8b88cc010000",
+            "length": 6
+          }
+        ]
+      },
+      "function": {
+        "entry": "00799d70",
+        "name": "FUN_00799d70",
+        "signature": "undefined FUN_00799d70(void)"
+      },
+      "patch_bytes": "382e870f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 24,
+      "name": "Vehicle List Mod Fix 3/4 (Always Update Vehicle Control)",
+      "category": "Vehicle list / mod assets",
+      "dest_va": "0x007AA5A1",
+      "dest_slot_va": null,
+      "length": 1,
+      "kind": "u8",
+      "payload_value": "0x000000EB",
+      "payload_desc": "u8 0xEB",
+      "call_va": "0x1000FB1D",
+      "original_bytes": "75",
+      "instruction": {
+        "address": "007aa5a1",
+        "text": "JNZ 0x007aa60a",
+        "bytes": "7567",
+        "length": 2,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "007aa5a1",
+            "text": "JNZ 0x007aa60a",
+            "bytes": "7567",
+            "length": 2
+          },
+          {
+            "address": "007aa5a3",
+            "text": "LEA ECX,[EBP + 0xffffff34]",
+            "bytes": "8d8d34ffffff",
+            "length": 6
+          },
+          {
+            "address": "007aa5a9",
+            "text": "PUSH ECX",
+            "bytes": "51",
+            "length": 1
+          },
+          {
+            "address": "007aa5aa",
+            "text": "CALL 0x00764780",
+            "bytes": "e8d1a1fbff",
+            "length": 5
+          }
+        ]
+      },
+      "function": {
+        "entry": "007aa560",
+        "name": "FUN_007aa560",
+        "signature": "undefined FUN_007aa560(void)"
+      },
+      "patch_bytes": "eb",
+      "open_shim_status": "implemented",
+      "open_shim_note": "Clean-room shim now applies this byte patch under the original vehicle-fix semantics."
+    },
+    {
+      "index": 25,
+      "name": "Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)",
+      "category": "Vehicle list / mod assets",
+      "dest_va": "0x00798BD9",
+      "dest_slot_va": "0x1002ADF4",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000D440",
+      "payload_desc": "jmp5 -> _bzcp+0x0D440",
+      "call_va": "0x1000FB9A",
+      "original_bytes": "51e8a1bbfc",
+      "instruction": {
+        "address": "00798bd9",
+        "text": "PUSH ECX",
+        "bytes": "51",
+        "length": 1,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "00798bd9",
+            "text": "PUSH ECX",
+            "bytes": "51",
+            "length": 1
+          },
+          {
+            "address": "00798bda",
+            "text": "CALL 0x00764780",
+            "bytes": "e8a1bbfcff",
+            "length": 5
+          },
+          {
+            "address": "00798bdf",
+            "text": "MOV ECX,EAX",
+            "bytes": "8bc8",
+            "length": 2
+          },
+          {
+            "address": "00798be1",
+            "text": "CALL 0x00766900",
+            "bytes": "e81addfcff",
+            "length": 5
+          }
+        ]
+      },
+      "function": {
+        "entry": "00796880",
+        "name": "FUN_00796880",
+        "signature": "undefined FUN_00796880(void)"
+      },
+      "patch_bytes": "e96248870f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 26,
+      "name": "BZCP BZRNET Integration HOST",
+      "category": "Lobby / network / commands",
+      "dest_va": "0x00743C05",
+      "dest_slot_va": "0x1002AE40",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000D7B0",
+      "payload_desc": "jmp5 -> _bzcp+0x0D7B0",
+      "call_va": "0x1000FC17",
+      "original_bytes": "8d8500ffff",
+      "instruction": {
+        "address": "00743c05",
+        "text": "LEA EAX,[EBP + 0xffffff00]",
+        "bytes": "8d8500ffffff",
+        "length": 6,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "00743c05",
+            "text": "LEA EAX,[EBP + 0xffffff00]",
+            "bytes": "8d8500ffffff",
+            "length": 6
+          },
+          {
+            "address": "00743c0b",
+            "text": "PUSH EAX",
+            "bytes": "50",
+            "length": 1
+          },
+          {
+            "address": "00743c0c",
+            "text": "LEA ECX,[EBP + 0xffffff48]",
+            "bytes": "8d8d48ffffff",
+            "length": 6
+          },
+          {
+            "address": "00743c12",
+            "text": "PUSH ECX",
+            "bytes": "51",
+            "length": 1
+          }
+        ]
+      },
+      "function": {
+        "entry": "007436c0",
+        "name": "FUN_007436c0",
+        "signature": "undefined FUN_007436c0(void)"
+      },
+      "patch_bytes": "e9a69b8c0f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 27,
+      "name": "BZCP BZRNET Integration CLIENT",
+      "category": "Lobby / network / commands",
+      "dest_va": "0x0073E71C",
+      "dest_slot_va": "0x1002AE48",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000D850",
+      "payload_desc": "jmp5 -> _bzcp+0x0D850",
+      "call_va": "0x1000FC94",
+      "original_bytes": "c645fc078d",
+      "instruction": {
+        "address": "0073e71c",
+        "text": "MOV byte ptr [EBP + -0x4],0x7",
+        "bytes": "c645fc07",
+        "length": 4,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "0073e71c",
+            "text": "MOV byte ptr [EBP + -0x4],0x7",
+            "bytes": "c645fc07",
+            "length": 4
+          },
+          {
+            "address": "0073e720",
+            "text": "LEA ECX,[EBP + -0x40]",
+            "bytes": "8d4dc0",
+            "length": 3
+          },
+          {
+            "address": "0073e723",
+            "text": "PUSH ECX",
+            "bytes": "51",
+            "length": 1
+          },
+          {
+            "address": "0073e724",
+            "text": "LEA EDX,[EBP + 0xffffff60]",
+            "bytes": "8d9560ffffff",
+            "length": 6
+          }
+        ]
+      },
+      "function": {
+        "entry": "0073e240",
+        "name": "FUN_0073e240",
+        "signature": "undefined FUN_0073e240(void)"
+      },
+      "patch_bytes": "e92ff18c0f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 28,
+      "name": "Custom Command /help Handler",
+      "category": "Lobby / network / commands",
+      "dest_va": "0x0062480B",
+      "dest_slot_va": "0x1002AE1C",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000D770",
+      "payload_desc": "jmp5 -> _bzcp+0x0D770",
+      "call_va": "0x1000FD11",
+      "original_bytes": "683cd58800",
+      "instruction": {
+        "address": "0062480b",
+        "text": "PUSH 0x88d53c",
+        "bytes": "683cd58800",
+        "length": 5,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "0062480b",
+            "text": "PUSH 0x88d53c",
+            "bytes": "683cd58800",
+            "length": 5
+          },
+          {
+            "address": "00624810",
+            "text": "MOV EDX,dword ptr [EBP + 0xc]",
+            "bytes": "8b550c",
+            "length": 3
+          },
+          {
+            "address": "00624813",
+            "text": "PUSH EDX",
+            "bytes": "52",
+            "length": 1
+          },
+          {
+            "address": "00624814",
+            "text": "CALL dword ptr [0x008694a4]",
+            "bytes": "ff15a4948600",
+            "length": 6
+          }
+        ]
+      },
+      "function": {
+        "entry": "006247a0",
+        "name": "FUN_006247a0",
+        "signature": "undefined FUN_006247a0(void)"
+      },
+      "patch_bytes": "e9608f9e0f",
+      "open_shim_status": "deferred",
+      "open_shim_note": "Clean-room shim now leaves this original /help and /ban command intercept disabled until the detour is reimplemented clean-room."
+    },
+    {
+      "index": 29,
+      "name": "Ban Button Hook 1/2",
+      "category": "Lobby / network / commands",
+      "dest_va": "0x007D0A2F",
+      "dest_slot_va": "0x1002AE90",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000E110",
+      "payload_desc": "jmp5 -> _bzcp+0x0E110",
+      "call_va": "0x1000FD8E",
+      "original_bytes": "0fb6452085",
+      "instruction": {
+        "address": "007d0a2f",
+        "text": "MOVZX EAX,byte ptr [EBP + 0x20]",
+        "bytes": "0fb64520",
+        "length": 4,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "007d0a2f",
+            "text": "MOVZX EAX,byte ptr [EBP + 0x20]",
+            "bytes": "0fb64520",
+            "length": 4
+          },
+          {
+            "address": "007d0a33",
+            "text": "TEST EAX,EAX",
+            "bytes": "85c0",
+            "length": 2
+          },
+          {
+            "address": "007d0a35",
+            "text": "JNZ 0x007d0b74",
+            "bytes": "0f8539010000",
+            "length": 6
+          },
+          {
+            "address": "007d0a3b",
+            "text": "PUSH 0x1ec",
+            "bytes": "68ec010000",
+            "length": 5
+          }
+        ]
+      },
+      "function": {
+        "entry": "007d0770",
+        "name": "FUN_007d0770",
+        "signature": "undefined FUN_007d0770(void)"
+      },
+      "patch_bytes": "e9dcd6830f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 30,
+      "name": "Ban Button Hook 2/2",
+      "category": "Lobby / network / commands",
+      "dest_va": "0x007A6913",
+      "dest_slot_va": "0x1002AEA4",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000E360",
+      "payload_desc": "jmp5 -> _bzcp+0x0E360",
+      "call_va": "0x1000FE0B",
+      "original_bytes": "c745fcffff",
+      "instruction": {
+        "address": "007a6913",
+        "text": "MOV dword ptr [EBP + -0x4],0xffffffff",
+        "bytes": "c745fcffffffff",
+        "length": 7,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "007a6913",
+            "text": "MOV dword ptr [EBP + -0x4],0xffffffff",
+            "bytes": "c745fcffffffff",
+            "length": 7
+          },
+          {
+            "address": "007a691a",
+            "text": "MOV EAX,dword ptr [EBP + 0xffffff2c]",
+            "bytes": "8b852cffffff",
+            "length": 6
+          },
+          {
+            "address": "007a6920",
+            "text": "MOV ECX,dword ptr [EBP + -0xc]",
+            "bytes": "8b4df4",
+            "length": 3
+          },
+          {
+            "address": "007a6923",
+            "text": "MOV dword ptr FS:[0x0],ECX",
+            "bytes": "64890d00000000",
+            "length": 7
+          }
+        ]
+      },
+      "function": {
+        "entry": "007a4b60",
+        "name": "FUN_007a4b60",
+        "signature": "undefined FUN_007a4b60(void)"
+      },
+      "patch_bytes": "e9487a860f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 31,
+      "name": "Joiner Event Hook",
+      "category": "Lobby / network / commands",
+      "dest_va": "0x0073F430",
+      "dest_slot_va": "0x1002AE54",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000DD80",
+      "payload_desc": "jmp5 -> _bzcp+0x0DD80",
+      "call_va": "0x1000FE88",
+      "original_bytes": "e82b310000",
+      "instruction": {
+        "address": "0073f430",
+        "text": "CALL 0x00742560",
+        "bytes": "e82b310000",
+        "length": 5,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "0073f430",
+            "text": "CALL 0x00742560",
+            "bytes": "e82b310000",
+            "length": 5
+          },
+          {
+            "address": "0073f435",
+            "text": "MOV ECX,dword ptr [EBP + -0x74]",
+            "bytes": "8b4d8c",
+            "length": 3
+          },
+          {
+            "address": "0073f438",
+            "text": "CALL 0x007476a0",
+            "bytes": "e863820000",
+            "length": 5
+          },
+          {
+            "address": "0073f43d",
+            "text": "MOV ECX,dword ptr [EBP + -0xc]",
+            "bytes": "8b4df4",
+            "length": 3
+          }
+        ]
+      },
+      "function": {
+        "entry": "0073eeb0",
+        "name": "FUN_0073eeb0",
+        "signature": "undefined FUN_0073eeb0(void)"
+      },
+      "patch_bytes": "e94be98c0f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 32,
+      "name": "Map Icon Hook (Map Select)",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x007A42F5",
+      "dest_slot_va": "0x1002AEAC",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000E560",
+      "payload_desc": "jmp5 -> _bzcp+0x0E560",
+      "call_va": "0x1000FF05",
+      "original_bytes": "8a40380fb6",
+      "instruction": {
+        "address": "007a42f5",
+        "text": "MOV AL,byte ptr [EAX + 0x38]",
+        "bytes": "8a4038",
+        "length": 3,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "007a42f5",
+            "text": "MOV AL,byte ptr [EAX + 0x38]",
+            "bytes": "8a4038",
+            "length": 3
+          },
+          {
+            "address": "007a42f8",
+            "text": "MOVZX ECX,AL",
+            "bytes": "0fb6c8",
+            "length": 3
+          },
+          {
+            "address": "007a42fb",
+            "text": "PUSH ECX",
+            "bytes": "51",
+            "length": 1
+          },
+          {
+            "address": "007a42fc",
+            "text": "LEA EDX,[EBP + -0x40]",
+            "bytes": "8d55c0",
+            "length": 3
+          }
+        ]
+      },
+      "function": {
+        "entry": "007a4260",
+        "name": "FUN_007a4260",
+        "signature": "undefined FUN_007a4260(void)"
+      },
+      "patch_bytes": "e966a2860f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 33,
+      "name": "Map Icon Hook (Lobby)",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x007A1FAD",
+      "dest_slot_va": "0x1002AEB8",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000E5A0",
+      "payload_desc": "jmp5 -> _bzcp+0x0E5A0",
+      "call_va": "0x1000FF82",
+      "original_bytes": "e82e08fbff",
+      "instruction": {
+        "address": "007a1fad",
+        "text": "CALL 0x007527e0",
+        "bytes": "e82e08fbff",
+        "length": 5,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "007a1fad",
+            "text": "CALL 0x007527e0",
+            "bytes": "e82e08fbff",
+            "length": 5
+          },
+          {
+            "address": "007a1fb2",
+            "text": "MOV byte ptr [EBP + -0x4],0x3",
+            "bytes": "c645fc03",
+            "length": 4
+          },
+          {
+            "address": "007a1fb6",
+            "text": "LEA ECX,[EBP + -0x28]",
+            "bytes": "8d4dd8",
+            "length": 3
+          },
+          {
+            "address": "007a1fb9",
+            "text": "CALL 0x0041f870",
+            "bytes": "e8b2d8c7ff",
+            "length": 5
+          }
+        ]
+      },
+      "function": {
+        "entry": "007a1e20",
+        "name": "FUN_007a1e20",
+        "signature": "undefined FUN_007a1e20(void)"
+      },
+      "patch_bytes": "e9eec5860f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 34,
+      "name": "Ogre Resource Loader",
+      "category": "Ogre / resources",
+      "dest_va": "0x00664865",
+      "dest_slot_va": "0x1002AEC0",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000E950",
+      "payload_desc": "jmp5 -> _bzcp+0x0E950",
+      "call_va": "0x1000FFFF",
+      "original_bytes": "e9ebfeffff",
+      "instruction": {
+        "address": "00664865",
+        "text": "JMP 0x00664755",
+        "bytes": "e9ebfeffff",
+        "length": 5,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "00664865",
+            "text": "JMP 0x00664755",
+            "bytes": "e9ebfeffff",
+            "length": 5
+          },
+          {
+            "address": "0066486a",
+            "text": "MOV byte ptr [EBP + 0xfffffbc7],0x0",
+            "bytes": "c685c7fbffff00",
+            "length": 7
+          },
+          {
+            "address": "00664871",
+            "text": "MOV byte ptr [EBP + 0xfffffbbb],0x0",
+            "bytes": "c685bbfbffff00",
+            "length": 7
+          },
+          {
+            "address": "00664878",
+            "text": "MOV dword ptr [EBP + 0xfffffb98],0x3",
+            "bytes": "c78598fbffff03000000",
+            "length": 10
+          }
+        ]
+      },
+      "function": {
+        "entry": "00664110",
+        "name": "FUN_00664110",
+        "signature": "undefined FUN_00664110(void)"
+      },
+      "patch_bytes": "e9e6a09a0f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 35,
+      "name": "Map list icon draw coordinate adjustments",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x007A39DF",
+      "dest_slot_va": "0x1002AEC8",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000E9C0",
+      "payload_desc": "jmp5 -> _bzcp+0x0E9C0",
+      "call_va": "0x1001007C",
+      "original_bytes": "8b482c516a",
+      "instruction": {
+        "address": "007a39df",
+        "text": "MOV ECX,dword ptr [EAX + 0x2c]",
+        "bytes": "8b482c",
+        "length": 3,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "007a39df",
+            "text": "MOV ECX,dword ptr [EAX + 0x2c]",
+            "bytes": "8b482c",
+            "length": 3
+          },
+          {
+            "address": "007a39e2",
+            "text": "PUSH ECX",
+            "bytes": "51",
+            "length": 1
+          },
+          {
+            "address": "007a39e3",
+            "text": "PUSH 0x20",
+            "bytes": "6a20",
+            "length": 2
+          },
+          {
+            "address": "007a39e5",
+            "text": "PUSH ECX",
+            "bytes": "51",
+            "length": 1
+          }
+        ]
+      },
+      "function": {
+        "entry": "007a3160",
+        "name": "FUN_007a3160",
+        "signature": "undefined FUN_007a3160(void)"
+      },
+      "patch_bytes": "e9dcaf860f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    },
+    {
+      "index": 36,
+      "name": "Lobby map name for unknown map",
+      "category": "Map UI / filters / hop-fix",
+      "dest_va": "0x007A18F8",
+      "dest_slot_va": "0x1002AED4",
+      "length": 5,
+      "kind": "jmp5",
+      "payload_value": "0x1000EAF0",
+      "payload_desc": "jmp5 -> _bzcp+0x0EAF0",
+      "call_va": "0x1001010B",
+      "original_bytes": "8d8de4feff",
+      "instruction": {
+        "address": "007a18f8",
+        "text": "LEA ECX,[EBP + 0xfffffee4]",
+        "bytes": "8d8de4feffff",
+        "length": 6,
+        "field_offset": 0,
+        "preview": [
+          {
+            "address": "007a18f8",
+            "text": "LEA ECX,[EBP + 0xfffffee4]",
+            "bytes": "8d8de4feffff",
+            "length": 6
+          },
+          {
+            "address": "007a18fe",
+            "text": "PUSH ECX",
+            "bytes": "51",
+            "length": 1
+          },
+          {
+            "address": "007a18ff",
+            "text": "LEA ECX,[EBP + -0x28]",
+            "bytes": "8d4dd8",
+            "length": 3
+          },
+          {
+            "address": "007a1902",
+            "text": "CALL 0x00449810",
+            "bytes": "e8097fcaff",
+            "length": 5
+          }
+        ]
+      },
+      "function": {
+        "entry": "007a11e0",
+        "name": "FUN_007a11e0",
+        "signature": "undefined FUN_007a11e0(void)"
+      },
+      "patch_bytes": "e9f3d1860f",
+      "open_shim_status": "unmodeled",
+      "open_shim_note": "Clean-room shim does not currently model this original _bzcp.dll patch site."
+    }
+  ],
+  "dll_hook_stubs": [
+    {
+      "address": "0x1000A040",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000a040",
+          "text": "MOV EBP,ESP",
+          "bytes": "8bec",
+          "length": 2
+        },
+        {
+          "address": "1000a042",
+          "text": "MOV ECX,dword ptr DS:[0x945564]",
+          "bytes": "3e8b0d64559400",
+          "length": 7
+        },
+        {
+          "address": "1000a049",
+          "text": "MOV byte ptr [0x1002ab12],0x1",
+          "bytes": "c60512ab021001",
+          "length": 7
+        },
+        {
+          "address": "1000a050",
+          "text": "JMP dword ptr [0x1002ad8c]",
+          "bytes": "ff258cad0210",
+          "length": 6
+        },
+        {
+          "address": "1000a060",
+          "text": "MOV EBP,ESP",
+          "bytes": "8bec",
+          "length": 2
+        },
+        {
+          "address": "1000a062",
+          "text": "MOV ECX,dword ptr DS:[0x945564]",
+          "bytes": "3e8b0d64559400",
+          "length": 7
+        }
+      ],
+      "summary": "MOV EBP,ESP; MOV ECX,dword ptr DS:[0x945564]; MOV byte ptr [0x1002ab12],0x1",
+      "callouts": [],
+      "used_by_patches": [
+        4
+      ]
+    },
+    {
+      "address": "0x1000A060",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000a060",
+          "text": "MOV EBP,ESP",
+          "bytes": "8bec",
+          "length": 2
+        },
+        {
+          "address": "1000a062",
+          "text": "MOV ECX,dword ptr DS:[0x945564]",
+          "bytes": "3e8b0d64559400",
+          "length": 7
+        },
+        {
+          "address": "1000a069",
+          "text": "MOV byte ptr [0x1002ab12],0x0",
+          "bytes": "c60512ab021000",
+          "length": 7
+        },
+        {
+          "address": "1000a070",
+          "text": "JMP dword ptr [0x1002ad94]",
+          "bytes": "ff2594ad0210",
+          "length": 6
+        },
+        {
+          "address": "1000a080",
+          "text": "MOV ECX,dword ptr [0x1002ac34]",
+          "bytes": "8b0d34ac0210",
+          "length": 6
+        },
+        {
+          "address": "1000a086",
+          "text": "TEST ECX,ECX",
+          "bytes": "85c9",
+          "length": 2
+        }
+      ],
+      "summary": "MOV EBP,ESP; MOV ECX,dword ptr DS:[0x945564]; MOV byte ptr [0x1002ab12],0x0",
+      "callouts": [],
+      "used_by_patches": [
+        5
+      ]
+    },
+    {
+      "address": "0x1000A1E0",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000a1e0",
+          "text": "MOV EAX,dword ptr [EBP + 0x8]",
+          "bytes": "8b4508",
+          "length": 3
+        },
+        {
+          "address": "1000a1e3",
+          "text": "MOV dword ptr [EBP + -0x4],EAX",
+          "bytes": "8945fc",
+          "length": 3
+        },
+        {
+          "address": "1000a1e6",
+          "text": "MOV ECX,dword ptr [EBP + -0x4]",
+          "bytes": "8b4dfc",
+          "length": 3
+        },
+        {
+          "address": "1000a1e9",
+          "text": "CALL 0x1000a0c0",
+          "bytes": "e8d2feffff",
+          "length": 5
+        },
+        {
+          "address": "1000a1ee",
+          "text": "JMP dword ptr [0x1002ad10]",
+          "bytes": "ff2510ad0210",
+          "length": 6
+        },
+        {
+          "address": "1000a200",
+          "text": "PUSH EBP",
+          "bytes": "55",
+          "length": 1
+        }
+      ],
+      "summary": "MOV EAX,dword ptr [EBP + 0x8]; MOV dword ptr [EBP + -0x4],EAX; MOV ECX,dword ptr [EBP + -0x4]",
+      "callouts": [
+        "CALL 0x1000a0c0"
+      ],
+      "used_by_patches": [
+        1
+      ]
+    },
+    {
+      "address": "0x1000BF50",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000bf50",
+          "text": "MOV ECX,dword ptr [EBP + 0xfffffe3c]",
+          "bytes": "8b8d3cfeffff",
+          "length": 6
+        },
+        {
+          "address": "1000bf56",
+          "text": "MOV dword ptr [EBP + -0x4],ECX",
+          "bytes": "894dfc",
+          "length": 3
+        },
+        {
+          "address": "1000bf59",
+          "text": "MOV ECX,dword ptr [EBP + -0x4]",
+          "bytes": "8b4dfc",
+          "length": 3
+        },
+        {
+          "address": "1000bf5c",
+          "text": "CALL 0x1000acc0",
+          "bytes": "e85fedffff",
+          "length": 5
+        },
+        {
+          "address": "1000bf61",
+          "text": "JMP dword ptr [0x1002ad18]",
+          "bytes": "ff2518ad0210",
+          "length": 6
+        },
+        {
+          "address": "1000bf70",
+          "text": "PUSH EBP",
+          "bytes": "55",
+          "length": 1
+        }
+      ],
+      "summary": "MOV ECX,dword ptr [EBP + 0xfffffe3c]; MOV dword ptr [EBP + -0x4],ECX; MOV ECX,dword ptr [EBP + -0x4]",
+      "callouts": [
+        "CALL 0x1000acc0"
+      ],
+      "used_by_patches": [
+        2
+      ]
+    },
+    {
+      "address": "0x1000C9D0",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000c9d0",
+          "text": "MOV dword ptr [EBP + -0x8],ECX",
+          "bytes": "894df8",
+          "length": 3
+        },
+        {
+          "address": "1000c9d3",
+          "text": "MOV ECX,EBP",
+          "bytes": "8bcd",
+          "length": 2
+        },
+        {
+          "address": "1000c9d5",
+          "text": "ADD ECX,0x8",
+          "bytes": "83c108",
+          "length": 3
+        },
+        {
+          "address": "1000c9d8",
+          "text": "MOV dword ptr [EBP + -0x4],ECX",
+          "bytes": "894dfc",
+          "length": 3
+        },
+        {
+          "address": "1000c9db",
+          "text": "MOV EDX,dword ptr [EBP + -0x4]",
+          "bytes": "8b55fc",
+          "length": 3
+        },
+        {
+          "address": "1000c9de",
+          "text": "MOV ECX,dword ptr [EBP + -0x8]",
+          "bytes": "8b4df8",
+          "length": 3
+        }
+      ],
+      "summary": "MOV dword ptr [EBP + -0x8],ECX; MOV ECX,EBP; ADD ECX,0x8",
+      "callouts": [],
+      "used_by_patches": [
+        3
+      ]
+    },
+    {
+      "address": "0x1000C9F0",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000c9f0",
+          "text": "PUSH EDX",
+          "bytes": "52",
+          "length": 1
+        },
+        {
+          "address": "1000c9f1",
+          "text": "PUSH 0x20",
+          "bytes": "6a20",
+          "length": 2
+        },
+        {
+          "address": "1000c9f3",
+          "text": "PUSH 0x1000a0a0",
+          "bytes": "68a0a00010",
+          "length": 5
+        },
+        {
+          "address": "1000c9f8",
+          "text": "PUSH 0x1000a080",
+          "bytes": "6880a00010",
+          "length": 5
+        },
+        {
+          "address": "1000c9fd",
+          "text": "PUSH ECX",
+          "bytes": "51",
+          "length": 1
+        },
+        {
+          "address": "1000c9fe",
+          "text": "MOVSS XMM0,dword ptr [0x1002a1cc]",
+          "bytes": "f30f1005cca10210",
+          "length": 8
+        }
+      ],
+      "summary": "PUSH EDX; PUSH 0x20; PUSH 0x1000a0a0",
+      "callouts": [],
+      "used_by_patches": [
+        6
+      ]
+    },
+    {
+      "address": "0x1000CA60",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000ca60",
+          "text": "MOV byte ptr [0x1002ab11],0x1",
+          "bytes": "c60511ab021001",
+          "length": 7
+        },
+        {
+          "address": "1000ca67",
+          "text": "MOV EAX,dword ptr [EBP + -0x44]",
+          "bytes": "8b45bc",
+          "length": 3
+        },
+        {
+          "address": "1000ca6a",
+          "text": "MOV ECX,dword ptr [EAX + 0x17c]",
+          "bytes": "8b887c010000",
+          "length": 6
+        },
+        {
+          "address": "1000ca70",
+          "text": "JMP dword ptr [0x1002ad4c]",
+          "bytes": "ff254cad0210",
+          "length": 6
+        },
+        {
+          "address": "1000ca80",
+          "text": "MOVZX EAX,byte ptr [0x1002ab11]",
+          "bytes": "0fb60511ab0210",
+          "length": 7
+        },
+        {
+          "address": "1000ca87",
+          "text": "TEST EAX,EAX",
+          "bytes": "85c0",
+          "length": 2
+        }
+      ],
+      "summary": "MOV byte ptr [0x1002ab11],0x1; MOV EAX,dword ptr [EBP + -0x44]; MOV ECX,dword ptr [EAX + 0x17c]",
+      "callouts": [],
+      "used_by_patches": [
+        8
+      ]
+    },
+    {
+      "address": "0x1000CA80",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000ca80",
+          "text": "MOVZX EAX,byte ptr [0x1002ab11]",
+          "bytes": "0fb60511ab0210",
+          "length": 7
+        },
+        {
+          "address": "1000ca87",
+          "text": "TEST EAX,EAX",
+          "bytes": "85c0",
+          "length": 2
+        },
+        {
+          "address": "1000ca89",
+          "text": "JZ 0x1000caa3",
+          "bytes": "7418",
+          "length": 2
+        },
+        {
+          "address": "1000ca8b",
+          "text": "MOV byte ptr [0x1002ab11],0x0",
+          "bytes": "c60511ab021000",
+          "length": 7
+        },
+        {
+          "address": "1000ca92",
+          "text": "MOV EAX,dword ptr [EBP + -0x8]",
+          "bytes": "8b45f8",
+          "length": 3
+        },
+        {
+          "address": "1000ca95",
+          "text": "MOV ECX,dword ptr [EAX + 0x164]",
+          "bytes": "8b8864010000",
+          "length": 6
+        }
+      ],
+      "summary": "MOVZX EAX,byte ptr [0x1002ab11]; TEST EAX,EAX; JZ 0x1000caa3",
+      "callouts": [],
+      "used_by_patches": [
+        9
+      ]
+    },
+    {
+      "address": "0x1000CAD0",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000cad0",
+          "text": "PUSH EBP",
+          "bytes": "55",
+          "length": 1
+        },
+        {
+          "address": "1000cad1",
+          "text": "MOV EBP,ESP",
+          "bytes": "8bec",
+          "length": 2
+        },
+        {
+          "address": "1000cad3",
+          "text": "PUSH ECX",
+          "bytes": "51",
+          "length": 1
+        },
+        {
+          "address": "1000cad4",
+          "text": "MOV dword ptr [EBP + -0x4],ECX",
+          "bytes": "894dfc",
+          "length": 3
+        },
+        {
+          "address": "1000cad7",
+          "text": "MOV ECX,dword ptr [EBP + -0x4]",
+          "bytes": "8b4dfc",
+          "length": 3
+        },
+        {
+          "address": "1000cada",
+          "text": "ADD ECX,0x168",
+          "bytes": "81c168010000",
+          "length": 6
+        }
+      ],
+      "summary": "PUSH EBP; MOV EBP,ESP; PUSH ECX",
+      "callouts": [],
+      "used_by_patches": [
+        7
+      ]
+    },
+    {
+      "address": "0x1000CD10",
+      "note": "Hop-Fix 1 trampoline",
+      "instructions": [
+        {
+          "address": "1000cd10",
+          "text": "MOV EAX,dword ptr [EBP + -0x4]",
+          "bytes": "8b45fc",
+          "length": 3
+        },
+        {
+          "address": "1000cd13",
+          "text": "MOV dword ptr [EBP + -0x4],EAX",
+          "bytes": "8945fc",
+          "length": 3
+        },
+        {
+          "address": "1000cd16",
+          "text": "MOV ECX,dword ptr [EBP + -0x4]",
+          "bytes": "8b4dfc",
+          "length": 3
+        },
+        {
+          "address": "1000cd19",
+          "text": "CALL 0x1000caf0",
+          "bytes": "e8d2fdffff",
+          "length": 5
+        },
+        {
+          "address": "1000cd1e",
+          "text": "MOV EAX,dword ptr [EBP + -0x4]",
+          "bytes": "8b45fc",
+          "length": 3
+        },
+        {
+          "address": "1000cd21",
+          "text": "MOV ECX,dword ptr [EAX + 0x138]",
+          "bytes": "8b8838010000",
+          "length": 6
+        }
+      ],
+      "summary": "MOV EAX,dword ptr [EBP + -0x4]; MOV dword ptr [EBP + -0x4],EAX; MOV ECX,dword ptr [EBP + -0x4]",
+      "callouts": [
+        "CALL 0x1000caf0"
+      ],
+      "used_by_patches": [
+        10
+      ]
+    },
+    {
+      "address": "0x1000CD40",
+      "note": "Hop-Fix 2 trampoline",
+      "instructions": [
+        {
+          "address": "1000cd40",
+          "text": "MOV EAX,[0x1002ad84]",
+          "bytes": "a184ad0210",
+          "length": 5
+        },
+        {
+          "address": "1000cd45",
+          "text": "MOV ECX,dword ptr [EAX]",
+          "bytes": "8b08",
+          "length": 2
+        },
+        {
+          "address": "1000cd47",
+          "text": "CALL 0x1000cb40",
+          "bytes": "e8f4fdffff",
+          "length": 5
+        },
+        {
+          "address": "1000cd4c",
+          "text": "JMP dword ptr [0x1002ad04]",
+          "bytes": "ff2504ad0210",
+          "length": 6
+        },
+        {
+          "address": "1000cd60",
+          "text": "CALL EDX",
+          "bytes": "ffd2",
+          "length": 2
+        },
+        {
+          "address": "1000cd62",
+          "text": "MOV EAX,dword ptr [EBP + 0xffffff5c]",
+          "bytes": "8b855cffffff",
+          "length": 6
+        }
+      ],
+      "summary": "MOV EAX,[0x1002ad84]; MOV ECX,dword ptr [EAX]; CALL 0x1000cb40",
+      "callouts": [
+        "CALL 0x1000cb40",
+        "CALL EDX"
+      ],
+      "used_by_patches": [
+        11
+      ]
+    },
+    {
+      "address": "0x1000CD60",
+      "note": "Hop-Fix 3 trampoline",
+      "instructions": [
+        {
+          "address": "1000cd60",
+          "text": "CALL EDX",
+          "bytes": "ffd2",
+          "length": 2
+        },
+        {
+          "address": "1000cd62",
+          "text": "MOV EAX,dword ptr [EBP + 0xffffff5c]",
+          "bytes": "8b855cffffff",
+          "length": 6
+        },
+        {
+          "address": "1000cd68",
+          "text": "MOV dword ptr [EBP + -0x4],EAX",
+          "bytes": "8945fc",
+          "length": 3
+        },
+        {
+          "address": "1000cd6b",
+          "text": "MOV ECX,dword ptr [EBP + -0x4]",
+          "bytes": "8b4dfc",
+          "length": 3
+        },
+        {
+          "address": "1000cd6e",
+          "text": "CALL 0x1000cca0",
+          "bytes": "e82dffffff",
+          "length": 5
+        },
+        {
+          "address": "1000cd73",
+          "text": "PUSH 0x930",
+          "bytes": "6830090000",
+          "length": 5
+        }
+      ],
+      "summary": "CALL EDX; MOV EAX,dword ptr [EBP + 0xffffff5c]; MOV dword ptr [EBP + -0x4],EAX",
+      "callouts": [
+        "CALL EDX",
+        "CALL 0x1000cca0"
+      ],
+      "used_by_patches": [
+        12
+      ]
+    },
+    {
+      "address": "0x1000CE20",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000ce20",
+          "text": "MOV dword ptr [EBP + -0x4],ECX",
+          "bytes": "894dfc",
+          "length": 3
+        },
+        {
+          "address": "1000ce23",
+          "text": "MOV EAX,dword ptr [EBP + 0x8]",
+          "bytes": "8b4508",
+          "length": 3
+        },
+        {
+          "address": "1000ce26",
+          "text": "MOV dword ptr [EBP + -0x4],EAX",
+          "bytes": "8945fc",
+          "length": 3
+        },
+        {
+          "address": "1000ce29",
+          "text": "PUSH EAX",
+          "bytes": "50",
+          "length": 1
+        },
+        {
+          "address": "1000ce2a",
+          "text": "MOV ECX,dword ptr [EBP + -0x4]",
+          "bytes": "8b4dfc",
+          "length": 3
+        },
+        {
+          "address": "1000ce2d",
+          "text": "CALL 0x1000cd80",
+          "bytes": "e84effffff",
+          "length": 5
+        }
+      ],
+      "summary": "MOV dword ptr [EBP + -0x4],ECX; MOV EAX,dword ptr [EBP + 0x8]; MOV dword ptr [EBP + -0x4],EAX",
+      "callouts": [
+        "CALL 0x1000cd80"
+      ],
+      "used_by_patches": [
+        13
+      ]
+    },
+    {
+      "address": "0x1000CEF0",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000cef0",
+          "text": "MOV [0x1002af84],EAX",
+          "bytes": "a384af0210",
+          "length": 5
+        },
+        {
+          "address": "1000cef5",
+          "text": "MOV EDX,dword ptr [EBP + -0x4]",
+          "bytes": "8b55fc",
+          "length": 3
+        },
+        {
+          "address": "1000cef8",
+          "text": "MOV dword ptr [0x1002af88],EDX",
+          "bytes": "891588af0210",
+          "length": 6
+        },
+        {
+          "address": "1000cefe",
+          "text": "MOV EDX,dword ptr [EBP + -0x8]",
+          "bytes": "8b55f8",
+          "length": 3
+        },
+        {
+          "address": "1000cf01",
+          "text": "MOV ECX,dword ptr [EDX + 0x2c]",
+          "bytes": "8b4a2c",
+          "length": 3
+        },
+        {
+          "address": "1000cf04",
+          "text": "MOV dword ptr [0x1002af8c],ECX",
+          "bytes": "890d8caf0210",
+          "length": 6
+        }
+      ],
+      "summary": "MOV [0x1002af84],EAX; MOV EDX,dword ptr [EBP + -0x4]; MOV dword ptr [0x1002af88],EDX",
+      "callouts": [],
+      "used_by_patches": [
+        14
+      ]
+    },
+    {
+      "address": "0x1000D090",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000d090",
+          "text": "MOV ECX,dword ptr [0x1002adc4]",
+          "bytes": "8b0dc4ad0210",
+          "length": 6
+        },
+        {
+          "address": "1000d096",
+          "text": "MOV ECX,dword ptr [ECX]",
+          "bytes": "8b09",
+          "length": 2
+        },
+        {
+          "address": "1000d098",
+          "text": "CALL dword ptr [0x1002adc0]",
+          "bytes": "ff15c0ad0210",
+          "length": 6
+        },
+        {
+          "address": "1000d09e",
+          "text": "CALL 0x1000cf30",
+          "bytes": "e88dfeffff",
+          "length": 5
+        },
+        {
+          "address": "1000d0a3",
+          "text": "POP EBP",
+          "bytes": "5d",
+          "length": 1
+        },
+        {
+          "address": "1000d0a4",
+          "text": "RET",
+          "bytes": "c3",
+          "length": 1
+        }
+      ],
+      "summary": "MOV ECX,dword ptr [0x1002adc4]; MOV ECX,dword ptr [ECX]; CALL dword ptr [0x1002adc0]",
+      "callouts": [
+        "CALL dword ptr [0x1002adc0]",
+        "CALL 0x1000cf30"
+      ],
+      "used_by_patches": [
+        15,
+        16
+      ]
+    },
+    {
+      "address": "0x1000D0B0",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000d0b0",
+          "text": "MOV ECX,dword ptr [0x1002adc4]",
+          "bytes": "8b0dc4ad0210",
+          "length": 6
+        },
+        {
+          "address": "1000d0b6",
+          "text": "MOV ECX,dword ptr [ECX]",
+          "bytes": "8b09",
+          "length": 2
+        },
+        {
+          "address": "1000d0b8",
+          "text": "CALL dword ptr [0x1002adc0]",
+          "bytes": "ff15c0ad0210",
+          "length": 6
+        },
+        {
+          "address": "1000d0be",
+          "text": "CALL 0x1000cf30",
+          "bytes": "e86dfeffff",
+          "length": 5
+        },
+        {
+          "address": "1000d0c3",
+          "text": "MOV ESP,EBP",
+          "bytes": "8be5",
+          "length": 2
+        },
+        {
+          "address": "1000d0c5",
+          "text": "POP EBP",
+          "bytes": "5d",
+          "length": 1
+        }
+      ],
+      "summary": "MOV ECX,dword ptr [0x1002adc4]; MOV ECX,dword ptr [ECX]; CALL dword ptr [0x1002adc0]",
+      "callouts": [
+        "CALL dword ptr [0x1002adc0]",
+        "CALL 0x1000cf30"
+      ],
+      "used_by_patches": [
+        17
+      ]
+    },
+    {
+      "address": "0x1000D330",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000d330",
+          "text": "MOV dword ptr [0x1002ac30],ECX",
+          "bytes": "890d30ac0210",
+          "length": 6
+        },
+        {
+          "address": "1000d336",
+          "text": "JMP 0x1000d0d0",
+          "bytes": "e995fdffff",
+          "length": 5
+        },
+        {
+          "address": "1000d340",
+          "text": "PUSH EBP",
+          "bytes": "55",
+          "length": 1
+        },
+        {
+          "address": "1000d341",
+          "text": "MOV EBP,ESP",
+          "bytes": "8bec",
+          "length": 2
+        },
+        {
+          "address": "1000d343",
+          "text": "PUSH -0x1",
+          "bytes": "6aff",
+          "length": 2
+        },
+        {
+          "address": "1000d345",
+          "text": "PUSH 0x10021a45",
+          "bytes": "68451a0210",
+          "length": 5
+        }
+      ],
+      "summary": "MOV dword ptr [0x1002ac30],ECX; JMP 0x1000d0d0; PUSH EBP",
+      "callouts": [],
+      "used_by_patches": [
+        23
+      ]
+    },
+    {
+      "address": "0x1000D440",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000d440",
+          "text": "MOV dword ptr [0x1002af20],ECX",
+          "bytes": "890d20af0210",
+          "length": 6
+        },
+        {
+          "address": "1000d446",
+          "text": "MOV ECX,dword ptr [0x1002af20]",
+          "bytes": "8b0d20af0210",
+          "length": 6
+        },
+        {
+          "address": "1000d44c",
+          "text": "CALL 0x1000d340",
+          "bytes": "e8effeffff",
+          "length": 5
+        },
+        {
+          "address": "1000d451",
+          "text": "NOP",
+          "bytes": "90",
+          "length": 1
+        },
+        {
+          "address": "1000d452",
+          "text": "JMP dword ptr [0x1002adf8]",
+          "bytes": "ff25f8ad0210",
+          "length": 6
+        },
+        {
+          "address": "1000d460",
+          "text": "POP dword ptr [EBP + -0x4]",
+          "bytes": "8f45fc",
+          "length": 3
+        }
+      ],
+      "summary": "MOV dword ptr [0x1002af20],ECX; MOV ECX,dword ptr [0x1002af20]; CALL 0x1000d340",
+      "callouts": [
+        "CALL 0x1000d340"
+      ],
+      "used_by_patches": [
+        25
+      ]
+    },
+    {
+      "address": "0x1000D460",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000d460",
+          "text": "POP dword ptr [EBP + -0x4]",
+          "bytes": "8f45fc",
+          "length": 3
+        },
+        {
+          "address": "1000d463",
+          "text": "PUSH dword ptr [EBP + -0x4]",
+          "bytes": "ff75fc",
+          "length": 3
+        },
+        {
+          "address": "1000d466",
+          "text": "CALL dword ptr [0x1002adfc]",
+          "bytes": "ff15fcad0210",
+          "length": 6
+        },
+        {
+          "address": "1000d46c",
+          "text": "PUSH dword ptr [EBP + -0x4]",
+          "bytes": "ff75fc",
+          "length": 3
+        },
+        {
+          "address": "1000d46f",
+          "text": "CALL dword ptr [0x1002ae00]",
+          "bytes": "ff1500ae0210",
+          "length": 6
+        },
+        {
+          "address": "1000d475",
+          "text": "ADD ESP,0x4",
+          "bytes": "83c404",
+          "length": 3
+        }
+      ],
+      "summary": "POP dword ptr [EBP + -0x4]; PUSH dword ptr [EBP + -0x4]; CALL dword ptr [0x1002adfc]",
+      "callouts": [
+        "CALL dword ptr [0x1002adfc]",
+        "CALL dword ptr [0x1002ae00]"
+      ],
+      "used_by_patches": [
+        22
+      ]
+    },
+    {
+      "address": "0x1000D770",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000d770",
+          "text": "MOV EDX,dword ptr [EBP + 0xc]",
+          "bytes": "8b550c",
+          "length": 3
+        },
+        {
+          "address": "1000d773",
+          "text": "MOV dword ptr [0x1002af24],EDX",
+          "bytes": "891524af0210",
+          "length": 6
+        },
+        {
+          "address": "1000d779",
+          "text": "MOVZX EDX,byte ptr [EBP + 0x8]",
+          "bytes": "0fb65508",
+          "length": 4
+        },
+        {
+          "address": "1000d77d",
+          "text": "MOV word ptr [0x1002af28],DX",
+          "bytes": "66891528af0210",
+          "length": 7
+        },
+        {
+          "address": "1000d784",
+          "text": "MOV DX,word ptr [0x1002af28]",
+          "bytes": "668b1528af0210",
+          "length": 7
+        },
+        {
+          "address": "1000d78b",
+          "text": "MOV ECX,dword ptr [0x1002af24]",
+          "bytes": "8b0d24af0210",
+          "length": 6
+        }
+      ],
+      "summary": "MOV EDX,dword ptr [EBP + 0xc]; MOV dword ptr [0x1002af24],EDX; MOVZX EDX,byte ptr [EBP + 0x8]",
+      "callouts": [],
+      "used_by_patches": [
+        28
+      ]
+    },
+    {
+      "address": "0x1000D7B0",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000d7b0",
+          "text": "MOV byte ptr [EBP + -0x4],0xc",
+          "bytes": "c645fc0c",
+          "length": 4
+        },
+        {
+          "address": "1000d7b4",
+          "text": "LEA EAX,[EBP + 0xffffff00]",
+          "bytes": "8d8500ffffff",
+          "length": 6
+        },
+        {
+          "address": "1000d7ba",
+          "text": "PUSH EAX",
+          "bytes": "50",
+          "length": 1
+        },
+        {
+          "address": "1000d7bb",
+          "text": "LEA ECX,[EBP + 0xffffff48]",
+          "bytes": "8d8d48ffffff",
+          "length": 6
+        },
+        {
+          "address": "1000d7c1",
+          "text": "PUSH ECX",
+          "bytes": "51",
+          "length": 1
+        },
+        {
+          "address": "1000d7c2",
+          "text": "MOV EDX,dword ptr [EBP + 0xfffffd94]",
+          "bytes": "8b9594fdffff",
+          "length": 6
+        }
+      ],
+      "summary": "MOV byte ptr [EBP + -0x4],0xc; LEA EAX,[EBP + 0xffffff00]; PUSH EAX",
+      "callouts": [],
+      "used_by_patches": [
+        26
+      ]
+    },
+    {
+      "address": "0x1000D850",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000d850",
+          "text": "MOV byte ptr [EBP + -0x4],0x7",
+          "bytes": "c645fc07",
+          "length": 4
+        },
+        {
+          "address": "1000d854",
+          "text": "LEA ECX,[EBP + -0x40]",
+          "bytes": "8d4dc0",
+          "length": 3
+        },
+        {
+          "address": "1000d857",
+          "text": "PUSH ECX",
+          "bytes": "51",
+          "length": 1
+        },
+        {
+          "address": "1000d858",
+          "text": "LEA EDX,[EBP + 0xffffff60]",
+          "bytes": "8d9560ffffff",
+          "length": 6
+        },
+        {
+          "address": "1000d85e",
+          "text": "PUSH EDX",
+          "bytes": "52",
+          "length": 1
+        },
+        {
+          "address": "1000d85f",
+          "text": "MOV EAX,dword ptr [EBP + 0xffffff44]",
+          "bytes": "8b8544ffffff",
+          "length": 6
+        }
+      ],
+      "summary": "MOV byte ptr [EBP + -0x4],0x7; LEA ECX,[EBP + -0x40]; PUSH ECX",
+      "callouts": [],
+      "used_by_patches": [
+        27
+      ]
+    },
+    {
+      "address": "0x1000DD80",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000dd80",
+          "text": "MOV EAX,dword ptr [EBP + 0xc]",
+          "bytes": "8b450c",
+          "length": 3
+        },
+        {
+          "address": "1000dd83",
+          "text": "MOV [0x1002af34],EAX",
+          "bytes": "a334af0210",
+          "length": 5
+        },
+        {
+          "address": "1000dd88",
+          "text": "MOV dword ptr [0x1002af38],ECX",
+          "bytes": "890d38af0210",
+          "length": 6
+        },
+        {
+          "address": "1000dd8e",
+          "text": "CALL dword ptr [0x1002ae50]",
+          "bytes": "ff1550ae0210",
+          "length": 6
+        },
+        {
+          "address": "1000dd94",
+          "text": "MOV ECX,dword ptr [0x1002af34]",
+          "bytes": "8b0d34af0210",
+          "length": 6
+        },
+        {
+          "address": "1000dd9a",
+          "text": "CALL 0x1000d8f0",
+          "bytes": "e851fbffff",
+          "length": 5
+        }
+      ],
+      "summary": "MOV EAX,dword ptr [EBP + 0xc]; MOV [0x1002af34],EAX; MOV dword ptr [0x1002af38],ECX",
+      "callouts": [
+        "CALL dword ptr [0x1002ae50]",
+        "CALL 0x1000d8f0"
+      ],
+      "used_by_patches": [
+        31
+      ]
+    },
+    {
+      "address": "0x1000E110",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000e110",
+          "text": "MOVZX EAX,byte ptr [EBP + 0x20]",
+          "bytes": "0fb64520",
+          "length": 4
+        },
+        {
+          "address": "1000e114",
+          "text": "MOV [0x1002af58],EAX",
+          "bytes": "a358af0210",
+          "length": 5
+        },
+        {
+          "address": "1000e119",
+          "text": "MOV ECX,dword ptr [EBP + 0x8]",
+          "bytes": "8b4d08",
+          "length": 3
+        },
+        {
+          "address": "1000e11c",
+          "text": "MOV dword ptr [0x1002af4c],ECX",
+          "bytes": "890d4caf0210",
+          "length": 6
+        },
+        {
+          "address": "1000e122",
+          "text": "MOVSS XMM0,dword ptr [EBP + 0xc]",
+          "bytes": "f30f10450c",
+          "length": 5
+        },
+        {
+          "address": "1000e127",
+          "text": "MOVSS dword ptr [0x1002af50],XMM0",
+          "bytes": "f30f110550af0210",
+          "length": 8
+        }
+      ],
+      "summary": "MOVZX EAX,byte ptr [EBP + 0x20]; MOV [0x1002af58],EAX; MOV ECX,dword ptr [EBP + 0x8]",
+      "callouts": [],
+      "used_by_patches": [
+        29
+      ]
+    },
+    {
+      "address": "0x1000E360",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000e360",
+          "text": "MOV ECX,dword ptr [EBP + 0xffffff28]",
+          "bytes": "8b8d28ffffff",
+          "length": 6
+        },
+        {
+          "address": "1000e366",
+          "text": "MOV dword ptr [0x1002af5c],ECX",
+          "bytes": "890d5caf0210",
+          "length": 6
+        },
+        {
+          "address": "1000e36c",
+          "text": "MOV ECX,dword ptr [0x1002af5c]",
+          "bytes": "8b0d5caf0210",
+          "length": 6
+        },
+        {
+          "address": "1000e372",
+          "text": "CALL 0x1000e1f0",
+          "bytes": "e879feffff",
+          "length": 5
+        },
+        {
+          "address": "1000e377",
+          "text": "MOV byte ptr [EBP + -0x4],0xff",
+          "bytes": "c645fcff",
+          "length": 4
+        },
+        {
+          "address": "1000e37b",
+          "text": "JMP dword ptr [0x1002aea8]",
+          "bytes": "ff25a8ae0210",
+          "length": 6
+        }
+      ],
+      "summary": "MOV ECX,dword ptr [EBP + 0xffffff28]; MOV dword ptr [0x1002af5c],ECX; MOV ECX,dword ptr [0x1002af5c]",
+      "callouts": [
+        "CALL 0x1000e1f0"
+      ],
+      "used_by_patches": [
+        30
+      ]
+    },
+    {
+      "address": "0x1000E560",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000e560",
+          "text": "MOV [0x1002af60],EAX",
+          "bytes": "a360af0210",
+          "length": 5
+        },
+        {
+          "address": "1000e565",
+          "text": "MOV AL,byte ptr [EAX + 0x38]",
+          "bytes": "8a4038",
+          "length": 3
+        },
+        {
+          "address": "1000e568",
+          "text": "MOVZX ECX,AL",
+          "bytes": "0fb6c8",
+          "length": 3
+        },
+        {
+          "address": "1000e56b",
+          "text": "PUSH ECX",
+          "bytes": "51",
+          "length": 1
+        },
+        {
+          "address": "1000e56c",
+          "text": "LEA EDX,[EBP + -0x40]",
+          "bytes": "8d55c0",
+          "length": 3
+        },
+        {
+          "address": "1000e56f",
+          "text": "PUSH EDX",
+          "bytes": "52",
+          "length": 1
+        }
+      ],
+      "summary": "MOV [0x1002af60],EAX; MOV AL,byte ptr [EAX + 0x38]; MOVZX ECX,AL",
+      "callouts": [],
+      "used_by_patches": [
+        32
+      ]
+    },
+    {
+      "address": "0x1000E5A0",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000e5a0",
+          "text": "MOV EAX,EBP",
+          "bytes": "8bc5",
+          "length": 2
+        },
+        {
+          "address": "1000e5a2",
+          "text": "ADD EAX,0xffffff44",
+          "bytes": "0544ffffff",
+          "length": 5
+        },
+        {
+          "address": "1000e5a7",
+          "text": "ADD EAX,-0x38",
+          "bytes": "83c0c8",
+          "length": 3
+        },
+        {
+          "address": "1000e5aa",
+          "text": "MOV [0x1002af60],EAX",
+          "bytes": "a360af0210",
+          "length": 5
+        },
+        {
+          "address": "1000e5af",
+          "text": "CALL dword ptr [0x1002aeb4]",
+          "bytes": "ff15b4ae0210",
+          "length": 6
+        },
+        {
+          "address": "1000e5b5",
+          "text": "MOV ECX,dword ptr [0x1002af60]",
+          "bytes": "8b0d60af0210",
+          "length": 6
+        }
+      ],
+      "summary": "MOV EAX,EBP; ADD EAX,0xffffff44; ADD EAX,-0x38",
+      "callouts": [
+        "CALL dword ptr [0x1002aeb4]"
+      ],
+      "used_by_patches": [
+        33
+      ]
+    },
+    {
+      "address": "0x1000E950",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000e950",
+          "text": "CALL 0x1000e5d0",
+          "bytes": "e87bfcffff",
+          "length": 5
+        },
+        {
+          "address": "1000e955",
+          "text": "JMP dword ptr [0x1002aec4]",
+          "bytes": "ff25c4ae0210",
+          "length": 6
+        },
+        {
+          "address": "1000e960",
+          "text": "MOVSS XMM1,dword ptr [0x1002af68]",
+          "bytes": "f30f100d68af0210",
+          "length": 8
+        },
+        {
+          "address": "1000e968",
+          "text": "SUBSS XMM1,dword ptr [0x10025c1c]",
+          "bytes": "f30f5c0d1c5c0210",
+          "length": 8
+        },
+        {
+          "address": "1000e970",
+          "text": "MOVSS XMM0,dword ptr [0x10025c20]",
+          "bytes": "f30f1005205c0210",
+          "length": 8
+        },
+        {
+          "address": "1000e978",
+          "text": "COMISS XMM0,XMM1",
+          "bytes": "0f2fc1",
+          "length": 3
+        }
+      ],
+      "summary": "CALL 0x1000e5d0; JMP dword ptr [0x1002aec4]; MOVSS XMM1,dword ptr [0x1002af68]",
+      "callouts": [
+        "CALL 0x1000e5d0"
+      ],
+      "used_by_patches": [
+        34
+      ]
+    },
+    {
+      "address": "0x1000E9C0",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000e9c0",
+          "text": "MOVSS XMM0,dword ptr [EBP + 0xfffffde8]",
+          "bytes": "f30f1085e8fdffff",
+          "length": 8
+        },
+        {
+          "address": "1000e9c8",
+          "text": "MOVSS dword ptr [0x1002af68],XMM0",
+          "bytes": "f30f110568af0210",
+          "length": 8
+        },
+        {
+          "address": "1000e9d0",
+          "text": "MOVSS XMM0,dword ptr [EBP + 0xfffffe04]",
+          "bytes": "f30f108504feffff",
+          "length": 8
+        },
+        {
+          "address": "1000e9d8",
+          "text": "MOVSS dword ptr [0x1002af6c],XMM0",
+          "bytes": "f30f11056caf0210",
+          "length": 8
+        },
+        {
+          "address": "1000e9e0",
+          "text": "MOVSS XMM0,dword ptr [EBP + 0xfffffdfc]",
+          "bytes": "f30f1085fcfdffff",
+          "length": 8
+        },
+        {
+          "address": "1000e9e8",
+          "text": "MOVSS dword ptr [0x1002af70],XMM0",
+          "bytes": "f30f110570af0210",
+          "length": 8
+        }
+      ],
+      "summary": "MOVSS XMM0,dword ptr [EBP + 0xfffffde8]; MOVSS dword ptr [0x1002af68],XMM0; MOVSS XMM0,dword ptr [EBP + 0xfffffe04]",
+      "callouts": [],
+      "used_by_patches": [
+        35
+      ]
+    },
+    {
+      "address": "0x1000EAF0",
+      "note": null,
+      "instructions": [
+        {
+          "address": "1000eaf0",
+          "text": "LEA EAX,[EBP + -0x28]",
+          "bytes": "8d45d8",
+          "length": 3
+        },
+        {
+          "address": "1000eaf3",
+          "text": "MOV [0x1002ac28],EAX",
+          "bytes": "a328ac0210",
+          "length": 5
+        },
+        {
+          "address": "1000eaf8",
+          "text": "LEA EAX,[EBP + 0xfffffec4]",
+          "bytes": "8d85c4feffff",
+          "length": 6
+        },
+        {
+          "address": "1000eafe",
+          "text": "MOV [0x1002ac24],EAX",
+          "bytes": "a324ac0210",
+          "length": 5
+        },
+        {
+          "address": "1000eb03",
+          "text": "MOV EAX,dword ptr [EBP + 0xfffffebc]",
+          "bytes": "8b85bcfeffff",
+          "length": 6
+        },
+        {
+          "address": "1000eb09",
+          "text": "MOV [0x1002ac20],EAX",
+          "bytes": "a320ac0210",
+          "length": 5
+        }
+      ],
+      "summary": "LEA EAX,[EBP + -0x28]; MOV [0x1002ac28],EAX; LEA EAX,[EBP + 0xfffffec4]",
+      "callouts": [],
+      "used_by_patches": [
+        36
+      ]
+    }
+  ]
+}
