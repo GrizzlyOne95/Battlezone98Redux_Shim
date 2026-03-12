@@ -21,6 +21,9 @@ namespace BZROpenShim
     void __cdecl BanButtonOnHoverHost(void* param);
     void __cdecl BanButtonOnHoverClient(void* param);
 
+    // Custom /help + /ban command intercept.
+    bool __cdecl HandleCommandHelpBan(uint16_t id, const char* cmd);
+
     // Shared state for trampolines.
     extern void* g_VehicleListContext;
     extern void* g_VehicleListParam;
