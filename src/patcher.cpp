@@ -20,15 +20,18 @@
 #include "scroll_helper.h"
 #include "trampolines.h"
 #include "netcode_hooks.h"
+#include "bzr_hooks.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
 #include <vector>
 
 namespace BZROpenShim
 {
+    static const char kOpenShimVersionTag[] = "2.2.301 + OpenShim";
     // -----------------------------------------------------------------------
     // Internal log helper.
     // CRT's per-FILE lock handles thread safety for individual fwprintf calls.
@@ -183,23 +186,157 @@ namespace BZROpenShim
 
     static bool BytesMatchAt(uint32_t address, const uint8_t* expected, size_t len)
     {
-        uint8_t buf[16] = {};
-        if (len > sizeof(buf))
+        if (!expected || len == 0)
             return false;
 
+        std::vector<uint8_t> buf(len);
         SIZE_T read = 0;
         if (!ReadProcessMemory(GetCurrentProcess(),
                                reinterpret_cast<LPCVOID>(address),
-                               buf, len, &read) ||
+                               buf.data(), len, &read) ||
             read != len)
             return false;
 
-        for (size_t i = 0; i < len; ++i)
+        return memcmp(buf.data(), expected, len) == 0;
+    }
+
+    static bool ReadFileAt(HANDLE hFile, uint32_t offset, void* dst, uint32_t len)
+    {
+        if (SetFilePointer(hFile, offset, nullptr, FILE_BEGIN) == INVALID_SET_FILE_POINTER &&
+            GetLastError() != NO_ERROR)
+            return false;
+
+        DWORD read = 0;
+        return ReadFile(hFile, dst, len, &read, nullptr) && read == len;
+    }
+
+    // -----------------------------------------------------------------------
+    // Read the 256-byte signature block from the on-disk BZR.exe.
+    // This is used to wait until SteamStub has decrypted .text in memory.
+    // -----------------------------------------------------------------------
+    static bool ReadExeSignature(std::vector<uint8_t>& outSig)
+    {
+        outSig.clear();
+
+        char path[MAX_PATH] = {};
+        if (!GetModuleFileNameA(nullptr, path, MAX_PATH))
         {
-            if (buf[i] != expected[i])
-                return false;
+            Log(L"[WARN] GetModuleFileNameA failed for exe (err=%lu)\n", GetLastError());
+            return false;
         }
+
+        HANDLE hFile = CreateFileA(path, GENERIC_READ,
+                                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                   nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (hFile == INVALID_HANDLE_VALUE)
+        {
+            Log(L"[WARN] Failed to open exe for signature read (err=%lu)\n", GetLastError());
+            return false;
+        }
+
+        IMAGE_DOS_HEADER dos = {};
+        if (!ReadFileAt(hFile, 0, &dos, sizeof(dos)) || dos.e_magic != IMAGE_DOS_SIGNATURE)
+        {
+            Log(L"[WARN] Invalid DOS header when reading signature\n");
+            CloseHandle(hFile);
+            return false;
+        }
+
+        IMAGE_NT_HEADERS32 nt = {};
+        if (!ReadFileAt(hFile, static_cast<uint32_t>(dos.e_lfanew), &nt, sizeof(nt)) ||
+            nt.Signature != IMAGE_NT_SIGNATURE)
+        {
+            Log(L"[WARN] Invalid NT headers when reading signature\n");
+            CloseHandle(hFile);
+            return false;
+        }
+
+        if (nt.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC)
+        {
+            Log(L"[WARN] Unexpected optional header magic (0x%04X)\n", nt.OptionalHeader.Magic);
+            CloseHandle(hFile);
+            return false;
+        }
+
+        const uint32_t imageBase = static_cast<uint32_t>(nt.OptionalHeader.ImageBase);
+        if (BZR_SIGNATURE_ADDR < imageBase)
+        {
+            Log(L"[WARN] Signature VA 0x%08X is below image base 0x%08X\n",
+                BZR_SIGNATURE_ADDR, imageBase);
+            CloseHandle(hFile);
+            return false;
+        }
+
+        const uint32_t sigRva = BZR_SIGNATURE_ADDR - imageBase;
+        const uint32_t sigLen = 256;
+
+        const uint32_t sectionTableOffset =
+            static_cast<uint32_t>(dos.e_lfanew) + sizeof(uint32_t) +
+            sizeof(IMAGE_FILE_HEADER) + nt.FileHeader.SizeOfOptionalHeader;
+
+        std::vector<IMAGE_SECTION_HEADER> sections(nt.FileHeader.NumberOfSections);
+        if (!ReadFileAt(hFile, sectionTableOffset,
+                        sections.data(),
+                        static_cast<uint32_t>(sections.size() * sizeof(IMAGE_SECTION_HEADER))))
+        {
+            Log(L"[WARN] Failed to read section headers for signature\n");
+            CloseHandle(hFile);
+            return false;
+        }
+
+        uint32_t sigRaw = 0;
+        bool found = false;
+        for (const auto& s : sections)
+        {
+            const uint32_t va = s.VirtualAddress;
+            const uint32_t vsz = std::max(s.Misc.VirtualSize, s.SizeOfRawData);
+            if (sigRva >= va && (sigRva + sigLen) <= (va + vsz))
+            {
+                sigRaw = s.PointerToRawData + (sigRva - va);
+                found = true;
+                break;
+            }
+        }
+
+        if (!found)
+        {
+            Log(L"[WARN] Signature RVA 0x%08X not found in any section\n", sigRva);
+            CloseHandle(hFile);
+            return false;
+        }
+
+        outSig.resize(sigLen);
+        if (!ReadFileAt(hFile, sigRaw, outSig.data(), sigLen))
+        {
+            Log(L"[WARN] Failed to read signature bytes from exe\n");
+            outSig.clear();
+            CloseHandle(hFile);
+            return false;
+        }
+
+        CloseHandle(hFile);
+        Log(L"[INFO] Loaded signature bytes from disk (VA=0x%08X)\n", BZR_SIGNATURE_ADDR);
         return true;
+    }
+
+    static bool WaitForSignature(const std::vector<uint8_t>& sig)
+    {
+        if (sig.empty())
+            return true; // best-effort: skip gating if we couldn't load signature
+
+        Log(L"[INFO] Waiting for signature at 0x%08X...\n", BZR_SIGNATURE_ADDR);
+        for (int attempt = 0; attempt < PATCH_MAX_RETRIES; ++attempt)
+        {
+            if (BytesMatchAt(BZR_SIGNATURE_ADDR, sig.data(), sig.size()))
+            {
+                Log(L"[OK]   Signature matched after %d attempts\n", attempt + 1);
+                return true;
+            }
+            Sleep(PATCH_RETRY_DELAY_MS);
+        }
+
+        Log(L"[FAIL] Signature never matched after %d attempts\n", PATCH_MAX_RETRIES);
+        return false;
     }
 
     // -----------------------------------------------------------------------
@@ -234,7 +371,7 @@ namespace BZROpenShim
     // Resolve internal BZR.exe pointers for trampolines/helpers.
     // Now uses dynamic addresses found by pattern scanning.
     // -----------------------------------------------------------------------
-    static void ResolvePointers(uint32_t hopFix1Addr, uint32_t hopFix2Addr, uint32_t hopFix3Addr, uint32_t probeMapSortingAddr, uint32_t probeMapFilter1Addr, uint32_t versionNoticeAddr, uint32_t probeMapListFix1Addr, uint32_t probeMapListFix2Addr)
+    static void ResolvePointers(uint32_t hopFix1Addr, uint32_t hopFix2Addr, uint32_t hopFix3Addr, uint32_t probeMapSortingAddr, uint32_t probeMapFilter1Addr, uint32_t probeMapListFix1Addr, uint32_t probeMapListFix2Addr)
     {
         Log(L"=========== RESOLVING POINTERS ===========\n");
 
@@ -281,6 +418,11 @@ namespace BZROpenShim
             g_RetAddr_HopFix3 = reinterpret_cast<void*>(hopFix3Addr + 0x07);
             Log(L"[PTR] Hop-Fix 3 return: 0x%08X\n", hopFix3Addr + 0x07);
         }
+        if (g_EnableScrollRestore && !g_BZRFnPtr_HopFix3Step)
+        {
+            g_BZRFnPtr_HopFix3Step = reinterpret_cast<void (*)()>(0x007A3130);
+            Log(L"[PTR] Hop-Fix 3 step function fallback: 0x%08X\n", 0x007A3130);
+        }
 
         if (probeMapSortingAddr) {
             g_RetAddr_Probe_MapSorting = reinterpret_cast<void*>(probeMapSortingAddr + 0x07);
@@ -300,10 +442,21 @@ namespace BZROpenShim
             Log(L"[PTR] Probe MapListFix2 return: 0x%08X\n", probeMapListFix2Addr + 0x05);
         }
 
-        if (versionNoticeAddr) {
-            g_RetAddr_VersionNotice = reinterpret_cast<void*>(versionNoticeAddr + 0x05);
-            Log(L"[PTR] Version Notice return: 0x%08X\n", versionNoticeAddr + 0x05);
-        }
+        // Vehicle list mod fix returns.
+        g_RetAddr_VehicleListModFix1 = reinterpret_cast<void*>(0x00766C52);
+        g_RetAddr_VehicleListModFix4 = reinterpret_cast<void*>(0x00798BE6);
+        Log(L"[PTR] Vehicle ModFix1 return: 0x%08X\n", 0x00766C52);
+        Log(L"[PTR] Vehicle ModFix4 return: 0x%08X\n", 0x00798BE6);
+
+        // Lobby/BZRNET + ban button returns.
+        g_RetAddr_BzrnetHost   = reinterpret_cast<void*>(0x00743C30);
+        g_RetAddr_BzrnetClient = reinterpret_cast<void*>(0x0073E748);
+        g_RetAddr_BanHook1     = reinterpret_cast<void*>(0x007D0A35);
+        g_RetAddr_BanHook2     = reinterpret_cast<void*>(0x007A691A);
+        Log(L"[PTR] BZRNET Host return: 0x%08X\n", 0x00743C30);
+        Log(L"[PTR] BZRNET Client return: 0x%08X\n", 0x0073E748);
+        Log(L"[PTR] Ban Hook1 return: 0x%08X\n", 0x007D0A35);
+        Log(L"[PTR] Ban Hook2 return: 0x%08X\n", 0x007A691A);
 
         // Scroll Helpers — DISABLED: these are GOG-specific addresses that
         // hang on Steam.  Leaving them nullptr safely skips scroll restoration
@@ -489,18 +642,73 @@ namespace BZROpenShim
         {
             if (p.verified) continue;
 
-            if (strcmp(p.name, "Version Notice OpenShim") == 0)
-            {
-                p.bzr_address = 0x0062480B;
-                p.verified = true;
-                p.expected_original = { 0x68, 0x3C, 0xD5, 0x88, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Map Jump Fix Branch Override") == 0)
+            if (strcmp(p.name, "Map Jump Fix Branch Override") == 0)
             {
                 p.bzr_address = 0x007AA5A1;
                 p.verified = true;
                 p.expected_original = { 0x75 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Version Notice 1/2 OpenShim") == 0)
+            {
+                p.bzr_address = 0x0078DD4E;
+                p.verified = true;
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Version Notice 2/2 OpenShim") == 0)
+            {
+                p.bzr_address = 0x00618C2F;
+                p.verified = true;
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)") == 0)
+            {
+                p.bzr_address = 0x00766C4A;
+                p.verified = true;
+                p.expected_original = { 0xE8, 0xA1, 0xAE, 0xD1, 0xFF };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Vehicle List Mod Fix 2/4 (Force Mod-Scoped Assets 2/3)") == 0)
+            {
+                // rel32 operand for CALL at 0x0079A4F3
+                p.bzr_address = 0x0079A4F4;
+                p.verified = true;
+                p.expected_original = { 0x68, 0x99, 0x00, 0x00 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)") == 0)
+            {
+                p.bzr_address = 0x00798BD9;
+                p.verified = true;
+                p.expected_original = { 0x51, 0xE8, 0xA1, 0xBB, 0xFC };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "BZCP BZRNET Integration HOST") == 0)
+            {
+                p.bzr_address = 0x00743C05;
+                p.verified = true;
+                p.expected_original = { 0x8D, 0x85, 0x00, 0xFF, 0xFF };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "BZCP BZRNET Integration CLIENT") == 0)
+            {
+                p.bzr_address = 0x0073E71C;
+                p.verified = true;
+                p.expected_original = { 0xC6, 0x45, 0xFC, 0x07, 0x8D };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Ban Button Hook 1/2") == 0)
+            {
+                p.bzr_address = 0x007D0A2F;
+                p.verified = true;
+                p.expected_original = { 0x0F, 0xB6, 0x45, 0x20, 0x85 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Ban Button Hook 2/2") == 0)
+            {
+                p.bzr_address = 0x007A6913;
+                p.verified = true;
+                p.expected_original = { 0xC7, 0x45, 0xFC, 0xFF, 0xFF };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
             else
@@ -522,7 +730,12 @@ namespace BZROpenShim
             { "Probe Refresh Path MapFilter1",                 (void*)Trampoline_Probe_MapFilter1 },
             { "Probe MapListFix1",                              (void*)Trampoline_Probe_MapListFix1 },
             { "Probe MapListFix2",                              (void*)Trampoline_Probe_MapListFix2 },
-            { "Version Notice OpenShim",                       (void*)Trampoline_VersionNotice },
+            { "Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)", (void*)Trampoline_VehicleListModFix1 },
+            { "Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)", (void*)Trampoline_VehicleListModFix4 },
+            { "BZCP BZRNET Integration HOST",                   (void*)Trampoline_BzrnetHost },
+            { "BZCP BZRNET Integration CLIENT",                 (void*)Trampoline_BzrnetClient },
+            { "Ban Button Hook 1/2",                            (void*)Trampoline_BanButtonHook1 },
+            { "Ban Button Hook 2/2",                            (void*)Trampoline_BanButtonHook2 },
         };
 
         for (auto& p : patches)
@@ -538,6 +751,43 @@ namespace BZROpenShim
                     p.payload = MakeJmpPatch(p.bzr_address, targetVal, 5);
                     break;
                 }
+            }
+        }
+    }
+
+    static void FillRel32Payloads(std::vector<PatchDef>& patches)
+    {
+        for (auto& p : patches)
+        {
+            if (p.type != PatchType::REL32) continue;
+            if (!p.verified) continue;
+            if (strcmp(p.name, "Vehicle List Mod Fix 2/4 (Force Mod-Scoped Assets 2/3)") == 0)
+            {
+                // Patch address points at the rel32 operand (CALL +1).
+                uint32_t instrAddr = p.bzr_address - 1;
+                uint32_t target = static_cast<uint32_t>(
+                    reinterpret_cast<uintptr_t>(VehicleListModFix2));
+                int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(instrAddr + 5);
+                p.payload.resize(4);
+                memcpy(p.payload.data(), &rel, sizeof(rel));
+            }
+        }
+    }
+
+    static void FillVersionNoticePayloads(std::vector<PatchDef>& patches)
+    {
+        const uint32_t tagPtr = static_cast<uint32_t>(
+            reinterpret_cast<uintptr_t>(kOpenShimVersionTag));
+        uint8_t tagBytes[4] = {};
+        memcpy(tagBytes, &tagPtr, sizeof(tagBytes));
+
+        for (auto& p : patches)
+        {
+            if (p.type != PatchType::DWORD) continue;
+            if (strcmp(p.name, "Version Notice 1/2 OpenShim") == 0 ||
+                strcmp(p.name, "Version Notice 2/2 OpenShim") == 0)
+            {
+                p.payload.assign(tagBytes, tagBytes + sizeof(tagBytes));
             }
         }
     }
@@ -567,6 +817,133 @@ namespace BZROpenShim
 
         // 2. Check BZR.exe version
         uint32_t gameVer = GetBZRVersion();
+        Log(L"[INFO] Detected BZR version: %u (expected %u)\n", gameVer, BZR_EXPECTED_VERSION);
+        if (gameVer != BZR_EXPECTED_VERSION)
+        {
+            Log(L"[FAIL] Version mismatch; aborting patcher\n");
+            return;
+        }
+
+        // 3. Wait for signature (SteamStub decrypt gate)
+        std::vector<uint8_t> signature;
+        if (!ReadExeSignature(signature))
+            Log(L"[WARN] Signature read failed; proceeding without gate\n");
+        else if (!WaitForSignature(signature))
+            return;
+
+        // 4. Build patch list and resolve dynamic addresses
+        auto patches = BuildPatchList();
+        ScanForPatchAddresses(patches);
+
+        auto findAddr = [&patches](const char* name) -> uint32_t
+        {
+            for (const auto& p : patches)
+            {
+                if (strcmp(p.name, name) == 0)
+                    return p.bzr_address;
+            }
+            return 0;
+        };
+
+        ResolvePointers(
+            findAddr("Map List Rewrite for Hop-Fix 1/3"),
+            findAddr("Map List Rewrite for Hop-Fix 2/3"),
+            findAddr("Map List Rewrite for Hop-Fix 3/3"),
+            findAddr("Probe Refresh Path MapSorting"),
+            findAddr("Probe Refresh Path MapFilter1"),
+            findAddr("Probe MapListFix1"),
+            findAddr("Probe MapListFix2"));
+
+        ResolveBzrHooks();
+        InitBzrHookStrings();
+
+        FillJmp5Payloads(patches);
+        FillVersionNoticePayloads(patches);
+        FillRel32Payloads(patches);
+
+        // 5. Apply patches
+        int applied = 0;
+        int skipped = 0;
+        int failed  = 0;
+
+        for (const auto& p : patches)
+        {
+            int result = 0;
+            switch (p.type)
+            {
+            case PatchType::JMP5:
+                if (p.payload.size() != 5)
+                {
+                    Log(L"[SKIP] %hs (jmp payload missing)\n", p.name);
+                    result = 0;
+                }
+                else
+                {
+                    result = ApplyPatch(p.bzr_address, p.payload.data(), p.payload.size(),
+                                        p.name, p.expected_original);
+                }
+                break;
+            case PatchType::DWORD:
+                if (p.payload.size() < 4)
+                {
+                    Log(L"[SKIP] %hs (DWORD payload missing)\n", p.name);
+                    result = 0;
+                }
+                else
+                {
+                    result = ApplyPatch(p.bzr_address, p.payload.data(), 4,
+                                        p.name, p.expected_original);
+                }
+                break;
+            case PatchType::REL32:
+                if (p.payload.size() < 4)
+                {
+                    Log(L"[SKIP] %hs (REL32 payload missing)\n", p.name);
+                    result = 0;
+                }
+                else
+                {
+                    result = ApplyPatch(p.bzr_address, p.payload.data(), 4,
+                                        p.name, p.expected_original);
+                }
+                break;
+            case PatchType::BYTE1:
+                if (p.payload.empty())
+                {
+                    Log(L"[SKIP] %hs (BYTE payload missing)\n", p.name);
+                    result = 0;
+                }
+                else
+                {
+                    result = ApplyPatch(p.bzr_address, p.payload.data(), 1,
+                                        p.name, p.expected_original);
+                }
+                break;
+            case PatchType::BYTES:
+                if (p.payload.empty())
+                {
+                    Log(L"[SKIP] %hs (BYTES payload missing)\n", p.name);
+                    result = 0;
+                }
+                else
+                {
+                    result = ApplyPatch(p.bzr_address, p.payload.data(), p.payload.size(),
+                                        p.name, p.expected_original);
+                }
+                break;
+            default:
+                Log(L"[SKIP] %hs (unknown patch type)\n", p.name);
+                result = 0;
+                break;
+            }
+
+            if (result > 0) ++applied;
+            else if (result < 0) ++failed;
+            else ++skipped;
+        }
+
+        Log(L"[DONE] Applied=%d Skipped=%d Failed=%d\n", applied, skipped, failed);
+
         // Keep the log file open for runtime hook telemetry (LogHit in trampolines).
         // Closing here leaves g_Log dangling while hooks are still active.
     }

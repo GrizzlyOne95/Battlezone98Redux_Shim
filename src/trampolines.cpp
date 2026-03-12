@@ -11,6 +11,7 @@
 #include "trampolines.h"
 #include "patches.h"
 #include "scroll_helper.h"
+#include "bzr_hooks.h"
 
 // We compile this as 32-bit (/arch:IA32) -- same as BZR.exe
 
@@ -286,6 +287,241 @@ void __declspec(naked) __cdecl Trampoline_VersionNotice()
 
         push offset kVersionTag
         jmp  [g_RetAddr_VersionNotice]
+    }
+}
+
+// -----------------------------------------------------------------------
+// Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)
+// Site: 0x00766C4A (CALL 0x00481AF0)
+// Stub mirrors _bzcp.dll: call 0x481EA0, then original 0x481AF0, then jump
+// to return address after the original stack cleanup.
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_VehicleListModFix1()
+{
+    static const char* name = "Trampoline_VehicleListModFix1";
+    __asm
+    {
+        pushfd
+        pushad
+        push name
+        call LogHit
+        add  esp, 4
+        popad
+        popfd
+
+        pop  dword ptr [ebp - 4]
+        push dword ptr [ebp - 4]
+        call dword ptr [g_BzrFn_VehicleFixPre]
+        push dword ptr [ebp - 4]
+        call dword ptr [g_BzrFn_VehicleFixOrig]
+        add  esp, 4
+        jmp  [g_RetAddr_VehicleListModFix1]
+    }
+}
+
+// -----------------------------------------------------------------------
+// Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)
+// Site: 0x00798BD9 (PUSH ECX)
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_VehicleListModFix4()
+{
+    static const char* name = "Trampoline_VehicleListModFix4";
+    __asm
+    {
+        pushfd
+        pushad
+        push name
+        call LogHit
+        add  esp, 4
+        popad
+        popfd
+
+        mov  [g_VehicleListParam], ecx
+        call VehicleListModFix4Helper
+        jmp  [g_RetAddr_VehicleListModFix4]
+    }
+}
+
+// -----------------------------------------------------------------------
+// BZRNET Integration Host
+// Site: 0x00743C05
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_BzrnetHost()
+{
+    static const char* name = "Trampoline_BzrnetHost";
+    __asm
+    {
+        pushfd
+        pushad
+        push name
+        call LogHit
+        add  esp, 4
+        popad
+        popfd
+
+        mov  byte ptr [ebp - 4], 0x0C
+        lea  eax, [ebp - 0x100]
+        push eax
+        lea  ecx, [ebp - 0xB8]
+        push ecx
+        mov  edx, [ebp - 0x26C]
+        mov  [g_BzrnetHostObj], edx
+        add  edx, 0x28
+        push edx
+        mov  eax, [ebp - 0x26C]
+        mov  edx, [eax]
+        mov  ecx, [ebp - 0x26C]
+        mov  eax, [edx + 0x1C]
+        call eax
+
+        cmp  dword ptr [g_BzrnetHostObj], 0
+        je   host_done
+        mov  eax, [g_BzrnetHostObj]
+        mov  ecx, [eax]
+        mov  edx, [ecx + 0x1C]
+        mov  [ebp - 4], edx
+        push offset g_BzrnetLabel2
+        push offset g_BzrnetLabel1
+        mov  eax, [g_BzrnetHostObj]
+        add  eax, 0x28
+        push eax
+        mov  ecx, [g_BzrnetHostObj]
+        call dword ptr [ebp - 4]
+
+        mov  ecx, [g_BzrnetHostObj]
+        mov  edx, [ecx]
+        mov  eax, [edx + 0x1C]
+        mov  [ebp - 8], eax
+        push offset g_BzrnetLabel4
+        push offset g_BzrnetLabel3
+        mov  ecx, [g_BzrnetHostObj]
+        add  ecx, 0x28
+        push ecx
+        mov  ecx, [g_BzrnetHostObj]
+        call dword ptr [ebp - 8]
+    host_done:
+        jmp  [g_RetAddr_BzrnetHost]
+    }
+}
+
+// -----------------------------------------------------------------------
+// BZRNET Integration Client
+// Site: 0x0073E71C
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_BzrnetClient()
+{
+    static const char* name = "Trampoline_BzrnetClient";
+    __asm
+    {
+        pushfd
+        pushad
+        push name
+        call LogHit
+        add  esp, 4
+        popad
+        popfd
+
+        mov  byte ptr [ebp - 4], 0x07
+        lea  ecx, [ebp - 0x40]
+        push ecx
+        lea  edx, [ebp - 0xA0]
+        push edx
+        mov  eax, [ebp - 0xBC]
+        mov  [g_BzrnetClientObj], eax
+        add  eax, 0x28
+        push eax
+        mov  ecx, [ebp - 0xBC]
+        mov  edx, [ecx]
+        mov  ecx, [ebp - 0xBC]
+        mov  eax, [edx + 0x1C]
+        call eax
+
+        cmp  dword ptr [g_BzrnetClientObj], 0
+        je   client_done
+        mov  eax, [g_BzrnetClientObj]
+        mov  ecx, [eax]
+        mov  edx, [ecx + 0x1C]
+        mov  [ebp - 4], edx
+        push offset g_BzrnetLabel2
+        push offset g_BzrnetLabel1
+        mov  eax, [g_BzrnetClientObj]
+        add  eax, 0x28
+        push eax
+        mov  ecx, [g_BzrnetClientObj]
+        call dword ptr [ebp - 4]
+
+        mov  ecx, [g_BzrnetClientObj]
+        mov  edx, [ecx]
+        mov  eax, [edx + 0x1C]
+        mov  [ebp - 8], eax
+        push offset g_BzrnetLabel4
+        push offset g_BzrnetLabel3
+        mov  ecx, [g_BzrnetClientObj]
+        add  ecx, 0x28
+        push ecx
+        mov  ecx, [g_BzrnetClientObj]
+        call dword ptr [ebp - 8]
+    client_done:
+        jmp  [g_RetAddr_BzrnetClient]
+    }
+}
+
+// -----------------------------------------------------------------------
+// Ban Button Hook 1/2
+// Site: 0x007D0A2F
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_BanButtonHook1()
+{
+    static const char* name = "Trampoline_BanButtonHook1";
+    __asm
+    {
+        pushfd
+        pushad
+        push name
+        call LogHit
+        add  esp, 4
+        popad
+        popfd
+
+        movzx eax, byte ptr [ebp + 0x20]
+        mov  [g_BanFlag], eax
+        mov  ecx, [ebp + 8]
+        mov  [g_BanParentHost], ecx
+        movss xmm0, [ebp + 0x0C]
+        movss [g_BanX], xmm0
+        movss xmm0, [ebp + 0x10]
+        movss [g_BanY], xmm0
+        cmp  dword ptr [g_BanFlag], 0
+        setne cl
+        call BanButtonCreateHost
+        mov  eax, [g_BanFlag]
+        test eax, eax
+        jmp  [g_RetAddr_BanHook1]
+    }
+}
+
+// -----------------------------------------------------------------------
+// Ban Button Hook 2/2
+// Site: 0x007A6913
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_BanButtonHook2()
+{
+    static const char* name = "Trampoline_BanButtonHook2";
+    __asm
+    {
+        pushfd
+        pushad
+        push name
+        call LogHit
+        add  esp, 4
+        popad
+        popfd
+
+        mov  ecx, [ebp - 0xD8]
+        mov  [g_BanParentClient], ecx
+        call BanButtonCreateClient
+        mov  byte ptr [ebp - 4], 0xFF
+        jmp  [g_RetAddr_BanHook2]
     }
 }
 

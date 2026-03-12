@@ -43,6 +43,7 @@ namespace BZROpenShim
     enum class PatchType : uint8_t
     {
         JMP5,       // 5-byte relative JMP:  E9 rel32
+        REL32,      // 4-byte relative operand (CALL/JMP rel32)
         DWORD,      // 4-byte DWORD overwrite
         BYTE1,      // 1-byte overwrite
         BYTES,      // raw byte array
@@ -77,6 +78,7 @@ namespace BZROpenShim
     // -----------------------------------------------------------------------
     // Hop-fix trampoline addresses in this DLL.
     // -----------------------------------------------------------------------
+    struct BzrString;
     extern void __cdecl Trampoline_HopFix1();
     extern void __cdecl Trampoline_HopFix2();
     extern void __cdecl Trampoline_HopFix3();
@@ -84,7 +86,13 @@ namespace BZROpenShim
     extern void __cdecl Trampoline_Probe_MapFilter1();
     extern void __cdecl Trampoline_Probe_MapListFix1();
     extern void __cdecl Trampoline_Probe_MapListFix2();
-    extern void __cdecl Trampoline_VersionNotice();
+    extern void __cdecl Trampoline_VehicleListModFix1();
+    extern void __cdecl Trampoline_VehicleListModFix4();
+    extern void __cdecl Trampoline_BzrnetHost();
+    extern void __cdecl Trampoline_BzrnetClient();
+    extern void __cdecl Trampoline_BanButtonHook1();
+    extern void __cdecl Trampoline_BanButtonHook2();
+    extern void __fastcall VehicleListModFix2(void* thisPtr, void* edx, BzrString* name);
 
     // -----------------------------------------------------------------------
     // Return-jump pointer storage (filled at patch time by the loader)
@@ -98,6 +106,12 @@ namespace BZROpenShim
     inline void* g_RetAddr_Probe_MapListFix1 = nullptr;
     inline void* g_RetAddr_Probe_MapListFix2 = nullptr;
     inline void* g_RetAddr_VersionNotice     = nullptr;
+    inline void* g_RetAddr_VehicleListModFix1 = nullptr;
+    inline void* g_RetAddr_VehicleListModFix4 = nullptr;
+    inline void* g_RetAddr_BzrnetHost         = nullptr;
+    inline void* g_RetAddr_BzrnetClient       = nullptr;
+    inline void* g_RetAddr_BanHook1           = nullptr;
+    inline void* g_RetAddr_BanHook2           = nullptr;
 
     // -----------------------------------------------------------------------
     // Build the active hop-fix patch list.
@@ -105,7 +119,7 @@ namespace BZROpenShim
     inline std::vector<PatchDef> BuildPatchList()
     {
         using PT = PatchType;
-        // Hop-fix only mode: keep the patch surface minimal and reliable.
+        // Hop-fix + vehicle mod fix + version notice: keep patch surface minimal.
         return
         {
             // -- Hop-Fix 1/3 --
@@ -114,16 +128,21 @@ namespace BZROpenShim
             { 0x0, PT::JMP5, {}, "Map List Rewrite for Hop-Fix 2/3", false },
             // -- Hop-Fix 3/3 --
             { 0x0, PT::JMP5, {}, "Map List Rewrite for Hop-Fix 3/3", false },
-            // -- Refresh path probe (log-only) --
-            { 0x0, PT::JMP5, {}, "Probe Refresh Path MapSorting", false },
-            { 0x0, PT::JMP5, {}, "Probe Refresh Path MapFilter1", false },
-            // -- Additional map list fix probes (may be manual refresh path) --
-            { 0x0, PT::JMP5, {}, "Probe MapListFix1", false },
-            { 0x0, PT::JMP5, {}, "Probe MapListFix2", false },
-            // -- Main-menu version transparency --
-            { 0x0, PT::JMP5, {}, "Version Notice OpenShim", false },
+            // -- Version notice (two sites) --
+            { 0x0, PT::DWORD, {}, "Version Notice 1/2 OpenShim", false },
+            { 0x0, PT::DWORD, {}, "Version Notice 2/2 OpenShim", false },
             // -- Known map-jump fix (conditional -> unconditional branch) --
             { 0x0, PT::BYTE1, { 0xEB }, "Map Jump Fix Branch Override", false },
+            // -- Vehicle list / mod asset scoping --
+            { 0x0, PT::JMP5, {}, "Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)", false },
+            { 0x0, PT::REL32, {}, "Vehicle List Mod Fix 2/4 (Force Mod-Scoped Assets 2/3)", false },
+            { 0x0, PT::JMP5, {}, "Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)", false },
+            // -- Lobby / BZRNET integration --
+            { 0x0, PT::JMP5, {}, "BZCP BZRNET Integration HOST", false },
+            { 0x0, PT::JMP5, {}, "BZCP BZRNET Integration CLIENT", false },
+            // -- Ban button hooks --
+            { 0x0, PT::JMP5, {}, "Ban Button Hook 1/2", false },
+            { 0x0, PT::JMP5, {}, "Ban Button Hook 2/2", false },
         };
     }
 } // namespace BZROpenShim

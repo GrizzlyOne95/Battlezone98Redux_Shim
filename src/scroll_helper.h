@@ -17,6 +17,7 @@
 #endif
 #include <Windows.h>
 #include <cstdint>
+#include <cstring>
 #include "patcher.h"
 
 namespace BZROpenShim
@@ -40,10 +41,256 @@ namespace BZROpenShim
 
     // BZR.exe function pointer for hop-fix 2 internal call
     inline void (*g_BZRFnPtr_HopFix2)() = nullptr;
+    inline void (*g_BZRFnPtr_HopFix3Step)() = nullptr;
 
     // Steam build uses different internal addresses for scroll helpers.
     // When false, HopFix3 will skip scroll-restore helpers entirely.
     inline bool g_EnableScrollRestore = true;
+
+    // Saved map-list selection (clean-room replacement for DAT_1002A1C8 / 1002A1EC)
+    inline int32_t g_SavedMapIndex = -1;
+    inline char g_SavedMapName[256] = {};
+    inline uint32_t g_SavedMapNameLen = 0;
+
+    inline bool TryReadI32(const void* p, int32_t& out);
+
+    inline bool TryReadPtr(const void* p, void*& out)
+    {
+        __try
+        {
+            out = *reinterpret_cast<void* const*>(p);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            out = nullptr;
+            return false;
+        }
+    }
+
+    inline bool TryReadU32(const void* p, uint32_t& out)
+    {
+        __try
+        {
+            out = *reinterpret_cast<const volatile uint32_t*>(p);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            out = 0;
+            return false;
+        }
+    }
+
+    inline const char* ResolveEntryString(const uint8_t* entry, uint32_t& out_len)
+    {
+        out_len = 0;
+        if (!entry) return nullptr;
+
+        uint32_t len = 0;
+        uint32_t cap = 0;
+        if (!TryReadU32(entry + 0x10, len)) return nullptr;
+        if (!TryReadU32(entry + 0x14, cap)) return nullptr;
+
+        const char* src = reinterpret_cast<const char*>(entry);
+        if (cap > 0x0F)
+        {
+            void* ptr = nullptr;
+            if (!TryReadPtr(entry, ptr)) return nullptr;
+            src = reinterpret_cast<const char*>(ptr);
+        }
+
+        out_len = len;
+        return src;
+    }
+
+    // -----------------------------------------------------------------------
+    // Hop-Fix 1 helper: capture selected entry + index
+    // Mirrors _bzcp.dll FUN_1000CAF0 semantics (clean-room).
+    // ECX = map list context pointer.
+    // -----------------------------------------------------------------------
+    extern "C" inline void __fastcall SaveMapListSelection(void* ctx)
+    {
+        if (!ctx) return;
+
+        static int s_logBudget = 6;
+        uint8_t* base = reinterpret_cast<uint8_t*>(ctx);
+
+        // Resolve list root at [ctx + 0x1C8]
+        void* listRootRaw = nullptr;
+        if (!TryReadPtr(base + 0x1C8, listRootRaw) || !listRootRaw) return;
+        void** listRoot = reinterpret_cast<void**>(listRootRaw);
+
+        // Saved index from [listRoot[0x0B] + 0x150]
+        int32_t savedIndex = -1;
+        __try
+        {
+            uint8_t* listState = reinterpret_cast<uint8_t*>(listRoot[0x0B]);
+            if (listState)
+                TryReadI32(listState + 0x150, savedIndex);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            savedIndex = -1;
+        }
+        g_SavedMapIndex = savedIndex;
+
+        // Selected entry index from [ctx + 0x17C] + 0x14C
+        void* ctx17c = nullptr;
+        if (!TryReadPtr(base + 0x17C, ctx17c) || !ctx17c) return;
+        int32_t selIndex = 0;
+        if (!TryReadI32(reinterpret_cast<uint8_t*>(ctx17c) + 0x14C, selIndex))
+            return;
+
+        // Entry base from listRoot[0]
+        void* entryBaseRaw = nullptr;
+        if (!TryReadPtr(listRoot, entryBaseRaw) || !entryBaseRaw) return;
+        if (selIndex < 0 || selIndex > 10000) return;
+
+        uint8_t* entry = reinterpret_cast<uint8_t*>(entryBaseRaw) + (selIndex * 0x18);
+        uint32_t entryLen = 0;
+        const char* entryStr = ResolveEntryString(entry, entryLen);
+        if (!entryStr || entryLen == 0) return;
+
+        const uint32_t copyLen = (entryLen >= sizeof(g_SavedMapName)) ? (sizeof(g_SavedMapName) - 1) : entryLen;
+        __try
+        {
+            memcpy(g_SavedMapName, entryStr, copyLen);
+            g_SavedMapName[copyLen] = '\0';
+            g_SavedMapNameLen = copyLen;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            g_SavedMapName[0] = '\0';
+            g_SavedMapNameLen = 0;
+        }
+
+        if (s_logBudget > 0)
+        {
+            --s_logBudget;
+            Log(L"[HOP1] saved index=%d name=%hs\n", g_SavedMapIndex, g_SavedMapName);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Hop-Fix 2 helper: reselect entry by saved name
+    // Mirrors _bzcp.dll FUN_1000CB40 semantics (clean-room).
+    // ECX = map list object (this-ptr).
+    // -----------------------------------------------------------------------
+    extern "C" inline void __fastcall RestoreMapListSelection(void* this_ptr)
+    {
+        if (!this_ptr) return;
+
+        if (g_SavedMapNameLen == 0)
+        {
+            const char* allMaps = "All Maps";
+            const size_t allLen = strlen(allMaps);
+            memcpy(g_SavedMapName, allMaps, allLen);
+            g_SavedMapName[allLen] = '\0';
+            g_SavedMapNameLen = static_cast<uint32_t>(allLen);
+        }
+
+        // Resolve list root at [this + 0x1C8]
+        uint8_t* base = reinterpret_cast<uint8_t*>(this_ptr);
+        void* listRootRaw = nullptr;
+        if (!TryReadPtr(base + 0x1C8, listRootRaw) || !listRootRaw) return;
+        void** listRoot = reinterpret_cast<void**>(listRootRaw);
+
+        void* beginRaw = nullptr;
+        void* endRaw = nullptr;
+        if (!TryReadPtr(listRoot, beginRaw)) return;
+        if (!TryReadPtr(listRoot + 1, endRaw)) return;
+        if (!beginRaw || !endRaw) return;
+
+        uint8_t* begin = reinterpret_cast<uint8_t*>(beginRaw);
+        uint8_t* end = reinterpret_cast<uint8_t*>(endRaw);
+        if (end < begin) return;
+
+        int32_t foundIndex = -1;
+        uint8_t* entry = begin;
+        for (; entry != end; entry += 0x18)
+        {
+            uint32_t entryLen = 0;
+            const char* entryStr = ResolveEntryString(entry, entryLen);
+            if (!entryStr || entryLen == 0) continue;
+
+            if (entryLen == g_SavedMapNameLen &&
+                memcmp(entryStr, g_SavedMapName, entryLen) == 0)
+            {
+                foundIndex = static_cast<int32_t>((entry - begin) / 0x18);
+                break;
+            }
+        }
+
+        int32_t targetIndex = (foundIndex >= 0) ? foundIndex : 0;
+        if (!g_BZRFnPtr_HopFix2) return;
+
+        void (*fn)() = g_BZRFnPtr_HopFix2;
+        __try
+        {
+            __asm
+            {
+                mov ecx, this_ptr
+                push targetIndex
+                call fn
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            Log(L"[WARN] RestoreMapListSelection call failed\n");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Hop-Fix 3 helper: restore visible row index by replaying list-step calls
+    // Mirrors _bzcp.dll FUN_1000CCA0 semantics (clean-room).
+    // ECX = map list context pointer (frame-local).
+    // -----------------------------------------------------------------------
+    extern "C" inline void __fastcall RestoreMapListVisibleIndex(void* ctx)
+    {
+        if (!ctx) return;
+        if (!g_BZRFnPtr_HopFix3Step) return;
+
+        int32_t saved = g_SavedMapIndex;
+        if (saved < 0) return;
+
+        uint8_t* base = reinterpret_cast<uint8_t*>(ctx);
+        void* listRootRaw = nullptr;
+        if (!TryReadPtr(base + 0x1C8, listRootRaw) || !listRootRaw)
+            goto done;
+
+        void* listInnerRaw = nullptr;
+        if (!TryReadPtr(reinterpret_cast<uint8_t*>(listRootRaw) + 0x2C, listInnerRaw) || !listInnerRaw)
+            goto done;
+
+        int32_t spanStart = 0;
+        int32_t spanEnd = 0;
+        if (!TryReadI32(reinterpret_cast<uint8_t*>(listInnerRaw) + 0x168, spanStart))
+            goto done;
+        if (!TryReadI32(reinterpret_cast<uint8_t*>(listInnerRaw) + 0x16C, spanEnd))
+            goto done;
+
+        int32_t count = (spanEnd - spanStart) / 0x1C;
+        if (saved >= count)
+            goto done;
+
+        if (saved > 0)
+        {
+            void (*fn)() = g_BZRFnPtr_HopFix3Step;
+            for (int32_t i = 0; i < saved; ++i)
+            {
+                __try { fn(); }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    Log(L"[WARN] RestoreMapListVisibleIndex step failed\n");
+                    break;
+                }
+            }
+        }
+
+    done:
+        g_SavedMapIndex = -1;
+    }
 
     // -----------------------------------------------------------------------
     // ScrollUpdateHelper
