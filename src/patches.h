@@ -90,6 +90,7 @@ namespace BZROpenShim
     extern void __cdecl Trampoline_VehicleListModFix4();
     extern void __cdecl Trampoline_BzrnetHost();
     extern void __cdecl Trampoline_BzrnetClient();
+    extern void __cdecl Trampoline_CommandHelp();
     extern void __cdecl Trampoline_BanButtonHook1();
     extern void __cdecl Trampoline_BanButtonHook2();
     extern void __fastcall VehicleListModFix2(void* thisPtr, void* edx, BzrString* name);
@@ -110,6 +111,8 @@ namespace BZROpenShim
     inline void* g_RetAddr_VehicleListModFix4 = nullptr;
     inline void* g_RetAddr_BzrnetHost         = nullptr;
     inline void* g_RetAddr_BzrnetClient       = nullptr;
+    inline void* g_RetAddr_CommandHelpHandled = nullptr;
+    inline void* g_RetAddr_CommandHelpFallback = nullptr;
     inline void* g_RetAddr_BanHook1           = nullptr;
     inline void* g_RetAddr_BanHook2           = nullptr;
 
@@ -140,6 +143,8 @@ namespace BZROpenShim
             // -- Lobby / BZRNET integration --
             { 0x0, PT::JMP5, {}, "BZCP BZRNET Integration HOST", false },
             { 0x0, PT::JMP5, {}, "BZCP BZRNET Integration CLIENT", false },
+            // -- Custom /help + /ban command handler --
+            { 0x0, PT::JMP5, {}, "Custom Command /help Handler", false },
             // -- Ban button hooks --
             { 0x0, PT::JMP5, {}, "Ban Button Hook 1/2", false },
             { 0x0, PT::JMP5, {}, "Ban Button Hook 2/2", false },

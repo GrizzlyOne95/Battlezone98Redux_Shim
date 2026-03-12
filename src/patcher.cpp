@@ -451,10 +451,14 @@ namespace BZROpenShim
         // Lobby/BZRNET + ban button returns.
         g_RetAddr_BzrnetHost   = reinterpret_cast<void*>(0x00743C30);
         g_RetAddr_BzrnetClient = reinterpret_cast<void*>(0x0073E748);
+        g_RetAddr_CommandHelpHandled = reinterpret_cast<void*>(0x00625052);
+        g_RetAddr_CommandHelpFallback = reinterpret_cast<void*>(0x0062491F);
         g_RetAddr_BanHook1     = reinterpret_cast<void*>(0x007D0A35);
         g_RetAddr_BanHook2     = reinterpret_cast<void*>(0x007A691A);
         Log(L"[PTR] BZRNET Host return: 0x%08X\n", 0x00743C30);
         Log(L"[PTR] BZRNET Client return: 0x%08X\n", 0x0073E748);
+        Log(L"[PTR] Command Help handled return: 0x%08X\n", 0x00625052);
+        Log(L"[PTR] Command Help fallback return: 0x%08X\n", 0x0062491F);
         Log(L"[PTR] Ban Hook1 return: 0x%08X\n", 0x007D0A35);
         Log(L"[PTR] Ban Hook2 return: 0x%08X\n", 0x007A691A);
 
@@ -697,6 +701,13 @@ namespace BZROpenShim
                 p.expected_original = { 0xC6, 0x45, 0xFC, 0x07, 0x8D };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
+            else if (strcmp(p.name, "Custom Command /help Handler") == 0)
+            {
+                p.bzr_address = 0x0062480B;
+                p.verified = true;
+                p.expected_original = { 0x68, 0x3C, 0xD5, 0x88, 0x00 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
             else if (strcmp(p.name, "Ban Button Hook 1/2") == 0)
             {
                 p.bzr_address = 0x007D0A2F;
@@ -734,6 +745,7 @@ namespace BZROpenShim
             { "Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)", (void*)Trampoline_VehicleListModFix4 },
             { "BZCP BZRNET Integration HOST",                   (void*)Trampoline_BzrnetHost },
             { "BZCP BZRNET Integration CLIENT",                 (void*)Trampoline_BzrnetClient },
+            { "Custom Command /help Handler",                   (void*)Trampoline_CommandHelp },
             { "Ban Button Hook 1/2",                            (void*)Trampoline_BanButtonHook1 },
             { "Ban Button Hook 2/2",                            (void*)Trampoline_BanButtonHook2 },
         };
