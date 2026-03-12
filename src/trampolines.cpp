@@ -266,6 +266,160 @@ void __declspec(naked) __cdecl Trampoline_Probe_MapListFix2()
 }
 
 // -----------------------------------------------------------------------
+// Map Filters 3/8
+// Site: 0x0079D6B1
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_MapFilters3()
+{
+    static const char* name = "Trampoline_MapFilters3";
+    __asm
+    {
+        pushfd
+        pushad
+        push name
+        call LogHit
+        add  esp, 4
+        popad
+        popfd
+
+        mov  ebp, esp
+        mov  ecx, dword ptr ds:[0x00945564]
+        mov  byte ptr [g_MapFilterFlag12], 0x1
+        jmp  [g_RetAddr_MapFilters3]
+    }
+}
+
+// -----------------------------------------------------------------------
+// Map Filters 4/8
+// Site: 0x0079D691
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_MapFilters4()
+{
+    static const char* name = "Trampoline_MapFilters4";
+    __asm
+    {
+        pushfd
+        pushad
+        push name
+        call LogHit
+        add  esp, 4
+        popad
+        popfd
+
+        mov  ebp, esp
+        mov  ecx, dword ptr ds:[0x00945564]
+        mov  byte ptr [g_MapFilterFlag12], 0x0
+        jmp  [g_RetAddr_MapFilters4]
+    }
+}
+
+// -----------------------------------------------------------------------
+// Map Filters 5/8
+// Site: 0x00799116
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_MapFilters5()
+{
+    static const char* name = "Trampoline_MapFilters5";
+    __asm
+    {
+        pushfd
+        pushad
+        push name
+        call LogHit
+        add  esp, 4
+        popad
+        popfd
+
+        // Build the filter list via engine helper.
+        push edx
+        push 0x20
+        push offset MapFilterOnScrollDown
+        push offset MapFilterOnScrollUp
+        push ecx
+        xorps xmm0, xmm0
+        movss dword ptr [esp], xmm0
+        push ecx
+        movss xmm0, dword ptr ds:[0x008A2B08]
+        movss dword ptr [esp], xmm0
+        push ecx
+        movss xmm0, dword ptr ds:[0x008A2A5C]
+        movss dword ptr [esp], xmm0
+        push ecx
+        movss xmm0, dword ptr ds:[0x008A2AA0]
+        movss dword ptr [esp], xmm0
+        push dword ptr ds:[0x0089E8C8]
+        mov  ecx, [ebp - 0xBC]
+        call dword ptr [g_BzrFn_MapFilterCreate]
+        mov  [ebp - 0x1B4], eax
+        mov  [g_MapFilterListPtr], eax
+        jmp  [g_RetAddr_MapFilters5]
+    }
+}
+
+// -----------------------------------------------------------------------
+// Map Filters 7/8
+// Site: 0x007998AB
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_MapFilters7()
+{
+    static const char* name = "Trampoline_MapFilters7";
+    __asm
+    {
+        pushfd
+        pushad
+        push name
+        call LogHit
+        add  esp, 4
+        popad
+        popfd
+
+        mov  byte ptr [g_MapFilterFlag11], 0x1
+        mov  eax, [ebp - 0x44]
+        mov  ecx, [eax + 0x17C]
+        jmp  [g_RetAddr_MapFilters7]
+    }
+}
+
+// -----------------------------------------------------------------------
+// Map Filters 8/8
+// Site: 0x007997A9
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_MapFilters8()
+{
+    static const char* name = "Trampoline_MapFilters8";
+    __asm
+    {
+        pushfd
+        pushad
+        push name
+        call LogHit
+        add  esp, 4
+        popad
+        popfd
+
+        movzx eax, byte ptr [g_MapFilterFlag11]
+        test eax, eax
+        jz   mf8_check
+        mov  byte ptr [g_MapFilterFlag11], 0x0
+        mov  eax, [ebp - 0x8]
+        mov  ecx, [eax + 0x164]
+        jmp  [g_RetAddr_MapFilters8_A]
+
+    mf8_check:
+        mov  eax, [ebp - 0x8]
+        mov  ecx, [eax + 0x164]
+        call dword ptr [g_BzrFn_MapFilter8Check]
+        mov  [ebp - 0x1], al
+        movzx ecx, byte ptr [ebp - 0x1]
+        test ecx, ecx
+        jz   mf8_false
+        jmp  [g_RetAddr_MapFilters8_B]
+    mf8_false:
+        jmp  [g_RetAddr_MapFilters8_C]
+    }
+}
+
+// -----------------------------------------------------------------------
 // Version Notice patch
 // Site: 0x0062480B
 // Original bytes: 68 3C D5 88 00   (push <version string ptr>)

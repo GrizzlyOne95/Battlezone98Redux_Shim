@@ -1,5 +1,4 @@
 # Visual Studio
-.vs/
 [Bb]in/
 [Oo]bj/
 *.user
@@ -17,8 +16,8 @@ __pycache__/
 *.txt
 *.log
 architecture_reference.md
-reverse_engineering/
-pyghidra_mcp_projects/
+reverse_engineering/latest
+reverse_engineering/snapshots
 
 # Tools and references
 tools/
