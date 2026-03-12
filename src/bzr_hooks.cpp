@@ -1,4 +1,5 @@
 #include "bzr_hooks.h"
+#include "patcher.h"
 
 #include <Windows.h>
 #include <cstdio>
@@ -54,12 +55,17 @@ namespace BZROpenShim
 
     using FnGetSelected = void* (__thiscall*)(void* list);
     using FnCommandHandler = void(__cdecl*)(uint16_t id, const char* cmd);
+    using FnHelpLog = void(__cdecl*)(void* obj, const char* text);
+    using FnHelpUi = void(__cdecl*)(int channel, const char* text);
+    using FnBanLookup = void* (__cdecl*)(uint16_t id);
+    using FnIsHost = int(__cdecl*)();
 
     static void** g_BzrPtr_945478 = nullptr;
     static void** g_BzrPtr_94548C = nullptr;
     static void** g_BzrPtr_94555C = nullptr;
     static void** g_BzrPtr_9456D0 = nullptr;
     static void** g_BzrPtr_94557C = nullptr;
+    static void** g_BzrPtr_920168 = nullptr;
     static uint8_t* g_BzrPtr_CurrentUser = nullptr;
 
     static FnVehicleListSet g_BzrFn_VehicleListSet = nullptr;      // 0x0076B7A0
@@ -82,6 +88,10 @@ namespace BZROpenShim
 
     static FnGetSelected g_BzrFn_GetSelected = nullptr; // 0x007CB1A0
     static FnCommandHandler g_BzrFn_CommandHandler = nullptr; // 0x006247A0
+    static FnHelpLog g_BzrFn_HelpLog = nullptr; // 0x00821390
+    static FnHelpUi g_BzrFn_HelpUi = nullptr;   // 0x007A47B0
+    static FnBanLookup g_BzrFn_BanLookup = nullptr; // 0x005771B0
+    static FnIsHost g_BzrFn_IsHost = nullptr; // 0x00572A60
 
     // ---------------------------------------------------------------------
     // Helpers
@@ -93,6 +103,7 @@ namespace BZROpenShim
         g_BzrPtr_94555C = reinterpret_cast<void**>(0x0094555C);
         g_BzrPtr_9456D0 = reinterpret_cast<void**>(0x009456D0);
         g_BzrPtr_94557C = reinterpret_cast<void**>(0x0094557C);
+        g_BzrPtr_920168 = reinterpret_cast<void**>(0x00920168);
         g_BzrPtr_CurrentUser = reinterpret_cast<uint8_t*>(0x009C8F60);
 
         g_BzrFn_VehicleListSet = reinterpret_cast<FnVehicleListSet>(0x0076B7A0);
@@ -115,6 +126,10 @@ namespace BZROpenShim
 
         g_BzrFn_GetSelected = reinterpret_cast<FnGetSelected>(0x007CB1A0);
         g_BzrFn_CommandHandler = reinterpret_cast<FnCommandHandler>(0x006247A0);
+        g_BzrFn_HelpLog = reinterpret_cast<FnHelpLog>(0x00821390);
+        g_BzrFn_HelpUi = reinterpret_cast<FnHelpUi>(0x007A47B0);
+        g_BzrFn_BanLookup = reinterpret_cast<FnBanLookup>(0x005771B0);
+        g_BzrFn_IsHost = reinterpret_cast<FnIsHost>(0x00572A60);
 
         g_BzrFn_VehicleFixPre = reinterpret_cast<void*>(0x00481EA0);
         g_BzrFn_VehicleFixOrig = reinterpret_cast<void*>(0x00481AF0);
@@ -290,6 +305,80 @@ namespace BZROpenShim
             std::fprintf(f, "%s\n", id);
         }
         std::fclose(f);
+    }
+
+    bool __cdecl HandleCommandHelpBan(uint16_t id, const char* cmd)
+    {
+        if (!cmd || !*cmd)
+            return false;
+
+        if (_stricmp(cmd, "/help") == 0)
+        {
+            static const char* kHelpLines[] =
+            {
+                "[M] - mute/unmute - select the player in the list and click \"M\"",
+                "[L] - kick - select the player in the list and click \"K\"",
+                "[B] - ban - select the player in the list and click \"B\"",
+                "/lock - prevent new players from joining",
+                "/unlock - allow new players to join",
+            };
+
+            void* helpObj = (g_BzrPtr_920168 && *g_BzrPtr_920168) ? *g_BzrPtr_920168 : nullptr;
+            for (const char* line : kHelpLines)
+            {
+                if (g_BzrFn_HelpLog && helpObj)
+                    g_BzrFn_HelpLog(helpObj, line);
+                if (g_BzrFn_HelpUi)
+                    g_BzrFn_HelpUi(0, line);
+            }
+            return true;
+        }
+
+        if (_stricmp(cmd, "/ban") == 0)
+        {
+            if (g_BzrFn_IsHost && g_BzrFn_IsHost() == 0)
+            {
+                Log(L"[BAN] /ban blocked (client mode)\n");
+                return true;
+            }
+            if (static_cast<int16_t>(id) < 0)
+            {
+                Log(L"[BAN] /ban failed: invalid target id (id=%u)\n", id);
+                return true;
+            }
+            else if (!g_BzrFn_BanLookup)
+            {
+                Log(L"[BAN] /ban failed: ban lookup unavailable (id=%u)\n", id);
+                return true;
+            }
+
+            uint8_t* entry = reinterpret_cast<uint8_t*>(g_BzrFn_BanLookup(id));
+            if (!entry)
+            {
+                Log(L"[BAN] /ban failed: ban lookup returned null (id=%u)\n", id);
+                return true;
+            }
+
+            int type = *reinterpret_cast<int*>(entry + 0x30);
+            if (type != 1 && type != 2)
+            {
+                Log(L"[BAN] /ban failed: ban entry type invalid (id=%u)\n", id);
+                return true;
+            }
+
+            const char prefix = (type == 1) ? 'S' : 'G';
+            uint64_t uid = *reinterpret_cast<uint64_t*>(entry + 0x38);
+            char idbuf[32] = {};
+            std::snprintf(idbuf, sizeof(idbuf), "%c%llu", prefix, static_cast<unsigned long long>(uid));
+
+            const auto* name = reinterpret_cast<const BzrString*>(entry + 0x74);
+            AppendBanList(idbuf, name);
+            Log(L"[BAN] /ban added %c%llu (%hs)\n", prefix, static_cast<unsigned long long>(uid),
+                (name && name->size) ? BzrStringData(name) : "");
+            return true;
+        }
+
+        return false;
     }
 
     void __cdecl BanButtonOnClickHost()

@@ -467,6 +467,37 @@ void __declspec(naked) __cdecl Trampoline_BzrnetClient()
 }
 
 // -----------------------------------------------------------------------
+// Custom /help + /ban command handler
+// Site: 0x0062480B
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_CommandHelp()
+{
+    static const char* name = "Trampoline_CommandHelp";
+    __asm
+    {
+        pushfd
+        pushad
+        push name
+        call LogHit
+        add  esp, 4
+        popad
+        popfd
+
+        mov  edx, [ebp + 0x0C]
+        movzx eax, byte ptr [ebp + 0x08]
+        push edx
+        push eax
+        call HandleCommandHelpBan
+        add  esp, 8
+        test al, al
+        jnz  cmd_handled
+        jmp  [g_RetAddr_CommandHelpFallback]
+    cmd_handled:
+        jmp  [g_RetAddr_CommandHelpHandled]
+    }
+}
+
+// -----------------------------------------------------------------------
 // Ban Button Hook 1/2
 // Site: 0x007D0A2F
 // -----------------------------------------------------------------------
