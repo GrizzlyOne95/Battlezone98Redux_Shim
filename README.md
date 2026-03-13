@@ -61,6 +61,44 @@ The current patcher handles that by:
    OpenShim version tag
 4. leaving logger buffering at the CRT default and flushing explicitly
 
+### Legacy Chunk Render Bridge Experiment
+
+The shim now includes a GOG-only test hook for the legacy chunk visibility
+investigation tied to invisible death chunks in Redux.
+
+What it does:
+
+1. hooks the native resolve call inside the object render classifier
+2. lets the stock resolver run first
+3. if the stock path fails and the experiment is enabled, picks the first
+   non-null geometry entry from the object's legacy geometry table
+4. writes that handle back to the active render slot so the object can keep
+   moving through normal render classification
+
+This is intentionally narrow. It does not add native GEO rendering, and it
+does not claim to be the final chunk fix. It is a bridge experiment meant to
+prove whether chunk child objects are invisible because they fail to select an
+active Ogre-backed render handle.
+
+The hook is disabled by default. Enable it with either environment variable:
+
+- `BZR_CHUNK_FORCE_FIRST_GEO=1`
+- `OPENSHIM_CHUNK_FORCE_FIRST_GEO=1`
+
+Current scope:
+
+- validated against the GOG address `CALL 0x004E3620` at `0x00443B34`
+- not enabled for Steam yet because the equivalent site has not been
+  revalidated there
+
+Suggested test asset:
+
+- `agr11bda.geo` from `avtank.vdf`
+
+The intent is to give a known good `VGEO` name a valid Redux mesh/material
+pipeline, then see whether chunk child objects become visible once a valid
+render handle is forced into the stock resolve/classify path.
+
 ## Building
 
 1. Open `BZROpenShim.sln` in Visual Studio 2022+
@@ -69,6 +107,32 @@ The current patcher handles that by:
 4. Copy `winmm.dll` to the BZR.exe directory
 
 For the Steam build, copy `winmm.dll` next to `battlezone98redux.exe`.
+
+## Testing The Chunk Experiment
+
+1. Build `bin\Release\winmm.dll`.
+2. Copy it next to the GOG game executable in `C:\GOG Games\Battlezone 98 Redux`.
+3. Set `BZR_CHUNK_FORCE_FIRST_GEO=1` before launching the game.
+4. Make sure the test GEO you want to exercise has a valid Redux-side
+   mesh/material pipeline. For the current working assumption, use
+   `agr11bda` from `avtank.vdf`.
+5. Start a scenario that reliably produces large death chunks from vehicles or
+   structures.
+6. Watch for either:
+   - newly visible chunk geometry
+   - changed behavior in chunk impacts that suggests the object now has a
+     valid active render handle
+7. Inspect the shim log for lines beginning with `[CHUNK]`.
+
+Expected log signals:
+
+- `Force-first-geo fallback: enabled`
+- `Forced geometry entry ...`
+
+If the hook never logs forced geometry for destroyed objects, the failure is
+probably earlier than active-handle selection. If it does log forced geometry
+but chunks still do not render, the next failure point is likely downstream in
+render-class handling or Ogre proxy creation.
 
 ## Debug Metadata Inspection
 

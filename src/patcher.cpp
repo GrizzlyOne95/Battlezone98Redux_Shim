@@ -800,6 +800,20 @@ namespace BZROpenShim
                 p.expected_original = { 0x8B, 0x45, 0xF8, 0x8B, 0x88 };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
+            else if (strcmp(p.name, "Chunk Render Resolve Hook") == 0)
+            {
+                if (isSteam)
+                {
+                    Log(L"[SCAN] SKIPPED %hs (GOG-only address not yet validated on Steam)\n", p.name);
+                    continue;
+                }
+
+                // rel32 operand for CALL 0x004E3620 at 0x00443B34
+                p.bzr_address = 0x00443B35;
+                p.verified = true;
+                p.expected_original = { 0xE7, 0xFA, 0x09, 0x00 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
             else if (strcmp(p.name, "Lobby BZRNET Integration HOST") == 0)
             {
                 p.bzr_address = 0x00743C05;
@@ -908,6 +922,15 @@ namespace BZROpenShim
                 uint32_t instrAddr = p.bzr_address - 1;
                 uint32_t target = static_cast<uint32_t>(
                     reinterpret_cast<uintptr_t>(MapFilters6Rel32));
+                int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(instrAddr + 5);
+                p.payload.resize(4);
+                memcpy(p.payload.data(), &rel, sizeof(rel));
+            }
+            else if (strcmp(p.name, "Chunk Render Resolve Hook") == 0)
+            {
+                uint32_t instrAddr = p.bzr_address - 1;
+                uint32_t target = static_cast<uint32_t>(
+                    reinterpret_cast<uintptr_t>(ChunkRenderResolveHook));
                 int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(instrAddr + 5);
                 p.payload.resize(4);
                 memcpy(p.payload.data(), &rel, sizeof(rel));

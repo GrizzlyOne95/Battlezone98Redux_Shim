@@ -164,6 +164,8 @@ namespace BZROpenShim
             { 0x0, PT::REL32, {}, "Map Filters 6/8", false },
             { 0x0, PT::JMP5, {}, "Map Filters 7/8", false },
             { 0x0, PT::JMP5, {}, "Map Filters 8/8", false },
+            // -- Legacy chunk render bridge experiment --
+            { 0x0, PT::REL32, {}, "Chunk Render Resolve Hook", false },
             // -- Vehicle list / mod asset scoping --
             { 0x0, PT::JMP5, {}, "Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)", false },
             { 0x0, PT::REL32, {}, "Vehicle List Mod Fix 2/4 (Force Mod-Scoped Assets 2/3)", false },
