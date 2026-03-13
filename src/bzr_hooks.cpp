@@ -220,15 +220,12 @@ namespace BZROpenShim
 
         BzrString title;
         BzrString subtitle;
+        BzrStringInitEmpty(&title);
+        BzrStringInitEmpty(&subtitle);
         if (match)
         {
             BzrStringCopy(&title, reinterpret_cast<const BzrString*>(match));
             BzrStringCopy(&subtitle, reinterpret_cast<const BzrString*>(match + 0x3C));
-        }
-        else
-        {
-            BzrStringInitEmpty(&title);
-            BzrStringInitEmpty(&subtitle);
         }
 
         void* listThis = (g_BzrPtr_945478 && *g_BzrPtr_945478) ? *g_BzrPtr_945478 : nullptr;
@@ -236,6 +233,7 @@ namespace BZROpenShim
             g_BzrFn_VehicleListSet(listThis, title, subtitle);
 
         BzrString file;
+        BzrStringInitEmpty(&file);
         BzrStringCopy(&file, name);
         BzrStringAppend(&file, ".vxt", 4);
 
@@ -275,6 +273,8 @@ namespace BZROpenShim
         int index = *reinterpret_cast<int*>(ctx + 0x38);
         BzrString title;
         BzrString subtitle;
+        BzrStringInitEmpty(&title);
+        BzrStringInitEmpty(&subtitle);
 
         if (index >= 0)
         {
@@ -284,16 +284,6 @@ namespace BZROpenShim
                 BzrStringCopy(&title, reinterpret_cast<const BzrString*>(entry));
                 BzrStringCopy(&subtitle, reinterpret_cast<const BzrString*>(entry + 0x3C));
             }
-            else
-            {
-                BzrStringInitEmpty(&title);
-                BzrStringInitEmpty(&subtitle);
-            }
-        }
-        else
-        {
-            BzrStringInitEmpty(&title);
-            BzrStringInitEmpty(&subtitle);
         }
 
         void* listThis = (g_BzrPtr_945478 && *g_BzrPtr_945478) ? *g_BzrPtr_945478 : nullptr;
@@ -1021,6 +1011,7 @@ namespace BZROpenShim
         std::snprintf(idbuf, sizeof(idbuf), "%c%llu", prefix, static_cast<unsigned long long>(id));
 
         BzrString name;
+        BzrStringInitEmpty(&name);
         BzrStringCopy(&name, reinterpret_cast<BzrString*>(reinterpret_cast<uint8_t*>(selected) + 0x2C));
         AppendBanList(idbuf, &name);
         BzrStringFree(&name);
