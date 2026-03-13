@@ -4,7 +4,8 @@
 // Copyright (C) 2025 BZR Open Shim contributors
 // SPDX-License-Identifier: MIT
 //
-// Reconstructed from analysis of _bzcp.dll and the GOG v2.2.301 executable.
+// Reconstructed from analysis of the reference patch behavior and the
+// GOG v2.2.301 executable.
 // All logic is described in terms of the purpose of each operation, not
 // copied bytes.
 
@@ -21,7 +22,7 @@ namespace BZROpenShim
 // -----------------------------------------------------------------------
 // Hop-Fix 1/3
 // Purpose: Save the selected entry and visible row before the list rebuild.
-// Ghidra-confirmed _bzcp pipeline:
+// Reverse-engineering-confirmed reference pipeline:
 //   Hook 1 -> FUN_1000CAF0 -> original call at 0x005D4260
 // The JMP overwrites:
 //   MOV EAX,[EBP-4]
@@ -55,7 +56,7 @@ void __declspec(naked) __cdecl Trampoline_HopFix1()
 // -----------------------------------------------------------------------
 // Hop-Fix 2/3
 // Purpose: Reselect the saved entry after the list rebuild completes.
-// Ghidra-confirmed _bzcp trampoline:
+// Reverse-engineering-confirmed reference trampoline:
 //   MOV EAX,[0x0094555C]
 //   MOV ECX,[EAX]
 //   CALL restore-selection helper
@@ -89,7 +90,7 @@ hop2_done:
 // -----------------------------------------------------------------------
 // Hop-Fix 3/3
 // Purpose: Restore the visible row after the selection has been restored.
-// Ghidra-confirmed _bzcp helper FUN_1000CCA0 replays the native list-step
+// Reverse-engineering-confirmed helper replays the native list-step
 // function once per saved visible row and then returns to the original flow.
 // -----------------------------------------------------------------------
 void __declspec(naked) __cdecl Trampoline_HopFix3()
@@ -127,7 +128,7 @@ void __declspec(naked) __cdecl Trampoline_HopFix3()
 }
 
 // -----------------------------------------------------------------------
-// Probe: refresh/map-sorting path candidate (historical _bzcp patch site)
+// Probe: refresh/map-sorting path candidate from earlier patch analysis
 // Site: 0x007680D6
 // Original bytes:
 //   89 4D F8          mov [ebp-0x08], ecx
@@ -498,7 +499,8 @@ void __declspec(naked) __cdecl Trampoline_VersionNotice()
 // -----------------------------------------------------------------------
 // Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)
 // Site: 0x00766C4A (CALL 0x00481AF0)
-// Stub mirrors _bzcp.dll: call 0x481EA0, then original 0x481AF0, then jump
+// Stub mirrors the reference patch: call 0x481EA0, then original 0x481AF0,
+// then jump
 // to return address after the original stack cleanup.
 // -----------------------------------------------------------------------
 void __declspec(naked) __cdecl Trampoline_VehicleListModFix1()

@@ -4,8 +4,8 @@
 // Copyright (C) 2025 BZR Open Shim contributors
 // SPDX-License-Identifier: MIT
 //
-// Reconstructed from HOPFIX_ANALYSIS.md "Support Function (0x1000cd80)"
-// and bzcp_hopfix_decompiled.txt.
+// Reconstructed from HOPFIX analysis notes and validated against the game
+// executable.
 //
 // The original algorithm divides the scroll delta by 120 (one row height)
 // to compute how many rows to scroll, then calls the BZR.exe scroll-up or
@@ -105,8 +105,8 @@ namespace BZROpenShim
     }
 
     // -----------------------------------------------------------------------
-    // Hop-Fix 1 helper: capture selected entry + index
-    // Mirrors _bzcp.dll FUN_1000CAF0 semantics (clean-room).
+    // Hop-Fix 1 helper: capture selected entry + index.
+    // Mirrors the reference patch semantics in clean-room form.
     // ECX = map list context pointer.
     // -----------------------------------------------------------------------
     extern "C" inline void __fastcall SaveMapListSelection(void* ctx)
@@ -173,8 +173,8 @@ namespace BZROpenShim
     }
 
     // -----------------------------------------------------------------------
-    // Hop-Fix 2 helper: reselect entry by saved name
-    // Mirrors _bzcp.dll FUN_1000CB40 semantics (clean-room).
+    // Hop-Fix 2 helper: reselect entry by saved name.
+    // Mirrors the reference patch semantics in clean-room form.
     // ECX = map list object (this-ptr).
     // -----------------------------------------------------------------------
     extern "C" inline void __fastcall RestoreMapListSelection(void* this_ptr)
@@ -242,8 +242,8 @@ namespace BZROpenShim
     }
 
     // -----------------------------------------------------------------------
-    // Hop-Fix 3 helper: restore visible row index by replaying list-step calls
-    // Mirrors _bzcp.dll FUN_1000CCA0 semantics (clean-room).
+    // Hop-Fix 3 helper: restore visible row index by replaying list-step calls.
+    // Mirrors the reference patch semantics in clean-room form.
     // ECX = map list context pointer (frame-local).
     // -----------------------------------------------------------------------
     extern "C" inline void __fastcall RestoreMapListVisibleIndex(void* ctx)
@@ -629,7 +629,7 @@ namespace BZROpenShim
         }
     }
 
-    // Selects HopFix2 this-pointer using the _bzcp-style global map object.
+    // Selects HopFix2 this-pointer using the reference patch's global map object.
     // If unavailable, returns null and caller skips the helper call.
     inline void* __cdecl SelectHopFix2This(void* stack_this)
     {

@@ -27,7 +27,8 @@ winmm.dll (this project)
               └── Applies patches from patches.h via WriteProcessMemory
 ```
 
-The shim now runs fully standalone and does not load or defer to `_bzcp.dll`.
+The shim now runs fully standalone and does not load or defer to any external
+patch DLL.
 
 ## What is patched
 
@@ -35,7 +36,7 @@ The shim now runs fully standalone and does not load or defer to `_bzcp.dll`.
 
 The hop-fix prevents the multiplayer map list from jumping back to the top
 when the list rebuilds. The current clean-room port follows the same
-three-stage method confirmed in `_bzcp.dll`:
+three-stage method confirmed during reverse-engineering:
 
 1. save the selected entry and visible row before rebuild
 2. reselect the matching entry after rebuild

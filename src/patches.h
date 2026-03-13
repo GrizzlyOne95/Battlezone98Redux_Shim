@@ -5,15 +5,15 @@
 // SPDX-License-Identifier: MIT
 //
 // --- Architecture overview ---
-// _bzcp.dll exposes a Lua module "install" function that is called from
-// Lua mission scripts via require("_bzcp").install().
+// The original closed-source patch exposed a Lua install entry point that was
+// called from mission scripts.
 //
 // The patch thread (FUN_1000eb30) runs on a background thread, waits for
 // BZR.exe bytes at 0x00868300 to match a known signature (256 bytes),
 // then applies all patches via WriteProcessMemory JMP hooks.
 //
 // Each JMP hook is:
-//   E9 [rel32]   -- relative jump to replacement code inside _bzcp.dll
+//   E9 [rel32]   -- relative jump to replacement code inside the patch DLL
 //
 // We replicate this by applying the same JMP patches pointing to our own
 // replacement trampolines defined here.
@@ -23,8 +23,8 @@
 // The version is verified by checking file version info == 0x12D (301).
 //
 // --- Address notes ---
-// The BZR.exe addresses stored in _bzcp.dll's DAT_1002axxx variables are
-// resolved at runtime from a secondary source (maplist.txt / external).
+// The BZR.exe addresses used by the reference patch were resolved at runtime
+// from secondary data.
 // The values here were extracted from memory dumps of a patched v2.2.301
 // process. Where the dump addresses were outside BZR.exe range due to ASLR
 // they are marked TODO and MUST be re-verified with a live debugger session
@@ -103,8 +103,8 @@ namespace BZROpenShim
     extern void __fastcall VehicleListModFix2(void* thisPtr, void* edx, BzrString* name);
 
     // -----------------------------------------------------------------------
-    // Return-jump pointer storage (filled at patch time by the loader)
-    // These mirror the _bzcp.dll hop-fix return-address pointers.
+    // Return-jump pointer storage (filled at patch time by the loader).
+    // These mirror the reference patch's hop-fix return-address pointers.
     // -----------------------------------------------------------------------
     inline void* g_RetAddr_HopFix1           = nullptr;
     inline void* g_RetAddr_HopFix2           = nullptr;
@@ -169,8 +169,8 @@ namespace BZROpenShim
             { 0x0, PT::REL32, {}, "Vehicle List Mod Fix 2/4 (Force Mod-Scoped Assets 2/3)", false },
             { 0x0, PT::JMP5, {}, "Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)", false },
             // -- Lobby / BZRNET integration --
-            { 0x0, PT::JMP5, {}, "BZCP BZRNET Integration HOST", false },
-            { 0x0, PT::JMP5, {}, "BZCP BZRNET Integration CLIENT", false },
+            { 0x0, PT::JMP5, {}, "Lobby BZRNET Integration HOST", false },
+            { 0x0, PT::JMP5, {}, "Lobby BZRNET Integration CLIENT", false },
             // -- Custom /help + /ban command handler --
             { 0x0, PT::JMP5, {}, "Custom Command /help Handler", false },
             // -- Ban button hooks --

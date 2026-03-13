@@ -49,7 +49,7 @@ namespace BZROpenShim
     extern float g_BanX;
     extern float g_BanY;
 
-    // Map filter state flags (mirrors _bzcp DAT_1002ab11/ab12).
+    // Map filter state flags recovered from the reference patch analysis.
     extern uint8_t g_MapFilterFlag11;
     extern uint8_t g_MapFilterFlag12;
     extern void* g_BzrFn_MapFilter8Check;

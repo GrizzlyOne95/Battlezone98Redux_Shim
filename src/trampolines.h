@@ -5,12 +5,12 @@
 // SPDX-License-Identifier: MIT
 //
 // Each trampoline is a __declspec(naked) x86 function that:
-//   1. Executes the replacement logic derived from _bzcp.dll decompilation
+//   1. Executes the clean-room replacement logic derived from RE notes
 //   2. Jumps back to BZR.exe via the corresponding g_RetAddr_* pointer
 //
-// The assembly was reconstructed from bzcp_hopfix_decompiled.txt and
-// HOPFIX_ANALYSIS.md. It is NOT copied from the binary; it is a clean-room
-// reimplementation of the described algorithm.
+// The assembly was reconstructed from RE notes and HOPFIX_ANALYSIS.md. It is
+// not copied from the binary; it is a clean-room reimplementation of the
+// described algorithm.
 
 #pragma once
 #ifndef WIN32_LEAN_AND_MEAN

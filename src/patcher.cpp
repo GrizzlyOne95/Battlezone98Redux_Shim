@@ -4,11 +4,11 @@
 // Copyright (C) 2025 BZR Open Shim contributors
 // SPDX-License-Identifier: MIT
 //
-// Reconstructed from: bzcp_hopfix_decompiled.txt (FUN_1000eb30),
-// FINAL_RE_REPORT.md, COMPLETE_RE_REPORT.md
+// Reconstructed from prior reverse-engineering notes and validation against
+// the game executable.
 //
-// The original _bzcp.dll patch flow:
-//  1. Open bzcp.log
+// The reference patch flow:
+//  1. Open a patch log
 //  2. Read BZR.exe file version via GetFileVersionInfoA; expect 0x12D (301)
 //  3. Loop up to 1000 times polling ReadProcessMemory at 0x00868300
 //     until the 256-byte signature block matches the expected value
@@ -73,7 +73,7 @@ namespace BZROpenShim
 
     // -----------------------------------------------------------------------
     // Read BZR.exe file version (minor build number)
-    // Mirrors _bzcp.dll logic: reads VS_FIXEDFILEINFO.dwFileVersionMS fields
+    // Mirrors the reference patch logic: reads VS_FIXEDFILEINFO fields.
     // Expected value: 0x12D == 301 decimal
     // -----------------------------------------------------------------------
     static uint32_t GetBZRVersion()
@@ -98,7 +98,7 @@ namespace BZROpenShim
         Log(L"[INFO] FileVersion MS: 0x%08X, LS: 0x%08X\n", ffi->dwFileVersionMS, ffi->dwFileVersionLS);
         Log(L"[INFO] ProductVersion MS: 0x%08X, LS: 0x%08X\n", ffi->dwProductVersionMS, ffi->dwProductVersionLS);
 
-        // _bzcp.dll reads *(ushort*)((int)local_160 + 0xe) 
+        // The reference patch reads *(ushort*)((int)local_160 + 0xe)
         // local_160 is likely the start of VS_FIXEDFILEINFO.
         // +0xE is the HIWORD of dwFileVersionLS? 
         // No, in memory it's: 0x8 (MS), 0xC (LS). 
@@ -112,8 +112,8 @@ namespace BZROpenShim
     }
 
     // -----------------------------------------------------------------------
-    // Apply a single patch via WriteProcessMemory
-    // Mirrors _bzcp.dll FUN_10004930 / FUN_10003810
+    // Apply a single patch via WriteProcessMemory.
+    // Mirrors the reference patch's patch-write helpers.
     // Returns: 1 = applied, 0 = skipped (not a failure), -1 = failed
     // -----------------------------------------------------------------------
     static int ApplyPatch(uint32_t address, const void* data, size_t len, const char* name,
@@ -377,7 +377,7 @@ namespace BZROpenShim
     {
         Log(L"=========== RESOLVING POINTERS ===========\n");
 
-        // Hop-Fix 1 - _bzcp jumps back to patch site + 0xE
+        // Hop-Fix 1 - reference patch jumps back to patch site + 0xE
         // (covers overwritten + inlined original call block).
         if (hopFix1Addr) {
             g_RetAddr_HopFix1 = reinterpret_cast<void*>(hopFix1Addr + 0x0E);
@@ -395,7 +395,7 @@ namespace BZROpenShim
             Log(L"[PTR] Hop-Fix 1 return: 0x%08X\n", hopFix1Addr + 0x0E);
         }
 
-        // Hop-Fix 2 - _bzcp jumps back to patch site + 0x13.
+        // Hop-Fix 2 - reference patch jumps back to patch site + 0x13.
         if (hopFix2Addr) {
             g_RetAddr_HopFix2 = reinterpret_cast<void*>(hopFix2Addr + 0x13);
             g_MapListObject = reinterpret_cast<void**>(0x0094555C);
@@ -414,7 +414,7 @@ namespace BZROpenShim
             Log(L"[PTR] Hop-Fix 2 return: 0x%08X\n", hopFix2Addr + 0x13);
         }
 
-        // Hop-Fix 3 - _bzcp jumps back to patch site + 7
+        // Hop-Fix 3 - reference patch jumps back to patch site + 7
         // (CALL EDX + PUSH 0x930).
         if (hopFix3Addr) {
             g_RetAddr_HopFix3 = reinterpret_cast<void*>(hopFix3Addr + 0x07);
@@ -800,14 +800,14 @@ namespace BZROpenShim
                 p.expected_original = { 0x8B, 0x45, 0xF8, 0x8B, 0x88 };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
-            else if (strcmp(p.name, "BZCP BZRNET Integration HOST") == 0)
+            else if (strcmp(p.name, "Lobby BZRNET Integration HOST") == 0)
             {
                 p.bzr_address = 0x00743C05;
                 p.verified = true;
                 p.expected_original = { 0x8D, 0x85, 0x00, 0xFF, 0xFF };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
-            else if (strcmp(p.name, "BZCP BZRNET Integration CLIENT") == 0)
+            else if (strcmp(p.name, "Lobby BZRNET Integration CLIENT") == 0)
             {
                 p.bzr_address = 0x0073E71C;
                 p.verified = true;
@@ -863,8 +863,8 @@ namespace BZROpenShim
             { "Map Filters 8/8",                                (void*)Trampoline_MapFilters8 },
             { "Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)", (void*)Trampoline_VehicleListModFix1 },
             { "Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)", (void*)Trampoline_VehicleListModFix4 },
-            { "BZCP BZRNET Integration HOST",                   (void*)Trampoline_BzrnetHost },
-            { "BZCP BZRNET Integration CLIENT",                 (void*)Trampoline_BzrnetClient },
+            { "Lobby BZRNET Integration HOST",                  (void*)Trampoline_BzrnetHost },
+            { "Lobby BZRNET Integration CLIENT",                (void*)Trampoline_BzrnetClient },
             { "Custom Command /help Handler",                   (void*)Trampoline_CommandHelp },
             { "Ban Button Hook 1/2",                            (void*)Trampoline_BanButtonHook1 },
             { "Ban Button Hook 2/2",                            (void*)Trampoline_BanButtonHook2 },

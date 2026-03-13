@@ -19,9 +19,9 @@ namespace BZROpenShim
     static constexpr int PATCH_RETRY_DELAY_MS = 10;
 
     // -----------------------------------------------------------------------
-    // Entry point - called on background thread from DllMain
-    // Mirrors _bzcp.dll FUN_1000eb30:
-    //   1. Opens bzcp.log
+    // Entry point - called on background thread from DllMain.
+    // Mirrors the reference patch startup flow:
+    //   1. Opens a patch log
     //   2. Checks BZR.exe file version == 301
     //   3. Polls 0x00868300 until signature matches
     //   4. Applies all patches
