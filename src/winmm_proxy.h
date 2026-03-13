@@ -1,7 +1,7 @@
 // winmm_proxy.h
 // BZR Open Shim - winmm.dll proxy forward declarations
 // All winmm exports are forwarded to the real System32 winmm.dll.
-// The DllMain in dllmain.cpp bootstraps the BZCP loader.
+// The DllMain in dllmain.cpp bootstraps the standalone OpenShim patcher.
 //
 // BZR.exe loads winmm.dll from its own directory before System32.
 // This shim intercepts that load, forwards all real calls, and injects patches.

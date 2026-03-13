@@ -17,12 +17,17 @@ winmm.dll (this project)
   │
   ├── Proxies all winmm.dll exports → C:\Windows\System32\winmm.dll
   │
-  └── Spawns patch thread → patcher.cpp::RunPatcher()
+  └── Spawns patch thread
         │
-        ├── Verifies BZR.exe file version == 301
-        ├── Polls 0x00868300 for signature match
-        └── Applies patches from patches.h via WriteProcessMemory
+        ├── Initializes startup-time Winsock hooks via net_optimizer.cpp
+        └── Runs patcher.cpp::RunPatcher()
+              │
+              ├── Verifies BZR.exe file version == 301
+              ├── Polls 0x00868300 for signature match
+              └── Applies patches from patches.h via WriteProcessMemory
 ```
+
+The shim now runs fully standalone and does not load or defer to `_bzcp.dll`.
 
 ## What is patched
 
