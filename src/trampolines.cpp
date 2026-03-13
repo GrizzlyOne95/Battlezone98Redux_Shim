@@ -307,7 +307,7 @@ void __declspec(naked) __cdecl Trampoline_Probe_MapListFix2()
             popad
             popfd
 
-            mov  eax, [ebp + 0x8]
+            lea  eax, [ebp + 0x8]
             push eax
             push ecx
             call MapFilters2Filter
