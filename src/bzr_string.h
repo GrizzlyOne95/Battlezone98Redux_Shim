@@ -7,7 +7,7 @@
 
 namespace BZROpenShim
 {
-    // BZR std::string (SSO) layout as observed in [third-party patch DLL].
+    // BZR std::string (SSO) layout as observed in the reference patch.
     struct BzrString
     {
         union
