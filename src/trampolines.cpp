@@ -398,7 +398,7 @@ void __declspec(naked) __cdecl Trampoline_MapFilters5()
         push ecx
         movss xmm0, dword ptr ds:[0x008A2AA0]
         movss dword ptr [esp], xmm0
-        push dword ptr ds:[0x0089E8C8]
+        push 0x0089E8C8
         mov  ecx, [ebp - 0xBC]
         call dword ptr [g_BzrFn_MapFilterCreate]
         mov  [ebp - 0x1B4], eax
