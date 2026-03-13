@@ -22,7 +22,9 @@
 #include "netcode_hooks.h"
 #include "bzr_hooks.h"
 
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <Windows.h>
 #include <cstdio>
 #include <cstring>
@@ -289,7 +291,7 @@ namespace BZROpenShim
         for (const auto& s : sections)
         {
             const uint32_t va = s.VirtualAddress;
-            const uint32_t vsz = std::max(s.Misc.VirtualSize, s.SizeOfRawData);
+            const uint32_t vsz = (std::max)(s.Misc.VirtualSize, s.SizeOfRawData);
             if (sigRva >= va && (sigRva + sigLen) <= (va + vsz))
             {
                 sigRaw = s.PointerToRawData + (sigRva - va);
@@ -498,7 +500,7 @@ namespace BZROpenShim
     // This works for both Steam and GOG versions since we search for actual
     // instruction patterns rather than hardcoded addresses.
     // -----------------------------------------------------------------------
-    static void ScanForPatchAddresses(std::vector<PatchDef>& patches)
+    static void ScanForPatchAddresses(std::vector<PatchDef>& patches, bool isSteam)
     {
         Log(L"=========== SCANNING FOR PATTERNS ===========\n");
 
@@ -675,14 +677,49 @@ namespace BZROpenShim
             }
             else if (strcmp(p.name, "Version Notice 1/2 OpenShim") == 0)
             {
-                p.bzr_address = 0x0078DD4E;
+                p.bzr_address = isSteam ? 0x004B022B : 0x0078DD4E;
                 p.verified = true;
+                p.expected_original = { 0xE4, 0x84, 0x87, 0x00 };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
             else if (strcmp(p.name, "Version Notice 2/2 OpenShim") == 0)
             {
-                p.bzr_address = 0x00618C2F;
+                p.bzr_address = isSteam ? 0x004B0247 : 0x00618C2F;
                 p.verified = true;
+                p.expected_original = { 0xE4, 0x84, 0x87, 0x00 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Version Notice 3/3 OpenShim") == 0)
+            {
+                if (!isSteam)
+                {
+                    Log(L"[SCAN] SKIPPED %hs (Steam-only site)\n", p.name);
+                    continue;
+                }
+
+                p.bzr_address = 0x005091F4;
+                p.verified = true;
+                p.expected_original = { 0xE4, 0x84, 0x87, 0x00 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Main Menu GameVersion OpenShim") == 0)
+            {
+                if (!isSteam)
+                {
+                    Log(L"[SCAN] SKIPPED %hs (Steam-only site)\n", p.name);
+                    continue;
+                }
+
+                p.bzr_address = 0x008EDA3C;
+                p.verified = true;
+                p.expected_original = { 0xE4, 0x84, 0x87, 0x00 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Main Menu Version Text OpenShim") == 0)
+            {
+                p.bzr_address = 0x0078DD4E;
+                p.verified = true;
+                p.expected_original = { 0xE4, 0x84, 0x87, 0x00 };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
             else if (strcmp(p.name, "Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)") == 0)
@@ -889,11 +926,78 @@ namespace BZROpenShim
         {
             if (p.type != PatchType::DWORD) continue;
             if (strcmp(p.name, "Version Notice 1/2 OpenShim") == 0 ||
-                strcmp(p.name, "Version Notice 2/2 OpenShim") == 0)
+                strcmp(p.name, "Version Notice 2/2 OpenShim") == 0 ||
+                strcmp(p.name, "Version Notice 3/3 OpenShim") == 0 ||
+                strcmp(p.name, "Main Menu GameVersion OpenShim") == 0 ||
+                strcmp(p.name, "Main Menu Version Text OpenShim") == 0)
             {
                 p.payload.assign(tagBytes, tagBytes + sizeof(tagBytes));
             }
         }
+    }
+
+    static void WaitForExpectedBytes(std::vector<PatchDef>& patches, bool isSteam)
+    {
+        if (!isSteam)
+            return;
+
+        const char* const steamVersionNames[] =
+        {
+            "Version Notice 1/2 OpenShim",
+            "Version Notice 2/2 OpenShim",
+            "Version Notice 3/3 OpenShim",
+            "Main Menu Version Text OpenShim",
+        };
+
+        auto isTrackedPatch = [&steamVersionNames](const PatchDef& patch) -> bool
+        {
+            for (const char* name : steamVersionNames)
+            {
+                if (strcmp(patch.name, name) == 0)
+                    return true;
+            }
+            return false;
+        };
+
+        Log(L"[INFO] Waiting for Steam version notice sites to settle...\n");
+        constexpr int kMaxAttempts = 200;
+        constexpr DWORD kDelayMs = 10;
+
+        for (int attempt = 0; attempt < kMaxAttempts; ++attempt)
+        {
+            bool allReady = true;
+
+            for (const auto& patch : patches)
+            {
+                if (!isTrackedPatch(patch) || patch.expected_original.empty() || patch.bzr_address == 0)
+                    continue;
+
+                std::vector<uint8_t> current(patch.expected_original.size());
+                SIZE_T read = 0;
+                if (!ReadProcessMemory(
+                        GetCurrentProcess(),
+                        reinterpret_cast<const void*>(patch.bzr_address),
+                        current.data(),
+                        current.size(),
+                        &read) ||
+                    read != current.size() ||
+                    current != patch.expected_original)
+                {
+                    allReady = false;
+                    break;
+                }
+            }
+
+            if (allReady)
+            {
+                Log(L"[OK]   Steam version notice sites settled after %d attempts\n", attempt + 1);
+                return;
+            }
+
+            Sleep(kDelayMs);
+        }
+
+        Log(L"[WARN] Steam version notice sites never settled; version tag patches may be skipped\n");
     }
 
     // -----------------------------------------------------------------------
@@ -937,7 +1041,7 @@ namespace BZROpenShim
 
         // 4. Build patch list and resolve dynamic addresses
         auto patches = BuildPatchList();
-        ScanForPatchAddresses(patches);
+        ScanForPatchAddresses(patches, isSteam);
 
         auto findAddr = [&patches](const char* name) -> uint32_t
         {
@@ -964,6 +1068,7 @@ namespace BZROpenShim
         FillJmp5Payloads(patches);
         FillVersionNoticePayloads(patches);
         FillRel32Payloads(patches);
+        WaitForExpectedBytes(patches, isSteam);
 
         // 5. Apply patches
         int applied = 0;

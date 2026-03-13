@@ -16,6 +16,8 @@ __pycache__/
 # Analysis results
 *.txt
 *.log
+BZPLYR*.DEF
+save/
 architecture_reference.md
 reverse_engineering/latest
 reverse_engineering/snapshots

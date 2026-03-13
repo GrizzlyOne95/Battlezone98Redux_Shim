@@ -102,7 +102,9 @@ namespace
         if (!g_LogFile)
             return TRUE;
 
-        setvbuf(g_LogFile, nullptr, _IOLBF, 0);
+        // UCRT rejects line-buffered mode with a zero-sized buffer here and
+        // fail-fast triggers during DllMain. Leave the default buffering in
+        // place and flush explicitly after each write instead.
         WriteLineUnlocked(LogLevel::Info, "logger", "================ session start ================");
         WriteLineUnlocked(LogLevel::Info, "logger", g_LogPath);
         return TRUE;
