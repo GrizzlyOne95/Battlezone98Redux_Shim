@@ -30,7 +30,8 @@ namespace
         bool disableUdpConnReset = true;
         bool logSocketErrors = true;
         bool applySocketBuffers = true;
-        uint32_t socketBufferSize = 524288;
+        uint32_t sendBufferSize = 524288;
+        uint32_t recvBufferSize = 2097152;
     };
 
     struct SocketState
@@ -167,14 +168,24 @@ namespace
         g_Config.keepAlive = ReadIniBool("OpenShimSocket", "EnableKeepAlive", true);
         g_Config.disableUdpConnReset = ReadIniBool("OpenShimSocket", "DisableUdpConnReset", true);
         g_Config.logSocketErrors = ReadIniBool("OpenShimSocket", "LogSocketErrors", true);
-        g_Config.socketBufferSize = ReadIniUint("OpenShimSocket", "SocketBufferSize", 524288);
-        g_Config.socketBufferSize = std::max<uint32_t>(g_Config.socketBufferSize, 32 * 1024);
+        const uint32_t legacySocketBufferSize = ReadIniUint("OpenShimSocket", "SocketBufferSize", 0);
+        g_Config.sendBufferSize = ReadIniUint(
+            "OpenShimSocket",
+            "SendBufferSize",
+            legacySocketBufferSize ? legacySocketBufferSize : 524288);
+        g_Config.recvBufferSize = ReadIniUint(
+            "OpenShimSocket",
+            "ReceiveBufferSize",
+            legacySocketBufferSize ? legacySocketBufferSize : 2097152);
+        g_Config.sendBufferSize = std::max<uint32_t>(g_Config.sendBufferSize, 32 * 1024);
+        g_Config.recvBufferSize = std::max<uint32_t>(g_Config.recvBufferSize, 32 * 1024);
 
         const std::string manifestPath = JoinPath(GetGameDir(), "netcode_manifest.json");
         if (FileExists(manifestPath))
         {
             g_Config.applySocketBuffers = false;
-            g_Config.socketBufferSize = 524288;
+            g_Config.sendBufferSize = 524288;
+            g_Config.recvBufferSize = 2097152;
         }
     }
 
@@ -345,8 +356,8 @@ namespace
 
         if (g_Config.applySocketBuffers)
         {
-            SetSocketIntOption(s, SOL_SOCKET, SO_SNDBUF, static_cast<int>(g_Config.socketBufferSize), "SO_SNDBUF");
-            SetSocketIntOption(s, SOL_SOCKET, SO_RCVBUF, static_cast<int>(g_Config.socketBufferSize), "SO_RCVBUF");
+            SetSocketIntOption(s, SOL_SOCKET, SO_SNDBUF, static_cast<int>(g_Config.sendBufferSize), "SO_SNDBUF");
+            SetSocketIntOption(s, SOL_SOCKET, SO_RCVBUF, static_cast<int>(g_Config.recvBufferSize), "SO_RCVBUF");
         }
 
         if ((state.type == SOCK_STREAM || state.protocol == IPPROTO_TCP) && g_Config.tcpNoDelay)
@@ -544,10 +555,11 @@ namespace
 
         LogShimA(LogLevel::Info, "net", "[OpenShimNet] Initializing");
         LogNetIniValues();
-        Logf("[OpenShimNet] Config enabled=%d logging=%d socketBufferSize=%u applySocketBuffers=%d tcpNoDelay=%d keepAlive=%d disableUdpConnReset=%d logSocketErrors=%d",
+        Logf("[OpenShimNet] Config enabled=%d logging=%d sendBufferSize=%u recvBufferSize=%u applySocketBuffers=%d tcpNoDelay=%d keepAlive=%d disableUdpConnReset=%d logSocketErrors=%d",
             g_Config.enabled ? 1 : 0,
             g_Config.logging ? 1 : 0,
-            g_Config.socketBufferSize,
+            g_Config.sendBufferSize,
+            g_Config.recvBufferSize,
             g_Config.applySocketBuffers ? 1 : 0,
             g_Config.tcpNoDelay ? 1 : 0,
             g_Config.keepAlive ? 1 : 0,
