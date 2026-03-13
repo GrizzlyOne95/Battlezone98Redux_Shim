@@ -121,3 +121,10 @@ It prints:
 - the candidate `SaveGame` start
 - the GOG-only save signature hit
 - the cross-build `.text` mismatch summary
+
+For PDB and RSDS inspection without `llvm-pdbutil`, use:
+
+`python reverse_engineering/inspect_pdb.py --pe <exe-or-dll> --pdb <pdb> --show-paths --find SaveGame --find LoadGame`
+
+That path uses direct PE/MSF parsing and raw PDB string scanning, so it does
+not depend on DIA or COM registration.
