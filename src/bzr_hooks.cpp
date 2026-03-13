@@ -72,6 +72,7 @@ namespace BZROpenShim
     using FnBanLookup = void* (__cdecl*)(uint16_t id);
     using FnIsHost = int(__cdecl*)();
     using FnMapFilter6 = uint32_t(__thiscall*)(void* thisPtr);
+    using FnChunkResolve = uint32_t(__cdecl*)(void* objectPtr, uint32_t variant);
     using FnMapFilterScroll = void(__cdecl*)();
 
     static void** g_BzrPtr_945478 = nullptr;
@@ -107,8 +108,44 @@ namespace BZROpenShim
     static FnBanLookup g_BzrFn_BanLookup = nullptr; // 0x005771B0
     static FnIsHost g_BzrFn_IsHost = nullptr; // 0x00572A60
     static FnMapFilter6 g_BzrFn_MapFilter6 = nullptr; // 0x004200B0
+    static FnChunkResolve g_BzrFn_ChunkResolve = nullptr; // 0x004E3620
     static FnMapFilterScroll g_BzrFn_MapFilterScrollUp = nullptr; // 0x007CB500
     static FnMapFilterScroll g_BzrFn_MapFilterScrollDown = nullptr; // 0x007CB540
+
+    namespace
+    {
+        struct BzrGeoEntry
+        {
+            uint32_t packedKey;
+            void* handle;
+            uint32_t unk8;
+            uint32_t unkC;
+        };
+
+        struct BzrGeoLookup
+        {
+            uint32_t count;
+            uint32_t unk4;
+            uint32_t cachedKey;
+            BzrGeoEntry* entries;
+        };
+
+        static bool g_EnableChunkRenderFallback = false;
+        static volatile long g_ChunkRenderLogBudget = 12;
+
+        static bool EnvFlagEnabled(const char* name)
+        {
+            if (!name || !*name)
+                return false;
+
+            char value[16] = {};
+            const DWORD len = GetEnvironmentVariableA(name, value, static_cast<DWORD>(sizeof(value)));
+            if (len == 0 || len >= sizeof(value))
+                return false;
+
+            return value[0] != '0' && value[0] != '\0';
+        }
+    }
 
     // ---------------------------------------------------------------------
     // Helpers
@@ -148,6 +185,7 @@ namespace BZROpenShim
         g_BzrFn_BanLookup = reinterpret_cast<FnBanLookup>(0x005771B0);
         g_BzrFn_IsHost = reinterpret_cast<FnIsHost>(0x00572A60);
         g_BzrFn_MapFilter6 = reinterpret_cast<FnMapFilter6>(0x004200B0);
+        g_BzrFn_ChunkResolve = reinterpret_cast<FnChunkResolve>(0x004E3620);
 
         g_BzrFn_MapFilter8Check = reinterpret_cast<void*>(0x007D3360);
         g_BzrFn_MapFilterCreate = reinterpret_cast<void*>(0x007C9DE0);
@@ -157,6 +195,12 @@ namespace BZROpenShim
 
         g_BzrFn_VehicleFixPre = reinterpret_cast<void*>(0x00481EA0);
         g_BzrFn_VehicleFixOrig = reinterpret_cast<void*>(0x00481AF0);
+
+        g_EnableChunkRenderFallback =
+            EnvFlagEnabled("BZR_CHUNK_FORCE_FIRST_GEO") ||
+            EnvFlagEnabled("OPENSHIM_CHUNK_FORCE_FIRST_GEO");
+        Log(L"[CHUNK] Force-first-geo fallback: %hs\n",
+            g_EnableChunkRenderFallback ? "enabled" : "disabled");
     }
 
     void InitBzrHookStrings()
@@ -328,6 +372,54 @@ namespace BZROpenShim
 
         auto target = reinterpret_cast<uint8_t*>(thisPtr) + 0x168;
         return g_BzrFn_MapFilter6(target);
+    }
+
+    uint32_t __cdecl ChunkRenderResolveHook(void* objectPtr, uint32_t variant)
+    {
+        if (!objectPtr || !g_BzrFn_ChunkResolve)
+            return 0;
+
+        uint32_t resolved = g_BzrFn_ChunkResolve(objectPtr, variant);
+        auto* objectBytes = reinterpret_cast<uint8_t*>(objectPtr);
+        auto* activeHandle = reinterpret_cast<void**>(objectBytes + 0x64);
+
+        if (resolved != 0 && *activeHandle != nullptr)
+            return resolved;
+
+        if (!g_EnableChunkRenderFallback)
+            return resolved;
+
+        auto* lookup = reinterpret_cast<BzrGeoLookup*>(objectBytes + 0x68);
+        if (!lookup || lookup->count == 0 || !lookup->entries)
+            return resolved;
+
+        for (uint32_t index = 0; index < lookup->count; ++index)
+        {
+            BzrGeoEntry& entry = lookup->entries[index];
+            if (!entry.handle)
+                continue;
+
+            *activeHandle = entry.handle;
+            lookup->cachedKey = entry.packedKey;
+
+            if (InterlockedDecrement(&g_ChunkRenderLogBudget) >= 0)
+            {
+                const uint32_t renderClass =
+                    *reinterpret_cast<uint32_t*>(objectBytes + 0x14) & 0xF000;
+                const uint32_t objectType = *reinterpret_cast<uint32_t*>(objectBytes + 0x84);
+                Log(L"[CHUNK] Forced geometry entry idx=%u key=0x%08X class=0x%04X type=0x%X count=%u obj=0x%08X\n",
+                    index,
+                    entry.packedKey,
+                    renderClass,
+                    objectType,
+                    lookup->count,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectPtr)));
+            }
+
+            return 1;
+        }
+
+        return resolved;
     }
 
     void __cdecl MapFilterOnScrollUp()
