@@ -64,6 +64,15 @@ The current patcher handles that by:
 
 For the Steam build, copy `winmm.dll` next to `battlezone98redux.exe`.
 
+## Debug Metadata Inspection
+
+If `llvm-pdbutil` is unavailable or blocked by local DIA/COM registration, use:
+
+`python reverse_engineering/inspect_pdb.py --pe bin\Release\winmm.dll --pdb bin\Release\winmm.pdb --list-streams --show-paths`
+
+The script reads PE RSDS records and PDB MSF metadata directly and can also
+search raw PDB strings with repeated `--find` regex arguments.
+
 ## License
 
 MIT - see LICENSE file
