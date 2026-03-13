@@ -37,8 +37,8 @@ namespace BZROpenShim
     static PFN_WSASocketW g_RealWSASocketW = nullptr;
 
     // Buffer sizes from manifest (defaults if missing)
-    static uint32_t g_SendSize = 524288;   // 512 KB
-    static uint32_t g_RecvSize = 524288;   // 512 KB
+    static uint32_t g_SendSize = DEFAULT_SEND_BUFFER;
+    static uint32_t g_RecvSize = DEFAULT_RECV_BUFFER;
 
     // -----------------------------------------------------------------------
     // Our hook that gets called instead of the real WSASocketW
