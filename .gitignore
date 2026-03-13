@@ -20,6 +20,7 @@ BZPLYR*.DEF
 save/
 architecture_reference.md
 reverse_engineering/latest
+reverse_engineering/workshop
 reverse_engineering/snapshots
 
 # Tools and references
