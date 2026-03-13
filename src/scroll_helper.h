@@ -256,21 +256,22 @@ namespace BZROpenShim
 
         uint8_t* base = reinterpret_cast<uint8_t*>(ctx);
         void* listRootRaw = nullptr;
+        void* listInnerRaw = nullptr;
+        int32_t spanStart = 0;
+        int32_t spanEnd = 0;
+        int32_t count = 0;
         if (!TryReadPtr(base + 0x1C8, listRootRaw) || !listRootRaw)
             goto done;
 
-        void* listInnerRaw = nullptr;
         if (!TryReadPtr(reinterpret_cast<uint8_t*>(listRootRaw) + 0x2C, listInnerRaw) || !listInnerRaw)
             goto done;
 
-        int32_t spanStart = 0;
-        int32_t spanEnd = 0;
         if (!TryReadI32(reinterpret_cast<uint8_t*>(listInnerRaw) + 0x168, spanStart))
             goto done;
         if (!TryReadI32(reinterpret_cast<uint8_t*>(listInnerRaw) + 0x16C, spanEnd))
             goto done;
 
-        int32_t count = (spanEnd - spanStart) / 0x1C;
+        count = (spanEnd - spanStart) / 0x1C;
         if (saved >= count)
             goto done;
 

@@ -147,9 +147,12 @@ namespace BZROpenShim
             { 0x0, PT::JMP5, {}, "Map List Rewrite for Hop-Fix 2/3", false },
             // -- Hop-Fix 3/3 --
             { 0x0, PT::JMP5, {}, "Map List Rewrite for Hop-Fix 3/3", false },
-            // -- Version notice (two sites) --
+            // -- Version notice / CLI constants --
             { 0x0, PT::DWORD, {}, "Version Notice 1/2 OpenShim", false },
             { 0x0, PT::DWORD, {}, "Version Notice 2/2 OpenShim", false },
+            { 0x0, PT::DWORD, {}, "Version Notice 3/3 OpenShim", false },
+            { 0x0, PT::DWORD, {}, "Main Menu GameVersion OpenShim", false },
+            { 0x0, PT::DWORD, {}, "Main Menu Version Text OpenShim", false },
             // -- Known map-jump fix (conditional -> unconditional branch) --
             { 0x0, PT::BYTE1, { 0xEB }, "Map Jump Fix Branch Override", false },
             // -- Map filters (partial set) --
