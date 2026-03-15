@@ -215,7 +215,9 @@ namespace
         const std::string manifestPath = JoinPath(GetGameDir(), "netcode_manifest.json");
         if (FileExists(manifestPath))
         {
-            g_Config.applySocketBuffers = false;
+            // Keep the runtime socket guardrails active even when the binary
+            // patch manifest is present so we can verify and top off buffers if
+            // the live socket ends up below the intended target.
             g_Config.sendBufferSize = 524288;
             g_Config.recvBufferSize = 2097152;
         }
@@ -648,7 +650,7 @@ namespace
             return;
 
         const int err = g_RealWSAGetLastError();
-        if (err == WSAEWOULDBLOCK)
+        if (err == WSAEWOULDBLOCK || err == WSA_IO_PENDING || err == ERROR_IO_PENDING)
             return;
 
         bool shouldLog = true;
@@ -965,8 +967,8 @@ namespace
             g_Config.logSockOptCalls ? 1 : 0,
             g_Config.packetLogLimit,
             g_Config.packetLogInterval);
-        if (!g_Config.applySocketBuffers)
-            LogShimA(LogLevel::Info, "net", "[OpenShimNet] netcode_manifest.json detected; skipping socket buffer overrides");
+        if (FileExists(JoinPath(GetGameDir(), "netcode_manifest.json")))
+            LogShimA(LogLevel::Info, "net", "[OpenShimNet] netcode_manifest.json detected; using manifest buffer targets as runtime minimums");
 
         if (!g_Config.enabled)
         {
