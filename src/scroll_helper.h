@@ -29,6 +29,7 @@ namespace BZROpenShim
     inline void (*g_BZRFn_ScrollUp)()   = nullptr;
     inline void (*g_BZRFn_ScrollDown)() = nullptr;
     inline uint32_t (*g_BZRFn_GetScrollState)() = nullptr;
+    inline void (*g_BZRFn_MapListFixSupport1)() = nullptr;
     inline void* g_HopFix3Context = nullptr;
     inline int32_t g_SavedScrollState = 0;
     inline bool g_HaveSavedScrollState = false;
@@ -104,6 +105,28 @@ namespace BZROpenShim
         return src;
     }
 
+    inline void SetSavedMapName(const char* value, uint32_t len)
+    {
+        if (!value || len == 0)
+        {
+            g_SavedMapName[0] = '\0';
+            g_SavedMapNameLen = 0;
+            return;
+        }
+
+        const uint32_t copyLen = (len >= sizeof(g_SavedMapName))
+            ? (sizeof(g_SavedMapName) - 1)
+            : len;
+        memcpy(g_SavedMapName, value, copyLen);
+        g_SavedMapName[copyLen] = '\0';
+        g_SavedMapNameLen = copyLen;
+    }
+
+    inline void SetSavedMapNameLiteral(const char* value)
+    {
+        SetSavedMapName(value, value ? static_cast<uint32_t>(strlen(value)) : 0);
+    }
+
     // -----------------------------------------------------------------------
     // Hop-Fix 1 helper: capture selected entry + index.
     // Mirrors the reference patch semantics in clean-room form.
@@ -155,9 +178,7 @@ namespace BZROpenShim
         const uint32_t copyLen = (entryLen >= sizeof(g_SavedMapName)) ? (sizeof(g_SavedMapName) - 1) : entryLen;
         __try
         {
-            memcpy(g_SavedMapName, entryStr, copyLen);
-            g_SavedMapName[copyLen] = '\0';
-            g_SavedMapNameLen = copyLen;
+            SetSavedMapName(entryStr, copyLen);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -182,13 +203,7 @@ namespace BZROpenShim
         if (!this_ptr) return;
 
         if (g_SavedMapNameLen == 0)
-        {
-            const char* allMaps = "All Maps";
-            const size_t allLen = strlen(allMaps);
-            memcpy(g_SavedMapName, allMaps, allLen);
-            g_SavedMapName[allLen] = '\0';
-            g_SavedMapNameLen = static_cast<uint32_t>(allLen);
-        }
+            SetSavedMapNameLiteral("All Maps");
 
         // Resolve list root at [this + 0x1C8]
         uint8_t* base = reinterpret_cast<uint8_t*>(this_ptr);
@@ -205,32 +220,65 @@ namespace BZROpenShim
         uint8_t* begin = reinterpret_cast<uint8_t*>(beginRaw);
         uint8_t* end = reinterpret_cast<uint8_t*>(endRaw);
         if (end < begin) return;
+        const int32_t entryCount = static_cast<int32_t>((end - begin) / 0x18);
+        if (entryCount <= 0)
+            return;
 
         int32_t foundIndex = -1;
-        uint8_t* entry = begin;
-        for (; entry != end; entry += 0x18)
+        const int32_t savedIndex = g_SavedMapIndex;
+
+        if (savedIndex >= 0 && savedIndex < entryCount)
         {
+            uint8_t* entry = begin + (savedIndex * 0x18);
             uint32_t entryLen = 0;
             const char* entryStr = ResolveEntryString(entry, entryLen);
-            if (!entryStr || entryLen == 0) continue;
-
-            if (entryLen == g_SavedMapNameLen &&
+            if (entryStr && entryLen == g_SavedMapNameLen &&
                 memcmp(entryStr, g_SavedMapName, entryLen) == 0)
             {
-                foundIndex = static_cast<int32_t>((entry - begin) / 0x18);
-                break;
+                foundIndex = savedIndex;
             }
         }
 
-        int32_t targetIndex = (foundIndex >= 0) ? foundIndex : 0;
+        if (foundIndex < 0)
+        {
+            uint8_t* entry = begin;
+            for (; entry != end; entry += 0x18)
+            {
+                uint32_t entryLen = 0;
+                const char* entryStr = ResolveEntryString(entry, entryLen);
+                if (!entryStr || entryLen == 0) continue;
+
+                if (entryLen == g_SavedMapNameLen &&
+                    memcmp(entryStr, g_SavedMapName, entryLen) == 0)
+                {
+                    foundIndex = static_cast<int32_t>((entry - begin) / 0x18);
+                    break;
+                }
+            }
+        }
+
+        int32_t targetIndex = 0;
+        if (foundIndex >= 0)
+        {
+            targetIndex = foundIndex;
+        }
+        else if (savedIndex >= 0)
+        {
+            targetIndex = (savedIndex < entryCount) ? savedIndex : (entryCount - 1);
+        }
+
         if (!g_BZRFnPtr_HopFix2) return;
+
+        void* selectThis = nullptr;
+        if (!TryReadPtr(base + 0x17C, selectThis) || !selectThis)
+            return;
 
         void (*fn)() = g_BZRFnPtr_HopFix2;
         __try
         {
             __asm
             {
-                mov ecx, this_ptr
+                mov ecx, selectThis
                 push targetIndex
                 call fn
             }
@@ -252,7 +300,8 @@ namespace BZROpenShim
         if (!g_BZRFnPtr_HopFix3Step) return;
 
         int32_t saved = g_SavedMapIndex;
-        if (saved < 0) return;
+        if (saved < 0)
+            return;
 
         uint8_t* base = reinterpret_cast<uint8_t*>(ctx);
         void* listRootRaw = nullptr;

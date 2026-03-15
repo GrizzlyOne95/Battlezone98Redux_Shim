@@ -20,6 +20,7 @@
 #include "scroll_helper.h"
 #include "trampolines.h"
 #include "netcode_hooks.h"
+#include "d3d_startup_hooks.h"
 #include "bzr_hooks.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -42,6 +43,30 @@ namespace BZROpenShim
     // -----------------------------------------------------------------------
     static FILE* g_Log = nullptr;
 
+    static bool ShouldLogHookHits()
+    {
+        static int s_cached = -1;
+        if (s_cached < 0)
+        {
+            char value[8] = {};
+            const DWORD len = GetEnvironmentVariableA("OPENSHIM_TRACE_HITS", value, static_cast<DWORD>(sizeof(value)));
+            s_cached = (len > 0 && len < sizeof(value) && value[0] != '0') ? 1 : 0;
+        }
+        return s_cached != 0;
+    }
+
+    static bool ShouldEnableD3DStartupHooks()
+    {
+        static int s_cached = -1;
+        if (s_cached < 0)
+        {
+            char value[8] = {};
+            const DWORD len = GetEnvironmentVariableA("OPENSHIM_ENABLE_D3D_STARTUP_HOOKS", value, static_cast<DWORD>(sizeof(value)));
+            s_cached = (len > 0 && len < sizeof(value) && value[0] != '0') ? 1 : 0;
+        }
+        return s_cached != 0;
+    }
+
     void Log(const wchar_t* fmt, ...)
     {
         if (!g_Log) return;
@@ -54,8 +79,8 @@ namespace BZROpenShim
 
     extern "C" void LogHit(const char* name)
     {
-        static volatile long s_budget = 50;
-        if (InterlockedDecrement(&s_budget) >= 0)
+        static volatile long s_budget = 100;
+        if (ShouldLogHookHits() && InterlockedDecrement(&s_budget) >= 0)
             Log(L"[HIT]  %hs\n", name);
     }
 
@@ -373,7 +398,7 @@ namespace BZROpenShim
     // Resolve internal BZR.exe pointers for trampolines/helpers.
     // Now uses dynamic addresses found by pattern scanning.
     // -----------------------------------------------------------------------
-    static void ResolvePointers(uint32_t hopFix1Addr, uint32_t hopFix2Addr, uint32_t hopFix3Addr, uint32_t probeMapSortingAddr, uint32_t probeMapFilter1Addr, uint32_t probeMapListFix1Addr, uint32_t probeMapListFix2Addr)
+    static void ResolvePointers(uint32_t mapSortingAddr, uint32_t hopFix1Addr, uint32_t hopFix2Addr, uint32_t hopFix3Addr, uint32_t probeMapFilter1Addr, uint32_t probeMapListFix1Addr, uint32_t probeMapListFix2Addr)
     {
         Log(L"=========== RESOLVING POINTERS ===========\n");
 
@@ -420,15 +445,15 @@ namespace BZROpenShim
             g_RetAddr_HopFix3 = reinterpret_cast<void*>(hopFix3Addr + 0x07);
             Log(L"[PTR] Hop-Fix 3 return: 0x%08X\n", hopFix3Addr + 0x07);
         }
-        if (g_EnableScrollRestore && !g_BZRFnPtr_HopFix3Step)
+        if (!g_BZRFnPtr_HopFix3Step)
         {
             g_BZRFnPtr_HopFix3Step = reinterpret_cast<void (*)()>(0x007A3130);
             Log(L"[PTR] Hop-Fix 3 step function fallback: 0x%08X\n", 0x007A3130);
         }
 
-        if (probeMapSortingAddr) {
-            g_RetAddr_Probe_MapSorting = reinterpret_cast<void*>(probeMapSortingAddr + 0x07);
-            Log(L"[PTR] Probe MapSorting return: 0x%08X\n", probeMapSortingAddr + 0x07);
+        if (mapSortingAddr) {
+            g_RetAddr_Probe_MapSorting = reinterpret_cast<void*>(mapSortingAddr + 0x07);
+            Log(L"[PTR] Map Sorting return: 0x%08X\n", mapSortingAddr + 0x07);
         }
         if (probeMapFilter1Addr) {
             g_RetAddr_Probe_MapFilter1 = reinterpret_cast<void*>(probeMapFilter1Addr + 0x05);
@@ -436,8 +461,10 @@ namespace BZROpenShim
         }
 
         if (probeMapListFix1Addr) {
-            g_RetAddr_Probe_MapListFix1 = reinterpret_cast<void*>(probeMapListFix1Addr + 0x05);
-            Log(L"[PTR] Probe MapListFix1 return: 0x%08X\n", probeMapListFix1Addr + 0x05);
+            g_RetAddr_MapListFixSupport1 = reinterpret_cast<void*>(probeMapListFix1Addr + 0x15);
+            g_BZRFn_MapListFixSupport1 = reinterpret_cast<void (*)()>(0x007A3BD0);
+            Log(L"[PTR] Map List Fix Support 1 return: 0x%08X\n", probeMapListFix1Addr + 0x15);
+            Log(L"[PTR] Map List Fix Support 1 fallback: 0x%08X\n", 0x007A3BD0);
         }
         if (probeMapListFix2Addr) {
             g_RetAddr_Probe_MapListFix2 = reinterpret_cast<void*>(probeMapListFix2Addr + 0x05);
@@ -484,13 +511,12 @@ namespace BZROpenShim
         Log(L"[PTR] Ban Hook1 return: 0x%08X\n", 0x007D0A35);
         Log(L"[PTR] Ban Hook2 return: 0x%08X\n", 0x007A691A);
 
-        // Scroll Helpers — DISABLED: these are GOG-specific addresses that
-        // hang on Steam.  Leaving them nullptr safely skips scroll restoration
-        // (all callers null-check).  The core hop-fix still works without them.
-        // TODO: decode these dynamically from nearby call sites like HopFix1/2.
-        // g_BZRFn_GetScrollState   = reinterpret_cast<uint32_t (*)()>(0x007D3360);
-        // g_BZRFn_ScrollUp         = reinterpret_cast<void (*)()>(0x007CB540);
-        // g_BZRFn_ScrollDown       = reinterpret_cast<void (*)()>(0x007CB500);
+        g_BZRFn_GetScrollState = reinterpret_cast<uint32_t (*)()>(0x007D3360);
+        g_BZRFn_ScrollUp = reinterpret_cast<void (*)()>(0x007CB500);
+        g_BZRFn_ScrollDown = reinterpret_cast<void (*)()>(0x007CB540);
+        Log(L"[PTR] Scroll state helper: 0x%08X\n", 0x007D3360);
+        Log(L"[PTR] Scroll up helper: 0x%08X\n", 0x007CB500);
+        Log(L"[PTR] Scroll down helper: 0x%08X\n", 0x007CB540);
 
         Log(L"[OK]   Pointers resolved\n");
     }
@@ -660,15 +686,48 @@ namespace BZROpenShim
         }
 
         // Fallback for v2.2.301 when pattern scan misses due environment noise.
-        // On Steam, the hop-fix patterns are NOT found and the trampolines
-        // crash/freeze because they call into GOG-specific function addresses.
-        // We ONLY fallback for safe patches (Version Notice, Map Jump Fix).
-        // Hop-fix 1/2/3 and probe patches are SKIPPED when not found by scan.
+        // The original _bzcp.dll uses these same fixed sites on Steam, so we
+        // can fall back to them once our helper logic matches that reference.
         for (auto& p : patches)
         {
             if (p.verified) continue;
 
-            if (strcmp(p.name, "Map Jump Fix Branch Override") == 0)
+            if (strcmp(p.name, "Map Sorting") == 0)
+            {
+                p.bzr_address = 0x007680D6;
+                p.verified = true;
+                p.expected_original = { 0x89, 0x4D, 0xF8, 0x0F, 0xB6 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Map List Rewrite for Hop-Fix 1/3") == 0)
+            {
+                p.bzr_address = 0x0079B85F;
+                p.verified = true;
+                p.expected_original = { 0x8B, 0x45, 0xFC, 0x8B, 0x88 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Map List Rewrite for Hop-Fix 2/3") == 0)
+            {
+                p.bzr_address = 0x00799279;
+                p.verified = true;
+                p.expected_original = { 0x6A, 0x00, 0x8B, 0x85, 0x5C };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Map List Rewrite for Hop-Fix 3/3") == 0)
+            {
+                p.bzr_address = 0x00799377;
+                p.verified = true;
+                p.expected_original = { 0xFF, 0xD2, 0x68, 0x30, 0x09 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Map List Fix Support 1/3") == 0)
+            {
+                p.bzr_address = 0x00799774;
+                p.verified = true;
+                p.expected_original = { 0x89, 0x4D, 0xFC, 0x8B, 0x45 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Map Jump Fix Branch Override") == 0)
             {
                 p.bzr_address = 0x007AA5A1;
                 p.verified = true;
@@ -861,10 +920,11 @@ namespace BZROpenShim
         // Map patch names to their trampoline addresses
         struct { const char* name; void* fn; } map[] =
         {
+            { "Map Sorting",                                     (void*)Trampoline_Probe_MapSorting },
             { "Map List Rewrite for Hop-Fix 1/3",              (void*)Trampoline_HopFix1 },
             { "Map List Rewrite for Hop-Fix 2/3",              (void*)Trampoline_HopFix2 },
             { "Map List Rewrite for Hop-Fix 3/3",              (void*)Trampoline_HopFix3 },
-            { "Probe Refresh Path MapSorting",                 (void*)Trampoline_Probe_MapSorting },
+            { "Map List Fix Support 1/3",                       (void*)Trampoline_MapListFixSupport1 },
             { "Probe Refresh Path MapFilter1",                 (void*)Trampoline_Probe_MapFilter1 },
             { "Probe MapListFix1",                              (void*)Trampoline_Probe_MapListFix1 },
             { "Probe MapListFix2",                              (void*)Trampoline_Probe_MapListFix2 },
@@ -1039,12 +1099,21 @@ namespace BZROpenShim
 
         const bool isSteam = IsSteamExe();
         Log(L"[INFO] Executable: %hs\n", isSteam ? "battlezone98redux.exe (Steam)" : "BZR.exe (GOG)");
-        g_EnableScrollRestore = !isSteam;
-        if (!g_EnableScrollRestore)
-            Log(L"[INFO] Steam build detected: HopFix3 scroll restore disabled\n");
+        g_EnableScrollRestore = true;
+        Log(L"[INFO] HopFix helpers enabled for %hs\n",
+            isSteam ? "Steam" : "GOG");
 
         // Apply netcode socket buffer hooks EARLY before the game initializes its networking.
         ApplyNetcodeHooks();
+        if (ShouldEnableD3DStartupHooks())
+        {
+            Log(L"[INFO] D3D startup hooks enabled via OPENSHIM_ENABLE_D3D_STARTUP_HOOKS\n");
+            ApplyD3DStartupHooks();
+        }
+        else
+        {
+            Log(L"[INFO] D3D startup hooks disabled by default\n");
+        }
 
         // 2. Check BZR.exe version
         uint32_t gameVer = GetBZRVersion();
@@ -1077,12 +1146,12 @@ namespace BZROpenShim
         };
 
         ResolvePointers(
+            findAddr("Map Sorting"),
             findAddr("Map List Rewrite for Hop-Fix 1/3"),
             findAddr("Map List Rewrite for Hop-Fix 2/3"),
             findAddr("Map List Rewrite for Hop-Fix 3/3"),
-            findAddr("Probe Refresh Path MapSorting"),
             findAddr("Probe Refresh Path MapFilter1"),
-            findAddr("Probe MapListFix1"),
+            findAddr("Map List Fix Support 1/3"),
             findAddr("Probe MapListFix2"));
 
         ResolveBzrHooks();

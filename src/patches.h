@@ -82,6 +82,7 @@ namespace BZROpenShim
     extern void __cdecl Trampoline_HopFix1();
     extern void __cdecl Trampoline_HopFix2();
     extern void __cdecl Trampoline_HopFix3();
+    extern void __cdecl Trampoline_MapListFixSupport1();
     extern void __cdecl Trampoline_Probe_MapSorting();
     extern void __cdecl Trampoline_Probe_MapFilter1();
     extern void __cdecl Trampoline_Probe_MapListFix1();
@@ -109,6 +110,7 @@ namespace BZROpenShim
     inline void* g_RetAddr_HopFix1           = nullptr;
     inline void* g_RetAddr_HopFix2           = nullptr;
     inline void* g_RetAddr_HopFix3           = nullptr;
+    inline void* g_RetAddr_MapListFixSupport1 = nullptr;
     inline void* g_RetAddr_Probe_MapSorting  = nullptr;
     inline void* g_RetAddr_Probe_MapFilter1  = nullptr;
     inline void* g_RetAddr_Probe_MapListFix1 = nullptr;
@@ -141,12 +143,14 @@ namespace BZROpenShim
         // Hop-fix + vehicle mod fix + version notice: keep patch surface minimal.
         return
         {
+            { 0x0, PT::JMP5, {}, "Map Sorting", false },
             // -- Hop-Fix 1/3 --
             { 0x0, PT::JMP5, {}, "Map List Rewrite for Hop-Fix 1/3", false },
             // -- Hop-Fix 2/3 --
             { 0x0, PT::JMP5, {}, "Map List Rewrite for Hop-Fix 2/3", false },
             // -- Hop-Fix 3/3 --
             { 0x0, PT::JMP5, {}, "Map List Rewrite for Hop-Fix 3/3", false },
+            { 0x0, PT::JMP5, {}, "Map List Fix Support 1/3", false },
             // -- Version notice / CLI constants --
             { 0x0, PT::DWORD, {}, "Version Notice 1/2 OpenShim", false },
             { 0x0, PT::DWORD, {}, "Version Notice 2/2 OpenShim", false },
