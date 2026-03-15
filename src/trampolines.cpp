@@ -107,28 +107,55 @@ void __declspec(naked) __cdecl Trampoline_HopFix3()
         popfd
 
         call edx
-        // Re-execute the original instructions we overwrote
-        call edx                       // FF D2
-
-        // Steam build: skip scroll restore helpers entirely.
-        cmp  byte ptr [g_EnableScrollRestore], 0
-        je   skip_restore
-
-        // Capture likely list context for thiscall scroll routines.
         mov  eax, [ebp - 0xA4]
-        mov  ecx, eax
+        mov  [ebp - 4], eax
+        mov  ecx, [ebp - 4]
         call RestoreMapListVisibleIndex
-        push 0x930
-        call ScrollUpdateHelper
-
-    skip_restore:
         push 0x930                     // 68 30 09 00 00
         jmp  [g_RetAddr_HopFix3]
     }
 }
 
 // -----------------------------------------------------------------------
-// Probe: refresh/map-sorting path candidate from earlier patch analysis
+// Map List Fix Support 1/3
+// Site: 0x00799774
+// Purpose: intercept native row-scroll updates and let our helper consume
+// the delta first; if not handled, fall back to the original 0x007A3BD0 call.
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_MapListFixSupport1()
+{
+    static const char* name = "Trampoline_MapListFixSupport1";
+    __asm
+    {
+        pushfd
+        pushad
+        push name
+        call LogHit
+        add  esp, 4
+        popad
+        popfd
+
+        mov  [ebp - 4], ecx
+        mov  eax, [ebp + 8]
+        push eax
+        mov  ecx, eax
+        call ScrollUpdateHelper
+        test eax, eax
+        jne  support1_done
+
+        mov  ecx, [ebp - 4]
+        mov  ecx, [ecx + 0x1C8]
+        call [g_BZRFn_MapListFixSupport1]
+        jmp  [g_RetAddr_MapListFixSupport1]
+
+    support1_done:
+        add  esp, 4
+        jmp  [g_RetAddr_MapListFixSupport1]
+    }
+}
+
+// -----------------------------------------------------------------------
+// Map Sorting
 // Site: 0x007680D6
 // Original bytes:
 //   89 4D F8          mov [ebp-0x08], ecx

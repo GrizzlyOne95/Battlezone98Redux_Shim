@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <climits>
 #include <new>
 
 namespace BZROpenShim
@@ -114,6 +115,18 @@ namespace BZROpenShim
 
     namespace
     {
+        constexpr DWORD kDbgPrintExceptionAnsi = 0x40010006u;
+        constexpr DWORD kDbgPrintExceptionWide = 0x4001000Au;
+        constexpr DWORD kVehicleAssetRetryDelayMs = 1500u;
+        constexpr size_t kVehicleAssetExceptionCacheSize = 8;
+
+        struct VehicleAssetExceptionCacheEntry
+        {
+            char assetName[64];
+            DWORD suppressUntil;
+            DWORD lastSkipLogTick;
+        };
+
         struct BzrGeoEntry
         {
             uint32_t packedKey;
@@ -132,6 +145,7 @@ namespace BZROpenShim
 
         static bool g_EnableChunkRenderFallback = false;
         static volatile long g_ChunkRenderLogBudget = 12;
+        static VehicleAssetExceptionCacheEntry g_VehicleAssetExceptionCache[kVehicleAssetExceptionCacheSize] = {};
 
         static bool EnvFlagEnabled(const char* name)
         {
@@ -144,6 +158,131 @@ namespace BZROpenShim
                 return false;
 
             return value[0] != '0' && value[0] != '\0';
+        }
+
+        static int FilterVehicleAssetDebugException(
+            unsigned int code,
+            const char* stage,
+            const BzrString* assetName)
+        {
+            if (code == kDbgPrintExceptionAnsi || code == kDbgPrintExceptionWide)
+            {
+                Log(L"[VEHICLE] Swallowed debug-print exception during %hs for asset '%hs' (code=0x%08X)\n",
+                    stage ? stage : "unknown",
+                    assetName ? BzrStringData(assetName) : "",
+                    code);
+                return EXCEPTION_EXECUTE_HANDLER;
+            }
+
+            return EXCEPTION_CONTINUE_SEARCH;
+        }
+
+        static bool CopyVehicleAssetName(
+            const BzrString* assetName,
+            char (&buffer)[64])
+        {
+            buffer[0] = '\0';
+            if (!assetName)
+                return false;
+
+            const char* name = BzrStringData(assetName);
+            if (!name || !name[0])
+                return false;
+
+            strncpy_s(buffer, name, _TRUNCATE);
+            return buffer[0] != '\0';
+        }
+
+        static bool TickIsBefore(DWORD lhs, DWORD rhs)
+        {
+            return static_cast<long>(lhs - rhs) < 0;
+        }
+
+        static VehicleAssetExceptionCacheEntry* FindVehicleAssetExceptionEntry(const char* assetName)
+        {
+            if (!assetName || !assetName[0])
+                return nullptr;
+
+            for (auto& entry : g_VehicleAssetExceptionCache)
+            {
+                if (entry.assetName[0] && _stricmp(entry.assetName, assetName) == 0)
+                    return &entry;
+            }
+
+            return nullptr;
+        }
+
+        static VehicleAssetExceptionCacheEntry* GetVehicleAssetExceptionSlot()
+        {
+            VehicleAssetExceptionCacheEntry* oldest = &g_VehicleAssetExceptionCache[0];
+            for (auto& entry : g_VehicleAssetExceptionCache)
+            {
+                if (!entry.assetName[0])
+                    return &entry;
+                if (TickIsBefore(entry.suppressUntil, oldest->suppressUntil))
+                    oldest = &entry;
+            }
+            return oldest;
+        }
+
+        static void RememberVehicleAssetDebugException(const BzrString* assetName)
+        {
+            char assetNameBuffer[64] = {};
+            if (!CopyVehicleAssetName(assetName, assetNameBuffer))
+                return;
+
+            VehicleAssetExceptionCacheEntry* entry = FindVehicleAssetExceptionEntry(assetNameBuffer);
+            if (!entry)
+                entry = GetVehicleAssetExceptionSlot();
+            if (!entry)
+                return;
+
+            strncpy_s(entry->assetName, assetNameBuffer, _TRUNCATE);
+            entry->suppressUntil = GetTickCount() + kVehicleAssetRetryDelayMs;
+            entry->lastSkipLogTick = 0;
+        }
+
+        static bool ShouldSuppressVehicleAssetLoad(const BzrString* assetName, const char* stage)
+        {
+            char assetNameBuffer[64] = {};
+            if (!CopyVehicleAssetName(assetName, assetNameBuffer))
+                return false;
+
+            VehicleAssetExceptionCacheEntry* entry = FindVehicleAssetExceptionEntry(assetNameBuffer);
+            if (!entry)
+                return false;
+
+            const DWORD now = GetTickCount();
+            if (!TickIsBefore(now, entry->suppressUntil))
+                return false;
+
+            if (entry->lastSkipLogTick == 0 || !TickIsBefore(now, entry->lastSkipLogTick + 500u))
+            {
+                Log(L"[VEHICLE] Suppressed retry during %hs for recent-miss asset '%hs'\n",
+                    stage ? stage : "unknown",
+                    assetNameBuffer);
+                entry->lastSkipLogTick = now;
+            }
+
+            return true;
+        }
+
+        static void CallVehicleListLoadSafely(void* mgrThis, BzrString* assetName, const char* stage)
+        {
+            if (!g_BzrFn_VehicleListLoad || !mgrThis || !assetName)
+                return;
+
+            if (ShouldSuppressVehicleAssetLoad(assetName, stage))
+                return;
+
+            __try
+            {
+                g_BzrFn_VehicleListLoad(mgrThis, assetName);
+            }
+            __except (FilterVehicleAssetDebugException(GetExceptionCode(), stage, assetName))
+            {
+                RememberVehicleAssetDebugException(assetName);
+            }
         }
     }
 
@@ -282,8 +421,8 @@ namespace BZROpenShim
         BzrStringAppend(&file, ".vxt", 4);
 
         void* mgrThis = (g_BzrPtr_94548C && *g_BzrPtr_94548C) ? *g_BzrPtr_94548C : nullptr;
-        if (g_BzrFn_VehicleListLoad && mgrThis)
-            g_BzrFn_VehicleListLoad(mgrThis, &file);
+        if (mgrThis)
+            CallVehicleListLoadSafely(mgrThis, &file, "VehicleListModFix_Select");
 
         if (g_BzrFn_VehicleListRefresh1 && g_VehicleListContext)
             g_BzrFn_VehicleListRefresh1(g_VehicleListContext);
@@ -335,8 +474,13 @@ namespace BZROpenShim
             g_BzrFn_VehicleListSet(listThis, title, subtitle);
 
         void* mgrThis = (g_BzrPtr_94548C && *g_BzrPtr_94548C) ? *g_BzrPtr_94548C : nullptr;
-        if (g_BzrFn_VehicleListLoad && mgrThis && g_VehicleListParam)
-            g_BzrFn_VehicleListLoad(mgrThis, reinterpret_cast<BzrString*>(g_VehicleListParam));
+        if (mgrThis && g_VehicleListParam)
+        {
+            CallVehicleListLoadSafely(
+                mgrThis,
+                reinterpret_cast<BzrString*>(g_VehicleListParam),
+                "VehicleListModFix4Helper");
+        }
 
         if (g_BzrFn_VehicleListFinalize && listThis)
             g_BzrFn_VehicleListFinalize(listThis);
