@@ -19,7 +19,6 @@
 #include "patches.h"
 #include "scroll_helper.h"
 #include "trampolines.h"
-#include "netcode_hooks.h"
 #include "d3d_startup_hooks.h"
 #include "bzr_hooks.h"
 
@@ -65,6 +64,41 @@ namespace BZROpenShim
             s_cached = (len > 0 && len < sizeof(value) && value[0] != '0') ? 1 : 0;
         }
         return s_cached != 0;
+    }
+
+    static bool ShouldAllowStartupAutoLoad()
+    {
+        static int s_cached = -1;
+        if (s_cached < 0)
+        {
+            char value[8] = {};
+            const DWORD len = GetEnvironmentVariableA("OPENSHIM_ALLOW_STARTUP_AUTOLOAD", value, static_cast<DWORD>(sizeof(value)));
+            s_cached = (len > 0 && len < sizeof(value) && value[0] != '0') ? 1 : 0;
+        }
+        return s_cached != 0;
+    }
+
+    static void SuppressStartupShellAutoLoad()
+    {
+        constexpr uintptr_t kStartupShellAutoLoadFlagAddr = 0x008EAAA8;
+
+        if (ShouldAllowStartupAutoLoad())
+        {
+            Log(L"[INFO] Startup shell autoload left enabled via OPENSHIM_ALLOW_STARTUP_AUTOLOAD\n");
+            return;
+        }
+
+        __try
+        {
+            auto* flag = reinterpret_cast<volatile uint32_t*>(kStartupShellAutoLoadFlagAddr);
+            const uint32_t previous = *flag;
+            *flag = 0;
+            Log(L"[INFO] Startup shell autoload gate cleared (prev=%u)\n", previous);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            Log(L"[WARN] Failed to clear startup shell autoload gate\n");
+        }
     }
 
     void Log(const wchar_t* fmt, ...)
@@ -504,6 +538,7 @@ namespace BZROpenShim
         g_RetAddr_CommandHelpFallback = reinterpret_cast<void*>(0x0062491F);
         g_RetAddr_BanHook1     = reinterpret_cast<void*>(0x007D0A35);
         g_RetAddr_BanHook2     = reinterpret_cast<void*>(0x007A691A);
+        g_RetAddr_AutoSaveLoadHook = reinterpret_cast<void*>(0x0078B45F);
         Log(L"[PTR] BZRNET Host return: 0x%08X\n", 0x00743C30);
         Log(L"[PTR] BZRNET Client return: 0x%08X\n", 0x0073E748);
         Log(L"[PTR] Command Help handled return: 0x%08X\n", 0x00625052);
@@ -908,6 +943,13 @@ namespace BZROpenShim
                 p.expected_original = { 0xC7, 0x45, 0xFC, 0xFF, 0xFF };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
+            else if (strcmp(p.name, "AutoSave Load Button Hook") == 0)
+            {
+                p.bzr_address = 0x0078B45A;
+                p.verified = true;
+                p.expected_original = { 0xA1, 0x0C, 0x83, 0x91, 0x00 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
             else
             {
                 Log(L"[SCAN] SKIPPED %hs (pattern not found, no safe fallback)\n", p.name);
@@ -942,6 +984,7 @@ namespace BZROpenShim
             { "Custom Command /help Handler",                   (void*)Trampoline_CommandHelp },
             { "Ban Button Hook 1/2",                            (void*)Trampoline_BanButtonHook1 },
             { "Ban Button Hook 2/2",                            (void*)Trampoline_BanButtonHook2 },
+            { "AutoSave Load Button Hook",                      (void*)Trampoline_AutoSaveLoadButtonHook },
         };
 
         for (auto& p : patches)
@@ -1103,8 +1146,6 @@ namespace BZROpenShim
         Log(L"[INFO] HopFix helpers enabled for %hs\n",
             isSteam ? "Steam" : "GOG");
 
-        // Apply netcode socket buffer hooks EARLY before the game initializes its networking.
-        ApplyNetcodeHooks();
         if (ShouldEnableD3DStartupHooks())
         {
             Log(L"[INFO] D3D startup hooks enabled via OPENSHIM_ENABLE_D3D_STARTUP_HOOKS\n");
@@ -1156,6 +1197,7 @@ namespace BZROpenShim
 
         ResolveBzrHooks();
         InitBzrHookStrings();
+        SuppressStartupShellAutoLoad();
 
         FillJmp5Payloads(patches);
         FillVersionNoticePayloads(patches);

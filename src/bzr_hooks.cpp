@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <climits>
+#include <filesystem>
 #include <new>
 
 namespace BZROpenShim
@@ -28,6 +29,9 @@ namespace BZROpenShim
     void* g_BanButtonClient = nullptr;
     void* g_BanLabelHost   = nullptr;
     void* g_BanLabelClient = nullptr;
+    void* g_AutoSaveLoadParent = nullptr;
+    void* g_AutoSaveLoadScreen = nullptr;
+    void* g_AutoSaveLoadButton = nullptr;
 
     uint32_t g_BanFlag = 0;
     float g_BanX = 0.0f;
@@ -65,6 +69,7 @@ namespace BZROpenShim
     using FnUiSetInt = void(__thiscall*)(void* self, void* param);
     using FnUiSetCb  = void(__thiscall*)(void* self, void* cb);
     using FnUiAddChild = void(__thiscall*)(void* parent, void* child, int flags);
+    using FnUiDialogAction = void(__thiscall*)(void* thisPtr, int value);
 
     using FnGetSelected = void* (__thiscall*)(void* list);
     using FnCommandHandler = void(__cdecl*)(uint16_t id, const char* cmd);
@@ -72,6 +77,14 @@ namespace BZROpenShim
     using FnHelpUi = void(__cdecl*)(int channel, const char* text);
     using FnBanLookup = void* (__cdecl*)(uint16_t id);
     using FnIsHost = int(__cdecl*)();
+    using FnAutoLoadShellGame = int(__cdecl*)();
+    using FnLoadGameByPath = int(__cdecl*)(const char* path, char* outName, int outNameLen);
+    using FnLoadScreenPrep = void(__cdecl*)();
+    using FnFinalizeQueuedLoad = void(__cdecl*)();
+    using FnSetShellState = void(__cdecl*)(int state);
+    using FnBzrStringCtorFromCStr = void(__thiscall*)(BzrString* self, const char* text);
+    using FnBzrStringDtor = void(__thiscall*)(BzrString* self);
+    using FnLoadScreenClearSelection = void(__cdecl*)(BzrString* text);
     using FnMapFilter6 = uint32_t(__thiscall*)(void* thisPtr);
     using FnChunkResolve = uint32_t(__cdecl*)(void* objectPtr, uint32_t variant);
     using FnMapFilterScroll = void(__cdecl*)();
@@ -101,6 +114,8 @@ namespace BZROpenShim
     static FnUiSetCb g_BzrFn_SetOnClick = nullptr; // 0x007C23E0
     static FnUiSetCb g_BzrFn_SetOnHover = nullptr; // 0x007C23C0
     static FnUiAddChild g_BzrFn_AddChild = nullptr; // 0x007D2110
+    static FnUiDialogAction g_BzrFn_UiDialogSetEnabled = nullptr; // 0x007C9170
+    static FnUiDialogAction g_BzrFn_UiDialogAdvance = nullptr; // 0x007C7930
 
     static FnGetSelected g_BzrFn_GetSelected = nullptr; // 0x007CB1A0
     static FnCommandHandler g_BzrFn_CommandHandler = nullptr; // 0x006247A0
@@ -108,6 +123,14 @@ namespace BZROpenShim
     static FnHelpUi g_BzrFn_HelpUi = nullptr;   // 0x007A47B0
     static FnBanLookup g_BzrFn_BanLookup = nullptr; // 0x005771B0
     static FnIsHost g_BzrFn_IsHost = nullptr; // 0x00572A60
+    static FnAutoLoadShellGame g_BzrFn_AutoLoadShellGame = nullptr; // 0x004FDAB0
+    static FnLoadGameByPath g_BzrFn_LoadGameByPath = nullptr; // 0x004FDFE0 (_load_bzone_game)
+    static FnLoadScreenPrep g_BzrFn_LoadScreenPrep = nullptr; // 0x0078BB00
+    static FnFinalizeQueuedLoad g_BzrFn_FinalizeQueuedLoad = nullptr; // 0x005D4980
+    static FnSetShellState g_BzrFn_SetShellState = nullptr; // 0x00434170
+    static FnBzrStringCtorFromCStr g_BzrFn_BzrStringCtorFromCStr = nullptr; // 0x00416EF0
+    static FnBzrStringDtor g_BzrFn_BzrStringDtor = nullptr; // 0x00416F30
+    static FnLoadScreenClearSelection g_BzrFn_LoadScreenClearSelection = nullptr; // 0x00482860
     static FnMapFilter6 g_BzrFn_MapFilter6 = nullptr; // 0x004200B0
     static FnChunkResolve g_BzrFn_ChunkResolve = nullptr; // 0x004E3620
     static FnMapFilterScroll g_BzrFn_MapFilterScrollUp = nullptr; // 0x007CB500
@@ -119,6 +142,16 @@ namespace BZROpenShim
         constexpr DWORD kDbgPrintExceptionWide = 0x4001000Au;
         constexpr DWORD kVehicleAssetRetryDelayMs = 1500u;
         constexpr size_t kVehicleAssetExceptionCacheSize = 8;
+        constexpr float kAutoSaveLoadButtonX = 135.0f;
+        constexpr float kAutoSaveLoadButtonY = 180.0f + (10.0f * 68.0f);
+        constexpr float kAutoSaveLoadButtonW = 1100.0f;
+        constexpr float kAutoSaveLoadButtonH = 58.0f;
+        constexpr uint32_t kAutoSaveLoadButtonFlags = 0x22;
+        constexpr int kLoadQueuedState = 5;
+        constexpr int kQueuedLoadNameBufferLen = 16;
+        constexpr uintptr_t kLoadScreenSelectionFlagAddr = 0x00918133;
+        constexpr uintptr_t kQueuedLoadPathBufferAddr = 0x00945708;
+        constexpr uintptr_t kQueuedLoadNameBufferAddr = 0x00915540;
 
         struct VehicleAssetExceptionCacheEntry
         {
@@ -225,6 +258,93 @@ namespace BZROpenShim
             return oldest;
         }
 
+        static std::filesystem::path GetMainModuleDirectory()
+        {
+            char path[MAX_PATH] = {};
+            const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+            if (length == 0 || length >= MAX_PATH)
+                return {};
+
+            return std::filesystem::path(path).parent_path();
+        }
+
+        static bool AutoSaveFileExists()
+        {
+            const auto moduleDir = GetMainModuleDirectory();
+            if (moduleDir.empty())
+                return false;
+
+            std::error_code error;
+            return std::filesystem::exists(moduleDir / "Save" / "auto.sav", error) ||
+                std::filesystem::exists(moduleDir / "Save" / "auto2.sav", error);
+        }
+
+        static bool TryGetAutoSaveFilePathUtf8(char (&outPath)[MAX_PATH])
+        {
+            outPath[0] = '\0';
+
+            const auto moduleDir = GetMainModuleDirectory();
+            if (moduleDir.empty())
+                return false;
+
+            std::error_code error;
+            const auto primaryPath = moduleDir / "Save" / "auto.sav";
+            if (std::filesystem::exists(primaryPath, error))
+            {
+                const auto primaryString = primaryPath.string();
+                return strncpy_s(outPath, primaryString.c_str(), _TRUNCATE) == 0;
+            }
+
+            error.clear();
+            const auto secondaryPath = moduleDir / "Save" / "auto2.sav";
+            if (std::filesystem::exists(secondaryPath, error))
+            {
+                const auto secondaryString = secondaryPath.string();
+                return strncpy_s(outPath, secondaryString.c_str(), _TRUNCATE) == 0;
+            }
+
+            return false;
+        }
+
+        static void PrepareLoadScreenForSelection(void* screen)
+        {
+            if (!screen)
+                return;
+
+            auto* screenBytes = reinterpret_cast<uint8_t*>(screen);
+            void* dialog = *reinterpret_cast<void**>(screenBytes + 0x138);
+            if (!dialog || !g_BzrFn_UiDialogSetEnabled || !g_BzrFn_UiDialogAdvance ||
+                !g_BzrFn_LoadScreenPrep || !g_BzrFn_BzrStringCtorFromCStr ||
+                !g_BzrFn_BzrStringDtor || !g_BzrFn_LoadScreenClearSelection)
+            {
+                return;
+            }
+
+            *reinterpret_cast<uint8_t*>(kLoadScreenSelectionFlagAddr) = 1;
+            g_BzrFn_UiDialogSetEnabled(dialog, 0);
+            g_BzrFn_LoadScreenPrep();
+            g_BzrFn_UiDialogAdvance(dialog, 0x17);
+
+            BzrString emptyText = {};
+            g_BzrFn_BzrStringCtorFromCStr(&emptyText, "");
+            g_BzrFn_LoadScreenClearSelection(&emptyText);
+            g_BzrFn_BzrStringDtor(&emptyText);
+        }
+
+        static bool QueueAutoSaveLoadPath(const char* autoSavePath)
+        {
+            if (!autoSavePath || !autoSavePath[0])
+                return false;
+
+            auto* queuedPath = reinterpret_cast<char*>(kQueuedLoadPathBufferAddr);
+            auto* queuedName = reinterpret_cast<char*>(kQueuedLoadNameBufferAddr);
+            if (!queuedPath || !queuedName)
+                return false;
+
+            queuedName[0] = '\0';
+            return strncpy_s(queuedPath, MAX_PATH, autoSavePath, _TRUNCATE) == 0;
+        }
+
         static void RememberVehicleAssetDebugException(const BzrString* assetName)
         {
             char assetNameBuffer[64] = {};
@@ -316,6 +436,8 @@ namespace BZROpenShim
         g_BzrFn_SetOnClick = reinterpret_cast<FnUiSetCb>(0x007C23E0);
         g_BzrFn_SetOnHover = reinterpret_cast<FnUiSetCb>(0x007C23C0);
         g_BzrFn_AddChild = reinterpret_cast<FnUiAddChild>(0x007D2110);
+        g_BzrFn_UiDialogSetEnabled = reinterpret_cast<FnUiDialogAction>(0x007C9170);
+        g_BzrFn_UiDialogAdvance = reinterpret_cast<FnUiDialogAction>(0x007C7930);
 
         g_BzrFn_GetSelected = reinterpret_cast<FnGetSelected>(0x007CB1A0);
         g_BzrFn_CommandHandler = reinterpret_cast<FnCommandHandler>(0x006247A0);
@@ -323,6 +445,14 @@ namespace BZROpenShim
         g_BzrFn_HelpUi = reinterpret_cast<FnHelpUi>(0x007A47B0);
         g_BzrFn_BanLookup = reinterpret_cast<FnBanLookup>(0x005771B0);
         g_BzrFn_IsHost = reinterpret_cast<FnIsHost>(0x00572A60);
+        g_BzrFn_AutoLoadShellGame = reinterpret_cast<FnAutoLoadShellGame>(0x004FDAB0);
+        g_BzrFn_LoadGameByPath = reinterpret_cast<FnLoadGameByPath>(0x004FDFE0);
+        g_BzrFn_LoadScreenPrep = reinterpret_cast<FnLoadScreenPrep>(0x0078BB00);
+        g_BzrFn_FinalizeQueuedLoad = reinterpret_cast<FnFinalizeQueuedLoad>(0x005D4980);
+        g_BzrFn_SetShellState = reinterpret_cast<FnSetShellState>(0x00434170);
+        g_BzrFn_BzrStringCtorFromCStr = reinterpret_cast<FnBzrStringCtorFromCStr>(0x00416EF0);
+        g_BzrFn_BzrStringDtor = reinterpret_cast<FnBzrStringDtor>(0x00416F30);
+        g_BzrFn_LoadScreenClearSelection = reinterpret_cast<FnLoadScreenClearSelection>(0x00482860);
         g_BzrFn_MapFilter6 = reinterpret_cast<FnMapFilter6>(0x004200B0);
         g_BzrFn_ChunkResolve = reinterpret_cast<FnChunkResolve>(0x004E3620);
 
@@ -1296,6 +1426,114 @@ namespace BZROpenShim
     {
         if (g_BzrFn_LabelState && g_BanLabelClient)
             g_BzrFn_LabelState(g_BanLabelClient, param);
+    }
+
+    void __cdecl AutoSaveButtonOnClickLoad()
+    {
+        if (!g_BzrFn_LoadGameByPath || !g_BzrFn_FinalizeQueuedLoad || !g_BzrFn_SetShellState)
+            return;
+
+        char autoSavePath[MAX_PATH] = {};
+        if (!TryGetAutoSaveFilePathUtf8(autoSavePath))
+        {
+            Log(L"[AUTOSAVE] AutoSave button clicked but no auto-save file exists\n");
+            return;
+        }
+
+        __try
+        {
+            PrepareLoadScreenForSelection(g_AutoSaveLoadScreen);
+            if (!QueueAutoSaveLoadPath(autoSavePath))
+            {
+                Log(L"[AUTOSAVE] Failed to queue auto-save load path=%hs\n", autoSavePath);
+                return;
+            }
+
+            auto* queuedPath = reinterpret_cast<char*>(kQueuedLoadPathBufferAddr);
+            auto* queuedName = reinterpret_cast<char*>(kQueuedLoadNameBufferAddr);
+            const int result = g_BzrFn_LoadGameByPath(
+                queuedPath,
+                queuedName,
+                kQueuedLoadNameBufferLen);
+            Log(L"[AUTOSAVE] Queued auto-save load path=%hs result=%d name=%hs\n",
+                queuedPath,
+                result,
+                queuedName);
+
+            if (result)
+            {
+                g_BzrFn_FinalizeQueuedLoad();
+                g_BzrFn_SetShellState(kLoadQueuedState);
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            Log(L"[AUTOSAVE] Direct auto-save load raised an exception\n");
+        }
+    }
+
+    static void AutoSaveLoadButtonCreate(void* parent, void* screen)
+    {
+        if (!parent || !screen || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild)
+            return;
+
+        if (!AutoSaveFileExists())
+            return;
+
+        if (g_AutoSaveLoadButton && g_AutoSaveLoadParent == parent && g_AutoSaveLoadScreen == screen)
+            return;
+
+        g_AutoSaveLoadParent = parent;
+        g_AutoSaveLoadScreen = screen;
+        g_AutoSaveLoadButton = nullptr;
+
+        void* buttonMem = ::operator new(0x1EC, std::nothrow);
+        if (!buttonMem)
+            return;
+
+        std::memset(buttonMem, 0, 0x1EC);
+        g_AutoSaveLoadButton = g_BzrFn_ButtonCtor(
+            buttonMem,
+            "AutoSave",
+            kAutoSaveLoadButtonX,
+            kAutoSaveLoadButtonY,
+            kAutoSaveLoadButtonW,
+            kAutoSaveLoadButtonH,
+            kAutoSaveLoadButtonFlags,
+            parent,
+            0,
+            0);
+
+        if (!g_AutoSaveLoadButton)
+            return;
+
+        if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(g_AutoSaveLoadButton, "mpcron.png");
+        if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(g_AutoSaveLoadButton, "mpcrclk.png");
+        if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(g_AutoSaveLoadButton, "mpcrclk.png");
+        if (g_BzrFn_SetButtonLabel) g_BzrFn_SetButtonLabel(g_AutoSaveLoadButton, "AutoSave");
+        // 0x007CC660 is a label-style tooltip writer that stores text inline at
+        // +0x144. Button objects use +0x150/+0x154 for hover/click callbacks,
+        // so using it here corrupts the callback slot and crashes the load menu.
+        if (g_BzrFn_SetOnClick) g_BzrFn_SetOnClick(g_AutoSaveLoadButton, reinterpret_cast<void*>(AutoSaveButtonOnClickLoad));
+        g_BzrFn_AddChild(parent, g_AutoSaveLoadButton, 0);
+    }
+
+    void AutoSaveLoadButtonCreateFromFrame(void* frameBase)
+    {
+        if (!frameBase)
+            return;
+
+        __try
+        {
+            auto* frame = reinterpret_cast<uint8_t*>(frameBase);
+            void* parent = *reinterpret_cast<void**>(frame - 0x184);
+            void* screen = *reinterpret_cast<void**>(frame - 0x178);
+            AutoSaveLoadButtonCreate(parent, screen);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            Log(L"[AUTOSAVE] Failed to inspect load screen frame for AutoSave button injection\n");
+        }
     }
 
     void BanButtonCreateHost()

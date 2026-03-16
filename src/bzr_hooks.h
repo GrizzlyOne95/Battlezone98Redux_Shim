@@ -20,6 +20,8 @@ namespace BZROpenShim
     void __cdecl BanButtonOnClickClient();
     void __cdecl BanButtonOnHoverHost(void* param);
     void __cdecl BanButtonOnHoverClient(void* param);
+    void __cdecl AutoSaveButtonOnClickLoad();
+    void AutoSaveLoadButtonCreateFromFrame(void* frameBase);
 
     // Custom /help + /ban command intercept.
     bool __cdecl HandleCommandHelpBan(uint16_t id, const char* cmd);
