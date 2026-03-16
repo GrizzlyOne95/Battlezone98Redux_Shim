@@ -102,6 +102,32 @@ The intent is to give a known good `VGEO` name a valid Redux mesh/material
 pipeline, then see whether chunk child objects become visible once a valid
 render handle is forced into the stock resolve/classify path.
 
+## Howitzer / Minelayer Weapon Mask Fix
+
+There is now a Shim-side behavior patch for the hardcoded howitzer and
+minelayer first-slot issue on the GOG executable.
+
+- The patch biases `Carrier` slot `0` toward the decoded `weaponMask` target
+  for `Howitzer` and `Minelayer` craft.
+- Artillery AI reaches the bias helper through the existing artillery hook.
+- Additional bias refreshes run through exact `weaponMask` getter hooks and the
+  existing hovercraft flame path, which helps keep minelayers aligned without
+  rewriting the full native AI state machine.
+- Steam is still skipped until the equivalent sites are revalidated there.
+
+Optional trace logging:
+
+- Enable `OPENSHIM_TRACE_ARTILLERY_MASK=1` before launching the game.
+- `[ARTYMASK]` lines in `winmm_shim.log` record `process`, `process vft`,
+  `craft`, `craft vft`, raw `weaponMask`, decoded `weaponMask`,
+  `modeList.enabledMask`, and `modeList.activeSlot`.
+- Logging is budget-limited to the first `400` hits.
+
+Current limitation:
+
+- This fix has been build-validated but not yet gameplay-validated in a live
+  Redux session.
+
 ## Building
 
 1. Open `BZROpenShim.sln` in Visual Studio 2022+
@@ -123,6 +149,43 @@ The verifier uses `openshim.log` as the source of truth and checks for:
 - successful Winsock hook installation
 - `SO_SNDBUF` readback reaching `524288`
 - `SO_RCVBUF` readback reaching `4194304`
+
+## LLDB Recovery
+
+If the local LLVM `lldb.exe` crashes on startup because it cannot find a
+complete Python 3.11 runtime, run:
+
+`powershell -ExecutionPolicy Bypass -File .\install_lldb_shim.ps1`
+
+The script installs user-level `lldb.cmd` and `lldb-dap.cmd` wrappers in
+`%USERPROFILE%\bin`, points them at the LLVM debugger binaries, and supplies
+the Python runtime from the Android Studio NDK LLDB bundle when present.
+
+## Netcode Reorder Controls
+
+The Windows shim now includes the first-pass UDP packet resequencer from the
+netcode investigation work. It runs inside the existing `WSARecvFrom` hook and
+holds small out-of-order bursts briefly so they can be delivered back to the
+game in sequence.
+
+Configure it through `net.ini` next to the game executable:
+
+```ini
+[OpenShimSocket]
+EnablePacketReorder=1
+PacketReorderWindowMs=30
+LogPacketReorder=1
+```
+
+Notes:
+
+- `EnablePacketReorder=1` enables the reorder buffer for synchronous UDP recv.
+- `PacketReorderWindowMs` is clamped to `5`-`200` ms.
+- `LogPacketReorder=1` enables detailed reorder diagnostics in `openshim.log`.
+- Environment variables `BZ_REORDER`, `BZ_REORDER_WINDOW_MS`,
+  `OPENSHIM_REORDER`, and `OPENSHIM_REORDER_WINDOW_MS` override the `net.ini`
+  values for testing.
+- The reorder path is bypassed for overlapped or async `WSARecvFrom` calls.
 
 ## Testing The Chunk Experiment
 

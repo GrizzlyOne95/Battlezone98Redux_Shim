@@ -102,6 +102,12 @@ namespace BZROpenShim
     extern void __cdecl Trampoline_BanButtonHook1();
     extern void __cdecl Trampoline_BanButtonHook2();
     extern void __cdecl Trampoline_AutoSaveLoadButtonHook();
+    extern void __cdecl Trampoline_TurretCraftAimPitchMultiplier();
+    extern void __cdecl Trampoline_TurretTankAimPitchMultiplier();
+    extern void __cdecl Trampoline_EngineFlameHoverCraftEmit();
+    extern void __cdecl Trampoline_ArtilleryMaskTrace();
+    extern void __cdecl Trampoline_DecodedWeaponMaskBias();
+    extern void __cdecl Trampoline_RawWeaponMaskBias();
     extern void __fastcall VehicleListModFix2(void* thisPtr, void* edx, BzrString* name);
 
     // -----------------------------------------------------------------------
@@ -135,6 +141,10 @@ namespace BZROpenShim
     inline void* g_RetAddr_BanHook1           = nullptr;
     inline void* g_RetAddr_BanHook2           = nullptr;
     inline void* g_RetAddr_AutoSaveLoadHook   = nullptr;
+    inline void* g_RetAddr_TurretCraftAimPitchMultiplier = nullptr;
+    inline void* g_RetAddr_TurretTankAimPitchMultiplier = nullptr;
+    inline void* g_RetAddr_ArtilleryMaskTrace = nullptr;
+    inline void (*g_BZRFnPtr_ArtilleryMaskTraceOriginal)() = nullptr;
 
     // -----------------------------------------------------------------------
     // Build the active hop-fix patch list.
@@ -174,6 +184,14 @@ namespace BZROpenShim
             { 0x0, PT::REL32, {}, "Chunk Render Resolve Hook", false },
             // -- Producer build menu bridge experiment --
             { 0x0, PT::REL32, {}, "Producer Build Menu Root Hook", false },
+            // -- Engine flame color routing --
+            { 0x0, PT::REL32, {}, "HoverCraft Engine Flame Emit Hook 1/2", false },
+            { 0x0, PT::REL32, {}, "HoverCraft Engine Flame Emit Hook 2/2", false },
+            { 0x0, PT::JMP5, {}, "Artillery Weapon Mask Trace", false },
+            { 0x0, PT::JMP5, {}, "Decoded Weapon Mask Carrier Bias Hook", false },
+            { 0x0, PT::JMP5, {}, "Raw Weapon Mask Carrier Bias Hook", false },
+            { 0x0, PT::DWORD, {}, "Engine Flame Control VTable Hook", false },
+            { 0x0, PT::DWORD, {}, "Engine Flame Submit VTable Hook", false },
             // -- Vehicle list / mod asset scoping --
             { 0x0, PT::JMP5, {}, "Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)", false },
             { 0x0, PT::REL32, {}, "Vehicle List Mod Fix 2/4 (Force Mod-Scoped Assets 2/3)", false },
@@ -188,6 +206,9 @@ namespace BZROpenShim
             { 0x0, PT::JMP5, {}, "Ban Button Hook 2/2", false },
             // -- Single-player load screen AutoSave button --
             { 0x0, PT::JMP5, {}, "AutoSave Load Button Hook", false },
+            // -- Turret aiming range --
+            { 0x0, PT::JMP5, {}, "TurretCraft Aim Pitch Multiplier", false },
+            { 0x0, PT::JMP5, {}, "TurretTank Aim Pitch Multiplier", false },
         };
     }
 } // namespace BZROpenShim

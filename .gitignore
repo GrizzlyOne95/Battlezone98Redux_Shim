@@ -11,6 +11,13 @@
 # Python scripts and artifacts
 *.py
 !reverse_engineering/locate_native_save.py
+!reverse_engineering/export_pdb_reference.py
+!reverse_engineering/export_ghidra_inventory.py
+!reverse_engineering/run_best_effort_pipeline.py
+!reverse_engineering/finalize_global_corpus.py
+!reverse_engineering/build_re_brief.py
+!reverse_engineering/export_existing_project_decomp.py
+!reverse_engineering/complete_cached_project_pipeline.py
 __pycache__/
 
 # Analysis results
@@ -22,6 +29,13 @@ architecture_reference.md
 reverse_engineering/latest
 reverse_engineering/workshop
 reverse_engineering/snapshots
+reverse_engineering/current_global_corpus/
+reverse_engineering/current_legacy_global_corpus/
+reverse_engineering/portable_corpora/
+reverse_engineering/bzr_audio_re*/
+.ghidra_tmp/
+battlezone98redux.exe/
+39024
 
 # Tools and references
 tools/

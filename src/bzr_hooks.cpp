@@ -36,6 +36,7 @@ namespace BZROpenShim
     uint32_t g_BanFlag = 0;
     float g_BanX = 0.0f;
     float g_BanY = 0.0f;
+    float g_TurretAimPitchMultiplier = 0.95f;
 
     uint8_t g_MapFilterFlag11 = 0;
     uint8_t g_MapFilterFlag12 = 0;
@@ -92,6 +93,13 @@ namespace BZROpenShim
     using FnBuildItemInit = void(__cdecl*)(BuildItem& item, int64_t token);
     using FnBuildItemCleanup = void(__cdecl*)(BuildItem& item);
     using FnProducerModeCall = void* (__cdecl*)(void* producerPtr, int slot, int flags);
+    using FnEngineFlameAddFlame = void(__thiscall*)(void* self, const void* transform, float scale);
+    using FnEngineFlameControl = void(__thiscall*)(void* self);
+    using FnEngineFlameSubmit = void(__thiscall*)(void* self, void* camera);
+    using FnEngineFlameResolveTexture = int(__cdecl*)(BzrString* textureName);
+    using FnGetHandle = uint32_t(__thiscall*)(void* self);
+    using FnGetTeamNum = int(__cdecl*)(int handle);
+    using FnExuGetTeamEngineFlameColor = int(__cdecl*)(int team);
 
     static void** g_BzrPtr_945478 = nullptr;
     static void** g_BzrPtr_94548C = nullptr;
@@ -142,6 +150,13 @@ namespace BZROpenShim
     static FnBuildItemInit g_BzrFn_InitBuildItem = nullptr; // 0x0049F5C0
     static FnBuildItemCleanup g_BzrFn_CleanupBuildItem = nullptr; // 0x0049F880
     static FnProducerModeCall g_BzrFn_ProducerModeCallOriginal = nullptr;
+    static FnEngineFlameAddFlame g_BzrFn_EngineFlameAddFlame = reinterpret_cast<FnEngineFlameAddFlame>(0x004C8800);
+    static FnEngineFlameControl g_BzrFn_EngineFlameControl = reinterpret_cast<FnEngineFlameControl>(0x004C88A0);
+    static FnEngineFlameSubmit g_BzrFn_EngineFlameSubmit = reinterpret_cast<FnEngineFlameSubmit>(0x004C88C0);
+    static FnEngineFlameResolveTexture g_BzrFn_EngineFlameResolveTexture = reinterpret_cast<FnEngineFlameResolveTexture>(0x0068BED0);
+    static FnGetHandle g_BzrFn_GetHandle = reinterpret_cast<FnGetHandle>(0x00462380);
+    static FnGetTeamNum g_BzrFn_GetTeamNum = reinterpret_cast<FnGetTeamNum>(0x005C8800);
+    static FnExuGetTeamEngineFlameColor g_ExuFn_GetTeamEngineFlameColor = nullptr;
     static BuildItem* g_BzrBuildMenuRoot = nullptr;
     static bool g_IsSteamExe = false;
 
@@ -176,6 +191,15 @@ namespace BZROpenShim
         constexpr uint32_t kArmoryAttachableVft = 0x00408A18;
         constexpr uint32_t kConstructionRigDistributedVft = 0x0040A158;
         constexpr uint32_t kConstructionRigAttachableVft = 0x0040A1B0;
+        constexpr uintptr_t kEngineFlamePrimaryAddr = 0x009B2C88;
+        constexpr uintptr_t kEngineFlameSecondaryAddr = 0x009B3ED8;
+        constexpr size_t kEngineFlameObjectSize = 0x1250;
+        constexpr size_t kEngineFlameFlamePtrOffset = 0x1228;
+        constexpr size_t kEngineFlameFlameTextureOffset = 0x123C;
+        constexpr int kEngineFlameColorDefault = 0;
+        constexpr int kEngineFlameColorBlue = 1;
+        constexpr int kEngineFlameColorRed = 2;
+        constexpr int kEngineFlameColorGreen = 3;
 
         enum class ProducerBuildMenuKind
         {
@@ -229,11 +253,22 @@ namespace BZROpenShim
 
         static bool g_EnableChunkRenderFallback = false;
         static volatile long g_ChunkRenderLogBudget = 12;
+        static volatile long g_ArtilleryMaskTraceBudget = 400;
         static VehicleAssetExceptionCacheEntry g_VehicleAssetExceptionCache[kVehicleAssetExceptionCacheSize] = {};
         static ProducerBuildMenuConfig g_ProducerBuildMenuConfig = {};
         static bool g_HasAppliedProducerBuildMenu = false;
         static int64_t g_LastAppliedProducerBuildMenu = 0;
         static uint32_t g_LastUnknownProducerVft = 0;
+        static bool g_LoggedExuEngineFlameBridge = false;
+        static bool g_LoggedExuEngineFlameBridgeMissing = false;
+        static bool g_EngineFlameVariantsInitialized = false;
+        static bool g_EngineFlameVariantsInitAttempted = false;
+        static int g_EngineFlamePrimaryRedTexture = 0;
+        static int g_EngineFlamePrimaryGreenTexture = 0;
+        alignas(16) static unsigned char g_EngineFlamePrimaryRed[kEngineFlameObjectSize] = {};
+        alignas(16) static unsigned char g_EngineFlamePrimaryGreen[kEngineFlameObjectSize] = {};
+        alignas(16) static unsigned char g_EngineFlameSecondaryRed[kEngineFlameObjectSize] = {};
+        alignas(16) static unsigned char g_EngineFlameSecondaryGreen[kEngineFlameObjectSize] = {};
 
         static bool EnvFlagEnabled(const char* name)
         {
@@ -246,6 +281,259 @@ namespace BZROpenShim
                 return false;
 
             return value[0] != '0' && value[0] != '\0';
+        }
+
+        static bool TryGetEnvFloat(const char* name, float& outValue)
+        {
+            if (!name || !*name)
+                return false;
+
+            char value[32] = {};
+            const DWORD len = GetEnvironmentVariableA(name, value, static_cast<DWORD>(sizeof(value)));
+            if (len == 0 || len >= sizeof(value))
+                return false;
+
+            char* end = nullptr;
+            const float parsed = std::strtof(value, &end);
+            if (end == value)
+                return false;
+
+            while (*end == ' ' || *end == '\t')
+                ++end;
+            if (*end != '\0')
+                return false;
+
+            outValue = parsed;
+            return true;
+        }
+
+        static float ClampTurretAimPitchMultiplier(float value)
+        {
+            if (value < 0.0f)
+                return 0.0f;
+            if (value > 1.25f)
+                return 1.25f;
+            return value;
+        }
+
+        static void* GetEngineFlamePrimary()
+        {
+            return reinterpret_cast<void*>(kEngineFlamePrimaryAddr);
+        }
+
+        static void* GetEngineFlameSecondary()
+        {
+            return reinterpret_cast<void*>(kEngineFlameSecondaryAddr);
+        }
+
+        static void ResetEngineFlameQueue(void* manager)
+        {
+            if (!manager)
+                return;
+
+            auto* bytes = reinterpret_cast<uint8_t*>(manager);
+            *reinterpret_cast<uintptr_t*>(bytes + kEngineFlameFlamePtrOffset) =
+                reinterpret_cast<uintptr_t>(bytes + 0x28);
+        }
+
+        static void SetEngineFlameTexture(void* manager, int textureHandle)
+        {
+            if (!manager)
+                return;
+
+            auto* bytes = reinterpret_cast<uint8_t*>(manager);
+            *reinterpret_cast<int*>(bytes + kEngineFlameFlameTextureOffset) = textureHandle;
+        }
+
+        static FnExuGetTeamEngineFlameColor ResolveExuTeamEngineFlameColor()
+        {
+            if (g_ExuFn_GetTeamEngineFlameColor)
+                return g_ExuFn_GetTeamEngineFlameColor;
+
+            HMODULE exuModule = GetModuleHandleA("exu.dll");
+            if (!exuModule)
+                exuModule = GetModuleHandleA("ExtraUtilities.dll");
+
+            if (!exuModule)
+            {
+                if (!g_LoggedExuEngineFlameBridgeMissing)
+                {
+                    Log(L"[FLAME] EXU module not loaded; team engine flame colors default to stock blue\n");
+                    g_LoggedExuEngineFlameBridgeMissing = true;
+                }
+                return nullptr;
+            }
+
+            auto* proc = reinterpret_cast<FnExuGetTeamEngineFlameColor>(
+                GetProcAddress(exuModule, "EXU_GetTeamEngineFlameColor"));
+            if (!proc)
+            {
+                if (!g_LoggedExuEngineFlameBridgeMissing)
+                {
+                    Log(L"[FLAME] EXU_GetTeamEngineFlameColor export missing; team engine flame colors disabled\n");
+                    g_LoggedExuEngineFlameBridgeMissing = true;
+                }
+                return nullptr;
+            }
+
+            g_ExuFn_GetTeamEngineFlameColor = proc;
+            if (!g_LoggedExuEngineFlameBridge)
+            {
+                Log(L"[FLAME] Connected EXU engine flame color bridge from module=0x%p\n", exuModule);
+                g_LoggedExuEngineFlameBridge = true;
+            }
+            return g_ExuFn_GetTeamEngineFlameColor;
+        }
+
+        static int ResolveTeamEngineFlameColor(int team)
+        {
+            if (team <= 0)
+                return kEngineFlameColorDefault;
+
+            auto* exuGetColor = ResolveExuTeamEngineFlameColor();
+            if (!exuGetColor)
+                return kEngineFlameColorDefault;
+
+            const int color = exuGetColor(team);
+            if (color < kEngineFlameColorDefault || color > kEngineFlameColorGreen)
+                return kEngineFlameColorDefault;
+            return color;
+        }
+
+        static int ResolveEngineFlameTextureHandle(const char* const* candidates, size_t count, const wchar_t* colorName)
+        {
+            if (!g_BzrFn_EngineFlameResolveTexture || !candidates || count == 0)
+                return 0;
+
+            for (size_t i = 0; i < count; ++i)
+            {
+                const char* candidate = candidates[i];
+                if (!candidate || !candidate[0])
+                    continue;
+
+                BzrString textureName = {};
+                BzrStringInitEmpty(&textureName);
+                BzrStringAssign(&textureName, candidate, std::strlen(candidate));
+                const int textureHandle = g_BzrFn_EngineFlameResolveTexture(&textureName);
+                BzrStringFree(&textureName);
+
+                if (textureHandle != 0)
+                {
+                    Log(L"[FLAME] Resolved %ls engine flame texture '%hs' => 0x%08X\n",
+                        colorName ? colorName : L"unknown",
+                        candidate,
+                        textureHandle);
+                    return textureHandle;
+                }
+            }
+
+            Log(L"[FLAME] Failed to resolve any %ls engine flame texture candidate\n",
+                colorName ? colorName : L"unknown");
+            return 0;
+        }
+
+        static void CloneEngineFlameManager(void* destination, const void* source, int textureHandle)
+        {
+            if (!destination || !source || textureHandle == 0)
+                return;
+
+            std::memcpy(destination, source, kEngineFlameObjectSize);
+            ResetEngineFlameQueue(destination);
+            SetEngineFlameTexture(destination, textureHandle);
+        }
+
+        static void EnsureEngineFlameVariantsInitialized()
+        {
+            if (g_EngineFlameVariantsInitialized || g_EngineFlameVariantsInitAttempted)
+                return;
+
+            g_EngineFlameVariantsInitAttempted = true;
+
+            static const char* const kRedTextureCandidates[] =
+            {
+                "exhaust_r.0",
+                "rflame.0",
+                "rflame",
+            };
+            static const char* const kGreenTextureCandidates[] =
+            {
+                "exhaust_g.0",
+                "gflame.0",
+                "gflame",
+            };
+
+            g_EngineFlamePrimaryRedTexture =
+                ResolveEngineFlameTextureHandle(kRedTextureCandidates, _countof(kRedTextureCandidates), L"red");
+            g_EngineFlamePrimaryGreenTexture =
+                ResolveEngineFlameTextureHandle(kGreenTextureCandidates, _countof(kGreenTextureCandidates), L"green");
+
+            if (g_EngineFlamePrimaryRedTexture != 0)
+            {
+                CloneEngineFlameManager(g_EngineFlamePrimaryRed, GetEngineFlamePrimary(), g_EngineFlamePrimaryRedTexture);
+                CloneEngineFlameManager(g_EngineFlameSecondaryRed, GetEngineFlameSecondary(), g_EngineFlamePrimaryRedTexture);
+            }
+
+            if (g_EngineFlamePrimaryGreenTexture != 0)
+            {
+                CloneEngineFlameManager(g_EngineFlamePrimaryGreen, GetEngineFlamePrimary(), g_EngineFlamePrimaryGreenTexture);
+                CloneEngineFlameManager(g_EngineFlameSecondaryGreen, GetEngineFlameSecondary(), g_EngineFlamePrimaryGreenTexture);
+            }
+
+            g_EngineFlameVariantsInitialized = true;
+            Log(L"[FLAME] Engine flame variants initialized red=%hs green=%hs\n",
+                g_EngineFlamePrimaryRedTexture != 0 ? "yes" : "no",
+                g_EngineFlamePrimaryGreenTexture != 0 ? "yes" : "no");
+        }
+
+        static void* SelectEngineFlameManager(void* originalManager, void* craftPtr)
+        {
+            if (!originalManager || !craftPtr)
+                return originalManager;
+
+            if (originalManager != GetEngineFlamePrimary() && originalManager != GetEngineFlameSecondary())
+                return originalManager;
+
+            if (!g_BzrFn_GetHandle || !g_BzrFn_GetTeamNum)
+                return originalManager;
+
+            const uint32_t handle = g_BzrFn_GetHandle(craftPtr);
+            if (handle == 0)
+                return originalManager;
+
+            const int team = g_BzrFn_GetTeamNum(static_cast<int>(handle));
+            const int color = ResolveTeamEngineFlameColor(team);
+            if (color == kEngineFlameColorDefault || color == kEngineFlameColorBlue)
+                return originalManager;
+
+            EnsureEngineFlameVariantsInitialized();
+
+            if (color == kEngineFlameColorRed && g_EngineFlamePrimaryRedTexture != 0)
+            {
+                return (originalManager == GetEngineFlamePrimary())
+                    ? static_cast<void*>(g_EngineFlamePrimaryRed)
+                    : static_cast<void*>(g_EngineFlameSecondaryRed);
+            }
+
+            if (color == kEngineFlameColorGreen && g_EngineFlamePrimaryGreenTexture != 0)
+            {
+                return (originalManager == GetEngineFlamePrimary())
+                    ? static_cast<void*>(g_EngineFlamePrimaryGreen)
+                    : static_cast<void*>(g_EngineFlameSecondaryGreen);
+            }
+
+            return originalManager;
+        }
+
+        static bool ShouldTraceArtilleryMask()
+        {
+            static int s_cached = -1;
+            if (s_cached < 0)
+            {
+                s_cached =
+                    (EnvFlagEnabled("OPENSHIM_TRACE_ARTILLERY_MASK") ||
+                     EnvFlagEnabled("OPENSHIM_TRACE_WEAPON_MASK")) ? 1 : 0;
+            }
+            return s_cached != 0;
         }
 
         static int FilterVehicleAssetDebugException(
@@ -832,8 +1120,21 @@ namespace BZROpenShim
         g_EnableChunkRenderFallback =
             EnvFlagEnabled("BZR_CHUNK_FORCE_FIRST_GEO") ||
             EnvFlagEnabled("OPENSHIM_CHUNK_FORCE_FIRST_GEO");
+        float turretAimPitchMultiplier = g_TurretAimPitchMultiplier;
+        if (TryGetEnvFloat("OPENSHIM_TURRET_AIM_PITCH_MULTIPLIER", turretAimPitchMultiplier) ||
+            TryGetEnvFloat("OPENSHIM_TURRET_PITCH_MULTIPLIER", turretAimPitchMultiplier))
+        {
+            g_TurretAimPitchMultiplier = ClampTurretAimPitchMultiplier(turretAimPitchMultiplier);
+        }
+        else
+        {
+            g_TurretAimPitchMultiplier = 0.95f;
+        }
         Log(L"[CHUNK] Force-first-geo fallback: %hs\n",
             g_EnableChunkRenderFallback ? "enabled" : "disabled");
+        Log(L"[TURRET] Aim pitch multiplier: %.3f%s\n",
+            static_cast<double>(g_TurretAimPitchMultiplier),
+            g_TurretAimPitchMultiplier >= 0.999f ? " (full range)" : "");
         Log(L"[PRODMENU] Builder bridge: %hs\n",
             (!g_IsSteamExe && g_BzrFn_InitBuildItem && g_BzrFn_CleanupBuildItem && g_BzrBuildMenuRoot)
                 ? "GOG ready"
@@ -846,6 +1147,192 @@ namespace BZROpenShim
         BzrStringInitEmpty(&g_BzrnetLabel2);
         BzrStringInitEmpty(&g_BzrnetLabel3);
         BzrStringInitEmpty(&g_BzrnetLabel4);
+    }
+
+    namespace
+    {
+        struct CarrierView
+        {
+            void* owner;
+            void* hardpoint[5];
+            void* weapon[5];
+            uint32_t existant;
+            uint32_t selected;
+            uint32_t enabled;
+            int32_t special;
+            float weaponTriggerTillTime;
+        };
+
+        constexpr size_t kGameObjectCarrierOffset = 0x198;
+        constexpr size_t kGameObjectWeaponMaskOffset = 0x210;
+        constexpr size_t kWeaponIndexOffset = 0xAC;
+
+        constexpr uint32_t kHowitzerVftPrimary = 0x0087AD70;
+        constexpr uint32_t kHowitzerVftSecondary = 0x0087AE1C;
+        constexpr uint32_t kMinelayerVftPrimary = 0x0087D790;
+        constexpr uint32_t kMinelayerVftSecondary = 0x0087D83C;
+
+        bool IsWeaponMaskCarrierBiasCraft(const void* craft)
+        {
+            if (!craft)
+                return false;
+
+            const uint32_t vft = *reinterpret_cast<const uint32_t*>(craft);
+            return vft == kHowitzerVftPrimary ||
+                vft == kHowitzerVftSecondary ||
+                vft == kMinelayerVftPrimary ||
+                vft == kMinelayerVftSecondary;
+        }
+
+        int FindPreferredWeaponSlot(const void* craft)
+        {
+            const auto* craftBytes = reinterpret_cast<const uint8_t*>(craft);
+            const uint32_t rawMask = *reinterpret_cast<const uint32_t*>(craftBytes + kGameObjectWeaponMaskOffset);
+            const uint32_t decodedMask = rawMask ^ 0x33333333u;
+
+            if (decodedMask != 0 && (decodedMask & (decodedMask - 1u)) == 0)
+            {
+                for (int slot = 0; slot < 5; ++slot)
+                {
+                    if (decodedMask == (1u << slot))
+                        return slot;
+                }
+            }
+
+            const uint32_t activeSlot = *reinterpret_cast<const uint32_t*>(craftBytes + 0x1CC);
+            return activeSlot < 5 ? static_cast<int>(activeSlot) : -1;
+        }
+
+        int FindWeaponArrayIndexForSlot(const CarrierView* carrier, int desiredSlot)
+        {
+            if (!carrier)
+                return -1;
+
+            for (int index = 0; index < 5; ++index)
+            {
+                const auto* weapon = reinterpret_cast<const uint8_t*>(carrier->weapon[index]);
+                if (!weapon)
+                    continue;
+
+                if (*reinterpret_cast<const int32_t*>(weapon + kWeaponIndexOffset) == desiredSlot)
+                    return index;
+            }
+
+            if (desiredSlot >= 0 && desiredSlot < 5 && carrier->weapon[desiredSlot] != nullptr)
+                return desiredSlot;
+
+            return -1;
+        }
+
+        void SwapCarrierBits(uint32_t& bits, int a, int b)
+        {
+            const uint32_t bitA = (bits >> a) & 1u;
+            const uint32_t bitB = (bits >> b) & 1u;
+            if (bitA == bitB)
+                return;
+
+            bits ^= (1u << a);
+            bits ^= (1u << b);
+        }
+    }
+
+    void __cdecl ApplyWeaponMaskCarrierBiasForCraft(void* craft)
+    {
+        if (!craft)
+            return;
+
+        __try
+        {
+            if (!IsWeaponMaskCarrierBiasCraft(craft))
+                return;
+
+            const int desiredSlot = FindPreferredWeaponSlot(craft);
+            if (desiredSlot < 0 || desiredSlot >= 5)
+                return;
+
+            auto* craftBytes = reinterpret_cast<uint8_t*>(craft);
+            auto* carrier = *reinterpret_cast<CarrierView**>(craftBytes + kGameObjectCarrierOffset);
+            if (!carrier)
+                return;
+
+            const int currentIndex = FindWeaponArrayIndexForSlot(carrier, desiredSlot);
+            if (currentIndex <= 0)
+                return;
+
+            std::swap(carrier->hardpoint[0], carrier->hardpoint[currentIndex]);
+            std::swap(carrier->weapon[0], carrier->weapon[currentIndex]);
+            SwapCarrierBits(carrier->existant, 0, currentIndex);
+            SwapCarrierBits(carrier->selected, 0, currentIndex);
+            SwapCarrierBits(carrier->enabled, 0, currentIndex);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+    }
+
+    void __cdecl TraceArtilleryMaskFromProcess(void* process)
+    {
+        if (!process)
+            return;
+
+        __try
+        {
+            auto* processBytes = reinterpret_cast<uint8_t*>(process);
+            void* craft = *reinterpret_cast<void**>(processBytes + 44);
+            ApplyWeaponMaskCarrierBiasForCraft(craft);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+
+        if (!ShouldTraceArtilleryMask())
+            return;
+
+        const long remaining = InterlockedDecrement(&g_ArtilleryMaskTraceBudget);
+        if (remaining < 0)
+            return;
+
+        const uint32_t processAddr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(process));
+
+        __try
+        {
+            auto* processBytes = reinterpret_cast<uint8_t*>(process);
+            void* craft = *reinterpret_cast<void**>(processBytes + 44);
+            const uint32_t craftAddr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft));
+            const uint32_t processVft = *reinterpret_cast<const uint32_t*>(process);
+            const uint32_t craftVft = craft ? *reinterpret_cast<const uint32_t*>(craft) : 0;
+
+            uint32_t rawMask = 0;
+            uint32_t decodedMask = 0;
+            uint32_t enabledMask = 0;
+            uint32_t activeSlot = 0xFFFFFFFFu;
+
+            if (craft)
+            {
+                auto* craftBytes = reinterpret_cast<uint8_t*>(craft);
+                rawMask = *reinterpret_cast<const uint32_t*>(craftBytes + 0x210);
+                decodedMask = rawMask ^ 0x33333333u;
+                enabledMask = *reinterpret_cast<const uint32_t*>(craftBytes + 0x1C8);
+                activeSlot = *reinterpret_cast<const uint32_t*>(craftBytes + 0x1CC);
+            }
+
+            Log(L"[ARTYMASK] process=0x%08X procVft=0x%08X craft=0x%08X craftVft=0x%08X raw=0x%08X decoded=0x%08X enabled=0x%08X active=%u remaining=%ld\n",
+                processAddr,
+                processVft,
+                craftAddr,
+                craftVft,
+                rawMask,
+                decodedMask,
+                enabledMask,
+                activeSlot,
+                remaining);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            Log(L"[ARTYMASK] exception while inspecting process=0x%08X remaining=%ld\n",
+                processAddr,
+                remaining);
+        }
     }
 
     void SetProducerBuildMenuOriginal(void* target)
@@ -1661,6 +2148,74 @@ namespace BZROpenShim
 
             if (include)
                 MapRingPush(ring, entry);
+        }
+    }
+
+    void __cdecl EngineFlameHoverCraftEmitHook(
+        void* managerPtr,
+        const void* transform,
+        uint32_t scaleBits,
+        void* craftPtr)
+    {
+        if (!g_BzrFn_EngineFlameAddFlame || !managerPtr || !transform)
+            return;
+
+        ApplyWeaponMaskCarrierBiasForCraft(craftPtr);
+
+        const float scale = *reinterpret_cast<const float*>(&scaleBits);
+        void* selectedManager = SelectEngineFlameManager(managerPtr, craftPtr);
+        g_BzrFn_EngineFlameAddFlame(selectedManager, transform, scale);
+    }
+
+    void __fastcall EngineFlameControlHook(void* thisPtr, void* /*edx*/)
+    {
+        if (!g_BzrFn_EngineFlameControl || !thisPtr)
+            return;
+
+        EnsureEngineFlameVariantsInitialized();
+        g_BzrFn_EngineFlameControl(thisPtr);
+
+        if (thisPtr == GetEngineFlamePrimary())
+        {
+            if (g_EngineFlamePrimaryRedTexture != 0)
+                g_BzrFn_EngineFlameControl(g_EngineFlamePrimaryRed);
+            if (g_EngineFlamePrimaryGreenTexture != 0)
+                g_BzrFn_EngineFlameControl(g_EngineFlamePrimaryGreen);
+            return;
+        }
+
+        if (thisPtr == GetEngineFlameSecondary())
+        {
+            if (g_EngineFlamePrimaryRedTexture != 0)
+                g_BzrFn_EngineFlameControl(g_EngineFlameSecondaryRed);
+            if (g_EngineFlamePrimaryGreenTexture != 0)
+                g_BzrFn_EngineFlameControl(g_EngineFlameSecondaryGreen);
+        }
+    }
+
+    void __fastcall EngineFlameSubmitHook(void* thisPtr, void* /*edx*/, void* camera)
+    {
+        if (!g_BzrFn_EngineFlameSubmit || !thisPtr)
+            return;
+
+        EnsureEngineFlameVariantsInitialized();
+        g_BzrFn_EngineFlameSubmit(thisPtr, camera);
+
+        if (thisPtr == GetEngineFlamePrimary())
+        {
+            if (g_EngineFlamePrimaryRedTexture != 0)
+                g_BzrFn_EngineFlameSubmit(g_EngineFlamePrimaryRed, camera);
+            if (g_EngineFlamePrimaryGreenTexture != 0)
+                g_BzrFn_EngineFlameSubmit(g_EngineFlamePrimaryGreen, camera);
+            return;
+        }
+
+        if (thisPtr == GetEngineFlameSecondary())
+        {
+            if (g_EngineFlamePrimaryRedTexture != 0)
+                g_BzrFn_EngineFlameSubmit(g_EngineFlameSecondaryRed, camera);
+            if (g_EngineFlamePrimaryGreenTexture != 0)
+                g_BzrFn_EngineFlameSubmit(g_EngineFlameSecondaryGreen, camera);
         }
     }
 
