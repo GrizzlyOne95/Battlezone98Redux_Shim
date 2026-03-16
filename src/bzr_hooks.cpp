@@ -1135,6 +1135,9 @@ namespace BZROpenShim
         Log(L"[TURRET] Aim pitch multiplier: %.3f%s\n",
             static_cast<double>(g_TurretAimPitchMultiplier),
             g_TurretAimPitchMultiplier >= 0.999f ? " (full range)" : "");
+        Log(L"[MAPTRACE] Map refresh trace: %hs\n",
+            (EnvFlagEnabled("OPENSHIM_TRACE_MAP_REFRESH") ||
+             EnvFlagEnabled("OPENSHIM_TRACE_STEAM_MAP_REFRESH")) ? "enabled" : "disabled");
         Log(L"[PRODMENU] Builder bridge: %hs\n",
             (!g_IsSteamExe && g_BzrFn_InitBuildItem && g_BzrFn_CleanupBuildItem && g_BzrBuildMenuRoot)
                 ? "GOG ready"
@@ -1570,12 +1573,24 @@ namespace BZROpenShim
 
     void __cdecl MapFilterOnScrollUp()
     {
+        if (EnvFlagEnabled("OPENSHIM_TRACE_MAP_REFRESH") ||
+            EnvFlagEnabled("OPENSHIM_TRACE_STEAM_MAP_REFRESH"))
+        {
+            Log(L"[MAPTRACE] MapFilterOnScrollUp list=0x%08X\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_MapFilterListPtr)));
+        }
         if (g_MapFilterListPtr && g_BzrFn_MapFilterScrollUp)
             g_BzrFn_MapFilterScrollUp();
     }
 
     void __cdecl MapFilterOnScrollDown()
     {
+        if (EnvFlagEnabled("OPENSHIM_TRACE_MAP_REFRESH") ||
+            EnvFlagEnabled("OPENSHIM_TRACE_STEAM_MAP_REFRESH"))
+        {
+            Log(L"[MAPTRACE] MapFilterOnScrollDown list=0x%08X\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_MapFilterListPtr)));
+        }
         if (g_MapFilterListPtr && g_BzrFn_MapFilterScrollDown)
             g_BzrFn_MapFilterScrollDown();
     }
@@ -2006,6 +2021,13 @@ namespace BZROpenShim
         MapFilterListClear(list);
 
         const uint32_t flags = ComputeMapFilterFlags();
+        if (EnvFlagEnabled("OPENSHIM_TRACE_MAP_REFRESH") ||
+            EnvFlagEnabled("OPENSHIM_TRACE_STEAM_MAP_REFRESH"))
+        {
+            Log(L"[MAPTRACE] MapFilters1Rebuild list=0x%08X flags=0x%08X\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(listPtr)),
+                flags);
+        }
 
         if (flags & 0x4)
         {
@@ -2097,6 +2119,14 @@ namespace BZROpenShim
         const uint32_t filterLen = filter->size;
         if (!filterStr || filterLen == 0)
             return;
+        if (EnvFlagEnabled("OPENSHIM_TRACE_MAP_REFRESH") ||
+            EnvFlagEnabled("OPENSHIM_TRACE_STEAM_MAP_REFRESH"))
+        {
+            Log(L"[MAPTRACE] MapFilters2Filter list=0x%08X filter=%hs len=%u\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(listPtr)),
+                filterStr,
+                filterLen);
+        }
 
         MapManager* mgr = GetMapManager();
         if (!mgr || !mgr->entries || mgr->capacity == 0)
