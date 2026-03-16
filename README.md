@@ -159,3 +159,5 @@ search raw PDB strings with repeated `--find` regex arguments.
 ## License
 
 MIT - see LICENSE file
+
+## Special Thanks to Piercing, VTrider and Business Lawyer for technical assistance and collaboration building this DLL patch.
