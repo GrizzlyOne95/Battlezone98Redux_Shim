@@ -19,6 +19,41 @@
 namespace BZROpenShim
 {
 
+namespace
+{
+    enum MapRefreshTraceSite : int
+    {
+        kTraceHopFix1 = 1,
+        kTraceHopFix3 = 2,
+        kTraceMapListFixSupport1 = 3,
+        kTraceMapSorting = 4,
+        kTraceProbeMapFilter1 = 5,
+        kTraceProbeMapListFix1 = 6,
+        kTraceProbeMapListFix2 = 7,
+        kTraceMapFilters5 = 8,
+        kTraceMapFilters7 = 9,
+        kTraceMapFilters8 = 10,
+    };
+
+    static void __cdecl TraceMapRefreshSiteFrame(int site, void* frame_ebp)
+    {
+        switch (site)
+        {
+        case kTraceHopFix1: TraceMapRefreshFrame(L"HopFix1", frame_ebp); break;
+        case kTraceHopFix3: TraceMapRefreshFrame(L"HopFix3", frame_ebp); break;
+        case kTraceMapListFixSupport1: TraceMapRefreshFrame(L"MapListFixSupport1", frame_ebp); break;
+        case kTraceMapSorting: TraceMapRefreshFrame(L"MapSorting", frame_ebp); break;
+        case kTraceProbeMapFilter1: TraceMapRefreshFrame(L"Probe_MapFilter1", frame_ebp); break;
+        case kTraceProbeMapListFix1: TraceMapRefreshFrame(L"Probe_MapListFix1", frame_ebp); break;
+        case kTraceProbeMapListFix2: TraceMapRefreshFrame(L"Probe_MapListFix2", frame_ebp); break;
+        case kTraceMapFilters5: TraceMapRefreshFrame(L"MapFilters5", frame_ebp); break;
+        case kTraceMapFilters7: TraceMapRefreshFrame(L"MapFilters7", frame_ebp); break;
+        case kTraceMapFilters8: TraceMapRefreshFrame(L"MapFilters8", frame_ebp); break;
+        default: break;
+        }
+    }
+}
+
 // -----------------------------------------------------------------------
 // Hop-Fix 1/3
 // Purpose: Save the selected entry and visible row before the list rebuild.
@@ -41,6 +76,13 @@ void __declspec(naked) __cdecl Trampoline_HopFix1()
         add  esp, 4
         popad
         popfd
+
+        pushad
+        push ebp
+        push kTraceHopFix1
+        call TraceMapRefreshSiteFrame
+        add  esp, 8
+        popad
 
         mov  eax, [ebp - 4]          // 8B 45 FC
         mov  [ebp - 4], eax          // 89 45 FC
@@ -106,6 +148,13 @@ void __declspec(naked) __cdecl Trampoline_HopFix3()
         popad
         popfd
 
+        pushad
+        push ebp
+        push kTraceHopFix3
+        call TraceMapRefreshSiteFrame
+        add  esp, 8
+        popad
+
         call edx
         mov  eax, [ebp - 0xA4]
         mov  [ebp - 4], eax
@@ -135,6 +184,13 @@ void __declspec(naked) __cdecl Trampoline_MapListFixSupport1()
         add  esp, 4
         popad
         popfd
+
+        pushad
+        push ebp
+        push kTraceMapListFixSupport1
+        call TraceMapRefreshSiteFrame
+        add  esp, 8
+        popad
 
         mov  [ebp - 4], ecx
         mov  eax, [ebp + 8]
@@ -206,6 +262,10 @@ void __declspec(naked) __cdecl Trampoline_Probe_MapSorting()
         // Try to capture scroll state via SEH-protected helper
         pushad
         push ebp
+        push kTraceMapSorting
+        call TraceMapRefreshSiteFrame
+        add  esp, 8
+        push ebp
         call SafeCapture_MapSorting
         add  esp, 4
         popad
@@ -238,6 +298,13 @@ void __declspec(naked) __cdecl Trampoline_Probe_MapFilter1()
         popad
         popfd
 
+        pushad
+        push ebp
+        push kTraceProbeMapFilter1
+        call TraceMapRefreshSiteFrame
+        add  esp, 8
+        popad
+
         push edx
         push 0x20
         push 0
@@ -263,6 +330,13 @@ void __declspec(naked) __cdecl Trampoline_Probe_MapListFix1()
         popad
         popfd
 
+        pushad
+        push ebp
+        push kTraceProbeMapListFix1
+        call TraceMapRefreshSiteFrame
+        add  esp, 8
+        popad
+
         mov  [ebp - 4], ecx
         mov  eax, [ebp - 4]
         jmp  [g_RetAddr_Probe_MapListFix1]
@@ -286,6 +360,13 @@ void __declspec(naked) __cdecl Trampoline_Probe_MapListFix2()
         add  esp, 4
         popad
         popfd
+
+        pushad
+        push ebp
+        push kTraceProbeMapListFix2
+        call TraceMapRefreshSiteFrame
+        add  esp, 8
+        popad
 
         mov  eax, [ebp - 8]
         mov  ecx, [eax + 8]
@@ -409,6 +490,13 @@ void __declspec(naked) __cdecl Trampoline_MapFilters5()
         popad
         popfd
 
+        pushad
+        push ebp
+        push kTraceMapFilters5
+        call TraceMapRefreshSiteFrame
+        add  esp, 8
+        popad
+
         // Build the filter list via engine helper.
         push edx
         push 0x20
@@ -452,6 +540,13 @@ void __declspec(naked) __cdecl Trampoline_MapFilters7()
         popad
         popfd
 
+        pushad
+        push ebp
+        push kTraceMapFilters7
+        call TraceMapRefreshSiteFrame
+        add  esp, 8
+        popad
+
         mov  byte ptr [g_MapFilterFlag11], 0x1
         mov  eax, [ebp - 0x44]
         mov  ecx, [eax + 0x17C]
@@ -475,6 +570,13 @@ void __declspec(naked) __cdecl Trampoline_MapFilters8()
         add  esp, 4
         popad
         popfd
+
+        pushad
+        push ebp
+        push kTraceMapFilters8
+        call TraceMapRefreshSiteFrame
+        add  esp, 8
+        popad
 
         movzx eax, byte ptr [g_MapFilterFlag11]
         test eax, eax

@@ -52,8 +52,57 @@ namespace BZROpenShim
     inline int32_t g_SavedMapIndex = -1;
     inline char g_SavedMapName[256] = {};
     inline uint32_t g_SavedMapNameLen = 0;
+    inline volatile long g_MapRefreshTraceSequence = 0;
 
     inline bool TryReadI32(const void* p, int32_t& out);
+    inline void __cdecl TraceMapRefreshFrame(const wchar_t* tag, void* frame_base);
+    inline void __cdecl TraceMapRefreshContext(const wchar_t* tag, void* this_ptr);
+
+    inline bool IsMapRefreshTraceEnabled()
+    {
+        static int s_cached = -1;
+        if (s_cached < 0)
+        {
+            char value[8] = {};
+            DWORD len = GetEnvironmentVariableA("OPENSHIM_TRACE_MAP_REFRESH", value, static_cast<DWORD>(sizeof(value)));
+            if (!(len > 0 && len < sizeof(value) && value[0] != '0'))
+            {
+                ZeroMemory(value, sizeof(value));
+                len = GetEnvironmentVariableA("OPENSHIM_TRACE_STEAM_MAP_REFRESH", value, static_cast<DWORD>(sizeof(value)));
+            }
+            s_cached = (len > 0 && len < sizeof(value) && value[0] != '0') ? 1 : 0;
+        }
+        return s_cached != 0;
+    }
+
+    inline uint32_t NextMapRefreshTraceSequence()
+    {
+        return static_cast<uint32_t>(InterlockedIncrement(&g_MapRefreshTraceSequence));
+    }
+
+    inline void TraceMapRefreshPhase(
+        const wchar_t* phase,
+        void* ptr0 = nullptr,
+        void* ptr1 = nullptr,
+        int32_t value0 = 0,
+        int32_t value1 = 0)
+    {
+        if (!IsMapRefreshTraceEnabled())
+            return;
+
+        const uint32_t seq = NextMapRefreshTraceSequence();
+        Log(L"[MAPTRACE] #%u phase=%ls ptr0=0x%08X ptr1=0x%08X value0=%d value1=%d savedIdx=%d savedState=%d haveSaved=%d savedName=%hs\n",
+            seq,
+            phase ? phase : L"<null>",
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr0)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr1)),
+            value0,
+            value1,
+            g_SavedMapIndex,
+            g_SavedScrollState,
+            g_HaveSavedScrollState ? 1 : 0,
+            g_SavedMapNameLen ? g_SavedMapName : "");
+    }
 
     inline bool TryReadPtr(const void* p, void*& out)
     {
@@ -137,6 +186,8 @@ namespace BZROpenShim
         if (!ctx) return;
 
         static int s_logBudget = 6;
+        if (IsMapRefreshTraceEnabled())
+            TraceMapRefreshContext(L"SaveMapListSelection_enter", ctx);
         uint8_t* base = reinterpret_cast<uint8_t*>(ctx);
 
         // Resolve list root at [ctx + 0x1C8]
@@ -191,6 +242,11 @@ namespace BZROpenShim
             --s_logBudget;
             Log(L"[HOP1] saved index=%d name=%hs\n", g_SavedMapIndex, g_SavedMapName);
         }
+        if (IsMapRefreshTraceEnabled())
+        {
+            TraceMapRefreshPhase(L"SelectionSaved", ctx, ctx17c, g_SavedMapIndex, selIndex);
+            TraceMapRefreshContext(L"SaveMapListSelection_exit", ctx);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -201,6 +257,8 @@ namespace BZROpenShim
     extern "C" inline void __fastcall RestoreMapListSelection(void* this_ptr)
     {
         if (!this_ptr) return;
+        if (IsMapRefreshTraceEnabled())
+            TraceMapRefreshContext(L"RestoreMapListSelection_enter", this_ptr);
 
         if (g_SavedMapNameLen == 0)
             SetSavedMapNameLiteral("All Maps");
@@ -287,6 +345,16 @@ namespace BZROpenShim
         {
             Log(L"[WARN] RestoreMapListSelection call failed\n");
         }
+        if (IsMapRefreshTraceEnabled())
+        {
+            TraceMapRefreshPhase(L"SelectionRestored", this_ptr, selectThis, targetIndex, foundIndex);
+            Log(L"[MAPTRACE] RestoreMapListSelection targetIndex=%d foundIndex=%d savedIndex=%d this=0x%08X\n",
+                targetIndex,
+                foundIndex,
+                savedIndex,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(this_ptr)));
+            TraceMapRefreshContext(L"RestoreMapListSelection_exit", this_ptr);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -298,6 +366,8 @@ namespace BZROpenShim
     {
         if (!ctx) return;
         if (!g_BZRFnPtr_HopFix3Step) return;
+        if (IsMapRefreshTraceEnabled())
+            TraceMapRefreshContext(L"RestoreMapListVisibleIndex_enter", ctx);
 
         int32_t saved = g_SavedMapIndex;
         if (saved < 0)
@@ -339,6 +409,15 @@ namespace BZROpenShim
         }
 
     done:
+        if (IsMapRefreshTraceEnabled())
+        {
+            TraceMapRefreshPhase(L"VisibleRowRestoreDone", ctx, listInnerRaw, saved, count);
+            Log(L"[MAPTRACE] RestoreMapListVisibleIndex done saved=%d count=%d ctx=0x%08X\n",
+                saved,
+                count,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ctx)));
+            TraceMapRefreshContext(L"RestoreMapListVisibleIndex_exit", ctx);
+        }
         g_SavedMapIndex = -1;
     }
 
@@ -378,6 +457,16 @@ namespace BZROpenShim
                 return 0;
             }
             if (state == 0) return 0;
+        }
+        if (IsMapRefreshTraceEnabled())
+        {
+            TraceMapRefreshPhase(L"ScrollUpdateHelper", this_ptr, g_HopFix3Context, scroll_delta, static_cast<int32_t>(state));
+            Log(L"[MAPTRACE] ScrollUpdateHelper delta=%d this=0x%08X state=%u hopCtx=0x%08X\n",
+                scroll_delta,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(this_ptr)),
+                state,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_HopFix3Context)));
+            TraceMapRefreshContext(L"ScrollUpdateHelper", this_ptr);
         }
 
         // Guard against bogus pointer-like deltas from uncertain stack reconstruction.
@@ -489,6 +578,124 @@ namespace BZROpenShim
         return true;
     }
 
+    inline void __cdecl TraceMapRefreshFrame(const wchar_t* tag, void* frame_base)
+    {
+        if (!IsMapRefreshTraceEnabled() || !frame_base)
+            return;
+
+        const uint32_t seq = NextMapRefreshTraceSequence();
+        auto* base = reinterpret_cast<uint8_t*>(frame_base);
+        void* parent = nullptr;
+        void* arg8 = nullptr;
+        void* m4 = nullptr;
+        void* m8 = nullptr;
+        void* m44 = nullptr;
+        void* ma4 = nullptr;
+        void* globalMapObj = nullptr;
+        int32_t d94 = 0;
+        int32_t d98 = 0;
+        int32_t da4 = 0;
+
+        TryReadPtr(base + 0x00, parent);
+        TryReadPtr(base + 0x08, arg8);
+        TryReadPtr(base - 0x04, m4);
+        TryReadPtr(base - 0x08, m8);
+        TryReadPtr(base - 0x44, m44);
+        TryReadPtr(base - 0xA4, ma4);
+        TryReadI32(base - 0x94, d94);
+        TryReadI32(base - 0x98, d98);
+        TryReadI32(base - 0xA4, da4);
+
+        __try
+        {
+            if (g_MapListObject)
+                globalMapObj = *g_MapListObject;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            globalMapObj = nullptr;
+        }
+
+        Log(L"[MAPTRACE] #%u %ls frame=0x%08X parent=0x%08X arg8=0x%08X m4=0x%08X m8=0x%08X m44=0x%08X ma4=0x%08X d94=%d d98=%d da4=%d savedIdx=%d savedState=%d haveSaved=%d mapObj=0x%08X\n",
+            seq,
+            tag ? tag : L"<null>",
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(frame_base)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parent)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(arg8)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(m4)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(m8)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(m44)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ma4)),
+            d94,
+            d98,
+            da4,
+            g_SavedMapIndex,
+            g_SavedScrollState,
+            g_HaveSavedScrollState ? 1 : 0,
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(globalMapObj)));
+        if (g_SavedMapNameLen > 0)
+        {
+            Log(L"[MAPTRACE] #%u %ls savedName=%hs len=%u\n",
+                seq,
+                tag ? tag : L"<null>",
+                g_SavedMapName,
+                g_SavedMapNameLen);
+        }
+    }
+
+    inline void __cdecl TraceMapRefreshContext(const wchar_t* tag, void* this_ptr)
+    {
+        if (!IsMapRefreshTraceEnabled() || !this_ptr)
+            return;
+
+        const uint32_t seq = NextMapRefreshTraceSequence();
+        auto* base = reinterpret_cast<uint8_t*>(this_ptr);
+        void* ctx17c = nullptr;
+        void* listRootRaw = nullptr;
+        void* beginRaw = nullptr;
+        void* endRaw = nullptr;
+        void* listInnerRaw = nullptr;
+        int32_t selIndex = 0;
+        int32_t spanStart = 0;
+        int32_t spanEnd = 0;
+        uint32_t scrollState = 0;
+        const bool hasScrollState = QueryScrollStateWithContext(this_ptr, scrollState);
+
+        TryReadPtr(base + 0x17C, ctx17c);
+        TryReadPtr(base + 0x1C8, listRootRaw);
+        if (ctx17c)
+            TryReadI32(reinterpret_cast<uint8_t*>(ctx17c) + 0x14C, selIndex);
+
+        if (listRootRaw)
+        {
+            auto* listRoot = reinterpret_cast<void**>(listRootRaw);
+            TryReadPtr(listRoot, beginRaw);
+            TryReadPtr(listRoot + 1, endRaw);
+            TryReadPtr(reinterpret_cast<uint8_t*>(listRootRaw) + 0x2C, listInnerRaw);
+        }
+
+        if (listInnerRaw)
+        {
+            TryReadI32(reinterpret_cast<uint8_t*>(listInnerRaw) + 0x168, spanStart);
+            TryReadI32(reinterpret_cast<uint8_t*>(listInnerRaw) + 0x16C, spanEnd);
+        }
+
+        Log(L"[MAPTRACE] #%u %ls this=0x%08X ctx17c=0x%08X listRoot=0x%08X begin=0x%08X end=0x%08X inner=0x%08X sel=%d spanStart=%d spanEnd=%d scrollState=%u haveState=%d\n",
+            seq,
+            tag ? tag : L"<null>",
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(this_ptr)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ctx17c)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(listRootRaw)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(beginRaw)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(endRaw)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(listInnerRaw)),
+            selIndex,
+            spanStart,
+            spanEnd,
+            scrollState,
+            hasScrollState ? 1 : 0);
+    }
+
     inline void __cdecl CaptureScrollStateFromContext(void* this_ptr)
     {
         static int s_logBudget = 10;
@@ -497,6 +704,14 @@ namespace BZROpenShim
             return;
         g_SavedScrollState = static_cast<int32_t>(state);
         g_HaveSavedScrollState = true;
+        if (IsMapRefreshTraceEnabled())
+        {
+            TraceMapRefreshContext(L"CaptureScrollState", this_ptr);
+            TraceMapRefreshPhase(L"ScrollStateCaptured", this_ptr, nullptr, g_SavedScrollState, static_cast<int32_t>(state));
+            Log(L"[MAPTRACE] capture savedScrollState=%d this=0x%08X\n",
+                g_SavedScrollState,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(this_ptr)));
+        }
         if (s_logBudget > 0)
         {
             --s_logBudget;
