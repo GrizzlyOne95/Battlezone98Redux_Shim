@@ -1,0 +1,13 @@
+[ProducerBuildMenus]
+Enabled=1
+
+; Root tokens are up to 8 chars. You can use plain tokens or .odf names.
+; The hook normalizes b_amcmbt, b_amcmbt.odf, and b_amcmbt_mp.odf to the same token.
+;
+; This first pass is GOG-only for now. Steam still skips the hook site until it
+; gets a fresh byte-level validation.
+
+Recycler=b_amcmbt
+Factory=b_ambldg
+Armory=b_amprod
+ConstructionRig=b_ambldg

@@ -6,8 +6,9 @@
 namespace BZROpenShim
 {
     // Runtime-resolved BZR pointers and helpers.
-    void ResolveBzrHooks();
+    void ResolveBzrHooks(bool isSteam);
     void InitBzrHookStrings();
+    void SetProducerBuildMenuOriginal(void* target);
 
     // Vehicle list mod fix helpers (rel32 patch target + helper for jmp stub).
     void __fastcall VehicleListModFix2(void* thisPtr, void* edx, BzrString* name);
@@ -29,6 +30,7 @@ namespace BZROpenShim
     // Map filter helpers (rel32 patch target).
     uint32_t __fastcall MapFilters6Rel32(void* thisPtr, void* edx);
     uint32_t __cdecl ChunkRenderResolveHook(void* objectPtr, uint32_t variant);
+    void* __cdecl ProducerBuildMenuCallHook(void* producerPtr, int slot, int flags);
     void __cdecl MapFilterOnScrollUp();
     void __cdecl MapFilterOnScrollDown();
     void __cdecl MapFilters1Rebuild(void* listPtr);
