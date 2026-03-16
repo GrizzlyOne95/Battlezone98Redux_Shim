@@ -10,6 +10,9 @@ The clean-room shim now supports both:
 - `BZR.exe` (GOG)
 - `battlezone98redux.exe` (Steam)
 
+<img width="1377" height="758" alt="image" src="https://github.com/user-attachments/assets/b1f12ee2-5e57-46df-b467-1d5c69c6426e" />
+
+
 ## Architecture
 
 ```
