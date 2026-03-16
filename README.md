@@ -193,4 +193,4 @@ search raw PDB strings with repeated `--find` regex arguments.
 
 MIT - see LICENSE file
 
-## Special Thanks to Piercing, VTrider and Business Lawyer for technical assistance and collaboration building this DLL patch.
+## Special Thanks to Piercing, VTrider and Business Lawyer for technical assistance and collaboration building this DLL patch. Thanks to Janne for their original work learning how to shim and hook DLL's into BZR.
