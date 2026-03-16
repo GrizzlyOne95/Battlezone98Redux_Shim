@@ -108,6 +108,19 @@ render handle is forced into the stock resolve/classify path.
 
 For the Steam build, copy `winmm.dll` next to `battlezone98redux.exe`.
 
+## Netcode Verification
+
+1. Launch the game with OpenShim installed.
+2. Enter multiplayer so the game creates its P2P sockets.
+3. Exit the game.
+4. Run `.\verify_windows.ps1` from the repo root, or pass `-GamePath` explicitly.
+
+The verifier uses `openshim.log` as the source of truth and checks for:
+
+- successful Winsock hook installation
+- `SO_SNDBUF` readback reaching `524288`
+- `SO_RCVBUF` readback reaching `4194304`
+
 ## Testing The Chunk Experiment
 
 1. Build `bin\Release\winmm.dll`.

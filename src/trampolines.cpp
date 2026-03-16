@@ -790,4 +790,32 @@ void __declspec(naked) __cdecl Trampoline_BanButtonHook2()
     }
 }
 
+// -----------------------------------------------------------------------
+// AutoSave Load Button Hook
+// Site: 0x0078B45A
+// Replays: mov eax, [0x0091830C]
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_AutoSaveLoadButtonHook()
+{
+    static const char* name = "Trampoline_AutoSaveLoadButtonHook";
+    __asm
+    {
+        pushfd
+        pushad
+        push name
+        call LogHit
+        add  esp, 4
+        popad
+        popfd
+
+        mov  eax, [0x0091830C]
+        pushad
+        push ebp
+        call AutoSaveLoadButtonCreateFromFrame
+        add  esp, 4
+        popad
+        jmp  [g_RetAddr_AutoSaveLoadHook]
+    }
+}
+
 } // namespace BZROpenShim
