@@ -1,4 +1,5 @@
 #include "net_optimizer.h"
+#include "netcode_hooks.h"
 #include "shim_log.h"
 
 #include <winsock2.h>
@@ -35,8 +36,8 @@ namespace
         bool logSocketPackets = true;
         bool logSockOptCalls = true;
         bool applySocketBuffers = true;
-        uint32_t sendBufferSize = 524288;
-        uint32_t recvBufferSize = 2097152;
+        uint32_t sendBufferSize = DEFAULT_SEND_BUFFER;
+        uint32_t recvBufferSize = DEFAULT_RECV_BUFFER;
         uint32_t packetLogLimit = kDefaultPacketLogLimit;
         uint32_t packetLogInterval = kDefaultPacketLogInterval;
     };
@@ -79,6 +80,7 @@ namespace
 
     NetConfig g_Config;
     std::string g_NetIniPath;
+    INIT_ONCE g_NetworkInitOnce = INIT_ONCE_STATIC_INIT;
 
     SRWLOCK g_SocketLock = SRWLOCK_INIT;
     std::unordered_map<SOCKET, SocketState> g_Sockets;
@@ -86,7 +88,9 @@ namespace
 
     HMODULE g_Ws2Module = nullptr;
     SocketFn g_RealSocket = nullptr;
+    SocketFn g_DispatchSocket = nullptr;
     WSASocketWFn g_RealWSASocketW = nullptr;
+    WSASocketWFn g_DispatchWSASocketW = nullptr;
     WSASendFn g_RealWSASend = nullptr;
     WSARecvFn g_RealWSARecv = nullptr;
     WSASendToFn g_RealWSASendTo = nullptr;
@@ -183,6 +187,64 @@ namespace
         return std::atoi(buf);
     }
 
+    bool LoadManifestProfile(const std::string& manifestPath, uint32_t& outSend, uint32_t& outRecv)
+    {
+        FILE* file = nullptr;
+        fopen_s(&file, manifestPath.c_str(), "rb");
+        if (!file)
+            return false;
+
+        if (fseek(file, 0, SEEK_END) != 0)
+        {
+            fclose(file);
+            return false;
+        }
+
+        const long size = ftell(file);
+        if (size <= 0 || size > 64 * 1024 || fseek(file, 0, SEEK_SET) != 0)
+        {
+            fclose(file);
+            return false;
+        }
+
+        std::string buffer(static_cast<size_t>(size), '\0');
+        const size_t bytesRead = fread(buffer.data(), 1, buffer.size(), file);
+        fclose(file);
+        buffer.resize(bytesRead);
+
+        const char* profileStart = std::strstr(buffer.c_str(), "\"profile\"");
+        if (!profileStart)
+            return false;
+
+        auto extractUint = [](const char* start, const char* key) -> uint32_t
+        {
+            const char* pos = std::strstr(start, key);
+            if (!pos)
+                return 0;
+
+            pos += std::strlen(key);
+            while (*pos && (*pos == ':' || *pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r' || *pos == '"'))
+                ++pos;
+
+            return static_cast<uint32_t>(std::strtoul(pos, nullptr, 10));
+        };
+
+        bool found = false;
+        const uint32_t send = extractUint(profileStart, "\"send_buffer_bytes\"");
+        const uint32_t recv = extractUint(profileStart, "\"receive_buffer_bytes\"");
+        if (send > 0)
+        {
+            outSend = send;
+            found = true;
+        }
+        if (recv > 0)
+        {
+            outRecv = recv;
+            found = true;
+        }
+        return found;
+    }
+
     void LoadConfig()
     {
         const std::string netIni = JoinPath(GetGameDir(), "net.ini");
@@ -202,11 +264,11 @@ namespace
         g_Config.sendBufferSize = ReadIniUint(
             "OpenShimSocket",
             "SendBufferSize",
-            legacySocketBufferSize ? legacySocketBufferSize : 524288);
+            legacySocketBufferSize ? legacySocketBufferSize : DEFAULT_SEND_BUFFER);
         g_Config.recvBufferSize = ReadIniUint(
             "OpenShimSocket",
             "ReceiveBufferSize",
-            legacySocketBufferSize ? legacySocketBufferSize : 2097152);
+            legacySocketBufferSize ? legacySocketBufferSize : DEFAULT_RECV_BUFFER);
         g_Config.sendBufferSize = std::max<uint32_t>(g_Config.sendBufferSize, 32 * 1024);
         g_Config.recvBufferSize = std::max<uint32_t>(g_Config.recvBufferSize, 32 * 1024);
         g_Config.packetLogLimit = std::max<uint32_t>(ReadIniUint("OpenShimSocket", "PacketLogLimit", kDefaultPacketLogLimit), 1);
@@ -215,11 +277,15 @@ namespace
         const std::string manifestPath = JoinPath(GetGameDir(), "netcode_manifest.json");
         if (FileExists(manifestPath))
         {
-            // Keep the runtime socket guardrails active even when the binary
-            // patch manifest is present so we can verify and top off buffers if
-            // the live socket ends up below the intended target.
-            g_Config.sendBufferSize = 524288;
-            g_Config.recvBufferSize = 2097152;
+            uint32_t manifestSend = DEFAULT_SEND_BUFFER;
+            uint32_t manifestRecv = DEFAULT_RECV_BUFFER;
+            if (LoadManifestProfile(manifestPath, manifestSend, manifestRecv))
+            {
+                // Keep manifest targets as runtime minimums so the optimizer and
+                // startup hook stay aligned on the authoritative buffer values.
+                g_Config.sendBufferSize = (std::max)(g_Config.sendBufferSize, manifestSend);
+                g_Config.recvBufferSize = (std::max)(g_Config.recvBufferSize, manifestRecv);
+            }
         }
     }
 
@@ -295,7 +361,41 @@ namespace
         if (!ok)
             LogShimA(LogLevel::Error, "net", "[OpenShimNet] Missing one or more required Winsock exports");
 
+        g_DispatchSocket = g_RealSocket;
+        g_DispatchWSASocketW = g_RealWSASocketW;
+
         return ok;
+    }
+
+    template <typename T>
+    void AdoptChainedImportTarget(const char* name, T candidate, T realProc, T& dispatchProc)
+    {
+        if (!candidate || candidate == realProc || candidate == dispatchProc)
+            return;
+
+        if (!dispatchProc || dispatchProc == realProc)
+        {
+            dispatchProc = candidate;
+            Logf("[OpenShimNet] Preserving pre-existing %s import chain", name);
+            return;
+        }
+
+        Logf("[OpenShimNet] Multiple pre-existing %s import targets detected; keeping first chained target", name);
+    }
+
+    void RememberPatchedImport(const char* name, FARPROC previousTarget)
+    {
+        if (!name || !previousTarget)
+            return;
+
+        if (std::strcmp(name, "socket") == 0)
+        {
+            AdoptChainedImportTarget("socket", reinterpret_cast<SocketFn>(previousTarget), g_RealSocket, g_DispatchSocket);
+        }
+        else if (std::strcmp(name, "WSASocketW") == 0)
+        {
+            AdoptChainedImportTarget("WSASocketW", reinterpret_cast<WSASocketWFn>(previousTarget), g_RealWSASocketW, g_DispatchWSASocketW);
+        }
     }
 
     const char* SocketTypeLabel(int type, int protocol)
@@ -586,6 +686,45 @@ namespace
             g_RealWSASetLastError(err);
     }
 
+    int ConfiguredSocketBufferFloor(int level, int optName)
+    {
+        if (!g_Config.applySocketBuffers || level != SOL_SOCKET)
+            return 0;
+
+        if (optName == SO_SNDBUF)
+            return static_cast<int>(g_Config.sendBufferSize);
+        if (optName == SO_RCVBUF)
+            return static_cast<int>(g_Config.recvBufferSize);
+        return 0;
+    }
+
+    int ReassertSocketBufferFloor(SOCKET s, int level, int optName, int requested, int readback)
+    {
+        const int floor = ConfiguredSocketBufferFloor(level, optName);
+        if (floor <= 0)
+            return readback;
+
+        const bool belowFloor = (readback >= 0 && readback < floor) ||
+            (requested > 0 && requested < floor);
+        if (!belowFloor)
+            return readback;
+
+        const int savedErr = g_RealWSAGetLastError ? g_RealWSAGetLastError() : 0;
+        SetSocketIntOption(s, level, optName, floor, SockOptName(level, optName));
+        const int finalReadback = QuerySocketInt(s, level, optName);
+        Logf("[OpenShimNet] sid=%u reasserted %s floor on sock=0x%08X requested=%d initialReadback=%d floor=%d finalReadback=%d",
+            GetSocketId(s),
+            SockOptName(level, optName),
+            static_cast<unsigned>(s),
+            requested,
+            readback,
+            floor,
+            finalReadback);
+        if (g_RealWSASetLastError)
+            g_RealWSASetLastError(savedErr);
+        return finalReadback;
+    }
+
     void MaybeDisableUdpConnReset(SOCKET s, const SocketState& state)
     {
         if (!g_Config.disableUdpConnReset)
@@ -676,7 +815,8 @@ namespace
 
     SOCKET WSAAPI Hook_socket(int af, int type, int protocol)
     {
-        const SOCKET s = g_RealSocket(af, type, protocol);
+        const SocketFn dispatch = g_DispatchSocket ? g_DispatchSocket : g_RealSocket;
+        const SOCKET s = dispatch(af, type, protocol);
         if (s == INVALID_SOCKET)
         {
             const int err = g_RealWSAGetLastError ? g_RealWSAGetLastError() : 0;
@@ -694,7 +834,8 @@ namespace
 
     SOCKET WSAAPI Hook_WSASocketW(int af, int type, int protocol, LPWSAPROTOCOL_INFOW protocolInfo, GROUP group, DWORD flags)
     {
-        const SOCKET s = g_RealWSASocketW(af, type, protocol, protocolInfo, group, flags);
+        const WSASocketWFn dispatch = g_DispatchWSASocketW ? g_DispatchWSASocketW : g_RealWSASocketW;
+        const SOCKET s = dispatch(af, type, protocol, protocolInfo, group, flags);
         if (s == INVALID_SOCKET)
         {
             const int err = g_RealWSAGetLastError ? g_RealWSAGetLastError() : 0;
@@ -813,15 +954,20 @@ namespace
     int WSAAPI Hook_setsockopt(SOCKET s, int level, int optName, const char* optVal, int optLen)
     {
         const int rc = g_RealSetSockOpt(s, level, optName, optVal, optLen);
+        int requested = 0;
+        if (optVal && optLen >= static_cast<int>(sizeof(int)))
+            std::memcpy(&requested, optVal, sizeof(int));
+
+        int readback = -1;
+        if (rc == 0 && optLen >= static_cast<int>(sizeof(int)))
+        {
+            readback = QuerySocketInt(s, level, optName);
+            readback = ReassertSocketBufferFloor(s, level, optName, requested, readback);
+        }
+
         if (g_Config.logSockOptCalls)
         {
-            int requested = 0;
-            if (optVal && optLen >= static_cast<int>(sizeof(int)))
-                std::memcpy(&requested, optVal, sizeof(int));
             const int err = (rc == 0 || !g_RealWSAGetLastError) ? 0 : g_RealWSAGetLastError();
-            int readback = -1;
-            if (rc == 0 && optLen >= static_cast<int>(sizeof(int)))
-                readback = QuerySocketInt(s, level, optName);
             Logf("[OpenShimNet] sid=%u setsockopt sock=0x%08X level=%d opt=%s(%d) requested=%d readback=%d rc=%d err=%d",
                 GetSocketId(s),
                 static_cast<unsigned>(s),
@@ -844,7 +990,7 @@ namespace
         FARPROC hook;
     };
 
-    bool PatchImportSlot(HMODULE module, const char* moduleLabel, IMAGE_THUNK_DATA32* origThunk, IMAGE_THUNK_DATA32* thunk, const HookTarget& target)
+    bool PatchImportSlot(HMODULE module, const char* moduleLabel, IMAGE_THUNK_DATA32* origThunk, IMAGE_THUNK_DATA32* thunk, const HookTarget& target, FARPROC* previousTarget)
     {
         if (!origThunk)
             return false;
@@ -862,6 +1008,8 @@ namespace
                     if (!VirtualProtect(&thunk->u1.Function, sizeof(thunk->u1.Function), PAGE_READWRITE, &oldProtect))
                         return false;
 
+                    if (previousTarget)
+                        *previousTarget = reinterpret_cast<FARPROC>(static_cast<uintptr_t>(thunk->u1.Function));
                     thunk->u1.Function = static_cast<DWORD>(reinterpret_cast<uintptr_t>(target.hook));
                     VirtualProtect(&thunk->u1.Function, sizeof(thunk->u1.Function), oldProtect, &oldProtect);
 
@@ -936,7 +1084,14 @@ namespace
 
             int patched = 0;
             for (const auto& target : targets)
-                patched += PatchImportSlot(module, moduleLabel, origThunk, thunk, target) ? 1 : 0;
+            {
+                FARPROC previousTarget = nullptr;
+                if (PatchImportSlot(module, moduleLabel, origThunk, thunk, target, &previousTarget))
+                {
+                    RememberPatchedImport(target.name, previousTarget);
+                    ++patched;
+                }
+            }
 
             Logf("[OpenShimNet] %s Winsock IAT hooks installed: %d", moduleLabel, patched);
             return;
@@ -946,7 +1101,7 @@ namespace
     }
 } // namespace
 
-    void InitializeNetworkOptimizer()
+    BOOL CALLBACK InitializeNetworkOptimizerOnce(PINIT_ONCE, PVOID, PVOID*)
     {
         LoadConfig();
 
@@ -968,16 +1123,16 @@ namespace
             g_Config.packetLogLimit,
             g_Config.packetLogInterval);
         if (FileExists(JoinPath(GetGameDir(), "netcode_manifest.json")))
-            LogShimA(LogLevel::Info, "net", "[OpenShimNet] netcode_manifest.json detected; using manifest buffer targets as runtime minimums");
+            LogShimA(LogLevel::Info, "net", "[OpenShimNet] netcode_manifest.json detected; runtime buffer minimums aligned to manifest profile");
 
         if (!g_Config.enabled)
         {
             LogShimA(LogLevel::Info, "net", "[OpenShimNet] Socket optimizer disabled by configuration");
-            return;
+            return TRUE;
         }
 
         if (!LoadWinsockExports())
-            return;
+            return TRUE;
 
         PatchWinsockImportsForModule(GetModuleHandleA(nullptr), "battlezone98redux.exe");
         PatchWinsockImportsForModule(GetModuleHandleA("Galaxy.dll"), "Galaxy.dll");
@@ -985,5 +1140,11 @@ namespace
         PatchWinsockImportsForModule(GetModuleHandleA("steam_api.dll"), "steam_api.dll");
 
         LogShimA(LogLevel::Info, "net", "[OpenShimNet] Initialization complete");
+        return TRUE;
+    }
+
+    void InitializeNetworkOptimizer()
+    {
+        InitOnceExecuteOnce(&g_NetworkInitOnce, InitializeNetworkOptimizerOnce, nullptr, nullptr);
     }
 }
