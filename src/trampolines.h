@@ -27,4 +27,5 @@ namespace BZROpenShim
     extern void* g_RetAddr_HopFix1;
     extern void* g_RetAddr_HopFix2;
     extern void* g_RetAddr_HopFix3;
+    void __cdecl Trampoline_EngineFlameHoverCraftEmit();
 }
