@@ -23,6 +23,9 @@ namespace BZROpenShim
     void __cdecl BanButtonOnHoverClient(void* param);
     void __cdecl AutoSaveButtonOnClickLoad();
     void AutoSaveLoadButtonCreateFromFrame(void* frameBase);
+    void __cdecl EngineFlameHoverCraftEmitHook(void* managerPtr, const void* transform, uint32_t scaleBits, void* craftPtr);
+    void __fastcall EngineFlameControlHook(void* thisPtr, void* edx);
+    void __fastcall EngineFlameSubmitHook(void* thisPtr, void* edx, void* camera);
 
     // Custom /help + /ban command intercept.
     bool __cdecl HandleCommandHelpBan(uint16_t id, const char* cmd);
@@ -35,6 +38,8 @@ namespace BZROpenShim
     void __cdecl MapFilterOnScrollDown();
     void __cdecl MapFilters1Rebuild(void* listPtr);
     void __cdecl MapFilters2Filter(void* listPtr, BzrString* filter);
+    void __cdecl ApplyWeaponMaskCarrierBiasForCraft(void* craft);
+    void __cdecl TraceArtilleryMaskFromProcess(void* process);
 
     // Shared state for trampolines.
     extern void* g_VehicleListContext;
@@ -53,6 +58,7 @@ namespace BZROpenShim
     extern uint32_t g_BanFlag;
     extern float g_BanX;
     extern float g_BanY;
+    extern float g_TurretAimPitchMultiplier;
 
     // Map filter state flags recovered from the reference patch analysis.
     extern uint8_t g_MapFilterFlag11;

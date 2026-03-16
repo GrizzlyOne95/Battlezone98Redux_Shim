@@ -818,4 +818,116 @@ void __declspec(naked) __cdecl Trampoline_AutoSaveLoadButtonHook()
     }
 }
 
+// -----------------------------------------------------------------------
+// TurretCraft aim pitch multiplier
+// Site: 0x005F1838
+// Original bytes: movss xmm0, [0x008A2584]  (0.5f)
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_TurretCraftAimPitchMultiplier()
+{
+    __asm
+    {
+        movss xmm0, dword ptr [g_TurretAimPitchMultiplier]
+        jmp   [g_RetAddr_TurretCraftAimPitchMultiplier]
+    }
+}
+
+// -----------------------------------------------------------------------
+// TurretTank aim pitch multiplier
+// Site: 0x005F561A
+// Original bytes: movss xmm0, [0x008A2584]  (0.5f)
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_TurretTankAimPitchMultiplier()
+{
+    __asm
+    {
+        movss xmm0, dword ptr [g_TurretAimPitchMultiplier]
+        jmp   [g_RetAddr_TurretTankAimPitchMultiplier]
+    }
+}
+
+// -----------------------------------------------------------------------
+// HoverCraft Engine Flame Emit Hook
+// Sites:
+//   0x004EAD77
+//   0x004EAFDE
+// Original target:
+//   EngineFlame::AddFlame(this=ecx, transform, scale)
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_EngineFlameHoverCraftEmit()
+{
+    __asm
+    {
+        mov  eax, [esp + 4]
+        mov  edx, [esp + 8]
+        push dword ptr [ebp - 0x698]
+        push edx
+        push eax
+        push ecx
+        call EngineFlameHoverCraftEmitHook
+        add  esp, 16
+        ret  8
+    }
+}
+
+// -----------------------------------------------------------------------
+// Artillery Weapon Mask Trace
+// Site: first internal call inside ArtilleryProcess::DoAttack
+// Replays: original helper call via g_BZRFnPtr_ArtilleryMaskTraceOriginal
+// Purpose: temporary RE instrumentation to log process->me weapon-mask state
+// without changing behavior.
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_ArtilleryMaskTrace()
+{
+    static const char* name = "Trampoline_ArtilleryMaskTrace";
+    __asm
+    {
+        pushfd
+        pushad
+        push name
+        call LogHit
+        add  esp, 4
+        popad
+        popfd
+
+        pushfd
+        pushad
+        mov  eax, [ebp - 4]
+        push eax
+        call TraceArtilleryMaskFromProcess
+        add  esp, 4
+        popad
+        popfd
+
+        mov  ecx, [ebp - 4]
+        call [g_BZRFnPtr_ArtilleryMaskTraceOriginal]
+        jmp  [g_RetAddr_ArtilleryMaskTrace]
+    }
+}
+
+void __declspec(naked) __cdecl Trampoline_DecodedWeaponMaskBias()
+{
+    __asm
+    {
+        push ecx
+        call ApplyWeaponMaskCarrierBiasForCraft
+        pop  ecx
+        mov  eax, [ecx + 0x210]
+        xor  eax, 0x33333333
+        ret
+    }
+}
+
+void __declspec(naked) __cdecl Trampoline_RawWeaponMaskBias()
+{
+    __asm
+    {
+        push ecx
+        call ApplyWeaponMaskCarrierBiasForCraft
+        pop  ecx
+        mov  eax, [ecx + 0x210]
+        ret
+    }
+}
+
 } // namespace BZROpenShim

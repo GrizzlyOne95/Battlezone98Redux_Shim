@@ -1,0 +1,18 @@
+{
+  "corpora": [
+    {
+      "label": "redux",
+      "description": "Battlezone 98 Redux GOG corpus with advisory near-match PDB metadata.",
+      "promoted_root": "current_global_corpus",
+      "binary_family": "redux",
+      "pdb_trust": "advisory_near_match"
+    },
+    {
+      "label": "legacy",
+      "description": "Legacy Battlezone exact-match EXE/PDB corpus for core game code reference.",
+      "promoted_root": "current_legacy_global_corpus",
+      "binary_family": "legacy",
+      "pdb_trust": "exact_match"
+    }
+  ]
+}
