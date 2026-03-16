@@ -88,6 +88,10 @@ namespace BZROpenShim
     using FnMapFilter6 = uint32_t(__thiscall*)(void* thisPtr);
     using FnChunkResolve = uint32_t(__cdecl*)(void* objectPtr, uint32_t variant);
     using FnMapFilterScroll = void(__cdecl*)();
+    struct BuildItem;
+    using FnBuildItemInit = void(__cdecl*)(BuildItem& item, int64_t token);
+    using FnBuildItemCleanup = void(__cdecl*)(BuildItem& item);
+    using FnProducerModeCall = void* (__cdecl*)(void* producerPtr, int slot, int flags);
 
     static void** g_BzrPtr_945478 = nullptr;
     static void** g_BzrPtr_94548C = nullptr;
@@ -135,6 +139,11 @@ namespace BZROpenShim
     static FnChunkResolve g_BzrFn_ChunkResolve = nullptr; // 0x004E3620
     static FnMapFilterScroll g_BzrFn_MapFilterScrollUp = nullptr; // 0x007CB500
     static FnMapFilterScroll g_BzrFn_MapFilterScrollDown = nullptr; // 0x007CB540
+    static FnBuildItemInit g_BzrFn_InitBuildItem = nullptr; // 0x0049F5C0
+    static FnBuildItemCleanup g_BzrFn_CleanupBuildItem = nullptr; // 0x0049F880
+    static FnProducerModeCall g_BzrFn_ProducerModeCallOriginal = nullptr;
+    static BuildItem* g_BzrBuildMenuRoot = nullptr;
+    static bool g_IsSteamExe = false;
 
     namespace
     {
@@ -152,6 +161,48 @@ namespace BZROpenShim
         constexpr uintptr_t kLoadScreenSelectionFlagAddr = 0x00918133;
         constexpr uintptr_t kQueuedLoadPathBufferAddr = 0x00945708;
         constexpr uintptr_t kQueuedLoadNameBufferAddr = 0x00915540;
+        constexpr uintptr_t kBuildMenuRootAddr = 0x009174C4;
+        constexpr char kProducerBuildMenuIniName[] = "openshim_producer_build_menus.ini";
+        constexpr char kProducerBuildMenuSection[] = "ProducerBuildMenus";
+        constexpr char kProducerBuildMenuDefaultRoot[] = "build";
+        constexpr size_t kProducerBuildMenuTokenLen = 8;
+        constexpr uint32_t kRecyclerDistributedVft = 0x00417D74;
+        constexpr uint32_t kRecyclerAttachableVft = 0x00417DCC;
+        constexpr uint32_t kRecyclerFriendVft = 0x00417F68;
+        constexpr uint32_t kRecyclerEnemyVft = 0x00417F9C;
+        constexpr uint32_t kFactoryDistributedVft = 0x0040B71C;
+        constexpr uint32_t kFactoryAttachableVft = 0x0040B774;
+        constexpr uint32_t kArmoryDistributedVft = 0x004089C0;
+        constexpr uint32_t kArmoryAttachableVft = 0x00408A18;
+        constexpr uint32_t kConstructionRigDistributedVft = 0x0040A158;
+        constexpr uint32_t kConstructionRigAttachableVft = 0x0040A1B0;
+
+        enum class ProducerBuildMenuKind
+        {
+            Unknown,
+            Recycler,
+            Factory,
+            Armory,
+            ConstructionRig,
+        };
+
+        struct ProducerBuildMenuEntry
+        {
+            bool hasValue = false;
+            char token[kProducerBuildMenuTokenLen + 1] = {};
+            int64_t packedToken = 0;
+        };
+
+        struct ProducerBuildMenuConfig
+        {
+            bool initialized = false;
+            bool enabled = false;
+            ProducerBuildMenuEntry fallbackRoot = {};
+            ProducerBuildMenuEntry recycler = {};
+            ProducerBuildMenuEntry factory = {};
+            ProducerBuildMenuEntry armory = {};
+            ProducerBuildMenuEntry constructionRig = {};
+        };
 
         struct VehicleAssetExceptionCacheEntry
         {
@@ -179,6 +230,10 @@ namespace BZROpenShim
         static bool g_EnableChunkRenderFallback = false;
         static volatile long g_ChunkRenderLogBudget = 12;
         static VehicleAssetExceptionCacheEntry g_VehicleAssetExceptionCache[kVehicleAssetExceptionCacheSize] = {};
+        static ProducerBuildMenuConfig g_ProducerBuildMenuConfig = {};
+        static bool g_HasAppliedProducerBuildMenu = false;
+        static int64_t g_LastAppliedProducerBuildMenu = 0;
+        static uint32_t g_LastUnknownProducerVft = 0;
 
         static bool EnvFlagEnabled(const char* name)
         {
@@ -266,6 +321,299 @@ namespace BZROpenShim
                 return {};
 
             return std::filesystem::path(path).parent_path();
+        }
+
+        static bool IsIniBoolTrue(const char* value, bool fallback)
+        {
+            if (!value || !*value)
+                return fallback;
+
+            char normalized[16] = {};
+            size_t out = 0;
+            for (const char* cursor = value; *cursor && out + 1 < sizeof(normalized); ++cursor)
+            {
+                if (std::isspace(static_cast<unsigned char>(*cursor)))
+                    continue;
+                normalized[out++] = static_cast<char>(std::tolower(static_cast<unsigned char>(*cursor)));
+            }
+            normalized[out] = '\0';
+
+            if (normalized[0] == '\0')
+                return fallback;
+
+            if (strcmp(normalized, "1") == 0 ||
+                strcmp(normalized, "true") == 0 ||
+                strcmp(normalized, "yes") == 0 ||
+                strcmp(normalized, "on") == 0)
+            {
+                return true;
+            }
+
+            if (strcmp(normalized, "0") == 0 ||
+                strcmp(normalized, "false") == 0 ||
+                strcmp(normalized, "no") == 0 ||
+                strcmp(normalized, "off") == 0)
+            {
+                return false;
+            }
+
+            return fallback;
+        }
+
+        static int64_t PackProducerBuildMenuToken(const char* token)
+        {
+            if (!token)
+                return 0;
+
+            uint8_t bytes[kProducerBuildMenuTokenLen] = {};
+            for (size_t i = 0; i < kProducerBuildMenuTokenLen && token[i]; ++i)
+                bytes[i] = static_cast<uint8_t>(token[i]);
+
+            int64_t packed = 0;
+            memcpy(&packed, bytes, sizeof(bytes));
+            return packed;
+        }
+
+        static ProducerBuildMenuEntry NormalizeProducerBuildMenuToken(const char* value)
+        {
+            ProducerBuildMenuEntry entry = {};
+            if (!value)
+                return entry;
+
+            const char* start = value;
+            while (*start && std::isspace(static_cast<unsigned char>(*start)))
+                ++start;
+
+            const char* end = start + strlen(start);
+            while (end > start && std::isspace(static_cast<unsigned char>(end[-1])))
+                --end;
+
+            size_t length = static_cast<size_t>(end - start);
+            if (length == 0)
+                return entry;
+
+            char normalized[64] = {};
+            size_t out = 0;
+            for (size_t i = 0; i < length && out + 1 < sizeof(normalized); ++i)
+            {
+                normalized[out++] = static_cast<char>(
+                    std::tolower(static_cast<unsigned char>(start[i])));
+            }
+            normalized[out] = '\0';
+
+            if (out > 7 && strcmp(normalized + out - 7, "_mp.odf") == 0)
+            {
+                out -= 7;
+                normalized[out] = '\0';
+            }
+            else if (out > 4 && strcmp(normalized + out - 4, ".odf") == 0)
+            {
+                out -= 4;
+                normalized[out] = '\0';
+            }
+
+            if (out == 0)
+                return entry;
+
+            if (out > kProducerBuildMenuTokenLen)
+                out = kProducerBuildMenuTokenLen;
+
+            memcpy(entry.token, normalized, out);
+            entry.token[out] = '\0';
+            entry.hasValue = entry.token[0] != '\0';
+            entry.packedToken = entry.hasValue ? PackProducerBuildMenuToken(entry.token) : 0;
+            return entry;
+        }
+
+        static ProducerBuildMenuKind ClassifyProducerBuildMenuKind(void* producerPtr)
+        {
+            if (!producerPtr)
+                return ProducerBuildMenuKind::Unknown;
+
+            const uint32_t vft = *reinterpret_cast<const uint32_t*>(producerPtr);
+            switch (vft)
+            {
+            case kRecyclerDistributedVft:
+            case kRecyclerAttachableVft:
+            case kRecyclerFriendVft:
+            case kRecyclerEnemyVft:
+                return ProducerBuildMenuKind::Recycler;
+            case kFactoryDistributedVft:
+            case kFactoryAttachableVft:
+                return ProducerBuildMenuKind::Factory;
+            case kArmoryDistributedVft:
+            case kArmoryAttachableVft:
+                return ProducerBuildMenuKind::Armory;
+            case kConstructionRigDistributedVft:
+            case kConstructionRigAttachableVft:
+                return ProducerBuildMenuKind::ConstructionRig;
+            default:
+                if (vft != g_LastUnknownProducerVft)
+                {
+                    g_LastUnknownProducerVft = vft;
+                    Log(L"[PRODMENU] Unknown producer vft=0x%08X\n", vft);
+                }
+                return ProducerBuildMenuKind::Unknown;
+            }
+        }
+
+        static const char* ProducerBuildMenuKindName(ProducerBuildMenuKind kind)
+        {
+            switch (kind)
+            {
+            case ProducerBuildMenuKind::Recycler: return "Recycler";
+            case ProducerBuildMenuKind::Factory: return "Factory";
+            case ProducerBuildMenuKind::Armory: return "Armory";
+            case ProducerBuildMenuKind::ConstructionRig: return "ConstructionRig";
+            default: return "Producer";
+            }
+        }
+
+        static ProducerBuildMenuEntry ReadProducerBuildMenuEntry(const char* key)
+        {
+            ProducerBuildMenuEntry entry = {};
+            const auto moduleDir = GetMainModuleDirectory();
+            if (moduleDir.empty())
+                return entry;
+
+            const auto configPath = moduleDir / kProducerBuildMenuIniName;
+            char buffer[64] = {};
+            GetPrivateProfileStringA(
+                kProducerBuildMenuSection,
+                key,
+                "",
+                buffer,
+                static_cast<DWORD>(sizeof(buffer)),
+                configPath.string().c_str());
+            return NormalizeProducerBuildMenuToken(buffer);
+        }
+
+        static void LoadProducerBuildMenuConfig()
+        {
+            if (g_ProducerBuildMenuConfig.initialized)
+                return;
+
+            g_ProducerBuildMenuConfig.initialized = true;
+            g_ProducerBuildMenuConfig.fallbackRoot =
+                NormalizeProducerBuildMenuToken(kProducerBuildMenuDefaultRoot);
+
+            if (g_IsSteamExe)
+            {
+                Log(L"[PRODMENU] Disabled on Steam until the producer hook site is revalidated there\n");
+                return;
+            }
+
+            const auto moduleDir = GetMainModuleDirectory();
+            if (moduleDir.empty())
+            {
+                Log(L"[PRODMENU] Game directory unavailable; feature disabled\n");
+                return;
+            }
+
+            const auto configPath = moduleDir / kProducerBuildMenuIniName;
+            const auto configPathString = configPath.string();
+            DWORD attrs = GetFileAttributesA(configPathString.c_str());
+            if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0)
+            {
+                Log(L"[PRODMENU] Config not found at %hs; feature disabled\n", configPathString.c_str());
+                return;
+            }
+
+            char enabledBuffer[32] = {};
+            GetPrivateProfileStringA(
+                kProducerBuildMenuSection,
+                "Enabled",
+                "1",
+                enabledBuffer,
+                static_cast<DWORD>(sizeof(enabledBuffer)),
+                configPathString.c_str());
+
+            g_ProducerBuildMenuConfig.recycler = ReadProducerBuildMenuEntry("Recycler");
+            g_ProducerBuildMenuConfig.factory = ReadProducerBuildMenuEntry("Factory");
+            g_ProducerBuildMenuConfig.armory = ReadProducerBuildMenuEntry("Armory");
+            g_ProducerBuildMenuConfig.constructionRig = ReadProducerBuildMenuEntry("ConstructionRig");
+            if (!g_ProducerBuildMenuConfig.constructionRig.hasValue)
+            {
+                g_ProducerBuildMenuConfig.constructionRig = ReadProducerBuildMenuEntry("Constructor");
+            }
+
+            const bool hasAnyEntry =
+                g_ProducerBuildMenuConfig.recycler.hasValue ||
+                g_ProducerBuildMenuConfig.factory.hasValue ||
+                g_ProducerBuildMenuConfig.armory.hasValue ||
+                g_ProducerBuildMenuConfig.constructionRig.hasValue;
+            g_ProducerBuildMenuConfig.enabled = IsIniBoolTrue(enabledBuffer, true) && hasAnyEntry;
+
+            Log(L"[PRODMENU] Config %hs loaded enabled=%hs recycler=%hs factory=%hs armory=%hs constrig=%hs\n",
+                configPathString.c_str(),
+                g_ProducerBuildMenuConfig.enabled ? "true" : "false",
+                g_ProducerBuildMenuConfig.recycler.hasValue ? g_ProducerBuildMenuConfig.recycler.token : "-",
+                g_ProducerBuildMenuConfig.factory.hasValue ? g_ProducerBuildMenuConfig.factory.token : "-",
+                g_ProducerBuildMenuConfig.armory.hasValue ? g_ProducerBuildMenuConfig.armory.token : "-",
+                g_ProducerBuildMenuConfig.constructionRig.hasValue ? g_ProducerBuildMenuConfig.constructionRig.token : "-");
+        }
+
+        static const ProducerBuildMenuEntry& SelectProducerBuildMenuEntry(ProducerBuildMenuKind kind)
+        {
+            switch (kind)
+            {
+            case ProducerBuildMenuKind::Recycler:
+                if (g_ProducerBuildMenuConfig.recycler.hasValue)
+                    return g_ProducerBuildMenuConfig.recycler;
+                break;
+            case ProducerBuildMenuKind::Factory:
+                if (g_ProducerBuildMenuConfig.factory.hasValue)
+                    return g_ProducerBuildMenuConfig.factory;
+                break;
+            case ProducerBuildMenuKind::Armory:
+                if (g_ProducerBuildMenuConfig.armory.hasValue)
+                    return g_ProducerBuildMenuConfig.armory;
+                break;
+            case ProducerBuildMenuKind::ConstructionRig:
+                if (g_ProducerBuildMenuConfig.constructionRig.hasValue)
+                    return g_ProducerBuildMenuConfig.constructionRig;
+                break;
+            default:
+                break;
+            }
+
+            return g_ProducerBuildMenuConfig.fallbackRoot;
+        }
+
+        static void MaybeApplyProducerBuildMenu(void* producerPtr)
+        {
+            if (g_IsSteamExe || !g_BzrFn_InitBuildItem || !g_BzrFn_CleanupBuildItem || !g_BzrBuildMenuRoot)
+                return;
+
+            LoadProducerBuildMenuConfig();
+            if (!g_ProducerBuildMenuConfig.enabled)
+                return;
+
+            const ProducerBuildMenuKind kind = ClassifyProducerBuildMenuKind(producerPtr);
+            const auto& entry = SelectProducerBuildMenuEntry(kind);
+            if (!entry.hasValue)
+                return;
+
+            if (g_HasAppliedProducerBuildMenu && g_LastAppliedProducerBuildMenu == entry.packedToken)
+                return;
+
+            __try
+            {
+                g_BzrFn_CleanupBuildItem(*g_BzrBuildMenuRoot);
+                g_BzrFn_InitBuildItem(*g_BzrBuildMenuRoot, entry.packedToken);
+                g_HasAppliedProducerBuildMenu = true;
+                g_LastAppliedProducerBuildMenu = entry.packedToken;
+                Log(L"[PRODMENU] Applied %hs root=%hs producer=0x%08X\n",
+                    ProducerBuildMenuKindName(kind),
+                    entry.token,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(producerPtr)));
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[PRODMENU] Failed applying root=%hs producer=0x%08X\n",
+                    entry.token,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(producerPtr)));
+            }
         }
 
         static bool AutoSaveFileExists()
@@ -409,8 +757,18 @@ namespace BZROpenShim
     // ---------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------
-    void ResolveBzrHooks()
+    void ResolveBzrHooks(bool isSteam)
     {
+        g_IsSteamExe = isSteam;
+        g_BzrFn_ProducerModeCallOriginal = nullptr;
+        g_BzrFn_InitBuildItem = nullptr;
+        g_BzrFn_CleanupBuildItem = nullptr;
+        g_BzrBuildMenuRoot = nullptr;
+        g_ProducerBuildMenuConfig = {};
+        g_HasAppliedProducerBuildMenu = false;
+        g_LastAppliedProducerBuildMenu = 0;
+        g_LastUnknownProducerVft = 0;
+
         g_BzrPtr_945478 = reinterpret_cast<void**>(0x00945478);
         g_BzrPtr_94548C = reinterpret_cast<void**>(0x0094548C);
         g_BzrPtr_94555C = reinterpret_cast<void**>(0x0094555C);
@@ -464,12 +822,22 @@ namespace BZROpenShim
 
         g_BzrFn_VehicleFixPre = reinterpret_cast<void*>(0x00481EA0);
         g_BzrFn_VehicleFixOrig = reinterpret_cast<void*>(0x00481AF0);
+        if (!g_IsSteamExe)
+        {
+            g_BzrFn_InitBuildItem = reinterpret_cast<FnBuildItemInit>(0x0049F5C0);
+            g_BzrFn_CleanupBuildItem = reinterpret_cast<FnBuildItemCleanup>(0x0049F880);
+            g_BzrBuildMenuRoot = reinterpret_cast<BuildItem*>(kBuildMenuRootAddr);
+        }
 
         g_EnableChunkRenderFallback =
             EnvFlagEnabled("BZR_CHUNK_FORCE_FIRST_GEO") ||
             EnvFlagEnabled("OPENSHIM_CHUNK_FORCE_FIRST_GEO");
         Log(L"[CHUNK] Force-first-geo fallback: %hs\n",
             g_EnableChunkRenderFallback ? "enabled" : "disabled");
+        Log(L"[PRODMENU] Builder bridge: %hs\n",
+            (!g_IsSteamExe && g_BzrFn_InitBuildItem && g_BzrFn_CleanupBuildItem && g_BzrBuildMenuRoot)
+                ? "GOG ready"
+                : "disabled");
     }
 
     void InitBzrHookStrings()
@@ -478,6 +846,13 @@ namespace BZROpenShim
         BzrStringInitEmpty(&g_BzrnetLabel2);
         BzrStringInitEmpty(&g_BzrnetLabel3);
         BzrStringInitEmpty(&g_BzrnetLabel4);
+    }
+
+    void SetProducerBuildMenuOriginal(void* target)
+    {
+        g_BzrFn_ProducerModeCallOriginal = reinterpret_cast<FnProducerModeCall>(target);
+        Log(L"[PRODMENU] Original producer helper target=0x%08X\n",
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(target)));
     }
 
     static uint8_t* VehicleEntryAt(void* context, uint32_t index)
@@ -637,6 +1012,16 @@ namespace BZROpenShim
             std::fprintf(f, "%s\n", id);
         }
         std::fclose(f);
+    }
+
+    void* __cdecl ProducerBuildMenuCallHook(void* producerPtr, int slot, int flags)
+    {
+        MaybeApplyProducerBuildMenu(producerPtr);
+
+        if (!g_BzrFn_ProducerModeCallOriginal)
+            return nullptr;
+
+        return g_BzrFn_ProducerModeCallOriginal(producerPtr, slot, flags);
     }
 
     uint32_t __fastcall MapFilters6Rel32(void* thisPtr, void* /*edx*/)

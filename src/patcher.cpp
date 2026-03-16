@@ -908,6 +908,20 @@ namespace BZROpenShim
                 p.expected_original = { 0xE7, 0xFA, 0x09, 0x00 };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
+            else if (strcmp(p.name, "Producer Build Menu Root Hook") == 0)
+            {
+                if (isSteam)
+                {
+                    Log(L"[SCAN] SKIPPED %hs (GOG-only hook site for now)\n", p.name);
+                    continue;
+                }
+
+                // rel32 operand for CALL 0x0082BA59 at 0x004FFA9E
+                p.bzr_address = 0x004FFA9F;
+                p.verified = true;
+                p.expected_original = { 0xB6, 0xBF, 0x32, 0x00 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
             else if (strcmp(p.name, "Lobby BZRNET Integration HOST") == 0)
             {
                 p.bzr_address = 0x00743C05;
@@ -1034,6 +1048,24 @@ namespace BZROpenShim
                 uint32_t instrAddr = p.bzr_address - 1;
                 uint32_t target = static_cast<uint32_t>(
                     reinterpret_cast<uintptr_t>(ChunkRenderResolveHook));
+                int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(instrAddr + 5);
+                p.payload.resize(4);
+                memcpy(p.payload.data(), &rel, sizeof(rel));
+            }
+            else if (strcmp(p.name, "Producer Build Menu Root Hook") == 0)
+            {
+                uint32_t instrAddr = p.bzr_address - 1;
+                void* originalTarget = ResolveRelCallTarget(instrAddr);
+                if (!originalTarget)
+                {
+                    Log(L"[SKIP] %hs (failed to resolve original call target)\n", p.name);
+                    continue;
+                }
+
+                SetProducerBuildMenuOriginal(originalTarget);
+
+                uint32_t target = static_cast<uint32_t>(
+                    reinterpret_cast<uintptr_t>(ProducerBuildMenuCallHook));
                 int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(instrAddr + 5);
                 p.payload.resize(4);
                 memcpy(p.payload.data(), &rel, sizeof(rel));
@@ -1195,7 +1227,7 @@ namespace BZROpenShim
             findAddr("Map List Fix Support 1/3"),
             findAddr("Probe MapListFix2"));
 
-        ResolveBzrHooks();
+        ResolveBzrHooks(isSteam);
         InitBzrHookStrings();
         SuppressStartupShellAutoLoad();
 

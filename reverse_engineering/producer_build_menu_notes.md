@@ -196,3 +196,34 @@ The most realistic forward path is an OpenShim native hook that:
 
 That would give Recycler / Factory / Armory / Constructor nested menus without
 the current ODF hot-swap hacks.
+
+### First Implementation Stab
+
+OpenShim now has a first-pass bridge experiment wired in:
+
+- rel32 hook at the GOG `Producer::UpdateModeList` helper call site
+- config file: `openshim_producer_build_menus.ini`
+- producer-type detection by known GOG vtable addresses
+- root swaps performed through the game's own:
+  - `InitBuildItem(BuildItem&, __int64)`
+  - `CleanupBuildItem(BuildItem&)`
+
+Current behavior:
+
+- supported producer buckets:
+  - Recycler
+  - Factory
+  - Armory
+  - ConstructionRig
+- uses an external INI mapping for roots instead of reading a new ODF key yet
+- restores the stock `build` root for unmatched producer types
+- Steam intentionally skips this hook until the equivalent call site is
+  revalidated there
+
+This is intentionally only the first bridge step. It proves out the safest
+native reuse path, but it still needs live in-game validation to confirm:
+
+- whether `UpdateModeList` alone is enough for full submenu navigation
+- whether `SetActiveMode` / `StartBuild` also need companion hooks
+- whether the global `buildMenu` object needs per-instance caching instead of
+  repeated root swapping

@@ -147,6 +147,36 @@ probably earlier than active-handle selection. If it does log forced geometry
 but chunks still do not render, the next failure point is likely downstream in
 render-class handling or Ogre proxy creation.
 
+### Producer Build Menu Bridge Experiment
+
+The shim now includes a first-pass native hook for testing submenu-capable
+producer build menus on the GOG executable.
+
+What it does:
+
+1. hooks a call inside `Producer::UpdateModeList`
+2. identifies common producer types by vtable
+3. swaps the global native `buildMenu` root through the game's own
+   `InitBuildItem` / `CleanupBuildItem` path
+4. lets the original producer helper keep running afterward
+
+Configuration:
+
+- copy `openshim_producer_build_menus.ini.example` next to the game EXE as
+  `openshim_producer_build_menus.ini`
+- set root tokens under `[ProducerBuildMenus]` for:
+  - `Recycler`
+  - `Factory`
+  - `Armory`
+  - `ConstructionRig`
+
+Current scope and cautions:
+
+- GOG-only for now
+- config-driven by producer type, not by ODF field yet
+- this is the bridge experiment, not the finished submenu feature
+- final submenu navigation and leaf-build handoff still need in-game validation
+
 ## Debug Metadata Inspection
 
 If `llvm-pdbutil` is unavailable or blocked by local DIA/COM registration, use:
