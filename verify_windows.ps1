@@ -30,6 +30,9 @@ if (-not $GamePath -or -not (Test-Path $GamePath)) {
 
 $dllPath = Join-Path $GamePath "winmm.dll"
 $logPath = Join-Path $GamePath "openshim.log"
+$bzLoggerPath = Join-Path $GamePath "BZLogger.txt"
+$bufferBinPath = Join-Path $GamePath "bz_buffer_log.bin"
+$bufferMetaPath = Join-Path $GamePath "bz_buffer_log.meta.txt"
 $pass = $true
 $issues = @()
 
@@ -44,6 +47,37 @@ if (Test-Path $dllPath) {
     Write-Host "[FAIL] winmm.dll NOT found in game folder" -ForegroundColor Red
     $issues += "winmm.dll is missing from the game folder"
     $pass = $false
+}
+
+if (Test-Path $bufferBinPath) {
+    Write-Host "[INFO] buffer capture found: $bufferBinPath" -ForegroundColor Cyan
+} else {
+    Write-Host "[INFO] buffer capture not present (expected unless buffer logging was enabled)" -ForegroundColor DarkCyan
+}
+
+if (Test-Path $bufferMetaPath) {
+    Write-Host "[INFO] buffer capture metadata found: $bufferMetaPath" -ForegroundColor Cyan
+}
+
+if (Test-Path $bzLoggerPath) {
+    $intervalLines = Get-Content $bzLoggerPath | Where-Object { $_ -match "Bandwidth usage now set to\s+\d+,\s+Interval\s+(\d+)\s+ms" }
+    $lastIntervalLine = $intervalLines | Select-Object -Last 1
+    if ($lastIntervalLine) {
+        $intervalMatch = [regex]::Match($lastIntervalLine, "Bandwidth usage now set to\s+(\d+),\s+Interval\s+(\d+)\s+ms")
+        $bandwidth = [int]$intervalMatch.Groups[1].Value
+        $intervalMs = [int]$intervalMatch.Groups[2].Value
+        if ($intervalMs -le 33) {
+            Write-Host "[PASS] BZLogger interval is ${intervalMs} ms at bandwidth $bandwidth" -ForegroundColor Green
+            Write-Host "       $lastIntervalLine"
+        } else {
+            Write-Host "[WARN] BZLogger interval is ${intervalMs} ms at bandwidth $bandwidth (target is <= 33 ms for the test profile)" -ForegroundColor Yellow
+            Write-Host "       $lastIntervalLine"
+        }
+    } else {
+        Write-Host "[INFO] BZLogger.txt found, but no bandwidth interval line was detected yet" -ForegroundColor DarkCyan
+    }
+} else {
+    Write-Host "[INFO] BZLogger.txt not present yet" -ForegroundColor DarkCyan
 }
 
 if (-not (Test-Path $logPath)) {

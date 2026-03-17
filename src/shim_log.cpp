@@ -41,6 +41,66 @@ namespace
             text.pop_back();
     }
 
+    int GetCurrentUtcOffsetMinutes()
+    {
+        DYNAMIC_TIME_ZONE_INFORMATION tz = {};
+        const DWORD tzId = GetDynamicTimeZoneInformation(&tz);
+
+        LONG bias = tz.Bias;
+        if (tzId == TIME_ZONE_ID_DAYLIGHT)
+            bias += tz.DaylightBias;
+        else if (tzId == TIME_ZONE_ID_STANDARD)
+            bias += tz.StandardBias;
+
+        return -static_cast<int>(bias);
+    }
+
+    void FormatIso8601Utc(char* buffer, size_t bufferCount, const SYSTEMTIME& st)
+    {
+        if (!buffer || bufferCount == 0)
+            return;
+
+        _snprintf_s(
+            buffer,
+            bufferCount,
+            _TRUNCATE,
+            "%04u-%02u-%02uT%02u:%02u:%02u.%03uZ",
+            st.wYear,
+            st.wMonth,
+            st.wDay,
+            st.wHour,
+            st.wMinute,
+            st.wSecond,
+            st.wMilliseconds);
+    }
+
+    void FormatIso8601Local(char* buffer, size_t bufferCount, const SYSTEMTIME& st, int utcOffsetMinutes)
+    {
+        if (!buffer || bufferCount == 0)
+            return;
+
+        const char sign = utcOffsetMinutes >= 0 ? '+' : '-';
+        const int absOffsetMinutes = utcOffsetMinutes >= 0 ? utcOffsetMinutes : -utcOffsetMinutes;
+        const int offsetHours = absOffsetMinutes / 60;
+        const int offsetMinutes = absOffsetMinutes % 60;
+
+        _snprintf_s(
+            buffer,
+            bufferCount,
+            _TRUNCATE,
+            "%04u-%02u-%02uT%02u:%02u:%02u.%03u%c%02d:%02d",
+            st.wYear,
+            st.wMonth,
+            st.wDay,
+            st.wHour,
+            st.wMinute,
+            st.wSecond,
+            st.wMilliseconds,
+            sign,
+            offsetHours,
+            offsetMinutes);
+    }
+
     std::string BuildLogPath()
     {
         char modulePath[MAX_PATH] = {};
@@ -61,17 +121,13 @@ namespace
             return;
 
         SYSTEMTIME st = {};
-        GetLocalTime(&st);
+        GetSystemTime(&st);
+        char utcBuffer[40] = {};
+        FormatIso8601Utc(utcBuffer, sizeof(utcBuffer), st);
         std::fprintf(
             g_LogFile,
-            "[%04u-%02u-%02u %02u:%02u:%02u.%03u] [pid:%lu tid:%lu] [%s] [%s] %s\n",
-            st.wYear,
-            st.wMonth,
-            st.wDay,
-            st.wHour,
-            st.wMinute,
-            st.wSecond,
-            st.wMilliseconds,
+            "[%s] [pid:%lu tid:%lu] [%s] [%s] %s\n",
+            utcBuffer,
             static_cast<unsigned long>(GetCurrentProcessId()),
             static_cast<unsigned long>(GetCurrentThreadId()),
             LevelToString(level),
@@ -105,8 +161,28 @@ namespace
         // UCRT rejects line-buffered mode with a zero-sized buffer here and
         // fail-fast triggers during DllMain. Leave the default buffering in
         // place and flush explicitly after each write instead.
+        SYSTEMTIME utcNow = {};
+        SYSTEMTIME localNow = {};
+        GetSystemTime(&utcNow);
+        GetLocalTime(&localNow);
+
+        char utcBuffer[40] = {};
+        char localBuffer[48] = {};
+        const int utcOffsetMinutes = GetCurrentUtcOffsetMinutes();
+        FormatIso8601Utc(utcBuffer, sizeof(utcBuffer), utcNow);
+        FormatIso8601Local(localBuffer, sizeof(localBuffer), localNow, utcOffsetMinutes);
+
         WriteLineUnlocked(LogLevel::Info, "logger", "================ session start ================");
         WriteLineUnlocked(LogLevel::Info, "logger", g_LogPath);
+        char clockLine[160] = {};
+        _snprintf_s(
+            clockLine,
+            _TRUNCATE,
+            "Clock baseline utc=%s local=%s utcOffsetMinutes=%d",
+            utcBuffer,
+            localBuffer,
+            utcOffsetMinutes);
+        WriteLineUnlocked(LogLevel::Info, "logger", clockLine);
         return TRUE;
     }
 

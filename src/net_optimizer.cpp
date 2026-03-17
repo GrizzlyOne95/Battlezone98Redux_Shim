@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <cwchar>
 #include <string>
 #include <unordered_map>
 
@@ -26,12 +27,59 @@ namespace
     constexpr uint32_t kDefaultReorderWindowMs = 30;
     constexpr uint32_t kMinReorderWindowMs = 5;
     constexpr uint32_t kMaxReorderWindowMs = 200;
+    constexpr uint32_t kDefaultReorderDepth = 8;
+    constexpr uint32_t kMinReorderDepth = 1;
+    constexpr uint32_t kDefaultReorderPeers = 32;
+    constexpr uint32_t kMinReorderPeers = 1;
+    constexpr uint32_t kDefaultReorderDrainCap = 32;
+    constexpr uint32_t kMinReorderDrainCap = 1;
+    constexpr uint32_t kMaxReorderDrainCap = 128;
     constexpr uint32_t kReorderSeqOffset = 13;
     constexpr uint32_t kReorderSeqMinPayloadBytes = 17;
     constexpr uint32_t kReorderSlotCount = 8;
     constexpr uint32_t kReorderMaxPeers = 32;
-    constexpr uint32_t kReorderDrainCap = 32;
     constexpr uint32_t kReorderMaxPacketBytes = 1500;
+    constexpr uint32_t kBufferLogMagic = 0x474C5A42u; // 'BZLG'
+    constexpr uint32_t kBufferLogVersion = 1;
+    constexpr uint32_t kDefaultBufferLogPayloadBytes = 32;
+    constexpr uint32_t kMinBufferLogPayloadBytes = 8;
+    constexpr uint32_t kMaxBufferLogPayloadBytes = 256;
+    constexpr uint32_t kDefaultBufferLogRingRecords = 65536;
+    constexpr uint32_t kMinBufferLogRingRecords = 1024;
+    constexpr uint32_t kMaxBufferLogRingRecords = 1000000;
+    constexpr const char* kBufferLogBinName = "bz_buffer_log.bin";
+    constexpr const char* kBufferLogMetaName = "bz_buffer_log.meta.txt";
+    constexpr uint16_t kBzrNetWebSocketPort = 1337;
+    constexpr uint16_t kBzrNetProbePort = 1338;
+    constexpr uint16_t kBzrNetRelayPort = 1339;
+
+    enum BufferLogEventType : uint32_t
+    {
+        kBufferLogEventRecvFrom = 1,
+        kBufferLogEventWSARecvFrom = 2,
+        kBufferLogEventIoctlSocket = 3,
+        kBufferLogEventWSAIoctl = 4,
+    };
+
+#pragma pack(push, 1)
+    struct BufferLogRecordHeader
+    {
+        uint32_t magic = kBufferLogMagic;
+        uint32_t version = kBufferLogVersion;
+        uint32_t eventType = 0;
+        uint32_t socketId = 0;
+        uint64_t tickMs = 0;
+        uint32_t sequence = 0;
+        uint32_t requestedLength = 0;
+        uint32_t transferredLength = 0;
+        uint32_t wsaError = 0;
+        uint32_t srcIpv4 = 0;
+        uint16_t srcPort = 0;
+        uint16_t flags = 0;
+        uint16_t payloadLength = 0;
+        uint16_t reserved = 0;
+    };
+#pragma pack(pop)
 
     struct NetConfig
     {
@@ -47,11 +95,23 @@ namespace
         bool logPacketReorder = true;
         bool applySocketBuffers = true;
         bool enablePacketReorder = true;
+        bool enableBufferLog = false;
         uint32_t sendBufferSize = DEFAULT_SEND_BUFFER;
         uint32_t recvBufferSize = DEFAULT_RECV_BUFFER;
         uint32_t packetLogLimit = kDefaultPacketLogLimit;
         uint32_t packetLogInterval = kDefaultPacketLogInterval;
         uint32_t reorderWindowMs = kDefaultReorderWindowMs;
+        uint32_t reorderDepth = kDefaultReorderDepth;
+        uint32_t reorderPeers = kDefaultReorderPeers;
+        uint32_t reorderDrainCap = kDefaultReorderDrainCap;
+        uint32_t bufferLogPayloadBytes = kDefaultBufferLogPayloadBytes;
+        uint32_t bufferLogRingRecords = kDefaultBufferLogRingRecords;
+        uint32_t bufferLogSocketId = 0;
+        uint32_t bufferLogPeerIpv4 = 0;
+        uint16_t bufferLogPeerPort = 0;
+        bool bufferLogSocketFilterEnabled = false;
+        bool bufferLogPeerFilterEnabled = false;
+        std::string bufferLogPeerText;
     };
 
     struct SocketState
@@ -71,6 +131,7 @@ namespace
         int lastRecvError = 0;
         int lastSendToError = 0;
         int lastRecvFromError = 0;
+        std::string lastRouteKey;
     };
 
     using SocketFn = SOCKET (WSAAPI*)(int, int, int);
@@ -80,9 +141,12 @@ namespace
     using WSASendToFn = int (WSAAPI*)(SOCKET, LPWSABUF, DWORD, LPDWORD, DWORD, const sockaddr*, int, LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
     using WSARecvFromFn = int (WSAAPI*)(SOCKET, LPWSABUF, DWORD, LPDWORD, LPDWORD, sockaddr*, LPINT, LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
     using WSAIoctlFn = int (WSAAPI*)(SOCKET, DWORD, LPVOID, DWORD, LPVOID, DWORD, LPDWORD, LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
+    using SendToFn = int (WSAAPI*)(SOCKET, const char*, int, int, const sockaddr*, int);
+    using RecvFromFn = int (WSAAPI*)(SOCKET, char*, int, int, sockaddr*, int*);
     using IoctlSocketFn = int (WSAAPI*)(SOCKET, long, u_long*);
     using BindFn = int (WSAAPI*)(SOCKET, const sockaddr*, int);
     using ConnectFn = int (WSAAPI*)(SOCKET, const sockaddr*, int);
+    using WSAConnectFn = int (WSAAPI*)(SOCKET, const sockaddr*, int, LPWSABUF, LPWSABUF, LPQOS, LPQOS);
     using CloseSocketFn = int (WSAAPI*)(SOCKET);
     using SetSockOptFn = int (WSAAPI*)(SOCKET, int, int, const char*, int);
     using GetSockOptFn = int (WSAAPI*)(SOCKET, int, int, char*, int*);
@@ -109,9 +173,12 @@ namespace
     WSASendToFn g_RealWSASendTo = nullptr;
     WSARecvFromFn g_RealWSARecvFrom = nullptr;
     WSAIoctlFn g_RealWSAIoctl = nullptr;
+    SendToFn g_RealSendTo = nullptr;
+    RecvFromFn g_RealRecvFrom = nullptr;
     IoctlSocketFn g_RealIoctlSocket = nullptr;
     BindFn g_RealBind = nullptr;
     ConnectFn g_RealConnect = nullptr;
+    WSAConnectFn g_RealWSAConnect = nullptr;
     CloseSocketFn g_RealCloseSocket = nullptr;
     SetSockOptFn g_RealSetSockOpt = nullptr;
     GetSockOptFn g_RealGetSockOpt = nullptr;
@@ -144,6 +211,22 @@ namespace
 
     SRWLOCK g_ReorderLock = SRWLOCK_INIT;
     PeerBuf g_ReorderPeers[kReorderMaxPeers] = {};
+
+    SRWLOCK g_BufferLogLock = SRWLOCK_INIT;
+    uint8_t* g_BufferLogRing = nullptr;
+    uint32_t g_BufferLogStride = 0;
+    uint32_t g_BufferLogHead = 0;
+    uint32_t g_BufferLogCount = 0;
+    uint32_t g_BufferLogSequence = 0;
+    uint64_t g_BufferLogTotalEvents = 0;
+    bool g_BufferLogInitialized = false;
+    bool g_BufferLogEnabled = false;
+    std::string g_BufferLogBinPath;
+    std::string g_BufferLogMetaPath;
+
+    uint32_t GetSocketId(SOCKET s);
+    bool TryGetSockaddrPort(const sockaddr* addr, int addrLen, uint16_t* outPort);
+    bool TryGetSockaddrIpv4HostOrder(const sockaddr* addr, int addrLen, uint32_t* outIpv4);
 
     void Logf(const char* fmt, ...)
     {
@@ -210,6 +293,22 @@ namespace
         return value && value[0] != '\0' && value[0] != '0';
     }
 
+    std::string TrimString(const std::string& value)
+    {
+        const char* whitespace = " \t\r\n";
+        const size_t first = value.find_first_not_of(whitespace);
+        if (first == std::string::npos)
+            return {};
+
+        const size_t last = value.find_last_not_of(whitespace);
+        return value.substr(first, last - first + 1);
+    }
+
+    uint32_t ClampUint(uint32_t value, uint32_t minValue, uint32_t maxValue)
+    {
+        return (std::max)(minValue, (std::min)(value, maxValue));
+    }
+
     bool ReadIniBool(const char* section, const char* key, bool fallback)
     {
         if (g_NetIniPath.empty())
@@ -238,6 +337,16 @@ namespace
         return static_cast<uint32_t>(value);
     }
 
+    std::string ReadIniString(const char* section, const char* key)
+    {
+        if (g_NetIniPath.empty())
+            return {};
+
+        char buf[256] = {};
+        GetPrivateProfileStringA(section, key, "", buf, static_cast<DWORD>(sizeof(buf)), g_NetIniPath.c_str());
+        return TrimString(buf);
+    }
+
     int ReadIniInt(const char* section, const char* key, int fallback)
     {
         if (g_NetIniPath.empty())
@@ -254,6 +363,79 @@ namespace
     uint32_t ClampReorderWindow(uint32_t value)
     {
         return (std::max)(kMinReorderWindowMs, (std::min)(value, kMaxReorderWindowMs));
+    }
+
+    uint32_t ClampReorderDepth(uint32_t value)
+    {
+        return ClampUint(value, kMinReorderDepth, kReorderSlotCount);
+    }
+
+    uint32_t ClampReorderPeerCount(uint32_t value)
+    {
+        return ClampUint(value, kMinReorderPeers, kReorderMaxPeers);
+    }
+
+    uint32_t ClampReorderDrainCap(uint32_t value)
+    {
+        return ClampUint(value, kMinReorderDrainCap, kMaxReorderDrainCap);
+    }
+
+    uint32_t ClampBufferLogPayloadBytes(uint32_t value)
+    {
+        return ClampUint(value, kMinBufferLogPayloadBytes, kMaxBufferLogPayloadBytes);
+    }
+
+    uint32_t ClampBufferLogRingRecords(uint32_t value)
+    {
+        return ClampUint(value, kMinBufferLogRingRecords, kMaxBufferLogRingRecords);
+    }
+
+    bool ParseBufferLogPeerFilter(const std::string& text, uint32_t* outIpv4, uint16_t* outPort, std::string* outNormalized)
+    {
+        if (!outIpv4 || !outPort)
+            return false;
+
+        const std::string trimmed = TrimString(text);
+        if (trimmed.empty())
+            return false;
+
+        std::string ipPart = trimmed;
+        std::string portPart;
+        const size_t colon = trimmed.rfind(':');
+        if (colon != std::string::npos)
+        {
+            ipPart = TrimString(trimmed.substr(0, colon));
+            portPart = TrimString(trimmed.substr(colon + 1));
+        }
+
+        if (ipPart.empty())
+            return false;
+
+        IN_ADDR addr4 = {};
+        if (InetPtonA(AF_INET, ipPart.c_str(), &addr4) != 1)
+            return false;
+
+        uint16_t port = 0;
+        if (!portPart.empty())
+        {
+            char* end = nullptr;
+            const unsigned long parsedPort = std::strtoul(portPart.c_str(), &end, 10);
+            if (!end || *end != '\0' || parsedPort > 65535ul)
+                return false;
+            port = static_cast<uint16_t>(parsedPort);
+        }
+
+        char normalized[64] = {};
+        if (port != 0)
+            _snprintf_s(normalized, _TRUNCATE, "%s:%u", ipPart.c_str(), static_cast<unsigned>(port));
+        else
+            _snprintf_s(normalized, _TRUNCATE, "%s", ipPart.c_str());
+
+        *outIpv4 = ntohl(addr4.S_un.S_addr);
+        *outPort = port;
+        if (outNormalized)
+            *outNormalized = normalized;
+        return true;
     }
 
     bool LoadManifestProfile(const std::string& manifestPath, uint32_t& outSend, uint32_t& outRecv)
@@ -345,8 +527,30 @@ namespace
         g_Config.packetLogInterval = ReadIniUint("OpenShimSocket", "PacketLogInterval", kDefaultPacketLogInterval);
         g_Config.enablePacketReorder = ReadIniBool("OpenShimSocket", "EnablePacketReorder", true);
         g_Config.reorderWindowMs = ClampReorderWindow(ReadIniUint("OpenShimSocket", "PacketReorderWindowMs", kDefaultReorderWindowMs));
+        g_Config.reorderDepth = ClampReorderDepth(ReadIniUint("OpenShimSocket", "PacketReorderDepth", kDefaultReorderDepth));
+        g_Config.reorderPeers = ClampReorderPeerCount(ReadIniUint("OpenShimSocket", "PacketReorderPeers", kDefaultReorderPeers));
+        g_Config.reorderDrainCap = ClampReorderDrainCap(ReadIniUint("OpenShimSocket", "PacketReorderDrainCap", kDefaultReorderDrainCap));
+        g_Config.enableBufferLog = ReadIniBool("OpenShimSocket", "EnableBufferLog", false);
+        g_Config.bufferLogPayloadBytes = ClampBufferLogPayloadBytes(ReadIniUint("OpenShimSocket", "BufferLogPayloadBytes", kDefaultBufferLogPayloadBytes));
+        g_Config.bufferLogRingRecords = ClampBufferLogRingRecords(ReadIniUint("OpenShimSocket", "BufferLogRingRecords", kDefaultBufferLogRingRecords));
+        g_Config.bufferLogSocketId = ReadIniUint("OpenShimSocket", "BufferLogSocketId", 0);
+        g_Config.bufferLogSocketFilterEnabled = g_Config.bufferLogSocketId != 0;
+        g_Config.bufferLogPeerText = ReadIniString("OpenShimSocket", "BufferLogPeer");
+        if (!g_Config.bufferLogPeerText.empty())
+        {
+            std::string normalizedPeer;
+            if (ParseBufferLogPeerFilter(g_Config.bufferLogPeerText, &g_Config.bufferLogPeerIpv4, &g_Config.bufferLogPeerPort, &normalizedPeer))
+            {
+                g_Config.bufferLogPeerFilterEnabled = true;
+                g_Config.bufferLogPeerText = normalizedPeer;
+            }
+            else
+            {
+                g_Config.bufferLogPeerText.clear();
+            }
+        }
 
-        char envValue[32] = {};
+        char envValue[64] = {};
         if (TryReadEnvValue("BZ_REORDER", envValue, static_cast<DWORD>(sizeof(envValue))) ||
             TryReadEnvValue("OPENSHIM_REORDER", envValue, static_cast<DWORD>(sizeof(envValue))))
         {
@@ -357,6 +561,65 @@ namespace
             TryReadEnvValue("OPENSHIM_REORDER_WINDOW_MS", envValue, static_cast<DWORD>(sizeof(envValue))))
         {
             g_Config.reorderWindowMs = ClampReorderWindow(static_cast<uint32_t>(std::strtoul(envValue, nullptr, 10)));
+        }
+
+        if (TryReadEnvValue("BZ_REORDER_DEPTH", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_REORDER_DEPTH", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.reorderDepth = ClampReorderDepth(static_cast<uint32_t>(std::strtoul(envValue, nullptr, 10)));
+        }
+
+        if (TryReadEnvValue("BZ_REORDER_PEERS", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_REORDER_PEERS", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.reorderPeers = ClampReorderPeerCount(static_cast<uint32_t>(std::strtoul(envValue, nullptr, 10)));
+        }
+
+        if (TryReadEnvValue("BZ_REORDER_DRAIN", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_REORDER_DRAIN", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.reorderDrainCap = ClampReorderDrainCap(static_cast<uint32_t>(std::strtoul(envValue, nullptr, 10)));
+        }
+
+        if (TryReadEnvValue("BZ_BUFFER_LOG", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_BUFFER_LOG", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.enableBufferLog = EnvValueEnabled(envValue);
+        }
+
+        if (TryReadEnvValue("BZ_BUFFER_LOG_BYTES", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_BUFFER_LOG_BYTES", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.bufferLogPayloadBytes = ClampBufferLogPayloadBytes(static_cast<uint32_t>(std::strtoul(envValue, nullptr, 10)));
+        }
+
+        if (TryReadEnvValue("BZ_BUFFER_LOG_RING", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_BUFFER_LOG_RING", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.bufferLogRingRecords = ClampBufferLogRingRecords(static_cast<uint32_t>(std::strtoul(envValue, nullptr, 10)));
+        }
+
+        if (TryReadEnvValue("BZ_BUFFER_LOG_SOCKET", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_BUFFER_LOG_SOCKET", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.bufferLogSocketId = static_cast<uint32_t>(std::strtoul(envValue, nullptr, 10));
+            g_Config.bufferLogSocketFilterEnabled = g_Config.bufferLogSocketId != 0;
+        }
+
+        if (TryReadEnvValue("BZ_BUFFER_LOG_PEER", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_BUFFER_LOG_PEER", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.bufferLogPeerFilterEnabled = false;
+            g_Config.bufferLogPeerText.clear();
+            g_Config.bufferLogPeerIpv4 = 0;
+            g_Config.bufferLogPeerPort = 0;
+
+            std::string normalizedPeer;
+            if (ParseBufferLogPeerFilter(envValue, &g_Config.bufferLogPeerIpv4, &g_Config.bufferLogPeerPort, &normalizedPeer))
+            {
+                g_Config.bufferLogPeerFilterEnabled = true;
+                g_Config.bufferLogPeerText = normalizedPeer;
+            }
         }
 
         const std::string manifestPath = JoinPath(GetGameDir(), "netcode_manifest.json");
@@ -371,6 +634,13 @@ namespace
                 g_Config.sendBufferSize = (std::max)(g_Config.sendBufferSize, manifestSend);
                 g_Config.recvBufferSize = (std::max)(g_Config.recvBufferSize, manifestRecv);
             }
+        }
+
+        if (ReadIniString("OpenShimSocket", "BufferLogPeer").size() > 0 &&
+            !g_Config.bufferLogPeerFilterEnabled &&
+            g_Config.bufferLogPeerText.empty())
+        {
+            Logf("[OpenShimNet] buffer_log peer filter ignored: invalid BufferLogPeer value");
         }
     }
 
@@ -415,9 +685,12 @@ namespace
         g_RealWSASendTo = reinterpret_cast<WSASendToFn>(GetProcAddress(g_Ws2Module, "WSASendTo"));
         g_RealWSARecvFrom = reinterpret_cast<WSARecvFromFn>(GetProcAddress(g_Ws2Module, "WSARecvFrom"));
         g_RealWSAIoctl = reinterpret_cast<WSAIoctlFn>(GetProcAddress(g_Ws2Module, "WSAIoctl"));
+        g_RealSendTo = reinterpret_cast<SendToFn>(GetProcAddress(g_Ws2Module, "sendto"));
+        g_RealRecvFrom = reinterpret_cast<RecvFromFn>(GetProcAddress(g_Ws2Module, "recvfrom"));
         g_RealIoctlSocket = reinterpret_cast<IoctlSocketFn>(GetProcAddress(g_Ws2Module, "ioctlsocket"));
         g_RealBind = reinterpret_cast<BindFn>(GetProcAddress(g_Ws2Module, "bind"));
         g_RealConnect = reinterpret_cast<ConnectFn>(GetProcAddress(g_Ws2Module, "connect"));
+        g_RealWSAConnect = reinterpret_cast<WSAConnectFn>(GetProcAddress(g_Ws2Module, "WSAConnect"));
         g_RealCloseSocket = reinterpret_cast<CloseSocketFn>(GetProcAddress(g_Ws2Module, "closesocket"));
         g_RealSetSockOpt = reinterpret_cast<SetSockOptFn>(GetProcAddress(g_Ws2Module, "setsockopt"));
         g_RealGetSockOpt = reinterpret_cast<GetSockOptFn>(GetProcAddress(g_Ws2Module, "getsockopt"));
@@ -434,9 +707,12 @@ namespace
             g_RealWSASendTo &&
             g_RealWSARecvFrom &&
             g_RealWSAIoctl &&
+            g_RealSendTo &&
+            g_RealRecvFrom &&
             g_RealIoctlSocket &&
             g_RealBind &&
             g_RealConnect &&
+            g_RealWSAConnect &&
             g_RealCloseSocket &&
             g_RealSetSockOpt &&
             g_RealGetSockOpt &&
@@ -452,6 +728,184 @@ namespace
         g_DispatchWSASocketW = g_RealWSASocketW;
 
         return ok;
+    }
+
+    void InitializeBufferLog()
+    {
+        if (g_BufferLogInitialized)
+            return;
+
+        g_BufferLogInitialized = true;
+        if (!g_Config.enableBufferLog)
+        {
+            Logf("[OpenShimNet] buffer_log disabled");
+            return;
+        }
+
+        g_BufferLogBinPath = JoinPath(GetGameDir(), kBufferLogBinName);
+        g_BufferLogMetaPath = JoinPath(GetGameDir(), kBufferLogMetaName);
+        g_BufferLogStride = static_cast<uint32_t>(sizeof(BufferLogRecordHeader) + g_Config.bufferLogPayloadBytes);
+
+        const size_t totalBytes =
+            static_cast<size_t>(g_BufferLogStride) * static_cast<size_t>(g_Config.bufferLogRingRecords);
+        g_BufferLogRing = static_cast<uint8_t*>(HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, totalBytes));
+        if (!g_BufferLogRing)
+        {
+            Logf("[OpenShimNet] buffer_log allocation failed bytes=%llu",
+                static_cast<unsigned long long>(totalBytes));
+            return;
+        }
+
+        g_BufferLogEnabled = true;
+        Logf("[OpenShimNet] buffer_log enabled payload=%u ring=%u stride=%u socketFilter=%u peerFilter=%s bin=%s",
+            g_Config.bufferLogPayloadBytes,
+            g_Config.bufferLogRingRecords,
+            g_BufferLogStride,
+            g_Config.bufferLogSocketFilterEnabled ? g_Config.bufferLogSocketId : 0,
+            g_Config.bufferLogPeerFilterEnabled ? g_Config.bufferLogPeerText.c_str() : "<off>",
+            g_BufferLogBinPath.c_str());
+    }
+
+    bool BufferLogPeerMatches(const sockaddr* source)
+    {
+        if (!g_Config.bufferLogPeerFilterEnabled)
+            return true;
+
+        uint32_t ipv4 = 0;
+        uint16_t port = 0;
+        if (!source ||
+            !TryGetSockaddrIpv4HostOrder(source, static_cast<int>(sizeof(sockaddr_in)), &ipv4) ||
+            !TryGetSockaddrPort(source, static_cast<int>(sizeof(sockaddr_in)), &port))
+        {
+            return false;
+        }
+
+        if (ipv4 != g_Config.bufferLogPeerIpv4)
+            return false;
+
+        return g_Config.bufferLogPeerPort == 0 || port == g_Config.bufferLogPeerPort;
+    }
+
+    bool ShouldCaptureBufferLogEvent(SOCKET s, const sockaddr* source)
+    {
+        if (g_Config.bufferLogSocketFilterEnabled && GetSocketId(s) != g_Config.bufferLogSocketId)
+            return false;
+
+        if (!BufferLogPeerMatches(source))
+            return false;
+
+        return true;
+    }
+
+    void BufferLogEvent(
+        BufferLogEventType eventType,
+        SOCKET s,
+        const sockaddr* source,
+        uint16_t flags,
+        uint32_t requestedLength,
+        uint32_t transferredLength,
+        uint32_t wsaError,
+        const uint8_t* payload,
+        uint16_t payloadLength)
+    {
+        if (!g_BufferLogEnabled || !g_BufferLogRing)
+            return;
+        if (!ShouldCaptureBufferLogEvent(s, source))
+            return;
+
+        if (payloadLength > g_Config.bufferLogPayloadBytes)
+            payloadLength = static_cast<uint16_t>(g_Config.bufferLogPayloadBytes);
+
+        BufferLogRecordHeader record = {};
+        record.eventType = static_cast<uint32_t>(eventType);
+        record.socketId = GetSocketId(s);
+        record.tickMs = GetTickCount64();
+
+        AcquireSRWLockExclusive(&g_BufferLogLock);
+        record.sequence = g_BufferLogSequence++;
+
+        if (source && source->sa_family == AF_INET)
+        {
+            const auto* addr4 = reinterpret_cast<const sockaddr_in*>(source);
+            record.srcIpv4 = static_cast<uint32_t>(addr4->sin_addr.S_un.S_addr);
+            record.srcPort = ntohs(addr4->sin_port);
+        }
+
+        record.requestedLength = requestedLength;
+        record.transferredLength = transferredLength;
+        record.wsaError = wsaError;
+        record.flags = flags;
+        record.payloadLength = payloadLength;
+
+        uint8_t* slot = g_BufferLogRing +
+            (static_cast<size_t>(g_BufferLogHead) * static_cast<size_t>(g_BufferLogStride));
+        std::memcpy(slot, &record, sizeof(record));
+
+        uint8_t* payloadDst = slot + sizeof(record);
+        if (payloadLength > 0 && payload)
+            std::memcpy(payloadDst, payload, payloadLength);
+        if (payloadLength < g_Config.bufferLogPayloadBytes)
+            std::memset(payloadDst + payloadLength, 0, g_Config.bufferLogPayloadBytes - payloadLength);
+
+        g_BufferLogHead = (g_BufferLogHead + 1) % g_Config.bufferLogRingRecords;
+        if (g_BufferLogCount < g_Config.bufferLogRingRecords)
+            ++g_BufferLogCount;
+        ++g_BufferLogTotalEvents;
+
+        ReleaseSRWLockExclusive(&g_BufferLogLock);
+    }
+
+    void FlushBufferLog()
+    {
+        if (!g_BufferLogEnabled || !g_BufferLogRing)
+            return;
+
+        FILE* binFile = nullptr;
+        fopen_s(&binFile, g_BufferLogBinPath.c_str(), "wb");
+        if (binFile)
+        {
+            AcquireSRWLockShared(&g_BufferLogLock);
+            const uint32_t start =
+                (g_BufferLogHead + g_Config.bufferLogRingRecords - g_BufferLogCount) % g_Config.bufferLogRingRecords;
+            for (uint32_t i = 0; i < g_BufferLogCount; ++i)
+            {
+                const uint32_t index = (start + i) % g_Config.bufferLogRingRecords;
+                const uint8_t* slot = g_BufferLogRing +
+                    (static_cast<size_t>(index) * static_cast<size_t>(g_BufferLogStride));
+                fwrite(slot, 1, g_BufferLogStride, binFile);
+            }
+            ReleaseSRWLockShared(&g_BufferLogLock);
+            fclose(binFile);
+        }
+        else
+        {
+            Logf("[OpenShimNet] buffer_log failed to open %s for write", g_BufferLogBinPath.c_str());
+        }
+
+        FILE* metaFile = nullptr;
+        fopen_s(&metaFile, g_BufferLogMetaPath.c_str(), "wb");
+        if (metaFile)
+        {
+            std::fprintf(metaFile,
+                "format=buffer_log_v1\r\nrecord_header_size=%u\r\npayload_bytes=%u\r\nrecord_stride=%u\r\nring_records=%u\r\nrecords_written=%u\r\ntotal_events_seen=%llu\r\nsocket_filter=%u\r\npeer_filter=%s\r\n",
+                static_cast<unsigned>(sizeof(BufferLogRecordHeader)),
+                static_cast<unsigned>(g_Config.bufferLogPayloadBytes),
+                static_cast<unsigned>(g_BufferLogStride),
+                static_cast<unsigned>(g_Config.bufferLogRingRecords),
+                static_cast<unsigned>(g_BufferLogCount),
+                static_cast<unsigned long long>(g_BufferLogTotalEvents),
+                g_Config.bufferLogSocketFilterEnabled ? g_Config.bufferLogSocketId : 0,
+                g_Config.bufferLogPeerFilterEnabled ? g_Config.bufferLogPeerText.c_str() : "<off>");
+            fclose(metaFile);
+        }
+        else
+        {
+            Logf("[OpenShimNet] buffer_log failed to open %s for write", g_BufferLogMetaPath.c_str());
+        }
+
+        Logf("[OpenShimNet] buffer_log flushed records=%u totalEvents=%llu",
+            g_BufferLogCount,
+            static_cast<unsigned long long>(g_BufferLogTotalEvents));
     }
 
     template <typename T>
@@ -614,6 +1068,93 @@ namespace
         return QuerySocketInt(s, SOL_SOCKET, SO_TYPE) == SOCK_DGRAM;
     }
 
+    bool TryGetSockaddrPort(const sockaddr* addr, int addrLen, uint16_t* outPort)
+    {
+        if (!addr || !outPort || addrLen <= 0)
+            return false;
+
+        if (addr->sa_family == AF_INET && addrLen >= static_cast<int>(sizeof(sockaddr_in)))
+        {
+            const auto* addr4 = reinterpret_cast<const sockaddr_in*>(addr);
+            *outPort = ntohs(addr4->sin_port);
+            return true;
+        }
+
+        if (addr->sa_family == AF_INET6 && addrLen >= static_cast<int>(sizeof(sockaddr_in6)))
+        {
+            const auto* addr6 = reinterpret_cast<const sockaddr_in6*>(addr);
+            *outPort = ntohs(addr6->sin6_port);
+            return true;
+        }
+
+        return false;
+    }
+
+    bool TryGetSockaddrIpv4HostOrder(const sockaddr* addr, int addrLen, uint32_t* outIpv4)
+    {
+        if (!addr || !outIpv4 || addrLen < static_cast<int>(sizeof(sockaddr_in)) || addr->sa_family != AF_INET)
+            return false;
+
+        const auto* addr4 = reinterpret_cast<const sockaddr_in*>(addr);
+        *outIpv4 = ntohl(addr4->sin_addr.S_un.S_addr);
+        return true;
+    }
+
+    bool IsPrivateOrLocalIpv4(uint32_t ipv4)
+    {
+        const uint8_t a = static_cast<uint8_t>((ipv4 >> 24) & 0xFF);
+        const uint8_t b = static_cast<uint8_t>((ipv4 >> 16) & 0xFF);
+
+        if (a == 10 || a == 127)
+            return true;
+        if (a == 192 && b == 168)
+            return true;
+        if (a == 172 && b >= 16 && b <= 31)
+            return true;
+        if (a == 169 && b == 254)
+            return true;
+
+        return false;
+    }
+
+    bool IsPendingConnectError(int err)
+    {
+        return err == WSAEWOULDBLOCK || err == WSAEINPROGRESS || err == WSAEALREADY;
+    }
+
+    const char* ClassifyEndpoint(const sockaddr* addr, int addrLen, int type, int protocol)
+    {
+        if (!addr || addrLen <= 0)
+            return "connected_peer";
+
+        uint16_t port = 0;
+        if (TryGetSockaddrPort(addr, addrLen, &port))
+        {
+            if (port == kBzrNetWebSocketPort)
+                return "bzrnet_ws";
+            if (port == kBzrNetProbePort)
+                return "bzrnet_probe";
+            if (port == kBzrNetRelayPort)
+                return "bzrnet_relay";
+        }
+
+        const bool isUdp = type == SOCK_DGRAM || protocol == IPPROTO_UDP;
+        const bool isTcp = type == SOCK_STREAM || protocol == IPPROTO_TCP;
+
+        if (isUdp)
+        {
+            uint32_t ipv4 = 0;
+            if (TryGetSockaddrIpv4HostOrder(addr, addrLen, &ipv4))
+                return IsPrivateOrLocalIpv4(ipv4) ? "p2p_lan" : "p2p_candidate";
+            return "udp_peer";
+        }
+
+        if (isTcp)
+            return "tcp_peer";
+
+        return "endpoint";
+    }
+
     uint32_t GetSocketId(SOCKET s)
     {
         AcquireSRWLockShared(&g_SocketLock);
@@ -698,7 +1239,8 @@ namespace
             return;
 
         const std::string endpoint = addr ? FormatSockaddr(addr, addrLen) : snapshot.remoteAddress;
-        Logf("[OpenShimNet] sid=%u sock=0x%08X %s %s bytes=%d packet=%u totalBytes=%llu local=%s remote=%s",
+        const char* routeClass = ClassifyEndpoint(addr, addrLen, snapshot.type, snapshot.protocol);
+        Logf("[OpenShimNet] sid=%u sock=0x%08X %s %s bytes=%d packet=%u totalBytes=%llu route=%s local=%s remote=%s",
             snapshot.socketId,
             static_cast<unsigned>(s),
             SocketTypeLabel(snapshot.type, snapshot.protocol),
@@ -706,6 +1248,7 @@ namespace
             bytes,
             packetCount,
             static_cast<unsigned long long>(byteCount),
+            routeClass,
             snapshot.localAddress.empty() ? "<unbound>" : snapshot.localAddress.c_str(),
             endpoint.empty() ? (snapshot.remoteAddress.empty() ? "<unknown>" : snapshot.remoteAddress.c_str()) : endpoint.c_str());
     }
@@ -721,7 +1264,8 @@ namespace
             return;
 
         const std::string endpoint = addr ? FormatSockaddr(addr, addrLen) : snapshot.remoteAddress;
-        Logf("[OpenShimNet] sid=%u sock=0x%08X %s %s af=%d type=%d proto=%d local=%s remote=%s",
+        const char* routeClass = ClassifyEndpoint(addr, addrLen, snapshot.type, snapshot.protocol);
+        Logf("[OpenShimNet] sid=%u sock=0x%08X %s %s af=%d type=%d proto=%d route=%s local=%s remote=%s",
             snapshot.socketId,
             static_cast<unsigned>(s),
             SocketTypeLabel(snapshot.type, snapshot.protocol),
@@ -729,8 +1273,73 @@ namespace
             snapshot.af,
             snapshot.type,
             snapshot.protocol,
+            routeClass,
             snapshot.localAddress.empty() ? "<unbound>" : snapshot.localAddress.c_str(),
             endpoint.empty() ? (snapshot.remoteAddress.empty() ? "<unknown>" : snapshot.remoteAddress.c_str()) : endpoint.c_str());
+    }
+
+    bool RememberRouteKey(SOCKET s, const std::string& routeKey, SocketState* outSnapshot)
+    {
+        bool changed = false;
+
+        AcquireSRWLockExclusive(&g_SocketLock);
+        SocketState& state = g_Sockets[s];
+        if (state.socketId == 0)
+            state.socketId = static_cast<uint32_t>(InterlockedIncrement(&g_NextSocketId));
+        if (state.lastRouteKey != routeKey)
+        {
+            state.lastRouteKey = routeKey;
+            changed = true;
+        }
+        if (outSnapshot)
+            *outSnapshot = state;
+        ReleaseSRWLockExclusive(&g_SocketLock);
+
+        return changed;
+    }
+
+    void LogRouteEvent(const char* api, SOCKET s, const sockaddr* addr, int addrLen, bool success, int err, bool onlyOnChange)
+    {
+        if (!g_Config.logging)
+            return;
+
+        RefreshSocketAddresses(s);
+
+        SocketState snapshot = {};
+        if (!LookupSocket(s, snapshot))
+            RememberSocket(s, AF_UNSPEC, 0, 0);
+        if (!LookupSocket(s, snapshot))
+            return;
+
+        const std::string endpoint = addr ? FormatSockaddr(addr, addrLen) : snapshot.remoteAddress;
+        const char* routeClass = ClassifyEndpoint(addr, addrLen, snapshot.type, snapshot.protocol);
+
+        std::string routeKey = api;
+        routeKey.push_back('|');
+        routeKey += routeClass;
+        routeKey.push_back('|');
+        routeKey += endpoint;
+
+        const bool changed = RememberRouteKey(s, routeKey, &snapshot);
+        if (onlyOnChange && !changed)
+            return;
+
+        RefreshSocketAddresses(s);
+        if (!LookupSocket(s, snapshot))
+            return;
+
+        const char* status = success ? "ok" : (IsPendingConnectError(err) ? "pending" : "failed");
+        Logf("[OpenShimNet] sid=%u route api=%s status=%s sock=0x%08X %s class=%s endpoint=%s local=%s remote=%s err=%d",
+            snapshot.socketId,
+            api,
+            status,
+            static_cast<unsigned>(s),
+            SocketTypeLabel(snapshot.type, snapshot.protocol),
+            routeClass,
+            endpoint.empty() ? "<unknown>" : endpoint.c_str(),
+            snapshot.localAddress.empty() ? "<unbound>" : snapshot.localAddress.c_str(),
+            snapshot.remoteAddress.empty() ? "<unknown>" : snapshot.remoteAddress.c_str(),
+            err);
     }
 
     void LogSocketSummaryAndForget(SOCKET s)
@@ -824,14 +1433,16 @@ namespace
     PeerBuf* FindOrCreatePeerBufLocked(SOCKET s, const sockaddr_in& from)
     {
         const uint64_t peerKey = MakePeerKey(from);
-        for (PeerBuf& peer : g_ReorderPeers)
+        for (uint32_t i = 0; i < g_Config.reorderPeers; ++i)
         {
+            PeerBuf& peer = g_ReorderPeers[i];
             if (peer.peerKey == peerKey && peer.socket == s)
                 return &peer;
         }
 
-        for (PeerBuf& peer : g_ReorderPeers)
+        for (uint32_t i = 0; i < g_Config.reorderPeers; ++i)
         {
+            PeerBuf& peer = g_ReorderPeers[i];
             if (peer.peerKey == 0)
             {
                 ResetPeerBuf(peer);
@@ -856,8 +1467,9 @@ namespace
 
     void InsertPacketLocked(PeerBuf& peer, uint32_t sequence, uint64_t timestampMs, const sockaddr_in& from, const uint8_t* data, uint32_t dataLength)
     {
-        for (ReorderSlot& slot : peer.slots)
+        for (uint32_t i = 0; i < g_Config.reorderDepth; ++i)
         {
+            ReorderSlot& slot = peer.slots[i];
             if (slot.used && slot.sequence == sequence)
             {
                 LogReorderf("[OpenShimNet] sid=%u reorder duplicate dropped sock=0x%08X peer=%s seq=%u filled=%u",
@@ -870,8 +1482,9 @@ namespace
             }
         }
 
-        for (ReorderSlot& slot : peer.slots)
+        for (uint32_t i = 0; i < g_Config.reorderDepth; ++i)
         {
+            ReorderSlot& slot = peer.slots[i];
             if (slot.used)
                 continue;
 
@@ -893,7 +1506,7 @@ namespace
         }
 
         ReorderSlot* oldest = &peer.slots[0];
-        for (uint32_t i = 1; i < kReorderSlotCount; ++i)
+        for (uint32_t i = 1; i < g_Config.reorderDepth; ++i)
         {
             if (peer.slots[i].used && peer.slots[i].timestampMs < oldest->timestampMs)
                 oldest = &peer.slots[i];
@@ -922,7 +1535,7 @@ namespace
         if (peer.seqInitialized)
         {
             const uint32_t expected = peer.lastSequence + 1;
-            for (uint32_t i = 0; i < kReorderSlotCount; ++i)
+            for (uint32_t i = 0; i < g_Config.reorderDepth; ++i)
             {
                 if (peer.slots[i].used && peer.slots[i].sequence == expected)
                     return static_cast<int>(i);
@@ -930,7 +1543,7 @@ namespace
         }
 
         int lowestIndex = -1;
-        for (uint32_t i = 0; i < kReorderSlotCount; ++i)
+        for (uint32_t i = 0; i < g_Config.reorderDepth; ++i)
         {
             if (!peer.slots[i].used)
                 continue;
@@ -971,8 +1584,9 @@ namespace
         const uint64_t nowMs = GetTickCount64();
         PeerBuf* selectedPeer = nullptr;
         ReorderSlot* selectedSlot = nullptr;
-        for (PeerBuf& peer : g_ReorderPeers)
+        for (uint32_t i = 0; i < g_Config.reorderPeers; ++i)
         {
+            PeerBuf& peer = g_ReorderPeers[i];
             if (peer.peerKey == 0 || peer.socket != s)
                 continue;
 
@@ -1015,8 +1629,9 @@ namespace
     {
         AcquireSRWLockExclusive(&g_ReorderLock);
         uint32_t clearedPeers = 0;
-        for (PeerBuf& peer : g_ReorderPeers)
+        for (uint32_t i = 0; i < g_Config.reorderPeers; ++i)
         {
+            PeerBuf& peer = g_ReorderPeers[i];
             if (peer.peerKey != 0 && peer.socket == s)
             {
                 ResetPeerBuf(peer);
@@ -1325,16 +1940,43 @@ namespace
     int WSAAPI Hook_connect(SOCKET s, const sockaddr* name, int namelen)
     {
         const int rc = g_RealConnect(s, name, namelen);
+        const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
         if (rc == 0)
         {
             LogSocketLifecycleEvent("connect", s, name, namelen);
+            LogRouteEvent("connect", s, name, namelen, true, 0, false);
         }
         else if (g_Config.logSocketErrors && g_RealWSAGetLastError)
         {
-            const int err = g_RealWSAGetLastError();
-            Logf("[OpenShimNet] sid=%u connect failed sock=0x%08X addr=%s err=%d",
+            LogRouteEvent("connect", s, name, namelen, false, err, false);
+            Logf("[OpenShimNet] sid=%u connect %s sock=0x%08X addr=%s err=%d",
                 GetSocketId(s),
                 static_cast<unsigned>(s),
+                IsPendingConnectError(err) ? "pending" : "failed",
+                FormatSockaddr(name, namelen).c_str(),
+                err);
+            if (g_RealWSASetLastError)
+                g_RealWSASetLastError(err);
+        }
+        return rc;
+    }
+
+    int WSAAPI Hook_WSAConnect(SOCKET s, const sockaddr* name, int namelen, LPWSABUF callerData, LPWSABUF calleeData, LPQOS sqos, LPQOS gqos)
+    {
+        const int rc = g_RealWSAConnect(s, name, namelen, callerData, calleeData, sqos, gqos);
+        const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
+        if (rc == 0)
+        {
+            LogSocketLifecycleEvent("WSAConnect", s, name, namelen);
+            LogRouteEvent("WSAConnect", s, name, namelen, true, 0, false);
+        }
+        else if (g_Config.logSocketErrors && g_RealWSAGetLastError)
+        {
+            LogRouteEvent("WSAConnect", s, name, namelen, false, err, false);
+            Logf("[OpenShimNet] sid=%u WSAConnect %s sock=0x%08X addr=%s err=%d",
+                GetSocketId(s),
+                static_cast<unsigned>(s),
+                IsPendingConnectError(err) ? "pending" : "failed",
                 FormatSockaddr(name, namelen).c_str(),
                 err);
             if (g_RealWSASetLastError)
@@ -1385,10 +2027,75 @@ namespace
     {
         EnsureSocketOptions(s);
         const int rc = g_RealWSASendTo(s, buffers, bufferCount, bytesSent, flags, to, toLen, overlapped, completionRoutine);
+        const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
         if (rc == 0 && bytesSent)
+        {
             LogPacketActivity("WSASendTo", s, true, static_cast<int>(*bytesSent), to, toLen);
+            LogRouteEvent("WSASendTo", s, to, toLen, true, 0, true);
+        }
+        else if (rc == SOCKET_ERROR)
+        {
+            LogRouteEvent("WSASendTo", s, to, toLen, false, err, true);
+        }
         LogSocketError("WSASendTo", s, rc, &SocketState::lastSendToError);
         return rc;
+    }
+
+    int WSAAPI Hook_sendto(SOCKET s, const char* buffer, int length, int flags, const sockaddr* to, int toLen)
+    {
+        EnsureSocketOptions(s);
+        const int rc = g_RealSendTo(s, buffer, length, flags, to, toLen);
+        const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
+        if (rc != SOCKET_ERROR)
+        {
+            LogPacketActivity("sendto", s, true, rc, to, toLen);
+            LogRouteEvent("sendto", s, to, toLen, true, 0, true);
+        }
+        else
+        {
+            LogRouteEvent("sendto", s, to, toLen, false, err, true);
+        }
+        LogSocketError("sendto", s, rc, &SocketState::lastSendToError);
+        return rc;
+    }
+
+    uint32_t GetRequestedWsabufBytes(LPWSABUF buffers, DWORD bufferCount)
+    {
+        uint32_t total = 0;
+        if (!buffers)
+            return 0;
+
+        for (DWORD i = 0; i < bufferCount; ++i)
+            total += buffers[i].len;
+        return total;
+    }
+
+    void CaptureRecvPathEvent(
+        BufferLogEventType eventType,
+        SOCKET s,
+        const sockaddr* from,
+        uint16_t flags,
+        uint32_t requestedLength,
+        uint32_t transferredLength,
+        uint32_t wsaError,
+        const uint8_t* payload)
+    {
+        if (!g_BufferLogEnabled)
+            return;
+
+        const uint16_t payloadLength = static_cast<uint16_t>((std::min)(
+            transferredLength,
+            g_Config.bufferLogPayloadBytes));
+        BufferLogEvent(
+            eventType,
+            s,
+            from,
+            flags,
+            requestedLength,
+            transferredLength,
+            wsaError,
+            payloadLength > 0 ? payload : nullptr,
+            payloadLength);
     }
 
     int WSAAPI Hook_WSARecvFrom(SOCKET s, LPWSABUF buffers, DWORD bufferCount, LPDWORD bytesRecv, LPDWORD flags, sockaddr* from, LPINT fromLen, LPWSAOVERLAPPED overlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE completionRoutine)
@@ -1423,6 +2130,19 @@ namespace
             }
 
             const int rc = g_RealWSARecvFrom(s, buffers, bufferCount, bytesRecv, flags, from, fromLen, overlapped, completionRoutine);
+            const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
+            const uint8_t* payload = (rc == 0 && buffers && bufferCount > 0 && buffers[0].buf)
+                ? reinterpret_cast<const uint8_t*>(buffers[0].buf)
+                : nullptr;
+            CaptureRecvPathEvent(
+                kBufferLogEventWSARecvFrom,
+                s,
+                from,
+                flags ? static_cast<uint16_t>(*flags & 0xFFFFu) : 0,
+                GetRequestedWsabufBytes(buffers, bufferCount),
+                (rc == 0 && bytesRecv) ? *bytesRecv : 0,
+                static_cast<uint32_t>(err),
+                payload);
             if (rc == 0 && bytesRecv)
                 LogPacketActivity("WSARecvFrom", s, false, static_cast<int>(*bytesRecv), from, fromLen ? *fromLen : 0);
             LogSocketError("WSARecvFrom", s, rc, &SocketState::lastRecvFromError);
@@ -1440,6 +2160,17 @@ namespace
                 static_cast<unsigned>(s),
                 delivered,
                 FormatIpv4Peer(deliveredSource).c_str());
+            CaptureRecvPathEvent(
+                kBufferLogEventWSARecvFrom,
+                s,
+                reinterpret_cast<const sockaddr*>(&deliveredSource),
+                0,
+                GetRequestedWsabufBytes(buffers, bufferCount),
+                delivered,
+                0,
+                buffers && bufferCount > 0 && buffers[0].buf
+                    ? reinterpret_cast<const uint8_t*>(buffers[0].buf)
+                    : nullptr);
             LogPacketActivity("WSARecvFrom", s, false, static_cast<int>(delivered), reinterpret_cast<const sockaddr*>(&deliveredSource), static_cast<int>(sizeof(deliveredSource)));
             return 0;
         }
@@ -1481,6 +2212,17 @@ namespace
                     static_cast<unsigned>(s),
                     delivered,
                     FormatIpv4Peer(deliveredSource).c_str());
+                CaptureRecvPathEvent(
+                    kBufferLogEventWSARecvFrom,
+                    s,
+                    reinterpret_cast<const sockaddr*>(&deliveredSource),
+                    0,
+                    GetRequestedWsabufBytes(buffers, bufferCount),
+                    delivered,
+                    0,
+                    buffers && bufferCount > 0 && buffers[0].buf
+                        ? reinterpret_cast<const uint8_t*>(buffers[0].buf)
+                        : nullptr);
                 LogPacketActivity("WSARecvFrom", s, false, static_cast<int>(delivered), reinterpret_cast<const sockaddr*>(&deliveredSource), static_cast<int>(sizeof(deliveredSource)));
                 return 0;
             }
@@ -1507,12 +2249,23 @@ namespace
                 static_cast<unsigned>(s),
                 delivered,
                 FormatIpv4Peer(deliveredSource).c_str());
+            CaptureRecvPathEvent(
+                kBufferLogEventWSARecvFrom,
+                s,
+                reinterpret_cast<const sockaddr*>(&deliveredSource),
+                0,
+                GetRequestedWsabufBytes(buffers, bufferCount),
+                delivered,
+                0,
+                buffers && bufferCount > 0 && buffers[0].buf
+                    ? reinterpret_cast<const uint8_t*>(buffers[0].buf)
+                    : nullptr);
             LogPacketActivity("WSARecvFrom", s, false, static_cast<int>(delivered), reinterpret_cast<const sockaddr*>(&deliveredSource), static_cast<int>(sizeof(deliveredSource)));
             return 0;
         }
 
         uint32_t drainedPackets = 1;
-        for (uint32_t drainCount = 1; drainCount < kReorderDrainCap && SocketHasQueuedReceiveData(s); ++drainCount)
+        for (uint32_t drainCount = 1; drainCount < g_Config.reorderDrainCap && SocketHasQueuedReceiveData(s); ++drainCount)
         {
             DWORD drainBytes = 0;
             DWORD drainFlags = 0;
@@ -1560,6 +2313,17 @@ namespace
                     drainedPackets,
                     delivered,
                     FormatIpv4Peer(deliveredSource).c_str());
+                CaptureRecvPathEvent(
+                    kBufferLogEventWSARecvFrom,
+                    s,
+                    reinterpret_cast<const sockaddr*>(&deliveredSource),
+                    0,
+                    GetRequestedWsabufBytes(buffers, bufferCount),
+                    delivered,
+                    0,
+                    buffers && bufferCount > 0 && buffers[0].buf
+                        ? reinterpret_cast<const uint8_t*>(buffers[0].buf)
+                        : nullptr);
                 LogPacketActivity("WSARecvFrom", s, false, static_cast<int>(delivered), reinterpret_cast<const sockaddr*>(&deliveredSource), static_cast<int>(sizeof(deliveredSource)));
                 return 0;
             }
@@ -1575,6 +2339,17 @@ namespace
                 drainedPackets,
                 delivered,
                 FormatIpv4Peer(deliveredSource).c_str());
+            CaptureRecvPathEvent(
+                kBufferLogEventWSARecvFrom,
+                s,
+                reinterpret_cast<const sockaddr*>(&deliveredSource),
+                0,
+                GetRequestedWsabufBytes(buffers, bufferCount),
+                delivered,
+                0,
+                buffers && bufferCount > 0 && buffers[0].buf
+                    ? reinterpret_cast<const uint8_t*>(buffers[0].buf)
+                    : nullptr);
             LogPacketActivity("WSARecvFrom", s, false, static_cast<int>(delivered), reinterpret_cast<const sockaddr*>(&deliveredSource), static_cast<int>(sizeof(deliveredSource)));
             return 0;
         }
@@ -1587,6 +2362,91 @@ namespace
             drainedPackets);
         LogSocketError("WSARecvFrom", s, SOCKET_ERROR, &SocketState::lastRecvFromError);
         return SOCKET_ERROR;
+    }
+
+    int WSAAPI Hook_recvfrom(SOCKET s, char* buffer, int len, int flags, sockaddr* from, int* fromLen)
+    {
+        EnsureSocketOptions(s);
+        const int rc = g_RealRecvFrom(s, buffer, len, flags, from, fromLen);
+        const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
+        CaptureRecvPathEvent(
+            kBufferLogEventRecvFrom,
+            s,
+            from,
+            static_cast<uint16_t>(flags & 0xFFFFu),
+            len > 0 ? static_cast<uint32_t>(len) : 0,
+            rc >= 0 ? static_cast<uint32_t>(rc) : 0,
+            static_cast<uint32_t>(err),
+            (rc > 0 && buffer) ? reinterpret_cast<const uint8_t*>(buffer) : nullptr);
+        if (rc >= 0)
+            LogPacketActivity("recvfrom", s, false, rc, from, fromLen ? *fromLen : 0);
+        LogSocketError("recvfrom", s, rc == SOCKET_ERROR ? SOCKET_ERROR : 0, &SocketState::lastRecvFromError);
+        return rc;
+    }
+
+    int WSAAPI Hook_ioctlsocket(SOCKET s, long cmd, u_long* argp)
+    {
+        const int rc = g_RealIoctlSocket(s, cmd, argp);
+        const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
+        if (cmd == FIONBIO)
+        {
+            BufferLogEvent(
+                kBufferLogEventIoctlSocket,
+                s,
+                nullptr,
+                static_cast<uint16_t>((argp && (*argp & 1u)) ? 1u : 0u),
+                static_cast<uint32_t>(cmd),
+                argp ? static_cast<uint32_t>(*argp) : 0,
+                static_cast<uint32_t>(err),
+                nullptr,
+                0);
+        }
+        if (rc == SOCKET_ERROR && g_RealWSASetLastError)
+            g_RealWSASetLastError(err);
+        return rc;
+    }
+
+    int WSAAPI Hook_WSAIoctl(
+        SOCKET s,
+        DWORD controlCode,
+        LPVOID inBuffer,
+        DWORD inBufferLen,
+        LPVOID outBuffer,
+        DWORD outBufferLen,
+        LPDWORD bytesReturned,
+        LPWSAOVERLAPPED overlapped,
+        LPWSAOVERLAPPED_COMPLETION_ROUTINE completionRoutine)
+    {
+        const int rc = g_RealWSAIoctl(
+            s,
+            controlCode,
+            inBuffer,
+            inBufferLen,
+            outBuffer,
+            outBufferLen,
+            bytesReturned,
+            overlapped,
+            completionRoutine);
+        const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
+        if (controlCode == FIONBIO)
+        {
+            uint32_t mode = 0;
+            if (inBuffer && inBufferLen >= sizeof(u_long))
+                mode = static_cast<uint32_t>(*reinterpret_cast<u_long*>(inBuffer));
+            BufferLogEvent(
+                kBufferLogEventWSAIoctl,
+                s,
+                nullptr,
+                static_cast<uint16_t>((mode & 1u) ? 1u : 0u),
+                controlCode,
+                mode,
+                static_cast<uint32_t>(err),
+                nullptr,
+                0);
+        }
+        if (rc == SOCKET_ERROR && g_RealWSASetLastError)
+            g_RealWSASetLastError(err);
+        return rc;
     }
 
     int WSAAPI Hook_setsockopt(SOCKET s, int level, int optName, const char* optVal, int optLen)
@@ -1712,12 +2572,17 @@ namespace
                 { "WSASocketW", reinterpret_cast<FARPROC>(Hook_WSASocketW) },
                 { "bind", reinterpret_cast<FARPROC>(Hook_bind) },
                 { "connect", reinterpret_cast<FARPROC>(Hook_connect) },
+                { "WSAConnect", reinterpret_cast<FARPROC>(Hook_WSAConnect) },
                 { "closesocket", reinterpret_cast<FARPROC>(Hook_closesocket) },
+                { "sendto", reinterpret_cast<FARPROC>(Hook_sendto) },
+                { "recvfrom", reinterpret_cast<FARPROC>(Hook_recvfrom) },
                 { "setsockopt", reinterpret_cast<FARPROC>(Hook_setsockopt) },
                 { "WSASend", reinterpret_cast<FARPROC>(Hook_WSASend) },
                 { "WSARecv", reinterpret_cast<FARPROC>(Hook_WSARecv) },
                 { "WSASendTo", reinterpret_cast<FARPROC>(Hook_WSASendTo) },
                 { "WSARecvFrom", reinterpret_cast<FARPROC>(Hook_WSARecvFrom) },
+                { "ioctlsocket", reinterpret_cast<FARPROC>(Hook_ioctlsocket) },
+                { "WSAIoctl", reinterpret_cast<FARPROC>(Hook_WSAIoctl) },
             };
 
             int patched = 0;
@@ -1745,7 +2610,7 @@ namespace
 
         LogShimA(LogLevel::Info, "net", "[OpenShimNet] Initializing");
         LogNetIniValues();
-        Logf("[OpenShimNet] Config enabled=%d logging=%d sendBufferSize=%u recvBufferSize=%u applySocketBuffers=%d tcpNoDelay=%d keepAlive=%d disableUdpConnReset=%d logSocketErrors=%d logSocketLifecycle=%d logSocketPackets=%d logSockOptCalls=%d logPacketReorder=%d packetLogLimit=%u packetLogInterval=%u enablePacketReorder=%d reorderWindowMs=%u",
+        Logf("[OpenShimNet] Config enabled=%d logging=%d sendBufferSize=%u recvBufferSize=%u applySocketBuffers=%d tcpNoDelay=%d keepAlive=%d disableUdpConnReset=%d logSocketErrors=%d logSocketLifecycle=%d logSocketPackets=%d logSockOptCalls=%d logPacketReorder=%d packetLogLimit=%u packetLogInterval=%u enablePacketReorder=%d reorderWindowMs=%u reorderDepth=%u reorderPeers=%u reorderDrainCap=%u enableBufferLog=%d bufferLogPayloadBytes=%u bufferLogRingRecords=%u bufferLogSocketId=%u bufferLogPeer=%s",
             g_Config.enabled ? 1 : 0,
             g_Config.logging ? 1 : 0,
             g_Config.sendBufferSize,
@@ -1762,7 +2627,15 @@ namespace
             g_Config.packetLogLimit,
             g_Config.packetLogInterval,
             g_Config.enablePacketReorder ? 1 : 0,
-            g_Config.reorderWindowMs);
+            g_Config.reorderWindowMs,
+            g_Config.reorderDepth,
+            g_Config.reorderPeers,
+            g_Config.reorderDrainCap,
+            g_Config.enableBufferLog ? 1 : 0,
+            g_Config.bufferLogPayloadBytes,
+            g_Config.bufferLogRingRecords,
+            g_Config.bufferLogSocketFilterEnabled ? g_Config.bufferLogSocketId : 0,
+            g_Config.bufferLogPeerFilterEnabled ? g_Config.bufferLogPeerText.c_str() : "<off>");
         if (FileExists(JoinPath(GetGameDir(), "netcode_manifest.json")))
             LogShimA(LogLevel::Info, "net", "[OpenShimNet] netcode_manifest.json detected; runtime buffer minimums aligned to manifest profile");
 
@@ -1775,6 +2648,7 @@ namespace
         if (!LoadWinsockExports())
             return TRUE;
 
+        InitializeBufferLog();
         PatchWinsockImportsForModule(GetModuleHandleA(nullptr), "battlezone98redux.exe");
         PatchWinsockImportsForModule(GetModuleHandleA("Galaxy.dll"), "Galaxy.dll");
         PatchWinsockImportsForModule(GetModuleHandleA("GalaxyPeer.dll"), "GalaxyPeer.dll");
@@ -1787,5 +2661,16 @@ namespace
     void InitializeNetworkOptimizer()
     {
         InitOnceExecuteOnce(&g_NetworkInitOnce, InitializeNetworkOptimizerOnce, nullptr, nullptr);
+    }
+
+    void ShutdownNetworkOptimizer()
+    {
+        FlushBufferLog();
+        if (g_BufferLogRing)
+        {
+            HeapFree(GetProcessHeap(), 0, g_BufferLogRing);
+            g_BufferLogRing = nullptr;
+        }
+        g_BufferLogEnabled = false;
     }
 }

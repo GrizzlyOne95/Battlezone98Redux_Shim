@@ -189,6 +189,9 @@ namespace BZROpenShim
         constexpr int kLoadQueuedState = 5;
         constexpr int kQueuedLoadNameBufferLen = 16;
         constexpr uintptr_t kLoadScreenSelectionFlagAddr = 0x00918133;
+        constexpr uintptr_t kMissionSaveFlagAddr = 0x009173B7;
+        constexpr uintptr_t kOldMissionModeAddr = 0x00918314;
+        constexpr uintptr_t kUiScreenTypeAddr = 0x00918328;
         constexpr uintptr_t kQueuedLoadPathBufferAddr = 0x00945708;
         constexpr uintptr_t kQueuedLoadNameBufferAddr = 0x00915540;
         constexpr uintptr_t kBuildMenuRootAddr = 0x009174C4;
@@ -2588,6 +2591,59 @@ namespace BZROpenShim
             return strncpy_s(queuedPath, MAX_PATH, autoSavePath, _TRUNCATE) == 0;
         }
 
+        static void ForceFreshRestartMissionState(void* screenThis, const char* sourceTag)
+        {
+            if (!screenThis)
+            {
+                Log(L"[RESTART] %hs missing screen context\n", sourceTag ? sourceTag : "unknown");
+                return;
+            }
+
+            auto* screenBytes = reinterpret_cast<uint8_t*>(screenThis);
+            void* dialog = *reinterpret_cast<void**>(screenBytes + 0x138);
+            if (!dialog || !g_BzrFn_UiDialogSetEnabled || !g_BzrFn_UiDialogAdvance ||
+                !g_BzrFn_LoadScreenPrep || !g_BzrFn_SetShellState)
+            {
+                Log(L"[RESTART] %hs missing restart helpers dialog=0x%p setEnabled=0x%p advance=0x%p prep=0x%p setState=0x%p\n",
+                    sourceTag ? sourceTag : "unknown",
+                    dialog,
+                    g_BzrFn_UiDialogSetEnabled,
+                    g_BzrFn_UiDialogAdvance,
+                    g_BzrFn_LoadScreenPrep,
+                    g_BzrFn_SetShellState);
+                return;
+            }
+
+            auto* missionSaveFlag = reinterpret_cast<uint8_t*>(kMissionSaveFlagAddr);
+            auto* oldMissionMode = reinterpret_cast<uint32_t*>(kOldMissionModeAddr);
+            auto* screenType = reinterpret_cast<uint32_t*>(kUiScreenTypeAddr);
+            auto* queuedPath = reinterpret_cast<const char*>(kQueuedLoadPathBufferAddr);
+            auto* queuedName = reinterpret_cast<const char*>(kQueuedLoadNameBufferAddr);
+
+            const uint8_t previousMissionSave = *missionSaveFlag;
+            const uint32_t previousMissionMode = *oldMissionMode;
+
+            *reinterpret_cast<uint8_t*>(kLoadScreenSelectionFlagAddr) = 1;
+            *missionSaveFlag = 1;
+            *oldMissionMode = 0;
+            g_BzrFn_SetShellState(kLoadQueuedState);
+            *screenType = 0;
+
+            g_BzrFn_UiDialogSetEnabled(dialog, 0);
+            g_BzrFn_LoadScreenPrep();
+            g_BzrFn_UiDialogAdvance(dialog, 0x17);
+
+            Log(L"[RESTART] %hs forcing fresh mission reload state=%d missionSave=%u->%u oldMissionMode=%u->%u queuedName=%hs queuedPath=%hs\n",
+                sourceTag ? sourceTag : "unknown",
+                kLoadQueuedState,
+                previousMissionSave,
+                *missionSaveFlag,
+                previousMissionMode,
+                *oldMissionMode,
+                queuedName,
+                queuedPath);
+        }
+
         static void RememberVehicleAssetDebugException(const BzrString* assetName)
         {
             char assetNameBuffer[64] = {};
@@ -4546,6 +4602,16 @@ namespace BZROpenShim
         {
             Log(L"[AUTOSAVE] Failed to inspect load screen frame for AutoSave button injection\n");
         }
+    }
+
+    void __fastcall RestartMissionPauseHook(void* thisPtr)
+    {
+        ForceFreshRestartMissionState(thisPtr, "pause");
+    }
+
+    void __fastcall RestartMissionFailureHook(void* thisPtr)
+    {
+        ForceFreshRestartMissionState(thisPtr, "failure");
     }
 
     void BanButtonCreateHost()

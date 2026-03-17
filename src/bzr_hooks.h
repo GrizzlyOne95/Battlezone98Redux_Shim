@@ -27,6 +27,8 @@ namespace BZROpenShim
     void __cdecl FlagButtonOnHoverClient(void* param);
     void __cdecl AutoSaveButtonOnClickLoad();
     void AutoSaveLoadButtonCreateFromFrame(void* frameBase);
+    void __fastcall RestartMissionPauseHook(void* thisPtr);
+    void __fastcall RestartMissionFailureHook(void* thisPtr);
     void __cdecl EngineFlameHoverCraftEmitHook(void* managerPtr, const void* transform, uint32_t scaleBits, void* craftPtr);
     void __fastcall EngineFlameControlHook(void* thisPtr, void* edx);
     void __fastcall EngineFlameSubmitHook(void* thisPtr, void* edx, void* camera);
