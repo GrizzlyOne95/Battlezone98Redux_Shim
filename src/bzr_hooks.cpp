@@ -1,9 +1,14 @@
 #include "bzr_hooks.h"
+#include "game_state.h"
 #include "patcher.h"
 
 #include <Windows.h>
+#include <objidl.h>
+#include <gdiplus.h>
+#include <array>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -11,6 +16,8 @@
 #include <climits>
 #include <filesystem>
 #include <new>
+#include <string>
+#include <vector>
 
 namespace BZROpenShim
 {
@@ -29,6 +36,10 @@ namespace BZROpenShim
     void* g_BanButtonClient = nullptr;
     void* g_BanLabelHost   = nullptr;
     void* g_BanLabelClient = nullptr;
+    void* g_FlagButtonHost = nullptr;
+    void* g_FlagButtonClient = nullptr;
+    void* g_FlagLabelHost = nullptr;
+    void* g_FlagLabelClient = nullptr;
     void* g_AutoSaveLoadParent = nullptr;
     void* g_AutoSaveLoadScreen = nullptr;
     void* g_AutoSaveLoadButton = nullptr;
@@ -71,6 +82,7 @@ namespace BZROpenShim
     using FnUiSetCb  = void(__thiscall*)(void* self, void* cb);
     using FnUiAddChild = void(__thiscall*)(void* parent, void* child, int flags);
     using FnUiDialogAction = void(__thiscall*)(void* thisPtr, int value);
+    using FnPlayGlobalSound = int(__cdecl*)(const char* filename, uint32_t arg1, uint32_t arg2, uint32_t arg3);
 
     using FnGetSelected = void* (__thiscall*)(void* list);
     using FnCommandHandler = void(__cdecl*)(uint16_t id, const char* cmd);
@@ -89,6 +101,8 @@ namespace BZROpenShim
     using FnMapFilter6 = uint32_t(__thiscall*)(void* thisPtr);
     using FnChunkResolve = uint32_t(__cdecl*)(void* objectPtr, uint32_t variant);
     using FnMapFilterScroll = void(__cdecl*)();
+    using FnGetLocalPlayerNetId = uint16_t(__cdecl*)();
+    using FnNetPlayerSetData = void(__thiscall*)(void* thisPtr, uint32_t slot, uint8_t* data, uint32_t len);
     struct BuildItem;
     using FnBuildItemInit = void(__cdecl*)(BuildItem& item, int64_t token);
     using FnBuildItemCleanup = void(__cdecl*)(BuildItem& item);
@@ -97,7 +111,6 @@ namespace BZROpenShim
     using FnEngineFlameControl = void(__thiscall*)(void* self);
     using FnEngineFlameSubmit = void(__thiscall*)(void* self, void* camera);
     using FnEngineFlameResolveTexture = int(__cdecl*)(BzrString* textureName);
-    using FnGetHandle = uint32_t(__thiscall*)(void* self);
     using FnGetTeamNum = int(__cdecl*)(int handle);
     using FnExuGetTeamEngineFlameColor = int(__cdecl*)(int team);
 
@@ -147,15 +160,16 @@ namespace BZROpenShim
     static FnChunkResolve g_BzrFn_ChunkResolve = nullptr; // 0x004E3620
     static FnMapFilterScroll g_BzrFn_MapFilterScrollUp = nullptr; // 0x007CB500
     static FnMapFilterScroll g_BzrFn_MapFilterScrollDown = nullptr; // 0x007CB540
+    static FnGetLocalPlayerNetId g_BzrFn_GetLocalPlayerNetId = nullptr;
+    static FnNetPlayerSetData g_BzrFn_NetPlayerSetData = nullptr;
     static FnBuildItemInit g_BzrFn_InitBuildItem = nullptr; // 0x0049F5C0
     static FnBuildItemCleanup g_BzrFn_CleanupBuildItem = nullptr; // 0x0049F880
     static FnProducerModeCall g_BzrFn_ProducerModeCallOriginal = nullptr;
-    static FnEngineFlameAddFlame g_BzrFn_EngineFlameAddFlame = reinterpret_cast<FnEngineFlameAddFlame>(0x004C8800);
-    static FnEngineFlameControl g_BzrFn_EngineFlameControl = reinterpret_cast<FnEngineFlameControl>(0x004C88A0);
-    static FnEngineFlameSubmit g_BzrFn_EngineFlameSubmit = reinterpret_cast<FnEngineFlameSubmit>(0x004C88C0);
-    static FnEngineFlameResolveTexture g_BzrFn_EngineFlameResolveTexture = reinterpret_cast<FnEngineFlameResolveTexture>(0x0068BED0);
-    static FnGetHandle g_BzrFn_GetHandle = reinterpret_cast<FnGetHandle>(0x00462380);
-    static FnGetTeamNum g_BzrFn_GetTeamNum = reinterpret_cast<FnGetTeamNum>(0x005C8800);
+    static FnEngineFlameAddFlame g_BzrFn_EngineFlameAddFlame = nullptr;
+    static FnEngineFlameControl g_BzrFn_EngineFlameControl = nullptr;
+    static FnEngineFlameSubmit g_BzrFn_EngineFlameSubmit = nullptr;
+    static FnEngineFlameResolveTexture g_BzrFn_EngineFlameResolveTexture = nullptr;
+    static FnGetTeamNum g_BzrFn_GetTeamNum = nullptr;
     static FnExuGetTeamEngineFlameColor g_ExuFn_GetTeamEngineFlameColor = nullptr;
     static BuildItem* g_BzrBuildMenuRoot = nullptr;
     static bool g_IsSteamExe = false;
@@ -171,12 +185,20 @@ namespace BZROpenShim
         constexpr float kAutoSaveLoadButtonW = 1100.0f;
         constexpr float kAutoSaveLoadButtonH = 58.0f;
         constexpr uint32_t kAutoSaveLoadButtonFlags = 0x22;
+        constexpr int kBanScanMaxSessionId = 64;
         constexpr int kLoadQueuedState = 5;
         constexpr int kQueuedLoadNameBufferLen = 16;
         constexpr uintptr_t kLoadScreenSelectionFlagAddr = 0x00918133;
         constexpr uintptr_t kQueuedLoadPathBufferAddr = 0x00945708;
         constexpr uintptr_t kQueuedLoadNameBufferAddr = 0x00915540;
         constexpr uintptr_t kBuildMenuRootAddr = 0x009174C4;
+        constexpr char kBansConfigName[] = "bans.cfg";
+        constexpr char kLegacyBanListName[] = "banlist.txt";
+        constexpr char kFlagsConfigName[] = "flags.cfg";
+        constexpr char kFlagsDirectoryName[] = "flags";
+        constexpr char kFlagsGeneratedDirectoryName[] = "_generated";
+        constexpr char kGeneratedFlagBmpName[] = "openshim_selected_flag.bmp";
+        constexpr char kGeneratedFlagPayloadName[] = "openshim_selected_flag.bin";
         constexpr char kProducerBuildMenuIniName[] = "openshim_producer_build_menus.ini";
         constexpr char kProducerBuildMenuSection[] = "ProducerBuildMenus";
         constexpr char kProducerBuildMenuDefaultRoot[] = "build";
@@ -191,15 +213,26 @@ namespace BZROpenShim
         constexpr uint32_t kArmoryAttachableVft = 0x00408A18;
         constexpr uint32_t kConstructionRigDistributedVft = 0x0040A158;
         constexpr uint32_t kConstructionRigAttachableVft = 0x0040A1B0;
-        constexpr uintptr_t kEngineFlamePrimaryAddr = 0x009B2C88;
-        constexpr uintptr_t kEngineFlameSecondaryAddr = 0x009B3ED8;
         constexpr size_t kEngineFlameObjectSize = 0x1250;
         constexpr size_t kEngineFlameFlamePtrOffset = 0x1228;
         constexpr size_t kEngineFlameFlameTextureOffset = 0x123C;
+        constexpr size_t kEngineFlameControlVtableOffset = 0x18;
+        constexpr size_t kEngineFlameSubmitVtableOffset = 0x20;
+        constexpr size_t kCraftHandleLoOffset = 0x15C;
+        constexpr size_t kCraftHandleHiOffset = 0x160;
         constexpr int kEngineFlameColorDefault = 0;
         constexpr int kEngineFlameColorBlue = 1;
         constexpr int kEngineFlameColorRed = 2;
         constexpr int kEngineFlameColorGreen = 3;
+        constexpr float kFlagButtonSize = 48.0f;
+        constexpr uint32_t kLegacyFlagDataSlot = 0x0Du;
+        constexpr int kLegacyFlagWidth = 64;
+        constexpr int kLegacyFlagHeight = 32;
+        constexpr size_t kLegacyFlagPayloadBytes = 0x100;
+        constexpr size_t kLegacyFlagRowBytes = 8;
+        constexpr uintptr_t kFlagDisplayAddr = 0x006DDD34;
+        constexpr size_t kFlagDisplayFlagIndexOffset = 0x10;
+        constexpr size_t kFlagDisplayMakeTextureOffset = 0x14;
 
         enum class ProducerBuildMenuKind
         {
@@ -208,6 +241,26 @@ namespace BZROpenShim
             Factory,
             Armory,
             ConstructionRig,
+        };
+
+        struct BanRecord
+        {
+            std::string id;
+            std::string name;
+        };
+
+        struct FlagCatalogEntry
+        {
+            std::string fileName;
+            std::string displayName;
+            std::filesystem::path sourcePath;
+        };
+
+        struct LegacyFlagArtifactPaths
+        {
+            std::filesystem::path generatedDir;
+            std::filesystem::path bmpPath;
+            std::filesystem::path payloadPath;
         };
 
         struct ProducerBuildMenuEntry
@@ -227,6 +280,20 @@ namespace BZROpenShim
             ProducerBuildMenuEntry armory = {};
             ProducerBuildMenuEntry constructionRig = {};
         };
+
+        static bool g_BansConfigLoaded = false;
+        static std::vector<BanRecord> g_BanRecords;
+        static bool g_FlagCatalogLoaded = false;
+        static std::vector<FlagCatalogEntry> g_FlagCatalog;
+        static std::string g_SelectedFlagFileName;
+        static int g_SelectedFlagIndex = -1;
+        static std::string g_SelectedFlagStatus = "Legacy test path idle.";
+        static std::string g_GeneratedFlagFileName;
+        static bool g_FlagPayloadReady = false;
+        static bool g_FlagApplyPending = false;
+        static std::array<uint8_t, kLegacyFlagPayloadBytes> g_SelectedFlagPayload = {};
+        static ULONG_PTR g_GdiplusToken = 0;
+        static bool g_GdiplusInitialized = false;
 
         struct VehicleAssetExceptionCacheEntry
         {
@@ -252,7 +319,10 @@ namespace BZROpenShim
         };
 
         static bool g_EnableChunkRenderFallback = false;
+        static bool g_TraceChunkRender = true;
+        static bool g_TraceChunkRenderVerbose = true;
         static volatile long g_ChunkRenderLogBudget = 12;
+        static uint32_t g_ChunkTraceEntryLimit = 32;
         static volatile long g_ArtilleryMaskTraceBudget = 400;
         static VehicleAssetExceptionCacheEntry g_VehicleAssetExceptionCache[kVehicleAssetExceptionCacheSize] = {};
         static ProducerBuildMenuConfig g_ProducerBuildMenuConfig = {};
@@ -261,14 +331,35 @@ namespace BZROpenShim
         static uint32_t g_LastUnknownProducerVft = 0;
         static bool g_LoggedExuEngineFlameBridge = false;
         static bool g_LoggedExuEngineFlameBridgeMissing = false;
+        static bool g_LoggedEngineFlameTargetFailure = false;
+        static bool g_LoggedEngineFlameVtableHook = false;
         static bool g_EngineFlameVariantsInitialized = false;
         static bool g_EngineFlameVariantsInitAttempted = false;
+        static bool g_EngineFlameVtableHooksInstalled = false;
         static int g_EngineFlamePrimaryRedTexture = 0;
         static int g_EngineFlamePrimaryGreenTexture = 0;
+        static void* g_EngineFlamePrimaryManager = nullptr;
+        static void* g_EngineFlameSecondaryManager = nullptr;
         alignas(16) static unsigned char g_EngineFlamePrimaryRed[kEngineFlameObjectSize] = {};
         alignas(16) static unsigned char g_EngineFlamePrimaryGreen[kEngineFlameObjectSize] = {};
         alignas(16) static unsigned char g_EngineFlameSecondaryRed[kEngineFlameObjectSize] = {};
         alignas(16) static unsigned char g_EngineFlameSecondaryGreen[kEngineFlameObjectSize] = {};
+        enum class UnderAttackAlertMode : int
+        {
+            None = 1,
+            Minimal = 2,
+            Normal = 3,
+        };
+
+        static bool g_UnderAttackAlertConfigInitialized = false;
+        static UnderAttackAlertMode g_UnderAttackAlertMode = UnderAttackAlertMode::Normal;
+        static bool g_UnderAttackAlertEnabled = true;
+        static float g_UnderAttackAlertCooldownSeconds = 1.0f;
+        static float g_UnderAttackAlertNextAllowedTime = 0.0f;
+        static constexpr const char* kUnderAttackAlertConfigName = "campaignReimagined_settings.cfg";
+        static constexpr uintptr_t kUnderAttackAlertSoundAddr = 0x00877220;
+        static FnPlayGlobalSound g_BzrFn_PlayGlobalSound =
+            reinterpret_cast<FnPlayGlobalSound>(0x0043AA30);
 
         static bool EnvFlagEnabled(const char* name)
         {
@@ -307,6 +398,137 @@ namespace BZROpenShim
             return true;
         }
 
+        static bool TryGetEnvLong(const char* name, long& outValue)
+        {
+            if (!name || !*name)
+                return false;
+
+            char value[32] = {};
+            const DWORD len = GetEnvironmentVariableA(name, value, static_cast<DWORD>(sizeof(value)));
+            if (len == 0 || len >= sizeof(value))
+                return false;
+
+            char* end = nullptr;
+            const long parsed = std::strtol(value, &end, 10);
+            if (end == value)
+                return false;
+
+            while (*end == ' ' || *end == '\t')
+                ++end;
+            if (*end != '\0')
+                return false;
+
+            outValue = parsed;
+            return true;
+        }
+
+        static uint32_t ClampChunkTraceEntryLimit(long value)
+        {
+            if (value < 1)
+                return 1;
+            if (value > 32)
+                return 32;
+            return static_cast<uint32_t>(value);
+        }
+
+        static bool AcquireChunkLogSlot()
+        {
+            if (g_TraceChunkRenderVerbose)
+                return true;
+
+            return InterlockedDecrement(&g_ChunkRenderLogBudget) >= 0;
+        }
+
+        static int FindChunkGeoEntryByKey(const BzrGeoLookup* lookup, uint32_t key)
+        {
+            if (!lookup || !lookup->entries || lookup->count == 0 || key == 0)
+                return -1;
+
+            for (uint32_t index = 0; index < lookup->count; ++index)
+            {
+                const BzrGeoEntry& entry = lookup->entries[index];
+                if (entry.handle && entry.packedKey == key)
+                    return static_cast<int>(index);
+            }
+
+            return -1;
+        }
+
+        static int FindFirstChunkGeoEntryWithHandle(const BzrGeoLookup* lookup)
+        {
+            if (!lookup || !lookup->entries || lookup->count == 0)
+                return -1;
+
+            for (uint32_t index = 0; index < lookup->count; ++index)
+            {
+                if (lookup->entries[index].handle)
+                    return static_cast<int>(index);
+            }
+
+            return -1;
+        }
+
+        static void LogChunkResolveSnapshot(
+            const char* stage,
+            const char* reason,
+            const uint8_t* objectBytes,
+            uint32_t variant,
+            uint32_t stockResolved,
+            const void* activeBefore,
+            const void* activeAfter,
+            const BzrGeoLookup* lookup,
+            int selectedIndex,
+            uint32_t selectedKey)
+        {
+            if (!stage || !objectBytes)
+                return;
+
+            const uint32_t renderFlags = *reinterpret_cast<const uint32_t*>(objectBytes + 0x14);
+            const uint32_t renderClass = renderFlags & 0xF000;
+            const uint32_t objectType = *reinterpret_cast<const uint32_t*>(objectBytes + 0x84);
+            const uint32_t lookupCount = lookup ? lookup->count : 0;
+            const uint32_t cachedKey = lookup ? lookup->cachedKey : 0;
+            const uintptr_t entriesPtr = lookup ? reinterpret_cast<uintptr_t>(lookup->entries) : 0;
+
+            Log(L"[CHUNK] %hs obj=0x%08X variant=0x%08X resolved=0x%08X before=0x%08X after=0x%08X class=0x%04X type=0x%X count=%u cached=0x%08X entries=0x%08X reason=%hs idx=%d key=0x%08X\n",
+                stage,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectBytes)),
+                variant,
+                stockResolved,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(activeBefore)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(activeAfter)),
+                renderClass,
+                objectType,
+                lookupCount,
+                cachedKey,
+                static_cast<uint32_t>(entriesPtr),
+                reason ? reason : "-",
+                selectedIndex,
+                selectedKey);
+
+            if (!lookup || !lookup->entries || lookup->count == 0)
+                return;
+
+            const uint32_t entryLimit = (std::min)(lookup->count, g_ChunkTraceEntryLimit);
+            for (uint32_t index = 0; index < entryLimit; ++index)
+            {
+                const BzrGeoEntry& entry = lookup->entries[index];
+                Log(L"[CHUNK]   entry[%u] key=0x%08X handle=0x%08X unk8=0x%08X unkC=0x%08X%s\n",
+                    index,
+                    entry.packedKey,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entry.handle)),
+                    entry.unk8,
+                    entry.unkC,
+                    (selectedIndex == static_cast<int>(index)) ? " <selected>" : "");
+            }
+
+            if (lookup->count > entryLimit)
+            {
+                Log(L"[CHUNK]   ... truncated %u additional entries\n",
+                    lookup->count - entryLimit);
+            }
+        }
+
         static float ClampTurretAimPitchMultiplier(float value)
         {
             if (value < 0.0f)
@@ -316,14 +538,1385 @@ namespace BZROpenShim
             return value;
         }
 
+        static float ClampUnderAttackAlertCooldown(float value)
+        {
+            if (value < 0.0f)
+                return 0.0f;
+            if (value > 120.0f)
+                return 120.0f;
+            return value;
+        }
+
+        static std::filesystem::path GetConfigModuleDirectory()
+        {
+            char path[MAX_PATH] = {};
+            const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+            if (length == 0 || length >= MAX_PATH)
+                return {};
+
+            return std::filesystem::path(path).parent_path();
+        }
+
+        static char* TrimAsciiInPlace(char* text)
+        {
+            if (!text)
+                return text;
+
+            while (*text && std::isspace(static_cast<unsigned char>(*text)))
+                ++text;
+
+            size_t length = std::strlen(text);
+            while (length > 0 && std::isspace(static_cast<unsigned char>(text[length - 1])))
+                text[--length] = '\0';
+
+            return text;
+        }
+
+        static std::string NormalizeBanId(const char* value)
+        {
+            std::string normalized;
+            if (!value)
+                return normalized;
+
+            normalized.reserve(32);
+            for (const char* cursor = value; *cursor; ++cursor)
+            {
+                if (*cursor == '#' || *cursor == ';' ||
+                    std::isspace(static_cast<unsigned char>(*cursor)))
+                {
+                    break;
+                }
+
+                normalized.push_back(
+                    static_cast<char>(std::toupper(static_cast<unsigned char>(*cursor))));
+            }
+
+            return normalized;
+        }
+
+        static std::string BzrStringToStdString(const BzrString* value)
+        {
+            if (!value || value->size == 0)
+                return {};
+
+            return std::string(BzrStringData(value), value->size);
+        }
+
+        static std::filesystem::path GetBansConfigPath()
+        {
+            return GetConfigModuleDirectory() / kBansConfigName;
+        }
+
+        static std::filesystem::path GetLegacyBanListPath()
+        {
+            return GetConfigModuleDirectory() / kLegacyBanListName;
+        }
+
+        static std::filesystem::path GetFlagsConfigPath()
+        {
+            return GetConfigModuleDirectory() / kFlagsConfigName;
+        }
+
+        static std::filesystem::path GetFlagsDirectoryPath()
+        {
+            return GetConfigModuleDirectory() / kFlagsDirectoryName;
+        }
+
+        static std::filesystem::path GetGeneratedFlagsDirectoryPath()
+        {
+            return GetFlagsDirectoryPath() / kFlagsGeneratedDirectoryName;
+        }
+
+        static LegacyFlagArtifactPaths GetLegacyFlagArtifactPaths()
+        {
+            LegacyFlagArtifactPaths paths = {};
+            paths.generatedDir = GetGeneratedFlagsDirectoryPath();
+            paths.bmpPath = paths.generatedDir / kGeneratedFlagBmpName;
+            paths.payloadPath = paths.generatedDir / kGeneratedFlagPayloadName;
+            return paths;
+        }
+
+        static std::string ToLowerAscii(std::string value)
+        {
+            for (char& ch : value)
+            {
+                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            }
+            return value;
+        }
+
+        static bool IsSupportedFlagSourcePath(const std::filesystem::path& path)
+        {
+            const std::string ext = ToLowerAscii(path.extension().string());
+            return ext == ".bmp" || ext == ".png" || ext == ".tga" ||
+                   ext == ".jpg" || ext == ".jpeg";
+        }
+
+        static void InvalidateFlagPayloadCache()
+        {
+            g_FlagPayloadReady = false;
+            g_FlagApplyPending = false;
+            g_GeneratedFlagFileName.clear();
+            g_SelectedFlagPayload.fill(0);
+        }
+
+        static bool EnsureGdiplusInitialized(std::string& error)
+        {
+            if (g_GdiplusInitialized)
+                return true;
+
+            Gdiplus::GdiplusStartupInput startupInput;
+            const Gdiplus::Status status =
+                Gdiplus::GdiplusStartup(&g_GdiplusToken, &startupInput, nullptr);
+            if (status != Gdiplus::Ok)
+            {
+                char buffer[128] = {};
+                std::snprintf(buffer, sizeof(buffer), "GDI+ startup failed (status=%d)", static_cast<int>(status));
+                error = buffer;
+                return false;
+            }
+
+            g_GdiplusInitialized = true;
+            return true;
+        }
+
+        static bool TryBuildLegacyFlagPayloadFromSource(
+            const std::filesystem::path& sourcePath,
+            std::array<uint8_t, kLegacyFlagPayloadBytes>& outPayload,
+            std::string& error)
+        {
+            error.clear();
+            outPayload.fill(0);
+
+            std::string gdiplusError;
+            if (!EnsureGdiplusInitialized(gdiplusError))
+            {
+                error = gdiplusError;
+                return false;
+            }
+
+            const std::wstring widePath = sourcePath.wstring();
+            Gdiplus::Bitmap original(widePath.c_str(), FALSE);
+            if (original.GetLastStatus() != Gdiplus::Ok)
+            {
+                char buffer[512] = {};
+                std::snprintf(
+                    buffer,
+                    sizeof(buffer),
+                    "failed to load source image '%hs' (status=%d)",
+                    sourcePath.string().c_str(),
+                    static_cast<int>(original.GetLastStatus()));
+                error = buffer;
+                return false;
+            }
+
+            Gdiplus::Bitmap scaled(kLegacyFlagWidth, kLegacyFlagHeight, PixelFormat32bppARGB);
+            if (scaled.GetLastStatus() != Gdiplus::Ok)
+            {
+                error = "failed to allocate scaled flag surface";
+                return false;
+            }
+
+            {
+                Gdiplus::Graphics graphics(&scaled);
+                if (graphics.GetLastStatus() != Gdiplus::Ok)
+                {
+                    error = "failed to create GDI+ graphics context";
+                    return false;
+                }
+
+                graphics.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
+                graphics.SetCompositingQuality(Gdiplus::CompositingQualityHighQuality);
+                graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+                graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+                graphics.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
+                graphics.Clear(Gdiplus::Color(0, 0, 0, 0));
+                graphics.DrawImage(
+                    &original,
+                    Gdiplus::Rect(0, 0, kLegacyFlagWidth, kLegacyFlagHeight),
+                    0,
+                    0,
+                    static_cast<INT>(original.GetWidth()),
+                    static_cast<INT>(original.GetHeight()),
+                    Gdiplus::UnitPixel);
+            }
+
+            struct PixelSample
+            {
+                uint8_t alpha;
+                uint8_t luminance;
+            };
+
+            PixelSample samples[kLegacyFlagHeight][kLegacyFlagWidth] = {};
+            int opaqueCount = 0;
+            int darkCount = 0;
+            for (int y = 0; y < kLegacyFlagHeight; ++y)
+            {
+                for (int x = 0; x < kLegacyFlagWidth; ++x)
+                {
+                    Gdiplus::Color color;
+                    if (scaled.GetPixel(x, y, &color) != Gdiplus::Ok)
+                    {
+                        error = "failed reading scaled flag pixels";
+                        return false;
+                    }
+
+                    const uint8_t alpha = color.GetA();
+                    const uint8_t luminance = static_cast<uint8_t>(
+                        ((299u * color.GetR()) + (587u * color.GetG()) + (114u * color.GetB())) / 1000u);
+                    samples[y][x] = { alpha, luminance };
+                    if (alpha >= 64)
+                    {
+                        ++opaqueCount;
+                        if (luminance < 200)
+                            ++darkCount;
+                    }
+                }
+            }
+
+            const bool useAlphaOnly = (opaqueCount > 0) && (darkCount == 0);
+            int enabledPixels = 0;
+            for (int bmpRow = 0; bmpRow < kLegacyFlagHeight; ++bmpRow)
+            {
+                const int sourceY = (kLegacyFlagHeight - 1) - bmpRow;
+                for (int x = 0; x < kLegacyFlagWidth; ++x)
+                {
+                    const PixelSample sample = samples[sourceY][x];
+                    bool enabled = false;
+                    if (useAlphaOnly)
+                        enabled = sample.alpha >= 64;
+                    else
+                        enabled = sample.alpha >= 64 && sample.luminance < 200;
+
+                    if (!enabled)
+                        continue;
+
+                    ++enabledPixels;
+                    outPayload[static_cast<size_t>(bmpRow) * kLegacyFlagRowBytes + static_cast<size_t>(x / 8)] |=
+                        static_cast<uint8_t>(0x80u >> (x & 7));
+                }
+            }
+
+            if (enabledPixels == 0)
+            {
+                error = "source image converted to an empty mask";
+                return false;
+            }
+
+            return true;
+        }
+
+        static bool WriteLegacyFlagBitmap(
+            const std::filesystem::path& outputPath,
+            const std::array<uint8_t, kLegacyFlagPayloadBytes>& payload,
+            std::string& error)
+        {
+            error.clear();
+
+            std::error_code ec;
+            std::filesystem::create_directories(outputPath.parent_path(), ec);
+            if (ec)
+            {
+                char buffer[256] = {};
+                std::snprintf(buffer, sizeof(buffer), "failed to create output directory (%d)", static_cast<int>(ec.value()));
+                error = buffer;
+                return false;
+            }
+
+            FILE* file = nullptr;
+            if (fopen_s(&file, outputPath.string().c_str(), "wb") != 0 || !file)
+            {
+                error = "failed to create generated BMP";
+                return false;
+            }
+
+            unsigned char header[62] = {};
+            auto write16 = [&header](size_t offset, uint16_t value)
+            {
+                header[offset + 0] = static_cast<unsigned char>(value & 0xFFu);
+                header[offset + 1] = static_cast<unsigned char>((value >> 8) & 0xFFu);
+            };
+            auto write32 = [&header](size_t offset, uint32_t value)
+            {
+                header[offset + 0] = static_cast<unsigned char>(value & 0xFFu);
+                header[offset + 1] = static_cast<unsigned char>((value >> 8) & 0xFFu);
+                header[offset + 2] = static_cast<unsigned char>((value >> 16) & 0xFFu);
+                header[offset + 3] = static_cast<unsigned char>((value >> 24) & 0xFFu);
+            };
+
+            header[0] = 'B';
+            header[1] = 'M';
+            write32(2, 62u + static_cast<uint32_t>(payload.size()));
+            write32(10, 62u);
+            write32(14, 40u);
+            write32(18, kLegacyFlagWidth);
+            write32(22, kLegacyFlagHeight);
+            write16(26, 1u);
+            write16(28, 1u);
+            write32(34, static_cast<uint32_t>(payload.size()));
+            write32(38, 2835u);
+            write32(42, 2835u);
+            write32(46, 2u);
+            write32(50, 2u);
+
+            // Palette: 0 = white, 1 = black. The engine only copies the bits.
+            header[54] = 0xFF; header[55] = 0xFF; header[56] = 0xFF; header[57] = 0x00;
+            header[58] = 0x00; header[59] = 0x00; header[60] = 0x00; header[61] = 0x00;
+
+            const bool headerWritten = std::fwrite(header, 1, sizeof(header), file) == sizeof(header);
+            const bool payloadWritten = std::fwrite(payload.data(), 1, payload.size(), file) == payload.size();
+            std::fclose(file);
+
+            if (!headerWritten || !payloadWritten)
+            {
+                error = "failed while writing generated BMP";
+                return false;
+            }
+
+            return true;
+        }
+
+        static bool WriteLegacyFlagPayloadBin(
+            const std::filesystem::path& outputPath,
+            const std::array<uint8_t, kLegacyFlagPayloadBytes>& payload,
+            std::string& error)
+        {
+            error.clear();
+
+            FILE* file = nullptr;
+            if (fopen_s(&file, outputPath.string().c_str(), "wb") != 0 || !file)
+            {
+                error = "failed to create generated payload";
+                return false;
+            }
+
+            const bool written = std::fwrite(payload.data(), 1, payload.size(), file) == payload.size();
+            std::fclose(file);
+            if (!written)
+            {
+                error = "failed while writing generated payload";
+                return false;
+            }
+
+            return true;
+        }
+
+        static void MarkFlagDisplayDirty()
+        {
+            auto* flagDisplay = reinterpret_cast<uint8_t*>(kFlagDisplayAddr);
+            if (!flagDisplay)
+                return;
+
+            __try
+            {
+                const int flagIndex = *reinterpret_cast<int*>(flagDisplay + kFlagDisplayFlagIndexOffset);
+                if (flagIndex != 0)
+                    *(flagDisplay + kFlagDisplayMakeTextureOffset) = 1;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[FLAG] Failed to mark flag display dirty at 0x%08X\n", static_cast<uint32_t>(kFlagDisplayAddr));
+            }
+        }
+
+        static void SortFlagCatalog()
+        {
+            std::sort(
+                g_FlagCatalog.begin(),
+                g_FlagCatalog.end(),
+                [](const FlagCatalogEntry& a, const FlagCatalogEntry& b)
+                {
+                    return _stricmp(a.displayName.c_str(), b.displayName.c_str()) < 0;
+                });
+        }
+
+        static bool SaveSelectedFlagConfig()
+        {
+            const auto configPath = GetFlagsConfigPath();
+            const std::string configPathString = configPath.string();
+            FILE* file = nullptr;
+            if (fopen_s(&file, configPathString.c_str(), "w") != 0 || !file)
+            {
+                Log(L"[FLAG] Failed to write flag config path=%hs\n", configPathString.c_str());
+                return false;
+            }
+
+            std::fprintf(file, "; OpenShim multiplayer vehicle flag selection\n");
+            std::fprintf(file, "; Place source images in .\\flags\\ and click the lobby F button to cycle.\n");
+            std::fprintf(file, "selected=%s\n", g_SelectedFlagFileName.c_str());
+            std::fclose(file);
+            Log(L"[FLAG] Wrote flag config path=%hs selected=%hs\n",
+                configPathString.c_str(),
+                g_SelectedFlagFileName.c_str());
+            return true;
+        }
+
+        static void SyncSelectedFlagIndex()
+        {
+            g_SelectedFlagIndex = -1;
+            if (g_FlagCatalog.empty())
+            {
+                g_SelectedFlagFileName.clear();
+                return;
+            }
+
+            if (!g_SelectedFlagFileName.empty())
+            {
+                for (size_t i = 0; i < g_FlagCatalog.size(); ++i)
+                {
+                    if (_stricmp(g_FlagCatalog[i].fileName.c_str(), g_SelectedFlagFileName.c_str()) == 0)
+                    {
+                        g_SelectedFlagIndex = static_cast<int>(i);
+                        return;
+                    }
+                }
+            }
+
+            g_SelectedFlagIndex = 0;
+            g_SelectedFlagFileName = g_FlagCatalog.front().fileName;
+        }
+
+        static void EnsureFlagCatalogLoaded()
+        {
+            if (g_FlagCatalogLoaded)
+                return;
+
+            g_FlagCatalogLoaded = true;
+            g_FlagCatalog.clear();
+            g_SelectedFlagFileName.clear();
+            g_SelectedFlagIndex = -1;
+            g_SelectedFlagStatus = "Legacy test path idle.";
+            InvalidateFlagPayloadCache();
+
+            const auto flagsDir = GetFlagsDirectoryPath();
+            std::error_code ec;
+            std::filesystem::create_directories(flagsDir, ec);
+            if (ec)
+            {
+                Log(L"[FLAG] Failed to ensure flags directory path=%hs ec=%d\n",
+                    flagsDir.string().c_str(),
+                    static_cast<int>(ec.value()));
+            }
+
+            const auto configPath = GetFlagsConfigPath();
+            FILE* file = nullptr;
+            if (fopen_s(&file, configPath.string().c_str(), "r") == 0 && file)
+            {
+                char line[512] = {};
+                while (std::fgets(line, static_cast<int>(sizeof(line)), file))
+                {
+                    char* trimmed = TrimAsciiInPlace(line);
+                    if (*trimmed == '\0' || *trimmed == '#' || *trimmed == ';')
+                        continue;
+
+                    char* equals = std::strchr(trimmed, '=');
+                    if (!equals)
+                        continue;
+
+                    *equals = '\0';
+                    char* key = TrimAsciiInPlace(trimmed);
+                    char* value = TrimAsciiInPlace(equals + 1);
+                    if (_stricmp(key, "selected") == 0 && value && *value)
+                    {
+                        g_SelectedFlagFileName = value;
+                        break;
+                    }
+                }
+
+                std::fclose(file);
+            }
+
+            std::vector<std::filesystem::directory_entry> entries;
+            for (std::filesystem::directory_iterator it(flagsDir, ec), end;
+                 !ec && it != end;
+                 it.increment(ec))
+            {
+                if (ec)
+                    break;
+
+                const auto& entry = *it;
+                if (!entry.is_regular_file(ec) || ec)
+                    continue;
+                if (!IsSupportedFlagSourcePath(entry.path()))
+                    continue;
+
+                FlagCatalogEntry catalogEntry = {};
+                catalogEntry.fileName = entry.path().filename().string();
+                catalogEntry.displayName = entry.path().stem().string();
+                catalogEntry.sourcePath = entry.path();
+                g_FlagCatalog.push_back(std::move(catalogEntry));
+            }
+
+            SortFlagCatalog();
+            SyncSelectedFlagIndex();
+
+            if (g_FlagCatalog.empty())
+            {
+                g_SelectedFlagStatus = "No source images found under .\\flags.";
+                SaveSelectedFlagConfig();
+                Log(L"[FLAG] No flag source files found. Add files under path=%hs\n",
+                    flagsDir.string().c_str());
+                return;
+            }
+
+            SaveSelectedFlagConfig();
+            Log(L"[FLAG] Loaded flag catalog path=%hs entries=%u selected=%hs\n",
+                flagsDir.string().c_str(),
+                static_cast<unsigned>(g_FlagCatalog.size()),
+                g_SelectedFlagFileName.c_str());
+        }
+
+        static const FlagCatalogEntry* GetSelectedFlagEntry()
+        {
+            EnsureFlagCatalogLoaded();
+            if (g_SelectedFlagIndex < 0 ||
+                static_cast<size_t>(g_SelectedFlagIndex) >= g_FlagCatalog.size())
+            {
+                return nullptr;
+            }
+            return &g_FlagCatalog[static_cast<size_t>(g_SelectedFlagIndex)];
+        }
+
+        static std::string GetSelectedFlagSummary()
+        {
+            const FlagCatalogEntry* entry = GetSelectedFlagEntry();
+            if (!entry)
+                return "No flag files found in .\\flags. Add PNG/BMP/TGA/JPG images.";
+
+            char buffer[512] = {};
+            std::snprintf(
+                buffer,
+                sizeof(buffer),
+                "Selected multiplayer vehicle flag: %s (%d/%u). %s",
+                entry->displayName.c_str(),
+                g_SelectedFlagIndex + 1,
+                static_cast<unsigned>(g_FlagCatalog.size()),
+                g_SelectedFlagStatus.c_str());
+            return buffer;
+        }
+
+        static bool TryGenerateSelectedFlagArtifacts(const char* source)
+        {
+            const FlagCatalogEntry* entry = GetSelectedFlagEntry();
+            if (!entry)
+            {
+                g_SelectedFlagStatus = "No source images found under .\\flags.";
+                return false;
+            }
+
+            if (g_FlagPayloadReady &&
+                _stricmp(g_GeneratedFlagFileName.c_str(), entry->fileName.c_str()) == 0)
+            {
+                return true;
+            }
+
+            std::array<uint8_t, kLegacyFlagPayloadBytes> payload = {};
+            std::string error;
+            if (!TryBuildLegacyFlagPayloadFromSource(entry->sourcePath, payload, error))
+            {
+                g_SelectedFlagStatus = "Legacy conversion failed.";
+                Log(L"[FLAG] %hs failed converting source path=%hs error=%hs\n",
+                    source ? source : "flag",
+                    entry->sourcePath.string().c_str(),
+                    error.c_str());
+                return false;
+            }
+
+            const LegacyFlagArtifactPaths paths = GetLegacyFlagArtifactPaths();
+            if (!WriteLegacyFlagBitmap(paths.bmpPath, payload, error))
+            {
+                g_SelectedFlagStatus = "Generated payload but BMP write failed.";
+                Log(L"[FLAG] %hs failed writing BMP path=%hs error=%hs\n",
+                    source ? source : "flag",
+                    paths.bmpPath.string().c_str(),
+                    error.c_str());
+                return false;
+            }
+
+            if (!WriteLegacyFlagPayloadBin(paths.payloadPath, payload, error))
+            {
+                g_SelectedFlagStatus = "Generated BMP but payload write failed.";
+                Log(L"[FLAG] %hs failed writing payload path=%hs error=%hs\n",
+                    source ? source : "flag",
+                    paths.payloadPath.string().c_str(),
+                    error.c_str());
+                return false;
+            }
+
+            g_SelectedFlagPayload = payload;
+            g_GeneratedFlagFileName = entry->fileName;
+            g_FlagPayloadReady = true;
+            g_FlagApplyPending = true;
+            g_SelectedFlagStatus = "Generated legacy 64x32/1-bpp BMP and 256-byte payload.";
+            Log(L"[FLAG] %hs generated legacy artifacts source=%hs bmp=%hs payload=%hs\n",
+                source ? source : "flag",
+                entry->sourcePath.string().c_str(),
+                paths.bmpPath.string().c_str(),
+                paths.payloadPath.string().c_str());
+            return true;
+        }
+
+        static bool TryApplyCachedFlagPayload(const char* source)
+        {
+            if (!g_FlagPayloadReady)
+                return false;
+
+            if (g_IsSteamExe)
+            {
+                g_SelectedFlagStatus = "Generated legacy files. Steam apply path still needs revalidation.";
+                g_FlagApplyPending = true;
+                return false;
+            }
+
+            if (!g_BzrFn_GetLocalPlayerNetId || !g_BzrFn_BanLookup || !g_BzrFn_NetPlayerSetData)
+            {
+                g_SelectedFlagStatus = "Generated legacy files. GOG flag apply helpers were not resolved.";
+                g_FlagApplyPending = true;
+                return false;
+            }
+
+            __try
+            {
+                const uint16_t localPlayerId = g_BzrFn_GetLocalPlayerNetId();
+                void* const localPlayer = g_BzrFn_BanLookup(localPlayerId);
+                if (!localPlayer)
+                {
+                    g_SelectedFlagStatus = "Generated legacy files. Waiting for a local multiplayer player object.";
+                    g_FlagApplyPending = true;
+                    return false;
+                }
+
+                g_BzrFn_NetPlayerSetData(
+                    localPlayer,
+                    kLegacyFlagDataSlot,
+                    g_SelectedFlagPayload.data(),
+                    static_cast<uint32_t>(g_SelectedFlagPayload.size()));
+                MarkFlagDisplayDirty();
+                g_SelectedFlagStatus = "Uploaded 256-byte flag payload to player slot 0x0D.";
+                g_FlagApplyPending = false;
+                Log(L"[FLAG] %hs applied payload bytes=%u slot=0x%02X player=0x%p\n",
+                    source ? source : "flag",
+                    static_cast<unsigned>(g_SelectedFlagPayload.size()),
+                    static_cast<unsigned>(kLegacyFlagDataSlot),
+                    localPlayer);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                g_SelectedFlagStatus = "Generated legacy files. Apply raised an exception.";
+                g_FlagApplyPending = true;
+                Log(L"[FLAG] %hs apply raised an exception\n", source ? source : "flag");
+                return false;
+            }
+        }
+
+        static void PrimeSelectedFlagForTesting(const char* source)
+        {
+            if (!TryGenerateSelectedFlagArtifacts(source))
+                return;
+
+            TryApplyCachedFlagPayload(source);
+        }
+
+        static void SelectFlagEntryByIndex(int index, const char* source)
+        {
+            EnsureFlagCatalogLoaded();
+            if (g_FlagCatalog.empty())
+            {
+                Log(L"[FLAG] %hs ignored because no flag files are available\n",
+                    source ? source : "flag");
+                return;
+            }
+
+            const int count = static_cast<int>(g_FlagCatalog.size());
+            if (index < 0)
+                index = (count - 1);
+            else if (index >= count)
+                index = 0;
+
+            const std::string previousSelection = g_SelectedFlagFileName;
+            g_SelectedFlagIndex = index;
+            g_SelectedFlagFileName = g_FlagCatalog[static_cast<size_t>(index)].fileName;
+            if (_stricmp(previousSelection.c_str(), g_SelectedFlagFileName.c_str()) != 0)
+                InvalidateFlagPayloadCache();
+            SaveSelectedFlagConfig();
+            Log(L"[FLAG] %hs selected index=%d file=%hs path=%hs\n",
+                source ? source : "flag",
+                index,
+                g_SelectedFlagFileName.c_str(),
+                g_FlagCatalog[static_cast<size_t>(index)].sourcePath.string().c_str());
+        }
+
+        static void AppendLegacyBanList(const char* id, const BzrString* name)
+        {
+            if (!id || !*id)
+                return;
+
+            const auto path = GetLegacyBanListPath();
+            const std::string pathString = path.string();
+
+            FILE* file = nullptr;
+            fopen_s(&file, pathString.c_str(), "a");
+            if (!file)
+            {
+                Log(L"[BAN] Failed to append legacy banlist path=%hs\n", pathString.c_str());
+                return;
+            }
+
+            if (name && name->size)
+                std::fprintf(file, "%s %.*s\n", id, static_cast<int>(name->size), BzrStringData(name));
+            else
+                std::fprintf(file, "%s\n", id);
+            std::fclose(file);
+        }
+
+        static void EnsureBansConfigLoaded()
+        {
+            if (g_BansConfigLoaded)
+                return;
+
+            g_BansConfigLoaded = true;
+            g_BanRecords.clear();
+
+            const auto configPath = GetBansConfigPath();
+            const std::string configPathString = configPath.string();
+            FILE* file = nullptr;
+            if (fopen_s(&file, configPathString.c_str(), "r") != 0 || !file)
+            {
+                Log(L"[BAN] No bans config found at path=%hs\n", configPathString.c_str());
+                return;
+            }
+
+            char line[512] = {};
+            while (std::fgets(line, static_cast<int>(sizeof(line)), file))
+            {
+                char* trimmed = TrimAsciiInPlace(line);
+                if (*trimmed == '\0' || *trimmed == '#' || *trimmed == ';')
+                    continue;
+
+                char* split = trimmed;
+                while (*split && !std::isspace(static_cast<unsigned char>(*split)))
+                    ++split;
+
+                char saved = *split;
+                *split = '\0';
+                std::string id = NormalizeBanId(trimmed);
+                *split = saved;
+                if (id.empty())
+                    continue;
+
+                char* name = (*split != '\0') ? TrimAsciiInPlace(split + 1) : split;
+                auto existing = std::find_if(
+                    g_BanRecords.begin(),
+                    g_BanRecords.end(),
+                    [&id](const BanRecord& entry) { return entry.id == id; });
+                if (existing != g_BanRecords.end())
+                {
+                    if (existing->name.empty() && name && *name)
+                        existing->name = name;
+                    continue;
+                }
+
+                BanRecord entry = {};
+                entry.id = std::move(id);
+                if (name && *name)
+                    entry.name = name;
+                g_BanRecords.push_back(std::move(entry));
+            }
+
+            std::fclose(file);
+            Log(L"[BAN] Loaded bans config path=%hs entries=%u\n",
+                configPathString.c_str(),
+                static_cast<unsigned>(g_BanRecords.size()));
+        }
+
+        static bool SaveBansConfig()
+        {
+            const auto configPath = GetBansConfigPath();
+            const std::string configPathString = configPath.string();
+            FILE* file = nullptr;
+            if (fopen_s(&file, configPathString.c_str(), "w") != 0 || !file)
+            {
+                Log(L"[BAN] Failed to write bans config path=%hs\n", configPathString.c_str());
+                return false;
+            }
+
+            std::fprintf(file, "; OpenShim experimental ban list\n");
+            std::fprintf(file, "; Format: <stable_id> [display name]\n");
+            for (const BanRecord& entry : g_BanRecords)
+            {
+                if (entry.name.empty())
+                    std::fprintf(file, "%s\n", entry.id.c_str());
+                else
+                    std::fprintf(file, "%s %s\n", entry.id.c_str(), entry.name.c_str());
+            }
+
+            std::fclose(file);
+            Log(L"[BAN] Wrote bans config path=%hs entries=%u\n",
+                configPathString.c_str(),
+                static_cast<unsigned>(g_BanRecords.size()));
+            return true;
+        }
+
+        static bool IsBanIdConfigured(const char* stableId)
+        {
+            if (!stableId || !*stableId)
+                return false;
+
+            EnsureBansConfigLoaded();
+            const std::string normalized = NormalizeBanId(stableId);
+            return std::any_of(
+                g_BanRecords.begin(),
+                g_BanRecords.end(),
+                [&normalized](const BanRecord& entry) { return entry.id == normalized; });
+        }
+
+        static bool AddBanConfigEntry(const char* stableId, const BzrString* name, const char* source)
+        {
+            const std::string normalized = NormalizeBanId(stableId);
+            if (normalized.empty())
+            {
+                Log(L"[BAN] %hs rejected invalid stable id '%hs'\n",
+                    source ? source : "ban",
+                    stableId ? stableId : "");
+                return false;
+            }
+
+            EnsureBansConfigLoaded();
+
+            const std::string displayName = BzrStringToStdString(name);
+            auto existing = std::find_if(
+                g_BanRecords.begin(),
+                g_BanRecords.end(),
+                [&normalized](const BanRecord& entry) { return entry.id == normalized; });
+            if (existing != g_BanRecords.end())
+            {
+                if (existing->name.empty() && !displayName.empty())
+                {
+                    existing->name = displayName;
+                    SaveBansConfig();
+                    Log(L"[BAN] %hs refreshed existing entry stable=%hs name=%hs\n",
+                        source ? source : "ban",
+                        normalized.c_str(),
+                        displayName.c_str());
+                }
+                else
+                {
+                    Log(L"[BAN] %hs entry already present stable=%hs name=%hs\n",
+                        source ? source : "ban",
+                        normalized.c_str(),
+                        existing->name.c_str());
+                }
+
+                return true;
+            }
+
+            BanRecord entry = {};
+            entry.id = normalized;
+            entry.name = displayName;
+            g_BanRecords.push_back(std::move(entry));
+            SaveBansConfig();
+            AppendLegacyBanList(normalized.c_str(), name);
+            Log(L"[BAN] %hs added entry stable=%hs name=%hs\n",
+                source ? source : "ban",
+                normalized.c_str(),
+                displayName.c_str());
+            return true;
+        }
+
+        static const char* UnderAttackAlertModeName(UnderAttackAlertMode mode)
+        {
+            switch (mode)
+            {
+            case UnderAttackAlertMode::None:
+                return "NONE";
+            case UnderAttackAlertMode::Minimal:
+                return "MINIMAL";
+            default:
+                return "NORMAL";
+            }
+        }
+
+        static UnderAttackAlertMode ClampUnderAttackAlertMode(int value)
+        {
+            if (value <= static_cast<int>(UnderAttackAlertMode::None))
+                return UnderAttackAlertMode::None;
+            if (value == static_cast<int>(UnderAttackAlertMode::Minimal))
+                return UnderAttackAlertMode::Minimal;
+            return UnderAttackAlertMode::Normal;
+        }
+
+        static void ApplyUnderAttackAlertMode(UnderAttackAlertMode mode, bool resetTimer)
+        {
+            g_UnderAttackAlertMode = mode;
+            switch (mode)
+            {
+            case UnderAttackAlertMode::None:
+                g_UnderAttackAlertEnabled = false;
+                g_UnderAttackAlertCooldownSeconds = 0.0f;
+                break;
+            case UnderAttackAlertMode::Minimal:
+                g_UnderAttackAlertEnabled = true;
+                g_UnderAttackAlertCooldownSeconds = 10.0f;
+                break;
+            case UnderAttackAlertMode::Normal:
+            default:
+                g_UnderAttackAlertEnabled = true;
+                g_UnderAttackAlertCooldownSeconds = 1.0f;
+                break;
+            }
+
+            if (resetTimer)
+                g_UnderAttackAlertNextAllowedTime = 0.0f;
+        }
+
+        static bool TryParseUnderAttackAlertModeValue(const char* value, UnderAttackAlertMode& outMode)
+        {
+            if (!value || !*value)
+                return false;
+
+            char normalized[32] = {};
+            size_t out = 0;
+            for (const char* cursor = value; *cursor && out + 1 < sizeof(normalized); ++cursor)
+            {
+                if (std::isspace(static_cast<unsigned char>(*cursor)))
+                    continue;
+                normalized[out++] = static_cast<char>(std::toupper(static_cast<unsigned char>(*cursor)));
+            }
+            normalized[out] = '\0';
+            if (normalized[0] == '\0')
+                return false;
+
+            char* end = nullptr;
+            const long parsed = std::strtol(normalized, &end, 10);
+            if (end != normalized && *end == '\0')
+            {
+                outMode = parsed <= 0 ? UnderAttackAlertMode::None : ClampUnderAttackAlertMode(static_cast<int>(parsed));
+                return true;
+            }
+
+            if (std::strcmp(normalized, "NONE") == 0 || std::strcmp(normalized, "OFF") == 0)
+            {
+                outMode = UnderAttackAlertMode::None;
+                return true;
+            }
+            if (std::strcmp(normalized, "MINIMAL") == 0 || std::strcmp(normalized, "LOW") == 0)
+            {
+                outMode = UnderAttackAlertMode::Minimal;
+                return true;
+            }
+            if (std::strcmp(normalized, "NORMAL") == 0 || std::strcmp(normalized, "DEFAULT") == 0 ||
+                std::strcmp(normalized, "ON") == 0)
+            {
+                outMode = UnderAttackAlertMode::Normal;
+                return true;
+            }
+
+            return false;
+        }
+
+        static bool TryLoadUnderAttackAlertModeFromConfig(
+            const std::filesystem::path& configPath,
+            UnderAttackAlertMode& outMode)
+        {
+            if (configPath.empty())
+                return false;
+
+            FILE* file = nullptr;
+            if (fopen_s(&file, configPath.string().c_str(), "r") != 0 || !file)
+                return false;
+
+            char line[256] = {};
+            bool found = false;
+            while (std::fgets(line, static_cast<int>(sizeof(line)), file))
+            {
+                char* trimmed = TrimAsciiInPlace(line);
+                if (*trimmed == '\0' || *trimmed == '#' || *trimmed == ';')
+                    continue;
+
+                char* equals = std::strchr(trimmed, '=');
+                if (!equals)
+                    continue;
+
+                *equals = '\0';
+                char* key = TrimAsciiInPlace(trimmed);
+                char* value = TrimAsciiInPlace(equals + 1);
+                if (_stricmp(key, "UnderAttackAlertMode") != 0)
+                    continue;
+
+                found = TryParseUnderAttackAlertModeValue(value, outMode);
+                break;
+            }
+
+            std::fclose(file);
+            return found;
+        }
+
+        static bool TryGetEnvUnderAttackAlertMode(
+            const char* envName,
+            UnderAttackAlertMode& outMode)
+        {
+            if (!envName || !*envName)
+                return false;
+
+            char value[32] = {};
+            const DWORD len = GetEnvironmentVariableA(envName, value, static_cast<DWORD>(sizeof(value)));
+            if (len == 0 || len >= sizeof(value))
+                return false;
+
+            return TryParseUnderAttackAlertModeValue(value, outMode);
+        }
+
+        static void InitializeUnderAttackAlertConfig()
+        {
+            if (g_UnderAttackAlertConfigInitialized)
+                return;
+
+            g_UnderAttackAlertConfigInitialized = true;
+            ApplyUnderAttackAlertMode(UnderAttackAlertMode::Normal, true);
+
+            UnderAttackAlertMode mode = UnderAttackAlertMode::Normal;
+            const auto configPath = GetConfigModuleDirectory() / kUnderAttackAlertConfigName;
+            if (TryLoadUnderAttackAlertModeFromConfig(configPath, mode))
+                ApplyUnderAttackAlertMode(mode, true);
+
+            if (TryGetEnvUnderAttackAlertMode("OPENSHIM_UNDER_ATTACK_ALERT_MODE", mode) ||
+                TryGetEnvUnderAttackAlertMode("BZR_UNDER_ATTACK_ALERT_MODE", mode))
+            {
+                ApplyUnderAttackAlertMode(mode, true);
+            }
+            else if (EnvFlagEnabled("OPENSHIM_DISABLE_UNDER_ATTACK_ALERT") ||
+                     EnvFlagEnabled("BZR_DISABLE_UNDER_ATTACK_ALERT"))
+            {
+                ApplyUnderAttackAlertMode(UnderAttackAlertMode::None, true);
+            }
+            else
+            {
+                float envCooldown = g_UnderAttackAlertCooldownSeconds;
+                if (TryGetEnvFloat("OPENSHIM_UNDER_ATTACK_ALERT_COOLDOWN", envCooldown) ||
+                    TryGetEnvFloat("BZR_UNDER_ATTACK_ALERT_COOLDOWN", envCooldown) ||
+                    TryGetEnvFloat("OPENSHIM_UNDER_ATTACK_ALERT_COOLDOWN_SECONDS", envCooldown))
+                {
+                    g_UnderAttackAlertEnabled = true;
+                    g_UnderAttackAlertCooldownSeconds = ClampUnderAttackAlertCooldown(envCooldown);
+                }
+            }
+
+            Log(L"[AUDIO] Under-attack alert mode=%hs enabled=%hs cooldown=%.3fs\n",
+                UnderAttackAlertModeName(g_UnderAttackAlertMode),
+                g_UnderAttackAlertEnabled ? "yes" : "no",
+                static_cast<double>(g_UnderAttackAlertCooldownSeconds));
+        }
+
+        static bool SetUnderAttackAlertModeInternal(UnderAttackAlertMode mode, bool logChange)
+        {
+            InitializeUnderAttackAlertConfig();
+            const bool changed =
+                g_UnderAttackAlertMode != mode ||
+                !g_UnderAttackAlertEnabled ||
+                std::abs(g_UnderAttackAlertCooldownSeconds -
+                    (mode == UnderAttackAlertMode::Minimal ? 10.0f :
+                     mode == UnderAttackAlertMode::Normal ? 1.0f : 0.0f)) > 0.0001f;
+            ApplyUnderAttackAlertMode(mode, true);
+            if (logChange)
+            {
+                Log(L"[AUDIO] Under-attack alert bridge mode=%hs enabled=%hs cooldown=%.3fs\n",
+                    UnderAttackAlertModeName(g_UnderAttackAlertMode),
+                    g_UnderAttackAlertEnabled ? "yes" : "no",
+                    static_cast<double>(g_UnderAttackAlertCooldownSeconds));
+            }
+            return changed;
+        }
+
         static void* GetEngineFlamePrimary()
         {
-            return reinterpret_cast<void*>(kEngineFlamePrimaryAddr);
+            return g_EngineFlamePrimaryManager;
         }
 
         static void* GetEngineFlameSecondary()
         {
-            return reinterpret_cast<void*>(kEngineFlameSecondaryAddr);
+            return g_EngineFlameSecondaryManager;
+        }
+
+        static bool FindPatternInMainText(
+            const uint8_t* pattern,
+            const uint8_t* mask,
+            size_t size,
+            uint8_t*& outMatch)
+        {
+            outMatch = nullptr;
+            if (!pattern || !mask || size == 0)
+                return false;
+
+            HMODULE module = GetModuleHandleA(nullptr);
+            if (!module)
+                return false;
+
+            auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(module);
+            if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+                return false;
+
+            auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(
+                reinterpret_cast<uint8_t*>(module) + dos->e_lfanew);
+            if (nt->Signature != IMAGE_NT_SIGNATURE)
+                return false;
+
+            auto* section = IMAGE_FIRST_SECTION(nt);
+            for (unsigned i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++section)
+            {
+                if ((section->Characteristics & IMAGE_SCN_MEM_EXECUTE) == 0)
+                    continue;
+
+                auto* start = reinterpret_cast<uint8_t*>(module) + section->VirtualAddress;
+                const size_t sectionSize =
+                    (section->Misc.VirtualSize != 0) ? section->Misc.VirtualSize : section->SizeOfRawData;
+                if (sectionSize < size)
+                    continue;
+
+                for (size_t offset = 0; offset <= sectionSize - size; ++offset)
+                {
+                    bool match = true;
+                    for (size_t j = 0; j < size; ++j)
+                    {
+                        if (mask[j] != 0 && start[offset + j] != pattern[j])
+                        {
+                            match = false;
+                            break;
+                        }
+                    }
+
+                    if (match)
+                    {
+                        outMatch = start + offset;
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        static uint32_t ResolveRel32Target(uint8_t* callInstr)
+        {
+            if (!callInstr || callInstr[0] != 0xE8)
+                return 0;
+
+            const int32_t rel = *reinterpret_cast<int32_t*>(callInstr + 1);
+            return static_cast<uint32_t>(
+                reinterpret_cast<uintptr_t>(callInstr + 5) + rel);
+        }
+
+        static void LogEngineFlameTargetFailure(const wchar_t* name)
+        {
+            if (!name || !name[0])
+                return;
+
+            if (!g_LoggedEngineFlameTargetFailure)
+            {
+                Log(L"[FLAME] Failed to resolve Steam runtime target: %ls\n", name);
+                g_LoggedEngineFlameTargetFailure = true;
+            }
+        }
+
+        static void ResolveEngineFlameRuntimeTargets()
+        {
+            if (g_BzrFn_EngineFlameAddFlame &&
+                g_BzrFn_EngineFlameResolveTexture &&
+                g_BzrFn_GetTeamNum)
+            {
+                return;
+            }
+
+            static const uint8_t kEmit1Pattern[] =
+            {
+                0x0F, 0x11, 0x04, 0x24, 0x8D, 0x85, 0x00, 0x00, 0x00, 0x00,
+                0x50, 0xB9, 0x00, 0x00, 0x00, 0x00, 0xE8, 0x00, 0x00, 0x00,
+                0x00, 0x83, 0x3D, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0F, 0x84,
+            };
+            static const uint8_t kEmit1Mask[] =
+            {
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
+                0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00,
+                0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF,
+            };
+            static const uint8_t kGetTeamNumPattern[] =
+            {
+                0x8B, 0x45, 0x08, 0x50, 0xE8, 0x00, 0x00, 0x00, 0x00, 0x83,
+                0xC4, 0x04, 0x89, 0x45, 0xFC, 0x83, 0x7D, 0xFC, 0x00, 0x75,
+                0x04, 0x33, 0xC0, 0xEB, 0x11, 0x8B, 0x4D, 0xFC, 0x83, 0xC1,
+                0x18, 0x8B, 0x55, 0xFC, 0x8B, 0x42, 0x18, 0x8B, 0x50, 0x04,
+                0xFF, 0xD2,
+            };
+            static const uint8_t kGetTeamNumMask[] =
+            {
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF,
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                0xFF, 0xFF,
+            };
+            static const uint8_t kResolveTexturePattern[] =
+            {
+                0x55, 0x8B, 0xEC, 0x51, 0x83, 0x7D, 0x08, 0x00, 0x75, 0x04,
+                0x33, 0xC0, 0xEB, 0x44, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x83,
+                0xE8, 0x01, 0x89, 0x45, 0xFC, 0xEB, 0x09, 0x8B, 0x4D, 0xFC,
+                0x83, 0xE9, 0x01, 0x89, 0x4D, 0xFC, 0x83, 0x7D, 0xFC, 0x00,
+                0x7E, 0x26, 0x6A, 0x20, 0x8B, 0x55, 0x08, 0x52, 0x8B, 0x45,
+                0xFC, 0xC1, 0xE0, 0x05, 0x05, 0x00, 0x00, 0x00, 0x00, 0x50,
+                0xFF, 0x15, 0x00, 0x00, 0x00, 0x00, 0x83, 0xC4, 0x0C, 0x85,
+                0xC0, 0x75, 0x05,
+            };
+            static const uint8_t kResolveTextureMask[] =
+            {
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF,
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF,
+                0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF,
+                0xFF, 0xFF, 0xFF,
+            };
+
+            uint8_t* match = nullptr;
+            if (!g_BzrFn_EngineFlameAddFlame)
+            {
+                if (FindPatternInMainText(kEmit1Pattern, kEmit1Mask, sizeof(kEmit1Pattern), match))
+                {
+                    const uint32_t target = ResolveRel32Target(match + 16);
+                    if (target != 0)
+                    {
+                        g_BzrFn_EngineFlameAddFlame =
+                            reinterpret_cast<FnEngineFlameAddFlame>(target);
+                    }
+                }
+
+                if (!g_BzrFn_EngineFlameAddFlame)
+                    LogEngineFlameTargetFailure(L"EngineFlame::AddFlame");
+            }
+
+            if (!g_BzrFn_GetTeamNum)
+            {
+                if (FindPatternInMainText(kGetTeamNumPattern, kGetTeamNumMask, sizeof(kGetTeamNumPattern), match))
+                {
+                    g_BzrFn_GetTeamNum =
+                        reinterpret_cast<FnGetTeamNum>(
+                            reinterpret_cast<uintptr_t>(match) - 4);
+                }
+
+                if (!g_BzrFn_GetTeamNum)
+                    LogEngineFlameTargetFailure(L"GetTeamNum");
+            }
+
+            if (!g_BzrFn_EngineFlameResolveTexture)
+            {
+                if (FindPatternInMainText(
+                        kResolveTexturePattern,
+                        kResolveTextureMask,
+                        sizeof(kResolveTexturePattern),
+                        match))
+                {
+                    g_BzrFn_EngineFlameResolveTexture =
+                        reinterpret_cast<FnEngineFlameResolveTexture>(match);
+                }
+
+                if (!g_BzrFn_EngineFlameResolveTexture)
+                    LogEngineFlameTargetFailure(L"ResolveTexture");
+            }
+        }
+
+        static void ObserveEngineFlameManager(void* manager)
+        {
+            if (!manager)
+                return;
+
+            if (!g_EngineFlamePrimaryManager)
+            {
+                g_EngineFlamePrimaryManager = manager;
+                Log(L"[FLAME] Observed primary engine flame manager=0x%p\n", manager);
+                return;
+            }
+
+            if (manager != g_EngineFlamePrimaryManager && !g_EngineFlameSecondaryManager)
+            {
+                g_EngineFlameSecondaryManager = manager;
+                Log(L"[FLAME] Observed secondary engine flame manager=0x%p\n", manager);
+            }
+        }
+
+        static bool WritePointerValue(uintptr_t address, void* value)
+        {
+            if (address == 0)
+                return false;
+
+            DWORD oldProtect = 0;
+            if (!VirtualProtect(reinterpret_cast<void*>(address), sizeof(void*), PAGE_EXECUTE_READWRITE, &oldProtect))
+                return false;
+
+            *reinterpret_cast<void**>(address) = value;
+            FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void*>(address), sizeof(void*));
+
+            DWORD restoreProtect = 0;
+            VirtualProtect(reinterpret_cast<void*>(address), sizeof(void*), oldProtect, &restoreProtect);
+            return true;
+        }
+
+        static void EnsureEngineFlameVtableHooksInstalled(void* manager)
+        {
+            if (!g_IsSteamExe || g_EngineFlameVtableHooksInstalled || !manager)
+                return;
+
+            auto** vtable = *reinterpret_cast<void***>(manager);
+            if (!vtable)
+                return;
+
+            const uintptr_t controlSlot =
+                reinterpret_cast<uintptr_t>(vtable) + kEngineFlameControlVtableOffset;
+            const uintptr_t submitSlot =
+                reinterpret_cast<uintptr_t>(vtable) + kEngineFlameSubmitVtableOffset;
+            const size_t controlIndex = kEngineFlameControlVtableOffset / sizeof(void*);
+            const size_t submitIndex = kEngineFlameSubmitVtableOffset / sizeof(void*);
+
+            if (!g_BzrFn_EngineFlameControl)
+            {
+                g_BzrFn_EngineFlameControl =
+                    reinterpret_cast<FnEngineFlameControl>(vtable[controlIndex]);
+            }
+            if (!g_BzrFn_EngineFlameSubmit)
+            {
+                g_BzrFn_EngineFlameSubmit =
+                    reinterpret_cast<FnEngineFlameSubmit>(vtable[submitIndex]);
+            }
+
+            const bool controlPatched =
+                (vtable[controlIndex] == reinterpret_cast<void*>(EngineFlameControlHook)) ||
+                WritePointerValue(controlSlot, reinterpret_cast<void*>(EngineFlameControlHook));
+            const bool submitPatched =
+                (vtable[submitIndex] == reinterpret_cast<void*>(EngineFlameSubmitHook)) ||
+                WritePointerValue(submitSlot, reinterpret_cast<void*>(EngineFlameSubmitHook));
+
+            g_EngineFlameVtableHooksInstalled = controlPatched && submitPatched;
+            if (g_EngineFlameVtableHooksInstalled && !g_LoggedEngineFlameVtableHook)
+            {
+                Log(L"[FLAME] Patched Steam engine flame vtable control=0x%08X submit=0x%08X\n",
+                    static_cast<uint32_t>(controlSlot),
+                    static_cast<uint32_t>(submitSlot));
+                g_LoggedEngineFlameVtableHook = true;
+            }
+        }
+
+        static uint32_t ResolveCraftHandle(void* craftPtr)
+        {
+            if (!craftPtr)
+                return 0;
+
+            auto* bytes = reinterpret_cast<uint8_t*>(craftPtr);
+            const uint32_t low = *reinterpret_cast<uint32_t*>(bytes + kCraftHandleLoOffset);
+            if (low == 0)
+                return 0;
+
+            const uint32_t high = *reinterpret_cast<uint32_t*>(bytes + kCraftHandleHiOffset);
+            return ((high & 0x0FFFu) << 20) | (low & 0x000FFFFFu);
         }
 
         static void ResetEngineFlameQueue(void* manager)
@@ -444,7 +2037,16 @@ namespace BZROpenShim
 
         static void EnsureEngineFlameVariantsInitialized()
         {
-            if (g_EngineFlameVariantsInitialized || g_EngineFlameVariantsInitAttempted)
+            if (g_EngineFlameVariantsInitialized)
+                return;
+
+            if (g_IsSteamExe)
+                ResolveEngineFlameRuntimeTargets();
+
+            if (!GetEngineFlamePrimary() || !GetEngineFlameSecondary() || !g_BzrFn_EngineFlameResolveTexture)
+                return;
+
+            if (g_EngineFlameVariantsInitAttempted)
                 return;
 
             g_EngineFlameVariantsInitAttempted = true;
@@ -467,16 +2069,18 @@ namespace BZROpenShim
             g_EngineFlamePrimaryGreenTexture =
                 ResolveEngineFlameTextureHandle(kGreenTextureCandidates, _countof(kGreenTextureCandidates), L"green");
 
+            void* primary = GetEngineFlamePrimary();
+            void* secondary = GetEngineFlameSecondary();
             if (g_EngineFlamePrimaryRedTexture != 0)
             {
-                CloneEngineFlameManager(g_EngineFlamePrimaryRed, GetEngineFlamePrimary(), g_EngineFlamePrimaryRedTexture);
-                CloneEngineFlameManager(g_EngineFlameSecondaryRed, GetEngineFlameSecondary(), g_EngineFlamePrimaryRedTexture);
+                CloneEngineFlameManager(g_EngineFlamePrimaryRed, primary, g_EngineFlamePrimaryRedTexture);
+                CloneEngineFlameManager(g_EngineFlameSecondaryRed, secondary, g_EngineFlamePrimaryRedTexture);
             }
 
             if (g_EngineFlamePrimaryGreenTexture != 0)
             {
-                CloneEngineFlameManager(g_EngineFlamePrimaryGreen, GetEngineFlamePrimary(), g_EngineFlamePrimaryGreenTexture);
-                CloneEngineFlameManager(g_EngineFlameSecondaryGreen, GetEngineFlameSecondary(), g_EngineFlamePrimaryGreenTexture);
+                CloneEngineFlameManager(g_EngineFlamePrimaryGreen, primary, g_EngineFlamePrimaryGreenTexture);
+                CloneEngineFlameManager(g_EngineFlameSecondaryGreen, secondary, g_EngineFlamePrimaryGreenTexture);
             }
 
             g_EngineFlameVariantsInitialized = true;
@@ -493,10 +2097,13 @@ namespace BZROpenShim
             if (originalManager != GetEngineFlamePrimary() && originalManager != GetEngineFlameSecondary())
                 return originalManager;
 
-            if (!g_BzrFn_GetHandle || !g_BzrFn_GetTeamNum)
+            if (g_IsSteamExe)
+                ResolveEngineFlameRuntimeTargets();
+
+            if (!g_BzrFn_GetTeamNum)
                 return originalManager;
 
-            const uint32_t handle = g_BzrFn_GetHandle(craftPtr);
+            const uint32_t handle = ResolveCraftHandle(craftPtr);
             if (handle == 0)
                 return originalManager;
 
@@ -1048,10 +2655,26 @@ namespace BZROpenShim
     void ResolveBzrHooks(bool isSteam)
     {
         g_IsSteamExe = isSteam;
+        g_BzrFn_EngineFlameAddFlame = nullptr;
+        g_BzrFn_EngineFlameControl = nullptr;
+        g_BzrFn_EngineFlameSubmit = nullptr;
+        g_BzrFn_EngineFlameResolveTexture = nullptr;
+        g_BzrFn_GetTeamNum = nullptr;
+        g_EngineFlamePrimaryManager = nullptr;
+        g_EngineFlameSecondaryManager = nullptr;
+        g_EngineFlameVtableHooksInstalled = false;
+        g_EngineFlameVariantsInitialized = false;
+        g_EngineFlameVariantsInitAttempted = false;
+        g_EngineFlamePrimaryRedTexture = 0;
+        g_EngineFlamePrimaryGreenTexture = 0;
+        g_LoggedEngineFlameTargetFailure = false;
+        g_LoggedEngineFlameVtableHook = false;
         g_BzrFn_ProducerModeCallOriginal = nullptr;
         g_BzrFn_InitBuildItem = nullptr;
         g_BzrFn_CleanupBuildItem = nullptr;
         g_BzrBuildMenuRoot = nullptr;
+        g_BzrFn_GetLocalPlayerNetId = nullptr;
+        g_BzrFn_NetPlayerSetData = nullptr;
         g_ProducerBuildMenuConfig = {};
         g_HasAppliedProducerBuildMenu = false;
         g_LastAppliedProducerBuildMenu = 0;
@@ -1112,14 +2735,49 @@ namespace BZROpenShim
         g_BzrFn_VehicleFixOrig = reinterpret_cast<void*>(0x00481AF0);
         if (!g_IsSteamExe)
         {
+            g_BzrFn_GetLocalPlayerNetId = reinterpret_cast<FnGetLocalPlayerNetId>(0x00572D90);
+            g_BzrFn_NetPlayerSetData = reinterpret_cast<FnNetPlayerSetData>(0x00575570);
+            g_BzrFn_EngineFlameAddFlame = reinterpret_cast<FnEngineFlameAddFlame>(0x004C8800);
+            g_BzrFn_EngineFlameControl = reinterpret_cast<FnEngineFlameControl>(0x004C88A0);
+            g_BzrFn_EngineFlameSubmit = reinterpret_cast<FnEngineFlameSubmit>(0x004C88C0);
+            g_BzrFn_EngineFlameResolveTexture = reinterpret_cast<FnEngineFlameResolveTexture>(0x0068BED0);
+            g_BzrFn_GetTeamNum = reinterpret_cast<FnGetTeamNum>(0x005C8800);
+        }
+
+        if (!g_IsSteamExe)
+        {
             g_BzrFn_InitBuildItem = reinterpret_cast<FnBuildItemInit>(0x0049F5C0);
             g_BzrFn_CleanupBuildItem = reinterpret_cast<FnBuildItemCleanup>(0x0049F880);
             g_BzrBuildMenuRoot = reinterpret_cast<BuildItem*>(kBuildMenuRootAddr);
+        }
+        else
+        {
+            ResolveEngineFlameRuntimeTargets();
         }
 
         g_EnableChunkRenderFallback =
             EnvFlagEnabled("BZR_CHUNK_FORCE_FIRST_GEO") ||
             EnvFlagEnabled("OPENSHIM_CHUNK_FORCE_FIRST_GEO");
+        g_TraceChunkRender = true;
+        g_TraceChunkRenderVerbose = true;
+        long chunkLogBudget = 200;
+        if (TryGetEnvLong("BZR_CHUNK_LOG_BUDGET", chunkLogBudget) ||
+            TryGetEnvLong("OPENSHIM_CHUNK_LOG_BUDGET", chunkLogBudget))
+        {
+            if (chunkLogBudget < 0)
+                chunkLogBudget = 0;
+        }
+        g_ChunkRenderLogBudget = chunkLogBudget;
+        long chunkTraceEntryLimit = 32;
+        if (TryGetEnvLong("BZR_CHUNK_TRACE_ENTRY_LIMIT", chunkTraceEntryLimit) ||
+            TryGetEnvLong("OPENSHIM_CHUNK_TRACE_ENTRY_LIMIT", chunkTraceEntryLimit))
+        {
+            g_ChunkTraceEntryLimit = ClampChunkTraceEntryLimit(chunkTraceEntryLimit);
+        }
+        else
+        {
+            g_ChunkTraceEntryLimit = ClampChunkTraceEntryLimit(chunkTraceEntryLimit);
+        }
         float turretAimPitchMultiplier = g_TurretAimPitchMultiplier;
         if (TryGetEnvFloat("OPENSHIM_TURRET_AIM_PITCH_MULTIPLIER", turretAimPitchMultiplier) ||
             TryGetEnvFloat("OPENSHIM_TURRET_PITCH_MULTIPLIER", turretAimPitchMultiplier))
@@ -1132,9 +2790,15 @@ namespace BZROpenShim
         }
         Log(L"[CHUNK] Force-first-geo fallback: %hs\n",
             g_EnableChunkRenderFallback ? "enabled" : "disabled");
+        Log(L"[CHUNK] Trace logging: %hs%s budget=%ld entryLimit=%u\n",
+            g_TraceChunkRender ? "enabled" : "disabled",
+            g_TraceChunkRenderVerbose ? " verbose" : "",
+            static_cast<long>(g_ChunkRenderLogBudget),
+            g_ChunkTraceEntryLimit);
         Log(L"[TURRET] Aim pitch multiplier: %.3f%s\n",
             static_cast<double>(g_TurretAimPitchMultiplier),
             g_TurretAimPitchMultiplier >= 0.999f ? " (full range)" : "");
+        InitializeUnderAttackAlertConfig();
         Log(L"[MAPTRACE] Map refresh trace: %hs\n",
             (EnvFlagEnabled("OPENSHIM_TRACE_MAP_REFRESH") ||
              EnvFlagEnabled("OPENSHIM_TRACE_STEAM_MAP_REFRESH")) ? "enabled" : "disabled");
@@ -1142,6 +2806,13 @@ namespace BZROpenShim
             (!g_IsSteamExe && g_BzrFn_InitBuildItem && g_BzrFn_CleanupBuildItem && g_BzrBuildMenuRoot)
                 ? "GOG ready"
                 : "disabled");
+        EnsureBansConfigLoaded();
+        {
+            const std::string bansConfigPath = GetBansConfigPath().string();
+            Log(L"[BAN] Experimental bans path=%hs entries=%u\n",
+                bansConfigPath.c_str(),
+                static_cast<unsigned>(g_BanRecords.size()));
+        }
     }
 
     void InitBzrHookStrings()
@@ -1150,6 +2821,37 @@ namespace BZROpenShim
         BzrStringInitEmpty(&g_BzrnetLabel2);
         BzrStringInitEmpty(&g_BzrnetLabel3);
         BzrStringInitEmpty(&g_BzrnetLabel4);
+    }
+
+    void PrimeUnderAttackAlertConfig()
+    {
+        InitializeUnderAttackAlertConfig();
+    }
+
+    bool SetUnderAttackAlertModeFromBridge(int mode)
+    {
+        return SetUnderAttackAlertModeInternal(ClampUnderAttackAlertMode(mode), true);
+    }
+
+    void __cdecl HandleUnderAttackAlert(float currentTime)
+    {
+        InitializeUnderAttackAlertConfig();
+        if (!g_UnderAttackAlertEnabled)
+            return;
+
+        if (currentTime <= g_UnderAttackAlertNextAllowedTime)
+            return;
+
+        if (g_BzrFn_PlayGlobalSound && kUnderAttackAlertSoundAddr != 0)
+        {
+            const char* sound = reinterpret_cast<const char*>(kUnderAttackAlertSoundAddr);
+            g_BzrFn_PlayGlobalSound(sound, 0, 0, 0);
+        }
+
+        const float minSpacing = 1.0f;
+        const float nextDelay =
+            (std::max)(g_UnderAttackAlertCooldownSeconds, minSpacing);
+        g_UnderAttackAlertNextAllowedTime = currentTime + nextDelay;
     }
 
     namespace
@@ -1484,24 +3186,117 @@ namespace BZROpenShim
         BzrStringFree(&subtitle);
     }
 
-    static void AppendBanList(const char* id, const BzrString* name)
+    namespace
     {
-        if (!id || !*id)
-            return;
-        FILE* f = nullptr;
-        fopen_s(&f, "banlist.txt", "a");
-        if (!f)
-            return;
+        struct BanLookupIdentity
+        {
+            int type = 0;
+            uint64_t uid = 0;
+            const BzrString* name = nullptr;
+            char stableId[32] = {};
+        };
 
-        if (name && name->size)
+        static bool TryBuildBanLookupIdentity(int type, uint64_t uid, const BzrString* name, BanLookupIdentity& out)
         {
-            std::fprintf(f, "%s %.*s\n", id, static_cast<int>(name->size), BzrStringData(name));
+            if (type != 1 && type != 2)
+                return false;
+
+            const char prefix = (type == 1) ? 'S' : 'G';
+            std::snprintf(
+                out.stableId,
+                sizeof(out.stableId),
+                "%c%llu",
+                prefix,
+                static_cast<unsigned long long>(uid));
+            out.type = type;
+            out.uid = uid;
+            out.name = name;
+            return true;
         }
-        else
+
+        static bool TryGetBanLookupIdentityForSessionId(uint16_t sessionId, BanLookupIdentity& out)
         {
-            std::fprintf(f, "%s\n", id);
+            if (!g_BzrFn_BanLookup)
+                return false;
+
+            uint8_t* entry = reinterpret_cast<uint8_t*>(g_BzrFn_BanLookup(sessionId));
+            if (!entry)
+                return false;
+
+            const int type = *reinterpret_cast<int*>(entry + 0x30);
+            const uint64_t uid = *reinterpret_cast<uint64_t*>(entry + 0x38);
+            const auto* name = reinterpret_cast<const BzrString*>(entry + 0x74);
+            return TryBuildBanLookupIdentity(type, uid, name, out);
         }
-        std::fclose(f);
+
+        static void KickBannedPlayers(const char* source, uint32_t lobby, uint32_t member, int changes)
+        {
+            EnsureBansConfigLoaded();
+
+            if (!g_BzrFn_IsHost || g_BzrFn_IsHost() == 0)
+            {
+                Log(L"[BAN] %hs sweep skipped lobby=0x%08X member=0x%08X changes=0x%08X (not host)\n",
+                    source ? source : "ban",
+                    lobby,
+                    member,
+                    static_cast<uint32_t>(changes));
+                return;
+            }
+
+            if (g_BanRecords.empty())
+            {
+                Log(L"[BAN] %hs sweep skipped lobby=0x%08X member=0x%08X changes=0x%08X (no bans loaded)\n",
+                    source ? source : "ban",
+                    lobby,
+                    member,
+                    static_cast<uint32_t>(changes));
+                return;
+            }
+
+            if (!g_BzrFn_CommandHandler || !g_BzrFn_BanLookup)
+            {
+                Log(L"[BAN] %hs sweep skipped lobby=0x%08X member=0x%08X changes=0x%08X (helpers unavailable)\n",
+                    source ? source : "ban",
+                    lobby,
+                    member,
+                    static_cast<uint32_t>(changes));
+                return;
+            }
+
+            int kicks = 0;
+            for (uint16_t sessionId = 0; sessionId < kBanScanMaxSessionId; ++sessionId)
+            {
+                BanLookupIdentity identity = {};
+                if (!TryGetBanLookupIdentityForSessionId(sessionId, identity))
+                    continue;
+
+                if (!IsBanIdConfigured(identity.stableId))
+                    continue;
+
+                const char* nameText =
+                    (identity.name && identity.name->size) ? BzrStringData(identity.name) : "";
+                Log(L"[BAN] %hs matched session=%u stable=%hs type=%d uid=%llu name=%hs lobby=0x%08X member=0x%08X changes=0x%08X\n",
+                    source ? source : "ban",
+                    sessionId,
+                    identity.stableId,
+                    identity.type,
+                    static_cast<unsigned long long>(identity.uid),
+                    nameText,
+                    lobby,
+                    member,
+                    static_cast<uint32_t>(changes));
+                g_BzrFn_CommandHandler(sessionId, "/kick");
+                ++kicks;
+            }
+
+            Log(L"[BAN] %hs sweep complete lobby=0x%08X member=0x%08X changes=0x%08X kicks=%d entries=%u\n",
+                source ? source : "ban",
+                lobby,
+                member,
+                static_cast<uint32_t>(changes),
+                kicks,
+                static_cast<unsigned>(g_BanRecords.size()));
+        }
     }
 
     void* __cdecl ProducerBuildMenuCallHook(void* producerPtr, int slot, int flags)
@@ -1529,43 +3324,126 @@ namespace BZROpenShim
             return 0;
 
         uint32_t resolved = g_BzrFn_ChunkResolve(objectPtr, variant);
-        auto* objectBytes = reinterpret_cast<uint8_t*>(objectPtr);
-        auto* activeHandle = reinterpret_cast<void**>(objectBytes + 0x64);
-
-        if (resolved != 0 && *activeHandle != nullptr)
-            return resolved;
-
-        if (!g_EnableChunkRenderFallback)
-            return resolved;
-
-        auto* lookup = reinterpret_cast<BzrGeoLookup*>(objectBytes + 0x68);
-        if (!lookup || lookup->count == 0 || !lookup->entries)
-            return resolved;
-
-        for (uint32_t index = 0; index < lookup->count; ++index)
+        __try
         {
-            BzrGeoEntry& entry = lookup->entries[index];
-            if (!entry.handle)
-                continue;
+            constexpr uint32_t kMaxReasonableGeoEntries = 256;
 
+            auto* objectBytes = reinterpret_cast<uint8_t*>(objectPtr);
+            auto* activeHandle = reinterpret_cast<void**>(objectBytes + 0x64);
+            auto* lookup = reinterpret_cast<BzrGeoLookup*>(objectBytes + 0x68);
+            void* activeBefore = *activeHandle;
+
+            const bool hasLookup =
+                lookup && lookup->entries && lookup->count > 0 && lookup->count <= kMaxReasonableGeoEntries;
+            const bool shouldTraceStock =
+                g_TraceChunkRenderVerbose ||
+                (g_TraceChunkRender && (resolved == 0 || activeBefore == nullptr || !hasLookup));
+
+            if (shouldTraceStock && AcquireChunkLogSlot())
+            {
+                LogChunkResolveSnapshot(
+                    "stock",
+                    hasLookup ? "post-stock" : "lookup-missing-or-invalid",
+                    objectBytes,
+                    variant,
+                    resolved,
+                    activeBefore,
+                    *activeHandle,
+                    lookup,
+                    -1,
+                    0);
+            }
+
+            if (resolved != 0 && *activeHandle != nullptr)
+                return resolved;
+
+            if (!g_EnableChunkRenderFallback)
+                return resolved;
+
+            if (!hasLookup)
+                return resolved;
+
+            int selectedIndex = -1;
+            const char* selectionReason = "no-handle-entry";
+
+            if (resolved != 0)
+            {
+                selectedIndex = FindChunkGeoEntryByKey(lookup, resolved);
+                if (selectedIndex >= 0)
+                    selectionReason = "matched-stock-key";
+            }
+
+            if (selectedIndex < 0 && lookup->cachedKey != 0)
+            {
+                selectedIndex = FindChunkGeoEntryByKey(lookup, lookup->cachedKey);
+                if (selectedIndex >= 0)
+                    selectionReason = "matched-cached-key";
+            }
+
+            if (selectedIndex < 0 && variant != 0)
+            {
+                selectedIndex = FindChunkGeoEntryByKey(lookup, variant);
+                if (selectedIndex >= 0)
+                    selectionReason = "matched-variant";
+            }
+
+            if (selectedIndex < 0)
+            {
+                selectedIndex = FindFirstChunkGeoEntryWithHandle(lookup);
+                if (selectedIndex >= 0)
+                    selectionReason = "first-handle";
+            }
+
+            if (selectedIndex < 0)
+            {
+                if (g_TraceChunkRender && AcquireChunkLogSlot())
+                {
+                    LogChunkResolveSnapshot(
+                        "forced",
+                        selectionReason,
+                        objectBytes,
+                        variant,
+                        resolved,
+                        activeBefore,
+                        *activeHandle,
+                        lookup,
+                        -1,
+                        0);
+                }
+                return resolved;
+            }
+
+            BzrGeoEntry& entry = lookup->entries[selectedIndex];
             *activeHandle = entry.handle;
             lookup->cachedKey = entry.packedKey;
 
-            if (InterlockedDecrement(&g_ChunkRenderLogBudget) >= 0)
+            if (AcquireChunkLogSlot())
             {
-                const uint32_t renderClass =
-                    *reinterpret_cast<uint32_t*>(objectBytes + 0x14) & 0xF000;
-                const uint32_t objectType = *reinterpret_cast<uint32_t*>(objectBytes + 0x84);
-                Log(L"[CHUNK] Forced geometry entry idx=%u key=0x%08X class=0x%04X type=0x%X count=%u obj=0x%08X\n",
-                    index,
-                    entry.packedKey,
-                    renderClass,
-                    objectType,
-                    lookup->count,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectPtr)));
+                LogChunkResolveSnapshot(
+                    "forced",
+                    selectionReason,
+                    objectBytes,
+                    variant,
+                    resolved,
+                    activeBefore,
+                    *activeHandle,
+                    lookup,
+                    selectedIndex,
+                    entry.packedKey);
             }
 
-            return 1;
+            return entry.packedKey != 0 ? entry.packedKey : (resolved != 0 ? resolved : 1u);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            if (AcquireChunkLogSlot())
+            {
+                Log(L"[CHUNK] Resolve hook exception obj=0x%08X variant=0x%08X resolved=0x%08X code=0x%08X\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectPtr)),
+                    variant,
+                    resolved,
+                    static_cast<uint32_t>(GetExceptionCode()));
+            }
         }
 
         return resolved;
@@ -2187,10 +4065,15 @@ namespace BZROpenShim
         uint32_t scaleBits,
         void* craftPtr)
     {
+        if (g_IsSteamExe)
+            ResolveEngineFlameRuntimeTargets();
+
         if (!g_BzrFn_EngineFlameAddFlame || !managerPtr || !transform)
             return;
 
         ApplyWeaponMaskCarrierBiasForCraft(craftPtr);
+        ObserveEngineFlameManager(managerPtr);
+        EnsureEngineFlameVtableHooksInstalled(managerPtr);
 
         const float scale = *reinterpret_cast<const float*>(&scaleBits);
         void* selectedManager = SelectEngineFlameManager(managerPtr, craftPtr);
@@ -2294,39 +4177,154 @@ namespace BZROpenShim
                 return true;
             }
 
-            uint8_t* entry = reinterpret_cast<uint8_t*>(g_BzrFn_BanLookup(id));
-            if (!entry)
+            BanLookupIdentity identity = {};
+            if (!TryGetBanLookupIdentityForSessionId(id, identity))
             {
-                Log(L"[BAN] /ban failed: ban lookup returned null (id=%u)\n", id);
+                Log(L"[BAN] /ban failed: lookup returned no stable identity (id=%u)\n", id);
                 return true;
             }
 
-            int type = *reinterpret_cast<int*>(entry + 0x30);
-            if (type != 1 && type != 2)
-            {
-                Log(L"[BAN] /ban failed: ban entry type invalid (id=%u)\n", id);
-                return true;
-            }
-
-            const char prefix = (type == 1) ? 'S' : 'G';
-            uint64_t uid = *reinterpret_cast<uint64_t*>(entry + 0x38);
-            char idbuf[32] = {};
-            std::snprintf(idbuf, sizeof(idbuf), "%c%llu", prefix, static_cast<unsigned long long>(uid));
-
-            const auto* name = reinterpret_cast<const BzrString*>(entry + 0x74);
-            AppendBanList(idbuf, name);
-            Log(L"[BAN] /ban added %c%llu (%hs)\n", prefix, static_cast<unsigned long long>(uid),
-                (name && name->size) ? BzrStringData(name) : "");
+            AddBanConfigEntry(identity.stableId, identity.name, "/ban");
+            Log(L"[BAN] /ban queued immediate enforcement session=%u stable=%hs name=%hs\n",
+                id,
+                identity.stableId,
+                (identity.name && identity.name->size) ? BzrStringData(identity.name) : "");
+            if (g_BzrFn_CommandHandler)
+                g_BzrFn_CommandHandler(id, "/kick");
+            KickBannedPlayers("/ban", 0, id, 0);
             return true;
         }
 
         return false;
     }
 
+    void __cdecl HandleJoinerEvent(uint32_t lobby, uint32_t member, int changes)
+    {
+        EnsureBansConfigLoaded();
+        Log(L"[BAN] Join event observed lobby=0x%08X member=0x%08X changes=0x%08X bans=%u host=%hs\n",
+            lobby,
+            member,
+            static_cast<uint32_t>(changes),
+            static_cast<unsigned>(g_BanRecords.size()),
+            (g_BzrFn_IsHost && g_BzrFn_IsHost() != 0) ? "yes" : "no");
+        KickBannedPlayers("join_event", lobby, member, changes);
+    }
+
+    namespace
+    {
+        static void UpdateFlagSelectionUi()
+        {
+            if (g_FlagApplyPending)
+                TryApplyCachedFlagPayload("ui_update");
+
+            const std::string summary = GetSelectedFlagSummary();
+            if (g_BzrFn_SetTooltip)
+            {
+                if (g_FlagLabelHost)
+                    g_BzrFn_SetTooltip(g_FlagLabelHost, summary.c_str());
+                if (g_FlagLabelClient)
+                    g_BzrFn_SetTooltip(g_FlagLabelClient, summary.c_str());
+            }
+        }
+
+        static void CreateFlagButtonCommon(
+            void* parent,
+            float x,
+            float y,
+            void** outButton,
+            void** outLabel,
+            void* onClick,
+            void* onHover)
+        {
+            if (!parent || !outButton || !outLabel || !g_BzrFn_ButtonCtor || !g_BzrFn_LabelCtor || !g_BzrFn_AddChild)
+                return;
+
+            EnsureFlagCatalogLoaded();
+            PrimeSelectedFlagForTesting("ui_create");
+
+            void* buttonMem = ::operator new(0x1EC, std::nothrow);
+            if (!buttonMem)
+                return;
+            std::memset(buttonMem, 0, 0x1EC);
+
+            *outButton = g_BzrFn_ButtonCtor(
+                buttonMem,
+                "Flag Select",
+                x,
+                y,
+                kFlagButtonSize,
+                kFlagButtonSize,
+                0x20,
+                parent,
+                0,
+                0);
+            if (*outButton)
+            {
+                if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(*outButton, "MultiplayerModeButton_off.png");
+                if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(*outButton, "MultiplayerModeButton_over.png");
+                if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(*outButton, "MultiplayerModeButton_on.png");
+                if (g_BzrFn_SetButtonLabel) g_BzrFn_SetButtonLabel(*outButton, "F");
+                if (g_BzrFn_SetOnClick) g_BzrFn_SetOnClick(*outButton, onClick);
+                if (g_BzrFn_SetOnHover) g_BzrFn_SetOnHover(*outButton, onHover);
+                g_BzrFn_AddChild(parent, *outButton, 0);
+            }
+
+            void* labelMem = ::operator new(0x930, std::nothrow);
+            if (!labelMem)
+                return;
+            std::memset(labelMem, 0, 0x930);
+
+            *outLabel = g_BzrFn_LabelCtor(
+                labelMem,
+                "Lobby",
+                270.0f,
+                960.0f,
+                338.0f,
+                43.0f,
+                0x20,
+                parent,
+                0,
+                0);
+            if (*outLabel)
+            {
+                if (g_BzrFn_LabelState)
+                    g_BzrFn_LabelState(*outLabel, nullptr);
+                g_BzrFn_AddChild(parent, *outLabel, 0);
+            }
+
+            UpdateFlagSelectionUi();
+        }
+
+        static void CycleSelectedFlag(int delta, const char* source)
+        {
+            EnsureFlagCatalogLoaded();
+            if (g_FlagCatalog.empty())
+            {
+                UpdateFlagSelectionUi();
+                return;
+            }
+
+            int nextIndex = g_SelectedFlagIndex;
+            if (nextIndex < 0)
+                nextIndex = 0;
+            else
+                nextIndex += delta;
+
+            SelectFlagEntryByIndex(nextIndex, source);
+            PrimeSelectedFlagForTesting(source);
+            UpdateFlagSelectionUi();
+        }
+    }
+
     void __cdecl BanButtonOnClickHost()
     {
         if (!g_BzrPtr_9456D0 || !g_BzrFn_GetSelected)
             return;
+        if (g_BzrFn_IsHost && g_BzrFn_IsHost() == 0)
+        {
+            Log(L"[BAN] Host ban button ignored while not hosting\n");
+            return;
+        }
 
         void* root = *g_BzrPtr_9456D0;
         if (!root)
@@ -2349,7 +4347,11 @@ namespace BZROpenShim
         BzrString name;
         BzrStringInitEmpty(&name);
         BzrStringCopy(&name, reinterpret_cast<BzrString*>(reinterpret_cast<uint8_t*>(selected) + 0x2C));
-        AppendBanList(idbuf, &name);
+        Log(L"[BAN] Host button selected stable=%hs name=%hs\n",
+            idbuf,
+            name.size ? BzrStringData(&name) : "");
+        AddBanConfigEntry(idbuf, &name, "host_button");
+        KickBannedPlayers("host_button", 0, 0, 0);
         BzrStringFree(&name);
     }
 
@@ -2357,6 +4359,11 @@ namespace BZROpenShim
     {
         if (!g_BzrPtr_94557C || !g_BzrFn_GetSelected || !g_BzrFn_CommandHandler)
             return;
+        if (g_BzrFn_IsHost && g_BzrFn_IsHost() == 0)
+        {
+            Log(L"[BAN] Client-side ban button blocked because local user is not host\n");
+            return;
+        }
 
         void* root = *g_BzrPtr_94557C;
         if (!root)
@@ -2382,8 +4389,8 @@ namespace BZROpenShim
         }
 
         uint16_t id = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(selected) + 0x28);
+        Log(L"[BAN] Client-style lobby button issuing /ban for session=%u\n", id);
         g_BzrFn_CommandHandler(id, "/ban");
-        g_BzrFn_CommandHandler(id, "/kick");
     }
 
     void __cdecl BanButtonOnHoverHost(void* param)
@@ -2396,6 +4403,30 @@ namespace BZROpenShim
     {
         if (g_BzrFn_LabelState && g_BanLabelClient)
             g_BzrFn_LabelState(g_BanLabelClient, param);
+    }
+
+    void __cdecl FlagButtonOnClickHost()
+    {
+        CycleSelectedFlag(1, "host_button");
+    }
+
+    void __cdecl FlagButtonOnClickClient()
+    {
+        CycleSelectedFlag(1, "client_button");
+    }
+
+    void __cdecl FlagButtonOnHoverHost(void* param)
+    {
+        if (g_BzrFn_LabelState && g_FlagLabelHost)
+            g_BzrFn_LabelState(g_FlagLabelHost, param);
+        UpdateFlagSelectionUi();
+    }
+
+    void __cdecl FlagButtonOnHoverClient(void* param)
+    {
+        if (g_BzrFn_LabelState && g_FlagLabelClient)
+            g_BzrFn_LabelState(g_FlagLabelClient, param);
+        UpdateFlagSelectionUi();
     }
 
     void __cdecl AutoSaveButtonOnClickLoad()
@@ -2412,6 +4443,17 @@ namespace BZROpenShim
 
         __try
         {
+            if (IsSingleplayerPauseMenuOpen() && g_BzrFn_AutoLoadShellGame)
+            {
+                const int autoLoadResult = g_BzrFn_AutoLoadShellGame();
+                Log(L"[AUTOSAVE] Pause-menu auto-load helper result=%d\n", autoLoadResult);
+                if (autoLoadResult)
+                    return;
+
+                Log(L"[AUTOSAVE] Pause-menu auto-load helper failed, falling back to queued load path=%hs\n",
+                    autoSavePath);
+            }
+
             PrepareLoadScreenForSelection(g_AutoSaveLoadScreen);
             if (!QueueAutoSaveLoadPath(autoSavePath))
             {
@@ -2562,6 +4604,18 @@ namespace BZROpenShim
             if (g_BzrFn_LabelState) g_BzrFn_LabelState(g_BanLabelHost, nullptr);
             g_BzrFn_AddChild(parent, g_BanLabelHost, 0);
         }
+
+        if (!g_FlagButtonHost || !g_FlagLabelHost)
+        {
+            CreateFlagButtonCommon(
+                parent,
+                g_BanX - 104.0f,
+                g_BanY + 96.0f,
+                &g_FlagButtonHost,
+                &g_FlagLabelHost,
+                reinterpret_cast<void*>(FlagButtonOnClickHost),
+                reinterpret_cast<void*>(FlagButtonOnHoverHost));
+        }
     }
 
     void BanButtonCreateClient()
@@ -2619,6 +4673,18 @@ namespace BZROpenShim
             if (g_BzrFn_SetTooltip) g_BzrFn_SetTooltip(g_BanLabelClient, "Ban highlighted player");
             if (g_BzrFn_LabelState) g_BzrFn_LabelState(g_BanLabelClient, nullptr);
             g_BzrFn_AddChild(parent, g_BanLabelClient, 0);
+        }
+
+        if (!g_FlagButtonClient || !g_FlagLabelClient)
+        {
+            CreateFlagButtonCommon(
+                parent,
+                -85.0f,
+                942.0f,
+                &g_FlagButtonClient,
+                &g_FlagLabelClient,
+                reinterpret_cast<void*>(FlagButtonOnClickClient),
+                reinterpret_cast<void*>(FlagButtonOnHoverClient));
         }
     }
 }

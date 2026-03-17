@@ -21,14 +21,22 @@ namespace BZROpenShim
     void __cdecl BanButtonOnClickClient();
     void __cdecl BanButtonOnHoverHost(void* param);
     void __cdecl BanButtonOnHoverClient(void* param);
+    void __cdecl FlagButtonOnClickHost();
+    void __cdecl FlagButtonOnClickClient();
+    void __cdecl FlagButtonOnHoverHost(void* param);
+    void __cdecl FlagButtonOnHoverClient(void* param);
     void __cdecl AutoSaveButtonOnClickLoad();
     void AutoSaveLoadButtonCreateFromFrame(void* frameBase);
     void __cdecl EngineFlameHoverCraftEmitHook(void* managerPtr, const void* transform, uint32_t scaleBits, void* craftPtr);
     void __fastcall EngineFlameControlHook(void* thisPtr, void* edx);
     void __fastcall EngineFlameSubmitHook(void* thisPtr, void* edx, void* camera);
+    void __cdecl HandleUnderAttackAlert(float currentTime);
+    void PrimeUnderAttackAlertConfig();
+    bool SetUnderAttackAlertModeFromBridge(int mode);
 
     // Custom /help + /ban command intercept.
     bool __cdecl HandleCommandHelpBan(uint16_t id, const char* cmd);
+    void __cdecl HandleJoinerEvent(uint32_t lobby, uint32_t member, int changes);
 
     // Map filter helpers (rel32 patch target).
     uint32_t __fastcall MapFilters6Rel32(void* thisPtr, void* edx);

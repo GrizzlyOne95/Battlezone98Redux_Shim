@@ -962,6 +962,38 @@ void __declspec(naked) __cdecl Trampoline_CommandHelp()
 }
 
 // -----------------------------------------------------------------------
+// Joiner Event Hook
+// Site: 0x0073F430
+// Original: CALL 0x00742560
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_JoinerEventHook()
+{
+    static const char* name = "Trampoline_JoinerEventHook";
+    __asm
+    {
+        pushfd
+        pushad
+        push name
+        call LogHit
+        add  esp, 4
+        popad
+        popfd
+
+        call dword ptr [g_BZRFnPtr_JoinerEventOriginal]
+
+        mov  eax, [ebp + 0x10]
+        push eax
+        mov  eax, [ebp + 0x0C]
+        push eax
+        mov  eax, [ebp + 0x08]
+        push eax
+        call HandleJoinerEvent
+        add  esp, 12
+        jmp  [g_RetAddr_JoinerEventHook]
+    }
+}
+
+// -----------------------------------------------------------------------
 // Ban Button Hook 1/2
 // Site: 0x007D0A2F
 // -----------------------------------------------------------------------
@@ -1073,6 +1105,45 @@ void __declspec(naked) __cdecl Trampoline_TurretTankAimPitchMultiplier()
     {
         movss xmm0, dword ptr [g_TurretAimPitchMultiplier]
         jmp   [g_RetAddr_TurretTankAimPitchMultiplier]
+    }
+}
+
+// -----------------------------------------------------------------------
+// Team under-attack alert hooks
+// Sites:
+//   0x00494D35
+//   0x0050E6DD
+// Original block:
+//   compare against 0x009173D0, play "cgrowl.wav", then set next alert time.
+// We replace the whole block so the shim can honor campaign persistent config.
+// -----------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_UnderAttackAlertHook1()
+{
+    __asm
+    {
+        pushfd
+        pushad
+        push dword ptr [ebp - 1B8h]
+        call HandleUnderAttackAlert
+        add  esp, 4
+        popad
+        popfd
+        jmp  [g_RetAddr_UnderAttackAlertHook1]
+    }
+}
+
+void __declspec(naked) __cdecl Trampoline_UnderAttackAlertHook2()
+{
+    __asm
+    {
+        pushfd
+        pushad
+        push dword ptr [ebp - 1D0h]
+        call HandleUnderAttackAlert
+        add  esp, 4
+        popad
+        popfd
+        jmp  [g_RetAddr_UnderAttackAlertHook2]
     }
 }
 

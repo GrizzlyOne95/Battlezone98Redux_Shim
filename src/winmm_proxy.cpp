@@ -5,10 +5,16 @@
 // SPDX-License-Identifier: MIT
 
 #include "winmm_proxy.h"
+#include "bzr_hooks.h"
 #include "shim_log.h"
 #include <cstdio>
 
 HMODULE g_hRealWinmm = nullptr;
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetUnderAttackAlertMode(int mode)
+{
+    return BZROpenShim::SetUnderAttackAlertModeFromBridge(mode) ? TRUE : FALSE;
+}
 
 // Legacy thunk exports that need naked tail-jump forwarders.
 #define LEGACY_NAKED_EXPORTS(X) \
