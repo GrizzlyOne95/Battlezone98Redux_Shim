@@ -63,14 +63,22 @@ namespace BZROpenShim
         static int s_cached = -1;
         if (s_cached < 0)
         {
+            // Default-on for current Steam map refresh debugging; callers can
+            // still disable with OPENSHIM_TRACE_MAP_REFRESH=0.
+            s_cached = 1;
             char value[8] = {};
             DWORD len = GetEnvironmentVariableA("OPENSHIM_TRACE_MAP_REFRESH", value, static_cast<DWORD>(sizeof(value)));
-            if (!(len > 0 && len < sizeof(value) && value[0] != '0'))
+            if (len > 0 && len < sizeof(value))
+            {
+                s_cached = (value[0] != '0') ? 1 : 0;
+            }
+            else
             {
                 ZeroMemory(value, sizeof(value));
                 len = GetEnvironmentVariableA("OPENSHIM_TRACE_STEAM_MAP_REFRESH", value, static_cast<DWORD>(sizeof(value)));
+                if (len > 0 && len < sizeof(value))
+                    s_cached = (value[0] != '0') ? 1 : 0;
             }
-            s_cached = (len > 0 && len < sizeof(value) && value[0] != '0') ? 1 : 0;
         }
         return s_cached != 0;
     }
@@ -195,6 +203,17 @@ namespace BZROpenShim
         if (!TryReadPtr(base + 0x1C8, listRootRaw) || !listRootRaw) return;
         void** listRoot = reinterpret_cast<void**>(listRootRaw);
 
+        void* beginRaw = nullptr;
+        void* endRaw = nullptr;
+        if (!TryReadPtr(listRoot, beginRaw) || !beginRaw) return;
+        if (!TryReadPtr(listRoot + 1, endRaw) || !endRaw) return;
+
+        uint8_t* begin = reinterpret_cast<uint8_t*>(beginRaw);
+        uint8_t* end = reinterpret_cast<uint8_t*>(endRaw);
+        if (end < begin) return;
+        const int32_t entryCount = static_cast<int32_t>((end - begin) / 0x18);
+        if (entryCount <= 0) return;
+
         // Saved index from [listRoot[0x0B] + 0x150]
         int32_t savedIndex = -1;
         __try
@@ -216,12 +235,19 @@ namespace BZROpenShim
         if (!TryReadI32(reinterpret_cast<uint8_t*>(ctx17c) + 0x14C, selIndex))
             return;
 
-        // Entry base from listRoot[0]
-        void* entryBaseRaw = nullptr;
-        if (!TryReadPtr(listRoot, entryBaseRaw) || !entryBaseRaw) return;
-        if (selIndex < 0 || selIndex > 10000) return;
+        // On Steam, ctx17c+0x14C often remains at the first entry while the
+        // actual selected/visible map index advances via listState+0x150.
+        // Prefer the latter when it points at a valid entry so the saved name
+        // matches the same row we later restore.
+        int32_t entryIndex = -1;
+        if (savedIndex >= 0 && savedIndex < entryCount)
+            entryIndex = savedIndex;
+        else if (selIndex >= 0 && selIndex < entryCount)
+            entryIndex = selIndex;
+        else
+            return;
 
-        uint8_t* entry = reinterpret_cast<uint8_t*>(entryBaseRaw) + (selIndex * 0x18);
+        uint8_t* entry = begin + (entryIndex * 0x18);
         uint32_t entryLen = 0;
         const char* entryStr = ResolveEntryString(entry, entryLen);
         if (!entryStr || entryLen == 0) return;
@@ -240,11 +266,12 @@ namespace BZROpenShim
         if (s_logBudget > 0)
         {
             --s_logBudget;
-            Log(L"[HOP1] saved index=%d name=%hs\n", g_SavedMapIndex, g_SavedMapName);
+            Log(L"[HOP1] saved index=%d sel=%d entry=%d name=%hs\n",
+                g_SavedMapIndex, selIndex, entryIndex, g_SavedMapName);
         }
         if (IsMapRefreshTraceEnabled())
         {
-            TraceMapRefreshPhase(L"SelectionSaved", ctx, ctx17c, g_SavedMapIndex, selIndex);
+            TraceMapRefreshPhase(L"SelectionSaved", ctx, ctx17c, g_SavedMapIndex, entryIndex);
             TraceMapRefreshContext(L"SaveMapListSelection_exit", ctx);
         }
     }
@@ -484,53 +511,52 @@ namespace BZROpenShim
             int rows = ((-scroll_delta) - 1) / 120 + 1;
             if (rows > kMaxRows) rows = kMaxRows;
             Log(L"[SCROLL] Up: delta=%d, rows=%d\n", scroll_delta, rows);
-            if (g_BZRFn_ScrollUp)
+            if (!g_BZRFn_ScrollUp)
+                return 0;
+
+            auto fnUp = g_BZRFn_ScrollUp;
+            bool handled = false;
+            for (int i = 0; i < rows; ++i)
             {
-                auto fnUp = g_BZRFn_ScrollUp;
-                for (int i = 0; i < rows; ++i)
+                __try
                 {
-                    __try
-                    {
-                        __asm
-                        {
-                            mov ecx, this_ptr
-                            call fnUp
-                        }
-                    }
-                    __except (EXCEPTION_EXECUTE_HANDLER)
-                    {
-                        Log(L"[WARN] ScrollUpdateHelper ScrollUp fault (row %d)\n", i);
-                        break;
-                    }
+                    // Steam's UI scroll helpers behave like plain callbacks here;
+                    // forcing ECX causes an immediate fault in the manual-refresh path.
+                    fnUp();
+                    handled = true;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    Log(L"[WARN] ScrollUpdateHelper ScrollUp fault (row %d)\n", i);
+                    return handled ? 1 : 0;
                 }
             }
-            return 1;
+            return handled ? 1 : 0;
         }
         else if (scroll_delta > 0)
         {
             int rows = (scroll_delta - 1) / 120 + 1;
             if (rows > kMaxRows) rows = kMaxRows;
             Log(L"[SCROLL] Down: delta=%d, rows=%d\n", scroll_delta, rows);
-            if (g_BZRFn_ScrollDown)
+            if (!g_BZRFn_ScrollDown)
+                return 0;
+
+            auto fnDown = g_BZRFn_ScrollDown;
+            bool handled = false;
+            for (int i = 0; i < rows; ++i)
             {
-                auto fnDown = g_BZRFn_ScrollDown;
-                for (int i = 0; i < rows; ++i)
+                __try
                 {
-                    __try
-                    {
-                        __asm
-                        {
-                            mov ecx, this_ptr
-                            call fnDown
-                        }
-                    }
-                    __except (EXCEPTION_EXECUTE_HANDLER)
-                    {
-                        Log(L"[WARN] ScrollUpdateHelper ScrollDown fault (row %d)\n", i);
-                        break;
-                    }
+                    fnDown();
+                    handled = true;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    Log(L"[WARN] ScrollUpdateHelper ScrollDown fault (row %d)\n", i);
+                    return handled ? 1 : 0;
                 }
             }
+            return handled ? 1 : 0;
         }
         return 1;
     }

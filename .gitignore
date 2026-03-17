@@ -18,6 +18,7 @@
 !reverse_engineering/build_re_brief.py
 !reverse_engineering/export_existing_project_decomp.py
 !reverse_engineering/complete_cached_project_pipeline.py
+!reverse_engineering/capture_runtime_layout.py
 __pycache__/
 
 # Analysis results
@@ -35,6 +36,7 @@ reverse_engineering/portable_corpora/
 reverse_engineering/bzr_audio_re*/
 .ghidra_tmp/
 battlezone98redux.exe/
+reverse_engineering/badlands/
 39024
 
 # Tools and references

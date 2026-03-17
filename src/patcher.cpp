@@ -27,13 +27,45 @@
 #endif
 #include <Windows.h>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <new>
 #include <vector>
 
 namespace BZROpenShim
 {
     static const char kOpenShimVersionTag[] = "2.2.301 + OpenShim";
+    static constexpr uint32_t kDefaultMaxSoundChannels = 150;
+    static constexpr uint32_t kMaxSupportedSoundChannels = 256;
+    static constexpr uint32_t kGASMasterMaxObjectsOffset = 0x10;
+    static constexpr DWORD kSoundChannelRefreshDelayMs = 1000;
+
+    struct SoundChannelOverrideConfig
+    {
+        bool enabled = true;
+        bool envOverride = false;
+        bool envInvalid = false;
+        bool envClamped = false;
+        const char* sourceEnv = nullptr;
+        uint32_t requestedChannels = kDefaultMaxSoundChannels;
+        uint32_t maxChannels = kDefaultMaxSoundChannels;
+    };
+
+    struct SoundChannelOverrideTargets
+    {
+        uint32_t gmStorageAddress = 0;
+        uint32_t gasMasterAddress = 0;
+        uint32_t initSiteAddress = 0;
+    };
+
+    struct SoundChannelOverrideThreadContext
+    {
+        uint32_t gmStorageAddress = 0;
+        uint32_t gasMasterAddress = 0;
+        uint32_t maxChannels = 0;
+    };
+
     // -----------------------------------------------------------------------
     // Internal log helper.
     // CRT's per-FILE lock handles thread safety for individual fwprintf calls.
@@ -95,6 +127,62 @@ namespace BZROpenShim
         return s_cached != 0;
     }
 
+    static SoundChannelOverrideConfig GetSoundChannelOverrideConfig()
+    {
+        static bool s_initialized = false;
+        static SoundChannelOverrideConfig s_config = {};
+        if (s_initialized)
+            return s_config;
+
+        s_initialized = true;
+        s_config.enabled = true;
+        s_config.requestedChannels = kDefaultMaxSoundChannels;
+        s_config.maxChannels = kDefaultMaxSoundChannels;
+
+        const char* envNames[] = {
+            "OPENSHIM_MAX_SOUND_CHANNELS",
+            "BZR_MAX_SOUND_CHANNELS"
+        };
+
+        for (const char* envName : envNames)
+        {
+            char value[32] = {};
+            const DWORD len = GetEnvironmentVariableA(envName, value, static_cast<DWORD>(sizeof(value)));
+            if (!(len > 0 && len < sizeof(value)))
+                continue;
+
+            s_config.envOverride = true;
+            s_config.sourceEnv = envName;
+
+            char* end = nullptr;
+            const unsigned long parsed = strtoul(value, &end, 10);
+            if (end == value || *end != '\0')
+            {
+                s_config.envInvalid = true;
+                return s_config;
+            }
+
+            s_config.requestedChannels = static_cast<uint32_t>(parsed);
+            if (s_config.requestedChannels == 0)
+            {
+                s_config.enabled = false;
+                s_config.maxChannels = 0;
+                return s_config;
+            }
+
+            s_config.maxChannels = s_config.requestedChannels;
+            if (s_config.maxChannels > kMaxSupportedSoundChannels)
+            {
+                s_config.maxChannels = kMaxSupportedSoundChannels;
+                s_config.envClamped = true;
+            }
+
+            return s_config;
+        }
+
+        return s_config;
+    }
+
     static void SuppressStartupShellAutoLoad()
     {
         constexpr uintptr_t kStartupShellAutoLoadFlagAddr = 0x008EAAA8;
@@ -116,6 +204,321 @@ namespace BZROpenShim
         {
             Log(L"[WARN] Failed to clear startup shell autoload gate\n");
         }
+    }
+
+    static bool ScanForSoundChannelOverrideTargets(SoundChannelOverrideTargets& outTargets)
+    {
+        outTargets = {};
+
+        static const uint8_t kPattern[] = {
+            0xA3, 0x00, 0x00, 0x00, 0x00,
+            0xA3, 0x00, 0x00, 0x00, 0x00,
+            0xA3, 0x00, 0x00, 0x00, 0x00,
+            0xA3, 0x00, 0x00, 0x00, 0x00,
+            0xA3, 0x00, 0x00, 0x00, 0x00,
+            0x68, 0x00, 0x00, 0x00, 0x00,
+            0xE8, 0x00, 0x00, 0x00, 0x00,
+            0x83, 0xC4, 0x04, 0x85, 0xC0, 0x75, 0x04, 0x33, 0xC0, 0xEB, 0x00,
+            0xC7, 0x05, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x68, 0x00, 0x00, 0x00, 0x00,
+            0xE8, 0x00, 0x00, 0x00, 0x00
+        };
+        static const uint8_t kMask[] = {
+            0xFF, 0x00, 0x00, 0x00, 0x00,
+            0xFF, 0x00, 0x00, 0x00, 0x00,
+            0xFF, 0x00, 0x00, 0x00, 0x00,
+            0xFF, 0x00, 0x00, 0x00, 0x00,
+            0xFF, 0x00, 0x00, 0x00, 0x00,
+            0xFF, 0x00, 0x00, 0x00, 0x00,
+            0xFF, 0x00, 0x00, 0x00, 0x00,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00,
+            0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0xFF, 0x00, 0x00, 0x00, 0x00,
+            0xFF, 0x00, 0x00, 0x00, 0x00
+        };
+
+        HMODULE hMain = GetModuleHandleA(nullptr);
+        uint8_t* mainBase = reinterpret_cast<uint8_t*>(hMain);
+        size_t mainSize = 0;
+        if (hMain)
+        {
+            auto dos = reinterpret_cast<IMAGE_DOS_HEADER*>(hMain);
+            if (dos->e_magic == IMAGE_DOS_SIGNATURE)
+            {
+                auto nt = reinterpret_cast<IMAGE_NT_HEADERS*>(
+                    reinterpret_cast<uint8_t*>(hMain) + dos->e_lfanew);
+                if (nt->Signature == IMAGE_NT_SIGNATURE)
+                    mainSize = nt->OptionalHeader.SizeOfImage;
+            }
+        }
+
+        if (!mainBase || !mainSize)
+        {
+            Log(L"[AUDIO] Failed to resolve main module bounds for GAS scan\n");
+            return false;
+        }
+
+        const uint32_t mainBaseValue = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mainBase));
+        const uint32_t mainEndValue = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mainBase + mainSize));
+
+        HANDLE hProc = GetCurrentProcess();
+        MEMORY_BASIC_INFORMATION mbi = {};
+        uint8_t* addr = mainBase;
+
+        while (addr < (mainBase + mainSize) &&
+               VirtualQuery(addr, &mbi, sizeof(mbi)) == sizeof(mbi))
+        {
+            uint8_t* regionBase = reinterpret_cast<uint8_t*>(mbi.BaseAddress);
+            uint8_t* regionEnd = regionBase + mbi.RegionSize;
+            if (regionEnd <= mainBase || regionBase >= (mainBase + mainSize))
+            {
+                addr = regionEnd;
+                continue;
+            }
+
+            if (mbi.State != MEM_COMMIT ||
+                !(mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ |
+                                 PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)))
+            {
+                addr = regionEnd;
+                continue;
+            }
+
+            uint8_t* clipStart = (regionBase < mainBase) ? mainBase : regionBase;
+            uint8_t* clipEnd = (regionEnd > (mainBase + mainSize)) ? (mainBase + mainSize) : regionEnd;
+            const size_t clipSize = static_cast<size_t>(clipEnd - clipStart);
+            if (clipSize < sizeof(kPattern))
+            {
+                addr = regionEnd;
+                continue;
+            }
+
+            std::vector<uint8_t> buffer(clipSize);
+            SIZE_T read = 0;
+            if (!ReadProcessMemory(hProc, clipStart, buffer.data(), clipSize, &read) ||
+                read < sizeof(kPattern))
+            {
+                addr = regionEnd;
+                continue;
+            }
+
+            for (size_t i = 0; i <= read - sizeof(kPattern); ++i)
+            {
+                bool match = true;
+                for (size_t j = 0; j < sizeof(kPattern); ++j)
+                {
+                    if ((buffer[i + j] & kMask[j]) != (kPattern[j] & kMask[j]))
+                    {
+                        match = false;
+                        break;
+                    }
+                }
+
+                if (!match)
+                    continue;
+
+                uint32_t gasMasterA = 0;
+                uint32_t gasMasterB = 0;
+                uint32_t gasMasterC = 0;
+                uint32_t gmStorage = 0;
+                memcpy(&gasMasterA, &buffer[i + 26], sizeof(gasMasterA));
+                memcpy(&gmStorage, &buffer[i + 48], sizeof(gmStorage));
+                memcpy(&gasMasterB, &buffer[i + 52], sizeof(gasMasterB));
+                memcpy(&gasMasterC, &buffer[i + 57], sizeof(gasMasterC));
+
+                if (gasMasterA == 0 || gmStorage == 0 ||
+                    gasMasterA != gasMasterB || gasMasterA != gasMasterC)
+                {
+                    continue;
+                }
+
+                if (gmStorage < mainBaseValue || (gmStorage + sizeof(uint32_t)) > mainEndValue ||
+                    gasMasterA < mainBaseValue || (gasMasterA + kGASMasterMaxObjectsOffset + sizeof(uint32_t)) > mainEndValue)
+                {
+                    continue;
+                }
+
+                outTargets.gmStorageAddress = gmStorage;
+                outTargets.gasMasterAddress = gasMasterA;
+                outTargets.initSiteAddress = static_cast<uint32_t>(
+                    reinterpret_cast<uintptr_t>(clipStart + i));
+
+                Log(L"[AUDIO] GAS init anchor found at 0x%08X (GM storage=0x%08X, GAS_Master=0x%08X)\n",
+                    outTargets.initSiteAddress, outTargets.gmStorageAddress, outTargets.gasMasterAddress);
+                return true;
+            }
+
+            addr = regionEnd;
+        }
+
+        Log(L"[AUDIO] GAS init anchor not found in executable regions\n");
+        return false;
+    }
+
+    static bool ResolveSoundChannelOverrideTargets(bool isSteam, SoundChannelOverrideTargets& outTargets)
+    {
+        if (ScanForSoundChannelOverrideTargets(outTargets))
+            return true;
+
+        if (!isSteam)
+        {
+            outTargets.gmStorageAddress = 0x00915594;
+            outTargets.gasMasterAddress = 0x0091559C;
+            Log(L"[AUDIO] Falling back to revalidated GOG GAS globals (GM storage=0x%08X, GAS_Master=0x%08X)\n",
+                outTargets.gmStorageAddress, outTargets.gasMasterAddress);
+            return true;
+        }
+
+        return false;
+    }
+
+    static DWORD WINAPI SoundChannelOverrideThreadProc(LPVOID param)
+    {
+        SoundChannelOverrideThreadContext context = {};
+        SoundChannelOverrideThreadContext* heapContext =
+            reinterpret_cast<SoundChannelOverrideThreadContext*>(param);
+        if (heapContext)
+        {
+            context = *heapContext;
+            delete heapContext;
+        }
+
+        HANDLE hProc = GetCurrentProcess();
+        uint32_t lastGmPointer = 0;
+        uint32_t lastPatchedBase = 0;
+        bool loggedStorageReadFailure = false;
+
+        while (true)
+        {
+            uint32_t gmPointer = 0;
+            SIZE_T bytesRead = 0;
+            if (!ReadProcessMemory(hProc,
+                                   reinterpret_cast<LPCVOID>(context.gmStorageAddress),
+                                   &gmPointer, sizeof(gmPointer), &bytesRead) ||
+                bytesRead != sizeof(gmPointer))
+            {
+                if (!loggedStorageReadFailure)
+                {
+                    Log(L"[AUDIO] Failed reading GM storage at 0x%08X\n",
+                        context.gmStorageAddress);
+                    loggedStorageReadFailure = true;
+                }
+                Sleep(kSoundChannelRefreshDelayMs);
+                continue;
+            }
+
+            loggedStorageReadFailure = false;
+
+            const uint32_t targetBase = (gmPointer != 0) ? gmPointer : context.gasMasterAddress;
+            if (gmPointer != lastGmPointer)
+            {
+                Log(L"[AUDIO] GM pointer %s: 0x%08X\n",
+                    (gmPointer != 0) ? L"updated" : L"not yet published",
+                    gmPointer);
+                lastGmPointer = gmPointer;
+            }
+
+            if (targetBase != 0)
+            {
+                const uint32_t maxObjectsAddress = targetBase + kGASMasterMaxObjectsOffset;
+                uint32_t currentValue = 0;
+                SIZE_T fieldRead = 0;
+                if (ReadProcessMemory(hProc,
+                                      reinterpret_cast<LPCVOID>(maxObjectsAddress),
+                                      &currentValue, sizeof(currentValue), &fieldRead) &&
+                    fieldRead == sizeof(currentValue) &&
+                    currentValue != context.maxChannels)
+                {
+                    const uint32_t desiredValue = context.maxChannels;
+                    SIZE_T written = 0;
+                    if (WriteProcessMemory(hProc,
+                                           reinterpret_cast<LPVOID>(maxObjectsAddress),
+                                           &desiredValue, sizeof(desiredValue), &written) &&
+                        written == sizeof(desiredValue))
+                    {
+                        Log(L"[AUDIO] maxObjects %s at 0x%08X: %u -> %u\n",
+                            (gmPointer != 0) ? L"patched" : L"primed",
+                            maxObjectsAddress, currentValue, desiredValue);
+                        lastPatchedBase = targetBase;
+                    }
+                    else if (targetBase != lastPatchedBase)
+                    {
+                        Log(L"[AUDIO] Failed writing maxObjects at 0x%08X (err=%lu)\n",
+                            maxObjectsAddress, GetLastError());
+                        lastPatchedBase = targetBase;
+                    }
+                }
+            }
+
+            Sleep(kSoundChannelRefreshDelayMs);
+        }
+    }
+
+    static void StartSoundChannelOverride(bool isSteam)
+    {
+        const SoundChannelOverrideConfig config = GetSoundChannelOverrideConfig();
+        if (config.envInvalid)
+        {
+            Log(L"[AUDIO] Invalid %hs value; using default %u channels\n",
+                config.sourceEnv ? config.sourceEnv : "OPENSHIM_MAX_SOUND_CHANNELS",
+                kDefaultMaxSoundChannels);
+        }
+
+        if (!config.enabled)
+        {
+            Log(L"[AUDIO] Sound channel override disabled via %hs\n",
+                config.sourceEnv ? config.sourceEnv : "OPENSHIM_MAX_SOUND_CHANNELS");
+            return;
+        }
+
+        if (config.envOverride && !config.envInvalid)
+        {
+            Log(L"[AUDIO] Sound channel override requested via %hs: %u channel(s)\n",
+                config.sourceEnv, config.requestedChannels);
+            if (config.envClamped)
+            {
+                Log(L"[AUDIO] Requested sound channel count clamped to %u\n",
+                    config.maxChannels);
+            }
+        }
+        else
+        {
+            Log(L"[AUDIO] Sound channel override enabled by default: %u channel(s)\n",
+                config.maxChannels);
+        }
+
+        SoundChannelOverrideTargets targets = {};
+        if (!ResolveSoundChannelOverrideTargets(isSteam, targets))
+        {
+            Log(L"[AUDIO] Sound channel override unavailable; GAS globals not located\n");
+            return;
+        }
+
+        auto* context = new (std::nothrow) SoundChannelOverrideThreadContext();
+        if (!context)
+        {
+            Log(L"[AUDIO] Failed allocating sound channel override context\n");
+            return;
+        }
+
+        context->gmStorageAddress = targets.gmStorageAddress;
+        context->gasMasterAddress = targets.gasMasterAddress;
+        context->maxChannels = config.maxChannels;
+
+        HANDLE threadHandle = CreateThread(nullptr, 0, SoundChannelOverrideThreadProc,
+                                           context, 0, nullptr);
+        if (!threadHandle)
+        {
+            Log(L"[AUDIO] Failed starting sound channel override thread (err=%lu)\n",
+                GetLastError());
+            delete context;
+            return;
+        }
+
+        CloseHandle(threadHandle);
+        Log(L"[AUDIO] Sound channel override worker started\n");
     }
 
     void Log(const wchar_t* fmt, ...)
@@ -551,25 +954,31 @@ namespace BZROpenShim
                 turretTankAimPitchAddr + 0x08);
         }
 
-        // Map Filters partial set.
-        g_RetAddr_MapFilters1 = reinterpret_cast<void*>(0x007A35C0);
-        g_RetAddr_MapFilters2 = reinterpret_cast<void*>(0x00752D00);
-        g_RetAddr_MapFilters3 = reinterpret_cast<void*>(0x0079D6B9);
-        g_RetAddr_MapFilters4 = reinterpret_cast<void*>(0x0079D699);
-        g_RetAddr_MapFilters5 = reinterpret_cast<void*>(0x0079916B);
-        g_RetAddr_MapFilters7 = reinterpret_cast<void*>(0x007998B4);
-        g_RetAddr_MapFilters8_A = reinterpret_cast<void*>(0x007997B2);
-        g_RetAddr_MapFilters8_B = reinterpret_cast<void*>(0x007997B7);
-        g_RetAddr_MapFilters8_C = reinterpret_cast<void*>(0x0079987C);
-        Log(L"[PTR] MapFilters1 return: 0x%08X\n", 0x007A35C0);
-        Log(L"[PTR] MapFilters2 return: 0x%08X\n", 0x00752D00);
-        Log(L"[PTR] MapFilters3 return: 0x%08X\n", 0x0079D6B9);
-        Log(L"[PTR] MapFilters4 return: 0x%08X\n", 0x0079D699);
-        Log(L"[PTR] MapFilters5 return: 0x%08X\n", 0x0079916B);
-        Log(L"[PTR] MapFilters7 return: 0x%08X\n", 0x007998B4);
-        Log(L"[PTR] MapFilters8 return A: 0x%08X\n", 0x007997B2);
-        Log(L"[PTR] MapFilters8 return B: 0x%08X\n", 0x007997B7);
-        Log(L"[PTR] MapFilters8 return C: 0x%08X\n", 0x0079987C);
+        if (EnableExperimentalMapFilters())
+        {
+            g_RetAddr_MapFilters1 = reinterpret_cast<void*>(0x007A35C0);
+            g_RetAddr_MapFilters2 = reinterpret_cast<void*>(0x00752D00);
+            g_RetAddr_MapFilters3 = reinterpret_cast<void*>(0x0079D6B9);
+            g_RetAddr_MapFilters4 = reinterpret_cast<void*>(0x0079D699);
+            g_RetAddr_MapFilters5 = reinterpret_cast<void*>(0x0079916B);
+            g_RetAddr_MapFilters7 = reinterpret_cast<void*>(0x007998B4);
+            g_RetAddr_MapFilters8_A = reinterpret_cast<void*>(0x007997B2);
+            g_RetAddr_MapFilters8_B = reinterpret_cast<void*>(0x007997B7);
+            g_RetAddr_MapFilters8_C = reinterpret_cast<void*>(0x0079987C);
+            Log(L"[PTR] MapFilters1 return: 0x%08X\n", 0x007A35C0);
+            Log(L"[PTR] MapFilters2 return: 0x%08X\n", 0x00752D00);
+            Log(L"[PTR] MapFilters3 return: 0x%08X\n", 0x0079D6B9);
+            Log(L"[PTR] MapFilters4 return: 0x%08X\n", 0x0079D699);
+            Log(L"[PTR] MapFilters5 return: 0x%08X\n", 0x0079916B);
+            Log(L"[PTR] MapFilters7 return: 0x%08X\n", 0x007998B4);
+            Log(L"[PTR] MapFilters8 return A: 0x%08X\n", 0x007997B2);
+            Log(L"[PTR] MapFilters8 return B: 0x%08X\n", 0x007997B7);
+            Log(L"[PTR] MapFilters8 return C: 0x%08X\n", 0x0079987C);
+        }
+        else
+        {
+            Log(L"[INFO] Experimental map-filter hooks disabled; using stock map filter UI\n");
+        }
 
         // Vehicle list mod fix returns.
         g_RetAddr_VehicleListModFix1 = reinterpret_cast<void*>(0x00766C52);
@@ -1406,6 +1815,8 @@ namespace BZROpenShim
             Log(L"[WARN] Signature read failed; proceeding without gate\n");
         else if (!WaitForSignature(signature))
             return;
+
+        StartSoundChannelOverride(isSteam);
 
         // 4. Build patch list and resolve dynamic addresses
         auto patches = BuildPatchList();
