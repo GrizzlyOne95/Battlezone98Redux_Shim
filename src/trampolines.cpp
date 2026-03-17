@@ -52,6 +52,91 @@ namespace
         default: break;
         }
     }
+
+    enum ManualRefreshSupportPhase : int
+    {
+        kRefreshSupportEnter = 1,
+        kRefreshSupportHandled = 2,
+        kRefreshSupportFallback = 3,
+    };
+
+    static const wchar_t* ManualRefreshSupportPhaseName(int phase)
+    {
+        switch (phase)
+        {
+        case kRefreshSupportEnter: return L"enter";
+        case kRefreshSupportHandled: return L"handled";
+        case kRefreshSupportFallback: return L"fallback";
+        default: return L"unknown";
+        }
+    }
+
+    static void __cdecl TraceManualRefreshSupport(
+        int phase,
+        void* frame_ebp,
+        void* ctx,
+        int32_t delta,
+        int32_t helperResult)
+    {
+        static long s_budget = 160;
+        const long remaining = InterlockedDecrement(&s_budget);
+        if (remaining < 0)
+            return;
+
+        auto* base = reinterpret_cast<uint8_t*>(frame_ebp);
+        void* parent = nullptr;
+        void* arg8 = nullptr;
+        void* localMinus4 = nullptr;
+        void* localMinus44 = nullptr;
+        void* localMinusA4 = nullptr;
+        void* mapObj = nullptr;
+        int32_t d94 = 0;
+        int32_t d98 = 0;
+
+        if (base)
+        {
+            TryReadPtr(base + 0x00, parent);
+            TryReadPtr(base + 0x08, arg8);
+            TryReadPtr(base - 0x04, localMinus4);
+            TryReadPtr(base - 0x44, localMinus44);
+            TryReadPtr(base - 0xA4, localMinusA4);
+            TryReadI32(base - 0x94, d94);
+            TryReadI32(base - 0x98, d98);
+        }
+
+        __try
+        {
+            if (g_MapListObject)
+                mapObj = *g_MapListObject;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            mapObj = nullptr;
+        }
+
+        Log(L"[REFRESHDBG] phase=%ls frame=0x%08X ctx=0x%08X arg8=0x%08X parent=0x%08X m4=0x%08X m44=0x%08X ma4=0x%08X d94=%d d98=%d delta=%d helper=%d hopCtx=0x%08X mapObj=0x%08X savedIdx=%d savedState=%d haveSaved=%d\n",
+            ManualRefreshSupportPhaseName(phase),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(frame_ebp)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ctx)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(arg8)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parent)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(localMinus4)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(localMinus44)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(localMinusA4)),
+            d94,
+            d98,
+            delta,
+            helperResult,
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_HopFix3Context)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mapObj)),
+            g_SavedMapIndex,
+            g_SavedScrollState,
+            g_HaveSavedScrollState ? 1 : 0);
+
+        TraceMapRefreshFrame(L"ManualRefreshSupport", frame_ebp);
+        if (ctx)
+            TraceMapRefreshContext(L"ManualRefreshSupport", ctx);
+    }
 }
 
 // -----------------------------------------------------------------------
@@ -192,6 +277,27 @@ void __declspec(naked) __cdecl Trampoline_MapListFixSupport1()
         add  esp, 8
         popad
 
+        // Manual refresh does not appear to flow through HopFix1 on Steam, so
+        // capture the current selection/scroll state explicitly here.
+        pushad
+        push ecx
+        call SaveMapListSelection
+        push dword ptr [esp]
+        call CaptureScrollStateFromContext
+        add  esp, 4
+        pop  ecx
+        popad
+
+        pushad
+        push -1
+        push dword ptr [ebp + 8]
+        push ecx
+        push ebp
+        push kRefreshSupportEnter
+        call TraceManualRefreshSupport
+        add  esp, 20
+        popad
+
         mov  [ebp - 4], ecx
         mov  eax, [ebp + 8]
         mov  [ebp - 4], eax
@@ -199,11 +305,33 @@ void __declspec(naked) __cdecl Trampoline_MapListFixSupport1()
         mov  ecx, [ebp - 4]
         call ScrollUpdateHelper
         test eax, eax
-        jne  support1_done
+        jne  support1_handled
+
+        pushad
+        push eax
+        push dword ptr [ebp + 8]
+        push dword ptr [ebp - 4]
+        push ebp
+        push kRefreshSupportFallback
+        call TraceManualRefreshSupport
+        add  esp, 20
+        popad
 
         mov  ecx, [ebp]
         mov  ecx, [ecx + 0x1C8]
         call [g_BZRFn_MapListFixSupport1]
+        jmp  support1_done
+
+    support1_handled:
+        pushad
+        push eax
+        push dword ptr [ebp + 8]
+        push dword ptr [ebp - 4]
+        push ebp
+        push kRefreshSupportHandled
+        call TraceManualRefreshSupport
+        add  esp, 20
+        popad
 
     support1_done:
         jmp  [g_RetAddr_MapListFixSupport1]
