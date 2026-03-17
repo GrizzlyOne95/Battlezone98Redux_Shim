@@ -852,7 +852,7 @@ namespace BZROpenShim
     // Resolve internal BZR.exe pointers for trampolines/helpers.
     // Now uses dynamic addresses found by pattern scanning.
     // -----------------------------------------------------------------------
-    static void ResolvePointers(uint32_t mapSortingAddr, uint32_t hopFix1Addr, uint32_t hopFix2Addr, uint32_t hopFix3Addr, uint32_t probeMapFilter1Addr, uint32_t probeMapListFix1Addr, uint32_t probeMapListFix2Addr, uint32_t artilleryMaskTraceAddr, uint32_t turretCraftAimPitchAddr, uint32_t turretTankAimPitchAddr)
+    static void ResolvePointers(uint32_t mapSortingAddr, uint32_t hopFix1Addr, uint32_t hopFix2Addr, uint32_t hopFix3Addr, uint32_t probeMapFilter1Addr, uint32_t probeMapListFix1Addr, uint32_t probeMapListFix2Addr, uint32_t artilleryMaskTraceAddr, uint32_t turretCraftAimPitchAddr, uint32_t turretTankAimPitchAddr, uint32_t underAttackAlertHook1Addr, uint32_t underAttackAlertHook2Addr)
     {
         Log(L"=========== RESOLVING POINTERS ===========\n");
 
@@ -953,6 +953,18 @@ namespace BZROpenShim
             Log(L"[PTR] TurretTank aim pitch return: 0x%08X\n",
                 turretTankAimPitchAddr + 0x08);
         }
+        if (underAttackAlertHook1Addr) {
+            g_RetAddr_UnderAttackAlertHook1 =
+                reinterpret_cast<void*>(underAttackAlertHook1Addr + 0x34);
+            Log(L"[PTR] Under-attack alert hook 1 return: 0x%08X\n",
+                underAttackAlertHook1Addr + 0x34);
+        }
+        if (underAttackAlertHook2Addr) {
+            g_RetAddr_UnderAttackAlertHook2 =
+                reinterpret_cast<void*>(underAttackAlertHook2Addr + 0x34);
+            Log(L"[PTR] Under-attack alert hook 2 return: 0x%08X\n",
+                underAttackAlertHook2Addr + 0x34);
+        }
 
         if (EnableExperimentalMapFilters())
         {
@@ -991,15 +1003,19 @@ namespace BZROpenShim
         g_RetAddr_BzrnetClient = reinterpret_cast<void*>(0x0073E748);
         g_RetAddr_CommandHelpHandled = reinterpret_cast<void*>(0x00625052);
         g_RetAddr_CommandHelpFallback = reinterpret_cast<void*>(0x0062491F);
+        g_RetAddr_JoinerEventHook = reinterpret_cast<void*>(0x0073F435);
         g_RetAddr_BanHook1     = reinterpret_cast<void*>(0x007D0A35);
         g_RetAddr_BanHook2     = reinterpret_cast<void*>(0x007A691A);
         g_RetAddr_AutoSaveLoadHook = reinterpret_cast<void*>(0x0078B45F);
+        g_BZRFnPtr_JoinerEventOriginal = reinterpret_cast<void (*)()>(0x00742560);
         Log(L"[PTR] BZRNET Host return: 0x%08X\n", 0x00743C30);
         Log(L"[PTR] BZRNET Client return: 0x%08X\n", 0x0073E748);
         Log(L"[PTR] Command Help handled return: 0x%08X\n", 0x00625052);
         Log(L"[PTR] Command Help fallback return: 0x%08X\n", 0x0062491F);
+        Log(L"[PTR] Joiner Event return: 0x%08X\n", 0x0073F435);
         Log(L"[PTR] Ban Hook1 return: 0x%08X\n", 0x007D0A35);
         Log(L"[PTR] Ban Hook2 return: 0x%08X\n", 0x007A691A);
+        Log(L"[PTR] Joiner Event original: 0x%08X\n", 0x00742560);
 
         g_BZRFn_GetScrollState = reinterpret_cast<uint32_t (*)()>(0x007D3360);
         g_BZRFn_ScrollUp = reinterpret_cast<void (*)()>(0x007CB500);
@@ -1025,6 +1041,8 @@ namespace BZROpenShim
             const char* patchName;
             std::vector<uint8_t> pattern;
             std::vector<uint8_t> mask;  // 0xFF = must match, 0x00 = wildcard
+            uint32_t patchOffset;
+            uint32_t expectedSize;
         };
 
         std::vector<ScanTarget> targets = {
@@ -1035,7 +1053,9 @@ namespace BZROpenShim
             //   E8 F3 89 E3 FF = CALL (relative, follows directly - makes this unique)
             { "Map List Rewrite for Hop-Fix 1/3",
               { 0x8B, 0x45, 0xFC, 0x8B, 0x88, 0x38, 0x01, 0x00, 0x00, 0xE8, 0xF3, 0x89, 0xE3, 0xFF },
-              { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF } },
+              { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF },
+              0,
+              5 },
 
             // Hop-Fix 2 at 0x00799279 (confirmed identical on Steam and GOG).
             // Unique 15-byte pattern verified against full process dump (1 hit only):
@@ -1045,7 +1065,9 @@ namespace BZROpenShim
             //   E8 = CALL follows
             { "Map List Rewrite for Hop-Fix 2/3",
               { 0x6A, 0x00, 0x8B, 0x85, 0x5C, 0xFF, 0xFF, 0xFF, 0x8B, 0x88, 0x7C, 0x01, 0x00, 0x00, 0xE8 },
-              { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF } },
+              { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF },
+              0,
+              5 },
 
             // Hop-Fix 3 at 0x00799377 (confirmed identical on Steam and GOG).
             // Unique 7-byte pattern verified against full process dump (1 hit only):
@@ -1053,13 +1075,37 @@ namespace BZROpenShim
             //   68 30 09 00 00 = PUSH 0x930
             { "Map List Rewrite for Hop-Fix 3/3",
               { 0xFF, 0xD2, 0x68, 0x30, 0x09, 0x00, 0x00 },
-              { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF } },
+              { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF },
+              0,
+              5 },
+            { "HoverCraft Engine Flame Emit Hook 1/2",
+              { 0x0F, 0x11, 0x04, 0x24, 0x8D, 0x85, 0x00, 0x00, 0x00, 0x00,
+                0x50, 0xB9, 0x00, 0x00, 0x00, 0x00, 0xE8, 0x00, 0x00, 0x00,
+                0x00, 0x83, 0x3D, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0F, 0x84 },
+              { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
+                0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00,
+                0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF },
+              17,
+              4 },
+            { "HoverCraft Engine Flame Emit Hook 2/2",
+              { 0x8D, 0x95, 0x00, 0x00, 0x00, 0x00, 0x52, 0xB9, 0x00, 0x00,
+                0x00, 0x00, 0xE8, 0x00, 0x00, 0x00, 0x00, 0xE9, 0x00, 0x00,
+                0x00, 0x00, 0x83, 0xBD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0F,
+                0x8E },
+              { 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00,
+                0x00, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00,
+                0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF,
+                0xFF },
+              13,
+              4 },
             // ArtilleryProcess::DoAttack internal helper call at 0x0042BB1A on GOG.
             // Wildcard both rel32 call operands; the surrounding byte shape is
             // the revalidated anchor.
             { "Artillery Weapon Mask Trace",
               { 0xE8, 0x00, 0x00, 0x00, 0x00, 0x8B, 0x45, 0x08, 0x50, 0xE8, 0x00, 0x00, 0x00, 0x00, 0x83, 0xC4, 0x04, 0x50, 0x8B, 0x4D, 0xFC, 0xE8 },
-              { 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF } },
+              { 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF },
+              0,
+              5 },
         };
 
         // Restrict scan to executable pages inside the main BZR.exe image.
@@ -1148,22 +1194,22 @@ namespace BZROpenShim
                     {
                         uint32_t foundAddr = static_cast<uint32_t>(
                             reinterpret_cast<uintptr_t>(region.first + i));
+                        const size_t patchIndex = i + target.patchOffset;
+                        const uint32_t patchAddr = foundAddr + target.patchOffset;
                         
-                        Log(L"[SCAN] Found '%hs' at 0x%08X\n", target.patchName, foundAddr);
+                        Log(L"[SCAN] Found '%hs' at 0x%08X\n", target.patchName, patchAddr);
                         
                         // Update the patch address
                         for (auto& p : patches)
                         {
                             if (strcmp(p.name, target.patchName) == 0)
                             {
-                                p.bzr_address = foundAddr;
+                                p.bzr_address = patchAddr;
                                 p.verified = true;
                                 
-                                // Update expected original bytes: always the first 5 bytes
-                                // at the patch site (the bytes our JMP5 will overwrite).
                                 p.expected_original.clear();
-                                for (size_t j = 0; j < 5 && (i + j) < read; j++)
-                                    p.expected_original.push_back(buf[i + j]);
+                                for (size_t j = 0; j < target.expectedSize && (patchIndex + j) < read; ++j)
+                                    p.expected_original.push_back(buf[patchIndex + j]);
                                 
                                 found = true;
                                 break;
@@ -1495,6 +1541,13 @@ namespace BZROpenShim
                 p.expected_original = { 0x68, 0x3C, 0xD5, 0x88, 0x00 };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
+            else if (strcmp(p.name, "Joiner Event Hook") == 0)
+            {
+                p.bzr_address = 0x0073F430;
+                p.verified = true;
+                p.expected_original = { 0xE8, 0x2B, 0x31, 0x00, 0x00 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
             else if (strcmp(p.name, "Ban Button Hook 1/2") == 0)
             {
                 p.bzr_address = 0x007D0A2F;
@@ -1542,6 +1595,32 @@ namespace BZROpenShim
                 p.expected_original = { 0xF3, 0x0F, 0x10, 0x05, 0x84, 0x25, 0x8A, 0x00 };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
+            else if (strcmp(p.name, "Under Attack Alert Hook 1/2") == 0)
+            {
+                if (isSteam)
+                {
+                    Log(L"[SCAN] SKIPPED %hs (GOG-only address not yet validated on Steam)\n", p.name);
+                    continue;
+                }
+
+                p.bzr_address = 0x00494D35;
+                p.verified = true;
+                p.expected_original = { 0x0F, 0x2F, 0x05, 0xD0, 0x73 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Under Attack Alert Hook 2/2") == 0)
+            {
+                if (isSteam)
+                {
+                    Log(L"[SCAN] SKIPPED %hs (GOG-only address not yet validated on Steam)\n", p.name);
+                    continue;
+                }
+
+                p.bzr_address = 0x0050E6DD;
+                p.verified = true;
+                p.expected_original = { 0x0F, 0x2F, 0x05, 0xD0, 0x73 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
             else
             {
                 Log(L"[SCAN] SKIPPED %hs (pattern not found, no safe fallback)\n", p.name);
@@ -1574,11 +1653,14 @@ namespace BZROpenShim
             { "Lobby BZRNET Integration HOST",                  (void*)Trampoline_BzrnetHost },
             { "Lobby BZRNET Integration CLIENT",                (void*)Trampoline_BzrnetClient },
             { "Custom Command /help Handler",                   (void*)Trampoline_CommandHelp },
+            { "Joiner Event Hook",                              (void*)Trampoline_JoinerEventHook },
             { "Ban Button Hook 1/2",                            (void*)Trampoline_BanButtonHook1 },
             { "Ban Button Hook 2/2",                            (void*)Trampoline_BanButtonHook2 },
             { "AutoSave Load Button Hook",                      (void*)Trampoline_AutoSaveLoadButtonHook },
             { "TurretCraft Aim Pitch Multiplier",               (void*)Trampoline_TurretCraftAimPitchMultiplier },
             { "TurretTank Aim Pitch Multiplier",                (void*)Trampoline_TurretTankAimPitchMultiplier },
+            { "Under Attack Alert Hook 1/2",                    (void*)Trampoline_UnderAttackAlertHook1 },
+            { "Under Attack Alert Hook 2/2",                    (void*)Trampoline_UnderAttackAlertHook2 },
             { "Artillery Weapon Mask Trace",                    (void*)Trampoline_ArtilleryMaskTrace },
             { "Decoded Weapon Mask Carrier Bias Hook",          (void*)Trampoline_DecodedWeaponMaskBias },
             { "Raw Weapon Mask Carrier Bias Hook",              (void*)Trampoline_RawWeaponMaskBias },
@@ -1596,7 +1678,9 @@ namespace BZROpenShim
                     uint32_t targetVal = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(m.fn));
                     const size_t patchLen =
                         (strcmp(p.name, "TurretCraft Aim Pitch Multiplier") == 0 ||
-                         strcmp(p.name, "TurretTank Aim Pitch Multiplier") == 0) ? 8 : 5;
+                         strcmp(p.name, "TurretTank Aim Pitch Multiplier") == 0) ? 8 :
+                        ((strcmp(p.name, "Under Attack Alert Hook 1/2") == 0 ||
+                          strcmp(p.name, "Under Attack Alert Hook 2/2") == 0) ? 52 : 5);
                     p.payload = MakeJmpPatch(p.bzr_address, targetVal, patchLen);
                     break;
                 }
@@ -1846,7 +1930,9 @@ namespace BZROpenShim
             findAddr("Probe MapListFix2"),
             findAddr("Artillery Weapon Mask Trace"),
             findAddr("TurretCraft Aim Pitch Multiplier"),
-            findAddr("TurretTank Aim Pitch Multiplier"));
+            findAddr("TurretTank Aim Pitch Multiplier"),
+            findAddr("Under Attack Alert Hook 1/2"),
+            findAddr("Under Attack Alert Hook 2/2"));
 
         ResolveBzrHooks(isSteam);
         InitBzrHookStrings();
