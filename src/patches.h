@@ -107,11 +107,14 @@ namespace BZROpenShim
     extern void __cdecl Trampoline_BzrnetHost();
     extern void __cdecl Trampoline_BzrnetClient();
     extern void __cdecl Trampoline_CommandHelp();
+    extern void __cdecl Trampoline_JoinerEventHook();
     extern void __cdecl Trampoline_BanButtonHook1();
     extern void __cdecl Trampoline_BanButtonHook2();
     extern void __cdecl Trampoline_AutoSaveLoadButtonHook();
     extern void __cdecl Trampoline_TurretCraftAimPitchMultiplier();
     extern void __cdecl Trampoline_TurretTankAimPitchMultiplier();
+    extern void __cdecl Trampoline_UnderAttackAlertHook1();
+    extern void __cdecl Trampoline_UnderAttackAlertHook2();
     extern void __cdecl Trampoline_EngineFlameHoverCraftEmit();
     extern void __cdecl Trampoline_ArtilleryMaskTrace();
     extern void __cdecl Trampoline_DecodedWeaponMaskBias();
@@ -146,12 +149,16 @@ namespace BZROpenShim
     inline void* g_RetAddr_BzrnetClient       = nullptr;
     inline void* g_RetAddr_CommandHelpHandled = nullptr;
     inline void* g_RetAddr_CommandHelpFallback = nullptr;
+    inline void* g_RetAddr_JoinerEventHook    = nullptr;
     inline void* g_RetAddr_BanHook1           = nullptr;
     inline void* g_RetAddr_BanHook2           = nullptr;
     inline void* g_RetAddr_AutoSaveLoadHook   = nullptr;
     inline void* g_RetAddr_TurretCraftAimPitchMultiplier = nullptr;
     inline void* g_RetAddr_TurretTankAimPitchMultiplier = nullptr;
+    inline void* g_RetAddr_UnderAttackAlertHook1 = nullptr;
+    inline void* g_RetAddr_UnderAttackAlertHook2 = nullptr;
     inline void* g_RetAddr_ArtilleryMaskTrace = nullptr;
+    inline void (*g_BZRFnPtr_JoinerEventOriginal)() = nullptr;
     inline void (*g_BZRFnPtr_ArtilleryMaskTraceOriginal)() = nullptr;
 
     // -----------------------------------------------------------------------
@@ -200,6 +207,8 @@ namespace BZROpenShim
             { 0x0, PT::JMP5, {}, "Lobby BZRNET Integration CLIENT", false },
             // -- Custom /help + /ban command handler --
             { 0x0, PT::JMP5, {}, "Custom Command /help Handler", false },
+            // -- Experimental join-time ban enforcement --
+            { 0x0, PT::JMP5, {}, "Joiner Event Hook", false },
             // -- Ban button hooks --
             { 0x0, PT::JMP5, {}, "Ban Button Hook 1/2", false },
             { 0x0, PT::JMP5, {}, "Ban Button Hook 2/2", false },
@@ -208,6 +217,9 @@ namespace BZROpenShim
             // -- Turret aiming range --
             { 0x0, PT::JMP5, {}, "TurretCraft Aim Pitch Multiplier", false },
             { 0x0, PT::JMP5, {}, "TurretTank Aim Pitch Multiplier", false },
+            // -- Team under-attack growl throttle/toggle --
+            { 0x0, PT::JMP5, {}, "Under Attack Alert Hook 1/2", false },
+            { 0x0, PT::JMP5, {}, "Under Attack Alert Hook 2/2", false },
         };
 
         if (EnableExperimentalMapFilters())
