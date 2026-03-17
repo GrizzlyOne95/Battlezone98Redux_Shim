@@ -72,6 +72,7 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
 
     case DLL_PROCESS_DETACH:
         BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "DLL_PROCESS_DETACH reserved=0x%p", reserved);
+        BZROpenShim::ShutdownNetworkOptimizer();
         FreeRealWinmm();
         BZROpenShim::ShutdownShimLogger();
         break;

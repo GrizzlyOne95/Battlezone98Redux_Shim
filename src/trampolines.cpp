@@ -1080,6 +1080,22 @@ void __declspec(naked) __cdecl Trampoline_AutoSaveLoadButtonHook()
     }
 }
 
+void __declspec(naked) __cdecl Trampoline_RestartMissionPauseHook()
+{
+    __asm
+    {
+        jmp RestartMissionPauseHook
+    }
+}
+
+void __declspec(naked) __cdecl Trampoline_RestartMissionFailureHook()
+{
+    __asm
+    {
+        jmp RestartMissionFailureHook
+    }
+}
+
 // -----------------------------------------------------------------------
 // TurretCraft aim pitch multiplier
 // Site: 0x005F1838
