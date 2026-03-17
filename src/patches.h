@@ -76,7 +76,7 @@ namespace BZROpenShim
     {
         // The Steam map-filter port is still incomplete. Keep the core
         // position-preservation fixes enabled, but defer filter UI behavior to
-        // the stock game until the full _bzcp.dll behavior is replicated.
+        // the stock game until the full filter behavior is replicated.
         return false;
     }
 
@@ -214,6 +214,9 @@ namespace BZROpenShim
             { 0x0, PT::JMP5, {}, "Ban Button Hook 2/2", false },
             // -- Single-player load screen AutoSave button --
             { 0x0, PT::JMP5, {}, "AutoSave Load Button Hook", false },
+            // -- Single-player Restart Mission fresh-load repair --
+            { 0x0, PT::JMP5, {}, "Restart Mission Hook Pause", false },
+            { 0x0, PT::JMP5, {}, "Restart Mission Hook Failure", false },
             // -- Turret aiming range --
             { 0x0, PT::JMP5, {}, "TurretCraft Aim Pitch Multiplier", false },
             { 0x0, PT::JMP5, {}, "TurretTank Aim Pitch Multiplier", false },

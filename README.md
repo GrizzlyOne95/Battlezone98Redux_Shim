@@ -55,9 +55,9 @@ Steam status as of March 16, 2026:
 - the partial clean-room map-filter port is intentionally disabled on Steam for
   now, so filter and sort UI behavior falls back to the stock game
 
-That last point is deliberate. The in-progress `_bzcp.dll` filter/sort port was
-interfering with the Steam map-list UI and exposed only `All Maps` instead of
-the full stock filter set. Until the remaining behavior is fully replicated,
+That last point is deliberate. The in-progress experimental filter/sort hook set
+was interfering with the Steam map-list UI and exposed only `All Maps` instead
+of the full stock filter set. Until the remaining behavior is fully replicated,
 OpenShim keeps the core map-list position fix active but does not patch the
 custom filter/sort stack.
 
@@ -186,6 +186,13 @@ The verifier uses `openshim.log` as the source of truth and checks for:
 - successful Winsock hook installation
 - `SO_SNDBUF` readback reaching `524288`
 - `SO_RCVBUF` readback reaching `4194304`
+- latest `BZLogger.txt` interval line when present, so a shipped `net.ini`
+  test profile can be confirmed quickly
+
+If buffer logging is enabled, the same game folder will also receive:
+
+- `bz_buffer_log.bin`
+- `bz_buffer_log.meta.txt`
 
 ## LLDB Recovery
 
@@ -211,18 +218,90 @@ Configure it through `net.ini` next to the game executable:
 [OpenShimSocket]
 EnablePacketReorder=1
 PacketReorderWindowMs=30
+PacketReorderDepth=8
+PacketReorderPeers=32
+PacketReorderDrainCap=32
 LogPacketReorder=1
+EnableBufferLog=0
+BufferLogPayloadBytes=32
+BufferLogRingRecords=65536
+BufferLogSocketId=0
+BufferLogPeer=
 ```
 
 Notes:
 
 - `EnablePacketReorder=1` enables the reorder buffer for synchronous UDP recv.
 - `PacketReorderWindowMs` is clamped to `5`-`200` ms.
+- `PacketReorderDepth` is clamped to `1`-`8`.
+- `PacketReorderPeers` is clamped to `1`-`32`.
+- `PacketReorderDrainCap` is clamped to `1`-`128`.
 - `LogPacketReorder=1` enables detailed reorder diagnostics in `openshim.log`.
+- `EnableBufferLog=1` writes a binary recv-path capture to `bz_buffer_log.bin`
+  plus a small metadata sidecar file.
+- `BufferLogPayloadBytes` is clamped to `8`-`256`.
+- `BufferLogRingRecords` is clamped to `1024`-`1000000`.
+- `BufferLogSocketId` limits binary capture to one OpenShim socket id.
+- `BufferLogPeer` limits binary capture to one IPv4 peer, optionally with a
+  port, for example `203.0.113.42:17770`.
 - Environment variables `BZ_REORDER`, `BZ_REORDER_WINDOW_MS`,
-  `OPENSHIM_REORDER`, and `OPENSHIM_REORDER_WINDOW_MS` override the `net.ini`
-  values for testing.
+  `BZ_REORDER_DEPTH`, `BZ_REORDER_PEERS`, `BZ_REORDER_DRAIN`,
+  `OPENSHIM_REORDER`, `OPENSHIM_REORDER_WINDOW_MS`,
+  `OPENSHIM_REORDER_DEPTH`, `OPENSHIM_REORDER_PEERS`, and
+  `OPENSHIM_REORDER_DRAIN` override the `net.ini` values for testing.
+- Environment variables `BZ_BUFFER_LOG`, `BZ_BUFFER_LOG_BYTES`,
+  `BZ_BUFFER_LOG_RING`, `BZ_BUFFER_LOG_SOCKET`, `BZ_BUFFER_LOG_PEER`,
+  `OPENSHIM_BUFFER_LOG`, `OPENSHIM_BUFFER_LOG_BYTES`,
+  `OPENSHIM_BUFFER_LOG_RING`, `OPENSHIM_BUFFER_LOG_SOCKET`, and
+  `OPENSHIM_BUFFER_LOG_PEER` override the buffer-capture settings for testing.
 - The reorder path is bypassed for overlapped or async `WSARecvFrom` calls.
+- Direct `recvfrom` and `FIONBIO` mode changes are also captured when the
+  binary buffer log is enabled, which helps correlate nonblocking socket
+  transitions with packet loss or reorder bursts.
+- Outbound route diagnostics now tag `connect` / `WSAConnect` / `sendto` /
+  `WSASendTo` traffic in `openshim.log` as `bzrnet_ws`, `bzrnet_probe`,
+  `bzrnet_relay`, `p2p_lan`, or `p2p_candidate` so relay fallbacks and direct
+  peer traffic are easier to distinguish.
+
+## Test Net.ini
+
+The repo now ships a diagnostic [`net.ini`](net.ini)
+profile. Copy it next to the game executable to raise the default multiplayer
+update rate and greatly relax auto-kick thresholds while you are diagnosing
+packet loss.
+
+Key changes in the shipped profile:
+
+- `MinBandwidth=8000` instead of the common `4000` workshop setting
+- `AutoKickStart=180000`
+- `AutoKickPing=2000`
+- `AutoKickLoss=100`
+- `AutoKickTime=180000`
+- `MaxPingsLost=60`
+
+After launching multiplayer once, check `BZLogger.txt` for a line like
+`Net: Bandwidth usage now set to 8000, Interval ... ms`. The current target is
+`33 ms` or lower. If the interval is still above that on your build, the next
+safe test step is usually raising `MinBandwidth` to `16000`.
+
+## Buffer Capture Workflow
+
+For Windows session bundles, use [`buffer_logger_windows.ps1`](buffer_logger_windows.ps1):
+
+```powershell
+.\buffer_logger_windows.ps1 -Action Start
+.\buffer_logger_windows.ps1 -Action Mark -Message "loss spike during combat"
+.\buffer_logger_windows.ps1 -Action Stop
+```
+
+Optional filters for tighter captures:
+
+- `-SocketId <n>` captures only one OpenShim socket id
+- `-PeerFilter 203.0.113.42:17770` captures only one IPv4 peer
+
+`Stop` writes a zipped bundle under `test_bundles\` with `openshim.log`,
+`BZLogger.txt`, `bz_buffer_log.bin`, `bz_buffer_log.meta.txt`, and the active
+`net.ini` when present.
 
 ## Testing The Chunk Experiment
 

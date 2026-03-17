@@ -1228,8 +1228,8 @@ namespace BZROpenShim
         }
 
         // Fallback for v2.2.301 when pattern scan misses due environment noise.
-        // The original _bzcp.dll uses these same fixed sites on Steam, so we
-        // can fall back to them once our helper logic matches that reference.
+        // These Steam fixed sites are stable enough to use as a fallback once
+        // the helper logic matches the intended map-sorting behavior.
         for (auto& p : patches)
         {
             if (p.verified) continue;
@@ -1569,6 +1569,20 @@ namespace BZROpenShim
                 p.expected_original = { 0xA1, 0x0C, 0x83, 0x91, 0x00 };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
+            else if (strcmp(p.name, "Restart Mission Hook Pause") == 0)
+            {
+                p.bzr_address = 0x00788F40;
+                p.verified = true;
+                p.expected_original = { 0x55, 0x8B, 0xEC, 0x51, 0x89 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "Restart Mission Hook Failure") == 0)
+            {
+                p.bzr_address = 0x00791F50;
+                p.verified = true;
+                p.expected_original = { 0x55, 0x8B, 0xEC, 0x51, 0x89 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
             else if (strcmp(p.name, "TurretCraft Aim Pitch Multiplier") == 0)
             {
                 if (isSteam)
@@ -1657,6 +1671,8 @@ namespace BZROpenShim
             { "Ban Button Hook 1/2",                            (void*)Trampoline_BanButtonHook1 },
             { "Ban Button Hook 2/2",                            (void*)Trampoline_BanButtonHook2 },
             { "AutoSave Load Button Hook",                      (void*)Trampoline_AutoSaveLoadButtonHook },
+            { "Restart Mission Hook Pause",                     (void*)Trampoline_RestartMissionPauseHook },
+            { "Restart Mission Hook Failure",                   (void*)Trampoline_RestartMissionFailureHook },
             { "TurretCraft Aim Pitch Multiplier",               (void*)Trampoline_TurretCraftAimPitchMultiplier },
             { "TurretTank Aim Pitch Multiplier",                (void*)Trampoline_TurretTankAimPitchMultiplier },
             { "Under Attack Alert Hook 1/2",                    (void*)Trampoline_UnderAttackAlertHook1 },
