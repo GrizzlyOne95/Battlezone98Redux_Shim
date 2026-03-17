@@ -47,6 +47,20 @@ three-stage method confirmed during reverse-engineering:
 
 Reconstruction of the replacement code is in `trampolines.cpp` / `scroll_helper.h`.
 
+Steam status as of March 16, 2026:
+
+- manual refresh now preserves both the selected map and the visible list row
+- wheel scrolling and first-click map selection no longer fault in the Steam
+  refresh path
+- the partial clean-room map-filter port is intentionally disabled on Steam for
+  now, so filter and sort UI behavior falls back to the stock game
+
+That last point is deliberate. The in-progress `_bzcp.dll` filter/sort port was
+interfering with the Steam map-list UI and exposed only `All Maps` instead of
+the full stock filter set. Until the remaining behavior is fully replicated,
+OpenShim keeps the core map-list position fix active but does not patch the
+custom filter/sort stack.
+
 ### Steam-specific compatibility work
 
 The Steam build needs a few extra guards beyond the original GOG-oriented
@@ -63,6 +77,8 @@ The current patcher handles that by:
 3. patching the main menu and version-notice string operands to point at the
    OpenShim version tag
 4. leaving logger buffering at the CRT default and flushing explicitly
+5. preserving the stock map-filter and sort UI until the clean-room filter port
+   is complete
 
 ### Legacy Chunk Render Bridge Experiment
 
@@ -127,6 +143,27 @@ Current limitation:
 
 - This fix has been build-validated but not yet gameplay-validated in a live
   Redux session.
+
+## Audio Channel Override
+
+OpenShim now includes a native GAS max-object override to help with sound
+dropouts during large battles.
+
+- The shim defaults to a conservative `150`-channel cap.
+- Set `OPENSHIM_MAX_SOUND_CHANNELS=<n>` to choose a different limit.
+- Set `OPENSHIM_MAX_SOUND_CHANNELS=0` to disable the override.
+- `BZR_MAX_SOUND_CHANNELS` is also accepted as a legacy/testing alias.
+- Values above `256` are clamped down to `256`.
+
+Notes:
+
+- This targets the legacy `GM->maxObjects` sound-channel cap, so it should help
+  voice stealing and cutouts more than true mixer clipping/distortion.
+- Current Steam runtime captures suggest the stock internal cap is `100`, so
+  the default OpenShim setting is intentionally a modest step above stock.
+- The shim locates the GAS globals at runtime. If Steam's runtime layout does
+  not match the current anchor yet, the log will note that the override was
+  skipped instead of patching blindly.
 
 ## Building
 

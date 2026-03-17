@@ -72,6 +72,14 @@ namespace BZROpenShim
         return buf;
     }
 
+    inline bool EnableExperimentalMapFilters()
+    {
+        // The Steam map-filter port is still incomplete. Keep the core
+        // position-preservation fixes enabled, but defer filter UI behavior to
+        // the stock game until the full _bzcp.dll behavior is replicated.
+        return false;
+    }
+
     // Signature check block - 256 bytes at this address must match before patching
     static constexpr uint32_t BZR_SIGNATURE_ADDR = 0x00868300;
 
@@ -153,7 +161,7 @@ namespace BZROpenShim
     {
         using PT = PatchType;
         // Hop-fix + vehicle mod fix + version notice: keep patch surface minimal.
-        return
+        std::vector<PatchDef> patches =
         {
             { 0x0, PT::JMP5, {}, "Map Sorting", false },
             // -- Hop-Fix 1/3 --
@@ -171,15 +179,6 @@ namespace BZROpenShim
             { 0x0, PT::DWORD, {}, "Main Menu Version Text OpenShim", false },
             // -- Known map-jump fix (conditional -> unconditional branch) --
             { 0x0, PT::BYTE1, { 0xEB }, "Map Jump Fix Branch Override", false },
-            // -- Map filters (partial set) --
-            { 0x0, PT::JMP5, {}, "Map Filters 1/8", false },
-            { 0x0, PT::JMP5, {}, "Map Filters 2/8", false },
-            { 0x0, PT::JMP5, {}, "Map Filters 3/8", false },
-            { 0x0, PT::JMP5, {}, "Map Filters 4/8", false },
-            { 0x0, PT::JMP5, {}, "Map Filters 5/8", false },
-            { 0x0, PT::REL32, {}, "Map Filters 6/8", false },
-            { 0x0, PT::JMP5, {}, "Map Filters 7/8", false },
-            { 0x0, PT::JMP5, {}, "Map Filters 8/8", false },
             // -- Legacy chunk render bridge experiment --
             { 0x0, PT::REL32, {}, "Chunk Render Resolve Hook", false },
             // -- Producer build menu bridge experiment --
@@ -210,5 +209,19 @@ namespace BZROpenShim
             { 0x0, PT::JMP5, {}, "TurretCraft Aim Pitch Multiplier", false },
             { 0x0, PT::JMP5, {}, "TurretTank Aim Pitch Multiplier", false },
         };
+
+        if (EnableExperimentalMapFilters())
+        {
+            patches.push_back({ 0x0, PT::JMP5, {}, "Map Filters 1/8", false });
+            patches.push_back({ 0x0, PT::JMP5, {}, "Map Filters 2/8", false });
+            patches.push_back({ 0x0, PT::JMP5, {}, "Map Filters 3/8", false });
+            patches.push_back({ 0x0, PT::JMP5, {}, "Map Filters 4/8", false });
+            patches.push_back({ 0x0, PT::JMP5, {}, "Map Filters 5/8", false });
+            patches.push_back({ 0x0, PT::REL32, {}, "Map Filters 6/8", false });
+            patches.push_back({ 0x0, PT::JMP5, {}, "Map Filters 7/8", false });
+            patches.push_back({ 0x0, PT::JMP5, {}, "Map Filters 8/8", false });
+        }
+
+        return patches;
     }
 } // namespace BZROpenShim
