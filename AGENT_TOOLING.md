@@ -17,6 +17,32 @@ Use this together with [AGENTS.md](/c:/Users/istuart/Documents/GIT/Battlezone98R
 Prefer the stable wrappers in `C:\Users\istuart\bin`. They are already on
 `PATH` in this environment.
 
+## Agent Autonomy
+
+Use this split before choosing a tool.
+
+- Independent or mostly independent:
+  - `ghidra` MCP
+  - `redux_debug`
+  - Frida CLIs
+  - `angr`
+  - `ghidriff`
+  - `diec`
+  - Rizin CLIs
+  - Qiling wrapper
+- Partial / mixed:
+  - `Process Monitor`
+    - good for scripted capture, backing-file collection, and export
+    - still benefits from a human when interactively refining filters
+  - `Process Explorer`
+    - callable, but mainly a human inspection surface
+- Human-driven:
+  - `x32dbg`
+  - `Cutter`
+  - `ReClass.NET`
+  - `API Monitor`
+  - `Ghidrathon` inside the Ghidra GUI
+
 ### Ghidra / MCP
 
 - `bzr-ghidra-mcp.cmd`
@@ -50,12 +76,16 @@ Prefer the stable wrappers in `C:\Users\istuart\bin`. They are already on
   - Examples:
     - `bzr-redux-debug.cmd doctor`
     - `bzr-redux-debug.cmd probe 0x005E82B0 --backend cdb --wait-seconds 8 --length 16`
-  - Current caveat:
-    - the WinDbg `cdb` backend is installed and can launch Redux, but the
-      Python-side `OpenProcess` read path still needs hardening for that child
-      process shape on this machine. Treat the bridge as installed and useful,
-      but validate memory-read results before relying on it for patch-safe byte
-      capture.
+    - `bzr-redux-debug.cmd launch --backend cdb --wait-seconds 1`
+    - `bzr-redux-debug.cmd read 0x005E82B0 --length 16`
+  - Current behavior:
+    - the WinDbg `cdb` backend is the preferred path for hook-byte capture on
+      this machine.
+    - `probe --backend cdb` captures bytes with in-debugger `db` output, and
+      `read` against a saved `cdb` session relaunches through `cdb` instead of
+      depending on Python `OpenProcess` against the child process.
+    - use the `native` backend only when you explicitly want a persistent PID
+      session and plain `ReadProcessMemory`.
 
 ### WinDbg / x64dbg
 
@@ -93,6 +123,20 @@ Prefer the stable wrappers in `C:\Users\istuart\bin`. They are already on
   - Example:
     - `bzr-angr.cmd --help`
 
+### ghidriff
+
+- `bzr-ghidriff.cmd`
+  - Wrapper to the installed `ghidriff` CLI
+  - Use for:
+    - build-to-build binary diffing
+    - verifying whether a subsystem really changed between executable revisions
+    - producing markdown diff reports from Ghidra-backed analysis
+  - Example:
+    - `bzr-ghidriff.cmd --help`
+  - Notes:
+    - expects a working Ghidra install
+    - best used against old/new binary pairs, not as a general disassembler
+
 ### Qiling
 
 - `bzr-qiling.cmd`
@@ -126,6 +170,41 @@ Prefer the stable wrappers in `C:\Users\istuart\bin`. They are already on
     - `bzr-rizin.cmd -v`
     - `bzr-rz-bin.cmd -I "C:\Users\istuart\Documents\Battlezone 98 Redux\battlezone98redux.exe"`
 
+### Detect It Easy
+
+- `bzr-diec.cmd`
+- `bzr-die.cmd`
+  - Stable wrappers to the installed Detect It Easy CLI and GUI
+  - Use for:
+    - fast PE triage
+    - compiler/packer/signature checks
+    - quick pre-analysis classification before heavier reversing
+  - Example:
+    - `bzr-diec.cmd "C:\Users\istuart\Documents\Battlezone 98 Redux\battlezone98redux.exe"`
+  - Guidance:
+    - prefer `bzr-diec.cmd` for agent work
+    - use `bzr-die.cmd` only when a human wants the GUI
+
+### Sysinternals
+
+- `bzr-procmon.cmd`
+  - Stable wrapper to `Procmon.exe`
+  - Use for:
+    - startup/load-path mysteries
+    - file, registry, and DLL touch tracing
+    - backing-file capture flows that can later be inspected or exported
+  - Guidance:
+    - useful to agents for scripted capture and export
+    - a human still helps when interactively shaping filters
+- `bzr-procexp.cmd`
+  - Stable wrapper to `procexp.exe`
+  - Use for:
+    - loaded-module inspection
+    - parent/child process confirmation
+    - handle and thread inspection
+  - Guidance:
+    - primarily a human-operated inspection tool, not a first-choice autonomous surface
+
 ## Installed MCP Servers
 
 Configured in `%USERPROFILE%\.codex\config.toml`:
@@ -151,6 +230,8 @@ These are installed and usable from the local Python 3.13 environment.
   - Best-effort decompilation helpers
 - `angr`
   - Static + symbolic binary analysis
+- `ghidriff`
+  - Ghidra-backed binary diff engine
 - `frida`
   - Dynamic instrumentation runtime
 - `frida-tools`
@@ -177,6 +258,27 @@ These are installed and usable from the local Python 3.13 environment.
   - `MSBuild.exe`
 - Ghidra install
   - `C:\ghidra_12.0.4_PUBLIC`
+- Sysinternals
+  - `Process Monitor`
+  - `Process Explorer`
+- Detect It Easy
+  - portable WinGet install under `%LOCALAPPDATA%\Microsoft\WinGet\Packages`
+
+## Optional Manual Extras
+
+These are worth knowing about, but they are not currently part of the automated
+installer flow in this repo.
+
+- `Ghidrathon`
+  - useful when you specifically want Python 3 scripting inside the Ghidra GUI
+  - lower priority here because `pyghidra` and the Ghidra MCP cover most
+    agent-first workflows already
+- `ReClass.NET`
+  - useful for rebuilding live native class layouts and vtables
+  - human-assisted, not an unattended agent tool
+- `API Monitor`
+  - useful for fast manual Windows API and COM tracing
+  - less attractive when Frida already covers the same question programmatically
 
 ## Repo Scripts Worth Reusing
 
@@ -210,6 +312,16 @@ Prefer these before inventing a one-off script if they already cover the task.
   - fast dynamic tracing
   - argument/value logging
   - live API interception without rebuilding `winmm.dll`
+- Use `ghidriff` when the question is:
+  - did this executable revision really change here
+  - which functions moved or were rewritten between two builds
+  - produce a reusable diff report for later review
+- Use `diec` when the question is:
+  - what compiler/packer/signature does this binary show
+  - do quick triage before opening Ghidra
+- Use `bzr-procmon` when the question is:
+  - what files, registry keys, or DLLs did startup touch
+  - what path or load-order issue happened at runtime
 - Use angr or Qiling when the question is:
   - path exploration
   - symbolic constraints
