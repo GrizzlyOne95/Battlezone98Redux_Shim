@@ -7,8 +7,8 @@ param(
     [int]$ChunkLogBudget = 400,
     [int]$ChunkTraceEntryLimit = 16,
     [int]$PostCaptureWaitSeconds = 10,
-    [switch]$EnableChunkEffectTrace,
-    [switch]$EnableChunkProxyDebug,
+    [bool]$EnableChunkEffectTrace = $false,
+    [bool]$EnableChunkProxyDebug = $false,
     [switch]$KillExistingGame,
     [switch]$KillGameAfterCapture
 )
@@ -44,9 +44,13 @@ Remove-Item $stdoutLog,$stderrLog -ErrorAction SilentlyContinue
 $env:OPENSHIM_CHUNK_LOG_BUDGET = "$ChunkLogBudget"
 $env:OPENSHIM_CHUNK_TRACE_ENTRY_LIMIT = "$ChunkTraceEntryLimit"
 if ($EnableChunkEffectTrace) {
+    $env:OPENSHIM_TRACE_CHUNK_EFFECT = "1"
     $env:OPENSHIM_CHUNK_EFFECT_TRACE = "1"
+    $env:BZR_TRACE_CHUNK_EFFECT = "1"
 } else {
+    Remove-Item Env:OPENSHIM_TRACE_CHUNK_EFFECT -ErrorAction SilentlyContinue
     Remove-Item Env:OPENSHIM_CHUNK_EFFECT_TRACE -ErrorAction SilentlyContinue
+    Remove-Item Env:BZR_TRACE_CHUNK_EFFECT -ErrorAction SilentlyContinue
 }
 if ($EnableChunkProxyDebug) {
     $env:OPENSHIM_CHUNK_PROXY_DEBUG = "1"
