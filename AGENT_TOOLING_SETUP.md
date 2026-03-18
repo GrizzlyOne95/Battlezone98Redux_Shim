@@ -14,9 +14,13 @@ without copying machine-specific absolute paths from the current workstation.
 - x32dbg wrapper
 - Frida CLI wrappers
 - angr CLI wrapper
+- ghidriff CLI wrapper
 - Qiling wrapper
 - Rizin CLI wrappers
 - Cutter GUI wrapper
+- Detect It Easy CLI and GUI wrappers
+- Process Monitor wrapper
+- Process Explorer wrapper
 - Codex MCP config entries for:
   - `ghidra`
   - `redux_debug`
@@ -43,12 +47,16 @@ That script installs the free packages it can acquire automatically:
 - `x64dbg.x64dbg`
 - `Rizin.Rizin`
 - `Rizin.Cutter`
+- `horsicq.DIE-engine`
+- `Microsoft.Sysinternals.ProcessMonitor`
+- `Microsoft.Sysinternals.ProcessExplorer`
 - Python packages:
   - `pyghidra-mcp`
   - `angr`
   - `frida`
   - `frida-tools`
   - `qiling`
+  - `ghidriff`
 
 It also writes stable `bzr-*` wrappers into `%USERPROFILE%\bin` and updates
 `%USERPROFILE%\.codex\config.toml`.
@@ -114,6 +122,7 @@ Once installed, agents should prefer these stable wrappers from `%USERPROFILE%\b
 - `bzr-frida-ps.cmd`
 - `bzr-frida-trace.cmd`
 - `bzr-angr.cmd`
+- `bzr-ghidriff.cmd`
 - `bzr-qiling.cmd`
 - `bzr-rizin.cmd`
 - `bzr-rz-bin.cmd`
@@ -121,9 +130,54 @@ Once installed, agents should prefer these stable wrappers from `%USERPROFILE%\b
 - `bzr-cutter.cmd`
 - `bzr-cdb32.cmd`
 - `bzr-x32dbg.cmd`
+- `bzr-die.cmd`
+- `bzr-diec.cmd`
+- `bzr-procmon.cmd`
+- `bzr-procexp.cmd`
 
 The detailed local usage guide for agents lives in `AGENT_TOOLING.md` in the
 repo root after setup.
+
+## Tooling Categories
+
+Use this split when deciding what to automate on another PC.
+
+- Autonomous or mostly autonomous:
+  - `ghidra` MCP
+  - `redux_debug` bridge
+  - Frida CLIs
+  - `angr`
+  - `ghidriff`
+  - `diec`
+  - Rizin CLIs
+  - Qiling wrapper
+- Partially agent-usable:
+  - `Process Monitor`
+    - usable for scripted capture, backing-file collection, and export flows
+    - still benefits from a human when refining filters interactively
+  - `Process Explorer`
+    - callable, but mainly useful as a human inspection surface
+- Human-driven or manual-install extras:
+  - `Ghidrathon`
+    - useful inside Ghidra, but not the first agent interface in this repo
+  - `ReClass.NET`
+    - useful for live class-layout reconstruction, but not unattended
+  - `API Monitor`
+    - strong manual tracing tool, weak autonomous-agent surface
+
+## Manual Extras Not Automated By This Script
+
+These are worth documenting for another PC, but they are not currently installed
+by `install_agent_re_tooling.ps1`.
+
+- `Ghidrathon`
+  - install as a Ghidra extension if you specifically want Python 3 inside the
+    Ghidra GUI
+- `ReClass.NET`
+  - install manually if the task is live class/vtable reconstruction
+- `API Monitor`
+  - install manually if the task is targeted Win32 or COM tracing without
+    writing Frida scripts first
 
 ## Re-Running Safely
 
@@ -143,10 +197,13 @@ bzr-ghidra-mcp.cmd --help
 bzr-redux-debug.cmd doctor
 bzr-frida-ps.cmd --help
 bzr-angr.cmd --help
+bzr-ghidriff.cmd --help
 bzr-qiling.cmd version
 bzr-rizin.cmd -v
 bzr-rz-bin.cmd -h
 bzr-cdb32.cmd -version
+bzr-diec.cmd "%USERPROFILE%\Documents\Battlezone 98 Redux\battlezone98redux.exe"
+bzr-procmon.cmd /AcceptEula /Quiet /Minimized /Terminate
 ```
 
 If `Ghidra` is installed and the game path is correct, the MCP wrapper should

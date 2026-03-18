@@ -3,6 +3,7 @@ import ctypes
 import glob
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -59,6 +60,7 @@ kernel32.ReadProcessMemory.restype = ctypes.c_int
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATE_PATH = Path.home() / ".codex" / "tmp" / "redux_debug_bridge_state.json"
 DEFAULT_SETTLE_SECONDS = 15.0
+DEFAULT_CDB_TIMEOUT_SECONDS = 60.0
 
 
 @dataclass
@@ -306,6 +308,108 @@ def launch_process(command: list[str], cwd: Path) -> subprocess.Popen[Any]:
     return subprocess.Popen(command, cwd=str(cwd))
 
 
+def cdb_initial_dump_command(addresses: list[int], length: int) -> str:
+    commands: list[str] = []
+    for address in addresses:
+        commands.append(f".echo BZRBEGIN_{address:08X}")
+        commands.append(f"db {address:08x} L{length:x}")
+        commands.append(f".echo BZREND_{address:08X}")
+    commands.append("q")
+    return "; ".join(commands)
+
+
+def parse_cdb_dump_output(output: str, addresses: list[int], length: int) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+
+    for address in addresses:
+        begin_marker = f"BZRBEGIN_{address:08X}"
+        end_marker = f"BZREND_{address:08X}"
+        begin_match = re.search(rf"(?m)^\s*{re.escape(begin_marker)}\s*$", output)
+        if not begin_match:
+            raise RuntimeError(f"cdb output missing begin marker for 0x{address:08X}")
+        end_match = re.search(rf"(?m)^\s*{re.escape(end_marker)}\s*$", output[begin_match.end() :])
+        if not end_match:
+            raise RuntimeError(f"cdb output missing end marker for 0x{address:08X}")
+
+        payload_start = begin_match.end()
+        payload_end = payload_start + end_match.start()
+        payload = output[payload_start:payload_end]
+        byte_values: list[int] = []
+        for line in payload.splitlines():
+            match = re.match(r"^\s*([0-9A-Fa-f`]+)\s{2}(.*)$", line)
+            if not match:
+                continue
+
+            byte_field = match.group(2)
+            byte_field = re.split(r"\s{2,}", byte_field, maxsplit=1)[0]
+            byte_field = byte_field.replace("-", " ")
+            for token in re.findall(r"\b[0-9A-Fa-f]{2}\b", byte_field):
+                byte_values.append(int(token, 16))
+                if len(byte_values) >= length:
+                    break
+
+            if len(byte_values) >= length:
+                break
+
+        if not byte_values:
+            raise RuntimeError(f"cdb output did not contain any bytes for 0x{address:08X}")
+
+        rows.append(
+            {
+                "address_int": address,
+                "address": f"0x{address:08X}",
+                "length": min(length, len(byte_values)),
+                "data": bytes(byte_values[:length]),
+            }
+        )
+
+    return rows
+
+
+def cdb_probe_addresses(
+    addresses: list[int],
+    exe_path: str | None = None,
+    game_dir: str | None = None,
+    argline: str | None = "/nointro",
+    length: int = 16,
+    timeout_seconds: float = DEFAULT_CDB_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    resolved_game_dir = resolve_game_dir(game_dir)
+    resolved_game_exe = resolve_game_exe(exe_path, resolved_game_dir)
+    cdb = find_cdb_x86()
+    if not cdb:
+        raise FileNotFoundError("Could not locate x86 cdb.exe from the installed WinDbg package")
+
+    command = [
+        str(cdb),
+        "-c",
+        cdb_initial_dump_command(addresses, length),
+        str(resolved_game_exe),
+        *split_argline(argline),
+    ]
+
+    result = subprocess.run(
+        command,
+        cwd=str(resolved_game_dir),
+        capture_output=True,
+        text=True,
+        timeout=timeout_seconds,
+        check=False,
+    )
+    combined_output = (result.stdout or "") + ("\n" + result.stderr if result.stderr else "")
+    parsed = parse_cdb_dump_output(combined_output, addresses, length)
+
+    return {
+        "backend": "cdb",
+        "game_exe": str(resolved_game_exe),
+        "game_dir": str(resolved_game_dir),
+        "argline": argline or "",
+        "returncode": result.returncode,
+        "reads": parsed,
+        "raw_output": combined_output,
+    }
+
+
 def wait_for_descendant_process(root_pid: int, exe_name: str, timeout_seconds: float) -> int:
     deadline = time.time() + timeout_seconds
     exe_name = exe_name.lower()
@@ -417,17 +521,38 @@ def read_memory_command(
 ) -> dict[str, Any]:
     session = load_state(state_path)
     target_pid = pid or int(session.get("target_pid", 0))
-    if not target_pid:
-        raise RuntimeError("No target PID supplied and no saved session is available")
-
     parsed_address = parse_address(address)
-    data = read_process_memory(target_pid, parsed_address, length)
+
+    backend = str(session.get("backend") or "")
+    if pid:
+        data = read_process_memory(target_pid, parsed_address, length)
+        target_pid_value: int | None = target_pid
+        source = "pid"
+    elif backend in ("cdb", "windbg"):
+        probe = cdb_probe_addresses(
+            [parsed_address],
+            exe_path=str(session.get("game_exe") or "") or None,
+            game_dir=str(session.get("game_dir") or "") or None,
+            argline=" ".join(session.get("game_args") or []),
+            length=length,
+        )
+        data = probe["reads"][0]["data"]
+        target_pid_value = None
+        source = "cdb_relaunch"
+    else:
+        if not target_pid:
+            raise RuntimeError("No target PID supplied and no saved session is available")
+        data = read_process_memory(target_pid, parsed_address, length)
+        target_pid_value = target_pid
+        source = "saved_session_pid"
+
     return {
-        "pid": target_pid,
+        "pid": target_pid_value,
         "address": f"0x{parsed_address:08X}",
         "length": len(data),
         "bytes": format_bytes(data, render_as),
         "render_as": render_as,
+        "source": source,
     }
 
 
@@ -481,8 +606,40 @@ def probe_addresses(
     length: int = 16,
     state_path: Path = DEFAULT_STATE_PATH,
 ) -> dict[str, Any]:
+    resolved_backend = detect_backend(backend)
+    parsed_addresses = [parse_address(address) for address in addresses]
+
+    if resolved_backend in ("cdb", "windbg"):
+        probe = cdb_probe_addresses(
+            parsed_addresses,
+            exe_path=exe_path,
+            game_dir=game_dir,
+            argline=argline,
+            length=length,
+        )
+        return {
+            "session": {
+                "backend": resolved_backend,
+                "game_exe": probe["game_exe"],
+                "game_dir": probe["game_dir"],
+                "argline": probe["argline"],
+                "returncode": probe["returncode"],
+                "mode": "cdb_direct_probe",
+            },
+            "reads": [
+                {
+                    "address": row["address"],
+                    "length": row["length"],
+                    "bytes": format_bytes(row["data"], "hex"),
+                    "render_as": "hex",
+                    "source": "cdb_direct_probe",
+                }
+                for row in probe["reads"]
+            ],
+        }
+
     session = launch_session(
-        backend=backend,
+        backend=resolved_backend,
         exe_path=exe_path,
         game_dir=game_dir,
         argline=argline,

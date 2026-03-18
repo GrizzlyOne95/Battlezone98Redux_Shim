@@ -50,11 +50,11 @@ function Invoke-PipInstall([string[]]$Packages) {
 }
 
 function Get-PythonUserScripts() {
-    $userBase = python -c "import site; print(site.USER_BASE)"
-    if ($LASTEXITCODE -ne 0 -or -not $userBase) {
-        throw "Unable to resolve Python USER_BASE"
+    $scriptsDir = python -c "import sysconfig; print(sysconfig.get_path('scripts', 'nt_user'))"
+    if ($LASTEXITCODE -ne 0 -or -not $scriptsDir) {
+        throw "Unable to resolve Python user scripts directory"
     }
-    return (Join-Path $userBase.Trim() "Scripts")
+    return $scriptsDir.Trim()
 }
 
 function Get-WinDbgRoot() {
@@ -83,6 +83,25 @@ function Get-CutterPath() {
     }
 
     $match = Get-ChildItem $base -Recurse -Filter cutter.exe -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty FullName
+    return $match
+}
+
+function Get-WinGetPackageExe([string]$PackageId, [string]$ExeName) {
+    $base = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages"
+    if (-not (Test-Path $base)) {
+        return ""
+    }
+
+    $packageRoot = Get-ChildItem $base -Directory -Filter "$PackageId*" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1 -ExpandProperty FullName
+    if (-not $packageRoot) {
+        return ""
+    }
+
+    $match = Get-ChildItem $packageRoot -Recurse -Filter $ExeName -ErrorAction SilentlyContinue |
+        Sort-Object FullName |
         Select-Object -First 1 -ExpandProperty FullName
     return $match
 }
@@ -147,13 +166,17 @@ Invoke-WingetInstall "Microsoft.WinDbg"
 Invoke-WingetInstall "x64dbg.x64dbg"
 Invoke-WingetInstall "Rizin.Rizin"
 Invoke-WingetInstall "Rizin.Cutter"
+Invoke-WingetInstall "horsicq.DIE-engine"
+Invoke-WingetInstall "Microsoft.Sysinternals.ProcessMonitor"
+Invoke-WingetInstall "Microsoft.Sysinternals.ProcessExplorer"
 
 Invoke-PipInstall @(
     "pyghidra-mcp",
     "angr",
     "frida",
     "frida-tools",
-    "qiling"
+    "qiling",
+    "ghidriff"
 )
 
 $pythonScripts = Get-PythonUserScripts
@@ -161,6 +184,11 @@ $winDbgRoot = Get-WinDbgRoot
 $cdb32 = if ($winDbgRoot) { Join-Path $winDbgRoot "x86\cdb.exe" } else { "" }
 $x32dbg = Get-X32DbgPath
 $cutter = Get-CutterPath
+$ghidriff = Join-Path $pythonScripts "ghidriff.exe"
+$die = Get-WinGetPackageExe "horsicq.DIE-engine" "die.exe"
+$diec = Get-WinGetPackageExe "horsicq.DIE-engine" "diec.exe"
+$procmon = Get-WinGetPackageExe "Microsoft.Sysinternals.ProcessMonitor" "Procmon.exe"
+$procexp = Get-WinGetPackageExe "Microsoft.Sysinternals.ProcessExplorer" "procexp.exe"
 $rizin = "C:\Program Files\Rizin\bin\rizin.exe"
 $rzBin = "C:\Program Files\Rizin\bin\rz-bin.exe"
 $rzAsm = "C:\Program Files\Rizin\bin\rz-asm.exe"
@@ -174,6 +202,7 @@ if (-not $SkipWrappers) {
     Set-CmdWrapper (Join-Path $UserBin "bzr-frida-ps.cmd") "`"$pythonScripts\frida-ps.exe`""
     Set-CmdWrapper (Join-Path $UserBin "bzr-frida-trace.cmd") "`"$pythonScripts\frida-trace.exe`""
     Set-CmdWrapper (Join-Path $UserBin "bzr-angr.cmd") "`"$pythonScripts\angr.exe`""
+    if (Test-Path $ghidriff) { Set-CmdWrapper (Join-Path $UserBin "bzr-ghidriff.cmd") "`"$ghidriff`"" }
 
     if (Test-Path $rizin) { Set-CmdWrapper (Join-Path $UserBin "bzr-rizin.cmd") "`"$rizin`"" }
     if (Test-Path $rzBin) { Set-CmdWrapper (Join-Path $UserBin "bzr-rz-bin.cmd") "`"$rzBin`"" }
@@ -181,6 +210,10 @@ if (-not $SkipWrappers) {
     if ($cutter -and (Test-Path $cutter)) { Set-CmdWrapper (Join-Path $UserBin "bzr-cutter.cmd") "`"$cutter`"" }
     if ($cdb32 -and (Test-Path $cdb32)) { Set-CmdWrapper (Join-Path $UserBin "bzr-cdb32.cmd") "`"$cdb32`"" }
     if ($x32dbg -and (Test-Path $x32dbg)) { Set-CmdWrapper (Join-Path $UserBin "bzr-x32dbg.cmd") "`"$x32dbg`"" }
+    if ($die -and (Test-Path $die)) { Set-CmdWrapper (Join-Path $UserBin "bzr-die.cmd") "`"$die`"" }
+    if ($diec -and (Test-Path $diec)) { Set-CmdWrapper (Join-Path $UserBin "bzr-diec.cmd") "`"$diec`"" }
+    if ($procmon -and (Test-Path $procmon)) { Set-CmdWrapper (Join-Path $UserBin "bzr-procmon.cmd") "`"$procmon`"" }
+    if ($procexp -and (Test-Path $procexp)) { Set-CmdWrapper (Join-Path $UserBin "bzr-procexp.cmd") "`"$procexp`"" }
 
     Write-Info "Wrote wrappers to $UserBin"
 }
