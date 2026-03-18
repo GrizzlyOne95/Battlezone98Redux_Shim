@@ -1,6 +1,13 @@
 # BZR-OpenShim
 
-This repo is part of the shared Battlezone workspace described in `C:\Users\iestu\Documents\GIT\BZR-Workspace\AGENTS.md`.
+This repo is part of the local Battlezone workspace opened via
+`%USERPROFILE%\Documents\Battlezone98Redux_Shim.code-workspace`.
+
+## Workspace Layout
+- Sibling repos normally live under `%USERPROFILE%\Documents\GIT\...`.
+- The primary local game install is typically `%USERPROFILE%\Documents\Battlezone 98 Redux`.
+- Some machines also keep a baseline install at `C:\GOG Games\Battlezone 98 Redux`.
+- Prefer the workspace file and these conventions over hardcoded profile-specific paths.
 
 ## Local Role
 - Native shim, patching, and reverse-engineering repo.
@@ -15,9 +22,26 @@ This repo is part of the shared Battlezone workspace described in `C:\Users\iest
 - If future work returns to map filters, keep the core hop-fix and manual
   refresh preservation behavior separate from the filter/sort port.
 
-## Cross-Repo Pointers
-- Addon-side consumers and Lua integration points live in `C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux\addon\campaignReimagined`.
-- Subtitle integration work may involve `C:\Users\iestu\Documents\GIT\BZR-Subtitles`.
-- Rendering-adjacent work may involve `C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux\addon\shadersEnhanced` or `C:\Users\iestu\Documents\GIT\ogre-1.10.0`.
+## Executable Baseline Notes
+- For the Battlezone 98 Redux builds checked so far, the Steam executable has
+  matched the GOG executable byte-for-byte once the game has launched and the
+  runtime bytes have settled.
+- For static analysis, reverse-engineering, and best-effort decompilation, it
+  is acceptable to use the GOG executable as the baseline reference unless a
+  concrete mismatch is observed.
+- When validating Steam behavior, account for the post-launch settle delay
+  before treating a byte difference as a real build difference.
+- If future investigation finds a divergence, prefer documenting the exact
+  offset or subsystem mismatch rather than assuming the full executable differs.
 
-Open the shared workspace file `C:\Users\iestu\Documents\GIT\BZR-Workspace\Battlezone98.code-workspace` when a task may span repos.
+## Cross-Repo Pointers
+- Addon-side consumers and Lua integration points live in the deployed campaign addon under the workspace game install, usually `%USERPROFILE%\Documents\Battlezone 98 Redux\addon\campaignReimagined`.
+- Subtitle integration work may involve `%USERPROFILE%\Documents\GIT\BZR-Subtitles`.
+- Rendering-adjacent work may involve the deployed shader addon under the workspace game install, `%USERPROFILE%\Documents\GIT\Battlezone98Redux_EnhancedShaders`, or `%USERPROFILE%\Documents\GIT\ogre-1.10.0`.
+
+Open `%USERPROFILE%\Documents\Battlezone98Redux_Shim.code-workspace` when a task may span repos.
+
+## Agent Tooling
+- Read `AGENT_TOOLING.md` at repo start for the current local RE/tooling inventory.
+- Read `AGENT_TOOLING_SETUP.md` when reproducing the toolchain on another PC.
+- Prefer the stable `bzr-*` wrappers from `C:\Users\istuart\bin` over package-specific install paths.
