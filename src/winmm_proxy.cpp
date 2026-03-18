@@ -16,6 +16,11 @@ extern "C" WINMMAPI BOOL WINAPI OpenShimSetUnderAttackAlertMode(int mode)
     return BZROpenShim::SetUnderAttackAlertModeFromBridge(mode) ? TRUE : FALSE;
 }
 
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetTargetReticlePopupMode(int mode)
+{
+    return BZROpenShim::SetTargetReticlePopupModeFromBridge(mode) ? TRUE : FALSE;
+}
+
 // Legacy thunk exports that need naked tail-jump forwarders.
 #define LEGACY_NAKED_EXPORTS(X) \
     X(WOW32DriverCallback) \

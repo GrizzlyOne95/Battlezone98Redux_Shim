@@ -218,6 +218,75 @@ Representative first burst from the report:
 
 That matters because it is direct live evidence that Redux's native `ChunkEffect` manager is already tracking real `CLASS_ID_CHUNK` legacy objects. This is no longer inference from decomp alone.
 
+## March 18 Native Hook Result
+
+The next step was moving this runtime proof into OpenShim itself so the shim could observe the real native chunk manager without an attached debugger.
+
+OpenShim now hooks the `ChunkEffect::Simulate` vtable slot directly:
+
+- vtable slot: `0x0087708C`
+- original function: `0x004917F0`
+- shim hook: `ChunkEffectSimulateHook`
+
+That hook samples the active `ChunkEffect` array before calling the original virtual. Sampling before the original mattered: post-call tracing often only saw `count=0`, but pre-call tracing immediately matched the external sampler and the user's `misn03` repro.
+
+With `OPENSHIM_CHUNK_EFFECT_TRACE=1`, the shim now logs live entries like:
+
+- `count=2 gate=0x025D0608 templateCount=2`
+- `entry[0] obj=0x3096CF70 classId=53 owner=0 pos=(...) vel=(...)`
+- `entry[1] obj=0x2D39D948 classId=53 owner=0 pos=(...) vel=(...)`
+
+This closes the loop on several earlier hypotheses:
+
+- the real fragmentation path is not exposed through the old `ChunkRenderResolveHook`
+- Redux still creates and simulates real native `CLASS_ID_CHUNK` objects
+- those live chunk objects still have no normal `owner` bridge to Ogre
+- the active manager already exposes object pointer, position, and velocity per chunk
+
+So the best hook point for restoration is now clear: `ChunkEffect`, not the stock chunk render resolve path.
+
+## March 18 Placeholder Proxy Result
+
+After switching the placeholder prototype to consume only true live `ChunkEffect` entries, the old "everything exploded" failure mode went away.
+
+The new proxy debug path now:
+
+- initializes only from real `ChunkEffect` active entries
+- filters to `class_id == 53`
+- uses the entry position directly instead of trying to infer transform from every live GEO object
+- updates from the existing render heartbeat rather than from the old broad GEO resolve path
+
+The automated `misn03` proxy-debug run at:
+
+- [`chunk_effect_probe_20260318_000140`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260318_000140)
+
+showed:
+
+- `Placeholder proxy debug: enabled`
+- `Initialized billboard debug set=...`
+- stable nonzero `CHUNKEFFECT` entries during live chunk simulation
+- no new crash dump during the automated capture window
+
+That is not yet full visual confirmation of restored debris, but it is the first stable run where Ogre billboard debug resources were created from the true native chunk list instead of from generic live GEO objects.
+
+## Updated Practical Read
+
+At this point the problem is no longer "find where chunks exist." They exist, and Redux tracks them natively in a dedicated manager.
+
+The remaining gap is specifically:
+
+1. native `ChunkEffect` creates and simulates chunk-class `_OBJ76*` objects
+2. those objects have valid class/state/position data
+3. those objects do not carry a normal Redux `owner -> Ogre` bridge
+4. therefore they stay physically active but visually absent unless OpenShim creates a render-side proxy
+
+So the most feasible restoration path remains:
+
+1. track active `ChunkEffect` entries in-shim
+2. create transient Ogre proxy visuals for those live `CLASS_ID_CHUNK` objects
+3. mirror their position/lifetime from the native manager
+4. later replace placeholder billboards with reconstructed piece geometry once the render loop is proven
+
 The entry layout now also looks substantially more understandable. For multiple consecutive samples:
 
 - entry word `[0]` is the chunk `_OBJ76*`

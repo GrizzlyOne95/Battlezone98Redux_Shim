@@ -109,6 +109,28 @@ From `public_functions.csv`:
 
 These are the main Redux native targets for implementation.
 
+## Live Redux Revalidation
+
+Steam runtime revalidation was completed on March 17, 2026 against a live
+`battlezone98redux.exe /nointro` session.
+
+Verified results on the running Steam 2.2.301 process:
+
+- the first `96` bytes of `SelectionDisplay::Render` body at `0x0043E100`
+  matched the GOG executable exactly
+- the first `96` bytes of `GameObject::SetDamageFlags` at `0x0046C860`
+  matched the GOG executable exactly
+- the first `96` bytes of `Targeting::Simulate` at `0x00527550`
+  matched the GOG executable exactly
+
+Practical takeaway:
+
+- the current Steam build can reuse the same starting function bodies as GOG
+  for these targets
+- the launchability blocker is gone for this feature
+- the remaining native RE work is now about selecting the cleanest branch/hook
+  inside `SelectionDisplay::Render`, not about basic address drift
+
 ## Recommended Patch Shape
 
 The safest behavioral design is still to patch the render-side decision rather
@@ -143,26 +165,26 @@ Planned chain:
 
 ## Current Blocker
 
-This environment is not launchable for the target runtime, so the exact Redux
-instruction bytes at the live hook site were not revalidated yet.
+The original launchability blocker has been cleared, and the live Steam body
+bytes for the three key Redux functions were revalidated successfully.
 
 What is known:
 
 - semantic behavior from the legacy exact-match decompile
 - matching Redux GOG function names and addresses from the PDB export
+- live Steam byte parity for the first `96` bytes of the main Redux targets
 - the campaign/EXU/OpenShim config bridge pattern already used elsewhere
 
 What is still needed before shipping native code:
 
-- validate the live Redux hook site in a runnable session
 - recover the exact instruction sequence around the chosen render-side branch
-- verify Steam separately if this is intended to ship there too
+- identify the cheapest team read for the neutral-only mode gate
+- choose the safest hook window inside `SelectionDisplay::Render`
 
 ## Resume Checklist
 
-When a runnable build is available again:
-
-1. validate `SelectionDisplay::Render` at `0x0043E0E0`
+1. `SelectionDisplay::Render` live body revalidated on Steam at `0x0043E100`
+   (`0x0043E0E0` symbol entry still points at the short thunk/prelude region)
 2. locate the exact branch that corresponds to the `playerShot` popup path
 3. confirm where team number can be read cheaply for the rendered object
 4. add OpenShim mode enum and bridge export
