@@ -4,7 +4,7 @@ param(
     [double]$SampleWindowSeconds = 3.0,
     [int]$ChunkLogBudget = 600,
     [int]$ChunkTraceEntryLimit = 8,
-    [int]$PostCaptureWaitSeconds = 10,
+    [int]$PostCaptureWaitSeconds = 2,
     [bool]$EnableChunkEffectTrace = $true,
     [bool]$EnableChunkProxyDebug = $true
 )
