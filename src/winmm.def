@@ -6,6 +6,7 @@ LIBRARY winmm
 
 EXPORTS
     OpenShimSetUnderAttackAlertMode
+    OpenShimSetTargetReticlePopupMode
     CloseDriver
     DefDriverProc
     DriverCallback

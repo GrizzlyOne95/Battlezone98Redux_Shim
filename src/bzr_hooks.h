@@ -32,9 +32,13 @@ namespace BZROpenShim
     void __cdecl EngineFlameHoverCraftEmitHook(void* managerPtr, const void* transform, uint32_t scaleBits, void* craftPtr);
     void __fastcall EngineFlameControlHook(void* thisPtr, void* edx);
     void __fastcall EngineFlameSubmitHook(void* thisPtr, void* edx, void* camera);
+    void __fastcall ChunkEffectSimulateHook(void* thisPtr, void* edx, float dt);
     void __cdecl HandleUnderAttackAlert(float currentTime);
     void PrimeUnderAttackAlertConfig();
     bool SetUnderAttackAlertModeFromBridge(int mode);
+    float __fastcall TargetReticlePopupRecentHitGetterHook(void* objectPtr, void* edx);
+    void PrimeTargetReticlePopupConfig();
+    bool SetTargetReticlePopupModeFromBridge(int mode);
 
     // Custom /help + /ban command intercept.
     bool __cdecl HandleCommandHelpBan(uint16_t id, const char* cmd);
