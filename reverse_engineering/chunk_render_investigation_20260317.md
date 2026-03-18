@@ -322,6 +322,62 @@ So the proxy manager is now doing the full expected placeholder lifecycle on una
 3. assign an Ogre billboard
 4. expire the proxy once the native chunk stops appearing
 
+## March 18 Template Identity Result
+
+The next question was whether a live native chunk entry carries any stable piece identity beyond just "some `CLASS_ID_CHUNK` object."
+
+The richer runtime probe now captures:
+
+- `obj + 0x64` as a likely chunk template reference
+- `obj + 0x78/0x7C/0x80` as the live parent/sibling/child links
+- a raw snapshot of the `ChunkEffect` template list
+- one level of sub-structure snapshots beneath each unique template reference
+
+That probe showed a very important result: the candidate template reference at `obj + 0x64` dereferences to a tiny named template block whose first field is an ASCII string pointer.
+
+Representative unattended capture:
+
+- [`chunk_effect_probe_20260318_074532`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260318_074532)
+
+Representative live sample:
+
+- `entry[0] obj=... template=0x259A0C08 ...`
+- `entry[1] obj=... template=0x2002FC40 ...`
+- template ref `0x259A0C08` -> string `chunk1`
+- template ref `0x2002FC40` -> string `chunk2`
+
+This is the first direct proof that Redux's native chunk simulation preserves a stable per-piece name at runtime, not just anonymous physics state.
+
+It also lines up with the asset side. The same Steam install already contains stock Ogre-era resources like:
+
+- `iechunk1.geo`
+- `iechunk1.mesh`
+- `iechunk2.geo`
+- `iechunk2.mesh`
+
+and the Ogre/BZ logs show those assets being discovered and loaded during startup.
+
+## Updated Restoration Read
+
+This narrows the real rendering problem substantially:
+
+1. native chunk simulation already preserves piece identity as `chunkN`
+2. stock Redux already ships many corresponding Ogre chunk meshes for stock assets
+3. the missing piece is therefore not "invent what chunk piece this is"
+4. the missing piece is "bind the native chunk piece identity to an Ogre renderable at runtime"
+
+That changes the practical fix design:
+
+- for stock assets, the fastest path is likely to reuse existing Ogre chunk meshes by combining the source object's model family/prefix with the native `chunkN` template name
+- for custom assets, the same native `chunkN` identity can drive an exported/generated mesh path when no stock Ogre chunk mesh exists
+
+In other words, the comprehensive solution now looks less like "reverse the whole fragmentation system" and more like:
+
+1. cache the dying object's source model identity before the bridge disappears
+2. read the live native chunk template name (`chunk1`, `chunk2`, etc.) from `obj + 0x64`
+3. resolve or synthesize the corresponding Ogre mesh for that `(source-prefix + chunkN)` pair
+4. attach that render proxy to the existing native `ChunkEffect` lifecycle already proven in-shim
+
 ## Updated Practical Read
 
 At this point the problem is no longer "find where chunks exist." They exist, and Redux tracks them natively in a dedicated manager.
