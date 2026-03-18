@@ -883,8 +883,16 @@ namespace BZROpenShim
             return true;
         }
 
-        static void ReleaseChunkProxySlot(ChunkProxySlot& slot)
+        static void ReleaseChunkProxySlot(ChunkProxySlot& slot, const wchar_t* reason = nullptr)
         {
+            if (slot.active && reason && AcquireChunkLogSlot())
+            {
+                Log(L"[CHUNKPROXY] release obj=0x%08X billboard=0x%08X reason=%ls\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.billboard)),
+                    reason);
+            }
+
             if (slot.billboardAssigned)
                 HideChunkProxyBillboard(slot.billboard);
             slot.objectBytes = nullptr;
@@ -915,16 +923,25 @@ namespace BZROpenShim
             }
             else if (!TryGetChunkProxyPosition(slot.objectBytes, x, y, z))
             {
-                ReleaseChunkProxySlot(slot);
+                ReleaseChunkProxySlot(slot, L"transform-read-failed");
                 return;
             }
 
             if (!TrySetChunkProxyBillboardPosition(slot.billboard, setPosition, x, y, z))
             {
-                ReleaseChunkProxySlot(slot);
+                ReleaseChunkProxySlot(slot, L"billboard-set-failed");
                 return;
             }
 
+            if (!slot.billboardAssigned && AcquireChunkLogSlot())
+            {
+                Log(L"[CHUNKPROXY] assigned obj=0x%08X billboard=0x%08X pos=(%.4f, %.4f, %.4f)\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.billboard)),
+                    static_cast<double>(x),
+                    static_cast<double>(y),
+                    static_cast<double>(z));
+            }
             slot.billboardAssigned = true;
         }
 
@@ -946,7 +963,7 @@ namespace BZROpenShim
                 if (slot.lastSeenTick == 0 ||
                     static_cast<DWORD>(now - slot.lastSeenTick) >= kChunkProxyExpireMs)
                 {
-                    ReleaseChunkProxySlot(slot);
+                    ReleaseChunkProxySlot(slot, L"expired");
                     continue;
                 }
 
@@ -995,6 +1012,14 @@ namespace BZROpenShim
             freeSlot->lastSeenTick = now;
             freeSlot->active = true;
             freeSlot->billboardAssigned = false;
+            if (AcquireChunkLogSlot())
+            {
+                Log(L"[CHUNKPROXY] tracking obj=0x%08X pos=(%.4f, %.4f, %.4f)\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectBytes)),
+                    static_cast<double>(positionX),
+                    static_cast<double>(positionY),
+                    static_cast<double>(positionZ));
+            }
         }
 
         static void TrackChunkProxyDebugObject(
@@ -3929,7 +3954,6 @@ namespace BZROpenShim
             EnvFlagEnabled("BZR_CHUNK_TRACE_VERBOSE") ||
             EnvFlagEnabled("OPENSHIM_CHUNK_TRACE_VERBOSE");
         g_TraceChunkEffectRuntime =
-            g_EnableChunkProxyDebug ||
             EnvFlagEnabled("BZR_TRACE_CHUNK_EFFECT") ||
             EnvFlagEnabled("OPENSHIM_TRACE_CHUNK_EFFECT") ||
             EnvFlagEnabled("OPENSHIM_CHUNK_EFFECT_TRACE");
