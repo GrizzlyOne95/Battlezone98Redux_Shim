@@ -269,6 +269,59 @@ showed:
 
 That is not yet full visual confirmation of restored debris, but it is the first stable run where Ogre billboard debug resources were created from the true native chunk list instead of from generic live GEO objects.
 
+## March 18 Automation Tightening
+
+The `misn03` harness is now more useful as an unattended regression tool instead of just a one-off probe:
+
+- [`run_misn03_chunk_probe.ps1`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\run_misn03_chunk_probe.ps1) can now set chunk log budget, trace entry limits, chunk-effect tracing, proxy debug, and post-capture wait time for a single automated run
+- [`run_misn03_chunk_probe_series.ps1`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\run_misn03_chunk_probe_series.ps1) can repeat the `misn03` repro multiple times and summarize proxy lifecycle events per run
+
+OpenShim's proxy debug logging was also tightened to emit low-noise lifecycle markers:
+
+- `tracking obj=...`
+- `assigned obj=... billboard=...`
+- `release obj=... reason=expired`
+
+That matters because it lets the shim answer "did a real native chunk reach the Ogre-side placeholder path?" entirely from archived logs, without requiring a debugger or a manual screenshot for every pass.
+
+The automated series runs on March 18 consistently showed:
+
+- proxy initialization succeeded
+- real `CLASS_ID_CHUNK` entries were tracked into proxy slots
+- billboard assignment happened for those same native chunk objects
+
+Representative unattended runs:
+
+- [`chunk_effect_probe_20260318_071733`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260318_071733)
+- [`chunk_effect_probe_20260318_071826`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260318_071826)
+
+In both cases the first proxy lifecycle lines looked like:
+
+- `tracking obj=...`
+- `assigned obj=... billboard=...`
+
+## March 18 Long-Wait Lifecycle Result
+
+A longer single automated run with a larger log budget and a longer post-capture wait:
+
+- [`chunk_effect_probe_20260318_072541`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260318_072541)
+
+finally captured not just tracking and assignment, but expiry and billboard-slot reuse:
+
+- `tracking obj=0x29C042B8 ...`
+- `assigned obj=0x29C042B8 billboard=0x298F45A0 ...`
+- `tracking obj=0x2CEDD708 ...`
+- `assigned obj=0x2CEDD708 billboard=0x298D9270 ...`
+- `release obj=0x2CEDD708 billboard=0x298D9270 reason=expired`
+- later reuse of that same billboard slot for a different chunk object
+
+So the proxy manager is now doing the full expected placeholder lifecycle on unattended runs:
+
+1. observe real native chunk entries from `ChunkEffect`
+2. allocate or reuse a proxy slot
+3. assign an Ogre billboard
+4. expire the proxy once the native chunk stops appearing
+
 ## Updated Practical Read
 
 At this point the problem is no longer "find where chunks exist." They exist, and Redux tracks them natively in a dedicated manager.
