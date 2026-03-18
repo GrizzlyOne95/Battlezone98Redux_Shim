@@ -15,6 +15,7 @@
 #include <cstring>
 #include <climits>
 #include <filesystem>
+#include <fstream>
 #include <new>
 #include <string>
 #include <unordered_map>
@@ -121,6 +122,7 @@ namespace BZROpenShim
     using FnGetPlayerHandle = int(__cdecl*)();
     using FnGameObjectGetObjByHandle = void* (__cdecl*)(int handle);
     using FnPersonSimulate = void(__thiscall*)(void* thisPtr, float dt);
+    using FnOptionsInputPopulateUi = void(__thiscall*)(void* thisPtr);
 
     static void** g_BzrPtr_945478 = nullptr;
     static void** g_BzrPtr_94548C = nullptr;
@@ -183,6 +185,7 @@ namespace BZROpenShim
     static FnGetPlayerHandle g_BzrFn_GetPlayerHandle = nullptr;
     static FnGameObjectGetObjByHandle g_BzrFn_GameObjectGetObjByHandle = nullptr;
     static FnPersonSimulate g_BzrFn_PersonSimulate = nullptr;
+    static FnOptionsInputPopulateUi g_BzrFn_OptionsInputPopulateUi = nullptr;
     static BuildItem* g_BzrBuildMenuRoot = nullptr;
     static bool g_IsSteamExe = false;
 
@@ -251,6 +254,9 @@ namespace BZROpenShim
         constexpr uintptr_t kGogPersonSimulateEntryAddr = 0x004F4370;
         constexpr uintptr_t kGogGetPlayerHandleAddr = 0x00514610;
         constexpr uintptr_t kGogGameObjectGetObjByHandleAddr = 0x0046B160;
+        constexpr uintptr_t kOptionsInputPopulateUiRva = 0x001E82B0;
+        constexpr uintptr_t kOptionsInputKeyReleasedRva = 0x001E7D10;
+        constexpr uintptr_t kOptionsInputResetDefaultsRva = 0x001E5E50;
         constexpr size_t kInlineDetourMaxPatchLen = 16;
         constexpr size_t kPersonSimulateDetourLen = 8;
         constexpr uint32_t kWeaponSigSnip = 0x534E4950u;
@@ -356,6 +362,47 @@ namespace BZROpenShim
             ProducerBuildMenuEntry factory = {};
             ProducerBuildMenuEntry armory = {};
             ProducerBuildMenuEntry constructionRig = {};
+        };
+
+        enum class InputBindingMapFamily
+        {
+            Input,
+            GameKey,
+        };
+
+        struct InputBindingCommandBlock
+        {
+            std::string command;
+            std::string comment;
+            std::vector<std::string> positiveKeyboardTokens;
+            bool hasPositiveNonKeyboard = false;
+        };
+
+        struct InputBindingInventoryStats
+        {
+            size_t uniqueCommandBlocks = 0;
+            size_t simpleKeyboardBlocks = 0;
+            size_t keyboardChordBlocks = 0;
+            size_t mixedBlocks = 0;
+        };
+
+        struct InputBindingRowSeed
+        {
+            const char* command = nullptr;
+            const char* labelKey = nullptr;
+            const char* displayText = nullptr;
+        };
+
+        struct InputBindingUiRow
+        {
+            InputBindingMapFamily family = InputBindingMapFamily::Input;
+            std::string command;
+            std::string displayLabelKey;
+            std::string displayText;
+            std::string currentBindingText;
+            bool reserved = false;
+            bool foundInMap = false;
+            size_t matchingBlockCount = 0;
         };
 
         static bool g_BansConfigLoaded = false;
@@ -491,6 +538,16 @@ namespace BZROpenShim
         static bool g_EngineFlameVariantsInitialized = false;
         static bool g_EngineFlameVariantsInitAttempted = false;
         static bool g_EngineFlameVtableHooksInstalled = false;
+        static InlineDetour32 g_OptionsInputPopulateUiDetour = {};
+        static bool g_InputBindingUiScaffoldInitialized = false;
+        static bool g_InputBindingUiScaffoldLogged = false;
+        static bool g_InputBindingUiPopulateHookInstallAttempted = false;
+        static bool g_InputBindingUiPopulateHookInstalled = false;
+        static std::filesystem::path g_InputBindingInstallDirectory = {};
+        static InputBindingInventoryStats g_InputBindingInventory = {};
+        static std::vector<InputBindingCommandBlock> g_InputBindingCommandBlocks = {};
+        static std::vector<InputBindingUiRow> g_InputBindingUiRows = {};
+        static void* g_LastOptionsInputScreen = nullptr;
         static int g_EngineFlamePrimaryRedTexture = 0;
         static int g_EngineFlamePrimaryGreenTexture = 0;
         static void* g_EngineFlamePrimaryManager = nullptr;
@@ -547,6 +604,43 @@ namespace BZROpenShim
         static TargetReticlePopupMode g_TargetReticlePopupMode = TargetReticlePopupMode::Default;
         static bool g_TargetReticlePopupSteamNeutralAllowed = false;
         static bool g_TargetReticlePopupSteamNeutralWarned = false;
+        static constexpr InputBindingRowSeed kInputBindingFirstPassSeeds[] = {
+            { "center_player", nullptr, "Center On Player" },
+            { "center_recycler", nullptr, "Center On Recycler" },
+            { "menu_up", nullptr, "Menu Up" },
+            { "menu_down", nullptr, "Menu Down" },
+            { "menu_back", nullptr, "Menu Back" },
+            { "menu_press", nullptr, "Reticle Command" },
+            { "group_select_0", nullptr, "Select Group 1" },
+            { "group_select_1", nullptr, "Select Group 2" },
+            { "group_select_2", nullptr, "Select Group 3" },
+            { "group_select_3", nullptr, "Select Group 4" },
+            { "group_select_4", nullptr, "Select Group 5" },
+            { "group_select_5", nullptr, "Select Group 6" },
+            { "group_select_6", nullptr, "Select Group 7" },
+            { "turbo", nullptr, "Turbo" },
+            { "throttle_up", nullptr, "Throttle Forward" },
+            { "throttle_down", nullptr, "Throttle Back" },
+            { "steer_left", nullptr, "Steer Left" },
+            { "steer_right", nullptr, "Steer Right" },
+            { "strafe_left", nullptr, "Strafe Left" },
+            { "strafe_right", nullptr, "Strafe Right" },
+            { "jump", nullptr, "Jump" },
+            { "weapon_link", nullptr, "Link Weapons" },
+            { "weapon_select_0", nullptr, "Weapon Slot 1" },
+            { "weapon_select_1", nullptr, "Weapon Slot 2" },
+            { "weapon_select_2", nullptr, "Weapon Slot 3" },
+            { "weapon_select_3", nullptr, "Weapon Slot 4" },
+            { "weapon_select_4", nullptr, "Weapon Slot 5" },
+            { "eject", nullptr, "Eject" },
+            { "abandon", nullptr, "Abandon Vehicle" },
+            { "cloak", nullptr, "Cloak" },
+            { "deploy", nullptr, "Deploy" },
+            { "drop_beacon", nullptr, "Drop Beacon" },
+            { "cycle_beacon", nullptr, "Cycle Beacon" },
+            { "zoom_factor_plus", nullptr, "Zoom In" },
+            { "zoom_factor_minus", nullptr, "Zoom Out" },
+        };
         static constexpr size_t kGameObjectPlayerShotOffset = 0x1D8;
         static constexpr size_t kGameObjectGetTeamVtableOffset = 0x4;
         static constexpr size_t kGameObjectPerceivedTeamOffset = 0x180;
@@ -4148,6 +4242,384 @@ namespace BZROpenShim
             return std::filesystem::path(path).parent_path();
         }
 
+        static std::string TrimAsciiCopy(const std::string& value)
+        {
+            size_t start = 0;
+            while (start < value.size() &&
+                   std::isspace(static_cast<unsigned char>(value[start])))
+            {
+                ++start;
+            }
+
+            size_t end = value.size();
+            while (end > start &&
+                   std::isspace(static_cast<unsigned char>(value[end - 1])))
+            {
+                --end;
+            }
+
+            return value.substr(start, end - start);
+        }
+
+        static std::string HumanizeInputBindingCommand(const std::string& command)
+        {
+            if (command.empty())
+                return {};
+
+            std::string text = command;
+            for (char& ch : text)
+            {
+                if (ch == '_')
+                    ch = ' ';
+            }
+
+            bool capitalizeNext = true;
+            for (char& ch : text)
+            {
+                if (std::isspace(static_cast<unsigned char>(ch)))
+                {
+                    capitalizeNext = true;
+                    continue;
+                }
+
+                if (capitalizeNext)
+                {
+                    ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+                    capitalizeNext = false;
+                }
+            }
+
+            return text;
+        }
+
+        static std::string JoinStrings(const std::vector<std::string>& parts, const char* separator)
+        {
+            if (parts.empty())
+                return {};
+
+            std::string combined;
+            for (size_t index = 0; index < parts.size(); ++index)
+            {
+                if (index != 0 && separator)
+                    combined += separator;
+                combined += parts[index];
+            }
+            return combined;
+        }
+
+        static bool AppendUniqueString(std::vector<std::string>& values, const std::string& value)
+        {
+            if (value.empty())
+                return false;
+
+            if (std::find(values.begin(), values.end(), value) != values.end())
+                return false;
+
+            values.push_back(value);
+            return true;
+        }
+
+        static std::filesystem::path ResolveInputBindingInstallDirectory()
+        {
+            const auto moduleDir = GetMainModuleDirectory();
+            const auto hasInputMap = [](const std::filesystem::path& dir) -> bool
+            {
+                if (dir.empty())
+                    return false;
+
+                std::error_code error;
+                return std::filesystem::exists(dir / "input.map", error);
+            };
+
+            if (hasInputMap(moduleDir))
+                return moduleDir;
+
+            char userProfile[MAX_PATH] = {};
+            const DWORD userProfileLen =
+                GetEnvironmentVariableA("USERPROFILE", userProfile, MAX_PATH);
+            if (userProfileLen > 0 && userProfileLen < MAX_PATH)
+            {
+                const std::filesystem::path documentsInstall =
+                    std::filesystem::path(userProfile) / "Documents" / "Battlezone 98 Redux";
+                if (hasInputMap(documentsInstall))
+                    return documentsInstall;
+            }
+
+            const std::filesystem::path gogInstall("C:\\GOG Games\\Battlezone 98 Redux");
+            if (hasInputMap(gogInstall))
+                return gogInstall;
+
+            return moduleDir;
+        }
+
+        static bool ParseInputBindingMapFile(
+            const std::filesystem::path& inputMapPath,
+            std::vector<InputBindingCommandBlock>& outBlocks,
+            InputBindingInventoryStats& outInventory)
+        {
+            outBlocks.clear();
+            outInventory = {};
+
+            std::ifstream file(inputMapPath);
+            if (!file)
+                return false;
+
+            std::string line;
+            std::string pendingComment;
+            bool inBlock = false;
+            InputBindingCommandBlock currentBlock = {};
+
+            auto finalizeBlock = [&]()
+            {
+                if (currentBlock.command.empty())
+                    return;
+
+                ++outInventory.uniqueCommandBlocks;
+                if (currentBlock.hasPositiveNonKeyboard)
+                    ++outInventory.mixedBlocks;
+                else if (currentBlock.positiveKeyboardTokens.size() > 1)
+                    ++outInventory.keyboardChordBlocks;
+                else if (!currentBlock.positiveKeyboardTokens.empty())
+                    ++outInventory.simpleKeyboardBlocks;
+
+                outBlocks.push_back(currentBlock);
+                currentBlock = {};
+            };
+
+            while (std::getline(file, line))
+            {
+                const std::string trimmed = TrimAsciiCopy(line);
+                if (!inBlock)
+                {
+                    if (trimmed.empty())
+                        continue;
+
+                    if (trimmed[0] == '#')
+                    {
+                        const std::string comment = TrimAsciiCopy(trimmed.substr(1));
+                        if (!comment.empty())
+                            pendingComment = comment;
+                        continue;
+                    }
+
+                    const size_t bracePos = trimmed.find('{');
+                    if (bracePos == std::string::npos)
+                    {
+                        pendingComment.clear();
+                        continue;
+                    }
+
+                    const std::string command = TrimAsciiCopy(trimmed.substr(0, bracePos));
+                    if (command.empty())
+                    {
+                        pendingComment.clear();
+                        continue;
+                    }
+
+                    currentBlock = {};
+                    currentBlock.command = command;
+                    currentBlock.comment = pendingComment;
+                    pendingComment.clear();
+                    inBlock = true;
+                    continue;
+                }
+
+                if (trimmed.empty() || trimmed[0] == '#')
+                    continue;
+
+                if (trimmed[0] == '}')
+                {
+                    finalizeBlock();
+                    inBlock = false;
+                    continue;
+                }
+
+                if (trimmed[0] != '+' && trimmed[0] != '-')
+                    continue;
+
+                size_t cursor = 1;
+                while (cursor < trimmed.size() &&
+                       std::isspace(static_cast<unsigned char>(trimmed[cursor])))
+                {
+                    ++cursor;
+                }
+
+                const size_t sourceStart = cursor;
+                while (cursor < trimmed.size() &&
+                       !std::isspace(static_cast<unsigned char>(trimmed[cursor])))
+                {
+                    ++cursor;
+                }
+
+                const std::string source = trimmed.substr(sourceStart, cursor - sourceStart);
+                const std::string token = TrimAsciiCopy(trimmed.substr(cursor));
+                if (source.empty() || token.empty())
+                    continue;
+
+                if (trimmed[0] == '+')
+                {
+                    if (_stricmp(source.c_str(), "keyboard") == 0)
+                        currentBlock.positiveKeyboardTokens.push_back(token);
+                    else
+                        currentBlock.hasPositiveNonKeyboard = true;
+                }
+            }
+
+            if (inBlock)
+                finalizeBlock();
+
+            return true;
+        }
+
+        static std::string FormatInputBindingBlockValue(const InputBindingCommandBlock& block)
+        {
+            if (block.positiveKeyboardTokens.empty() || block.hasPositiveNonKeyboard)
+                return {};
+
+            return JoinStrings(block.positiveKeyboardTokens, " + ");
+        }
+
+        static std::vector<InputBindingUiRow> BuildFirstPassInputBindingRows(
+            const std::vector<InputBindingCommandBlock>& blocks)
+        {
+            std::vector<InputBindingUiRow> rows;
+            rows.reserve(std::size(kInputBindingFirstPassSeeds));
+
+            for (const InputBindingRowSeed& seed : kInputBindingFirstPassSeeds)
+            {
+                InputBindingUiRow row = {};
+                row.family = InputBindingMapFamily::Input;
+                row.command = seed.command ? seed.command : "";
+                row.displayLabelKey = seed.labelKey ? seed.labelKey : "";
+                row.displayText = seed.displayText ? seed.displayText : "";
+
+                std::vector<std::string> bindingValues;
+                std::string firstComment;
+
+                for (const InputBindingCommandBlock& block : blocks)
+                {
+                    if (block.command != row.command)
+                        continue;
+
+                    row.foundInMap = true;
+                    ++row.matchingBlockCount;
+
+                    if (firstComment.empty() && !block.comment.empty())
+                        firstComment = block.comment;
+
+                    AppendUniqueString(bindingValues, FormatInputBindingBlockValue(block));
+                }
+
+                if (row.displayText.empty())
+                {
+                    if (!firstComment.empty())
+                        row.displayText = firstComment;
+                    else
+                        row.displayText = HumanizeInputBindingCommand(row.command);
+                }
+
+                row.currentBindingText = JoinStrings(bindingValues, ", ");
+                row.reserved = !row.foundInMap || row.currentBindingText.empty();
+                rows.push_back(row);
+            }
+
+            return rows;
+        }
+
+        static void LogInputBindingUiScaffoldSummary()
+        {
+            if (g_InputBindingUiScaffoldLogged)
+                return;
+            g_InputBindingUiScaffoldLogged = true;
+
+            const std::string installPath = g_InputBindingInstallDirectory.string();
+            const std::string inputMapPath =
+                (g_InputBindingInstallDirectory / "input.map").string();
+
+            Log(L"[INPUTUI] Scaffold install=%hs input.map=%hs blocks=%u simple=%u chord=%u mixed=%u firstPassRows=%u\n",
+                installPath.c_str(),
+                inputMapPath.c_str(),
+                static_cast<unsigned>(g_InputBindingInventory.uniqueCommandBlocks),
+                static_cast<unsigned>(g_InputBindingInventory.simpleKeyboardBlocks),
+                static_cast<unsigned>(g_InputBindingInventory.keyboardChordBlocks),
+                static_cast<unsigned>(g_InputBindingInventory.mixedBlocks),
+                static_cast<unsigned>(g_InputBindingUiRows.size()));
+
+            const size_t previewCount = std::min<size_t>(g_InputBindingUiRows.size(), 10);
+            for (size_t index = 0; index < previewCount; ++index)
+            {
+                const InputBindingUiRow& row = g_InputBindingUiRows[index];
+                Log(L"[INPUTUI]   row[%u] cmd=%hs title=%hs value=%hs reserved=%hs blocks=%u\n",
+                    static_cast<unsigned>(index),
+                    row.command.c_str(),
+                    row.displayText.c_str(),
+                    row.currentBindingText.empty() ? "<none>" : row.currentBindingText.c_str(),
+                    row.reserved ? "yes" : "no",
+                    static_cast<unsigned>(row.matchingBlockCount));
+            }
+
+            Log(L"[INPUTUI] Hook candidates PopulateUI=0x%08X KeyReleased=0x%08X ResetDefaults=0x%08X\n",
+                static_cast<uint32_t>(GetMainModuleBase() + kOptionsInputPopulateUiRva),
+                static_cast<uint32_t>(GetMainModuleBase() + kOptionsInputKeyReleasedRva),
+                static_cast<uint32_t>(GetMainModuleBase() + kOptionsInputResetDefaultsRva));
+        }
+
+        static void InitializeInputBindingUiScaffold()
+        {
+            if (g_InputBindingUiScaffoldInitialized)
+                return;
+            g_InputBindingUiScaffoldInitialized = true;
+
+            g_InputBindingInstallDirectory = ResolveInputBindingInstallDirectory();
+            g_InputBindingInventory = {};
+            g_InputBindingCommandBlocks.clear();
+            g_InputBindingUiRows.clear();
+            g_LastOptionsInputScreen = nullptr;
+
+            const std::filesystem::path inputMapPath = g_InputBindingInstallDirectory / "input.map";
+            if (!ParseInputBindingMapFile(inputMapPath, g_InputBindingCommandBlocks, g_InputBindingInventory))
+            {
+                const std::string inputMapPathText = inputMapPath.string();
+                Log(L"[INPUTUI] Failed to parse input binding map at %hs\n",
+                    inputMapPathText.c_str());
+                return;
+            }
+
+            g_InputBindingUiRows = BuildFirstPassInputBindingRows(g_InputBindingCommandBlocks);
+            LogInputBindingUiScaffoldSummary();
+        }
+
+        static void EnsureInputBindingPopulateHookScaffold()
+        {
+            InitializeInputBindingUiScaffold();
+
+            if (g_InputBindingUiPopulateHookInstallAttempted)
+                return;
+            g_InputBindingUiPopulateHookInstallAttempted = true;
+
+            if (EnvFlagEnabled("OPENSHIM_ENABLE_INPUT_BINDING_UI_POPULATE_HOOK") ||
+                EnvFlagEnabled("OPENSHIM_ENABLE_INPUT_BINDING_UI_SCAFFOLD"))
+            {
+                Log(L"[INPUTUI] PopulateUI hook requested but detour install remains disabled until entry bytes and patch length are runtime-validated installed=%hs target=0x%08X\n",
+                    g_InputBindingUiPopulateHookInstalled ? "yes" : "no",
+                    static_cast<uint32_t>(GetMainModuleBase() + kOptionsInputPopulateUiRva));
+            }
+        }
+
+        static void OnOptionsInputPopulateUiScaffold(void* screen)
+        {
+            InitializeInputBindingUiScaffold();
+
+            if (!screen || g_LastOptionsInputScreen == screen)
+                return;
+
+            g_LastOptionsInputScreen = screen;
+            Log(L"[INPUTUI] PopulateUI scaffold screen=0x%08X rows=%u stockFallback=%hs\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(screen)),
+                static_cast<unsigned>(g_InputBindingUiRows.size()),
+                "yes");
+        }
+
         static bool IsIniBoolTrue(const char* value, bool fallback)
         {
             if (!value || !*value)
@@ -4635,6 +5107,14 @@ namespace BZROpenShim
     // ---------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------
+    void __fastcall OptionsInputPopulateUiHook(void* thisPtr, void* /*edx*/)
+    {
+        OnOptionsInputPopulateUiScaffold(thisPtr);
+
+        if (g_BzrFn_OptionsInputPopulateUi)
+            g_BzrFn_OptionsInputPopulateUi(thisPtr);
+    }
+
     void ResolveBzrHooks(bool isSteam)
     {
         g_IsSteamExe = isSteam;
@@ -4647,6 +5127,7 @@ namespace BZROpenShim
         g_BzrFn_GetPlayerHandle = nullptr;
         g_BzrFn_GameObjectGetObjByHandle = nullptr;
         g_BzrFn_PersonSimulate = nullptr;
+        g_BzrFn_OptionsInputPopulateUi = nullptr;
         g_JumpSnipeProbeInstalled = false;
         g_EngineFlamePrimaryManager = nullptr;
         g_EngineFlameSecondaryManager = nullptr;
@@ -4663,6 +5144,15 @@ namespace BZROpenShim
         g_BzrBuildMenuRoot = nullptr;
         g_BzrFn_GetLocalPlayerNetId = nullptr;
         g_BzrFn_NetPlayerSetData = nullptr;
+        g_InputBindingUiScaffoldInitialized = false;
+        g_InputBindingUiScaffoldLogged = false;
+        g_InputBindingUiPopulateHookInstallAttempted = false;
+        g_InputBindingUiPopulateHookInstalled = false;
+        g_InputBindingInstallDirectory.clear();
+        g_InputBindingInventory = {};
+        g_InputBindingCommandBlocks.clear();
+        g_InputBindingUiRows.clear();
+        g_LastOptionsInputScreen = nullptr;
         g_JumpSnipeProbeLogState = {};
         g_ProducerBuildMenuConfig = {};
         g_HasAppliedProducerBuildMenu = false;
@@ -4892,6 +5382,7 @@ namespace BZROpenShim
             g_TurretAimPitchMultiplier >= 0.999f ? " (full range)" : "");
         InitializeUnderAttackAlertConfig();
         InitializeTargetReticlePopupConfig();
+        EnsureInputBindingPopulateHookScaffold();
         Log(L"[MAPTRACE] Map refresh trace: %hs\n",
             (EnvFlagEnabled("OPENSHIM_TRACE_MAP_REFRESH") ||
              EnvFlagEnabled("OPENSHIM_TRACE_STEAM_MAP_REFRESH")) ? "enabled" : "disabled");
@@ -4911,6 +5402,7 @@ namespace BZROpenShim
     void RetryDeferredRuntimeHooks()
     {
         InstallJumpSnipingProbeIfRequested();
+        EnsureInputBindingPopulateHookScaffold();
     }
 
     void InitBzrHookStrings()
