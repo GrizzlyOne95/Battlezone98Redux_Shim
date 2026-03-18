@@ -19,6 +19,7 @@
 !reverse_engineering/export_existing_project_decomp.py
 !reverse_engineering/complete_cached_project_pipeline.py
 !reverse_engineering/capture_runtime_layout.py
+!reverse_engineering/probe_chunk_effect_runtime.py
 __pycache__/
 
 # Analysis results
