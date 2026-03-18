@@ -80,6 +80,33 @@ The current patcher handles that by:
 5. preserving the stock map-filter and sort UI until the clean-room filter port
    is complete
 
+Steam hook-site validation status as of March 17, 2026:
+
+- A clean `/nointro` launch of `battlezone98redux.exe` was tested with
+  `winmm.dll` temporarily removed so the process stayed unpatched.
+- After waiting 30 seconds at the main menu, the live Steam process matched the
+  recorded GOG bytes at these addresses:
+- `0x00443B35` `Chunk Render Resolve Hook`
+- `0x0042BB1A` `Artillery Weapon Mask Trace`
+- `0x00417C80` `Decoded Weapon Mask Carrier Bias Hook`
+- `0x0046DD70` `Raw Weapon Mask Carrier Bias Hook`
+- `0x004EAD78` `HoverCraft Engine Flame Emit Hook 1/2`
+- `0x004EAFDF` `HoverCraft Engine Flame Emit Hook 2/2`
+- `0x008791A4` `Engine Flame Control VTable Hook`
+- `0x008791AC` `Engine Flame Submit VTable Hook`
+- `0x005F1838` `TurretCraft Aim Pitch Multiplier`
+- `0x005F561A` `TurretTank Aim Pitch Multiplier`
+- `0x00494D35` `Under Attack Alert Hook 1/2`
+- `0x0050E6DD` `Under Attack Alert Hook 2/2`
+
+Practical takeaway:
+
+- for these validated sites, Steam can use the same live addresses and
+  original-byte expectations as GOG
+- Steam still needs the startup settle/poll step before applying hooks
+- if a Steam hook is still skipped, treat that as an OpenShim payload or
+  resolver gap first, not proof that the site moved
+
 ### Legacy Chunk Render Bridge Experiment
 
 The shim now includes a GOG-only test hook for the legacy chunk visibility
@@ -107,8 +134,10 @@ The hook is disabled by default. Enable it with either environment variable:
 Current scope:
 
 - validated against the GOG address `CALL 0x004E3620` at `0x00443B34`
-- not enabled for Steam yet because the equivalent site has not been
-  revalidated there
+- the matching Steam live bytes at `0x00443B35` were revalidated on March 17,
+  2026 after a settled `/nointro` launch
+- OpenShim still leaves this disabled on Steam until the payload path is wired
+  up there cleanly
 
 Suggested test asset:
 
@@ -129,7 +158,10 @@ minelayer first-slot issue on the GOG executable.
 - Additional bias refreshes run through exact `weaponMask` getter hooks and the
   existing hovercraft flame path, which helps keep minelayers aligned without
   rewriting the full native AI state machine.
-- Steam is still skipped until the equivalent sites are revalidated there.
+- The relevant Steam live bytes at `0x0042BB1A`, `0x00417C80`, and `0x0046DD70`
+  were revalidated on March 17, 2026 after a settled `/nointro` launch.
+- OpenShim still skips the Steam path today because those hooks do not yet get
+  payloads assigned in the Steam branch.
 
 Optional trace logging:
 

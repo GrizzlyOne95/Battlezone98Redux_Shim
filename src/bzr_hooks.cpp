@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <new>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace BZROpenShim
@@ -40,6 +41,8 @@ namespace BZROpenShim
     void* g_FlagButtonClient = nullptr;
     void* g_FlagLabelHost = nullptr;
     void* g_FlagLabelClient = nullptr;
+    void* g_HostUiParent = nullptr;
+    void* g_ClientUiParent = nullptr;
     void* g_AutoSaveLoadParent = nullptr;
     void* g_AutoSaveLoadScreen = nullptr;
     void* g_AutoSaveLoadButton = nullptr;
@@ -113,6 +116,8 @@ namespace BZROpenShim
     using FnEngineFlameResolveTexture = int(__cdecl*)(BzrString* textureName);
     using FnGetTeamNum = int(__cdecl*)(int handle);
     using FnExuGetTeamEngineFlameColor = int(__cdecl*)(int team);
+    using FnGameObjectGetTeam = int(__thiscall*)(void* thisPtr);
+    using FnChunkEffectSimulate = void(__thiscall*)(void* self, float dt);
 
     static void** g_BzrPtr_945478 = nullptr;
     static void** g_BzrPtr_94548C = nullptr;
@@ -171,6 +176,7 @@ namespace BZROpenShim
     static FnEngineFlameResolveTexture g_BzrFn_EngineFlameResolveTexture = nullptr;
     static FnGetTeamNum g_BzrFn_GetTeamNum = nullptr;
     static FnExuGetTeamEngineFlameColor g_ExuFn_GetTeamEngineFlameColor = nullptr;
+    static FnChunkEffectSimulate g_BzrFn_ChunkEffectSimulate = nullptr;
     static BuildItem* g_BzrBuildMenuRoot = nullptr;
     static bool g_IsSteamExe = false;
 
@@ -321,11 +327,82 @@ namespace BZROpenShim
             BzrGeoEntry* entries;
         };
 
+        struct ChunkBridgeSnapshot
+        {
+            void* directBridgeRoot = nullptr;
+            void* directOgreEntity = nullptr;
+            void* directOgreLight = nullptr;
+            bool directProbeOk = false;
+            void* legacyOwner = nullptr;
+            void* ownerBridgeRoot = nullptr;
+            void* ownerOgreEntity = nullptr;
+            void* ownerOgreLight = nullptr;
+            void* ownerObj = nullptr;
+            void* ownerEntity = nullptr;
+            bool ownerProbeOk = false;
+        };
+
+        struct LegacyMat3
+        {
+            float right_x;
+            float right_y;
+            float right_z;
+            float up_x;
+            float up_y;
+            float up_z;
+            float front_x;
+            float front_y;
+            float front_z;
+            uint32_t padding;
+            double posit_x;
+            double posit_y;
+            double posit_z;
+        };
+
+        struct OgreColourValue
+        {
+            float r;
+            float g;
+            float b;
+            float a;
+        };
+
+        struct ChunkProxySlot
+        {
+            const uint8_t* objectBytes = nullptr;
+            float positionX = 0.0f;
+            float positionY = 0.0f;
+            float positionZ = 0.0f;
+            bool useEntryPosition = false;
+            void* billboard = nullptr;
+            DWORD lastSeenTick = 0;
+            bool active = false;
+            bool billboardAssigned = false;
+        };
+
+        struct ChunkEffectActiveEntry
+        {
+            const uint8_t* objectBytes = nullptr;
+            uint32_t reserved = 0;
+            float positionX = 0.0f;
+            float positionY = 0.0f;
+            float positionZ = 0.0f;
+            float velocityX = 0.0f;
+            float velocityY = 0.0f;
+            float velocityZ = 0.0f;
+        };
+
         static bool g_EnableChunkRenderFallback = false;
-        static bool g_TraceChunkRender = true;
-        static bool g_TraceChunkRenderVerbose = true;
+        static bool g_EnableChunkProxyDebug = false;
+        static bool g_TraceChunkRender = false;
+        static bool g_TraceChunkRenderVerbose = false;
+        static bool g_TraceChunkEffectRuntime = false;
+        static uint32_t g_LastChunkEffectLoggedCount = UINT32_MAX;
         static volatile long g_ChunkRenderLogBudget = 12;
         static uint32_t g_ChunkTraceEntryLimit = 32;
+        static uint32_t g_ChunkProxyCapacity = 96;
+        static float g_ChunkProxyDebugSize = 2.5f;
+        static std::unordered_map<uintptr_t, uint32_t> g_ChunkObservedClassIds = {};
         static volatile long g_ArtilleryMaskTraceBudget = 400;
         static VehicleAssetExceptionCacheEntry g_VehicleAssetExceptionCache[kVehicleAssetExceptionCacheSize] = {};
         static ProducerBuildMenuConfig g_ProducerBuildMenuConfig = {};
@@ -354,6 +431,13 @@ namespace BZROpenShim
             Normal = 3,
         };
 
+        enum class TargetReticlePopupMode : int
+        {
+            Default = 1,
+            NeutralOnly = 2,
+            ExplicitOnly = 3,
+        };
+
         static bool g_UnderAttackAlertConfigInitialized = false;
         static UnderAttackAlertMode g_UnderAttackAlertMode = UnderAttackAlertMode::Normal;
         static bool g_UnderAttackAlertEnabled = true;
@@ -361,8 +445,59 @@ namespace BZROpenShim
         static float g_UnderAttackAlertNextAllowedTime = 0.0f;
         static constexpr const char* kUnderAttackAlertConfigName = "campaignReimagined_settings.cfg";
         static constexpr uintptr_t kUnderAttackAlertSoundAddr = 0x00877220;
+        static constexpr uintptr_t kOgreSceneManagerStructureAddr = 0x00920EA0;
+        static constexpr uintptr_t kOgreSceneManagerOffset = 0x08;
+        static constexpr uintptr_t kChunkEffectActiveCountOffset = 0x8028;
+        static constexpr uintptr_t kChunkEffectGateOffset = 0x802C;
+        static constexpr uintptr_t kChunkEffectTuningBaseOffset = 0x8038;
+        static constexpr uintptr_t kChunkEffectTemplateListOffset = 0x8050;
+        static constexpr uintptr_t kChunkEffectEntryBaseOffset = 0x28;
+        static constexpr uintptr_t kChunkEffectVtableSimulateSlotAddr = 0x0087708C;
+        static constexpr size_t kChunkEffectEntrySize = 0x20;
+        static constexpr uint32_t kClassIdChunk = 53;
+        static constexpr DWORD kChunkProxyExpireMs = 400;
+        static constexpr DWORD kChunkProxyRetryDelayMs = 1000;
+        static constexpr float kChunkProxyHiddenY = -100000.0f;
+        static constexpr const char* kChunkProxyBillboardSetName = "OpenShimChunkProxyDebug";
+        static constexpr const char* kChunkProxyMaterialName = "BaseWhiteNoLighting";
+        static constexpr const char* kChunkProxyMaterialGroup = "General";
         static FnPlayGlobalSound g_BzrFn_PlayGlobalSound =
             reinterpret_cast<FnPlayGlobalSound>(0x0043AA30);
+        static bool g_TargetReticlePopupConfigInitialized = false;
+        static TargetReticlePopupMode g_TargetReticlePopupMode = TargetReticlePopupMode::Default;
+        static bool g_TargetReticlePopupSteamNeutralAllowed = false;
+        static bool g_TargetReticlePopupSteamNeutralWarned = false;
+        static constexpr size_t kGameObjectPlayerShotOffset = 0x1D8;
+        static constexpr size_t kGameObjectGetTeamVtableOffset = 0x4;
+        static constexpr float kSuppressedRecentHitTime = -1.0e30f;
+        static DWORD g_ChunkProxyLastRetryTick = 0;
+        static bool g_ChunkProxyInitLogged = false;
+        static bool g_ChunkProxyFailureLogged = false;
+        static bool g_ChunkProxyWaitLogged = false;
+        static void* g_ChunkProxyBillboardSet = nullptr;
+        static std::vector<ChunkProxySlot> g_ChunkProxySlots = {};
+        using FnOgreGetRootSceneNode = void*(__thiscall*)(void*);
+        using FnOgreCreateBillboardSet = void*(__thiscall*)(void*, uint32_t);
+        using FnOgreAttachObject = void(__thiscall*)(void*, void*);
+        using FnOgreSetBillboardsInWorldSpace = void(__thiscall*)(void*, bool);
+        using FnOgreSetDefaultDimensions = void(__thiscall*)(void*, float, float);
+        using FnOgreCreateBillboard = void*(__thiscall*)(void*, float, float, float, const OgreColourValue&);
+        using FnOgreSetBillboardPosition = void(__thiscall*)(void*, float, float, float);
+
+        template<typename T>
+        static T ResolveOgreProc(const char* name)
+        {
+            if (!name || !*name)
+                return nullptr;
+
+            static HMODULE ogreMain = nullptr;
+            if (!ogreMain)
+                ogreMain = GetModuleHandleA("OgreMain.dll");
+            if (!ogreMain)
+                return nullptr;
+
+            return reinterpret_cast<T>(GetProcAddress(ogreMain, name));
+        }
 
         static bool EnvFlagEnabled(const char* name)
         {
@@ -425,6 +560,24 @@ namespace BZROpenShim
             return true;
         }
 
+        static uint32_t ClampChunkProxyCapacity(long value)
+        {
+            if (value < 8)
+                return 8;
+            if (value > 512)
+                return 512;
+            return static_cast<uint32_t>(value);
+        }
+
+        static float ClampChunkProxySize(float value)
+        {
+            if (value < 0.25f)
+                return 0.25f;
+            if (value > 20.0f)
+                return 20.0f;
+            return value;
+        }
+
         static uint32_t ClampChunkTraceEntryLimit(long value)
         {
             if (value < 1)
@@ -471,6 +624,693 @@ namespace BZROpenShim
             return -1;
         }
 
+        static bool TryGetChunkProxyPosition(const uint8_t* objectBytes, float& outX, float& outY, float& outZ)
+        {
+            if (!objectBytes)
+                return false;
+
+            __try
+            {
+                const auto* transform = reinterpret_cast<const LegacyMat3*>(objectBytes + 0x20);
+                const double x = transform->posit_x;
+                const double y = transform->posit_y;
+                const double z = transform->posit_z;
+                if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z))
+                    return false;
+
+                outX = static_cast<float>(x);
+                outY = static_cast<float>(y);
+                outZ = static_cast<float>(z);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void* GetOgreSceneManagerRuntime()
+        {
+            __try
+            {
+                auto* sceneManagerStructure =
+                    *reinterpret_cast<uint8_t**>(kOgreSceneManagerStructureAddr);
+                if (!sceneManagerStructure)
+                    return nullptr;
+
+                return *reinterpret_cast<void**>(sceneManagerStructure + kOgreSceneManagerOffset);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
+
+        static bool TrySetChunkProxyBillboardPosition(
+            void* billboard,
+            FnOgreSetBillboardPosition setPosition,
+            float x,
+            float y,
+            float z);
+
+        static void HideChunkProxyBillboard(void* billboard)
+        {
+            static FnOgreSetBillboardPosition setPosition =
+                ResolveOgreProc<FnOgreSetBillboardPosition>("?setPosition@Billboard@Ogre@@QAEXMMM@Z");
+            if (!billboard || !setPosition)
+                return;
+
+            TrySetChunkProxyBillboardPosition(billboard, setPosition, 0.0f, kChunkProxyHiddenY, 0.0f);
+        }
+
+        static bool TryCreateChunkProxyBillboardSet(
+            void* sceneManager,
+            FnOgreGetRootSceneNode getRootSceneNode,
+            FnOgreCreateBillboardSet createBillboardSet,
+            void*& outRootNode,
+            void*& outBillboardSet)
+        {
+            outRootNode = nullptr;
+            outBillboardSet = nullptr;
+            if (!sceneManager || !getRootSceneNode || !createBillboardSet)
+                return false;
+
+            __try
+            {
+                outRootNode = getRootSceneNode(sceneManager);
+                if (outRootNode)
+                    outBillboardSet = createBillboardSet(sceneManager, g_ChunkProxyCapacity);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outRootNode = nullptr;
+                outBillboardSet = nullptr;
+            }
+
+            return outRootNode != nullptr && outBillboardSet != nullptr;
+        }
+
+        static bool TrySetupChunkProxyBillboardSet(
+            void* rootNode,
+            void* billboardSet,
+            FnOgreAttachObject attachObject,
+            FnOgreSetBillboardsInWorldSpace setBillboardsInWorldSpace,
+            FnOgreSetDefaultDimensions setDefaultDimensions)
+        {
+            if (!rootNode || !billboardSet || !attachObject || !setBillboardsInWorldSpace || !setDefaultDimensions)
+                return false;
+
+            __try
+            {
+                setBillboardsInWorldSpace(billboardSet, true);
+                setDefaultDimensions(billboardSet, g_ChunkProxyDebugSize, g_ChunkProxyDebugSize);
+                attachObject(rootNode, billboardSet);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void* TryCreateChunkProxyBillboard(void* billboardSet, FnOgreCreateBillboard createBillboard, const OgreColourValue& color)
+        {
+            if (!billboardSet || !createBillboard)
+                return nullptr;
+
+            __try
+            {
+                return createBillboard(billboardSet, 0.0f, kChunkProxyHiddenY, 0.0f, color);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
+
+        static bool TrySetChunkProxyBillboardPosition(
+            void* billboard,
+            FnOgreSetBillboardPosition setPosition,
+            float x,
+            float y,
+            float z)
+        {
+            if (!billboard || !setPosition)
+                return false;
+
+            __try
+            {
+                setPosition(billboard, x, y, z);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static bool EnsureChunkProxyResources()
+        {
+            if (!g_EnableChunkProxyDebug)
+                return false;
+
+            if (g_ChunkProxyBillboardSet)
+                return true;
+
+            const DWORD now = GetTickCount();
+            if (g_ChunkProxyLastRetryTick != 0 &&
+                static_cast<DWORD>(now - g_ChunkProxyLastRetryTick) < kChunkProxyRetryDelayMs)
+            {
+                return false;
+            }
+            g_ChunkProxyLastRetryTick = now;
+
+            static FnOgreGetRootSceneNode getRootSceneNode =
+                ResolveOgreProc<FnOgreGetRootSceneNode>("?getRootSceneNode@SceneManager@Ogre@@UAEPAVSceneNode@2@XZ");
+            static FnOgreCreateBillboardSet createBillboardSet =
+                ResolveOgreProc<FnOgreCreateBillboardSet>("?createBillboardSet@SceneManager@Ogre@@UAEPAVBillboardSet@2@I@Z");
+            static FnOgreAttachObject attachObject =
+                ResolveOgreProc<FnOgreAttachObject>("?attachObject@SceneNode@Ogre@@UAEXPAVMovableObject@2@@Z");
+            static FnOgreSetBillboardsInWorldSpace setBillboardsInWorldSpace =
+                ResolveOgreProc<FnOgreSetBillboardsInWorldSpace>("?setBillboardsInWorldSpace@BillboardSet@Ogre@@UAEX_N@Z");
+            static FnOgreSetDefaultDimensions setDefaultDimensions =
+                ResolveOgreProc<FnOgreSetDefaultDimensions>("?setDefaultDimensions@BillboardSet@Ogre@@UAEXMM@Z");
+            static FnOgreCreateBillboard createBillboard =
+                ResolveOgreProc<FnOgreCreateBillboard>("?createBillboard@BillboardSet@Ogre@@QAEPAVBillboard@2@MMMABVColourValue@2@@Z");
+
+            if (!getRootSceneNode || !attachObject || !setBillboardsInWorldSpace ||
+                !setDefaultDimensions || !createBillboard)
+            {
+                if (!g_ChunkProxyFailureLogged)
+                {
+                    Log(L"[CHUNKPROXY] Missing Ogre billboard symbols; proxy debug disabled for now\n");
+                    g_ChunkProxyFailureLogged = true;
+                }
+                return false;
+            }
+
+            void* sceneManager = GetOgreSceneManagerRuntime();
+            if (!sceneManager)
+            {
+                if (!g_ChunkProxyWaitLogged)
+                {
+                    Log(L"[CHUNKPROXY] Scene manager unavailable; waiting to initialize chunk proxy debug\n");
+                    g_ChunkProxyWaitLogged = true;
+                }
+                return false;
+            }
+
+            void* rootNode = nullptr;
+            void* billboardSet = nullptr;
+            if (!TryCreateChunkProxyBillboardSet(
+                    sceneManager,
+                    getRootSceneNode,
+                    createBillboardSet,
+                    rootNode,
+                    billboardSet))
+            {
+                if (!g_ChunkProxyFailureLogged)
+                {
+                    Log(L"[CHUNKPROXY] BillboardSet creation failed sceneManager=0x%08X root=0x%08X set=0x%08X\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneManager)),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rootNode)),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(billboardSet)));
+                    g_ChunkProxyFailureLogged = true;
+                }
+                return false;
+            }
+
+            if (!TrySetupChunkProxyBillboardSet(
+                    rootNode,
+                    billboardSet,
+                    attachObject,
+                    setBillboardsInWorldSpace,
+                    setDefaultDimensions))
+            {
+                if (!g_ChunkProxyFailureLogged)
+                {
+                    Log(L"[CHUNKPROXY] BillboardSet setup fault set=0x%08X code=0x%08X\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(billboardSet)),
+                        0u);
+                    g_ChunkProxyFailureLogged = true;
+                }
+                return false;
+            }
+
+            if (g_ChunkProxySlots.size() != g_ChunkProxyCapacity)
+                g_ChunkProxySlots.resize(g_ChunkProxyCapacity);
+            const OgreColourValue color = { 1.0f, 0.35f, 0.05f, 0.9f };
+            for (uint32_t index = 0; index < g_ChunkProxyCapacity; ++index)
+            {
+                void* billboard = TryCreateChunkProxyBillboard(billboardSet, createBillboard, color);
+                g_ChunkProxySlots[index].billboard = billboard;
+                g_ChunkProxySlots[index].billboardAssigned = false;
+                HideChunkProxyBillboard(billboard);
+            }
+
+            g_ChunkProxyBillboardSet = billboardSet;
+            g_ChunkProxyFailureLogged = false;
+            g_ChunkProxyWaitLogged = false;
+            if (!g_ChunkProxyInitLogged)
+            {
+                Log(L"[CHUNKPROXY] Initialized billboard debug set=0x%08X cap=%u size=%.2f\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(billboardSet)),
+                    g_ChunkProxyCapacity,
+                    g_ChunkProxyDebugSize);
+                g_ChunkProxyInitLogged = true;
+            }
+
+            return true;
+        }
+
+        static void ReleaseChunkProxySlot(ChunkProxySlot& slot)
+        {
+            if (slot.billboardAssigned)
+                HideChunkProxyBillboard(slot.billboard);
+            slot.objectBytes = nullptr;
+            slot.positionX = 0.0f;
+            slot.positionY = 0.0f;
+            slot.positionZ = 0.0f;
+            slot.useEntryPosition = false;
+            slot.lastSeenTick = 0;
+            slot.active = false;
+            slot.billboardAssigned = false;
+        }
+
+        static void UpdateChunkProxySlotPosition(ChunkProxySlot& slot)
+        {
+            static FnOgreSetBillboardPosition setPosition =
+                ResolveOgreProc<FnOgreSetBillboardPosition>("?setPosition@Billboard@Ogre@@QAEXMMM@Z");
+            if (!slot.active || !slot.billboard || !setPosition)
+                return;
+
+            float x = 0.0f;
+            float y = 0.0f;
+            float z = 0.0f;
+            if (slot.useEntryPosition)
+            {
+                x = slot.positionX;
+                y = slot.positionY;
+                z = slot.positionZ;
+            }
+            else if (!TryGetChunkProxyPosition(slot.objectBytes, x, y, z))
+            {
+                ReleaseChunkProxySlot(slot);
+                return;
+            }
+
+            if (!TrySetChunkProxyBillboardPosition(slot.billboard, setPosition, x, y, z))
+            {
+                ReleaseChunkProxySlot(slot);
+                return;
+            }
+
+            slot.billboardAssigned = true;
+        }
+
+        static void TickChunkProxyDebug()
+        {
+            if (!g_EnableChunkProxyDebug)
+                return;
+
+            EnsureChunkProxyResources();
+            if (g_ChunkProxySlots.empty())
+                return;
+
+            const DWORD now = GetTickCount();
+            for (ChunkProxySlot& slot : g_ChunkProxySlots)
+            {
+                if (!slot.active)
+                    continue;
+
+                if (slot.lastSeenTick == 0 ||
+                    static_cast<DWORD>(now - slot.lastSeenTick) >= kChunkProxyExpireMs)
+                {
+                    ReleaseChunkProxySlot(slot);
+                    continue;
+                }
+
+                UpdateChunkProxySlotPosition(slot);
+            }
+        }
+
+        static void TrackChunkProxyDebugEntry(
+            const uint8_t* objectBytes,
+            float positionX,
+            float positionY,
+            float positionZ)
+        {
+            if (!g_EnableChunkProxyDebug || !objectBytes)
+                return;
+
+            if (g_ChunkProxySlots.size() != g_ChunkProxyCapacity)
+                g_ChunkProxySlots.resize(g_ChunkProxyCapacity);
+
+            ChunkProxySlot* freeSlot = nullptr;
+            const DWORD now = GetTickCount();
+            for (ChunkProxySlot& slot : g_ChunkProxySlots)
+            {
+                if (slot.active && slot.objectBytes == objectBytes)
+                {
+                    slot.positionX = positionX;
+                    slot.positionY = positionY;
+                    slot.positionZ = positionZ;
+                    slot.useEntryPosition = true;
+                    slot.lastSeenTick = now;
+                    return;
+                }
+
+                if (!slot.active && !freeSlot)
+                    freeSlot = &slot;
+            }
+
+            if (!freeSlot)
+                return;
+
+            freeSlot->objectBytes = objectBytes;
+            freeSlot->positionX = positionX;
+            freeSlot->positionY = positionY;
+            freeSlot->positionZ = positionZ;
+            freeSlot->useEntryPosition = true;
+            freeSlot->lastSeenTick = now;
+            freeSlot->active = true;
+            freeSlot->billboardAssigned = false;
+        }
+
+        static void TrackChunkProxyDebugObject(
+            const uint8_t* objectBytes,
+            uint32_t objectType,
+            const void* activeHandle,
+            const BzrGeoLookup* lookup)
+        {
+            (void)objectBytes;
+            (void)objectType;
+            (void)activeHandle;
+            (void)lookup;
+        }
+
+        static bool TryReadChunkEffectEntry(
+            const uint8_t* thisBytes,
+            uint32_t index,
+            ChunkEffectActiveEntry& outEntry)
+        {
+            if (!thisBytes)
+                return false;
+
+            const uintptr_t entryOffset = kChunkEffectEntryBaseOffset +
+                (static_cast<uintptr_t>(index) * kChunkEffectEntrySize);
+            __try
+            {
+                const auto* entryBytes = thisBytes + entryOffset;
+                outEntry.objectBytes = *reinterpret_cast<const uint8_t* const*>(entryBytes + 0x00);
+                outEntry.reserved = *reinterpret_cast<const uint32_t*>(entryBytes + 0x04);
+                outEntry.positionX = *reinterpret_cast<const float*>(entryBytes + 0x08);
+                outEntry.positionY = *reinterpret_cast<const float*>(entryBytes + 0x0C);
+                outEntry.positionZ = *reinterpret_cast<const float*>(entryBytes + 0x10);
+                outEntry.velocityX = *reinterpret_cast<const float*>(entryBytes + 0x14);
+                outEntry.velocityY = *reinterpret_cast<const float*>(entryBytes + 0x18);
+                outEntry.velocityZ = *reinterpret_cast<const float*>(entryBytes + 0x1C);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void LogChunkEffectRuntimeSample(void* thisPtr, float dt)
+        {
+            if (!g_TraceChunkEffectRuntime || !thisPtr)
+                return;
+
+            const auto* thisBytes = reinterpret_cast<const uint8_t*>(thisPtr);
+            __try
+            {
+                const uint32_t count = *reinterpret_cast<const uint32_t*>(thisBytes + kChunkEffectActiveCountOffset);
+                const bool shouldLog =
+                    g_TraceChunkRenderVerbose ||
+                    count > 0 ||
+                    count != g_LastChunkEffectLoggedCount;
+                g_LastChunkEffectLoggedCount = count;
+                if (!shouldLog || !AcquireChunkLogSlot())
+                    return;
+
+                const uint32_t gate = *reinterpret_cast<const uint32_t*>(thisBytes + kChunkEffectGateOffset);
+                const uint32_t templateList = *reinterpret_cast<const uint32_t*>(thisBytes + kChunkEffectTemplateListOffset);
+                const uint32_t templateCount = *reinterpret_cast<const uint32_t*>(thisBytes + kChunkEffectTemplateListOffset + 4);
+                const float tuning8038 = *reinterpret_cast<const float*>(thisBytes + kChunkEffectTuningBaseOffset + 0x0);
+                const float tuning8044 = *reinterpret_cast<const float*>(thisBytes + kChunkEffectTuningBaseOffset + 0xC);
+                const float tuning8048 = *reinterpret_cast<const float*>(thisBytes + kChunkEffectTuningBaseOffset + 0x10);
+
+                Log(L"[CHUNKEFFECT] this=0x%08X dt=%.4f count=%u gate=0x%08X templateList=0x%08X templateCount=%u tune8038=%.4f tune8044=%.4f tune8048=%.4f\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)),
+                    static_cast<double>(dt),
+                    count,
+                    gate,
+                    templateList,
+                    templateCount,
+                    static_cast<double>(tuning8038),
+                    static_cast<double>(tuning8044),
+                    static_cast<double>(tuning8048));
+
+                const uint32_t entryLimit = (std::min)(count, g_ChunkTraceEntryLimit);
+                for (uint32_t index = 0; index < entryLimit; ++index)
+                {
+                    ChunkEffectActiveEntry entry = {};
+                    if (!TryReadChunkEffectEntry(thisBytes, index, entry))
+                    {
+                        Log(L"[CHUNKEFFECT]   entry[%u] fault\n", index);
+                        continue;
+                    }
+
+                    uint32_t classId = 0;
+                    uint32_t flags = 0;
+                    uint32_t owner = 0;
+                    float timer = 0.0f;
+                    __try
+                    {
+                        if (entry.objectBytes)
+                        {
+                            classId = *reinterpret_cast<const uint32_t*>(entry.objectBytes + 0x84);
+                            flags = *reinterpret_cast<const uint32_t*>(entry.objectBytes + 0x14);
+                            owner = *reinterpret_cast<const uint32_t*>(entry.objectBytes + 0x8C);
+                            timer = *reinterpret_cast<const float*>(entry.objectBytes + 0xAC);
+                        }
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                    }
+
+                    Log(L"[CHUNKEFFECT]   entry[%u] obj=0x%08X reserved=0x%08X classId=%u flags=0x%08X owner=0x%08X timer=%.6f pos=(%.4f, %.4f, %.4f) vel=(%.4f, %.4f, %.4f)\n",
+                        index,
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entry.objectBytes)),
+                        entry.reserved,
+                        classId,
+                        flags,
+                        owner,
+                        static_cast<double>(timer),
+                        static_cast<double>(entry.positionX),
+                        static_cast<double>(entry.positionY),
+                        static_cast<double>(entry.positionZ),
+                        static_cast<double>(entry.velocityX),
+                        static_cast<double>(entry.velocityY),
+                        static_cast<double>(entry.velocityZ));
+                }
+
+                if (count > entryLimit)
+                {
+                    Log(L"[CHUNKEFFECT]   ... truncated %u additional entries\n",
+                        count - entryLimit);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[CHUNKEFFECT] sample fault this=0x%08X code=0x%08X\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)),
+                    static_cast<uint32_t>(GetExceptionCode()));
+            }
+        }
+
+        static void TrackChunkEffectActiveEntries(void* thisPtr)
+        {
+            if ((!g_EnableChunkProxyDebug && !g_TraceChunkEffectRuntime) || !thisPtr)
+                return;
+
+            const auto* thisBytes = reinterpret_cast<const uint8_t*>(thisPtr);
+            __try
+            {
+                const uint32_t count = *reinterpret_cast<const uint32_t*>(thisBytes + kChunkEffectActiveCountOffset);
+                for (uint32_t index = 0; index < count; ++index)
+                {
+                    ChunkEffectActiveEntry entry = {};
+                    if (!TryReadChunkEffectEntry(thisBytes, index, entry))
+                        continue;
+                    if (!entry.objectBytes)
+                        continue;
+
+                    uint32_t classId = 0;
+                    __try
+                    {
+                        classId = *reinterpret_cast<const uint32_t*>(entry.objectBytes + 0x84);
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        classId = 0;
+                    }
+
+                    if (classId != kClassIdChunk)
+                        continue;
+
+                    TrackChunkProxyDebugEntry(
+                        entry.objectBytes,
+                        entry.positionX,
+                        entry.positionY,
+                        entry.positionZ);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
+        static ChunkBridgeSnapshot CaptureChunkBridgeSnapshot(const uint8_t* objectBytes)
+        {
+            ChunkBridgeSnapshot snapshot = {};
+            if (!objectBytes)
+                return snapshot;
+
+            __try
+            {
+                snapshot.directBridgeRoot = *reinterpret_cast<void* const*>(objectBytes + 0xF0);
+                if (snapshot.directBridgeRoot)
+                {
+                    const auto* bridgeBytes = reinterpret_cast<const uint8_t*>(snapshot.directBridgeRoot);
+                    snapshot.directOgreEntity = *reinterpret_cast<void* const*>(bridgeBytes + 0x94);
+                    snapshot.directOgreLight = *reinterpret_cast<void* const*>(bridgeBytes + 0xA8);
+                }
+                snapshot.directProbeOk = true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                snapshot.directProbeOk = false;
+            }
+
+            __try
+            {
+                // Legacy OBJ76 layouts observed in Redux helpers place the owning GameObject*
+                // at +0x8C, which is the bridge we want to validate for native death chunks.
+                snapshot.legacyOwner = *reinterpret_cast<void* const*>(objectBytes + 0x8C);
+                if (snapshot.legacyOwner)
+                {
+                    const auto* ownerBytes = reinterpret_cast<const uint8_t*>(snapshot.legacyOwner);
+                    snapshot.ownerBridgeRoot = *reinterpret_cast<void* const*>(ownerBytes + 0xF0);
+                    snapshot.ownerEntity = *reinterpret_cast<void* const*>(ownerBytes + 0xF4);
+                    snapshot.ownerObj = *reinterpret_cast<void* const*>(ownerBytes + 0xF8);
+
+                    if (snapshot.ownerBridgeRoot)
+                    {
+                        const auto* bridgeBytes = reinterpret_cast<const uint8_t*>(snapshot.ownerBridgeRoot);
+                        snapshot.ownerOgreEntity = *reinterpret_cast<void* const*>(bridgeBytes + 0x94);
+                        snapshot.ownerOgreLight = *reinterpret_cast<void* const*>(bridgeBytes + 0xA8);
+                    }
+                }
+                snapshot.ownerProbeOk = true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                snapshot.ownerProbeOk = false;
+            }
+
+            return snapshot;
+        }
+
+        static void LogChunkClassProbe(const uint8_t* objectBytes)
+        {
+            if (!objectBytes)
+                return;
+
+            __try
+            {
+                // Redux's live OBJ76-like layout appears to preserve the legacy
+                // parent/child/class/gameObj neighborhood, shifted down by 0x28:
+                // legacy A0/A4/A8/AC/B0/B4 -> live 78/7C/80/84/88/8C.
+                const void* parent = *reinterpret_cast<void* const*>(objectBytes + 0x78);
+                const void* sibling = *reinterpret_cast<void* const*>(objectBytes + 0x7C);
+                const void* child = *reinterpret_cast<void* const*>(objectBytes + 0x80);
+                const uint32_t classId = *reinterpret_cast<const uint32_t*>(objectBytes + 0x84);
+                const void* classPtr = *reinterpret_cast<void* const*>(objectBytes + 0x88);
+                const void* gameObj = *reinterpret_cast<void* const*>(objectBytes + 0x8C);
+
+                Log(L"[CHUNK]   obj76Probe parent=0x%08X sibling=0x%08X child=0x%08X classId=0x%X classPtr=0x%08X gameObj=0x%08X\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parent)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sibling)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(child)),
+                    classId,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(classPtr)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(gameObj)));
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[CHUNK]   obj76Probe fault code=0x%08X\n",
+                    static_cast<uint32_t>(GetExceptionCode()));
+            }
+        }
+
+        static void NoteChunkClassTransition(const uint8_t* objectBytes, uint32_t classId)
+        {
+            if (!g_TraceChunkRender || !objectBytes)
+                return;
+
+            constexpr size_t kMaxTrackedChunkClasses = 8192;
+
+            const uintptr_t objectKey = reinterpret_cast<uintptr_t>(objectBytes);
+            if (g_ChunkObservedClassIds.size() >= kMaxTrackedChunkClasses &&
+                g_ChunkObservedClassIds.find(objectKey) == g_ChunkObservedClassIds.end())
+            {
+                g_ChunkObservedClassIds.clear();
+            }
+
+            auto [it, inserted] = g_ChunkObservedClassIds.emplace(objectKey, classId);
+            if (inserted)
+                return;
+
+            const uint32_t previousClassId = it->second;
+            if (previousClassId == classId)
+                return;
+
+            it->second = classId;
+
+            if (!AcquireChunkLogSlot())
+                return;
+
+            __try
+            {
+                const void* parent = *reinterpret_cast<void* const*>(objectBytes + 0x78);
+                const void* sibling = *reinterpret_cast<void* const*>(objectBytes + 0x7C);
+                const void* child = *reinterpret_cast<void* const*>(objectBytes + 0x80);
+                const void* classPtr = *reinterpret_cast<void* const*>(objectBytes + 0x88);
+                const void* gameObj = *reinterpret_cast<void* const*>(objectBytes + 0x8C);
+
+                Log(L"[CHUNK] classChange obj=0x%08X old=0x%X new=0x%X parent=0x%08X sibling=0x%08X child=0x%08X classPtr=0x%08X gameObj=0x%08X\n",
+                    static_cast<uint32_t>(objectKey),
+                    previousClassId,
+                    classId,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parent)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sibling)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(child)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(classPtr)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(gameObj)));
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[CHUNK] classChange obj=0x%08X old=0x%X new=0x%X probe=fault code=0x%08X\n",
+                    static_cast<uint32_t>(objectKey),
+                    previousClassId,
+                    classId,
+                    static_cast<uint32_t>(GetExceptionCode()));
+            }
+        }
+
         static void LogChunkResolveSnapshot(
             const char* stage,
             const char* reason,
@@ -492,8 +1332,9 @@ namespace BZROpenShim
             const uint32_t lookupCount = lookup ? lookup->count : 0;
             const uint32_t cachedKey = lookup ? lookup->cachedKey : 0;
             const uintptr_t entriesPtr = lookup ? reinterpret_cast<uintptr_t>(lookup->entries) : 0;
+            const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(objectBytes);
 
-            Log(L"[CHUNK] %hs obj=0x%08X variant=0x%08X resolved=0x%08X before=0x%08X after=0x%08X class=0x%04X type=0x%X count=%u cached=0x%08X entries=0x%08X reason=%hs idx=%d key=0x%08X\n",
+            Log(L"[CHUNK] %hs obj=0x%08X variant=0x%08X resolved=0x%08X before=0x%08X after=0x%08X class=0x%04X classId=0x%X count=%u cached=0x%08X entries=0x%08X reason=%hs idx=%d key=0x%08X\n",
                 stage,
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectBytes)),
                 variant,
@@ -508,6 +1349,21 @@ namespace BZROpenShim
                 reason ? reason : "-",
                 selectedIndex,
                 selectedKey);
+
+            Log(L"[CHUNK]   direct root=0x%08X entity=0x%08X light=0x%08X probe=%hs | owner=0x%08X ownerBridge=0x%08X ownerEntity=0x%08X ownerObj=0x%08X ownerOgre=0x%08X ownerLight=0x%08X ownerProbe=%hs\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bridgeSnapshot.directBridgeRoot)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bridgeSnapshot.directOgreEntity)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bridgeSnapshot.directOgreLight)),
+                bridgeSnapshot.directProbeOk ? "ok" : "fault",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bridgeSnapshot.legacyOwner)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bridgeSnapshot.ownerBridgeRoot)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bridgeSnapshot.ownerEntity)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bridgeSnapshot.ownerObj)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bridgeSnapshot.ownerOgreEntity)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bridgeSnapshot.ownerOgreLight)),
+                bridgeSnapshot.ownerProbeOk ? "ok" : "fault");
+
+            LogChunkClassProbe(objectBytes);
 
             if (!lookup || !lookup->entries || lookup->count == 0)
                 return;
@@ -1631,6 +2487,224 @@ namespace BZROpenShim
             return changed;
         }
 
+        static const char* TargetReticlePopupModeName(TargetReticlePopupMode mode)
+        {
+            switch (mode)
+            {
+            case TargetReticlePopupMode::NeutralOnly:
+                return "NEUTRAL_ONLY";
+            case TargetReticlePopupMode::ExplicitOnly:
+                return "EXPLICIT_ONLY";
+            default:
+                return "DEFAULT";
+            }
+        }
+
+        static TargetReticlePopupMode ClampTargetReticlePopupMode(int value)
+        {
+            if (value <= static_cast<int>(TargetReticlePopupMode::Default))
+                return TargetReticlePopupMode::Default;
+            if (value == static_cast<int>(TargetReticlePopupMode::NeutralOnly))
+                return TargetReticlePopupMode::NeutralOnly;
+            return TargetReticlePopupMode::ExplicitOnly;
+        }
+
+        static bool TryParseTargetReticlePopupModeValue(const char* value, TargetReticlePopupMode& outMode)
+        {
+            if (!value || !*value)
+                return false;
+
+            char normalized[32] = {};
+            size_t out = 0;
+            for (const char* cursor = value; *cursor && out + 1 < sizeof(normalized); ++cursor)
+            {
+                if (std::isspace(static_cast<unsigned char>(*cursor)) || *cursor == '_' || *cursor == '-')
+                    continue;
+                normalized[out++] = static_cast<char>(std::toupper(static_cast<unsigned char>(*cursor)));
+            }
+            normalized[out] = '\0';
+            if (normalized[0] == '\0')
+                return false;
+
+            char* end = nullptr;
+            const long parsed = std::strtol(normalized, &end, 10);
+            if (end != normalized && *end == '\0')
+            {
+                outMode = ClampTargetReticlePopupMode(static_cast<int>(parsed));
+                return true;
+            }
+
+            if (std::strcmp(normalized, "DEFAULT") == 0 || std::strcmp(normalized, "NORMAL") == 0 ||
+                std::strcmp(normalized, "ON") == 0)
+            {
+                outMode = TargetReticlePopupMode::Default;
+                return true;
+            }
+            if (std::strcmp(normalized, "NEUTRALONLY") == 0 || std::strcmp(normalized, "NEUTRAL") == 0)
+            {
+                outMode = TargetReticlePopupMode::NeutralOnly;
+                return true;
+            }
+            if (std::strcmp(normalized, "EXPLICITONLY") == 0 || std::strcmp(normalized, "EXPLICIT") == 0)
+            {
+                outMode = TargetReticlePopupMode::ExplicitOnly;
+                return true;
+            }
+
+            return false;
+        }
+
+        static bool TryLoadTargetReticlePopupModeFromConfig(
+            const std::filesystem::path& configPath,
+            TargetReticlePopupMode& outMode)
+        {
+            if (configPath.empty())
+                return false;
+
+            FILE* file = nullptr;
+            if (fopen_s(&file, configPath.string().c_str(), "r") != 0 || !file)
+                return false;
+
+            char line[256] = {};
+            bool found = false;
+            while (std::fgets(line, static_cast<int>(sizeof(line)), file))
+            {
+                char* trimmed = TrimAsciiInPlace(line);
+                if (*trimmed == '\0' || *trimmed == '#' || *trimmed == ';')
+                    continue;
+
+                char* equals = std::strchr(trimmed, '=');
+                if (!equals)
+                    continue;
+
+                *equals = '\0';
+                char* key = TrimAsciiInPlace(trimmed);
+                char* value = TrimAsciiInPlace(equals + 1);
+                if (_stricmp(key, "TargetReticlePopupMode") != 0)
+                    continue;
+
+                found = TryParseTargetReticlePopupModeValue(value, outMode);
+                break;
+            }
+
+            std::fclose(file);
+            return found;
+        }
+
+        static bool TryGetEnvTargetReticlePopupMode(const char* envName, TargetReticlePopupMode& outMode)
+        {
+            if (!envName || !*envName)
+                return false;
+
+            char value[32] = {};
+            const DWORD len = GetEnvironmentVariableA(envName, value, static_cast<DWORD>(sizeof(value)));
+            if (len == 0 || len >= sizeof(value))
+                return false;
+
+            return TryParseTargetReticlePopupModeValue(value, outMode);
+        }
+
+        static TargetReticlePopupMode SanitizeTargetReticlePopupMode(TargetReticlePopupMode mode, bool logDowngrade)
+        {
+            if (g_IsSteamExe &&
+                mode == TargetReticlePopupMode::NeutralOnly &&
+                !g_TargetReticlePopupSteamNeutralAllowed)
+            {
+                if (logDowngrade && !g_TargetReticlePopupSteamNeutralWarned)
+                {
+                    g_TargetReticlePopupSteamNeutralWarned = true;
+                    Log(L"[HUD] Steam reticle popup NEUTRAL_ONLY is temporarily downgraded to DEFAULT; set OPENSHIM_ALLOW_STEAM_NEUTRAL_RETICLE_POPUP=1 to force it\n");
+                }
+                return TargetReticlePopupMode::Default;
+            }
+
+            return mode;
+        }
+
+        static void ApplyTargetReticlePopupMode(TargetReticlePopupMode mode)
+        {
+            g_TargetReticlePopupMode = mode;
+        }
+
+        static void InitializeTargetReticlePopupConfig()
+        {
+            if (g_TargetReticlePopupConfigInitialized)
+                return;
+
+            g_TargetReticlePopupConfigInitialized = true;
+            g_TargetReticlePopupSteamNeutralAllowed =
+                EnvFlagEnabled("OPENSHIM_ALLOW_STEAM_NEUTRAL_RETICLE_POPUP") ||
+                EnvFlagEnabled("BZR_ALLOW_STEAM_NEUTRAL_RETICLE_POPUP");
+            ApplyTargetReticlePopupMode(TargetReticlePopupMode::Default);
+
+            TargetReticlePopupMode mode = TargetReticlePopupMode::Default;
+            const auto configPath = GetConfigModuleDirectory() / kUnderAttackAlertConfigName;
+            if (TryLoadTargetReticlePopupModeFromConfig(configPath, mode))
+                ApplyTargetReticlePopupMode(SanitizeTargetReticlePopupMode(mode, true));
+
+            if (TryGetEnvTargetReticlePopupMode("OPENSHIM_TARGET_RETICLE_POPUP_MODE", mode) ||
+                TryGetEnvTargetReticlePopupMode("BZR_TARGET_RETICLE_POPUP_MODE", mode))
+            {
+                ApplyTargetReticlePopupMode(SanitizeTargetReticlePopupMode(mode, true));
+            }
+
+            Log(L"[HUD] Target reticle popup mode=%hs\n",
+                TargetReticlePopupModeName(g_TargetReticlePopupMode));
+        }
+
+        static bool SetTargetReticlePopupModeInternal(TargetReticlePopupMode mode, bool logChange)
+        {
+            InitializeTargetReticlePopupConfig();
+            mode = SanitizeTargetReticlePopupMode(mode, logChange);
+            const bool changed = g_TargetReticlePopupMode != mode;
+            ApplyTargetReticlePopupMode(mode);
+            if (logChange)
+            {
+                Log(L"[HUD] Target reticle popup bridge mode=%hs\n",
+                    TargetReticlePopupModeName(g_TargetReticlePopupMode));
+            }
+            return changed;
+        }
+
+        static float GetGameObjectPlayerShotTime(void* objectPtr)
+        {
+            if (!objectPtr)
+                return kSuppressedRecentHitTime;
+
+            __try
+            {
+                const auto* bytes = reinterpret_cast<const uint8_t*>(objectPtr);
+                return *reinterpret_cast<const float*>(bytes + kGameObjectPlayerShotOffset);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return kSuppressedRecentHitTime;
+            }
+        }
+
+        static bool IsNeutralTeamObject(void* objectPtr)
+        {
+            if (!objectPtr)
+                return false;
+
+            __try
+            {
+                auto** vtable = *reinterpret_cast<void***>(objectPtr);
+                if (!vtable)
+                    return false;
+
+                auto getTeam = reinterpret_cast<FnGameObjectGetTeam>(vtable[kGameObjectGetTeamVtableOffset / sizeof(void*)]);
+                if (!getTeam)
+                    return false;
+
+                return getTeam(objectPtr) == 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         static void* GetEngineFlamePrimary()
         {
             return g_EngineFlamePrimaryManager;
@@ -2480,7 +3554,7 @@ namespace BZROpenShim
 
         static void MaybeApplyProducerBuildMenu(void* producerPtr)
         {
-            if (g_IsSteamExe || !g_BzrFn_InitBuildItem || !g_BzrFn_CleanupBuildItem || !g_BzrBuildMenuRoot)
+            if (!g_BzrFn_InitBuildItem || !g_BzrFn_CleanupBuildItem || !g_BzrBuildMenuRoot)
                 return;
 
             LoadProducerBuildMenuConfig();
@@ -2716,6 +3790,7 @@ namespace BZROpenShim
         g_BzrFn_EngineFlameSubmit = nullptr;
         g_BzrFn_EngineFlameResolveTexture = nullptr;
         g_BzrFn_GetTeamNum = nullptr;
+        g_BzrFn_ChunkEffectSimulate = nullptr;
         g_EngineFlamePrimaryManager = nullptr;
         g_EngineFlameSecondaryManager = nullptr;
         g_EngineFlameVtableHooksInstalled = false;
@@ -2793,20 +3868,22 @@ namespace BZROpenShim
         {
             g_BzrFn_GetLocalPlayerNetId = reinterpret_cast<FnGetLocalPlayerNetId>(0x00572D90);
             g_BzrFn_NetPlayerSetData = reinterpret_cast<FnNetPlayerSetData>(0x00575570);
-            g_BzrFn_EngineFlameAddFlame = reinterpret_cast<FnEngineFlameAddFlame>(0x004C8800);
-            g_BzrFn_EngineFlameControl = reinterpret_cast<FnEngineFlameControl>(0x004C88A0);
-            g_BzrFn_EngineFlameSubmit = reinterpret_cast<FnEngineFlameSubmit>(0x004C88C0);
-            g_BzrFn_EngineFlameResolveTexture = reinterpret_cast<FnEngineFlameResolveTexture>(0x0068BED0);
-            g_BzrFn_GetTeamNum = reinterpret_cast<FnGetTeamNum>(0x005C8800);
         }
 
-        if (!g_IsSteamExe)
-        {
-            g_BzrFn_InitBuildItem = reinterpret_cast<FnBuildItemInit>(0x0049F5C0);
-            g_BzrFn_CleanupBuildItem = reinterpret_cast<FnBuildItemCleanup>(0x0049F880);
-            g_BzrBuildMenuRoot = reinterpret_cast<BuildItem*>(kBuildMenuRootAddr);
-        }
-        else
+        // Steam's wrapped executable still maps these helpers at the same live
+        // runtime addresses as GOG on the current 2.2.301 build.
+        g_BzrFn_EngineFlameAddFlame = reinterpret_cast<FnEngineFlameAddFlame>(0x004C8800);
+        g_BzrFn_EngineFlameControl = reinterpret_cast<FnEngineFlameControl>(0x004C88A0);
+        g_BzrFn_EngineFlameSubmit = reinterpret_cast<FnEngineFlameSubmit>(0x004C88C0);
+        g_BzrFn_EngineFlameResolveTexture = reinterpret_cast<FnEngineFlameResolveTexture>(0x0068BED0);
+        g_BzrFn_GetTeamNum = reinterpret_cast<FnGetTeamNum>(0x005C8800);
+        g_BzrFn_ChunkEffectSimulate = reinterpret_cast<FnChunkEffectSimulate>(0x004917F0);
+
+        g_BzrFn_InitBuildItem = reinterpret_cast<FnBuildItemInit>(0x0049F5C0);
+        g_BzrFn_CleanupBuildItem = reinterpret_cast<FnBuildItemCleanup>(0x0049F880);
+        g_BzrBuildMenuRoot = reinterpret_cast<BuildItem*>(kBuildMenuRootAddr);
+
+        if (g_IsSteamExe)
         {
             ResolveEngineFlameRuntimeTargets();
         }
@@ -2814,19 +3891,26 @@ namespace BZROpenShim
         g_EnableChunkRenderFallback =
             EnvFlagEnabled("BZR_CHUNK_FORCE_FIRST_GEO") ||
             EnvFlagEnabled("OPENSHIM_CHUNK_FORCE_FIRST_GEO");
-        g_TraceChunkRender = true;
-        g_TraceChunkRenderVerbose = true;
+        g_EnableChunkProxyDebug =
+            EnvFlagEnabled("OPENSHIM_CHUNK_PROXY_DEBUG") ||
+            EnvFlagEnabled("OPENSHIM_CHUNK_PLACEHOLDER_PROXY");
         long chunkLogBudget = 200;
-        if (TryGetEnvLong("BZR_CHUNK_LOG_BUDGET", chunkLogBudget) ||
-            TryGetEnvLong("OPENSHIM_CHUNK_LOG_BUDGET", chunkLogBudget))
+        const bool chunkLogBudgetSpecified =
+            TryGetEnvLong("BZR_CHUNK_LOG_BUDGET", chunkLogBudget) ||
+            TryGetEnvLong("OPENSHIM_CHUNK_LOG_BUDGET", chunkLogBudget);
+        if (chunkLogBudgetSpecified)
         {
             if (chunkLogBudget < 0)
                 chunkLogBudget = 0;
         }
         g_ChunkRenderLogBudget = chunkLogBudget;
+        g_ChunkObservedClassIds.clear();
+        g_LastChunkEffectLoggedCount = UINT32_MAX;
         long chunkTraceEntryLimit = 32;
-        if (TryGetEnvLong("BZR_CHUNK_TRACE_ENTRY_LIMIT", chunkTraceEntryLimit) ||
-            TryGetEnvLong("OPENSHIM_CHUNK_TRACE_ENTRY_LIMIT", chunkTraceEntryLimit))
+        const bool chunkTraceEntryLimitSpecified =
+            TryGetEnvLong("BZR_CHUNK_TRACE_ENTRY_LIMIT", chunkTraceEntryLimit) ||
+            TryGetEnvLong("OPENSHIM_CHUNK_TRACE_ENTRY_LIMIT", chunkTraceEntryLimit);
+        if (chunkTraceEntryLimitSpecified)
         {
             g_ChunkTraceEntryLimit = ClampChunkTraceEntryLimit(chunkTraceEntryLimit);
         }
@@ -2834,6 +3918,47 @@ namespace BZROpenShim
         {
             g_ChunkTraceEntryLimit = ClampChunkTraceEntryLimit(chunkTraceEntryLimit);
         }
+        g_TraceChunkRender =
+            g_EnableChunkRenderFallback ||
+            g_EnableChunkProxyDebug ||
+            EnvFlagEnabled("BZR_CHUNK_TRACE") ||
+            EnvFlagEnabled("OPENSHIM_CHUNK_TRACE") ||
+            chunkLogBudgetSpecified ||
+            chunkTraceEntryLimitSpecified;
+        g_TraceChunkRenderVerbose =
+            EnvFlagEnabled("BZR_CHUNK_TRACE_VERBOSE") ||
+            EnvFlagEnabled("OPENSHIM_CHUNK_TRACE_VERBOSE");
+        g_TraceChunkEffectRuntime =
+            g_EnableChunkProxyDebug ||
+            EnvFlagEnabled("BZR_TRACE_CHUNK_EFFECT") ||
+            EnvFlagEnabled("OPENSHIM_TRACE_CHUNK_EFFECT") ||
+            EnvFlagEnabled("OPENSHIM_CHUNK_EFFECT_TRACE");
+        long chunkProxyCapacity = static_cast<long>(g_ChunkProxyCapacity);
+        if (TryGetEnvLong("OPENSHIM_CHUNK_PROXY_CAP", chunkProxyCapacity) ||
+            TryGetEnvLong("OPENSHIM_CHUNK_PROXY_CAPACITY", chunkProxyCapacity))
+        {
+            g_ChunkProxyCapacity = ClampChunkProxyCapacity(chunkProxyCapacity);
+        }
+        else
+        {
+            g_ChunkProxyCapacity = 96;
+        }
+        float chunkProxySize = g_ChunkProxyDebugSize;
+        if (TryGetEnvFloat("OPENSHIM_CHUNK_PROXY_SIZE", chunkProxySize) ||
+            TryGetEnvFloat("OPENSHIM_CHUNK_PROXY_DEBUG_SIZE", chunkProxySize))
+        {
+            g_ChunkProxyDebugSize = ClampChunkProxySize(chunkProxySize);
+        }
+        else
+        {
+            g_ChunkProxyDebugSize = 2.5f;
+        }
+        g_ChunkProxyLastRetryTick = 0;
+        g_ChunkProxyInitLogged = false;
+        g_ChunkProxyFailureLogged = false;
+        g_ChunkProxyWaitLogged = false;
+        g_ChunkProxyBillboardSet = nullptr;
+        g_ChunkProxySlots.clear();
         float turretAimPitchMultiplier = g_TurretAimPitchMultiplier;
         if (TryGetEnvFloat("OPENSHIM_TURRET_AIM_PITCH_MULTIPLIER", turretAimPitchMultiplier) ||
             TryGetEnvFloat("OPENSHIM_TURRET_PITCH_MULTIPLIER", turretAimPitchMultiplier))
@@ -2851,16 +3976,25 @@ namespace BZROpenShim
             g_TraceChunkRenderVerbose ? " verbose" : "",
             static_cast<long>(g_ChunkRenderLogBudget),
             g_ChunkTraceEntryLimit);
+        Log(L"[CHUNKPROXY] Placeholder proxy debug: %hs cap=%u size=%.2f\n",
+            g_EnableChunkProxyDebug ? "enabled" : "disabled",
+            g_ChunkProxyCapacity,
+            g_ChunkProxyDebugSize);
+        Log(L"[CHUNKEFFECT] Runtime manager trace: %hs vtableSlot=0x%08X orig=0x%08X\n",
+            g_TraceChunkEffectRuntime ? "enabled" : "disabled",
+            static_cast<uint32_t>(kChunkEffectVtableSimulateSlotAddr),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_ChunkEffectSimulate)));
         Log(L"[TURRET] Aim pitch multiplier: %.3f%s\n",
             static_cast<double>(g_TurretAimPitchMultiplier),
             g_TurretAimPitchMultiplier >= 0.999f ? " (full range)" : "");
         InitializeUnderAttackAlertConfig();
+        InitializeTargetReticlePopupConfig();
         Log(L"[MAPTRACE] Map refresh trace: %hs\n",
             (EnvFlagEnabled("OPENSHIM_TRACE_MAP_REFRESH") ||
              EnvFlagEnabled("OPENSHIM_TRACE_STEAM_MAP_REFRESH")) ? "enabled" : "disabled");
         Log(L"[PRODMENU] Builder bridge: %hs\n",
-            (!g_IsSteamExe && g_BzrFn_InitBuildItem && g_BzrFn_CleanupBuildItem && g_BzrBuildMenuRoot)
-                ? "GOG ready"
+            (g_BzrFn_InitBuildItem && g_BzrFn_CleanupBuildItem && g_BzrBuildMenuRoot)
+                ? (g_IsSteamExe ? "Steam ready" : "GOG ready")
                 : "disabled");
         EnsureBansConfigLoaded();
         {
@@ -2887,6 +4021,33 @@ namespace BZROpenShim
     bool SetUnderAttackAlertModeFromBridge(int mode)
     {
         return SetUnderAttackAlertModeInternal(ClampUnderAttackAlertMode(mode), true);
+    }
+
+    void PrimeTargetReticlePopupConfig()
+    {
+        InitializeTargetReticlePopupConfig();
+    }
+
+    bool SetTargetReticlePopupModeFromBridge(int mode)
+    {
+        return SetTargetReticlePopupModeInternal(ClampTargetReticlePopupMode(mode), true);
+    }
+
+    float __fastcall TargetReticlePopupRecentHitGetterHook(void* objectPtr, void* /*edx*/)
+    {
+        InitializeTargetReticlePopupConfig();
+
+        const float playerShotTime = GetGameObjectPlayerShotTime(objectPtr);
+        switch (g_TargetReticlePopupMode)
+        {
+        case TargetReticlePopupMode::ExplicitOnly:
+            return kSuppressedRecentHitTime;
+        case TargetReticlePopupMode::NeutralOnly:
+            return IsNeutralTeamObject(objectPtr) ? kSuppressedRecentHitTime : playerShotTime;
+        case TargetReticlePopupMode::Default:
+        default:
+            return playerShotTime;
+        }
     }
 
     void __cdecl HandleUnderAttackAlert(float currentTime)
@@ -3380,6 +4541,9 @@ namespace BZROpenShim
             return 0;
 
         uint32_t resolved = g_BzrFn_ChunkResolve(objectPtr, variant);
+        if (!g_EnableChunkRenderFallback && !g_TraceChunkRender && !g_TraceChunkRenderVerbose && !g_EnableChunkProxyDebug)
+            return resolved;
+
         __try
         {
             constexpr uint32_t kMaxReasonableGeoEntries = 256;
@@ -3388,18 +4552,23 @@ namespace BZROpenShim
             auto* activeHandle = reinterpret_cast<void**>(objectBytes + 0x64);
             auto* lookup = reinterpret_cast<BzrGeoLookup*>(objectBytes + 0x68);
             void* activeBefore = *activeHandle;
+            const uint32_t objectType = *reinterpret_cast<const uint32_t*>(objectBytes + 0x84);
+            NoteChunkClassTransition(objectBytes, objectType);
 
             const bool hasLookup =
                 lookup && lookup->entries && lookup->count > 0 && lookup->count <= kMaxReasonableGeoEntries;
             const bool shouldTraceStock =
                 g_TraceChunkRenderVerbose ||
-                (g_TraceChunkRender && (resolved == 0 || activeBefore == nullptr || !hasLookup));
+                (g_TraceChunkRender &&
+                    ((hasLookup && (resolved == 0 || activeBefore == nullptr)) ||
+                     objectType == kClassIdChunk));
 
             if (shouldTraceStock && AcquireChunkLogSlot())
             {
                 LogChunkResolveSnapshot(
                     "stock",
-                    hasLookup ? "post-stock" : "lookup-missing-or-invalid",
+                    hasLookup ? "post-stock" :
+                        (objectType == kClassIdChunk ? "class-id-chunk-no-lookup" : "lookup-missing-or-invalid"),
                     objectBytes,
                     variant,
                     resolved,
@@ -3409,6 +4578,9 @@ namespace BZROpenShim
                     -1,
                     0);
             }
+
+            if (*activeHandle != nullptr && hasLookup)
+                TrackChunkProxyDebugObject(objectBytes, objectType, *activeHandle, lookup);
 
             if (resolved != 0 && *activeHandle != nullptr)
                 return resolved;
@@ -3487,6 +4659,9 @@ namespace BZROpenShim
                     selectedIndex,
                     entry.packedKey);
             }
+
+            if (*activeHandle != nullptr)
+                TrackChunkProxyDebugObject(objectBytes, objectType, *activeHandle, lookup);
 
             return entry.packedKey != 0 ? entry.packedKey : (resolved != 0 ? resolved : 1u);
         }
@@ -4169,6 +5344,7 @@ namespace BZROpenShim
 
         EnsureEngineFlameVariantsInitialized();
         g_BzrFn_EngineFlameSubmit(thisPtr, camera);
+        TickChunkProxyDebug();
 
         if (thisPtr == GetEngineFlamePrimary())
         {
@@ -4186,6 +5362,16 @@ namespace BZROpenShim
             if (g_EngineFlamePrimaryGreenTexture != 0)
                 g_BzrFn_EngineFlameSubmit(g_EngineFlameSecondaryGreen, camera);
         }
+    }
+
+    void __fastcall ChunkEffectSimulateHook(void* thisPtr, void* /*edx*/, float dt)
+    {
+        if (!g_BzrFn_ChunkEffectSimulate || !thisPtr)
+            return;
+
+        TrackChunkEffectActiveEntries(thisPtr);
+        LogChunkEffectRuntimeSample(thisPtr, dt);
+        g_BzrFn_ChunkEffectSimulate(thisPtr, dt);
     }
 
     bool __cdecl HandleCommandHelpBan(uint16_t id, const char* cmd)
@@ -4268,19 +5454,48 @@ namespace BZROpenShim
 
     namespace
     {
-        static void UpdateFlagSelectionUi()
+        static void ResetHostUiCache()
+        {
+            g_BanButtonHost = nullptr;
+            g_BanLabelHost = nullptr;
+            g_FlagButtonHost = nullptr;
+            g_FlagLabelHost = nullptr;
+        }
+
+        static void ResetClientUiCache()
+        {
+            g_BanButtonClient = nullptr;
+            g_BanLabelClient = nullptr;
+            g_FlagButtonClient = nullptr;
+            g_FlagLabelClient = nullptr;
+        }
+
+        static void EnsureUiCacheMatchesParent(void* parent, bool host)
+        {
+            if (!parent)
+                return;
+
+            void*& cachedParent = host ? g_HostUiParent : g_ClientUiParent;
+            if (cachedParent == parent)
+                return;
+
+            cachedParent = parent;
+            if (host)
+                ResetHostUiCache();
+            else
+                ResetClientUiCache();
+        }
+
+        static void UpdateFlagSelectionUiLabel(void* label)
         {
             if (g_FlagApplyPending)
                 TryApplyCachedFlagPayload("ui_update");
 
+            if (!label || !g_BzrFn_SetTooltip)
+                return;
+
             const std::string summary = GetSelectedFlagSummary();
-            if (g_BzrFn_SetTooltip)
-            {
-                if (g_FlagLabelHost)
-                    g_BzrFn_SetTooltip(g_FlagLabelHost, summary.c_str());
-                if (g_FlagLabelClient)
-                    g_BzrFn_SetTooltip(g_FlagLabelClient, summary.c_str());
-            }
+            g_BzrFn_SetTooltip(label, summary.c_str());
         }
 
         static void CreateFlagButtonCommon(
@@ -4348,17 +5563,14 @@ namespace BZROpenShim
                 g_BzrFn_AddChild(parent, *outLabel, 0);
             }
 
-            UpdateFlagSelectionUi();
+            UpdateFlagSelectionUiLabel(*outLabel);
         }
 
         static void CycleSelectedFlag(int delta, const char* source)
         {
             EnsureFlagCatalogLoaded();
             if (g_FlagCatalog.empty())
-            {
-                UpdateFlagSelectionUi();
                 return;
-            }
 
             int nextIndex = g_SelectedFlagIndex;
             if (nextIndex < 0)
@@ -4368,7 +5580,6 @@ namespace BZROpenShim
 
             SelectFlagEntryByIndex(nextIndex, source);
             PrimeSelectedFlagForTesting(source);
-            UpdateFlagSelectionUi();
         }
     }
 
@@ -4464,25 +5675,27 @@ namespace BZROpenShim
     void __cdecl FlagButtonOnClickHost()
     {
         CycleSelectedFlag(1, "host_button");
+        UpdateFlagSelectionUiLabel(g_FlagLabelHost);
     }
 
     void __cdecl FlagButtonOnClickClient()
     {
         CycleSelectedFlag(1, "client_button");
+        UpdateFlagSelectionUiLabel(g_FlagLabelClient);
     }
 
     void __cdecl FlagButtonOnHoverHost(void* param)
     {
         if (g_BzrFn_LabelState && g_FlagLabelHost)
             g_BzrFn_LabelState(g_FlagLabelHost, param);
-        UpdateFlagSelectionUi();
+        UpdateFlagSelectionUiLabel(g_FlagLabelHost);
     }
 
     void __cdecl FlagButtonOnHoverClient(void* param)
     {
         if (g_BzrFn_LabelState && g_FlagLabelClient)
             g_BzrFn_LabelState(g_FlagLabelClient, param);
-        UpdateFlagSelectionUi();
+        UpdateFlagSelectionUiLabel(g_FlagLabelClient);
     }
 
     void __cdecl AutoSaveButtonOnClickLoad()
@@ -4620,6 +5833,7 @@ namespace BZROpenShim
             return;
 
         void* parent = g_BanParentHost;
+        EnsureUiCacheMatchesParent(parent, true);
 
         void* buttonMem = ::operator new(0x1EC, std::nothrow);
         if (!buttonMem)
@@ -4690,6 +5904,7 @@ namespace BZROpenShim
             return;
 
         void* parent = g_BanParentClient;
+        EnsureUiCacheMatchesParent(parent, false);
 
         void* buttonMem = ::operator new(0x1EC, std::nothrow);
         if (!buttonMem)

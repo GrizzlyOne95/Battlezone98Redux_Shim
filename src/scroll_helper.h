@@ -63,9 +63,7 @@ namespace BZROpenShim
         static int s_cached = -1;
         if (s_cached < 0)
         {
-            // Default-on for current Steam map refresh debugging; callers can
-            // still disable with OPENSHIM_TRACE_MAP_REFRESH=0.
-            s_cached = 1;
+            s_cached = 0;
             char value[8] = {};
             DWORD len = GetEnvironmentVariableA("OPENSHIM_TRACE_MAP_REFRESH", value, static_cast<DWORD>(sizeof(value)));
             if (len > 0 && len < sizeof(value))

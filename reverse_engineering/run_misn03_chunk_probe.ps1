@@ -4,7 +4,11 @@ param(
     [double]$SampleWindowSeconds = 2.0,
     [int]$MaxEntries = 16,
     [int]$MaxObjects = 8,
+    [int]$ChunkLogBudget = 400,
+    [int]$ChunkTraceEntryLimit = 16,
     [int]$PostCaptureWaitSeconds = 10,
+    [switch]$EnableChunkEffectTrace,
+    [switch]$EnableChunkProxyDebug,
     [switch]$KillExistingGame,
     [switch]$KillGameAfterCapture
 )
@@ -36,6 +40,19 @@ if (Test-Path $shimLog) {
 }
 
 Remove-Item $stdoutLog,$stderrLog -ErrorAction SilentlyContinue
+
+$env:OPENSHIM_CHUNK_LOG_BUDGET = "$ChunkLogBudget"
+$env:OPENSHIM_CHUNK_TRACE_ENTRY_LIMIT = "$ChunkTraceEntryLimit"
+if ($EnableChunkEffectTrace) {
+    $env:OPENSHIM_CHUNK_EFFECT_TRACE = "1"
+} else {
+    Remove-Item Env:OPENSHIM_CHUNK_EFFECT_TRACE -ErrorAction SilentlyContinue
+}
+if ($EnableChunkProxyDebug) {
+    $env:OPENSHIM_CHUNK_PROXY_DEBUG = "1"
+} else {
+    Remove-Item Env:OPENSHIM_CHUNK_PROXY_DEBUG -ErrorAction SilentlyContinue
+}
 
 $probeArgs = @(
     $probeScript,

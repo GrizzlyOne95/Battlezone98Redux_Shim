@@ -154,7 +154,7 @@ namespace
         const std::string logPath = BuildLogPath();
         std::strncpy(g_LogPath, logPath.c_str(), MAX_PATH - 1);
 
-        fopen_s(&g_LogFile, logPath.c_str(), "a");
+        fopen_s(&g_LogFile, logPath.c_str(), "w");
         if (!g_LogFile)
             return TRUE;
 

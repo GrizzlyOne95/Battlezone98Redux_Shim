@@ -127,6 +127,90 @@ namespace BZROpenShim
         return s_cached != 0;
     }
 
+    static bool EnvFlagEnabledByName(const char* name)
+    {
+        if (!name || !*name)
+            return false;
+
+        char value[8] = {};
+        const DWORD len = GetEnvironmentVariableA(name, value, static_cast<DWORD>(sizeof(value)));
+        return (len > 0 && len < sizeof(value) && value[0] != '0');
+    }
+
+    static bool ShouldEnableMapRefreshFixes(bool isSteam)
+    {
+        static int s_cachedSteam = -1;
+        static int s_cachedGog = -1;
+        int& cache = isSteam ? s_cachedSteam : s_cachedGog;
+        if (cache >= 0)
+            return cache != 0;
+
+        if (EnvFlagEnabledByName("OPENSHIM_DISABLE_MAP_REFRESH_FIXES") ||
+            EnvFlagEnabledByName("BZR_DISABLE_MAP_REFRESH_FIXES"))
+        {
+            cache = 0;
+            return false;
+        }
+
+        if (!isSteam)
+        {
+            cache = 1;
+            return true;
+        }
+
+        cache = 1;
+        return true;
+    }
+
+    static bool IsMapRefreshPatchName(const char* name)
+    {
+        if (!name)
+            return false;
+
+        return strcmp(name, "Map Sorting") == 0 ||
+               strcmp(name, "Map List Rewrite for Hop-Fix 1/3") == 0 ||
+               strcmp(name, "Map List Rewrite for Hop-Fix 2/3") == 0 ||
+               strcmp(name, "Map List Rewrite for Hop-Fix 3/3") == 0 ||
+               strcmp(name, "Map List Fix Support 1/3") == 0 ||
+               strcmp(name, "Map Jump Fix Branch Override") == 0;
+    }
+
+    static void FilterPatchesForRuntime(std::vector<PatchDef>& patches, bool isSteam)
+    {
+        if (ShouldEnableMapRefreshFixes(isSteam))
+        {
+            // keep existing set
+        }
+        else
+        {
+            const size_t before = patches.size();
+            patches.erase(
+                std::remove_if(
+                    patches.begin(),
+                    patches.end(),
+                    [](const PatchDef& patch)
+                    {
+                        return IsMapRefreshPatchName(patch.name);
+                    }),
+                patches.end());
+
+            const size_t removed = before - patches.size();
+            if (removed > 0)
+            {
+                if (isSteam)
+                {
+                    Log(L"[INFO] Steam map refresh fixes disabled via env override (%zu patch(es) skipped)\n",
+                        removed);
+                }
+                else
+                {
+                    Log(L"[INFO] Map refresh fixes disabled via env override (%zu patch(es) skipped)\n",
+                        removed);
+                }
+            }
+        }
+    }
+
     static SoundChannelOverrideConfig GetSoundChannelOverrideConfig()
     {
         static bool s_initialized = false;
@@ -357,6 +441,75 @@ namespace BZROpenShim
         return false;
     }
 
+    static bool IsAddressInMainImage(uint32_t address, size_t size)
+    {
+        HMODULE hMain = GetModuleHandleA(nullptr);
+        if (!hMain)
+            return false;
+
+        auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(hMain);
+        if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+            return false;
+
+        auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(
+            reinterpret_cast<uint8_t*>(hMain) + dos->e_lfanew);
+        if (nt->Signature != IMAGE_NT_SIGNATURE)
+            return false;
+
+        const uint32_t base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(hMain));
+        const uint32_t end = base + nt->OptionalHeader.SizeOfImage;
+        return address >= base && (address + size) <= end;
+    }
+
+    static bool ValidateSoundChannelOverrideTargets(const SoundChannelOverrideTargets& targets,
+                                                    const wchar_t* sourceTag)
+    {
+        if (targets.gmStorageAddress == 0 || targets.gasMasterAddress == 0)
+            return false;
+
+        if (!IsAddressInMainImage(targets.gmStorageAddress, sizeof(uint32_t)) ||
+            !IsAddressInMainImage(targets.gasMasterAddress + kGASMasterMaxObjectsOffset, sizeof(uint32_t)))
+        {
+            Log(L"[AUDIO] %ls GAS globals rejected (outside main image: GM storage=0x%08X, GAS_Master=0x%08X)\n",
+                sourceTag ? sourceTag : L"candidate",
+                targets.gmStorageAddress,
+                targets.gasMasterAddress);
+            return false;
+        }
+
+        HANDLE hProc = GetCurrentProcess();
+        uint32_t staticMaxObjects = 0;
+        SIZE_T bytesRead = 0;
+        if (!ReadProcessMemory(hProc,
+                               reinterpret_cast<LPCVOID>(targets.gasMasterAddress + kGASMasterMaxObjectsOffset),
+                               &staticMaxObjects,
+                               sizeof(staticMaxObjects),
+                               &bytesRead) ||
+            bytesRead != sizeof(staticMaxObjects))
+        {
+            Log(L"[AUDIO] %ls GAS globals rejected (failed reading GAS_Master maxObjects at 0x%08X)\n",
+                sourceTag ? sourceTag : L"candidate",
+                targets.gasMasterAddress + kGASMasterMaxObjectsOffset);
+            return false;
+        }
+
+        if (staticMaxObjects == 0 || staticMaxObjects > kMaxSupportedSoundChannels)
+        {
+            Log(L"[AUDIO] %ls GAS globals rejected (unexpected GAS_Master maxObjects=%u at 0x%08X)\n",
+                sourceTag ? sourceTag : L"candidate",
+                staticMaxObjects,
+                targets.gasMasterAddress + kGASMasterMaxObjectsOffset);
+            return false;
+        }
+
+        Log(L"[AUDIO] %ls GAS globals validated (GM storage=0x%08X, GAS_Master=0x%08X, maxObjects=%u)\n",
+            sourceTag ? sourceTag : L"candidate",
+            targets.gmStorageAddress,
+            targets.gasMasterAddress,
+            staticMaxObjects);
+        return true;
+    }
+
     static bool ResolveSoundChannelOverrideTargets(bool isSteam, SoundChannelOverrideTargets& outTargets)
     {
         if (ScanForSoundChannelOverrideTargets(outTargets))
@@ -368,6 +521,15 @@ namespace BZROpenShim
             outTargets.gasMasterAddress = 0x0091559C;
             Log(L"[AUDIO] Falling back to revalidated GOG GAS globals (GM storage=0x%08X, GAS_Master=0x%08X)\n",
                 outTargets.gmStorageAddress, outTargets.gasMasterAddress);
+            return true;
+        }
+
+        SoundChannelOverrideTargets gogFallback = {};
+        gogFallback.gmStorageAddress = 0x00915594;
+        gogFallback.gasMasterAddress = 0x0091559C;
+        if (ValidateSoundChannelOverrideTargets(gogFallback, L"Steam fallback"))
+        {
+            outTargets = gogFallback;
             return true;
         }
 
@@ -841,6 +1003,39 @@ namespace BZROpenShim
         memcpy(&rel, &buf[1], sizeof(rel));
         uint32_t target = instrAddr + 5 + static_cast<uint32_t>(rel);
         return reinterpret_cast<void*>(target);
+    }
+
+    static void* ResolveRelCallTargetWithRetry(uint32_t instrAddr, int maxAttempts, DWORD delayMs)
+    {
+        for (int attempt = 0; attempt < maxAttempts; ++attempt)
+        {
+            if (void* target = ResolveRelCallTarget(instrAddr))
+            {
+                if (attempt > 0)
+                {
+                    Log(L"[PTR] REL32 call at 0x%08X settled after %d attempts\n",
+                        instrAddr,
+                        attempt + 1);
+                }
+                return target;
+            }
+
+            if (attempt + 1 < maxAttempts)
+                Sleep(delayMs);
+        }
+
+        uint8_t buf[5] = {};
+        SIZE_T read = 0;
+        if (ReadProcessMemory(GetCurrentProcess(),
+                              reinterpret_cast<LPCVOID>(instrAddr),
+                              buf, sizeof(buf), &read) &&
+            read == sizeof(buf))
+        {
+            Log(L"[PTR] REL32 call unresolved at 0x%08X bytes=%02X %02X %02X %02X %02X\n",
+                instrAddr, buf[0], buf[1], buf[2], buf[3], buf[4]);
+        }
+
+        return nullptr;
     }
 
     // -----------------------------------------------------------------------
@@ -1403,12 +1598,6 @@ namespace BZROpenShim
             }
             else if (strcmp(p.name, "Chunk Render Resolve Hook") == 0)
             {
-                if (isSteam)
-                {
-                    Log(L"[SCAN] SKIPPED %hs (GOG-only address not yet validated on Steam)\n", p.name);
-                    continue;
-                }
-
                 // rel32 operand for CALL 0x004E3620 at 0x00443B34
                 p.bzr_address = 0x00443B35;
                 p.verified = true;
@@ -1417,26 +1606,22 @@ namespace BZROpenShim
             }
             else if (strcmp(p.name, "Producer Build Menu Root Hook") == 0)
             {
-                if (isSteam)
-                {
-                    Log(L"[SCAN] SKIPPED %hs (GOG-only hook site for now)\n", p.name);
-                    continue;
-                }
-
                 // rel32 operand for CALL 0x0082BA59 at 0x004FFA9E
                 p.bzr_address = 0x004FFA9F;
                 p.verified = true;
                 p.expected_original = { 0xB6, 0xBF, 0x32, 0x00 };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
+            else if (strcmp(p.name, "Target Reticle Popup Recent-Hit Getter Hook") == 0)
+            {
+                // rel32 operand for CALL 0x00497890 at 0x00497C26
+                p.bzr_address = 0x00497C27;
+                p.verified = true;
+                p.expected_original = { 0x65, 0xFC, 0xFF, 0xFF };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
             else if (strcmp(p.name, "HoverCraft Engine Flame Emit Hook 1/2") == 0)
             {
-                if (isSteam)
-                {
-                    Log(L"[SCAN] SKIPPED %hs (GOG-only address not yet validated on Steam)\n", p.name);
-                    continue;
-                }
-
                 p.bzr_address = 0x004EAD78;
                 p.verified = true;
                 p.expected_original = { 0x84, 0xDA, 0xFD, 0xFF };
@@ -1444,12 +1629,6 @@ namespace BZROpenShim
             }
             else if (strcmp(p.name, "HoverCraft Engine Flame Emit Hook 2/2") == 0)
             {
-                if (isSteam)
-                {
-                    Log(L"[SCAN] SKIPPED %hs (GOG-only address not yet validated on Steam)\n", p.name);
-                    continue;
-                }
-
                 p.bzr_address = 0x004EAFDF;
                 p.verified = true;
                 p.expected_original = { 0x1D, 0xD8, 0xFD, 0xFF };
@@ -1457,12 +1636,6 @@ namespace BZROpenShim
             }
             else if (strcmp(p.name, "Engine Flame Control VTable Hook") == 0)
             {
-                if (isSteam)
-                {
-                    Log(L"[SCAN] SKIPPED %hs (GOG-only address not yet validated on Steam)\n", p.name);
-                    continue;
-                }
-
                 p.bzr_address = 0x008791A4;
                 p.verified = true;
                 p.expected_original = { 0xA0, 0x88, 0x4C, 0x00 };
@@ -1470,25 +1643,20 @@ namespace BZROpenShim
             }
             else if (strcmp(p.name, "Engine Flame Submit VTable Hook") == 0)
             {
-                if (isSteam)
-                {
-                    Log(L"[SCAN] SKIPPED %hs (GOG-only address not yet validated on Steam)\n", p.name);
-                    continue;
-                }
-
                 p.bzr_address = 0x008791AC;
                 p.verified = true;
                 p.expected_original = { 0xC0, 0x88, 0x4C, 0x00 };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
+            else if (strcmp(p.name, "Chunk Effect Simulate VTable Hook") == 0)
+            {
+                p.bzr_address = 0x0087708C;
+                p.verified = true;
+                p.expected_original = { 0xF0, 0x17, 0x49, 0x00 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
             else if (strcmp(p.name, "Artillery Weapon Mask Trace") == 0)
             {
-                if (isSteam)
-                {
-                    Log(L"[SCAN] SKIPPED %hs (Steam site not yet revalidated)\n", p.name);
-                    continue;
-                }
-
                 p.bzr_address = 0x0042BB1A;
                 p.verified = true;
                 p.expected_original = { 0xE8, 0x01, 0xAD, 0xFE, 0xFF };
@@ -1496,12 +1664,6 @@ namespace BZROpenShim
             }
             else if (strcmp(p.name, "Decoded Weapon Mask Carrier Bias Hook") == 0)
             {
-                if (isSteam)
-                {
-                    Log(L"[SCAN] SKIPPED %hs (GOG-only address not yet validated on Steam)\n", p.name);
-                    continue;
-                }
-
                 p.bzr_address = 0x00417C80;
                 p.verified = true;
                 p.expected_original = { 0x55, 0x8B, 0xEC, 0x51, 0x89 };
@@ -1509,12 +1671,6 @@ namespace BZROpenShim
             }
             else if (strcmp(p.name, "Raw Weapon Mask Carrier Bias Hook") == 0)
             {
-                if (isSteam)
-                {
-                    Log(L"[SCAN] SKIPPED %hs (GOG-only address not yet validated on Steam)\n", p.name);
-                    continue;
-                }
-
                 p.bzr_address = 0x0046DD70;
                 p.verified = true;
                 p.expected_original = { 0x55, 0x8B, 0xEC, 0x51, 0x89 };
@@ -1585,12 +1741,6 @@ namespace BZROpenShim
             }
             else if (strcmp(p.name, "TurretCraft Aim Pitch Multiplier") == 0)
             {
-                if (isSteam)
-                {
-                    Log(L"[SCAN] SKIPPED %hs (GOG-only address not yet validated on Steam)\n", p.name);
-                    continue;
-                }
-
                 p.bzr_address = 0x005F1838;
                 p.verified = true;
                 p.expected_original = { 0xF3, 0x0F, 0x10, 0x05, 0x84, 0x25, 0x8A, 0x00 };
@@ -1598,12 +1748,6 @@ namespace BZROpenShim
             }
             else if (strcmp(p.name, "TurretTank Aim Pitch Multiplier") == 0)
             {
-                if (isSteam)
-                {
-                    Log(L"[SCAN] SKIPPED %hs (GOG-only address not yet validated on Steam)\n", p.name);
-                    continue;
-                }
-
                 p.bzr_address = 0x005F561A;
                 p.verified = true;
                 p.expected_original = { 0xF3, 0x0F, 0x10, 0x05, 0x84, 0x25, 0x8A, 0x00 };
@@ -1611,12 +1755,6 @@ namespace BZROpenShim
             }
             else if (strcmp(p.name, "Under Attack Alert Hook 1/2") == 0)
             {
-                if (isSteam)
-                {
-                    Log(L"[SCAN] SKIPPED %hs (GOG-only address not yet validated on Steam)\n", p.name);
-                    continue;
-                }
-
                 p.bzr_address = 0x00494D35;
                 p.verified = true;
                 p.expected_original = { 0x0F, 0x2F, 0x05, 0xD0, 0x73 };
@@ -1624,12 +1762,6 @@ namespace BZROpenShim
             }
             else if (strcmp(p.name, "Under Attack Alert Hook 2/2") == 0)
             {
-                if (isSteam)
-                {
-                    Log(L"[SCAN] SKIPPED %hs (GOG-only address not yet validated on Steam)\n", p.name);
-                    continue;
-                }
-
                 p.bzr_address = 0x0050E6DD;
                 p.verified = true;
                 p.expected_original = { 0x0F, 0x2F, 0x05, 0xD0, 0x73 };
@@ -1704,7 +1836,7 @@ namespace BZROpenShim
         }
     }
 
-    static void FillRel32Payloads(std::vector<PatchDef>& patches)
+    static void FillRel32Payloads(std::vector<PatchDef>& patches, bool isSteam)
     {
         for (auto& p : patches)
         {
@@ -1741,7 +1873,15 @@ namespace BZROpenShim
             else if (strcmp(p.name, "Producer Build Menu Root Hook") == 0)
             {
                 uint32_t instrAddr = p.bzr_address - 1;
-                void* originalTarget = ResolveRelCallTarget(instrAddr);
+                void* originalTarget = nullptr;
+                if (isSteam)
+                {
+                    originalTarget = ResolveRelCallTargetWithRetry(instrAddr, 300, 10);
+                }
+                else
+                {
+                    originalTarget = ResolveRelCallTarget(instrAddr);
+                }
                 if (!originalTarget)
                 {
                     Log(L"[SKIP] %hs (failed to resolve original call target)\n", p.name);
@@ -1752,6 +1892,15 @@ namespace BZROpenShim
 
                 uint32_t target = static_cast<uint32_t>(
                     reinterpret_cast<uintptr_t>(ProducerBuildMenuCallHook));
+                int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(instrAddr + 5);
+                p.payload.resize(4);
+                memcpy(p.payload.data(), &rel, sizeof(rel));
+            }
+            else if (strcmp(p.name, "Target Reticle Popup Recent-Hit Getter Hook") == 0)
+            {
+                uint32_t instrAddr = p.bzr_address - 1;
+                uint32_t target = static_cast<uint32_t>(
+                    reinterpret_cast<uintptr_t>(TargetReticlePopupRecentHitGetterHook));
                 int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(instrAddr + 5);
                 p.payload.resize(4);
                 memcpy(p.payload.data(), &rel, sizeof(rel));
@@ -1779,10 +1928,14 @@ namespace BZROpenShim
             reinterpret_cast<uintptr_t>(EngineFlameControlHook));
         const uint32_t engineFlameSubmitHook = static_cast<uint32_t>(
             reinterpret_cast<uintptr_t>(EngineFlameSubmitHook));
+        const uint32_t chunkEffectSimulateHook = static_cast<uint32_t>(
+            reinterpret_cast<uintptr_t>(ChunkEffectSimulateHook));
         uint8_t engineFlameControlBytes[4] = {};
         uint8_t engineFlameSubmitBytes[4] = {};
+        uint8_t chunkEffectSimulateBytes[4] = {};
         memcpy(engineFlameControlBytes, &engineFlameControlHook, sizeof(engineFlameControlBytes));
         memcpy(engineFlameSubmitBytes, &engineFlameSubmitHook, sizeof(engineFlameSubmitBytes));
+        memcpy(chunkEffectSimulateBytes, &chunkEffectSimulateHook, sizeof(chunkEffectSimulateBytes));
 
         for (auto& p : patches)
         {
@@ -1802,6 +1955,10 @@ namespace BZROpenShim
             else if (strcmp(p.name, "Engine Flame Submit VTable Hook") == 0)
             {
                 p.payload.assign(engineFlameSubmitBytes, engineFlameSubmitBytes + sizeof(engineFlameSubmitBytes));
+            }
+            else if (strcmp(p.name, "Chunk Effect Simulate VTable Hook") == 0)
+            {
+                p.payload.assign(chunkEffectSimulateBytes, chunkEffectSimulateBytes + sizeof(chunkEffectSimulateBytes));
             }
         }
     }
@@ -1887,7 +2044,8 @@ namespace BZROpenShim
         const bool isSteam = IsSteamExe();
         Log(L"[INFO] Executable: %hs\n", isSteam ? "battlezone98redux.exe (Steam)" : "BZR.exe (GOG)");
         g_EnableScrollRestore = true;
-        Log(L"[INFO] HopFix helpers enabled for %hs\n",
+        Log(L"[INFO] HopFix helpers %hs for %hs\n",
+            ShouldEnableMapRefreshFixes(isSteam) ? "enabled" : "disabled",
             isSteam ? "Steam" : "GOG");
 
         if (ShouldEnableD3DStartupHooks())
@@ -1920,6 +2078,7 @@ namespace BZROpenShim
 
         // 4. Build patch list and resolve dynamic addresses
         auto patches = BuildPatchList();
+        FilterPatchesForRuntime(patches, isSteam);
         if (ShouldEnableArtilleryMaskTracePatch())
         {
             Log(L"[INFO] Artillery weapon-mask trace enabled via OPENSHIM_TRACE_ARTILLERY_MASK\n");
@@ -1956,7 +2115,7 @@ namespace BZROpenShim
 
         FillJmp5Payloads(patches);
         FillVersionNoticePayloads(patches);
-        FillRel32Payloads(patches);
+        FillRel32Payloads(patches, isSteam);
         WaitForExpectedBytes(patches, isSteam);
 
         // 5. Apply patches

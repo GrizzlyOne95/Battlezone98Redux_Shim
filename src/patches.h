@@ -190,6 +190,8 @@ namespace BZROpenShim
             { 0x0, PT::REL32, {}, "Chunk Render Resolve Hook", false },
             // -- Producer build menu bridge experiment --
             { 0x0, PT::REL32, {}, "Producer Build Menu Root Hook", false },
+            // -- Target reticle recent-hit popup filter --
+            { 0x0, PT::REL32, {}, "Target Reticle Popup Recent-Hit Getter Hook", false },
             // -- Engine flame color routing --
             { 0x0, PT::REL32, {}, "HoverCraft Engine Flame Emit Hook 1/2", false },
             { 0x0, PT::REL32, {}, "HoverCraft Engine Flame Emit Hook 2/2", false },
@@ -198,6 +200,7 @@ namespace BZROpenShim
             { 0x0, PT::JMP5, {}, "Raw Weapon Mask Carrier Bias Hook", false },
             { 0x0, PT::DWORD, {}, "Engine Flame Control VTable Hook", false },
             { 0x0, PT::DWORD, {}, "Engine Flame Submit VTable Hook", false },
+            { 0x0, PT::DWORD, {}, "Chunk Effect Simulate VTable Hook", false },
             // -- Vehicle list / mod asset scoping --
             { 0x0, PT::JMP5, {}, "Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)", false },
             { 0x0, PT::REL32, {}, "Vehicle List Mod Fix 2/4 (Force Mod-Scoped Assets 2/3)", false },
