@@ -1,10 +1,13 @@
 param(
+    [string]$GameRoot = "",
+    [string]$GameExeName = "",
     [int]$RepeatCount = 3,
     [int]$ProbeTimeoutSeconds = 180,
     [double]$SampleWindowSeconds = 3.0,
     [int]$ChunkLogBudget = 600,
     [int]$ChunkTraceEntryLimit = 8,
     [int]$PostCaptureWaitSeconds = 2,
+    [int]$StartupSettleSeconds = -1,
     [bool]$EnableChunkEffectTrace = $true,
     [bool]$EnableChunkProxyDebug = $true
 )
@@ -21,11 +24,14 @@ for ($index = 1; $index -le $RepeatCount; $index++) {
     Write-Host "=== misn03 chunk probe run $index / $RepeatCount ==="
 
     $result = & $singleRunScript `
+        -GameRoot $GameRoot `
+        -GameExeName $GameExeName `
         -ProbeTimeoutSeconds $ProbeTimeoutSeconds `
         -SampleWindowSeconds $SampleWindowSeconds `
         -ChunkLogBudget $ChunkLogBudget `
         -ChunkTraceEntryLimit $ChunkTraceEntryLimit `
         -PostCaptureWaitSeconds $PostCaptureWaitSeconds `
+        -StartupSettleSeconds $StartupSettleSeconds `
         -EnableChunkEffectTrace $EnableChunkEffectTrace `
         -EnableChunkProxyDebug $EnableChunkProxyDebug `
         -KillExistingGame `
@@ -71,6 +77,7 @@ $summary = [ordered]@{
     enable_chunk_proxy_debug = [bool]$EnableChunkProxyDebug
     chunk_log_budget = $ChunkLogBudget
     chunk_trace_entry_limit = $ChunkTraceEntryLimit
+    startup_settle_seconds = $StartupSettleSeconds
     runs = $runs
 }
 
@@ -86,6 +93,7 @@ $lines = @(
     "- Chunk proxy debug: $([bool]$EnableChunkProxyDebug)",
     "- Chunk log budget: $ChunkLogBudget",
     "- Chunk trace entry limit: $ChunkTraceEntryLimit",
+    "- Startup settle seconds: $StartupSettleSeconds",
     "- Post-capture wait seconds: $PostCaptureWaitSeconds",
     ""
 )

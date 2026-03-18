@@ -33,7 +33,11 @@ CHUNK_EFFECT_TUNING_BASE_OFFSET = 0x8038
 CHUNK_EFFECT_TEMPLATE_LIST_OFFSET = 0x8050
 OBJ76_FLAGS_OFFSET = 0x14
 OBJ76_MATRIX_OFFSET = 0x20
-OBJ76_TEMPLATE_REF_OFFSET = 0x64
+OBJ76_GEOM_REF_OFFSET = 0x64
+# Older notes called this a "template ref", but the legacy decompile strongly
+# suggests obj+0x64 is the geometry-side identity we need for distinguishing
+# stock chunklets from reused fragment GEO objects.
+OBJ76_TEMPLATE_REF_OFFSET = OBJ76_GEOM_REF_OFFSET
 OBJ76_PARENT_OFFSET = 0x78
 OBJ76_SIBLING_OFFSET = 0x7C
 OBJ76_CHILD_OFFSET = 0x80
@@ -63,6 +67,15 @@ def decode_entry_words(data: bytes) -> list[int]:
     for offset in range(0, min(len(data), CHUNK_EFFECT_ENTRY_SIZE), 4):
         words.append(u32(data, offset))
     return words
+
+
+def classify_chunk_geom_name(name: str | None) -> str | None:
+    if not name:
+        return None
+    lowered = name.lower()
+    if lowered in {"chunk1", "chunk2"}:
+        return "stock_chunklet_guess"
+    return "named_non_chunklet_geom"
 
 
 def read_c_string(handle: int, address: int, max_len: int = 64) -> str | None:
@@ -117,7 +130,7 @@ def snapshot_block(handle: int, address: int, size: int) -> dict[str, Any]:
     return snapshot
 
 
-def snapshot_template_ref_block(handle: int, address: int) -> dict[str, Any]:
+def snapshot_geom_ref_block(handle: int, address: int) -> dict[str, Any]:
     snapshot = snapshot_block(handle, address, 0x80)
     children: list[dict[str, Any]] = []
     raw_dwords = snapshot.get("raw_dwords", [])
@@ -129,6 +142,24 @@ def snapshot_template_ref_block(handle: int, address: int) -> dict[str, Any]:
     return snapshot
 
 
+def pick_snapshot_name(snapshot: dict[str, Any] | None) -> str | None:
+    if not snapshot:
+        return None
+
+    for string_info in snapshot.get("candidate_strings", []):
+        text = string_info.get("text")
+        if text:
+            return text
+
+    for child_snapshot in snapshot.get("child_blocks", []):
+        for string_info in child_snapshot.get("candidate_strings", []):
+            text = string_info.get("text")
+            if text:
+                return text
+
+    return None
+
+
 def snapshot_obj76(handle: int, obj_ptr: int) -> dict[str, Any]:
     raw, error = read_process_memory(handle, obj_ptr, 0xC0)
     snapshot: dict[str, Any] = {
@@ -138,6 +169,9 @@ def snapshot_obj76(handle: int, obj_ptr: int) -> dict[str, Any]:
         "raw_dwords": [],
         "class_id": None,
         "flags": None,
+        "geom_ref": None,
+        "geom_name": None,
+        "geom_kind": None,
         "template_ref": None,
         "parent": None,
         "sibling": None,
@@ -154,7 +188,8 @@ def snapshot_obj76(handle: int, obj_ptr: int) -> dict[str, Any]:
     snapshot["raw_dwords"] = raw_dwords
     snapshot["class_id"] = u32(raw, OBJ76_CLASS_ID_OFFSET)
     snapshot["flags"] = u32(raw, OBJ76_FLAGS_OFFSET)
-    snapshot["template_ref"] = u32(raw, OBJ76_TEMPLATE_REF_OFFSET)
+    snapshot["geom_ref"] = u32(raw, OBJ76_GEOM_REF_OFFSET)
+    snapshot["template_ref"] = snapshot["geom_ref"]
     snapshot["parent"] = u32(raw, OBJ76_PARENT_OFFSET)
     snapshot["sibling"] = u32(raw, OBJ76_SIBLING_OFFSET)
     snapshot["child"] = u32(raw, OBJ76_CHILD_OFFSET)
@@ -222,15 +257,22 @@ def snapshot_chunk_effect(handle: int, chunk_effect_va: int, max_entries: int) -
 
 
 def enrich_sample(handle: int, sample: dict[str, Any], max_objects: int) -> None:
-    template_refs: dict[int, dict[str, Any]] = {}
+    geom_refs: dict[int, dict[str, Any]] = {}
 
     for entry in sample["entries"][:max_objects]:
         if entry["obj_ptr"]:
             obj_snapshot = snapshot_obj76(handle, entry["obj_ptr"])
             entry["obj_snapshot"] = obj_snapshot
-            template_ref = obj_snapshot.get("template_ref") or 0
-            if template_ref and template_ref not in template_refs:
-                template_refs[template_ref] = snapshot_template_ref_block(handle, template_ref)
+            geom_ref = obj_snapshot.get("geom_ref") or 0
+            if geom_ref:
+                geom_snapshot = geom_refs.get(geom_ref)
+                if geom_snapshot is None:
+                    geom_snapshot = snapshot_geom_ref_block(handle, geom_ref)
+                    geom_refs[geom_ref] = geom_snapshot
+
+                geom_name = pick_snapshot_name(geom_snapshot)
+                obj_snapshot["geom_name"] = geom_name
+                obj_snapshot["geom_kind"] = classify_chunk_geom_name(geom_name)
 
     template_list_ptr = sample.get("template_list") or 0
     if template_list_ptr:
@@ -239,7 +281,8 @@ def enrich_sample(handle: int, sample: dict[str, Any], max_objects: int) -> None
     else:
         sample["template_list_snapshot"] = None
 
-    sample["template_ref_snapshots"] = list(template_refs.values())
+    sample["geom_ref_snapshots"] = list(geom_refs.values())
+    sample["template_ref_snapshots"] = sample["geom_ref_snapshots"]
 
 
 def resolve_runtime_va(main_module_base: int, disk_va: int) -> int:
@@ -281,22 +324,24 @@ def write_summary(output_dir: Path, report: dict[str, Any]) -> None:
             if obj:
                 lines.append(
                     f"  entry[{entry['index']}] obj={entry['obj_ptr_hex']} "
-                    f"class={obj.get('class_id')} template={hex32(obj.get('template_ref') or 0)} "
+                    f"class={obj.get('class_id')} geom={hex32(obj.get('geom_ref') or 0)} "
+                    f"geomName={obj.get('geom_name') or '<none>'} "
+                    f"geomKind={obj.get('geom_kind') or '<unknown>'} "
                     f"parent={hex32(obj.get('parent') or 0)} sibling={hex32(obj.get('sibling') or 0)} "
                     f"flags={hex32(obj.get('flags') or 0)} "
                     f"owner={hex32(obj.get('owner') or 0)} timer={obj.get('timer')}"
                 )
-        for template_snapshot in sample.get("template_ref_snapshots", []):
-            template_words = template_snapshot.get("raw_dwords", [])[:8]
+        for geom_snapshot in sample.get("geom_ref_snapshots", []):
+            geom_words = geom_snapshot.get("raw_dwords", [])[:8]
             lines.append(
-                f"  templateRef {template_snapshot['address_hex']} "
-                f"words={[hex32(word) for word in template_words]}"
+                f"  geomRef {geom_snapshot['address_hex']} "
+                f"words={[hex32(word) for word in geom_words]}"
             )
-            for string_info in template_snapshot.get("candidate_strings", [])[:4]:
+            for string_info in geom_snapshot.get("candidate_strings", [])[:4]:
                 lines.append(
                     f"    string {string_info['pointer_hex']} -> {string_info['text']}"
                 )
-            for child_snapshot in template_snapshot.get("child_blocks", [])[:3]:
+            for child_snapshot in geom_snapshot.get("child_blocks", [])[:3]:
                 child_words = child_snapshot.get("raw_dwords", [])[:8]
                 lines.append(
                     f"    child {child_snapshot['address_hex']} "

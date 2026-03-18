@@ -118,6 +118,9 @@ namespace BZROpenShim
     using FnExuGetTeamEngineFlameColor = int(__cdecl*)(int team);
     using FnGameObjectGetTeam = int(__thiscall*)(void* thisPtr);
     using FnChunkEffectSimulate = void(__thiscall*)(void* self, float dt);
+    using FnGetPlayerHandle = int(__cdecl*)();
+    using FnGameObjectGetObjByHandle = void* (__cdecl*)(int handle);
+    using FnPersonSimulate = void(__thiscall*)(void* thisPtr, float dt);
 
     static void** g_BzrPtr_945478 = nullptr;
     static void** g_BzrPtr_94548C = nullptr;
@@ -177,6 +180,9 @@ namespace BZROpenShim
     static FnGetTeamNum g_BzrFn_GetTeamNum = nullptr;
     static FnExuGetTeamEngineFlameColor g_ExuFn_GetTeamEngineFlameColor = nullptr;
     static FnChunkEffectSimulate g_BzrFn_ChunkEffectSimulate = nullptr;
+    static FnGetPlayerHandle g_BzrFn_GetPlayerHandle = nullptr;
+    static FnGameObjectGetObjByHandle g_BzrFn_GameObjectGetObjByHandle = nullptr;
+    static FnPersonSimulate g_BzrFn_PersonSimulate = nullptr;
     static BuildItem* g_BzrBuildMenuRoot = nullptr;
     static bool g_IsSteamExe = false;
 
@@ -242,6 +248,68 @@ namespace BZROpenShim
         constexpr uintptr_t kFlagDisplayAddr = 0x006DDD34;
         constexpr size_t kFlagDisplayFlagIndexOffset = 0x10;
         constexpr size_t kFlagDisplayMakeTextureOffset = 0x14;
+        constexpr uintptr_t kGogPersonSimulateEntryAddr = 0x004F4370;
+        constexpr uintptr_t kGogGetPlayerHandleAddr = 0x00514610;
+        constexpr uintptr_t kGogGameObjectGetObjByHandleAddr = 0x0046B160;
+        constexpr size_t kInlineDetourMaxPatchLen = 16;
+        constexpr size_t kPersonSimulateDetourLen = 8;
+        constexpr uint32_t kWeaponSigSnip = 0x534E4950u;
+        constexpr size_t kPersonObjOffset = 0x0E8;
+        constexpr size_t kPersonCarrierOffset = 0x198;
+        constexpr size_t kGameObjectVelocityYOffset = 0x124;
+        constexpr size_t kCraftStateOffset = 0x220;
+        constexpr size_t kPersonCurAnimOffset = 0x288;
+        constexpr size_t kPersonAnimHandleOffset = 0x28C;
+        constexpr size_t kCarrierWeaponsOffset = 0x18;
+        constexpr size_t kCarrierSelectedOffset = 0x30;
+        constexpr size_t kWeaponClassOffset = 0x08;
+        constexpr size_t kWeaponClassSigOffset = 0x0C;
+        constexpr size_t kWeaponClassOdfOffset = 0x20;
+        constexpr float kJumpSnipeVelocityBandThreshold = 0.15f;
+
+        struct InlineDetour32
+        {
+            uintptr_t target = 0;
+            void* hook = nullptr;
+            void* trampoline = nullptr;
+            size_t patchLen = 0;
+            std::array<uint8_t, kInlineDetourMaxPatchLen> original = {};
+        };
+
+        enum class VerticalBand
+        {
+            Down,
+            Flat,
+            Up,
+        };
+
+        struct JumpSnipeProbeSnapshot
+        {
+            bool valid = false;
+            int playerHandle = 0;
+            void* person = nullptr;
+            void* obj = nullptr;
+            float velY = 0.0f;
+            uint32_t craftState = 0;
+            long curAnim = 0;
+            int animHandle = 0;
+            uint32_t selectedMask = 0;
+            int selectedSlot = -1;
+            uint32_t selectedSig = 0;
+            char selectedOdf[17] = {};
+            bool sniperSelected = false;
+        };
+
+        struct JumpSnipeProbeLogState
+        {
+            bool initialized = false;
+            JumpSnipeProbeSnapshot last = {};
+        };
+
+        static InlineDetour32 g_PersonSimulateDetour = {};
+        static bool g_JumpSnipeProbeInstallAttempted = false;
+        static bool g_JumpSnipeProbeInstalled = false;
+        static JumpSnipeProbeLogState g_JumpSnipeProbeLogState = {};
 
         enum class ProducerBuildMenuKind
         {
@@ -370,6 +438,8 @@ namespace BZROpenShim
         struct ChunkProxySlot
         {
             const uint8_t* objectBytes = nullptr;
+            const void* geomRef = nullptr;
+            char geomName[64] = {};
             float positionX = 0.0f;
             float positionY = 0.0f;
             float positionZ = 0.0f;
@@ -397,11 +467,16 @@ namespace BZROpenShim
         static bool g_TraceChunkRender = false;
         static bool g_TraceChunkRenderVerbose = false;
         static bool g_TraceChunkEffectRuntime = false;
+        static bool g_TraceSatelliteVisibility = false;
         static uint32_t g_LastChunkEffectLoggedCount = UINT32_MAX;
         static volatile long g_ChunkRenderLogBudget = 12;
+        static volatile long g_SatelliteVisibilityLogBudget = 8;
         static uint32_t g_ChunkTraceEntryLimit = 32;
         static uint32_t g_ChunkProxyCapacity = 96;
         static float g_ChunkProxyDebugSize = 2.5f;
+        static uint32_t g_SatelliteVisibilityObjectLimit = 96;
+        static DWORD g_SatelliteVisibilityLastTick = 0;
+        static DWORD g_SatelliteVisibilityLogIntervalMs = 1000;
         static std::unordered_map<uintptr_t, uint32_t> g_ChunkObservedClassIds = {};
         static volatile long g_ArtilleryMaskTraceBudget = 400;
         static VehicleAssetExceptionCacheEntry g_VehicleAssetExceptionCache[kVehicleAssetExceptionCacheSize] = {};
@@ -453,6 +528,11 @@ namespace BZROpenShim
         static constexpr uintptr_t kChunkEffectTemplateListOffset = 0x8050;
         static constexpr uintptr_t kChunkEffectEntryBaseOffset = 0x28;
         static constexpr uintptr_t kChunkEffectVtableSimulateSlotAddr = 0x0087708C;
+        static constexpr uintptr_t kChunkObjGeomRefOffset = 0x64;
+        static constexpr uintptr_t kViewRecordRva = 0x004FD770;
+        static constexpr uintptr_t kGameObjectObjectListRva = 0x0050D2F0;
+        static constexpr uintptr_t kGameObjectUserObjectRva = 0x0050D2F8;
+        static constexpr uintptr_t kGameObjectUserTeamNumberRva = 0x0050D2E4;
         static constexpr size_t kChunkEffectEntrySize = 0x20;
         static constexpr uint32_t kClassIdChunk = 53;
         static constexpr DWORD kChunkProxyExpireMs = 400;
@@ -469,6 +549,14 @@ namespace BZROpenShim
         static bool g_TargetReticlePopupSteamNeutralWarned = false;
         static constexpr size_t kGameObjectPlayerShotOffset = 0x1D8;
         static constexpr size_t kGameObjectGetTeamVtableOffset = 0x4;
+        static constexpr size_t kGameObjectPerceivedTeamOffset = 0x180;
+        static constexpr size_t kProcessOwnerObjectOffset = 0x34;
+        static constexpr size_t kPresetViewCurrentViewOffset = 0x8;
+        static constexpr size_t kGameObjectIlluminationOffset = 0xDC;
+        static constexpr size_t kGameObjectIsVisibleOffset = 0x184;
+        static constexpr size_t kGameObjectSeenOffset = 0x188;
+        static constexpr size_t kGameObjectTargetHandleOffset = 0x214;
+        static constexpr long kCameraTypeOverView = 3;
         static constexpr float kSuppressedRecentHitTime = -1.0e30f;
         static DWORD g_ChunkProxyLastRetryTick = 0;
         static bool g_ChunkProxyInitLogged = false;
@@ -587,12 +675,134 @@ namespace BZROpenShim
             return static_cast<uint32_t>(value);
         }
 
+        static uint32_t ClampSatelliteVisibilityObjectLimit(long value)
+        {
+            if (value < 8)
+                return 8;
+            if (value > 256)
+                return 256;
+            return static_cast<uint32_t>(value);
+        }
+
+        static DWORD ClampSatelliteVisibilityLogInterval(long value)
+        {
+            if (value < 100)
+                return 100;
+            if (value > 10000)
+                return 10000;
+            return static_cast<DWORD>(value);
+        }
+
+        static uintptr_t GetMainModuleBase()
+        {
+            static uintptr_t s_moduleBase = 0;
+            if (s_moduleBase == 0)
+                s_moduleBase = reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr));
+            return s_moduleBase;
+        }
+
+        template<typename T>
+        static T* ResolveMainModulePtr(uintptr_t rva)
+        {
+            const uintptr_t base = GetMainModuleBase();
+            if (base == 0)
+                return nullptr;
+            return reinterpret_cast<T*>(base + rva);
+        }
+
         static bool AcquireChunkLogSlot()
         {
             if (g_TraceChunkRenderVerbose)
                 return true;
 
             return InterlockedDecrement(&g_ChunkRenderLogBudget) >= 0;
+        }
+
+        static bool TryReadAsciiString(const char* address, char* outText, size_t outTextCapacity)
+        {
+            if (!address || !outText || outTextCapacity == 0)
+                return false;
+
+            outText[0] = '\0';
+
+            __try
+            {
+                size_t index = 0;
+                for (; index + 1 < outTextCapacity; ++index)
+                {
+                    const unsigned char ch = static_cast<unsigned char>(address[index]);
+                    if (ch == 0)
+                    {
+                        outText[index] = '\0';
+                        return index > 0;
+                    }
+
+                    if (ch < 0x20 || ch > 0x7E)
+                    {
+                        outText[0] = '\0';
+                        return false;
+                    }
+
+                    outText[index] = static_cast<char>(ch);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outText[0] = '\0';
+                return false;
+            }
+
+            outText[outTextCapacity - 1] = '\0';
+            return false;
+        }
+
+        static bool TryReadChunkGeomIdentity(
+            const uint8_t* objectBytes,
+            const void*& outGeomRef,
+            char* outGeomName,
+            size_t outGeomNameCapacity)
+        {
+            outGeomRef = nullptr;
+            if (outGeomName && outGeomNameCapacity > 0)
+                outGeomName[0] = '\0';
+
+            if (!objectBytes)
+                return false;
+
+            __try
+            {
+                outGeomRef = *reinterpret_cast<void* const*>(objectBytes + kChunkObjGeomRefOffset);
+                if (!outGeomRef || !outGeomName || outGeomNameCapacity == 0)
+                    return true;
+
+                const auto* geomBytes = reinterpret_cast<const uint8_t*>(outGeomRef);
+                const char* const geomNamePtr = *reinterpret_cast<const char* const*>(geomBytes + 0x0);
+                TryReadAsciiString(geomNamePtr, outGeomName, outGeomNameCapacity);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outGeomRef = nullptr;
+                if (outGeomName && outGeomNameCapacity > 0)
+                    outGeomName[0] = '\0';
+                return false;
+            }
+        }
+
+        static const char* ClassifyChunkGeomName(const char* geomName)
+        {
+            if (!geomName || !*geomName)
+                return "unknown";
+
+            if (_stricmp(geomName, "chunk1") == 0 || _stricmp(geomName, "chunk2") == 0)
+                return "stock-chunklet";
+
+            return "named-nonchunklet";
+        }
+
+        static const char* GetChunkGeomNameForLog(const char* geomName)
+        {
+            return (geomName && *geomName) ? geomName : "<none>";
         }
 
         static int FindChunkGeoEntryByKey(const BzrGeoLookup* lookup, uint32_t key)
@@ -887,15 +1097,20 @@ namespace BZROpenShim
         {
             if (slot.active && reason && AcquireChunkLogSlot())
             {
-                Log(L"[CHUNKPROXY] release obj=0x%08X billboard=0x%08X reason=%ls\n",
+                Log(L"[CHUNKPROXY] release obj=0x%08X billboard=0x%08X geom=0x%08X geomName=%hs geomKind=%hs reason=%ls\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.billboard)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
+                    GetChunkGeomNameForLog(slot.geomName),
+                    ClassifyChunkGeomName(slot.geomName),
                     reason);
             }
 
             if (slot.billboardAssigned)
                 HideChunkProxyBillboard(slot.billboard);
             slot.objectBytes = nullptr;
+            slot.geomRef = nullptr;
+            slot.geomName[0] = '\0';
             slot.positionX = 0.0f;
             slot.positionY = 0.0f;
             slot.positionZ = 0.0f;
@@ -935,9 +1150,12 @@ namespace BZROpenShim
 
             if (!slot.billboardAssigned && AcquireChunkLogSlot())
             {
-                Log(L"[CHUNKPROXY] assigned obj=0x%08X billboard=0x%08X pos=(%.4f, %.4f, %.4f)\n",
+                Log(L"[CHUNKPROXY] assigned obj=0x%08X billboard=0x%08X geom=0x%08X geomName=%hs geomKind=%hs pos=(%.4f, %.4f, %.4f)\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.billboard)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
+                    GetChunkGeomNameForLog(slot.geomName),
+                    ClassifyChunkGeomName(slot.geomName),
                     static_cast<double>(x),
                     static_cast<double>(y),
                     static_cast<double>(z));
@@ -973,6 +1191,8 @@ namespace BZROpenShim
 
         static void TrackChunkProxyDebugEntry(
             const uint8_t* objectBytes,
+            const void* geomRef,
+            const char* geomName,
             float positionX,
             float positionY,
             float positionZ)
@@ -989,6 +1209,15 @@ namespace BZROpenShim
             {
                 if (slot.active && slot.objectBytes == objectBytes)
                 {
+                    slot.geomRef = geomRef;
+                    if (geomName && *geomName)
+                    {
+                        strncpy_s(slot.geomName, geomName, _TRUNCATE);
+                    }
+                    else
+                    {
+                        slot.geomName[0] = '\0';
+                    }
                     slot.positionX = positionX;
                     slot.positionY = positionY;
                     slot.positionZ = positionZ;
@@ -1005,6 +1234,15 @@ namespace BZROpenShim
                 return;
 
             freeSlot->objectBytes = objectBytes;
+            freeSlot->geomRef = geomRef;
+            if (geomName && *geomName)
+            {
+                strncpy_s(freeSlot->geomName, geomName, _TRUNCATE);
+            }
+            else
+            {
+                freeSlot->geomName[0] = '\0';
+            }
             freeSlot->positionX = positionX;
             freeSlot->positionY = positionY;
             freeSlot->positionZ = positionZ;
@@ -1014,8 +1252,11 @@ namespace BZROpenShim
             freeSlot->billboardAssigned = false;
             if (AcquireChunkLogSlot())
             {
-                Log(L"[CHUNKPROXY] tracking obj=0x%08X pos=(%.4f, %.4f, %.4f)\n",
+                Log(L"[CHUNKPROXY] tracking obj=0x%08X geom=0x%08X geomName=%hs geomKind=%hs pos=(%.4f, %.4f, %.4f)\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectBytes)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(geomRef)),
+                    GetChunkGeomNameForLog(geomName),
+                    ClassifyChunkGeomName(geomName),
                     static_cast<double>(positionX),
                     static_cast<double>(positionY),
                     static_cast<double>(positionZ));
@@ -1112,6 +1353,8 @@ namespace BZROpenShim
                     uint32_t flags = 0;
                     uint32_t owner = 0;
                     float timer = 0.0f;
+                    const void* geomRef = nullptr;
+                    char geomName[64] = {};
                     __try
                     {
                         if (entry.objectBytes)
@@ -1125,8 +1368,9 @@ namespace BZROpenShim
                     __except (EXCEPTION_EXECUTE_HANDLER)
                     {
                     }
+                    TryReadChunkGeomIdentity(entry.objectBytes, geomRef, geomName, sizeof(geomName));
 
-                    Log(L"[CHUNKEFFECT]   entry[%u] obj=0x%08X reserved=0x%08X classId=%u flags=0x%08X owner=0x%08X timer=%.6f pos=(%.4f, %.4f, %.4f) vel=(%.4f, %.4f, %.4f)\n",
+                    Log(L"[CHUNKEFFECT]   entry[%u] obj=0x%08X reserved=0x%08X classId=%u flags=0x%08X owner=0x%08X timer=%.6f geom=0x%08X geomName=%hs geomKind=%hs pos=(%.4f, %.4f, %.4f) vel=(%.4f, %.4f, %.4f)\n",
                         index,
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entry.objectBytes)),
                         entry.reserved,
@@ -1134,6 +1378,9 @@ namespace BZROpenShim
                         flags,
                         owner,
                         static_cast<double>(timer),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(geomRef)),
+                        GetChunkGeomNameForLog(geomName),
+                        ClassifyChunkGeomName(geomName),
                         static_cast<double>(entry.positionX),
                         static_cast<double>(entry.positionY),
                         static_cast<double>(entry.positionZ),
@@ -1186,8 +1433,14 @@ namespace BZROpenShim
                     if (classId != kClassIdChunk)
                         continue;
 
+                    const void* geomRef = nullptr;
+                    char geomName[64] = {};
+                    TryReadChunkGeomIdentity(entry.objectBytes, geomRef, geomName, sizeof(geomName));
+
                     TrackChunkProxyDebugEntry(
                         entry.objectBytes,
+                        geomRef,
+                        geomName,
                         entry.positionX,
                         entry.positionY,
                         entry.positionZ);
@@ -1281,6 +1534,11 @@ namespace BZROpenShim
             }
         }
 
+        static void LogChunkClassTransitionProbe(const uint8_t* objectBytes,
+                                                uintptr_t objectKey,
+                                                uint32_t previousClassId,
+                                                uint32_t classId);
+
         static void NoteChunkClassTransition(const uint8_t* objectBytes, uint32_t classId)
         {
             if (!g_TraceChunkRender || !objectBytes)
@@ -1305,6 +1563,14 @@ namespace BZROpenShim
 
             it->second = classId;
 
+            LogChunkClassTransitionProbe(objectBytes, objectKey, previousClassId, classId);
+        }
+
+        static void LogChunkClassTransitionProbe(const uint8_t* objectBytes,
+                                                uintptr_t objectKey,
+                                                uint32_t previousClassId,
+                                                uint32_t classId)
+        {
             if (!AcquireChunkLogSlot())
                 return;
 
@@ -2631,14 +2897,13 @@ namespace BZROpenShim
 
         static TargetReticlePopupMode SanitizeTargetReticlePopupMode(TargetReticlePopupMode mode, bool logDowngrade)
         {
-            if (g_IsSteamExe &&
-                mode == TargetReticlePopupMode::NeutralOnly &&
+            if (mode == TargetReticlePopupMode::NeutralOnly &&
                 !g_TargetReticlePopupSteamNeutralAllowed)
             {
                 if (logDowngrade && !g_TargetReticlePopupSteamNeutralWarned)
                 {
                     g_TargetReticlePopupSteamNeutralWarned = true;
-                    Log(L"[HUD] Steam reticle popup NEUTRAL_ONLY is temporarily downgraded to DEFAULT; set OPENSHIM_ALLOW_STEAM_NEUTRAL_RETICLE_POPUP=1 to force it\n");
+                    Log(L"[HUD] Reticle popup NEUTRAL_ONLY is experimental and downgraded to DEFAULT; set OPENSHIM_ALLOW_NEUTRAL_RETICLE_POPUP=1 to force it\n");
                 }
                 return TargetReticlePopupMode::Default;
             }
@@ -2658,6 +2923,8 @@ namespace BZROpenShim
 
             g_TargetReticlePopupConfigInitialized = true;
             g_TargetReticlePopupSteamNeutralAllowed =
+                EnvFlagEnabled("OPENSHIM_ALLOW_NEUTRAL_RETICLE_POPUP") ||
+                EnvFlagEnabled("BZR_ALLOW_NEUTRAL_RETICLE_POPUP") ||
                 EnvFlagEnabled("OPENSHIM_ALLOW_STEAM_NEUTRAL_RETICLE_POPUP") ||
                 EnvFlagEnabled("BZR_ALLOW_STEAM_NEUTRAL_RETICLE_POPUP");
             ApplyTargetReticlePopupMode(TargetReticlePopupMode::Default);
@@ -2727,6 +2994,216 @@ namespace BZROpenShim
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 return false;
+            }
+        }
+
+        struct SatelliteVisibilityLogEntry
+        {
+            void* objectPtr = nullptr;
+            int team = INT_MIN;
+            float illumination = 0.0f;
+            uint32_t isVisible = 0;
+            uint32_t seen = 0;
+            int targetHandle = 0;
+        };
+
+        static int GetGameObjectTeamForLog(void* objectPtr)
+        {
+            if (!objectPtr)
+                return INT_MIN;
+
+            __try
+            {
+                auto** vtable = *reinterpret_cast<void***>(objectPtr);
+                if (!vtable)
+                    return INT_MIN;
+
+                auto getTeam = reinterpret_cast<FnGameObjectGetTeam>(vtable[kGameObjectGetTeamVtableOffset / sizeof(void*)]);
+                if (!getTeam)
+                    return INT_MIN;
+
+                return getTeam(objectPtr);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return INT_MIN;
+            }
+        }
+
+        static bool IsSatelliteOverviewActive()
+        {
+            auto* viewRecord = ResolveMainModulePtr<uint8_t>(kViewRecordRva);
+            if (!viewRecord)
+                return false;
+
+            __try
+            {
+                const long currentView =
+                    *reinterpret_cast<const long*>(viewRecord + kPresetViewCurrentViewOffset);
+                return currentView == kCameraTypeOverView;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static bool CaptureSatelliteVisibilityEntry(void* objectPtr, SatelliteVisibilityLogEntry& outEntry)
+        {
+            if (!objectPtr)
+                return false;
+
+            __try
+            {
+                auto* bytes = reinterpret_cast<uint8_t*>(objectPtr);
+                outEntry.objectPtr = objectPtr;
+                outEntry.team = GetGameObjectTeamForLog(objectPtr);
+                outEntry.illumination =
+                    *reinterpret_cast<const float*>(bytes + kGameObjectIlluminationOffset);
+                outEntry.isVisible =
+                    *reinterpret_cast<const uint32_t*>(bytes + kGameObjectIsVisibleOffset);
+                outEntry.seen =
+                    *reinterpret_cast<const uint32_t*>(bytes + kGameObjectSeenOffset);
+                outEntry.targetHandle =
+                    *reinterpret_cast<const int*>(bytes + kGameObjectTargetHandleOffset);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void LogSatelliteVisibilityEntry(const wchar_t* tag, const SatelliteVisibilityLogEntry& entry)
+        {
+            if (!tag)
+                return;
+
+            Log(L"[SATVIS]   %ls obj=0x%08X team=%d illum=%.3f isVisible=0x%08X seen=0x%08X target=0x%08X\n",
+                tag,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entry.objectPtr)),
+                entry.team,
+                static_cast<double>(entry.illumination),
+                entry.isVisible,
+                entry.seen,
+                static_cast<uint32_t>(entry.targetHandle));
+        }
+
+        static void MaybeLogSatelliteVisibilitySample()
+        {
+            if (!g_TraceSatelliteVisibility)
+                return;
+            if (!IsSatelliteOverviewActive())
+                return;
+
+            const DWORD now = GetTickCount();
+            if (g_SatelliteVisibilityLastTick != 0 &&
+                (now - g_SatelliteVisibilityLastTick) < g_SatelliteVisibilityLogIntervalMs)
+            {
+                return;
+            }
+
+            if (InterlockedDecrement(&g_SatelliteVisibilityLogBudget) < 0)
+                return;
+
+            g_SatelliteVisibilityLastTick = now;
+
+            auto* viewRecord = ResolveMainModulePtr<uint8_t>(kViewRecordRva);
+            auto* userTeamNumberPtr = ResolveMainModulePtr<long>(kGameObjectUserTeamNumberRva);
+            auto* userObjectPtr = ResolveMainModulePtr<void*>(kGameObjectUserObjectRva);
+            auto* objectListBytes = ResolveMainModulePtr<uint8_t>(kGameObjectObjectListRva);
+            if (!viewRecord || !userTeamNumberPtr || !userObjectPtr || !objectListBytes)
+            {
+                Log(L"[SATVIS] missing runtime pointers viewRecord=0x%08X userTeam=0x%08X userObject=0x%08X objectList=0x%08X\n",
+                    static_cast<uint32_t>(GetMainModuleBase() + kViewRecordRva),
+                    static_cast<uint32_t>(GetMainModuleBase() + kGameObjectUserTeamNumberRva),
+                    static_cast<uint32_t>(GetMainModuleBase() + kGameObjectUserObjectRva),
+                    static_cast<uint32_t>(GetMainModuleBase() + kGameObjectObjectListRva));
+                return;
+            }
+
+            __try
+            {
+                const long currentView =
+                    *reinterpret_cast<const long*>(viewRecord + kPresetViewCurrentViewOffset);
+                const long userTeam = *userTeamNumberPtr;
+                void* const userObject = *userObjectPtr;
+
+                auto** begin = *reinterpret_cast<void***>(objectListBytes + 0x0);
+                auto** end = *reinterpret_cast<void***>(objectListBytes + 0x4);
+                auto** capacity = *reinterpret_cast<void***>(objectListBytes + 0x8);
+                if (!begin || !end || !capacity || end < begin || capacity < end)
+                {
+                    Log(L"[SATVIS] invalid objectList begin=0x%08X end=0x%08X cap=0x%08X\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(begin)),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(end)),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(capacity)));
+                    return;
+                }
+
+                const size_t totalObjects = static_cast<size_t>(end - begin);
+                const size_t maxSampleObjects = static_cast<size_t>(g_SatelliteVisibilityObjectLimit);
+                const size_t sampleObjects =
+                    (totalObjects < maxSampleObjects) ? totalObjects : maxSampleObjects;
+
+                SatelliteVisibilityLogEntry userEntry = {};
+                const bool haveUserEntry = CaptureSatelliteVisibilityEntry(userObject, userEntry);
+
+                uint32_t illuminatedCount = 0;
+                uint32_t visibleCount = 0;
+                uint32_t seenCount = 0;
+                std::array<SatelliteVisibilityLogEntry, 3> hiddenEntries = {};
+                std::array<SatelliteVisibilityLogEntry, 3> visibleEntries = {};
+                size_t hiddenLogged = 0;
+                size_t visibleLogged = 0;
+
+                for (size_t index = 0; index < sampleObjects; ++index)
+                {
+                    SatelliteVisibilityLogEntry entry = {};
+                    if (!CaptureSatelliteVisibilityEntry(begin[index], entry))
+                        continue;
+
+                    if (entry.illumination > 0.0f)
+                        ++illuminatedCount;
+                    if (entry.isVisible != 0)
+                        ++visibleCount;
+                    if (entry.seen != 0)
+                        ++seenCount;
+
+                    if (entry.illumination <= 0.0f && entry.isVisible == 0)
+                    {
+                        if (hiddenLogged < hiddenEntries.size())
+                            hiddenEntries[hiddenLogged++] = entry;
+                    }
+                    else if (visibleLogged < visibleEntries.size())
+                    {
+                        visibleEntries[visibleLogged++] = entry;
+                    }
+                }
+
+                Log(L"[SATVIS] view=%ld userTeam=%ld userObj=0x%08X total=%u sampled=%u illum=%u visible=%u seen=%u interval=%lums remaining=%ld\n",
+                    currentView,
+                    userTeam,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(userObject)),
+                    static_cast<unsigned>(totalObjects),
+                    static_cast<unsigned>(sampleObjects),
+                    illuminatedCount,
+                    visibleCount,
+                    seenCount,
+                    static_cast<unsigned long>(g_SatelliteVisibilityLogIntervalMs),
+                    g_SatelliteVisibilityLogBudget);
+
+                if (haveUserEntry)
+                    LogSatelliteVisibilityEntry(L"user", userEntry);
+
+                for (size_t index = 0; index < hiddenLogged; ++index)
+                    LogSatelliteVisibilityEntry(L"hidden", hiddenEntries[index]);
+                for (size_t index = 0; index < visibleLogged; ++index)
+                    LogSatelliteVisibilityEntry(L"visible", visibleEntries[index]);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[SATVIS] sample fault code=0x%08X\n", static_cast<uint32_t>(GetExceptionCode()));
             }
         }
 
@@ -2961,6 +3438,357 @@ namespace BZROpenShim
             DWORD restoreProtect = 0;
             VirtualProtect(reinterpret_cast<void*>(address), sizeof(void*), oldProtect, &restoreProtect);
             return true;
+        }
+
+        template <typename T>
+        static T ReadValueAtOffset(const void* base, size_t offset)
+        {
+            return *reinterpret_cast<const T*>(reinterpret_cast<const uint8_t*>(base) + offset);
+        }
+
+        static bool ShouldEnableJumpSnipingProbe()
+        {
+            static int s_cached = -1;
+            if (s_cached < 0)
+            {
+                char value[8] = {};
+                DWORD len = GetEnvironmentVariableA("OPENSHIM_TRACE_JUMP_SNIPING",
+                                                    value,
+                                                    static_cast<DWORD>(sizeof(value)));
+                if (!(len > 0 && len < sizeof(value) && value[0] != '0'))
+                {
+                    ZeroMemory(value, sizeof(value));
+                    len = GetEnvironmentVariableA("OPENSHIM_TRACE_JUMPSNIPE",
+                                                  value,
+                                                  static_cast<DWORD>(sizeof(value)));
+                }
+                s_cached = (len > 0 && len < sizeof(value) && value[0] != '0') ? 1 : 0;
+            }
+            return s_cached != 0;
+        }
+
+        static const char* BoolText(bool value)
+        {
+            return value ? "true" : "false";
+        }
+
+        static VerticalBand ClassifyVerticalBand(float velY)
+        {
+            if (velY > kJumpSnipeVelocityBandThreshold)
+                return VerticalBand::Up;
+            if (velY < -kJumpSnipeVelocityBandThreshold)
+                return VerticalBand::Down;
+            return VerticalBand::Flat;
+        }
+
+        static const char* VerticalBandText(VerticalBand band)
+        {
+            switch (band)
+            {
+            case VerticalBand::Down:
+                return "down";
+            case VerticalBand::Up:
+                return "up";
+            default:
+                return "flat";
+            }
+        }
+
+        static void FormatSigString(uint32_t sig, char (&out)[5])
+        {
+            out[0] = static_cast<char>((sig >> 24) & 0xFFu);
+            out[1] = static_cast<char>((sig >> 16) & 0xFFu);
+            out[2] = static_cast<char>((sig >> 8) & 0xFFu);
+            out[3] = static_cast<char>(sig & 0xFFu);
+            out[4] = '\0';
+
+            for (size_t i = 0; i < 4; ++i)
+            {
+                const unsigned char ch = static_cast<unsigned char>(out[i]);
+                if (ch < 32 || ch > 126)
+                    out[i] = '.';
+            }
+        }
+
+        static bool InstallInlineDetour32(InlineDetour32& detour,
+                                          uintptr_t target,
+                                          void* hook,
+                                          size_t patchLen,
+                                          const uint8_t* expectedBytes,
+                                          size_t expectedLen)
+        {
+            if (!target || !hook || patchLen < 5 || patchLen > detour.original.size())
+                return false;
+
+            if (detour.trampoline)
+                return true;
+
+            auto* targetBytes = reinterpret_cast<uint8_t*>(target);
+            if (expectedBytes && expectedLen > 0)
+            {
+                if (expectedLen > patchLen || memcmp(targetBytes, expectedBytes, expectedLen) != 0)
+                    return false;
+            }
+
+            auto* trampolineBytes = reinterpret_cast<uint8_t*>(
+                VirtualAlloc(nullptr, patchLen + 5, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+            if (!trampolineBytes)
+                return false;
+
+            memcpy(detour.original.data(), targetBytes, patchLen);
+            memcpy(trampolineBytes, targetBytes, patchLen);
+
+            const uintptr_t resumeAddr = target + patchLen;
+            trampolineBytes[patchLen] = 0xE9;
+            const int32_t trampolineRel =
+                static_cast<int32_t>(resumeAddr) -
+                static_cast<int32_t>(reinterpret_cast<uintptr_t>(trampolineBytes + patchLen) + 5);
+            memcpy(trampolineBytes + patchLen + 1, &trampolineRel, sizeof(trampolineRel));
+
+            DWORD oldProtect = 0;
+            if (!VirtualProtect(targetBytes, patchLen, PAGE_EXECUTE_READWRITE, &oldProtect))
+            {
+                VirtualFree(trampolineBytes, 0, MEM_RELEASE);
+                return false;
+            }
+
+            targetBytes[0] = 0xE9;
+            const int32_t hookRel =
+                static_cast<int32_t>(reinterpret_cast<uintptr_t>(hook)) -
+                static_cast<int32_t>(target + 5);
+            memcpy(targetBytes + 1, &hookRel, sizeof(hookRel));
+            for (size_t i = 5; i < patchLen; ++i)
+                targetBytes[i] = 0x90;
+
+            FlushInstructionCache(GetCurrentProcess(), targetBytes, patchLen);
+
+            DWORD restoreProtect = 0;
+            VirtualProtect(targetBytes, patchLen, oldProtect, &restoreProtect);
+
+            detour.target = target;
+            detour.hook = hook;
+            detour.trampoline = trampolineBytes;
+            detour.patchLen = patchLen;
+            return true;
+        }
+
+        static bool ExpectedBytesMatchAt(uintptr_t address,
+                                         const uint8_t* expectedBytes,
+                                         size_t expectedLen)
+        {
+            if (!address || !expectedBytes || expectedLen == 0 || expectedLen > kInlineDetourMaxPatchLen)
+                return false;
+
+            uint8_t current[kInlineDetourMaxPatchLen] = {};
+            SIZE_T read = 0;
+            if (!ReadProcessMemory(GetCurrentProcess(),
+                                   reinterpret_cast<const void*>(address),
+                                   current,
+                                   expectedLen,
+                                   &read) ||
+                read != expectedLen)
+            {
+                return false;
+            }
+
+            return memcmp(current, expectedBytes, expectedLen) == 0;
+        }
+
+        static bool TryCaptureLocalPlayerSnapshot(JumpSnipeProbeSnapshot& out)
+        {
+            out = {};
+
+            if (!g_BzrFn_GetPlayerHandle || !g_BzrFn_GameObjectGetObjByHandle)
+                return false;
+
+            __try
+            {
+                const int playerHandle = g_BzrFn_GetPlayerHandle();
+                if (playerHandle == 0)
+                    return false;
+
+                void* person = g_BzrFn_GameObjectGetObjByHandle(playerHandle);
+                if (!person)
+                    return false;
+
+                out.valid = true;
+                out.playerHandle = playerHandle;
+                out.person = person;
+                out.obj = ReadValueAtOffset<void*>(person, kPersonObjOffset);
+                out.velY = ReadValueAtOffset<float>(person, kGameObjectVelocityYOffset);
+                out.craftState = ReadValueAtOffset<uint32_t>(person, kCraftStateOffset);
+                out.curAnim = ReadValueAtOffset<long>(person, kPersonCurAnimOffset);
+                out.animHandle = ReadValueAtOffset<int>(person, kPersonAnimHandleOffset);
+
+                void* carrier = ReadValueAtOffset<void*>(person, kPersonCarrierOffset);
+                if (!carrier)
+                    return true;
+
+                out.selectedMask = ReadValueAtOffset<uint32_t>(carrier, kCarrierSelectedOffset);
+                auto** weapons =
+                    reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(carrier) + kCarrierWeaponsOffset);
+
+                for (int slot = 0; slot < 5; ++slot)
+                {
+                    if ((out.selectedMask & (1u << slot)) == 0)
+                        continue;
+
+                    out.selectedSlot = slot;
+                    void* weapon = weapons[slot];
+                    if (!weapon)
+                        break;
+
+                    void* weaponClass = ReadValueAtOffset<void*>(weapon, kWeaponClassOffset);
+                    if (!weaponClass)
+                        break;
+
+                    out.selectedSig = ReadValueAtOffset<uint32_t>(weaponClass, kWeaponClassSigOffset);
+                    const char* odf = reinterpret_cast<const char*>(
+                        reinterpret_cast<const uint8_t*>(weaponClass) + kWeaponClassOdfOffset);
+                    strncpy_s(out.selectedOdf, odf ? odf : "", _TRUNCATE);
+                    out.sniperSelected = (out.selectedSig == kWeaponSigSnip);
+                    break;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                out = {};
+                return false;
+            }
+
+            return out.valid;
+        }
+
+        static bool HasMeaningfulJumpSnipeChange(const JumpSnipeProbeSnapshot& lhs,
+                                                 const JumpSnipeProbeSnapshot& rhs)
+        {
+            return lhs.person != rhs.person ||
+                   lhs.obj != rhs.obj ||
+                   lhs.craftState != rhs.craftState ||
+                   lhs.curAnim != rhs.curAnim ||
+                   lhs.animHandle != rhs.animHandle ||
+                   lhs.selectedMask != rhs.selectedMask ||
+                   lhs.selectedSlot != rhs.selectedSlot ||
+                   lhs.selectedSig != rhs.selectedSig ||
+                   lhs.sniperSelected != rhs.sniperSelected ||
+                   strcmp(lhs.selectedOdf, rhs.selectedOdf) != 0 ||
+                   ClassifyVerticalBand(lhs.velY) != ClassifyVerticalBand(rhs.velY);
+        }
+
+        static void LogJumpSnipeProbeState(const JumpSnipeProbeSnapshot& before,
+                                           const JumpSnipeProbeSnapshot& after,
+                                           float dt)
+        {
+            if (!after.valid)
+                return;
+
+            char beforeSig[5] = {};
+            char afterSig[5] = {};
+            FormatSigString(before.selectedSig, beforeSig);
+            FormatSigString(after.selectedSig, afterSig);
+
+            Log(L"[JUMPSNIPE] dt=%.3f handle=%d person=0x%08X obj=0x%08X state=%u->%u anim=%ld->%ld animH=%d->%d velY=%.3f->%.3f band=%hs->%hs sel=0x%08X->0x%08X slot=%d->%d sig=%hs->%hs odf=%hs->%hs sniper=%hs->%hs\n",
+                dt,
+                after.playerHandle,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(after.person)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(after.obj)),
+                before.craftState,
+                after.craftState,
+                before.curAnim,
+                after.curAnim,
+                before.animHandle,
+                after.animHandle,
+                before.velY,
+                after.velY,
+                VerticalBandText(ClassifyVerticalBand(before.velY)),
+                VerticalBandText(ClassifyVerticalBand(after.velY)),
+                before.selectedMask,
+                after.selectedMask,
+                before.selectedSlot,
+                after.selectedSlot,
+                beforeSig,
+                afterSig,
+                before.selectedOdf,
+                after.selectedOdf,
+                BoolText(before.sniperSelected),
+                BoolText(after.sniperSelected));
+        }
+
+        void __fastcall PersonSimulateJumpSnipeProbeHook(void* thisPtr, void* /*edx*/, float dt)
+        {
+            JumpSnipeProbeSnapshot before = {};
+            TryCaptureLocalPlayerSnapshot(before);
+
+            g_BzrFn_PersonSimulate(thisPtr, dt);
+
+            JumpSnipeProbeSnapshot after = {};
+            TryCaptureLocalPlayerSnapshot(after);
+
+            if ((!before.valid || before.person != thisPtr) &&
+                (!after.valid || after.person != thisPtr))
+            {
+                return;
+            }
+
+            const JumpSnipeProbeSnapshot& current = after.valid ? after : before;
+            if (!g_JumpSnipeProbeLogState.initialized ||
+                HasMeaningfulJumpSnipeChange(g_JumpSnipeProbeLogState.last, current))
+            {
+                LogJumpSnipeProbeState(before, after.valid ? after : before, dt);
+                g_JumpSnipeProbeLogState.initialized = true;
+                g_JumpSnipeProbeLogState.last = current;
+            }
+        }
+
+        static void InstallJumpSnipingProbeIfRequested()
+        {
+            if (!ShouldEnableJumpSnipingProbe() || g_JumpSnipeProbeInstalled)
+                return;
+
+            if (g_PersonSimulateDetour.trampoline && g_BzrFn_PersonSimulate)
+            {
+                g_JumpSnipeProbeInstalled = true;
+                return;
+            }
+
+            g_BzrFn_GetPlayerHandle = reinterpret_cast<FnGetPlayerHandle>(kGogGetPlayerHandleAddr);
+            g_BzrFn_GameObjectGetObjByHandle =
+                reinterpret_cast<FnGameObjectGetObjByHandle>(kGogGameObjectGetObjByHandleAddr);
+
+            static const uint8_t kExpectedPersonSimulateBytes[kPersonSimulateDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0xB8, 0x44, 0x10, 0x00, 0x00
+            };
+
+            if (!ExpectedBytesMatchAt(kGogPersonSimulateEntryAddr,
+                                      kExpectedPersonSimulateBytes,
+                                      sizeof(kExpectedPersonSimulateBytes)))
+            {
+                return;
+            }
+
+            if (!InstallInlineDetour32(g_PersonSimulateDetour,
+                                       kGogPersonSimulateEntryAddr,
+                                       reinterpret_cast<void*>(PersonSimulateJumpSnipeProbeHook),
+                                       kPersonSimulateDetourLen,
+                                       kExpectedPersonSimulateBytes,
+                                       sizeof(kExpectedPersonSimulateBytes)))
+            {
+                Log(L"[JUMPSNIPE] Failed to install Person::Simulate probe at 0x%08X\n",
+                    static_cast<uint32_t>(kGogPersonSimulateEntryAddr));
+                return;
+            }
+
+            g_BzrFn_PersonSimulate =
+                reinterpret_cast<FnPersonSimulate>(g_PersonSimulateDetour.trampoline);
+            g_JumpSnipeProbeInstalled = (g_BzrFn_PersonSimulate != nullptr);
+            if (g_JumpSnipeProbeInstalled)
+            {
+                Log(L"[JUMPSNIPE] Installed %hs player Person::Simulate probe entry=0x%08X trampoline=0x%08X env=OPENSHIM_TRACE_JUMP_SNIPING\n",
+                    g_IsSteamExe ? "Steam" : "GOG",
+                    static_cast<uint32_t>(kGogPersonSimulateEntryAddr),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_PersonSimulateDetour.trampoline)));
+            }
         }
 
         static void EnsureEngineFlameVtableHooksInstalled(void* manager)
@@ -3816,6 +4644,10 @@ namespace BZROpenShim
         g_BzrFn_EngineFlameResolveTexture = nullptr;
         g_BzrFn_GetTeamNum = nullptr;
         g_BzrFn_ChunkEffectSimulate = nullptr;
+        g_BzrFn_GetPlayerHandle = nullptr;
+        g_BzrFn_GameObjectGetObjByHandle = nullptr;
+        g_BzrFn_PersonSimulate = nullptr;
+        g_JumpSnipeProbeInstalled = false;
         g_EngineFlamePrimaryManager = nullptr;
         g_EngineFlameSecondaryManager = nullptr;
         g_EngineFlameVtableHooksInstalled = false;
@@ -3831,6 +4663,7 @@ namespace BZROpenShim
         g_BzrBuildMenuRoot = nullptr;
         g_BzrFn_GetLocalPlayerNetId = nullptr;
         g_BzrFn_NetPlayerSetData = nullptr;
+        g_JumpSnipeProbeLogState = {};
         g_ProducerBuildMenuConfig = {};
         g_HasAppliedProducerBuildMenu = false;
         g_LastAppliedProducerBuildMenu = 0;
@@ -3908,6 +4741,8 @@ namespace BZROpenShim
         g_BzrFn_CleanupBuildItem = reinterpret_cast<FnBuildItemCleanup>(0x0049F880);
         g_BzrBuildMenuRoot = reinterpret_cast<BuildItem*>(kBuildMenuRootAddr);
 
+        InstallJumpSnipingProbeIfRequested();
+
         if (g_IsSteamExe)
         {
             ResolveEngineFlameRuntimeTargets();
@@ -3957,6 +4792,10 @@ namespace BZROpenShim
             EnvFlagEnabled("BZR_TRACE_CHUNK_EFFECT") ||
             EnvFlagEnabled("OPENSHIM_TRACE_CHUNK_EFFECT") ||
             EnvFlagEnabled("OPENSHIM_CHUNK_EFFECT_TRACE");
+        g_TraceSatelliteVisibility =
+            EnvFlagEnabled("BZR_TRACE_SAT_VIS") ||
+            EnvFlagEnabled("OPENSHIM_TRACE_SAT_VIS") ||
+            EnvFlagEnabled("OPENSHIM_TRACE_SATELLITE_VISIBILITY");
         long chunkProxyCapacity = static_cast<long>(g_ChunkProxyCapacity);
         if (TryGetEnvLong("OPENSHIM_CHUNK_PROXY_CAP", chunkProxyCapacity) ||
             TryGetEnvLong("OPENSHIM_CHUNK_PROXY_CAPACITY", chunkProxyCapacity))
@@ -3977,6 +4816,38 @@ namespace BZROpenShim
         {
             g_ChunkProxyDebugSize = 2.5f;
         }
+        long satelliteVisibilityBudget = 8;
+        if (TryGetEnvLong("OPENSHIM_SAT_VIS_BUDGET", satelliteVisibilityBudget) ||
+            TryGetEnvLong("BZR_SAT_VIS_BUDGET", satelliteVisibilityBudget))
+        {
+            if (satelliteVisibilityBudget < 0)
+                satelliteVisibilityBudget = 0;
+        }
+        g_SatelliteVisibilityLogBudget = satelliteVisibilityBudget;
+        long satelliteVisibilityObjectLimit = static_cast<long>(g_SatelliteVisibilityObjectLimit);
+        if (TryGetEnvLong("OPENSHIM_SAT_VIS_OBJECT_LIMIT", satelliteVisibilityObjectLimit) ||
+            TryGetEnvLong("BZR_SAT_VIS_OBJECT_LIMIT", satelliteVisibilityObjectLimit))
+        {
+            g_SatelliteVisibilityObjectLimit =
+                ClampSatelliteVisibilityObjectLimit(satelliteVisibilityObjectLimit);
+        }
+        else
+        {
+            g_SatelliteVisibilityObjectLimit = ClampSatelliteVisibilityObjectLimit(satelliteVisibilityObjectLimit);
+        }
+        long satelliteVisibilityInterval = static_cast<long>(g_SatelliteVisibilityLogIntervalMs);
+        if (TryGetEnvLong("OPENSHIM_SAT_VIS_INTERVAL_MS", satelliteVisibilityInterval) ||
+            TryGetEnvLong("BZR_SAT_VIS_INTERVAL_MS", satelliteVisibilityInterval))
+        {
+            g_SatelliteVisibilityLogIntervalMs =
+                ClampSatelliteVisibilityLogInterval(satelliteVisibilityInterval);
+        }
+        else
+        {
+            g_SatelliteVisibilityLogIntervalMs =
+                ClampSatelliteVisibilityLogInterval(satelliteVisibilityInterval);
+        }
+        g_SatelliteVisibilityLastTick = 0;
         g_ChunkProxyLastRetryTick = 0;
         g_ChunkProxyInitLogged = false;
         g_ChunkProxyFailureLogged = false;
@@ -4008,6 +4879,14 @@ namespace BZROpenShim
             g_TraceChunkEffectRuntime ? "enabled" : "disabled",
             static_cast<uint32_t>(kChunkEffectVtableSimulateSlotAddr),
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_ChunkEffectSimulate)));
+        Log(L"[SATVIS] Satellite visibility trace: %hs budget=%ld interval=%lums objectLimit=%u viewRecord=0x%08X objectList=0x%08X userObject=0x%08X\n",
+            g_TraceSatelliteVisibility ? "enabled" : "disabled",
+            g_SatelliteVisibilityLogBudget,
+            static_cast<unsigned long>(g_SatelliteVisibilityLogIntervalMs),
+            g_SatelliteVisibilityObjectLimit,
+            static_cast<uint32_t>(GetMainModuleBase() + kViewRecordRva),
+            static_cast<uint32_t>(GetMainModuleBase() + kGameObjectObjectListRva),
+            static_cast<uint32_t>(GetMainModuleBase() + kGameObjectUserObjectRva));
         Log(L"[TURRET] Aim pitch multiplier: %.3f%s\n",
             static_cast<double>(g_TurretAimPitchMultiplier),
             g_TurretAimPitchMultiplier >= 0.999f ? " (full range)" : "");
@@ -4027,6 +4906,11 @@ namespace BZROpenShim
                 bansConfigPath.c_str(),
                 static_cast<unsigned>(g_BanRecords.size()));
         }
+    }
+
+    void RetryDeferredRuntimeHooks()
+    {
+        InstallJumpSnipingProbeIfRequested();
     }
 
     void InitBzrHookStrings()
@@ -4071,6 +4955,31 @@ namespace BZROpenShim
         case TargetReticlePopupMode::Default:
         default:
             return playerShotTime;
+        }
+    }
+
+    void __cdecl RevealProcessOwnerPerceivedTeamOnAttackStateEntry(void* processPtr)
+    {
+        if (!processPtr || g_IsSteamExe)
+            return;
+
+        __try
+        {
+            auto* processBytes = reinterpret_cast<uint8_t*>(processPtr);
+            void* const objectPtr =
+                *reinterpret_cast<void**>(processBytes + kProcessOwnerObjectOffset);
+            if (!objectPtr)
+                return;
+
+            const int team = GetGameObjectTeamForLog(objectPtr);
+            if (team == INT_MIN)
+                return;
+
+            auto* objectBytes = reinterpret_cast<uint8_t*>(objectPtr);
+            *reinterpret_cast<int*>(objectBytes + kGameObjectPerceivedTeamOffset) = team;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
         }
     }
 
@@ -5393,6 +6302,10 @@ namespace BZROpenShim
         if (!g_BzrFn_ChunkEffectSimulate || !thisPtr)
             return;
 
+        if (!g_JumpSnipeProbeInstalled)
+            InstallJumpSnipingProbeIfRequested();
+
+        MaybeLogSatelliteVisibilitySample();
         TrackChunkEffectActiveEntries(thisPtr);
         LogChunkEffectRuntimeSample(thisPtr, dt);
         g_BzrFn_ChunkEffectSimulate(thisPtr, dt);

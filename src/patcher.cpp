@@ -1047,7 +1047,7 @@ namespace BZROpenShim
     // Resolve internal BZR.exe pointers for trampolines/helpers.
     // Now uses dynamic addresses found by pattern scanning.
     // -----------------------------------------------------------------------
-    static void ResolvePointers(uint32_t mapSortingAddr, uint32_t hopFix1Addr, uint32_t hopFix2Addr, uint32_t hopFix3Addr, uint32_t probeMapFilter1Addr, uint32_t probeMapListFix1Addr, uint32_t probeMapListFix2Addr, uint32_t artilleryMaskTraceAddr, uint32_t turretCraftAimPitchAddr, uint32_t turretTankAimPitchAddr, uint32_t underAttackAlertHook1Addr, uint32_t underAttackAlertHook2Addr)
+    static void ResolvePointers(uint32_t mapSortingAddr, uint32_t hopFix1Addr, uint32_t hopFix2Addr, uint32_t hopFix3Addr, uint32_t probeMapFilter1Addr, uint32_t probeMapListFix1Addr, uint32_t probeMapListFix2Addr, uint32_t artilleryMaskTraceAddr, uint32_t turretCraftAimPitchAddr, uint32_t turretTankAimPitchAddr, uint32_t underAttackAlertHook1Addr, uint32_t underAttackAlertHook2Addr, uint32_t offensiveAttackRevealAddr, uint32_t turretTankAttackRevealAddr)
     {
         Log(L"=========== RESOLVING POINTERS ===========\n");
 
@@ -1159,6 +1159,18 @@ namespace BZROpenShim
                 reinterpret_cast<void*>(underAttackAlertHook2Addr + 0x34);
             Log(L"[PTR] Under-attack alert hook 2 return: 0x%08X\n",
                 underAttackAlertHook2Addr + 0x34);
+        }
+        if (offensiveAttackRevealAddr) {
+            g_RetAddr_OffensiveAttackRevealHook =
+                reinterpret_cast<void*>(offensiveAttackRevealAddr + 0x0C);
+            Log(L"[PTR] Offensive attack reveal return: 0x%08X\n",
+                offensiveAttackRevealAddr + 0x0C);
+        }
+        if (turretTankAttackRevealAddr) {
+            g_RetAddr_TurretTankAttackRevealHook =
+                reinterpret_cast<void*>(turretTankAttackRevealAddr + 0x0C);
+            Log(L"[PTR] TurretTank attack reveal return: 0x%08X\n",
+                turretTankAttackRevealAddr + 0x0C);
         }
 
         if (EnableExperimentalMapFilters())
@@ -1767,6 +1779,20 @@ namespace BZROpenShim
                 p.expected_original = { 0x0F, 0x2F, 0x05, 0xD0, 0x73 };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
+            else if (strcmp(p.name, "Offensive Attack Reveal Hook") == 0)
+            {
+                p.bzr_address = 0x005839E0;
+                p.verified = true;
+                p.expected_original = { 0x8B, 0x4D, 0xF8, 0x8B, 0x55, 0xF8, 0x8B, 0x42, 0x1C, 0x89, 0x41, 0x24 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
+            else if (strcmp(p.name, "TurretTank Attack Reveal Hook") == 0)
+            {
+                p.bzr_address = 0x005F73F3;
+                p.verified = true;
+                p.expected_original = { 0x8B, 0x55, 0xF8, 0x8B, 0x45, 0xF8, 0x8B, 0x48, 0x1C, 0x89, 0x4A, 0x24 };
+                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
+            }
             else
             {
                 Log(L"[SCAN] SKIPPED %hs (pattern not found, no safe fallback)\n", p.name);
@@ -1809,6 +1835,8 @@ namespace BZROpenShim
             { "TurretTank Aim Pitch Multiplier",                (void*)Trampoline_TurretTankAimPitchMultiplier },
             { "Under Attack Alert Hook 1/2",                    (void*)Trampoline_UnderAttackAlertHook1 },
             { "Under Attack Alert Hook 2/2",                    (void*)Trampoline_UnderAttackAlertHook2 },
+            { "Offensive Attack Reveal Hook",                   (void*)Trampoline_OffensiveAttackRevealHook },
+            { "TurretTank Attack Reveal Hook",                  (void*)Trampoline_TurretTankAttackRevealHook },
             { "Artillery Weapon Mask Trace",                    (void*)Trampoline_ArtilleryMaskTrace },
             { "Decoded Weapon Mask Carrier Bias Hook",          (void*)Trampoline_DecodedWeaponMaskBias },
             { "Raw Weapon Mask Carrier Bias Hook",              (void*)Trampoline_RawWeaponMaskBias },
@@ -1827,8 +1855,10 @@ namespace BZROpenShim
                     const size_t patchLen =
                         (strcmp(p.name, "TurretCraft Aim Pitch Multiplier") == 0 ||
                          strcmp(p.name, "TurretTank Aim Pitch Multiplier") == 0) ? 8 :
+                        ((strcmp(p.name, "Offensive Attack Reveal Hook") == 0 ||
+                          strcmp(p.name, "TurretTank Attack Reveal Hook") == 0) ? 12 :
                         ((strcmp(p.name, "Under Attack Alert Hook 1/2") == 0 ||
-                          strcmp(p.name, "Under Attack Alert Hook 2/2") == 0) ? 52 : 5);
+                          strcmp(p.name, "Under Attack Alert Hook 2/2") == 0) ? 52 : 5));
                     p.payload = MakeJmpPatch(p.bzr_address, targetVal, patchLen);
                     break;
                 }
@@ -1968,17 +1998,19 @@ namespace BZROpenShim
         if (!isSteam)
             return;
 
-        const char* const steamVersionNames[] =
+        const char* const steamTrackedNames[] =
         {
             "Version Notice 1/2 OpenShim",
             "Version Notice 2/2 OpenShim",
             "Version Notice 3/3 OpenShim",
             "Main Menu Version Text OpenShim",
+            "Offensive Attack Reveal Hook",
+            "TurretTank Attack Reveal Hook",
         };
 
-        auto isTrackedPatch = [&steamVersionNames](const PatchDef& patch) -> bool
+        auto isTrackedPatch = [&steamTrackedNames](const PatchDef& patch) -> bool
         {
-            for (const char* name : steamVersionNames)
+            for (const char* name : steamTrackedNames)
             {
                 if (strcmp(patch.name, name) == 0)
                     return true;
@@ -1986,8 +2018,8 @@ namespace BZROpenShim
             return false;
         };
 
-        Log(L"[INFO] Waiting for Steam version notice sites to settle...\n");
-        constexpr int kMaxAttempts = 200;
+        Log(L"[INFO] Waiting for Steam tracked patch sites to settle...\n");
+        constexpr int kMaxAttempts = 2500;
         constexpr DWORD kDelayMs = 10;
 
         for (int attempt = 0; attempt < kMaxAttempts; ++attempt)
@@ -2107,7 +2139,9 @@ namespace BZROpenShim
             findAddr("TurretCraft Aim Pitch Multiplier"),
             findAddr("TurretTank Aim Pitch Multiplier"),
             findAddr("Under Attack Alert Hook 1/2"),
-            findAddr("Under Attack Alert Hook 2/2"));
+            findAddr("Under Attack Alert Hook 2/2"),
+            findAddr("Offensive Attack Reveal Hook"),
+            findAddr("TurretTank Attack Reveal Hook"));
 
         ResolveBzrHooks(isSteam);
         InitBzrHookStrings();
@@ -2117,6 +2151,7 @@ namespace BZROpenShim
         FillVersionNoticePayloads(patches);
         FillRel32Payloads(patches, isSteam);
         WaitForExpectedBytes(patches, isSteam);
+        RetryDeferredRuntimeHooks();
 
         // 5. Apply patches
         int applied = 0;
