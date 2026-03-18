@@ -1,0 +1,203 @@
+param(
+    [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
+    [string]$UserBin = "$env:USERPROFILE\bin",
+    [string]$CodexConfigPath = "$env:USERPROFILE\.codex\config.toml",
+    [string]$GameDir = "",
+    [string]$GameExe = "",
+    [string]$GhidraInstallDir = "",
+    [switch]$SkipWinget,
+    [switch]$SkipPip,
+    [switch]$SkipWrappers,
+    [switch]$SkipCodexConfig
+)
+
+$ErrorActionPreference = "Stop"
+
+function Write-Info([string]$Message) {
+    Write-Host "[tooling] $Message"
+}
+
+function Ensure-Directory([string]$PathValue) {
+    if (-not (Test-Path $PathValue)) {
+        New-Item -ItemType Directory -Path $PathValue -Force | Out-Null
+    }
+}
+
+function Invoke-WingetInstall([string]$Id) {
+    if ($SkipWinget) {
+        Write-Info "Skipping winget install for $Id"
+        return
+    }
+
+    $already = winget list --id $Id --accept-source-agreements 2>$null
+    if ($LASTEXITCODE -eq 0 -and $already -match [regex]::Escape($Id)) {
+        Write-Info "winget package already present: $Id"
+        return
+    }
+
+    Write-Info "Installing winget package: $Id"
+    winget install --id $Id --accept-source-agreements --accept-package-agreements --disable-interactivity
+}
+
+function Invoke-PipInstall([string[]]$Packages) {
+    if ($SkipPip) {
+        Write-Info "Skipping pip installs"
+        return
+    }
+
+    Write-Info "Installing Python packages: $($Packages -join ', ')"
+    python -m pip install --user @Packages
+}
+
+function Get-PythonUserScripts() {
+    $userBase = python -c "import site; print(site.USER_BASE)"
+    if ($LASTEXITCODE -ne 0 -or -not $userBase) {
+        throw "Unable to resolve Python USER_BASE"
+    }
+    return (Join-Path $userBase.Trim() "Scripts")
+}
+
+function Get-WinDbgRoot() {
+    $install = (Get-AppxPackage Microsoft.WinDbg | Select-Object -ExpandProperty InstallLocation -ErrorAction SilentlyContinue)
+    if ($install) {
+        return $install
+    }
+    return ""
+}
+
+function Get-X32DbgPath() {
+    $base = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages"
+    if (-not (Test-Path $base)) {
+        return ""
+    }
+
+    $match = Get-ChildItem $base -Recurse -Filter x32dbg.exe -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty FullName
+    return $match
+}
+
+function Get-CutterPath() {
+    $base = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages"
+    if (-not (Test-Path $base)) {
+        return ""
+    }
+
+    $match = Get-ChildItem $base -Recurse -Filter cutter.exe -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty FullName
+    return $match
+}
+
+function Set-CmdWrapper([string]$WrapperPath, [string]$TargetCommand) {
+    $content = "@echo off`r`n$TargetCommand %*`r`n"
+    Set-Content -Path $WrapperPath -Value $content -Encoding ASCII
+}
+
+function Update-CodexConfig() {
+    if ($SkipCodexConfig) {
+        Write-Info "Skipping Codex config update"
+        return
+    }
+
+    Ensure-Directory (Split-Path $CodexConfigPath -Parent)
+    if (-not (Test-Path $CodexConfigPath)) {
+        Set-Content -Path $CodexConfigPath -Value "" -Encoding UTF8
+    }
+
+    $existing = Get-Content $CodexConfigPath -Raw
+    $startMarker = "# >>> BZR agent tooling >>>"
+    $endMarker = "# <<< BZR agent tooling <<<"
+
+    $ghidraDirValue = if ($GhidraInstallDir) { $GhidraInstallDir } else { 'C:/ghidra_12.0.4_PUBLIC' }
+    $repoToml = $RepoRoot -replace "\\", "/"
+
+    $block = @"
+$startMarker
+[mcp_servers.ghidra]
+command = "python"
+args = [
+  "$repoToml/scripts/ghidra_mcp_bz98.py"
+]
+env = { "GHIDRA_INSTALL_DIR" = "$($ghidraDirValue -replace '\\', '/')" }
+
+[mcp_servers.redux_debug]
+command = "python"
+args = [
+  "$repoToml/scripts/redux_debug_bridge.py",
+  "mcp"
+]
+$endMarker
+"@
+
+    $pattern = "(?s)$([regex]::Escape($startMarker)).*?$([regex]::Escape($endMarker))"
+    if ($existing -match $pattern) {
+        $updated = [regex]::Replace($existing, $pattern, $block)
+    } else {
+        $updated = $existing.TrimEnd()
+        if ($updated) {
+            $updated += "`r`n`r`n"
+        }
+        $updated += $block + "`r`n"
+    }
+
+    Set-Content -Path $CodexConfigPath -Value $updated -Encoding UTF8
+    Write-Info "Updated Codex config: $CodexConfigPath"
+}
+
+Invoke-WingetInstall "Microsoft.WinDbg"
+Invoke-WingetInstall "x64dbg.x64dbg"
+Invoke-WingetInstall "Rizin.Rizin"
+Invoke-WingetInstall "Rizin.Cutter"
+
+Invoke-PipInstall @(
+    "pyghidra-mcp",
+    "angr",
+    "frida",
+    "frida-tools",
+    "qiling"
+)
+
+$pythonScripts = Get-PythonUserScripts
+$winDbgRoot = Get-WinDbgRoot
+$cdb32 = if ($winDbgRoot) { Join-Path $winDbgRoot "x86\cdb.exe" } else { "" }
+$x32dbg = Get-X32DbgPath
+$cutter = Get-CutterPath
+$rizin = "C:\Program Files\Rizin\bin\rizin.exe"
+$rzBin = "C:\Program Files\Rizin\bin\rz-bin.exe"
+$rzAsm = "C:\Program Files\Rizin\bin\rz-asm.exe"
+
+if (-not $SkipWrappers) {
+    Ensure-Directory $UserBin
+    Set-CmdWrapper (Join-Path $UserBin "bzr-ghidra-mcp.cmd") "python `"$RepoRoot\scripts\ghidra_mcp_bz98.py`""
+    Set-CmdWrapper (Join-Path $UserBin "bzr-redux-debug.cmd") "python `"$RepoRoot\scripts\redux_debug_bridge.py`""
+    Set-CmdWrapper (Join-Path $UserBin "bzr-qiling.cmd") "python `"$RepoRoot\scripts\qiling_cli.py`""
+    Set-CmdWrapper (Join-Path $UserBin "bzr-frida.cmd") "`"$pythonScripts\frida.exe`""
+    Set-CmdWrapper (Join-Path $UserBin "bzr-frida-ps.cmd") "`"$pythonScripts\frida-ps.exe`""
+    Set-CmdWrapper (Join-Path $UserBin "bzr-frida-trace.cmd") "`"$pythonScripts\frida-trace.exe`""
+    Set-CmdWrapper (Join-Path $UserBin "bzr-angr.cmd") "`"$pythonScripts\angr.exe`""
+
+    if (Test-Path $rizin) { Set-CmdWrapper (Join-Path $UserBin "bzr-rizin.cmd") "`"$rizin`"" }
+    if (Test-Path $rzBin) { Set-CmdWrapper (Join-Path $UserBin "bzr-rz-bin.cmd") "`"$rzBin`"" }
+    if (Test-Path $rzAsm) { Set-CmdWrapper (Join-Path $UserBin "bzr-rz-asm.cmd") "`"$rzAsm`"" }
+    if ($cutter -and (Test-Path $cutter)) { Set-CmdWrapper (Join-Path $UserBin "bzr-cutter.cmd") "`"$cutter`"" }
+    if ($cdb32 -and (Test-Path $cdb32)) { Set-CmdWrapper (Join-Path $UserBin "bzr-cdb32.cmd") "`"$cdb32`"" }
+    if ($x32dbg -and (Test-Path $x32dbg)) { Set-CmdWrapper (Join-Path $UserBin "bzr-x32dbg.cmd") "`"$x32dbg`"" }
+
+    Write-Info "Wrote wrappers to $UserBin"
+}
+
+if ($GameDir) {
+    [Environment]::SetEnvironmentVariable("BZR_GAME_DIR", $GameDir, "User")
+    Write-Info "Set user env BZR_GAME_DIR=$GameDir"
+}
+if ($GameExe) {
+    [Environment]::SetEnvironmentVariable("BZR_GAME_EXE", $GameExe, "User")
+    Write-Info "Set user env BZR_GAME_EXE=$GameExe"
+}
+if ($GhidraInstallDir) {
+    [Environment]::SetEnvironmentVariable("BZR_GHIDRA_INSTALL_DIR", $GhidraInstallDir, "User")
+    Write-Info "Set user env BZR_GHIDRA_INSTALL_DIR=$GhidraInstallDir"
+}
+
+Update-CodexConfig
+
+Write-Info "Done. Open a new shell if newly created wrappers are not visible yet."
