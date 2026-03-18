@@ -12,6 +12,36 @@ The clean-room shim now supports both:
 
 <img width="1377" height="758" alt="image" src="https://github.com/user-attachments/assets/b1f12ee2-5e57-46df-b467-1d5c69c6426e" />
 
+## High-Level Summary
+
+- Standalone clean-room `winmm.dll` shim for Battlezone 98 Redux `2.2.301`, with
+  live support for both GOG and Steam executables.
+- Multiplayer/lobby fixes include the map-list hop-fix and refresh-position
+  preservation work, BZRNET host/client integration hooks, host-side `/help`
+  and `/ban` command handling, join-time ban enforcement support, ban button
+  hooks, and multiplayer vehicle flag selection/generation helpers.
+- Gameplay and simulation patches include the howitzer/minelayer weapon-mask
+  bias fix, configurable turret aim-pitch multiplier hooks for `TurretCraft`
+  and `TurretTank` so they are no longer hard-limited to the stock `0.5`
+  radians behavior, target-reticle recent-hit popup filtering, under-attack
+  alert throttling/toggling, engine-flame color routing, and sound-channel cap
+  overrides for large battles.
+- Single-player shell/load support includes the injected AutoSave load button
+  and the restart-mission fresh-load repair so restart paths behave more like a
+  true clean mission load instead of reusing stale save-style state.
+- Steam compatibility work includes executable-name detection, startup settle
+  polling for delayed byte sites, Steam-safe version-tag patching, Steam hook
+  validation against live runtime bytes, and deliberate fallback to stock
+  map-filter/sort UI while the clean-room filter port remains incomplete.
+- Runtime and diagnostics work includes startup hook validation, verbose patch
+  logging, Winsock buffer tuning, UDP packet reorder buffering, outbound route
+  tagging, binary packet capture, shipped `net.ini` diagnostics, and bundled
+  verification and session-capture scripts.
+- The repo also carries guarded bridge experiments for larger native problems,
+  including chunk render resolve fallback/proxy tracing and submenu-capable
+  producer build menu work. Those remain explicitly scoped experiments rather
+  than finished gameplay features.
+
 
 ## Architecture
 
@@ -249,10 +279,10 @@ Configure it through `net.ini` next to the game executable:
 ```ini
 [OpenShimSocket]
 EnablePacketReorder=1
-PacketReorderWindowMs=30
+PacketReorderWindowMs=45
 PacketReorderDepth=8
 PacketReorderPeers=32
-PacketReorderDrainCap=32
+PacketReorderDrainCap=96
 LogPacketReorder=1
 EnableBufferLog=0
 BufferLogPayloadBytes=32
@@ -334,6 +364,37 @@ Optional filters for tighter captures:
 `Stop` writes a zipped bundle under `test_bundles\` with `openshim.log`,
 `BZLogger.txt`, `bz_buffer_log.bin`, `bz_buffer_log.meta.txt`, and the active
 `net.ini` when present.
+
+## Deep Diagnostics Workflow
+
+For broader Windows session bundles, use [`tester_diag_windows.ps1`](tester_diag_windows.ps1):
+
+```powershell
+.\tester_diag_windows.ps1 -Action Start
+.\tester_diag_windows.ps1 -Action Mark -Message "relay fallback after join"
+.\tester_diag_windows.ps1 -Action Stop
+```
+
+Optional targeting:
+
+- `-PingTarget 1.1.1.1` changes the baseline ping timeline target
+- `-PeerPingTarget 203.0.113.42` captures a second ping timeline for a known peer
+- if `-PeerPingTarget` is omitted, `Stop` tries to infer likely public peers
+  from the captured socket timeline and records them in `peer_candidates.txt`
+
+The trimmed workflow captures:
+
+- route snapshots at start and stop
+- adapter overview and adapter statistics
+- baseline ping timeline and optional peer ping timeline
+- repeated `netstat` socket snapshots for peer inference
+- optional `netsh trace` output when the shell has sufficient rights
+- `openshim.log`, `BZLogger.txt`, optional buffer-log files, `net.ini`,
+  `multi.ini`, and `verify_windows.ps1` output
+
+Use `buffer_logger_windows.ps1` separately when you specifically need the
+binary recv-path capture, and use `tester_diag_windows.ps1` when you need the
+broader session-level networking bundle.
 
 ## Testing The Chunk Experiment
 
