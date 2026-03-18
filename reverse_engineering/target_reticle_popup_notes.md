@@ -2,22 +2,37 @@
 
 Date: 2026-03-17
 
+Update: 2026-03-18
+
+Shipping scope was narrowed after the earlier `NEUTRAL ONLY` attempt proved too
+fragile in practice. The normal user-facing path now ships only:
+
+- `DEFAULT`
+- `EXPLICIT ONLY`
+
+The `NEUTRAL ONLY` logic remains an experimental native path only, and legacy
+or config requests for it should downgrade to `DEFAULT` unless explicitly
+forced for testing.
+
 ## Scope
 
 Goal: determine where Battlezone 98 Redux automatically shows the target
 reticle sprite and health bar when player ordnance hits an object, and map out
-the safest implementation path for a persistent PDA setting with these modes:
+the safest implementation path for a persistent PDA setting. The original
+investigation covered these modes:
 
 - `DEFAULT`
-- `NEUTRAL ONLY`
 - `EXPLICIT ONLY`
 
-The intended user-facing behavior is:
+The current intended shipping behavior is:
 
 - `DEFAULT`: keep stock behavior
-- `NEUTRAL ONLY`: suppress auto-popup reticles on team `0` neutral objects
 - `EXPLICIT ONLY`: only show the target reticle when the player explicitly
   targets something, such as with the `T` target action
+
+The shelved experimental behavior was:
+
+- `NEUTRAL ONLY`: suppress auto-popup reticles on team `0` neutral objects
 
 ## Primary Inputs
 
@@ -142,13 +157,14 @@ Preferred native logic:
 2. gate or suppress only the recent-hit popup path
 3. leave `playerShot` available for any other system that may use it
 
-That gives the three requested modes cleanly:
+That originally gave the three requested modes cleanly:
 
 - `DEFAULT`: stock explicit-target and recent-hit popup paths remain active
-- `NEUTRAL ONLY`: keep recent-hit popups except when the target object is team
-  `0`
 - `EXPLICIT ONLY`: disable the recent-hit popup path entirely, but keep the
   explicit target path
+
+The final shipping recommendation was narrowed to `DEFAULT` and
+`EXPLICIT ONLY`, with `NEUTRAL ONLY` kept experimental only.
 
 ## Config Integration Plan
 

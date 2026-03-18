@@ -1163,6 +1163,48 @@ void __declspec(naked) __cdecl Trampoline_UnderAttackAlertHook2()
     }
 }
 
+void __declspec(naked) __cdecl Trampoline_OffensiveAttackRevealHook()
+{
+    __asm
+    {
+        mov  ecx, [ebp - 8]
+        mov  edx, [ebp - 8]
+        mov  eax, [edx + 1Ch]
+        mov  [ecx + 24h], eax
+
+        pushfd
+        pushad
+        push dword ptr [ebp - 8]
+        call RevealProcessOwnerPerceivedTeamOnAttackStateEntry
+        add  esp, 4
+        popad
+        popfd
+
+        jmp  [g_RetAddr_OffensiveAttackRevealHook]
+    }
+}
+
+void __declspec(naked) __cdecl Trampoline_TurretTankAttackRevealHook()
+{
+    __asm
+    {
+        mov  edx, [ebp - 8]
+        mov  eax, [ebp - 8]
+        mov  ecx, [eax + 1Ch]
+        mov  [edx + 24h], ecx
+
+        pushfd
+        pushad
+        push dword ptr [ebp - 8]
+        call RevealProcessOwnerPerceivedTeamOnAttackStateEntry
+        add  esp, 4
+        popad
+        popfd
+
+        jmp  [g_RetAddr_TurretTankAttackRevealHook]
+    }
+}
+
 // -----------------------------------------------------------------------
 // HoverCraft Engine Flame Emit Hook
 // Sites:

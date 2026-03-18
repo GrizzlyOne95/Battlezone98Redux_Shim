@@ -1,4 +1,6 @@
 param(
+    [string]$GameRoot = "",
+    [string]$GameExeName = "",
     [int]$ProbeTimeoutSeconds = 120,
     [double]$PollIntervalSeconds = 0.05,
     [double]$SampleWindowSeconds = 2.0,
@@ -7,6 +9,7 @@ param(
     [int]$ChunkLogBudget = 400,
     [int]$ChunkTraceEntryLimit = 16,
     [int]$PostCaptureWaitSeconds = 2,
+    [int]$StartupSettleSeconds = -1,
     [bool]$EnableChunkEffectTrace = $false,
     [bool]$EnableChunkProxyDebug = $false,
     [switch]$KillExistingGame,
@@ -14,9 +17,39 @@ param(
 )
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$gameRoot = "C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux"
-$gameExe = Join-Path $gameRoot "battlezone98redux.exe"
-$shimLog = Join-Path $gameRoot "winmm_shim.log"
+if (-not $GameRoot) {
+    $candidateRoots = @(
+        "C:\Users\istuart\Documents\Battlezone 98 Redux",
+        "C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux"
+    )
+    $GameRoot = $candidateRoots | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+if (-not $GameRoot) {
+    throw "Could not locate a Battlezone install. Pass -GameRoot explicitly."
+}
+
+if (-not $GameExeName) {
+    if (Test-Path (Join-Path $GameRoot "battlezone98redux.exe")) {
+        $GameExeName = "battlezone98redux.exe"
+    } elseif (Test-Path (Join-Path $GameRoot "BZR.exe")) {
+        $GameExeName = "BZR.exe"
+    } else {
+        throw "Could not find battlezone98redux.exe or BZR.exe under $GameRoot"
+    }
+}
+
+$gameExe = Join-Path $GameRoot $GameExeName
+if (-not (Test-Path $gameExe)) {
+    throw "Game executable not found: $gameExe"
+}
+
+$processName = [System.IO.Path]::GetFileName($GameExeName)
+$processBaseName = [System.IO.Path]::GetFileNameWithoutExtension($GameExeName)
+if ($StartupSettleSeconds -lt 0) {
+    $StartupSettleSeconds = if ($processName -ieq "battlezone98redux.exe") { 20 } else { 0 }
+}
+
+$shimLog = Join-Path $GameRoot "winmm_shim.log"
 $probeScript = Join-Path $PSScriptRoot "probe_chunk_effect_runtime.py"
 $snapshotRoot = Join-Path $PSScriptRoot "snapshots"
 $stdoutLog = Join-Path $env:TEMP "run_misn03_chunk_probe.stdout.log"
@@ -29,7 +62,7 @@ if (-not $python) {
 New-Item -ItemType Directory -Path $snapshotRoot -Force | Out-Null
 
 if ($KillExistingGame) {
-    Get-Process battlezone98redux -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-Process $processBaseName -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep -Seconds 2
 }
 
@@ -60,7 +93,7 @@ if ($EnableChunkProxyDebug) {
 
 $probeArgs = @(
     $probeScript,
-    "--process-name", "battlezone98redux.exe",
+    "--process-name", $processName,
     "--timeout", $ProbeTimeoutSeconds,
     "--poll-interval", $PollIntervalSeconds,
     "--sample-window", $SampleWindowSeconds,
@@ -72,7 +105,11 @@ $probeArgs = @(
 $probeProc = Start-Process -FilePath $python.Source -ArgumentList $probeArgs -PassThru `
     -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -WindowStyle Minimized
 
-$gameProc = Start-Process -FilePath $gameExe -ArgumentList "misn03.bzn" -PassThru -WorkingDirectory $gameRoot
+$gameProc = Start-Process -FilePath $gameExe -ArgumentList "misn03.bzn" -PassThru -WorkingDirectory $GameRoot
+
+if ($StartupSettleSeconds -gt 0) {
+    Start-Sleep -Seconds $StartupSettleSeconds
+}
 
 $probeFinished = $probeProc.WaitForExit(($ProbeTimeoutSeconds + 15) * 1000)
 if (-not $probeFinished) {
@@ -111,7 +148,7 @@ if (-not $outputDir) {
 Start-Sleep -Seconds $PostCaptureWaitSeconds
 
 if ($KillGameAfterCapture) {
-    Get-Process battlezone98redux -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-Process $processBaseName -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep -Seconds 2
 }
 
@@ -136,7 +173,11 @@ $result = [ordered]@{
     output_dir = $outputDir
     probe_stdout = $stdoutLog
     probe_stderr = $stderrLog
+    game_root = $GameRoot
+    game_exe = $gameExe
+    process_name = $processName
     game_pid = $gameProc.Id
+    startup_settle_seconds = $StartupSettleSeconds
     probe_exit_code = $probeExitCode
 }
 

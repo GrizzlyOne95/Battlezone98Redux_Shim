@@ -7,6 +7,7 @@ namespace BZROpenShim
 {
     // Runtime-resolved BZR pointers and helpers.
     void ResolveBzrHooks(bool isSteam);
+    void RetryDeferredRuntimeHooks();
     void InitBzrHookStrings();
     void SetProducerBuildMenuOriginal(void* target);
 
@@ -37,6 +38,7 @@ namespace BZROpenShim
     void PrimeUnderAttackAlertConfig();
     bool SetUnderAttackAlertModeFromBridge(int mode);
     float __fastcall TargetReticlePopupRecentHitGetterHook(void* objectPtr, void* edx);
+    void __cdecl RevealProcessOwnerPerceivedTeamOnAttackStateEntry(void* processPtr);
     void PrimeTargetReticlePopupConfig();
     bool SetTargetReticlePopupModeFromBridge(int mode);
 
