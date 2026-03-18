@@ -378,6 +378,35 @@ In other words, the comprehensive solution now looks less like "reverse the whol
 3. resolve or synthesize the corresponding Ogre mesh for that `(source-prefix + chunkN)` pair
 4. attach that render proxy to the existing native `ChunkEffect` lifecycle already proven in-shim
 
+## Final Auto-Path Conclusion
+
+At this point the automatic/runtime-only investigation is effectively exhausted on the key questions it can answer without building the full restoration feature:
+
+- native chunk simulation exists and is stable
+- `ChunkEffect` is the correct runtime manager hook
+- live chunk entries are real `CLASS_ID_CHUNK` objects
+- those chunk objects have no normal Redux owner bridge
+- the native chunk objects preserve stable piece identity as `chunkN`
+- stock Redux already ships many matching Ogre chunk meshes
+- the placeholder proxy lifecycle works against the true native chunk list
+
+What the automated probes did **not** fully recover yet is the stock source-family prefix at the exact moment of fragmentation. That is now the remaining engineering problem, not the remaining reverse-engineering mystery.
+
+So the most feasible restoration implementation is:
+
+1. hook earlier at the death/fragmentation boundary or another still-bridged source-object path
+2. cache the source object's model/class identity while that information is still intact
+3. combine that cached source-family prefix with the native `chunkN` template name
+4. spawn or attach the matching Ogre chunk mesh to the existing native chunk lifecycle
+5. fall back to generated/exported custom chunk meshes when no stock Ogre chunk asset exists
+
+If that prefix cache proves awkward, the fallback remains viable:
+
+- keep using `ChunkEffect` as the authoritative native simulation source
+- render a shim-managed Ogre proxy from offline-exported chunk meshes keyed by mod asset data instead of stock Redux naming
+
+But either way, the core direction is now settled: preserve native chunk simulation and repair only the rendering bridge.
+
 ## Updated Practical Read
 
 At this point the problem is no longer "find where chunks exist." They exist, and Redux tracks them natively in a dedicated manager.
