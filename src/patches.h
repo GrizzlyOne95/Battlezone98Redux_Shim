@@ -115,6 +115,8 @@ namespace BZROpenShim
     extern void __cdecl Trampoline_TurretTankAimPitchMultiplier();
     extern void __cdecl Trampoline_UnderAttackAlertHook1();
     extern void __cdecl Trampoline_UnderAttackAlertHook2();
+    extern void __cdecl Trampoline_OffensiveAttackRevealHook();
+    extern void __cdecl Trampoline_TurretTankAttackRevealHook();
     extern void __cdecl Trampoline_EngineFlameHoverCraftEmit();
     extern void __cdecl Trampoline_ArtilleryMaskTrace();
     extern void __cdecl Trampoline_DecodedWeaponMaskBias();
@@ -158,6 +160,8 @@ namespace BZROpenShim
     inline void* g_RetAddr_UnderAttackAlertHook1 = nullptr;
     inline void* g_RetAddr_UnderAttackAlertHook2 = nullptr;
     inline void* g_RetAddr_ArtilleryMaskTrace = nullptr;
+    inline void* g_RetAddr_OffensiveAttackRevealHook = nullptr;
+    inline void* g_RetAddr_TurretTankAttackRevealHook = nullptr;
     inline void (*g_BZRFnPtr_JoinerEventOriginal)() = nullptr;
     inline void (*g_BZRFnPtr_ArtilleryMaskTraceOriginal)() = nullptr;
 
@@ -226,6 +230,9 @@ namespace BZROpenShim
             // -- Team under-attack growl throttle/toggle --
             { 0x0, PT::JMP5, {}, "Under Attack Alert Hook 1/2", false },
             { 0x0, PT::JMP5, {}, "Under Attack Alert Hook 2/2", false },
+            // -- Reveal attacker the moment it enters attack state --
+            { 0x0, PT::JMP5, {}, "Offensive Attack Reveal Hook", false },
+            { 0x0, PT::JMP5, {}, "TurretTank Attack Reveal Hook", false },
         };
 
         if (EnableExperimentalMapFilters())
