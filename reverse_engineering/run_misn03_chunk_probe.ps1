@@ -6,7 +6,7 @@ param(
     [int]$MaxObjects = 8,
     [int]$ChunkLogBudget = 400,
     [int]$ChunkTraceEntryLimit = 16,
-    [int]$PostCaptureWaitSeconds = 10,
+    [int]$PostCaptureWaitSeconds = 2,
     [bool]$EnableChunkEffectTrace = $false,
     [bool]$EnableChunkProxyDebug = $false,
     [switch]$KillExistingGame,
