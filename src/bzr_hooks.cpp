@@ -126,6 +126,11 @@ namespace BZROpenShim
     using FnGameObjectGetObjByHandle = void* (__cdecl*)(int handle);
     using FnPersonSimulate = void(__thiscall*)(void* thisPtr, float dt);
     using FnOptionsInputPopulateUi = void(__thiscall*)(void* thisPtr);
+    using FnCalcRangeCraft = void(__cdecl*)(void* craft,
+                                            float* closeRange,
+                                            float* range,
+                                            float* time,
+                                            void** weapon);
 
     static void** g_BzrPtr_945478 = nullptr;
     static void** g_BzrPtr_94548C = nullptr;
@@ -192,6 +197,7 @@ namespace BZROpenShim
     static FnGameObjectGetObjByHandle g_BzrFn_GameObjectGetObjByHandle = nullptr;
     static FnPersonSimulate g_BzrFn_PersonSimulate = nullptr;
     static FnOptionsInputPopulateUi g_BzrFn_OptionsInputPopulateUi = nullptr;
+    static FnCalcRangeCraft g_BzrFn_CalcRangeCraft = nullptr;
     static BuildItem* g_BzrBuildMenuRoot = nullptr;
     static bool g_IsSteamExe = false;
 
@@ -256,6 +262,9 @@ namespace BZROpenShim
         constexpr size_t kHudSpriteRectScanAlignment = 0x08;
         constexpr uint32_t kHudSpriteMaxReasonableCount = 4096;
         constexpr ULONGLONG kHudSpriteRectDiscoveryRetryMs = 1000;
+        constexpr size_t kGameObjectClassOffset = 0xF8;
+        constexpr size_t kObjectClassOdfOffset = 0x20;
+        constexpr size_t kObjectClassOdfLen = 16;
         constexpr float kFlagButtonSize = 48.0f;
         constexpr uint32_t kLegacyFlagDataSlot = 0x0Du;
         constexpr int kLegacyFlagWidth = 64;
@@ -288,6 +297,8 @@ namespace BZROpenShim
         constexpr size_t kWeaponClassSigOffset = 0x0C;
         constexpr size_t kWeaponClassOdfOffset = 0x20;
         constexpr float kJumpSnipeVelocityBandThreshold = 0.15f;
+        constexpr uintptr_t kGogCalcRangeCraftEntryAddr = 0x0041F240;
+        constexpr size_t kCalcRangeCraftDetourLen = 8;
 
         struct InlineDetour32
         {
@@ -327,6 +338,10 @@ namespace BZROpenShim
             bool initialized = false;
             JumpSnipeProbeSnapshot last = {};
         };
+
+        struct AiTuningConfig;
+        static bool TryGetAiTuningForObject(void* objectPtr, AiTuningConfig& outConfig);
+        static bool TryGetObjectOdfToken(void* objectPtr, char (&outToken)[kProducerBuildMenuTokenLen + 1]);
 
         struct HudSpriteRectRecord
         {
@@ -409,6 +424,45 @@ namespace BZROpenShim
             ProducerBuildMenuEntry factory = {};
             ProducerBuildMenuEntry armory = {};
             ProducerBuildMenuEntry constructionRig = {};
+            std::unordered_map<std::string, ProducerBuildMenuEntry> odfOverrides = {};
+            std::unordered_map<std::string, ProducerBuildMenuEntry> odfFileEntries = {};
+        };
+
+        struct AiTuningConfig
+        {
+            bool parsed = false;
+            bool bomberAiRole = false;
+            bool hasEngageRangeAI = false;
+            float engageRangeAI = 0.0f;
+            bool hasWeaponRangeMinAI = false;
+            float weaponRangeMinAI = 0.0f;
+            bool derivedBomberWeaponRangeAI = false;
+            bool hasRetargetPeriodAI = false;
+            float retargetPeriodAI = 0.0f;
+            bool hasStuckCheckPeriodAI = false;
+            float stuckCheckPeriodAI = 0.0f;
+            bool hasStuckReverseTimeAI = false;
+            float stuckReverseTimeAI = 0.0f;
+            bool hasStuckStrafeTimeAI = false;
+            float stuckStrafeTimeAI = 0.0f;
+            bool scrapPathingAI = false;
+            bool hasScrapPathingAI = false;
+            bool hasScrapPathLengthWeightAI = false;
+            float scrapPathLengthWeightAI = 1.0f;
+            bool hasScrapStraightDistanceWeightAI = false;
+            float scrapStraightDistanceWeightAI = 0.05f;
+            bool hasScrapPathFailPenaltyAI = false;
+            float scrapPathFailPenaltyAI = 250.0f;
+            bool hasScrapHardToGetCooldownAI = false;
+            float scrapHardToGetCooldownAI = 10.0f;
+            bool hasScrapSearchRadiusAI = false;
+            float scrapSearchRadiusAI = 0.0f;
+        };
+
+        struct AiTuningCache
+        {
+            bool initialized = false;
+            std::unordered_map<std::string, AiTuningConfig> odfEntries = {};
         };
 
         enum class InputBindingMapFamily
@@ -467,6 +521,7 @@ namespace BZROpenShim
         static bool g_FlagCatalogLoaded = false;
         static std::vector<FlagCatalogEntry> g_FlagCatalog;
         static std::filesystem::path g_ActiveFlagsDirectory;
+        static std::filesystem::path g_ConfigRequestedFlagsDirectory;
         static std::string g_SelectedFlagFileName;
         static int g_SelectedFlagIndex = -1;
         static std::string g_SelectedFlagStatus = "Legacy test path idle.";
@@ -584,8 +639,10 @@ namespace BZROpenShim
         static DWORD g_SatelliteVisibilityLogIntervalMs = 1000;
         static std::unordered_map<uintptr_t, uint32_t> g_ChunkObservedClassIds = {};
         static volatile long g_ArtilleryMaskTraceBudget = 400;
+        static volatile long g_BomberRangeTraceBudget = 200;
         static VehicleAssetExceptionCacheEntry g_VehicleAssetExceptionCache[kVehicleAssetExceptionCacheSize] = {};
         static ProducerBuildMenuConfig g_ProducerBuildMenuConfig = {};
+        static AiTuningCache g_AiTuningCache = {};
         static bool g_HasAppliedProducerBuildMenu = false;
         static int64_t g_LastAppliedProducerBuildMenu = 0;
         static uint32_t g_LastUnknownProducerVft = 0;
@@ -597,6 +654,8 @@ namespace BZROpenShim
         static bool g_EngineFlameVariantsInitAttempted = false;
         static bool g_EngineFlameVtableHooksInstalled = false;
         static InlineDetour32 g_OptionsInputPopulateUiDetour = {};
+        static InlineDetour32 g_CalcRangeCraftDetour = {};
+        static bool g_CalcRangeCraftHookInstalled = false;
         static bool g_InputBindingUiScaffoldInitialized = false;
         static bool g_InputBindingUiScaffoldLogged = false;
         static bool g_InputBindingUiPopulateHookInstallAttempted = false;
@@ -2337,6 +2396,18 @@ namespace BZROpenShim
 
         static std::filesystem::path ResolveFlagSourceDirectoryPath()
         {
+            if (!g_ConfigRequestedFlagsDirectory.empty())
+            {
+                std::error_code ec;
+                if (std::filesystem::exists(g_ConfigRequestedFlagsDirectory, ec) && !ec)
+                {
+                    if (DirectoryContainsSupportedFlagSources(g_ConfigRequestedFlagsDirectory))
+                        return g_ConfigRequestedFlagsDirectory;
+
+                    return g_ConfigRequestedFlagsDirectory;
+                }
+            }
+
             const auto candidates = GetFlagDirectoryCandidates();
             for (const auto& candidate : candidates)
             {
@@ -2665,11 +2736,20 @@ namespace BZROpenShim
 
             std::fprintf(file, "; OpenShim multiplayer vehicle flag selection\n");
             std::fprintf(file, "; Place source images in .\\flags\\ and click the lobby F button to cycle.\n");
+            std::fprintf(file, "; Supported source formats: .bmp .png .tga .jpg .jpeg\n");
             std::fprintf(file, "selected=%s\n", g_SelectedFlagFileName.c_str());
+            if (!g_ConfigRequestedFlagsDirectory.empty())
+                std::fprintf(file, "sourceDir=%s\n", g_ConfigRequestedFlagsDirectory.string().c_str());
+            if (!g_ActiveFlagsDirectory.empty())
+                std::fprintf(file, "; activeSourceDir=%s\n", g_ActiveFlagsDirectory.string().c_str());
+            if (!g_GeneratedFlagFileName.empty())
+                std::fprintf(file, "; generatedFor=%s\n", g_GeneratedFlagFileName.c_str());
             std::fclose(file);
-            Log(L"[FLAG] Wrote flag config path=%hs selected=%hs\n",
+            Log(L"[FLAG] Wrote flag config path=%hs selected=%hs sourceDir=%hs activeDir=%hs\n",
                 configPathString.c_str(),
-                g_SelectedFlagFileName.c_str());
+                g_SelectedFlagFileName.c_str(),
+                g_ConfigRequestedFlagsDirectory.empty() ? "" : g_ConfigRequestedFlagsDirectory.string().c_str(),
+                g_ActiveFlagsDirectory.empty() ? "" : g_ActiveFlagsDirectory.string().c_str());
             return true;
         }
 
@@ -2706,6 +2786,7 @@ namespace BZROpenShim
             g_FlagCatalogLoaded = true;
             g_FlagCatalog.clear();
             g_ActiveFlagsDirectory.clear();
+            g_ConfigRequestedFlagsDirectory.clear();
             g_SelectedFlagFileName.clear();
             g_SelectedFlagIndex = -1;
             g_SelectedFlagStatus = "Legacy test path idle.";
@@ -2719,15 +2800,6 @@ namespace BZROpenShim
                 Log(L"[FLAG] Failed to ensure flags directory path=%hs ec=%d\n",
                     primaryFlagsDir.string().c_str(),
                     static_cast<int>(ec.value()));
-            }
-
-            const auto flagsDir = ResolveFlagSourceDirectoryPath();
-            g_ActiveFlagsDirectory = flagsDir;
-            if (!flagsDir.empty() && flagsDir != primaryFlagsDir)
-            {
-                Log(L"[FLAG] Using fallback flag source directory path=%hs primary=%hs\n",
-                    flagsDir.string().c_str(),
-                    primaryFlagsDir.string().c_str());
             }
 
             const auto configPath = GetFlagsConfigPath();
@@ -2751,14 +2823,43 @@ namespace BZROpenShim
                     if (_stricmp(key, "selected") == 0 && value && *value)
                     {
                         g_SelectedFlagFileName = value;
-                        break;
+                    }
+                    else if ((_stricmp(key, "sourceDir") == 0 ||
+                              _stricmp(key, "sourcePath") == 0) &&
+                             value && *value)
+                    {
+                        g_ConfigRequestedFlagsDirectory = value;
                     }
                 }
 
                 std::fclose(file);
             }
 
-            std::vector<std::filesystem::directory_entry> entries;
+            if (!g_ConfigRequestedFlagsDirectory.empty())
+            {
+                std::error_code overrideError;
+                if (!std::filesystem::exists(g_ConfigRequestedFlagsDirectory, overrideError) || overrideError)
+                {
+                    Log(L"[FLAG] Config sourceDir does not exist path=%hs\n",
+                        g_ConfigRequestedFlagsDirectory.string().c_str());
+                    g_SelectedFlagStatus = "Configured flag source directory was not found; using fallback search.";
+                    g_ConfigRequestedFlagsDirectory.clear();
+                }
+                else
+                {
+                    Log(L"[FLAG] Config requested source directory path=%hs\n",
+                        g_ConfigRequestedFlagsDirectory.string().c_str());
+                }
+            }
+
+            const auto flagsDir = ResolveFlagSourceDirectoryPath();
+            g_ActiveFlagsDirectory = flagsDir;
+            if (!flagsDir.empty() && flagsDir != primaryFlagsDir)
+            {
+                Log(L"[FLAG] Using fallback flag source directory path=%hs primary=%hs\n",
+                    flagsDir.string().c_str(),
+                    primaryFlagsDir.string().c_str());
+            }
             for (std::filesystem::directory_iterator it(flagsDir, ec), end;
                  !ec && it != end;
                  it.increment(ec))
@@ -2784,19 +2885,24 @@ namespace BZROpenShim
 
             if (g_FlagCatalog.empty())
             {
-                g_SelectedFlagStatus = "No source images found under the configured flag folders.";
+                if (!g_ConfigRequestedFlagsDirectory.empty())
+                    g_SelectedFlagStatus = "No source images found in the configured flag source directory.";
+                else
+                    g_SelectedFlagStatus = "No source images found under the configured flag folders.";
                 SaveSelectedFlagConfig();
-                Log(L"[FLAG] No flag source files found. Checked primary=%hs active=%hs\n",
+                Log(L"[FLAG] No flag source files found. Checked primary=%hs active=%hs requested=%hs\n",
                     primaryFlagsDir.string().c_str(),
-                    flagsDir.string().c_str());
+                    flagsDir.string().c_str(),
+                    g_ConfigRequestedFlagsDirectory.empty() ? "" : g_ConfigRequestedFlagsDirectory.string().c_str());
                 return;
             }
 
             SaveSelectedFlagConfig();
-            Log(L"[FLAG] Loaded flag catalog path=%hs entries=%u selected=%hs\n",
+            Log(L"[FLAG] Loaded flag catalog path=%hs entries=%u selected=%hs requested=%hs\n",
                 flagsDir.string().c_str(),
                 static_cast<unsigned>(g_FlagCatalog.size()),
-                g_SelectedFlagFileName.c_str());
+                g_SelectedFlagFileName.c_str(),
+                g_ConfigRequestedFlagsDirectory.empty() ? "" : g_ConfigRequestedFlagsDirectory.string().c_str());
         }
 
         static const FlagCatalogEntry* GetSelectedFlagEntry()
@@ -2816,14 +2922,19 @@ namespace BZROpenShim
             if (!entry)
                 return "No flag files found in the configured flag folders. Add PNG/BMP/TGA/JPG images.";
 
+            const std::string sourceDirName =
+                g_ActiveFlagsDirectory.empty()
+                ? std::string("<none>")
+                : g_ActiveFlagsDirectory.filename().string();
             char buffer[512] = {};
             std::snprintf(
                 buffer,
                 sizeof(buffer),
-                "Selected multiplayer vehicle flag: %s (%d/%u). %s",
+                "Selected multiplayer vehicle flag: %s (%d/%u, dir=%s). %s",
                 entry->displayName.c_str(),
                 g_SelectedFlagIndex + 1,
                 static_cast<unsigned>(g_FlagCatalog.size()),
+                sourceDirName.c_str(),
                 g_SelectedFlagStatus.c_str());
             return buffer;
         }
@@ -2840,6 +2951,9 @@ namespace BZROpenShim
             if (g_FlagPayloadReady &&
                 _stricmp(g_GeneratedFlagFileName.c_str(), entry->fileName.c_str()) == 0)
             {
+                Log(L"[FLAG] %hs reused cached generated artifacts source=%hs\n",
+                    source ? source : "flag",
+                    entry->sourcePath.string().c_str());
                 return true;
             }
 
@@ -2847,7 +2961,7 @@ namespace BZROpenShim
             std::string error;
             if (!TryBuildLegacyFlagPayloadFromSource(entry->sourcePath, payload, error))
             {
-                g_SelectedFlagStatus = "Legacy conversion failed.";
+                g_SelectedFlagStatus = "Legacy conversion failed; see log for source-path detail.";
                 Log(L"[FLAG] %hs failed converting source path=%hs error=%hs\n",
                     source ? source : "flag",
                     entry->sourcePath.string().c_str(),
@@ -2858,7 +2972,7 @@ namespace BZROpenShim
             const LegacyFlagArtifactPaths paths = GetLegacyFlagArtifactPaths();
             if (!WriteLegacyFlagBitmap(paths.bmpPath, payload, error))
             {
-                g_SelectedFlagStatus = "Generated payload but BMP write failed.";
+                g_SelectedFlagStatus = "Generated payload but writing the debug BMP failed.";
                 Log(L"[FLAG] %hs failed writing BMP path=%hs error=%hs\n",
                     source ? source : "flag",
                     paths.bmpPath.string().c_str(),
@@ -2868,7 +2982,7 @@ namespace BZROpenShim
 
             if (!WriteLegacyFlagPayloadBin(paths.payloadPath, payload, error))
             {
-                g_SelectedFlagStatus = "Generated BMP but payload write failed.";
+                g_SelectedFlagStatus = "Generated BMP but writing the legacy payload failed.";
                 Log(L"[FLAG] %hs failed writing payload path=%hs error=%hs\n",
                     source ? source : "flag",
                     paths.payloadPath.string().c_str(),
@@ -2880,7 +2994,7 @@ namespace BZROpenShim
             g_GeneratedFlagFileName = entry->fileName;
             g_FlagPayloadReady = true;
             g_FlagApplyPending = true;
-            g_SelectedFlagStatus = "Generated legacy 64x32/1-bpp BMP and 256-byte payload.";
+            g_SelectedFlagStatus = "Generated legacy 64x32/1-bpp BMP and 256-byte payload; upload pending.";
             Log(L"[FLAG] %hs generated legacy artifacts source=%hs bmp=%hs payload=%hs\n",
                 source ? source : "flag",
                 entry->sourcePath.string().c_str(),
@@ -2917,7 +3031,7 @@ namespace BZROpenShim
                 }
                 else
                 {
-                    g_SelectedFlagStatus = "Engine SetMyFlag ran, but the local player flag buffer stayed empty.";
+                    g_SelectedFlagStatus = "Engine SetMyFlag ran, but the local player flag buffer stayed empty; fallback remains pending.";
                     g_FlagApplyPending = true;
                 }
 
@@ -2951,7 +3065,7 @@ namespace BZROpenShim
 
             if (!g_BzrFn_SetMyFlag)
             {
-                g_SelectedFlagStatus = "Engine flag upload helper was not resolved.";
+                g_SelectedFlagStatus = "Engine flag upload helper was not resolved; using legacy fallback if available.";
                 g_FlagApplyPending = true;
                 return false;
             }
@@ -2959,7 +3073,7 @@ namespace BZROpenShim
             const std::string path = entry->sourcePath.string();
             if (path.empty() || path.size() >= kFlagFilePathBufferCapacity)
             {
-                g_SelectedFlagStatus = "Selected flag path is empty or too long for engine upload.";
+                g_SelectedFlagStatus = "Selected flag path is empty or too long for engine upload; using legacy fallback if available.";
                 g_FlagApplyPending = true;
                 return false;
             }
@@ -2977,7 +3091,7 @@ namespace BZROpenShim
                 !g_BzrFn_NetPlayerSetData ||
                 !g_BzrFn_NetPlayerSetFlagBuffer)
             {
-                g_SelectedFlagStatus = "Generated legacy files. Flag apply helpers were not resolved.";
+                g_SelectedFlagStatus = "Generated legacy files, but fallback apply helpers were not resolved.";
                 g_FlagApplyPending = true;
                 return false;
             }
@@ -2987,7 +3101,7 @@ namespace BZROpenShim
                 void* localPlayer = nullptr;
                 if (!TryGetLocalPlayerForFlags(localPlayer))
                 {
-                    g_SelectedFlagStatus = "Generated legacy files. Waiting for a local multiplayer player object.";
+                    g_SelectedFlagStatus = "Generated legacy files; waiting for a local multiplayer player object.";
                     g_FlagApplyPending = true;
                     return false;
                 }
@@ -3013,7 +3127,7 @@ namespace BZROpenShim
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                g_SelectedFlagStatus = "Generated legacy files. Apply raised an exception.";
+                g_SelectedFlagStatus = "Generated legacy files, but fallback apply raised an exception.";
                 g_FlagApplyPending = true;
                 Log(L"[FLAG] %hs apply raised an exception\n", source ? source : "flag");
                 return false;
@@ -3051,7 +3165,10 @@ namespace BZROpenShim
             g_SelectedFlagIndex = index;
             g_SelectedFlagFileName = g_FlagCatalog[static_cast<size_t>(index)].fileName;
             if (_stricmp(previousSelection.c_str(), g_SelectedFlagFileName.c_str()) != 0)
+            {
                 InvalidateFlagPayloadCache();
+                g_SelectedFlagStatus = "Selected new source image; upload pending.";
+            }
             SaveSelectedFlagConfig();
             Log(L"[FLAG] %hs selected index=%d file=%hs path=%hs\n",
                 source ? source : "flag",
@@ -4456,6 +4573,118 @@ namespace BZROpenShim
             }
         }
 
+        void __cdecl CalcRangeCraftHook(void* craft,
+                                        float* closeRange,
+                                        float* range,
+                                        float* time,
+                                        void** weapon)
+        {
+            if (g_BzrFn_CalcRangeCraft)
+                g_BzrFn_CalcRangeCraft(craft, closeRange, range, time, weapon);
+
+            if (!craft || !range)
+                return;
+
+            const float originalRange = *range;
+            AiTuningConfig tuning = {};
+            if (!TryGetAiTuningForObject(craft, tuning))
+                return;
+
+            float minRange = 0.0f;
+            bool hasMinRange = false;
+            if (tuning.hasEngageRangeAI)
+            {
+                minRange = (std::max)(minRange, tuning.engageRangeAI);
+                hasMinRange = true;
+            }
+            if (tuning.hasWeaponRangeMinAI)
+            {
+                minRange = (std::max)(minRange, tuning.weaponRangeMinAI);
+                hasMinRange = true;
+            }
+
+            if (hasMinRange && std::isfinite(*range) && *range < minRange)
+                *range = minRange;
+
+            if (time && (!std::isfinite(*time) || *time <= 0.0f))
+                *time = 1.0f;
+
+            if (tuning.bomberAiRole &&
+                (EnvFlagEnabled("OPENSHIM_TRACE_BOMBER_RANGE") ||
+                 EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE")))
+            {
+                const long remaining = InterlockedDecrement(&g_BomberRangeTraceBudget);
+                if (remaining >= 0)
+                {
+                    char odfToken[kProducerBuildMenuTokenLen + 1] = {};
+                    TryGetObjectOdfToken(craft, odfToken);
+                    Log(L"[BOMBERRANGE] craft=0x%08X odf=%hs original=%.2f final=%.2f min=%.2f engage=%hs%.2f weaponMin=%hs%.2f derived=%hs close=%.2f time=%.2f weapon=0x%08X remaining=%ld\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
+                        odfToken[0] ? odfToken : "-",
+                        originalRange,
+                        *range,
+                        minRange,
+                        tuning.hasEngageRangeAI ? "" : "-",
+                        tuning.engageRangeAI,
+                        tuning.hasWeaponRangeMinAI ? "" : "-",
+                        tuning.weaponRangeMinAI,
+                        tuning.derivedBomberWeaponRangeAI ? "true" : "false",
+                        closeRange ? *closeRange : -1.0f,
+                        time ? *time : -1.0f,
+                        weapon && *weapon ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(*weapon)) : 0u,
+                        remaining);
+                }
+            }
+        }
+
+        static void InstallAiTuningHooksIfPossible()
+        {
+            if (g_CalcRangeCraftHookInstalled)
+                return;
+
+            if (g_CalcRangeCraftDetour.trampoline && g_BzrFn_CalcRangeCraft)
+            {
+                g_CalcRangeCraftHookInstalled = true;
+                return;
+            }
+
+            static const uint8_t kExpectedCalcRangeCraftBytes[kCalcRangeCraftDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C, 0x89, 0x4D
+            };
+
+            if (!ExpectedBytesMatchAt(kGogCalcRangeCraftEntryAddr,
+                                      kExpectedCalcRangeCraftBytes,
+                                      sizeof(kExpectedCalcRangeCraftBytes)))
+            {
+                Log(L"[AIODF] CalcRange(Craft) entry bytes mismatch at 0x%08X; AI ODF range tuning disabled\n",
+                    static_cast<uint32_t>(kGogCalcRangeCraftEntryAddr));
+                return;
+            }
+
+            if (!InstallInlineDetour32(g_CalcRangeCraftDetour,
+                                       kGogCalcRangeCraftEntryAddr,
+                                       reinterpret_cast<void*>(CalcRangeCraftHook),
+                                       kCalcRangeCraftDetourLen,
+                                       kExpectedCalcRangeCraftBytes,
+                                       sizeof(kExpectedCalcRangeCraftBytes)))
+            {
+                Log(L"[AIODF] Failed installing CalcRange(Craft) hook at 0x%08X\n",
+                    static_cast<uint32_t>(kGogCalcRangeCraftEntryAddr));
+                return;
+            }
+
+            g_BzrFn_CalcRangeCraft =
+                reinterpret_cast<FnCalcRangeCraft>(g_CalcRangeCraftDetour.trampoline);
+            g_CalcRangeCraftHookInstalled = (g_BzrFn_CalcRangeCraft != nullptr);
+            if (g_CalcRangeCraftHookInstalled)
+            {
+                Log(L"[AIODF] Installed CalcRange(Craft) hook entry=0x%08X trampoline=0x%08X\n",
+                    static_cast<uint32_t>(kGogCalcRangeCraftEntryAddr),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CalcRangeCraftDetour.trampoline)));
+            }
+        }
+
         static void EnsureEngineFlameVtableHooksInstalled(void* manager)
         {
             if (!g_IsSteamExe || g_EngineFlameVtableHooksInstalled || !manager)
@@ -5472,6 +5701,688 @@ namespace BZROpenShim
             return NormalizeProducerBuildMenuToken(buffer);
         }
 
+        static bool IsProducerBuildMenuReservedKey(const char* key)
+        {
+            if (!key || !*key)
+                return true;
+
+            return _stricmp(key, "Enabled") == 0 ||
+                _stricmp(key, "Recycler") == 0 ||
+                _stricmp(key, "Factory") == 0 ||
+                _stricmp(key, "Armory") == 0 ||
+                _stricmp(key, "ConstructionRig") == 0 ||
+                _stricmp(key, "Constructor") == 0 ||
+                _stricmp(key, "Default") == 0 ||
+                _stricmp(key, "Fallback") == 0;
+        }
+
+        static void LoadProducerBuildMenuOdfOverrides(const std::filesystem::path& configPath)
+        {
+            g_ProducerBuildMenuConfig.odfOverrides.clear();
+
+            FILE* file = nullptr;
+            if (fopen_s(&file, configPath.string().c_str(), "r") != 0 || !file)
+                return;
+
+            char line[256] = {};
+            bool inTargetSection = false;
+            while (std::fgets(line, static_cast<int>(sizeof(line)), file))
+            {
+                char* trimmed = TrimAsciiInPlace(line);
+                if (*trimmed == '\0' || *trimmed == ';' || *trimmed == '#')
+                    continue;
+
+                if (*trimmed == '[')
+                {
+                    char* closing = std::strchr(trimmed, ']');
+                    if (!closing)
+                        continue;
+
+                    *closing = '\0';
+                    inTargetSection = (_stricmp(trimmed + 1, kProducerBuildMenuSection) == 0);
+                    continue;
+                }
+
+                if (!inTargetSection)
+                    continue;
+
+                char* equals = std::strchr(trimmed, '=');
+                if (!equals)
+                    continue;
+
+                *equals = '\0';
+                char* key = TrimAsciiInPlace(trimmed);
+                char* value = TrimAsciiInPlace(equals + 1);
+                if (!key || !*key || !value || !*value)
+                    continue;
+                if (IsProducerBuildMenuReservedKey(key))
+                    continue;
+
+                const ProducerBuildMenuEntry keyEntry = NormalizeProducerBuildMenuToken(key);
+                const ProducerBuildMenuEntry valueEntry = NormalizeProducerBuildMenuToken(value);
+                if (!keyEntry.hasValue || !valueEntry.hasValue)
+                    continue;
+
+                g_ProducerBuildMenuConfig.odfOverrides[keyEntry.token] = valueEntry;
+            }
+
+            std::fclose(file);
+        }
+
+        static ProducerBuildMenuEntry TryGetProducerBuildMenuEntryForOdf(const char* producerOdf)
+        {
+            ProducerBuildMenuEntry entry = {};
+            const ProducerBuildMenuEntry key = NormalizeProducerBuildMenuToken(producerOdf);
+            if (!key.hasValue)
+                return entry;
+
+            const auto it = g_ProducerBuildMenuConfig.odfOverrides.find(key.token);
+            if (it != g_ProducerBuildMenuConfig.odfOverrides.end())
+                return it->second;
+
+            return entry;
+        }
+
+        static std::vector<std::filesystem::path> GetProducerOdfDirectoryCandidates()
+        {
+            std::vector<std::filesystem::path> candidates;
+
+            const auto moduleDir = GetMainModuleDirectory();
+            if (moduleDir.empty())
+                return candidates;
+
+            candidates.push_back(moduleDir / "addon" / "campaignReimagined" / "ODF");
+            candidates.push_back(moduleDir / "addon" / "campaignReimagined" / "_Release" / "ODF");
+            candidates.push_back(moduleDir / "addon" / "campaignReimagined" / "_Source" / "ODF");
+            candidates.push_back(moduleDir / "Edit" / "stock");
+            return candidates;
+        }
+
+        static bool TryParseFloatValue(const char* value, float& out)
+        {
+            if (!value || !*value)
+                return false;
+
+            char* end = nullptr;
+            const float parsed = std::strtof(value, &end);
+            if (end == value)
+                return false;
+
+            while (end && *end && std::isspace(static_cast<unsigned char>(*end)))
+                ++end;
+
+            if (end && *end == 'f' && end[1] == '\0')
+                ++end;
+
+            if (end && *end != '\0')
+                return false;
+
+            out = parsed;
+            return std::isfinite(out);
+        }
+
+        static bool TryParseBoolValue(const char* value, bool& out)
+        {
+            if (!value)
+                return false;
+
+            char normalized[16] = {};
+            size_t i = 0;
+            for (const char* p = value; *p && i + 1 < sizeof(normalized); ++p)
+            {
+                if (std::isspace(static_cast<unsigned char>(*p)))
+                    continue;
+
+                normalized[i++] = static_cast<char>(
+                    std::tolower(static_cast<unsigned char>(*p)));
+            }
+            normalized[i] = '\0';
+
+            if (strcmp(normalized, "1") == 0 ||
+                strcmp(normalized, "true") == 0 ||
+                strcmp(normalized, "yes") == 0 ||
+                strcmp(normalized, "on") == 0)
+            {
+                out = true;
+                return true;
+            }
+
+            if (strcmp(normalized, "0") == 0 ||
+                strcmp(normalized, "false") == 0 ||
+                strcmp(normalized, "no") == 0 ||
+                strcmp(normalized, "off") == 0)
+            {
+                out = false;
+                return true;
+            }
+
+            return false;
+        }
+
+        static bool TryGetObjectOdfToken(void* objectPtr, char (&outToken)[kProducerBuildMenuTokenLen + 1])
+        {
+            outToken[0] = '\0';
+            if (!objectPtr)
+                return false;
+
+            __try
+            {
+                void* objectClass = ReadValueAtOffset<void*>(objectPtr, kGameObjectClassOffset);
+                if (!objectClass)
+                    return false;
+
+                char rawOdf[kObjectClassOdfLen + 1] = {};
+                std::memcpy(rawOdf,
+                            reinterpret_cast<const uint8_t*>(objectClass) + kObjectClassOdfOffset,
+                            kObjectClassOdfLen);
+                rawOdf[kObjectClassOdfLen] = '\0';
+
+                const ProducerBuildMenuEntry entry = NormalizeProducerBuildMenuToken(rawOdf);
+                if (!entry.hasValue)
+                    return false;
+
+                strncpy_s(outToken, entry.token, _TRUNCATE);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outToken[0] = '\0';
+                return false;
+            }
+        }
+
+        static bool TryNormalizeQuotedStringValue(const char* value,
+                                                  char* out,
+                                                  size_t outSize)
+        {
+            if (!value || !out || outSize == 0)
+                return false;
+
+            out[0] = '\0';
+
+            const char* start = value;
+            while (*start && std::isspace(static_cast<unsigned char>(*start)))
+                ++start;
+
+            const char* end = start + std::strlen(start);
+            while (end > start && std::isspace(static_cast<unsigned char>(end[-1])))
+                --end;
+
+            if (end <= start)
+                return false;
+
+            if ((*start == '"' || *start == '\'') && end > start + 1 && end[-1] == *start)
+            {
+                ++start;
+                --end;
+            }
+
+            size_t outIndex = 0;
+            while (start < end && outIndex + 1 < outSize)
+            {
+                out[outIndex++] = static_cast<char>(
+                    std::tolower(static_cast<unsigned char>(*start++)));
+            }
+            out[outIndex] = '\0';
+
+            return outIndex > 0;
+        }
+
+        static ProducerBuildMenuEntry NormalizeQuotedOdfToken(const char* value)
+        {
+            char normalized[64] = {};
+            if (!TryNormalizeQuotedStringValue(value, normalized, sizeof(normalized)))
+                return {};
+
+            return NormalizeProducerBuildMenuToken(normalized);
+        }
+
+        static bool TryResolveOdfFilePath(const char* odfToken, std::filesystem::path& outPath)
+        {
+            outPath.clear();
+
+            const ProducerBuildMenuEntry odfKey = NormalizeQuotedOdfToken(odfToken);
+            if (!odfKey.hasValue)
+                return false;
+
+            const auto directories = GetProducerOdfDirectoryCandidates();
+            for (const auto& directory : directories)
+            {
+                std::error_code error;
+                const auto mpPath = directory / (std::string(odfKey.token) + "_mp.odf");
+                if (std::filesystem::exists(mpPath, error) && !error)
+                {
+                    outPath = mpPath;
+                    return true;
+                }
+
+                error.clear();
+                const auto normalPath = directory / (std::string(odfKey.token) + ".odf");
+                if (std::filesystem::exists(normalPath, error) && !error)
+                {
+                    outPath = normalPath;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        static bool TryReadOrdnanceRangeFromOdfFile(const char* ordnanceToken, float& outRange)
+        {
+            outRange = 0.0f;
+
+            std::filesystem::path resolvedPath;
+            if (!TryResolveOdfFilePath(ordnanceToken, resolvedPath))
+                return false;
+
+            FILE* file = nullptr;
+            if (fopen_s(&file, resolvedPath.string().c_str(), "r") != 0 || !file)
+                return false;
+
+            float shotSpeed = 0.0f;
+            float lifeSpan = 0.0f;
+            bool haveShotSpeed = false;
+            bool haveLifeSpan = false;
+            char line[256] = {};
+            while (std::fgets(line, static_cast<int>(sizeof(line)), file))
+            {
+                char* trimmed = TrimAsciiInPlace(line);
+                if (*trimmed == '\0' || *trimmed == ';' || *trimmed == '#')
+                    continue;
+
+                if (*trimmed == '[')
+                    continue;
+
+                char* equals = std::strchr(trimmed, '=');
+                if (!equals)
+                    continue;
+
+                *equals = '\0';
+                char* key = TrimAsciiInPlace(trimmed);
+                char* value = TrimAsciiInPlace(equals + 1);
+                if (!key || !*key || !value || !*value)
+                    continue;
+
+                float parsedFloat = 0.0f;
+                if (_stricmp(key, "shotSpeed") == 0 && TryParseFloatValue(value, parsedFloat))
+                {
+                    shotSpeed = parsedFloat;
+                    haveShotSpeed = true;
+                }
+                else if (_stricmp(key, "lifeSpan") == 0 && TryParseFloatValue(value, parsedFloat))
+                {
+                    lifeSpan = parsedFloat;
+                    haveLifeSpan = true;
+                }
+            }
+
+            std::fclose(file);
+
+            if (!haveShotSpeed || !haveLifeSpan || shotSpeed <= 0.0f || lifeSpan <= 0.0f)
+                return false;
+
+            outRange = (std::max)(shotSpeed * lifeSpan - 1.0f, 0.0f);
+            return std::isfinite(outRange) && outRange > 0.0f;
+        }
+
+        static bool TryReadWeaponRangeFromOdfFile(const char* weaponToken, float& outRange)
+        {
+            outRange = 0.0f;
+
+            std::filesystem::path resolvedPath;
+            if (!TryResolveOdfFilePath(weaponToken, resolvedPath))
+                return false;
+
+            FILE* file = nullptr;
+            if (fopen_s(&file, resolvedPath.string().c_str(), "r") != 0 || !file)
+                return false;
+
+            ProducerBuildMenuEntry ordnanceToken = {};
+            char line[256] = {};
+            while (std::fgets(line, static_cast<int>(sizeof(line)), file))
+            {
+                char* trimmed = TrimAsciiInPlace(line);
+                if (*trimmed == '\0' || *trimmed == ';' || *trimmed == '#')
+                    continue;
+
+                if (*trimmed == '[')
+                    continue;
+
+                char* equals = std::strchr(trimmed, '=');
+                if (!equals)
+                    continue;
+
+                *equals = '\0';
+                char* key = TrimAsciiInPlace(trimmed);
+                char* value = TrimAsciiInPlace(equals + 1);
+                if (!key || !*key || !value || !*value)
+                    continue;
+
+                if (_stricmp(key, "ordName") == 0)
+                {
+                    ordnanceToken = NormalizeQuotedOdfToken(value);
+                    break;
+                }
+            }
+
+            std::fclose(file);
+
+            if (!ordnanceToken.hasValue)
+                return false;
+
+            return TryReadOrdnanceRangeFromOdfFile(ordnanceToken.token, outRange);
+        }
+
+        static bool TryReadAiTuningFromOdfFile(const char* odfToken, AiTuningConfig& outConfig)
+        {
+            outConfig = {};
+
+            std::filesystem::path resolvedPath;
+            if (!TryResolveOdfFilePath(odfToken, resolvedPath))
+                return false;
+
+            const ProducerBuildMenuEntry odfKey = NormalizeQuotedOdfToken(odfToken);
+            if (!odfKey.hasValue)
+                return false;
+
+            FILE* file = nullptr;
+            if (fopen_s(&file, resolvedPath.string().c_str(), "r") != 0 || !file)
+                return false;
+
+            bool foundAny = false;
+            bool bomberAiRole = false;
+            ProducerBuildMenuEntry weaponTokens[5] = {};
+            char line[256] = {};
+            while (std::fgets(line, static_cast<int>(sizeof(line)), file))
+            {
+                char* trimmed = TrimAsciiInPlace(line);
+                if (*trimmed == '\0' || *trimmed == ';' || *trimmed == '#')
+                    continue;
+
+                if (*trimmed == '[')
+                    continue;
+
+                char* equals = std::strchr(trimmed, '=');
+                if (!equals)
+                    continue;
+
+                *equals = '\0';
+                char* key = TrimAsciiInPlace(trimmed);
+                char* value = TrimAsciiInPlace(equals + 1);
+                if (!key || !*key || !value || !*value)
+                    continue;
+
+                float parsedFloat = 0.0f;
+                bool parsedBool = false;
+
+                if (_stricmp(key, "engageRangeAI") == 0 && TryParseFloatValue(value, parsedFloat))
+                {
+                    outConfig.hasEngageRangeAI = true;
+                    outConfig.engageRangeAI = parsedFloat;
+                    foundAny = true;
+                }
+                else if (_stricmp(key, "weaponRangeMinAI") == 0 && TryParseFloatValue(value, parsedFloat))
+                {
+                    outConfig.hasWeaponRangeMinAI = true;
+                    outConfig.weaponRangeMinAI = parsedFloat;
+                    foundAny = true;
+                }
+                else if (_stricmp(key, "retargetPeriodAI") == 0 && TryParseFloatValue(value, parsedFloat))
+                {
+                    outConfig.hasRetargetPeriodAI = true;
+                    outConfig.retargetPeriodAI = parsedFloat;
+                    foundAny = true;
+                }
+                else if (_stricmp(key, "stuckCheckPeriodAI") == 0 && TryParseFloatValue(value, parsedFloat))
+                {
+                    outConfig.hasStuckCheckPeriodAI = true;
+                    outConfig.stuckCheckPeriodAI = parsedFloat;
+                    foundAny = true;
+                }
+                else if (_stricmp(key, "stuckReverseTimeAI") == 0 && TryParseFloatValue(value, parsedFloat))
+                {
+                    outConfig.hasStuckReverseTimeAI = true;
+                    outConfig.stuckReverseTimeAI = parsedFloat;
+                    foundAny = true;
+                }
+                else if (_stricmp(key, "stuckStrafeTimeAI") == 0 && TryParseFloatValue(value, parsedFloat))
+                {
+                    outConfig.hasStuckStrafeTimeAI = true;
+                    outConfig.stuckStrafeTimeAI = parsedFloat;
+                    foundAny = true;
+                }
+                else if (_stricmp(key, "scrapPathingAI") == 0 && TryParseBoolValue(value, parsedBool))
+                {
+                    outConfig.hasScrapPathingAI = true;
+                    outConfig.scrapPathingAI = parsedBool;
+                    foundAny = true;
+                }
+                else if (_stricmp(key, "scrapPathLengthWeightAI") == 0 && TryParseFloatValue(value, parsedFloat))
+                {
+                    outConfig.hasScrapPathLengthWeightAI = true;
+                    outConfig.scrapPathLengthWeightAI = parsedFloat;
+                    foundAny = true;
+                }
+                else if (_stricmp(key, "scrapStraightDistanceWeightAI") == 0 && TryParseFloatValue(value, parsedFloat))
+                {
+                    outConfig.hasScrapStraightDistanceWeightAI = true;
+                    outConfig.scrapStraightDistanceWeightAI = parsedFloat;
+                    foundAny = true;
+                }
+                else if (_stricmp(key, "scrapPathFailPenaltyAI") == 0 && TryParseFloatValue(value, parsedFloat))
+                {
+                    outConfig.hasScrapPathFailPenaltyAI = true;
+                    outConfig.scrapPathFailPenaltyAI = parsedFloat;
+                    foundAny = true;
+                }
+                else if (_stricmp(key, "scrapHardToGetCooldownAI") == 0 && TryParseFloatValue(value, parsedFloat))
+                {
+                    outConfig.hasScrapHardToGetCooldownAI = true;
+                    outConfig.scrapHardToGetCooldownAI = parsedFloat;
+                    foundAny = true;
+                }
+                else if (_stricmp(key, "scrapSearchRadiusAI") == 0 && TryParseFloatValue(value, parsedFloat))
+                {
+                    outConfig.hasScrapSearchRadiusAI = true;
+                    outConfig.scrapSearchRadiusAI = parsedFloat;
+                    foundAny = true;
+                }
+                else if (_stricmp(key, "aiName") == 0 || _stricmp(key, "aiName2") == 0)
+                {
+                    char normalizedAiName[64] = {};
+                    if (TryNormalizeQuotedStringValue(value, normalizedAiName, sizeof(normalizedAiName)))
+                    {
+                        if (strcmp(normalizedAiName, "bomberfriend") == 0 ||
+                            strcmp(normalizedAiName, "bomberenemy") == 0)
+                        {
+                            bomberAiRole = true;
+                            outConfig.bomberAiRole = true;
+                        }
+                    }
+                }
+                else if (_strnicmp(key, "weaponName", 10) == 0 &&
+                         std::isdigit(static_cast<unsigned char>(key[10])) &&
+                         key[11] == '\0')
+                {
+                    const int index = key[10] - '1';
+                    if (index >= 0 && index < 5)
+                        weaponTokens[index] = NormalizeQuotedOdfToken(value);
+                }
+            }
+
+            std::fclose(file);
+
+            if (bomberAiRole && !outConfig.hasEngageRangeAI && !outConfig.hasWeaponRangeMinAI)
+            {
+                float derivedRange = 0.0f;
+                bool haveDerivedRange = false;
+                for (const auto& weaponToken : weaponTokens)
+                {
+                    if (!weaponToken.hasValue)
+                        continue;
+
+                    float weaponRange = 0.0f;
+                    if (!TryReadWeaponRangeFromOdfFile(weaponToken.token, weaponRange))
+                        continue;
+
+                    if (!haveDerivedRange || weaponRange > derivedRange)
+                    {
+                        derivedRange = weaponRange;
+                        haveDerivedRange = true;
+                    }
+                }
+
+                if (haveDerivedRange)
+                {
+                    outConfig.hasWeaponRangeMinAI = true;
+                    outConfig.weaponRangeMinAI = derivedRange;
+                    outConfig.derivedBomberWeaponRangeAI = true;
+                    foundAny = true;
+                }
+            }
+
+            if (foundAny)
+            {
+                outConfig.parsed = true;
+                Log(L"[AIODF] Loaded tuning odf=%hs engage=%hs%.2f weaponMin=%hs%.2f bomberDerived=%hs scrapPathing=%hs pathWeight=%hs%.3f straightWeight=%hs%.3f file=%hs\n",
+                    odfKey.token,
+                    outConfig.hasEngageRangeAI ? "" : "-",
+                    outConfig.engageRangeAI,
+                    outConfig.hasWeaponRangeMinAI ? "" : "-",
+                    outConfig.weaponRangeMinAI,
+                    outConfig.derivedBomberWeaponRangeAI ? "true" : "false",
+                    outConfig.scrapPathingAI ? "true" : "false",
+                    outConfig.hasScrapPathLengthWeightAI ? "" : "-",
+                    outConfig.scrapPathLengthWeightAI,
+                    outConfig.hasScrapStraightDistanceWeightAI ? "" : "-",
+                    outConfig.scrapStraightDistanceWeightAI,
+                    resolvedPath.string().c_str());
+            }
+
+            return foundAny;
+        }
+
+        static bool TryGetAiTuningForObject(void* objectPtr, AiTuningConfig& outConfig)
+        {
+            outConfig = {};
+
+            char odfToken[kProducerBuildMenuTokenLen + 1] = {};
+            if (!TryGetObjectOdfToken(objectPtr, odfToken))
+                return false;
+
+            const auto cached = g_AiTuningCache.odfEntries.find(odfToken);
+            if (cached != g_AiTuningCache.odfEntries.end())
+            {
+                outConfig = cached->second;
+                return outConfig.parsed;
+            }
+
+            AiTuningConfig loaded = {};
+            TryReadAiTuningFromOdfFile(odfToken, loaded);
+            g_AiTuningCache.odfEntries[odfToken] = loaded;
+            outConfig = loaded;
+            return outConfig.parsed;
+        }
+
+        static ProducerBuildMenuEntry TryReadProducerBuildMenuEntryFromOdfFile(const char* producerOdf)
+        {
+            ProducerBuildMenuEntry result = {};
+            const ProducerBuildMenuEntry producerKey = NormalizeProducerBuildMenuToken(producerOdf);
+            if (!producerKey.hasValue)
+                return result;
+
+            const auto cached = g_ProducerBuildMenuConfig.odfFileEntries.find(producerKey.token);
+            if (cached != g_ProducerBuildMenuConfig.odfFileEntries.end())
+                return cached->second;
+
+            const auto directories = GetProducerOdfDirectoryCandidates();
+            std::filesystem::path resolvedPath;
+            for (const auto& directory : directories)
+            {
+                std::error_code error;
+                const auto mpPath = directory / (std::string(producerKey.token) + "_mp.odf");
+                if (std::filesystem::exists(mpPath, error) && !error)
+                {
+                    resolvedPath = mpPath;
+                    break;
+                }
+
+                error.clear();
+                const auto normalPath = directory / (std::string(producerKey.token) + ".odf");
+                if (std::filesystem::exists(normalPath, error) && !error)
+                {
+                    resolvedPath = normalPath;
+                    break;
+                }
+            }
+
+            if (!resolvedPath.empty())
+            {
+                FILE* file = nullptr;
+                if (fopen_s(&file, resolvedPath.string().c_str(), "r") == 0 && file)
+                {
+                    char line[256] = {};
+                    bool inProducerSection = false;
+                    while (std::fgets(line, static_cast<int>(sizeof(line)), file))
+                    {
+                        char* trimmed = TrimAsciiInPlace(line);
+                        if (*trimmed == '\0' || *trimmed == ';' || *trimmed == '#')
+                            continue;
+
+                        if (*trimmed == '[')
+                        {
+                            char* closing = std::strchr(trimmed, ']');
+                            if (!closing)
+                                continue;
+
+                            *closing = '\0';
+                            inProducerSection = (_stricmp(trimmed + 1, "ProducerClass") == 0);
+                            continue;
+                        }
+
+                        if (!inProducerSection)
+                            continue;
+
+                        char* equals = std::strchr(trimmed, '=');
+                        if (!equals)
+                            continue;
+
+                        *equals = '\0';
+                        char* key = TrimAsciiInPlace(trimmed);
+                        char* value = TrimAsciiInPlace(equals + 1);
+                        if (!key || !*key || !value || !*value)
+                            continue;
+
+                        if (_stricmp(key, "buildMenuRoot") == 0 ||
+                            _stricmp(key, "buildMenu") == 0)
+                        {
+                            result = NormalizeProducerBuildMenuToken(value);
+                            break;
+                        }
+                    }
+
+                    std::fclose(file);
+
+                    if (result.hasValue)
+                    {
+                        Log(L"[PRODMENU] ODF root producer=%hs root=%hs path=%hs\n",
+                            producerKey.token,
+                            result.token,
+                            resolvedPath.string().c_str());
+                    }
+                }
+            }
+
+            g_ProducerBuildMenuConfig.odfFileEntries[producerKey.token] = result;
+            return result;
+        }
+
+        static bool TryGetProducerOdfToken(void* producerPtr, char (&outToken)[kProducerBuildMenuTokenLen + 1])
+        {
+            return TryGetObjectOdfToken(producerPtr, outToken);
+        }
+
         static void LoadProducerBuildMenuConfig()
         {
             if (g_ProducerBuildMenuConfig.initialized)
@@ -5516,29 +6427,50 @@ namespace BZROpenShim
             g_ProducerBuildMenuConfig.factory = ReadProducerBuildMenuEntry("Factory");
             g_ProducerBuildMenuConfig.armory = ReadProducerBuildMenuEntry("Armory");
             g_ProducerBuildMenuConfig.constructionRig = ReadProducerBuildMenuEntry("ConstructionRig");
+            ProducerBuildMenuEntry fallbackEntry = ReadProducerBuildMenuEntry("Fallback");
+            if (!fallbackEntry.hasValue)
+                fallbackEntry = ReadProducerBuildMenuEntry("Default");
+            if (fallbackEntry.hasValue)
+                g_ProducerBuildMenuConfig.fallbackRoot = fallbackEntry;
             if (!g_ProducerBuildMenuConfig.constructionRig.hasValue)
             {
                 g_ProducerBuildMenuConfig.constructionRig = ReadProducerBuildMenuEntry("Constructor");
             }
+            LoadProducerBuildMenuOdfOverrides(configPath);
 
             const bool hasAnyEntry =
+                !g_ProducerBuildMenuConfig.odfOverrides.empty() ||
                 g_ProducerBuildMenuConfig.recycler.hasValue ||
                 g_ProducerBuildMenuConfig.factory.hasValue ||
                 g_ProducerBuildMenuConfig.armory.hasValue ||
                 g_ProducerBuildMenuConfig.constructionRig.hasValue;
             g_ProducerBuildMenuConfig.enabled = IsIniBoolTrue(enabledBuffer, true) && hasAnyEntry;
 
-            Log(L"[PRODMENU] Config %hs loaded enabled=%hs recycler=%hs factory=%hs armory=%hs constrig=%hs\n",
+            Log(L"[PRODMENU] Config %hs loaded enabled=%hs fallback=%hs recycler=%hs factory=%hs armory=%hs constrig=%hs odfOverrides=%u\n",
                 configPathString.c_str(),
                 g_ProducerBuildMenuConfig.enabled ? "true" : "false",
+                g_ProducerBuildMenuConfig.fallbackRoot.hasValue ? g_ProducerBuildMenuConfig.fallbackRoot.token : "-",
                 g_ProducerBuildMenuConfig.recycler.hasValue ? g_ProducerBuildMenuConfig.recycler.token : "-",
                 g_ProducerBuildMenuConfig.factory.hasValue ? g_ProducerBuildMenuConfig.factory.token : "-",
                 g_ProducerBuildMenuConfig.armory.hasValue ? g_ProducerBuildMenuConfig.armory.token : "-",
-                g_ProducerBuildMenuConfig.constructionRig.hasValue ? g_ProducerBuildMenuConfig.constructionRig.token : "-");
+                g_ProducerBuildMenuConfig.constructionRig.hasValue ? g_ProducerBuildMenuConfig.constructionRig.token : "-",
+                static_cast<unsigned>(g_ProducerBuildMenuConfig.odfOverrides.size()));
         }
 
-        static const ProducerBuildMenuEntry& SelectProducerBuildMenuEntry(ProducerBuildMenuKind kind)
+        static ProducerBuildMenuEntry SelectProducerBuildMenuEntry(void* producerPtr, ProducerBuildMenuKind kind)
         {
+            char producerOdf[kProducerBuildMenuTokenLen + 1] = {};
+            if (TryGetProducerOdfToken(producerPtr, producerOdf))
+            {
+                ProducerBuildMenuEntry odfFileEntry = TryReadProducerBuildMenuEntryFromOdfFile(producerOdf);
+                if (odfFileEntry.hasValue)
+                    return odfFileEntry;
+
+                ProducerBuildMenuEntry odfEntry = TryGetProducerBuildMenuEntryForOdf(producerOdf);
+                if (odfEntry.hasValue)
+                    return odfEntry;
+            }
+
             switch (kind)
             {
             case ProducerBuildMenuKind::Recycler:
@@ -5574,7 +6506,7 @@ namespace BZROpenShim
                 return;
 
             const ProducerBuildMenuKind kind = ClassifyProducerBuildMenuKind(producerPtr);
-            const auto& entry = SelectProducerBuildMenuEntry(kind);
+            const ProducerBuildMenuEntry entry = SelectProducerBuildMenuEntry(producerPtr, kind);
             if (!entry.hasValue)
                 return;
 
@@ -5583,17 +6515,22 @@ namespace BZROpenShim
 
             __try
             {
+                char producerOdf[kProducerBuildMenuTokenLen + 1] = {};
+                TryGetProducerOdfToken(producerPtr, producerOdf);
                 g_BzrFn_CleanupBuildItem(*g_BzrBuildMenuRoot);
                 g_BzrFn_InitBuildItem(*g_BzrBuildMenuRoot, entry.packedToken);
                 g_HasAppliedProducerBuildMenu = true;
                 g_LastAppliedProducerBuildMenu = entry.packedToken;
-                Log(L"[PRODMENU] Applied %hs root=%hs producer=0x%08X\n",
+                Log(L"[PRODMENU] Applied %hs root=%hs producer=0x%08X odf=%hs\n",
                     ProducerBuildMenuKindName(kind),
                     entry.token,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(producerPtr)));
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(producerPtr)),
+                    producerOdf[0] ? producerOdf : "-");
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
+                char producerOdf[kProducerBuildMenuTokenLen + 1] = {};
+                TryGetProducerOdfToken(producerPtr, producerOdf);
                 Log(L"[PRODMENU] Failed applying root=%hs producer=0x%08X\n",
                     entry.token,
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(producerPtr)));
@@ -5887,9 +6824,12 @@ namespace BZROpenShim
         g_LastOptionsInputScreen = nullptr;
         g_JumpSnipeProbeLogState = {};
         g_ProducerBuildMenuConfig = {};
+        g_AiTuningCache = {};
         g_HasAppliedProducerBuildMenu = false;
         g_LastAppliedProducerBuildMenu = 0;
         g_LastUnknownProducerVft = 0;
+        g_CalcRangeCraftHookInstalled = false;
+        g_BzrFn_CalcRangeCraft = nullptr;
 
         g_BzrPtr_945478 = reinterpret_cast<void**>(0x00945478);
         g_BzrPtr_94548C = reinterpret_cast<void**>(0x0094548C);
@@ -6136,6 +7076,7 @@ namespace BZROpenShim
     void RetryDeferredRuntimeHooks()
     {
         InstallJumpSnipingProbeIfRequested();
+        InstallAiTuningHooksIfPossible();
         EnsureInputBindingPopulateHookScaffold();
     }
 

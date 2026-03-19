@@ -20,6 +20,7 @@
 #include "scroll_helper.h"
 #include "trampolines.h"
 #include "d3d_startup_hooks.h"
+#include "file_io_hooks.h"
 #include "bzr_hooks.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -2096,6 +2097,8 @@ namespace BZROpenShim
         {
             Log(L"[INFO] D3D startup hooks disabled by default\n");
         }
+
+        ApplyTrnSaveNormalizeHooks();
 
         // 2. Check BZR.exe version
         uint32_t gameVer = GetBZRVersion();
