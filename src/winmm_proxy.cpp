@@ -21,6 +21,26 @@ extern "C" WINMMAPI BOOL WINAPI OpenShimSetTargetReticlePopupMode(int mode)
     return BZROpenShim::SetTargetReticlePopupModeFromBridge(mode) ? TRUE : FALSE;
 }
 
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetHudSpriteRect(LPCSTR name, int x, int y, int w, int h)
+{
+    return BZROpenShim::SetHudSpriteRectFromBridge(name, x, y, w, h) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetHudSpriteVisible(LPCSTR name, BOOL visible)
+{
+    return BZROpenShim::SetHudSpriteVisibleFromBridge(name, visible != FALSE) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimRestoreHudSprite(LPCSTR name)
+{
+    return BZROpenShim::RestoreHudSpriteFromBridge(name) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimRestoreAllHudSprites()
+{
+    return BZROpenShim::RestoreAllHudSpritesFromBridge() ? TRUE : FALSE;
+}
+
 // Legacy thunk exports that need naked tail-jump forwarders.
 #define LEGACY_NAKED_EXPORTS(X) \
     X(WOW32DriverCallback) \

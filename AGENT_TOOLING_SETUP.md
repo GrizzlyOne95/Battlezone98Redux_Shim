@@ -58,8 +58,8 @@ That script installs the free packages it can acquire automatically:
   - `qiling`
   - `ghidriff`
 
-It also writes stable `bzr-*` wrappers into `%USERPROFILE%\bin` and updates
-`%USERPROFILE%\.codex\config.toml`.
+It also writes stable `bzr-*` wrappers into `%USERPROFILE%\bin`, adds that
+directory to the user `PATH`, and updates `%USERPROFILE%\.codex\config.toml`.
 
 ## Paths That Commonly Vary By PC
 
@@ -202,9 +202,9 @@ bzr-qiling.cmd version
 bzr-rizin.cmd -v
 bzr-rz-bin.cmd -h
 bzr-cdb32.cmd -version
-bzr-diec.cmd "%USERPROFILE%\Documents\Battlezone 98 Redux\battlezone98redux.exe"
-bzr-procmon.cmd /AcceptEula /Quiet /Minimized /Terminate
+bzr-diec.cmd $env:BZR_GAME_EXE
+Get-Command bzr-procmon.cmd
 ```
 
-If `Ghidra` is installed and the game path is correct, the MCP wrapper should
-be ready for Codex and CLI use immediately.
+If `Ghidra` is installed and `BZR_GAME_EXE` points at a valid executable, the
+MCP wrapper should be ready for Codex and CLI use immediately.
