@@ -98,14 +98,23 @@ namespace BZROpenShim
         return s_cached != 0;
     }
 
-    static bool ShouldAllowStartupAutoLoad()
+    static bool ShouldSuppressStartupAutoLoad()
     {
         static int s_cached = -1;
         if (s_cached < 0)
         {
             char value[8] = {};
-            const DWORD len = GetEnvironmentVariableA("OPENSHIM_ALLOW_STARTUP_AUTOLOAD", value, static_cast<DWORD>(sizeof(value)));
-            s_cached = (len > 0 && len < sizeof(value) && value[0] != '0') ? 1 : 0;
+            const DWORD allowLen = GetEnvironmentVariableA("OPENSHIM_ALLOW_STARTUP_AUTOLOAD", value, static_cast<DWORD>(sizeof(value)));
+            if (allowLen > 0 && allowLen < sizeof(value) && value[0] != '0')
+            {
+                s_cached = 0;
+            }
+            else
+            {
+                std::memset(value, 0, sizeof(value));
+                const DWORD suppressLen = GetEnvironmentVariableA("OPENSHIM_SUPPRESS_STARTUP_AUTOLOAD", value, static_cast<DWORD>(sizeof(value)));
+                s_cached = (suppressLen > 0 && suppressLen < sizeof(value) && value[0] != '0') ? 1 : 0;
+            }
         }
         return s_cached != 0;
     }
@@ -271,9 +280,9 @@ namespace BZROpenShim
     {
         constexpr uintptr_t kStartupShellAutoLoadFlagAddr = 0x008EAAA8;
 
-        if (ShouldAllowStartupAutoLoad())
+        if (!ShouldSuppressStartupAutoLoad())
         {
-            Log(L"[INFO] Startup shell autoload left enabled via OPENSHIM_ALLOW_STARTUP_AUTOLOAD\n");
+            Log(L"[INFO] Startup shell autoload gate preserved (default; set OPENSHIM_SUPPRESS_STARTUP_AUTOLOAD=1 to force-disable)\n");
             return;
         }
 

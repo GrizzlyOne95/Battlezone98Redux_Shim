@@ -41,6 +41,10 @@ namespace BZROpenShim
     void __cdecl RevealProcessOwnerPerceivedTeamOnAttackStateEntry(void* processPtr);
     void PrimeTargetReticlePopupConfig();
     bool SetTargetReticlePopupModeFromBridge(int mode);
+    bool SetHudSpriteRectFromBridge(const char* name, int x, int y, int w, int h);
+    bool SetHudSpriteVisibleFromBridge(const char* name, bool visible);
+    bool RestoreHudSpriteFromBridge(const char* name);
+    bool RestoreAllHudSpritesFromBridge();
 
     // Custom /help + /ban command intercept.
     bool __cdecl HandleCommandHelpBan(uint16_t id, const char* cmd);

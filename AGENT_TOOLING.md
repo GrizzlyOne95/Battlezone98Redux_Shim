@@ -3,19 +3,21 @@
 This file is the local reverse-engineering and agent-tooling inventory for the
 Battlezone workspace on this machine.
 
-Use this together with [AGENTS.md](/c:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/AGENTS.md).
+Use this together with [AGENTS.md](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/AGENTS.md).
 
 ## Default Targets
 
-- Primary local game install: `%USERPROFILE%\Documents\Battlezone 98 Redux`
-- Baseline/reference install also available on some tasks: `C:\GOG Games\Battlezone 98 Redux`
-- For current work in this repo, do not assume a Steam-specific runtime path is
-  needed unless the task explicitly says so.
+- Configured local game install: `C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux`
+- Configured game executable via `BZR_GAME_EXE`:
+  `C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux\battlezone98redux.exe`
+- If this machine later gains a second runtime install, prefer the configured
+  `BZR_GAME_DIR` / `BZR_GAME_EXE` environment variables over stale hardcoded
+  assumptions.
 
 ## Command Surface
 
-Prefer the stable wrappers in `C:\Users\istuart\bin`. They are already on
-`PATH` in this environment.
+Prefer the stable wrappers in `%USERPROFILE%\bin`. The installer adds that
+directory to the user `PATH`.
 
 ## Agent Autonomy
 
@@ -47,19 +49,20 @@ Use this split before choosing a tool.
 
 - `bzr-ghidra-mcp.cmd`
   - Wrapper around `pyghidra_mcp`.
-  - Default project path: [pyghidra_mcp_projects](/c:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/pyghidra_mcp_projects)
+  - Default project path: [pyghidra_mcp_projects](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/pyghidra_mcp_projects)
   - Default project name: `BZ98_Redux`
   - Default binary resolution order:
-    1. `%USERPROFILE%\Documents\Battlezone 98 Redux\battlezone98redux.exe`
-    2. `%USERPROFILE%\Downloads\Battlezone 98 Redux\battlezone98redux.exe`
-    3. `C:\GOG Games\Battlezone 98 Redux\battlezone98redux.exe`
+    1. `BZR_GAME_EXE` / `BZR_REDUX_EXE` if set
+    2. `%USERPROFILE%\Documents\Battlezone 98 Redux\battlezone98redux.exe`
+    3. `%USERPROFILE%\Downloads\Battlezone 98 Redux\battlezone98redux.exe`
+    4. `C:\GOG Games\Battlezone 98 Redux\battlezone98redux.exe`
   - Use for: entry bytes, disassembly, function lookup, symbols, xrefs, Ghidra project-backed binary queries.
   - Help: `bzr-ghidra-mcp.cmd --help`
 
 ### Debugger Bridge
 
 - `bzr-redux-debug.cmd`
-  - Wrapper around [redux_debug_bridge.py](/c:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/scripts/redux_debug_bridge.py)
+  - Wrapper around [redux_debug_bridge.py](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/scripts/redux_debug_bridge.py)
   - Subcommands:
     - `doctor`
     - `launch`
@@ -109,8 +112,8 @@ Use this split before choosing a tool.
     - function attach/replace experiments without rebuilding the shim
   - Examples:
     - `bzr-frida-ps.cmd --help`
-    - `bzr-frida.cmd -f "C:\Users\istuart\Documents\Battlezone 98 Redux\battlezone98redux.exe"`
-    - `bzr-frida-trace.cmd -f "C:\Users\istuart\Documents\Battlezone 98 Redux\battlezone98redux.exe" -i MessageBoxA`
+    - `bzr-frida.cmd -f $env:BZR_GAME_EXE`
+    - `bzr-frida-trace.cmd -f $env:BZR_GAME_EXE -i MessageBoxA`
 
 ### angr
 
@@ -140,7 +143,7 @@ Use this split before choosing a tool.
 ### Qiling
 
 - `bzr-qiling.cmd`
-  - Wrapper to [qiling_cli.py](/c:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/scripts/qiling_cli.py)
+  - Wrapper to [qiling_cli.py](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/scripts/qiling_cli.py)
   - Subcommands:
     - `version`
     - `run-python`
@@ -168,7 +171,7 @@ Use this split before choosing a tool.
     - GUI reversing in Cutter
   - Examples:
     - `bzr-rizin.cmd -v`
-    - `bzr-rz-bin.cmd -I "C:\Users\istuart\Documents\Battlezone 98 Redux\battlezone98redux.exe"`
+    - `bzr-rz-bin.cmd -I $env:BZR_GAME_EXE`
 
 ### Detect It Easy
 
@@ -180,7 +183,7 @@ Use this split before choosing a tool.
     - compiler/packer/signature checks
     - quick pre-analysis classification before heavier reversing
   - Example:
-    - `bzr-diec.cmd "C:\Users\istuart\Documents\Battlezone 98 Redux\battlezone98redux.exe"`
+    - `bzr-diec.cmd $env:BZR_GAME_EXE`
   - Guidance:
     - prefer `bzr-diec.cmd` for agent work
     - use `bzr-die.cmd` only when a human wants the GUI
@@ -220,7 +223,7 @@ Configured in `%USERPROFILE%\.codex\config.toml`:
 
 ## Python RE Packages Present
 
-These are installed and usable from the local Python 3.13 environment.
+These are installed and usable from the local Python 3.12 environment.
 
 - `pyghidra-mcp`
   - Ghidra-backed MCP/CLI analysis server
@@ -257,7 +260,8 @@ These are installed and usable from the local Python 3.13 environment.
   - `link.exe`
   - `MSBuild.exe`
 - Ghidra install
-  - `C:\ghidra_12.0.4_PUBLIC`
+  - `C:\Users\iestu\Tools\ghidra_12.0.4_PUBLIC`
+  - mirrored into `BZR_GHIDRA_INSTALL_DIR` and the Codex `ghidra` MCP entry
 - Sysinternals
   - `Process Monitor`
   - `Process Explorer`
@@ -284,15 +288,15 @@ installer flow in this repo.
 
 Prefer these before inventing a one-off script if they already cover the task.
 
-- [ghidra_mcp_bz98.py](/c:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/scripts/ghidra_mcp_bz98.py)
+- [ghidra_mcp_bz98.py](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/scripts/ghidra_mcp_bz98.py)
   - Battlezone-specific wrapper for `pyghidra_mcp`
-- [redux_debug_bridge.py](/c:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/scripts/redux_debug_bridge.py)
+- [redux_debug_bridge.py](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/scripts/redux_debug_bridge.py)
   - launch/read/terminate bridge, also exposes MCP mode
-- [qiling_cli.py](/c:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/scripts/qiling_cli.py)
+- [qiling_cli.py](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/scripts/qiling_cli.py)
   - small Qiling CLI bridge
-- [capture_runtime_layout.ps1](/c:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/capture_runtime_layout.ps1)
-- [run_misn03_chunk_probe.ps1](/c:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/run_misn03_chunk_probe.ps1)
-- [run_best_effort_pipeline.py](/c:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/run_best_effort_pipeline.py)
+- [capture_runtime_layout.ps1](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/reverse_engineering/capture_runtime_layout.ps1)
+- [run_misn03_chunk_probe.ps1](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/reverse_engineering/run_misn03_chunk_probe.ps1)
+- [run_best_effort_pipeline.py](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/reverse_engineering/run_best_effort_pipeline.py)
 
 ## Practical Guidance
 

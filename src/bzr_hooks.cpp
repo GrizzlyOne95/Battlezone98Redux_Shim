@@ -115,6 +115,7 @@ namespace BZROpenShim
     using FnEngineFlameControl = void(__thiscall*)(void* self);
     using FnEngineFlameSubmit = void(__thiscall*)(void* self, void* camera);
     using FnEngineFlameResolveTexture = int(__cdecl*)(BzrString* textureName);
+    using FnHudSpriteLookup = int(__cdecl*)(const char* spriteName);
     using FnGetTeamNum = int(__cdecl*)(int handle);
     using FnExuGetTeamEngineFlameColor = int(__cdecl*)(int team);
     using FnGameObjectGetTeam = int(__thiscall*)(void* thisPtr);
@@ -179,6 +180,7 @@ namespace BZROpenShim
     static FnEngineFlameControl g_BzrFn_EngineFlameControl = nullptr;
     static FnEngineFlameSubmit g_BzrFn_EngineFlameSubmit = nullptr;
     static FnEngineFlameResolveTexture g_BzrFn_EngineFlameResolveTexture = nullptr;
+    static FnHudSpriteLookup g_BzrFn_HudSpriteLookup = nullptr;
     static FnGetTeamNum g_BzrFn_GetTeamNum = nullptr;
     static FnExuGetTeamEngineFlameColor g_ExuFn_GetTeamEngineFlameColor = nullptr;
     static FnChunkEffectSimulate g_BzrFn_ChunkEffectSimulate = nullptr;
@@ -242,6 +244,13 @@ namespace BZROpenShim
         constexpr int kEngineFlameColorBlue = 1;
         constexpr int kEngineFlameColorRed = 2;
         constexpr int kEngineFlameColorGreen = 3;
+        constexpr uintptr_t kHudSpriteNameCountAddr = 0x00920F00;
+        constexpr uintptr_t kHudSpriteNameTableAddr = 0x00920F08;
+        constexpr size_t kHudSpriteNameEntrySize = 0x20;
+        constexpr size_t kHudSpriteRectEntrySize = 0x20;
+        constexpr size_t kHudSpriteRectXYWHOffset = 0x08;
+        constexpr uint32_t kHudSpriteMaxReasonableCount = 4096;
+        constexpr ULONGLONG kHudSpriteRectDiscoveryRetryMs = 1000;
         constexpr float kFlagButtonSize = 48.0f;
         constexpr uint32_t kLegacyFlagDataSlot = 0x0Du;
         constexpr int kLegacyFlagWidth = 64;
@@ -312,10 +321,41 @@ namespace BZROpenShim
             JumpSnipeProbeSnapshot last = {};
         };
 
+        struct HudSpriteRectRecord
+        {
+            uint32_t ref0 = 0;
+            uint32_t ref4 = 0;
+            int16_t x = 0;
+            int16_t y = 0;
+            int16_t w = 0;
+            int16_t h = 0;
+            float u0 = 0.0f;
+            float v0 = 0.0f;
+            float u1 = 0.0f;
+            float v1 = 0.0f;
+        };
+
+        struct HudSpriteKnownSample
+        {
+            const char* name = nullptr;
+            int16_t x = 0;
+            int16_t y = 0;
+            int16_t w = 0;
+            int16_t h = 0;
+            int id = 0;
+        };
+
+        static_assert(sizeof(HudSpriteRectRecord) == 0x20, "Unexpected HUD sprite rect record size");
+
         static InlineDetour32 g_PersonSimulateDetour = {};
         static bool g_JumpSnipeProbeInstallAttempted = false;
         static bool g_JumpSnipeProbeInstalled = false;
         static JumpSnipeProbeLogState g_JumpSnipeProbeLogState = {};
+        static HudSpriteRectRecord* g_HudSpriteRectTableBase = nullptr;
+        static bool g_HudSpriteRectTableDiscoveryAttempted = false;
+        static ULONGLONG g_HudSpriteRectTableDiscoveryLastTick = 0;
+        static std::unordered_map<int, HudSpriteRectRecord> g_HudSpriteOriginalEntries;
+        static std::unordered_map<int, HudSpriteRectRecord> g_HudSpriteHiddenEntries;
 
         enum class ProducerBuildMenuKind
         {
@@ -409,6 +449,7 @@ namespace BZROpenShim
         static std::vector<BanRecord> g_BanRecords;
         static bool g_FlagCatalogLoaded = false;
         static std::vector<FlagCatalogEntry> g_FlagCatalog;
+        static std::filesystem::path g_ActiveFlagsDirectory;
         static std::string g_SelectedFlagFileName;
         static int g_SelectedFlagIndex = -1;
         static std::string g_SelectedFlagStatus = "Legacy test path idle.";
@@ -848,6 +889,339 @@ namespace BZROpenShim
 
             outText[outTextCapacity - 1] = '\0';
             return false;
+        }
+
+        static int16_t ClampHudSpriteCoord(int value)
+        {
+            if (value < static_cast<int>(SHRT_MIN))
+                return SHRT_MIN;
+            if (value > static_cast<int>(SHRT_MAX))
+                return SHRT_MAX;
+            return static_cast<int16_t>(value);
+        }
+
+        static bool IsReadableDataProtect(DWORD protect)
+        {
+            if ((protect & PAGE_GUARD) != 0 || (protect & PAGE_NOACCESS) != 0)
+                return false;
+
+            switch (protect & 0xFFu)
+            {
+            case PAGE_READONLY:
+            case PAGE_READWRITE:
+            case PAGE_WRITECOPY:
+            case PAGE_EXECUTE_READ:
+            case PAGE_EXECUTE_READWRITE:
+            case PAGE_EXECUTE_WRITECOPY:
+                return true;
+            default:
+                return false;
+            }
+        }
+
+        static bool TryReadHudSpriteNameCount(uint32_t& outCount)
+        {
+            __try
+            {
+                const uint32_t count = *reinterpret_cast<const uint32_t*>(kHudSpriteNameCountAddr);
+                if (count == 0 || count > kHudSpriteMaxReasonableCount)
+                    return false;
+
+                outCount = count;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+
+            return false;
+        }
+
+        static int LookupHudSpriteId(const char* name)
+        {
+            if (!name || !name[0])
+                return 0;
+
+            if (g_BzrFn_HudSpriteLookup)
+            {
+                __try
+                {
+                    const int id = g_BzrFn_HudSpriteLookup(name);
+                    if (id > 0)
+                        return id;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                }
+            }
+
+            uint32_t count = 0;
+            if (!TryReadHudSpriteNameCount(count))
+                return 0;
+
+            __try
+            {
+                auto* table = reinterpret_cast<const char*>(kHudSpriteNameTableAddr);
+                char entryName[kHudSpriteNameEntrySize + 1] = {};
+                for (int index = static_cast<int>(count) - 1; index > 0; --index)
+                {
+                    const char* entry = table + (static_cast<size_t>(index) * kHudSpriteNameEntrySize);
+                    std::memcpy(entryName, entry, kHudSpriteNameEntrySize);
+                    entryName[kHudSpriteNameEntrySize] = '\0';
+                    if (_stricmp(entryName, name) == 0)
+                        return index;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+
+            return 0;
+        }
+
+        static bool ResolveHudSpriteKnownSamples(std::array<HudSpriteKnownSample, 6>& outSamples)
+        {
+            outSamples = {{
+                {"scrap_panel", 660, 960, 180, 64, 0},
+                {"pilot_panel", 844, 960, 180, 64, 0},
+                {"sscrap_panel", 660, 960, 180, 64, 0},
+                {"spilot_panel", 844, 960, 180, 64, 0},
+                {"fscrap_panel", 660, 960, 180, 64, 0},
+                {"fpilot_panel", 844, 960, 180, 64, 0},
+            }};
+
+            for (auto& sample : outSamples)
+            {
+                sample.id = LookupHudSpriteId(sample.name);
+                if (sample.id <= 0)
+                    return false;
+            }
+
+            return true;
+        }
+
+        static bool HudSpriteRecordMatches(const HudSpriteRectRecord& record, const HudSpriteKnownSample& sample)
+        {
+            return record.x == sample.x &&
+                   record.y == sample.y &&
+                   record.w == sample.w &&
+                   record.h == sample.h;
+        }
+
+        static bool ValidateHudSpriteRectTableBase(
+            HudSpriteRectRecord* base,
+            const std::array<HudSpriteKnownSample, 6>& samples)
+        {
+            if (!base)
+                return false;
+
+            __try
+            {
+                for (const auto& sample : samples)
+                {
+                    const HudSpriteRectRecord& record = base[sample.id];
+                    if (!HudSpriteRecordMatches(record, sample))
+                        return false;
+                }
+
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+
+            return false;
+        }
+
+        static bool MemoryStartsWithBytes(const uint8_t* address, const uint8_t* pattern, size_t length)
+        {
+            if (!address || !pattern || length == 0)
+                return false;
+
+            __try
+            {
+                for (size_t index = 0; index < length; ++index)
+                {
+                    if (address[index] != pattern[index])
+                        return false;
+                }
+
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+
+            return false;
+        }
+
+        static bool DiscoverHudSpriteRectTableBase()
+        {
+            if (g_HudSpriteRectTableBase)
+                return true;
+            const ULONGLONG now = GetTickCount64();
+            if (g_HudSpriteRectTableDiscoveryAttempted &&
+                now - g_HudSpriteRectTableDiscoveryLastTick < kHudSpriteRectDiscoveryRetryMs)
+                return false;
+
+            g_HudSpriteRectTableDiscoveryAttempted = true;
+            g_HudSpriteRectTableDiscoveryLastTick = now;
+
+            std::array<HudSpriteKnownSample, 6> samples = {};
+            if (!ResolveHudSpriteKnownSamples(samples))
+            {
+                Log(L"[HUD] Failed resolving stock HUD sprite ids needed for rect-table discovery\n");
+                return false;
+            }
+
+            const auto& first = samples.front();
+            uint8_t xywhPattern[sizeof(int16_t) * 4] = {};
+            std::memcpy(xywhPattern + 0, &first.x, sizeof(first.x));
+            std::memcpy(xywhPattern + 2, &first.y, sizeof(first.y));
+            std::memcpy(xywhPattern + 4, &first.w, sizeof(first.w));
+            std::memcpy(xywhPattern + 6, &first.h, sizeof(first.h));
+
+            SYSTEM_INFO systemInfo = {};
+            GetSystemInfo(&systemInfo);
+
+            auto* cursor = static_cast<uint8_t*>(systemInfo.lpMinimumApplicationAddress);
+            auto* maxAddress = static_cast<uint8_t*>(systemInfo.lpMaximumApplicationAddress);
+            MEMORY_BASIC_INFORMATION mbi = {};
+            while (cursor < maxAddress &&
+                   VirtualQuery(cursor, &mbi, sizeof(mbi)) == sizeof(mbi))
+            {
+                auto* regionBase = static_cast<uint8_t*>(mbi.BaseAddress);
+                auto* regionEnd = regionBase + mbi.RegionSize;
+                cursor = regionEnd;
+
+                if (mbi.State != MEM_COMMIT || !IsReadableDataProtect(mbi.Protect))
+                    continue;
+
+                if (mbi.RegionSize < kHudSpriteRectXYWHOffset + sizeof(xywhPattern))
+                    continue;
+
+                for (size_t offset = 0;
+                     offset + kHudSpriteRectXYWHOffset + sizeof(xywhPattern) <= mbi.RegionSize;
+                     ++offset)
+                {
+                    uint8_t* xywhAddress = regionBase + offset;
+                    if (!MemoryStartsWithBytes(xywhAddress, xywhPattern, sizeof(xywhPattern)))
+                        continue;
+
+                    const uintptr_t xywhValue = reinterpret_cast<uintptr_t>(xywhAddress);
+                    const uintptr_t adjustment =
+                        kHudSpriteRectXYWHOffset +
+                        (static_cast<uintptr_t>(first.id) * kHudSpriteRectEntrySize);
+                    if (xywhValue < adjustment)
+                        continue;
+
+                    auto* candidateBase =
+                        reinterpret_cast<HudSpriteRectRecord*>(xywhValue - adjustment);
+                    if (!ValidateHudSpriteRectTableBase(candidateBase, samples))
+                        continue;
+
+                    g_HudSpriteRectTableBase = candidateBase;
+                    g_HudSpriteOriginalEntries.clear();
+                    g_HudSpriteHiddenEntries.clear();
+                    Log(L"[HUD] Sprite rect table discovered base=0x%08X scrap=%d pilot=%d sscrap=%d spilot=%d fscrap=%d fpilot=%d\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(candidateBase)),
+                        samples[0].id,
+                        samples[1].id,
+                        samples[2].id,
+                        samples[3].id,
+                        samples[4].id,
+                        samples[5].id);
+                    return true;
+                }
+            }
+
+            Log(L"[HUD] Failed discovering sprite rect table in live process memory\n");
+            return false;
+        }
+
+        static HudSpriteRectRecord* GetHudSpriteRectEntry(int spriteId)
+        {
+            if (spriteId <= 0)
+                return nullptr;
+
+            for (int attempt = 0; attempt < 2; ++attempt)
+            {
+                if (!g_HudSpriteRectTableBase && !DiscoverHudSpriteRectTableBase())
+                    return nullptr;
+
+                __try
+                {
+                    auto* entry = g_HudSpriteRectTableBase + spriteId;
+                    volatile int16_t probe = entry->w;
+                    (void)probe;
+                    return entry;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    g_HudSpriteRectTableBase = nullptr;
+                    g_HudSpriteRectTableDiscoveryAttempted = false;
+                }
+            }
+
+            return nullptr;
+        }
+
+        static bool WriteHudSpriteRectEntry(int spriteId, const HudSpriteRectRecord& record)
+        {
+            auto* entry = GetHudSpriteRectEntry(spriteId);
+            if (!entry)
+                return false;
+
+            DWORD oldProtect = 0;
+            if (!VirtualProtect(entry, sizeof(record), PAGE_EXECUTE_READWRITE, &oldProtect))
+                return false;
+
+            *entry = record;
+            FlushInstructionCache(GetCurrentProcess(), entry, sizeof(record));
+
+            DWORD restoreProtect = 0;
+            VirtualProtect(entry, sizeof(record), oldProtect, &restoreProtect);
+            return true;
+        }
+
+        static bool TryGetHudSpriteCurrentRecord(int spriteId, HudSpriteRectRecord& outRecord)
+        {
+            auto* entry = GetHudSpriteRectEntry(spriteId);
+            if (!entry)
+                return false;
+
+            __try
+            {
+                outRecord = *entry;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+
+            return false;
+        }
+
+        static bool ResolveHudSpriteForMutation(const char* name, int& outId, HudSpriteRectRecord& outCurrent)
+        {
+            outId = LookupHudSpriteId(name);
+            if (outId <= 0)
+            {
+                Log(L"[HUD] Unknown sprite '%hs'\n", name ? name : "<null>");
+                return false;
+            }
+
+            if (!TryGetHudSpriteCurrentRecord(outId, outCurrent))
+            {
+                Log(L"[HUD] Failed reading live rect entry for sprite '%hs' (id=%d)\n",
+                    name ? name : "<null>",
+                    outId);
+                return false;
+            }
+
+            if (g_HudSpriteOriginalEntries.find(outId) == g_HudSpriteOriginalEntries.end())
+                g_HudSpriteOriginalEntries.emplace(outId, outCurrent);
+            return true;
         }
 
         static bool TryReadChunkGeomIdentity(
@@ -1896,6 +2270,68 @@ namespace BZROpenShim
                    ext == ".jpg" || ext == ".jpeg";
         }
 
+        static std::vector<std::filesystem::path> GetFlagDirectoryCandidates()
+        {
+            std::vector<std::filesystem::path> candidates;
+
+            const auto configDir = GetConfigModuleDirectory();
+            if (configDir.empty())
+                return candidates;
+
+            candidates.push_back(configDir / kFlagsDirectoryName);
+
+            const auto addonDir = configDir / "addon" / "campaignReimagined";
+            candidates.push_back(addonDir / kFlagsDirectoryName);
+            candidates.push_back(addonDir / "_Release" / kFlagsDirectoryName);
+            candidates.push_back(addonDir / "_Source" / kFlagsDirectoryName);
+            return candidates;
+        }
+
+        static bool DirectoryContainsSupportedFlagSources(const std::filesystem::path& directory)
+        {
+            if (directory.empty())
+                return false;
+
+            std::error_code ec;
+            if (!std::filesystem::exists(directory, ec) || ec)
+                return false;
+
+            for (std::filesystem::directory_iterator it(directory, ec), end;
+                 !ec && it != end;
+                 it.increment(ec))
+            {
+                if (ec)
+                    break;
+
+                const auto& entry = *it;
+                if (!entry.is_regular_file(ec) || ec)
+                    continue;
+                if (IsSupportedFlagSourcePath(entry.path()))
+                    return true;
+            }
+
+            return false;
+        }
+
+        static std::filesystem::path ResolveFlagSourceDirectoryPath()
+        {
+            const auto candidates = GetFlagDirectoryCandidates();
+            for (const auto& candidate : candidates)
+            {
+                if (DirectoryContainsSupportedFlagSources(candidate))
+                    return candidate;
+            }
+
+            for (const auto& candidate : candidates)
+            {
+                std::error_code ec;
+                if (std::filesystem::exists(candidate, ec) && !ec)
+                    return candidate;
+            }
+
+            return GetFlagsDirectoryPath();
+        }
+
         static void InvalidateFlagPayloadCache()
         {
             g_FlagPayloadReady = false;
@@ -2227,19 +2663,29 @@ namespace BZROpenShim
 
             g_FlagCatalogLoaded = true;
             g_FlagCatalog.clear();
+            g_ActiveFlagsDirectory.clear();
             g_SelectedFlagFileName.clear();
             g_SelectedFlagIndex = -1;
             g_SelectedFlagStatus = "Legacy test path idle.";
             InvalidateFlagPayloadCache();
 
-            const auto flagsDir = GetFlagsDirectoryPath();
+            const auto primaryFlagsDir = GetFlagsDirectoryPath();
             std::error_code ec;
-            std::filesystem::create_directories(flagsDir, ec);
+            std::filesystem::create_directories(primaryFlagsDir, ec);
             if (ec)
             {
                 Log(L"[FLAG] Failed to ensure flags directory path=%hs ec=%d\n",
-                    flagsDir.string().c_str(),
+                    primaryFlagsDir.string().c_str(),
                     static_cast<int>(ec.value()));
+            }
+
+            const auto flagsDir = ResolveFlagSourceDirectoryPath();
+            g_ActiveFlagsDirectory = flagsDir;
+            if (!flagsDir.empty() && flagsDir != primaryFlagsDir)
+            {
+                Log(L"[FLAG] Using fallback flag source directory path=%hs primary=%hs\n",
+                    flagsDir.string().c_str(),
+                    primaryFlagsDir.string().c_str());
             }
 
             const auto configPath = GetFlagsConfigPath();
@@ -2296,9 +2742,10 @@ namespace BZROpenShim
 
             if (g_FlagCatalog.empty())
             {
-                g_SelectedFlagStatus = "No source images found under .\\flags.";
+                g_SelectedFlagStatus = "No source images found under the configured flag folders.";
                 SaveSelectedFlagConfig();
-                Log(L"[FLAG] No flag source files found. Add files under path=%hs\n",
+                Log(L"[FLAG] No flag source files found. Checked primary=%hs active=%hs\n",
+                    primaryFlagsDir.string().c_str(),
                     flagsDir.string().c_str());
                 return;
             }
@@ -2325,7 +2772,7 @@ namespace BZROpenShim
         {
             const FlagCatalogEntry* entry = GetSelectedFlagEntry();
             if (!entry)
-                return "No flag files found in .\\flags. Add PNG/BMP/TGA/JPG images.";
+                return "No flag files found in the configured flag folders. Add PNG/BMP/TGA/JPG images.";
 
             char buffer[512] = {};
             std::snprintf(
@@ -2344,7 +2791,7 @@ namespace BZROpenShim
             const FlagCatalogEntry* entry = GetSelectedFlagEntry();
             if (!entry)
             {
-                g_SelectedFlagStatus = "No source images found under .\\flags.";
+                g_SelectedFlagStatus = "No source images found under the configured flag folders.";
                 return false;
             }
 
@@ -3491,6 +3938,8 @@ namespace BZROpenShim
                 {
                     g_BzrFn_EngineFlameResolveTexture =
                         reinterpret_cast<FnEngineFlameResolveTexture>(match);
+                    g_BzrFn_HudSpriteLookup =
+                        reinterpret_cast<FnHudSpriteLookup>(match);
                 }
 
                 if (!g_BzrFn_EngineFlameResolveTexture)
@@ -5224,6 +5673,7 @@ namespace BZROpenShim
         g_BzrFn_EngineFlameControl = reinterpret_cast<FnEngineFlameControl>(0x004C88A0);
         g_BzrFn_EngineFlameSubmit = reinterpret_cast<FnEngineFlameSubmit>(0x004C88C0);
         g_BzrFn_EngineFlameResolveTexture = reinterpret_cast<FnEngineFlameResolveTexture>(0x0068BED0);
+        g_BzrFn_HudSpriteLookup = reinterpret_cast<FnHudSpriteLookup>(0x0068BED0);
         g_BzrFn_GetTeamNum = reinterpret_cast<FnGetTeamNum>(0x005C8800);
         g_BzrFn_ChunkEffectSimulate = reinterpret_cast<FnChunkEffectSimulate>(0x004917F0);
 
@@ -5431,6 +5881,174 @@ namespace BZROpenShim
     bool SetTargetReticlePopupModeFromBridge(int mode)
     {
         return SetTargetReticlePopupModeInternal(ClampTargetReticlePopupMode(mode), true);
+    }
+
+    bool SetHudSpriteRectFromBridge(const char* name, int x, int y, int w, int h)
+    {
+        int spriteId = 0;
+        HudSpriteRectRecord current = {};
+        if (!ResolveHudSpriteForMutation(name, spriteId, current))
+            return false;
+
+        HudSpriteRectRecord updated = current;
+        const auto hiddenIt = g_HudSpriteHiddenEntries.find(spriteId);
+        if (hiddenIt != g_HudSpriteHiddenEntries.end())
+            updated = hiddenIt->second;
+
+        updated.x = ClampHudSpriteCoord(x);
+        updated.y = ClampHudSpriteCoord(y);
+        updated.w = ClampHudSpriteCoord(w);
+        updated.h = ClampHudSpriteCoord(h);
+
+        if (hiddenIt != g_HudSpriteHiddenEntries.end())
+        {
+            hiddenIt->second = updated;
+
+            HudSpriteRectRecord hiddenRecord = updated;
+            hiddenRecord.w = 0;
+            hiddenRecord.h = 0;
+            if (!WriteHudSpriteRectEntry(spriteId, hiddenRecord))
+            {
+                Log(L"[HUD] Failed updating hidden sprite '%hs' (id=%d)\n",
+                    name ? name : "<null>",
+                    spriteId);
+                return false;
+            }
+        }
+        else if (!WriteHudSpriteRectEntry(spriteId, updated))
+        {
+            Log(L"[HUD] Failed writing rect for sprite '%hs' (id=%d)\n",
+                name ? name : "<null>",
+                spriteId);
+            return false;
+        }
+
+        Log(L"[HUD] Sprite rect %hs id=%d => (%d,%d,%d,%d)%s\n",
+            name ? name : "<null>",
+            spriteId,
+            static_cast<int>(updated.x),
+            static_cast<int>(updated.y),
+            static_cast<int>(updated.w),
+            static_cast<int>(updated.h),
+            hiddenIt != g_HudSpriteHiddenEntries.end() ? " [hidden snapshot]" : "");
+        return true;
+    }
+
+    bool SetHudSpriteVisibleFromBridge(const char* name, bool visible)
+    {
+        const int spriteId = LookupHudSpriteId(name);
+        if (spriteId <= 0)
+        {
+            Log(L"[HUD] Unknown sprite '%hs'\n", name ? name : "<null>");
+            return false;
+        }
+
+        const auto hiddenIt = g_HudSpriteHiddenEntries.find(spriteId);
+        if (!visible)
+        {
+            if (hiddenIt != g_HudSpriteHiddenEntries.end())
+            {
+                Log(L"[HUD] Sprite already hidden %hs id=%d\n", name ? name : "<null>", spriteId);
+                return true;
+            }
+
+            HudSpriteRectRecord current = {};
+            if (!TryGetHudSpriteCurrentRecord(spriteId, current))
+            {
+                Log(L"[HUD] Failed reading live rect entry for sprite '%hs' (id=%d)\n",
+                    name ? name : "<null>",
+                    spriteId);
+                return false;
+            }
+
+            g_HudSpriteOriginalEntries.emplace(spriteId, current);
+            g_HudSpriteHiddenEntries[spriteId] = current;
+
+            HudSpriteRectRecord hiddenRecord = current;
+            hiddenRecord.w = 0;
+            hiddenRecord.h = 0;
+            if (!WriteHudSpriteRectEntry(spriteId, hiddenRecord))
+            {
+                Log(L"[HUD] Failed hiding sprite '%hs' (id=%d)\n",
+                    name ? name : "<null>",
+                    spriteId);
+                return false;
+            }
+
+            Log(L"[HUD] Sprite hidden %hs id=%d\n", name ? name : "<null>", spriteId);
+            return true;
+        }
+
+        if (hiddenIt == g_HudSpriteHiddenEntries.end())
+        {
+            Log(L"[HUD] Sprite already visible %hs id=%d\n", name ? name : "<null>", spriteId);
+            return true;
+        }
+
+        if (!WriteHudSpriteRectEntry(spriteId, hiddenIt->second))
+        {
+            Log(L"[HUD] Failed restoring visible state for sprite '%hs' (id=%d)\n",
+                name ? name : "<null>",
+                spriteId);
+            return false;
+        }
+
+        g_HudSpriteHiddenEntries.erase(spriteId);
+        Log(L"[HUD] Sprite shown %hs id=%d\n", name ? name : "<null>", spriteId);
+        return true;
+    }
+
+    bool RestoreHudSpriteFromBridge(const char* name)
+    {
+        const int spriteId = LookupHudSpriteId(name);
+        if (spriteId <= 0)
+        {
+            Log(L"[HUD] Unknown sprite '%hs'\n", name ? name : "<null>");
+            return false;
+        }
+
+        const auto originalIt = g_HudSpriteOriginalEntries.find(spriteId);
+        if (originalIt == g_HudSpriteOriginalEntries.end())
+        {
+            Log(L"[HUD] No cached original rect for sprite '%hs' (id=%d)\n",
+                name ? name : "<null>",
+                spriteId);
+            return false;
+        }
+
+        if (!WriteHudSpriteRectEntry(spriteId, originalIt->second))
+        {
+            Log(L"[HUD] Failed restoring original rect for sprite '%hs' (id=%d)\n",
+                name ? name : "<null>",
+                spriteId);
+            return false;
+        }
+
+        g_HudSpriteHiddenEntries.erase(spriteId);
+        Log(L"[HUD] Sprite restored %hs id=%d\n", name ? name : "<null>", spriteId);
+        return true;
+    }
+
+    bool RestoreAllHudSpritesFromBridge()
+    {
+        bool anyFailed = false;
+        for (const auto& entry : g_HudSpriteOriginalEntries)
+        {
+            if (!WriteHudSpriteRectEntry(entry.first, entry.second))
+            {
+                anyFailed = true;
+                Log(L"[HUD] Failed restoring cached sprite id=%d during restore-all\n", entry.first);
+            }
+        }
+
+        if (!anyFailed)
+        {
+            g_HudSpriteHiddenEntries.clear();
+            Log(L"[HUD] Restored %u cached HUD sprite rect(s)\n",
+                static_cast<unsigned>(g_HudSpriteOriginalEntries.size()));
+        }
+
+        return !anyFailed;
     }
 
     float __fastcall TargetReticlePopupRecentHitGetterHook(void* objectPtr, void* /*edx*/)

@@ -23,6 +23,22 @@ function Ensure-Directory([string]$PathValue) {
     }
 }
 
+function Ensure-UserPathContains([string]$PathEntry) {
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $entries = @()
+    if ($userPath) {
+        $entries = $userPath -split ";" | Where-Object { $_ }
+    }
+
+    if ($entries -contains $PathEntry) {
+        return
+    }
+
+    $updated = @($entries + $PathEntry) -join ";"
+    [Environment]::SetEnvironmentVariable("Path", $updated, "User")
+    Write-Info "Added to user PATH: $PathEntry"
+}
+
 function Invoke-WingetInstall([string]$Id) {
     if ($SkipWinget) {
         Write-Info "Skipping winget install for $Id"
@@ -55,6 +71,44 @@ function Get-PythonUserScripts() {
         throw "Unable to resolve Python user scripts directory"
     }
     return $scriptsDir.Trim()
+}
+
+function Resolve-CommandPath([string]$CommandName, [string[]]$Candidates = @()) {
+    foreach ($candidate in $Candidates) {
+        if ($candidate -and (Test-Path $candidate)) {
+            return $candidate
+        }
+    }
+
+    $command = Get-Command $CommandName -ErrorAction SilentlyContinue
+    if ($command -and $command.Source -and (Test-Path $command.Source)) {
+        return $command.Source
+    }
+
+    return ""
+}
+
+function Get-PreferredGhidraInstallDir() {
+    if ($GhidraInstallDir) {
+        return $GhidraInstallDir
+    }
+
+    $envOverride = [Environment]::GetEnvironmentVariable("BZR_GHIDRA_INSTALL_DIR", "User")
+    if ($envOverride -and (Test-Path $envOverride)) {
+        return $envOverride
+    }
+
+    $envFallback = [Environment]::GetEnvironmentVariable("GHIDRA_INSTALL_DIR", "User")
+    if ($envFallback -and (Test-Path $envFallback)) {
+        return $envFallback
+    }
+
+    $defaultPath = "C:\ghidra_12.0.4_PUBLIC"
+    if (Test-Path $defaultPath) {
+        return $defaultPath
+    }
+
+    return ""
 }
 
 function Get-WinDbgRoot() {
@@ -126,7 +180,11 @@ function Update-CodexConfig() {
     $startMarker = "# >>> BZR agent tooling >>>"
     $endMarker = "# <<< BZR agent tooling <<<"
 
-    $ghidraDirValue = if ($GhidraInstallDir) { $GhidraInstallDir } else { 'C:/ghidra_12.0.4_PUBLIC' }
+    $ghidraDirValue = Get-PreferredGhidraInstallDir
+    $ghidraEnvLine = ""
+    if ($ghidraDirValue) {
+        $ghidraEnvLine = "env = { `"GHIDRA_INSTALL_DIR`" = `"$($ghidraDirValue -replace '\\', '/')`" }"
+    }
     $repoToml = $RepoRoot -replace "\\", "/"
 
     $block = @"
@@ -136,7 +194,7 @@ command = "python"
 args = [
   "$repoToml/scripts/ghidra_mcp_bz98.py"
 ]
-env = { "GHIDRA_INSTALL_DIR" = "$($ghidraDirValue -replace '\\', '/')" }
+$ghidraEnvLine
 
 [mcp_servers.redux_debug]
 command = "python"
@@ -179,12 +237,34 @@ Invoke-PipInstall @(
     "ghidriff"
 )
 
+$pythonExe = (Get-Command python -ErrorAction Stop).Source
+$pythonInstallDir = Split-Path $pythonExe -Parent
+$pythonInstallScripts = Join-Path $pythonInstallDir "Scripts"
 $pythonScripts = Get-PythonUserScripts
 $winDbgRoot = Get-WinDbgRoot
 $cdb32 = if ($winDbgRoot) { Join-Path $winDbgRoot "x86\cdb.exe" } else { "" }
 $x32dbg = Get-X32DbgPath
 $cutter = Get-CutterPath
-$ghidriff = Join-Path $pythonScripts "ghidriff.exe"
+$frida = Resolve-CommandPath "frida.exe" @(
+    (Join-Path $pythonInstallScripts "frida.exe"),
+    (Join-Path $pythonScripts "frida.exe")
+)
+$fridaPs = Resolve-CommandPath "frida-ps.exe" @(
+    (Join-Path $pythonInstallScripts "frida-ps.exe"),
+    (Join-Path $pythonScripts "frida-ps.exe")
+)
+$fridaTrace = Resolve-CommandPath "frida-trace.exe" @(
+    (Join-Path $pythonInstallScripts "frida-trace.exe"),
+    (Join-Path $pythonScripts "frida-trace.exe")
+)
+$angrCli = Resolve-CommandPath "angr.exe" @(
+    (Join-Path $pythonInstallScripts "angr.exe"),
+    (Join-Path $pythonScripts "angr.exe")
+)
+$ghidriff = Resolve-CommandPath "ghidriff.exe" @(
+    (Join-Path $pythonInstallScripts "ghidriff.exe"),
+    (Join-Path $pythonScripts "ghidriff.exe")
+)
 $die = Get-WinGetPackageExe "horsicq.DIE-engine" "die.exe"
 $diec = Get-WinGetPackageExe "horsicq.DIE-engine" "diec.exe"
 $procmon = Get-WinGetPackageExe "Microsoft.Sysinternals.ProcessMonitor" "Procmon.exe"
@@ -195,13 +275,14 @@ $rzAsm = "C:\Program Files\Rizin\bin\rz-asm.exe"
 
 if (-not $SkipWrappers) {
     Ensure-Directory $UserBin
+    Ensure-UserPathContains $UserBin
     Set-CmdWrapper (Join-Path $UserBin "bzr-ghidra-mcp.cmd") "python `"$RepoRoot\scripts\ghidra_mcp_bz98.py`""
     Set-CmdWrapper (Join-Path $UserBin "bzr-redux-debug.cmd") "python `"$RepoRoot\scripts\redux_debug_bridge.py`""
     Set-CmdWrapper (Join-Path $UserBin "bzr-qiling.cmd") "python `"$RepoRoot\scripts\qiling_cli.py`""
-    Set-CmdWrapper (Join-Path $UserBin "bzr-frida.cmd") "`"$pythonScripts\frida.exe`""
-    Set-CmdWrapper (Join-Path $UserBin "bzr-frida-ps.cmd") "`"$pythonScripts\frida-ps.exe`""
-    Set-CmdWrapper (Join-Path $UserBin "bzr-frida-trace.cmd") "`"$pythonScripts\frida-trace.exe`""
-    Set-CmdWrapper (Join-Path $UserBin "bzr-angr.cmd") "`"$pythonScripts\angr.exe`""
+    if ($frida) { Set-CmdWrapper (Join-Path $UserBin "bzr-frida.cmd") "`"$frida`"" }
+    if ($fridaPs) { Set-CmdWrapper (Join-Path $UserBin "bzr-frida-ps.cmd") "`"$fridaPs`"" }
+    if ($fridaTrace) { Set-CmdWrapper (Join-Path $UserBin "bzr-frida-trace.cmd") "`"$fridaTrace`"" }
+    if ($angrCli) { Set-CmdWrapper (Join-Path $UserBin "bzr-angr.cmd") "`"$angrCli`"" }
     if (Test-Path $ghidriff) { Set-CmdWrapper (Join-Path $UserBin "bzr-ghidriff.cmd") "`"$ghidriff`"" }
 
     if (Test-Path $rizin) { Set-CmdWrapper (Join-Path $UserBin "bzr-rizin.cmd") "`"$rizin`"" }
@@ -232,5 +313,9 @@ if ($GhidraInstallDir) {
 }
 
 Update-CodexConfig
+
+if (-not (Get-PreferredGhidraInstallDir)) {
+    Write-Info "Ghidra install not detected. Set BZR_GHIDRA_INSTALL_DIR or rerun with -GhidraInstallDir once Ghidra is installed."
+}
 
 Write-Info "Done. Open a new shell if newly created wrappers are not visible yet."
