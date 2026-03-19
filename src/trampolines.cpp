@@ -142,6 +142,9 @@ namespace
 // -----------------------------------------------------------------------
 // Hop-Fix 1/3
 // Purpose: Save the selected entry and visible row before the list rebuild.
+// This workshop map-list jump fix was inspired by the logic of earlier
+// closed-source patches we reverse-engineered, but the implementation here is
+// a clean-room reconstruction.
 // Reverse-engineering-confirmed reference pipeline:
 //   Hook 1 -> FUN_1000CAF0 -> original call at 0x005D4260
 // The JMP overwrites:
