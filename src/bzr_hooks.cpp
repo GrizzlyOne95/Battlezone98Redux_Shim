@@ -249,6 +249,7 @@ namespace BZROpenShim
         constexpr size_t kHudSpriteNameEntrySize = 0x20;
         constexpr size_t kHudSpriteRectEntrySize = 0x20;
         constexpr size_t kHudSpriteRectXYWHOffset = 0x08;
+        constexpr size_t kHudSpriteRectScanAlignment = 0x08;
         constexpr uint32_t kHudSpriteMaxReasonableCount = 4096;
         constexpr ULONGLONG kHudSpriteRectDiscoveryRetryMs = 1000;
         constexpr float kFlagButtonSize = 48.0f;
@@ -1033,26 +1034,21 @@ namespace BZROpenShim
             return false;
         }
 
-        static bool MemoryStartsWithBytes(const uint8_t* address, const uint8_t* pattern, size_t length)
+        static bool IsLikelyHudSpriteRectRegion(const MEMORY_BASIC_INFORMATION& mbi)
         {
-            if (!address || !pattern || length == 0)
+            if (mbi.State != MEM_COMMIT || !IsReadableDataProtect(mbi.Protect))
                 return false;
 
-            __try
+            // The rect table is runtime-owned data; avoid crawling image/code
+            // mappings when a hide/show request arrives on the UI thread.
+            switch (mbi.Type)
             {
-                for (size_t index = 0; index < length; ++index)
-                {
-                    if (address[index] != pattern[index])
-                        return false;
-                }
-
+            case MEM_PRIVATE:
+            case MEM_MAPPED:
                 return true;
+            default:
+                return false;
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-            }
-
-            return false;
         }
 
         static bool DiscoverHudSpriteRectTableBase()
@@ -1074,12 +1070,16 @@ namespace BZROpenShim
                 return false;
             }
 
+            int maxSpriteId = 0;
+            for (const auto& sample : samples)
+            {
+                if (sample.id > maxSpriteId)
+                    maxSpriteId = sample.id;
+            }
+
+            const size_t requiredSpan =
+                (static_cast<size_t>(maxSpriteId) * kHudSpriteRectEntrySize) + sizeof(HudSpriteRectRecord);
             const auto& first = samples.front();
-            uint8_t xywhPattern[sizeof(int16_t) * 4] = {};
-            std::memcpy(xywhPattern + 0, &first.x, sizeof(first.x));
-            std::memcpy(xywhPattern + 2, &first.y, sizeof(first.y));
-            std::memcpy(xywhPattern + 4, &first.w, sizeof(first.w));
-            std::memcpy(xywhPattern + 6, &first.h, sizeof(first.h));
 
             SYSTEM_INFO systemInfo = {};
             GetSystemInfo(&systemInfo);
@@ -1094,29 +1094,34 @@ namespace BZROpenShim
                 auto* regionEnd = regionBase + mbi.RegionSize;
                 cursor = regionEnd;
 
-                if (mbi.State != MEM_COMMIT || !IsReadableDataProtect(mbi.Protect))
+                if (!IsLikelyHudSpriteRectRegion(mbi))
                     continue;
 
-                if (mbi.RegionSize < kHudSpriteRectXYWHOffset + sizeof(xywhPattern))
+                if (mbi.RegionSize < requiredSpan)
                     continue;
 
-                for (size_t offset = 0;
-                     offset + kHudSpriteRectXYWHOffset + sizeof(xywhPattern) <= mbi.RegionSize;
-                     ++offset)
+                const uintptr_t regionAddress = reinterpret_cast<uintptr_t>(regionBase);
+                size_t candidateOffset = 0;
+                const size_t misalignment = regionAddress % kHudSpriteRectScanAlignment;
+                if (misalignment != 0)
+                    candidateOffset = kHudSpriteRectScanAlignment - misalignment;
+
+                for (; candidateOffset + requiredSpan <= mbi.RegionSize;
+                     candidateOffset += kHudSpriteRectScanAlignment)
                 {
-                    uint8_t* xywhAddress = regionBase + offset;
-                    if (!MemoryStartsWithBytes(xywhAddress, xywhPattern, sizeof(xywhPattern)))
-                        continue;
+                    auto* candidateBase = reinterpret_cast<HudSpriteRectRecord*>(regionBase + candidateOffset);
 
-                    const uintptr_t xywhValue = reinterpret_cast<uintptr_t>(xywhAddress);
-                    const uintptr_t adjustment =
-                        kHudSpriteRectXYWHOffset +
-                        (static_cast<uintptr_t>(first.id) * kHudSpriteRectEntrySize);
-                    if (xywhValue < adjustment)
+                    __try
+                    {
+                        const HudSpriteRectRecord& record = candidateBase[first.id];
+                        if (!HudSpriteRecordMatches(record, first))
+                            continue;
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
                         continue;
+                    }
 
-                    auto* candidateBase =
-                        reinterpret_cast<HudSpriteRectRecord*>(xywhValue - adjustment);
                     if (!ValidateHudSpriteRectTableBase(candidateBase, samples))
                         continue;
 
@@ -2852,16 +2857,9 @@ namespace BZROpenShim
             if (!g_FlagPayloadReady)
                 return false;
 
-            if (g_IsSteamExe)
-            {
-                g_SelectedFlagStatus = "Generated legacy files. Steam apply path still needs revalidation.";
-                g_FlagApplyPending = true;
-                return false;
-            }
-
             if (!g_BzrFn_GetLocalPlayerNetId || !g_BzrFn_BanLookup || !g_BzrFn_NetPlayerSetData)
             {
-                g_SelectedFlagStatus = "Generated legacy files. GOG flag apply helpers were not resolved.";
+                g_SelectedFlagStatus = "Generated legacy files. Flag apply helpers were not resolved.";
                 g_FlagApplyPending = true;
                 return false;
             }
@@ -5400,6 +5398,50 @@ namespace BZROpenShim
             return false;
         }
 
+        static std::string GetAutoSaveButtonLabel()
+        {
+            char autoSavePath[MAX_PATH] = {};
+            if (!TryGetAutoSaveFilePathUtf8(autoSavePath))
+                return "AutoSave";
+
+            std::filesystem::path labelPath(autoSavePath);
+            labelPath.replace_extension(".label.txt");
+
+            std::ifstream input(labelPath, std::ios::binary);
+            if (!input.is_open())
+                return "AutoSave";
+
+            std::string data((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+            if (!input.good() && !input.eof())
+                return "AutoSave";
+
+            data.erase(std::remove(data.begin(), data.end(), '\0'), data.end());
+            data.erase(std::remove(data.begin(), data.end(), '\r'), data.end());
+            data.erase(std::remove(data.begin(), data.end(), '\n'), data.end());
+
+            const auto trimPred = [](unsigned char ch)
+            {
+                return std::isspace(ch) != 0;
+            };
+            data.erase(data.begin(), std::find_if(data.begin(), data.end(), [&](char ch)
+            {
+                return !trimPred(static_cast<unsigned char>(ch));
+            }));
+            data.erase(std::find_if(data.rbegin(), data.rend(), [&](char ch)
+            {
+                return !trimPred(static_cast<unsigned char>(ch));
+            }).base(), data.end());
+
+            if (data.empty())
+                return "AutoSave";
+
+            constexpr size_t kMaxButtonLabelChars = 96;
+            if (data.size() > kMaxButtonLabelChars)
+                data.resize(kMaxButtonLabelChars);
+
+            return data;
+        }
+
         static void PrepareLoadScreenForSelection(void* screen)
         {
             if (!screen)
@@ -7808,8 +7850,13 @@ namespace BZROpenShim
         if (!AutoSaveFileExists())
             return;
 
+        const std::string autoSaveLabel = GetAutoSaveButtonLabel();
         if (g_AutoSaveLoadButton && g_AutoSaveLoadParent == parent && g_AutoSaveLoadScreen == screen)
+        {
+            if (g_BzrFn_SetButtonLabel)
+                g_BzrFn_SetButtonLabel(g_AutoSaveLoadButton, autoSaveLabel.c_str());
             return;
+        }
 
         g_AutoSaveLoadParent = parent;
         g_AutoSaveLoadScreen = screen;
@@ -7822,7 +7869,7 @@ namespace BZROpenShim
         std::memset(buttonMem, 0, 0x1EC);
         g_AutoSaveLoadButton = g_BzrFn_ButtonCtor(
             buttonMem,
-            "AutoSave",
+            autoSaveLabel.c_str(),
             kAutoSaveLoadButtonX,
             kAutoSaveLoadButtonY,
             kAutoSaveLoadButtonW,
@@ -7838,7 +7885,7 @@ namespace BZROpenShim
         if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(g_AutoSaveLoadButton, "mpcron.png");
         if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(g_AutoSaveLoadButton, "mpcrclk.png");
         if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(g_AutoSaveLoadButton, "mpcrclk.png");
-        if (g_BzrFn_SetButtonLabel) g_BzrFn_SetButtonLabel(g_AutoSaveLoadButton, "AutoSave");
+        if (g_BzrFn_SetButtonLabel) g_BzrFn_SetButtonLabel(g_AutoSaveLoadButton, autoSaveLabel.c_str());
         // 0x007CC660 is a label-style tooltip writer that stores text inline at
         // +0x144. Button objects use +0x150/+0x154 for hover/click callbacks,
         // so using it here corrupts the callback slot and crashes the load menu.

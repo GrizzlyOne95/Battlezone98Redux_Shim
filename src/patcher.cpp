@@ -111,9 +111,7 @@ namespace BZROpenShim
             }
             else
             {
-                std::memset(value, 0, sizeof(value));
-                const DWORD suppressLen = GetEnvironmentVariableA("OPENSHIM_SUPPRESS_STARTUP_AUTOLOAD", value, static_cast<DWORD>(sizeof(value)));
-                s_cached = (suppressLen > 0 && suppressLen < sizeof(value) && value[0] != '0') ? 1 : 0;
+                s_cached = 1;
             }
         }
         return s_cached != 0;
@@ -282,7 +280,7 @@ namespace BZROpenShim
 
         if (!ShouldSuppressStartupAutoLoad())
         {
-            Log(L"[INFO] Startup shell autoload gate preserved (default; set OPENSHIM_SUPPRESS_STARTUP_AUTOLOAD=1 to force-disable)\n");
+            Log(L"[INFO] Startup shell autoload gate preserved via OPENSHIM_ALLOW_STARTUP_AUTOLOAD\n");
             return;
         }
 
