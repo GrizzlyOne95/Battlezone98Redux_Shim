@@ -107,6 +107,8 @@ namespace BZROpenShim
     using FnMapFilterScroll = void(__cdecl*)();
     using FnGetLocalPlayerNetId = uint16_t(__cdecl*)();
     using FnNetPlayerSetData = void(__thiscall*)(void* thisPtr, uint32_t slot, uint8_t* data, uint32_t len);
+    using FnNetPlayerSetFlagBuffer = void(__thiscall*)(void* thisPtr, const uint8_t* data, uint32_t len);
+    using FnSetMyFlag = void(__cdecl*)();
     struct BuildItem;
     using FnBuildItemInit = void(__cdecl*)(BuildItem& item, int64_t token);
     using FnBuildItemCleanup = void(__cdecl*)(BuildItem& item);
@@ -173,6 +175,8 @@ namespace BZROpenShim
     static FnMapFilterScroll g_BzrFn_MapFilterScrollDown = nullptr; // 0x007CB540
     static FnGetLocalPlayerNetId g_BzrFn_GetLocalPlayerNetId = nullptr;
     static FnNetPlayerSetData g_BzrFn_NetPlayerSetData = nullptr;
+    static FnNetPlayerSetFlagBuffer g_BzrFn_NetPlayerSetFlagBuffer = nullptr;
+    static FnSetMyFlag g_BzrFn_SetMyFlag = nullptr;
     static FnBuildItemInit g_BzrFn_InitBuildItem = nullptr; // 0x0049F5C0
     static FnBuildItemCleanup g_BzrFn_CleanupBuildItem = nullptr; // 0x0049F880
     static FnProducerModeCall g_BzrFn_ProducerModeCallOriginal = nullptr;
@@ -259,6 +263,8 @@ namespace BZROpenShim
         constexpr size_t kLegacyFlagPayloadBytes = 0x100;
         constexpr size_t kLegacyFlagRowBytes = 8;
         constexpr uintptr_t kFlagDisplayAddr = 0x006DDD34;
+        constexpr uintptr_t kFlagFilePathBufferAddr = 0x00917FAC;
+        constexpr size_t kFlagFilePathBufferCapacity = MAX_PATH;
         constexpr size_t kFlagDisplayFlagIndexOffset = 0x10;
         constexpr size_t kFlagDisplayMakeTextureOffset = 0x14;
         constexpr uintptr_t kGogPersonSimulateEntryAddr = 0x004F4370;
@@ -425,6 +431,16 @@ namespace BZROpenShim
             size_t simpleKeyboardBlocks = 0;
             size_t keyboardChordBlocks = 0;
             size_t mixedBlocks = 0;
+            size_t uniqueGameKeyActions = 0;
+            size_t gameKeyChords = 0;
+            size_t firstPassInputRows = 0;
+            size_t firstPassGameKeyRows = 0;
+        };
+
+        struct GameKeyBindingAction
+        {
+            std::string action;
+            std::vector<std::string> chords;
         };
 
         struct InputBindingRowSeed
@@ -588,6 +604,7 @@ namespace BZROpenShim
         static std::filesystem::path g_InputBindingInstallDirectory = {};
         static InputBindingInventoryStats g_InputBindingInventory = {};
         static std::vector<InputBindingCommandBlock> g_InputBindingCommandBlocks = {};
+        static std::vector<GameKeyBindingAction> g_GameKeyBindingActions = {};
         static std::vector<InputBindingUiRow> g_InputBindingUiRows = {};
         static void* g_LastOptionsInputScreen = nullptr;
         static int g_EngineFlamePrimaryRedTexture = 0;
@@ -2604,6 +2621,26 @@ namespace BZROpenShim
             }
         }
 
+        static bool TryGetLocalPlayerForFlags(void*& outPlayer)
+        {
+            outPlayer = nullptr;
+            if (!g_BzrFn_GetLocalPlayerNetId || !g_BzrFn_BanLookup)
+                return false;
+
+            __try
+            {
+                const uint16_t localPlayerId = g_BzrFn_GetLocalPlayerNetId();
+                outPlayer = g_BzrFn_BanLookup(localPlayerId);
+                return outPlayer != nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+
+            outPlayer = nullptr;
+            return false;
+        }
+
         static void SortFlagCatalog()
         {
             std::sort(
@@ -2852,12 +2889,93 @@ namespace BZROpenShim
             return true;
         }
 
+        static bool TryApplySelectedFlagThroughEnginePath(const char* source, const char* path)
+        {
+            __try
+            {
+                auto* pathBuffer = reinterpret_cast<char*>(kFlagFilePathBufferAddr);
+                std::memset(pathBuffer, 0, kFlagFilePathBufferCapacity);
+                std::memcpy(pathBuffer, path, std::strlen(path));
+                g_BzrFn_SetMyFlag();
+                MarkFlagDisplayDirty();
+
+                void* localPlayer = nullptr;
+                const bool haveLocalPlayer = TryGetLocalPlayerForFlags(localPlayer);
+                const void* flagBuffer =
+                    haveLocalPlayer && localPlayer
+                    ? *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(localPlayer) + 0x1C)
+                    : nullptr;
+                const int flagIndex =
+                    haveLocalPlayer && localPlayer
+                    ? *reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(localPlayer) + 0x50)
+                    : -1;
+
+                if (flagBuffer)
+                {
+                    g_SelectedFlagStatus = "Uploaded selected flag through the engine SetMyFlag path.";
+                    g_FlagApplyPending = false;
+                }
+                else
+                {
+                    g_SelectedFlagStatus = "Engine SetMyFlag ran, but the local player flag buffer stayed empty.";
+                    g_FlagApplyPending = true;
+                }
+
+                Log(L"[FLAG] %hs engine apply path=%hs player=0x%p flagBuf=0x%p flagIndex=%d\n",
+                    source ? source : "flag",
+                    path,
+                    localPlayer,
+                    flagBuffer,
+                    flagIndex);
+                return flagBuffer != nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                g_SelectedFlagStatus = "Engine SetMyFlag apply raised an exception.";
+                g_FlagApplyPending = true;
+                Log(L"[FLAG] %hs engine apply raised an exception path=%hs\n",
+                    source ? source : "flag",
+                    path ? path : "");
+                return false;
+            }
+        }
+
+        static bool TryApplySelectedFlagThroughEngine(const char* source)
+        {
+            const FlagCatalogEntry* entry = GetSelectedFlagEntry();
+            if (!entry)
+            {
+                g_SelectedFlagStatus = "No source images found under the configured flag folders.";
+                return false;
+            }
+
+            if (!g_BzrFn_SetMyFlag)
+            {
+                g_SelectedFlagStatus = "Engine flag upload helper was not resolved.";
+                g_FlagApplyPending = true;
+                return false;
+            }
+
+            const std::string path = entry->sourcePath.string();
+            if (path.empty() || path.size() >= kFlagFilePathBufferCapacity)
+            {
+                g_SelectedFlagStatus = "Selected flag path is empty or too long for engine upload.";
+                g_FlagApplyPending = true;
+                return false;
+            }
+
+            return TryApplySelectedFlagThroughEnginePath(source, path.c_str());
+        }
+
         static bool TryApplyCachedFlagPayload(const char* source)
         {
             if (!g_FlagPayloadReady)
                 return false;
 
-            if (!g_BzrFn_GetLocalPlayerNetId || !g_BzrFn_BanLookup || !g_BzrFn_NetPlayerSetData)
+            if (!g_BzrFn_GetLocalPlayerNetId ||
+                !g_BzrFn_BanLookup ||
+                !g_BzrFn_NetPlayerSetData ||
+                !g_BzrFn_NetPlayerSetFlagBuffer)
             {
                 g_SelectedFlagStatus = "Generated legacy files. Flag apply helpers were not resolved.";
                 g_FlagApplyPending = true;
@@ -2866,24 +2984,27 @@ namespace BZROpenShim
 
             __try
             {
-                const uint16_t localPlayerId = g_BzrFn_GetLocalPlayerNetId();
-                void* const localPlayer = g_BzrFn_BanLookup(localPlayerId);
-                if (!localPlayer)
+                void* localPlayer = nullptr;
+                if (!TryGetLocalPlayerForFlags(localPlayer))
                 {
                     g_SelectedFlagStatus = "Generated legacy files. Waiting for a local multiplayer player object.";
                     g_FlagApplyPending = true;
                     return false;
                 }
 
+                g_BzrFn_NetPlayerSetFlagBuffer(
+                    localPlayer,
+                    g_SelectedFlagPayload.data(),
+                    static_cast<uint32_t>(g_SelectedFlagPayload.size()));
                 g_BzrFn_NetPlayerSetData(
                     localPlayer,
                     kLegacyFlagDataSlot,
                     g_SelectedFlagPayload.data(),
                     static_cast<uint32_t>(g_SelectedFlagPayload.size()));
                 MarkFlagDisplayDirty();
-                g_SelectedFlagStatus = "Uploaded 256-byte flag payload to player slot 0x0D.";
+                g_SelectedFlagStatus = "Uploaded 256-byte legacy fallback flag payload.";
                 g_FlagApplyPending = false;
-                Log(L"[FLAG] %hs applied payload bytes=%u slot=0x%02X player=0x%p\n",
+                Log(L"[FLAG] %hs applied legacy fallback payload bytes=%u slot=0x%02X player=0x%p\n",
                     source ? source : "flag",
                     static_cast<unsigned>(g_SelectedFlagPayload.size()),
                     static_cast<unsigned>(kLegacyFlagDataSlot),
@@ -2901,6 +3022,9 @@ namespace BZROpenShim
 
         static void PrimeSelectedFlagForTesting(const char* source)
         {
+            if (TryApplySelectedFlagThroughEngine(source))
+                return;
+
             if (!TryGenerateSelectedFlagArtifacts(source))
                 return;
 
@@ -4718,6 +4842,8 @@ namespace BZROpenShim
             {
                 if (ch == '_')
                     ch = ' ';
+                else
+                    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
             }
 
             bool capitalizeNext = true;
@@ -4737,6 +4863,19 @@ namespace BZROpenShim
             }
 
             return text;
+        }
+
+        static GameKeyBindingAction* FindGameKeyBindingAction(
+            std::vector<GameKeyBindingAction>& actions,
+            const std::string& action)
+        {
+            for (GameKeyBindingAction& entry : actions)
+            {
+                if (entry.action == action)
+                    return &entry;
+            }
+
+            return nullptr;
         }
 
         static std::string JoinStrings(const std::vector<std::string>& parts, const char* separator)
@@ -4918,6 +5057,55 @@ namespace BZROpenShim
             return true;
         }
 
+        static bool ParseGameKeyBindingMapFile(
+            const std::filesystem::path& gameKeyMapPath,
+            std::vector<GameKeyBindingAction>& outActions,
+            InputBindingInventoryStats& outInventory)
+        {
+            outActions.clear();
+            outInventory.uniqueGameKeyActions = 0;
+            outInventory.gameKeyChords = 0;
+
+            std::ifstream file(gameKeyMapPath);
+            if (!file)
+                return false;
+
+            std::string line;
+            while (std::getline(file, line))
+            {
+                const std::string trimmed = TrimAsciiCopy(line);
+                if (trimmed.empty() || trimmed[0] == '#')
+                    continue;
+
+                size_t cursor = 0;
+                while (cursor < trimmed.size() &&
+                       !std::isspace(static_cast<unsigned char>(trimmed[cursor])))
+                {
+                    ++cursor;
+                }
+
+                const std::string action = trimmed.substr(0, cursor);
+                const std::string chord = TrimAsciiCopy(trimmed.substr(cursor));
+                if (action.empty() || chord.empty())
+                    continue;
+
+                GameKeyBindingAction* existing = FindGameKeyBindingAction(outActions, action);
+                if (!existing)
+                {
+                    GameKeyBindingAction created = {};
+                    created.action = action;
+                    outActions.push_back(std::move(created));
+                    existing = &outActions.back();
+                }
+
+                if (AppendUniqueString(existing->chords, chord))
+                    ++outInventory.gameKeyChords;
+            }
+
+            outInventory.uniqueGameKeyActions = outActions.size();
+            return true;
+        }
+
         static std::string FormatInputBindingBlockValue(const InputBindingCommandBlock& block)
         {
             if (block.positiveKeyboardTokens.empty() || block.hasPositiveNonKeyboard)
@@ -4973,6 +5161,28 @@ namespace BZROpenShim
             return rows;
         }
 
+        static std::vector<InputBindingUiRow> BuildFirstPassGameKeyBindingRows(
+            const std::vector<GameKeyBindingAction>& actions)
+        {
+            std::vector<InputBindingUiRow> rows;
+            rows.reserve(actions.size());
+
+            for (const GameKeyBindingAction& action : actions)
+            {
+                InputBindingUiRow row = {};
+                row.family = InputBindingMapFamily::GameKey;
+                row.command = action.action;
+                row.displayText = HumanizeInputBindingCommand(action.action);
+                row.currentBindingText = JoinStrings(action.chords, ", ");
+                row.foundInMap = true;
+                row.reserved = row.currentBindingText.empty();
+                row.matchingBlockCount = action.chords.size();
+                rows.push_back(std::move(row));
+            }
+
+            return rows;
+        }
+
         static void LogInputBindingUiScaffoldSummary()
         {
             if (g_InputBindingUiScaffoldLogged)
@@ -4982,22 +5192,32 @@ namespace BZROpenShim
             const std::string installPath = g_InputBindingInstallDirectory.string();
             const std::string inputMapPath =
                 (g_InputBindingInstallDirectory / "input.map").string();
+            const std::string gameKeyMapPath =
+                (g_InputBindingInstallDirectory / "gamekey.map").string();
 
-            Log(L"[INPUTUI] Scaffold install=%hs input.map=%hs blocks=%u simple=%u chord=%u mixed=%u firstPassRows=%u\n",
+            Log(L"[INPUTUI] Scaffold install=%hs input.map=%hs gamekey.map=%hs inputBlocks=%u simple=%u chord=%u mixed=%u gameActions=%u gameChords=%u firstPassInputRows=%u firstPassGameKeyRows=%u totalRows=%u\n",
                 installPath.c_str(),
                 inputMapPath.c_str(),
+                gameKeyMapPath.c_str(),
                 static_cast<unsigned>(g_InputBindingInventory.uniqueCommandBlocks),
                 static_cast<unsigned>(g_InputBindingInventory.simpleKeyboardBlocks),
                 static_cast<unsigned>(g_InputBindingInventory.keyboardChordBlocks),
                 static_cast<unsigned>(g_InputBindingInventory.mixedBlocks),
+                static_cast<unsigned>(g_InputBindingInventory.uniqueGameKeyActions),
+                static_cast<unsigned>(g_InputBindingInventory.gameKeyChords),
+                static_cast<unsigned>(g_InputBindingInventory.firstPassInputRows),
+                static_cast<unsigned>(g_InputBindingInventory.firstPassGameKeyRows),
                 static_cast<unsigned>(g_InputBindingUiRows.size()));
 
             const size_t previewCount = std::min<size_t>(g_InputBindingUiRows.size(), 10);
             for (size_t index = 0; index < previewCount; ++index)
             {
                 const InputBindingUiRow& row = g_InputBindingUiRows[index];
-                Log(L"[INPUTUI]   row[%u] cmd=%hs title=%hs value=%hs reserved=%hs blocks=%u\n",
+                const char* familyText =
+                    row.family == InputBindingMapFamily::GameKey ? "gamekey" : "input";
+                Log(L"[INPUTUI]   row[%u] family=%hs cmd=%hs title=%hs value=%hs reserved=%hs blocks=%u\n",
                     static_cast<unsigned>(index),
+                    familyText,
                     row.command.c_str(),
                     row.displayText.c_str(),
                     row.currentBindingText.empty() ? "<none>" : row.currentBindingText.c_str(),
@@ -5020,6 +5240,7 @@ namespace BZROpenShim
             g_InputBindingInstallDirectory = ResolveInputBindingInstallDirectory();
             g_InputBindingInventory = {};
             g_InputBindingCommandBlocks.clear();
+            g_GameKeyBindingActions.clear();
             g_InputBindingUiRows.clear();
             g_LastOptionsInputScreen = nullptr;
 
@@ -5032,7 +5253,26 @@ namespace BZROpenShim
                 return;
             }
 
-            g_InputBindingUiRows = BuildFirstPassInputBindingRows(g_InputBindingCommandBlocks);
+            const std::filesystem::path gameKeyMapPath = g_InputBindingInstallDirectory / "gamekey.map";
+            if (!ParseGameKeyBindingMapFile(gameKeyMapPath, g_GameKeyBindingActions, g_InputBindingInventory))
+            {
+                const std::string gameKeyMapPathText = gameKeyMapPath.string();
+                Log(L"[INPUTUI] Failed to parse gamekey binding map at %hs\n",
+                    gameKeyMapPathText.c_str());
+            }
+
+            std::vector<InputBindingUiRow> inputRows =
+                BuildFirstPassInputBindingRows(g_InputBindingCommandBlocks);
+            std::vector<InputBindingUiRow> gameKeyRows =
+                BuildFirstPassGameKeyBindingRows(g_GameKeyBindingActions);
+            g_InputBindingInventory.firstPassInputRows = inputRows.size();
+            g_InputBindingInventory.firstPassGameKeyRows = gameKeyRows.size();
+
+            g_InputBindingUiRows = inputRows;
+            g_InputBindingUiRows.insert(
+                g_InputBindingUiRows.end(),
+                gameKeyRows.begin(),
+                gameKeyRows.end());
             LogInputBindingUiScaffoldSummary();
         }
 
@@ -5642,6 +5882,7 @@ namespace BZROpenShim
         g_InputBindingInstallDirectory.clear();
         g_InputBindingInventory = {};
         g_InputBindingCommandBlocks.clear();
+        g_GameKeyBindingActions.clear();
         g_InputBindingUiRows.clear();
         g_LastOptionsInputScreen = nullptr;
         g_JumpSnipeProbeLogState = {};
@@ -5703,11 +5944,12 @@ namespace BZROpenShim
 
         g_BzrFn_VehicleFixPre = reinterpret_cast<void*>(0x00481EA0);
         g_BzrFn_VehicleFixOrig = reinterpret_cast<void*>(0x00481AF0);
-        if (!g_IsSteamExe)
-        {
-            g_BzrFn_GetLocalPlayerNetId = reinterpret_cast<FnGetLocalPlayerNetId>(0x00572D90);
-            g_BzrFn_NetPlayerSetData = reinterpret_cast<FnNetPlayerSetData>(0x00575570);
-        }
+        // The live Redux runtime maps these multiplayer flag helpers at the
+        // same settled addresses on current GOG and Steam builds.
+        g_BzrFn_GetLocalPlayerNetId = reinterpret_cast<FnGetLocalPlayerNetId>(0x00572D90);
+        g_BzrFn_NetPlayerSetData = reinterpret_cast<FnNetPlayerSetData>(0x00575570);
+        g_BzrFn_NetPlayerSetFlagBuffer = reinterpret_cast<FnNetPlayerSetFlagBuffer>(0x00575810);
+        g_BzrFn_SetMyFlag = reinterpret_cast<FnSetMyFlag>(0x0056FA50);
 
         // Steam's wrapped executable still maps these helpers at the same live
         // runtime addresses as GOG on the current 2.2.301 build.
@@ -7578,7 +7820,10 @@ namespace BZROpenShim
         static void UpdateFlagSelectionUiLabel(void* label)
         {
             if (g_FlagApplyPending)
-                TryApplyCachedFlagPayload("ui_update");
+            {
+                if (!TryApplySelectedFlagThroughEngine("ui_update"))
+                    TryApplyCachedFlagPayload("ui_update");
+            }
 
             if (!label || !g_BzrFn_SetTooltip)
                 return;
