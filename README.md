@@ -274,6 +274,10 @@ netcode investigation work. It runs inside the existing `WSARecvFrom` hook and
 holds small out-of-order bursts briefly so they can be delivered back to the
 game in sequence.
 
+Netcode patching in OpenShim is maintained by `GrizzlyOne95`, with `Piercing`
+providing captures, validation, and technical collaboration on the multiplayer
+investigation path.
+
 Configure it through `net.ini` next to the game executable:
 
 ```ini
@@ -465,4 +469,9 @@ search raw PDB strings with repeated `--find` regex arguments.
 
 MIT - see LICENSE file
 
-## Special Thanks to Piercing, VTrider and Business Lawyer for technical assistance and collaboration building this DLL patch. Thanks to Janne for their original work learning how to shim and hook DLL's into BZR.
+## Credits
+
+- `GrizzlyOne95` for primary implementation, maintenance, and ongoing clean-room patch work across the shim.
+- `Piercing` for technical assistance, multiplayer testing, and netcode investigation support.
+- `VTrider` and `Business Lawyer` for technical assistance and collaboration building this DLL patch.
+- `Janne` for the original work learning how to shim and hook DLLs into BZR.
