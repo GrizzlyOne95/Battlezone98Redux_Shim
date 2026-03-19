@@ -6,8 +6,29 @@ Enabled=1
 ;
 ; This first pass is GOG-only for now. Steam still skips the hook site until it
 ; gets a fresh byte-level validation.
+;
+; You can map either broad producer buckets or exact producer ODF names.
+; Exact ODF-name keys win over the bucket keys.
+;
+; If the live producer ODF itself contains:
+;   [ProducerClass]
+;   buildMenuRoot = "b_amcmbt"
+; or:
+;   [ProducerClass]
+;   buildMenu = "b_amcmbt"
+; that ODF-side value wins over this INI.
+;
+; Values can be builder/list roots such as b_amcmbt, or any other token the
+; native BuildItem loader can resolve.
+
+Fallback=build
 
 Recycler=b_amcmbt
 Factory=b_ambldg
 Armory=b_amprod
 ConstructionRig=b_ambldg
+
+; Exact producer ODF overrides:
+; avmuf=b_amcmbt
+; avrecy=b_ambldg
+; avslf=b_amprod
