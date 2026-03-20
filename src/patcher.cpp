@@ -135,6 +135,48 @@ namespace BZROpenShim
         return s_cached != 0;
     }
 
+    static bool EnvFlagEnabledByName(const char* name);
+
+    static bool ShouldEnableChunkExperiments()
+    {
+        static int s_cached = -1;
+        if (s_cached < 0)
+        {
+            s_cached =
+                EnvFlagEnabledByName("OPENSHIM_ENABLE_CHUNK_EXPERIMENTS") ||
+                EnvFlagEnabledByName("BZR_ENABLE_CHUNK_EXPERIMENTS") ||
+                EnvFlagEnabledByName("BZR_CHUNK_FORCE_FIRST_GEO") ||
+                EnvFlagEnabledByName("OPENSHIM_CHUNK_FORCE_FIRST_GEO") ||
+                EnvFlagEnabledByName("OPENSHIM_CHUNK_PROXY_DEBUG") ||
+                EnvFlagEnabledByName("OPENSHIM_CHUNK_PLACEHOLDER_PROXY") ||
+                EnvFlagEnabledByName("BZR_CHUNK_TRACE") ||
+                EnvFlagEnabledByName("OPENSHIM_CHUNK_TRACE") ||
+                EnvFlagEnabledByName("BZR_CHUNK_TRACE_VERBOSE") ||
+                EnvFlagEnabledByName("OPENSHIM_CHUNK_TRACE_VERBOSE") ||
+                EnvFlagEnabledByName("BZR_TRACE_CHUNK_EFFECT") ||
+                EnvFlagEnabledByName("OPENSHIM_TRACE_CHUNK_EFFECT") ||
+                EnvFlagEnabledByName("OPENSHIM_CHUNK_EFFECT_TRACE") ||
+                EnvFlagEnabledByName("BZR_CHUNK_LOG_BUDGET") ||
+                EnvFlagEnabledByName("OPENSHIM_CHUNK_LOG_BUDGET") ||
+                EnvFlagEnabledByName("BZR_CHUNK_TRACE_ENTRY_LIMIT") ||
+                EnvFlagEnabledByName("OPENSHIM_CHUNK_TRACE_ENTRY_LIMIT") ? 1 : 0;
+        }
+        return s_cached != 0;
+    }
+
+    static bool ShouldEnableProducerBuildMenuExperiment()
+    {
+        static int s_cached = -1;
+        if (s_cached < 0)
+        {
+            s_cached =
+                EnvFlagEnabledByName("OPENSHIM_ENABLE_PRODUCER_BUILD_MENU") ||
+                EnvFlagEnabledByName("OPENSHIM_ENABLE_PRODUCER_BUILD_MENU_EXPERIMENT") ||
+                EnvFlagEnabledByName("BZR_ENABLE_PRODUCER_BUILD_MENU") ? 1 : 0;
+        }
+        return s_cached != 0;
+    }
+
     static bool EnvFlagEnabledByName(const char* name)
     {
         if (!name || !*name)
@@ -183,6 +225,20 @@ namespace BZROpenShim
                strcmp(name, "Map Jump Fix Branch Override") == 0;
     }
 
+    static bool IsChunkExperimentPatchName(const char* name)
+    {
+        if (!name)
+            return false;
+
+        return strcmp(name, "Chunk Render Resolve Hook") == 0 ||
+               strcmp(name, "Chunk Effect Simulate VTable Hook") == 0;
+    }
+
+    static bool IsProducerBuildMenuExperimentPatchName(const char* name)
+    {
+        return name && strcmp(name, "Producer Build Menu Root Hook") == 0;
+    }
+
     static void FilterPatchesForRuntime(std::vector<PatchDef>& patches, bool isSteam)
     {
         if (ShouldEnableMapRefreshFixes(isSteam))
@@ -215,6 +271,48 @@ namespace BZROpenShim
                     Log(L"[INFO] Map refresh fixes disabled via env override (%zu patch(es) skipped)\n",
                         removed);
                 }
+            }
+        }
+
+        if (!ShouldEnableChunkExperiments())
+        {
+            const size_t before = patches.size();
+            patches.erase(
+                std::remove_if(
+                    patches.begin(),
+                    patches.end(),
+                    [](const PatchDef& patch)
+                    {
+                        return IsChunkExperimentPatchName(patch.name);
+                    }),
+                patches.end());
+
+            const size_t removed = before - patches.size();
+            if (removed > 0)
+            {
+                Log(L"[INFO] Chunk experiments disabled by default (%zu patch(es) skipped). Set OPENSHIM_ENABLE_CHUNK_EXPERIMENTS=1 or a chunk trace/fallback env var to opt in.\n",
+                    removed);
+            }
+        }
+
+        if (!ShouldEnableProducerBuildMenuExperiment())
+        {
+            const size_t before = patches.size();
+            patches.erase(
+                std::remove_if(
+                    patches.begin(),
+                    patches.end(),
+                    [](const PatchDef& patch)
+                    {
+                        return IsProducerBuildMenuExperimentPatchName(patch.name);
+                    }),
+                patches.end());
+
+            const size_t removed = before - patches.size();
+            if (removed > 0)
+            {
+                Log(L"[INFO] Producer build-menu experiment disabled by default (%zu patch(es) skipped). Set OPENSHIM_ENABLE_PRODUCER_BUILD_MENU=1 to opt in.\n",
+                    removed);
             }
         }
     }
