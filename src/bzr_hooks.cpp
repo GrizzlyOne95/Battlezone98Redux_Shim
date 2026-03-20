@@ -822,6 +822,20 @@ namespace BZROpenShim
             return value[0] != '0' && value[0] != '\0';
         }
 
+        static bool ShouldEnableMultiplayerFlagUi()
+        {
+            static int s_cached = -1;
+            if (s_cached < 0)
+            {
+                s_cached =
+                    EnvFlagEnabled("OPENSHIM_ENABLE_MP_FLAG_UI") ||
+                    EnvFlagEnabled("OPENSHIM_ENABLE_MULTIPLAYER_FLAG_UI") ||
+                    EnvFlagEnabled("OPENSHIM_ENABLE_MP_FLAGS") ||
+                    EnvFlagEnabled("BZR_ENABLE_MP_FLAG_UI") ? 1 : 0;
+            }
+            return s_cached != 0;
+        }
+
         static bool TryGetEnvFloat(const char* name, float& outValue)
         {
             if (!name || !*name)
@@ -2266,6 +2280,74 @@ namespace BZROpenShim
             return std::filesystem::path(path).parent_path();
         }
 
+        static void AppendUniquePath(std::vector<std::filesystem::path>& paths, const std::filesystem::path& candidate)
+        {
+            if (candidate.empty())
+                return;
+
+            if (std::find(paths.begin(), paths.end(), candidate) != paths.end())
+                return;
+
+            paths.push_back(candidate);
+        }
+
+        static std::filesystem::path TryGetWorkshopContentDirectory(const std::filesystem::path& gameDir)
+        {
+            if (gameDir.empty())
+                return {};
+
+            const auto normalized = gameDir.lexically_normal().string();
+            std::string lower = normalized;
+            std::transform(lower.begin(), lower.end(), lower.begin(),
+                [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+
+            constexpr const char* kSteamCommonMarker = "\\steamapps\\common\\";
+            const size_t markerPos = lower.find(kSteamCommonMarker);
+            if (markerPos == std::string::npos)
+                return {};
+
+            return std::filesystem::path(normalized.substr(0, markerPos)) /
+                "steamapps" / "workshop" / "content" / "301650";
+        }
+
+        static void AppendImmediateSubdirectories(
+            const std::filesystem::path& parent,
+            std::vector<std::filesystem::path>& results)
+        {
+            if (parent.empty())
+                return;
+
+            std::error_code ec;
+            if (!std::filesystem::exists(parent, ec) || ec)
+                return;
+
+            for (std::filesystem::directory_iterator it(parent, ec), end;
+                 !ec && it != end;
+                 it.increment(ec))
+            {
+                if (ec)
+                    break;
+
+                const auto& entry = *it;
+                if (entry.is_directory(ec) && !ec)
+                    AppendUniquePath(results, entry.path());
+            }
+        }
+
+        static std::vector<std::filesystem::path> GetCampaignContentRootCandidates(
+            const std::filesystem::path& gameDir)
+        {
+            std::vector<std::filesystem::path> candidates;
+            if (gameDir.empty())
+                return candidates;
+
+            AppendImmediateSubdirectories(gameDir / "addon", candidates);
+            AppendImmediateSubdirectories(gameDir / "mods", candidates);
+            AppendImmediateSubdirectories(gameDir / "packaged_mods", candidates);
+            AppendImmediateSubdirectories(TryGetWorkshopContentDirectory(gameDir), candidates);
+            return candidates;
+        }
+
         static char* TrimAsciiInPlace(char* text)
         {
             if (!text)
@@ -2383,10 +2465,12 @@ namespace BZROpenShim
 
             candidates.push_back(configDir / kFlagsDirectoryName);
 
-            const auto addonDir = configDir / "addon" / "campaignReimagined";
-            candidates.push_back(addonDir / kFlagsDirectoryName);
-            candidates.push_back(addonDir / "_Release" / kFlagsDirectoryName);
-            candidates.push_back(addonDir / "_Source" / kFlagsDirectoryName);
+            for (const auto& root : GetCampaignContentRootCandidates(configDir))
+            {
+                AppendUniquePath(candidates, root / kFlagsDirectoryName);
+                AppendUniquePath(candidates, root / "_Release" / kFlagsDirectoryName);
+                AppendUniquePath(candidates, root / "_Source" / kFlagsDirectoryName);
+            }
             return candidates;
         }
 
@@ -5871,9 +5955,12 @@ namespace BZROpenShim
             if (moduleDir.empty())
                 return candidates;
 
-            candidates.push_back(moduleDir / "addon" / "campaignReimagined" / "ODF");
-            candidates.push_back(moduleDir / "addon" / "campaignReimagined" / "_Release" / "ODF");
-            candidates.push_back(moduleDir / "addon" / "campaignReimagined" / "_Source" / "ODF");
+            for (const auto& root : GetCampaignContentRootCandidates(moduleDir))
+            {
+                AppendUniquePath(candidates, root / "ODF");
+                AppendUniquePath(candidates, root / "_Release" / "ODF");
+                AppendUniquePath(candidates, root / "_Source" / "ODF");
+            }
             candidates.push_back(moduleDir / "Edit" / "stock");
             return candidates;
         }
@@ -7144,6 +7231,8 @@ namespace BZROpenShim
             (g_BzrFn_InitBuildItem && g_BzrFn_CleanupBuildItem && g_BzrBuildMenuRoot)
                 ? (g_IsSteamExe ? "Steam ready" : "GOG ready")
                 : "disabled");
+        Log(L"[FLAG] Multiplayer flag UI: %hs\n",
+            ShouldEnableMultiplayerFlagUi() ? "enabled" : "disabled");
         EnsureBansConfigLoaded();
         {
             const std::string bansConfigPath = GetBansConfigPath().string();
@@ -9251,7 +9340,7 @@ namespace BZROpenShim
             g_BzrFn_AddChild(parent, g_BanLabelHost, 0);
         }
 
-        if (!g_FlagButtonHost || !g_FlagLabelHost)
+        if (ShouldEnableMultiplayerFlagUi() && (!g_FlagButtonHost || !g_FlagLabelHost))
         {
             CreateFlagButtonCommon(
                 parent,
@@ -9321,7 +9410,7 @@ namespace BZROpenShim
             g_BzrFn_AddChild(parent, g_BanLabelClient, 0);
         }
 
-        if (!g_FlagButtonClient || !g_FlagLabelClient)
+        if (ShouldEnableMultiplayerFlagUi() && (!g_FlagButtonClient || !g_FlagLabelClient))
         {
             CreateFlagButtonCommon(
                 parent,

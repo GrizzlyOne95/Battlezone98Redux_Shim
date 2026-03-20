@@ -9,8 +9,6 @@
 
 #include <Windows.h>
 #include <d3d9.h>
-#include <strsafe.h>
-#include <cwchar>
 
 namespace BZROpenShim
 {
@@ -19,7 +17,6 @@ namespace BZROpenShim
 
     static PFN_Direct3DCreate9 g_RealDirect3DCreate9 = nullptr;
     static PFN_Direct3DCreate9Ex g_RealDirect3DCreate9Ex = nullptr;
-    static volatile LONG g_EarlySubtitlesLoadState = 0;
 
     namespace
     {
@@ -121,67 +118,9 @@ namespace BZROpenShim
             return false;
         }
 
-        static bool BuildEarlySubtitlesPath(wchar_t (&path)[MAX_PATH])
-        {
-            path[0] = L'\0';
-
-            wchar_t exePath[MAX_PATH] = {};
-            const DWORD len = GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-            if (len == 0 || len >= MAX_PATH)
-                return false;
-
-            wchar_t* lastSlash = wcsrchr(exePath, L'\\');
-            if (!lastSlash)
-                return false;
-
-            *(lastSlash + 1) = L'\0';
-            if (FAILED(StringCchPrintfW(path, MAX_PATH, L"%saddon\\campaignReimagined\\subtitles.dll", exePath)))
-                return false;
-
-            return true;
-        }
-
-        static void EnsureEarlySubtitlesLoaded(const wchar_t* reason)
-        {
-            const LONG previous = InterlockedCompareExchange(&g_EarlySubtitlesLoadState, 1, 0);
-            if (previous != 0)
-                return;
-
-            wchar_t subtitlesPath[MAX_PATH] = {};
-            if (!BuildEarlySubtitlesPath(subtitlesPath))
-            {
-                Log(L"[D3D] Failed to build early subtitles.dll path for reason=%ls\n", reason ? reason : L"<unknown>");
-                return;
-            }
-
-            if (GetFileAttributesW(subtitlesPath) == INVALID_FILE_ATTRIBUTES)
-            {
-                Log(L"[D3D] Early subtitles.dll path not found: %ls (reason=%ls)\n", subtitlesPath, reason ? reason : L"<unknown>");
-                return;
-            }
-
-            if (GetModuleHandleW(subtitlesPath))
-            {
-                Log(L"[D3D] subtitles.dll already loaded before early load attempt: %ls\n", subtitlesPath);
-                return;
-            }
-
-            Log(L"[D3D] Loading subtitles.dll early from %ls (reason=%ls)\n", subtitlesPath, reason ? reason : L"<unknown>");
-            HMODULE subtitlesModule = LoadLibraryW(subtitlesPath);
-            if (subtitlesModule)
-            {
-                Log(L"[D3D] Early subtitles.dll load succeeded: module=0x%p\n", subtitlesModule);
-            }
-            else
-            {
-                Log(L"[D3D] Early subtitles.dll load FAILED: err=%lu path=%ls\n", GetLastError(), subtitlesPath);
-            }
-        }
-
         static IDirect3D9* WINAPI Hooked_Direct3DCreate9(UINT sdkVersion)
         {
             Log(L"[D3D] Direct3DCreate9 intercepted (sdk=%u)\n", sdkVersion);
-            EnsureEarlySubtitlesLoaded(L"Direct3DCreate9");
 
             if (!g_RealDirect3DCreate9)
             {
@@ -197,7 +136,6 @@ namespace BZROpenShim
         static HRESULT WINAPI Hooked_Direct3DCreate9Ex(UINT sdkVersion, IDirect3D9Ex** outD3D9Ex)
         {
             Log(L"[D3D] Direct3DCreate9Ex intercepted (sdk=%u)\n", sdkVersion);
-            EnsureEarlySubtitlesLoaded(L"Direct3DCreate9Ex");
 
             if (!g_RealDirect3DCreate9Ex)
             {
@@ -238,10 +176,6 @@ namespace BZROpenShim
                 if (module != nullptr)
                 {
                     hooked = PatchD3DImportsForModule(module, moduleName);
-                    if (_wcsicmp(moduleName, L"RenderSystem_Direct3D9.dll") == 0)
-                    {
-                        EnsureEarlySubtitlesLoaded(L"RenderSystem_Direct3D9 loaded");
-                    }
                     break;
                 }
 
