@@ -777,6 +777,7 @@ namespace BZROpenShim
         HANDLE hProc = GetCurrentProcess();
         DWORD oldProtect = 0;
         void* ptr = reinterpret_cast<void*>(address);
+        const bool isSteam = IsSteamExe();
 
         // Verify original bytes match (detects Steam vs GOG mismatch)
         if (!expected_original.empty())
@@ -797,6 +798,40 @@ namespace BZROpenShim
                 {
                     match = false;
                     break;
+                }
+            }
+
+            if (!match && isSteam)
+            {
+                constexpr DWORD kRetryAttempts = 300;
+                constexpr DWORD kRetryDelayMs = 10;
+                for (DWORD attempt = 0; attempt < kRetryAttempts && !match; ++attempt)
+                {
+                    Sleep(kRetryDelayMs);
+
+                    read = 0;
+                    if (!ReadProcessMemory(hProc, ptr, current.data(), current.size(), &read) ||
+                        read != current.size())
+                    {
+                        break;
+                    }
+
+                    match = true;
+                    for (size_t i = 0; i < expected_original.size(); ++i)
+                    {
+                        if (current[i] != expected_original[i])
+                        {
+                            match = false;
+                            break;
+                        }
+                    }
+
+                    if (match)
+                    {
+                        Log(L"[INFO] %hs original bytes settled after %u retry attempts\n",
+                            name,
+                            static_cast<unsigned>(attempt + 1));
+                    }
                 }
             }
 

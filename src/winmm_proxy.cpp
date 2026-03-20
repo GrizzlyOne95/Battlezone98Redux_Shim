@@ -21,6 +21,11 @@ extern "C" WINMMAPI BOOL WINAPI OpenShimSetTargetReticlePopupMode(int mode)
     return BZROpenShim::SetTargetReticlePopupModeFromBridge(mode) ? TRUE : FALSE;
 }
 
+extern "C" WINMMAPI BOOL WINAPI OpenShimGetHudSpriteRect(LPCSTR name, int* x, int* y, int* w, int* h)
+{
+    return BZROpenShim::GetHudSpriteRectFromBridge(name, x, y, w, h) ? TRUE : FALSE;
+}
+
 extern "C" WINMMAPI BOOL WINAPI OpenShimSetHudSpriteRect(LPCSTR name, int x, int y, int w, int h)
 {
     return BZROpenShim::SetHudSpriteRectFromBridge(name, x, y, w, h) ? TRUE : FALSE;
