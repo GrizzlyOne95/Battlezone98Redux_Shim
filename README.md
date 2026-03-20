@@ -161,6 +161,10 @@ The hook is disabled by default. Enable it with either environment variable:
 - `BZR_CHUNK_FORCE_FIRST_GEO=1`
 - `OPENSHIM_CHUNK_FORCE_FIRST_GEO=1`
 
+Any of the existing chunk trace/fallback env vars will also opt the chunk
+experiment hooks in at startup. For a broad opt-in without a specific trace
+flag, set `OPENSHIM_ENABLE_CHUNK_EXPERIMENTS=1`.
+
 Current scope:
 
 - validated against the GOG address `CALL 0x004E3620` at `0x00443B34`
@@ -441,6 +445,7 @@ What it does:
 
 Configuration:
 
+- set `OPENSHIM_ENABLE_PRODUCER_BUILD_MENU=1` before launching the game
 - copy `openshim_producer_build_menus.ini.example` next to the game EXE as
   `openshim_producer_build_menus.ini`
 - set root tokens under `[ProducerBuildMenus]` for:
@@ -448,6 +453,10 @@ Configuration:
   - `Factory`
   - `Armory`
   - `ConstructionRig`
+
+The multiplayer vehicle flag-selection UI is also treated as experimental for
+release builds now. Set `OPENSHIM_ENABLE_MP_FLAG_UI=1` before launch if you
+want the lobby `F` button and flag-generation helpers visible.
 
 Current scope and cautions:
 
