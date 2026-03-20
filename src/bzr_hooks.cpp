@@ -77,10 +77,15 @@ namespace BZROpenShim
     using FnVehicleListStep = void(__thiscall*)(void* thisPtr);
     using FnVehicleListFinalize = void(__thiscall*)(void* thisPtr);
 
-    using FnUiCtor = void* (__thiscall*)(void* self,
-                                         const char* label,
-                                         float x, float y, float w, float h,
-                                         uint32_t flags, void* parent, int a, int b);
+    using FnUiButtonCtor = void* (__thiscall*)(void* self,
+                                               const char* label,
+                                               float x, float y, float w, float h,
+                                               uint32_t flags, void* parent, int a, int b);
+    // The label ctor only cleans 8 stack arguments in v2.2.301.
+    using FnUiLabelCtor = void* (__thiscall*)(void* self,
+                                              const char* label,
+                                              float x, float y, float w, float h,
+                                              uint32_t flags, void* parent, int a);
     using FnUiSetStr = void(__thiscall*)(void* self, const char* str);
     using FnUiSetInt = void(__thiscall*)(void* self, void* param);
     using FnUiSetCb  = void(__thiscall*)(void* self, void* cb);
@@ -146,8 +151,8 @@ namespace BZROpenShim
     static FnVehicleListStep g_BzrFn_VehicleListRefresh1 = nullptr; // 0x007A3F80
     static FnVehicleListStep g_BzrFn_VehicleListRefresh2 = nullptr; // 0x007A4070
 
-    static FnUiCtor g_BzrFn_ButtonCtor = nullptr; // 0x007C2480
-    static FnUiCtor g_BzrFn_LabelCtor  = nullptr; // 0x007CC390
+    static FnUiButtonCtor g_BzrFn_ButtonCtor = nullptr; // 0x007C2480
+    static FnUiLabelCtor g_BzrFn_LabelCtor  = nullptr; // 0x007CC390
     static FnUiSetStr g_BzrFn_SetTextureOff = nullptr; // 0x007D2870
     static FnUiSetStr g_BzrFn_SetTextureOver = nullptr; // 0x007C2F10
     static FnUiSetStr g_BzrFn_SetTextureOn = nullptr; // 0x007C2E80
@@ -214,6 +219,7 @@ namespace BZROpenShim
         constexpr uint32_t kAutoSaveLoadButtonFlags = 0x22;
         constexpr int kBanScanMaxSessionId = 64;
         constexpr int kLoadQueuedState = 5;
+        constexpr int kLoadSaveState = 8;
         constexpr int kQueuedLoadNameBufferLen = 16;
         constexpr uintptr_t kLoadScreenSelectionFlagAddr = 0x00918133;
         constexpr uintptr_t kMissionSaveFlagAddr = 0x009173B7;
@@ -229,6 +235,9 @@ namespace BZROpenShim
         constexpr char kFlagsGeneratedDirectoryName[] = "_generated";
         constexpr char kGeneratedFlagBmpName[] = "openshim_selected_flag.bmp";
         constexpr char kGeneratedFlagPayloadName[] = "openshim_selected_flag.bin";
+        constexpr char kEngineFlagResourceRootName[] = "BZ_ASSETS";
+        constexpr char kEngineFlagResourceDirectoryName[] = "OpenShimFlags";
+        constexpr char kEngineFlagResourcePath[] = "OpenShimFlags/openshim_selected_flag.bmp";
         constexpr char kProducerBuildMenuIniName[] = "openshim_producer_build_menus.ini";
         constexpr char kProducerBuildMenuSection[] = "ProducerBuildMenus";
         constexpr char kProducerBuildMenuDefaultRoot[] = "build";
@@ -526,6 +535,7 @@ namespace BZROpenShim
         static int g_SelectedFlagIndex = -1;
         static std::string g_SelectedFlagStatus = "Legacy test path idle.";
         static std::string g_GeneratedFlagFileName;
+        static std::string g_EngineStagedFlagFileName;
         static bool g_FlagPayloadReady = false;
         static bool g_FlagApplyPending = false;
         static std::array<uint8_t, kLegacyFlagPayloadBytes> g_SelectedFlagPayload = {};
@@ -2326,6 +2336,18 @@ namespace BZROpenShim
             return GetFlagsDirectoryPath() / kFlagsGeneratedDirectoryName;
         }
 
+        static std::filesystem::path GetEngineFlagResourceDirectoryPath()
+        {
+            return GetConfigModuleDirectory() /
+                   kEngineFlagResourceRootName /
+                   kEngineFlagResourceDirectoryName;
+        }
+
+        static std::filesystem::path GetEngineFlagResourceFilePath()
+        {
+            return GetEngineFlagResourceDirectoryPath() / kGeneratedFlagBmpName;
+        }
+
         static LegacyFlagArtifactPaths GetLegacyFlagArtifactPaths()
         {
             LegacyFlagArtifactPaths paths = {};
@@ -2430,7 +2452,59 @@ namespace BZROpenShim
             g_FlagPayloadReady = false;
             g_FlagApplyPending = false;
             g_GeneratedFlagFileName.clear();
+            g_EngineStagedFlagFileName.clear();
             g_SelectedFlagPayload.fill(0);
+        }
+
+        static bool EnsureEngineFlagResourceStaged(const char* source, std::string& outResourcePath)
+        {
+            if (g_SelectedFlagIndex < 0 ||
+                static_cast<size_t>(g_SelectedFlagIndex) >= g_FlagCatalog.size())
+            {
+                return false;
+            }
+
+            const FlagCatalogEntry& entry = g_FlagCatalog[static_cast<size_t>(g_SelectedFlagIndex)];
+
+            outResourcePath = kEngineFlagResourcePath;
+            if (g_EngineStagedFlagFileName == entry.fileName)
+                return true;
+
+            const auto generatedBmpPath = GetLegacyFlagArtifactPaths().bmpPath;
+            std::error_code ec;
+            std::filesystem::create_directories(GetEngineFlagResourceDirectoryPath(), ec);
+            if (ec)
+            {
+                Log(L"[FLAG] %hs failed ensuring staged engine flag directory path=%hs ec=%d\n",
+                    source ? source : "flag",
+                    GetEngineFlagResourceDirectoryPath().string().c_str(),
+                    static_cast<int>(ec.value()));
+                return false;
+            }
+
+            ec.clear();
+            std::filesystem::copy_file(
+                generatedBmpPath,
+                GetEngineFlagResourceFilePath(),
+                std::filesystem::copy_options::overwrite_existing,
+                ec);
+            if (ec)
+            {
+                Log(L"[FLAG] %hs failed staging engine flag resource src=%hs dst=%hs ec=%d\n",
+                    source ? source : "flag",
+                    generatedBmpPath.string().c_str(),
+                    GetEngineFlagResourceFilePath().string().c_str(),
+                    static_cast<int>(ec.value()));
+                return false;
+            }
+
+            g_EngineStagedFlagFileName = entry.fileName;
+            Log(L"[FLAG] %hs staged engine flag resource src=%hs dst=%hs resource=%hs\n",
+                source ? source : "flag",
+                generatedBmpPath.string().c_str(),
+                GetEngineFlagResourceFilePath().string().c_str(),
+                outResourcePath.c_str());
+            return true;
         }
 
         static bool EnsureGdiplusInitialized(std::string& error)
@@ -3070,7 +3144,13 @@ namespace BZROpenShim
                 return false;
             }
 
-            const std::string path = entry->sourcePath.string();
+            if (!TryGenerateSelectedFlagArtifacts(source))
+                return false;
+
+            std::string path;
+            if (!EnsureEngineFlagResourceStaged(source, path))
+                path = entry->sourcePath.string();
+
             if (path.empty() || path.size() >= kFlagFilePathBufferCapacity)
             {
                 g_SelectedFlagStatus = "Selected flag path is empty or too long for engine upload; using legacy fallback if available.";
@@ -6845,8 +6925,8 @@ namespace BZROpenShim
         g_BzrFn_VehicleListRefresh1 = reinterpret_cast<FnVehicleListStep>(0x007A3F80);
         g_BzrFn_VehicleListRefresh2 = reinterpret_cast<FnVehicleListStep>(0x007A4070);
 
-        g_BzrFn_ButtonCtor = reinterpret_cast<FnUiCtor>(0x007C2480);
-        g_BzrFn_LabelCtor  = reinterpret_cast<FnUiCtor>(0x007CC390);
+        g_BzrFn_ButtonCtor = reinterpret_cast<FnUiButtonCtor>(0x007C2480);
+        g_BzrFn_LabelCtor  = reinterpret_cast<FnUiLabelCtor>(0x007CC390);
         g_BzrFn_SetTextureOff = reinterpret_cast<FnUiSetStr>(0x007D2870);
         g_BzrFn_SetTextureOver = reinterpret_cast<FnUiSetStr>(0x007C2F10);
         g_BzrFn_SetTextureOn = reinterpret_cast<FnUiSetStr>(0x007C2E80);
@@ -7106,6 +7186,37 @@ namespace BZROpenShim
     bool SetTargetReticlePopupModeFromBridge(int mode)
     {
         return SetTargetReticlePopupModeInternal(ClampTargetReticlePopupMode(mode), true);
+    }
+
+    bool GetHudSpriteRectFromBridge(const char* name, int* outX, int* outY, int* outW, int* outH)
+    {
+        if (!outX || !outY || !outW || !outH)
+        {
+            Log(L"[HUD] Invalid rect output pointers for sprite '%hs'\n", name ? name : "<null>");
+            return false;
+        }
+
+        const int spriteId = LookupHudSpriteId(name);
+        if (spriteId <= 0)
+        {
+            Log(L"[HUD] Unknown sprite '%hs'\n", name ? name : "<null>");
+            return false;
+        }
+
+        HudSpriteRectRecord current = {};
+        if (!TryGetHudSpriteCurrentRecord(spriteId, current))
+        {
+            Log(L"[HUD] Failed reading live rect entry for sprite '%hs' (id=%d)\n",
+                name ? name : "<null>",
+                spriteId);
+            return false;
+        }
+
+        *outX = static_cast<int>(current.x);
+        *outY = static_cast<int>(current.y);
+        *outW = static_cast<int>(current.w);
+        *outH = static_cast<int>(current.h);
+        return true;
     }
 
     bool SetHudSpriteRectFromBridge(const char* name, int x, int y, int w, int h)
@@ -8829,7 +8940,6 @@ namespace BZROpenShim
                 43.0f,
                 0x20,
                 parent,
-                0,
                 0);
             if (*outLabel)
             {
@@ -8975,7 +9085,7 @@ namespace BZROpenShim
 
     void __cdecl AutoSaveButtonOnClickLoad()
     {
-        if (!g_BzrFn_LoadGameByPath || !g_BzrFn_FinalizeQueuedLoad || !g_BzrFn_SetShellState)
+        if (!g_BzrFn_SetShellState)
             return;
 
         char autoSavePath[MAX_PATH] = {};
@@ -8987,17 +9097,6 @@ namespace BZROpenShim
 
         __try
         {
-            if (IsSingleplayerPauseMenuOpen() && g_BzrFn_AutoLoadShellGame)
-            {
-                const int autoLoadResult = g_BzrFn_AutoLoadShellGame();
-                Log(L"[AUTOSAVE] Pause-menu auto-load helper result=%d\n", autoLoadResult);
-                if (autoLoadResult)
-                    return;
-
-                Log(L"[AUTOSAVE] Pause-menu auto-load helper failed, falling back to queued load path=%hs\n",
-                    autoSavePath);
-            }
-
             PrepareLoadScreenForSelection(g_AutoSaveLoadScreen);
             if (!QueueAutoSaveLoadPath(autoSavePath))
             {
@@ -9006,21 +9105,9 @@ namespace BZROpenShim
             }
 
             auto* queuedPath = reinterpret_cast<char*>(kQueuedLoadPathBufferAddr);
-            auto* queuedName = reinterpret_cast<char*>(kQueuedLoadNameBufferAddr);
-            const int result = g_BzrFn_LoadGameByPath(
-                queuedPath,
-                queuedName,
-                kQueuedLoadNameBufferLen);
-            Log(L"[AUTOSAVE] Queued auto-save load path=%hs result=%d name=%hs\n",
-                queuedPath,
-                result,
-                queuedName);
-
-            if (result)
-            {
-                g_BzrFn_FinalizeQueuedLoad();
-                g_BzrFn_SetShellState(kLoadQueuedState);
-            }
+            Log(L"[AUTOSAVE] Auto-save queued for stock save-load state path=%hs\n",
+                queuedPath);
+            g_BzrFn_SetShellState(kLoadSaveState);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -9155,7 +9242,6 @@ namespace BZROpenShim
             43.0f,
             0x8020,
             parent,
-            0,
             0);
 
         if (g_BanLabelHost)
@@ -9226,7 +9312,6 @@ namespace BZROpenShim
             43.0f,
             0x20,
             parent,
-            0,
             0);
 
         if (g_BanLabelClient)

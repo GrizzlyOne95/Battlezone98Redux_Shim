@@ -41,6 +41,7 @@ namespace BZROpenShim
     void __cdecl RevealProcessOwnerPerceivedTeamOnAttackStateEntry(void* processPtr);
     void PrimeTargetReticlePopupConfig();
     bool SetTargetReticlePopupModeFromBridge(int mode);
+    bool GetHudSpriteRectFromBridge(const char* name, int* outX, int* outY, int* outW, int* outH);
     bool SetHudSpriteRectFromBridge(const char* name, int x, int y, int w, int h);
     bool SetHudSpriteVisibleFromBridge(const char* name, bool visible);
     bool RestoreHudSpriteFromBridge(const char* name);
