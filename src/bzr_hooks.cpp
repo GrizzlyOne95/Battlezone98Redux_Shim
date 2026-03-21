@@ -1,5 +1,6 @@
 #include "bzr_hooks.h"
 #include "game_state.h"
+#include "patches.h"
 #include "patcher.h"
 
 #include <Windows.h>
@@ -136,6 +137,7 @@ namespace BZROpenShim
                                             float* range,
                                             float* time,
                                             void** weapon);
+    using FnProcessDoSubTask = bool(__thiscall*)(void* thisPtr);
 
     static void** g_BzrPtr_945478 = nullptr;
     static void** g_BzrPtr_94548C = nullptr;
@@ -203,6 +205,8 @@ namespace BZROpenShim
     static FnPersonSimulate g_BzrFn_PersonSimulate = nullptr;
     static FnOptionsInputPopulateUi g_BzrFn_OptionsInputPopulateUi = nullptr;
     static FnCalcRangeCraft g_BzrFn_CalcRangeCraft = nullptr;
+    static FnProcessDoSubTask g_BzrFn_OffensiveProcessDoSubTask = nullptr;
+    static FnProcessDoSubTask g_BzrFn_GunTowerProcessDoSubTask = nullptr;
     static BuildItem* g_BzrBuildMenuRoot = nullptr;
     static bool g_IsSteamExe = false;
 
@@ -219,6 +223,7 @@ namespace BZROpenShim
         constexpr uint32_t kAutoSaveLoadButtonFlags = 0x22;
         constexpr int kBanScanMaxSessionId = 64;
         constexpr int kLoadQueuedState = 5;
+        constexpr int kRestartMissionState = 6;
         constexpr int kLoadSaveState = 8;
         constexpr int kQueuedLoadNameBufferLen = 16;
         constexpr uintptr_t kLoadScreenSelectionFlagAddr = 0x00918133;
@@ -308,6 +313,12 @@ namespace BZROpenShim
         constexpr float kJumpSnipeVelocityBandThreshold = 0.15f;
         constexpr uintptr_t kGogCalcRangeCraftEntryAddr = 0x0041F240;
         constexpr size_t kCalcRangeCraftDetourLen = 8;
+        constexpr uintptr_t kGogOffensiveProcessDoSubTaskEntryAddr = 0x004DFE70;
+        constexpr size_t kOffensiveProcessDoSubTaskDetourLen = 8;
+        constexpr uintptr_t kGogGunTowerProcessDoSubTaskEntryAddr = 0x004741A0;
+        constexpr size_t kGunTowerProcessDoSubTaskDetourLen = 6;
+        constexpr size_t kUnitProcessNextEnemyCheckOffset = 0x28;
+        constexpr size_t kUnitProcessObjectOffset = 0x2C;
 
         struct InlineDetour32
         {
@@ -666,6 +677,10 @@ namespace BZROpenShim
         static InlineDetour32 g_OptionsInputPopulateUiDetour = {};
         static InlineDetour32 g_CalcRangeCraftDetour = {};
         static bool g_CalcRangeCraftHookInstalled = false;
+        static InlineDetour32 g_OffensiveProcessDoSubTaskDetour = {};
+        static InlineDetour32 g_GunTowerProcessDoSubTaskDetour = {};
+        static bool g_RetargetPeriodHooksInstalled = false;
+        static std::unordered_map<uintptr_t, ULONGLONG> g_RetargetPeriodNextForceMsByProcess = {};
         static bool g_InputBindingUiScaffoldInitialized = false;
         static bool g_InputBindingUiScaffoldLogged = false;
         static bool g_InputBindingUiPopulateHookInstallAttempted = false;
@@ -4801,52 +4816,192 @@ namespace BZROpenShim
             }
         }
 
+        static void ApplyRetargetPeriodAfterDoSubTask(void* processPtr)
+        {
+            if (!processPtr)
+                return;
+
+            auto* processBytes = reinterpret_cast<uint8_t*>(processPtr);
+            void* objectPtr = *reinterpret_cast<void**>(processBytes + kUnitProcessObjectOffset);
+            if (!objectPtr)
+                return;
+
+            AiTuningConfig tuning = {};
+            if (!TryGetAiTuningForObject(objectPtr, tuning) ||
+                !tuning.hasRetargetPeriodAI ||
+                !std::isfinite(tuning.retargetPeriodAI) ||
+                tuning.retargetPeriodAI <= 0.0f)
+            {
+                g_RetargetPeriodNextForceMsByProcess.erase(reinterpret_cast<uintptr_t>(processPtr));
+                return;
+            }
+
+            float& nextEnemyCheck =
+                *reinterpret_cast<float*>(processBytes + kUnitProcessNextEnemyCheckOffset);
+            if (!std::isfinite(nextEnemyCheck) || nextEnemyCheck <= 0.0f)
+                return;
+
+            const ULONGLONG nowMs = GetTickCount64();
+            const ULONGLONG periodMs = static_cast<ULONGLONG>(
+                (std::max)(tuning.retargetPeriodAI, 0.01f) * 1000.0f);
+            ULONGLONG& nextForceMs =
+                g_RetargetPeriodNextForceMsByProcess[reinterpret_cast<uintptr_t>(processPtr)];
+            if (nextForceMs == 0)
+            {
+                nextForceMs = nowMs + periodMs;
+                return;
+            }
+
+            if (nowMs < nextForceMs)
+                return;
+
+            // These processes only look for a fresh enemy when this timer expires.
+            nextEnemyCheck = 0.0f;
+            nextForceMs = nowMs + periodMs;
+        }
+
+        bool __fastcall OffensiveProcessDoSubTaskHook(void* thisPtr, void* /*edx*/)
+        {
+            const bool result =
+                g_BzrFn_OffensiveProcessDoSubTask
+                    ? g_BzrFn_OffensiveProcessDoSubTask(thisPtr)
+                    : false;
+            ApplyRetargetPeriodAfterDoSubTask(thisPtr);
+            return result;
+        }
+
+        bool __fastcall GunTowerProcessDoSubTaskHook(void* thisPtr, void* /*edx*/)
+        {
+            const bool result =
+                g_BzrFn_GunTowerProcessDoSubTask
+                    ? g_BzrFn_GunTowerProcessDoSubTask(thisPtr)
+                    : false;
+            ApplyRetargetPeriodAfterDoSubTask(thisPtr);
+            return result;
+        }
+
         static void InstallAiTuningHooksIfPossible()
         {
-            if (g_CalcRangeCraftHookInstalled)
+            if (g_CalcRangeCraftHookInstalled && g_RetargetPeriodHooksInstalled)
                 return;
 
             if (g_CalcRangeCraftDetour.trampoline && g_BzrFn_CalcRangeCraft)
             {
                 g_CalcRangeCraftHookInstalled = true;
+            }
+
+            if (!g_CalcRangeCraftHookInstalled)
+            {
+                static const uint8_t kExpectedCalcRangeCraftBytes[kCalcRangeCraftDetourLen] =
+                {
+                    0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C, 0x89, 0x4D
+                };
+
+                if (!ExpectedBytesMatchAt(kGogCalcRangeCraftEntryAddr,
+                                          kExpectedCalcRangeCraftBytes,
+                                          sizeof(kExpectedCalcRangeCraftBytes)))
+                {
+                    Log(L"[AIODF] CalcRange(Craft) entry bytes mismatch at 0x%08X; AI ODF range tuning disabled\n",
+                        static_cast<uint32_t>(kGogCalcRangeCraftEntryAddr));
+                }
+                else if (!InstallInlineDetour32(g_CalcRangeCraftDetour,
+                                                kGogCalcRangeCraftEntryAddr,
+                                                reinterpret_cast<void*>(CalcRangeCraftHook),
+                                                kCalcRangeCraftDetourLen,
+                                                kExpectedCalcRangeCraftBytes,
+                                                sizeof(kExpectedCalcRangeCraftBytes)))
+                {
+                    Log(L"[AIODF] Failed installing CalcRange(Craft) hook at 0x%08X\n",
+                        static_cast<uint32_t>(kGogCalcRangeCraftEntryAddr));
+                }
+                else
+                {
+                    g_BzrFn_CalcRangeCraft =
+                        reinterpret_cast<FnCalcRangeCraft>(g_CalcRangeCraftDetour.trampoline);
+                    g_CalcRangeCraftHookInstalled = (g_BzrFn_CalcRangeCraft != nullptr);
+                    if (g_CalcRangeCraftHookInstalled)
+                    {
+                        Log(L"[AIODF] Installed CalcRange(Craft) hook entry=0x%08X trampoline=0x%08X\n",
+                            static_cast<uint32_t>(kGogCalcRangeCraftEntryAddr),
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CalcRangeCraftDetour.trampoline)));
+                    }
+                }
+            }
+
+            if (g_RetargetPeriodHooksInstalled)
+                return;
+
+            if (g_OffensiveProcessDoSubTaskDetour.trampoline && g_BzrFn_OffensiveProcessDoSubTask &&
+                g_GunTowerProcessDoSubTaskDetour.trampoline && g_BzrFn_GunTowerProcessDoSubTask)
+            {
+                g_RetargetPeriodHooksInstalled = true;
                 return;
             }
 
-            static const uint8_t kExpectedCalcRangeCraftBytes[kCalcRangeCraftDetourLen] =
+            static const uint8_t kExpectedOffensiveProcessDoSubTaskBytes[kOffensiveProcessDoSubTaskDetourLen] =
             {
-                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C, 0x89, 0x4D
+                0x55, 0x8B, 0xEC, 0xE8, 0xB8, 0x15, 0xF8, 0xFF
+            };
+            static const uint8_t kExpectedGunTowerProcessDoSubTaskBytes[kGunTowerProcessDoSubTaskDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x5C
             };
 
-            if (!ExpectedBytesMatchAt(kGogCalcRangeCraftEntryAddr,
-                                      kExpectedCalcRangeCraftBytes,
-                                      sizeof(kExpectedCalcRangeCraftBytes)))
+            bool offensiveInstalled = false;
+            if (ExpectedBytesMatchAt(kGogOffensiveProcessDoSubTaskEntryAddr,
+                                     kExpectedOffensiveProcessDoSubTaskBytes,
+                                     sizeof(kExpectedOffensiveProcessDoSubTaskBytes)) &&
+                InstallInlineDetour32(g_OffensiveProcessDoSubTaskDetour,
+                                      kGogOffensiveProcessDoSubTaskEntryAddr,
+                                      reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                                      kOffensiveProcessDoSubTaskDetourLen,
+                                      kExpectedOffensiveProcessDoSubTaskBytes,
+                                      sizeof(kExpectedOffensiveProcessDoSubTaskBytes)))
             {
-                Log(L"[AIODF] CalcRange(Craft) entry bytes mismatch at 0x%08X; AI ODF range tuning disabled\n",
-                    static_cast<uint32_t>(kGogCalcRangeCraftEntryAddr));
-                return;
+                g_BzrFn_OffensiveProcessDoSubTask =
+                    reinterpret_cast<FnProcessDoSubTask>(g_OffensiveProcessDoSubTaskDetour.trampoline);
+                offensiveInstalled = (g_BzrFn_OffensiveProcessDoSubTask != nullptr);
+                if (offensiveInstalled)
+                {
+                    Log(L"[AIODF] Installed OffensiveProcess::DoSubTask hook entry=0x%08X trampoline=0x%08X\n",
+                        static_cast<uint32_t>(kGogOffensiveProcessDoSubTaskEntryAddr),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OffensiveProcessDoSubTaskDetour.trampoline)));
+                }
+            }
+            else
+            {
+                Log(L"[AIODF] OffensiveProcess::DoSubTask entry bytes mismatch at 0x%08X; shared retarget tuning disabled there\n",
+                    static_cast<uint32_t>(kGogOffensiveProcessDoSubTaskEntryAddr));
             }
 
-            if (!InstallInlineDetour32(g_CalcRangeCraftDetour,
-                                       kGogCalcRangeCraftEntryAddr,
-                                       reinterpret_cast<void*>(CalcRangeCraftHook),
-                                       kCalcRangeCraftDetourLen,
-                                       kExpectedCalcRangeCraftBytes,
-                                       sizeof(kExpectedCalcRangeCraftBytes)))
+            bool gunTowerInstalled = false;
+            if (ExpectedBytesMatchAt(kGogGunTowerProcessDoSubTaskEntryAddr,
+                                     kExpectedGunTowerProcessDoSubTaskBytes,
+                                     sizeof(kExpectedGunTowerProcessDoSubTaskBytes)) &&
+                InstallInlineDetour32(g_GunTowerProcessDoSubTaskDetour,
+                                      kGogGunTowerProcessDoSubTaskEntryAddr,
+                                      reinterpret_cast<void*>(GunTowerProcessDoSubTaskHook),
+                                      kGunTowerProcessDoSubTaskDetourLen,
+                                      kExpectedGunTowerProcessDoSubTaskBytes,
+                                      sizeof(kExpectedGunTowerProcessDoSubTaskBytes)))
             {
-                Log(L"[AIODF] Failed installing CalcRange(Craft) hook at 0x%08X\n",
-                    static_cast<uint32_t>(kGogCalcRangeCraftEntryAddr));
-                return;
+                g_BzrFn_GunTowerProcessDoSubTask =
+                    reinterpret_cast<FnProcessDoSubTask>(g_GunTowerProcessDoSubTaskDetour.trampoline);
+                gunTowerInstalled = (g_BzrFn_GunTowerProcessDoSubTask != nullptr);
+                if (gunTowerInstalled)
+                {
+                    Log(L"[AIODF] Installed GunTowerProcess::DoSubTask hook entry=0x%08X trampoline=0x%08X\n",
+                        static_cast<uint32_t>(kGogGunTowerProcessDoSubTaskEntryAddr),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_GunTowerProcessDoSubTaskDetour.trampoline)));
+                }
+            }
+            else
+            {
+                Log(L"[AIODF] GunTowerProcess::DoSubTask entry bytes mismatch at 0x%08X; tower retarget tuning disabled there\n",
+                    static_cast<uint32_t>(kGogGunTowerProcessDoSubTaskEntryAddr));
             }
 
-            g_BzrFn_CalcRangeCraft =
-                reinterpret_cast<FnCalcRangeCraft>(g_CalcRangeCraftDetour.trampoline);
-            g_CalcRangeCraftHookInstalled = (g_BzrFn_CalcRangeCraft != nullptr);
-            if (g_CalcRangeCraftHookInstalled)
-            {
-                Log(L"[AIODF] Installed CalcRange(Craft) hook entry=0x%08X trampoline=0x%08X\n",
-                    static_cast<uint32_t>(kGogCalcRangeCraftEntryAddr),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CalcRangeCraftDetour.trampoline)));
-            }
+            g_RetargetPeriodHooksInstalled = offensiveInstalled && gunTowerInstalled;
         }
 
         static void EnsureEngineFlameVtableHooksInstalled(void* manager)
@@ -6825,6 +6980,16 @@ namespace BZROpenShim
             return strncpy_s(queuedPath, MAX_PATH, autoSavePath, _TRUNCATE) == 0;
         }
 
+        static bool RefreshQueuedPathFromMissionName()
+        {
+            auto* queuedPath = reinterpret_cast<char*>(kQueuedLoadPathBufferAddr);
+            auto* queuedName = reinterpret_cast<const char*>(kQueuedLoadNameBufferAddr);
+            if (!queuedPath || !queuedName || !queuedName[0])
+                return false;
+
+            return strncpy_s(queuedPath, MAX_PATH, queuedName, _TRUNCATE) == 0;
+        }
+
         static void ForceFreshRestartMissionState(void* screenThis, const char* sourceTag)
         {
             if (!screenThis)
@@ -6836,14 +7001,19 @@ namespace BZROpenShim
             auto* screenBytes = reinterpret_cast<uint8_t*>(screenThis);
             void* dialog = *reinterpret_cast<void**>(screenBytes + 0x138);
             if (!dialog || !g_BzrFn_UiDialogSetEnabled || !g_BzrFn_UiDialogAdvance ||
-                !g_BzrFn_LoadScreenPrep || !g_BzrFn_SetShellState)
+                !g_BzrFn_LoadScreenPrep || !g_BzrFn_BzrStringCtorFromCStr ||
+                !g_BzrFn_BzrStringDtor || !g_BzrFn_LoadScreenClearSelection ||
+                !g_BzrFn_SetShellState)
             {
-                Log(L"[RESTART] %hs missing restart helpers dialog=0x%p setEnabled=0x%p advance=0x%p prep=0x%p setState=0x%p\n",
+                Log(L"[RESTART] %hs missing restart helpers dialog=0x%p setEnabled=0x%p advance=0x%p prep=0x%p strCtor=0x%p strDtor=0x%p clearSelection=0x%p setState=0x%p\n",
                     sourceTag ? sourceTag : "unknown",
                     dialog,
                     g_BzrFn_UiDialogSetEnabled,
                     g_BzrFn_UiDialogAdvance,
                     g_BzrFn_LoadScreenPrep,
+                    g_BzrFn_BzrStringCtorFromCStr,
+                    g_BzrFn_BzrStringDtor,
+                    g_BzrFn_LoadScreenClearSelection,
                     g_BzrFn_SetShellState);
                 return;
             }
@@ -6856,26 +7026,27 @@ namespace BZROpenShim
 
             const uint8_t previousMissionSave = *missionSaveFlag;
             const uint32_t previousMissionMode = *oldMissionMode;
+            char previousQueuedPath[MAX_PATH] = {};
+            strncpy_s(previousQueuedPath, queuedPath ? queuedPath : "", _TRUNCATE);
 
-            *reinterpret_cast<uint8_t*>(kLoadScreenSelectionFlagAddr) = 1;
-            *missionSaveFlag = 1;
+            *missionSaveFlag = 0;
             *oldMissionMode = 0;
-            g_BzrFn_SetShellState(kLoadQueuedState);
+            const bool refreshedQueuedPath = RefreshQueuedPathFromMissionName();
+            PrepareLoadScreenForSelection(screenThis);
+            g_BzrFn_SetShellState(kRestartMissionState);
             *screenType = 0;
 
-            g_BzrFn_UiDialogSetEnabled(dialog, 0);
-            g_BzrFn_LoadScreenPrep();
-            g_BzrFn_UiDialogAdvance(dialog, 0x17);
-
-            Log(L"[RESTART] %hs forcing fresh mission reload state=%d missionSave=%u->%u oldMissionMode=%u->%u queuedName=%hs queuedPath=%hs\n",
+            Log(L"[RESTART] %hs forcing restart mission reload state=%d missionSave=%u->%u oldMissionMode=%u->%u queuedName=%hs queuedPath=%hs refreshedQueuedPath=%hs previousQueuedPath=%hs\n",
                 sourceTag ? sourceTag : "unknown",
-                kLoadQueuedState,
+                kRestartMissionState,
                 previousMissionSave,
                 *missionSaveFlag,
                 previousMissionMode,
                 *oldMissionMode,
                 queuedName,
-                queuedPath);
+                queuedPath,
+                refreshedQueuedPath ? "true" : "false",
+                previousQueuedPath);
         }
 
         static void RememberVehicleAssetDebugException(const BzrString* assetName)
@@ -6997,6 +7168,10 @@ namespace BZROpenShim
         g_LastUnknownProducerVft = 0;
         g_CalcRangeCraftHookInstalled = false;
         g_BzrFn_CalcRangeCraft = nullptr;
+        g_RetargetPeriodHooksInstalled = false;
+        g_BzrFn_OffensiveProcessDoSubTask = nullptr;
+        g_BzrFn_GunTowerProcessDoSubTask = nullptr;
+        g_RetargetPeriodNextForceMsByProcess.clear();
 
         g_BzrPtr_945478 = reinterpret_cast<void**>(0x00945478);
         g_BzrPtr_94548C = reinterpret_cast<void**>(0x0094548C);
@@ -7555,6 +7730,7 @@ namespace BZROpenShim
 
         constexpr size_t kGameObjectCarrierOffset = 0x198;
         constexpr size_t kGameObjectWeaponMaskOffset = 0x210;
+        constexpr size_t kUnitProcessMeOffset = 44;
         constexpr size_t kWeaponIndexOffset = 0xAC;
 
         constexpr uint32_t kHowitzerVftPrimary = 0x0087AD70;
@@ -7562,15 +7738,23 @@ namespace BZROpenShim
         constexpr uint32_t kMinelayerVftPrimary = 0x0087D790;
         constexpr uint32_t kMinelayerVftSecondary = 0x0087D83C;
 
-        bool IsWeaponMaskCarrierBiasCraft(const void* craft)
+        bool IsHowitzerCraft(const void* craft)
         {
             if (!craft)
                 return false;
 
             const uint32_t vft = *reinterpret_cast<const uint32_t*>(craft);
             return vft == kHowitzerVftPrimary ||
-                vft == kHowitzerVftSecondary ||
-                vft == kMinelayerVftPrimary ||
+                vft == kHowitzerVftSecondary;
+        }
+
+        bool IsWeaponMaskCarrierBiasCraft(const void* craft)
+        {
+            if (!craft)
+                return false;
+
+            const uint32_t vft = *reinterpret_cast<const uint32_t*>(craft);
+            return vft == kMinelayerVftPrimary ||
                 vft == kMinelayerVftSecondary;
         }
 
@@ -7623,6 +7807,84 @@ namespace BZROpenShim
 
             bits ^= (1u << a);
             bits ^= (1u << b);
+        }
+
+        struct CarrierSnapshot
+        {
+            void* hardpoint[5];
+            void* weapon[5];
+            uint32_t existant;
+            uint32_t selected;
+            uint32_t enabled;
+        };
+
+        void SnapshotCarrierState(const CarrierView* carrier, CarrierSnapshot* snapshot)
+        {
+            if (!carrier || !snapshot)
+                return;
+
+            memcpy(snapshot->hardpoint, carrier->hardpoint, sizeof(snapshot->hardpoint));
+            memcpy(snapshot->weapon, carrier->weapon, sizeof(snapshot->weapon));
+            snapshot->existant = carrier->existant;
+            snapshot->selected = carrier->selected;
+            snapshot->enabled = carrier->enabled;
+        }
+
+        void RestoreCarrierState(CarrierView* carrier, const CarrierSnapshot& snapshot)
+        {
+            if (!carrier)
+                return;
+
+            memcpy(carrier->hardpoint, snapshot.hardpoint, sizeof(snapshot.hardpoint));
+            memcpy(carrier->weapon, snapshot.weapon, sizeof(snapshot.weapon));
+            carrier->existant = snapshot.existant;
+            carrier->selected = snapshot.selected;
+            carrier->enabled = snapshot.enabled;
+        }
+
+        void MoveCarrierWeaponIndexToFront(CarrierView* carrier, int desiredIndex)
+        {
+            if (!carrier || desiredIndex <= 0 || desiredIndex >= 5)
+                return;
+
+            std::swap(carrier->hardpoint[0], carrier->hardpoint[desiredIndex]);
+            std::swap(carrier->weapon[0], carrier->weapon[desiredIndex]);
+            SwapCarrierBits(carrier->existant, 0, desiredIndex);
+            SwapCarrierBits(carrier->selected, 0, desiredIndex);
+            SwapCarrierBits(carrier->enabled, 0, desiredIndex);
+        }
+
+        int CollectCarrierVolleyIndices(const CarrierView* carrier, int* outIndices, int maxCount)
+        {
+            if (!carrier || !outIndices || maxCount <= 0)
+                return 0;
+
+            int count = 0;
+            for (int index = 0; index < 5 && count < maxCount; ++index)
+            {
+                if (!carrier->weapon[index])
+                    continue;
+
+                outIndices[count++] = index;
+            }
+
+            return count;
+        }
+
+        using FnArtilleryHowitzerVolleyOriginal =
+            uint32_t(__thiscall*)(void*, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+
+        uint32_t CallOriginalArtilleryHowitzerVolley(
+            void* process,
+            uint32_t arg1,
+            uint32_t arg2,
+            uint32_t arg3,
+            uint32_t arg4,
+            uint32_t arg5)
+        {
+            auto fn = reinterpret_cast<FnArtilleryHowitzerVolleyOriginal>(
+                Trampoline_ArtilleryHowitzerVolleyOriginal);
+            return fn(process, arg1, arg2, arg3, arg4, arg5);
         }
     }
 
@@ -7722,6 +7984,100 @@ namespace BZROpenShim
             Log(L"[ARTYMASK] exception while inspecting process=0x%08X remaining=%ld\n",
                 processAddr,
                 remaining);
+        }
+    }
+
+    uint32_t __cdecl ArtilleryHowitzerVolleyHook(
+        void* process,
+        uint32_t arg1,
+        uint32_t arg2,
+        uint32_t arg3,
+        uint32_t arg4,
+        uint32_t arg5)
+    {
+        if (!g_BZRFnPtr_ArtilleryHowitzerVolleyContinue)
+            return 0;
+
+        uint32_t lastResult = 0;
+        bool startedVolley = false;
+        CarrierView* carrier = nullptr;
+        CarrierSnapshot snapshot = {};
+        bool hasSnapshot = false;
+
+        __try
+        {
+            if (!process)
+            {
+                return CallOriginalArtilleryHowitzerVolley(process, arg1, arg2, arg3, arg4, arg5);
+            }
+
+            auto* processBytes = reinterpret_cast<uint8_t*>(process);
+            void* craft = *reinterpret_cast<void**>(processBytes + kUnitProcessMeOffset);
+            if (!IsHowitzerCraft(craft))
+            {
+                return CallOriginalArtilleryHowitzerVolley(process, arg1, arg2, arg3, arg4, arg5);
+            }
+
+            auto* craftBytes = reinterpret_cast<uint8_t*>(craft);
+            carrier = *reinterpret_cast<CarrierView**>(craftBytes + kGameObjectCarrierOffset);
+            if (!carrier)
+            {
+                return CallOriginalArtilleryHowitzerVolley(process, arg1, arg2, arg3, arg4, arg5);
+            }
+
+            int volleyIndices[5] = {};
+            const int volleyCount = CollectCarrierVolleyIndices(carrier, volleyIndices, 5);
+            if (volleyCount <= 1)
+            {
+                return CallOriginalArtilleryHowitzerVolley(process, arg1, arg2, arg3, arg4, arg5);
+            }
+
+            SnapshotCarrierState(carrier, &snapshot);
+            hasSnapshot = true;
+
+            if (ShouldTraceArtilleryMask())
+            {
+                const long remaining = InterlockedDecrement(&g_ArtilleryMaskTraceBudget);
+                if (remaining >= 0)
+                {
+                    Log(L"[ARTYVOLLEY] process=0x%08X craft=0x%08X weapons=%d raw=0x%08X decoded=0x%08X\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(process)),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
+                        volleyCount,
+                        *reinterpret_cast<const uint32_t*>(craftBytes + kGameObjectWeaponMaskOffset),
+                        *reinterpret_cast<const uint32_t*>(craftBytes + kGameObjectWeaponMaskOffset) ^ 0x33333333u);
+                }
+            }
+
+            for (int i = 0; i < volleyCount; ++i)
+            {
+                RestoreCarrierState(carrier, snapshot);
+                MoveCarrierWeaponIndexToFront(carrier, volleyIndices[i]);
+                lastResult = CallOriginalArtilleryHowitzerVolley(process, arg1, arg2, arg3, arg4, arg5);
+                startedVolley = true;
+            }
+
+            RestoreCarrierState(carrier, snapshot);
+            return startedVolley ?
+                lastResult :
+                CallOriginalArtilleryHowitzerVolley(process, arg1, arg2, arg3, arg4, arg5);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            if (hasSnapshot && carrier)
+            {
+                __try
+                {
+                    RestoreCarrierState(carrier, snapshot);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                }
+            }
+
+            return startedVolley ?
+                lastResult :
+                CallOriginalArtilleryHowitzerVolley(process, arg1, arg2, arg3, arg4, arg5);
         }
     }
 
