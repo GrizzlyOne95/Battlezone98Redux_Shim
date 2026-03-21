@@ -61,6 +61,13 @@ namespace BZROpenShim
     void __cdecl MapFilters2Filter(void* listPtr, BzrString* filter);
     void __cdecl ApplyWeaponMaskCarrierBiasForCraft(void* craft);
     void __cdecl TraceArtilleryMaskFromProcess(void* process);
+    uint32_t __cdecl ArtilleryHowitzerVolleyHook(
+        void* process,
+        uint32_t arg1,
+        uint32_t arg2,
+        uint32_t arg3,
+        uint32_t arg4,
+        uint32_t arg5);
 
     // Shared state for trampolines.
     extern void* g_VehicleListContext;

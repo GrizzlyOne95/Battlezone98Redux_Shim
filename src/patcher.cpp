@@ -177,6 +177,33 @@ namespace BZROpenShim
         return s_cached != 0;
     }
 
+    static bool ShouldEnableLobbyBzrnetIntegration(bool isSteam)
+    {
+        static int s_cachedSteam = -1;
+        static int s_cachedGog = -1;
+        int& cache = isSteam ? s_cachedSteam : s_cachedGog;
+        if (cache >= 0)
+            return cache != 0;
+
+        if (EnvFlagEnabledByName("OPENSHIM_DISABLE_LOBBY_BZRNET_INTEGRATION") ||
+            EnvFlagEnabledByName("BZR_DISABLE_LOBBY_BZRNET_INTEGRATION"))
+        {
+            cache = 0;
+            return false;
+        }
+
+        if (EnvFlagEnabledByName("OPENSHIM_ENABLE_LOBBY_BZRNET_INTEGRATION") ||
+            EnvFlagEnabledByName("OPENSHIM_ENABLE_LOBBY_UI_BZRNET") ||
+            EnvFlagEnabledByName("BZR_ENABLE_LOBBY_BZRNET_INTEGRATION"))
+        {
+            cache = 1;
+            return true;
+        }
+
+        cache = isSteam ? 0 : 1;
+        return cache != 0;
+    }
+
     static bool EnvFlagEnabledByName(const char* name)
     {
         if (!name || !*name)
@@ -237,6 +264,15 @@ namespace BZROpenShim
     static bool IsProducerBuildMenuExperimentPatchName(const char* name)
     {
         return name && strcmp(name, "Producer Build Menu Root Hook") == 0;
+    }
+
+    static bool IsLobbyBzrnetIntegrationPatchName(const char* name)
+    {
+        if (!name)
+            return false;
+
+        return strcmp(name, "Lobby BZRNET Integration HOST") == 0 ||
+               strcmp(name, "Lobby BZRNET Integration CLIENT") == 0;
     }
 
     static void FilterPatchesForRuntime(std::vector<PatchDef>& patches, bool isSteam)
@@ -313,6 +349,35 @@ namespace BZROpenShim
             {
                 Log(L"[INFO] Producer build-menu experiment disabled by default (%zu patch(es) skipped). Set OPENSHIM_ENABLE_PRODUCER_BUILD_MENU=1 to opt in.\n",
                     removed);
+            }
+        }
+
+        if (!ShouldEnableLobbyBzrnetIntegration(isSteam))
+        {
+            const size_t before = patches.size();
+            patches.erase(
+                std::remove_if(
+                    patches.begin(),
+                    patches.end(),
+                    [](const PatchDef& patch)
+                    {
+                        return IsLobbyBzrnetIntegrationPatchName(patch.name);
+                    }),
+                patches.end());
+
+            const size_t removed = before - patches.size();
+            if (removed > 0)
+            {
+                if (isSteam)
+                {
+                    Log(L"[INFO] Steam lobby BZRNET integration hooks disabled by default (%zu patch(es) skipped). Set OPENSHIM_ENABLE_LOBBY_BZRNET_INTEGRATION=1 to opt in.\n",
+                        removed);
+                }
+                else
+                {
+                    Log(L"[INFO] Lobby BZRNET integration hooks disabled via env override (%zu patch(es) skipped).\n",
+                        removed);
+                }
             }
         }
     }
@@ -1188,7 +1253,7 @@ namespace BZROpenShim
     // Resolve internal BZR.exe pointers for trampolines/helpers.
     // Now uses dynamic addresses found by pattern scanning.
     // -----------------------------------------------------------------------
-    static void ResolvePointers(uint32_t mapSortingAddr, uint32_t hopFix1Addr, uint32_t hopFix2Addr, uint32_t hopFix3Addr, uint32_t probeMapFilter1Addr, uint32_t probeMapListFix1Addr, uint32_t probeMapListFix2Addr, uint32_t artilleryMaskTraceAddr, uint32_t turretCraftAimPitchAddr, uint32_t turretTankAimPitchAddr, uint32_t underAttackAlertHook1Addr, uint32_t underAttackAlertHook2Addr, uint32_t offensiveAttackRevealAddr, uint32_t turretTankAttackRevealAddr)
+    static void ResolvePointers(uint32_t mapSortingAddr, uint32_t hopFix1Addr, uint32_t hopFix2Addr, uint32_t hopFix3Addr, uint32_t probeMapFilter1Addr, uint32_t probeMapListFix1Addr, uint32_t probeMapListFix2Addr, uint32_t artilleryHowitzerVolleyAddr, uint32_t turretCraftAimPitchAddr, uint32_t turretTankAimPitchAddr, uint32_t underAttackAlertHook1Addr, uint32_t underAttackAlertHook2Addr, uint32_t offensiveAttackRevealAddr, uint32_t turretTankAttackRevealAddr)
     {
         Log(L"=========== RESOLVING POINTERS ===========\n");
 
@@ -1260,22 +1325,11 @@ namespace BZROpenShim
             g_RetAddr_Probe_MapListFix2 = reinterpret_cast<void*>(probeMapListFix2Addr + 0x05);
             Log(L"[PTR] Probe MapListFix2 return: 0x%08X\n", probeMapListFix2Addr + 0x05);
         }
-        if (artilleryMaskTraceAddr) {
-            g_RetAddr_ArtilleryMaskTrace = reinterpret_cast<void*>(artilleryMaskTraceAddr + 0x05);
-            if (void* callTarget = ResolveRelCallTarget(artilleryMaskTraceAddr))
-            {
-                g_BZRFnPtr_ArtilleryMaskTraceOriginal =
-                    reinterpret_cast<void (*)()>(callTarget);
-                Log(L"[PTR] Artillery mask trace original call target: 0x%08X\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(callTarget)));
-            }
-            else
-            {
-                g_BZRFnPtr_ArtilleryMaskTraceOriginal =
-                    reinterpret_cast<void (*)()>(0x00415C20);
-                Log(L"[PTR] Artillery mask trace call target fallback: 0x%08X\n", 0x00415C20);
-            }
-            Log(L"[PTR] Artillery mask trace return: 0x%08X\n", artilleryMaskTraceAddr + 0x05);
+        if (artilleryHowitzerVolleyAddr) {
+            g_BZRFnPtr_ArtilleryHowitzerVolleyContinue =
+                reinterpret_cast<void*>(artilleryHowitzerVolleyAddr + 0x06);
+            Log(L"[PTR] Artillery howitzer volley continue: 0x%08X\n",
+                artilleryHowitzerVolleyAddr + 0x06);
         }
         if (turretCraftAimPitchAddr) {
             g_RetAddr_TurretCraftAimPitchMultiplier =
@@ -1446,14 +1500,13 @@ namespace BZROpenShim
                 0xFF },
               13,
               4 },
-            // ArtilleryProcess::DoAttack internal helper call at 0x0042BB1A on GOG.
-            // Wildcard both rel32 call operands; the surrounding byte shape is
-            // the revalidated anchor.
-            { "Artillery Weapon Mask Trace",
-              { 0xE8, 0x00, 0x00, 0x00, 0x00, 0x8B, 0x45, 0x08, 0x50, 0xE8, 0x00, 0x00, 0x00, 0x00, 0x83, 0xC4, 0x04, 0x50, 0x8B, 0x4D, 0xFC, 0xE8 },
-              { 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF },
+            // Native artillery helper entry at 0x0042F840 on GOG.
+            // The six-byte prologue is followed by a unique local setup block.
+            { "Artillery Howitzer Volley Hook",
+              { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C, 0x56, 0x89, 0x4D, 0xF8, 0x8B, 0x4D, 0xF8, 0xE8, 0x00, 0x00, 0x00, 0x00, 0x83, 0xE8, 0x01 },
+              { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF },
               0,
-              5 },
+              6 },
         };
 
         // Restrict scan to executable pages inside the main BZR.exe image.
@@ -1808,11 +1861,11 @@ namespace BZROpenShim
                 p.expected_original = { 0xF0, 0x17, 0x49, 0x00 };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
-            else if (strcmp(p.name, "Artillery Weapon Mask Trace") == 0)
+            else if (strcmp(p.name, "Artillery Howitzer Volley Hook") == 0)
             {
-                p.bzr_address = 0x0042BB1A;
+                p.bzr_address = 0x0042F840;
                 p.verified = true;
-                p.expected_original = { 0xE8, 0x01, 0xAD, 0xFE, 0xFF };
+                p.expected_original = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C };
                 Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
             }
             else if (strcmp(p.name, "Decoded Weapon Mask Carrier Bias Hook") == 0)
@@ -1978,7 +2031,7 @@ namespace BZROpenShim
             { "Under Attack Alert Hook 2/2",                    (void*)Trampoline_UnderAttackAlertHook2 },
             { "Offensive Attack Reveal Hook",                   (void*)Trampoline_OffensiveAttackRevealHook },
             { "TurretTank Attack Reveal Hook",                  (void*)Trampoline_TurretTankAttackRevealHook },
-            { "Artillery Weapon Mask Trace",                    (void*)Trampoline_ArtilleryMaskTrace },
+            { "Artillery Howitzer Volley Hook",                 (void*)Trampoline_ArtilleryHowitzerVolley },
             { "Decoded Weapon Mask Carrier Bias Hook",          (void*)Trampoline_DecodedWeaponMaskBias },
             { "Raw Weapon Mask Carrier Bias Hook",              (void*)Trampoline_RawWeaponMaskBias },
         };
@@ -1998,8 +2051,9 @@ namespace BZROpenShim
                          strcmp(p.name, "TurretTank Aim Pitch Multiplier") == 0) ? 8 :
                         ((strcmp(p.name, "Offensive Attack Reveal Hook") == 0 ||
                           strcmp(p.name, "TurretTank Attack Reveal Hook") == 0) ? 12 :
+                        (strcmp(p.name, "Artillery Howitzer Volley Hook") == 0 ? 6 :
                         ((strcmp(p.name, "Under Attack Alert Hook 1/2") == 0 ||
-                          strcmp(p.name, "Under Attack Alert Hook 2/2") == 0) ? 52 : 5));
+                          strcmp(p.name, "Under Attack Alert Hook 2/2") == 0) ? 52 : 5)));
                     p.payload = MakeJmpPatch(p.bzr_address, targetVal, patchLen);
                     break;
                 }
@@ -2220,6 +2274,9 @@ namespace BZROpenShim
         Log(L"[INFO] HopFix helpers %hs for %hs\n",
             ShouldEnableMapRefreshFixes(isSteam) ? "enabled" : "disabled",
             isSteam ? "Steam" : "GOG");
+        Log(L"[INFO] Lobby BZRNET integration hooks %hs for %hs\n",
+            ShouldEnableLobbyBzrnetIntegration(isSteam) ? "enabled" : "disabled",
+            isSteam ? "Steam" : "GOG");
 
         if (ShouldEnableD3DStartupHooks())
         {
@@ -2278,7 +2335,7 @@ namespace BZROpenShim
             findAddr("Probe Refresh Path MapFilter1"),
             findAddr("Map List Fix Support 1/3"),
             findAddr("Probe MapListFix2"),
-            findAddr("Artillery Weapon Mask Trace"),
+            findAddr("Artillery Howitzer Volley Hook"),
             findAddr("TurretCraft Aim Pitch Multiplier"),
             findAddr("TurretTank Aim Pitch Multiplier"),
             findAddr("Under Attack Alert Hook 1/2"),

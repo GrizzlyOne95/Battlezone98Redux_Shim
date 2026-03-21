@@ -1233,37 +1233,38 @@ void __declspec(naked) __cdecl Trampoline_EngineFlameHoverCraftEmit()
 }
 
 // -----------------------------------------------------------------------
-// Artillery Weapon Mask Trace
-// Site: first internal call inside ArtilleryProcess::DoAttack
-// Replays: original helper call via g_BZRFnPtr_ArtilleryMaskTraceOriginal
-// Purpose: temporary RE instrumentation to log process->me weapon-mask state
-// without changing behavior.
+// Artillery Howitzer Volley Hook
+// Site: native artillery fire helper entry at 0x0042F840
+// Purpose: keep stock single-shot behavior for everything except howitzers,
+// which replay the helper once per mounted mortar slot.
 // -----------------------------------------------------------------------
-void __declspec(naked) __cdecl Trampoline_ArtilleryMaskTrace()
+void __declspec(naked) __cdecl Trampoline_ArtilleryHowitzerVolley()
 {
-    static const char* name = "Trampoline_ArtilleryMaskTrace";
     __asm
     {
-        pushfd
-        pushad
-        push name
-        call LogHit
-        add  esp, 4
-        popad
-        popfd
+        push ebp
+        mov  ebp, esp
+        push dword ptr [ebp + 0x1C]
+        push dword ptr [ebp + 0x18]
+        push dword ptr [ebp + 0x14]
+        push dword ptr [ebp + 0x10]
+        push dword ptr [ebp + 0x0C]
+        push ecx
+        call ArtilleryHowitzerVolleyHook
+        add  esp, 0x18
+        pop  ebp
+        ret  0x14
+    }
+}
 
-        pushfd
-        pushad
-        mov  eax, [ebp - 4]
-        push eax
-        call TraceArtilleryMaskFromProcess
-        add  esp, 4
-        popad
-        popfd
-
-        mov  ecx, [ebp - 4]
-        call [g_BZRFnPtr_ArtilleryMaskTraceOriginal]
-        jmp  [g_RetAddr_ArtilleryMaskTrace]
+void __declspec(naked) __cdecl Trampoline_ArtilleryHowitzerVolleyOriginal()
+{
+    __asm
+    {
+        push ebp
+        mov  ebp, esp
+        sub  esp, 0x0C
+        jmp  [g_BZRFnPtr_ArtilleryHowitzerVolleyContinue]
     }
 }
 
