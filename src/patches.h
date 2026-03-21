@@ -118,7 +118,8 @@ namespace BZROpenShim
     extern void __cdecl Trampoline_OffensiveAttackRevealHook();
     extern void __cdecl Trampoline_TurretTankAttackRevealHook();
     extern void __cdecl Trampoline_EngineFlameHoverCraftEmit();
-    extern void __cdecl Trampoline_ArtilleryMaskTrace();
+    extern void __cdecl Trampoline_ArtilleryHowitzerVolley();
+    extern void __cdecl Trampoline_ArtilleryHowitzerVolleyOriginal();
     extern void __cdecl Trampoline_DecodedWeaponMaskBias();
     extern void __cdecl Trampoline_RawWeaponMaskBias();
     extern void __fastcall VehicleListModFix2(void* thisPtr, void* edx, BzrString* name);
@@ -159,11 +160,10 @@ namespace BZROpenShim
     inline void* g_RetAddr_TurretTankAimPitchMultiplier = nullptr;
     inline void* g_RetAddr_UnderAttackAlertHook1 = nullptr;
     inline void* g_RetAddr_UnderAttackAlertHook2 = nullptr;
-    inline void* g_RetAddr_ArtilleryMaskTrace = nullptr;
     inline void* g_RetAddr_OffensiveAttackRevealHook = nullptr;
     inline void* g_RetAddr_TurretTankAttackRevealHook = nullptr;
     inline void (*g_BZRFnPtr_JoinerEventOriginal)() = nullptr;
-    inline void (*g_BZRFnPtr_ArtilleryMaskTraceOriginal)() = nullptr;
+    inline void* g_BZRFnPtr_ArtilleryHowitzerVolleyContinue = nullptr;
 
     // -----------------------------------------------------------------------
     // Build the active hop-fix patch list.
@@ -199,7 +199,7 @@ namespace BZROpenShim
             // -- Engine flame color routing --
             { 0x0, PT::REL32, {}, "HoverCraft Engine Flame Emit Hook 1/2", false },
             { 0x0, PT::REL32, {}, "HoverCraft Engine Flame Emit Hook 2/2", false },
-            { 0x0, PT::JMP5, {}, "Artillery Weapon Mask Trace", false },
+            { 0x0, PT::JMP5, {}, "Artillery Howitzer Volley Hook", false },
             { 0x0, PT::JMP5, {}, "Decoded Weapon Mask Carrier Bias Hook", false },
             { 0x0, PT::JMP5, {}, "Raw Weapon Mask Carrier Bias Hook", false },
             { 0x0, PT::DWORD, {}, "Engine Flame Control VTable Hook", false },
