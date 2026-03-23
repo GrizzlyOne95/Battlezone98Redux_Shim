@@ -1,0 +1,19 @@
+
+undefined4 __thiscall FUN_007fc680(undefined4 param_1,int param_2)
+
+{
+  void *local_10;
+  undefined1 *puStack_c;
+  undefined4 local_8;
+  
+  local_8 = 0xffffffff;
+  puStack_c = &LAB_008644e8;
+  local_10 = ExceptionList;
+  ExceptionList = &local_10;
+  FUN_007fc750(param_2);
+  local_8 = 0;
+  FUN_007fc640(param_2 + 0x20);
+  ExceptionList = local_10;
+  return param_1;
+}
+

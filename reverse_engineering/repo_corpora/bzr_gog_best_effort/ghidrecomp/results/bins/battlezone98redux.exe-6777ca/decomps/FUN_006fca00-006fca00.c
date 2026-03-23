@@ -1,0 +1,32 @@
+
+int __thiscall
+FUN_006fca00(int param_1,undefined4 param_2,undefined4 param_3,undefined4 param_4,undefined4 param_5
+            )
+
+{
+  undefined4 uVar1;
+  undefined4 uVar2;
+  undefined4 uVar3;
+  _func_bool_agent_status_ptr **pp_Var4;
+  void *local_10;
+  undefined1 *puStack_c;
+  undefined4 local_8;
+  
+  local_8 = 0xffffffff;
+  puStack_c = &LAB_008550e8;
+  local_10 = ExceptionList;
+  ExceptionList = &local_10;
+  uVar1 = FUN_00417780(param_5,DAT_008e7000 ^ (uint)&stack0xfffffffc);
+  uVar2 = FUN_00417780(param_4,uVar1);
+  uVar3 = FUN_00417780(param_3,uVar2);
+  FUN_0070cac0(uVar3,uVar2,uVar1);
+  local_8 = 0;
+  pp_Var4 = (_func_bool_agent_status_ptr **)FUN_00417780(param_2);
+  std::_Callable_base<bool_(__cdecl*const)(enum_Concurrency::agent_status_const&),0>::
+  _Callable_base<bool_(__cdecl*const)(enum_Concurrency::agent_status_const&),0><bool_(__cdecl*const&)(enum_Concurrency::agent_status_const&)>
+            ((_Callable_base<bool_(__cdecl*const)(enum_Concurrency::agent_status_const&),0> *)
+             (param_1 + 0x28),pp_Var4);
+  ExceptionList = local_10;
+  return param_1;
+}
+

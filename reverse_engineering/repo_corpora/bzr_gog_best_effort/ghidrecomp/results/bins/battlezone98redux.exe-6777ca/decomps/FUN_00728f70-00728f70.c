@@ -1,0 +1,27 @@
+
+void FUN_00728f70(undefined4 param_1)
+
+{
+  undefined4 uVar1;
+  int iVar2;
+  void *local_10;
+  undefined1 *puStack_c;
+  int local_8;
+  
+  local_8 = 0xffffffff;
+  puStack_c = &LAB_008594a1;
+  local_10 = ExceptionList;
+  ExceptionList = &local_10;
+  FUN_006d0c90();
+  local_8 = 0;
+  uVar1 = FUN_006d0d10();
+  iVar2 = forward<>(4,uVar1);
+  local_8._0_1_ = 1;
+  if (iVar2 != 0) {
+    FUN_0072eef0(param_1);
+  }
+  local_8 = (uint)local_8._1_3_ << 8;
+  FUN_00729022();
+  return;
+}
+

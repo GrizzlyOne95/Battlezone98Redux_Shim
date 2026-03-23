@@ -1,0 +1,10 @@
+
+float10 FUN_00689cb0(undefined4 param_1,undefined4 param_2)
+
+{
+  float local_8;
+  
+  FUN_00689ab0(param_1,param_2,&local_8,0);
+  return (float10)local_8;
+}
+

@@ -1,0 +1,19 @@
+{
+    "binary_path":  "battlezone98redux.exe (GOG source binary not bundled)",
+    "binary_sha256":  "8d71f56c1314e69a8ad38f4eeaf20a8ff825965a84cf196e5f77ea4cc3377413",
+    "pdb_path":  "battlezone98redux.pdb (advisory PDB source not bundled)",
+    "output_root":  ".",
+    "ghidra_project_path":  "ghidra_projects",
+    "ghidra_project_name":  "battlezone98redux.exe-6777ca",
+    "counts":  {
+                   "ascii_strings":  15255,
+                   "utf16_strings":  77,
+                   "merged_rva_names":  497
+               },
+    "pdb_exact_match":  false,
+    "decomp_dir":  "ghidrecomp/results/bins/battlezone98redux.exe-6777ca/decomps",
+    "inventory_dir":  "inventory",
+    "strings_dir":  "binary_strings",
+    "pdb_dir":  "pdb_reference",
+    "logs_dir":  "logs"
+}

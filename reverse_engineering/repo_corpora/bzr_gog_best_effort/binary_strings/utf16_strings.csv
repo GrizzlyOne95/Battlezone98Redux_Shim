@@ -1,0 +1,78 @@
+offset,rva,section,text
+119158,122230,.text,jjjjj
+211526,214598,.text,jjjj
+218677,221749,.text,jjjjj
+248924,251996,.text,jjjj
+253445,256517,.text,jjjj
+603014,606086,.text,jjjh
+2245193,2248265,.text,jjjj
+2245218,2248290,.text,jjjj
+2245391,2248463,.text,jjjj
+2245416,2248488,.text,jjjj
+2549357,2552429,.text,fjjj
+2549901,2552973,.text,fjjj
+2550413,2553485,.text,fjjj
+2614697,2617769,.text,jjjj
+2634445,2637517,.text,hjjj
+2825625,2828697,.text,jjjjjj
+2939257,2942329,.text,jjjj
+2939310,2942382,.text,jjjjj
+4620074,4626218,.rdata,N0N^N
+4634830,4640974,.rdata,A A0A@APA`ApA
+4660200,4666344,.rdata," !""#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+4661112,4667256,.rdata," !""#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+5077094,5083238,.rdata,N0N^N
+5131976,5141192,.data,0123456789
+5132010,5141226,.data,abcdefghijklmnopqrstuvwxyz
+5319862,42947254,.rsrc,Path Options
+5319890,42947282,.rsrc,MS Sans Serif
+5319974,42947366,.rsrc,Cancel
+5320042,42947434,.rsrc,Name
+5320078,42947470,.rsrc,Path Type
+5320122,42947514,.rsrc,Path
+5320158,42947550,.rsrc,Area
+5320194,42947586,.rsrc,Area Options
+5320246,42947638,.rsrc,Interesting
+5320294,42947686,.rsrc,Boring
+5320334,42947726,.rsrc,Area Type
+5320378,42947770,.rsrc,Area Part
+5320422,42947814,.rsrc,Inside
+5320462,42947854,.rsrc,Outside
+5320502,42947894,.rsrc,Value
+5320566,42947958,.rsrc,Force
+5320630,42948022,.rsrc,Unit Type
+5320674,42948066,.rsrc,Defend
+5320714,42948106,.rsrc,Attack
+5320758,42948150,.rsrc,Object Settings
+5320792,42948184,.rsrc,MS Sans Serif
+5320874,42948266,.rsrc,Cancel
+5320914,42948306,.rsrc,Label
+5320978,42948370,.rsrc,Independence
+5321058,42948450,.rsrc,Team
+5423238,43050630,.rsrc,VS_VERSION_INFO
+5423330,43050722,.rsrc,StringFileInfo
+5423366,43050758,.rsrc,040904b0
+5423390,43050782,.rsrc,Comments
+5423408,43050800,.rsrc,Super Programmer Ken Miller says: 'Dare To Have It All!'
+5423530,43050922,.rsrc,CompanyName
+5423556,43050948,.rsrc,"Rebellion, Ltd."
+5423594,43050986,.rsrc,FileDescription
+5423628,43051020,.rsrc,Battlezone
+5423650,43051042,.rsrc, 98 Redux
+5423678,43051070,.rsrc,FileVersion
+5423704,43051096,.rsrc,2.2.301
+5423726,43051118,.rsrc,InternalName
+5423752,43051144,.rsrc,bzone
+5423770,43051162,.rsrc,LegalCopyright
+5423802,43051194,.rsrc,1998-2016 Rebellion
+5423850,43051242,.rsrc,LegalTrademarks
+5423884,43051276,.rsrc,The Rebellion name and logo and the Battlezone name and logo are trademarks of Rebellion and may be registered trademarks in certain countries. All rights reserved.
+5424222,43051614,.rsrc,OriginalFilename
+5424256,43051648,.rsrc,bzone.exe
+5424282,43051674,.rsrc,ProductName
+5424308,43051700,.rsrc,Battlezone
+5424330,43051722,.rsrc, 98 Redux
+5424358,43051750,.rsrc,ProductVersion
+5424388,43051780,.rsrc,2.2.301
+5424410,43051802,.rsrc,VarFileInfo
+5424442,43051834,.rsrc,Translation

@@ -1,0 +1,9 @@
+
+TypeDescriptor * FUN_0072c130(void)
+
+{
+  return &std::
+          _Bind<1,void,struct_std::_Pmf_wrap<void_(__thiscall_websocketpp::connection<struct_websocketpp::config::asio_client>::*)(class_std::error_code_const&),void,class_websocketpp::connection<struct_websocketpp::config::asio_client>,class_std::error_code_const&>,class_websocketpp::connection<struct_websocketpp::config::asio_client>*_const,class_std::_Ph<1>&>
+          ::RTTI_Type_Descriptor;
+}
+

@@ -14,11 +14,11 @@ def slugify(text: str) -> str:
 
 
 def load_index(promoted_root: Path) -> dict:
-    return json.loads((promoted_root / "current_index.json").read_text(encoding="utf-8"))
+    return json.loads((promoted_root / "current_index.json").read_text(encoding="utf-8-sig"))
 
 
 def load_corpora_config(config_path: Path) -> list[dict]:
-    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    payload = json.loads(config_path.read_text(encoding="utf-8-sig"))
     corpora = payload.get("corpora", [])
     if not corpora:
         raise ValueError(f"No corpora defined in config: {config_path}")
@@ -30,6 +30,13 @@ def resolve_config_path(config_path: Path, candidate: str) -> Path:
     if root.is_absolute():
         return root
     return (config_path.parent / root).resolve()
+
+
+def resolve_index_path(promoted_root: Path, candidate: str) -> Path:
+    path = Path(candidate)
+    if path.is_absolute():
+        return path
+    return (promoted_root / path).resolve()
 
 
 def read_csv_rows(path: Path) -> list[dict]:
@@ -101,6 +108,7 @@ def prefix_rows(rows: list[dict], corpus_label: str) -> list[dict]:
 def default_promoted_roots() -> list[Path]:
     roots = [
         Path("reverse_engineering/current_global_corpus"),
+        Path("reverse_engineering/repo_corpora/bzr_gog_best_effort"),
         Path("reverse_engineering/current_legacy_global_corpus"),
     ]
     return [root for root in roots if (root / "current_index.json").exists()]
@@ -170,7 +178,7 @@ def main() -> None:
         label = str(corpus["label"])
         index = load_index(promoted_root)
         manifest = index["manifest"]
-        corpus_root = Path(index["current_corpus_root"])
+        corpus_root = resolve_index_path(promoted_root, str(index["current_corpus_root"]))
         trust = "exact" if manifest.get("pdb_exact_match") else "advisory"
         trust_counter[trust] += 1
         corpus_summaries.append(
@@ -184,18 +192,22 @@ def main() -> None:
             }
         )
 
-        inventory_functions = read_csv_rows(Path(manifest["inventory_dir"]) / "functions.csv")
-        inventory_symbols = read_csv_rows(Path(manifest["inventory_dir"]) / "symbols.csv")
+        inventory_dir = resolve_index_path(promoted_root, str(manifest["inventory_dir"]))
+        pdb_dir = resolve_index_path(promoted_root, str(manifest["pdb_dir"])) if manifest.get("pdb_dir") else None
+        decomp_dir = resolve_index_path(promoted_root, str(manifest["decomp_dir"]))
+
+        inventory_functions = read_csv_rows(inventory_dir / "functions.csv")
+        inventory_symbols = read_csv_rows(inventory_dir / "symbols.csv")
         merged_matches = read_csv_rows(corpus_root / "merged" / "function_matches_by_rva.csv")
-        pdb_publics = read_csv_rows(Path(manifest["pdb_dir"]) / "public_functions.csv") if manifest.get("pdb_dir") else []
-        pdb_modules = read_csv_rows(Path(manifest["pdb_dir"]) / "modules.csv") if manifest.get("pdb_dir") else []
+        pdb_publics = read_csv_rows(pdb_dir / "public_functions.csv") if pdb_dir else []
+        pdb_modules = read_csv_rows(pdb_dir / "modules.csv") if pdb_dir else []
 
         function_hits.extend(prefix_rows(select_rows(inventory_functions, patterns, ["name", "signature", "namespace"], args.limit), label))
         symbol_hits.extend(prefix_rows(select_rows(inventory_symbols, patterns, ["name", "namespace", "symbol_type"], args.limit), label))
         merged_hits.extend(prefix_rows(select_rows(merged_matches, patterns, ["ghidra_name", "pdb_name", "ghidra_signature"], args.limit), label))
         pdb_hits.extend(prefix_rows(select_rows(pdb_publics, patterns, ["name"], args.limit), label))
         module_hits.extend(prefix_rows(select_rows(pdb_modules, patterns, ["module_name", "object_name"], args.limit), label))
-        decomp_hits_all.extend([f"[{label}] {line}" for line in rg_hits(Path(manifest["decomp_dir"]), query, ["*.c"], args.limit)])
+        decomp_hits_all.extend([f"[{label}] {line}" for line in rg_hits(decomp_dir, query, ["*.c"], args.limit)])
 
     function_hits = function_hits[: args.limit]
     symbol_hits = symbol_hits[: args.limit]

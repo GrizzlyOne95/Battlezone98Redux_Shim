@@ -1,0 +1,19 @@
+
+undefined4 FUN_007e00d0(undefined4 param_1,undefined4 param_2,undefined4 param_3,undefined4 param_4)
+
+{
+  undefined4 uVar1;
+  undefined4 uVar2;
+  undefined1 local_18 [8];
+  undefined1 local_10 [11];
+  undefined1 local_5;
+  
+  local_5 = 0;
+  uVar2 = param_4;
+  uVar1 = FUN_007e2fb0(param_2,param_3,param_4,param_4);
+  uVar1 = FUN_007e2fc0(local_10,uVar1,param_3,param_4);
+  uVar1 = FUN_007e2ff0(local_18,uVar1);
+  FUN_007e3010(param_1,uVar1,uVar2);
+  return param_1;
+}
+

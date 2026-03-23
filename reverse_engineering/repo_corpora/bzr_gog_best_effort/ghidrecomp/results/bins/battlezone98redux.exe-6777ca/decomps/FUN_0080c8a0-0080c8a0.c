@@ -1,0 +1,16 @@
+
+void FUN_0080c8a0(undefined4 param_1,undefined4 param_2)
+
+{
+  undefined1 *puVar1;
+  undefined4 uVar2;
+  undefined1 local_c [6];
+  undefined1 local_6 [2];
+  
+  puVar1 = (undefined1 *)FUN_0066f210();
+  uVar2 = FUN_007ec3a0(local_6,param_1,param_2,*puVar1);
+  uVar2 = FUN_007e96b0(local_c,param_1,uVar2);
+  FUN_0080d2f0(uVar2);
+  return;
+}
+

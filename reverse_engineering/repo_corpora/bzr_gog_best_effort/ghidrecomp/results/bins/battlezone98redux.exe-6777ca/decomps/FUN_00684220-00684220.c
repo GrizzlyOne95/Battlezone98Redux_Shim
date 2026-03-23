@@ -1,0 +1,22 @@
+
+void __fastcall FUN_00684220(undefined4 *param_1)
+
+{
+  uint uVar1;
+  void *local_10;
+  undefined1 *puStack_c;
+  undefined4 local_8;
+  
+  puStack_c = &LAB_0084ecd8;
+  local_10 = ExceptionList;
+  uVar1 = DAT_008e7000 ^ (uint)&stack0xfffffffc;
+  ExceptionList = &local_10;
+  *param_1 = Ogre::SharedPtrInfoFree<class_Ogre::ShadowCameraSetup>::vftable;
+  local_8 = 0;
+  Ogre::StdAllocPolicy::deallocateBytes((void *)param_1[6]);
+  local_8 = 0xffffffff;
+  FUN_00667260(uVar1);
+  ExceptionList = local_10;
+  return;
+}
+

@@ -1,0 +1,10 @@
+
+undefined4 * __thiscall
+FUN_005e2310(undefined4 *param_1,undefined4 param_2,undefined4 param_3,undefined4 param_4)
+
+{
+  FUN_004f8bc0(param_2,param_3,param_4);
+  *param_1 = ThermalLauncherClass::vftable;
+  return param_1;
+}
+
