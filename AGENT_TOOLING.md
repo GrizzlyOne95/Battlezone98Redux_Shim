@@ -48,7 +48,7 @@ Use this split before choosing a tool.
 ### Ghidra / MCP
 
 - `bzr-ghidra-mcp.cmd`
-  - Wrapper around `pyghidra_mcp`.
+  - Battlezone-specific wrapper around `pyghidra_mcp`.
   - Default project path: [pyghidra_mcp_projects](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/pyghidra_mcp_projects)
   - Default project name: `BZ98_Redux`
   - Default binary resolution order:
@@ -56,8 +56,14 @@ Use this split before choosing a tool.
     2. `%USERPROFILE%\Documents\Battlezone 98 Redux\battlezone98redux.exe`
     3. `%USERPROFILE%\Downloads\Battlezone 98 Redux\battlezone98redux.exe`
     4. `C:\GOG Games\Battlezone 98 Redux\battlezone98redux.exe`
+  - Includes a Windows-specific reopen patch for existing Ghidra project binaries so reopened projects do not fail on absolute-path reconstruction.
   - Use for: entry bytes, disassembly, function lookup, symbols, xrefs, Ghidra project-backed binary queries.
   - Help: `bzr-ghidra-mcp.cmd --help`
+- `bzr-ghidra-mcp-service.cmd`
+  - Starts or reuses the persistent localhost Ghidra MCP service.
+  - Default endpoint: `http://127.0.0.1:8765/mcp`
+  - Installed into the user startup run key as `BzrGhidraMcp` by `install_agent_re_tooling.ps1`.
+  - Use when validating or repairing the background Ghidra MCP service outside Codex.
 
 ### Debugger Bridge
 
@@ -213,7 +219,9 @@ Use this split before choosing a tool.
 Configured in `%USERPROFILE%\.codex\config.toml`:
 
 - `ghidra`
-  - Command: `python ...\scripts\ghidra_mcp_bz98.py`
+  - URL: `http://127.0.0.1:8765/mcp`
+  - Backed by `bzr-ghidra-mcp-service.cmd` and the `BzrGhidraMcp` user startup entry.
+  - This avoids Codex per-session startup timing out on Ghidra initialization.
   - Use this first for Ghidra-backed binary questions.
 - `redux_debug`
   - Command: `python ...\scripts\redux_debug_bridge.py mcp`
@@ -289,7 +297,7 @@ installer flow in this repo.
 Prefer these before inventing a one-off script if they already cover the task.
 
 - [ghidra_mcp_bz98.py](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/scripts/ghidra_mcp_bz98.py)
-  - Battlezone-specific wrapper for `pyghidra_mcp`
+  - Battlezone-specific wrapper for `pyghidra_mcp`, including the project reopen patch and persistent-service helper
 - [redux_debug_bridge.py](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/scripts/redux_debug_bridge.py)
   - launch/read/terminate bridge, also exposes MCP mode
 - [qiling_cli.py](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/scripts/qiling_cli.py)
