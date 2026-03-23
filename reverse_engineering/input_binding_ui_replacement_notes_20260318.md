@@ -249,6 +249,38 @@ repo pattern:
 - wire native click callbacks
 - reuse existing game assets and localization
 
+### 8. 2026-03-23 recovery update: the PDB public method addresses were misleading
+
+The shipped GOG PDB still helps with class names and singleton discovery, but
+its public `cUI_OptionsInput` method addresses did not correspond to reliable
+hook entries for the live Redux binary.
+
+String-xref recovery against the GOG executable showed that the real stock input
+screen construction path is:
+
+- `FUN_007b25b0`
+
+That function:
+
+- sets `cUI_OptionsInput::vftable`
+- stores the singleton at `DAT_009455b8`
+- creates the `ioptions_center.png` overlay
+- creates the fixed `Back`, `Joystick`, `Defaults`, and stock key-bind buttons
+- resolves the expected localization keys:
+  - `input_config`
+  - `alreadyBound`
+  - `reserved_key`
+  - `message_one`
+  - `message_two`
+  - `keyBindForward`
+  - `keyBindJump`
+  - `keyBindWeapon`
+
+Immediate practical implication:
+
+- the first live replacement hook should target the recovered constructor path
+  at `0x007B25B0`, not the earlier PDB-derived `0x005E82B0` placeholder
+
 ## Current Constraints
 
 ### Reserved entries

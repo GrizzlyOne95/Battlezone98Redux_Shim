@@ -134,7 +134,7 @@ namespace BZROpenShim
     using FnGetPlayerHandle = int(__cdecl*)();
     using FnGameObjectGetObjByHandle = void* (__cdecl*)(int handle);
     using FnPersonSimulate = void(__thiscall*)(void* thisPtr, float dt);
-    using FnOptionsInputPopulateUi = void(__thiscall*)(void* thisPtr);
+    using FnOptionsInputCtor = void* (__thiscall*)(void* thisPtr);
     using FnRecordDeath = void(__cdecl*)(int killedTeam, int killerTeam);
     using FnCalcRangeCraft = void(__cdecl*)(void* craft,
                                             float* closeRange,
@@ -214,7 +214,7 @@ namespace BZROpenShim
     static FnGetPlayerHandle g_BzrFn_GetPlayerHandle = nullptr;
     static FnGameObjectGetObjByHandle g_BzrFn_GameObjectGetObjByHandle = nullptr;
     static FnPersonSimulate g_BzrFn_PersonSimulate = nullptr;
-    static FnOptionsInputPopulateUi g_BzrFn_OptionsInputPopulateUi = nullptr;
+    static FnOptionsInputCtor g_BzrFn_OptionsInputCtor = nullptr;
     static FnRecordDeath g_BzrFn_RecordDeath = nullptr;
     static FnCalcRangeCraft g_BzrFn_CalcRangeCraft = nullptr;
     static FnProcessDoSubTask g_BzrFn_OffensiveProcessDoSubTask = nullptr;
@@ -227,6 +227,8 @@ namespace BZROpenShim
     static FnAIBuildUnassignedCCAdd g_BzrFn_AIBuildUnassignedCCAdd = nullptr;
     static BuildItem* g_BzrBuildMenuRoot = nullptr;
     static bool g_IsSteamExe = false;
+
+    void* __fastcall OptionsInputPopulateUiHook(void* thisPtr, void* /*edx*/);
 
     namespace
     {
@@ -314,10 +316,13 @@ namespace BZROpenShim
         constexpr uintptr_t kGogGameObjectGetObjByHandleAddr = 0x0046B160;
         constexpr uintptr_t kGogRecordDeathEntryAddr = 0x004D9210;
         constexpr uintptr_t kSteam64GlobalAddr = 0x0260B1D0;
-        constexpr uintptr_t kOptionsInputPopulateUiRva = 0x001E82B0;
-        constexpr uintptr_t kOptionsInputKeyReleasedRva = 0x001E7D10;
-        constexpr uintptr_t kOptionsInputResetDefaultsRva = 0x001E5E50;
+        // The shipped GOG PDB public-symbol addresses for cUI_OptionsInput methods
+        // are not reliable function-entry hooks against the current Redux binary.
+        // The stock input screen constructor was recovered from string xrefs instead.
+        constexpr uintptr_t kOptionsInputCtorAddr = 0x007B25B0;
+        constexpr uintptr_t kOptionsInputScreenFactoryCallerAddr = 0x007C8600;
         constexpr size_t kInlineDetourMaxPatchLen = 16;
+        constexpr size_t kOptionsInputCtorDetourLen = 10;
         constexpr size_t kPersonSimulateDetourLen = 8;
         constexpr size_t kRecordDeathDetourLen = 6;
         constexpr ULONGLONG kCareerStatsMpHookRetryMs = 1000;
@@ -760,12 +765,14 @@ namespace BZROpenShim
         static bool g_InputBindingUiScaffoldLogged = false;
         static bool g_InputBindingUiPopulateHookInstallAttempted = false;
         static bool g_InputBindingUiPopulateHookInstalled = false;
+        static bool g_InputBindingUiPopulateHookMismatchLogged = false;
         static std::filesystem::path g_InputBindingInstallDirectory = {};
         static InputBindingInventoryStats g_InputBindingInventory = {};
         static std::vector<InputBindingCommandBlock> g_InputBindingCommandBlocks = {};
         static std::vector<GameKeyBindingAction> g_GameKeyBindingActions = {};
         static std::vector<InputBindingUiRow> g_InputBindingUiRows = {};
         static void* g_LastOptionsInputScreen = nullptr;
+        static void InitializeInputBindingUiScaffold();
         static int g_EngineFlamePrimaryRedTexture = 0;
         static int g_EngineFlamePrimaryGreenTexture = 0;
         static void* g_EngineFlamePrimaryManager = nullptr;
@@ -6898,10 +6905,109 @@ namespace BZROpenShim
                     static_cast<unsigned>(row.matchingBlockCount));
             }
 
-            Log(L"[INPUTUI] Hook candidates PopulateUI=0x%08X KeyReleased=0x%08X ResetDefaults=0x%08X\n",
-                static_cast<uint32_t>(GetMainModuleBase() + kOptionsInputPopulateUiRva),
-                static_cast<uint32_t>(GetMainModuleBase() + kOptionsInputKeyReleasedRva),
-                static_cast<uint32_t>(GetMainModuleBase() + kOptionsInputResetDefaultsRva));
+            Log(L"[INPUTUI] Recovered stock constructor entry=0x%08X screenFactoryCall=0x%08X\n",
+                static_cast<uint32_t>(kOptionsInputCtorAddr),
+                static_cast<uint32_t>(kOptionsInputScreenFactoryCallerAddr));
+        }
+
+        static bool ShouldEnableInputBindingUiReplacement()
+        {
+            return EnvFlagEnabled("OPENSHIM_ENABLE_INPUT_BINDING_UI_CONSTRUCTOR_HOOK") ||
+                   EnvFlagEnabled("OPENSHIM_ENABLE_INPUT_BINDING_UI_POPULATE_HOOK") ||
+                   EnvFlagEnabled("OPENSHIM_ENABLE_INPUT_BINDING_UI_SCAFFOLD");
+        }
+
+        static bool CreateInputBindingPreviewLabel(void* parent,
+                                                   const char* text,
+                                                   float x,
+                                                   float y,
+                                                   float w,
+                                                   float h)
+        {
+            if (!parent || !text || !*text || !g_BzrFn_LabelCtor || !g_BzrFn_AddChild)
+                return false;
+
+            void* labelMem = ::operator new(0x930, std::nothrow);
+            if (!labelMem)
+                return false;
+
+            std::memset(labelMem, 0, 0x930);
+            void* label = g_BzrFn_LabelCtor(labelMem, text, x, y, w, h, 0x20, parent, 0);
+            if (!label)
+                return false;
+
+            if (g_BzrFn_LabelState)
+                g_BzrFn_LabelState(label, nullptr);
+            g_BzrFn_AddChild(parent, label, 0);
+            return true;
+        }
+
+        static std::string FormatInputBindingPreviewLine(const InputBindingUiRow& row)
+        {
+            std::string line = row.displayText.empty() ? HumanizeInputBindingCommand(row.command) : row.displayText;
+            line += ": ";
+            line += row.currentBindingText.empty() ? "<none>" : row.currentBindingText;
+            if (row.reserved)
+                line += " [reserved]";
+            return line;
+        }
+
+        static void RenderInputBindingUiPreview(void* screen)
+        {
+            InitializeInputBindingUiScaffold();
+
+            if (!screen)
+                return;
+
+            static constexpr float kHeaderX = 170.0f;
+            static constexpr float kHeaderY = 185.0f;
+            static constexpr float kHeaderW = 980.0f;
+            static constexpr float kHeaderH = 30.0f;
+            static constexpr float kRowX = 170.0f;
+            static constexpr float kRowY = 222.0f;
+            static constexpr float kRowW = 980.0f;
+            static constexpr float kRowH = 24.0f;
+            static constexpr float kRowStep = 25.0f;
+            static constexpr size_t kMaxPreviewRows = 12;
+
+            CreateInputBindingPreviewLabel(
+                screen,
+                "OpenShim Input UI Preview",
+                kHeaderX,
+                kHeaderY,
+                kHeaderW,
+                kHeaderH);
+
+            size_t rendered = 0;
+            for (const InputBindingUiRow& row : g_InputBindingUiRows)
+            {
+                if (row.family != InputBindingMapFamily::Input)
+                    continue;
+                if (rendered >= kMaxPreviewRows)
+                    break;
+
+                const std::string line = FormatInputBindingPreviewLine(row);
+                if (CreateInputBindingPreviewLabel(
+                        screen,
+                        line.c_str(),
+                        kRowX,
+                        kRowY + (static_cast<float>(rendered) * kRowStep),
+                        kRowW,
+                        kRowH))
+                {
+                    ++rendered;
+                }
+            }
+
+            const std::string footer =
+                "OpenShim preview overlays the stock screen; capture/edit flow not wired yet.";
+            CreateInputBindingPreviewLabel(
+                screen,
+                footer.c_str(),
+                kRowX,
+                kRowY + (static_cast<float>(kMaxPreviewRows) * kRowStep) + 8.0f,
+                kRowW,
+                kRowH);
         }
 
         static void InitializeInputBindingUiScaffold()
@@ -6957,13 +7063,47 @@ namespace BZROpenShim
                 return;
             g_InputBindingUiPopulateHookInstallAttempted = true;
 
-            if (EnvFlagEnabled("OPENSHIM_ENABLE_INPUT_BINDING_UI_POPULATE_HOOK") ||
-                EnvFlagEnabled("OPENSHIM_ENABLE_INPUT_BINDING_UI_SCAFFOLD"))
+            if (!ShouldEnableInputBindingUiReplacement())
+                return;
+
+            static const uint8_t kExpectedOptionsInputCtorBytes[kOptionsInputCtorDetourLen] =
             {
-                Log(L"[INPUTUI] PopulateUI hook requested but detour install remains disabled until entry bytes and patch length are runtime-validated installed=%hs target=0x%08X\n",
-                    g_InputBindingUiPopulateHookInstalled ? "yes" : "no",
-                    static_cast<uint32_t>(GetMainModuleBase() + kOptionsInputPopulateUiRva));
+                0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x73, 0x12, 0x86, 0x00
+            };
+
+            if (!ExpectedBytesMatchAt(kOptionsInputCtorAddr,
+                                      kExpectedOptionsInputCtorBytes,
+                                      sizeof(kExpectedOptionsInputCtorBytes)))
+            {
+                if (!g_InputBindingUiPopulateHookMismatchLogged)
+                {
+                    Log(L"[INPUTUI] Constructor entry bytes mismatch at 0x%08X; input UI replacement remains disabled\n",
+                        static_cast<uint32_t>(kOptionsInputCtorAddr));
+                    g_InputBindingUiPopulateHookMismatchLogged = true;
+                }
+                return;
             }
+
+            if (!InstallInlineDetour32(g_OptionsInputPopulateUiDetour,
+                                       kOptionsInputCtorAddr,
+                                       reinterpret_cast<void*>(OptionsInputPopulateUiHook),
+                                       kOptionsInputCtorDetourLen,
+                                       kExpectedOptionsInputCtorBytes,
+                                       sizeof(kExpectedOptionsInputCtorBytes)))
+            {
+                Log(L"[INPUTUI] Failed installing constructor hook at 0x%08X\n",
+                    static_cast<uint32_t>(kOptionsInputCtorAddr));
+                return;
+            }
+
+            g_BzrFn_OptionsInputCtor =
+                reinterpret_cast<FnOptionsInputCtor>(g_OptionsInputPopulateUiDetour.trampoline);
+            g_InputBindingUiPopulateHookInstalled = (g_BzrFn_OptionsInputCtor != nullptr);
+            g_InputBindingUiPopulateHookMismatchLogged = false;
+            Log(L"[INPUTUI] Installed constructor hook entry=0x%08X trampoline=0x%08X preview=%hs\n",
+                static_cast<uint32_t>(kOptionsInputCtorAddr),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OptionsInputPopulateUiDetour.trampoline)),
+                "enabled");
         }
 
         static void OnOptionsInputPopulateUiScaffold(void* screen)
@@ -6974,10 +7114,13 @@ namespace BZROpenShim
                 return;
 
             g_LastOptionsInputScreen = screen;
-            Log(L"[INPUTUI] PopulateUI scaffold screen=0x%08X rows=%u stockFallback=%hs\n",
+            Log(L"[INPUTUI] Constructor hook screen=0x%08X rows=%u stockFallback=%hs preview=%hs\n",
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(screen)),
                 static_cast<unsigned>(g_InputBindingUiRows.size()),
+                "yes",
                 "yes");
+
+            RenderInputBindingUiPreview(screen);
         }
 
         static bool IsIniBoolTrue(const char* value, bool fallback)
@@ -8238,12 +8381,15 @@ namespace BZROpenShim
     // ---------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------
-    void __fastcall OptionsInputPopulateUiHook(void* thisPtr, void* /*edx*/)
+    void* __fastcall OptionsInputPopulateUiHook(void* thisPtr, void* /*edx*/)
     {
-        OnOptionsInputPopulateUiScaffold(thisPtr);
+        void* screen = thisPtr;
 
-        if (g_BzrFn_OptionsInputPopulateUi)
-            g_BzrFn_OptionsInputPopulateUi(thisPtr);
+        if (g_BzrFn_OptionsInputCtor)
+            screen = g_BzrFn_OptionsInputCtor(thisPtr);
+
+        OnOptionsInputPopulateUiScaffold(screen);
+        return screen;
     }
 
     void ResolveBzrHooks(bool isSteam)
@@ -8258,7 +8404,7 @@ namespace BZROpenShim
         g_BzrFn_GetPlayerHandle = nullptr;
         g_BzrFn_GameObjectGetObjByHandle = nullptr;
         g_BzrFn_PersonSimulate = nullptr;
-        g_BzrFn_OptionsInputPopulateUi = nullptr;
+        g_BzrFn_OptionsInputCtor = nullptr;
         g_BzrFn_RecordDeath = g_RecordDeathDetour.trampoline
             ? reinterpret_cast<FnRecordDeath>(g_RecordDeathDetour.trampoline)
             : nullptr;
@@ -8282,6 +8428,7 @@ namespace BZROpenShim
         g_InputBindingUiScaffoldLogged = false;
         g_InputBindingUiPopulateHookInstallAttempted = false;
         g_InputBindingUiPopulateHookInstalled = false;
+        g_InputBindingUiPopulateHookMismatchLogged = false;
         g_CareerStatsMpHookInstalled = (g_RecordDeathDetour.trampoline != nullptr);
         g_CareerStatsMpHookInstallAttempted = g_CareerStatsMpHookInstalled;
         g_CareerStatsMpHookMismatchLogged = false;
