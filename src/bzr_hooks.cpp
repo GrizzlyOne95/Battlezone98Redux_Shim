@@ -130,10 +130,22 @@ namespace BZROpenShim
     using FnGetTeamNum = int(__cdecl*)(int handle);
     using FnExuGetTeamEngineFlameColor = int(__cdecl*)(int team);
     using FnGameObjectGetTeam = int(__thiscall*)(void* thisPtr);
+    using FnGameObjectRelation = bool(__thiscall*)(void* thisPtr, void* other);
     using FnChunkEffectSimulate = void(__thiscall*)(void* self, float dt);
     using FnGetPlayerHandle = int(__cdecl*)();
     using FnGameObjectGetObjByHandle = void* (__cdecl*)(int handle);
     using FnPersonSimulate = void(__thiscall*)(void* thisPtr, float dt);
+    using FnShieldTowerSimulate = void(__thiscall*)(void* thisPtr, float dt);
+    using FnShieldTowerPowerUpdate = void(__fastcall*)(void* thisPtr);
+    using FnMatrixInverse = void(__cdecl*)(void* outMatrix, const void* inMatrix);
+    using FnVectorTransform = void(__cdecl*)(float* dst, const float* src, int count, const void* matrix);
+    using FnRangeSearch = void(__thiscall*)(void* rangeSearch,
+                                            double minX,
+                                            double minZ,
+                                            double maxX,
+                                            double maxZ,
+                                            void* outResults);
+    using FnRangeResultsGetNext = uint32_t(__thiscall*)(void* results, uint32_t** outHandlePtr);
     using FnOptionsInputCtor = void* (__thiscall*)(void* thisPtr);
     using FnRecordDeath = void(__cdecl*)(int killedTeam, int killerTeam);
     using FnCalcRangeCraft = void(__cdecl*)(void* craft,
@@ -214,6 +226,15 @@ namespace BZROpenShim
     static FnGetPlayerHandle g_BzrFn_GetPlayerHandle = nullptr;
     static FnGameObjectGetObjByHandle g_BzrFn_GameObjectGetObjByHandle = nullptr;
     static FnPersonSimulate g_BzrFn_PersonSimulate = nullptr;
+    static FnShieldTowerSimulate g_BzrFn_ShieldTowerSimulateOriginal = nullptr;
+    static FnShieldTowerSimulate g_BzrFn_BuildingSimulate = nullptr;
+    static FnShieldTowerPowerUpdate g_BzrFn_ShieldTowerPowerUpdate = nullptr;
+    static FnGameObjectRelation g_BzrFn_GameObjectFriendP = nullptr;
+    static FnGameObjectRelation g_BzrFn_GameObjectEnemyP = nullptr;
+    static FnMatrixInverse g_BzrFn_MatrixInverse = nullptr;
+    static FnVectorTransform g_BzrFn_VectorTransform = nullptr;
+    static FnRangeSearch g_BzrFn_CollisionRangeSearch = nullptr;
+    static FnRangeResultsGetNext g_BzrFn_RangeResultsGetNext = nullptr;
     static FnOptionsInputCtor g_BzrFn_OptionsInputCtor = nullptr;
     static FnRecordDeath g_BzrFn_RecordDeath = nullptr;
     static FnCalcRangeCraft g_BzrFn_CalcRangeCraft = nullptr;
@@ -298,8 +319,36 @@ namespace BZROpenShim
         constexpr ULONGLONG kHudSpriteRectDiscoveryRetryMs = 10000;
         constexpr ULONGLONG kHudSpriteFallbackDiscoveryRetryMs = 15000;
         constexpr size_t kGameObjectClassOffset = 0xF8;
+        constexpr size_t kGameObjectObjOffset = 0xF4;
         constexpr size_t kObjectClassOdfOffset = 0x20;
         constexpr size_t kObjectClassOdfLen = 16;
+        constexpr size_t kObj76TransformOffset = 0x20;
+        constexpr size_t kObj76GameObjectOffset = 0x8C;
+        constexpr size_t kOrdnanceObjOffset = 0x14;
+        constexpr size_t kOrdnanceSpeedOffset = 0x20;
+        constexpr size_t kOrdnanceInvSpeedOffset = 0x24;
+        constexpr size_t kOrdnanceVelocityOffset = 0x30;
+        constexpr size_t kOrdnanceOwnerObjOffset = 0xCC;
+        constexpr uintptr_t kOrdnanceListAddr = 0x0072665C;
+        constexpr size_t kShieldTowerClassShieldMinXOffset = 0x160;
+        constexpr size_t kShieldTowerClassShieldMaxXOffset = 0x16C;
+        constexpr size_t kShieldTowerClassObjPushOffset = 0x178;
+        constexpr size_t kShieldTowerClassObjDragOffset = 0x17C;
+        constexpr size_t kShieldTowerClassOrdPushOffset = 0x180;
+        constexpr size_t kShieldTowerClassOrdDragOffset = 0x184;
+        constexpr size_t kShieldTowerPowerSourceOffset = 0x238;
+        constexpr uintptr_t kCollisionRangeSearchAddr = 0x006A3E10;
+        constexpr uintptr_t kGogShieldTowerSimulateAddr = 0x005D0D80;
+        constexpr uintptr_t kGogBuildingSimulateAddr = 0x0047FCB0;
+        constexpr uintptr_t kGogShieldTowerPowerUpdateAddr = 0x005D0CC0;
+        constexpr uintptr_t kGogGameObjectFriendPAddr = 0x0046BF40;
+        constexpr uintptr_t kGogGameObjectEnemyPAddr = 0x0046BFD0;
+        constexpr uintptr_t kGogGameObjectAddVelocityAddr = 0x004A75B0;
+        constexpr uintptr_t kGogMatrixInverseAddr = 0x008203F0;
+        constexpr uintptr_t kGogVectorTransformAddr = 0x00820180;
+        constexpr uintptr_t kGogRangeSearchAddr = 0x005B2950;
+        constexpr uintptr_t kGogRangeResultsGetNextAddr = 0x00462710;
+        constexpr uintptr_t kShieldTowerSimulateVtableSlotAddr = 0x00887728;
         constexpr float kFlagButtonSize = 48.0f;
         constexpr uint32_t kLegacyFlagDataSlot = 0x0Du;
         constexpr int kLegacyFlagWidth = 64;
@@ -424,6 +473,9 @@ namespace BZROpenShim
         struct AiTuningConfig;
         static bool TryGetAiTuningForObject(void* objectPtr, AiTuningConfig& outConfig);
         static bool TryGetObjectOdfToken(void* objectPtr, char (&outToken)[kProducerBuildMenuTokenLen + 1]);
+        struct ShieldTowerTeamFilterConfig;
+        static bool TryGetShieldTowerTeamFilterForObject(void* objectPtr, ShieldTowerTeamFilterConfig& outConfig);
+        static void RunShieldTowerFilteredSimulate(void* shieldTowerPtr, float dt);
         static void RevealProcessOwnerPerceivedTeam(void* processPtr, const char* sourceTag);
 
         struct HudSpriteRectRecord
@@ -552,6 +604,51 @@ namespace BZROpenShim
         {
             bool initialized = false;
             std::unordered_map<std::string, AiTuningConfig> odfEntries = {};
+        };
+
+        struct ShieldTowerTeamFilterConfig
+        {
+            bool parsed = false;
+            bool affectAllies = true;
+            bool affectEnemies = true;
+        };
+
+        struct ShieldTowerTeamFilterCache
+        {
+            bool initialized = false;
+            std::unordered_map<std::string, ShieldTowerTeamFilterConfig> odfEntries = {};
+        };
+
+        struct ShieldTowerRangeSearchResults
+        {
+            uint8_t storage[48] = {};
+        };
+
+        struct ListNodePtrValue
+        {
+            ListNodePtrValue* next = nullptr;
+            ListNodePtrValue* prev = nullptr;
+            void* value = nullptr;
+        };
+
+        struct ListPtrValue
+        {
+            ListNodePtrValue* head = nullptr;
+            size_t size = 0;
+        };
+
+        struct ShieldTowerRuntimeParams
+        {
+            float minX = 0.0f;
+            float maxX = 0.0f;
+            float minY = 0.0f;
+            float maxY = 0.0f;
+            float minZ = 0.0f;
+            float maxZ = 0.0f;
+            float objPush = 0.0f;
+            float objDrag = 0.0f;
+            float ordPush = 0.0f;
+            float ordDrag = 0.0f;
         };
 
         enum class InputBindingMapFamily
@@ -733,6 +830,7 @@ namespace BZROpenShim
         static VehicleAssetExceptionCacheEntry g_VehicleAssetExceptionCache[kVehicleAssetExceptionCacheSize] = {};
         static ProducerBuildMenuConfig g_ProducerBuildMenuConfig = {};
         static AiTuningCache g_AiTuningCache = {};
+        static ShieldTowerTeamFilterCache g_ShieldTowerTeamFilterCache = {};
         static bool g_HasAppliedProducerBuildMenu = false;
         static int64_t g_LastAppliedProducerBuildMenu = 0;
         static uint32_t g_LastUnknownProducerVft = 0;
@@ -758,6 +856,7 @@ namespace BZROpenShim
         static volatile long g_AttackRevealTraceBudget = 64;
         static InlineDetour32 g_AIUnitRemoveDetour = {};
         static bool g_ConstructorRemoteBuildFixInstalled = false;
+        static bool g_ShieldTowerSimulateHookInstalled = false;
         static bool g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
         static volatile long g_ConstructorRemoteBuildTraceBudget = kConstructorRemoteBuildTraceBudgetDefault;
         static std::unordered_map<uintptr_t, ULONGLONG> g_RetargetPeriodNextForceMsByProcess = {};
@@ -5718,6 +5817,92 @@ namespace BZROpenShim
             return result;
         }
 
+        void __fastcall ShieldTowerSimulateTeamFilterHook(void* thisPtr, void* /*edx*/, float dt)
+        {
+            RunShieldTowerFilteredSimulate(thisPtr, dt);
+        }
+
+        static void InstallShieldTowerTeamFilterHookIfPossible()
+        {
+            if (g_ShieldTowerSimulateHookInstalled)
+                return;
+
+            if (!g_BzrFn_ShieldTowerSimulateOriginal)
+                g_BzrFn_ShieldTowerSimulateOriginal =
+                    reinterpret_cast<FnShieldTowerSimulate>(kGogShieldTowerSimulateAddr);
+            if (!g_BzrFn_BuildingSimulate)
+                g_BzrFn_BuildingSimulate =
+                    reinterpret_cast<FnShieldTowerSimulate>(kGogBuildingSimulateAddr);
+            if (!g_BzrFn_ShieldTowerPowerUpdate)
+                g_BzrFn_ShieldTowerPowerUpdate =
+                    reinterpret_cast<FnShieldTowerPowerUpdate>(kGogShieldTowerPowerUpdateAddr);
+            if (!g_BzrFn_GameObjectFriendP)
+                g_BzrFn_GameObjectFriendP =
+                    reinterpret_cast<FnGameObjectRelation>(kGogGameObjectFriendPAddr);
+            if (!g_BzrFn_GameObjectEnemyP)
+                g_BzrFn_GameObjectEnemyP =
+                    reinterpret_cast<FnGameObjectRelation>(kGogGameObjectEnemyPAddr);
+            if (!g_BzrFn_GameObjectGetObjByHandle)
+                g_BzrFn_GameObjectGetObjByHandle =
+                    reinterpret_cast<FnGameObjectGetObjByHandle>(kGogGameObjectGetObjByHandleAddr);
+            if (!g_BzrFn_MatrixInverse)
+                g_BzrFn_MatrixInverse =
+                    reinterpret_cast<FnMatrixInverse>(kGogMatrixInverseAddr);
+            if (!g_BzrFn_VectorTransform)
+                g_BzrFn_VectorTransform =
+                    reinterpret_cast<FnVectorTransform>(kGogVectorTransformAddr);
+            if (!g_BzrFn_CollisionRangeSearch)
+                g_BzrFn_CollisionRangeSearch =
+                    reinterpret_cast<FnRangeSearch>(kGogRangeSearchAddr);
+            if (!g_BzrFn_RangeResultsGetNext)
+                g_BzrFn_RangeResultsGetNext =
+                    reinterpret_cast<FnRangeResultsGetNext>(kGogRangeResultsGetNextAddr);
+
+            void* current = nullptr;
+            __try
+            {
+                current = *reinterpret_cast<void**>(kShieldTowerSimulateVtableSlotAddr);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                current = nullptr;
+            }
+
+            if (current != reinterpret_cast<void*>(ShieldTowerSimulateTeamFilterHook) &&
+                current != reinterpret_cast<void*>(kGogShieldTowerSimulateAddr))
+            {
+                Log(L"[SHIELDODF] ShieldTower::Simulate vtable mismatch slot=0x%08X current=0x%08X expected=0x%08X\n",
+                    static_cast<uint32_t>(kShieldTowerSimulateVtableSlotAddr),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
+                    static_cast<uint32_t>(kGogShieldTowerSimulateAddr));
+                return;
+            }
+
+            const bool patched =
+                (current == reinterpret_cast<void*>(ShieldTowerSimulateTeamFilterHook)) ||
+                WritePointerValue(kShieldTowerSimulateVtableSlotAddr,
+                                  reinterpret_cast<void*>(ShieldTowerSimulateTeamFilterHook));
+            g_ShieldTowerSimulateHookInstalled =
+                patched &&
+                g_BzrFn_ShieldTowerSimulateOriginal &&
+                g_BzrFn_BuildingSimulate &&
+                g_BzrFn_ShieldTowerPowerUpdate &&
+                g_BzrFn_GameObjectFriendP &&
+                g_BzrFn_GameObjectEnemyP &&
+                g_BzrFn_GameObjectGetObjByHandle &&
+                g_BzrFn_MatrixInverse &&
+                g_BzrFn_VectorTransform &&
+                g_BzrFn_CollisionRangeSearch &&
+                g_BzrFn_RangeResultsGetNext;
+
+            if (g_ShieldTowerSimulateHookInstalled)
+            {
+                Log(L"[SHIELDODF] Installed ShieldTower team filter hook slot=0x%08X original=0x%08X\n",
+                    static_cast<uint32_t>(kShieldTowerSimulateVtableSlotAddr),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_ShieldTowerSimulateOriginal)));
+            }
+        }
+
         static void InstallAiTuningHooksIfPossible()
         {
             if (g_CalcRangeCraftHookInstalled && g_RetargetPeriodHooksInstalled)
@@ -7875,6 +8060,559 @@ namespace BZROpenShim
             return outConfig.parsed;
         }
 
+        static bool TryParseShieldTowerTeamFilterValue(const char* value,
+                                                       bool& outAffectAllies,
+                                                       bool& outAffectEnemies)
+        {
+            char normalized[64] = {};
+            if (!TryNormalizeQuotedStringValue(value, normalized, sizeof(normalized)))
+                return false;
+
+            if (strcmp(normalized, "all") == 0 ||
+                strcmp(normalized, "both") == 0 ||
+                strcmp(normalized, "default") == 0)
+            {
+                outAffectAllies = true;
+                outAffectEnemies = true;
+                return true;
+            }
+
+            if (strcmp(normalized, "allies") == 0 ||
+                strcmp(normalized, "ally") == 0 ||
+                strcmp(normalized, "friendly") == 0 ||
+                strcmp(normalized, "friendlies") == 0)
+            {
+                outAffectAllies = true;
+                outAffectEnemies = false;
+                return true;
+            }
+
+            if (strcmp(normalized, "enemies") == 0 ||
+                strcmp(normalized, "enemy") == 0 ||
+                strcmp(normalized, "hostile") == 0 ||
+                strcmp(normalized, "hostiles") == 0)
+            {
+                outAffectAllies = false;
+                outAffectEnemies = true;
+                return true;
+            }
+
+            if (strcmp(normalized, "none") == 0 ||
+                strcmp(normalized, "off") == 0 ||
+                strcmp(normalized, "disabled") == 0)
+            {
+                outAffectAllies = false;
+                outAffectEnemies = false;
+                return true;
+            }
+
+            return false;
+        }
+
+        static bool TryReadShieldTowerTeamFilterFromOdfFile(const char* odfToken,
+                                                            ShieldTowerTeamFilterConfig& outConfig)
+        {
+            outConfig = {};
+
+            std::filesystem::path resolvedPath;
+            if (!TryResolveOdfFilePath(odfToken, resolvedPath))
+                return false;
+
+            const ProducerBuildMenuEntry odfKey = NormalizeQuotedOdfToken(odfToken);
+            if (!odfKey.hasValue)
+                return false;
+
+            FILE* file = nullptr;
+            if (fopen_s(&file, resolvedPath.string().c_str(), "r") != 0 || !file)
+                return false;
+
+            bool foundAny = false;
+            bool affectAllies = true;
+            bool affectEnemies = true;
+            char line[256] = {};
+            while (std::fgets(line, static_cast<int>(sizeof(line)), file))
+            {
+                char* trimmed = TrimAsciiInPlace(line);
+                if (*trimmed == '\0' || *trimmed == ';' || *trimmed == '#')
+                    continue;
+
+                if (*trimmed == '[')
+                    continue;
+
+                char* equals = std::strchr(trimmed, '=');
+                if (!equals)
+                    continue;
+
+                *equals = '\0';
+                char* key = TrimAsciiInPlace(trimmed);
+                char* value = TrimAsciiInPlace(equals + 1);
+                if (!key || !*key || !value || !*value)
+                    continue;
+
+                bool parsedBool = false;
+                bool parsedAllies = false;
+                bool parsedEnemies = false;
+                if (_stricmp(key, "teamFilter") == 0 &&
+                    TryParseShieldTowerTeamFilterValue(value, parsedAllies, parsedEnemies))
+                {
+                    affectAllies = parsedAllies;
+                    affectEnemies = parsedEnemies;
+                    foundAny = true;
+                }
+                else if (_stricmp(key, "affectAllies") == 0 && TryParseBoolValue(value, parsedBool))
+                {
+                    affectAllies = parsedBool;
+                    foundAny = true;
+                }
+                else if (_stricmp(key, "affectEnemies") == 0 && TryParseBoolValue(value, parsedBool))
+                {
+                    affectEnemies = parsedBool;
+                    foundAny = true;
+                }
+            }
+
+            std::fclose(file);
+
+            if (!foundAny)
+                return false;
+
+            outConfig.parsed = true;
+            outConfig.affectAllies = affectAllies;
+            outConfig.affectEnemies = affectEnemies;
+            Log(L"[SHIELDODF] Loaded team filter odf=%hs allies=%hs enemies=%hs file=%hs\n",
+                odfKey.token,
+                affectAllies ? "true" : "false",
+                affectEnemies ? "true" : "false",
+                resolvedPath.string().c_str());
+            return true;
+        }
+
+        static bool TryGetShieldTowerTeamFilterForObject(void* objectPtr, ShieldTowerTeamFilterConfig& outConfig)
+        {
+            outConfig = {};
+
+            char odfToken[kProducerBuildMenuTokenLen + 1] = {};
+            if (!TryGetObjectOdfToken(objectPtr, odfToken))
+                return false;
+
+            const auto cached = g_ShieldTowerTeamFilterCache.odfEntries.find(odfToken);
+            if (cached != g_ShieldTowerTeamFilterCache.odfEntries.end())
+            {
+                outConfig = cached->second;
+                return outConfig.parsed;
+            }
+
+            ShieldTowerTeamFilterConfig loaded = {};
+            TryReadShieldTowerTeamFilterFromOdfFile(odfToken, loaded);
+            g_ShieldTowerTeamFilterCache.odfEntries[odfToken] = loaded;
+            outConfig = loaded;
+            return outConfig.parsed;
+        }
+
+        static bool ShieldTowerNeedsCustomFilterPath(const ShieldTowerTeamFilterConfig& config)
+        {
+            return config.parsed && !(config.affectAllies && config.affectEnemies);
+        }
+
+        static bool TryGetGameObjectObj76(void* gameObject, void*& outObj76)
+        {
+            outObj76 = nullptr;
+            if (!gameObject)
+                return false;
+
+            __try
+            {
+                outObj76 =
+                    *reinterpret_cast<void* const*>(reinterpret_cast<const uint8_t*>(gameObject) + kGameObjectObjOffset);
+                return outObj76 != nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outObj76 = nullptr;
+                return false;
+            }
+        }
+
+        static bool TryGetGameObjectFromObj76(void* obj76, void*& outGameObject)
+        {
+            outGameObject = nullptr;
+            if (!obj76)
+                return false;
+
+            __try
+            {
+                outGameObject =
+                    *reinterpret_cast<void* const*>(reinterpret_cast<const uint8_t*>(obj76) + kObj76GameObjectOffset);
+                return outGameObject != nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outGameObject = nullptr;
+                return false;
+            }
+        }
+
+        static bool TryGetObjectWorldPositionFromObj76(void* obj76, float (&outPosition)[3])
+        {
+            outPosition[0] = 0.0f;
+            outPosition[1] = 0.0f;
+            outPosition[2] = 0.0f;
+            if (!obj76)
+                return false;
+
+            __try
+            {
+                const auto* transform = reinterpret_cast<const LegacyMat3*>(
+                    reinterpret_cast<const uint8_t*>(obj76) + kObj76TransformOffset);
+                outPosition[0] = static_cast<float>(transform->posit_x);
+                outPosition[1] = static_cast<float>(transform->posit_y);
+                outPosition[2] = static_cast<float>(transform->posit_z);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outPosition[0] = 0.0f;
+                outPosition[1] = 0.0f;
+                outPosition[2] = 0.0f;
+                return false;
+            }
+        }
+
+        static bool TryGetGameObjectWorldPosition(void* gameObject, float (&outPosition)[3])
+        {
+            void* obj76 = nullptr;
+            return TryGetGameObjectObj76(gameObject, obj76) &&
+                   TryGetObjectWorldPositionFromObj76(obj76, outPosition);
+        }
+
+        static bool TryGetOrdnanceWorldPosition(void* ordnance, float (&outPosition)[3])
+        {
+            outPosition[0] = 0.0f;
+            outPosition[1] = 0.0f;
+            outPosition[2] = 0.0f;
+            if (!ordnance)
+                return false;
+
+            __try
+            {
+                void* obj76 =
+                    *reinterpret_cast<void* const*>(reinterpret_cast<const uint8_t*>(ordnance) + kOrdnanceObjOffset);
+                return TryGetObjectWorldPositionFromObj76(obj76, outPosition);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static bool TryGetOrdnanceOwnerGameObject(void* ordnance, void*& outOwner)
+        {
+            outOwner = nullptr;
+            if (!ordnance)
+                return false;
+
+            __try
+            {
+                void* ownerObj76 =
+                    *reinterpret_cast<void* const*>(reinterpret_cast<const uint8_t*>(ordnance) + kOrdnanceOwnerObjOffset);
+                return TryGetGameObjectFromObj76(ownerObj76, outOwner);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outOwner = nullptr;
+                return false;
+            }
+        }
+
+        static bool TryReadShieldTowerRuntimeParams(void* shieldTowerPtr,
+                                                    ShieldTowerRuntimeParams& outParams,
+                                                    void*& outTowerObj76,
+                                                    LegacyMat3*& outTowerMatrix,
+                                                    LegacyMat3& outInverseMatrix)
+        {
+            outParams = {};
+            outTowerObj76 = nullptr;
+            outTowerMatrix = nullptr;
+            std::memset(&outInverseMatrix, 0, sizeof(outInverseMatrix));
+            if (!shieldTowerPtr)
+                return false;
+
+            __try
+            {
+                const auto* shieldBytes = reinterpret_cast<const uint8_t*>(shieldTowerPtr);
+                outTowerObj76 = *reinterpret_cast<void* const*>(shieldBytes + kGameObjectObjOffset);
+                auto* shieldClass = *reinterpret_cast<void* const*>(shieldBytes + kGameObjectClassOffset);
+                if (!outTowerObj76 || !shieldClass)
+                    return false;
+
+                outTowerMatrix = reinterpret_cast<LegacyMat3*>(
+                    reinterpret_cast<uint8_t*>(outTowerObj76) + kObj76TransformOffset);
+                if (!outTowerMatrix)
+                    return false;
+
+                outParams.minX = *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(shieldClass) + kShieldTowerClassShieldMinXOffset + 0x00);
+                outParams.minY = *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(shieldClass) + kShieldTowerClassShieldMinXOffset + 0x04);
+                outParams.minZ = *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(shieldClass) + kShieldTowerClassShieldMinXOffset + 0x08);
+                outParams.maxX = *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(shieldClass) + kShieldTowerClassShieldMaxXOffset + 0x00);
+                outParams.maxY = *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(shieldClass) + kShieldTowerClassShieldMaxXOffset + 0x04);
+                outParams.maxZ = *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(shieldClass) + kShieldTowerClassShieldMaxXOffset + 0x08);
+                outParams.objPush = *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(shieldClass) + kShieldTowerClassObjPushOffset);
+                outParams.objDrag = *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(shieldClass) + kShieldTowerClassObjDragOffset);
+                outParams.ordPush = *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(shieldClass) + kShieldTowerClassOrdPushOffset);
+                outParams.ordDrag = *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(shieldClass) + kShieldTowerClassOrdDragOffset);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outTowerObj76 = nullptr;
+                outTowerMatrix = nullptr;
+                return false;
+            }
+
+            if (!g_BzrFn_MatrixInverse)
+                return false;
+
+            g_BzrFn_MatrixInverse(&outInverseMatrix, outTowerMatrix);
+            return true;
+        }
+
+        static bool ShieldTowerContainsLocalPosition(const float (&localPosition)[3],
+                                                     const ShieldTowerRuntimeParams& params)
+        {
+            return (params.minX < localPosition[0] && localPosition[0] < params.maxX) &&
+                   (params.minY < localPosition[1] && localPosition[1] < params.maxY) &&
+                   (params.minZ < localPosition[2] && localPosition[2] < params.maxZ);
+        }
+
+        static bool ShieldTowerShouldAffectObject(void* shieldTowerPtr,
+                                                  void* targetObject,
+                                                  const ShieldTowerTeamFilterConfig& config)
+        {
+            if (!shieldTowerPtr || !targetObject)
+                return false;
+
+            if (config.affectAllies && config.affectEnemies)
+                return true;
+
+            bool allow = false;
+            if (config.affectAllies && g_BzrFn_GameObjectFriendP)
+                allow = g_BzrFn_GameObjectFriendP(shieldTowerPtr, targetObject);
+            if (!allow && config.affectEnemies && g_BzrFn_GameObjectEnemyP)
+                allow = g_BzrFn_GameObjectEnemyP(shieldTowerPtr, targetObject);
+            return allow;
+        }
+
+        static bool ShieldTowerShouldAffectOrdnance(void* shieldTowerPtr,
+                                                    void* ordnance,
+                                                    const ShieldTowerTeamFilterConfig& config)
+        {
+            if (config.affectAllies && config.affectEnemies)
+                return true;
+
+            void* ownerObject = nullptr;
+            if (!TryGetOrdnanceOwnerGameObject(ordnance, ownerObject))
+                return false;
+
+            return ShieldTowerShouldAffectObject(shieldTowerPtr, ownerObject, config);
+        }
+
+        static void ShieldTowerApplyObjectForce(void* shieldTowerPtr,
+                                                void* targetObject,
+                                                const LegacyMat3& towerMatrix,
+                                                const ShieldTowerRuntimeParams& params,
+                                                float dt)
+        {
+            if (!shieldTowerPtr || !targetObject)
+                return;
+
+            __try
+            {
+                float delta[3] =
+                {
+                    towerMatrix.front_x * (params.objPush * dt) -
+                        *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(targetObject) + 0x12C) * (params.objDrag * dt),
+                    towerMatrix.front_y * (params.objPush * dt) -
+                        *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(targetObject) + 0x130) * (params.objDrag * dt),
+                    towerMatrix.front_z * (params.objPush * dt) -
+                        *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(targetObject) + 0x134) * (params.objDrag * dt)
+                };
+                reinterpret_cast<void(__thiscall*)(void*, const float*)>(kGogGameObjectAddVelocityAddr)(targetObject, delta);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
+        static void ShieldTowerApplyOrdnanceForce(void* ordnance,
+                                                  const LegacyMat3& towerMatrix,
+                                                  const ShieldTowerRuntimeParams& params,
+                                                  float dt)
+        {
+            if (!ordnance)
+                return;
+
+            __try
+            {
+                auto* ordBytes = reinterpret_cast<uint8_t*>(ordnance);
+                auto* velocity = reinterpret_cast<float*>(ordBytes + kOrdnanceVelocityOffset);
+                velocity[0] += towerMatrix.front_x * (params.ordPush * dt) - velocity[0] * (params.ordDrag * dt);
+                velocity[1] += towerMatrix.front_y * (params.ordPush * dt) - velocity[1] * (params.ordDrag * dt);
+                velocity[2] += towerMatrix.front_z * (params.ordPush * dt) - velocity[2] * (params.ordDrag * dt);
+
+                const float speed = std::sqrt(
+                    velocity[0] * velocity[0] +
+                    velocity[1] * velocity[1] +
+                    velocity[2] * velocity[2]);
+                *reinterpret_cast<float*>(ordBytes + kOrdnanceSpeedOffset) = speed;
+                *reinterpret_cast<float*>(ordBytes + kOrdnanceInvSpeedOffset) =
+                    (speed == 0.0f) ? 1.0e30f : (1.0f / speed);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
+        static void RunShieldTowerFilteredSimulate(void* shieldTowerPtr, float dt)
+        {
+            if (!shieldTowerPtr || !g_BzrFn_ShieldTowerPowerUpdate || !g_BzrFn_BuildingSimulate ||
+                !g_BzrFn_VectorTransform || !g_BzrFn_CollisionRangeSearch || !g_BzrFn_RangeResultsGetNext ||
+                !g_BzrFn_GameObjectGetObjByHandle || !g_BzrFn_GameObjectFriendP || !g_BzrFn_GameObjectEnemyP)
+            {
+                if (g_BzrFn_ShieldTowerSimulateOriginal)
+                    g_BzrFn_ShieldTowerSimulateOriginal(shieldTowerPtr, dt);
+                return;
+            }
+
+            ShieldTowerRuntimeParams params = {};
+            void* towerObj76 = nullptr;
+            LegacyMat3* towerMatrix = nullptr;
+            LegacyMat3 inverseMatrix = {};
+
+            ShieldTowerTeamFilterConfig filter = {};
+            const bool hasFilter = TryGetShieldTowerTeamFilterForObject(shieldTowerPtr, filter);
+            if (!hasFilter || !ShieldTowerNeedsCustomFilterPath(filter))
+            {
+                if (g_BzrFn_ShieldTowerSimulateOriginal)
+                    g_BzrFn_ShieldTowerSimulateOriginal(shieldTowerPtr, dt);
+                return;
+            }
+
+            g_BzrFn_ShieldTowerPowerUpdate(shieldTowerPtr);
+
+            if (!TryReadShieldTowerRuntimeParams(shieldTowerPtr, params, towerObj76, towerMatrix, inverseMatrix))
+            {
+                if (g_BzrFn_ShieldTowerSimulateOriginal)
+                    g_BzrFn_ShieldTowerSimulateOriginal(shieldTowerPtr, dt);
+                return;
+            }
+
+            if (*reinterpret_cast<const int*>(reinterpret_cast<const uint8_t*>(shieldTowerPtr) + kShieldTowerPowerSourceOffset) != 0)
+            {
+                float worldCorners[24] =
+                {
+                    params.minX, params.minY, params.minZ,
+                    params.maxX, params.minY, params.minZ,
+                    params.minX, params.minY, params.maxZ,
+                    params.maxX, params.minY, params.maxZ,
+                    params.minX, params.maxY, params.minZ,
+                    params.maxX, params.maxY, params.minZ,
+                    params.minX, params.maxY, params.maxZ,
+                    params.maxX, params.maxY, params.maxZ
+                };
+
+                g_BzrFn_VectorTransform(worldCorners, worldCorners, 8, towerMatrix);
+
+                float minWorldX = 1.0e30f;
+                float minWorldZ = 1.0e30f;
+                float maxWorldX = -1.0e30f;
+                float maxWorldZ = -1.0e30f;
+                for (size_t i = 0; i < 8; ++i)
+                {
+                    const float worldX = worldCorners[i * 3 + 0];
+                    const float worldZ = worldCorners[i * 3 + 2];
+                    minWorldX = (std::min)(minWorldX, worldX);
+                    minWorldZ = (std::min)(minWorldZ, worldZ);
+                    maxWorldX = (std::max)(maxWorldX, worldX);
+                    maxWorldZ = (std::max)(maxWorldZ, worldZ);
+                }
+
+                void* collisionRangeSearch = nullptr;
+                __try
+                {
+                    collisionRangeSearch = *reinterpret_cast<void**>(kCollisionRangeSearchAddr);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    collisionRangeSearch = nullptr;
+                }
+
+                if (collisionRangeSearch)
+                {
+                    ShieldTowerRangeSearchResults results = {};
+                    g_BzrFn_CollisionRangeSearch(
+                        collisionRangeSearch,
+                        static_cast<double>(minWorldX),
+                        static_cast<double>(minWorldZ),
+                        static_cast<double>(maxWorldX),
+                        static_cast<double>(maxWorldZ),
+                        &results);
+
+                    uint32_t* handlePtr = nullptr;
+                    while (g_BzrFn_RangeResultsGetNext(&results, &handlePtr) != 0)
+                    {
+                        if (!handlePtr)
+                            continue;
+
+                        void* targetObject = g_BzrFn_GameObjectGetObjByHandle(static_cast<int>(*handlePtr));
+                        if (!targetObject || !ShieldTowerShouldAffectObject(shieldTowerPtr, targetObject, filter))
+                            continue;
+
+                        float targetWorld[3] = {};
+                        if (!TryGetGameObjectWorldPosition(targetObject, targetWorld))
+                            continue;
+
+                        float targetLocal[3] = { targetWorld[0], targetWorld[1], targetWorld[2] };
+                        g_BzrFn_VectorTransform(targetLocal, targetLocal, 1, &inverseMatrix);
+                        if (!ShieldTowerContainsLocalPosition(targetLocal, params))
+                            continue;
+
+                        ShieldTowerApplyObjectForce(shieldTowerPtr, targetObject, *towerMatrix, params, dt);
+                    }
+                }
+
+                const auto* list = reinterpret_cast<const ListPtrValue*>(kOrdnanceListAddr);
+                __try
+                {
+                    if (list && list->head)
+                    {
+                        for (ListNodePtrValue* node = list->head->next;
+                             node && node != list->head;
+                             node = node->next)
+                        {
+                            void* ordnance = node->value;
+                            if (!ordnance || !ShieldTowerShouldAffectOrdnance(shieldTowerPtr, ordnance, filter))
+                                continue;
+
+                            float ordWorld[3] = {};
+                            if (!TryGetOrdnanceWorldPosition(ordnance, ordWorld))
+                                continue;
+
+                            float ordLocal[3] = { ordWorld[0], ordWorld[1], ordWorld[2] };
+                            g_BzrFn_VectorTransform(ordLocal, ordLocal, 1, &inverseMatrix);
+                            if (!ShieldTowerContainsLocalPosition(ordLocal, params))
+                                continue;
+
+                            ShieldTowerApplyOrdnanceForce(ordnance, *towerMatrix, params, dt);
+                        }
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                }
+            }
+
+            g_BzrFn_BuildingSimulate(shieldTowerPtr, dt);
+        }
+
         static ProducerBuildMenuEntry TryReadProducerBuildMenuEntryFromOdfFile(const char* producerOdf)
         {
             ProducerBuildMenuEntry result = {};
@@ -8404,6 +9142,15 @@ namespace BZROpenShim
         g_BzrFn_GetPlayerHandle = nullptr;
         g_BzrFn_GameObjectGetObjByHandle = nullptr;
         g_BzrFn_PersonSimulate = nullptr;
+        g_BzrFn_ShieldTowerSimulateOriginal = nullptr;
+        g_BzrFn_BuildingSimulate = nullptr;
+        g_BzrFn_ShieldTowerPowerUpdate = nullptr;
+        g_BzrFn_GameObjectFriendP = nullptr;
+        g_BzrFn_GameObjectEnemyP = nullptr;
+        g_BzrFn_MatrixInverse = nullptr;
+        g_BzrFn_VectorTransform = nullptr;
+        g_BzrFn_CollisionRangeSearch = nullptr;
+        g_BzrFn_RangeResultsGetNext = nullptr;
         g_BzrFn_OptionsInputCtor = nullptr;
         g_BzrFn_RecordDeath = g_RecordDeathDetour.trampoline
             ? reinterpret_cast<FnRecordDeath>(g_RecordDeathDetour.trampoline)
@@ -8443,6 +9190,7 @@ namespace BZROpenShim
         g_JumpSnipeProbeLogState = {};
         g_ProducerBuildMenuConfig = {};
         g_AiTuningCache = {};
+        g_ShieldTowerTeamFilterCache = {};
         g_HasAppliedProducerBuildMenu = false;
         g_LastAppliedProducerBuildMenu = 0;
         g_LastUnknownProducerVft = 0;
@@ -8458,6 +9206,7 @@ namespace BZROpenShim
         g_BzrFn_UnitsSOrderStop = nullptr;
         g_BzrFn_AIBuildUnassignedCCAdd = nullptr;
         g_ConstructorRemoteBuildFixInstalled = false;
+        g_ShieldTowerSimulateHookInstalled = false;
         g_AttackRevealTraceBudget = kAttackRevealTraceBudgetDefault;
         g_HudSpriteRectTableBase = nullptr;
         g_HudSpriteRectTableDiscoveryAttempted = false;
@@ -8566,6 +9315,7 @@ namespace BZROpenShim
 
         InstallJumpSnipingProbeIfRequested();
         InstallCareerStatsMpHookIfPossible();
+        InstallShieldTowerTeamFilterHookIfPossible();
 
         if (g_IsSteamExe)
         {
@@ -8760,6 +9510,7 @@ namespace BZROpenShim
     {
         InstallJumpSnipingProbeIfRequested();
         InstallCareerStatsMpHookIfPossible();
+        InstallShieldTowerTeamFilterHookIfPossible();
         InstallAiTuningHooksIfPossible();
         InstallConstructorRemoteBuildFixIfPossible();
         EnsureInputBindingPopulateHookScaffold();
