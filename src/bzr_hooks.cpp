@@ -135,12 +135,19 @@ namespace BZROpenShim
     using FnGameObjectGetObjByHandle = void* (__cdecl*)(int handle);
     using FnPersonSimulate = void(__thiscall*)(void* thisPtr, float dt);
     using FnOptionsInputPopulateUi = void(__thiscall*)(void* thisPtr);
+    using FnRecordDeath = void(__cdecl*)(int killedTeam, int killerTeam);
     using FnCalcRangeCraft = void(__cdecl*)(void* craft,
                                             float* closeRange,
                                             float* range,
                                             float* time,
                                             void** weapon);
     using FnProcessDoSubTask = bool(__thiscall*)(void* thisPtr);
+    using FnAIUnitRemove = void(__cdecl*)(void* unitPtr);
+    using FnAIBuildConstructionEnd = void(__cdecl*)(int teamId, int constructType);
+    using FnAIBuildReservedAreaRemove = void(__cdecl*)(int teamId, int reservedArea);
+    using FnAISpentCreditRefund = void(__cdecl*)(int teamId, void* buildingPtr, void* unitPtr);
+    using FnUnitsSOrderStop = void(__cdecl*)(void* unitPtr);
+    using FnAIBuildUnassignedCCAdd = void(__cdecl*)(void* teamPtr, void* unitPtr);
 
     static void** g_BzrPtr_945478 = nullptr;
     static void** g_BzrPtr_94548C = nullptr;
@@ -208,9 +215,16 @@ namespace BZROpenShim
     static FnGameObjectGetObjByHandle g_BzrFn_GameObjectGetObjByHandle = nullptr;
     static FnPersonSimulate g_BzrFn_PersonSimulate = nullptr;
     static FnOptionsInputPopulateUi g_BzrFn_OptionsInputPopulateUi = nullptr;
+    static FnRecordDeath g_BzrFn_RecordDeath = nullptr;
     static FnCalcRangeCraft g_BzrFn_CalcRangeCraft = nullptr;
     static FnProcessDoSubTask g_BzrFn_OffensiveProcessDoSubTask = nullptr;
     static FnProcessDoSubTask g_BzrFn_GunTowerProcessDoSubTask = nullptr;
+    static FnAIUnitRemove g_BzrFn_AIUnitRemove = nullptr;
+    static FnAIBuildConstructionEnd g_BzrFn_AIBuildConstructionEnd = nullptr;
+    static FnAIBuildReservedAreaRemove g_BzrFn_AIBuildReservedAreaRemove = nullptr;
+    static FnAISpentCreditRefund g_BzrFn_AISpentCreditRefund = nullptr;
+    static FnUnitsSOrderStop g_BzrFn_UnitsSOrderStop = nullptr;
+    static FnAIBuildUnassignedCCAdd g_BzrFn_AIBuildUnassignedCCAdd = nullptr;
     static BuildItem* g_BzrBuildMenuRoot = nullptr;
     static bool g_IsSteamExe = false;
 
@@ -298,11 +312,16 @@ namespace BZROpenShim
         constexpr uintptr_t kGogPersonSimulateEntryAddr = 0x004F4370;
         constexpr uintptr_t kGogGetPlayerHandleAddr = 0x00514610;
         constexpr uintptr_t kGogGameObjectGetObjByHandleAddr = 0x0046B160;
+        constexpr uintptr_t kGogRecordDeathEntryAddr = 0x004D9210;
+        constexpr uintptr_t kSteam64GlobalAddr = 0x0260B1D0;
         constexpr uintptr_t kOptionsInputPopulateUiRva = 0x001E82B0;
         constexpr uintptr_t kOptionsInputKeyReleasedRva = 0x001E7D10;
         constexpr uintptr_t kOptionsInputResetDefaultsRva = 0x001E5E50;
         constexpr size_t kInlineDetourMaxPatchLen = 16;
         constexpr size_t kPersonSimulateDetourLen = 8;
+        constexpr size_t kRecordDeathDetourLen = 6;
+        constexpr ULONGLONG kCareerStatsMpHookRetryMs = 1000;
+        constexpr ULONGLONG kCareerStatsMpHookRetryWindowMs = 15000;
         constexpr uint32_t kWeaponSigSnip = 0x534E4950u;
         constexpr size_t kPersonObjOffset = 0x0E8;
         constexpr size_t kPersonCarrierOffset = 0x198;
@@ -322,6 +341,28 @@ namespace BZROpenShim
         constexpr size_t kOffensiveProcessDoSubTaskDetourLen = 8;
         constexpr uintptr_t kGogGunTowerProcessDoSubTaskEntryAddr = 0x004741A0;
         constexpr size_t kGunTowerProcessDoSubTaskDetourLen = 6;
+        constexpr uintptr_t kGogAIUnitRemoveEntryAddr = 0x0068FC60;
+        constexpr size_t kAIUnitRemoveDetourLen = 11;
+        constexpr uintptr_t kGogAIBuildConstructionEndAddr = 0x006905D0;
+        constexpr uintptr_t kGogAIBuildReservedAreaRemoveAddr = 0x00690920;
+        constexpr uintptr_t kGogAISpentCreditRefundAddr = 0x00690020;
+        constexpr uintptr_t kGogUnitsSOrderStopAddr = 0x00416280;
+        constexpr uintptr_t kGogAIBuildUnassignedCCAddAddr = 0x00690770;
+        constexpr uintptr_t kAiGameInitialisedAddr = 0x00930F08;
+        constexpr uintptr_t kAiTeamTableAddr = 0x00920F04;
+        constexpr uintptr_t kAiTeamDataBaseAddr = 0x02CE9B18;
+        constexpr size_t kAiTeamDataStride = 0x1E0;
+        constexpr size_t kUnitTypeOffset = 0x08;
+        constexpr size_t kUnitTeamOffset = 0x10;
+        constexpr size_t kUnitTypeAbilitiesOffset = 0x70;
+        constexpr size_t kUnitAiConstructTypeOffset = 0x30;
+        constexpr size_t kUnitAiConstructCostOffset = 0x34;
+        constexpr size_t kUnitAiConstructingOffset = 0x38;
+        constexpr size_t kUnitAiReservedAreaOffset = 0x3C;
+        constexpr size_t kUnitAiAccountOffset = 0x40;
+        constexpr uint32_t kConstructorAbilityMask = 0x2;
+        constexpr bool kConstructorRemoteBuildFixEnabledDefault = true;
+        constexpr long kConstructorRemoteBuildTraceBudgetDefault = 32;
         constexpr size_t kUnitProcessNextEnemyCheckOffset = 0x28;
         constexpr size_t kUnitProcessObjectOffset = 0x2C;
 
@@ -364,9 +405,21 @@ namespace BZROpenShim
             JumpSnipeProbeSnapshot last = {};
         };
 
+        struct ConstructorCleanupSnapshot
+        {
+            int teamId = 0;
+            void* teamPtr = nullptr;
+            uint32_t constructType = 0;
+            uint32_t constructCost = 0;
+            uint32_t constructing = 0;
+            uint32_t reservedArea = 0;
+            uint32_t account = 0;
+        };
+
         struct AiTuningConfig;
         static bool TryGetAiTuningForObject(void* objectPtr, AiTuningConfig& outConfig);
         static bool TryGetObjectOdfToken(void* objectPtr, char (&outToken)[kProducerBuildMenuTokenLen + 1]);
+        static void RevealProcessOwnerPerceivedTeam(void* processPtr, const char* sourceTag);
 
         struct HudSpriteRectRecord
         {
@@ -686,11 +739,22 @@ namespace BZROpenShim
         static bool g_EngineFlameVariantsInitAttempted = false;
         static bool g_EngineFlameVtableHooksInstalled = false;
         static InlineDetour32 g_OptionsInputPopulateUiDetour = {};
+        static InlineDetour32 g_RecordDeathDetour = {};
+        static bool g_CareerStatsMpHookInstalled = false;
+        static bool g_CareerStatsMpHookInstallAttempted = false;
+        static bool g_CareerStatsMpHookMismatchLogged = false;
+        static ULONGLONG g_CareerStatsMpHookFirstAttemptTick = 0;
+        static ULONGLONG g_CareerStatsMpHookLastAttemptTick = 0;
         static InlineDetour32 g_CalcRangeCraftDetour = {};
         static bool g_CalcRangeCraftHookInstalled = false;
         static InlineDetour32 g_OffensiveProcessDoSubTaskDetour = {};
         static InlineDetour32 g_GunTowerProcessDoSubTaskDetour = {};
         static bool g_RetargetPeriodHooksInstalled = false;
+        static volatile long g_AttackRevealTraceBudget = 64;
+        static InlineDetour32 g_AIUnitRemoveDetour = {};
+        static bool g_ConstructorRemoteBuildFixInstalled = false;
+        static bool g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
+        static volatile long g_ConstructorRemoteBuildTraceBudget = kConstructorRemoteBuildTraceBudgetDefault;
         static std::unordered_map<uintptr_t, ULONGLONG> g_RetargetPeriodNextForceMsByProcess = {};
         static bool g_InputBindingUiScaffoldInitialized = false;
         static bool g_InputBindingUiScaffoldLogged = false;
@@ -763,7 +827,8 @@ namespace BZROpenShim
         static constexpr bool kWeaponMaskCarrierBiasEnabledDefault = false;
         static constexpr bool kAiOdfGameplayTuningEnabledDefault = false;
         static constexpr bool kTurretAimPitchEnabledDefault = false;
-        static constexpr bool kAttackRevealEnabledDefault = false;
+        static constexpr bool kAttackRevealEnabledDefault = true;
+        static constexpr long kAttackRevealTraceBudgetDefault = 64;
         static bool g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
         static bool g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
         static bool g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
@@ -2826,6 +2891,182 @@ namespace BZROpenShim
                 return {};
 
             return std::string(BzrStringData(value), value->size);
+        }
+
+        static bool TryReadSteam64Value(uint64_t& outValue)
+        {
+            outValue = 0;
+            __try
+            {
+                outValue = *reinterpret_cast<volatile const uint64_t*>(kSteam64GlobalAddr);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outValue = 0;
+                return false;
+            }
+
+            return outValue != 0;
+        }
+
+        static std::filesystem::path GetCareerStatsPath()
+        {
+            return GetConfigModuleDirectory() / "career_stats.cfg";
+        }
+
+        static std::string SanitizeCareerStatsKeyToken(const std::string& value, const char* fallback)
+        {
+            std::string sanitized;
+            sanitized.reserve(value.size());
+
+            for (const char ch : value)
+            {
+                const unsigned char uch = static_cast<unsigned char>(ch);
+                if (std::isalnum(uch) || ch == '.' || ch == '_' || ch == '-')
+                {
+                    sanitized.push_back(static_cast<char>(std::tolower(uch)));
+                }
+                else if (!sanitized.empty() && sanitized.back() != '_')
+                {
+                    sanitized.push_back('_');
+                }
+            }
+
+            while (!sanitized.empty() && sanitized.front() == '_')
+                sanitized.erase(sanitized.begin());
+            while (!sanitized.empty() && sanitized.back() == '_')
+                sanitized.pop_back();
+
+            if (!sanitized.empty())
+                return sanitized;
+
+            return fallback ? fallback : "unknown";
+        }
+
+        static std::string ResolveCareerStatsProfileKey()
+        {
+            uint64_t steam64 = 0;
+            if (TryReadSteam64Value(steam64))
+                return SanitizeCareerStatsKeyToken(std::to_string(steam64), "offline");
+
+            if (g_BzrFn_GetLocalPlayerNetId)
+            {
+                const uint16_t netId = g_BzrFn_GetLocalPlayerNetId();
+                if (netId != 0)
+                    return SanitizeCareerStatsKeyToken("netid_" + std::to_string(netId), "offline");
+            }
+
+            return "offline";
+        }
+
+        static void LoadCareerStatsFile(std::unordered_map<std::string, std::string>& outData)
+        {
+            outData.clear();
+
+            const std::filesystem::path path = GetCareerStatsPath();
+            std::ifstream input(path);
+            if (!input.is_open())
+                return;
+
+            std::string line;
+            while (std::getline(input, line))
+            {
+                const size_t split = line.find('=');
+                if (split == std::string::npos || split == 0)
+                    continue;
+
+                std::string key = line.substr(0, split);
+                std::string value = line.substr(split + 1);
+                if (key.empty())
+                    continue;
+
+                outData[key] = value;
+            }
+        }
+
+        static bool SaveCareerStatsFile(const std::unordered_map<std::string, std::string>& data)
+        {
+            const std::filesystem::path path = GetCareerStatsPath();
+            std::ofstream output(path, std::ios::trunc);
+            if (!output.is_open())
+                return false;
+
+            std::vector<std::string> keys;
+            keys.reserve(data.size());
+            for (const auto& entry : data)
+                keys.push_back(entry.first);
+
+            std::sort(keys.begin(), keys.end());
+            for (const auto& key : keys)
+            {
+                const auto it = data.find(key);
+                if (it == data.end())
+                    continue;
+
+                output << it->first << '=' << it->second << '\n';
+            }
+
+            return output.good();
+        }
+
+        static int GetCareerStatsInteger(const std::unordered_map<std::string, std::string>& data,
+                                         const std::string& key)
+        {
+            const auto it = data.find(key);
+            if (it == data.end())
+                return 0;
+
+            return std::atoi(it->second.c_str());
+        }
+
+        static void IncrementCareerStatsInteger(std::unordered_map<std::string, std::string>& data,
+                                                const std::string& key,
+                                                int amount)
+        {
+            data[key] = std::to_string(GetCareerStatsInteger(data, key) + amount);
+        }
+
+        static void RecordMultiplayerCareerStats(int killedTeam, int killerTeam)
+        {
+            if (!g_BzrFn_GetPlayerHandle || !g_BzrFn_GetTeamNum)
+                return;
+
+            const int playerHandle = g_BzrFn_GetPlayerHandle();
+            if (playerHandle <= 0)
+                return;
+
+            const int localTeam = g_BzrFn_GetTeamNum(playerHandle);
+            if (localTeam <= 0)
+                return;
+
+            const bool localDeath = (killedTeam == localTeam);
+            // RecordDeath exposes team ids here; keep the first pass conservative
+            // by suppressing same-team kills and counting only cross-team kills.
+            const bool localKill = (killerTeam == localTeam && killerTeam > 0 && killerTeam != killedTeam);
+            if (!localDeath && !localKill)
+                return;
+
+            std::unordered_map<std::string, std::string> data;
+            LoadCareerStatsFile(data);
+            data["meta.version"] = "1";
+
+            const std::string profilePrefix = "profile." + ResolveCareerStatsProfileKey();
+            if (localKill)
+            {
+                IncrementCareerStatsInteger(data, profilePrefix + ".career.totalKills", 1);
+                IncrementCareerStatsInteger(data, profilePrefix + ".career.mpKills", 1);
+            }
+            if (localDeath)
+            {
+                IncrementCareerStatsInteger(data, profilePrefix + ".career.totalDeaths", 1);
+                IncrementCareerStatsInteger(data, profilePrefix + ".career.mpDeaths", 1);
+            }
+
+            if (!SaveCareerStatsFile(data))
+            {
+                const std::string path = GetCareerStatsPath().string();
+                Log(L"[CAREER] Failed writing multiplayer career stats file: %hs\n", path.c_str());
+            }
         }
 
         static std::filesystem::path GetBansConfigPath()
@@ -5095,6 +5336,14 @@ namespace BZROpenShim
                 BoolText(after.sniperSelected));
         }
 
+        void __cdecl RecordDeathHook(int killedTeam, int killerTeam)
+        {
+            if (g_BzrFn_RecordDeath)
+                g_BzrFn_RecordDeath(killedTeam, killerTeam);
+
+            RecordMultiplayerCareerStats(killedTeam, killerTeam);
+        }
+
         void __fastcall PersonSimulateJumpSnipeProbeHook(void* thisPtr, void* /*edx*/, float dt)
         {
             JumpSnipeProbeSnapshot before = {};
@@ -5118,6 +5367,81 @@ namespace BZROpenShim
                 LogJumpSnipeProbeState(before, after.valid ? after : before, dt);
                 g_JumpSnipeProbeLogState.initialized = true;
                 g_JumpSnipeProbeLogState.last = current;
+            }
+        }
+
+        static void InstallCareerStatsMpHookIfPossible()
+        {
+            if (g_CareerStatsMpHookInstalled)
+                return;
+
+            if (g_RecordDeathDetour.trampoline && g_BzrFn_RecordDeath)
+            {
+                g_CareerStatsMpHookInstalled = true;
+                return;
+            }
+
+            const ULONGLONG nowMs = GetTickCount64();
+            if (g_CareerStatsMpHookFirstAttemptTick == 0)
+                g_CareerStatsMpHookFirstAttemptTick = nowMs;
+
+            if (g_CareerStatsMpHookLastAttemptTick != 0 &&
+                (nowMs - g_CareerStatsMpHookLastAttemptTick) < kCareerStatsMpHookRetryMs)
+            {
+                return;
+            }
+
+            g_CareerStatsMpHookLastAttemptTick = nowMs;
+            g_CareerStatsMpHookInstallAttempted = true;
+
+            static const uint8_t kExpectedRecordDeathBytes[kRecordDeathDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x10
+            };
+
+            if (!ExpectedBytesMatchAt(kGogRecordDeathEntryAddr,
+                                      kExpectedRecordDeathBytes,
+                                      sizeof(kExpectedRecordDeathBytes)))
+            {
+                if (!g_CareerStatsMpHookMismatchLogged)
+                {
+                    Log(L"[CAREER] RecordDeath entry bytes not settled yet at 0x%08X; retrying for up to %llums\n",
+                        static_cast<uint32_t>(kGogRecordDeathEntryAddr),
+                        static_cast<unsigned long long>(kCareerStatsMpHookRetryWindowMs));
+                    g_CareerStatsMpHookMismatchLogged = true;
+                }
+                else if ((nowMs - g_CareerStatsMpHookFirstAttemptTick) >= kCareerStatsMpHookRetryWindowMs)
+                {
+                    Log(L"[CAREER] RecordDeath entry bytes still mismatched at 0x%08X after %llums; continuing guarded retries\n",
+                        static_cast<uint32_t>(kGogRecordDeathEntryAddr),
+                        static_cast<unsigned long long>(nowMs - g_CareerStatsMpHookFirstAttemptTick));
+                    g_CareerStatsMpHookFirstAttemptTick = nowMs;
+                }
+                return;
+            }
+
+            if (!InstallInlineDetour32(g_RecordDeathDetour,
+                                       kGogRecordDeathEntryAddr,
+                                       reinterpret_cast<void*>(RecordDeathHook),
+                                       kRecordDeathDetourLen,
+                                       kExpectedRecordDeathBytes,
+                                       sizeof(kExpectedRecordDeathBytes)))
+            {
+                Log(L"[CAREER] Failed installing RecordDeath hook at 0x%08X\n",
+                    static_cast<uint32_t>(kGogRecordDeathEntryAddr));
+                return;
+            }
+
+            g_BzrFn_RecordDeath =
+                reinterpret_cast<FnRecordDeath>(g_RecordDeathDetour.trampoline);
+            g_CareerStatsMpHookInstalled = (g_BzrFn_RecordDeath != nullptr);
+            if (g_CareerStatsMpHookInstalled)
+            {
+                g_CareerStatsMpHookMismatchLogged = false;
+                Log(L"[CAREER] Installed NetPlayer::RecordDeath hook entry=0x%08X trampoline=0x%08X path=%hs\n",
+                    static_cast<uint32_t>(kGogRecordDeathEntryAddr),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_RecordDeathDetour.trampoline)),
+                    GetCareerStatsPath().string().c_str());
             }
         }
 
@@ -5290,12 +5614,88 @@ namespace BZROpenShim
             nextForceMs = nowMs + periodMs;
         }
 
+        static bool ShouldTraceAttackReveal()
+        {
+            return EnvFlagEnabled("OPENSHIM_TRACE_ATTACK_REVEAL") ||
+                   EnvFlagEnabled("BZR_TRACE_ATTACK_REVEAL");
+        }
+
+        static void TraceAttackRevealEvent(const char* action,
+                                           const char* reason,
+                                           const char* sourceTag,
+                                           void* processPtr,
+                                           void* objectPtr,
+                                           int perceivedTeam,
+                                           int actualTeam)
+        {
+            if (!ShouldTraceAttackReveal())
+                return;
+
+            const long remaining = InterlockedDecrement(&g_AttackRevealTraceBudget);
+            if (remaining < 0)
+                return;
+
+            Log(L"[AGGRO] trace remaining=%ld action=%hs reason=%hs source=%hs process=0x%08X object=0x%08X perceived=%d actual=%d enabled=%hs\n",
+                remaining,
+                action ? action : "unknown",
+                reason ? reason : "unspecified",
+                sourceTag ? sourceTag : "unknown",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(processPtr)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectPtr)),
+                perceivedTeam,
+                actualTeam,
+                BoolText(g_AttackRevealEnabled));
+        }
+
+        static void RevealProcessOwnerPerceivedTeam(void* processPtr, const char* sourceTag)
+        {
+            if (!g_AttackRevealEnabled || !processPtr)
+                return;
+
+            __try
+            {
+                auto* processBytes = reinterpret_cast<uint8_t*>(processPtr);
+                void* const objectPtr =
+                    *reinterpret_cast<void**>(processBytes + kProcessOwnerObjectOffset);
+                if (!objectPtr)
+                {
+                    TraceAttackRevealEvent("skip", "missing_owner", sourceTag, processPtr, nullptr, INT_MIN, INT_MIN);
+                    return;
+                }
+
+                const int actualTeam = GetGameObjectTeamForLog(objectPtr);
+                if (actualTeam == INT_MIN)
+                {
+                    TraceAttackRevealEvent("skip", "team_read_failed", sourceTag, processPtr, objectPtr, INT_MIN, INT_MIN);
+                    return;
+                }
+
+                auto* objectBytes = reinterpret_cast<uint8_t*>(objectPtr);
+                int& perceivedTeam =
+                    *reinterpret_cast<int*>(objectBytes + kGameObjectPerceivedTeamOffset);
+                const int previousPerceivedTeam = perceivedTeam;
+                if (previousPerceivedTeam == actualTeam)
+                {
+                    TraceAttackRevealEvent("noop", "already_revealed", sourceTag, processPtr, objectPtr, previousPerceivedTeam, actualTeam);
+                    return;
+                }
+
+                perceivedTeam = actualTeam;
+                TraceAttackRevealEvent("write", "revealed", sourceTag, processPtr, objectPtr, previousPerceivedTeam, actualTeam);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                TraceAttackRevealEvent("fault", "access_fault", sourceTag, processPtr, nullptr, INT_MIN, INT_MIN);
+            }
+        }
+
         bool __fastcall OffensiveProcessDoSubTaskHook(void* thisPtr, void* /*edx*/)
         {
             const bool result =
                 g_BzrFn_OffensiveProcessDoSubTask
                     ? g_BzrFn_OffensiveProcessDoSubTask(thisPtr)
                     : false;
+            RevealProcessOwnerPerceivedTeam(thisPtr, "offensive_post_subtask");
             ApplyRetargetPeriodAfterDoSubTask(thisPtr);
             return result;
         }
@@ -5306,6 +5706,7 @@ namespace BZROpenShim
                 g_BzrFn_GunTowerProcessDoSubTask
                     ? g_BzrFn_GunTowerProcessDoSubTask(thisPtr)
                     : false;
+            RevealProcessOwnerPerceivedTeam(thisPtr, "guntower_post_subtask");
             ApplyRetargetPeriodAfterDoSubTask(thisPtr);
             return result;
         }
@@ -5432,6 +5833,279 @@ namespace BZROpenShim
             }
 
             g_RetargetPeriodHooksInstalled = offensiveInstalled && gunTowerInstalled;
+        }
+
+        static bool ShouldTraceConstructorRemoteBuildFix()
+        {
+            return EnvFlagEnabled("OPENSHIM_TRACE_CONSTRUCTOR_REMOTE_BUILD") ||
+                   EnvFlagEnabled("OPENSHIM_TRACE_CONSTRUCTOR_BUILD_CLEANUP") ||
+                   EnvFlagEnabled("BZR_TRACE_CONSTRUCTOR_REMOTE_BUILD");
+        }
+
+        static void TraceConstructorRemoteBuildEvent(const char* action,
+                                                     const char* reason,
+                                                     void* unitPtr,
+                                                     const ConstructorCleanupSnapshot* snapshot)
+        {
+            if (!ShouldTraceConstructorRemoteBuildFix())
+                return;
+
+            const long remaining = InterlockedDecrement(&g_ConstructorRemoteBuildTraceBudget);
+            if (remaining < 0)
+                return;
+
+            const ConstructorCleanupSnapshot empty = {};
+            const ConstructorCleanupSnapshot& current = snapshot ? *snapshot : empty;
+            Log(L"[AICONSTRUCT] trace remaining=%ld action=%hs reason=%hs team=%d teamPtr=0x%08X unit=0x%08X constructType=%u cost=%u constructing=%u account=%u reservedArea=%u helpers=end:%hs reserved:%hs refund:%hs add:%hs stop:%hs\n",
+                remaining,
+                action ? action : "unknown",
+                reason ? reason : "unspecified",
+                current.teamId,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current.teamPtr)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(unitPtr)),
+                current.constructType,
+                current.constructCost,
+                current.constructing,
+                current.account,
+                current.reservedArea,
+                BoolText(g_BzrFn_AIBuildConstructionEnd != nullptr),
+                BoolText(g_BzrFn_AIBuildReservedAreaRemove != nullptr),
+                BoolText(g_BzrFn_AISpentCreditRefund != nullptr),
+                BoolText(g_BzrFn_AIBuildUnassignedCCAdd != nullptr),
+                BoolText(g_BzrFn_UnitsSOrderStop != nullptr));
+        }
+
+        static bool TryCaptureConstructorCleanupSnapshot(void* unitPtr,
+                                                        ConstructorCleanupSnapshot& outSnapshot,
+                                                        const char** outReason)
+        {
+            outSnapshot = {};
+            if (outReason)
+                *outReason = "unknown";
+            if (!unitPtr)
+            {
+                if (outReason)
+                    *outReason = "null_unit";
+                return false;
+            }
+
+            __try
+            {
+                if (*reinterpret_cast<const uint32_t*>(kAiGameInitialisedAddr) == 0)
+                {
+                    if (outReason)
+                        *outReason = "ai_not_ready";
+                    return false;
+                }
+
+                auto* unitBytes = reinterpret_cast<const uint8_t*>(unitPtr);
+                const int teamId =
+                    static_cast<int>(*reinterpret_cast<const int8_t*>(unitBytes + kUnitTeamOffset));
+                if (teamId < 0)
+                {
+                    if (outReason)
+                        *outReason = "team_invalid";
+                    return false;
+                }
+
+                auto* teamAicontrol =
+                    reinterpret_cast<const uint8_t*>(kAiTeamDataBaseAddr + (teamId * kAiTeamDataStride));
+                if (*teamAicontrol == 0)
+                {
+                    if (outReason)
+                        *outReason = "team_not_ai";
+                    return false;
+                }
+
+                auto* teamTable = reinterpret_cast<void* const*>(kAiTeamTableAddr);
+                outSnapshot.teamPtr = teamTable[teamId];
+                if (!outSnapshot.teamPtr)
+                {
+                    if (outReason)
+                        *outReason = "team_ptr_missing";
+                    return false;
+                }
+
+                void* typePtr = *reinterpret_cast<void* const*>(unitBytes + kUnitTypeOffset);
+                if (!typePtr)
+                {
+                    if (outReason)
+                        *outReason = "missing_type";
+                    return false;
+                }
+
+                const uint32_t abilities =
+                    *reinterpret_cast<const uint32_t*>(reinterpret_cast<const uint8_t*>(typePtr) +
+                                                       kUnitTypeAbilitiesOffset);
+                if ((abilities & kConstructorAbilityMask) == 0)
+                {
+                    if (outReason)
+                        *outReason = "not_constructor";
+                    return false;
+                }
+
+                outSnapshot.teamId = teamId;
+                outSnapshot.constructType =
+                    *reinterpret_cast<const uint32_t*>(unitBytes + kUnitAiConstructTypeOffset);
+                outSnapshot.constructCost =
+                    *reinterpret_cast<const uint32_t*>(unitBytes + kUnitAiConstructCostOffset);
+                outSnapshot.constructing =
+                    *reinterpret_cast<const uint32_t*>(unitBytes + kUnitAiConstructingOffset);
+                outSnapshot.reservedArea =
+                    *reinterpret_cast<const uint32_t*>(unitBytes + kUnitAiReservedAreaOffset);
+                outSnapshot.account =
+                    *reinterpret_cast<const uint32_t*>(unitBytes + kUnitAiAccountOffset);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outSnapshot = {};
+                if (outReason)
+                    *outReason = "access_fault";
+                return false;
+            }
+
+            if (outReason)
+                *outReason = "eligible";
+            return true;
+        }
+
+        static bool TryApplyConstructorRemoteBuildDeathCleanup(void* unitPtr,
+                                                               ConstructorCleanupSnapshot& outSnapshot,
+                                                               const char** outReason)
+        {
+            outSnapshot = {};
+            if (outReason)
+                *outReason = "unknown";
+
+            if (!g_ConstructorRemoteBuildFixEnabled ||
+                !g_BzrFn_AIBuildConstructionEnd ||
+                !g_BzrFn_AIBuildReservedAreaRemove ||
+                !g_BzrFn_AISpentCreditRefund ||
+                !g_BzrFn_AIBuildUnassignedCCAdd ||
+                !unitPtr)
+            {
+                if (outReason)
+                    *outReason = !g_ConstructorRemoteBuildFixEnabled
+                        ? "fix_disabled"
+                        : (!unitPtr ? "null_unit" : "helpers_missing");
+                return false;
+            }
+
+            if (!TryCaptureConstructorCleanupSnapshot(unitPtr, outSnapshot, outReason))
+                return false;
+
+            if (outSnapshot.constructType == 0)
+            {
+                if (outReason)
+                    *outReason = "construct_type_zero";
+                return false;
+            }
+
+            if (outSnapshot.constructing == 0)
+            {
+                if (outReason)
+                    *outReason = "constructing_zero";
+                return false;
+            }
+
+            g_BzrFn_AIBuildConstructionEnd(outSnapshot.teamId, static_cast<int>(outSnapshot.constructType));
+            g_BzrFn_AIBuildReservedAreaRemove(outSnapshot.teamId, static_cast<int>(outSnapshot.reservedArea));
+            g_BzrFn_AISpentCreditRefund(outSnapshot.teamId, nullptr, unitPtr);
+            if (outSnapshot.teamPtr)
+                g_BzrFn_AIBuildUnassignedCCAdd(outSnapshot.teamPtr, unitPtr);
+            if (g_BzrFn_UnitsSOrderStop)
+                g_BzrFn_UnitsSOrderStop(unitPtr);
+
+            auto* unitBytes = reinterpret_cast<uint8_t*>(unitPtr);
+            *reinterpret_cast<uint32_t*>(unitBytes + kUnitAiConstructTypeOffset) = 0;
+            *reinterpret_cast<uint32_t*>(unitBytes + kUnitAiConstructCostOffset) = 0;
+            *reinterpret_cast<uint32_t*>(unitBytes + kUnitAiConstructingOffset) = 0;
+            *reinterpret_cast<uint32_t*>(unitBytes + kUnitAiAccountOffset) = 0;
+            *reinterpret_cast<uint32_t*>(unitBytes + kUnitAiReservedAreaOffset) = 0;
+
+            Log(L"[AICONSTRUCT] Applied constructor death cleanup action=death_cleanup team=%d teamPtr=0x%08X unit=0x%08X constructType=%u cost=%u constructing=%u account=%u reservedArea=%u end=0x%08X reserved=0x%08X refund=0x%08X add=0x%08X stop=0x%08X\n",
+                outSnapshot.teamId,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(outSnapshot.teamPtr)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(unitPtr)),
+                outSnapshot.constructType,
+                outSnapshot.constructCost,
+                outSnapshot.constructing,
+                outSnapshot.account,
+                outSnapshot.reservedArea,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_AIBuildConstructionEnd)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_AIBuildReservedAreaRemove)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_AISpentCreditRefund)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_AIBuildUnassignedCCAdd)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_UnitsSOrderStop)));
+
+            if (outReason)
+                *outReason = "applied";
+            TraceConstructorRemoteBuildEvent("death_cleanup", "applied", unitPtr, &outSnapshot);
+
+            return true;
+        }
+
+        void __cdecl AIUnitRemoveConstructorCleanupHook(void* unitPtr)
+        {
+            ConstructorCleanupSnapshot snapshot = {};
+            const char* reason = nullptr;
+            const bool applied = TryApplyConstructorRemoteBuildDeathCleanup(unitPtr, snapshot, &reason);
+
+            TraceConstructorRemoteBuildEvent(applied ? "forward_after_cleanup" : "fallback", reason, unitPtr, &snapshot);
+            if (g_BzrFn_AIUnitRemove)
+                g_BzrFn_AIUnitRemove(unitPtr);
+        }
+
+        static void InstallConstructorRemoteBuildFixIfPossible()
+        {
+            if (!g_ConstructorRemoteBuildFixEnabled)
+                return;
+
+            if (g_ConstructorRemoteBuildFixInstalled)
+                return;
+
+            if (g_AIUnitRemoveDetour.trampoline && g_BzrFn_AIUnitRemove)
+            {
+                g_ConstructorRemoteBuildFixInstalled = true;
+                return;
+            }
+
+            static const uint8_t kExpectedAIUnitRemoveBytes[kAIUnitRemoveDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x51, 0x83, 0x3D, 0x08, 0x0F, 0x93, 0x00, 0x00
+            };
+
+            if (!ExpectedBytesMatchAt(kGogAIUnitRemoveEntryAddr,
+                                      kExpectedAIUnitRemoveBytes,
+                                      sizeof(kExpectedAIUnitRemoveBytes)))
+            {
+                Log(L"[AICONSTRUCT] AI_UnitRemove entry bytes mismatch at 0x%08X; constructor death cleanup fix disabled\n",
+                    static_cast<uint32_t>(kGogAIUnitRemoveEntryAddr));
+                return;
+            }
+
+            if (!InstallInlineDetour32(g_AIUnitRemoveDetour,
+                                       kGogAIUnitRemoveEntryAddr,
+                                       reinterpret_cast<void*>(AIUnitRemoveConstructorCleanupHook),
+                                       kAIUnitRemoveDetourLen,
+                                       kExpectedAIUnitRemoveBytes,
+                                       sizeof(kExpectedAIUnitRemoveBytes)))
+            {
+                Log(L"[AICONSTRUCT] Failed installing AI_UnitRemove cleanup hook at 0x%08X\n",
+                    static_cast<uint32_t>(kGogAIUnitRemoveEntryAddr));
+                return;
+            }
+
+            g_BzrFn_AIUnitRemove =
+                reinterpret_cast<FnAIUnitRemove>(g_AIUnitRemoveDetour.trampoline);
+            g_ConstructorRemoteBuildFixInstalled = (g_BzrFn_AIUnitRemove != nullptr);
+            if (g_ConstructorRemoteBuildFixInstalled)
+            {
+                Log(L"[AICONSTRUCT] Installed AI_UnitRemove cleanup hook entry=0x%08X trampoline=0x%08X trace=%hs\n",
+                    static_cast<uint32_t>(kGogAIUnitRemoveEntryAddr),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_AIUnitRemoveDetour.trampoline)),
+                    BoolText(ShouldTraceConstructorRemoteBuildFix()));
+            }
         }
 
         static void EnsureEngineFlameVtableHooksInstalled(void* manager)
@@ -7585,6 +8259,9 @@ namespace BZROpenShim
         g_BzrFn_GameObjectGetObjByHandle = nullptr;
         g_BzrFn_PersonSimulate = nullptr;
         g_BzrFn_OptionsInputPopulateUi = nullptr;
+        g_BzrFn_RecordDeath = g_RecordDeathDetour.trampoline
+            ? reinterpret_cast<FnRecordDeath>(g_RecordDeathDetour.trampoline)
+            : nullptr;
         g_JumpSnipeProbeInstalled = false;
         g_EngineFlamePrimaryManager = nullptr;
         g_EngineFlameSecondaryManager = nullptr;
@@ -7605,6 +8282,11 @@ namespace BZROpenShim
         g_InputBindingUiScaffoldLogged = false;
         g_InputBindingUiPopulateHookInstallAttempted = false;
         g_InputBindingUiPopulateHookInstalled = false;
+        g_CareerStatsMpHookInstalled = (g_RecordDeathDetour.trampoline != nullptr);
+        g_CareerStatsMpHookInstallAttempted = g_CareerStatsMpHookInstalled;
+        g_CareerStatsMpHookMismatchLogged = false;
+        g_CareerStatsMpHookFirstAttemptTick = 0;
+        g_CareerStatsMpHookLastAttemptTick = 0;
         g_InputBindingInstallDirectory.clear();
         g_InputBindingInventory = {};
         g_InputBindingCommandBlocks.clear();
@@ -7622,6 +8304,14 @@ namespace BZROpenShim
         g_RetargetPeriodHooksInstalled = false;
         g_BzrFn_OffensiveProcessDoSubTask = nullptr;
         g_BzrFn_GunTowerProcessDoSubTask = nullptr;
+        g_BzrFn_AIUnitRemove = nullptr;
+        g_BzrFn_AIBuildConstructionEnd = nullptr;
+        g_BzrFn_AIBuildReservedAreaRemove = nullptr;
+        g_BzrFn_AISpentCreditRefund = nullptr;
+        g_BzrFn_UnitsSOrderStop = nullptr;
+        g_BzrFn_AIBuildUnassignedCCAdd = nullptr;
+        g_ConstructorRemoteBuildFixInstalled = false;
+        g_AttackRevealTraceBudget = kAttackRevealTraceBudgetDefault;
         g_HudSpriteRectTableBase = nullptr;
         g_HudSpriteRectTableDiscoveryAttempted = false;
         g_HudSpriteRectTableDiscoveryLastTick = 0;
@@ -7638,6 +8328,7 @@ namespace BZROpenShim
         g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
         g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
         g_AttackRevealEnabled = kAttackRevealEnabledDefault;
+        g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
         g_TurretAimPitchMultiplier = 0.5f;
         g_TurretAimPitchMultiplierEnhanced = 0.95f;
         g_RetargetPeriodNextForceMsByProcess.clear();
@@ -7711,12 +8402,23 @@ namespace BZROpenShim
         g_BzrFn_HudSpriteLookup = reinterpret_cast<FnHudSpriteLookup>(0x0068BED0);
         g_BzrFn_GetTeamNum = reinterpret_cast<FnGetTeamNum>(0x005C8800);
         g_BzrFn_ChunkEffectSimulate = reinterpret_cast<FnChunkEffectSimulate>(0x004917F0);
+        g_BzrFn_AIBuildConstructionEnd =
+            reinterpret_cast<FnAIBuildConstructionEnd>(kGogAIBuildConstructionEndAddr);
+        g_BzrFn_AIBuildReservedAreaRemove =
+            reinterpret_cast<FnAIBuildReservedAreaRemove>(kGogAIBuildReservedAreaRemoveAddr);
+        g_BzrFn_AISpentCreditRefund =
+            reinterpret_cast<FnAISpentCreditRefund>(kGogAISpentCreditRefundAddr);
+        g_BzrFn_UnitsSOrderStop =
+            reinterpret_cast<FnUnitsSOrderStop>(kGogUnitsSOrderStopAddr);
+        g_BzrFn_AIBuildUnassignedCCAdd =
+            reinterpret_cast<FnAIBuildUnassignedCCAdd>(kGogAIBuildUnassignedCCAddAddr);
 
         g_BzrFn_InitBuildItem = reinterpret_cast<FnBuildItemInit>(0x0049F5C0);
         g_BzrFn_CleanupBuildItem = reinterpret_cast<FnBuildItemCleanup>(0x0049F880);
         g_BzrBuildMenuRoot = reinterpret_cast<BuildItem*>(kBuildMenuRootAddr);
 
         InstallJumpSnipingProbeIfRequested();
+        InstallCareerStatsMpHookIfPossible();
 
         if (g_IsSteamExe)
         {
@@ -7771,6 +8473,17 @@ namespace BZROpenShim
             EnvFlagEnabled("BZR_TRACE_SAT_VIS") ||
             EnvFlagEnabled("OPENSHIM_TRACE_SAT_VIS") ||
             EnvFlagEnabled("OPENSHIM_TRACE_SATELLITE_VISIBILITY");
+        g_ConstructorRemoteBuildFixEnabled =
+            !(EnvFlagEnabled("OPENSHIM_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX") ||
+              EnvFlagEnabled("BZR_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX"));
+        long constructorCleanupTraceBudget = kConstructorRemoteBuildTraceBudgetDefault;
+        if (TryGetEnvLong("OPENSHIM_TRACE_CONSTRUCTOR_REMOTE_BUILD_BUDGET", constructorCleanupTraceBudget) ||
+            TryGetEnvLong("BZR_TRACE_CONSTRUCTOR_REMOTE_BUILD_BUDGET", constructorCleanupTraceBudget))
+        {
+            if (constructorCleanupTraceBudget < 0)
+                constructorCleanupTraceBudget = 0;
+        }
+        g_ConstructorRemoteBuildTraceBudget = constructorCleanupTraceBudget;
         long chunkProxyCapacity = static_cast<long>(g_ChunkProxyCapacity);
         if (TryGetEnvLong("OPENSHIM_CHUNK_PROXY_CAP", chunkProxyCapacity) ||
             TryGetEnvLong("OPENSHIM_CHUNK_PROXY_CAPACITY", chunkProxyCapacity))
@@ -7866,6 +8579,15 @@ namespace BZROpenShim
         Log(L"[TURRET] Aim pitch multiplier: %.3f%s\n",
             static_cast<double>(g_TurretAimPitchMultiplier),
             g_TurretAimPitchMultiplier >= 0.999f ? " (full range)" : "");
+        Log(L"[AICONSTRUCT] Constructor death cleanup fix: %hs entry=0x%08X trace=%hs budget=%ld\n",
+            g_ConstructorRemoteBuildFixEnabled ? "enabled" : "disabled",
+            static_cast<uint32_t>(kGogAIUnitRemoveEntryAddr),
+            ShouldTraceConstructorRemoteBuildFix() ? "enabled" : "disabled",
+            g_ConstructorRemoteBuildTraceBudget);
+        Log(L"[AGGRO] Attack reveal fix: %hs trace=%hs budget=%ld\n",
+            g_AttackRevealEnabled ? "enabled" : "disabled",
+            ShouldTraceAttackReveal() ? "enabled" : "disabled",
+            g_AttackRevealTraceBudget);
         InitializeUnderAttackAlertConfig();
         InitializeTargetReticlePopupConfig();
         EnsureInputBindingPopulateHookScaffold();
@@ -7890,7 +8612,9 @@ namespace BZROpenShim
     void RetryDeferredRuntimeHooks()
     {
         InstallJumpSnipingProbeIfRequested();
+        InstallCareerStatsMpHookIfPossible();
         InstallAiTuningHooksIfPossible();
+        InstallConstructorRemoteBuildFixIfPossible();
         EnsureInputBindingPopulateHookScaffold();
     }
 
@@ -7964,6 +8688,7 @@ namespace BZROpenShim
 
     bool SetAttackRevealEnabledFromBridge(bool enabled)
     {
+        RetryDeferredRuntimeHooks();
         g_AttackRevealEnabled = enabled;
         Log(L"[MISSIONHOOK] attack reveal %hs\n", enabled ? "enabled" : "disabled");
         return true;
@@ -7978,6 +8703,7 @@ namespace BZROpenShim
         g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
         g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
         g_AttackRevealEnabled = kAttackRevealEnabledDefault;
+        g_AttackRevealTraceBudget = kAttackRevealTraceBudgetDefault;
         g_TurretAimPitchMultiplier = 0.5f;
         Log(L"[MISSIONHOOK] restored mission hook overrides to defaults\n");
         return true;
@@ -8212,27 +8938,7 @@ namespace BZROpenShim
 
     void __cdecl RevealProcessOwnerPerceivedTeamOnAttackStateEntry(void* processPtr)
     {
-        if (!g_AttackRevealEnabled || !processPtr || g_IsSteamExe)
-            return;
-
-        __try
-        {
-            auto* processBytes = reinterpret_cast<uint8_t*>(processPtr);
-            void* const objectPtr =
-                *reinterpret_cast<void**>(processBytes + kProcessOwnerObjectOffset);
-            if (!objectPtr)
-                return;
-
-            const int team = GetGameObjectTeamForLog(objectPtr);
-            if (team == INT_MIN)
-                return;
-
-            auto* objectBytes = reinterpret_cast<uint8_t*>(objectPtr);
-            *reinterpret_cast<int*>(objectBytes + kGameObjectPerceivedTeamOffset) = team;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-        }
+        RevealProcessOwnerPerceivedTeam(processPtr, "attack_state_entry");
     }
 
     void __cdecl HandleUnderAttackAlert(float currentTime)
@@ -9742,6 +10448,8 @@ namespace BZROpenShim
 
         if (!g_JumpSnipeProbeInstalled)
             InstallJumpSnipingProbeIfRequested();
+        if (!g_CareerStatsMpHookInstalled)
+            InstallCareerStatsMpHookIfPossible();
 
         MaybeLogSatelliteVisibilitySample();
         TrackChunkEffectActiveEntries(thisPtr);

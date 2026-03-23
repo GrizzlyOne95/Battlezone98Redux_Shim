@@ -5,10 +5,13 @@ param(
     [string]$GameDir = "",
     [string]$GameExe = "",
     [string]$GhidraInstallDir = "",
+    [string]$GhidraMcpHost = "127.0.0.1",
+    [int]$GhidraMcpPort = 8765,
     [switch]$SkipWinget,
     [switch]$SkipPip,
     [switch]$SkipWrappers,
-    [switch]$SkipCodexConfig
+    [switch]$SkipCodexConfig,
+    [switch]$SkipGhidraService
 )
 
 $ErrorActionPreference = "Stop"
@@ -165,6 +168,22 @@ function Set-CmdWrapper([string]$WrapperPath, [string]$TargetCommand) {
     Set-Content -Path $WrapperPath -Value $content -Encoding ASCII
 }
 
+function Set-UserRunEntry([string]$Name, [string]$CommandValue) {
+    $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+    if (-not (Test-Path $runKey)) {
+        New-Item -Path $runKey -Force | Out-Null
+    }
+    Set-ItemProperty -Path $runKey -Name $Name -Value $CommandValue
+    Write-Info "Set startup entry $Name"
+}
+
+function Remove-UserRunEntry([string]$Name) {
+    $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+    if (Test-Path $runKey) {
+        Remove-ItemProperty -Path $runKey -Name $Name -ErrorAction SilentlyContinue
+    }
+}
+
 function Update-CodexConfig() {
     if ($SkipCodexConfig) {
         Write-Info "Skipping Codex config update"
@@ -180,21 +199,13 @@ function Update-CodexConfig() {
     $startMarker = "# >>> BZR agent tooling >>>"
     $endMarker = "# <<< BZR agent tooling <<<"
 
-    $ghidraDirValue = Get-PreferredGhidraInstallDir
-    $ghidraEnvLine = ""
-    if ($ghidraDirValue) {
-        $ghidraEnvLine = "env = { `"GHIDRA_INSTALL_DIR`" = `"$($ghidraDirValue -replace '\\', '/')`" }"
-    }
     $repoToml = $RepoRoot -replace "\\", "/"
+    $ghidraUrl = "http://$GhidraMcpHost`:$GhidraMcpPort/mcp"
 
     $block = @"
 $startMarker
 [mcp_servers.ghidra]
-command = "python"
-args = [
-  "$repoToml/scripts/ghidra_mcp_bz98.py"
-]
-$ghidraEnvLine
+url = "$ghidraUrl"
 
 [mcp_servers.redux_debug]
 command = "python"
@@ -206,10 +217,15 @@ $endMarker
 "@
 
     $pattern = "(?s)$([regex]::Escape($startMarker)).*?$([regex]::Escape($endMarker))"
-    if ($existing -match $pattern) {
-        $updated = [regex]::Replace($existing, $pattern, $block)
+    $updated = $existing
+    if ($updated -match $pattern) {
+        $updated = [regex]::Replace($updated, $pattern, $block)
     } else {
-        $updated = $existing.TrimEnd()
+        $ghidraBlockPattern = '(?ms)^\[mcp_servers\.ghidra\]\r?\n(?:.+\r?\n)*?(?=^\[|\z)'
+        $reduxBlockPattern = '(?ms)^\[mcp_servers\.redux_debug\]\r?\n(?:.+\r?\n)*?(?=^\[|\z)'
+        $updated = [regex]::Replace($updated, $ghidraBlockPattern, "")
+        $updated = [regex]::Replace($updated, $reduxBlockPattern, "")
+        $updated = $updated.TrimEnd()
         if ($updated) {
             $updated += "`r`n`r`n"
         }
@@ -277,6 +293,7 @@ if (-not $SkipWrappers) {
     Ensure-Directory $UserBin
     Ensure-UserPathContains $UserBin
     Set-CmdWrapper (Join-Path $UserBin "bzr-ghidra-mcp.cmd") "python `"$RepoRoot\scripts\ghidra_mcp_bz98.py`""
+    Set-CmdWrapper (Join-Path $UserBin "bzr-ghidra-mcp-service.cmd") "python `"$RepoRoot\scripts\ghidra_mcp_bz98.py`" --ensure-service --service-host $GhidraMcpHost --service-port $GhidraMcpPort"
     Set-CmdWrapper (Join-Path $UserBin "bzr-redux-debug.cmd") "python `"$RepoRoot\scripts\redux_debug_bridge.py`""
     Set-CmdWrapper (Join-Path $UserBin "bzr-qiling.cmd") "python `"$RepoRoot\scripts\qiling_cli.py`""
     if ($frida) { Set-CmdWrapper (Join-Path $UserBin "bzr-frida.cmd") "`"$frida`"" }
@@ -313,6 +330,16 @@ if ($GhidraInstallDir) {
 }
 
 Update-CodexConfig
+
+$ghidraServiceWrapper = Join-Path $UserBin "bzr-ghidra-mcp-service.cmd"
+if (-not $SkipGhidraService -and (Test-Path $ghidraServiceWrapper)) {
+    Set-UserRunEntry "BzrGhidraMcp" "`"$ghidraServiceWrapper`""
+    Write-Info "Ensuring persistent Ghidra MCP service is running"
+    & $ghidraServiceWrapper | Out-Null
+} elseif ($SkipGhidraService) {
+    Remove-UserRunEntry "BzrGhidraMcp"
+    Write-Info "Skipping Ghidra MCP startup hook"
+}
 
 if (-not (Get-PreferredGhidraInstallDir)) {
     Write-Info "Ghidra install not detected. Set BZR_GHIDRA_INSTALL_DIR or rerun with -GhidraInstallDir once Ghidra is installed."

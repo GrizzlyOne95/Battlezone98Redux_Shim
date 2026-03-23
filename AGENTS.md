@@ -45,3 +45,4 @@ Open `%USERPROFILE%\Documents\Battlezone98Redux_Shim.code-workspace` when a task
 - Read `AGENT_TOOLING.md` at repo start for the current local RE/tooling inventory.
 - Read `AGENT_TOOLING_SETUP.md` when reproducing the toolchain on another PC.
 - Prefer the stable `bzr-*` wrappers from `C:\Users\istuart\bin` over package-specific install paths.
+- The `ghidra` MCP server is expected to come from the persistent localhost service documented in `AGENT_TOOLING.md`, not a fresh per-request Ghidra launch.
