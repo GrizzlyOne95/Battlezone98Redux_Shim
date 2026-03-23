@@ -104,11 +104,27 @@ The current patcher handles that by:
 
 1. detecting the Steam executable name
 2. waiting for the Steam version sites to reach their expected original bytes
-3. patching the main menu and version-notice string operands to point at the
-   OpenShim version tag
+3. limiting Steam version branding to the main-menu text patch so lobby-facing
+   GameVersion metadata stays stock
 4. leaving logger buffering at the CRT default and flushing explicitly
 5. preserving the stock map-filter and sort UI until the clean-room filter port
    is complete
+
+Current Steam multiplayer-safe status as of March 21, 2026:
+
+- The main-menu informational label is `2.2.301 + Open Patch`.
+- The shared Steam version-string patches remain disabled except for the
+  main-menu-only text site, because patching the shared operand changed lobby
+  GameVersion metadata, produced matching lobbies: 0 in BZLogger.txt,
+  hid room/game/player lists, and removed the stock K control in the lobby
+  UI.
+- Steam Lobby BZRNET Integration HOST/CLIENT hooks are disabled by default.
+  Re-enable them for testing with OPENSHIM_ENABLE_LOBBY_BZRNET_INTEGRATION=1.
+- The current active patch list also leaves these multiplayer experiments out
+  until they can be reintroduced safely: Custom Command /help Handler,
+  Joiner Event Hook, Ban Button Hook 1/2, and Ban Button Hook 2/2.
+- The Steam-safe baseline for now is hop-fix/map-refresh fixes on, stock lobby
+  matching behavior, stock lobby controls, and main-menu-only branding.
 
 Steam hook-site validation status as of March 17, 2026:
 
@@ -484,3 +500,4 @@ MIT - see LICENSE file
 - `Piercing` for technical assistance, multiplayer testing, and netcode investigation support.
 - `VTrider` and `Business Lawyer` for technical assistance and collaboration building this DLL patch.
 - `Janne` for the original work learning how to shim and hook DLLs into BZR.
+

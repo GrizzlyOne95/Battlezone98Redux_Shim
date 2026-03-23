@@ -353,11 +353,11 @@ void __declspec(naked) __cdecl Trampoline_MapListFixSupport1()
 // which are GOG-specific stack frame offsets.  On Steam builds the layout
 // differs, so dereferencing them crashed (0xc0000005).
 // We now attempt the capture in a SEH-protected helper; if the offsets are
-// wrong the capture is silently skipped — the hop-fix still works, it just
+// wrong the capture is silently skipped Ã¢â‚¬â€ the hop-fix still works, it just
 // won't know the pre-refresh scroll position for this path.
 // -----------------------------------------------------------------------
 
-// Safe helper called from asm — SEH-protected so we never crash
+// Safe helper called from asm Ã¢â‚¬â€ SEH-protected so we never crash
 static void __cdecl SafeCapture_MapSorting(void* frame_ebp)
 {
     __try
@@ -373,7 +373,7 @@ static void __cdecl SafeCapture_MapSorting(void* frame_ebp)
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
     {
-        // Offsets don't match this build — silently skip
+        // Offsets don't match this build Ã¢â‚¬â€ silently skip
     }
 }
 
@@ -841,31 +841,6 @@ void __declspec(naked) __cdecl Trampoline_BzrnetHost()
         mov  eax, [edx + 0x1C]
         call eax
 
-        cmp  dword ptr [g_BzrnetHostObj], 0
-        je   host_done
-        mov  eax, [g_BzrnetHostObj]
-        mov  ecx, [eax]
-        mov  edx, [ecx + 0x1C]
-        mov  [ebp - 4], edx
-        push offset g_BzrnetLabel2
-        push offset g_BzrnetLabel1
-        mov  eax, [g_BzrnetHostObj]
-        add  eax, 0x28
-        push eax
-        mov  ecx, [g_BzrnetHostObj]
-        call dword ptr [ebp - 4]
-
-        mov  ecx, [g_BzrnetHostObj]
-        mov  edx, [ecx]
-        mov  eax, [edx + 0x1C]
-        mov  [ebp - 8], eax
-        push offset g_BzrnetLabel4
-        push offset g_BzrnetLabel3
-        mov  ecx, [g_BzrnetHostObj]
-        add  ecx, 0x28
-        push ecx
-        mov  ecx, [g_BzrnetHostObj]
-        call dword ptr [ebp - 8]
     host_done:
         jmp  [g_RetAddr_BzrnetHost]
     }
@@ -903,31 +878,6 @@ void __declspec(naked) __cdecl Trampoline_BzrnetClient()
         mov  eax, [edx + 0x1C]
         call eax
 
-        cmp  dword ptr [g_BzrnetClientObj], 0
-        je   client_done
-        mov  eax, [g_BzrnetClientObj]
-        mov  ecx, [eax]
-        mov  edx, [ecx + 0x1C]
-        mov  [ebp - 4], edx
-        push offset g_BzrnetLabel2
-        push offset g_BzrnetLabel1
-        mov  eax, [g_BzrnetClientObj]
-        add  eax, 0x28
-        push eax
-        mov  ecx, [g_BzrnetClientObj]
-        call dword ptr [ebp - 4]
-
-        mov  ecx, [g_BzrnetClientObj]
-        mov  edx, [ecx]
-        mov  eax, [edx + 0x1C]
-        mov  [ebp - 8], eax
-        push offset g_BzrnetLabel4
-        push offset g_BzrnetLabel3
-        mov  ecx, [g_BzrnetClientObj]
-        add  ecx, 0x28
-        push ecx
-        mov  ecx, [g_BzrnetClientObj]
-        call dword ptr [ebp - 8]
     client_done:
         jmp  [g_RetAddr_BzrnetClient]
     }

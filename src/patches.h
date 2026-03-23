@@ -182,11 +182,7 @@ namespace BZROpenShim
             // -- Hop-Fix 3/3 --
             { 0x0, PT::JMP5, {}, "Map List Rewrite for Hop-Fix 3/3", false },
             { 0x0, PT::JMP5, {}, "Map List Fix Support 1/3", false },
-            // -- Version notice / CLI constants --
-            { 0x0, PT::DWORD, {}, "Version Notice 1/2 OpenShim", false },
-            { 0x0, PT::DWORD, {}, "Version Notice 2/2 OpenShim", false },
-            { 0x0, PT::DWORD, {}, "Version Notice 3/3 OpenShim", false },
-            { 0x0, PT::DWORD, {}, "Main Menu GameVersion OpenShim", false },
+
             { 0x0, PT::DWORD, {}, "Main Menu Version Text OpenShim", false },
             // -- Known map-jump fix (conditional -> unconditional branch) --
             { 0x0, PT::BYTE1, { 0xEB }, "Map Jump Fix Branch Override", false },
@@ -212,13 +208,6 @@ namespace BZROpenShim
             // -- Lobby / BZRNET integration --
             { 0x0, PT::JMP5, {}, "Lobby BZRNET Integration HOST", false },
             { 0x0, PT::JMP5, {}, "Lobby BZRNET Integration CLIENT", false },
-            // -- Custom /help + /ban command handler --
-            { 0x0, PT::JMP5, {}, "Custom Command /help Handler", false },
-            // -- Experimental join-time ban enforcement --
-            { 0x0, PT::JMP5, {}, "Joiner Event Hook", false },
-            // -- Ban button hooks --
-            { 0x0, PT::JMP5, {}, "Ban Button Hook 1/2", false },
-            { 0x0, PT::JMP5, {}, "Ban Button Hook 2/2", false },
             // -- Single-player load screen AutoSave button --
             { 0x0, PT::JMP5, {}, "AutoSave Load Button Hook", false },
             // -- Single-player Restart Mission fresh-load repair --

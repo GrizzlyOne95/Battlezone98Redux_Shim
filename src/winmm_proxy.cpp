@@ -11,6 +11,30 @@
 
 HMODULE g_hRealWinmm = nullptr;
 
+namespace
+{
+    void LogHudBridgeCall(const char* functionName, const char* spriteName)
+    {
+        BZROpenShim::LogShimA(
+            BZROpenShim::LogLevel::Info,
+            "hudbridge",
+            "%s sprite=%s",
+            functionName ? functionName : "<null>",
+            spriteName ? spriteName : "<null>");
+    }
+
+    void LogHudBridgeResult(const char* functionName, const char* spriteName, BOOL result)
+    {
+        BZROpenShim::LogShimA(
+            BZROpenShim::LogLevel::Info,
+            "hudbridge",
+            "%s sprite=%s => %s",
+            functionName ? functionName : "<null>",
+            spriteName ? spriteName : "<null>",
+            result ? "true" : "false");
+    }
+}
+
 extern "C" WINMMAPI BOOL WINAPI OpenShimSetUnderAttackAlertMode(int mode)
 {
     return BZROpenShim::SetUnderAttackAlertModeFromBridge(mode) ? TRUE : FALSE;
@@ -21,29 +45,114 @@ extern "C" WINMMAPI BOOL WINAPI OpenShimSetTargetReticlePopupMode(int mode)
     return BZROpenShim::SetTargetReticlePopupModeFromBridge(mode) ? TRUE : FALSE;
 }
 
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetBomberAiRangeEnabled(BOOL enabled)
+{
+    return BZROpenShim::SetBomberAiRangeEnabledFromBridge(enabled != FALSE) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetHowitzerVolleyEnabled(BOOL enabled)
+{
+    return BZROpenShim::SetHowitzerVolleyEnabledFromBridge(enabled != FALSE) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetWeaponMaskCarrierBiasEnabled(BOOL enabled)
+{
+    return BZROpenShim::SetWeaponMaskCarrierBiasEnabledFromBridge(enabled != FALSE) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetAiOdfGameplayTuningEnabled(BOOL enabled)
+{
+    return BZROpenShim::SetAiOdfGameplayTuningEnabledFromBridge(enabled != FALSE) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetTurretAimPitchEnabled(BOOL enabled)
+{
+    return BZROpenShim::SetTurretAimPitchEnabledFromBridge(enabled != FALSE) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetAttackRevealEnabled(BOOL enabled)
+{
+    return BZROpenShim::SetAttackRevealEnabledFromBridge(enabled != FALSE) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimResetMissionHookOverrides()
+{
+    return BZROpenShim::ResetMissionHookOverridesFromBridge() ? TRUE : FALSE;
+}
+
 extern "C" WINMMAPI BOOL WINAPI OpenShimGetHudSpriteRect(LPCSTR name, int* x, int* y, int* w, int* h)
 {
-    return BZROpenShim::GetHudSpriteRectFromBridge(name, x, y, w, h) ? TRUE : FALSE;
+    LogHudBridgeCall("OpenShimGetHudSpriteRect", name);
+    const BOOL result = BZROpenShim::GetHudSpriteRectFromBridge(name, x, y, w, h) ? TRUE : FALSE;
+    if (result)
+    {
+        BZROpenShim::LogShimA(
+            BZROpenShim::LogLevel::Info,
+            "hudbridge",
+            "OpenShimGetHudSpriteRect sprite=%s => true rect=(%d,%d,%d,%d)",
+            name ? name : "<null>",
+            x ? *x : 0,
+            y ? *y : 0,
+            w ? *w : 0,
+            h ? *h : 0);
+    }
+    else
+    {
+        LogHudBridgeResult("OpenShimGetHudSpriteRect", name, result);
+    }
+    return result;
 }
 
 extern "C" WINMMAPI BOOL WINAPI OpenShimSetHudSpriteRect(LPCSTR name, int x, int y, int w, int h)
 {
-    return BZROpenShim::SetHudSpriteRectFromBridge(name, x, y, w, h) ? TRUE : FALSE;
+    BZROpenShim::LogShimA(
+        BZROpenShim::LogLevel::Info,
+        "hudbridge",
+        "OpenShimSetHudSpriteRect sprite=%s rect=(%d,%d,%d,%d)",
+        name ? name : "<null>",
+        x,
+        y,
+        w,
+        h);
+    const BOOL result = BZROpenShim::SetHudSpriteRectFromBridge(name, x, y, w, h) ? TRUE : FALSE;
+    LogHudBridgeResult("OpenShimSetHudSpriteRect", name, result);
+    return result;
 }
 
 extern "C" WINMMAPI BOOL WINAPI OpenShimSetHudSpriteVisible(LPCSTR name, BOOL visible)
 {
-    return BZROpenShim::SetHudSpriteVisibleFromBridge(name, visible != FALSE) ? TRUE : FALSE;
+    BZROpenShim::LogShimA(
+        BZROpenShim::LogLevel::Info,
+        "hudbridge",
+        "OpenShimSetHudSpriteVisible sprite=%s visible=%s",
+        name ? name : "<null>",
+        visible ? "true" : "false");
+    const BOOL result = BZROpenShim::SetHudSpriteVisibleFromBridge(name, visible != FALSE) ? TRUE : FALSE;
+    LogHudBridgeResult("OpenShimSetHudSpriteVisible", name, result);
+    return result;
 }
 
 extern "C" WINMMAPI BOOL WINAPI OpenShimRestoreHudSprite(LPCSTR name)
 {
-    return BZROpenShim::RestoreHudSpriteFromBridge(name) ? TRUE : FALSE;
+    LogHudBridgeCall("OpenShimRestoreHudSprite", name);
+    const BOOL result = BZROpenShim::RestoreHudSpriteFromBridge(name) ? TRUE : FALSE;
+    LogHudBridgeResult("OpenShimRestoreHudSprite", name, result);
+    return result;
 }
 
 extern "C" WINMMAPI BOOL WINAPI OpenShimRestoreAllHudSprites()
 {
-    return BZROpenShim::RestoreAllHudSpritesFromBridge() ? TRUE : FALSE;
+    BZROpenShim::LogShimA(
+        BZROpenShim::LogLevel::Info,
+        "hudbridge",
+        "OpenShimRestoreAllHudSprites");
+    const BOOL result = BZROpenShim::RestoreAllHudSpritesFromBridge() ? TRUE : FALSE;
+    BZROpenShim::LogShimA(
+        BZROpenShim::LogLevel::Info,
+        "hudbridge",
+        "OpenShimRestoreAllHudSprites => %s",
+        result ? "true" : "false");
+    return result;
 }
 
 // Legacy thunk exports that need naked tail-jump forwarders.

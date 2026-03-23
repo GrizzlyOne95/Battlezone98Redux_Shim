@@ -36,7 +36,7 @@
 
 namespace BZROpenShim
 {
-    static const char kOpenShimVersionTag[] = "2.2.301 + OpenShim";
+    static const char kOpenShimVersionTag[] = "2.2.301 + Open Patch";
     static constexpr uint32_t kDefaultMaxSoundChannels = 150;
     static constexpr uint32_t kMaxSupportedSoundChannels = 256;
     static constexpr uint32_t kGASMasterMaxObjectsOffset = 0x10;
@@ -2441,3 +2441,4 @@ namespace BZROpenShim
     }
 
 } // namespace BZROpenShim
+
