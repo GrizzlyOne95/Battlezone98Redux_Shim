@@ -59,7 +59,8 @@ That script installs the free packages it can acquire automatically:
   - `ghidriff`
 
 It also writes stable `bzr-*` wrappers into `%USERPROFILE%\bin`, adds that
-directory to the user `PATH`, and updates `%USERPROFILE%\.codex\config.toml`.
+directory to the user `PATH`, updates `%USERPROFILE%\.codex\config.toml`, and
+registers a persistent local Ghidra MCP service in the user startup run key.
 
 ## Paths That Commonly Vary By PC
 
@@ -117,6 +118,7 @@ Install Ghidra separately, then either:
 Once installed, agents should prefer these stable wrappers from `%USERPROFILE%\bin`:
 
 - `bzr-ghidra-mcp.cmd`
+- `bzr-ghidra-mcp-service.cmd`
 - `bzr-redux-debug.cmd`
 - `bzr-frida.cmd`
 - `bzr-frida-ps.cmd`
@@ -137,6 +139,21 @@ Once installed, agents should prefer these stable wrappers from `%USERPROFILE%\b
 
 The detailed local usage guide for agents lives in `AGENT_TOOLING.md` in the
 repo root after setup.
+
+## Ghidra MCP Startup Model
+
+The installer now configures Ghidra MCP as a persistent local HTTP endpoint
+instead of a fresh stdio spawn per Codex session.
+
+- Codex config entry:
+  - `http://127.0.0.1:8765/mcp`
+- Startup wrapper:
+  - `bzr-ghidra-mcp-service.cmd`
+- User startup run-key entry:
+  - `BzrGhidraMcp`
+
+This avoids Codex startup handshakes timing out while Ghidra initializes and
+keeps the Windows project-reopen patch in one repo-owned wrapper.
 
 ## Tooling Categories
 
@@ -187,6 +204,7 @@ The installer is intended to be re-runnable.
 - Python packages are refreshed idempotently
 - wrapper files are regenerated
 - Codex config entries are replaced inside a marked block
+- the Ghidra MCP startup wrapper and run-key entry are refreshed
 
 ## Recommended Validation
 
@@ -194,6 +212,7 @@ After install, open a fresh shell and run:
 
 ```powershell
 bzr-ghidra-mcp.cmd --help
+bzr-ghidra-mcp-service.cmd
 bzr-redux-debug.cmd doctor
 bzr-frida-ps.cmd --help
 bzr-angr.cmd --help
@@ -207,4 +226,6 @@ Get-Command bzr-procmon.cmd
 ```
 
 If `Ghidra` is installed and `BZR_GAME_EXE` points at a valid executable, the
-MCP wrapper should be ready for Codex and CLI use immediately.
+MCP service should be reachable at `http://127.0.0.1:8765/mcp` and ready for
+Codex and CLI use immediately. Restart any already-running Codex session if it
+still has the older stdio-based `ghidra` MCP entry cached.

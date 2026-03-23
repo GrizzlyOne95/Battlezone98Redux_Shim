@@ -24,7 +24,8 @@ The clean-room shim now supports both:
   bias fix, configurable turret aim-pitch multiplier hooks for `TurretCraft`
   and `TurretTank` so they are no longer hard-limited to the stock `0.5`
   radians behavior, target-reticle recent-hit popup filtering, under-attack
-  alert throttling/toggling, engine-flame color routing, and sound-channel cap
+  alert throttling/toggling, engine-flame color routing, AI constructor
+  death cleanup for stale scripted build claims, and sound-channel cap
   overrides for large battles.
 - Single-player shell/load support includes the injected AutoSave load button
   and the restart-mission fresh-load repair so restart paths behave more like a
@@ -225,6 +226,48 @@ Current limitation:
 
 - This fix has been build-validated but not yet gameplay-validated in a live
   Redux session.
+
+## Constructor Remote-Build Cleanup Fix
+
+OpenShim now patches the Redux `AI_UnitRemove` constructor-death branch so an
+AI constructor killed mid-facility-build does not leave the old construction
+claim alive for a replacement rig to satisfy from far away.
+
+- The hook is active by default on the shared settled GOG/Steam
+  `AI_UnitRemove` entry at `0x0068FC60`.
+- On the affected `cc_construct_type != 0 && cc_constructing != 0` path, the
+  shim now applies the missing cleanup subset from `AI_BuildingStalled`:
+  `AIBuild_ConstructionEnd`, `AIBuild_ReservedAreaRemove`,
+  `AI_SpentCreditRefund`, and clearing the constructor `cc_*` fields.
+- OpenShim intentionally does not re-add the dead constructor to the
+  unassigned-constructor pool, because that part of `AI_BuildingStalled` is
+  correct for a live stalled rig, not a removed one.
+- The stock stop-order helper is still called for parity, but current Redux
+  resolves that site to a `RET` stub at `0x00416280`, so the effective fix is
+  the construction-claim/accounting/state cleanup.
+- Runtime logging uses the `[AICONSTRUCT]` tag in `winmm_shim.log`.
+- The always-on success line is the `Applied constructor death cleanup
+  action=death_cleanup ...` record, which captures the pre-clear `cc_*` values
+  and the helper entry points used for that cleanup.
+- Trace mode adds budgeted structured lines with `action=` and `reason=`.
+  `action=death_cleanup reason=applied` confirms the hook took the fix path,
+  while `action=fallback` shows why a specific `AI_UnitRemove` call stayed on
+  the stock path instead, such as `team_not_ai`, `not_constructor`,
+  `construct_type_zero`, or `constructing_zero`.
+
+Environment controls:
+
+- `OPENSHIM_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX=1` disables the hook.
+- `OPENSHIM_TRACE_CONSTRUCTOR_REMOTE_BUILD=1` enables additional trace lines.
+- `OPENSHIM_TRACE_CONSTRUCTOR_BUILD_CLEANUP=1` is accepted as an alias for the
+  trace toggle.
+- `OPENSHIM_TRACE_CONSTRUCTOR_REMOTE_BUILD_BUDGET=<n>` adjusts the trace budget
+  from the default `32`.
+
+Current limitation:
+
+- This fix has been build-validated in OpenShim, but the exact gameplay repro
+  still needs a fresh live Redux validation pass.
 
 ## Audio Channel Override
 
