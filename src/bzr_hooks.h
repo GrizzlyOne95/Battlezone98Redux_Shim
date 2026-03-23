@@ -37,6 +37,13 @@ namespace BZROpenShim
     void __cdecl HandleUnderAttackAlert(float currentTime);
     void PrimeUnderAttackAlertConfig();
     bool SetUnderAttackAlertModeFromBridge(int mode);
+    bool SetBomberAiRangeEnabledFromBridge(bool enabled);
+    bool SetHowitzerVolleyEnabledFromBridge(bool enabled);
+    bool SetWeaponMaskCarrierBiasEnabledFromBridge(bool enabled);
+    bool SetAiOdfGameplayTuningEnabledFromBridge(bool enabled);
+    bool SetTurretAimPitchEnabledFromBridge(bool enabled);
+    bool SetAttackRevealEnabledFromBridge(bool enabled);
+    bool ResetMissionHookOverridesFromBridge();
     float __fastcall TargetReticlePopupRecentHitGetterHook(void* objectPtr, void* edx);
     void __cdecl RevealProcessOwnerPerceivedTeamOnAttackStateEntry(void* processPtr);
     void PrimeTargetReticlePopupConfig();
