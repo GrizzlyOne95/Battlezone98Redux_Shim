@@ -2,6 +2,7 @@
 #include "game_state.h"
 #include "patches.h"
 #include "patcher.h"
+#include "shim_log.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -19,6 +20,7 @@
 #include <fstream>
 #include <new>
 #include <string>
+#include <unordered_set>
 #include <unordered_map>
 #include <vector>
 
@@ -52,7 +54,8 @@ namespace BZROpenShim
     uint32_t g_BanFlag = 0;
     float g_BanX = 0.0f;
     float g_BanY = 0.0f;
-    float g_TurretAimPitchMultiplier = 0.95f;
+    float g_TurretAimPitchMultiplier = 0.5f;
+    float g_TurretAimPitchMultiplierEnhanced = 0.95f;
 
     uint8_t g_MapFilterFlag11 = 0;
     uint8_t g_MapFilterFlag12 = 0;
@@ -199,6 +202,7 @@ namespace BZROpenShim
     static FnHudSpriteLookup g_BzrFn_HudSpriteLookup = nullptr;
     static FnGetTeamNum g_BzrFn_GetTeamNum = nullptr;
     static FnExuGetTeamEngineFlameColor g_ExuFn_GetTeamEngineFlameColor = nullptr;
+    static HMODULE g_ExuTeamEngineFlameColorModule = nullptr;
     static FnChunkEffectSimulate g_BzrFn_ChunkEffectSimulate = nullptr;
     static FnGetPlayerHandle g_BzrFn_GetPlayerHandle = nullptr;
     static FnGameObjectGetObjByHandle g_BzrFn_GameObjectGetObjByHandle = nullptr;
@@ -271,11 +275,12 @@ namespace BZROpenShim
         constexpr uintptr_t kHudSpriteNameCountAddr = 0x00920F00;
         constexpr uintptr_t kHudSpriteNameTableAddr = 0x00920F08;
         constexpr size_t kHudSpriteNameEntrySize = 0x20;
-        constexpr size_t kHudSpriteRectEntrySize = 0x20;
+        constexpr size_t kHudSpriteRectEntrySize = 0x30;
         constexpr size_t kHudSpriteRectXYWHOffset = 0x08;
         constexpr size_t kHudSpriteRectScanAlignment = 0x08;
         constexpr uint32_t kHudSpriteMaxReasonableCount = 4096;
-        constexpr ULONGLONG kHudSpriteRectDiscoveryRetryMs = 1000;
+        constexpr ULONGLONG kHudSpriteRectDiscoveryRetryMs = 10000;
+        constexpr ULONGLONG kHudSpriteFallbackDiscoveryRetryMs = 15000;
         constexpr size_t kGameObjectClassOffset = 0xF8;
         constexpr size_t kObjectClassOdfOffset = 0x20;
         constexpr size_t kObjectClassOdfLen = 16;
@@ -375,19 +380,20 @@ namespace BZROpenShim
             float v0 = 0.0f;
             float u1 = 0.0f;
             float v1 = 0.0f;
+            uint8_t extra[0x10] = {};
         };
 
         struct HudSpriteKnownSample
         {
             const char* name = nullptr;
-            int16_t x = 0;
-            int16_t y = 0;
-            int16_t w = 0;
-            int16_t h = 0;
+            float u0 = 0.0f;
+            float v0 = 0.0f;
+            float u1 = 0.0f;
+            float v1 = 0.0f;
             int id = 0;
         };
 
-        static_assert(sizeof(HudSpriteRectRecord) == 0x20, "Unexpected HUD sprite rect record size");
+        static_assert(sizeof(HudSpriteRectRecord) == 0x30, "Unexpected HUD sprite rect record size");
 
         static InlineDetour32 g_PersonSimulateDetour = {};
         static bool g_JumpSnipeProbeInstallAttempted = false;
@@ -398,6 +404,11 @@ namespace BZROpenShim
         static ULONGLONG g_HudSpriteRectTableDiscoveryLastTick = 0;
         static std::unordered_map<int, HudSpriteRectRecord> g_HudSpriteOriginalEntries;
         static std::unordered_map<int, HudSpriteRectRecord> g_HudSpriteHiddenEntries;
+        static std::unordered_map<uintptr_t, HudSpriteRectRecord> g_HudSpriteOriginalEntriesByAddress;
+        static std::unordered_set<uintptr_t> g_HudSpriteHiddenAddresses;
+        static std::vector<uintptr_t> g_HudSpriteCachedPanelAddresses;
+        static bool g_HudSpriteFallbackDiscoveryAttempted = false;
+        static ULONGLONG g_HudSpriteFallbackDiscoveryLastTick = 0;
 
         enum class ProducerBuildMenuKind
         {
@@ -747,6 +758,18 @@ namespace BZROpenShim
         static TargetReticlePopupMode g_TargetReticlePopupMode = TargetReticlePopupMode::Default;
         static bool g_TargetReticlePopupSteamNeutralAllowed = false;
         static bool g_TargetReticlePopupSteamNeutralWarned = false;
+        static constexpr bool kBomberAiRangeEnabledDefault = false;
+        static constexpr bool kHowitzerVolleyEnabledDefault = false;
+        static constexpr bool kWeaponMaskCarrierBiasEnabledDefault = false;
+        static constexpr bool kAiOdfGameplayTuningEnabledDefault = false;
+        static constexpr bool kTurretAimPitchEnabledDefault = false;
+        static constexpr bool kAttackRevealEnabledDefault = false;
+        static bool g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
+        static bool g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
+        static bool g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
+        static bool g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
+        static bool g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
+        static bool g_AttackRevealEnabled = kAttackRevealEnabledDefault;
         static constexpr InputBindingRowSeed kInputBindingFirstPassSeeds[] = {
             { "center_player", nullptr, "Center On Player" },
             { "center_recycler", nullptr, "Center On Recycler" },
@@ -1063,17 +1086,47 @@ namespace BZROpenShim
                 __try
                 {
                     const int id = g_BzrFn_HudSpriteLookup(name);
+                    LogShimA(
+                        LogLevel::Info,
+                        "hudlookup",
+                        "lookupFn=0x%p sprite=%s => id=%d",
+                        reinterpret_cast<void*>(g_BzrFn_HudSpriteLookup),
+                        name,
+                        id);
                     if (id > 0)
                         return id;
                 }
                 __except (EXCEPTION_EXECUTE_HANDLER)
                 {
+                    LogShimA(
+                        LogLevel::Warn,
+                        "hudlookup",
+                        "lookupFn=0x%p sprite=%s raised exception",
+                        reinterpret_cast<void*>(g_BzrFn_HudSpriteLookup),
+                        name);
                 }
             }
 
             uint32_t count = 0;
             if (!TryReadHudSpriteNameCount(count))
+            {
+                LogShimA(
+                    LogLevel::Warn,
+                    "hudlookup",
+                    "fallback table unavailable for sprite=%s countAddr=0x%08X tableAddr=0x%08X",
+                    name,
+                    static_cast<unsigned>(kHudSpriteNameCountAddr),
+                    static_cast<unsigned>(kHudSpriteNameTableAddr));
                 return 0;
+            }
+
+            LogShimA(
+                LogLevel::Info,
+                "hudlookup",
+                "fallback table search sprite=%s count=%u tableAddr=0x%08X",
+                name,
+                static_cast<unsigned>(count),
+                static_cast<unsigned>(kHudSpriteNameTableAddr));
 
             __try
             {
@@ -1085,25 +1138,48 @@ namespace BZROpenShim
                     std::memcpy(entryName, entry, kHudSpriteNameEntrySize);
                     entryName[kHudSpriteNameEntrySize] = '\0';
                     if (_stricmp(entryName, name) == 0)
+                    {
+                        LogShimA(
+                            LogLevel::Info,
+                            "hudlookup",
+                            "fallback table sprite=%s => id=%d",
+                            name,
+                            index);
                         return index;
+                    }
                 }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
+                LogShimA(
+                    LogLevel::Warn,
+                    "hudlookup",
+                    "fallback table search sprite=%s raised exception",
+                    name);
             }
 
+            LogShimA(
+                LogLevel::Warn,
+                "hudlookup",
+                "sprite=%s not found by any lookup path",
+                name);
             return 0;
+        }
+
+        static bool HudSpriteUvNearlyEqual(float a, float b)
+        {
+            return std::fabs(a - b) <= 0.0005f;
         }
 
         static bool ResolveHudSpriteKnownSamples(std::array<HudSpriteKnownSample, 6>& outSamples)
         {
             outSamples = {{
-                {"scrap_panel", 660, 960, 180, 64, 0},
-                {"pilot_panel", 844, 960, 180, 64, 0},
-                {"sscrap_panel", 660, 960, 180, 64, 0},
-                {"spilot_panel", 844, 960, 180, 64, 0},
-                {"fscrap_panel", 660, 960, 180, 64, 0},
-                {"fpilot_panel", 844, 960, 180, 64, 0},
+                {"scrap_panel", 660.0f / 1024.0f, 960.0f / 1024.0f, 840.0f / 1024.0f, 1024.0f / 1024.0f, 0},
+                {"pilot_panel", 844.0f / 1024.0f, 960.0f / 1024.0f, 1024.0f / 1024.0f, 1024.0f / 1024.0f, 0},
+                {"sscrap_panel", 660.0f / 1024.0f, 960.0f / 1024.0f, 840.0f / 1024.0f, 1024.0f / 1024.0f, 0},
+                {"spilot_panel", 844.0f / 1024.0f, 960.0f / 1024.0f, 1024.0f / 1024.0f, 1024.0f / 1024.0f, 0},
+                {"fscrap_panel", 660.0f / 1024.0f, 960.0f / 1024.0f, 840.0f / 1024.0f, 1024.0f / 1024.0f, 0},
+                {"fpilot_panel", 844.0f / 1024.0f, 960.0f / 1024.0f, 1024.0f / 1024.0f, 1024.0f / 1024.0f, 0},
             }};
 
             for (auto& sample : outSamples)
@@ -1118,10 +1194,10 @@ namespace BZROpenShim
 
         static bool HudSpriteRecordMatches(const HudSpriteRectRecord& record, const HudSpriteKnownSample& sample)
         {
-            return record.x == sample.x &&
-                   record.y == sample.y &&
-                   record.w == sample.w &&
-                   record.h == sample.h;
+            return HudSpriteUvNearlyEqual(record.u0, sample.u0) &&
+                   HudSpriteUvNearlyEqual(record.v0, sample.v0) &&
+                   HudSpriteUvNearlyEqual(record.u1, sample.u1) &&
+                   HudSpriteUvNearlyEqual(record.v1, sample.v1);
         }
 
         static bool ValidateHudSpriteRectTableBase(
@@ -1149,6 +1225,288 @@ namespace BZROpenShim
             return false;
         }
 
+        static bool HudSpriteUvBlockMatches(const uint8_t* address, const HudSpriteKnownSample& sample)
+        {
+            if (!address)
+                return false;
+
+            __try
+            {
+                const float* uv = reinterpret_cast<const float*>(address);
+                return HudSpriteUvNearlyEqual(uv[0], sample.u0) &&
+                       HudSpriteUvNearlyEqual(uv[1], sample.v0) &&
+                       HudSpriteUvNearlyEqual(uv[2], sample.u1) &&
+                       HudSpriteUvNearlyEqual(uv[3], sample.v1);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+
+            return false;
+        }
+
+        static bool IsLikelyHudSpriteRectRegion(const MEMORY_BASIC_INFORMATION& mbi);
+
+        static bool IsStockScrapPilotPanelName(const char* name)
+        {
+            if (!name || !name[0])
+                return false;
+
+            return _stricmp(name, "scrap_panel") == 0 ||
+                   _stricmp(name, "pilot_panel") == 0 ||
+                   _stricmp(name, "sscrap_panel") == 0 ||
+                   _stricmp(name, "spilot_panel") == 0 ||
+                   _stricmp(name, "fscrap_panel") == 0 ||
+                   _stricmp(name, "fpilot_panel") == 0;
+        }
+
+        static bool HudSpriteRecordMatchesStockScrapOrPilotUv(const HudSpriteRectRecord& record)
+        {
+            const HudSpriteKnownSample scrapSample = {
+                "scrap_panel",
+                660.0f / 1024.0f,
+                960.0f / 1024.0f,
+                840.0f / 1024.0f,
+                1024.0f / 1024.0f,
+                0
+            };
+            const HudSpriteKnownSample pilotSample = {
+                "pilot_panel",
+                844.0f / 1024.0f,
+                960.0f / 1024.0f,
+                1024.0f / 1024.0f,
+                1024.0f / 1024.0f,
+                0
+            };
+
+            return HudSpriteRecordMatches(record, scrapSample) ||
+                   HudSpriteRecordMatches(record, pilotSample);
+        }
+
+        static bool HudSpriteRecordLooksLikeLivePanelRecord(const HudSpriteRectRecord& record)
+        {
+            return record.w > 0 &&
+                   record.h > 0 &&
+                   record.w <= 4096 &&
+                   record.h <= 4096 &&
+                   record.x >= -64 &&
+                   record.y >= -64 &&
+                   record.x <= 8192 &&
+                   record.y <= 8192;
+        }
+
+        static bool DiscoverStockScrapPilotPanelRecordAddresses(std::vector<uintptr_t>& outAddresses)
+        {
+            outAddresses.clear();
+            if (!g_HudSpriteCachedPanelAddresses.empty())
+            {
+                outAddresses = g_HudSpriteCachedPanelAddresses;
+                return true;
+            }
+
+            const ULONGLONG now = GetTickCount64();
+            if (g_HudSpriteFallbackDiscoveryAttempted &&
+                now - g_HudSpriteFallbackDiscoveryLastTick < kHudSpriteFallbackDiscoveryRetryMs)
+            {
+                return false;
+            }
+
+            g_HudSpriteFallbackDiscoveryAttempted = true;
+            g_HudSpriteFallbackDiscoveryLastTick = now;
+
+            SYSTEM_INFO systemInfo = {};
+            GetSystemInfo(&systemInfo);
+
+            auto* cursor = static_cast<uint8_t*>(systemInfo.lpMinimumApplicationAddress);
+            auto* maxAddress = static_cast<uint8_t*>(systemInfo.lpMaximumApplicationAddress);
+            MEMORY_BASIC_INFORMATION mbi = {};
+            while (cursor < maxAddress &&
+                   VirtualQuery(cursor, &mbi, sizeof(mbi)) == sizeof(mbi))
+            {
+                auto* regionBase = static_cast<uint8_t*>(mbi.BaseAddress);
+                auto* regionEnd = regionBase + mbi.RegionSize;
+                cursor = regionEnd;
+
+                if (!IsLikelyHudSpriteRectRegion(mbi))
+                    continue;
+
+                if (mbi.RegionSize < sizeof(HudSpriteRectRecord))
+                    continue;
+
+                for (size_t offset = 0; offset + sizeof(HudSpriteRectRecord) <= mbi.RegionSize; offset += sizeof(float))
+                {
+                    const auto* candidate = reinterpret_cast<const HudSpriteRectRecord*>(regionBase + offset);
+                    HudSpriteRectRecord record = {};
+                    __try
+                    {
+                        record = *candidate;
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        continue;
+                    }
+
+                    if (!HudSpriteRecordLooksLikeLivePanelRecord(record))
+                        continue;
+
+                    if (!HudSpriteRecordMatchesStockScrapOrPilotUv(record))
+                        continue;
+
+                    const uintptr_t address = reinterpret_cast<uintptr_t>(candidate);
+                    if (g_HudSpriteOriginalEntriesByAddress.find(address) == g_HudSpriteOriginalEntriesByAddress.end())
+                        g_HudSpriteOriginalEntriesByAddress.emplace(address, record);
+                    outAddresses.push_back(address);
+                }
+            }
+
+            std::sort(outAddresses.begin(), outAddresses.end());
+            outAddresses.erase(std::unique(outAddresses.begin(), outAddresses.end()), outAddresses.end());
+            if (!outAddresses.empty())
+                g_HudSpriteCachedPanelAddresses = outAddresses;
+            return !outAddresses.empty();
+        }
+
+        static bool WriteHudSpriteRectRecordAtAddress(uintptr_t address, const HudSpriteRectRecord& record)
+        {
+            if (address == 0)
+                return false;
+
+            auto* entry = reinterpret_cast<void*>(address);
+            DWORD oldProtect = 0;
+            if (!VirtualProtect(entry, sizeof(record), PAGE_EXECUTE_READWRITE, &oldProtect))
+                return false;
+
+            *reinterpret_cast<HudSpriteRectRecord*>(entry) = record;
+            FlushInstructionCache(GetCurrentProcess(), entry, sizeof(record));
+
+            DWORD restoreProtect = 0;
+            VirtualProtect(entry, sizeof(record), oldProtect, &restoreProtect);
+            return true;
+        }
+
+        static bool SetStockScrapPilotPanelsVisibleByUv(bool visible)
+        {
+            if (!visible)
+            {
+                if (!g_HudSpriteHiddenAddresses.empty())
+                    return true;
+
+                std::vector<uintptr_t> addresses;
+                if (!DiscoverStockScrapPilotPanelRecordAddresses(addresses))
+                {
+                    LogShimA(LogLevel::Warn, "hudfallback", "no stock scrap/pilot panel records found");
+                    return false;
+                }
+
+                bool anySucceeded = false;
+                for (uintptr_t address : addresses)
+                {
+                    auto originalIt = g_HudSpriteOriginalEntriesByAddress.find(address);
+                    if (originalIt == g_HudSpriteOriginalEntriesByAddress.end())
+                        continue;
+
+                    HudSpriteRectRecord hidden = originalIt->second;
+                    hidden.w = 0;
+                    hidden.h = 0;
+                    if (WriteHudSpriteRectRecordAtAddress(address, hidden))
+                    {
+                        g_HudSpriteHiddenAddresses.insert(address);
+                        anySucceeded = true;
+                    }
+                }
+
+                LogShimA(
+                    anySucceeded ? LogLevel::Info : LogLevel::Warn,
+                    "hudfallback",
+                    "hide stock scrap/pilot panels matches=%zu hidden=%zu",
+                    addresses.size(),
+                    g_HudSpriteHiddenAddresses.size());
+                return anySucceeded;
+            }
+
+            if (g_HudSpriteHiddenAddresses.empty())
+                return true;
+
+            bool anySucceeded = false;
+            for (const auto& entry : g_HudSpriteOriginalEntriesByAddress)
+            {
+                if (g_HudSpriteHiddenAddresses.find(entry.first) == g_HudSpriteHiddenAddresses.end())
+                    continue;
+
+                if (WriteHudSpriteRectRecordAtAddress(entry.first, entry.second))
+                    anySucceeded = true;
+            }
+
+            if (anySucceeded)
+                g_HudSpriteHiddenAddresses.clear();
+            LogShimA(
+                anySucceeded ? LogLevel::Info : LogLevel::Warn,
+                "hudfallback",
+                "restore stock scrap/pilot panels restored=%zu",
+                anySucceeded ? g_HudSpriteOriginalEntriesByAddress.size() : 0u);
+            return anySucceeded;
+        }
+
+        static void LogHudSpriteValidationSnapshot(
+            const char* source,
+            uintptr_t candidateBaseAddr,
+            const std::array<HudSpriteKnownSample, 6>& samples)
+        {
+            static long s_budget = 6;
+            if (InterlockedDecrement(&s_budget) < 0)
+                return;
+
+            char line[1024] = {};
+            int written = _snprintf_s(
+                line,
+                _countof(line),
+                _TRUNCATE,
+                "%s base=0x%08X",
+                source ? source : "candidate",
+                static_cast<unsigned>(candidateBaseAddr));
+
+            auto* base = reinterpret_cast<const HudSpriteRectRecord*>(candidateBaseAddr);
+            for (const auto& sample : samples)
+            {
+                HudSpriteRectRecord record = {};
+                bool readOk = false;
+                __try
+                {
+                    record = base[sample.id];
+                    readOk = true;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                }
+
+                if (!readOk)
+                {
+                    written += _snprintf_s(
+                        line + written,
+                        _countof(line) - written,
+                        _TRUNCATE,
+                        " | %s#%d=<fault>",
+                        sample.name ? sample.name : "?",
+                        sample.id);
+                    continue;
+                }
+
+                written += _snprintf_s(
+                    line + written,
+                    _countof(line) - written,
+                    _TRUNCATE,
+                    " | %s#%d=(%.3f,%.3f,%.3f,%.3f)",
+                    sample.name ? sample.name : "?",
+                    sample.id,
+                    static_cast<double>(record.u0),
+                    static_cast<double>(record.v0),
+                    static_cast<double>(record.u1),
+                    static_cast<double>(record.v1));
+            }
+
+            LogShimA(LogLevel::Info, "huddiscover", "%s", line);
+        }
+
         static bool IsLikelyHudSpriteRectRegion(const MEMORY_BASIC_INFORMATION& mbi)
         {
             if (mbi.State != MEM_COMMIT || !IsReadableDataProtect(mbi.Protect))
@@ -1160,6 +1518,7 @@ namespace BZROpenShim
             {
             case MEM_PRIVATE:
             case MEM_MAPPED:
+            case MEM_IMAGE:
                 return true;
             default:
                 return false;
@@ -1195,6 +1554,10 @@ namespace BZROpenShim
             const size_t requiredSpan =
                 (static_cast<size_t>(maxSpriteId) * kHudSpriteRectEntrySize) + sizeof(HudSpriteRectRecord);
             const auto& first = samples.front();
+            size_t regionsScanned = 0;
+            size_t directRecordHits = 0;
+            size_t uvBlockHits = 0;
+            size_t validationFailures = 0;
 
             SYSTEM_INFO systemInfo = {};
             GetSystemInfo(&systemInfo);
@@ -1215,6 +1578,8 @@ namespace BZROpenShim
                 if (mbi.RegionSize < requiredSpan)
                     continue;
 
+                ++regionsScanned;
+
                 const uintptr_t regionAddress = reinterpret_cast<uintptr_t>(regionBase);
                 size_t candidateOffset = 0;
                 const size_t misalignment = regionAddress % kHudSpriteRectScanAlignment;
@@ -1231,6 +1596,7 @@ namespace BZROpenShim
                         const HudSpriteRectRecord& record = candidateBase[first.id];
                         if (!HudSpriteRecordMatches(record, first))
                             continue;
+                        ++directRecordHits;
                     }
                     __except (EXCEPTION_EXECUTE_HANDLER)
                     {
@@ -1238,7 +1604,14 @@ namespace BZROpenShim
                     }
 
                     if (!ValidateHudSpriteRectTableBase(candidateBase, samples))
+                    {
+                        ++validationFailures;
+                        LogHudSpriteValidationSnapshot(
+                            "direct-fail",
+                            reinterpret_cast<uintptr_t>(candidateBase),
+                            samples);
                         continue;
+                    }
 
                     g_HudSpriteRectTableBase = candidateBase;
                     g_HudSpriteOriginalEntries.clear();
@@ -1253,8 +1626,55 @@ namespace BZROpenShim
                         samples[5].id);
                     return true;
                 }
+
+                const size_t uvScanSpan = sizeof(float) * 4;
+                for (size_t uvOffset = 0; uvOffset + uvScanSpan <= mbi.RegionSize; uvOffset += sizeof(float))
+                {
+                    const uint8_t* candidateUv = regionBase + uvOffset;
+                    if (!HudSpriteUvBlockMatches(candidateUv, first))
+                        continue;
+                    ++uvBlockHits;
+
+                    const uintptr_t candidateBaseAddr =
+                        reinterpret_cast<uintptr_t>(candidateUv) -
+                        (static_cast<uintptr_t>(first.id) * kHudSpriteRectEntrySize) -
+                        offsetof(HudSpriteRectRecord, u0);
+                    auto* candidateBase = reinterpret_cast<HudSpriteRectRecord*>(candidateBaseAddr);
+                    if (!ValidateHudSpriteRectTableBase(candidateBase, samples))
+                    {
+                        ++validationFailures;
+                        LogHudSpriteValidationSnapshot(
+                            "uv-fail",
+                            candidateBaseAddr,
+                            samples);
+                        continue;
+                    }
+
+                    g_HudSpriteRectTableBase = candidateBase;
+                    g_HudSpriteOriginalEntries.clear();
+                    g_HudSpriteHiddenEntries.clear();
+                    Log(L"[HUD] Sprite rect table discovered via UV scan base=0x%08X scrap=%d pilot=%d sscrap=%d spilot=%d fscrap=%d fpilot=%d\n",
+                        static_cast<uint32_t>(candidateBaseAddr),
+                        samples[0].id,
+                        samples[1].id,
+                        samples[2].id,
+                        samples[3].id,
+                        samples[4].id,
+                        samples[5].id);
+                    return true;
+                }
             }
 
+            LogShimA(
+                LogLevel::Warn,
+                "huddiscover",
+                "failed regions=%zu directHits=%zu uvHits=%zu validationFailures=%zu firstId=%d requiredSpan=0x%zX",
+                regionsScanned,
+                directRecordHits,
+                uvBlockHits,
+                validationFailures,
+                first.id,
+                requiredSpan);
             Log(L"[HUD] Failed discovering sprite rect table in live process memory\n");
             return false;
         }
@@ -4769,14 +5189,17 @@ namespace BZROpenShim
             if (!TryGetAiTuningForObject(craft, tuning))
                 return;
 
+            const bool applyRangeOverride =
+                g_AiOdfGameplayTuningEnabled ||
+                (tuning.bomberAiRole && g_BomberAiRangeEnabled);
             float minRange = 0.0f;
             bool hasMinRange = false;
-            if (tuning.hasEngageRangeAI)
+            if (applyRangeOverride && tuning.hasEngageRangeAI)
             {
                 minRange = (std::max)(minRange, tuning.engageRangeAI);
                 hasMinRange = true;
             }
-            if (tuning.hasWeaponRangeMinAI)
+            if (applyRangeOverride && tuning.hasWeaponRangeMinAI)
             {
                 minRange = (std::max)(minRange, tuning.weaponRangeMinAI);
                 hasMinRange = true;
@@ -4785,8 +5208,12 @@ namespace BZROpenShim
             if (hasMinRange && std::isfinite(*range) && *range < minRange)
                 *range = minRange;
 
-            if (time && (!std::isfinite(*time) || *time <= 0.0f))
+            if (applyRangeOverride &&
+                time &&
+                (!std::isfinite(*time) || *time <= 0.0f))
+            {
                 *time = 1.0f;
+            }
 
             if (tuning.bomberAiRole &&
                 (EnvFlagEnabled("OPENSHIM_TRACE_BOMBER_RANGE") ||
@@ -4818,6 +5245,9 @@ namespace BZROpenShim
 
         static void ApplyRetargetPeriodAfterDoSubTask(void* processPtr)
         {
+            if (!g_AiOdfGameplayTuningEnabled)
+                return;
+
             if (!processPtr)
                 return;
 
@@ -5083,15 +5513,14 @@ namespace BZROpenShim
 
         static FnExuGetTeamEngineFlameColor ResolveExuTeamEngineFlameColor()
         {
-            if (g_ExuFn_GetTeamEngineFlameColor)
-                return g_ExuFn_GetTeamEngineFlameColor;
-
             HMODULE exuModule = GetModuleHandleA("exu.dll");
             if (!exuModule)
                 exuModule = GetModuleHandleA("ExtraUtilities.dll");
 
             if (!exuModule)
             {
+                g_ExuFn_GetTeamEngineFlameColor = nullptr;
+                g_ExuTeamEngineFlameColorModule = nullptr;
                 if (!g_LoggedExuEngineFlameBridgeMissing)
                 {
                     Log(L"[FLAME] EXU module not loaded; team engine flame colors default to stock blue\n");
@@ -5100,10 +5529,15 @@ namespace BZROpenShim
                 return nullptr;
             }
 
+            if (g_ExuFn_GetTeamEngineFlameColor && g_ExuTeamEngineFlameColorModule == exuModule)
+                return g_ExuFn_GetTeamEngineFlameColor;
+
             auto* proc = reinterpret_cast<FnExuGetTeamEngineFlameColor>(
                 GetProcAddress(exuModule, "EXU_GetTeamEngineFlameColor"));
             if (!proc)
             {
+                g_ExuFn_GetTeamEngineFlameColor = nullptr;
+                g_ExuTeamEngineFlameColorModule = nullptr;
                 if (!g_LoggedExuEngineFlameBridgeMissing)
                 {
                     Log(L"[FLAME] EXU_GetTeamEngineFlameColor export missing; team engine flame colors disabled\n");
@@ -5113,6 +5547,8 @@ namespace BZROpenShim
             }
 
             g_ExuFn_GetTeamEngineFlameColor = proc;
+            g_ExuTeamEngineFlameColorModule = exuModule;
+            g_LoggedExuEngineFlameBridgeMissing = false;
             if (!g_LoggedExuEngineFlameBridge)
             {
                 Log(L"[FLAME] Connected EXU engine flame color bridge from module=0x%p\n", exuModule);
@@ -5130,7 +5566,22 @@ namespace BZROpenShim
             if (!exuGetColor)
                 return kEngineFlameColorDefault;
 
-            const int color = exuGetColor(team);
+            int color = kEngineFlameColorDefault;
+            __try
+            {
+                color = exuGetColor(team);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                g_ExuFn_GetTeamEngineFlameColor = nullptr;
+                g_ExuTeamEngineFlameColorModule = nullptr;
+                if (!g_LoggedExuEngineFlameBridgeMissing)
+                {
+                    Log(L"[FLAME] EXU engine flame color bridge call faulted; disabling cached bridge and falling back to stock blue\n");
+                    g_LoggedExuEngineFlameBridgeMissing = true;
+                }
+                return kEngineFlameColorDefault;
+            }
             if (color < kEngineFlameColorDefault || color > kEngineFlameColorGreen)
                 return kEngineFlameColorDefault;
             return color;
@@ -7171,6 +7622,24 @@ namespace BZROpenShim
         g_RetargetPeriodHooksInstalled = false;
         g_BzrFn_OffensiveProcessDoSubTask = nullptr;
         g_BzrFn_GunTowerProcessDoSubTask = nullptr;
+        g_HudSpriteRectTableBase = nullptr;
+        g_HudSpriteRectTableDiscoveryAttempted = false;
+        g_HudSpriteRectTableDiscoveryLastTick = 0;
+        g_HudSpriteOriginalEntries.clear();
+        g_HudSpriteHiddenEntries.clear();
+        g_HudSpriteOriginalEntriesByAddress.clear();
+        g_HudSpriteHiddenAddresses.clear();
+        g_HudSpriteCachedPanelAddresses.clear();
+        g_HudSpriteFallbackDiscoveryAttempted = false;
+        g_HudSpriteFallbackDiscoveryLastTick = 0;
+        g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
+        g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
+        g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
+        g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
+        g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
+        g_AttackRevealEnabled = kAttackRevealEnabledDefault;
+        g_TurretAimPitchMultiplier = 0.5f;
+        g_TurretAimPitchMultiplierEnhanced = 0.95f;
         g_RetargetPeriodNextForceMsByProcess.clear();
 
         g_BzrPtr_945478 = reinterpret_cast<void**>(0x00945478);
@@ -7360,16 +7829,17 @@ namespace BZROpenShim
         g_ChunkProxyWaitLogged = false;
         g_ChunkProxyBillboardSet = nullptr;
         g_ChunkProxySlots.clear();
-        float turretAimPitchMultiplier = g_TurretAimPitchMultiplier;
+        float turretAimPitchMultiplier = g_TurretAimPitchMultiplierEnhanced;
         if (TryGetEnvFloat("OPENSHIM_TURRET_AIM_PITCH_MULTIPLIER", turretAimPitchMultiplier) ||
             TryGetEnvFloat("OPENSHIM_TURRET_PITCH_MULTIPLIER", turretAimPitchMultiplier))
         {
-            g_TurretAimPitchMultiplier = ClampTurretAimPitchMultiplier(turretAimPitchMultiplier);
+            g_TurretAimPitchMultiplierEnhanced = ClampTurretAimPitchMultiplier(turretAimPitchMultiplier);
         }
         else
         {
-            g_TurretAimPitchMultiplier = 0.95f;
+            g_TurretAimPitchMultiplierEnhanced = 0.95f;
         }
+        g_TurretAimPitchMultiplier = g_TurretAimPitchEnabled ? g_TurretAimPitchMultiplierEnhanced : 0.5f;
         Log(L"[CHUNK] Force-first-geo fallback: %hs\n",
             g_EnableChunkRenderFallback ? "enabled" : "disabled");
         Log(L"[CHUNK] Trace logging: %hs%s budget=%ld entryLimit=%u\n",
@@ -7452,6 +7922,67 @@ namespace BZROpenShim
         return SetTargetReticlePopupModeInternal(ClampTargetReticlePopupMode(mode), true);
     }
 
+    bool SetBomberAiRangeEnabledFromBridge(bool enabled)
+    {
+        RetryDeferredRuntimeHooks();
+        g_BomberAiRangeEnabled = enabled;
+        Log(L"[MISSIONHOOK] bomber AI range override %hs\n", enabled ? "enabled" : "disabled");
+        return true;
+    }
+
+    bool SetHowitzerVolleyEnabledFromBridge(bool enabled)
+    {
+        g_HowitzerVolleyEnabled = enabled;
+        Log(L"[MISSIONHOOK] howitzer volley override %hs\n", enabled ? "enabled" : "disabled");
+        return true;
+    }
+
+    bool SetWeaponMaskCarrierBiasEnabledFromBridge(bool enabled)
+    {
+        g_WeaponMaskCarrierBiasEnabled = enabled;
+        Log(L"[MISSIONHOOK] weapon-mask carrier bias %hs\n", enabled ? "enabled" : "disabled");
+        return true;
+    }
+
+    bool SetAiOdfGameplayTuningEnabledFromBridge(bool enabled)
+    {
+        RetryDeferredRuntimeHooks();
+        g_AiOdfGameplayTuningEnabled = enabled;
+        Log(L"[MISSIONHOOK] AI ODF gameplay tuning %hs\n", enabled ? "enabled" : "disabled");
+        return true;
+    }
+
+    bool SetTurretAimPitchEnabledFromBridge(bool enabled)
+    {
+        g_TurretAimPitchEnabled = enabled;
+        g_TurretAimPitchMultiplier = enabled ? g_TurretAimPitchMultiplierEnhanced : 0.5f;
+        Log(L"[MISSIONHOOK] turret aim pitch override %hs active=%.3f\n",
+            enabled ? "enabled" : "disabled",
+            static_cast<double>(g_TurretAimPitchMultiplier));
+        return true;
+    }
+
+    bool SetAttackRevealEnabledFromBridge(bool enabled)
+    {
+        g_AttackRevealEnabled = enabled;
+        Log(L"[MISSIONHOOK] attack reveal %hs\n", enabled ? "enabled" : "disabled");
+        return true;
+    }
+
+    bool ResetMissionHookOverridesFromBridge()
+    {
+        RetryDeferredRuntimeHooks();
+        g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
+        g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
+        g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
+        g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
+        g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
+        g_AttackRevealEnabled = kAttackRevealEnabledDefault;
+        g_TurretAimPitchMultiplier = 0.5f;
+        Log(L"[MISSIONHOOK] restored mission hook overrides to defaults\n");
+        return true;
+    }
+
     bool GetHudSpriteRectFromBridge(const char* name, int* outX, int* outY, int* outW, int* outH)
     {
         if (!outX || !outY || !outW || !outH)
@@ -7485,10 +8016,15 @@ namespace BZROpenShim
 
     bool SetHudSpriteRectFromBridge(const char* name, int x, int y, int w, int h)
     {
+        if (IsStockScrapPilotPanelName(name) && w == 0 && h == 0)
+            return SetStockScrapPilotPanelsVisibleByUv(false);
+
         int spriteId = 0;
         HudSpriteRectRecord current = {};
         if (!ResolveHudSpriteForMutation(name, spriteId, current))
+        {
             return false;
+        }
 
         HudSpriteRectRecord updated = current;
         const auto hiddenIt = g_HudSpriteHiddenEntries.find(spriteId);
@@ -7536,6 +8072,9 @@ namespace BZROpenShim
 
     bool SetHudSpriteVisibleFromBridge(const char* name, bool visible)
     {
+        if (IsStockScrapPilotPanelName(name))
+            return SetStockScrapPilotPanelsVisibleByUv(visible);
+
         const int spriteId = LookupHudSpriteId(name);
         if (spriteId <= 0)
         {
@@ -7600,6 +8139,9 @@ namespace BZROpenShim
 
     bool RestoreHudSpriteFromBridge(const char* name)
     {
+        if (IsStockScrapPilotPanelName(name))
+            return SetStockScrapPilotPanelsVisibleByUv(true);
+
         const int spriteId = LookupHudSpriteId(name);
         if (spriteId <= 0)
         {
@@ -7670,7 +8212,7 @@ namespace BZROpenShim
 
     void __cdecl RevealProcessOwnerPerceivedTeamOnAttackStateEntry(void* processPtr)
     {
-        if (!processPtr || g_IsSteamExe)
+        if (!g_AttackRevealEnabled || !processPtr || g_IsSteamExe)
             return;
 
         __try
@@ -7890,6 +8432,9 @@ namespace BZROpenShim
 
     void __cdecl ApplyWeaponMaskCarrierBiasForCraft(void* craft)
     {
+        if (!g_WeaponMaskCarrierBiasEnabled)
+            return;
+
         if (!craft)
             return;
 
@@ -7997,6 +8542,8 @@ namespace BZROpenShim
     {
         if (!g_BZRFnPtr_ArtilleryHowitzerVolleyContinue)
             return 0;
+        if (!g_HowitzerVolleyEnabled)
+            return CallOriginalArtilleryHowitzerVolley(process, arg1, arg2, arg3, arg4, arg5);
 
         uint32_t lastResult = 0;
         bool startedVolley = false;
