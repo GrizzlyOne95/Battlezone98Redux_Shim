@@ -1,0 +1,15 @@
+
+undefined4 FUN_005048f0(undefined4 param_1)
+
+{
+  undefined4 uVar1;
+  undefined4 uVar2;
+  undefined4 uVar3;
+  
+  uVar1 = FUN_004ff750(param_1,1);
+  uVar2 = FUN_004ff750(param_1,2,uVar1);
+  uVar3 = FUN_0082c1fd(param_1,3,1,uVar1,uVar2);
+  FUN_005cc180(uVar1,uVar2,uVar3);
+  return 0;
+}
+

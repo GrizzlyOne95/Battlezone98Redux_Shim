@@ -23,6 +23,32 @@ The two current corpora are roughly:
 That is workable for manual storage or release artifacts, but poor for normal
 Git history.
 
+## Repo-Tracked Redux Corpus
+
+The repo now carries a trimmed portable Redux best-effort corpus at:
+
+- `reverse_engineering\repo_corpora\bzr_gog_best_effort`
+
+This tracked subset intentionally excludes local-only heavy artifacts such as:
+
+- `ghidra_projects`
+- watcher and background PID files
+- local pipeline logs
+
+It keeps the parts that are useful on another PC without rerunning the pipeline:
+
+- `ghidrecomp` decomp output
+- `inventory`
+- `merged`
+- `pdb_reference`
+- `binary_strings`
+- portable `current_index.json` / `current_manifest.json`
+
+The default Redux corpus entry in `current_re_corpora.json` now points at this
+repo-tracked portable copy, so `search_re_corpora.ps1`, `search_global_corpus.ps1`,
+`build_re_brief.py`, and the Ghidra MCP advisory-label loader can use it in a
+fresh checkout.
+
 ## Recommended Transfer Method
 
 1. Copy the finished corpus folders to the target machine.

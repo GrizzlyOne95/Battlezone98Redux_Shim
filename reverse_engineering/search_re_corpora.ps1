@@ -8,6 +8,25 @@ param(
     [switch]$IncludeLargeTextDumps
 )
 
+function Resolve-CorpusRoot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Candidate,
+        [Parameter(Mandatory = $true)]
+        [string]$BaseDir
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Candidate)) {
+        return $null
+    }
+
+    if ([System.IO.Path]::IsPathRooted($Candidate)) {
+        return $Candidate
+    }
+
+    return Join-Path $BaseDir $Candidate
+}
+
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     $ConfigPath = Join-Path $PSScriptRoot "current_re_corpora.json"
 }
@@ -48,7 +67,7 @@ foreach ($corpus in $corpora) {
     }
 
     $index = Get-Content $indexPath | ConvertFrom-Json
-    $root = [string]$index.current_corpus_root
+    $root = Resolve-CorpusRoot -Candidate ([string]$index.current_corpus_root) -BaseDir $promotedRoot
     if (-not (Test-Path $root)) {
         Write-Warning "Skipping corpus '$label' because root does not exist: $root"
         continue
@@ -62,7 +81,7 @@ foreach ($corpus in $corpora) {
     )
 
     if ($IncludeDecomps) {
-        $paths += $index.manifest.decomp_dir
+        $paths += (Resolve-CorpusRoot -Candidate ([string]$index.manifest.decomp_dir) -BaseDir $promotedRoot)
     }
 
     if ($IncludeLargeTextDumps) {

@@ -1,0 +1,10 @@
+
+undefined4 __thiscall
+FUN_007fc2d0(undefined4 param_1,undefined4 param_2,undefined4 param_3,undefined4 param_4,
+            undefined4 param_5)
+
+{
+  FUN_007fc770(param_2,param_1,param_3,param_4,param_5,param_1,0);
+  return param_2;
+}
+

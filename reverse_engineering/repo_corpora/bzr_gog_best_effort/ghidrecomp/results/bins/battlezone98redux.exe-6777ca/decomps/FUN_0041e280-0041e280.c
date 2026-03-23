@@ -1,0 +1,58 @@
+
+char FUN_0041e280(undefined4 param_1,undefined1 param_2)
+
+{
+  char cVar1;
+  undefined4 *puVar2;
+  undefined1 local_34 [4];
+  undefined1 local_30 [4];
+  undefined1 local_2c [4];
+  undefined1 local_28 [4];
+  undefined4 local_24;
+  undefined4 local_20;
+  int *local_1c;
+  int *local_18;
+  undefined4 local_14;
+  undefined4 local_10;
+  int local_c;
+  char local_5;
+  
+  local_5 = '\0';
+  puVar2 = (undefined4 *)FID_conflict_begin(local_28);
+  local_10 = *puVar2;
+  puVar2 = (undefined4 *)FID_conflict_end(local_2c);
+  local_20 = *puVar2;
+  while (cVar1 = FID_conflict_operator__(&local_20), cVar1 != '\0') {
+    puVar2 = (undefined4 *)get();
+    local_18 = (int *)*puVar2;
+    cVar1 = (**(code **)(*local_18 + 0x18))(param_1,param_2);
+    if (cVar1 != '\0') {
+      local_5 = '\x01';
+    }
+    FUN_00421f70();
+  }
+  if (local_5 == '\0') {
+    puVar2 = (undefined4 *)FID_conflict_begin(local_30);
+    local_14 = *puVar2;
+    puVar2 = (undefined4 *)FID_conflict_end(local_34);
+    local_24 = *puVar2;
+    while (cVar1 = FID_conflict_operator__(&local_24), cVar1 != '\0') {
+      puVar2 = (undefined4 *)get();
+      local_1c = (int *)*puVar2;
+      cVar1 = (**(code **)(*local_1c + 0x18))(param_1,param_2);
+      if (cVar1 != '\0') {
+        local_5 = '\x01';
+      }
+      if (*(char *)(local_c + 8) != '\0') break;
+      FUN_00421f70();
+    }
+    if (local_5 == '\0') {
+      FUN_004b6180(param_1);
+    }
+  }
+  else {
+    local_5 = '\x01';
+  }
+  return local_5;
+}
+

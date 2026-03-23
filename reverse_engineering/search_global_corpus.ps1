@@ -7,8 +7,34 @@ param(
     [switch]$IncludeLargeTextDumps
 )
 
+function Resolve-CorpusRoot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Candidate,
+        [Parameter(Mandatory = $true)]
+        [string]$BaseDir
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Candidate)) {
+        return $null
+    }
+
+    if ([System.IO.Path]::IsPathRooted($Candidate)) {
+        return $Candidate
+    }
+
+    return Join-Path $BaseDir $Candidate
+}
+
 if ([string]::IsNullOrWhiteSpace($PromotedRoot)) {
-    $PromotedRoot = Join-Path $PSScriptRoot "current_global_corpus"
+    $localPromotedRoot = Join-Path $PSScriptRoot "current_global_corpus"
+    $repoPromotedRoot = Join-Path $PSScriptRoot "repo_corpora\bzr_gog_best_effort"
+    if (Test-Path (Join-Path $localPromotedRoot "current_index.json")) {
+        $PromotedRoot = $localPromotedRoot
+    }
+    else {
+        $PromotedRoot = $repoPromotedRoot
+    }
 }
 
 $indexPath = Join-Path $PromotedRoot "current_index.json"
@@ -17,7 +43,7 @@ if (-not (Test-Path $indexPath)) {
 }
 
 $index = Get-Content $indexPath | ConvertFrom-Json
-$root = $index.current_corpus_root
+$root = Resolve-CorpusRoot -Candidate ([string]$index.current_corpus_root) -BaseDir $PromotedRoot
 if (-not (Test-Path $root)) {
     throw "Promoted corpus root does not exist: $root"
 }
@@ -30,7 +56,7 @@ $paths = @(
 )
 
 if ($IncludeDecomps) {
-    $paths += $index.manifest.decomp_dir
+    $paths += (Resolve-CorpusRoot -Candidate ([string]$index.manifest.decomp_dir) -BaseDir $PromotedRoot)
 }
 
 if ($IncludeLargeTextDumps) {
