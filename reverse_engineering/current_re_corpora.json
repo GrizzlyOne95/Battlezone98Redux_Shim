@@ -2,8 +2,8 @@
   "corpora": [
     {
       "label": "redux",
-      "description": "Battlezone 98 Redux GOG corpus with advisory near-match PDB metadata.",
-      "promoted_root": "current_global_corpus",
+      "description": "Battlezone 98 Redux GOG best-effort portable corpus tracked in the repo with advisory near-match PDB metadata.",
+      "promoted_root": "repo_corpora/bzr_gog_best_effort",
       "binary_family": "redux",
       "pdb_trust": "advisory_near_match"
     },

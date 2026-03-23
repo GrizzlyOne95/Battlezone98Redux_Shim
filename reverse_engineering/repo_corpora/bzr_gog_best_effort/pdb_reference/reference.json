@@ -1,0 +1,105 @@
+{
+  "pe_path": "C:\\GOG Games\\Battlezone 98 Redux\\battlezone98redux.exe",
+  "pdb_path": "C:\\GOG Games\\Battlezone 98 Redux\\battlezone98redux.pdb",
+  "pe_sha256": "8d71f56c1314e69a8ad38f4eeaf20a8ff825965a84cf196e5f77ea4cc3377413",
+  "pdb_sha256": "3d948fc7c532af770389b91e09c5a2f123fad9f0838b711b34bf8ae755f8162b",
+  "pe_rsds": {
+    "guid": "04FFCABE-6837-4AB9-9D42-E5B9DF4C7CBA",
+    "age": 1,
+    "pdb_path": "D:\\code\\BattleZoneTest\\build\\bin\\Release\\battlezone\\battlezone98redux.pdb"
+  },
+  "pdb_info": {
+    "guid": "37614DB0-6577-4506-8AD6-0E6A72F6FD2F",
+    "age": 1,
+    "named_streams": [
+      "/LinkInfo",
+      "/names",
+      "/src/headerblock"
+    ]
+  },
+  "dbi": {
+    "machine": "IMAGE_FILE_MACHINE_I386",
+    "module_count": 670,
+    "file_count": 39271,
+    "global_symbol_stream": 9,
+    "section_header_stream": 10,
+    "section_header_orig_stream": -1,
+    "omap_from_source_stream": -1
+  },
+  "match": {
+    "guid_matches": false,
+    "age_matches": true,
+    "exact_match": false
+  },
+  "counts": {
+    "modules": 670,
+    "module_files": 39271,
+    "sections": 5,
+    "public_functions": 8078,
+    "global_data": 13677,
+    "raw_path_hits": 3533
+  },
+  "llvm_exports": [
+    {
+      "file": "C:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\pdb_reference\\llvm\\dump_summary.txt",
+      "exit_code": 0,
+      "command": [
+        "C:\\Program Files\\LLVM\\bin\\llvm-pdbutil.exe",
+        "dump",
+        "--summary",
+        "--streams",
+        "--named-streams",
+        "--section-headers",
+        "--modules",
+        "C:\\GOG Games\\Battlezone 98 Redux\\battlezone98redux.pdb"
+      ]
+    },
+    {
+      "file": "C:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\pdb_reference\\llvm\\pretty_funcs.txt",
+      "exit_code": 0,
+      "command": [
+        "C:\\Program Files\\LLVM\\bin\\llvm-pdbutil.exe",
+        "pretty",
+        "--globals",
+        "--sym-types=funcs",
+        "--symbol-order=name",
+        "--no-system-libs",
+        "C:\\GOG Games\\Battlezone 98 Redux\\battlezone98redux.pdb"
+      ]
+    },
+    {
+      "file": "C:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\pdb_reference\\llvm\\compiland_files.txt",
+      "exit_code": 0,
+      "command": [
+        "C:\\Program Files\\LLVM\\bin\\llvm-pdbutil.exe",
+        "dump",
+        "--files",
+        "C:\\GOG Games\\Battlezone 98 Redux\\battlezone98redux.pdb"
+      ]
+    },
+    {
+      "file": "C:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\pdb_reference\\llvm\\pretty_classes.txt",
+      "exit_code": 0,
+      "command": [
+        "C:\\Program Files\\LLVM\\bin\\llvm-pdbutil.exe",
+        "pretty",
+        "--classes",
+        "--class-order=name",
+        "--class-definitions=layout",
+        "--no-system-libs",
+        "C:\\GOG Games\\Battlezone 98 Redux\\battlezone98redux.pdb"
+      ]
+    },
+    {
+      "file": "C:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\pdb_reference\\llvm\\publics.txt",
+      "exit_code": 0,
+      "command": [
+        "C:\\Program Files\\LLVM\\bin\\llvm-pdbutil.exe",
+        "dump",
+        "--publics",
+        "--globals",
+        "C:\\GOG Games\\Battlezone 98 Redux\\battlezone98redux.pdb"
+      ]
+    }
+  ]
+}

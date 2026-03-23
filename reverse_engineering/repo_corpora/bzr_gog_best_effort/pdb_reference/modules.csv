@@ -1,0 +1,671 @@
+module_name,object_name,stream,symbol_size,source_file_count,range_section,range_offset,range_size,flags
+* CIL *,,13,68,0,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\audio.obj,E:\BattleZoneTest\build\obj\Release\battlezone\audio.obj,14,5424,19,1,22944,355,0
+E:\BattleZoneTest\build\obj\Release\battlezone\cb.obj,E:\BattleZoneTest\build\obj\Release\battlezone\cb.obj,15,3120,12,1,24768,145,0
+E:\BattleZoneTest\build\obj\Release\battlezone\directsound_theoraaudiointerface.obj,E:\BattleZoneTest\build\obj\Release\battlezone\directsound_theoraaudiointerface.obj,16,7588,14,1,25056,752,0
+E:\BattleZoneTest\build\obj\Release\battlezone\redbook.obj,E:\BattleZoneTest\build\obj\Release\battlezone\redbook.obj,17,5388,11,1,27744,241,0
+E:\BattleZoneTest\build\obj\Release\battlezone\d3dapp.obj,E:\BattleZoneTest\build\obj\Release\battlezone\d3dapp.obj,18,140,168,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\D3ddebug.obj,E:\BattleZoneTest\build\obj\Release\battlezone\D3ddebug.obj,19,140,175,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\D3dpoly.obj,E:\BattleZoneTest\build\obj\Release\battlezone\D3dpoly.obj,20,1384,182,1,29888,52,0
+E:\BattleZoneTest\build\obj\Release\battlezone\D3drendr.obj,E:\BattleZoneTest\build\obj\Release\battlezone\D3drendr.obj,21,14268,197,1,32192,55,0
+E:\BattleZoneTest\build\obj\Release\battlezone\carclsn.obj,E:\BattleZoneTest\build\obj\Release\battlezone\carclsn.obj,22,11616,13,1,38992,1639,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Clsn.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Clsn.obj,23,8016,25,1,45248,354,0
+E:\BattleZoneTest\build\obj\Release\battlezone\clsngeom.obj,E:\BattleZoneTest\build\obj\Release\battlezone\clsngeom.obj,24,3180,7,1,49488,663,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Dynamics.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Dynamics.obj,25,1708,8,1,50928,99,0
+E:\BattleZoneTest\build\obj\Release\battlezone\floor.obj,E:\BattleZoneTest\build\obj\Release\battlezone\floor.obj,26,2356,11,1,51920,64,0
+E:\BattleZoneTest\build\obj\Release\battlezone\pntclsn.obj,E:\BattleZoneTest\build\obj\Release\battlezone\pntclsn.obj,27,6876,10,1,56144,872,0
+E:\BattleZoneTest\build\obj\Release\battlezone\BoltRenderClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\BoltRenderClass.obj,28,11744,46,1,57056,342,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ChunkSimulateClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ChunkSimulateClass.obj,29,2620,8,1,62032,12,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ColorRenderClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ColorRenderClass.obj,30,4136,12,1,63056,567,0
+E:\BattleZoneTest\build\obj\Release\battlezone\DustSimulateClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\DustSimulateClass.obj,31,2744,12,1,63984,12,0
+E:\BattleZoneTest\build\obj\Release\battlezone\EmberSimulateClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\EmberSimulateClass.obj,32,2484,8,1,64672,12,0
+E:\BattleZoneTest\build\obj\Release\battlezone\EmitRenderClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\EmitRenderClass.obj,33,6700,11,1,65488,135,0
+E:\BattleZoneTest\build\obj\Release\battlezone\forcfeed.obj,E:\BattleZoneTest\build\obj\Release\battlezone\forcfeed.obj,34,648,9,1,68448,54,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Iforceld.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Iforceld.obj,35,728,8,1,68512,760,0
+E:\BattleZoneTest\build\obj\Release\battlezone\LightRenderClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\LightRenderClass.obj,36,6892,19,1,69312,525,0
+E:\BattleZoneTest\build\obj\Release\battlezone\MultiRenderClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\MultiRenderClass.obj,37,7268,14,1,73072,26,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ParticleRenderClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ParticleRenderClass.obj,38,29212,22,1,77408,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ParticleSimulateClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ParticleSimulateClass.obj,39,28500,25,1,80240,98,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ParticleSpraySimulateClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ParticleSpraySimulateClass.obj,40,2628,11,1,80368,12,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ParticleSystem.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ParticleSystem.obj,41,3976,41,1,2304,21,0
+E:\BattleZoneTest\build\obj\Release\battlezone\PlanarRenderClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\PlanarRenderClass.obj,42,8016,47,1,81760,189,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SmokeSimulateClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SmokeSimulateClass.obj,43,2208,7,1,84000,12,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SpriteRenderClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SpriteRenderClass.obj,44,7096,45,1,84352,254,0
+E:\BattleZoneTest\build\obj\Release\battlezone\TrailRenderClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\TrailRenderClass.obj,45,12912,45,1,86624,299,0
+E:\BattleZoneTest\build\obj\Release\battlezone\TwirlRenderClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\TwirlRenderClass.obj,46,7500,46,1,91824,326,0
+E:\BattleZoneTest\build\obj\Release\battlezone\TwirlTrailRenderClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\TwirlTrailRenderClass.obj,47,17740,52,1,94240,114,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ActionMode.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ActionMode.obj,48,1112,10,1,101536,99,0
+E:\BattleZoneTest\build\obj\Release\battlezone\adialup.obj,E:\BattleZoneTest\build\obj\Release\battlezone\adialup.obj,49,140,143,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AdjustVar.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AdjustVar.obj,50,144,4,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AiCommon.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AiCommon.obj,51,256,313,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AIController.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AIController.obj,52,1484,22,1,101792,18,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AiMission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AiMission.obj,53,24132,329,1,106304,32,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AiPath.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AiPath.obj,54,8524,12,1,106704,194,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AiProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AiProcess.obj,55,4096,12,1,108864,170,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AISchedMission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AISchedMission.obj,56,2108,5,1,109792,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AiTask.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AiTask.obj,57,6420,12,1,109856,219,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AiUtil.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AiUtil.obj,58,86256,73,1,141344,42,0
+E:\BattleZoneTest\build\obj\Release\battlezone\allie.obj,E:\BattleZoneTest\build\obj\Release\battlezone\allie.obj,59,2128,199,1,143600,71,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AmmoPowerup.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AmmoPowerup.obj,60,3976,10,1,144096,75,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AmmoPowerupClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AmmoPowerupClass.obj,61,3020,11,1,144816,202,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AnchorRocket.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AnchorRocket.obj,62,5288,20,1,145376,288,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AnimBuilding.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AnimBuilding.obj,63,3556,11,1,146992,181,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AnimSprite.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AnimSprite.obj,64,32488,1150,1,149056,81,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AOI.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AOI.obj,65,10820,11,1,151712,141,0
+E:\BattleZoneTest\build\obj\Release\battlezone\APC.obj,E:\BattleZoneTest\build\obj\Release\battlezone\APC.obj,66,8388,29,1,153696,165,0
+E:\BattleZoneTest\build\obj\Release\battlezone\APCClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\APCClass.obj,67,3032,17,1,157968,610,0
+E:\BattleZoneTest\build\obj\Release\battlezone\APCProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\APCProcess.obj,68,9524,25,1,160736,139,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ApproachAction.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ApproachAction.obj,69,148,9,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Armory.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Armory.obj,70,7324,35,1,161824,489,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ArmoryClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ArmoryClass.obj,71,6244,22,1,165872,990,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ArmoryProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ArmoryProcess.obj,72,11492,33,1,167200,102,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Artifact.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Artifact.obj,73,768,10,1,172080,112,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ArtifactClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ArtifactClass.obj,74,1864,7,1,4560,69,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ArtilleryProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ArtilleryProcess.obj,75,10800,32,1,172448,82,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AtomicAction.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AtomicAction.obj,76,1964,7,1,176896,723,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Attach.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Attach.obj,77,4060,8,1,177696,141,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AttackGroup.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AttackGroup.obj,78,10312,15,1,4704,26,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AttackTask.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AttackTask.obj,79,11448,23,1,179600,218,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AudioMessage.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AudioMessage.obj,80,11424,21,1,184080,76,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AudioSys.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AudioSys.obj,81,15148,22,1,192144,436,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Barracks.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Barracks.obj,82,3340,21,1,194912,110,0
+E:\BattleZoneTest\build\obj\Release\battlezone\BarracksClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\BarracksClass.obj,83,3020,11,1,196288,403,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Beam.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Beam.obj,84,8704,28,1,197072,422,0
+E:\BattleZoneTest\build\obj\Release\battlezone\BeamGun.obj,E:\BattleZoneTest\build\obj\Release\battlezone\BeamGun.obj,85,4092,16,1,201296,90,0
+E:\BattleZoneTest\build\obj\Release\battlezone\BeamGunClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\BeamGunClass.obj,86,2004,8,1,202528,130,0
+E:\BattleZoneTest\build\obj\Release\battlezone\BettyVoice.obj,E:\BattleZoneTest\build\obj\Release\battlezone\BettyVoice.obj,87,4148,20,1,4944,32,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Bolt.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Bolt.obj,88,7228,23,1,204480,462,0
+E:\BattleZoneTest\build\obj\Release\battlezone\BounceBomb.obj,E:\BattleZoneTest\build\obj\Release\battlezone\BounceBomb.obj,89,6328,32,1,208176,252,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Building.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Building.obj,90,9476,30,1,210544,18,0
+E:\BattleZoneTest\build\obj\Release\battlezone\BuildingClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\BuildingClass.obj,91,4048,9,1,215056,213,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Bullet.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Bullet.obj,92,6344,18,1,217808,799,0
+E:\BattleZoneTest\build\obj\Release\battlezone\BulletClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\BulletClass.obj,93,1888,7,1,218608,50,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Cache.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Cache.obj,94,5324,13,1,219712,106,0
+E:\BattleZoneTest\build\obj\Release\battlezone\CameraPod.obj,E:\BattleZoneTest\build\obj\Release\battlezone\CameraPod.obj,95,1844,14,1,221024,301,0
+E:\BattleZoneTest\build\obj\Release\battlezone\CameraPodClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\CameraPodClass.obj,96,2792,10,1,221696,288,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Cannon.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Cannon.obj,97,3780,15,1,222224,180,0
+E:\BattleZoneTest\build\obj\Release\battlezone\CannonClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\CannonClass.obj,98,3072,9,1,224752,358,0
+E:\BattleZoneTest\build\obj\Release\battlezone\CellType.obj,E:\BattleZoneTest\build\obj\Release\battlezone\CellType.obj,99,1372,11,1,225392,236,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ChargeGun.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ChargeGun.obj,100,2848,17,1,225824,141,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ChargeGunClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ChargeGunClass.obj,101,7804,16,1,228272,1718,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ChunkEffect.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ChunkEffect.obj,102,10580,19,1,5728,32,0
+E:\BattleZoneTest\build\obj\Release\battlezone\CockpitRadar.obj,E:\BattleZoneTest\build\obj\Release\battlezone\CockpitRadar.obj,103,31972,58,1,249424,171,0
+E:\BattleZoneTest\build\obj\Release\battlezone\CockpitSelection.obj,E:\BattleZoneTest\build\obj\Release\battlezone\CockpitSelection.obj,104,18928,54,1,249696,229,0
+E:\BattleZoneTest\build\obj\Release\battlezone\CockpitTimer.obj,E:\BattleZoneTest\build\obj\Release\battlezone\CockpitTimer.obj,105,5172,13,1,258992,215,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Collision.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Collision.obj,106,1400,19,1,261488,669,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ColorFade.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ColorFade.obj,107,1632,11,1,6048,28,0
+E:\BattleZoneTest\build\obj\Release\battlezone\CommTower.obj,E:\BattleZoneTest\build\obj\Release\battlezone\CommTower.obj,108,5212,22,1,263360,289,0
+E:\BattleZoneTest\build\obj\Release\battlezone\CommTowerClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\CommTowerClass.obj,109,2736,10,1,265248,249,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Condition.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Condition.obj,110,144,6,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ConstructionBlob.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ConstructionBlob.obj,111,2328,14,1,6112,28,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ConstructionDisplay.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ConstructionDisplay.obj,112,1144,18,1,6144,21,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ConstructionRig.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ConstructionRig.obj,113,8744,41,1,267264,75,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ConstructionRigClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ConstructionRigClass.obj,114,2156,16,1,6176,194,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ConstructionRigProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ConstructionRigProcess.obj,115,12280,24,1,272048,171,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ControlPanel.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ControlPanel.obj,116,47336,87,1,276096,249,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Craft.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Craft.obj,117,32096,74,1,322352,113,0
+E:\BattleZoneTest\build\obj\Release\battlezone\CraftClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\CraftClass.obj,118,9408,11,1,323056,2554,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Crater.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Crater.obj,119,1296,5,1,325856,5,0
+E:\BattleZoneTest\build\obj\Release\battlezone\CRC.obj,E:\BattleZoneTest\build\obj\Release\battlezone\CRC.obj,120,3600,152,1,326224,298,0
+E:\BattleZoneTest\build\obj\Release\battlezone\DayWrecker.obj,E:\BattleZoneTest\build\obj\Release\battlezone\DayWrecker.obj,121,2488,18,1,328000,582,0
+E:\BattleZoneTest\build\obj\Release\battlezone\DayWreckerClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\DayWreckerClass.obj,122,3220,11,1,328704,580,0
+E:\BattleZoneTest\build\obj\Release\battlezone\DefendTask.obj,E:\BattleZoneTest\build\obj\Release\battlezone\DefendTask.obj,123,3872,14,1,329568,139,0
+E:\BattleZoneTest\build\obj\Release\battlezone\DemoMission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\DemoMission.obj,124,4932,30,1,331744,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Dispenser.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Dispenser.obj,125,5460,15,1,334224,279,0
+E:\BattleZoneTest\build\obj\Release\battlezone\DisplayInterface.obj,E:\BattleZoneTest\build\obj\Release\battlezone\DisplayInterface.obj,126,21712,45,1,339472,73,0
+E:\BattleZoneTest\build\obj\Release\battlezone\DistributedObject.obj,E:\BattleZoneTest\build\obj\Release\battlezone\DistributedObject.obj,127,97504,63,1,354256,59,0
+E:\BattleZoneTest\build\obj\Release\battlezone\DrawUtils.obj,E:\BattleZoneTest\build\obj\Release\battlezone\DrawUtils.obj,128,2292,6,1,356608,205,0
+E:\BattleZoneTest\build\obj\Release\battlezone\dsutil.obj,E:\BattleZoneTest\build\obj\Release\battlezone\dsutil.obj,129,4980,7,1,357104,102,0
+E:\BattleZoneTest\build\obj\Release\battlezone\DustEffect.obj,E:\BattleZoneTest\build\obj\Release\battlezone\DustEffect.obj,130,3764,14,1,7952,32,0
+E:\BattleZoneTest\build\obj\Release\battlezone\EarthQuake.obj,E:\BattleZoneTest\build\obj\Release\battlezone\EarthQuake.obj,131,5940,13,1,7984,31,0
+E:\BattleZoneTest\build\obj\Release\battlezone\EditTerrain.obj,E:\BattleZoneTest\build\obj\Release\battlezone\EditTerrain.obj,132,50600,65,1,387280,42,0
+E:\BattleZoneTest\build\obj\Release\battlezone\EngineFlame.obj,E:\BattleZoneTest\build\obj\Release\battlezone\EngineFlame.obj,133,3128,15,1,8048,21,0
+E:\BattleZoneTest\build\obj\Release\battlezone\EngineSplash.obj,E:\BattleZoneTest\build\obj\Release\battlezone\EngineSplash.obj,134,2244,15,1,8080,21,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Explosion.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Explosion.obj,135,12888,28,1,391200,64,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ExplosionClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ExplosionClass.obj,136,13828,1149,1,395904,1876,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Factory.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Factory.obj,137,388,18,1,398912,75,0
+E:\BattleZoneTest\build\obj\Release\battlezone\FactoryClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\FactoryClass.obj,138,2052,16,1,8240,194,0
+E:\BattleZoneTest\build\obj\Release\battlezone\FactoryProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\FactoryProcess.obj,139,3016,17,1,399856,84,0
+E:\BattleZoneTest\build\obj\Release\battlezone\FileUtil.obj,E:\BattleZoneTest\build\obj\Release\battlezone\FileUtil.obj,140,29660,13,1,399952,220,0
+E:\BattleZoneTest\build\obj\Release\battlezone\FireballEffect.obj,E:\BattleZoneTest\build\obj\Release\battlezone\FireballEffect.obj,141,4252,15,1,8512,21,0
+E:\BattleZoneTest\build\obj\Release\battlezone\FlagDisplay.obj,E:\BattleZoneTest\build\obj\Release\battlezone\FlagDisplay.obj,142,5240,18,1,8544,62,0
+E:\BattleZoneTest\build\obj\Release\battlezone\FlamePuff.obj,E:\BattleZoneTest\build\obj\Release\battlezone\FlamePuff.obj,143,5100,17,1,414256,423,0
+E:\BattleZoneTest\build\obj\Release\battlezone\FlareMine.obj,E:\BattleZoneTest\build\obj\Release\battlezone\FlareMine.obj,144,4536,22,1,415600,392,0
+E:\BattleZoneTest\build\obj\Release\battlezone\FollowGroup.obj,E:\BattleZoneTest\build\obj\Release\battlezone\FollowGroup.obj,145,9880,13,1,8672,26,0
+E:\BattleZoneTest\build\obj\Release\battlezone\FollowTask.obj,E:\BattleZoneTest\build\obj\Release\battlezone\FollowTask.obj,146,6408,22,1,418240,186,0
+E:\BattleZoneTest\build\obj\Release\battlezone\GameCommon.obj,E:\BattleZoneTest\build\obj\Release\battlezone\GameCommon.obj,147,1216,1147,1,8752,11,0
+E:\BattleZoneTest\build\obj\Release\battlezone\GameFeature.obj,E:\BattleZoneTest\build\obj\Release\battlezone\GameFeature.obj,148,66560,16,1,433120,147,0
+E:\BattleZoneTest\build\obj\Release\battlezone\GameObject.obj,E:\BattleZoneTest\build\obj\Release\battlezone\GameObject.obj,149,43672,1246,1,433280,112,0
+E:\BattleZoneTest\build\obj\Release\battlezone\GameObjectClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\GameObjectClass.obj,150,17252,1162,1,451520,2170,0
+E:\BattleZoneTest\build\obj\Release\battlezone\GameObjectHandle.obj,E:\BattleZoneTest\build\obj\Release\battlezone\GameObjectHandle.obj,151,148,3,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\GechProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\GechProcess.obj,152,8292,18,1,456224,139,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Geizer.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Geizer.obj,153,8120,24,1,458304,583,0
+E:\BattleZoneTest\build\obj\Release\battlezone\GeizerClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\GeizerClass.obj,154,2648,10,1,459936,210,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Geometry.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Geometry.obj,155,8156,17,1,461296,91,0
+E:\BattleZoneTest\build\obj\Release\battlezone\GotoGeyser.obj,E:\BattleZoneTest\build\obj\Release\battlezone\GotoGeyser.obj,156,6424,23,1,464704,164,0
+E:\BattleZoneTest\build\obj\Release\battlezone\GotoTask.obj,E:\BattleZoneTest\build\obj\Release\battlezone\GotoTask.obj,157,20080,23,1,472912,159,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Grenade.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Grenade.obj,158,2012,15,1,474208,284,0
+E:\BattleZoneTest\build\obj\Release\battlezone\GrenadeClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\GrenadeClass.obj,159,2136,13,1,9312,234,0
+E:\BattleZoneTest\build\obj\Release\battlezone\GroundBlast.obj,E:\BattleZoneTest\build\obj\Release\battlezone\GroundBlast.obj,160,2708,12,1,9552,52,0
+E:\BattleZoneTest\build\obj\Release\battlezone\GunTowerProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\GunTowerProcess.obj,161,6824,21,1,475296,76,0
+E:\BattleZoneTest\build\obj\Release\battlezone\HealthPowerup.obj,E:\BattleZoneTest\build\obj\Release\battlezone\HealthPowerup.obj,162,908,10,1,476896,205,0
+E:\BattleZoneTest\build\obj\Release\battlezone\HealthPowerupClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\HealthPowerupClass.obj,163,3068,11,1,477280,210,0
+E:\BattleZoneTest\build\obj\Release\battlezone\HovCondition.obj,E:\BattleZoneTest\build\obj\Release\battlezone\HovCondition.obj,164,676,12,1,477776,103,0
+E:\BattleZoneTest\build\obj\Release\battlezone\HoverCraft.obj,E:\BattleZoneTest\build\obj\Release\battlezone\HoverCraft.obj,165,27508,41,1,477888,1444,0
+E:\BattleZoneTest\build\obj\Release\battlezone\HoverCraftClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\HoverCraftClass.obj,166,5616,16,1,498336,2025,0
+E:\BattleZoneTest\build\obj\Release\battlezone\HoverInterface.obj,E:\BattleZoneTest\build\obj\Release\battlezone\HoverInterface.obj,167,148,12,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Howitzer.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Howitzer.obj,168,2900,25,1,500640,322,0
+E:\BattleZoneTest\build\obj\Release\battlezone\HowitzerClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\HowitzerClass.obj,169,2140,16,1,501984,96,0
+E:\BattleZoneTest\build\obj\Release\battlezone\HuntTask.obj,E:\BattleZoneTest\build\obj\Release\battlezone\HuntTask.obj,170,6428,66,1,502624,163,0
+E:\BattleZoneTest\build\obj\Release\battlezone\I76Common.obj,E:\BattleZoneTest\build\obj\Release\battlezone\I76Common.obj,171,144,187,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ImageLauncher.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ImageLauncher.obj,172,4368,18,1,505280,56,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ImageMissile.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ImageMissile.obj,173,2664,19,1,505616,83,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ImageRefract.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ImageRefract.obj,174,4172,13,1,506032,90,0
+E:\BattleZoneTest\build\obj\Release\battlezone\InfoDisplay.obj,E:\BattleZoneTest\build\obj\Release\battlezone\InfoDisplay.obj,175,10032,33,1,506880,238,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Inst01Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Inst01Mission.obj,176,5688,26,1,512240,135,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Inst02Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Inst02Mission.obj,177,2408,6,1,513264,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Inst03Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Inst03Mission.obj,178,3340,21,1,513813,8,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Inst04Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Inst04Mission.obj,179,7948,28,1,516112,160,0
+E:\BattleZoneTest\build\obj\Release\battlezone\InternalAdjuster.obj,E:\BattleZoneTest\build\obj\Release\battlezone\InternalAdjuster.obj,180,148,3,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Launcher.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Launcher.obj,181,6424,24,1,516688,190,0
+E:\BattleZoneTest\build\obj\Release\battlezone\LauncherClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\LauncherClass.obj,182,6340,13,1,519120,1205,0
+E:\BattleZoneTest\build\obj\Release\battlezone\LensFlare.obj,E:\BattleZoneTest\build\obj\Release\battlezone\LensFlare.obj,183,9404,51,1,520672,249,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Lightning.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Lightning.obj,184,6980,39,1,10832,28,0
+E:\BattleZoneTest\build\obj\Release\battlezone\LoadSaveGame.obj,E:\BattleZoneTest\build\obj\Release\battlezone\LoadSaveGame.obj,185,10308,172,1,528384,707,0
+E:\BattleZoneTest\build\obj\Release\battlezone\LuaMission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\LuaMission.obj,186,135412,84,1,589376,26,0
+E:\BattleZoneTest\build\obj\Release\battlezone\MachineGun.obj,E:\BattleZoneTest\build\obj\Release\battlezone\MachineGun.obj,187,2344,19,1,589440,1445,0
+E:\BattleZoneTest\build\obj\Release\battlezone\MachineGunClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\MachineGunClass.obj,188,2080,10,1,590896,140,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Magnet.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Magnet.obj,189,5904,23,1,591440,530,0
+E:\BattleZoneTest\build\obj\Release\battlezone\MapRadar.obj,E:\BattleZoneTest\build\obj\Release\battlezone\MapRadar.obj,190,23092,65,1,593888,273,0
+E:\BattleZoneTest\build\obj\Release\battlezone\mcimovie.obj,E:\BattleZoneTest\build\obj\Release\battlezone\mcimovie.obj,191,804,11,1,606464,123,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Mine.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Mine.obj,192,2208,14,1,606592,390,0
+E:\BattleZoneTest\build\obj\Release\battlezone\MineClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\MineClass.obj,193,2772,10,1,607312,210,0
+E:\BattleZoneTest\build\obj\Release\battlezone\MineLayer.obj,E:\BattleZoneTest\build\obj\Release\battlezone\MineLayer.obj,194,2316,19,1,607840,153,0
+E:\BattleZoneTest\build\obj\Release\battlezone\MinelayerClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\MinelayerClass.obj,195,2848,16,1,609088,288,0
+E:\BattleZoneTest\build\obj\Release\battlezone\MineLayerProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\MineLayerProcess.obj,196,9408,27,1,610416,219,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misn01Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misn01Mission.obj,197,6992,23,1,612672,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misn02Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misn02Mission.obj,198,148,3,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misn03Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misn03Mission.obj,199,10056,24,1,627520,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misn04Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misn04Mission.obj,200,9856,22,1,639360,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misn05Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misn05Mission.obj,201,37660,71,1,659344,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misn06Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misn06Mission.obj,202,13928,26,1,673808,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misn07Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misn07Mission.obj,203,10812,27,1,674592,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misn08Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misn08Mission.obj,204,7528,26,1,694400,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misn09Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misn09Mission.obj,205,7096,26,1,695264,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misn10Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misn10Mission.obj,206,7036,21,1,703616,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misn11Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misn11Mission.obj,207,12680,29,1,718656,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misn12Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misn12Mission.obj,208,12988,22,1,719392,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misn13Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misn13Mission.obj,209,6836,20,1,744912,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misn14Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misn14Mission.obj,210,12476,30,1,751904,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misn15Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misn15Mission.obj,211,6276,23,1,755648,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misn16Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misn16Mission.obj,212,5816,22,1,759360,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misn17Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misn17Mission.obj,213,14592,22,1,774368,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misn18Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misn18Mission.obj,214,7356,22,1,781952,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misns1Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misns1Mission.obj,215,7152,21,1,788736,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misns2Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misns2Mission.obj,216,13160,23,1,803216,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misns3Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misns3Mission.obj,217,4628,19,1,809184,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misns4Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misns4Mission.obj,218,4644,24,1,812000,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misns5Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misns5Mission.obj,219,4384,22,1,814656,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misns6Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misns6Mission.obj,220,5588,22,1,818320,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misns7Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misns7Mission.obj,221,10948,23,1,831824,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Misns8Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Misns8Mission.obj,222,7588,25,1,832752,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Missile.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Missile.obj,223,3928,17,1,847440,31,0
+E:\BattleZoneTest\build\obj\Release\battlezone\MissileClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\MissileClass.obj,224,2908,16,1,848672,266,0
+E:\BattleZoneTest\build\obj\Release\battlezone\MissionDialog.obj,E:\BattleZoneTest\build\obj\Release\battlezone\MissionDialog.obj,225,948,10,1,849312,111,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Mortar.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Mortar.obj,226,3756,16,1,849424,60,0
+E:\BattleZoneTest\build\obj\Release\battlezone\MortarClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\MortarClass.obj,227,2192,10,1,12304,242,0
+E:\BattleZoneTest\build\obj\Release\battlezone\MPMission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\MPMission.obj,228,1376,5,1,850960,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\MultDMMission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\MultDMMission.obj,229,16488,82,1,854736,47,0
+E:\BattleZoneTest\build\obj\Release\battlezone\MultGMission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\MultGMission.obj,230,8280,35,1,854848,188,0
+E:\BattleZoneTest\build\obj\Release\battlezone\MultSTMission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\MultSTMission.obj,231,7152,76,1,858288,89,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Net.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Net.obj,232,59140,85,1,876448,488,0
+E:\BattleZoneTest\build\obj\Release\battlezone\NetPlayers.obj,E:\BattleZoneTest\build\obj\Release\battlezone\NetPlayers.obj,233,149464,66,1,905216,34,0
+E:\BattleZoneTest\build\obj\Release\battlezone\NetProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\NetProcess.obj,234,3676,13,1,907104,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ObjectLobber.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ObjectLobber.obj,235,3996,20,1,908752,90,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ObjectLobberClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ObjectLobberClass.obj,236,2812,9,1,910576,249,0
+E:\BattleZoneTest\build\obj\Release\battlezone\OffensiveProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\OffensiveProcess.obj,237,10060,27,1,911088,109,0
+E:\BattleZoneTest\build\obj\Release\battlezone\OggManager.obj,E:\BattleZoneTest\build\obj\Release\battlezone\OggManager.obj,238,7588,15,1,13104,31,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Ordnance.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Ordnance.obj,239,34716,1160,1,923648,60,0
+E:\BattleZoneTest\build\obj\Release\battlezone\OrdnanceClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\OrdnanceClass.obj,240,14548,1152,1,924784,1849,0
+E:\BattleZoneTest\build\obj\Release\battlezone\OverView.obj,E:\BattleZoneTest\build\obj\Release\battlezone\OverView.obj,241,7920,23,1,13488,117,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ParameterDB.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ParameterDB.obj,242,100872,43,1,939520,146,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ParticleEffect.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ParticleEffect.obj,243,2048,12,1,13680,21,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Path.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Path.obj,244,78448,1159,1,966624,155,0
+E:\BattleZoneTest\build\obj\Release\battlezone\PathDialog.obj,E:\BattleZoneTest\build\obj\Release\battlezone\PathDialog.obj,245,3512,14,1,967824,143,0
+E:\BattleZoneTest\build\obj\Release\battlezone\PathDisplay.obj,E:\BattleZoneTest\build\obj\Release\battlezone\PathDisplay.obj,246,46816,122,1,968976,147,0
+E:\BattleZoneTest\build\obj\Release\battlezone\PathSpawn.obj,E:\BattleZoneTest\build\obj\Release\battlezone\PathSpawn.obj,247,4288,31,1,992752,617,0
+E:\BattleZoneTest\build\obj\Release\battlezone\PatrolTask.obj,E:\BattleZoneTest\build\obj\Release\battlezone\PatrolTask.obj,248,4316,61,1,994096,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Person.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Person.obj,249,19488,54,1,995408,236,0
+E:\BattleZoneTest\build\obj\Release\battlezone\PersonClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\PersonClass.obj,250,4800,11,1,1009536,2212,0
+E:\BattleZoneTest\build\obj\Release\battlezone\PersonProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\PersonProcess.obj,251,25084,27,1,1018080,134,0
+E:\BattleZoneTest\build\obj\Release\battlezone\PlanarExplosion.obj,E:\BattleZoneTest\build\obj\Release\battlezone\PlanarExplosion.obj,252,2980,16,1,14272,52,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Popper.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Popper.obj,253,3212,24,1,1020144,1052,0
+E:\BattleZoneTest\build\obj\Release\battlezone\PopperClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\PopperClass.obj,254,2964,20,1,1021360,342,0
+E:\BattleZoneTest\build\obj\Release\battlezone\PopperGun.obj,E:\BattleZoneTest\build\obj\Release\battlezone\PopperGun.obj,255,2232,11,1,1021904,35,0
+E:\BattleZoneTest\build\obj\Release\battlezone\PopperGunClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\PopperGunClass.obj,256,2872,11,1,1022736,249,0
+E:\BattleZoneTest\build\obj\Release\battlezone\PowerPlant.obj,E:\BattleZoneTest\build\obj\Release\battlezone\PowerPlant.obj,257,6152,21,1,1023328,193,0
+E:\BattleZoneTest\build\obj\Release\battlezone\PowerPlantClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\PowerPlantClass.obj,258,2748,10,1,1024576,210,0
+E:\BattleZoneTest\build\obj\Release\battlezone\PowerUp.obj,E:\BattleZoneTest\build\obj\Release\battlezone\PowerUp.obj,259,16192,38,1,1025040,373,0
+E:\BattleZoneTest\build\obj\Release\battlezone\PowerUpClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\PowerUpClass.obj,260,2924,8,1,1035504,247,0
+E:\BattleZoneTest\build\obj\Release\battlezone\PowerUpProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\PowerUpProcess.obj,261,2076,13,1,1036048,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Producer.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Producer.obj,262,26996,62,1,1036880,1238,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ProducerClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ProducerClass.obj,263,6348,20,1,1054624,1051,0
+E:\BattleZoneTest\build\obj\Release\battlezone\progctrl.obj,E:\BattleZoneTest\build\obj\Release\battlezone\progctrl.obj,264,1916,7,1,1055920,102,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ProximityMine.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ProximityMine.obj,265,6324,23,1,1056208,319,0
+E:\BattleZoneTest\build\obj\Release\battlezone\QuakeBlast.obj,E:\BattleZoneTest\build\obj\Release\battlezone\QuakeBlast.obj,266,4228,16,1,1058272,272,0
+E:\BattleZoneTest\build\obj\Release\battlezone\RadarDamper.obj,E:\BattleZoneTest\build\obj\Release\battlezone\RadarDamper.obj,267,3312,12,1,1059344,90,0
+E:\BattleZoneTest\build\obj\Release\battlezone\RadarLauncher.obj,E:\BattleZoneTest\build\obj\Release\battlezone\RadarLauncher.obj,268,6048,20,1,1061200,239,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Range.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Range.obj,269,3104,6,1,1061696,319,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Recycler.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Recycler.obj,270,2388,21,1,1062656,75,0
+E:\BattleZoneTest\build\obj\Release\battlezone\RecyclerClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\RecyclerClass.obj,271,2076,16,1,15136,194,0
+E:\BattleZoneTest\build\obj\Release\battlezone\RecyclerProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\RecyclerProcess.obj,272,14100,33,1,1068656,126,0
+E:\BattleZoneTest\build\obj\Release\battlezone\RecycleTask.obj,E:\BattleZoneTest\build\obj\Release\battlezone\RecycleTask.obj,273,25760,58,1,1069712,332,0
+E:\BattleZoneTest\build\obj\Release\battlezone\RemoteDetonator.obj,E:\BattleZoneTest\build\obj\Release\battlezone\RemoteDetonator.obj,274,6316,27,1,1079664,329,0
+E:\BattleZoneTest\build\obj\Release\battlezone\RepairDepot.obj,E:\BattleZoneTest\build\obj\Release\battlezone\RepairDepot.obj,275,2328,17,1,1081792,185,0
+E:\BattleZoneTest\build\obj\Release\battlezone\RepairDepotClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\RepairDepotClass.obj,276,3044,11,1,1082960,330,0
+E:\BattleZoneTest\build\obj\Release\battlezone\RescueTask.obj,E:\BattleZoneTest\build\obj\Release\battlezone\RescueTask.obj,277,4596,19,1,1083824,64,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Reticle.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Reticle.obj,278,11836,61,1,15664,21,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Rocket.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Rocket.obj,279,5024,18,1,1093632,183,0
+E:\BattleZoneTest\build\obj\Release\battlezone\RocketClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\RocketClass.obj,280,5008,13,1,1096640,1037,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SAV.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SAV.obj,281,3020,25,1,1099760,216,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SAVClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SAVClass.obj,282,2644,16,1,1099984,210,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SAVProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SAVProcess.obj,283,15808,28,1,1103328,135,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Scanner.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Scanner.obj,284,6220,20,1,16112,12,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Scavenger.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Scavenger.obj,285,7404,32,1,1110336,137,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ScavengerClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ScavengerClass.obj,286,4124,19,1,1111680,653,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ScavengerProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ScavengerProcess.obj,287,18608,97,1,1112784,221,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Scrap.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Scrap.obj,288,8192,24,1,1120688,409,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ScrapClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ScrapClass.obj,289,1824,7,1,16240,69,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ScrapDropoff.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ScrapDropoff.obj,290,3996,15,1,1121936,78,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ScrapField.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ScrapField.obj,291,3608,22,1,1123104,169,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ScrapFieldClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ScrapFieldClass.obj,292,1888,7,1,16464,69,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ScrapGauge.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ScrapGauge.obj,293,4004,17,1,1123584,229,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ScriptUtils.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ScriptUtils.obj,294,74100,120,1,1148400,223,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Seismic.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Seismic.obj,295,14804,23,1,1149888,240,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Shell.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Shell.obj,296,388,34,1,1156672,235,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ShieldTower.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ShieldTower.obj,297,4448,23,1,1156912,110,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ShieldTowerClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ShieldTowerClass.obj,298,2800,10,1,1158800,561,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ShockBlast.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ShockBlast.obj,299,2412,13,1,16656,52,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ShockWaveEffect.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ShockWaveEffect.obj,300,2940,10,1,16720,21,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ShortPath.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ShortPath.obj,301,18916,21,1,1165616,46,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Silo.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Silo.obj,302,3116,16,1,1165728,110,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SiloClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SiloClass.obj,303,2728,10,1,1166720,202,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SMain.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SMain.obj,304,22044,180,1,1173904,482,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SmokeEffect.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SmokeEffect.obj,305,3748,40,1,16928,32,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SniperGun.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SniperGun.obj,306,3104,15,1,16960,207,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SniperInterface.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SniperInterface.obj,307,4080,55,1,1180304,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SniperShell.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SniperShell.obj,308,4344,17,1,1182320,281,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SObject.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SObject.obj,309,6456,14,1,1183424,216,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SoldierProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SoldierProcess.obj,310,16688,20,1,1186112,134,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SpawnBuoy.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SpawnBuoy.obj,311,4148,18,1,1187392,364,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SpawnBuoyClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SpawnBuoyClass.obj,312,1872,7,1,17488,69,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SpawnPoint.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SpawnPoint.obj,313,8236,20,1,1188432,106,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SpecialItem.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SpecialItem.obj,314,4320,13,1,1189920,104,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SpecialItemClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SpecialItemClass.obj,315,2676,10,1,1191072,369,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SprayBomb.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SprayBomb.obj,316,9972,37,1,1194272,307,0
+E:\BattleZoneTest\build\obj\Release\battlezone\StatusDisplay.obj,E:\BattleZoneTest\build\obj\Release\battlezone\StatusDisplay.obj,317,6536,57,1,1196272,201,0
+E:\BattleZoneTest\build\obj\Release\battlezone\StrafeAction.obj,E:\BattleZoneTest\build\obj\Release\battlezone\StrafeAction.obj,318,144,6,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\StreamOggSound.obj,E:\BattleZoneTest\build\obj\Release\battlezone\StreamOggSound.obj,319,5500,12,1,1199744,167,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SupplyDepot.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SupplyDepot.obj,320,2384,16,1,1200832,185,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SupplyDepotClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SupplyDepotClass.obj,321,3044,11,1,1202000,322,0
+E:\BattleZoneTest\build\obj\Release\battlezone\TargetCam.obj,E:\BattleZoneTest\build\obj\Release\battlezone\TargetCam.obj,322,4628,55,1,1202576,201,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Targeting.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Targeting.obj,323,4708,17,1,1205296,229,0
+E:\BattleZoneTest\build\obj\Release\battlezone\TargetingGun.obj,E:\BattleZoneTest\build\obj\Release\battlezone\TargetingGun.obj,324,13552,33,1,1208288,210,0
+E:\BattleZoneTest\build\obj\Release\battlezone\TeamSlots.obj,E:\BattleZoneTest\build\obj\Release\battlezone\TeamSlots.obj,325,4312,14,1,1213520,124,0
+E:\BattleZoneTest\build\obj\Release\battlezone\TeamSwitcher.obj,E:\BattleZoneTest\build\obj\Release\battlezone\TeamSwitcher.obj,326,4648,20,1,1213792,210,0
+E:\BattleZoneTest\build\obj\Release\battlezone\TerrainExpose.obj,E:\BattleZoneTest\build\obj\Release\battlezone\TerrainExpose.obj,327,3844,16,1,1215040,90,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Texture.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Texture.obj,328,12564,15,1,1216368,125,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ThermalLauncher.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ThermalLauncher.obj,329,4560,16,1,18512,256,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ThermalMissile.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ThermalMissile.obj,330,4980,25,1,1222128,210,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Torpedo.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Torpedo.obj,331,10244,22,1,1223712,70,0
+E:\BattleZoneTest\build\obj\Release\battlezone\TorpedoClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\TorpedoClass.obj,332,3284,12,1,1230256,887,0
+E:\BattleZoneTest\build\obj\Release\battlezone\TorpedoProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\TorpedoProcess.obj,333,2696,17,1,1231472,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Tracer.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Tracer.obj,334,6120,18,1,1232592,441,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Tran01Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Tran01Mission.obj,335,148,3,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Tran02Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Tran02Mission.obj,336,5492,23,1,1236448,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Tran03Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Tran03Mission.obj,337,6292,28,1,1238944,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Tran04Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Tran04Mission.obj,338,6636,29,1,1241648,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Tran05Mission.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Tran05Mission.obj,339,5280,33,1,1245088,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Tug.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Tug.obj,340,9564,33,1,1246048,217,0
+E:\BattleZoneTest\build\obj\Release\battlezone\TugClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\TugClass.obj,341,2776,16,1,1250592,312,0
+E:\BattleZoneTest\build\obj\Release\battlezone\TugProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\TugProcess.obj,342,19248,42,1,1258960,156,0
+E:\BattleZoneTest\build\obj\Release\battlezone\TurnAction.obj,E:\BattleZoneTest\build\obj\Release\battlezone\TurnAction.obj,343,144,7,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\TurretCraft.obj,E:\BattleZoneTest\build\obj\Release\battlezone\TurretCraft.obj,344,12128,38,1,1260160,544,0
+E:\BattleZoneTest\build\obj\Release\battlezone\TurretCraftClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\TurretCraftClass.obj,345,2788,12,1,1267184,327,0
+E:\BattleZoneTest\build\obj\Release\battlezone\TurretTank.obj,E:\BattleZoneTest\build\obj\Release\battlezone\TurretTank.obj,346,19408,49,1,1267952,209,0
+E:\BattleZoneTest\build\obj\Release\battlezone\TurretTankClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\TurretTankClass.obj,347,2732,15,1,1281184,288,0
+E:\BattleZoneTest\build\obj\Release\battlezone\TurretTankProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\TurretTankProcess.obj,348,23136,25,1,1285456,167,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UnitDialog.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UnitDialog.obj,349,1760,17,1,1289040,368,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UnitProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UnitProcess.obj,350,30636,47,1,1289680,99,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UnitTask.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UnitTask.obj,351,56620,66,1,1333328,36,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UserProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UserProcess.obj,352,8104,20,1,1333632,106,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Walker.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Walker.obj,353,15672,37,1,1337840,145,0
+E:\BattleZoneTest\build\obj\Release\battlezone\WalkerClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\WalkerClass.obj,354,3220,11,1,1350464,1841,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Weapon.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Weapon.obj,355,7916,1147,1,1352688,331,0
+E:\BattleZoneTest\build\obj\Release\battlezone\WeaponClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\WeaponClass.obj,356,12480,1148,1,1353648,954,0
+E:\BattleZoneTest\build\obj\Release\battlezone\WeaponMine.obj,E:\BattleZoneTest\build\obj\Release\battlezone\WeaponMine.obj,357,7000,27,1,1355856,387,0
+E:\BattleZoneTest\build\obj\Release\battlezone\WeaponPowerup.obj,E:\BattleZoneTest\build\obj\Release\battlezone\WeaponPowerup.obj,358,2700,14,1,1358656,182,0
+E:\BattleZoneTest\build\obj\Release\battlezone\WeaponPowerupClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\WeaponPowerupClass.obj,359,3292,11,1,1359024,278,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Wingman.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Wingman.obj,360,1220,17,1,1359744,128,0
+E:\BattleZoneTest\build\obj\Release\battlezone\WingmanClass.obj,E:\BattleZoneTest\build\obj\Release\battlezone\WingmanClass.obj,361,1944,13,1,19920,72,0
+E:\BattleZoneTest\build\obj\Release\battlezone\WingmanProcess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\WingmanProcess.obj,362,22188,32,1,1364224,74,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Horizon.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Horizon.obj,363,6864,32,1,1365664,119,0
+E:\BattleZoneTest\build\obj\Release\battlezone\I76loop.obj,E:\BattleZoneTest\build\obj\Release\battlezone\I76loop.obj,364,4188,51,1,1371520,310,0
+E:\BattleZoneTest\build\obj\Release\battlezone\I76win.obj,E:\BattleZoneTest\build\obj\Release\battlezone\I76win.obj,365,22332,149,1,1372400,150,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Views.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Views.obj,366,14964,34,1,1392112,238,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Cheater.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Cheater.obj,367,4692,21,1,1395936,2208,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Gamekeys.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Gamekeys.obj,368,1868,42,1,1398272,1014,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Input.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Input.obj,369,12552,25,1,1406928,78,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Joystick.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Joystick.obj,370,6896,10,1,1412416,423,0
+E:\BattleZoneTest\build\obj\Release\battlezone\keybd_j1.obj,E:\BattleZoneTest\build\obj\Release\battlezone\keybd_j1.obj,371,140,8,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\keybd_jn.obj,E:\BattleZoneTest\build\obj\Release\battlezone\keybd_jn.obj,372,292,8,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\keybd__e.obj,E:\BattleZoneTest\build\obj\Release\battlezone\keybd__e.obj,373,140,8,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\keybd__g.obj,E:\BattleZoneTest\build\obj\Release\battlezone\keybd__g.obj,374,140,8,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Keyboard.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Keyboard.obj,375,4288,13,1,1415232,81,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Mouse.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Mouse.obj,376,5100,10,1,1416192,105,0
+E:\BattleZoneTest\build\obj\Release\battlezone\lzo1x_9x.obj,E:\BattleZoneTest\build\obj\Release\battlezone\lzo1x_9x.obj,377,7804,33,1,1420592,167,0
+E:\BattleZoneTest\build\obj\Release\battlezone\lzo1x_o.obj,E:\BattleZoneTest\build\obj\Release\battlezone\lzo1x_o.obj,378,140,32,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\lzo1y_9x.obj,E:\BattleZoneTest\build\obj\Release\battlezone\lzo1y_9x.obj,379,156,36,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\lzo1y_o.obj,E:\BattleZoneTest\build\obj\Release\battlezone\lzo1y_o.obj,380,140,34,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\lzo_init.obj,E:\BattleZoneTest\build\obj\Release\battlezone\lzo_init.obj,381,868,30,1,1422192,455,0
+E:\BattleZoneTest\build\obj\Release\battlezone\lzo_ptr.obj,E:\BattleZoneTest\build\obj\Release\battlezone\lzo_ptr.obj,382,140,29,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\lzo_str.obj,E:\BattleZoneTest\build\obj\Release\battlezone\lzo_str.obj,383,140,29,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\lzo_util.obj,E:\BattleZoneTest\build\obj\Release\battlezone\lzo_util.obj,384,172,29,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\chat.obj,E:\BattleZoneTest\build\obj\Release\battlezone\chat.obj,385,8976,21,1,1424336,144,0
+E:\BattleZoneTest\build\obj\Release\battlezone\netutil.obj,E:\BattleZoneTest\build\obj\Release\battlezone\netutil.obj,386,7508,8,1,1426736,132,0
+E:\BattleZoneTest\build\obj\Release\battlezone\score.obj,E:\BattleZoneTest\build\obj\Release\battlezone\score.obj,387,40008,56,1,1442752,177,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AnimObj.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AnimObj.obj,388,6028,15,1,1443440,34,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Bspcache.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Bspcache.obj,389,140,12,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Bspobj.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Bspobj.obj,390,140,3,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Classfnc.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Classfnc.obj,391,9012,17,1,1448560,88,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Entities.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Entities.obj,392,4996,26,1,1450240,67,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Obj76.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Obj76.obj,393,4020,12,1,1452080,117,0
+E:\BattleZoneTest\build\obj\Release\battlezone\objdb.obj,E:\BattleZoneTest\build\obj\Release\battlezone\objdb.obj,394,2356,5,1,1452896,496,0
+E:\BattleZoneTest\build\obj\Release\battlezone\objtrack.obj,E:\BattleZoneTest\build\obj\Release\battlezone\objtrack.obj,395,140,3,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Obj_util.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Obj_util.obj,396,6128,10,1,1454704,542,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Scrounge.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Scrounge.obj,397,2972,13,1,1455664,11,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Shadows.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Shadows.obj,398,140,20,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Spinner.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Spinner.obj,399,2260,9,1,1457552,6,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Vehicle.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Vehicle.obj,400,432,8,1,1457840,376,0
+E:\BattleZoneTest\build\obj\Release\battlezone\MurmurHash3.obj,E:\BattleZoneTest\build\obj\Release\battlezone\MurmurHash3.obj,401,2372,4,1,1458224,812,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Ogre3d_wrapper.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Ogre3d_wrapper.obj,402,96860,161,1,1470080,90,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Ogre76Archive.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Ogre76Archive.obj,403,272676,58,1,1509472,97,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Ogre76DynamicGeometry.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Ogre76DynamicGeometry.obj,404,44364,48,1,1521920,99,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Ogre76Handler.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Ogre76Handler.obj,405,45444,167,1,1526624,373,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Ogre76SpriteHandler.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Ogre76SpriteHandler.obj,406,34844,123,1,1552096,16,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Bitmap.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Bitmap.obj,407,13172,3,1,1555152,252,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Camera.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Camera.obj,408,5568,8,1,1561680,302,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Color.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Color.obj,409,3988,6,1,1563184,107,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Fadepal.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Fadepal.obj,410,764,12,1,1563632,440,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Font.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Font.obj,411,2412,17,1,1564080,459,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Graphbuf.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Graphbuf.obj,412,1624,5,1,1565264,210,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Lightmd.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Lightmd.obj,413,6292,9,1,1566000,570,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Line.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Line.obj,414,4404,10,1,1570144,44,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Pane.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Pane.obj,415,556,3,1,1570272,259,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Pcx.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Pcx.obj,416,1540,6,1,1570544,620,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Sprites.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Sprites.obj,417,15980,24,1,1572256,400,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Video.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Video.obj,418,4516,18,1,1582960,350,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Ai.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Ai.obj,419,9108,214,1,1586208,328,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Aibuild.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Aibuild.obj,420,36588,206,1,1593488,424,0
+E:\BattleZoneTest\build\obj\Release\battlezone\aip.obj,E:\BattleZoneTest\build\obj\Release\battlezone\aip.obj,421,9856,194,1,1604896,915,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AI_Match.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AI_Match.obj,422,3268,200,1,1610096,313,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Ai_parts.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Ai_parts.obj,423,1440,196,1,1611584,105,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ai_team.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ai_team.obj,424,19604,75,1,1611936,134,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Blobs.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Blobs.obj,425,140,17,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Buildid.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Buildid.obj,426,140,176,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Defense_Map.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Defense_Map.obj,427,144,5,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\DR_Debug.obj,E:\BattleZoneTest\build\obj\Release\battlezone\DR_Debug.obj,428,140,90,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Escort_Goal.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Escort_Goal.obj,429,4732,97,1,1619984,146,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Expression.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Expression.obj,430,11496,22,1,1622432,284,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Genllist.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Genllist.obj,431,140,13,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Geom.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Geom.obj,432,136,9,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Goal.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Goal.obj,433,332,18,1,1624400,12,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Grasfire.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Grasfire.obj,434,2876,19,1,1624416,155,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Id.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Id.obj,435,136,141,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\IParse.obj,E:\BattleZoneTest\build\obj\Release\battlezone\IParse.obj,436,33124,29,1,1625824,91,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Linklist.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Linklist.obj,437,3064,21,1,1636848,109,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Mapgrid.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Mapgrid.obj,438,980,182,1,1637632,237,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Mapgrid_Goal.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Mapgrid_Goal.obj,439,4192,197,1,1637872,133,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Mutils.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Mutils.obj,440,508,164,1,1640576,158,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Nrutil.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Nrutil.obj,441,984,150,1,1640848,98,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Partid.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Partid.obj,442,140,165,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Prereq.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Prereq.obj,443,7076,184,1,1643776,135,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Random.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Random.obj,444,228,143,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\ScheduleGlue.obj,E:\BattleZoneTest\build\obj\Release\battlezone\ScheduleGlue.obj,445,47468,139,1,1660480,43,0
+E:\BattleZoneTest\build\obj\Release\battlezone\scheduler.obj,E:\BattleZoneTest\build\obj\Release\battlezone\scheduler.obj,446,12600,199,1,1665312,300,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Sortlist.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Sortlist.obj,447,672,14,1,1667296,287,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Squad.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Squad.obj,448,4976,201,1,1667584,169,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Stratmap.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Stratmap.obj,449,1168,192,1,1669312,153,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Team.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Team.obj,450,1268,181,1,1669744,80,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Unitid.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Unitid.obj,451,140,176,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\lobby.obj,E:\BattleZoneTest\build\obj\Release\battlezone\lobby.obj,452,320376,541,1,1717488,52,0
+E:\BattleZoneTest\build\obj\Release\battlezone\MapManager.obj,E:\BattleZoneTest\build\obj\Release\battlezone\MapManager.obj,453,17936,124,1,1733296,215,0
+E:\BattleZoneTest\build\obj\Release\battlezone\p2p.obj,E:\BattleZoneTest\build\obj\Release\battlezone\p2p.obj,454,33996,45,1,1737936,530,0
+E:\BattleZoneTest\build\obj\Release\battlezone\StatsAndAchievements.obj,E:\BattleZoneTest\build\obj\Release\battlezone\StatsAndAchievements.obj,455,10524,30,1,1740624,176,0
+E:\BattleZoneTest\build\obj\Release\battlezone\steamInterface.obj,E:\BattleZoneTest\build\obj\Release\battlezone\steamInterface.obj,456,1220,13,1,1741280,34,0
+E:\BattleZoneTest\build\obj\Release\battlezone\VehicleManager.obj,E:\BattleZoneTest\build\obj\Release\battlezone\VehicleManager.obj,457,14740,13,1,1744480,155,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Workshop.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Workshop.obj,458,110648,58,1,1771216,467,0
+E:\BattleZoneTest\build\obj\Release\battlezone\AnimSky.obj,E:\BattleZoneTest\build\obj\Release\battlezone\AnimSky.obj,459,20808,29,1,1774304,411,0
+E:\BattleZoneTest\build\obj\Release\battlezone\RenderableTerrain.obj,E:\BattleZoneTest\build\obj\Release\battlezone\RenderableTerrain.obj,460,74644,138,1,1807808,62,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Terramap.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Terramap.obj,461,38232,48,1,1823520,122,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Terr_asm.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Terr_asm.obj,462,13672,7,1,1832544,886,0
+E:\BattleZoneTest\build\obj\Release\battlezone\zonemgr.obj,E:\BattleZoneTest\build\obj\Release\battlezone\zonemgr.obj,463,8924,23,1,1839376,85,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Zsorting.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Zsorting.obj,464,7636,24,1,1845808,361,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_AlertDlg.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_AlertDlg.obj,465,2988,138,1,1847056,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Esc.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Esc.obj,466,5928,136,1,1848160,1724,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_InstantAction.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_InstantAction.obj,467,7892,146,1,1850976,1813,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Load.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Load.obj,468,7764,137,1,1853920,1440,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Loading.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Loading.obj,469,4736,141,1,1855552,675,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_MainScreen.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_MainScreen.obj,470,18548,150,1,1863232,393,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_MissionArchivesTraining.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_MissionArchivesTraining.obj,471,10444,139,1,1864944,1915,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_MissionArchivesUSA.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_MissionArchivesUSA.obj,472,6956,139,1,1867904,1984,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_MissionArchivesUSSR.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_MissionArchivesUSSR.obj,473,6976,139,1,1870864,1985,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_MissionFailed.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_MissionFailed.obj,474,3836,140,1,1873200,1612,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_MissionSuccess.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_MissionSuccess.obj,475,11048,152,1,1878400,1281,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_MissionTraining.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_MissionTraining.obj,476,8284,137,1,1880544,2379,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_MissionUSA.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_MissionUSA.obj,477,8560,136,1,1883728,2720,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_MissionUSSR.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_MissionUSSR.obj,478,8404,136,1,1887216,2623,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Mods.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Mods.obj,479,12068,137,1,1890544,2689,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_MultiPlayer.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_MultiPlayer.obj,480,4004,131,1,1894752,1351,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Multiplayer_Create.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Multiplayer_Create.obj,481,104252,172,1,1918368,450,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_MultiPlayer_Lobby.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_MultiPlayer_Lobby.obj,482,67856,163,1,1939904,68,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Multiplayer_MapSelect.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Multiplayer_MapSelect.obj,483,25400,131,1,1941456,2850,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Multiplayer_Refresh.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Multiplayer_Refresh.obj,484,1352,123,1,1947776,224,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Multiplayer_Status.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Multiplayer_Status.obj,485,52836,169,1,1962416,108,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Multiplayer_UserSelect.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Multiplayer_UserSelect.obj,486,18524,142,1,1962720,2901,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Multiplayer_VehicleSelect.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Multiplayer_VehicleSelect.obj,487,7280,126,1,1967744,1239,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_OptionsAudio.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_OptionsAudio.obj,488,5820,138,1,1970736,1649,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_OptionsGraphics.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_OptionsGraphics.obj,489,33920,152,1,1975440,9039,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_OptionsInput.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_OptionsInput.obj,490,24168,138,1,1986368,7572,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_OptionsJoystick.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_OptionsJoystick.obj,491,5432,139,1,1996768,1544,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_OptionsParent.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_OptionsParent.obj,492,4648,134,1,1998528,1484,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_OptionsPlay.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_OptionsPlay.obj,493,9564,154,1,2000656,3677,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Save.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Save.obj,494,11168,139,1,2007056,1593,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_SinglePlayer.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_SinglePlayer.obj,495,8584,135,1,2009152,2525,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Splash.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Splash.obj,496,144,122,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Alert.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Alert.obj,497,4964,132,1,2012768,912,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Button.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Button.obj,498,17960,119,1,2013904,533,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Checkbox.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Checkbox.obj,499,144,115,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Checklist.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Checklist.obj,500,21688,120,1,2019520,523,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_MultiplayerDebug.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_MultiplayerDebug.obj,501,1212,116,1,2025408,234,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Multiplayer_SettingButton.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Multiplayer_SettingButton.obj,502,7900,119,1,2025648,1311,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Observer.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Observer.obj,503,16736,14,1,2027680,14,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Overlay.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Overlay.obj,504,1364,115,1,2028976,40,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Parent.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Parent.obj,505,48896,191,1,2037824,58,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_ProgressBar.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_ProgressBar.obj,506,1284,129,1,2038880,260,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Selectlist.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Selectlist.obj,507,26124,132,1,2046160,186,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Slider.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Slider.obj,508,2724,111,1,2046352,505,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_Text.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_Text.obj,509,3556,115,1,2047520,277,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_TextBlock.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_TextBlock.obj,510,20408,130,1,2053072,171,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_TextEntry.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_TextEntry.obj,511,5212,120,1,2053248,475,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_TextPopup.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_TextPopup.obj,512,3236,123,1,2054752,1118,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_UserBar.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_UserBar.obj,513,6352,124,1,2056384,1410,0
+E:\BattleZoneTest\build\obj\Release\battlezone\UI_View.obj,E:\BattleZoneTest\build\obj\Release\battlezone\UI_View.obj,514,27652,144,1,2068208,103,0
+E:\BattleZoneTest\build\obj\Release\battlezone\base64.obj,E:\BattleZoneTest\build\obj\Release\battlezone\base64.obj,515,824,13,1,21008,29,0
+E:\BattleZoneTest\build\obj\Release\battlezone\cmdline.obj,E:\BattleZoneTest\build\obj\Release\battlezone\cmdline.obj,516,2048,9,1,2068320,1539,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Dbgdisp.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Dbgdisp.obj,517,140,24,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Dbghash.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Dbghash.obj,518,140,3,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Dbgmem.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Dbgmem.obj,519,140,7,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Debug.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Debug.obj,520,4464,5,1,2070080,87,0
+E:\BattleZoneTest\build\obj\Release\battlezone\dmemory.obj,E:\BattleZoneTest\build\obj\Release\battlezone\dmemory.obj,521,140,5,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\filters.obj,E:\BattleZoneTest\build\obj\Release\battlezone\filters.obj,522,140,5,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\interval.obj,E:\BattleZoneTest\build\obj\Release\battlezone\interval.obj,523,140,4,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\jparse.obj,E:\BattleZoneTest\build\obj\Release\battlezone\jparse.obj,524,140,6,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\LabelMap.obj,E:\BattleZoneTest\build\obj\Release\battlezone\LabelMap.obj,525,67596,41,1,2077184,103,0
+E:\BattleZoneTest\build\obj\Release\battlezone\localize.obj,E:\BattleZoneTest\build\obj\Release\battlezone\localize.obj,526,676,14,1,2077360,104,0
+E:\BattleZoneTest\build\obj\Release\battlezone\logger.obj,E:\BattleZoneTest\build\obj\Release\battlezone\logger.obj,527,208984,393,1,2094800,125,0
+E:\BattleZoneTest\build\obj\Release\battlezone\machcaps.obj,E:\BattleZoneTest\build\obj\Release\battlezone\machcaps.obj,528,172,6,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Math3d.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Math3d.obj,529,6572,7,1,2115488,617,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Mathstd.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Mathstd.obj,530,140,3,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Mdebug.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Mdebug.obj,531,140,4,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\menu.obj,E:\BattleZoneTest\build\obj\Release\battlezone\menu.obj,532,1308,29,1,2116816,686,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Resource.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Resource.obj,533,1812,26,1,2117712,145,0
+E:\BattleZoneTest\build\obj\Release\battlezone\scrnmgr.obj,E:\BattleZoneTest\build\obj\Release\battlezone\scrnmgr.obj,534,708,13,1,2118304,224,0
+E:\BattleZoneTest\build\obj\Release\battlezone\scrolly.obj,E:\BattleZoneTest\build\obj\Release\battlezone\scrolly.obj,535,4512,21,1,2119104,687,0
+E:\BattleZoneTest\build\obj\Release\battlezone\scrsave.obj,E:\BattleZoneTest\build\obj\Release\battlezone\scrsave.obj,536,436,5,1,2120720,90,0
+E:\BattleZoneTest\build\obj\Release\battlezone\SimCut.obj,E:\BattleZoneTest\build\obj\Release\battlezone\SimCut.obj,537,5064,9,1,2120816,225,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Srandom.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Srandom.obj,538,968,4,1,2123760,261,0
+E:\BattleZoneTest\build\obj\Release\battlezone\textutil.obj,E:\BattleZoneTest\build\obj\Release\battlezone\textutil.obj,539,140,11,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Timers.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Timers.obj,540,1904,157,1,2124928,29,0
+E:\BattleZoneTest\build\obj\Release\battlezone\tinput.obj,E:\BattleZoneTest\build\obj\Release\battlezone\tinput.obj,541,7516,21,1,2124960,25,0
+E:\BattleZoneTest\build\obj\Release\battlezone\vq.obj,E:\BattleZoneTest\build\obj\Release\battlezone\vq.obj,542,2496,4,1,2128288,63,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Vrtlmem.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Vrtlmem.obj,543,140,5,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\wiggle.obj,E:\BattleZoneTest\build\obj\Release\battlezone\wiggle.obj,544,2060,11,1,2129072,1228,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Wrapper.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Wrapper.obj,545,408,5,1,2130304,55,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Damage.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Damage.obj,546,1868,14,1,2130368,230,0
+E:\BattleZoneTest\build\obj\Release\battlezone\compress.obj,E:\BattleZoneTest\build\obj\Release\battlezone\compress.obj,547,980,100,1,2131120,165,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Fileio.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Fileio.obj,548,140,9,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Instid.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Instid.obj,549,704,4,1,2131392,173,0
+E:\BattleZoneTest\build\obj\Release\battlezone\objload.obj,E:\BattleZoneTest\build\obj\Release\battlezone\objload.obj,550,7248,17,1,2131568,681,0
+E:\BattleZoneTest\build\obj\Release\battlezone\othrload.obj,E:\BattleZoneTest\build\obj\Release\battlezone\othrload.obj,551,7908,22,1,2136000,123,0
+E:\BattleZoneTest\build\obj\Release\battlezone\vhclload.obj,E:\BattleZoneTest\build\obj\Release\battlezone\vhclload.obj,552,4340,21,1,2138336,164,0
+E:\BattleZoneTest\build\obj\Release\battlezone\wildmat.obj,E:\BattleZoneTest\build\obj\Release\battlezone\wildmat.obj,553,140,3,-1,0,-1,0
+E:\BattleZoneTest\build\obj\Release\battlezone\world2.obj,E:\BattleZoneTest\build\obj\Release\battlezone\world2.obj,554,6712,11,1,2140800,451,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Zfs.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Zfs.obj,555,4096,11,1,2141776,396,0
+E:\BattleZoneTest\build\obj\Release\battlezone\Zfsaux.obj,E:\BattleZoneTest\build\obj\Release\battlezone\Zfsaux.obj,556,9076,10,1,2146160,87,0
+E:\BattleZoneTest\build\obj\Release\battlezone\PathDialog.res,E:\BattleZoneTest\build\obj\Release\battlezone\PathDialog.res,557,252,2,-1,0,-1,0
+E:\BattleZoneTest\build\bin\Release\battlezone\battlezone98redux.exp,E:\BattleZoneTest\build\bin\Release\battlezone\battlezone98redux.exp,558,304,0,-1,0,-1,0
+E:\BattleZoneTest\source\lzo\lzo1y_s1.obj,E:\BattleZoneTest\source\lzo\lzo1y_s1.obj,-1,0,0,1,512,512,0
+E:\BattleZoneTest\source\lzo\lzo1x_s1.obj,E:\BattleZoneTest\source\lzo\lzo1x_s1.obj,-1,0,0,1,0,512,0
+Import:WINMM.dll,C:\Program Files (x86)\Windows Kits\8.1\lib\winv6.3\um\x86\winmm.lib,560,1636,0,-1,0,-1,0
+WINMM.dll,C:\Program Files (x86)\Windows Kits\8.1\lib\winv6.3\um\x86\winmm.lib,559,196,0,-1,0,-1,0
+Import:IMM32.dll,C:\Program Files (x86)\Windows Kits\8.1\lib\winv6.3\um\x86\imm32.lib,562,72,0,-1,0,-1,0
+IMM32.dll,C:\Program Files (x86)\Windows Kits\8.1\lib\winv6.3\um\x86\imm32.lib,561,132,0,-1,0,-1,0
+Import:DSOUND.dll,D:\Program Files (x86)\Microsoft DirectX SDK (June 2010)\Lib\x86\dsound.lib,564,140,0,-1,0,-1,0
+DSOUND.dll,D:\Program Files (x86)\Microsoft DirectX SDK (June 2010)\Lib\x86\dsound.lib,563,132,0,-1,0,-1,0
+e:\temp\193462\obj.x86fre\misc\dxerr\objfre\i386\dxerra.obj,D:\Program Files (x86)\Microsoft DirectX SDK (June 2010)\Lib\x86\dxerr.lib,565,8728,142,-1,0,-1,0
+e:\temp\193462\obj.x86fre\misc\dxguid\daytona\objfre\i386\dxguid.obj,D:\Program Files (x86)\Microsoft DirectX SDK (June 2010)\Lib\x86\dxguid.lib,566,7164,89,-1,0,-1,0
+Import:COMCTL32.dll,C:\Program Files (x86)\Windows Kits\8.1\lib\winv6.3\um\x86\comctl32.lib,568,76,0,-1,0,-1,0
+COMCTL32.dll,C:\Program Files (x86)\Windows Kits\8.1\lib\winv6.3\um\x86\comctl32.lib,567,140,0,-1,0,-1,0
+Import:KERNEL32.dll,C:\Program Files (x86)\Windows Kits\8.1\lib\winv6.3\um\x86\kernel32.lib,570,5964,0,1,2230614,6,0
+KERNEL32.dll,C:\Program Files (x86)\Windows Kits\8.1\lib\winv6.3\um\x86\kernel32.lib,569,140,0,-1,0,-1,0
+Import:USER32.dll,C:\Program Files (x86)\Windows Kits\8.1\lib\winv6.3\um\x86\user32.lib,572,5172,0,-1,0,-1,0
+USER32.dll,C:\Program Files (x86)\Windows Kits\8.1\lib\winv6.3\um\x86\user32.lib,571,132,0,-1,0,-1,0
+Import:GDI32.dll,C:\Program Files (x86)\Windows Kits\8.1\lib\winv6.3\um\x86\gdi32.lib,574,2112,0,-1,0,-1,0
+GDI32.dll,C:\Program Files (x86)\Windows Kits\8.1\lib\winv6.3\um\x86\gdi32.lib,573,132,0,-1,0,-1,0
+Import:COMDLG32.dll,C:\Program Files (x86)\Windows Kits\8.1\lib\winv6.3\um\x86\comdlg32.lib,576,220,0,-1,0,-1,0
+COMDLG32.dll,C:\Program Files (x86)\Windows Kits\8.1\lib\winv6.3\um\x86\comdlg32.lib,575,140,0,-1,0,-1,0
+Import:ADVAPI32.dll,C:\Program Files (x86)\Windows Kits\8.1\lib\winv6.3\um\x86\advapi32.lib,578,292,0,-1,0,-1,0
+ADVAPI32.dll,C:\Program Files (x86)\Windows Kits\8.1\lib\winv6.3\um\x86\advapi32.lib,577,140,0,-1,0,-1,0
+Import:OgreMain.dll,E:\BattleZoneTest\source\extlibs\vc12\Ogre\lib\Release\OgreMain.lib,580,42180,0,1,2147878,6,0
+OgreMain.dll,E:\BattleZoneTest\source\extlibs\vc12\Ogre\lib\Release\OgreMain.lib,579,140,0,-1,0,-1,0
+Import:OIS.dll,E:\BattleZoneTest\source\extlibs\vc12\Ogre\lib\Release\OIS.lib,582,260,0,-1,0,-1,0
+OIS.dll,E:\BattleZoneTest\source\extlibs\vc12\Ogre\lib\Release\OIS.lib,581,124,0,-1,0,-1,0
+Import:libvorbisfile.dll,E:\BattleZoneTest\source\extlibs\vc12\OgreVideo\deplibs\Release\libvorbisfile.lib,584,384,0,-1,0,-1,0
+libvorbisfile.dll,E:\BattleZoneTest\source\extlibs\vc12\OgreVideo\deplibs\Release\libvorbisfile.lib,583,148,0,-1,0,-1,0
+Import:libtheoraplayer.dll,E:\BattleZoneTest\source\extlibs\vc12\OgreVideo\deplibs\Release\libtheoraplayer.lib,586,916,0,-1,0,-1,0
+libtheoraplayer.dll,E:\BattleZoneTest\source\extlibs\vc12\OgreVideo\deplibs\Release\libtheoraplayer.lib,585,148,0,-1,0,-1,0
+Import:steam_api.dll,E:\BattleZoneTest\source\steam\SDK\lib\steam_api.lib,588,1012,0,-1,0,-1,0
+steam_api.dll,E:\BattleZoneTest\source\steam\SDK\lib\steam_api.lib,587,140,0,-1,0,-1,0
+Import:Plugin_TheoraVideoSystem.dll,E:\BattleZoneTest\build\bin\Release\Plugin_TheoraVideoSystem\Plugin_TheoraVideoSystem.lib,590,1060,0,-1,0,-1,0
+Plugin_TheoraVideoSystem.dll,E:\BattleZoneTest\build\bin\Release\Plugin_TheoraVideoSystem\Plugin_TheoraVideoSystem.lib,589,172,0,-1,0,-1,0
+..\..\build\obj\Release\Lua\bit.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,591,1636,13,1,2205076,42,0
+..\..\build\obj\Release\Lua\lapi.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,592,8976,28,1,2152109,108,0
+..\..\build\obj\Release\Lua\lauxlib.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,593,5904,17,1,2148664,120,0
+..\..\build\obj\Release\Lua\lbaselib.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,594,5172,17,1,2184997,198,0
+..\..\build\obj\Release\Lua\lcode.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,595,7560,26,1,2215924,211,0
+..\..\build\obj\Release\Lua\ldblib.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,596,3380,16,1,2199221,17,0
+..\..\build\obj\Release\Lua\ldebug.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,597,4112,30,1,2157425,197,0
+..\..\build\obj\Release\Lua\ldo.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,598,3588,30,1,2162622,353,0
+..\..\build\obj\Release\Lua\ldump.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,599,1280,18,1,2173401,36,0
+..\..\build\obj\Release\Lua\lfunc.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,600,1416,19,1,2165680,125,0
+..\..\build\obj\Release\Lua\lgc.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,601,3152,24,1,2166525,218,0
+..\..\build\obj\Release\Lua\linit.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,602,264,14,1,2157360,65,0
+..\..\build\obj\Release\Lua\llex.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,603,2632,26,1,2181258,41,0
+..\..\build\obj\Release\Lua\lmathlib.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,604,3336,16,1,2196990,54,0
+..\..\build\obj\Release\Lua\lmem.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,605,636,19,1,2181056,114,0
+..\..\build\obj\Release\Lua\loadlib.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,606,2824,147,1,2202165,97,0
+..\..\build\obj\Release\Lua\lobject.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,607,1480,26,1,2161090,290,0
+..\..\build\obj\Release\Lua\lopcodes.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,608,136,13,-1,0,-1,0
+..\..\build\obj\Release\Lua\lparser.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,609,8296,28,1,2206173,112,0
+..\..\build\obj\Release\Lua\lstate.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,610,1328,24,1,2156446,14,0
+..\..\build\obj\Release\Lua\lstring.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,611,680,20,1,2169973,161,0
+..\..\build\obj\Release\Lua\lstrlib.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,612,5604,17,1,2191023,39,0
+..\..\build\obj\Release\Lua\ltable.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,613,3120,22,1,2170588,60,0
+..\..\build\obj\Release\Lua\ltablib.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,614,1740,14,1,2189106,125,0
+..\..\build\obj\Release\Lua\ltm.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,615,556,21,1,2180860,39,0
+..\..\build\obj\Release\Lua\lundump.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,616,1400,24,1,2214425,44,0
+..\..\build\obj\Release\Lua\lvm.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,617,3572,29,1,2174232,339,0
+..\..\build\obj\Release\Lua\lzio.obj,E:\BattleZoneTest\build\bin\Release\Lua\Lua.lib,618,820,18,1,2162344,59,0
+..\..\build\obj\Release\PebbleFL\PblTrace.obj,E:\BattleZoneTest\build\bin\Release\PebbleFL\PebbleFL.lib,619,376,86,1,2230624,42,0
+..\..\build\obj\Release\RedMemoryFL\RedMemoryPool.obj,E:\BattleZoneTest\build\bin\Release\RedMemoryFL\RedMemoryFL.lib,620,2704,71,1,2220864,342,0
+e:\8180.obj.x86fre\com\published\idlole\public\objfre\i386\cguid_i.obj,C:\Program Files (x86)\Windows Kits\8.1\lib\winv6.3\um\x86\uuid.lib,621,152,20,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\INTEL\dll_lib\ehvecctr.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,622,868,8,1,2223752,98,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\INTEL\dll_lib\ehvecdtr.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,623,1484,86,1,2223850,111,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\INTEL\dll_lib\unhandld.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,624,616,97,1,2225338,65,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativec\atonexit.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,625,1148,94,1,2222896,60,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativec\cinitexe.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,626,248,92,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativec\crtexew.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,627,1784,101,1,2224092,185,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativec\dllargv.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,628,332,89,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativec\gs_cookie.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,629,252,83,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativec\gs_report.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,630,996,86,1,2223220,61,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativec\gs_support.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,631,644,99,1,2225761,156,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativec\merr.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,632,396,90,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativec\natstart.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,633,248,89,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativec\pesect.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,634,1240,83,1,2225440,67,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativecpp\ti_inst.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,635,368,20,1,2223146,74,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativec\wildcard.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,636,248,89,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\asm\dllsupp.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,637,304,1,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\asm\lldiv.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,638,480,3,1,2230736,170,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\asm\llmul.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,639,368,3,1,2230912,52,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\asm\llrem.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,640,480,3,1,2231024,178,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\INTEL\dll_lib\chandler4gs.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,641,704,84,1,2225273,35,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\INTEL\dll_lib\cpu_disp.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,642,740,90,1,2226032,377,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativec\fp8.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,643,472,92,1,2225981,39,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\INTEL\dll_lib\ftol2.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,644,644,2,1,2224880,171,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\INTEL\dll_lib\ftol3.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,645,1892,2,1,2231216,973,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativec\loadcfg.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,646,248,83,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativec\secchk.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,647,436,84,1,2222869,15,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\INTEL\dll_lib\sehprolg4.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,648,436,1,1,2225184,89,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativec\_newmode.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,649,248,89,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativec\xncommod.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,650,248,89,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativec\xtxtmode.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,651,184,9,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativec\xthdloc.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,652,248,92,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\asm\alloca16.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,653,384,2,1,2230976,44,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\asm\chkstk.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,654,384,2,1,2224800,43,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\almap\vsnprintf_s.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,-1,0,0,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\almap\vsnprintf.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,-1,0,0,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\st_obj\almap\time.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,-1,0,0,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\vmath\asm\\svml_ssinf4_sse2.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,655,584,2,1,2232208,448,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\vmath\asm\\svml_ssinf4_dispatch.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,656,400,1,1,2230720,5,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\vmath\asm\\svml_dtrig.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,657,2432,2,1,2232672,2384,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\rtc\nativecpp\\initsect.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,658,544,93,1,2225917,32,0
+MSVCR120.dll,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,660,140,0,-1,0,-1,0
+Import:MSVCR120.dll,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\MSVCRT.lib,659,17844,0,1,2224080,6,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\st_obj\oldnames\putch.obi,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\OLDNAMES.lib,-1,0,0,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\st_obj\oldnames\getcwd.obi,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\OLDNAMES.lib,-1,0,0,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\st_obj\oldnames\close.obi,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\OLDNAMES.lib,-1,0,0,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\st_obj\oldnames\open.obi,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\OLDNAMES.lib,-1,0,0,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\st_obj\oldnames\read.obi,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\OLDNAMES.lib,-1,0,0,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\st_obj\oldnames\unlink.obi,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\OLDNAMES.lib,-1,0,0,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\st_obj\oldnames\stricmp.obi,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\OLDNAMES.lib,-1,0,0,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\st_obj\oldnames\strdup.obi,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\OLDNAMES.lib,-1,0,0,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\st_obj\oldnames\strlwr.obi,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\OLDNAMES.lib,-1,0,0,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\st_obj\oldnames\strnicmp.obi,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\OLDNAMES.lib,-1,0,0,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\st_obj\oldnames\strupr.obi,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\OLDNAMES.lib,-1,0,0,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\st_obj\oldnames\fileleng.obi,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\OLDNAMES.lib,-1,0,0,-1,0,-1,0
+f:\binaries\Intermediate\vctools\crt_bld\SELF_X86\crt\prebuild\build\INTEL\dll_obj\nativecpp\p\locale0_implib.obj,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\msvcprt.lib,661,1192,14,1,2226488,21,0
+MSVCP120.dll,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\msvcprt.lib,663,140,0,-1,0,-1,0
+Import:MSVCP120.dll,D:\Program Files (x86)\Microsoft Visual Studio 12.0\VC\lib\msvcprt.lib,662,10572,0,1,2226592,6,0
+bin.v2\libs\system\build\msvc-12.0\release\link-static\threading-multi\error_code.obj,E:\BattleZoneTest\source\extlibs\vc12\boost\lib\libboost_system-vc120-mt-1_59.lib,664,188,0,1,2226608,9,0
+* Linker *,,665,1364,0,-1,0,-1,0

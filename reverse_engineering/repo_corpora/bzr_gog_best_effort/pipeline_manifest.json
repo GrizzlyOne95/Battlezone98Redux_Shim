@@ -1,0 +1,19 @@
+{
+  "binary_path": "C:\\GOG Games\\Battlezone 98 Redux\\battlezone98redux.exe",
+  "binary_sha256": "8d71f56c1314e69a8ad38f4eeaf20a8ff825965a84cf196e5f77ea4cc3377413",
+  "pdb_path": "C:\\GOG Games\\Battlezone 98 Redux\\battlezone98redux.pdb",
+  "output_root": "C:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort",
+  "ghidra_project_path": "C:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\ghidra_projects",
+  "ghidra_project_name": "battlezone98redux.exe-6777ca",
+  "counts": {
+    "ascii_strings": 15255,
+    "utf16_strings": 77,
+    "merged_rva_names": 497
+  },
+  "pdb_exact_match": false,
+  "decomp_dir": "C:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\ghidrecomp\\results\\bins\\battlezone98redux.exe-6777ca\\decomps",
+  "inventory_dir": "C:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\inventory",
+  "strings_dir": "C:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\binary_strings",
+  "pdb_dir": "C:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\pdb_reference",
+  "logs_dir": "C:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\logs"
+}

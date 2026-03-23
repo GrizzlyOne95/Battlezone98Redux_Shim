@@ -1,0 +1,8 @@
+
+void FUN_004047c0(void)
+
+{
+  std::allocator<char>::allocator<char>((allocator<char> *)&DAT_0094ff15);
+  return;
+}
+
