@@ -477,7 +477,14 @@ broader session-level networking bundle.
    - newly visible chunk geometry
    - changed behavior in chunk impacts that suggests the object now has a
      valid active render handle
-7. Inspect the shim log for lines beginning with `[CHUNK]`.
+7. Inspect `openshim.log` or `winmm_shim.log` for lines beginning with
+   `[CHUNK]`.
+
+Current logging note:
+
+- chunk experiment diagnostics are mirrored into both `openshim.log` and
+  `winmm_shim.log`
+- older builds may only have the chunk diagnostics in `winmm_shim.log`
 
 Expected log signals:
 

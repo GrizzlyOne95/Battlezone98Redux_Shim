@@ -1319,6 +1319,21 @@ namespace BZROpenShim
             return static_cast<uint32_t>(value);
         }
 
+        static void LogChunkDiagnostic(const char* component, const wchar_t* fmt, ...)
+        {
+            if (!fmt || !*fmt)
+                return;
+
+            wchar_t buffer[4096] = {};
+            va_list args;
+            va_start(args, fmt);
+            _vsnwprintf_s(buffer, _countof(buffer), _TRUNCATE, fmt, args);
+            va_end(args);
+
+            Log(L"%ls", buffer);
+            LogShimW(LogLevel::Info, component, L"%ls", buffer);
+        }
+
         static uint32_t ClampSatelliteVisibilityObjectLimit(long value)
         {
             if (value < 8)
@@ -2656,7 +2671,7 @@ namespace BZROpenShim
             {
                 if (!g_ChunkMeshProxyFailureLogged)
                 {
-                    Log(L"[CHUNKMESH] Missing Ogre entity symbols; mesh proxy disabled for now\n");
+                    LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Missing Ogre entity symbols; mesh proxy disabled for now\n");
                     g_ChunkMeshProxyFailureLogged = true;
                 }
                 return false;
@@ -2667,7 +2682,7 @@ namespace BZROpenShim
             {
                 if (!g_ChunkMeshProxyWaitLogged)
                 {
-                    Log(L"[CHUNKMESH] Scene manager unavailable; waiting to initialize chunk mesh proxy\n");
+                    LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Scene manager unavailable; waiting to initialize chunk mesh proxy\n");
                     g_ChunkMeshProxyWaitLogged = true;
                 }
                 return false;
@@ -2678,7 +2693,7 @@ namespace BZROpenShim
             {
                 if (!g_ChunkMeshProxyFailureLogged)
                 {
-                    Log(L"[CHUNKMESH] Root scene node unavailable sceneManager=0x%08X\n",
+                    LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Root scene node unavailable sceneManager=0x%08X\n",
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneManager)));
                     g_ChunkMeshProxyFailureLogged = true;
                 }
@@ -2701,7 +2716,7 @@ namespace BZROpenShim
             {
                 if (!g_ChunkMeshProxyFailureLogged)
                 {
-                    Log(L"[CHUNKMESH] Entity creation failed mesh=%hs node=0x%08X entity=0x%08X\n",
+                    LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Entity creation failed mesh=%hs node=0x%08X entity=0x%08X\n",
                         meshName,
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneNode)),
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entity)));
@@ -2716,7 +2731,7 @@ namespace BZROpenShim
             g_ChunkMeshProxyWaitLogged = false;
             if (!g_ChunkMeshProxyInitLogged)
             {
-                Log(L"[CHUNKMESH] Initialized proof mesh proxy mesh=%hs\n", meshName);
+                LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Initialized proof mesh proxy mesh=%hs\n", meshName);
                 g_ChunkMeshProxyInitLogged = true;
             }
             return true;
@@ -2756,7 +2771,7 @@ namespace BZROpenShim
             {
                 if (!g_ChunkProxyFailureLogged)
                 {
-                    Log(L"[CHUNKPROXY] Missing Ogre billboard symbols; proxy debug disabled for now\n");
+                    LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] Missing Ogre billboard symbols; proxy debug disabled for now\n");
                     g_ChunkProxyFailureLogged = true;
                 }
                 return false;
@@ -2767,7 +2782,7 @@ namespace BZROpenShim
             {
                 if (!g_ChunkProxyWaitLogged)
                 {
-                    Log(L"[CHUNKPROXY] Scene manager unavailable; waiting to initialize chunk proxy debug\n");
+                    LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] Scene manager unavailable; waiting to initialize chunk proxy debug\n");
                     g_ChunkProxyWaitLogged = true;
                 }
                 return false;
@@ -2784,7 +2799,7 @@ namespace BZROpenShim
             {
                 if (!g_ChunkProxyFailureLogged)
                 {
-                    Log(L"[CHUNKPROXY] BillboardSet creation failed sceneManager=0x%08X root=0x%08X set=0x%08X\n",
+                    LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] BillboardSet creation failed sceneManager=0x%08X root=0x%08X set=0x%08X\n",
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneManager)),
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rootNode)),
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(billboardSet)));
@@ -2802,7 +2817,7 @@ namespace BZROpenShim
             {
                 if (!g_ChunkProxyFailureLogged)
                 {
-                    Log(L"[CHUNKPROXY] BillboardSet setup fault set=0x%08X code=0x%08X\n",
+                    LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] BillboardSet setup fault set=0x%08X code=0x%08X\n",
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(billboardSet)),
                         0u);
                     g_ChunkProxyFailureLogged = true;
@@ -2826,7 +2841,7 @@ namespace BZROpenShim
             g_ChunkProxyWaitLogged = false;
             if (!g_ChunkProxyInitLogged)
             {
-                Log(L"[CHUNKPROXY] Initialized billboard debug set=0x%08X cap=%u size=%.2f\n",
+                LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] Initialized billboard debug set=0x%08X cap=%u size=%.2f\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(billboardSet)),
                     g_ChunkProxyCapacity,
                     g_ChunkProxyDebugSize);
@@ -2840,7 +2855,7 @@ namespace BZROpenShim
         {
             if (slot.active && reason && AcquireChunkLogSlot())
             {
-                Log(L"[CHUNKPROXY] release obj=0x%08X billboard=0x%08X entity=0x%08X geom=0x%08X geomName=%hs geomKind=%hs reason=%ls\n",
+                LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] release obj=0x%08X billboard=0x%08X entity=0x%08X geom=0x%08X geomName=%hs geomKind=%hs reason=%ls\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.billboard)),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.entity)),
@@ -2908,7 +2923,7 @@ namespace BZROpenShim
 
             if (slot.billboard && setPosition && !slot.billboardAssigned && AcquireChunkLogSlot())
             {
-                Log(L"[CHUNKPROXY] assigned obj=0x%08X billboard=0x%08X geom=0x%08X geomName=%hs geomKind=%hs pos=(%.4f, %.4f, %.4f)\n",
+                LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] assigned obj=0x%08X billboard=0x%08X geom=0x%08X geomName=%hs geomKind=%hs pos=(%.4f, %.4f, %.4f)\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.billboard)),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
@@ -2942,7 +2957,7 @@ namespace BZROpenShim
 
                 if (!slot.meshAssigned && AcquireChunkLogSlot())
                 {
-                    Log(L"[CHUNKMESH] assigned obj=0x%08X entity=0x%08X geom=0x%08X geomName=%hs mesh=%hs pos=(%.4f, %.4f, %.4f)\n",
+                    LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] assigned obj=0x%08X entity=0x%08X geom=0x%08X geomName=%hs mesh=%hs pos=(%.4f, %.4f, %.4f)\n",
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.entity)),
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
@@ -3080,7 +3095,7 @@ namespace BZROpenShim
             freeSlot->meshAssigned = false;
             if (AcquireChunkLogSlot())
             {
-                Log(L"[CHUNKPROXY] tracking obj=0x%08X geom=0x%08X geomName=%hs geomKind=%hs ownerEntity=0x%08X ownerBase=%hs ownerFile=%hs mesh=%hs pos=(%.4f, %.4f, %.4f)\n",
+                LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] tracking obj=0x%08X geom=0x%08X geomName=%hs geomKind=%hs ownerEntity=0x%08X ownerBase=%hs ownerFile=%hs mesh=%hs pos=(%.4f, %.4f, %.4f)\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectBytes)),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(geomRef)),
                     GetChunkGeomNameForLog(geomName),
@@ -3160,7 +3175,7 @@ namespace BZROpenShim
                 const float tuning8044 = *reinterpret_cast<const float*>(thisBytes + kChunkEffectTuningBaseOffset + 0xC);
                 const float tuning8048 = *reinterpret_cast<const float*>(thisBytes + kChunkEffectTuningBaseOffset + 0x10);
 
-                Log(L"[CHUNKEFFECT] this=0x%08X dt=%.4f count=%u gate=0x%08X templateList=0x%08X templateCount=%u tune8038=%.4f tune8044=%.4f tune8048=%.4f\n",
+                LogChunkDiagnostic("chunkeffect", L"[CHUNKEFFECT] this=0x%08X dt=%.4f count=%u gate=0x%08X templateList=0x%08X templateCount=%u tune8038=%.4f tune8044=%.4f tune8048=%.4f\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)),
                     static_cast<double>(dt),
                     count,
@@ -3177,7 +3192,7 @@ namespace BZROpenShim
                     ChunkEffectActiveEntry entry = {};
                     if (!TryReadChunkEffectEntry(thisBytes, index, entry))
                     {
-                        Log(L"[CHUNKEFFECT]   entry[%u] fault\n", index);
+                        LogChunkDiagnostic("chunkeffect", L"[CHUNKEFFECT]   entry[%u] fault\n", index);
                         continue;
                     }
 
@@ -3202,7 +3217,7 @@ namespace BZROpenShim
                     }
                     TryReadChunkGeomIdentity(entry.objectBytes, geomRef, geomName, sizeof(geomName));
 
-                    Log(L"[CHUNKEFFECT]   entry[%u] obj=0x%08X reserved=0x%08X classId=%u flags=0x%08X owner=0x%08X timer=%.6f geom=0x%08X geomName=%hs geomKind=%hs pos=(%.4f, %.4f, %.4f) vel=(%.4f, %.4f, %.4f)\n",
+                    LogChunkDiagnostic("chunkeffect", L"[CHUNKEFFECT]   entry[%u] obj=0x%08X reserved=0x%08X classId=%u flags=0x%08X owner=0x%08X timer=%.6f geom=0x%08X geomName=%hs geomKind=%hs pos=(%.4f, %.4f, %.4f) vel=(%.4f, %.4f, %.4f)\n",
                         index,
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entry.objectBytes)),
                         entry.reserved,
@@ -3223,13 +3238,13 @@ namespace BZROpenShim
 
                 if (count > entryLimit)
                 {
-                    Log(L"[CHUNKEFFECT]   ... truncated %u additional entries\n",
+                    LogChunkDiagnostic("chunkeffect", L"[CHUNKEFFECT]   ... truncated %u additional entries\n",
                         count - entryLimit);
                 }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                Log(L"[CHUNKEFFECT] sample fault this=0x%08X code=0x%08X\n",
+                LogChunkDiagnostic("chunkeffect", L"[CHUNKEFFECT] sample fault this=0x%08X code=0x%08X\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)),
                     static_cast<uint32_t>(GetExceptionCode()));
             }
@@ -3370,7 +3385,7 @@ namespace BZROpenShim
                 const void* classPtr = *reinterpret_cast<void* const*>(objectBytes + 0x88);
                 const void* gameObj = *reinterpret_cast<void* const*>(objectBytes + 0x8C);
 
-                Log(L"[CHUNK]   obj76Probe parent=0x%08X sibling=0x%08X child=0x%08X classId=0x%X classPtr=0x%08X gameObj=0x%08X\n",
+                LogChunkDiagnostic("chunk", L"[CHUNK]   obj76Probe parent=0x%08X sibling=0x%08X child=0x%08X classId=0x%X classPtr=0x%08X gameObj=0x%08X\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parent)),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sibling)),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(child)),
@@ -3380,7 +3395,7 @@ namespace BZROpenShim
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                Log(L"[CHUNK]   obj76Probe fault code=0x%08X\n",
+                LogChunkDiagnostic("chunk", L"[CHUNK]   obj76Probe fault code=0x%08X\n",
                     static_cast<uint32_t>(GetExceptionCode()));
             }
         }
@@ -3433,7 +3448,7 @@ namespace BZROpenShim
                 const void* classPtr = *reinterpret_cast<void* const*>(objectBytes + 0x88);
                 const void* gameObj = *reinterpret_cast<void* const*>(objectBytes + 0x8C);
 
-                Log(L"[CHUNK] classChange obj=0x%08X old=0x%X new=0x%X parent=0x%08X sibling=0x%08X child=0x%08X classPtr=0x%08X gameObj=0x%08X\n",
+                LogChunkDiagnostic("chunk", L"[CHUNK] classChange obj=0x%08X old=0x%X new=0x%X parent=0x%08X sibling=0x%08X child=0x%08X classPtr=0x%08X gameObj=0x%08X\n",
                     static_cast<uint32_t>(objectKey),
                     previousClassId,
                     classId,
@@ -3445,7 +3460,7 @@ namespace BZROpenShim
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                Log(L"[CHUNK] classChange obj=0x%08X old=0x%X new=0x%X probe=fault code=0x%08X\n",
+                LogChunkDiagnostic("chunk", L"[CHUNK] classChange obj=0x%08X old=0x%X new=0x%X probe=fault code=0x%08X\n",
                     static_cast<uint32_t>(objectKey),
                     previousClassId,
                     classId,
@@ -3476,7 +3491,7 @@ namespace BZROpenShim
             const uintptr_t entriesPtr = lookup ? reinterpret_cast<uintptr_t>(lookup->entries) : 0;
             const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(objectBytes);
 
-            Log(L"[CHUNK] %hs obj=0x%08X variant=0x%08X resolved=0x%08X before=0x%08X after=0x%08X class=0x%04X classId=0x%X count=%u cached=0x%08X entries=0x%08X reason=%hs idx=%d key=0x%08X\n",
+            LogChunkDiagnostic("chunk", L"[CHUNK] %hs obj=0x%08X variant=0x%08X resolved=0x%08X before=0x%08X after=0x%08X class=0x%04X classId=0x%X count=%u cached=0x%08X entries=0x%08X reason=%hs idx=%d key=0x%08X\n",
                 stage,
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectBytes)),
                 variant,
@@ -3492,7 +3507,7 @@ namespace BZROpenShim
                 selectedIndex,
                 selectedKey);
 
-            Log(L"[CHUNK]   direct root=0x%08X entity=0x%08X light=0x%08X probe=%hs | owner=0x%08X ownerBridge=0x%08X ownerEntity=0x%08X ownerObj=0x%08X ownerOgre=0x%08X ownerLight=0x%08X ownerProbe=%hs ownerNameProbe=%hs ownerBase=%hs ownerFile=%hs ownerMesh=%hs\n",
+            LogChunkDiagnostic("chunk", L"[CHUNK]   direct root=0x%08X entity=0x%08X light=0x%08X probe=%hs | owner=0x%08X ownerBridge=0x%08X ownerEntity=0x%08X ownerObj=0x%08X ownerOgre=0x%08X ownerLight=0x%08X ownerProbe=%hs ownerNameProbe=%hs ownerBase=%hs ownerFile=%hs ownerMesh=%hs\n",
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bridgeSnapshot.directBridgeRoot)),
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bridgeSnapshot.directOgreEntity)),
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bridgeSnapshot.directOgreLight)),
@@ -3518,7 +3533,7 @@ namespace BZROpenShim
             for (uint32_t index = 0; index < entryLimit; ++index)
             {
                 const BzrGeoEntry& entry = lookup->entries[index];
-                Log(L"[CHUNK]   entry[%u] key=0x%08X handle=0x%08X unk8=0x%08X unkC=0x%08X%s\n",
+                LogChunkDiagnostic("chunk", L"[CHUNK]   entry[%u] key=0x%08X handle=0x%08X unk8=0x%08X unkC=0x%08X%s\n",
                     index,
                     entry.packedKey,
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entry.handle)),
@@ -3529,7 +3544,7 @@ namespace BZROpenShim
 
             if (lookup->count > entryLimit)
             {
-                Log(L"[CHUNK]   ... truncated %u additional entries\n",
+                LogChunkDiagnostic("chunk", L"[CHUNK]   ... truncated %u additional entries\n",
                     lookup->count - entryLimit);
             }
         }
@@ -11271,22 +11286,22 @@ namespace BZROpenShim
             g_TurretAimPitchMultiplierEnhanced = 0.95f;
         }
         g_TurretAimPitchMultiplier = g_TurretAimPitchEnabled ? g_TurretAimPitchMultiplierEnhanced : 0.5f;
-        Log(L"[CHUNK] Force-first-geo fallback: %hs\n",
+        LogChunkDiagnostic("chunk", L"[CHUNK] Force-first-geo fallback: %hs\n",
             g_EnableChunkRenderFallback ? "enabled" : "disabled");
-        Log(L"[CHUNK] Trace logging: %hs%s budget=%ld entryLimit=%u\n",
+        LogChunkDiagnostic("chunk", L"[CHUNK] Trace logging: %hs%s budget=%ld entryLimit=%u\n",
             g_TraceChunkRender ? "enabled" : "disabled",
             g_TraceChunkRenderVerbose ? " verbose" : "",
             static_cast<long>(g_ChunkRenderLogBudget),
             g_ChunkTraceEntryLimit);
-        Log(L"[CHUNKPROXY] Placeholder proxy debug: %hs cap=%u size=%.2f\n",
+        LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] Placeholder proxy debug: %hs cap=%u size=%.2f\n",
             g_EnableChunkProxyDebug ? "enabled" : "disabled",
             g_ChunkProxyCapacity,
             g_ChunkProxyDebugSize);
-        Log(L"[CHUNKMESH] Proof mesh proxy: %hs targetGeo=%hs mesh=%hs\n",
+        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Proof mesh proxy: %hs targetGeo=%hs mesh=%hs\n",
             g_EnableChunkMeshProxy ? "enabled" : "disabled",
             kChunkMeshProofTargetGeoName,
             kChunkMeshProofMeshName);
-        Log(L"[CHUNKEFFECT] Runtime manager trace: %hs vtableSlot=0x%08X orig=0x%08X\n",
+        LogChunkDiagnostic("chunkeffect", L"[CHUNKEFFECT] Runtime manager trace: %hs vtableSlot=0x%08X orig=0x%08X\n",
             g_TraceChunkEffectRuntime ? "enabled" : "disabled",
             static_cast<uint32_t>(kChunkEffectVtableSimulateSlotAddr),
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_ChunkEffectSimulate)));
@@ -12474,7 +12489,7 @@ namespace BZROpenShim
         {
             if (AcquireChunkLogSlot())
             {
-                Log(L"[CHUNK] Resolve hook exception obj=0x%08X variant=0x%08X resolved=0x%08X code=0x%08X\n",
+                LogChunkDiagnostic("chunk", L"[CHUNK] Resolve hook exception obj=0x%08X variant=0x%08X resolved=0x%08X code=0x%08X\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectPtr)),
                     variant,
                     resolved,
