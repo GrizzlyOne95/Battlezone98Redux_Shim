@@ -2352,6 +2352,28 @@ namespace BZROpenShim
         FillRel32Payloads(patches, isSteam);
         WaitForExpectedBytes(patches, isSteam);
         RetryDeferredRuntimeHooks();
+        if (isSteam && !AreInputBindingUiHooksInstalled())
+        {
+            constexpr int kInputUiRetryAttempts = 2500;
+            constexpr DWORD kInputUiRetryDelayMs = 10;
+            Log(L"[INFO] Waiting for Steam input UI hook sites to settle...\n");
+            for (int attempt = 0; attempt < kInputUiRetryAttempts; ++attempt)
+            {
+                if (AreInputBindingUiHooksInstalled())
+                {
+                    Log(L"[OK]   Steam input UI hook sites settled after %d attempts\n", attempt + 1);
+                    break;
+                }
+
+                Sleep(kInputUiRetryDelayMs);
+                RetryDeferredRuntimeHooks();
+            }
+
+            if (!AreInputBindingUiHooksInstalled())
+            {
+                Log(L"[WARN] Steam input UI hook sites never settled; stock input screen will remain active\n");
+            }
+        }
 
         // 5. Apply patches
         int applied = 0;

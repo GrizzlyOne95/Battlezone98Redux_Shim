@@ -8,6 +8,7 @@ namespace BZROpenShim
     // Runtime-resolved BZR pointers and helpers.
     void ResolveBzrHooks(bool isSteam);
     void RetryDeferredRuntimeHooks();
+    bool AreInputBindingUiHooksInstalled();
     void InitBzrHookStrings();
     void SetProducerBuildMenuOriginal(void* target);
 

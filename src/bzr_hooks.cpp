@@ -90,9 +90,14 @@ namespace BZROpenShim
                                               const char* label,
                                               float x, float y, float w, float h,
                                               uint32_t flags, void* parent, int a);
+    using FnUiOverlayCtor = void* (__thiscall*)(void* self,
+                                                const char* label,
+                                                float x, float y, float w, float h,
+                                                uint32_t flags, void* parent, int a);
     using FnUiSetStr = void(__thiscall*)(void* self, const char* str);
     using FnUiSetInt = void(__thiscall*)(void* self, void* param);
     using FnUiSetCb  = void(__thiscall*)(void* self, void* cb);
+    using FnUiSetActive = void(__thiscall*)(void* self, uint8_t value);
     using FnUiAddChild = void(__thiscall*)(void* parent, void* child, int flags);
     using FnUiDialogAction = void(__thiscall*)(void* thisPtr, int value);
     using FnPlayGlobalSound = int(__cdecl*)(const char* filename, uint32_t arg1, uint32_t arg2, uint32_t arg3);
@@ -147,6 +152,11 @@ namespace BZROpenShim
                                             void* outResults);
     using FnRangeResultsGetNext = uint32_t(__thiscall*)(void* results, uint32_t** outHandlePtr);
     using FnOptionsInputCtor = void* (__thiscall*)(void* thisPtr);
+    using FnOptionsInputKeyReleased = bool(__thiscall*)(void* thisPtr, uint32_t key, uint32_t keyCode);
+    using FnKeyConfigSetKey = int(__thiscall*)(void* thisPtr, const char* command, const char* keyName);
+    using FnWriteInputMapKey = void(__cdecl*)(const char* command, const char* keyName);
+    using FnMapKeyNameFromCode = void(__cdecl*)(uint32_t keyCode, char* outBuffer);
+    using FnReloadGameKeyMap = void(__cdecl*)();
     using FnRecordDeath = void(__cdecl*)(int killedTeam, int killerTeam);
     using FnCalcRangeCraft = void(__cdecl*)(void* craft,
                                             float* closeRange,
@@ -177,6 +187,7 @@ namespace BZROpenShim
 
     static FnUiButtonCtor g_BzrFn_ButtonCtor = nullptr; // 0x007C2480
     static FnUiLabelCtor g_BzrFn_LabelCtor  = nullptr; // 0x007CC390
+    static FnUiOverlayCtor g_BzrFn_OverlayCtor = nullptr; // 0x007D1CC0
     static FnUiSetStr g_BzrFn_SetTextureOff = nullptr; // 0x007D2870
     static FnUiSetStr g_BzrFn_SetTextureOver = nullptr; // 0x007C2F10
     static FnUiSetStr g_BzrFn_SetTextureOn = nullptr; // 0x007C2E80
@@ -185,6 +196,7 @@ namespace BZROpenShim
     static FnUiSetInt g_BzrFn_LabelState = nullptr; // 0x007CC5C0
     static FnUiSetCb g_BzrFn_SetOnClick = nullptr; // 0x007C23E0
     static FnUiSetCb g_BzrFn_SetOnHover = nullptr; // 0x007C23C0
+    static FnUiSetActive g_BzrFn_UiSetActive = nullptr; // 0x007D3310
     static FnUiAddChild g_BzrFn_AddChild = nullptr; // 0x007D2110
     static FnUiDialogAction g_BzrFn_UiDialogSetEnabled = nullptr; // 0x007C9170
     static FnUiDialogAction g_BzrFn_UiDialogAdvance = nullptr; // 0x007C7930
@@ -236,6 +248,11 @@ namespace BZROpenShim
     static FnRangeSearch g_BzrFn_CollisionRangeSearch = nullptr;
     static FnRangeResultsGetNext g_BzrFn_RangeResultsGetNext = nullptr;
     static FnOptionsInputCtor g_BzrFn_OptionsInputCtor = nullptr;
+    static FnOptionsInputKeyReleased g_BzrFn_OptionsInputKeyReleased = nullptr;
+    static FnKeyConfigSetKey g_BzrFn_KeyConfigSetKey = nullptr;
+    static FnWriteInputMapKey g_BzrFn_WriteInputMapKey = nullptr;
+    static FnMapKeyNameFromCode g_BzrFn_MapKeyNameFromCode = nullptr;
+    static FnReloadGameKeyMap g_BzrFn_ReloadGameKeyMap = nullptr;
     static FnRecordDeath g_BzrFn_RecordDeath = nullptr;
     static FnCalcRangeCraft g_BzrFn_CalcRangeCraft = nullptr;
     static FnProcessDoSubTask g_BzrFn_OffensiveProcessDoSubTask = nullptr;
@@ -250,6 +267,7 @@ namespace BZROpenShim
     static bool g_IsSteamExe = false;
 
     void* __fastcall OptionsInputPopulateUiHook(void* thisPtr, void* /*edx*/);
+    bool __fastcall OptionsInputKeyReleasedHook(void* thisPtr, void* /*edx*/, uint32_t key, uint32_t keyCode);
 
     namespace
     {
@@ -369,9 +387,14 @@ namespace BZROpenShim
         // are not reliable function-entry hooks against the current Redux binary.
         // The stock input screen constructor was recovered from string xrefs instead.
         constexpr uintptr_t kOptionsInputCtorAddr = 0x007B25B0;
+        constexpr uintptr_t kOptionsInputKeyReleasedAddr = 0x007B48C0;
         constexpr uintptr_t kOptionsInputScreenFactoryCallerAddr = 0x007C8600;
+        constexpr uintptr_t kOptionsInputBackClickAddr = 0x007B2210;
+        constexpr uintptr_t kOptionsInputDefaultsClickAddr = 0x007B2230;
         constexpr size_t kInlineDetourMaxPatchLen = 16;
         constexpr size_t kOptionsInputCtorDetourLen = 10;
+        constexpr size_t kOptionsInputKeyReleasedDetourLen = 9;
+        constexpr size_t kOptionsInputKeyConfigOffset = 0x188;
         constexpr size_t kPersonSimulateDetourLen = 8;
         constexpr size_t kRecordDeathDetourLen = 6;
         constexpr ULONGLONG kCareerStatsMpHookRetryMs = 1000;
@@ -402,6 +425,11 @@ namespace BZROpenShim
         constexpr uintptr_t kGogAISpentCreditRefundAddr = 0x00690020;
         constexpr uintptr_t kGogUnitsSOrderStopAddr = 0x00416280;
         constexpr uintptr_t kGogAIBuildUnassignedCCAddAddr = 0x00690770;
+        constexpr uintptr_t kGogKeyConfigSetKeyAddr = 0x0081C440;
+        constexpr uintptr_t kGogWriteInputMapKeyAddr = 0x0061F1C0;
+        constexpr uintptr_t kGogMapKeyNameFromCodeAddr = 0x00434F60;
+        constexpr uintptr_t kGogReloadGameKeyMapAddr = 0x00620980;
+        constexpr uintptr_t kGogUiOverlayCtorAddr = 0x007D1CC0;
         constexpr uintptr_t kAiGameInitialisedAddr = 0x00930F08;
         constexpr uintptr_t kAiTeamTableAddr = 0x00920F04;
         constexpr uintptr_t kAiTeamDataBaseAddr = 0x02CE9B18;
@@ -660,8 +688,10 @@ namespace BZROpenShim
         struct InputBindingCommandBlock
         {
             std::string command;
+            std::string section;
             std::string comment;
             std::vector<std::string> positiveKeyboardTokens;
+            std::vector<std::string> positiveNonKeyboardTokens;
             bool hasPositiveNonKeyboard = false;
         };
 
@@ -694,6 +724,7 @@ namespace BZROpenShim
         {
             InputBindingMapFamily family = InputBindingMapFamily::Input;
             std::string command;
+            std::string sectionName;
             std::string displayLabelKey;
             std::string displayText;
             std::string currentBindingText;
@@ -701,6 +732,11 @@ namespace BZROpenShim
             bool foundInMap = false;
             size_t matchingBlockCount = 0;
         };
+
+        constexpr size_t kInputBindingUiColumnCount = 2;
+        constexpr size_t kInputBindingUiRowsPerColumn = 10;
+        constexpr size_t kInputBindingUiVisibleRowCount =
+            kInputBindingUiColumnCount * kInputBindingUiRowsPerColumn;
 
         static bool g_BansConfigLoaded = false;
         static std::vector<BanRecord> g_BanRecords;
@@ -842,6 +878,7 @@ namespace BZROpenShim
         static bool g_EngineFlameVariantsInitAttempted = false;
         static bool g_EngineFlameVtableHooksInstalled = false;
         static InlineDetour32 g_OptionsInputPopulateUiDetour = {};
+        static InlineDetour32 g_OptionsInputKeyReleasedDetour = {};
         static InlineDetour32 g_RecordDeathDetour = {};
         static bool g_CareerStatsMpHookInstalled = false;
         static bool g_CareerStatsMpHookInstallAttempted = false;
@@ -864,6 +901,7 @@ namespace BZROpenShim
         static bool g_InputBindingUiScaffoldLogged = false;
         static bool g_InputBindingUiPopulateHookInstallAttempted = false;
         static bool g_InputBindingUiPopulateHookInstalled = false;
+        static bool g_InputBindingUiKeyReleasedHookInstalled = false;
         static bool g_InputBindingUiPopulateHookMismatchLogged = false;
         static std::filesystem::path g_InputBindingInstallDirectory = {};
         static InputBindingInventoryStats g_InputBindingInventory = {};
@@ -871,7 +909,124 @@ namespace BZROpenShim
         static std::vector<GameKeyBindingAction> g_GameKeyBindingActions = {};
         static std::vector<InputBindingUiRow> g_InputBindingUiRows = {};
         static void* g_LastOptionsInputScreen = nullptr;
+        static void* g_InputBindingUiScreen = nullptr;
+        static void* g_InputBindingUiMiddleOverlay = nullptr;
+        static void* g_InputBindingUiBackdrop = nullptr;
+        static void* g_InputBindingUiFrame = nullptr;
+        static void* g_InputBindingUiTopMask = nullptr;
+        static void* g_InputBindingUiContentMask = nullptr;
+        static void* g_InputBindingUiHeaderLabel = nullptr;
+        static void* g_InputBindingUiStatusLabel = nullptr;
+        static void* g_InputBindingUiPageLabel = nullptr;
+        static void* g_InputBindingUiBackButton = nullptr;
+        static void* g_InputBindingUiDefaultsButton = nullptr;
+        static void* g_InputBindingUiInputFamilyButton = nullptr;
+        static void* g_InputBindingUiGameKeyFamilyButton = nullptr;
+        static void* g_InputBindingUiPrevPageButton = nullptr;
+        static void* g_InputBindingUiNextPageButton = nullptr;
+        static void* g_InputBindingUiRefreshButton = nullptr;
+        static std::array<void*, kInputBindingUiVisibleRowCount> g_InputBindingUiRowLabels = {};
+        static std::array<void*, kInputBindingUiVisibleRowCount> g_InputBindingUiRowButtons = {};
+        static std::array<int, kInputBindingUiVisibleRowCount> g_InputBindingUiVisibleRowIndices = {};
+        static InputBindingMapFamily g_InputBindingUiActiveFamily = InputBindingMapFamily::Input;
+        static size_t g_InputBindingUiPageStart = 0;
+        static InputBindingMapFamily g_InputBindingUiPendingFamily = InputBindingMapFamily::Input;
+        static std::string g_InputBindingUiPendingCommand = {};
+        static std::string g_InputBindingUiPendingDisplayText = {};
+        static std::string g_InputBindingUiStatusText = {};
         static void InitializeInputBindingUiScaffold();
+        static void OnInputBindingBackClicked();
+        static void OnInputBindingDefaultsClicked();
+        static void OnInputBindingRowButtonClicked(size_t visibleSlot);
+        static void OnInputBindingFamilyButtonClicked(InputBindingMapFamily family);
+        static void OnInputBindingPageStepClicked(int direction);
+        static void OnInputBindingRefreshClicked();
+
+#define BZR_INPUT_BINDING_ROW_CLICK_DECL(index) \
+        static void __cdecl InputBindingRowClick##index() { OnInputBindingRowButtonClicked(index); }
+
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(0)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(1)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(2)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(3)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(4)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(5)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(6)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(7)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(8)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(9)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(10)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(11)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(12)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(13)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(14)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(15)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(16)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(17)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(18)
+        BZR_INPUT_BINDING_ROW_CLICK_DECL(19)
+
+#undef BZR_INPUT_BINDING_ROW_CLICK_DECL
+
+        static void* const kInputBindingRowClickCallbacks[kInputBindingUiVisibleRowCount] =
+        {
+            reinterpret_cast<void*>(InputBindingRowClick0),
+            reinterpret_cast<void*>(InputBindingRowClick1),
+            reinterpret_cast<void*>(InputBindingRowClick2),
+            reinterpret_cast<void*>(InputBindingRowClick3),
+            reinterpret_cast<void*>(InputBindingRowClick4),
+            reinterpret_cast<void*>(InputBindingRowClick5),
+            reinterpret_cast<void*>(InputBindingRowClick6),
+            reinterpret_cast<void*>(InputBindingRowClick7),
+            reinterpret_cast<void*>(InputBindingRowClick8),
+            reinterpret_cast<void*>(InputBindingRowClick9),
+            reinterpret_cast<void*>(InputBindingRowClick10),
+            reinterpret_cast<void*>(InputBindingRowClick11),
+            reinterpret_cast<void*>(InputBindingRowClick12),
+            reinterpret_cast<void*>(InputBindingRowClick13),
+            reinterpret_cast<void*>(InputBindingRowClick14),
+            reinterpret_cast<void*>(InputBindingRowClick15),
+            reinterpret_cast<void*>(InputBindingRowClick16),
+            reinterpret_cast<void*>(InputBindingRowClick17),
+            reinterpret_cast<void*>(InputBindingRowClick18),
+            reinterpret_cast<void*>(InputBindingRowClick19),
+        };
+
+        static void __cdecl InputBindingFamilyInputClick()
+        {
+            OnInputBindingFamilyButtonClicked(InputBindingMapFamily::Input);
+        }
+
+        static void __cdecl InputBindingBackClick()
+        {
+            OnInputBindingBackClicked();
+        }
+
+        static void __cdecl InputBindingDefaultsClick()
+        {
+            OnInputBindingDefaultsClicked();
+        }
+
+        static void __cdecl InputBindingFamilyGameKeyClick()
+        {
+            OnInputBindingFamilyButtonClicked(InputBindingMapFamily::GameKey);
+        }
+
+        static void __cdecl InputBindingPrevPageClick()
+        {
+            OnInputBindingPageStepClicked(-1);
+        }
+
+        static void __cdecl InputBindingNextPageClick()
+        {
+            OnInputBindingPageStepClicked(1);
+        }
+
+        static void __cdecl InputBindingRefreshClick()
+        {
+            OnInputBindingRefreshClicked();
+        }
+
         static int g_EngineFlamePrimaryRedTexture = 0;
         static int g_EngineFlamePrimaryGreenTexture = 0;
         static void* g_EngineFlamePrimaryManager = nullptr;
@@ -942,6 +1097,26 @@ namespace BZROpenShim
         static bool g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
         static bool g_AttackRevealEnabled = kAttackRevealEnabledDefault;
         static constexpr InputBindingRowSeed kInputBindingFirstPassSeeds[] = {
+            { "turbo", nullptr, "Turbo" },
+            { "throttle_up", nullptr, "Throttle Forward" },
+            { "throttle_down", nullptr, "Throttle Back" },
+            { "steer_left", nullptr, "Steer Left" },
+            { "steer_right", nullptr, "Steer Right" },
+            { "pitch_up", nullptr, "Pitch Up" },
+            { "pitch_down", nullptr, "Pitch Down" },
+            { "strafe_left", nullptr, "Strafe Left" },
+            { "strafe_right", nullptr, "Strafe Right" },
+            { "jump", nullptr, "Jump" },
+            { "weapon_fire", nullptr, "Fire" },
+            { "weapon_cycle", nullptr, "Cycle Weapon" },
+            { "weapon_link", nullptr, "Link Weapons" },
+            { "eject", nullptr, "Eject" },
+            { "abandon", nullptr, "Abandon Vehicle" },
+            { "cloak", nullptr, "Cloak" },
+            { "deploy", nullptr, "Deploy" },
+            { "frontal_target", nullptr, "Target Ahead" },
+            { "drop_beacon", nullptr, "Drop Beacon" },
+            { "cycle_beacon", nullptr, "Cycle Beacon" },
             { "center_player", nullptr, "Center On Player" },
             { "center_recycler", nullptr, "Center On Recycler" },
             { "menu_up", nullptr, "Menu Up" },
@@ -955,26 +1130,11 @@ namespace BZROpenShim
             { "group_select_4", nullptr, "Select Group 5" },
             { "group_select_5", nullptr, "Select Group 6" },
             { "group_select_6", nullptr, "Select Group 7" },
-            { "turbo", nullptr, "Turbo" },
-            { "throttle_up", nullptr, "Throttle Forward" },
-            { "throttle_down", nullptr, "Throttle Back" },
-            { "steer_left", nullptr, "Steer Left" },
-            { "steer_right", nullptr, "Steer Right" },
-            { "strafe_left", nullptr, "Strafe Left" },
-            { "strafe_right", nullptr, "Strafe Right" },
-            { "jump", nullptr, "Jump" },
-            { "weapon_link", nullptr, "Link Weapons" },
             { "weapon_select_0", nullptr, "Weapon Slot 1" },
             { "weapon_select_1", nullptr, "Weapon Slot 2" },
             { "weapon_select_2", nullptr, "Weapon Slot 3" },
             { "weapon_select_3", nullptr, "Weapon Slot 4" },
             { "weapon_select_4", nullptr, "Weapon Slot 5" },
-            { "eject", nullptr, "Eject" },
-            { "abandon", nullptr, "Abandon Vehicle" },
-            { "cloak", nullptr, "Cloak" },
-            { "deploy", nullptr, "Deploy" },
-            { "drop_beacon", nullptr, "Drop Beacon" },
-            { "cycle_beacon", nullptr, "Cycle Beacon" },
             { "zoom_factor_plus", nullptr, "Zoom In" },
             { "zoom_factor_minus", nullptr, "Zoom Out" },
         };
@@ -6730,6 +6890,21 @@ namespace BZROpenShim
             return text;
         }
 
+        static bool IsInputBindingSectionHeading(const std::string& comment)
+        {
+            if (comment.empty())
+                return false;
+
+            if (_stricmp(comment.c_str(), "BATTLEZONE") == 0 ||
+                _stricmp(comment.c_str(), "Input Mapping") == 0)
+            {
+                return false;
+            }
+
+            return comment.size() >= 8 &&
+                   _stricmp(comment.c_str() + (comment.size() - 8), "CONTROLS") == 0;
+        }
+
         static GameKeyBindingAction* FindGameKeyBindingAction(
             std::vector<GameKeyBindingAction>& actions,
             const std::string& action)
@@ -6817,6 +6992,7 @@ namespace BZROpenShim
 
             std::string line;
             std::string pendingComment;
+            std::string currentSection;
             bool inBlock = false;
             InputBindingCommandBlock currentBlock = {};
 
@@ -6849,7 +7025,17 @@ namespace BZROpenShim
                     {
                         const std::string comment = TrimAsciiCopy(trimmed.substr(1));
                         if (!comment.empty())
-                            pendingComment = comment;
+                        {
+                            if (IsInputBindingSectionHeading(comment))
+                            {
+                                currentSection = comment;
+                                pendingComment.clear();
+                            }
+                            else
+                            {
+                                pendingComment = comment;
+                            }
+                        }
                         continue;
                     }
 
@@ -6869,6 +7055,7 @@ namespace BZROpenShim
 
                     currentBlock = {};
                     currentBlock.command = command;
+                    currentBlock.section = currentSection;
                     currentBlock.comment = pendingComment;
                     pendingComment.clear();
                     inBlock = true;
@@ -6912,7 +7099,10 @@ namespace BZROpenShim
                     if (_stricmp(source.c_str(), "keyboard") == 0)
                         currentBlock.positiveKeyboardTokens.push_back(token);
                     else
+                    {
                         currentBlock.hasPositiveNonKeyboard = true;
+                        currentBlock.positiveNonKeyboardTokens.push_back(source + " " + token);
+                    }
                 }
             }
 
@@ -6973,57 +7163,106 @@ namespace BZROpenShim
 
         static std::string FormatInputBindingBlockValue(const InputBindingCommandBlock& block)
         {
-            if (block.positiveKeyboardTokens.empty() || block.hasPositiveNonKeyboard)
-                return {};
+            std::vector<std::string> parts = {};
+            if (!block.positiveKeyboardTokens.empty())
+                parts.push_back(JoinStrings(block.positiveKeyboardTokens, " + "));
 
-            return JoinStrings(block.positiveKeyboardTokens, " + ");
+            for (const std::string& token : block.positiveNonKeyboardTokens)
+                AppendUniqueString(parts, token);
+
+            return JoinStrings(parts, " | ");
         }
 
         static std::vector<InputBindingUiRow> BuildFirstPassInputBindingRows(
             const std::vector<InputBindingCommandBlock>& blocks)
         {
             std::vector<InputBindingUiRow> rows;
-            rows.reserve(std::size(kInputBindingFirstPassSeeds));
+            rows.reserve(blocks.size());
+            std::unordered_map<std::string, size_t> rowIndexByCommand = {};
+            std::vector<std::string> encounteredCommands = {};
+            encounteredCommands.reserve(blocks.size());
+            std::vector<std::vector<std::string>> bindingValues = {};
+            bindingValues.reserve(blocks.size());
+
+            for (const InputBindingCommandBlock& block : blocks)
+            {
+                if (block.command.empty())
+                    continue;
+
+                size_t rowIndex = rows.size();
+                const auto existing = rowIndexByCommand.find(block.command);
+                if (existing == rowIndexByCommand.end())
+                {
+                    InputBindingUiRow row = {};
+                    row.family = InputBindingMapFamily::Input;
+                    row.command = block.command;
+                    row.sectionName = block.section;
+                    row.displayText =
+                        !block.comment.empty() ? block.comment : HumanizeInputBindingCommand(block.command);
+                    row.foundInMap = true;
+                    rows.push_back(std::move(row));
+                    encounteredCommands.push_back(block.command);
+                    bindingValues.push_back({});
+                    rowIndexByCommand.emplace(block.command, rowIndex);
+                }
+                else
+                {
+                    rowIndex = existing->second;
+                }
+
+                InputBindingUiRow& row = rows[rowIndex];
+                row.foundInMap = true;
+                ++row.matchingBlockCount;
+                if (row.sectionName.empty() && !block.section.empty())
+                    row.sectionName = block.section;
+                if (row.displayText.empty() && !block.comment.empty())
+                    row.displayText = block.comment;
+
+                AppendUniqueString(bindingValues[rowIndex], FormatInputBindingBlockValue(block));
+            }
+
+            for (size_t index = 0; index < rows.size(); ++index)
+            {
+                InputBindingUiRow& row = rows[index];
+                if (row.displayText.empty())
+                    row.displayText = HumanizeInputBindingCommand(row.command);
+                row.currentBindingText = JoinStrings(bindingValues[index], ", ");
+                row.reserved = row.currentBindingText.empty();
+            }
+
+            std::vector<InputBindingUiRow> orderedRows = {};
+            orderedRows.reserve(rows.size());
+            std::unordered_set<std::string> usedCommands = {};
+
+            const auto appendOrderedRow = [&](const std::string& command, const char* displayText)
+            {
+                const auto found = rowIndexByCommand.find(command);
+                if (found == rowIndexByCommand.end())
+                    return;
+
+                InputBindingUiRow row = rows[found->second];
+                if (displayText && *displayText)
+                    row.displayText = displayText;
+
+                orderedRows.push_back(std::move(row));
+                usedCommands.insert(command);
+            };
 
             for (const InputBindingRowSeed& seed : kInputBindingFirstPassSeeds)
             {
-                InputBindingUiRow row = {};
-                row.family = InputBindingMapFamily::Input;
-                row.command = seed.command ? seed.command : "";
-                row.displayLabelKey = seed.labelKey ? seed.labelKey : "";
-                row.displayText = seed.displayText ? seed.displayText : "";
-
-                std::vector<std::string> bindingValues;
-                std::string firstComment;
-
-                for (const InputBindingCommandBlock& block : blocks)
-                {
-                    if (block.command != row.command)
-                        continue;
-
-                    row.foundInMap = true;
-                    ++row.matchingBlockCount;
-
-                    if (firstComment.empty() && !block.comment.empty())
-                        firstComment = block.comment;
-
-                    AppendUniqueString(bindingValues, FormatInputBindingBlockValue(block));
-                }
-
-                if (row.displayText.empty())
-                {
-                    if (!firstComment.empty())
-                        row.displayText = firstComment;
-                    else
-                        row.displayText = HumanizeInputBindingCommand(row.command);
-                }
-
-                row.currentBindingText = JoinStrings(bindingValues, ", ");
-                row.reserved = !row.foundInMap || row.currentBindingText.empty();
-                rows.push_back(row);
+                if (!seed.command || !*seed.command)
+                    continue;
+                appendOrderedRow(seed.command, seed.displayText);
             }
 
-            return rows;
+            for (const std::string& command : encounteredCommands)
+            {
+                if (usedCommands.find(command) != usedCommands.end())
+                    continue;
+                appendOrderedRow(command, nullptr);
+            }
+
+            return orderedRows;
         }
 
         static std::vector<InputBindingUiRow> BuildFirstPassGameKeyBindingRows(
@@ -7097,9 +7336,647 @@ namespace BZROpenShim
 
         static bool ShouldEnableInputBindingUiReplacement()
         {
-            return EnvFlagEnabled("OPENSHIM_ENABLE_INPUT_BINDING_UI_CONSTRUCTOR_HOOK") ||
-                   EnvFlagEnabled("OPENSHIM_ENABLE_INPUT_BINDING_UI_POPULATE_HOOK") ||
-                   EnvFlagEnabled("OPENSHIM_ENABLE_INPUT_BINDING_UI_SCAFFOLD");
+            if (EnvFlagEnabled("OPENSHIM_DISABLE_INPUT_BINDING_UI") ||
+                EnvFlagEnabled("OPENSHIM_DISABLE_INPUT_BINDING_UI_REPLACEMENT") ||
+                EnvFlagEnabled("BZR_DISABLE_INPUT_BINDING_UI"))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        static void ResetInputBindingUiVisuals()
+        {
+            g_InputBindingUiScreen = nullptr;
+            g_InputBindingUiMiddleOverlay = nullptr;
+            g_InputBindingUiBackdrop = nullptr;
+            g_InputBindingUiFrame = nullptr;
+            g_InputBindingUiTopMask = nullptr;
+            g_InputBindingUiContentMask = nullptr;
+            g_InputBindingUiHeaderLabel = nullptr;
+            g_InputBindingUiStatusLabel = nullptr;
+            g_InputBindingUiPageLabel = nullptr;
+            g_InputBindingUiBackButton = nullptr;
+            g_InputBindingUiDefaultsButton = nullptr;
+            g_InputBindingUiInputFamilyButton = nullptr;
+            g_InputBindingUiGameKeyFamilyButton = nullptr;
+            g_InputBindingUiPrevPageButton = nullptr;
+            g_InputBindingUiNextPageButton = nullptr;
+            g_InputBindingUiRefreshButton = nullptr;
+            g_InputBindingUiRowLabels.fill(nullptr);
+            g_InputBindingUiRowButtons.fill(nullptr);
+            g_InputBindingUiVisibleRowIndices.fill(-1);
+            g_InputBindingUiPendingCommand.clear();
+            g_InputBindingUiPendingDisplayText.clear();
+            g_InputBindingUiStatusText = "Click a binding button, then press a key. ESC cancels.";
+        }
+
+        static bool ReloadInputBindingUiInventory(bool logFailures)
+        {
+            g_InputBindingInventory = {};
+            g_InputBindingCommandBlocks.clear();
+            g_GameKeyBindingActions.clear();
+            g_InputBindingUiRows.clear();
+
+            const std::filesystem::path inputMapPath = g_InputBindingInstallDirectory / "input.map";
+            if (!ParseInputBindingMapFile(inputMapPath, g_InputBindingCommandBlocks, g_InputBindingInventory))
+            {
+                if (logFailures)
+                {
+                    const std::string inputMapPathText = inputMapPath.string();
+                    Log(L"[INPUTUI] Failed to parse input binding map at %hs\n",
+                        inputMapPathText.c_str());
+                }
+                return false;
+            }
+
+            const std::filesystem::path gameKeyMapPath = g_InputBindingInstallDirectory / "gamekey.map";
+            if (!ParseGameKeyBindingMapFile(gameKeyMapPath, g_GameKeyBindingActions, g_InputBindingInventory) &&
+                logFailures)
+            {
+                const std::string gameKeyMapPathText = gameKeyMapPath.string();
+                Log(L"[INPUTUI] Failed to parse gamekey binding map at %hs\n",
+                    gameKeyMapPathText.c_str());
+            }
+
+            std::vector<InputBindingUiRow> inputRows =
+                BuildFirstPassInputBindingRows(g_InputBindingCommandBlocks);
+            std::vector<InputBindingUiRow> gameKeyRows =
+                BuildFirstPassGameKeyBindingRows(g_GameKeyBindingActions);
+            g_InputBindingInventory.firstPassInputRows = inputRows.size();
+            g_InputBindingInventory.firstPassGameKeyRows = gameKeyRows.size();
+
+            g_InputBindingUiRows = std::move(inputRows);
+            g_InputBindingUiRows.insert(
+                g_InputBindingUiRows.end(),
+                gameKeyRows.begin(),
+                gameKeyRows.end());
+            return true;
+        }
+
+        static size_t FindInputBindingUiRowIndex(InputBindingMapFamily family, const std::string& command)
+        {
+            for (size_t index = 0; index < g_InputBindingUiRows.size(); ++index)
+            {
+                const InputBindingUiRow& row = g_InputBindingUiRows[index];
+                if (row.family == family && row.command == command)
+                    return index;
+            }
+            return g_InputBindingUiRows.size();
+        }
+
+        static size_t GetInputBindingUiRowCountForFamily(InputBindingMapFamily family)
+        {
+            size_t count = 0;
+            for (const InputBindingUiRow& row : g_InputBindingUiRows)
+            {
+                if (row.family == family)
+                    ++count;
+            }
+            return count;
+        }
+
+        static size_t ClampInputBindingUiPageStart(InputBindingMapFamily family, size_t pageStart)
+        {
+            const size_t totalRows = GetInputBindingUiRowCountForFamily(family);
+            if (totalRows <= kInputBindingUiVisibleRowCount)
+                return 0;
+
+            const size_t maxPageStart =
+                ((totalRows - 1) / kInputBindingUiVisibleRowCount) * kInputBindingUiVisibleRowCount;
+            return (std::min)(pageStart, maxPageStart);
+        }
+
+        static bool IsInputBindingUiPending(const InputBindingUiRow& row)
+        {
+            return !g_InputBindingUiPendingCommand.empty() &&
+                   row.family == g_InputBindingUiPendingFamily &&
+                   row.command == g_InputBindingUiPendingCommand;
+        }
+
+        static bool SetInputBindingUiLabelText(void* label, const char* text)
+        {
+            if (!label || !g_BzrFn_SetTooltip)
+                return false;
+
+            g_BzrFn_SetTooltip(label, text ? text : "");
+            if (g_BzrFn_LabelState)
+                g_BzrFn_LabelState(label, nullptr);
+            return true;
+        }
+
+        static bool CreateInputBindingUiLabel(void*& slot,
+                                              void* parent,
+                                              const char* objectName,
+                                              const char* text,
+                                              float x,
+                                              float y,
+                                              float w,
+                                              float h)
+        {
+            if (!parent || !g_BzrFn_LabelCtor || !g_BzrFn_AddChild)
+                return false;
+
+            if (slot)
+                return SetInputBindingUiLabelText(slot, text);
+
+            void* labelMem = ::operator new(0x930, std::nothrow);
+            if (!labelMem)
+                return false;
+
+            std::memset(labelMem, 0, 0x930);
+            const char* ctorLabel =
+                (objectName && *objectName) ? objectName :
+                ((text && *text) ? text : "OpenShimInputLabel");
+            slot = g_BzrFn_LabelCtor(labelMem, ctorLabel, x, y, w, h, 0x20, parent, 0);
+            if (!slot)
+                return false;
+
+            if (g_BzrFn_LabelState)
+                g_BzrFn_LabelState(slot, nullptr);
+            g_BzrFn_AddChild(parent, slot, 0);
+            SetInputBindingUiLabelText(slot, text);
+            return true;
+        }
+
+        static bool CreateInputBindingUiOverlay(void*& slot,
+                                                void* parent,
+                                                const char* objectName,
+                                                const char* textureName,
+                                                float x,
+                                                float y,
+                                                float w,
+                                                float h,
+                                                uint32_t flags)
+        {
+            if (!parent || !g_BzrFn_OverlayCtor || !g_BzrFn_AddChild)
+                return false;
+
+            if (!slot)
+            {
+                void* overlayMem = ::operator new(0x144, std::nothrow);
+                if (!overlayMem)
+                    return false;
+
+                std::memset(overlayMem, 0, 0x144);
+                const char* ctorLabel =
+                    (objectName && *objectName) ? objectName : "OpenShimInputOverlay";
+                slot = g_BzrFn_OverlayCtor(overlayMem, ctorLabel, x, y, w, h, flags, parent, 0);
+                if (!slot)
+                    return false;
+
+                g_BzrFn_AddChild(parent, slot, 0);
+            }
+
+            if (textureName && *textureName && g_BzrFn_SetTextureOff)
+                g_BzrFn_SetTextureOff(slot, textureName);
+            return true;
+        }
+
+        static bool CreateInputBindingUiButton(void*& slot,
+                                               void* parent,
+                                               const char* objectName,
+                                               const char* text,
+                                               float x,
+                                               float y,
+                                               float w,
+                                               float h,
+                                               void* onClick)
+        {
+            if (!parent || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild)
+                return false;
+
+            if (!slot)
+            {
+                void* buttonMem = ::operator new(0x1EC, std::nothrow);
+                if (!buttonMem)
+                    return false;
+
+                std::memset(buttonMem, 0, 0x1EC);
+                const char* ctorLabel =
+                    (objectName && *objectName) ? objectName :
+                    ((text && *text) ? text : "OpenShimInputButton");
+                slot = g_BzrFn_ButtonCtor(buttonMem,
+                                          ctorLabel,
+                                          x,
+                                          y,
+                                          w,
+                                          h,
+                                          0x20,
+                                          parent,
+                                          0,
+                                          0);
+                if (!slot)
+                    return false;
+
+                if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(slot, "mpcron.png");
+                if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(slot, "mpcrclk.png");
+                if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(slot, "mpcrclk.png");
+                if (g_BzrFn_SetOnClick && onClick) g_BzrFn_SetOnClick(slot, onClick);
+                g_BzrFn_AddChild(parent, slot, 0);
+            }
+
+            if (g_BzrFn_SetButtonLabel)
+                g_BzrFn_SetButtonLabel(slot, text ? text : "");
+            return true;
+        }
+
+        static bool SetInputBindingUiButtonText(void* button, const char* text)
+        {
+            if (!button || !g_BzrFn_SetButtonLabel)
+                return false;
+
+            g_BzrFn_SetButtonLabel(button, text ? text : "");
+            return true;
+        }
+
+        static void* GetInputBindingUiViewParent(void* view)
+        {
+            if (!view)
+                return nullptr;
+
+            auto* viewBytes = reinterpret_cast<uint8_t*>(view);
+            return *reinterpret_cast<void**>(viewBytes + 0x13C);
+        }
+
+        static void SetInputBindingUiViewActive(void* view, bool active)
+        {
+            if (!view || !g_BzrFn_UiSetActive)
+                return;
+
+            g_BzrFn_UiSetActive(view, active ? 1 : 0);
+        }
+
+        static void* ResolveStockOptionsInputMiddleOverlay(void* screen)
+        {
+            if (!screen)
+                return nullptr;
+
+            auto* screenWords = reinterpret_cast<void**>(screen);
+            static constexpr size_t kDirectOverlayLabelOffsets[] = { 0x5D, 0x5E };
+            for (size_t wordOffset : kDirectOverlayLabelOffsets)
+            {
+                void* const label = screenWords[wordOffset];
+                void* const parent = GetInputBindingUiViewParent(label);
+                if (parent)
+                    return parent;
+            }
+
+            static constexpr size_t kKeyLabelOffsets[] =
+            {
+                0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B, 0x5C
+            };
+            for (size_t wordOffset : kKeyLabelOffsets)
+            {
+                void* const label = screenWords[wordOffset];
+                void* const button = GetInputBindingUiViewParent(label);
+                void* const parent = GetInputBindingUiViewParent(button);
+                if (parent)
+                    return parent;
+            }
+
+            return nullptr;
+        }
+
+        static void ReplaceInputBindingUiSubstring(std::string& text,
+                                                   const char* oldText,
+                                                   const char* newText)
+        {
+            if (!oldText || !*oldText)
+                return;
+
+            const std::string from(oldText);
+            const std::string to = newText ? std::string(newText) : std::string();
+            size_t position = 0;
+            while ((position = text.find(from, position)) != std::string::npos)
+            {
+                text.replace(position, from.size(), to);
+                position += to.size();
+            }
+        }
+
+        static std::string CompactInputBindingUiValueText(std::string value)
+        {
+            ReplaceInputBindingUiSubstring(value, "program ", "");
+            ReplaceInputBindingUiSubstring(value, "mouse ", "Mouse ");
+            ReplaceInputBindingUiSubstring(value, "joystick ", "Joystick ");
+            ReplaceInputBindingUiSubstring(value, "LeftBtn", "Left");
+            ReplaceInputBindingUiSubstring(value, "RightBtn", "Right");
+            ReplaceInputBindingUiSubstring(value, "MiddleBtn", "Middle");
+            ReplaceInputBindingUiSubstring(value, "HorizPos", "X Axis");
+            ReplaceInputBindingUiSubstring(value, "VertPos", "Y Axis");
+            ReplaceInputBindingUiSubstring(value, "HorizVel", "X Delta");
+            ReplaceInputBindingUiSubstring(value, "VertVel", "Y Delta");
+            return value;
+        }
+
+        static std::string GetInputBindingUiRowLabelText(const InputBindingUiRow& row)
+        {
+            return row.displayText.empty() ? HumanizeInputBindingCommand(row.command) : row.displayText;
+        }
+
+        static std::string GetInputBindingUiRowValueText(const InputBindingUiRow& row)
+        {
+            if (IsInputBindingUiPending(row))
+                return "[Press key]";
+
+            std::string value = row.currentBindingText.empty() ? "<none>" : row.currentBindingText;
+            if (row.reserved && row.family == InputBindingMapFamily::Input)
+                value += " [reserved]";
+            return CompactInputBindingUiValueText(std::move(value));
+        }
+
+        static void SuppressStockOptionsInputWidgets(void* screen)
+        {
+            if (!screen)
+                return;
+
+            static constexpr size_t kStockLabelWordOffsets[] =
+            {
+                0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E
+            };
+
+            auto* screenWords = reinterpret_cast<void**>(screen);
+            for (size_t wordOffset : kStockLabelWordOffsets)
+            {
+                void* const label = screenWords[wordOffset];
+                if (!label)
+                    continue;
+
+                SetInputBindingUiLabelText(label, "");
+                SetInputBindingUiViewActive(label, false);
+
+                if (wordOffset >= 0x51 && wordOffset <= 0x5C)
+                {
+                    void* const button = GetInputBindingUiViewParent(label);
+                    if (button)
+                    {
+                        auto* buttonBytes = reinterpret_cast<uint8_t*>(button);
+                        void* const buttonCaption = *reinterpret_cast<void**>(buttonBytes + 0x144);
+                        SetInputBindingUiLabelText(buttonCaption, "");
+                        SetInputBindingUiViewActive(buttonCaption, false);
+                    }
+                    SetInputBindingUiViewActive(button, false);
+                }
+            }
+        }
+
+        static void RefreshInputBindingUiControls()
+        {
+            if (!g_InputBindingUiScreen)
+                return;
+
+            g_InputBindingUiPageStart =
+                ClampInputBindingUiPageStart(g_InputBindingUiActiveFamily, g_InputBindingUiPageStart);
+
+            const char* familyName =
+                g_InputBindingUiActiveFamily == InputBindingMapFamily::GameKey ? "gamekey.map" : "input.map";
+            const size_t totalRows = GetInputBindingUiRowCountForFamily(g_InputBindingUiActiveFamily);
+            const size_t pageNumber = (g_InputBindingUiPageStart / kInputBindingUiVisibleRowCount) + 1;
+            const size_t pageCount =
+                totalRows == 0 ? 1 : ((totalRows - 1) / kInputBindingUiVisibleRowCount) + 1;
+
+            const char* headerText =
+                g_InputBindingUiActiveFamily == InputBindingMapFamily::GameKey
+                    ? "OpenShim Key Rebinding - Game Actions"
+                    : "OpenShim Key Rebinding - Control Channels";
+
+            SetInputBindingUiButtonText(g_InputBindingUiHeaderLabel, headerText);
+            SetInputBindingUiButtonText(g_InputBindingUiStatusLabel, g_InputBindingUiStatusText.c_str());
+            SuppressStockOptionsInputWidgets(g_InputBindingUiScreen);
+
+            if (g_BzrFn_SetButtonLabel)
+            {
+                if (g_InputBindingUiInputFamilyButton)
+                    g_BzrFn_SetButtonLabel(
+                        g_InputBindingUiInputFamilyButton,
+                        g_InputBindingUiActiveFamily == InputBindingMapFamily::Input ? "> Input <" : "Input");
+                if (g_InputBindingUiGameKeyFamilyButton)
+                    g_BzrFn_SetButtonLabel(
+                        g_InputBindingUiGameKeyFamilyButton,
+                        g_InputBindingUiActiveFamily == InputBindingMapFamily::GameKey ? "> GameKey <" : "GameKey");
+            }
+
+            g_InputBindingUiVisibleRowIndices.fill(-1);
+            size_t matchingIndex = 0;
+            size_t visibleIndex = 0;
+            for (size_t rowIndex = 0;
+                 rowIndex < g_InputBindingUiRows.size() && visibleIndex < kInputBindingUiVisibleRowCount;
+                 ++rowIndex)
+            {
+                const InputBindingUiRow& row = g_InputBindingUiRows[rowIndex];
+                if (row.family != g_InputBindingUiActiveFamily)
+                    continue;
+                if (matchingIndex++ < g_InputBindingUiPageStart)
+                    continue;
+
+                g_InputBindingUiVisibleRowIndices[visibleIndex] = static_cast<int>(rowIndex);
+                ++visibleIndex;
+            }
+
+            std::string sectionSummary;
+            if (g_InputBindingUiActiveFamily == InputBindingMapFamily::Input)
+            {
+                std::string firstSection;
+                std::string lastSection;
+                for (size_t slot = 0; slot < visibleIndex; ++slot)
+                {
+                    const int rowIndex = g_InputBindingUiVisibleRowIndices[slot];
+                    if (rowIndex < 0 || static_cast<size_t>(rowIndex) >= g_InputBindingUiRows.size())
+                        continue;
+
+                    const std::string& sectionName =
+                        g_InputBindingUiRows[static_cast<size_t>(rowIndex)].sectionName;
+                    if (sectionName.empty())
+                        continue;
+
+                    if (firstSection.empty())
+                        firstSection = sectionName;
+                    lastSection = sectionName;
+                }
+
+                if (!firstSection.empty())
+                {
+                    sectionSummary = firstSection;
+                    if (_stricmp(firstSection.c_str(), lastSection.c_str()) != 0)
+                    {
+                        sectionSummary += " -> ";
+                        sectionSummary += lastSection;
+                    }
+                }
+            }
+
+            char pageText[256] = {};
+            if (!sectionSummary.empty())
+            {
+                std::snprintf(pageText,
+                              sizeof(pageText),
+                              "%s  page %u/%u  rows=%u  section=%s",
+                              familyName,
+                              static_cast<unsigned>(pageNumber),
+                              static_cast<unsigned>(pageCount),
+                              static_cast<unsigned>(totalRows),
+                              sectionSummary.c_str());
+            }
+            else
+            {
+                std::snprintf(pageText,
+                              sizeof(pageText),
+                              "%s  page %u/%u  rows=%u",
+                              familyName,
+                              static_cast<unsigned>(pageNumber),
+                              static_cast<unsigned>(pageCount),
+                              static_cast<unsigned>(totalRows));
+            }
+            SetInputBindingUiButtonText(g_InputBindingUiPageLabel, pageText);
+
+            for (size_t slot = 0; slot < kInputBindingUiVisibleRowCount; ++slot)
+            {
+                const int rowIndex = g_InputBindingUiVisibleRowIndices[slot];
+                if (rowIndex < 0 || static_cast<size_t>(rowIndex) >= g_InputBindingUiRows.size())
+                {
+                    SetInputBindingUiButtonText(g_InputBindingUiRowLabels[slot], "");
+                    SetInputBindingUiButtonText(g_InputBindingUiRowButtons[slot], "");
+                    continue;
+                }
+
+                const InputBindingUiRow& row = g_InputBindingUiRows[static_cast<size_t>(rowIndex)];
+                const std::string labelText = GetInputBindingUiRowLabelText(row);
+                const std::string buttonText = GetInputBindingUiRowValueText(row);
+                SetInputBindingUiButtonText(g_InputBindingUiRowLabels[slot], labelText.c_str());
+                SetInputBindingUiButtonText(g_InputBindingUiRowButtons[slot], buttonText.c_str());
+            }
+        }
+
+        static void EnsureInputBindingUiControls(void* screen)
+        {
+            if (!screen)
+                return;
+
+            if (g_InputBindingUiScreen != screen)
+            {
+                ResetInputBindingUiVisuals();
+                g_InputBindingUiScreen = screen;
+            }
+
+            if (!g_InputBindingUiMiddleOverlay)
+                g_InputBindingUiMiddleOverlay = ResolveStockOptionsInputMiddleOverlay(screen);
+
+            void* const controlParent = screen;
+
+            static constexpr float kBackdropX = 0.0f;
+            static constexpr float kBackdropY = 0.0f;
+            static constexpr float kBackdropW = 1440.0f;
+            static constexpr float kBackdropH = 1080.0f;
+            static constexpr float kHeaderX = 320.0f;
+            static constexpr float kHeaderY = 176.0f;
+            static constexpr float kHeaderW = 800.0f;
+            static constexpr float kHeaderH = 28.0f;
+            static constexpr float kStatusX = 320.0f;
+            static constexpr float kStatusY = 204.0f;
+            static constexpr float kStatusW = 800.0f;
+            static constexpr float kStatusH = 24.0f;
+            static constexpr float kPageX = 320.0f;
+            static constexpr float kPageY = 230.0f;
+            static constexpr float kPageW = 800.0f;
+            static constexpr float kPageH = 22.0f;
+            static constexpr float kToolbarY = 256.0f;
+            static constexpr float kToolbarW = 150.0f;
+            static constexpr float kToolbarH = 34.0f;
+            static constexpr float kTopMaskX = 220.0f;
+            static constexpr float kTopMaskY = 122.0f;
+            static constexpr float kTopMaskW = 1000.0f;
+            static constexpr float kTopMaskH = 126.0f;
+            static constexpr float kContentMaskX = 240.0f;
+            static constexpr float kContentMaskY = 292.0f;
+            static constexpr float kContentMaskW = 980.0f;
+            static constexpr float kContentMaskH = 456.0f;
+            static constexpr float kRowLeftBaseX = 287.0f;
+            static constexpr float kRowRightBaseX = 747.0f;
+            static constexpr float kRowY = 308.0f;
+            static constexpr float kRowLabelW = 185.0f;
+            static constexpr float kRowButtonH = 30.0f;
+            static constexpr float kRowStep = 38.0f;
+            static constexpr float kRowButtonOffsetX = 180.0f;
+            static constexpr float kRowCompactButtonW = 225.0f;
+
+            const unsigned screenTag = static_cast<unsigned>(reinterpret_cast<uintptr_t>(screen));
+            char controlName[64] = {};
+
+            std::snprintf(controlName, sizeof(controlName), "OpenShimInputBackdrop_%08X", screenTag);
+            CreateInputBindingUiOverlay(g_InputBindingUiBackdrop,
+                                        controlParent,
+                                        controlName,
+                                        "blackui.png",
+                                        kBackdropX,
+                                        kBackdropY,
+                                        kBackdropW,
+                                        kBackdropH,
+                                        0x60);
+            std::snprintf(controlName, sizeof(controlName), "OpenShimInputFrame_%08X", screenTag);
+            CreateInputBindingUiOverlay(g_InputBindingUiFrame,
+                                        controlParent,
+                                        controlName,
+                                        "keyOptions_center.png",
+                                        kBackdropX,
+                                        kBackdropY,
+                                        kBackdropW,
+                                        kBackdropH,
+                                        0x60);
+            std::snprintf(controlName, sizeof(controlName), "OpenShimInputTopMask_%08X", screenTag);
+            CreateInputBindingUiOverlay(g_InputBindingUiTopMask,
+                                        controlParent,
+                                        controlName,
+                                        "blackui.png",
+                                        kTopMaskX,
+                                        kTopMaskY,
+                                        kTopMaskW,
+                                        kTopMaskH,
+                                        0x60);
+            std::snprintf(controlName, sizeof(controlName), "OpenShimInputContentMask_%08X", screenTag);
+            CreateInputBindingUiOverlay(g_InputBindingUiContentMask,
+                                        controlParent,
+                                        controlName,
+                                        "blackui.png",
+                                        kContentMaskX,
+                                        kContentMaskY,
+                                        kContentMaskW,
+                                        kContentMaskH,
+                                        0x60);
+
+            std::snprintf(controlName, sizeof(controlName), "OpenShimInputHeader_%08X", screenTag);
+            CreateInputBindingUiButton(g_InputBindingUiHeaderLabel, controlParent, controlName, "", kHeaderX, kHeaderY, kHeaderW, kHeaderH, nullptr);
+            std::snprintf(controlName, sizeof(controlName), "OpenShimInputStatus_%08X", screenTag);
+            CreateInputBindingUiButton(g_InputBindingUiStatusLabel, controlParent, controlName, "", kStatusX, kStatusY, kStatusW, kStatusH, nullptr);
+            std::snprintf(controlName, sizeof(controlName), "OpenShimInputPage_%08X", screenTag);
+            CreateInputBindingUiButton(g_InputBindingUiPageLabel, controlParent, controlName, "", kPageX, kPageY, kPageW, kPageH, nullptr);
+            std::snprintf(controlName, sizeof(controlName), "OpenShimInputBack_%08X", screenTag);
+            CreateInputBindingUiButton(g_InputBindingUiBackButton, controlParent, controlName, "Back", 195.0f, kToolbarY, kToolbarW, kToolbarH, reinterpret_cast<void*>(InputBindingBackClick));
+            std::snprintf(controlName, sizeof(controlName), "OpenShimInputDefaults_%08X", screenTag);
+            CreateInputBindingUiButton(g_InputBindingUiDefaultsButton, controlParent, controlName, "Input Defaults", 355.0f, kToolbarY, 210.0f, kToolbarH, reinterpret_cast<void*>(InputBindingDefaultsClick));
+            std::snprintf(controlName, sizeof(controlName), "OpenShimInputFamily_%08X", screenTag);
+            CreateInputBindingUiButton(g_InputBindingUiInputFamilyButton, controlParent, controlName, "Input", 585.0f, kToolbarY, kToolbarW, kToolbarH, reinterpret_cast<void*>(InputBindingFamilyInputClick));
+            std::snprintf(controlName, sizeof(controlName), "OpenShimGameKeyFamily_%08X", screenTag);
+            CreateInputBindingUiButton(g_InputBindingUiGameKeyFamilyButton, controlParent, controlName, "GameKey", 745.0f, kToolbarY, kToolbarW, kToolbarH, reinterpret_cast<void*>(InputBindingFamilyGameKeyClick));
+            std::snprintf(controlName, sizeof(controlName), "OpenShimInputPrev_%08X", screenTag);
+            CreateInputBindingUiButton(g_InputBindingUiPrevPageButton, controlParent, controlName, "Prev", 915.0f, kToolbarY, 110.0f, kToolbarH, reinterpret_cast<void*>(InputBindingPrevPageClick));
+            std::snprintf(controlName, sizeof(controlName), "OpenShimInputNext_%08X", screenTag);
+            CreateInputBindingUiButton(g_InputBindingUiNextPageButton, controlParent, controlName, "Next", 1035.0f, kToolbarY, 110.0f, kToolbarH, reinterpret_cast<void*>(InputBindingNextPageClick));
+            std::snprintf(controlName, sizeof(controlName), "OpenShimInputReload_%08X", screenTag);
+            CreateInputBindingUiButton(g_InputBindingUiRefreshButton, controlParent, controlName, "Reload", 1155.0f, kToolbarY, 90.0f, kToolbarH, reinterpret_cast<void*>(InputBindingRefreshClick));
+
+            for (size_t slot = 0; slot < kInputBindingUiVisibleRowCount; ++slot)
+            {
+                const size_t column = slot / kInputBindingUiRowsPerColumn;
+                const size_t row = slot % kInputBindingUiRowsPerColumn;
+                const float baseX = (column == 0) ? kRowLeftBaseX : kRowRightBaseX;
+                const float y = kRowY + (static_cast<float>(row) * kRowStep);
+                std::snprintf(controlName, sizeof(controlName), "OpenShimInputRowLabel_%08X_%02u", screenTag, static_cast<unsigned>(slot));
+                CreateInputBindingUiButton(g_InputBindingUiRowLabels[slot], controlParent, controlName, "", baseX, y, kRowLabelW, kRowButtonH, kInputBindingRowClickCallbacks[slot]);
+                std::snprintf(controlName, sizeof(controlName), "OpenShimInputRowButton_%08X_%02u", screenTag, static_cast<unsigned>(slot));
+                CreateInputBindingUiButton(g_InputBindingUiRowButtons[slot], controlParent, controlName, "", baseX + kRowButtonOffsetX, y, kRowCompactButtonW, kRowButtonH, kInputBindingRowClickCallbacks[slot]);
+            }
         }
 
         static bool CreateInputBindingPreviewLabel(void* parent,
@@ -7195,6 +8072,375 @@ namespace BZROpenShim
                 kRowH);
         }
 
+        static std::string BuildInputBindingKeyNameFromCode(uint32_t keyCode)
+        {
+            if (!g_BzrFn_MapKeyNameFromCode)
+                return {};
+
+            char keyName[64] = {};
+            g_BzrFn_MapKeyNameFromCode(keyCode, keyName);
+            return TrimAsciiCopy(keyName);
+        }
+
+        static std::string BuildGameKeyTokenFromVk(uint32_t key, uint32_t keyCode)
+        {
+            switch (key)
+            {
+            case VK_BACK: return "BSP";
+            case VK_TAB: return "TAB";
+            case VK_RETURN: return "ENTER";
+            case VK_ESCAPE: return "ESC";
+            case VK_SPACE: return "SPACE";
+            case VK_PAUSE: return "PAUSE";
+            case VK_CAPITAL: return "CAPS";
+            case VK_UP: return "GreyUpArrow";
+            case VK_DOWN: return "GreyDownArrow";
+            case VK_LEFT: return "GreyLeftArrow";
+            case VK_RIGHT: return "GreyRightArrow";
+            case VK_INSERT: return "Insert";
+            case VK_DELETE: return "GreyDelete";
+            case VK_HOME: return "Home";
+            case VK_END: return "End";
+            case VK_PRIOR: return "PageUp";
+            case VK_NEXT: return "PageDown";
+            default:
+                break;
+            }
+
+            if ((key >= 'A' && key <= 'Z') || (key >= '0' && key <= '9'))
+                return std::string(1, static_cast<char>(key));
+            if (key >= VK_F1 && key <= VK_F12)
+                return "F" + std::to_string(static_cast<unsigned>(key - VK_F1 + 1));
+
+            switch (key)
+            {
+            case VK_OEM_3: return "`";
+            case VK_OEM_MINUS: return "-";
+            case VK_OEM_PLUS: return "=";
+            case VK_OEM_4: return "[";
+            case VK_OEM_6: return "]";
+            case VK_OEM_5: return "\\";
+            case VK_OEM_1: return ";";
+            case VK_OEM_7: return "'";
+            case VK_OEM_COMMA: return ",";
+            case VK_OEM_PERIOD: return ".";
+            case VK_OEM_2: return "/";
+            default:
+                break;
+            }
+
+            std::string fallback = BuildInputBindingKeyNameFromCode(keyCode);
+            if (_stricmp(fallback.c_str(), "Escape") == 0)
+                return "ESC";
+            if (_stricmp(fallback.c_str(), "Backspace") == 0)
+                return "BSP";
+            if (_stricmp(fallback.c_str(), "CapsLock") == 0 ||
+                _stricmp(fallback.c_str(), "CAPSLock") == 0)
+            {
+                return "CAPS";
+            }
+            if (_stricmp(fallback.c_str(), "Enter") == 0 ||
+                _stricmp(fallback.c_str(), "Return") == 0)
+            {
+                return "ENTER";
+            }
+            return fallback;
+        }
+
+        static bool BuildGameKeyChordFromKey(uint32_t key, uint32_t keyCode, std::string& outChord)
+        {
+            outChord.clear();
+            if (key == VK_SHIFT || key == VK_CONTROL || key == VK_MENU)
+                return false;
+
+            const std::string token = BuildGameKeyTokenFromVk(key, keyCode);
+            if (token.empty())
+                return false;
+
+            std::vector<std::string> parts;
+            if ((GetKeyState(VK_CONTROL) & 0x8000) != 0)
+                parts.push_back("CTRL");
+            if ((GetKeyState(VK_SHIFT) & 0x8000) != 0)
+                parts.push_back("SHIFT");
+            if ((GetKeyState(VK_MENU) & 0x8000) != 0)
+                parts.push_back("ALT");
+            parts.push_back(token);
+            outChord = JoinStrings(parts, "+");
+            return true;
+        }
+
+        static bool WriteGameKeyBindingMapFile()
+        {
+            const std::filesystem::path gameKeyMapPath = g_InputBindingInstallDirectory / "gamekey.map";
+            std::ofstream file(gameKeyMapPath, std::ios::trunc);
+            if (!file)
+                return false;
+
+            file << "#***********************************************\n";
+            file << "#*\n";
+            file << "#*  BattleZone 98 Redux Keyboard Mapping File\n";
+            file << "#*\n";
+            file << "#*  Generated by OpenShim native key rebinding UI.\n";
+            file << "#*\n";
+            file << "#***********************************************\n\n";
+
+            for (size_t actionIndex = 0; actionIndex < g_GameKeyBindingActions.size(); ++actionIndex)
+            {
+                const GameKeyBindingAction& action = g_GameKeyBindingActions[actionIndex];
+                for (const std::string& chord : action.chords)
+                {
+                    if (!chord.empty())
+                        file << action.action << "\t\t\t" << chord << "\n";
+                }
+
+                if (actionIndex + 1 < g_GameKeyBindingActions.size())
+                    file << "\n";
+            }
+
+            return file.good();
+        }
+
+        static bool AssignGameKeyBindingChord(const std::string& action, const std::string& newChord)
+        {
+            if (action.empty() || newChord.empty())
+                return false;
+
+            GameKeyBindingAction* bindingAction = FindGameKeyBindingAction(g_GameKeyBindingActions, action);
+            if (!bindingAction)
+                return false;
+
+            if (bindingAction->chords.empty())
+            {
+                bindingAction->chords.push_back(newChord);
+            }
+            else
+            {
+                bindingAction->chords[0] = newChord;
+                std::vector<std::string> uniqueChords;
+                for (const std::string& chord : bindingAction->chords)
+                    AppendUniqueString(uniqueChords, chord);
+                bindingAction->chords = std::move(uniqueChords);
+            }
+
+            if (!WriteGameKeyBindingMapFile())
+                return false;
+
+            if (g_BzrFn_ReloadGameKeyMap)
+                g_BzrFn_ReloadGameKeyMap();
+            return true;
+        }
+
+        static void OnInputBindingRowButtonClicked(size_t visibleSlot)
+        {
+            if (visibleSlot >= kInputBindingUiVisibleRowCount)
+                return;
+
+            const int rowIndex = g_InputBindingUiVisibleRowIndices[visibleSlot];
+            if (rowIndex < 0 || static_cast<size_t>(rowIndex) >= g_InputBindingUiRows.size())
+                return;
+
+            const InputBindingUiRow& row = g_InputBindingUiRows[static_cast<size_t>(rowIndex)];
+            const std::string displayText =
+                row.displayText.empty() ? HumanizeInputBindingCommand(row.command) : row.displayText;
+            g_InputBindingUiPendingFamily = row.family;
+            g_InputBindingUiPendingCommand = row.command;
+            g_InputBindingUiPendingDisplayText = displayText;
+            g_InputBindingUiStatusText =
+                "Press a key for " + g_InputBindingUiPendingDisplayText + ". ESC cancels.";
+            Log(L"[INPUTUI] Pending capture family=%hs slot=%u command=%hs display=%hs\n",
+                row.family == InputBindingMapFamily::GameKey ? "gamekey" : "input",
+                static_cast<unsigned>(visibleSlot),
+                row.command.c_str(),
+                displayText.c_str());
+            RefreshInputBindingUiControls();
+        }
+
+        static void OnInputBindingBackClicked()
+        {
+            auto* const backClick = reinterpret_cast<void(__cdecl*)()>(kOptionsInputBackClickAddr);
+            if (backClick)
+            {
+                Log(L"[INPUTUI] Invoking stock Back callback\n");
+                backClick();
+            }
+        }
+
+        static void OnInputBindingDefaultsClicked()
+        {
+            auto* const defaultsClick = reinterpret_cast<void(__cdecl*)()>(kOptionsInputDefaultsClickAddr);
+            if (defaultsClick)
+            {
+                Log(L"[INPUTUI] Invoking stock input default reset callback\n");
+                defaultsClick();
+            }
+
+            ReloadInputBindingUiInventory(true);
+            g_InputBindingUiPageStart =
+                ClampInputBindingUiPageStart(g_InputBindingUiActiveFamily, g_InputBindingUiPageStart);
+            g_InputBindingUiPendingCommand.clear();
+            g_InputBindingUiPendingDisplayText.clear();
+            g_InputBindingUiStatusText = "Reset input.map defaults and reloaded key maps.";
+            RefreshInputBindingUiControls();
+        }
+
+        static void OnInputBindingFamilyButtonClicked(InputBindingMapFamily family)
+        {
+            g_InputBindingUiActiveFamily = family;
+            g_InputBindingUiPageStart = 0;
+            RefreshInputBindingUiControls();
+        }
+
+        static void OnInputBindingPageStepClicked(int direction)
+        {
+            const size_t current = g_InputBindingUiPageStart;
+            if (direction < 0)
+            {
+                g_InputBindingUiPageStart =
+                    current >= kInputBindingUiVisibleRowCount ? current - kInputBindingUiVisibleRowCount : 0;
+            }
+            else if (direction > 0)
+            {
+                g_InputBindingUiPageStart = current + kInputBindingUiVisibleRowCount;
+            }
+
+            g_InputBindingUiPageStart =
+                ClampInputBindingUiPageStart(g_InputBindingUiActiveFamily, g_InputBindingUiPageStart);
+            RefreshInputBindingUiControls();
+        }
+
+        static void OnInputBindingRefreshClicked()
+        {
+            ReloadInputBindingUiInventory(true);
+            g_InputBindingUiPageStart =
+                ClampInputBindingUiPageStart(g_InputBindingUiActiveFamily, g_InputBindingUiPageStart);
+            g_InputBindingUiStatusText = "Reloaded input.map and gamekey.map.";
+            RefreshInputBindingUiControls();
+        }
+
+        static bool HandleCapturedInputBindingKey(void* screen, uint32_t key, uint32_t keyCode)
+        {
+            if (g_InputBindingUiPendingCommand.empty())
+                return false;
+
+            Log(L"[INPUTUI] Capture key family=%hs command=%hs vk=0x%02X keyCode=0x%02X screen=0x%08X\n",
+                g_InputBindingUiPendingFamily == InputBindingMapFamily::GameKey ? "gamekey" : "input",
+                g_InputBindingUiPendingCommand.c_str(),
+                static_cast<unsigned>(key & 0xFFu),
+                static_cast<unsigned>(keyCode & 0xFFu),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(screen)));
+
+            if (key == VK_ESCAPE)
+            {
+                g_InputBindingUiPendingCommand.clear();
+                g_InputBindingUiPendingDisplayText.clear();
+                g_InputBindingUiStatusText = "Capture cancelled.";
+                RefreshInputBindingUiControls();
+                return true;
+            }
+
+            const size_t rowIndex =
+                FindInputBindingUiRowIndex(g_InputBindingUiPendingFamily, g_InputBindingUiPendingCommand);
+            if (rowIndex >= g_InputBindingUiRows.size())
+            {
+                g_InputBindingUiPendingCommand.clear();
+                g_InputBindingUiPendingDisplayText.clear();
+                g_InputBindingUiStatusText = "Pending binding row was no longer available.";
+                RefreshInputBindingUiControls();
+                return true;
+            }
+
+            const InputBindingUiRow& row = g_InputBindingUiRows[rowIndex];
+            if (row.family == InputBindingMapFamily::Input)
+            {
+                const std::string keyName = BuildInputBindingKeyNameFromCode(keyCode);
+                if (keyName.empty())
+                {
+                    g_InputBindingUiStatusText = "That key is not available for input.map bindings.";
+                    Log(L"[INPUTUI] Capture rejected: no stock key name for keyCode=0x%02X\n",
+                        static_cast<unsigned>(keyCode & 0xFFu));
+                    RefreshInputBindingUiControls();
+                    return true;
+                }
+
+                void* keyConfig = nullptr;
+                if (screen)
+                {
+                    auto* screenBytes = reinterpret_cast<uint8_t*>(screen);
+                    keyConfig = *reinterpret_cast<void**>(screenBytes + kOptionsInputKeyConfigOffset);
+                }
+
+                if (!keyConfig || !g_BzrFn_KeyConfigSetKey || !g_BzrFn_WriteInputMapKey)
+                {
+                    g_InputBindingUiStatusText = "OpenShim could not reach the stock key config object.";
+                    Log(L"[INPUTUI] Capture failed: missing key config or writers keyConfig=0x%08X setKey=0x%p writeKey=0x%p\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(keyConfig)),
+                        reinterpret_cast<void*>(g_BzrFn_KeyConfigSetKey),
+                        reinterpret_cast<void*>(g_BzrFn_WriteInputMapKey));
+                    RefreshInputBindingUiControls();
+                    return true;
+                }
+
+                if (g_BzrFn_KeyConfigSetKey(keyConfig, row.command.c_str(), keyName.c_str()) == 0)
+                {
+                    g_InputBindingUiStatusText =
+                        "Binding rejected for " + g_InputBindingUiPendingDisplayText +
+                        ". The key is already bound or reserved.";
+                    Log(L"[INPUTUI] Capture rejected by KeyConfig::set_key command=%hs key=%hs\n",
+                        row.command.c_str(),
+                        keyName.c_str());
+                    RefreshInputBindingUiControls();
+                    return true;
+                }
+
+                g_BzrFn_WriteInputMapKey(row.command.c_str(), keyName.c_str());
+                ReloadInputBindingUiInventory(true);
+                g_InputBindingUiPendingCommand.clear();
+                g_InputBindingUiPendingDisplayText.clear();
+                const std::string displayText =
+                    row.displayText.empty() ? HumanizeInputBindingCommand(row.command) : row.displayText;
+                g_InputBindingUiStatusText = "Bound " + displayText + " to " + keyName + ".";
+                Log(L"[INPUTUI] Bound input command=%hs key=%hs\n",
+                    row.command.c_str(),
+                    keyName.c_str());
+                RefreshInputBindingUiControls();
+                return true;
+            }
+
+            std::string chord;
+            if (!BuildGameKeyChordFromKey(key, keyCode, chord))
+            {
+                g_InputBindingUiStatusText =
+                    "Press a non-modifier key for " + g_InputBindingUiPendingDisplayText + ".";
+                Log(L"[INPUTUI] Capture rejected for gamekey command=%hs because chord build failed\n",
+                    row.command.c_str());
+                RefreshInputBindingUiControls();
+                return true;
+            }
+
+            if (!AssignGameKeyBindingChord(row.command, chord))
+            {
+                g_InputBindingUiStatusText =
+                    "Failed writing gamekey.map for " + g_InputBindingUiPendingDisplayText + ".";
+                Log(L"[INPUTUI] Failed writing gamekey command=%hs chord=%hs\n",
+                    row.command.c_str(),
+                    chord.c_str());
+                RefreshInputBindingUiControls();
+                return true;
+            }
+
+            ReloadInputBindingUiInventory(true);
+            g_InputBindingUiPendingCommand.clear();
+            g_InputBindingUiPendingDisplayText.clear();
+            const std::string displayText =
+                row.displayText.empty() ? HumanizeInputBindingCommand(row.command) : row.displayText;
+            g_InputBindingUiStatusText = "Bound " + displayText + " to " + chord + ".";
+            Log(L"[INPUTUI] Bound gamekey action=%hs chord=%hs\n",
+                row.command.c_str(),
+                chord.c_str());
+            RefreshInputBindingUiControls();
+            return true;
+        }
+
         static void InitializeInputBindingUiScaffold()
         {
             if (g_InputBindingUiScaffoldInitialized)
@@ -7202,41 +8448,11 @@ namespace BZROpenShim
             g_InputBindingUiScaffoldInitialized = true;
 
             g_InputBindingInstallDirectory = ResolveInputBindingInstallDirectory();
-            g_InputBindingInventory = {};
-            g_InputBindingCommandBlocks.clear();
-            g_GameKeyBindingActions.clear();
-            g_InputBindingUiRows.clear();
             g_LastOptionsInputScreen = nullptr;
-
-            const std::filesystem::path inputMapPath = g_InputBindingInstallDirectory / "input.map";
-            if (!ParseInputBindingMapFile(inputMapPath, g_InputBindingCommandBlocks, g_InputBindingInventory))
-            {
-                const std::string inputMapPathText = inputMapPath.string();
-                Log(L"[INPUTUI] Failed to parse input binding map at %hs\n",
-                    inputMapPathText.c_str());
-                return;
-            }
-
-            const std::filesystem::path gameKeyMapPath = g_InputBindingInstallDirectory / "gamekey.map";
-            if (!ParseGameKeyBindingMapFile(gameKeyMapPath, g_GameKeyBindingActions, g_InputBindingInventory))
-            {
-                const std::string gameKeyMapPathText = gameKeyMapPath.string();
-                Log(L"[INPUTUI] Failed to parse gamekey binding map at %hs\n",
-                    gameKeyMapPathText.c_str());
-            }
-
-            std::vector<InputBindingUiRow> inputRows =
-                BuildFirstPassInputBindingRows(g_InputBindingCommandBlocks);
-            std::vector<InputBindingUiRow> gameKeyRows =
-                BuildFirstPassGameKeyBindingRows(g_GameKeyBindingActions);
-            g_InputBindingInventory.firstPassInputRows = inputRows.size();
-            g_InputBindingInventory.firstPassGameKeyRows = gameKeyRows.size();
-
-            g_InputBindingUiRows = inputRows;
-            g_InputBindingUiRows.insert(
-                g_InputBindingUiRows.end(),
-                gameKeyRows.begin(),
-                gameKeyRows.end());
+            g_InputBindingUiActiveFamily = InputBindingMapFamily::Input;
+            g_InputBindingUiPageStart = 0;
+            ResetInputBindingUiVisuals();
+            ReloadInputBindingUiInventory(true);
             LogInputBindingUiScaffoldSummary();
         }
 
@@ -7244,9 +8460,8 @@ namespace BZROpenShim
         {
             InitializeInputBindingUiScaffold();
 
-            if (g_InputBindingUiPopulateHookInstallAttempted)
+            if (g_InputBindingUiPopulateHookInstalled && g_InputBindingUiKeyReleasedHookInstalled)
                 return;
-            g_InputBindingUiPopulateHookInstallAttempted = true;
 
             if (!ShouldEnableInputBindingUiReplacement())
                 return;
@@ -7254,6 +8469,10 @@ namespace BZROpenShim
             static const uint8_t kExpectedOptionsInputCtorBytes[kOptionsInputCtorDetourLen] =
             {
                 0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x73, 0x12, 0x86, 0x00
+            };
+            static const uint8_t kExpectedOptionsInputKeyReleasedBytes[kOptionsInputKeyReleasedDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x54, 0x01, 0x00, 0x00
             };
 
             if (!ExpectedBytesMatchAt(kOptionsInputCtorAddr,
@@ -7284,28 +8503,54 @@ namespace BZROpenShim
             g_BzrFn_OptionsInputCtor =
                 reinterpret_cast<FnOptionsInputCtor>(g_OptionsInputPopulateUiDetour.trampoline);
             g_InputBindingUiPopulateHookInstalled = (g_BzrFn_OptionsInputCtor != nullptr);
+
+            if (!ExpectedBytesMatchAt(kOptionsInputKeyReleasedAddr,
+                                      kExpectedOptionsInputKeyReleasedBytes,
+                                      sizeof(kExpectedOptionsInputKeyReleasedBytes)))
+            {
+                Log(L"[INPUTUI] KeyReleased entry bytes mismatch at 0x%08X; live capture remains disabled\n",
+                    static_cast<uint32_t>(kOptionsInputKeyReleasedAddr));
+                return;
+            }
+
+            if (!InstallInlineDetour32(g_OptionsInputKeyReleasedDetour,
+                                       kOptionsInputKeyReleasedAddr,
+                                       reinterpret_cast<void*>(OptionsInputKeyReleasedHook),
+                                       kOptionsInputKeyReleasedDetourLen,
+                                       kExpectedOptionsInputKeyReleasedBytes,
+                                       sizeof(kExpectedOptionsInputKeyReleasedBytes)))
+            {
+                Log(L"[INPUTUI] Failed installing key-release hook at 0x%08X\n",
+                    static_cast<uint32_t>(kOptionsInputKeyReleasedAddr));
+                return;
+            }
+
+            g_BzrFn_OptionsInputKeyReleased =
+                reinterpret_cast<FnOptionsInputKeyReleased>(g_OptionsInputKeyReleasedDetour.trampoline);
+            g_InputBindingUiKeyReleasedHookInstalled = (g_BzrFn_OptionsInputKeyReleased != nullptr);
+            g_InputBindingUiPopulateHookInstallAttempted = true;
             g_InputBindingUiPopulateHookMismatchLogged = false;
-            Log(L"[INPUTUI] Installed constructor hook entry=0x%08X trampoline=0x%08X preview=%hs\n",
+            Log(L"[INPUTUI] Installed constructor hook entry=0x%08X trampoline=0x%08X keyRelease=0x%08X\n",
                 static_cast<uint32_t>(kOptionsInputCtorAddr),
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OptionsInputPopulateUiDetour.trampoline)),
-                "enabled");
+                static_cast<uint32_t>(kOptionsInputKeyReleasedAddr));
         }
 
         static void OnOptionsInputPopulateUiScaffold(void* screen)
         {
             InitializeInputBindingUiScaffold();
 
-            if (!screen || g_LastOptionsInputScreen == screen)
+            if (!screen)
                 return;
 
             g_LastOptionsInputScreen = screen;
-            Log(L"[INPUTUI] Constructor hook screen=0x%08X rows=%u stockFallback=%hs preview=%hs\n",
+            EnsureInputBindingUiControls(screen);
+            RefreshInputBindingUiControls();
+            Log(L"[INPUTUI] Constructor hook screen=0x%08X rows=%u liveUi=%hs keyRelease=%hs\n",
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(screen)),
                 static_cast<unsigned>(g_InputBindingUiRows.size()),
                 "yes",
-                "yes");
-
-            RenderInputBindingUiPreview(screen);
+                g_InputBindingUiKeyReleasedHookInstalled ? "yes" : "no");
         }
 
         static bool IsIniBoolTrue(const char* value, bool fallback)
@@ -9130,6 +10375,20 @@ namespace BZROpenShim
         return screen;
     }
 
+    bool __fastcall OptionsInputKeyReleasedHook(void* thisPtr,
+                                                void* /*edx*/,
+                                                uint32_t key,
+                                                uint32_t keyCode)
+    {
+        if (HandleCapturedInputBindingKey(thisPtr, key, keyCode))
+            return true;
+
+        if (g_BzrFn_OptionsInputKeyReleased)
+            return g_BzrFn_OptionsInputKeyReleased(thisPtr, key, keyCode);
+
+        return false;
+    }
+
     void ResolveBzrHooks(bool isSteam)
     {
         g_IsSteamExe = isSteam;
@@ -9151,7 +10410,14 @@ namespace BZROpenShim
         g_BzrFn_VectorTransform = nullptr;
         g_BzrFn_CollisionRangeSearch = nullptr;
         g_BzrFn_RangeResultsGetNext = nullptr;
+        g_BzrFn_OverlayCtor = nullptr;
+        g_BzrFn_UiSetActive = nullptr;
         g_BzrFn_OptionsInputCtor = nullptr;
+        g_BzrFn_OptionsInputKeyReleased = nullptr;
+        g_BzrFn_KeyConfigSetKey = nullptr;
+        g_BzrFn_WriteInputMapKey = nullptr;
+        g_BzrFn_MapKeyNameFromCode = nullptr;
+        g_BzrFn_ReloadGameKeyMap = nullptr;
         g_BzrFn_RecordDeath = g_RecordDeathDetour.trampoline
             ? reinterpret_cast<FnRecordDeath>(g_RecordDeathDetour.trampoline)
             : nullptr;
@@ -9175,6 +10441,7 @@ namespace BZROpenShim
         g_InputBindingUiScaffoldLogged = false;
         g_InputBindingUiPopulateHookInstallAttempted = false;
         g_InputBindingUiPopulateHookInstalled = false;
+        g_InputBindingUiKeyReleasedHookInstalled = false;
         g_InputBindingUiPopulateHookMismatchLogged = false;
         g_CareerStatsMpHookInstalled = (g_RecordDeathDetour.trampoline != nullptr);
         g_CareerStatsMpHookInstallAttempted = g_CareerStatsMpHookInstalled;
@@ -9187,6 +10454,7 @@ namespace BZROpenShim
         g_GameKeyBindingActions.clear();
         g_InputBindingUiRows.clear();
         g_LastOptionsInputScreen = nullptr;
+        ResetInputBindingUiVisuals();
         g_JumpSnipeProbeLogState = {};
         g_ProducerBuildMenuConfig = {};
         g_AiTuningCache = {};
@@ -9245,6 +10513,7 @@ namespace BZROpenShim
 
         g_BzrFn_ButtonCtor = reinterpret_cast<FnUiButtonCtor>(0x007C2480);
         g_BzrFn_LabelCtor  = reinterpret_cast<FnUiLabelCtor>(0x007CC390);
+        g_BzrFn_OverlayCtor = reinterpret_cast<FnUiOverlayCtor>(kGogUiOverlayCtorAddr);
         g_BzrFn_SetTextureOff = reinterpret_cast<FnUiSetStr>(0x007D2870);
         g_BzrFn_SetTextureOver = reinterpret_cast<FnUiSetStr>(0x007C2F10);
         g_BzrFn_SetTextureOn = reinterpret_cast<FnUiSetStr>(0x007C2E80);
@@ -9253,9 +10522,14 @@ namespace BZROpenShim
         g_BzrFn_LabelState = reinterpret_cast<FnUiSetInt>(0x007CC5C0);
         g_BzrFn_SetOnClick = reinterpret_cast<FnUiSetCb>(0x007C23E0);
         g_BzrFn_SetOnHover = reinterpret_cast<FnUiSetCb>(0x007C23C0);
+        g_BzrFn_UiSetActive = reinterpret_cast<FnUiSetActive>(0x007D3310);
         g_BzrFn_AddChild = reinterpret_cast<FnUiAddChild>(0x007D2110);
         g_BzrFn_UiDialogSetEnabled = reinterpret_cast<FnUiDialogAction>(0x007C9170);
         g_BzrFn_UiDialogAdvance = reinterpret_cast<FnUiDialogAction>(0x007C7930);
+        g_BzrFn_KeyConfigSetKey = reinterpret_cast<FnKeyConfigSetKey>(kGogKeyConfigSetKeyAddr);
+        g_BzrFn_WriteInputMapKey = reinterpret_cast<FnWriteInputMapKey>(kGogWriteInputMapKeyAddr);
+        g_BzrFn_MapKeyNameFromCode = reinterpret_cast<FnMapKeyNameFromCode>(kGogMapKeyNameFromCodeAddr);
+        g_BzrFn_ReloadGameKeyMap = reinterpret_cast<FnReloadGameKeyMap>(kGogReloadGameKeyMapAddr);
 
         g_BzrFn_GetSelected = reinterpret_cast<FnGetSelected>(0x007CB1A0);
         g_BzrFn_CommandHandler = reinterpret_cast<FnCommandHandler>(0x006247A0);
@@ -9514,6 +10788,11 @@ namespace BZROpenShim
         InstallAiTuningHooksIfPossible();
         InstallConstructorRemoteBuildFixIfPossible();
         EnsureInputBindingPopulateHookScaffold();
+    }
+
+    bool AreInputBindingUiHooksInstalled()
+    {
+        return g_InputBindingUiPopulateHookInstalled && g_InputBindingUiKeyReleasedHookInstalled;
     }
 
     void InitBzrHookStrings()
