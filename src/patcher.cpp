@@ -142,24 +142,15 @@ namespace BZROpenShim
         static int s_cached = -1;
         if (s_cached < 0)
         {
-            s_cached =
-                EnvFlagEnabledByName("OPENSHIM_ENABLE_CHUNK_EXPERIMENTS") ||
-                EnvFlagEnabledByName("BZR_ENABLE_CHUNK_EXPERIMENTS") ||
-                EnvFlagEnabledByName("BZR_CHUNK_FORCE_FIRST_GEO") ||
-                EnvFlagEnabledByName("OPENSHIM_CHUNK_FORCE_FIRST_GEO") ||
-                EnvFlagEnabledByName("OPENSHIM_CHUNK_PROXY_DEBUG") ||
-                EnvFlagEnabledByName("OPENSHIM_CHUNK_PLACEHOLDER_PROXY") ||
-                EnvFlagEnabledByName("BZR_CHUNK_TRACE") ||
-                EnvFlagEnabledByName("OPENSHIM_CHUNK_TRACE") ||
-                EnvFlagEnabledByName("BZR_CHUNK_TRACE_VERBOSE") ||
-                EnvFlagEnabledByName("OPENSHIM_CHUNK_TRACE_VERBOSE") ||
-                EnvFlagEnabledByName("BZR_TRACE_CHUNK_EFFECT") ||
-                EnvFlagEnabledByName("OPENSHIM_TRACE_CHUNK_EFFECT") ||
-                EnvFlagEnabledByName("OPENSHIM_CHUNK_EFFECT_TRACE") ||
-                EnvFlagEnabledByName("BZR_CHUNK_LOG_BUDGET") ||
-                EnvFlagEnabledByName("OPENSHIM_CHUNK_LOG_BUDGET") ||
-                EnvFlagEnabledByName("BZR_CHUNK_TRACE_ENTRY_LIMIT") ||
-                EnvFlagEnabledByName("OPENSHIM_CHUNK_TRACE_ENTRY_LIMIT") ? 1 : 0;
+            if (EnvFlagEnabledByName("OPENSHIM_DISABLE_CHUNK_EXPERIMENTS") ||
+                EnvFlagEnabledByName("BZR_DISABLE_CHUNK_EXPERIMENTS"))
+            {
+                s_cached = 0;
+            }
+            else
+            {
+                s_cached = 1;
+            }
         }
         return s_cached != 0;
     }

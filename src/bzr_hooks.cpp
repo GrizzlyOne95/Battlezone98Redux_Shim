@@ -791,6 +791,10 @@ namespace BZROpenShim
             void* ownerObj = nullptr;
             void* ownerEntity = nullptr;
             bool ownerProbeOk = false;
+            char ownerEntityBaseName[32] = {};
+            char ownerOgreFilename[32] = {};
+            char ownerResolvedMeshName[48] = {};
+            bool ownerNameProbeOk = false;
         };
 
         struct LegacyMat3
@@ -818,19 +822,41 @@ namespace BZROpenShim
             float a;
         };
 
+        struct OgreVector3
+        {
+            float x;
+            float y;
+            float z;
+        };
+
+        struct OgreQuaternion
+        {
+            float w;
+            float x;
+            float y;
+            float z;
+        };
+
         struct ChunkProxySlot
         {
             const uint8_t* objectBytes = nullptr;
             const void* geomRef = nullptr;
             char geomName[64] = {};
+            void* ownerEntity = nullptr;
+            char ownerEntityBaseName[32] = {};
+            char ownerOgreFilename[32] = {};
+            char proofMeshName[48] = {};
             float positionX = 0.0f;
             float positionY = 0.0f;
             float positionZ = 0.0f;
             bool useEntryPosition = false;
             void* billboard = nullptr;
+            void* sceneNode = nullptr;
+            void* entity = nullptr;
             DWORD lastSeenTick = 0;
             bool active = false;
             bool billboardAssigned = false;
+            bool meshAssigned = false;
         };
 
         struct ChunkEffectActiveEntry
@@ -847,6 +873,7 @@ namespace BZROpenShim
 
         static bool g_EnableChunkRenderFallback = false;
         static bool g_EnableChunkProxyDebug = false;
+        static bool g_EnableChunkMeshProxy = false;
         static bool g_TraceChunkRender = false;
         static bool g_TraceChunkRenderVerbose = false;
         static bool g_TraceChunkEffectRuntime = false;
@@ -941,6 +968,7 @@ namespace BZROpenShim
         static void OnInputBindingFamilyButtonClicked(InputBindingMapFamily family);
         static void OnInputBindingPageStepClicked(int direction);
         static void OnInputBindingRefreshClicked();
+        static ChunkBridgeSnapshot CaptureChunkBridgeSnapshot(const uint8_t* objectBytes);
 
 #define BZR_INPUT_BINDING_ROW_CLICK_DECL(index) \
         static void __cdecl InputBindingRowClick##index() { OnInputBindingRowButtonClicked(index); }
@@ -1077,6 +1105,8 @@ namespace BZROpenShim
         static constexpr const char* kChunkProxyBillboardSetName = "OpenShimChunkProxyDebug";
         static constexpr const char* kChunkProxyMaterialName = "BaseWhiteNoLighting";
         static constexpr const char* kChunkProxyMaterialGroup = "General";
+        static constexpr const char* kChunkMeshProofTargetGeoName = "AGR11BDA";
+        static constexpr const char* kChunkMeshProofMeshName = "avtank.mesh";
         static FnPlayGlobalSound g_BzrFn_PlayGlobalSound =
             reinterpret_cast<FnPlayGlobalSound>(0x0043AA30);
         static bool g_TargetReticlePopupConfigInitialized = false;
@@ -1153,15 +1183,24 @@ namespace BZROpenShim
         static bool g_ChunkProxyInitLogged = false;
         static bool g_ChunkProxyFailureLogged = false;
         static bool g_ChunkProxyWaitLogged = false;
+        static DWORD g_ChunkMeshProxyLastRetryTick = 0;
+        static bool g_ChunkMeshProxyInitLogged = false;
+        static bool g_ChunkMeshProxyFailureLogged = false;
+        static bool g_ChunkMeshProxyWaitLogged = false;
         static void* g_ChunkProxyBillboardSet = nullptr;
         static std::vector<ChunkProxySlot> g_ChunkProxySlots = {};
         using FnOgreGetRootSceneNode = void*(__thiscall*)(void*);
         using FnOgreCreateBillboardSet = void*(__thiscall*)(void*, uint32_t);
+        using FnOgreCreateChildSceneNode = void*(__thiscall*)(void*, const OgreVector3&, const OgreQuaternion&);
+        using FnOgreCreateEntity = void*(__thiscall*)(void*, const std::string&);
         using FnOgreAttachObject = void(__thiscall*)(void*, void*);
         using FnOgreSetBillboardsInWorldSpace = void(__thiscall*)(void*, bool);
         using FnOgreSetDefaultDimensions = void(__thiscall*)(void*, float, float);
         using FnOgreCreateBillboard = void*(__thiscall*)(void*, float, float, float, const OgreColourValue&);
         using FnOgreSetBillboardPosition = void(__thiscall*)(void*, float, float, float);
+        using FnOgreSetNodePosition = void(__thiscall*)(void*, float, float, float);
+        using FnOgreSetNodeOrientation = void(__thiscall*)(void*, float, float, float, float);
+        using FnOgreSetVisible = void(__thiscall*)(void*, bool);
 
         template<typename T>
         static T ResolveOgreProc(const char* name)
@@ -1359,6 +1398,119 @@ namespace BZROpenShim
 
             outText[outTextCapacity - 1] = '\0';
             return false;
+        }
+
+        static bool TryReadInlineAsciiBuffer(
+            const void* address,
+            size_t maxInlineBytes,
+            char* outText,
+            size_t outTextCapacity)
+        {
+            if (!address || !outText || outTextCapacity == 0 || maxInlineBytes == 0)
+                return false;
+
+            outText[0] = '\0';
+
+            __try
+            {
+                const auto* textBytes = reinterpret_cast<const unsigned char*>(address);
+                size_t index = 0;
+                for (; index < maxInlineBytes && index + 1 < outTextCapacity; ++index)
+                {
+                    const unsigned char ch = textBytes[index];
+                    if (ch == 0)
+                    {
+                        outText[index] = '\0';
+                        return index > 0;
+                    }
+
+                    if (ch < 0x20 || ch > 0x7E)
+                    {
+                        outText[0] = '\0';
+                        return false;
+                    }
+
+                    outText[index] = static_cast<char>(ch);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outText[0] = '\0';
+                return false;
+            }
+
+            outText[outTextCapacity - 1] = '\0';
+            return outText[0] != '\0';
+        }
+
+        static bool BuildChunkOwnerMeshName(
+            const char* ownerEntityBaseName,
+            const char* ownerOgreFilename,
+            char* outMeshName,
+            size_t outMeshNameCapacity)
+        {
+            if (!outMeshName || outMeshNameCapacity == 0)
+                return false;
+
+            outMeshName[0] = '\0';
+
+            const char* preferredName =
+                (ownerOgreFilename && *ownerOgreFilename) ? ownerOgreFilename :
+                ((ownerEntityBaseName && *ownerEntityBaseName) ? ownerEntityBaseName : nullptr);
+            if (!preferredName || !*preferredName)
+                return false;
+
+            if (strchr(preferredName, '.') != nullptr)
+            {
+                strncpy_s(outMeshName, outMeshNameCapacity, preferredName, _TRUNCATE);
+                return true;
+            }
+
+            _snprintf_s(outMeshName, outMeshNameCapacity, _TRUNCATE, "%s.mesh", preferredName);
+            return outMeshName[0] != '\0';
+        }
+
+        static bool TryReadOwnerEntityNames(
+            const void* ownerEntity,
+            char* outEntityBaseName,
+            size_t outEntityBaseNameCapacity,
+            char* outOgreFilename,
+            size_t outOgreFilenameCapacity,
+            char* outResolvedMeshName,
+            size_t outResolvedMeshNameCapacity)
+        {
+            if (outEntityBaseName && outEntityBaseNameCapacity > 0)
+                outEntityBaseName[0] = '\0';
+            if (outOgreFilename && outOgreFilenameCapacity > 0)
+                outOgreFilename[0] = '\0';
+            if (outResolvedMeshName && outResolvedMeshNameCapacity > 0)
+                outResolvedMeshName[0] = '\0';
+
+            if (!ownerEntity)
+                return false;
+
+            char entityBaseName[32] = {};
+            char ogreFilename[32] = {};
+
+            // The current best-effort corpora disagree on the inline string offsets for
+            // tagENTITY. Probe both candidate layouts and keep whichever yields sane ASCII.
+            const auto* entityBytes = reinterpret_cast<const uint8_t*>(ownerEntity);
+            const bool baseRead =
+                TryReadInlineAsciiBuffer(entityBytes + 0xC4, 16, entityBaseName, sizeof(entityBaseName)) ||
+                TryReadInlineAsciiBuffer(entityBytes + 0x84, 16, entityBaseName, sizeof(entityBaseName));
+            const bool fileRead =
+                TryReadInlineAsciiBuffer(entityBytes + 0xD4, 16, ogreFilename, sizeof(ogreFilename)) ||
+                TryReadInlineAsciiBuffer(entityBytes + 0x94, 16, ogreFilename, sizeof(ogreFilename));
+
+            if (outEntityBaseName && outEntityBaseNameCapacity > 0 && baseRead)
+                strncpy_s(outEntityBaseName, outEntityBaseNameCapacity, entityBaseName, _TRUNCATE);
+            if (outOgreFilename && outOgreFilenameCapacity > 0 && fileRead)
+                strncpy_s(outOgreFilename, outOgreFilenameCapacity, ogreFilename, _TRUNCATE);
+
+            if (outResolvedMeshName && outResolvedMeshNameCapacity > 0)
+                BuildChunkOwnerMeshName(entityBaseName, ogreFilename, outResolvedMeshName, outResolvedMeshNameCapacity);
+
+            return baseRead || fileRead;
         }
 
         static int16_t ClampHudSpriteCoord(int value)
@@ -2144,6 +2296,18 @@ namespace BZROpenShim
             return (geomName && *geomName) ? geomName : "<none>";
         }
 
+        static bool ShouldUseChunkMeshProof(const char* geomName)
+        {
+            return g_EnableChunkMeshProxy &&
+                   geomName &&
+                   _stricmp(geomName, kChunkMeshProofTargetGeoName) == 0;
+        }
+
+        static const char* GetChunkProofMeshName(const ChunkProxySlot& slot)
+        {
+            return slot.proofMeshName[0] ? slot.proofMeshName : kChunkMeshProofMeshName;
+        }
+
         static int FindChunkGeoEntryByKey(const BzrGeoLookup* lookup, uint32_t key)
         {
             if (!lookup || !lookup->entries || lookup->count == 0 || key == 0)
@@ -2318,6 +2482,246 @@ namespace BZROpenShim
             }
         }
 
+        static void TryHideChunkProxyEntity(void* entity, FnOgreSetVisible setVisible)
+        {
+            if (!entity || !setVisible)
+                return;
+
+            __try
+            {
+                setVisible(entity, false);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
+        static void TryResetChunkProxyNode(
+            void* sceneNode,
+            FnOgreSetNodePosition setPosition,
+            FnOgreSetNodeOrientation setOrientation)
+        {
+            if (!sceneNode || !setPosition)
+                return;
+
+            __try
+            {
+                setPosition(sceneNode, 0.0f, kChunkProxyHiddenY, 0.0f);
+                if (setOrientation)
+                    setOrientation(sceneNode, 1.0f, 0.0f, 0.0f, 0.0f);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
+        static void* CreateChunkMeshProxyEntity(
+            void* sceneManager,
+            FnOgreCreateEntity createEntity,
+            const char* meshName)
+        {
+            if (!sceneManager || !createEntity)
+                return nullptr;
+
+            const std::string meshNameString =
+                (meshName && *meshName) ? meshName : kChunkMeshProofMeshName;
+            return createEntity(sceneManager, meshNameString);
+        }
+
+        static bool TryCreateChunkMeshProxyObjects(
+            void* rootNode,
+            void* sceneManager,
+            FnOgreCreateChildSceneNode createChildSceneNode,
+            FnOgreCreateEntity createEntity,
+            FnOgreAttachObject attachObject,
+            FnOgreSetVisible setVisible,
+            const char* meshName,
+            void*& outSceneNode,
+            void*& outEntity)
+        {
+            outSceneNode = nullptr;
+            outEntity = nullptr;
+            if (!rootNode || !sceneManager || !createChildSceneNode || !createEntity || !attachObject || !setVisible)
+                return false;
+
+            const OgreVector3 zeroPos = { 0.0f, kChunkProxyHiddenY, 0.0f };
+            const OgreQuaternion identity = { 1.0f, 0.0f, 0.0f, 0.0f };
+            __try
+            {
+                outSceneNode = createChildSceneNode(rootNode, zeroPos, identity);
+                if (outSceneNode)
+                {
+                    outEntity = CreateChunkMeshProxyEntity(sceneManager, createEntity, meshName);
+                    if (outEntity)
+                    {
+                        attachObject(outSceneNode, outEntity);
+                        setVisible(outEntity, false);
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outSceneNode = nullptr;
+                outEntity = nullptr;
+            }
+
+            return outSceneNode != nullptr && outEntity != nullptr;
+        }
+
+        static void* TryGetChunkMeshProxyRootNode(
+            void* sceneManager,
+            FnOgreGetRootSceneNode getRootSceneNode)
+        {
+            if (!sceneManager || !getRootSceneNode)
+                return nullptr;
+
+            __try
+            {
+                return getRootSceneNode(sceneManager);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
+
+        static bool TryUpdateChunkMeshProxyTransform(
+            void* sceneNode,
+            void* entity,
+            FnOgreSetNodePosition setNodePosition,
+            FnOgreSetNodeOrientation setNodeOrientation,
+            FnOgreSetVisible setVisible,
+            float x,
+            float y,
+            float z)
+        {
+            if (!sceneNode || !entity || !setNodePosition || !setVisible)
+                return false;
+
+            __try
+            {
+                setNodePosition(sceneNode, x, y, z);
+                if (setNodeOrientation)
+                    setNodeOrientation(sceneNode, 1.0f, 0.0f, 0.0f, 0.0f);
+                setVisible(entity, true);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void HideChunkProxyMesh(ChunkProxySlot& slot)
+        {
+            static FnOgreSetVisible setVisible =
+                ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
+            static FnOgreSetNodePosition setPosition =
+                ResolveOgreProc<FnOgreSetNodePosition>("?setPosition@Node@Ogre@@UAEXMMM@Z");
+            static FnOgreSetNodeOrientation setOrientation =
+                ResolveOgreProc<FnOgreSetNodeOrientation>("?setOrientation@Node@Ogre@@UAEXMMMM@Z");
+
+            TryHideChunkProxyEntity(slot.entity, setVisible);
+            TryResetChunkProxyNode(slot.sceneNode, setPosition, setOrientation);
+        }
+
+        static bool EnsureChunkMeshProxySlot(ChunkProxySlot& slot)
+        {
+            if (!g_EnableChunkMeshProxy)
+                return false;
+
+            if (slot.sceneNode && slot.entity)
+                return true;
+
+            const DWORD now = GetTickCount();
+            if (g_ChunkMeshProxyLastRetryTick != 0 &&
+                static_cast<DWORD>(now - g_ChunkMeshProxyLastRetryTick) < kChunkProxyRetryDelayMs)
+            {
+                return false;
+            }
+            g_ChunkMeshProxyLastRetryTick = now;
+
+            static FnOgreGetRootSceneNode getRootSceneNode =
+                ResolveOgreProc<FnOgreGetRootSceneNode>("?getRootSceneNode@SceneManager@Ogre@@UAEPAVSceneNode@2@XZ");
+            static FnOgreCreateChildSceneNode createChildSceneNode =
+                ResolveOgreProc<FnOgreCreateChildSceneNode>("?createChildSceneNode@SceneNode@Ogre@@UAEPAV12@ABVVector3@2@ABVQuaternion@2@@Z");
+            static FnOgreCreateEntity createEntity =
+                ResolveOgreProc<FnOgreCreateEntity>("?createEntity@SceneManager@Ogre@@UAEPAVEntity@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            static FnOgreAttachObject attachObject =
+                ResolveOgreProc<FnOgreAttachObject>("?attachObject@SceneNode@Ogre@@UAEXPAVMovableObject@2@@Z");
+            static FnOgreSetVisible setVisible =
+                ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
+
+            if (!getRootSceneNode || !createChildSceneNode || !createEntity || !attachObject || !setVisible)
+            {
+                if (!g_ChunkMeshProxyFailureLogged)
+                {
+                    Log(L"[CHUNKMESH] Missing Ogre entity symbols; mesh proxy disabled for now\n");
+                    g_ChunkMeshProxyFailureLogged = true;
+                }
+                return false;
+            }
+
+            void* sceneManager = GetOgreSceneManagerRuntime();
+            if (!sceneManager)
+            {
+                if (!g_ChunkMeshProxyWaitLogged)
+                {
+                    Log(L"[CHUNKMESH] Scene manager unavailable; waiting to initialize chunk mesh proxy\n");
+                    g_ChunkMeshProxyWaitLogged = true;
+                }
+                return false;
+            }
+
+            void* rootNode = TryGetChunkMeshProxyRootNode(sceneManager, getRootSceneNode);
+            if (!rootNode)
+            {
+                if (!g_ChunkMeshProxyFailureLogged)
+                {
+                    Log(L"[CHUNKMESH] Root scene node unavailable sceneManager=0x%08X\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneManager)));
+                    g_ChunkMeshProxyFailureLogged = true;
+                }
+                return false;
+            }
+
+            void* sceneNode = nullptr;
+            void* entity = nullptr;
+            const char* const meshName = GetChunkProofMeshName(slot);
+            if (!TryCreateChunkMeshProxyObjects(
+                    rootNode,
+                    sceneManager,
+                    createChildSceneNode,
+                    createEntity,
+                    attachObject,
+                    setVisible,
+                    meshName,
+                    sceneNode,
+                    entity))
+            {
+                if (!g_ChunkMeshProxyFailureLogged)
+                {
+                    Log(L"[CHUNKMESH] Entity creation failed mesh=%hs node=0x%08X entity=0x%08X\n",
+                        meshName,
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneNode)),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entity)));
+                    g_ChunkMeshProxyFailureLogged = true;
+                }
+                return false;
+            }
+
+            slot.sceneNode = sceneNode;
+            slot.entity = entity;
+            g_ChunkMeshProxyFailureLogged = false;
+            g_ChunkMeshProxyWaitLogged = false;
+            if (!g_ChunkMeshProxyInitLogged)
+            {
+                Log(L"[CHUNKMESH] Initialized proof mesh proxy mesh=%hs\n", meshName);
+                g_ChunkMeshProxyInitLogged = true;
+            }
+            return true;
+        }
+
         static bool EnsureChunkProxyResources()
         {
             if (!g_EnableChunkProxyDebug)
@@ -2436,9 +2840,10 @@ namespace BZROpenShim
         {
             if (slot.active && reason && AcquireChunkLogSlot())
             {
-                Log(L"[CHUNKPROXY] release obj=0x%08X billboard=0x%08X geom=0x%08X geomName=%hs geomKind=%hs reason=%ls\n",
+                Log(L"[CHUNKPROXY] release obj=0x%08X billboard=0x%08X entity=0x%08X geom=0x%08X geomName=%hs geomKind=%hs reason=%ls\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.billboard)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.entity)),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
                     GetChunkGeomNameForLog(slot.geomName),
                     ClassifyChunkGeomName(slot.geomName),
@@ -2447,9 +2852,15 @@ namespace BZROpenShim
 
             if (slot.billboardAssigned)
                 HideChunkProxyBillboard(slot.billboard);
+            if (slot.meshAssigned)
+                HideChunkProxyMesh(slot);
             slot.objectBytes = nullptr;
             slot.geomRef = nullptr;
             slot.geomName[0] = '\0';
+            slot.ownerEntity = nullptr;
+            slot.ownerEntityBaseName[0] = '\0';
+            slot.ownerOgreFilename[0] = '\0';
+            slot.proofMeshName[0] = '\0';
             slot.positionX = 0.0f;
             slot.positionY = 0.0f;
             slot.positionZ = 0.0f;
@@ -2457,13 +2868,20 @@ namespace BZROpenShim
             slot.lastSeenTick = 0;
             slot.active = false;
             slot.billboardAssigned = false;
+            slot.meshAssigned = false;
         }
 
         static void UpdateChunkProxySlotPosition(ChunkProxySlot& slot)
         {
             static FnOgreSetBillboardPosition setPosition =
                 ResolveOgreProc<FnOgreSetBillboardPosition>("?setPosition@Billboard@Ogre@@QAEXMMM@Z");
-            if (!slot.active || !slot.billboard || !setPosition)
+            static FnOgreSetNodePosition setNodePosition =
+                ResolveOgreProc<FnOgreSetNodePosition>("?setPosition@Node@Ogre@@UAEXMMM@Z");
+            static FnOgreSetNodeOrientation setNodeOrientation =
+                ResolveOgreProc<FnOgreSetNodeOrientation>("?setOrientation@Node@Ogre@@UAEXMMMM@Z");
+            static FnOgreSetVisible setVisible =
+                ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
+            if (!slot.active)
                 return;
 
             float x = 0.0f;
@@ -2481,13 +2899,14 @@ namespace BZROpenShim
                 return;
             }
 
-            if (!TrySetChunkProxyBillboardPosition(slot.billboard, setPosition, x, y, z))
+            if (slot.billboard && setPosition &&
+                !TrySetChunkProxyBillboardPosition(slot.billboard, setPosition, x, y, z))
             {
                 ReleaseChunkProxySlot(slot, L"billboard-set-failed");
                 return;
             }
 
-            if (!slot.billboardAssigned && AcquireChunkLogSlot())
+            if (slot.billboard && setPosition && !slot.billboardAssigned && AcquireChunkLogSlot())
             {
                 Log(L"[CHUNKPROXY] assigned obj=0x%08X billboard=0x%08X geom=0x%08X geomName=%hs geomKind=%hs pos=(%.4f, %.4f, %.4f)\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
@@ -2499,15 +2918,56 @@ namespace BZROpenShim
                     static_cast<double>(y),
                     static_cast<double>(z));
             }
-            slot.billboardAssigned = true;
+            if (slot.billboard && setPosition)
+                slot.billboardAssigned = true;
+
+            if (ShouldUseChunkMeshProof(slot.geomName))
+            {
+                if (!EnsureChunkMeshProxySlot(slot))
+                    return;
+
+                if (!TryUpdateChunkMeshProxyTransform(
+                        slot.sceneNode,
+                        slot.entity,
+                        setNodePosition,
+                        setNodeOrientation,
+                        setVisible,
+                        x,
+                        y,
+                        z))
+                {
+                    ReleaseChunkProxySlot(slot, L"mesh-set-failed");
+                    return;
+                }
+
+                if (!slot.meshAssigned && AcquireChunkLogSlot())
+                {
+                    Log(L"[CHUNKMESH] assigned obj=0x%08X entity=0x%08X geom=0x%08X geomName=%hs mesh=%hs pos=(%.4f, %.4f, %.4f)\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.entity)),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
+                        GetChunkGeomNameForLog(slot.geomName),
+                        GetChunkProofMeshName(slot),
+                        static_cast<double>(x),
+                        static_cast<double>(y),
+                        static_cast<double>(z));
+                }
+                slot.meshAssigned = true;
+            }
+            else if (slot.meshAssigned)
+            {
+                HideChunkProxyMesh(slot);
+                slot.meshAssigned = false;
+            }
         }
 
         static void TickChunkProxyDebug()
         {
-            if (!g_EnableChunkProxyDebug)
+            if (!g_EnableChunkProxyDebug && !g_EnableChunkMeshProxy)
                 return;
 
-            EnsureChunkProxyResources();
+            if (g_EnableChunkProxyDebug)
+                EnsureChunkProxyResources();
             if (g_ChunkProxySlots.empty())
                 return;
 
@@ -2536,7 +2996,7 @@ namespace BZROpenShim
             float positionY,
             float positionZ)
         {
-            if (!g_EnableChunkProxyDebug || !objectBytes)
+            if ((!g_EnableChunkProxyDebug && !g_EnableChunkMeshProxy) || !objectBytes)
                 return;
 
             if (g_ChunkProxySlots.size() != g_ChunkProxyCapacity)
@@ -2548,6 +3008,7 @@ namespace BZROpenShim
             {
                 if (slot.active && slot.objectBytes == objectBytes)
                 {
+                    const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(objectBytes);
                     slot.geomRef = geomRef;
                     if (geomName && *geomName)
                     {
@@ -2561,6 +3022,19 @@ namespace BZROpenShim
                     slot.positionY = positionY;
                     slot.positionZ = positionZ;
                     slot.useEntryPosition = true;
+                    slot.ownerEntity = bridgeSnapshot.ownerEntity;
+                    if (bridgeSnapshot.ownerEntityBaseName[0])
+                        strncpy_s(slot.ownerEntityBaseName, bridgeSnapshot.ownerEntityBaseName, _TRUNCATE);
+                    else
+                        slot.ownerEntityBaseName[0] = '\0';
+                    if (bridgeSnapshot.ownerOgreFilename[0])
+                        strncpy_s(slot.ownerOgreFilename, bridgeSnapshot.ownerOgreFilename, _TRUNCATE);
+                    else
+                        slot.ownerOgreFilename[0] = '\0';
+                    if (bridgeSnapshot.ownerResolvedMeshName[0])
+                        strncpy_s(slot.proofMeshName, bridgeSnapshot.ownerResolvedMeshName, _TRUNCATE);
+                    else
+                        slot.proofMeshName[0] = '\0';
                     slot.lastSeenTick = now;
                     return;
                 }
@@ -2574,6 +3048,7 @@ namespace BZROpenShim
 
             freeSlot->objectBytes = objectBytes;
             freeSlot->geomRef = geomRef;
+            const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(objectBytes);
             if (geomName && *geomName)
             {
                 strncpy_s(freeSlot->geomName, geomName, _TRUNCATE);
@@ -2586,16 +3061,34 @@ namespace BZROpenShim
             freeSlot->positionY = positionY;
             freeSlot->positionZ = positionZ;
             freeSlot->useEntryPosition = true;
+            freeSlot->ownerEntity = bridgeSnapshot.ownerEntity;
+            if (bridgeSnapshot.ownerEntityBaseName[0])
+                strncpy_s(freeSlot->ownerEntityBaseName, bridgeSnapshot.ownerEntityBaseName, _TRUNCATE);
+            else
+                freeSlot->ownerEntityBaseName[0] = '\0';
+            if (bridgeSnapshot.ownerOgreFilename[0])
+                strncpy_s(freeSlot->ownerOgreFilename, bridgeSnapshot.ownerOgreFilename, _TRUNCATE);
+            else
+                freeSlot->ownerOgreFilename[0] = '\0';
+            if (bridgeSnapshot.ownerResolvedMeshName[0])
+                strncpy_s(freeSlot->proofMeshName, bridgeSnapshot.ownerResolvedMeshName, _TRUNCATE);
+            else
+                freeSlot->proofMeshName[0] = '\0';
             freeSlot->lastSeenTick = now;
             freeSlot->active = true;
             freeSlot->billboardAssigned = false;
+            freeSlot->meshAssigned = false;
             if (AcquireChunkLogSlot())
             {
-                Log(L"[CHUNKPROXY] tracking obj=0x%08X geom=0x%08X geomName=%hs geomKind=%hs pos=(%.4f, %.4f, %.4f)\n",
+                Log(L"[CHUNKPROXY] tracking obj=0x%08X geom=0x%08X geomName=%hs geomKind=%hs ownerEntity=0x%08X ownerBase=%hs ownerFile=%hs mesh=%hs pos=(%.4f, %.4f, %.4f)\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectBytes)),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(geomRef)),
                     GetChunkGeomNameForLog(geomName),
                     ClassifyChunkGeomName(geomName),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(freeSlot->ownerEntity)),
+                    freeSlot->ownerEntityBaseName[0] ? freeSlot->ownerEntityBaseName : "<none>",
+                    freeSlot->ownerOgreFilename[0] ? freeSlot->ownerOgreFilename : "<none>",
+                    freeSlot->proofMeshName[0] ? freeSlot->proofMeshName : kChunkMeshProofMeshName,
                     static_cast<double>(positionX),
                     static_cast<double>(positionY),
                     static_cast<double>(positionZ));
@@ -2744,7 +3237,7 @@ namespace BZROpenShim
 
         static void TrackChunkEffectActiveEntries(void* thisPtr)
         {
-            if ((!g_EnableChunkProxyDebug && !g_TraceChunkEffectRuntime) || !thisPtr)
+            if ((!g_EnableChunkProxyDebug && !g_EnableChunkMeshProxy && !g_TraceChunkEffectRuntime) || !thisPtr)
                 return;
 
             const auto* thisBytes = reinterpret_cast<const uint8_t*>(thisPtr);
@@ -2836,6 +3329,25 @@ namespace BZROpenShim
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 snapshot.ownerProbeOk = false;
+            }
+
+            __try
+            {
+                snapshot.ownerNameProbeOk = TryReadOwnerEntityNames(
+                    snapshot.ownerEntity,
+                    snapshot.ownerEntityBaseName,
+                    sizeof(snapshot.ownerEntityBaseName),
+                    snapshot.ownerOgreFilename,
+                    sizeof(snapshot.ownerOgreFilename),
+                    snapshot.ownerResolvedMeshName,
+                    sizeof(snapshot.ownerResolvedMeshName));
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                snapshot.ownerEntityBaseName[0] = '\0';
+                snapshot.ownerOgreFilename[0] = '\0';
+                snapshot.ownerResolvedMeshName[0] = '\0';
+                snapshot.ownerNameProbeOk = false;
             }
 
             return snapshot;
@@ -2980,7 +3492,7 @@ namespace BZROpenShim
                 selectedIndex,
                 selectedKey);
 
-            Log(L"[CHUNK]   direct root=0x%08X entity=0x%08X light=0x%08X probe=%hs | owner=0x%08X ownerBridge=0x%08X ownerEntity=0x%08X ownerObj=0x%08X ownerOgre=0x%08X ownerLight=0x%08X ownerProbe=%hs\n",
+            Log(L"[CHUNK]   direct root=0x%08X entity=0x%08X light=0x%08X probe=%hs | owner=0x%08X ownerBridge=0x%08X ownerEntity=0x%08X ownerObj=0x%08X ownerOgre=0x%08X ownerLight=0x%08X ownerProbe=%hs ownerNameProbe=%hs ownerBase=%hs ownerFile=%hs ownerMesh=%hs\n",
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bridgeSnapshot.directBridgeRoot)),
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bridgeSnapshot.directOgreEntity)),
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bridgeSnapshot.directOgreLight)),
@@ -2991,7 +3503,11 @@ namespace BZROpenShim
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bridgeSnapshot.ownerObj)),
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bridgeSnapshot.ownerOgreEntity)),
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bridgeSnapshot.ownerOgreLight)),
-                bridgeSnapshot.ownerProbeOk ? "ok" : "fault");
+                bridgeSnapshot.ownerProbeOk ? "ok" : "fault",
+                bridgeSnapshot.ownerNameProbeOk ? "ok" : "fault",
+                bridgeSnapshot.ownerEntityBaseName[0] ? bridgeSnapshot.ownerEntityBaseName : "<none>",
+                bridgeSnapshot.ownerOgreFilename[0] ? bridgeSnapshot.ownerOgreFilename : "<none>",
+                bridgeSnapshot.ownerResolvedMeshName[0] ? bridgeSnapshot.ownerResolvedMeshName : "<none>");
 
             LogChunkClassProbe(objectBytes);
 
@@ -10625,6 +11141,9 @@ namespace BZROpenShim
         g_EnableChunkProxyDebug =
             EnvFlagEnabled("OPENSHIM_CHUNK_PROXY_DEBUG") ||
             EnvFlagEnabled("OPENSHIM_CHUNK_PLACEHOLDER_PROXY");
+        g_EnableChunkMeshProxy =
+            !(EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_MESH_PROXY") ||
+              EnvFlagEnabled("BZR_DISABLE_CHUNK_MESH_PROXY"));
         long chunkLogBudget = 200;
         const bool chunkLogBudgetSpecified =
             TryGetEnvLong("BZR_CHUNK_LOG_BUDGET", chunkLogBudget) ||
@@ -10652,6 +11171,7 @@ namespace BZROpenShim
         g_TraceChunkRender =
             g_EnableChunkRenderFallback ||
             g_EnableChunkProxyDebug ||
+            g_EnableChunkMeshProxy ||
             EnvFlagEnabled("BZR_CHUNK_TRACE") ||
             EnvFlagEnabled("OPENSHIM_CHUNK_TRACE") ||
             chunkLogBudgetSpecified ||
@@ -10734,6 +11254,10 @@ namespace BZROpenShim
         g_ChunkProxyInitLogged = false;
         g_ChunkProxyFailureLogged = false;
         g_ChunkProxyWaitLogged = false;
+        g_ChunkMeshProxyLastRetryTick = 0;
+        g_ChunkMeshProxyInitLogged = false;
+        g_ChunkMeshProxyFailureLogged = false;
+        g_ChunkMeshProxyWaitLogged = false;
         g_ChunkProxyBillboardSet = nullptr;
         g_ChunkProxySlots.clear();
         float turretAimPitchMultiplier = g_TurretAimPitchMultiplierEnhanced;
@@ -10758,6 +11282,10 @@ namespace BZROpenShim
             g_EnableChunkProxyDebug ? "enabled" : "disabled",
             g_ChunkProxyCapacity,
             g_ChunkProxyDebugSize);
+        Log(L"[CHUNKMESH] Proof mesh proxy: %hs targetGeo=%hs mesh=%hs\n",
+            g_EnableChunkMeshProxy ? "enabled" : "disabled",
+            kChunkMeshProofTargetGeoName,
+            kChunkMeshProofMeshName);
         Log(L"[CHUNKEFFECT] Runtime manager trace: %hs vtableSlot=0x%08X orig=0x%08X\n",
             g_TraceChunkEffectRuntime ? "enabled" : "disabled",
             static_cast<uint32_t>(kChunkEffectVtableSimulateSlotAddr),
