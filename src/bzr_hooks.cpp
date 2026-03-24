@@ -7462,6 +7462,8 @@ namespace BZROpenShim
                    row.command == g_InputBindingUiPendingCommand;
         }
 
+        static void SetInputBindingUiViewActive(void* view, bool active);
+
         static bool SetInputBindingUiLabelText(void* label, const char* text)
         {
             if (!label || !g_BzrFn_SetTooltip)
@@ -7486,7 +7488,11 @@ namespace BZROpenShim
                 return false;
 
             if (slot)
-                return SetInputBindingUiLabelText(slot, text);
+            {
+                const bool updated = SetInputBindingUiLabelText(slot, text);
+                SetInputBindingUiViewActive(slot, true);
+                return updated;
+            }
 
             void* labelMem = ::operator new(0x930, std::nothrow);
             if (!labelMem)
@@ -7504,6 +7510,7 @@ namespace BZROpenShim
                 g_BzrFn_LabelState(slot, nullptr);
             g_BzrFn_AddChild(parent, slot, 0);
             SetInputBindingUiLabelText(slot, text);
+            SetInputBindingUiViewActive(slot, true);
             return true;
         }
 
@@ -7538,6 +7545,7 @@ namespace BZROpenShim
 
             if (textureName && *textureName && g_BzrFn_SetTextureOff)
                 g_BzrFn_SetTextureOff(slot, textureName);
+            SetInputBindingUiViewActive(slot, true);
             return true;
         }
 
@@ -7580,12 +7588,14 @@ namespace BZROpenShim
                 if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(slot, "mpcron.png");
                 if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(slot, "mpcrclk.png");
                 if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(slot, "mpcrclk.png");
-                if (g_BzrFn_SetOnClick && onClick) g_BzrFn_SetOnClick(slot, onClick);
                 g_BzrFn_AddChild(parent, slot, 0);
             }
 
+            if (g_BzrFn_SetOnClick && onClick)
+                g_BzrFn_SetOnClick(slot, onClick);
             if (g_BzrFn_SetButtonLabel)
                 g_BzrFn_SetButtonLabel(slot, text ? text : "");
+            SetInputBindingUiViewActive(slot, true);
             return true;
         }
 
@@ -7749,8 +7759,8 @@ namespace BZROpenShim
                     ? "OpenShim Key Rebinding - Game Actions"
                     : "OpenShim Key Rebinding - Control Channels";
 
-            SetInputBindingUiButtonText(g_InputBindingUiHeaderLabel, headerText);
-            SetInputBindingUiButtonText(g_InputBindingUiStatusLabel, g_InputBindingUiStatusText.c_str());
+            SetInputBindingUiLabelText(g_InputBindingUiHeaderLabel, headerText);
+            SetInputBindingUiLabelText(g_InputBindingUiStatusLabel, g_InputBindingUiStatusText.c_str());
             SuppressStockOptionsInputWidgets(g_InputBindingUiScreen);
 
             if (g_BzrFn_SetButtonLabel)
@@ -7836,23 +7846,27 @@ namespace BZROpenShim
                               static_cast<unsigned>(pageCount),
                               static_cast<unsigned>(totalRows));
             }
-            SetInputBindingUiButtonText(g_InputBindingUiPageLabel, pageText);
+            SetInputBindingUiLabelText(g_InputBindingUiPageLabel, pageText);
 
             for (size_t slot = 0; slot < kInputBindingUiVisibleRowCount; ++slot)
             {
                 const int rowIndex = g_InputBindingUiVisibleRowIndices[slot];
                 if (rowIndex < 0 || static_cast<size_t>(rowIndex) >= g_InputBindingUiRows.size())
                 {
-                    SetInputBindingUiButtonText(g_InputBindingUiRowLabels[slot], "");
+                    SetInputBindingUiLabelText(g_InputBindingUiRowLabels[slot], "");
                     SetInputBindingUiButtonText(g_InputBindingUiRowButtons[slot], "");
+                    SetInputBindingUiViewActive(g_InputBindingUiRowLabels[slot], false);
+                    SetInputBindingUiViewActive(g_InputBindingUiRowButtons[slot], false);
                     continue;
                 }
 
                 const InputBindingUiRow& row = g_InputBindingUiRows[static_cast<size_t>(rowIndex)];
                 const std::string labelText = GetInputBindingUiRowLabelText(row);
                 const std::string buttonText = GetInputBindingUiRowValueText(row);
-                SetInputBindingUiButtonText(g_InputBindingUiRowLabels[slot], labelText.c_str());
+                SetInputBindingUiLabelText(g_InputBindingUiRowLabels[slot], labelText.c_str());
                 SetInputBindingUiButtonText(g_InputBindingUiRowButtons[slot], buttonText.c_str());
+                SetInputBindingUiViewActive(g_InputBindingUiRowLabels[slot], true);
+                SetInputBindingUiViewActive(g_InputBindingUiRowButtons[slot], true);
             }
         }
 
@@ -7870,7 +7884,9 @@ namespace BZROpenShim
             if (!g_InputBindingUiMiddleOverlay)
                 g_InputBindingUiMiddleOverlay = ResolveStockOptionsInputMiddleOverlay(screen);
 
-            void* const controlParent = screen;
+            void* const visualParent = screen;
+            void* const controlParent =
+                g_InputBindingUiMiddleOverlay ? g_InputBindingUiMiddleOverlay : screen;
 
             static constexpr float kBackdropX = 0.0f;
             static constexpr float kBackdropY = 0.0f;
@@ -7905,7 +7921,7 @@ namespace BZROpenShim
             static constexpr float kRowLabelW = 185.0f;
             static constexpr float kRowButtonH = 30.0f;
             static constexpr float kRowStep = 38.0f;
-            static constexpr float kRowButtonOffsetX = 180.0f;
+            static constexpr float kRowButtonOffsetX = 205.0f;
             static constexpr float kRowCompactButtonW = 225.0f;
 
             const unsigned screenTag = static_cast<unsigned>(reinterpret_cast<uintptr_t>(screen));
@@ -7913,7 +7929,7 @@ namespace BZROpenShim
 
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputBackdrop_%08X", screenTag);
             CreateInputBindingUiOverlay(g_InputBindingUiBackdrop,
-                                        controlParent,
+                                        visualParent,
                                         controlName,
                                         "blackui.png",
                                         kBackdropX,
@@ -7923,7 +7939,7 @@ namespace BZROpenShim
                                         0x60);
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputFrame_%08X", screenTag);
             CreateInputBindingUiOverlay(g_InputBindingUiFrame,
-                                        controlParent,
+                                        visualParent,
                                         controlName,
                                         "keyOptions_center.png",
                                         kBackdropX,
@@ -7933,7 +7949,7 @@ namespace BZROpenShim
                                         0x60);
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputTopMask_%08X", screenTag);
             CreateInputBindingUiOverlay(g_InputBindingUiTopMask,
-                                        controlParent,
+                                        visualParent,
                                         controlName,
                                         "blackui.png",
                                         kTopMaskX,
@@ -7943,7 +7959,7 @@ namespace BZROpenShim
                                         0x60);
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputContentMask_%08X", screenTag);
             CreateInputBindingUiOverlay(g_InputBindingUiContentMask,
-                                        controlParent,
+                                        visualParent,
                                         controlName,
                                         "blackui.png",
                                         kContentMaskX,
@@ -7953,11 +7969,11 @@ namespace BZROpenShim
                                         0x60);
 
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputHeader_%08X", screenTag);
-            CreateInputBindingUiButton(g_InputBindingUiHeaderLabel, controlParent, controlName, "", kHeaderX, kHeaderY, kHeaderW, kHeaderH, nullptr);
+            CreateInputBindingUiLabel(g_InputBindingUiHeaderLabel, controlParent, controlName, "", kHeaderX, kHeaderY, kHeaderW, kHeaderH);
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputStatus_%08X", screenTag);
-            CreateInputBindingUiButton(g_InputBindingUiStatusLabel, controlParent, controlName, "", kStatusX, kStatusY, kStatusW, kStatusH, nullptr);
+            CreateInputBindingUiLabel(g_InputBindingUiStatusLabel, controlParent, controlName, "", kStatusX, kStatusY, kStatusW, kStatusH);
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputPage_%08X", screenTag);
-            CreateInputBindingUiButton(g_InputBindingUiPageLabel, controlParent, controlName, "", kPageX, kPageY, kPageW, kPageH, nullptr);
+            CreateInputBindingUiLabel(g_InputBindingUiPageLabel, controlParent, controlName, "", kPageX, kPageY, kPageW, kPageH);
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputBack_%08X", screenTag);
             CreateInputBindingUiButton(g_InputBindingUiBackButton, controlParent, controlName, "Back", 195.0f, kToolbarY, kToolbarW, kToolbarH, reinterpret_cast<void*>(InputBindingBackClick));
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputDefaults_%08X", screenTag);
@@ -7980,7 +7996,7 @@ namespace BZROpenShim
                 const float baseX = (column == 0) ? kRowLeftBaseX : kRowRightBaseX;
                 const float y = kRowY + (static_cast<float>(row) * kRowStep);
                 std::snprintf(controlName, sizeof(controlName), "OpenShimInputRowLabel_%08X_%02u", screenTag, static_cast<unsigned>(slot));
-                CreateInputBindingUiButton(g_InputBindingUiRowLabels[slot], controlParent, controlName, "", baseX, y, kRowLabelW, kRowButtonH, kInputBindingRowClickCallbacks[slot]);
+                CreateInputBindingUiLabel(g_InputBindingUiRowLabels[slot], controlParent, controlName, "", baseX, y + 2.0f, kRowLabelW, kRowButtonH);
                 std::snprintf(controlName, sizeof(controlName), "OpenShimInputRowButton_%08X_%02u", screenTag, static_cast<unsigned>(slot));
                 CreateInputBindingUiButton(g_InputBindingUiRowButtons[slot], controlParent, controlName, "", baseX + kRowButtonOffsetX, y, kRowCompactButtonW, kRowButtonH, kInputBindingRowClickCallbacks[slot]);
             }
