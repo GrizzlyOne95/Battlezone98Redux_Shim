@@ -7336,14 +7336,21 @@ namespace BZROpenShim
 
         static bool ShouldEnableInputBindingUiReplacement()
         {
-            if (EnvFlagEnabled("OPENSHIM_DISABLE_INPUT_BINDING_UI") ||
-                EnvFlagEnabled("OPENSHIM_DISABLE_INPUT_BINDING_UI_REPLACEMENT") ||
-                EnvFlagEnabled("BZR_DISABLE_INPUT_BINDING_UI"))
+            static int s_cached = -1;
+            if (s_cached < 0)
             {
-                return false;
+                const bool disabled =
+                    EnvFlagEnabled("OPENSHIM_DISABLE_INPUT_BINDING_UI") ||
+                    EnvFlagEnabled("OPENSHIM_DISABLE_INPUT_BINDING_UI_REPLACEMENT") ||
+                    EnvFlagEnabled("BZR_DISABLE_INPUT_BINDING_UI");
+                const bool enabled =
+                    EnvFlagEnabled("OPENSHIM_ENABLE_INPUT_BINDING_UI") ||
+                    EnvFlagEnabled("OPENSHIM_ENABLE_INPUT_BINDING_UI_REPLACEMENT") ||
+                    EnvFlagEnabled("OPENSHIM_ENABLE_CUSTOM_KEYBIND_UI") ||
+                    EnvFlagEnabled("BZR_ENABLE_INPUT_BINDING_UI");
+                s_cached = (!disabled && enabled) ? 1 : 0;
             }
-
-            return true;
+            return s_cached != 0;
         }
 
         static void ResetInputBindingUiVisuals()

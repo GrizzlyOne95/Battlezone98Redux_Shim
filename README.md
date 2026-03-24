@@ -517,6 +517,10 @@ The multiplayer vehicle flag-selection UI is also treated as experimental for
 release builds now. Set `OPENSHIM_ENABLE_MP_FLAG_UI=1` before launch if you
 want the lobby `F` button and flag-generation helpers visible.
 
+The custom input-binding replacement UI is also testing-only for now. Set
+`OPENSHIM_ENABLE_INPUT_BINDING_UI=1` before launch if you want OpenShim's
+replacement keybind screen instead of the stock controls screen.
+
 Current scope and cautions:
 
 - GOG-only for now
