@@ -170,6 +170,14 @@ namespace BZROpenShim
     using FnAISpentCreditRefund = void(__cdecl*)(int teamId, void* buildingPtr, void* unitPtr);
     using FnUnitsSOrderStop = void(__cdecl*)(void* unitPtr);
     using FnAIBuildUnassignedCCAdd = void(__cdecl*)(void* teamPtr, void* unitPtr);
+    using FnChunkEffectCreateChunk = void* (__thiscall*)(void* thisPtr,
+                                                         void* objectPtr,
+                                                         const float* velocity,
+                                                         uint8_t preserveFlag);
+    using FnChunkEffectCreateChunklet = void(__thiscall*)(void* thisPtr,
+                                                          const void* positionVec,
+                                                          const float* velocity,
+                                                          uint8_t preserveFlag);
 
     static void** g_BzrPtr_945478 = nullptr;
     static void** g_BzrPtr_94548C = nullptr;
@@ -263,11 +271,23 @@ namespace BZROpenShim
     static FnAISpentCreditRefund g_BzrFn_AISpentCreditRefund = nullptr;
     static FnUnitsSOrderStop g_BzrFn_UnitsSOrderStop = nullptr;
     static FnAIBuildUnassignedCCAdd g_BzrFn_AIBuildUnassignedCCAdd = nullptr;
+    static FnChunkEffectCreateChunk g_BzrFn_ChunkEffectCreateChunk = nullptr;
+    static FnChunkEffectCreateChunklet g_BzrFn_ChunkEffectCreateChunklet = nullptr;
     static BuildItem* g_BzrBuildMenuRoot = nullptr;
     static bool g_IsSteamExe = false;
 
     void* __fastcall OptionsInputPopulateUiHook(void* thisPtr, void* /*edx*/);
     bool __fastcall OptionsInputKeyReleasedHook(void* thisPtr, void* /*edx*/, uint32_t key, uint32_t keyCode);
+    void* __fastcall ChunkEffectCreateChunkHook(void* thisPtr,
+                                                void* /*edx*/,
+                                                void* objectPtr,
+                                                const float* velocity,
+                                                uint8_t preserveFlag);
+    void __fastcall ChunkEffectCreateChunkletHook(void* thisPtr,
+                                                  void* /*edx*/,
+                                                  const void* positionVec,
+                                                  const float* velocity,
+                                                  uint8_t preserveFlag);
 
     namespace
     {
@@ -418,6 +438,12 @@ namespace BZROpenShim
         constexpr size_t kOffensiveProcessDoSubTaskDetourLen = 8;
         constexpr uintptr_t kGogGunTowerProcessDoSubTaskEntryAddr = 0x004741A0;
         constexpr size_t kGunTowerProcessDoSubTaskDetourLen = 6;
+        constexpr uintptr_t kGogChunkEffectCreateChunkAddr = 0x00492AA0;
+        constexpr uintptr_t kGogChunkEffectCreateChunkletAddr = 0x004927D0;
+        constexpr size_t kChunkEffectCreateChunkDetourLen = 9;
+        constexpr size_t kChunkEffectCreateChunkletDetourLen = 9;
+        constexpr size_t kChunkEffectCreateExpectedLen = 16;
+        constexpr ULONGLONG kSteamChunkCreateHookSettleDelayMs = 15000;
         constexpr uintptr_t kGogAIUnitRemoveEntryAddr = 0x0068FC60;
         constexpr size_t kAIUnitRemoveDetourLen = 11;
         constexpr uintptr_t kGogAIBuildConstructionEndAddr = 0x006905D0;
@@ -505,6 +531,31 @@ namespace BZROpenShim
         static bool TryGetShieldTowerTeamFilterForObject(void* objectPtr, ShieldTowerTeamFilterConfig& outConfig);
         static void RunShieldTowerFilteredSimulate(void* shieldTowerPtr, float dt);
         static void RevealProcessOwnerPerceivedTeam(void* processPtr, const char* sourceTag);
+        static std::filesystem::path GetMainModuleDirectory();
+        struct ChunkObjectLinkProbe;
+        struct ChunkCreateSourceTreeProbe;
+        static void PopulateChunkVdfCandidates(const char* meshName, ChunkObjectLinkProbe& probe);
+        static void PopulateChunkObjectLinkProbeFromIdentityCache(ChunkObjectLinkProbe& probe);
+        static bool ResolveChunkCreateMeshContext(
+            const ChunkCreateSourceTreeProbe& probe,
+            char* outMeshName,
+            size_t outMeshNameCapacity);
+        static bool BuildChunkVdfSourceCandidateList(
+            const char* meshName,
+            const ChunkObjectLinkProbe& source,
+            const ChunkObjectLinkProbe& parent,
+            const ChunkObjectLinkProbe& sibling,
+            const ChunkObjectLinkProbe& child,
+            char* outText,
+            size_t outTextCapacity);
+        static bool TryInferChunkMeshNameFromTree(
+            const ChunkObjectLinkProbe& source,
+            const ChunkObjectLinkProbe& parent,
+            const ChunkObjectLinkProbe& sibling,
+            const ChunkObjectLinkProbe& child,
+            char* outMeshName,
+            size_t outMeshNameCapacity);
+        static void RefreshChunkObjectIdentityCacheIfNeeded();
 
         struct HudSpriteRectRecord
         {
@@ -871,6 +922,31 @@ namespace BZROpenShim
             float velocityZ = 0.0f;
         };
 
+        struct ChunkObjectLinkProbe
+        {
+            const uint8_t* objectBytes = nullptr;
+            char objectId[16] = {};
+            uint32_t classId = 0;
+            uint32_t flags = 0;
+            void* geomRef = nullptr;
+            char geomName[64] = {};
+            char cachedMeshName[48] = {};
+            char vdfCandidates[128] = {};
+        };
+
+        struct ChunkCreateSourceTreeProbe
+        {
+            bool valid = false;
+            ChunkObjectLinkProbe source = {};
+            ChunkObjectLinkProbe parent = {};
+            ChunkObjectLinkProbe sibling = {};
+            ChunkObjectLinkProbe child = {};
+            void* ownerEntity = nullptr;
+            char ownerEntityBaseName[32] = {};
+            char ownerOgreFilename[32] = {};
+            char ownerResolvedMeshName[48] = {};
+        };
+
         static bool g_EnableChunkRenderFallback = false;
         static bool g_EnableChunkProxyDebug = false;
         static bool g_EnableChunkMeshProxy = false;
@@ -888,6 +964,39 @@ namespace BZROpenShim
         static DWORD g_SatelliteVisibilityLastTick = 0;
         static DWORD g_SatelliteVisibilityLogIntervalMs = 1000;
         static std::unordered_map<uintptr_t, uint32_t> g_ChunkObservedClassIds = {};
+        struct ChunkVdfRecord
+        {
+            char name[16] = {};
+            char parent[16] = {};
+            uint32_t type = 0;
+            uint32_t flags = 0;
+        };
+
+        struct ChunkVdfAssetInfo
+        {
+            bool attempted = false;
+            bool loaded = false;
+            std::vector<ChunkVdfRecord> records = {};
+        };
+
+        struct ChunkObjectIdentityCacheEntry
+        {
+            char meshName[48] = {};
+            char vdfCandidates[128] = {};
+            uint32_t classId = 0;
+        };
+
+        static std::unordered_map<std::string, ChunkVdfAssetInfo> g_ChunkVdfAssetCache = {};
+        static std::unordered_map<uintptr_t, ChunkObjectIdentityCacheEntry> g_ChunkObjectIdentityCache = {};
+        static DWORD g_ChunkObjectIdentityLastRefreshTick = 0;
+        struct ChunkVdfMeshRef
+        {
+            char meshBase[48] = {};
+            uint32_t type = 0;
+        };
+
+        static bool g_ChunkVdfReverseIndexAttempted = false;
+        static std::unordered_map<std::string, std::vector<ChunkVdfMeshRef>> g_ChunkVdfGeomReverseIndex = {};
         static volatile long g_ArtilleryMaskTraceBudget = 400;
         static volatile long g_BomberRangeTraceBudget = 200;
         static VehicleAssetExceptionCacheEntry g_VehicleAssetExceptionCache[kVehicleAssetExceptionCacheSize] = {};
@@ -919,6 +1028,14 @@ namespace BZROpenShim
         static bool g_RetargetPeriodHooksInstalled = false;
         static volatile long g_AttackRevealTraceBudget = 64;
         static InlineDetour32 g_AIUnitRemoveDetour = {};
+        static InlineDetour32 g_ChunkEffectCreateChunkDetour = {};
+        static InlineDetour32 g_ChunkEffectCreateChunkletDetour = {};
+        static bool g_ChunkEffectCreateHooksInstalled = false;
+        static bool g_ChunkEffectCreateHooksLogged = false;
+        static bool g_AllowUnsafeSteamChunkCreateHooks = false;
+        static bool g_ChunkEffectCreateHooksWaitLogged = false;
+        static bool g_ChunkEffectCreateHooksMismatchLogged = false;
+        static ULONGLONG g_ChunkEffectCreateHooksReadyTick = 0;
         static bool g_ConstructorRemoteBuildFixInstalled = false;
         static bool g_ShieldTowerSimulateHookInstalled = false;
         static bool g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
@@ -1101,6 +1218,9 @@ namespace BZROpenShim
         static constexpr uint32_t kClassIdChunk = 53;
         static constexpr DWORD kChunkProxyExpireMs = 400;
         static constexpr DWORD kChunkProxyRetryDelayMs = 1000;
+        static constexpr DWORD kChunkObjectIdentityRefreshMs = 1000;
+        static constexpr size_t kChunkObjectIdentityMaxObjectsPerRefresh = 1024;
+        static constexpr size_t kChunkObjectIdentityMaxNodesPerObject = 256;
         static constexpr float kChunkProxyHiddenY = -100000.0f;
         static constexpr const char* kChunkProxyBillboardSetName = "OpenShimChunkProxyDebug";
         static constexpr const char* kChunkProxyMaterialName = "BaseWhiteNoLighting";
@@ -1456,6 +1576,130 @@ namespace BZROpenShim
 
             outText[outTextCapacity - 1] = '\0';
             return outText[0] != '\0';
+        }
+
+        static bool IsLikelyChunkGeomName(const char* text)
+        {
+            if (!text || !*text)
+                return false;
+
+            size_t length = 0;
+            bool hasAlpha = false;
+            for (const unsigned char* cursor = reinterpret_cast<const unsigned char*>(text); *cursor; ++cursor)
+            {
+                const unsigned char ch = *cursor;
+                if (!(std::isalnum(ch) || ch == '_' || ch == '-'))
+                    return false;
+
+                if (std::isalpha(ch))
+                    hasAlpha = true;
+
+                ++length;
+                if (length > 15)
+                    return false;
+            }
+
+            if (!hasAlpha || length < 4)
+                return false;
+
+            return _strnicmp(text, "chunk", 5) == 0 ||
+                   _strnicmp(text, "agr", 3) == 0;
+        }
+
+        static bool TryProbeChunkGeomName(
+            const uint8_t* geomBytes,
+            char* outGeomName,
+            size_t outGeomNameCapacity)
+        {
+            if (!geomBytes || !outGeomName || outGeomNameCapacity == 0)
+                return false;
+
+            outGeomName[0] = '\0';
+
+            constexpr uintptr_t kGeomPointerProbeOffsets[] = {
+                0x04, 0x08, 0x0C, 0x10, 0x14, 0x18, 0x1C, 0x20,
+                0x24, 0x28, 0x2C, 0x30, 0x34, 0x38, 0x3C, 0x40
+            };
+            constexpr uintptr_t kGeomInlineProbeOffsets[] = {
+                0x00, 0x04, 0x08, 0x0C, 0x10, 0x14, 0x18, 0x1C,
+                0x20, 0x24, 0x28, 0x2C, 0x30, 0x34, 0x38, 0x3C
+            };
+
+            char candidate[64] = {};
+
+            for (uintptr_t offset : kGeomPointerProbeOffsets)
+            {
+                const char* candidatePtr = nullptr;
+                __try
+                {
+                    candidatePtr = *reinterpret_cast<const char* const*>(geomBytes + offset);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    candidatePtr = nullptr;
+                }
+
+                if (!candidatePtr)
+                    continue;
+
+                if (TryReadAsciiString(candidatePtr, candidate, sizeof(candidate)) &&
+                    IsLikelyChunkGeomName(candidate))
+                {
+                    strncpy_s(outGeomName, outGeomNameCapacity, candidate, _TRUNCATE);
+                    return true;
+                }
+            }
+
+            for (uintptr_t offset : kGeomInlineProbeOffsets)
+            {
+                if (TryReadInlineAsciiBuffer(geomBytes + offset, 16, candidate, sizeof(candidate)) &&
+                    IsLikelyChunkGeomName(candidate))
+                {
+                    strncpy_s(outGeomName, outGeomNameCapacity, candidate, _TRUNCATE);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        static bool TryReadObjProjectId(
+            const uint8_t* objectBytes,
+            char* outText,
+            size_t outTextCapacity)
+        {
+            if (!objectBytes || !outText || outTextCapacity == 0)
+                return false;
+
+            outText[0] = '\0';
+
+            __try
+            {
+                size_t index = 0;
+                for (; index < 8 && index + 1 < outTextCapacity; ++index)
+                {
+                    const unsigned char rawCh = objectBytes[index];
+                    const unsigned char ch = rawCh & 0x7F;
+                    if (ch == 0)
+                        break;
+
+                    if (!(std::isalnum(ch) || ch == '_' || ch == '-'))
+                    {
+                        outText[0] = '\0';
+                        return false;
+                    }
+
+                    outText[index] = static_cast<char>(ch);
+                }
+
+                outText[index] = '\0';
+                return index > 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outText[0] = '\0';
+                return false;
+            }
         }
 
         static bool BuildChunkOwnerMeshName(
@@ -2283,7 +2527,11 @@ namespace BZROpenShim
 
                 const auto* geomBytes = reinterpret_cast<const uint8_t*>(outGeomRef);
                 const char* const geomNamePtr = *reinterpret_cast<const char* const*>(geomBytes + 0x0);
-                TryReadAsciiString(geomNamePtr, outGeomName, outGeomNameCapacity);
+                if (!TryReadAsciiString(geomNamePtr, outGeomName, outGeomNameCapacity) ||
+                    !outGeomName[0])
+                {
+                    TryProbeChunkGeomName(geomBytes, outGeomName, outGeomNameCapacity);
+                }
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -2292,6 +2540,377 @@ namespace BZROpenShim
                 if (outGeomName && outGeomNameCapacity > 0)
                     outGeomName[0] = '\0';
                 return false;
+            }
+        }
+
+        static bool TryReadFloat3(const float* values, float& outX, float& outY, float& outZ)
+        {
+            outX = 0.0f;
+            outY = 0.0f;
+            outZ = 0.0f;
+            if (!values)
+                return false;
+
+            __try
+            {
+                outX = values[0];
+                outY = values[1];
+                outZ = values[2];
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outX = 0.0f;
+                outY = 0.0f;
+                outZ = 0.0f;
+                return false;
+            }
+        }
+
+        static bool TryReadChunkObjectSummary(
+            const uint8_t* objectBytes,
+            uint32_t& outClassId,
+            uint32_t& outFlags,
+            void*& outGeomRef,
+            char* outGeomName,
+            size_t outGeomNameCapacity,
+            void*& outOwner)
+        {
+            outClassId = 0;
+            outFlags = 0;
+            outGeomRef = nullptr;
+            outOwner = nullptr;
+            if (outGeomName && outGeomNameCapacity > 0)
+                outGeomName[0] = '\0';
+            if (!objectBytes)
+                return false;
+
+            __try
+            {
+                outFlags = *reinterpret_cast<const uint32_t*>(objectBytes + 0x14);
+                outClassId = *reinterpret_cast<const uint32_t*>(objectBytes + 0x84);
+                outOwner = *reinterpret_cast<void* const*>(objectBytes + 0x8C);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outClassId = 0;
+                outFlags = 0;
+                outOwner = nullptr;
+                if (outGeomName && outGeomNameCapacity > 0)
+                    outGeomName[0] = '\0';
+                return false;
+            }
+
+            const void* geomRefConst = nullptr;
+            TryReadChunkGeomIdentity(objectBytes, geomRefConst, outGeomName, outGeomNameCapacity);
+            outGeomRef = const_cast<void*>(geomRefConst);
+            return true;
+        }
+
+        static bool CaptureChunkObjectLinkProbe(const uint8_t* objectBytes, ChunkObjectLinkProbe& outProbe)
+        {
+            outProbe = {};
+            outProbe.objectBytes = objectBytes;
+            if (!objectBytes)
+                return false;
+
+            TryReadObjProjectId(objectBytes, outProbe.objectId, sizeof(outProbe.objectId));
+
+            void* ownerUnused = nullptr;
+            const bool ok = TryReadChunkObjectSummary(
+                objectBytes,
+                outProbe.classId,
+                outProbe.flags,
+                outProbe.geomRef,
+                outProbe.geomName,
+                sizeof(outProbe.geomName),
+                ownerUnused);
+            if (ok)
+                PopulateChunkObjectLinkProbeFromIdentityCache(outProbe);
+            return ok;
+        }
+
+        static const ChunkObjectIdentityCacheEntry* FindChunkObjectIdentityCacheEntry(const uint8_t* objectBytes)
+        {
+            if (!objectBytes)
+                return nullptr;
+
+            const auto it = g_ChunkObjectIdentityCache.find(reinterpret_cast<uintptr_t>(objectBytes));
+            return (it != g_ChunkObjectIdentityCache.end()) ? &it->second : nullptr;
+        }
+
+        static void PopulateChunkObjectLinkProbeFromIdentityCache(ChunkObjectLinkProbe& probe)
+        {
+            const ChunkObjectIdentityCacheEntry* cached = FindChunkObjectIdentityCacheEntry(probe.objectBytes);
+            if (!cached)
+                return;
+
+            if (cached->meshName[0])
+                strncpy_s(probe.cachedMeshName, cached->meshName, _TRUNCATE);
+            if (cached->vdfCandidates[0])
+                strncpy_s(probe.vdfCandidates, cached->vdfCandidates, _TRUNCATE);
+        }
+
+        static bool CaptureChunkCreateSourceTreeProbe(
+            const uint8_t* sourceBytes,
+            ChunkCreateSourceTreeProbe& outProbe)
+        {
+            outProbe = {};
+            if (!sourceBytes)
+                return false;
+
+            outProbe.valid = CaptureChunkObjectLinkProbe(sourceBytes, outProbe.source);
+
+            const uint8_t* parentBytes = nullptr;
+            const uint8_t* siblingBytes = nullptr;
+            const uint8_t* childBytes = nullptr;
+            __try
+            {
+                parentBytes = *reinterpret_cast<const uint8_t* const*>(sourceBytes + 0x78);
+                siblingBytes = *reinterpret_cast<const uint8_t* const*>(sourceBytes + 0x7C);
+                childBytes = *reinterpret_cast<const uint8_t* const*>(sourceBytes + 0x80);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                parentBytes = nullptr;
+                siblingBytes = nullptr;
+                childBytes = nullptr;
+            }
+
+            CaptureChunkObjectLinkProbe(parentBytes, outProbe.parent);
+            CaptureChunkObjectLinkProbe(siblingBytes, outProbe.sibling);
+            CaptureChunkObjectLinkProbe(childBytes, outProbe.child);
+
+            const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(sourceBytes);
+            outProbe.ownerEntity = bridgeSnapshot.ownerEntity;
+            if (bridgeSnapshot.ownerEntityBaseName[0])
+                strncpy_s(outProbe.ownerEntityBaseName, bridgeSnapshot.ownerEntityBaseName, _TRUNCATE);
+            if (bridgeSnapshot.ownerOgreFilename[0])
+                strncpy_s(outProbe.ownerOgreFilename, bridgeSnapshot.ownerOgreFilename, _TRUNCATE);
+            if (bridgeSnapshot.ownerResolvedMeshName[0])
+                strncpy_s(outProbe.ownerResolvedMeshName, bridgeSnapshot.ownerResolvedMeshName, _TRUNCATE);
+            if (!outProbe.ownerResolvedMeshName[0])
+            {
+                ResolveChunkCreateMeshContext(
+                    outProbe,
+                    outProbe.ownerResolvedMeshName,
+                    sizeof(outProbe.ownerResolvedMeshName));
+            }
+            if (!outProbe.source.vdfCandidates[0] && outProbe.ownerResolvedMeshName[0])
+            {
+                BuildChunkVdfSourceCandidateList(
+                    outProbe.ownerResolvedMeshName,
+                    outProbe.source,
+                    outProbe.parent,
+                    outProbe.sibling,
+                    outProbe.child,
+                    outProbe.source.vdfCandidates,
+                    sizeof(outProbe.source.vdfCandidates));
+            }
+
+            if (outProbe.ownerResolvedMeshName[0])
+            {
+                if (!outProbe.source.vdfCandidates[0])
+                    PopulateChunkVdfCandidates(outProbe.ownerResolvedMeshName, outProbe.source);
+                PopulateChunkVdfCandidates(outProbe.ownerResolvedMeshName, outProbe.parent);
+                PopulateChunkVdfCandidates(outProbe.ownerResolvedMeshName, outProbe.sibling);
+                PopulateChunkVdfCandidates(outProbe.ownerResolvedMeshName, outProbe.child);
+            }
+
+            return outProbe.valid;
+        }
+
+        static bool TryReadChunkEffectCount(const uint8_t* thisBytes, uint32_t& outCount)
+        {
+            outCount = 0;
+            if (!thisBytes)
+                return false;
+
+            __try
+            {
+                outCount = *reinterpret_cast<const uint32_t*>(thisBytes + kChunkEffectActiveCountOffset);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outCount = 0;
+                return false;
+            }
+        }
+
+        static void LogChunkCreateLifecycle(
+            const wchar_t* tag,
+            void* thisPtr,
+            const uint8_t* sourceBytes,
+            const float* positionVec,
+            const float* velocityVec,
+            uint8_t preserveFlag,
+            uint32_t countBefore,
+            uint32_t countAfter,
+            const ChunkEffectActiveEntry* createdEntry,
+            const ChunkCreateSourceTreeProbe* sourceTreeProbe)
+        {
+            if ((!g_TraceChunkRender && !g_TraceChunkEffectRuntime) || !AcquireChunkLogSlot())
+                return;
+
+            uint32_t sourceClassId = 0;
+            uint32_t sourceFlags = 0;
+            void* sourceGeomRef = nullptr;
+            void* sourceOwner = nullptr;
+            char sourceGeomName[64] = {};
+            TryReadChunkObjectSummary(
+                sourceBytes,
+                sourceClassId,
+                sourceFlags,
+                sourceGeomRef,
+                sourceGeomName,
+                sizeof(sourceGeomName),
+                sourceOwner);
+
+            uint32_t createdClassId = 0;
+            uint32_t createdFlags = 0;
+            void* createdGeomRef = nullptr;
+            void* createdOwner = nullptr;
+            char createdGeomName[64] = {};
+            TryReadChunkObjectSummary(
+                createdEntry ? createdEntry->objectBytes : nullptr,
+                createdClassId,
+                createdFlags,
+                createdGeomRef,
+                createdGeomName,
+                sizeof(createdGeomName),
+                createdOwner);
+
+            const char* const sourceGeomDisplay = sourceGeomName[0] ? sourceGeomName : "<none>";
+            const char* const sourceGeomKind =
+                !sourceGeomName[0]
+                    ? "unknown"
+                    : ((_stricmp(sourceGeomName, "chunk1") == 0 || _stricmp(sourceGeomName, "chunk2") == 0)
+                           ? "stock-chunklet"
+                           : "named-nonchunklet");
+            const char* const sourceVdfDisplay =
+                (sourceTreeProbe && sourceTreeProbe->source.vdfCandidates[0])
+                    ? sourceTreeProbe->source.vdfCandidates
+                    : "<none>";
+            const char* const createdGeomDisplay = createdGeomName[0] ? createdGeomName : "<none>";
+            const char* const createdGeomKind =
+                !createdGeomName[0]
+                    ? "unknown"
+                    : ((_stricmp(createdGeomName, "chunk1") == 0 || _stricmp(createdGeomName, "chunk2") == 0)
+                           ? "stock-chunklet"
+                           : "named-nonchunklet");
+
+            float posX = 0.0f;
+            float posY = 0.0f;
+            float posZ = 0.0f;
+            bool havePos = false;
+            if (createdEntry)
+            {
+                posX = createdEntry->positionX;
+                posY = createdEntry->positionY;
+                posZ = createdEntry->positionZ;
+                havePos = true;
+            }
+            else
+            {
+                havePos = TryReadFloat3(positionVec, posX, posY, posZ);
+            }
+
+            float velX = 0.0f;
+            float velY = 0.0f;
+            float velZ = 0.0f;
+            bool haveVel = false;
+            if (createdEntry)
+            {
+                velX = createdEntry->velocityX;
+                velY = createdEntry->velocityY;
+                velZ = createdEntry->velocityZ;
+                haveVel = true;
+            }
+            else
+            {
+                haveVel = TryReadFloat3(velocityVec, velX, velY, velZ);
+            }
+
+            LogChunkDiagnostic(
+                "chunkspawn",
+                L"[CHUNKSPAWN] %ls this=0x%08X before=%u after=%u preserve=%u src=0x%08X srcClass=%u srcFlags=0x%08X srcOwner=0x%08X srcGeom=0x%08X srcGeomName=%hs srcGeomKind=%hs srcVdf=%hs created=0x%08X createdClass=%u createdFlags=0x%08X createdOwner=0x%08X createdGeom=0x%08X createdGeomName=%hs createdGeomKind=%hs pos=%hs(%.4f, %.4f, %.4f) vel=%hs(%.4f, %.4f, %.4f)\n",
+                tag ? tag : L"unknown",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)),
+                countBefore,
+                countAfter,
+                static_cast<uint32_t>(preserveFlag),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceBytes)),
+                sourceClassId,
+                sourceFlags,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceOwner)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceGeomRef)),
+                sourceGeomDisplay,
+                sourceGeomKind,
+                sourceVdfDisplay,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(createdEntry ? createdEntry->objectBytes : nullptr)),
+                createdClassId,
+                createdFlags,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(createdOwner)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(createdGeomRef)),
+                createdGeomDisplay,
+                createdGeomKind,
+                havePos ? "" : "missing-",
+                static_cast<double>(posX),
+                static_cast<double>(posY),
+                static_cast<double>(posZ),
+                haveVel ? "" : "missing-",
+                static_cast<double>(velX),
+                static_cast<double>(velY),
+                static_cast<double>(velZ));
+
+            if (sourceTreeProbe && sourceTreeProbe->valid)
+            {
+                const ChunkObjectLinkProbe& sourceProbe = sourceTreeProbe->source;
+                const ChunkObjectLinkProbe& parentProbe = sourceTreeProbe->parent;
+                const ChunkObjectLinkProbe& siblingProbe = sourceTreeProbe->sibling;
+                const ChunkObjectLinkProbe& childProbe = sourceTreeProbe->child;
+
+                LogChunkDiagnostic(
+                    "chunkspawn",
+                    L"[CHUNKSPAWN]   srcTree src=0x%08X objId=%hs class=%u flags=0x%08X geom=0x%08X geomName=%hs ownerEntity=0x%08X ownerBase=%hs ownerFile=%hs ownerMesh=%hs | parent=0x%08X objId=%hs class=%u geom=0x%08X geomName=%hs | sibling=0x%08X objId=%hs class=%u geom=0x%08X geomName=%hs | child=0x%08X objId=%hs class=%u geom=0x%08X geomName=%hs\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceProbe.objectBytes)),
+                    sourceProbe.objectId[0] ? sourceProbe.objectId : "<none>",
+                    sourceProbe.classId,
+                    sourceProbe.flags,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceProbe.geomRef)),
+                    sourceProbe.geomName[0] ? sourceProbe.geomName : "<none>",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceTreeProbe->ownerEntity)),
+                    sourceTreeProbe->ownerEntityBaseName[0] ? sourceTreeProbe->ownerEntityBaseName : "<none>",
+                    sourceTreeProbe->ownerOgreFilename[0] ? sourceTreeProbe->ownerOgreFilename : "<none>",
+                    sourceTreeProbe->ownerResolvedMeshName[0] ? sourceTreeProbe->ownerResolvedMeshName : "<none>",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parentProbe.objectBytes)),
+                    parentProbe.objectId[0] ? parentProbe.objectId : "<none>",
+                    parentProbe.classId,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parentProbe.geomRef)),
+                    parentProbe.geomName[0] ? parentProbe.geomName : "<none>",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(siblingProbe.objectBytes)),
+                    siblingProbe.objectId[0] ? siblingProbe.objectId : "<none>",
+                    siblingProbe.classId,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(siblingProbe.geomRef)),
+                    siblingProbe.geomName[0] ? siblingProbe.geomName : "<none>",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(childProbe.objectBytes)),
+                    childProbe.objectId[0] ? childProbe.objectId : "<none>",
+                    childProbe.classId,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(childProbe.geomRef)),
+                    childProbe.geomName[0] ? childProbe.geomName : "<none>");
+
+                if (sourceProbe.vdfCandidates[0] || parentProbe.vdfCandidates[0] ||
+                    siblingProbe.vdfCandidates[0] || childProbe.vdfCandidates[0])
+                {
+                    LogChunkDiagnostic(
+                        "chunkspawn",
+                        L"[CHUNKSPAWN]   vdf src=%hs | parent=%hs | sibling=%hs | child=%hs\n",
+                        sourceProbe.vdfCandidates[0] ? sourceProbe.vdfCandidates : "<none>",
+                        parentProbe.vdfCandidates[0] ? parentProbe.vdfCandidates : "<none>",
+                        siblingProbe.vdfCandidates[0] ? siblingProbe.vdfCandidates : "<none>",
+                        childProbe.vdfCandidates[0] ? childProbe.vdfCandidates : "<none>");
+                }
             }
         }
 
@@ -6293,6 +6912,120 @@ namespace BZROpenShim
             }
         }
 
+        static void InstallChunkEffectCreateHooksIfRequested()
+        {
+            if ((!g_TraceChunkRender && !g_TraceChunkEffectRuntime) || g_ChunkEffectCreateHooksInstalled)
+                return;
+
+            static const uint8_t kExpectedCreateChunkletBytes[kChunkEffectCreateExpectedLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xB8, 0x00, 0x00,
+                0x00, 0xA1, 0x00, 0x70, 0x8E, 0x00, 0x33, 0xC5
+            };
+            static const uint8_t kExpectedCreateChunkBytes[kChunkEffectCreateExpectedLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xA8, 0x00, 0x00,
+                0x00, 0xA1, 0x00, 0x70, 0x8E, 0x00, 0x33, 0xC5
+            };
+
+            if (g_IsSteamExe && !g_AllowUnsafeSteamChunkCreateHooks)
+            {
+                const ULONGLONG nowMs = GetTickCount64();
+                if (g_ChunkEffectCreateHooksReadyTick != 0 && nowMs < g_ChunkEffectCreateHooksReadyTick)
+                {
+                    if (!g_ChunkEffectCreateHooksWaitLogged)
+                    {
+                        LogChunkDiagnostic(
+                            "chunkspawn",
+                            L"[CHUNKSPAWN] Steam creator hooks waiting %llums for settled-byte verification\n",
+                            static_cast<unsigned long long>(g_ChunkEffectCreateHooksReadyTick - nowMs));
+                        g_ChunkEffectCreateHooksWaitLogged = true;
+                    }
+                    return;
+                }
+
+                const bool createChunkBytesMatch =
+                    ExpectedBytesMatchAt(
+                        kGogChunkEffectCreateChunkAddr,
+                        kExpectedCreateChunkBytes,
+                        sizeof(kExpectedCreateChunkBytes));
+                const bool createChunkletBytesMatch =
+                    ExpectedBytesMatchAt(
+                        kGogChunkEffectCreateChunkletAddr,
+                        kExpectedCreateChunkletBytes,
+                        sizeof(kExpectedCreateChunkletBytes));
+                if (!createChunkBytesMatch || !createChunkletBytesMatch)
+                {
+                    if (!g_ChunkEffectCreateHooksMismatchLogged)
+                    {
+                        LogChunkDiagnostic(
+                            "chunkspawn",
+                            L"[CHUNKSPAWN] Steam creator hooks still waiting for settled bytes create=%hs chunklet=%hs\n",
+                            createChunkBytesMatch ? "ok" : "mismatch",
+                            createChunkletBytesMatch ? "ok" : "mismatch");
+                        g_ChunkEffectCreateHooksMismatchLogged = true;
+                    }
+                    return;
+                }
+            }
+
+            if (g_ChunkEffectCreateChunkDetour.trampoline && g_BzrFn_ChunkEffectCreateChunk &&
+                g_ChunkEffectCreateChunkletDetour.trampoline && g_BzrFn_ChunkEffectCreateChunklet)
+            {
+                g_ChunkEffectCreateHooksInstalled = true;
+            }
+            else
+            {
+                if (!g_ChunkEffectCreateChunkDetour.trampoline)
+                {
+                    InstallInlineDetour32(
+                        g_ChunkEffectCreateChunkDetour,
+                        kGogChunkEffectCreateChunkAddr,
+                        reinterpret_cast<void*>(ChunkEffectCreateChunkHook),
+                        kChunkEffectCreateChunkDetourLen,
+                        nullptr,
+                        0);
+                }
+                if (g_ChunkEffectCreateChunkDetour.trampoline)
+                {
+                    g_BzrFn_ChunkEffectCreateChunk = reinterpret_cast<FnChunkEffectCreateChunk>(
+                        g_ChunkEffectCreateChunkDetour.trampoline);
+                }
+
+                if (!g_ChunkEffectCreateChunkletDetour.trampoline)
+                {
+                    InstallInlineDetour32(
+                        g_ChunkEffectCreateChunkletDetour,
+                        kGogChunkEffectCreateChunkletAddr,
+                        reinterpret_cast<void*>(ChunkEffectCreateChunkletHook),
+                        kChunkEffectCreateChunkletDetourLen,
+                        nullptr,
+                        0);
+                }
+                if (g_ChunkEffectCreateChunkletDetour.trampoline)
+                {
+                    g_BzrFn_ChunkEffectCreateChunklet = reinterpret_cast<FnChunkEffectCreateChunklet>(
+                        g_ChunkEffectCreateChunkletDetour.trampoline);
+                }
+
+                g_ChunkEffectCreateHooksInstalled =
+                    g_ChunkEffectCreateChunkDetour.trampoline &&
+                    g_BzrFn_ChunkEffectCreateChunk &&
+                    g_ChunkEffectCreateChunkletDetour.trampoline &&
+                    g_BzrFn_ChunkEffectCreateChunklet;
+            }
+
+            if (g_ChunkEffectCreateHooksInstalled && !g_ChunkEffectCreateHooksLogged)
+            {
+                LogChunkDiagnostic(
+                    "chunkspawn",
+                    L"[CHUNKSPAWN] Installed create hooks create=0x%08X chunklet=0x%08X\n",
+                    static_cast<uint32_t>(kGogChunkEffectCreateChunkAddr),
+                    static_cast<uint32_t>(kGogChunkEffectCreateChunkletAddr));
+                g_ChunkEffectCreateHooksLogged = true;
+            }
+        }
+
         void __cdecl CalcRangeCraftHook(void* craft,
                                         float* closeRange,
                                         float* range,
@@ -7386,6 +8119,623 @@ namespace BZROpenShim
             }
 
             return value.substr(start, end - start);
+        }
+
+        static std::string ReadFixedAsciiField(const uint8_t* bytes, size_t length)
+        {
+            if (!bytes || length == 0)
+                return {};
+
+            size_t end = 0;
+            while (end < length && bytes[end] != 0)
+                ++end;
+
+            std::string text(reinterpret_cast<const char*>(bytes), end);
+            return TrimAsciiCopy(text);
+        }
+
+        static uint32_t ReadLeU32(const uint8_t* bytes)
+        {
+            if (!bytes)
+                return 0;
+
+            uint32_t value = 0;
+            std::memcpy(&value, bytes, sizeof(value));
+            return value;
+        }
+
+        static std::string NormalizeChunkMeshBaseName(const char* meshName)
+        {
+            if (!meshName || !*meshName)
+                return {};
+
+            std::string baseName(meshName);
+            const size_t slash = baseName.find_last_of("/\\");
+            if (slash != std::string::npos)
+                baseName.erase(0, slash + 1);
+
+            const size_t dot = baseName.find_last_of('.');
+            if (dot != std::string::npos)
+                baseName.erase(dot);
+
+            std::transform(
+                baseName.begin(),
+                baseName.end(),
+                baseName.begin(),
+                [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            return baseName;
+        }
+
+        static ChunkVdfAssetInfo& GetChunkVdfAssetInfoForMesh(const char* meshName)
+        {
+            static ChunkVdfAssetInfo kEmptyInfo = {};
+
+            const std::string baseName = NormalizeChunkMeshBaseName(meshName);
+            if (baseName.empty())
+                return kEmptyInfo;
+
+            ChunkVdfAssetInfo& info = g_ChunkVdfAssetCache[baseName];
+            if (info.attempted)
+                return info;
+
+            info.attempted = true;
+
+            const std::filesystem::path vdfPath =
+                GetMainModuleDirectory() / "Edit" / "stock" / (baseName + ".vdf");
+            std::error_code error;
+            if (!std::filesystem::exists(vdfPath, error) || error)
+                return info;
+
+            std::ifstream file(vdfPath, std::ios::binary);
+            if (!file)
+                return info;
+
+            const std::vector<uint8_t> bytes(
+                (std::istreambuf_iterator<char>(file)),
+                std::istreambuf_iterator<char>());
+            constexpr size_t kVdfHeaderBytes = 20;
+            constexpr size_t kVdfcHeaderBytes = 68;
+            constexpr size_t kExitBytes = 8;
+            constexpr size_t kVgeoHeaderBytes = 12;
+            constexpr size_t kVgeoRecordBytes = 100;
+            constexpr size_t kVgeoNameOffset = 0;
+            constexpr size_t kVgeoParentOffset = 56;
+            constexpr size_t kVgeoTypeOffset = 92;
+            constexpr size_t kVgeoFlagsOffset = 96;
+
+            if (bytes.size() < (kVdfHeaderBytes + kVdfcHeaderBytes + kExitBytes + kVgeoHeaderBytes))
+                return info;
+
+            size_t cursor = kVdfHeaderBytes + kVdfcHeaderBytes + kExitBytes;
+            const int32_t geoCount = static_cast<int32_t>(ReadLeU32(bytes.data() + cursor + 8));
+            cursor += kVgeoHeaderBytes;
+            if (geoCount <= 0)
+                return info;
+
+            if (bytes.size() < cursor + (static_cast<size_t>(geoCount) * kVgeoRecordBytes))
+                return info;
+
+            std::unordered_set<std::string> seenKeys;
+            info.records.clear();
+            info.records.reserve(static_cast<size_t>(geoCount));
+            for (int32_t index = 0; index < geoCount; ++index)
+            {
+                const size_t recordOffset = cursor + (static_cast<size_t>(index) * kVgeoRecordBytes);
+                const std::string name = ReadFixedAsciiField(bytes.data() + recordOffset + kVgeoNameOffset, 8);
+                if (name.empty() || _stricmp(name.c_str(), "NULL") == 0)
+                    continue;
+
+                const std::string parent = ReadFixedAsciiField(bytes.data() + recordOffset + kVgeoParentOffset, 8);
+                const std::string seenKey = name + "|" + parent;
+                if (!seenKeys.insert(seenKey).second)
+                    continue;
+
+                ChunkVdfRecord record = {};
+                strncpy_s(record.name, sizeof(record.name), name.c_str(), _TRUNCATE);
+                strncpy_s(record.parent, sizeof(record.parent), parent.c_str(), _TRUNCATE);
+                record.type = ReadLeU32(bytes.data() + recordOffset + kVgeoTypeOffset);
+                record.flags = ReadLeU32(bytes.data() + recordOffset + kVgeoFlagsOffset);
+                info.records.push_back(record);
+            }
+
+            info.loaded = !info.records.empty();
+            return info;
+        }
+
+        static void AddChunkVdfReverseIndexRecord(
+            const std::string& geomName,
+            const std::string& meshBase,
+            uint32_t type)
+        {
+            if (geomName.empty() || meshBase.empty())
+                return;
+
+            std::string key = geomName;
+            std::transform(
+                key.begin(),
+                key.end(),
+                key.begin(),
+                [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+
+            auto& refs = g_ChunkVdfGeomReverseIndex[key];
+            for (const ChunkVdfMeshRef& existing : refs)
+            {
+                if (_stricmp(existing.meshBase, meshBase.c_str()) == 0 && existing.type == type)
+                    return;
+            }
+
+            ChunkVdfMeshRef ref = {};
+            strncpy_s(ref.meshBase, sizeof(ref.meshBase), meshBase.c_str(), _TRUNCATE);
+            ref.type = type;
+            refs.push_back(ref);
+        }
+
+        static void EnsureChunkVdfReverseIndex()
+        {
+            if (g_ChunkVdfReverseIndexAttempted)
+                return;
+
+            g_ChunkVdfReverseIndexAttempted = true;
+
+            const std::filesystem::path stockDir = GetMainModuleDirectory() / "Edit" / "stock";
+            std::error_code error;
+            if (!std::filesystem::exists(stockDir, error) || error)
+                return;
+
+            for (std::filesystem::directory_iterator it(stockDir, error);
+                 !error && it != std::filesystem::directory_iterator();
+                 it.increment(error))
+            {
+                const auto& entry = *it;
+                if (!entry.is_regular_file(error) || error)
+                    continue;
+
+                std::string extension = entry.path().extension().string();
+                std::transform(
+                    extension.begin(),
+                    extension.end(),
+                    extension.begin(),
+                    [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+                if (extension != ".vdf")
+                    continue;
+
+                const std::string meshBase = entry.path().stem().string();
+                ChunkVdfAssetInfo& info = GetChunkVdfAssetInfoForMesh(meshBase.c_str());
+                if (!info.loaded)
+                    continue;
+
+                for (const ChunkVdfRecord& record : info.records)
+                {
+                    if (!record.name[0])
+                        continue;
+                    AddChunkVdfReverseIndexRecord(record.name, meshBase, record.type);
+                }
+            }
+        }
+
+        static bool TryCopyChunkVdfExactName(
+            const char* meshName,
+            const char* geomName,
+            uint32_t classId,
+            char* outText,
+            size_t outTextCapacity)
+        {
+            if (!outText || outTextCapacity == 0)
+                return false;
+
+            outText[0] = '\0';
+            if (!meshName || !*meshName || !geomName || !*geomName)
+                return false;
+
+            ChunkVdfAssetInfo& info = GetChunkVdfAssetInfoForMesh(meshName);
+            if (!info.loaded)
+                return false;
+
+            for (const ChunkVdfRecord& record : info.records)
+            {
+                if (!record.name[0] || _stricmp(record.name, geomName) != 0)
+                    continue;
+                if (classId != 0 && record.type != classId)
+                    continue;
+
+                strncpy_s(outText, outTextCapacity, record.name, _TRUNCATE);
+                return outText[0] != '\0';
+            }
+
+            return false;
+        }
+
+        static bool BuildChunkVdfCandidateList(
+            const char* meshName,
+            uint32_t classId,
+            char* outText,
+            size_t outTextCapacity)
+        {
+            if (!outText || outTextCapacity == 0)
+                return false;
+
+            outText[0] = '\0';
+            if (!meshName || !*meshName || classId == 0)
+                return false;
+
+            ChunkVdfAssetInfo& info = GetChunkVdfAssetInfoForMesh(meshName);
+            if (!info.loaded)
+                return false;
+
+            bool wroteAny = false;
+            for (const ChunkVdfRecord& record : info.records)
+            {
+                if (record.type != classId || !record.name[0])
+                    continue;
+
+                const size_t currentLength = std::strlen(outText);
+                if (currentLength + (wroteAny ? 1 : 0) + std::strlen(record.name) + 1 >= outTextCapacity)
+                    break;
+
+                if (wroteAny)
+                    strcat_s(outText, outTextCapacity, "|");
+                strcat_s(outText, outTextCapacity, record.name);
+                wroteAny = true;
+            }
+
+            return wroteAny;
+        }
+
+        static uint32_t FindChunkVdfRecordTypeByName(
+            const ChunkVdfAssetInfo& info,
+            const char* name)
+        {
+            if (!name || !*name)
+                return 0;
+
+            for (const ChunkVdfRecord& record : info.records)
+            {
+                if (record.name[0] && _stricmp(record.name, name) == 0)
+                    return record.type;
+            }
+
+            return 0;
+        }
+
+        static bool ChunkVdfRecordHasSiblingType(
+            const ChunkVdfAssetInfo& info,
+            const ChunkVdfRecord& record,
+            uint32_t siblingClassId)
+        {
+            if (siblingClassId == 0)
+                return true;
+
+            for (const ChunkVdfRecord& other : info.records)
+            {
+                if (&other == &record)
+                    continue;
+                if (other.type != siblingClassId)
+                    continue;
+                if (_stricmp(other.parent, record.parent) == 0)
+                    return true;
+            }
+
+            return false;
+        }
+
+        static bool ChunkVdfRecordHasChildType(
+            const ChunkVdfAssetInfo& info,
+            const ChunkVdfRecord& record,
+            uint32_t childClassId)
+        {
+            if (childClassId == 0)
+                return true;
+
+            for (const ChunkVdfRecord& other : info.records)
+            {
+                if (other.type != childClassId)
+                    continue;
+                if (_stricmp(other.parent, record.name) == 0)
+                    return true;
+            }
+
+            return false;
+        }
+
+        static bool ChunkVdfRecordMatchesTree(
+            const ChunkVdfAssetInfo& info,
+            const ChunkVdfRecord& record,
+            const ChunkObjectLinkProbe& source,
+            const ChunkObjectLinkProbe& parent,
+            const ChunkObjectLinkProbe& sibling,
+            const ChunkObjectLinkProbe& child)
+        {
+            if (!record.name[0] || record.type != source.classId)
+                return false;
+
+            if (source.geomName[0] && _stricmp(source.geomName, record.name) != 0)
+                return false;
+
+            if (parent.objectBytes && parent.classId != 0)
+            {
+                if (parent.classId == 1)
+                {
+                    if (_stricmp(record.parent, "WORLD") != 0)
+                        return false;
+                }
+                else
+                {
+                    if (!record.parent[0])
+                        return false;
+
+                    const uint32_t parentType = FindChunkVdfRecordTypeByName(info, record.parent);
+                    if (parentType != parent.classId)
+                        return false;
+
+                    if (parent.geomName[0] && _stricmp(parent.geomName, record.parent) != 0)
+                        return false;
+                }
+            }
+
+            if (sibling.objectBytes && sibling.classId != 0)
+            {
+                if (!ChunkVdfRecordHasSiblingType(info, record, sibling.classId))
+                    return false;
+            }
+
+            if (child.objectBytes && child.classId != 0)
+            {
+                if (!ChunkVdfRecordHasChildType(info, record, child.classId))
+                    return false;
+            }
+
+            return true;
+        }
+
+        static bool BuildChunkVdfSourceCandidateList(
+            const char* meshName,
+            const ChunkObjectLinkProbe& source,
+            const ChunkObjectLinkProbe& parent,
+            const ChunkObjectLinkProbe& sibling,
+            const ChunkObjectLinkProbe& child,
+            char* outText,
+            size_t outTextCapacity)
+        {
+            if (!outText || outTextCapacity == 0)
+                return false;
+
+            outText[0] = '\0';
+            if (!meshName || !*meshName || !source.objectBytes || source.classId == 0)
+                return false;
+
+            ChunkVdfAssetInfo& info = GetChunkVdfAssetInfoForMesh(meshName);
+            if (!info.loaded)
+                return false;
+
+            bool wroteAny = false;
+            for (const ChunkVdfRecord& record : info.records)
+            {
+                if (!ChunkVdfRecordMatchesTree(info, record, source, parent, sibling, child))
+                    continue;
+
+                const size_t currentLength = std::strlen(outText);
+                if (currentLength + (wroteAny ? 1 : 0) + std::strlen(record.name) + 1 >= outTextCapacity)
+                    break;
+
+                if (wroteAny)
+                    strcat_s(outText, outTextCapacity, "|");
+                strcat_s(outText, outTextCapacity, record.name);
+                wroteAny = true;
+            }
+
+            return wroteAny;
+        }
+
+        static void PopulateChunkVdfCandidates(const char* meshName, ChunkObjectLinkProbe& probe)
+        {
+            probe.vdfCandidates[0] = '\0';
+            if (!probe.objectBytes || !meshName || !*meshName)
+                return;
+
+            if (probe.geomName[0] &&
+                TryCopyChunkVdfExactName(
+                    meshName,
+                    probe.geomName,
+                    probe.classId,
+                    probe.vdfCandidates,
+                    sizeof(probe.vdfCandidates)))
+            {
+                return;
+            }
+
+            BuildChunkVdfCandidateList(meshName, probe.classId, probe.vdfCandidates, sizeof(probe.vdfCandidates));
+        }
+
+        static bool TryInferChunkMeshNameFromGeom(
+            const char* geomName,
+            uint32_t classId,
+            char* outMeshName,
+            size_t outMeshNameCapacity)
+        {
+            if (!outMeshName || outMeshNameCapacity == 0)
+                return false;
+
+            outMeshName[0] = '\0';
+            if (!geomName || !*geomName)
+                return false;
+            if (_stricmp(geomName, "chunk1") == 0 || _stricmp(geomName, "chunk2") == 0)
+                return false;
+
+            EnsureChunkVdfReverseIndex();
+
+            std::string key(geomName);
+            std::transform(
+                key.begin(),
+                key.end(),
+                key.begin(),
+                [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+
+            const auto it = g_ChunkVdfGeomReverseIndex.find(key);
+            if (it == g_ChunkVdfGeomReverseIndex.end() || it->second.empty())
+                return false;
+
+            const ChunkVdfMeshRef* selected = nullptr;
+            for (const ChunkVdfMeshRef& ref : it->second)
+            {
+                if (classId != 0 && ref.type != classId)
+                    continue;
+
+                if (!selected)
+                {
+                    selected = &ref;
+                    continue;
+                }
+
+                if (_stricmp(selected->meshBase, ref.meshBase) != 0)
+                    return false;
+            }
+
+            if (!selected)
+            {
+                for (const ChunkVdfMeshRef& ref : it->second)
+                {
+                    if (!selected)
+                    {
+                        selected = &ref;
+                        continue;
+                    }
+
+                    if (_stricmp(selected->meshBase, ref.meshBase) != 0)
+                        return false;
+                }
+            }
+
+            if (!selected || !selected->meshBase[0])
+                return false;
+
+            _snprintf_s(outMeshName, outMeshNameCapacity, _TRUNCATE, "%s.mesh", selected->meshBase);
+            return outMeshName[0] != '\0';
+        }
+
+        static bool ResolveChunkCreateMeshContext(
+            const ChunkCreateSourceTreeProbe& probe,
+            char* outMeshName,
+            size_t outMeshNameCapacity)
+        {
+            if (!outMeshName || outMeshNameCapacity == 0)
+                return false;
+
+            outMeshName[0] = '\0';
+
+            if (probe.ownerResolvedMeshName[0])
+            {
+                strncpy_s(outMeshName, outMeshNameCapacity, probe.ownerResolvedMeshName, _TRUNCATE);
+                return true;
+            }
+
+            const ChunkObjectLinkProbe* links[] = {
+                &probe.source,
+                &probe.parent,
+                &probe.sibling,
+                &probe.child,
+            };
+            for (const ChunkObjectLinkProbe* link : links)
+            {
+                if (!link || !link->cachedMeshName[0])
+                    continue;
+
+                if (!outMeshName[0])
+                {
+                    strncpy_s(outMeshName, outMeshNameCapacity, link->cachedMeshName, _TRUNCATE);
+                    continue;
+                }
+
+                if (_stricmp(outMeshName, link->cachedMeshName) != 0)
+                {
+                    outMeshName[0] = '\0';
+                    break;
+                }
+            }
+            if (outMeshName[0])
+                return true;
+
+            for (const ChunkObjectLinkProbe* link : links)
+            {
+                if (!link || !link->geomName[0])
+                    continue;
+
+                if (TryInferChunkMeshNameFromGeom(
+                        link->geomName,
+                        link->classId,
+                        outMeshName,
+                        outMeshNameCapacity))
+                {
+                    return true;
+                }
+            }
+
+            if (TryInferChunkMeshNameFromTree(
+                    probe.source,
+                    probe.parent,
+                    probe.sibling,
+                    probe.child,
+                    outMeshName,
+                    outMeshNameCapacity))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        static bool TryInferChunkMeshNameFromTree(
+            const ChunkObjectLinkProbe& source,
+            const ChunkObjectLinkProbe& parent,
+            const ChunkObjectLinkProbe& sibling,
+            const ChunkObjectLinkProbe& child,
+            char* outMeshName,
+            size_t outMeshNameCapacity)
+        {
+            if (!outMeshName || outMeshNameCapacity == 0)
+                return false;
+
+            outMeshName[0] = '\0';
+            if (!source.objectBytes || source.classId == 0)
+                return false;
+
+            EnsureChunkVdfReverseIndex();
+
+            std::string selectedMeshBase;
+            for (const auto& pair : g_ChunkVdfAssetCache)
+            {
+                const std::string& meshBase = pair.first;
+                const ChunkVdfAssetInfo& info = pair.second;
+                if (!info.loaded)
+                    continue;
+
+                bool matchedMesh = false;
+                for (const ChunkVdfRecord& record : info.records)
+                {
+                    if (ChunkVdfRecordMatchesTree(info, record, source, parent, sibling, child))
+                    {
+                        matchedMesh = true;
+                        break;
+                    }
+                }
+
+                if (!matchedMesh)
+                    continue;
+
+                if (selectedMeshBase.empty())
+                {
+                    selectedMeshBase = meshBase;
+                    continue;
+                }
+
+                if (_stricmp(selectedMeshBase.c_str(), meshBase.c_str()) != 0)
+                    return false;
+            }
+
+            if (selectedMeshBase.empty())
+                return false;
+
+            _snprintf_s(outMeshName, outMeshNameCapacity, _TRUNCATE, "%s.mesh", selectedMeshBase.c_str());
+            return outMeshName[0] != '\0';
         }
 
         static std::string HumanizeInputBindingCommand(const std::string& command)
@@ -10051,6 +11401,199 @@ namespace BZROpenShim
             }
         }
 
+        static bool TryReadChunkObjectLinks(
+            const uint8_t* objectBytes,
+            const uint8_t*& outParent,
+            const uint8_t*& outSibling,
+            const uint8_t*& outChild)
+        {
+            outParent = nullptr;
+            outSibling = nullptr;
+            outChild = nullptr;
+            if (!objectBytes)
+                return false;
+
+            __try
+            {
+                outParent = *reinterpret_cast<const uint8_t* const*>(objectBytes + 0x78);
+                outSibling = *reinterpret_cast<const uint8_t* const*>(objectBytes + 0x7C);
+                outChild = *reinterpret_cast<const uint8_t* const*>(objectBytes + 0x80);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outParent = nullptr;
+                outSibling = nullptr;
+                outChild = nullptr;
+                return false;
+            }
+        }
+
+        static bool TryGetGameObjectMeshName(void* gameObject, char* outMeshName, size_t outMeshNameCapacity)
+        {
+            if (!outMeshName || outMeshNameCapacity == 0)
+                return false;
+
+            outMeshName[0] = '\0';
+            if (!gameObject)
+                return false;
+
+            void* obj76 = nullptr;
+            if (!TryGetGameObjectObj76(gameObject, obj76))
+                return false;
+
+            const ChunkBridgeSnapshot snapshot = CaptureChunkBridgeSnapshot(reinterpret_cast<const uint8_t*>(obj76));
+            if (snapshot.ownerResolvedMeshName[0])
+            {
+                strncpy_s(outMeshName, outMeshNameCapacity, snapshot.ownerResolvedMeshName, _TRUNCATE);
+                return true;
+            }
+
+            char entityBaseName[32] = {};
+            char ogreFilename[32] = {};
+            if (TryReadOwnerEntityNames(
+                    gameObject,
+                    entityBaseName,
+                    sizeof(entityBaseName),
+                    ogreFilename,
+                    sizeof(ogreFilename),
+                    outMeshName,
+                    outMeshNameCapacity))
+            {
+                return outMeshName[0] != '\0';
+            }
+
+            return false;
+        }
+
+        static void CacheChunkObjectIdentityForNode(const uint8_t* objectBytes, const char* meshName)
+        {
+            if (!objectBytes || !meshName || !*meshName)
+                return;
+
+            ChunkObjectLinkProbe source = {};
+            if (!CaptureChunkObjectLinkProbe(objectBytes, source))
+                return;
+
+            const uint8_t* parentBytes = nullptr;
+            const uint8_t* siblingBytes = nullptr;
+            const uint8_t* childBytes = nullptr;
+            TryReadChunkObjectLinks(objectBytes, parentBytes, siblingBytes, childBytes);
+
+            ChunkObjectLinkProbe parent = {};
+            ChunkObjectLinkProbe sibling = {};
+            ChunkObjectLinkProbe child = {};
+            CaptureChunkObjectLinkProbe(parentBytes, parent);
+            CaptureChunkObjectLinkProbe(siblingBytes, sibling);
+            CaptureChunkObjectLinkProbe(childBytes, child);
+
+            ChunkObjectIdentityCacheEntry entry = {};
+            strncpy_s(entry.meshName, sizeof(entry.meshName), meshName, _TRUNCATE);
+            entry.classId = source.classId;
+            if (!BuildChunkVdfSourceCandidateList(
+                    meshName,
+                    source,
+                    parent,
+                    sibling,
+                    child,
+                    entry.vdfCandidates,
+                    sizeof(entry.vdfCandidates)))
+            {
+                PopulateChunkVdfCandidates(meshName, source);
+                if (source.vdfCandidates[0])
+                    strncpy_s(entry.vdfCandidates, sizeof(entry.vdfCandidates), source.vdfCandidates, _TRUNCATE);
+            }
+
+            g_ChunkObjectIdentityCache[reinterpret_cast<uintptr_t>(objectBytes)] = entry;
+        }
+
+        static void CacheChunkObjectIdentityTreeForGameObject(void* gameObject)
+        {
+            char meshName[48] = {};
+            if (!TryGetGameObjectMeshName(gameObject, meshName, sizeof(meshName)))
+                return;
+
+            ChunkVdfAssetInfo& info = GetChunkVdfAssetInfoForMesh(meshName);
+            if (!info.loaded)
+                return;
+
+            void* rootObj76 = nullptr;
+            if (!TryGetGameObjectObj76(gameObject, rootObj76) || !rootObj76)
+                return;
+
+            std::vector<const uint8_t*> stack;
+            stack.reserve(32);
+            stack.push_back(reinterpret_cast<const uint8_t*>(rootObj76));
+            std::unordered_set<uintptr_t> visited;
+            visited.reserve(64);
+
+            while (!stack.empty() && visited.size() < kChunkObjectIdentityMaxNodesPerObject)
+            {
+                const uint8_t* nodeBytes = stack.back();
+                stack.pop_back();
+                if (!nodeBytes)
+                    continue;
+
+                const uintptr_t nodeKey = reinterpret_cast<uintptr_t>(nodeBytes);
+                if (!visited.insert(nodeKey).second)
+                    continue;
+
+                CacheChunkObjectIdentityForNode(nodeBytes, meshName);
+
+                const uint8_t* parentBytes = nullptr;
+                const uint8_t* siblingBytes = nullptr;
+                const uint8_t* childBytes = nullptr;
+                if (!TryReadChunkObjectLinks(nodeBytes, parentBytes, siblingBytes, childBytes))
+                    continue;
+
+                if (siblingBytes)
+                    stack.push_back(siblingBytes);
+                if (childBytes)
+                    stack.push_back(childBytes);
+            }
+        }
+
+        static void RefreshChunkObjectIdentityCacheIfNeeded()
+        {
+            if (!g_TraceChunkRender && !g_TraceChunkEffectRuntime && !g_EnableChunkProxyDebug)
+                return;
+
+            const DWORD now = GetTickCount();
+            if (g_ChunkObjectIdentityLastRefreshTick != 0 &&
+                static_cast<DWORD>(now - g_ChunkObjectIdentityLastRefreshTick) < kChunkObjectIdentityRefreshMs)
+            {
+                return;
+            }
+            g_ChunkObjectIdentityLastRefreshTick = now;
+
+            auto* objectListBytes = ResolveMainModulePtr<uint8_t>(kGameObjectObjectListRva);
+            if (!objectListBytes)
+                return;
+
+            __try
+            {
+                auto** begin = *reinterpret_cast<void***>(objectListBytes + 0x0);
+                auto** end = *reinterpret_cast<void***>(objectListBytes + 0x4);
+                auto** capacity = *reinterpret_cast<void***>(objectListBytes + 0x8);
+                if (!begin || !end || !capacity || end < begin || capacity < end)
+                    return;
+
+                const size_t totalObjects = static_cast<size_t>(end - begin);
+                const size_t objectLimit =
+                    (totalObjects < kChunkObjectIdentityMaxObjectsPerRefresh)
+                        ? totalObjects
+                        : kChunkObjectIdentityMaxObjectsPerRefresh;
+
+                g_ChunkObjectIdentityCache.clear();
+                g_ChunkObjectIdentityCache.reserve(objectLimit * 8);
+                for (size_t index = 0; index < objectLimit; ++index)
+                    CacheChunkObjectIdentityTreeForGameObject(begin[index]);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
         static bool TryGetObjectWorldPositionFromObj76(void* obj76, float (&outPosition)[3])
         {
             outPosition[0] = 0.0f;
@@ -10975,6 +12518,12 @@ namespace BZROpenShim
         g_BzrFn_RecordDeath = g_RecordDeathDetour.trampoline
             ? reinterpret_cast<FnRecordDeath>(g_RecordDeathDetour.trampoline)
             : nullptr;
+        g_BzrFn_ChunkEffectCreateChunk = g_ChunkEffectCreateChunkDetour.trampoline
+            ? reinterpret_cast<FnChunkEffectCreateChunk>(g_ChunkEffectCreateChunkDetour.trampoline)
+            : nullptr;
+        g_BzrFn_ChunkEffectCreateChunklet = g_ChunkEffectCreateChunkletDetour.trampoline
+            ? reinterpret_cast<FnChunkEffectCreateChunklet>(g_ChunkEffectCreateChunkletDetour.trampoline)
+            : nullptr;
         g_JumpSnipeProbeInstalled = false;
         g_EngineFlamePrimaryManager = nullptr;
         g_EngineFlameSecondaryManager = nullptr;
@@ -11027,6 +12576,19 @@ namespace BZROpenShim
         g_BzrFn_AISpentCreditRefund = nullptr;
         g_BzrFn_UnitsSOrderStop = nullptr;
         g_BzrFn_AIBuildUnassignedCCAdd = nullptr;
+        g_ChunkEffectCreateHooksInstalled =
+            g_ChunkEffectCreateChunkDetour.trampoline &&
+            g_BzrFn_ChunkEffectCreateChunk &&
+            g_ChunkEffectCreateChunkletDetour.trampoline &&
+            g_BzrFn_ChunkEffectCreateChunklet;
+        g_ChunkEffectCreateHooksLogged = false;
+        g_AllowUnsafeSteamChunkCreateHooks =
+            EnvFlagEnabled("OPENSHIM_UNSAFE_CHUNK_CREATE_HOOKS") ||
+            EnvFlagEnabled("BZR_UNSAFE_CHUNK_CREATE_HOOKS");
+        g_ChunkEffectCreateHooksWaitLogged = false;
+        g_ChunkEffectCreateHooksMismatchLogged = false;
+        g_ChunkEffectCreateHooksReadyTick =
+            GetTickCount64() + (g_IsSteamExe ? kSteamChunkCreateHookSettleDelayMs : 0);
         g_ConstructorRemoteBuildFixInstalled = false;
         g_ShieldTowerSimulateHookInstalled = false;
         g_AttackRevealTraceBudget = kAttackRevealTraceBudgetDefault;
@@ -11198,6 +12760,7 @@ namespace BZROpenShim
             EnvFlagEnabled("BZR_TRACE_CHUNK_EFFECT") ||
             EnvFlagEnabled("OPENSHIM_TRACE_CHUNK_EFFECT") ||
             EnvFlagEnabled("OPENSHIM_CHUNK_EFFECT_TRACE");
+        InstallChunkEffectCreateHooksIfRequested();
         g_TraceSatelliteVisibility =
             EnvFlagEnabled("BZR_TRACE_SAT_VIS") ||
             EnvFlagEnabled("OPENSHIM_TRACE_SAT_VIS") ||
@@ -11305,6 +12868,14 @@ namespace BZROpenShim
             g_TraceChunkEffectRuntime ? "enabled" : "disabled",
             static_cast<uint32_t>(kChunkEffectVtableSimulateSlotAddr),
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_ChunkEffectSimulate)));
+        LogChunkDiagnostic("chunkspawn", L"[CHUNKSPAWN] Create-path hooks: %hs create=0x%08X chunklet=0x%08X\n",
+            g_ChunkEffectCreateHooksInstalled ? "enabled" : "disabled",
+            static_cast<uint32_t>(kGogChunkEffectCreateChunkAddr),
+            static_cast<uint32_t>(kGogChunkEffectCreateChunkletAddr));
+        if (g_IsSteamExe && !g_AllowUnsafeSteamChunkCreateHooks)
+        {
+            LogChunkDiagnostic("chunkspawn", L"[CHUNKSPAWN] Steam safety gate active; creator hooks will install after settled-byte verification and delay\n");
+        }
         Log(L"[SATVIS] Satellite visibility trace: %hs budget=%ld interval=%lums objectLimit=%u viewRecord=0x%08X objectList=0x%08X userObject=0x%08X\n",
             g_TraceSatelliteVisibility ? "enabled" : "disabled",
             g_SatelliteVisibilityLogBudget,
@@ -13184,6 +14755,89 @@ namespace BZROpenShim
         }
     }
 
+    void* __fastcall ChunkEffectCreateChunkHook(void* thisPtr,
+                                                void* /*edx*/,
+                                                void* objectPtr,
+                                                const float* velocity,
+                                                uint8_t preserveFlag)
+    {
+        if (!g_BzrFn_ChunkEffectCreateChunk)
+            return nullptr;
+
+        const auto* thisBytes = reinterpret_cast<const uint8_t*>(thisPtr);
+        uint32_t countBefore = 0;
+        TryReadChunkEffectCount(thisBytes, countBefore);
+
+        ChunkCreateSourceTreeProbe sourceTreeProbe = {};
+        CaptureChunkCreateSourceTreeProbe(reinterpret_cast<const uint8_t*>(objectPtr), sourceTreeProbe);
+
+        void* result = g_BzrFn_ChunkEffectCreateChunk(thisPtr, objectPtr, velocity, preserveFlag);
+
+        uint32_t countAfter = countBefore;
+        TryReadChunkEffectCount(thisBytes, countAfter);
+
+        ChunkEffectActiveEntry createdEntry = {};
+        const ChunkEffectActiveEntry* createdEntryPtr = nullptr;
+        if (countAfter > countBefore)
+        {
+            if (TryReadChunkEffectEntry(thisBytes, countBefore, createdEntry))
+                createdEntryPtr = &createdEntry;
+        }
+
+        LogChunkCreateLifecycle(
+            L"CreateChunk",
+            thisPtr,
+            reinterpret_cast<const uint8_t*>(objectPtr),
+            nullptr,
+            velocity,
+            preserveFlag,
+            countBefore,
+            countAfter,
+            createdEntryPtr,
+            sourceTreeProbe.valid ? &sourceTreeProbe : nullptr);
+
+        return result;
+    }
+
+    void __fastcall ChunkEffectCreateChunkletHook(void* thisPtr,
+                                                  void* /*edx*/,
+                                                  const void* positionVec,
+                                                  const float* velocity,
+                                                  uint8_t preserveFlag)
+    {
+        if (!g_BzrFn_ChunkEffectCreateChunklet)
+            return;
+
+        const auto* thisBytes = reinterpret_cast<const uint8_t*>(thisPtr);
+        uint32_t countBefore = 0;
+        TryReadChunkEffectCount(thisBytes, countBefore);
+
+        g_BzrFn_ChunkEffectCreateChunklet(thisPtr, positionVec, velocity, preserveFlag);
+
+        uint32_t countAfter = countBefore;
+        TryReadChunkEffectCount(thisBytes, countAfter);
+
+        ChunkEffectActiveEntry createdEntry = {};
+        const ChunkEffectActiveEntry* createdEntryPtr = nullptr;
+        if (countAfter > countBefore)
+        {
+            if (TryReadChunkEffectEntry(thisBytes, countBefore, createdEntry))
+                createdEntryPtr = &createdEntry;
+        }
+
+        LogChunkCreateLifecycle(
+            L"CreateChunklet",
+            thisPtr,
+            nullptr,
+            reinterpret_cast<const float*>(positionVec),
+            velocity,
+            preserveFlag,
+            countBefore,
+            countAfter,
+            createdEntryPtr,
+            nullptr);
+    }
+
     void __fastcall ChunkEffectSimulateHook(void* thisPtr, void* /*edx*/, float dt)
     {
         if (!g_BzrFn_ChunkEffectSimulate || !thisPtr)
@@ -13193,8 +14847,11 @@ namespace BZROpenShim
             InstallJumpSnipingProbeIfRequested();
         if (!g_CareerStatsMpHookInstalled)
             InstallCareerStatsMpHookIfPossible();
+        if (!g_ChunkEffectCreateHooksInstalled)
+            InstallChunkEffectCreateHooksIfRequested();
 
         MaybeLogSatelliteVisibilitySample();
+        RefreshChunkObjectIdentityCacheIfNeeded();
         TrackChunkEffectActiveEntries(thisPtr);
         LogChunkEffectRuntimeSample(thisPtr, dt);
         g_BzrFn_ChunkEffectSimulate(thisPtr, dt);
