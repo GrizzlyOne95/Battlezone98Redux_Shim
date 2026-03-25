@@ -1,0 +1,170 @@
+[
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cspilo_fp.mesh",
+    "name": "cspilo_fp",
+    "exit_code": 0,
+    "payload_meshes": 1,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cspilo_fp.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cspilo.mesh",
+    "name": "cspilo",
+    "exit_code": 0,
+    "payload_meshes": 22,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cspilo.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cvapc.mesh",
+    "name": "cvapc",
+    "exit_code": 0,
+    "payload_meshes": 4,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cvapc.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cvartl.mesh",
+    "name": "cvartl",
+    "exit_code": 0,
+    "payload_meshes": 12,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cvartl.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cvcnst.mesh",
+    "name": "cvcnst",
+    "exit_code": 0,
+    "payload_meshes": 8,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cvcnst.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cvfigh.mesh",
+    "name": "cvfigh",
+    "exit_code": 0,
+    "payload_meshes": 7,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cvfigh.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cvhaul.mesh",
+    "name": "cvhaul",
+    "exit_code": 0,
+    "payload_meshes": 4,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cvhaul.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cvhraz.mesh",
+    "name": "cvhraz",
+    "exit_code": 0,
+    "payload_meshes": 8,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cvhraz.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cvhtnk.mesh",
+    "name": "cvhtnk",
+    "exit_code": 0,
+    "payload_meshes": 13,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cvhtnk.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cvltnk.mesh",
+    "name": "cvltnk",
+    "exit_code": 0,
+    "payload_meshes": 2,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cvltnk.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cvmine.mesh",
+    "name": "cvmine",
+    "exit_code": 0,
+    "payload_meshes": 7,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cvmine.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cvmuf.mesh",
+    "name": "cvmuf",
+    "exit_code": 0,
+    "payload_meshes": 4,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cvmuf.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cvrckt.mesh",
+    "name": "cvrckt",
+    "exit_code": 0,
+    "payload_meshes": 4,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cvrckt.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cvrecy.mesh",
+    "name": "cvrecy",
+    "exit_code": 0,
+    "payload_meshes": 15,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cvrecy.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cvscav.mesh",
+    "name": "cvscav",
+    "exit_code": 0,
+    "payload_meshes": 7,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cvscav.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cvslf.mesh",
+    "name": "cvslf",
+    "exit_code": 0,
+    "payload_meshes": 3,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cvslf.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cvtnk.mesh",
+    "name": "cvtnk",
+    "exit_code": 0,
+    "payload_meshes": 8,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cvtnk.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cvturr.mesh",
+    "name": "cvturr",
+    "exit_code": 0,
+    "payload_meshes": 13,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cvturr.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cvwalk_c.mesh",
+    "name": "cvwalk_c",
+    "exit_code": 0,
+    "payload_meshes": 8,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cvwalk_c.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\TRO\\cvwalk.mesh",
+    "name": "cvwalk",
+    "exit_code": 0,
+    "payload_meshes": 8,
+    "zero_length_meshes": 0,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\cvwalk.log"
+  },
+  {
+    "mesh": "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\ubtart.mesh",
+    "name": "ubtart",
+    "exit_code": 0,
+    "payload_meshes": 3,
+    "zero_length_meshes": 1,
+    "log": "c:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\generated_chunk_payload_meshes_stock\\_logs\\ubtart.log"
+  }
+]

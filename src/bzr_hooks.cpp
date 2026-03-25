@@ -536,6 +536,12 @@ namespace BZROpenShim
         struct ChunkCreateSourceTreeProbe;
         static void PopulateChunkVdfCandidates(const char* meshName, ChunkObjectLinkProbe& probe);
         static void PopulateChunkObjectLinkProbeFromIdentityCache(ChunkObjectLinkProbe& probe);
+        static bool TryResolveChunkPayloadMeshResource(
+            const ChunkObjectLinkProbe& probe,
+            const char* preferredMeshName,
+            const char* explicitGeomName,
+            char* outMeshName,
+            size_t outMeshNameCapacity);
         static bool ResolveChunkCreateMeshContext(
             const ChunkCreateSourceTreeProbe& probe,
             char* outMeshName,
@@ -888,6 +894,14 @@ namespace BZROpenShim
             float z;
         };
 
+        struct ChunkProxyTransform
+        {
+            float x = 0.0f;
+            float y = 0.0f;
+            float z = 0.0f;
+            OgreQuaternion orientation = { 1.0f, 0.0f, 0.0f, 0.0f };
+        };
+
         struct ChunkProxySlot
         {
             const uint8_t* objectBytes = nullptr;
@@ -896,7 +910,7 @@ namespace BZROpenShim
             void* ownerEntity = nullptr;
             char ownerEntityBaseName[32] = {};
             char ownerOgreFilename[32] = {};
-            char proofMeshName[48] = {};
+            char proofMeshName[128] = {};
             float positionX = 0.0f;
             float positionY = 0.0f;
             float positionZ = 0.0f;
@@ -988,6 +1002,7 @@ namespace BZROpenShim
 
         static std::unordered_map<std::string, ChunkVdfAssetInfo> g_ChunkVdfAssetCache = {};
         static std::unordered_map<uintptr_t, ChunkObjectIdentityCacheEntry> g_ChunkObjectIdentityCache = {};
+        static std::unordered_map<std::string, bool> g_ChunkPayloadMeshExistsCache = {};
         static DWORD g_ChunkObjectIdentityLastRefreshTick = 0;
         struct ChunkVdfMeshRef
         {
@@ -1225,6 +1240,7 @@ namespace BZROpenShim
         static constexpr const char* kChunkProxyBillboardSetName = "OpenShimChunkProxyDebug";
         static constexpr const char* kChunkProxyMaterialName = "BaseWhiteNoLighting";
         static constexpr const char* kChunkProxyMaterialGroup = "General";
+        static constexpr const char* kChunkPayloadResourceRootName = "OpenShimChunkPayloads";
         static constexpr const char* kChunkMeshProofTargetGeoName = "AGR11BDA";
         static constexpr const char* kChunkMeshProofMeshName = "avtank.mesh";
         static FnPlayGlobalSound g_BzrFn_PlayGlobalSound =
@@ -2930,16 +2946,26 @@ namespace BZROpenShim
             return (geomName && *geomName) ? geomName : "<none>";
         }
 
-        static bool ShouldUseChunkMeshProof(const char* geomName)
+        static bool ShouldUseChunkMeshProof(const ChunkProxySlot& slot)
         {
-            return g_EnableChunkMeshProxy &&
-                   geomName &&
-                   _stricmp(geomName, kChunkMeshProofTargetGeoName) == 0;
+            return g_EnableChunkMeshProxy && slot.proofMeshName[0];
         }
 
         static const char* GetChunkProofMeshName(const ChunkProxySlot& slot)
         {
             return slot.proofMeshName[0] ? slot.proofMeshName : kChunkMeshProofMeshName;
+        }
+
+        static void HideChunkProxyMesh(ChunkProxySlot& slot);
+
+        static void InvalidateChunkMeshProxySlot(ChunkProxySlot& slot)
+        {
+            if (slot.meshAssigned)
+                HideChunkProxyMesh(slot);
+
+            slot.sceneNode = nullptr;
+            slot.entity = nullptr;
+            slot.meshAssigned = false;
         }
 
         static int FindChunkGeoEntryByKey(const BzrGeoLookup* lookup, uint32_t key)
@@ -2971,6 +2997,114 @@ namespace BZROpenShim
             return -1;
         }
 
+        static bool TryBuildOgreQuaternionFromLegacyTransform(
+            const LegacyMat3& transform,
+            OgreQuaternion& outOrientation)
+        {
+            outOrientation = { 1.0f, 0.0f, 0.0f, 0.0f };
+
+            double rightX = transform.right_x;
+            double rightY = transform.right_y;
+            double rightZ = transform.right_z;
+            double upX = transform.up_x;
+            double upY = transform.up_y;
+            double upZ = transform.up_z;
+            double frontX = transform.front_x;
+            double frontY = transform.front_y;
+            double frontZ = transform.front_z;
+
+            const double rightLen = std::sqrt(rightX * rightX + rightY * rightY + rightZ * rightZ);
+            const double upLen = std::sqrt(upX * upX + upY * upY + upZ * upZ);
+            const double frontLen = std::sqrt(frontX * frontX + frontY * frontY + frontZ * frontZ);
+            if (!(std::isfinite(rightLen) && std::isfinite(upLen) && std::isfinite(frontLen)) ||
+                rightLen <= 1.0e-8 || upLen <= 1.0e-8 || frontLen <= 1.0e-8)
+            {
+                return false;
+            }
+
+            rightX /= rightLen;
+            rightY /= rightLen;
+            rightZ /= rightLen;
+            upX /= upLen;
+            upY /= upLen;
+            upZ /= upLen;
+            frontX /= frontLen;
+            frontY /= frontLen;
+            frontZ /= frontLen;
+
+            // LegacyMat3 stores basis vectors directly. Build a rotation matrix
+            // with those basis vectors as columns to match Ogre's node orientation.
+            const double m00 = rightX;
+            const double m10 = rightY;
+            const double m20 = rightZ;
+            const double m01 = upX;
+            const double m11 = upY;
+            const double m21 = upZ;
+            const double m02 = frontX;
+            const double m12 = frontY;
+            const double m22 = frontZ;
+
+            double w = 1.0;
+            double x = 0.0;
+            double y = 0.0;
+            double z = 0.0;
+
+            const double trace = m00 + m11 + m22;
+            if (trace > 0.0)
+            {
+                const double s = std::sqrt(trace + 1.0) * 2.0;
+                if (!std::isfinite(s) || s <= 1.0e-8)
+                    return false;
+                w = 0.25 * s;
+                x = (m21 - m12) / s;
+                y = (m02 - m20) / s;
+                z = (m10 - m01) / s;
+            }
+            else if (m00 > m11 && m00 > m22)
+            {
+                const double s = std::sqrt(1.0 + m00 - m11 - m22) * 2.0;
+                if (!std::isfinite(s) || s <= 1.0e-8)
+                    return false;
+                w = (m21 - m12) / s;
+                x = 0.25 * s;
+                y = (m01 + m10) / s;
+                z = (m02 + m20) / s;
+            }
+            else if (m11 > m22)
+            {
+                const double s = std::sqrt(1.0 + m11 - m00 - m22) * 2.0;
+                if (!std::isfinite(s) || s <= 1.0e-8)
+                    return false;
+                w = (m02 - m20) / s;
+                x = (m01 + m10) / s;
+                y = 0.25 * s;
+                z = (m12 + m21) / s;
+            }
+            else
+            {
+                const double s = std::sqrt(1.0 + m22 - m00 - m11) * 2.0;
+                if (!std::isfinite(s) || s <= 1.0e-8)
+                    return false;
+                w = (m10 - m01) / s;
+                x = (m02 + m20) / s;
+                y = (m12 + m21) / s;
+                z = 0.25 * s;
+            }
+
+            const double quatLen = std::sqrt(w * w + x * x + y * y + z * z);
+            if (!std::isfinite(quatLen) || quatLen <= 1.0e-8)
+                return false;
+
+            outOrientation.w = static_cast<float>(w / quatLen);
+            outOrientation.x = static_cast<float>(x / quatLen);
+            outOrientation.y = static_cast<float>(y / quatLen);
+            outOrientation.z = static_cast<float>(z / quatLen);
+            return std::isfinite(outOrientation.w) &&
+                   std::isfinite(outOrientation.x) &&
+                   std::isfinite(outOrientation.y) &&
+                   std::isfinite(outOrientation.z);
+        }
+
         static bool TryGetChunkProxyPosition(const uint8_t* objectBytes, float& outX, float& outY, float& outZ)
         {
             if (!objectBytes)
@@ -2992,6 +3126,35 @@ namespace BZROpenShim
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
+                return false;
+            }
+        }
+
+        static bool TryGetChunkProxyTransform(const uint8_t* objectBytes, ChunkProxyTransform& outTransform)
+        {
+            outTransform = {};
+            if (!objectBytes)
+                return false;
+
+            __try
+            {
+                const auto* transform = reinterpret_cast<const LegacyMat3*>(objectBytes + 0x20);
+                const double x = transform->posit_x;
+                const double y = transform->posit_y;
+                const double z = transform->posit_z;
+                if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z))
+                    return false;
+
+                outTransform.x = static_cast<float>(x);
+                outTransform.y = static_cast<float>(y);
+                outTransform.z = static_cast<float>(z);
+                if (!TryBuildOgreQuaternionFromLegacyTransform(*transform, outTransform.orientation))
+                    outTransform.orientation = { 1.0f, 0.0f, 0.0f, 0.0f };
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outTransform = {};
                 return false;
             }
         }
@@ -3225,18 +3388,23 @@ namespace BZROpenShim
             FnOgreSetNodePosition setNodePosition,
             FnOgreSetNodeOrientation setNodeOrientation,
             FnOgreSetVisible setVisible,
-            float x,
-            float y,
-            float z)
+            const ChunkProxyTransform& transform)
         {
             if (!sceneNode || !entity || !setNodePosition || !setVisible)
                 return false;
 
             __try
             {
-                setNodePosition(sceneNode, x, y, z);
+                setNodePosition(sceneNode, transform.x, transform.y, transform.z);
                 if (setNodeOrientation)
-                    setNodeOrientation(sceneNode, 1.0f, 0.0f, 0.0f, 0.0f);
+                {
+                    setNodeOrientation(
+                        sceneNode,
+                        transform.orientation.w,
+                        transform.orientation.x,
+                        transform.orientation.y,
+                        transform.orientation.z);
+                }
                 setVisible(entity, true);
                 return true;
             }
@@ -3486,8 +3654,8 @@ namespace BZROpenShim
 
             if (slot.billboardAssigned)
                 HideChunkProxyBillboard(slot.billboard);
-            if (slot.meshAssigned)
-                HideChunkProxyMesh(slot);
+            if (slot.sceneNode || slot.entity || slot.meshAssigned)
+                InvalidateChunkMeshProxySlot(slot);
             slot.objectBytes = nullptr;
             slot.geomRef = nullptr;
             slot.geomName[0] = '\0';
@@ -3518,23 +3686,23 @@ namespace BZROpenShim
             if (!slot.active)
                 return;
 
-            float x = 0.0f;
-            float y = 0.0f;
-            float z = 0.0f;
-            if (slot.useEntryPosition)
+            ChunkProxyTransform transform = {};
+            if (!TryGetChunkProxyTransform(slot.objectBytes, transform))
             {
-                x = slot.positionX;
-                y = slot.positionY;
-                z = slot.positionZ;
-            }
-            else if (!TryGetChunkProxyPosition(slot.objectBytes, x, y, z))
-            {
-                ReleaseChunkProxySlot(slot, L"transform-read-failed");
-                return;
+                if (!slot.useEntryPosition)
+                {
+                    ReleaseChunkProxySlot(slot, L"transform-read-failed");
+                    return;
+                }
+
+                transform.x = slot.positionX;
+                transform.y = slot.positionY;
+                transform.z = slot.positionZ;
+                transform.orientation = { 1.0f, 0.0f, 0.0f, 0.0f };
             }
 
             if (slot.billboard && setPosition &&
-                !TrySetChunkProxyBillboardPosition(slot.billboard, setPosition, x, y, z))
+                !TrySetChunkProxyBillboardPosition(slot.billboard, setPosition, transform.x, transform.y, transform.z))
             {
                 ReleaseChunkProxySlot(slot, L"billboard-set-failed");
                 return;
@@ -3548,14 +3716,14 @@ namespace BZROpenShim
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
                     GetChunkGeomNameForLog(slot.geomName),
                     ClassifyChunkGeomName(slot.geomName),
-                    static_cast<double>(x),
-                    static_cast<double>(y),
-                    static_cast<double>(z));
+                    static_cast<double>(transform.x),
+                    static_cast<double>(transform.y),
+                    static_cast<double>(transform.z));
             }
             if (slot.billboard && setPosition)
                 slot.billboardAssigned = true;
 
-            if (ShouldUseChunkMeshProof(slot.geomName))
+            if (ShouldUseChunkMeshProof(slot))
             {
                 if (!EnsureChunkMeshProxySlot(slot))
                     return;
@@ -3566,9 +3734,7 @@ namespace BZROpenShim
                         setNodePosition,
                         setNodeOrientation,
                         setVisible,
-                        x,
-                        y,
-                        z))
+                        transform))
                 {
                     ReleaseChunkProxySlot(slot, L"mesh-set-failed");
                     return;
@@ -3582,9 +3748,9 @@ namespace BZROpenShim
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
                         GetChunkGeomNameForLog(slot.geomName),
                         GetChunkProofMeshName(slot),
-                        static_cast<double>(x),
-                        static_cast<double>(y),
-                        static_cast<double>(z));
+                        static_cast<double>(transform.x),
+                        static_cast<double>(transform.y),
+                        static_cast<double>(transform.z));
                 }
                 slot.meshAssigned = true;
             }
@@ -3642,6 +3808,9 @@ namespace BZROpenShim
             {
                 if (slot.active && slot.objectBytes == objectBytes)
                 {
+                    char resolvedMeshName[sizeof(slot.proofMeshName)] = {};
+                    ChunkObjectLinkProbe probe = {};
+                    CaptureChunkObjectLinkProbe(objectBytes, probe);
                     const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(objectBytes);
                     slot.geomRef = geomRef;
                     if (geomName && *geomName)
@@ -3665,10 +3834,23 @@ namespace BZROpenShim
                         strncpy_s(slot.ownerOgreFilename, bridgeSnapshot.ownerOgreFilename, _TRUNCATE);
                     else
                         slot.ownerOgreFilename[0] = '\0';
-                    if (bridgeSnapshot.ownerResolvedMeshName[0])
-                        strncpy_s(slot.proofMeshName, bridgeSnapshot.ownerResolvedMeshName, _TRUNCATE);
-                    else
-                        slot.proofMeshName[0] = '\0';
+                    if (!TryResolveChunkPayloadMeshResource(
+                            probe,
+                            bridgeSnapshot.ownerResolvedMeshName,
+                            slot.geomName,
+                            resolvedMeshName,
+                            sizeof(resolvedMeshName)) &&
+                        geomName &&
+                        _stricmp(geomName, kChunkMeshProofTargetGeoName) == 0)
+                    {
+                        strncpy_s(resolvedMeshName, sizeof(resolvedMeshName), kChunkMeshProofMeshName, _TRUNCATE);
+                    }
+
+                    if (_stricmp(slot.proofMeshName, resolvedMeshName) != 0)
+                    {
+                        InvalidateChunkMeshProxySlot(slot);
+                        strncpy_s(slot.proofMeshName, sizeof(slot.proofMeshName), resolvedMeshName, _TRUNCATE);
+                    }
                     slot.lastSeenTick = now;
                     return;
                 }
@@ -3682,6 +3864,8 @@ namespace BZROpenShim
 
             freeSlot->objectBytes = objectBytes;
             freeSlot->geomRef = geomRef;
+            ChunkObjectLinkProbe probe = {};
+            CaptureChunkObjectLinkProbe(objectBytes, probe);
             const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(objectBytes);
             if (geomName && *geomName)
             {
@@ -3704,10 +3888,22 @@ namespace BZROpenShim
                 strncpy_s(freeSlot->ownerOgreFilename, bridgeSnapshot.ownerOgreFilename, _TRUNCATE);
             else
                 freeSlot->ownerOgreFilename[0] = '\0';
-            if (bridgeSnapshot.ownerResolvedMeshName[0])
-                strncpy_s(freeSlot->proofMeshName, bridgeSnapshot.ownerResolvedMeshName, _TRUNCATE);
-            else
+            if (!TryResolveChunkPayloadMeshResource(
+                    probe,
+                    bridgeSnapshot.ownerResolvedMeshName,
+                    freeSlot->geomName,
+                    freeSlot->proofMeshName,
+                    sizeof(freeSlot->proofMeshName)) &&
+                (!geomName || _stricmp(geomName, kChunkMeshProofTargetGeoName) != 0))
+            {
                 freeSlot->proofMeshName[0] = '\0';
+            }
+            else if (!freeSlot->proofMeshName[0] &&
+                     geomName &&
+                     _stricmp(geomName, kChunkMeshProofTargetGeoName) == 0)
+            {
+                strncpy_s(freeSlot->proofMeshName, sizeof(freeSlot->proofMeshName), kChunkMeshProofMeshName, _TRUNCATE);
+            }
             freeSlot->lastSeenTick = now;
             freeSlot->active = true;
             freeSlot->billboardAssigned = false;
@@ -8164,6 +8360,145 @@ namespace BZROpenShim
                 baseName.begin(),
                 [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
             return baseName;
+        }
+
+        static std::filesystem::path GetChunkPayloadResourceDirectory()
+        {
+            return GetMainModuleDirectory() / "BZ_ASSETS" / "common" / "models" / kChunkPayloadResourceRootName;
+        }
+
+        static std::string NormalizeChunkPayloadComponentName(const char* value)
+        {
+            return NormalizeChunkMeshBaseName(value);
+        }
+
+        static void AppendUniqueChunkPayloadCandidate(
+            std::vector<std::string>& candidates,
+            const std::string& candidate)
+        {
+            if (candidate.empty())
+                return;
+
+            for (const std::string& existing : candidates)
+            {
+                if (_stricmp(existing.c_str(), candidate.c_str()) == 0)
+                    return;
+            }
+
+            candidates.push_back(candidate);
+        }
+
+        static void AppendChunkPayloadCandidatesFromPipeList(
+            const char* listText,
+            std::vector<std::string>& outCandidates)
+        {
+            if (!listText || !*listText)
+                return;
+
+            const char* cursor = listText;
+            while (*cursor)
+            {
+                const char* separator = std::strchr(cursor, '|');
+                const size_t tokenLength = separator
+                    ? static_cast<size_t>(separator - cursor)
+                    : std::strlen(cursor);
+                if (tokenLength > 0)
+                {
+                    std::string token(cursor, tokenLength);
+                    AppendUniqueChunkPayloadCandidate(
+                        outCandidates,
+                        NormalizeChunkPayloadComponentName(token.c_str()));
+                }
+
+                if (!separator)
+                    break;
+                cursor = separator + 1;
+            }
+        }
+
+        static bool TryResolveChunkPayloadMeshResourceForMeshAndGeom(
+            const char* meshName,
+            const char* geomName,
+            char* outMeshName,
+            size_t outMeshNameCapacity)
+        {
+            if (!outMeshName || outMeshNameCapacity == 0)
+                return false;
+
+            outMeshName[0] = '\0';
+            const std::string meshBase = NormalizeChunkMeshBaseName(meshName);
+            const std::string geomBase = NormalizeChunkPayloadComponentName(geomName);
+            if (meshBase.empty() || geomBase.empty())
+                return false;
+
+            std::string resourceName = kChunkPayloadResourceRootName;
+            resourceName += "/";
+            resourceName += meshBase;
+            resourceName += "/";
+            resourceName += geomBase;
+            resourceName += ".mesh";
+
+            auto cacheIt = g_ChunkPayloadMeshExistsCache.find(resourceName);
+            bool exists = false;
+            if (cacheIt != g_ChunkPayloadMeshExistsCache.end())
+            {
+                exists = cacheIt->second;
+            }
+            else
+            {
+                const std::filesystem::path payloadPath =
+                    GetChunkPayloadResourceDirectory() / meshBase / (geomBase + ".mesh");
+                std::error_code error;
+                exists = std::filesystem::exists(payloadPath, error) && !error;
+                g_ChunkPayloadMeshExistsCache.emplace(resourceName, exists);
+            }
+
+            if (!exists)
+                return false;
+
+            strncpy_s(outMeshName, outMeshNameCapacity, resourceName.c_str(), _TRUNCATE);
+            return outMeshName[0] != '\0';
+        }
+
+        static bool TryResolveChunkPayloadMeshResource(
+            const ChunkObjectLinkProbe& probe,
+            const char* preferredMeshName,
+            const char* explicitGeomName,
+            char* outMeshName,
+            size_t outMeshNameCapacity)
+        {
+            if (!outMeshName || outMeshNameCapacity == 0)
+                return false;
+
+            outMeshName[0] = '\0';
+
+            std::vector<std::string> meshCandidates;
+            meshCandidates.reserve(2);
+            AppendUniqueChunkPayloadCandidate(meshCandidates, NormalizeChunkMeshBaseName(preferredMeshName));
+            AppendUniqueChunkPayloadCandidate(meshCandidates, NormalizeChunkMeshBaseName(probe.cachedMeshName));
+
+            std::vector<std::string> geomCandidates;
+            geomCandidates.reserve(4);
+            AppendUniqueChunkPayloadCandidate(geomCandidates, NormalizeChunkPayloadComponentName(explicitGeomName));
+            AppendUniqueChunkPayloadCandidate(geomCandidates, NormalizeChunkPayloadComponentName(probe.geomName));
+            AppendChunkPayloadCandidatesFromPipeList(probe.vdfCandidates, geomCandidates);
+
+            for (const std::string& meshCandidate : meshCandidates)
+            {
+                for (const std::string& geomCandidate : geomCandidates)
+                {
+                    if (TryResolveChunkPayloadMeshResourceForMeshAndGeom(
+                            meshCandidate.c_str(),
+                            geomCandidate.c_str(),
+                            outMeshName,
+                            outMeshNameCapacity))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         static ChunkVdfAssetInfo& GetChunkVdfAssetInfoForMesh(const char* meshName)
@@ -12721,7 +13056,7 @@ namespace BZROpenShim
         g_EnableChunkMeshProxy =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_MESH_PROXY") ||
               EnvFlagEnabled("BZR_DISABLE_CHUNK_MESH_PROXY"));
-        long chunkLogBudget = 200;
+        long chunkLogBudget = 1000;
         const bool chunkLogBudgetSpecified =
             TryGetEnvLong("BZR_CHUNK_LOG_BUDGET", chunkLogBudget) ||
             TryGetEnvLong("OPENSHIM_CHUNK_LOG_BUDGET", chunkLogBudget);
@@ -12745,21 +13080,31 @@ namespace BZROpenShim
         {
             g_ChunkTraceEntryLimit = ClampChunkTraceEntryLimit(chunkTraceEntryLimit);
         }
+        const bool disableChunkTrace =
+            EnvFlagEnabled("BZR_DISABLE_CHUNK_TRACE") ||
+            EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_TRACE");
         g_TraceChunkRender =
-            g_EnableChunkRenderFallback ||
-            g_EnableChunkProxyDebug ||
-            g_EnableChunkMeshProxy ||
-            EnvFlagEnabled("BZR_CHUNK_TRACE") ||
-            EnvFlagEnabled("OPENSHIM_CHUNK_TRACE") ||
-            chunkLogBudgetSpecified ||
-            chunkTraceEntryLimitSpecified;
+            !disableChunkTrace &&
+            (true ||
+             g_EnableChunkRenderFallback ||
+             g_EnableChunkProxyDebug ||
+             g_EnableChunkMeshProxy ||
+             EnvFlagEnabled("BZR_CHUNK_TRACE") ||
+             EnvFlagEnabled("OPENSHIM_CHUNK_TRACE") ||
+             chunkLogBudgetSpecified ||
+             chunkTraceEntryLimitSpecified);
         g_TraceChunkRenderVerbose =
             EnvFlagEnabled("BZR_CHUNK_TRACE_VERBOSE") ||
             EnvFlagEnabled("OPENSHIM_CHUNK_TRACE_VERBOSE");
+        const bool disableChunkEffectTrace =
+            EnvFlagEnabled("BZR_DISABLE_CHUNK_EFFECT_TRACE") ||
+            EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_EFFECT_TRACE");
         g_TraceChunkEffectRuntime =
-            EnvFlagEnabled("BZR_TRACE_CHUNK_EFFECT") ||
-            EnvFlagEnabled("OPENSHIM_TRACE_CHUNK_EFFECT") ||
-            EnvFlagEnabled("OPENSHIM_CHUNK_EFFECT_TRACE");
+            !disableChunkEffectTrace &&
+            (true ||
+             EnvFlagEnabled("BZR_TRACE_CHUNK_EFFECT") ||
+             EnvFlagEnabled("OPENSHIM_TRACE_CHUNK_EFFECT") ||
+             EnvFlagEnabled("OPENSHIM_CHUNK_EFFECT_TRACE"));
         InstallChunkEffectCreateHooksIfRequested();
         g_TraceSatelliteVisibility =
             EnvFlagEnabled("BZR_TRACE_SAT_VIS") ||
@@ -12838,6 +13183,7 @@ namespace BZROpenShim
         g_ChunkMeshProxyWaitLogged = false;
         g_ChunkProxyBillboardSet = nullptr;
         g_ChunkProxySlots.clear();
+        g_ChunkPayloadMeshExistsCache.clear();
         float turretAimPitchMultiplier = g_TurretAimPitchMultiplierEnhanced;
         if (TryGetEnvFloat("OPENSHIM_TURRET_AIM_PITCH_MULTIPLIER", turretAimPitchMultiplier) ||
             TryGetEnvFloat("OPENSHIM_TURRET_PITCH_MULTIPLIER", turretAimPitchMultiplier))

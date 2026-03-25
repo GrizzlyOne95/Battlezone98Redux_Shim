@@ -17,6 +17,7 @@ dependencies, and exports one standalone `.mesh` per chunk name.
 from __future__ import annotations
 
 import argparse
+import bmesh
 import importlib
 import os
 import re
@@ -98,9 +99,19 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help="Also emit .material files next to each exported mesh",
     )
     parser.add_argument(
+        "--skip-tangents",
+        action="store_true",
+        help="Do not export tangents/binormals for payload meshes",
+    )
+    parser.add_argument(
         "--skip-pivot-rebase",
         action="store_true",
         help="Leave extracted vertices in model space instead of shifting them to the bone pivot",
+    )
+    parser.add_argument(
+        "--skip-import-normals",
+        action="store_true",
+        help="Disable custom-normal import for meshes that crash Blender on import",
     )
     parser.add_argument(
         "--verbose",
@@ -283,9 +294,83 @@ def _duplicate_mesh_object(
 
 
 def _deselect_all() -> None:
-    for obj in bpy.context.view_layer.objects:
+    for obj in bpy.data.objects:
         if obj is not None:
             obj.select_set(False)
+
+
+def _get_vertex_indices_for_group(
+    source_obj: bpy.types.Object,
+    group_name: str,
+) -> set[int]:
+    if group_name not in source_obj.vertex_groups:
+        return set()
+
+    group_index = source_obj.vertex_groups[group_name].index
+    return {
+        vertex.index
+        for vertex in source_obj.data.vertices
+        if any(group.group == group_index for group in vertex.groups)
+    }
+
+
+def _filter_piece_object_to_vertex_indices(
+    piece_obj: bpy.types.Object,
+    keep_vertex_indices: set[int],
+) -> bool:
+    if not keep_vertex_indices:
+        return False
+
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(piece_obj.data)
+        bm.verts.ensure_lookup_table()
+        delete_verts = [vert for vert in bm.verts if vert.index not in keep_vertex_indices]
+        if delete_verts:
+            bmesh.ops.delete(bm, geom=delete_verts, context="VERTS")
+        bm.to_mesh(piece_obj.data)
+    finally:
+        bm.free()
+
+    piece_obj.data.validate(verbose=False)
+    piece_obj.data.update(calc_edges=True, calc_edges_loose=True)
+    return len(piece_obj.data.vertices) > 0 and len(piece_obj.data.polygons) > 0
+
+
+def _extract_piece_object(
+    source_obj: bpy.types.Object,
+    piece_name: str,
+    keep_vertex_indices: set[int],
+    pieces_collection: bpy.types.Collection,
+    pivot_local: Vector,
+    rebase_to_pivot: bool,
+) -> Optional[bpy.types.Object]:
+    if not keep_vertex_indices:
+        return None
+
+    temp_obj = _duplicate_mesh_object(source_obj, pieces_collection)
+    if not _filter_piece_object_to_vertex_indices(temp_obj, keep_vertex_indices):
+        bpy.data.objects.remove(temp_obj, do_unlink=True)
+        return None
+
+    temp_obj.name = f"{source_obj.name}__{piece_name}"
+    temp_obj.data.name = temp_obj.name
+    _strip_vertex_group_data(temp_obj, source_obj)
+    _strip_armature_dependencies(temp_obj)
+    _rebase_piece_to_pivot(temp_obj, pivot_local, rebase_to_pivot)
+    _reset_piece_custom_normals(temp_obj)
+    return temp_obj
+
+
+def _reset_piece_custom_normals(piece_obj: bpy.types.Object) -> None:
+    if len(piece_obj.data.vertices) == 0:
+        return
+
+    # Zero vectors tell Blender to rebuild normals from the current topology.
+    piece_obj.data.normals_split_custom_set_from_vertices(
+        [(0.0, 0.0, 0.0)] * len(piece_obj.data.vertices)
+    )
+    piece_obj.data.update()
 
 
 def _extract_piece_object_by_group(
@@ -295,49 +380,87 @@ def _extract_piece_object_by_group(
     pivot_local: Vector,
     rebase_to_pivot: bool,
 ) -> Optional[bpy.types.Object]:
-    if group_name not in source_obj.vertex_groups:
-        return None
+    return _extract_piece_object(
+        source_obj=source_obj,
+        piece_name=group_name,
+        keep_vertex_indices=_get_vertex_indices_for_group(source_obj, group_name),
+        pieces_collection=pieces_collection,
+        pivot_local=pivot_local,
+        rebase_to_pivot=rebase_to_pivot,
+    )
 
-    temp_obj = _duplicate_mesh_object(source_obj, pieces_collection)
-    view_layer = bpy.context.view_layer
-    before_names = {obj.name for obj in bpy.data.objects}
 
-    _deselect_all()
-    temp_obj.select_set(True)
-    view_layer.objects.active = temp_obj
-    bpy.ops.object.mode_set(mode="EDIT")
-    bpy.ops.mesh.select_mode(type="VERT")
-    bpy.ops.mesh.select_all(action="DESELECT")
-    temp_obj.vertex_groups.active_index = temp_obj.vertex_groups[group_name].index
-    bpy.ops.object.vertex_group_select()
+def _find_connected_face_islands(mesh_obj: bpy.types.Object) -> List[set[int]]:
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(mesh_obj.data)
+        bm.faces.ensure_lookup_table()
+        remaining_faces = set(bm.faces)
+        islands: List[set[int]] = []
+        while remaining_faces:
+            seed_face = remaining_faces.pop()
+            stack = [seed_face]
+            island_faces = {seed_face}
+            while stack:
+                current_face = stack.pop()
+                for edge in current_face.edges:
+                    for linked_face in edge.link_faces:
+                        if linked_face in remaining_faces:
+                            remaining_faces.remove(linked_face)
+                            island_faces.add(linked_face)
+                            stack.append(linked_face)
 
-    selected_vert_count = sum(1 for vertex in temp_obj.data.vertices if vertex.select)
-    if selected_vert_count == 0:
-        bpy.ops.object.mode_set(mode="OBJECT")
-        bpy.data.objects.remove(temp_obj, do_unlink=True)
-        return None
+            islands.append({vert.index for face in island_faces for vert in face.verts})
+        return islands
+    finally:
+        bm.free()
 
-    bpy.ops.mesh.separate(type="SELECTED")
-    bpy.ops.object.mode_set(mode="OBJECT")
 
-    created_objects = [obj for obj in bpy.data.objects if obj.name not in before_names]
-    piece_obj = next((obj for obj in created_objects if obj.type == "MESH"), None)
-    if piece_obj is None:
-        bpy.data.objects.remove(temp_obj, do_unlink=True)
-        return None
+def _split_objects_into_connected_face_islands(
+    mesh_objects: Sequence[bpy.types.Object],
+    pieces_collection: bpy.types.Collection,
+    mesh_basename: str,
+    rebase_to_pivot: bool,
+    verbose: bool,
+) -> Dict[str, List[bpy.types.Object]]:
+    export_map: Dict[str, List[bpy.types.Object]] = defaultdict(list)
 
-    bpy.data.objects.remove(temp_obj, do_unlink=True)
-    piece_obj.name = f"{source_obj.name}__{group_name}"
-    piece_obj.data.name = piece_obj.name
-    _strip_vertex_group_data(piece_obj, source_obj)
-    _strip_armature_dependencies(piece_obj)
-    _rebase_piece_to_pivot(piece_obj, pivot_local, rebase_to_pivot)
-    return piece_obj
+    for mesh_obj in mesh_objects:
+        if mesh_obj.type != "MESH" or len(mesh_obj.data.polygons) == 0:
+            continue
+
+        islands = _find_connected_face_islands(mesh_obj)
+        island_count = len(islands)
+        for index, keep_vertex_indices in enumerate(islands, start=1):
+            if island_count == 1:
+                piece_name = mesh_basename
+            else:
+                piece_name = f"{mesh_basename}_part{index:02d}"
+
+            piece_obj = _extract_piece_object(
+                source_obj=mesh_obj,
+                piece_name=piece_name,
+                keep_vertex_indices=keep_vertex_indices,
+                pieces_collection=pieces_collection,
+                pivot_local=Vector((0.0, 0.0, 0.0)),
+                rebase_to_pivot=rebase_to_pivot,
+            )
+            if piece_obj is None:
+                continue
+            export_map[piece_name].append(piece_obj)
+            if verbose:
+                print(
+                    f"Created fallback piece {piece_obj.name} from {mesh_obj.name} "
+                    f"island={index}/{island_count}"
+                )
+
+    return export_map
 
 
 def _split_objects_into_chunk_payloads(
     mesh_objects: Sequence[bpy.types.Object],
     armature: Optional[bpy.types.Object],
+    mesh_basename: str,
     include_pattern: re.Pattern[str],
     exclude_pattern: re.Pattern[str],
     rebase_to_pivot: bool,
@@ -379,7 +502,16 @@ def _split_objects_into_chunk_payloads(
                     f"pivot={tuple(round(v, 6) for v in pivot_local)}"
                 )
 
-    return export_map
+    if export_map:
+        return export_map
+
+    return _split_objects_into_connected_face_islands(
+        mesh_objects=mesh_objects,
+        pieces_collection=pieces_collection,
+        mesh_basename=mesh_basename,
+        rebase_to_pivot=rebase_to_pivot,
+        verbose=verbose,
+    )
 
 
 def _export_group_meshes(
@@ -391,6 +523,7 @@ def _export_group_meshes(
     keep_xml: bool,
     preserve_case: bool,
     export_materials: bool,
+    export_tangents: bool,
     verbose: bool,
 ) -> List[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -415,8 +548,8 @@ def _export_group_meshes(
             legacy_handler=OgreExport.save,
             xml_converter=xml_converter,
             keep_xml=keep_xml,
-            export_tangents=True,
-            export_binormals=True,
+            export_tangents=export_tangents,
+            export_binormals=export_tangents,
             zero_tangents_binormals=False,
             export_colour=True,
             tangent_parity=True,
@@ -432,7 +565,14 @@ def _export_group_meshes(
             batch_export=False,
         )
         if result != {"FINISHED"}:
-            raise RuntimeError(f"Failed exporting {group_name}: {result}")
+            print(f"[WARNING] Failed exporting {group_name}: {result}")
+            continue
+
+        if not output_path.exists() or output_path.stat().st_size == 0:
+            if output_path.exists():
+                output_path.unlink()
+            print(f"[WARNING] Export produced no usable mesh for {group_name}")
+            continue
 
         exported_paths.append(output_path)
         if verbose:
@@ -454,6 +594,8 @@ def _process_single_mesh(
     preserve_case: bool,
     export_materials: bool,
     rebase_to_pivot: bool,
+    export_tangents: bool,
+    import_normals: bool,
     verbose: bool,
 ) -> List[Path]:
     _clear_scene()
@@ -467,7 +609,7 @@ def _process_single_mesh(
         legacy_handler=OgreImport.load,
         xml_converter=xml_converter,
         keep_xml=keep_xml,
-        import_normals=True,
+        import_normals=import_normals,
         normal_mode="custom",
         import_shapekeys=False,
         import_animations=False,
@@ -485,6 +627,7 @@ def _process_single_mesh(
     export_map = _split_objects_into_chunk_payloads(
         mesh_objects=mesh_objects,
         armature=armature,
+        mesh_basename=mesh_path.stem,
         include_pattern=include_pattern,
         exclude_pattern=exclude_pattern,
         rebase_to_pivot=rebase_to_pivot,
@@ -502,6 +645,7 @@ def _process_single_mesh(
         keep_xml=keep_xml,
         preserve_case=preserve_case,
         export_materials=export_materials,
+        export_tangents=export_tangents,
         verbose=verbose,
     )
 
@@ -539,6 +683,8 @@ def main(argv: Sequence[str]) -> int:
             preserve_case=args.preserve_case,
             export_materials=args.export_materials,
             rebase_to_pivot=not args.skip_pivot_rebase,
+            export_tangents=not args.skip_tangents,
+            import_normals=not args.skip_import_normals,
             verbose=args.verbose,
         )
         all_exported_paths.extend(exported_paths)
