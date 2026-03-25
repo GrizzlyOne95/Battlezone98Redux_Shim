@@ -403,6 +403,8 @@ namespace BZROpenShim
         constexpr uintptr_t kGogGameObjectGetObjByHandleAddr = 0x0046B160;
         constexpr uintptr_t kGogRecordDeathEntryAddr = 0x004D9210;
         constexpr uintptr_t kSteam64GlobalAddr = 0x0260B1D0;
+        constexpr uintptr_t kLocalPlayerNetIdAddr = 0x009180D4;
+        constexpr uintptr_t kUiWrapperActiveAddr = 0x00918324;
         // The shipped GOG PDB public-symbol addresses for cUI_OptionsInput methods
         // are not reliable function-entry hooks against the current Redux binary.
         // The stock input screen constructor was recovered from string xrefs instead.
@@ -419,6 +421,8 @@ namespace BZROpenShim
         constexpr size_t kRecordDeathDetourLen = 6;
         constexpr ULONGLONG kCareerStatsMpHookRetryMs = 1000;
         constexpr ULONGLONG kCareerStatsMpHookRetryWindowMs = 15000;
+        constexpr DWORD kCareerStatsMpSessionPollIntervalMs = 1000;
+        constexpr ULONGLONG kCareerStatsMpSessionResetMs = 15000;
         constexpr uint32_t kWeaponSigSnip = 0x534E4950u;
         constexpr size_t kPersonObjOffset = 0x0E8;
         constexpr size_t kPersonCarrierOffset = 0x198;
@@ -1038,6 +1042,12 @@ namespace BZROpenShim
         static bool g_CareerStatsMpHookMismatchLogged = false;
         static ULONGLONG g_CareerStatsMpHookFirstAttemptTick = 0;
         static ULONGLONG g_CareerStatsMpHookLastAttemptTick = 0;
+        static SRWLOCK g_CareerStatsLock = SRWLOCK_INIT;
+        static volatile long g_CareerStatsMpSessionWorkerStarted = 0;
+        static bool g_CareerStatsMpMatchRecorded = false;
+        static std::string g_CareerStatsMpMatchProfileKey;
+        static std::string g_CareerStatsMpMatchMissionKey;
+        static ULONGLONG g_CareerStatsMpLastActiveTick = 0;
         static InlineDetour32 g_CalcRangeCraftDetour = {};
         static bool g_CalcRangeCraftHookInstalled = false;
         static InlineDetour32 g_OffensiveProcessDoSubTaskDetour = {};
@@ -4635,6 +4645,69 @@ namespace BZROpenShim
             return outValue != 0;
         }
 
+        static uint16_t ReadLocalPlayerNetIdValue()
+        {
+            __try
+            {
+                return *reinterpret_cast<volatile const uint16_t*>(kLocalPlayerNetIdAddr);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return 0;
+            }
+        }
+
+        static uint32_t ReadUiWrapperActiveValue()
+        {
+            __try
+            {
+                return *reinterpret_cast<volatile const uint32_t*>(kUiWrapperActiveAddr);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return 0;
+            }
+        }
+
+        static size_t ReadInlineAsciiBufferRaw(uintptr_t address, char* outBuffer, size_t capacity)
+        {
+            if (!outBuffer || capacity == 0)
+                return 0;
+
+            size_t length = 0;
+            outBuffer[0] = '\0';
+
+            __try
+            {
+                const char* buffer = reinterpret_cast<const char*>(address);
+                for (size_t i = 0; i < capacity; ++i)
+                {
+                    const char ch = buffer[i];
+                    if (ch == '\0')
+                        break;
+                    outBuffer[length++] = ch;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                length = 0;
+            }
+
+            outBuffer[length] = '\0';
+            return length;
+        }
+
+        static std::string ReadInlineAsciiBuffer(uintptr_t address, size_t capacity)
+        {
+            if (capacity == 0)
+                return {};
+
+            std::string value(capacity, '\0');
+            const size_t length = ReadInlineAsciiBufferRaw(address, value.data(), capacity);
+            value.resize(length);
+            return value;
+        }
+
         static std::filesystem::path GetCareerStatsPath()
         {
             return GetConfigModuleDirectory() / "career_stats.cfg";
@@ -4667,6 +4740,31 @@ namespace BZROpenShim
                 return sanitized;
 
             return fallback ? fallback : "unknown";
+        }
+
+        static std::string ResolveCareerStatsMissionKey()
+        {
+            const auto normalizeCandidate = [](const std::string& candidate) -> std::string
+            {
+                if (candidate.empty())
+                    return {};
+
+                std::filesystem::path path(candidate);
+                std::string stem = path.stem().string();
+                if (stem.empty())
+                    stem = path.filename().string();
+                if (stem.empty())
+                    stem = candidate;
+
+                return SanitizeCareerStatsKeyToken(stem, "");
+            };
+
+            const std::string queuedName =
+                normalizeCandidate(ReadInlineAsciiBuffer(kQueuedLoadNameBufferAddr, kQueuedLoadNameBufferLen));
+            if (!queuedName.empty())
+                return queuedName;
+
+            return normalizeCandidate(ReadInlineAsciiBuffer(kQueuedLoadPathBufferAddr, MAX_PATH));
         }
 
         static std::string ResolveCareerStatsProfileKey()
@@ -4752,6 +4850,132 @@ namespace BZROpenShim
             data[key] = std::to_string(GetCareerStatsInteger(data, key) + amount);
         }
 
+        static bool EnsureMultiplayerCareerSessionRecordedLocked(
+            std::unordered_map<std::string, std::string>& data,
+            const std::string& profileKey,
+            const std::string& missionKey,
+            const char* sourceTag)
+        {
+            if (profileKey.empty() || missionKey.empty())
+                return false;
+
+            if (g_CareerStatsMpMatchRecorded &&
+                g_CareerStatsMpMatchProfileKey == profileKey &&
+                g_CareerStatsMpMatchMissionKey == missionKey)
+            {
+                return false;
+            }
+
+            const std::string profilePrefix = "profile." + profileKey;
+            IncrementCareerStatsInteger(data, profilePrefix + ".career.mpMatchesPlayed", 1);
+            IncrementCareerStatsInteger(data, profilePrefix + ".mission." + missionKey + ".plays", 1);
+
+            g_CareerStatsMpMatchRecorded = true;
+            g_CareerStatsMpMatchProfileKey = profileKey;
+            g_CareerStatsMpMatchMissionKey = missionKey;
+
+            Log(L"[CAREER] Recorded multiplayer match start source=%hs profile=%hs mission=%hs\n",
+                sourceTag ? sourceTag : "unknown",
+                profileKey.c_str(),
+                missionKey.c_str());
+            return true;
+        }
+
+        static bool IsMultiplayerCareerSessionActive()
+        {
+            if (ReadLocalPlayerNetIdValue() == 0)
+                return false;
+
+            if (ReadUiWrapperActiveValue() == 0)
+                return true;
+
+            return IsMultiplayerPauseMenuOpen();
+        }
+
+        static void PollMultiplayerCareerSession()
+        {
+            const ULONGLONG nowMs = GetTickCount64();
+            const bool active = IsMultiplayerCareerSessionActive();
+
+            AcquireSRWLockExclusive(&g_CareerStatsLock);
+
+            if (active)
+            {
+                g_CareerStatsMpLastActiveTick = nowMs;
+
+                const std::string profileKey = ResolveCareerStatsProfileKey();
+                const std::string missionKey = ResolveCareerStatsMissionKey();
+                if (!missionKey.empty() &&
+                    (!g_CareerStatsMpMatchRecorded ||
+                     g_CareerStatsMpMatchProfileKey != profileKey ||
+                     g_CareerStatsMpMatchMissionKey != missionKey))
+                {
+                    const bool previousRecorded = g_CareerStatsMpMatchRecorded;
+                    const std::string previousProfileKey = g_CareerStatsMpMatchProfileKey;
+                    const std::string previousMissionKey = g_CareerStatsMpMatchMissionKey;
+                    std::unordered_map<std::string, std::string> data;
+                    LoadCareerStatsFile(data);
+                    data["meta.version"] = "1";
+
+                    if (EnsureMultiplayerCareerSessionRecordedLocked(data, profileKey, missionKey, "poll") &&
+                        !SaveCareerStatsFile(data))
+                    {
+                        g_CareerStatsMpMatchRecorded = previousRecorded;
+                        g_CareerStatsMpMatchProfileKey = previousProfileKey;
+                        g_CareerStatsMpMatchMissionKey = previousMissionKey;
+                        const std::string path = GetCareerStatsPath().string();
+                        Log(L"[CAREER] Failed writing multiplayer match start file: %hs\n", path.c_str());
+                    }
+                }
+            }
+            else if (g_CareerStatsMpMatchRecorded &&
+                     g_CareerStatsMpLastActiveTick != 0 &&
+                     (nowMs - g_CareerStatsMpLastActiveTick) >= kCareerStatsMpSessionResetMs)
+            {
+                Log(L"[CAREER] Cleared multiplayer match session profile=%hs mission=%hs\n",
+                    g_CareerStatsMpMatchProfileKey.c_str(),
+                    g_CareerStatsMpMatchMissionKey.c_str());
+                g_CareerStatsMpMatchRecorded = false;
+                g_CareerStatsMpMatchProfileKey.clear();
+                g_CareerStatsMpMatchMissionKey.clear();
+                g_CareerStatsMpLastActiveTick = 0;
+            }
+
+            ReleaseSRWLockExclusive(&g_CareerStatsLock);
+        }
+
+        static DWORD WINAPI CareerStatsMpSessionThreadProc(LPVOID)
+        {
+            Log(L"[CAREER] Multiplayer session worker started\n");
+            while (true)
+            {
+                PollMultiplayerCareerSession();
+                Sleep(kCareerStatsMpSessionPollIntervalMs);
+            }
+        }
+
+        static void StartCareerStatsMpSessionWorker()
+        {
+            if (InterlockedCompareExchange(&g_CareerStatsMpSessionWorkerStarted, 1, 0) != 0)
+                return;
+
+            HANDLE threadHandle = CreateThread(
+                nullptr,
+                0,
+                CareerStatsMpSessionThreadProc,
+                nullptr,
+                0,
+                nullptr);
+            if (!threadHandle)
+            {
+                InterlockedExchange(&g_CareerStatsMpSessionWorkerStarted, 0);
+                Log(L"[CAREER] Failed starting multiplayer session worker (err=%lu)\n", GetLastError());
+                return;
+            }
+
+            CloseHandle(threadHandle);
+        }
+
         static void RecordMultiplayerCareerStats(int killedTeam, int killerTeam)
         {
             if (!g_BzrFn_GetPlayerHandle || !g_BzrFn_GetTeamNum)
@@ -4772,27 +4996,46 @@ namespace BZROpenShim
             if (!localDeath && !localKill)
                 return;
 
+            AcquireSRWLockExclusive(&g_CareerStatsLock);
+
             std::unordered_map<std::string, std::string> data;
             LoadCareerStatsFile(data);
             data["meta.version"] = "1";
 
-            const std::string profilePrefix = "profile." + ResolveCareerStatsProfileKey();
+            const std::string profileKey = ResolveCareerStatsProfileKey();
+            const std::string missionKey = ResolveCareerStatsMissionKey();
+            const std::string profilePrefix = "profile." + profileKey;
+            const bool previousRecorded = g_CareerStatsMpMatchRecorded;
+            const std::string previousProfileKey = g_CareerStatsMpMatchProfileKey;
+            const std::string previousMissionKey = g_CareerStatsMpMatchMissionKey;
+
+            EnsureMultiplayerCareerSessionRecordedLocked(data, profileKey, missionKey, "death");
+
             if (localKill)
             {
                 IncrementCareerStatsInteger(data, profilePrefix + ".career.totalKills", 1);
                 IncrementCareerStatsInteger(data, profilePrefix + ".career.mpKills", 1);
+                if (!missionKey.empty())
+                    IncrementCareerStatsInteger(data, profilePrefix + ".mission." + missionKey + ".kills", 1);
             }
             if (localDeath)
             {
                 IncrementCareerStatsInteger(data, profilePrefix + ".career.totalDeaths", 1);
                 IncrementCareerStatsInteger(data, profilePrefix + ".career.mpDeaths", 1);
+                if (!missionKey.empty())
+                    IncrementCareerStatsInteger(data, profilePrefix + ".mission." + missionKey + ".deaths", 1);
             }
 
             if (!SaveCareerStatsFile(data))
             {
+                g_CareerStatsMpMatchRecorded = previousRecorded;
+                g_CareerStatsMpMatchProfileKey = previousProfileKey;
+                g_CareerStatsMpMatchMissionKey = previousMissionKey;
                 const std::string path = GetCareerStatsPath().string();
                 Log(L"[CAREER] Failed writing multiplayer career stats file: %hs\n", path.c_str());
             }
+
+            ReleaseSRWLockExclusive(&g_CareerStatsLock);
         }
 
         static std::filesystem::path GetBansConfigPath()
@@ -13219,6 +13462,7 @@ namespace BZROpenShim
 
         InstallJumpSnipingProbeIfRequested();
         InstallCareerStatsMpHookIfPossible();
+        StartCareerStatsMpSessionWorker();
         InstallShieldTowerTeamFilterHookIfPossible();
 
         if (g_IsSteamExe)
