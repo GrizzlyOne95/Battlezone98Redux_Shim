@@ -466,7 +466,10 @@ broader session-level networking bundle.
 ## Testing The Chunk Experiment
 
 1. Build `bin\Release\winmm.dll`.
-2. Copy it next to the GOG game executable in `C:\GOG Games\Battlezone 98 Redux`.
+2. Deploy it next to the game executable.
+   For Steam, use `launch_steam_chunk_force_geo.cmd` from the repo root to copy
+   the latest build into the game directory and launch with the chunk test
+   environment variables enabled.
 3. Set `BZR_CHUNK_FORCE_FIRST_GEO=1` before launching the game.
 4. Make sure the test GEO you want to exercise has a valid Redux-side
    mesh/material pipeline. For the current working assumption, use
@@ -485,16 +488,66 @@ Current logging note:
 - chunk experiment diagnostics are mirrored into both `openshim.log` and
   `winmm_shim.log`
 - older builds may only have the chunk diagnostics in `winmm_shim.log`
+- the Steam build delays the `CreateChunk` / `CreateChunklet` detours until the
+  executable bytes have settled, then logs whether the creator hooks are active
 
 Expected log signals:
 
 - `Force-first-geo fallback: enabled`
 - `Forced geometry entry ...`
+- `Create-path hooks: enabled`
+- `CreateChunklet ... createdGeomName=chunk1|chunk2` for generic hit chunklets
+- `CreateChunk ...` for real craft-fragment repurposing during death effects
 
 If the hook never logs forced geometry for destroyed objects, the failure is
 probably earlier than active-handle selection. If it does log forced geometry
 but chunks still do not render, the next failure point is likely downstream in
 render-class handling or Ogre proxy creation.
+
+### Chunk Spawn Trace Notes
+
+The shim now includes additional chunk-spawn instrumentation that is meant to
+answer two different questions:
+
+1. is Redux creating generic stock chunklets or real repurposed craft pieces
+2. if the fragment is a real craft piece, can OpenShim still identify the
+   originating VDF node after `CreateChunk` mutates the object
+
+Relevant log families:
+
+- `[CHUNKSPAWN]` logs the native `CreateChunk` and `CreateChunklet` paths
+- `[CHUNKPROXY]` tracks the active runtime chunk objects after creation
+- `[CHUNKEFFECT]` samples the live `ChunkEffect` manager entries
+
+Important field meanings:
+
+- `srcGeomName` / `createdGeomName`
+  direct runtime GEO identity when Redux still exposes a readable name
+- `srcVdf`
+  OpenShim's current best-effort VDF candidate list for the source fragment
+- `[CHUNKSPAWN]   vdf ...`
+  expanded source, parent, sibling, and child candidate names when any are
+  available
+
+Current Steam implementation details:
+
+- creator hooks are installed only after settled-byte verification
+- direct runtime GEO names are inconsistent across real craft fragments
+- to reduce that inconsistency, OpenShim keeps a throttled intact-object cache
+  while vehicles are still alive, then reuses that cached `obj76 -> mesh -> VDF`
+  identity later in the death path
+- the intact-object cache refreshes at most once per second and currently caps
+  itself at `1024` game objects and `256` object-tree nodes per object per pass
+
+Practical interpretation:
+
+- `CreateChunklet` plus `chunk1` / `chunk2` still means generic stock debris
+- `CreateChunk` means Redux is repurposing a real child object from the craft
+- when `srcVdf` resolves to names like `AGR11TUR`, `AGR11BDA`, or
+  `Agr11nrr`, OpenShim has successfully matched that runtime fragment back to
+  the source VDF tree
+- when `srcVdf=<none>`, the fragment is still real, but the available runtime
+  metadata was not unique enough for a safe name match in that run
 
 ### Producer Build Menu Bridge Experiment
 
