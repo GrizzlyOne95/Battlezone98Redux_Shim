@@ -8578,37 +8578,64 @@ namespace BZROpenShim
             if (meshBase.empty() || geomBase.empty())
                 return false;
 
-            std::string resourceName = meshBase;
-            resourceName += "/";
-            resourceName += geomBase;
-            resourceName += ".mesh";
+            const std::string payloadFileName = geomBase + ".mesh";
 
-            auto cacheIt = g_ChunkPayloadMeshExistsCache.find(resourceName);
-            bool exists = false;
-            if (cacheIt != g_ChunkPayloadMeshExistsCache.end())
+            std::string nestedResourceName = meshBase;
+            nestedResourceName += "/";
+            nestedResourceName += payloadFileName;
+
+            auto nestedCacheIt = g_ChunkPayloadMeshExistsCache.find(nestedResourceName);
+            bool nestedExists = false;
+            if (nestedCacheIt != g_ChunkPayloadMeshExistsCache.end())
             {
-                exists = cacheIt->second;
+                nestedExists = nestedCacheIt->second;
             }
             else
             {
-                const std::string payloadFileName = geomBase + ".mesh";
                 for (const std::filesystem::path& resourceRoot : GetChunkPayloadResourceDirectories())
                 {
                     const std::filesystem::path payloadPath = resourceRoot / meshBase / payloadFileName;
                     std::error_code error;
                     if (std::filesystem::exists(payloadPath, error) && !error)
                     {
-                        exists = true;
+                        nestedExists = true;
                         break;
                     }
                 }
-                g_ChunkPayloadMeshExistsCache.emplace(resourceName, exists);
+                g_ChunkPayloadMeshExistsCache.emplace(nestedResourceName, nestedExists);
             }
 
-            if (!exists)
+            if (nestedExists)
+            {
+                strncpy_s(outMeshName, outMeshNameCapacity, nestedResourceName.c_str(), _TRUNCATE);
+                return outMeshName[0] != '\0';
+            }
+
+            auto flatCacheIt = g_ChunkPayloadMeshExistsCache.find(payloadFileName);
+            bool flatExists = false;
+            if (flatCacheIt != g_ChunkPayloadMeshExistsCache.end())
+            {
+                flatExists = flatCacheIt->second;
+            }
+            else
+            {
+                for (const std::filesystem::path& resourceRoot : GetChunkPayloadResourceDirectories())
+                {
+                    const std::filesystem::path payloadPath = resourceRoot / payloadFileName;
+                    std::error_code error;
+                    if (std::filesystem::exists(payloadPath, error) && !error)
+                    {
+                        flatExists = true;
+                        break;
+                    }
+                }
+                g_ChunkPayloadMeshExistsCache.emplace(payloadFileName, flatExists);
+            }
+
+            if (!flatExists)
                 return false;
 
-            strncpy_s(outMeshName, outMeshNameCapacity, resourceName.c_str(), _TRUNCATE);
+            strncpy_s(outMeshName, outMeshNameCapacity, payloadFileName.c_str(), _TRUNCATE);
             return outMeshName[0] != '\0';
         }
 
