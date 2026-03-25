@@ -534,6 +534,8 @@ namespace BZROpenShim
         static std::filesystem::path GetMainModuleDirectory();
         struct ChunkObjectLinkProbe;
         struct ChunkCreateSourceTreeProbe;
+        static std::filesystem::path GetChunkPayloadStockResourceDirectory();
+        static void RefreshChunkPayloadResourceDirectories();
         static void PopulateChunkVdfCandidates(const char* meshName, ChunkObjectLinkProbe& probe);
         static void PopulateChunkObjectLinkProbeFromIdentityCache(ChunkObjectLinkProbe& probe);
         static bool TryResolveChunkPayloadMeshResource(
@@ -1241,6 +1243,8 @@ namespace BZROpenShim
         static constexpr const char* kChunkProxyMaterialName = "BaseWhiteNoLighting";
         static constexpr const char* kChunkProxyMaterialGroup = "General";
         static constexpr const char* kChunkPayloadResourceRootName = "OpenShimChunkPayloads";
+        static constexpr const char* kChunkPayloadModRelativeDirName = "chunkMeshes";
+        static constexpr const char* kChunkPayloadResourceLocationType = "FileSystem";
         static constexpr const char* kChunkMeshProofTargetGeoName = "AGR11BDA";
         static constexpr const char* kChunkMeshProofMeshName = "avtank.mesh";
         static FnPlayGlobalSound g_BzrFn_PlayGlobalSound =
@@ -1323,12 +1327,22 @@ namespace BZROpenShim
         static bool g_ChunkMeshProxyInitLogged = false;
         static bool g_ChunkMeshProxyFailureLogged = false;
         static bool g_ChunkMeshProxyWaitLogged = false;
+        static bool g_ChunkPayloadResourceLocationsAttempted = false;
+        static bool g_ChunkPayloadResourceLocationsReady = false;
+        static bool g_ChunkPayloadResourceLocationsLogged = false;
+        static bool g_ChunkPayloadResourceLocationsFailureLogged = false;
+        static std::vector<std::filesystem::path> g_ChunkPayloadResourceDirectories = {};
         static void* g_ChunkProxyBillboardSet = nullptr;
         static std::vector<ChunkProxySlot> g_ChunkProxySlots = {};
         using FnOgreGetRootSceneNode = void*(__thiscall*)(void*);
         using FnOgreCreateBillboardSet = void*(__thiscall*)(void*, uint32_t);
         using FnOgreCreateChildSceneNode = void*(__thiscall*)(void*, const OgreVector3&, const OgreQuaternion&);
         using FnOgreCreateEntity = void*(__thiscall*)(void*, const std::string&);
+        using FnOgreGetResourceGroupManager = void*(__cdecl*)();
+        using FnOgreResourceGroupExists = bool(__thiscall*)(void*, const std::string&);
+        using FnOgreCreateResourceGroup = void(__thiscall*)(void*, const std::string&, bool);
+        using FnOgreAddResourceLocation = void(__thiscall*)(void*, const std::string&, const std::string&, const std::string&, bool, bool);
+        using FnOgreInitialiseResourceGroup = void(__thiscall*)(void*, const std::string&);
         using FnOgreAttachObject = void(__thiscall*)(void*, void*);
         using FnOgreSetBillboardsInWorldSpace = void(__thiscall*)(void*, bool);
         using FnOgreSetDefaultDimensions = void(__thiscall*)(void*, float, float);
@@ -3382,6 +3396,103 @@ namespace BZROpenShim
             }
         }
 
+        static bool EnsureChunkPayloadResourceLocations()
+        {
+            if (!g_EnableChunkMeshProxy)
+                return false;
+
+            if (g_ChunkPayloadResourceLocationsReady)
+                return true;
+
+            if (!g_ChunkPayloadResourceLocationsAttempted)
+            {
+                RefreshChunkPayloadResourceDirectories();
+                g_ChunkPayloadResourceLocationsAttempted = true;
+            }
+
+            if (g_ChunkPayloadResourceDirectories.empty())
+            {
+                if (!g_ChunkPayloadResourceLocationsFailureLogged)
+                {
+                    LogChunkDiagnostic("chunkmesh",
+                        L"[CHUNKMESH] No chunk payload resource directories found; stockRoot=%hs modRelative=%hs\n",
+                        GetChunkPayloadStockResourceDirectory().string().c_str(),
+                        kChunkPayloadModRelativeDirName);
+                    g_ChunkPayloadResourceLocationsFailureLogged = true;
+                }
+                return false;
+            }
+
+            static FnOgreGetResourceGroupManager getResourceGroupManager =
+                ResolveOgreProc<FnOgreGetResourceGroupManager>("?getSingletonPtr@ResourceGroupManager@Ogre@@SAPAV12@XZ");
+            static FnOgreResourceGroupExists resourceGroupExists =
+                ResolveOgreProc<FnOgreResourceGroupExists>("?resourceGroupExists@ResourceGroupManager@Ogre@@QAE_NABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            static FnOgreCreateResourceGroup createResourceGroup =
+                ResolveOgreProc<FnOgreCreateResourceGroup>("?createResourceGroup@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@_N@Z");
+            static FnOgreAddResourceLocation addResourceLocation =
+                ResolveOgreProc<FnOgreAddResourceLocation>("?addResourceLocation@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@00_N1@Z");
+            static FnOgreInitialiseResourceGroup initialiseResourceGroup =
+                ResolveOgreProc<FnOgreInitialiseResourceGroup>("?initialiseResourceGroup@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+
+            if (!getResourceGroupManager || !resourceGroupExists || !createResourceGroup ||
+                !addResourceLocation || !initialiseResourceGroup)
+            {
+                if (!g_ChunkPayloadResourceLocationsFailureLogged)
+                {
+                    LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Missing Ogre resource manager symbols; cannot register chunk payload roots\n");
+                    g_ChunkPayloadResourceLocationsFailureLogged = true;
+                }
+                return false;
+            }
+
+            void* resourceManager = getResourceGroupManager();
+            if (!resourceManager)
+            {
+                if (!g_ChunkPayloadResourceLocationsFailureLogged)
+                {
+                    LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Ogre resource manager unavailable; cannot register chunk payload roots yet\n");
+                    g_ChunkPayloadResourceLocationsFailureLogged = true;
+                }
+                return false;
+            }
+
+            const std::string groupName = kChunkPayloadResourceRootName;
+            const std::string locationType = kChunkPayloadResourceLocationType;
+            try
+            {
+                if (!resourceGroupExists(resourceManager, groupName))
+                    createResourceGroup(resourceManager, groupName, false);
+
+                for (const std::filesystem::path& resourceRoot : g_ChunkPayloadResourceDirectories)
+                {
+                    addResourceLocation(resourceManager, resourceRoot.string(), locationType, groupName, false, true);
+                    if (!g_ChunkPayloadResourceLocationsLogged)
+                    {
+                        LogChunkDiagnostic("chunkmesh",
+                            L"[CHUNKMESH] Registered chunk payload resource root group=%hs path=%hs\n",
+                            groupName.c_str(),
+                            resourceRoot.string().c_str());
+                    }
+                }
+
+                initialiseResourceGroup(resourceManager, groupName);
+            }
+            catch (...)
+            {
+                if (!g_ChunkPayloadResourceLocationsFailureLogged)
+                {
+                    LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Exception while registering chunk payload resource roots\n");
+                    g_ChunkPayloadResourceLocationsFailureLogged = true;
+                }
+                return false;
+            }
+
+            g_ChunkPayloadResourceLocationsReady = true;
+            g_ChunkPayloadResourceLocationsLogged = true;
+            g_ChunkPayloadResourceLocationsFailureLogged = false;
+            return true;
+        }
+
         static bool TryUpdateChunkMeshProxyTransform(
             void* sceneNode,
             void* entity,
@@ -3474,6 +3585,9 @@ namespace BZROpenShim
                 }
                 return false;
             }
+
+            if (!EnsureChunkPayloadResourceLocations())
+                return false;
 
             void* rootNode = TryGetChunkMeshProxyRootNode(sceneManager, getRootSceneNode);
             if (!rootNode)
@@ -8362,9 +8476,42 @@ namespace BZROpenShim
             return baseName;
         }
 
-        static std::filesystem::path GetChunkPayloadResourceDirectory()
+        static std::filesystem::path GetChunkPayloadStockResourceDirectory()
         {
             return GetMainModuleDirectory() / "BZ_ASSETS" / "common" / "models" / kChunkPayloadResourceRootName;
+        }
+
+        static void RefreshChunkPayloadResourceDirectories()
+        {
+            g_ChunkPayloadResourceDirectories.clear();
+
+            const std::filesystem::path gameDir = GetMainModuleDirectory();
+            for (const std::filesystem::path& modRoot : GetCampaignContentRootCandidates(gameDir))
+            {
+                const std::filesystem::path candidate = modRoot / kChunkPayloadModRelativeDirName;
+                std::error_code ec;
+                if (std::filesystem::exists(candidate, ec) && !ec &&
+                    std::filesystem::is_directory(candidate, ec) && !ec)
+                {
+                    AppendUniquePath(g_ChunkPayloadResourceDirectories, candidate);
+                }
+            }
+
+            const std::filesystem::path stockDir = GetChunkPayloadStockResourceDirectory();
+            std::error_code stockError;
+            if (std::filesystem::exists(stockDir, stockError) && !stockError &&
+                std::filesystem::is_directory(stockDir, stockError) && !stockError)
+            {
+                AppendUniquePath(g_ChunkPayloadResourceDirectories, stockDir);
+            }
+        }
+
+        static const std::vector<std::filesystem::path>& GetChunkPayloadResourceDirectories()
+        {
+            if (g_ChunkPayloadResourceDirectories.empty())
+                RefreshChunkPayloadResourceDirectories();
+
+            return g_ChunkPayloadResourceDirectories;
         }
 
         static std::string NormalizeChunkPayloadComponentName(const char* value)
@@ -8431,9 +8578,7 @@ namespace BZROpenShim
             if (meshBase.empty() || geomBase.empty())
                 return false;
 
-            std::string resourceName = kChunkPayloadResourceRootName;
-            resourceName += "/";
-            resourceName += meshBase;
+            std::string resourceName = meshBase;
             resourceName += "/";
             resourceName += geomBase;
             resourceName += ".mesh";
@@ -8446,10 +8591,17 @@ namespace BZROpenShim
             }
             else
             {
-                const std::filesystem::path payloadPath =
-                    GetChunkPayloadResourceDirectory() / meshBase / (geomBase + ".mesh");
-                std::error_code error;
-                exists = std::filesystem::exists(payloadPath, error) && !error;
+                const std::string payloadFileName = geomBase + ".mesh";
+                for (const std::filesystem::path& resourceRoot : GetChunkPayloadResourceDirectories())
+                {
+                    const std::filesystem::path payloadPath = resourceRoot / meshBase / payloadFileName;
+                    std::error_code error;
+                    if (std::filesystem::exists(payloadPath, error) && !error)
+                    {
+                        exists = true;
+                        break;
+                    }
+                }
                 g_ChunkPayloadMeshExistsCache.emplace(resourceName, exists);
             }
 
@@ -13181,8 +13333,13 @@ namespace BZROpenShim
         g_ChunkMeshProxyInitLogged = false;
         g_ChunkMeshProxyFailureLogged = false;
         g_ChunkMeshProxyWaitLogged = false;
+        g_ChunkPayloadResourceLocationsAttempted = false;
+        g_ChunkPayloadResourceLocationsReady = false;
+        g_ChunkPayloadResourceLocationsLogged = false;
+        g_ChunkPayloadResourceLocationsFailureLogged = false;
         g_ChunkProxyBillboardSet = nullptr;
         g_ChunkProxySlots.clear();
+        g_ChunkPayloadResourceDirectories.clear();
         g_ChunkPayloadMeshExistsCache.clear();
         float turretAimPitchMultiplier = g_TurretAimPitchMultiplierEnhanced;
         if (TryGetEnvFloat("OPENSHIM_TURRET_AIM_PITCH_MULTIPLIER", turretAimPitchMultiplier) ||
@@ -13206,10 +13363,12 @@ namespace BZROpenShim
             g_EnableChunkProxyDebug ? "enabled" : "disabled",
             g_ChunkProxyCapacity,
             g_ChunkProxyDebugSize);
-        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Proof mesh proxy: %hs targetGeo=%hs mesh=%hs\n",
+        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Proof mesh proxy: %hs targetGeo=%hs mesh=%hs stockRoot=%hs modRelative=%hs\n",
             g_EnableChunkMeshProxy ? "enabled" : "disabled",
             kChunkMeshProofTargetGeoName,
-            kChunkMeshProofMeshName);
+            kChunkMeshProofMeshName,
+            GetChunkPayloadStockResourceDirectory().string().c_str(),
+            kChunkPayloadModRelativeDirName);
         LogChunkDiagnostic("chunkeffect", L"[CHUNKEFFECT] Runtime manager trace: %hs vtableSlot=0x%08X orig=0x%08X\n",
             g_TraceChunkEffectRuntime ? "enabled" : "disabled",
             static_cast<uint32_t>(kChunkEffectVtableSimulateSlotAddr),
