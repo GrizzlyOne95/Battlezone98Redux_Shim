@@ -518,6 +518,8 @@ Relevant log families:
 - `[CHUNKSPAWN]` logs the native `CreateChunk` and `CreateChunklet` paths
 - `[CHUNKPROXY]` tracks the active runtime chunk objects after creation
 - `[CHUNKEFFECT]` samples the live `ChunkEffect` manager entries
+- `[CHUNKMESH]` reports payload mesh root registration, Ogre entity creation,
+  payload assignment, and payload-resolution misses
 
 Important field meanings:
 
@@ -536,6 +538,8 @@ Current Steam implementation details:
 - to reduce that inconsistency, OpenShim keeps a throttled intact-object cache
   while vehicles are still alive, then reuses that cached `obj76 -> mesh -> VDF`
   identity later in the death path
+- `CreateChunk` bindings are keyed by the live `_OBJ76*`, not by vehicle name,
+  so multiple identical units can fragment independently
 - the intact-object cache refreshes at most once per second and currently caps
   itself at `1024` game objects and `256` object-tree nodes per object per pass
 
@@ -548,6 +552,30 @@ Practical interpretation:
   the source VDF tree
 - when `srcVdf=<none>`, the fragment is still real, but the available runtime
   metadata was not unique enough for a safe name match in that run
+
+Current payload-mesh path:
+
+- when `OPENSHIM_DISABLE_CHUNK_MESH_PROXY` is not set, OpenShim tries to spawn
+  a mesh proxy for each live chunk whose source piece resolves to a payload
+  mesh
+- the intended lookup order is `meshBase/GeomName.mesh` first, then
+  `GeomName.mesh` as a flat fallback under the registered chunk payload roots
+- example: `avtank` source mesh plus `AGR11BDA` source fragment resolves to
+  `avtank/AGR11BDA.mesh` first, then `AGR11BDA.mesh`
+- the payload proxy is keyed by the mutated chunk `_OBJ76*` and copies that
+  native chunk object's world transform each frame, so the payload follows the
+  native fragment velocity, bounce, and spin instead of running a second
+  physics path
+
+Useful failure signatures:
+
+- `[CHUNKMESH] payload resolve miss ...`
+  payload mesh candidates were built successfully, but none of the candidate
+  files existed under the registered payload roots
+- `[CHUNKMESH] Entity creation failed ...`
+  the payload mesh resolved, but Ogre could not create the proxy entity
+- `[CHUNKPROXY] release ... reason=transform-read-failed`
+  the chunk proxy lost access to the native chunk transform before expiry
 
 ### Producer Build Menu Bridge Experiment
 
