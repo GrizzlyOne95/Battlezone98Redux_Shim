@@ -10,6 +10,7 @@
 //   2. Spawn the background patch thread
 
 #include "winmm_proxy.h"
+#include "bzr_hooks.h"
 #include "net_optimizer.h"
 #include "patcher.h"
 #include "shim_log.h"
@@ -72,6 +73,7 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
 
     case DLL_PROCESS_DETACH:
         BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "DLL_PROCESS_DETACH reserved=0x%p", reserved);
+        BZROpenShim::FlushChunkFragmentEventsForShutdown();
         BZROpenShim::ShutdownNetworkOptimizer();
         FreeRealWinmm();
         BZROpenShim::ShutdownShimLogger();
