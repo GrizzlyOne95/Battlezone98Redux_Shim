@@ -547,11 +547,63 @@ Practical interpretation:
 
 - `CreateChunklet` plus `chunk1` / `chunk2` still means generic stock debris
 - `CreateChunk` means Redux is repurposing a real child object from the craft
+- `caller` / `callerRva` on `[CHUNKSPAWN]` lines identify the native caller site
+  that reached `CreateChunk` or `CreateChunklet`, which is useful when the
+  upstream fragment-stage function has not been hooked directly yet
+- `callerTag`
+  a conservative OpenShim label for specific recurring caller RVAs observed in
+  live Steam traces
+- `path`
+  an OpenShim classification for a known create-route signature, such as the
+  observed Steam generic chunklet chain or observed Steam fragment-create chain
+- `[CHUNKSPAWN]   bt ...`
+  a short captured native backtrace for the same create event, useful when the
+  immediate caller alone is not enough to distinguish a fragment walker from a
+  generic debris helper
+- `[CHUNKSPAWN]   stack ...`
+  for `CreateChunk`, a raw snapshot of the native caller stack words at the
+  fragment-creation callsite
+- `[CHUNKSPAWN]   stackObj ...`
+  for `CreateChunk`, OpenShim's best-effort decode of object-looking stack
+  words, including any cached mesh or VDF identity already known for those
+  fragment pointers
 - when `srcVdf` resolves to names like `AGR11TUR`, `AGR11BDA`, or
   `Agr11nrr`, OpenShim has successfully matched that runtime fragment back to
   the source VDF tree
 - when `srcVdf=<none>`, the fragment is still real, but the available runtime
   metadata was not unique enough for a safe name match in that run
+
+Legacy validation as of March 26, 2026:
+
+- a live legacy `bzone.exe` Frida trace against `avtank` destruction confirmed
+  the expected craft-death chain:
+  `Craft::Explode -> FullFragmentObject / PartialFragmentObject -> CreateChunk`
+  with additional `CreateChunklet` calls around the same event
+- that result is recorded in
+  [`reverse_engineering/chunk_fragment_path_20260326.md`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\chunk_fragment_path_20260326.md)
+  and the helper script used for the live legacy trace is
+  [`reverse_engineering/legacy_bzone_chunk_trace.js`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\legacy_bzone_chunk_trace.js)
+- practical takeaway: if a Steam `avtank` death only logs `CreateChunklet`
+  and never logs `CreateChunk` from a fragment-style caller site, the blocker
+  is upstream path divergence, not uncertainty about how legacy fragmentation
+  works
+- newer Steam traces have also identified a recurring fragment-create parent
+  chain rooted at `0x00492565 <- 0x004924F5 <- 0x004AC5E0`, so OpenShim now
+  tags those frames on `[CHUNKSPAWN]` backtraces for faster comparison against
+  live Frida runs
+- an automated April 2, 2026 `misn06.bzn /edit` repro now confirms that the
+  clean shim logs preserve the same live craft root Frida sees for the
+  `svtank` fragment batch, including `selectedOdf=svtank`, `rootOdf=svtank`,
+  `rootGameObj=0x029E5320`, and a stable `ownerObj`
+- the same automated repro is driven by
+  [`run_misn06_auto_capture.ps1`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\run_misn06_auto_capture.ps1)
+  using a `150ms` load-phase `SPACE` press after the first Redux window appears
+- current builds now prefer runtime ODF identity over misleading inline owner
+  strings, which removed the old `RocketTankFriend` fallback from the validated
+  `svtank` fragment path
+- this means the chunk mesh bridge can now key off `root + rootGameObj +
+  ownerObj + piece VDF/geo`, which is the intended per-instance identity path
+  for missions with many identical craft alive at once
 
 Current payload-mesh path:
 
