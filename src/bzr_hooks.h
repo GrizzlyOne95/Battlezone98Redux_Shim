@@ -11,6 +11,7 @@ namespace BZROpenShim
     bool AreInputBindingUiHooksInstalled();
     void InitBzrHookStrings();
     void SetProducerBuildMenuOriginal(void* target);
+    void FlushChunkFragmentEventsForShutdown();
 
     // Vehicle list mod fix helpers (rel32 patch target + helper for jmp stub).
     void __fastcall VehicleListModFix2(void* thisPtr, void* edx, BzrString* name);
