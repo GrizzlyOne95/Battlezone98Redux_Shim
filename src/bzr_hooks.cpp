@@ -215,6 +215,17 @@ namespace BZROpenShim
                                                                      void* camera);
     using FnOgreEntityUpdateRenderQueue = void(__thiscall*)(void* thisPtr,
                                                             void* renderQueue);
+    using FnObjectQueryGlobalSlotGet = void* (__cdecl*)(int index);
+    using FnObjectQueryArraySet = void(__thiscall*)(void* thisPtr, int index, void* value);
+    using FnObjectQueryArrayGet = void* (__thiscall*)(void* thisPtr, int index);
+    using FnObjectQueryFindIndex = int(__thiscall*)(void* thisPtr, int startIndex, int endIndex);
+    using FnObjectQueryStampedValueSet = void(__thiscall*)(void* thisPtr, uint32_t value);
+    using FnObjectQueryBitClear = void(__thiscall*)(void* thisPtr, int bitIndex);
+    using FnObjectQueryBitTest = uint8_t(__thiscall*)(void* thisPtr, int bitIndex);
+    using FnObjectAccessorFloatGet = float(__thiscall*)(void* thisPtr);
+    using FnObjectAccessorDwordGet = uint32_t(__thiscall*)(void* thisPtr);
+    using FnObjectAccessorBitGet = uint32_t(__thiscall*)(void* thisPtr, int bitIndex);
+    using FnObjectAccessorVoidCall = void(__thiscall*)(void* thisPtr);
 
     static void** g_BzrPtr_945478 = nullptr;
     static void** g_BzrPtr_94548C = nullptr;
@@ -374,6 +385,21 @@ namespace BZROpenShim
                                                         uint32_t includeChildren,
                                                         uint32_t displayNodes,
                                                         uint32_t onlyShadowCasters);
+    void* __cdecl ObjectQueryGlobalSlotGetHook(int index);
+    void __fastcall ObjectQueryArraySetHook(void* thisPtr, void* /*edx*/, int index, void* value);
+    void* __fastcall ObjectQueryArrayGetHook(void* thisPtr, void* /*edx*/, int index);
+    int __fastcall ObjectQueryFindZeroIndexHook(void* thisPtr, void* /*edx*/, int startIndex, int endIndex);
+    int __fastcall ObjectQueryFindNonZeroIndexHook(void* thisPtr, void* /*edx*/, int startIndex, int endIndex);
+    void __fastcall ObjectQueryStampedValueSetHook(void* thisPtr, void* /*edx*/, uint32_t value);
+    void __fastcall ObjectQueryBitClearHook(void* thisPtr, void* /*edx*/, int bitIndex);
+    uint8_t __fastcall ObjectQueryBitTestSetHook(void* thisPtr, void* /*edx*/, int bitIndex);
+    uint8_t __fastcall ObjectQueryBitTestClearHook(void* thisPtr, void* /*edx*/, int bitIndex);
+    float __fastcall ObjectStateFloat1fcGetHook(void* thisPtr, void* /*edx*/);
+    uint32_t __fastcall ObjectStateFlags17cGetHook(void* thisPtr, void* /*edx*/);
+    uint32_t __fastcall ObjectStateFlags180GetHook(void* thisPtr, void* /*edx*/);
+    uint32_t __fastcall ObjectStateBit18cGetHook(void* thisPtr, void* /*edx*/, int bitIndex);
+    uint32_t __fastcall ObjectStateBit194GetHook(void* thisPtr, void* /*edx*/, int bitIndex);
+    void __fastcall ObjectStateCall21cHook(void* thisPtr, void* /*edx*/);
 
     namespace
     {
@@ -534,6 +560,41 @@ namespace BZROpenShim
         constexpr size_t kChunkEffectCreateChunkDetourLen = 9;
         constexpr size_t kChunkEffectCreateChunkletDetourLen = 9;
         constexpr size_t kChunkEffectCreateExpectedLen = 16;
+        constexpr uintptr_t kGogObjectQueryGlobalSlotGetAddr = 0x005E0BC0;
+        constexpr uintptr_t kGogObjectQueryArraySetAddr = 0x005E0F50;
+        constexpr uintptr_t kGogObjectQueryArrayGetAddr = 0x005E0F70;
+        constexpr uintptr_t kGogObjectQueryFindZeroIndexAddr = 0x005E0F90;
+        constexpr uintptr_t kGogObjectQueryFindNonZeroIndexAddr = 0x005E0FD0;
+        constexpr uintptr_t kGogObjectQueryStampedValueSetAddr = 0x005E10D0;
+        constexpr uintptr_t kGogObjectQueryBitClearAddr = 0x005E12E0;
+        constexpr uintptr_t kGogObjectQueryBitTestSetAddr = 0x005E1310;
+        constexpr uintptr_t kGogObjectQueryBitTestClearAddr = 0x005E1350;
+        constexpr size_t kObjectQueryGlobalSlotGetDetourLen = 6;
+        constexpr size_t kObjectQueryArraySetDetourLen = 7;
+        constexpr size_t kObjectQueryArrayGetDetourLen = 7;
+        constexpr size_t kObjectQueryFindZeroIndexDetourLen = 6;
+        constexpr size_t kObjectQueryFindNonZeroIndexDetourLen = 6;
+        constexpr size_t kObjectQueryStampedValueSetDetourLen = 7;
+        constexpr size_t kObjectQueryBitClearDetourLen = 7;
+        constexpr size_t kObjectQueryBitTestSetDetourLen = 6;
+        constexpr size_t kObjectQueryBitTestClearDetourLen = 6;
+        constexpr uintptr_t kObjectQueryGlobalSlotTableAddr = 0x00918370;
+        constexpr size_t kObjectQueryGlobalSlotCount = 16;
+        constexpr int kObjectQueryMaxReasonableIndex = 256;
+        constexpr uintptr_t kObjectQueryMinimumPlausiblePtr = 0x00010000u;
+        constexpr size_t kObjectQueryStampedValueOffset = 0x16C;
+        constexpr size_t kObjectQueryBitfieldOffset = 0x17C;
+        constexpr uintptr_t kGogObjectStateFloat1fcGetAddr = 0x00462570;
+        constexpr uintptr_t kGogObjectStateFlags17cGetAddr = 0x00462590;
+        constexpr uintptr_t kGogObjectStateFlags180GetAddr = 0x004625B0;
+        constexpr uintptr_t kGogObjectStateBit18cGetAddr = 0x004625D0;
+        constexpr uintptr_t kGogObjectStateBit194GetAddr = 0x004625F0;
+        constexpr uintptr_t kGogObjectStateCall21cAddr = 0x00462610;
+        constexpr size_t kObjectStateAccessorDetourLen = 7;
+        constexpr size_t kObjectStateFloat1fcOffset = 0x1FC;
+        constexpr size_t kObjectStateFlags180Offset = 0x180;
+        constexpr size_t kObjectStateBit18cOffset = 0x18C;
+        constexpr size_t kObjectStateBit194Offset = 0x194;
         constexpr uintptr_t kObservedChunkPathParentAAddr = 0x00480683;
         constexpr uintptr_t kObservedChunkPathParentBAddr = 0x00480867;
         constexpr size_t kObservedChunkPathParentADetourLen = 5;
@@ -1525,6 +1586,21 @@ namespace BZROpenShim
         static InlineDetour32 g_ChunkEffectCreateChunkletDetour = {};
         static InlineDetour32 g_ObservedChunkPathParentADetour = {};
         static InlineDetour32 g_ObservedChunkPathParentBDetour = {};
+        static InlineDetour32 g_ObjectQueryGlobalSlotGetDetour = {};
+        static InlineDetour32 g_ObjectQueryArraySetDetour = {};
+        static InlineDetour32 g_ObjectQueryArrayGetDetour = {};
+        static InlineDetour32 g_ObjectQueryFindZeroIndexDetour = {};
+        static InlineDetour32 g_ObjectQueryFindNonZeroIndexDetour = {};
+        static InlineDetour32 g_ObjectQueryStampedValueSetDetour = {};
+        static InlineDetour32 g_ObjectQueryBitClearDetour = {};
+        static InlineDetour32 g_ObjectQueryBitTestSetDetour = {};
+        static InlineDetour32 g_ObjectQueryBitTestClearDetour = {};
+        static InlineDetour32 g_ObjectStateFloat1fcGetDetour = {};
+        static InlineDetour32 g_ObjectStateFlags17cGetDetour = {};
+        static InlineDetour32 g_ObjectStateFlags180GetDetour = {};
+        static InlineDetour32 g_ObjectStateBit18cGetDetour = {};
+        static InlineDetour32 g_ObjectStateBit194GetDetour = {};
+        static InlineDetour32 g_ObjectStateCall21cDetour = {};
         static InlineDetour32 g_OgreSceneManagerFindVisibleObjectsDetour = {};
         static InlineDetour32 g_OgreSceneManagerRenderSingleObjectDetour = {};
         static InlineDetour32 g_OgreSceneNodeFindVisibleObjectsDetour = {};
@@ -1536,6 +1612,10 @@ namespace BZROpenShim
         static InlineDetour32 g_OgreEntityUpdateRenderQueueDetour = {};
         static bool g_ChunkEffectCreateHooksInstalled = false;
         static bool g_ChunkEffectCreateHooksLogged = false;
+        static bool g_ObjectQuerySafetyEnabled = true;
+        static bool g_ObjectQuerySafetyHooksInstalled = false;
+        static bool g_ObjectQuerySafetyHooksLogged = false;
+        static bool g_ObjectQuerySafetyHooksFailureLogged = false;
         static bool g_ObservedChunkPathProbesInstalled = false;
         static bool g_ObservedChunkPathProbesLogged = false;
         static bool g_ObservedChunkPathProbesMismatchLogged = false;
@@ -1547,6 +1627,7 @@ namespace BZROpenShim
         static bool g_ChunkEffectCreateHooksWaitLogged = false;
         static bool g_ChunkEffectCreateHooksMismatchLogged = false;
         static ULONGLONG g_ChunkEffectCreateHooksReadyTick = 0;
+        static volatile long g_ObjectQuerySafetyGuardLogBudget = 24;
         static void* g_ObservedChunkPathParentATrampoline = nullptr;
         static void* g_ObservedChunkPathParentBTrampoline = nullptr;
         static FnOgreSceneManagerFindVisibleObjects g_OgreFn_SceneManagerFindVisibleObjects = nullptr;
@@ -12873,6 +12954,81 @@ namespace BZROpenShim
             }
         }
 
+        static bool IsPlausibleObjectQueryBase(const void* ptr)
+        {
+            return reinterpret_cast<uintptr_t>(ptr) >= kObjectQueryMinimumPlausiblePtr;
+        }
+
+        static bool IsReasonableObjectQueryIndex(int index)
+        {
+            return index >= 0 && index <= kObjectQueryMaxReasonableIndex;
+        }
+
+        static void LogObjectQuerySafetyEvent(
+            const char* op,
+            const char* reason,
+            const void* thisPtr,
+            int firstIndex,
+            int secondIndex,
+            uintptr_t value)
+        {
+            if (InterlockedDecrement(&g_ObjectQuerySafetyGuardLogBudget) < 0)
+                return;
+
+            const uint32_t thisAddr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr));
+            const uint32_t valueAddr = static_cast<uint32_t>(value);
+            Log(L"[OBJSAFE] op=%hs reason=%hs this=0x%08X a=%d b=%d value=0x%08X\n",
+                op ? op : "<none>",
+                reason ? reason : "<none>",
+                thisAddr,
+                firstIndex,
+                secondIndex,
+                valueAddr);
+            LogShimA(
+                LogLevel::Warn,
+                "objsafe",
+                "op=%s reason=%s this=0x%08X a=%d b=%d value=0x%08X",
+                op ? op : "<none>",
+                reason ? reason : "<none>",
+                thisAddr,
+                firstIndex,
+                secondIndex,
+                valueAddr);
+        }
+
+        static bool NormalizeObjectQueryFindRange(
+            const char* op,
+            const void* thisPtr,
+            int& startIndex,
+            int& endIndex)
+        {
+            if (startIndex < 0 || endIndex < startIndex || startIndex > kObjectQueryMaxReasonableIndex)
+            {
+                LogObjectQuerySafetyEvent(
+                    op,
+                    "invalid-range",
+                    thisPtr,
+                    startIndex,
+                    endIndex,
+                    0);
+                return false;
+            }
+
+            if (endIndex > kObjectQueryMaxReasonableIndex)
+            {
+                LogObjectQuerySafetyEvent(
+                    op,
+                    "clamp-end",
+                    thisPtr,
+                    startIndex,
+                    endIndex,
+                    kObjectQueryMaxReasonableIndex);
+                endIndex = kObjectQueryMaxReasonableIndex;
+            }
+
+            return true;
+        }
+
         static bool TryFormatObservedChunkPathCandidate(
             const char* label,
             uint32_t value,
@@ -13312,6 +13468,240 @@ namespace BZROpenShim
                     g_IsSteamExe ? "Steam" : "GOG",
                     static_cast<uint32_t>(kGogPersonSimulateEntryAddr),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_PersonSimulateDetour.trampoline)));
+            }
+        }
+
+        static void InstallObjectQuerySafetyHooksIfPossible()
+        {
+            if (!g_ObjectQuerySafetyEnabled || g_ObjectQuerySafetyHooksInstalled)
+                return;
+
+            static const uint8_t kExpectedGlobalSlotGetBytes[kObjectQueryGlobalSlotGetDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08
+            };
+            static const uint8_t kExpectedArraySetBytes[kObjectQueryArraySetDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC
+            };
+            static const uint8_t kExpectedArrayGetBytes[kObjectQueryArrayGetDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC
+            };
+            static const uint8_t kExpectedFindIndexBytes[kObjectQueryFindZeroIndexDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08
+            };
+            static const uint8_t kExpectedStampedValueBytes[kObjectQueryStampedValueSetDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC
+            };
+            static const uint8_t kExpectedBitClearBytes[kObjectQueryBitClearDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC
+            };
+            static const uint8_t kExpectedBitTestBytes[kObjectQueryBitTestSetDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08
+            };
+            static const uint8_t kExpectedObjectStateAccessorBytes[kObjectStateAccessorDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC
+            };
+
+            auto tryInstallHook =
+                [&](const wchar_t* label,
+                    InlineDetour32& detour,
+                    uintptr_t target,
+                    void* hook,
+                    size_t patchLen,
+                    const uint8_t* expectedBytes)
+            {
+                if (detour.trampoline)
+                    return;
+
+                if (InstallInlineDetour32(
+                        detour,
+                        target,
+                        hook,
+                        patchLen,
+                        expectedBytes,
+                        patchLen))
+                {
+                    return;
+                }
+
+                if (!g_ObjectQuerySafetyHooksFailureLogged)
+                {
+                    const InlineDetourFailureInfo failure = g_LastInlineDetourFailure;
+                    wchar_t currentBytes[128] = {};
+                    wchar_t expectedBytesText[128] = {};
+                    FormatInlineDetourBytes(
+                        failure.current.data(),
+                        failure.currentLen,
+                        currentBytes,
+                        _countof(currentBytes));
+                    FormatInlineDetourBytes(
+                        failure.expected.data(),
+                        failure.expectedCaptureLen,
+                        expectedBytesText,
+                        _countof(expectedBytesText));
+                    Log(L"[OBJSAFE] detour install failed label=%ls reason=%ls target=0x%08X hook=0x%08X patchLen=%u expectedLen=%u lastError=%lu current=%ls expected=%ls\n",
+                        label ? label : L"<none>",
+                        DescribeInlineDetourFailureReason(failure.reason),
+                        static_cast<uint32_t>(target),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(hook)),
+                        static_cast<unsigned>(failure.patchLen),
+                        static_cast<unsigned>(failure.expectedLen),
+                        static_cast<unsigned long>(failure.lastError),
+                        currentBytes[0] ? currentBytes : L"<none>",
+                        expectedBytesText[0] ? expectedBytesText : L"<none>");
+                    g_ObjectQuerySafetyHooksFailureLogged = true;
+                }
+            };
+
+            tryInstallHook(
+                L"global-slot-get",
+                g_ObjectQueryGlobalSlotGetDetour,
+                kGogObjectQueryGlobalSlotGetAddr,
+                reinterpret_cast<void*>(ObjectQueryGlobalSlotGetHook),
+                kObjectQueryGlobalSlotGetDetourLen,
+                kExpectedGlobalSlotGetBytes);
+            tryInstallHook(
+                L"array-set",
+                g_ObjectQueryArraySetDetour,
+                kGogObjectQueryArraySetAddr,
+                reinterpret_cast<void*>(ObjectQueryArraySetHook),
+                kObjectQueryArraySetDetourLen,
+                kExpectedArraySetBytes);
+            tryInstallHook(
+                L"array-get",
+                g_ObjectQueryArrayGetDetour,
+                kGogObjectQueryArrayGetAddr,
+                reinterpret_cast<void*>(ObjectQueryArrayGetHook),
+                kObjectQueryArrayGetDetourLen,
+                kExpectedArrayGetBytes);
+            tryInstallHook(
+                L"find-zero-index",
+                g_ObjectQueryFindZeroIndexDetour,
+                kGogObjectQueryFindZeroIndexAddr,
+                reinterpret_cast<void*>(ObjectQueryFindZeroIndexHook),
+                kObjectQueryFindZeroIndexDetourLen,
+                kExpectedFindIndexBytes);
+            tryInstallHook(
+                L"find-nonzero-index",
+                g_ObjectQueryFindNonZeroIndexDetour,
+                kGogObjectQueryFindNonZeroIndexAddr,
+                reinterpret_cast<void*>(ObjectQueryFindNonZeroIndexHook),
+                kObjectQueryFindNonZeroIndexDetourLen,
+                kExpectedFindIndexBytes);
+            tryInstallHook(
+                L"stamped-value-set",
+                g_ObjectQueryStampedValueSetDetour,
+                kGogObjectQueryStampedValueSetAddr,
+                reinterpret_cast<void*>(ObjectQueryStampedValueSetHook),
+                kObjectQueryStampedValueSetDetourLen,
+                kExpectedStampedValueBytes);
+            tryInstallHook(
+                L"bit-clear",
+                g_ObjectQueryBitClearDetour,
+                kGogObjectQueryBitClearAddr,
+                reinterpret_cast<void*>(ObjectQueryBitClearHook),
+                kObjectQueryBitClearDetourLen,
+                kExpectedBitClearBytes);
+            tryInstallHook(
+                L"bit-test-set",
+                g_ObjectQueryBitTestSetDetour,
+                kGogObjectQueryBitTestSetAddr,
+                reinterpret_cast<void*>(ObjectQueryBitTestSetHook),
+                kObjectQueryBitTestSetDetourLen,
+                kExpectedBitTestBytes);
+            tryInstallHook(
+                L"bit-test-clear",
+                g_ObjectQueryBitTestClearDetour,
+                kGogObjectQueryBitTestClearAddr,
+                reinterpret_cast<void*>(ObjectQueryBitTestClearHook),
+                kObjectQueryBitTestClearDetourLen,
+                kExpectedBitTestBytes);
+            tryInstallHook(
+                L"state-float-1fc",
+                g_ObjectStateFloat1fcGetDetour,
+                kGogObjectStateFloat1fcGetAddr,
+                reinterpret_cast<void*>(ObjectStateFloat1fcGetHook),
+                kObjectStateAccessorDetourLen,
+                kExpectedObjectStateAccessorBytes);
+            tryInstallHook(
+                L"state-flags-17c",
+                g_ObjectStateFlags17cGetDetour,
+                kGogObjectStateFlags17cGetAddr,
+                reinterpret_cast<void*>(ObjectStateFlags17cGetHook),
+                kObjectStateAccessorDetourLen,
+                kExpectedObjectStateAccessorBytes);
+            tryInstallHook(
+                L"state-flags-180",
+                g_ObjectStateFlags180GetDetour,
+                kGogObjectStateFlags180GetAddr,
+                reinterpret_cast<void*>(ObjectStateFlags180GetHook),
+                kObjectStateAccessorDetourLen,
+                kExpectedObjectStateAccessorBytes);
+            tryInstallHook(
+                L"state-bit-18c",
+                g_ObjectStateBit18cGetDetour,
+                kGogObjectStateBit18cGetAddr,
+                reinterpret_cast<void*>(ObjectStateBit18cGetHook),
+                kObjectStateAccessorDetourLen,
+                kExpectedObjectStateAccessorBytes);
+            tryInstallHook(
+                L"state-bit-194",
+                g_ObjectStateBit194GetDetour,
+                kGogObjectStateBit194GetAddr,
+                reinterpret_cast<void*>(ObjectStateBit194GetHook),
+                kObjectStateAccessorDetourLen,
+                kExpectedObjectStateAccessorBytes);
+            tryInstallHook(
+                L"state-call-21c",
+                g_ObjectStateCall21cDetour,
+                kGogObjectStateCall21cAddr,
+                reinterpret_cast<void*>(ObjectStateCall21cHook),
+                kObjectStateAccessorDetourLen,
+                kExpectedObjectStateAccessorBytes);
+
+            g_ObjectQuerySafetyHooksInstalled =
+                g_ObjectQueryGlobalSlotGetDetour.trampoline &&
+                g_ObjectQueryArraySetDetour.trampoline &&
+                g_ObjectQueryArrayGetDetour.trampoline &&
+                g_ObjectQueryFindZeroIndexDetour.trampoline &&
+                g_ObjectQueryFindNonZeroIndexDetour.trampoline &&
+                g_ObjectQueryStampedValueSetDetour.trampoline &&
+                g_ObjectQueryBitClearDetour.trampoline &&
+                g_ObjectQueryBitTestSetDetour.trampoline &&
+                g_ObjectQueryBitTestClearDetour.trampoline &&
+                g_ObjectStateFloat1fcGetDetour.trampoline &&
+                g_ObjectStateFlags17cGetDetour.trampoline &&
+                g_ObjectStateFlags180GetDetour.trampoline &&
+                g_ObjectStateBit18cGetDetour.trampoline &&
+                g_ObjectStateBit194GetDetour.trampoline &&
+                g_ObjectStateCall21cDetour.trampoline;
+
+            if (g_ObjectQuerySafetyHooksInstalled && !g_ObjectQuerySafetyHooksLogged)
+            {
+                Log(L"[OBJSAFE] Installed helper guards global=0x%08X arraySet=0x%08X arrayGet=0x%08X findZero=0x%08X findNonZero=0x%08X stamped=0x%08X bitClear=0x%08X bitSet=0x%08X bitClearTest=0x%08X state17c=0x%08X state180=0x%08X state18c=0x%08X state194=0x%08X state21c=0x%08X\n",
+                    static_cast<uint32_t>(kGogObjectQueryGlobalSlotGetAddr),
+                    static_cast<uint32_t>(kGogObjectQueryArraySetAddr),
+                    static_cast<uint32_t>(kGogObjectQueryArrayGetAddr),
+                    static_cast<uint32_t>(kGogObjectQueryFindZeroIndexAddr),
+                    static_cast<uint32_t>(kGogObjectQueryFindNonZeroIndexAddr),
+                    static_cast<uint32_t>(kGogObjectQueryStampedValueSetAddr),
+                    static_cast<uint32_t>(kGogObjectQueryBitClearAddr),
+                    static_cast<uint32_t>(kGogObjectQueryBitTestSetAddr),
+                    static_cast<uint32_t>(kGogObjectQueryBitTestClearAddr),
+                    static_cast<uint32_t>(kGogObjectStateFlags17cGetAddr),
+                    static_cast<uint32_t>(kGogObjectStateFlags180GetAddr),
+                    static_cast<uint32_t>(kGogObjectStateBit18cGetAddr),
+                    static_cast<uint32_t>(kGogObjectStateBit194GetAddr),
+                    static_cast<uint32_t>(kGogObjectStateCall21cAddr));
+                g_ObjectQuerySafetyHooksLogged = true;
+                g_ObjectQuerySafetyHooksFailureLogged = false;
             }
         }
 
@@ -20094,6 +20484,655 @@ namespace BZROpenShim
         }
     }
 
+    void* __cdecl ObjectQueryGlobalSlotGetHook(int index)
+    {
+        if (!g_ObjectQuerySafetyEnabled)
+        {
+            auto original = reinterpret_cast<FnObjectQueryGlobalSlotGet>(
+                g_ObjectQueryGlobalSlotGetDetour.trampoline);
+            return original ? original(index) : nullptr;
+        }
+
+        if (index < 0 || index >= static_cast<int>(kObjectQueryGlobalSlotCount))
+        {
+            LogObjectQuerySafetyEvent(
+                "global-slot-get",
+                "invalid-index",
+                nullptr,
+                index,
+                static_cast<int>(kObjectQueryGlobalSlotCount),
+                0);
+            return nullptr;
+        }
+
+        __try
+        {
+            return reinterpret_cast<void* const*>(kObjectQueryGlobalSlotTableAddr)[index];
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            LogObjectQuerySafetyEvent(
+                "global-slot-get",
+                "access-fault",
+                reinterpret_cast<const void*>(kObjectQueryGlobalSlotTableAddr),
+                index,
+                static_cast<int>(kObjectQueryGlobalSlotCount),
+                0);
+            return nullptr;
+        }
+    }
+
+    void __fastcall ObjectQueryArraySetHook(void* thisPtr, void* /*edx*/, int index, void* value)
+    {
+        if (!g_ObjectQuerySafetyEnabled)
+        {
+            auto original = reinterpret_cast<FnObjectQueryArraySet>(
+                g_ObjectQueryArraySetDetour.trampoline);
+            if (original)
+                original(thisPtr, index, value);
+            return;
+        }
+
+        if (!IsPlausibleObjectQueryBase(thisPtr))
+        {
+            LogObjectQuerySafetyEvent(
+                "array-set",
+                "bad-base",
+                thisPtr,
+                index,
+                0,
+                reinterpret_cast<uintptr_t>(value));
+            return;
+        }
+
+        if (!IsReasonableObjectQueryIndex(index))
+        {
+            LogObjectQuerySafetyEvent(
+                "array-set",
+                "invalid-index",
+                thisPtr,
+                index,
+                0,
+                reinterpret_cast<uintptr_t>(value));
+            return;
+        }
+
+        __try
+        {
+            reinterpret_cast<void**>(thisPtr)[index] = value;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            LogObjectQuerySafetyEvent(
+                "array-set",
+                "access-fault",
+                thisPtr,
+                index,
+                0,
+                reinterpret_cast<uintptr_t>(value));
+        }
+    }
+
+    void* __fastcall ObjectQueryArrayGetHook(void* thisPtr, void* /*edx*/, int index)
+    {
+        if (!g_ObjectQuerySafetyEnabled)
+        {
+            auto original = reinterpret_cast<FnObjectQueryArrayGet>(
+                g_ObjectQueryArrayGetDetour.trampoline);
+            return original ? original(thisPtr, index) : nullptr;
+        }
+
+        if (!IsPlausibleObjectQueryBase(thisPtr))
+        {
+            LogObjectQuerySafetyEvent(
+                "array-get",
+                "bad-base",
+                thisPtr,
+                index,
+                0,
+                0);
+            return nullptr;
+        }
+
+        if (!IsReasonableObjectQueryIndex(index))
+        {
+            LogObjectQuerySafetyEvent(
+                "array-get",
+                "invalid-index",
+                thisPtr,
+                index,
+                0,
+                0);
+            return nullptr;
+        }
+
+        __try
+        {
+            return reinterpret_cast<void* const*>(thisPtr)[index];
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            LogObjectQuerySafetyEvent(
+                "array-get",
+                "access-fault",
+                thisPtr,
+                index,
+                0,
+                0);
+            return nullptr;
+        }
+    }
+
+    int __fastcall ObjectQueryFindZeroIndexHook(void* thisPtr, void* /*edx*/, int startIndex, int endIndex)
+    {
+        if (!g_ObjectQuerySafetyEnabled)
+        {
+            auto original = reinterpret_cast<FnObjectQueryFindIndex>(
+                g_ObjectQueryFindZeroIndexDetour.trampoline);
+            return original ? original(thisPtr, startIndex, endIndex) : -1;
+        }
+
+        if (!IsPlausibleObjectQueryBase(thisPtr))
+        {
+            LogObjectQuerySafetyEvent(
+                "find-zero-index",
+                "bad-base",
+                thisPtr,
+                startIndex,
+                endIndex,
+                0);
+            return -1;
+        }
+
+        if (!NormalizeObjectQueryFindRange("find-zero-index", thisPtr, startIndex, endIndex))
+            return -1;
+
+        __try
+        {
+            auto* slots = reinterpret_cast<void* const*>(thisPtr);
+            for (int index = startIndex; index <= endIndex; ++index)
+            {
+                if (slots[index] == nullptr)
+                    return index;
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            LogObjectQuerySafetyEvent(
+                "find-zero-index",
+                "access-fault",
+                thisPtr,
+                startIndex,
+                endIndex,
+                0);
+        }
+
+        return -1;
+    }
+
+    int __fastcall ObjectQueryFindNonZeroIndexHook(void* thisPtr, void* /*edx*/, int startIndex, int endIndex)
+    {
+        if (!g_ObjectQuerySafetyEnabled)
+        {
+            auto original = reinterpret_cast<FnObjectQueryFindIndex>(
+                g_ObjectQueryFindNonZeroIndexDetour.trampoline);
+            return original ? original(thisPtr, startIndex, endIndex) : -1;
+        }
+
+        if (!IsPlausibleObjectQueryBase(thisPtr))
+        {
+            LogObjectQuerySafetyEvent(
+                "find-nonzero-index",
+                "bad-base",
+                thisPtr,
+                startIndex,
+                endIndex,
+                0);
+            return -1;
+        }
+
+        if (!NormalizeObjectQueryFindRange("find-nonzero-index", thisPtr, startIndex, endIndex))
+            return -1;
+
+        __try
+        {
+            auto* slots = reinterpret_cast<void* const*>(thisPtr);
+            for (int index = startIndex; index <= endIndex; ++index)
+            {
+                if (slots[index] != nullptr)
+                    return index;
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            LogObjectQuerySafetyEvent(
+                "find-nonzero-index",
+                "access-fault",
+                thisPtr,
+                startIndex,
+                endIndex,
+                0);
+        }
+
+        return -1;
+    }
+
+    void __fastcall ObjectQueryStampedValueSetHook(void* thisPtr, void* /*edx*/, uint32_t value)
+    {
+        if (!g_ObjectQuerySafetyEnabled)
+        {
+            auto original = reinterpret_cast<FnObjectQueryStampedValueSet>(
+                g_ObjectQueryStampedValueSetDetour.trampoline);
+            if (original)
+                original(thisPtr, value);
+            return;
+        }
+
+        if (!IsPlausibleObjectQueryBase(thisPtr))
+        {
+            LogObjectQuerySafetyEvent(
+                "stamped-value-set",
+                "bad-base",
+                thisPtr,
+                0,
+                0,
+                value);
+            return;
+        }
+
+        __try
+        {
+            auto* const bytes = reinterpret_cast<uint8_t*>(thisPtr);
+            *reinterpret_cast<uint32_t*>(bytes + kObjectQueryStampedValueOffset) =
+                value ^ 0x33333333u;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            LogObjectQuerySafetyEvent(
+                "stamped-value-set",
+                "access-fault",
+                thisPtr,
+                0,
+                0,
+                value);
+        }
+    }
+
+    void __fastcall ObjectQueryBitClearHook(void* thisPtr, void* /*edx*/, int bitIndex)
+    {
+        if (!g_ObjectQuerySafetyEnabled)
+        {
+            auto original = reinterpret_cast<FnObjectQueryBitClear>(
+                g_ObjectQueryBitClearDetour.trampoline);
+            if (original)
+                original(thisPtr, bitIndex);
+            return;
+        }
+
+        if (!IsPlausibleObjectQueryBase(thisPtr))
+        {
+            LogObjectQuerySafetyEvent(
+                "bit-clear",
+                "bad-base",
+                thisPtr,
+                bitIndex,
+                0,
+                0);
+            return;
+        }
+
+        __try
+        {
+            auto* const bytes = reinterpret_cast<uint8_t*>(thisPtr);
+            auto* const flags = reinterpret_cast<uint32_t*>(bytes + kObjectQueryBitfieldOffset);
+            const uint32_t mask = 1u << (static_cast<uint32_t>(bitIndex) & 0x1Fu);
+            *flags &= ~mask;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            LogObjectQuerySafetyEvent(
+                "bit-clear",
+                "access-fault",
+                thisPtr,
+                bitIndex,
+                0,
+                0);
+        }
+    }
+
+    uint8_t __fastcall ObjectQueryBitTestSetHook(void* thisPtr, void* /*edx*/, int bitIndex)
+    {
+        if (!g_ObjectQuerySafetyEnabled)
+        {
+            auto original = reinterpret_cast<FnObjectQueryBitTest>(
+                g_ObjectQueryBitTestSetDetour.trampoline);
+            return original ? original(thisPtr, bitIndex) : 0;
+        }
+
+        if (bitIndex < 1)
+            return 0;
+
+        if (!IsPlausibleObjectQueryBase(thisPtr))
+        {
+            LogObjectQuerySafetyEvent(
+                "bit-test-set",
+                "bad-base",
+                thisPtr,
+                bitIndex,
+                0,
+                0);
+            return 0;
+        }
+
+        __try
+        {
+            auto* const bytes = reinterpret_cast<uint8_t*>(thisPtr);
+            const uint32_t flags =
+                *reinterpret_cast<const uint32_t*>(bytes + kObjectQueryBitfieldOffset);
+            const uint32_t mask = 1u << (static_cast<uint32_t>(bitIndex) & 0x1Fu);
+            return (flags & mask) != 0 ? 1 : 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            LogObjectQuerySafetyEvent(
+                "bit-test-set",
+                "access-fault",
+                thisPtr,
+                bitIndex,
+                0,
+                0);
+            return 0;
+        }
+    }
+
+    uint8_t __fastcall ObjectQueryBitTestClearHook(void* thisPtr, void* /*edx*/, int bitIndex)
+    {
+        if (!g_ObjectQuerySafetyEnabled)
+        {
+            auto original = reinterpret_cast<FnObjectQueryBitTest>(
+                g_ObjectQueryBitTestClearDetour.trampoline);
+            return original ? original(thisPtr, bitIndex) : 0;
+        }
+
+        if (bitIndex < 1)
+            return 0;
+
+        if (!IsPlausibleObjectQueryBase(thisPtr))
+        {
+            LogObjectQuerySafetyEvent(
+                "bit-test-clear",
+                "bad-base",
+                thisPtr,
+                bitIndex,
+                0,
+                0);
+            return 0;
+        }
+
+        __try
+        {
+            auto* const bytes = reinterpret_cast<uint8_t*>(thisPtr);
+            const uint32_t flags =
+                *reinterpret_cast<const uint32_t*>(bytes + kObjectQueryBitfieldOffset);
+            const uint32_t mask = 1u << (static_cast<uint32_t>(bitIndex) & 0x1Fu);
+            return (flags & mask) != 0 ? 0 : 1;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            LogObjectQuerySafetyEvent(
+                "bit-test-clear",
+                "access-fault",
+                thisPtr,
+                bitIndex,
+                0,
+                0);
+            return 0;
+        }
+    }
+
+    float __fastcall ObjectStateFloat1fcGetHook(void* thisPtr, void* /*edx*/)
+    {
+        if (!g_ObjectQuerySafetyEnabled)
+        {
+            auto original = reinterpret_cast<FnObjectAccessorFloatGet>(
+                g_ObjectStateFloat1fcGetDetour.trampoline);
+            return original ? original(thisPtr) : 0.0f;
+        }
+
+        if (!IsPlausibleObjectQueryBase(thisPtr))
+        {
+            LogObjectQuerySafetyEvent(
+                "state-float-1fc",
+                "bad-base",
+                thisPtr,
+                0,
+                0,
+                kObjectStateFloat1fcOffset);
+            return 0.0f;
+        }
+
+        __try
+        {
+            auto* const bytes = reinterpret_cast<uint8_t*>(thisPtr);
+            return *reinterpret_cast<const float*>(bytes + kObjectStateFloat1fcOffset);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            LogObjectQuerySafetyEvent(
+                "state-float-1fc",
+                "access-fault",
+                thisPtr,
+                0,
+                0,
+                kObjectStateFloat1fcOffset);
+            return 0.0f;
+        }
+    }
+
+    uint32_t __fastcall ObjectStateFlags17cGetHook(void* thisPtr, void* /*edx*/)
+    {
+        if (!g_ObjectQuerySafetyEnabled)
+        {
+            auto original = reinterpret_cast<FnObjectAccessorDwordGet>(
+                g_ObjectStateFlags17cGetDetour.trampoline);
+            return original ? original(thisPtr) : 0u;
+        }
+
+        if (!IsPlausibleObjectQueryBase(thisPtr))
+        {
+            LogObjectQuerySafetyEvent(
+                "state-flags-17c",
+                "bad-base",
+                thisPtr,
+                0,
+                0,
+                kObjectQueryBitfieldOffset);
+            return 0u;
+        }
+
+        __try
+        {
+            auto* const bytes = reinterpret_cast<uint8_t*>(thisPtr);
+            return *reinterpret_cast<const uint32_t*>(bytes + kObjectQueryBitfieldOffset);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            LogObjectQuerySafetyEvent(
+                "state-flags-17c",
+                "access-fault",
+                thisPtr,
+                0,
+                0,
+                kObjectQueryBitfieldOffset);
+            return 0u;
+        }
+    }
+
+    uint32_t __fastcall ObjectStateFlags180GetHook(void* thisPtr, void* /*edx*/)
+    {
+        if (!g_ObjectQuerySafetyEnabled)
+        {
+            auto original = reinterpret_cast<FnObjectAccessorDwordGet>(
+                g_ObjectStateFlags180GetDetour.trampoline);
+            return original ? original(thisPtr) : 0u;
+        }
+
+        if (!IsPlausibleObjectQueryBase(thisPtr))
+        {
+            LogObjectQuerySafetyEvent(
+                "state-flags-180",
+                "bad-base",
+                thisPtr,
+                0,
+                0,
+                kObjectStateFlags180Offset);
+            return 0u;
+        }
+
+        __try
+        {
+            auto* const bytes = reinterpret_cast<uint8_t*>(thisPtr);
+            return *reinterpret_cast<const uint32_t*>(bytes + kObjectStateFlags180Offset);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            LogObjectQuerySafetyEvent(
+                "state-flags-180",
+                "access-fault",
+                thisPtr,
+                0,
+                0,
+                kObjectStateFlags180Offset);
+            return 0u;
+        }
+    }
+
+    uint32_t __fastcall ObjectStateBit18cGetHook(void* thisPtr, void* /*edx*/, int bitIndex)
+    {
+        if (!g_ObjectQuerySafetyEnabled)
+        {
+            auto original = reinterpret_cast<FnObjectAccessorBitGet>(
+                g_ObjectStateBit18cGetDetour.trampoline);
+            return original ? original(thisPtr, bitIndex) : 0u;
+        }
+
+        if (!IsPlausibleObjectQueryBase(thisPtr))
+        {
+            LogObjectQuerySafetyEvent(
+                "state-bit-18c",
+                "bad-base",
+                thisPtr,
+                bitIndex,
+                0,
+                kObjectStateBit18cOffset);
+            return 0u;
+        }
+
+        __try
+        {
+            auto* const bytes = reinterpret_cast<uint8_t*>(thisPtr);
+            const uint32_t flags =
+                *reinterpret_cast<const uint32_t*>(bytes + kObjectStateBit18cOffset);
+            return (flags >> (static_cast<uint32_t>(bitIndex) & 0x1Fu)) & 1u;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            LogObjectQuerySafetyEvent(
+                "state-bit-18c",
+                "access-fault",
+                thisPtr,
+                bitIndex,
+                0,
+                kObjectStateBit18cOffset);
+            return 0u;
+        }
+    }
+
+    uint32_t __fastcall ObjectStateBit194GetHook(void* thisPtr, void* /*edx*/, int bitIndex)
+    {
+        if (!g_ObjectQuerySafetyEnabled)
+        {
+            auto original = reinterpret_cast<FnObjectAccessorBitGet>(
+                g_ObjectStateBit194GetDetour.trampoline);
+            return original ? original(thisPtr, bitIndex) : 0u;
+        }
+
+        if (!IsPlausibleObjectQueryBase(thisPtr))
+        {
+            LogObjectQuerySafetyEvent(
+                "state-bit-194",
+                "bad-base",
+                thisPtr,
+                bitIndex,
+                0,
+                kObjectStateBit194Offset);
+            return 0u;
+        }
+
+        __try
+        {
+            auto* const bytes = reinterpret_cast<uint8_t*>(thisPtr);
+            const uint32_t flags =
+                *reinterpret_cast<const uint32_t*>(bytes + kObjectStateBit194Offset);
+            return (flags >> (static_cast<uint32_t>(bitIndex) & 0x1Fu)) & 1u;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            LogObjectQuerySafetyEvent(
+                "state-bit-194",
+                "access-fault",
+                thisPtr,
+                bitIndex,
+                0,
+                kObjectStateBit194Offset);
+            return 0u;
+        }
+    }
+
+    void __fastcall ObjectStateCall21cHook(void* thisPtr, void* /*edx*/)
+    {
+        if (!g_ObjectQuerySafetyEnabled)
+        {
+            auto original = reinterpret_cast<FnObjectAccessorVoidCall>(
+                g_ObjectStateCall21cDetour.trampoline);
+            if (original)
+                original(thisPtr);
+            return;
+        }
+
+        if (!IsPlausibleObjectQueryBase(thisPtr))
+        {
+            LogObjectQuerySafetyEvent(
+                "state-call-21c",
+                "bad-base",
+                thisPtr,
+                0,
+                0,
+                0x21Cu);
+            return;
+        }
+
+        auto original = reinterpret_cast<FnObjectAccessorVoidCall>(
+            g_ObjectStateCall21cDetour.trampoline);
+        if (!original)
+            return;
+
+        __try
+        {
+            original(thisPtr);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            LogObjectQuerySafetyEvent(
+                "state-call-21c",
+                "access-fault",
+                thisPtr,
+                0,
+                0,
+                0x21Cu);
+        }
+    }
+
     void* __fastcall OptionsInputPopulateUiHook(void* thisPtr, void* /*edx*/)
     {
         void* screen = thisPtr;
@@ -20216,6 +21255,25 @@ namespace BZROpenShim
             g_ChunkEffectCreateChunkletDetour.trampoline &&
             g_BzrFn_ChunkEffectCreateChunklet;
         g_ChunkEffectCreateHooksLogged = false;
+        g_ObjectQuerySafetyHooksInstalled =
+            g_ObjectQueryGlobalSlotGetDetour.trampoline &&
+            g_ObjectQueryArraySetDetour.trampoline &&
+            g_ObjectQueryArrayGetDetour.trampoline &&
+            g_ObjectQueryFindZeroIndexDetour.trampoline &&
+            g_ObjectQueryFindNonZeroIndexDetour.trampoline &&
+            g_ObjectQueryStampedValueSetDetour.trampoline &&
+            g_ObjectQueryBitClearDetour.trampoline &&
+            g_ObjectQueryBitTestSetDetour.trampoline &&
+            g_ObjectQueryBitTestClearDetour.trampoline &&
+            g_ObjectStateFloat1fcGetDetour.trampoline &&
+            g_ObjectStateFlags17cGetDetour.trampoline &&
+            g_ObjectStateFlags180GetDetour.trampoline &&
+            g_ObjectStateBit18cGetDetour.trampoline &&
+            g_ObjectStateBit194GetDetour.trampoline &&
+            g_ObjectStateCall21cDetour.trampoline;
+        g_ObjectQuerySafetyHooksLogged = false;
+        g_ObjectQuerySafetyHooksFailureLogged = false;
+        g_ObjectQuerySafetyGuardLogBudget = 24;
         g_ObservedChunkPathParentATrampoline = g_ObservedChunkPathParentADetour.trampoline;
         g_ObservedChunkPathParentBTrampoline = g_ObservedChunkPathParentBDetour.trampoline;
         g_ObservedChunkPathProbesInstalled =
@@ -20356,6 +21414,11 @@ namespace BZROpenShim
         {
             ResolveEngineFlameRuntimeTargets();
         }
+
+        g_ObjectQuerySafetyEnabled =
+            !(EnvFlagEnabled("OPENSHIM_DISABLE_OBJECT_QUERY_SAFETY") ||
+              EnvFlagEnabled("BZR_DISABLE_OBJECT_QUERY_SAFETY"));
+        InstallObjectQuerySafetyHooksIfPossible();
 
         g_EnableChunkRenderFallback =
             EnvFlagEnabled("BZR_CHUNK_FORCE_FIRST_GEO") ||
@@ -20537,6 +21600,9 @@ namespace BZROpenShim
             g_TraceChunkEffectRuntime ? "enabled" : "disabled",
             static_cast<uint32_t>(kChunkEffectVtableSimulateSlotAddr),
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_ChunkEffectSimulate)));
+        Log(L"[OBJSAFE] Object query helper guards: %hs hooks=%hs\n",
+            g_ObjectQuerySafetyEnabled ? "enabled" : "disabled",
+            g_ObjectQuerySafetyHooksInstalled ? "installed" : "pending");
         LogChunkDiagnostic("chunkspawn", L"[CHUNKSPAWN] Create-path hooks: %hs create=0x%08X chunklet=0x%08X\n",
             g_ChunkEffectCreateHooksInstalled ? "enabled" : "disabled",
             static_cast<uint32_t>(kGogChunkEffectCreateChunkAddr),
@@ -20588,6 +21654,7 @@ namespace BZROpenShim
 
     void RetryDeferredRuntimeHooks()
     {
+        InstallObjectQuerySafetyHooksIfPossible();
         InstallJumpSnipingProbeIfRequested();
         InstallCareerStatsMpHookIfPossible();
         InstallChunkEffectCreateHooksIfRequested();
