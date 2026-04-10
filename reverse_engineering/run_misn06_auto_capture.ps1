@@ -3,7 +3,13 @@ param(
     [string]$PackagedModsRoot = "C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux\packaged_mods\3686673790",
     [string]$MissionArgs = "misn06.bzn /edit",
     [int[]]$SpaceDelaysMs = @(250, 500, 750, 1000),
+    [int]$SpaceRetryIntervalMs = 400,
+    [int]$SpaceRetryWindowSeconds = 12,
+    [int[]]$ScreenshotOffsetsMs = @(),
+    [switch]$ScreenshotRelativeToSpace,
     [int]$RunDurationSeconds = 45,
+    [switch]$WaitForChunkActivity,
+    [int]$PostChunkActivitySeconds = 12,
     [int]$MainWindowTimeoutSeconds = 20,
     [switch]$AttachFrida,
     [string]$FridaScript = "",
@@ -13,6 +19,92 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class OpenShimAutomationInputNative
+{
+    public const int SW_RESTORE = 9;
+    public const ushort VK_SPACE = 0x20;
+    public const uint KEYEVENTF_KEYUP = 0x0002;
+    public const uint INPUT_KEYBOARD = 1;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct INPUT
+    {
+        public uint type;
+        public InputUnion U;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    public struct InputUnion
+    {
+        [FieldOffset(0)]
+        public KEYBDINPUT ki;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct KEYBDINPUT
+    {
+        public ushort wVk;
+        public ushort wScan;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+    public static bool SendSpaceKey()
+    {
+        INPUT[] inputs = new INPUT[2];
+        inputs[0].type = INPUT_KEYBOARD;
+        inputs[0].U.ki.wVk = VK_SPACE;
+
+        inputs[1].type = INPUT_KEYBOARD;
+        inputs[1].U.ki.wVk = VK_SPACE;
+        inputs[1].U.ki.dwFlags = KEYEVENTF_KEYUP;
+
+        return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))) == inputs.Length;
+    }
+}
+"@
+
+if ($ScreenshotOffsetsMs.Count -gt 0) {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class OpenShimWindowCaptureNative
+{
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+}
+"@
+}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $gameExe = Join-Path $GameRoot "battlezone98redux.exe"
@@ -51,7 +143,19 @@ function Get-HashOrNull {
     if (-not (Test-Path $Path)) {
         return $null
     }
-    return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash
+    try {
+        return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash
+    } catch {
+        $tempCopy = Join-Path $env:TEMP ("openshim_hash_" + [System.Guid]::NewGuid().ToString("N"))
+        try {
+            Copy-Item -LiteralPath $Path -Destination $tempCopy -Force
+            return (Get-FileHash -Algorithm SHA256 -LiteralPath $tempCopy).Hash
+        } catch {
+            return $null
+        } finally {
+            Remove-Item -LiteralPath $tempCopy -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Stop-ProcessByNameIfPresent {
@@ -59,42 +163,115 @@ function Stop-ProcessByNameIfPresent {
     Get-Process -Name $Name -ErrorAction SilentlyContinue | Stop-Process -Force
 }
 
-function Get-LineCount {
+function Get-FileLengthOrZero {
     param([string]$Path)
     if (-not (Test-Path $Path)) {
-        return 0
+        return 0L
     }
     try {
-        return (Get-Content -LiteralPath $Path | Measure-Object -Line).Lines
+        return (Get-Item -LiteralPath $Path).Length
     } catch {
-        return 0
+        return 0L
     }
 }
 
-function Get-LinesAfter {
+function Get-LinesAfterOffset {
     param(
         [string]$Path,
-        [int]$StartLine
+        [long]$StartOffset
     )
     if (-not (Test-Path $Path)) {
         return @()
     }
-    $all = Get-Content -LiteralPath $Path
-    if ($StartLine -lt 0) {
-        $StartLine = 0
-    }
-    if ($StartLine -ge $all.Count) {
+    try {
+        $fileInfo = Get-Item -LiteralPath $Path
+        if ($StartOffset -lt 0 -or $StartOffset -gt $fileInfo.Length) {
+            $StartOffset = 0L
+        }
+
+        $fileStream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        try {
+            $skipFirstPartialLine = $false
+            if ($StartOffset -gt 0) {
+                [void]$fileStream.Seek($StartOffset - 1, [System.IO.SeekOrigin]::Begin)
+                $previousByte = $fileStream.ReadByte()
+                $skipFirstPartialLine = ($previousByte -ne 10 -and $previousByte -ne 13)
+            }
+            [void]$fileStream.Seek($StartOffset, [System.IO.SeekOrigin]::Begin)
+            $reader = New-Object System.IO.StreamReader($fileStream, [System.Text.Encoding]::UTF8, $true, 4096, $true)
+            try {
+                if ($skipFirstPartialLine -and -not $reader.EndOfStream) {
+                    [void]$reader.ReadLine()
+                }
+                $lines = New-Object System.Collections.Generic.List[string]
+                while (-not $reader.EndOfStream) {
+                    $lines.Add($reader.ReadLine())
+                }
+                return $lines.ToArray()
+            } finally {
+                $reader.Dispose()
+            }
+        } finally {
+            $fileStream.Dispose()
+        }
+    } catch {
         return @()
     }
-    return $all[$StartLine..($all.Count - 1)]
+}
+
+function Try-ActivateProcessWindow {
+    param([System.Diagnostics.Process]$Process)
+
+    if (-not $Process) {
+        return $false
+    }
+
+    try {
+        $Process.Refresh()
+        if ($Process.HasExited -or $Process.MainWindowHandle -eq 0) {
+            return $false
+        }
+
+        [void][OpenShimAutomationInputNative]::ShowWindow($Process.MainWindowHandle, [OpenShimAutomationInputNative]::SW_RESTORE)
+        [void][OpenShimAutomationInputNative]::BringWindowToTop($Process.MainWindowHandle)
+        [void][OpenShimAutomationInputNative]::SetForegroundWindow($Process.MainWindowHandle)
+
+        $shell = New-Object -ComObject WScript.Shell
+        [void]$shell.AppActivate($Process.Id)
+        Start-Sleep -Milliseconds 100
+        return $true
+    } catch {
+        return $false
+    }
 }
 
 function Send-SpaceToProcess {
     param([System.Diagnostics.Process]$Process)
-    $shell = New-Object -ComObject WScript.Shell
-    [void]$shell.AppActivate($Process.Id)
-    Start-Sleep -Milliseconds 150
-    $shell.SendKeys(" ")
+
+    $activated = Try-ActivateProcessWindow -Process $Process
+    $sent = $false
+
+    try {
+        $sent = [OpenShimAutomationInputNative]::SendSpaceKey()
+    } catch {
+        $sent = $false
+    }
+
+    if (-not $sent) {
+        try {
+            $shell = New-Object -ComObject WScript.Shell
+            if (-not $activated) {
+                [void]$shell.AppActivate($Process.Id)
+                Start-Sleep -Milliseconds 100
+            }
+            $shell.SendKeys(" ")
+            $sent = $true
+        } catch {
+            $sent = $false
+        }
+    }
+
+    return $sent
 }
 
 function Wait-ForMainWindow {
@@ -114,6 +291,72 @@ function Wait-ForMainWindow {
         Start-Sleep -Milliseconds 200
     }
     return $false
+}
+
+function Capture-DesktopScreenshot {
+    param(
+        [string]$OutPath,
+        [int]$ProcessId = 0
+    )
+
+    if ($ProcessId -gt 0) {
+        try {
+            $shell = New-Object -ComObject WScript.Shell
+            [void]$shell.AppActivate($ProcessId)
+            Start-Sleep -Milliseconds 150
+        } catch {
+        }
+    }
+
+    $bounds = $null
+    if ($ProcessId -gt 0) {
+        try {
+            $proc = Get-Process -Id $ProcessId -ErrorAction Stop
+            if ($proc.MainWindowHandle -ne 0) {
+                $rect = New-Object OpenShimWindowCaptureNative+RECT
+                if ([OpenShimWindowCaptureNative]::GetWindowRect($proc.MainWindowHandle, [ref]$rect)) {
+                    $width = [Math]::Max(1, $rect.Right - $rect.Left)
+                    $height = [Math]::Max(1, $rect.Bottom - $rect.Top)
+                    $bounds = [pscustomobject]@{
+                        Left = $rect.Left
+                        Top = $rect.Top
+                        Width = $width
+                        Height = $height
+                    }
+                }
+            }
+        } catch {
+        }
+    }
+
+    if (-not $bounds) {
+        $virtualScreen = [System.Windows.Forms.SystemInformation]::VirtualScreen
+        $bounds = [pscustomobject]@{
+            Left = $virtualScreen.Left
+            Top = $virtualScreen.Top
+            Width = $virtualScreen.Width
+            Height = $virtualScreen.Height
+        }
+    }
+
+    $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bitmap.Size)
+        $bitmap.Save($OutPath, [System.Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+        $graphics.Dispose()
+        $bitmap.Dispose()
+    }
+}
+
+function Get-RemainingRunMilliseconds {
+    param([datetime]$Deadline)
+    $remaining = [int][Math]::Floor(($Deadline - (Get-Date)).TotalMilliseconds)
+    if ($remaining -lt 0) {
+        return 0
+    }
+    return $remaining
 }
 
 function Start-FridaTrace {
@@ -205,25 +448,119 @@ foreach ($delayMs in $SpaceDelaysMs) {
 
     $runRoot = Join-Path $seriesRoot ("delay_" + $delayMs.ToString("0000") + "ms")
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
+    $screenshotPaths = @()
 
-    $preShimLines = Get-LineCount -Path $gameLog
-    $preBzLines = Get-LineCount -Path $bzLogger
+    $preShimOffset = Get-FileLengthOrZero -Path $gameLog
+    $preBzOffset = Get-FileLengthOrZero -Path $bzLogger
     $preDumpNames = @()
     if (Test-Path $dumpRoot) {
         $preDumpNames = @(Get-ChildItem -LiteralPath $dumpRoot -File | Select-Object -ExpandProperty Name)
     }
 
+    $runStartedAt = Get-Date
+    $runDeadline = $runStartedAt.AddSeconds($RunDurationSeconds)
+    $tailDeadline = $runDeadline
+    $chunkActivityDetected = $false
+    $chunkActivityDetectedAt = $null
+    $liveShimOffset = $preShimOffset
+    $liveBzOffset = $preBzOffset
+
     $gameProc = Start-Process -FilePath $gameExe -ArgumentList $MissionArgs -WorkingDirectory $GameRoot -PassThru
-    $windowReady = Wait-ForMainWindow -Process $gameProc -TimeoutSeconds $MainWindowTimeoutSeconds
+    $windowWaitSeconds = [Math]::Min(
+        $MainWindowTimeoutSeconds,
+        [Math]::Max(0, [int][Math]::Ceiling(($runDeadline - (Get-Date)).TotalSeconds)))
+    $windowReady = $false
+    if ($windowWaitSeconds -gt 0) {
+        $windowReady = Wait-ForMainWindow -Process $gameProc -TimeoutSeconds $windowWaitSeconds
+    }
     $spaceSent = $false
     $spaceSentAt = $null
+    $spaceAttemptCount = 0
+    $waitingForVoObserved = $false
+    $spaceSkipObserved = $false
+    $voiceCompleteObserved = $false
 
     if ($windowReady) {
-        Start-Sleep -Milliseconds $delayMs
-        if (-not $gameProc.HasExited) {
-            Send-SpaceToProcess -Process $gameProc
-            $spaceSent = $true
-            $spaceSentAt = Get-Date
+        $remainingBeforeSpace = Get-RemainingRunMilliseconds -Deadline $runDeadline
+        if ($remainingBeforeSpace -gt 0) {
+            Start-Sleep -Milliseconds ([Math]::Min($delayMs, $remainingBeforeSpace))
+        }
+
+        $spaceRetryDeadline = $null
+        $nextSpaceAttemptAt = Get-Date
+
+        while (-not $gameProc.HasExited -and
+               -not $spaceSkipObserved -and
+               -not $voiceCompleteObserved) {
+            $remainingBeforeInput = Get-RemainingRunMilliseconds -Deadline $runDeadline
+            if ($remainingBeforeInput -le 0) {
+                break
+            }
+
+            $currentBzLength = Get-FileLengthOrZero -Path $bzLogger
+            $liveBzLines = Get-LinesAfterOffset -Path $bzLogger -StartOffset $liveBzOffset
+            $liveBzOffset = $currentBzLength
+
+            foreach ($line in $liveBzLines) {
+                if ($line -match 'Sim Startup: Waiting For VO') {
+                    $waitingForVoObserved = $true
+                    if (-not $spaceRetryDeadline) {
+                        $spaceRetryDeadline = (Get-Date).AddSeconds($SpaceRetryWindowSeconds)
+                        $nextSpaceAttemptAt = Get-Date
+                    }
+                }
+                if ($line -match 'Stopping load voice due to space keypress') {
+                    $spaceSkipObserved = $true
+                }
+                if ($line -match 'Sim Startup: VO complete' -or
+                    $line -match 'Sim Startup: First Frame after' -or
+                    $line -match 'Game Simulation Initialized after') {
+                    $voiceCompleteObserved = $true
+                }
+            }
+
+            if ($spaceSkipObserved -or $voiceCompleteObserved) {
+                break
+            }
+
+            if ($waitingForVoObserved -and
+                ((-not $spaceRetryDeadline) -or (Get-Date) -lt $spaceRetryDeadline) -and
+                (Get-Date) -ge $nextSpaceAttemptAt) {
+                if (Send-SpaceToProcess -Process $gameProc) {
+                    ++$spaceAttemptCount
+                    if (-not $spaceSent) {
+                        $spaceSent = $true
+                        $spaceSentAt = Get-Date
+                    }
+                }
+                $nextSpaceAttemptAt = (Get-Date).AddMilliseconds($SpaceRetryIntervalMs)
+            }
+
+            $sleepUntilNextAttemptMs = [int][Math]::Floor(($nextSpaceAttemptAt - (Get-Date)).TotalMilliseconds)
+            $loopSleepMs = 100
+            if ($waitingForVoObserved) {
+                $loopSleepMs = [Math]::Max(25, [Math]::Min(100, $sleepUntilNextAttemptMs))
+            }
+            Start-Sleep -Milliseconds ([Math]::Min($loopSleepMs, $remainingBeforeInput))
+        }
+
+        if (-not $spaceSkipObserved -and -not $voiceCompleteObserved) {
+            $currentBzLength = Get-FileLengthOrZero -Path $bzLogger
+            $liveBzLines = Get-LinesAfterOffset -Path $bzLogger -StartOffset $liveBzOffset
+            $liveBzOffset = $currentBzLength
+            foreach ($line in $liveBzLines) {
+                if ($line -match 'Sim Startup: Waiting For VO') {
+                    $waitingForVoObserved = $true
+                }
+                if ($line -match 'Stopping load voice due to space keypress') {
+                    $spaceSkipObserved = $true
+                }
+                if ($line -match 'Sim Startup: VO complete' -or
+                    $line -match 'Sim Startup: First Frame after' -or
+                    $line -match 'Game Simulation Initialized after') {
+                    $voiceCompleteObserved = $true
+                }
+            }
         }
     }
 
@@ -232,10 +569,67 @@ foreach ($delayMs in $SpaceDelaysMs) {
     $fridaProc = $null
     if ($AttachFrida -and -not $gameProc.HasExited) {
         $fridaProc = Start-FridaTrace -TargetPid $gameProc.Id -ScriptPath $FridaScript -OutPath $fridaLog -ErrPath $fridaErr
-        Start-Sleep -Seconds 1
+        $remainingAfterFrida = Get-RemainingRunMilliseconds -Deadline $runDeadline
+        if ($remainingAfterFrida -gt 0) {
+            Start-Sleep -Milliseconds ([Math]::Min(1000, $remainingAfterFrida))
+        }
     }
 
-    Start-Sleep -Seconds $RunDurationSeconds
+    $captureSchedule = @($ScreenshotOffsetsMs | Sort-Object)
+    foreach ($offsetMs in $captureSchedule) {
+        $captureBaseTime = $runStartedAt
+        if ($ScreenshotRelativeToSpace -and $spaceSentAt) {
+            $captureBaseTime = $spaceSentAt
+        }
+        $targetTime = $captureBaseTime.AddMilliseconds($offsetMs)
+        $remainingUntilCapture = [int][Math]::Floor(($targetTime - (Get-Date)).TotalMilliseconds)
+        if ($remainingUntilCapture -gt 0) {
+            $remainingBudget = Get-RemainingRunMilliseconds -Deadline $runDeadline
+            if ($remainingBudget -le 0) {
+                break
+            }
+            Start-Sleep -Milliseconds ([Math]::Min($remainingUntilCapture, $remainingBudget))
+        }
+        if ($gameProc.HasExited) {
+            break
+        }
+        $shotPrefix = if ($ScreenshotRelativeToSpace) { "screen_space_" } else { "screen_" }
+        $shotPath = Join-Path $runRoot ($shotPrefix + $offsetMs.ToString("00000") + "ms.png")
+        try {
+            Capture-DesktopScreenshot -OutPath $shotPath -ProcessId $gameProc.Id
+            $screenshotPaths += $shotPath
+        } catch {
+        }
+    }
+
+    while ($true) {
+        $remainingRunMs = Get-RemainingRunMilliseconds -Deadline $tailDeadline
+        if ($remainingRunMs -le 0) {
+            break
+        }
+
+        if ($WaitForChunkActivity -and -not $chunkActivityDetected -and -not $gameProc.HasExited) {
+            $currentShimLength = Get-FileLengthOrZero -Path $gameLog
+            $liveShimLines = Get-LinesAfterOffset -Path $gameLog -StartOffset $liveShimOffset
+            $liveShimOffset = $currentShimLength
+            $chunkActivityLines = @($liveShimLines | Where-Object {
+                    $_ -match '\[CHUNKSPAWN\] CreateChunk ' -or
+                    $_ -match '\[CHUNKMESH\] assigned '
+                })
+            if ($chunkActivityLines.Count -gt 0) {
+                $chunkActivityDetected = $true
+                $chunkActivityDetectedAt = Get-Date
+                $tailDeadline = [DateTime]::Max($tailDeadline, $chunkActivityDetectedAt.AddSeconds($PostChunkActivitySeconds))
+                continue
+            }
+
+            Start-Sleep -Milliseconds ([Math]::Min(500, $remainingRunMs))
+            continue
+        }
+
+        Start-Sleep -Milliseconds $remainingRunMs
+        break
+    }
 
     $exitCode = $null
     $exitedNaturally = $false
@@ -245,7 +639,7 @@ foreach ($delayMs in $SpaceDelaysMs) {
         $exitedNaturally = $true
     } elseif (-not $KeepGameOpen) {
         Stop-Process -Id $gameProc.Id -Force
-        Start-Sleep -Seconds 1
+        Start-Sleep -Milliseconds 250
     }
 
     if ($fridaProc) {
@@ -257,10 +651,10 @@ foreach ($delayMs in $SpaceDelaysMs) {
         }
     }
 
-    Start-Sleep -Seconds 2
+    Start-Sleep -Milliseconds 250
 
-    $shimLines = Get-LinesAfter -Path $gameLog -StartLine $preShimLines
-    $bzLines = Get-LinesAfter -Path $bzLogger -StartLine $preBzLines
+    $shimLines = Get-LinesAfterOffset -Path $gameLog -StartOffset $preShimOffset
+    $bzLines = Get-LinesAfterOffset -Path $bzLogger -StartOffset $preBzOffset
     $fridaLines = @()
     if (Test-Path $fridaLog) {
         $fridaLines = Get-Content -LiteralPath $fridaLog
@@ -287,6 +681,14 @@ foreach ($delayMs in $SpaceDelaysMs) {
         window_ready = $windowReady
         space_sent = $spaceSent
         space_sent_at = if ($spaceSentAt) { $spaceSentAt.ToString("o") } else { $null }
+        space_attempt_count = $spaceAttemptCount
+        waiting_for_vo_observed = $waitingForVoObserved
+        space_skip_observed = $spaceSkipObserved
+        voice_complete_observed = $voiceCompleteObserved
+        wait_for_chunk_activity = [bool]$WaitForChunkActivity
+        chunk_activity_detected = $chunkActivityDetected
+        chunk_activity_detected_at = if ($chunkActivityDetectedAt) { $chunkActivityDetectedAt.ToString("o") } else { $null }
+        post_chunk_activity_seconds = $PostChunkActivitySeconds
         attach_frida = [bool]$AttachFrida
         frida_script = if ($AttachFrida) { $FridaScript } else { $null }
         exited_naturally = $exitedNaturally
@@ -297,6 +699,7 @@ foreach ($delayMs in $SpaceDelaysMs) {
         bz_slice = $bzSlicePath
         frida_log = if ($AttachFrida) { $fridaLog } else { $null }
         frida_err = if ($AttachFrida) { $fridaErr } else { $null }
+        screenshots = $screenshotPaths
     }
     foreach ($key in $score.Keys) {
         $run[$key] = $score[$key]
@@ -316,6 +719,10 @@ $seriesSummary = [ordered]@{
     attach_frida = [bool]$AttachFrida
     frida_script = if ($AttachFrida) { $FridaScript } else { $null }
     run_duration_seconds = $RunDurationSeconds
+    space_retry_interval_ms = $SpaceRetryIntervalMs
+    space_retry_window_seconds = $SpaceRetryWindowSeconds
+    wait_for_chunk_activity = [bool]$WaitForChunkActivity
+    post_chunk_activity_seconds = $PostChunkActivitySeconds
     main_window_timeout_seconds = $MainWindowTimeoutSeconds
     space_delays_ms = $SpaceDelaysMs
     best_run = $bestRun
