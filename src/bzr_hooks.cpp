@@ -7201,31 +7201,52 @@ namespace BZROpenShim
             }
             slot.meshRetryTick = now;
 
-            static FnOgreGetRootSceneNode getRootSceneNode =
-                ResolveOgreProc<FnOgreGetRootSceneNode>("?getRootSceneNode@SceneManager@Ogre@@UAEPAVSceneNode@2@XZ");
-            static FnOgreCreateSceneNode createSceneNode =
-                ResolveOgreProc<FnOgreCreateSceneNode>("?createSceneNode@SceneManager@Ogre@@UAEPAVSceneNode@2@XZ");
-            static FnOgreCreateChildSceneNode createChildSceneNode =
-                ResolveOgreProc<FnOgreCreateChildSceneNode>("?createChildSceneNode@SceneNode@Ogre@@UAEPAV12@ABVVector3@2@ABVQuaternion@2@@Z");
-            static FnOgreAddChildNode addChildNode =
-                ResolveOgreProc<FnOgreAddChildNode>("?addChild@Node@Ogre@@UAEXPAV12@@Z");
-            static FnOgreCreateEntity createEntity =
-                ResolveOgreProc<FnOgreCreateEntity>("?createEntity@SceneManager@Ogre@@UAEPAVEntity@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
-            static FnOgreAttachObject attachObject =
-                ResolveOgreProc<FnOgreAttachObject>("?attachObject@SceneNode@Ogre@@UAEXPAVMovableObject@2@@Z");
-            static FnOgreSetVisible setVisible =
-                ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
-            static FnOgreSetSceneNodeVisible setNodeVisible =
-                ResolveOgreProc<FnOgreSetSceneNodeVisible>("?setVisible@SceneNode@Ogre@@UAEX_N0@Z");
+            // Improved Ogre symbol resolution with delayed initialization and retry logic
+            static FnOgreGetRootSceneNode getRootSceneNode = nullptr;
+            static FnOgreCreateSceneNode createSceneNode = nullptr;
+            static FnOgreCreateChildSceneNode createChildSceneNode = nullptr;
+            static FnOgreAddChildNode addChildNode = nullptr;
+            static FnOgreCreateEntity createEntity = nullptr;
+            static FnOgreAttachObject attachObject = nullptr;
+            static FnOgreSetVisible setVisible = nullptr;
+            static FnOgreSetSceneNodeVisible setNodeVisible = nullptr;
+            static DWORD g_OgreSymbolLastRetryTick = 0;
 
+            // Initialize Ogre symbols with retry logic for individual GEO chunks
             if (!getRootSceneNode || !createChildSceneNode || !createEntity || !attachObject || !setVisible)
             {
-                if (!g_ChunkMeshProxyFailureLogged)
+                const DWORD now = GetTickCount();
+                if (g_ChunkMeshProxyFailureLogged || 
+                    (g_OgreSymbolLastRetryTick != 0 && static_cast<DWORD>(now - g_OgreSymbolLastRetryTick) < 2000))
                 {
-                    LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Missing Ogre entity symbols; mesh proxy disabled for now\n");
-                    g_ChunkMeshProxyFailureLogged = true;
+                    return false; // Don't spam logs, retry after delay
                 }
-                return false;
+
+                // Attempt to resolve Ogre symbols
+                getRootSceneNode = ResolveOgreProc<FnOgreGetRootSceneNode>("?getRootSceneNode@SceneManager@Ogre@@UAEPAVSceneNode@2@XZ");
+                createSceneNode = ResolveOgreProc<FnOgreCreateSceneNode>("?createSceneNode@SceneManager@Ogre@@UAEPAVSceneNode@2@XZ");
+                createChildSceneNode = ResolveOgreProc<FnOgreCreateChildSceneNode>("?createChildSceneNode@SceneNode@Ogre@@UAEPAV12@ABVVector3@2@ABVQuaternion@2@@Z");
+                addChildNode = ResolveOgreProc<FnOgreAddChildNode>("?addChild@Node@Ogre@@UAEXPAV12@@Z");
+                createEntity = ResolveOgreProc<FnOgreCreateEntity>("?createEntity@SceneManager@Ogre@@UAEPAVEntity@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+                attachObject = ResolveOgreProc<FnOgreAttachObject>("?attachObject@SceneNode@Ogre@@UAEXPAVMovableObject@2@@Z");
+                setVisible = ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
+                setNodeVisible = ResolveOgreProc<FnOgreSetSceneNodeVisible>("?setVisible@SceneNode@Ogre@@UAEX_N0@Z");
+
+                g_OgreSymbolLastRetryTick = now;
+
+                if (!getRootSceneNode || !createChildSceneNode || !createEntity || !attachObject || !setVisible)
+                {
+                    if (!g_ChunkMeshProxyFailureLogged)
+                    {
+                        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Ogre entity symbols not available; will retry for individual GEO chunks\n");
+                        g_ChunkMeshProxyFailureLogged = true;
+                    }
+                    return false;
+                }
+
+                // Successfully resolved symbols for individual GEO chunk proxy
+                LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Ogre symbols resolved for individual GEO chunk proxy\n");
+                g_ChunkMeshProxyFailureLogged = false; // Reset on successful resolution
             }
 
             void* sceneManager = GetOgreSceneManagerRuntime();
@@ -7789,8 +7810,8 @@ namespace BZROpenShim
 
         static void UpdateChunkProxySlotPosition(
             ChunkProxySlot& slot,
-            void* currentCamera = nullptr,
-            bool allowManualSubmit = true)
+            void* currentCamera,
+            bool allowManualSubmit)
         {
             static FnOgreSetBillboardPosition setPosition =
                 ResolveOgreProc<FnOgreSetBillboardPosition>("?setPosition@Billboard@Ogre@@QAEXMMM@Z");
@@ -7837,154 +7858,141 @@ namespace BZROpenShim
 
             ChunkProxyTransform transform = {};
             const void* resolvedTransformObject = nullptr;
-            if (!TryResolveChunkProxyTransformForSlot(slot, transform, &resolvedTransformObject))
+            
+            // Priority 1: Use ChunkEffect entry directly (most reliable for individual GEO chunks)
+            if (slot.useEntryPosition && slot.objectBytes)
             {
-                if (!slot.useEntryPosition)
+                // Read position directly from ChunkEffect active entry for this object
+                void* chunkEffectThis = GetChunkEffectSingleton();
+                if (chunkEffectThis)
                 {
-                    ReleaseChunkProxySlot(slot, L"transform-read-failed");
-                    return;
-                }
-
-                const void* anchoredObject = nullptr;
-                if (TryBuildChunkProxyAnchoredEntryTransform(slot, nullptr, transform, &anchoredObject))
-                {
-                    resolvedTransformObject = anchoredObject;
-                }
-                else
-                {
-                    transform.x = slot.positionX;
-                    transform.y = slot.positionY;
-                    transform.z = slot.positionZ;
-                    transform.orientation = { 1.0f, 0.0f, 0.0f, 0.0f };
+                    const auto* thisBytes = reinterpret_cast<const uint8_t*>(chunkEffectThis);
+                    const uint32_t count = *reinterpret_cast<const uint32_t*>(thisBytes + kChunkEffectActiveCountOffset);
+                    const uint32_t gate = *reinterpret_cast<const uint32_t*>(thisBytes + kChunkEffectGateOffset);
+                    
+                    // Search for matching object in ChunkEffect active array
+                    for (uint32_t i = 0; i < count; ++i)
+                    {
+                        const uintptr_t entryOffset = kChunkEffectEntryBaseOffset + (i * kChunkEffectEntrySize);
+                        const auto* entryBytes = thisBytes + entryOffset;
+                        if (*reinterpret_cast<const uint8_t*>(entryBytes + 0x00) == slot.objectBytes[0])
+                        {
+                            transform.x = *reinterpret_cast<const float*>(entryBytes + 0x08);
+                            transform.y = *reinterpret_cast<const float*>(entryBytes + 0x0C);
+                            transform.z = *reinterpret_cast<const float*>(entryBytes + 0x10);
+                            resolvedTransformObject = slot.objectBytes;
+                            
+                            if (AcquireChunkLogSlot())
+                            {
+                                LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] Using ChunkEffect position for obj=0x%08X geom=0x%08X pos=(%.4f, %.4f, %.4f)\n",
+                                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
+                                    static_cast<double>(transform.x),
+                                    static_cast<double>(transform.y),
+                                    static_cast<double>(transform.z));
+                            }
+                            break; // Found matching entry
+                        }
+                    }
                 }
             }
-            else
-            {
-                ChunkProxyTransform anchoredLocalTransform = {};
-                const void* anchoredLocalObject = nullptr;
-                if (TryPromoteChunkProxyLocalTransformToAnchoredWorld(
-                        slot,
-                        transform,
-                        resolvedTransformObject,
-                        anchoredLocalTransform,
-                        &anchoredLocalObject))
-                {
-                    if (AcquireChunkLogSlot())
-                    {
-                        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] anchor-local-pos obj=0x%08X geom=0x%08X geomName=%hs xfSrc=0x%08X anchorSrc=0x%08X rawPos=(%.4f, %.4f, %.4f) entryLocal=(%.4f, %.4f, %.4f) worldPos=(%.4f, %.4f, %.4f)\n",
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
-                            GetChunkGeomNameForLog(slot.geomName),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(resolvedTransformObject)),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(anchoredLocalObject)),
-                            static_cast<double>(transform.x),
-                            static_cast<double>(transform.y),
-                            static_cast<double>(transform.z),
-                            static_cast<double>(slot.positionX),
-                            static_cast<double>(slot.positionY),
-                            static_cast<double>(slot.positionZ),
-                            static_cast<double>(anchoredLocalTransform.x),
-                            static_cast<double>(anchoredLocalTransform.y),
-                            static_cast<double>(anchoredLocalTransform.z));
-                    }
 
-                    transform = anchoredLocalTransform;
-                    resolvedTransformObject = anchoredLocalObject;
-                }
-                else if (ShouldPreferChunkEntryPosition(slot, transform))
+            // Fallback to existing logic if ChunkEffect lookup fails
+            if (!resolvedTransformObject)
+            {
+                if (slot.objectBytes)
                 {
-                    const bool keepResolvedChunkWorldTransform =
-                        resolvedTransformObject != nullptr &&
-                        resolvedTransformObject == slot.objectBytes;
-                    if (keepResolvedChunkWorldTransform)
+                    const ChunkResolvedBindingEntry* binding = FindChunkResolvedBindingEntry(slot.objectBytes);
+                    if (binding && binding->payloadMeshName[0] &&
+                        _stricmp(slot.proofMeshName, binding->payloadMeshName) != 0)
                     {
                         if (AcquireChunkLogSlot())
                         {
-                            LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] keep-raw-pos obj=0x%08X geom=0x%08X geomName=%hs xfSrc=0x%08X rawPos=(%.4f, %.4f, %.4f) entryLocal=(%.4f, %.4f, %.4f)\n",
+                            LogChunkDiagnostic(
+                                "chunkmesh",
+                                L"[CHUNKMESH] rebinding obj=0x%08X oldMesh=%hs newMesh=%hs root=0x%08X rootGameObj=0x%08X ownerObj=0x%08X\n",
                                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
-                                GetChunkGeomNameForLog(slot.geomName),
-                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(resolvedTransformObject)),
-                                static_cast<double>(transform.x),
-                                static_cast<double>(transform.y),
-                                static_cast<double>(transform.z),
-                                static_cast<double>(slot.positionX),
-                                static_cast<double>(slot.positionY),
-                                static_cast<double>(slot.positionZ));
+                                slot.proofMeshName[0] ? slot.proofMeshName : "<none>",
+                                binding->payloadMeshName,
+                                binding->sourceRootObjectPtr,
+                                binding->sourceRootGameObjectPtr,
+                                binding->sourceOwnerObjPtr);
                         }
-                    }
-                    else
-                    {
-                        ChunkProxyTransform anchoredTransform = {};
-                        const void* anchoredObject = nullptr;
-                        if (TryBuildChunkProxyAnchoredEntryTransform(slot, &transform, anchoredTransform, &anchoredObject))
-                        {
-                            if (AcquireChunkLogSlot())
-                            {
-                                LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] anchor-pos obj=0x%08X geom=0x%08X geomName=%hs xfSrc=0x%08X anchorSrc=0x%08X rawPos=(%.4f, %.4f, %.4f) entryLocal=(%.4f, %.4f, %.4f) worldPos=(%.4f, %.4f, %.4f)\n",
-                                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
-                                    GetChunkGeomNameForLog(slot.geomName),
-                                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(resolvedTransformObject)),
-                                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(anchoredObject)),
-                                    static_cast<double>(transform.x),
-                                    static_cast<double>(transform.y),
-                                    static_cast<double>(transform.z),
-                                    static_cast<double>(slot.positionX),
-                                    static_cast<double>(slot.positionY),
-                                    static_cast<double>(slot.positionZ),
-                                    static_cast<double>(anchoredTransform.x),
-                                    static_cast<double>(anchoredTransform.y),
-                                    static_cast<double>(anchoredTransform.z));
-                            }
-                            transform = anchoredTransform;
-                            resolvedTransformObject = anchoredObject;
-                        }
-                        else
-                        {
-                            if (AcquireChunkLogSlot())
-                            {
-                                LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] clamp-pos obj=0x%08X geom=0x%08X geomName=%hs xfSrc=0x%08X rawPos=(%.4f, %.4f, %.4f) entryPos=(%.4f, %.4f, %.4f)\n",
-                                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
-                                    GetChunkGeomNameForLog(slot.geomName),
-                                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(resolvedTransformObject)),
-                                    static_cast<double>(transform.x),
-                                    static_cast<double>(transform.y),
-                                    static_cast<double>(transform.z),
-                                    static_cast<double>(slot.positionX),
-                                    static_cast<double>(slot.positionY),
-                                    static_cast<double>(slot.positionZ));
-                            }
-                            transform.x = slot.positionX;
-                            transform.y = slot.positionY;
-                            transform.z = slot.positionZ;
-                        }
+
+                        InvalidateChunkMeshProxySlot(slot);
+                        strncpy_s(slot.proofMeshName, sizeof(slot.proofMeshName), binding->payloadMeshName, _TRUNCATE);
                     }
                 }
             }
 
-            if (slot.billboard && setPosition &&
-                !TrySetChunkProxyBillboardPosition(slot.billboard, setPosition, transform.x, transform.y, transform.z))
+            // Apply transform to Ogre entities/billboards with improved error handling
+            if (slot.entity && (resolvedTransformObject || slot.useEntryPosition))
             {
-                ReleaseChunkProxySlot(slot, L"billboard-set-failed");
-                return;
-            }
+                bool transformSuccess = false;
+                
+                if (setPosition && slot.billboard)
+                {
+                    __try
+                    {
+                        setPosition(slot.billboard, transform.x, transform.y, transform.z);
+                        transformSuccess = true;
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Billboard setPosition failed for obj=0x%08X geom=0x%08X\n",
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
+                            GetChunkGeomNameForLog(slot.geomName));
+                    }
+                }
 
-            if (slot.billboard && setPosition && !slot.billboardAssigned && AcquireChunkLogSlot())
-            {
-                LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] assigned obj=0x%08X billboard=0x%08X geom=0x%08X geomName=%hs geomKind=%hs pos=(%.4f, %.4f, %.4f)\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.billboard)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
-                    GetChunkGeomNameForLog(slot.geomName),
-                    ClassifyChunkGeomName(slot.geomName),
-                    static_cast<double>(transform.x),
-                    static_cast<double>(transform.y),
-                    static_cast<double>(transform.z));
+                if (transformSuccess && setNodePosition && slot.sceneNode)
+                {
+                    __try
+                    {
+                        setNodePosition(slot.sceneNode, transform.x, transform.y, transform.z);
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] SceneNode setPosition failed for obj=0x%08X geom=0x%08X\n",
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
+                            GetChunkGeomNameForLog(slot.geomName));
+                    }
+                }
+
+                if (transformSuccess && setNodeOrientation && slot.sceneNode)
+                {
+                    __try
+                    {
+                        setNodeOrientation(slot.sceneNode, 1.0f, 0.0f, 0.0f, 1.0f);
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] SceneNode setOrientation failed for obj=0x%08X geom=0x%08X\n",
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
+                            GetChunkGeomNameForLog(slot.geomName));
+                    }
+                }
+
+                if (transformSuccess && setVisible)
+                {
+                    __try
+                    {
+                        setVisible(slot.entity, false);
+                        if (setNodeVisible)
+                            setNodeVisible(slot.sceneNode, false);
+                    }
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Entity setVisible failed for obj=0x%08X geom=0x%08X\n",
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
+                            GetChunkGeomNameForLog(slot.geomName));
+                    }
+                }
             }
-            if (slot.billboard && setPosition)
-                slot.billboardAssigned = true;
 
             if (ShouldUseChunkPayloadMesh(slot))
             {
