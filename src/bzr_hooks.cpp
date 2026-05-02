@@ -5,7 +5,6 @@
 #include "shim_log.h"
 
 #include <Windows.h>
-#include <intrin.h>
 #include <objidl.h>
 #include <gdiplus.h>
 #include <array>
@@ -27,7 +26,6 @@
 
 namespace BZROpenShim
 {
-#pragma intrinsic(_ReturnAddress)
     // ---------------------------------------------------------------------
     // Global state used by hooks/trampolines
     // ---------------------------------------------------------------------
@@ -180,52 +178,6 @@ namespace BZROpenShim
                                                           const void* positionVec,
                                                           const float* velocity,
                                                           uint8_t preserveFlag);
-    using FnOgreRenderQueueProcessVisibleObject = void(__thiscall*)(void* thisPtr,
-                                                                    void* movableObject,
-                                                                    void* camera,
-                                                                    bool onlyShadowCasters,
-                                                                    void* visibleBounds);
-    using FnOgreRenderQueueAddRenderablePriority = void(__thiscall*)(void* thisPtr,
-                                                                     void* renderable,
-                                                                     uint8_t groupId,
-                                                                     uint16_t priority);
-    using FnOgreRenderQueueAddRenderableGroup = void(__thiscall*)(void* thisPtr,
-                                                                  void* renderable,
-                                                                  uint8_t groupId);
-    using FnOgreRenderQueueAddRenderableDefault = void(__thiscall*)(void* thisPtr,
-                                                                    void* renderable);
-    using FnOgreSceneNodeFindVisibleObjects = void(__thiscall*)(void* thisPtr,
-                                                                void* camera,
-                                                                void* renderQueue,
-                                                                void* visibleBounds,
-                                                                bool includeChildren,
-                                                                bool displayNodes,
-                                                                bool onlyShadowCasters);
-    using FnOgreSceneManagerRenderSingleObject = void(__thiscall*)(void* thisPtr,
-                                                                   void* renderable,
-                                                                   const void* pass,
-                                                                   bool lightScissoringClipping,
-                                                                   bool doLightIteration,
-                                                                   const void* manualLightList);
-    using FnOgreSceneManagerFindVisibleObjects = void(__thiscall*)(void* thisPtr,
-                                                                   void* camera,
-                                                                   void* visibleBounds,
-                                                                   bool onlyShadowCasters);
-    using FnOgreMovableObjectNotifyCurrentCamera = void(__thiscall*)(void* thisPtr,
-                                                                     void* camera);
-    using FnOgreEntityUpdateRenderQueue = void(__thiscall*)(void* thisPtr,
-                                                            void* renderQueue);
-    using FnObjectQueryGlobalSlotGet = void* (__cdecl*)(int index);
-    using FnObjectQueryArraySet = void(__thiscall*)(void* thisPtr, int index, void* value);
-    using FnObjectQueryArrayGet = void* (__thiscall*)(void* thisPtr, int index);
-    using FnObjectQueryFindIndex = int(__thiscall*)(void* thisPtr, int startIndex, int endIndex);
-    using FnObjectQueryStampedValueSet = void(__thiscall*)(void* thisPtr, uint32_t value);
-    using FnObjectQueryBitClear = void(__thiscall*)(void* thisPtr, int bitIndex);
-    using FnObjectQueryBitTest = uint8_t(__thiscall*)(void* thisPtr, int bitIndex);
-    using FnObjectAccessorFloatGet = float(__thiscall*)(void* thisPtr);
-    using FnObjectAccessorDwordGet = uint32_t(__thiscall*)(void* thisPtr);
-    using FnObjectAccessorBitGet = uint32_t(__thiscall*)(void* thisPtr, int bitIndex);
-    using FnObjectAccessorVoidCall = void(__thiscall*)(void* thisPtr);
 
     static void** g_BzrPtr_945478 = nullptr;
     static void** g_BzrPtr_94548C = nullptr;
@@ -336,70 +288,6 @@ namespace BZROpenShim
                                                   const void* positionVec,
                                                   const float* velocity,
                                                   uint8_t preserveFlag);
-    void __stdcall ObservedChunkPathProbeThunk(uint32_t siteRva,
-                                               const void* registerBlock,
-                                               uint32_t originalEsp);
-    void ObservedChunkPathParentAProbeHook();
-    void ObservedChunkPathParentBProbeHook();
-    void __fastcall OgreRenderQueueProcessVisibleObjectHook(void* thisPtr,
-                                                            void* /*edx*/,
-                                                            void* movableObject,
-                                                            void* camera,
-                                                            uint32_t onlyShadowCasters,
-                                                            void* visibleBounds);
-    void __fastcall OgreSceneManagerFindVisibleObjectsHook(void* thisPtr,
-                                                           void* /*edx*/,
-                                                           void* camera,
-                                                           void* visibleBounds,
-                                                           uint32_t onlyShadowCasters);
-    void __fastcall OgreSceneManagerRenderSingleObjectHook(void* thisPtr,
-                                                           void* /*edx*/,
-                                                           void* renderable,
-                                                           const void* pass,
-                                                           uint32_t lightScissoringClipping,
-                                                           uint32_t doLightIteration,
-                                                           const void* manualLightList);
-    void __fastcall OgreRenderQueueAddRenderablePriorityHook(void* thisPtr,
-                                                             void* /*edx*/,
-                                                             void* renderable,
-                                                             uint32_t groupId,
-                                                             uint32_t priority);
-    void __fastcall OgreRenderQueueAddRenderableGroupHook(void* thisPtr,
-                                                          void* /*edx*/,
-                                                          void* renderable,
-                                                          uint32_t groupId);
-    void __fastcall OgreRenderQueueAddRenderableDefaultHook(void* thisPtr,
-                                                            void* /*edx*/,
-                                                            void* renderable);
-    void __fastcall OgreMovableObjectNotifyCurrentCameraHook(void* thisPtr,
-                                                             void* /*edx*/,
-                                                             void* camera);
-    void __fastcall OgreEntityUpdateRenderQueueHook(void* thisPtr,
-                                                    void* /*edx*/,
-                                                    void* renderQueue);
-    void __fastcall OgreSceneNodeFindVisibleObjectsHook(void* thisPtr,
-                                                        void* /*edx*/,
-                                                        void* camera,
-                                                        void* renderQueue,
-                                                        void* visibleBounds,
-                                                        uint32_t includeChildren,
-                                                        uint32_t displayNodes,
-                                                        uint32_t onlyShadowCasters);
-    void* __cdecl ObjectQueryGlobalSlotGetHook(int index);
-    void __fastcall ObjectQueryArraySetHook(void* thisPtr, void* /*edx*/, int index, void* value);
-    void* __fastcall ObjectQueryArrayGetHook(void* thisPtr, void* /*edx*/, int index);
-    int __fastcall ObjectQueryFindZeroIndexHook(void* thisPtr, void* /*edx*/, int startIndex, int endIndex);
-    int __fastcall ObjectQueryFindNonZeroIndexHook(void* thisPtr, void* /*edx*/, int startIndex, int endIndex);
-    void __fastcall ObjectQueryStampedValueSetHook(void* thisPtr, void* /*edx*/, uint32_t value);
-    void __fastcall ObjectQueryBitClearHook(void* thisPtr, void* /*edx*/, int bitIndex);
-    uint8_t __fastcall ObjectQueryBitTestSetHook(void* thisPtr, void* /*edx*/, int bitIndex);
-    uint8_t __fastcall ObjectQueryBitTestClearHook(void* thisPtr, void* /*edx*/, int bitIndex);
-    float __fastcall ObjectStateFloat1fcGetHook(void* thisPtr, void* /*edx*/);
-    uint32_t __fastcall ObjectStateFlags17cGetHook(void* thisPtr, void* /*edx*/);
-    uint32_t __fastcall ObjectStateFlags180GetHook(void* thisPtr, void* /*edx*/);
-    uint32_t __fastcall ObjectStateBit18cGetHook(void* thisPtr, void* /*edx*/, int bitIndex);
-    uint32_t __fastcall ObjectStateBit194GetHook(void* thisPtr, void* /*edx*/, int bitIndex);
-    void __fastcall ObjectStateCall21cHook(void* thisPtr, void* /*edx*/);
 
     namespace
     {
@@ -525,7 +413,7 @@ namespace BZROpenShim
         constexpr uintptr_t kOptionsInputScreenFactoryCallerAddr = 0x007C8600;
         constexpr uintptr_t kOptionsInputBackClickAddr = 0x007B2210;
         constexpr uintptr_t kOptionsInputDefaultsClickAddr = 0x007B2230;
-        constexpr size_t kInlineDetourMaxPatchLen = 32;
+        constexpr size_t kInlineDetourMaxPatchLen = 16;
         constexpr size_t kOptionsInputCtorDetourLen = 10;
         constexpr size_t kOptionsInputKeyReleasedDetourLen = 9;
         constexpr size_t kOptionsInputKeyConfigOffset = 0x188;
@@ -549,7 +437,6 @@ namespace BZROpenShim
         constexpr size_t kWeaponClassOdfOffset = 0x20;
         constexpr float kJumpSnipeVelocityBandThreshold = 0.15f;
         constexpr uintptr_t kGogCalcRangeCraftEntryAddr = 0x0041F240;
-        constexpr uintptr_t kExeImageBaseAddr = 0x00400000;
         constexpr size_t kCalcRangeCraftDetourLen = 8;
         constexpr uintptr_t kGogOffensiveProcessDoSubTaskEntryAddr = 0x004DFE70;
         constexpr size_t kOffensiveProcessDoSubTaskDetourLen = 8;
@@ -560,45 +447,6 @@ namespace BZROpenShim
         constexpr size_t kChunkEffectCreateChunkDetourLen = 9;
         constexpr size_t kChunkEffectCreateChunkletDetourLen = 9;
         constexpr size_t kChunkEffectCreateExpectedLen = 16;
-        constexpr uintptr_t kGogObjectQueryGlobalSlotGetAddr = 0x005E0BC0;
-        constexpr uintptr_t kGogObjectQueryArraySetAddr = 0x005E0F50;
-        constexpr uintptr_t kGogObjectQueryArrayGetAddr = 0x005E0F70;
-        constexpr uintptr_t kGogObjectQueryFindZeroIndexAddr = 0x005E0F90;
-        constexpr uintptr_t kGogObjectQueryFindNonZeroIndexAddr = 0x005E0FD0;
-        constexpr uintptr_t kGogObjectQueryStampedValueSetAddr = 0x005E10D0;
-        constexpr uintptr_t kGogObjectQueryBitClearAddr = 0x005E12E0;
-        constexpr uintptr_t kGogObjectQueryBitTestSetAddr = 0x005E1310;
-        constexpr uintptr_t kGogObjectQueryBitTestClearAddr = 0x005E1350;
-        constexpr size_t kObjectQueryGlobalSlotGetDetourLen = 6;
-        constexpr size_t kObjectQueryArraySetDetourLen = 7;
-        constexpr size_t kObjectQueryArrayGetDetourLen = 7;
-        constexpr size_t kObjectQueryFindZeroIndexDetourLen = 6;
-        constexpr size_t kObjectQueryFindNonZeroIndexDetourLen = 6;
-        constexpr size_t kObjectQueryStampedValueSetDetourLen = 7;
-        constexpr size_t kObjectQueryBitClearDetourLen = 7;
-        constexpr size_t kObjectQueryBitTestSetDetourLen = 6;
-        constexpr size_t kObjectQueryBitTestClearDetourLen = 6;
-        constexpr uintptr_t kObjectQueryGlobalSlotTableAddr = 0x00918370;
-        constexpr size_t kObjectQueryGlobalSlotCount = 16;
-        constexpr int kObjectQueryMaxReasonableIndex = 256;
-        constexpr uintptr_t kObjectQueryMinimumPlausiblePtr = 0x00010000u;
-        constexpr size_t kObjectQueryStampedValueOffset = 0x16C;
-        constexpr size_t kObjectQueryBitfieldOffset = 0x17C;
-        constexpr uintptr_t kGogObjectStateFloat1fcGetAddr = 0x00462570;
-        constexpr uintptr_t kGogObjectStateFlags17cGetAddr = 0x00462590;
-        constexpr uintptr_t kGogObjectStateFlags180GetAddr = 0x004625B0;
-        constexpr uintptr_t kGogObjectStateBit18cGetAddr = 0x004625D0;
-        constexpr uintptr_t kGogObjectStateBit194GetAddr = 0x004625F0;
-        constexpr uintptr_t kGogObjectStateCall21cAddr = 0x00462610;
-        constexpr size_t kObjectStateAccessorDetourLen = 7;
-        constexpr size_t kObjectStateFloat1fcOffset = 0x1FC;
-        constexpr size_t kObjectStateFlags180Offset = 0x180;
-        constexpr size_t kObjectStateBit18cOffset = 0x18C;
-        constexpr size_t kObjectStateBit194Offset = 0x194;
-        constexpr uintptr_t kObservedChunkPathParentAAddr = 0x00480683;
-        constexpr uintptr_t kObservedChunkPathParentBAddr = 0x00480867;
-        constexpr size_t kObservedChunkPathParentADetourLen = 5;
-        constexpr size_t kObservedChunkPathParentBDetourLen = 6;
         constexpr ULONGLONG kSteamChunkCreateHookSettleDelayMs = 15000;
         constexpr uintptr_t kGogAIUnitRemoveEntryAddr = 0x0068FC60;
         constexpr size_t kAIUnitRemoveDetourLen = 11;
@@ -638,129 +486,6 @@ namespace BZROpenShim
             size_t patchLen = 0;
             std::array<uint8_t, kInlineDetourMaxPatchLen> original = {};
         };
-
-        enum class InlineDetourFailureReason
-        {
-            None,
-            InvalidArgs,
-            ExpectedMismatch,
-            TrampolineAllocFailed,
-            ProtectFailed,
-        };
-
-        struct InlineDetourFailureInfo
-        {
-            InlineDetourFailureReason reason = InlineDetourFailureReason::None;
-            uintptr_t target = 0;
-            void* hook = nullptr;
-            size_t patchLen = 0;
-            size_t expectedLen = 0;
-            DWORD lastError = 0;
-            std::array<uint8_t, kInlineDetourMaxPatchLen> current = {};
-            std::array<uint8_t, kInlineDetourMaxPatchLen> expected = {};
-            size_t currentLen = 0;
-            size_t expectedCaptureLen = 0;
-        };
-
-        static InlineDetourFailureInfo g_LastInlineDetourFailure = {};
-
-        static void ClearInlineDetourFailureInfo()
-        {
-            g_LastInlineDetourFailure = {};
-        }
-
-        static void RecordInlineDetourFailure(
-            InlineDetourFailureReason reason,
-            uintptr_t target,
-            void* hook,
-            size_t patchLen,
-            const uint8_t* currentBytes,
-            size_t currentLen,
-            const uint8_t* expectedBytes,
-            size_t expectedLen,
-            DWORD lastError)
-        {
-            g_LastInlineDetourFailure = {};
-            g_LastInlineDetourFailure.reason = reason;
-            g_LastInlineDetourFailure.target = target;
-            g_LastInlineDetourFailure.hook = hook;
-            g_LastInlineDetourFailure.patchLen = patchLen;
-            g_LastInlineDetourFailure.expectedLen = expectedLen;
-            g_LastInlineDetourFailure.lastError = lastError;
-
-            if (currentBytes && currentLen > 0)
-            {
-                g_LastInlineDetourFailure.currentLen =
-                    (std::min)(currentLen, g_LastInlineDetourFailure.current.size());
-                memcpy(
-                    g_LastInlineDetourFailure.current.data(),
-                    currentBytes,
-                    g_LastInlineDetourFailure.currentLen);
-            }
-
-            if (expectedBytes && expectedLen > 0)
-            {
-                g_LastInlineDetourFailure.expectedCaptureLen =
-                    (std::min)(expectedLen, g_LastInlineDetourFailure.expected.size());
-                memcpy(
-                    g_LastInlineDetourFailure.expected.data(),
-                    expectedBytes,
-                    g_LastInlineDetourFailure.expectedCaptureLen);
-            }
-        }
-
-        static const wchar_t* DescribeInlineDetourFailureReason(InlineDetourFailureReason reason)
-        {
-            switch (reason)
-            {
-            case InlineDetourFailureReason::InvalidArgs:
-                return L"invalid-args";
-            case InlineDetourFailureReason::ExpectedMismatch:
-                return L"expected-mismatch";
-            case InlineDetourFailureReason::TrampolineAllocFailed:
-                return L"trampoline-alloc-failed";
-            case InlineDetourFailureReason::ProtectFailed:
-                return L"protect-failed";
-            default:
-                return L"none";
-            }
-        }
-
-        static void FormatInlineDetourBytes(
-            const uint8_t* bytes,
-            size_t len,
-            wchar_t* outBuffer,
-            size_t outBufferCount)
-        {
-            if (!outBuffer || outBufferCount == 0)
-                return;
-
-            outBuffer[0] = L'\0';
-            if (!bytes || len == 0)
-                return;
-
-            size_t offset = 0;
-            for (size_t index = 0; index < len && offset + 4 < outBufferCount; ++index)
-            {
-                const int written = _snwprintf_s(
-                    outBuffer + offset,
-                    outBufferCount - offset,
-                    _TRUNCATE,
-                    index == 0 ? L"%02X" : L" %02X",
-                    static_cast<unsigned>(bytes[index]));
-                if (written <= 0)
-                    break;
-                offset += static_cast<size_t>(written);
-            }
-        }
-
-        static bool InstallInlineDetour32(InlineDetour32& detour,
-                                          uintptr_t target,
-                                          void* hook,
-                                          size_t patchLen,
-                                          const uint8_t* expectedBytes,
-                                          size_t expectedLen,
-                                          const uint8_t* expectedMask = nullptr);
 
         enum class VerticalBand
         {
@@ -806,10 +531,6 @@ namespace BZROpenShim
         struct AiTuningConfig;
         static bool TryGetAiTuningForObject(void* objectPtr, AiTuningConfig& outConfig);
         static bool TryGetObjectOdfToken(void* objectPtr, char (&outToken)[kProducerBuildMenuTokenLen + 1]);
-        static bool TryResolveChunkMeshBaseNameFromRuntimeOdfToken(
-            const char* odfToken,
-            char* outMeshBaseName,
-            size_t outMeshBaseNameCapacity);
         struct ShieldTowerTeamFilterConfig;
         static bool TryGetShieldTowerTeamFilterForObject(void* objectPtr, ShieldTowerTeamFilterConfig& outConfig);
         static void RunShieldTowerFilteredSimulate(void* shieldTowerPtr, float dt);
@@ -817,20 +538,10 @@ namespace BZROpenShim
         static std::filesystem::path GetMainModuleDirectory();
         struct ChunkObjectLinkProbe;
         struct ChunkCreateSourceTreeProbe;
-        struct ChunkVdfRecord;
-        struct ChunkVdfAssetInfo;
         static std::filesystem::path GetChunkPayloadStockResourceDirectory();
         static void RefreshChunkPayloadResourceDirectories();
-        static void EnsureChunkVdfReverseIndex();
-        static ChunkVdfAssetInfo& GetChunkVdfAssetInfoForMesh(const char* meshName);
         static void PopulateChunkVdfCandidates(const char* meshName, ChunkObjectLinkProbe& probe);
         static void PopulateChunkObjectLinkProbeFromIdentityCache(ChunkObjectLinkProbe& probe);
-        static bool TryInferChunkMeshNameFromGeom(
-            const char* geomName,
-            uint32_t classId,
-            char* outMeshName,
-            size_t outMeshNameCapacity);
-        static std::string NormalizeChunkPayloadComponentName(const char* value);
         static bool TryResolveChunkPayloadMeshResource(
             const ChunkObjectLinkProbe& probe,
             const char* preferredMeshName,
@@ -856,13 +567,6 @@ namespace BZROpenShim
             const ChunkObjectLinkProbe& child,
             char* outMeshName,
             size_t outMeshNameCapacity);
-        static bool ChunkVdfRecordMatchesTree(
-            const ChunkVdfAssetInfo& info,
-            const ChunkVdfRecord& record,
-            const ChunkObjectLinkProbe& source,
-            const ChunkObjectLinkProbe& parent,
-            const ChunkObjectLinkProbe& sibling,
-            const ChunkObjectLinkProbe& child);
         static void RefreshChunkObjectIdentityCacheIfNeeded();
 
         struct HudSpriteRectRecord
@@ -1143,7 +847,6 @@ namespace BZROpenShim
             void* directOgreEntity = nullptr;
             void* directOgreLight = nullptr;
             bool directProbeOk = false;
-            void* gameObject = nullptr;
             void* legacyOwner = nullptr;
             void* ownerBridgeRoot = nullptr;
             void* ownerOgreEntity = nullptr;
@@ -1197,21 +900,12 @@ namespace BZROpenShim
             float z;
         };
 
-        struct OgreAxisAlignedBox
-        {
-            OgreVector3 minimum;
-            OgreVector3 maximum;
-            int32_t extent;
-            void* corners;
-        };
-
         struct ChunkProxyTransform
         {
             float x = 0.0f;
             float y = 0.0f;
             float z = 0.0f;
             OgreQuaternion orientation = { 1.0f, 0.0f, 0.0f, 0.0f };
-            OgreVector3 scale = { 1.0f, 1.0f, 1.0f };
         };
 
         struct ChunkProxySlot
@@ -1220,43 +914,20 @@ namespace BZROpenShim
             const void* geomRef = nullptr;
             char geomName[64] = {};
             void* ownerEntity = nullptr;
-            void* ownerOgreEntity = nullptr;
-            void* ownerObj = nullptr;
-            void* sourceRootObject = nullptr;
-            void* sourceRootGameObject = nullptr;
-            void* sourceGameObject = nullptr;
-            void* sceneManager = nullptr;
-            void* rootSceneNode = nullptr;
             char ownerEntityBaseName[32] = {};
             char ownerOgreFilename[32] = {};
             char proofMeshName[128] = {};
             float positionX = 0.0f;
             float positionY = 0.0f;
             float positionZ = 0.0f;
-            float lastAppliedX = 0.0f;
-            float lastAppliedY = 0.0f;
-            float lastAppliedZ = 0.0f;
-            float lastAppliedScaleX = 1.0f;
-            float lastAppliedScaleY = 1.0f;
-            float lastAppliedScaleZ = 1.0f;
             bool useEntryPosition = false;
             void* billboard = nullptr;
             void* sceneNode = nullptr;
             void* entity = nullptr;
-            const void* lastTransformObject = nullptr;
             DWORD lastSeenTick = 0;
-            DWORD meshRetryTick = 0;
             bool active = false;
             bool billboardAssigned = false;
             bool meshAssigned = false;
-            bool haveAppliedTransform = false;
-            uint8_t loggedTransformUpdateCount = 0;
-            uint16_t cameraNotifyCount = 0;
-            uint16_t entityUpdateQueueCount = 0;
-            uint16_t renderProcessCount = 0;
-            uint16_t renderQueueAddCount = 0;
-            uint16_t sceneTraversalCount = 0;
-            uint16_t renderSingleCount = 0;
         };
 
         struct ChunkEffectActiveEntry
@@ -1288,85 +959,12 @@ namespace BZROpenShim
             bool valid = false;
             ChunkObjectLinkProbe source = {};
             ChunkObjectLinkProbe parent = {};
-            ChunkObjectLinkProbe grandparent = {};
-            ChunkObjectLinkProbe root = {};
             ChunkObjectLinkProbe sibling = {};
             ChunkObjectLinkProbe child = {};
-            void* sourceGameObject = nullptr;
-            void* parentGameObject = nullptr;
-            void* grandparentGameObject = nullptr;
-            void* rootGameObject = nullptr;
-            void* selectedBridgeObject = nullptr;
-            void* selectedGameObject = nullptr;
             void* ownerEntity = nullptr;
-            void* ownerObj = nullptr;
-            char selectedGameObjectOdf[kProducerBuildMenuTokenLen + 1] = {};
-            char rootGameObjectOdf[kProducerBuildMenuTokenLen + 1] = {};
             char ownerEntityBaseName[32] = {};
             char ownerOgreFilename[32] = {};
             char ownerResolvedMeshName[48] = {};
-        };
-
-        struct ChunkFragmentStackCandidate
-        {
-            uint32_t slotIndex = 0;
-            uint32_t rawValue = 0;
-            bool valid = false;
-            ChunkObjectLinkProbe probe = {};
-        };
-
-        struct ChunkFragmentStackProbe
-        {
-            bool valid = false;
-            uint32_t callerRva = 0;
-            uint32_t stackWords[8] = {};
-            ChunkFragmentStackCandidate slot1 = {};
-            ChunkFragmentStackCandidate slot5 = {};
-            ChunkFragmentStackCandidate slot6 = {};
-            ChunkFragmentStackCandidate slot7 = {};
-        };
-
-        struct ChunkFragmentEventRecord
-        {
-            DWORD tick = 0;
-            uint32_t sequence = 0;
-            uint32_t thisPtr = 0;
-            uint32_t sourceObjectPtr = 0;
-            uint32_t boundObjectPtr = 0;
-            uint32_t createdObjectPtr = 0;
-            uint32_t resultObjectPtr = 0;
-            uint32_t callerRva = 0;
-            uint32_t countBefore = 0;
-            uint32_t countAfter = 0;
-            uint8_t preserveFlag = 0;
-            bool stackWordsValid = false;
-            uint32_t stackWords[8] = {};
-            bool sourceSummaryValid = false;
-            uint32_t sourceClassId = 0;
-            uint32_t sourceFlags = 0;
-            uint32_t sourceOwner = 0;
-            char sourceGeomName[64] = {};
-            char sourceProbeMeshName[48] = {};
-            char sourceProbeVdfCandidates[128] = {};
-            char sourceProbeOwnerMeshName[48] = {};
-            uint32_t sourceProbeRootObjectPtr = 0;
-            uint32_t sourceProbeSelectedBridgePtr = 0;
-            uint32_t sourceProbeGameObjectPtr = 0;
-            uint32_t sourceProbeOwnerEntityPtr = 0;
-            uint32_t sourceProbeOwnerObjPtr = 0;
-            char sourceTreeSummary[384] = {};
-            char sourceTreeVdfSummary[384] = {};
-            char sourceTreeMeshCandidates[256] = {};
-            bool createdSummaryValid = false;
-            uint32_t createdClassId = 0;
-            uint32_t createdFlags = 0;
-            uint32_t createdOwner = 0;
-            char createdGeomName[64] = {};
-            bool resultSummaryValid = false;
-            uint32_t resultClassId = 0;
-            uint32_t resultFlags = 0;
-            uint32_t resultOwner = 0;
-            char resultGeomName[64] = {};
         };
 
         static bool g_EnableChunkRenderFallback = false;
@@ -1386,13 +984,6 @@ namespace BZROpenShim
         static DWORD g_SatelliteVisibilityLastTick = 0;
         static DWORD g_SatelliteVisibilityLogIntervalMs = 1000;
         static std::unordered_map<uintptr_t, uint32_t> g_ChunkObservedClassIds = {};
-        static constexpr size_t kChunkFragmentEventCapacity = 128;
-        static std::array<ChunkFragmentEventRecord, kChunkFragmentEventCapacity> g_ChunkFragmentEvents = {};
-        static SRWLOCK g_ChunkFragmentEventLock = SRWLOCK_INIT;
-        static size_t g_ChunkFragmentEventStart = 0;
-        static size_t g_ChunkFragmentEventCount = 0;
-        static uint32_t g_ChunkFragmentEventTotal = 0;
-        static bool g_ChunkFragmentEventsFlushed = false;
         struct ChunkVdfRecord
         {
             char name[16] = {};
@@ -1418,125 +1009,20 @@ namespace BZROpenShim
         struct ChunkResolvedBindingEntry
         {
             char meshName[48] = {};
-            char ownerMeshName[48] = {};
             char vdfCandidates[128] = {};
-            char payloadComponentName[64] = {};
-            char payloadMeshName[128] = {};
             uint32_t sourceClassId = 0;
             char sourceGeomName[64] = {};
-            uint32_t sourceParentObjectPtr = 0;
-            uint32_t sourceSiblingObjectPtr = 0;
-            uint32_t sourceChildObjectPtr = 0;
-            uint32_t sourceRootObjectPtr = 0;
-            uint32_t sourceRootGameObjectPtr = 0;
-            uint32_t sourceGameObjectPtr = 0;
-            uint32_t sourceOwnerEntityPtr = 0;
-            uint32_t sourceOwnerObjPtr = 0;
-            uint32_t fragmentCallerRva = 0;
-            uint32_t fragmentStackWord5 = 0;
-            uint32_t fragmentStackWord6 = 0;
-            uint32_t fragmentStackWord7 = 0;
             DWORD bindTick = 0;
             DWORD lastSeenTick = 0;
         };
-
-        struct ChunkFragmentBatchKey
-        {
-            uint32_t callerRva = 0;
-            uint32_t stackWord5 = 0;
-            uint32_t stackWord6 = 0;
-
-            bool operator==(const ChunkFragmentBatchKey& other) const
-            {
-                return callerRva == other.callerRva &&
-                       stackWord5 == other.stackWord5 &&
-                       stackWord6 == other.stackWord6;
-            }
-        };
-
-        struct ChunkFragmentBatchKeyHash
-        {
-            size_t operator()(const ChunkFragmentBatchKey& key) const
-            {
-                return
-                    (static_cast<size_t>(key.callerRva) * 1315423911u) ^
-                    (static_cast<size_t>(key.stackWord5) * 2654435761u) ^
-                    static_cast<size_t>(key.stackWord6);
-            }
-        };
-
-        struct ChunkFragmentBatchCandidateState
-        {
-            std::vector<std::string> candidates = {};
-            DWORD bindTick = 0;
-            DWORD lastSeenTick = 0;
-        };
-
-        static void MergeChunkResolvedBindingFromLinkProbe(
-            ChunkResolvedBindingEntry& entry,
-            const ChunkObjectLinkProbe& probe);
-        static bool HasStrongChunkObjectLinkIdentity(const ChunkObjectLinkProbe& probe);
-        static bool HasCorroboratingChunkSourceTreeIdentity(const ChunkCreateSourceTreeProbe& probe);
-        static void BuildChunkTreeMeshCandidateList(
-            const ChunkCreateSourceTreeProbe& probe,
-            std::vector<std::string>& outCandidates);
-        static bool BuildChunkTreeMeshCandidateSummary(
-            const ChunkCreateSourceTreeProbe& probe,
-            char* outText,
-            size_t outTextCapacity);
-        static void BuildChunkSourceTreeSummary(
-            const ChunkCreateSourceTreeProbe& probe,
-            char* outSummary,
-            size_t outSummaryCapacity,
-            char* outVdfSummary,
-            size_t outVdfSummaryCapacity);
-        static bool TryGetGameObjectMeshName(void* gameObject, char* outMeshName, size_t outMeshNameCapacity);
-        static bool TryResolveChunkMeshNameFromSourceTreeGameObject(
-            const ChunkCreateSourceTreeProbe& sourceTreeProbe,
-            char* outMeshName,
-            size_t outMeshNameCapacity);
-        static bool TryResolveChunkOwnerMeshNameFromSourceTreeProbe(
-            const ChunkCreateSourceTreeProbe& sourceTreeProbe,
-            char* outMeshName,
-            size_t outMeshNameCapacity);
-        static bool TryResolveChunkOwnerMeshNameForBinding(
-            const ChunkResolvedBindingEntry* binding,
-            const ChunkBridgeSnapshot& bridgeSnapshot,
-            char* outMeshName,
-            size_t outMeshNameCapacity);
-        static void BuildChunkPayloadComponentCandidates(
-            const ChunkResolvedBindingEntry& entry,
-            std::vector<std::string>& outCandidates);
-        static void RefreshChunkResolvedBindingPayloadMesh(uintptr_t objectKey, ChunkResolvedBindingEntry& entry);
-        static void RefreshChunkResolvedBindingPayloadMeshesForRoot(uint32_t sourceRootObjectPtr);
-        static bool HasChunkResolvedBindingIdentityData(const ChunkResolvedBindingEntry& entry);
-        static void MergeChunkResolvedBindingEntries(
-            ChunkResolvedBindingEntry& target,
-            const ChunkResolvedBindingEntry& source);
-        static bool ShouldAcceptOwnerResolvedMeshFallback(
-            const ChunkCreateSourceTreeProbe& sourceTreeProbe,
-            const ChunkFragmentStackProbe* fragmentStackProbe);
-        static bool TryBuildChunkFragmentBatchKey(
-            const ChunkFragmentStackProbe* fragmentStackProbe,
-            ChunkFragmentBatchKey& outKey);
-        static void PruneChunkFragmentBatchBindingsIfNeeded();
-        static void PruneChunkFragmentBatchCandidateStatesIfNeeded();
-        static const ChunkResolvedBindingEntry* FindChunkFragmentBatchBindingEntry(
-            uint32_t callerRva,
-            uint32_t stackWord5,
-            uint32_t stackWord6);
 
         static std::unordered_map<std::string, ChunkVdfAssetInfo> g_ChunkVdfAssetCache = {};
         static std::unordered_map<uintptr_t, ChunkObjectIdentityCacheEntry> g_ChunkObjectIdentityCache = {};
         static std::unordered_map<uintptr_t, ChunkResolvedBindingEntry> g_ChunkResolvedBindingCache = {};
-        static std::unordered_map<ChunkFragmentBatchKey, ChunkResolvedBindingEntry, ChunkFragmentBatchKeyHash> g_ChunkFragmentBatchBindingCache = {};
-        static std::unordered_map<ChunkFragmentBatchKey, ChunkFragmentBatchCandidateState, ChunkFragmentBatchKeyHash> g_ChunkFragmentBatchCandidateCache = {};
         static std::unordered_map<std::string, bool> g_ChunkPayloadMeshExistsCache = {};
         static std::unordered_set<std::string> g_ChunkPayloadResolveFailureLogCache = {};
         static DWORD g_ChunkObjectIdentityLastRefreshTick = 0;
         static DWORD g_ChunkResolvedBindingLastPruneTick = 0;
-        static DWORD g_ChunkFragmentBatchBindingLastPruneTick = 0;
-        static DWORD g_ChunkFragmentBatchCandidateLastPruneTick = 0;
         struct ChunkVdfMeshRef
         {
             char meshBase[48] = {};
@@ -1584,79 +1070,12 @@ namespace BZROpenShim
         static InlineDetour32 g_AIUnitRemoveDetour = {};
         static InlineDetour32 g_ChunkEffectCreateChunkDetour = {};
         static InlineDetour32 g_ChunkEffectCreateChunkletDetour = {};
-        static InlineDetour32 g_ObservedChunkPathParentADetour = {};
-        static InlineDetour32 g_ObservedChunkPathParentBDetour = {};
-        static InlineDetour32 g_ObjectQueryGlobalSlotGetDetour = {};
-        static InlineDetour32 g_ObjectQueryArraySetDetour = {};
-        static InlineDetour32 g_ObjectQueryArrayGetDetour = {};
-        static InlineDetour32 g_ObjectQueryFindZeroIndexDetour = {};
-        static InlineDetour32 g_ObjectQueryFindNonZeroIndexDetour = {};
-        static InlineDetour32 g_ObjectQueryStampedValueSetDetour = {};
-        static InlineDetour32 g_ObjectQueryBitClearDetour = {};
-        static InlineDetour32 g_ObjectQueryBitTestSetDetour = {};
-        static InlineDetour32 g_ObjectQueryBitTestClearDetour = {};
-        static InlineDetour32 g_ObjectStateFloat1fcGetDetour = {};
-        static InlineDetour32 g_ObjectStateFlags17cGetDetour = {};
-        static InlineDetour32 g_ObjectStateFlags180GetDetour = {};
-        static InlineDetour32 g_ObjectStateBit18cGetDetour = {};
-        static InlineDetour32 g_ObjectStateBit194GetDetour = {};
-        static InlineDetour32 g_ObjectStateCall21cDetour = {};
-        static InlineDetour32 g_OgreSceneManagerFindVisibleObjectsDetour = {};
-        static InlineDetour32 g_OgreSceneManagerRenderSingleObjectDetour = {};
-        static InlineDetour32 g_OgreSceneNodeFindVisibleObjectsDetour = {};
-        static InlineDetour32 g_OgreRenderQueueProcessVisibleObjectDetour = {};
-        static InlineDetour32 g_OgreRenderQueueAddRenderableDefaultDetour = {};
-        static InlineDetour32 g_OgreRenderQueueAddRenderableGroupDetour = {};
-        static InlineDetour32 g_OgreRenderQueueAddRenderablePriorityDetour = {};
-        static InlineDetour32 g_OgreMovableObjectNotifyCurrentCameraDetour = {};
-        static InlineDetour32 g_OgreEntityUpdateRenderQueueDetour = {};
         static bool g_ChunkEffectCreateHooksInstalled = false;
         static bool g_ChunkEffectCreateHooksLogged = false;
-        static bool g_ObjectQuerySafetyEnabled = true;
-        static bool g_ObjectQuerySafetyHooksInstalled = false;
-        static bool g_ObjectQuerySafetyHooksLogged = false;
-        static bool g_ObjectQuerySafetyHooksFailureLogged = false;
-        static bool g_ObservedChunkPathProbesInstalled = false;
-        static bool g_ObservedChunkPathProbesLogged = false;
-        static bool g_ObservedChunkPathProbesMismatchLogged = false;
-        static bool g_OgreChunkTraversalHooksInstalled = false;
-        static bool g_OgreChunkTraversalHooksLogged = false;
-        static bool g_OgreChunkTraversalHooksMismatchLogged = false;
-        static volatile long g_ObservedChunkPathProbeBudget = 96;
         static bool g_AllowUnsafeSteamChunkCreateHooks = false;
         static bool g_ChunkEffectCreateHooksWaitLogged = false;
         static bool g_ChunkEffectCreateHooksMismatchLogged = false;
         static ULONGLONG g_ChunkEffectCreateHooksReadyTick = 0;
-        static volatile long g_ObjectQuerySafetyGuardLogBudget = 24;
-        static void* g_ObservedChunkPathParentATrampoline = nullptr;
-        static void* g_ObservedChunkPathParentBTrampoline = nullptr;
-        static FnOgreSceneManagerFindVisibleObjects g_OgreFn_SceneManagerFindVisibleObjects = nullptr;
-        static FnOgreSceneManagerRenderSingleObject g_OgreFn_SceneManagerRenderSingleObject = nullptr;
-        static FnOgreSceneNodeFindVisibleObjects g_OgreFn_SceneNodeFindVisibleObjects = nullptr;
-        static FnOgreRenderQueueProcessVisibleObject g_OgreFn_RenderQueueProcessVisibleObject = nullptr;
-        static FnOgreRenderQueueAddRenderableDefault g_OgreFn_RenderQueueAddRenderableDefault = nullptr;
-        static FnOgreRenderQueueAddRenderableGroup g_OgreFn_RenderQueueAddRenderableGroup = nullptr;
-        static FnOgreRenderQueueAddRenderablePriority g_OgreFn_RenderQueueAddRenderablePriority = nullptr;
-        static FnOgreMovableObjectNotifyCurrentCamera g_OgreFn_MovableObjectNotifyCurrentCamera = nullptr;
-        static FnOgreEntityUpdateRenderQueue g_OgreFn_EntityUpdateRenderQueue = nullptr;
-        struct ObservedChunkPathRegisterBlock
-        {
-            uint32_t edi = 0;
-            uint32_t esi = 0;
-            uint32_t ebp = 0;
-            uint32_t originalEspBeforePushad = 0;
-            uint32_t ebx = 0;
-            uint32_t edx = 0;
-            uint32_t ecx = 0;
-            uint32_t eax = 0;
-        };
-        struct ObservedChunkPathProbeLogState
-        {
-            uint64_t signature = 0;
-            DWORD lastTick = 0;
-        };
-        static ObservedChunkPathProbeLogState g_ObservedChunkPathParentALogState = {};
-        static ObservedChunkPathProbeLogState g_ObservedChunkPathParentBLogState = {};
         static bool g_ConstructorRemoteBuildFixInstalled = false;
         static bool g_ShieldTowerSimulateHookInstalled = false;
         static bool g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
@@ -1838,25 +1257,17 @@ namespace BZROpenShim
         static constexpr size_t kChunkEffectEntrySize = 0x20;
         static constexpr uint32_t kClassIdChunk = 53;
         static constexpr DWORD kChunkProxyExpireMs = 400;
-        static constexpr DWORD kChunkProxyMeshExpireMs = 6000;
         static constexpr DWORD kChunkProxyRetryDelayMs = 1000;
-        static constexpr float kChunkProxyEntryPositionTolerance = 256.0f;
-        static constexpr float kChunkProxyLocalTransformTolerance = 64.0f;
-        static constexpr float kChunkProxyAnchoredTransformAdoptDistance = 512.0f;
         static constexpr DWORD kChunkObjectIdentityRefreshMs = 1000;
         static constexpr DWORD kChunkResolvedBindingExpireMs = 10000;
         static constexpr DWORD kChunkResolvedBindingPruneMs = 1000;
-        static constexpr DWORD kChunkFragmentBatchBindingExpireMs = 10000;
-        static constexpr DWORD kChunkFragmentBatchBindingPruneMs = 1000;
-        static constexpr DWORD kChunkFragmentBatchCandidateExpireMs = 10000;
-        static constexpr DWORD kChunkFragmentBatchCandidatePruneMs = 1000;
         static constexpr size_t kChunkPayloadResolveFailureLogCacheLimit = 512;
         static constexpr size_t kChunkObjectIdentityMaxObjectsPerRefresh = 1024;
         static constexpr size_t kChunkObjectIdentityMaxNodesPerObject = 256;
         static constexpr float kChunkProxyHiddenY = -100000.0f;
         static constexpr const char* kChunkProxyBillboardSetName = "OpenShimChunkProxyDebug";
         static constexpr const char* kChunkProxyMaterialName = "BaseWhiteNoLighting";
-        static constexpr const char* kChunkProxyMaterialGroup = "Autodetect";
+        static constexpr const char* kChunkProxyMaterialGroup = "General";
         static constexpr const char* kChunkPayloadResourceRootName = "OpenShimChunkPayloads";
         static constexpr const char* kChunkPayloadModRelativeDirName = "chunkMeshes";
         static constexpr const char* kChunkPayloadResourceLocationType = "FileSystem";
@@ -1950,8 +1361,6 @@ namespace BZROpenShim
         using FnOgreGetRootSceneNode = void*(__thiscall*)(void*);
         using FnOgreCreateBillboardSet = void*(__thiscall*)(void*, uint32_t);
         using FnOgreCreateChildSceneNode = void*(__thiscall*)(void*, const OgreVector3&, const OgreQuaternion&);
-        using FnOgreCreateSceneNode = void*(__thiscall*)(void*);
-        using FnOgreAddChildNode = void(__thiscall*)(void*, void*);
         using FnOgreCreateEntity = void*(__thiscall*)(void*, const std::string&);
         using FnOgreGetResourceGroupManager = void*(__cdecl*)();
         using FnOgreResourceGroupExists = bool(__thiscall*)(void*, const std::string&);
@@ -1966,46 +1375,6 @@ namespace BZROpenShim
         using FnOgreSetNodePosition = void(__thiscall*)(void*, float, float, float);
         using FnOgreSetNodeOrientation = void(__thiscall*)(void*, float, float, float, float);
         using FnOgreSetVisible = void(__thiscall*)(void*, bool);
-        using FnOgreSetVisibilityFlags = void(__thiscall*)(void*, uint32_t);
-        using FnOgreSetQueryFlags = void(__thiscall*)(void*, uint32_t);
-        using FnOgreSetRenderingDistance = void(__thiscall*)(void*, float);
-        using FnOgreSetCastShadows = void(__thiscall*)(void*, bool);
-        using FnOgreSetRenderQueueGroup = void(__thiscall*)(void*, uint8_t);
-        using FnOgreSetInheritOrientation = void(__thiscall*)(void*, bool);
-        using FnOgreSetInheritScale = void(__thiscall*)(void*, bool);
-        using FnOgreSetNodeScale = void(__thiscall*)(void*, float, float, float);
-        using FnOgreSetSceneNodeVisible = void(__thiscall*)(void*, bool, bool);
-        using FnOgreNeedNodeUpdate = void(__thiscall*)(void*, bool);
-        using FnOgreSceneNodeUpdate = void(__thiscall*)(void*, bool, bool);
-        using FnOgreSetEntityMaterialName = void(__thiscall*)(void*, const std::string&, const std::string&);
-        using FnOgreSetSubEntityMaterialName = void(__thiscall*)(void*, const std::string&, const std::string&);
-        using FnOgreGetBoundingRadius = float(__thiscall*)(void*);
-        using FnOgreGetBoundingBox = const OgreAxisAlignedBox*(__thiscall*)(void*);
-        using FnOgreGetWorldBoundingBox = const OgreAxisAlignedBox*(__thiscall*)(void*, bool);
-        using FnOgreGetNodeDerivedPosition = const OgreVector3*(__thiscall*)(void*);
-        using FnOgreGetParentSceneNode = void*(__thiscall*)(void*);
-        using FnOgreGetManager = void*(__thiscall*)(void*);
-        using FnOgreIsInSceneGraph = bool(__thiscall*)(void*);
-        using FnOgreGetVisible = bool(__thiscall*)(void*);
-        using FnOgreIsVisible = bool(__thiscall*)(void*);
-        using FnOgreGetVisibilityFlags = uint32_t(__thiscall*)(void*);
-        using FnOgreGetRenderQueueGroup = uint8_t(__thiscall*)(void*);
-        using FnOgreGetRenderQueue = void*(__thiscall*)(void*);
-        using FnOgreGetCurrentViewport = void*(__thiscall*)(void*);
-        using FnOgreViewportGetCamera = void*(__thiscall*)(void*);
-        using FnOgreGetNumSubEntities = uint32_t(__thiscall*)(void*);
-        using FnOgreGetSubEntity = void*(__thiscall*)(void*, uint32_t);
-        using FnOgreGetRenderableTechnique = void*(__thiscall*)(void*);
-        using FnOgreGetTechniquePass = void*(__thiscall*)(void*, uint16_t);
-        using FnOgreSetPassDepthCheckEnabled = void(__thiscall*)(void*, bool);
-        using FnOgreSetPassCullingMode = void(__thiscall*)(void*, uint32_t);
-        using FnOgreGetSubEntityMaterialName = const std::string&(__thiscall*)(void*);
-        using FnOgreGetMovableObjectName = const std::string&(__thiscall*)(void*);
-        using FnOgreGetRootSingletonPtr = void*(__cdecl*)();
-        using FnOgreGetCurrentSceneManager = void*(__thiscall*)(void*);
-        using FnOgreNumAttachedObjects = uint16_t(__thiscall*)(void*);
-        using FnOgreGetAttachedObjectByIndex = void*(__thiscall*)(void*, uint16_t);
-        using FnOgreProcessQueuedUpdates = void(__cdecl*)();
 
         template<typename T>
         static T ResolveOgreProc(const char* name)
@@ -2020,18 +1389,6 @@ namespace BZROpenShim
                 return nullptr;
 
             return reinterpret_cast<T>(GetProcAddress(ogreMain, name));
-        }
-
-        template<typename T>
-        static T ResolveOgreProcByOffset(uintptr_t offset)
-        {
-            static HMODULE ogreMain = nullptr;
-            if (!ogreMain)
-                ogreMain = GetModuleHandleA("OgreMain.dll");
-            if (!ogreMain || offset == 0)
-                return nullptr;
-
-            return reinterpret_cast<T>(reinterpret_cast<uint8_t*>(ogreMain) + offset);
         }
 
         static bool EnvFlagEnabled(const char* name)
@@ -2192,17 +1549,6 @@ namespace BZROpenShim
                 return true;
 
             return InterlockedDecrement(&g_ChunkRenderLogBudget) >= 0;
-        }
-
-        static void ResetChunkFragmentEventBuffer()
-        {
-            AcquireSRWLockExclusive(&g_ChunkFragmentEventLock);
-            g_ChunkFragmentEvents = {};
-            g_ChunkFragmentEventStart = 0;
-            g_ChunkFragmentEventCount = 0;
-            g_ChunkFragmentEventTotal = 0;
-            g_ChunkFragmentEventsFlushed = false;
-            ReleaseSRWLockExclusive(&g_ChunkFragmentEventLock);
         }
 
         static bool TryReadAsciiString(const char* address, char* outText, size_t outTextCapacity)
@@ -2410,48 +1756,6 @@ namespace BZROpenShim
             }
         }
 
-        static bool IsPlausibleChunkOwnerToken(const char* value, bool allowMeshExtension)
-        {
-            if (!value || !*value)
-                return false;
-
-            size_t len = 0;
-            bool sawAlphaNum = false;
-            bool sawDot = false;
-            for (const unsigned char* p = reinterpret_cast<const unsigned char*>(value); *p; ++p)
-            {
-                const unsigned char ch = *p;
-                ++len;
-                if (std::isalnum(ch))
-                {
-                    sawAlphaNum = true;
-                    continue;
-                }
-                if (ch == '_' || ch == '-')
-                    continue;
-                if (allowMeshExtension && ch == '.')
-                {
-                    if (sawDot)
-                        return false;
-                    sawDot = true;
-                    continue;
-                }
-                return false;
-            }
-
-            if (!sawAlphaNum || len < 3)
-                return false;
-
-            if (sawDot)
-            {
-                const char* ext = std::strrchr(value, '.');
-                if (!ext || _stricmp(ext, ".mesh") != 0)
-                    return false;
-            }
-
-            return true;
-        }
-
         static bool BuildChunkOwnerMeshName(
             const char* ownerEntityBaseName,
             const char* ownerOgreFilename,
@@ -2464,8 +1768,8 @@ namespace BZROpenShim
             outMeshName[0] = '\0';
 
             const char* preferredName =
-                (ownerOgreFilename && IsPlausibleChunkOwnerToken(ownerOgreFilename, true)) ? ownerOgreFilename :
-                ((ownerEntityBaseName && IsPlausibleChunkOwnerToken(ownerEntityBaseName, false)) ? ownerEntityBaseName : nullptr);
+                (ownerOgreFilename && *ownerOgreFilename) ? ownerOgreFilename :
+                ((ownerEntityBaseName && *ownerEntityBaseName) ? ownerEntityBaseName : nullptr);
             if (!preferredName || !*preferredName)
                 return false;
 
@@ -2511,22 +1815,15 @@ namespace BZROpenShim
                 TryReadInlineAsciiBuffer(entityBytes + 0xD4, 16, ogreFilename, sizeof(ogreFilename)) ||
                 TryReadInlineAsciiBuffer(entityBytes + 0x94, 16, ogreFilename, sizeof(ogreFilename));
 
-            const bool baseAccepted = baseRead && IsPlausibleChunkOwnerToken(entityBaseName, false);
-            const bool fileAccepted = fileRead && IsPlausibleChunkOwnerToken(ogreFilename, true);
-
-            if (outEntityBaseName && outEntityBaseNameCapacity > 0 && baseAccepted)
+            if (outEntityBaseName && outEntityBaseNameCapacity > 0 && baseRead)
                 strncpy_s(outEntityBaseName, outEntityBaseNameCapacity, entityBaseName, _TRUNCATE);
-            if (outOgreFilename && outOgreFilenameCapacity > 0 && fileAccepted)
+            if (outOgreFilename && outOgreFilenameCapacity > 0 && fileRead)
                 strncpy_s(outOgreFilename, outOgreFilenameCapacity, ogreFilename, _TRUNCATE);
 
             if (outResolvedMeshName && outResolvedMeshNameCapacity > 0)
-                BuildChunkOwnerMeshName(
-                    baseAccepted ? entityBaseName : nullptr,
-                    fileAccepted ? ogreFilename : nullptr,
-                    outResolvedMeshName,
-                    outResolvedMeshNameCapacity);
+                BuildChunkOwnerMeshName(entityBaseName, ogreFilename, outResolvedMeshName, outResolvedMeshNameCapacity);
 
-            return baseAccepted || fileAccepted;
+            return baseRead || fileRead;
         }
 
         static int16_t ClampHudSpriteCoord(int value)
@@ -2794,25 +2091,6 @@ namespace BZROpenShim
                    record.y <= 8192;
         }
 
-        static bool TryReadHudSpriteRectRecord(
-            const HudSpriteRectRecord* candidate,
-            HudSpriteRectRecord& outRecord)
-        {
-            outRecord = {};
-            if (!candidate)
-                return false;
-
-            __try
-            {
-                outRecord = *candidate;
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
-        }
-
         static bool DiscoverStockScrapPilotPanelRecordAddresses(std::vector<uintptr_t>& outAddresses)
         {
             outAddresses.clear();
@@ -2855,8 +2133,14 @@ namespace BZROpenShim
                 {
                     const auto* candidate = reinterpret_cast<const HudSpriteRectRecord*>(regionBase + offset);
                     HudSpriteRectRecord record = {};
-                    if (!TryReadHudSpriteRectRecord(candidate, record))
+                    __try
+                    {
+                        record = *candidate;
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
                         continue;
+                    }
 
                     if (!HudSpriteRecordLooksLikeLivePanelRecord(record))
                         continue;
@@ -3396,19 +2680,7 @@ namespace BZROpenShim
                 sizeof(outProbe.geomName),
                 ownerUnused);
             if (ok)
-            {
                 PopulateChunkObjectLinkProbeFromIdentityCache(outProbe);
-                if (!outProbe.cachedMeshName[0] &&
-                    outProbe.geomName[0] &&
-                    TryInferChunkMeshNameFromGeom(
-                        outProbe.geomName,
-                        outProbe.classId,
-                        outProbe.cachedMeshName,
-                        sizeof(outProbe.cachedMeshName)))
-                {
-                    PopulateChunkVdfCandidates(outProbe.cachedMeshName, outProbe);
-                }
-            }
             return ok;
         }
 
@@ -3432,52 +2704,29 @@ namespace BZROpenShim
 
         static void StoreChunkResolvedBinding(
             const uint8_t* objectBytes,
-            const ChunkCreateSourceTreeProbe& sourceTreeProbe,
-            const ChunkFragmentStackProbe* fragmentStackProbe)
+            const ChunkCreateSourceTreeProbe& sourceTreeProbe)
         {
-            if (!objectBytes)
+            if (!objectBytes || !sourceTreeProbe.valid)
                 return;
 
             ChunkResolvedBindingEntry entry = {};
-            ChunkFragmentBatchKey batchKey = {};
-            const bool hasBatchKey = TryBuildChunkFragmentBatchKey(fragmentStackProbe, batchKey);
-            const bool hasStrongSourceSignal =
-                sourceTreeProbe.valid &&
-                (sourceTreeProbe.source.vdfCandidates[0] || sourceTreeProbe.source.geomName[0]);
-            const bool allowWeakSourceMeshIdentity =
-                sourceTreeProbe.valid &&
-                sourceTreeProbe.source.cachedMeshName[0] &&
-                (hasStrongSourceSignal || hasBatchKey);
-            const bool acceptOwnerResolvedMeshFallback =
-                ShouldAcceptOwnerResolvedMeshFallback(sourceTreeProbe, fragmentStackProbe);
-            bool meshFromWeakSource = false;
-            if (sourceTreeProbe.valid &&
-                TryResolveChunkMeshNameFromSourceTreeGameObject(
-                    sourceTreeProbe,
-                    entry.meshName,
-                    sizeof(entry.meshName)))
-            {
-            }
-            else if (allowWeakSourceMeshIdentity)
+            if (sourceTreeProbe.source.cachedMeshName[0])
             {
                 strncpy_s(entry.meshName, sizeof(entry.meshName), sourceTreeProbe.source.cachedMeshName, _TRUNCATE);
-                meshFromWeakSource = true;
             }
-            else if (acceptOwnerResolvedMeshFallback)
+            else if (sourceTreeProbe.ownerResolvedMeshName[0])
             {
                 strncpy_s(entry.meshName, sizeof(entry.meshName), sourceTreeProbe.ownerResolvedMeshName, _TRUNCATE);
-                meshFromWeakSource = true;
             }
-            else if (sourceTreeProbe.valid && (hasStrongSourceSignal || hasBatchKey))
+            else
             {
                 ResolveChunkCreateMeshContext(
                     sourceTreeProbe,
                     entry.meshName,
                     sizeof(entry.meshName));
-                meshFromWeakSource = true;
             }
 
-            if (sourceTreeProbe.valid && sourceTreeProbe.source.vdfCandidates[0])
+            if (sourceTreeProbe.source.vdfCandidates[0])
             {
                 strncpy_s(
                     entry.vdfCandidates,
@@ -3485,18 +2734,7 @@ namespace BZROpenShim
                     sourceTreeProbe.source.vdfCandidates,
                     _TRUNCATE);
             }
-            else if (sourceTreeProbe.valid && entry.meshName[0] && acceptOwnerResolvedMeshFallback)
-            {
-                BuildChunkVdfSourceCandidateList(
-                    entry.meshName,
-                    sourceTreeProbe.source,
-                    sourceTreeProbe.parent,
-                    sourceTreeProbe.sibling,
-                    sourceTreeProbe.child,
-                    entry.vdfCandidates,
-                    sizeof(entry.vdfCandidates));
-            }
-            else if (sourceTreeProbe.valid && entry.meshName[0])
+            else if (entry.meshName[0])
             {
                 BuildChunkVdfSourceCandidateList(
                     entry.meshName,
@@ -3508,141 +2746,14 @@ namespace BZROpenShim
                     sizeof(entry.vdfCandidates));
             }
 
-            if (sourceTreeProbe.valid)
-                entry.sourceClassId = sourceTreeProbe.source.classId;
-            if (sourceTreeProbe.valid && sourceTreeProbe.source.geomName[0])
+            entry.sourceClassId = sourceTreeProbe.source.classId;
+            if (sourceTreeProbe.source.geomName[0])
                 strncpy_s(entry.sourceGeomName, sizeof(entry.sourceGeomName), sourceTreeProbe.source.geomName, _TRUNCATE);
-            if (sourceTreeProbe.valid)
-            {
-                entry.sourceParentObjectPtr = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(sourceTreeProbe.parent.objectBytes));
-                entry.sourceSiblingObjectPtr = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(sourceTreeProbe.sibling.objectBytes));
-                entry.sourceChildObjectPtr = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(sourceTreeProbe.child.objectBytes));
-                entry.sourceRootObjectPtr = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(sourceTreeProbe.root.objectBytes));
-                entry.sourceRootGameObjectPtr = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(sourceTreeProbe.rootGameObject));
-                entry.sourceGameObjectPtr = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(sourceTreeProbe.selectedGameObject));
-                entry.sourceOwnerEntityPtr = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(sourceTreeProbe.ownerEntity));
-                entry.sourceOwnerObjPtr = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(sourceTreeProbe.ownerObj));
-            }
-            if (sourceTreeProbe.valid)
-            {
-                TryResolveChunkOwnerMeshNameFromSourceTreeProbe(
-                    sourceTreeProbe,
-                    entry.ownerMeshName,
-                    sizeof(entry.ownerMeshName));
-            }
-
-            if (fragmentStackProbe && fragmentStackProbe->valid)
-            {
-                auto mergeFragmentProbe = [&entry, &meshFromWeakSource, hasStrongSourceSignal](
-                                              const ChunkObjectLinkProbe& probe)
-                {
-                    if (meshFromWeakSource &&
-                        probe.cachedMeshName[0] &&
-                        HasStrongChunkObjectLinkIdentity(probe) &&
-                        (!entry.meshName[0] ||
-                         !hasStrongSourceSignal ||
-                         _stricmp(entry.meshName, probe.cachedMeshName) != 0))
-                    {
-                        strncpy_s(entry.meshName, sizeof(entry.meshName), probe.cachedMeshName, _TRUNCATE);
-                        meshFromWeakSource = false;
-                    }
-
-                    MergeChunkResolvedBindingFromLinkProbe(entry, probe);
-                };
-
-                entry.fragmentCallerRva = fragmentStackProbe->callerRva;
-                entry.fragmentStackWord5 = fragmentStackProbe->stackWords[5];
-                entry.fragmentStackWord6 = fragmentStackProbe->stackWords[6];
-                entry.fragmentStackWord7 = fragmentStackProbe->stackWords[7];
-                if (hasBatchKey || HasStrongChunkObjectLinkIdentity(fragmentStackProbe->slot1.probe))
-                    mergeFragmentProbe(fragmentStackProbe->slot1.probe);
-                if (hasBatchKey || HasStrongChunkObjectLinkIdentity(fragmentStackProbe->slot7.probe))
-                    mergeFragmentProbe(fragmentStackProbe->slot7.probe);
-                if (hasBatchKey || HasStrongChunkObjectLinkIdentity(fragmentStackProbe->slot5.probe))
-                    mergeFragmentProbe(fragmentStackProbe->slot5.probe);
-                if (hasBatchKey || HasStrongChunkObjectLinkIdentity(fragmentStackProbe->slot6.probe))
-                    mergeFragmentProbe(fragmentStackProbe->slot6.probe);
-            }
-
-            if (hasBatchKey)
-            {
-                PruneChunkFragmentBatchBindingsIfNeeded();
-                const auto batchIt = g_ChunkFragmentBatchBindingCache.find(batchKey);
-                if (batchIt != g_ChunkFragmentBatchBindingCache.end())
-                    MergeChunkResolvedBindingEntries(entry, batchIt->second);
-
-                if (!entry.meshName[0] && sourceTreeProbe.valid)
-                {
-                    std::vector<std::string> treeCandidates;
-                    BuildChunkTreeMeshCandidateList(sourceTreeProbe, treeCandidates);
-                    if (!treeCandidates.empty())
-                    {
-                        PruneChunkFragmentBatchCandidateStatesIfNeeded();
-                        ChunkFragmentBatchCandidateState& candidateState =
-                            g_ChunkFragmentBatchCandidateCache[batchKey];
-                        if (candidateState.candidates.empty())
-                        {
-                            candidateState.candidates = treeCandidates;
-                        }
-                        else
-                        {
-                            std::vector<std::string> intersection;
-                            intersection.reserve(
-                                (std::min)(candidateState.candidates.size(), treeCandidates.size()));
-                            std::set_intersection(
-                                candidateState.candidates.begin(),
-                                candidateState.candidates.end(),
-                                treeCandidates.begin(),
-                                treeCandidates.end(),
-                                std::back_inserter(intersection));
-                            if (!intersection.empty())
-                                candidateState.candidates.swap(intersection);
-                        }
-
-                        if (candidateState.bindTick == 0)
-                            candidateState.bindTick = GetTickCount();
-                        candidateState.lastSeenTick = GetTickCount();
-
-                        if (candidateState.candidates.size() == 1)
-                        {
-                            _snprintf_s(
-                                entry.meshName,
-                                sizeof(entry.meshName),
-                                _TRUNCATE,
-                                "%s.mesh",
-                                candidateState.candidates.front().c_str());
-                        }
-                    }
-                }
-            }
 
             if (!entry.meshName[0] &&
-                !entry.ownerMeshName[0] &&
                 !entry.vdfCandidates[0] &&
-                !entry.payloadComponentName[0] &&
-                !entry.payloadMeshName[0] &&
                 entry.sourceClassId == 0 &&
-                !entry.sourceGeomName[0] &&
-                entry.sourceParentObjectPtr == 0 &&
-                entry.sourceSiblingObjectPtr == 0 &&
-                entry.sourceChildObjectPtr == 0 &&
-                entry.sourceRootObjectPtr == 0 &&
-                entry.sourceRootGameObjectPtr == 0 &&
-                entry.sourceGameObjectPtr == 0 &&
-                entry.sourceOwnerEntityPtr == 0 &&
-                entry.sourceOwnerObjPtr == 0 &&
-                entry.fragmentCallerRva == 0 &&
-                entry.fragmentStackWord5 == 0 &&
-                entry.fragmentStackWord6 == 0 &&
-                entry.fragmentStackWord7 == 0)
+                !entry.sourceGeomName[0])
             {
                 return;
             }
@@ -3650,220 +2761,6 @@ namespace BZROpenShim
             entry.bindTick = GetTickCount();
             entry.lastSeenTick = entry.bindTick;
             g_ChunkResolvedBindingCache[reinterpret_cast<uintptr_t>(objectBytes)] = entry;
-            RefreshChunkResolvedBindingPayloadMesh(
-                reinterpret_cast<uintptr_t>(objectBytes),
-                g_ChunkResolvedBindingCache[reinterpret_cast<uintptr_t>(objectBytes)]);
-            if (entry.sourceRootObjectPtr != 0)
-                RefreshChunkResolvedBindingPayloadMeshesForRoot(entry.sourceRootObjectPtr);
-
-            if (hasBatchKey && HasChunkResolvedBindingIdentityData(entry))
-            {
-                ChunkResolvedBindingEntry& batchEntry = g_ChunkFragmentBatchBindingCache[batchKey];
-                MergeChunkResolvedBindingEntries(batchEntry, entry);
-                if (batchEntry.bindTick == 0)
-                    batchEntry.bindTick = entry.bindTick;
-                batchEntry.lastSeenTick = entry.lastSeenTick;
-            }
-        }
-
-        static bool HasChunkResolvedBindingIdentityData(const ChunkResolvedBindingEntry& entry)
-        {
-            return entry.meshName[0] ||
-                   entry.ownerMeshName[0] ||
-                   entry.vdfCandidates[0] ||
-                   entry.payloadComponentName[0] ||
-                   entry.payloadMeshName[0] ||
-                   entry.sourceClassId != 0 ||
-                   entry.sourceGeomName[0] ||
-                   entry.sourceParentObjectPtr != 0 ||
-                   entry.sourceSiblingObjectPtr != 0 ||
-                   entry.sourceChildObjectPtr != 0 ||
-                   entry.sourceRootObjectPtr != 0 ||
-                   entry.sourceRootGameObjectPtr != 0 ||
-                   entry.sourceGameObjectPtr != 0 ||
-                   entry.sourceOwnerEntityPtr != 0 ||
-                   entry.sourceOwnerObjPtr != 0;
-        }
-
-        static void MergeChunkResolvedBindingEntries(
-            ChunkResolvedBindingEntry& target,
-            const ChunkResolvedBindingEntry& source)
-        {
-            if (!target.meshName[0] && source.meshName[0])
-                strncpy_s(target.meshName, sizeof(target.meshName), source.meshName, _TRUNCATE);
-            if (!target.ownerMeshName[0] && source.ownerMeshName[0])
-                strncpy_s(target.ownerMeshName, sizeof(target.ownerMeshName), source.ownerMeshName, _TRUNCATE);
-            if (!target.vdfCandidates[0] && source.vdfCandidates[0])
-                strncpy_s(target.vdfCandidates, sizeof(target.vdfCandidates), source.vdfCandidates, _TRUNCATE);
-            if (target.sourceClassId == 0 && source.sourceClassId != 0)
-                target.sourceClassId = source.sourceClassId;
-            if (!target.sourceGeomName[0] && source.sourceGeomName[0])
-                strncpy_s(target.sourceGeomName, sizeof(target.sourceGeomName), source.sourceGeomName, _TRUNCATE);
-            if (target.sourceParentObjectPtr == 0 && source.sourceParentObjectPtr != 0)
-                target.sourceParentObjectPtr = source.sourceParentObjectPtr;
-            if (target.sourceSiblingObjectPtr == 0 && source.sourceSiblingObjectPtr != 0)
-                target.sourceSiblingObjectPtr = source.sourceSiblingObjectPtr;
-            if (target.sourceChildObjectPtr == 0 && source.sourceChildObjectPtr != 0)
-                target.sourceChildObjectPtr = source.sourceChildObjectPtr;
-            if (target.sourceRootObjectPtr == 0 && source.sourceRootObjectPtr != 0)
-                target.sourceRootObjectPtr = source.sourceRootObjectPtr;
-            if (target.sourceRootGameObjectPtr == 0 && source.sourceRootGameObjectPtr != 0)
-                target.sourceRootGameObjectPtr = source.sourceRootGameObjectPtr;
-            if (target.sourceGameObjectPtr == 0 && source.sourceGameObjectPtr != 0)
-                target.sourceGameObjectPtr = source.sourceGameObjectPtr;
-            if (target.sourceOwnerEntityPtr == 0 && source.sourceOwnerEntityPtr != 0)
-                target.sourceOwnerEntityPtr = source.sourceOwnerEntityPtr;
-            if (target.sourceOwnerObjPtr == 0 && source.sourceOwnerObjPtr != 0)
-                target.sourceOwnerObjPtr = source.sourceOwnerObjPtr;
-            if (target.fragmentCallerRva == 0 && source.fragmentCallerRva != 0)
-                target.fragmentCallerRva = source.fragmentCallerRva;
-            if (target.fragmentStackWord5 == 0 && source.fragmentStackWord5 != 0)
-                target.fragmentStackWord5 = source.fragmentStackWord5;
-            if (target.fragmentStackWord6 == 0 && source.fragmentStackWord6 != 0)
-                target.fragmentStackWord6 = source.fragmentStackWord6;
-            if (target.fragmentStackWord7 == 0 && source.fragmentStackWord7 != 0)
-                target.fragmentStackWord7 = source.fragmentStackWord7;
-        }
-
-        static bool ShouldAcceptOwnerResolvedMeshFallback(
-            const ChunkCreateSourceTreeProbe& sourceTreeProbe,
-            const ChunkFragmentStackProbe* fragmentStackProbe)
-        {
-            if (!sourceTreeProbe.valid || !sourceTreeProbe.ownerResolvedMeshName[0])
-                return false;
-
-            if (sourceTreeProbe.source.cachedMeshName[0] ||
-                sourceTreeProbe.source.vdfCandidates[0] ||
-                sourceTreeProbe.source.geomName[0])
-            {
-                return true;
-            }
-
-            if (!fragmentStackProbe || !fragmentStackProbe->valid)
-                return false;
-
-            const bool hasStableBatchContext =
-                fragmentStackProbe->stackWords[5] != 0 &&
-                fragmentStackProbe->stackWords[6] != 0;
-            if (!hasStableBatchContext)
-                return false;
-            const ChunkObjectLinkProbe* probes[] =
-            {
-                &fragmentStackProbe->slot5.probe,
-                &fragmentStackProbe->slot6.probe,
-                &fragmentStackProbe->slot7.probe,
-            };
-            bool sawMatchingMesh = false;
-            bool sawSiblingIdentity = false;
-            for (const ChunkObjectLinkProbe* probe : probes)
-            {
-                if (!probe)
-                    continue;
-                if (probe->cachedMeshName[0] &&
-                    _stricmp(probe->cachedMeshName, sourceTreeProbe.ownerResolvedMeshName) == 0)
-                {
-                    sawMatchingMesh = true;
-                    break;
-                }
-                if (probe->vdfCandidates[0] || probe->geomName[0])
-                    sawSiblingIdentity = true;
-            }
-
-            return sawMatchingMesh || (hasStableBatchContext && sawSiblingIdentity);
-        }
-
-        static bool TryBuildChunkFragmentBatchKey(
-            const ChunkFragmentStackProbe* fragmentStackProbe,
-            ChunkFragmentBatchKey& outKey)
-        {
-            outKey = {};
-            if (!fragmentStackProbe || !fragmentStackProbe->valid)
-                return false;
-
-            if (fragmentStackProbe->callerRva == 0 ||
-                fragmentStackProbe->stackWords[5] == 0 ||
-                fragmentStackProbe->stackWords[6] == 0)
-            {
-                return false;
-            }
-
-            outKey.callerRva = fragmentStackProbe->callerRva;
-            outKey.stackWord5 = fragmentStackProbe->stackWords[5];
-            outKey.stackWord6 = fragmentStackProbe->stackWords[6];
-            return true;
-        }
-
-        static void PruneChunkFragmentBatchBindingsIfNeeded()
-        {
-            if (g_ChunkFragmentBatchBindingCache.empty())
-                return;
-
-            const DWORD now = GetTickCount();
-            if (g_ChunkFragmentBatchBindingLastPruneTick != 0 &&
-                static_cast<DWORD>(now - g_ChunkFragmentBatchBindingLastPruneTick) < kChunkFragmentBatchBindingPruneMs)
-            {
-                return;
-            }
-            g_ChunkFragmentBatchBindingLastPruneTick = now;
-
-            for (auto it = g_ChunkFragmentBatchBindingCache.begin();
-                 it != g_ChunkFragmentBatchBindingCache.end();)
-            {
-                const DWORD referenceTick =
-                    (it->second.lastSeenTick != 0) ? it->second.lastSeenTick : it->second.bindTick;
-                if (referenceTick != 0 &&
-                    static_cast<DWORD>(now - referenceTick) >= kChunkFragmentBatchBindingExpireMs)
-                {
-                    it = g_ChunkFragmentBatchBindingCache.erase(it);
-                }
-                else
-                {
-                    ++it;
-                }
-            }
-        }
-
-        static void PruneChunkFragmentBatchCandidateStatesIfNeeded()
-        {
-            if (g_ChunkFragmentBatchCandidateCache.empty())
-                return;
-
-            const DWORD now = GetTickCount();
-            if (g_ChunkFragmentBatchCandidateLastPruneTick != 0 &&
-                static_cast<DWORD>(now - g_ChunkFragmentBatchCandidateLastPruneTick) < kChunkFragmentBatchCandidatePruneMs)
-            {
-                return;
-            }
-            g_ChunkFragmentBatchCandidateLastPruneTick = now;
-
-            for (auto it = g_ChunkFragmentBatchCandidateCache.begin();
-                 it != g_ChunkFragmentBatchCandidateCache.end();)
-            {
-                const DWORD referenceTick =
-                    (it->second.lastSeenTick != 0) ? it->second.lastSeenTick : it->second.bindTick;
-                if (referenceTick != 0 &&
-                    static_cast<DWORD>(now - referenceTick) >= kChunkFragmentBatchCandidateExpireMs)
-                {
-                    it = g_ChunkFragmentBatchCandidateCache.erase(it);
-                }
-                else
-                {
-                    ++it;
-                }
-            }
-        }
-
-        static const ChunkResolvedBindingEntry* FindChunkFragmentBatchBindingEntry(
-            uint32_t callerRva,
-            uint32_t stackWord5,
-            uint32_t stackWord6)
-        {
-            if (callerRva == 0 || stackWord5 == 0 || stackWord6 == 0)
-                return nullptr;
-
-            const ChunkFragmentBatchKey key = { callerRva, stackWord5, stackWord6 };
-            const auto it = g_ChunkFragmentBatchBindingCache.find(key);
-            return (it != g_ChunkFragmentBatchBindingCache.end()) ? &it->second : nullptr;
         }
 
         static void TouchChunkResolvedBinding(const uint8_t* objectBytes)
@@ -3939,143 +2836,33 @@ namespace BZROpenShim
             outProbe.valid = CaptureChunkObjectLinkProbe(sourceBytes, outProbe.source);
 
             const uint8_t* parentBytes = nullptr;
-            const uint8_t* grandparentBytes = nullptr;
-            const uint8_t* rootBytes = sourceBytes;
             const uint8_t* siblingBytes = nullptr;
             const uint8_t* childBytes = nullptr;
             __try
             {
                 parentBytes = *reinterpret_cast<const uint8_t* const*>(sourceBytes + 0x78);
-                if (parentBytes)
-                    grandparentBytes = *reinterpret_cast<const uint8_t* const*>(parentBytes + 0x78);
-                const uint8_t* walk = sourceBytes;
-                for (size_t depth = 0; depth < 8; ++depth)
-                {
-                    const uint8_t* next = *reinterpret_cast<const uint8_t* const*>(walk + 0x78);
-                    if (!next || next == walk)
-                        break;
-                    rootBytes = next;
-                    walk = next;
-                }
                 siblingBytes = *reinterpret_cast<const uint8_t* const*>(sourceBytes + 0x7C);
                 childBytes = *reinterpret_cast<const uint8_t* const*>(sourceBytes + 0x80);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 parentBytes = nullptr;
-                grandparentBytes = nullptr;
-                rootBytes = sourceBytes;
                 siblingBytes = nullptr;
                 childBytes = nullptr;
             }
 
             CaptureChunkObjectLinkProbe(parentBytes, outProbe.parent);
-            CaptureChunkObjectLinkProbe(grandparentBytes, outProbe.grandparent);
-            CaptureChunkObjectLinkProbe(rootBytes, outProbe.root);
             CaptureChunkObjectLinkProbe(siblingBytes, outProbe.sibling);
             CaptureChunkObjectLinkProbe(childBytes, outProbe.child);
 
-            const ChunkBridgeSnapshot sourceBridgeSnapshot = CaptureChunkBridgeSnapshot(sourceBytes);
-            const ChunkBridgeSnapshot parentBridgeSnapshot = CaptureChunkBridgeSnapshot(parentBytes);
-            const ChunkBridgeSnapshot grandparentBridgeSnapshot = CaptureChunkBridgeSnapshot(grandparentBytes);
-            const ChunkBridgeSnapshot rootBridgeSnapshot = CaptureChunkBridgeSnapshot(rootBytes);
-            outProbe.sourceGameObject = sourceBridgeSnapshot.gameObject;
-            outProbe.parentGameObject = parentBridgeSnapshot.gameObject;
-            outProbe.grandparentGameObject = grandparentBridgeSnapshot.gameObject;
-            outProbe.rootGameObject = rootBridgeSnapshot.gameObject;
-            auto selectBridgeSnapshot = [](
-                const ChunkBridgeSnapshot& current,
-                const ChunkBridgeSnapshot& candidate) -> const ChunkBridgeSnapshot&
-            {
-                const bool currentHasResolvedMesh =
-                    current.ownerResolvedMeshName[0] != '\0' &&
-                    IsPlausibleChunkOwnerToken(current.ownerResolvedMeshName, true);
-                const bool candidateHasResolvedMesh =
-                    candidate.ownerResolvedMeshName[0] != '\0' &&
-                    IsPlausibleChunkOwnerToken(candidate.ownerResolvedMeshName, true);
-                if (candidateHasResolvedMesh != currentHasResolvedMesh)
-                    return candidateHasResolvedMesh ? candidate : current;
-
-                const bool currentHasOwnerEntity = current.ownerEntity != nullptr;
-                const bool candidateHasOwnerEntity = candidate.ownerEntity != nullptr;
-                if (candidateHasOwnerEntity != currentHasOwnerEntity)
-                    return candidateHasOwnerEntity ? candidate : current;
-
-                const bool currentHasOwnerObj = current.ownerObj != nullptr;
-                const bool candidateHasOwnerObj = candidate.ownerObj != nullptr;
-                if (candidateHasOwnerObj != currentHasOwnerObj)
-                    return candidateHasOwnerObj ? candidate : current;
-
-                const bool currentHasLegacyOwner = current.legacyOwner != nullptr;
-                const bool candidateHasLegacyOwner = candidate.legacyOwner != nullptr;
-                if (candidateHasLegacyOwner != currentHasLegacyOwner)
-                    return candidateHasLegacyOwner ? candidate : current;
-
-                return current;
-            };
-            const ChunkBridgeSnapshot& resolvedBridgeSnapshot =
-                selectBridgeSnapshot(
-                    selectBridgeSnapshot(
-                        selectBridgeSnapshot(sourceBridgeSnapshot, parentBridgeSnapshot),
-                        grandparentBridgeSnapshot),
-                    rootBridgeSnapshot);
-            const ChunkBridgeSnapshot* identityBridgeSnapshot = nullptr;
-            const uint8_t* identityBridgeBytes = nullptr;
-            auto considerIdentityBridge = [&identityBridgeSnapshot, &identityBridgeBytes](
-                                              const ChunkBridgeSnapshot& snapshot,
-                                              const uint8_t* objectBytes)
-            {
-                if (!identityBridgeSnapshot && snapshot.gameObject)
-                {
-                    identityBridgeSnapshot = &snapshot;
-                    identityBridgeBytes = objectBytes;
-                }
-            };
-            considerIdentityBridge(rootBridgeSnapshot, rootBytes);
-            considerIdentityBridge(grandparentBridgeSnapshot, grandparentBytes);
-            considerIdentityBridge(parentBridgeSnapshot, parentBytes);
-            considerIdentityBridge(sourceBridgeSnapshot, sourceBytes);
-            const ChunkBridgeSnapshot& bridgeSnapshot =
-                identityBridgeSnapshot ? *identityBridgeSnapshot : resolvedBridgeSnapshot;
-            const uint8_t* selectedBridgeBytes = identityBridgeBytes;
-            if (!selectedBridgeBytes)
-            {
-                if (&bridgeSnapshot == &rootBridgeSnapshot)
-                    selectedBridgeBytes = rootBytes;
-                else if (&bridgeSnapshot == &grandparentBridgeSnapshot)
-                    selectedBridgeBytes = grandparentBytes;
-                else if (&bridgeSnapshot == &parentBridgeSnapshot)
-                    selectedBridgeBytes = parentBytes;
-                else
-                    selectedBridgeBytes = sourceBytes;
-            }
-            outProbe.selectedBridgeObject = const_cast<uint8_t*>(selectedBridgeBytes);
-            outProbe.selectedGameObject = bridgeSnapshot.gameObject;
-            if (outProbe.selectedGameObject)
-                TryGetObjectOdfToken(outProbe.selectedGameObject, outProbe.selectedGameObjectOdf);
-            if (outProbe.rootGameObject)
-                TryGetObjectOdfToken(outProbe.rootGameObject, outProbe.rootGameObjectOdf);
-            outProbe.ownerEntity =
-                bridgeSnapshot.ownerEntity ? bridgeSnapshot.ownerEntity : resolvedBridgeSnapshot.ownerEntity;
-            outProbe.ownerObj =
-                bridgeSnapshot.ownerObj ? bridgeSnapshot.ownerObj : resolvedBridgeSnapshot.ownerObj;
+            const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(sourceBytes);
+            outProbe.ownerEntity = bridgeSnapshot.ownerEntity;
             if (bridgeSnapshot.ownerEntityBaseName[0])
                 strncpy_s(outProbe.ownerEntityBaseName, bridgeSnapshot.ownerEntityBaseName, _TRUNCATE);
-            else if (resolvedBridgeSnapshot.ownerEntityBaseName[0])
-                strncpy_s(outProbe.ownerEntityBaseName, resolvedBridgeSnapshot.ownerEntityBaseName, _TRUNCATE);
             if (bridgeSnapshot.ownerOgreFilename[0])
                 strncpy_s(outProbe.ownerOgreFilename, bridgeSnapshot.ownerOgreFilename, _TRUNCATE);
-            else if (resolvedBridgeSnapshot.ownerOgreFilename[0])
-                strncpy_s(outProbe.ownerOgreFilename, resolvedBridgeSnapshot.ownerOgreFilename, _TRUNCATE);
             if (bridgeSnapshot.ownerResolvedMeshName[0])
                 strncpy_s(outProbe.ownerResolvedMeshName, bridgeSnapshot.ownerResolvedMeshName, _TRUNCATE);
-            else if (outProbe.selectedGameObject)
-                TryGetGameObjectMeshName(
-                    outProbe.selectedGameObject,
-                    outProbe.ownerResolvedMeshName,
-                    sizeof(outProbe.ownerResolvedMeshName));
-            if (!outProbe.ownerResolvedMeshName[0] && resolvedBridgeSnapshot.ownerResolvedMeshName[0])
-                strncpy_s(outProbe.ownerResolvedMeshName, resolvedBridgeSnapshot.ownerResolvedMeshName, _TRUNCATE);
             if (!outProbe.ownerResolvedMeshName[0])
             {
                 ResolveChunkCreateMeshContext(
@@ -4083,10 +2870,7 @@ namespace BZROpenShim
                     outProbe.ownerResolvedMeshName,
                     sizeof(outProbe.ownerResolvedMeshName));
             }
-            const bool allowOwnerDerivedVdfCandidates =
-                outProbe.ownerResolvedMeshName[0] &&
-                HasCorroboratingChunkSourceTreeIdentity(outProbe);
-            if (!outProbe.source.vdfCandidates[0] && allowOwnerDerivedVdfCandidates)
+            if (!outProbe.source.vdfCandidates[0] && outProbe.ownerResolvedMeshName[0])
             {
                 BuildChunkVdfSourceCandidateList(
                     outProbe.ownerResolvedMeshName,
@@ -4098,12 +2882,11 @@ namespace BZROpenShim
                     sizeof(outProbe.source.vdfCandidates));
             }
 
-            if (allowOwnerDerivedVdfCandidates)
+            if (outProbe.ownerResolvedMeshName[0])
             {
                 if (!outProbe.source.vdfCandidates[0])
                     PopulateChunkVdfCandidates(outProbe.ownerResolvedMeshName, outProbe.source);
                 PopulateChunkVdfCandidates(outProbe.ownerResolvedMeshName, outProbe.parent);
-                PopulateChunkVdfCandidates(outProbe.ownerResolvedMeshName, outProbe.grandparent);
                 PopulateChunkVdfCandidates(outProbe.ownerResolvedMeshName, outProbe.sibling);
                 PopulateChunkVdfCandidates(outProbe.ownerResolvedMeshName, outProbe.child);
             }
@@ -4129,514 +2912,6 @@ namespace BZROpenShim
             }
         }
 
-        static const wchar_t* DescribeObservedChunkRva(uint32_t rva)
-        {
-            switch (rva)
-            {
-            case 0x00080683u:
-                return L"observed-generic-chunklet-parent-a";
-            case 0x00080867u:
-                return L"observed-generic-chunklet-parent-b";
-            case 0x000AC5E0u:
-                return L"observed-fragment-parent-a";
-            case 0x000DF34Au:
-                return L"observed-fragment-parent-c";
-            case 0x000EE768u:
-                return L"observed-fragment-parent-b";
-            case 0x002180DDu:
-                return L"observed-fragment-parent-f";
-            case 0x00218201u:
-                return L"observed-fragment-parent-g";
-            case 0x0022BCADu:
-                return L"observed-fragment-parent-e";
-            case 0x0022BDA3u:
-                return L"observed-fragment-parent-d";
-            case 0x000924F5u:
-                return L"observed-fragment-create-parent";
-            case 0x00092565u:
-                return L"observed-fragment-create-site";
-            case 0x000AAC35u:
-                return L"observed-generic-chunklet-site";
-            default:
-                return nullptr;
-            }
-        }
-
-        static bool BacktraceHasChunkRva(const void* const* frames, USHORT count, uint32_t targetRva)
-        {
-            for (USHORT index = 0; index < count; ++index)
-            {
-                const uintptr_t frameAddress = reinterpret_cast<uintptr_t>(frames[index]);
-                if (frameAddress < kExeImageBaseAddr)
-                    continue;
-                const uint32_t frameRva = static_cast<uint32_t>(frameAddress - kExeImageBaseAddr);
-                if (frameRva == targetRva)
-                    return true;
-            }
-            return false;
-        }
-
-        static const wchar_t* ClassifyObservedChunkCreatePath(
-            uint32_t callerRva,
-            const void* const* backtraceFrames,
-            USHORT backtraceCount)
-        {
-            if (callerRva == 0x00092565u ||
-                BacktraceHasChunkRva(backtraceFrames, backtraceCount, 0x00092565u) ||
-                BacktraceHasChunkRva(backtraceFrames, backtraceCount, 0x000924F5u) ||
-                (BacktraceHasChunkRva(backtraceFrames, backtraceCount, 0x000AC5E0u) &&
-                 BacktraceHasChunkRva(backtraceFrames, backtraceCount, 0x000EE768u)))
-            {
-                return L"observed-fragment-create-path";
-            }
-
-            if (callerRva == 0x000AAC35u ||
-                (BacktraceHasChunkRva(backtraceFrames, backtraceCount, 0x000AAC35u) &&
-                 BacktraceHasChunkRva(backtraceFrames, backtraceCount, 0x00080867u) &&
-                 BacktraceHasChunkRva(backtraceFrames, backtraceCount, 0x00080683u)))
-            {
-                return L"observed-generic-chunklet-path";
-            }
-
-            return nullptr;
-        }
-
-        static bool IsObservedFragmentCreateCallerRva(uint32_t callerRva)
-        {
-            return callerRva == 0x00092565u ||
-                   callerRva == 0x000924F5u ||
-                   callerRva == 0x000AC5E0u;
-        }
-
-        static bool TryReadChunkCreateStackWords(
-            const void* const* callerReturnAddressSlot,
-            uint32_t* outWords,
-            size_t wordCount)
-        {
-            if (!outWords || wordCount == 0)
-                return false;
-
-            for (size_t index = 0; index < wordCount; ++index)
-                outWords[index] = 0;
-
-            if (!callerReturnAddressSlot)
-                return false;
-
-            __try
-            {
-                for (size_t index = 0; index < wordCount; ++index)
-                {
-                    outWords[index] = static_cast<uint32_t>(
-                        reinterpret_cast<uintptr_t>(callerReturnAddressSlot[index]));
-                }
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                for (size_t index = 0; index < wordCount; ++index)
-                    outWords[index] = 0;
-                return false;
-            }
-        }
-
-        static void CaptureChunkFragmentStackCandidate(
-            const uint32_t* stackWords,
-            size_t stackWordCount,
-            size_t slotIndex,
-            ChunkFragmentStackCandidate& outCandidate)
-        {
-            outCandidate = {};
-            outCandidate.slotIndex = static_cast<uint32_t>(slotIndex);
-            if (!stackWords || slotIndex >= stackWordCount)
-                return;
-
-            outCandidate.rawValue = stackWords[slotIndex];
-            if (outCandidate.rawValue < 0x00010000u)
-                return;
-
-            outCandidate.valid = CaptureChunkObjectLinkProbe(
-                reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(outCandidate.rawValue)),
-                outCandidate.probe);
-        }
-
-        static bool CaptureChunkFragmentStackProbe(
-            uint32_t callerRva,
-            const void* const* callerReturnAddressSlot,
-            ChunkFragmentStackProbe& outProbe)
-        {
-            outProbe = {};
-            if (!callerReturnAddressSlot || !IsObservedFragmentCreateCallerRva(callerRva))
-                return false;
-
-            outProbe.valid = TryReadChunkCreateStackWords(
-                callerReturnAddressSlot,
-                outProbe.stackWords,
-                std::size(outProbe.stackWords));
-            if (!outProbe.valid)
-                return false;
-
-            outProbe.callerRva = callerRva;
-            CaptureChunkFragmentStackCandidate(
-                outProbe.stackWords,
-                std::size(outProbe.stackWords),
-                1,
-                outProbe.slot1);
-            CaptureChunkFragmentStackCandidate(
-                outProbe.stackWords,
-                std::size(outProbe.stackWords),
-                5,
-                outProbe.slot5);
-            CaptureChunkFragmentStackCandidate(
-                outProbe.stackWords,
-                std::size(outProbe.stackWords),
-                6,
-                outProbe.slot6);
-            CaptureChunkFragmentStackCandidate(
-                outProbe.stackWords,
-                std::size(outProbe.stackWords),
-                7,
-                outProbe.slot7);
-            return true;
-        }
-
-        static void RecordChunkFragmentEvent(
-            void* thisPtr,
-            void* sourceObjectPtr,
-            const uint8_t* boundObjectBytes,
-            const uint8_t* resultObjectBytes,
-            uint8_t preserveFlag,
-            uint32_t callerRva,
-            const void* const* callerReturnAddressSlot,
-            uint32_t countBefore,
-            uint32_t countAfter,
-            const ChunkEffectActiveEntry* createdEntry,
-            const ChunkCreateSourceTreeProbe* sourceTreeProbe,
-            const ChunkFragmentStackProbe* fragmentStackProbe)
-        {
-            ChunkFragmentEventRecord record = {};
-            record.tick = GetTickCount();
-            record.thisPtr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr));
-            record.sourceObjectPtr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceObjectPtr));
-            record.boundObjectPtr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(boundObjectBytes));
-            record.createdObjectPtr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
-                createdEntry ? createdEntry->objectBytes : nullptr));
-            record.resultObjectPtr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(resultObjectBytes));
-            record.callerRva = callerRva;
-            record.countBefore = countBefore;
-            record.countAfter = countAfter;
-            record.preserveFlag = preserveFlag;
-
-            void* sourceGeomRefUnused = nullptr;
-            void* sourceOwner = nullptr;
-            record.sourceSummaryValid = TryReadChunkObjectSummary(
-                reinterpret_cast<const uint8_t*>(sourceObjectPtr),
-                record.sourceClassId,
-                record.sourceFlags,
-                sourceGeomRefUnused,
-                record.sourceGeomName,
-                sizeof(record.sourceGeomName),
-                sourceOwner);
-            record.sourceOwner = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceOwner));
-            if (sourceTreeProbe)
-            {
-                if (sourceTreeProbe->source.cachedMeshName[0])
-                {
-                    strncpy_s(
-                        record.sourceProbeMeshName,
-                        sizeof(record.sourceProbeMeshName),
-                        sourceTreeProbe->source.cachedMeshName,
-                        _TRUNCATE);
-                }
-                if (sourceTreeProbe->source.vdfCandidates[0])
-                {
-                    strncpy_s(
-                        record.sourceProbeVdfCandidates,
-                        sizeof(record.sourceProbeVdfCandidates),
-                        sourceTreeProbe->source.vdfCandidates,
-                        _TRUNCATE);
-                }
-                if (sourceTreeProbe->ownerResolvedMeshName[0])
-                {
-                    strncpy_s(
-                        record.sourceProbeOwnerMeshName,
-                        sizeof(record.sourceProbeOwnerMeshName),
-                        sourceTreeProbe->ownerResolvedMeshName,
-                        _TRUNCATE);
-                }
-                record.sourceProbeRootObjectPtr = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(sourceTreeProbe->root.objectBytes));
-                record.sourceProbeSelectedBridgePtr = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(sourceTreeProbe->selectedBridgeObject));
-                record.sourceProbeGameObjectPtr = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(sourceTreeProbe->selectedGameObject));
-                record.sourceProbeOwnerEntityPtr = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(sourceTreeProbe->ownerEntity));
-                record.sourceProbeOwnerObjPtr = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(sourceTreeProbe->ownerObj));
-                BuildChunkSourceTreeSummary(
-                    *sourceTreeProbe,
-                    record.sourceTreeSummary,
-                    sizeof(record.sourceTreeSummary),
-                    record.sourceTreeVdfSummary,
-                    sizeof(record.sourceTreeVdfSummary));
-                BuildChunkTreeMeshCandidateSummary(
-                    *sourceTreeProbe,
-                    record.sourceTreeMeshCandidates,
-                    sizeof(record.sourceTreeMeshCandidates));
-            }
-
-            void* createdGeomRefUnused = nullptr;
-            void* createdOwner = nullptr;
-            record.createdSummaryValid = TryReadChunkObjectSummary(
-                createdEntry ? createdEntry->objectBytes : nullptr,
-                record.createdClassId,
-                record.createdFlags,
-                createdGeomRefUnused,
-                record.createdGeomName,
-                sizeof(record.createdGeomName),
-                createdOwner);
-            record.createdOwner = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(createdOwner));
-
-            void* resultGeomRefUnused = nullptr;
-            void* resultOwner = nullptr;
-            record.resultSummaryValid = TryReadChunkObjectSummary(
-                resultObjectBytes,
-                record.resultClassId,
-                record.resultFlags,
-                resultGeomRefUnused,
-                record.resultGeomName,
-                sizeof(record.resultGeomName),
-                resultOwner);
-            record.resultOwner = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(resultOwner));
-
-            if (fragmentStackProbe && fragmentStackProbe->valid)
-            {
-                memcpy(record.stackWords, fragmentStackProbe->stackWords, sizeof(record.stackWords));
-                record.stackWordsValid = true;
-            }
-            else
-            {
-                record.stackWordsValid = TryReadChunkCreateStackWords(
-                    callerReturnAddressSlot,
-                    record.stackWords,
-                    std::size(record.stackWords));
-            }
-
-            AcquireSRWLockExclusive(&g_ChunkFragmentEventLock);
-            record.sequence = ++g_ChunkFragmentEventTotal;
-            if (g_ChunkFragmentEventCount < g_ChunkFragmentEvents.size())
-            {
-                const size_t slotIndex =
-                    (g_ChunkFragmentEventStart + g_ChunkFragmentEventCount) % g_ChunkFragmentEvents.size();
-                g_ChunkFragmentEvents[slotIndex] = record;
-                ++g_ChunkFragmentEventCount;
-            }
-            else
-            {
-                g_ChunkFragmentEvents[g_ChunkFragmentEventStart] = record;
-                g_ChunkFragmentEventStart =
-                    (g_ChunkFragmentEventStart + 1) % g_ChunkFragmentEvents.size();
-            }
-            ReleaseSRWLockExclusive(&g_ChunkFragmentEventLock);
-        }
-
-        static void MergeChunkResolvedBindingFromLinkProbe(
-            ChunkResolvedBindingEntry& entry,
-            const ChunkObjectLinkProbe& probe)
-        {
-            if (!entry.meshName[0] && probe.cachedMeshName[0])
-                strncpy_s(entry.meshName, sizeof(entry.meshName), probe.cachedMeshName, _TRUNCATE);
-            if (!entry.vdfCandidates[0] && probe.vdfCandidates[0])
-                strncpy_s(entry.vdfCandidates, sizeof(entry.vdfCandidates), probe.vdfCandidates, _TRUNCATE);
-            if (entry.sourceClassId == 0 && probe.classId != 0)
-                entry.sourceClassId = probe.classId;
-            if (!entry.sourceGeomName[0] && probe.geomName[0])
-                strncpy_s(entry.sourceGeomName, sizeof(entry.sourceGeomName), probe.geomName, _TRUNCATE);
-        }
-
-        static bool HasStrongChunkObjectLinkIdentity(const ChunkObjectLinkProbe& probe)
-        {
-            return probe.vdfCandidates[0] || probe.geomName[0];
-        }
-
-        static bool HasCorroboratingChunkSourceTreeIdentity(const ChunkCreateSourceTreeProbe& probe)
-        {
-            return HasStrongChunkObjectLinkIdentity(probe.source) ||
-                   HasStrongChunkObjectLinkIdentity(probe.parent) ||
-                   HasStrongChunkObjectLinkIdentity(probe.grandparent) ||
-                   HasStrongChunkObjectLinkIdentity(probe.root) ||
-                   HasStrongChunkObjectLinkIdentity(probe.sibling) ||
-                   HasStrongChunkObjectLinkIdentity(probe.child);
-        }
-
-        static void BuildChunkTreeMeshCandidateList(
-            const ChunkCreateSourceTreeProbe& probe,
-            std::vector<std::string>& outCandidates)
-        {
-            outCandidates.clear();
-            if (!probe.source.objectBytes || probe.source.classId == 0)
-                return;
-
-            EnsureChunkVdfReverseIndex();
-
-            for (const auto& pair : g_ChunkVdfAssetCache)
-            {
-                const std::string& meshBase = pair.first;
-                const ChunkVdfAssetInfo& info = pair.second;
-                if (!info.loaded)
-                    continue;
-
-                for (const ChunkVdfRecord& record : info.records)
-                {
-                    if (!ChunkVdfRecordMatchesTree(
-                            info,
-                            record,
-                            probe.source,
-                            probe.parent,
-                            probe.sibling,
-                            probe.child))
-                    {
-                        continue;
-                    }
-
-                    outCandidates.push_back(meshBase);
-                    break;
-                }
-            }
-
-            std::sort(outCandidates.begin(), outCandidates.end());
-            outCandidates.erase(std::unique(outCandidates.begin(), outCandidates.end()), outCandidates.end());
-        }
-
-        static bool BuildChunkTreeMeshCandidateSummary(
-            const ChunkCreateSourceTreeProbe& probe,
-            char* outText,
-            size_t outTextCapacity)
-        {
-            if (!outText || outTextCapacity == 0)
-                return false;
-
-            outText[0] = '\0';
-            if (!probe.source.objectBytes || probe.source.classId == 0)
-                return false;
-
-            std::vector<std::string> matches;
-            BuildChunkTreeMeshCandidateList(probe, matches);
-            if (matches.empty())
-                return false;
-
-            _snprintf_s(
-                outText,
-                outTextCapacity,
-                _TRUNCATE,
-                "count=%u",
-                static_cast<unsigned int>(matches.size()));
-
-            const size_t previewCount = (std::min)(matches.size(), static_cast<size_t>(5));
-            for (size_t index = 0; index < previewCount; ++index)
-            {
-                if (std::strlen(outText) + matches[index].size() + 3 >= outTextCapacity)
-                    break;
-                strcat_s(outText, outTextCapacity, index == 0 ? " [" : "|");
-                strcat_s(outText, outTextCapacity, matches[index].c_str());
-            }
-            if (previewCount > 0 && std::strlen(outText) + 2 < outTextCapacity)
-                strcat_s(outText, outTextCapacity, "]");
-
-            return true;
-        }
-
-        static void BuildChunkSourceTreeSummary(
-            const ChunkCreateSourceTreeProbe& probe,
-            char* outSummary,
-            size_t outSummaryCapacity,
-            char* outVdfSummary,
-            size_t outVdfSummaryCapacity)
-        {
-            if (outSummary && outSummaryCapacity > 0)
-                outSummary[0] = '\0';
-            if (outVdfSummary && outVdfSummaryCapacity > 0)
-                outVdfSummary[0] = '\0';
-
-            if ((!outSummary || outSummaryCapacity == 0) &&
-                (!outVdfSummary || outVdfSummaryCapacity == 0))
-            {
-                return;
-            }
-
-            const ChunkObjectLinkProbe& sourceProbe = probe.source;
-            const ChunkObjectLinkProbe& parentProbe = probe.parent;
-            const ChunkObjectLinkProbe& grandparentProbe = probe.grandparent;
-            const ChunkObjectLinkProbe& rootProbe = probe.root;
-            const ChunkObjectLinkProbe& siblingProbe = probe.sibling;
-            const ChunkObjectLinkProbe& childProbe = probe.child;
-
-            if (outSummary && outSummaryCapacity > 0)
-            {
-                _snprintf_s(
-                    outSummary,
-                    outSummaryCapacity,
-                    _TRUNCATE,
-                    "src=0x%08X objId=%s class=%u flags=0x%08X geom=%s srcGameObj=0x%08X selectedBridge=0x%08X selectedGameObj=0x%08X selectedOdf=%s ownerEntity=0x%08X ownerObj=0x%08X ownerBase=%s ownerFile=%s ownerMesh=%s | parent=0x%08X objId=%s class=%u geom=%s gameObj=0x%08X | grandparent=0x%08X objId=%s class=%u geom=%s gameObj=0x%08X | root=0x%08X objId=%s class=%u geom=%s gameObj=0x%08X rootOdf=%s | sibling=0x%08X objId=%s class=%u geom=%s | child=0x%08X objId=%s class=%u geom=%s",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceProbe.objectBytes)),
-                    sourceProbe.objectId[0] ? sourceProbe.objectId : "<none>",
-                    sourceProbe.classId,
-                    sourceProbe.flags,
-                    sourceProbe.geomName[0] ? sourceProbe.geomName : "<none>",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(probe.sourceGameObject)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(probe.selectedBridgeObject)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(probe.selectedGameObject)),
-                    probe.selectedGameObjectOdf[0] ? probe.selectedGameObjectOdf : "<none>",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(probe.ownerEntity)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(probe.ownerObj)),
-                    probe.ownerEntityBaseName[0] ? probe.ownerEntityBaseName : "<none>",
-                    probe.ownerOgreFilename[0] ? probe.ownerOgreFilename : "<none>",
-                    probe.ownerResolvedMeshName[0] ? probe.ownerResolvedMeshName : "<none>",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parentProbe.objectBytes)),
-                    parentProbe.objectId[0] ? parentProbe.objectId : "<none>",
-                    parentProbe.classId,
-                    parentProbe.geomName[0] ? parentProbe.geomName : "<none>",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(probe.parentGameObject)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(grandparentProbe.objectBytes)),
-                    grandparentProbe.objectId[0] ? grandparentProbe.objectId : "<none>",
-                    grandparentProbe.classId,
-                    grandparentProbe.geomName[0] ? grandparentProbe.geomName : "<none>",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(probe.grandparentGameObject)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rootProbe.objectBytes)),
-                    rootProbe.objectId[0] ? rootProbe.objectId : "<none>",
-                    rootProbe.classId,
-                    rootProbe.geomName[0] ? rootProbe.geomName : "<none>",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(probe.rootGameObject)),
-                    probe.rootGameObjectOdf[0] ? probe.rootGameObjectOdf : "<none>",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(siblingProbe.objectBytes)),
-                    siblingProbe.objectId[0] ? siblingProbe.objectId : "<none>",
-                    siblingProbe.classId,
-                    siblingProbe.geomName[0] ? siblingProbe.geomName : "<none>",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(childProbe.objectBytes)),
-                    childProbe.objectId[0] ? childProbe.objectId : "<none>",
-                    childProbe.classId,
-                    childProbe.geomName[0] ? childProbe.geomName : "<none>");
-            }
-
-            if (outVdfSummary && outVdfSummaryCapacity > 0 &&
-                (sourceProbe.vdfCandidates[0] || parentProbe.vdfCandidates[0] ||
-                 grandparentProbe.vdfCandidates[0] || rootProbe.vdfCandidates[0] ||
-                 siblingProbe.vdfCandidates[0] || childProbe.vdfCandidates[0]))
-            {
-                _snprintf_s(
-                    outVdfSummary,
-                    outVdfSummaryCapacity,
-                    _TRUNCATE,
-                    "src=%s | parent=%s | grandparent=%s | root=%s | sibling=%s | child=%s",
-                    sourceProbe.vdfCandidates[0] ? sourceProbe.vdfCandidates : "<none>",
-                    parentProbe.vdfCandidates[0] ? parentProbe.vdfCandidates : "<none>",
-                    grandparentProbe.vdfCandidates[0] ? grandparentProbe.vdfCandidates : "<none>",
-                    rootProbe.vdfCandidates[0] ? rootProbe.vdfCandidates : "<none>",
-                    siblingProbe.vdfCandidates[0] ? siblingProbe.vdfCandidates : "<none>",
-                    childProbe.vdfCandidates[0] ? childProbe.vdfCandidates : "<none>");
-            }
-        }
-
         static void LogChunkCreateLifecycle(
             const wchar_t* tag,
             void* thisPtr,
@@ -4644,13 +2919,10 @@ namespace BZROpenShim
             const float* positionVec,
             const float* velocityVec,
             uint8_t preserveFlag,
-            const void* callerReturnAddress,
-            const void* const* callerReturnAddressSlot,
             uint32_t countBefore,
             uint32_t countAfter,
             const ChunkEffectActiveEntry* createdEntry,
-            const ChunkCreateSourceTreeProbe* sourceTreeProbe,
-            const ChunkFragmentStackProbe* fragmentStackProbe)
+            const ChunkCreateSourceTreeProbe* sourceTreeProbe)
         {
             if ((!g_TraceChunkRender && !g_TraceChunkEffectRuntime) || !AcquireChunkLogSlot())
                 return;
@@ -4701,57 +2973,6 @@ namespace BZROpenShim
                     : ((_stricmp(createdGeomName, "chunk1") == 0 || _stricmp(createdGeomName, "chunk2") == 0)
                            ? "stock-chunklet"
                            : "named-nonchunklet");
-            const uintptr_t callerAddress = reinterpret_cast<uintptr_t>(callerReturnAddress);
-            const uint32_t callerAddress32 = static_cast<uint32_t>(callerAddress);
-            const uint32_t callerRva =
-                callerAddress >= kExeImageBaseAddr
-                    ? static_cast<uint32_t>(callerAddress - kExeImageBaseAddr)
-                    : 0u;
-            const wchar_t* const callerTag = callerRva ? DescribeObservedChunkRva(callerRva) : nullptr;
-            void* backtraceFrames[6] = {};
-            const USHORT backtraceCount = CaptureStackBackTrace(
-                0,
-                static_cast<DWORD>(std::size(backtraceFrames)),
-                backtraceFrames,
-                nullptr);
-            const wchar_t* const observedPathTag =
-                ClassifyObservedChunkCreatePath(callerRva, backtraceFrames, backtraceCount);
-            wchar_t backtraceLine[256] = {};
-            size_t backtraceCursor = 0;
-            for (USHORT index = 0; index < backtraceCount; ++index)
-            {
-                const uintptr_t frameAddress = reinterpret_cast<uintptr_t>(backtraceFrames[index]);
-                const uint32_t frameAddress32 = static_cast<uint32_t>(frameAddress);
-                const uint32_t frameRva =
-                    frameAddress >= kExeImageBaseAddr
-                        ? static_cast<uint32_t>(frameAddress - kExeImageBaseAddr)
-                        : 0u;
-                const wchar_t* const frameTag = frameRva ? DescribeObservedChunkRva(frameRva) : nullptr;
-                const int written = _snwprintf_s(
-                    backtraceLine + backtraceCursor,
-                    std::size(backtraceLine) - backtraceCursor,
-                    _TRUNCATE,
-                    frameTag
-                        ? ((index == 0)
-                               ? L"0x%08X(rva=0x%08X tag=%ls)"
-                               : L" <- 0x%08X(rva=0x%08X tag=%ls)")
-                        : ((index == 0)
-                               ? L"0x%08X(rva=0x%08X)"
-                               : L" <- 0x%08X(rva=0x%08X)"),
-                    frameAddress32,
-                    frameRva,
-                    frameTag);
-                if (written < 0)
-                {
-                    backtraceCursor = wcsnlen_s(backtraceLine, std::size(backtraceLine));
-                    break;
-                }
-                if (written == 0)
-                    break;
-                backtraceCursor += static_cast<size_t>(written);
-                if (backtraceCursor >= std::size(backtraceLine))
-                    break;
-            }
 
             float posX = 0.0f;
             float posY = 0.0f;
@@ -4787,13 +3008,9 @@ namespace BZROpenShim
 
             LogChunkDiagnostic(
                 "chunkspawn",
-                L"[CHUNKSPAWN] %ls this=0x%08X caller=0x%08X callerRva=0x%08X callerTag=%ls path=%ls before=%u after=%u preserve=%u src=0x%08X srcClass=%u srcFlags=0x%08X srcOwner=0x%08X srcGeom=0x%08X srcGeomName=%hs srcGeomKind=%hs srcVdf=%hs created=0x%08X createdClass=%u createdFlags=0x%08X createdOwner=0x%08X createdGeom=0x%08X createdGeomName=%hs createdGeomKind=%hs pos=%hs(%.4f, %.4f, %.4f) vel=%hs(%.4f, %.4f, %.4f)\n",
+                L"[CHUNKSPAWN] %ls this=0x%08X before=%u after=%u preserve=%u src=0x%08X srcClass=%u srcFlags=0x%08X srcOwner=0x%08X srcGeom=0x%08X srcGeomName=%hs srcGeomKind=%hs srcVdf=%hs created=0x%08X createdClass=%u createdFlags=0x%08X createdOwner=0x%08X createdGeom=0x%08X createdGeomName=%hs createdGeomKind=%hs pos=%hs(%.4f, %.4f, %.4f) vel=%hs(%.4f, %.4f, %.4f)\n",
                 tag ? tag : L"unknown",
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)),
-                callerAddress32,
-                callerRva,
-                callerTag ? callerTag : L"<none>",
-                observedPathTag ? observedPathTag : L"<none>",
                 countBefore,
                 countAfter,
                 static_cast<uint32_t>(preserveFlag),
@@ -4820,190 +3037,24 @@ namespace BZROpenShim
                 static_cast<double>(velX),
                 static_cast<double>(velY),
                 static_cast<double>(velZ));
-            if (backtraceLine[0])
-            {
-                LogChunkDiagnostic(
-                    "chunkspawn",
-                    L"[CHUNKSPAWN]   bt %ls\n",
-                    backtraceLine);
-            }
-
-            const bool shouldLogFragmentStack =
-                callerReturnAddressSlot &&
-                (((tag && wcscmp(tag, L"CreateChunk") == 0) ||
-                  (observedPathTag && wcscmp(observedPathTag, L"observed-fragment-create-path") == 0)));
-            if (shouldLogFragmentStack)
-            {
-                uint32_t stackWords[8] = {};
-                const uint32_t* stackWordsToLog = nullptr;
-                if (fragmentStackProbe && fragmentStackProbe->valid)
-                {
-                    memcpy(stackWords, fragmentStackProbe->stackWords, sizeof(stackWords));
-                    stackWordsToLog = stackWords;
-                }
-                else if (TryReadChunkCreateStackWords(
-                             callerReturnAddressSlot,
-                             stackWords,
-                             std::size(stackWords)))
-                {
-                    stackWordsToLog = stackWords;
-                }
-
-                if (stackWordsToLog)
-                {
-                    LogChunkDiagnostic(
-                        "chunkspawn",
-                        L"[CHUNKSPAWN]   stack [0]=0x%08X [1]=0x%08X [2]=0x%08X [3]=0x%08X [4]=0x%08X [5]=0x%08X [6]=0x%08X [7]=0x%08X\n",
-                        stackWordsToLog[0],
-                        stackWordsToLog[1],
-                        stackWordsToLog[2],
-                        stackWordsToLog[3],
-                        stackWordsToLog[4],
-                        stackWordsToLog[5],
-                        stackWordsToLog[6],
-                        stackWordsToLog[7]);
-
-                    uint32_t loggedCandidates[8] = {};
-                    size_t loggedCandidateCount = 0;
-                    for (size_t stackIndex = 1; stackIndex < std::size(stackWords); ++stackIndex)
-                    {
-                        const uint32_t candidateValue = stackWordsToLog[stackIndex];
-                        if (candidateValue < 0x00010000u)
-                            continue;
-
-                        bool alreadyLogged = false;
-                        for (size_t loggedIndex = 0; loggedIndex < loggedCandidateCount; ++loggedIndex)
-                        {
-                            if (loggedCandidates[loggedIndex] == candidateValue)
-                            {
-                                alreadyLogged = true;
-                                break;
-                            }
-                        }
-                        if (alreadyLogged)
-                            continue;
-
-                        ChunkObjectLinkProbe stackProbe = {};
-                        if (!CaptureChunkObjectLinkProbe(
-                                reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(candidateValue)),
-                                stackProbe))
-                        {
-                            continue;
-                        }
-
-                        if (loggedCandidateCount < std::size(loggedCandidates))
-                            loggedCandidates[loggedCandidateCount++] = candidateValue;
-
-                        const char* relation = "<none>";
-                        if (sourceBytes &&
-                            candidateValue == static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceBytes)))
-                        {
-                            relation = "source";
-                        }
-                        else if (createdEntry && createdEntry->objectBytes &&
-                                 candidateValue == static_cast<uint32_t>(
-                                     reinterpret_cast<uintptr_t>(createdEntry->objectBytes)))
-                        {
-                            relation = "created";
-                        }
-                        else if (sourceTreeProbe && sourceTreeProbe->parent.objectBytes &&
-                                 candidateValue == static_cast<uint32_t>(
-                                     reinterpret_cast<uintptr_t>(sourceTreeProbe->parent.objectBytes)))
-                        {
-                            relation = "parent";
-                        }
-                        else if (sourceTreeProbe && sourceTreeProbe->grandparent.objectBytes &&
-                                 candidateValue == static_cast<uint32_t>(
-                                     reinterpret_cast<uintptr_t>(sourceTreeProbe->grandparent.objectBytes)))
-                        {
-                            relation = "grandparent";
-                        }
-                        else if (sourceTreeProbe && sourceTreeProbe->root.objectBytes &&
-                                 candidateValue == static_cast<uint32_t>(
-                                     reinterpret_cast<uintptr_t>(sourceTreeProbe->root.objectBytes)))
-                        {
-                            relation = "root";
-                        }
-                        else if (sourceTreeProbe && sourceTreeProbe->sibling.objectBytes &&
-                                 candidateValue == static_cast<uint32_t>(
-                                     reinterpret_cast<uintptr_t>(sourceTreeProbe->sibling.objectBytes)))
-                        {
-                            relation = "sibling";
-                        }
-                        else if (sourceTreeProbe && sourceTreeProbe->child.objectBytes &&
-                                 candidateValue == static_cast<uint32_t>(
-                                     reinterpret_cast<uintptr_t>(sourceTreeProbe->child.objectBytes)))
-                        {
-                            relation = "child";
-                        }
-
-                        LogChunkDiagnostic(
-                            "chunkspawn",
-                            L"[CHUNKSPAWN]   stackObj slot=%u ptr=0x%08X relation=%hs objId=%hs class=%u flags=0x%08X geom=0x%08X geomName=%hs mesh=%hs vdf=%hs\n",
-                            static_cast<unsigned>(stackIndex),
-                            candidateValue,
-                            relation,
-                            stackProbe.objectId[0] ? stackProbe.objectId : "<none>",
-                            stackProbe.classId,
-                            stackProbe.flags,
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(stackProbe.geomRef)),
-                            stackProbe.geomName[0] ? stackProbe.geomName : "<none>",
-                            stackProbe.cachedMeshName[0] ? stackProbe.cachedMeshName : "<none>",
-                            stackProbe.vdfCandidates[0] ? stackProbe.vdfCandidates : "<none>");
-                    }
-                }
-            }
-
-            if (fragmentStackProbe && fragmentStackProbe->valid)
-            {
-                const ChunkFragmentStackCandidate* candidates[] =
-                {
-                    &fragmentStackProbe->slot1,
-                    &fragmentStackProbe->slot5,
-                    &fragmentStackProbe->slot6,
-                    &fragmentStackProbe->slot7,
-                };
-                for (const ChunkFragmentStackCandidate* candidate : candidates)
-                {
-                    if (!candidate || !candidate->valid)
-                        continue;
-
-                    LogChunkDiagnostic(
-                        "chunkspawn",
-                        L"[CHUNKSPAWN]   fragCtx slot=%u ptr=0x%08X objId=%hs class=%u geomName=%hs mesh=%hs vdf=%hs\n",
-                        candidate->slotIndex,
-                        candidate->rawValue,
-                        candidate->probe.objectId[0] ? candidate->probe.objectId : "<none>",
-                        candidate->probe.classId,
-                        candidate->probe.geomName[0] ? candidate->probe.geomName : "<none>",
-                        candidate->probe.cachedMeshName[0] ? candidate->probe.cachedMeshName : "<none>",
-                        candidate->probe.vdfCandidates[0] ? candidate->probe.vdfCandidates : "<none>");
-                }
-            }
 
             if (sourceTreeProbe && sourceTreeProbe->valid)
             {
                 const ChunkObjectLinkProbe& sourceProbe = sourceTreeProbe->source;
                 const ChunkObjectLinkProbe& parentProbe = sourceTreeProbe->parent;
-                const ChunkObjectLinkProbe& grandparentProbe = sourceTreeProbe->grandparent;
-                const ChunkObjectLinkProbe& rootProbe = sourceTreeProbe->root;
                 const ChunkObjectLinkProbe& siblingProbe = sourceTreeProbe->sibling;
                 const ChunkObjectLinkProbe& childProbe = sourceTreeProbe->child;
 
                 LogChunkDiagnostic(
                     "chunkspawn",
-                    L"[CHUNKSPAWN]   srcTree src=0x%08X objId=%hs class=%u flags=0x%08X geom=0x%08X geomName=%hs selectedBridge=0x%08X selectedGameObj=0x%08X selectedOdf=%hs ownerEntity=0x%08X ownerObj=0x%08X ownerBase=%hs ownerFile=%hs ownerMesh=%hs | parent=0x%08X objId=%hs class=%u geom=0x%08X geomName=%hs gameObj=0x%08X | grandparent=0x%08X objId=%hs class=%u geom=0x%08X geomName=%hs gameObj=0x%08X | root=0x%08X objId=%hs class=%u geom=0x%08X geomName=%hs gameObj=0x%08X rootOdf=%hs | sibling=0x%08X objId=%hs class=%u geom=0x%08X geomName=%hs | child=0x%08X objId=%hs class=%u geom=0x%08X geomName=%hs\n",
+                    L"[CHUNKSPAWN]   srcTree src=0x%08X objId=%hs class=%u flags=0x%08X geom=0x%08X geomName=%hs ownerEntity=0x%08X ownerBase=%hs ownerFile=%hs ownerMesh=%hs | parent=0x%08X objId=%hs class=%u geom=0x%08X geomName=%hs | sibling=0x%08X objId=%hs class=%u geom=0x%08X geomName=%hs | child=0x%08X objId=%hs class=%u geom=0x%08X geomName=%hs\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceProbe.objectBytes)),
                     sourceProbe.objectId[0] ? sourceProbe.objectId : "<none>",
                     sourceProbe.classId,
                     sourceProbe.flags,
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceProbe.geomRef)),
                     sourceProbe.geomName[0] ? sourceProbe.geomName : "<none>",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceTreeProbe->selectedBridgeObject)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceTreeProbe->selectedGameObject)),
-                    sourceTreeProbe->selectedGameObjectOdf[0] ? sourceTreeProbe->selectedGameObjectOdf : "<none>",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceTreeProbe->ownerEntity)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceTreeProbe->ownerObj)),
                     sourceTreeProbe->ownerEntityBaseName[0] ? sourceTreeProbe->ownerEntityBaseName : "<none>",
                     sourceTreeProbe->ownerOgreFilename[0] ? sourceTreeProbe->ownerOgreFilename : "<none>",
                     sourceTreeProbe->ownerResolvedMeshName[0] ? sourceTreeProbe->ownerResolvedMeshName : "<none>",
@@ -5012,20 +3063,6 @@ namespace BZROpenShim
                     parentProbe.classId,
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parentProbe.geomRef)),
                     parentProbe.geomName[0] ? parentProbe.geomName : "<none>",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceTreeProbe->parentGameObject)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(grandparentProbe.objectBytes)),
-                    grandparentProbe.objectId[0] ? grandparentProbe.objectId : "<none>",
-                    grandparentProbe.classId,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(grandparentProbe.geomRef)),
-                    grandparentProbe.geomName[0] ? grandparentProbe.geomName : "<none>",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceTreeProbe->grandparentGameObject)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rootProbe.objectBytes)),
-                    rootProbe.objectId[0] ? rootProbe.objectId : "<none>",
-                    rootProbe.classId,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rootProbe.geomRef)),
-                    rootProbe.geomName[0] ? rootProbe.geomName : "<none>",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceTreeProbe->rootGameObject)),
-                    sourceTreeProbe->rootGameObjectOdf[0] ? sourceTreeProbe->rootGameObjectOdf : "<none>",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(siblingProbe.objectBytes)),
                     siblingProbe.objectId[0] ? siblingProbe.objectId : "<none>",
                     siblingProbe.classId,
@@ -5087,9 +3124,6 @@ namespace BZROpenShim
             slot.sceneNode = nullptr;
             slot.entity = nullptr;
             slot.meshAssigned = false;
-            slot.renderProcessCount = 0;
-            slot.renderQueueAddCount = 0;
-            slot.renderSingleCount = 0;
         }
 
         static int FindChunkGeoEntryByKey(const BzrGeoLookup* lookup, uint32_t key)
@@ -5229,38 +3263,6 @@ namespace BZROpenShim
                    std::isfinite(outOrientation.z);
         }
 
-        static bool TryBuildOgreScaleFromLegacyTransform(
-            const LegacyMat3& transform,
-            OgreVector3& outScale)
-        {
-            outScale = { 1.0f, 1.0f, 1.0f };
-
-            const double rightLen = std::sqrt(
-                static_cast<double>(transform.right_x) * transform.right_x +
-                static_cast<double>(transform.right_y) * transform.right_y +
-                static_cast<double>(transform.right_z) * transform.right_z);
-            const double upLen = std::sqrt(
-                static_cast<double>(transform.up_x) * transform.up_x +
-                static_cast<double>(transform.up_y) * transform.up_y +
-                static_cast<double>(transform.up_z) * transform.up_z);
-            const double frontLen = std::sqrt(
-                static_cast<double>(transform.front_x) * transform.front_x +
-                static_cast<double>(transform.front_y) * transform.front_y +
-                static_cast<double>(transform.front_z) * transform.front_z);
-
-            if (!(std::isfinite(rightLen) && std::isfinite(upLen) && std::isfinite(frontLen)))
-                return false;
-            if (rightLen <= 1.0e-8 || upLen <= 1.0e-8 || frontLen <= 1.0e-8)
-                return false;
-
-            outScale.x = static_cast<float>(rightLen);
-            outScale.y = static_cast<float>(upLen);
-            outScale.z = static_cast<float>(frontLen);
-            return std::isfinite(outScale.x) &&
-                   std::isfinite(outScale.y) &&
-                   std::isfinite(outScale.z);
-        }
-
         static bool TryGetChunkProxyPosition(const uint8_t* objectBytes, float& outX, float& outY, float& outZ)
         {
             if (!objectBytes)
@@ -5306,8 +3308,6 @@ namespace BZROpenShim
                 outTransform.z = static_cast<float>(z);
                 if (!TryBuildOgreQuaternionFromLegacyTransform(*transform, outTransform.orientation))
                     outTransform.orientation = { 1.0f, 0.0f, 0.0f, 0.0f };
-                if (!TryBuildOgreScaleFromLegacyTransform(*transform, outTransform.scale))
-                    outTransform.scale = { 1.0f, 1.0f, 1.0f };
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -5315,325 +3315,6 @@ namespace BZROpenShim
                 outTransform = {};
                 return false;
             }
-        }
-
-        static bool TryResolveChunkProxyPositionFromCandidates(
-            const uint8_t* primaryObjectBytes,
-            const ChunkResolvedBindingEntry* binding,
-            const ChunkBridgeSnapshot* bridgeSnapshot,
-            float& outX,
-            float& outY,
-            float& outZ,
-            const void** outResolvedObject = nullptr)
-        {
-            if (outResolvedObject)
-                *outResolvedObject = nullptr;
-
-            const void* candidates[] =
-            {
-                primaryObjectBytes,
-                reinterpret_cast<const void*>(static_cast<uintptr_t>(binding ? binding->sourceRootObjectPtr : 0)),
-                reinterpret_cast<const void*>(static_cast<uintptr_t>(binding ? binding->sourceOwnerEntityPtr : 0)),
-                reinterpret_cast<const void*>(static_cast<uintptr_t>(binding ? binding->sourceOwnerObjPtr : 0)),
-                reinterpret_cast<const void*>(static_cast<uintptr_t>(binding ? binding->sourceGameObjectPtr : 0)),
-                reinterpret_cast<const void*>(static_cast<uintptr_t>(binding ? binding->sourceRootGameObjectPtr : 0)),
-                bridgeSnapshot ? bridgeSnapshot->ownerEntity : nullptr,
-                bridgeSnapshot ? bridgeSnapshot->ownerObj : nullptr,
-                bridgeSnapshot ? bridgeSnapshot->gameObject : nullptr,
-            };
-
-            std::unordered_set<uintptr_t> seen;
-            seen.reserve(std::size(candidates));
-            for (const void* candidate : candidates)
-            {
-                const uintptr_t key = reinterpret_cast<uintptr_t>(candidate);
-                if (!candidate || !seen.insert(key).second)
-                    continue;
-
-                if (TryGetChunkProxyPosition(
-                        reinterpret_cast<const uint8_t*>(candidate),
-                        outX,
-                        outY,
-                        outZ))
-                {
-                    if (outResolvedObject)
-                        *outResolvedObject = candidate;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        static bool TryResolveChunkProxyTransformForSlot(
-            const ChunkProxySlot& slot,
-            ChunkProxyTransform& outTransform,
-            const void** outResolvedObject = nullptr)
-        {
-            if (outResolvedObject)
-                *outResolvedObject = nullptr;
-
-            const void* candidates[] =
-            {
-                slot.objectBytes,
-                slot.sourceRootObject,
-                slot.ownerEntity,
-                slot.ownerObj,
-                slot.sourceGameObject,
-                slot.sourceRootGameObject,
-            };
-
-            std::unordered_set<uintptr_t> seen;
-            seen.reserve(std::size(candidates));
-            for (const void* candidate : candidates)
-            {
-                const uintptr_t key = reinterpret_cast<uintptr_t>(candidate);
-                if (!candidate || !seen.insert(key).second)
-                    continue;
-
-                if (TryGetChunkProxyTransform(
-                        reinterpret_cast<const uint8_t*>(candidate),
-                        outTransform))
-                {
-                    if (outResolvedObject)
-                        *outResolvedObject = candidate;
-                    return true;
-                }
-            }
-
-            outTransform = {};
-            return false;
-        }
-
-        static bool TryBuildChunkProxyAnchoredEntryTransform(
-            const ChunkProxySlot& slot,
-            const ChunkProxyTransform* baseTransform,
-            ChunkProxyTransform& outTransform,
-            const void** outAnchorObject = nullptr)
-        {
-            const void* candidates[] =
-            {
-                slot.sourceRootGameObject,
-                slot.sourceGameObject,
-                slot.ownerObj,
-                slot.ownerEntity,
-                slot.sourceRootObject,
-            };
-
-            std::unordered_set<uintptr_t> seen;
-            seen.reserve(std::size(candidates));
-
-            bool found = false;
-            double bestScore = 0.0;
-            ChunkProxyTransform bestTransform = {};
-            const void* bestAnchorObject = nullptr;
-            for (const void* candidate : candidates)
-            {
-                const uintptr_t key = reinterpret_cast<uintptr_t>(candidate);
-                if (!candidate || !seen.insert(key).second)
-                    continue;
-
-                ChunkProxyTransform anchorTransform = {};
-                if (!TryGetChunkProxyTransform(
-                        reinterpret_cast<const uint8_t*>(candidate),
-                        anchorTransform))
-                {
-                    continue;
-                }
-
-                ChunkProxyTransform candidateTransform = baseTransform ? *baseTransform : anchorTransform;
-                candidateTransform.x = anchorTransform.x + slot.positionX;
-                candidateTransform.y = anchorTransform.y + slot.positionY;
-                candidateTransform.z = anchorTransform.z + slot.positionZ;
-
-                if (!baseTransform)
-                {
-                    candidateTransform.orientation = anchorTransform.orientation;
-                    candidateTransform.scale = anchorTransform.scale;
-                }
-
-                double candidateScore = 0.0;
-                if (baseTransform)
-                {
-                    const double dx = static_cast<double>(candidateTransform.x) - static_cast<double>(baseTransform->x);
-                    const double dy = static_cast<double>(candidateTransform.y) - static_cast<double>(baseTransform->y);
-                    const double dz = static_cast<double>(candidateTransform.z) - static_cast<double>(baseTransform->z);
-                    candidateScore = std::sqrt((dx * dx) + (dy * dy) + (dz * dz));
-                }
-
-                if (!found || candidateScore < bestScore)
-                {
-                    bestScore = candidateScore;
-                    bestTransform = candidateTransform;
-                    bestAnchorObject = candidate;
-                    found = true;
-                    if (!baseTransform)
-                        break;
-                }
-            }
-
-            if (!found)
-            {
-                seen.clear();
-                for (const void* candidate : candidates)
-                {
-                    const uintptr_t key = reinterpret_cast<uintptr_t>(candidate);
-                    if (!candidate || !seen.insert(key).second)
-                        continue;
-
-                    float anchorX = 0.0f;
-                    float anchorY = 0.0f;
-                    float anchorZ = 0.0f;
-                    if (!TryGetChunkProxyPosition(
-                            reinterpret_cast<const uint8_t*>(candidate),
-                            anchorX,
-                            anchorY,
-                            anchorZ))
-                    {
-                        continue;
-                    }
-
-                    ChunkProxyTransform candidateTransform = {};
-                    if (baseTransform)
-                    {
-                        candidateTransform = *baseTransform;
-                    }
-                    else
-                    {
-                        candidateTransform.orientation = { 1.0f, 0.0f, 0.0f, 0.0f };
-                        candidateTransform.scale = { 1.0f, 1.0f, 1.0f };
-                    }
-
-                    candidateTransform.x = anchorX + slot.positionX;
-                    candidateTransform.y = anchorY + slot.positionY;
-                    candidateTransform.z = anchorZ + slot.positionZ;
-
-                    double candidateScore = 0.0;
-                    if (baseTransform)
-                    {
-                        const double dx = static_cast<double>(candidateTransform.x) - static_cast<double>(baseTransform->x);
-                        const double dy = static_cast<double>(candidateTransform.y) - static_cast<double>(baseTransform->y);
-                        const double dz = static_cast<double>(candidateTransform.z) - static_cast<double>(baseTransform->z);
-                        candidateScore = std::sqrt((dx * dx) + (dy * dy) + (dz * dz));
-                    }
-
-                    if (!found || candidateScore < bestScore)
-                    {
-                        bestScore = candidateScore;
-                        bestTransform = candidateTransform;
-                        bestAnchorObject = candidate;
-                        found = true;
-                        if (!baseTransform)
-                            break;
-                    }
-                }
-            }
-
-            if (!found)
-                return false;
-
-            outTransform = bestTransform;
-            if (outAnchorObject)
-                *outAnchorObject = bestAnchorObject;
-            return true;
-        }
-
-        static bool ShouldPreferChunkEntryPosition(
-            const ChunkProxySlot& slot,
-            const ChunkProxyTransform& transform)
-        {
-            if (!slot.useEntryPosition)
-                return false;
-
-            const double dx = static_cast<double>(transform.x) - static_cast<double>(slot.positionX);
-            const double dy = static_cast<double>(transform.y) - static_cast<double>(slot.positionY);
-            const double dz = static_cast<double>(transform.z) - static_cast<double>(slot.positionZ);
-            const double distance = std::sqrt((dx * dx) + (dy * dy) + (dz * dz));
-            return std::isfinite(distance) &&
-                   distance > static_cast<double>(kChunkProxyEntryPositionTolerance);
-        }
-
-        static double ComputeChunkProxyPositionDistance(
-            float ax,
-            float ay,
-            float az,
-            float bx,
-            float by,
-            float bz)
-        {
-            const double dx = static_cast<double>(ax) - static_cast<double>(bx);
-            const double dy = static_cast<double>(ay) - static_cast<double>(by);
-            const double dz = static_cast<double>(az) - static_cast<double>(bz);
-            return std::sqrt((dx * dx) + (dy * dy) + (dz * dz));
-        }
-
-        static bool TryPromoteChunkProxyLocalTransformToAnchoredWorld(
-            const ChunkProxySlot& slot,
-            const ChunkProxyTransform& resolvedTransform,
-            const void* resolvedTransformObject,
-            ChunkProxyTransform& outTransform,
-            const void** outAnchorObject = nullptr)
-        {
-            if (outAnchorObject)
-                *outAnchorObject = nullptr;
-
-            if (!slot.useEntryPosition ||
-                resolvedTransformObject == nullptr ||
-                resolvedTransformObject != slot.objectBytes)
-            {
-                return false;
-            }
-
-            const double rawEntryDistance = ComputeChunkProxyPositionDistance(
-                resolvedTransform.x,
-                resolvedTransform.y,
-                resolvedTransform.z,
-                slot.positionX,
-                slot.positionY,
-                slot.positionZ);
-            const double rawMagnitude = ComputeChunkProxyPositionDistance(
-                resolvedTransform.x,
-                resolvedTransform.y,
-                resolvedTransform.z,
-                0.0f,
-                0.0f,
-                0.0f);
-            const bool localLike =
-                (std::isfinite(rawEntryDistance) &&
-                 rawEntryDistance <= static_cast<double>(kChunkProxyLocalTransformTolerance)) ||
-                (std::isfinite(rawMagnitude) &&
-                 rawMagnitude <= static_cast<double>(kChunkProxyLocalTransformTolerance));
-            if (!localLike)
-                return false;
-
-            ChunkProxyTransform anchoredTransform = {};
-            const void* anchoredObject = nullptr;
-            if (!TryBuildChunkProxyAnchoredEntryTransform(
-                    slot,
-                    nullptr,
-                    anchoredTransform,
-                    &anchoredObject))
-            {
-                return false;
-            }
-
-            const double anchorDelta = ComputeChunkProxyPositionDistance(
-                anchoredTransform.x,
-                anchoredTransform.y,
-                anchoredTransform.z,
-                resolvedTransform.x,
-                resolvedTransform.y,
-                resolvedTransform.z);
-            if (!std::isfinite(anchorDelta) ||
-                anchorDelta < static_cast<double>(kChunkProxyAnchoredTransformAdoptDistance))
-            {
-                return false;
-            }
-
-            outTransform = anchoredTransform;
-            if (outAnchorObject)
-                *outAnchorObject = anchoredObject;
-            return true;
         }
 
         static void* GetOgreSceneManagerRuntime()
@@ -5770,358 +3451,10 @@ namespace BZROpenShim
             }
         }
 
-        static bool TryReadChunkProxyTemplateRenderState(
-            void* templateEntity,
-            uint32_t& outVisibilityFlags,
-            uint8_t& outRenderQueueGroup)
-        {
-            static FnOgreGetVisibilityFlags getVisibilityFlags =
-                ResolveOgreProc<FnOgreGetVisibilityFlags>("?getVisibilityFlags@MovableObject@Ogre@@UBEIXZ");
-            static FnOgreGetRenderQueueGroup getRenderQueueGroup =
-                ResolveOgreProcByOffset<FnOgreGetRenderQueueGroup>(0x0001584D);
-
-            outVisibilityFlags = 0xFFFFFFFFu;
-            outRenderQueueGroup = 50;
-            if (!templateEntity)
-                return false;
-
-            if (getVisibilityFlags)
-                outVisibilityFlags = getVisibilityFlags(templateEntity);
-            if (getRenderQueueGroup)
-                outRenderQueueGroup = getRenderQueueGroup(templateEntity);
-            return true;
-        }
-
-        static FnOgreGetParentSceneNode GetChunkProxyParentSceneNodeProc()
-        {
-            static FnOgreGetParentSceneNode getParentSceneNode =
-                ResolveOgreProc<FnOgreGetParentSceneNode>("?getParentSceneNode@MovableObject@Ogre@@UBEPAVSceneNode@2@XZ");
-            return getParentSceneNode;
-        }
-
-        static FnOgreGetManager GetChunkProxyEntityManagerProc()
-        {
-            static FnOgreGetManager getManager =
-                ResolveOgreProc<FnOgreGetManager>("?_getManager@MovableObject@Ogre@@UBEPAVSceneManager@2@XZ");
-            return getManager;
-        }
-
-        static void* TryGetChunkProxyParentSceneNodeSafe(void* movableObject)
-        {
-            FnOgreGetParentSceneNode getParentSceneNode = GetChunkProxyParentSceneNodeProc();
-            if (!movableObject || !getParentSceneNode)
-                return nullptr;
-
-            __try
-            {
-                return getParentSceneNode(movableObject);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return nullptr;
-            }
-        }
-
-        static void* TryGetChunkProxyEntityManagerSafe(void* movableObject)
-        {
-            FnOgreGetManager getManager = GetChunkProxyEntityManagerProc();
-            if (!movableObject || !getManager)
-                return nullptr;
-
-            __try
-            {
-                return getManager(movableObject);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return nullptr;
-            }
-        }
-
-        static void TryConfigureChunkProxyEntity(
-            void* entity,
-            FnOgreSetVisibilityFlags setVisibilityFlags,
-            FnOgreSetQueryFlags setQueryFlags,
-            FnOgreSetRenderingDistance setRenderingDistance,
-            FnOgreSetCastShadows setCastShadows,
-            FnOgreSetRenderQueueGroup setRenderQueueGroup);
-
-        static void TryApplyChunkProxyEntityPassOverrides(
-            void* entity,
-            bool disableDepthCheck,
-            bool disableCulling,
-            const wchar_t* sourceTag)
-        {
-            if (!entity || (!disableDepthCheck && !disableCulling))
-                return;
-
-            static FnOgreGetNumSubEntities getNumSubEntities =
-                ResolveOgreProc<FnOgreGetNumSubEntities>("?getNumSubEntities@Entity@Ogre@@QBEIXZ");
-            static FnOgreGetSubEntity getSubEntity =
-                ResolveOgreProc<FnOgreGetSubEntity>("?getSubEntity@Entity@Ogre@@QBEPAVSubEntity@2@I@Z");
-            static FnOgreGetRenderableTechnique getRenderableTechnique =
-                ResolveOgreProc<FnOgreGetRenderableTechnique>("?getTechnique@Renderable@Ogre@@UBEPAVTechnique@2@XZ");
-            static FnOgreGetTechniquePass getTechniquePass =
-                ResolveOgreProc<FnOgreGetTechniquePass>("?getPass@Technique@Ogre@@QAEPAVPass@2@G@Z");
-            static FnOgreSetPassDepthCheckEnabled setPassDepthCheckEnabled =
-                ResolveOgreProc<FnOgreSetPassDepthCheckEnabled>("?setDepthCheckEnabled@Pass@Ogre@@QAEX_N@Z");
-            static FnOgreSetPassCullingMode setPassCullingMode =
-                ResolveOgreProc<FnOgreSetPassCullingMode>("?setCullingMode@Pass@Ogre@@QAEXW4CullingMode@2@@Z");
-            constexpr uint32_t kOgreCullNone = 1u;
-
-            uint32_t subEntityCount = 0;
-            if (getNumSubEntities && getSubEntity && getRenderableTechnique &&
-                getTechniquePass && (setPassDepthCheckEnabled || setPassCullingMode))
-            {
-                subEntityCount = getNumSubEntities(entity);
-                for (uint32_t index = 0; index < subEntityCount; ++index)
-                {
-                    void* const subEntity = getSubEntity(entity, index);
-                    if (!subEntity)
-                        continue;
-
-                    void* const technique = getRenderableTechnique(subEntity);
-                    void* const pass = technique ? getTechniquePass(technique, 0) : nullptr;
-                    if (!pass)
-                        continue;
-
-                    if (disableDepthCheck && setPassDepthCheckEnabled)
-                        setPassDepthCheckEnabled(pass, false);
-                    if (disableCulling && setPassCullingMode)
-                        setPassCullingMode(pass, kOgreCullNone);
-                }
-            }
-
-            if (AcquireChunkLogSlot())
-            {
-                LogChunkDiagnostic(
-                    "chunkmesh",
-                    L"[CHUNKMESH] pass-override applied entity=0x%08X source=%ls noDepthCheck=%u noCull=%u subCount=%u\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entity)),
-                    sourceTag ? sourceTag : L"<none>",
-                    disableDepthCheck ? 1u : 0u,
-                    disableCulling ? 1u : 0u,
-                    static_cast<unsigned>(subEntityCount));
-            }
-        }
-
-        static void TryApplyChunkProxyEnvPassOverrides(void* entity)
-        {
-            const bool disableDepthCheck =
-                EnvFlagEnabled("OPENSHIM_CHUNK_FORCE_PASS_NO_DEPTH") ||
-                EnvFlagEnabled("BZR_CHUNK_FORCE_PASS_NO_DEPTH") ||
-                EnvFlagEnabled("OPENSHIM_CHUNK_FORCE_PASS_NO_DEPTH_CHECK") ||
-                EnvFlagEnabled("BZR_CHUNK_FORCE_PASS_NO_DEPTH_CHECK");
-            const bool disableCulling =
-                EnvFlagEnabled("OPENSHIM_CHUNK_FORCE_PASS_NO_CULL") ||
-                EnvFlagEnabled("BZR_CHUNK_FORCE_PASS_NO_CULL");
-            static bool loggedConfig = false;
-            if ((!disableDepthCheck && !disableCulling) || !entity)
-                return;
-
-            if (!loggedConfig && AcquireChunkLogSlot())
-            {
-                LogChunkDiagnostic(
-                    "chunkmesh",
-                    L"[CHUNKMESH] pass-override enabled source=env noDepthCheck=%u noCull=%u\n",
-                    disableDepthCheck ? 1u : 0u,
-                    disableCulling ? 1u : 0u);
-                loggedConfig = true;
-            }
-
-            TryApplyChunkProxyEntityPassOverrides(entity, disableDepthCheck, disableCulling, L"env");
-        }
-
-        static void TryApplyChunkProxyTemplateFallbackPassOverrides(
-            void* entity,
-            void* templateEntity)
-        {
-            if (!entity || templateEntity)
-                return;
-
-            const bool envPassOverrideRequested =
-                EnvFlagEnabled("OPENSHIM_CHUNK_FORCE_PASS_NO_DEPTH") ||
-                EnvFlagEnabled("BZR_CHUNK_FORCE_PASS_NO_DEPTH") ||
-                EnvFlagEnabled("OPENSHIM_CHUNK_FORCE_PASS_NO_DEPTH_CHECK") ||
-                EnvFlagEnabled("BZR_CHUNK_FORCE_PASS_NO_DEPTH_CHECK") ||
-                EnvFlagEnabled("OPENSHIM_CHUNK_FORCE_PASS_NO_CULL") ||
-                EnvFlagEnabled("BZR_CHUNK_FORCE_PASS_NO_CULL");
-            if (EnvFlagEnabled("OPENSHIM_CHUNK_FORCE_DEBUG_MATERIAL") || envPassOverrideRequested)
-                return;
-
-            static bool loggedConfig = false;
-            if (!loggedConfig && AcquireChunkLogSlot())
-            {
-                LogChunkDiagnostic(
-                    "chunkmesh",
-                    L"[CHUNKMESH] fallback-presentation enabled source=template-missing rq=95 noDepthCheck=1 noCull=0\n");
-                loggedConfig = true;
-            }
-
-            TryApplyChunkProxyEntityPassOverrides(entity, true, false, L"template-fallback");
-        }
-
-        static void TryApplyChunkProxyDebugMaterialOverride(void* entity)
-        {
-            if (!entity || !EnvFlagEnabled("OPENSHIM_CHUNK_FORCE_DEBUG_MATERIAL"))
-                return;
-
-            static FnOgreSetEntityMaterialName setEntityMaterialName =
-                ResolveOgreProcByOffset<FnOgreSetEntityMaterialName>(0x1BF9F);
-            static FnOgreGetNumSubEntities getNumSubEntities =
-                ResolveOgreProc<FnOgreGetNumSubEntities>("?getNumSubEntities@Entity@Ogre@@QBEIXZ");
-            static FnOgreGetSubEntity getSubEntity =
-                ResolveOgreProc<FnOgreGetSubEntity>("?getSubEntity@Entity@Ogre@@QBEPAVSubEntity@2@I@Z");
-            static FnOgreSetSubEntityMaterialName setSubEntityMaterialName =
-                ResolveOgreProcByOffset<FnOgreSetSubEntityMaterialName>(0x6E3D);
-            static bool loggedConfig = false;
-
-            const std::string materialName(kChunkProxyMaterialName);
-            const std::string resourceGroup(kChunkProxyMaterialGroup);
-            if (!loggedConfig && AcquireChunkLogSlot())
-            {
-                LogChunkDiagnostic(
-                    "chunkmesh",
-                    L"[CHUNKMESH] debug-material enabled material=%hs group=%hs setEntity=0x%08X setSubEntity=0x%08X\n",
-                    materialName.c_str(),
-                    resourceGroup.c_str(),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(setEntityMaterialName)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(setSubEntityMaterialName)));
-                loggedConfig = true;
-            }
-
-            if (setEntityMaterialName)
-                setEntityMaterialName(entity, materialName, resourceGroup);
-
-            uint32_t subEntityCount = 0;
-            if (getNumSubEntities && getSubEntity && setSubEntityMaterialName)
-            {
-                subEntityCount = getNumSubEntities(entity);
-                for (uint32_t index = 0; index < subEntityCount; ++index)
-                {
-                    void* const subEntity = getSubEntity(entity, index);
-                    if (subEntity)
-                        setSubEntityMaterialName(subEntity, materialName, resourceGroup);
-                }
-            }
-
-            TryApplyChunkProxyEntityPassOverrides(entity, true, true, L"debug-material");
-
-            if (AcquireChunkLogSlot())
-            {
-                LogChunkDiagnostic(
-                    "chunkmesh",
-                    L"[CHUNKMESH] debug-material applied entity=0x%08X material=%hs group=%hs subCount=%u\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entity)),
-                    materialName.c_str(),
-                    resourceGroup.c_str(),
-                    static_cast<unsigned>(subEntityCount));
-            }
-        }
-
-        static void TryConfigureChunkProxyEntity(
-            void* entity,
-            FnOgreSetVisibilityFlags setVisibilityFlags,
-            FnOgreSetQueryFlags setQueryFlags,
-            FnOgreSetRenderingDistance setRenderingDistance,
-            FnOgreSetCastShadows setCastShadows,
-            FnOgreSetRenderQueueGroup setRenderQueueGroup,
-            void* templateEntity)
-        {
-            if (!entity)
-                return;
-
-            uint32_t visibilityFlags = 0xFFFFFFFFu;
-            uint8_t renderQueueGroup = 50;
-            const bool haveTemplateRenderState =
-                TryReadChunkProxyTemplateRenderState(templateEntity, visibilityFlags, renderQueueGroup);
-            long forcedRenderQueueGroupLong = 0;
-            const bool haveForcedRenderQueueGroup =
-                (TryGetEnvLong("OPENSHIM_CHUNK_RENDER_QUEUE_GROUP", forcedRenderQueueGroupLong) ||
-                 TryGetEnvLong("BZR_CHUNK_RENDER_QUEUE_GROUP", forcedRenderQueueGroupLong)) &&
-                forcedRenderQueueGroupLong >= 0 &&
-                forcedRenderQueueGroupLong <= 255;
-            const bool forceDebugMaterial = EnvFlagEnabled("OPENSHIM_CHUNK_FORCE_DEBUG_MATERIAL");
-            const bool useTemplateFallbackRenderQueue =
-                !haveForcedRenderQueueGroup &&
-                !forceDebugMaterial &&
-                !haveTemplateRenderState;
-
-            __try
-            {
-                if (setVisibilityFlags)
-                    setVisibilityFlags(entity, visibilityFlags);
-                if (setQueryFlags)
-                    setQueryFlags(entity, visibilityFlags);
-                if (setRenderingDistance)
-                    setRenderingDistance(entity, 0.0f);
-                if (setCastShadows)
-                    setCastShadows(entity, false);
-                if (setRenderQueueGroup)
-                {
-                    const uint8_t effectiveRenderQueueGroup =
-                        haveForcedRenderQueueGroup
-                            ? static_cast<uint8_t>(forcedRenderQueueGroupLong)
-                            : (forceDebugMaterial
-                            ? static_cast<uint8_t>(95u)
-                            : (useTemplateFallbackRenderQueue
-                                ? static_cast<uint8_t>(95u)
-                                : renderQueueGroup));
-                    setRenderQueueGroup(entity, effectiveRenderQueueGroup);
-                }
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-            }
-
-            TryApplyChunkProxyDebugMaterialOverride(entity);
-            TryApplyChunkProxyEnvPassOverrides(entity);
-            TryApplyChunkProxyTemplateFallbackPassOverrides(entity, templateEntity);
-        }
-
-        static void TryConfigureChunkProxySceneNode(
-            void* sceneNode,
-            FnOgreSetInheritOrientation setInheritOrientation,
-            FnOgreSetInheritScale setInheritScale)
-        {
-            if (!sceneNode)
-                return;
-
-            __try
-            {
-                if (setInheritOrientation)
-                    setInheritOrientation(sceneNode, true);
-                if (setInheritScale)
-                    setInheritScale(sceneNode, true);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-            }
-        }
-
-        static void TrySetChunkProxySceneNodeVisible(
-            void* sceneNode,
-            FnOgreSetSceneNodeVisible setVisible,
-            bool visible)
-        {
-            if (!sceneNode || !setVisible)
-                return;
-
-            __try
-            {
-                setVisible(sceneNode, visible, true);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-            }
-        }
-
         static void TryResetChunkProxyNode(
             void* sceneNode,
             FnOgreSetNodePosition setPosition,
-            FnOgreSetNodeOrientation setOrientation,
-            FnOgreSetNodeScale setScale,
-            FnOgreSetSceneNodeVisible setVisible)
+            FnOgreSetNodeOrientation setOrientation)
         {
             if (!sceneNode || !setPosition)
                 return;
@@ -6131,17 +3464,13 @@ namespace BZROpenShim
                 setPosition(sceneNode, 0.0f, kChunkProxyHiddenY, 0.0f);
                 if (setOrientation)
                     setOrientation(sceneNode, 1.0f, 0.0f, 0.0f, 0.0f);
-                if (setScale)
-                    setScale(sceneNode, 1.0f, 1.0f, 1.0f);
-                if (setVisible)
-                    setVisible(sceneNode, false, true);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
             }
         }
 
-        __declspec(noinline) static void* CreateChunkMeshProxyEntity(
+        static void* CreateChunkMeshProxyEntity(
             void* sceneManager,
             FnOgreCreateEntity createEntity,
             const char* meshName)
@@ -6152,99 +3481,13 @@ namespace BZROpenShim
             return createEntity(sceneManager, std::string(meshName));
         }
 
-        static void* TryCreateChunkMeshProxySceneNode(
-            void* rootNode,
-            void* sceneManager,
-            FnOgreCreateSceneNode createSceneNode,
-            FnOgreCreateChildSceneNode createChildSceneNode,
-            FnOgreAddChildNode addChildNode,
-            FnOgreSetNodePosition setPosition,
-            FnOgreSetNodeOrientation setOrientation,
-            const OgreVector3& initialPosition,
-            const OgreQuaternion& initialOrientation)
-        {
-            if (!rootNode || !sceneManager || !createChildSceneNode)
-                return nullptr;
-
-            __try
-            {
-                void* childNode = createChildSceneNode(rootNode, initialPosition, initialOrientation);
-                if (childNode)
-                    return childNode;
-
-                if (createSceneNode && addChildNode)
-                {
-                    void* sceneNode = createSceneNode(sceneManager);
-                    if (sceneNode)
-                    {
-                        addChildNode(rootNode, sceneNode);
-                        if (setPosition)
-                            setPosition(sceneNode, initialPosition.x, initialPosition.y, initialPosition.z);
-                        if (setOrientation)
-                            setOrientation(
-                                sceneNode,
-                                initialOrientation.w,
-                                initialOrientation.x,
-                                initialOrientation.y,
-                                initialOrientation.z);
-                        return sceneNode;
-                    }
-                }
-                return nullptr;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return nullptr;
-            }
-        }
-
-        static bool TryAttachChunkMeshProxyEntity(
-            void* sceneNode,
-            void* entity,
-            void* expectedSceneManager,
-            FnOgreAttachObject attachObject,
-            FnOgreSetVisible setVisible,
-            FnOgreSetSceneNodeVisible setNodeVisible)
-        {
-            if (!sceneNode || !entity || !attachObject || !setVisible)
-                return false;
-
-            __try
-            {
-                attachObject(sceneNode, entity);
-                const void* const entityParentSceneNode = TryGetChunkProxyParentSceneNodeSafe(entity);
-                const void* const entitySceneManager = TryGetChunkProxyEntityManagerSafe(entity);
-                Log(
-                    L"[CHUNKMESH] attach entity=0x%08X sceneNode=0x%08X entityParent=0x%08X entityMgr=0x%08X expectedMgr=0x%08X parentOk=%u mgrOk=%u\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entity)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneNode)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entityParentSceneNode)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entitySceneManager)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(expectedSceneManager)),
-                    entityParentSceneNode == sceneNode ? 1u : 0u,
-                    entitySceneManager == expectedSceneManager ? 1u : 0u);
-                if (setNodeVisible)
-                    setNodeVisible(sceneNode, false, true);
-                setVisible(entity, false);
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
-        }
-
         static bool TryCreateChunkMeshProxyObjects(
             void* rootNode,
             void* sceneManager,
-            FnOgreCreateSceneNode createSceneNode,
             FnOgreCreateChildSceneNode createChildSceneNode,
-            FnOgreAddChildNode addChildNode,
             FnOgreCreateEntity createEntity,
             FnOgreAttachObject attachObject,
             FnOgreSetVisible setVisible,
-            FnOgreSetSceneNodeVisible setNodeVisible,
-            void* templateEntity,
             const char* meshName,
             void*& outSceneNode,
             void*& outEntity)
@@ -6256,66 +3499,21 @@ namespace BZROpenShim
 
             const OgreVector3 zeroPos = { 0.0f, kChunkProxyHiddenY, 0.0f };
             const OgreQuaternion identity = { 1.0f, 0.0f, 0.0f, 0.0f };
-            static FnOgreSetNodePosition setPosition =
-                ResolveOgreProc<FnOgreSetNodePosition>("?setPosition@Node@Ogre@@UAEXMMM@Z");
-            static FnOgreSetNodeOrientation setOrientation =
-                ResolveOgreProc<FnOgreSetNodeOrientation>("?setOrientation@Node@Ogre@@UAEXMMMM@Z");
-            static FnOgreSetVisibilityFlags setVisibilityFlags =
-                ResolveOgreProc<FnOgreSetVisibilityFlags>("?setVisibilityFlags@MovableObject@Ogre@@UAEXI@Z");
-            static FnOgreSetQueryFlags setQueryFlags =
-                ResolveOgreProc<FnOgreSetQueryFlags>("?setQueryFlags@MovableObject@Ogre@@UAEXI@Z");
-            static FnOgreSetRenderingDistance setRenderingDistance =
-                ResolveOgreProc<FnOgreSetRenderingDistance>("?setRenderingDistance@MovableObject@Ogre@@UAEXM@Z");
-            static FnOgreSetCastShadows setCastShadows =
-                ResolveOgreProc<FnOgreSetCastShadows>("?setCastShadows@MovableObject@Ogre@@QAEX_N@Z");
-            static FnOgreSetRenderQueueGroup setRenderQueueGroup =
-                ResolveOgreProc<FnOgreSetRenderQueueGroup>("?setRenderQueueGroup@MovableObject@Ogre@@UAEXE@Z");
-            static FnOgreSetInheritOrientation setInheritOrientation =
-                ResolveOgreProc<FnOgreSetInheritOrientation>("?setInheritOrientation@Node@Ogre@@UAEX_N@Z");
-            static FnOgreSetInheritScale setInheritScale =
-                ResolveOgreProc<FnOgreSetInheritScale>("?setInheritScale@Node@Ogre@@UAEX_N@Z");
-            outSceneNode = TryCreateChunkMeshProxySceneNode(
-                rootNode,
-                sceneManager,
-                createSceneNode,
-                createChildSceneNode,
-                addChildNode,
-                setPosition,
-                setOrientation,
-                zeroPos,
-                identity);
-            if (outSceneNode)
-                TryConfigureChunkProxySceneNode(outSceneNode, setInheritOrientation, setInheritScale);
-            if (outSceneNode)
-                outEntity = CreateChunkMeshProxyEntity(sceneManager, createEntity, meshName);
-            Log(
-                L"[CHUNKMESH] create-objects mesh=%hs sceneNode=0x%08X entity=0x%08X sceneManager=0x%08X root=0x%08X\n",
-                meshName ? meshName : "<none>",
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(outSceneNode)),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(outEntity)),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneManager)),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rootNode)));
-            if (outEntity)
+            __try
             {
-                TryConfigureChunkProxyEntity(
-                    outEntity,
-                    setVisibilityFlags,
-                    setQueryFlags,
-                    setRenderingDistance,
-                    setCastShadows,
-                    setRenderQueueGroup,
-                    templateEntity);
+                outSceneNode = createChildSceneNode(rootNode, zeroPos, identity);
+                if (outSceneNode)
+                {
+                    outEntity = CreateChunkMeshProxyEntity(sceneManager, createEntity, meshName);
+                    if (outEntity)
+                    {
+                        attachObject(outSceneNode, outEntity);
+                        setVisible(outEntity, false);
+                    }
+                }
             }
-            if (outSceneNode && outEntity &&
-                !TryAttachChunkMeshProxyEntity(outSceneNode, outEntity, sceneManager, attachObject, setVisible, setNodeVisible))
+            __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                Log(
-                    L"[CHUNKMESH] attach-failed mesh=%hs sceneNode=0x%08X entity=0x%08X sceneManager=0x%08X root=0x%08X\n",
-                    meshName ? meshName : "<none>",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(outSceneNode)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(outEntity)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneManager)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rootNode)));
                 outSceneNode = nullptr;
                 outEntity = nullptr;
             }
@@ -6442,11 +3640,7 @@ namespace BZROpenShim
             void* entity,
             FnOgreSetNodePosition setNodePosition,
             FnOgreSetNodeOrientation setNodeOrientation,
-            FnOgreSetNodeScale setNodeScale,
-            FnOgreNeedNodeUpdate needNodeUpdate,
-            FnOgreSceneNodeUpdate sceneNodeUpdate,
             FnOgreSetVisible setVisible,
-            FnOgreSetSceneNodeVisible setNodeVisible,
             const ChunkProxyTransform& transform)
         {
             if (!sceneNode || !entity || !setNodePosition || !setVisible)
@@ -6464,707 +3658,12 @@ namespace BZROpenShim
                         transform.orientation.y,
                         transform.orientation.z);
                 }
-                if (setNodeScale)
-                    setNodeScale(sceneNode, transform.scale.x, transform.scale.y, transform.scale.z);
-                if (needNodeUpdate)
-                    needNodeUpdate(sceneNode, true);
-                if (setNodeVisible)
-                    setNodeVisible(sceneNode, true, true);
                 setVisible(entity, true);
-                if (sceneNodeUpdate)
-                    sceneNodeUpdate(sceneNode, true, true);
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 return false;
-            }
-        }
-
-        struct ChunkProxyBoundsSnapshot
-        {
-            bool haveNodePos = false;
-            OgreVector3 nodePos = {};
-            bool haveLocalBox = false;
-            OgreAxisAlignedBox localBox = {};
-            bool haveWorldBox = false;
-            OgreAxisAlignedBox worldBox = {};
-            bool haveRadius = false;
-            float radius = 0.0f;
-            bool haveVisible = false;
-            bool visible = false;
-            bool haveIsVisible = false;
-            bool isVisible = false;
-            bool haveVisibilityFlags = false;
-            uint32_t visibilityFlags = 0;
-            bool haveRenderQueueGroup = false;
-            uint8_t renderQueueGroup = 0;
-            bool haveEntityParentSceneNode = false;
-            void* entityParentSceneNode = nullptr;
-            bool haveEntityManager = false;
-            void* entityManager = nullptr;
-            bool haveInSceneGraph = false;
-            bool inSceneGraph = false;
-            bool haveCurrentSceneManager = false;
-            void* currentSceneManager = nullptr;
-        };
-
-        static OgreVector3 ComputeAabbCenter(const OgreAxisAlignedBox& box)
-        {
-            return {
-                (box.minimum.x + box.maximum.x) * 0.5f,
-                (box.minimum.y + box.maximum.y) * 0.5f,
-                (box.minimum.z + box.maximum.z) * 0.5f,
-            };
-        }
-
-        static OgreVector3 ComputeAabbSize(const OgreAxisAlignedBox& box)
-        {
-            return {
-                box.maximum.x - box.minimum.x,
-                box.maximum.y - box.minimum.y,
-                box.maximum.z - box.minimum.z,
-            };
-        }
-
-        static void CaptureChunkProxyBoundsSnapshot(
-            void* sceneNode,
-            void* entity,
-            ChunkProxyBoundsSnapshot& outSnapshot)
-        {
-            static FnOgreGetBoundingRadius getBoundingRadius =
-                ResolveOgreProcByOffset<FnOgreGetBoundingRadius>(0x0000F8DF);
-            static FnOgreGetBoundingBox getBoundingBox =
-                ResolveOgreProcByOffset<FnOgreGetBoundingBox>(0x0002CDD6);
-            static FnOgreGetWorldBoundingBox getWorldBoundingBox =
-                ResolveOgreProcByOffset<FnOgreGetWorldBoundingBox>(0x000287BD);
-            static FnOgreGetNodeDerivedPosition getDerivedPosition =
-                ResolveOgreProcByOffset<FnOgreGetNodeDerivedPosition>(0x00002C20);
-            static FnOgreGetParentSceneNode getParentSceneNode =
-                ResolveOgreProc<FnOgreGetParentSceneNode>("?getParentSceneNode@MovableObject@Ogre@@UBEPAVSceneNode@2@XZ");
-            static FnOgreGetManager getManager =
-                ResolveOgreProc<FnOgreGetManager>("?_getManager@MovableObject@Ogre@@UBEPAVSceneManager@2@XZ");
-            static FnOgreIsInSceneGraph isInSceneGraph =
-                ResolveOgreProcByOffset<FnOgreIsInSceneGraph>(0x000212AB);
-            static FnOgreGetVisible getVisible =
-                ResolveOgreProcByOffset<FnOgreGetVisible>(0x00005E70);
-            static FnOgreIsVisible isVisible =
-                ResolveOgreProcByOffset<FnOgreIsVisible>(0x0002CCCD);
-            static FnOgreGetVisibilityFlags getVisibilityFlags =
-                ResolveOgreProcByOffset<FnOgreGetVisibilityFlags>(0x0002B819);
-            static FnOgreGetRenderQueueGroup getRenderQueueGroup =
-                ResolveOgreProcByOffset<FnOgreGetRenderQueueGroup>(0x0001584D);
-            static FnOgreGetRootSingletonPtr getRootSingletonPtr =
-                ResolveOgreProc<FnOgreGetRootSingletonPtr>("?getSingletonPtr@Root@Ogre@@SAPAV12@XZ");
-            static FnOgreGetCurrentSceneManager getCurrentSceneManager =
-                ResolveOgreProc<FnOgreGetCurrentSceneManager>("?_getCurrentSceneManager@Root@Ogre@@QBEPAVSceneManager@2@XZ");
-
-            if (!entity)
-                return;
-
-            if (getBoundingRadius)
-            {
-                outSnapshot.radius = getBoundingRadius(entity);
-                outSnapshot.haveRadius = std::isfinite(outSnapshot.radius);
-            }
-
-            if (getVisible)
-            {
-                outSnapshot.visible = getVisible(entity);
-                outSnapshot.haveVisible = true;
-            }
-
-            if (isVisible)
-            {
-                outSnapshot.isVisible = isVisible(entity);
-                outSnapshot.haveIsVisible = true;
-            }
-
-            if (getVisibilityFlags)
-            {
-                outSnapshot.visibilityFlags = getVisibilityFlags(entity);
-                outSnapshot.haveVisibilityFlags = true;
-            }
-
-            if (getRenderQueueGroup)
-            {
-                outSnapshot.renderQueueGroup = getRenderQueueGroup(entity);
-                outSnapshot.haveRenderQueueGroup = true;
-            }
-
-            if (getBoundingBox)
-            {
-                const OgreAxisAlignedBox* box = getBoundingBox(entity);
-                if (box)
-                {
-                    outSnapshot.localBox = *box;
-                    outSnapshot.haveLocalBox = true;
-                }
-            }
-
-            if (getWorldBoundingBox)
-            {
-                const OgreAxisAlignedBox* box = getWorldBoundingBox(entity, true);
-                if (box)
-                {
-                    outSnapshot.worldBox = *box;
-                    outSnapshot.haveWorldBox = true;
-                }
-            }
-
-            if (sceneNode && getDerivedPosition)
-            {
-                const OgreVector3* derived = getDerivedPosition(sceneNode);
-                if (derived)
-                {
-                    outSnapshot.nodePos = *derived;
-                    outSnapshot.haveNodePos = true;
-                }
-            }
-
-            if (entity && getParentSceneNode)
-            {
-                outSnapshot.entityParentSceneNode = getParentSceneNode(entity);
-                outSnapshot.haveEntityParentSceneNode = outSnapshot.entityParentSceneNode != nullptr;
-            }
-
-            if (entity && getManager)
-            {
-                outSnapshot.entityManager = getManager(entity);
-                outSnapshot.haveEntityManager = outSnapshot.entityManager != nullptr;
-            }
-
-            if (sceneNode && isInSceneGraph)
-            {
-                outSnapshot.inSceneGraph = isInSceneGraph(sceneNode);
-                outSnapshot.haveInSceneGraph = true;
-            }
-
-            if (getRootSingletonPtr && getCurrentSceneManager)
-            {
-                void* const rootSingleton = getRootSingletonPtr();
-                if (rootSingleton)
-                {
-                    outSnapshot.currentSceneManager = getCurrentSceneManager(rootSingleton);
-                    outSnapshot.haveCurrentSceneManager = outSnapshot.currentSceneManager != nullptr;
-                }
-            }
-        }
-
-        static ChunkProxySlot* FindChunkProxySlotByEntity(void* movableObject, bool* outOwnerMatch = nullptr)
-        {
-            if (outOwnerMatch)
-                *outOwnerMatch = false;
-            if (!movableObject || g_ChunkProxySlots.empty())
-                return nullptr;
-
-            for (ChunkProxySlot& slot : g_ChunkProxySlots)
-            {
-                if (!slot.active)
-                    continue;
-
-                if (slot.entity == movableObject)
-                    return &slot;
-
-                if (slot.ownerOgreEntity && slot.ownerOgreEntity == movableObject)
-                {
-                    if (outOwnerMatch)
-                        *outOwnerMatch = true;
-                    return &slot;
-                }
-            }
-
-            return nullptr;
-        }
-
-        static ChunkProxySlot* FindChunkProxySlotByRenderable(void* renderable, uint32_t* outSubIndex = nullptr)
-        {
-            if (outSubIndex)
-                *outSubIndex = UINT32_MAX;
-            if (!renderable || g_ChunkProxySlots.empty())
-                return nullptr;
-
-            static FnOgreGetNumSubEntities getNumSubEntities =
-                ResolveOgreProc<FnOgreGetNumSubEntities>("?getNumSubEntities@Entity@Ogre@@QBEIXZ");
-            static FnOgreGetSubEntity getSubEntity =
-                ResolveOgreProc<FnOgreGetSubEntity>("?getSubEntity@Entity@Ogre@@QBEPAVSubEntity@2@I@Z");
-            if (!getNumSubEntities || !getSubEntity)
-                return nullptr;
-
-            for (ChunkProxySlot& slot : g_ChunkProxySlots)
-            {
-                if (!slot.active || !slot.entity)
-                    continue;
-
-                if (slot.entity == renderable)
-                    return &slot;
-
-                const uint32_t subEntityCount = getNumSubEntities(slot.entity);
-                for (uint32_t index = 0; index < subEntityCount; ++index)
-                {
-                    if (getSubEntity(slot.entity, index) != renderable)
-                        continue;
-
-                    if (outSubIndex)
-                        *outSubIndex = index;
-                    return &slot;
-                }
-            }
-
-            return nullptr;
-        }
-
-        static ChunkProxySlot* FindChunkProxySlotBySceneNode(void* sceneNode)
-        {
-            if (!sceneNode || g_ChunkProxySlots.empty())
-                return nullptr;
-
-            for (ChunkProxySlot& slot : g_ChunkProxySlots)
-            {
-                if (!slot.active || !slot.sceneNode)
-                    continue;
-                if (slot.sceneNode == sceneNode)
-                    return &slot;
-            }
-
-            return nullptr;
-        }
-
-        static uintptr_t ResolveOgreExportThunkTarget(void* proc)
-        {
-            uintptr_t target = reinterpret_cast<uintptr_t>(proc);
-            const uint8_t* bytes = reinterpret_cast<const uint8_t*>(target);
-            if (bytes && bytes[0] == 0xE9)
-            {
-                const int32_t rel = *reinterpret_cast<const int32_t*>(bytes + 1);
-                target = target + 5 + static_cast<intptr_t>(rel);
-            }
-            return target;
-        }
-
-        static void InstallOgreChunkTraversalHooksIfRequested()
-        {
-            if (!g_EnableChunkMeshProxy || g_OgreChunkTraversalHooksInstalled)
-                return;
-
-            g_OgreFn_SceneManagerFindVisibleObjects = nullptr;
-            g_OgreFn_SceneNodeFindVisibleObjects = nullptr;
-            g_OgreFn_MovableObjectNotifyCurrentCamera = nullptr;
-            g_OgreFn_EntityUpdateRenderQueue = nullptr;
-            g_OgreFn_RenderQueueProcessVisibleObject = nullptr;
-            g_OgreFn_SceneManagerRenderSingleObject = nullptr;
-            g_OgreFn_RenderQueueAddRenderableDefault = nullptr;
-            g_OgreFn_RenderQueueAddRenderableGroup = nullptr;
-            g_OgreFn_RenderQueueAddRenderablePriority = nullptr;
-
-            HMODULE ogreModule = GetModuleHandleA("OgreMain.dll");
-            if (!ogreModule)
-                ogreModule = GetModuleHandleA("ogremain.dll");
-            if (!ogreModule)
-                return;
-
-            constexpr char kAddRenderableDefaultName[] =
-                "?addRenderable@RenderQueue@Ogre@@QAEXPAVRenderable@2@@Z";
-            constexpr char kAddRenderableGroupName[] =
-                "?addRenderable@RenderQueue@Ogre@@QAEXPAVRenderable@2@E@Z";
-            constexpr char kAddRenderablePriorityName[] =
-                "?addRenderable@RenderQueue@Ogre@@QAEXPAVRenderable@2@EG@Z";
-            constexpr char kProcessVisibleObjectName[] =
-                "?processVisibleObject@RenderQueue@Ogre@@QAEXPAVMovableObject@2@PAVCamera@2@_NPAUVisibleObjectsBoundsInfo@2@@Z";
-            constexpr char kRenderSingleObjectName[] =
-                "?renderSingleObject@SceneManager@Ogre@@MAEXPAVRenderable@2@PBVPass@2@_N2PBV?$HashedVector@PAVLight@Ogre@@@2@@Z";
-            constexpr char kSceneManagerFindVisibleObjectsName[] =
-                "?_findVisibleObjects@SceneManager@Ogre@@UAEXPAVCamera@2@PAUVisibleObjectsBoundsInfo@2@_N@Z";
-            constexpr char kSceneNodeFindVisibleObjectsName[] =
-                "?_findVisibleObjects@SceneNode@Ogre@@UAEXPAVCamera@2@PAVRenderQueue@2@PAUVisibleObjectsBoundsInfo@2@_N33@Z";
-            constexpr char kEntityNotifyCurrentCameraName[] =
-                "?_notifyCurrentCamera@Entity@Ogre@@UAEXPAVCamera@2@@Z";
-            constexpr char kEntityUpdateRenderQueueName[] =
-                "?_updateRenderQueue@Entity@Ogre@@UAEXPAVRenderQueue@2@@Z";
-            void* const addRenderableDefault =
-                reinterpret_cast<void*>(GetProcAddress(ogreModule, kAddRenderableDefaultName));
-            void* const addRenderableGroup =
-                reinterpret_cast<void*>(GetProcAddress(ogreModule, kAddRenderableGroupName));
-            void* const addRenderablePriority =
-                reinterpret_cast<void*>(GetProcAddress(ogreModule, kAddRenderablePriorityName));
-            void* const sceneManagerFindVisibleObjects =
-                reinterpret_cast<void*>(GetProcAddress(ogreModule, kSceneManagerFindVisibleObjectsName));
-            void* const renderSingleObject =
-                reinterpret_cast<void*>(GetProcAddress(ogreModule, kRenderSingleObjectName));
-            void* const sceneNodeFindVisibleObjects =
-                reinterpret_cast<void*>(GetProcAddress(ogreModule, kSceneNodeFindVisibleObjectsName));
-            void* const entityNotifyCurrentCamera =
-                reinterpret_cast<void*>(GetProcAddress(ogreModule, kEntityNotifyCurrentCameraName));
-            void* const entityUpdateRenderQueue =
-                reinterpret_cast<void*>(GetProcAddress(ogreModule, kEntityUpdateRenderQueueName));
-            void* const processVisibleObject =
-                reinterpret_cast<void*>(GetProcAddress(ogreModule, kProcessVisibleObjectName));
-            if (!addRenderableDefault || !addRenderableGroup || !addRenderablePriority ||
-                !renderSingleObject ||
-                !sceneManagerFindVisibleObjects || !sceneNodeFindVisibleObjects ||
-                !entityNotifyCurrentCamera || !entityUpdateRenderQueue || !processVisibleObject)
-                return;
-
-            const uintptr_t addRenderableDefaultTarget =
-                ResolveOgreExportThunkTarget(addRenderableDefault);
-            const uintptr_t addRenderableGroupTarget =
-                ResolveOgreExportThunkTarget(addRenderableGroup);
-            const uintptr_t addRenderablePriorityTarget =
-                ResolveOgreExportThunkTarget(addRenderablePriority);
-            const uintptr_t renderSingleObjectTarget =
-                ResolveOgreExportThunkTarget(renderSingleObject);
-            const uintptr_t sceneManagerFindVisibleObjectsTarget =
-                ResolveOgreExportThunkTarget(sceneManagerFindVisibleObjects);
-            const uintptr_t sceneNodeFindVisibleObjectsTarget =
-                ResolveOgreExportThunkTarget(sceneNodeFindVisibleObjects);
-            const uintptr_t entityNotifyCurrentCameraTarget =
-                ResolveOgreExportThunkTarget(entityNotifyCurrentCamera);
-            const uintptr_t entityUpdateRenderQueueTarget =
-                ResolveOgreExportThunkTarget(entityUpdateRenderQueue);
-            const uintptr_t processVisibleObjectTarget =
-                ResolveOgreExportThunkTarget(processVisibleObject);
-
-            static const uint8_t kExpectedSceneManagerFindVisibleObjectsBytes[8] =
-            {
-                0x55, 0x8B, 0xEC, 0x53, 0x56, 0x8B, 0xF1, 0x57
-            };
-            static const uint8_t kExpectedSceneNodeFindVisibleObjectsBytes[12] =
-            {
-                0x55, 0x8B, 0xEC, 0x51, 0x53, 0x8B, 0xD9, 0x8B,
-                0x4D, 0x08, 0x6A, 0x00
-            };
-            static const uint8_t kExpectedEntityNotifyCurrentCameraBytes[8] =
-            {
-                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x38, 0x53, 0x56
-            };
-            static const uint8_t kExpectedEntityUpdateRenderQueueBytes[12] =
-            {
-                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x10, 0x53, 0x8B,
-                0xD9, 0x89, 0x5D, 0xF4
-            };
-            static const uint8_t kExpectedAddRenderableDefaultBytes[16] =
-            {
-                0x55, 0x8B, 0xEC, 0x0F, 0xB7, 0x41, 0x12, 0x50,
-                0x0F, 0xB6, 0x41, 0x10, 0x50, 0xFF, 0x75, 0x08
-            };
-            static const uint8_t kExpectedAddRenderableGroupBytes[14] =
-            {
-                0x55, 0x8B, 0xEC, 0x0F, 0xB7, 0x41, 0x12, 0x50,
-                0xFF, 0x75, 0x0C, 0xFF, 0x75, 0x08
-            };
-            static const uint8_t kExpectedAddRenderablePriorityBytes[20] =
-            {
-                0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0xD0, 0x7A,
-                0x68, 0x10, 0x64, 0xA1, 0x00, 0x00, 0x00, 0x00,
-                0x50, 0x83, 0xEC, 0x50
-            };
-            static const uint8_t kExpectedAddRenderablePriorityMask[20] =
-            {
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00,
-                0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF
-            };
-            static const uint8_t kExpectedRenderSingleObjectBytes[20] =
-            {
-                0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x68, 0xA2,
-                0x69, 0x10, 0x64, 0xA1, 0x00, 0x00, 0x00, 0x00,
-                0x50, 0x83, 0xEC, 0x50
-            };
-            static const uint8_t kExpectedRenderSingleObjectMask[20] =
-            {
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00,
-                0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF
-            };
-
-            static const uint8_t kExpectedProcessVisibleObjectBytes[7] =
-            {
-                0x55, 0x8B, 0xEC, 0x56, 0x8B, 0x75, 0x08
-            };
-
-            auto tryInstallOgreDetour =
-                [&](const wchar_t* label,
-                    InlineDetour32& detour,
-                    uintptr_t target,
-                    void* hook,
-                    const uint8_t* expectedBytes,
-                    size_t expectedLen,
-                    const uint8_t* expectedMask = nullptr)
-            {
-                if (detour.trampoline)
-                    return;
-
-                if (InstallInlineDetour32(
-                        detour,
-                        target,
-                        hook,
-                        expectedLen,
-                        expectedBytes,
-                        expectedLen,
-                        expectedMask))
-                {
-                    return;
-                }
-
-                if (AcquireChunkLogSlot())
-                {
-                    const InlineDetourFailureInfo failure = g_LastInlineDetourFailure;
-                    wchar_t currentBytes[128] = {};
-                    wchar_t expectedBytesText[128] = {};
-                    FormatInlineDetourBytes(
-                        failure.current.data(),
-                        failure.currentLen,
-                        currentBytes,
-                        _countof(currentBytes));
-                    FormatInlineDetourBytes(
-                        failure.expected.data(),
-                        failure.expectedCaptureLen,
-                        expectedBytesText,
-                        _countof(expectedBytesText));
-
-                    LogChunkDiagnostic(
-                        "chunkmesh",
-                        L"[CHUNKMESH] Ogre detour install failed label=%ls reason=%ls target=0x%08X hook=0x%08X patchLen=%u expectedLen=%u lastError=%lu current=%ls expected=%ls\n",
-                        label,
-                        DescribeInlineDetourFailureReason(failure.reason),
-                        static_cast<uint32_t>(target),
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(hook)),
-                        static_cast<unsigned>(failure.patchLen),
-                        static_cast<unsigned>(failure.expectedLen),
-                        static_cast<unsigned long>(failure.lastError),
-                        currentBytes[0] ? currentBytes : L"<none>",
-                        expectedBytesText[0] ? expectedBytesText : L"<none>");
-                }
-            };
-
-            if (!g_OgreSceneManagerFindVisibleObjectsDetour.trampoline)
-            {
-                tryInstallOgreDetour(
-                    L"SceneManager::_findVisibleObjects",
-                    g_OgreSceneManagerFindVisibleObjectsDetour,
-                    sceneManagerFindVisibleObjectsTarget,
-                    reinterpret_cast<void*>(OgreSceneManagerFindVisibleObjectsHook),
-                    kExpectedSceneManagerFindVisibleObjectsBytes,
-                    sizeof(kExpectedSceneManagerFindVisibleObjectsBytes));
-            }
-
-            if (!g_OgreSceneManagerRenderSingleObjectDetour.trampoline)
-            {
-                tryInstallOgreDetour(
-                    L"SceneManager::renderSingleObject",
-                    g_OgreSceneManagerRenderSingleObjectDetour,
-                    renderSingleObjectTarget,
-                    reinterpret_cast<void*>(OgreSceneManagerRenderSingleObjectHook),
-                    kExpectedRenderSingleObjectBytes,
-                    sizeof(kExpectedRenderSingleObjectBytes),
-                    kExpectedRenderSingleObjectMask);
-            }
-
-            if (!g_OgreSceneNodeFindVisibleObjectsDetour.trampoline)
-            {
-                tryInstallOgreDetour(
-                    L"SceneNode::_findVisibleObjects",
-                    g_OgreSceneNodeFindVisibleObjectsDetour,
-                    sceneNodeFindVisibleObjectsTarget,
-                    reinterpret_cast<void*>(OgreSceneNodeFindVisibleObjectsHook),
-                    kExpectedSceneNodeFindVisibleObjectsBytes,
-                    sizeof(kExpectedSceneNodeFindVisibleObjectsBytes));
-            }
-
-            if (!g_OgreMovableObjectNotifyCurrentCameraDetour.trampoline)
-            {
-                tryInstallOgreDetour(
-                    L"Entity::_notifyCurrentCamera",
-                    g_OgreMovableObjectNotifyCurrentCameraDetour,
-                    entityNotifyCurrentCameraTarget,
-                    reinterpret_cast<void*>(OgreMovableObjectNotifyCurrentCameraHook),
-                    kExpectedEntityNotifyCurrentCameraBytes,
-                    sizeof(kExpectedEntityNotifyCurrentCameraBytes));
-            }
-
-            if (!g_OgreEntityUpdateRenderQueueDetour.trampoline)
-            {
-                tryInstallOgreDetour(
-                    L"Entity::_updateRenderQueue",
-                    g_OgreEntityUpdateRenderQueueDetour,
-                    entityUpdateRenderQueueTarget,
-                    reinterpret_cast<void*>(OgreEntityUpdateRenderQueueHook),
-                    kExpectedEntityUpdateRenderQueueBytes,
-                    sizeof(kExpectedEntityUpdateRenderQueueBytes));
-            }
-
-            if (!g_OgreRenderQueueAddRenderableDefaultDetour.trampoline)
-            {
-                tryInstallOgreDetour(
-                    L"RenderQueue::addRenderable(default)",
-                    g_OgreRenderQueueAddRenderableDefaultDetour,
-                    addRenderableDefaultTarget,
-                    reinterpret_cast<void*>(OgreRenderQueueAddRenderableDefaultHook),
-                    kExpectedAddRenderableDefaultBytes,
-                    sizeof(kExpectedAddRenderableDefaultBytes));
-            }
-
-            if (!g_OgreRenderQueueAddRenderableGroupDetour.trampoline)
-            {
-                tryInstallOgreDetour(
-                    L"RenderQueue::addRenderable(group)",
-                    g_OgreRenderQueueAddRenderableGroupDetour,
-                    addRenderableGroupTarget,
-                    reinterpret_cast<void*>(OgreRenderQueueAddRenderableGroupHook),
-                    kExpectedAddRenderableGroupBytes,
-                    sizeof(kExpectedAddRenderableGroupBytes));
-            }
-
-            if (!g_OgreRenderQueueAddRenderablePriorityDetour.trampoline)
-            {
-                tryInstallOgreDetour(
-                    L"RenderQueue::addRenderable(priority)",
-                    g_OgreRenderQueueAddRenderablePriorityDetour,
-                    addRenderablePriorityTarget,
-                    reinterpret_cast<void*>(OgreRenderQueueAddRenderablePriorityHook),
-                    kExpectedAddRenderablePriorityBytes,
-                    sizeof(kExpectedAddRenderablePriorityBytes),
-                    kExpectedAddRenderablePriorityMask);
-            }
-
-            if (!g_OgreRenderQueueProcessVisibleObjectDetour.trampoline)
-            {
-                tryInstallOgreDetour(
-                    L"RenderQueue::processVisibleObject",
-                    g_OgreRenderQueueProcessVisibleObjectDetour,
-                    processVisibleObjectTarget,
-                    reinterpret_cast<void*>(OgreRenderQueueProcessVisibleObjectHook),
-                    kExpectedProcessVisibleObjectBytes,
-                    sizeof(kExpectedProcessVisibleObjectBytes));
-            }
-
-            g_OgreFn_SceneManagerFindVisibleObjects =
-                reinterpret_cast<FnOgreSceneManagerFindVisibleObjects>(
-                    g_OgreSceneManagerFindVisibleObjectsDetour.trampoline);
-            g_OgreFn_SceneManagerRenderSingleObject =
-                reinterpret_cast<FnOgreSceneManagerRenderSingleObject>(
-                    g_OgreSceneManagerRenderSingleObjectDetour.trampoline);
-            g_OgreFn_SceneNodeFindVisibleObjects =
-                reinterpret_cast<FnOgreSceneNodeFindVisibleObjects>(
-                    g_OgreSceneNodeFindVisibleObjectsDetour.trampoline);
-            g_OgreFn_MovableObjectNotifyCurrentCamera =
-                reinterpret_cast<FnOgreMovableObjectNotifyCurrentCamera>(
-                    g_OgreMovableObjectNotifyCurrentCameraDetour.trampoline);
-            g_OgreFn_EntityUpdateRenderQueue =
-                reinterpret_cast<FnOgreEntityUpdateRenderQueue>(
-                    g_OgreEntityUpdateRenderQueueDetour.trampoline);
-            g_OgreFn_RenderQueueAddRenderableDefault =
-                reinterpret_cast<FnOgreRenderQueueAddRenderableDefault>(
-                    g_OgreRenderQueueAddRenderableDefaultDetour.trampoline);
-            g_OgreFn_RenderQueueAddRenderableGroup =
-                reinterpret_cast<FnOgreRenderQueueAddRenderableGroup>(
-                    g_OgreRenderQueueAddRenderableGroupDetour.trampoline);
-            g_OgreFn_RenderQueueAddRenderablePriority =
-                reinterpret_cast<FnOgreRenderQueueAddRenderablePriority>(
-                    g_OgreRenderQueueAddRenderablePriorityDetour.trampoline);
-            g_OgreFn_RenderQueueProcessVisibleObject =
-                reinterpret_cast<FnOgreRenderQueueProcessVisibleObject>(
-                    g_OgreRenderQueueProcessVisibleObjectDetour.trampoline);
-            g_OgreChunkTraversalHooksInstalled =
-                (g_OgreFn_SceneManagerFindVisibleObjects != nullptr);
-
-            if (g_OgreChunkTraversalHooksInstalled && !g_OgreChunkTraversalHooksLogged)
-            {
-                LogChunkDiagnostic(
-                    "chunkmesh",
-                    L"[CHUNKMESH] Installed Ogre traversal hooks addDefault=0x%08X target=0x%08X tramp=0x%08X addGroup=0x%08X target=0x%08X tramp=0x%08X addPriority=0x%08X target=0x%08X tramp=0x%08X renderSingle=0x%08X target=0x%08X tramp=0x%08X sceneMgrFindVisible=0x%08X target=0x%08X tramp=0x%08X sceneNodeFindVisible=0x%08X target=0x%08X tramp=0x%08X entityNotify=0x%08X target=0x%08X tramp=0x%08X entityUpdate=0x%08X target=0x%08X tramp=0x%08X processVisibleObject=0x%08X target=0x%08X tramp=0x%08X\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(addRenderableDefault)),
-                    static_cast<uint32_t>(addRenderableDefaultTarget),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OgreRenderQueueAddRenderableDefaultDetour.trampoline)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(addRenderableGroup)),
-                    static_cast<uint32_t>(addRenderableGroupTarget),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OgreRenderQueueAddRenderableGroupDetour.trampoline)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(addRenderablePriority)),
-                    static_cast<uint32_t>(addRenderablePriorityTarget),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OgreRenderQueueAddRenderablePriorityDetour.trampoline)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(renderSingleObject)),
-                    static_cast<uint32_t>(renderSingleObjectTarget),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OgreSceneManagerRenderSingleObjectDetour.trampoline)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneManagerFindVisibleObjects)),
-                    static_cast<uint32_t>(sceneManagerFindVisibleObjectsTarget),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OgreSceneManagerFindVisibleObjectsDetour.trampoline)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneNodeFindVisibleObjects)),
-                    static_cast<uint32_t>(sceneNodeFindVisibleObjectsTarget),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OgreSceneNodeFindVisibleObjectsDetour.trampoline)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entityNotifyCurrentCamera)),
-                    static_cast<uint32_t>(entityNotifyCurrentCameraTarget),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OgreMovableObjectNotifyCurrentCameraDetour.trampoline)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entityUpdateRenderQueue)),
-                    static_cast<uint32_t>(entityUpdateRenderQueueTarget),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OgreEntityUpdateRenderQueueDetour.trampoline)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(processVisibleObject)),
-                    static_cast<uint32_t>(processVisibleObjectTarget),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OgreRenderQueueProcessVisibleObjectDetour.trampoline)));
-                g_OgreChunkTraversalHooksLogged = true;
-            }
-            g_OgreChunkTraversalHooksMismatchLogged = !g_OgreChunkTraversalHooksInstalled;
-        }
-
-        static void LogChunkMeshProxyEntityMaterials(void* entity, const char* meshName)
-        {
-            if (!entity)
-                return;
-
-            static FnOgreGetNumSubEntities getNumSubEntities =
-                ResolveOgreProc<FnOgreGetNumSubEntities>("?getNumSubEntities@Entity@Ogre@@QBEIXZ");
-            static FnOgreGetSubEntity getSubEntity =
-                ResolveOgreProc<FnOgreGetSubEntity>("?getSubEntity@Entity@Ogre@@QBEPAVSubEntity@2@I@Z");
-            static FnOgreGetSubEntityMaterialName getSubEntityMaterialName =
-                ResolveOgreProc<FnOgreGetSubEntityMaterialName>("?getMaterialName@SubEntity@Ogre@@QBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
-            static FnOgreGetMovableObjectName getMovableObjectName =
-                ResolveOgreProc<FnOgreGetMovableObjectName>("?getName@MovableObject@Ogre@@UBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
-
-            if (!getNumSubEntities || !getSubEntity || !getSubEntityMaterialName)
-                return;
-
-            const char* entityName = "<none>";
-            if (getMovableObjectName)
-            {
-                const std::string* const entityNameRef = &getMovableObjectName(entity);
-                if (entityNameRef && !entityNameRef->empty())
-                    entityName = entityNameRef->c_str();
-            }
-
-            const uint32_t subEntityCount = getNumSubEntities(entity);
-            if (AcquireChunkLogSlot())
-            {
-                LogChunkDiagnostic(
-                    "chunkmesh",
-                    L"[CHUNKMESH] materials entity=0x%08X mesh=%hs name=%hs subCount=%u\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entity)),
-                    meshName ? meshName : "<none>",
-                    entityName,
-                    subEntityCount);
-            }
-
-            const uint32_t sampleCount = (subEntityCount < 8u) ? subEntityCount : 8u;
-            for (uint32_t index = 0; index < sampleCount; ++index)
-            {
-                void* const subEntity = getSubEntity(entity, index);
-                const char* materialName = "<none>";
-                if (subEntity)
-                {
-                    const std::string* const materialNameRef = &getSubEntityMaterialName(subEntity);
-                    if (materialNameRef && !materialNameRef->empty())
-                        materialName = materialNameRef->c_str();
-                }
-
-                if (AcquireChunkLogSlot())
-                {
-                    LogChunkDiagnostic(
-                        "chunkmesh",
-                        L"[CHUNKMESH] material entity=0x%08X sub=%u ptr=0x%08X mesh=%hs material=%hs\n",
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entity)),
-                        index,
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(subEntity)),
-                        meshName ? meshName : "<none>",
-                        materialName);
-                }
             }
         }
 
@@ -7176,13 +3675,9 @@ namespace BZROpenShim
                 ResolveOgreProc<FnOgreSetNodePosition>("?setPosition@Node@Ogre@@UAEXMMM@Z");
             static FnOgreSetNodeOrientation setOrientation =
                 ResolveOgreProc<FnOgreSetNodeOrientation>("?setOrientation@Node@Ogre@@UAEXMMMM@Z");
-            static FnOgreSetNodeScale setScale =
-                ResolveOgreProc<FnOgreSetNodeScale>("?setScale@Node@Ogre@@UAEXMMM@Z");
-            static FnOgreSetSceneNodeVisible setNodeVisible =
-                ResolveOgreProc<FnOgreSetSceneNodeVisible>("?setVisible@SceneNode@Ogre@@UAEX_N0@Z");
 
             TryHideChunkProxyEntity(slot.entity, setVisible);
-            TryResetChunkProxyNode(slot.sceneNode, setPosition, setOrientation, setScale, setNodeVisible);
+            TryResetChunkProxyNode(slot.sceneNode, setPosition, setOrientation);
         }
 
         static bool EnsureChunkMeshProxySlot(ChunkProxySlot& slot)
@@ -7194,59 +3689,32 @@ namespace BZROpenShim
                 return true;
 
             const DWORD now = GetTickCount();
-            if (slot.meshRetryTick != 0 &&
-                static_cast<DWORD>(now - slot.meshRetryTick) < kChunkProxyRetryDelayMs)
+            if (g_ChunkMeshProxyLastRetryTick != 0 &&
+                static_cast<DWORD>(now - g_ChunkMeshProxyLastRetryTick) < kChunkProxyRetryDelayMs)
             {
                 return false;
             }
-            slot.meshRetryTick = now;
+            g_ChunkMeshProxyLastRetryTick = now;
 
-            // Improved Ogre symbol resolution with delayed initialization and retry logic
-            static FnOgreGetRootSceneNode getRootSceneNode = nullptr;
-            static FnOgreCreateSceneNode createSceneNode = nullptr;
-            static FnOgreCreateChildSceneNode createChildSceneNode = nullptr;
-            static FnOgreAddChildNode addChildNode = nullptr;
-            static FnOgreCreateEntity createEntity = nullptr;
-            static FnOgreAttachObject attachObject = nullptr;
-            static FnOgreSetVisible setVisible = nullptr;
-            static FnOgreSetSceneNodeVisible setNodeVisible = nullptr;
-            static DWORD g_OgreSymbolLastRetryTick = 0;
+            static FnOgreGetRootSceneNode getRootSceneNode =
+                ResolveOgreProc<FnOgreGetRootSceneNode>("?getRootSceneNode@SceneManager@Ogre@@UAEPAVSceneNode@2@XZ");
+            static FnOgreCreateChildSceneNode createChildSceneNode =
+                ResolveOgreProc<FnOgreCreateChildSceneNode>("?createChildSceneNode@SceneNode@Ogre@@UAEPAV12@ABVVector3@2@ABVQuaternion@2@@Z");
+            static FnOgreCreateEntity createEntity =
+                ResolveOgreProc<FnOgreCreateEntity>("?createEntity@SceneManager@Ogre@@UAEPAVEntity@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            static FnOgreAttachObject attachObject =
+                ResolveOgreProc<FnOgreAttachObject>("?attachObject@SceneNode@Ogre@@UAEXPAVMovableObject@2@@Z");
+            static FnOgreSetVisible setVisible =
+                ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
 
-            // Initialize Ogre symbols with retry logic for individual GEO chunks
             if (!getRootSceneNode || !createChildSceneNode || !createEntity || !attachObject || !setVisible)
             {
-                const DWORD now = GetTickCount();
-                if (g_ChunkMeshProxyFailureLogged || 
-                    (g_OgreSymbolLastRetryTick != 0 && static_cast<DWORD>(now - g_OgreSymbolLastRetryTick) < 2000))
+                if (!g_ChunkMeshProxyFailureLogged)
                 {
-                    return false; // Don't spam logs, retry after delay
+                    LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Missing Ogre entity symbols; mesh proxy disabled for now\n");
+                    g_ChunkMeshProxyFailureLogged = true;
                 }
-
-                // Attempt to resolve Ogre symbols
-                getRootSceneNode = ResolveOgreProc<FnOgreGetRootSceneNode>("?getRootSceneNode@SceneManager@Ogre@@UAEPAVSceneNode@2@XZ");
-                createSceneNode = ResolveOgreProc<FnOgreCreateSceneNode>("?createSceneNode@SceneManager@Ogre@@UAEPAVSceneNode@2@XZ");
-                createChildSceneNode = ResolveOgreProc<FnOgreCreateChildSceneNode>("?createChildSceneNode@SceneNode@Ogre@@UAEPAV12@ABVVector3@2@ABVQuaternion@2@@Z");
-                addChildNode = ResolveOgreProc<FnOgreAddChildNode>("?addChild@Node@Ogre@@UAEXPAV12@@Z");
-                createEntity = ResolveOgreProc<FnOgreCreateEntity>("?createEntity@SceneManager@Ogre@@UAEPAVEntity@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
-                attachObject = ResolveOgreProc<FnOgreAttachObject>("?attachObject@SceneNode@Ogre@@UAEXPAVMovableObject@2@@Z");
-                setVisible = ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
-                setNodeVisible = ResolveOgreProc<FnOgreSetSceneNodeVisible>("?setVisible@SceneNode@Ogre@@UAEX_N0@Z");
-
-                g_OgreSymbolLastRetryTick = now;
-
-                if (!getRootSceneNode || !createChildSceneNode || !createEntity || !attachObject || !setVisible)
-                {
-                    if (!g_ChunkMeshProxyFailureLogged)
-                    {
-                        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Ogre entity symbols not available; will retry for individual GEO chunks\n");
-                        g_ChunkMeshProxyFailureLogged = true;
-                    }
-                    return false;
-                }
-
-                // Successfully resolved symbols for individual GEO chunk proxy
-                LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Ogre symbols resolved for individual GEO chunk proxy\n");
-                g_ChunkMeshProxyFailureLogged = false; // Reset on successful resolution
+                return false;
             }
 
             void* sceneManager = GetOgreSceneManagerRuntime();
@@ -7259,8 +3727,6 @@ namespace BZROpenShim
                 }
                 return false;
             }
-
-            InstallOgreChunkTraversalHooksIfRequested();
 
             if (!EnsureChunkPayloadResourceLocations())
                 return false;
@@ -7283,21 +3749,17 @@ namespace BZROpenShim
             if (!TryCreateChunkMeshProxyObjects(
                     rootNode,
                     sceneManager,
-                    createSceneNode,
                     createChildSceneNode,
-                    addChildNode,
                     createEntity,
                     attachObject,
                     setVisible,
-                    setNodeVisible,
-                    slot.ownerOgreEntity,
                     meshName,
                     sceneNode,
                     entity))
             {
                 if (!g_ChunkMeshProxyFailureLogged)
                 {
-                    Log(L"[CHUNKMESH] Entity creation failed mesh=%hs node=0x%08X entity=0x%08X\n",
+                    LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Entity creation failed mesh=%hs node=0x%08X entity=0x%08X\n",
                         meshName,
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneNode)),
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entity)));
@@ -7308,18 +3770,11 @@ namespace BZROpenShim
 
             slot.sceneNode = sceneNode;
             slot.entity = entity;
-            slot.sceneManager = sceneManager;
-            slot.rootSceneNode = rootNode;
-            slot.meshRetryTick = 0;
             g_ChunkMeshProxyFailureLogged = false;
             g_ChunkMeshProxyWaitLogged = false;
             if (!g_ChunkMeshProxyInitLogged)
             {
-                LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Initialized chunk mesh proxy mesh=%hs sceneManager=0x%08X root=0x%08X ownerOgre=0x%08X\n",
-                    meshName,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneManager)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rootNode)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.ownerOgreEntity)));
+                LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Initialized chunk mesh proxy mesh=%hs\n", meshName);
                 g_ChunkMeshProxyInitLogged = true;
             }
             return true;
@@ -7452,21 +3907,6 @@ namespace BZROpenShim
                     ClassifyChunkGeomName(slot.geomName),
                     reason);
             }
-            if (slot.active && slot.proofMeshName[0] && AcquireChunkLogSlot())
-            {
-                LogChunkDiagnostic(
-                    "chunkmesh",
-                    L"[CHUNKMESH] render-summary obj=0x%08X entity=0x%08X mesh=%hs cameraCount=%u updateCount=%u processCount=%u addCount=%u drawCount=%u reason=%ls\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.entity)),
-                    slot.proofMeshName,
-                    static_cast<unsigned>(slot.cameraNotifyCount),
-                    static_cast<unsigned>(slot.entityUpdateQueueCount),
-                    static_cast<unsigned>(slot.renderProcessCount),
-                    static_cast<unsigned>(slot.renderQueueAddCount),
-                    static_cast<unsigned>(slot.renderSingleCount),
-                    reason ? reason : L"<none>");
-            }
 
             if (slot.billboardAssigned)
                 HideChunkProxyBillboard(slot.billboard);
@@ -7476,342 +3916,20 @@ namespace BZROpenShim
             slot.geomRef = nullptr;
             slot.geomName[0] = '\0';
             slot.ownerEntity = nullptr;
-            slot.ownerOgreEntity = nullptr;
-            slot.ownerObj = nullptr;
-            slot.sourceRootObject = nullptr;
-            slot.sourceRootGameObject = nullptr;
-            slot.sourceGameObject = nullptr;
-            slot.sceneManager = nullptr;
-            slot.rootSceneNode = nullptr;
             slot.ownerEntityBaseName[0] = '\0';
             slot.ownerOgreFilename[0] = '\0';
             slot.proofMeshName[0] = '\0';
             slot.positionX = 0.0f;
             slot.positionY = 0.0f;
             slot.positionZ = 0.0f;
-            slot.lastAppliedX = 0.0f;
-            slot.lastAppliedY = 0.0f;
-            slot.lastAppliedZ = 0.0f;
-            slot.lastAppliedScaleX = 1.0f;
-            slot.lastAppliedScaleY = 1.0f;
-            slot.lastAppliedScaleZ = 1.0f;
             slot.useEntryPosition = false;
-            slot.lastTransformObject = nullptr;
             slot.lastSeenTick = 0;
-            slot.meshRetryTick = 0;
             slot.active = false;
             slot.billboardAssigned = false;
             slot.meshAssigned = false;
-            slot.haveAppliedTransform = false;
-            slot.loggedTransformUpdateCount = 0;
-            slot.cameraNotifyCount = 0;
-            slot.entityUpdateQueueCount = 0;
-            slot.renderProcessCount = 0;
-            slot.renderQueueAddCount = 0;
-            slot.sceneTraversalCount = 0;
-            slot.renderSingleCount = 0;
         }
 
-        static void LogChunkManualSubmitSkip(
-            const ChunkProxySlot& slot,
-            const wchar_t* reason,
-            void* sceneManager,
-            void* viewport,
-            void* hintedCamera,
-            void* resolvedCamera)
-        {
-            static volatile long s_ManualSubmitSkipBudget = 24;
-            const long remaining = InterlockedDecrement(&s_ManualSubmitSkipBudget);
-            if (remaining < 0 || !AcquireChunkLogSlot())
-                return;
-
-            LogChunkDiagnostic(
-                "chunkmesh",
-                L"[CHUNKMESH] manual-submit-skip obj=0x%08X entity=0x%08X mesh=%hs reason=%ls sceneMgr=0x%08X viewport=0x%08X hintedCamera=0x%08X camera=0x%08X\n",
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.entity)),
-                GetChunkPayloadMeshName(slot),
-                reason ? reason : L"<none>",
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneManager)),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(viewport)),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(hintedCamera)),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(resolvedCamera)));
-        }
-
-        static void* TryGetChunkProxyViewportCameraSafe(
-            void* sceneManager,
-            FnOgreGetCurrentViewport getCurrentViewport,
-            FnOgreViewportGetCamera getViewportCamera,
-            void** outViewport,
-            void* fallbackCamera)
-        {
-            if (outViewport)
-                *outViewport = nullptr;
-            if (!sceneManager || !getCurrentViewport)
-                return fallbackCamera;
-
-            __try
-            {
-                void* viewport = getCurrentViewport(sceneManager);
-                if (outViewport)
-                    *outViewport = viewport;
-                if (viewport && getViewportCamera)
-                {
-                    void* viewportCamera = getViewportCamera(viewport);
-                    if (viewportCamera)
-                        return viewportCamera;
-                }
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-            }
-
-            return fallbackCamera;
-        }
-
-        static bool TryProcessQueuedUpdatesSafe(FnOgreProcessQueuedUpdates processQueuedUpdates)
-        {
-            if (!processQueuedUpdates)
-                return false;
-
-            __try
-            {
-                processQueuedUpdates();
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
-        }
-
-        static uint32_t TryGetChunkProxySubEntityCountSafe(
-            void* entity,
-            FnOgreGetNumSubEntities getNumSubEntities)
-        {
-            if (!entity || !getNumSubEntities)
-                return 0;
-
-            __try
-            {
-                return getNumSubEntities(entity);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return 0;
-            }
-        }
-
-        static void* TryGetChunkProxySubEntitySafe(
-            void* entity,
-            uint32_t index,
-            FnOgreGetSubEntity getSubEntity)
-        {
-            if (!entity || !getSubEntity)
-                return nullptr;
-
-            __try
-            {
-                return getSubEntity(entity, index);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return nullptr;
-            }
-        }
-
-        static uint16_t TryGetChunkProxyNumAttachedObjectsSafe(
-            void* sceneNode,
-            FnOgreNumAttachedObjects numAttachedObjects)
-        {
-            if (!sceneNode || !numAttachedObjects)
-                return 0;
-
-            __try
-            {
-                return numAttachedObjects(sceneNode);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return 0;
-            }
-        }
-
-        static void* TryGetChunkProxyAttachedObjectSafe(
-            void* sceneNode,
-            uint16_t index,
-            FnOgreGetAttachedObjectByIndex getAttachedObject)
-        {
-            if (!sceneNode || !getAttachedObject)
-                return nullptr;
-
-            __try
-            {
-                return getAttachedObject(sceneNode, index);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return nullptr;
-            }
-        }
-
-        static bool TrySubmitChunkMeshProxyToCurrentRenderQueue(
-            ChunkProxySlot& slot,
-            void* currentCamera)
-        {
-            if (!slot.active || !slot.entity)
-                return false;
-
-            static FnOgreGetRenderQueue getRenderQueue =
-                ResolveOgreProc<FnOgreGetRenderQueue>("?getRenderQueue@SceneManager@Ogre@@UAEPAVRenderQueue@2@XZ");
-            static FnOgreMovableObjectNotifyCurrentCamera notifyCurrentCamera =
-                nullptr;
-            static FnOgreEntityUpdateRenderQueue updateRenderQueue =
-                nullptr;
-            static FnOgreRenderQueueAddRenderablePriority addRenderablePriority =
-                ResolveOgreProcByOffset<FnOgreRenderQueueAddRenderablePriority>(0x00026850);
-            static FnOgreGetCurrentViewport getCurrentViewport =
-                ResolveOgreProc<FnOgreGetCurrentViewport>("?getCurrentViewport@SceneManager@Ogre@@QBEPAVViewport@2@XZ");
-            static FnOgreViewportGetCamera getViewportCamera =
-                ResolveOgreProc<FnOgreViewportGetCamera>("?getCamera@Viewport@Ogre@@QBEPAVCamera@2@XZ");
-            static FnOgreIsVisible isVisible =
-                ResolveOgreProcByOffset<FnOgreIsVisible>(0x0002CCCD);
-            static FnOgreGetRenderQueueGroup getRenderQueueGroup =
-                ResolveOgreProcByOffset<FnOgreGetRenderQueueGroup>(0x0001584D);
-            static FnOgreGetNumSubEntities getNumSubEntities =
-                ResolveOgreProc<FnOgreGetNumSubEntities>("?getNumSubEntities@Entity@Ogre@@QBEIXZ");
-            static FnOgreGetSubEntity getSubEntity =
-                ResolveOgreProc<FnOgreGetSubEntity>("?getSubEntity@Entity@Ogre@@QBEPAVSubEntity@2@I@Z");
-
-            if (!notifyCurrentCamera)
-            {
-                notifyCurrentCamera = g_OgreFn_MovableObjectNotifyCurrentCamera
-                    ? g_OgreFn_MovableObjectNotifyCurrentCamera
-                    : ResolveOgreProc<FnOgreMovableObjectNotifyCurrentCamera>(
-                        "?_notifyCurrentCamera@Entity@Ogre@@UAEXPAVCamera@2@@Z");
-            }
-            if (!updateRenderQueue)
-            {
-                updateRenderQueue = g_OgreFn_EntityUpdateRenderQueue
-                    ? g_OgreFn_EntityUpdateRenderQueue
-                    : ResolveOgreProc<FnOgreEntityUpdateRenderQueue>(
-                        "?_updateRenderQueue@Entity@Ogre@@UAEXPAVRenderQueue@2@@Z");
-            }
-
-            void* sceneManager = slot.sceneManager ? slot.sceneManager : GetOgreSceneManagerRuntime();
-            void* viewport = nullptr;
-            void* resolvedCamera = TryGetChunkProxyViewportCameraSafe(
-                sceneManager,
-                getCurrentViewport,
-                getViewportCamera,
-                &viewport,
-                currentCamera);
-
-            if (!sceneManager)
-            {
-                LogChunkManualSubmitSkip(slot, L"scene-manager-null", sceneManager, viewport, currentCamera, resolvedCamera);
-                return false;
-            }
-            if (!resolvedCamera)
-            {
-                LogChunkManualSubmitSkip(slot, L"camera-null", sceneManager, viewport, currentCamera, resolvedCamera);
-                return false;
-            }
-            if (!getRenderQueue)
-            {
-                LogChunkManualSubmitSkip(slot, L"get-render-queue-missing", sceneManager, viewport, currentCamera, resolvedCamera);
-                return false;
-            }
-            if (!notifyCurrentCamera || (!updateRenderQueue && !addRenderablePriority))
-            {
-                LogChunkManualSubmitSkip(slot, L"submit-procs-missing", sceneManager, viewport, currentCamera, resolvedCamera);
-                return false;
-            }
-
-            void* renderQueue = getRenderQueue(sceneManager);
-            if (!renderQueue)
-            {
-                LogChunkManualSubmitSkip(slot, L"render-queue-null", sceneManager, viewport, currentCamera, resolvedCamera);
-                return false;
-            }
-
-            bool visibleNow = true;
-            notifyCurrentCamera(slot.entity, resolvedCamera);
-            if (slot.cameraNotifyCount < USHRT_MAX)
-                ++slot.cameraNotifyCount;
-
-            if (isVisible)
-                visibleNow = !!isVisible(slot.entity);
-
-            uint32_t directAddCount = 0;
-            if (visibleNow && updateRenderQueue)
-            {
-                updateRenderQueue(slot.entity, renderQueue);
-                if (slot.entityUpdateQueueCount < USHRT_MAX)
-                    ++slot.entityUpdateQueueCount;
-            }
-            else if (visibleNow && addRenderablePriority && getNumSubEntities && getSubEntity)
-            {
-                const uint8_t groupId = getRenderQueueGroup
-                    ? getRenderQueueGroup(slot.entity)
-                    : 50u;
-                const uint32_t subEntityCount =
-                    TryGetChunkProxySubEntityCountSafe(slot.entity, getNumSubEntities);
-
-                for (uint32_t index = 0; index < subEntityCount; ++index)
-                {
-                    void* const subEntity =
-                        TryGetChunkProxySubEntitySafe(slot.entity, index, getSubEntity);
-
-                    if (!subEntity)
-                        continue;
-
-                    addRenderablePriority(renderQueue, subEntity, groupId, 100u);
-                    ++directAddCount;
-                    if (slot.renderQueueAddCount < USHRT_MAX)
-                        ++slot.renderQueueAddCount;
-                }
-            }
-
-            if (isVisible)
-                visibleNow = !!isVisible(slot.entity);
-
-            if (AcquireChunkLogSlot() &&
-                (slot.cameraNotifyCount <= 4 || slot.entityUpdateQueueCount <= 4 || slot.renderQueueAddCount <= 4))
-            {
-                LogChunkDiagnostic(
-                    "chunkmesh",
-                    L"[CHUNKMESH] manual-submit obj=0x%08X entity=0x%08X mesh=%hs sceneMgr=0x%08X viewport=0x%08X queue=0x%08X camera=0x%08X source=%hs visibleNow=%u notifyCount=%u updateCount=%u addCount=%u\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.entity)),
-                    GetChunkPayloadMeshName(slot),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneManager)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(viewport)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(renderQueue)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(resolvedCamera)),
-                    (viewport && resolvedCamera && resolvedCamera != currentCamera) ? "viewport" :
-                    (currentCamera ? "hint" : "none"),
-                    visibleNow ? 1u : 0u,
-                    static_cast<unsigned>(slot.cameraNotifyCount),
-                    static_cast<unsigned>(slot.entityUpdateQueueCount),
-                    static_cast<unsigned>(slot.renderQueueAddCount));
-            }
-
-            return visibleNow;
-        }
-
-        static bool IsChunkManualSubmitEnabled()
-        {
-            static const bool disabled =
-                EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_MANUAL_SUBMIT") ||
-                EnvFlagEnabled("BZR_DISABLE_CHUNK_MANUAL_SUBMIT");
-            return !disabled;
-        }
-
-        static void UpdateChunkProxySlotPosition(
-            ChunkProxySlot& slot,
-            void* currentCamera,
-            bool allowManualSubmit)
+        static void UpdateChunkProxySlotPosition(ChunkProxySlot& slot)
         {
             static FnOgreSetBillboardPosition setPosition =
                 ResolveOgreProc<FnOgreSetBillboardPosition>("?setPosition@Billboard@Ogre@@QAEXMMM@Z");
@@ -7819,437 +3937,87 @@ namespace BZROpenShim
                 ResolveOgreProc<FnOgreSetNodePosition>("?setPosition@Node@Ogre@@UAEXMMM@Z");
             static FnOgreSetNodeOrientation setNodeOrientation =
                 ResolveOgreProc<FnOgreSetNodeOrientation>("?setOrientation@Node@Ogre@@UAEXMMMM@Z");
-            static FnOgreSetNodeScale setNodeScale =
-                ResolveOgreProc<FnOgreSetNodeScale>("?setScale@Node@Ogre@@UAEXMMM@Z");
-            static FnOgreNeedNodeUpdate needNodeUpdate =
-                ResolveOgreProc<FnOgreNeedNodeUpdate>("?needUpdate@Node@Ogre@@UAEX_N@Z");
-            static FnOgreSceneNodeUpdate sceneNodeUpdate =
-                ResolveOgreProc<FnOgreSceneNodeUpdate>("?_update@SceneNode@Ogre@@UAEX_N0@Z");
             static FnOgreSetVisible setVisible =
                 ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
-            static FnOgreSetSceneNodeVisible setNodeVisible =
-                ResolveOgreProc<FnOgreSetSceneNodeVisible>("?setVisible@SceneNode@Ogre@@UAEX_N0@Z");
             if (!slot.active)
                 return;
 
-            if (slot.objectBytes)
-            {
-                const ChunkResolvedBindingEntry* binding = FindChunkResolvedBindingEntry(slot.objectBytes);
-                if (binding && binding->payloadMeshName[0] &&
-                    _stricmp(slot.proofMeshName, binding->payloadMeshName) != 0)
-                {
-                    if (AcquireChunkLogSlot())
-                    {
-                        LogChunkDiagnostic(
-                            "chunkmesh",
-                            L"[CHUNKMESH] rebinding obj=0x%08X oldMesh=%hs newMesh=%hs root=0x%08X rootGameObj=0x%08X ownerObj=0x%08X\n",
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                            slot.proofMeshName[0] ? slot.proofMeshName : "<none>",
-                            binding->payloadMeshName,
-                            binding->sourceRootObjectPtr,
-                            binding->sourceRootGameObjectPtr,
-                            binding->sourceOwnerObjPtr);
-                    }
-
-                    InvalidateChunkMeshProxySlot(slot);
-                    strncpy_s(slot.proofMeshName, sizeof(slot.proofMeshName), binding->payloadMeshName, _TRUNCATE);
-                }
-            }
-
             ChunkProxyTransform transform = {};
-            const void* resolvedTransformObject = nullptr;
-            
-            // Priority 1: Use ChunkEffect entry directly (most reliable for individual GEO chunks)
-            if (slot.useEntryPosition && slot.objectBytes)
+            if (!TryGetChunkProxyTransform(slot.objectBytes, transform))
             {
-                // Read position directly from ChunkEffect active entry for this object
-                void* chunkEffectThis = GetChunkEffectSingleton();
-                if (chunkEffectThis)
+                if (!slot.useEntryPosition)
                 {
-                    const auto* thisBytes = reinterpret_cast<const uint8_t*>(chunkEffectThis);
-                    const uint32_t count = *reinterpret_cast<const uint32_t*>(thisBytes + kChunkEffectActiveCountOffset);
-                    const uint32_t gate = *reinterpret_cast<const uint32_t*>(thisBytes + kChunkEffectGateOffset);
-                    
-                    // Search for matching object in ChunkEffect active array
-                    for (uint32_t i = 0; i < count; ++i)
-                    {
-                        const uintptr_t entryOffset = kChunkEffectEntryBaseOffset + (i * kChunkEffectEntrySize);
-                        const auto* entryBytes = thisBytes + entryOffset;
-                        if (*reinterpret_cast<const uint8_t*>(entryBytes + 0x00) == slot.objectBytes[0])
-                        {
-                            transform.x = *reinterpret_cast<const float*>(entryBytes + 0x08);
-                            transform.y = *reinterpret_cast<const float*>(entryBytes + 0x0C);
-                            transform.z = *reinterpret_cast<const float*>(entryBytes + 0x10);
-                            resolvedTransformObject = slot.objectBytes;
-                            
-                            if (AcquireChunkLogSlot())
-                            {
-                                LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] Using ChunkEffect position for obj=0x%08X geom=0x%08X pos=(%.4f, %.4f, %.4f)\n",
-                                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                                    static_cast<double>(transform.x),
-                                    static_cast<double>(transform.y),
-                                    static_cast<double>(transform.z));
-                            }
-                            break; // Found matching entry
-                        }
-                    }
+                    ReleaseChunkProxySlot(slot, L"transform-read-failed");
+                    return;
                 }
+
+                transform.x = slot.positionX;
+                transform.y = slot.positionY;
+                transform.z = slot.positionZ;
+                transform.orientation = { 1.0f, 0.0f, 0.0f, 0.0f };
             }
 
-            // Fallback to existing logic if ChunkEffect lookup fails
-            if (!resolvedTransformObject)
+            if (slot.billboard && setPosition &&
+                !TrySetChunkProxyBillboardPosition(slot.billboard, setPosition, transform.x, transform.y, transform.z))
             {
-                if (slot.objectBytes)
-                {
-                    const ChunkResolvedBindingEntry* binding = FindChunkResolvedBindingEntry(slot.objectBytes);
-                    if (binding && binding->payloadMeshName[0] &&
-                        _stricmp(slot.proofMeshName, binding->payloadMeshName) != 0)
-                    {
-                        if (AcquireChunkLogSlot())
-                        {
-                            LogChunkDiagnostic(
-                                "chunkmesh",
-                                L"[CHUNKMESH] rebinding obj=0x%08X oldMesh=%hs newMesh=%hs root=0x%08X rootGameObj=0x%08X ownerObj=0x%08X\n",
-                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                                slot.proofMeshName[0] ? slot.proofMeshName : "<none>",
-                                binding->payloadMeshName,
-                                binding->sourceRootObjectPtr,
-                                binding->sourceRootGameObjectPtr,
-                                binding->sourceOwnerObjPtr);
-                        }
-
-                        InvalidateChunkMeshProxySlot(slot);
-                        strncpy_s(slot.proofMeshName, sizeof(slot.proofMeshName), binding->payloadMeshName, _TRUNCATE);
-                    }
-                }
+                ReleaseChunkProxySlot(slot, L"billboard-set-failed");
+                return;
             }
 
-            // Apply transform to Ogre entities/billboards with improved error handling
-            if (slot.entity && (resolvedTransformObject || slot.useEntryPosition))
+            if (slot.billboard && setPosition && !slot.billboardAssigned && AcquireChunkLogSlot())
             {
-                bool transformSuccess = false;
-                
-                if (setPosition && slot.billboard)
-                {
-                    __try
-                    {
-                        setPosition(slot.billboard, transform.x, transform.y, transform.z);
-                        transformSuccess = true;
-                    }
-                    __except (EXCEPTION_EXECUTE_HANDLER)
-                    {
-                        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Billboard setPosition failed for obj=0x%08X geom=0x%08X\n",
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
-                            GetChunkGeomNameForLog(slot.geomName));
-                    }
-                }
-
-                if (transformSuccess && setNodePosition && slot.sceneNode)
-                {
-                    __try
-                    {
-                        setNodePosition(slot.sceneNode, transform.x, transform.y, transform.z);
-                    }
-                    __except (EXCEPTION_EXECUTE_HANDLER)
-                    {
-                        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] SceneNode setPosition failed for obj=0x%08X geom=0x%08X\n",
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
-                            GetChunkGeomNameForLog(slot.geomName));
-                    }
-                }
-
-                if (transformSuccess && setNodeOrientation && slot.sceneNode)
-                {
-                    __try
-                    {
-                        setNodeOrientation(slot.sceneNode, 1.0f, 0.0f, 0.0f, 1.0f);
-                    }
-                    __except (EXCEPTION_EXECUTE_HANDLER)
-                    {
-                        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] SceneNode setOrientation failed for obj=0x%08X geom=0x%08X\n",
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
-                            GetChunkGeomNameForLog(slot.geomName));
-                    }
-                }
-
-                if (transformSuccess && setVisible)
-                {
-                    __try
-                    {
-                        setVisible(slot.entity, false);
-                        if (setNodeVisible)
-                            setNodeVisible(slot.sceneNode, false);
-                    }
-                    }
-                    __except (EXCEPTION_EXECUTE_HANDLER)
-                    {
-                        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Entity setVisible failed for obj=0x%08X geom=0x%08X\n",
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
-                            GetChunkGeomNameForLog(slot.geomName));
-                    }
-                }
+                LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] assigned obj=0x%08X billboard=0x%08X geom=0x%08X geomName=%hs geomKind=%hs pos=(%.4f, %.4f, %.4f)\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.billboard)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
+                    GetChunkGeomNameForLog(slot.geomName),
+                    ClassifyChunkGeomName(slot.geomName),
+                    static_cast<double>(transform.x),
+                    static_cast<double>(transform.y),
+                    static_cast<double>(transform.z));
             }
+            if (slot.billboard && setPosition)
+                slot.billboardAssigned = true;
 
             if (ShouldUseChunkPayloadMesh(slot))
             {
-                static bool s_ChunkDebugVisualConfigInit = false;
-                static bool s_ChunkDebugVisualEnabled = false;
-                static bool s_ChunkDebugVisualLogged = false;
-                static float s_ChunkDebugVisualScaleMultiplier = 12.0f;
-                static float s_ChunkDebugVisualLiftY = 8.0f;
-                if (!s_ChunkDebugVisualConfigInit)
-                {
-                    float envScaleMultiplier = 0.0f;
-                    float envLiftY = 0.0f;
-                    const bool forcedDebugVisual =
-                        EnvFlagEnabled("OPENSHIM_CHUNK_FORCE_DEBUG_VIS") ||
-                        EnvFlagEnabled("BZR_CHUNK_FORCE_DEBUG_VIS");
-                    const bool haveScaleMultiplier =
-                        TryGetEnvFloat("OPENSHIM_CHUNK_DEBUG_SCALE_MULTIPLIER", envScaleMultiplier) ||
-                        TryGetEnvFloat("BZR_CHUNK_DEBUG_SCALE_MULTIPLIER", envScaleMultiplier) ||
-                        TryGetEnvFloat("OPENSHIM_CHUNK_DEBUG_SCALE", envScaleMultiplier) ||
-                        TryGetEnvFloat("BZR_CHUNK_DEBUG_SCALE", envScaleMultiplier);
-                    const bool haveLiftY =
-                        TryGetEnvFloat("OPENSHIM_CHUNK_DEBUG_LIFT_Y", envLiftY) ||
-                        TryGetEnvFloat("BZR_CHUNK_DEBUG_LIFT_Y", envLiftY);
-                    if (haveScaleMultiplier && envScaleMultiplier > 0.0f)
-                        s_ChunkDebugVisualScaleMultiplier = envScaleMultiplier;
-                    if (haveLiftY)
-                        s_ChunkDebugVisualLiftY = envLiftY;
-                    s_ChunkDebugVisualEnabled =
-                        forcedDebugVisual ||
-                        (haveScaleMultiplier && envScaleMultiplier > 0.0f) ||
-                        haveLiftY;
-                    s_ChunkDebugVisualConfigInit = true;
-                }
-
-                if (s_ChunkDebugVisualEnabled)
-                {
-                    transform.y += s_ChunkDebugVisualLiftY;
-                    transform.scale.x *= s_ChunkDebugVisualScaleMultiplier;
-                    transform.scale.y *= s_ChunkDebugVisualScaleMultiplier;
-                    transform.scale.z *= s_ChunkDebugVisualScaleMultiplier;
-
-                    if (!s_ChunkDebugVisualLogged && AcquireChunkLogSlot())
-                    {
-                        LogChunkDiagnostic(
-                            "chunkmesh",
-                            L"[CHUNKMESH] debug-visual enabled scaleMultiplier=%.3f liftY=%.3f\n",
-                            static_cast<double>(s_ChunkDebugVisualScaleMultiplier),
-                            static_cast<double>(s_ChunkDebugVisualLiftY));
-                        s_ChunkDebugVisualLogged = true;
-                    }
-                }
-
                 if (!EnsureChunkMeshProxySlot(slot))
                     return;
 
-                const bool meshWasAssigned = slot.meshAssigned;
-                const bool hadAppliedTransform = slot.haveAppliedTransform;
-                const float oldX = slot.lastAppliedX;
-                const float oldY = slot.lastAppliedY;
-                const float oldZ = slot.lastAppliedZ;
-                const float oldScaleX = slot.lastAppliedScaleX;
-                const float oldScaleY = slot.lastAppliedScaleY;
-                const float oldScaleZ = slot.lastAppliedScaleZ;
-                const void* const oldTransformObject = slot.lastTransformObject;
                 if (!TryUpdateChunkMeshProxyTransform(
                         slot.sceneNode,
                         slot.entity,
                         setNodePosition,
                         setNodeOrientation,
-                        setNodeScale,
-                        needNodeUpdate,
-                        sceneNodeUpdate,
                         setVisible,
-                        setNodeVisible,
                         transform))
                 {
                     ReleaseChunkProxySlot(slot, L"mesh-set-failed");
                     return;
                 }
 
-                static FnOgreProcessQueuedUpdates processQueuedUpdates =
-                    ResolveOgreProc<FnOgreProcessQueuedUpdates>("?processQueuedUpdates@Node@Ogre@@SAXXZ");
-                const bool processedQueuedUpdates =
-                    processQueuedUpdates &&
-                    TryProcessQueuedUpdatesSafe(processQueuedUpdates);
-                if (!meshWasAssigned && processedQueuedUpdates)
-                {
-                    if (AcquireChunkLogSlot())
-                    {
-                        LogChunkDiagnostic(
-                            "chunkmesh",
-                            L"[CHUNKMESH] process-queued-updates obj=0x%08X entity=0x%08X mesh=%hs sceneNode=0x%08X\n",
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.entity)),
-                            GetChunkPayloadMeshName(slot),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.sceneNode)));
-                    }
-                }
-
-                if (meshWasAssigned && hadAppliedTransform)
-                {
-                    const float dx = transform.x - oldX;
-                    const float dy = transform.y - oldY;
-                    const float dz = transform.z - oldZ;
-                    const float dsx = transform.scale.x - oldScaleX;
-                    const float dsy = transform.scale.y - oldScaleY;
-                    const float dsz = transform.scale.z - oldScaleZ;
-                    const float posDeltaSq = (dx * dx) + (dy * dy) + (dz * dz);
-                    const float scaleDeltaSq = (dsx * dsx) + (dsy * dsy) + (dsz * dsz);
-                    const bool transformSourceChanged = oldTransformObject != resolvedTransformObject;
-                    if ((posDeltaSq >= 25.0f || scaleDeltaSq >= 0.01f || transformSourceChanged) &&
-                        slot.loggedTransformUpdateCount < 8 &&
-                        AcquireChunkLogSlot())
-                    {
-                        ++slot.loggedTransformUpdateCount;
-                        LogChunkDiagnostic(
-                            "chunkmesh",
-                            L"[CHUNKMESH] update obj=0x%08X entity=0x%08X geom=0x%08X geomName=%hs mesh=%hs oldXfSrc=0x%08X newXfSrc=0x%08X oldPos=(%.4f, %.4f, %.4f) newPos=(%.4f, %.4f, %.4f) oldScale=(%.4f, %.4f, %.4f) newScale=(%.4f, %.4f, %.4f)\n",
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.entity)),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
-                            GetChunkGeomNameForLog(slot.geomName),
-                            GetChunkPayloadMeshName(slot),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(oldTransformObject)),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(resolvedTransformObject)),
-                            static_cast<double>(oldX),
-                            static_cast<double>(oldY),
-                            static_cast<double>(oldZ),
-                            static_cast<double>(transform.x),
-                            static_cast<double>(transform.y),
-                            static_cast<double>(transform.z),
-                            static_cast<double>(oldScaleX),
-                            static_cast<double>(oldScaleY),
-                            static_cast<double>(oldScaleZ),
-                            static_cast<double>(transform.scale.x),
-                            static_cast<double>(transform.scale.y),
-                            static_cast<double>(transform.scale.z));
-                    }
-                }
-
-                slot.lastAppliedX = transform.x;
-                slot.lastAppliedY = transform.y;
-                slot.lastAppliedZ = transform.z;
-                slot.lastAppliedScaleX = transform.scale.x;
-                slot.lastAppliedScaleY = transform.scale.y;
-                slot.lastAppliedScaleZ = transform.scale.z;
-                slot.lastTransformObject = resolvedTransformObject;
-                slot.haveAppliedTransform = true;
-
                 if (!slot.meshAssigned && AcquireChunkLogSlot())
                 {
-                    LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] assigned obj=0x%08X entity=0x%08X geom=0x%08X geomName=%hs mesh=%hs xfSrc=0x%08X pos=(%.4f, %.4f, %.4f) scale=(%.4f, %.4f, %.4f)\n",
+                    LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] assigned obj=0x%08X entity=0x%08X geom=0x%08X geomName=%hs mesh=%hs pos=(%.4f, %.4f, %.4f)\n",
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.entity)),
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
                         GetChunkGeomNameForLog(slot.geomName),
                         GetChunkPayloadMeshName(slot),
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(resolvedTransformObject)),
                         static_cast<double>(transform.x),
                         static_cast<double>(transform.y),
-                        static_cast<double>(transform.z),
-                        static_cast<double>(transform.scale.x),
-                        static_cast<double>(transform.scale.y),
-                        static_cast<double>(transform.scale.z));
-
-                    LogChunkMeshProxyEntityMaterials(slot.entity, GetChunkPayloadMeshName(slot));
-
-                    ChunkProxyBoundsSnapshot bounds = {};
-                    CaptureChunkProxyBoundsSnapshot(slot.sceneNode, slot.entity, bounds);
-                    if (bounds.haveNodePos || bounds.haveLocalBox || bounds.haveWorldBox || bounds.haveRadius)
-                    {
-                        const OgreVector3 localCenter = bounds.haveLocalBox
-                            ? ComputeAabbCenter(bounds.localBox)
-                            : OgreVector3{};
-                        const OgreVector3 localSize = bounds.haveLocalBox
-                            ? ComputeAabbSize(bounds.localBox)
-                            : OgreVector3{};
-                        const OgreVector3 worldCenter = bounds.haveWorldBox
-                            ? ComputeAabbCenter(bounds.worldBox)
-                            : OgreVector3{};
-                        const OgreVector3 worldSize = bounds.haveWorldBox
-                            ? ComputeAabbSize(bounds.worldBox)
-                            : OgreVector3{};
-                        LogChunkDiagnostic(
-                            "chunkmesh",
-                            L"[CHUNKMESH] bounds obj=0x%08X entity=0x%08X mesh=%hs nodePos=(%.4f, %.4f, %.4f) entityParent=0x%08X inGraph=%u radius=%.4f visible=%u isVisible=%u visFlags=0x%08X rq=%u entityMgr=0x%08X curSm=0x%08X slotSm=0x%08X slotRoot=0x%08X localCenter=(%.4f, %.4f, %.4f) localSize=(%.4f, %.4f, %.4f) worldCenter=(%.4f, %.4f, %.4f) worldSize=(%.4f, %.4f, %.4f)\n",
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.entity)),
-                            GetChunkPayloadMeshName(slot),
-                            static_cast<double>(bounds.haveNodePos ? bounds.nodePos.x : 0.0f),
-                            static_cast<double>(bounds.haveNodePos ? bounds.nodePos.y : 0.0f),
-                            static_cast<double>(bounds.haveNodePos ? bounds.nodePos.z : 0.0f),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bounds.haveEntityParentSceneNode ? bounds.entityParentSceneNode : nullptr)),
-                            static_cast<unsigned>(bounds.haveInSceneGraph ? (bounds.inSceneGraph ? 1u : 0u) : 0u),
-                            static_cast<double>(bounds.haveRadius ? bounds.radius : 0.0f),
-                            static_cast<unsigned>(bounds.haveVisible ? (bounds.visible ? 1u : 0u) : 0u),
-                            static_cast<unsigned>(bounds.haveIsVisible ? (bounds.isVisible ? 1u : 0u) : 0u),
-                            static_cast<uint32_t>(bounds.haveVisibilityFlags ? bounds.visibilityFlags : 0u),
-                            static_cast<unsigned>(bounds.haveRenderQueueGroup ? bounds.renderQueueGroup : 0u),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bounds.haveEntityManager ? bounds.entityManager : nullptr)),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bounds.haveCurrentSceneManager ? bounds.currentSceneManager : nullptr)),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.sceneManager)),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.rootSceneNode)),
-                            static_cast<double>(bounds.haveLocalBox ? localCenter.x : 0.0f),
-                            static_cast<double>(bounds.haveLocalBox ? localCenter.y : 0.0f),
-                            static_cast<double>(bounds.haveLocalBox ? localCenter.z : 0.0f),
-                            static_cast<double>(bounds.haveLocalBox ? localSize.x : 0.0f),
-                            static_cast<double>(bounds.haveLocalBox ? localSize.y : 0.0f),
-                            static_cast<double>(bounds.haveLocalBox ? localSize.z : 0.0f),
-                            static_cast<double>(bounds.haveWorldBox ? worldCenter.x : 0.0f),
-                            static_cast<double>(bounds.haveWorldBox ? worldCenter.y : 0.0f),
-                            static_cast<double>(bounds.haveWorldBox ? worldCenter.z : 0.0f),
-                            static_cast<double>(bounds.haveWorldBox ? worldSize.x : 0.0f),
-                            static_cast<double>(bounds.haveWorldBox ? worldSize.y : 0.0f),
-                            static_cast<double>(bounds.haveWorldBox ? worldSize.z : 0.0f));
-
-                        if (slot.ownerOgreEntity)
-                        {
-                            void* const ownerSceneNode = TryGetChunkProxyParentSceneNodeSafe(slot.ownerOgreEntity);
-                            ChunkProxyBoundsSnapshot ownerBounds = {};
-                            CaptureChunkProxyBoundsSnapshot(ownerSceneNode, slot.ownerOgreEntity, ownerBounds);
-                            LogChunkDiagnostic(
-                                "chunkmesh",
-                                L"[CHUNKMESH] owner-bounds obj=0x%08X ownerOgre=0x%08X ownerScene=0x%08X entityParent=0x%08X ownerMgr=0x%08X visible=%u isVisible=%u visFlags=0x%08X rq=%u curSm=0x%08X nodePos=(%.4f, %.4f, %.4f)\n",
-                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.ownerOgreEntity)),
-                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ownerSceneNode)),
-                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ownerBounds.haveEntityParentSceneNode ? ownerBounds.entityParentSceneNode : nullptr)),
-                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ownerBounds.haveEntityManager ? ownerBounds.entityManager : nullptr)),
-                                static_cast<unsigned>(ownerBounds.haveVisible ? (ownerBounds.visible ? 1u : 0u) : 0u),
-                                static_cast<unsigned>(ownerBounds.haveIsVisible ? (ownerBounds.isVisible ? 1u : 0u) : 0u),
-                                static_cast<uint32_t>(ownerBounds.haveVisibilityFlags ? ownerBounds.visibilityFlags : 0u),
-                                static_cast<unsigned>(ownerBounds.haveRenderQueueGroup ? ownerBounds.renderQueueGroup : 0u),
-                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ownerBounds.haveCurrentSceneManager ? ownerBounds.currentSceneManager : nullptr)),
-                                static_cast<double>(ownerBounds.haveNodePos ? ownerBounds.nodePos.x : 0.0f),
-                                static_cast<double>(ownerBounds.haveNodePos ? ownerBounds.nodePos.y : 0.0f),
-                                static_cast<double>(ownerBounds.haveNodePos ? ownerBounds.nodePos.z : 0.0f));
-                        }
-                    }
+                        static_cast<double>(transform.z));
                 }
-
-                if (allowManualSubmit && IsChunkManualSubmitEnabled())
-                    TrySubmitChunkMeshProxyToCurrentRenderQueue(slot, currentCamera);
-
                 slot.meshAssigned = true;
             }
             else if (slot.meshAssigned)
             {
                 HideChunkProxyMesh(slot);
                 slot.meshAssigned = false;
-                slot.haveAppliedTransform = false;
-                slot.lastTransformObject = nullptr;
-                slot.loggedTransformUpdateCount = 0;
             }
         }
 
-        static void TickChunkProxyDebug(void* currentCamera = nullptr, bool allowManualSubmit = true)
+        static void TickChunkProxyDebug()
         {
             if (!g_EnableChunkProxyDebug && !g_EnableChunkMeshProxy)
                 return;
@@ -8265,18 +4033,14 @@ namespace BZROpenShim
                 if (!slot.active)
                     continue;
 
-                const DWORD expireMs =
-                    slot.proofMeshName[0]
-                        ? kChunkProxyMeshExpireMs
-                        : kChunkProxyExpireMs;
                 if (slot.lastSeenTick == 0 ||
-                    static_cast<DWORD>(now - slot.lastSeenTick) >= expireMs)
+                    static_cast<DWORD>(now - slot.lastSeenTick) >= kChunkProxyExpireMs)
                 {
                     ReleaseChunkProxySlot(slot, L"expired");
                     continue;
                 }
 
-                UpdateChunkProxySlotPosition(slot, currentCamera, allowManualSubmit);
+                UpdateChunkProxySlotPosition(slot);
             }
         }
 
@@ -8300,52 +4064,16 @@ namespace BZROpenShim
             {
                 if (slot.active && slot.objectBytes == objectBytes)
                 {
-                    const bool hadProofMesh = slot.proofMeshName[0] != '\0';
                     char resolvedMeshName[sizeof(slot.proofMeshName)] = {};
-                    char directOwnerMeshName[48] = {};
                     ChunkObjectLinkProbe probe = {};
                     CaptureChunkObjectLinkProbe(objectBytes, probe);
-                    const ChunkResolvedBindingEntry* binding = FindChunkResolvedBindingEntry(objectBytes);
                     const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(objectBytes);
-                    ChunkObjectLinkProbe payloadProbe = probe;
-                    if (binding)
-                    {
-                        if (!payloadProbe.cachedMeshName[0] && binding->meshName[0])
-                            strncpy_s(payloadProbe.cachedMeshName, sizeof(payloadProbe.cachedMeshName), binding->meshName, _TRUNCATE);
-                        if (!payloadProbe.geomName[0] && binding->sourceGeomName[0])
-                            strncpy_s(payloadProbe.geomName, sizeof(payloadProbe.geomName), binding->sourceGeomName, _TRUNCATE);
-                        if (!payloadProbe.vdfCandidates[0] && binding->vdfCandidates[0])
-                            strncpy_s(payloadProbe.vdfCandidates, sizeof(payloadProbe.vdfCandidates), binding->vdfCandidates, _TRUNCATE);
-                    }
-                    if (binding && binding->ownerMeshName[0])
-                    {
-                        strncpy_s(directOwnerMeshName, sizeof(directOwnerMeshName), binding->ownerMeshName, _TRUNCATE);
-                        strncpy_s(payloadProbe.cachedMeshName, sizeof(payloadProbe.cachedMeshName), binding->ownerMeshName, _TRUNCATE);
-                    }
-                    else if (TryResolveChunkOwnerMeshNameForBinding(
-                            binding,
-                            bridgeSnapshot,
-                            directOwnerMeshName,
-                            sizeof(directOwnerMeshName)))
-                    {
-                        strncpy_s(payloadProbe.cachedMeshName, sizeof(payloadProbe.cachedMeshName), directOwnerMeshName, _TRUNCATE);
-                    }
                     const char* preferredMeshName =
-                        directOwnerMeshName[0]
-                            ? directOwnerMeshName
-                            : (payloadProbe.cachedMeshName[0]
-                                ? payloadProbe.cachedMeshName
-                                : (bridgeSnapshot.ownerResolvedMeshName[0]
-                                    ? bridgeSnapshot.ownerResolvedMeshName
-                                    : (binding && binding->meshName[0] ? binding->meshName : "")));
+                        probe.cachedMeshName[0] ? probe.cachedMeshName : bridgeSnapshot.ownerResolvedMeshName;
                     slot.geomRef = geomRef;
                     if (geomName && *geomName)
                     {
                         strncpy_s(slot.geomName, geomName, _TRUNCATE);
-                    }
-                    else if (binding && binding->sourceGeomName[0])
-                    {
-                        strncpy_s(slot.geomName, binding->sourceGeomName, _TRUNCATE);
                     }
                     else
                     {
@@ -8355,16 +4083,7 @@ namespace BZROpenShim
                     slot.positionY = positionY;
                     slot.positionZ = positionZ;
                     slot.useEntryPosition = true;
-                    slot.ownerEntity = bridgeSnapshot.ownerEntity
-                        ? bridgeSnapshot.ownerEntity
-                        : reinterpret_cast<void*>(static_cast<uintptr_t>(binding ? binding->sourceOwnerEntityPtr : 0));
-                    slot.ownerOgreEntity = bridgeSnapshot.ownerOgreEntity;
-                    slot.ownerObj = bridgeSnapshot.ownerObj
-                        ? bridgeSnapshot.ownerObj
-                        : reinterpret_cast<void*>(static_cast<uintptr_t>(binding ? binding->sourceOwnerObjPtr : 0));
-                    slot.sourceRootObject = reinterpret_cast<void*>(static_cast<uintptr_t>(binding ? binding->sourceRootObjectPtr : 0));
-                    slot.sourceRootGameObject = reinterpret_cast<void*>(static_cast<uintptr_t>(binding ? binding->sourceRootGameObjectPtr : 0));
-                    slot.sourceGameObject = reinterpret_cast<void*>(static_cast<uintptr_t>(binding ? binding->sourceGameObjectPtr : 0));
+                    slot.ownerEntity = bridgeSnapshot.ownerEntity;
                     if (bridgeSnapshot.ownerEntityBaseName[0])
                         strncpy_s(slot.ownerEntityBaseName, bridgeSnapshot.ownerEntityBaseName, _TRUNCATE);
                     else
@@ -8373,39 +4092,19 @@ namespace BZROpenShim
                         strncpy_s(slot.ownerOgreFilename, bridgeSnapshot.ownerOgreFilename, _TRUNCATE);
                     else
                         slot.ownerOgreFilename[0] = '\0';
-                    if (binding && binding->payloadMeshName[0])
-                    {
-                        strncpy_s(resolvedMeshName, sizeof(resolvedMeshName), binding->payloadMeshName, _TRUNCATE);
-                    }
-                    else
-                    {
-                        TryResolveChunkPayloadMeshResource(
-                            payloadProbe,
-                            preferredMeshName,
-                            slot.geomName,
-                            resolvedMeshName,
-                            sizeof(resolvedMeshName));
-                    }
+                    TryResolveChunkPayloadMeshResource(
+                        probe,
+                        preferredMeshName,
+                        slot.geomName,
+                        resolvedMeshName,
+                        sizeof(resolvedMeshName));
 
                     if (_stricmp(slot.proofMeshName, resolvedMeshName) != 0)
                     {
                         InvalidateChunkMeshProxySlot(slot);
                         strncpy_s(slot.proofMeshName, sizeof(slot.proofMeshName), resolvedMeshName, _TRUNCATE);
-                        if (!hadProofMesh && slot.proofMeshName[0] && AcquireChunkLogSlot())
-                        {
-                            LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] promote obj=0x%08X geom=0x%08X geomName=%hs mesh=%hs root=0x%08X rootGameObj=0x%08X ownerObj=0x%08X\n",
-                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
-                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
-                                GetChunkGeomNameForLog(slot.geomName),
-                                slot.proofMeshName,
-                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.sourceRootObject)),
-                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.sourceRootGameObject)),
-                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.ownerObj)));
-                        }
                     }
                     slot.lastSeenTick = now;
-                    if (slot.proofMeshName[0])
-                        UpdateChunkProxySlotPosition(slot);
                     return;
                 }
 
@@ -8418,49 +4117,14 @@ namespace BZROpenShim
 
             freeSlot->objectBytes = objectBytes;
             freeSlot->geomRef = geomRef;
-            char directOwnerMeshName[48] = {};
             ChunkObjectLinkProbe probe = {};
             CaptureChunkObjectLinkProbe(objectBytes, probe);
-            const ChunkResolvedBindingEntry* binding = FindChunkResolvedBindingEntry(objectBytes);
             const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(objectBytes);
-            ChunkObjectLinkProbe payloadProbe = probe;
-            if (binding)
-            {
-                if (!payloadProbe.cachedMeshName[0] && binding->meshName[0])
-                    strncpy_s(payloadProbe.cachedMeshName, sizeof(payloadProbe.cachedMeshName), binding->meshName, _TRUNCATE);
-                if (!payloadProbe.geomName[0] && binding->sourceGeomName[0])
-                    strncpy_s(payloadProbe.geomName, sizeof(payloadProbe.geomName), binding->sourceGeomName, _TRUNCATE);
-                if (!payloadProbe.vdfCandidates[0] && binding->vdfCandidates[0])
-                    strncpy_s(payloadProbe.vdfCandidates, sizeof(payloadProbe.vdfCandidates), binding->vdfCandidates, _TRUNCATE);
-            }
-            if (binding && binding->ownerMeshName[0])
-            {
-                strncpy_s(directOwnerMeshName, sizeof(directOwnerMeshName), binding->ownerMeshName, _TRUNCATE);
-                strncpy_s(payloadProbe.cachedMeshName, sizeof(payloadProbe.cachedMeshName), binding->ownerMeshName, _TRUNCATE);
-            }
-            else if (TryResolveChunkOwnerMeshNameForBinding(
-                    binding,
-                    bridgeSnapshot,
-                    directOwnerMeshName,
-                    sizeof(directOwnerMeshName)))
-            {
-                strncpy_s(payloadProbe.cachedMeshName, sizeof(payloadProbe.cachedMeshName), directOwnerMeshName, _TRUNCATE);
-            }
             const char* preferredMeshName =
-                directOwnerMeshName[0]
-                    ? directOwnerMeshName
-                    : (payloadProbe.cachedMeshName[0]
-                        ? payloadProbe.cachedMeshName
-                        : (bridgeSnapshot.ownerResolvedMeshName[0]
-                            ? bridgeSnapshot.ownerResolvedMeshName
-                            : (binding && binding->meshName[0] ? binding->meshName : "")));
+                probe.cachedMeshName[0] ? probe.cachedMeshName : bridgeSnapshot.ownerResolvedMeshName;
             if (geomName && *geomName)
             {
                 strncpy_s(freeSlot->geomName, geomName, _TRUNCATE);
-            }
-            else if (binding && binding->sourceGeomName[0])
-            {
-                strncpy_s(freeSlot->geomName, binding->sourceGeomName, _TRUNCATE);
             }
             else
             {
@@ -8470,16 +4134,7 @@ namespace BZROpenShim
             freeSlot->positionY = positionY;
             freeSlot->positionZ = positionZ;
             freeSlot->useEntryPosition = true;
-            freeSlot->ownerEntity = bridgeSnapshot.ownerEntity
-                ? bridgeSnapshot.ownerEntity
-                : reinterpret_cast<void*>(static_cast<uintptr_t>(binding ? binding->sourceOwnerEntityPtr : 0));
-            freeSlot->ownerOgreEntity = bridgeSnapshot.ownerOgreEntity;
-            freeSlot->ownerObj = bridgeSnapshot.ownerObj
-                ? bridgeSnapshot.ownerObj
-                : reinterpret_cast<void*>(static_cast<uintptr_t>(binding ? binding->sourceOwnerObjPtr : 0));
-            freeSlot->sourceRootObject = reinterpret_cast<void*>(static_cast<uintptr_t>(binding ? binding->sourceRootObjectPtr : 0));
-            freeSlot->sourceRootGameObject = reinterpret_cast<void*>(static_cast<uintptr_t>(binding ? binding->sourceRootGameObjectPtr : 0));
-            freeSlot->sourceGameObject = reinterpret_cast<void*>(static_cast<uintptr_t>(binding ? binding->sourceGameObjectPtr : 0));
+            freeSlot->ownerEntity = bridgeSnapshot.ownerEntity;
             if (bridgeSnapshot.ownerEntityBaseName[0])
                 strncpy_s(freeSlot->ownerEntityBaseName, bridgeSnapshot.ownerEntityBaseName, _TRUNCATE);
             else
@@ -8488,16 +4143,8 @@ namespace BZROpenShim
                 strncpy_s(freeSlot->ownerOgreFilename, bridgeSnapshot.ownerOgreFilename, _TRUNCATE);
             else
                 freeSlot->ownerOgreFilename[0] = '\0';
-            const bool usedBoundPayloadMesh =
-                binding && binding->payloadMeshName[0] &&
-                strncpy_s(
-                    freeSlot->proofMeshName,
-                    sizeof(freeSlot->proofMeshName),
-                    binding->payloadMeshName,
-                    _TRUNCATE) == 0;
-            if (!usedBoundPayloadMesh &&
-                !TryResolveChunkPayloadMeshResource(
-                    payloadProbe,
+            if (!TryResolveChunkPayloadMeshResource(
+                    probe,
                     preferredMeshName,
                     freeSlot->geomName,
                     freeSlot->proofMeshName,
@@ -8511,114 +4158,19 @@ namespace BZROpenShim
             freeSlot->meshAssigned = false;
             if (AcquireChunkLogSlot())
             {
-                LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] tracking obj=0x%08X geom=0x%08X geomName=%hs geomKind=%hs ownerEntity=0x%08X ownerOgre=0x%08X ownerObj=0x%08X root=0x%08X rootGameObj=0x%08X gameObj=0x%08X ownerBase=%hs ownerFile=%hs piece=%hs mesh=%hs pos=(%.4f, %.4f, %.4f)\n",
+                LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] tracking obj=0x%08X geom=0x%08X geomName=%hs geomKind=%hs ownerEntity=0x%08X ownerBase=%hs ownerFile=%hs mesh=%hs pos=(%.4f, %.4f, %.4f)\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectBytes)),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(geomRef)),
                     GetChunkGeomNameForLog(geomName),
                     ClassifyChunkGeomName(geomName),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(freeSlot->ownerEntity)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(freeSlot->ownerOgreEntity)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(freeSlot->ownerObj)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(freeSlot->sourceRootObject)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(freeSlot->sourceRootGameObject)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(freeSlot->sourceGameObject)),
                     freeSlot->ownerEntityBaseName[0] ? freeSlot->ownerEntityBaseName : "<none>",
                     freeSlot->ownerOgreFilename[0] ? freeSlot->ownerOgreFilename : "<none>",
-                    (binding && binding->payloadComponentName[0]) ? binding->payloadComponentName : "<none>",
                     freeSlot->proofMeshName[0] ? freeSlot->proofMeshName : "<none>",
                     static_cast<double>(positionX),
                     static_cast<double>(positionY),
                     static_cast<double>(positionZ));
             }
-            if (freeSlot->proofMeshName[0])
-                UpdateChunkProxySlotPosition(*freeSlot);
-        }
-
-        static void TrackCreateChunkTargetForProxy(
-            const uint8_t* objectBytes,
-            const ChunkEffectActiveEntry* createdEntry)
-        {
-            if ((!g_EnableChunkProxyDebug && !g_EnableChunkMeshProxy) || !objectBytes)
-                return;
-
-            const void* geomRef = nullptr;
-            char geomName[64] = {};
-            TryReadChunkGeomIdentity(objectBytes, geomRef, geomName, sizeof(geomName));
-
-            const ChunkResolvedBindingEntry* binding = FindChunkResolvedBindingEntry(objectBytes);
-            const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(objectBytes);
-
-            float positionX = 0.0f;
-            float positionY = 0.0f;
-            float positionZ = 0.0f;
-            bool havePosition = false;
-            const void* resolvedPositionObject = nullptr;
-            if (createdEntry && createdEntry->objectBytes == objectBytes)
-            {
-                positionX = createdEntry->positionX;
-                positionY = createdEntry->positionY;
-                positionZ = createdEntry->positionZ;
-                havePosition = true;
-                resolvedPositionObject = objectBytes;
-            }
-            if (!havePosition)
-            {
-                havePosition = TryResolveChunkProxyPositionFromCandidates(
-                    objectBytes,
-                    binding,
-                    &bridgeSnapshot,
-                    positionX,
-                    positionY,
-                    positionZ,
-                    &resolvedPositionObject);
-            }
-            if (!havePosition && createdEntry)
-            {
-                positionX = createdEntry->positionX;
-                positionY = createdEntry->positionY;
-                positionZ = createdEntry->positionZ;
-                havePosition = true;
-                resolvedPositionObject = createdEntry->objectBytes;
-            }
-            if (!havePosition)
-            {
-                if (binding && binding->payloadMeshName[0] && AcquireChunkLogSlot())
-                {
-                    LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] defer obj=0x%08X geom=0x%08X geomName=%hs mesh=%hs root=0x%08X rootGameObj=0x%08X ownerObj=0x%08X reason=no-position\n",
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectBytes)),
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(geomRef)),
-                        GetChunkGeomNameForLog(geomName),
-                        binding->payloadMeshName,
-                        binding->sourceRootObjectPtr,
-                        binding->sourceRootGameObjectPtr,
-                        binding->sourceOwnerObjPtr);
-                }
-                return;
-            }
-
-            if (binding && binding->payloadMeshName[0] && AcquireChunkLogSlot())
-            {
-                LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] live-track obj=0x%08X geom=0x%08X geomName=%hs mesh=%hs posSrc=0x%08X root=0x%08X rootGameObj=0x%08X ownerObj=0x%08X pos=(%.4f, %.4f, %.4f)\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectBytes)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(geomRef)),
-                    GetChunkGeomNameForLog(geomName),
-                    binding->payloadMeshName,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(resolvedPositionObject)),
-                    binding->sourceRootObjectPtr,
-                    binding->sourceRootGameObjectPtr,
-                    binding->sourceOwnerObjPtr,
-                    static_cast<double>(positionX),
-                    static_cast<double>(positionY),
-                    static_cast<double>(positionZ));
-            }
-
-            TrackChunkProxyDebugEntry(
-                objectBytes,
-                geomRef,
-                geomName,
-                positionX,
-                positionY,
-                positionZ);
         }
 
         static void TrackChunkProxyDebugObject(
@@ -8673,6 +4225,7 @@ namespace BZROpenShim
                 const uint32_t count = *reinterpret_cast<const uint32_t*>(thisBytes + kChunkEffectActiveCountOffset);
                 const bool shouldLog =
                     g_TraceChunkRenderVerbose ||
+                    count > 0 ||
                     count != g_LastChunkEffectLoggedCount;
                 g_LastChunkEffectLoggedCount = count;
                 if (!shouldLog || !AcquireChunkLogSlot())
@@ -8766,7 +4319,6 @@ namespace BZROpenShim
                 return;
 
             PruneChunkResolvedBindingsIfNeeded();
-            PruneChunkFragmentBatchBindingsIfNeeded();
 
             const auto* thisBytes = reinterpret_cast<const uint8_t*>(thisPtr);
             __try
@@ -8819,39 +4371,6 @@ namespace BZROpenShim
             if (!objectBytes)
                 return snapshot;
 
-            auto tryCaptureBridgeFromCandidate = [&](const void* candidate, bool preferForOwner) -> bool
-            {
-                if (!candidate)
-                    return false;
-
-                __try
-                {
-                    const auto* candidateBytes = reinterpret_cast<const uint8_t*>(candidate);
-                    void* const bridgeRoot = *reinterpret_cast<void* const*>(candidateBytes + 0xF0);
-                    if (!bridgeRoot)
-                        return false;
-
-                    const auto* bridgeBytes = reinterpret_cast<const uint8_t*>(bridgeRoot);
-                    void* const ogreEntity = *reinterpret_cast<void* const*>(bridgeBytes + 0x94);
-                    void* const ogreLight = *reinterpret_cast<void* const*>(bridgeBytes + 0xA8);
-                    if (preferForOwner)
-                    {
-                        if (!snapshot.ownerBridgeRoot)
-                            snapshot.ownerBridgeRoot = bridgeRoot;
-                        if (!snapshot.ownerOgreEntity && ogreEntity)
-                            snapshot.ownerOgreEntity = ogreEntity;
-                        if (!snapshot.ownerOgreLight && ogreLight)
-                            snapshot.ownerOgreLight = ogreLight;
-                    }
-
-                    return true;
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    return false;
-                }
-            };
-
             __try
             {
                 snapshot.directBridgeRoot = *reinterpret_cast<void* const*>(objectBytes + 0xF0);
@@ -8872,11 +4391,10 @@ namespace BZROpenShim
             {
                 // Legacy OBJ76 layouts observed in Redux helpers place the owning GameObject*
                 // at +0x8C, which is the bridge we want to validate for native death chunks.
-                snapshot.gameObject = *reinterpret_cast<void* const*>(objectBytes + 0x8C);
-                snapshot.legacyOwner = snapshot.gameObject;
-                if (snapshot.gameObject)
+                snapshot.legacyOwner = *reinterpret_cast<void* const*>(objectBytes + 0x8C);
+                if (snapshot.legacyOwner)
                 {
-                    const auto* ownerBytes = reinterpret_cast<const uint8_t*>(snapshot.gameObject);
+                    const auto* ownerBytes = reinterpret_cast<const uint8_t*>(snapshot.legacyOwner);
                     snapshot.ownerBridgeRoot = *reinterpret_cast<void* const*>(ownerBytes + 0xF0);
                     snapshot.ownerEntity = *reinterpret_cast<void* const*>(ownerBytes + 0xF4);
                     snapshot.ownerObj = *reinterpret_cast<void* const*>(ownerBytes + 0xF8);
@@ -8888,15 +4406,6 @@ namespace BZROpenShim
                         snapshot.ownerOgreLight = *reinterpret_cast<void* const*>(bridgeBytes + 0xA8);
                     }
                 }
-
-                if (!snapshot.ownerOgreEntity)
-                {
-                    // Some chunk chains expose the live Ogre bridge on the selected
-                    // owner entity or owner OBJ76 instead of the GameObject.
-                    tryCaptureBridgeFromCandidate(snapshot.ownerEntity, true);
-                    tryCaptureBridgeFromCandidate(snapshot.ownerObj, true);
-                    tryCaptureBridgeFromCandidate(snapshot.gameObject, true);
-                }
                 snapshot.ownerProbeOk = true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -8904,76 +4413,16 @@ namespace BZROpenShim
                 snapshot.ownerProbeOk = false;
             }
 
-            auto tryOwnerNameProbe = [&](const void* candidate) -> bool
-            {
-                if (!candidate)
-                    return false;
-
-                char entityBaseName[sizeof(snapshot.ownerEntityBaseName)] = {};
-                char ogreFilename[sizeof(snapshot.ownerOgreFilename)] = {};
-                char resolvedMeshName[sizeof(snapshot.ownerResolvedMeshName)] = {};
-                const bool inlineIdentityOk =
-                    TryReadOwnerEntityNames(
-                        candidate,
-                        entityBaseName,
-                        sizeof(entityBaseName),
-                        ogreFilename,
-                        sizeof(ogreFilename),
-                        resolvedMeshName,
-                        sizeof(resolvedMeshName));
-
-                char odfToken[kProducerBuildMenuTokenLen + 1] = {};
-                char odfMeshBaseName[48] = {};
-                char odfMeshName[sizeof(snapshot.ownerResolvedMeshName)] = {};
-                const bool odfIdentityOk =
-                    TryGetObjectOdfToken(const_cast<void*>(candidate), odfToken) &&
-                    TryResolveChunkMeshBaseNameFromRuntimeOdfToken(
-                        odfToken,
-                        odfMeshBaseName,
-                        sizeof(odfMeshBaseName));
-                if (odfIdentityOk)
-                {
-                    _snprintf_s(
-                        odfMeshName,
-                        sizeof(odfMeshName),
-                        _TRUNCATE,
-                        "%s.mesh",
-                        odfMeshBaseName);
-
-                    if (odfMeshBaseName[0] != '\0')
-                    {
-                        strncpy_s(entityBaseName, sizeof(entityBaseName), odfMeshBaseName, _TRUNCATE);
-                    }
-                    if (odfMeshName[0] != '\0')
-                    {
-                        strncpy_s(resolvedMeshName, sizeof(resolvedMeshName), odfMeshName, _TRUNCATE);
-                    }
-                }
-
-                if (!inlineIdentityOk && !odfIdentityOk)
-                {
-                    return false;
-                }
-
-                strncpy_s(snapshot.ownerEntityBaseName, sizeof(snapshot.ownerEntityBaseName), entityBaseName, _TRUNCATE);
-                strncpy_s(snapshot.ownerOgreFilename, sizeof(snapshot.ownerOgreFilename), ogreFilename, _TRUNCATE);
-                strncpy_s(snapshot.ownerResolvedMeshName, sizeof(snapshot.ownerResolvedMeshName), resolvedMeshName, _TRUNCATE);
-                return snapshot.ownerEntityBaseName[0] || snapshot.ownerOgreFilename[0] || snapshot.ownerResolvedMeshName[0];
-            };
-
-            snapshot.ownerEntityBaseName[0] = '\0';
-            snapshot.ownerOgreFilename[0] = '\0';
-            snapshot.ownerResolvedMeshName[0] = '\0';
-            snapshot.ownerNameProbeOk = false;
-
             __try
             {
-                // For chunk fragments, the GameObject* and its class pointer are more
-                // trustworthy name sources than the raw +0xF4 OBJ76 link.
-                snapshot.ownerNameProbeOk =
-                    tryOwnerNameProbe(snapshot.ownerEntity) ||
-                    tryOwnerNameProbe(snapshot.ownerObj) ||
-                    tryOwnerNameProbe(snapshot.gameObject);
+                snapshot.ownerNameProbeOk = TryReadOwnerEntityNames(
+                    snapshot.ownerEntity,
+                    snapshot.ownerEntityBaseName,
+                    sizeof(snapshot.ownerEntityBaseName),
+                    snapshot.ownerOgreFilename,
+                    sizeof(snapshot.ownerOgreFilename),
+                    snapshot.ownerResolvedMeshName,
+                    sizeof(snapshot.ownerResolvedMeshName));
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -8984,1012 +4433,6 @@ namespace BZROpenShim
             }
 
             return snapshot;
-        }
-
-        static bool TryResolveChunkMeshNameFromSourceTreeGameObject(
-            const ChunkCreateSourceTreeProbe& sourceTreeProbe,
-            char* outMeshName,
-            size_t outMeshNameCapacity)
-        {
-            if (!outMeshName || outMeshNameCapacity == 0)
-                return false;
-
-            outMeshName[0] = '\0';
-
-            void* candidates[] = {
-                sourceTreeProbe.selectedGameObject,
-                sourceTreeProbe.rootGameObject,
-                sourceTreeProbe.grandparentGameObject,
-                sourceTreeProbe.parentGameObject,
-                sourceTreeProbe.sourceGameObject,
-            };
-
-            std::unordered_set<uintptr_t> seen;
-            seen.reserve(std::size(candidates));
-            for (void* candidate : candidates)
-            {
-                const uintptr_t key = reinterpret_cast<uintptr_t>(candidate);
-                if (!candidate || !seen.insert(key).second)
-                    continue;
-
-                if (TryGetGameObjectMeshName(candidate, outMeshName, outMeshNameCapacity) &&
-                    IsPlausibleChunkOwnerToken(outMeshName, true))
-                {
-                    return true;
-                }
-            }
-
-            outMeshName[0] = '\0';
-            return false;
-        }
-
-        static bool TryResolveChunkOwnerMeshNameFromSourceTreeProbe(
-            const ChunkCreateSourceTreeProbe& sourceTreeProbe,
-            char* outMeshName,
-            size_t outMeshNameCapacity)
-        {
-            if (!outMeshName || outMeshNameCapacity == 0)
-                return false;
-
-            outMeshName[0] = '\0';
-
-            if (TryResolveChunkMeshNameFromSourceTreeGameObject(
-                    sourceTreeProbe,
-                    outMeshName,
-                    outMeshNameCapacity) &&
-                IsPlausibleChunkOwnerToken(outMeshName, true))
-            {
-                return true;
-            }
-
-            if (sourceTreeProbe.ownerResolvedMeshName[0] &&
-                IsPlausibleChunkOwnerToken(sourceTreeProbe.ownerResolvedMeshName, true))
-            {
-                strncpy_s(outMeshName, outMeshNameCapacity, sourceTreeProbe.ownerResolvedMeshName, _TRUNCATE);
-                return true;
-            }
-
-            if (sourceTreeProbe.ownerEntityBaseName[0] &&
-                IsPlausibleChunkOwnerToken(sourceTreeProbe.ownerEntityBaseName, false))
-            {
-                _snprintf_s(
-                    outMeshName,
-                    outMeshNameCapacity,
-                    _TRUNCATE,
-                    "%s.mesh",
-                    sourceTreeProbe.ownerEntityBaseName);
-                return outMeshName[0] != '\0';
-            }
-
-            if (sourceTreeProbe.ownerOgreFilename[0] &&
-                IsPlausibleChunkOwnerToken(sourceTreeProbe.ownerOgreFilename, false))
-            {
-                _snprintf_s(
-                    outMeshName,
-                    outMeshNameCapacity,
-                    _TRUNCATE,
-                    "%s.mesh",
-                    sourceTreeProbe.ownerOgreFilename);
-                return outMeshName[0] != '\0';
-            }
-
-            return false;
-        }
-
-        static bool TryResolveChunkOwnerMeshNameForBinding(
-            const ChunkResolvedBindingEntry* binding,
-            const ChunkBridgeSnapshot& bridgeSnapshot,
-            char* outMeshName,
-            size_t outMeshNameCapacity)
-        {
-            if (!outMeshName || outMeshNameCapacity == 0)
-                return false;
-
-            outMeshName[0] = '\0';
-
-            if (binding && binding->ownerMeshName[0] &&
-                IsPlausibleChunkOwnerToken(binding->ownerMeshName, true))
-            {
-                strncpy_s(outMeshName, outMeshNameCapacity, binding->ownerMeshName, _TRUNCATE);
-                return true;
-            }
-
-            void* candidates[] = {
-                reinterpret_cast<void*>(static_cast<uintptr_t>(binding ? binding->sourceGameObjectPtr : 0)),
-                reinterpret_cast<void*>(static_cast<uintptr_t>(binding ? binding->sourceRootGameObjectPtr : 0)),
-                reinterpret_cast<void*>(static_cast<uintptr_t>(binding ? binding->sourceOwnerObjPtr : 0)),
-                bridgeSnapshot.gameObject,
-                bridgeSnapshot.ownerObj,
-            };
-
-            std::unordered_set<uintptr_t> seen;
-            seen.reserve(std::size(candidates));
-            for (void* candidate : candidates)
-            {
-                const uintptr_t key = reinterpret_cast<uintptr_t>(candidate);
-                if (!candidate || !seen.insert(key).second)
-                    continue;
-
-                if (TryGetGameObjectMeshName(candidate, outMeshName, outMeshNameCapacity) &&
-                    IsPlausibleChunkOwnerToken(outMeshName, true))
-                {
-                    return true;
-                }
-            }
-
-            char entityBaseName[32] = {};
-            char ogreFilename[32] = {};
-            void* ownerEntityCandidates[] = {
-                reinterpret_cast<void*>(static_cast<uintptr_t>(binding ? binding->sourceOwnerEntityPtr : 0)),
-                bridgeSnapshot.ownerEntity,
-            };
-            seen.clear();
-            seen.reserve(std::size(ownerEntityCandidates));
-            for (void* ownerEntity : ownerEntityCandidates)
-            {
-                const uintptr_t key = reinterpret_cast<uintptr_t>(ownerEntity);
-                if (!ownerEntity || !seen.insert(key).second)
-                    continue;
-
-                if (TryReadOwnerEntityNames(
-                        ownerEntity,
-                        entityBaseName,
-                        sizeof(entityBaseName),
-                        ogreFilename,
-                        sizeof(ogreFilename),
-                        outMeshName,
-                        outMeshNameCapacity) &&
-                    IsPlausibleChunkOwnerToken(outMeshName, true))
-                {
-                    return true;
-                }
-            }
-
-            if (bridgeSnapshot.ownerResolvedMeshName[0] &&
-                IsPlausibleChunkOwnerToken(bridgeSnapshot.ownerResolvedMeshName, true))
-            {
-                strncpy_s(outMeshName, outMeshNameCapacity, bridgeSnapshot.ownerResolvedMeshName, _TRUNCATE);
-                return true;
-            }
-
-            if (binding && binding->meshName[0] &&
-                IsPlausibleChunkOwnerToken(binding->meshName, true))
-            {
-                strncpy_s(outMeshName, outMeshNameCapacity, binding->meshName, _TRUNCATE);
-                return true;
-            }
-
-            return false;
-        }
-
-        static void BuildChunkPayloadComponentCandidates(
-            const ChunkResolvedBindingEntry& entry,
-            std::vector<std::string>& outCandidates)
-        {
-            outCandidates.clear();
-            outCandidates.reserve(6);
-
-            auto appendCandidate = [&outCandidates](const char* token)
-            {
-                const std::string normalized = NormalizeChunkPayloadComponentName(token);
-                if (normalized.empty())
-                    return;
-
-                const auto it = std::find(outCandidates.begin(), outCandidates.end(), normalized);
-                if (it == outCandidates.end())
-                    outCandidates.push_back(normalized);
-            };
-
-            appendCandidate(entry.sourceGeomName);
-
-            const char* cursor = entry.vdfCandidates;
-            while (cursor && *cursor)
-            {
-                const char* const pipe = std::strchr(cursor, '|');
-                const size_t tokenLen = pipe
-                    ? static_cast<size_t>(pipe - cursor)
-                    : std::strlen(cursor);
-                if (tokenLen != 0)
-                {
-                    char token[64] = {};
-                    strncpy_s(token, sizeof(token), cursor, tokenLen);
-                    appendCandidate(token);
-                }
-
-                if (!pipe)
-                    break;
-                cursor = pipe + 1;
-            }
-        }
-
-        static bool TryGetChunkResolvedBindingExactPayloadComponent(
-            const ChunkResolvedBindingEntry& entry,
-            std::string& outComponent)
-        {
-            outComponent.clear();
-            if (entry.payloadComponentName[0])
-            {
-                outComponent = NormalizeChunkPayloadComponentName(entry.payloadComponentName);
-                if (!outComponent.empty())
-                    return true;
-            }
-
-            std::vector<std::string> payloadCandidates;
-            BuildChunkPayloadComponentCandidates(entry, payloadCandidates);
-            if (payloadCandidates.size() == 1)
-            {
-                outComponent = payloadCandidates.front();
-                return true;
-            }
-
-            return false;
-        }
-
-        static const ChunkResolvedBindingEntry* FindChunkResolvedBindingEntryByKey(uintptr_t objectKey)
-        {
-            if (objectKey == 0)
-                return nullptr;
-
-            const auto it = g_ChunkResolvedBindingCache.find(objectKey);
-            return (it != g_ChunkResolvedBindingCache.end()) ? &it->second : nullptr;
-        }
-
-        static const ChunkVdfRecord* FindChunkVdfRecordByName(
-            const ChunkVdfAssetInfo& info,
-            const char* name)
-        {
-            if (!name || !*name)
-                return nullptr;
-
-            for (const ChunkVdfRecord& record : info.records)
-            {
-                if (record.name[0] && _stricmp(record.name, name) == 0)
-                    return &record;
-            }
-
-            return nullptr;
-        }
-
-        static bool ChunkVdfRecordHasRenderableMesh(
-            const char* meshName,
-            const char* geomName)
-        {
-            ChunkObjectLinkProbe probe = {};
-            probe.classId = 0;
-            char resolvedMeshName[128] = {};
-            return TryResolveChunkPayloadMeshResource(
-                probe,
-                meshName,
-                geomName,
-                resolvedMeshName,
-                sizeof(resolvedMeshName));
-        }
-
-        static void FilterChunkPayloadCandidatesByParentToken(
-            const ChunkVdfAssetInfo& info,
-            const std::string& parentToken,
-            std::vector<std::string>& candidates)
-        {
-            if (parentToken.empty() || candidates.empty())
-                return;
-
-            std::vector<std::string> filtered;
-            filtered.reserve(candidates.size());
-            for (const std::string& candidate : candidates)
-            {
-                const ChunkVdfRecord* record = FindChunkVdfRecordByName(info, candidate.c_str());
-                if (record && _stricmp(record->parent, parentToken.c_str()) == 0)
-                    filtered.push_back(candidate);
-            }
-
-            if (!filtered.empty())
-                candidates.swap(filtered);
-        }
-
-        static void FilterChunkPayloadCandidatesByChildBindings(
-            const ChunkVdfAssetInfo& info,
-            uintptr_t objectKey,
-            uint32_t sourceRootObjectPtr,
-            std::vector<std::string>& candidates)
-        {
-            if (objectKey == 0 || candidates.empty())
-                return;
-
-            std::vector<const ChunkResolvedBindingEntry*> childEntries;
-            childEntries.reserve(4);
-            for (const auto& pair : g_ChunkResolvedBindingCache)
-            {
-                const ChunkResolvedBindingEntry& other = pair.second;
-                if (other.sourceRootObjectPtr != sourceRootObjectPtr)
-                    continue;
-                if (other.sourceParentObjectPtr != static_cast<uint32_t>(objectKey))
-                    continue;
-                childEntries.push_back(&other);
-            }
-
-            if (childEntries.empty())
-                return;
-
-            std::vector<std::string> filtered;
-            filtered.reserve(candidates.size());
-            for (const std::string& candidate : candidates)
-            {
-                const ChunkVdfRecord* record = FindChunkVdfRecordByName(info, candidate.c_str());
-                if (!record)
-                    continue;
-
-                bool matchesAllChildren = true;
-                for (const ChunkResolvedBindingEntry* childEntry : childEntries)
-                {
-                    bool matchedChild = false;
-
-                    std::string exactChildToken;
-                    if (TryGetChunkResolvedBindingExactPayloadComponent(*childEntry, exactChildToken))
-                    {
-                        for (const ChunkVdfRecord& other : info.records)
-                        {
-                            if (_stricmp(other.parent, record->name) == 0 &&
-                                _stricmp(other.name, exactChildToken.c_str()) == 0)
-                            {
-                                matchedChild = true;
-                                break;
-                            }
-                        }
-                    }
-                    else if (childEntry->sourceClassId != 0)
-                    {
-                        for (const ChunkVdfRecord& other : info.records)
-                        {
-                            if (_stricmp(other.parent, record->name) == 0 &&
-                                other.type == childEntry->sourceClassId)
-                            {
-                                matchedChild = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (!matchedChild)
-                    {
-                        matchesAllChildren = false;
-                        break;
-                    }
-                }
-
-                if (matchesAllChildren)
-                    filtered.push_back(candidate);
-            }
-
-            if (!filtered.empty())
-                candidates.swap(filtered);
-        }
-
-        static void RemoveChunkPayloadCandidatesUsedBySiblingBindings(
-            uintptr_t objectKey,
-            uint32_t sourceRootObjectPtr,
-            uint32_t sourceParentObjectPtr,
-            std::vector<std::string>& candidates)
-        {
-            if (objectKey == 0 || sourceParentObjectPtr == 0 || candidates.empty())
-                return;
-
-            std::vector<std::string> usedExactTokens;
-            usedExactTokens.reserve(4);
-            for (const auto& pair : g_ChunkResolvedBindingCache)
-            {
-                const uintptr_t otherKey = pair.first;
-                const ChunkResolvedBindingEntry& other = pair.second;
-                if (otherKey == objectKey ||
-                    other.sourceRootObjectPtr != sourceRootObjectPtr ||
-                    other.sourceParentObjectPtr != sourceParentObjectPtr)
-                {
-                    continue;
-                }
-
-                std::string exactSiblingToken;
-                if (TryGetChunkResolvedBindingExactPayloadComponent(other, exactSiblingToken))
-                {
-                    if (std::find(usedExactTokens.begin(), usedExactTokens.end(), exactSiblingToken) ==
-                        usedExactTokens.end())
-                    {
-                        usedExactTokens.push_back(exactSiblingToken);
-                    }
-                }
-            }
-
-            if (usedExactTokens.empty())
-                return;
-
-            std::vector<std::string> filtered;
-            filtered.reserve(candidates.size());
-            for (const std::string& candidate : candidates)
-            {
-                if (std::find(usedExactTokens.begin(), usedExactTokens.end(), candidate) ==
-                    usedExactTokens.end())
-                {
-                    filtered.push_back(candidate);
-                }
-            }
-
-            if (!filtered.empty())
-                candidates.swap(filtered);
-        }
-
-        static void BuildChunkSiblingRuntimeOrder(
-            uint32_t sourceRootObjectPtr,
-            uint32_t sourceParentObjectPtr,
-            uint32_t sourceClassId,
-            std::vector<uintptr_t>& outOrder)
-        {
-            outOrder.clear();
-            if (sourceRootObjectPtr == 0 || sourceParentObjectPtr == 0 || sourceClassId == 0)
-                return;
-
-            std::vector<uintptr_t> objectKeys;
-            objectKeys.reserve(8);
-            std::unordered_set<uintptr_t> referencedSiblings;
-            for (const auto& pair : g_ChunkResolvedBindingCache)
-            {
-                const uintptr_t objectKey = pair.first;
-                const ChunkResolvedBindingEntry& other = pair.second;
-                if (other.sourceRootObjectPtr != sourceRootObjectPtr ||
-                    other.sourceParentObjectPtr != sourceParentObjectPtr ||
-                    other.sourceClassId != sourceClassId)
-                {
-                    continue;
-                }
-
-                objectKeys.push_back(objectKey);
-                if (other.sourceSiblingObjectPtr != 0)
-                    referencedSiblings.insert(other.sourceSiblingObjectPtr);
-            }
-
-            if (objectKeys.empty())
-                return;
-
-            std::sort(
-                objectKeys.begin(),
-                objectKeys.end(),
-                [&](uintptr_t lhs, uintptr_t rhs)
-                {
-                    const ChunkResolvedBindingEntry& left = g_ChunkResolvedBindingCache[lhs];
-                    const ChunkResolvedBindingEntry& right = g_ChunkResolvedBindingCache[rhs];
-                    if (left.bindTick != right.bindTick)
-                        return left.bindTick < right.bindTick;
-                    return lhs < rhs;
-                });
-
-            uintptr_t startKey = 0;
-            for (uintptr_t objectKey : objectKeys)
-            {
-                if (referencedSiblings.find(objectKey) == referencedSiblings.end())
-                {
-                    startKey = objectKey;
-                    break;
-                }
-            }
-            if (startKey == 0)
-                startKey = objectKeys.front();
-
-            std::unordered_set<uintptr_t> visited;
-            uintptr_t currentKey = startKey;
-            while (currentKey != 0 && visited.insert(currentKey).second)
-            {
-                outOrder.push_back(currentKey);
-                const auto it = g_ChunkResolvedBindingCache.find(currentKey);
-                currentKey = (it != g_ChunkResolvedBindingCache.end())
-                    ? static_cast<uintptr_t>(it->second.sourceSiblingObjectPtr)
-                    : 0;
-            }
-
-            for (uintptr_t objectKey : objectKeys)
-            {
-                if (visited.insert(objectKey).second)
-                    outOrder.push_back(objectKey);
-            }
-        }
-
-        static bool TryResolveChunkPayloadComponentFromSiblingOrder(
-            uintptr_t objectKey,
-            const ChunkVdfAssetInfo& info,
-            const ChunkResolvedBindingEntry& entry,
-            std::vector<std::string>& candidates,
-            std::string& outComponent)
-        {
-            outComponent.clear();
-            if (objectKey == 0 ||
-                entry.sourceRootObjectPtr == 0 ||
-                entry.sourceParentObjectPtr == 0 ||
-                entry.sourceClassId == 0 ||
-                candidates.size() <= 1)
-            {
-                return false;
-            }
-
-            std::string exactParentToken;
-            const ChunkResolvedBindingEntry* parentEntry =
-                FindChunkResolvedBindingEntryByKey(entry.sourceParentObjectPtr);
-            if (!parentEntry || !TryGetChunkResolvedBindingExactPayloadComponent(*parentEntry, exactParentToken))
-                return false;
-
-            std::vector<std::string> orderedTokens;
-            orderedTokens.reserve(candidates.size());
-            for (const ChunkVdfRecord& record : info.records)
-            {
-                if (record.type != entry.sourceClassId ||
-                    _stricmp(record.parent, exactParentToken.c_str()) != 0)
-                {
-                    continue;
-                }
-
-                const std::string normalized = NormalizeChunkPayloadComponentName(record.name);
-                if (normalized.empty())
-                    continue;
-                if (std::find(candidates.begin(), candidates.end(), normalized) == candidates.end())
-                    continue;
-
-                char resolvedMeshName[128] = {};
-                ChunkObjectLinkProbe probe = {};
-                if (!TryResolveChunkPayloadMeshResource(
-                        probe,
-                        entry.ownerMeshName[0] ? entry.ownerMeshName : entry.meshName,
-                        normalized.c_str(),
-                        resolvedMeshName,
-                        sizeof(resolvedMeshName)))
-                {
-                    continue;
-                }
-
-                orderedTokens.push_back(normalized);
-            }
-
-            if (orderedTokens.size() <= 1)
-                return false;
-
-            std::vector<uintptr_t> runtimeOrder;
-            BuildChunkSiblingRuntimeOrder(
-                entry.sourceRootObjectPtr,
-                entry.sourceParentObjectPtr,
-                entry.sourceClassId,
-                runtimeOrder);
-            if (runtimeOrder.size() != orderedTokens.size())
-                return false;
-
-            size_t runtimeIndex = std::string::npos;
-            for (size_t index = 0; index < runtimeOrder.size(); ++index)
-            {
-                if (runtimeOrder[index] == objectKey)
-                {
-                    runtimeIndex = index;
-                    break;
-                }
-            }
-            if (runtimeIndex == std::string::npos)
-                return false;
-
-            size_t sameDirectionError = 0;
-            size_t reverseDirectionError = 0;
-            size_t anchorCount = 0;
-            for (size_t index = 0; index < runtimeOrder.size(); ++index)
-            {
-                const ChunkResolvedBindingEntry* siblingEntry =
-                    FindChunkResolvedBindingEntryByKey(runtimeOrder[index]);
-                if (!siblingEntry)
-                    continue;
-
-                std::string exactToken;
-                if (!TryGetChunkResolvedBindingExactPayloadComponent(*siblingEntry, exactToken))
-                    continue;
-
-                const auto tokenIt = std::find(orderedTokens.begin(), orderedTokens.end(), exactToken);
-                if (tokenIt == orderedTokens.end())
-                    continue;
-
-                const size_t tokenIndex = static_cast<size_t>(tokenIt - orderedTokens.begin());
-                sameDirectionError += (index > tokenIndex) ? (index - tokenIndex) : (tokenIndex - index);
-                const size_t reverseTokenIndex = (orderedTokens.size() - 1u) - index;
-                reverseDirectionError +=
-                    (reverseTokenIndex > tokenIndex)
-                        ? (reverseTokenIndex - tokenIndex)
-                        : (tokenIndex - reverseTokenIndex);
-                ++anchorCount;
-            }
-
-            if (anchorCount == 0)
-                return false;
-
-            const bool reverseOrder = reverseDirectionError < sameDirectionError;
-            const size_t orderedIndex = reverseOrder
-                ? ((orderedTokens.size() - 1u) - runtimeIndex)
-                : runtimeIndex;
-            if (orderedIndex >= orderedTokens.size())
-                return false;
-
-            outComponent = orderedTokens[orderedIndex];
-            return !outComponent.empty();
-        }
-
-        static bool TryResolveChunkPayloadComponentFromBindingGraph(
-            uintptr_t objectKey,
-            ChunkResolvedBindingEntry& entry,
-            std::string& outComponent,
-            char* outMeshName,
-            size_t outMeshNameCapacity)
-        {
-            outComponent.clear();
-            if (!outMeshName || outMeshNameCapacity == 0)
-                return false;
-
-            outMeshName[0] = '\0';
-
-            const char* meshContext =
-                entry.ownerMeshName[0] ? entry.ownerMeshName :
-                (entry.meshName[0] ? entry.meshName : nullptr);
-            if (!meshContext || !*meshContext)
-                return false;
-
-            std::vector<std::string> candidates;
-            BuildChunkPayloadComponentCandidates(entry, candidates);
-            if (candidates.size() <= 1)
-                return false;
-
-            ChunkVdfAssetInfo& info = GetChunkVdfAssetInfoForMesh(meshContext);
-            if (!info.loaded)
-                return false;
-
-            std::string exactParentToken;
-            const ChunkResolvedBindingEntry* parentEntry =
-                FindChunkResolvedBindingEntryByKey(entry.sourceParentObjectPtr);
-            if (parentEntry && TryGetChunkResolvedBindingExactPayloadComponent(*parentEntry, exactParentToken))
-            {
-                FilterChunkPayloadCandidatesByParentToken(info, exactParentToken, candidates);
-            }
-
-            FilterChunkPayloadCandidatesByChildBindings(
-                info,
-                objectKey,
-                entry.sourceRootObjectPtr,
-                candidates);
-
-            if (candidates.size() == 1)
-            {
-                outComponent = candidates.front();
-            }
-            else if (!TryResolveChunkPayloadComponentFromSiblingOrder(
-                         objectKey,
-                         info,
-                         entry,
-                         candidates,
-                         outComponent))
-            {
-                RemoveChunkPayloadCandidatesUsedBySiblingBindings(
-                    objectKey,
-                    entry.sourceRootObjectPtr,
-                    entry.sourceParentObjectPtr,
-                    candidates);
-
-                if (candidates.size() == 1)
-                {
-                    outComponent = candidates.front();
-                }
-                else
-                {
-                    return false;
-                }
-            }
-
-            ChunkObjectLinkProbe payloadProbe = {};
-            payloadProbe.classId = entry.sourceClassId;
-            if (entry.meshName[0])
-                strncpy_s(payloadProbe.cachedMeshName, sizeof(payloadProbe.cachedMeshName), entry.meshName, _TRUNCATE);
-            if (entry.sourceGeomName[0])
-                strncpy_s(payloadProbe.geomName, sizeof(payloadProbe.geomName), entry.sourceGeomName, _TRUNCATE);
-            if (entry.vdfCandidates[0])
-                strncpy_s(payloadProbe.vdfCandidates, sizeof(payloadProbe.vdfCandidates), entry.vdfCandidates, _TRUNCATE);
-
-            return TryResolveChunkPayloadMeshResource(
-                payloadProbe,
-                meshContext,
-                outComponent.c_str(),
-                outMeshName,
-                outMeshNameCapacity);
-        }
-
-        static bool TryResolveChunkPayloadComponentFromRenderableAncestor(
-            const ChunkResolvedBindingEntry& entry,
-            std::string& outComponent,
-            char* outMeshName,
-            size_t outMeshNameCapacity)
-        {
-            outComponent.clear();
-            if (!outMeshName || outMeshNameCapacity == 0)
-                return false;
-
-            outMeshName[0] = '\0';
-
-            const char* meshContext =
-                entry.ownerMeshName[0] ? entry.ownerMeshName :
-                (entry.meshName[0] ? entry.meshName : nullptr);
-            if (!meshContext || !*meshContext)
-                return false;
-
-            ChunkVdfAssetInfo& info = GetChunkVdfAssetInfoForMesh(meshContext);
-            if (!info.loaded)
-                return false;
-
-            std::vector<std::string> sourceCandidates;
-            BuildChunkPayloadComponentCandidates(entry, sourceCandidates);
-            if (sourceCandidates.empty())
-                return false;
-
-            std::vector<std::string> resolvedAncestors;
-            resolvedAncestors.reserve(sourceCandidates.size());
-            auto appendUniqueResolvedAncestor = [&resolvedAncestors](const std::string& candidate)
-            {
-                if (candidate.empty())
-                    return;
-
-                for (const std::string& existing : resolvedAncestors)
-                {
-                    if (_stricmp(existing.c_str(), candidate.c_str()) == 0)
-                        return;
-                }
-
-                resolvedAncestors.push_back(candidate);
-            };
-            for (const std::string& candidate : sourceCandidates)
-            {
-                const ChunkVdfRecord* record = FindChunkVdfRecordByName(info, candidate.c_str());
-                std::unordered_set<std::string> visited;
-                while (record)
-                {
-                    const std::string normalizedRecord =
-                        NormalizeChunkPayloadComponentName(record->name);
-                    if (!normalizedRecord.empty() &&
-                        !visited.insert(normalizedRecord).second)
-                    {
-                        break;
-                    }
-
-                    if (!normalizedRecord.empty() &&
-                        ChunkVdfRecordHasRenderableMesh(meshContext, record->name))
-                    {
-                        appendUniqueResolvedAncestor(normalizedRecord);
-                        break;
-                    }
-
-                    if (!record->parent[0])
-                        break;
-
-                    record = FindChunkVdfRecordByName(info, record->parent);
-                }
-            }
-
-            if (resolvedAncestors.size() != 1)
-                return false;
-
-            ChunkObjectLinkProbe payloadProbe = {};
-            payloadProbe.classId = entry.sourceClassId;
-            if (entry.meshName[0])
-                strncpy_s(
-                    payloadProbe.cachedMeshName,
-                    sizeof(payloadProbe.cachedMeshName),
-                    entry.meshName,
-                    _TRUNCATE);
-            if (entry.sourceGeomName[0])
-                strncpy_s(
-                    payloadProbe.geomName,
-                    sizeof(payloadProbe.geomName),
-                    entry.sourceGeomName,
-                    _TRUNCATE);
-            if (entry.vdfCandidates[0])
-                strncpy_s(
-                    payloadProbe.vdfCandidates,
-                    sizeof(payloadProbe.vdfCandidates),
-                    entry.vdfCandidates,
-                    _TRUNCATE);
-
-            if (!TryResolveChunkPayloadMeshResource(
-                    payloadProbe,
-                    meshContext,
-                    resolvedAncestors.front().c_str(),
-                    outMeshName,
-                    outMeshNameCapacity))
-            {
-                return false;
-            }
-
-            outComponent = resolvedAncestors.front();
-            return !outComponent.empty();
-        }
-
-        static void RefreshChunkResolvedBindingPayloadMesh(
-            uintptr_t objectKey,
-            ChunkResolvedBindingEntry& entry)
-        {
-            if (!entry.ownerMeshName[0] && entry.meshName[0] &&
-                IsPlausibleChunkOwnerToken(entry.meshName, true))
-            {
-                strncpy_s(entry.ownerMeshName, sizeof(entry.ownerMeshName), entry.meshName, _TRUNCATE);
-            }
-
-            entry.payloadComponentName[0] = '\0';
-            entry.payloadMeshName[0] = '\0';
-
-            if (!entry.ownerMeshName[0])
-                return;
-
-            std::vector<std::string> payloadCandidates;
-            BuildChunkPayloadComponentCandidates(entry, payloadCandidates);
-            if (payloadCandidates.empty())
-                return;
-
-            auto isGenericChunkGeom = [](const char* geomName) -> bool
-            {
-                return geomName &&
-                    (*geomName != '\0') &&
-                    (_stricmp(geomName, "chunk1") == 0 || _stricmp(geomName, "chunk2") == 0);
-            };
-
-            ChunkObjectLinkProbe payloadProbe = {};
-            payloadProbe.classId = entry.sourceClassId;
-            if (entry.meshName[0])
-                strncpy_s(payloadProbe.cachedMeshName, sizeof(payloadProbe.cachedMeshName), entry.meshName, _TRUNCATE);
-            if (entry.sourceGeomName[0])
-                strncpy_s(payloadProbe.geomName, sizeof(payloadProbe.geomName), entry.sourceGeomName, _TRUNCATE);
-            if (entry.vdfCandidates[0])
-                strncpy_s(payloadProbe.vdfCandidates, sizeof(payloadProbe.vdfCandidates), entry.vdfCandidates, _TRUNCATE);
-
-            // Prefer a direct named piece match first. This keeps strong tokens like
-            // SCZ11RAD/SCZ11BGA authoritative and avoids drifting into sibling fallbacks.
-            if (entry.sourceGeomName[0] && !isGenericChunkGeom(entry.sourceGeomName))
-            {
-                char exactPayloadMesh[sizeof(entry.payloadMeshName)] = {};
-                if (TryResolveChunkPayloadMeshResource(
-                        payloadProbe,
-                        entry.ownerMeshName,
-                        entry.sourceGeomName,
-                        exactPayloadMesh,
-                        sizeof(exactPayloadMesh)))
-                {
-                    const std::string normalizedExact = NormalizeChunkPayloadComponentName(entry.sourceGeomName);
-                    if (!normalizedExact.empty())
-                    {
-                        strncpy_s(
-                            entry.payloadComponentName,
-                            sizeof(entry.payloadComponentName),
-                            normalizedExact.c_str(),
-                            _TRUNCATE);
-                        strncpy_s(entry.payloadMeshName, sizeof(entry.payloadMeshName), exactPayloadMesh, _TRUNCATE);
-                        return;
-                    }
-                }
-            }
-
-            if (payloadCandidates.size() > 1)
-            {
-                std::string graphResolvedComponent;
-                char graphResolvedMesh[sizeof(entry.payloadMeshName)] = {};
-                if (TryResolveChunkPayloadComponentFromBindingGraph(
-                        objectKey,
-                        entry,
-                        graphResolvedComponent,
-                        graphResolvedMesh,
-                        sizeof(graphResolvedMesh)))
-                {
-                    strncpy_s(
-                        entry.payloadComponentName,
-                        sizeof(entry.payloadComponentName),
-                        graphResolvedComponent.c_str(),
-                        _TRUNCATE);
-                    strncpy_s(entry.payloadMeshName, sizeof(entry.payloadMeshName), graphResolvedMesh, _TRUNCATE);
-                    return;
-                }
-            }
-
-            if (!payloadCandidates.empty())
-            {
-                std::string ancestorResolvedComponent;
-                char ancestorResolvedMesh[sizeof(entry.payloadMeshName)] = {};
-                if (TryResolveChunkPayloadComponentFromRenderableAncestor(
-                        entry,
-                        ancestorResolvedComponent,
-                        ancestorResolvedMesh,
-                        sizeof(ancestorResolvedMesh)))
-                {
-                    strncpy_s(
-                        entry.payloadComponentName,
-                        sizeof(entry.payloadComponentName),
-                        ancestorResolvedComponent.c_str(),
-                        _TRUNCATE);
-                    strncpy_s(entry.payloadMeshName, sizeof(entry.payloadMeshName), ancestorResolvedMesh, _TRUNCATE);
-                    return;
-                }
-            }
-
-            std::string firstResolvedCandidate;
-            char firstResolvedMesh[sizeof(entry.payloadMeshName)] = {};
-            bool sawResolvedCandidate = false;
-            bool sawConflictingResolvedCandidate = false;
-            for (const std::string& payloadCandidate : payloadCandidates)
-            {
-                char resolvedPayloadMesh[sizeof(entry.payloadMeshName)] = {};
-                if (!TryResolveChunkPayloadMeshResource(
-                        payloadProbe,
-                        entry.ownerMeshName,
-                        payloadCandidate.c_str(),
-                        resolvedPayloadMesh,
-                        sizeof(resolvedPayloadMesh)))
-                {
-                    continue;
-                }
-
-                if (!sawResolvedCandidate)
-                {
-                    firstResolvedCandidate = payloadCandidate;
-                    strncpy_s(firstResolvedMesh, sizeof(firstResolvedMesh), resolvedPayloadMesh, _TRUNCATE);
-                    sawResolvedCandidate = true;
-                    continue;
-                }
-
-                if (_stricmp(firstResolvedCandidate.c_str(), payloadCandidate.c_str()) != 0 ||
-                    _stricmp(firstResolvedMesh, resolvedPayloadMesh) != 0)
-                {
-                    sawConflictingResolvedCandidate = true;
-                    break;
-                }
-            }
-
-            if (!sawResolvedCandidate)
-                return;
-
-            // If we only have generic chunk geometry and multiple sibling candidates
-            // resolve, fail closed instead of borrowing the first mesh arbitrarily.
-            if (sawConflictingResolvedCandidate &&
-                (!entry.sourceGeomName[0] || isGenericChunkGeom(entry.sourceGeomName)))
-            {
-                return;
-            }
-
-            strncpy_s(
-                entry.payloadComponentName,
-                sizeof(entry.payloadComponentName),
-                firstResolvedCandidate.c_str(),
-                _TRUNCATE);
-            strncpy_s(entry.payloadMeshName, sizeof(entry.payloadMeshName), firstResolvedMesh, _TRUNCATE);
-        }
-
-        static void RefreshChunkResolvedBindingPayloadMeshesForRoot(uint32_t sourceRootObjectPtr)
-        {
-            if (sourceRootObjectPtr == 0)
-                return;
-
-            std::vector<uintptr_t> objectKeys;
-            objectKeys.reserve(16);
-            for (const auto& pair : g_ChunkResolvedBindingCache)
-            {
-                if (pair.second.sourceRootObjectPtr == sourceRootObjectPtr)
-                    objectKeys.push_back(pair.first);
-            }
-
-            std::sort(
-                objectKeys.begin(),
-                objectKeys.end(),
-                [&](uintptr_t lhs, uintptr_t rhs)
-                {
-                    const ChunkResolvedBindingEntry& left = g_ChunkResolvedBindingCache[lhs];
-                    const ChunkResolvedBindingEntry& right = g_ChunkResolvedBindingCache[rhs];
-                    if (left.bindTick != right.bindTick)
-                        return left.bindTick < right.bindTick;
-                    return lhs < rhs;
-                });
-
-            for (uintptr_t objectKey : objectKeys)
-            {
-                auto it = g_ChunkResolvedBindingCache.find(objectKey);
-                if (it != g_ChunkResolvedBindingCache.end())
-                    RefreshChunkResolvedBindingPayloadMesh(objectKey, it->second);
-            }
         }
 
         static void LogChunkClassProbe(const uint8_t* objectBytes)
@@ -12791,87 +7234,25 @@ namespace BZROpenShim
                                           void* hook,
                                           size_t patchLen,
                                           const uint8_t* expectedBytes,
-                                          size_t expectedLen,
-                                          const uint8_t* expectedMask)
+                                          size_t expectedLen)
         {
             if (!target || !hook || patchLen < 5 || patchLen > detour.original.size())
-            {
-                RecordInlineDetourFailure(
-                    InlineDetourFailureReason::InvalidArgs,
-                    target,
-                    hook,
-                    patchLen,
-                    nullptr,
-                    0,
-                    expectedBytes,
-                    expectedLen,
-                    0);
                 return false;
-            }
 
             if (detour.trampoline)
-            {
-                ClearInlineDetourFailureInfo();
                 return true;
-            }
 
             auto* targetBytes = reinterpret_cast<uint8_t*>(target);
             if (expectedBytes && expectedLen > 0)
             {
-                bool expectedMatched = expectedLen <= patchLen;
-                if (expectedMatched)
-                {
-                    if (expectedMask)
-                    {
-                        for (size_t index = 0; index < expectedLen; ++index)
-                        {
-                            if (expectedMask[index] == 0)
-                                continue;
-                            if (targetBytes[index] != expectedBytes[index])
-                            {
-                                expectedMatched = false;
-                                break;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        expectedMatched = memcmp(targetBytes, expectedBytes, expectedLen) == 0;
-                    }
-                }
-
-                if (!expectedMatched)
-                {
-                    RecordInlineDetourFailure(
-                        InlineDetourFailureReason::ExpectedMismatch,
-                        target,
-                        hook,
-                        patchLen,
-                        targetBytes,
-                        (std::min)((std::max)(expectedLen, patchLen), detour.original.size()),
-                        expectedBytes,
-                        expectedLen,
-                        0);
+                if (expectedLen > patchLen || memcmp(targetBytes, expectedBytes, expectedLen) != 0)
                     return false;
-                }
             }
 
             auto* trampolineBytes = reinterpret_cast<uint8_t*>(
                 VirtualAlloc(nullptr, patchLen + 5, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
             if (!trampolineBytes)
-            {
-                RecordInlineDetourFailure(
-                    InlineDetourFailureReason::TrampolineAllocFailed,
-                    target,
-                    hook,
-                    patchLen,
-                    targetBytes,
-                    (std::min)(patchLen, detour.original.size()),
-                    expectedBytes,
-                    expectedLen,
-                    GetLastError());
                 return false;
-            }
 
             memcpy(detour.original.data(), targetBytes, patchLen);
             memcpy(trampolineBytes, targetBytes, patchLen);
@@ -12886,18 +7267,7 @@ namespace BZROpenShim
             DWORD oldProtect = 0;
             if (!VirtualProtect(targetBytes, patchLen, PAGE_EXECUTE_READWRITE, &oldProtect))
             {
-                const DWORD protectError = GetLastError();
                 VirtualFree(trampolineBytes, 0, MEM_RELEASE);
-                RecordInlineDetourFailure(
-                    InlineDetourFailureReason::ProtectFailed,
-                    target,
-                    hook,
-                    patchLen,
-                    targetBytes,
-                    (std::min)(patchLen, detour.original.size()),
-                    expectedBytes,
-                    expectedLen,
-                    protectError);
                 return false;
             }
 
@@ -12918,7 +7288,6 @@ namespace BZROpenShim
             detour.hook = hook;
             detour.trampoline = trampolineBytes;
             detour.patchLen = patchLen;
-            ClearInlineDetourFailureInfo();
             return true;
         }
 
@@ -12942,261 +7311,6 @@ namespace BZROpenShim
             }
 
             return memcmp(current, expectedBytes, expectedLen) == 0;
-        }
-
-        static bool TryReadDwordValue(uint32_t address, uint32_t& outValue)
-        {
-            outValue = 0;
-            if (address == 0)
-                return false;
-
-            __try
-            {
-                outValue = *reinterpret_cast<const uint32_t*>(static_cast<uintptr_t>(address));
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                outValue = 0;
-                return false;
-            }
-        }
-
-        static bool IsPlausibleObjectQueryBase(const void* ptr)
-        {
-            return reinterpret_cast<uintptr_t>(ptr) >= kObjectQueryMinimumPlausiblePtr;
-        }
-
-        static bool IsReasonableObjectQueryIndex(int index)
-        {
-            return index >= 0 && index <= kObjectQueryMaxReasonableIndex;
-        }
-
-        static void LogObjectQuerySafetyEvent(
-            const char* op,
-            const char* reason,
-            const void* thisPtr,
-            int firstIndex,
-            int secondIndex,
-            uintptr_t value)
-        {
-            if (InterlockedDecrement(&g_ObjectQuerySafetyGuardLogBudget) < 0)
-                return;
-
-            const uint32_t thisAddr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr));
-            const uint32_t valueAddr = static_cast<uint32_t>(value);
-            Log(L"[OBJSAFE] op=%hs reason=%hs this=0x%08X a=%d b=%d value=0x%08X\n",
-                op ? op : "<none>",
-                reason ? reason : "<none>",
-                thisAddr,
-                firstIndex,
-                secondIndex,
-                valueAddr);
-            LogShimA(
-                LogLevel::Warn,
-                "objsafe",
-                "op=%s reason=%s this=0x%08X a=%d b=%d value=0x%08X",
-                op ? op : "<none>",
-                reason ? reason : "<none>",
-                thisAddr,
-                firstIndex,
-                secondIndex,
-                valueAddr);
-        }
-
-        static bool NormalizeObjectQueryFindRange(
-            const char* op,
-            const void* thisPtr,
-            int& startIndex,
-            int& endIndex)
-        {
-            if (startIndex < 0 || endIndex < startIndex || startIndex > kObjectQueryMaxReasonableIndex)
-            {
-                LogObjectQuerySafetyEvent(
-                    op,
-                    "invalid-range",
-                    thisPtr,
-                    startIndex,
-                    endIndex,
-                    0);
-                return false;
-            }
-
-            if (endIndex > kObjectQueryMaxReasonableIndex)
-            {
-                LogObjectQuerySafetyEvent(
-                    op,
-                    "clamp-end",
-                    thisPtr,
-                    startIndex,
-                    endIndex,
-                    kObjectQueryMaxReasonableIndex);
-                endIndex = kObjectQueryMaxReasonableIndex;
-            }
-
-            return true;
-        }
-
-        static bool TryFormatObservedChunkPathCandidate(
-            const char* label,
-            uint32_t value,
-            wchar_t* outLine,
-            size_t outLineCount)
-        {
-            if (!outLine || outLineCount == 0)
-                return false;
-
-            outLine[0] = L'\0';
-            if (value == 0)
-                return false;
-
-            uint32_t classId = 0;
-            uint32_t flags = 0;
-            void* geomRef = nullptr;
-            void* owner = nullptr;
-            char geomName[64] = {};
-            if (!TryReadChunkObjectSummary(
-                    reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(value)),
-                    classId,
-                    flags,
-                    geomRef,
-                    geomName,
-                    sizeof(geomName),
-                    owner))
-            {
-                return false;
-            }
-
-            ChunkCreateSourceTreeProbe sourceTreeProbe = {};
-            CaptureChunkCreateSourceTreeProbe(
-                reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(value)),
-                sourceTreeProbe);
-
-            const char* const geomDisplay = geomName[0] ? geomName : "<none>";
-            const char* const ownerBase =
-                (sourceTreeProbe.valid && sourceTreeProbe.ownerEntityBaseName[0])
-                    ? sourceTreeProbe.ownerEntityBaseName
-                    : "<none>";
-            const char* const ownerMesh =
-                (sourceTreeProbe.valid && sourceTreeProbe.ownerResolvedMeshName[0])
-                    ? sourceTreeProbe.ownerResolvedMeshName
-                    : "<none>";
-            const char* const vdfDisplay =
-                (sourceTreeProbe.valid && sourceTreeProbe.source.vdfCandidates[0])
-                    ? sourceTreeProbe.source.vdfCandidates
-                    : "<none>";
-            return swprintf_s(
-                       outLine,
-                       outLineCount,
-                       L"%hs=0x%08X class=%u flags=0x%08X geom=%hs owner=0x%08X ownerBase=%hs ownerMesh=%hs vdf=%hs",
-                       label ? label : "<unnamed>",
-                       value,
-                       classId,
-                       flags,
-                       geomDisplay,
-                       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(owner)),
-                       ownerBase,
-                       ownerMesh,
-                       vdfDisplay) > 0;
-        }
-
-        static void LogObservedChunkPathProbe(
-            uint32_t siteRva,
-            const ObservedChunkPathRegisterBlock* regs,
-            uint32_t originalEsp)
-        {
-            if ((!g_TraceChunkRender && !g_TraceChunkEffectRuntime) || !regs)
-                return;
-            if (InterlockedDecrement(&g_ObservedChunkPathProbeBudget) < 0)
-                return;
-            if (!AcquireChunkLogSlot())
-                return;
-
-            uint32_t retAddress = 0;
-            uint32_t arg1 = 0;
-            uint32_t arg2 = 0;
-            uint32_t arg3 = 0;
-            uint32_t arg4 = 0;
-            TryReadDwordValue(originalEsp, retAddress);
-            TryReadDwordValue(originalEsp + 4, arg1);
-            TryReadDwordValue(originalEsp + 8, arg2);
-            TryReadDwordValue(originalEsp + 12, arg3);
-            TryReadDwordValue(originalEsp + 16, arg4);
-
-            const uint64_t signature =
-                (static_cast<uint64_t>(siteRva) << 32) ^
-                static_cast<uint64_t>(regs->ecx) ^
-                (static_cast<uint64_t>(regs->eax) << 7) ^
-                (static_cast<uint64_t>(arg1) << 13) ^
-                (static_cast<uint64_t>(arg2) << 17) ^
-                (static_cast<uint64_t>(arg3) << 19) ^
-                (static_cast<uint64_t>(arg4) << 23);
-            const DWORD nowTick = GetTickCount();
-            ObservedChunkPathProbeLogState* state =
-                (siteRva == 0x00080683u)
-                    ? &g_ObservedChunkPathParentALogState
-                    : &g_ObservedChunkPathParentBLogState;
-            if (state->signature == signature &&
-                state->lastTick != 0 &&
-                (nowTick - state->lastTick) < 250u)
-            {
-                return;
-            }
-            state->signature = signature;
-            state->lastTick = nowTick;
-
-            LogChunkDiagnostic(
-                "chunkpath",
-                L"[CHUNKPATH] siteRva=0x%08X eax=0x%08X ecx=0x%08X edx=0x%08X ebx=0x%08X esi=0x%08X edi=0x%08X ebp=0x%08X stack=0x%08X ret=0x%08X arg1=0x%08X arg2=0x%08X arg3=0x%08X arg4=0x%08X\n",
-                siteRva,
-                regs->eax,
-                regs->ecx,
-                regs->edx,
-                regs->ebx,
-                regs->esi,
-                regs->edi,
-                regs->ebp,
-                originalEsp,
-                retAddress,
-                arg1,
-                arg2,
-                arg3,
-                arg4);
-
-            struct CandidateValue
-            {
-                const char* label;
-                uint32_t value;
-            };
-            const CandidateValue candidates[] =
-            {
-                {"ecx", regs->ecx},
-                {"eax", regs->eax},
-                {"esi", regs->esi},
-                {"edi", regs->edi},
-                {"arg1", arg1},
-                {"arg2", arg2},
-                {"arg3", arg3},
-                {"arg4", arg4},
-            };
-
-            wchar_t candidateLine[384] = {};
-            for (const CandidateValue& candidate : candidates)
-            {
-                if (!TryFormatObservedChunkPathCandidate(
-                        candidate.label,
-                        candidate.value,
-                        candidateLine,
-                        std::size(candidateLine)))
-                {
-                    continue;
-                }
-
-                LogChunkDiagnostic(
-                    "chunkpath",
-                    L"[CHUNKPATH]   %ls\n",
-                    candidateLine);
-            }
         }
 
         static bool TryCaptureLocalPlayerSnapshot(JumpSnipeProbeSnapshot& out)
@@ -13479,240 +7593,6 @@ namespace BZROpenShim
             }
         }
 
-        static void InstallObjectQuerySafetyHooksIfPossible()
-        {
-            if (!g_ObjectQuerySafetyEnabled || g_ObjectQuerySafetyHooksInstalled)
-                return;
-
-            static const uint8_t kExpectedGlobalSlotGetBytes[kObjectQueryGlobalSlotGetDetourLen] =
-            {
-                0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08
-            };
-            static const uint8_t kExpectedArraySetBytes[kObjectQueryArraySetDetourLen] =
-            {
-                0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC
-            };
-            static const uint8_t kExpectedArrayGetBytes[kObjectQueryArrayGetDetourLen] =
-            {
-                0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC
-            };
-            static const uint8_t kExpectedFindIndexBytes[kObjectQueryFindZeroIndexDetourLen] =
-            {
-                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08
-            };
-            static const uint8_t kExpectedStampedValueBytes[kObjectQueryStampedValueSetDetourLen] =
-            {
-                0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC
-            };
-            static const uint8_t kExpectedBitClearBytes[kObjectQueryBitClearDetourLen] =
-            {
-                0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC
-            };
-            static const uint8_t kExpectedBitTestBytes[kObjectQueryBitTestSetDetourLen] =
-            {
-                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08
-            };
-            static const uint8_t kExpectedObjectStateAccessorBytes[kObjectStateAccessorDetourLen] =
-            {
-                0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC
-            };
-
-            auto tryInstallHook =
-                [&](const wchar_t* label,
-                    InlineDetour32& detour,
-                    uintptr_t target,
-                    void* hook,
-                    size_t patchLen,
-                    const uint8_t* expectedBytes)
-            {
-                if (detour.trampoline)
-                    return;
-
-                if (InstallInlineDetour32(
-                        detour,
-                        target,
-                        hook,
-                        patchLen,
-                        expectedBytes,
-                        patchLen))
-                {
-                    return;
-                }
-
-                if (!g_ObjectQuerySafetyHooksFailureLogged)
-                {
-                    const InlineDetourFailureInfo failure = g_LastInlineDetourFailure;
-                    wchar_t currentBytes[128] = {};
-                    wchar_t expectedBytesText[128] = {};
-                    FormatInlineDetourBytes(
-                        failure.current.data(),
-                        failure.currentLen,
-                        currentBytes,
-                        _countof(currentBytes));
-                    FormatInlineDetourBytes(
-                        failure.expected.data(),
-                        failure.expectedCaptureLen,
-                        expectedBytesText,
-                        _countof(expectedBytesText));
-                    Log(L"[OBJSAFE] detour install failed label=%ls reason=%ls target=0x%08X hook=0x%08X patchLen=%u expectedLen=%u lastError=%lu current=%ls expected=%ls\n",
-                        label ? label : L"<none>",
-                        DescribeInlineDetourFailureReason(failure.reason),
-                        static_cast<uint32_t>(target),
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(hook)),
-                        static_cast<unsigned>(failure.patchLen),
-                        static_cast<unsigned>(failure.expectedLen),
-                        static_cast<unsigned long>(failure.lastError),
-                        currentBytes[0] ? currentBytes : L"<none>",
-                        expectedBytesText[0] ? expectedBytesText : L"<none>");
-                    g_ObjectQuerySafetyHooksFailureLogged = true;
-                }
-            };
-
-            tryInstallHook(
-                L"global-slot-get",
-                g_ObjectQueryGlobalSlotGetDetour,
-                kGogObjectQueryGlobalSlotGetAddr,
-                reinterpret_cast<void*>(ObjectQueryGlobalSlotGetHook),
-                kObjectQueryGlobalSlotGetDetourLen,
-                kExpectedGlobalSlotGetBytes);
-            tryInstallHook(
-                L"array-set",
-                g_ObjectQueryArraySetDetour,
-                kGogObjectQueryArraySetAddr,
-                reinterpret_cast<void*>(ObjectQueryArraySetHook),
-                kObjectQueryArraySetDetourLen,
-                kExpectedArraySetBytes);
-            tryInstallHook(
-                L"array-get",
-                g_ObjectQueryArrayGetDetour,
-                kGogObjectQueryArrayGetAddr,
-                reinterpret_cast<void*>(ObjectQueryArrayGetHook),
-                kObjectQueryArrayGetDetourLen,
-                kExpectedArrayGetBytes);
-            tryInstallHook(
-                L"find-zero-index",
-                g_ObjectQueryFindZeroIndexDetour,
-                kGogObjectQueryFindZeroIndexAddr,
-                reinterpret_cast<void*>(ObjectQueryFindZeroIndexHook),
-                kObjectQueryFindZeroIndexDetourLen,
-                kExpectedFindIndexBytes);
-            tryInstallHook(
-                L"find-nonzero-index",
-                g_ObjectQueryFindNonZeroIndexDetour,
-                kGogObjectQueryFindNonZeroIndexAddr,
-                reinterpret_cast<void*>(ObjectQueryFindNonZeroIndexHook),
-                kObjectQueryFindNonZeroIndexDetourLen,
-                kExpectedFindIndexBytes);
-            tryInstallHook(
-                L"stamped-value-set",
-                g_ObjectQueryStampedValueSetDetour,
-                kGogObjectQueryStampedValueSetAddr,
-                reinterpret_cast<void*>(ObjectQueryStampedValueSetHook),
-                kObjectQueryStampedValueSetDetourLen,
-                kExpectedStampedValueBytes);
-            tryInstallHook(
-                L"bit-clear",
-                g_ObjectQueryBitClearDetour,
-                kGogObjectQueryBitClearAddr,
-                reinterpret_cast<void*>(ObjectQueryBitClearHook),
-                kObjectQueryBitClearDetourLen,
-                kExpectedBitClearBytes);
-            tryInstallHook(
-                L"bit-test-set",
-                g_ObjectQueryBitTestSetDetour,
-                kGogObjectQueryBitTestSetAddr,
-                reinterpret_cast<void*>(ObjectQueryBitTestSetHook),
-                kObjectQueryBitTestSetDetourLen,
-                kExpectedBitTestBytes);
-            tryInstallHook(
-                L"bit-test-clear",
-                g_ObjectQueryBitTestClearDetour,
-                kGogObjectQueryBitTestClearAddr,
-                reinterpret_cast<void*>(ObjectQueryBitTestClearHook),
-                kObjectQueryBitTestClearDetourLen,
-                kExpectedBitTestBytes);
-            tryInstallHook(
-                L"state-float-1fc",
-                g_ObjectStateFloat1fcGetDetour,
-                kGogObjectStateFloat1fcGetAddr,
-                reinterpret_cast<void*>(ObjectStateFloat1fcGetHook),
-                kObjectStateAccessorDetourLen,
-                kExpectedObjectStateAccessorBytes);
-            tryInstallHook(
-                L"state-flags-17c",
-                g_ObjectStateFlags17cGetDetour,
-                kGogObjectStateFlags17cGetAddr,
-                reinterpret_cast<void*>(ObjectStateFlags17cGetHook),
-                kObjectStateAccessorDetourLen,
-                kExpectedObjectStateAccessorBytes);
-            tryInstallHook(
-                L"state-flags-180",
-                g_ObjectStateFlags180GetDetour,
-                kGogObjectStateFlags180GetAddr,
-                reinterpret_cast<void*>(ObjectStateFlags180GetHook),
-                kObjectStateAccessorDetourLen,
-                kExpectedObjectStateAccessorBytes);
-            tryInstallHook(
-                L"state-bit-18c",
-                g_ObjectStateBit18cGetDetour,
-                kGogObjectStateBit18cGetAddr,
-                reinterpret_cast<void*>(ObjectStateBit18cGetHook),
-                kObjectStateAccessorDetourLen,
-                kExpectedObjectStateAccessorBytes);
-            tryInstallHook(
-                L"state-bit-194",
-                g_ObjectStateBit194GetDetour,
-                kGogObjectStateBit194GetAddr,
-                reinterpret_cast<void*>(ObjectStateBit194GetHook),
-                kObjectStateAccessorDetourLen,
-                kExpectedObjectStateAccessorBytes);
-            tryInstallHook(
-                L"state-call-21c",
-                g_ObjectStateCall21cDetour,
-                kGogObjectStateCall21cAddr,
-                reinterpret_cast<void*>(ObjectStateCall21cHook),
-                kObjectStateAccessorDetourLen,
-                kExpectedObjectStateAccessorBytes);
-
-            g_ObjectQuerySafetyHooksInstalled =
-                g_ObjectQueryGlobalSlotGetDetour.trampoline &&
-                g_ObjectQueryArraySetDetour.trampoline &&
-                g_ObjectQueryArrayGetDetour.trampoline &&
-                g_ObjectQueryFindZeroIndexDetour.trampoline &&
-                g_ObjectQueryFindNonZeroIndexDetour.trampoline &&
-                g_ObjectQueryStampedValueSetDetour.trampoline &&
-                g_ObjectQueryBitClearDetour.trampoline &&
-                g_ObjectQueryBitTestSetDetour.trampoline &&
-                g_ObjectQueryBitTestClearDetour.trampoline &&
-                g_ObjectStateFloat1fcGetDetour.trampoline &&
-                g_ObjectStateFlags17cGetDetour.trampoline &&
-                g_ObjectStateFlags180GetDetour.trampoline &&
-                g_ObjectStateBit18cGetDetour.trampoline &&
-                g_ObjectStateBit194GetDetour.trampoline &&
-                g_ObjectStateCall21cDetour.trampoline;
-
-            if (g_ObjectQuerySafetyHooksInstalled && !g_ObjectQuerySafetyHooksLogged)
-            {
-                Log(L"[OBJSAFE] Installed helper guards global=0x%08X arraySet=0x%08X arrayGet=0x%08X findZero=0x%08X findNonZero=0x%08X stamped=0x%08X bitClear=0x%08X bitSet=0x%08X bitClearTest=0x%08X state17c=0x%08X state180=0x%08X state18c=0x%08X state194=0x%08X state21c=0x%08X\n",
-                    static_cast<uint32_t>(kGogObjectQueryGlobalSlotGetAddr),
-                    static_cast<uint32_t>(kGogObjectQueryArraySetAddr),
-                    static_cast<uint32_t>(kGogObjectQueryArrayGetAddr),
-                    static_cast<uint32_t>(kGogObjectQueryFindZeroIndexAddr),
-                    static_cast<uint32_t>(kGogObjectQueryFindNonZeroIndexAddr),
-                    static_cast<uint32_t>(kGogObjectQueryStampedValueSetAddr),
-                    static_cast<uint32_t>(kGogObjectQueryBitClearAddr),
-                    static_cast<uint32_t>(kGogObjectQueryBitTestSetAddr),
-                    static_cast<uint32_t>(kGogObjectQueryBitTestClearAddr),
-                    static_cast<uint32_t>(kGogObjectStateFlags17cGetAddr),
-                    static_cast<uint32_t>(kGogObjectStateFlags180GetAddr),
-                    static_cast<uint32_t>(kGogObjectStateBit18cGetAddr),
-                    static_cast<uint32_t>(kGogObjectStateBit194GetAddr),
-                    static_cast<uint32_t>(kGogObjectStateCall21cAddr));
-                g_ObjectQuerySafetyHooksLogged = true;
-                g_ObjectQuerySafetyHooksFailureLogged = false;
-            }
-        }
-
         static void InstallChunkEffectCreateHooksIfRequested()
         {
             if ((!g_TraceChunkRender && !g_TraceChunkEffectRuntime) || g_ChunkEffectCreateHooksInstalled)
@@ -13824,89 +7704,6 @@ namespace BZROpenShim
                     static_cast<uint32_t>(kGogChunkEffectCreateChunkAddr),
                     static_cast<uint32_t>(kGogChunkEffectCreateChunkletAddr));
                 g_ChunkEffectCreateHooksLogged = true;
-            }
-        }
-
-        static void InstallObservedChunkPathProbesIfRequested()
-        {
-            if (!g_IsSteamExe || (!g_TraceChunkRender && !g_TraceChunkEffectRuntime) || g_ObservedChunkPathProbesInstalled)
-                return;
-
-            static const uint8_t kExpectedParentABytes[kObservedChunkPathParentADetourLen] =
-            {
-                0x3D, 0x64, 0xF7, 0xB1, 0x6B
-            };
-            static const uint8_t kExpectedParentBBytes[kObservedChunkPathParentBDetourLen] =
-            {
-                0xD3, 0x9F, 0x8F, 0x1C, 0xFA, 0x08
-            };
-
-            if (!g_AllowUnsafeSteamChunkCreateHooks)
-            {
-                const ULONGLONG nowMs = GetTickCount64();
-                if (g_ChunkEffectCreateHooksReadyTick != 0 && nowMs < g_ChunkEffectCreateHooksReadyTick)
-                    return;
-
-                const bool parentABytesMatch =
-                    ExpectedBytesMatchAt(
-                        kObservedChunkPathParentAAddr,
-                        kExpectedParentABytes,
-                        sizeof(kExpectedParentABytes));
-                const bool parentBBytesMatch =
-                    ExpectedBytesMatchAt(
-                        kObservedChunkPathParentBAddr,
-                        kExpectedParentBBytes,
-                        sizeof(kExpectedParentBBytes));
-                if (!parentABytesMatch || !parentBBytesMatch)
-                {
-                    if (!g_ObservedChunkPathProbesMismatchLogged)
-                    {
-                        LogChunkDiagnostic(
-                            "chunkpath",
-                            L"[CHUNKPATH] Upstream probes still waiting for settled bytes parentA=%hs parentB=%hs\n",
-                            parentABytesMatch ? "ok" : "mismatch",
-                            parentBBytesMatch ? "ok" : "mismatch");
-                        g_ObservedChunkPathProbesMismatchLogged = true;
-                    }
-                    return;
-                }
-            }
-
-            if (!g_ObservedChunkPathParentADetour.trampoline)
-            {
-                InstallInlineDetour32(
-                    g_ObservedChunkPathParentADetour,
-                    kObservedChunkPathParentAAddr,
-                    reinterpret_cast<void*>(ObservedChunkPathParentAProbeHook),
-                    kObservedChunkPathParentADetourLen,
-                    kExpectedParentABytes,
-                    sizeof(kExpectedParentABytes));
-            }
-            if (!g_ObservedChunkPathParentBDetour.trampoline)
-            {
-                InstallInlineDetour32(
-                    g_ObservedChunkPathParentBDetour,
-                    kObservedChunkPathParentBAddr,
-                    reinterpret_cast<void*>(ObservedChunkPathParentBProbeHook),
-                    kObservedChunkPathParentBDetourLen,
-                    kExpectedParentBBytes,
-                    sizeof(kExpectedParentBBytes));
-            }
-
-            g_ObservedChunkPathParentATrampoline = g_ObservedChunkPathParentADetour.trampoline;
-            g_ObservedChunkPathParentBTrampoline = g_ObservedChunkPathParentBDetour.trampoline;
-            g_ObservedChunkPathProbesInstalled =
-                (g_ObservedChunkPathParentATrampoline != nullptr) &&
-                (g_ObservedChunkPathParentBTrampoline != nullptr);
-
-            if (g_ObservedChunkPathProbesInstalled && !g_ObservedChunkPathProbesLogged)
-            {
-                LogChunkDiagnostic(
-                    "chunkpath",
-                    L"[CHUNKPATH] Installed upstream probes parentA=0x%08X parentB=0x%08X\n",
-                    static_cast<uint32_t>(kObservedChunkPathParentAAddr),
-                    static_cast<uint32_t>(kObservedChunkPathParentBAddr));
-                g_ObservedChunkPathProbesLogged = true;
             }
         }
 
@@ -15137,89 +8934,6 @@ namespace BZROpenShim
             }
         }
 
-        static void AppendChunkPayloadMeshCandidatesFromGeomName(
-            const char* geomName,
-            uint32_t classId,
-            std::vector<std::string>& outCandidates)
-        {
-            if (!geomName || !*geomName)
-                return;
-
-            EnsureChunkVdfReverseIndex();
-
-            std::string key(geomName);
-            std::transform(
-                key.begin(),
-                key.end(),
-                key.begin(),
-                [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-
-            const auto it = g_ChunkVdfGeomReverseIndex.find(key);
-            if (it == g_ChunkVdfGeomReverseIndex.end())
-                return;
-
-            bool appendedClassMatch = false;
-            for (const ChunkVdfMeshRef& ref : it->second)
-            {
-                if (!ref.meshBase[0])
-                    continue;
-                if (classId != 0 && ref.type != 0 && ref.type != classId)
-                    continue;
-
-                AppendUniqueChunkPayloadCandidate(outCandidates, ref.meshBase);
-                appendedClassMatch = true;
-            }
-
-            if (appendedClassMatch || classId == 0)
-                return;
-
-            for (const ChunkVdfMeshRef& ref : it->second)
-            {
-                if (!ref.meshBase[0])
-                    continue;
-
-                AppendUniqueChunkPayloadCandidate(outCandidates, ref.meshBase);
-            }
-        }
-
-        static void AppendChunkPayloadMeshCandidatesFromProbe(
-            const ChunkObjectLinkProbe& probe,
-            std::vector<std::string>& outCandidates)
-        {
-            AppendChunkPayloadMeshCandidatesFromGeomName(
-                probe.geomName,
-                probe.classId,
-                outCandidates);
-
-            if (!probe.vdfCandidates[0])
-                return;
-
-            const char* cursor = probe.vdfCandidates;
-            while (*cursor)
-            {
-                const char* separator = std::strchr(cursor, '|');
-                const size_t tokenLength = separator
-                    ? static_cast<size_t>(separator - cursor)
-                    : std::strlen(cursor);
-                if (tokenLength > 0)
-                {
-                    std::string token(cursor, tokenLength);
-                    token = TrimAsciiCopy(token);
-                    if (!token.empty())
-                    {
-                        AppendChunkPayloadMeshCandidatesFromGeomName(
-                            token.c_str(),
-                            probe.classId,
-                            outCandidates);
-                    }
-                }
-
-                if (!separator)
-                    break;
-                cursor = separator + 1;
-            }
-        }
-
         static std::string JoinChunkPayloadCandidates(const std::vector<std::string>& candidates)
         {
             std::string result;
@@ -15376,14 +9090,9 @@ namespace BZROpenShim
             outMeshName[0] = '\0';
 
             std::vector<std::string> meshCandidates;
-            meshCandidates.reserve(8);
+            meshCandidates.reserve(2);
             AppendUniqueChunkPayloadCandidate(meshCandidates, NormalizeChunkMeshBaseName(preferredMeshName));
             AppendUniqueChunkPayloadCandidate(meshCandidates, NormalizeChunkMeshBaseName(probe.cachedMeshName));
-            AppendChunkPayloadMeshCandidatesFromGeomName(
-                explicitGeomName,
-                probe.classId,
-                meshCandidates);
-            AppendChunkPayloadMeshCandidatesFromProbe(probe, meshCandidates);
 
             std::vector<std::string> geomCandidates;
             geomCandidates.reserve(4);
@@ -15880,8 +9589,6 @@ namespace BZROpenShim
             const ChunkObjectLinkProbe* links[] = {
                 &probe.source,
                 &probe.parent,
-                &probe.grandparent,
-                &probe.root,
                 &probe.sibling,
                 &probe.child,
             };
@@ -18046,33 +11753,18 @@ namespace BZROpenShim
                 if (!objectClass)
                     return false;
 
-                constexpr ptrdiff_t kCandidateOffsets[] =
-                {
-                    static_cast<ptrdiff_t>(kObjectClassOdfOffset),
-                    static_cast<ptrdiff_t>(kObjectClassOdfOffset + 0x08),
-                    static_cast<ptrdiff_t>(kObjectClassOdfOffset + 0x10),
-                    static_cast<ptrdiff_t>(kObjectClassOdfOffset + 0x18)
-                };
+                char rawOdf[kObjectClassOdfLen + 1] = {};
+                std::memcpy(rawOdf,
+                            reinterpret_cast<const uint8_t*>(objectClass) + kObjectClassOdfOffset,
+                            kObjectClassOdfLen);
+                rawOdf[kObjectClassOdfLen] = '\0';
 
-                for (ptrdiff_t offset : kCandidateOffsets)
-                {
-                    char rawOdf[kObjectClassOdfLen + 1] = {};
-                    std::memcpy(rawOdf,
-                                reinterpret_cast<const uint8_t*>(objectClass) + offset,
-                                kObjectClassOdfLen);
-                    rawOdf[kObjectClassOdfLen] = '\0';
+                const ProducerBuildMenuEntry entry = NormalizeProducerBuildMenuToken(rawOdf);
+                if (!entry.hasValue)
+                    return false;
 
-                    const ProducerBuildMenuEntry entry = NormalizeProducerBuildMenuToken(rawOdf);
-                    if (!entry.hasValue)
-                        continue;
-                    if (!IsPlausibleChunkOwnerToken(entry.token, false))
-                        continue;
-
-                    strncpy_s(outToken, entry.token, _TRUNCATE);
-                    return true;
-                }
-
-                return false;
+                strncpy_s(outToken, entry.token, _TRUNCATE);
+                return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -18695,176 +12387,6 @@ namespace BZROpenShim
             }
         }
 
-        static bool TryCopyLoadedChunkMeshBaseName(
-            const char* meshBaseName,
-            char* outMeshBaseName,
-            size_t outMeshBaseNameCapacity)
-        {
-            if (!outMeshBaseName || outMeshBaseNameCapacity == 0)
-                return false;
-
-            outMeshBaseName[0] = '\0';
-            if (!meshBaseName || !*meshBaseName)
-                return false;
-
-            const ProducerBuildMenuEntry entry = NormalizeProducerBuildMenuToken(meshBaseName);
-            if (!entry.hasValue)
-                return false;
-
-            ChunkVdfAssetInfo& info = GetChunkVdfAssetInfoForMesh(entry.token);
-            if (!info.loaded)
-                return false;
-
-            strncpy_s(outMeshBaseName, outMeshBaseNameCapacity, entry.token, _TRUNCATE);
-            return outMeshBaseName[0] != '\0';
-        }
-
-        static bool TryReadChunkMeshBaseNameFromOdfFile(
-            const char* odfToken,
-            char* outMeshBaseName,
-            size_t outMeshBaseNameCapacity)
-        {
-            if (!outMeshBaseName || outMeshBaseNameCapacity == 0)
-                return false;
-
-            outMeshBaseName[0] = '\0';
-
-            std::filesystem::path resolvedPath;
-            if (!TryResolveOdfFilePath(odfToken, resolvedPath))
-                return false;
-
-            FILE* file = nullptr;
-            if (fopen_s(&file, resolvedPath.string().c_str(), "r") != 0 || !file)
-                return false;
-
-            bool resolved = false;
-            char line[256] = {};
-            while (std::fgets(line, static_cast<int>(sizeof(line)), file))
-            {
-                char* trimmed = TrimAsciiInPlace(line);
-                if (*trimmed == '\0' || *trimmed == ';' || *trimmed == '#')
-                    continue;
-
-                if (*trimmed == '[')
-                    continue;
-
-                char* equals = std::strchr(trimmed, '=');
-                if (!equals)
-                    continue;
-
-                *equals = '\0';
-                char* key = TrimAsciiInPlace(trimmed);
-                char* value = TrimAsciiInPlace(equals + 1);
-                if (!key || !*key || !value || !*value)
-                    continue;
-
-                if (_stricmp(key, "baseName") != 0)
-                    continue;
-
-                const ProducerBuildMenuEntry baseEntry = NormalizeQuotedOdfToken(value);
-                if (!baseEntry.hasValue)
-                    break;
-
-                resolved = TryCopyLoadedChunkMeshBaseName(
-                    baseEntry.token,
-                    outMeshBaseName,
-                    outMeshBaseNameCapacity);
-                break;
-            }
-
-            std::fclose(file);
-            return resolved;
-        }
-
-        static bool TryResolveChunkMeshBaseNameFromRuntimeOdfToken(
-            const char* odfToken,
-            char* outMeshBaseName,
-            size_t outMeshBaseNameCapacity)
-        {
-            if (!outMeshBaseName || outMeshBaseNameCapacity == 0)
-                return false;
-
-            outMeshBaseName[0] = '\0';
-
-            const ProducerBuildMenuEntry normalized = NormalizeProducerBuildMenuToken(odfToken);
-            if (!normalized.hasValue)
-                return false;
-
-            std::vector<std::string> candidateTokens = {};
-            candidateTokens.reserve(8);
-
-            auto appendCandidate = [&candidateTokens](const char* token)
-            {
-                if (!token || !*token)
-                    return;
-
-                for (const std::string& existing : candidateTokens)
-                {
-                    if (_stricmp(existing.c_str(), token) == 0)
-                        return;
-                }
-
-                candidateTokens.emplace_back(token);
-            };
-
-            appendCandidate(normalized.token);
-
-            std::string stripped(normalized.token);
-            while (!stripped.empty() && stripped.front() == '_')
-            {
-                stripped.erase(stripped.begin());
-                appendCandidate(stripped.c_str());
-            }
-
-            for (const std::string& candidate : candidateTokens)
-            {
-                if (TryCopyLoadedChunkMeshBaseName(
-                        candidate.c_str(),
-                        outMeshBaseName,
-                        outMeshBaseNameCapacity))
-                {
-                    return true;
-                }
-                if (TryReadChunkMeshBaseNameFromOdfFile(
-                        candidate.c_str(),
-                        outMeshBaseName,
-                        outMeshBaseNameCapacity))
-                {
-                    return true;
-                }
-            }
-
-            for (const std::string& seed : candidateTokens)
-            {
-                if (seed.size() < 7)
-                    continue;
-
-                for (size_t start = 1; start + 5 < seed.size(); ++start)
-                {
-                    const char* suffix = seed.c_str() + start;
-                    if (!std::isalpha(static_cast<unsigned char>(*suffix)))
-                        continue;
-
-                    if (TryCopyLoadedChunkMeshBaseName(
-                            suffix,
-                            outMeshBaseName,
-                            outMeshBaseNameCapacity))
-                    {
-                        return true;
-                    }
-                    if (TryReadChunkMeshBaseNameFromOdfFile(
-                            suffix,
-                            outMeshBaseName,
-                            outMeshBaseNameCapacity))
-                    {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
-        }
-
         static bool TryGetGameObjectMeshName(void* gameObject, char* outMeshName, size_t outMeshNameCapacity)
         {
             if (!outMeshName || outMeshNameCapacity == 0)
@@ -18873,21 +12395,6 @@ namespace BZROpenShim
             outMeshName[0] = '\0';
             if (!gameObject)
                 return false;
-
-            char odfToken[kProducerBuildMenuTokenLen + 1] = {};
-            if (TryGetObjectOdfToken(gameObject, odfToken))
-            {
-                char odfMeshBaseName[48] = {};
-                if (TryResolveChunkMeshBaseNameFromRuntimeOdfToken(
-                        odfToken,
-                        odfMeshBaseName,
-                        sizeof(odfMeshBaseName)))
-                {
-                    _snprintf_s(outMeshName, outMeshNameCapacity, _TRUNCATE, "%s.mesh", odfMeshBaseName);
-                    if (outMeshName[0] != '\0')
-                        return true;
-                }
-            }
 
             void* obj76 = nullptr;
             if (!TryGetGameObjectObj76(gameObject, obj76))
@@ -18915,139 +12422,6 @@ namespace BZROpenShim
             }
 
             return false;
-        }
-
-        static void BuildChunkMeshCandidatesFromGeomName(
-            const char* geomName,
-            uint32_t classId,
-            std::vector<std::string>& outCandidates)
-        {
-            if (!geomName || !*geomName)
-                return;
-            if (_stricmp(geomName, "chunk1") == 0 || _stricmp(geomName, "chunk2") == 0)
-                return;
-
-            EnsureChunkVdfReverseIndex();
-
-            std::string key(geomName);
-            std::transform(
-                key.begin(),
-                key.end(),
-                key.begin(),
-                [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-
-            const auto it = g_ChunkVdfGeomReverseIndex.find(key);
-            if (it == g_ChunkVdfGeomReverseIndex.end() || it->second.empty())
-                return;
-
-            bool appendedClassMatch = false;
-            for (const ChunkVdfMeshRef& ref : it->second)
-            {
-                if (!ref.meshBase[0])
-                    continue;
-                if (classId != 0 && ref.type != 0 && ref.type != classId)
-                    continue;
-
-                AppendUniqueString(outCandidates, ref.meshBase);
-                appendedClassMatch = true;
-            }
-
-            if (appendedClassMatch || classId == 0)
-                return;
-
-            for (const ChunkVdfMeshRef& ref : it->second)
-            {
-                if (!ref.meshBase[0])
-                    continue;
-
-                AppendUniqueString(outCandidates, ref.meshBase);
-            }
-        }
-
-        static bool TryInferChunkMeshNameFromObj76Tree(
-            const uint8_t* rootObj76,
-            char* outMeshName,
-            size_t outMeshNameCapacity)
-        {
-            if (!outMeshName || outMeshNameCapacity == 0)
-                return false;
-
-            outMeshName[0] = '\0';
-            if (!rootObj76)
-                return false;
-
-            std::vector<const uint8_t*> stack;
-            stack.reserve(32);
-            stack.push_back(rootObj76);
-
-            std::unordered_set<uintptr_t> visited;
-            visited.reserve(64);
-
-            std::vector<std::string> intersection;
-            bool sawAnyCandidates = false;
-
-            while (!stack.empty() && visited.size() < kChunkObjectIdentityMaxNodesPerObject)
-            {
-                const uint8_t* nodeBytes = stack.back();
-                stack.pop_back();
-                if (!nodeBytes)
-                    continue;
-
-                const uintptr_t nodeKey = reinterpret_cast<uintptr_t>(nodeBytes);
-                if (!visited.insert(nodeKey).second)
-                    continue;
-
-                ChunkObjectLinkProbe probe = {};
-                if (CaptureChunkObjectLinkProbe(nodeBytes, probe) && probe.geomName[0])
-                {
-                    std::vector<std::string> candidates;
-                    BuildChunkMeshCandidatesFromGeomName(probe.geomName, probe.classId, candidates);
-                    if (!candidates.empty())
-                    {
-                        std::sort(candidates.begin(), candidates.end());
-                        if (!sawAnyCandidates)
-                        {
-                            intersection = std::move(candidates);
-                            sawAnyCandidates = true;
-                        }
-                        else
-                        {
-                            std::vector<std::string> reduced;
-                            reduced.reserve((std::min)(intersection.size(), candidates.size()));
-                            std::set_intersection(
-                                intersection.begin(),
-                                intersection.end(),
-                                candidates.begin(),
-                                candidates.end(),
-                                std::back_inserter(reduced));
-                            if (!reduced.empty())
-                                intersection.swap(reduced);
-                        }
-                    }
-                }
-
-                const uint8_t* parentBytes = nullptr;
-                const uint8_t* siblingBytes = nullptr;
-                const uint8_t* childBytes = nullptr;
-                if (!TryReadChunkObjectLinks(nodeBytes, parentBytes, siblingBytes, childBytes))
-                    continue;
-
-                if (siblingBytes)
-                    stack.push_back(siblingBytes);
-                if (childBytes)
-                    stack.push_back(childBytes);
-            }
-
-            if (intersection.size() != 1 || intersection.front().empty())
-                return false;
-
-            _snprintf_s(
-                outMeshName,
-                outMeshNameCapacity,
-                _TRUNCATE,
-                "%s.mesh",
-                intersection.front().c_str());
-            return outMeshName[0] != '\0';
         }
 
         static void CacheChunkObjectIdentityForNode(const uint8_t* objectBytes, const char* meshName)
@@ -19093,30 +12467,16 @@ namespace BZROpenShim
 
         static void CacheChunkObjectIdentityTreeForGameObject(void* gameObject)
         {
-            void* rootObj76 = nullptr;
-            if (!TryGetGameObjectObj76(gameObject, rootObj76) || !rootObj76)
-                return;
-
             char meshName[48] = {};
-            char inferredMeshName[48] = {};
-            const bool inferredMeshOk =
-                TryInferChunkMeshNameFromObj76Tree(
-                    reinterpret_cast<const uint8_t*>(rootObj76),
-                    inferredMeshName,
-                    sizeof(inferredMeshName));
-            const bool gameObjectMeshOk =
-                TryGetGameObjectMeshName(gameObject, meshName, sizeof(meshName));
-            if (!gameObjectMeshOk && inferredMeshOk)
-            {
-                strncpy_s(meshName, sizeof(meshName), inferredMeshName, _TRUNCATE);
-            }
-            else if (!gameObjectMeshOk)
-            {
+            if (!TryGetGameObjectMeshName(gameObject, meshName, sizeof(meshName)))
                 return;
-            }
 
             ChunkVdfAssetInfo& info = GetChunkVdfAssetInfoForMesh(meshName);
             if (!info.loaded)
+                return;
+
+            void* rootObj76 = nullptr;
+            if (!TryGetGameObjectObj76(gameObject, rootObj76) || !rootObj76)
                 return;
 
             std::vector<const uint8_t*> stack;
@@ -20064,1083 +13424,6 @@ namespace BZROpenShim
     // ---------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------
-    void __stdcall ObservedChunkPathProbeThunk(uint32_t siteRva,
-                                               const void* registerBlock,
-                                               uint32_t originalEsp)
-    {
-        LogObservedChunkPathProbe(
-            siteRva,
-            reinterpret_cast<const ObservedChunkPathRegisterBlock*>(registerBlock),
-            originalEsp);
-    }
-
-    void __declspec(naked) ObservedChunkPathParentAProbeHook()
-    {
-        __asm
-        {
-            mov eax, esp
-            pushfd
-            pushad
-            push eax
-            lea eax, [esp + 4]
-            push eax
-            push 00080683h
-            call ObservedChunkPathProbeThunk
-            add esp, 0Ch
-            popad
-            popfd
-            jmp [g_ObservedChunkPathParentATrampoline]
-        }
-    }
-
-    void __declspec(naked) ObservedChunkPathParentBProbeHook()
-    {
-        __asm
-        {
-            mov eax, esp
-            pushfd
-            pushad
-            push eax
-            lea eax, [esp + 4]
-            push eax
-            push 00080867h
-            call ObservedChunkPathProbeThunk
-            add esp, 0Ch
-            popad
-            popfd
-            jmp [g_ObservedChunkPathParentBTrampoline]
-        }
-    }
-
-    void __fastcall OgreSceneManagerFindVisibleObjectsHook(void* thisPtr,
-                                                           void* /*edx*/,
-                                                           void* camera,
-                                                           void* visibleBounds,
-                                                           uint32_t onlyShadowCasters)
-    {
-        static DWORD s_LastFindVisibleTick = 0;
-        static void* s_LastFindVisibleManager = nullptr;
-        static void* s_LastFindVisibleCamera = nullptr;
-
-        const DWORD nowTick = GetTickCount();
-        const bool frameChanged =
-            (nowTick != s_LastFindVisibleTick) ||
-            (thisPtr != s_LastFindVisibleManager) ||
-            (camera != s_LastFindVisibleCamera);
-        if (frameChanged)
-        {
-            s_LastFindVisibleTick = nowTick;
-            s_LastFindVisibleManager = thisPtr;
-            s_LastFindVisibleCamera = camera;
-            TickChunkProxyDebug(camera, IsChunkManualSubmitEnabled());
-
-            static volatile long s_FindVisibleLogBudget = 24;
-            const long remaining = InterlockedDecrement(&s_FindVisibleLogBudget);
-            if (remaining >= 0 && AcquireChunkLogSlot())
-            {
-                LogChunkDiagnostic(
-                    "chunkmesh",
-                    L"[CHUNKMESH] scene-find-visible sceneMgr=0x%08X camera=0x%08X bounds=0x%08X onlyShadow=%u\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(camera)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(visibleBounds)),
-                    onlyShadowCasters ? 1u : 0u);
-            }
-        }
-
-        if (g_OgreFn_SceneManagerFindVisibleObjects)
-        {
-            g_OgreFn_SceneManagerFindVisibleObjects(
-                thisPtr,
-                camera,
-                visibleBounds,
-                onlyShadowCasters != 0);
-        }
-    }
-
-    void __fastcall OgreSceneNodeFindVisibleObjectsHook(void* thisPtr,
-                                                        void* /*edx*/,
-                                                        void* camera,
-                                                        void* renderQueue,
-                                                        void* visibleBounds,
-                                                        uint32_t includeChildren,
-                                                        uint32_t displayNodes,
-                                                        uint32_t onlyShadowCasters)
-    {
-        static FnOgreNumAttachedObjects numAttachedObjects =
-            ResolveOgreProcByOffset<FnOgreNumAttachedObjects>(0x0003A689);
-        static FnOgreGetAttachedObjectByIndex getAttachedObject =
-            ResolveOgreProcByOffset<FnOgreGetAttachedObjectByIndex>(0x00034DFB);
-
-        ChunkProxySlot* const slot = FindChunkProxySlotBySceneNode(thisPtr);
-        if (slot)
-        {
-            if (slot->sceneTraversalCount < USHRT_MAX)
-                ++slot->sceneTraversalCount;
-
-            if (slot->sceneTraversalCount <= 8 && AcquireChunkLogSlot())
-            {
-                const uint16_t attachedCount =
-                    TryGetChunkProxyNumAttachedObjectsSafe(thisPtr, numAttachedObjects);
-                void* const attached0 =
-                    attachedCount > 0
-                    ? TryGetChunkProxyAttachedObjectSafe(thisPtr, 0, getAttachedObject)
-                    : nullptr;
-                LogChunkDiagnostic(
-                    "chunkmesh",
-                    L"[CHUNKMESH] scene-node-find-visible obj=0x%08X entity=0x%08X node=0x%08X mesh=%hs count=%u camera=0x%08X queue=0x%08X bounds=0x%08X children=%u display=%u onlyShadow=%u attached=%u firstObj=0x%08X firstMatch=%u\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot->objectBytes)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot->entity)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)),
-                    slot->proofMeshName[0] ? slot->proofMeshName : "<none>",
-                    static_cast<unsigned>(slot->sceneTraversalCount),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(camera)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(renderQueue)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(visibleBounds)),
-                    includeChildren ? 1u : 0u,
-                    displayNodes ? 1u : 0u,
-                    onlyShadowCasters ? 1u : 0u,
-                    static_cast<unsigned>(attachedCount),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(attached0)),
-                    attached0 == slot->entity ? 1u : 0u);
-            }
-        }
-
-        if (g_OgreFn_SceneNodeFindVisibleObjects)
-        {
-            g_OgreFn_SceneNodeFindVisibleObjects(
-                thisPtr,
-                camera,
-                renderQueue,
-                visibleBounds,
-                includeChildren != 0,
-                displayNodes != 0,
-                onlyShadowCasters != 0);
-        }
-    }
-
-    void __fastcall OgreRenderQueueProcessVisibleObjectHook(void* thisPtr,
-                                                            void* /*edx*/,
-                                                            void* movableObject,
-                                                            void* camera,
-                                                            uint32_t onlyShadowCasters,
-                                                            void* visibleBounds)
-    {
-        static void* s_LastTraversalQueue = nullptr;
-        static void* s_LastTraversalCamera = nullptr;
-        static DWORD s_LastTraversalTick = 0;
-
-        const DWORD nowTick = GetTickCount();
-        const bool traversalTickChanged =
-            (thisPtr != s_LastTraversalQueue) ||
-            (camera != s_LastTraversalCamera) ||
-            (nowTick != s_LastTraversalTick);
-        if (traversalTickChanged)
-        {
-            s_LastTraversalQueue = thisPtr;
-            s_LastTraversalCamera = camera;
-            s_LastTraversalTick = nowTick;
-            TickChunkProxyDebug(camera, false);
-        }
-
-        bool ownerMatch = false;
-        ChunkProxySlot* const slot = FindChunkProxySlotByEntity(movableObject, &ownerMatch);
-        if (slot)
-        {
-            if (slot->renderProcessCount < USHRT_MAX)
-                ++slot->renderProcessCount;
-            if (slot->sceneTraversalCount < USHRT_MAX)
-                ++slot->sceneTraversalCount;
-
-            if (slot->renderProcessCount <= 6 && AcquireChunkLogSlot())
-            {
-                LogChunkDiagnostic(
-                    "chunkmesh",
-                    L"[CHUNKMESH] render-process obj=0x%08X entity=0x%08X mo=0x%08X mesh=%hs count=%u traversals=%u ownerMatch=%u queue=0x%08X camera=0x%08X onlyShadow=%u bounds=0x%08X\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot->objectBytes)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot->entity)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(movableObject)),
-                    slot->proofMeshName[0] ? slot->proofMeshName : "<none>",
-                    static_cast<unsigned>(slot->renderProcessCount),
-                    static_cast<unsigned>(slot->sceneTraversalCount),
-                    ownerMatch ? 1u : 0u,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(camera)),
-                    onlyShadowCasters ? 1u : 0u,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(visibleBounds)));
-            }
-        }
-
-        if (g_OgreFn_RenderQueueProcessVisibleObject)
-        {
-            g_OgreFn_RenderQueueProcessVisibleObject(
-                thisPtr,
-                movableObject,
-                camera,
-                onlyShadowCasters != 0,
-                visibleBounds);
-        }
-    }
-
-    void __fastcall OgreRenderQueueAddRenderablePriorityHook(void* thisPtr,
-                                                             void* /*edx*/,
-                                                             void* renderable,
-                                                             uint32_t groupId,
-                                                             uint32_t priority)
-    {
-        uint32_t subIndex = 0xFFFFFFFFu;
-        ChunkProxySlot* const slot = FindChunkProxySlotByRenderable(renderable, &subIndex);
-        if (slot)
-        {
-            if (slot->renderQueueAddCount < USHRT_MAX)
-                ++slot->renderQueueAddCount;
-
-            if (slot->renderQueueAddCount <= 8 && AcquireChunkLogSlot())
-            {
-                LogChunkDiagnostic(
-                    "chunkmesh",
-                    L"[CHUNKMESH] render-enqueue obj=0x%08X entity=0x%08X renderable=0x%08X mesh=%hs count=%u group=%u priority=%u sub=%u queue=0x%08X\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot->objectBytes)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot->entity)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(renderable)),
-                    slot->proofMeshName[0] ? slot->proofMeshName : "<none>",
-                    static_cast<unsigned>(slot->renderQueueAddCount),
-                    static_cast<unsigned>(groupId & 0xFFu),
-                    static_cast<unsigned>(priority & 0xFFFFu),
-                    subIndex == 0xFFFFFFFFu ? 0xFFFFFFFFu : subIndex,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)));
-            }
-        }
-
-        if (g_OgreFn_RenderQueueAddRenderablePriority)
-        {
-            g_OgreFn_RenderQueueAddRenderablePriority(
-                thisPtr,
-                renderable,
-                static_cast<uint8_t>(groupId & 0xFFu),
-                static_cast<uint16_t>(priority & 0xFFFFu));
-        }
-    }
-
-    void __fastcall OgreRenderQueueAddRenderableGroupHook(void* thisPtr,
-                                                          void* /*edx*/,
-                                                          void* renderable,
-                                                          uint32_t groupId)
-    {
-        uint32_t subIndex = 0xFFFFFFFFu;
-        ChunkProxySlot* const slot = FindChunkProxySlotByRenderable(renderable, &subIndex);
-        if (slot)
-        {
-            if (slot->renderQueueAddCount < USHRT_MAX)
-                ++slot->renderQueueAddCount;
-
-            if (slot->renderQueueAddCount <= 8 && AcquireChunkLogSlot())
-            {
-                LogChunkDiagnostic(
-                    "chunkmesh",
-                    L"[CHUNKMESH] render-enqueue obj=0x%08X entity=0x%08X renderable=0x%08X mesh=%hs count=%u group=%u priority=%u sub=%u queue=0x%08X mode=group\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot->objectBytes)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot->entity)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(renderable)),
-                    slot->proofMeshName[0] ? slot->proofMeshName : "<none>",
-                    static_cast<unsigned>(slot->renderQueueAddCount),
-                    static_cast<unsigned>(groupId & 0xFFu),
-                    0xFFFFu,
-                    subIndex == 0xFFFFFFFFu ? 0xFFFFFFFFu : subIndex,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)));
-            }
-        }
-
-        if (g_OgreFn_RenderQueueAddRenderableGroup)
-            g_OgreFn_RenderQueueAddRenderableGroup(thisPtr, renderable, static_cast<uint8_t>(groupId & 0xFFu));
-    }
-
-    void __fastcall OgreRenderQueueAddRenderableDefaultHook(void* thisPtr,
-                                                            void* /*edx*/,
-                                                            void* renderable)
-    {
-        uint32_t subIndex = 0xFFFFFFFFu;
-        ChunkProxySlot* const slot = FindChunkProxySlotByRenderable(renderable, &subIndex);
-        if (slot)
-        {
-            if (slot->renderQueueAddCount < USHRT_MAX)
-                ++slot->renderQueueAddCount;
-
-            if (slot->renderQueueAddCount <= 8 && AcquireChunkLogSlot())
-            {
-                LogChunkDiagnostic(
-                    "chunkmesh",
-                    L"[CHUNKMESH] render-enqueue obj=0x%08X entity=0x%08X renderable=0x%08X mesh=%hs count=%u group=%u priority=%u sub=%u queue=0x%08X mode=default\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot->objectBytes)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot->entity)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(renderable)),
-                    slot->proofMeshName[0] ? slot->proofMeshName : "<none>",
-                    static_cast<unsigned>(slot->renderQueueAddCount),
-                    0xFFu,
-                    0xFFFFu,
-                    subIndex == 0xFFFFFFFFu ? 0xFFFFFFFFu : subIndex,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)));
-            }
-        }
-
-        if (g_OgreFn_RenderQueueAddRenderableDefault)
-            g_OgreFn_RenderQueueAddRenderableDefault(thisPtr, renderable);
-    }
-
-    void __fastcall OgreMovableObjectNotifyCurrentCameraHook(void* thisPtr,
-                                                             void* /*edx*/,
-                                                             void* camera)
-    {
-        bool ownerMatch = false;
-        ChunkProxySlot* const slot = FindChunkProxySlotByEntity(thisPtr, &ownerMatch);
-        if (slot)
-        {
-            if (slot->cameraNotifyCount < USHRT_MAX)
-                ++slot->cameraNotifyCount;
-
-            if (slot->cameraNotifyCount <= 6 && AcquireChunkLogSlot())
-            {
-                LogChunkDiagnostic(
-                    "chunkmesh",
-                    L"[CHUNKMESH] camera-notify obj=0x%08X entity=0x%08X mo=0x%08X mesh=%hs count=%u ownerMatch=%u camera=0x%08X\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot->objectBytes)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot->entity)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)),
-                    slot->proofMeshName[0] ? slot->proofMeshName : "<none>",
-                    static_cast<unsigned>(slot->cameraNotifyCount),
-                    ownerMatch ? 1u : 0u,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(camera)));
-            }
-        }
-
-        if (g_OgreFn_MovableObjectNotifyCurrentCamera)
-            g_OgreFn_MovableObjectNotifyCurrentCamera(thisPtr, camera);
-    }
-
-    void __fastcall OgreEntityUpdateRenderQueueHook(void* thisPtr,
-                                                    void* /*edx*/,
-                                                    void* renderQueue)
-    {
-        bool ownerMatch = false;
-        ChunkProxySlot* const slot = FindChunkProxySlotByEntity(thisPtr, &ownerMatch);
-        if (slot)
-        {
-            if (slot->entityUpdateQueueCount < USHRT_MAX)
-                ++slot->entityUpdateQueueCount;
-
-            if (slot->entityUpdateQueueCount <= 6 && AcquireChunkLogSlot())
-            {
-                LogChunkDiagnostic(
-                    "chunkmesh",
-                    L"[CHUNKMESH] entity-update-queue obj=0x%08X entity=0x%08X mesh=%hs count=%u ownerMatch=%u queue=0x%08X\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot->objectBytes)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot->entity)),
-                    slot->proofMeshName[0] ? slot->proofMeshName : "<none>",
-                    static_cast<unsigned>(slot->entityUpdateQueueCount),
-                    ownerMatch ? 1u : 0u,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(renderQueue)));
-            }
-        }
-
-        if (g_OgreFn_EntityUpdateRenderQueue)
-            g_OgreFn_EntityUpdateRenderQueue(thisPtr, renderQueue);
-    }
-
-    void __fastcall OgreSceneManagerRenderSingleObjectHook(void* thisPtr,
-                                                           void* /*edx*/,
-                                                           void* renderable,
-                                                           const void* pass,
-                                                           uint32_t lightScissoringClipping,
-                                                           uint32_t doLightIteration,
-                                                           const void* manualLightList)
-    {
-        uint32_t subIndex = 0xFFFFFFFFu;
-        ChunkProxySlot* const slot = FindChunkProxySlotByRenderable(renderable, &subIndex);
-        if (slot)
-        {
-            if (slot->renderSingleCount < USHRT_MAX)
-                ++slot->renderSingleCount;
-
-            if (slot->renderSingleCount <= 8 && AcquireChunkLogSlot())
-            {
-                LogChunkDiagnostic(
-                    "chunkmesh",
-                    L"[CHUNKMESH] render-single obj=0x%08X entity=0x%08X renderable=0x%08X mesh=%hs count=%u sub=%u sceneMgr=0x%08X pass=0x%08X scissor=%u lightIter=%u manualLights=0x%08X\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot->objectBytes)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot->entity)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(renderable)),
-                    slot->proofMeshName[0] ? slot->proofMeshName : "<none>",
-                    static_cast<unsigned>(slot->renderSingleCount),
-                    subIndex == 0xFFFFFFFFu ? 0xFFFFFFFFu : subIndex,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(pass)),
-                    lightScissoringClipping ? 1u : 0u,
-                    doLightIteration ? 1u : 0u,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(manualLightList)));
-            }
-        }
-
-        if (g_OgreFn_SceneManagerRenderSingleObject)
-        {
-            g_OgreFn_SceneManagerRenderSingleObject(
-                thisPtr,
-                renderable,
-                pass,
-                lightScissoringClipping != 0,
-                doLightIteration != 0,
-                manualLightList);
-        }
-    }
-
-    void* __cdecl ObjectQueryGlobalSlotGetHook(int index)
-    {
-        if (!g_ObjectQuerySafetyEnabled)
-        {
-            auto original = reinterpret_cast<FnObjectQueryGlobalSlotGet>(
-                g_ObjectQueryGlobalSlotGetDetour.trampoline);
-            return original ? original(index) : nullptr;
-        }
-
-        if (index < 0 || index >= static_cast<int>(kObjectQueryGlobalSlotCount))
-        {
-            LogObjectQuerySafetyEvent(
-                "global-slot-get",
-                "invalid-index",
-                nullptr,
-                index,
-                static_cast<int>(kObjectQueryGlobalSlotCount),
-                0);
-            return nullptr;
-        }
-
-        __try
-        {
-            return reinterpret_cast<void* const*>(kObjectQueryGlobalSlotTableAddr)[index];
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            LogObjectQuerySafetyEvent(
-                "global-slot-get",
-                "access-fault",
-                reinterpret_cast<const void*>(kObjectQueryGlobalSlotTableAddr),
-                index,
-                static_cast<int>(kObjectQueryGlobalSlotCount),
-                0);
-            return nullptr;
-        }
-    }
-
-    void __fastcall ObjectQueryArraySetHook(void* thisPtr, void* /*edx*/, int index, void* value)
-    {
-        if (!g_ObjectQuerySafetyEnabled)
-        {
-            auto original = reinterpret_cast<FnObjectQueryArraySet>(
-                g_ObjectQueryArraySetDetour.trampoline);
-            if (original)
-                original(thisPtr, index, value);
-            return;
-        }
-
-        if (!IsPlausibleObjectQueryBase(thisPtr))
-        {
-            LogObjectQuerySafetyEvent(
-                "array-set",
-                "bad-base",
-                thisPtr,
-                index,
-                0,
-                reinterpret_cast<uintptr_t>(value));
-            return;
-        }
-
-        if (!IsReasonableObjectQueryIndex(index))
-        {
-            LogObjectQuerySafetyEvent(
-                "array-set",
-                "invalid-index",
-                thisPtr,
-                index,
-                0,
-                reinterpret_cast<uintptr_t>(value));
-            return;
-        }
-
-        __try
-        {
-            reinterpret_cast<void**>(thisPtr)[index] = value;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            LogObjectQuerySafetyEvent(
-                "array-set",
-                "access-fault",
-                thisPtr,
-                index,
-                0,
-                reinterpret_cast<uintptr_t>(value));
-        }
-    }
-
-    void* __fastcall ObjectQueryArrayGetHook(void* thisPtr, void* /*edx*/, int index)
-    {
-        if (!g_ObjectQuerySafetyEnabled)
-        {
-            auto original = reinterpret_cast<FnObjectQueryArrayGet>(
-                g_ObjectQueryArrayGetDetour.trampoline);
-            return original ? original(thisPtr, index) : nullptr;
-        }
-
-        if (!IsPlausibleObjectQueryBase(thisPtr))
-        {
-            LogObjectQuerySafetyEvent(
-                "array-get",
-                "bad-base",
-                thisPtr,
-                index,
-                0,
-                0);
-            return nullptr;
-        }
-
-        if (!IsReasonableObjectQueryIndex(index))
-        {
-            LogObjectQuerySafetyEvent(
-                "array-get",
-                "invalid-index",
-                thisPtr,
-                index,
-                0,
-                0);
-            return nullptr;
-        }
-
-        __try
-        {
-            return reinterpret_cast<void* const*>(thisPtr)[index];
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            LogObjectQuerySafetyEvent(
-                "array-get",
-                "access-fault",
-                thisPtr,
-                index,
-                0,
-                0);
-            return nullptr;
-        }
-    }
-
-    int __fastcall ObjectQueryFindZeroIndexHook(void* thisPtr, void* /*edx*/, int startIndex, int endIndex)
-    {
-        if (!g_ObjectQuerySafetyEnabled)
-        {
-            auto original = reinterpret_cast<FnObjectQueryFindIndex>(
-                g_ObjectQueryFindZeroIndexDetour.trampoline);
-            return original ? original(thisPtr, startIndex, endIndex) : -1;
-        }
-
-        if (!IsPlausibleObjectQueryBase(thisPtr))
-        {
-            LogObjectQuerySafetyEvent(
-                "find-zero-index",
-                "bad-base",
-                thisPtr,
-                startIndex,
-                endIndex,
-                0);
-            return -1;
-        }
-
-        if (!NormalizeObjectQueryFindRange("find-zero-index", thisPtr, startIndex, endIndex))
-            return -1;
-
-        __try
-        {
-            auto* slots = reinterpret_cast<void* const*>(thisPtr);
-            for (int index = startIndex; index <= endIndex; ++index)
-            {
-                if (slots[index] == nullptr)
-                    return index;
-            }
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            LogObjectQuerySafetyEvent(
-                "find-zero-index",
-                "access-fault",
-                thisPtr,
-                startIndex,
-                endIndex,
-                0);
-        }
-
-        return -1;
-    }
-
-    int __fastcall ObjectQueryFindNonZeroIndexHook(void* thisPtr, void* /*edx*/, int startIndex, int endIndex)
-    {
-        if (!g_ObjectQuerySafetyEnabled)
-        {
-            auto original = reinterpret_cast<FnObjectQueryFindIndex>(
-                g_ObjectQueryFindNonZeroIndexDetour.trampoline);
-            return original ? original(thisPtr, startIndex, endIndex) : -1;
-        }
-
-        if (!IsPlausibleObjectQueryBase(thisPtr))
-        {
-            LogObjectQuerySafetyEvent(
-                "find-nonzero-index",
-                "bad-base",
-                thisPtr,
-                startIndex,
-                endIndex,
-                0);
-            return -1;
-        }
-
-        if (!NormalizeObjectQueryFindRange("find-nonzero-index", thisPtr, startIndex, endIndex))
-            return -1;
-
-        __try
-        {
-            auto* slots = reinterpret_cast<void* const*>(thisPtr);
-            for (int index = startIndex; index <= endIndex; ++index)
-            {
-                if (slots[index] != nullptr)
-                    return index;
-            }
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            LogObjectQuerySafetyEvent(
-                "find-nonzero-index",
-                "access-fault",
-                thisPtr,
-                startIndex,
-                endIndex,
-                0);
-        }
-
-        return -1;
-    }
-
-    void __fastcall ObjectQueryStampedValueSetHook(void* thisPtr, void* /*edx*/, uint32_t value)
-    {
-        if (!g_ObjectQuerySafetyEnabled)
-        {
-            auto original = reinterpret_cast<FnObjectQueryStampedValueSet>(
-                g_ObjectQueryStampedValueSetDetour.trampoline);
-            if (original)
-                original(thisPtr, value);
-            return;
-        }
-
-        if (!IsPlausibleObjectQueryBase(thisPtr))
-        {
-            LogObjectQuerySafetyEvent(
-                "stamped-value-set",
-                "bad-base",
-                thisPtr,
-                0,
-                0,
-                value);
-            return;
-        }
-
-        __try
-        {
-            auto* const bytes = reinterpret_cast<uint8_t*>(thisPtr);
-            *reinterpret_cast<uint32_t*>(bytes + kObjectQueryStampedValueOffset) =
-                value ^ 0x33333333u;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            LogObjectQuerySafetyEvent(
-                "stamped-value-set",
-                "access-fault",
-                thisPtr,
-                0,
-                0,
-                value);
-        }
-    }
-
-    void __fastcall ObjectQueryBitClearHook(void* thisPtr, void* /*edx*/, int bitIndex)
-    {
-        if (!g_ObjectQuerySafetyEnabled)
-        {
-            auto original = reinterpret_cast<FnObjectQueryBitClear>(
-                g_ObjectQueryBitClearDetour.trampoline);
-            if (original)
-                original(thisPtr, bitIndex);
-            return;
-        }
-
-        if (!IsPlausibleObjectQueryBase(thisPtr))
-        {
-            LogObjectQuerySafetyEvent(
-                "bit-clear",
-                "bad-base",
-                thisPtr,
-                bitIndex,
-                0,
-                0);
-            return;
-        }
-
-        __try
-        {
-            auto* const bytes = reinterpret_cast<uint8_t*>(thisPtr);
-            auto* const flags = reinterpret_cast<uint32_t*>(bytes + kObjectQueryBitfieldOffset);
-            const uint32_t mask = 1u << (static_cast<uint32_t>(bitIndex) & 0x1Fu);
-            *flags &= ~mask;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            LogObjectQuerySafetyEvent(
-                "bit-clear",
-                "access-fault",
-                thisPtr,
-                bitIndex,
-                0,
-                0);
-        }
-    }
-
-    uint8_t __fastcall ObjectQueryBitTestSetHook(void* thisPtr, void* /*edx*/, int bitIndex)
-    {
-        if (!g_ObjectQuerySafetyEnabled)
-        {
-            auto original = reinterpret_cast<FnObjectQueryBitTest>(
-                g_ObjectQueryBitTestSetDetour.trampoline);
-            return original ? original(thisPtr, bitIndex) : 0;
-        }
-
-        if (bitIndex < 1)
-            return 0;
-
-        if (!IsPlausibleObjectQueryBase(thisPtr))
-        {
-            LogObjectQuerySafetyEvent(
-                "bit-test-set",
-                "bad-base",
-                thisPtr,
-                bitIndex,
-                0,
-                0);
-            return 0;
-        }
-
-        __try
-        {
-            auto* const bytes = reinterpret_cast<uint8_t*>(thisPtr);
-            const uint32_t flags =
-                *reinterpret_cast<const uint32_t*>(bytes + kObjectQueryBitfieldOffset);
-            const uint32_t mask = 1u << (static_cast<uint32_t>(bitIndex) & 0x1Fu);
-            return (flags & mask) != 0 ? 1 : 0;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            LogObjectQuerySafetyEvent(
-                "bit-test-set",
-                "access-fault",
-                thisPtr,
-                bitIndex,
-                0,
-                0);
-            return 0;
-        }
-    }
-
-    uint8_t __fastcall ObjectQueryBitTestClearHook(void* thisPtr, void* /*edx*/, int bitIndex)
-    {
-        if (!g_ObjectQuerySafetyEnabled)
-        {
-            auto original = reinterpret_cast<FnObjectQueryBitTest>(
-                g_ObjectQueryBitTestClearDetour.trampoline);
-            return original ? original(thisPtr, bitIndex) : 0;
-        }
-
-        if (bitIndex < 1)
-            return 0;
-
-        if (!IsPlausibleObjectQueryBase(thisPtr))
-        {
-            LogObjectQuerySafetyEvent(
-                "bit-test-clear",
-                "bad-base",
-                thisPtr,
-                bitIndex,
-                0,
-                0);
-            return 0;
-        }
-
-        __try
-        {
-            auto* const bytes = reinterpret_cast<uint8_t*>(thisPtr);
-            const uint32_t flags =
-                *reinterpret_cast<const uint32_t*>(bytes + kObjectQueryBitfieldOffset);
-            const uint32_t mask = 1u << (static_cast<uint32_t>(bitIndex) & 0x1Fu);
-            return (flags & mask) != 0 ? 0 : 1;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            LogObjectQuerySafetyEvent(
-                "bit-test-clear",
-                "access-fault",
-                thisPtr,
-                bitIndex,
-                0,
-                0);
-            return 0;
-        }
-    }
-
-    float __fastcall ObjectStateFloat1fcGetHook(void* thisPtr, void* /*edx*/)
-    {
-        if (!g_ObjectQuerySafetyEnabled)
-        {
-            auto original = reinterpret_cast<FnObjectAccessorFloatGet>(
-                g_ObjectStateFloat1fcGetDetour.trampoline);
-            return original ? original(thisPtr) : 0.0f;
-        }
-
-        if (!IsPlausibleObjectQueryBase(thisPtr))
-        {
-            LogObjectQuerySafetyEvent(
-                "state-float-1fc",
-                "bad-base",
-                thisPtr,
-                0,
-                0,
-                kObjectStateFloat1fcOffset);
-            return 0.0f;
-        }
-
-        __try
-        {
-            auto* const bytes = reinterpret_cast<uint8_t*>(thisPtr);
-            return *reinterpret_cast<const float*>(bytes + kObjectStateFloat1fcOffset);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            LogObjectQuerySafetyEvent(
-                "state-float-1fc",
-                "access-fault",
-                thisPtr,
-                0,
-                0,
-                kObjectStateFloat1fcOffset);
-            return 0.0f;
-        }
-    }
-
-    uint32_t __fastcall ObjectStateFlags17cGetHook(void* thisPtr, void* /*edx*/)
-    {
-        if (!g_ObjectQuerySafetyEnabled)
-        {
-            auto original = reinterpret_cast<FnObjectAccessorDwordGet>(
-                g_ObjectStateFlags17cGetDetour.trampoline);
-            return original ? original(thisPtr) : 0u;
-        }
-
-        if (!IsPlausibleObjectQueryBase(thisPtr))
-        {
-            LogObjectQuerySafetyEvent(
-                "state-flags-17c",
-                "bad-base",
-                thisPtr,
-                0,
-                0,
-                kObjectQueryBitfieldOffset);
-            return 0u;
-        }
-
-        __try
-        {
-            auto* const bytes = reinterpret_cast<uint8_t*>(thisPtr);
-            return *reinterpret_cast<const uint32_t*>(bytes + kObjectQueryBitfieldOffset);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            LogObjectQuerySafetyEvent(
-                "state-flags-17c",
-                "access-fault",
-                thisPtr,
-                0,
-                0,
-                kObjectQueryBitfieldOffset);
-            return 0u;
-        }
-    }
-
-    uint32_t __fastcall ObjectStateFlags180GetHook(void* thisPtr, void* /*edx*/)
-    {
-        if (!g_ObjectQuerySafetyEnabled)
-        {
-            auto original = reinterpret_cast<FnObjectAccessorDwordGet>(
-                g_ObjectStateFlags180GetDetour.trampoline);
-            return original ? original(thisPtr) : 0u;
-        }
-
-        if (!IsPlausibleObjectQueryBase(thisPtr))
-        {
-            LogObjectQuerySafetyEvent(
-                "state-flags-180",
-                "bad-base",
-                thisPtr,
-                0,
-                0,
-                kObjectStateFlags180Offset);
-            return 0u;
-        }
-
-        __try
-        {
-            auto* const bytes = reinterpret_cast<uint8_t*>(thisPtr);
-            return *reinterpret_cast<const uint32_t*>(bytes + kObjectStateFlags180Offset);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            LogObjectQuerySafetyEvent(
-                "state-flags-180",
-                "access-fault",
-                thisPtr,
-                0,
-                0,
-                kObjectStateFlags180Offset);
-            return 0u;
-        }
-    }
-
-    uint32_t __fastcall ObjectStateBit18cGetHook(void* thisPtr, void* /*edx*/, int bitIndex)
-    {
-        if (!g_ObjectQuerySafetyEnabled)
-        {
-            auto original = reinterpret_cast<FnObjectAccessorBitGet>(
-                g_ObjectStateBit18cGetDetour.trampoline);
-            return original ? original(thisPtr, bitIndex) : 0u;
-        }
-
-        if (!IsPlausibleObjectQueryBase(thisPtr))
-        {
-            LogObjectQuerySafetyEvent(
-                "state-bit-18c",
-                "bad-base",
-                thisPtr,
-                bitIndex,
-                0,
-                kObjectStateBit18cOffset);
-            return 0u;
-        }
-
-        __try
-        {
-            auto* const bytes = reinterpret_cast<uint8_t*>(thisPtr);
-            const uint32_t flags =
-                *reinterpret_cast<const uint32_t*>(bytes + kObjectStateBit18cOffset);
-            return (flags >> (static_cast<uint32_t>(bitIndex) & 0x1Fu)) & 1u;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            LogObjectQuerySafetyEvent(
-                "state-bit-18c",
-                "access-fault",
-                thisPtr,
-                bitIndex,
-                0,
-                kObjectStateBit18cOffset);
-            return 0u;
-        }
-    }
-
-    uint32_t __fastcall ObjectStateBit194GetHook(void* thisPtr, void* /*edx*/, int bitIndex)
-    {
-        if (!g_ObjectQuerySafetyEnabled)
-        {
-            auto original = reinterpret_cast<FnObjectAccessorBitGet>(
-                g_ObjectStateBit194GetDetour.trampoline);
-            return original ? original(thisPtr, bitIndex) : 0u;
-        }
-
-        if (!IsPlausibleObjectQueryBase(thisPtr))
-        {
-            LogObjectQuerySafetyEvent(
-                "state-bit-194",
-                "bad-base",
-                thisPtr,
-                bitIndex,
-                0,
-                kObjectStateBit194Offset);
-            return 0u;
-        }
-
-        __try
-        {
-            auto* const bytes = reinterpret_cast<uint8_t*>(thisPtr);
-            const uint32_t flags =
-                *reinterpret_cast<const uint32_t*>(bytes + kObjectStateBit194Offset);
-            return (flags >> (static_cast<uint32_t>(bitIndex) & 0x1Fu)) & 1u;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            LogObjectQuerySafetyEvent(
-                "state-bit-194",
-                "access-fault",
-                thisPtr,
-                bitIndex,
-                0,
-                kObjectStateBit194Offset);
-            return 0u;
-        }
-    }
-
-    void __fastcall ObjectStateCall21cHook(void* thisPtr, void* /*edx*/)
-    {
-        if (!g_ObjectQuerySafetyEnabled)
-        {
-            auto original = reinterpret_cast<FnObjectAccessorVoidCall>(
-                g_ObjectStateCall21cDetour.trampoline);
-            if (original)
-                original(thisPtr);
-            return;
-        }
-
-        if (!IsPlausibleObjectQueryBase(thisPtr))
-        {
-            LogObjectQuerySafetyEvent(
-                "state-call-21c",
-                "bad-base",
-                thisPtr,
-                0,
-                0,
-                0x21Cu);
-            return;
-        }
-
-        auto original = reinterpret_cast<FnObjectAccessorVoidCall>(
-            g_ObjectStateCall21cDetour.trampoline);
-        if (!original)
-            return;
-
-        __try
-        {
-            original(thisPtr);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            LogObjectQuerySafetyEvent(
-                "state-call-21c",
-                "access-fault",
-                thisPtr,
-                0,
-                0,
-                0x21Cu);
-        }
-    }
-
     void* __fastcall OptionsInputPopulateUiHook(void* thisPtr, void* /*edx*/)
     {
         void* screen = thisPtr;
@@ -21169,7 +13452,6 @@ namespace BZROpenShim
     void ResolveBzrHooks(bool isSteam)
     {
         g_IsSteamExe = isSteam;
-        ResetChunkFragmentEventBuffer();
         g_BzrFn_EngineFlameAddFlame = nullptr;
         g_BzrFn_EngineFlameControl = nullptr;
         g_BzrFn_EngineFlameSubmit = nullptr;
@@ -21263,35 +13545,6 @@ namespace BZROpenShim
             g_ChunkEffectCreateChunkletDetour.trampoline &&
             g_BzrFn_ChunkEffectCreateChunklet;
         g_ChunkEffectCreateHooksLogged = false;
-        g_ObjectQuerySafetyHooksInstalled =
-            g_ObjectQueryGlobalSlotGetDetour.trampoline &&
-            g_ObjectQueryArraySetDetour.trampoline &&
-            g_ObjectQueryArrayGetDetour.trampoline &&
-            g_ObjectQueryFindZeroIndexDetour.trampoline &&
-            g_ObjectQueryFindNonZeroIndexDetour.trampoline &&
-            g_ObjectQueryStampedValueSetDetour.trampoline &&
-            g_ObjectQueryBitClearDetour.trampoline &&
-            g_ObjectQueryBitTestSetDetour.trampoline &&
-            g_ObjectQueryBitTestClearDetour.trampoline &&
-            g_ObjectStateFloat1fcGetDetour.trampoline &&
-            g_ObjectStateFlags17cGetDetour.trampoline &&
-            g_ObjectStateFlags180GetDetour.trampoline &&
-            g_ObjectStateBit18cGetDetour.trampoline &&
-            g_ObjectStateBit194GetDetour.trampoline &&
-            g_ObjectStateCall21cDetour.trampoline;
-        g_ObjectQuerySafetyHooksLogged = false;
-        g_ObjectQuerySafetyHooksFailureLogged = false;
-        g_ObjectQuerySafetyGuardLogBudget = 24;
-        g_ObservedChunkPathParentATrampoline = g_ObservedChunkPathParentADetour.trampoline;
-        g_ObservedChunkPathParentBTrampoline = g_ObservedChunkPathParentBDetour.trampoline;
-        g_ObservedChunkPathProbesInstalled =
-            (g_ObservedChunkPathParentATrampoline != nullptr) &&
-            (g_ObservedChunkPathParentBTrampoline != nullptr);
-        g_ObservedChunkPathProbesLogged = false;
-        g_ObservedChunkPathProbesMismatchLogged = false;
-        g_ObservedChunkPathProbeBudget = 96;
-        g_ObservedChunkPathParentALogState = {};
-        g_ObservedChunkPathParentBLogState = {};
         g_AllowUnsafeSteamChunkCreateHooks =
             EnvFlagEnabled("OPENSHIM_UNSAFE_CHUNK_CREATE_HOOKS") ||
             EnvFlagEnabled("BZR_UNSAFE_CHUNK_CREATE_HOOKS");
@@ -21423,11 +13676,6 @@ namespace BZROpenShim
             ResolveEngineFlameRuntimeTargets();
         }
 
-        g_ObjectQuerySafetyEnabled =
-            !(EnvFlagEnabled("OPENSHIM_DISABLE_OBJECT_QUERY_SAFETY") ||
-              EnvFlagEnabled("BZR_DISABLE_OBJECT_QUERY_SAFETY"));
-        InstallObjectQuerySafetyHooksIfPossible();
-
         g_EnableChunkRenderFallback =
             EnvFlagEnabled("BZR_CHUNK_FORCE_FIRST_GEO") ||
             EnvFlagEnabled("OPENSHIM_CHUNK_FORCE_FIRST_GEO");
@@ -21466,7 +13714,8 @@ namespace BZROpenShim
             EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_TRACE");
         g_TraceChunkRender =
             !disableChunkTrace &&
-            (g_EnableChunkRenderFallback ||
+            (true ||
+             g_EnableChunkRenderFallback ||
              g_EnableChunkProxyDebug ||
              g_EnableChunkMeshProxy ||
              EnvFlagEnabled("BZR_CHUNK_TRACE") ||
@@ -21481,11 +13730,11 @@ namespace BZROpenShim
             EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_EFFECT_TRACE");
         g_TraceChunkEffectRuntime =
             !disableChunkEffectTrace &&
-            (EnvFlagEnabled("BZR_TRACE_CHUNK_EFFECT") ||
+            (true ||
+             EnvFlagEnabled("BZR_TRACE_CHUNK_EFFECT") ||
              EnvFlagEnabled("OPENSHIM_TRACE_CHUNK_EFFECT") ||
              EnvFlagEnabled("OPENSHIM_CHUNK_EFFECT_TRACE"));
         InstallChunkEffectCreateHooksIfRequested();
-        InstallObservedChunkPathProbesIfRequested();
         g_TraceSatelliteVisibility =
             EnvFlagEnabled("BZR_TRACE_SAT_VIS") ||
             EnvFlagEnabled("OPENSHIM_TRACE_SAT_VIS") ||
@@ -21561,8 +13810,6 @@ namespace BZROpenShim
         g_ChunkMeshProxyInitLogged = false;
         g_ChunkMeshProxyFailureLogged = false;
         g_ChunkMeshProxyWaitLogged = false;
-        g_OgreChunkTraversalHooksLogged = false;
-        g_OgreChunkTraversalHooksMismatchLogged = false;
         g_ChunkPayloadResourceLocationsAttempted = false;
         g_ChunkPayloadResourceLocationsReady = false;
         g_ChunkPayloadResourceLocationsLogged = false;
@@ -21574,10 +13821,6 @@ namespace BZROpenShim
         g_ChunkPayloadResolveFailureLogCache.clear();
         g_ChunkResolvedBindingCache.clear();
         g_ChunkResolvedBindingLastPruneTick = 0;
-        g_ChunkFragmentBatchBindingCache.clear();
-        g_ChunkFragmentBatchBindingLastPruneTick = 0;
-        g_ChunkFragmentBatchCandidateCache.clear();
-        g_ChunkFragmentBatchCandidateLastPruneTick = 0;
         float turretAimPitchMultiplier = g_TurretAimPitchMultiplierEnhanced;
         if (TryGetEnvFloat("OPENSHIM_TURRET_AIM_PITCH_MULTIPLIER", turretAimPitchMultiplier) ||
             TryGetEnvFloat("OPENSHIM_TURRET_PITCH_MULTIPLIER", turretAimPitchMultiplier))
@@ -21608,9 +13851,6 @@ namespace BZROpenShim
             g_TraceChunkEffectRuntime ? "enabled" : "disabled",
             static_cast<uint32_t>(kChunkEffectVtableSimulateSlotAddr),
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_ChunkEffectSimulate)));
-        Log(L"[OBJSAFE] Object query helper guards: %hs hooks=%hs\n",
-            g_ObjectQuerySafetyEnabled ? "enabled" : "disabled",
-            g_ObjectQuerySafetyHooksInstalled ? "installed" : "pending");
         LogChunkDiagnostic("chunkspawn", L"[CHUNKSPAWN] Create-path hooks: %hs create=0x%08X chunklet=0x%08X\n",
             g_ChunkEffectCreateHooksInstalled ? "enabled" : "disabled",
             static_cast<uint32_t>(kGogChunkEffectCreateChunkAddr),
@@ -21662,244 +13902,12 @@ namespace BZROpenShim
 
     void RetryDeferredRuntimeHooks()
     {
-        InstallObjectQuerySafetyHooksIfPossible();
         InstallJumpSnipingProbeIfRequested();
         InstallCareerStatsMpHookIfPossible();
-        InstallChunkEffectCreateHooksIfRequested();
-        InstallObservedChunkPathProbesIfRequested();
         InstallShieldTowerTeamFilterHookIfPossible();
         InstallAiTuningHooksIfPossible();
         InstallConstructorRemoteBuildFixIfPossible();
         EnsureInputBindingPopulateHookScaffold();
-    }
-
-    void FlushChunkFragmentEventsForShutdown()
-    {
-        std::array<ChunkFragmentEventRecord, kChunkFragmentEventCapacity> snapshot = {};
-        size_t snapshotCount = 0;
-        uint32_t totalRecorded = 0;
-        bool alreadyFlushed = false;
-
-        AcquireSRWLockExclusive(&g_ChunkFragmentEventLock);
-        alreadyFlushed = g_ChunkFragmentEventsFlushed;
-        if (!alreadyFlushed)
-        {
-            g_ChunkFragmentEventsFlushed = true;
-            snapshotCount = g_ChunkFragmentEventCount;
-            totalRecorded = g_ChunkFragmentEventTotal;
-            for (size_t index = 0; index < snapshotCount; ++index)
-            {
-                const size_t sourceIndex =
-                    (g_ChunkFragmentEventStart + index) % g_ChunkFragmentEvents.size();
-                snapshot[index] = g_ChunkFragmentEvents[sourceIndex];
-            }
-        }
-        ReleaseSRWLockExclusive(&g_ChunkFragmentEventLock);
-
-        if (alreadyFlushed)
-            return;
-
-        const uint32_t omittedCount =
-            (totalRecorded > snapshotCount)
-                ? (totalRecorded - static_cast<uint32_t>(snapshotCount))
-                : 0u;
-
-        auto logBindingEntry = [](const wchar_t* label, const ChunkResolvedBindingEntry* entry)
-        {
-            if (!entry)
-                return;
-
-            LogChunkDiagnostic(
-                "chunkfrag",
-                L"[CHUNKFRAG]   %ls mesh=%hs ownerMesh=%hs vdf=%hs piece=%hs payload=%hs class=%u geom=%hs root=0x%08X rootGameObj=0x%08X gameObj=0x%08X ownerEntity=0x%08X ownerObj=0x%08X fragCaller=0x%08X stack5=0x%08X stack6=0x%08X stack7=0x%08X bindTick=%lu lastSeen=%lu\n",
-                label ? label : L"binding",
-                entry->meshName[0] ? entry->meshName : "<none>",
-                entry->ownerMeshName[0] ? entry->ownerMeshName : "<none>",
-                entry->vdfCandidates[0] ? entry->vdfCandidates : "<none>",
-                entry->payloadComponentName[0] ? entry->payloadComponentName : "<none>",
-                entry->payloadMeshName[0] ? entry->payloadMeshName : "<none>",
-                entry->sourceClassId,
-                entry->sourceGeomName[0] ? entry->sourceGeomName : "<none>",
-                entry->sourceRootObjectPtr,
-                entry->sourceRootGameObjectPtr,
-                entry->sourceGameObjectPtr,
-                entry->sourceOwnerEntityPtr,
-                entry->sourceOwnerObjPtr,
-                entry->fragmentCallerRva,
-                entry->fragmentStackWord5,
-                entry->fragmentStackWord6,
-                entry->fragmentStackWord7,
-                static_cast<unsigned long>(entry->bindTick),
-                static_cast<unsigned long>(entry->lastSeenTick));
-        };
-        auto logObjectSummary = [](
-            const wchar_t* label,
-            bool valid,
-            uint32_t objectPtr,
-            uint32_t classId,
-            uint32_t flags,
-            uint32_t owner,
-            const char* geomName)
-        {
-            if (!valid)
-                return;
-
-            LogChunkDiagnostic(
-                "chunkfrag",
-                L"[CHUNKFRAG]   %ls obj=0x%08X class=%u flags=0x%08X owner=0x%08X geom=%hs\n",
-                label ? label : L"object",
-                objectPtr,
-                classId,
-                flags,
-                owner,
-                (geomName && geomName[0]) ? geomName : "<none>");
-        };
-        auto logSourceProbeSummary = [](const ChunkFragmentEventRecord& record)
-        {
-            if (!record.sourceProbeMeshName[0] &&
-                !record.sourceProbeVdfCandidates[0] &&
-                !record.sourceProbeOwnerMeshName[0] &&
-                record.sourceProbeSelectedBridgePtr == 0 &&
-                record.sourceProbeGameObjectPtr == 0 &&
-                !record.sourceTreeSummary[0] &&
-                !record.sourceTreeVdfSummary[0] &&
-                !record.sourceTreeMeshCandidates[0])
-            {
-                return;
-            }
-
-            if (record.sourceProbeMeshName[0] ||
-                record.sourceProbeVdfCandidates[0] ||
-                record.sourceProbeOwnerMeshName[0] ||
-                record.sourceProbeRootObjectPtr != 0 ||
-                record.sourceProbeSelectedBridgePtr != 0 ||
-                record.sourceProbeGameObjectPtr != 0 ||
-                record.sourceProbeOwnerEntityPtr != 0 ||
-                record.sourceProbeOwnerObjPtr != 0)
-            {
-                LogChunkDiagnostic(
-                    "chunkfrag",
-                    L"[CHUNKFRAG]   sourceProbe mesh=%hs vdf=%hs ownerMesh=%hs root=0x%08X selectedBridge=0x%08X gameObj=0x%08X ownerEntity=0x%08X ownerObj=0x%08X\n",
-                    record.sourceProbeMeshName[0] ? record.sourceProbeMeshName : "<none>",
-                    record.sourceProbeVdfCandidates[0] ? record.sourceProbeVdfCandidates : "<none>",
-                    record.sourceProbeOwnerMeshName[0] ? record.sourceProbeOwnerMeshName : "<none>",
-                    record.sourceProbeRootObjectPtr,
-                    record.sourceProbeSelectedBridgePtr,
-                    record.sourceProbeGameObjectPtr,
-                    record.sourceProbeOwnerEntityPtr,
-                    record.sourceProbeOwnerObjPtr);
-            }
-
-            if (record.sourceTreeSummary[0])
-            {
-                LogChunkDiagnostic(
-                    "chunkfrag",
-                    L"[CHUNKFRAG]   sourceTree %hs\n",
-                    record.sourceTreeSummary);
-            }
-            if (record.sourceTreeVdfSummary[0])
-            {
-                LogChunkDiagnostic(
-                    "chunkfrag",
-                    L"[CHUNKFRAG]   sourceTreeVdf %hs\n",
-                    record.sourceTreeVdfSummary);
-            }
-            if (record.sourceTreeMeshCandidates[0])
-            {
-                LogChunkDiagnostic(
-                    "chunkfrag",
-                    L"[CHUNKFRAG]   sourceTreeMeshes %hs\n",
-                    record.sourceTreeMeshCandidates);
-            }
-        };
-
-        LogChunkDiagnostic(
-            "chunkfrag",
-            L"[CHUNKFRAG] flush total=%u retained=%u omitted=%u capacity=%u\n",
-            totalRecorded,
-            static_cast<uint32_t>(snapshotCount),
-            omittedCount,
-            static_cast<uint32_t>(g_ChunkFragmentEvents.size()));
-
-        for (size_t index = 0; index < snapshotCount; ++index)
-        {
-            const ChunkFragmentEventRecord& record = snapshot[index];
-            LogChunkDiagnostic(
-                "chunkfrag",
-                L"[CHUNKFRAG] seq=%u tick=%lu this=0x%08X src=0x%08X bound=0x%08X created=0x%08X result=0x%08X callerRva=0x%08X preserve=%u before=%u after=%u stack=%hs\n",
-                record.sequence,
-                static_cast<unsigned long>(record.tick),
-                record.thisPtr,
-                record.sourceObjectPtr,
-                record.boundObjectPtr,
-                record.createdObjectPtr,
-                record.resultObjectPtr,
-                record.callerRva,
-                static_cast<uint32_t>(record.preserveFlag),
-                record.countBefore,
-                record.countAfter,
-                record.stackWordsValid ? "captured" : "missing");
-            logObjectSummary(
-                L"sourceSummary",
-                record.sourceSummaryValid,
-                record.sourceObjectPtr,
-                record.sourceClassId,
-                record.sourceFlags,
-                record.sourceOwner,
-                record.sourceGeomName);
-            logSourceProbeSummary(record);
-            logObjectSummary(
-                L"createdSummary",
-                record.createdSummaryValid,
-                record.createdObjectPtr,
-                record.createdClassId,
-                record.createdFlags,
-                record.createdOwner,
-                record.createdGeomName);
-            logObjectSummary(
-                L"resultSummary",
-                record.resultSummaryValid,
-                record.resultObjectPtr,
-                record.resultClassId,
-                record.resultFlags,
-                record.resultOwner,
-                record.resultGeomName);
-            if (record.stackWordsValid)
-            {
-                LogChunkDiagnostic(
-                    "chunkfrag",
-                    L"[CHUNKFRAG]   stack [0]=0x%08X [1]=0x%08X [2]=0x%08X [3]=0x%08X [4]=0x%08X [5]=0x%08X [6]=0x%08X [7]=0x%08X\n",
-                    record.stackWords[0],
-                    record.stackWords[1],
-                    record.stackWords[2],
-                    record.stackWords[3],
-                    record.stackWords[4],
-                    record.stackWords[5],
-                    record.stackWords[6],
-                    record.stackWords[7]);
-            }
-
-            const ChunkResolvedBindingEntry* boundBinding =
-                FindChunkResolvedBindingEntry(reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(record.boundObjectPtr)));
-            logBindingEntry(L"boundBinding", boundBinding);
-
-            if (record.createdObjectPtr != 0 && record.createdObjectPtr != record.boundObjectPtr)
-            {
-                const ChunkResolvedBindingEntry* createdBinding =
-                    FindChunkResolvedBindingEntry(reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(record.createdObjectPtr)));
-                logBindingEntry(L"createdBinding", createdBinding);
-            }
-
-            if (record.stackWordsValid)
-            {
-                const ChunkResolvedBindingEntry* batchBinding =
-                    FindChunkFragmentBatchBindingEntry(
-                        record.callerRva,
-                        record.stackWords[5],
-                        record.stackWords[6]);
-                logBindingEntry(L"batchBinding", batchBinding);
-            }
-        }
     }
 
     bool AreInputBindingUiHooksInstalled()
@@ -23690,7 +15698,6 @@ namespace BZROpenShim
 
         EnsureEngineFlameVariantsInitialized();
         g_BzrFn_EngineFlameControl(thisPtr);
-        TickChunkProxyDebug(nullptr, false);
 
         if (thisPtr == GetEngineFlamePrimary())
         {
@@ -23716,8 +15723,8 @@ namespace BZROpenShim
             return;
 
         EnsureEngineFlameVariantsInitialized();
-        TickChunkProxyDebug(camera, true);
         g_BzrFn_EngineFlameSubmit(thisPtr, camera);
+        TickChunkProxyDebug();
 
         if (thisPtr == GetEngineFlamePrimary())
         {
@@ -23746,25 +15753,12 @@ namespace BZROpenShim
         if (!g_BzrFn_ChunkEffectCreateChunk)
             return nullptr;
 
-        const void* const callerReturnAddress = _ReturnAddress();
-        const void* const* const callerReturnAddressSlot =
-            reinterpret_cast<const void* const*>(_AddressOfReturnAddress());
-        const uintptr_t callerAddress = reinterpret_cast<uintptr_t>(callerReturnAddress);
-        const uint32_t callerRva =
-            callerAddress >= kExeImageBaseAddr
-                ? static_cast<uint32_t>(callerAddress - kExeImageBaseAddr)
-                : 0u;
         const auto* thisBytes = reinterpret_cast<const uint8_t*>(thisPtr);
         uint32_t countBefore = 0;
         TryReadChunkEffectCount(thisBytes, countBefore);
 
         ChunkCreateSourceTreeProbe sourceTreeProbe = {};
         CaptureChunkCreateSourceTreeProbe(reinterpret_cast<const uint8_t*>(objectPtr), sourceTreeProbe);
-        ChunkFragmentStackProbe fragmentStackProbe = {};
-        CaptureChunkFragmentStackProbe(
-            callerRva,
-            callerReturnAddressSlot,
-            fragmentStackProbe);
 
         void* result = g_BzrFn_ChunkEffectCreateChunk(thisPtr, objectPtr, velocity, preserveFlag);
 
@@ -23779,47 +15773,14 @@ namespace BZROpenShim
                 createdEntryPtr = &createdEntry;
         }
 
-        const auto* const sourceObjectBytes = reinterpret_cast<const uint8_t*>(objectPtr);
-        const auto* const resultObjectBytes = reinterpret_cast<const uint8_t*>(result);
-        const auto* const createdObjectBytes =
-            createdEntryPtr ? createdEntryPtr->objectBytes : nullptr;
         const uint8_t* boundObjectBytes = nullptr;
-        if (createdObjectBytes)
-            boundObjectBytes = createdObjectBytes;
+        if (createdEntryPtr && createdEntryPtr->objectBytes)
+            boundObjectBytes = createdEntryPtr->objectBytes;
         else
-            boundObjectBytes = sourceObjectBytes;
-
-        const ChunkFragmentStackProbe* fragmentStackProbePtr =
-            fragmentStackProbe.valid ? &fragmentStackProbe : nullptr;
+            boundObjectBytes = reinterpret_cast<const uint8_t*>(objectPtr);
 
         if (boundObjectBytes)
-            StoreChunkResolvedBinding(boundObjectBytes, sourceTreeProbe, fragmentStackProbePtr);
-        if (createdObjectBytes &&
-            createdObjectBytes != boundObjectBytes)
-        {
-            StoreChunkResolvedBinding(createdObjectBytes, sourceTreeProbe, fragmentStackProbePtr);
-        }
-
-        TrackCreateChunkTargetForProxy(boundObjectBytes, createdEntryPtr);
-        if (createdObjectBytes &&
-            createdObjectBytes != boundObjectBytes)
-        {
-            TrackCreateChunkTargetForProxy(createdObjectBytes, createdEntryPtr);
-        }
-
-        RecordChunkFragmentEvent(
-            thisPtr,
-            objectPtr,
-            boundObjectBytes,
-            resultObjectBytes,
-            preserveFlag,
-            callerRva,
-            callerReturnAddressSlot,
-            countBefore,
-            countAfter,
-            createdEntryPtr,
-            sourceTreeProbe.valid ? &sourceTreeProbe : nullptr,
-            fragmentStackProbePtr);
+            StoreChunkResolvedBinding(boundObjectBytes, sourceTreeProbe);
 
         LogChunkCreateLifecycle(
             L"CreateChunk",
@@ -23828,13 +15789,10 @@ namespace BZROpenShim
             nullptr,
             velocity,
             preserveFlag,
-            callerReturnAddress,
-            callerReturnAddressSlot,
             countBefore,
             countAfter,
             createdEntryPtr,
-            sourceTreeProbe.valid ? &sourceTreeProbe : nullptr,
-            fragmentStackProbePtr);
+            sourceTreeProbe.valid ? &sourceTreeProbe : nullptr);
 
         return result;
     }
@@ -23848,9 +15806,6 @@ namespace BZROpenShim
         if (!g_BzrFn_ChunkEffectCreateChunklet)
             return;
 
-        const void* const callerReturnAddress = _ReturnAddress();
-        const void* const* const callerReturnAddressSlot =
-            reinterpret_cast<const void* const*>(_AddressOfReturnAddress());
         const auto* thisBytes = reinterpret_cast<const uint8_t*>(thisPtr);
         uint32_t countBefore = 0;
         TryReadChunkEffectCount(thisBytes, countBefore);
@@ -23875,12 +15830,9 @@ namespace BZROpenShim
             reinterpret_cast<const float*>(positionVec),
             velocity,
             preserveFlag,
-            callerReturnAddress,
-            callerReturnAddressSlot,
             countBefore,
             countAfter,
             createdEntryPtr,
-            nullptr,
             nullptr);
     }
 
@@ -23895,8 +15847,6 @@ namespace BZROpenShim
             InstallCareerStatsMpHookIfPossible();
         if (!g_ChunkEffectCreateHooksInstalled)
             InstallChunkEffectCreateHooksIfRequested();
-        if (!g_ObservedChunkPathProbesInstalled)
-            InstallObservedChunkPathProbesIfRequested();
 
         MaybeLogSatelliteVisibilitySample();
         RefreshChunkObjectIdentityCacheIfNeeded();
@@ -24480,5 +16430,10 @@ namespace BZROpenShim
                 reinterpret_cast<void*>(FlagButtonOnClickClient),
                 reinterpret_cast<void*>(FlagButtonOnHoverClient));
         }
+    }
+
+    // Stub: chunk fragment event flush not present in this revision.
+    void FlushChunkFragmentEventsForShutdown()
+    {
     }
 }
