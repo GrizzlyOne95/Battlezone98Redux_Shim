@@ -860,6 +860,7 @@ namespace BZROpenShim
             void* ownerOgreLight = nullptr;
             void* ownerObj = nullptr;
             void* ownerEntity = nullptr;
+            void* gameObject = nullptr;
             bool ownerProbeOk = false;
             char ownerEntityBaseName[32] = {};
             char ownerOgreFilename[32] = {};
@@ -913,6 +914,7 @@ namespace BZROpenShim
             float y = 0.0f;
             float z = 0.0f;
             OgreQuaternion orientation = { 1.0f, 0.0f, 0.0f, 0.0f };
+            OgreVector3 scale = { 1.0f, 1.0f, 1.0f };
         };
 
         struct ChunkProxySlot
@@ -931,7 +933,15 @@ namespace BZROpenShim
             void* billboard = nullptr;
             void* sceneNode = nullptr;
             void* entity = nullptr;
+            void* sceneManager = nullptr;
+            void* sourceRootObject = nullptr;
+            void* ownerObj = nullptr;
+            void* sourceGameObject = nullptr;
+            void* sourceRootGameObject = nullptr;
             DWORD lastSeenTick = 0;
+            uint16_t cameraNotifyCount = 0;
+            uint16_t entityUpdateQueueCount = 0;
+            uint16_t renderQueueAddCount = 0;
             bool active = false;
             bool billboardAssigned = false;
             bool meshAssigned = false;
@@ -1017,8 +1027,14 @@ namespace BZROpenShim
         struct ChunkResolvedBindingEntry
         {
             char meshName[48] = {};
+            char payloadMeshName[128] = {};
             char vdfCandidates[128] = {};
             uint32_t sourceClassId = 0;
+            uint32_t sourceRootObjectPtr = 0;
+            uint32_t sourceOwnerEntityPtr = 0;
+            uint32_t sourceOwnerObjPtr = 0;
+            uint32_t sourceGameObjectPtr = 0;
+            uint32_t sourceRootGameObjectPtr = 0;
             char sourceGeomName[64] = {};
             DWORD bindTick = 0;
             DWORD lastSeenTick = 0;
@@ -1272,6 +1288,9 @@ namespace BZROpenShim
         static constexpr size_t kChunkPayloadResolveFailureLogCacheLimit = 512;
         static constexpr size_t kChunkObjectIdentityMaxObjectsPerRefresh = 1024;
         static constexpr size_t kChunkObjectIdentityMaxNodesPerObject = 256;
+        static constexpr float kChunkProxyEntryPositionTolerance = 256.0f;
+        static constexpr float kChunkProxyLocalTransformTolerance = 0.001f;
+        static constexpr float kChunkProxyAnchoredTransformAdoptDistance = 1.0f;
         static constexpr float kChunkProxyHiddenY = -100000.0f;
         static constexpr const char* kChunkProxyBillboardSetName = "OpenShimChunkProxyDebug";
         static constexpr const char* kChunkProxyMaterialName = "BaseWhiteNoLighting";
@@ -4247,6 +4266,7 @@ namespace BZROpenShim
             slot.meshAssigned = false;
         }
 
+        #if 0
         static void LogChunkManualSubmitSkip(
             const ChunkProxySlot& slot,
             const wchar_t* reason,
@@ -4542,12 +4562,16 @@ namespace BZROpenShim
                 EnvFlagEnabled("BZR_DISABLE_CHUNK_MANUAL_SUBMIT");
             return !disabled;
         }
+        #endif
 
         static void UpdateChunkProxySlotPosition(
             ChunkProxySlot& slot,
             void* currentCamera = nullptr,
             bool allowManualSubmit = true)
         {
+            (void)currentCamera;
+            (void)allowManualSubmit;
+
             static FnOgreSetBillboardPosition setPosition =
                 ResolveOgreProc<FnOgreSetBillboardPosition>("?setPosition@Billboard@Ogre@@QAEXMMM@Z");
             static FnOgreSetNodePosition setNodePosition =
@@ -4636,12 +4660,11 @@ namespace BZROpenShim
                 }
             }
 
-            // Apply transform to Ogre entities/billboards with improved error handling
-            if (slot.entity && haveTransform)
+            const bool useMeshProxy = ShouldUseChunkPayloadMesh(slot);
+
+            if (!useMeshProxy)
             {
-                bool transformSuccess = false;
-                
-                if (setPosition && slot.billboard)
+                if (slot.billboard && haveTransform && setPosition)
                 {
                     if (TrySetChunkProxyBillboardPosition(
                             slot.billboard,
@@ -4650,7 +4673,7 @@ namespace BZROpenShim
                             transform.y,
                             transform.z))
                     {
-                        transformSuccess = true;
+                        slot.billboardAssigned = true;
                     }
                     else
                     {
@@ -4661,25 +4684,15 @@ namespace BZROpenShim
                     }
                 }
 
-                if (transformSuccess && setNodePosition && slot.sceneNode)
+                if (slot.meshAssigned)
                 {
-                    setNodePosition(slot.sceneNode, transform.x, transform.y, transform.z);
+                    HideChunkProxyMesh(slot);
+                    slot.meshAssigned = false;
                 }
-
-                if (transformSuccess && setNodeOrientation && slot.sceneNode)
-                {
-                    setNodeOrientation(slot.sceneNode, 1.0f, 0.0f, 0.0f, 1.0f);
-                }
-
-                if (transformSuccess && setVisible)
-                {
-                    setVisible(slot.entity, false);
-                    if (setNodeVisible)
-                        setNodeVisible(slot.sceneNode, false, false);
-                }
+                return;
             }
 
-            if (ShouldUseChunkPayloadMesh(slot))
+            if (haveTransform)
             {
                 if (!EnsureChunkMeshProxySlot(slot))
                     return;

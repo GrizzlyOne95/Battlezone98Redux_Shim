@@ -547,6 +547,13 @@ Practical interpretation:
 
 - `CreateChunklet` plus `chunk1` / `chunk2` still means generic stock debris
 - `CreateChunk` means Redux is repurposing a real child object from the craft
+- decompiled 1.5 and unpacked Redux code agree on that split: `CreateChunk`
+  changes an existing child `_OBJ76` to class/type `53`, while `CreateChunklet`
+  allocates a new generic debris object from the chunk template list
+- real vehicle pieces such as `AGR11BDA` should therefore be rendered by
+  mirroring the native `ChunkEffect` entry transform, not by replacing native
+  chunk simulation or treating the piece as a stock `chunk1` / `chunk2`
+  template
 - `caller` / `callerRva` on `[CHUNKSPAWN]` lines identify the native caller site
   that reached `CreateChunk` or `CreateChunklet`, which is useful when the
   upstream fragment-stage function has not been hooked directly yet
@@ -618,6 +625,12 @@ Current payload-mesh path:
   native chunk object's world transform each frame, so the payload follows the
   native fragment velocity, bounce, and spin instead of running a second
   physics path
+- mesh proxy visibility is handled only by the payload mesh path; the older
+  debug/billboard path no longer hides the same scene node after Ogre creates a
+  chunk entity
+- the unfinished manual render-queue submission experiment is compiled out for
+  now; the active path relies on a normal root-scene-node child plus Ogre entity
+  visibility updates
 
 Useful failure signatures:
 
