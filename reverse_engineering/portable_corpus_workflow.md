@@ -51,6 +51,26 @@ fresh checkout.
 
 ## Recommended Transfer Method
 
+## Git LFS Corpus Artifacts
+
+The current preferred two-machine flow is to sync compressed corpus artifacts
+through Git LFS, then restore the local extracted corpora:
+
+```powershell
+git lfs install
+git lfs pull
+.\reverse_engineering\restore_redux_unpacked_beta_corpus.ps1
+.\reverse_engineering\restore_legacy_15227_clean_corpus.ps1
+```
+
+Tracked artifacts:
+
+- `reverse_engineering\corpus_artifacts\redux_documents_unpacked_beta_pdb_best_effort.zip`
+- `reverse_engineering\corpus_artifacts\legacy_15227_clean_pdb_c.zip`
+
+The extracted folders remain ignored/generated so Git does not track tens of
+thousands of loose decompiler files.
+
 1. Copy the finished corpus folders to the target machine.
 
 Recommended names:
