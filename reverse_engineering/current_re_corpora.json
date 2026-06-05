@@ -2,10 +2,10 @@
   "corpora": [
     {
       "label": "redux",
-      "description": "Battlezone 98 Redux GOG best-effort portable corpus tracked in the repo with advisory near-match PDB metadata.",
-      "promoted_root": "repo_corpora/bzr_gog_best_effort",
+      "description": "Steamless-unpacked Battlezone 98 Redux corpus from Documents build with beta PDB used as advisory metadata.",
+      "promoted_root": "current_global_corpus",
       "binary_family": "redux",
-      "pdb_trust": "advisory_near_match"
+      "pdb_trust": "advisory_mismatched_beta"
     },
     {
       "label": "legacy",
