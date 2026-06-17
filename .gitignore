@@ -56,3 +56,6 @@ docs/
 *.vsix
 .db/
 pyghidra_mcp_projects/
+battlezone98redux.exe
+battlezone98redux.exe.payload
+battlezone98redux.exe.unpacked.exe
