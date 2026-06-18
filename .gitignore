@@ -60,3 +60,8 @@ pyghidra_mcp_projects/
 battlezone98redux.exe
 battlezone98redux.exe.payload
 battlezone98redux.exe.unpacked.exe
+reverse_engineering/finalize_global_corpus.py
+reverse_engineering/repo_corpora/bzr_gog_best_effort/pipeline_manifest.json
+reverse_engineering/repo_corpora/bzr_gog_best_effort/merged/legacy_symbol_enriched_functions.json
+reverse_engineering/finalize_global_corpus.py
+reverse_engineering/repo_corpora/bzr_gog_best_effort/pipeline_manifest.json
