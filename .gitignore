@@ -16,6 +16,7 @@
 !reverse_engineering/run_best_effort_pipeline.py
 !reverse_engineering/finalize_global_corpus.py
 !reverse_engineering/build_re_brief.py
+!reverse_engineering/build_legacy_to_redux_symbol_map.py
 !reverse_engineering/export_existing_project_decomp.py
 !reverse_engineering/complete_cached_project_pipeline.py
 !reverse_engineering/capture_runtime_layout.py
