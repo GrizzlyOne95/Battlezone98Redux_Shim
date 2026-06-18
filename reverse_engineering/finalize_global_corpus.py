@@ -79,6 +79,7 @@ def main() -> None:
             {"label": "Inventory Functions", "path": str(output_root / "inventory" / "functions.csv")},
             {"label": "Inventory Symbols", "path": str(output_root / "inventory" / "symbols.csv")},
             {"label": "Merged RVA Matches", "path": str(output_root / "merged" / "function_matches_by_rva.csv")},
+            {"label": "Legacy Symbol Enriched Functions", "path": str(output_root / "merged" / "legacy_symbol_enriched_functions.csv")},
             {"label": "PDB Public Functions", "path": str(output_root / "pdb_reference" / "public_functions.csv")},
             {"label": "PDB Modules", "path": str(output_root / "pdb_reference" / "modules.csv")},
             {"label": "ASCII Strings", "path": str(output_root / "binary_strings" / "ascii_strings.csv")},
