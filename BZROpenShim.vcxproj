@@ -64,10 +64,10 @@
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions);WIN32_LEAN_AND_MEAN;_CRT_SECURE_NO_WARNINGS</PreprocessorDefinitions>
+      <PreprocessorDefinitions>BZROPENSHIM_EXPORTS;WIN32;_DEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions);WIN32_LEAN_AND_MEAN;_CRT_SECURE_NO_WARNINGS</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <AdditionalIncludeDirectories>$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <ExceptionHandling>Sync</ExceptionHandling>
@@ -77,9 +77,11 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>DebugFull</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>Version.lib;ws2_32.lib;Gdiplus.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Version.lib;ws2_32.lib;Gdiplus.lib;Psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>$(ProjectDir)src\winmm.def</ModuleDefinitionFile>
       <LargeAddressAware>true</LargeAddressAware>
+      <DelayLoadDLLs>version.dll;gdiplus.dll;ws2_32.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <SupportUnloadOfDelayLoadedDLL>true</SupportUnloadOfDelayLoadedDLL>
     </Link>
   </ItemDefinitionGroup>
 
@@ -89,10 +91,10 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions);WIN32_LEAN_AND_MEAN;_CRT_SECURE_NO_WARNINGS</PreprocessorDefinitions>
+      <PreprocessorDefinitions>BZROPENSHIM_EXPORTS;WIN32;NDEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions);WIN32_LEAN_AND_MEAN;_CRT_SECURE_NO_WARNINGS</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <AdditionalIncludeDirectories>$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <ExceptionHandling>Sync</ExceptionHandling>
@@ -104,41 +106,47 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>Version.lib;ws2_32.lib;Gdiplus.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Version.lib;ws2_32.lib;Gdiplus.lib;Psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>$(ProjectDir)src\winmm.def</ModuleDefinitionFile>
       <LargeAddressAware>true</LargeAddressAware>
+      <DelayLoadDLLs>version.dll;gdiplus.dll;ws2_32.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <SupportUnloadOfDelayLoadedDLL>true</SupportUnloadOfDelayLoadedDLL>
     </Link>
   </ItemDefinitionGroup>
 
   <ItemGroup>
     <ClCompile Include="src\dllmain.cpp" />
-    <ClCompile Include="src\bzr_hooks.cpp" />
-    <ClCompile Include="src\d3d_startup_hooks.cpp" />
-    <ClCompile Include="src\file_io_hooks.cpp" />
-    <ClCompile Include="src\game_state.cpp" />
-    <ClCompile Include="src\net_optimizer.cpp" />
-    <ClCompile Include="src\shim_log.cpp" />
-    <ClCompile Include="src\winmm_proxy.cpp" />
-    <ClCompile Include="src\patcher.cpp" />
-    <ClCompile Include="src\trampolines.cpp" />
-    <ClCompile Include="src\netcode_hooks.cpp" />
+    <ClCompile Include="src\patches\bzr_hooks.cpp" />
+    <ClCompile Include="src\patches\d3d_startup_hooks.cpp" />
+    <ClCompile Include="src\patches\file_io_hooks.cpp" />
+    <ClCompile Include="src\patches\game_state.cpp" />
+    <ClCompile Include="src\patches\net_optimizer.cpp" />
+    <ClCompile Include="src\engine\shim_log.cpp" />
+    <ClCompile Include="src\engine\winmm_proxy.cpp" />
+    <ClCompile Include="src\engine\patcher.cpp" />
+    <ClCompile Include="src\engine\hook_engine.cpp" />
+    <ClCompile Include="src\patches\trampolines.cpp" />
+    <ClCompile Include="src\patches\netcode_hooks.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="src\bzr_hooks.h" />
-    <ClInclude Include="src\bzr_string.h" />
-    <ClInclude Include="src\d3d_startup_hooks.h" />
-    <ClInclude Include="src\file_io_hooks.h" />
-    <ClInclude Include="src\game_state.h" />
-    <ClInclude Include="src\net_optimizer.h" />
-    <ClInclude Include="src\shim_log.h" />
-    <ClInclude Include="src\winmm_proxy.h" />
-    <ClInclude Include="src\patches.h" />
-    <ClInclude Include="src\patcher.h" />
-    <ClInclude Include="src\trampolines.h" />
-    <ClInclude Include="src\scroll_helper.h" />
-    <ClInclude Include="src\netcode_hooks.h" />
+    <ClInclude Include="include\bzr_hooks.h" />
+    <ClInclude Include="include\bzr_string.h" />
+    <ClInclude Include="include\d3d_startup_hooks.h" />
+    <ClInclude Include="include\file_io_hooks.h" />
+    <ClInclude Include="include\game_state.h" />
+    <ClInclude Include="include\net_optimizer.h" />
+    <ClInclude Include="include\shim_log.h" />
+    <ClInclude Include="include\winmm_proxy.h" />
+    <ClInclude Include="include\patches.h" />
+    <ClInclude Include="include\patcher.h" />
+    <ClInclude Include="include\hook_engine.h" />
+    <ClInclude Include="include\BZROpenShim.h" />
+    <ClInclude Include="include\trampolines.h" />
+    <ClInclude Include="include\scroll_helper.h" />
+    <ClInclude Include="include\netcode_hooks.h" />
   </ItemGroup>
   <ItemGroup>
+    <ResourceCompile Include="src\engine\version.rc" />
     <None Include="src\winmm.def" />
     <None Include="README.md" />
   </ItemGroup>
