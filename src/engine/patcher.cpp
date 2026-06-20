@@ -9,13 +9,14 @@
 //
 // The reference patch flow:
 //  1. Open a patch log
-//  2. Read BZR.exe file version via GetFileVersionInfoA; expect 0x12D (301)
+//  2. Read BZR.exe file version via GetFileVersionInfoA; expect g_Config.GetStaticPointer("BZR_EXPECTED_VERSION_HEX", 0x12D) (301)
 //  3. Loop up to 1000 times polling ReadProcessMemory at 0x00868300
 //     until the 256-byte signature block matches the expected value
 //  4. Once matched, apply all JMP/DWORD/BYTE patches via WriteProcessMemory
 //  5. Log each patch name and result
 
 #include "patcher.h"
+#include "hook_engine.h"
 #include "patches.h"
 #include "scroll_helper.h"
 #include "trampolines.h"
@@ -33,10 +34,41 @@
 #include <algorithm>
 #include <new>
 #include <vector>
+#include <fstream>
+#include <string>
+#include <sstream>
+#include <nlohmann/json.hpp>
 
 namespace BZROpenShim
 {
-    static const char kOpenShimVersionTag[] = "2.2.301 + Open Patch";
+    struct PatcherConfig {
+        nlohmann::json data;
+
+        bool Load() {
+            try {
+                std::ifstream f("scripts/patches.json");
+                if (f.is_open()) {
+                    data = nlohmann::json::parse(f);
+                    return true;
+                }
+            } catch (...) {}
+            return false;
+        }
+
+        uint32_t GetStaticPointer(const std::string& name, uint32_t defaultVal = 0) {
+            if (data.contains("static_pointers")) {
+                for (const auto& p : data["static_pointers"]) {
+                    if (p["name"] == name) {
+                        return std::stoul(p["address"].get<std::string>(), nullptr, 16);
+                    }
+                }
+            }
+            return defaultVal;
+        }
+    };
+    static PatcherConfig g_Config;
+
+    static const char kOpenShimVersionTag[] = "2.2.301 + BZR Open Shim";
     static constexpr uint32_t kDefaultMaxSoundChannels = 150;
     static constexpr uint32_t kMaxSupportedSoundChannels = 256;
     static constexpr uint32_t kGASMasterMaxObjectsOffset = 0x10;
@@ -266,7 +298,7 @@ namespace BZROpenShim
                strcmp(name, "Lobby BZRNET Integration CLIENT") == 0;
     }
 
-    static void FilterPatchesForRuntime(std::vector<PatchDef>& patches, bool isSteam)
+    static void FilterPatchesForRuntime(std::vector<HookEngine::PatchDef>& patches, bool isSteam)
     {
         if (ShouldEnableMapRefreshFixes(isSteam))
         {
@@ -279,7 +311,7 @@ namespace BZROpenShim
                 std::remove_if(
                     patches.begin(),
                     patches.end(),
-                    [](const PatchDef& patch)
+                    [](const HookEngine::PatchDef& patch)
                     {
                         return IsMapRefreshPatchName(patch.name);
                     }),
@@ -308,7 +340,7 @@ namespace BZROpenShim
                 std::remove_if(
                     patches.begin(),
                     patches.end(),
-                    [](const PatchDef& patch)
+                    [](const HookEngine::PatchDef& patch)
                     {
                         return IsChunkExperimentPatchName(patch.name);
                     }),
@@ -329,7 +361,7 @@ namespace BZROpenShim
                 std::remove_if(
                     patches.begin(),
                     patches.end(),
-                    [](const PatchDef& patch)
+                    [](const HookEngine::PatchDef& patch)
                     {
                         return IsProducerBuildMenuExperimentPatchName(patch.name);
                     }),
@@ -350,7 +382,7 @@ namespace BZROpenShim
                 std::remove_if(
                     patches.begin(),
                     patches.end(),
-                    [](const PatchDef& patch)
+                    [](const HookEngine::PatchDef& patch)
                     {
                         return IsLobbyBzrnetIntegrationPatchName(patch.name);
                     }),
@@ -431,7 +463,7 @@ namespace BZROpenShim
 
     static void SuppressStartupShellAutoLoad()
     {
-        constexpr uintptr_t kStartupShellAutoLoadFlagAddr = 0x008EAAA8;
+        const uintptr_t kStartupShellAutoLoadFlagAddr = g_Config.GetStaticPointer("StartupShellAutoLoadFlag", 0x008EAAA8);
 
         if (!ShouldSuppressStartupAutoLoad())
         {
@@ -452,38 +484,18 @@ namespace BZROpenShim
         }
     }
 
+
+
     static bool ScanForSoundChannelOverrideTargets(SoundChannelOverrideTargets& outTargets)
     {
         outTargets = {};
+        if (!g_Config.data.contains("audio_gas_pattern")) {
+            Log(L"[AUDIO] No GAS pattern in config; skipping scan\n");
+            return false;
+        }
 
-        static const uint8_t kPattern[] = {
-            0xA3, 0x00, 0x00, 0x00, 0x00,
-            0xA3, 0x00, 0x00, 0x00, 0x00,
-            0xA3, 0x00, 0x00, 0x00, 0x00,
-            0xA3, 0x00, 0x00, 0x00, 0x00,
-            0xA3, 0x00, 0x00, 0x00, 0x00,
-            0x68, 0x00, 0x00, 0x00, 0x00,
-            0xE8, 0x00, 0x00, 0x00, 0x00,
-            0x83, 0xC4, 0x04, 0x85, 0xC0, 0x75, 0x04, 0x33, 0xC0, 0xEB, 0x00,
-            0xC7, 0x05, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x68, 0x00, 0x00, 0x00, 0x00,
-            0xE8, 0x00, 0x00, 0x00, 0x00
-        };
-        static const uint8_t kMask[] = {
-            0xFF, 0x00, 0x00, 0x00, 0x00,
-            0xFF, 0x00, 0x00, 0x00, 0x00,
-            0xFF, 0x00, 0x00, 0x00, 0x00,
-            0xFF, 0x00, 0x00, 0x00, 0x00,
-            0xFF, 0x00, 0x00, 0x00, 0x00,
-            0xFF, 0x00, 0x00, 0x00, 0x00,
-            0xFF, 0x00, 0x00, 0x00, 0x00,
-            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00,
-            0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0xFF, 0x00, 0x00, 0x00, 0x00,
-            0xFF, 0x00, 0x00, 0x00, 0x00
-        };
+        auto pVec = HookEngine::ParseIdaPattern(g_Config.data["audio_gas_pattern"]["pattern"]);
+        const size_t patternSize = pVec.size();
 
         HMODULE hMain = GetModuleHandleA(nullptr);
         uint8_t* mainBase = reinterpret_cast<uint8_t*>(hMain);
@@ -535,7 +547,7 @@ namespace BZROpenShim
             uint8_t* clipStart = (regionBase < mainBase) ? mainBase : regionBase;
             uint8_t* clipEnd = (regionEnd > (mainBase + mainSize)) ? (mainBase + mainSize) : regionEnd;
             const size_t clipSize = static_cast<size_t>(clipEnd - clipStart);
-            if (clipSize < sizeof(kPattern))
+            if (clipSize < patternSize)
             {
                 addr = regionEnd;
                 continue;
@@ -544,18 +556,18 @@ namespace BZROpenShim
             std::vector<uint8_t> buffer(clipSize);
             SIZE_T read = 0;
             if (!ReadProcessMemory(hProc, clipStart, buffer.data(), clipSize, &read) ||
-                read < sizeof(kPattern))
+                read < patternSize)
             {
                 addr = regionEnd;
                 continue;
             }
 
-            for (size_t i = 0; i <= read - sizeof(kPattern); ++i)
+            for (size_t i = 0; i <= read - patternSize; ++i)
             {
                 bool match = true;
-                for (size_t j = 0; j < sizeof(kPattern); ++j)
+                for (size_t j = 0; j < patternSize; ++j)
                 {
-                    if ((buffer[i + j] & kMask[j]) != (kPattern[j] & kMask[j]))
+                    if (pVec[j] < 0x100 && buffer[i + j] != static_cast<uint8_t>(pVec[j]))
                     {
                         match = false;
                         break;
@@ -679,16 +691,16 @@ namespace BZROpenShim
 
         if (!isSteam)
         {
-            outTargets.gmStorageAddress = 0x00915594;
-            outTargets.gasMasterAddress = 0x0091559C;
+            outTargets.gmStorageAddress = g_Config.GetStaticPointer("GAS_GMStorage", 0x00915594);
+            outTargets.gasMasterAddress = g_Config.GetStaticPointer("GAS_Master", 0x0091559C);
             Log(L"[AUDIO] Falling back to revalidated GOG GAS globals (GM storage=0x%08X, GAS_Master=0x%08X)\n",
                 outTargets.gmStorageAddress, outTargets.gasMasterAddress);
             return true;
         }
 
         SoundChannelOverrideTargets gogFallback = {};
-        gogFallback.gmStorageAddress = 0x00915594;
-        gogFallback.gasMasterAddress = 0x0091559C;
+        gogFallback.gmStorageAddress = g_Config.GetStaticPointer("GAS_GMStorage", 0x00915594);
+        gogFallback.gasMasterAddress = g_Config.GetStaticPointer("GAS_Master", 0x0091559C);
         if (ValidateSoundChannelOverrideTargets(gogFallback, L"Steam fallback"))
         {
             outTargets = gogFallback;
@@ -877,7 +889,7 @@ namespace BZROpenShim
     // -----------------------------------------------------------------------
     // Read BZR.exe file version (minor build number)
     // Mirrors the reference patch logic: reads VS_FIXEDFILEINFO fields.
-    // Expected value: 0x12D == 301 decimal
+    // Expected value: g_Config.GetStaticPointer("BZR_EXPECTED_VERSION_HEX", 0x12D) == 301 decimal
     // -----------------------------------------------------------------------
     static uint32_t GetBZRVersion()
     {
@@ -896,7 +908,7 @@ namespace BZROpenShim
         if (!VerQueryValueA(buf.data(), "\\",
             reinterpret_cast<LPVOID*>(&ffi), &ffiLen))
             return 0xFFFFFFFF;
-        if (!ffi || ffi->dwSignature != 0xFEEF04BD) return 0xFFFFFFFF;
+        if (!ffi || ffi->dwSignature != g_Config.GetStaticPointer("VS_FFI_SIGNATURE", 0xFEEF04BD)) return 0xFFFFFFFF;
 
         Log(L"[INFO] FileVersion MS: 0x%08X, LS: 0x%08X\n", ffi->dwFileVersionMS, ffi->dwFileVersionLS);
         Log(L"[INFO] ProductVersion MS: 0x%08X, LS: 0x%08X\n", ffi->dwProductVersionMS, ffi->dwProductVersionLS);
@@ -1099,15 +1111,15 @@ namespace BZROpenShim
         }
 
         const uint32_t imageBase = static_cast<uint32_t>(nt.OptionalHeader.ImageBase);
-        if (BZR_SIGNATURE_ADDR < imageBase)
+        if (g_Config.GetStaticPointer("BZR_SIGNATURE_ADDR", DEFAULT_BZR_SIGNATURE_ADDR) < imageBase)
         {
             Log(L"[WARN] Signature VA 0x%08X is below image base 0x%08X\n",
-                BZR_SIGNATURE_ADDR, imageBase);
+                static_cast<uint32_t>(g_Config.GetStaticPointer("BZR_SIGNATURE_ADDR", DEFAULT_BZR_SIGNATURE_ADDR)), imageBase);
             CloseHandle(hFile);
             return false;
         }
 
-        const uint32_t sigRva = BZR_SIGNATURE_ADDR - imageBase;
+        const uint32_t sigRva = g_Config.GetStaticPointer("BZR_SIGNATURE_ADDR", DEFAULT_BZR_SIGNATURE_ADDR) - imageBase;
         const uint32_t sigLen = 256;
 
         const uint32_t sectionTableOffset =
@@ -1155,7 +1167,7 @@ namespace BZROpenShim
         }
 
         CloseHandle(hFile);
-        Log(L"[INFO] Loaded signature bytes from disk (VA=0x%08X)\n", BZR_SIGNATURE_ADDR);
+        Log(L"[INFO] Loaded signature bytes from disk (VA=0x%08X)\n", static_cast<uint32_t>(g_Config.GetStaticPointer("BZR_SIGNATURE_ADDR", DEFAULT_BZR_SIGNATURE_ADDR)));
         return true;
     }
 
@@ -1164,10 +1176,10 @@ namespace BZROpenShim
         if (sig.empty())
             return true; // best-effort: skip gating if we couldn't load signature
 
-        Log(L"[INFO] Waiting for signature at 0x%08X...\n", BZR_SIGNATURE_ADDR);
+        Log(L"[INFO] Waiting for signature at 0x%08X...\n", static_cast<uint32_t>(g_Config.GetStaticPointer("BZR_SIGNATURE_ADDR", DEFAULT_BZR_SIGNATURE_ADDR)));
         for (int attempt = 0; attempt < PATCH_MAX_RETRIES; ++attempt)
         {
-            if (BytesMatchAt(BZR_SIGNATURE_ADDR, sig.data(), sig.size()))
+            if (BytesMatchAt(g_Config.GetStaticPointer("BZR_SIGNATURE_ADDR", DEFAULT_BZR_SIGNATURE_ADDR), sig.data(), sig.size()))
             {
                 Log(L"[OK]   Signature matched after %d attempts\n", attempt + 1);
                 return true;
@@ -1185,73 +1197,20 @@ namespace BZROpenShim
     // -----------------------------------------------------------------------
     static void* ResolveRelCallTarget(uint32_t instrAddr)
     {
-        uint8_t buf[5] = {};
-        SIZE_T read = 0;
-        if (!ReadProcessMemory(GetCurrentProcess(),
-                               reinterpret_cast<LPCVOID>(instrAddr),
-                               buf, sizeof(buf), &read) ||
-            read != sizeof(buf))
-            return nullptr;
-
-        if (buf[0] != 0xE8)
-            return nullptr;
-
-        int32_t rel = 0;
-        memcpy(&rel, &buf[1], sizeof(rel));
-        uint32_t target = instrAddr + 5 + static_cast<uint32_t>(rel);
-        return reinterpret_cast<void*>(target);
+        return HookEngine::ResolveRelCallTarget(instrAddr);
     }
 
     static void* ResolveRelCallTargetWithRetry(uint32_t instrAddr, int maxAttempts, DWORD delayMs)
     {
-        for (int attempt = 0; attempt < maxAttempts; ++attempt)
-        {
-            if (void* target = ResolveRelCallTarget(instrAddr))
-            {
-                if (attempt > 0)
-                {
-                    Log(L"[PTR] REL32 call at 0x%08X settled after %d attempts\n",
-                        instrAddr,
-                        attempt + 1);
-                }
-                return target;
-            }
-
-            if (attempt + 1 < maxAttempts)
-                Sleep(delayMs);
-        }
-
-        uint8_t buf[5] = {};
-        SIZE_T read = 0;
-        if (ReadProcessMemory(GetCurrentProcess(),
-                              reinterpret_cast<LPCVOID>(instrAddr),
-                              buf, sizeof(buf), &read) &&
-            read == sizeof(buf))
-        {
-            Log(L"[PTR] REL32 call unresolved at 0x%08X bytes=%02X %02X %02X %02X %02X\n",
-                instrAddr, buf[0], buf[1], buf[2], buf[3], buf[4]);
-        }
-
-        return nullptr;
+        return HookEngine::ResolveRelCallTargetWithRetry(instrAddr, maxAttempts, delayMs);
     }
 
-    // -----------------------------------------------------------------------
-    // Build final patch payloads for JMP5 patches.
-    // For each JMP5 patch, the payload is a 5-byte E9 sequence jumping to
-    // the corresponding Trampoline_xxx function in this DLL.
-    // -----------------------------------------------------------------------
-    // -----------------------------------------------------------------------
-    // Resolve internal BZR.exe pointers for trampolines/helpers.
-    // Now uses dynamic addresses found by pattern scanning.
-    // -----------------------------------------------------------------------
     static void ResolvePointers(uint32_t mapSortingAddr, uint32_t hopFix1Addr, uint32_t hopFix2Addr, uint32_t hopFix3Addr, uint32_t probeMapFilter1Addr, uint32_t probeMapListFix1Addr, uint32_t probeMapListFix2Addr, uint32_t artilleryHowitzerVolleyAddr, uint32_t turretCraftAimPitchAddr, uint32_t turretTankAimPitchAddr, uint32_t underAttackAlertHook1Addr, uint32_t underAttackAlertHook2Addr, uint32_t offensiveAttackRevealAddr, uint32_t turretTankAttackRevealAddr)
     {
         Log(L"=========== RESOLVING POINTERS ===========\n");
 
-        // Hop-Fix 1 - reference patch jumps back to patch site + 0xE
-        // (covers overwritten + inlined original call block).
         if (hopFix1Addr) {
-            g_RetAddr_HopFix1 = reinterpret_cast<void*>(hopFix1Addr + 0x0E);
+            g_RetAddr_HopFix1 = reinterpret_cast<void*>(hopFix1Addr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_HopFix1_Offset", 0x0E)));
             if (void* callTarget = ResolveRelCallTarget(hopFix1Addr + 0x09))
             {
                 g_BZRFnPtr_HopFix1 = reinterpret_cast<void (*)()>(callTarget);
@@ -1260,17 +1219,15 @@ namespace BZROpenShim
             }
             else
             {
-                g_BZRFnPtr_HopFix1 = reinterpret_cast<void (*)()>(0x005D4260);
-                Log(L"[PTR] Hop-Fix 1 call target fallback: 0x%08X\n", 0x005D4260);
+                g_BZRFnPtr_HopFix1 = reinterpret_cast<void (*)()>(g_Config.GetStaticPointer("HopFix1_Fallback", 0x005D4260));
+                Log(L"[PTR] Hop-Fix 1 call target fallback: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("HopFix1_Fallback", 0x005D4260)));
             }
-            Log(L"[PTR] Hop-Fix 1 return: 0x%08X\n", hopFix1Addr + 0x0E);
+            Log(L"[PTR] Hop-Fix 1 return: 0x%08X\n", hopFix1Addr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_HopFix1_Offset", 0x0E)));
         }
 
-        // Hop-Fix 2 - reference patch jumps back to patch site + 0x13.
         if (hopFix2Addr) {
-            g_RetAddr_HopFix2 = reinterpret_cast<void*>(hopFix2Addr + 0x13);
-            g_MapListObject = reinterpret_cast<void**>(0x0094555C);
-            // Stability mode: replay original call site target from 0x00799279 context.
+            g_RetAddr_HopFix2 = reinterpret_cast<void*>(hopFix2Addr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_HopFix2_Offset", 0x13)));
+            g_MapListObject = reinterpret_cast<void**>(g_Config.GetStaticPointer("MapListObject", 0x0094555C));
             if (void* callTarget = ResolveRelCallTarget(hopFix2Addr + 0x0E))
             {
                 g_BZRFnPtr_HopFix2 = reinterpret_cast<void (*)()>(callTarget);
@@ -1279,713 +1236,223 @@ namespace BZROpenShim
             }
             else
             {
-                g_BZRFnPtr_HopFix2 = reinterpret_cast<void (*)()>(0x007CAFA0);
-                Log(L"[PTR] Hop-Fix 2 call target fallback: 0x%08X\n", 0x007CAFA0);
+                g_BZRFnPtr_HopFix2 = reinterpret_cast<void (*)()>(g_Config.GetStaticPointer("HopFix2_Fallback", 0x007CAFA0));
+                Log(L"[PTR] Hop-Fix 2 call target fallback: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("HopFix2_Fallback", 0x007CAFA0)));
             }
-            Log(L"[PTR] Hop-Fix 2 return: 0x%08X\n", hopFix2Addr + 0x13);
+            Log(L"[PTR] Hop-Fix 2 return: 0x%08X\n", hopFix2Addr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_HopFix2_Offset", 0x13)));
         }
 
-        // Hop-Fix 3 - reference patch jumps back to patch site + 7
-        // (CALL EDX + PUSH 0x930).
         if (hopFix3Addr) {
-            g_RetAddr_HopFix3 = reinterpret_cast<void*>(hopFix3Addr + 0x07);
-            Log(L"[PTR] Hop-Fix 3 return: 0x%08X\n", hopFix3Addr + 0x07);
+            g_RetAddr_HopFix3 = reinterpret_cast<void*>(hopFix3Addr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_HopFix3_Offset", 0x07)));
+            Log(L"[PTR] Hop-Fix 3 return: 0x%08X\n", hopFix3Addr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_HopFix3_Offset", 0x07)));
         }
         if (!g_BZRFnPtr_HopFix3Step)
         {
-            g_BZRFnPtr_HopFix3Step = reinterpret_cast<void (*)()>(0x007A3130);
-            Log(L"[PTR] Hop-Fix 3 step function fallback: 0x%08X\n", 0x007A3130);
+            g_BZRFnPtr_HopFix3Step = reinterpret_cast<void (*)()>(g_Config.GetStaticPointer("HopFix3Step_Fallback", 0x007A3130));
+            Log(L"[PTR] Hop-Fix 3 step function fallback: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("HopFix3Step_Fallback", 0x007A3130)));
         }
 
         if (mapSortingAddr) {
-            g_RetAddr_Probe_MapSorting = reinterpret_cast<void*>(mapSortingAddr + 0x07);
-            Log(L"[PTR] Map Sorting return: 0x%08X\n", mapSortingAddr + 0x07);
+            g_RetAddr_Probe_MapSorting = reinterpret_cast<void*>(mapSortingAddr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_HopFix3_Offset", 0x07)));
+            Log(L"[PTR] Map Sorting return: 0x%08X\n", mapSortingAddr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_HopFix3_Offset", 0x07)));
         }
         if (probeMapFilter1Addr) {
-            g_RetAddr_Probe_MapFilter1 = reinterpret_cast<void*>(probeMapFilter1Addr + 0x05);
-            Log(L"[PTR] Probe MapFilter1 return: 0x%08X\n", probeMapFilter1Addr + 0x05);
+            g_RetAddr_Probe_MapFilter1 = reinterpret_cast<void*>(probeMapFilter1Addr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_Probe_MapFilter1_Offset", 0x05)));
+            Log(L"[PTR] Probe MapFilter1 return: 0x%08X\n", probeMapFilter1Addr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_Probe_MapFilter1_Offset", 0x05)));
         }
 
         if (probeMapListFix1Addr) {
-            g_RetAddr_MapListFixSupport1 = reinterpret_cast<void*>(probeMapListFix1Addr + 0x15);
-            g_BZRFn_MapListFixSupport1 = reinterpret_cast<void (*)()>(0x007A3BD0);
-            Log(L"[PTR] Map List Fix Support 1 return: 0x%08X\n", probeMapListFix1Addr + 0x15);
-            Log(L"[PTR] Map List Fix Support 1 fallback: 0x%08X\n", 0x007A3BD0);
+            g_RetAddr_MapListFixSupport1 = reinterpret_cast<void*>(probeMapListFix1Addr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_MapListFixSupport1_Offset", 0x15)));
+            g_BZRFn_MapListFixSupport1 = reinterpret_cast<void (*)()>(g_Config.GetStaticPointer("MapListFixSupport1_Fallback", 0x007A3BD0));
+            Log(L"[PTR] Map List Fix Support 1 return: 0x%08X\n", probeMapListFix1Addr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_MapListFixSupport1_Offset", 0x15)));
+            Log(L"[PTR] Map List Fix Support 1 fallback: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("MapListFixSupport1_Fallback", 0x007A3BD0)));
         }
         if (probeMapListFix2Addr) {
-            g_RetAddr_Probe_MapListFix2 = reinterpret_cast<void*>(probeMapListFix2Addr + 0x05);
-            Log(L"[PTR] Probe MapListFix2 return: 0x%08X\n", probeMapListFix2Addr + 0x05);
+            g_RetAddr_Probe_MapListFix2 = reinterpret_cast<void*>(probeMapListFix2Addr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_Probe_MapFilter1_Offset", 0x05)));
+            Log(L"[PTR] Probe MapListFix2 return: 0x%08X\n", probeMapListFix2Addr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_Probe_MapFilter1_Offset", 0x05)));
         }
         if (artilleryHowitzerVolleyAddr) {
             g_BZRFnPtr_ArtilleryHowitzerVolleyContinue =
-                reinterpret_cast<void*>(artilleryHowitzerVolleyAddr + 0x06);
-            Log(L"[PTR] Artillery howitzer volley continue: 0x%08X\n",
-                artilleryHowitzerVolleyAddr + 0x06);
+                reinterpret_cast<void*>(artilleryHowitzerVolleyAddr + static_cast<uint32_t>(g_Config.GetStaticPointer("BZRFnPtr_Artillery_Offset", 0x06)));
+            Log(L"[PTR] Artillery howitzer volley continue: 0x%08X\n", artilleryHowitzerVolleyAddr + static_cast<uint32_t>(g_Config.GetStaticPointer("BZRFnPtr_Artillery_Offset", 0x06)));
         }
         if (turretCraftAimPitchAddr) {
             g_RetAddr_TurretCraftAimPitchMultiplier =
-                reinterpret_cast<void*>(turretCraftAimPitchAddr + 0x08);
-            Log(L"[PTR] TurretCraft aim pitch return: 0x%08X\n",
-                turretCraftAimPitchAddr + 0x08);
+                reinterpret_cast<void*>(turretCraftAimPitchAddr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_TurretCraft_Offset", 0x08)));
+            Log(L"[PTR] TurretCraft aim pitch return: 0x%08X\n", turretCraftAimPitchAddr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_TurretCraft_Offset", 0x08)));
         }
         if (turretTankAimPitchAddr) {
             g_RetAddr_TurretTankAimPitchMultiplier =
-                reinterpret_cast<void*>(turretTankAimPitchAddr + 0x08);
-            Log(L"[PTR] TurretTank aim pitch return: 0x%08X\n",
-                turretTankAimPitchAddr + 0x08);
+                reinterpret_cast<void*>(turretTankAimPitchAddr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_TurretCraft_Offset", 0x08)));
+            Log(L"[PTR] TurretTank aim pitch return: 0x%08X\n", turretTankAimPitchAddr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_TurretCraft_Offset", 0x08)));
         }
         if (underAttackAlertHook1Addr) {
             g_RetAddr_UnderAttackAlertHook1 =
-                reinterpret_cast<void*>(underAttackAlertHook1Addr + 0x34);
-            Log(L"[PTR] Under-attack alert hook 1 return: 0x%08X\n",
-                underAttackAlertHook1Addr + 0x34);
+                reinterpret_cast<void*>(underAttackAlertHook1Addr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_UnderAttack1_Offset", 0x34)));
+            Log(L"[PTR] Under-attack alert hook 1 return: 0x%08X\n", underAttackAlertHook1Addr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_UnderAttack1_Offset", 0x34)));
         }
         if (underAttackAlertHook2Addr) {
             g_RetAddr_UnderAttackAlertHook2 =
-                reinterpret_cast<void*>(underAttackAlertHook2Addr + 0x34);
-            Log(L"[PTR] Under-attack alert hook 2 return: 0x%08X\n",
-                underAttackAlertHook2Addr + 0x34);
+                reinterpret_cast<void*>(underAttackAlertHook2Addr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_UnderAttack1_Offset", 0x34)));
+            Log(L"[PTR] Under-attack alert hook 2 return: 0x%08X\n", underAttackAlertHook2Addr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_UnderAttack1_Offset", 0x34)));
         }
         if (offensiveAttackRevealAddr) {
             g_RetAddr_OffensiveAttackRevealHook =
-                reinterpret_cast<void*>(offensiveAttackRevealAddr + 0x0C);
-            Log(L"[PTR] Offensive attack reveal return: 0x%08X\n",
-                offensiveAttackRevealAddr + 0x0C);
+                reinterpret_cast<void*>(offensiveAttackRevealAddr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_OffensiveAttack_Offset", 0x0C)));
+            Log(L"[PTR] Offensive attack reveal return: 0x%08X\n", offensiveAttackRevealAddr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_OffensiveAttack_Offset", 0x0C)));
         }
         if (turretTankAttackRevealAddr) {
             g_RetAddr_TurretTankAttackRevealHook =
-                reinterpret_cast<void*>(turretTankAttackRevealAddr + 0x0C);
-            Log(L"[PTR] TurretTank attack reveal return: 0x%08X\n",
-                turretTankAttackRevealAddr + 0x0C);
+                reinterpret_cast<void*>(turretTankAttackRevealAddr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_OffensiveAttack_Offset", 0x0C)));
+            Log(L"[PTR] TurretTank attack reveal return: 0x%08X\n", turretTankAttackRevealAddr + static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_OffensiveAttack_Offset", 0x0C)));
         }
 
         if (EnableExperimentalMapFilters())
         {
-            g_RetAddr_MapFilters1 = reinterpret_cast<void*>(0x007A35C0);
-            g_RetAddr_MapFilters2 = reinterpret_cast<void*>(0x00752D00);
-            g_RetAddr_MapFilters3 = reinterpret_cast<void*>(0x0079D6B9);
-            g_RetAddr_MapFilters4 = reinterpret_cast<void*>(0x0079D699);
-            g_RetAddr_MapFilters5 = reinterpret_cast<void*>(0x0079916B);
-            g_RetAddr_MapFilters7 = reinterpret_cast<void*>(0x007998B4);
-            g_RetAddr_MapFilters8_A = reinterpret_cast<void*>(0x007997B2);
-            g_RetAddr_MapFilters8_B = reinterpret_cast<void*>(0x007997B7);
-            g_RetAddr_MapFilters8_C = reinterpret_cast<void*>(0x0079987C);
-            Log(L"[PTR] MapFilters1 return: 0x%08X\n", 0x007A35C0);
-            Log(L"[PTR] MapFilters2 return: 0x%08X\n", 0x00752D00);
-            Log(L"[PTR] MapFilters3 return: 0x%08X\n", 0x0079D6B9);
-            Log(L"[PTR] MapFilters4 return: 0x%08X\n", 0x0079D699);
-            Log(L"[PTR] MapFilters5 return: 0x%08X\n", 0x0079916B);
-            Log(L"[PTR] MapFilters7 return: 0x%08X\n", 0x007998B4);
-            Log(L"[PTR] MapFilters8 return A: 0x%08X\n", 0x007997B2);
-            Log(L"[PTR] MapFilters8 return B: 0x%08X\n", 0x007997B7);
-            Log(L"[PTR] MapFilters8 return C: 0x%08X\n", 0x0079987C);
+            g_RetAddr_MapFilters1 = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_MapFilters1", 0x007A35C0));
+            g_RetAddr_MapFilters2 = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_MapFilters2", 0x00752D00));
+            g_RetAddr_MapFilters3 = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_MapFilters3", 0x0079D6B9));
+            g_RetAddr_MapFilters4 = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_MapFilters4", 0x0079D699));
+            g_RetAddr_MapFilters5 = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_MapFilters5", 0x0079916B));
+            g_RetAddr_MapFilters7 = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_MapFilters7", 0x007998B4));
+            g_RetAddr_MapFilters8_A = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_MapFilters8_A", 0x007997B2));
+            g_RetAddr_MapFilters8_B = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_MapFilters8_B", 0x007997B7));
+            g_RetAddr_MapFilters8_C = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_MapFilters8_C", 0x0079987C));
+            Log(L"[PTR] MapFilters1 return: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_MapFilters1", 0x007A35C0)));
+            Log(L"[PTR] MapFilters2 return: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_MapFilters2", 0x00752D00)));
+            Log(L"[PTR] MapFilters3 return: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_MapFilters3", 0x0079D6B9)));
+            Log(L"[PTR] MapFilters4 return: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_MapFilters4", 0x0079D699)));
+            Log(L"[PTR] MapFilters5 return: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_MapFilters5", 0x0079916B)));
+            Log(L"[PTR] MapFilters7 return: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_MapFilters7", 0x007998B4)));
+            Log(L"[PTR] MapFilters8 return A: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_MapFilters8_A", 0x007997B2)));
+            Log(L"[PTR] MapFilters8 return B: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_MapFilters8_B", 0x007997B7)));
+            Log(L"[PTR] MapFilters8 return C: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_MapFilters8_C", 0x0079987C)));
         }
         else
         {
             Log(L"[INFO] Experimental map-filter hooks disabled; using stock map filter UI\n");
         }
 
-        // Vehicle list mod fix returns.
-        g_RetAddr_VehicleListModFix1 = reinterpret_cast<void*>(0x00766C52);
-        g_RetAddr_VehicleListModFix4 = reinterpret_cast<void*>(0x00798BE6);
-        Log(L"[PTR] Vehicle ModFix1 return: 0x%08X\n", 0x00766C52);
-        Log(L"[PTR] Vehicle ModFix4 return: 0x%08X\n", 0x00798BE6);
+        g_RetAddr_VehicleListModFix1 = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_VehicleListModFix1", 0x00766C52));
+        g_RetAddr_VehicleListModFix4 = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_VehicleListModFix4", 0x00798BE6));
+        Log(L"[PTR] Vehicle ModFix1 return: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_VehicleListModFix1", 0x00766C52)));
+        Log(L"[PTR] Vehicle ModFix4 return: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_VehicleListModFix4", 0x00798BE6)));
 
-        // Lobby/BZRNET + ban button returns.
-        g_RetAddr_BzrnetHost   = reinterpret_cast<void*>(0x00743C30);
-        g_RetAddr_BzrnetClient = reinterpret_cast<void*>(0x0073E748);
-        g_RetAddr_CommandHelpHandled = reinterpret_cast<void*>(0x00625052);
-        g_RetAddr_CommandHelpFallback = reinterpret_cast<void*>(0x0062491F);
-        g_RetAddr_JoinerEventHook = reinterpret_cast<void*>(0x0073F435);
-        g_RetAddr_BanHook1     = reinterpret_cast<void*>(0x007D0A35);
-        g_RetAddr_BanHook2     = reinterpret_cast<void*>(0x007A691A);
-        g_RetAddr_AutoSaveLoadHook = reinterpret_cast<void*>(0x0078B45F);
-        g_BZRFnPtr_JoinerEventOriginal = reinterpret_cast<void (*)()>(0x00742560);
-        Log(L"[PTR] BZRNET Host return: 0x%08X\n", 0x00743C30);
-        Log(L"[PTR] BZRNET Client return: 0x%08X\n", 0x0073E748);
-        Log(L"[PTR] Command Help handled return: 0x%08X\n", 0x00625052);
-        Log(L"[PTR] Command Help fallback return: 0x%08X\n", 0x0062491F);
-        Log(L"[PTR] Joiner Event return: 0x%08X\n", 0x0073F435);
-        Log(L"[PTR] Ban Hook1 return: 0x%08X\n", 0x007D0A35);
-        Log(L"[PTR] Ban Hook2 return: 0x%08X\n", 0x007A691A);
-        Log(L"[PTR] Joiner Event original: 0x%08X\n", 0x00742560);
+        g_RetAddr_BzrnetHost   = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_BzrnetHost", 0x00743C30));
+        g_RetAddr_BzrnetClient = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_BzrnetClient", 0x0073E748));
+        g_RetAddr_CommandHelpHandled = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_CommandHelpHandled", 0x00625052));
+        g_RetAddr_CommandHelpFallback = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_CommandHelpFallback", 0x0062491F));
+        g_RetAddr_JoinerEventHook = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_JoinerEventHook", 0x0073F435));
+        g_RetAddr_BanHook1     = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_BanHook1", 0x007D0A35));
+        g_RetAddr_BanHook2     = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_BanHook2", 0x007A691A));
+        g_RetAddr_AutoSaveLoadHook = reinterpret_cast<void*>(g_Config.GetStaticPointer("RetAddr_AutoSaveLoadHook", 0x0078B45F));
+        g_BZRFnPtr_JoinerEventOriginal = reinterpret_cast<void (*)()>(g_Config.GetStaticPointer("JoinerEventOriginal", 0x00742560));
+        Log(L"[PTR] BZRNET Host return: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_BzrnetHost", 0x00743C30)));
+        Log(L"[PTR] BZRNET Client return: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_BzrnetClient", 0x0073E748)));
+        Log(L"[PTR] Command Help handled return: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_CommandHelpHandled", 0x00625052)));
+        Log(L"[PTR] Command Help fallback return: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_CommandHelpFallback", 0x0062491F)));
+        Log(L"[PTR] Joiner Event return: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_JoinerEventHook", 0x0073F435)));
+        Log(L"[PTR] Ban Hook1 return: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_BanHook1", 0x007D0A35)));
+        Log(L"[PTR] Ban Hook2 return: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("RetAddr_BanHook2", 0x007A691A)));
+        Log(L"[PTR] Joiner Event original: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("JoinerEventOriginal", 0x00742560)));
 
-        g_BZRFn_GetScrollState = reinterpret_cast<uint32_t (*)()>(0x007D3360);
-        g_BZRFn_ScrollUp = reinterpret_cast<void (*)()>(0x007CB500);
-        g_BZRFn_ScrollDown = reinterpret_cast<void (*)()>(0x007CB540);
-        Log(L"[PTR] Scroll state helper: 0x%08X\n", 0x007D3360);
-        Log(L"[PTR] Scroll up helper: 0x%08X\n", 0x007CB500);
-        Log(L"[PTR] Scroll down helper: 0x%08X\n", 0x007CB540);
+        g_BZRFn_GetScrollState = reinterpret_cast<uint32_t (*)()>(g_Config.GetStaticPointer("GetScrollState", 0x007D3360));
+        g_BZRFn_ScrollUp = reinterpret_cast<void (*)()>(g_Config.GetStaticPointer("ScrollUp", 0x007CB500));
+        g_BZRFn_ScrollDown = reinterpret_cast<void (*)()>(g_Config.GetStaticPointer("ScrollDown", 0x007CB540));
+        Log(L"[PTR] Scroll state helper: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("GetScrollState", 0x007D3360)));
+        Log(L"[PTR] Scroll up helper: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("ScrollUp", 0x007CB500)));
+        Log(L"[PTR] Scroll down helper: 0x%08X\n", static_cast<uint32_t>(g_Config.GetStaticPointer("ScrollDown", 0x007CB540)));
 
         Log(L"[OK]   Pointers resolved\n");
     }
 
-    // -----------------------------------------------------------------------
-    // Runtime pattern scanner - finds patch addresses by scanning memory
-    // This works for both Steam and GOG versions since we search for actual
-    // instruction patterns rather than hardcoded addresses.
-    // -----------------------------------------------------------------------
-    static void ScanForPatchAddresses(std::vector<PatchDef>& patches, bool isSteam)
+    static void ScanForPatchAddresses(std::vector<HookEngine::PatchDef>& patches, bool isSteam)
     {
         Log(L"=========== SCANNING FOR PATTERNS ===========\n");
 
-        // Define patterns to search for
-        struct ScanTarget {
-            const char* patchName;
-            std::vector<uint8_t> pattern;
-            std::vector<uint8_t> mask;  // 0xFF = must match, 0x00 = wildcard
-            uint32_t patchOffset;
-            uint32_t expectedSize;
-        };
-
-        std::vector<ScanTarget> targets = {
-            // Hop-Fix 1 at 0x0079B85F (confirmed identical on Steam and GOG).
-            // Unique 14-byte pattern verified against full process dump (1 hit only):
-            //   8B 45 FC  = MOV EAX,[EBP-4]
-            //   8B 88 38 01 00 00 = MOV ECX,[EAX+0x138]
-            //   E8 F3 89 E3 FF = CALL (relative, follows directly - makes this unique)
-            { "Map List Rewrite for Hop-Fix 1/3",
-              { 0x8B, 0x45, 0xFC, 0x8B, 0x88, 0x38, 0x01, 0x00, 0x00, 0xE8, 0xF3, 0x89, 0xE3, 0xFF },
-              { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF },
-              0,
-              5 },
-
-            // Hop-Fix 2 at 0x00799279 (confirmed identical on Steam and GOG).
-            // Unique 15-byte pattern verified against full process dump (1 hit only):
-            //   6A 00  = PUSH 0
-            //   8B 85 5C FF FF FF = MOV EAX,[EBP-0xA4]
-            //   8B 88 7C 01 00 00 = MOV ECX,[EAX+0x17C]  (7C 01 makes this unique vs other hits)
-            //   E8 = CALL follows
-            { "Map List Rewrite for Hop-Fix 2/3",
-              { 0x6A, 0x00, 0x8B, 0x85, 0x5C, 0xFF, 0xFF, 0xFF, 0x8B, 0x88, 0x7C, 0x01, 0x00, 0x00, 0xE8 },
-              { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF },
-              0,
-              5 },
-
-            // Hop-Fix 3 at 0x00799377 (confirmed identical on Steam and GOG).
-            // Unique 7-byte pattern verified against full process dump (1 hit only):
-            //   FF D2 = CALL EDX
-            //   68 30 09 00 00 = PUSH 0x930
-            { "Map List Rewrite for Hop-Fix 3/3",
-              { 0xFF, 0xD2, 0x68, 0x30, 0x09, 0x00, 0x00 },
-              { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF },
-              0,
-              5 },
-            { "HoverCraft Engine Flame Emit Hook 1/2",
-              { 0x0F, 0x11, 0x04, 0x24, 0x8D, 0x85, 0x00, 0x00, 0x00, 0x00,
-                0x50, 0xB9, 0x00, 0x00, 0x00, 0x00, 0xE8, 0x00, 0x00, 0x00,
-                0x00, 0x83, 0x3D, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0F, 0x84 },
-              { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
-                0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00,
-                0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF },
-              17,
-              4 },
-            { "HoverCraft Engine Flame Emit Hook 2/2",
-              { 0x8D, 0x95, 0x00, 0x00, 0x00, 0x00, 0x52, 0xB9, 0x00, 0x00,
-                0x00, 0x00, 0xE8, 0x00, 0x00, 0x00, 0x00, 0xE9, 0x00, 0x00,
-                0x00, 0x00, 0x83, 0xBD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0F,
-                0x8E },
-              { 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00,
-                0x00, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00,
-                0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF,
-                0xFF },
-              13,
-              4 },
-            // Native artillery helper entry at 0x0042F840 on GOG.
-            // The six-byte prologue is followed by a unique local setup block.
-            { "Artillery Howitzer Volley Hook",
-              { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C, 0x56, 0x89, 0x4D, 0xF8, 0x8B, 0x4D, 0xF8, 0xE8, 0x00, 0x00, 0x00, 0x00, 0x83, 0xE8, 0x01 },
-              { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF },
-              0,
-              6 },
-        };
-
-        // Restrict scan to executable pages inside the main BZR.exe image.
-        HMODULE hMain = GetModuleHandleA(nullptr);
-        uint8_t* mainBase = reinterpret_cast<uint8_t*>(hMain);
-        size_t mainSize = 0;
-        if (hMain)
-        {
-            auto dos = reinterpret_cast<IMAGE_DOS_HEADER*>(hMain);
-            if (dos->e_magic == IMAGE_DOS_SIGNATURE)
+        std::vector<HookEngine::ScanTarget> targets;
+        try {
+            if (g_Config.data.contains("patches"))
             {
-                auto nt = reinterpret_cast<IMAGE_NT_HEADERS*>(
-                    reinterpret_cast<uint8_t*>(hMain) + dos->e_lfanew);
-                if (nt->Signature == IMAGE_NT_SIGNATURE)
-                    mainSize = nt->OptionalHeader.SizeOfImage;
+                for (const auto& p : g_Config.data["patches"])
+                {
+                    HookEngine::ScanTarget target;
+                    target.name = p["name"].get<std::string>();
+                    target.ida_pattern = p["pattern"].get<std::string>();
+                    target.offset = p["offset"].get<uint32_t>();
+                    target.expected_size = p["expected_size"].get<uint32_t>();
+                    target.fallback_addr = std::stoul(p["fallback"].get<std::string>(), nullptr, 16);
+                    targets.push_back(target);
+                }
+            }
+
+            if (g_Config.data.contains("globals"))
+            {
+                for (const auto& g : g_Config.data["globals"])
+                {
+                    const std::string name = g["name"].get<std::string>();
+                    uint32_t fallback = 0;
+                    if (g.contains("fallback"))
+                    {
+                        fallback = std::stoul(g["fallback"].get<std::string>(), nullptr, 16);
+                    }
+                    else if (isSteam && g.contains("fallback_steam"))
+                    {
+                        fallback = std::stoul(g["fallback_steam"].get<std::string>(), nullptr, 16);
+                    }
+                    else if (!isSteam && g.contains("fallback_gog"))
+                    {
+                        fallback = std::stoul(g["fallback_gog"].get<std::string>(), nullptr, 16);
+                    }
+
+                    auto expectedVec = HookEngine::ParseIdaPattern(g["expected_original"].get<std::string>());
+                    std::vector<uint8_t> expected;
+                    for (auto val : expectedVec) expected.push_back(static_cast<uint8_t>(val));
+
+                    for (auto& p : patches)
+                    {
+                        if (p.name == name)
+                        {
+                            p.address = fallback;
+                            p.verified = (fallback != 0);
+                            p.expected_original = expected;
+                            if (p.verified)
+                                Log(L"[JSON] Global %hs => 0x%08X\n", p.name.c_str(), p.address);
+                        }
+                    }
+                }
             }
         }
-
-        if (!mainBase || !mainSize)
-        {
-            Log(L"[SCAN] Failed to resolve main module bounds; skipping scan.\n");
-            return;
+        catch (const std::exception& e) {
+            Log(L"[FAIL] Error parsing patterns: %hs\n", e.what());
         }
 
-        uint8_t* mainEnd = mainBase + mainSize;
-        Log(L"[SCAN] Main image: 0x%08X - 0x%08X\n",
-            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mainBase)),
-            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mainEnd)));
+        HookEngine::ScanForPatterns("", patches, targets);
 
-        // Scan BZR-only memory for each pattern
-        HANDLE hProc = GetCurrentProcess();
-        MEMORY_BASIC_INFORMATION mbi = {};
-        uint8_t* addr = mainBase;
-
-        // Collect all executable memory regions
-        std::vector<std::pair<uint8_t*, size_t>> regions;
-        while (addr < mainEnd && VirtualQuery(addr, &mbi, sizeof(mbi)) == sizeof(mbi))
-        {
-            uint8_t* rBase = reinterpret_cast<uint8_t*>(mbi.BaseAddress);
-            uint8_t* rEnd = rBase + mbi.RegionSize;
-            if (rEnd <= mainBase || rBase >= mainEnd)
-            {
-                addr = rEnd;
-                continue;
-            }
-            uint8_t* clipStart = (rBase < mainBase) ? mainBase : rBase;
-            uint8_t* clipEnd = (rEnd > mainEnd) ? mainEnd : rEnd;
-            size_t clipSize = static_cast<size_t>(clipEnd - clipStart);
-
-            if (clipSize > 0 && mbi.State == MEM_COMMIT &&
-                (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)))
-            {
-                regions.push_back({ clipStart, clipSize });
-            }
-            addr = rEnd;
-        }
-
-        Log(L"[SCAN] Found %zu executable regions\n", regions.size());
-
-        // Search for each pattern
+        // Fallback for missing scans
         for (const auto& target : targets)
         {
-            bool found = false;
-            for (const auto& region : regions)
+            for (auto& p : patches)
             {
-                std::vector<uint8_t> buf(region.second);
-                SIZE_T read = 0;
-                if (!ReadProcessMemory(hProc, region.first, buf.data(), region.second, &read) || read == 0)
-                    continue;
-                if (read < target.pattern.size())
-                    continue;
-
-                for (size_t i = 0; i <= read - target.pattern.size(); i++)
+                if (!p.verified && p.name == target.name)
                 {
-                    bool match = true;
-                    for (size_t j = 0; j < target.pattern.size(); j++)
+                    p.address = target.fallback_addr;
+                    p.verified = true;
+                    auto idaPattern = HookEngine::ParseIdaPattern(target.ida_pattern);
+                    if (target.expected_size > 0)
                     {
-                        if ((buf[i + j] & target.mask[j]) != (target.pattern[j] & target.mask[j]))
-                        {
-                            match = false;
-                            break;
-                        }
+                        p.expected_original.clear();
+                        for (size_t j = 0; j < target.expected_size && j < idaPattern.size(); ++j)
+                            p.expected_original.push_back(static_cast<uint8_t>(idaPattern[j]));
                     }
-
-                    if (match)
-                    {
-                        uint32_t foundAddr = static_cast<uint32_t>(
-                            reinterpret_cast<uintptr_t>(region.first + i));
-                        const size_t patchIndex = i + target.patchOffset;
-                        const uint32_t patchAddr = foundAddr + target.patchOffset;
-                        
-                        Log(L"[SCAN] Found '%hs' at 0x%08X\n", target.patchName, patchAddr);
-                        
-                        // Update the patch address
-                        for (auto& p : patches)
-                        {
-                            if (strcmp(p.name, target.patchName) == 0)
-                            {
-                                p.bzr_address = patchAddr;
-                                p.verified = true;
-                                
-                                p.expected_original.clear();
-                                for (size_t j = 0; j < target.expectedSize && (patchIndex + j) < read; ++j)
-                                    p.expected_original.push_back(buf[patchIndex + j]);
-                                
-                                found = true;
-                                break;
-                            }
-                        }
-                        break;
-                    }
+                    Log(L"[JSON] Fallback %hs => 0x%08X\n", p.name.c_str(), p.address);
                 }
-                if (found) break;
-            }
-
-            if (!found)
-            {
-                Log(L"[SCAN] Pattern '%hs' NOT FOUND\n", target.patchName);
-            }
-        }
-
-        // Fallback for v2.2.301 when pattern scan misses due environment noise.
-        // These Steam fixed sites are stable enough to use as a fallback once
-        // the helper logic matches the intended map-sorting behavior.
-        for (auto& p : patches)
-        {
-            if (p.verified) continue;
-
-            if (strcmp(p.name, "Map Sorting") == 0)
-            {
-                p.bzr_address = 0x007680D6;
-                p.verified = true;
-                p.expected_original = { 0x89, 0x4D, 0xF8, 0x0F, 0xB6 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Map List Rewrite for Hop-Fix 1/3") == 0)
-            {
-                p.bzr_address = 0x0079B85F;
-                p.verified = true;
-                p.expected_original = { 0x8B, 0x45, 0xFC, 0x8B, 0x88 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Map List Rewrite for Hop-Fix 2/3") == 0)
-            {
-                p.bzr_address = 0x00799279;
-                p.verified = true;
-                p.expected_original = { 0x6A, 0x00, 0x8B, 0x85, 0x5C };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Map List Rewrite for Hop-Fix 3/3") == 0)
-            {
-                p.bzr_address = 0x00799377;
-                p.verified = true;
-                p.expected_original = { 0xFF, 0xD2, 0x68, 0x30, 0x09 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Map List Fix Support 1/3") == 0)
-            {
-                p.bzr_address = 0x00799774;
-                p.verified = true;
-                p.expected_original = { 0x89, 0x4D, 0xFC, 0x8B, 0x45 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Map Jump Fix Branch Override") == 0)
-            {
-                p.bzr_address = 0x007AA5A1;
-                p.verified = true;
-                p.expected_original = { 0x75 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Version Notice 1/2 OpenShim") == 0)
-            {
-                p.bzr_address = isSteam ? 0x004B022B : 0x0078DD4E;
-                p.verified = true;
-                p.expected_original = { 0xE4, 0x84, 0x87, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Version Notice 2/2 OpenShim") == 0)
-            {
-                p.bzr_address = isSteam ? 0x004B0247 : 0x00618C2F;
-                p.verified = true;
-                p.expected_original = { 0xE4, 0x84, 0x87, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Version Notice 3/3 OpenShim") == 0)
-            {
-                if (!isSteam)
-                {
-                    Log(L"[SCAN] SKIPPED %hs (Steam-only site)\n", p.name);
-                    continue;
-                }
-
-                p.bzr_address = 0x005091F4;
-                p.verified = true;
-                p.expected_original = { 0xE4, 0x84, 0x87, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Main Menu GameVersion OpenShim") == 0)
-            {
-                if (!isSteam)
-                {
-                    Log(L"[SCAN] SKIPPED %hs (Steam-only site)\n", p.name);
-                    continue;
-                }
-
-                p.bzr_address = 0x008EDA3C;
-                p.verified = true;
-                p.expected_original = { 0xE4, 0x84, 0x87, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Main Menu Version Text OpenShim") == 0)
-            {
-                p.bzr_address = 0x0078DD4E;
-                p.verified = true;
-                p.expected_original = { 0xE4, 0x84, 0x87, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)") == 0)
-            {
-                p.bzr_address = 0x00766C4A;
-                p.verified = true;
-                p.expected_original = { 0xE8, 0xA1, 0xAE, 0xD1, 0xFF };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Vehicle List Mod Fix 2/4 (Force Mod-Scoped Assets 2/3)") == 0)
-            {
-                // rel32 operand for CALL at 0x0079A4F3
-                p.bzr_address = 0x0079A4F4;
-                p.verified = true;
-                p.expected_original = { 0x68, 0x99, 0x00, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)") == 0)
-            {
-                p.bzr_address = 0x00798BD9;
-                p.verified = true;
-                p.expected_original = { 0x51, 0xE8, 0xA1, 0xBB, 0xFC };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Map Filters 3/8") == 0)
-            {
-                p.bzr_address = 0x0079D6B1;
-                p.verified = true;
-                p.expected_original = { 0x8B, 0xEC, 0x8B, 0x0D, 0x64 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Map Filters 1/8") == 0)
-            {
-                p.bzr_address = 0x007A31D9;
-                p.verified = true;
-                p.expected_original = { 0x68, 0xE0, 0xB3, 0x89, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Map Filters 2/8") == 0)
-            {
-                p.bzr_address = 0x00752A82;
-                p.verified = true;
-                p.expected_original = { 0xE8, 0x49, 0x04, 0x00, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Map Filters 4/8") == 0)
-            {
-                p.bzr_address = 0x0079D691;
-                p.verified = true;
-                p.expected_original = { 0x8B, 0xEC, 0x8B, 0x0D, 0x64 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Map Filters 5/8") == 0)
-            {
-                p.bzr_address = 0x00799116;
-                p.verified = true;
-                p.expected_original = { 0x52, 0x6A, 0x20, 0x6A, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Map Filters 6/8") == 0)
-            {
-                p.bzr_address = 0x0079920A;
-                p.verified = true;
-                p.expected_original = { 0x92, 0x23, 0x03, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Map Filters 7/8") == 0)
-            {
-                p.bzr_address = 0x007998AB;
-                p.verified = true;
-                p.expected_original = { 0x8B, 0x45, 0xBC, 0x8B, 0x88 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Map Filters 8/8") == 0)
-            {
-                p.bzr_address = 0x007997A9;
-                p.verified = true;
-                p.expected_original = { 0x8B, 0x45, 0xF8, 0x8B, 0x88 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Chunk Render Resolve Hook") == 0)
-            {
-                // rel32 operand for CALL 0x004E3620 at 0x00443B34
-                p.bzr_address = 0x00443B35;
-                p.verified = true;
-                p.expected_original = { 0xE7, 0xFA, 0x09, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Producer Build Menu Root Hook") == 0)
-            {
-                // rel32 operand for CALL 0x0082BA59 at 0x004FFA9E
-                p.bzr_address = 0x004FFA9F;
-                p.verified = true;
-                p.expected_original = { 0xB6, 0xBF, 0x32, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Target Reticle Popup Recent-Hit Getter Hook") == 0)
-            {
-                // rel32 operand for CALL 0x00497890 at 0x00497C26
-                p.bzr_address = 0x00497C27;
-                p.verified = true;
-                p.expected_original = { 0x65, 0xFC, 0xFF, 0xFF };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "HoverCraft Engine Flame Emit Hook 1/2") == 0)
-            {
-                p.bzr_address = 0x004EAD78;
-                p.verified = true;
-                p.expected_original = { 0x84, 0xDA, 0xFD, 0xFF };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "HoverCraft Engine Flame Emit Hook 2/2") == 0)
-            {
-                p.bzr_address = 0x004EAFDF;
-                p.verified = true;
-                p.expected_original = { 0x1D, 0xD8, 0xFD, 0xFF };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Engine Flame Control VTable Hook") == 0)
-            {
-                p.bzr_address = 0x008791A4;
-                p.verified = true;
-                p.expected_original = { 0xA0, 0x88, 0x4C, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Engine Flame Submit VTable Hook") == 0)
-            {
-                p.bzr_address = 0x008791AC;
-                p.verified = true;
-                p.expected_original = { 0xC0, 0x88, 0x4C, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Chunk Effect Simulate VTable Hook") == 0)
-            {
-                p.bzr_address = 0x0087708C;
-                p.verified = true;
-                p.expected_original = { 0xF0, 0x17, 0x49, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Artillery Howitzer Volley Hook") == 0)
-            {
-                p.bzr_address = 0x0042F840;
-                p.verified = true;
-                p.expected_original = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Decoded Weapon Mask Carrier Bias Hook") == 0)
-            {
-                p.bzr_address = 0x00417C80;
-                p.verified = true;
-                p.expected_original = { 0x55, 0x8B, 0xEC, 0x51, 0x89 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Raw Weapon Mask Carrier Bias Hook") == 0)
-            {
-                p.bzr_address = 0x0046DD70;
-                p.verified = true;
-                p.expected_original = { 0x55, 0x8B, 0xEC, 0x51, 0x89 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Lobby BZRNET Integration HOST") == 0)
-            {
-                p.bzr_address = 0x00743C05;
-                p.verified = true;
-                p.expected_original = { 0x8D, 0x85, 0x00, 0xFF, 0xFF };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Lobby BZRNET Integration CLIENT") == 0)
-            {
-                p.bzr_address = 0x0073E71C;
-                p.verified = true;
-                p.expected_original = { 0xC6, 0x45, 0xFC, 0x07, 0x8D };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Custom Command /help Handler") == 0)
-            {
-                p.bzr_address = 0x0062480B;
-                p.verified = true;
-                p.expected_original = { 0x68, 0x3C, 0xD5, 0x88, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Joiner Event Hook") == 0)
-            {
-                p.bzr_address = 0x0073F430;
-                p.verified = true;
-                p.expected_original = { 0xE8, 0x2B, 0x31, 0x00, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Ban Button Hook 1/2") == 0)
-            {
-                p.bzr_address = 0x007D0A2F;
-                p.verified = true;
-                p.expected_original = { 0x0F, 0xB6, 0x45, 0x20, 0x85 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Ban Button Hook 2/2") == 0)
-            {
-                p.bzr_address = 0x007A6913;
-                p.verified = true;
-                p.expected_original = { 0xC7, 0x45, 0xFC, 0xFF, 0xFF };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "AutoSave Load Button Hook") == 0)
-            {
-                p.bzr_address = 0x0078B45A;
-                p.verified = true;
-                p.expected_original = { 0xA1, 0x0C, 0x83, 0x91, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Restart Mission Hook Pause") == 0)
-            {
-                p.bzr_address = 0x00788F40;
-                p.verified = true;
-                p.expected_original = { 0x55, 0x8B, 0xEC, 0x51, 0x89 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Restart Mission Hook Failure") == 0)
-            {
-                p.bzr_address = 0x00791F50;
-                p.verified = true;
-                p.expected_original = { 0x55, 0x8B, 0xEC, 0x51, 0x89 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "TurretCraft Aim Pitch Multiplier") == 0)
-            {
-                p.bzr_address = 0x005F1838;
-                p.verified = true;
-                p.expected_original = { 0xF3, 0x0F, 0x10, 0x05, 0x84, 0x25, 0x8A, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "TurretTank Aim Pitch Multiplier") == 0)
-            {
-                p.bzr_address = 0x005F561A;
-                p.verified = true;
-                p.expected_original = { 0xF3, 0x0F, 0x10, 0x05, 0x84, 0x25, 0x8A, 0x00 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Under Attack Alert Hook 1/2") == 0)
-            {
-                p.bzr_address = 0x00494D35;
-                p.verified = true;
-                p.expected_original = { 0x0F, 0x2F, 0x05, 0xD0, 0x73 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Under Attack Alert Hook 2/2") == 0)
-            {
-                p.bzr_address = 0x0050E6DD;
-                p.verified = true;
-                p.expected_original = { 0x0F, 0x2F, 0x05, 0xD0, 0x73 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "Offensive Attack Reveal Hook") == 0)
-            {
-                p.bzr_address = 0x005839E0;
-                p.verified = true;
-                p.expected_original = { 0x8B, 0x4D, 0xF8, 0x8B, 0x55, 0xF8, 0x8B, 0x42, 0x1C, 0x89, 0x41, 0x24 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else if (strcmp(p.name, "TurretTank Attack Reveal Hook") == 0)
-            {
-                p.bzr_address = 0x005F73F3;
-                p.verified = true;
-                p.expected_original = { 0x8B, 0x55, 0xF8, 0x8B, 0x45, 0xF8, 0x8B, 0x48, 0x1C, 0x89, 0x4A, 0x24 };
-                Log(L"[SCAN] Fallback %hs => 0x%08X\n", p.name, p.bzr_address);
-            }
-            else
-            {
-                Log(L"[SCAN] SKIPPED %hs (pattern not found, no safe fallback)\n", p.name);
             }
         }
     }
 
-    static void FillJmp5Payloads(std::vector<PatchDef>& patches)
+
+    static void FillJmp5Payloads(std::vector<HookEngine::PatchDef>& patches)
     {
         // Map patch names to their trampoline addresses
         struct { const char* name; void* fn; } map[] =
@@ -2029,7 +1496,7 @@ namespace BZROpenShim
 
         for (auto& p : patches)
         {
-            if (p.type != PatchType::JMP5) continue;
+            if (p.type != HookEngine::PatchType::JMP5) continue;
             if (!p.verified) continue;   // skip unverified entries
 
             for (auto& m : map)
@@ -2052,11 +1519,11 @@ namespace BZROpenShim
         }
     }
 
-    static void FillRel32Payloads(std::vector<PatchDef>& patches, bool isSteam)
+    static void FillRel32Payloads(std::vector<HookEngine::PatchDef>& patches, bool isSteam)
     {
         for (auto& p : patches)
         {
-            if (p.type != PatchType::REL32) continue;
+            if (p.type != HookEngine::PatchType::REL32) continue;
             if (!p.verified) continue;
             if (strcmp(p.name, "Vehicle List Mod Fix 2/4 (Force Mod-Scoped Assets 2/3)") == 0)
             {
@@ -2092,11 +1559,11 @@ namespace BZROpenShim
                 void* originalTarget = nullptr;
                 if (isSteam)
                 {
-                    originalTarget = ResolveRelCallTargetWithRetry(instrAddr, 300, 10);
+                    originalTarget = HookEngine::ResolveRelCallTargetWithRetry(instrAddr, 300, 10);
                 }
                 else
                 {
-                    originalTarget = ResolveRelCallTarget(instrAddr);
+                    originalTarget = HookEngine::ResolveRelCallTarget(instrAddr);
                 }
                 if (!originalTarget)
                 {
@@ -2134,7 +1601,7 @@ namespace BZROpenShim
         }
     }
 
-    static void FillVersionNoticePayloads(std::vector<PatchDef>& patches)
+    static void FillVersionNoticePayloads(std::vector<HookEngine::PatchDef>& patches)
     {
         const uint32_t tagPtr = static_cast<uint32_t>(
             reinterpret_cast<uintptr_t>(kOpenShimVersionTag));
@@ -2155,7 +1622,7 @@ namespace BZROpenShim
 
         for (auto& p : patches)
         {
-            if (p.type != PatchType::DWORD) continue;
+            if (p.type != HookEngine::PatchType::DWORD) continue;
             if (strcmp(p.name, "Version Notice 1/2 OpenShim") == 0 ||
                 strcmp(p.name, "Version Notice 2/2 OpenShim") == 0 ||
                 strcmp(p.name, "Version Notice 3/3 OpenShim") == 0 ||
@@ -2179,7 +1646,7 @@ namespace BZROpenShim
         }
     }
 
-    static void WaitForExpectedBytes(std::vector<PatchDef>& patches, bool isSteam)
+    static void WaitForExpectedBytes(std::vector<HookEngine::PatchDef>& patches, bool isSteam)
     {
         if (!isSteam)
             return;
@@ -2194,7 +1661,7 @@ namespace BZROpenShim
             "TurretTank Attack Reveal Hook",
         };
 
-        auto isTrackedPatch = [&steamTrackedNames](const PatchDef& patch) -> bool
+        auto isTrackedPatch = [&steamTrackedNames](const HookEngine::PatchDef& patch) -> bool
         {
             for (const char* name : steamTrackedNames)
             {
@@ -2250,6 +1717,7 @@ namespace BZROpenShim
     // -----------------------------------------------------------------------
     void RunPatcher(uint32_t shimVersion)
     {
+        g_Config.Load();
         // 1. Open log
         _wfopen_s(&g_Log, L"winmm_shim.log", L"w");
         if (g_Log)
@@ -2284,7 +1752,7 @@ namespace BZROpenShim
         // 2. Check BZR.exe version
         uint32_t gameVer = GetBZRVersion();
         Log(L"[INFO] Detected BZR version: %u (expected %u)\n", gameVer, BZR_EXPECTED_VERSION);
-        if (gameVer != BZR_EXPECTED_VERSION)
+        if (gameVer != static_cast<uint32_t>(g_Config.GetStaticPointer("BZR_EXPECTED_VERSION", BZR_EXPECTED_VERSION)))
         {
             Log(L"[FAIL] Version mismatch; aborting patcher\n");
             return;
@@ -2300,6 +1768,7 @@ namespace BZROpenShim
         StartSoundChannelOverride(isSteam);
 
         // 4. Build patch list and resolve dynamic addresses
+        g_Config.Load();
         auto patches = BuildPatchList();
         FilterPatchesForRuntime(patches, isSteam);
         if (ShouldEnableArtilleryMaskTracePatch())
@@ -2376,68 +1845,15 @@ namespace BZROpenShim
             int result = 0;
             switch (p.type)
             {
-            case PatchType::JMP5:
-                if (p.payload.size() < 5)
-                {
-                    Log(L"[SKIP] %hs (jmp payload missing)\n", p.name);
-                    result = 0;
-                }
-                else
-                {
-                    result = ApplyPatch(p.bzr_address, p.payload.data(), p.payload.size(),
-                                        p.name, p.expected_original);
-                }
-                break;
-            case PatchType::DWORD:
-                if (p.payload.size() < 4)
-                {
-                    Log(L"[SKIP] %hs (DWORD payload missing)\n", p.name);
-                    result = 0;
-                }
-                else
-                {
-                    result = ApplyPatch(p.bzr_address, p.payload.data(), 4,
-                                        p.name, p.expected_original);
-                }
-                break;
-            case PatchType::REL32:
-                if (p.payload.size() < 4)
-                {
-                    Log(L"[SKIP] %hs (REL32 payload missing)\n", p.name);
-                    result = 0;
-                }
-                else
-                {
-                    result = ApplyPatch(p.bzr_address, p.payload.data(), 4,
-                                        p.name, p.expected_original);
-                }
-                break;
-            case PatchType::BYTE1:
-                if (p.payload.empty())
-                {
-                    Log(L"[SKIP] %hs (BYTE payload missing)\n", p.name);
-                    result = 0;
-                }
-                else
-                {
-                    result = ApplyPatch(p.bzr_address, p.payload.data(), 1,
-                                        p.name, p.expected_original);
-                }
-                break;
-            case PatchType::BYTES:
-                if (p.payload.empty())
-                {
-                    Log(L"[SKIP] %hs (BYTES payload missing)\n", p.name);
-                    result = 0;
-                }
-                else
-                {
-                    result = ApplyPatch(p.bzr_address, p.payload.data(), p.payload.size(),
-                                        p.name, p.expected_original);
-                }
+            case HookEngine::PatchType::JMP5:
+            case HookEngine::PatchType::DWORD:
+            case HookEngine::PatchType::REL32:
+            case HookEngine::PatchType::BYTE1:
+            case HookEngine::PatchType::BYTES:
+                result = HookEngine::ApplyPatch(p) ? 1 : -1;
                 break;
             default:
-                Log(L"[SKIP] %hs (unknown patch type)\n", p.name);
+                Log(L"[SKIP] %hs (unknown patch type)\n", p.name.c_str());
                 result = 0;
                 break;
             }
@@ -2448,6 +1864,8 @@ namespace BZROpenShim
         }
 
         Log(L"[DONE] Applied=%d Skipped=%d Failed=%d\n", applied, skipped, failed);
+        SetPatchingComplete(true);
+        SetAppliedPatchCount(applied);
 
         // Keep the log file open for runtime hook telemetry (LogHit in trampolines).
         // Closing here leaves g_Log dangling while hooks are still active.
