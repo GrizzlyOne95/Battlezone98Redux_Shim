@@ -9,6 +9,10 @@
 
 namespace BZROpenShim
 {
+    void SetPatchingComplete(bool complete);
+    void SetAppliedPatchCount(uint32_t count);
+    void SetCompatibleVersion(bool compatible);
+
     // Expected BZR.exe file version (decimal 301)
     static constexpr uint32_t BZR_EXPECTED_VERSION = 301; // 0x12D
 
