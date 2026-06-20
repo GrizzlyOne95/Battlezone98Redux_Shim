@@ -9,6 +9,23 @@ This repo is part of the local Battlezone workspace opened via
 - Some machines also keep a baseline install at `C:\GOG Games\Battlezone 98 Redux`.
 - Prefer the workspace file and these conventions over hardcoded profile-specific paths.
 
+
+## Refactored Architecture (2025)
+- The project has been decoupled into a generic Hooking Engine and Battlezone-specific Patch Logic.
+- ****: Contains the C++ SDK () and internal engine headers.
+- ****: The core  handles memory I/O and IDA-style pattern scanning.
+- ****: Battlezone-specific trampolines and hooks.
+- ****: External configuration for all memory patterns and offsets. This is the primary file to update for game patches.
+- **Delay-Loading**: System dependencies like  and  are delay-loaded for robustness.
+
+
+- The project has been decoupled into a generic Hooking Engine and Battlezone-specific Patch Logic.
+- **include/**: Contains the C++ SDK (BZROpenShim.h) and internal engine headers.
+- **src/engine/**: The core HookEngine handles memory I/O and IDA-style pattern scanning.
+- **src/patches/**: Battlezone-specific trampolines and hooks.
+- **scripts/patches.json**: External configuration for all memory patterns and offsets. This is the primary file to update for game patches.
+- **Delay-Loading**: System dependencies like ws2_32.dll and gdiplus.dll are delay-loaded for robustness.
+
 ## Local Role
 - Native shim, patching, and reverse-engineering repo.
 - Owns `winmm.dll`, patch trampolines, and native save or loader investigations.
