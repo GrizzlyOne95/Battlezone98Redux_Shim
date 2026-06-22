@@ -10,12 +10,12 @@ baseline.
 
 ## Legacy Runtime Setup
 
-- EXE: `C:\Program Files (x86)\Battlezone\bzone.exe`
-- PDB: `C:\Program Files (x86)\Battlezone\bzint.pdb`
+- EXE: `<GAME_ROOT>\bzone.exe`
+- PDB: `<GAME_ROOT>\bzint.pdb`
 - Match status: exact legacy EXE/PDB match confirmed in
-  [`reference.json`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\badlands\legacy_bz1_exact_full\pdb_reference\reference.json)
+  [`reference.json`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\badlands\legacy_bz1_exact_full\pdb_reference\reference.json)
 - Live trace helper:
-  [`legacy_bzone_chunk_trace.js`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\legacy_bzone_chunk_trace.js)
+  [`legacy_bzone_chunk_trace.js`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\legacy_bzone_chunk_trace.js)
 
 The Frida helper attached to the live legacy process and traced:
 
@@ -35,7 +35,7 @@ Live `avtank` destruction produced:
 - additional `CreateChunk` and `CreateChunklet` calls from that same death
 
 Representative trace lines from
-[`tmp_legacy_frida.log`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\tmp_legacy_frida.log):
+[`tmp_legacy_frida.log`](<USER_HOME>\Documents\GIT\BZR-OpenShim\tmp_legacy_frida.log):
 
 - `[Craft::Explode] this=0xb01988 obj=0x44dac000`
 - `[FullFragmentObject] this=0xb1a788 obj=0x136d5f70`
@@ -91,15 +91,15 @@ Close the loop between the legacy Frida trace and the Steam Redux `winmm.dll`
 
 ### Redux Automated Repro
 
-- Game: `C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux`
+- Game: `<GAME_ROOT>`
 - Packaged mod target:
-  `C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux\packaged_mods\3686673790`
+  `<GAME_ROOT>\packaged_mods\3686673790`
 - Mission launch:
   `battlezone98redux misn06.bzn /edit`
 - Cutscene skip timing:
   send `SPACE` during load, `150ms` after the first main window appears
 - Automation helper:
-  [`run_misn06_auto_capture.ps1`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\run_misn06_auto_capture.ps1)
+  [`run_misn06_auto_capture.ps1`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\run_misn06_auto_capture.ps1)
 - Current validated shim hash:
   `9303CBA2DF99AA09AF4A9936770DB2FDEB82F544AD5BCB5E65FD31BB5A216C01`
 
@@ -117,7 +117,7 @@ present in the fragment walker:
 
 - Frida saw `_svtank` at `gameObj=0x029E5320` during
   `CreateChunkParent` / `FragmentParentA` in
-  [`frida.log`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\misn06_auto_20260402_090250\delay_0150ms\frida.log)
+  [`frida.log`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\misn06_auto_20260402_090250\delay_0150ms\frida.log)
 
 The clean Redux shim run now mirrors that same identity without Frida:
 
@@ -129,7 +129,7 @@ The clean Redux shim run now mirrors that same identity without Frida:
   `root=0x4025E678 rootGameObj=0x029E5320 ownerObj=0x3B3C58F8`
 
 Representative clean lines from
-[`openshim.log`](C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux\openshim.log):
+[`openshim.log`](<GAME_ROOT>\openshim.log):
 
 - `CreateChunk ... callerRva=0x00092565`
 - `srcTree ... selectedOdf=svtank ... rootOdf=svtank ... ownerBase=svtank`

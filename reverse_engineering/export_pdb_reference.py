@@ -282,7 +282,7 @@ def main() -> None:
     parser.add_argument("--pe", type=Path, required=True, help="Path to the executable or DLL that the PDB approximates.")
     parser.add_argument("--pdb", type=Path, required=True, help="Path to the PDB file.")
     parser.add_argument("--output-dir", type=Path, required=True, help="Directory for exported metadata.")
-    parser.add_argument("--llvm-pdbutil", type=Path, default=Path(r"C:\Program Files\LLVM\bin\llvm-pdbutil.exe"))
+    parser.add_argument("--llvm-pdbutil", type=Path, default=Path(r"<LLVM_ROOT>\bin\llvm-pdbutil.exe"))
     parser.add_argument("--skip-llvm", action="store_true", help="Skip llvm-pdbutil exports.")
     parser.add_argument("--lightweight", action="store_true", help="Skip the heaviest llvm-pdbutil dumps.")
     args = parser.parse_args()

@@ -6,36 +6,37 @@ on:
       - 'v*'
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build:
-    name: Build winmm.dll
     runs-on: windows-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
 
-      - name: Add MSBuild to PATH
-        uses: microsoft/setup-msbuild@v2
+    - name: Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v2
 
-      - name: Build Solution
-        run: msbuild BZROpenShim.sln /p:Configuration=Release /p:Platform=Win32
+    - name: Build Shim
+      run: msbuild BZROpenShim.sln /p:Configuration=Release /p:Platform=Win32 /m
 
-      - name: Verify DLL Output
-        shell: pwsh
-        run: |
-          if (!(Test-Path "bin/Release/winmm.dll")) {
-            throw "winmm.dll was not built!"
-          }
+    - name: Prepare Release Artifacts
+      run: |
+        mkdir release_assets
+        cp bin/Release/winmm.dll release_assets/
+        cp scripts/patches.json release_assets/
+      shell: bash
 
-      - name: Release DLL
-        uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: |
-            bin/Release/winmm.dll
-            bin/Release/winmm.pdb
-          generate_release_notes: true
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          release_assets/winmm.dll
+          release_assets/patches.json
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,6 +1,6 @@
 {
-  "pe_path": "C:\\GOG Games\\Battlezone 98 Redux\\battlezone98redux.exe",
-  "pdb_path": "C:\\GOG Games\\Battlezone 98 Redux\\battlezone98redux.pdb",
+  "pe_path": "<GAME_ROOT>\\battlezone98redux.exe",
+  "pdb_path": "<GAME_ROOT>\\battlezone98redux.pdb",
   "pe_sha256": "8d71f56c1314e69a8ad38f4eeaf20a8ff825965a84cf196e5f77ea4cc3377413",
   "pdb_sha256": "3d948fc7c532af770389b91e09c5a2f123fad9f0838b711b34bf8ae755f8162b",
   "pe_rsds": {
@@ -41,64 +41,64 @@
   },
   "llvm_exports": [
     {
-      "file": "C:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\pdb_reference\\llvm\\dump_summary.txt",
+      "file": "<USER_HOME>\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\pdb_reference\\llvm\\dump_summary.txt",
       "exit_code": 0,
       "command": [
-        "C:\\Program Files\\LLVM\\bin\\llvm-pdbutil.exe",
+        "<LLVM_ROOT>\\bin\\llvm-pdbutil.exe",
         "dump",
         "--summary",
         "--streams",
         "--named-streams",
         "--section-headers",
         "--modules",
-        "C:\\GOG Games\\Battlezone 98 Redux\\battlezone98redux.pdb"
+        "<GAME_ROOT>\\battlezone98redux.pdb"
       ]
     },
     {
-      "file": "C:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\pdb_reference\\llvm\\pretty_funcs.txt",
+      "file": "<USER_HOME>\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\pdb_reference\\llvm\\pretty_funcs.txt",
       "exit_code": 0,
       "command": [
-        "C:\\Program Files\\LLVM\\bin\\llvm-pdbutil.exe",
+        "<LLVM_ROOT>\\bin\\llvm-pdbutil.exe",
         "pretty",
         "--globals",
         "--sym-types=funcs",
         "--symbol-order=name",
         "--no-system-libs",
-        "C:\\GOG Games\\Battlezone 98 Redux\\battlezone98redux.pdb"
+        "<GAME_ROOT>\\battlezone98redux.pdb"
       ]
     },
     {
-      "file": "C:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\pdb_reference\\llvm\\compiland_files.txt",
+      "file": "<USER_HOME>\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\pdb_reference\\llvm\\compiland_files.txt",
       "exit_code": 0,
       "command": [
-        "C:\\Program Files\\LLVM\\bin\\llvm-pdbutil.exe",
+        "<LLVM_ROOT>\\bin\\llvm-pdbutil.exe",
         "dump",
         "--files",
-        "C:\\GOG Games\\Battlezone 98 Redux\\battlezone98redux.pdb"
+        "<GAME_ROOT>\\battlezone98redux.pdb"
       ]
     },
     {
-      "file": "C:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\pdb_reference\\llvm\\pretty_classes.txt",
+      "file": "<USER_HOME>\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\pdb_reference\\llvm\\pretty_classes.txt",
       "exit_code": 0,
       "command": [
-        "C:\\Program Files\\LLVM\\bin\\llvm-pdbutil.exe",
+        "<LLVM_ROOT>\\bin\\llvm-pdbutil.exe",
         "pretty",
         "--classes",
         "--class-order=name",
         "--class-definitions=layout",
         "--no-system-libs",
-        "C:\\GOG Games\\Battlezone 98 Redux\\battlezone98redux.pdb"
+        "<GAME_ROOT>\\battlezone98redux.pdb"
       ]
     },
     {
-      "file": "C:\\Users\\istuart\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\pdb_reference\\llvm\\publics.txt",
+      "file": "<USER_HOME>\\Documents\\GIT\\Battlezone98Redux_Shim\\reverse_engineering\\workshop\\global_decompile\\bzr_gog_best_effort\\pdb_reference\\llvm\\publics.txt",
       "exit_code": 0,
       "command": [
-        "C:\\Program Files\\LLVM\\bin\\llvm-pdbutil.exe",
+        "<LLVM_ROOT>\\bin\\llvm-pdbutil.exe",
         "dump",
         "--publics",
         "--globals",
-        "C:\\GOG Games\\Battlezone 98 Redux\\battlezone98redux.pdb"
+        "<GAME_ROOT>\\battlezone98redux.pdb"
       ]
     }
   ]

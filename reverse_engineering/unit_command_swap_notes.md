@@ -10,13 +10,13 @@ arbitrary per-unit command injection with custom text and Lua dispatch.
 
 Compared and inspected:
 
-- `C:\Users\istuart\Documents\GIT\Battlezone98Redux_CampaignReimagined-1\_Source\ODF\svfigh.odf`
-- `C:\Users\istuart\Documents\GIT\Battlezone98Redux_CampaignReimagined-1\_Source\ODF\cvfigh.odf`
-- `C:\GOG Games\Battlezone 98 Redux\battlezone98redux.exe`
-- `C:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb`
-- `C:\Users\istuart\Downloads\Battlezone 98 Redux\battlezone98redux.exe`
-- `C:\Users\istuart\Documents\GIT\ExtraUtilities-G1`
-- `C:\Users\istuart\Documents\GIT\Battlezone98Redux_Shim\reverse_engineering\workshop\global_decompile\legacy_bz1_exact_full`
+- `<USER_HOME>\Documents\GIT\Battlezone98Redux_CampaignReimagined-1\_Source\ODF\svfigh.odf`
+- `<USER_HOME>\Documents\GIT\Battlezone98Redux_CampaignReimagined-1\_Source\ODF\cvfigh.odf`
+- `<GAME_ROOT>\battlezone98redux.exe`
+- `<GAME_ROOT>\battlezone98redux.pdb`
+- `<USER_HOME>\Downloads\Battlezone 98 Redux\battlezone98redux.exe`
+- `<USER_HOME>\Documents\GIT\ExtraUtilities-G1`
+- `<USER_HOME>\Documents\GIT\Battlezone98Redux_Shim\reverse_engineering\workshop\global_decompile\legacy_bz1_exact_full`
 
 ### ODF Findings
 
