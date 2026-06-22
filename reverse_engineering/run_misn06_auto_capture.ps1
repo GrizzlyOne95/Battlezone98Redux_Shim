@@ -1,6 +1,6 @@
 param(
-    [string]$GameRoot = "C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux",
-    [string]$PackagedModsRoot = "C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux\packaged_mods\3686673790",
+    [string]$GameRoot = "<GAME_ROOT>",
+    [string]$PackagedModsRoot = "<GAME_ROOT>\packaged_mods\3686673790",
     [string]$MissionArgs = "misn06.bzn /edit",
     [int[]]$SpaceDelaysMs = @(250, 500, 750, 1000),
     [int]$SpaceRetryIntervalMs = 400,
@@ -110,7 +110,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $gameExe = Join-Path $GameRoot "battlezone98redux.exe"
 $gameLog = Join-Path $GameRoot "openshim.log"
 $bzLogger = Join-Path $GameRoot "BZLogger.txt"
-$dumpRoot = "C:\BZDumps"
+$dumpRoot = "<DUMP_ROOT>"
 $snapshotRoot = Join-Path $PSScriptRoot "snapshots"
 $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $seriesRoot = Join-Path $snapshotRoot "misn06_auto_$stamp"

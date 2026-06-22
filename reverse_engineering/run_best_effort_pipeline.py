@@ -190,7 +190,7 @@ def write_summary(summary_path: Path, summary: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a best-effort Battlezone global decompile pipeline.")
-    parser.add_argument("--binary", type=Path, default=Path(r"C:\GOG Games\Battlezone 98 Redux\battlezone98redux.exe"))
+    parser.add_argument("--binary", type=Path, default=Path(r"<GAME_ROOT>\battlezone98redux.exe"))
     parser.add_argument("--pdb", type=Path, help="Optional PDB path. Defaults to <binary>.pdb if present.")
     parser.add_argument("--output-root", type=Path, help="Root directory for all generated artifacts.")
     parser.add_argument("--project-path", type=Path, help="Ghidra project storage root.")

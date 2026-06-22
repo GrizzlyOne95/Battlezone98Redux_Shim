@@ -26,7 +26,7 @@ fits a missing transition in the Redux player `Person` animation-state path much
 Legacy exact function:
 
 - `Person::Simulate`
-- [Simulate-004a56ba.c](c:\Users\istuart\Documents\GIT\Battlezone98Redux_Shim\reverse_engineering\workshop\global_decompile\legacy_bz1_exact_full\ghidrecomp\results\bins\bzone.exe-aa1ee4\decomps\Simulate-004a56ba.c)
+- [Simulate-004a56ba.c](<USER_HOME>\Documents\GIT\Battlezone98Redux_Shim\reverse_engineering\workshop\global_decompile\legacy_bz1_exact_full\ghidrecomp\results\bins\bzone.exe-aa1ee4\decomps\Simulate-004a56ba.c)
 
 Important observations from the legacy body:
 
@@ -54,8 +54,8 @@ This is the clearest exact-legacy proof that crouch/sniping is a player-side per
 
 The local Blender toolkit has a person animation reference and exporter mapping:
 
-- [__init__.py](c:\Users\istuart\Documents\GIT\BZ98RBlenderToolKit\bz98tools\__init__.py)
-- [bzportmodels.py](c:\Users\istuart\Documents\GIT\BZ98RBlenderToolKit\bz98tools\bzrmodelporter\bzportmodels.py)
+- [__init__.py](<USER_HOME>\Documents\GIT\BZ98RBlenderToolKit\bz98tools\__init__.py)
+- [bzportmodels.py](<USER_HOME>\Documents\GIT\BZ98RBlenderToolKit\bz98tools\bzrmodelporter\bzportmodels.py)
 
 Useful mapping:
 
@@ -81,10 +81,10 @@ The porter currently maps index `3` to the stock clip name `fireRecoilSniper`, w
 
 Stock pilot skeletons are present at:
 
-- [aspilo.skeleton](c:\Users\istuart\Documents\Battlezone 98 Redux\BZ_ASSETS\common\models\aspilo.skeleton)
-- [bspilo.skeleton](c:\Users\istuart\Documents\Battlezone 98 Redux\BZ_ASSETS\common\models\bspilo.skeleton)
-- [sspilo.skeleton](c:\Users\istuart\Documents\Battlezone 98 Redux\BZ_ASSETS\common\models\sspilo.skeleton)
-- [cspilo.skeleton](c:\Users\istuart\Documents\Battlezone 98 Redux\BZ_ASSETS\common\models\TRO\cspilo.skeleton)
+- [aspilo.skeleton](<USER_HOME>\Documents\Battlezone 98 Redux\BZ_ASSETS\common\models\aspilo.skeleton)
+- [bspilo.skeleton](<USER_HOME>\Documents\Battlezone 98 Redux\BZ_ASSETS\common\models\bspilo.skeleton)
+- [sspilo.skeleton](<USER_HOME>\Documents\Battlezone 98 Redux\BZ_ASSETS\common\models\sspilo.skeleton)
+- [cspilo.skeleton](<USER_HOME>\Documents\Battlezone 98 Redux\BZ_ASSETS\common\models\TRO\cspilo.skeleton)
 
 Binary string hits in those skeletons confirm the clips exist in stock assets:
 
@@ -166,8 +166,8 @@ If this gets instrumented in OpenShim, the highest-signal probe would be:
 
 The live GOG install at:
 
-- [battlezone98redux.exe](c:\GOG Games\Battlezone 98 Redux\battlezone98redux.exe)
-- [battlezone98redux.pdb](c:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb)
+- [battlezone98redux.exe](<GAME_ROOT>\battlezone98redux.exe)
+- [battlezone98redux.pdb](<GAME_ROOT>\battlezone98redux.pdb)
 
 confirms that the current Redux build still has the exact `Person` and `AnimObj` symbols needed to probe this cleanly.
 
@@ -277,7 +277,7 @@ If the answer is "no", item 23 is almost certainly a missing player `Person::Sim
 
 ## OpenShim Probe Added
 
-There is now a temporary GOG-only OpenShim probe in [src/bzr_hooks.cpp](c:\Users\istuart\Documents\GIT\Battlezone98Redux_Shim\src\bzr_hooks.cpp) gated behind:
+There is now a temporary GOG-only OpenShim probe in [src/bzr_hooks.cpp](<USER_HOME>\Documents\GIT\Battlezone98Redux_Shim\src\bzr_hooks.cpp) gated behind:
 
 - `OPENSHIM_TRACE_JUMP_SNIPING=1`
 

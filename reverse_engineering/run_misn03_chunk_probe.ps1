@@ -19,8 +19,8 @@ param(
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $GameRoot) {
     $candidateRoots = @(
-        "C:\Users\istuart\Documents\Battlezone 98 Redux",
-        "C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux"
+        "<USER_HOME>\Documents\Battlezone 98 Redux",
+        "<GAME_ROOT>"
     )
     $GameRoot = $candidateRoots | Where-Object { Test-Path $_ } | Select-Object -First 1
 }

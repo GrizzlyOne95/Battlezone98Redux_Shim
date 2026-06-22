@@ -59,7 +59,7 @@ This is the existing submenu mechanism we want to reuse.
 ### Stock ODF Evidence
 
 The stock ODFs in
-`C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux\Edit\stock`
+`<GAME_ROOT>\Edit\stock`
 split cleanly into two systems:
 
 Builder tree files:

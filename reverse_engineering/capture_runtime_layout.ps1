@@ -5,7 +5,7 @@ param(
     [string]$OutputRoot = "reverse_engineering/snapshots",
     [switch]$NoDumpSections,
     [switch]$Launch,
-    [string]$GameExe = "C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux\battlezone98redux.exe"
+    [string]$GameExe = "<GAME_ROOT>\battlezone98redux.exe"
 )
 
 $scriptDir = Split-Path -Parent $PSCommandPath

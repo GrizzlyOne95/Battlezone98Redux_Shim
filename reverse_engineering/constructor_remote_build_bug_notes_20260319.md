@@ -129,7 +129,7 @@ the meaningful recovery work in Redux is the construction-claim, refund, and
 
 ## OpenShim Status 2026-03-23
 
-Implemented in [`src/bzr_hooks.cpp`](/c:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/src/bzr_hooks.cpp):
+Implemented in [`src/bzr_hooks.cpp`](/<USER_HOME>/Documents/GIT/Battlezone98Redux_Shim/src/bzr_hooks.cpp):
 
 - inline detour at `AI_UnitRemove` entry `0x0068FC60`
 - interception only for AI constructor deaths where

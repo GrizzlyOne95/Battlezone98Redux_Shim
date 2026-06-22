@@ -10625,7 +10625,7 @@ namespace BZROpenShim
                     return documentsInstall;
             }
 
-            const std::filesystem::path gogInstall("C:\\GOG Games\\Battlezone 98 Redux");
+            const std::filesystem::path gogInstall("<GAME_ROOT>");
             if (hasInputMap(gogInstall))
                 return gogInstall;
 

@@ -73,9 +73,16 @@ namespace BZROpenShim
     BZRO_API void Shutdown() {
         if (g_PatchThread)
         {
+            BZROpenShim::SignalPatcherShutdown();
+            WaitForSingleObject(reinterpret_cast<HANDLE>(g_PatchThread), 2000);
             CloseHandle(reinterpret_cast<HANDLE>(g_PatchThread));
             g_PatchThread = 0;
         }
+        BZROpenShim::FlushChunkFragmentEventsForShutdown();
+        BZROpenShim::ShutdownNetworkOptimizer();
+        FreeRealWinmm();
+        BZROpenShim::ShutdownShimLogger();
+    }
         BZROpenShim::FlushChunkFragmentEventsForShutdown();
         BZROpenShim::ShutdownNetworkOptimizer();
         FreeRealWinmm();

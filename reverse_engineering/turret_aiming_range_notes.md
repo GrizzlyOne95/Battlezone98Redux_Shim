@@ -18,8 +18,8 @@ This is a native class-simulation issue in `TurretCraft` and `TurretTank`, not a
 
 Exact legacy match used:
 
-- EXE: `C:\Program Files (x86)\Battlezone\bzone.exe`
-- PDB: `C:\Program Files (x86)\Battlezone\bzint.pdb`
+- EXE: `<GAME_ROOT>\bzone.exe`
+- PDB: `<GAME_ROOT>\bzint.pdb`
 - Corpus: `reverse_engineering\workshop\global_decompile\legacy_bz1_exact`
 
 Full legacy export corpus now also verified:
@@ -65,7 +65,7 @@ That full-export corpus does not reveal a second hidden clamp site. It reinforce
 
 Redux binary used:
 
-- `C:\GOG Games\Battlezone 98 Redux\battlezone98redux.exe`
+- `<GAME_ROOT>\battlezone98redux.exe`
 - Image base `0x00400000`
 
 Because the shipped Redux PDB is not an exact GUID match, symbol names from that PDB are advisory only. The live code below is based on the current binary plus the legacy exact-match lineage.

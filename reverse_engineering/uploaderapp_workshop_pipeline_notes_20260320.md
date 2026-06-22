@@ -4,9 +4,9 @@
 
 Focused reverse-engineering pass over the legacy Steam uploader tool:
 
-- `C:\steamcmd\steamapps\content\app_450970\depot_450971\UploaderApp.exe`
-- `C:\steamcmd\steamapps\content\app_450970\depot_450971\odfHeaderList.txt`
-- `C:\Users\istuart\Documents\Battlezone 98 Redux\Edit\sample.ini`
+- `<STEAM_CMD>\steamapps\content\app_450970\depot_450971\UploaderApp.exe`
+- `<STEAM_CMD>\steamapps\content\app_450970\depot_450971\odfHeaderList.txt`
+- `<USER_HOME>\Documents\Battlezone 98 Redux\Edit\sample.ini`
 
 Tooling used:
 
@@ -56,7 +56,7 @@ Important functions:
 
 ## Expected INI Schema
 
-The bundled sample file at `C:\Users\istuart\Documents\Battlezone 98 Redux\Edit\sample.ini` matches the strings and branches recovered from `UploaderApp.exe`.
+The bundled sample file at `<USER_HOME>\Documents\Battlezone 98 Redux\Edit\sample.ini` matches the strings and branches recovered from `UploaderApp.exe`.
 
 ### Required top-level sections
 
@@ -304,7 +304,7 @@ in:
 
 There is already local proof-of-concept code for this in the separate repo:
 
-- `C:\Users\istuart\Documents\GIT\Battlezone98Redux_WorkshopUploader\uploader.py`
+- `<USER_HOME>\Documents\GIT\Battlezone98Redux_WorkshopUploader\uploader.py`
 
 That uploader does a normal SteamCMD-style upload, then calls:
 
@@ -330,7 +330,7 @@ I did **not** find local evidence that your current SteamCMD upload VDF path is 
 
 The current generated VDF in:
 
-- `C:\steamcmd\campaignReimagined_update.vdf`
+- `<STEAM_CMD>\campaignReimagined_update.vdf`
 
 contains:
 
