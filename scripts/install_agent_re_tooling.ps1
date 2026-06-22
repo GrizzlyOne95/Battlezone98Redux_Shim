@@ -106,7 +106,7 @@ function Get-PreferredGhidraInstallDir() {
         return $envFallback
     }
 
-    $defaultPath = "C:\ghidra_12.0.4_PUBLIC"
+    $defaultPath = "<GHIDRA_ROOT>"
     if (Test-Path $defaultPath) {
         return $defaultPath
     }
@@ -285,9 +285,9 @@ $die = Get-WinGetPackageExe "horsicq.DIE-engine" "die.exe"
 $diec = Get-WinGetPackageExe "horsicq.DIE-engine" "diec.exe"
 $procmon = Get-WinGetPackageExe "Microsoft.Sysinternals.ProcessMonitor" "Procmon.exe"
 $procexp = Get-WinGetPackageExe "Microsoft.Sysinternals.ProcessExplorer" "procexp.exe"
-$rizin = "C:\Program Files\Rizin\bin\rizin.exe"
-$rzBin = "C:\Program Files\Rizin\bin\rz-bin.exe"
-$rzAsm = "C:\Program Files\Rizin\bin\rz-asm.exe"
+$rizin = "<RIZIN_ROOT>\bin\rizin.exe"
+$rzBin = "<RIZIN_ROOT>\bin\rz-bin.exe"
+$rzAsm = "<RIZIN_ROOT>\bin\rz-asm.exe"
 
 if (-not $SkipWrappers) {
     Ensure-Directory $UserBin

@@ -16,10 +16,10 @@ What we know:
 
 The best-effort badlands corpus points strongly at native chunks being built from existing legacy GEO child objects, not from separate pre-authored "chunk mesh" assets:
 
-- [`CreateChunk-004be555.c`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\badlands\legacy_bz1_exact_full\ghidrecomp\results\bins\bzone.exe-aa1ee4\decomps\CreateChunk-004be555.c) changes the existing object to `CLASS_ID_CHUNK`, recomputes its transform, removes it from the old tree, and adds it under the `ChunkEffect` entity.
-- [`PartialFragmentObject-004bef90.c`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\badlands\legacy_bz1_exact_full\ghidrecomp\results\bins\bzone.exe-aa1ee4\decomps\PartialFragmentObject-004bef90.c) recursively walks child GEO nodes and hands them to `CreateChunk`.
-- [`FullFragmentObject-004bf08b.c`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\badlands\legacy_bz1_exact_full\ghidrecomp\results\bins\bzone.exe-aa1ee4\decomps\FullFragmentObject-004bf08b.c) does the same for the full hierarchy.
-- [`Render_Chunk_Object-004e8ede.c`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\badlands\legacy_bz1_exact_full\ghidrecomp\results\bins\bzone.exe-aa1ee4\decomps\Render_Chunk_Object-004e8ede.c) renders through the old child/BSP display-list path.
+- [`CreateChunk-004be555.c`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\badlands\legacy_bz1_exact_full\ghidrecomp\results\bins\bzone.exe-aa1ee4\decomps\CreateChunk-004be555.c) changes the existing object to `CLASS_ID_CHUNK`, recomputes its transform, removes it from the old tree, and adds it under the `ChunkEffect` entity.
+- [`PartialFragmentObject-004bef90.c`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\badlands\legacy_bz1_exact_full\ghidrecomp\results\bins\bzone.exe-aa1ee4\decomps\PartialFragmentObject-004bef90.c) recursively walks child GEO nodes and hands them to `CreateChunk`.
+- [`FullFragmentObject-004bf08b.c`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\badlands\legacy_bz1_exact_full\ghidrecomp\results\bins\bzone.exe-aa1ee4\decomps\FullFragmentObject-004bf08b.c) does the same for the full hierarchy.
+- [`Render_Chunk_Object-004e8ede.c`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\badlands\legacy_bz1_exact_full\ghidrecomp\results\bins\bzone.exe-aa1ee4\decomps\Render_Chunk_Object-004e8ede.c) renders through the old child/BSP display-list path.
 
 Taken together, the legacy game is not spawning a separate modern chunk representation. It is reparenting real legacy GEO child objects and expecting the renderer to display them.
 
@@ -46,13 +46,13 @@ OpenShim chunk tracing now logs two candidate Redux/Ogre bridge paths for each t
 - owner bridge `+0xA8` Ogre light pointer
 - probe status for both paths
 
-This was added in [`src/bzr_hooks.cpp`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\src\bzr_hooks.cpp) and built successfully into:
+This was added in [`src/bzr_hooks.cpp`](<USER_HOME>\Documents\GIT\BZR-OpenShim\src\bzr_hooks.cpp) and built successfully into:
 
-- `C:\Users\iestu\Documents\GIT\BZR-OpenShim\bin\Release\winmm.dll`
+- `<USER_HOME>\Documents\GIT\BZR-OpenShim\bin\Release\winmm.dll`
 
 The rebuilt DLL was copied to:
 
-- `C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux\winmm.dll`
+- `<GAME_ROOT>\winmm.dll`
 
 ## March 17 Follow-Up Result
 
@@ -170,8 +170,8 @@ One invasive debugger pass accidentally broke on `0x004917F0`, which produced a 
 
 That breakpoint fired even when `count == 0`, so the next probe path should be non-invasive sampling of the `ChunkEffect` singleton rather than more entry breakpoints. To support that, there is now a lightweight live sampler:
 
-- [`probe_chunk_effect_runtime.py`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\probe_chunk_effect_runtime.py)
-- [`probe_chunk_effect_runtime.ps1`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\probe_chunk_effect_runtime.ps1)
+- [`probe_chunk_effect_runtime.py`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\probe_chunk_effect_runtime.py)
+- [`probe_chunk_effect_runtime.ps1`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\probe_chunk_effect_runtime.ps1)
 
 The intended next step is:
 
@@ -186,7 +186,7 @@ If that capture shows real chunk-class objects in the active `ChunkEffect` array
 
 The new launcher/probe harness:
 
-- [`run_misn03_chunk_probe.ps1`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\run_misn03_chunk_probe.ps1)
+- [`run_misn03_chunk_probe.ps1`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\run_misn03_chunk_probe.ps1)
 
 was used to automate:
 
@@ -197,8 +197,8 @@ was used to automate:
 
 Two automated runs were captured:
 
-- [`chunk_effect_probe_20260317_234117`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260317_234117)
-- [`chunk_effect_probe_20260317_234342`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260317_234342)
+- [`chunk_effect_probe_20260317_234117`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260317_234117)
+- [`chunk_effect_probe_20260317_234342`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260317_234342)
 
 The second run is the clearest one. It observed:
 
@@ -258,7 +258,7 @@ The new proxy debug path now:
 
 The automated `misn03` proxy-debug run at:
 
-- [`chunk_effect_probe_20260318_000140`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260318_000140)
+- [`chunk_effect_probe_20260318_000140`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260318_000140)
 
 showed:
 
@@ -273,8 +273,8 @@ That is not yet full visual confirmation of restored debris, but it is the first
 
 The `misn03` harness is now more useful as an unattended regression tool instead of just a one-off probe:
 
-- [`run_misn03_chunk_probe.ps1`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\run_misn03_chunk_probe.ps1) can now set chunk log budget, trace entry limits, chunk-effect tracing, proxy debug, and post-capture wait time for a single automated run
-- [`run_misn03_chunk_probe_series.ps1`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\run_misn03_chunk_probe_series.ps1) can repeat the `misn03` repro multiple times and summarize proxy lifecycle events per run
+- [`run_misn03_chunk_probe.ps1`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\run_misn03_chunk_probe.ps1) can now set chunk log budget, trace entry limits, chunk-effect tracing, proxy debug, and post-capture wait time for a single automated run
+- [`run_misn03_chunk_probe_series.ps1`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\run_misn03_chunk_probe_series.ps1) can repeat the `misn03` repro multiple times and summarize proxy lifecycle events per run
 
 OpenShim's proxy debug logging was also tightened to emit low-noise lifecycle markers:
 
@@ -292,8 +292,8 @@ The automated series runs on March 18 consistently showed:
 
 Representative unattended runs:
 
-- [`chunk_effect_probe_20260318_071733`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260318_071733)
-- [`chunk_effect_probe_20260318_071826`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260318_071826)
+- [`chunk_effect_probe_20260318_071733`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260318_071733)
+- [`chunk_effect_probe_20260318_071826`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260318_071826)
 
 In both cases the first proxy lifecycle lines looked like:
 
@@ -304,7 +304,7 @@ In both cases the first proxy lifecycle lines looked like:
 
 A longer single automated run with a larger log budget and a longer post-capture wait:
 
-- [`chunk_effect_probe_20260318_072541`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260318_072541)
+- [`chunk_effect_probe_20260318_072541`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260318_072541)
 
 finally captured not just tracking and assignment, but expiry and billboard-slot reuse:
 
@@ -337,7 +337,7 @@ That probe showed a very important result: the candidate template reference at `
 
 Representative unattended capture:
 
-- [`chunk_effect_probe_20260318_074532`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260318_074532)
+- [`chunk_effect_probe_20260318_074532`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\snapshots\chunk_effect_probe_20260318_074532)
 
 Representative live sample:
 

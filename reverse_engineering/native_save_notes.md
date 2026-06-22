@@ -8,9 +8,9 @@ Goal: identify the game's native save entry point so Lua can trigger a real engi
 
 Primary inputs:
 
-- GOG EXE: `C:\GOG Games\Battlezone 98 Redux\battlezone98redux.exe`
-- GOG PDB: `C:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb`
-- Steam EXE: `C:\Users\istuart\Downloads\Battlezone 98 Redux\battlezone98redux.exe`
+- GOG EXE: `<GAME_ROOT>\battlezone98redux.exe`
+- GOG PDB: `<GAME_ROOT>\battlezone98redux.pdb`
+- Steam EXE: `<USER_HOME>\Downloads\Battlezone 98 Redux\battlezone98redux.exe`
 
 ## Current Script Baseline
 

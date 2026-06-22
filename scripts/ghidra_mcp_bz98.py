@@ -15,7 +15,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PROJECT_PATH = REPO_ROOT / "pyghidra_mcp_projects"
 DEFAULT_PROJECT_NAME = "BZ98_Redux"
-DEFAULT_GHIDRA_INSTALL_DIR = Path("C:/ghidra_12.0.4_PUBLIC")
+DEFAULT_GHIDRA_INSTALL_DIR = Path("<GHIDRA_ROOT>")
 DEFAULT_SERVICE_HOST = "127.0.0.1"
 DEFAULT_SERVICE_PORT = 8765
 DEFAULT_SERVICE_PATH = "/mcp"
@@ -56,7 +56,7 @@ def candidate_binary_paths() -> list[Path]:
         paths.append(user_profile / "Documents" / "Battlezone 98 Redux" / "battlezone98redux.exe")
         paths.append(user_profile / "Downloads" / "Battlezone 98 Redux" / "battlezone98redux.exe")
 
-    paths.append(Path("C:/GOG Games/Battlezone 98 Redux/battlezone98redux.exe"))
+    paths.append(Path("<GAME_ROOT>/battlezone98redux.exe"))
     return paths
 
 

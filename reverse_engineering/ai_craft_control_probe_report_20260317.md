@@ -1,8 +1,8 @@
 # AI Craft Control Probe
 
 - Process: `battlezone98redux.exe` PID `19772`
-- Exe: `C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux\battlezone98redux.exe`
-- Advisory PDB: `C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux\battlezone98redux.pdb`
+- Exe: `<GAME_ROOT>\battlezone98redux.exe`
+- Advisory PDB: `<GAME_ROOT>\battlezone98redux.pdb`
 - Image base: `0x00400000`
 
 ## Direct Disp Hits

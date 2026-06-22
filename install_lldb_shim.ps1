@@ -4,13 +4,13 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$llvmBin = "C:\Program Files\LLVM\bin"
+$llvmBin = "<LLVM_ROOT>\bin"
 $llvmLldb = Join-Path $llvmBin "lldb.exe"
 $llvmLldbDap = Join-Path $llvmBin "lldb-dap.exe"
 $userBin = Join-Path $env:USERPROFILE "bin"
 $shimRuntimeCandidates = @(
-    "C:\Program Files\Android\Android Studio\plugins\android-ndk\resources\lldb"
-    "C:\Program Files\Blender Foundation\Blender 4.5\4.5\python"
+    "<ANDROID_SDK>\Android Studio\plugins\android-ndk\resources\lldb"
+    "<BLENDER_ROOT>\Blender 4.5\4.5\python"
 )
 
 function Find-Python311Runtime {

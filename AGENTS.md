@@ -1,13 +1,30 @@
 # BZR-OpenShim
 
 This repo is part of the local Battlezone workspace opened via
-`%USERPROFILE%\Documents\Battlezone98Redux_Shim.code-workspace`.
+`<USER_HOME>\Documents\Battlezone98Redux_Shim.code-workspace`.
 
 ## Workspace Layout
-- Sibling repos normally live under `%USERPROFILE%\Documents\GIT\...`.
-- The primary local game install is typically `%USERPROFILE%\Documents\Battlezone 98 Redux`.
-- Some machines also keep a baseline install at `C:\GOG Games\Battlezone 98 Redux`.
+- Sibling repos normally live under `<USER_HOME>\Documents\GIT\...`.
+- The primary local game install is typically `<USER_HOME>\Documents\Battlezone 98 Redux`.
+- Some machines also keep a baseline install at `<GAME_ROOT>`.
 - Prefer the workspace file and these conventions over hardcoded profile-specific paths.
+
+
+## Refactored Architecture (2025)
+- The project has been decoupled into a generic Hooking Engine and Battlezone-specific Patch Logic.
+- ****: Contains the C++ SDK () and internal engine headers.
+- ****: The core  handles memory I/O and IDA-style pattern scanning.
+- ****: Battlezone-specific trampolines and hooks.
+- ****: External configuration for all memory patterns and offsets. This is the primary file to update for game patches.
+- **Delay-Loading**: System dependencies like  and  are delay-loaded for robustness.
+
+
+- The project has been decoupled into a generic Hooking Engine and Battlezone-specific Patch Logic.
+- **include/**: Contains the C++ SDK (BZROpenShim.h) and internal engine headers.
+- **src/engine/**: The core HookEngine handles memory I/O and IDA-style pattern scanning.
+- **src/patches/**: Battlezone-specific trampolines and hooks.
+- **scripts/patches.json**: External configuration for all memory patterns and offsets. This is the primary file to update for game patches.
+- **Delay-Loading**: System dependencies like ws2_32.dll and gdiplus.dll are delay-loaded for robustness.
 
 ## Local Role
 - Native shim, patching, and reverse-engineering repo.
@@ -35,14 +52,14 @@ This repo is part of the local Battlezone workspace opened via
   offset or subsystem mismatch rather than assuming the full executable differs.
 
 ## Cross-Repo Pointers
-- Addon-side consumers and Lua integration points live in the deployed campaign addon under the workspace game install, usually `%USERPROFILE%\Documents\Battlezone 98 Redux\addon\campaignReimagined`.
-- Subtitle integration work may involve `%USERPROFILE%\Documents\GIT\BZR-Subtitles`.
-- Rendering-adjacent work may involve the deployed shader addon under the workspace game install, `%USERPROFILE%\Documents\GIT\Battlezone98Redux_EnhancedShaders`, or `%USERPROFILE%\Documents\GIT\ogre-1.10.0`.
+- Addon-side consumers and Lua integration points live in the deployed campaign addon under the workspace game install, usually `<USER_HOME>\Documents\Battlezone 98 Redux\addon\campaignReimagined`.
+- Subtitle integration work may involve `<USER_HOME>\Documents\GIT\BZR-Subtitles`.
+- Rendering-adjacent work may involve the deployed shader addon under the workspace game install, `<USER_HOME>\Documents\GIT\Battlezone98Redux_EnhancedShaders`, or `<USER_HOME>\Documents\GIT\ogre-1.10.0`.
 
-Open `%USERPROFILE%\Documents\Battlezone98Redux_Shim.code-workspace` when a task may span repos.
+Open `<USER_HOME>\Documents\Battlezone98Redux_Shim.code-workspace` when a task may span repos.
 
 ## Agent Tooling
 - Read `AGENT_TOOLING.md` at repo start for the current local RE/tooling inventory.
 - Read `AGENT_TOOLING_SETUP.md` when reproducing the toolchain on another PC.
-- Prefer the stable `bzr-*` wrappers from `C:\Users\istuart\bin` over package-specific install paths.
+- Prefer the stable `bzr-*` wrappers from `<USER_HOME>\bin` over package-specific install paths.
 - The `ghidra` MCP server is expected to come from the persistent localhost service documented in `AGENT_TOOLING.md`, not a fresh per-request Ghidra launch.

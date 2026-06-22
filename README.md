@@ -327,7 +327,7 @@ complete Python 3.11 runtime, run:
 `powershell -ExecutionPolicy Bypass -File .\install_lldb_shim.ps1`
 
 The script installs user-level `lldb.cmd` and `lldb-dap.cmd` wrappers in
-`%USERPROFILE%\bin`, points them at the LLVM debugger binaries, and supplies
+`<USER_HOME>\bin`, points them at the LLVM debugger binaries, and supplies
 the Python runtime from the Android Studio NDK LLDB bundle when present.
 
 ## Netcode Reorder Controls
@@ -587,9 +587,9 @@ Legacy validation as of March 26, 2026:
   `Craft::Explode -> FullFragmentObject / PartialFragmentObject -> CreateChunk`
   with additional `CreateChunklet` calls around the same event
 - that result is recorded in
-  [`reverse_engineering/chunk_fragment_path_20260326.md`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\chunk_fragment_path_20260326.md)
+  [`reverse_engineering/chunk_fragment_path_20260326.md`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\chunk_fragment_path_20260326.md)
   and the helper script used for the live legacy trace is
-  [`reverse_engineering/legacy_bzone_chunk_trace.js`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\legacy_bzone_chunk_trace.js)
+  [`reverse_engineering/legacy_bzone_chunk_trace.js`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\legacy_bzone_chunk_trace.js)
 - practical takeaway: if a Steam `avtank` death only logs `CreateChunklet`
   and never logs `CreateChunk` from a fragment-style caller site, the blocker
   is upstream path divergence, not uncertainty about how legacy fragmentation
@@ -603,7 +603,7 @@ Legacy validation as of March 26, 2026:
   `svtank` fragment batch, including `selectedOdf=svtank`, `rootOdf=svtank`,
   `rootGameObj=0x029E5320`, and a stable `ownerObj`
 - the same automated repro is driven by
-  [`run_misn06_auto_capture.ps1`](C:\Users\iestu\Documents\GIT\BZR-OpenShim\reverse_engineering\run_misn06_auto_capture.ps1)
+  [`run_misn06_auto_capture.ps1`](<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\run_misn06_auto_capture.ps1)
   using a `150ms` load-phase `SPACE` press after the first Redux window appears
 - current builds now prefer runtime ODF identity over misleading inline owner
   strings, which removed the old `RocketTankFriend` fallback from the validated

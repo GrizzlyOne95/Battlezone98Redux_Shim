@@ -45,10 +45,10 @@ The shelved experimental behavior was:
   `src\winmm_proxy.cpp`
   `src\winmm.def`
 - Existing Extra Utilities bridge pattern:
-  `C:\Users\istuart\Documents\GIT\ExtraUtilities-G1\src\UnitVo.cpp`
-  `C:\Users\istuart\Documents\GIT\ExtraUtilities-G1\src\luaexport.cpp`
+  `<USER_HOME>\Documents\GIT\ExtraUtilities-G1\src\UnitVo.cpp`
+  `<USER_HOME>\Documents\GIT\ExtraUtilities-G1\src\luaexport.cpp`
 - Campaign persistent config:
-  `C:\Users\istuart\Documents\GIT\Battlezone98Redux_CampaignReimagined-1\_Source\Scripts\PersistentConfig.lua`
+  `<USER_HOME>\Documents\GIT\Battlezone98Redux_CampaignReimagined-1\_Source\Scripts\PersistentConfig.lua`
 
 ## Result
 
