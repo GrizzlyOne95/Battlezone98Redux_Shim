@@ -56,16 +56,11 @@ namespace BZROpenShim
         void __cdecl Trampoline_ArtilleryHowitzerVolleyOriginal();
         void __cdecl Trampoline_DecodedWeaponMaskBias();
         void __cdecl Trampoline_RawWeaponMaskBias();
-        void __fastcall VehicleListModFix2(void* thisPtr, void* edx, BzrString* name);
 
         // Experiments
-        void __cdecl MapFilters6Rel32();
         void __cdecl ChunkRenderResolveHook();
         void __cdecl ProducerBuildMenuCallHook();
         void __cdecl TargetReticlePopupRecentHitGetterHook();
-        void __cdecl EngineFlameControlHook();
-        void __cdecl EngineFlameSubmitHook();
-        void __cdecl ChunkEffectSimulateHook();
     }
 
     // -----------------------------------------------------------------------

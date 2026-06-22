@@ -34,9 +34,6 @@ namespace BZROpenShim
     inline int32_t g_SavedScrollState = 0;
     inline bool g_HaveSavedScrollState = false;
 
-    // Global map list object pointer (hop-fix 2)
-    inline void**   g_MapListObject     = nullptr;
-
     // BZR.exe function pointer for hop-fix 1 indirect call
     inline void (*g_BZRFnPtr_HopFix1)() = nullptr;
 

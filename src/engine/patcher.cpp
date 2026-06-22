@@ -200,6 +200,19 @@ namespace BZROpenShim
         return s_cached != 0;
     }
 
+    static bool EnableExperimentalMapFilters()
+    {
+        static int s_cached = -1;
+        if (s_cached < 0)
+        {
+            s_cached =
+                EnvFlagEnabledByName("OPENSHIM_ENABLE_EXPERIMENTAL_MAP_FILTERS") ||
+                EnvFlagEnabledByName("OPENSHIM_ENABLE_MAP_FILTERS") ||
+                EnvFlagEnabledByName("BZR_ENABLE_EXPERIMENTAL_MAP_FILTERS") ? 1 : 0;
+        }
+        return s_cached != 0;
+    }
+
     static bool ShouldEnableLobbyBzrnetIntegration(bool isSteam)
     {
         static int s_cachedSteam = -1;
@@ -313,7 +326,7 @@ namespace BZROpenShim
                     patches.end(),
                     [](const HookEngine::PatchDef& patch)
                     {
-                        return IsMapRefreshPatchName(patch.name);
+                        return IsMapRefreshPatchName(patch.name.c_str());
                     }),
                 patches.end());
 
@@ -342,7 +355,7 @@ namespace BZROpenShim
                     patches.end(),
                     [](const HookEngine::PatchDef& patch)
                     {
-                        return IsChunkExperimentPatchName(patch.name);
+                        return IsChunkExperimentPatchName(patch.name.c_str());
                     }),
                 patches.end());
 
@@ -363,7 +376,7 @@ namespace BZROpenShim
                     patches.end(),
                     [](const HookEngine::PatchDef& patch)
                     {
-                        return IsProducerBuildMenuExperimentPatchName(patch.name);
+                        return IsProducerBuildMenuExperimentPatchName(patch.name.c_str());
                     }),
                 patches.end());
 
@@ -384,7 +397,7 @@ namespace BZROpenShim
                     patches.end(),
                     [](const HookEngine::PatchDef& patch)
                     {
-                        return IsLobbyBzrnetIntegrationPatchName(patch.name);
+                        return IsLobbyBzrnetIntegrationPatchName(patch.name.c_str());
                     }),
                 patches.end());
 
@@ -471,17 +484,21 @@ namespace BZROpenShim
             return;
         }
 
-        __try
+        uint32_t previous = 0;
+        if (!HookEngine::ReadMemory(static_cast<uint32_t>(kStartupShellAutoLoadFlagAddr), &previous, sizeof(previous)))
         {
-            auto* flag = reinterpret_cast<volatile uint32_t*>(kStartupShellAutoLoadFlagAddr);
-            const uint32_t previous = *flag;
-            *flag = 0;
-            Log(L"[INFO] Startup shell autoload gate cleared (prev=%u)\n", previous);
+            Log(L"[WARN] Failed to read startup shell autoload gate\n");
+            return;
         }
-        __except (EXCEPTION_EXECUTE_HANDLER)
+
+        const uint32_t cleared = 0;
+        if (!HookEngine::WriteMemory(static_cast<uint32_t>(kStartupShellAutoLoadFlagAddr), &cleared, sizeof(cleared)))
         {
             Log(L"[WARN] Failed to clear startup shell autoload gate\n");
+            return;
         }
+
+        Log(L"[INFO] Startup shell autoload gate cleared (prev=%u)\n", previous);
     }
 
 
@@ -931,8 +948,8 @@ namespace BZROpenShim
     // Mirrors the reference patch's patch-write helpers.
     // Returns: 1 = applied, 0 = skipped (not a failure), -1 = failed
     // -----------------------------------------------------------------------
-    static int ApplyPatch(uint32_t address, const void* data, size_t len, const char* name,
-                          const std::vector<uint8_t>& expected_original)
+    [[maybe_unused]] static int ApplyPatch(uint32_t address, const void* data, size_t len, const char* name,
+                                           const std::vector<uint8_t>& expected_original)
     {
         if (address == 0)
         {
@@ -1200,7 +1217,7 @@ namespace BZROpenShim
         return HookEngine::ResolveRelCallTarget(instrAddr);
     }
 
-    static void* ResolveRelCallTargetWithRetry(uint32_t instrAddr, int maxAttempts, DWORD delayMs)
+    [[maybe_unused]] static void* ResolveRelCallTargetWithRetry(uint32_t instrAddr, int maxAttempts, DWORD delayMs)
     {
         return HookEngine::ResolveRelCallTargetWithRetry(instrAddr, maxAttempts, delayMs);
     }
@@ -1501,18 +1518,18 @@ namespace BZROpenShim
 
             for (auto& m : map)
             {
-                if (strcmp(p.name, m.name) == 0 && m.fn)
+                if (strcmp(p.name.c_str(), m.name) == 0 && m.fn)
                 {
                     uint32_t targetVal = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(m.fn));
                     const size_t patchLen =
-                        (strcmp(p.name, "TurretCraft Aim Pitch Multiplier") == 0 ||
-                         strcmp(p.name, "TurretTank Aim Pitch Multiplier") == 0) ? 8 :
-                        ((strcmp(p.name, "Offensive Attack Reveal Hook") == 0 ||
-                          strcmp(p.name, "TurretTank Attack Reveal Hook") == 0) ? 12 :
-                        (strcmp(p.name, "Artillery Howitzer Volley Hook") == 0 ? 6 :
-                        ((strcmp(p.name, "Under Attack Alert Hook 1/2") == 0 ||
-                          strcmp(p.name, "Under Attack Alert Hook 2/2") == 0) ? 52 : 5)));
-                    p.payload = MakeJmpPatch(p.bzr_address, targetVal, patchLen);
+                        (strcmp(p.name.c_str(), "TurretCraft Aim Pitch Multiplier") == 0 ||
+                         strcmp(p.name.c_str(), "TurretTank Aim Pitch Multiplier") == 0) ? 8 :
+                        ((strcmp(p.name.c_str(), "Offensive Attack Reveal Hook") == 0 ||
+                          strcmp(p.name.c_str(), "TurretTank Attack Reveal Hook") == 0) ? 12 :
+                        (strcmp(p.name.c_str(), "Artillery Howitzer Volley Hook") == 0 ? 6 :
+                        ((strcmp(p.name.c_str(), "Under Attack Alert Hook 1/2") == 0 ||
+                          strcmp(p.name.c_str(), "Under Attack Alert Hook 2/2") == 0) ? 52 : 5)));
+                    p.payload = HookEngine::MakeJmp5Payload(p.address, targetVal, patchLen);
                     break;
                 }
             }
@@ -1525,37 +1542,40 @@ namespace BZROpenShim
         {
             if (p.type != HookEngine::PatchType::REL32) continue;
             if (!p.verified) continue;
-            if (strcmp(p.name, "Vehicle List Mod Fix 2/4 (Force Mod-Scoped Assets 2/3)") == 0)
+            if (strcmp(p.name.c_str(), "Vehicle List Mod Fix 2/4 (Force Mod-Scoped Assets 2/3)") == 0)
             {
                 // Patch address points at the rel32 operand (CALL +1).
-                uint32_t instrAddr = p.bzr_address - 1;
+                uint32_t instrAddr = p.address - 1;
+                using VehicleListModFix2Fn = void (__fastcall*)(void*, void*, BzrString*);
                 uint32_t target = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(VehicleListModFix2));
+                    reinterpret_cast<uintptr_t>(static_cast<VehicleListModFix2Fn>(VehicleListModFix2)));
                 int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(instrAddr + 5);
                 p.payload.resize(4);
                 memcpy(p.payload.data(), &rel, sizeof(rel));
             }
-            else if (strcmp(p.name, "Map Filters 6/8") == 0)
+            else if (strcmp(p.name.c_str(), "Map Filters 6/8") == 0)
             {
-                uint32_t instrAddr = p.bzr_address - 1;
+                uint32_t instrAddr = p.address - 1;
+                using MapFilters6Rel32Fn = uint32_t (__fastcall*)(void*, void*);
                 uint32_t target = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(MapFilters6Rel32));
+                    reinterpret_cast<uintptr_t>(static_cast<MapFilters6Rel32Fn>(MapFilters6Rel32)));
                 int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(instrAddr + 5);
                 p.payload.resize(4);
                 memcpy(p.payload.data(), &rel, sizeof(rel));
             }
-            else if (strcmp(p.name, "Chunk Render Resolve Hook") == 0)
+            else if (strcmp(p.name.c_str(), "Chunk Render Resolve Hook") == 0)
             {
-                uint32_t instrAddr = p.bzr_address - 1;
+                uint32_t instrAddr = p.address - 1;
+                using ChunkRenderResolveHookFn = uint32_t (__cdecl*)(void*, uint32_t);
                 uint32_t target = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(ChunkRenderResolveHook));
+                    reinterpret_cast<uintptr_t>(static_cast<ChunkRenderResolveHookFn>(ChunkRenderResolveHook)));
                 int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(instrAddr + 5);
                 p.payload.resize(4);
                 memcpy(p.payload.data(), &rel, sizeof(rel));
             }
-            else if (strcmp(p.name, "Producer Build Menu Root Hook") == 0)
+            else if (strcmp(p.name.c_str(), "Producer Build Menu Root Hook") == 0)
             {
-                uint32_t instrAddr = p.bzr_address - 1;
+                uint32_t instrAddr = p.address - 1;
                 void* originalTarget = nullptr;
                 if (isSteam)
                 {
@@ -1567,31 +1587,33 @@ namespace BZROpenShim
                 }
                 if (!originalTarget)
                 {
-                    Log(L"[SKIP] %hs (failed to resolve original call target)\n", p.name);
+                    Log(L"[SKIP] %hs (failed to resolve original call target)\n", p.name.c_str());
                     continue;
                 }
 
                 SetProducerBuildMenuOriginal(originalTarget);
 
+                using ProducerBuildMenuCallHookFn = void* (__cdecl*)(void*, int, int);
                 uint32_t target = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(ProducerBuildMenuCallHook));
+                    reinterpret_cast<uintptr_t>(static_cast<ProducerBuildMenuCallHookFn>(ProducerBuildMenuCallHook)));
                 int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(instrAddr + 5);
                 p.payload.resize(4);
                 memcpy(p.payload.data(), &rel, sizeof(rel));
             }
-            else if (strcmp(p.name, "Target Reticle Popup Recent-Hit Getter Hook") == 0)
+            else if (strcmp(p.name.c_str(), "Target Reticle Popup Recent-Hit Getter Hook") == 0)
             {
-                uint32_t instrAddr = p.bzr_address - 1;
+                uint32_t instrAddr = p.address - 1;
+                using TargetReticlePopupRecentHitGetterHookFn = float (__fastcall*)(void*, void*);
                 uint32_t target = static_cast<uint32_t>(
-                    reinterpret_cast<uintptr_t>(TargetReticlePopupRecentHitGetterHook));
+                    reinterpret_cast<uintptr_t>(static_cast<TargetReticlePopupRecentHitGetterHookFn>(TargetReticlePopupRecentHitGetterHook)));
                 int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(instrAddr + 5);
                 p.payload.resize(4);
                 memcpy(p.payload.data(), &rel, sizeof(rel));
             }
-            else if (strcmp(p.name, "HoverCraft Engine Flame Emit Hook 1/2") == 0 ||
-                     strcmp(p.name, "HoverCraft Engine Flame Emit Hook 2/2") == 0)
+            else if (strcmp(p.name.c_str(), "HoverCraft Engine Flame Emit Hook 1/2") == 0 ||
+                     strcmp(p.name.c_str(), "HoverCraft Engine Flame Emit Hook 2/2") == 0)
             {
-                uint32_t instrAddr = p.bzr_address - 1;
+                uint32_t instrAddr = p.address - 1;
                 uint32_t target = static_cast<uint32_t>(
                     reinterpret_cast<uintptr_t>(Trampoline_EngineFlameHoverCraftEmit));
                 int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(instrAddr + 5);
@@ -1607,12 +1629,15 @@ namespace BZROpenShim
             reinterpret_cast<uintptr_t>(kOpenShimVersionTag));
         uint8_t tagBytes[4] = {};
         memcpy(tagBytes, &tagPtr, sizeof(tagBytes));
+        using EngineFlameControlHookFn = void (__fastcall*)(void*, void*);
+        using EngineFlameSubmitHookFn = void (__fastcall*)(void*, void*, void*);
+        using ChunkEffectSimulateHookFn = void (__fastcall*)(void*, void*, float);
         const uint32_t engineFlameControlHook = static_cast<uint32_t>(
-            reinterpret_cast<uintptr_t>(EngineFlameControlHook));
+            reinterpret_cast<uintptr_t>(static_cast<EngineFlameControlHookFn>(EngineFlameControlHook)));
         const uint32_t engineFlameSubmitHook = static_cast<uint32_t>(
-            reinterpret_cast<uintptr_t>(EngineFlameSubmitHook));
+            reinterpret_cast<uintptr_t>(static_cast<EngineFlameSubmitHookFn>(EngineFlameSubmitHook)));
         const uint32_t chunkEffectSimulateHook = static_cast<uint32_t>(
-            reinterpret_cast<uintptr_t>(ChunkEffectSimulateHook));
+            reinterpret_cast<uintptr_t>(static_cast<ChunkEffectSimulateHookFn>(ChunkEffectSimulateHook)));
         uint8_t engineFlameControlBytes[4] = {};
         uint8_t engineFlameSubmitBytes[4] = {};
         uint8_t chunkEffectSimulateBytes[4] = {};
@@ -1623,23 +1648,23 @@ namespace BZROpenShim
         for (auto& p : patches)
         {
             if (p.type != HookEngine::PatchType::DWORD) continue;
-            if (strcmp(p.name, "Version Notice 1/2 OpenShim") == 0 ||
-                strcmp(p.name, "Version Notice 2/2 OpenShim") == 0 ||
-                strcmp(p.name, "Version Notice 3/3 OpenShim") == 0 ||
-                strcmp(p.name, "Main Menu GameVersion OpenShim") == 0 ||
-                strcmp(p.name, "Main Menu Version Text OpenShim") == 0)
+            if (strcmp(p.name.c_str(), "Version Notice 1/2 OpenShim") == 0 ||
+                strcmp(p.name.c_str(), "Version Notice 2/2 OpenShim") == 0 ||
+                strcmp(p.name.c_str(), "Version Notice 3/3 OpenShim") == 0 ||
+                strcmp(p.name.c_str(), "Main Menu GameVersion OpenShim") == 0 ||
+                strcmp(p.name.c_str(), "Main Menu Version Text OpenShim") == 0)
             {
                 p.payload.assign(tagBytes, tagBytes + sizeof(tagBytes));
             }
-            else if (strcmp(p.name, "Engine Flame Control VTable Hook") == 0)
+            else if (strcmp(p.name.c_str(), "Engine Flame Control VTable Hook") == 0)
             {
                 p.payload.assign(engineFlameControlBytes, engineFlameControlBytes + sizeof(engineFlameControlBytes));
             }
-            else if (strcmp(p.name, "Engine Flame Submit VTable Hook") == 0)
+            else if (strcmp(p.name.c_str(), "Engine Flame Submit VTable Hook") == 0)
             {
                 p.payload.assign(engineFlameSubmitBytes, engineFlameSubmitBytes + sizeof(engineFlameSubmitBytes));
             }
-            else if (strcmp(p.name, "Chunk Effect Simulate VTable Hook") == 0)
+            else if (strcmp(p.name.c_str(), "Chunk Effect Simulate VTable Hook") == 0)
             {
                 p.payload.assign(chunkEffectSimulateBytes, chunkEffectSimulateBytes + sizeof(chunkEffectSimulateBytes));
             }
@@ -1665,7 +1690,7 @@ namespace BZROpenShim
         {
             for (const char* name : steamTrackedNames)
             {
-                if (strcmp(patch.name, name) == 0)
+                if (strcmp(patch.name.c_str(), name) == 0)
                     return true;
             }
             return false;
@@ -1681,14 +1706,14 @@ namespace BZROpenShim
 
             for (const auto& patch : patches)
             {
-                if (!isTrackedPatch(patch) || patch.expected_original.empty() || patch.bzr_address == 0)
+                if (!isTrackedPatch(patch) || patch.expected_original.empty() || patch.address == 0)
                     continue;
 
                 std::vector<uint8_t> current(patch.expected_original.size());
                 SIZE_T read = 0;
                 if (!ReadProcessMemory(
                         GetCurrentProcess(),
-                        reinterpret_cast<const void*>(patch.bzr_address),
+                        reinterpret_cast<const void*>(patch.address),
                         current.data(),
                         current.size(),
                         &read) ||
@@ -1781,8 +1806,8 @@ namespace BZROpenShim
         {
             for (const auto& p : patches)
             {
-                if (strcmp(p.name, name) == 0)
-                    return p.bzr_address;
+                if (strcmp(p.name.c_str(), name) == 0)
+                    return p.address;
             }
             return 0;
         };

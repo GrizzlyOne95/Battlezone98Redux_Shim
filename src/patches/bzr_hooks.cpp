@@ -2118,6 +2118,19 @@ namespace BZROpenShim
                    record.y <= 8192;
         }
 
+        static bool TryReadHudSpriteRectRecord(const HudSpriteRectRecord* candidate, HudSpriteRectRecord& record)
+        {
+            __try
+            {
+                record = *candidate;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         static bool DiscoverStockScrapPilotPanelRecordAddresses(std::vector<uintptr_t>& outAddresses)
         {
             outAddresses.clear();
@@ -2160,14 +2173,8 @@ namespace BZROpenShim
                 {
                     const auto* candidate = reinterpret_cast<const HudSpriteRectRecord*>(regionBase + offset);
                     HudSpriteRectRecord record = {};
-                    __try
-                    {
-                        record = *candidate;
-                    }
-                    __except (EXCEPTION_EXECUTE_HANDLER)
-                    {
+                    if (!TryReadHudSpriteRectRecord(candidate, record))
                         continue;
-                    }
 
                     if (!HudSpriteRecordLooksLikeLivePanelRecord(record))
                         continue;
@@ -9234,12 +9241,18 @@ namespace BZROpenShim
                     reinterpret_cast<FnEngineFlameSubmit>(vtable[submitIndex]);
             }
 
+            using EngineFlameControlHookFn = void (__fastcall*)(void*, void*);
+            using EngineFlameSubmitHookFn = void (__fastcall*)(void*, void*, void*);
+            auto* controlHook =
+                reinterpret_cast<void*>(static_cast<EngineFlameControlHookFn>(EngineFlameControlHook));
+            auto* submitHook =
+                reinterpret_cast<void*>(static_cast<EngineFlameSubmitHookFn>(EngineFlameSubmitHook));
             const bool controlPatched =
-                (vtable[controlIndex] == reinterpret_cast<void*>(EngineFlameControlHook)) ||
-                WritePointerValue(controlSlot, reinterpret_cast<void*>(EngineFlameControlHook));
+                (vtable[controlIndex] == controlHook) ||
+                WritePointerValue(controlSlot, controlHook);
             const bool submitPatched =
-                (vtable[submitIndex] == reinterpret_cast<void*>(EngineFlameSubmitHook)) ||
-                WritePointerValue(submitSlot, reinterpret_cast<void*>(EngineFlameSubmitHook));
+                (vtable[submitIndex] == submitHook) ||
+                WritePointerValue(submitSlot, submitHook);
 
             g_EngineFlameVtableHooksInstalled = controlPatched && submitPatched;
             if (g_EngineFlameVtableHooksInstalled && !g_LoggedEngineFlameVtableHook)
