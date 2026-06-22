@@ -198,6 +198,36 @@ The intent is to give a known good `VGEO` name a valid Redux mesh/material
 pipeline, then see whether chunk child objects become visible once a valid
 render handle is forced into the stock resolve/classify path.
 
+### Chunk Mesh Self-Test And Payload Audit
+
+OpenShim also includes a standalone Ogre payload self-test for the chunk mesh
+bridge. This does not touch native chunk simulation; it only registers the same
+payload resource roots and creates one visible Ogre entity from a requested
+payload mesh.
+
+Environment controls:
+
+- `OPENSHIM_CHUNK_MESH_SELFTEST=<meshName>` creates one diagnostic entity after
+  the Ogre scene manager becomes available. A bare name such as `agr11bda`
+  searches the registered payload roots for `agr11bda.mesh`; a relative resource
+  name such as `avtank/agr11bda.mesh` is also accepted.
+- `OPENSHIM_CHUNK_MESH_SELFTEST_OFFSET=x,y,z` chooses the world position for
+  the diagnostic entity. The default is `0,8,25`.
+- `OPENSHIM_CHUNK_MESH_SELFTEST_SCALE=<n>` scales the diagnostic entity. The
+  default is `1.0`.
+- `OPENSHIM_CHUNK_PAYLOAD_AUDIT=1` adds explicit payload resolver hit/miss
+  lines for observed chunk geos without requiring the mesh proxy to render.
+
+Expected log tags:
+
+- `[CHUNKMESH] selftest resolve ...` confirms the requested mesh mapped to an
+  Ogre resource name.
+- `[CHUNKMESH] selftest create ...` reports scene manager, root node, scene
+  node, entity pointer, subentity count, attached object count, transform, and
+  visibility intent.
+- `[CHUNKMESH] payload audit hit ...` records the VDF/GEO candidates that
+  resolved to a payload mesh during live chunk tracking.
+
 ## Howitzer / Minelayer Weapon Mask Fix
 
 There is now a Shim-side behavior patch for the hardcoded howitzer and
@@ -247,8 +277,8 @@ claim alive for a replacement rig to satisfy from far away.
   the construction-claim/accounting/state cleanup.
 - Runtime logging uses the `[AICONSTRUCT]` tag in `winmm_shim.log`.
 - The always-on success line is the `Applied constructor death cleanup
-  action=death_cleanup ...` record, which captures the pre-clear `cc_*` values
-  and the helper entry points used for that cleanup.
+  action=death_cleanup ...` record, which captures both the pre-clear and
+  post-clear `cc_*` values plus the helper entry points used for that cleanup.
 - Trace mode adds budgeted structured lines with `action=` and `reason=`.
   `action=death_cleanup reason=applied` confirms the hook took the fix path,
   while `action=fallback` shows why a specific `AI_UnitRemove` call stayed on
@@ -279,6 +309,9 @@ dropouts during large battles.
 - Set `OPENSHIM_MAX_SOUND_CHANNELS=0` to disable the override.
 - `BZR_MAX_SOUND_CHANNELS` is also accepted as a legacy/testing alias.
 - Values above `256` are clamped down to `256`.
+- Set `OPENSHIM_TRACE_SOUND_CHANNELS=1` to log the selected GAS target, current
+  `maxObjects` field, requested cap, and applied cap while the refresh thread
+  is running.
 
 Notes:
 
@@ -289,6 +322,61 @@ Notes:
 - The shim locates the GAS globals at runtime. If Steam's runtime layout does
   not match the current anchor yet, the log will note that the override was
   skipped instead of patching blindly.
+
+## Lua Music Bridge
+
+OpenShim exports a small music bridge through the `winmm.dll` proxy, and EXU can
+resolve those exports for Lua scripts:
+
+- `OpenShimSetMusicTrack(int index)`
+- `OpenShimStopMusic()`
+- `OpenShimPauseMusic()`
+- `OpenShimResumeMusic()`
+- `OpenShimGetMusicTrack(int* outIndex)`
+
+EXU exposes matching Lua helpers:
+
+- `exu.SetMusicTrack(index)`
+- `exu.StopMusic()`
+- `exu.PauseMusic()`
+- `exu.ResumeMusic()`
+- `exu.GetMusicTrack()`
+
+Current native validation status:
+
+- `SetMusicTrack` calls the decompilation-identified native `StartMusic(long,
+  int)` entry at `0x00406670` and logs `[MUSIC]` success/fault lines.
+- Stop, pause, and resume exports currently fail closed and log once because
+  their native soundtrack control targets are not yet validated. They exist so
+  Lua scripts can probe support without crashing or changing `StartSound` /
+  `AudioMessage` behavior.
+
+## Co-op Mission Sync Helper
+
+The co-op campaign path should stay script-level first. A standalone helper is
+provided in the EXU repo at `examples/openshim_coop_sync.lua`.
+
+- Missions choose their own packet type and forward `Receive(from, type, ...)`
+  into `sync:receive(from, type, ...)`.
+- Host-side helpers broadcast objective text, objective markers, mission state,
+  and delayed win/loss calls through stock Lua `Send`.
+- Object existence and world simulation remain native/distributed; mission UI
+  and objective state must be explicitly synchronized.
+
+## Deferred Native Experiments
+
+These items remain deliberately gated until their exact live bytes/function
+bodies are validated on a launchable machine:
+
+- Mission briefing scroll cutoff: the RE note points at `FUN_007ce110` and
+  `FUN_007ce6d0`, but the currently loaded Redux image does not expose a
+  usable executable-looking body at the noted address, so OpenShim does not
+  patch it yet.
+- Raw input trace: keep this as a future `OPENSHIM_TRACE_RAW_INPUT=1`
+  logging-only hook after `ProcessMouseRawInput` bytes are revalidated.
+- Bomber stand-off: keep the first pass as `OPENSHIM_TRACE_BOMBER_RANGE=1`
+  instrumentation before enabling any `OPENSHIM_ENABLE_BOMBER_STANDOFF=1`
+  behavior change.
 
 ## Building
 
