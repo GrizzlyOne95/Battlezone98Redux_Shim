@@ -155,6 +155,94 @@ extern "C" WINMMAPI BOOL WINAPI OpenShimRestoreAllHudSprites()
     return result;
 }
 
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetMusicTrack(int index)
+{
+    typedef void (__cdecl* StartMusicFn)(long, int);
+    static StartMusicFn pStartMusic = reinterpret_cast<StartMusicFn>(0x00406670);
+
+    BZROpenShim::LogShimA(
+        BZROpenShim::LogLevel::Info,
+        "music",
+        "OpenShimSetMusicTrack index=%d",
+        index);
+
+    __try
+    {
+        pStartMusic(0, index);
+        return TRUE;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        BZROpenShim::LogShimA(
+            BZROpenShim::LogLevel::Error,
+            "music",
+            "OpenShimSetMusicTrack failed to call StartMusic (index=%d)",
+            index);
+        return FALSE;
+    }
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimStopMusic()
+{
+    static bool logged = false;
+    if (!logged)
+    {
+        logged = true;
+        BZROpenShim::LogShimA(
+            BZROpenShim::LogLevel::Info,
+            "music",
+            "OpenShimStopMusic: stub/fail closed");
+    }
+    return FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimPauseMusic()
+{
+    static bool logged = false;
+    if (!logged)
+    {
+        logged = true;
+        BZROpenShim::LogShimA(
+            BZROpenShim::LogLevel::Info,
+            "music",
+            "OpenShimPauseMusic: stub/fail closed");
+    }
+    return FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimResumeMusic()
+{
+    static bool logged = false;
+    if (!logged)
+    {
+        logged = true;
+        BZROpenShim::LogShimA(
+            BZROpenShim::LogLevel::Info,
+            "music",
+            "OpenShimResumeMusic: stub/fail closed");
+    }
+    return FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimGetMusicTrack(int* outIndex)
+{
+    static bool logged = false;
+    if (!logged)
+    {
+        logged = true;
+        BZROpenShim::LogShimA(
+            BZROpenShim::LogLevel::Info,
+            "music",
+            "OpenShimGetMusicTrack: stub/fail closed");
+    }
+    if (outIndex)
+    {
+        *outIndex = -1;
+    }
+    return FALSE;
+}
+
+
 // Legacy thunk exports that need naked tail-jump forwarders.
 #define LEGACY_NAKED_EXPORTS(X) \
     X(WOW32DriverCallback) \
