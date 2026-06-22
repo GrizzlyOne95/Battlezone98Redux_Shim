@@ -142,7 +142,7 @@ The missing piece is Steam-specific address resolution for the live build.
 - The local repo has a useful Redux PDB/decompile corpus, but it is not a
   direct Steam address map.
 - A local Steam Ghidra project exists at
-  `C:\Users\istuart\Documents\Battlezone 98 Redux\battlezone98redux.exe_ghidra`,
+  `<USER_HOME>\Documents\Battlezone 98 Redux\battlezone98redux.exe_ghidra`,
   but automated `pyghidra` inventory export timed out in this environment
   before producing a usable symbol dump.
 - Direct live-process probing has now recovered useful Steam runtime anchors for
@@ -329,7 +329,7 @@ order:
 
 ## Battlezone_LobbyMonitor Reuse Notes
 
-`C:\Users\iestu\Documents\GIT\Battlezone_LobbyMonitor` is useful as a protocol
+`<USER_HOME>\Documents\GIT\Battlezone_LobbyMonitor` is useful as a protocol
 reference for the public BZRNet side.
 
 Important confirmed message shapes from that repo:

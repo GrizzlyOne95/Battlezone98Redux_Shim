@@ -31,7 +31,7 @@ In the Steam executable:
   at `0x004917F0`
 
 That lines up with the earlier repo-side note in
-[`multiplayer_vehicle_flags_notes.md`](C:/Users/iestu/Documents/GIT/BZR-OpenShim/reverse_engineering/multiplayer_vehicle_flags_notes.md)
+[`multiplayer_vehicle_flags_notes.md`](<USER_HOME>/Documents/GIT/BZR-OpenShim/reverse_engineering/multiplayer_vehicle_flags_notes.md)
 that referenced `_spriteTable`, `_spriteTableSize`, and
 `_ReadSpriteTableFile`.
 

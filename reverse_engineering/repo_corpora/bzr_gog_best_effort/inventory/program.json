@@ -1,6 +1,6 @@
 {
   "program_name": "battlezone98redux.exe",
-  "executable_path": "C:\\GOG Games\\Battlezone 98 Redux\\battlezone98redux.exe",
+  "executable_path": "<GAME_ROOT>\\battlezone98redux.exe",
   "image_base": 4194304,
   "language_id": "x86:LE:32:default",
   "compiler": "visualstudio:unknown",
