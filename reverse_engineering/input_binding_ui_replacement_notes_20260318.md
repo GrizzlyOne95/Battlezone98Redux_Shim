@@ -32,7 +32,7 @@ existing native input pipeline.
 The old input options screen is a fixed native dialog with hand-built controls.
 The decompile at:
 
-- [InputConfigDlgProc-00577848.c](/C:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/workshop/global_decompile/legacy_bz1_exact_full/ghidrecomp/results/bins/bzone.exe-aa1ee4/decomps/InputConfigDlgProc-00577848.c)
+- [InputConfigDlgProc-00577848.c](/<USER_HOME>/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/workshop/global_decompile/legacy_bz1_exact_full/ghidrecomp/results/bins/bzone.exe-aa1ee4/decomps/InputConfigDlgProc-00577848.c)
 
 shows explicit creation of stock widgets like:
 
@@ -59,13 +59,13 @@ is editable through the UI even though the live input tables are larger.
 The stock native flow already includes:
 
 - one-key capture via
-  [GetOneKey-004bd7dc.c](/C:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/workshop/global_decompile/legacy_bz1_exact_full/ghidrecomp/results/bins/bzone.exe-aa1ee4/decomps/GetOneKey-004bd7dc.c)
+  [GetOneKey-004bd7dc.c](/<USER_HOME>/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/workshop/global_decompile/legacy_bz1_exact_full/ghidrecomp/results/bins/bzone.exe-aa1ee4/decomps/GetOneKey-004bd7dc.c)
 - modifier collection via
-  [StoreGameKey-004bd422.c](/C:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/workshop/global_decompile/legacy_bz1_exact_full/ghidrecomp/results/bins/bzone.exe-aa1ee4/decomps/StoreGameKey-004bd422.c)
+  [StoreGameKey-004bd422.c](/<USER_HOME>/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/workshop/global_decompile/legacy_bz1_exact_full/ghidrecomp/results/bins/bzone.exe-aa1ee4/decomps/StoreGameKey-004bd422.c)
 - stock `KeyConfig` validation via
-  [set_key-0056fc32.c](/C:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/workshop/global_decompile/legacy_bz1_exact_full/ghidrecomp/results/bins/bzone.exe-aa1ee4/decomps/set_key-0056fc32.c)
+  [set_key-0056fc32.c](/<USER_HOME>/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/workshop/global_decompile/legacy_bz1_exact_full/ghidrecomp/results/bins/bzone.exe-aa1ee4/decomps/set_key-0056fc32.c)
 - live UI label update plus file write via
-  [SetKeyInput-00573e4b.c](/C:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/workshop/global_decompile/legacy_bz1_exact_full/ghidrecomp/results/bins/bzone.exe-aa1ee4/decomps/SetKeyInput-00573e4b.c)
+  [SetKeyInput-00573e4b.c](/<USER_HOME>/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/workshop/global_decompile/legacy_bz1_exact_full/ghidrecomp/results/bins/bzone.exe-aa1ee4/decomps/SetKeyInput-00573e4b.c)
 
 The stock input page is therefore mostly a thin GUI wrapper over reusable
 native key-config helpers.
@@ -74,8 +74,8 @@ native key-config helpers.
 
 The live install under:
 
-- [input.map](/C:/Users/istuart/Documents/Battlezone%2098%20Redux/input.map)
-- [gamekey.map](/C:/Users/istuart/Documents/Battlezone%2098%20Redux/gamekey.map)
+- [input.map](/<USER_HOME>/Documents/Battlezone%2098%20Redux/input.map)
+- [gamekey.map](/<USER_HOME>/Documents/Battlezone%2098%20Redux/gamekey.map)
 
 confirms two distinct mapping layers:
 
@@ -86,17 +86,17 @@ confirms two distinct mapping layers:
 
 Examples from the live files:
 
-- [input.map](/C:/Users/istuart/Documents/Battlezone%2098%20Redux/input.map#L204)
+- [input.map](/<USER_HOME>/Documents/Battlezone%2098%20Redux/input.map#L204)
   `throttle_up`
-- [input.map](/C:/Users/istuart/Documents/Battlezone%2098%20Redux/input.map#L262)
+- [input.map](/<USER_HOME>/Documents/Battlezone%2098%20Redux/input.map#L262)
   `strafe_left`
-- [input.map](/C:/Users/istuart/Documents/Battlezone%2098%20Redux/input.map#L268)
+- [input.map](/<USER_HOME>/Documents/Battlezone%2098%20Redux/input.map#L268)
   `jump`
-- [input.map](/C:/Users/istuart/Documents/Battlezone%2098%20Redux/input.map#L288)
+- [input.map](/<USER_HOME>/Documents/Battlezone%2098%20Redux/input.map#L288)
   `weapon_cycle`
-- [gamekey.map](/C:/Users/istuart/Documents/Battlezone%2098%20Redux/gamekey.map#L24)
+- [gamekey.map](/<USER_HOME>/Documents/Battlezone%2098%20Redux/gamekey.map#L24)
   `PAUSE_GAME`
-- [gamekey.map](/C:/Users/istuart/Documents/Battlezone%2098%20Redux/gamekey.map#L31)
+- [gamekey.map](/<USER_HOME>/Documents/Battlezone%2098%20Redux/gamekey.map#L31)
   `CHAT_SENDTOALL`
 
 Practical implication:
@@ -109,7 +109,7 @@ Practical implication:
 
 The old decompile shows:
 
-- [set_defaults-0056facc.c](/C:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/workshop/global_decompile/legacy_bz1_exact_full/ghidrecomp/results/bins/bzone.exe-aa1ee4/decomps/set_defaults-0056facc.c#L14)
+- [set_defaults-0056facc.c](/<USER_HOME>/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/workshop/global_decompile/legacy_bz1_exact_full/ghidrecomp/results/bins/bzone.exe-aa1ee4/decomps/set_defaults-0056facc.c#L14)
 
 with `this->nKeyCount = 0x3e`, meaning the stock key-config table already
 tracks many more entries than the tiny fixed input page displays.
@@ -157,8 +157,8 @@ _StoreGameKey
 Command used:
 
 ```powershell
-& 'C:\Program Files\LLVM\bin\llvm-pdbutil.exe' dump --publics `
-  'C:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb' |
+& '<LLVM_ROOT>\bin\llvm-pdbutil.exe' dump --publics `
+  '<GAME_ROOT>\battlezone98redux.pdb' |
   Select-String -Pattern 'OptionsInput|KeyConfig|read_input_map_key|write_input_map_key|StoreGameKey'
 ```
 
@@ -176,19 +176,19 @@ The GOG PDB confirms these globals:
 Commands used:
 
 ```powershell
-& 'C:\Program Files\LLVM\bin\llvm-pdbutil.exe' dump --globals --global-name=sOptionsInput `
-  'C:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb'
+& '<LLVM_ROOT>\bin\llvm-pdbutil.exe' dump --globals --global-name=sOptionsInput `
+  '<GAME_ROOT>\battlezone98redux.pdb'
 
-& 'C:\Program Files\LLVM\bin\llvm-pdbutil.exe' dump --globals --global-name=sOptionsParent `
-  'C:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb'
+& '<LLVM_ROOT>\bin\llvm-pdbutil.exe' dump --globals --global-name=sOptionsParent `
+  '<GAME_ROOT>\battlezone98redux.pdb'
 
-& 'C:\Program Files\LLVM\bin\llvm-pdbutil.exe' dump --globals --global-name=sOptionsPlay `
-  'C:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb'
+& '<LLVM_ROOT>\bin\llvm-pdbutil.exe' dump --globals --global-name=sOptionsPlay `
+  '<GAME_ROOT>\battlezone98redux.pdb'
 ```
 
 The shared options/pause singleton cluster was already corroborated in:
 
-- [pause_menu_notes.md](/C:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/pause_menu_notes.md)
+- [pause_menu_notes.md](/<USER_HOME>/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/pause_menu_notes.md)
 
 This is useful because it suggests the replacement should attach to the stock
 options-input screen lifecycle rather than trying to fake a completely separate
@@ -198,7 +198,7 @@ shell page.
 
 String scanning against the live Steam executable at:
 
-- [battlezone98redux.exe](/C:/Users/istuart/Documents/Battlezone%2098%20Redux/battlezone98redux.exe)
+- [battlezone98redux.exe](/<USER_HOME>/Documents/Battlezone%2098%20Redux/battlezone98redux.exe)
 
 shows the current build still includes:
 
@@ -219,7 +219,7 @@ corpus.
 
 OpenShim already resolves and uses stock UI constructors and child insertion in:
 
-- [bzr_hooks.cpp](/C:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/src/bzr_hooks.cpp#L4669)
+- [bzr_hooks.cpp](/<USER_HOME>/Documents/GIT/Battlezone98Redux_Shim/src/bzr_hooks.cpp#L4669)
 
 Relevant helpers already in the shim:
 
@@ -239,7 +239,7 @@ OpenShim also already injects stock-style UI into live screens for:
 
 Example implementation:
 
-- [AutoSaveLoadButtonCreate](/C:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/src/bzr_hooks.cpp#L6688)
+- [AutoSaveLoadButtonCreate](/<USER_HOME>/Documents/GIT/Battlezone98Redux_Shim/src/bzr_hooks.cpp#L6688)
 
 This matters because the replacement input screen can follow an established
 repo pattern:
@@ -287,7 +287,7 @@ Immediate practical implication:
 
 `KeyConfig::set_key` rejects assignment when `nReserved != 0`:
 
-- [set_key-0056fc32.c](/C:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/workshop/global_decompile/legacy_bz1_exact_full/ghidrecomp/results/bins/bzone.exe-aa1ee4/decomps/set_key-0056fc32.c#L74)
+- [set_key-0056fc32.c](/<USER_HOME>/Documents/GIT/Battlezone98Redux_Shim/reverse_engineering/workshop/global_decompile/legacy_bz1_exact_full/ghidrecomp/results/bins/bzone.exe-aa1ee4/decomps/set_key-0056fc32.c#L74)
 
 This should be treated as a product decision:
 
@@ -313,8 +313,8 @@ Some live commands have:
 
 Examples:
 
-- [weapon_fire](/C:/Users/istuart/Documents/Battlezone%2098%20Redux/input.map#L276)
-- [weapon_cycle](/C:/Users/istuart/Documents/Battlezone%2098%20Redux/input.map#L288)
+- [weapon_fire](/<USER_HOME>/Documents/Battlezone%2098%20Redux/input.map#L276)
+- [weapon_cycle](/<USER_HOME>/Documents/Battlezone%2098%20Redux/input.map#L288)
 
 This means the first replacement UI should probably define a limited policy for
 each row, for example:
@@ -330,8 +330,8 @@ the whole file immediately.
 
 Extra Utilities `GetGameKey()` is raw `GetAsyncKeyState` against VK names:
 
-- [IO.cpp](/C:/Users/istuart/Documents/GIT/ExtraUtilities-G1/src/IO.cpp#L24)
-- [IO.h](/C:/Users/istuart/Documents/GIT/ExtraUtilities-G1/src/IO.h#L37)
+- [IO.cpp](/<USER_HOME>/Documents/GIT/ExtraUtilities-G1/src/IO.cpp#L24)
+- [IO.h](/<USER_HOME>/Documents/GIT/ExtraUtilities-G1/src/IO.h#L37)
 
 So a native full-rebind UI will not automatically update addon scripts that ask
 for keys like `"J"` or `"CTRL"`.

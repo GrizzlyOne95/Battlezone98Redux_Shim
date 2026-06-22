@@ -58,8 +58,8 @@ That script installs the free packages it can acquire automatically:
   - `qiling`
   - `ghidriff`
 
-It also writes stable `bzr-*` wrappers into `%USERPROFILE%\bin`, adds that
-directory to the user `PATH`, updates `%USERPROFILE%\.codex\config.toml`, and
+It also writes stable `bzr-*` wrappers into `<USER_HOME>\bin`, adds that
+directory to the user `PATH`, updates `<USER_HOME>\.codex\config.toml`, and
 registers a persistent local Ghidra MCP service in the user startup run key.
 
 ## Paths That Commonly Vary By PC
@@ -77,9 +77,9 @@ The installer supports parameters:
 
 ```powershell
 .\scripts\install_agent_re_tooling.ps1 `
-  -RepoRoot "D:\src\Battlezone98Redux_Shim" `
-  -GameDir "D:\Games\Battlezone 98 Redux" `
-  -GhidraInstallDir "D:\tools\ghidra_12.0.4_PUBLIC"
+  -RepoRoot "<REPO_ROOT>" `
+  -GameDir "<GAME_ROOT>" `
+  -GhidraInstallDir "<GHIDRA_ROOT>"
 ```
 
 ## Environment Variable Overrides
@@ -97,9 +97,9 @@ The repo tooling also honors these user or process environment variables:
 
 These are useful when:
 
-- the game is not under `%USERPROFILE%\Documents\Battlezone 98 Redux`
+- the game is not under `<USER_HOME>\Documents\Battlezone 98 Redux`
 - you want to force a specific executable
-- Ghidra is installed somewhere other than `C:\ghidra_12.0.4_PUBLIC`
+- Ghidra is installed somewhere other than `<GHIDRA_ROOT>`
 - you want to pin the debugger backend to a specific install
 
 ## Ghidra Note
@@ -115,7 +115,7 @@ Install Ghidra separately, then either:
 
 ## What Agents Should Use After Setup
 
-Once installed, agents should prefer these stable wrappers from `%USERPROFILE%\bin`:
+Once installed, agents should prefer these stable wrappers from `<USER_HOME>\bin`:
 
 - `bzr-ghidra-mcp.cmd`
 - `bzr-ghidra-mcp-service.cmd`

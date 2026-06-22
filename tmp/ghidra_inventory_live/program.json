@@ -1,9 +1,9 @@
 {
   "program_name": "battlezone98redux.exe",
-  "executable_path": "<GAME_ROOT>\\battlezone98redux.exe",
+  "executable_path": "<USER_HOME>\\Documents\\Battlezone 98 Redux\\battlezone98redux.exe",
   "image_base": 4194304,
   "language_id": "x86:LE:32:default",
   "compiler": "visualstudio:unknown",
-  "function_count": 34278,
-  "symbol_count": 150389
+  "function_count": 911,
+  "symbol_count": 1117
 }

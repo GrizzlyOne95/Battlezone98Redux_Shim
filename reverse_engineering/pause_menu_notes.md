@@ -32,7 +32,7 @@ Single-player pause is open when:
      - `0x12` load game
      - `0x17` restart
 
-This is what [`game_state.cpp`](/c:/Users/istuart/Documents/GIT/Battlezone98Redux_Shim/src/game_state.cpp)
+This is what [`game_state.cpp`](/<USER_HOME>/Documents/GIT/Battlezone98Redux_Shim/src/game_state.cpp)
 now implements.
 
 ## Why This Looks Correct
@@ -51,20 +51,20 @@ provides a coherent UI singleton cluster:
 - `sSave`
 - `sSinglePlayer`
 
-Using `llvm-pdbutil` on `C:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb`
+Using `llvm-pdbutil` on `<GAME_ROOT>\battlezone98redux.pdb`
 shows that these globals live together in the `.data` singleton block. That
 matches the known absolute addresses already used successfully in:
 
-- [`IO.cpp`](C:/Users/istuart/Documents/GIT/ExtraUtilities-G1/src/IO.cpp)
-- [`usergui.cpp`](C:/Users/istuart/Documents/GIT/BZR-Subtitles/external/usergui.cpp)
+- [`IO.cpp`](<USER_HOME>/Documents/GIT/ExtraUtilities-G1/src/IO.cpp)
+- [`usergui.cpp`](<USER_HOME>/Documents/GIT/BZR-Subtitles/external/usergui.cpp)
 
 ## Binary Sanity Check
 
 Both executables currently in scope share the same image base and section layout
 for the relevant globals:
 
-- `C:\GOG Games\Battlezone 98 Redux\battlezone98redux.exe`
-- `C:\Users\istuart\Downloads\Battlezone 98 Redux\battlezone98redux.exe`
+- `<GAME_ROOT>\battlezone98redux.exe`
+- `<USER_HOME>\Downloads\Battlezone 98 Redux\battlezone98redux.exe`
 
 The addresses above all land inside `.data` in both binaries, so the probe is
 valid for both current installs.
@@ -72,14 +72,14 @@ valid for both current installs.
 ## Commands Used
 
 ```powershell
-C:\Program Files\LLVM\bin\llvm-pdbutil.exe dump --globals --global-name=sEsc `
-  C:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb
+<LLVM_ROOT>\bin\llvm-pdbutil.exe dump --globals --global-name=sEsc `
+  <GAME_ROOT>\battlezone98redux.pdb
 
-C:\Program Files\LLVM\bin\llvm-pdbutil.exe dump --globals --global-name=sOptionsPlay `
-  C:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb
+<LLVM_ROOT>\bin\llvm-pdbutil.exe dump --globals --global-name=sOptionsPlay `
+  <GAME_ROOT>\battlezone98redux.pdb
 
-C:\Program Files\LLVM\bin\llvm-pdbutil.exe dump --globals --global-name=sSave `
-  C:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb
+<LLVM_ROOT>\bin\llvm-pdbutil.exe dump --globals --global-name=sSave `
+  <GAME_ROOT>\battlezone98redux.pdb
 ```
 
 Python `pefile` inspection also confirmed that `0x00918320`, `0x00918324`,

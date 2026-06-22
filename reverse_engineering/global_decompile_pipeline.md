@@ -32,8 +32,8 @@ Useful switches:
 
 ```powershell
 .\reverse_engineering\start_best_effort_pipeline.ps1 `
-  -BinaryPath "C:\GOG Games\Battlezone 98 Redux\battlezone98redux.exe" `
-  -PdbPath "C:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb" `
+  -BinaryPath "<GAME_ROOT>\battlezone98redux.exe" `
+  -PdbPath "<GAME_ROOT>\battlezone98redux.pdb" `
   -OutputRoot ".\reverse_engineering\workshop\global_decompile\bzr_gog" `
   -ForceAnalysis `
   -Callgraphs
@@ -49,8 +49,8 @@ The launcher writes:
 
 ```powershell
 python reverse_engineering\run_best_effort_pipeline.py `
-  --binary "C:\GOG Games\Battlezone 98 Redux\battlezone98redux.exe" `
-  --pdb "C:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb" `
+  --binary "<GAME_ROOT>\battlezone98redux.exe" `
+  --pdb "<GAME_ROOT>\battlezone98redux.pdb" `
   --force-analysis
 ```
 
@@ -86,7 +86,7 @@ Key artifacts:
 ## Notes
 
 - `llvm-pdbutil` is auto-discovered at
-  `C:\Program Files\LLVM\bin\llvm-pdbutil.exe`
+  `<LLVM_ROOT>\bin\llvm-pdbutil.exe`
 - `GHIDRA_INSTALL_DIR` is taken from the environment, which is already set in
   this environment
 - the pipeline is safe to rerun; `ghidrecomp` uses its cached project unless

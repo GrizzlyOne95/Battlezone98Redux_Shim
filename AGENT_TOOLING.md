@@ -3,20 +3,20 @@
 This file is the local reverse-engineering and agent-tooling inventory for the
 Battlezone workspace on this machine.
 
-Use this together with [AGENTS.md](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/AGENTS.md).
+Use this together with [AGENTS.md](/<USER_HOME>/Documents/GIT/BZR-OpenShim/AGENTS.md).
 
 ## Default Targets
 
-- Configured local game install: `C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux`
+- Configured local game install: `<GAME_ROOT>`
 - Configured game executable via `BZR_GAME_EXE`:
-  `C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux\battlezone98redux.exe`
+  `<GAME_ROOT>\battlezone98redux.exe`
 - If this machine later gains a second runtime install, prefer the configured
   `BZR_GAME_DIR` / `BZR_GAME_EXE` environment variables over stale hardcoded
   assumptions.
 
 ## Command Surface
 
-Prefer the stable wrappers in `%USERPROFILE%\bin`. The installer adds that
+Prefer the stable wrappers in `<USER_HOME>\bin`. The installer adds that
 directory to the user `PATH`.
 
 ## Agent Autonomy
@@ -49,13 +49,13 @@ Use this split before choosing a tool.
 
 - `bzr-ghidra-mcp.cmd`
   - Battlezone-specific wrapper around `pyghidra_mcp`.
-  - Default project path: [pyghidra_mcp_projects](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/pyghidra_mcp_projects)
+  - Default project path: [pyghidra_mcp_projects](/<USER_HOME>/Documents/GIT/BZR-OpenShim/pyghidra_mcp_projects)
   - Default project name: `BZ98_Redux`
   - Default binary resolution order:
     1. `BZR_GAME_EXE` / `BZR_REDUX_EXE` if set
-    2. `%USERPROFILE%\Documents\Battlezone 98 Redux\battlezone98redux.exe`
-    3. `%USERPROFILE%\Downloads\Battlezone 98 Redux\battlezone98redux.exe`
-    4. `C:\GOG Games\Battlezone 98 Redux\battlezone98redux.exe`
+    2. `<USER_HOME>\Documents\Battlezone 98 Redux\battlezone98redux.exe`
+    3. `<USER_HOME>\Downloads\Battlezone 98 Redux\battlezone98redux.exe`
+    4. `<GAME_ROOT>\battlezone98redux.exe`
   - Includes a Windows-specific reopen patch for existing Ghidra project binaries so reopened projects do not fail on absolute-path reconstruction.
   - Use for: entry bytes, disassembly, function lookup, symbols, xrefs, Ghidra project-backed binary queries.
   - Help: `bzr-ghidra-mcp.cmd --help`
@@ -68,7 +68,7 @@ Use this split before choosing a tool.
 ### Debugger Bridge
 
 - `bzr-redux-debug.cmd`
-  - Wrapper around [redux_debug_bridge.py](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/scripts/redux_debug_bridge.py)
+  - Wrapper around [redux_debug_bridge.py](/<USER_HOME>/Documents/GIT/BZR-OpenShim/scripts/redux_debug_bridge.py)
   - Subcommands:
     - `doctor`
     - `launch`
@@ -149,7 +149,7 @@ Use this split before choosing a tool.
 ### Qiling
 
 - `bzr-qiling.cmd`
-  - Wrapper to [qiling_cli.py](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/scripts/qiling_cli.py)
+  - Wrapper to [qiling_cli.py](/<USER_HOME>/Documents/GIT/BZR-OpenShim/scripts/qiling_cli.py)
   - Subcommands:
     - `version`
     - `run-python`
@@ -216,7 +216,7 @@ Use this split before choosing a tool.
 
 ## Installed MCP Servers
 
-Configured in `%USERPROFILE%\.codex\config.toml`:
+Configured in `<USER_HOME>\.codex\config.toml`:
 
 - `ghidra`
   - URL: `http://127.0.0.1:8765/mcp`
@@ -259,7 +259,7 @@ These are installed and usable from the local Python 3.12 environment.
 
 ## Other Native Tooling Already Available
 
-- LLVM tools in `C:\Program Files\LLVM\bin`
+- LLVM tools in `<LLVM_ROOT>\bin`
   - `llvm-pdbutil.exe`
   - `llvm-objdump.exe`
   - useful for PDB lookup and static disassembly from shell scripts
@@ -268,7 +268,7 @@ These are installed and usable from the local Python 3.12 environment.
   - `link.exe`
   - `MSBuild.exe`
 - Ghidra install
-  - `C:\Users\iestu\Tools\ghidra_12.0.4_PUBLIC`
+  - `<USER_HOME>\Tools\ghidra_12.0.4_PUBLIC`
   - mirrored into `BZR_GHIDRA_INSTALL_DIR` and the Codex `ghidra` MCP entry
 - Sysinternals
   - `Process Monitor`
@@ -296,15 +296,15 @@ installer flow in this repo.
 
 Prefer these before inventing a one-off script if they already cover the task.
 
-- [ghidra_mcp_bz98.py](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/scripts/ghidra_mcp_bz98.py)
+- [ghidra_mcp_bz98.py](/<USER_HOME>/Documents/GIT/BZR-OpenShim/scripts/ghidra_mcp_bz98.py)
   - Battlezone-specific wrapper for `pyghidra_mcp`, including the project reopen patch and persistent-service helper
-- [redux_debug_bridge.py](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/scripts/redux_debug_bridge.py)
+- [redux_debug_bridge.py](/<USER_HOME>/Documents/GIT/BZR-OpenShim/scripts/redux_debug_bridge.py)
   - launch/read/terminate bridge, also exposes MCP mode
-- [qiling_cli.py](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/scripts/qiling_cli.py)
+- [qiling_cli.py](/<USER_HOME>/Documents/GIT/BZR-OpenShim/scripts/qiling_cli.py)
   - small Qiling CLI bridge
-- [capture_runtime_layout.ps1](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/reverse_engineering/capture_runtime_layout.ps1)
-- [run_misn03_chunk_probe.ps1](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/reverse_engineering/run_misn03_chunk_probe.ps1)
-- [run_best_effort_pipeline.py](/c:/Users/iestu/Documents/GIT/BZR-OpenShim/reverse_engineering/run_best_effort_pipeline.py)
+- [capture_runtime_layout.ps1](/<USER_HOME>/Documents/GIT/BZR-OpenShim/reverse_engineering/capture_runtime_layout.ps1)
+- [run_misn03_chunk_probe.ps1](/<USER_HOME>/Documents/GIT/BZR-OpenShim/reverse_engineering/run_misn03_chunk_probe.ps1)
+- [run_best_effort_pipeline.py](/<USER_HOME>/Documents/GIT/BZR-OpenShim/reverse_engineering/run_best_effort_pipeline.py)
 
 ## Practical Guidance
 

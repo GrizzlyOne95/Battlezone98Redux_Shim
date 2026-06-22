@@ -2,7 +2,7 @@
 
 Investigated on 2026-03-23 against:
 
-- current Redux GOG install under `%USERPROFILE%\Documents\Battlezone 98 Redux`
+- current Redux GOG install under `<USER_HOME>\Documents\Battlezone 98 Redux`
 - current EXU repo
 - current Campaign Reimagined addon scripts
 - current OpenShim repo
@@ -21,9 +21,9 @@ Feature 17 asks for either:
 
 Campaign Reimagined's shipped stock-Lua docs still describe the relevant mission-audio APIs as WAV-only:
 
-- [`scriptutils.lua`](/c:/Users/istuart/Documents/Battlezone%2098%20Redux/addon/campaignReimagined/_Source/Scripts/scriptutils.lua#L274)
+- [`scriptutils.lua`](/<USER_HOME>/Documents/Battlezone%2098%20Redux/addon/campaignReimagined/_Source/Scripts/scriptutils.lua#L274)
   - `AudioMessage(filename)` says the file must be an uncompressed RIFF WAVE.
-- [`scriptutils.lua`](/c:/Users/istuart/Documents/Battlezone%2098%20Redux/addon/campaignReimagined/_Source/Scripts/scriptutils.lua#L300)
+- [`scriptutils.lua`](/<USER_HOME>/Documents/Battlezone%2098%20Redux/addon/campaignReimagined/_Source/Scripts/scriptutils.lua#L300)
   - `StartSound(filename, ...)` says the file must be an uncompressed RIFF WAVE.
 
 This matches current modder experience: mission music hacks still go through WAV conversion plus `StartSound` / `StopAudioMessage`.
@@ -32,11 +32,11 @@ This matches current modder experience: mission music hacks still go through WAV
 
 The only music-facing EXU export found in the current tree is music-slider inspection:
 
-- [`luaexport.cpp`](/c:/Users/istuart/Documents/GIT/ExtraUtilities-G1/src/luaexport.cpp#L792)
+- [`luaexport.cpp`](/<USER_HOME>/Documents/GIT/ExtraUtilities-G1/src/luaexport.cpp#L792)
   - exports `GetMusicVolume`
-- [`SoundOptions.h`](/c:/Users/istuart/Documents/GIT/ExtraUtilities-G1/src/SoundOptions.h#L30)
+- [`SoundOptions.h`](/<USER_HOME>/Documents/GIT/ExtraUtilities-G1/src/SoundOptions.h#L30)
   - reads a scanner-backed `musicVolume`
-- [`SoundOptions.cpp`](/c:/Users/istuart/Documents/GIT/ExtraUtilities-G1/src/SoundOptions.cpp#L23)
+- [`SoundOptions.cpp`](/<USER_HOME>/Documents/GIT/ExtraUtilities-G1/src/SoundOptions.cpp#L23)
   - `GetMusicVolume` just returns the current display value
 
 There is no current EXU API for:
@@ -74,7 +74,7 @@ The executable and install both show a dedicated OGG music path:
 
 The game logger also confirms that a separate native music system is active:
 
-- [`BZLogger.txt`](/c:/Users/istuart/Documents/Battlezone%2098%20Redux/BZLogger.txt)
+- [`BZLogger.txt`](/<USER_HOME>/Documents/Battlezone%2098%20Redux/BZLogger.txt)
   - `Initializing music handler`
   - `Starting Music Playback Index 0`
 

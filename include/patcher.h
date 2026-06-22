@@ -31,6 +31,7 @@ namespace BZROpenShim
     //   4. Applies all patches
     // -----------------------------------------------------------------------
     void RunPatcher(uint32_t shimVersion);
+    void SignalPatcherShutdown();
 
     // Logging helpers for use in other modules
     void Log(const wchar_t* fmt, ...);

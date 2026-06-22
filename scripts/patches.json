@@ -1,0 +1,379 @@
+{
+  "patches": [
+    {
+      "name": "Map List Rewrite for Hop-Fix 1/3",
+      "pattern": "8B 45 FC 8B 88 38 01 00 00 E8 F3 89 E3 FF",
+      "offset": 0,
+      "expected_size": 5,
+      "fallback": "0x0079B85F"
+    },
+    {
+      "name": "Map List Rewrite for Hop-Fix 2/3",
+      "pattern": "6A 00 8B 85 5C FF FF FF 8B 88 7C 01 00 00 E8",
+      "offset": 0,
+      "expected_size": 5,
+      "fallback": "0x00799279"
+    },
+    {
+      "name": "Map List Rewrite for Hop-Fix 3/3",
+      "pattern": "FF D2 68 30 09 00 00",
+      "offset": 0,
+      "expected_size": 5,
+      "fallback": "0x00799377"
+    },
+    {
+      "name": "HoverCraft Engine Flame Emit Hook 1/2",
+      "pattern": "0F 11 04 24 8D 85 ?? ?? ?? ?? 50 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 3D ?? ?? ?? ?? 00 0F 84",
+      "offset": 17,
+      "expected_size": 4,
+      "fallback": "0x004EAD78"
+    },
+    {
+      "name": "HoverCraft Engine Flame Emit Hook 2/2",
+      "pattern": "8D 95 ?? ?? ?? ?? 52 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? E9 ?? ?? ?? ?? 83 BD ?? ?? ?? ?? 00 0F 8E",
+      "offset": 13,
+      "expected_size": 4,
+      "fallback": "0x004EAFDF"
+    },
+    {
+      "name": "Artillery Howitzer Volley Hook",
+      "pattern": "55 8B EC 83 EC 0C 56 89 4D F8 8B 4D F8 ?? ?? ?? ?? 00 83 E8 01",
+      "offset": 0,
+      "expected_size": 6,
+      "fallback": "0x0042F840"
+    }
+  ],
+  "globals": [
+    {
+      "name": "Map Sorting",
+      "fallback": "0x007680D6",
+      "expected_original": "89 4D F8 0F B6"
+    },
+    {
+      "name": "Map List Fix Support 1/3",
+      "fallback": "0x00799774",
+      "expected_original": "89 4D FC 8B 45"
+    },
+    {
+      "name": "Map Jump Fix Branch Override",
+      "fallback": "0x007AA5A1",
+      "expected_original": "75"
+    },
+    {
+      "name": "Main Menu Version Text OpenShim",
+      "fallback": "0x0078DD4E",
+      "expected_original": "E4 84 87 00"
+    },
+    {
+      "name": "Version Notice 1/2 OpenShim",
+      "fallback_gog": "0x0078DD4E",
+      "fallback_steam": "0x004B022B",
+      "expected_original": "E4 84 87 00"
+    },
+    {
+      "name": "Version Notice 2/2 OpenShim",
+      "fallback_gog": "0x00618C2F",
+      "fallback_steam": "0x004B0247",
+      "expected_original": "E4 84 87 00"
+    },
+    {
+      "name": "Version Notice 3/3 OpenShim",
+      "fallback_steam": "0x005091F4",
+      "expected_original": "E4 84 87 00"
+    },
+    {
+      "name": "Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)",
+      "fallback": "0x00766C4A",
+      "expected_original": "E8 A1 AE D1 FF"
+    },
+    {
+      "name": "Vehicle List Mod Fix 2/4 (Force Mod-Scoped Assets 2/3)",
+      "fallback": "0x0079A4F4",
+      "expected_original": "68 99 00 00"
+    },
+    {
+      "name": "Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)",
+      "fallback": "0x00798BD9",
+      "expected_original": "51 E8 A1 BB FC"
+    },
+    {
+      "name": "Chunk Render Resolve Hook",
+      "fallback": "0x00443B35",
+      "expected_original": "E7 FA 09 00"
+    },
+    {
+      "name": "Producer Build Menu Root Hook",
+      "fallback": "0x004FFA9F",
+      "expected_original": "B6 BF 32 00"
+    },
+    {
+      "name": "Target Reticle Popup Recent-Hit Getter Hook",
+      "fallback": "0x00497C27",
+      "expected_original": "65 FC FF FF"
+    },
+    {
+      "name": "Engine Flame Control VTable Hook",
+      "fallback": "0x008791A4",
+      "expected_original": "A0 88 4C 00"
+    },
+    {
+      "name": "Engine Flame Submit VTable Hook",
+      "fallback": "0x008791AC",
+      "expected_original": "C0 88 4C 00"
+    },
+    {
+      "name": "Chunk Effect Simulate VTable Hook",
+      "fallback": "0x0087708C",
+      "expected_original": "F0 17 49 00"
+    },
+    {
+      "name": "Decoded Weapon Mask Carrier Bias Hook",
+      "fallback": "0x00417C80",
+      "expected_original": "55 8B EC 51 89"
+    },
+    {
+      "name": "Raw Weapon Mask Carrier Bias Hook",
+      "fallback": "0x0046DD70",
+      "expected_original": "55 8B EC 51 89"
+    },
+    {
+      "name": "Lobby BZRNET Integration HOST",
+      "fallback": "0x00743C05",
+      "expected_original": "8D 85 00 FF FF"
+    },
+    {
+      "name": "Lobby BZRNET Integration CLIENT",
+      "fallback": "0x0073E71C",
+      "expected_original": "C6 45 FC 07 8D"
+    },
+    {
+      "name": "Joiner Event Hook",
+      "fallback": "0x0073F430",
+      "expected_original": "E8 2B 31 00 00"
+    },
+    {
+      "name": "Ban Button Hook 1/2",
+      "fallback": "0x007D0A2F",
+      "expected_original": "0F B6 45 20 85"
+    },
+    {
+      "name": "Ban Button Hook 2/2",
+      "fallback": "0x007A6913",
+      "expected_original": "C7 45 FC FF FF"
+    },
+    {
+      "name": "AutoSave Load Button Hook",
+      "fallback": "0x0078B45A",
+      "expected_original": "A1 0C 83 91 00"
+    },
+    {
+      "name": "Restart Mission Hook Pause",
+      "fallback": "0x00788F40",
+      "expected_original": "55 8B EC 51 89"
+    },
+    {
+      "name": "Restart Mission Hook Failure",
+      "fallback": "0x00791F50",
+      "expected_original": "55 8B EC 51 89"
+    },
+    {
+      "name": "TurretCraft Aim Pitch Multiplier",
+      "fallback": "0x005F1838",
+      "expected_original": "F3 0F 10 05 84 25 8A 00"
+    },
+    {
+      "name": "TurretTank Aim Pitch Multiplier",
+      "fallback": "0x005F561A",
+      "expected_original": "F3 0F 10 05 84 25 8A 00"
+    },
+    {
+      "name": "Under Attack Alert Hook 1/2",
+      "fallback": "0x00494D35",
+      "expected_original": "0F 2F 05 D0 73"
+    },
+    {
+      "name": "Under Attack Alert Hook 2/2",
+      "fallback": "0x0050E6DD",
+      "expected_original": "0F 2F 05 D0 73"
+    },
+    {
+      "name": "Offensive Attack Reveal Hook",
+      "fallback": "0x005839E0",
+      "expected_original": "8B 4D F8 8B 55 F8 8B 42 1C 89 41 24"
+    },
+    {
+      "name": "TurretTank Attack Reveal Hook",
+      "fallback": "0x005F73F3",
+      "expected_original": "8B 55 F8 8B 45 F8 8B 48 1C 89 4A 24"
+    },
+    {
+      "name": "Map Filters 1/8",
+      "fallback": "0x007A31D9",
+      "expected_original": "68 E0 B3 89 00"
+    },
+    {
+      "name": "Map Filters 2/8",
+      "fallback": "0x00752A82",
+      "expected_original": "E8 49 04 00 00"
+    },
+    {
+      "name": "Map Filters 3/8",
+      "fallback": "0x0079D6B1",
+      "expected_original": "8B EC 8B 0D 64"
+    },
+    {
+      "name": "Map Filters 4/8",
+      "fallback": "0x0079D691",
+      "expected_original": "8B EC 8B 0D 64"
+    },
+    {
+      "name": "Map Filters 5/8",
+      "fallback": "0x00799116",
+      "expected_original": "52 6A 20 6A 00"
+    },
+    {
+      "name": "Map Filters 6/8",
+      "fallback": "0x0079920A",
+      "expected_original": "92 23 03 00"
+    },
+    {
+      "name": "Map Filters 7/8",
+      "fallback": "0x007998AB",
+      "expected_original": "8B 45 BC 8B 88"
+    },
+    {
+      "name": "Map Filters 8/8",
+      "fallback": "0x007997A9",
+      "expected_original": "8B 45 F8 8B 88"
+    }
+  ],
+  "static_pointers": [
+    {
+      "name": "MapListObject",
+      "address": "0x0094555C"
+    },
+    {
+      "name": "GAS_GMStorage",
+      "address": "0x00915594"
+    },
+    {
+      "name": "GAS_Master",
+      "address": "0x0091559C"
+    },
+    {
+      "name": "HopFix1_Fallback",
+      "address": "0x005D4260"
+    },
+    {
+      "name": "HopFix2_Fallback",
+      "address": "0x007CAFA0"
+    },
+    {
+      "name": "HopFix3Step_Fallback",
+      "address": "0x007A3130"
+    },
+    {
+      "name": "MapListFixSupport1_Fallback",
+      "address": "0x007A3BD0"
+    },
+    {
+      "name": "JoinerEventOriginal",
+      "address": "0x00742560"
+    },
+    {
+      "name": "GetScrollState",
+      "address": "0x007D3360"
+    },
+    {
+      "name": "ScrollUp",
+      "address": "0x007CB500"
+    },
+    {
+      "name": "ScrollDown",
+      "address": "0x007CB540"
+    },
+    {
+      "name": "StartupShellAutoLoadFlag",
+      "address": "0x008EAAA8"
+    },
+    {
+      "name": "RetAddr_MapFilters1",
+      "address": "0x007A35C0"
+    },
+    {
+      "name": "RetAddr_MapFilters2",
+      "address": "0x00752D00"
+    },
+    {
+      "name": "RetAddr_MapFilters3",
+      "address": "0x0079D6B9"
+    },
+    {
+      "name": "RetAddr_MapFilters4",
+      "address": "0x0079D699"
+    },
+    {
+      "name": "RetAddr_MapFilters5",
+      "address": "0x0079916B"
+    },
+    {
+      "name": "RetAddr_MapFilters7",
+      "address": "0x007998B4"
+    },
+    {
+      "name": "RetAddr_MapFilters8_A",
+      "address": "0x007997B2"
+    },
+    {
+      "name": "RetAddr_MapFilters8_B",
+      "address": "0x007997B7"
+    },
+    {
+      "name": "RetAddr_MapFilters8_C",
+      "address": "0x0079987C"
+    },
+    {
+      "name": "RetAddr_VehicleListModFix1",
+      "address": "0x00766C52"
+    },
+    {
+      "name": "RetAddr_VehicleListModFix4",
+      "address": "0x00798BE6"
+    },
+    {
+      "name": "RetAddr_BzrnetHost",
+      "address": "0x00743C30"
+    },
+    {
+      "name": "RetAddr_BzrnetClient",
+      "address": "0x0073E748"
+    },
+    {
+      "name": "RetAddr_CommandHelpHandled",
+      "address": "0x00625052"
+    },
+    {
+      "name": "RetAddr_CommandHelpFallback",
+      "address": "0x0062491F"
+    },
+    {
+      "name": "RetAddr_JoinerEventHook",
+      "address": "0x0073F435"
+    },
+    {
+      "name": "RetAddr_BanHook1",
+      "address": "0x007D0A35"
+    },
+    {
+      "name": "RetAddr_BanHook2",
+      "address": "0x007A691A"
+    },
+    {
+      "name": "RetAddr_AutoSaveLoadHook",
+      "address": "0x0078B45F"
+    }
+  ],
+  "audio_gas_pattern": {
+    "pattern": "A3 ?? ?? ?? ?? A3 ?? ?? ?? ?? A3 ?? ?? ?? ?? A3 ?? ?? ?? ?? A3 ?? ?? ?? ?? 68 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 C4 04 85 C0 75 04 33 C0 EB ?? C7 05 ?? ?? ?? ?? ?? ?? ?? ?? 68 ?? ?? ?? ?? E8 ?? ?? ?? ??"
+  }
+}
