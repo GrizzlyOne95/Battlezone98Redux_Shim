@@ -7,9 +7,9 @@ successfully identified SteamStub Variant 3.1 x86, removed `.bind`, decrypted
 
 ## Inputs
 
-- Packed EXE: `C:\Users\istuart\Documents\Battlezone 98 Redux\battlezone98redux.exe`
+- Packed EXE: `<USER_HOME>\Documents\Battlezone 98 Redux\battlezone98redux.exe`
 - Packed EXE SHA-256: `d298782fc9a13edb0665db934110440c45461031db5f7fe1a76c8784b61cc90d`
-- Beta PDB: `C:\Users\istuart\Documents\Battlezone 98 Redux\battlezone98redux.pdb`
+- Beta PDB: `<USER_HOME>\Documents\Battlezone 98 Redux\battlezone98redux.pdb`
 - PDB trust: advisory only; GUID mismatch, age match
 
 ## Static Unpack

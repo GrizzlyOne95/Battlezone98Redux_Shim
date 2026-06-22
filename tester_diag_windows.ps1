@@ -25,11 +25,11 @@ function Get-ResolvedGamePath {
     }
 
     $defaultPaths = @(
-        "C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux",
-        "C:\Program Files\Steam\steamapps\common\Battlezone 98 Redux",
+        "<GAME_ROOT>",
+        "<GAME_ROOT>",
         "$env:PROGRAMFILES\Steam\steamapps\common\Battlezone 98 Redux",
-        "C:\GOG Games\Battlezone 98 Redux",
-        "C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux"
+        "<GAME_ROOT>",
+        "<GAME_ROOT>"
     )
 
     foreach ($path in $defaultPaths) {

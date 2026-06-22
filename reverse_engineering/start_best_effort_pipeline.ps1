@@ -1,5 +1,5 @@
 param(
-    [string]$BinaryPath = "C:\GOG Games\Battlezone 98 Redux\battlezone98redux.exe",
+    [string]$BinaryPath = "<GAME_ROOT>\battlezone98redux.exe",
     [string]$PdbPath = "",
     [string]$OutputRoot = "",
     [int]$ThreadCount = [Math]::Max(1, [Environment]::ProcessorCount / 2),

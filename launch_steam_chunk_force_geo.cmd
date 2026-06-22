@@ -13,7 +13,7 @@ if not exist "%SOURCE_DLL%" (
 if defined BZR_GAME_DIR (
   set "GAME_DIR=%BZR_GAME_DIR%"
 ) else (
-  set "GAME_DIR=C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux"
+  set "GAME_DIR=<GAME_ROOT>"
 )
 
 set "GAME_EXE=%GAME_DIR%\battlezone98redux.exe"

@@ -171,13 +171,13 @@ def main() -> None:
     parser.add_argument(
         "--gog",
         type=Path,
-        default=Path(r"C:\GOG Games\Battlezone 98 Redux\battlezone98redux.exe"),
+        default=Path(r"<GAME_ROOT>\battlezone98redux.exe"),
         help="Path to the GOG executable",
     )
     parser.add_argument(
         "--steam",
         type=Path,
-        default=Path(r"C:\Users\istuart\Downloads\Battlezone 98 Redux\battlezone98redux.exe"),
+        default=Path(r"<USER_HOME>\Downloads\Battlezone 98 Redux\battlezone98redux.exe"),
         help="Path to the Steam executable",
     )
     args = parser.parse_args()

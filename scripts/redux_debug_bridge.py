@@ -82,7 +82,7 @@ def candidate_game_dirs() -> list[Path]:
         dirs.append(Path(explicit))
     if user_profile:
         dirs.append(user_profile / "Documents" / "Battlezone 98 Redux")
-    dirs.append(Path("C:/GOG Games/Battlezone 98 Redux"))
+    dirs.append(Path("<GAME_ROOT>"))
     return dirs
 
 
@@ -197,7 +197,7 @@ def latest_windbg_root() -> Path | None:
     except OSError:
         pass
 
-    fallback = Path(r"C:\Program Files\WindowsApps\Microsoft.WinDbg_1.2601.12001.0_x64__8wekyb3d8bbwe")
+    fallback = Path(r"<WINDOWS_APPS>\Microsoft.WinDbg_1.2601.12001.0_x64__8wekyb3d8bbwe")
     if fallback.exists():
         return fallback
 
@@ -216,8 +216,8 @@ def find_cdb_x86() -> Path | None:
             return candidate
 
     for pattern in [
-        r"C:\Program Files (x86)\Windows Kits\10\Debuggers\x86\cdb.exe",
-        r"C:\Program Files\WindowsApps\Microsoft.WinDbg_*_x64__8wekyb3d8bbwe\x86\cdb.exe",
+        r"<WINDOWS_KITS>\10\Debuggers\x86\cdb.exe",
+        r"<WINDOWS_APPS>\Microsoft.WinDbg_*_x64__8wekyb3d8bbwe\x86\cdb.exe",
     ]:
         matches = [Path(path) for path in glob.glob(pattern)]
         if matches:

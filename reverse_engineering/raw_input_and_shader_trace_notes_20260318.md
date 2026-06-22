@@ -156,7 +156,7 @@ So the right current answer is:
 
 A best-effort PE scan against the older local GOG install at:
 
-- `C:\GOG Games\Battlezone 98 Redux\battlezone98redux.exe`
+- `<GAME_ROOT>\battlezone98redux.exe`
 
 found one direct `RegisterRawInputDevices` IAT call and two direct `GetRawInputData` IAT calls:
 
@@ -182,7 +182,7 @@ Important limitation:
 
 The current workspace install at:
 
-- `C:\Users\istuart\Documents\Battlezone 98 Redux\battlezone98redux.exe`
+- `<USER_HOME>\Documents\Battlezone 98 Redux\battlezone98redux.exe`
 
 still contains the `rawinput` / `norawinput` strings, but the same quick IAT scan did not recover direct callsites cleanly there, so the current-build registration site remains unvalidated.
 
@@ -320,9 +320,9 @@ When BZR uses Ogre RTShaderSystem-generated shaders, the matching OGRE 1.10 sour
 
 Local source anchors:
 
-- `C:\Users\istuart\Documents\GIT\ogre-1.10.0\Components\RTShaderSystem\src\OgreShaderRenderState.cpp`
+- `<USER_HOME>\Documents\GIT\ogre-1.10.0\Components\RTShaderSystem\src\OgreShaderRenderState.cpp`
   - `TargetRenderState::createCpuPrograms()`
-- `C:\Users\istuart\Documents\GIT\ogre-1.10.0\Components\RTShaderSystem\src\OgreShaderProgramManager.cpp`
+- `<USER_HOME>\Documents\GIT\ogre-1.10.0\Components\RTShaderSystem\src\OgreShaderProgramManager.cpp`
   - `ProgramManager::acquirePrograms(...)`
   - `ProgramManager::createGpuPrograms(...)`
   - `ProgramManager::createGpuProgram(...)`
@@ -344,8 +344,8 @@ When the path uses the Cg plugin, the matching source is:
 
 Local source anchors:
 
-- `C:\Users\istuart\Documents\GIT\ogre-1.10.0\PlugIns\CgProgramManager\src\OgreCgFxScriptLoader.cpp`
-- `C:\Users\istuart\Documents\GIT\ogre-1.10.0\PlugIns\CgProgramManager\src\OgreCgProgram.cpp`
+- `<USER_HOME>\Documents\GIT\ogre-1.10.0\PlugIns\CgProgramManager\src\OgreCgFxScriptLoader.cpp`
+- `<USER_HOME>\Documents\GIT\ogre-1.10.0\PlugIns\CgProgramManager\src\OgreCgProgram.cpp`
 
 The local module dump matches that source:
 
@@ -369,8 +369,8 @@ Once the pass has a bound program, the matching D3D9 backend source shows two im
 
 Local source anchors:
 
-- `C:\Users\istuart\Documents\GIT\ogre-1.10.0\RenderSystems\Direct3D9\src\OgreD3D9GpuProgram.cpp`
-- `C:\Users\istuart\Documents\GIT\ogre-1.10.0\RenderSystems\Direct3D9\src\OgreD3D9HLSLProgram.cpp`
+- `<USER_HOME>\Documents\GIT\ogre-1.10.0\RenderSystems\Direct3D9\src\OgreD3D9GpuProgram.cpp`
+- `<USER_HOME>\Documents\GIT\ogre-1.10.0\RenderSystems\Direct3D9\src\OgreD3D9HLSLProgram.cpp`
 
 The local module dump confirms those backend imports:
 

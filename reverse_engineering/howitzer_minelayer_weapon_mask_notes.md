@@ -38,12 +38,12 @@ Current limitation:
 
 ### Repos / Inputs Used
 
-- `C:\Users\istuart\Documents\GIT\ExtraUtilities-G1\FeaturesToLookInto.txt`
-- `C:\Users\istuart\Documents\GIT\Battlezone98Redux_CampaignReimagined-1\_Source\ODF\svartl.odf`
-- `C:\Users\istuart\Documents\GIT\Battlezone98Redux_CampaignReimagined-1\_Source\ODF\svmine.odf`
-- `C:\GOG Games\Battlezone 98 Redux\battlezone98redux.exe`
-- `C:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb`
-- `C:\Users\istuart\Documents\GIT\Battlezone98Redux_Shim\reverse_engineering\workshop\global_decompile\legacy_bz1_exact_full`
+- `<USER_HOME>\Documents\GIT\ExtraUtilities-G1\FeaturesToLookInto.txt`
+- `<USER_HOME>\Documents\GIT\Battlezone98Redux_CampaignReimagined-1\_Source\ODF\svartl.odf`
+- `<USER_HOME>\Documents\GIT\Battlezone98Redux_CampaignReimagined-1\_Source\ODF\svmine.odf`
+- `<GAME_ROOT>\battlezone98redux.exe`
+- `<GAME_ROOT>\battlezone98redux.pdb`
+- `<USER_HOME>\Documents\GIT\Battlezone98Redux_Shim\reverse_engineering\workshop\global_decompile\legacy_bz1_exact_full`
 - local `llvm-pdbutil`, `llvm-objdump`, `dumpbin`, `pyghidra`
 
 ### High-Confidence Findings
@@ -54,9 +54,9 @@ The legacy exact corpus is the cleanest semantic source currently available for
 this feature family, even though it is not the Redux executable we patch:
 
 - corpus root:
-  `C:\Users\istuart\Documents\GIT\Battlezone98Redux_Shim\reverse_engineering\workshop\global_decompile\legacy_bz1_exact_full`
+  `<USER_HOME>\Documents\GIT\Battlezone98Redux_Shim\reverse_engineering\workshop\global_decompile\legacy_bz1_exact_full`
 - source tree roots in the PDB:
-  `c:\Users\Ken\Documents\Projects\BZ1\source\Internal\...`
+  `<USER_HOME>\Documents\Projects\BZ1\source\Internal\...`
 - confirmed legacy source modules:
   - `ArtilleryProcess.obj`
   - `MineLayerProcess.obj`

@@ -9,10 +9,10 @@ team or per handle, and if not, identify what native change would be required.
 
 Primary inputs:
 
-- GOG EXE: `C:\GOG Games\Battlezone 98 Redux\battlezone98redux.exe`
-- GOG PDB: `C:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb`
-- Stock ODF: `C:\Users\istuart\Downloads\Battlezone 98 Redux\Edit\stock\engflame.odf`
-- Sprite materials: `C:\GOG Games\Battlezone 98 Redux\BZ_ASSETS\pc\materials\sprites.material`
+- GOG EXE: `<GAME_ROOT>\battlezone98redux.exe`
+- GOG PDB: `<GAME_ROOT>\battlezone98redux.pdb`
+- Stock ODF: `<USER_HOME>\Downloads\Battlezone 98 Redux\Edit\stock\engflame.odf`
+- Sprite materials: `<GAME_ROOT>\BZ_ASSETS\pc\materials\sprites.material`
 
 ## Result
 
@@ -322,21 +322,21 @@ Current blockers for the complete chain:
 
 ```powershell
 rg -n "rflame|gflame|bflame|exhaust_[rgb]\.0" `
-  "C:\GOG Games\Battlezone 98 Redux\BZ_ASSETS\pc\materials\sprites.material" `
-  "C:\Users\istuart\Downloads\Battlezone 98 Redux\Edit\stock\engflame.odf"
+  "<GAME_ROOT>\BZ_ASSETS\pc\materials\sprites.material" `
+  "<USER_HOME>\Downloads\Battlezone 98 Redux\Edit\stock\engflame.odf"
 
-C:\Program Files\LLVM\bin\llvm-pdbutil.exe pretty --classes `
+<LLVM_ROOT>\bin\llvm-pdbutil.exe pretty --classes `
   --class-definitions=all --with-name=EngineFlame `
-  "C:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb"
+  "<GAME_ROOT>\battlezone98redux.pdb"
 
-C:\Program Files\LLVM\bin\llvm-pdbutil.exe pretty --classes `
+<LLVM_ROOT>\bin\llvm-pdbutil.exe pretty --classes `
   --class-definitions=all --with-name=Flame `
-  "C:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb"
+  "<GAME_ROOT>\battlezone98redux.pdb"
 
-C:\Program Files\LLVM\bin\llvm-pdbutil.exe pretty --globals `
+<LLVM_ROOT>\bin\llvm-pdbutil.exe pretty --globals `
   --with-name=engineFlame `
-  "C:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb"
+  "<GAME_ROOT>\battlezone98redux.pdb"
 
-C:\Program Files\LLVM\bin\llvm-pdbutil.exe dump --files --modi=120 -l `
-  "C:\GOG Games\Battlezone 98 Redux\battlezone98redux.pdb"
+<LLVM_ROOT>\bin\llvm-pdbutil.exe dump --files --modi=120 -l `
+  "<GAME_ROOT>\battlezone98redux.pdb"
 ```

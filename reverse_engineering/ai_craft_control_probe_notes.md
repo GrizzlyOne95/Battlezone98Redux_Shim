@@ -87,15 +87,15 @@ The live pass did find `+0xD0` accesses, but they were inside the noisy buckets 
 Relevant repo locations recorded for later agent work:
 
 - Shim-side probe helper:
-  - `%USERPROFILE%\Documents\GIT\BZR-OpenShim\reverse_engineering\probe_ai_craft_controls.py`
+  - `<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\probe_ai_craft_controls.py`
 - Captured live-process report from the successful rerun after the EXE was relaunched:
-  - `%USERPROFILE%\Documents\GIT\BZR-OpenShim\reverse_engineering\ai_craft_control_probe_report_20260317.md`
+  - `<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\ai_craft_control_probe_report_20260317.md`
 - This summary note:
-  - `%USERPROFILE%\Documents\GIT\BZR-OpenShim\reverse_engineering\ai_craft_control_probe_notes.md`
+  - `<USER_HOME>\Documents\GIT\BZR-OpenShim\reverse_engineering\ai_craft_control_probe_notes.md`
 - Current EXU task-state implementation:
-  - `%USERPROFILE%\Documents\ExtraUtilities\src\GameObject.cpp`
+  - `<USER_HOME>\Documents\ExtraUtilities\src\GameObject.cpp`
 - Shared high-level feature tracker entry:
-  - `%USERPROFILE%\Documents\ExtraUtilities\FeaturesToLookInto.txt`
+  - `<USER_HOME>\Documents\ExtraUtilities\FeaturesToLookInto.txt`
 
 ## Practical Conclusion
 

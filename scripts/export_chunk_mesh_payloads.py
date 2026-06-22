@@ -4,8 +4,8 @@ Batch-export per-bone chunk payload meshes from Battlezone Redux `.mesh` files.
 Typical usage from Blender:
 
     blender --background --python scripts/export_chunk_mesh_payloads.py -- \
-        --mesh "C:\\Users\\istuart\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\avtank.mesh" \
-        --output-dir "C:\\temp\\chunk_meshes"
+        --mesh "<USER_HOME>\\Documents\\Battlezone 98 Redux\\BZ_ASSETS\\common\\models\\avtank.mesh" \
+        --output-dir "<TEMP_DIR>"
 
 This Shim-local copy is intended for chunk rendering experiments. It imports the
 source mesh through the BZ98 Blender toolkit Ogre path, isolates geometry by
