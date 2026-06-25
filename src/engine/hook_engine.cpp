@@ -4,6 +4,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
+#include <psapi.h>
 #include <algorithm>
 #include <sstream>
 
