@@ -1297,6 +1297,7 @@ namespace BZROpenShim
         static constexpr const char* kChunkProxyMaterialGroup = "General";
         static constexpr const char* kChunkPayloadResourceRootName = "OpenShimChunkPayloads";
         static constexpr const char* kChunkPayloadModRelativeDirName = "chunkMeshes";
+        static constexpr const char* kChunkPayloadModRelativeDirNameAlt = "Chunks";
         static constexpr const char* kChunkPayloadResourceLocationType = "FileSystem";
         static FnPlayGlobalSound g_BzrFn_PlayGlobalSound =
             reinterpret_cast<FnPlayGlobalSound>(0x0043AA30);
@@ -3951,7 +3952,7 @@ namespace BZROpenShim
 
                 for (const std::filesystem::path& resourceRoot : g_ChunkPayloadResourceDirectories)
                 {
-                    addResourceLocation(resourceManager, resourceRoot.string(), locationType, groupName, false, true);
+                    addResourceLocation(resourceManager, resourceRoot.string(), locationType, groupName, true, true);
                     if (!g_ChunkPayloadResourceLocationsLogged)
                     {
                         LogChunkDiagnostic("chunkmesh",
@@ -4704,13 +4705,32 @@ namespace BZROpenShim
                 if (!EnsureChunkMeshProxySlot(slot))
                     return;
 
-                if (!TryUpdateChunkMeshProxyTransform(
-                        slot.sceneNode,
-                        slot.entity,
-                        setNodePosition,
-                        setNodeOrientation,
-                        setVisible,
-                        transform))
+                const bool transformOk = TryUpdateChunkMeshProxyTransform(
+                    slot.sceneNode,
+                    slot.entity,
+                    setNodePosition,
+                    setNodeOrientation,
+                    setVisible,
+                    transform);
+
+                static volatile long s_FirstMeshTransformLogBudget = 8;
+                if (InterlockedDecrement(&s_FirstMeshTransformLogBudget) >= 0)
+                {
+                    LogChunkDiagnostic("chunkmesh",
+                        L"[CHUNKMESH] first-transform obj=0x%08X node=0x%08X entity=0x%08X mesh=%hs ok=%u procs=%u/%u pos=(%.2f, %.2f, %.2f)\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.sceneNode)),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.entity)),
+                        GetChunkPayloadMeshName(slot),
+                        transformOk ? 1u : 0u,
+                        setNodePosition ? 1u : 0u,
+                        setVisible ? 1u : 0u,
+                        static_cast<double>(transform.x),
+                        static_cast<double>(transform.y),
+                        static_cast<double>(transform.z));
+                }
+
+                if (!transformOk)
                 {
                     ReleaseChunkProxySlot(slot, L"mesh-set-failed");
                     return;
@@ -9672,14 +9692,22 @@ namespace BZROpenShim
             g_ChunkPayloadResourceDirectories.clear();
 
             const std::filesystem::path gameDir = GetMainModuleDirectory();
+            static constexpr const char* kPayloadDirNames[] =
+            {
+                kChunkPayloadModRelativeDirName,
+                kChunkPayloadModRelativeDirNameAlt,
+            };
             for (const std::filesystem::path& modRoot : GetCampaignContentRootCandidates(gameDir))
             {
-                const std::filesystem::path candidate = modRoot / kChunkPayloadModRelativeDirName;
-                std::error_code ec;
-                if (std::filesystem::exists(candidate, ec) && !ec &&
-                    std::filesystem::is_directory(candidate, ec) && !ec)
+                for (const char* dirName : kPayloadDirNames)
                 {
-                    AppendUniquePath(g_ChunkPayloadResourceDirectories, candidate);
+                    const std::filesystem::path candidate = modRoot / dirName;
+                    std::error_code ec;
+                    if (std::filesystem::exists(candidate, ec) && !ec &&
+                        std::filesystem::is_directory(candidate, ec) && !ec)
+                    {
+                        AppendUniquePath(g_ChunkPayloadResourceDirectories, candidate);
+                    }
                 }
             }
 
@@ -9816,6 +9844,29 @@ namespace BZROpenShim
                 geomCandidateText.empty() ? "<none>" : geomCandidateText.c_str());
         }
 
+        static bool ChunkPayloadFlatMeshExists(const std::string& fileName)
+        {
+            if (fileName.empty())
+                return false;
+
+            auto cacheIt = g_ChunkPayloadMeshExistsCache.find(fileName);
+            if (cacheIt != g_ChunkPayloadMeshExistsCache.end())
+                return cacheIt->second;
+
+            bool exists = false;
+            for (const std::filesystem::path& resourceRoot : GetChunkPayloadResourceDirectories())
+            {
+                std::error_code error;
+                if (std::filesystem::exists(resourceRoot / fileName, error) && !error)
+                {
+                    exists = true;
+                    break;
+                }
+            }
+            g_ChunkPayloadMeshExistsCache.emplace(fileName, exists);
+            return exists;
+        }
+
         static bool TryResolveChunkPayloadMeshResourceForMeshAndGeom(
             const char* meshName,
             const char* geomName,
@@ -9927,6 +9978,37 @@ namespace BZROpenShim
                     {
                         return true;
                     }
+                }
+            }
+
+            // Generic chunklet templates ("chunk1", "chunk2", ...) have no craft
+            // owner; map them onto the legacy iechunkN payload meshes when a
+            // payload root ships them flat.
+            for (const std::string& geomCandidate : geomCandidates)
+            {
+                if (geomCandidate.size() <= 5 ||
+                    _strnicmp(geomCandidate.c_str(), "chunk", 5) != 0)
+                {
+                    continue;
+                }
+
+                bool digitsOnly = true;
+                for (size_t index = 5; index < geomCandidate.size(); ++index)
+                {
+                    if (!std::isdigit(static_cast<unsigned char>(geomCandidate[index])))
+                    {
+                        digitsOnly = false;
+                        break;
+                    }
+                }
+                if (!digitsOnly)
+                    continue;
+
+                const std::string chunkletFileName = "ie" + geomCandidate + ".mesh";
+                if (ChunkPayloadFlatMeshExists(chunkletFileName))
+                {
+                    strncpy_s(outMeshName, outMeshNameCapacity, chunkletFileName.c_str(), _TRUNCATE);
+                    return true;
                 }
             }
 
@@ -14658,10 +14740,11 @@ namespace BZROpenShim
             g_EnableChunkProxyDebug ? "enabled" : "disabled",
             g_ChunkProxyCapacity,
             g_ChunkProxyDebugSize);
-        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Chunk mesh proxy: %hs stockRoot=%hs modRelative=%hs\n",
+        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Chunk mesh proxy: %hs stockRoot=%hs modRelative=%hs|%hs\n",
             g_EnableChunkMeshProxy ? "enabled" : "disabled",
             GetChunkPayloadStockResourceDirectory().string().c_str(),
-            kChunkPayloadModRelativeDirName);
+            kChunkPayloadModRelativeDirName,
+            kChunkPayloadModRelativeDirNameAlt);
         LogChunkDiagnostic("chunkeffect", L"[CHUNKEFFECT] Runtime manager trace: %hs vtableSlot=0x%08X orig=0x%08X\n",
             g_TraceChunkEffectRuntime ? "enabled" : "disabled",
             static_cast<uint32_t>(kChunkEffectVtableSimulateSlotAddr),
@@ -16666,6 +16749,11 @@ namespace BZROpenShim
         MaybeLogSatelliteVisibilitySample();
         RefreshChunkObjectIdentityCacheIfNeeded();
         TrackChunkEffectActiveEntries(thisPtr);
+        // The Steam build ticks chunk proxies from EngineFlameSubmitHook; the
+        // GOG build never installs those vtable hooks, so drive the proxy
+        // lifecycle from the chunk simulate tick instead.
+        if (!g_EngineFlameVtableHooksInstalled)
+            TickChunkProxyDebug();
         LogChunkEffectRuntimeSample(thisPtr, dt);
         g_BzrFn_ChunkEffectSimulate(thisPtr, dt);
     }
