@@ -37,6 +37,15 @@ namespace BZROpenShim
                 std::ifstream f("scripts/patches.json");
                 if (f.is_open()) { data = nlohmann::json::parse(f); return true; }
             } catch (...) {}
+            try {
+                // The game may be launched with a working directory other than
+                // the install root; fall back to the exe's own directory.
+                char path[MAX_PATH] = {}; GetModuleFileNameA(nullptr, path, MAX_PATH);
+                char* slash = strrchr(path, '\\'); if (slash) *slash = '\0';
+                std::string exeRelative = std::string(path) + "\\scripts\\patches.json";
+                std::ifstream f(exeRelative);
+                if (f.is_open()) { data = nlohmann::json::parse(f); return true; }
+            } catch (...) {}
             return false;
         }
         uint32_t GetStaticPointer(const std::string& name, uint32_t defaultVal = 0) {
@@ -311,9 +320,22 @@ namespace BZROpenShim
     }
 
     static bool IsSteamExe() {
-        char path[MAX_PATH] = {}; GetModuleFileNameA(nullptr, path, MAX_PATH);
-        const char* base = strrchr(path, '\\'); base = base ? (base + 1) : path;
-        return _stricmp(base, "battlezone98redux.exe") == 0;
+        // GOG and Steam both ship battlezone98redux.exe, so the name cannot
+        // distinguish them. The Steam build is SteamStub-packed and carries a
+        // ".bind" PE section - the exact property the Steam settled-byte
+        // waits exist for - while the GOG build has none.
+        const uint8_t* base = reinterpret_cast<const uint8_t*>(GetModuleHandleA(nullptr));
+        if (!base) return false;
+        const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+        if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
+        const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
+        if (nt->Signature != IMAGE_NT_SIGNATURE) return false;
+        const IMAGE_SECTION_HEADER* sect = IMAGE_FIRST_SECTION(nt);
+        static const uint8_t kBindName[IMAGE_SIZEOF_SHORT_NAME] = { '.', 'b', 'i', 'n', 'd', 0, 0, 0 };
+        for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i) {
+            if (memcmp(sect[i].Name, kBindName, IMAGE_SIZEOF_SHORT_NAME) == 0) return true;
+        }
+        return false;
     }
 
     static uint32_t GetBZRVersion() {
@@ -395,6 +417,7 @@ namespace BZROpenShim
                 for (const auto& g : g_Config.data["globals"]) {
                     uint32_t fb = 0; if (isSteam && g.contains("fallback_steam")) fb = std::stoul(g["fallback_steam"].get<std::string>(), nullptr, 16);
                     else if (!isSteam && g.contains("fallback_gog")) fb = std::stoul(g["fallback_gog"].get<std::string>(), nullptr, 16);
+                    if (fb == 0 && g.contains("fallback")) fb = std::stoul(g["fallback"].get<std::string>(), nullptr, 16);
                     auto expVec = HookEngine::ParseIdaPattern(g["expected_original"]);
                     std::vector<uint8_t> exp; for (auto v : expVec) exp.push_back(static_cast<uint8_t>(v));
                     for (auto& p : patches) { if (p.name == g["name"].get<std::string>()) { p.address = fb; p.verified = (fb != 0); p.expected_original = exp; } }
@@ -493,7 +516,16 @@ namespace BZROpenShim
         if (isSteam && !AreInputBindingUiHooksInstalled()) {
             for (int i = 0; i < 2500; ++i) { if (g_ShutdownRequested) return; if (AreInputBindingUiHooksInstalled()) break; Sleep(10); RetryDeferredRuntimeHooks(); }
         }
-        int app = 0; for (const auto& p : patches) { if (HookEngine::ApplyPatch(p)) app++; }
+        int app = 0;
+        for (const auto& p : patches) {
+            if (HookEngine::ApplyPatch(p)) {
+                app++;
+                Log(L"[OK]   %hs wrote %u bytes to 0x%08X\n", p.name.c_str(), static_cast<unsigned>(p.payload.size()), p.address);
+            } else {
+                Log(L"[SKIP] %hs address=0x%08X verified=%hs payload=%u\n", p.name.c_str(), p.address, p.verified ? "yes" : "no", static_cast<unsigned>(p.payload.size()));
+            }
+        }
+        Log(L"[DONE] Applied=%d of %u\n", app, static_cast<unsigned>(patches.size()));
         SetPatchingComplete(true); SetAppliedPatchCount(app);
     }
 }
