@@ -36,6 +36,7 @@ namespace BZROpenShim
     void __fastcall EngineFlameControlHook(void* thisPtr, void* edx);
     void __fastcall EngineFlameSubmitHook(void* thisPtr, void* edx, void* camera);
     void __fastcall ChunkEffectSimulateHook(void* thisPtr, void* edx, float dt);
+    void __fastcall LegacyWorldUpdateRenderQueueHook(void* thisPtr, void* edx, void* renderQueue);
     void __cdecl HandleUnderAttackAlert(float currentTime);
     void PrimeUnderAttackAlertConfig();
     bool SetUnderAttackAlertModeFromBridge(int mode);

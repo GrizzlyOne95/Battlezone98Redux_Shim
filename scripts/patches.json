@@ -127,6 +127,11 @@
       "expected_original": "F0 17 49 00"
     },
     {
+      "name": "Legacy World Update RenderQueue VTable Hook",
+      "fallback": "0x00892728",
+      "expected_original": "70 95 67 00"
+    },
+    {
       "name": "Decoded Weapon Mask Carrier Bias Hook",
       "fallback": "0x00417C80",
       "expected_original": "55 8B EC 51 89"

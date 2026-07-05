@@ -182,7 +182,7 @@ namespace BZROpenShim
 
     static bool IsChunkExperimentPatchName(const char* name) {
         if (!name) return false;
-        return strcmp(name, "Chunk Render Resolve Hook") == 0 || strcmp(name, "Chunk Effect Simulate VTable Hook") == 0;
+        return strcmp(name, "Chunk Render Resolve Hook") == 0 || strcmp(name, "Chunk Effect Simulate VTable Hook") == 0 || strcmp(name, "Legacy World Update RenderQueue VTable Hook") == 0;
     }
 
     static bool IsProducerBuildMenuExperimentPatchName(const char* name) { return name && strcmp(name, "Producer Build Menu Root Hook") == 0; }
@@ -472,6 +472,7 @@ namespace BZROpenShim
         const uint32_t flameC = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(EngineFlameControlHook));
         const uint32_t flameS = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(EngineFlameSubmitHook));
         const uint32_t chunkE = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ChunkEffectSimulateHook));
+        const uint32_t legacyRQ = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(LegacyWorldUpdateRenderQueueHook));
         for (auto& p : patches) {
             if (p.type != HookEngine::PatchType::DWORD) continue;
             uint32_t val = 0;
@@ -479,6 +480,7 @@ namespace BZROpenShim
             else if (p.name == "Engine Flame Control VTable Hook") val = flameC;
             else if (p.name == "Engine Flame Submit VTable Hook") val = flameS;
             else if (p.name == "Chunk Effect Simulate VTable Hook") val = chunkE;
+            else if (p.name == "Legacy World Update RenderQueue VTable Hook") val = legacyRQ;
             if (val) { p.payload.resize(4); memcpy(p.payload.data(), &val, 4); }
         }
     }

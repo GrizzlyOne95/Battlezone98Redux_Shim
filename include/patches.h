@@ -129,6 +129,7 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::DWORD, {}, "Engine Flame Control VTable Hook", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Engine Flame Submit VTable Hook", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Chunk Effect Simulate VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Legacy World Update RenderQueue VTable Hook", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Vehicle List Mod Fix 2/4 (Force Mod-Scoped Assets 2/3)", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)", false, {} },
