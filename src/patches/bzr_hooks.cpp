@@ -2470,17 +2470,22 @@ namespace BZROpenShim
             if (mbi.State != MEM_COMMIT || !IsReadableDataProtect(mbi.Protect))
                 return false;
 
-            // The rect table is runtime-owned data; avoid crawling image/code
-            // mappings when a hide/show request arrives on the UI thread.
-            switch (mbi.Type)
-            {
-            case MEM_PRIVATE:
-            case MEM_MAPPED:
-            case MEM_IMAGE:
-                return true;
-            default:
+            // The stock scrap/pilot rect records are runtime heap data
+            // (MEM_PRIVATE). The previous code also returned true for MEM_MAPPED
+            // and MEM_IMAGE, which forced the discovery scan to crawl every
+            // mapped asset file and loaded module at 4-byte stride on the UI
+            // thread -> multi-second freeze on the first legacy-layout toggle.
+            // Restrict to private commits (matching the comment's original
+            // intent) and skip pathologically large arenas that cannot hold the
+            // small HUD rect table but would dominate the scan cost.
+            if (mbi.Type != MEM_PRIVATE)
                 return false;
-            }
+
+            constexpr SIZE_T kMaxHudSpriteScanRegionBytes = 128ull * 1024ull * 1024ull;
+            if (mbi.RegionSize > kMaxHudSpriteScanRegionBytes)
+                return false;
+
+            return true;
         }
 
         static bool DiscoverHudSpriteRectTableBase()
@@ -15812,8 +15817,21 @@ namespace BZROpenShim
 
     bool SetHudSpriteRectFromBridge(const char* name, int x, int y, int w, int h)
     {
-        if (IsStockScrapPilotPanelName(name) && w == 0 && h == 0)
-            return SetStockScrapPilotPanelsVisibleByUv(false);
+        // The stock scrap/pilot panels are engine-owned rects that are not
+        // reliably present in the id-indexed sprite table; they are located and
+        // toggled through the UV address-scan fallback instead. The "legacy
+        // layout" feature hides the stock panels (w==0,h==0) and draws EXU's own
+        // legacy widgets. Moving the panels back to a real size must reverse that
+        // hide. Previously only the hide direction had a shortcut here, so a
+        // restore write (w>0,h>0) fell through to the id-based path, which never
+        // reaches SetStockScrapPilotPanelsVisibleByUv(true) and left the stock
+        // panels stuck at w=0/h=0. Handle both directions symmetrically.
+        if (IsStockScrapPilotPanelName(name))
+        {
+            if (w == 0 && h == 0)
+                return SetStockScrapPilotPanelsVisibleByUv(false);
+            return SetStockScrapPilotPanelsVisibleByUv(true);
+        }
 
         int spriteId = 0;
         HudSpriteRectRecord current = {};
@@ -18395,6 +18413,19 @@ namespace BZROpenShim
         UpdateFlagSelectionUiLabel(g_FlagLabelClient);
     }
 
+    // The native load screen sets BOTH callback slots on every load-slot button:
+    // +0x150 (via 0x007C23C0, "SetOnHover") and +0x154 (via 0x007C23E0,
+    // "SetOnClick"). When the screen is opened it walks every dialog child and
+    // invokes each child's +0x150 slot, so any child that leaves +0x150 null
+    // causes a call-through-null (EIP=0) crash. Our injected AutoSave button
+    // only set the click slot, leaving +0x150 null -> deterministic crash on
+    // opening Load/Save whenever an auto.sav exists. This benign no-op keeps the
+    // hover slot non-null (matching the stock slot buttons) without triggering
+    // the load path on hover/refresh.
+    void __cdecl AutoSaveButtonOnHoverNoop(void* /*param*/)
+    {
+    }
+
     void __cdecl AutoSaveButtonOnClickLoad()
     {
         if (!g_BzrFn_SetShellState)
@@ -18475,6 +18506,10 @@ namespace BZROpenShim
         // +0x144. Button objects use +0x150/+0x154 for hover/click callbacks,
         // so using it here corrupts the callback slot and crashes the load menu.
         if (g_BzrFn_SetOnClick) g_BzrFn_SetOnClick(g_AutoSaveLoadButton, reinterpret_cast<void*>(AutoSaveButtonOnClickLoad));
+        // Mirror the stock load-slot buttons by also populating the +0x150 slot.
+        // Without this the load screen invokes a null callback on open and
+        // crashes (call through NULL / EIP=0). See AutoSaveButtonOnHoverNoop.
+        if (g_BzrFn_SetOnHover) g_BzrFn_SetOnHover(g_AutoSaveLoadButton, reinterpret_cast<void*>(AutoSaveButtonOnHoverNoop));
         g_BzrFn_AddChild(parent, g_AutoSaveLoadButton, 0);
     }
 
