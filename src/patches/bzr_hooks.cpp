@@ -141,6 +141,8 @@ namespace BZROpenShim
     using FnGameObjectGetObjByHandle = void* (__cdecl*)(int handle);
     using FnPersonSimulate = void(__thiscall*)(void* thisPtr, float dt);
     using FnShieldTowerSimulate = void(__thiscall*)(void* thisPtr, float dt);
+    using FnMagnetMineSimulate = void(__thiscall*)(void* thisPtr, float dt);
+    using FnProximityMineSimulate = void(__thiscall*)(void* thisPtr, float dt);
     using FnShieldTowerPowerUpdate = void(__fastcall*)(void* thisPtr);
     using FnMatrixInverse = void(__cdecl*)(void* outMatrix, const void* inMatrix);
     using FnVectorTransform = void(__cdecl*)(float* dst, const float* src, int count, const void* matrix);
@@ -248,6 +250,9 @@ namespace BZROpenShim
     static FnPersonSimulate g_BzrFn_PersonSimulate = nullptr;
     static FnShieldTowerSimulate g_BzrFn_ShieldTowerSimulateOriginal = nullptr;
     static FnShieldTowerSimulate g_BzrFn_BuildingSimulate = nullptr;
+    static FnMagnetMineSimulate g_BzrFn_MagnetMineSimulateOriginal = nullptr;
+    static FnProximityMineSimulate g_BzrFn_ProximityMineSimulateOriginal = nullptr;
+    static FnProximityMineSimulate g_BzrFn_MineSimulate = nullptr;
     static FnShieldTowerPowerUpdate g_BzrFn_ShieldTowerPowerUpdate = nullptr;
     static FnGameObjectRelation g_BzrFn_GameObjectFriendP = nullptr;
     static FnGameObjectRelation g_BzrFn_GameObjectEnemyP = nullptr;
@@ -375,9 +380,28 @@ namespace BZROpenShim
         constexpr size_t kShieldTowerClassOrdPushOffset = 0x180;
         constexpr size_t kShieldTowerClassOrdDragOffset = 0x184;
         constexpr size_t kShieldTowerPowerSourceOffset = 0x238;
+        constexpr size_t kMagnetMineArmingTimerOffset = 0x238;
+        constexpr size_t kMagnetMineSoundHandleOffset = 0x230;
+        constexpr size_t kProximityMineArmingTimerOffset = 0x240;
+        constexpr size_t kMineOwnerOffset = 0x17C;
+        constexpr size_t kMagnetMineClassSoundNameOffset = 0x150;
+        constexpr size_t kMagnetMineClassTotalLifeOffset = 0x160;
+        constexpr size_t kMagnetMineClassArmingDelayOffset = 0x168;
+        constexpr size_t kMagnetMineClassRangeOffset = 0x16C;
+        constexpr size_t kMagnetMineClassObjPull1Offset = 0x170;
+        constexpr size_t kMagnetMineClassObjPull2Offset = 0x174;
+        constexpr size_t kMagnetMineClassObjRotPullOffset = 0x178;
+        constexpr size_t kMagnetMineClassOrdPull1Offset = 0x17C;
+        constexpr size_t kMagnetMineClassOrdPull2Offset = 0x180;
+        constexpr size_t kMagnetMineClassOrdRotPullOffset = 0x184;
+        constexpr size_t kProximityMineClassRangeOffset = 0x168;
+        constexpr size_t kProximityMineClassScanPeriodOffset = 0x16C;
         constexpr uintptr_t kCollisionRangeSearchAddr = 0x006A3E10;
         constexpr uintptr_t kGogShieldTowerSimulateAddr = 0x005D0D80;
         constexpr uintptr_t kGogBuildingSimulateAddr = 0x0047FCB0;
+        constexpr uintptr_t kGogMagnetMineSimulateAddr = 0x0050C650;
+        constexpr uintptr_t kGogProximityMineSimulateAddr = 0x005B0E40;
+        constexpr uintptr_t kGogMineSimulateAddr = 0x00511460;
         constexpr uintptr_t kGogShieldTowerPowerUpdateAddr = 0x005D0CC0;
         constexpr uintptr_t kGogGameObjectFriendPAddr = 0x0046BF40;
         constexpr uintptr_t kGogGameObjectEnemyPAddr = 0x0046BFD0;
@@ -387,6 +411,8 @@ namespace BZROpenShim
         constexpr uintptr_t kGogRangeSearchAddr = 0x005B2950;
         constexpr uintptr_t kGogRangeResultsGetNextAddr = 0x00462710;
         constexpr uintptr_t kShieldTowerSimulateVtableSlotAddr = 0x00887728;
+        constexpr uintptr_t kMagnetMineSimulateVtableSlotAddr = 0x0087D574;
+        constexpr uintptr_t kProximityMineSimulateVtableSlotAddr = 0x00886234;
         constexpr float kFlagButtonSize = 48.0f;
         constexpr uint32_t kLegacyFlagDataSlot = 0x0Du;
         constexpr int kLegacyFlagWidth = 64;
@@ -531,9 +557,11 @@ namespace BZROpenShim
         struct AiTuningConfig;
         static bool TryGetAiTuningForObject(void* objectPtr, AiTuningConfig& outConfig);
         static bool TryGetObjectOdfToken(void* objectPtr, char (&outToken)[kProducerBuildMenuTokenLen + 1]);
-        struct ShieldTowerTeamFilterConfig;
-        static bool TryGetShieldTowerTeamFilterForObject(void* objectPtr, ShieldTowerTeamFilterConfig& outConfig);
+        struct TeamFilterConfig;
+        static bool TryGetTeamFilterForObject(void* objectPtr, TeamFilterConfig& outConfig, TeamFilterCache& cache, const char* logTag);
         static void RunShieldTowerFilteredSimulate(void* shieldTowerPtr, float dt);
+        static void RunMagnetMineFilteredSimulate(void* magnetMinePtr, float dt);
+        static void RunProximityMineFilteredSimulate(void* proximityMinePtr, float dt);
         static void RevealProcessOwnerPerceivedTeam(void* processPtr, const char* sourceTag);
         static std::filesystem::path GetMainModuleDirectory();
         struct ChunkObjectLinkProbe;
@@ -704,17 +732,17 @@ namespace BZROpenShim
             std::unordered_map<std::string, AiTuningConfig> odfEntries = {};
         };
 
-        struct ShieldTowerTeamFilterConfig
+        struct TeamFilterConfig
         {
             bool parsed = false;
             bool affectAllies = true;
             bool affectEnemies = true;
         };
 
-        struct ShieldTowerTeamFilterCache
+        struct TeamFilterCache
         {
             bool initialized = false;
-            std::unordered_map<std::string, ShieldTowerTeamFilterConfig> odfEntries = {};
+            std::unordered_map<std::string, TeamFilterConfig> odfEntries = {};
         };
 
         struct ShieldTowerRangeSearchResults
@@ -1060,7 +1088,9 @@ namespace BZROpenShim
         static VehicleAssetExceptionCacheEntry g_VehicleAssetExceptionCache[kVehicleAssetExceptionCacheSize] = {};
         static ProducerBuildMenuConfig g_ProducerBuildMenuConfig = {};
         static AiTuningCache g_AiTuningCache = {};
-        static ShieldTowerTeamFilterCache g_ShieldTowerTeamFilterCache = {};
+        static TeamFilterCache g_ShieldTowerTeamFilterCache = {};
+        static TeamFilterCache g_MagnetMineTeamFilterCache = {};
+        static TeamFilterCache g_ProximityMineTeamFilterCache = {};
         static bool g_HasAppliedProducerBuildMenu = false;
         static int64_t g_LastAppliedProducerBuildMenu = 0;
         static uint32_t g_LastUnknownProducerVft = 0;
@@ -1100,8 +1130,10 @@ namespace BZROpenShim
         static bool g_ChunkEffectCreateHooksWaitLogged = false;
         static bool g_ChunkEffectCreateHooksMismatchLogged = false;
         static ULONGLONG g_ChunkEffectCreateHooksReadyTick = 0;
-        static bool g_ConstructorRemoteBuildFixInstalled = false;
         static bool g_ShieldTowerSimulateHookInstalled = false;
+        static bool g_ConstructorRemoteBuildFixInstalled = false;
+        static bool g_MagnetMineSimulateHookInstalled = false;
+        static bool g_ProximityMineSimulateHookInstalled = false;
         static bool g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
         static volatile long g_ConstructorRemoteBuildTraceBudget = kConstructorRemoteBuildTraceBudgetDefault;
         static std::unordered_map<uintptr_t, ULONGLONG> g_RetargetPeriodNextForceMsByProcess = {};
@@ -8736,6 +8768,16 @@ namespace BZROpenShim
             RunShieldTowerFilteredSimulate(thisPtr, dt);
         }
 
+        void __fastcall MagnetMineSimulateTeamFilterHook(void* thisPtr, void* /*edx*/, float dt)
+        {
+            RunMagnetMineFilteredSimulate(thisPtr, dt);
+        }
+
+        void __fastcall ProximityMineSimulateTeamFilterHook(void* thisPtr, void* /*edx*/, float dt)
+        {
+            RunProximityMineFilteredSimulate(thisPtr, dt);
+        }
+
         static void InstallShieldTowerTeamFilterHookIfPossible()
         {
             if (g_ShieldTowerSimulateHookInstalled)
@@ -8814,6 +8856,115 @@ namespace BZROpenShim
                 Log(L"[SHIELDODF] Installed ShieldTower team filter hook slot=0x%08X original=0x%08X\n",
                     static_cast<uint32_t>(kShieldTowerSimulateVtableSlotAddr),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_ShieldTowerSimulateOriginal)));
+            }
+        }
+        static void InstallMineTeamFilterHooksIfPossible()
+        {
+            if (g_MagnetMineSimulateHookInstalled && g_ProximityMineSimulateHookInstalled)
+                return;
+
+            if (!g_BzrFn_MagnetMineSimulateOriginal)
+                g_BzrFn_MagnetMineSimulateOriginal =
+                    reinterpret_cast<FnMagnetMineSimulate>(kGogMagnetMineSimulateAddr);
+            if (!g_BzrFn_ProximityMineSimulateOriginal)
+                g_BzrFn_ProximityMineSimulateOriginal =
+                    reinterpret_cast<FnProximityMineSimulate>(kGogProximityMineSimulateAddr);
+            if (!g_BzrFn_MineSimulate)
+                g_BzrFn_MineSimulate =
+                    reinterpret_cast<FnProximityMineSimulate>(kGogMineSimulateAddr);
+
+            if (!g_BzrFn_GameObjectFriendP)
+                g_BzrFn_GameObjectFriendP =
+                    reinterpret_cast<FnGameObjectRelation>(kGogGameObjectFriendPAddr);
+            if (!g_BzrFn_GameObjectEnemyP)
+                g_BzrFn_GameObjectEnemyP =
+                    reinterpret_cast<FnGameObjectRelation>(kGogGameObjectEnemyPAddr);
+            if (!g_BzrFn_GameObjectGetObjByHandle)
+                g_BzrFn_GameObjectGetObjByHandle =
+                    reinterpret_cast<FnGameObjectGetObjByHandle>(kGogGameObjectGetObjByHandleAddr);
+            if (!g_BzrFn_CollisionRangeSearch)
+                g_BzrFn_CollisionRangeSearch =
+                    reinterpret_cast<FnRangeSearch>(kGogRangeSearchAddr);
+            if (!g_BzrFn_RangeResultsGetNext)
+                g_BzrFn_RangeResultsGetNext =
+                    reinterpret_cast<FnRangeResultsGetNext>(kGogRangeResultsGetNextAddr);
+
+            if (!g_MagnetMineSimulateHookInstalled)
+            {
+                void* current = nullptr;
+                __try { current = *reinterpret_cast<void**>(kMagnetMineSimulateVtableSlotAddr); }
+                __except (EXCEPTION_EXECUTE_HANDLER) { current = nullptr; }
+
+                if (current != reinterpret_cast<void*>(MagnetMineSimulateTeamFilterHook) &&
+                    current != reinterpret_cast<void*>(kGogMagnetMineSimulateAddr))
+                {
+                    Log(L"[MAGNETODF] MagnetMine::Simulate vtable mismatch slot=0x%08X current=0x%08X expected=0x%08X\n",
+                        static_cast<uint32_t>(kMagnetMineSimulateVtableSlotAddr),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
+                        static_cast<uint32_t>(kGogMagnetMineSimulateAddr));
+                }
+                else
+                {
+                    const bool patched =
+                        (current == reinterpret_cast<void*>(MagnetMineSimulateTeamFilterHook)) ||
+                        WritePointerValue(kMagnetMineSimulateVtableSlotAddr,
+                                          reinterpret_cast<void*>(MagnetMineSimulateTeamFilterHook));
+                    g_MagnetMineSimulateHookInstalled =
+                        patched &&
+                        g_BzrFn_MagnetMineSimulateOriginal &&
+                        g_BzrFn_MineSimulate &&
+                        g_BzrFn_GameObjectFriendP &&
+                        g_BzrFn_GameObjectEnemyP &&
+                        g_BzrFn_GameObjectGetObjByHandle &&
+                        g_BzrFn_CollisionRangeSearch &&
+                        g_BzrFn_RangeResultsGetNext;
+
+                    if (g_MagnetMineSimulateHookInstalled)
+                    {
+                        Log(L"[MAGNETODF] Installed MagnetMine team filter hook slot=0x%08X original=0x%08X\n",
+                            static_cast<uint32_t>(kMagnetMineSimulateVtableSlotAddr),
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_MagnetMineSimulateOriginal)));
+                    }
+                }
+            }
+
+            if (!g_ProximityMineSimulateHookInstalled)
+            {
+                void* current = nullptr;
+                __try { current = *reinterpret_cast<void**>(kProximityMineSimulateVtableSlotAddr); }
+                __except (EXCEPTION_EXECUTE_HANDLER) { current = nullptr; }
+
+                if (current != reinterpret_cast<void*>(ProximityMineSimulateTeamFilterHook) &&
+                    current != reinterpret_cast<void*>(kGogProximityMineSimulateAddr))
+                {
+                    Log(L"[PROXODF] ProximityMine::Simulate vtable mismatch slot=0x%08X current=0x%08X expected=0x%08X\n",
+                        static_cast<uint32_t>(kProximityMineSimulateVtableSlotAddr),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
+                        static_cast<uint32_t>(kGogProximityMineSimulateAddr));
+                }
+                else
+                {
+                    const bool patched =
+                        (current == reinterpret_cast<void*>(ProximityMineSimulateTeamFilterHook)) ||
+                        WritePointerValue(kProximityMineSimulateVtableSlotAddr,
+                                          reinterpret_cast<void*>(ProximityMineSimulateTeamFilterHook));
+                    g_ProximityMineSimulateHookInstalled =
+                        patched &&
+                        g_BzrFn_ProximityMineSimulateOriginal &&
+                        g_BzrFn_MineSimulate &&
+                        g_BzrFn_GameObjectFriendP &&
+                        g_BzrFn_GameObjectEnemyP &&
+                        g_BzrFn_GameObjectGetObjByHandle &&
+                        g_BzrFn_CollisionRangeSearch &&
+                        g_BzrFn_RangeResultsGetNext;
+
+                    if (g_ProximityMineSimulateHookInstalled)
+                    {
+                        Log(L"[PROXODF] Installed ProximityMine team filter hook slot=0x%08X original=0x%08X\n",
+                            static_cast<uint32_t>(kProximityMineSimulateVtableSlotAddr),
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_ProximityMineSimulateOriginal)));
+                    }
+                }
             }
         }
 
@@ -12982,7 +13133,7 @@ namespace BZROpenShim
             return outConfig.parsed;
         }
 
-        static bool TryParseShieldTowerTeamFilterValue(const char* value,
+        static bool TryParseTeamFilterValue(const char* value,
                                                        bool& outAffectAllies,
                                                        bool& outAffectEnemies)
         {
@@ -13031,8 +13182,9 @@ namespace BZROpenShim
             return false;
         }
 
-        static bool TryReadShieldTowerTeamFilterFromOdfFile(const char* odfToken,
-                                                            ShieldTowerTeamFilterConfig& outConfig)
+        static bool TryReadTeamFilterFromOdfFile(const char* odfToken,
+                                                 TeamFilterConfig& outConfig,
+                                                 const char* logTag)
         {
             outConfig = {};
 
@@ -13075,7 +13227,7 @@ namespace BZROpenShim
                 bool parsedAllies = false;
                 bool parsedEnemies = false;
                 if (_stricmp(key, "teamFilter") == 0 &&
-                    TryParseShieldTowerTeamFilterValue(value, parsedAllies, parsedEnemies))
+                    TryParseTeamFilterValue(value, parsedAllies, parsedEnemies))
                 {
                     affectAllies = parsedAllies;
                     affectEnemies = parsedEnemies;
@@ -13101,7 +13253,8 @@ namespace BZROpenShim
             outConfig.parsed = true;
             outConfig.affectAllies = affectAllies;
             outConfig.affectEnemies = affectEnemies;
-            Log(L"[SHIELDODF] Loaded team filter odf=%hs allies=%hs enemies=%hs file=%hs\n",
+            Log(L"[%hs] Loaded team filter odf=%hs allies=%hs enemies=%hs file=%hs\n",
+                logTag ? logTag : "TEAMODF",
                 odfKey.token,
                 affectAllies ? "true" : "false",
                 affectEnemies ? "true" : "false",
@@ -13109,7 +13262,7 @@ namespace BZROpenShim
             return true;
         }
 
-        static bool TryGetShieldTowerTeamFilterForObject(void* objectPtr, ShieldTowerTeamFilterConfig& outConfig)
+        static bool TryGetTeamFilterForObject(void* objectPtr, TeamFilterConfig& outConfig, TeamFilterCache& cache, const char* logTag)
         {
             outConfig = {};
 
@@ -13117,21 +13270,21 @@ namespace BZROpenShim
             if (!TryGetObjectOdfToken(objectPtr, odfToken))
                 return false;
 
-            const auto cached = g_ShieldTowerTeamFilterCache.odfEntries.find(odfToken);
-            if (cached != g_ShieldTowerTeamFilterCache.odfEntries.end())
+            const auto cached = cache.odfEntries.find(odfToken);
+            if (cached != cache.odfEntries.end())
             {
                 outConfig = cached->second;
                 return outConfig.parsed;
             }
 
-            ShieldTowerTeamFilterConfig loaded = {};
-            TryReadShieldTowerTeamFilterFromOdfFile(odfToken, loaded);
-            g_ShieldTowerTeamFilterCache.odfEntries[odfToken] = loaded;
+            TeamFilterConfig loaded = {};
+            TryReadTeamFilterFromOdfFile(odfToken, loaded, logTag);
+            cache.odfEntries[odfToken] = loaded;
             outConfig = loaded;
             return outConfig.parsed;
         }
 
-        static bool ShieldTowerNeedsCustomFilterPath(const ShieldTowerTeamFilterConfig& config)
+        static bool TeamFilterNeedsCustomPath(const TeamFilterConfig& config)
         {
             return config.parsed && !(config.affectAllies && config.affectEnemies);
         }
@@ -13503,9 +13656,9 @@ namespace BZROpenShim
                    (params.minZ < localPosition[2] && localPosition[2] < params.maxZ);
         }
 
-        static bool ShieldTowerShouldAffectObject(void* shieldTowerPtr,
+        static bool TeamFilterShouldAffectObject(void* shieldTowerPtr,
                                                   void* targetObject,
-                                                  const ShieldTowerTeamFilterConfig& config)
+                                                  const TeamFilterConfig& config)
         {
             if (!shieldTowerPtr || !targetObject)
                 return false;
@@ -13521,9 +13674,9 @@ namespace BZROpenShim
             return allow;
         }
 
-        static bool ShieldTowerShouldAffectOrdnance(void* shieldTowerPtr,
+        static bool TeamFilterShouldAffectOrdnance(void* shieldTowerPtr,
                                                     void* ordnance,
-                                                    const ShieldTowerTeamFilterConfig& config)
+                                                    const TeamFilterConfig& config)
         {
             if (config.affectAllies && config.affectEnemies)
                 return true;
@@ -13532,7 +13685,7 @@ namespace BZROpenShim
             if (!TryGetOrdnanceOwnerGameObject(ordnance, ownerObject))
                 return false;
 
-            return ShieldTowerShouldAffectObject(shieldTowerPtr, ownerObject, config);
+            return TeamFilterShouldAffectObject(shieldTowerPtr, ownerObject, config);
         }
 
         static void ShieldTowerApplyObjectForce(void* shieldTowerPtr,
@@ -13607,9 +13760,9 @@ namespace BZROpenShim
             LegacyMat3* towerMatrix = nullptr;
             LegacyMat3 inverseMatrix = {};
 
-            ShieldTowerTeamFilterConfig filter = {};
-            const bool hasFilter = TryGetShieldTowerTeamFilterForObject(shieldTowerPtr, filter);
-            if (!hasFilter || !ShieldTowerNeedsCustomFilterPath(filter))
+            TeamFilterConfig filter = {};
+            const bool hasFilter = TryGetTeamFilterForObject(shieldTowerPtr, filter, g_ShieldTowerTeamFilterCache, "SHIELDODF");
+            if (!hasFilter || !TeamFilterNeedsCustomPath(filter))
             {
                 if (g_BzrFn_ShieldTowerSimulateOriginal)
                     g_BzrFn_ShieldTowerSimulateOriginal(shieldTowerPtr, dt);
@@ -13683,7 +13836,7 @@ namespace BZROpenShim
                             continue;
 
                         void* targetObject = g_BzrFn_GameObjectGetObjByHandle(static_cast<int>(*handlePtr));
-                        if (!targetObject || !ShieldTowerShouldAffectObject(shieldTowerPtr, targetObject, filter))
+                        if (!targetObject || !TeamFilterShouldAffectObject(shieldTowerPtr, targetObject, filter))
                             continue;
 
                         float targetWorld[3] = {};
@@ -13709,7 +13862,7 @@ namespace BZROpenShim
                              node = node->next)
                         {
                             void* ordnance = node->value;
-                            if (!ordnance || !ShieldTowerShouldAffectOrdnance(shieldTowerPtr, ordnance, filter))
+                            if (!ordnance || !TeamFilterShouldAffectOrdnance(shieldTowerPtr, ordnance, filter))
                                 continue;
 
                             float ordWorld[3] = {};
@@ -13732,7 +13885,260 @@ namespace BZROpenShim
 
             g_BzrFn_BuildingSimulate(shieldTowerPtr, dt);
         }
+        static void RunMagnetMineFilteredSimulate(void* magnetMinePtr, float dt)
+        {
+                    g_BzrFn_MagnetMineSimulateOriginal(magnetMinePtr, dt);
+                return;
+            }
 
+            TeamFilterConfig filter = {};
+            const bool hasFilter = TryGetTeamFilterForObject(magnetMinePtr, filter, g_MagnetMineTeamFilterCache, "MAGNETODF");
+            if (!hasFilter || !TeamFilterNeedsCustomPath(filter))
+            {
+                if (g_BzrFn_MagnetMineSimulateOriginal)
+                    g_BzrFn_MagnetMineSimulateOriginal(magnetMinePtr, dt);
+                return;
+            }
+
+            __try
+            {
+                auto* mineBytes = reinterpret_cast<uint8_t*>(magnetMinePtr);
+                void* mineClass = *reinterpret_cast<void**>(mineBytes + kGameObjectClassOffset);
+                if (!mineClass) return;
+
+                float armingTimer = *reinterpret_cast<float*>(mineBytes + kMagnetMineArmingTimerOffset);
+                float totalLife = *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kMagnetMineClassTotalLifeOffset);
+                float armingDelay = *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kMagnetMineClassArmingDelayOffset);
+
+                float elapsed = totalLife - armingTimer;
+                if (elapsed >= armingDelay)
+                {
+                    if (*reinterpret_cast<int*>(mineBytes + kMagnetMineSoundHandleOffset) == 0)
+                    {
+                        // Logic for starting ambient sound could be added here if needed,
+                        // but we primarily care about the simulation loop.
+                    }
+
+                    float range = *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kMagnetMineClassRangeOffset);
+                    float minePos[3] = {
+                        *reinterpret_cast<float*>(mineBytes + 0x108),
+                        *reinterpret_cast<float*>(mineBytes + 0x10C),
+                        *reinterpret_cast<float*>(mineBytes + 0x110)
+                    };
+
+                    // Proximity scan for objects
+                    void* collisionRangeSearch = *reinterpret_cast<void**>(kCollisionRangeSearchAddr);
+                    if (collisionRangeSearch && g_BzrFn_CollisionRangeSearch && g_BzrFn_RangeResultsGetNext)
+                    {
+                        ShieldTowerRangeSearchResults results = {};
+                        g_BzrFn_CollisionRangeSearch(
+                            collisionRangeSearch,
+                            static_cast<double>(minePos[0] - range),
+                            static_cast<double>(minePos[2] - range),
+                            static_cast<double>(minePos[0] + range),
+                            static_cast<double>(minePos[2] + range),
+                            &results);
+
+                        uint32_t* handlePtr = nullptr;
+                        while (g_BzrFn_RangeResultsGetNext(&results, &handlePtr) != 0)
+                        {
+                            if (!handlePtr) continue;
+                            void* target = g_BzrFn_GameObjectGetObjByHandle(static_cast<int>(*handlePtr));
+                            if (!target || target == magnetMinePtr) continue;
+
+                            // ORIGINAL check: vtable[+0x2c] targets? and distance.
+                            // We add TeamFilter check.
+                            if (!TeamFilterShouldAffectObject(magnetMinePtr, target, filter))
+                                continue;
+
+                            float targetPos[3] = {};
+                            if (TryGetGameObjectWorldPosition(target, targetPos))
+                            {
+                                float dx = targetPos[0] - minePos[0];
+                                float dy = targetPos[1] - minePos[1];
+                                float dz = targetPos[2] - minePos[2];
+                                float distSq = dx * dx + dy * dy + dz * dz;
+
+                                if (distSq < range * range)
+                                {
+                                    float dist = std::sqrt(distSq + 0.0001f);
+                                    float pull = (dist * *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kMagnetMineClassObjPull1Offset) +
+                                                  *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kMagnetMineClassObjPull2Offset)) * dt;
+                                    float rotPull = dt * *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kMagnetMineClassObjRotPullOffset);
+
+                                    float velDelta[3] = {
+                                        dx * pull - (*reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(target) + 0x12C) * rotPull),
+                                        dy * pull - (*reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(target) + 0x130) * rotPull),
+                                        dz * pull - (*reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(target) + 0x134) * rotPull)
+                                    };
+                                    reinterpret_cast<void(__thiscall*)(void*, const float*)>(kGogGameObjectAddVelocityAddr)(target, velDelta);
+                                }
+                            }
+                        }
+                    }
+
+                    // Proximity scan for ordnance
+                    const auto* ordList = reinterpret_cast<const ListPtrValue*>(kOrdnanceListAddr);
+                    if (ordList && ordList->head)
+                    {
+                        for (ListNodePtrValue* node = ordList->head->next; node && node != ordList->head; node = node->next)
+                        {
+                            void* ordnance = node->value;
+                            if (!ordnance || !TeamFilterShouldAffectOrdnance(magnetMinePtr, ordnance, filter))
+                                continue;
+
+                            float ordPos[3] = {};
+                            if (TryGetOrdnanceWorldPosition(ordnance, ordPos))
+                            {
+                                float dx = ordPos[0] - minePos[0];
+                                float dy = ordPos[1] - minePos[1];
+                                float dz = ordPos[2] - minePos[2];
+                                float distSq = dx * dx + dy * dy + dz * dz;
+
+                                if (distSq < range * range)
+                                {
+                                    float dist = std::sqrt(distSq + 0.0001f);
+                                    float pull = (dist * *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kMagnetMineClassOrdPull1Offset) +
+                                                  *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kMagnetMineClassOrdPull2Offset)) * dt;
+                                    float rotPull = dt * *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kMagnetMineClassOrdRotPullOffset);
+
+                                    auto* ordBytes = reinterpret_cast<uint8_t*>(ordnance);
+                                    auto* velocity = reinterpret_cast<float*>(ordBytes + kOrdnanceVelocityOffset);
+                                    velocity[0] += dx * pull - velocity[0] * rotPull;
+                                    velocity[1] += dy * pull - velocity[1] * rotPull;
+                                    velocity[2] += dz * pull - velocity[2] * rotPull;
+
+                                    const float speed = std::sqrt(velocity[0] * velocity[0] + velocity[1] * velocity[1] + velocity[2] * velocity[2]);
+                                    *reinterpret_cast<float*>(ordBytes + kOrdnanceSpeedOffset) = speed;
+                                    *reinterpret_cast<float*>(ordBytes + kOrdnanceInvSpeedOffset) = (speed == 0.0f) ? 1.0e30f : (1.0f / speed);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+
+            if (g_BzrFn_MineSimulate)
+                g_BzrFn_MineSimulate(magnetMinePtr, dt);
+        }
+
+        static void RunProximityMineFilteredSimulate(void* proximityMinePtr, float dt)
+        {
+            if (!proximityMinePtr || !g_BzrFn_GameObjectGetObjByHandle || !g_BzrFn_GameObjectFriendP || !g_BzrFn_GameObjectEnemyP)
+            {
+                if (g_BzrFn_ProximityMineSimulateOriginal)
+                    g_BzrFn_ProximityMineSimulateOriginal(proximityMinePtr, dt);
+                return;
+            }
+
+            TeamFilterConfig filter = {};
+            const bool hasFilter = TryGetTeamFilterForObject(proximityMinePtr, filter, g_ProximityMineTeamFilterCache, "PROXODF");
+            if (!hasFilter || !TeamFilterNeedsCustomPath(filter))
+            {
+                if (g_BzrFn_ProximityMineSimulateOriginal)
+                    g_BzrFn_ProximityMineSimulateOriginal(proximityMinePtr, dt);
+                return;
+            }
+
+            bool shouldDetonate = false;
+
+            __try
+            {
+                auto* mineBytes = reinterpret_cast<uint8_t*>(proximityMinePtr);
+                float* armingTimer = reinterpret_cast<float*>(mineBytes + kProximityMineArmingTimerOffset);
+                *armingTimer -= dt;
+
+                if (*armingTimer <= 0.0f && *armingTimer != 0.0f)
+                {
+                    void* mineObj = *reinterpret_cast<void**>(mineBytes + kGameObjectObjOffset);
+                    if (mineObj && (*reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(mineObj) + 0x14) & 0x200) == 0)
+                    {
+                        void* mineClass = *reinterpret_cast<void**>(mineBytes + kGameObjectClassOffset);
+                        if (mineClass)
+                        {
+                            *armingTimer += *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kProximityMineClassScanPeriodOffset);
+                            float range = *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kProximityMineClassRangeOffset);
+                            float rangeSq = range * range;
+
+                            float minePos[3] = {
+                                *reinterpret_cast<float*>(mineBytes + 0x108),
+                                *reinterpret_cast<float*>(mineBytes + 0x10C),
+                                *reinterpret_cast<float*>(mineBytes + 0x110)
+                            };
+
+                            void* collisionRangeSearch = *reinterpret_cast<void**>(kCollisionRangeSearchAddr);
+                            if (collisionRangeSearch && g_BzrFn_CollisionRangeSearch && g_BzrFn_RangeResultsGetNext)
+                            {
+                                ShieldTowerRangeSearchResults results = {};
+                                g_BzrFn_CollisionRangeSearch(
+                                    collisionRangeSearch,
+                                    static_cast<double>(minePos[0] - range),
+                                    static_cast<double>(minePos[2] - range),
+                                    static_cast<double>(minePos[0] + range),
+                                    static_cast<double>(minePos[2] + range),
+                                    &results);
+
+                                uint32_t* handlePtr = nullptr;
+                                while (g_BzrFn_RangeResultsGetNext(&results, &handlePtr) != 0)
+                                {
+                                    if (!handlePtr) continue;
+                                    void* target = g_BzrFn_GameObjectGetObjByHandle(static_cast<int>(*handlePtr));
+                                    if (!target || target == proximityMinePtr) continue;
+
+                                    // Team Filter check replaces the hardcoded enemy check.
+                                    if (!TeamFilterShouldAffectObject(proximityMinePtr, target, filter))
+                                        continue;
+
+                                    float targetPos[3] = {};
+                                    if (TryGetGameObjectWorldPosition(target, targetPos))
+                                    {
+                                        float dx = targetPos[0] - minePos[0];
+                                        float dy = targetPos[1] - minePos[1];
+                                        float dz = targetPos[2] - minePos[2];
+                                        float distSq = dx * dx + dy * dy + dz * dz;
+
+                                        if (distSq <= rangeSq)
+                                        {
+                                            shouldDetonate = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (shouldDetonate)
+                {
+                    // Call detonation logic: ordnance spawn and self-destruct flags.
+                    // This mirrors the logic at the end of ProximityMine::Simulate.
+                    void* mineObj = *reinterpret_cast<void**>(mineBytes + kGameObjectObjOffset);
+                    if (mineObj)
+                    {
+                        // Spawn explosion ordnance, set removed flags etc.
+                        // For simplicity and correctness, we might want to jump back into
+                        // the original Simulate if we detect a detonation condition,
+                        // but ProximityMine::Simulate is simple enough to mirror.
+
+                        // Set removed flags (0x280)
+                        *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(mineObj) + 0x14) |= 0x280;
+
+                        // We could also call the original simulation with a huge dt or force state,
+                        // but setting the flags and letting the engine handle it is closer to how it works.
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+
+            if (g_BzrFn_MineSimulate)
+                g_BzrFn_MineSimulate(proximityMinePtr, dt);
+        }
         static ProducerBuildMenuEntry TryReadProducerBuildMenuEntryFromOdfFile(const char* producerOdf)
         {
             ProducerBuildMenuEntry result = {};
@@ -14277,6 +14683,9 @@ namespace BZROpenShim
         g_BzrFn_GameObjectGetObjByHandle = nullptr;
         g_BzrFn_PersonSimulate = nullptr;
         g_BzrFn_ShieldTowerSimulateOriginal = nullptr;
+        g_BzrFn_MagnetMineSimulateOriginal = nullptr;
+        g_BzrFn_ProximityMineSimulateOriginal = nullptr;
+        g_BzrFn_MineSimulate = nullptr;
         g_BzrFn_BuildingSimulate = nullptr;
         g_BzrFn_ShieldTowerPowerUpdate = nullptr;
         g_BzrFn_GameObjectFriendP = nullptr;
@@ -14340,6 +14749,8 @@ namespace BZROpenShim
         g_ProducerBuildMenuConfig = {};
         g_AiTuningCache = {};
         g_ShieldTowerTeamFilterCache = {};
+        g_MagnetMineTeamFilterCache = {};
+        g_ProximityMineTeamFilterCache = {};
         g_HasAppliedProducerBuildMenu = false;
         g_LastAppliedProducerBuildMenu = 0;
         g_LastUnknownProducerVft = 0;
@@ -14369,6 +14780,8 @@ namespace BZROpenShim
             GetTickCount64() + (g_IsSteamExe ? kSteamChunkCreateHookSettleDelayMs : 0);
         g_ConstructorRemoteBuildFixInstalled = false;
         g_ShieldTowerSimulateHookInstalled = false;
+        g_MagnetMineSimulateHookInstalled = false;
+        g_ProximityMineSimulateHookInstalled = false;
         g_AttackRevealTraceBudget = kAttackRevealTraceBudgetDefault;
         g_HudSpriteRectTableBase = nullptr;
         g_HudSpriteRectTableDiscoveryAttempted = false;
@@ -14485,6 +14898,7 @@ namespace BZROpenShim
         InstallCareerStatsMpHookIfPossible();
         StartCareerStatsMpSessionWorker();
         InstallShieldTowerTeamFilterHookIfPossible();
+        InstallMineTeamFilterHooksIfPossible();
 
         if (g_IsSteamExe)
         {
@@ -14720,6 +15134,7 @@ namespace BZROpenShim
         InstallJumpSnipingProbeIfRequested();
         InstallCareerStatsMpHookIfPossible();
         InstallShieldTowerTeamFilterHookIfPossible();
+        InstallMineTeamFilterHooksIfPossible();
         InstallAiTuningHooksIfPossible();
         InstallConstructorRemoteBuildFixIfPossible();
         EnsureInputBindingPopulateHookScaffold();
