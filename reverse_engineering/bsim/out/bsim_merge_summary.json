@@ -1,0 +1,24 @@
+{
+  "bsim_legacy_functions": 3910,
+  "text_map_legacy_functions": 713,
+  "merged_rows": 4275,
+  "bsim_only_discoveries": 3562,
+  "agreement_counts": {
+    "bsim_only": 3562,
+    "text_only": 365,
+    "exact": 238,
+    "diff": 110
+  },
+  "combined_confidence_counts": {
+    "low": 2756,
+    "medium": 715,
+    "text_low": 266,
+    "very_high": 238,
+    "collision_ambiguous": 223,
+    "high": 91,
+    "text_medium": 91,
+    "low_conflict": 87,
+    "medium_conflict": 23,
+    "text_very_high": 8
+  }
+}
