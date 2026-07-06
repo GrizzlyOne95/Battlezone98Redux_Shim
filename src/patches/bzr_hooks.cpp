@@ -572,6 +572,10 @@ namespace BZROpenShim
             uint32_t classId,
             char* outMeshName,
             size_t outMeshNameCapacity);
+        static void AppendAllChunkMeshBasesForGeom(
+            const char* geomName,
+            uint32_t classId,
+            std::vector<std::string>& outMeshCandidates);
         static std::string NormalizeChunkPayloadComponentName(const char* value);
         static bool TryGetChunkProxyPosition(const uint8_t* objectBytes, float& outX, float& outY, float& outZ);
         static bool TryResolveChunkPayloadMeshResource(
@@ -1013,6 +1017,13 @@ namespace BZROpenShim
         static bool g_EnableChunkRenderFallback = false;
         static bool g_EnableChunkProxyDebug = false;
         static bool g_EnableChunkMeshProxy = false;
+        // Building geo nodes carry no owner GameObject link (+0x8C is null),
+        // so chunks born from a building can't identify their craft through
+        // the bridge. The fragment ROOT still can. FragmentObject calls
+        // CreateChunk synchronously on the same thread, so the root's
+        // resolved mesh name is handed down through this scoped global while
+        // the walk is on the stack.
+        static char g_ActiveFragmentSourceMeshName[48] = {};
         static bool g_TraceChunkRender = false;
         static bool g_TraceChunkRenderVerbose = false;
         static bool g_TraceChunkEffectRuntime = false;
@@ -1021,7 +1032,10 @@ namespace BZROpenShim
         static volatile long g_ChunkRenderLogBudget = 12;
         static volatile long g_SatelliteVisibilityLogBudget = 8;
         static uint32_t g_ChunkTraceEntryLimit = 32;
-        static uint32_t g_ChunkProxyCapacity = 96;
+        // 96 slots exhaust in multi-craft battles (each death emits ~10 geo
+        // pieces plus impact chunklets); once full, new chunks are silently
+        // dropped until a slot expires.
+        static uint32_t g_ChunkProxyCapacity = 256;
         static float g_ChunkProxyDebugSize = 2.5f;
         static uint32_t g_SatelliteVisibilityObjectLimit = 96;
         static DWORD g_SatelliteVisibilityLastTick = 0;
@@ -1046,6 +1060,7 @@ namespace BZROpenShim
         {
             char meshName[48] = {};
             char vdfCandidates[128] = {};
+            char geomName[64] = {};
             uint32_t classId = 0;
         };
 
@@ -1066,6 +1081,11 @@ namespace BZROpenShim
         };
 
         static std::unordered_map<std::string, ChunkVdfAssetInfo> g_ChunkVdfAssetCache = {};
+        // Distributable replacement for shipping the stock VDF/SDF files:
+        // a text manifest holding just the geo-piece names/hierarchy, seeded
+        // into g_ChunkVdfAssetCache before any Edit\stock fallback runs.
+        static bool g_ChunkGeoManifestAttempted = false;
+        static constexpr const char* kChunkGeoManifestFileName = "chunk_geo_manifest.txt";
         static std::unordered_map<uintptr_t, ChunkObjectIdentityCacheEntry> g_ChunkObjectIdentityCache = {};
         static std::unordered_map<uintptr_t, ChunkResolvedBindingEntry> g_ChunkResolvedBindingCache = {};
         static std::unordered_map<std::string, bool> g_ChunkPayloadMeshExistsCache = {};
@@ -2835,13 +2855,44 @@ namespace BZROpenShim
             return (it != g_ChunkObjectIdentityCache.end()) ? &it->second : nullptr;
         }
 
-        static const ChunkResolvedBindingEntry* FindChunkResolvedBindingEntry(const uint8_t* objectBytes)
+        // Caches keyed on raw OBJ76 pointers go stale when the engine's object
+        // pool recycles an address for a new chunk: without validation a fresh
+        // chunklet (or another craft's chunk) inherits the previous owner's
+        // craft identity. A geo-name mismatch is the recycle signal.
+        static bool ChunkCachedGeomNameMatchesLive(const char* cachedGeomName, const char* liveGeomName)
+        {
+            if (!cachedGeomName || !cachedGeomName[0] || !liveGeomName || !liveGeomName[0])
+                return true;
+
+            return _stricmp(cachedGeomName, liveGeomName) == 0;
+        }
+
+        static void EraseChunkResolvedBinding(const uint8_t* objectBytes)
+        {
+            if (!objectBytes)
+                return;
+
+            g_ChunkResolvedBindingCache.erase(reinterpret_cast<uintptr_t>(objectBytes));
+        }
+
+        static const ChunkResolvedBindingEntry* FindChunkResolvedBindingEntryForGeom(
+            const uint8_t* objectBytes,
+            const char* liveGeomName)
         {
             if (!objectBytes)
                 return nullptr;
 
             const auto it = g_ChunkResolvedBindingCache.find(reinterpret_cast<uintptr_t>(objectBytes));
-            return (it != g_ChunkResolvedBindingCache.end()) ? &it->second : nullptr;
+            if (it == g_ChunkResolvedBindingCache.end())
+                return nullptr;
+
+            if (!ChunkCachedGeomNameMatchesLive(it->second.sourceGeomName, liveGeomName))
+            {
+                g_ChunkResolvedBindingCache.erase(it);
+                return nullptr;
+            }
+
+            return &it->second;
         }
 
         static void StoreChunkResolvedBinding(
@@ -2948,7 +2999,8 @@ namespace BZROpenShim
 
         static void PopulateChunkObjectLinkProbeFromIdentityCache(ChunkObjectLinkProbe& probe)
         {
-            const ChunkResolvedBindingEntry* binding = FindChunkResolvedBindingEntry(probe.objectBytes);
+            const ChunkResolvedBindingEntry* binding =
+                FindChunkResolvedBindingEntryForGeom(probe.objectBytes, probe.geomName);
             if (binding)
             {
                 if (binding->meshName[0])
@@ -2959,6 +3011,8 @@ namespace BZROpenShim
 
             const ChunkObjectIdentityCacheEntry* cached = FindChunkObjectIdentityCacheEntry(probe.objectBytes);
             if (!cached)
+                return;
+            if (!ChunkCachedGeomNameMatchesLive(cached->geomName, probe.geomName))
                 return;
 
             if (!probe.cachedMeshName[0] && cached->meshName[0])
@@ -3005,6 +3059,8 @@ namespace BZROpenShim
                 strncpy_s(outProbe.ownerOgreFilename, bridgeSnapshot.ownerOgreFilename, _TRUNCATE);
             if (bridgeSnapshot.ownerResolvedMeshName[0])
                 strncpy_s(outProbe.ownerResolvedMeshName, bridgeSnapshot.ownerResolvedMeshName, _TRUNCATE);
+            if (!outProbe.ownerResolvedMeshName[0] && g_ActiveFragmentSourceMeshName[0])
+                strncpy_s(outProbe.ownerResolvedMeshName, g_ActiveFragmentSourceMeshName, _TRUNCATE);
             if (!outProbe.ownerResolvedMeshName[0])
             {
                 ResolveChunkCreateMeshContext(
@@ -4833,7 +4889,8 @@ namespace BZROpenShim
 
             if (slot.objectBytes)
             {
-                const ChunkResolvedBindingEntry* binding = FindChunkResolvedBindingEntry(slot.objectBytes);
+                const ChunkResolvedBindingEntry* binding =
+                    FindChunkResolvedBindingEntryForGeom(slot.objectBytes, slot.geomName);
                 if (binding && binding->payloadMeshName[0] &&
                     _stricmp(slot.proofMeshName, binding->payloadMeshName) != 0)
                 {
@@ -5277,7 +5334,8 @@ namespace BZROpenShim
             char geomName[64] = {};
             TryReadChunkGeomIdentity(objectBytes, geomRef, geomName, sizeof(geomName));
 
-            const ChunkResolvedBindingEntry* binding = FindChunkResolvedBindingEntry(objectBytes);
+            const ChunkResolvedBindingEntry* binding =
+                FindChunkResolvedBindingEntryForGeom(objectBytes, geomName);
             const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(objectBytes);
 
             float positionX = 0.0f;
@@ -5507,13 +5565,14 @@ namespace BZROpenShim
                     if (classId != kClassIdChunk)
                         continue;
 
-                    TouchChunkResolvedBinding(entry.objectBytes);
-
                     const void* geomRef = nullptr;
                     char geomName[64] = {};
                     TryReadChunkGeomIdentity(entry.objectBytes, geomRef, geomName, sizeof(geomName));
 
-                    const ChunkResolvedBindingEntry* binding = FindChunkResolvedBindingEntry(entry.objectBytes);
+                    const ChunkResolvedBindingEntry* binding =
+                        FindChunkResolvedBindingEntryForGeom(entry.objectBytes, geomName);
+                    if (binding)
+                        TouchChunkResolvedBinding(entry.objectBytes);
                     const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(entry.objectBytes);
                     float positionX = 0.0f;
                     float positionY = 0.0f;
@@ -10365,6 +10424,46 @@ namespace BZROpenShim
             return outMeshName[0] != '\0';
         }
 
+        static bool TryResolveGenericChunkPayloadFallback(
+            const char* seedName,
+            char* outMeshName,
+            size_t outMeshNameCapacity)
+        {
+            if (!outMeshName || outMeshNameCapacity == 0)
+                return false;
+
+            outMeshName[0] = '\0';
+
+            std::vector<std::string> available;
+            for (uint32_t index = 1; index <= 8; ++index)
+            {
+                char geomBuffer[16] = {};
+                _snprintf_s(geomBuffer, _TRUNCATE, "iechunk%u", index);
+                char resourceName[128] = {};
+                if (TryResolveChunkPayloadMeshResourceForMeshAndGeom(
+                        "generic",
+                        geomBuffer,
+                        resourceName,
+                        sizeof(resourceName)))
+                {
+                    available.emplace_back(resourceName);
+                }
+            }
+            if (available.empty())
+                return false;
+
+            uint32_t hash = 2166136261u;
+            for (const char* ch = seedName ? seedName : ""; *ch; ++ch)
+            {
+                hash ^= static_cast<uint8_t>(std::tolower(static_cast<unsigned char>(*ch)));
+                hash *= 16777619u;
+            }
+
+            const std::string& pick = available[hash % available.size()];
+            strncpy_s(outMeshName, outMeshNameCapacity, pick.c_str(), _TRUNCATE);
+            return outMeshName[0] != '\0';
+        }
+
         static bool TryResolveChunkPayloadMeshResource(
             const ChunkObjectLinkProbe& probe,
             const char* preferredMeshName,
@@ -10382,11 +10481,50 @@ namespace BZROpenShim
             AppendUniqueChunkPayloadCandidate(meshCandidates, NormalizeChunkMeshBaseName(preferredMeshName));
             AppendUniqueChunkPayloadCandidate(meshCandidates, NormalizeChunkMeshBaseName(probe.cachedMeshName));
 
+            // Identity caches only cover objects seen live before death; a
+            // chunk that missed them (buildings especially) can still be
+            // identified purely from its own geo name when the VDF/SDF
+            // reverse index maps it to exactly one craft.
+            if (meshCandidates.empty())
+            {
+                char inferredMeshName[48] = {};
+                const char* inferGeomName =
+                    (explicitGeomName && explicitGeomName[0]) ? explicitGeomName : probe.geomName;
+                if (TryInferChunkMeshNameFromGeom(
+                        inferGeomName,
+                        probe.classId,
+                        inferredMeshName,
+                        sizeof(inferredMeshName)))
+                {
+                    AppendUniqueChunkPayloadCandidate(
+                        meshCandidates, NormalizeChunkMeshBaseName(inferredMeshName));
+                }
+            }
+
+            // Faction twins (abspow/bbspow, abtowe/bbtowe, ...) share their
+            // entire piece list, so the single-craft inference above refuses
+            // them. The lookup below is gated on the payload file actually
+            // existing per candidate, and twin payload dirs ship the same
+            // per-piece mesh files, so trying every craft the reverse index
+            // maps this geo to still yields the correct piece.
+            if (meshCandidates.empty())
+            {
+                const char* inferGeomName =
+                    (explicitGeomName && explicitGeomName[0]) ? explicitGeomName : probe.geomName;
+                AppendAllChunkMeshBasesForGeom(inferGeomName, probe.classId, meshCandidates);
+            }
+
             std::vector<std::string> geomCandidates;
             geomCandidates.reserve(4);
             AppendUniqueChunkPayloadCandidate(geomCandidates, NormalizeChunkPayloadComponentName(explicitGeomName));
             AppendUniqueChunkPayloadCandidate(geomCandidates, NormalizeChunkPayloadComponentName(probe.geomName));
-            AppendChunkPayloadCandidatesFromPipeList(probe.vdfCandidates, geomCandidates);
+            // The VDF candidate list names OTHER pieces of the source craft.
+            // Substituting one of those is only acceptable when the chunk's
+            // own geo name could not be read at all — otherwise a resolve
+            // miss (or a stale craft binding) turns into a visibly wrong
+            // piece instead of an invisible chunk.
+            if (geomCandidates.empty())
+                AppendChunkPayloadCandidatesFromPipeList(probe.vdfCandidates, geomCandidates);
 
             for (const std::string& meshCandidate : meshCandidates)
             {
@@ -10432,6 +10570,46 @@ namespace BZROpenShim
                     strncpy_s(outMeshName, outMeshNameCapacity, chunkletFileName.c_str(), _TRUNCATE);
                     return true;
                 }
+
+                // Nested layouts for the same templates: chunkN/chunkN.mesh
+                // and generic/iechunkN.mesh.
+                if (TryResolveChunkPayloadMeshResourceForMeshAndGeom(
+                        geomCandidate.c_str(),
+                        geomCandidate.c_str(),
+                        outMeshName,
+                        outMeshNameCapacity))
+                {
+                    return true;
+                }
+                const std::string chunkletGeneric = "ie" + geomCandidate;
+                if (TryResolveChunkPayloadMeshResourceForMeshAndGeom(
+                        "generic",
+                        chunkletGeneric.c_str(),
+                        outMeshName,
+                        outMeshNameCapacity))
+                {
+                    return true;
+                }
+            }
+
+            // Last resort: a payload root can ship generic debris meshes in a
+            // "generic" dir (generic/iechunkN.mesh). Seed the pick with the
+            // geo name so a given piece always shatters into the same shape.
+            if (TryResolveGenericChunkPayloadFallback(
+                    geomCandidates.empty() ? nullptr : geomCandidates.front().c_str(),
+                    outMeshName,
+                    outMeshNameCapacity))
+            {
+                static volatile long s_GenericFallbackLogBudget = 64;
+                if (InterlockedDecrement(&s_GenericFallbackLogBudget) >= 0)
+                {
+                    LogChunkDiagnostic(
+                        "chunkmesh",
+                        L"[CHUNKMESH] generic-fallback geom=%hs mesh=%hs\n",
+                        geomCandidates.empty() ? "<none>" : geomCandidates.front().c_str(),
+                        outMeshName);
+                }
+                return true;
             }
 
             LogChunkPayloadResolveFailureOnce(
@@ -10443,6 +10621,191 @@ namespace BZROpenShim
             return false;
         }
 
+        // Manifest line format: craft|geoName|parentName|type|flags
+        // ('#' comments and blank lines ignored; parent/type/flags optional).
+        static void LoadChunkGeoManifestFile(
+            const std::filesystem::path& manifestPath,
+            uint32_t& craftCount,
+            uint32_t& recordCount)
+        {
+            std::ifstream file(manifestPath);
+            if (!file)
+                return;
+
+            std::string line;
+            while (std::getline(file, line))
+            {
+                const std::string trimmed = TrimAsciiCopy(line);
+                if (trimmed.empty() || trimmed[0] == '#')
+                    continue;
+
+                std::array<std::string, 5> fields = {};
+                size_t fieldIndex = 0;
+                size_t start = 0;
+                while (fieldIndex < fields.size())
+                {
+                    const size_t separator = trimmed.find('|', start);
+                    fields[fieldIndex++] =
+                        TrimAsciiCopy(trimmed.substr(start, separator - start));
+                    if (separator == std::string::npos)
+                        break;
+                    start = separator + 1;
+                }
+
+                const std::string craftBase = NormalizeChunkMeshBaseName(fields[0].c_str());
+                const std::string& geoName = fields[1];
+                if (craftBase.empty() || geoName.empty() ||
+                    geoName.size() >= sizeof(ChunkVdfRecord{}.name) ||
+                    _stricmp(geoName.c_str(), "NULL") == 0)
+                {
+                    continue;
+                }
+
+                ChunkVdfAssetInfo& info = g_ChunkVdfAssetCache[craftBase];
+                if (!info.attempted)
+                    ++craftCount;
+                info.attempted = true;
+
+                bool duplicate = false;
+                for (const ChunkVdfRecord& existing : info.records)
+                {
+                    if (_stricmp(existing.name, geoName.c_str()) == 0 &&
+                        _stricmp(existing.parent, fields[2].c_str()) == 0)
+                    {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (duplicate)
+                    continue;
+
+                ChunkVdfRecord record = {};
+                strncpy_s(record.name, sizeof(record.name), geoName.c_str(), _TRUNCATE);
+                strncpy_s(record.parent, sizeof(record.parent), fields[2].c_str(), _TRUNCATE);
+                record.type = static_cast<uint32_t>(std::strtoul(fields[3].c_str(), nullptr, 10));
+                record.flags = static_cast<uint32_t>(std::strtoul(fields[4].c_str(), nullptr, 10));
+                info.records.push_back(record);
+                info.loaded = true;
+                ++recordCount;
+            }
+        }
+
+        static void EnsureChunkGeoManifestLoaded()
+        {
+            if (g_ChunkGeoManifestAttempted)
+                return;
+
+            g_ChunkGeoManifestAttempted = true;
+
+            std::vector<std::filesystem::path> manifestCandidates;
+            AppendUniquePath(
+                manifestCandidates,
+                GetMainModuleDirectory() / "scripts" / kChunkGeoManifestFileName);
+            for (const std::filesystem::path& payloadDir : GetChunkPayloadResourceDirectories())
+                AppendUniquePath(manifestCandidates, payloadDir / kChunkGeoManifestFileName);
+
+            uint32_t fileCount = 0;
+            uint32_t craftCount = 0;
+            uint32_t recordCount = 0;
+            for (const std::filesystem::path& candidate : manifestCandidates)
+            {
+                std::error_code error;
+                if (!std::filesystem::exists(candidate, error) || error)
+                    continue;
+
+                ++fileCount;
+                LoadChunkGeoManifestFile(candidate, craftCount, recordCount);
+            }
+
+            if (fileCount)
+            {
+                LogChunkDiagnostic(
+                    "chunkmesh",
+                    L"[CHUNKMESH] geo-manifest loaded files=%u crafts=%u records=%u\n",
+                    fileCount,
+                    craftCount,
+                    recordCount);
+            }
+        }
+
+        // Buildings ship as .sdf instead of .vdf: same BWD2 container, but the
+        // geo table is an SGEO block (120-byte records vs VGEO's 100) whose
+        // count field is authoritative — the block is padded with "NULL"
+        // records to a fixed capacity.
+        static bool TryLoadChunkSdfAssetInfo(
+            const std::filesystem::path& sdfPath,
+            ChunkVdfAssetInfo& info)
+        {
+            std::ifstream file(sdfPath, std::ios::binary);
+            if (!file)
+                return false;
+
+            const std::vector<uint8_t> bytes(
+                (std::istreambuf_iterator<char>(file)),
+                std::istreambuf_iterator<char>());
+            constexpr size_t kSdfPreambleBytes = 20;
+            constexpr size_t kSgeoHeaderBytes = 12;
+            constexpr size_t kSgeoRecordBytes = 120;
+            constexpr size_t kSgeoNameOffset = 0;
+            constexpr size_t kSgeoParentOffset = 56;
+            constexpr size_t kSgeoTypeOffset = 92;
+
+            // Block sizes include the 8-byte tag+size header; walk until SGEO.
+            size_t cursor = kSdfPreambleBytes;
+            size_t sgeoOffset = 0;
+            size_t sgeoSize = 0;
+            while (cursor + 8 <= bytes.size())
+            {
+                const uint32_t blockSize = ReadLeU32(bytes.data() + cursor + 4);
+                if (blockSize < 8 || cursor + blockSize > bytes.size())
+                    break;
+
+                if (std::memcmp(bytes.data() + cursor, "SGEO", 4) == 0)
+                {
+                    sgeoOffset = cursor;
+                    sgeoSize = blockSize;
+                    break;
+                }
+                cursor += blockSize;
+            }
+
+            if (!sgeoOffset || sgeoSize < kSgeoHeaderBytes + kSgeoRecordBytes)
+                return false;
+
+            const size_t recordCapacity = (sgeoSize - kSgeoHeaderBytes) / kSgeoRecordBytes;
+            const uint32_t declaredCount = ReadLeU32(bytes.data() + sgeoOffset + 8);
+            const size_t geoCount =
+                (declaredCount < recordCapacity) ? declaredCount : recordCapacity;
+            if (geoCount == 0)
+                return false;
+
+            const size_t recordsStart = sgeoOffset + kSgeoHeaderBytes;
+            std::unordered_set<std::string> seenKeys;
+            info.records.clear();
+            info.records.reserve(geoCount);
+            for (size_t index = 0; index < geoCount; ++index)
+            {
+                const size_t recordOffset = recordsStart + (index * kSgeoRecordBytes);
+                const std::string name = ReadFixedAsciiField(bytes.data() + recordOffset + kSgeoNameOffset, 8);
+                if (name.empty() || _stricmp(name.c_str(), "NULL") == 0)
+                    continue;
+
+                const std::string parent = ReadFixedAsciiField(bytes.data() + recordOffset + kSgeoParentOffset, 8);
+                const std::string seenKey = name + "|" + parent;
+                if (!seenKeys.insert(seenKey).second)
+                    continue;
+
+                ChunkVdfRecord record = {};
+                strncpy_s(record.name, sizeof(record.name), name.c_str(), _TRUNCATE);
+                strncpy_s(record.parent, sizeof(record.parent), parent.c_str(), _TRUNCATE);
+                record.type = ReadLeU32(bytes.data() + recordOffset + kSgeoTypeOffset);
+                info.records.push_back(record);
+            }
+
+            info.loaded = !info.records.empty();
+            return info.loaded;
+        }
+
         static ChunkVdfAssetInfo& GetChunkVdfAssetInfoForMesh(const char* meshName)
         {
             static ChunkVdfAssetInfo kEmptyInfo = {};
@@ -10451,17 +10814,25 @@ namespace BZROpenShim
             if (baseName.empty())
                 return kEmptyInfo;
 
+            EnsureChunkGeoManifestLoaded();
+
             ChunkVdfAssetInfo& info = g_ChunkVdfAssetCache[baseName];
             if (info.attempted)
                 return info;
 
             info.attempted = true;
 
-            const std::filesystem::path vdfPath =
-                GetMainModuleDirectory() / "Edit" / "stock" / (baseName + ".vdf");
+            const std::filesystem::path stockDir = GetMainModuleDirectory() / "Edit" / "stock";
+            const std::filesystem::path vdfPath = stockDir / (baseName + ".vdf");
             std::error_code error;
             if (!std::filesystem::exists(vdfPath, error) || error)
+            {
+                const std::filesystem::path sdfPath = stockDir / (baseName + ".sdf");
+                std::error_code sdfError;
+                if (std::filesystem::exists(sdfPath, sdfError) && !sdfError)
+                    TryLoadChunkSdfAssetInfo(sdfPath, info);
                 return info;
+            }
 
             std::ifstream file(vdfPath, std::ios::binary);
             if (!file)
@@ -10554,6 +10925,18 @@ namespace BZROpenShim
 
             g_ChunkVdfReverseIndexAttempted = true;
 
+            EnsureChunkGeoManifestLoaded();
+            for (const auto& [meshBase, info] : g_ChunkVdfAssetCache)
+            {
+                if (!info.loaded)
+                    continue;
+                for (const ChunkVdfRecord& record : info.records)
+                {
+                    if (record.name[0])
+                        AddChunkVdfReverseIndexRecord(record.name, meshBase, record.type);
+                }
+            }
+
             const std::filesystem::path stockDir = GetMainModuleDirectory() / "Edit" / "stock";
             std::error_code error;
             if (!std::filesystem::exists(stockDir, error) || error)
@@ -10573,7 +10956,7 @@ namespace BZROpenShim
                     extension.end(),
                     extension.begin(),
                     [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-                if (extension != ".vdf")
+                if (extension != ".vdf" && extension != ".sdf")
                     continue;
 
                 const std::string meshBase = entry.path().stem().string();
@@ -10887,6 +11270,61 @@ namespace BZROpenShim
 
             _snprintf_s(outMeshName, outMeshNameCapacity, _TRUNCATE, "%s.mesh", selected->meshBase);
             return outMeshName[0] != '\0';
+        }
+
+        // Unlike TryInferChunkMeshNameFromGeom this does not refuse ambiguous
+        // geo names; it hands back every craft the reverse index knows, in
+        // stable alphabetical order, for callers that can verify candidates
+        // against actual payload files.
+        static void AppendAllChunkMeshBasesForGeom(
+            const char* geomName,
+            uint32_t classId,
+            std::vector<std::string>& outMeshCandidates)
+        {
+            if (!geomName || !*geomName)
+                return;
+            if (_stricmp(geomName, "chunk1") == 0 || _stricmp(geomName, "chunk2") == 0)
+                return;
+
+            EnsureChunkVdfReverseIndex();
+
+            std::string key(geomName);
+            std::transform(
+                key.begin(),
+                key.end(),
+                key.begin(),
+                [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+
+            const auto it = g_ChunkVdfGeomReverseIndex.find(key);
+            if (it == g_ChunkVdfGeomReverseIndex.end() || it->second.empty())
+                return;
+
+            std::vector<std::string> bases;
+            for (const ChunkVdfMeshRef& ref : it->second)
+            {
+                if (classId != 0 && ref.type != classId)
+                    continue;
+                if (ref.meshBase[0])
+                    bases.emplace_back(ref.meshBase);
+            }
+            if (bases.empty())
+            {
+                for (const ChunkVdfMeshRef& ref : it->second)
+                {
+                    if (ref.meshBase[0])
+                        bases.emplace_back(ref.meshBase);
+                }
+            }
+
+            std::sort(
+                bases.begin(),
+                bases.end(),
+                [](const std::string& left, const std::string& right)
+                {
+                    return _stricmp(left.c_str(), right.c_str()) < 0;
+                });
+            for (const std::string& base : bases)
+                AppendUniqueChunkPayloadCandidate(outMeshCandidates, NormalizeChunkMeshBaseName(base.c_str()));
         }
 
         static bool ResolveChunkCreateMeshContext(
@@ -13766,6 +14204,8 @@ namespace BZROpenShim
 
             ChunkObjectIdentityCacheEntry entry = {};
             strncpy_s(entry.meshName, sizeof(entry.meshName), meshName, _TRUNCATE);
+            if (source.geomName[0])
+                strncpy_s(entry.geomName, sizeof(entry.geomName), source.geomName, _TRUNCATE);
             entry.classId = source.classId;
             if (!BuildChunkVdfSourceCandidateList(
                     meshName,
@@ -15090,7 +15530,7 @@ namespace BZROpenShim
         }
         else
         {
-            g_ChunkProxyCapacity = 96;
+            g_ChunkProxyCapacity = 256;
         }
         float chunkProxySize = g_ChunkProxyDebugSize;
         if (TryGetEnvFloat("OPENSHIM_CHUNK_PROXY_SIZE", chunkProxySize) ||
@@ -17243,6 +17683,13 @@ namespace BZROpenShim
         else
             boundObjectBytes = reinterpret_cast<const uint8_t*>(objectPtr);
 
+        // The object pool recycles pointers, so any binding left at either
+        // address belongs to a previous chunk. Evict before storing — a
+        // failed source capture must not leave the old craft's identity
+        // behind for this chunk to inherit.
+        EraseChunkResolvedBinding(reinterpret_cast<const uint8_t*>(objectPtr));
+        EraseChunkResolvedBinding(boundObjectBytes);
+
         if (boundObjectBytes)
             StoreChunkResolvedBinding(boundObjectBytes, sourceTreeProbe);
 
@@ -17286,6 +17733,12 @@ namespace BZROpenShim
             if (TryReadChunkEffectEntry(thisBytes, countBefore, createdEntry))
                 createdEntryPtr = &createdEntry;
         }
+
+        // Generic chunklets have no craft owner; if the pool recycled this
+        // pointer from a craft chunk, the leftover binding would dress the
+        // chunklet in that craft's debris meshes.
+        if (createdEntryPtr && createdEntryPtr->objectBytes)
+            EraseChunkResolvedBinding(createdEntryPtr->objectBytes);
 
         LogChunkCreateLifecycle(
             L"CreateChunklet",
@@ -17420,6 +17873,34 @@ namespace BZROpenShim
         }
     }
 
+    static void BeginActiveFragmentSourceContext(void* rootObjectPtr)
+    {
+        g_ActiveFragmentSourceMeshName[0] = '\0';
+        if (!rootObjectPtr)
+            return;
+
+        const ChunkBridgeSnapshot rootSnapshot =
+            CaptureChunkBridgeSnapshot(reinterpret_cast<const uint8_t*>(rootObjectPtr));
+        if (rootSnapshot.ownerResolvedMeshName[0])
+        {
+            strncpy_s(
+                g_ActiveFragmentSourceMeshName,
+                rootSnapshot.ownerResolvedMeshName,
+                _TRUNCATE);
+        }
+
+        if (AcquireChunkFragmentWalkLogSlot())
+        {
+            LogChunkDiagnostic(
+                "chunkspawn",
+                L"[CHUNKSPAWN] frag-source obj=0x%08X mesh=%hs base=%hs file=%hs\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rootObjectPtr)),
+                g_ActiveFragmentSourceMeshName[0] ? g_ActiveFragmentSourceMeshName : "<none>",
+                rootSnapshot.ownerEntityBaseName[0] ? rootSnapshot.ownerEntityBaseName : "<none>",
+                rootSnapshot.ownerOgreFilename[0] ? rootSnapshot.ownerOgreFilename : "<none>");
+        }
+    }
+
     void __fastcall ChunkEffectPartialFragmentHook(void* thisPtr,
                                                    void* /*edx*/,
                                                    void* objectPtr,
@@ -17437,12 +17918,14 @@ namespace BZROpenShim
         {
             LogChunkFragmentWalkTree(L"PartialFragmentObject", thisPtr, objectPtr, preserveFlag);
             TryReadChunkEffectCount(reinterpret_cast<const uint8_t*>(thisPtr), countBefore);
+            BeginActiveFragmentSourceContext(objectPtr);
         }
         ++g_ChunkFragmentHookDepth;
         g_BzrFn_ChunkEffectPartialFragment(thisPtr, objectPtr, velocity, preserveFlag);
         --g_ChunkFragmentHookDepth;
         if (outermost)
         {
+            g_ActiveFragmentSourceMeshName[0] = '\0';
             uint32_t countAfter = countBefore;
             TryReadChunkEffectCount(reinterpret_cast<const uint8_t*>(thisPtr), countAfter);
             if (AcquireChunkFragmentWalkLogSlot())
@@ -17535,12 +18018,14 @@ namespace BZROpenShim
             LogChunkFragmentWalkTree(L"FullFragmentObject", thisPtr, objectPtr, preserveFlag);
             TryReadChunkEffectCount(reinterpret_cast<const uint8_t*>(thisPtr), countBefore);
             HideChunkFragmentSourceMesh(objectPtr);
+            BeginActiveFragmentSourceContext(objectPtr);
         }
         ++g_ChunkFragmentHookDepth;
         g_BzrFn_ChunkEffectFullFragment(thisPtr, objectPtr, velocity, preserveFlag);
         --g_ChunkFragmentHookDepth;
         if (outermost)
         {
+            g_ActiveFragmentSourceMeshName[0] = '\0';
             uint32_t countAfter = countBefore;
             TryReadChunkEffectCount(reinterpret_cast<const uint8_t*>(thisPtr), countAfter);
             if (AcquireChunkFragmentWalkLogSlot())
