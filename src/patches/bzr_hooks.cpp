@@ -142,6 +142,7 @@ namespace BZROpenShim
     using FnGameObjectGetObjByHandle = void* (__cdecl*)(int handle);
     using FnPersonSimulate = void(__thiscall*)(void* thisPtr, float dt);
     using FnShieldTowerSimulate = void(__thiscall*)(void* thisPtr, float dt);
+    using FnSprayBuildingSimulate = void(__thiscall*)(void* thisPtr, float dt);
     using FnShieldTowerPowerUpdate = void(__fastcall*)(void* thisPtr);
     using FnMatrixInverse = void(__cdecl*)(void* outMatrix, const void* inMatrix);
     using FnVectorTransform = void(__cdecl*)(float* dst, const float* src, int count, const void* matrix);
@@ -254,6 +255,7 @@ namespace BZROpenShim
     static FnPersonSimulate g_BzrFn_PersonSimulate = nullptr;
     static FnShieldTowerSimulate g_BzrFn_ShieldTowerSimulateOriginal = nullptr;
     static FnShieldTowerSimulate g_BzrFn_BuildingSimulate = nullptr;
+    static FnSprayBuildingSimulate g_BzrFn_SprayBuildingSimulateOriginal = nullptr;
     static FnShieldTowerPowerUpdate g_BzrFn_ShieldTowerPowerUpdate = nullptr;
     static FnGameObjectRelation g_BzrFn_GameObjectFriendP = nullptr;
     static FnGameObjectRelation g_BzrFn_GameObjectEnemyP = nullptr;
@@ -405,6 +407,22 @@ namespace BZROpenShim
         constexpr uintptr_t kGogRangeSearchAddr = 0x005B2950;
         constexpr uintptr_t kGogRangeResultsGetNextAddr = 0x00462710;
         constexpr uintptr_t kShieldTowerSimulateVtableSlotAddr = 0x00887728;
+        // Splinter (spraybomb) undead bug (#46). SprayBuilding::Simulate keeps
+        // spinning its payload fire loop after the deployed splinter is damaged
+        // below zero because it overrides Building::Simulate without preserving
+        // the base destroyed/remove gate. GOG addresses re-derived via RTTI on
+        // the live 2.2.301 exe (advisory-PDB VA 0x005242F0 had drifted): the
+        // SprayBuilding vtable is 0x008881EC and Simulate is slot 15.
+        constexpr uintptr_t kGogSprayBuildingSimulateAddr = 0x005DA6E0;
+        constexpr uintptr_t kSprayBuildingSimulateVtableSlotAddr = 0x00888228;
+        // Building::Simulate reads flags at [[this+0xF4]+0x14] and early-outs on
+        // destroyed (0x1000000) / marked-for-remove (0x200) by dispatching the
+        // stock explode/remove virtuals.
+        constexpr size_t kBuildingStateBlockOffset = 0xF4;
+        constexpr size_t kBuildingStateFlagsOffset = 0x14;
+        constexpr uint32_t kBuildingDestroyedOrRemoveMask = 0x01000200u;
+        constexpr bool kSplinterUndeadFixEnabledDefault = true;
+        constexpr long kSplinterUndeadTraceBudgetDefault = 32;
         constexpr float kFlagButtonSize = 48.0f;
         constexpr uint32_t kLegacyFlagDataSlot = 0x0Du;
         constexpr int kLegacyFlagWidth = 64;
@@ -1152,6 +1170,9 @@ namespace BZROpenShim
         static ULONGLONG g_ChunkEffectCreateHooksReadyTick = 0;
         static bool g_ConstructorRemoteBuildFixInstalled = false;
         static bool g_ShieldTowerSimulateHookInstalled = false;
+        static bool g_SprayBuildingSimulateHookInstalled = false;
+        static bool g_SplinterUndeadFixEnabled = kSplinterUndeadFixEnabledDefault;
+        static volatile long g_SplinterUndeadTraceBudget = kSplinterUndeadTraceBudgetDefault;
         static bool g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
         static volatile long g_ConstructorRemoteBuildTraceBudget = kConstructorRemoteBuildTraceBudgetDefault;
         static std::unordered_map<uintptr_t, ULONGLONG> g_RetargetPeriodNextForceMsByProcess = {};
@@ -9320,6 +9341,139 @@ namespace BZROpenShim
             }
         }
 
+        static bool ShouldTraceSplinterUndeadFix()
+        {
+            return EnvFlagEnabled("OPENSHIM_TRACE_SPLINTER_UNDEAD") ||
+                   EnvFlagEnabled("BZR_TRACE_SPLINTER_UNDEAD");
+        }
+
+        // Splinter (spraybomb) undead fix (#46): a deployed splinter that has
+        // been damaged below zero is still marked dead by Building::DamageAlloc
+        // (flags |= 0x1000200), but SprayBuilding::Simulate overrides
+        // Building::Simulate without preserving the base destroyed/remove gate,
+        // so it keeps spawning payload ordnance until ammo depletion. Restore the
+        // missing gate: when the object is destroyed/marked-for-remove, route the
+        // frame through stock Building::Simulate (which dispatches the explode /
+        // remove virtuals and returns) instead of the payload fire loop.
+        static void RunSprayBuildingSimulateWithDeadGate(void* sprayPtr, float dt)
+        {
+            if (!sprayPtr || !g_BzrFn_SprayBuildingSimulateOriginal)
+            {
+                if (g_BzrFn_SprayBuildingSimulateOriginal)
+                    g_BzrFn_SprayBuildingSimulateOriginal(sprayPtr, dt);
+                return;
+            }
+
+            bool routeToBase = false;
+            if (g_SplinterUndeadFixEnabled && g_BzrFn_BuildingSimulate)
+            {
+                __try
+                {
+                    auto* stateBlock = *reinterpret_cast<void* const*>(
+                        reinterpret_cast<const uint8_t*>(sprayPtr) + kBuildingStateBlockOffset);
+                    if (stateBlock)
+                    {
+                        const uint32_t flags = *reinterpret_cast<const uint32_t*>(
+                            reinterpret_cast<const uint8_t*>(stateBlock) + kBuildingStateFlagsOffset);
+                        routeToBase = (flags & kBuildingDestroyedOrRemoveMask) != 0;
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    routeToBase = false;
+                }
+            }
+
+            if (routeToBase)
+            {
+                if (ShouldTraceSplinterUndeadFix())
+                {
+                    const long remaining = InterlockedDecrement(&g_SplinterUndeadTraceBudget);
+                    if (remaining >= 0)
+                        Log(L"[SPLINTER] Dead splinter routed to base Building::Simulate remaining=%ld unit=0x%08X\n",
+                            remaining,
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sprayPtr)));
+                }
+                g_BzrFn_BuildingSimulate(sprayPtr, dt);
+                return;
+            }
+
+            g_BzrFn_SprayBuildingSimulateOriginal(sprayPtr, dt);
+        }
+
+        void __fastcall SprayBuildingSimulateUndeadFixHook(void* thisPtr, void* /*edx*/, float dt)
+        {
+            RunSprayBuildingSimulateWithDeadGate(thisPtr, dt);
+        }
+
+        static void InstallSplinterUndeadFixIfPossible()
+        {
+            if (!g_SplinterUndeadFixEnabled)
+                return;
+            if (g_SprayBuildingSimulateHookInstalled)
+                return;
+
+            if (!g_BzrFn_SprayBuildingSimulateOriginal)
+                g_BzrFn_SprayBuildingSimulateOriginal =
+                    reinterpret_cast<FnSprayBuildingSimulate>(kGogSprayBuildingSimulateAddr);
+            if (!g_BzrFn_BuildingSimulate)
+                g_BzrFn_BuildingSimulate =
+                    reinterpret_cast<FnShieldTowerSimulate>(kGogBuildingSimulateAddr);
+
+            // The advisory-PDB VA for SprayBuilding::Simulate drifted, so validate
+            // the live entry prologue before trusting the re-derived GOG address.
+            static const uint8_t kExpectedSprayBuildingSimulateBytes[] =
+            {
+                0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xE8, 0x02, 0x00, 0x00
+            };
+            if (!ExpectedBytesMatchAt(kGogSprayBuildingSimulateAddr,
+                                      kExpectedSprayBuildingSimulateBytes,
+                                      sizeof(kExpectedSprayBuildingSimulateBytes)))
+            {
+                Log(L"[SPLINTER] SprayBuilding::Simulate entry bytes mismatch at 0x%08X; splinter undead fix disabled\n",
+                    static_cast<uint32_t>(kGogSprayBuildingSimulateAddr));
+                return;
+            }
+
+            void* current = nullptr;
+            __try
+            {
+                current = *reinterpret_cast<void**>(kSprayBuildingSimulateVtableSlotAddr);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                current = nullptr;
+            }
+
+            if (current != reinterpret_cast<void*>(SprayBuildingSimulateUndeadFixHook) &&
+                current != reinterpret_cast<void*>(kGogSprayBuildingSimulateAddr))
+            {
+                Log(L"[SPLINTER] SprayBuilding::Simulate vtable mismatch slot=0x%08X current=0x%08X expected=0x%08X\n",
+                    static_cast<uint32_t>(kSprayBuildingSimulateVtableSlotAddr),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
+                    static_cast<uint32_t>(kGogSprayBuildingSimulateAddr));
+                return;
+            }
+
+            const bool patched =
+                (current == reinterpret_cast<void*>(SprayBuildingSimulateUndeadFixHook)) ||
+                WritePointerValue(kSprayBuildingSimulateVtableSlotAddr,
+                                  reinterpret_cast<void*>(SprayBuildingSimulateUndeadFixHook));
+            g_SprayBuildingSimulateHookInstalled =
+                patched &&
+                g_BzrFn_SprayBuildingSimulateOriginal &&
+                g_BzrFn_BuildingSimulate;
+
+            if (g_SprayBuildingSimulateHookInstalled)
+            {
+                Log(L"[SPLINTER] Installed splinter undead fix slot=0x%08X original=0x%08X base=0x%08X trace=%hs\n",
+                    static_cast<uint32_t>(kSprayBuildingSimulateVtableSlotAddr),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_SprayBuildingSimulateOriginal)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_BuildingSimulate)),
+                    BoolText(ShouldTraceSplinterUndeadFix()));
+            }
+        }
+
         static void InstallAiTuningHooksIfPossible()
         {
             if (g_CalcRangeCraftHookInstalled && g_RetargetPeriodHooksInstalled)
@@ -15228,6 +15382,7 @@ namespace BZROpenShim
         g_BzrFn_PersonSimulate = nullptr;
         g_BzrFn_ShieldTowerSimulateOriginal = nullptr;
         g_BzrFn_BuildingSimulate = nullptr;
+        g_BzrFn_SprayBuildingSimulateOriginal = nullptr;
         g_BzrFn_ShieldTowerPowerUpdate = nullptr;
         g_BzrFn_GameObjectFriendP = nullptr;
         g_BzrFn_GameObjectEnemyP = nullptr;
@@ -15325,6 +15480,7 @@ namespace BZROpenShim
             GetTickCount64() + (g_IsSteamExe ? kSteamChunkCreateHookSettleDelayMs : 0);
         g_ConstructorRemoteBuildFixInstalled = false;
         g_ShieldTowerSimulateHookInstalled = false;
+        g_SprayBuildingSimulateHookInstalled = false;
         g_AttackRevealTraceBudget = kAttackRevealTraceBudgetDefault;
         g_HudSpriteRectTableBase = nullptr;
         g_HudSpriteRectTableDiscoveryAttempted = false;
@@ -15343,6 +15499,8 @@ namespace BZROpenShim
         g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
         g_AttackRevealEnabled = kAttackRevealEnabledDefault;
         g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
+        g_SplinterUndeadFixEnabled = kSplinterUndeadFixEnabledDefault;
+        g_SplinterUndeadTraceBudget = kSplinterUndeadTraceBudgetDefault;
         g_TurretAimPitchMultiplier = 0.5f;
         g_TurretAimPitchMultiplierEnhanced = 0.95f;
         g_RetargetPeriodNextForceMsByProcess.clear();
@@ -15445,6 +15603,7 @@ namespace BZROpenShim
         InstallCareerStatsMpHookIfPossible();
         StartCareerStatsMpSessionWorker();
         InstallShieldTowerTeamFilterHookIfPossible();
+        InstallSplinterUndeadFixIfPossible();
 
         if (g_IsSteamExe)
         {
@@ -15527,6 +15686,17 @@ namespace BZROpenShim
                 constructorCleanupTraceBudget = 0;
         }
         g_ConstructorRemoteBuildTraceBudget = constructorCleanupTraceBudget;
+        g_SplinterUndeadFixEnabled =
+            !(EnvFlagEnabled("OPENSHIM_DISABLE_SPLINTER_UNDEAD_FIX") ||
+              EnvFlagEnabled("BZR_DISABLE_SPLINTER_UNDEAD_FIX"));
+        long splinterUndeadTraceBudget = kSplinterUndeadTraceBudgetDefault;
+        if (TryGetEnvLong("OPENSHIM_TRACE_SPLINTER_UNDEAD_BUDGET", splinterUndeadTraceBudget) ||
+            TryGetEnvLong("BZR_TRACE_SPLINTER_UNDEAD_BUDGET", splinterUndeadTraceBudget))
+        {
+            if (splinterUndeadTraceBudget < 0)
+                splinterUndeadTraceBudget = 0;
+        }
+        g_SplinterUndeadTraceBudget = splinterUndeadTraceBudget;
         long chunkProxyCapacity = static_cast<long>(g_ChunkProxyCapacity);
         if (TryGetEnvLong("OPENSHIM_CHUNK_PROXY_CAP", chunkProxyCapacity) ||
             TryGetEnvLong("OPENSHIM_CHUNK_PROXY_CAPACITY", chunkProxyCapacity))
@@ -15683,6 +15853,7 @@ namespace BZROpenShim
         InstallJumpSnipingProbeIfRequested();
         InstallCareerStatsMpHookIfPossible();
         InstallShieldTowerTeamFilterHookIfPossible();
+        InstallSplinterUndeadFixIfPossible();
         InstallAiTuningHooksIfPossible();
         InstallConstructorRemoteBuildFixIfPossible();
         EnsureInputBindingPopulateHookScaffold();

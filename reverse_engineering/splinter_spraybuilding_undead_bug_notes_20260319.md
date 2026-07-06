@@ -87,3 +87,46 @@ Equivalent higher-level version:
 - The deployed object is the problem, not the thrown `SprayBomb::Hit` half.
 - A direct entry detour on `SprayBuilding::Simulate` is the cleanest first attempt.
 - Because the Redux corpus is best-effort rather than exact-match, use expected-bytes validation or a small signature around the current entry before enabling the hook by default.
+
+## Implementation (OpenShim, 2026-07-06)
+
+Implemented in `src/patches/bzr_hooks.cpp` as a vtable-slot swap (same mechanism
+as the ShieldTower team-filter fix), NOT an inline entry detour.
+
+**Address re-derivation (the advisory-PDB VA was stale on the live exe):** the
+2026-03-19 advisory VA `0x005242F0` for `SprayBuilding::Simulate` lands
+mid-instruction on the current GOG build (Jan 29 2026 exe) — it is inside
+`mov [edx+0x270], eax` at `0x005242EE`. The known-good constructor hook
+(`AI_UnitRemove` @ `0x0068FC60`, bytes `55 8B EC 51 83 3D 08 0F 93 00 00`)
+still matches this exe byte-for-byte, so the exe is the mapped build; only the
+spraybomb VA had drifted. Re-derived via RTTI:
+
+- `.?AVSprayBuilding@@` TypeDescriptor @ `0x00901E3C`
+- complete-object COL (offset==0) @ `0x008ABDDC`, referenced by vtable-4 ptr @ `0x008881E8`
+- **SprayBuilding primary vtable = `0x008881EC`** (24 slots; second sub-object COL at `0x0088824C`)
+- diff vs **Building primary vtable `0x00876630`** (RTTI: TD `0x008FF9C8`, COL `0x008A6210`): SprayBuilding overrides exactly two slots — slot 0 (deleting dtor, `0x005DA680`) and **slot 15 = SprayBuilding::Simulate = `0x005DA6E0`** (Building's is `0x0047FCB0` = `Building::Simulate`).
+- **Simulate vtable slot address = `0x00888228`** (`0x008881EC + 15*4`).
+- Entry prologue @ `0x005DA6E0`: `55 8B EC 81 EC E8 02 00 00 …` (validated at install).
+
+**Fix logic:** hook the vtable slot with a `__fastcall(this, edx, float)` thunk.
+Read the destroyed/remove flags at `[[this+0xF4]+0x14]` (this is exactly what
+stock `Building::Simulate @ 0x0047FCB0` reads: `mov edx,[this+0xF4];
+mov eax,[edx+0x14]; and eax,0x1000000` … `and edx,0x200`). If
+`flags & 0x01000200` (destroyed | marked-for-remove) is set, route the frame
+through stock `Building::Simulate` (which dispatches the base explode/remove
+virtual on the `this+0x18` sub-object and returns) instead of the spray payload
+fire loop; otherwise call the original `SprayBuilding::Simulate`. No recursion:
+`Building::Simulate` dispatches the remove/explode virtuals (second-base vtable
+slots +0x10/+0x14), never Simulate.
+
+Cross-validation bonus: the ShieldTower fix already resolves
+`kGogBuildingSimulateAddr = 0x0047FCB0`, independently matching the RTTI diff.
+
+Safety: install is gated by `ExpectedBytesMatchAt` on the prologue plus a vtable
+slot value check (must be the hook or `0x005DA6E0`), so a future build drift
+fails safe (fix disables itself, stock behavior preserved). All flag reads are
+SEH-guarded and fall back to stock on fault. Toggle off with
+`OPENSHIM_DISABLE_SPLINTER_UNDEAD_FIX=1`; trace with
+`OPENSHIM_TRACE_SPLINTER_UNDEAD=1` (`[SPLINTER]` tag in `winmm_shim.log`,
+budgeted via `OPENSHIM_TRACE_SPLINTER_UNDEAD_BUDGET`). Builds clean
+Release|Win32. Runtime in-game repro validation still pending.
