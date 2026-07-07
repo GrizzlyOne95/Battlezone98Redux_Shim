@@ -456,3 +456,69 @@ So the most feasible restoration path is now:
 4. keep native chunk simulation untouched
 
 At this point the missing piece is no longer "do chunks really exist?" They do. The remaining job is to render the already-simulating native chunk list.
+
+## 2026-07-05 — 1.5 PDB cross-reference confirms render-queue hook placement
+
+Source: `C:\Users\iestu\Documents\Unreal Projects\HoverZone\decompiled_bz_reference\_unzipped\1.5`
+(PDB-named Ghidra export of BZ 1.5; `function_index.tsv` maps names to addresses).
+
+Findings:
+
+- `ChunkEffect::Submit(CAMERA*)` (1.5 @ 004be552) is an **empty function**. Even in
+  1.5, chunks were never rendered through the effect Submit path. This retroactively
+  explains why chasing Redux effect-submit hooks (EngineFlameSubmitHook injection)
+  could never have worked for chunks.
+- Chunks rendered through the zone sorting list instead:
+  `Render_Single_Entity(_ZSORTING*, CAMERA*)` (1.5 @ 00524115) dispatches
+  `Render_Chunk_Object(SORTING_LIST_ENTITY*, CAMERA*)` (1.5 @ 004e8ede) for entities
+  with no bitmap op / skin color. Each chunk was an ordinary world sorting-list
+  entity, drawn in the same pass as all other world geometry.
+- Redux equivalent of that zone sorting list is the game-side renderable container
+  whose `_updateRenderQueue(RenderQueue*)` override is FUN_00679570 — the sole
+  exe-side caller of `Ogre::RenderQueue::addRenderable` (vtable slot 0x00892728).
+
+Conclusion: the "Legacy World Update RenderQueue VTable Hook" (0x00892728 →
+LegacyWorldUpdateRenderQueueHook, submits chunk proxy sub-entities into the live
+RenderQueue via addRenderablePriority group=entity default, priority=100) is the
+faithful Redux analog of the 1.5 chunk render path.
+
+## 2026-07-05 — Manual-kill test: game never fragments, only generic chunklets
+
+User test (GOG, pid 36728): 3 spawned svtanks + 1 avtank destroyed in normal
+combat. Render hook fired every frame and the proxy system was enabled, but the
+session produced **zero `CreateChunk` calls** — only 14 generic `chunk1`/`chunk2`
+stock chunklets (`srcGeom=0x00000000`). Nothing for the shim to render; the Ogre
+log correctly shows no payload mesh loads.
+
+Cross-reference against 1.5 PDB decompile:
+
+- `ChunkEffect::PartialFragmentObject` is called unconditionally from the
+  `Craft::Simulate` (00487c01) death branch (`obj flags & 0x200` set, vhcl flag
+  0x8000 not yet set) — every craft death partial-fragments in 1.5.
+- `ChunkEffect::FullFragmentObject` is called unconditionally from
+  `Craft::Explode` (004886f7), `Building::Explode` (0048308b, gated by
+  `useD3D & 4`), `Person::Explode`, `PowerUp::Explode`.
+- `CreateChunk` (004be555) only skips nodes with `geom == NULL`; the old
+  `useD3D & 4` graphics bit merely sets chunk flag 8, it does not gate creation.
+
+Redux ports are faithful and ungated:
+
+- `FUN_00492460` = PartialFragmentObject, `FUN_00492640` = FullFragmentObject
+  (velocity passed by pointer, otherwise 1:1 with 1.5 including the
+  vehicle-geometry three-parent protection rule).
+- Craft::Simulate analog `FUN_004ab380` calls FUN_00492460 unconditionally in
+  its death branch; the user's chunklet bursts prove that branch executed.
+
+Conclusion: on the user's kills the fragment walker either received an OBJ76
+tree with **no child geo nodes** (nothing satisfies `parent != NULL`), or was
+not reached. The misn06 scripted final kill demonstrably does produce a full
+tree (scz11rad/bga/bgb/bda chunks, callerRva 0x00092565 = inside
+PartialFragmentObject). Difference is per-object data, not settings.
+
+Instrumentation added: inline detours on 0x00492460/0x00492640
+("fragment walk hooks", GOG only, prologue-verified `55 8B EC 83 EC 30/28`).
+`LogChunkFragmentWalkTree` dumps the incoming OBJ76 tree (depth-first, 24-node
+cap, budget 160 lines) as `[CHUNKSPAWN] <tag>-walk` + `frag-node` lines, outer
+call only (recursion re-enters the patched entry and is depth-suppressed).
+Compare a misn06 walk (positive control) against a manual-kill walk to see
+which trees arrive empty and why.

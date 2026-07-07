@@ -260,6 +260,57 @@ So if the goal is:
 then the realistic path is a native shim / EXU patch that intercepts stock mode
 selection and dispatch, not an ODF-only solution.
 
+### 2026-07-07 Validation Against Full Decompiles
+
+Validation inputs:
+
+- fully decompiled 1.5 reference:
+  `reverse_engineering\workshop\global_decompile\legacy_bz1_exact_full`
+- fully decompiled Redux reference:
+  `<USER_HOME>\Documents\GIT\HoverZone\decompiled_bz_reference\_unzipped\Redux`
+- repo Redux best-effort corpus:
+  `reverse_engineering\workshop\global_decompile\bzr_gog_best_effort`
+
+The 1.5 decompile directly confirms the original model:
+
+- `Wingman::UpdateModeList` installs fixed modes `0x0D`, `0x10`, and `0x11`
+  into fixed slots 7, 8, and 9.
+- `Wingman::SetActiveMode` maps mode `0x0D` directly to
+  `GameObject::SetCommand(CMD_HUNT)`.
+- `Craft::SetActiveMode` still does not own `Hunt`; it handles follow, repair,
+  reload, rescue, and recycle style craft commands.
+
+The Redux full decompile is less symbol-rich, but it validates the same broad
+architecture:
+
+- `ActionMode::GetCommand` in the Redux best-effort corpus still resolves
+  behavior through selected objects, current control-panel mode, and stock
+  `CMD_*` values rather than a data-driven command registry.
+- `PathDisplay` / `ControlPanel` paths still operate on fixed native menu and
+  mode structures.
+- The HoverZone Redux raw decompile contains fixed numeric mode-to-command
+  dispatch examples, such as `FUN_00474b80`, where a switch case dispatches to
+  command value `0x14` (`CMD_HUNT`). That function is an Armory-process path,
+  not the Wingman menu hook target, so it is supporting evidence for the fixed
+  dispatch model rather than proof of the Wingman slot itself.
+
+Important caveat from this validation pass:
+
+- The Redux Ghidra/PDB labels `Wingman_UpdateModeList = 0x0054CEE0` and
+  `Wingman_SetActiveMode = 0x0054CF80` exist in the local project, but they are
+  labels rather than usable function entries for the current analyzed Steam
+  image. Static and runtime probes at those exact VAs did not decode as code.
+  Treat those addresses as stale or mismatched labels, not patch targets.
+- This strengthens the existing EXU design choice to signature-scan the live
+  executable for the actual Hunt activation block instead of hardcoding a PDB
+  address.
+
+Net result: the prior conclusion holds. The evidence still points to fixed
+native command/mode tables plus class-specific activation logic. Replacing an
+existing stock slot, especially `Hunt`, is the practical patch path. Arbitrary
+new button insertion still requires a deeper control-panel/path-display UI
+patch.
+
 ### Implementation Status
 
 As of 2026-03-16, the first EXU native pass now exists:
