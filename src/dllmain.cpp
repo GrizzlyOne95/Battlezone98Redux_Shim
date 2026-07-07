@@ -83,11 +83,6 @@ namespace BZROpenShim
         FreeRealWinmm();
         BZROpenShim::ShutdownShimLogger();
     }
-        BZROpenShim::FlushChunkFragmentEventsForShutdown();
-        BZROpenShim::ShutdownNetworkOptimizer();
-        FreeRealWinmm();
-        BZROpenShim::ShutdownShimLogger();
-    }
 }
 
 BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)

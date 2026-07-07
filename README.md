@@ -433,12 +433,26 @@ Configure it through `net.ini` next to the game executable:
 
 ```ini
 [OpenShimSocket]
+Dscp=46
 EnablePacketReorder=1
-PacketReorderWindowMs=45
+PacketReorderWindowMs=100
+PacketReorderMinWindowMs=5
+EnableAdaptivePacketReorder=1
+EnablePacketReorderWake=1
 PacketReorderDepth=8
 PacketReorderPeers=32
 PacketReorderDrainCap=96
 LogPacketReorder=1
+SendDup=0
+DupDelayMs=25
+DupMaxPps=40
+GovernorStart=0
+GovernorScan=0
+AutoKickRelax=1
+AutoKickStart=60000
+AutoKickPing=2000
+AutoKickLoss=200
+AutoKickTime=60000
 EnableBufferLog=0
 BufferLogPayloadBytes=32
 BufferLogRingRecords=65536
@@ -449,10 +463,16 @@ BufferLogPeer=
 Notes:
 
 - `EnablePacketReorder=1` enables the reorder buffer for synchronous UDP recv.
-- `PacketReorderWindowMs` is clamped to `5`-`200` ms.
+- `PacketReorderWindowMs` is the adaptive ceiling and is clamped to `5`-`200` ms.
+- `PacketReorderMinWindowMs` is the adaptive floor; clean links start at `5` ms.
+- `EnablePacketReorderWake=1` starts a wake helper so held packets release even after the hook drains the socket.
 - `PacketReorderDepth` is clamped to `1`-`8`.
 - `PacketReorderPeers` is clamped to `1`-`32`.
 - `PacketReorderDrainCap` is clamped to `1`-`128`.
+- `Dscp=46` marks IPv4 UDP packets as EF priority (`0` disables).
+- `SendDup=1` enables deprecated duplicate-send testing with `DupDelayMs` and `DupMaxPps`; leave it off for normal play.
+- `GovernorStart` maps to `BZ_GOV_START`; `0` disables the data-only 4000 B/s cold-start lift.
+- `AutoKickRelax=1` defaults the host-side data patch to start `60000`, ping `2000`, loss `200`, and time `60000`.
 - `LogPacketReorder=1` enables detailed reorder diagnostics in `openshim.log`.
 - `EnableBufferLog=1` writes a binary recv-path capture to `bz_buffer_log.bin`
   plus a small metadata sidecar file.
@@ -462,10 +482,21 @@ Notes:
 - `BufferLogPeer` limits binary capture to one IPv4 peer, optionally with a
   port, for example `203.0.113.42:17770`.
 - Environment variables `BZ_REORDER`, `BZ_REORDER_WINDOW_MS`,
+  `BZ_REORDER_MIN_MS`, `BZ_REORDER_ADAPT`, `BZ_REORDER_WAKE`,
   `BZ_REORDER_DEPTH`, `BZ_REORDER_PEERS`, `BZ_REORDER_DRAIN`,
+  `BZ_DSCP`, `BZ_SEND_DUP`, `BZ_DUP_DELAY_MS`, `BZ_DUP_MAX_PPS`,
+  `BZ_GOV_START`, `BZ_GOV_SCAN`, `BZ_AUTOKICK_RELAX`,
+  `BZ_AUTOKICK_START`, `BZ_AUTOKICK_PING`, `BZ_AUTOKICK_LOSS`,
+  `BZ_AUTOKICK_TIME`,
   `OPENSHIM_REORDER`, `OPENSHIM_REORDER_WINDOW_MS`,
-  `OPENSHIM_REORDER_DEPTH`, `OPENSHIM_REORDER_PEERS`, and
-  `OPENSHIM_REORDER_DRAIN` override the `net.ini` values for testing.
+  `OPENSHIM_REORDER_MIN_MS`, `OPENSHIM_REORDER_ADAPT`,
+  `OPENSHIM_REORDER_WAKE`, `OPENSHIM_REORDER_DEPTH`,
+  `OPENSHIM_REORDER_PEERS`, `OPENSHIM_REORDER_DRAIN`,
+  `OPENSHIM_DSCP`, `OPENSHIM_SEND_DUP`, `OPENSHIM_DUP_DELAY_MS`,
+  `OPENSHIM_DUP_MAX_PPS`, `OPENSHIM_GOV_START`, `OPENSHIM_GOV_SCAN`,
+  `OPENSHIM_AUTOKICK_RELAX`, `OPENSHIM_AUTOKICK_START`,
+  `OPENSHIM_AUTOKICK_PING`, `OPENSHIM_AUTOKICK_LOSS`, and
+  `OPENSHIM_AUTOKICK_TIME` override the `net.ini` values for testing.
 - Environment variables `BZ_BUFFER_LOG`, `BZ_BUFFER_LOG_BYTES`,
   `BZ_BUFFER_LOG_RING`, `BZ_BUFFER_LOG_SOCKET`, `BZ_BUFFER_LOG_PEER`,
   `OPENSHIM_BUFFER_LOG`, `OPENSHIM_BUFFER_LOG_BYTES`,
@@ -479,6 +510,9 @@ Notes:
   `WSASendTo` traffic in `openshim.log` as `bzrnet_ws`, `bzrnet_probe`,
   `bzrnet_relay`, `p2p_lan`, or `p2p_candidate` so relay fallbacks and direct
   peer traffic are easier to distinguish.
+- The game uses overlapped/IOCP receives on native Windows; the reorder path
+  still bypasses async `WSARecvFrom` calls to avoid the standalone patch's old
+  launch-freeze failure mode.
 
 ## Test Net.ini
 
@@ -489,17 +523,18 @@ packet loss.
 
 Key changes in the shipped profile:
 
-- `MinBandwidth=8000` instead of the common `4000` workshop setting
-- `AutoKickStart=180000`
-- `AutoKickPing=2000`
-- `AutoKickLoss=100`
-- `AutoKickTime=180000`
+- `MaxPing=450`
+- `MinBandwidth=16000` instead of the common `4000` workshop setting
+- `MaxBandwidth=320000`
+- `AutoKickStart=60000`
+- `AutoKickPing=750`
+- `AutoKickLoss=75`
+- `AutoKickTime=45000`
 - `MaxPingsLost=60`
 
 After launching multiplayer once, check `BZLogger.txt` for a line like
-`Net: Bandwidth usage now set to 8000, Interval ... ms`. The current target is
-`33 ms` or lower. If the interval is still above that on your build, the next
-safe test step is usually raising `MinBandwidth` to `16000`.
+`Net: Bandwidth usage now set to 16000, Interval ... ms`. The current target is
+`33 ms` or lower.
 
 ## Buffer Capture Workflow
 

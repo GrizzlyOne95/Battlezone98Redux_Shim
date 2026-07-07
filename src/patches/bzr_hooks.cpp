@@ -137,12 +137,14 @@ namespace BZROpenShim
     using FnGameObjectGetTeam = int(__thiscall*)(void* thisPtr);
     using FnGameObjectRelation = bool(__thiscall*)(void* thisPtr, void* other);
     using FnChunkEffectSimulate = void(__thiscall*)(void* self, float dt);
+    using FnLegacyWorldUpdateRenderQueue = void(__thiscall*)(void* self, void* renderQueue);
     using FnGetPlayerHandle = int(__cdecl*)();
     using FnGameObjectGetObjByHandle = void* (__cdecl*)(int handle);
     using FnPersonSimulate = void(__thiscall*)(void* thisPtr, float dt);
     using FnShieldTowerSimulate = void(__thiscall*)(void* thisPtr, float dt);
     using FnMagnetMineSimulate = void(__thiscall*)(void* thisPtr, float dt);
     using FnProximityMineSimulate = void(__thiscall*)(void* thisPtr, float dt);
+    using FnSprayBuildingSimulate = void(__thiscall*)(void* thisPtr, float dt);
     using FnShieldTowerPowerUpdate = void(__fastcall*)(void* thisPtr);
     using FnMatrixInverse = void(__cdecl*)(void* outMatrix, const void* inMatrix);
     using FnVectorTransform = void(__cdecl*)(float* dst, const float* src, int count, const void* matrix);
@@ -178,6 +180,10 @@ namespace BZROpenShim
                                                          uint8_t preserveFlag);
     using FnChunkEffectCreateChunklet = void(__thiscall*)(void* thisPtr,
                                                           const void* positionVec,
+                                                          const float* velocity,
+                                                          uint8_t preserveFlag);
+    using FnChunkEffectFragmentObject = void(__thiscall*)(void* thisPtr,
+                                                          void* objectPtr,
                                                           const float* velocity,
                                                           uint8_t preserveFlag);
 
@@ -245,6 +251,7 @@ namespace BZROpenShim
     static FnExuGetTeamEngineFlameColor g_ExuFn_GetTeamEngineFlameColor = nullptr;
     static HMODULE g_ExuTeamEngineFlameColorModule = nullptr;
     static FnChunkEffectSimulate g_BzrFn_ChunkEffectSimulate = nullptr;
+    static FnLegacyWorldUpdateRenderQueue g_BzrFn_LegacyWorldUpdateRenderQueue = nullptr;
     static FnGetPlayerHandle g_BzrFn_GetPlayerHandle = nullptr;
     static FnGameObjectGetObjByHandle g_BzrFn_GameObjectGetObjByHandle = nullptr;
     static FnPersonSimulate g_BzrFn_PersonSimulate = nullptr;
@@ -253,6 +260,7 @@ namespace BZROpenShim
     static FnMagnetMineSimulate g_BzrFn_MagnetMineSimulateOriginal = nullptr;
     static FnProximityMineSimulate g_BzrFn_ProximityMineSimulateOriginal = nullptr;
     static FnProximityMineSimulate g_BzrFn_MineSimulate = nullptr;
+    static FnSprayBuildingSimulate g_BzrFn_SprayBuildingSimulateOriginal = nullptr;
     static FnShieldTowerPowerUpdate g_BzrFn_ShieldTowerPowerUpdate = nullptr;
     static FnGameObjectRelation g_BzrFn_GameObjectFriendP = nullptr;
     static FnGameObjectRelation g_BzrFn_GameObjectEnemyP = nullptr;
@@ -278,6 +286,8 @@ namespace BZROpenShim
     static FnAIBuildUnassignedCCAdd g_BzrFn_AIBuildUnassignedCCAdd = nullptr;
     static FnChunkEffectCreateChunk g_BzrFn_ChunkEffectCreateChunk = nullptr;
     static FnChunkEffectCreateChunklet g_BzrFn_ChunkEffectCreateChunklet = nullptr;
+    static FnChunkEffectFragmentObject g_BzrFn_ChunkEffectPartialFragment = nullptr;
+    static FnChunkEffectFragmentObject g_BzrFn_ChunkEffectFullFragment = nullptr;
     static BuildItem* g_BzrBuildMenuRoot = nullptr;
     static bool g_IsSteamExe = false;
 
@@ -293,6 +303,16 @@ namespace BZROpenShim
                                                   const void* positionVec,
                                                   const float* velocity,
                                                   uint8_t preserveFlag);
+    void __fastcall ChunkEffectPartialFragmentHook(void* thisPtr,
+                                                   void* /*edx*/,
+                                                   void* objectPtr,
+                                                   const float* velocity,
+                                                   uint8_t preserveFlag);
+    void __fastcall ChunkEffectFullFragmentHook(void* thisPtr,
+                                                void* /*edx*/,
+                                                void* objectPtr,
+                                                const float* velocity,
+                                                uint8_t preserveFlag);
 
     namespace
     {
@@ -413,6 +433,22 @@ namespace BZROpenShim
         constexpr uintptr_t kShieldTowerSimulateVtableSlotAddr = 0x00887728;
         constexpr uintptr_t kMagnetMineSimulateVtableSlotAddr = 0x0087D574;
         constexpr uintptr_t kProximityMineSimulateVtableSlotAddr = 0x00886234;
+        // Splinter (spraybomb) undead bug (#46). SprayBuilding::Simulate keeps
+        // spinning its payload fire loop after the deployed splinter is damaged
+        // below zero because it overrides Building::Simulate without preserving
+        // the base destroyed/remove gate. GOG addresses re-derived via RTTI on
+        // the live 2.2.301 exe (advisory-PDB VA 0x005242F0 had drifted): the
+        // SprayBuilding vtable is 0x008881EC and Simulate is slot 15.
+        constexpr uintptr_t kGogSprayBuildingSimulateAddr = 0x005DA6E0;
+        constexpr uintptr_t kSprayBuildingSimulateVtableSlotAddr = 0x00888228;
+        // Building::Simulate reads flags at [[this+0xF4]+0x14] and early-outs on
+        // destroyed (0x1000000) / marked-for-remove (0x200) by dispatching the
+        // stock explode/remove virtuals.
+        constexpr size_t kBuildingStateBlockOffset = 0xF4;
+        constexpr size_t kBuildingStateFlagsOffset = 0x14;
+        constexpr uint32_t kBuildingDestroyedOrRemoveMask = 0x01000200u;
+        constexpr bool kSplinterUndeadFixEnabledDefault = true;
+        constexpr long kSplinterUndeadTraceBudgetDefault = 32;
         constexpr float kFlagButtonSize = 48.0f;
         constexpr uint32_t kLegacyFlagDataSlot = 0x0Du;
         constexpr int kLegacyFlagWidth = 64;
@@ -473,6 +509,13 @@ namespace BZROpenShim
         constexpr size_t kChunkEffectCreateChunkDetourLen = 9;
         constexpr size_t kChunkEffectCreateChunkletDetourLen = 9;
         constexpr size_t kChunkEffectCreateExpectedLen = 16;
+        constexpr uintptr_t kGogChunkEffectPartialFragmentAddr = 0x00492460;
+        constexpr uintptr_t kGogChunkEffectFullFragmentAddr = 0x00492640;
+        // Ogre::Vector3 global holding the per-map render origin (terrain
+        // center); every engine sim->render conversion subtracts it and
+        // mirrors Z (render = simX-o.x, simY-o.y, -simZ-o.z).
+        constexpr uintptr_t kGogWorldRenderOriginAddr = 0x025F8E4C;
+        constexpr size_t kChunkEffectFragmentDetourLen = 6;
         constexpr ULONGLONG kSteamChunkCreateHookSettleDelayMs = 15000;
         constexpr uintptr_t kGogAIUnitRemoveEntryAddr = 0x0068FC60;
         constexpr size_t kAIUnitRemoveDetourLen = 11;
@@ -558,6 +601,7 @@ namespace BZROpenShim
         static bool TryGetAiTuningForObject(void* objectPtr, AiTuningConfig& outConfig);
         static bool TryGetObjectOdfToken(void* objectPtr, char (&outToken)[kProducerBuildMenuTokenLen + 1]);
         struct TeamFilterConfig;
+        struct TeamFilterCache;
         static bool TryGetTeamFilterForObject(void* objectPtr, TeamFilterConfig& outConfig, TeamFilterCache& cache, const char* logTag);
         static void RunShieldTowerFilteredSimulate(void* shieldTowerPtr, float dt);
         static void RunMagnetMineFilteredSimulate(void* magnetMinePtr, float dt);
@@ -575,6 +619,10 @@ namespace BZROpenShim
             uint32_t classId,
             char* outMeshName,
             size_t outMeshNameCapacity);
+        static void AppendAllChunkMeshBasesForGeom(
+            const char* geomName,
+            uint32_t classId,
+            std::vector<std::string>& outMeshCandidates);
         static std::string NormalizeChunkPayloadComponentName(const char* value);
         static bool TryGetChunkProxyPosition(const uint8_t* objectBytes, float& outX, float& outY, float& outZ);
         static bool TryResolveChunkPayloadMeshResource(
@@ -1016,6 +1064,13 @@ namespace BZROpenShim
         static bool g_EnableChunkRenderFallback = false;
         static bool g_EnableChunkProxyDebug = false;
         static bool g_EnableChunkMeshProxy = false;
+        // Building geo nodes carry no owner GameObject link (+0x8C is null),
+        // so chunks born from a building can't identify their craft through
+        // the bridge. The fragment ROOT still can. FragmentObject calls
+        // CreateChunk synchronously on the same thread, so the root's
+        // resolved mesh name is handed down through this scoped global while
+        // the walk is on the stack.
+        static char g_ActiveFragmentSourceMeshName[48] = {};
         static bool g_TraceChunkRender = false;
         static bool g_TraceChunkRenderVerbose = false;
         static bool g_TraceChunkEffectRuntime = false;
@@ -1024,7 +1079,10 @@ namespace BZROpenShim
         static volatile long g_ChunkRenderLogBudget = 12;
         static volatile long g_SatelliteVisibilityLogBudget = 8;
         static uint32_t g_ChunkTraceEntryLimit = 32;
-        static uint32_t g_ChunkProxyCapacity = 96;
+        // 96 slots exhaust in multi-craft battles (each death emits ~10 geo
+        // pieces plus impact chunklets); once full, new chunks are silently
+        // dropped until a slot expires.
+        static uint32_t g_ChunkProxyCapacity = 256;
         static float g_ChunkProxyDebugSize = 2.5f;
         static uint32_t g_SatelliteVisibilityObjectLimit = 96;
         static DWORD g_SatelliteVisibilityLastTick = 0;
@@ -1049,6 +1107,7 @@ namespace BZROpenShim
         {
             char meshName[48] = {};
             char vdfCandidates[128] = {};
+            char geomName[64] = {};
             uint32_t classId = 0;
         };
 
@@ -1069,6 +1128,11 @@ namespace BZROpenShim
         };
 
         static std::unordered_map<std::string, ChunkVdfAssetInfo> g_ChunkVdfAssetCache = {};
+        // Distributable replacement for shipping the stock VDF/SDF files:
+        // a text manifest holding just the geo-piece names/hierarchy, seeded
+        // into g_ChunkVdfAssetCache before any Edit\stock fallback runs.
+        static bool g_ChunkGeoManifestAttempted = false;
+        static constexpr const char* kChunkGeoManifestFileName = "chunk_geo_manifest.txt";
         static std::unordered_map<uintptr_t, ChunkObjectIdentityCacheEntry> g_ChunkObjectIdentityCache = {};
         static std::unordered_map<uintptr_t, ChunkResolvedBindingEntry> g_ChunkResolvedBindingCache = {};
         static std::unordered_map<std::string, bool> g_ChunkPayloadMeshExistsCache = {};
@@ -1126,6 +1190,11 @@ namespace BZROpenShim
         static InlineDetour32 g_ChunkEffectCreateChunkletDetour = {};
         static bool g_ChunkEffectCreateHooksInstalled = false;
         static bool g_ChunkEffectCreateHooksLogged = false;
+        static InlineDetour32 g_ChunkEffectPartialFragmentDetour = {};
+        static InlineDetour32 g_ChunkEffectFullFragmentDetour = {};
+        static bool g_ChunkEffectFragmentHooksInstalled = false;
+        static bool g_ChunkEffectFragmentHooksLogged = false;
+        static int g_ChunkFragmentHookDepth = 0;
         static bool g_AllowUnsafeSteamChunkCreateHooks = false;
         static bool g_ChunkEffectCreateHooksWaitLogged = false;
         static bool g_ChunkEffectCreateHooksMismatchLogged = false;
@@ -1134,6 +1203,9 @@ namespace BZROpenShim
         static bool g_ConstructorRemoteBuildFixInstalled = false;
         static bool g_MagnetMineSimulateHookInstalled = false;
         static bool g_ProximityMineSimulateHookInstalled = false;
+        static bool g_SprayBuildingSimulateHookInstalled = false;
+        static bool g_SplinterUndeadFixEnabled = kSplinterUndeadFixEnabledDefault;
+        static volatile long g_SplinterUndeadTraceBudget = kSplinterUndeadTraceBudgetDefault;
         static bool g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
         static volatile long g_ConstructorRemoteBuildTraceBudget = kConstructorRemoteBuildTraceBudgetDefault;
         static std::unordered_map<uintptr_t, ULONGLONG> g_RetargetPeriodNextForceMsByProcess = {};
@@ -1329,6 +1401,7 @@ namespace BZROpenShim
         static constexpr const char* kChunkProxyMaterialGroup = "General";
         static constexpr const char* kChunkPayloadResourceRootName = "OpenShimChunkPayloads";
         static constexpr const char* kChunkPayloadModRelativeDirName = "chunkMeshes";
+        static constexpr const char* kChunkPayloadModRelativeDirNameAlt = "Chunks";
         static constexpr const char* kChunkPayloadResourceLocationType = "FileSystem";
         static FnPlayGlobalSound g_BzrFn_PlayGlobalSound =
             reinterpret_cast<FnPlayGlobalSound>(0x0043AA30);
@@ -1434,6 +1507,25 @@ namespace BZROpenShim
         using FnOgreSetNodePosition = void(__thiscall*)(void*, float, float, float);
         using FnOgreSetNodeOrientation = void(__thiscall*)(void*, float, float, float, float);
         using FnOgreSetVisible = void(__thiscall*)(void*, bool);
+        using FnOgreGetRenderQueue = void*(__thiscall*)(void*);
+        using FnOgreGetCurrentViewport = void*(__thiscall*)(void*);
+        using FnOgreViewportGetCamera = void*(__thiscall*)(void*);
+        using FnOgreMovableObjectNotifyCurrentCamera = void(__thiscall*)(void*, void*);
+        using FnOgreEntityUpdateRenderQueue = void(__thiscall*)(void*, void*);
+        using FnOgreRenderQueueAddRenderablePriority = void(__thiscall*)(void*, void*, uint8_t, uint16_t);
+        using FnOgreIsVisible = bool(__thiscall*)(void*);
+        using FnOgreGetRenderQueueGroup = uint8_t(__thiscall*)(void*);
+        using FnOgreGetNumSubEntities = uint32_t(__thiscall*)(void*);
+        using FnOgreGetSubEntity = void*(__thiscall*)(void*, uint32_t);
+        using FnOgreProcessQueuedUpdates = void(__cdecl*)();
+        using FnOgreNumAttachedObjects = uint16_t(__thiscall*)(void*);
+        using FnOgreGetAttachedObjectByIndex = void*(__thiscall*)(void*, uint16_t);
+
+        // Render-pass procs captured at hook time when available; the mangled
+        // export fallback in TrySubmitChunkMeshProxyToCurrentRenderQueue covers
+        // the case where these were never observed.
+        static FnOgreMovableObjectNotifyCurrentCamera g_OgreFn_MovableObjectNotifyCurrentCamera = nullptr;
+        static FnOgreEntityUpdateRenderQueue g_OgreFn_EntityUpdateRenderQueue = nullptr;
 
         template<typename T>
         static T ResolveOgreProc(const char* name)
@@ -1448,6 +1540,23 @@ namespace BZROpenShim
                 return nullptr;
 
             return reinterpret_cast<T>(GetProcAddress(ogreMain, name));
+        }
+
+        // Some render-queue helpers are inlined or unexported from the shipped
+        // OgreMain.dll; resolve those by raw image offset from the module base.
+        template<typename T>
+        static T ResolveOgreProcByOffset(uintptr_t offset)
+        {
+            if (!offset)
+                return nullptr;
+
+            static HMODULE ogreMain = nullptr;
+            if (!ogreMain)
+                ogreMain = GetModuleHandleA("OgreMain.dll");
+            if (!ogreMain)
+                return nullptr;
+
+            return reinterpret_cast<T>(reinterpret_cast<uint8_t*>(ogreMain) + offset);
         }
 
         static bool EnvFlagEnabled(const char* name)
@@ -1646,6 +1755,47 @@ namespace BZROpenShim
 
             outText[outTextCapacity - 1] = '\0';
             return false;
+        }
+
+        // Legacy geo names live in a fixed 8-byte field that is NOT
+        // NUL-terminated when the name is exactly 8 chars (e.g. "scz11bda"
+        // is immediately followed by the geom back-pointer); shorter names
+        // are NUL-padded ("chunk2\0\0"). Read at most 8 chars and accept
+        // hitting the field boundary without a terminator.
+        static bool TryReadLegacyGeoNameField(const char* address, char* outText, size_t outTextCapacity)
+        {
+            if (!address || !outText || outTextCapacity == 0)
+                return false;
+
+            outText[0] = '\0';
+
+            __try
+            {
+                const size_t kFieldLen = 8;
+                size_t index = 0;
+                for (; index < kFieldLen && index + 1 < outTextCapacity; ++index)
+                {
+                    const unsigned char ch = static_cast<unsigned char>(address[index]);
+                    if (ch == 0)
+                        break;
+
+                    if (ch < 0x20 || ch > 0x7E)
+                    {
+                        outText[0] = '\0';
+                        return false;
+                    }
+
+                    outText[index] = static_cast<char>(ch);
+                }
+
+                outText[index] = '\0';
+                return index > 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outText[0] = '\0';
+                return false;
+            }
         }
 
         static bool TryReadInlineAsciiBuffer(
@@ -2374,17 +2524,22 @@ namespace BZROpenShim
             if (mbi.State != MEM_COMMIT || !IsReadableDataProtect(mbi.Protect))
                 return false;
 
-            // The rect table is runtime-owned data; avoid crawling image/code
-            // mappings when a hide/show request arrives on the UI thread.
-            switch (mbi.Type)
-            {
-            case MEM_PRIVATE:
-            case MEM_MAPPED:
-            case MEM_IMAGE:
-                return true;
-            default:
+            // The stock scrap/pilot rect records are runtime heap data
+            // (MEM_PRIVATE). The previous code also returned true for MEM_MAPPED
+            // and MEM_IMAGE, which forced the discovery scan to crawl every
+            // mapped asset file and loaded module at 4-byte stride on the UI
+            // thread -> multi-second freeze on the first legacy-layout toggle.
+            // Restrict to private commits (matching the comment's original
+            // intent) and skip pathologically large arenas that cannot hold the
+            // small HUD rect table but would dominate the scan cost.
+            if (mbi.Type != MEM_PRIVATE)
                 return false;
-            }
+
+            constexpr SIZE_T kMaxHudSpriteScanRegionBytes = 128ull * 1024ull * 1024ull;
+            if (mbi.RegionSize > kMaxHudSpriteScanRegionBytes)
+                return false;
+
+            return true;
         }
 
         static bool DiscoverHudSpriteRectTableBase()
@@ -2647,7 +2802,7 @@ namespace BZROpenShim
 
                 const auto* geomBytes = reinterpret_cast<const uint8_t*>(outGeomRef);
                 const char* const geomNamePtr = *reinterpret_cast<const char* const*>(geomBytes + 0x0);
-                if (!TryReadAsciiString(geomNamePtr, outGeomName, outGeomNameCapacity) ||
+                if (!TryReadLegacyGeoNameField(geomNamePtr, outGeomName, outGeomNameCapacity) ||
                     !outGeomName[0])
                 {
                     TryProbeChunkGeomName(geomBytes, outGeomName, outGeomNameCapacity);
@@ -2759,13 +2914,44 @@ namespace BZROpenShim
             return (it != g_ChunkObjectIdentityCache.end()) ? &it->second : nullptr;
         }
 
-        static const ChunkResolvedBindingEntry* FindChunkResolvedBindingEntry(const uint8_t* objectBytes)
+        // Caches keyed on raw OBJ76 pointers go stale when the engine's object
+        // pool recycles an address for a new chunk: without validation a fresh
+        // chunklet (or another craft's chunk) inherits the previous owner's
+        // craft identity. A geo-name mismatch is the recycle signal.
+        static bool ChunkCachedGeomNameMatchesLive(const char* cachedGeomName, const char* liveGeomName)
+        {
+            if (!cachedGeomName || !cachedGeomName[0] || !liveGeomName || !liveGeomName[0])
+                return true;
+
+            return _stricmp(cachedGeomName, liveGeomName) == 0;
+        }
+
+        static void EraseChunkResolvedBinding(const uint8_t* objectBytes)
+        {
+            if (!objectBytes)
+                return;
+
+            g_ChunkResolvedBindingCache.erase(reinterpret_cast<uintptr_t>(objectBytes));
+        }
+
+        static const ChunkResolvedBindingEntry* FindChunkResolvedBindingEntryForGeom(
+            const uint8_t* objectBytes,
+            const char* liveGeomName)
         {
             if (!objectBytes)
                 return nullptr;
 
             const auto it = g_ChunkResolvedBindingCache.find(reinterpret_cast<uintptr_t>(objectBytes));
-            return (it != g_ChunkResolvedBindingCache.end()) ? &it->second : nullptr;
+            if (it == g_ChunkResolvedBindingCache.end())
+                return nullptr;
+
+            if (!ChunkCachedGeomNameMatchesLive(it->second.sourceGeomName, liveGeomName))
+            {
+                g_ChunkResolvedBindingCache.erase(it);
+                return nullptr;
+            }
+
+            return &it->second;
         }
 
         static void StoreChunkResolvedBinding(
@@ -2872,7 +3058,8 @@ namespace BZROpenShim
 
         static void PopulateChunkObjectLinkProbeFromIdentityCache(ChunkObjectLinkProbe& probe)
         {
-            const ChunkResolvedBindingEntry* binding = FindChunkResolvedBindingEntry(probe.objectBytes);
+            const ChunkResolvedBindingEntry* binding =
+                FindChunkResolvedBindingEntryForGeom(probe.objectBytes, probe.geomName);
             if (binding)
             {
                 if (binding->meshName[0])
@@ -2883,6 +3070,8 @@ namespace BZROpenShim
 
             const ChunkObjectIdentityCacheEntry* cached = FindChunkObjectIdentityCacheEntry(probe.objectBytes);
             if (!cached)
+                return;
+            if (!ChunkCachedGeomNameMatchesLive(cached->geomName, probe.geomName))
                 return;
 
             if (!probe.cachedMeshName[0] && cached->meshName[0])
@@ -2929,6 +3118,8 @@ namespace BZROpenShim
                 strncpy_s(outProbe.ownerOgreFilename, bridgeSnapshot.ownerOgreFilename, _TRUNCATE);
             if (bridgeSnapshot.ownerResolvedMeshName[0])
                 strncpy_s(outProbe.ownerResolvedMeshName, bridgeSnapshot.ownerResolvedMeshName, _TRUNCATE);
+            if (!outProbe.ownerResolvedMeshName[0] && g_ActiveFragmentSourceMeshName[0])
+                strncpy_s(outProbe.ownerResolvedMeshName, g_ActiveFragmentSourceMeshName, _TRUNCATE);
             if (!outProbe.ownerResolvedMeshName[0])
             {
                 ResolveChunkCreateMeshContext(
@@ -3983,7 +4174,7 @@ namespace BZROpenShim
 
                 for (const std::filesystem::path& resourceRoot : g_ChunkPayloadResourceDirectories)
                 {
-                    addResourceLocation(resourceManager, resourceRoot.string(), locationType, groupName, false, true);
+                    addResourceLocation(resourceManager, resourceRoot.string(), locationType, groupName, true, true);
                     if (!g_ChunkPayloadResourceLocationsLogged)
                     {
                         LogChunkDiagnostic("chunkmesh",
@@ -4064,13 +4255,15 @@ namespace BZROpenShim
             if (slot.sceneNode && slot.entity)
                 return true;
 
+            // Back off only after a failed attempt (Ogre not ready yet). Arming
+            // the throttle on success too would let just one fragment per second
+            // acquire an entity, while chunk entries expire within 400ms.
             const DWORD now = GetTickCount();
             if (g_ChunkMeshProxyLastRetryTick != 0 &&
                 static_cast<DWORD>(now - g_ChunkMeshProxyLastRetryTick) < kChunkProxyRetryDelayMs)
             {
                 return false;
             }
-            g_ChunkMeshProxyLastRetryTick = now;
 
             static FnOgreGetRootSceneNode getRootSceneNode =
                 ResolveOgreProc<FnOgreGetRootSceneNode>("?getRootSceneNode@SceneManager@Ogre@@UAEPAVSceneNode@2@XZ");
@@ -4090,6 +4283,7 @@ namespace BZROpenShim
                     LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Missing Ogre entity symbols; mesh proxy disabled for now\n");
                     g_ChunkMeshProxyFailureLogged = true;
                 }
+                g_ChunkMeshProxyLastRetryTick = now;
                 return false;
             }
 
@@ -4101,11 +4295,15 @@ namespace BZROpenShim
                     LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Scene manager unavailable; waiting to initialize chunk mesh proxy\n");
                     g_ChunkMeshProxyWaitLogged = true;
                 }
+                g_ChunkMeshProxyLastRetryTick = now;
                 return false;
             }
 
             if (!EnsureChunkPayloadResourceLocations())
+            {
+                g_ChunkMeshProxyLastRetryTick = now;
                 return false;
+            }
 
             void* rootNode = TryGetChunkMeshProxyRootNode(sceneManager, getRootSceneNode);
             if (!rootNode)
@@ -4116,6 +4314,7 @@ namespace BZROpenShim
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneManager)));
                     g_ChunkMeshProxyFailureLogged = true;
                 }
+                g_ChunkMeshProxyLastRetryTick = now;
                 return false;
             }
 
@@ -4141,11 +4340,14 @@ namespace BZROpenShim
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entity)));
                     g_ChunkMeshProxyFailureLogged = true;
                 }
+                g_ChunkMeshProxyLastRetryTick = now;
                 return false;
             }
 
             slot.sceneNode = sceneNode;
             slot.entity = entity;
+            slot.sceneManager = sceneManager;
+            g_ChunkMeshProxyLastRetryTick = 0;
             g_ChunkMeshProxyFailureLogged = false;
             g_ChunkMeshProxyWaitLogged = false;
             if (!g_ChunkMeshProxyInitLogged)
@@ -4305,7 +4507,6 @@ namespace BZROpenShim
             slot.meshAssigned = false;
         }
 
-        #if 0
         static void LogChunkManualSubmitSkip(
             const ChunkProxySlot& slot,
             const wchar_t* reason,
@@ -4316,7 +4517,7 @@ namespace BZROpenShim
         {
             static volatile long s_ManualSubmitSkipBudget = 24;
             const long remaining = InterlockedDecrement(&s_ManualSubmitSkipBudget);
-            if (remaining < 0 || !AcquireChunkLogSlot())
+            if (remaining < 0)
                 return;
 
             LogChunkDiagnostic(
@@ -4449,6 +4650,27 @@ namespace BZROpenShim
             }
         }
 
+        using FnOgreCameraGetDerivedPosition = const OgreVector3&(__thiscall*)(void*);
+
+        static bool TryGetChunkProxyCameraPositionSafe(
+            void* camera,
+            FnOgreCameraGetDerivedPosition getCameraDerivedPosition,
+            OgreVector3& outPos)
+        {
+            if (!camera || !getCameraDerivedPosition)
+                return false;
+
+            __try
+            {
+                outPos = getCameraDerivedPosition(camera);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         static bool TrySubmitChunkMeshProxyToCurrentRenderQueue(
             ChunkProxySlot& slot,
             void* currentCamera)
@@ -4570,9 +4792,27 @@ namespace BZROpenShim
             if (isVisible)
                 visibleNow = !!isVisible(slot.entity);
 
-            if (AcquireChunkLogSlot() &&
-                (slot.cameraNotifyCount <= 4 || slot.entityUpdateQueueCount <= 4 || slot.renderQueueAddCount <= 4))
+            // Camera world position tells us whether the render camera lives in
+            // the same coordinate space as the sim positions we mirror onto the
+            // proxy nodes; a camera near the origin while chunks sit at ~1e5
+            // would mean a render-space offset we are not applying.
+            static FnOgreCameraGetDerivedPosition getCameraDerivedPosition =
+                ResolveOgreProc<FnOgreCameraGetDerivedPosition>("?getDerivedPosition@Camera@Ogre@@QBEABVVector3@2@XZ");
+            OgreVector3 cameraPos = { 0.0f, 0.0f, 0.0f };
+            const bool haveCameraPos = TryGetChunkProxyCameraPositionSafe(
+                resolvedCamera, getCameraDerivedPosition, cameraPos);
+
+            static volatile long s_FirstManualSubmitLogBudget = 12;
+            if ((slot.cameraNotifyCount <= 4 || slot.entityUpdateQueueCount <= 4 || slot.renderQueueAddCount <= 4) &&
+                InterlockedDecrement(&s_FirstManualSubmitLogBudget) >= 0)
             {
+                LogChunkDiagnostic(
+                    "chunkmesh",
+                    L"[CHUNKMESH] manual-submit-campos have=%u pos=(%.2f, %.2f, %.2f)\n",
+                    haveCameraPos ? 1u : 0u,
+                    static_cast<double>(cameraPos.x),
+                    static_cast<double>(cameraPos.y),
+                    static_cast<double>(cameraPos.z));
                 LogChunkDiagnostic(
                     "chunkmesh",
                     L"[CHUNKMESH] manual-submit obj=0x%08X entity=0x%08X mesh=%hs sceneMgr=0x%08X viewport=0x%08X queue=0x%08X camera=0x%08X source=%hs visibleNow=%u notifyCount=%u updateCount=%u addCount=%u\n",
@@ -4601,16 +4841,100 @@ namespace BZROpenShim
                 EnvFlagEnabled("BZR_DISABLE_CHUNK_MANUAL_SUBMIT");
             return !disabled;
         }
-        #endif
+
+        // Reads the geo-local vertex bounds straight out of the Redux geom
+        // struct (vertex count at +0x04, position array at +0x0C, 3 floats
+        // per vertex) so payload mesh pivots can be compared against the
+        // original geo pivots the chunk sim rotates around.
+        static bool TryComputeChunkGeomLocalBounds(
+            const void* geomRef,
+            uint32_t& outCount,
+            float outMin[3],
+            float outMax[3])
+        {
+            outCount = 0;
+            if (!geomRef)
+                return false;
+
+            __try
+            {
+                const auto* geomBytes = reinterpret_cast<const uint8_t*>(geomRef);
+                const uint32_t count = *reinterpret_cast<const uint32_t*>(geomBytes + 0x04);
+                const float* verts = *reinterpret_cast<const float* const*>(geomBytes + 0x0C);
+                if (!verts || count == 0 || count > 65536)
+                    return false;
+
+                for (uint32_t i = 0; i < count; ++i)
+                {
+                    const float* v = verts + (static_cast<size_t>(i) * 3);
+                    for (int axis = 0; axis < 3; ++axis)
+                    {
+                        if (i == 0 || v[axis] < outMin[axis])
+                            outMin[axis] = v[axis];
+                        if (i == 0 || v[axis] > outMax[axis])
+                            outMax[axis] = v[axis];
+                    }
+                }
+
+                outCount = count;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outCount = 0;
+                return false;
+            }
+        }
+
+        // Redux renders around a per-map origin (terrain center, the
+        // Ogre::Vector3 global at kGogWorldRenderOriginAddr) with the Z axis
+        // mirrored versus sim space. The camera, lights, and every world
+        // renderable go through this conversion inside the exe, so proxy
+        // nodes fed raw sim coordinates land ~1e5 units outside the render
+        // world and never appear on screen.
+        static bool TryConvertChunkSimTransformToRenderSpace(ChunkProxyTransform& transform)
+        {
+            float origin[3] = {};
+
+            __try
+            {
+                const float* originPtr = reinterpret_cast<const float*>(kGogWorldRenderOriginAddr);
+                origin[0] = originPtr[0];
+                origin[1] = originPtr[1];
+                origin[2] = originPtr[2];
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+
+            static volatile long s_OriginLogBudget = 1;
+            if (InterlockedDecrement(&s_OriginLogBudget) >= 0)
+            {
+                LogChunkDiagnostic(
+                    "chunkmesh",
+                    L"[CHUNKMESH] render-origin=(%.2f, %.2f, %.2f)\n",
+                    static_cast<double>(origin[0]),
+                    static_cast<double>(origin[1]),
+                    static_cast<double>(origin[2]));
+            }
+
+            transform.x = transform.x - origin[0];
+            transform.y = transform.y - origin[1];
+            transform.z = -transform.z - origin[2];
+            // Conjugating a rotation by the Z mirror negates the quaternion
+            // X/Y components (X/Y rotations flip direction, Z rotations do
+            // not).
+            transform.orientation.x = -transform.orientation.x;
+            transform.orientation.y = -transform.orientation.y;
+            return true;
+        }
 
         static void UpdateChunkProxySlotPosition(
             ChunkProxySlot& slot,
             void* currentCamera = nullptr,
             bool allowManualSubmit = true)
         {
-            (void)currentCamera;
-            (void)allowManualSubmit;
-
             static FnOgreSetBillboardPosition setPosition =
                 ResolveOgreProc<FnOgreSetBillboardPosition>("?setPosition@Billboard@Ogre@@QAEXMMM@Z");
             static FnOgreSetNodePosition setNodePosition =
@@ -4624,7 +4948,8 @@ namespace BZROpenShim
 
             if (slot.objectBytes)
             {
-                const ChunkResolvedBindingEntry* binding = FindChunkResolvedBindingEntry(slot.objectBytes);
+                const ChunkResolvedBindingEntry* binding =
+                    FindChunkResolvedBindingEntryForGeom(slot.objectBytes, slot.geomName);
                 if (binding && binding->payloadMeshName[0] &&
                     _stricmp(slot.proofMeshName, binding->payloadMeshName) != 0)
                 {
@@ -4699,6 +5024,9 @@ namespace BZROpenShim
                 }
             }
 
+            if (haveTransform && !TryConvertChunkSimTransformToRenderSpace(transform))
+                haveTransform = false;
+
             const bool useMeshProxy = ShouldUseChunkPayloadMesh(slot);
 
             if (!useMeshProxy)
@@ -4736,13 +5064,32 @@ namespace BZROpenShim
                 if (!EnsureChunkMeshProxySlot(slot))
                     return;
 
-                if (!TryUpdateChunkMeshProxyTransform(
-                        slot.sceneNode,
-                        slot.entity,
-                        setNodePosition,
-                        setNodeOrientation,
-                        setVisible,
-                        transform))
+                const bool transformOk = TryUpdateChunkMeshProxyTransform(
+                    slot.sceneNode,
+                    slot.entity,
+                    setNodePosition,
+                    setNodeOrientation,
+                    setVisible,
+                    transform);
+
+                static volatile long s_FirstMeshTransformLogBudget = 8;
+                if (InterlockedDecrement(&s_FirstMeshTransformLogBudget) >= 0)
+                {
+                    LogChunkDiagnostic("chunkmesh",
+                        L"[CHUNKMESH] first-transform obj=0x%08X node=0x%08X entity=0x%08X mesh=%hs ok=%u procs=%u/%u pos=(%.2f, %.2f, %.2f)\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.objectBytes)),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.sceneNode)),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.entity)),
+                        GetChunkPayloadMeshName(slot),
+                        transformOk ? 1u : 0u,
+                        setNodePosition ? 1u : 0u,
+                        setVisible ? 1u : 0u,
+                        static_cast<double>(transform.x),
+                        static_cast<double>(transform.y),
+                        static_cast<double>(transform.z));
+                }
+
+                if (!transformOk)
                 {
                     ReleaseChunkProxySlot(slot, L"mesh-set-failed");
                     return;
@@ -4759,8 +5106,34 @@ namespace BZROpenShim
                         static_cast<double>(transform.x),
                         static_cast<double>(transform.y),
                         static_cast<double>(transform.z));
+
+                    uint32_t geoVertCount = 0;
+                    float geoMin[3] = {};
+                    float geoMax[3] = {};
+                    if (TryComputeChunkGeomLocalBounds(slot.geomRef, geoVertCount, geoMin, geoMax))
+                    {
+                        LogChunkDiagnostic("chunkmesh",
+                            L"[CHUNKMESH] geo-bounds geom=0x%08X name=%hs verts=%u center=(%.2f, %.2f, %.2f) size=(%.2f, %.2f, %.2f)\n",
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.geomRef)),
+                            GetChunkGeomNameForLog(slot.geomName),
+                            geoVertCount,
+                            static_cast<double>((geoMin[0] + geoMax[0]) * 0.5f),
+                            static_cast<double>((geoMin[1] + geoMax[1]) * 0.5f),
+                            static_cast<double>((geoMin[2] + geoMax[2]) * 0.5f),
+                            static_cast<double>(geoMax[0] - geoMin[0]),
+                            static_cast<double>(geoMax[1] - geoMin[1]),
+                            static_cast<double>(geoMax[2] - geoMin[2]));
+                    }
                 }
                 slot.meshAssigned = true;
+
+                // Redux drives the Ogre render queue itself rather than letting
+                // the scene manager traverse root-node children, so a positioned
+                // visible entity still never draws. Inject it into the current
+                // render queue while the game is submitting its own legacy
+                // effects (EngineFlameSubmitHook passes the active camera).
+                if (allowManualSubmit && IsChunkManualSubmitEnabled())
+                    TrySubmitChunkMeshProxyToCurrentRenderQueue(slot, currentCamera);
             }
             else if (slot.meshAssigned)
             {
@@ -4769,7 +5142,9 @@ namespace BZROpenShim
             }
         }
 
-        static void TickChunkProxyDebug()
+        static void TickChunkProxyDebug(
+            void* currentCamera = nullptr,
+            bool allowManualSubmit = true)
         {
             if (!g_EnableChunkProxyDebug && !g_EnableChunkMeshProxy)
                 return;
@@ -4792,7 +5167,87 @@ namespace BZROpenShim
                     continue;
                 }
 
-                UpdateChunkProxySlotPosition(slot);
+                UpdateChunkProxySlotPosition(slot, currentCamera, allowManualSubmit);
+            }
+        }
+
+        // Render-time injection: called from the game's own _updateRenderQueue
+        // override (0x00679570), the only exe-side path that feeds Ogre's
+        // RenderQueue. Adding our sub-entities to the queue passed here puts
+        // chunk proxies in exactly the same queue, frame, and coordinate space
+        // as the game's world geometry — no camera/viewport guesswork.
+        static void SubmitChunkProxiesToRenderQueue(void* renderQueue)
+        {
+            if (!renderQueue || !g_EnableChunkMeshProxy)
+                return;
+            if (!IsChunkManualSubmitEnabled())
+                return;
+            if (g_ChunkProxySlots.empty())
+                return;
+
+            static FnOgreRenderQueueAddRenderablePriority addRenderablePriority =
+                ResolveOgreProcByOffset<FnOgreRenderQueueAddRenderablePriority>(0x00026850);
+            static FnOgreGetRenderQueueGroup getRenderQueueGroup =
+                ResolveOgreProcByOffset<FnOgreGetRenderQueueGroup>(0x0001584D);
+            static FnOgreGetNumSubEntities getNumSubEntities =
+                ResolveOgreProc<FnOgreGetNumSubEntities>("?getNumSubEntities@Entity@Ogre@@QBEIXZ");
+            static FnOgreGetSubEntity getSubEntity =
+                ResolveOgreProc<FnOgreGetSubEntity>("?getSubEntity@Entity@Ogre@@QBEPAVSubEntity@2@I@Z");
+
+            if (!addRenderablePriority || !getNumSubEntities || !getSubEntity)
+            {
+                static volatile long s_MissingProcLogBudget = 2;
+                if (InterlockedDecrement(&s_MissingProcLogBudget) >= 0)
+                {
+                    LogChunkDiagnostic(
+                        "chunkmesh",
+                        L"[CHUNKMESH] world-rq-submit procs-missing add=%u numSub=%u getSub=%u\n",
+                        addRenderablePriority ? 1u : 0u,
+                        getNumSubEntities ? 1u : 0u,
+                        getSubEntity ? 1u : 0u);
+                }
+                return;
+            }
+
+            for (ChunkProxySlot& slot : g_ChunkProxySlots)
+            {
+                if (!slot.active || !slot.entity)
+                    continue;
+
+                const uint8_t groupId = getRenderQueueGroup
+                    ? getRenderQueueGroup(slot.entity)
+                    : 50u;
+                const uint32_t subEntityCount =
+                    TryGetChunkProxySubEntityCountSafe(slot.entity, getNumSubEntities);
+                uint32_t added = 0;
+
+                for (uint32_t index = 0; index < subEntityCount; ++index)
+                {
+                    void* const subEntity =
+                        TryGetChunkProxySubEntitySafe(slot.entity, index, getSubEntity);
+                    if (!subEntity)
+                        continue;
+
+                    addRenderablePriority(renderQueue, subEntity, groupId, 100u);
+                    ++added;
+                    if (slot.renderQueueAddCount < USHRT_MAX)
+                        ++slot.renderQueueAddCount;
+                }
+
+                static volatile long s_FirstWorldRqSubmitLogBudget = 12;
+                if (added != 0 && slot.renderQueueAddCount <= 8 &&
+                    InterlockedDecrement(&s_FirstWorldRqSubmitLogBudget) >= 0)
+                {
+                    LogChunkDiagnostic(
+                        "chunkmesh",
+                        L"[CHUNKMESH] world-rq-submit entity=0x%08X mesh=%hs queue=0x%08X group=%u added=%u totalAdds=%u\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.entity)),
+                        GetChunkPayloadMeshName(slot),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(renderQueue)),
+                        static_cast<unsigned>(groupId),
+                        added,
+                        static_cast<unsigned>(slot.renderQueueAddCount));
+                }
             }
         }
 
@@ -4938,7 +5393,8 @@ namespace BZROpenShim
             char geomName[64] = {};
             TryReadChunkGeomIdentity(objectBytes, geomRef, geomName, sizeof(geomName));
 
-            const ChunkResolvedBindingEntry* binding = FindChunkResolvedBindingEntry(objectBytes);
+            const ChunkResolvedBindingEntry* binding =
+                FindChunkResolvedBindingEntryForGeom(objectBytes, geomName);
             const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(objectBytes);
 
             float positionX = 0.0f;
@@ -5168,13 +5624,14 @@ namespace BZROpenShim
                     if (classId != kClassIdChunk)
                         continue;
 
-                    TouchChunkResolvedBinding(entry.objectBytes);
-
                     const void* geomRef = nullptr;
                     char geomName[64] = {};
                     TryReadChunkGeomIdentity(entry.objectBytes, geomRef, geomName, sizeof(geomName));
 
-                    const ChunkResolvedBindingEntry* binding = FindChunkResolvedBindingEntry(entry.objectBytes);
+                    const ChunkResolvedBindingEntry* binding =
+                        FindChunkResolvedBindingEntryForGeom(entry.objectBytes, geomName);
+                    if (binding)
+                        TouchChunkResolvedBinding(entry.objectBytes);
                     const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(entry.objectBytes);
                     float positionX = 0.0f;
                     float positionY = 0.0f;
@@ -8548,6 +9005,74 @@ namespace BZROpenShim
             }
         }
 
+        // Diagnostic detours on ChunkEffect::PartialFragmentObject/FullFragmentObject
+        // (the walkers Craft/Building explode paths hand the dying OBJ76 tree to).
+        // Logs the tree each walk receives so "death produced no CreateChunk" can be
+        // told apart from "walker never ran". GOG only; addresses are GOG layout.
+        static void InstallChunkFragmentWalkHooksIfRequested()
+        {
+            if ((!g_TraceChunkRender && !g_TraceChunkEffectRuntime) ||
+                g_ChunkEffectFragmentHooksInstalled || g_IsSteamExe)
+                return;
+
+            static const uint8_t kExpectedPartialFragmentBytes[kChunkEffectFragmentDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x30
+            };
+            static const uint8_t kExpectedFullFragmentBytes[kChunkEffectFragmentDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x28
+            };
+
+            if (!g_ChunkEffectPartialFragmentDetour.trampoline)
+            {
+                InstallInlineDetour32(
+                    g_ChunkEffectPartialFragmentDetour,
+                    kGogChunkEffectPartialFragmentAddr,
+                    reinterpret_cast<void*>(ChunkEffectPartialFragmentHook),
+                    kChunkEffectFragmentDetourLen,
+                    kExpectedPartialFragmentBytes,
+                    sizeof(kExpectedPartialFragmentBytes));
+            }
+            if (g_ChunkEffectPartialFragmentDetour.trampoline)
+            {
+                g_BzrFn_ChunkEffectPartialFragment = reinterpret_cast<FnChunkEffectFragmentObject>(
+                    g_ChunkEffectPartialFragmentDetour.trampoline);
+            }
+
+            if (!g_ChunkEffectFullFragmentDetour.trampoline)
+            {
+                InstallInlineDetour32(
+                    g_ChunkEffectFullFragmentDetour,
+                    kGogChunkEffectFullFragmentAddr,
+                    reinterpret_cast<void*>(ChunkEffectFullFragmentHook),
+                    kChunkEffectFragmentDetourLen,
+                    kExpectedFullFragmentBytes,
+                    sizeof(kExpectedFullFragmentBytes));
+            }
+            if (g_ChunkEffectFullFragmentDetour.trampoline)
+            {
+                g_BzrFn_ChunkEffectFullFragment = reinterpret_cast<FnChunkEffectFragmentObject>(
+                    g_ChunkEffectFullFragmentDetour.trampoline);
+            }
+
+            g_ChunkEffectFragmentHooksInstalled =
+                g_ChunkEffectPartialFragmentDetour.trampoline &&
+                g_BzrFn_ChunkEffectPartialFragment &&
+                g_ChunkEffectFullFragmentDetour.trampoline &&
+                g_BzrFn_ChunkEffectFullFragment;
+
+            if (g_ChunkEffectFragmentHooksInstalled && !g_ChunkEffectFragmentHooksLogged)
+            {
+                LogChunkDiagnostic(
+                    "chunkspawn",
+                    L"[CHUNKSPAWN] Installed fragment walk hooks partial=0x%08X full=0x%08X\n",
+                    static_cast<uint32_t>(kGogChunkEffectPartialFragmentAddr),
+                    static_cast<uint32_t>(kGogChunkEffectFullFragmentAddr));
+                g_ChunkEffectFragmentHooksLogged = true;
+            }
+        }
+
         void __cdecl CalcRangeCraftHook(void* craft,
                                         float* closeRange,
                                         float* range,
@@ -8965,6 +9490,139 @@ namespace BZROpenShim
                             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_ProximityMineSimulateOriginal)));
                     }
                 }
+            }
+        }
+
+        static bool ShouldTraceSplinterUndeadFix()
+        {
+            return EnvFlagEnabled("OPENSHIM_TRACE_SPLINTER_UNDEAD") ||
+                   EnvFlagEnabled("BZR_TRACE_SPLINTER_UNDEAD");
+        }
+
+        // Splinter (spraybomb) undead fix (#46): a deployed splinter that has
+        // been damaged below zero is still marked dead by Building::DamageAlloc
+        // (flags |= 0x1000200), but SprayBuilding::Simulate overrides
+        // Building::Simulate without preserving the base destroyed/remove gate,
+        // so it keeps spawning payload ordnance until ammo depletion. Restore the
+        // missing gate: when the object is destroyed/marked-for-remove, route the
+        // frame through stock Building::Simulate (which dispatches the explode /
+        // remove virtuals and returns) instead of the payload fire loop.
+        static void RunSprayBuildingSimulateWithDeadGate(void* sprayPtr, float dt)
+        {
+            if (!sprayPtr || !g_BzrFn_SprayBuildingSimulateOriginal)
+            {
+                if (g_BzrFn_SprayBuildingSimulateOriginal)
+                    g_BzrFn_SprayBuildingSimulateOriginal(sprayPtr, dt);
+                return;
+            }
+
+            bool routeToBase = false;
+            if (g_SplinterUndeadFixEnabled && g_BzrFn_BuildingSimulate)
+            {
+                __try
+                {
+                    auto* stateBlock = *reinterpret_cast<void* const*>(
+                        reinterpret_cast<const uint8_t*>(sprayPtr) + kBuildingStateBlockOffset);
+                    if (stateBlock)
+                    {
+                        const uint32_t flags = *reinterpret_cast<const uint32_t*>(
+                            reinterpret_cast<const uint8_t*>(stateBlock) + kBuildingStateFlagsOffset);
+                        routeToBase = (flags & kBuildingDestroyedOrRemoveMask) != 0;
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    routeToBase = false;
+                }
+            }
+
+            if (routeToBase)
+            {
+                if (ShouldTraceSplinterUndeadFix())
+                {
+                    const long remaining = InterlockedDecrement(&g_SplinterUndeadTraceBudget);
+                    if (remaining >= 0)
+                        Log(L"[SPLINTER] Dead splinter routed to base Building::Simulate remaining=%ld unit=0x%08X\n",
+                            remaining,
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sprayPtr)));
+                }
+                g_BzrFn_BuildingSimulate(sprayPtr, dt);
+                return;
+            }
+
+            g_BzrFn_SprayBuildingSimulateOriginal(sprayPtr, dt);
+        }
+
+        void __fastcall SprayBuildingSimulateUndeadFixHook(void* thisPtr, void* /*edx*/, float dt)
+        {
+            RunSprayBuildingSimulateWithDeadGate(thisPtr, dt);
+        }
+
+        static void InstallSplinterUndeadFixIfPossible()
+        {
+            if (!g_SplinterUndeadFixEnabled)
+                return;
+            if (g_SprayBuildingSimulateHookInstalled)
+                return;
+
+            if (!g_BzrFn_SprayBuildingSimulateOriginal)
+                g_BzrFn_SprayBuildingSimulateOriginal =
+                    reinterpret_cast<FnSprayBuildingSimulate>(kGogSprayBuildingSimulateAddr);
+            if (!g_BzrFn_BuildingSimulate)
+                g_BzrFn_BuildingSimulate =
+                    reinterpret_cast<FnShieldTowerSimulate>(kGogBuildingSimulateAddr);
+
+            // The advisory-PDB VA for SprayBuilding::Simulate drifted, so validate
+            // the live entry prologue before trusting the re-derived GOG address.
+            static const uint8_t kExpectedSprayBuildingSimulateBytes[] =
+            {
+                0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xE8, 0x02, 0x00, 0x00
+            };
+            if (!ExpectedBytesMatchAt(kGogSprayBuildingSimulateAddr,
+                                      kExpectedSprayBuildingSimulateBytes,
+                                      sizeof(kExpectedSprayBuildingSimulateBytes)))
+            {
+                Log(L"[SPLINTER] SprayBuilding::Simulate entry bytes mismatch at 0x%08X; splinter undead fix disabled\n",
+                    static_cast<uint32_t>(kGogSprayBuildingSimulateAddr));
+                return;
+            }
+
+            void* current = nullptr;
+            __try
+            {
+                current = *reinterpret_cast<void**>(kSprayBuildingSimulateVtableSlotAddr);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                current = nullptr;
+            }
+
+            if (current != reinterpret_cast<void*>(SprayBuildingSimulateUndeadFixHook) &&
+                current != reinterpret_cast<void*>(kGogSprayBuildingSimulateAddr))
+            {
+                Log(L"[SPLINTER] SprayBuilding::Simulate vtable mismatch slot=0x%08X current=0x%08X expected=0x%08X\n",
+                    static_cast<uint32_t>(kSprayBuildingSimulateVtableSlotAddr),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
+                    static_cast<uint32_t>(kGogSprayBuildingSimulateAddr));
+                return;
+            }
+
+            const bool patched =
+                (current == reinterpret_cast<void*>(SprayBuildingSimulateUndeadFixHook)) ||
+                WritePointerValue(kSprayBuildingSimulateVtableSlotAddr,
+                                  reinterpret_cast<void*>(SprayBuildingSimulateUndeadFixHook));
+            g_SprayBuildingSimulateHookInstalled =
+                patched &&
+                g_BzrFn_SprayBuildingSimulateOriginal &&
+                g_BzrFn_BuildingSimulate;
+
+            if (g_SprayBuildingSimulateHookInstalled)
+            {
+                Log(L"[SPLINTER] Installed splinter undead fix slot=0x%08X original=0x%08X base=0x%08X trace=%hs\n",
+                    static_cast<uint32_t>(kSprayBuildingSimulateVtableSlotAddr),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_SprayBuildingSimulateOriginal)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_BuildingSimulate)),
+                    BoolText(ShouldTraceSplinterUndeadFix()));
             }
         }
 
@@ -9823,14 +10481,22 @@ namespace BZROpenShim
             g_ChunkPayloadResourceDirectories.clear();
 
             const std::filesystem::path gameDir = GetMainModuleDirectory();
+            static constexpr const char* kPayloadDirNames[] =
+            {
+                kChunkPayloadModRelativeDirName,
+                kChunkPayloadModRelativeDirNameAlt,
+            };
             for (const std::filesystem::path& modRoot : GetCampaignContentRootCandidates(gameDir))
             {
-                const std::filesystem::path candidate = modRoot / kChunkPayloadModRelativeDirName;
-                std::error_code ec;
-                if (std::filesystem::exists(candidate, ec) && !ec &&
-                    std::filesystem::is_directory(candidate, ec) && !ec)
+                for (const char* dirName : kPayloadDirNames)
                 {
-                    AppendUniquePath(g_ChunkPayloadResourceDirectories, candidate);
+                    const std::filesystem::path candidate = modRoot / dirName;
+                    std::error_code ec;
+                    if (std::filesystem::exists(candidate, ec) && !ec &&
+                        std::filesystem::is_directory(candidate, ec) && !ec)
+                    {
+                        AppendUniquePath(g_ChunkPayloadResourceDirectories, candidate);
+                    }
                 }
             }
 
@@ -9920,11 +10586,8 @@ namespace BZROpenShim
             const std::vector<std::string>& meshCandidates,
             const std::vector<std::string>& geomCandidates)
         {
-            if ((!g_EnableChunkMeshProxy && !g_TraceChunkRender && !g_TraceChunkEffectRuntime) ||
-                !AcquireChunkLogSlot())
-            {
+            if (!g_EnableChunkMeshProxy && !g_TraceChunkRender && !g_TraceChunkEffectRuntime)
                 return;
-            }
 
             const std::string meshCandidateText = JoinChunkPayloadCandidates(meshCandidates);
             const std::string geomCandidateText = JoinChunkPayloadCandidates(geomCandidates);
@@ -9953,6 +10616,12 @@ namespace BZROpenShim
             if (!g_ChunkPayloadResolveFailureLogCache.insert(fingerprint).second)
                 return;
 
+            // Acquire the shared slot only once the dedup cache says this line
+            // will actually be written; otherwise repeated resolve failures
+            // drain the budget silently and blind all lifecycle logging.
+            if (!AcquireChunkLogSlot())
+                return;
+
             LogChunkDiagnostic(
                 "chunkmesh",
                 L"[CHUNKMESH] payload resolve miss obj=0x%08X class=%u preferredMesh=%hs cachedMesh=%hs explicitGeom=%hs probeGeom=%hs vdf=%hs meshCandidates=%hs geomCandidates=%hs\n",
@@ -9965,6 +10634,29 @@ namespace BZROpenShim
                 probe.vdfCandidates[0] ? probe.vdfCandidates : "<none>",
                 meshCandidateText.empty() ? "<none>" : meshCandidateText.c_str(),
                 geomCandidateText.empty() ? "<none>" : geomCandidateText.c_str());
+        }
+
+        static bool ChunkPayloadFlatMeshExists(const std::string& fileName)
+        {
+            if (fileName.empty())
+                return false;
+
+            auto cacheIt = g_ChunkPayloadMeshExistsCache.find(fileName);
+            if (cacheIt != g_ChunkPayloadMeshExistsCache.end())
+                return cacheIt->second;
+
+            bool exists = false;
+            for (const std::filesystem::path& resourceRoot : GetChunkPayloadResourceDirectories())
+            {
+                std::error_code error;
+                if (std::filesystem::exists(resourceRoot / fileName, error) && !error)
+                {
+                    exists = true;
+                    break;
+                }
+            }
+            g_ChunkPayloadMeshExistsCache.emplace(fileName, exists);
+            return exists;
         }
 
         static bool TryResolveChunkPayloadMeshResourceForMeshAndGeom(
@@ -10043,6 +10735,46 @@ namespace BZROpenShim
             return outMeshName[0] != '\0';
         }
 
+        static bool TryResolveGenericChunkPayloadFallback(
+            const char* seedName,
+            char* outMeshName,
+            size_t outMeshNameCapacity)
+        {
+            if (!outMeshName || outMeshNameCapacity == 0)
+                return false;
+
+            outMeshName[0] = '\0';
+
+            std::vector<std::string> available;
+            for (uint32_t index = 1; index <= 8; ++index)
+            {
+                char geomBuffer[16] = {};
+                _snprintf_s(geomBuffer, _TRUNCATE, "iechunk%u", index);
+                char resourceName[128] = {};
+                if (TryResolveChunkPayloadMeshResourceForMeshAndGeom(
+                        "generic",
+                        geomBuffer,
+                        resourceName,
+                        sizeof(resourceName)))
+                {
+                    available.emplace_back(resourceName);
+                }
+            }
+            if (available.empty())
+                return false;
+
+            uint32_t hash = 2166136261u;
+            for (const char* ch = seedName ? seedName : ""; *ch; ++ch)
+            {
+                hash ^= static_cast<uint8_t>(std::tolower(static_cast<unsigned char>(*ch)));
+                hash *= 16777619u;
+            }
+
+            const std::string& pick = available[hash % available.size()];
+            strncpy_s(outMeshName, outMeshNameCapacity, pick.c_str(), _TRUNCATE);
+            return outMeshName[0] != '\0';
+        }
+
         static bool TryResolveChunkPayloadMeshResource(
             const ChunkObjectLinkProbe& probe,
             const char* preferredMeshName,
@@ -10060,11 +10792,50 @@ namespace BZROpenShim
             AppendUniqueChunkPayloadCandidate(meshCandidates, NormalizeChunkMeshBaseName(preferredMeshName));
             AppendUniqueChunkPayloadCandidate(meshCandidates, NormalizeChunkMeshBaseName(probe.cachedMeshName));
 
+            // Identity caches only cover objects seen live before death; a
+            // chunk that missed them (buildings especially) can still be
+            // identified purely from its own geo name when the VDF/SDF
+            // reverse index maps it to exactly one craft.
+            if (meshCandidates.empty())
+            {
+                char inferredMeshName[48] = {};
+                const char* inferGeomName =
+                    (explicitGeomName && explicitGeomName[0]) ? explicitGeomName : probe.geomName;
+                if (TryInferChunkMeshNameFromGeom(
+                        inferGeomName,
+                        probe.classId,
+                        inferredMeshName,
+                        sizeof(inferredMeshName)))
+                {
+                    AppendUniqueChunkPayloadCandidate(
+                        meshCandidates, NormalizeChunkMeshBaseName(inferredMeshName));
+                }
+            }
+
+            // Faction twins (abspow/bbspow, abtowe/bbtowe, ...) share their
+            // entire piece list, so the single-craft inference above refuses
+            // them. The lookup below is gated on the payload file actually
+            // existing per candidate, and twin payload dirs ship the same
+            // per-piece mesh files, so trying every craft the reverse index
+            // maps this geo to still yields the correct piece.
+            if (meshCandidates.empty())
+            {
+                const char* inferGeomName =
+                    (explicitGeomName && explicitGeomName[0]) ? explicitGeomName : probe.geomName;
+                AppendAllChunkMeshBasesForGeom(inferGeomName, probe.classId, meshCandidates);
+            }
+
             std::vector<std::string> geomCandidates;
             geomCandidates.reserve(4);
             AppendUniqueChunkPayloadCandidate(geomCandidates, NormalizeChunkPayloadComponentName(explicitGeomName));
             AppendUniqueChunkPayloadCandidate(geomCandidates, NormalizeChunkPayloadComponentName(probe.geomName));
-            AppendChunkPayloadCandidatesFromPipeList(probe.vdfCandidates, geomCandidates);
+            // The VDF candidate list names OTHER pieces of the source craft.
+            // Substituting one of those is only acceptable when the chunk's
+            // own geo name could not be read at all — otherwise a resolve
+            // miss (or a stale craft binding) turns into a visibly wrong
+            // piece instead of an invisible chunk.
+            if (geomCandidates.empty())
+                AppendChunkPayloadCandidatesFromPipeList(probe.vdfCandidates, geomCandidates);
 
             for (const std::string& meshCandidate : meshCandidates)
             {
@@ -10081,6 +10852,77 @@ namespace BZROpenShim
                 }
             }
 
+            // Generic chunklet templates ("chunk1", "chunk2", ...) have no craft
+            // owner; map them onto the legacy iechunkN payload meshes when a
+            // payload root ships them flat.
+            for (const std::string& geomCandidate : geomCandidates)
+            {
+                if (geomCandidate.size() <= 5 ||
+                    _strnicmp(geomCandidate.c_str(), "chunk", 5) != 0)
+                {
+                    continue;
+                }
+
+                bool digitsOnly = true;
+                for (size_t index = 5; index < geomCandidate.size(); ++index)
+                {
+                    if (!std::isdigit(static_cast<unsigned char>(geomCandidate[index])))
+                    {
+                        digitsOnly = false;
+                        break;
+                    }
+                }
+                if (!digitsOnly)
+                    continue;
+
+                const std::string chunkletFileName = "ie" + geomCandidate + ".mesh";
+                if (ChunkPayloadFlatMeshExists(chunkletFileName))
+                {
+                    strncpy_s(outMeshName, outMeshNameCapacity, chunkletFileName.c_str(), _TRUNCATE);
+                    return true;
+                }
+
+                // Nested layouts for the same templates: chunkN/chunkN.mesh
+                // and generic/iechunkN.mesh.
+                if (TryResolveChunkPayloadMeshResourceForMeshAndGeom(
+                        geomCandidate.c_str(),
+                        geomCandidate.c_str(),
+                        outMeshName,
+                        outMeshNameCapacity))
+                {
+                    return true;
+                }
+                const std::string chunkletGeneric = "ie" + geomCandidate;
+                if (TryResolveChunkPayloadMeshResourceForMeshAndGeom(
+                        "generic",
+                        chunkletGeneric.c_str(),
+                        outMeshName,
+                        outMeshNameCapacity))
+                {
+                    return true;
+                }
+            }
+
+            // Last resort: a payload root can ship generic debris meshes in a
+            // "generic" dir (generic/iechunkN.mesh). Seed the pick with the
+            // geo name so a given piece always shatters into the same shape.
+            if (TryResolveGenericChunkPayloadFallback(
+                    geomCandidates.empty() ? nullptr : geomCandidates.front().c_str(),
+                    outMeshName,
+                    outMeshNameCapacity))
+            {
+                static volatile long s_GenericFallbackLogBudget = 64;
+                if (InterlockedDecrement(&s_GenericFallbackLogBudget) >= 0)
+                {
+                    LogChunkDiagnostic(
+                        "chunkmesh",
+                        L"[CHUNKMESH] generic-fallback geom=%hs mesh=%hs\n",
+                        geomCandidates.empty() ? "<none>" : geomCandidates.front().c_str(),
+                        outMeshName);
+                }
+                return true;
+            }
+
             LogChunkPayloadResolveFailureOnce(
                 probe,
                 preferredMeshName,
@@ -10088,6 +10930,191 @@ namespace BZROpenShim
                 meshCandidates,
                 geomCandidates);
             return false;
+        }
+
+        // Manifest line format: craft|geoName|parentName|type|flags
+        // ('#' comments and blank lines ignored; parent/type/flags optional).
+        static void LoadChunkGeoManifestFile(
+            const std::filesystem::path& manifestPath,
+            uint32_t& craftCount,
+            uint32_t& recordCount)
+        {
+            std::ifstream file(manifestPath);
+            if (!file)
+                return;
+
+            std::string line;
+            while (std::getline(file, line))
+            {
+                const std::string trimmed = TrimAsciiCopy(line);
+                if (trimmed.empty() || trimmed[0] == '#')
+                    continue;
+
+                std::array<std::string, 5> fields = {};
+                size_t fieldIndex = 0;
+                size_t start = 0;
+                while (fieldIndex < fields.size())
+                {
+                    const size_t separator = trimmed.find('|', start);
+                    fields[fieldIndex++] =
+                        TrimAsciiCopy(trimmed.substr(start, separator - start));
+                    if (separator == std::string::npos)
+                        break;
+                    start = separator + 1;
+                }
+
+                const std::string craftBase = NormalizeChunkMeshBaseName(fields[0].c_str());
+                const std::string& geoName = fields[1];
+                if (craftBase.empty() || geoName.empty() ||
+                    geoName.size() >= sizeof(ChunkVdfRecord{}.name) ||
+                    _stricmp(geoName.c_str(), "NULL") == 0)
+                {
+                    continue;
+                }
+
+                ChunkVdfAssetInfo& info = g_ChunkVdfAssetCache[craftBase];
+                if (!info.attempted)
+                    ++craftCount;
+                info.attempted = true;
+
+                bool duplicate = false;
+                for (const ChunkVdfRecord& existing : info.records)
+                {
+                    if (_stricmp(existing.name, geoName.c_str()) == 0 &&
+                        _stricmp(existing.parent, fields[2].c_str()) == 0)
+                    {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (duplicate)
+                    continue;
+
+                ChunkVdfRecord record = {};
+                strncpy_s(record.name, sizeof(record.name), geoName.c_str(), _TRUNCATE);
+                strncpy_s(record.parent, sizeof(record.parent), fields[2].c_str(), _TRUNCATE);
+                record.type = static_cast<uint32_t>(std::strtoul(fields[3].c_str(), nullptr, 10));
+                record.flags = static_cast<uint32_t>(std::strtoul(fields[4].c_str(), nullptr, 10));
+                info.records.push_back(record);
+                info.loaded = true;
+                ++recordCount;
+            }
+        }
+
+        static void EnsureChunkGeoManifestLoaded()
+        {
+            if (g_ChunkGeoManifestAttempted)
+                return;
+
+            g_ChunkGeoManifestAttempted = true;
+
+            std::vector<std::filesystem::path> manifestCandidates;
+            AppendUniquePath(
+                manifestCandidates,
+                GetMainModuleDirectory() / "scripts" / kChunkGeoManifestFileName);
+            for (const std::filesystem::path& payloadDir : GetChunkPayloadResourceDirectories())
+                AppendUniquePath(manifestCandidates, payloadDir / kChunkGeoManifestFileName);
+
+            uint32_t fileCount = 0;
+            uint32_t craftCount = 0;
+            uint32_t recordCount = 0;
+            for (const std::filesystem::path& candidate : manifestCandidates)
+            {
+                std::error_code error;
+                if (!std::filesystem::exists(candidate, error) || error)
+                    continue;
+
+                ++fileCount;
+                LoadChunkGeoManifestFile(candidate, craftCount, recordCount);
+            }
+
+            if (fileCount)
+            {
+                LogChunkDiagnostic(
+                    "chunkmesh",
+                    L"[CHUNKMESH] geo-manifest loaded files=%u crafts=%u records=%u\n",
+                    fileCount,
+                    craftCount,
+                    recordCount);
+            }
+        }
+
+        // Buildings ship as .sdf instead of .vdf: same BWD2 container, but the
+        // geo table is an SGEO block (120-byte records vs VGEO's 100) whose
+        // count field is authoritative — the block is padded with "NULL"
+        // records to a fixed capacity.
+        static bool TryLoadChunkSdfAssetInfo(
+            const std::filesystem::path& sdfPath,
+            ChunkVdfAssetInfo& info)
+        {
+            std::ifstream file(sdfPath, std::ios::binary);
+            if (!file)
+                return false;
+
+            const std::vector<uint8_t> bytes(
+                (std::istreambuf_iterator<char>(file)),
+                std::istreambuf_iterator<char>());
+            constexpr size_t kSdfPreambleBytes = 20;
+            constexpr size_t kSgeoHeaderBytes = 12;
+            constexpr size_t kSgeoRecordBytes = 120;
+            constexpr size_t kSgeoNameOffset = 0;
+            constexpr size_t kSgeoParentOffset = 56;
+            constexpr size_t kSgeoTypeOffset = 92;
+
+            // Block sizes include the 8-byte tag+size header; walk until SGEO.
+            size_t cursor = kSdfPreambleBytes;
+            size_t sgeoOffset = 0;
+            size_t sgeoSize = 0;
+            while (cursor + 8 <= bytes.size())
+            {
+                const uint32_t blockSize = ReadLeU32(bytes.data() + cursor + 4);
+                if (blockSize < 8 || cursor + blockSize > bytes.size())
+                    break;
+
+                if (std::memcmp(bytes.data() + cursor, "SGEO", 4) == 0)
+                {
+                    sgeoOffset = cursor;
+                    sgeoSize = blockSize;
+                    break;
+                }
+                cursor += blockSize;
+            }
+
+            if (!sgeoOffset || sgeoSize < kSgeoHeaderBytes + kSgeoRecordBytes)
+                return false;
+
+            const size_t recordCapacity = (sgeoSize - kSgeoHeaderBytes) / kSgeoRecordBytes;
+            const uint32_t declaredCount = ReadLeU32(bytes.data() + sgeoOffset + 8);
+            const size_t geoCount =
+                (declaredCount < recordCapacity) ? declaredCount : recordCapacity;
+            if (geoCount == 0)
+                return false;
+
+            const size_t recordsStart = sgeoOffset + kSgeoHeaderBytes;
+            std::unordered_set<std::string> seenKeys;
+            info.records.clear();
+            info.records.reserve(geoCount);
+            for (size_t index = 0; index < geoCount; ++index)
+            {
+                const size_t recordOffset = recordsStart + (index * kSgeoRecordBytes);
+                const std::string name = ReadFixedAsciiField(bytes.data() + recordOffset + kSgeoNameOffset, 8);
+                if (name.empty() || _stricmp(name.c_str(), "NULL") == 0)
+                    continue;
+
+                const std::string parent = ReadFixedAsciiField(bytes.data() + recordOffset + kSgeoParentOffset, 8);
+                const std::string seenKey = name + "|" + parent;
+                if (!seenKeys.insert(seenKey).second)
+                    continue;
+
+                ChunkVdfRecord record = {};
+                strncpy_s(record.name, sizeof(record.name), name.c_str(), _TRUNCATE);
+                strncpy_s(record.parent, sizeof(record.parent), parent.c_str(), _TRUNCATE);
+                record.type = ReadLeU32(bytes.data() + recordOffset + kSgeoTypeOffset);
+                info.records.push_back(record);
+            }
+
+            info.loaded = !info.records.empty();
+            return info.loaded;
         }
 
         static ChunkVdfAssetInfo& GetChunkVdfAssetInfoForMesh(const char* meshName)
@@ -10098,17 +11125,25 @@ namespace BZROpenShim
             if (baseName.empty())
                 return kEmptyInfo;
 
+            EnsureChunkGeoManifestLoaded();
+
             ChunkVdfAssetInfo& info = g_ChunkVdfAssetCache[baseName];
             if (info.attempted)
                 return info;
 
             info.attempted = true;
 
-            const std::filesystem::path vdfPath =
-                GetMainModuleDirectory() / "Edit" / "stock" / (baseName + ".vdf");
+            const std::filesystem::path stockDir = GetMainModuleDirectory() / "Edit" / "stock";
+            const std::filesystem::path vdfPath = stockDir / (baseName + ".vdf");
             std::error_code error;
             if (!std::filesystem::exists(vdfPath, error) || error)
+            {
+                const std::filesystem::path sdfPath = stockDir / (baseName + ".sdf");
+                std::error_code sdfError;
+                if (std::filesystem::exists(sdfPath, sdfError) && !sdfError)
+                    TryLoadChunkSdfAssetInfo(sdfPath, info);
                 return info;
+            }
 
             std::ifstream file(vdfPath, std::ios::binary);
             if (!file)
@@ -10201,6 +11236,18 @@ namespace BZROpenShim
 
             g_ChunkVdfReverseIndexAttempted = true;
 
+            EnsureChunkGeoManifestLoaded();
+            for (const auto& [meshBase, info] : g_ChunkVdfAssetCache)
+            {
+                if (!info.loaded)
+                    continue;
+                for (const ChunkVdfRecord& record : info.records)
+                {
+                    if (record.name[0])
+                        AddChunkVdfReverseIndexRecord(record.name, meshBase, record.type);
+                }
+            }
+
             const std::filesystem::path stockDir = GetMainModuleDirectory() / "Edit" / "stock";
             std::error_code error;
             if (!std::filesystem::exists(stockDir, error) || error)
@@ -10220,7 +11267,7 @@ namespace BZROpenShim
                     extension.end(),
                     extension.begin(),
                     [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-                if (extension != ".vdf")
+                if (extension != ".vdf" && extension != ".sdf")
                     continue;
 
                 const std::string meshBase = entry.path().stem().string();
@@ -10534,6 +11581,61 @@ namespace BZROpenShim
 
             _snprintf_s(outMeshName, outMeshNameCapacity, _TRUNCATE, "%s.mesh", selected->meshBase);
             return outMeshName[0] != '\0';
+        }
+
+        // Unlike TryInferChunkMeshNameFromGeom this does not refuse ambiguous
+        // geo names; it hands back every craft the reverse index knows, in
+        // stable alphabetical order, for callers that can verify candidates
+        // against actual payload files.
+        static void AppendAllChunkMeshBasesForGeom(
+            const char* geomName,
+            uint32_t classId,
+            std::vector<std::string>& outMeshCandidates)
+        {
+            if (!geomName || !*geomName)
+                return;
+            if (_stricmp(geomName, "chunk1") == 0 || _stricmp(geomName, "chunk2") == 0)
+                return;
+
+            EnsureChunkVdfReverseIndex();
+
+            std::string key(geomName);
+            std::transform(
+                key.begin(),
+                key.end(),
+                key.begin(),
+                [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+
+            const auto it = g_ChunkVdfGeomReverseIndex.find(key);
+            if (it == g_ChunkVdfGeomReverseIndex.end() || it->second.empty())
+                return;
+
+            std::vector<std::string> bases;
+            for (const ChunkVdfMeshRef& ref : it->second)
+            {
+                if (classId != 0 && ref.type != classId)
+                    continue;
+                if (ref.meshBase[0])
+                    bases.emplace_back(ref.meshBase);
+            }
+            if (bases.empty())
+            {
+                for (const ChunkVdfMeshRef& ref : it->second)
+                {
+                    if (ref.meshBase[0])
+                        bases.emplace_back(ref.meshBase);
+                }
+            }
+
+            std::sort(
+                bases.begin(),
+                bases.end(),
+                [](const std::string& left, const std::string& right)
+                {
+                    return _stricmp(left.c_str(), right.c_str()) < 0;
+                });
+            for (const std::string& base : bases)
+                AppendUniqueChunkPayloadCandidate(outMeshCandidates, NormalizeChunkMeshBaseName(base.c_str()));
         }
 
         static bool ResolveChunkCreateMeshContext(
@@ -13415,6 +14517,8 @@ namespace BZROpenShim
 
             ChunkObjectIdentityCacheEntry entry = {};
             strncpy_s(entry.meshName, sizeof(entry.meshName), meshName, _TRUNCATE);
+            if (source.geomName[0])
+                strncpy_s(entry.geomName, sizeof(entry.geomName), source.geomName, _TRUNCATE);
             entry.classId = source.classId;
             if (!BuildChunkVdfSourceCandidateList(
                     meshName,
@@ -13887,6 +14991,9 @@ namespace BZROpenShim
         }
         static void RunMagnetMineFilteredSimulate(void* magnetMinePtr, float dt)
         {
+            if (!magnetMinePtr || !g_BzrFn_GameObjectGetObjByHandle || !g_BzrFn_GameObjectFriendP || !g_BzrFn_GameObjectEnemyP)
+            {
+                if (g_BzrFn_MagnetMineSimulateOriginal)
                     g_BzrFn_MagnetMineSimulateOriginal(magnetMinePtr, dt);
                 return;
             }
@@ -14679,6 +15786,7 @@ namespace BZROpenShim
         g_BzrFn_EngineFlameResolveTexture = nullptr;
         g_BzrFn_GetTeamNum = nullptr;
         g_BzrFn_ChunkEffectSimulate = nullptr;
+        g_BzrFn_LegacyWorldUpdateRenderQueue = nullptr;
         g_BzrFn_GetPlayerHandle = nullptr;
         g_BzrFn_GameObjectGetObjByHandle = nullptr;
         g_BzrFn_PersonSimulate = nullptr;
@@ -14687,6 +15795,7 @@ namespace BZROpenShim
         g_BzrFn_ProximityMineSimulateOriginal = nullptr;
         g_BzrFn_MineSimulate = nullptr;
         g_BzrFn_BuildingSimulate = nullptr;
+        g_BzrFn_SprayBuildingSimulateOriginal = nullptr;
         g_BzrFn_ShieldTowerPowerUpdate = nullptr;
         g_BzrFn_GameObjectFriendP = nullptr;
         g_BzrFn_GameObjectEnemyP = nullptr;
@@ -14710,6 +15819,12 @@ namespace BZROpenShim
             : nullptr;
         g_BzrFn_ChunkEffectCreateChunklet = g_ChunkEffectCreateChunkletDetour.trampoline
             ? reinterpret_cast<FnChunkEffectCreateChunklet>(g_ChunkEffectCreateChunkletDetour.trampoline)
+            : nullptr;
+        g_BzrFn_ChunkEffectPartialFragment = g_ChunkEffectPartialFragmentDetour.trampoline
+            ? reinterpret_cast<FnChunkEffectFragmentObject>(g_ChunkEffectPartialFragmentDetour.trampoline)
+            : nullptr;
+        g_BzrFn_ChunkEffectFullFragment = g_ChunkEffectFullFragmentDetour.trampoline
+            ? reinterpret_cast<FnChunkEffectFragmentObject>(g_ChunkEffectFullFragmentDetour.trampoline)
             : nullptr;
         g_JumpSnipeProbeInstalled = false;
         g_EngineFlamePrimaryManager = nullptr;
@@ -14782,6 +15897,7 @@ namespace BZROpenShim
         g_ShieldTowerSimulateHookInstalled = false;
         g_MagnetMineSimulateHookInstalled = false;
         g_ProximityMineSimulateHookInstalled = false;
+        g_SprayBuildingSimulateHookInstalled = false;
         g_AttackRevealTraceBudget = kAttackRevealTraceBudgetDefault;
         g_HudSpriteRectTableBase = nullptr;
         g_HudSpriteRectTableDiscoveryAttempted = false;
@@ -14800,6 +15916,8 @@ namespace BZROpenShim
         g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
         g_AttackRevealEnabled = kAttackRevealEnabledDefault;
         g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
+        g_SplinterUndeadFixEnabled = kSplinterUndeadFixEnabledDefault;
+        g_SplinterUndeadTraceBudget = kSplinterUndeadTraceBudgetDefault;
         g_TurretAimPitchMultiplier = 0.5f;
         g_TurretAimPitchMultiplierEnhanced = 0.95f;
         g_RetargetPeriodNextForceMsByProcess.clear();
@@ -14879,6 +15997,10 @@ namespace BZROpenShim
         g_BzrFn_HudSpriteLookup = reinterpret_cast<FnHudSpriteLookup>(0x0068BED0);
         g_BzrFn_GetTeamNum = reinterpret_cast<FnGetTeamNum>(0x005C8800);
         g_BzrFn_ChunkEffectSimulate = reinterpret_cast<FnChunkEffectSimulate>(0x004917F0);
+        // FUN_00679570: _updateRenderQueue override of the game's world
+        // renderable container — the only exe-side caller of
+        // Ogre::RenderQueue::addRenderable. Vtable slot 0x00892728.
+        g_BzrFn_LegacyWorldUpdateRenderQueue = reinterpret_cast<FnLegacyWorldUpdateRenderQueue>(0x00679570);
         g_BzrFn_AIBuildConstructionEnd =
             reinterpret_cast<FnAIBuildConstructionEnd>(kGogAIBuildConstructionEndAddr);
         g_BzrFn_AIBuildReservedAreaRemove =
@@ -14899,6 +16021,7 @@ namespace BZROpenShim
         StartCareerStatsMpSessionWorker();
         InstallShieldTowerTeamFilterHookIfPossible();
         InstallMineTeamFilterHooksIfPossible();
+        InstallSplinterUndeadFixIfPossible();
 
         if (g_IsSteamExe)
         {
@@ -14914,7 +16037,7 @@ namespace BZROpenShim
         g_EnableChunkMeshProxy =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_MESH_PROXY") ||
               EnvFlagEnabled("BZR_DISABLE_CHUNK_MESH_PROXY"));
-        long chunkLogBudget = 1000;
+        long chunkLogBudget = 4000;
         const bool chunkLogBudgetSpecified =
             TryGetEnvLong("BZR_CHUNK_LOG_BUDGET", chunkLogBudget) ||
             TryGetEnvLong("OPENSHIM_CHUNK_LOG_BUDGET", chunkLogBudget);
@@ -14957,13 +16080,15 @@ namespace BZROpenShim
         const bool disableChunkEffectTrace =
             EnvFlagEnabled("BZR_DISABLE_CHUNK_EFFECT_TRACE") ||
             EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_EFFECT_TRACE");
+        // Opt-in only: the per-frame [CHUNKEFFECT] sampler exhausts the shared
+        // chunk log budget within seconds and silences lifecycle logging.
         g_TraceChunkEffectRuntime =
             !disableChunkEffectTrace &&
-            (true ||
-             EnvFlagEnabled("BZR_TRACE_CHUNK_EFFECT") ||
+            (EnvFlagEnabled("BZR_TRACE_CHUNK_EFFECT") ||
              EnvFlagEnabled("OPENSHIM_TRACE_CHUNK_EFFECT") ||
              EnvFlagEnabled("OPENSHIM_CHUNK_EFFECT_TRACE"));
         InstallChunkEffectCreateHooksIfRequested();
+        InstallChunkFragmentWalkHooksIfRequested();
         g_TraceSatelliteVisibility =
             EnvFlagEnabled("BZR_TRACE_SAT_VIS") ||
             EnvFlagEnabled("OPENSHIM_TRACE_SAT_VIS") ||
@@ -14979,6 +16104,17 @@ namespace BZROpenShim
                 constructorCleanupTraceBudget = 0;
         }
         g_ConstructorRemoteBuildTraceBudget = constructorCleanupTraceBudget;
+        g_SplinterUndeadFixEnabled =
+            !(EnvFlagEnabled("OPENSHIM_DISABLE_SPLINTER_UNDEAD_FIX") ||
+              EnvFlagEnabled("BZR_DISABLE_SPLINTER_UNDEAD_FIX"));
+        long splinterUndeadTraceBudget = kSplinterUndeadTraceBudgetDefault;
+        if (TryGetEnvLong("OPENSHIM_TRACE_SPLINTER_UNDEAD_BUDGET", splinterUndeadTraceBudget) ||
+            TryGetEnvLong("BZR_TRACE_SPLINTER_UNDEAD_BUDGET", splinterUndeadTraceBudget))
+        {
+            if (splinterUndeadTraceBudget < 0)
+                splinterUndeadTraceBudget = 0;
+        }
+        g_SplinterUndeadTraceBudget = splinterUndeadTraceBudget;
         long chunkProxyCapacity = static_cast<long>(g_ChunkProxyCapacity);
         if (TryGetEnvLong("OPENSHIM_CHUNK_PROXY_CAP", chunkProxyCapacity) ||
             TryGetEnvLong("OPENSHIM_CHUNK_PROXY_CAPACITY", chunkProxyCapacity))
@@ -14987,7 +16123,7 @@ namespace BZROpenShim
         }
         else
         {
-            g_ChunkProxyCapacity = 96;
+            g_ChunkProxyCapacity = 256;
         }
         float chunkProxySize = g_ChunkProxyDebugSize;
         if (TryGetEnvFloat("OPENSHIM_CHUNK_PROXY_SIZE", chunkProxySize) ||
@@ -15072,10 +16208,11 @@ namespace BZROpenShim
             g_EnableChunkProxyDebug ? "enabled" : "disabled",
             g_ChunkProxyCapacity,
             g_ChunkProxyDebugSize);
-        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Chunk mesh proxy: %hs stockRoot=%hs modRelative=%hs\n",
+        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Chunk mesh proxy: %hs stockRoot=%hs modRelative=%hs|%hs\n",
             g_EnableChunkMeshProxy ? "enabled" : "disabled",
             GetChunkPayloadStockResourceDirectory().string().c_str(),
-            kChunkPayloadModRelativeDirName);
+            kChunkPayloadModRelativeDirName,
+            kChunkPayloadModRelativeDirNameAlt);
         LogChunkDiagnostic("chunkeffect", L"[CHUNKEFFECT] Runtime manager trace: %hs vtableSlot=0x%08X orig=0x%08X\n",
             g_TraceChunkEffectRuntime ? "enabled" : "disabled",
             static_cast<uint32_t>(kChunkEffectVtableSimulateSlotAddr),
@@ -15135,6 +16272,7 @@ namespace BZROpenShim
         InstallCareerStatsMpHookIfPossible();
         InstallShieldTowerTeamFilterHookIfPossible();
         InstallMineTeamFilterHooksIfPossible();
+        InstallSplinterUndeadFixIfPossible();
         InstallAiTuningHooksIfPossible();
         InstallConstructorRemoteBuildFixIfPossible();
         EnsureInputBindingPopulateHookScaffold();
@@ -15269,8 +16407,21 @@ namespace BZROpenShim
 
     bool SetHudSpriteRectFromBridge(const char* name, int x, int y, int w, int h)
     {
-        if (IsStockScrapPilotPanelName(name) && w == 0 && h == 0)
-            return SetStockScrapPilotPanelsVisibleByUv(false);
+        // The stock scrap/pilot panels are engine-owned rects that are not
+        // reliably present in the id-indexed sprite table; they are located and
+        // toggled through the UV address-scan fallback instead. The "legacy
+        // layout" feature hides the stock panels (w==0,h==0) and draws EXU's own
+        // legacy widgets. Moving the panels back to a real size must reverse that
+        // hide. Previously only the hide direction had a shortcut here, so a
+        // restore write (w>0,h>0) fell through to the id-based path, which never
+        // reaches SetStockScrapPilotPanelsVisibleByUv(true) and left the stock
+        // panels stuck at w=0/h=0. Handle both directions symmetrically.
+        if (IsStockScrapPilotPanelName(name))
+        {
+            if (w == 0 && h == 0)
+                return SetStockScrapPilotPanelsVisibleByUv(false);
+            return SetStockScrapPilotPanelsVisibleByUv(true);
+        }
 
         int spriteId = 0;
         HudSpriteRectRecord current = {};
@@ -16954,7 +18105,7 @@ namespace BZROpenShim
 
         EnsureEngineFlameVariantsInitialized();
         g_BzrFn_EngineFlameSubmit(thisPtr, camera);
-        TickChunkProxyDebug();
+        TickChunkProxyDebug(camera, true);
 
         if (thisPtr == GetEngineFlamePrimary())
         {
@@ -16971,6 +18122,137 @@ namespace BZROpenShim
                 g_BzrFn_EngineFlameSubmit(g_EngineFlameSecondaryRed, camera);
             if (g_EngineFlamePrimaryGreenTexture != 0)
                 g_BzrFn_EngineFlameSubmit(g_EngineFlameSecondaryGreen, camera);
+        }
+    }
+
+    void __fastcall LegacyWorldUpdateRenderQueueHook(void* thisPtr, void* /*edx*/, void* renderQueue)
+    {
+        if (g_BzrFn_LegacyWorldUpdateRenderQueue && thisPtr)
+            g_BzrFn_LegacyWorldUpdateRenderQueue(thisPtr, renderQueue);
+
+        static volatile long s_FiredLogBudget = 4;
+        if (InterlockedDecrement(&s_FiredLogBudget) >= 0)
+        {
+            LogChunkDiagnostic(
+                "chunkmesh",
+                L"[CHUNKMESH] world-rq-hook fired this=0x%08X queue=0x%08X\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(renderQueue)));
+        }
+
+        SubmitChunkProxiesToRenderQueue(renderQueue);
+    }
+
+    static volatile long g_ChunkGeomDumpFragmentBudget = 8;
+    static volatile long g_ChunkGeomDumpChunkletBudget = 2;
+
+    static bool TryCopyBytesSeh(const void* src, void* dst, size_t len)
+    {
+        __try
+        {
+            memcpy(dst, src, len);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    // One-shot layout probe for the structure at obj+0x64: hex-dumps the first
+    // 0x60 bytes and ASCII-probes every dword that looks like a heap/module
+    // pointer, so the real geo-name field can be located from a live session.
+    static void DumpChunkGeomBytes(const char* tag, const void* geomPtr, volatile long* budget)
+    {
+        if (!geomPtr || !budget || InterlockedDecrement(budget) < 0)
+            return;
+
+        uint8_t raw[0x60] = {};
+        if (!TryCopyBytesSeh(geomPtr, raw, sizeof(raw)))
+        {
+            LogChunkDiagnostic(
+                "chunkspawn",
+                L"[CHUNKSPAWN] geom-dump tag=%hs geom=0x%08X unreadable\n",
+                tag ? tag : "?",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(geomPtr)));
+            return;
+        }
+
+        wchar_t hex[sizeof(raw) * 3 + 1] = {};
+        for (size_t i = 0; i < sizeof(raw); ++i)
+        {
+            static const wchar_t kDigits[] = L"0123456789ABCDEF";
+            hex[i * 3 + 0] = kDigits[raw[i] >> 4];
+            hex[i * 3 + 1] = kDigits[raw[i] & 0xF];
+            hex[i * 3 + 2] = L' ';
+        }
+        hex[sizeof(raw) * 3] = L'\0';
+
+        LogChunkDiagnostic(
+            "chunkspawn",
+            L"[CHUNKSPAWN] geom-dump tag=%hs geom=0x%08X bytes=%ls\n",
+            tag ? tag : "?",
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(geomPtr)),
+            hex);
+
+        for (size_t off = 0; off + 4 <= sizeof(raw); off += 4)
+        {
+            const uint32_t value = *reinterpret_cast<const uint32_t*>(raw + off);
+            if (value < 0x10000 || value >= 0x7FFF0000)
+                continue;
+
+            char text[40] = {};
+            if (TryReadInlineAsciiBuffer(reinterpret_cast<const void*>(static_cast<uintptr_t>(value)),
+                                         sizeof(text) - 1,
+                                         text,
+                                         sizeof(text)) &&
+                std::strlen(text) >= 3)
+            {
+                LogChunkDiagnostic(
+                    "chunkspawn",
+                    L"[CHUNKSPAWN]   geom-deref tag=%hs off=0x%02X ptr=0x%08X text=%hs\n",
+                    tag ? tag : "?",
+                    static_cast<uint32_t>(off),
+                    value,
+                    text);
+            }
+        }
+
+        // The dword at geom+0x00 points into a 0x18-byte-stride name table
+        // (chunk2's slot holds inline ASCII, craft-piece slots don't).
+        // Hex-dump the raw slot bytes so the actual encoding is visible.
+        const uint32_t nameRef = *reinterpret_cast<const uint32_t*>(raw);
+        if (nameRef >= 0x10000 && nameRef < 0x7FFF0000)
+        {
+            uint8_t slot[0x30] = {};
+            if (TryCopyBytesSeh(reinterpret_cast<const void*>(static_cast<uintptr_t>(nameRef)),
+                                slot,
+                                sizeof(slot)))
+            {
+                wchar_t slotHex[sizeof(slot) * 3 + 1] = {};
+                for (size_t i = 0; i < sizeof(slot); ++i)
+                {
+                    static const wchar_t kDigits[] = L"0123456789ABCDEF";
+                    slotHex[i * 3 + 0] = kDigits[slot[i] >> 4];
+                    slotHex[i * 3 + 1] = kDigits[slot[i] & 0xF];
+                    slotHex[i * 3 + 2] = L' ';
+                }
+                slotHex[sizeof(slot) * 3] = L'\0';
+                LogChunkDiagnostic(
+                    "chunkspawn",
+                    L"[CHUNKSPAWN]   geom-name-slot tag=%hs target=0x%08X bytes=%ls\n",
+                    tag ? tag : "?",
+                    nameRef,
+                    slotHex);
+            }
+            else
+            {
+                LogChunkDiagnostic(
+                    "chunkspawn",
+                    L"[CHUNKSPAWN]   geom-name-slot tag=%hs target=0x%08X unreadable\n",
+                    tag ? tag : "?",
+                    nameRef);
+            }
         }
     }
 
@@ -17008,6 +18290,13 @@ namespace BZROpenShim
             boundObjectBytes = createdEntryPtr->objectBytes;
         else
             boundObjectBytes = reinterpret_cast<const uint8_t*>(objectPtr);
+
+        // The object pool recycles pointers, so any binding left at either
+        // address belongs to a previous chunk. Evict before storing — a
+        // failed source capture must not leave the old craft's identity
+        // behind for this chunk to inherit.
+        EraseChunkResolvedBinding(reinterpret_cast<const uint8_t*>(objectPtr));
+        EraseChunkResolvedBinding(boundObjectBytes);
 
         if (boundObjectBytes)
             StoreChunkResolvedBinding(boundObjectBytes, sourceTreeProbe);
@@ -17053,6 +18342,12 @@ namespace BZROpenShim
                 createdEntryPtr = &createdEntry;
         }
 
+        // Generic chunklets have no craft owner; if the pool recycled this
+        // pointer from a craft chunk, the leftover binding would dress the
+        // chunklet in that craft's debris meshes.
+        if (createdEntryPtr && createdEntryPtr->objectBytes)
+            EraseChunkResolvedBinding(createdEntryPtr->objectBytes);
+
         LogChunkCreateLifecycle(
             L"CreateChunklet",
             thisPtr,
@@ -17064,6 +18359,293 @@ namespace BZROpenShim
             countAfter,
             createdEntryPtr,
             nullptr);
+
+        // Baseline layout dump of a known-good chunklet geo (its name reads
+        // fine) to compare against the craft-piece geoms whose names don't.
+        if (createdEntryPtr && createdEntryPtr->objectBytes)
+        {
+            const void* geomRef = nullptr;
+            char geomName[64] = {};
+            if (TryReadChunkGeomIdentity(createdEntryPtr->objectBytes, geomRef, geomName, sizeof(geomName)) &&
+                geomRef && geomName[0])
+            {
+                DumpChunkGeomBytes("chunklet-baseline", geomRef, &g_ChunkGeomDumpChunkletBudget);
+            }
+        }
+    }
+
+    static volatile long g_ChunkFragmentWalkLogBudget = 160;
+
+    static bool AcquireChunkFragmentWalkLogSlot()
+    {
+        return InterlockedDecrement(&g_ChunkFragmentWalkLogBudget) >= 0;
+    }
+
+
+    static void LogChunkFragmentWalkTree(const wchar_t* tag,
+                                         void* thisPtr,
+                                         void* objectPtr,
+                                         uint8_t preserveFlag)
+    {
+        if (!g_TraceChunkRender && !g_TraceChunkEffectRuntime)
+            return;
+        if (!AcquireChunkFragmentWalkLogSlot())
+            return;
+
+        LogChunkDiagnostic(
+            "chunkspawn",
+            L"[CHUNKSPAWN] %ls-walk this=0x%08X root=0x%08X preserve=%u\n",
+            tag ? tag : L"fragment",
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectPtr)),
+            static_cast<uint32_t>(preserveFlag));
+
+        // Depth-first dump of the OBJ76 tree handed to the fragment walker.
+        constexpr uint32_t kMaxWalkNodes = 24;
+        constexpr uint32_t kMaxWalkStack = 24;
+        const uint8_t* pending[kMaxWalkStack] = {};
+        uint32_t pendingDepth[kMaxWalkStack] = {};
+        uint32_t pendingCount = 0;
+        if (objectPtr)
+        {
+            pending[pendingCount] = reinterpret_cast<const uint8_t*>(objectPtr);
+            pendingDepth[pendingCount] = 0;
+            ++pendingCount;
+        }
+
+        uint32_t visited = 0;
+        while (pendingCount != 0 && visited < kMaxWalkNodes)
+        {
+            --pendingCount;
+            const uint8_t* node = pending[pendingCount];
+            const uint32_t depth = pendingDepth[pendingCount];
+            if (!node)
+                continue;
+            ++visited;
+
+            uint32_t classId = 0;
+            uint32_t flags = 0;
+            void* geomRef = nullptr;
+            void* owner = nullptr;
+            char geomName[64] = {};
+            TryReadChunkObjectSummary(node, classId, flags, geomRef, geomName, sizeof(geomName), owner);
+
+            const uint8_t* parent = nullptr;
+            const uint8_t* sibling = nullptr;
+            const uint8_t* child = nullptr;
+            const bool linksOk = TryReadChunkObjectLinks(node, parent, sibling, child);
+
+            if (AcquireChunkFragmentWalkLogSlot())
+            {
+                LogChunkDiagnostic(
+                    "chunkspawn",
+                    L"[CHUNKSPAWN]   frag-node depth=%u obj=0x%08X class=%u flags=0x%08X geom=0x%08X geomName=%hs parent=0x%08X sibling=0x%08X child=0x%08X%hs\n",
+                    depth,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(node)),
+                    classId,
+                    flags,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(geomRef)),
+                    geomName[0] ? geomName : "<none>",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parent)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sibling)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(child)),
+                    linksOk ? "" : " links=unreadable");
+            }
+
+            if (geomRef && !geomName[0])
+                DumpChunkGeomBytes("fragnode", geomRef, &g_ChunkGeomDumpFragmentBudget);
+
+            if (!linksOk)
+                continue;
+            // Push sibling first so children print directly under their parent.
+            if (sibling && pendingCount < kMaxWalkStack)
+            {
+                pending[pendingCount] = sibling;
+                pendingDepth[pendingCount] = depth;
+                ++pendingCount;
+            }
+            if (child && pendingCount < kMaxWalkStack)
+            {
+                pending[pendingCount] = child;
+                pendingDepth[pendingCount] = depth + 1;
+                ++pendingCount;
+            }
+        }
+
+        if (visited >= kMaxWalkNodes && AcquireChunkFragmentWalkLogSlot())
+        {
+            LogChunkDiagnostic(
+                "chunkspawn",
+                L"[CHUNKSPAWN]   frag-walk truncated at %u nodes\n",
+                visited);
+        }
+    }
+
+    static void BeginActiveFragmentSourceContext(void* rootObjectPtr)
+    {
+        g_ActiveFragmentSourceMeshName[0] = '\0';
+        if (!rootObjectPtr)
+            return;
+
+        const ChunkBridgeSnapshot rootSnapshot =
+            CaptureChunkBridgeSnapshot(reinterpret_cast<const uint8_t*>(rootObjectPtr));
+        if (rootSnapshot.ownerResolvedMeshName[0])
+        {
+            strncpy_s(
+                g_ActiveFragmentSourceMeshName,
+                rootSnapshot.ownerResolvedMeshName,
+                _TRUNCATE);
+        }
+
+        if (AcquireChunkFragmentWalkLogSlot())
+        {
+            LogChunkDiagnostic(
+                "chunkspawn",
+                L"[CHUNKSPAWN] frag-source obj=0x%08X mesh=%hs base=%hs file=%hs\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rootObjectPtr)),
+                g_ActiveFragmentSourceMeshName[0] ? g_ActiveFragmentSourceMeshName : "<none>",
+                rootSnapshot.ownerEntityBaseName[0] ? rootSnapshot.ownerEntityBaseName : "<none>",
+                rootSnapshot.ownerOgreFilename[0] ? rootSnapshot.ownerOgreFilename : "<none>");
+        }
+    }
+
+    void __fastcall ChunkEffectPartialFragmentHook(void* thisPtr,
+                                                   void* /*edx*/,
+                                                   void* objectPtr,
+                                                   const float* velocity,
+                                                   uint8_t preserveFlag)
+    {
+        if (!g_BzrFn_ChunkEffectPartialFragment)
+            return;
+
+        // The original recurses into its own patched entry for child levels;
+        // only dump the tree for the outermost call.
+        const bool outermost = (g_ChunkFragmentHookDepth == 0);
+        uint32_t countBefore = 0;
+        if (outermost)
+        {
+            LogChunkFragmentWalkTree(L"PartialFragmentObject", thisPtr, objectPtr, preserveFlag);
+            TryReadChunkEffectCount(reinterpret_cast<const uint8_t*>(thisPtr), countBefore);
+            BeginActiveFragmentSourceContext(objectPtr);
+        }
+        ++g_ChunkFragmentHookDepth;
+        g_BzrFn_ChunkEffectPartialFragment(thisPtr, objectPtr, velocity, preserveFlag);
+        --g_ChunkFragmentHookDepth;
+        if (outermost)
+        {
+            g_ActiveFragmentSourceMeshName[0] = '\0';
+            uint32_t countAfter = countBefore;
+            TryReadChunkEffectCount(reinterpret_cast<const uint8_t*>(thisPtr), countAfter);
+            if (AcquireChunkFragmentWalkLogSlot())
+            {
+                LogChunkDiagnostic(
+                    "chunkspawn",
+                    L"[CHUNKSPAWN] PartialFragmentObject-result created=%d countBefore=%u countAfter=%u\n",
+                    static_cast<int>(countAfter) - static_cast<int>(countBefore),
+                    countBefore,
+                    countAfter);
+            }
+        }
+    }
+
+    // In the legacy engine full fragmentation unparented every geo from the
+    // craft's object tree, so the intact model stopped rendering on the same
+    // frame the debris appeared. Redux instead renders a baked Ogre mesh that
+    // lingers until entity teardown; hide that mesh (and its light) here so
+    // the chunk proxies visually take over immediately.
+    static bool TrySetChunkOwnerMovableVisibleSeh(
+        FnOgreSetVisible setVisible,
+        void* movable,
+        bool visible)
+    {
+        if (!setVisible || !movable)
+            return false;
+
+        __try
+        {
+            setVisible(movable, visible);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    static void HideChunkFragmentSourceMesh(void* objectPtr)
+    {
+        if (!objectPtr)
+            return;
+
+        static FnOgreSetVisible setVisible =
+            ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
+        if (!setVisible)
+            return;
+
+        const ChunkBridgeSnapshot snapshot =
+            CaptureChunkBridgeSnapshot(reinterpret_cast<const uint8_t*>(objectPtr));
+
+        uint32_t hiddenCount = 0;
+        void* const candidates[] = {
+            snapshot.directOgreEntity,
+            snapshot.directOgreLight,
+            (snapshot.ownerOgreEntity != snapshot.directOgreEntity) ? snapshot.ownerOgreEntity : nullptr,
+            (snapshot.ownerOgreLight != snapshot.directOgreLight) ? snapshot.ownerOgreLight : nullptr,
+        };
+        for (void* candidate : candidates)
+        {
+            if (TrySetChunkOwnerMovableVisibleSeh(setVisible, candidate, false))
+                ++hiddenCount;
+        }
+
+        if (AcquireChunkFragmentWalkLogSlot())
+        {
+            LogChunkDiagnostic(
+                "chunkspawn",
+                L"[CHUNKSPAWN] hide-source obj=0x%08X directEntity=0x%08X ownerEntity=0x%08X hidden=%u\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectPtr)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(snapshot.directOgreEntity)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(snapshot.ownerOgreEntity)),
+                hiddenCount);
+        }
+    }
+
+    void __fastcall ChunkEffectFullFragmentHook(void* thisPtr,
+                                                void* /*edx*/,
+                                                void* objectPtr,
+                                                const float* velocity,
+                                                uint8_t preserveFlag)
+    {
+        if (!g_BzrFn_ChunkEffectFullFragment)
+            return;
+
+        const bool outermost = (g_ChunkFragmentHookDepth == 0);
+        uint32_t countBefore = 0;
+        if (outermost)
+        {
+            LogChunkFragmentWalkTree(L"FullFragmentObject", thisPtr, objectPtr, preserveFlag);
+            TryReadChunkEffectCount(reinterpret_cast<const uint8_t*>(thisPtr), countBefore);
+            HideChunkFragmentSourceMesh(objectPtr);
+            BeginActiveFragmentSourceContext(objectPtr);
+        }
+        ++g_ChunkFragmentHookDepth;
+        g_BzrFn_ChunkEffectFullFragment(thisPtr, objectPtr, velocity, preserveFlag);
+        --g_ChunkFragmentHookDepth;
+        if (outermost)
+        {
+            g_ActiveFragmentSourceMeshName[0] = '\0';
+            uint32_t countAfter = countBefore;
+            TryReadChunkEffectCount(reinterpret_cast<const uint8_t*>(thisPtr), countAfter);
+            if (AcquireChunkFragmentWalkLogSlot())
+            {
+                LogChunkDiagnostic(
+                    "chunkspawn",
+                    L"[CHUNKSPAWN] FullFragmentObject-result created=%d countBefore=%u countAfter=%u\n",
+                    static_cast<int>(countAfter) - static_cast<int>(countBefore),
+                    countBefore,
+                    countAfter);
+            }
+        }
     }
 
     void __fastcall ChunkEffectSimulateHook(void* thisPtr, void* /*edx*/, float dt)
@@ -17077,10 +18659,20 @@ namespace BZROpenShim
             InstallCareerStatsMpHookIfPossible();
         if (!g_ChunkEffectCreateHooksInstalled)
             InstallChunkEffectCreateHooksIfRequested();
+        if (!g_ChunkEffectFragmentHooksInstalled)
+            InstallChunkFragmentWalkHooksIfRequested();
 
         MaybeLogSatelliteVisibilitySample();
         RefreshChunkObjectIdentityCacheIfNeeded();
         TrackChunkEffectActiveEntries(thisPtr);
+        // Keep proxy lifecycle (expiry, transform mirroring) ticking from the
+        // simulate hook so it survives even when the render hooks are not
+        // running, but never manual-submit from sim time: the render queue is
+        // rebuilt each frame, so submissions here would be discarded — or worse,
+        // outlive a released slot. Render-time submission happens in
+        // LegacyWorldUpdateRenderQueueHook, invoked by Ogre with the live
+        // render queue every rendered frame.
+        TickChunkProxyDebug(nullptr, false);
         LogChunkEffectRuntimeSample(thisPtr, dt);
         g_BzrFn_ChunkEffectSimulate(thisPtr, dt);
     }
@@ -17411,6 +19003,19 @@ namespace BZROpenShim
         UpdateFlagSelectionUiLabel(g_FlagLabelClient);
     }
 
+    // The native load screen sets BOTH callback slots on every load-slot button:
+    // +0x150 (via 0x007C23C0, "SetOnHover") and +0x154 (via 0x007C23E0,
+    // "SetOnClick"). When the screen is opened it walks every dialog child and
+    // invokes each child's +0x150 slot, so any child that leaves +0x150 null
+    // causes a call-through-null (EIP=0) crash. Our injected AutoSave button
+    // only set the click slot, leaving +0x150 null -> deterministic crash on
+    // opening Load/Save whenever an auto.sav exists. This benign no-op keeps the
+    // hover slot non-null (matching the stock slot buttons) without triggering
+    // the load path on hover/refresh.
+    void __cdecl AutoSaveButtonOnHoverNoop(void* /*param*/)
+    {
+    }
+
     void __cdecl AutoSaveButtonOnClickLoad()
     {
         if (!g_BzrFn_SetShellState)
@@ -17491,6 +19096,10 @@ namespace BZROpenShim
         // +0x144. Button objects use +0x150/+0x154 for hover/click callbacks,
         // so using it here corrupts the callback slot and crashes the load menu.
         if (g_BzrFn_SetOnClick) g_BzrFn_SetOnClick(g_AutoSaveLoadButton, reinterpret_cast<void*>(AutoSaveButtonOnClickLoad));
+        // Mirror the stock load-slot buttons by also populating the +0x150 slot.
+        // Without this the load screen invokes a null callback on open and
+        // crashes (call through NULL / EIP=0). See AutoSaveButtonOnHoverNoop.
+        if (g_BzrFn_SetOnHover) g_BzrFn_SetOnHover(g_AutoSaveLoadButton, reinterpret_cast<void*>(AutoSaveButtonOnHoverNoop));
         g_BzrFn_AddChild(parent, g_AutoSaveLoadButton, 0);
     }
 
