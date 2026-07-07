@@ -37,6 +37,15 @@ namespace BZROpenShim
                 std::ifstream f("scripts/patches.json");
                 if (f.is_open()) { data = nlohmann::json::parse(f); return true; }
             } catch (...) {}
+            try {
+                // The game may be launched with a working directory other than
+                // the install root; fall back to the exe's own directory.
+                char path[MAX_PATH] = {}; GetModuleFileNameA(nullptr, path, MAX_PATH);
+                char* slash = strrchr(path, '\\'); if (slash) *slash = '\0';
+                std::string exeRelative = std::string(path) + "\\scripts\\patches.json";
+                std::ifstream f(exeRelative);
+                if (f.is_open()) { data = nlohmann::json::parse(f); return true; }
+            } catch (...) {}
             return false;
         }
         uint32_t GetStaticPointer(const std::string& name, uint32_t defaultVal = 0) {
@@ -173,7 +182,7 @@ namespace BZROpenShim
 
     static bool IsChunkExperimentPatchName(const char* name) {
         if (!name) return false;
-        return strcmp(name, "Chunk Render Resolve Hook") == 0 || strcmp(name, "Chunk Effect Simulate VTable Hook") == 0;
+        return strcmp(name, "Chunk Render Resolve Hook") == 0 || strcmp(name, "Chunk Effect Simulate VTable Hook") == 0 || strcmp(name, "Legacy World Update RenderQueue VTable Hook") == 0;
     }
 
     static bool IsProducerBuildMenuExperimentPatchName(const char* name) { return name && strcmp(name, "Producer Build Menu Root Hook") == 0; }
@@ -219,11 +228,15 @@ namespace BZROpenShim
         return s_config;
     }
 
+    static void WriteZeroGuarded(uintptr_t addr) {
+        __try { auto* flag = reinterpret_cast<volatile uint32_t*>(addr); *flag = 0; }
+        __except (EXCEPTION_EXECUTE_HANDLER) {}
+    }
+
     static void SuppressStartupShellAutoLoad() {
         const uintptr_t kAddr = g_Config.GetStaticPointer("StartupShellAutoLoadFlag", 0x008EAAA8);
         if (!ShouldSuppressStartupAutoLoad()) return;
-        __try { auto* flag = reinterpret_cast<volatile uint32_t*>(kAddr); *flag = 0; }
-        __except (EXCEPTION_EXECUTE_HANDLER) {}
+        WriteZeroGuarded(kAddr);
     }
 
     static bool ScanForSoundChannelOverrideTargets(SoundChannelOverrideTargets& outTargets) {
@@ -307,9 +320,22 @@ namespace BZROpenShim
     }
 
     static bool IsSteamExe() {
-        char path[MAX_PATH] = {}; GetModuleFileNameA(nullptr, path, MAX_PATH);
-        const char* base = strrchr(path, '\'); base = base ? (base + 1) : path;
-        return _stricmp(base, "battlezone98redux.exe") == 0;
+        // GOG and Steam both ship battlezone98redux.exe, so the name cannot
+        // distinguish them. The Steam build is SteamStub-packed and carries a
+        // ".bind" PE section - the exact property the Steam settled-byte
+        // waits exist for - while the GOG build has none.
+        const uint8_t* base = reinterpret_cast<const uint8_t*>(GetModuleHandleA(nullptr));
+        if (!base) return false;
+        const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+        if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
+        const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
+        if (nt->Signature != IMAGE_NT_SIGNATURE) return false;
+        const IMAGE_SECTION_HEADER* sect = IMAGE_FIRST_SECTION(nt);
+        static const uint8_t kBindName[IMAGE_SIZEOF_SHORT_NAME] = { '.', 'b', 'i', 'n', 'd', 0, 0, 0 };
+        for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i) {
+            if (memcmp(sect[i].Name, kBindName, IMAGE_SIZEOF_SHORT_NAME) == 0) return true;
+        }
+        return false;
     }
 
     static uint32_t GetBZRVersion() {
@@ -317,7 +343,7 @@ namespace BZROpenShim
         DWORD d = 0; DWORD sz = GetFileVersionInfoSizeA(path, &d); if (sz == 0) return 0xFFFFFFFF;
         std::vector<uint8_t> buf(sz); if (!GetFileVersionInfoA(path, 0, sz, buf.data())) return 0xFFFFFFFF;
         VS_FIXEDFILEINFO* ffi = nullptr; UINT fl = 0;
-        if (!VerQueryValueA(buf.data(), "\", reinterpret_cast<LPVOID*>(&ffi), &fl) || !ffi) return 0xFFFFFFFF;
+        if (!VerQueryValueA(buf.data(), "\\", reinterpret_cast<LPVOID*>(&ffi), &fl) || !ffi) return 0xFFFFFFFF;
         uint32_t ver = static_cast<uint32_t>(LOWORD(ffi->dwFileVersionLS));
         if (ver == 0) ver = static_cast<uint32_t>(HIWORD(ffi->dwFileVersionLS));
         return ver;
@@ -391,9 +417,10 @@ namespace BZROpenShim
                 for (const auto& g : g_Config.data["globals"]) {
                     uint32_t fb = 0; if (isSteam && g.contains("fallback_steam")) fb = std::stoul(g["fallback_steam"].get<std::string>(), nullptr, 16);
                     else if (!isSteam && g.contains("fallback_gog")) fb = std::stoul(g["fallback_gog"].get<std::string>(), nullptr, 16);
+                    if (fb == 0 && g.contains("fallback")) fb = std::stoul(g["fallback"].get<std::string>(), nullptr, 16);
                     auto expVec = HookEngine::ParseIdaPattern(g["expected_original"]);
                     std::vector<uint8_t> exp; for (auto v : expVec) exp.push_back(static_cast<uint8_t>(v));
-                    for (auto& p : patches) { if (p.name == g["name"]) { p.bzr_address = fb; p.verified = (fb != 0); p.expected_original = exp; } }
+                    for (auto& p : patches) { if (p.name == g["name"].get<std::string>()) { p.address = fb; p.verified = (fb != 0); p.expected_original = exp; } }
                 }
             }
         } catch (...) {}
@@ -401,7 +428,7 @@ namespace BZROpenShim
         for (const auto& t : targets) {
             for (auto& p : patches) {
                 if (!p.verified && p.name == t.name) {
-                    p.bzr_address = t.fallback_addr; p.verified = true;
+                    p.address = t.fallback_addr; p.verified = true;
                     auto ida = HookEngine::ParseIdaPattern(t.ida_pattern);
                     if (t.expected_size > 0) { p.expected_original.clear(); for (size_t j = 0; j < t.expected_size && j < ida.size(); ++j) p.expected_original.push_back(static_cast<uint8_t>(ida[j])); }
                 }
@@ -418,7 +445,7 @@ namespace BZROpenShim
             for (auto& x : m) {
                 if (p.name == x.n) {
                     size_t l = (p.name.find("Turret") != std::string::npos && p.name.find("Pitch") != std::string::npos) ? 8 : (p.name.find("Reveal") != std::string::npos ? 12 : (p.name.find("Volley") != std::string::npos ? 6 : (p.name.find("Attack Alert") != std::string::npos ? 52 : 5)));
-                    p.payload = HookEngine::MakeJmp5Payload(p.bzr_address, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(x.f)), l); break;
+                    p.payload = HookEngine::MakeJmp5Payload(p.address, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(x.f)), l); break;
                 }
             }
         }
@@ -432,11 +459,11 @@ namespace BZROpenShim
             else if (p.name == "Map Filters 6/8") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(MapFilters6Rel32));
             else if (p.name == "Chunk Render Resolve Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ChunkRenderResolveHook));
             else if (p.name == "Producer Build Menu Root Hook") {
-                void* orig = isSteam ? HookEngine::ResolveRelCallTargetWithRetry(p.bzr_address - 1, 300, 10) : HookEngine::ResolveRelCallTarget(p.bzr_address - 1);
+                void* orig = isSteam ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10) : HookEngine::ResolveRelCallTarget(p.address - 1);
                 if (!orig) continue; SetProducerBuildMenuOriginal(orig); target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ProducerBuildMenuCallHook));
             } else if (p.name == "Target Reticle Popup Recent-Hit Getter Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(TargetReticlePopupRecentHitGetterHook));
             else if (p.name.find("HoverCraft Engine Flame Emit Hook") != std::string::npos) target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_EngineFlameHoverCraftEmit));
-            if (target) { int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(p.bzr_address + 4); p.payload.resize(4); memcpy(p.payload.data(), &rel, 4); }
+            if (target) { int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(p.address + 4); p.payload.resize(4); memcpy(p.payload.data(), &rel, 4); }
         }
     }
 
@@ -445,6 +472,7 @@ namespace BZROpenShim
         const uint32_t flameC = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(EngineFlameControlHook));
         const uint32_t flameS = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(EngineFlameSubmitHook));
         const uint32_t chunkE = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ChunkEffectSimulateHook));
+        const uint32_t legacyRQ = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(LegacyWorldUpdateRenderQueueHook));
         for (auto& p : patches) {
             if (p.type != HookEngine::PatchType::DWORD) continue;
             uint32_t val = 0;
@@ -452,6 +480,7 @@ namespace BZROpenShim
             else if (p.name == "Engine Flame Control VTable Hook") val = flameC;
             else if (p.name == "Engine Flame Submit VTable Hook") val = flameS;
             else if (p.name == "Chunk Effect Simulate VTable Hook") val = chunkE;
+            else if (p.name == "Legacy World Update RenderQueue VTable Hook") val = legacyRQ;
             if (val) { p.payload.resize(4); memcpy(p.payload.data(), &val, 4); }
         }
     }
@@ -462,10 +491,10 @@ namespace BZROpenShim
             if (g_ShutdownRequested) return;
             bool all = true;
             for (const auto& p : patches) {
-                if (p.bzr_address == 0 || p.expected_original.empty()) continue;
+                if (p.address == 0 || p.expected_original.empty()) continue;
                 if (p.name.find("Version Notice") == std::string::npos && p.name.find("Offensive Attack") == std::string::npos) continue;
                 std::vector<uint8_t> cur(p.expected_original.size()); SIZE_T r;
-                if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(p.bzr_address), cur.data(), cur.size(), &r) || cur != p.expected_original) { all = false; break; }
+                if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(p.address), cur.data(), cur.size(), &r) || cur != p.expected_original) { all = false; break; }
             }
             if (all) return; Sleep(10);
         }
@@ -481,7 +510,7 @@ namespace BZROpenShim
         std::vector<uint8_t> sig; if (ReadExeSignature(sig)) WaitForSignature(sig);
         StartSoundChannelOverride(isSteam);
         g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForRuntime(patches, isSteam); ScanForPatchAddresses(patches, isSteam);
-        auto findAddr = [&patches](const char* n) -> uint32_t { for (const auto& p : patches) { if (p.name == n) return p.bzr_address; } return 0; };
+        auto findAddr = [&patches](const char* n) -> uint32_t { for (const auto& p : patches) { if (p.name == n) return p.address; } return 0; };
         ResolvePointers(findAddr("Map Sorting"), findAddr("Map List Rewrite for Hop-Fix 1/3"), findAddr("Map List Rewrite for Hop-Fix 2/3"), findAddr("Map List Rewrite for Hop-Fix 3/3"), findAddr("Probe Refresh Path MapFilter1"), findAddr("Map List Fix Support 1/3"), findAddr("Probe MapListFix2"), findAddr("Artillery Howitzer Volley Hook"), findAddr("TurretCraft Aim Pitch Multiplier"), findAddr("TurretTank Aim Pitch Multiplier"), findAddr("Under Attack Alert Hook 1/2"), findAddr("Under Attack Alert Hook 2/2"), findAddr("Offensive Attack Reveal Hook"), findAddr("TurretTank Attack Reveal Hook"));
         ResolveBzrHooks(isSteam); InitBzrHookStrings(); SuppressStartupShellAutoLoad();
         FillJmp5Payloads(patches); FillVersionNoticePayloads(patches); FillRel32Payloads(patches, isSteam); WaitForExpectedBytes(patches, isSteam);
@@ -489,7 +518,16 @@ namespace BZROpenShim
         if (isSteam && !AreInputBindingUiHooksInstalled()) {
             for (int i = 0; i < 2500; ++i) { if (g_ShutdownRequested) return; if (AreInputBindingUiHooksInstalled()) break; Sleep(10); RetryDeferredRuntimeHooks(); }
         }
-        int app = 0; for (const auto& p : patches) { if (HookEngine::ApplyPatch(p)) app++; }
+        int app = 0;
+        for (const auto& p : patches) {
+            if (HookEngine::ApplyPatch(p)) {
+                app++;
+                Log(L"[OK]   %hs wrote %u bytes to 0x%08X\n", p.name.c_str(), static_cast<unsigned>(p.payload.size()), p.address);
+            } else {
+                Log(L"[SKIP] %hs address=0x%08X verified=%hs payload=%u\n", p.name.c_str(), p.address, p.verified ? "yes" : "no", static_cast<unsigned>(p.payload.size()));
+            }
+        }
+        Log(L"[DONE] Applied=%d of %u\n", app, static_cast<unsigned>(patches.size()));
         SetPatchingComplete(true); SetAppliedPatchCount(app);
     }
 }
