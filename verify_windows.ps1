@@ -6,21 +6,105 @@ param (
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$defaultPaths = @(
-    "<GAME_ROOT>",
-    "<GAME_ROOT>",
-    "$env:PROGRAMFILES\Steam\steamapps\common\Battlezone 98 Redux",
-    "<GAME_ROOT>",
-    "<GAME_ROOT>"
-)
+$steamAppId = "301650"
+$steamGameExeName = "battlezone98redux.exe"
+$gogGameExeName = "BZR.exe"
+$defaultInstallDir = "Battlezone 98 Redux"
 
-if (-not $GamePath) {
-    foreach ($path in $defaultPaths) {
-        if (Test-Path $path) {
-            $GamePath = $path
-            break
+function Get-SteamRoots {
+    $roots = New-Object System.Collections.Generic.List[string]
+
+    foreach ($location in @(
+        @{ Path = "HKCU:\Software\Valve\Steam"; Names = @("SteamPath", "Path") },
+        @{ Path = "HKLM:\SOFTWARE\WOW6432Node\Valve\Steam"; Names = @("InstallPath") },
+        @{ Path = "HKLM:\SOFTWARE\Valve\Steam"; Names = @("InstallPath") }
+    )) {
+        try {
+            $item = Get-ItemProperty -Path $location.Path -ErrorAction Stop
+            foreach ($name in $location.Names) {
+                $value = [string]$item.$name
+                if ($value) { $roots.Add($value) }
+            }
+        }
+        catch {
         }
     }
+
+    foreach ($fallback in @(
+        (Join-Path ${env:ProgramFiles(x86)} "Steam"),
+        (Join-Path $env:PROGRAMFILES "Steam")
+    )) {
+        if ($fallback) { $roots.Add($fallback) }
+    }
+
+    $roots | Where-Object { $_ } | Select-Object -Unique
+}
+
+function Get-SteamLibraryRoots {
+    param([string]$SteamRoot)
+
+    $libraryRoots = New-Object System.Collections.Generic.List[string]
+    $libraryRoots.Add($SteamRoot)
+
+    $libraryVdf = Join-Path $SteamRoot "steamapps\libraryfolders.vdf"
+    if (Test-Path $libraryVdf) {
+        foreach ($line in Get-Content -Path $libraryVdf) {
+            $match = [regex]::Match($line, '"path"\s+"([^"]+)"')
+            if (-not $match.Success) {
+                $match = [regex]::Match($line, '^\s*"\d+"\s+"([^"]+)"')
+            }
+            if ($match.Success) {
+                $libraryRoots.Add($match.Groups[1].Value.Replace('\\', '\'))
+            }
+        }
+    }
+
+    $libraryRoots | Where-Object { $_ } | Select-Object -Unique
+}
+
+function Find-InstalledGamePath {
+    foreach ($steamRoot in Get-SteamRoots) {
+        foreach ($libraryRoot in Get-SteamLibraryRoots -SteamRoot $steamRoot) {
+            $steamApps = Join-Path $libraryRoot "steamapps"
+            $manifest = Join-Path $steamApps "appmanifest_$steamAppId.acf"
+            if (Test-Path $manifest) {
+                $installDir = $defaultInstallDir
+                foreach ($line in Get-Content -Path $manifest) {
+                    $match = [regex]::Match($line, '"installdir"\s+"([^"]+)"')
+                    if ($match.Success) {
+                        $installDir = $match.Groups[1].Value
+                        break
+                    }
+                }
+
+                $candidate = Join-Path $steamApps (Join-Path "common" $installDir)
+                if (Test-Path (Join-Path $candidate $steamGameExeName)) {
+                    return $candidate
+                }
+            }
+
+            $fallbackCandidate = Join-Path $steamApps (Join-Path "common" $defaultInstallDir)
+            if (Test-Path (Join-Path $fallbackCandidate $steamGameExeName)) {
+                return $fallbackCandidate
+            }
+        }
+    }
+
+    foreach ($candidate in @(
+        (Join-Path ([Environment]::GetFolderPath("MyDocuments")) "Battlezone 98 Redux"),
+        (Join-Path $env:PROGRAMFILES "GOG Galaxy\Games\Battlezone 98 Redux"),
+        (Join-Path ${env:ProgramFiles(x86)} "GOG Galaxy\Games\Battlezone 98 Redux")
+    )) {
+        if ($candidate -and (Test-Path (Join-Path $candidate $gogGameExeName))) {
+            return $candidate
+        }
+    }
+
+    return ""
+}
+
+if (-not $GamePath) {
+    $GamePath = Find-InstalledGamePath
 }
 
 if (-not $GamePath -or -not (Test-Path $GamePath)) {
@@ -70,7 +154,7 @@ if (Test-Path $bzLoggerPath) {
             Write-Host "[PASS] BZLogger interval is ${intervalMs} ms at bandwidth $bandwidth" -ForegroundColor Green
             Write-Host "       $lastIntervalLine"
         } else {
-            Write-Host "[WARN] BZLogger interval is ${intervalMs} ms at bandwidth $bandwidth (target is <= 33 ms for the test profile)" -ForegroundColor Yellow
+            Write-Host "[WARN] BZLogger interval is ${intervalMs} ms at bandwidth $bandwidth (target is <= 33 ms for the 16000+ test profile)" -ForegroundColor Yellow
             Write-Host "       $lastIntervalLine"
         }
     } else {
@@ -119,6 +203,18 @@ if (-not (Test-Path $logPath)) {
         Write-Host "[FAIL] Winsock IAT hook installation not confirmed" -ForegroundColor Red
         $issues += "No non-zero Winsock IAT hook installation line was found in the latest session"
         $pass = $false
+    }
+
+    if ($sessionLog -match "dscp=46" -or $sessionLog -match "DSCP=46") {
+        Write-Host "[PASS] DSCP default observed in log" -ForegroundColor Green
+    } else {
+        Write-Host "[WARN] DSCP default was not observed in latest session log" -ForegroundColor Yellow
+    }
+
+    if ($sessionLog -match "autokickStart=60000" -or $sessionLog -match "autokick_patch: version confirmed") {
+        Write-Host "[PASS] auto-kick relax config observed in log" -ForegroundColor Green
+    } else {
+        Write-Host "[WARN] auto-kick relax config was not observed in latest session log" -ForegroundColor Yellow
     }
 
     $sendPatterns = @(

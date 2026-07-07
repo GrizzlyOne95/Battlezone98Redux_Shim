@@ -17,6 +17,11 @@ $stateRoot = Join-Path $repoRoot "test_bundles\openshim_diag_state"
 $currentFile = Join-Path $stateRoot "windows_current_session.txt"
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 
+$steamAppId = "301650"
+$steamGameExeName = "battlezone98redux.exe"
+$gogGameExeName = "BZR.exe"
+$defaultInstallDir = "Battlezone 98 Redux"
+
 function Get-ResolvedGamePath {
     param([string]$Candidate)
 
@@ -24,17 +29,91 @@ function Get-ResolvedGamePath {
         return (Resolve-Path $Candidate).Path
     }
 
-    $defaultPaths = @(
-        "<GAME_ROOT>",
-        "<GAME_ROOT>",
-        "$env:PROGRAMFILES\Steam\steamapps\common\Battlezone 98 Redux",
-        "<GAME_ROOT>",
-        "<GAME_ROOT>"
-    )
+    function Get-SteamRoots {
+        $roots = New-Object System.Collections.Generic.List[string]
 
-    foreach ($path in $defaultPaths) {
-        if (Test-Path $path) {
-            return (Resolve-Path $path).Path
+        foreach ($location in @(
+            @{ Path = "HKCU:\Software\Valve\Steam"; Names = @("SteamPath", "Path") },
+            @{ Path = "HKLM:\SOFTWARE\WOW6432Node\Valve\Steam"; Names = @("InstallPath") },
+            @{ Path = "HKLM:\SOFTWARE\Valve\Steam"; Names = @("InstallPath") }
+        )) {
+            try {
+                $item = Get-ItemProperty -Path $location.Path -ErrorAction Stop
+                foreach ($name in $location.Names) {
+                    $value = [string]$item.$name
+                    if ($value) { $roots.Add($value) }
+                }
+            }
+            catch {
+            }
+        }
+
+        foreach ($fallback in @(
+            (Join-Path ${env:ProgramFiles(x86)} "Steam"),
+            (Join-Path $env:PROGRAMFILES "Steam")
+        )) {
+            if ($fallback) { $roots.Add($fallback) }
+        }
+
+        $roots | Where-Object { $_ } | Select-Object -Unique
+    }
+
+    function Get-SteamLibraryRoots {
+        param([string]$SteamRoot)
+
+        $libraryRoots = New-Object System.Collections.Generic.List[string]
+        $libraryRoots.Add($SteamRoot)
+
+        $libraryVdf = Join-Path $SteamRoot "steamapps\libraryfolders.vdf"
+        if (Test-Path $libraryVdf) {
+            foreach ($line in Get-Content -Path $libraryVdf) {
+                $match = [regex]::Match($line, '"path"\s+"([^"]+)"')
+                if (-not $match.Success) {
+                    $match = [regex]::Match($line, '^\s*"\d+"\s+"([^"]+)"')
+                }
+                if ($match.Success) {
+                    $libraryRoots.Add($match.Groups[1].Value.Replace('\\', '\'))
+                }
+            }
+        }
+
+        $libraryRoots | Where-Object { $_ } | Select-Object -Unique
+    }
+
+    foreach ($steamRoot in Get-SteamRoots) {
+        foreach ($libraryRoot in Get-SteamLibraryRoots -SteamRoot $steamRoot) {
+            $steamApps = Join-Path $libraryRoot "steamapps"
+            $manifest = Join-Path $steamApps "appmanifest_$steamAppId.acf"
+            if (Test-Path $manifest) {
+                $installDir = $defaultInstallDir
+                foreach ($line in Get-Content -Path $manifest) {
+                    $match = [regex]::Match($line, '"installdir"\s+"([^"]+)"')
+                    if ($match.Success) {
+                        $installDir = $match.Groups[1].Value
+                        break
+                    }
+                }
+
+                $candidatePath = Join-Path $steamApps (Join-Path "common" $installDir)
+                if (Test-Path (Join-Path $candidatePath $steamGameExeName)) {
+                    return (Resolve-Path $candidatePath).Path
+                }
+            }
+
+            $fallbackPath = Join-Path $steamApps (Join-Path "common" $defaultInstallDir)
+            if (Test-Path (Join-Path $fallbackPath $steamGameExeName)) {
+                return (Resolve-Path $fallbackPath).Path
+            }
+        }
+    }
+
+    foreach ($candidatePath in @(
+        (Join-Path ([Environment]::GetFolderPath("MyDocuments")) "Battlezone 98 Redux"),
+        (Join-Path $env:PROGRAMFILES "GOG Galaxy\Games\Battlezone 98 Redux"),
+        (Join-Path ${env:ProgramFiles(x86)} "GOG Galaxy\Games\Battlezone 98 Redux")
+    )) {
+        if ($candidatePath -and (Test-Path (Join-Path $candidatePath $gogGameExeName))) {
+            return (Resolve-Path $candidatePath).Path
         }
     }
 

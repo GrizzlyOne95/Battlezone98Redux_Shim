@@ -8,6 +8,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstdarg>
 #include <cstdint>
@@ -24,9 +25,13 @@ namespace
     constexpr DWORD kSioUdpConnReset = _WSAIOW(IOC_VENDOR, 12);
     constexpr uint32_t kDefaultPacketLogLimit = 16;
     constexpr uint32_t kDefaultPacketLogInterval = 128;
-    constexpr uint32_t kDefaultReorderWindowMs = 30;
+    constexpr uint32_t kDefaultReorderWindowMs = 100;
+    constexpr uint32_t kDefaultReorderMinWindowMs = 5;
     constexpr uint32_t kMinReorderWindowMs = 5;
     constexpr uint32_t kMaxReorderWindowMs = 200;
+    constexpr uint32_t kReorderGrowPadMs = 5;
+    constexpr uint32_t kReorderDecayMs = 2000;
+    constexpr uint32_t kReorderDecayStepMs = 5;
     constexpr uint32_t kDefaultReorderDepth = 8;
     constexpr uint32_t kMinReorderDepth = 1;
     constexpr uint32_t kDefaultReorderPeers = 32;
@@ -52,6 +57,32 @@ namespace
     constexpr uint16_t kBzrNetWebSocketPort = 1337;
     constexpr uint16_t kBzrNetProbePort = 1338;
     constexpr uint16_t kBzrNetRelayPort = 1339;
+    constexpr uint32_t kDefaultDscp = 46;
+    constexpr uint32_t kDupQueueSlots = 128;
+    constexpr uint32_t kDupTickMs = 5;
+    constexpr uint32_t kDefaultDupDelayMs = 25;
+    constexpr uint32_t kDefaultDupMaxPps = 40;
+    constexpr uint32_t kReorderWakeTickMs = 10;
+    constexpr uint32_t kReorderWakeIdleMs = 10;
+    constexpr uint32_t kReorderWakeBurstCap = 8;
+    constexpr uint8_t kWakeMagic[8] = { 'B', 'Z', 'W', 'K', 'P', 'K', 'T', '1' };
+    constexpr DWORD kGovPollMs = 100;
+    constexpr uint32_t kGovColdStart = 4000;
+    constexpr uint32_t kGovStartMax = 200000;
+    constexpr uint32_t kAutokickMsMax = 600000;
+    constexpr uint32_t kAutokickPingMax = 60000;
+    constexpr uint32_t kAutokickLossMax = 100000;
+    static uint32_t* const kGovRateAddr = reinterpret_cast<uint32_t*>(0x008e8d14);
+    static uint32_t* const kAkStartAddr = reinterpret_cast<uint32_t*>(0x008e8d0c);
+    static uint32_t* const kAkPingAddr = reinterpret_cast<uint32_t*>(0x008e8cf8);
+    static uint32_t* const kAkLossAddr = reinterpret_cast<uint32_t*>(0x008e8bfc);
+    static uint32_t* const kAkTimeAddr = reinterpret_cast<uint32_t*>(0x008e8ce4);
+    constexpr uint8_t kGovSig[15] =
+    {
+        0x68, 0xA0, 0x0F, 0x00, 0x00,
+        0x68, 0xE8, 0x03, 0x00, 0x00,
+        0x68, 0x48, 0xF4, 0xFF, 0xFF,
+    };
 
     enum BufferLogEventType : uint32_t
     {
@@ -95,12 +126,25 @@ namespace
         bool logPacketReorder = true;
         bool applySocketBuffers = true;
         bool enablePacketReorder = true;
+        bool adaptivePacketReorder = true;
+        bool enableReorderWake = true;
         bool enableBufferLog = false;
+        bool sendDup = false;
+        bool govScan = false;
         uint32_t sendBufferSize = DEFAULT_SEND_BUFFER;
         uint32_t recvBufferSize = DEFAULT_RECV_BUFFER;
+        uint32_t dscp = kDefaultDscp;
+        uint32_t dupDelayMs = kDefaultDupDelayMs;
+        uint32_t dupMaxPps = kDefaultDupMaxPps;
+        uint32_t govStart = 0;
+        uint32_t autoKickStart = 60000;
+        uint32_t autoKickPing = 2000;
+        uint32_t autoKickLoss = 200;
+        uint32_t autoKickTime = 60000;
         uint32_t packetLogLimit = kDefaultPacketLogLimit;
         uint32_t packetLogInterval = kDefaultPacketLogInterval;
         uint32_t reorderWindowMs = kDefaultReorderWindowMs;
+        uint32_t reorderMinWindowMs = kDefaultReorderMinWindowMs;
         uint32_t reorderDepth = kDefaultReorderDepth;
         uint32_t reorderPeers = kDefaultReorderPeers;
         uint32_t reorderDrainCap = kDefaultReorderDrainCap;
@@ -205,12 +249,44 @@ namespace
         uint32_t seqInitialized = 0;
         uint32_t lastSequence = 0;
         uint32_t filled = 0;
-        uint32_t reserved = 0;
+        uint32_t windowMs = kDefaultReorderMinWindowMs;
+        uint64_t lastAdjustMs = 0;
         ReorderSlot slots[kReorderSlotCount] = {};
+    };
+
+    struct DupEntry
+    {
+        SOCKET socket = INVALID_SOCKET;
+        uint64_t dueMs = 0;
+        int toLen = 0;
+        uint32_t length = 0;
+        sockaddr_storage to = {};
+        uint8_t data[kReorderMaxPacketBytes] = {};
     };
 
     SRWLOCK g_ReorderLock = SRWLOCK_INIT;
     PeerBuf g_ReorderPeers[kReorderMaxPeers] = {};
+    volatile LONG g_WakeStop = 0;
+    HANDLE g_WakeThread = nullptr;
+    SOCKET g_WakeSender = INVALID_SOCKET;
+    SOCKET g_ReorderSocket = INVALID_SOCKET;
+    uint64_t g_LastRecvCallMs = 0;
+    bool g_WakeLogged = false;
+
+    SRWLOCK g_DupLock = SRWLOCK_INIT;
+    DupEntry g_DupQueue[kDupQueueSlots] = {};
+    uint32_t g_DupHead = 0;
+    uint32_t g_DupCount = 0;
+    volatile LONG g_DupStop = 0;
+    HANDLE g_DupThread = nullptr;
+    uint64_t g_DupBucketStartMs = 0;
+    uint32_t g_DupBucketSent = 0;
+
+    volatile LONG g_GovStop = 0;
+    HANDLE g_GovScanThread = nullptr;
+    HANDLE g_GovPatchThread = nullptr;
+    volatile LONG g_AutoKickStop = 0;
+    HANDLE g_AutoKickThread = nullptr;
 
     SRWLOCK g_BufferLogLock = SRWLOCK_INIT;
     uint8_t* g_BufferLogRing = nullptr;
@@ -290,7 +366,19 @@ namespace
 
     bool EnvValueEnabled(const char* value)
     {
-        return value && value[0] != '\0' && value[0] != '0';
+        if (!value || value[0] == '\0')
+            return false;
+
+        char lower[16] = {};
+        size_t len = std::strlen(value);
+        len = (std::min)(len, sizeof(lower) - 1);
+        for (size_t i = 0; i < len; ++i)
+            lower[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(value[i])));
+
+        return std::strcmp(lower, "0") != 0 &&
+            std::strcmp(lower, "false") != 0 &&
+            std::strcmp(lower, "no") != 0 &&
+            std::strcmp(lower, "off") != 0;
     }
 
     std::string TrimString(const std::string& value)
@@ -363,6 +451,11 @@ namespace
     uint32_t ClampReorderWindow(uint32_t value)
     {
         return (std::max)(kMinReorderWindowMs, (std::min)(value, kMaxReorderWindowMs));
+    }
+
+    uint32_t ClampReorderMinWindow(uint32_t value, uint32_t maxWindow)
+    {
+        return ClampUint(value, 0, maxWindow);
     }
 
     uint32_t ClampReorderDepth(uint32_t value)
@@ -512,6 +605,8 @@ namespace
         g_Config.logSocketPackets = ReadIniBool("OpenShimSocket", "LogSocketPackets", true);
         g_Config.logSockOptCalls = ReadIniBool("OpenShimSocket", "LogSockOptCalls", true);
         g_Config.logPacketReorder = ReadIniBool("OpenShimSocket", "LogPacketReorder", true);
+        g_Config.applySocketBuffers = ReadIniBool("OpenShimSocket", "ApplySocketBuffers", true);
+        g_Config.dscp = ClampUint(ReadIniUint("OpenShimSocket", "Dscp", kDefaultDscp), 0, 63);
         const uint32_t legacySocketBufferSize = ReadIniUint("OpenShimSocket", "SocketBufferSize", 0);
         g_Config.sendBufferSize = ReadIniUint(
             "OpenShimSocket",
@@ -527,9 +622,22 @@ namespace
         g_Config.packetLogInterval = ReadIniUint("OpenShimSocket", "PacketLogInterval", kDefaultPacketLogInterval);
         g_Config.enablePacketReorder = ReadIniBool("OpenShimSocket", "EnablePacketReorder", true);
         g_Config.reorderWindowMs = ClampReorderWindow(ReadIniUint("OpenShimSocket", "PacketReorderWindowMs", kDefaultReorderWindowMs));
+        g_Config.reorderMinWindowMs = ClampReorderMinWindow(ReadIniUint("OpenShimSocket", "PacketReorderMinWindowMs", kDefaultReorderMinWindowMs), g_Config.reorderWindowMs);
+        g_Config.adaptivePacketReorder = ReadIniBool("OpenShimSocket", "EnableAdaptivePacketReorder", true);
+        g_Config.enableReorderWake = ReadIniBool("OpenShimSocket", "EnablePacketReorderWake", true);
         g_Config.reorderDepth = ClampReorderDepth(ReadIniUint("OpenShimSocket", "PacketReorderDepth", kDefaultReorderDepth));
         g_Config.reorderPeers = ClampReorderPeerCount(ReadIniUint("OpenShimSocket", "PacketReorderPeers", kDefaultReorderPeers));
         g_Config.reorderDrainCap = ClampReorderDrainCap(ReadIniUint("OpenShimSocket", "PacketReorderDrainCap", kDefaultReorderDrainCap));
+        g_Config.sendDup = ReadIniBool("OpenShimSocket", "SendDup", false);
+        g_Config.dupDelayMs = ClampUint(ReadIniUint("OpenShimSocket", "DupDelayMs", kDefaultDupDelayMs), 0, 500);
+        g_Config.dupMaxPps = ClampUint(ReadIniUint("OpenShimSocket", "DupMaxPps", kDefaultDupMaxPps), 0, 2000);
+        g_Config.govStart = ClampUint(ReadIniUint("OpenShimSocket", "GovernorStart", 0), 0, kGovStartMax);
+        g_Config.govScan = ReadIniBool("OpenShimSocket", "GovernorScan", false);
+        const bool autoKickRelax = ReadIniBool("OpenShimSocket", "AutoKickRelax", true);
+        g_Config.autoKickStart = ClampUint(ReadIniUint("OpenShimSocket", "AutoKickStart", autoKickRelax ? 60000 : 0), 0, kAutokickMsMax);
+        g_Config.autoKickPing = ClampUint(ReadIniUint("OpenShimSocket", "AutoKickPing", autoKickRelax ? 2000 : 0), 0, kAutokickPingMax);
+        g_Config.autoKickLoss = ClampUint(ReadIniUint("OpenShimSocket", "AutoKickLoss", autoKickRelax ? 200 : 0), 0, kAutokickLossMax);
+        g_Config.autoKickTime = ClampUint(ReadIniUint("OpenShimSocket", "AutoKickTime", autoKickRelax ? 60000 : 0), 0, kAutokickMsMax);
         g_Config.enableBufferLog = ReadIniBool("OpenShimSocket", "EnableBufferLog", false);
         g_Config.bufferLogPayloadBytes = ClampBufferLogPayloadBytes(ReadIniUint("OpenShimSocket", "BufferLogPayloadBytes", kDefaultBufferLogPayloadBytes));
         g_Config.bufferLogRingRecords = ClampBufferLogRingRecords(ReadIniUint("OpenShimSocket", "BufferLogRingRecords", kDefaultBufferLogRingRecords));
@@ -561,6 +669,25 @@ namespace
             TryReadEnvValue("OPENSHIM_REORDER_WINDOW_MS", envValue, static_cast<DWORD>(sizeof(envValue))))
         {
             g_Config.reorderWindowMs = ClampReorderWindow(static_cast<uint32_t>(std::strtoul(envValue, nullptr, 10)));
+            g_Config.reorderMinWindowMs = ClampReorderMinWindow(g_Config.reorderMinWindowMs, g_Config.reorderWindowMs);
+        }
+
+        if (TryReadEnvValue("BZ_REORDER_MIN_MS", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_REORDER_MIN_MS", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.reorderMinWindowMs = ClampReorderMinWindow(static_cast<uint32_t>(std::strtoul(envValue, nullptr, 10)), g_Config.reorderWindowMs);
+        }
+
+        if (TryReadEnvValue("BZ_REORDER_ADAPT", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_REORDER_ADAPT", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.adaptivePacketReorder = EnvValueEnabled(envValue);
+        }
+
+        if (TryReadEnvValue("BZ_REORDER_WAKE", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_REORDER_WAKE", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.enableReorderWake = EnvValueEnabled(envValue);
         }
 
         if (TryReadEnvValue("BZ_REORDER_DEPTH", envValue, static_cast<DWORD>(sizeof(envValue))) ||
@@ -585,6 +712,78 @@ namespace
             TryReadEnvValue("OPENSHIM_BUFFER_LOG", envValue, static_cast<DWORD>(sizeof(envValue))))
         {
             g_Config.enableBufferLog = EnvValueEnabled(envValue);
+        }
+
+        if (TryReadEnvValue("BZ_DSCP", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_DSCP", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.dscp = ClampUint(static_cast<uint32_t>(std::strtoul(envValue, nullptr, 10)), 0, 63);
+        }
+
+        if (TryReadEnvValue("BZ_SEND_DUP", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_SEND_DUP", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.sendDup = EnvValueEnabled(envValue);
+        }
+
+        if (TryReadEnvValue("BZ_DUP_DELAY_MS", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_DUP_DELAY_MS", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.dupDelayMs = ClampUint(static_cast<uint32_t>(std::strtoul(envValue, nullptr, 10)), 0, 500);
+        }
+
+        if (TryReadEnvValue("BZ_DUP_MAX_PPS", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_DUP_MAX_PPS", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.dupMaxPps = ClampUint(static_cast<uint32_t>(std::strtoul(envValue, nullptr, 10)), 0, 2000);
+        }
+
+        if (TryReadEnvValue("BZ_GOV_SCAN", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_GOV_SCAN", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.govScan = EnvValueEnabled(envValue);
+        }
+
+        if (TryReadEnvValue("BZ_GOV_START", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_GOV_START", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.govStart = ClampUint(static_cast<uint32_t>(std::strtoul(envValue, nullptr, 10)), 0, kGovStartMax);
+        }
+
+        if (TryReadEnvValue("BZ_AUTOKICK_RELAX", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_AUTOKICK_RELAX", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            if (!EnvValueEnabled(envValue))
+            {
+                g_Config.autoKickStart = 0;
+                g_Config.autoKickPing = 0;
+                g_Config.autoKickLoss = 0;
+                g_Config.autoKickTime = 0;
+            }
+        }
+
+        if (TryReadEnvValue("BZ_AUTOKICK_START", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_AUTOKICK_START", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.autoKickStart = ClampUint(static_cast<uint32_t>(std::strtoul(envValue, nullptr, 10)), 0, kAutokickMsMax);
+        }
+
+        if (TryReadEnvValue("BZ_AUTOKICK_PING", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_AUTOKICK_PING", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.autoKickPing = ClampUint(static_cast<uint32_t>(std::strtoul(envValue, nullptr, 10)), 0, kAutokickPingMax);
+        }
+
+        if (TryReadEnvValue("BZ_AUTOKICK_LOSS", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_AUTOKICK_LOSS", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.autoKickLoss = ClampUint(static_cast<uint32_t>(std::strtoul(envValue, nullptr, 10)), 0, kAutokickLossMax);
+        }
+
+        if (TryReadEnvValue("BZ_AUTOKICK_TIME", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_AUTOKICK_TIME", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.autoKickTime = ClampUint(static_cast<uint32_t>(std::strtoul(envValue, nullptr, 10)), 0, kAutokickMsMax);
         }
 
         if (TryReadEnvValue("BZ_BUFFER_LOG_BYTES", envValue, static_cast<DWORD>(sizeof(envValue))) ||
@@ -1184,6 +1383,10 @@ namespace
         {
             return "TCP_NODELAY";
         }
+        else if (level == IPPROTO_IP && optName == IP_TOS)
+        {
+            return "IP_TOS";
+        }
         return "opt";
     }
 
@@ -1375,6 +1578,7 @@ namespace
     {
         std::memset(&peer, 0, sizeof(peer));
         peer.socket = INVALID_SOCKET;
+        peer.windowMs = g_Config.adaptivePacketReorder ? g_Config.reorderMinWindowMs : g_Config.reorderWindowMs;
     }
 
     uint64_t MakePeerKey(const sockaddr_in& addr)
@@ -1465,6 +1669,42 @@ namespace
         return nullptr;
     }
 
+    void AdaptReorderWindowOnArrival(PeerBuf& peer, uint32_t sequence, uint64_t nowMs)
+    {
+        if (!g_Config.adaptivePacketReorder || !peer.seqInitialized)
+            return;
+
+        const uint32_t expected = peer.lastSequence + 1;
+        if (sequence <= peer.lastSequence)
+            return;
+
+        if (sequence > expected)
+        {
+            const uint32_t grown = peer.windowMs * 2 + kReorderGrowPadMs;
+            peer.windowMs = (std::min)(grown, g_Config.reorderWindowMs);
+            peer.lastAdjustMs = nowMs;
+            LogReorderf("[OpenShimNet] sid=%u reorder adapt grow sock=0x%08X seq=%u expected=%u windowMs=%u",
+                GetSocketId(peer.socket),
+                static_cast<unsigned>(peer.socket),
+                sequence,
+                expected,
+                peer.windowMs);
+        }
+    }
+
+    void DecayReorderWindow(PeerBuf& peer, uint64_t nowMs)
+    {
+        if (!g_Config.adaptivePacketReorder || peer.windowMs <= g_Config.reorderMinWindowMs)
+            return;
+        if (nowMs - peer.lastAdjustMs < kReorderDecayMs)
+            return;
+
+        peer.windowMs = (peer.windowMs > g_Config.reorderMinWindowMs + kReorderDecayStepMs)
+            ? peer.windowMs - kReorderDecayStepMs
+            : g_Config.reorderMinWindowMs;
+        peer.lastAdjustMs = nowMs;
+    }
+
     void InsertPacketLocked(PeerBuf& peer, uint32_t sequence, uint64_t timestampMs, const sockaddr_in& from, const uint8_t* data, uint32_t dataLength)
     {
         for (uint32_t i = 0; i < g_Config.reorderDepth; ++i)
@@ -1527,10 +1767,12 @@ namespace
             peer.filled);
     }
 
-    int PickReadySlotLocked(const PeerBuf& peer, uint64_t nowMs)
+    int PickReadySlotLocked(PeerBuf& peer, uint64_t nowMs)
     {
         if (peer.filled == 0)
             return -1;
+
+        DecayReorderWindow(peer, nowMs);
 
         if (peer.seqInitialized)
         {
@@ -1559,7 +1801,7 @@ namespace
             return lowestIndex;
 
         const ReorderSlot& slot = peer.slots[lowestIndex];
-        if (nowMs >= slot.timestampMs && (nowMs - slot.timestampMs) >= g_Config.reorderWindowMs)
+        if (nowMs >= slot.timestampMs && (nowMs - slot.timestampMs) >= peer.windowMs)
             return lowestIndex;
 
         return -1;
@@ -1613,13 +1855,14 @@ namespace
         if (selectedPeer->filled > 0)
             --selectedPeer->filled;
 
-        LogReorderf("[OpenShimNet] sid=%u reorder delivered sock=0x%08X peer=%s seq=%u bytes=%u remaining=%u",
+        LogReorderf("[OpenShimNet] sid=%u reorder delivered sock=0x%08X peer=%s seq=%u bytes=%u remaining=%u windowMs=%u",
             GetSocketId(s),
             static_cast<unsigned>(s),
             FormatIpv4Peer(outSource).c_str(),
             selectedPeer->lastSequence,
             outDelivered,
-            selectedPeer->filled);
+            selectedPeer->filled,
+            selectedPeer->windowMs);
 
         ReleaseSRWLockExclusive(&g_ReorderLock);
         return true;
@@ -1675,6 +1918,398 @@ namespace
         return queuedBytes > 0;
     }
 
+    bool HasBufferedReorderPackets(SOCKET s)
+    {
+        bool hasPackets = false;
+        AcquireSRWLockShared(&g_ReorderLock);
+        for (uint32_t i = 0; i < g_Config.reorderPeers; ++i)
+        {
+            const PeerBuf& peer = g_ReorderPeers[i];
+            if (peer.peerKey != 0 && peer.socket == s && peer.filled > 0)
+            {
+                hasPackets = true;
+                break;
+            }
+        }
+        ReleaseSRWLockShared(&g_ReorderLock);
+        return hasPackets;
+    }
+
+    bool IsWakePacket(const uint8_t* data, uint32_t length, const sockaddr_in& source)
+    {
+        return length == sizeof(kWakeMagic) &&
+            source.sin_family == AF_INET &&
+            ntohl(source.sin_addr.S_un.S_addr) == 0x7f000001u &&
+            std::memcmp(data, kWakeMagic, sizeof(kWakeMagic)) == 0;
+    }
+
+    DWORD WINAPI ReorderWakeThread(LPVOID)
+    {
+        uint32_t burst = 0;
+        while (InterlockedCompareExchange(&g_WakeStop, 0, 0) == 0)
+        {
+            Sleep(kReorderWakeTickMs);
+            const SOCKET target = g_ReorderSocket;
+            if (target == INVALID_SOCKET || !HasBufferedReorderPackets(target) || !g_RealGetSockName || !g_RealSendTo)
+            {
+                burst = 0;
+                continue;
+            }
+
+            const uint64_t now = GetTickCount64();
+            if (now - g_LastRecvCallMs < kReorderWakeIdleMs)
+            {
+                burst = 0;
+                continue;
+            }
+            if (burst >= kReorderWakeBurstCap)
+                continue;
+
+            sockaddr_in local = {};
+            int localLen = sizeof(local);
+            if (g_RealGetSockName(target, reinterpret_cast<sockaddr*>(&local), &localLen) != 0 ||
+                local.sin_family != AF_INET || local.sin_port == 0)
+            {
+                continue;
+            }
+
+            if (g_WakeSender == INVALID_SOCKET)
+            {
+                g_WakeSender = g_RealSocket ? g_RealSocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP) : INVALID_SOCKET;
+                if (g_WakeSender == INVALID_SOCKET)
+                    continue;
+            }
+
+            sockaddr_in wakeTo = {};
+            wakeTo.sin_family = AF_INET;
+            wakeTo.sin_addr.S_un.S_addr = htonl(0x7f000001u);
+            wakeTo.sin_port = local.sin_port;
+            g_RealSendTo(g_WakeSender, reinterpret_cast<const char*>(kWakeMagic),
+                static_cast<int>(sizeof(kWakeMagic)), 0,
+                reinterpret_cast<const sockaddr*>(&wakeTo), sizeof(wakeTo));
+            ++burst;
+            if (!g_WakeLogged)
+            {
+                g_WakeLogged = true;
+                Logf("[OpenShimNet] reorder wake thread nudging socket 0x%08X on loopback port %u",
+                    static_cast<unsigned>(target),
+                    ntohs(local.sin_port));
+            }
+        }
+        return 0;
+    }
+
+    bool IsLoopbackDestination(const sockaddr* to)
+    {
+        if (!to || to->sa_family != AF_INET)
+            return false;
+
+        const auto* addr4 = reinterpret_cast<const sockaddr_in*>(to);
+        return (ntohl(addr4->sin_addr.S_un.S_addr) >> 24) == 127;
+    }
+
+    uint32_t GatherWsabufPayload(LPWSABUF buffers, DWORD bufferCount, uint8_t* outData, uint32_t outCapacity)
+    {
+        if (!buffers || !outData || outCapacity == 0)
+            return 0;
+
+        uint32_t copied = 0;
+        for (DWORD i = 0; i < bufferCount && copied < outCapacity; ++i)
+        {
+            if (!buffers[i].buf || buffers[i].len == 0)
+                continue;
+
+            const uint32_t chunk = (std::min)(static_cast<uint32_t>(buffers[i].len), outCapacity - copied);
+            std::memcpy(outData + copied, buffers[i].buf, chunk);
+            copied += chunk;
+        }
+        return copied;
+    }
+
+    void DupPurgeSocket(SOCKET s)
+    {
+        AcquireSRWLockExclusive(&g_DupLock);
+        uint32_t kept = 0;
+        for (uint32_t i = 0; i < g_DupCount; ++i)
+        {
+            const uint32_t idx = (g_DupHead + i) % kDupQueueSlots;
+            if (g_DupQueue[idx].socket == s)
+                continue;
+            if (kept != i)
+                g_DupQueue[(g_DupHead + kept) % kDupQueueSlots] = g_DupQueue[idx];
+            ++kept;
+        }
+        g_DupCount = kept;
+        ReleaseSRWLockExclusive(&g_DupLock);
+    }
+
+    void DupEnqueue(SOCKET s, const uint8_t* data, uint32_t length, const sockaddr* to, int toLen)
+    {
+        if (!g_Config.sendDup || !data || length == 0 || length > kReorderMaxPacketBytes ||
+            !to || toLen <= 0 || static_cast<size_t>(toLen) > sizeof(sockaddr_storage) ||
+            IsLoopbackDestination(to))
+        {
+            return;
+        }
+
+        if (g_Config.dupDelayMs == 0)
+        {
+            if (g_RealSendTo)
+                g_RealSendTo(s, reinterpret_cast<const char*>(data), static_cast<int>(length), 0, to, toLen);
+            return;
+        }
+
+        const uint64_t now = GetTickCount64();
+        AcquireSRWLockExclusive(&g_DupLock);
+        if (now - g_DupBucketStartMs >= 1000)
+        {
+            g_DupBucketStartMs = now;
+            g_DupBucketSent = 0;
+        }
+
+        if ((g_Config.dupMaxPps != 0 && g_DupBucketSent >= g_Config.dupMaxPps) ||
+            g_DupCount >= kDupQueueSlots)
+        {
+            ReleaseSRWLockExclusive(&g_DupLock);
+            return;
+        }
+
+        DupEntry& entry = g_DupQueue[(g_DupHead + g_DupCount) % kDupQueueSlots];
+        entry.socket = s;
+        entry.dueMs = now + g_Config.dupDelayMs;
+        entry.toLen = toLen;
+        entry.length = length;
+        std::memcpy(&entry.to, to, static_cast<size_t>(toLen));
+        std::memcpy(entry.data, data, length);
+        ++g_DupCount;
+        ++g_DupBucketSent;
+        ReleaseSRWLockExclusive(&g_DupLock);
+    }
+
+    DWORD WINAPI DupPacerThread(LPVOID)
+    {
+        while (InterlockedCompareExchange(&g_DupStop, 0, 0) == 0)
+        {
+            Sleep(kDupTickMs);
+            if (!g_RealSendTo)
+                continue;
+
+            for (;;)
+            {
+                DupEntry local = {};
+                AcquireSRWLockExclusive(&g_DupLock);
+                if (g_DupCount == 0 || g_DupQueue[g_DupHead].dueMs > GetTickCount64())
+                {
+                    ReleaseSRWLockExclusive(&g_DupLock);
+                    break;
+                }
+
+                local = g_DupQueue[g_DupHead];
+                g_DupHead = (g_DupHead + 1) % kDupQueueSlots;
+                --g_DupCount;
+                ReleaseSRWLockExclusive(&g_DupLock);
+
+                g_RealSendTo(local.socket, reinterpret_cast<const char*>(local.data),
+                    static_cast<int>(local.length), 0,
+                    reinterpret_cast<const sockaddr*>(&local.to), local.toLen);
+            }
+        }
+        return 0;
+    }
+
+    bool FindExeSection(const char* sectionName, uint8_t** outBase, size_t* outSize)
+    {
+        if (!sectionName || !outBase || !outSize)
+            return false;
+
+        HMODULE exe = GetModuleHandleA(nullptr);
+        auto* base = reinterpret_cast<uint8_t*>(exe);
+        auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+        if (!base || dos->e_magic != IMAGE_DOS_SIGNATURE)
+            return false;
+
+        auto* nt = reinterpret_cast<IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
+        if (nt->Signature != IMAGE_NT_SIGNATURE)
+            return false;
+
+        auto* section = IMAGE_FIRST_SECTION(nt);
+        for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++section)
+        {
+            char name[9] = {};
+            std::memcpy(name, section->Name, 8);
+            if (std::strcmp(name, sectionName) == 0)
+            {
+                *outBase = base + section->VirtualAddress;
+                *outSize = section->Misc.VirtualSize ? section->Misc.VirtualSize : section->SizeOfRawData;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    int CountGovernorSignatureMatches()
+    {
+        uint8_t* text = nullptr;
+        size_t textSize = 0;
+        if (!FindExeSection(".text", &text, &textSize))
+            return -1;
+
+        int matches = 0;
+        for (size_t i = 0; i + sizeof(kGovSig) <= textSize; ++i)
+        {
+            if (std::memcmp(text + i, kGovSig, sizeof(kGovSig)) == 0)
+            {
+                ++matches;
+                if (matches > 1)
+                    break;
+            }
+        }
+        return matches;
+    }
+
+    DWORD WINAPI GovernorScanThread(LPVOID)
+    {
+        Sleep(15000);
+
+        uint8_t* text = nullptr;
+        size_t textSize = 0;
+        if (!FindExeSection(".text", &text, &textSize))
+        {
+            Logf("[OpenShimNet] governor_scan: .text section not found");
+            return 0;
+        }
+
+        Logf("[OpenShimNet] governor_scan: scanning .text base=%p size=%u for 0x00000FA0",
+            text,
+            static_cast<unsigned>(textSize));
+
+        const uint8_t pat[4] = { 0xA0, 0x0F, 0x00, 0x00 };
+        int hits = 0;
+        constexpr int kMaxHits = 48;
+        for (size_t i = 0; i + sizeof(pat) <= textSize && hits < kMaxHits; ++i)
+        {
+            if (std::memcmp(text + i, pat, sizeof(pat)) != 0)
+                continue;
+
+            char ctx[64] = {};
+            int written = 0;
+            const size_t start = (i >= 3) ? i - 3 : 0;
+            const size_t end = (std::min)(i + 8, textSize);
+            for (size_t k = start; k < end && written < static_cast<int>(sizeof(ctx)) - 4; ++k)
+                written += _snprintf_s(ctx + written, sizeof(ctx) - static_cast<size_t>(written), _TRUNCATE, "%02x ", text[k]);
+
+            Logf("[OpenShimNet] governor_scan: hit #%d va=0x%08lX bytes[%s]",
+                hits + 1,
+                static_cast<unsigned long>(reinterpret_cast<uintptr_t>(text + i)),
+                ctx);
+            ++hits;
+        }
+        Logf("[OpenShimNet] governor_scan: done hits=%d%s", hits, hits >= kMaxHits ? " capped" : "");
+        return 0;
+    }
+
+    DWORD WINAPI GovernorPatchThread(LPVOID)
+    {
+        if (g_Config.govStart == 0)
+            return 0;
+
+        Sleep(15000);
+        const int matches = CountGovernorSignatureMatches();
+        if (matches != 1)
+        {
+            Logf("[OpenShimNet] governor_patch: %d signature matches; disabled", matches);
+            return 0;
+        }
+
+        Logf("[OpenShimNet] governor_patch: version confirmed; watching 0x%08lX coldStart=%u target=%u",
+            static_cast<unsigned long>(reinterpret_cast<uintptr_t>(kGovRateAddr)),
+            kGovColdStart,
+            g_Config.govStart);
+
+        uint32_t bumps = 0;
+        while (InterlockedCompareExchange(&g_GovStop, 0, 0) == 0)
+        {
+            if (*kGovRateAddr == kGovColdStart)
+            {
+                *kGovRateAddr = g_Config.govStart;
+                if (bumps == 0)
+                {
+                    Logf("[OpenShimNet] governor_patch: cold-start caught %u -> %u",
+                        kGovColdStart,
+                        g_Config.govStart);
+                }
+                ++bumps;
+            }
+            Sleep(kGovPollMs);
+        }
+
+        Logf("[OpenShimNet] governor_patch: stopping after %u bump(s)", bumps);
+        return 0;
+    }
+
+    DWORD WINAPI AutoKickPatchThread(LPVOID)
+    {
+        if (g_Config.autoKickStart == 0 && g_Config.autoKickPing == 0 &&
+            g_Config.autoKickLoss == 0 && g_Config.autoKickTime == 0)
+        {
+            return 0;
+        }
+
+        Sleep(15000);
+        const int matches = CountGovernorSignatureMatches();
+        if (matches != 1)
+        {
+            Logf("[OpenShimNet] autokick_patch: %d signature matches; disabled", matches);
+            return 0;
+        }
+
+        struct Slot
+        {
+            uint32_t* addr;
+            uint32_t value;
+            const char* name;
+            bool logged;
+        };
+
+        Slot slots[] =
+        {
+            { kAkStartAddr, g_Config.autoKickStart, "AutoKickStart", false },
+            { kAkPingAddr, g_Config.autoKickPing, "AutoKickPing", false },
+            { kAkLossAddr, g_Config.autoKickLoss, "AutoKickLoss", false },
+            { kAkTimeAddr, g_Config.autoKickTime, "AutoKickTime", false },
+        };
+
+        Logf("[OpenShimNet] autokick_patch: version confirmed; overriding start=%u ping=%u loss=%u time=%u",
+            g_Config.autoKickStart,
+            g_Config.autoKickPing,
+            g_Config.autoKickLoss,
+            g_Config.autoKickTime);
+
+        while (InterlockedCompareExchange(&g_AutoKickStop, 0, 0) == 0)
+        {
+            for (Slot& slot : slots)
+            {
+                if (slot.value == 0 || *slot.addr == slot.value)
+                    continue;
+
+                const uint32_t previous = *slot.addr;
+                *slot.addr = slot.value;
+                if (!slot.logged)
+                {
+                    slot.logged = true;
+                    Logf("[OpenShimNet] autokick_patch: %s %u -> %u",
+                        slot.name,
+                        previous,
+                        slot.value);
+                }
+            }
+            Sleep(kGovPollMs);
+        }
+
+        Logf("[OpenShimNet] autokick_patch: stopping");
+        return 0;
+    }
+
     bool ProcessReceivedDatagram(
         SOCKET s,
         LPWSABUF buffers,
@@ -1724,7 +2359,9 @@ namespace
             return true;
         }
 
-        InsertPacketLocked(*peer, sequence, GetTickCount64(), packetSource, packetData, packetLength);
+        const uint64_t arrivalMs = GetTickCount64();
+        AdaptReorderWindowOnArrival(*peer, sequence, arrivalMs);
+        InsertPacketLocked(*peer, sequence, arrivalMs, packetSource, packetData, packetLength);
         ReleaseSRWLockExclusive(&g_ReorderLock);
 
         return false;
@@ -1789,6 +2426,26 @@ namespace
         return finalReadback;
     }
 
+    int ApplyDscpToSocket(SOCKET s)
+    {
+        if (g_Config.dscp == 0 || !g_RealSetSockOpt || !IsUdpSocket(s))
+            return 0;
+
+        const int tos = static_cast<int>((g_Config.dscp & 0x3Fu) << 2);
+        const int rc = g_RealSetSockOpt(s, IPPROTO_IP, IP_TOS, reinterpret_cast<const char*>(&tos), sizeof(tos));
+        const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
+        Logf("[OpenShimNet] sid=%u DSCP=%u IP_TOS=%d sock=0x%08X rc=%d err=%d",
+            GetSocketId(s),
+            g_Config.dscp,
+            tos,
+            static_cast<unsigned>(s),
+            rc,
+            err);
+        if (rc == SOCKET_ERROR && g_RealWSASetLastError)
+            g_RealWSASetLastError(err);
+        return rc;
+    }
+
     void MaybeDisableUdpConnReset(SOCKET s, const SocketState& state)
     {
         if (!g_Config.disableUdpConnReset)
@@ -1835,6 +2492,9 @@ namespace
             SetSocketIntOption(s, SOL_SOCKET, SO_SNDBUF, static_cast<int>(g_Config.sendBufferSize), "SO_SNDBUF");
             SetSocketIntOption(s, SOL_SOCKET, SO_RCVBUF, static_cast<int>(g_Config.recvBufferSize), "SO_RCVBUF");
         }
+
+        if ((state.type == SOCK_DGRAM || state.protocol == IPPROTO_UDP) && state.af == AF_INET)
+            ApplyDscpToSocket(s);
 
         if ((state.type == SOCK_STREAM || state.protocol == IPPROTO_TCP) && g_Config.tcpNoDelay)
             SetSocketIntOption(s, IPPROTO_TCP, TCP_NODELAY, 1, "TCP_NODELAY");
@@ -1991,6 +2651,7 @@ namespace
         if (rc == 0)
         {
             ClearReorderStateForSocket(s);
+            DupPurgeSocket(s);
             LogSocketSummaryAndForget(s);
         }
         else if (g_Config.logSocketErrors && g_RealWSAGetLastError)
@@ -2032,6 +2693,10 @@ namespace
         {
             LogPacketActivity("WSASendTo", s, true, static_cast<int>(*bytesSent), to, toLen);
             LogRouteEvent("WSASendTo", s, to, toLen, true, 0, true);
+            uint8_t dupData[kReorderMaxPacketBytes] = {};
+            const uint32_t dupLength = GatherWsabufPayload(buffers, bufferCount, dupData, kReorderMaxPacketBytes);
+            if (dupLength > 0)
+                DupEnqueue(s, dupData, dupLength, to, toLen);
         }
         else if (rc == SOCKET_ERROR)
         {
@@ -2050,6 +2715,8 @@ namespace
         {
             LogPacketActivity("sendto", s, true, rc, to, toLen);
             LogRouteEvent("sendto", s, to, toLen, true, 0, true);
+            if (buffer && rc > 0)
+                DupEnqueue(s, reinterpret_cast<const uint8_t*>(buffer), static_cast<uint32_t>((std::min)(rc, static_cast<int>(kReorderMaxPacketBytes))), to, toLen);
         }
         else
         {
@@ -2149,6 +2816,8 @@ namespace
             return rc;
         }
 
+        g_ReorderSocket = s;
+        g_LastRecvCallMs = GetTickCount64();
         uint32_t delivered = 0;
         sockaddr_in deliveredSource = {};
         if (TryDeliverBufferedPacket(s, buffers, bufferCount, bytesRecv, flags, from, fromLen, delivered, deliveredSource))
@@ -2233,6 +2902,35 @@ namespace
             return rc;
         }
 
+        if (IsWakePacket(packetBuffer, firstBytes, firstSource))
+        {
+            LogReorderf("[OpenShimNet] sid=%u reorder wake packet consumed sock=0x%08X",
+                GetSocketId(s),
+                static_cast<unsigned>(s));
+            if (TryDeliverBufferedPacket(s, buffers, bufferCount, bytesRecv, flags, from, fromLen, delivered, deliveredSource))
+            {
+                if (g_RealWSASetLastError)
+                    g_RealWSASetLastError(0);
+                CaptureRecvPathEvent(
+                    kBufferLogEventWSARecvFrom,
+                    s,
+                    reinterpret_cast<const sockaddr*>(&deliveredSource),
+                    0,
+                    GetRequestedWsabufBytes(buffers, bufferCount),
+                    delivered,
+                    0,
+                    buffers && bufferCount > 0 && buffers[0].buf
+                        ? reinterpret_cast<const uint8_t*>(buffers[0].buf)
+                        : nullptr);
+                LogPacketActivity("WSARecvFrom", s, false, static_cast<int>(delivered), reinterpret_cast<const sockaddr*>(&deliveredSource), static_cast<int>(sizeof(deliveredSource)));
+                return 0;
+            }
+
+            if (g_RealWSASetLastError)
+                g_RealWSASetLastError(WSAEWOULDBLOCK);
+            return SOCKET_ERROR;
+        }
+
         LogReorderf("[OpenShimNet] sid=%u reorder initial recv sock=0x%08X peer=%s bytes=%lu flags=0x%08lX",
             GetSocketId(s),
             static_cast<unsigned>(s),
@@ -2295,6 +2993,13 @@ namespace
             }
 
             ++drainedPackets;
+            if (IsWakePacket(packetBuffer, drainBytes, drainSource))
+            {
+                LogReorderf("[OpenShimNet] sid=%u reorder wake packet consumed during drain sock=0x%08X",
+                    GetSocketId(s),
+                    static_cast<unsigned>(s));
+                continue;
+            }
             LogReorderf("[OpenShimNet] sid=%u reorder drain recv sock=0x%08X iteration=%u peer=%s bytes=%lu flags=0x%08lX",
                 GetSocketId(s),
                 static_cast<unsigned>(s),
@@ -2461,6 +3166,8 @@ namespace
         {
             readback = QuerySocketInt(s, level, optName);
             readback = ReassertSocketBufferFloor(s, level, optName, requested, readback);
+            if (IsUdpSocket(s) && (level != IPPROTO_IP || optName != IP_TOS || requested != static_cast<int>((g_Config.dscp & 0x3Fu) << 2)))
+                ApplyDscpToSocket(s);
         }
 
         if (g_Config.logSockOptCalls)
@@ -2485,6 +3192,7 @@ namespace
     struct HookTarget
     {
         const char* name;
+        WORD ordinal;
         FARPROC hook;
     };
 
@@ -2495,25 +3203,32 @@ namespace
 
         while (origThunk->u1.AddressOfData && thunk->u1.Function)
         {
-            if (!(origThunk->u1.Ordinal & IMAGE_ORDINAL_FLAG32))
+            bool matched = false;
+            if (origThunk->u1.Ordinal & IMAGE_ORDINAL_FLAG32)
+            {
+                matched = target.ordinal != 0 && IMAGE_ORDINAL(origThunk->u1.Ordinal) == target.ordinal;
+            }
+            else
             {
                 auto* importByName = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(
                     reinterpret_cast<uint8_t*>(module) + origThunk->u1.AddressOfData);
 
-                if (std::strcmp(reinterpret_cast<const char*>(importByName->Name), target.name) == 0)
-                {
-                    DWORD oldProtect = 0;
-                    if (!VirtualProtect(&thunk->u1.Function, sizeof(thunk->u1.Function), PAGE_READWRITE, &oldProtect))
-                        return false;
+                matched = std::strcmp(reinterpret_cast<const char*>(importByName->Name), target.name) == 0;
+            }
 
-                    if (previousTarget)
-                        *previousTarget = reinterpret_cast<FARPROC>(static_cast<uintptr_t>(thunk->u1.Function));
-                    thunk->u1.Function = static_cast<DWORD>(reinterpret_cast<uintptr_t>(target.hook));
-                    VirtualProtect(&thunk->u1.Function, sizeof(thunk->u1.Function), oldProtect, &oldProtect);
+            if (matched)
+            {
+                DWORD oldProtect = 0;
+                if (!VirtualProtect(&thunk->u1.Function, sizeof(thunk->u1.Function), PAGE_READWRITE, &oldProtect))
+                    return false;
 
-                    Logf("[OpenShimNet] Patched %s import in %s", target.name, moduleLabel);
-                    return true;
-                }
+                if (previousTarget)
+                    *previousTarget = reinterpret_cast<FARPROC>(static_cast<uintptr_t>(thunk->u1.Function));
+                thunk->u1.Function = static_cast<DWORD>(reinterpret_cast<uintptr_t>(target.hook));
+                VirtualProtect(&thunk->u1.Function, sizeof(thunk->u1.Function), oldProtect, &oldProtect);
+
+                Logf("[OpenShimNet] Patched %s import in %s", target.name, moduleLabel);
+                return true;
             }
 
             ++origThunk;
@@ -2568,21 +3283,21 @@ namespace
 
             const HookTarget targets[] =
             {
-                { "socket", reinterpret_cast<FARPROC>(Hook_socket) },
-                { "WSASocketW", reinterpret_cast<FARPROC>(Hook_WSASocketW) },
-                { "bind", reinterpret_cast<FARPROC>(Hook_bind) },
-                { "connect", reinterpret_cast<FARPROC>(Hook_connect) },
-                { "WSAConnect", reinterpret_cast<FARPROC>(Hook_WSAConnect) },
-                { "closesocket", reinterpret_cast<FARPROC>(Hook_closesocket) },
-                { "sendto", reinterpret_cast<FARPROC>(Hook_sendto) },
-                { "recvfrom", reinterpret_cast<FARPROC>(Hook_recvfrom) },
-                { "setsockopt", reinterpret_cast<FARPROC>(Hook_setsockopt) },
-                { "WSASend", reinterpret_cast<FARPROC>(Hook_WSASend) },
-                { "WSARecv", reinterpret_cast<FARPROC>(Hook_WSARecv) },
-                { "WSASendTo", reinterpret_cast<FARPROC>(Hook_WSASendTo) },
-                { "WSARecvFrom", reinterpret_cast<FARPROC>(Hook_WSARecvFrom) },
-                { "ioctlsocket", reinterpret_cast<FARPROC>(Hook_ioctlsocket) },
-                { "WSAIoctl", reinterpret_cast<FARPROC>(Hook_WSAIoctl) },
+                { "socket", 23, reinterpret_cast<FARPROC>(Hook_socket) },
+                { "WSASocketW", 0, reinterpret_cast<FARPROC>(Hook_WSASocketW) },
+                { "bind", 2, reinterpret_cast<FARPROC>(Hook_bind) },
+                { "connect", 4, reinterpret_cast<FARPROC>(Hook_connect) },
+                { "WSAConnect", 0, reinterpret_cast<FARPROC>(Hook_WSAConnect) },
+                { "closesocket", 3, reinterpret_cast<FARPROC>(Hook_closesocket) },
+                { "sendto", 20, reinterpret_cast<FARPROC>(Hook_sendto) },
+                { "recvfrom", 17, reinterpret_cast<FARPROC>(Hook_recvfrom) },
+                { "setsockopt", 21, reinterpret_cast<FARPROC>(Hook_setsockopt) },
+                { "WSASend", 0, reinterpret_cast<FARPROC>(Hook_WSASend) },
+                { "WSARecv", 0, reinterpret_cast<FARPROC>(Hook_WSARecv) },
+                { "WSASendTo", 0, reinterpret_cast<FARPROC>(Hook_WSASendTo) },
+                { "WSARecvFrom", 0, reinterpret_cast<FARPROC>(Hook_WSARecvFrom) },
+                { "ioctlsocket", 12, reinterpret_cast<FARPROC>(Hook_ioctlsocket) },
+                { "WSAIoctl", 0, reinterpret_cast<FARPROC>(Hook_WSAIoctl) },
             };
 
             int patched = 0;
@@ -2610,12 +3325,13 @@ namespace
 
         LogShimA(LogLevel::Info, "net", "[OpenShimNet] Initializing");
         LogNetIniValues();
-        Logf("[OpenShimNet] Config enabled=%d logging=%d sendBufferSize=%u recvBufferSize=%u applySocketBuffers=%d tcpNoDelay=%d keepAlive=%d disableUdpConnReset=%d logSocketErrors=%d logSocketLifecycle=%d logSocketPackets=%d logSockOptCalls=%d logPacketReorder=%d packetLogLimit=%u packetLogInterval=%u enablePacketReorder=%d reorderWindowMs=%u reorderDepth=%u reorderPeers=%u reorderDrainCap=%u enableBufferLog=%d bufferLogPayloadBytes=%u bufferLogRingRecords=%u bufferLogSocketId=%u bufferLogPeer=%s",
+        Logf("[OpenShimNet] Config enabled=%d logging=%d sendBufferSize=%u recvBufferSize=%u applySocketBuffers=%d dscp=%u tcpNoDelay=%d keepAlive=%d disableUdpConnReset=%d logSocketErrors=%d logSocketLifecycle=%d logSocketPackets=%d logSockOptCalls=%d logPacketReorder=%d packetLogLimit=%u packetLogInterval=%u enablePacketReorder=%d reorderWindowMs=%u reorderMinWindowMs=%u reorderAdapt=%d reorderWake=%d reorderDepth=%u reorderPeers=%u reorderDrainCap=%u sendDup=%d dupDelayMs=%u dupMaxPps=%u govStart=%u govScan=%d autokickStart=%u autokickPing=%u autokickLoss=%u autokickTime=%u enableBufferLog=%d bufferLogPayloadBytes=%u bufferLogRingRecords=%u bufferLogSocketId=%u bufferLogPeer=%s",
             g_Config.enabled ? 1 : 0,
             g_Config.logging ? 1 : 0,
             g_Config.sendBufferSize,
             g_Config.recvBufferSize,
             g_Config.applySocketBuffers ? 1 : 0,
+            g_Config.dscp,
             g_Config.tcpNoDelay ? 1 : 0,
             g_Config.keepAlive ? 1 : 0,
             g_Config.disableUdpConnReset ? 1 : 0,
@@ -2628,9 +3344,21 @@ namespace
             g_Config.packetLogInterval,
             g_Config.enablePacketReorder ? 1 : 0,
             g_Config.reorderWindowMs,
+            g_Config.reorderMinWindowMs,
+            g_Config.adaptivePacketReorder ? 1 : 0,
+            g_Config.enableReorderWake ? 1 : 0,
             g_Config.reorderDepth,
             g_Config.reorderPeers,
             g_Config.reorderDrainCap,
+            g_Config.sendDup ? 1 : 0,
+            g_Config.dupDelayMs,
+            g_Config.dupMaxPps,
+            g_Config.govStart,
+            g_Config.govScan ? 1 : 0,
+            g_Config.autoKickStart,
+            g_Config.autoKickPing,
+            g_Config.autoKickLoss,
+            g_Config.autoKickTime,
             g_Config.enableBufferLog ? 1 : 0,
             g_Config.bufferLogPayloadBytes,
             g_Config.bufferLogRingRecords,
@@ -2654,6 +3382,48 @@ namespace
         PatchWinsockImportsForModule(GetModuleHandleA("GalaxyPeer.dll"), "GalaxyPeer.dll");
         PatchWinsockImportsForModule(GetModuleHandleA("steam_api.dll"), "steam_api.dll");
 
+        if (g_Config.enablePacketReorder && g_Config.enableReorderWake && !g_WakeThread)
+        {
+            InterlockedExchange(&g_WakeStop, 0);
+            g_WakeThread = CreateThread(nullptr, 0, ReorderWakeThread, nullptr, 0, nullptr);
+            if (!g_WakeThread)
+                LogShimA(LogLevel::Warn, "net", "[OpenShimNet] Failed to start reorder wake thread err=%lu", GetLastError());
+        }
+
+        if (g_Config.sendDup && g_Config.dupDelayMs > 0 && !g_DupThread)
+        {
+            InterlockedExchange(&g_DupStop, 0);
+            g_DupThread = CreateThread(nullptr, 0, DupPacerThread, nullptr, 0, nullptr);
+            if (!g_DupThread)
+            {
+                LogShimA(LogLevel::Warn, "net", "[OpenShimNet] Failed to start dup pacer thread err=%lu; falling back to immediate duplicates", GetLastError());
+                g_Config.dupDelayMs = 0;
+            }
+        }
+
+        if (g_Config.govScan && !g_GovScanThread)
+        {
+            g_GovScanThread = CreateThread(nullptr, 0, GovernorScanThread, nullptr, 0, nullptr);
+            if (!g_GovScanThread)
+                LogShimA(LogLevel::Warn, "net", "[OpenShimNet] Failed to start governor scan thread err=%lu", GetLastError());
+        }
+
+        if (g_Config.govStart != 0 && !g_GovPatchThread)
+        {
+            InterlockedExchange(&g_GovStop, 0);
+            g_GovPatchThread = CreateThread(nullptr, 0, GovernorPatchThread, nullptr, 0, nullptr);
+            if (!g_GovPatchThread)
+                LogShimA(LogLevel::Warn, "net", "[OpenShimNet] Failed to start governor patch thread err=%lu", GetLastError());
+        }
+
+        if ((g_Config.autoKickStart || g_Config.autoKickPing || g_Config.autoKickLoss || g_Config.autoKickTime) && !g_AutoKickThread)
+        {
+            InterlockedExchange(&g_AutoKickStop, 0);
+            g_AutoKickThread = CreateThread(nullptr, 0, AutoKickPatchThread, nullptr, 0, nullptr);
+            if (!g_AutoKickThread)
+                LogShimA(LogLevel::Warn, "net", "[OpenShimNet] Failed to start autokick patch thread err=%lu", GetLastError());
+        }
+
         LogShimA(LogLevel::Info, "net", "[OpenShimNet] Initialization complete");
         return TRUE;
     }
@@ -2665,6 +3435,40 @@ namespace
 
     void ShutdownNetworkOptimizer()
     {
+        InterlockedExchange(&g_WakeStop, 1);
+        InterlockedExchange(&g_DupStop, 1);
+        InterlockedExchange(&g_GovStop, 1);
+        InterlockedExchange(&g_AutoKickStop, 1);
+        if (g_WakeSender != INVALID_SOCKET && g_RealCloseSocket)
+        {
+            g_RealCloseSocket(g_WakeSender);
+            g_WakeSender = INVALID_SOCKET;
+        }
+        if (g_WakeThread)
+        {
+            CloseHandle(g_WakeThread);
+            g_WakeThread = nullptr;
+        }
+        if (g_DupThread)
+        {
+            CloseHandle(g_DupThread);
+            g_DupThread = nullptr;
+        }
+        if (g_GovScanThread)
+        {
+            CloseHandle(g_GovScanThread);
+            g_GovScanThread = nullptr;
+        }
+        if (g_GovPatchThread)
+        {
+            CloseHandle(g_GovPatchThread);
+            g_GovPatchThread = nullptr;
+        }
+        if (g_AutoKickThread)
+        {
+            CloseHandle(g_AutoKickThread);
+            g_AutoKickThread = nullptr;
+        }
         FlushBufferLog();
         if (g_BufferLogRing)
         {

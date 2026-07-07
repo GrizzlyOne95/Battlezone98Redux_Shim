@@ -76,6 +76,26 @@ Confirmed hierarchy: `GameObject`(544)→`Craft`(616)→`HoverCraft`/`Walker`, w
 `GameObjectClass`→`CraftClass`→`HoverCraftClass` config tree (every object has a paired
 `XClass` holding ODF-driven stats). This is the authoritative schema the port mirrors.
 
+## Gameplay logic export (for the UE port)
+`ghidra_scripts/ExportGameplayLogic.java` decompiles a focused 1.5 behavior slice: all
+`Misn*Mission` classes plus the core object/combat/AI classes (`GameObject`, `Craft`,
+`HoverCraft`, `Weapon`, `Ordnance`, `Team`, `AiMission`, etc.). Run:
+
+```
+.\run_gameplay_logic_export.ps1
+```
+
+Current output lives in `out/gameplay_logic/`:
+- `gameplay_logic.md` — summary report and mission `Execute` file index.
+- `index.csv` — machine-readable map of VA, namespace, function, signature, status, line count,
+  and relative source path.
+- `decompiled/` — one source-like `.cpp` file per exported function.
+
+Verified run: **784** functions, **0** decompile failures, **43,467** decompiled lines across
+**48** classes/namespaces. This includes **25** mission `Execute` methods (`Misn01Mission` through
+`Misn18Mission`, plus `Misns1Mission` through `Misns8Mission`) and core vehicle logic such as
+`HoverCraft::Simulate`.
+
 ## Applying names onto Redux (for the DLL shim)
 `prep_apply_input.py` filters the merged map to `very_high`/`high` rows → `out/apply_input.tsv`;
 `ghidra_scripts/ApplyNamesToRedux.java` (run `-process` on the Redux program, writable) renames
@@ -84,8 +104,72 @@ prototype + BSim provenance (similarity/significance/agreement) as a plate comme
 `out/redux_named.csv`. First run applied **323** names (0 failures). Verify read-only with
 `VerifyReduxNames.java`. Writes go only to the regenerable `bz_bsim` project copy.
 
-NOTE: this applies *names + signature comments*, not parameter *types* — copying the 1.5 struct
-DTM into Redux and setting real prototypes is the heavier follow-on.
+## Applying 1.5 signatures onto Redux (for safer hooks)
+`prep_signature_apply_input.py` builds `out/signature_apply_input.tsv` from the high-confidence
+BSim rows, exact Lua registration-table rows, and supplemental Lua-runtime rows that have a 1.5
+source VA. `ghidra_scripts/ApplyReduxSignaturesFromBz15.java` opens the 1.5 program read-only,
+clones return/parameter data types into the Redux DataTypeManager, and updates the destination
+function using Ghidra dynamic parameter storage. Run:
+
+```
+.\run_redux_signature_apply.ps1
+```
+
+Verified run: **590** Redux function prototypes applied, **0** missing source functions,
+**0** missing Redux functions, **0** failures. This upgrades a large portion of the named hook
+surface from "right name + prototype comment" to actual Redux function signatures in the local
+Ghidra project copy. Log: `out/redux_signatures_applied.csv`.
+
+`render_redux_hook_catalog.py` joins the named functions, Lua API targets, Lua runtime names,
+and signature-transfer log into:
+- `out/redux_hook_catalog.md` — prioritized hook target report.
+- `out/redux_hook_catalog.csv` — machine-readable hook catalog.
+
+Current catalog: **629** Redux hook/reference entries, with **590** having applied signatures.
+
+## Curated 1.5 port reference
+`render_port_reference.py` reorganizes the broad gameplay export into a porting-focused subset:
+
+```
+python .\render_port_reference.py
+```
+
+Current output lives in `out/port_reference/`:
+- `port_reference.md` — subsystem report.
+- `index.csv` — machine-readable function index.
+- `decompiled/<system>/...` — copied source-like files grouped by subsystem.
+
+Verified run: **458** unique 1.5 functions selected (**523** system-tagged rows):
+AI/tasks/orders **78**, damage/explosion/combat **116**, save/load state **124**,
+factory/build logic **170**, team/resources **35**.
+
+## Stock FID and Lua runtime cleanup
+`ghidra_scripts/ApplyStockFidNames.java` wraps Ghidra's stock Function ID command and logs only
+newly-added library labels. Run:
+
+```
+.\run_stock_fid.ps1
+```
+
+Result on the current Redux project copy: stock VS FID added only **11** ambiguous MFC/STL conflict
+labels and did **not** increase the primary named-function count. Treat this as a useful negative
+finding: the stock FID databases are not the next big coverage lever for this binary as imported.
+The log is `out/stock_fid_battlezone98redux.exe.unpacked.exe.csv`.
+
+The stronger Lua-runtime signal comes from the 1.5 PDB names plus BSim. `prep_lua_runtime_apply.py`
+filters the merged BSim map to Lua 5.1.5 runtime/library names with significance >= 30, excluding
+known collision/low-conflict classes. `ApplySupplementalBsimNames.java` then applies only to Redux
+functions that are still default-named, preserving existing BSim/Lua API names. Run:
+
+```
+.\run_lua_runtime_apply.ps1
+```
+
+Verified run: **130** Lua/runtime candidates, **65** newly named Redux functions, **65** skipped
+because they were already named, **0** missing functions, **0** rename failures. Redux non-default
+named functions increased **2,481 → 2,546**. Combined with the earlier high-confidence BSim pass,
+there are now **146** named Lua-runtime/library functions in Redux. Logs:
+`out/lua_runtime_apply_input.tsv` and `out/lua_runtime_names_applied.csv`.
 
 ## Lua script-binding recovery (registration table)
 BSim cannot separate the tiny mission-script getters/setters (`GetCurAmmo`, `GetOwner`,
