@@ -430,9 +430,9 @@ namespace BZROpenShim
         constexpr uintptr_t kGogVectorTransformAddr = 0x00820180;
         constexpr uintptr_t kGogRangeSearchAddr = 0x005B2950;
         constexpr uintptr_t kGogRangeResultsGetNextAddr = 0x00462710;
-        constexpr uintptr_t kShieldTowerSimulateVtableSlotAddr = 0x00887728;
+        constexpr uintptr_t kShieldTowerSimulateVtableSlotAddr = 0x00887724;
         constexpr uintptr_t kMagnetMineSimulateVtableSlotAddr = 0x0087D574;
-        constexpr uintptr_t kProximityMineSimulateVtableSlotAddr = 0x00886234;
+        constexpr uintptr_t kProximityMineSimulateVtableSlotAddr = 0x008862B4;
         // Splinter (spraybomb) undead bug (#46). SprayBuilding::Simulate keeps
         // spinning its payload fire loop after the deployed splinter is damaged
         // below zero because it overrides Building::Simulate without preserving
@@ -498,8 +498,8 @@ namespace BZROpenShim
         constexpr size_t kWeaponClassSigOffset = 0x0C;
         constexpr size_t kWeaponClassOdfOffset = 0x20;
         constexpr float kJumpSnipeVelocityBandThreshold = 0.15f;
-        constexpr uintptr_t kGogCalcRangeCraftEntryAddr = 0x0041F240;
-        constexpr size_t kCalcRangeCraftDetourLen = 8;
+        constexpr uintptr_t kGogCalcRangeCraftEntryAddr = 0x00466BE0;
+        constexpr size_t kCalcRangeCraftDetourLen = 9;
         constexpr uintptr_t kGogOffensiveProcessDoSubTaskEntryAddr = 0x004DFE70;
         constexpr size_t kOffensiveProcessDoSubTaskDetourLen = 8;
         constexpr uintptr_t kGogGunTowerProcessDoSubTaskEntryAddr = 0x004741A0;
@@ -9640,7 +9640,7 @@ namespace BZROpenShim
             {
                 static const uint8_t kExpectedCalcRangeCraftBytes[kCalcRangeCraftDetourLen] =
                 {
-                    0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C, 0x89, 0x4D
+                    0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x1C, 0x8B, 0x45, 0x0C
                 };
 
                 if (!ExpectedBytesMatchAt(kGogCalcRangeCraftEntryAddr,
