@@ -34,6 +34,7 @@ architecture_reference.md
 reverse_engineering/latest
 reverse_engineering/workshop
 reverse_engineering/snapshots
+reverse_engineering/tooling_smoke/
 reverse_engineering/bsim
 reverse_engineering/current_global_corpus/
 reverse_engineering/current_legacy_global_corpus/
@@ -68,3 +69,5 @@ reverse_engineering/repo_corpora/bzr_gog_best_effort/merged/legacy_symbol_enrich
 reverse_engineering/finalize_global_corpus.py
 reverse_engineering/repo_corpora/bzr_gog_best_effort/pipeline_manifest.json
 .vscode/settings.json
+nul
+tmp/dx11-hardening-fxc/

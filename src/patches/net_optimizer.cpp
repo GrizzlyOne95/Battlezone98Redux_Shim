@@ -3296,7 +3296,8 @@ namespace
                 { "WSARecv", 0, reinterpret_cast<FARPROC>(Hook_WSARecv) },
                 { "WSASendTo", 0, reinterpret_cast<FARPROC>(Hook_WSASendTo) },
                 { "WSARecvFrom", 0, reinterpret_cast<FARPROC>(Hook_WSARecvFrom) },
-                { "ioctlsocket", 12, reinterpret_cast<FARPROC>(Hook_ioctlsocket) },
+                // WS2_32 ordinal 12 is inet_ntoa; ioctlsocket is ordinal 10.
+                { "ioctlsocket", 10, reinterpret_cast<FARPROC>(Hook_ioctlsocket) },
                 { "WSAIoctl", 0, reinterpret_cast<FARPROC>(Hook_WSAIoctl) },
             };
 

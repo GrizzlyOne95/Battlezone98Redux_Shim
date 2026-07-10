@@ -32,6 +32,8 @@ Use this split before choosing a tool.
   - `diec`
   - Rizin CLIs
   - Qiling wrapper
+  - CMake / Ninja / 7-Zip wrappers
+  - Retoolkit CLI tools (`capa`, `floss`, `yara`, `upx`, `pe-sieve`)
 - Partial / mixed:
   - `Process Monitor`
     - good for scripted capture, backing-file collection, and export
@@ -44,6 +46,7 @@ Use this split before choosing a tool.
   - `ReClass.NET`
   - `API Monitor`
   - `Ghidrathon` inside the Ghidra GUI
+  - Unreal Editor GUI
 
 ### Ghidra / MCP
 
@@ -214,6 +217,62 @@ Use this split before choosing a tool.
   - Guidance:
     - primarily a human-operated inspection tool, not a first-choice autonomous surface
 
+### Build / Patch / Unreal
+
+- `bzr-cmake.cmd`
+- `bzr-ninja.cmd`
+- `bzr-7z.cmd`
+  - Stable wrappers to CMake, Ninja, and 7-Zip.
+  - Use for:
+    - repeatable C++ configure/build flows
+    - unpacking downloaded tool archives
+    - scriptable artifact packaging
+- `bzr-vsdevcmd.cmd`
+- `bzr-cl.cmd`
+- `bzr-link.cmd`
+- `bzr-dumpbin.cmd`
+- `bzr-devenv.cmd`
+  - Stable wrappers around Visual Studio Community 2022.
+  - The compiler/linker/dumpbin wrappers initialize an x86 target developer
+    environment, matching the 32-bit Battlezone executable and shim work.
+  - Examples:
+    - `bzr-cl.cmd /Bv`
+    - `bzr-dumpbin.cmd /headers path\\to\\winmm.dll`
+- `bzr-unreal-editor.cmd`
+- `bzr-unreal-editor-cmd.cmd`
+- `bzr-runuat.cmd`
+- `bzr-ue-build.cmd`
+  - Stable wrappers to the installed Unreal Engine tree.
+  - Current detected root: `C:\Program Files\Epic Games\UE_5.8`
+  - User environment variables set by the installer:
+    - `UE_ROOT=C:\Program Files\Epic Games\UE_5.8`
+    - `UE_ENGINE_DIR=C:\Program Files\Epic Games\UE_5.8\Engine`
+  - Use `bzr-runuat.cmd` and `bzr-ue-build.cmd` for agent-driven Unreal build
+    and automation work; reserve the editor wrapper for human-visible GUI work.
+
+### Retoolkit CLIs
+
+- `bzr-capa.cmd`
+- `bzr-floss.cmd`
+- `bzr-yara.cmd`
+- `bzr-yarac.cmd`
+- `bzr-upx.cmd`
+- `bzr-pe-sieve.cmd`
+- `bzr-entropy.cmd`
+- `bzr-goresym.cmd`
+- `bzr-redress.cmd`
+  - Stable wrappers to selected CLI tools from `retoolkit`.
+  - Use for:
+    - capability triage (`capa`)
+    - decoded/string extraction (`floss`)
+    - YARA-based scans
+    - quick entropy and packer signals
+    - unpacking / dumped-image inspection helpers
+  - Notes:
+    - `retoolkit` is installed under `%LOCALAPPDATA%\Programs\retoolkit`.
+    - Prefer these focused wrappers over launching the retoolkit menu when
+      working as an unattended agent.
+
 ## Installed MCP Servers
 
 Configured in `<USER_HOME>\.codex\config.toml`:
@@ -249,6 +308,10 @@ These are installed and usable from the local Python 3.12 environment.
   - Frida command-line tooling
 - `qiling`
   - Emulation framework
+- `r2pipe`
+  - Python bridge for scripting Rizin/radare-style CLI analysis
+- `construct`
+  - Binary structure parsing/building helpers
 - Supporting low-level packages already present through this stack include:
   - `capstone`
   - `keystone-engine`
@@ -264,9 +327,17 @@ These are installed and usable from the local Python 3.12 environment.
   - `llvm-objdump.exe`
   - useful for PDB lookup and static disassembly from shell scripts
 - Visual Studio / MSVC tools
+  - `cl.exe`
   - `dumpbin.exe`
   - `link.exe`
   - `MSBuild.exe`
+- CMake / Ninja / 7-Zip
+  - installed and exposed through `bzr-cmake.cmd`, `bzr-ninja.cmd`, and
+    `bzr-7z.cmd`
+- Unreal Engine
+  - `C:\Program Files\Epic Games\UE_5.8`
+  - exposed through `bzr-unreal-editor*.cmd`, `bzr-runuat.cmd`, and
+    `bzr-ue-build.cmd`
 - Ghidra install
   - `<USER_HOME>\Tools\ghidra_12.0.4_PUBLIC`
   - mirrored into `BZR_GHIDRA_INSTALL_DIR` and the Codex `ghidra` MCP entry
@@ -275,6 +346,9 @@ These are installed and usable from the local Python 3.12 environment.
   - `Process Explorer`
 - Detect It Easy
   - portable WinGet install under `%LOCALAPPDATA%\Microsoft\WinGet\Packages`
+- Retoolkit
+  - `%LOCALAPPDATA%\Programs\retoolkit`
+  - useful CLI subset wrapped in `<USER_HOME>\bin`
 
 ## Optional Manual Extras
 
@@ -300,11 +374,24 @@ Prefer these before inventing a one-off script if they already cover the task.
   - Battlezone-specific wrapper for `pyghidra_mcp`, including the project reopen patch and persistent-service helper
 - [redux_debug_bridge.py](/<USER_HOME>/Documents/GIT/BZR-OpenShim/scripts/redux_debug_bridge.py)
   - launch/read/terminate bridge, also exposes MCP mode
+- [launch_redux_steam_probe.ps1](/<USER_HOME>/Documents/GIT/BZR-OpenShim/reverse_engineering/launch_redux_steam_probe.ps1)
+  - launches Redux through Steam app id `301650` or attaches to an existing
+    working Redux process, avoiding the direct-exe Steam Error path
+  - use `-ClickLauncherPlay` to press the rendered launcher Play button, then
+    `-ProbeDefaultSites` to verify settled workshop preload call sites
 - [qiling_cli.py](/<USER_HOME>/Documents/GIT/BZR-OpenShim/scripts/qiling_cli.py)
   - small Qiling CLI bridge
 - [capture_runtime_layout.ps1](/<USER_HOME>/Documents/GIT/BZR-OpenShim/reverse_engineering/capture_runtime_layout.ps1)
 - [run_misn03_chunk_probe.ps1](/<USER_HOME>/Documents/GIT/BZR-OpenShim/reverse_engineering/run_misn03_chunk_probe.ps1)
 - [run_best_effort_pipeline.py](/<USER_HOME>/Documents/GIT/BZR-OpenShim/reverse_engineering/run_best_effort_pipeline.py)
+- [tooling_smoke_pipeline.ps1](/<USER_HOME>/Documents/GIT/BZR-OpenShim/reverse_engineering/tooling_smoke_pipeline.ps1)
+  - read-only first-pass binary triage for a target executable
+  - defaults to `BZR_GAME_EXE`
+  - writes timestamped Markdown/JSON/raw reports under
+    `reverse_engineering/tooling_smoke/`
+  - examples:
+    - `.\reverse_engineering\tooling_smoke_pipeline.ps1`
+    - `.\reverse_engineering\tooling_smoke_pipeline.ps1 -TargetPath path\to\file.exe -SkipFloss`
 
 ## Practical Guidance
 
@@ -340,5 +427,9 @@ Prefer these before inventing a one-off script if they already cover the task.
   - emulated execution
   - offline behavior experiments
 - Use Rizin / `rz-bin` for fast shell-side triage before opening a heavier GUI.
+- Use `bzr-capa`, `bzr-floss`, `bzr-yara`, and `bzr-entropy` for first-pass
+  binary triage before deeper Ghidra or debugger work.
+- Use `bzr-cl`, `bzr-dumpbin`, `bzr-runuat`, and `bzr-ue-build` when an agent
+  needs build or porting commands from a plain shell.
 - Prefer the `bzr-*` wrappers over raw install paths so future package updates
   only need one wrapper fix.
