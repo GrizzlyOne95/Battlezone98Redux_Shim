@@ -21,6 +21,10 @@ without copying machine-specific absolute paths from the current workstation.
 - Detect It Easy CLI and GUI wrappers
 - Process Monitor wrapper
 - Process Explorer wrapper
+- CMake / Ninja / 7-Zip wrappers
+- Visual Studio compiler, linker, dumpbin, and IDE wrappers
+- Unreal Engine editor/build automation wrappers
+- Retoolkit CLI wrappers for capability/string/YARA/packer triage
 - Codex MCP config entries for:
   - `ghidra`
   - `redux_debug`
@@ -50,6 +54,10 @@ That script installs the free packages it can acquire automatically:
 - `horsicq.DIE-engine`
 - `Microsoft.Sysinternals.ProcessMonitor`
 - `Microsoft.Sysinternals.ProcessExplorer`
+- `Kitware.CMake`
+- `Ninja-build.Ninja`
+- `7zip.7zip`
+- `mentebinaria.retoolkit`
 - Python packages:
   - `pyghidra-mcp`
   - `angr`
@@ -57,6 +65,8 @@ That script installs the free packages it can acquire automatically:
   - `frida-tools`
   - `qiling`
   - `ghidriff`
+  - `r2pipe`
+  - `construct`
 
 It also writes stable `bzr-*` wrappers into `<USER_HOME>\bin`, adds that
 directory to the user `PATH`, updates `<USER_HOME>\.codex\config.toml`, and
@@ -70,6 +80,8 @@ These are intentionally configurable:
 - game install directory
 - explicit game executable path
 - Ghidra install directory
+- Unreal Engine install directory
+- Retoolkit install directory
 - user bin directory
 - Codex config path
 
@@ -79,7 +91,9 @@ The installer supports parameters:
 .\scripts\install_agent_re_tooling.ps1 `
   -RepoRoot "<REPO_ROOT>" `
   -GameDir "<GAME_ROOT>" `
-  -GhidraInstallDir "<GHIDRA_ROOT>"
+  -GhidraInstallDir "<GHIDRA_ROOT>" `
+  -UnrealEngineDir "<UE_ROOT>" `
+  -RetoolkitDir "<RETOOLKIT_ROOT>"
 ```
 
 ## Environment Variable Overrides
@@ -94,6 +108,8 @@ The repo tooling also honors these user or process environment variables:
 - `BZR_CDB_PATH`
 - `BZR_WINDBG_ROOT`
 - `BZR_X32DBG_PATH`
+- `UE_ROOT`
+- `UE_ENGINE_DIR`
 
 These are useful when:
 
@@ -101,6 +117,7 @@ These are useful when:
 - you want to force a specific executable
 - Ghidra is installed somewhere other than `<GHIDRA_ROOT>`
 - you want to pin the debugger backend to a specific install
+- Unreal is installed somewhere other than the newest `C:\Program Files\Epic Games\UE_*`
 
 ## Ghidra Note
 
@@ -136,6 +153,27 @@ Once installed, agents should prefer these stable wrappers from `<USER_HOME>\bin
 - `bzr-diec.cmd`
 - `bzr-procmon.cmd`
 - `bzr-procexp.cmd`
+- `bzr-cmake.cmd`
+- `bzr-ninja.cmd`
+- `bzr-7z.cmd`
+- `bzr-vsdevcmd.cmd`
+- `bzr-cl.cmd`
+- `bzr-link.cmd`
+- `bzr-dumpbin.cmd`
+- `bzr-devenv.cmd`
+- `bzr-unreal-editor.cmd`
+- `bzr-unreal-editor-cmd.cmd`
+- `bzr-runuat.cmd`
+- `bzr-ue-build.cmd`
+- `bzr-capa.cmd`
+- `bzr-floss.cmd`
+- `bzr-yara.cmd`
+- `bzr-yarac.cmd`
+- `bzr-upx.cmd`
+- `bzr-pe-sieve.cmd`
+- `bzr-entropy.cmd`
+- `bzr-goresym.cmd`
+- `bzr-redress.cmd`
 
 The detailed local usage guide for agents lives in `AGENT_TOOLING.md` in the
 repo root after setup.
@@ -168,6 +206,10 @@ Use this split when deciding what to automate on another PC.
   - `diec`
   - Rizin CLIs
   - Qiling wrapper
+  - CMake / Ninja / 7-Zip wrappers
+  - Retoolkit CLI tools
+  - Visual Studio compiler/linker/dumpbin wrappers
+  - Unreal Automation Tool / Unreal build wrappers
 - Partially agent-usable:
   - `Process Monitor`
     - usable for scripted capture, backing-file collection, and export flows
@@ -175,6 +217,7 @@ Use this split when deciding what to automate on another PC.
   - `Process Explorer`
     - callable, but mainly useful as a human inspection surface
 - Human-driven or manual-install extras:
+  - Unreal Editor GUI
   - `Ghidrathon`
     - useful inside Ghidra, but not the first agent interface in this repo
   - `ReClass.NET`
@@ -223,6 +266,13 @@ bzr-rz-bin.cmd -h
 bzr-cdb32.cmd -version
 bzr-diec.cmd $env:BZR_GAME_EXE
 Get-Command bzr-procmon.cmd
+bzr-cmake.cmd --version
+bzr-ninja.cmd --version
+bzr-cl.cmd /Bv
+bzr-capa.cmd --version
+bzr-floss.cmd --version
+bzr-yara.cmd --version
+Get-Command bzr-runuat.cmd
 ```
 
 If `Ghidra` is installed and `BZR_GAME_EXE` points at a valid executable, the

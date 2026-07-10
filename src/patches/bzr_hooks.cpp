@@ -463,7 +463,14 @@ namespace BZROpenShim
         constexpr uintptr_t kGogPersonSimulateEntryAddr = 0x004F4370;
         constexpr uintptr_t kGogGetPlayerHandleAddr = 0x00514610;
         constexpr uintptr_t kGogGameObjectGetObjByHandleAddr = 0x0046B160;
-        constexpr uintptr_t kGogRecordDeathEntryAddr = 0x004D9210;
+        // NetPlayer::RecordDeath(int killedTeam, int killerTeam) on the live
+        // 2.2.301 exe (advisory-PDB VA 0x004D9210 had drifted; re-derived via
+        // the "NetPlayer::SetTeam team=%d" debug-string xref cluster and
+        // matched against the 1.5 decompile: netPlayerByTeam[] at 0x9180E8,
+        // playerId +0x28, deaths +0x6C, kills +0x70). Same VA on Steam: the
+        // Steam exe is the identical build wrapped in SteamStub (.bind), whose
+        // .text decrypts in place at runtime.
+        constexpr uintptr_t kGogRecordDeathEntryAddr = 0x00577290;
         constexpr uintptr_t kSteam64GlobalAddr = 0x0260B1D0;
         constexpr uintptr_t kLocalPlayerNetIdAddr = 0x009180D4;
         constexpr uintptr_t kUiWrapperActiveAddr = 0x00918324;
@@ -2400,9 +2407,6 @@ namespace BZROpenShim
         {
             if (!visible)
             {
-                if (!g_HudSpriteHiddenAddresses.empty())
-                    return true;
-
                 std::vector<uintptr_t> addresses;
                 if (!DiscoverStockScrapPilotPanelRecordAddresses(addresses))
                 {
@@ -2420,6 +2424,10 @@ namespace BZROpenShim
                     HudSpriteRectRecord hidden = originalIt->second;
                     hidden.w = 0;
                     hidden.h = 0;
+                    // The game can rebuild the HUD rect records after the
+                    // initial layout application. Re-write the hidden rect on
+                    // every hide request instead of treating the cached
+                    // hidden set as proof that the live record is still zeroed.
                     if (WriteHudSpriteRectRecordAtAddress(address, hidden))
                     {
                         g_HudSpriteHiddenAddresses.insert(address);
@@ -8791,12 +8799,24 @@ namespace BZROpenShim
 
             static const uint8_t kExpectedRecordDeathBytes[kRecordDeathDetourLen] =
             {
-                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x10
+                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C
             };
+            // Body check at +0x0F distinguishes RecordDeath from other small
+            // cdecl helpers sharing the generic prologue: cmp [ebp+8],0 / jle /
+            // mov eax,[ebp+8] / mov ecx,[eax*4 + netPlayerByTeam(0x9180E8)].
+            static const uint8_t kExpectedRecordDeathBodyBytes[] =
+            {
+                0x83, 0x7D, 0x08, 0x00, 0x7E, 0x3B, 0x8B, 0x45, 0x08,
+                0x8B, 0x0C, 0x85, 0xE8, 0x80, 0x91, 0x00
+            };
+            constexpr uintptr_t kRecordDeathBodyCheckOffset = 0x0F;
 
             if (!ExpectedBytesMatchAt(kGogRecordDeathEntryAddr,
                                       kExpectedRecordDeathBytes,
-                                      sizeof(kExpectedRecordDeathBytes)))
+                                      sizeof(kExpectedRecordDeathBytes)) ||
+                !ExpectedBytesMatchAt(kGogRecordDeathEntryAddr + kRecordDeathBodyCheckOffset,
+                                      kExpectedRecordDeathBodyBytes,
+                                      sizeof(kExpectedRecordDeathBodyBytes)))
             {
                 if (!g_CareerStatsMpHookMismatchLogged)
                 {
@@ -12456,6 +12476,13 @@ namespace BZROpenShim
             return true;
         }
 
+        // Keeps the +0x150 hover slot non-null on injected buttons. Screens that
+        // walk dialog children invoke this slot; a null slot is a call through
+        // NULL (see AutoSaveButtonOnHoverNoop for the same crash mechanism).
+        static void __cdecl InputBindingUiButtonOnHoverNoop(void* /*param*/)
+        {
+        }
+
         static bool CreateInputBindingUiButton(void*& slot,
                                                void* parent,
                                                const char* objectName,
@@ -12500,6 +12527,8 @@ namespace BZROpenShim
 
             if (g_BzrFn_SetOnClick && onClick)
                 g_BzrFn_SetOnClick(slot, onClick);
+            if (g_BzrFn_SetOnHover)
+                g_BzrFn_SetOnHover(slot, reinterpret_cast<void*>(InputBindingUiButtonOnHoverNoop));
             if (g_BzrFn_SetButtonLabel)
                 g_BzrFn_SetButtonLabel(slot, text ? text : "");
             SetInputBindingUiViewActive(slot, true);
@@ -19048,6 +19077,26 @@ namespace BZROpenShim
         }
     }
 
+    // POD-only helper so __try/__except is valid (no C++ objects with destructors).
+    // Returns true if the button is still alive and was updated, false if it was
+    // dangling (exception caught) so the caller should create a fresh button.
+    static bool TryUpdateAutoSaveLoadButton(const char* label)
+    {
+        __try
+        {
+            if (g_BzrFn_SetButtonLabel)
+                g_BzrFn_SetButtonLabel(g_AutoSaveLoadButton, label);
+            if (g_BzrFn_SetOnClick) g_BzrFn_SetOnClick(g_AutoSaveLoadButton, reinterpret_cast<void*>(AutoSaveButtonOnClickLoad));
+            if (g_BzrFn_SetOnHover) g_BzrFn_SetOnHover(g_AutoSaveLoadButton, reinterpret_cast<void*>(AutoSaveButtonOnHoverNoop));
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            g_AutoSaveLoadButton = nullptr;
+            return false;
+        }
+        return true;
+    }
+
     static void AutoSaveLoadButtonCreate(void* parent, void* screen)
     {
         if (!parent || !screen || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild)
@@ -19059,9 +19108,8 @@ namespace BZROpenShim
         const std::string autoSaveLabel = GetAutoSaveButtonLabel();
         if (g_AutoSaveLoadButton && g_AutoSaveLoadParent == parent && g_AutoSaveLoadScreen == screen)
         {
-            if (g_BzrFn_SetButtonLabel)
-                g_BzrFn_SetButtonLabel(g_AutoSaveLoadButton, autoSaveLabel.c_str());
-            return;
+            if (TryUpdateAutoSaveLoadButton(autoSaveLabel.c_str()))
+                return;
         }
 
         g_AutoSaveLoadParent = parent;
