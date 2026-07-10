@@ -102,6 +102,7 @@ namespace BZROpenShim
 
     // Helper functions (implemented in trampolines.cpp or bzr_hooks.cpp)
     void SetProducerBuildMenuOriginal(void* original);
+    void InstallOgreMaterialCollisionGuard();
 
     // -----------------------------------------------------------------------
     // Build the active hop-fix patch list.

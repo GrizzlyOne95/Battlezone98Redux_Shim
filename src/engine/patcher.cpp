@@ -56,6 +56,20 @@ namespace BZROpenShim
             }
             return defaultVal;
         }
+        bool GetBool(const std::string& name, bool defaultVal = false) {
+            try {
+                if (data.contains("features")) {
+                    const auto& features = data["features"];
+                    if (features.contains(name) && features[name].is_boolean()) {
+                        return features[name].get<bool>();
+                    }
+                }
+                if (data.contains(name) && data[name].is_boolean()) {
+                    return data[name].get<bool>();
+                }
+            } catch (...) {}
+            return defaultVal;
+        }
     };
     static PatcherConfig g_Config;
 
@@ -190,6 +204,24 @@ namespace BZROpenShim
     static bool IsLobbyBzrnetIntegrationPatchName(const char* name) {
         if (!name) return false;
         return strcmp(name, "Lobby BZRNET Integration HOST") == 0 || strcmp(name, "Lobby BZRNET Integration CLIENT") == 0;
+    }
+
+    static bool ShouldEnableOgreMaterialCollisionGuard() {
+        static int s_cached = -1;
+        if (s_cached < 0) {
+            if (EnvFlagEnabledByName("OPENSHIM_DISABLE_OGRE_MATERIAL_COLLISION_GUARD") ||
+                EnvFlagEnabledByName("BZR_DISABLE_OGRE_MATERIAL_COLLISION_GUARD")) {
+                s_cached = 0;
+            } else if (EnvFlagEnabledByName("OPENSHIM_ENABLE_OGRE_MATERIAL_COLLISION_GUARD") ||
+                       EnvFlagEnabledByName("BZR_ENABLE_OGRE_MATERIAL_COLLISION_GUARD")) {
+                s_cached = 1;
+            } else {
+                // WIP feature: off by default for the stable release. Opt back in
+                // via patches.json features or the ENABLE env vars above.
+                s_cached = g_Config.GetBool("ogre_material_collision_guard", false) ? 1 : 0;
+            }
+        }
+        return s_cached != 0;
     }
 
     static void FilterPatchesForRuntime(std::vector<HookEngine::PatchDef>& patches, bool isSteam) {
@@ -405,6 +437,34 @@ namespace BZROpenShim
         g_BZRFn_ScrollDown = reinterpret_cast<void(*)()>(g_Config.GetStaticPointer("ScrollDown", 0x007CB540));
     }
 
+    static void ResolveStaticReturnPointers() {
+        auto ptr = [](const char* name, uint32_t fallback) -> void* {
+            return reinterpret_cast<void*>(g_Config.GetStaticPointer(name, fallback));
+        };
+
+        g_RetAddr_MapFilters1 = ptr("RetAddr_MapFilters1", 0x007A35C0);
+        g_RetAddr_MapFilters2 = ptr("RetAddr_MapFilters2", 0x00752D00);
+        g_RetAddr_MapFilters3 = ptr("RetAddr_MapFilters3", 0x0079D6B9);
+        g_RetAddr_MapFilters4 = ptr("RetAddr_MapFilters4", 0x0079D699);
+        g_RetAddr_MapFilters5 = ptr("RetAddr_MapFilters5", 0x0079916B);
+        g_RetAddr_MapFilters7 = ptr("RetAddr_MapFilters7", 0x007998B4);
+        g_RetAddr_MapFilters8_A = ptr("RetAddr_MapFilters8_A", 0x007997B2);
+        g_RetAddr_MapFilters8_B = ptr("RetAddr_MapFilters8_B", 0x007997B7);
+        g_RetAddr_MapFilters8_C = ptr("RetAddr_MapFilters8_C", 0x0079987C);
+        g_RetAddr_VehicleListModFix1 = ptr("RetAddr_VehicleListModFix1", 0x00766C52);
+        g_RetAddr_VehicleListModFix4 = ptr("RetAddr_VehicleListModFix4", 0x00798BE6);
+        g_RetAddr_BzrnetHost = ptr("RetAddr_BzrnetHost", 0x00743C30);
+        g_RetAddr_BzrnetClient = ptr("RetAddr_BzrnetClient", 0x0073E748);
+        g_RetAddr_CommandHelpHandled = ptr("RetAddr_CommandHelpHandled", 0x00625052);
+        g_RetAddr_CommandHelpFallback = ptr("RetAddr_CommandHelpFallback", 0x0062491F);
+        g_RetAddr_JoinerEventHook = ptr("RetAddr_JoinerEventHook", 0x0073F435);
+        g_RetAddr_BanHook1 = ptr("RetAddr_BanHook1", 0x007D0A35);
+        g_RetAddr_BanHook2 = ptr("RetAddr_BanHook2", 0x007A691A);
+        g_RetAddr_AutoSaveLoadHook = ptr("RetAddr_AutoSaveLoadHook", 0x0078B45F);
+        g_BZRFnPtr_JoinerEventOriginal = reinterpret_cast<void(*)()>(
+            g_Config.GetStaticPointer("JoinerEventOriginal", 0x00742560));
+    }
+
     static void ScanForPatchAddresses(std::vector<HookEngine::PatchDef>& patches, bool isSteam) {
         std::vector<HookEngine::ScanTarget> targets;
         try {
@@ -492,7 +552,8 @@ namespace BZROpenShim
             bool all = true;
             for (const auto& p : patches) {
                 if (p.address == 0 || p.expected_original.empty()) continue;
-                if (p.name.find("Version Notice") == std::string::npos && p.name.find("Offensive Attack") == std::string::npos) continue;
+                if (p.name.find("Version Notice") == std::string::npos &&
+                    p.name.find("Offensive Attack") == std::string::npos) continue;
                 std::vector<uint8_t> cur(p.expected_original.size()); SIZE_T r;
                 if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(p.address), cur.data(), cur.size(), &r) || cur != p.expected_original) { all = false; break; }
             }
@@ -512,12 +573,14 @@ namespace BZROpenShim
         g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForRuntime(patches, isSteam); ScanForPatchAddresses(patches, isSteam);
         auto findAddr = [&patches](const char* n) -> uint32_t { for (const auto& p : patches) { if (p.name == n) return p.address; } return 0; };
         ResolvePointers(findAddr("Map Sorting"), findAddr("Map List Rewrite for Hop-Fix 1/3"), findAddr("Map List Rewrite for Hop-Fix 2/3"), findAddr("Map List Rewrite for Hop-Fix 3/3"), findAddr("Probe Refresh Path MapFilter1"), findAddr("Map List Fix Support 1/3"), findAddr("Probe MapListFix2"), findAddr("Artillery Howitzer Volley Hook"), findAddr("TurretCraft Aim Pitch Multiplier"), findAddr("TurretTank Aim Pitch Multiplier"), findAddr("Under Attack Alert Hook 1/2"), findAddr("Under Attack Alert Hook 2/2"), findAddr("Offensive Attack Reveal Hook"), findAddr("TurretTank Attack Reveal Hook"));
+        ResolveStaticReturnPointers();
         ResolveBzrHooks(isSteam); InitBzrHookStrings(); SuppressStartupShellAutoLoad();
         FillJmp5Payloads(patches); FillVersionNoticePayloads(patches); FillRel32Payloads(patches, isSteam); WaitForExpectedBytes(patches, isSteam);
-        RetryDeferredRuntimeHooks();
-        if (isSteam && !AreInputBindingUiHooksInstalled()) {
-            for (int i = 0; i < 2500; ++i) { if (g_ShutdownRequested) return; if (AreInputBindingUiHooksInstalled()) break; Sleep(10); RetryDeferredRuntimeHooks(); }
-        }
+        // Apply critical patches (JMP5 hooks, version notice, etc.) BEFORE the
+        // deferred-hook retry loop. The retry loop can take ~25 seconds for
+        // Steam input binding UI hooks, and the game may crash during that
+        // window if critical fixes (e.g. AutoSave +0x150 null callback) are
+        // not yet installed.
         int app = 0;
         for (const auto& p : patches) {
             if (HookEngine::ApplyPatch(p)) {
@@ -529,5 +592,12 @@ namespace BZROpenShim
         }
         Log(L"[DONE] Applied=%d of %u\n", app, static_cast<unsigned>(patches.size()));
         SetPatchingComplete(true); SetAppliedPatchCount(app);
+        if (ShouldEnableOgreMaterialCollisionGuard()) {
+            InstallOgreMaterialCollisionGuard();
+        }
+        RetryDeferredRuntimeHooks();
+        if (isSteam && !AreInputBindingUiHooksInstalled()) {
+            for (int i = 0; i < 2500; ++i) { if (g_ShutdownRequested) return; if (AreInputBindingUiHooksInstalled()) break; Sleep(10); RetryDeferredRuntimeHooks(); }
+        }
     }
 }

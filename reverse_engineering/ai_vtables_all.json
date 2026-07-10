@@ -1,0 +1,354 @@
+{
+  "APCProcess": {
+    "primary": [
+      "0x00875A88"
+    ],
+    "all": [
+      "0x00875A88(off=0)"
+    ]
+  },
+  "AiProcess": {
+    "primary": [
+      "0x008753D8"
+    ],
+    "all": [
+      "0x008753D8(off=0)"
+    ]
+  },
+  "AiTask": {
+    "primary": [
+      "0x0087547C"
+    ],
+    "all": [
+      "0x0087547C(off=0)"
+    ]
+  },
+  "ArmoryProcess": {
+    "primary": [
+      "0x00875F1C"
+    ],
+    "all": [
+      "0x00875F1C(off=0)"
+    ]
+  },
+  "ArtilleryProcess": {
+    "primary": [
+      "0x00876024"
+    ],
+    "all": [
+      "0x00876024(off=0)"
+    ]
+  },
+  "AttackTask": {
+    "primary": [
+      "0x00876358"
+    ],
+    "all": [
+      "0x00876358(off=0)"
+    ]
+  },
+  "BomberProcess": {
+    "primary": [
+      "0x0088B178"
+    ],
+    "all": [
+      "0x0088B178(off=0)"
+    ]
+  },
+  "CircleTask": {
+    "primary": [
+      "0x00889F8C"
+    ],
+    "all": [
+      "0x00889F8C(off=0)"
+    ]
+  },
+  "CoastTask": {
+    "primary": [
+      "0x00889ED8"
+    ],
+    "all": [
+      "0x00889ED8(off=0)"
+    ]
+  },
+  "DefendTask": {
+    "primary": [
+      "0x008785F4"
+    ],
+    "all": [
+      "0x008785F4(off=0)"
+    ]
+  },
+  "FactoryProcess": {
+    "primary": [
+      "0x008794AC"
+    ],
+    "all": [
+      "0x008794AC(off=0)"
+    ]
+  },
+  "FollowTask": {
+    "primary": [
+      "0x00879AE4"
+    ],
+    "all": [
+      "0x00879AE4(off=0)"
+    ]
+  },
+  "GechProcess": {
+    "primary": [
+      "0x0087A13C"
+    ],
+    "all": [
+      "0x0087A13C(off=0)"
+    ]
+  },
+  "GotoTask": {
+    "primary": [
+      "0x0087A61C"
+    ],
+    "all": [
+      "0x0087A61C(off=0)"
+    ]
+  },
+  "GunTowerProcess": {
+    "primary": [
+      "0x0087A87C"
+    ],
+    "all": [
+      "0x0087A87C(off=0)"
+    ]
+  },
+  "HuntTask": {
+    "primary": [
+      "0x0087AEBC"
+    ],
+    "all": [
+      "0x0087AEBC(off=0)"
+    ]
+  },
+  "LayMinesTask": {
+    "primary": [
+      "0x0087DBE0"
+    ],
+    "all": [
+      "0x0087DBE0(off=0)"
+    ]
+  },
+  "MineLayerProcess": {
+    "primary": [
+      "0x0087D928"
+    ],
+    "all": [
+      "0x0087D928(off=0)"
+    ]
+  },
+  "NetProcess": {
+    "primary": [
+      "0x00884BB4"
+    ],
+    "all": [
+      "0x00884BB4(off=0)"
+    ]
+  },
+  "OffensiveProcess": {
+    "primary": [
+      "0x00884C28"
+    ],
+    "all": [
+      "0x00884C28(off=0)"
+    ]
+  },
+  "PatrolTask": {
+    "primary": [
+      "0x008855EC"
+    ],
+    "all": [
+      "0x008855EC(off=0)"
+    ]
+  },
+  "PersonProcess": {
+    "primary": [
+      "0x00885984"
+    ],
+    "all": [
+      "0x00885984(off=0)"
+    ]
+  },
+  "PowerUpProcess": {
+    "primary": [
+      "0x00885FAC"
+    ],
+    "all": [
+      "0x00885FAC(off=0)"
+    ]
+  },
+  "RecycleTask": {
+    "primary": [
+      "0x008868BC"
+    ],
+    "all": [
+      "0x008868BC(off=0)"
+    ]
+  },
+  "RecyclerProcess": {
+    "primary": [
+      "0x008866D4"
+    ],
+    "all": [
+      "0x008866D4(off=0)"
+    ]
+  },
+  "RescueTask": {
+    "primary": [
+      "0x00886AE8"
+    ],
+    "all": [
+      "0x00886AE8(off=0)"
+    ]
+  },
+  "RigProcess": {
+    "primary": [
+      "0x00877C80"
+    ],
+    "all": [
+      "0x00877C80(off=0)"
+    ]
+  },
+  "RocketTankProcess": {
+    "primary": [
+      "0x0088A5C0"
+    ],
+    "all": [
+      "0x0088A5C0(off=0)"
+    ]
+  },
+  "SAVAttackPersonTask": {
+    "primary": [
+      "0x00886CBC"
+    ],
+    "all": [
+      "0x00886CBC(off=0)"
+    ]
+  },
+  "SAVAttackVehicleTask": {
+    "primary": [
+      "0x00886F48"
+    ],
+    "all": [
+      "0x00886F48(off=0)"
+    ]
+  },
+  "SAVProcess": {
+    "primary": [
+      "0x00886E60"
+    ],
+    "all": [
+      "0x00886E60(off=0)"
+    ]
+  },
+  "ScavengerProcess": {
+    "primary": [
+      "0x008871D8"
+    ],
+    "all": [
+      "0x008871D8(off=0)"
+    ]
+  },
+  "ScoutProcess": {
+    "primary": [
+      "0x0088AF98"
+    ],
+    "all": [
+      "0x0088AF98(off=0)"
+    ]
+  },
+  "SitSpinTask": {
+    "primary": [
+      "0x00889E9C"
+    ],
+    "all": [
+      "0x00889E9C(off=0)"
+    ]
+  },
+  "SitTask": {
+    "primary": [
+      "0x00889F50"
+    ],
+    "all": [
+      "0x00889F50(off=0)"
+    ]
+  },
+  "SoldierProcess": {
+    "primary": [
+      "0x00887D18"
+    ],
+    "all": [
+      "0x00887D18(off=0)"
+    ]
+  },
+  "TankProcess": {
+    "primary": [
+      "0x0088AB9C"
+    ],
+    "all": [
+      "0x0088AB9C(off=0)"
+    ]
+  },
+  "TorpedoProcess": {
+    "primary": [
+      "0x0088880C"
+    ],
+    "all": [
+      "0x0088880C(off=0)"
+    ]
+  },
+  "TugProcess": {
+    "primary": [
+      "0x00889264"
+    ],
+    "all": [
+      "0x00889264(off=0)"
+    ]
+  },
+  "TurretTankProcess": {
+    "primary": [
+      "0x00889710"
+    ],
+    "all": [
+      "0x00889710(off=0)"
+    ]
+  },
+  "UnitProcess": {
+    "primary": [
+      "0x00889AB0"
+    ],
+    "all": [
+      "0x00889AB0(off=0)"
+    ]
+  },
+  "UnitTask": {
+    "primary": [
+      "0x00889F14"
+    ],
+    "all": [
+      "0x00889F14(off=0)"
+    ]
+  },
+  "UserProcess": {
+    "primary": [
+      "0x00889FCC"
+    ],
+    "all": [
+      "0x00889FCC(off=0)"
+    ]
+  },
+  "WingmanProcess": {
+    "primary": [
+      "0x0088A6EC"
+    ],
+    "all": [
+      "0x0088A6EC(off=0)"
+    ]
+  }
+}

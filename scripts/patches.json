@@ -1,4 +1,7 @@
 {
+  "features": {
+    "ogre_material_collision_guard": false
+  },
   "patches": [
     {
       "name": "Map List Rewrite for Hop-Fix 1/3",

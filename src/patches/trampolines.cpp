@@ -11,8 +11,11 @@
 
 #include "trampolines.h"
 #include "patches.h"
+#include "patcher.h"
 #include "scroll_helper.h"
 #include "bzr_hooks.h"
+#include <Windows.h>
+#include <string>
 
 // We compile this as 32-bit (/arch:IA32) -- same as BZR.exe
 
@@ -51,6 +54,128 @@ namespace
         case kTraceMapFilters8: TraceMapRefreshFrame(L"MapFilters8", frame_ebp); break;
         default: break;
         }
+    }
+
+    template <typename T>
+    static T ResolveOgreExport(const char* name)
+    {
+        HMODULE ogre = GetModuleHandleA("OgreMain.dll");
+        if (!ogre)
+            return nullptr;
+        return reinterpret_cast<T>(GetProcAddress(ogre, name));
+    }
+
+    struct OgreDataStreamPtrStub
+    {
+        void* pRep = nullptr;
+        void* pInfo = nullptr;
+        OgreDataStreamPtrStub() = default;
+        ~OgreDataStreamPtrStub() {}
+    };
+
+    class OgreMaterialCollisionListener
+    {
+    public:
+        virtual ~OgreMaterialCollisionListener() {}
+        virtual OgreDataStreamPtrStub resourceLoading(const std::string& name, const std::string& group, void* resource)
+        {
+            if (previous)
+                return previous->resourceLoading(name, group, resource);
+            return OgreDataStreamPtrStub();
+        }
+        virtual void resourceStreamOpened(const std::string& name, const std::string& group, void* resource, OgreDataStreamPtrStub& dataStream)
+        {
+            if (previous)
+                previous->resourceStreamOpened(name, group, resource, dataStream);
+        }
+        virtual bool resourceCollision(void* resource, void* resourceManager)
+        {
+            if (previous && previous->resourceCollision(resource, resourceManager))
+                return true;
+
+            using FnResourceGetName = const std::string&(__thiscall*)(void*);
+            using FnResourceManagerRemove = void(__thiscall*)(void*, const std::string&);
+            using FnMaterialManagerGetSingletonPtr = void*(__cdecl*)();
+
+            FnMaterialManagerGetSingletonPtr getMaterialManager =
+                ResolveOgreExport<FnMaterialManagerGetSingletonPtr>("?getSingletonPtr@MaterialManager@Ogre@@SAPAV12@XZ");
+            FnResourceGetName getName =
+                ResolveOgreExport<FnResourceGetName>("?getName@Resource@Ogre@@UBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
+            FnResourceManagerRemove removeByName =
+                ResolveOgreExport<FnResourceManagerRemove>("?remove@ResourceManager@Ogre@@UAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+
+            if (!resource || !resourceManager || !getMaterialManager || !getName || !removeByName)
+                return false;
+
+            void* materialManager = getMaterialManager();
+            if (resourceManager != materialManager)
+                return false;
+
+            const std::string& name = getName(resource);
+            static volatile long s_logBudget = 32;
+            if (InterlockedDecrement(&s_logBudget) >= 0)
+                Log(L"[OgreMaterialCollision] replacing duplicate material '%hs'\n", name.c_str());
+
+            removeByName(resourceManager, name);
+            return true;
+        }
+
+        OgreMaterialCollisionListener* previous = nullptr;
+    };
+
+    static OgreMaterialCollisionListener g_OgreMaterialCollisionListener;
+    static volatile long g_OgreMaterialCollisionInstallerStarted = 0;
+
+    static bool TryInstallOgreMaterialCollisionGuard()
+    {
+        using FnResourceGroupManagerGetSingletonPtr = void*(__cdecl*)();
+        using FnMaterialManagerGetSingletonPtr = void*(__cdecl*)();
+        using FnGetLoadingListener = OgreMaterialCollisionListener*(__thiscall*)(void*);
+        using FnSetLoadingListener = void(__thiscall*)(void*, OgreMaterialCollisionListener*);
+
+        FnResourceGroupManagerGetSingletonPtr getResourceGroupManager =
+            ResolveOgreExport<FnResourceGroupManagerGetSingletonPtr>("?getSingletonPtr@ResourceGroupManager@Ogre@@SAPAV12@XZ");
+        FnMaterialManagerGetSingletonPtr getMaterialManager =
+            ResolveOgreExport<FnMaterialManagerGetSingletonPtr>("?getSingletonPtr@MaterialManager@Ogre@@SAPAV12@XZ");
+        FnGetLoadingListener getLoadingListener =
+            ResolveOgreExport<FnGetLoadingListener>("?getLoadingListener@ResourceGroupManager@Ogre@@QAEPAVResourceLoadingListener@2@XZ");
+        FnSetLoadingListener setLoadingListener =
+            ResolveOgreExport<FnSetLoadingListener>("?setLoadingListener@ResourceGroupManager@Ogre@@QAEXPAVResourceLoadingListener@2@@Z");
+
+        if (!getResourceGroupManager || !getMaterialManager || !getLoadingListener || !setLoadingListener)
+            return false;
+
+        void* resourceGroupManager = getResourceGroupManager();
+        void* materialManager = getMaterialManager();
+        if (!resourceGroupManager || !materialManager)
+            return false;
+
+        OgreMaterialCollisionListener* current = getLoadingListener(resourceGroupManager);
+        if (current == &g_OgreMaterialCollisionListener)
+            return true;
+
+        g_OgreMaterialCollisionListener.previous = current;
+        setLoadingListener(resourceGroupManager, &g_OgreMaterialCollisionListener);
+        if (getLoadingListener(resourceGroupManager) == &g_OgreMaterialCollisionListener)
+        {
+            Log(L"[OgreMaterialCollision] installed material-only resource collision guard\n");
+            return true;
+        }
+
+        return false;
+    }
+
+    static DWORD WINAPI OgreMaterialCollisionGuardInstallerThread(LPVOID)
+    {
+        for (int i = 0; i < 2400; ++i)
+        {
+            if (TryInstallOgreMaterialCollisionGuard())
+                return 0;
+            Sleep(50);
+        }
+
+        Log(L"[OgreMaterialCollision] timed out waiting for Ogre material manager\n");
+        return 0;
     }
 
     enum ManualRefreshSupportPhase : int
@@ -807,6 +932,25 @@ void __declspec(naked) __cdecl Trampoline_VehicleListModFix4()
         call VehicleListModFix4Helper
         jmp  [g_RetAddr_VehicleListModFix4]
     }
+}
+
+void InstallOgreMaterialCollisionGuard()
+{
+    if (InterlockedCompareExchange(&g_OgreMaterialCollisionInstallerStarted, 1, 0) != 0)
+        return;
+
+    if (TryInstallOgreMaterialCollisionGuard())
+        return;
+
+    HANDLE thread = CreateThread(nullptr, 0, OgreMaterialCollisionGuardInstallerThread, nullptr, 0, nullptr);
+    if (thread)
+    {
+        CloseHandle(thread);
+        return;
+    }
+
+    g_OgreMaterialCollisionInstallerStarted = 0;
+    Log(L"[OgreMaterialCollision] failed to start installer thread\n");
 }
 
 // -----------------------------------------------------------------------
