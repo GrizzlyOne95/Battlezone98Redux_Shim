@@ -68,7 +68,10 @@ In the mission process, the matching rect records were found at:
 - `0x025FB500` = ID `0x10D` = `fscrap_panel`
 - `0x025FB520` = ID `0x10E` = `fpilot_panel`
 
-Record stride is `0x20` bytes.
+The coordinate/UV prefix occupies `0x20` bytes. Static analysis of
+`_ReadSpriteTableFile` shows a compact `0x24`-byte source-table stride, while
+the mutable renderer records used by the current bridge have an expanded
+`0x30`-byte stride. Do not use the loader stride to index the renderer table.
 
 Observed layout:
 
@@ -82,6 +85,8 @@ Observed layout:
 - `+0x14` `v0` float
 - `+0x18` `u1` float
 - `+0x1C` `v1` float
+- `+0x20..+0x2F` renderer-owned fields (the compact source record stores its
+  flags at `+0x20`)
 
 The stock pilot/scrap panel rects were live exactly as:
 
