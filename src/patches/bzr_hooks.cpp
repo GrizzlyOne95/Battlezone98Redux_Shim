@@ -375,6 +375,9 @@ namespace BZROpenShim
         constexpr uintptr_t kHudSpriteNameCountAddr = 0x00920F00;
         constexpr uintptr_t kHudSpriteNameTableAddr = 0x00920F08;
         constexpr size_t kHudSpriteNameEntrySize = 0x20;
+        // The text/binary sprite-table loader uses a compact 0x24-byte source
+        // record, but the renderer expands it into the mutable 0x30-byte
+        // runtime records targeted by this bridge.
         constexpr size_t kHudSpriteRectEntrySize = 0x30;
         constexpr size_t kHudSpriteRectXYWHOffset = 0x08;
         constexpr size_t kHudSpriteRectScanAlignment = 0x08;
@@ -2093,6 +2096,61 @@ namespace BZROpenShim
             if (!name || !name[0])
                 return 0;
 
+            uint32_t count = 0;
+            if (TryReadHudSpriteNameCount(count))
+            {
+                LogShimA(
+                    LogLevel::Info,
+                    "hudlookup",
+                    "table search sprite=%s count=%u tableAddr=0x%08X",
+                    name,
+                    static_cast<unsigned>(count),
+                    static_cast<unsigned>(kHudSpriteNameTableAddr));
+
+                __try
+                {
+                    auto* table = reinterpret_cast<const char*>(kHudSpriteNameTableAddr);
+                    char entryName[kHudSpriteNameEntrySize + 1] = {};
+                    for (int index = static_cast<int>(count) - 1; index > 0; --index)
+                    {
+                        const char* entry = table + (static_cast<size_t>(index) * kHudSpriteNameEntrySize);
+                        std::memcpy(entryName, entry, kHudSpriteNameEntrySize);
+                        entryName[kHudSpriteNameEntrySize] = '\0';
+                        if (_stricmp(entryName, name) == 0)
+                        {
+                            LogShimA(
+                                LogLevel::Info,
+                                "hudlookup",
+                                "table sprite=%s => id=%d",
+                                name,
+                                index);
+                            return index;
+                        }
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    LogShimA(
+                        LogLevel::Warn,
+                        "hudlookup",
+                        "table search sprite=%s raised exception",
+                        name);
+                }
+            }
+            else
+            {
+                LogShimA(
+                    LogLevel::Warn,
+                    "hudlookup",
+                    "table unavailable for sprite=%s countAddr=0x%08X tableAddr=0x%08X",
+                    name,
+                    static_cast<unsigned>(kHudSpriteNameCountAddr),
+                    static_cast<unsigned>(kHudSpriteNameTableAddr));
+            }
+
+            // Retain the engine helper for unusual builds whose name table is
+            // not exposed at the stock addresses. The direct table is safer for
+            // bridge calls because it does not enter renderer-owned lookup code.
             if (g_BzrFn_HudSpriteLookup)
             {
                 __try
@@ -2117,57 +2175,6 @@ namespace BZROpenShim
                         reinterpret_cast<void*>(g_BzrFn_HudSpriteLookup),
                         name);
                 }
-            }
-
-            uint32_t count = 0;
-            if (!TryReadHudSpriteNameCount(count))
-            {
-                LogShimA(
-                    LogLevel::Warn,
-                    "hudlookup",
-                    "fallback table unavailable for sprite=%s countAddr=0x%08X tableAddr=0x%08X",
-                    name,
-                    static_cast<unsigned>(kHudSpriteNameCountAddr),
-                    static_cast<unsigned>(kHudSpriteNameTableAddr));
-                return 0;
-            }
-
-            LogShimA(
-                LogLevel::Info,
-                "hudlookup",
-                "fallback table search sprite=%s count=%u tableAddr=0x%08X",
-                name,
-                static_cast<unsigned>(count),
-                static_cast<unsigned>(kHudSpriteNameTableAddr));
-
-            __try
-            {
-                auto* table = reinterpret_cast<const char*>(kHudSpriteNameTableAddr);
-                char entryName[kHudSpriteNameEntrySize + 1] = {};
-                for (int index = static_cast<int>(count) - 1; index > 0; --index)
-                {
-                    const char* entry = table + (static_cast<size_t>(index) * kHudSpriteNameEntrySize);
-                    std::memcpy(entryName, entry, kHudSpriteNameEntrySize);
-                    entryName[kHudSpriteNameEntrySize] = '\0';
-                    if (_stricmp(entryName, name) == 0)
-                    {
-                        LogShimA(
-                            LogLevel::Info,
-                            "hudlookup",
-                            "fallback table sprite=%s => id=%d",
-                            name,
-                            index);
-                        return index;
-                    }
-                }
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                LogShimA(
-                    LogLevel::Warn,
-                    "hudlookup",
-                    "fallback table search sprite=%s raised exception",
-                    name);
             }
 
             LogShimA(
@@ -16403,61 +16410,12 @@ namespace BZROpenShim
         return true;
     }
 
-    bool GetHudSpriteRectFromBridge(const char* name, int* outX, int* outY, int* outW, int* outH)
+    static bool SetHudSpriteRectByTable(const char* name, int x, int y, int w, int h)
     {
-        if (!outX || !outY || !outW || !outH)
-        {
-            Log(L"[HUD] Invalid rect output pointers for sprite '%hs'\n", name ? name : "<null>");
-            return false;
-        }
-
-        const int spriteId = LookupHudSpriteId(name);
-        if (spriteId <= 0)
-        {
-            Log(L"[HUD] Unknown sprite '%hs'\n", name ? name : "<null>");
-            return false;
-        }
-
-        HudSpriteRectRecord current = {};
-        if (!TryGetHudSpriteCurrentRecord(spriteId, current))
-        {
-            Log(L"[HUD] Failed reading live rect entry for sprite '%hs' (id=%d)\n",
-                name ? name : "<null>",
-                spriteId);
-            return false;
-        }
-
-        *outX = static_cast<int>(current.x);
-        *outY = static_cast<int>(current.y);
-        *outW = static_cast<int>(current.w);
-        *outH = static_cast<int>(current.h);
-        return true;
-    }
-
-    bool SetHudSpriteRectFromBridge(const char* name, int x, int y, int w, int h)
-    {
-        // The stock scrap/pilot panels are engine-owned rects that are not
-        // reliably present in the id-indexed sprite table; they are located and
-        // toggled through the UV address-scan fallback instead. The "legacy
-        // layout" feature hides the stock panels (w==0,h==0) and draws EXU's own
-        // legacy widgets. Moving the panels back to a real size must reverse that
-        // hide. Previously only the hide direction had a shortcut here, so a
-        // restore write (w>0,h>0) fell through to the id-based path, which never
-        // reaches SetStockScrapPilotPanelsVisibleByUv(true) and left the stock
-        // panels stuck at w=0/h=0. Handle both directions symmetrically.
-        if (IsStockScrapPilotPanelName(name))
-        {
-            if (w == 0 && h == 0)
-                return SetStockScrapPilotPanelsVisibleByUv(false);
-            return SetStockScrapPilotPanelsVisibleByUv(true);
-        }
-
         int spriteId = 0;
         HudSpriteRectRecord current = {};
         if (!ResolveHudSpriteForMutation(name, spriteId, current))
-        {
             return false;
-        }
 
         HudSpriteRectRecord updated = current;
         const auto hiddenIt = g_HudSpriteHiddenEntries.find(spriteId);
@@ -16503,11 +16461,8 @@ namespace BZROpenShim
         return true;
     }
 
-    bool SetHudSpriteVisibleFromBridge(const char* name, bool visible)
+    static bool SetHudSpriteVisibleByTable(const char* name, bool visible)
     {
-        if (IsStockScrapPilotPanelName(name))
-            return SetStockScrapPilotPanelsVisibleByUv(visible);
-
         const int spriteId = LookupHudSpriteId(name);
         if (spriteId <= 0)
         {
@@ -16518,12 +16473,6 @@ namespace BZROpenShim
         const auto hiddenIt = g_HudSpriteHiddenEntries.find(spriteId);
         if (!visible)
         {
-            if (hiddenIt != g_HudSpriteHiddenEntries.end())
-            {
-                Log(L"[HUD] Sprite already hidden %hs id=%d\n", name ? name : "<null>", spriteId);
-                return true;
-            }
-
             HudSpriteRectRecord current = {};
             if (!TryGetHudSpriteCurrentRecord(spriteId, current))
             {
@@ -16533,10 +16482,13 @@ namespace BZROpenShim
                 return false;
             }
 
-            g_HudSpriteOriginalEntries.emplace(spriteId, current);
-            g_HudSpriteHiddenEntries[spriteId] = current;
+            if (hiddenIt == g_HudSpriteHiddenEntries.end())
+            {
+                g_HudSpriteOriginalEntries.emplace(spriteId, current);
+                g_HudSpriteHiddenEntries[spriteId] = current;
+            }
 
-            HudSpriteRectRecord hiddenRecord = current;
+            HudSpriteRectRecord hiddenRecord = g_HudSpriteHiddenEntries[spriteId];
             hiddenRecord.w = 0;
             hiddenRecord.h = 0;
             if (!WriteHudSpriteRectEntry(spriteId, hiddenRecord))
@@ -16551,29 +16503,119 @@ namespace BZROpenShim
             return true;
         }
 
-        if (hiddenIt == g_HudSpriteHiddenEntries.end())
+        if (hiddenIt != g_HudSpriteHiddenEntries.end())
         {
-            Log(L"[HUD] Sprite already visible %hs id=%d\n", name ? name : "<null>", spriteId);
+            if (!WriteHudSpriteRectEntry(spriteId, hiddenIt->second))
+            {
+                Log(L"[HUD] Failed restoring visible state for sprite '%hs' (id=%d)\n",
+                    name ? name : "<null>",
+                    spriteId);
+                return false;
+            }
+
+            g_HudSpriteHiddenEntries.erase(spriteId);
+            Log(L"[HUD] Sprite shown %hs id=%d\n", name ? name : "<null>", spriteId);
             return true;
         }
 
-        if (!WriteHudSpriteRectEntry(spriteId, hiddenIt->second))
+        // Recover records zeroed by an older bridge call that did not track
+        // hidden state, while leaving an already-visible stock record alone.
+        HudSpriteRectRecord current = {};
+        const auto originalIt = g_HudSpriteOriginalEntries.find(spriteId);
+        if (originalIt != g_HudSpriteOriginalEntries.end() &&
+            TryGetHudSpriteCurrentRecord(spriteId, current) &&
+            current.w == 0 && current.h == 0)
         {
-            Log(L"[HUD] Failed restoring visible state for sprite '%hs' (id=%d)\n",
+            return WriteHudSpriteRectEntry(spriteId, originalIt->second);
+        }
+
+        Log(L"[HUD] Sprite already visible %hs id=%d\n", name ? name : "<null>", spriteId);
+        return true;
+    }
+
+    static bool SetStockScrapPilotPanelsVisibleByTable(bool visible)
+    {
+        static constexpr const char* kPanelNames[] = {
+            "scrap_panel",
+            "pilot_panel",
+            "sscrap_panel",
+            "spilot_panel",
+            "fscrap_panel",
+            "fpilot_panel",
+        };
+
+        bool allSucceeded = true;
+        for (const char* panelName : kPanelNames)
+        {
+            if (!SetHudSpriteVisibleByTable(panelName, visible))
+                allSucceeded = false;
+        }
+
+        return allSucceeded;
+    }
+
+    static bool SetStockScrapPilotPanelsVisible(bool visible)
+    {
+        // The addon intentionally calls the primary panel name once. Treat any
+        // stock scrap/pilot name as a request for the complete six-entry set so
+        // faction/team aliases cannot leave one of the two top HUD boxes drawn.
+        if (SetStockScrapPilotPanelsVisibleByTable(visible))
+            return true;
+
+        return SetStockScrapPilotPanelsVisibleByUv(visible);
+    }
+
+    bool GetHudSpriteRectFromBridge(const char* name, int* outX, int* outY, int* outW, int* outH)
+    {
+        if (!outX || !outY || !outW || !outH)
+        {
+            Log(L"[HUD] Invalid rect output pointers for sprite '%hs'\n", name ? name : "<null>");
+            return false;
+        }
+
+        const int spriteId = LookupHudSpriteId(name);
+        if (spriteId <= 0)
+        {
+            Log(L"[HUD] Unknown sprite '%hs'\n", name ? name : "<null>");
+            return false;
+        }
+
+        HudSpriteRectRecord current = {};
+        if (!TryGetHudSpriteCurrentRecord(spriteId, current))
+        {
+            Log(L"[HUD] Failed reading live rect entry for sprite '%hs' (id=%d)\n",
                 name ? name : "<null>",
                 spriteId);
             return false;
         }
 
-        g_HudSpriteHiddenEntries.erase(spriteId);
-        Log(L"[HUD] Sprite shown %hs id=%d\n", name ? name : "<null>", spriteId);
+        *outX = static_cast<int>(current.x);
+        *outY = static_cast<int>(current.y);
+        *outW = static_cast<int>(current.w);
+        *outH = static_cast<int>(current.h);
         return true;
+    }
+
+    bool SetHudSpriteRectFromBridge(const char* name, int x, int y, int w, int h)
+    {
+        if (IsStockScrapPilotPanelName(name))
+            return SetStockScrapPilotPanelsVisible(w != 0 || h != 0);
+
+        return SetHudSpriteRectByTable(name, x, y, w, h);
+    }
+
+    bool SetHudSpriteVisibleFromBridge(const char* name, bool visible)
+    {
+        if (IsStockScrapPilotPanelName(name))
+            return SetStockScrapPilotPanelsVisible(visible);
+
+        return SetHudSpriteVisibleByTable(name, visible);
     }
 
     bool RestoreHudSpriteFromBridge(const char* name)
     {
         if (IsStockScrapPilotPanelName(name))
-            return SetStockScrapPilotPanelsVisibleByUv(true);
+            return SetStockScrapPilotPanelsVisible(true);
 
         const int spriteId = LookupHudSpriteId(name);
         if (spriteId <= 0)
