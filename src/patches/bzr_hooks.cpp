@@ -375,15 +375,24 @@ namespace BZROpenShim
         constexpr uintptr_t kHudSpriteNameCountAddr = 0x00920F00;
         constexpr uintptr_t kHudSpriteNameTableAddr = 0x00920F08;
         constexpr size_t kHudSpriteNameEntrySize = 0x20;
-        // The text/binary sprite-table loader uses a compact 0x24-byte source
-        // record, but the renderer expands it into the mutable 0x30-byte
-        // runtime records targeted by this bridge.
-        constexpr size_t kHudSpriteRectEntrySize = 0x30;
-        constexpr size_t kHudSpriteRectXYWHOffset = 0x08;
-        constexpr size_t kHudSpriteRectScanAlignment = 0x08;
+        // The live sprite rect records are a static exe-image array, NOT a
+        // heap allocation: the registration code (0x0068B107) and the
+        // renderer's per-draw accessors (width 0x0068F090, height 0x0068F0C0,
+        // UV block via base-8 at 0x0068F0F0) all index
+        // `0x025F8F40 + id*0x24` directly. Layout: int16 x,y,w,h at +0,
+        // float u0,v0,u1,v1 at +8, flags at +0x18, texture refs at
+        // +0x1C/+0x20. (An earlier revision assumed heap-resident 0x30-byte
+        // runtime records and scanned process memory for them; the scan was
+        // later restricted to MEM_PRIVATE regions, which can never contain
+        // this MEM_IMAGE table, so discovery failed every session.)
+        constexpr uintptr_t kHudSpriteRectTableAddr = 0x025F8F40;
+        constexpr size_t kHudSpriteRectEntrySize = 0x24;
         constexpr uint32_t kHudSpriteMaxReasonableCount = 4096;
-        constexpr ULONGLONG kHudSpriteRectDiscoveryRetryMs = 10000;
-        constexpr ULONGLONG kHudSpriteFallbackDiscoveryRetryMs = 15000;
+        // Kept short so a hide request issued before the mission HUD exists
+        // converges quickly once the rect records are created; the scan is
+        // bounded to MEM_PRIVATE regions <= 128 MB so a retry is cheap.
+        constexpr ULONGLONG kHudSpriteRectDiscoveryRetryMs = 4000;
+        constexpr ULONGLONG kHudSpriteFallbackDiscoveryRetryMs = 5000;
         constexpr size_t kGameObjectClassOffset = 0xF8;
         constexpr size_t kGameObjectObjOffset = 0xF4;
         constexpr size_t kObjectClassOdfOffset = 0x20;
@@ -664,8 +673,6 @@ namespace BZROpenShim
 
         struct HudSpriteRectRecord
         {
-            uint32_t ref0 = 0;
-            uint32_t ref4 = 0;
             int16_t x = 0;
             int16_t y = 0;
             int16_t w = 0;
@@ -674,7 +681,9 @@ namespace BZROpenShim
             float v0 = 0.0f;
             float u1 = 0.0f;
             float v1 = 0.0f;
-            uint8_t extra[0x10] = {};
+            uint32_t flags18 = 0;
+            uint32_t textureRef1C = 0;
+            uint32_t textureRef20 = 0;
         };
 
         struct HudSpriteKnownSample
@@ -687,7 +696,7 @@ namespace BZROpenShim
             int id = 0;
         };
 
-        static_assert(sizeof(HudSpriteRectRecord) == 0x30, "Unexpected HUD sprite rect record size");
+        static_assert(sizeof(HudSpriteRectRecord) == kHudSpriteRectEntrySize, "Unexpected HUD sprite rect record size");
 
         static InlineDetour32 g_PersonSimulateDetour = {};
         static bool g_JumpSnipeProbeInstallAttempted = false;
@@ -703,6 +712,11 @@ namespace BZROpenShim
         static std::vector<uintptr_t> g_HudSpriteCachedPanelAddresses;
         static bool g_HudSpriteFallbackDiscoveryAttempted = false;
         static ULONGLONG g_HudSpriteFallbackDiscoveryLastTick = 0;
+        // Full-memory scans cost seconds on the UI thread, so failed attempts
+        // back off exponentially (reset on success or mission-state reset).
+        static ULONGLONG g_HudSpriteRectTableDiscoveryBackoffMs = 0;
+        static ULONGLONG g_HudSpriteFallbackDiscoveryBackoffMs = 0;
+        constexpr ULONGLONG kHudSpriteDiscoveryBackoffCapMs = 60000;
 
         enum class ProducerBuildMenuKind
         {
@@ -1178,6 +1192,9 @@ namespace BZROpenShim
         static InlineDetour32 g_OptionsInputPopulateUiDetour = {};
         static InlineDetour32 g_OptionsInputKeyReleasedDetour = {};
         static InlineDetour32 g_RecordDeathDetour = {};
+        static InlineDetour32 g_ParticleCreateTemplateDetour = {};
+        static bool g_ParticleTemplateDedupeHookInstalled = false;
+        static bool g_ParticleTemplateDedupeFailureLogged = false;
         static bool g_CareerStatsMpHookInstalled = false;
         static bool g_CareerStatsMpHookInstallAttempted = false;
         static bool g_CareerStatsMpHookMismatchLogged = false;
@@ -2337,8 +2354,12 @@ namespace BZROpenShim
             }
 
             const ULONGLONG now = GetTickCount64();
+            const ULONGLONG fallbackRetryMs =
+                g_HudSpriteFallbackDiscoveryBackoffMs > kHudSpriteFallbackDiscoveryRetryMs
+                    ? g_HudSpriteFallbackDiscoveryBackoffMs
+                    : kHudSpriteFallbackDiscoveryRetryMs;
             if (g_HudSpriteFallbackDiscoveryAttempted &&
-                now - g_HudSpriteFallbackDiscoveryLastTick < kHudSpriteFallbackDiscoveryRetryMs)
+                now - g_HudSpriteFallbackDiscoveryLastTick < fallbackRetryMs)
             {
                 return false;
             }
@@ -2388,8 +2409,19 @@ namespace BZROpenShim
             std::sort(outAddresses.begin(), outAddresses.end());
             outAddresses.erase(std::unique(outAddresses.begin(), outAddresses.end()), outAddresses.end());
             if (!outAddresses.empty())
+            {
                 g_HudSpriteCachedPanelAddresses = outAddresses;
-            return !outAddresses.empty();
+                g_HudSpriteFallbackDiscoveryBackoffMs = 0;
+                return true;
+            }
+
+            g_HudSpriteFallbackDiscoveryBackoffMs =
+                g_HudSpriteFallbackDiscoveryBackoffMs == 0
+                    ? kHudSpriteFallbackDiscoveryRetryMs * 2
+                    : ((g_HudSpriteFallbackDiscoveryBackoffMs * 2 < kHudSpriteDiscoveryBackoffCapMs)
+                           ? g_HudSpriteFallbackDiscoveryBackoffMs * 2
+                           : kHudSpriteDiscoveryBackoffCapMs);
+            return false;
         }
 
         static bool WriteHudSpriteRectRecordAtAddress(uintptr_t address, const HudSpriteRectRecord& record)
@@ -2422,11 +2454,24 @@ namespace BZROpenShim
                 }
 
                 bool anySucceeded = false;
+                std::vector<uintptr_t> staleAddresses;
                 for (uintptr_t address : addresses)
                 {
                     auto originalIt = g_HudSpriteOriginalEntriesByAddress.find(address);
                     if (originalIt == g_HudSpriteOriginalEntriesByAddress.end())
                         continue;
+
+                    // The engine can free and rebuild the HUD rect heap block
+                    // (mission restart, resolution change). A cached address is
+                    // only trustworthy while it still holds the stock panel
+                    // UVs, which survive hiding because only w/h are zeroed.
+                    HudSpriteRectRecord live = {};
+                    if (!TryReadHudSpriteRectRecord(reinterpret_cast<const HudSpriteRectRecord*>(address), live) ||
+                        !HudSpriteRecordMatchesStockScrapOrPilotUv(live))
+                    {
+                        staleAddresses.push_back(address);
+                        continue;
+                    }
 
                     HudSpriteRectRecord hidden = originalIt->second;
                     hidden.w = 0;
@@ -2440,6 +2485,24 @@ namespace BZROpenShim
                         g_HudSpriteHiddenAddresses.insert(address);
                         anySucceeded = true;
                     }
+                }
+
+                if (!staleAddresses.empty())
+                {
+                    for (uintptr_t address : staleAddresses)
+                    {
+                        g_HudSpriteOriginalEntriesByAddress.erase(address);
+                        g_HudSpriteHiddenAddresses.erase(address);
+                    }
+                    // Drop the cache so the next hide request rediscovers the
+                    // rebuilt records instead of writing into freed memory.
+                    g_HudSpriteCachedPanelAddresses.clear();
+                    g_HudSpriteFallbackDiscoveryAttempted = false;
+                    LogShimA(
+                        LogLevel::Warn,
+                        "hudfallback",
+                        "dropped %zu stale panel record address(es); rediscovery scheduled",
+                        staleAddresses.size());
                 }
 
                 LogShimA(
@@ -2562,8 +2625,12 @@ namespace BZROpenShim
             if (g_HudSpriteRectTableBase)
                 return true;
             const ULONGLONG now = GetTickCount64();
+            const ULONGLONG tableRetryMs =
+                g_HudSpriteRectTableDiscoveryBackoffMs > kHudSpriteRectDiscoveryRetryMs
+                    ? g_HudSpriteRectTableDiscoveryBackoffMs
+                    : kHudSpriteRectDiscoveryRetryMs;
             if (g_HudSpriteRectTableDiscoveryAttempted &&
-                now - g_HudSpriteRectTableDiscoveryLastTick < kHudSpriteRectDiscoveryRetryMs)
+                now - g_HudSpriteRectTableDiscoveryLastTick < tableRetryMs)
                 return false;
 
             g_HudSpriteRectTableDiscoveryAttempted = true;
@@ -2576,139 +2643,49 @@ namespace BZROpenShim
                 return false;
             }
 
-            int maxSpriteId = 0;
-            for (const auto& sample : samples)
+            // The table is a static exe array (see kHudSpriteRectTableAddr):
+            // no memory scan, just validate the known base by checking that
+            // every panel record carries its stock atlas UVs (UVs survive our
+            // hiding, which only zeroes w/h). Validation can fail briefly at
+            // boot before the game registers the sprites; the retry/backoff
+            // gate above keeps that cheap.
+            auto* candidateBase = reinterpret_cast<HudSpriteRectRecord*>(kHudSpriteRectTableAddr);
+            if (!ValidateHudSpriteRectTableBase(candidateBase, samples))
             {
-                if (sample.id > maxSpriteId)
-                    maxSpriteId = sample.id;
+                LogHudSpriteValidationSnapshot(
+                    "static-fail",
+                    kHudSpriteRectTableAddr,
+                    samples);
+                g_HudSpriteRectTableDiscoveryBackoffMs =
+                    g_HudSpriteRectTableDiscoveryBackoffMs == 0
+                        ? kHudSpriteRectDiscoveryRetryMs * 2
+                        : ((g_HudSpriteRectTableDiscoveryBackoffMs * 2 < kHudSpriteDiscoveryBackoffCapMs)
+                               ? g_HudSpriteRectTableDiscoveryBackoffMs * 2
+                               : kHudSpriteDiscoveryBackoffCapMs);
+                LogShimA(
+                    LogLevel::Warn,
+                    "huddiscover",
+                    "static rect table at 0x%08X failed sample validation backoffMs=%llu",
+                    static_cast<unsigned>(kHudSpriteRectTableAddr),
+                    static_cast<unsigned long long>(g_HudSpriteRectTableDiscoveryBackoffMs));
+                Log(L"[HUD] Static sprite rect table at 0x%08X failed validation\n",
+                    static_cast<uint32_t>(kHudSpriteRectTableAddr));
+                return false;
             }
 
-            const size_t requiredSpan =
-                (static_cast<size_t>(maxSpriteId) * kHudSpriteRectEntrySize) + sizeof(HudSpriteRectRecord);
-            const auto& first = samples.front();
-            size_t regionsScanned = 0;
-            size_t directRecordHits = 0;
-            size_t uvBlockHits = 0;
-            size_t validationFailures = 0;
-
-            SYSTEM_INFO systemInfo = {};
-            GetSystemInfo(&systemInfo);
-
-            auto* cursor = static_cast<uint8_t*>(systemInfo.lpMinimumApplicationAddress);
-            auto* maxAddress = static_cast<uint8_t*>(systemInfo.lpMaximumApplicationAddress);
-            MEMORY_BASIC_INFORMATION mbi = {};
-            while (cursor < maxAddress &&
-                   VirtualQuery(cursor, &mbi, sizeof(mbi)) == sizeof(mbi))
-            {
-                auto* regionBase = static_cast<uint8_t*>(mbi.BaseAddress);
-                auto* regionEnd = regionBase + mbi.RegionSize;
-                cursor = regionEnd;
-
-                if (!IsLikelyHudSpriteRectRegion(mbi))
-                    continue;
-
-                if (mbi.RegionSize < requiredSpan)
-                    continue;
-
-                ++regionsScanned;
-
-                const uintptr_t regionAddress = reinterpret_cast<uintptr_t>(regionBase);
-                size_t candidateOffset = 0;
-                const size_t misalignment = regionAddress % kHudSpriteRectScanAlignment;
-                if (misalignment != 0)
-                    candidateOffset = kHudSpriteRectScanAlignment - misalignment;
-
-                for (; candidateOffset + requiredSpan <= mbi.RegionSize;
-                     candidateOffset += kHudSpriteRectScanAlignment)
-                {
-                    auto* candidateBase = reinterpret_cast<HudSpriteRectRecord*>(regionBase + candidateOffset);
-
-                    __try
-                    {
-                        const HudSpriteRectRecord& record = candidateBase[first.id];
-                        if (!HudSpriteRecordMatches(record, first))
-                            continue;
-                        ++directRecordHits;
-                    }
-                    __except (EXCEPTION_EXECUTE_HANDLER)
-                    {
-                        continue;
-                    }
-
-                    if (!ValidateHudSpriteRectTableBase(candidateBase, samples))
-                    {
-                        ++validationFailures;
-                        LogHudSpriteValidationSnapshot(
-                            "direct-fail",
-                            reinterpret_cast<uintptr_t>(candidateBase),
-                            samples);
-                        continue;
-                    }
-
-                    g_HudSpriteRectTableBase = candidateBase;
-                    g_HudSpriteOriginalEntries.clear();
-                    g_HudSpriteHiddenEntries.clear();
-                    Log(L"[HUD] Sprite rect table discovered base=0x%08X scrap=%d pilot=%d sscrap=%d spilot=%d fscrap=%d fpilot=%d\n",
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(candidateBase)),
-                        samples[0].id,
-                        samples[1].id,
-                        samples[2].id,
-                        samples[3].id,
-                        samples[4].id,
-                        samples[5].id);
-                    return true;
-                }
-
-                const size_t uvScanSpan = sizeof(float) * 4;
-                for (size_t uvOffset = 0; uvOffset + uvScanSpan <= mbi.RegionSize; uvOffset += sizeof(float))
-                {
-                    const uint8_t* candidateUv = regionBase + uvOffset;
-                    if (!HudSpriteUvBlockMatches(candidateUv, first))
-                        continue;
-                    ++uvBlockHits;
-
-                    const uintptr_t candidateBaseAddr =
-                        reinterpret_cast<uintptr_t>(candidateUv) -
-                        (static_cast<uintptr_t>(first.id) * kHudSpriteRectEntrySize) -
-                        offsetof(HudSpriteRectRecord, u0);
-                    auto* candidateBase = reinterpret_cast<HudSpriteRectRecord*>(candidateBaseAddr);
-                    if (!ValidateHudSpriteRectTableBase(candidateBase, samples))
-                    {
-                        ++validationFailures;
-                        LogHudSpriteValidationSnapshot(
-                            "uv-fail",
-                            candidateBaseAddr,
-                            samples);
-                        continue;
-                    }
-
-                    g_HudSpriteRectTableBase = candidateBase;
-                    g_HudSpriteOriginalEntries.clear();
-                    g_HudSpriteHiddenEntries.clear();
-                    Log(L"[HUD] Sprite rect table discovered via UV scan base=0x%08X scrap=%d pilot=%d sscrap=%d spilot=%d fscrap=%d fpilot=%d\n",
-                        static_cast<uint32_t>(candidateBaseAddr),
-                        samples[0].id,
-                        samples[1].id,
-                        samples[2].id,
-                        samples[3].id,
-                        samples[4].id,
-                        samples[5].id);
-                    return true;
-                }
-            }
-
-            LogShimA(
-                LogLevel::Warn,
-                "huddiscover",
-                "failed regions=%zu directHits=%zu uvHits=%zu validationFailures=%zu firstId=%d requiredSpan=0x%zX",
-                regionsScanned,
-                directRecordHits,
-                uvBlockHits,
-                validationFailures,
-                first.id,
-                requiredSpan);
-            Log(L"[HUD] Failed discovering sprite rect table in live process memory\n");
-            return false;
+            g_HudSpriteRectTableBase = candidateBase;
+            g_HudSpriteOriginalEntries.clear();
+            g_HudSpriteHiddenEntries.clear();
+            g_HudSpriteRectTableDiscoveryBackoffMs = 0;
+            Log(L"[HUD] Sprite rect table (static) base=0x%08X scrap=%d pilot=%d sscrap=%d spilot=%d fscrap=%d fpilot=%d\n",
+                static_cast<uint32_t>(kHudSpriteRectTableAddr),
+                samples[0].id,
+                samples[1].id,
+                samples[2].id,
+                samples[3].id,
+                samples[4].id,
+                samples[5].id);
+            return true;
         }
 
         static HudSpriteRectRecord* GetHudSpriteRectEntry(int spriteId)
@@ -4522,6 +4499,61 @@ namespace BZROpenShim
             slot.meshAssigned = false;
         }
 
+        // Drops every Ogre reference a slot holds WITHOUT calling into Ogre.
+        // Used when the referenced objects are already destroyed (or about to
+        // be): scene teardown, or an access fault while touching the entity.
+        static void ForgetChunkProxySlotOgreRefs(ChunkProxySlot& slot)
+        {
+            slot.billboard = nullptr;
+            slot.billboardAssigned = false;
+            slot.sceneNode = nullptr;
+            slot.entity = nullptr;
+            slot.meshAssigned = false;
+            slot.sceneManager = nullptr;
+            slot.objectBytes = nullptr;
+            slot.geomRef = nullptr;
+            slot.geomName[0] = '\0';
+            slot.ownerEntity = nullptr;
+            slot.ownerEntityBaseName[0] = '\0';
+            slot.ownerOgreFilename[0] = '\0';
+            slot.proofMeshName[0] = '\0';
+            slot.sourceRootObject = nullptr;
+            slot.ownerObj = nullptr;
+            slot.sourceGameObject = nullptr;
+            slot.sourceRootGameObject = nullptr;
+            slot.useEntryPosition = false;
+            slot.lastSeenTick = 0;
+            slot.active = false;
+        }
+
+        // Save-load and mission teardown destroy the whole Ogre scene
+        // (SceneManager::clearScene / destroyAllMovableObjects), taking our
+        // proxy billboard set, scene nodes, and entities with it. Any later
+        // touch of those pointers is a use-after-free: crash dump 35064 was
+        // Entity::isVisible on a destroyed chunk entity while the loading
+        // screen still rendered frames. Forget everything without calling
+        // into Ogre; resources are lazily recreated on the next tick.
+        static void ForgetAllChunkProxySceneResources(const wchar_t* reason)
+        {
+            size_t forgotten = 0;
+            for (ChunkProxySlot& slot : g_ChunkProxySlots)
+            {
+                if (slot.active || slot.entity || slot.sceneNode || slot.billboard)
+                    ++forgotten;
+                ForgetChunkProxySlotOgreRefs(slot);
+            }
+            g_ChunkProxyBillboardSet = nullptr;
+
+            if (forgotten > 0)
+            {
+                LogChunkDiagnostic(
+                    "chunkproxy",
+                    L"[CHUNKPROXY] scene teardown (%ls): forgot %zu slot(s) and the billboard set\n",
+                    reason ? reason : L"<none>",
+                    forgotten);
+            }
+        }
+
         static void LogChunkManualSubmitSkip(
             const ChunkProxySlot& slot,
             const wchar_t* reason,
@@ -4665,6 +4697,87 @@ namespace BZROpenShim
             }
         }
 
+        // The entity a slot references can be destroyed behind our back by a
+        // scene teardown we did not observe (the teardown hooks cover the
+        // known paths, these guards cover the unknown ones). On a fault the
+        // caller must forget the slot's Ogre refs instead of releasing them
+        // through Ogre calls.
+        static bool TryNotifyChunkProxyCameraSafe(
+            void* entity,
+            void* camera,
+            FnOgreMovableObjectNotifyCurrentCamera notifyCurrentCamera)
+        {
+            if (!entity || !camera || !notifyCurrentCamera)
+                return false;
+
+            __try
+            {
+                notifyCurrentCamera(entity, camera);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // Returns 1/0 for the entity's visibility, or -1 if reading it faulted.
+        static int TryGetChunkProxyVisibleSafe(void* entity, FnOgreIsVisible isVisible)
+        {
+            if (!entity || !isVisible)
+                return 1;
+
+            __try
+            {
+                return isVisible(entity) ? 1 : 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return -1;
+            }
+        }
+
+        static bool TryUpdateChunkProxyRenderQueueSafe(
+            void* entity,
+            void* renderQueue,
+            FnOgreEntityUpdateRenderQueue updateRenderQueue)
+        {
+            if (!entity || !renderQueue || !updateRenderQueue)
+                return false;
+
+            __try
+            {
+                updateRenderQueue(entity, renderQueue);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static uint8_t TryGetChunkProxyRenderQueueGroupSafe(
+            void* entity,
+            FnOgreGetRenderQueueGroup getRenderQueueGroup,
+            bool* outFaulted = nullptr)
+        {
+            if (outFaulted)
+                *outFaulted = false;
+            if (!entity || !getRenderQueueGroup)
+                return 50u;
+
+            __try
+            {
+                return getRenderQueueGroup(entity);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                if (outFaulted)
+                    *outFaulted = true;
+                return 50u;
+            }
+        }
+
         using FnOgreCameraGetDerivedPosition = const OgreVector3&(__thiscall*)(void*);
 
         static bool TryGetChunkProxyCameraPositionSafe(
@@ -4767,25 +4880,50 @@ namespace BZROpenShim
             }
 
             bool visibleNow = true;
-            notifyCurrentCamera(slot.entity, resolvedCamera);
+            if (!TryNotifyChunkProxyCameraSafe(slot.entity, resolvedCamera, notifyCurrentCamera))
+            {
+                LogChunkManualSubmitSkip(slot, L"entity-fault-notify", sceneManager, viewport, currentCamera, resolvedCamera);
+                ForgetChunkProxySlotOgreRefs(slot);
+                return false;
+            }
             if (slot.cameraNotifyCount < USHRT_MAX)
                 ++slot.cameraNotifyCount;
 
             if (isVisible)
-                visibleNow = !!isVisible(slot.entity);
+            {
+                const int visibleProbe = TryGetChunkProxyVisibleSafe(slot.entity, isVisible);
+                if (visibleProbe < 0)
+                {
+                    LogChunkManualSubmitSkip(slot, L"entity-fault-visible", sceneManager, viewport, currentCamera, resolvedCamera);
+                    ForgetChunkProxySlotOgreRefs(slot);
+                    return false;
+                }
+                visibleNow = visibleProbe != 0;
+            }
 
             uint32_t directAddCount = 0;
             if (visibleNow && updateRenderQueue)
             {
-                updateRenderQueue(slot.entity, renderQueue);
+                if (!TryUpdateChunkProxyRenderQueueSafe(slot.entity, renderQueue, updateRenderQueue))
+                {
+                    LogChunkManualSubmitSkip(slot, L"entity-fault-update-queue", sceneManager, viewport, currentCamera, resolvedCamera);
+                    ForgetChunkProxySlotOgreRefs(slot);
+                    return false;
+                }
                 if (slot.entityUpdateQueueCount < USHRT_MAX)
                     ++slot.entityUpdateQueueCount;
             }
             else if (visibleNow && addRenderablePriority && getNumSubEntities && getSubEntity)
             {
-                const uint8_t groupId = getRenderQueueGroup
-                    ? getRenderQueueGroup(slot.entity)
-                    : 50u;
+                bool groupFaulted = false;
+                const uint8_t groupId =
+                    TryGetChunkProxyRenderQueueGroupSafe(slot.entity, getRenderQueueGroup, &groupFaulted);
+                if (groupFaulted)
+                {
+                    LogChunkManualSubmitSkip(slot, L"entity-fault-queue-group", sceneManager, viewport, currentCamera, resolvedCamera);
+                    ForgetChunkProxySlotOgreRefs(slot);
+                    return false;
+                }
                 const uint32_t subEntityCount =
                     TryGetChunkProxySubEntityCountSafe(slot.entity, getNumSubEntities);
 
@@ -4805,7 +4943,11 @@ namespace BZROpenShim
             }
 
             if (isVisible)
-                visibleNow = !!isVisible(slot.entity);
+            {
+                const int visibleProbe = TryGetChunkProxyVisibleSafe(slot.entity, isVisible);
+                if (visibleProbe >= 0)
+                    visibleNow = visibleProbe != 0;
+            }
 
             // Camera world position tells us whether the render camera lives in
             // the same coordinate space as the sim positions we mirror onto the
@@ -5229,9 +5371,14 @@ namespace BZROpenShim
                 if (!slot.active || !slot.entity)
                     continue;
 
-                const uint8_t groupId = getRenderQueueGroup
-                    ? getRenderQueueGroup(slot.entity)
-                    : 50u;
+                bool groupFaulted = false;
+                const uint8_t groupId =
+                    TryGetChunkProxyRenderQueueGroupSafe(slot.entity, getRenderQueueGroup, &groupFaulted);
+                if (groupFaulted)
+                {
+                    ForgetChunkProxySlotOgreRefs(slot);
+                    continue;
+                }
                 const uint32_t subEntityCount =
                     TryGetChunkProxySubEntityCountSafe(slot.entity, getNumSubEntities);
                 uint32_t added = 0;
@@ -8865,6 +9012,273 @@ namespace BZROpenShim
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_RecordDeathDetour.trampoline)),
                     GetCareerStatsPath().string().c_str());
             }
+        }
+
+        // Ogre particle templates are process-global, but the game re-parses
+        // every mod resource group's .particle scripts when resource groups are
+        // re-initialised (e.g. leaving a multiplayer lobby back to the main
+        // menu). Stock ParticleSystemManager::createTemplate throws
+        // ItemIdentityException on the duplicate name, and the exception is
+        // never caught -> terminate/abort (dump battlezone98redux.exe.30808:
+        // "ParticleSystem template with name 'Weather/Rain/Heavy' already
+        // exists."). Detour createTemplate to drop the stale template first so
+        // the parser rebuilds it cleanly.
+        using FnOgreParticleCreateTemplate = void*(__thiscall*)(void*, const std::string&, const std::string&);
+        using FnOgreParticleGetTemplate = void*(__thiscall*)(void*, const std::string&);
+        using FnOgreParticleRemoveTemplate = void(__thiscall*)(void*, const std::string&, bool);
+
+        static FnOgreParticleCreateTemplate g_OgreFn_ParticleCreateTemplateOriginal = nullptr;
+        static FnOgreParticleGetTemplate g_OgreFn_ParticleGetTemplate = nullptr;
+        static FnOgreParticleRemoveTemplate g_OgreFn_ParticleRemoveTemplate = nullptr;
+
+        void* __fastcall ParticleCreateTemplateDedupeHook(void* thisPtr,
+                                                          void* /*edx*/,
+                                                          const std::string& name,
+                                                          const std::string& resourceGroup)
+        {
+            if (thisPtr &&
+                g_OgreFn_ParticleGetTemplate &&
+                g_OgreFn_ParticleRemoveTemplate &&
+                g_OgreFn_ParticleGetTemplate(thisPtr, name) != nullptr)
+            {
+                Log(L"[PARTICLE] Removing stale particle template '%hs' before re-create\n",
+                    name.c_str());
+                g_OgreFn_ParticleRemoveTemplate(thisPtr, name, true);
+            }
+
+            if (!g_OgreFn_ParticleCreateTemplateOriginal)
+                return nullptr;
+
+            return g_OgreFn_ParticleCreateTemplateOriginal(thisPtr, name, resourceGroup);
+        }
+
+        static void InstallParticleTemplateDedupeHookIfPossible()
+        {
+            if (g_ParticleTemplateDedupeHookInstalled)
+                return;
+
+            HMODULE ogreMain = GetModuleHandleA("OgreMain.dll");
+            if (!ogreMain)
+                return;
+
+            const auto resolveExportBody = [ogreMain](const char* exportName) -> uint8_t*
+            {
+                auto* proc = reinterpret_cast<uint8_t*>(GetProcAddress(ogreMain, exportName));
+                if (!proc)
+                    return nullptr;
+
+                // The shipped OgreMain.dll is incrementally linked: exports
+                // land on a `jmp rel32` thunk. Follow it so the detour patches
+                // the real function body every internal call site reaches.
+                if (proc[0] == 0xE9)
+                {
+                    int32_t rel = 0;
+                    memcpy(&rel, proc + 1, sizeof(rel));
+                    proc = proc + 5 + rel;
+                }
+                return proc;
+            };
+
+            uint8_t* createTemplateBody = resolveExportBody(
+                "?createTemplate@ParticleSystemManager@Ogre@@QAEPAVParticleSystem@2@"
+                "ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@0@Z");
+            g_OgreFn_ParticleGetTemplate = ResolveOgreProc<FnOgreParticleGetTemplate>(
+                "?getTemplate@ParticleSystemManager@Ogre@@QAEPAVParticleSystem@2@"
+                "ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            g_OgreFn_ParticleRemoveTemplate = ResolveOgreProc<FnOgreParticleRemoveTemplate>(
+                "?removeTemplate@ParticleSystemManager@Ogre@@QAEXABV?$basic_string@"
+                "DU?$char_traits@D@std@@V?$allocator@D@2@@std@@_N@Z");
+
+            if (!createTemplateBody ||
+                !g_OgreFn_ParticleGetTemplate ||
+                !g_OgreFn_ParticleRemoveTemplate)
+            {
+                if (!g_ParticleTemplateDedupeFailureLogged)
+                {
+                    Log(L"[PARTICLE] createTemplate dedupe hook: OgreMain exports unresolved\n");
+                    g_ParticleTemplateDedupeFailureLogged = true;
+                }
+                return;
+            }
+
+            static const uint8_t kExpectedCreateTemplateBytes[] =
+            {
+                0x55, 0x8B, 0xEC, 0x6A, 0xFF // push ebp; mov ebp,esp; push -1
+            };
+
+            if (!ExpectedBytesMatchAt(reinterpret_cast<uintptr_t>(createTemplateBody),
+                                      kExpectedCreateTemplateBytes,
+                                      sizeof(kExpectedCreateTemplateBytes)))
+            {
+                if (!g_ParticleTemplateDedupeFailureLogged)
+                {
+                    Log(L"[PARTICLE] createTemplate prologue mismatch at 0x%08X; dedupe hook skipped\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(createTemplateBody)));
+                    g_ParticleTemplateDedupeFailureLogged = true;
+                }
+                return;
+            }
+
+            if (!InstallInlineDetour32(g_ParticleCreateTemplateDetour,
+                                       reinterpret_cast<uintptr_t>(createTemplateBody),
+                                       reinterpret_cast<void*>(ParticleCreateTemplateDedupeHook),
+                                       sizeof(kExpectedCreateTemplateBytes),
+                                       kExpectedCreateTemplateBytes,
+                                       sizeof(kExpectedCreateTemplateBytes)))
+            {
+                if (!g_ParticleTemplateDedupeFailureLogged)
+                {
+                    Log(L"[PARTICLE] Failed installing createTemplate dedupe hook at 0x%08X\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(createTemplateBody)));
+                    g_ParticleTemplateDedupeFailureLogged = true;
+                }
+                return;
+            }
+
+            g_OgreFn_ParticleCreateTemplateOriginal =
+                reinterpret_cast<FnOgreParticleCreateTemplate>(g_ParticleCreateTemplateDetour.trampoline);
+            g_ParticleTemplateDedupeHookInstalled = true;
+            Log(L"[PARTICLE] Installed ParticleSystemManager::createTemplate dedupe hook body=0x%08X trampoline=0x%08X\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(createTemplateBody)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_ParticleCreateTemplateDetour.trampoline)));
+        }
+
+        // ---- Scene teardown observation --------------------------------
+        // Loading a save (and any mission teardown) clears the Ogre scene,
+        // destroying the chunk proxies' billboard set, scene nodes, and
+        // entities while our slot table still points at them; the loading
+        // screen renders a few frames in that window and the manual submit
+        // path then touched freed entities (crash dump 35064). Hook both
+        // teardown entry points -- clearScene calls destroyAllMovableObjects
+        // internally, but each is also reachable on its own -- and forget all
+        // chunk Ogre references before the objects die.
+        using FnOgreSceneManagerVoidMethod = void(__thiscall*)(void*);
+
+        static InlineDetour32 g_SceneClearSceneDetour = {};
+        static InlineDetour32 g_SceneDestroyAllMovablesDetour = {};
+        static FnOgreSceneManagerVoidMethod g_OgreFn_ClearSceneOriginal = nullptr;
+        static FnOgreSceneManagerVoidMethod g_OgreFn_DestroyAllMovablesOriginal = nullptr;
+        static bool g_SceneTeardownHooksInstalled = false;
+        static bool g_SceneTeardownHookFailureLogged = false;
+
+        static void __fastcall SceneManagerClearSceneHook(void* sceneManager, void* /*unusedEdx*/)
+        {
+            ForgetAllChunkProxySceneResources(L"clearScene");
+            if (g_OgreFn_ClearSceneOriginal)
+                g_OgreFn_ClearSceneOriginal(sceneManager);
+        }
+
+        static void __fastcall SceneManagerDestroyAllMovablesHook(void* sceneManager, void* /*unusedEdx*/)
+        {
+            ForgetAllChunkProxySceneResources(L"destroyAllMovableObjects");
+            if (g_OgreFn_DestroyAllMovablesOriginal)
+                g_OgreFn_DestroyAllMovablesOriginal(sceneManager);
+        }
+
+        static void InstallSceneTeardownForgetHooksIfPossible()
+        {
+            if (g_SceneTeardownHooksInstalled)
+                return;
+
+            HMODULE ogreMain = GetModuleHandleA("OgreMain.dll");
+            if (!ogreMain)
+                return;
+
+            const auto resolveExportBody = [ogreMain](const char* exportName) -> uint8_t*
+            {
+                auto* proc = reinterpret_cast<uint8_t*>(GetProcAddress(ogreMain, exportName));
+                if (!proc)
+                    return nullptr;
+
+                // Incremental-link export thunks are `jmp rel32`; follow to
+                // the body so internal callers hit the detour too.
+                if (proc[0] == 0xE9)
+                {
+                    int32_t rel = 0;
+                    memcpy(&rel, proc + 1, sizeof(rel));
+                    proc = proc + 5 + rel;
+                }
+                return proc;
+            };
+
+            uint8_t* clearSceneBody =
+                resolveExportBody("?clearScene@SceneManager@Ogre@@UAEXXZ");
+            uint8_t* destroyAllMovablesBody =
+                resolveExportBody("?destroyAllMovableObjects@SceneManager@Ogre@@UAEXXZ");
+            if (!clearSceneBody || !destroyAllMovablesBody)
+            {
+                if (!g_SceneTeardownHookFailureLogged)
+                {
+                    Log(L"[CHUNKPROXY] scene teardown hooks: OgreMain exports unresolved\n");
+                    g_SceneTeardownHookFailureLogged = true;
+                }
+                return;
+            }
+
+            // push ebp; mov ebp,esp; sub esp,8 -- 3 whole instructions, 6 bytes.
+            static const uint8_t kExpectedClearSceneBytes[] =
+            {
+                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08
+            };
+            // push ebp; mov ebp,esp; push -1 (EH prologue start), 5 bytes.
+            static const uint8_t kExpectedDestroyAllMovablesBytes[] =
+            {
+                0x55, 0x8B, 0xEC, 0x6A, 0xFF
+            };
+
+            bool anyFailed = false;
+            if (!InstallInlineDetour32(g_SceneClearSceneDetour,
+                                       reinterpret_cast<uintptr_t>(clearSceneBody),
+                                       reinterpret_cast<void*>(SceneManagerClearSceneHook),
+                                       sizeof(kExpectedClearSceneBytes),
+                                       kExpectedClearSceneBytes,
+                                       sizeof(kExpectedClearSceneBytes)))
+            {
+                anyFailed = true;
+            }
+            else
+            {
+                g_OgreFn_ClearSceneOriginal =
+                    reinterpret_cast<FnOgreSceneManagerVoidMethod>(g_SceneClearSceneDetour.trampoline);
+            }
+
+            if (!InstallInlineDetour32(g_SceneDestroyAllMovablesDetour,
+                                       reinterpret_cast<uintptr_t>(destroyAllMovablesBody),
+                                       reinterpret_cast<void*>(SceneManagerDestroyAllMovablesHook),
+                                       sizeof(kExpectedDestroyAllMovablesBytes),
+                                       kExpectedDestroyAllMovablesBytes,
+                                       sizeof(kExpectedDestroyAllMovablesBytes)))
+            {
+                anyFailed = true;
+            }
+            else
+            {
+                g_OgreFn_DestroyAllMovablesOriginal =
+                    reinterpret_cast<FnOgreSceneManagerVoidMethod>(g_SceneDestroyAllMovablesDetour.trampoline);
+            }
+
+            if (anyFailed)
+            {
+                if (!g_SceneTeardownHookFailureLogged)
+                {
+                    Log(L"[CHUNKPROXY] scene teardown hook install failed clearScene=0x%08X destroyAllMovables=0x%08X (installed=%d/%d)\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(clearSceneBody)),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(destroyAllMovablesBody)),
+                        g_OgreFn_ClearSceneOriginal ? 1 : 0,
+                        g_OgreFn_DestroyAllMovablesOriginal ? 1 : 0);
+                    g_SceneTeardownHookFailureLogged = true;
+                }
+                // Keep whatever half installed; retry cannot help once bytes
+                // mismatch, so mark installed to avoid rescanning every call.
+            }
+            else
+            {
+                Log(L"[CHUNKPROXY] Installed scene teardown forget hooks clearScene=0x%08X destroyAllMovables=0x%08X\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(clearSceneBody)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(destroyAllMovablesBody)));
+            }
+
+            g_SceneTeardownHooksInstalled = true;
         }
 
         static void InstallJumpSnipingProbeIfRequested()
@@ -15945,6 +16359,8 @@ namespace BZROpenShim
         g_HudSpriteCachedPanelAddresses.clear();
         g_HudSpriteFallbackDiscoveryAttempted = false;
         g_HudSpriteFallbackDiscoveryLastTick = 0;
+        g_HudSpriteRectTableDiscoveryBackoffMs = 0;
+        g_HudSpriteFallbackDiscoveryBackoffMs = 0;
         g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
         g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
         g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
@@ -16054,6 +16470,8 @@ namespace BZROpenShim
 
         InstallJumpSnipingProbeIfRequested();
         InstallCareerStatsMpHookIfPossible();
+        InstallParticleTemplateDedupeHookIfPossible();
+        InstallSceneTeardownForgetHooksIfPossible();
         StartCareerStatsMpSessionWorker();
         InstallShieldTowerTeamFilterHookIfPossible();
         InstallMineTeamFilterHooksIfPossible();
@@ -16306,6 +16724,8 @@ namespace BZROpenShim
     {
         InstallJumpSnipingProbeIfRequested();
         InstallCareerStatsMpHookIfPossible();
+        InstallParticleTemplateDedupeHookIfPossible();
+        InstallSceneTeardownForgetHooksIfPossible();
         InstallShieldTowerTeamFilterHookIfPossible();
         InstallMineTeamFilterHooksIfPossible();
         InstallSplinterUndeadFixIfPossible();
@@ -16562,7 +16982,27 @@ namespace BZROpenShim
         if (SetStockScrapPilotPanelsVisibleByTable(visible))
             return true;
 
-        return SetStockScrapPilotPanelsVisibleByUv(visible);
+        if (SetStockScrapPilotPanelsVisibleByUv(visible))
+            return true;
+
+        // A hide/show request can arrive before the mission HUD rect records
+        // exist (the Lua layout driver fires within seconds of process start).
+        // Report success anyway: the addon keeps a ~1s reassert loop alive only
+        // while the bridge looks supported, and its next call lands after the
+        // discovery throttle elapses, converging once the HUD is built. A hard
+        // "false" here made the addon latch the bridge as unsupported for the
+        // whole session, leaving the stock top-centre panels drawn.
+        static bool s_deferredLogged = false;
+        if (!s_deferredLogged)
+        {
+            LogShimA(
+                LogLevel::Info,
+                "hudfallback",
+                "stock scrap/pilot panel visible=%s deferred until records discoverable",
+                visible ? "true" : "false");
+            s_deferredLogged = true;
+        }
+        return true;
     }
 
     bool GetHudSpriteRectFromBridge(const char* name, int* outX, int* outY, int* outW, int* outH)
