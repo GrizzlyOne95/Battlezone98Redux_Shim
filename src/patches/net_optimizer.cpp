@@ -941,8 +941,8 @@ namespace
             return;
         }
 
-        g_BufferLogBinPath = JoinPath(GetGameDir(), kBufferLogBinName);
-        g_BufferLogMetaPath = JoinPath(GetGameDir(), kBufferLogMetaName);
+        g_BufferLogBinPath = GetGameLogPath(kBufferLogBinName);
+        g_BufferLogMetaPath = GetGameLogPath(kBufferLogMetaName);
         g_BufferLogStride = static_cast<uint32_t>(sizeof(BufferLogRecordHeader) + g_Config.bufferLogPayloadBytes);
 
         const size_t totalBytes =

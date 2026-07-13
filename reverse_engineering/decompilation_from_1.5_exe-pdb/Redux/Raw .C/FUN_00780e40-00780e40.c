@@ -1,0 +1,10 @@
+
+int FUN_00780e40(undefined4 param_1,undefined4 param_2)
+
+{
+  ushort *puVar1;
+  
+  puVar1 = (ushort *)FUN_004c0fe0(param_1,param_2);
+  return (int)(*puVar1 & 0xf0) >> 4;
+}
+

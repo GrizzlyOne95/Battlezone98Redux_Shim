@@ -1326,42 +1326,6 @@ void __declspec(naked) __cdecl Trampoline_EngineFlameHoverCraftEmit()
     }
 }
 
-// -----------------------------------------------------------------------
-// Artillery Howitzer Volley Hook
-// Site: native artillery fire helper entry at 0x0042F840
-// Purpose: keep stock single-shot behavior for everything except howitzers,
-// which replay the helper once per mounted mortar slot.
-// -----------------------------------------------------------------------
-void __declspec(naked) __cdecl Trampoline_ArtilleryHowitzerVolley()
-{
-    __asm
-    {
-        push ebp
-        mov  ebp, esp
-        push dword ptr [ebp + 0x1C]
-        push dword ptr [ebp + 0x18]
-        push dword ptr [ebp + 0x14]
-        push dword ptr [ebp + 0x10]
-        push dword ptr [ebp + 0x0C]
-        push ecx
-        call ArtilleryHowitzerVolleyHook
-        add  esp, 0x18
-        pop  ebp
-        ret  0x14
-    }
-}
-
-void __declspec(naked) __cdecl Trampoline_ArtilleryHowitzerVolleyOriginal()
-{
-    __asm
-    {
-        push ebp
-        mov  ebp, esp
-        sub  esp, 0x0C
-        jmp  [g_BZRFnPtr_ArtilleryHowitzerVolleyContinue]
-    }
-}
-
 void __declspec(naked) __cdecl Trampoline_DecodedWeaponMaskBias()
 {
     __asm

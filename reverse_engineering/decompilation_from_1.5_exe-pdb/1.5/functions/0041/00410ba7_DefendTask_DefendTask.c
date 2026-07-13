@@ -1,0 +1,18 @@
+/*
+ * Entry: 00410ba7
+ * Name: DefendTask::DefendTask
+ * Namespace: DefendTask
+ * Signature: DefendTask * DefendTask(DefendTask * this, Craft * param_1, GameObject * param_2)
+ * Symbol source: IMPORTED
+ * Export status: ok
+ */
+
+DefendTask * __thiscall DefendTask::DefendTask(DefendTask *this,Craft *param_1,GameObject *param_2)
+
+{
+  UnitTask::UnitTask((UnitTask *)this,param_1,param_2);
+  *(undefined4 *)&this->field_0xc = 1;
+  *(undefined4 *)&this->field_0x10 = 1;
+  *(undefined ***)this = &_vftable_;
+  return this;
+}

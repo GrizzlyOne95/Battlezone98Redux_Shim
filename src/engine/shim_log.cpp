@@ -11,6 +11,34 @@
 
 namespace BZROpenShim
 {
+    std::string GetGameLogPath(const char* fileName)
+    {
+        const char* safeName = (fileName && fileName[0]) ? fileName : "openshim.log";
+        if (const char* slash = std::strrchr(safeName, '\\'))
+            safeName = slash + 1;
+        if (const char* slash = std::strrchr(safeName, '/'))
+            safeName = slash + 1;
+
+        char modulePath[MAX_PATH] = {};
+        if (GetModuleFileNameA(nullptr, modulePath, MAX_PATH) == 0)
+            return safeName;
+
+        char* lastSlash = std::strrchr(modulePath, '\\');
+        if (!lastSlash)
+            return safeName;
+
+        *(lastSlash + 1) = '\0';
+        const std::string gameRoot(modulePath);
+        const std::string logDirectory = gameRoot + "logs";
+        if (CreateDirectoryA(logDirectory.c_str(), nullptr) != FALSE ||
+            GetLastError() == ERROR_ALREADY_EXISTS)
+        {
+            return logDirectory + "\\" + safeName;
+        }
+
+        return gameRoot + safeName;
+    }
+
 namespace
 {
     INIT_ONCE g_LogInitOnce = INIT_ONCE_STATIC_INIT;
@@ -103,16 +131,7 @@ namespace
 
     std::string BuildLogPath()
     {
-        char modulePath[MAX_PATH] = {};
-        if (GetModuleFileNameA(nullptr, modulePath, MAX_PATH) == 0)
-            return "openshim.log";
-
-        char* lastSlash = std::strrchr(modulePath, '\\');
-        if (!lastSlash)
-            return "openshim.log";
-
-        *(lastSlash + 1) = '\0';
-        return std::string(modulePath) + "openshim.log";
+        return GetGameLogPath("openshim.log");
     }
 
     void WriteLineUnlocked(LogLevel level, const char* component, const char* message)
