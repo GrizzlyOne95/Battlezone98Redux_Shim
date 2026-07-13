@@ -1,0 +1,17 @@
+
+int * __thiscall FUN_0066e920(int *param_1,int param_2,undefined4 param_3)
+
+{
+  int local_c;
+  
+  *param_1 = param_2;
+  if (param_2 == 0) {
+    local_c = 0;
+  }
+  else {
+    local_c = FUN_0066f450(param_2,param_3);
+  }
+  param_1[1] = local_c;
+  return param_1;
+}
+

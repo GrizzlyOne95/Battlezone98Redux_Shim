@@ -1,0 +1,17 @@
+
+void __thiscall
+FUN_00804b40(undefined4 param_1,undefined4 param_2,undefined4 param_3,undefined4 param_4,
+            undefined4 param_5,undefined4 param_6)
+
+{
+  undefined4 local_1c;
+  undefined4 local_18;
+  undefined4 local_14;
+  undefined4 local_10;
+  undefined4 local_c;
+  
+  <>(param_2,param_3,param_4,param_5,param_6);
+  FUN_00805c90(param_1,local_1c,local_18,local_14,local_10,local_c);
+  return;
+}
+

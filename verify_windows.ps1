@@ -113,8 +113,8 @@ if (-not $GamePath -or -not (Test-Path $GamePath)) {
 }
 
 $dllPath = Join-Path $GamePath "winmm.dll"
-$logPath = Join-Path $GamePath "openshim.log"
-$bzLoggerPath = Join-Path $GamePath "BZLogger.txt"
+$logPath = Join-Path $GamePath "logs\openshim.log"
+$bzLoggerPath = Join-Path $GamePath "logs\BZLogger.txt"
 $bufferBinPath = Join-Path $GamePath "bz_buffer_log.bin"
 $bufferMetaPath = Join-Path $GamePath "bz_buffer_log.meta.txt"
 $pass = $true

@@ -167,7 +167,25 @@ namespace BZROpenShim
                                             float* range,
                                             float* time,
                                             void** weapon);
+    using FnAttackTaskDoState = void(__thiscall*)(void* thisPtr);
+    using FnTerrainGetIntersection = int(__cdecl*)(double startX,
+                                                   double startY,
+                                                   double startZ,
+                                                   float diffX,
+                                                   float diffY,
+                                                   float diffZ,
+                                                   float* fraction,
+                                                   void* outNormal);
     using FnProcessDoSubTask = bool(__thiscall*)(void* thisPtr);
+    // Redux's ArtilleryProcess::DoAttack is not the zero-stack-argument method
+    // described by the legacy 1.5 PDB. At the machine ABI it consumes four
+    // stack words (the first is the hidden/result destination) and returns with
+    // `ret 0x10`. Preserve all four words when replaying the stock routine.
+    using FnArtilleryDoAttack = uint32_t(__thiscall*)(void* thisPtr,
+                                                      uint32_t arg0,
+                                                      uint32_t arg1,
+                                                      uint32_t arg2,
+                                                      uint32_t arg3);
     using FnAIUnitRemove = void(__cdecl*)(void* unitPtr);
     using FnAIBuildConstructionEnd = void(__cdecl*)(int teamId, int constructType);
     using FnAIBuildReservedAreaRemove = void(__cdecl*)(int teamId, int reservedArea);
@@ -276,6 +294,8 @@ namespace BZROpenShim
     static FnReloadGameKeyMap g_BzrFn_ReloadGameKeyMap = nullptr;
     static FnRecordDeath g_BzrFn_RecordDeath = nullptr;
     static FnCalcRangeCraft g_BzrFn_CalcRangeCraft = nullptr;
+    static FnAttackTaskDoState g_BzrFn_AttackTaskDoState = nullptr;
+    static FnTerrainGetIntersection g_BzrFn_TerrainGetIntersection = nullptr;
     static FnProcessDoSubTask g_BzrFn_OffensiveProcessDoSubTask = nullptr;
     static FnProcessDoSubTask g_BzrFn_GunTowerProcessDoSubTask = nullptr;
     static FnAIUnitRemove g_BzrFn_AIUnitRemove = nullptr;
@@ -313,6 +333,8 @@ namespace BZROpenShim
                                                 void* objectPtr,
                                                 const float* velocity,
                                                 uint8_t preserveFlag);
+
+    static void InstallArtilleryDoAttackHookIfPossible();
 
     namespace
     {
@@ -495,6 +517,8 @@ namespace BZROpenShim
         constexpr uintptr_t kOptionsInputBackClickAddr = 0x007B2210;
         constexpr uintptr_t kOptionsInputDefaultsClickAddr = 0x007B2230;
         constexpr size_t kInlineDetourMaxPatchLen = 16;
+        constexpr uintptr_t kGogArtilleryDoAttackEntryAddr = 0x0042AF10;
+        constexpr size_t kArtilleryDoAttackDetourLen = 10;
         constexpr size_t kOptionsInputCtorDetourLen = 10;
         constexpr size_t kOptionsInputKeyReleasedDetourLen = 9;
         constexpr size_t kOptionsInputKeyConfigOffset = 0x188;
@@ -519,6 +543,16 @@ namespace BZROpenShim
         constexpr float kJumpSnipeVelocityBandThreshold = 0.15f;
         constexpr uintptr_t kGogCalcRangeCraftEntryAddr = 0x00466BE0;
         constexpr size_t kCalcRangeCraftDetourLen = 9;
+        constexpr uintptr_t kGogAttackTaskDoStateEntryAddr = 0x00478A50;
+        constexpr size_t kAttackTaskDoStateDetourLen = 9;
+        constexpr uintptr_t kGogTerrainGetIntersectionAddr = 0x00784620;
+        constexpr size_t kAttackTaskCurStateOffset = 0x08;
+        constexpr size_t kAttackTaskNextStateOffset = 0x0C;
+        constexpr size_t kAttackTaskCraftOffset = 0x10;
+        constexpr size_t kAttackTaskTargetOffset = 0x18;
+        constexpr size_t kAttackTaskCloseSqOffset = 0x9C;
+        constexpr size_t kAttackTaskRangeSqOffset = 0xA0;
+        constexpr int kAttackTaskFiringState = 5;
         constexpr uintptr_t kGogOffensiveProcessDoSubTaskEntryAddr = 0x004DFE70;
         constexpr size_t kOffensiveProcessDoSubTaskDetourLen = 8;
         constexpr uintptr_t kGogGunTowerProcessDoSubTaskEntryAddr = 0x004741A0;
@@ -802,6 +836,35 @@ namespace BZROpenShim
         {
             bool initialized = false;
             std::unordered_map<std::string, AiTuningConfig> odfEntries = {};
+        };
+
+        // Per-unit AI tuning override set at runtime through the EXU bridge.
+        // Keyed by GameObject pointer; wins over ODF-level AiTuningConfig and
+        // applies regardless of the g_AiOdfGameplayTuningEnabled master toggle
+        // because each entry is an explicit script request for that unit.
+        struct AiUnitTuningOverride
+        {
+            bool hasEngageRange = false;
+            float engageRange = 0.0f;
+            bool hasWeaponRangeMin = false;
+            float weaponRangeMin = 0.0f;
+            bool hasRetargetPeriod = false;
+            float retargetPeriod = 0.0f;
+            bool hasKiteRanges = false;
+            float kiteDesiredRange = 0.0f;
+            float kiteEnterRange = 0.0f;
+            float kiteExitRange = 0.0f;
+            bool kitePreserveLos = false;
+            float kiteStrafe = 0.0f;
+            float kiteSwitchPeriod = 0.0f;
+        };
+
+        struct CombatKiteState
+        {
+            bool retreating = false;
+            uintptr_t target = 0;
+            int strafeDirection = 1;
+            ULONGLONG nextStrafeSwitchMs = 0;
         };
 
         struct TeamFilterConfig
@@ -1163,6 +1226,11 @@ namespace BZROpenShim
         static std::unordered_set<std::string> g_ChunkPayloadResolveFailureLogCache = {};
         static DWORD g_ChunkObjectIdentityLastRefreshTick = 0;
         static DWORD g_ChunkResolvedBindingLastPruneTick = 0;
+        static bool g_VehicleSkinningTraceEnabled = false;
+        static DWORD g_VehicleSkinningTraceIntervalMs = 5000;
+        static DWORD g_VehicleSkinningTraceLastTick = 0;
+        static volatile long g_VehicleSkinningTraceBudget = 64;
+        static std::unordered_set<std::string> g_VehicleSkinningTraceFingerprints = {};
         struct ChunkVdfMeshRef
         {
             char meshBase[48] = {};
@@ -1208,6 +1276,11 @@ namespace BZROpenShim
         static ULONGLONG g_CareerStatsMpLastActiveTick = 0;
         static InlineDetour32 g_CalcRangeCraftDetour = {};
         static bool g_CalcRangeCraftHookInstalled = false;
+        static InlineDetour32 g_AttackTaskDoStateDetour = {};
+        static bool g_AttackTaskDoStateHookInstalled = false;
+        static InlineDetour32 g_ArtilleryDoAttackDetour = {};
+        static FnArtilleryDoAttack g_BzrFn_ArtilleryDoAttackOriginal = nullptr;
+        static bool g_ArtilleryDoAttackHookInstalled = false;
         static InlineDetour32 g_OffensiveProcessDoSubTaskDetour = {};
         static InlineDetour32 g_GunTowerProcessDoSubTaskDetour = {};
         static bool g_RetargetPeriodHooksInstalled = false;
@@ -1228,6 +1301,7 @@ namespace BZROpenShim
         static ULONGLONG g_ChunkEffectCreateHooksReadyTick = 0;
         static bool g_ShieldTowerSimulateHookInstalled = false;
         static bool g_ConstructorRemoteBuildFixInstalled = false;
+        static bool g_ConstructorRemoteBuildFixMismatchLogged = false;
         static bool g_MagnetMineSimulateHookInstalled = false;
         static bool g_ProximityMineSimulateHookInstalled = false;
         static bool g_SprayBuildingSimulateHookInstalled = false;
@@ -1236,6 +1310,10 @@ namespace BZROpenShim
         static bool g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
         static volatile long g_ConstructorRemoteBuildTraceBudget = kConstructorRemoteBuildTraceBudgetDefault;
         static std::unordered_map<uintptr_t, ULONGLONG> g_RetargetPeriodNextForceMsByProcess = {};
+        static std::unordered_map<uintptr_t, AiUnitTuningOverride> g_AiUnitTuningOverridesByObject = {};
+        static std::unordered_map<uintptr_t, CombatKiteState> g_CombatKiteStateByObject = {};
+        static volatile long g_AiUnitTuningTraceBudget = 64;
+        static volatile long g_CombatKiteTraceBudget = 256;
         static bool g_InputBindingUiScaffoldInitialized = false;
         static bool g_InputBindingUiScaffoldLogged = false;
         static bool g_InputBindingUiPopulateHookInstallAttempted = false;
@@ -1414,6 +1492,10 @@ namespace BZROpenShim
         static constexpr DWORD kChunkProxyExpireMs = 400;
         static constexpr DWORD kChunkProxyRetryDelayMs = 1000;
         static constexpr DWORD kChunkObjectIdentityRefreshMs = 1000;
+        static constexpr DWORD kVehicleSkinningTraceIntervalMsDefault = 5000;
+        static constexpr DWORD kVehicleSkinningTraceIntervalMsMin = 100;
+        static constexpr DWORD kVehicleSkinningTraceIntervalMsMax = 60000;
+        static constexpr long kVehicleSkinningTraceBudgetDefault = 64;
         static constexpr DWORD kChunkResolvedBindingExpireMs = 10000;
         static constexpr DWORD kChunkResolvedBindingPruneMs = 1000;
         static constexpr size_t kChunkPayloadResolveFailureLogCacheLimit = 512;
@@ -1449,6 +1531,7 @@ namespace BZROpenShim
         static bool g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
         static bool g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
         static bool g_AttackRevealEnabled = kAttackRevealEnabledDefault;
+
         static constexpr InputBindingRowSeed kInputBindingFirstPassSeeds[] = {
             { "turbo", nullptr, "Turbo" },
             { "throttle_up", nullptr, "Throttle Forward" },
@@ -1493,7 +1576,16 @@ namespace BZROpenShim
         };
         static constexpr size_t kGameObjectPlayerShotOffset = 0x1D8;
         static constexpr size_t kGameObjectGetTeamVtableOffset = 0x4;
-        static constexpr size_t kGameObjectPerceivedTeamOffset = 0x180;
+        // Redux 2.2.301 stores GameObject::perceivedTeam at +0x174. The
+        // GameObject interface subobject begins at +0x18 and its
+        // GetPerceivedTeam implementation (0x00462450) reads [this+0x15C],
+        // which resolves to +0x174 from the complete object. The old +0x180
+        // value targeted a neighboring field and left newly spawned Wingmen
+        // with an uninitialized perceived team, eventually causing the stock
+        // team-table lookup at 0x005E0BC6 to index with garbage.
+        static constexpr size_t kGameObjectPerceivedTeamOffset = 0x174;
+        static constexpr int kGameTeamMin = 0;
+        static constexpr int kGameTeamMax = 15;
         static constexpr size_t kProcessOwnerObjectOffset = 0x34;
         static constexpr size_t kPresetViewCurrentViewOffset = 0x8;
         static constexpr size_t kGameObjectIlluminationOffset = 0xDC;
@@ -1544,6 +1636,11 @@ namespace BZROpenShim
         using FnOgreGetRenderQueueGroup = uint8_t(__thiscall*)(void*);
         using FnOgreGetNumSubEntities = uint32_t(__thiscall*)(void*);
         using FnOgreGetSubEntity = void*(__thiscall*)(void*, uint32_t);
+        using FnOgreEntityBoolQuery = bool(__thiscall*)(void*);
+        using FnOgreEntityU16Query = uint16_t(__thiscall*)(void*);
+        using FnOgreEntityIntQuery = int(__thiscall*)(void*);
+        using FnOgreEntityGetSkeleton = void*(__thiscall*)(void*);
+        using FnOgreStringQuery = const std::string&(__thiscall*)(void*);
         using FnOgreProcessQueuedUpdates = void(__cdecl*)();
         using FnOgreNumAttachedObjects = uint16_t(__thiscall*)(void*);
         using FnOgreGetAttachedObjectByIndex = void*(__thiscall*)(void*, uint16_t);
@@ -9514,6 +9611,391 @@ namespace BZROpenShim
             }
         }
 
+        static bool TryGetGameObjectPosition(void* objectPtr,
+                                             double& outX,
+                                             double& outY,
+                                             double& outZ)
+        {
+            if (!objectPtr)
+                return false;
+
+            __try
+            {
+                const auto* transform = reinterpret_cast<const LegacyMat3*>(
+                    reinterpret_cast<const uint8_t*>(objectPtr) + kObj76TransformOffset);
+                outX = transform->posit_x;
+                outY = transform->posit_y;
+                outZ = transform->posit_z;
+                return std::isfinite(outX) && std::isfinite(outY) && std::isfinite(outZ);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static bool HasTerrainLineOfSight(double startX,
+                                          double startY,
+                                          double startZ,
+                                          double endX,
+                                          double endY,
+                                          double endZ)
+        {
+            if (!g_BzrFn_TerrainGetIntersection)
+                return true;
+
+            const float diffX = static_cast<float>(endX - startX);
+            const float diffY = static_cast<float>(endY - startY);
+            const float diffZ = static_cast<float>(endZ - startZ);
+            float fraction = 1.0f;
+            __try
+            {
+                return g_BzrFn_TerrainGetIntersection(startX,
+                                                       startY,
+                                                       startZ,
+                                                       diffX,
+                                                       diffY,
+                                                       diffZ,
+                                                       &fraction,
+                                                       nullptr) == 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        void __fastcall AttackTaskDoStateTuningHook(void* taskPtr, void* /*edx*/)
+        {
+            if (!g_BzrFn_AttackTaskDoState || !taskPtr)
+                return;
+
+            auto* taskBytes = reinterpret_cast<uint8_t*>(taskPtr);
+            void* craft = nullptr;
+            void* target = nullptr;
+            __try
+            {
+                craft = *reinterpret_cast<void**>(taskBytes + kAttackTaskCraftOffset);
+                target = *reinterpret_cast<void**>(taskBytes + kAttackTaskTargetOffset);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                g_BzrFn_AttackTaskDoState(taskPtr);
+                return;
+            }
+
+            const auto tuningIt = g_AiUnitTuningOverridesByObject.find(
+                reinterpret_cast<uintptr_t>(craft));
+            if (!craft || !target || tuningIt == g_AiUnitTuningOverridesByObject.end())
+            {
+                g_CombatKiteStateByObject.erase(reinterpret_cast<uintptr_t>(craft));
+                g_BzrFn_AttackTaskDoState(taskPtr);
+                return;
+            }
+
+            const AiUnitTuningOverride& tuning = tuningIt->second;
+
+            // CalcRange initializes rangeSq when AttackTask is constructed. Lua
+            // discovery can legitimately push a per-unit policy afterward (for
+            // example, a freshly spawned bomber may already have its attack
+            // task and the dispenser's cached 50 m range). Keep the live task's
+            // fire range synchronized with the configured floor so behavior is
+            // independent of spawn/command ordering. Never reduce a range the
+            // engine or another tuning source has already made larger.
+            if (tuning.hasEngageRange && std::isfinite(tuning.engageRange))
+            {
+                __try
+                {
+                    float& rangeSq = *reinterpret_cast<float*>(
+                        taskBytes + kAttackTaskRangeSqOffset);
+                    const float engageSq = tuning.engageRange * tuning.engageRange;
+                    if (std::isfinite(engageSq) &&
+                        (!std::isfinite(rangeSq) || rangeSq < engageSq))
+                    {
+                        const float previousRangeSq = rangeSq;
+                        rangeSq = engageSq;
+                        if (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE") ||
+                            EnvFlagEnabled("OPENSHIM_TRACE_AI_KITE"))
+                        {
+                            const long remaining = InterlockedDecrement(
+                                &g_AiUnitTuningTraceBudget);
+                            if (remaining >= 0)
+                            {
+                                char odfToken[kProducerBuildMenuTokenLen + 1] = {};
+                                TryGetObjectOdfToken(craft, odfToken);
+                                const float previousRange =
+                                    std::isfinite(previousRangeSq) && previousRangeSq > 0.0f
+                                        ? std::sqrt(previousRangeSq)
+                                        : 0.0f;
+                                Log(L"[AIUNIT] live-task craft=0x%08X odf=%hs range=%.2f->%.2f remaining=%ld\n",
+                                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
+                                    odfToken[0] ? odfToken : "-",
+                                    static_cast<double>(previousRange),
+                                    static_cast<double>(tuning.engageRange),
+                                    remaining);
+                            }
+                        }
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                }
+            }
+
+            if (!tuning.hasKiteRanges)
+            {
+                g_CombatKiteStateByObject.erase(reinterpret_cast<uintptr_t>(craft));
+                g_BzrFn_AttackTaskDoState(taskPtr);
+                return;
+            }
+
+            double craftX = 0.0;
+            double craftY = 0.0;
+            double craftZ = 0.0;
+            double targetX = 0.0;
+            double targetY = 0.0;
+            double targetZ = 0.0;
+            if (!TryGetGameObjectPosition(craft, craftX, craftY, craftZ) ||
+                !TryGetGameObjectPosition(target, targetX, targetY, targetZ))
+            {
+                g_BzrFn_AttackTaskDoState(taskPtr);
+                return;
+            }
+
+            const double dx = craftX - targetX;
+            const double dy = craftY - targetY;
+            const double dz = craftZ - targetZ;
+            const double horizontalSq = (dx * dx) + (dz * dz);
+            const double distanceSqD = horizontalSq + (dy * dy);
+            if (!std::isfinite(distanceSqD) || distanceSqD <= 0.0001 || horizontalSq <= 0.0001)
+            {
+                g_BzrFn_AttackTaskDoState(taskPtr);
+                return;
+            }
+
+            const float distance = static_cast<float>(std::sqrt(distanceSqD));
+            CombatKiteState& state = g_CombatKiteStateByObject[reinterpret_cast<uintptr_t>(craft)];
+            if (state.target != reinterpret_cast<uintptr_t>(target))
+            {
+                state.target = reinterpret_cast<uintptr_t>(target);
+                state.retreating = false;
+                state.strafeDirection =
+                    (reinterpret_cast<uintptr_t>(craft) & 0x10u) ? 1 : -1;
+                state.nextStrafeSwitchMs = 0;
+            }
+
+            const bool wasRetreating = state.retreating;
+            if (!state.retreating && distance <= tuning.kiteEnterRange)
+                state.retreating = true;
+            else if (state.retreating && distance >= tuning.kiteExitRange)
+                state.retreating = false;
+
+            bool applied = false;
+            bool currentLos = false;
+            bool reverseLos = true;
+            bool lateralLos = false;
+            float savedCloseSq = 0.0f;
+            float movementCloseSq = 0.0f;
+            if (state.retreating)
+            {
+                // Match stock AbleToHit's terrain-only visibility check, while
+                // sampling from the craft body because weapon mount transforms
+                // are not stable across all craft classes.
+                currentLos = HasTerrainLineOfSight(craftX,
+                                                   craftY + 2.0,
+                                                   craftZ,
+                                                   targetX,
+                                                   targetY + 2.0,
+                                                   targetZ);
+
+                float rangeSq = 0.0f;
+                __try
+                {
+                    rangeSq = *reinterpret_cast<float*>(taskBytes + kAttackTaskRangeSqOffset);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    rangeSq = 0.0f;
+                }
+
+                if (currentLos && std::isfinite(rangeSq) && distanceSqD <= rangeSq)
+                {
+                    if (tuning.kitePreserveLos)
+                    {
+                        const double horizontalLength = std::sqrt(horizontalSq);
+                        constexpr double kReverseLosLookaheadMeters = 12.0;
+                        const double candidateX = craftX + (dx / horizontalLength) * kReverseLosLookaheadMeters;
+                        const double candidateZ = craftZ + (dz / horizontalLength) * kReverseLosLookaheadMeters;
+                        reverseLos = HasTerrainLineOfSight(candidateX,
+                                                           craftY + 2.0,
+                                                           candidateZ,
+                                                           targetX,
+                                                           targetY + 2.0,
+                                                           targetZ);
+                    }
+
+                    if (tuning.kiteStrafe > 0.0f)
+                    {
+                        const ULONGLONG nowMs = GetTickCount64();
+                        const ULONGLONG switchMs = static_cast<ULONGLONG>(
+                            (std::max)(tuning.kiteSwitchPeriod, 0.5f) * 1000.0f);
+                        if (state.nextStrafeSwitchMs == 0)
+                            state.nextStrafeSwitchMs = nowMs + switchMs;
+                        else if (nowMs >= state.nextStrafeSwitchMs)
+                        {
+                            state.strafeDirection = -state.strafeDirection;
+                            state.nextStrafeSwitchMs = nowMs + switchMs;
+                        }
+
+                        const double horizontalLength = std::sqrt(horizontalSq);
+                        constexpr double kLateralLosLookaheadMeters = 10.0;
+                        for (int attempt = 0; attempt < 2 && !lateralLos; ++attempt)
+                        {
+                            const double side = static_cast<double>(state.strafeDirection);
+                            const double candidateX = craftX + (-dz / horizontalLength) * side * kLateralLosLookaheadMeters;
+                            const double candidateZ = craftZ + (dx / horizontalLength) * side * kLateralLosLookaheadMeters;
+                            lateralLos = HasTerrainLineOfSight(candidateX,
+                                                               craftY + 2.0,
+                                                               candidateZ,
+                                                               targetX,
+                                                               targetY + 2.0,
+                                                               targetZ);
+                            if (!lateralLos)
+                                state.strafeDirection = -state.strafeDirection;
+                        }
+                    }
+
+                    __try
+                    {
+                        savedCloseSq = *reinterpret_cast<float*>(taskBytes + kAttackTaskCloseSqOffset);
+                        movementCloseSq = reverseLos
+                            ? tuning.kiteDesiredRange * tuning.kiteDesiredRange
+                            : 0.0f;
+                        *reinterpret_cast<float*>(taskBytes + kAttackTaskCloseSqOffset) = movementCloseSq;
+                        *reinterpret_cast<int*>(taskBytes + kAttackTaskCurStateOffset) = kAttackTaskFiringState;
+                        *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = kAttackTaskFiringState;
+                        applied = true;
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        applied = false;
+                    }
+                }
+            }
+
+            g_BzrFn_AttackTaskDoState(taskPtr);
+
+            if (applied)
+            {
+                __try
+                {
+                    // The temporary closeSq is a movement potential only. Fire
+                    // permission remains governed by rangeSq + stock AbleToHit.
+                    *reinterpret_cast<float*>(taskBytes + kAttackTaskCloseSqOffset) = savedCloseSq;
+                    *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = kAttackTaskFiringState;
+
+                    // Preserve the stock terrain/obstacle stop: only add the
+                    // lateral component when DoBlast produced movement of its
+                    // own and the projected side-step retains terrain LOS.
+                    if (lateralLos && tuning.kiteStrafe > 0.0f)
+                    {
+                        void* vehicle = *reinterpret_cast<void**>(
+                            reinterpret_cast<uint8_t*>(craft) + 0x230);
+                        float* control = reinterpret_cast<float*>(
+                            reinterpret_cast<uint8_t*>(vehicle) + 0xC4);
+                        if (std::fabs(control[2]) > 0.001f || std::fabs(control[3]) > 0.001f)
+                        {
+                            control[2] = static_cast<float>(state.strafeDirection) * tuning.kiteStrafe;
+                            if (!reverseLos)
+                                control[3] = 0.0f;
+                        }
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                }
+            }
+
+            if ((wasRetreating != state.retreating || (applied && !reverseLos)) &&
+                (EnvFlagEnabled("OPENSHIM_TRACE_AI_KITE") ||
+                 EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE")))
+            {
+                const long remaining = InterlockedDecrement(&g_CombatKiteTraceBudget);
+                if (remaining >= 0)
+                {
+                    char odfToken[kProducerBuildMenuTokenLen + 1] = {};
+                    TryGetObjectOdfToken(craft, odfToken);
+                    Log(L"[AIKITE] craft=0x%08X odf=%hs target=0x%08X dist=%.2f retreat=%hs transition=%hs los=%hs reverseLos=%hs lateralLos=%hs strafe=%.2f dir=%d movementClose=%.2f desired=%.2f enter=%.2f exit=%.2f remaining=%ld\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
+                        odfToken[0] ? odfToken : "-",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(target)),
+                        distance,
+                        BoolText(state.retreating),
+                        wasRetreating == state.retreating ? "hold" : (state.retreating ? "enter" : "exit"),
+                        BoolText(currentLos),
+                        BoolText(reverseLos),
+                        BoolText(lateralLos),
+                        static_cast<double>(tuning.kiteStrafe),
+                        state.strafeDirection,
+                        static_cast<double>(movementCloseSq > 0.0f ? std::sqrt(movementCloseSq) : 0.0f),
+                        static_cast<double>(tuning.kiteDesiredRange),
+                        static_cast<double>(tuning.kiteEnterRange),
+                        static_cast<double>(tuning.kiteExitRange),
+                        remaining);
+                }
+            }
+        }
+
+        static void InstallAttackTaskKiteHookIfPossible()
+        {
+            if (g_AttackTaskDoStateHookInstalled)
+                return;
+
+            if (g_AttackTaskDoStateDetour.trampoline && g_BzrFn_AttackTaskDoState)
+            {
+                g_AttackTaskDoStateHookInstalled = true;
+                return;
+            }
+
+            static const uint8_t kExpectedAttackTaskDoStateBytes[kAttackTaskDoStateDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x7C, 0x89, 0x4D, 0xFC
+            };
+
+            if (!ExpectedBytesMatchAt(kGogAttackTaskDoStateEntryAddr,
+                                      kExpectedAttackTaskDoStateBytes,
+                                      sizeof(kExpectedAttackTaskDoStateBytes)))
+            {
+                return;
+            }
+
+            if (!InstallInlineDetour32(g_AttackTaskDoStateDetour,
+                                       kGogAttackTaskDoStateEntryAddr,
+                                       reinterpret_cast<void*>(AttackTaskDoStateTuningHook),
+                                       kAttackTaskDoStateDetourLen,
+                                       kExpectedAttackTaskDoStateBytes,
+                                       sizeof(kExpectedAttackTaskDoStateBytes)))
+            {
+                Log(L"[AIKITE] Failed installing AttackTask::DoState hook at 0x%08X\n",
+                    static_cast<uint32_t>(kGogAttackTaskDoStateEntryAddr));
+                return;
+            }
+
+            g_BzrFn_AttackTaskDoState = reinterpret_cast<FnAttackTaskDoState>(
+                g_AttackTaskDoStateDetour.trampoline);
+            g_BzrFn_TerrainGetIntersection = reinterpret_cast<FnTerrainGetIntersection>(
+                kGogTerrainGetIntersectionAddr);
+            g_AttackTaskDoStateHookInstalled =
+                g_BzrFn_AttackTaskDoState && g_BzrFn_TerrainGetIntersection;
+            if (g_AttackTaskDoStateHookInstalled)
+            {
+                Log(L"[AIKITE] Installed AttackTask::DoState hook entry=0x%08X trampoline=0x%08X terrainLos=0x%08X\n",
+                    static_cast<uint32_t>(kGogAttackTaskDoStateEntryAddr),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_AttackTaskDoStateDetour.trampoline)),
+                    static_cast<uint32_t>(kGogTerrainGetIntersectionAddr));
+            }
+        }
+
         void __cdecl CalcRangeCraftHook(void* craft,
                                         float* closeRange,
                                         float* range,
@@ -9527,13 +10009,25 @@ namespace BZROpenShim
                 return;
 
             const float originalRange = *range;
+
+            const AiUnitTuningOverride* unitTuning = nullptr;
+            if (!g_AiUnitTuningOverridesByObject.empty())
+            {
+                const auto unitIt =
+                    g_AiUnitTuningOverridesByObject.find(reinterpret_cast<uintptr_t>(craft));
+                if (unitIt != g_AiUnitTuningOverridesByObject.end())
+                    unitTuning = &unitIt->second;
+            }
+
             AiTuningConfig tuning = {};
-            if (!TryGetAiTuningForObject(craft, tuning))
+            const bool hasOdfTuning = TryGetAiTuningForObject(craft, tuning);
+            if (!hasOdfTuning && !unitTuning)
                 return;
 
             const bool applyRangeOverride =
-                g_AiOdfGameplayTuningEnabled ||
-                (tuning.bomberAiRole && g_BomberAiRangeEnabled);
+                hasOdfTuning &&
+                (g_AiOdfGameplayTuningEnabled ||
+                 (tuning.bomberAiRole && g_BomberAiRangeEnabled));
             float minRange = 0.0f;
             bool hasMinRange = false;
             if (applyRangeOverride && tuning.hasEngageRangeAI)
@@ -9547,14 +10041,61 @@ namespace BZROpenShim
                 hasMinRange = true;
             }
 
+            // Per-unit overrides win over ODF tuning and ignore the master toggle.
+            if (unitTuning && unitTuning->hasEngageRange)
+            {
+                minRange = (std::max)(minRange, unitTuning->engageRange);
+                hasMinRange = true;
+            }
+
             if (hasMinRange && std::isfinite(*range) && *range < minRange)
                 *range = minRange;
 
-            if (applyRangeOverride &&
+            // Per-unit weaponRangeMin floors *closeRange, the engine's
+            // "too close" threshold (UnitTask::closeSq): inside it units hold
+            // fire, back away in DoStand, and AttackTask flees — a native
+            // standoff/kiting band. Clamped under the final fire range so a
+            // firing window always exists.
+            float finalCloseFloor = 0.0f;
+            if (unitTuning && unitTuning->hasWeaponRangeMin && closeRange)
+            {
+                float closeFloor = unitTuning->weaponRangeMin;
+                if (std::isfinite(*range) && *range > 0.0f)
+                    closeFloor = (std::min)(closeFloor, *range * 0.9f);
+                if (!std::isfinite(*closeRange) || *closeRange < closeFloor)
+                    *closeRange = closeFloor;
+                finalCloseFloor = closeFloor;
+            }
+
+            if ((applyRangeOverride || unitTuning) &&
                 time &&
                 (!std::isfinite(*time) || *time <= 0.0f))
             {
                 *time = 1.0f;
+            }
+
+            if (unitTuning &&
+                ((hasMinRange && originalRange < minRange) || finalCloseFloor > 0.0f) &&
+                (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE") ||
+                 EnvFlagEnabled("OPENSHIM_TRACE_AI_UNIT_TUNING")))
+            {
+                const long remaining = InterlockedDecrement(&g_AiUnitTuningTraceBudget);
+                if (remaining >= 0)
+                {
+                    char odfToken[kProducerBuildMenuTokenLen + 1] = {};
+                    TryGetObjectOdfToken(craft, odfToken);
+                    Log(L"[AIUNIT] tuning craft=0x%08X odf=%hs range=%.2f->%.2f close=%.2f engage=%hs%.2f standoff=%hs%.2f remaining=%ld\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
+                        odfToken[0] ? odfToken : "-",
+                        originalRange,
+                        *range,
+                        closeRange ? *closeRange : -1.0f,
+                        unitTuning->hasEngageRange ? "" : "-",
+                        unitTuning->engageRange,
+                        unitTuning->hasWeaponRangeMin ? "" : "-",
+                        unitTuning->weaponRangeMin,
+                        remaining);
+                }
             }
 
             if (tuning.bomberAiRole &&
@@ -9587,9 +10128,6 @@ namespace BZROpenShim
 
         static void ApplyRetargetPeriodAfterDoSubTask(void* processPtr)
         {
-            if (!g_AiOdfGameplayTuningEnabled)
-                return;
-
             if (!processPtr)
                 return;
 
@@ -9598,11 +10136,34 @@ namespace BZROpenShim
             if (!objectPtr)
                 return;
 
-            AiTuningConfig tuning = {};
-            if (!TryGetAiTuningForObject(objectPtr, tuning) ||
-                !tuning.hasRetargetPeriodAI ||
-                !std::isfinite(tuning.retargetPeriodAI) ||
-                tuning.retargetPeriodAI <= 0.0f)
+            // Per-unit override wins over ODF tuning and ignores the master toggle.
+            float retargetPeriod = 0.0f;
+            bool hasRetargetPeriod = false;
+            if (!g_AiUnitTuningOverridesByObject.empty())
+            {
+                const auto unitIt =
+                    g_AiUnitTuningOverridesByObject.find(reinterpret_cast<uintptr_t>(objectPtr));
+                if (unitIt != g_AiUnitTuningOverridesByObject.end() &&
+                    unitIt->second.hasRetargetPeriod)
+                {
+                    retargetPeriod = unitIt->second.retargetPeriod;
+                    hasRetargetPeriod = true;
+                }
+            }
+
+            if (!hasRetargetPeriod && g_AiOdfGameplayTuningEnabled)
+            {
+                AiTuningConfig tuning = {};
+                if (TryGetAiTuningForObject(objectPtr, tuning) && tuning.hasRetargetPeriodAI)
+                {
+                    retargetPeriod = tuning.retargetPeriodAI;
+                    hasRetargetPeriod = true;
+                }
+            }
+
+            if (!hasRetargetPeriod ||
+                !std::isfinite(retargetPeriod) ||
+                retargetPeriod <= 0.0f)
             {
                 g_RetargetPeriodNextForceMsByProcess.erase(reinterpret_cast<uintptr_t>(processPtr));
                 return;
@@ -9615,7 +10176,7 @@ namespace BZROpenShim
 
             const ULONGLONG nowMs = GetTickCount64();
             const ULONGLONG periodMs = static_cast<ULONGLONG>(
-                (std::max)(tuning.retargetPeriodAI, 0.01f) * 1000.0f);
+                (std::max)(retargetPeriod, 0.01f) * 1000.0f);
             ULONGLONG& nextForceMs =
                 g_RetargetPeriodNextForceMsByProcess[reinterpret_cast<uintptr_t>(processPtr)];
             if (nextForceMs == 0)
@@ -9682,9 +10243,9 @@ namespace BZROpenShim
                 }
 
                 const int actualTeam = GetGameObjectTeamForLog(objectPtr);
-                if (actualTeam == INT_MIN)
+                if (actualTeam < kGameTeamMin || actualTeam > kGameTeamMax)
                 {
-                    TraceAttackRevealEvent("skip", "team_read_failed", sourceTag, processPtr, objectPtr, INT_MIN, INT_MIN);
+                    TraceAttackRevealEvent("skip", "team_out_of_range", sourceTag, processPtr, objectPtr, INT_MIN, actualTeam);
                     return;
                 }
 
@@ -10013,21 +10574,6 @@ namespace BZROpenShim
                 g_BzrFn_BuildingSimulate =
                     reinterpret_cast<FnShieldTowerSimulate>(kGogBuildingSimulateAddr);
 
-            // The advisory-PDB VA for SprayBuilding::Simulate drifted, so validate
-            // the live entry prologue before trusting the re-derived GOG address.
-            static const uint8_t kExpectedSprayBuildingSimulateBytes[] =
-            {
-                0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xE8, 0x02, 0x00, 0x00
-            };
-            if (!ExpectedBytesMatchAt(kGogSprayBuildingSimulateAddr,
-                                      kExpectedSprayBuildingSimulateBytes,
-                                      sizeof(kExpectedSprayBuildingSimulateBytes)))
-            {
-                Log(L"[SPLINTER] SprayBuilding::Simulate entry bytes mismatch at 0x%08X; splinter undead fix disabled\n",
-                    static_cast<uint32_t>(kGogSprayBuildingSimulateAddr));
-                return;
-            }
-
             void* current = nullptr;
             __try
             {
@@ -10069,7 +10615,11 @@ namespace BZROpenShim
 
         static void InstallAiTuningHooksIfPossible()
         {
-            if (g_CalcRangeCraftHookInstalled && g_RetargetPeriodHooksInstalled)
+            InstallAttackTaskKiteHookIfPossible();
+
+            if (g_CalcRangeCraftHookInstalled &&
+                g_RetargetPeriodHooksInstalled &&
+                g_AttackTaskDoStateHookInstalled)
                 return;
 
             if (g_CalcRangeCraftDetour.trampoline && g_BzrFn_CalcRangeCraft)
@@ -10435,8 +10985,12 @@ namespace BZROpenShim
                                       kExpectedAIUnitRemoveBytes,
                                       sizeof(kExpectedAIUnitRemoveBytes)))
             {
-                Log(L"[AICONSTRUCT] AI_UnitRemove entry bytes mismatch at 0x%08X; constructor death cleanup fix disabled\n",
-                    static_cast<uint32_t>(kGogAIUnitRemoveEntryAddr));
+                if (!g_ConstructorRemoteBuildFixMismatchLogged)
+                {
+                    Log(L"[AICONSTRUCT] AI_UnitRemove entry bytes not settled at 0x%08X; deferring constructor death cleanup hook\n",
+                        static_cast<uint32_t>(kGogAIUnitRemoveEntryAddr));
+                    g_ConstructorRemoteBuildFixMismatchLogged = true;
+                }
                 return;
             }
 
@@ -10457,6 +11011,7 @@ namespace BZROpenShim
             g_ConstructorRemoteBuildFixInstalled = (g_BzrFn_AIUnitRemove != nullptr);
             if (g_ConstructorRemoteBuildFixInstalled)
             {
+                g_ConstructorRemoteBuildFixMismatchLogged = false;
                 Log(L"[AICONSTRUCT] Installed AI_UnitRemove cleanup hook entry=0x%08X trampoline=0x%08X trace=%hs\n",
                     static_cast<uint32_t>(kGogAIUnitRemoveEntryAddr),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_AIUnitRemoveDetour.trampoline)),
@@ -15079,6 +15634,358 @@ namespace BZROpenShim
             }
         }
 
+        struct VehicleSkinningProbeResult
+        {
+            bool initialized = false;
+            bool visible = false;
+            bool hasSkeleton = false;
+            bool hardwareAnimation = false;
+            bool animated = false;
+            bool skeletonAnimated = false;
+            uint16_t boneCount = 0;
+            uint16_t boneMatrixCount = 0;
+            int softwareRequests = 0;
+            int softwareNormalRequests = 0;
+            uint32_t subEntityCount = 0;
+            char entityName[96] = {};
+            char materialNames[512] = {};
+        };
+
+        static bool TryGetGameObjectListRange(void*** outBegin, void*** outEnd)
+        {
+            if (!outBegin || !outEnd)
+                return false;
+
+            *outBegin = nullptr;
+            *outEnd = nullptr;
+            auto* objectListBytes = ResolveMainModulePtr<uint8_t>(kGameObjectObjectListRva);
+            if (!objectListBytes)
+                return false;
+
+            __try
+            {
+                auto** begin = *reinterpret_cast<void***>(objectListBytes + 0x0);
+                auto** end = *reinterpret_cast<void***>(objectListBytes + 0x4);
+                auto** capacity = *reinterpret_cast<void***>(objectListBytes + 0x8);
+                if (!begin || !end || !capacity || end < begin || capacity < end)
+                    return false;
+
+                *outBegin = begin;
+                *outEnd = end;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                *outBegin = nullptr;
+                *outEnd = nullptr;
+                return false;
+            }
+        }
+
+        static bool TryCaptureVehicleSkinningProbe(
+            void* entity,
+            FnOgreEntityBoolQuery isInitialised,
+            FnOgreEntityBoolQuery isVisible,
+            FnOgreEntityBoolQuery hasSkeleton,
+            FnOgreEntityBoolQuery isHardwareAnimationEnabled,
+            FnOgreEntityBoolQuery isAnimated,
+            FnOgreEntityBoolQuery isSkeletonAnimated,
+            FnOgreEntityU16Query getNumBoneMatrices,
+            FnOgreEntityGetSkeleton getSkeleton,
+            FnOgreEntityU16Query getNumBones,
+            FnOgreEntityIntQuery getSoftwareRequests,
+            FnOgreEntityIntQuery getSoftwareNormalRequests,
+            FnOgreGetNumSubEntities getNumSubEntities,
+            FnOgreGetSubEntity getSubEntity,
+            FnOgreStringQuery getEntityName,
+            FnOgreStringQuery getMaterialName,
+            VehicleSkinningProbeResult& outProbe)
+        {
+            outProbe = {};
+            if (!entity || !isInitialised || !hasSkeleton ||
+                !isHardwareAnimationEnabled || !getNumBoneMatrices ||
+                !getNumSubEntities || !getSubEntity)
+            {
+                return false;
+            }
+
+            __try
+            {
+                outProbe.initialized = isInitialised(entity);
+                if (!outProbe.initialized)
+                    return true;
+
+                outProbe.visible = isVisible ? isVisible(entity) : false;
+                outProbe.hasSkeleton = hasSkeleton(entity);
+                outProbe.hardwareAnimation = isHardwareAnimationEnabled(entity);
+                outProbe.animated = isAnimated ? isAnimated(entity) : false;
+                outProbe.skeletonAnimated = isSkeletonAnimated ? isSkeletonAnimated(entity) : false;
+                outProbe.boneMatrixCount = getNumBoneMatrices(entity);
+                outProbe.softwareRequests = getSoftwareRequests ? getSoftwareRequests(entity) : 0;
+                outProbe.softwareNormalRequests =
+                    getSoftwareNormalRequests ? getSoftwareNormalRequests(entity) : 0;
+                outProbe.subEntityCount = getNumSubEntities(entity);
+
+                if (getSkeleton && getNumBones && outProbe.hasSkeleton)
+                {
+                    void* const skeleton = getSkeleton(entity);
+                    if (skeleton)
+                    {
+                        const uint16_t count = getNumBones(skeleton);
+                        if (count <= 1024)
+                            outProbe.boneCount = count;
+                    }
+                }
+
+                if (getEntityName)
+                {
+                    const std::string& name = getEntityName(entity);
+                    strncpy_s(outProbe.entityName, name.c_str(), _TRUNCATE);
+                }
+
+                if (getMaterialName)
+                {
+                    const uint32_t materialLimit =
+                        (outProbe.subEntityCount < 16u) ? outProbe.subEntityCount : 16u;
+                    for (uint32_t index = 0; index < materialLimit; ++index)
+                    {
+                        void* const subEntity = getSubEntity(entity, index);
+                        if (!subEntity)
+                            continue;
+
+                        const std::string& materialName = getMaterialName(subEntity);
+                        const size_t used = strlen(outProbe.materialNames);
+                        if (used + 2 >= sizeof(outProbe.materialNames))
+                            break;
+                        _snprintf_s(
+                            outProbe.materialNames + used,
+                            sizeof(outProbe.materialNames) - used,
+                            _TRUNCATE,
+                            "%s%s",
+                            used ? ";" : "",
+                            materialName.c_str());
+                    }
+                }
+
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outProbe = {};
+                return false;
+            }
+        }
+
+        static void RefreshVehicleSkinningDiagnosticsIfNeeded()
+        {
+            if (!g_VehicleSkinningTraceEnabled)
+                return;
+
+            const DWORD now = GetTickCount();
+            if (g_VehicleSkinningTraceLastTick != 0 &&
+                static_cast<DWORD>(now - g_VehicleSkinningTraceLastTick) <
+                    g_VehicleSkinningTraceIntervalMs)
+            {
+                return;
+            }
+            g_VehicleSkinningTraceLastTick = now;
+
+            static FnOgreEntityBoolQuery isInitialised =
+                ResolveOgreProc<FnOgreEntityBoolQuery>("?isInitialised@Entity@Ogre@@QBE_NXZ");
+            static FnOgreEntityBoolQuery isVisible =
+                ResolveOgreProc<FnOgreEntityBoolQuery>("?isVisible@MovableObject@Ogre@@UBE_NXZ");
+            static FnOgreEntityBoolQuery hasSkeleton =
+                ResolveOgreProc<FnOgreEntityBoolQuery>("?hasSkeleton@Entity@Ogre@@QBE_NXZ");
+            static FnOgreEntityBoolQuery isHardwareAnimationEnabled =
+                ResolveOgreProc<FnOgreEntityBoolQuery>("?isHardwareAnimationEnabled@Entity@Ogre@@QAE_NXZ");
+            static FnOgreEntityBoolQuery isAnimated =
+                ResolveOgreProc<FnOgreEntityBoolQuery>("?_isAnimated@Entity@Ogre@@QBE_NXZ");
+            static FnOgreEntityBoolQuery isSkeletonAnimated =
+                ResolveOgreProc<FnOgreEntityBoolQuery>("?_isSkeletonAnimated@Entity@Ogre@@QBE_NXZ");
+            static FnOgreEntityU16Query getNumBoneMatrices =
+                ResolveOgreProc<FnOgreEntityU16Query>("?_getNumBoneMatrices@Entity@Ogre@@QBEGXZ");
+            static FnOgreEntityGetSkeleton getSkeleton =
+                ResolveOgreProc<FnOgreEntityGetSkeleton>("?getSkeleton@Entity@Ogre@@QBEPAVSkeletonInstance@2@XZ");
+            static FnOgreEntityU16Query getNumBones =
+                ResolveOgreProc<FnOgreEntityU16Query>("?getNumBones@Skeleton@Ogre@@UBEGXZ");
+            static FnOgreEntityIntQuery getSoftwareRequests =
+                ResolveOgreProc<FnOgreEntityIntQuery>("?getSoftwareAnimationRequests@Entity@Ogre@@QBEHXZ");
+            static FnOgreEntityIntQuery getSoftwareNormalRequests =
+                ResolveOgreProc<FnOgreEntityIntQuery>("?getSoftwareAnimationNormalsRequests@Entity@Ogre@@QBEHXZ");
+            static FnOgreGetNumSubEntities getNumSubEntities =
+                ResolveOgreProc<FnOgreGetNumSubEntities>("?getNumSubEntities@Entity@Ogre@@QBEIXZ");
+            static FnOgreGetSubEntity getSubEntity =
+                ResolveOgreProc<FnOgreGetSubEntity>("?getSubEntity@Entity@Ogre@@QBEPAVSubEntity@2@I@Z");
+            static FnOgreStringQuery getEntityName =
+                ResolveOgreProc<FnOgreStringQuery>("?getName@MovableObject@Ogre@@UBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
+            static FnOgreStringQuery getMaterialName =
+                ResolveOgreProc<FnOgreStringQuery>("?getMaterialName@SubEntity@Ogre@@QBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
+
+            if (!isInitialised || !hasSkeleton || !isHardwareAnimationEnabled ||
+                !getNumBoneMatrices || !getNumSubEntities || !getSubEntity)
+            {
+                static volatile long s_MissingProcLogBudget = 1;
+                if (InterlockedDecrement(&s_MissingProcLogBudget) >= 0)
+                {
+                    Log(L"[SKINNING] required Ogre exports missing init=%u skeleton=%u hardware=%u bones=%u subentities=%u getsub=%u\n",
+                        isInitialised ? 1u : 0u,
+                        hasSkeleton ? 1u : 0u,
+                        isHardwareAnimationEnabled ? 1u : 0u,
+                        getNumBoneMatrices ? 1u : 0u,
+                        getNumSubEntities ? 1u : 0u,
+                        getSubEntity ? 1u : 0u);
+                }
+                return;
+            }
+
+            void** begin = nullptr;
+            void** end = nullptr;
+            if (!TryGetGameObjectListRange(&begin, &end))
+                return;
+
+            const size_t totalObjects = static_cast<size_t>(end - begin);
+            const size_t objectLimit =
+                (totalObjects < kChunkObjectIdentityMaxObjectsPerRefresh)
+                    ? totalObjects
+                    : kChunkObjectIdentityMaxObjectsPerRefresh;
+            std::unordered_set<uintptr_t> seenEntities;
+            seenEntities.reserve(objectLimit);
+
+            uint32_t initializedEntities = 0;
+            uint32_t skinnedEntities = 0;
+            uint32_t visibleSkinnedEntities = 0;
+            uint32_t hardwareEntities = 0;
+            uint32_t cpuFallbackEntities = 0;
+            uint32_t softwareRequestedEntities = 0;
+            uint32_t animatedEntities = 0;
+            uint32_t totalBones = 0;
+            uint32_t totalBoneMatrices = 0;
+            uint32_t totalSubEntities = 0;
+
+            for (size_t index = 0; index < objectLimit; ++index)
+            {
+                void* obj76 = nullptr;
+                if (!TryGetGameObjectObj76(begin[index], obj76) || !obj76)
+                    continue;
+
+                const ChunkBridgeSnapshot snapshot =
+                    CaptureChunkBridgeSnapshot(reinterpret_cast<const uint8_t*>(obj76));
+                void* const candidates[] = {
+                    snapshot.directOgreEntity,
+                    (snapshot.ownerOgreEntity != snapshot.directOgreEntity)
+                        ? snapshot.ownerOgreEntity
+                        : nullptr,
+                };
+
+                for (void* entity : candidates)
+                {
+                    if (!entity || !seenEntities.insert(reinterpret_cast<uintptr_t>(entity)).second)
+                        continue;
+
+                    VehicleSkinningProbeResult probe = {};
+                    if (!TryCaptureVehicleSkinningProbe(
+                            entity,
+                            isInitialised,
+                            isVisible,
+                            hasSkeleton,
+                            isHardwareAnimationEnabled,
+                            isAnimated,
+                            isSkeletonAnimated,
+                            getNumBoneMatrices,
+                            getSkeleton,
+                            getNumBones,
+                            getSoftwareRequests,
+                            getSoftwareNormalRequests,
+                            getNumSubEntities,
+                            getSubEntity,
+                            getEntityName,
+                            getMaterialName,
+                            probe))
+                    {
+                        continue;
+                    }
+
+                    if (probe.initialized)
+                        ++initializedEntities;
+                    if (!probe.initialized || !probe.hasSkeleton)
+                        continue;
+
+                    ++skinnedEntities;
+                    if (probe.visible)
+                        ++visibleSkinnedEntities;
+                    if (probe.hardwareAnimation)
+                        ++hardwareEntities;
+                    else
+                        ++cpuFallbackEntities;
+                    if (probe.softwareRequests > 0 || probe.softwareNormalRequests > 0)
+                        ++softwareRequestedEntities;
+                    if (probe.animated)
+                        ++animatedEntities;
+                    totalBones += probe.boneCount;
+                    totalBoneMatrices += probe.boneMatrixCount;
+                    totalSubEntities += probe.subEntityCount;
+
+                    char meshName[48] = {};
+                    if (snapshot.ownerResolvedMeshName[0])
+                    {
+                        strncpy_s(meshName, snapshot.ownerResolvedMeshName, _TRUNCATE);
+                    }
+                    else
+                    {
+                        TryGetGameObjectMeshName(begin[index], meshName, sizeof(meshName));
+                    }
+                    const char* const identity = meshName[0]
+                        ? meshName
+                        : (probe.entityName[0] ? probe.entityName : "<unknown>");
+                    const char* const mode =
+                        (probe.softwareRequests > 0 || probe.softwareNormalRequests > 0)
+                            ? (probe.hardwareAnimation ? "gpu+software-request" : "cpu-requested")
+                            : (probe.hardwareAnimation ? "gpu" : "cpu-fallback");
+
+                    std::string fingerprint(identity);
+                    fingerprint += '|';
+                    fingerprint += mode;
+                    fingerprint += '|';
+                    fingerprint += probe.materialNames;
+                    if (g_VehicleSkinningTraceBudget > 0 &&
+                        g_VehicleSkinningTraceFingerprints.insert(fingerprint).second &&
+                        InterlockedDecrement(&g_VehicleSkinningTraceBudget) >= 0)
+                    {
+                        Log(L"[SKINNING] mesh=%hs entityName=%hs entity=0x%08X mode=%hs visible=%u animated=%u skeletonAnimated=%u bones=%u boneMatrices=%u softwareRequests=%d softwareNormalRequests=%d subentities=%u materials=%hs\n",
+                            identity,
+                            probe.entityName[0] ? probe.entityName : "<none>",
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entity)),
+                            mode,
+                            probe.visible ? 1u : 0u,
+                            probe.animated ? 1u : 0u,
+                            probe.skeletonAnimated ? 1u : 0u,
+                            static_cast<unsigned>(probe.boneCount),
+                            static_cast<unsigned>(probe.boneMatrixCount),
+                            probe.softwareRequests,
+                            probe.softwareNormalRequests,
+                            probe.subEntityCount,
+                            probe.materialNames[0] ? probe.materialNames : "<none>");
+                    }
+                }
+            }
+
+            Log(L"[SKINNING] summary objects=%u scanned=%u uniqueEntities=%u initialized=%u skinned=%u visible=%u animated=%u gpu=%u cpuFallback=%u softwareRequested=%u bones=%u boneMatrices=%u subentities=%u detailBudget=%ld\n",
+                static_cast<unsigned>(totalObjects),
+                static_cast<unsigned>(objectLimit),
+                static_cast<unsigned>(seenEntities.size()),
+                initializedEntities,
+                skinnedEntities,
+                visibleSkinnedEntities,
+                animatedEntities,
+                hardwareEntities,
+                cpuFallbackEntities,
+                softwareRequestedEntities,
+                totalBones,
+                totalBoneMatrices,
+                totalSubEntities,
+                static_cast<long>(g_VehicleSkinningTraceBudget));
+        }
+
         static bool TryGetObjectWorldPositionFromObj76(void* obj76, float (&outPosition)[3])
         {
             outPosition[0] = 0.0f;
@@ -16321,7 +17228,21 @@ namespace BZROpenShim
         g_LastUnknownProducerVft = 0;
         g_CalcRangeCraftHookInstalled = false;
         g_BzrFn_CalcRangeCraft = nullptr;
+        g_BzrFn_AttackTaskDoState = g_AttackTaskDoStateDetour.trampoline
+            ? reinterpret_cast<FnAttackTaskDoState>(g_AttackTaskDoStateDetour.trampoline)
+            : nullptr;
+        g_BzrFn_TerrainGetIntersection = g_BzrFn_AttackTaskDoState
+            ? reinterpret_cast<FnTerrainGetIntersection>(kGogTerrainGetIntersectionAddr)
+            : nullptr;
+        g_AttackTaskDoStateHookInstalled =
+            g_BzrFn_AttackTaskDoState && g_BzrFn_TerrainGetIntersection;
+        g_BzrFn_ArtilleryDoAttackOriginal = g_ArtilleryDoAttackDetour.trampoline
+            ? reinterpret_cast<FnArtilleryDoAttack>(g_ArtilleryDoAttackDetour.trampoline)
+            : nullptr;
+        g_ArtilleryDoAttackHookInstalled =
+            (g_BzrFn_ArtilleryDoAttackOriginal != nullptr);
         g_RetargetPeriodHooksInstalled = false;
+        g_ConstructorRemoteBuildFixMismatchLogged = false;
         g_BzrFn_OffensiveProcessDoSubTask = nullptr;
         g_BzrFn_GunTowerProcessDoSubTask = nullptr;
         g_BzrFn_AIUnitRemove = nullptr;
@@ -16373,6 +17294,15 @@ namespace BZROpenShim
         g_TurretAimPitchMultiplier = 0.5f;
         g_TurretAimPitchMultiplierEnhanced = 0.95f;
         g_RetargetPeriodNextForceMsByProcess.clear();
+        g_AiUnitTuningOverridesByObject.clear();
+        g_CombatKiteStateByObject.clear();
+        g_AiUnitTuningTraceBudget = 64;
+        g_CombatKiteTraceBudget = 256;
+        g_VehicleSkinningTraceEnabled = false;
+        g_VehicleSkinningTraceIntervalMs = kVehicleSkinningTraceIntervalMsDefault;
+        g_VehicleSkinningTraceLastTick = 0;
+        g_VehicleSkinningTraceBudget = kVehicleSkinningTraceBudgetDefault;
+        g_VehicleSkinningTraceFingerprints.clear();
 
         g_BzrPtr_945478 = reinterpret_cast<void**>(0x00945478);
         g_BzrPtr_94548C = reinterpret_cast<void**>(0x0094548C);
@@ -16476,6 +17406,10 @@ namespace BZROpenShim
         InstallShieldTowerTeamFilterHookIfPossible();
         InstallMineTeamFilterHooksIfPossible();
         InstallSplinterUndeadFixIfPossible();
+        // The full ArtilleryProcess::DoAttack replay remains disabled. Even
+        // with the Redux four-word ABI preserved, replaying this large stateful
+        // routine can corrupt later simulator state. Keep the independent
+        // carrier-bias hooks, but do not install this experimental detour.
 
         if (g_IsSteamExe)
         {
@@ -16491,6 +17425,32 @@ namespace BZROpenShim
         g_EnableChunkMeshProxy =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_MESH_PROXY") ||
               EnvFlagEnabled("BZR_DISABLE_CHUNK_MESH_PROXY"));
+        g_VehicleSkinningTraceEnabled =
+            !(EnvFlagEnabled("OPENSHIM_DISABLE_VEHICLE_SKINNING_DIAGNOSTICS") ||
+              EnvFlagEnabled("OPENSHIM_DISABLE_SKINNING_DIAGNOSTICS") ||
+              EnvFlagEnabled("OPENSHIM_DISABLE_VEHICLE_SKINNING_TRACE") ||
+              EnvFlagEnabled("BZR_DISABLE_VEHICLE_SKINNING_DIAGNOSTICS"));
+        long vehicleSkinningTraceInterval =
+            static_cast<long>(kVehicleSkinningTraceIntervalMsDefault);
+        if (TryGetEnvLong("OPENSHIM_TRACE_VEHICLE_SKINNING_INTERVAL_MS", vehicleSkinningTraceInterval) ||
+            TryGetEnvLong("OPENSHIM_TRACE_SKINNING_INTERVAL_MS", vehicleSkinningTraceInterval))
+        {
+            if (vehicleSkinningTraceInterval < static_cast<long>(kVehicleSkinningTraceIntervalMsMin))
+                vehicleSkinningTraceInterval = kVehicleSkinningTraceIntervalMsMin;
+            if (vehicleSkinningTraceInterval > static_cast<long>(kVehicleSkinningTraceIntervalMsMax))
+                vehicleSkinningTraceInterval = kVehicleSkinningTraceIntervalMsMax;
+        }
+        g_VehicleSkinningTraceIntervalMs = static_cast<DWORD>(vehicleSkinningTraceInterval);
+        long vehicleSkinningTraceBudget = kVehicleSkinningTraceBudgetDefault;
+        if (TryGetEnvLong("OPENSHIM_TRACE_VEHICLE_SKINNING_BUDGET", vehicleSkinningTraceBudget) ||
+            TryGetEnvLong("OPENSHIM_TRACE_SKINNING_BUDGET", vehicleSkinningTraceBudget))
+        {
+            if (vehicleSkinningTraceBudget < 0)
+                vehicleSkinningTraceBudget = 0;
+            if (vehicleSkinningTraceBudget > 4096)
+                vehicleSkinningTraceBudget = 4096;
+        }
+        g_VehicleSkinningTraceBudget = vehicleSkinningTraceBudget;
         long chunkLogBudget = 4000;
         const bool chunkLogBudgetSpecified =
             TryGetEnvLong("BZR_CHUNK_LOG_BUDGET", chunkLogBudget) ||
@@ -16667,6 +17627,10 @@ namespace BZROpenShim
             GetChunkPayloadStockResourceDirectory().string().c_str(),
             kChunkPayloadModRelativeDirName,
             kChunkPayloadModRelativeDirNameAlt);
+        Log(L"[SKINNING] Vehicle diagnostics: %hs interval=%lums detailBudget=%ld optOut=OPENSHIM_DISABLE_VEHICLE_SKINNING_DIAGNOSTICS\n",
+            g_VehicleSkinningTraceEnabled ? "enabled" : "disabled",
+            static_cast<unsigned long>(g_VehicleSkinningTraceIntervalMs),
+            static_cast<long>(g_VehicleSkinningTraceBudget));
         LogChunkDiagnostic("chunkeffect", L"[CHUNKEFFECT] Runtime manager trace: %hs vtableSlot=0x%08X orig=0x%08X\n",
             g_TraceChunkEffectRuntime ? "enabled" : "disabled",
             static_cast<uint32_t>(kChunkEffectVtableSimulateSlotAddr),
@@ -16729,6 +17693,7 @@ namespace BZROpenShim
         InstallShieldTowerTeamFilterHookIfPossible();
         InstallMineTeamFilterHooksIfPossible();
         InstallSplinterUndeadFixIfPossible();
+        // Intentionally do not install the experimental full DoAttack replay.
         InstallAiTuningHooksIfPossible();
         InstallConstructorRemoteBuildFixIfPossible();
         EnsureInputBindingPopulateHookScaffold();
@@ -16737,6 +17702,15 @@ namespace BZROpenShim
     bool AreInputBindingUiHooksInstalled()
     {
         return g_InputBindingUiPopulateHookInstalled && g_InputBindingUiKeyReleasedHookInstalled;
+    }
+
+    bool AreRequiredDeferredRuntimeHooksInstalled()
+    {
+        const bool splinterReady =
+            !g_SplinterUndeadFixEnabled || g_SprayBuildingSimulateHookInstalled;
+        const bool constructorReady =
+            !g_ConstructorRemoteBuildFixEnabled || g_ConstructorRemoteBuildFixInstalled;
+        return splinterReady && constructorReady;
     }
 
     void InitBzrHookStrings()
@@ -16777,8 +17751,14 @@ namespace BZROpenShim
 
     bool SetHowitzerVolleyEnabledFromBridge(bool enabled)
     {
-        g_HowitzerVolleyEnabled = enabled;
-        Log(L"[MISSIONHOOK] howitzer volley override %hs\n", enabled ? "enabled" : "disabled");
+        g_HowitzerVolleyEnabled = false;
+        if (enabled)
+        {
+            Log(L"[MISSIONHOOK] howitzer volley override requested but unavailable; unsafe ArtilleryProcess::DoAttack replay remains disabled\n");
+            return false;
+        }
+
+        Log(L"[MISSIONHOOK] howitzer volley override disabled\n");
         return true;
     }
 
@@ -16794,6 +17774,96 @@ namespace BZROpenShim
         RetryDeferredRuntimeHooks();
         g_AiOdfGameplayTuningEnabled = enabled;
         Log(L"[MISSIONHOOK] AI ODF gameplay tuning %hs\n", enabled ? "enabled" : "disabled");
+        return true;
+    }
+
+    bool SetAiUnitTuningFromBridge(void* objectPtr,
+                                   float engageRange,
+                                   float weaponRangeMin,
+                                   float retargetPeriod,
+                                   float kiteDesiredRange,
+                                   float kiteEnterRange,
+                                   float kiteExitRange,
+                                   bool kitePreserveLos,
+                                   float kiteStrafe,
+                                   float kiteSwitchPeriod)
+    {
+        if (!objectPtr)
+            return false;
+
+        // The range/retarget detours are usually installed by mission setup, but a
+        // per-unit call can arrive first; retry once if neither hook is live yet.
+        if (!g_CalcRangeCraftHookInstalled ||
+            !g_RetargetPeriodHooksInstalled ||
+            !g_AttackTaskDoStateHookInstalled)
+            RetryDeferredRuntimeHooks();
+
+        AiUnitTuningOverride entry = {};
+        if (std::isfinite(engageRange) && engageRange > 0.0f)
+        {
+            entry.hasEngageRange = true;
+            entry.engageRange = engageRange;
+        }
+        if (std::isfinite(weaponRangeMin) && weaponRangeMin > 0.0f)
+        {
+            entry.hasWeaponRangeMin = true;
+            entry.weaponRangeMin = weaponRangeMin;
+        }
+        if (std::isfinite(retargetPeriod) && retargetPeriod > 0.0f)
+        {
+            entry.hasRetargetPeriod = true;
+            entry.retargetPeriod = retargetPeriod;
+        }
+        if (std::isfinite(kiteDesiredRange) && kiteDesiredRange > 0.0f &&
+            std::isfinite(kiteEnterRange) && kiteEnterRange > 0.0f &&
+            std::isfinite(kiteExitRange) && kiteExitRange > kiteEnterRange &&
+            kiteDesiredRange > kiteEnterRange && kiteDesiredRange < kiteExitRange)
+        {
+            entry.hasKiteRanges = true;
+            entry.kiteDesiredRange = kiteDesiredRange;
+            entry.kiteEnterRange = kiteEnterRange;
+            entry.kiteExitRange = kiteExitRange;
+            entry.kitePreserveLos = kitePreserveLos;
+            if (std::isfinite(kiteStrafe) && kiteStrafe > 0.0f)
+                entry.kiteStrafe = (std::min)(kiteStrafe, 1.0f);
+            if (std::isfinite(kiteSwitchPeriod) && kiteSwitchPeriod > 0.0f)
+                entry.kiteSwitchPeriod = kiteSwitchPeriod;
+        }
+
+        const uintptr_t key = reinterpret_cast<uintptr_t>(objectPtr);
+        if (!entry.hasEngageRange && !entry.hasWeaponRangeMin &&
+            !entry.hasRetargetPeriod && !entry.hasKiteRanges)
+        {
+            g_AiUnitTuningOverridesByObject.erase(key);
+            g_CombatKiteStateByObject.erase(key);
+            return true;
+        }
+
+        g_AiUnitTuningOverridesByObject[key] = entry;
+        if (!entry.hasKiteRanges)
+            g_CombatKiteStateByObject.erase(key);
+        return true;
+    }
+
+    bool ClearAiUnitTuningFromBridge(void* objectPtr)
+    {
+        if (!objectPtr)
+            return false;
+        const uintptr_t key = reinterpret_cast<uintptr_t>(objectPtr);
+        g_AiUnitTuningOverridesByObject.erase(key);
+        g_CombatKiteStateByObject.erase(key);
+        return true;
+    }
+
+    bool ClearAllAiUnitTuningFromBridge()
+    {
+        if (!g_AiUnitTuningOverridesByObject.empty())
+        {
+            Log(L"[AIUNIT] cleared %u per-unit tuning overrides\n",
+                static_cast<uint32_t>(g_AiUnitTuningOverridesByObject.size()));
+        }
+        g_AiUnitTuningOverridesByObject.clear();
+        g_CombatKiteStateByObject.clear();
         return true;
     }
 
@@ -16826,6 +17896,10 @@ namespace BZROpenShim
         g_AttackRevealEnabled = kAttackRevealEnabledDefault;
         g_AttackRevealTraceBudget = kAttackRevealTraceBudgetDefault;
         g_TurretAimPitchMultiplier = 0.5f;
+        g_AiUnitTuningOverridesByObject.clear();
+        g_CombatKiteStateByObject.clear();
+        g_AiUnitTuningTraceBudget = 64;
+        g_CombatKiteTraceBudget = 256;
         Log(L"[MISSIONHOOK] restored mission hook overrides to defaults\n");
         return true;
     }
@@ -17308,21 +18382,6 @@ namespace BZROpenShim
             return count;
         }
 
-        using FnArtilleryHowitzerVolleyOriginal =
-            uint32_t(__thiscall*)(void*, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
-
-        uint32_t CallOriginalArtilleryHowitzerVolley(
-            void* process,
-            uint32_t arg1,
-            uint32_t arg2,
-            uint32_t arg3,
-            uint32_t arg4,
-            uint32_t arg5)
-        {
-            auto fn = reinterpret_cast<FnArtilleryHowitzerVolleyOriginal>(
-                Trampoline_ArtilleryHowitzerVolleyOriginal);
-            return fn(process, arg1, arg2, arg3, arg4, arg5);
-        }
     }
 
     void __cdecl ApplyWeaponMaskCarrierBiasForCraft(void* craft)
@@ -17427,99 +18486,168 @@ namespace BZROpenShim
         }
     }
 
-    uint32_t __cdecl ArtilleryHowitzerVolleyHook(
-        void* process,
-        uint32_t arg1,
-        uint32_t arg2,
-        uint32_t arg3,
-        uint32_t arg4,
-        uint32_t arg5)
+    static bool TryPrepareArtilleryVolley(void* process,
+                                          void** outCraft,
+                                          CarrierView** outCarrier,
+                                          CarrierSnapshot* outSnapshot,
+                                          int* outIndices,
+                                          int* outCount)
     {
-        if (!g_BZRFnPtr_ArtilleryHowitzerVolleyContinue)
-            return 0;
-        if (!g_HowitzerVolleyEnabled)
-            return CallOriginalArtilleryHowitzerVolley(process, arg1, arg2, arg3, arg4, arg5);
-
-        uint32_t lastResult = 0;
-        bool startedVolley = false;
-        CarrierView* carrier = nullptr;
-        CarrierSnapshot snapshot = {};
-        bool hasSnapshot = false;
+        if (!process || !outCraft || !outCarrier || !outSnapshot || !outIndices || !outCount)
+            return false;
 
         __try
         {
-            if (!process)
-            {
-                return CallOriginalArtilleryHowitzerVolley(process, arg1, arg2, arg3, arg4, arg5);
-            }
-
             auto* processBytes = reinterpret_cast<uint8_t*>(process);
             void* craft = *reinterpret_cast<void**>(processBytes + kUnitProcessMeOffset);
             if (!IsHowitzerCraft(craft))
-            {
-                return CallOriginalArtilleryHowitzerVolley(process, arg1, arg2, arg3, arg4, arg5);
-            }
+                return false;
 
             auto* craftBytes = reinterpret_cast<uint8_t*>(craft);
-            carrier = *reinterpret_cast<CarrierView**>(craftBytes + kGameObjectCarrierOffset);
+            auto* carrier = *reinterpret_cast<CarrierView**>(craftBytes + kGameObjectCarrierOffset);
             if (!carrier)
-            {
-                return CallOriginalArtilleryHowitzerVolley(process, arg1, arg2, arg3, arg4, arg5);
-            }
+                return false;
 
-            int volleyIndices[5] = {};
-            const int volleyCount = CollectCarrierVolleyIndices(carrier, volleyIndices, 5);
+            const int volleyCount = CollectCarrierVolleyIndices(carrier, outIndices, 5);
             if (volleyCount <= 1)
+                return false;
+
+            SnapshotCarrierState(carrier, outSnapshot);
+            *outCraft = craft;
+            *outCarrier = carrier;
+            *outCount = volleyCount;
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    uint32_t __fastcall ArtilleryDoAttackHook(void* process,
+                                              void* /*edx*/,
+                                              uint32_t arg0,
+                                              uint32_t arg1,
+                                              uint32_t arg2,
+                                              uint32_t arg3)
+    {
+        if (!g_BzrFn_ArtilleryDoAttackOriginal)
+            return 0;
+
+        if (!g_HowitzerVolleyEnabled)
+        {
+            return g_BzrFn_ArtilleryDoAttackOriginal(
+                process, arg0, arg1, arg2, arg3);
+        }
+
+        void* craft = nullptr;
+        CarrierView* carrier = nullptr;
+        CarrierSnapshot snapshot = {};
+        int volleyIndices[5] = {};
+        int volleyCount = 0;
+        if (!TryPrepareArtilleryVolley(process,
+                                       &craft,
+                                       &carrier,
+                                       &snapshot,
+                                       volleyIndices,
+                                       &volleyCount))
+        {
+            return g_BzrFn_ArtilleryDoAttackOriginal(
+                process, arg0, arg1, arg2, arg3);
+        }
+
+        if (ShouldTraceArtilleryMask())
+        {
+            const long remaining = InterlockedDecrement(&g_ArtilleryMaskTraceBudget);
+            if (remaining >= 0)
             {
-                return CallOriginalArtilleryHowitzerVolley(process, arg1, arg2, arg3, arg4, arg5);
+                auto* craftBytes = reinterpret_cast<const uint8_t*>(craft);
+                const uint32_t rawMask =
+                    *reinterpret_cast<const uint32_t*>(craftBytes + kGameObjectWeaponMaskOffset);
+                Log(L"[ARTYVOLLEY] process=0x%08X craft=0x%08X weapons=%d raw=0x%08X decoded=0x%08X\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(process)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
+                    volleyCount,
+                    rawMask,
+                    rawMask ^ 0x33333333u);
             }
+        }
 
-            SnapshotCarrierState(carrier, &snapshot);
-            hasSnapshot = true;
-
-            if (ShouldTraceArtilleryMask())
-            {
-                const long remaining = InterlockedDecrement(&g_ArtilleryMaskTraceBudget);
-                if (remaining >= 0)
-                {
-                    Log(L"[ARTYVOLLEY] process=0x%08X craft=0x%08X weapons=%d raw=0x%08X decoded=0x%08X\n",
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(process)),
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
-                        volleyCount,
-                        *reinterpret_cast<const uint32_t*>(craftBytes + kGameObjectWeaponMaskOffset),
-                        *reinterpret_cast<const uint32_t*>(craftBytes + kGameObjectWeaponMaskOffset) ^ 0x33333333u);
-                }
-            }
-
+        // The stock routine selects the first non-null Carrier weapon, computes
+        // aim/lead for that specific weapon, then invokes its virtual fire method.
+        // Replay the complete routine with each mounted weapon temporarily in
+        // slot zero so every shot receives the stock per-weapon calculations.
+        uint32_t result = 0;
+        __try
+        {
             for (int i = 0; i < volleyCount; ++i)
             {
                 RestoreCarrierState(carrier, snapshot);
                 MoveCarrierWeaponIndexToFront(carrier, volleyIndices[i]);
-                lastResult = CallOriginalArtilleryHowitzerVolley(process, arg1, arg2, arg3, arg4, arg5);
-                startedVolley = true;
+                result = g_BzrFn_ArtilleryDoAttackOriginal(
+                    process, arg0, arg1, arg2, arg3);
             }
-
-            RestoreCarrierState(carrier, snapshot);
-            return startedVolley ?
-                lastResult :
-                CallOriginalArtilleryHowitzerVolley(process, arg1, arg2, arg3, arg4, arg5);
         }
-        __except (EXCEPTION_EXECUTE_HANDLER)
+        __finally
         {
-            if (hasSnapshot && carrier)
-            {
-                __try
-                {
-                    RestoreCarrierState(carrier, snapshot);
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                }
-            }
+            RestoreCarrierState(carrier, snapshot);
+        }
 
-            return startedVolley ?
-                lastResult :
-                CallOriginalArtilleryHowitzerVolley(process, arg1, arg2, arg3, arg4, arg5);
+        return result;
+    }
+
+    static void InstallArtilleryDoAttackHookIfPossible()
+    {
+        if (g_ArtilleryDoAttackHookInstalled)
+            return;
+
+        if (g_ArtilleryDoAttackDetour.trampoline)
+        {
+            g_BzrFn_ArtilleryDoAttackOriginal =
+                reinterpret_cast<FnArtilleryDoAttack>(g_ArtilleryDoAttackDetour.trampoline);
+            g_ArtilleryDoAttackHookInstalled =
+                (g_BzrFn_ArtilleryDoAttackOriginal != nullptr);
+            return;
+        }
+
+        // Settled Redux 2.2.301 ArtilleryProcess::DoAttack prologue. This full
+        // signature is unique in the captured GOG runtime and the settled Steam
+        // image uses the same address/bytes.
+        static const uint8_t kExpectedArtilleryDoAttackBytes[kArtilleryDoAttackDetourLen] =
+        {
+            0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0xB0, 0x56, 0x84, 0x00
+        };
+
+        if (!ExpectedBytesMatchAt(kGogArtilleryDoAttackEntryAddr,
+                                  kExpectedArtilleryDoAttackBytes,
+                                  sizeof(kExpectedArtilleryDoAttackBytes)))
+        {
+            Log(L"[ARTYVOLLEY] ArtilleryProcess::DoAttack bytes mismatch at 0x%08X; hook disabled\n",
+                static_cast<uint32_t>(kGogArtilleryDoAttackEntryAddr));
+            return;
+        }
+
+        if (!InstallInlineDetour32(g_ArtilleryDoAttackDetour,
+                                   kGogArtilleryDoAttackEntryAddr,
+                                   reinterpret_cast<void*>(ArtilleryDoAttackHook),
+                                   kArtilleryDoAttackDetourLen,
+                                   kExpectedArtilleryDoAttackBytes,
+                                   sizeof(kExpectedArtilleryDoAttackBytes)))
+        {
+            Log(L"[ARTYVOLLEY] Failed installing ArtilleryProcess::DoAttack hook at 0x%08X\n",
+                static_cast<uint32_t>(kGogArtilleryDoAttackEntryAddr));
+            return;
+        }
+
+        g_BzrFn_ArtilleryDoAttackOriginal =
+            reinterpret_cast<FnArtilleryDoAttack>(g_ArtilleryDoAttackDetour.trampoline);
+        g_ArtilleryDoAttackHookInstalled =
+            (g_BzrFn_ArtilleryDoAttackOriginal != nullptr);
+        if (g_ArtilleryDoAttackHookInstalled)
+        {
+            Log(L"[ARTYVOLLEY] Installed ArtilleryProcess::DoAttack hook entry=0x%08X trampoline=0x%08X\n",
+                static_cast<uint32_t>(kGogArtilleryDoAttackEntryAddr),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_ArtilleryDoAttackDetour.trampoline)));
         }
     }
 
@@ -18640,6 +19768,10 @@ namespace BZROpenShim
     {
         if (g_BzrFn_LegacyWorldUpdateRenderQueue && thisPtr)
             g_BzrFn_LegacyWorldUpdateRenderQueue(thisPtr, renderQueue);
+
+        // Sample after the stock world queue update, when Ogre has evaluated
+        // the entity materials and its hardware-animation decision is current.
+        RefreshVehicleSkinningDiagnosticsIfNeeded();
 
         static volatile long s_FiredLogBudget = 4;
         if (InterlockedDecrement(&s_FiredLogBudget) >= 0)

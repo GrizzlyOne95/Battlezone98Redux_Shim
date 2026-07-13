@@ -1,0 +1,27 @@
+
+CSliderCtrl * __fastcall FUN_0049f8e0(CSliderCtrl *param_1)
+
+{
+  uint uVar1;
+  void *local_10;
+  undefined1 *puStack_c;
+  undefined4 local_8;
+  
+  local_8 = 0xffffffff;
+  puStack_c = &LAB_008493d8;
+  local_10 = ExceptionList;
+  uVar1 = DAT_008e7000 ^ (uint)&stack0xfffffffc;
+  ExceptionList = &local_10;
+  FUN_004b6260();
+  local_8 = 0;
+  *(undefined ***)param_1 = ControlPanel::vftable;
+  FUN_0049f1a0();
+  CSliderCtrl::SetRange(param_1,0,0,uVar1);
+  CSliderCtrl::SetRange(param_1,2,0,uVar1);
+  CSliderCtrl::SetRange(param_1,1,0,uVar1);
+  CSliderCtrl::SetRange(param_1,7,0,uVar1);
+  CSliderCtrl::SetRange(param_1,3,0,uVar1);
+  ExceptionList = local_10;
+  return param_1;
+}
+

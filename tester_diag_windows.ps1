@@ -478,8 +478,8 @@ function Stop-Diagnostics {
     Set-Content -Path $statusFile -Value ""
 
     if ($gamePathResolved -and (Test-Path $gamePathResolved)) {
-        Collect-File -Source (Join-Path $gamePathResolved "openshim.log") -DestinationDir $sessionDir -StatusFile $statusFile
-        Collect-File -Source (Join-Path $gamePathResolved "BZLogger.txt") -DestinationDir $sessionDir -StatusFile $statusFile
+        Collect-File -Source (Join-Path $gamePathResolved "logs\openshim.log") -DestinationDir $sessionDir -StatusFile $statusFile
+        Collect-File -Source (Join-Path $gamePathResolved "logs\BZLogger.txt") -DestinationDir $sessionDir -StatusFile $statusFile
         Collect-File -Source (Join-Path $gamePathResolved "bz_buffer_log.bin") -DestinationDir $sessionDir -StatusFile $statusFile
         Collect-File -Source (Join-Path $gamePathResolved "bz_buffer_log.meta.txt") -DestinationDir $sessionDir -StatusFile $statusFile
         Collect-File -Source (Join-Path $gamePathResolved "net.ini") -DestinationDir $sessionDir -StatusFile $statusFile

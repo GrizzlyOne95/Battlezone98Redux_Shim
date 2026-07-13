@@ -1,0 +1,17 @@
+/*
+ * Entry: 005479f2
+ * Name: Addr::`scalar_deleting_destructor'
+ * Namespace: Addr
+ * Signature: void * `scalar_deleting_destructor'(Addr * this, uint param_1)
+ * Symbol source: IMPORTED
+ * Export status: ok
+ */
+
+void * __thiscall Addr::_scalar_deleting_destructor_(Addr *this,uint param_1)
+
+{
+  if ((param_1 & 1) != 0) {
+    operator_delete(this);
+  }
+  return this;
+}

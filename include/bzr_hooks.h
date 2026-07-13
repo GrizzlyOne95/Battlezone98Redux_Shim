@@ -9,6 +9,7 @@ namespace BZROpenShim
     void ResolveBzrHooks(bool isSteam);
     void RetryDeferredRuntimeHooks();
     bool AreInputBindingUiHooksInstalled();
+    bool AreRequiredDeferredRuntimeHooksInstalled();
     void InitBzrHookStrings();
     void SetProducerBuildMenuOriginal(void* target);
     void FlushChunkFragmentEventsForShutdown();
@@ -44,6 +45,18 @@ namespace BZROpenShim
     bool SetHowitzerVolleyEnabledFromBridge(bool enabled);
     bool SetWeaponMaskCarrierBiasEnabledFromBridge(bool enabled);
     bool SetAiOdfGameplayTuningEnabledFromBridge(bool enabled);
+    bool SetAiUnitTuningFromBridge(void* objectPtr,
+                                   float engageRange,
+                                   float weaponRangeMin,
+                                   float retargetPeriod,
+                                   float kiteDesiredRange = -1.0f,
+                                   float kiteEnterRange = -1.0f,
+                                   float kiteExitRange = -1.0f,
+                                   bool kitePreserveLos = false,
+                                   float kiteStrafe = -1.0f,
+                                   float kiteSwitchPeriod = -1.0f);
+    bool ClearAiUnitTuningFromBridge(void* objectPtr);
+    bool ClearAllAiUnitTuningFromBridge();
     bool SetTurretAimPitchEnabledFromBridge(bool enabled);
     bool SetAttackRevealEnabledFromBridge(bool enabled);
     bool ResetMissionHookOverridesFromBridge();
@@ -71,14 +84,6 @@ namespace BZROpenShim
     void __cdecl MapFilters2Filter(void* listPtr, BzrString* filter);
     void __cdecl ApplyWeaponMaskCarrierBiasForCraft(void* craft);
     void __cdecl TraceArtilleryMaskFromProcess(void* process);
-    uint32_t __cdecl ArtilleryHowitzerVolleyHook(
-        void* process,
-        uint32_t arg1,
-        uint32_t arg2,
-        uint32_t arg3,
-        uint32_t arg4,
-        uint32_t arg5);
-
     // Shared state for trampolines.
     extern void* g_VehicleListContext;
     extern void* g_VehicleListParam;

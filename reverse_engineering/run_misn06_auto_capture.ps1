@@ -108,8 +108,8 @@ public static class OpenShimWindowCaptureNative
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $gameExe = Join-Path $GameRoot "battlezone98redux.exe"
-$gameLog = Join-Path $GameRoot "openshim.log"
-$bzLogger = Join-Path $GameRoot "BZLogger.txt"
+$gameLog = Join-Path $GameRoot "logs\openshim.log"
+$bzLogger = Join-Path $GameRoot "logs\BZLogger.txt"
 $dumpRoot = "C:\BZDumpsGOG"
 $snapshotRoot = Join-Path $PSScriptRoot "snapshots"
 $stamp = Get-Date -Format "yyyyMMdd_HHmmss"

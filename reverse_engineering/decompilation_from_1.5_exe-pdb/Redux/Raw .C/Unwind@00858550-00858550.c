@@ -1,0 +1,10 @@
+
+void Unwind_00858550(void)
+
+{
+  int unaff_EBP;
+  
+  CCachedDataPathProperty::~CCachedDataPathProperty((CCachedDataPathProperty *)(unaff_EBP + -0x48));
+  return;
+}
+

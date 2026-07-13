@@ -1,0 +1,21 @@
+/*
+ * Entry: 00557fad
+ * Name: stdext::unchecked_copy<Session_*_*,Session_*_*>
+ * Namespace: stdext
+ * Signature: Session * * unchecked_copy<Session_*_*,Session_*_*>(Session * * param_1, Session * * param_2, Session * * param_3)
+ * Symbol source: IMPORTED
+ * Export status: ok
+ */
+
+Session ** __cdecl
+stdext::unchecked_copy<Session_*_*,Session_*_*>
+          (Session **param_1,Session **param_2,Session **param_3)
+
+{
+  Session **ppSVar1;
+  
+  ppSVar1 = std::_Copy_opt<Session_*_*,Session_*_*,std::random_access_iterator_tag>
+                      (param_1,param_2,param_3,SUB41(param_2,0),
+                       (_Scalar_ptr_iterator_tag)SUB41(param_2,0),(_Range_checked_iterator_tag)0x0);
+  return ppSVar1;
+}

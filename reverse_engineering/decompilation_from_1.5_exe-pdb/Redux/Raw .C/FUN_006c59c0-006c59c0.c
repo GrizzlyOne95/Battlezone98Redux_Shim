@@ -1,0 +1,132 @@
+
+void FUN_006c59c0(void)
+
+{
+  char cVar1;
+  undefined4 uVar2;
+  basic_ostream<char,struct_std::char_traits<char>_> *this;
+  undefined1 *puVar3;
+  code *pcVar4;
+  undefined4 uVar5;
+  undefined1 auStack_1d0 [160];
+  undefined1 local_130 [24];
+  undefined1 local_118 [16];
+  undefined4 local_108;
+  undefined4 local_104;
+  undefined4 local_100;
+  undefined4 local_fc;
+  undefined4 local_f8;
+  undefined4 local_f4;
+  undefined4 local_f0;
+  undefined4 local_ec;
+  undefined4 local_e8;
+  undefined4 local_e4;
+  undefined4 local_e0;
+  undefined1 *local_dc;
+  undefined1 local_d4 [24];
+  undefined1 local_bc [48];
+  undefined1 local_8c [24];
+  undefined1 local_74 [24];
+  undefined1 local_5c [24];
+  undefined1 local_44 [24];
+  undefined1 local_2c [24];
+  uint local_14;
+  void *local_10;
+  undefined1 *puStack_c;
+  int local_8;
+  
+  local_8 = 0xffffffff;
+  puStack_c = &LAB_008521bd;
+  local_10 = ExceptionList;
+  local_14 = DAT_008e7000 ^ (uint)&stack0xfffffffc;
+  ExceptionList = &local_10;
+  cVar1 = FUN_006ab7d0(local_14);
+  if (cVar1 != '\0') {
+    FUN_00574400(3,1);
+    local_8 = 0;
+    FUN_006cc0e0();
+    local_8._0_1_ = 1;
+    basic_string<>(&DAT_0087d178);
+    local_8._0_1_ = 2;
+    uVar2 = basic_string<>("DoP2PConnect");
+    local_8._0_1_ = 3;
+    local_fc = uVar2;
+    local_ec = uVar2;
+    FUN_006cc100(local_44);
+    FUN_006dc070(uVar2);
+    local_8._0_1_ = 2;
+    ~basic_string<>();
+    local_8._0_1_ = 1;
+    ~basic_string<>();
+    basic_string<>("content");
+    local_8._0_1_ = 4;
+    uVar2 = FUN_006cc0e0();
+    local_8._0_1_ = 5;
+    local_f4 = uVar2;
+    local_e8 = uVar2;
+    FUN_006cc100(local_2c);
+    uVar2 = FUN_006dc0c0(uVar2);
+    local_e0 = FUN_006db8f0(uVar2);
+    local_8._0_1_ = 4;
+    FUN_006c3d30();
+    local_8._0_1_ = 1;
+    ~basic_string<>();
+    basic_string<>("player");
+    local_8._0_1_ = 6;
+    uVar2 = FUN_0073a9f0(local_d4);
+    local_8._0_1_ = 7;
+    local_f8 = uVar2;
+    local_f0 = uVar2;
+    FUN_006cc100(local_74);
+    FUN_006dc070(uVar2);
+    local_8._0_1_ = 6;
+    ~basic_string<>();
+    local_8._0_1_ = 1;
+    ~basic_string<>();
+    basic_string<>("reset");
+    local_8._0_1_ = 8;
+    puVar3 = &stack0x00000008;
+    FUN_006cc100(local_5c);
+    FUN_006dc140(puVar3);
+    local_8._0_1_ = 1;
+    ~basic_string<>();
+    if (&stack0x00000000 == (undefined1 *)0x1e0) {
+      local_dc = (undefined1 *)0x0;
+    }
+    else {
+      local_dc = auStack_1d0;
+    }
+    FUN_007d7970(local_dc,local_118,0,2);
+    if (2 < DAT_008eda28) {
+      local_108 = GetPolicy(local_bc);
+      local_8._0_1_ = 9;
+      pcVar4 = FUN_004bc8c0;
+      local_100 = local_108;
+      FUN_0081e820("WebSocket Message Sent:\n",local_108);
+      uVar2 = FUN_0081e660();
+      uVar2 = FUN_004bc590(uVar2);
+      this = (basic_ostream<char,struct_std::char_traits<char>_> *)FUN_00574730(uVar2);
+      std::basic_ostream<char,struct_std::char_traits<char>_>::operator<<(this,pcVar4);
+      local_8._0_1_ = 1;
+      ~basic_string<>();
+    }
+    uVar2 = GetPolicy(local_8c);
+    local_8._0_1_ = 10;
+    uVar5 = 1;
+    puVar3 = local_130;
+    local_104 = uVar2;
+    local_e4 = uVar2;
+    FUN_00421ec0(puVar3,uVar2,1);
+    FUN_006da6b0(puVar3,uVar2,uVar5);
+    local_8._0_1_ = 1;
+    ~basic_string<>();
+    local_8 = (uint)local_8._1_3_ << 8;
+    FUN_006c3d30();
+    local_8 = 0xffffffff;
+    FUN_00417f10();
+  }
+  ExceptionList = local_10;
+  FUN_0083e885();
+  return;
+}
+
