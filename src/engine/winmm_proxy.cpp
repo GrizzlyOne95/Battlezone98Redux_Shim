@@ -65,6 +65,72 @@ extern "C" WINMMAPI BOOL WINAPI OpenShimSetAiOdfGameplayTuningEnabled(BOOL enabl
     return BZROpenShim::SetAiOdfGameplayTuningEnabledFromBridge(enabled != FALSE) ? TRUE : FALSE;
 }
 
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetAiUnitTuning(void* objectPtr,
+                                                        float engageRange,
+                                                        float weaponRangeMin,
+                                                        float retargetPeriod)
+{
+    return BZROpenShim::SetAiUnitTuningFromBridge(objectPtr, engageRange, weaponRangeMin, retargetPeriod)
+               ? TRUE
+               : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetAiUnitTuningV2(void* objectPtr,
+                                                          float engageRange,
+                                                          float weaponRangeMin,
+                                                          float retargetPeriod,
+                                                          float kiteDesiredRange,
+                                                          float kiteEnterRange,
+                                                          float kiteExitRange,
+                                                          BOOL kitePreserveLos)
+{
+    return BZROpenShim::SetAiUnitTuningFromBridge(objectPtr,
+                                                  engageRange,
+                                                  weaponRangeMin,
+                                                  retargetPeriod,
+                                                  kiteDesiredRange,
+                                                  kiteEnterRange,
+                                                  kiteExitRange,
+                                                  kitePreserveLos != FALSE)
+               ? TRUE
+               : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetAiUnitTuningV3(void* objectPtr,
+                                                          float engageRange,
+                                                          float weaponRangeMin,
+                                                          float retargetPeriod,
+                                                          float kiteDesiredRange,
+                                                          float kiteEnterRange,
+                                                          float kiteExitRange,
+                                                          BOOL kitePreserveLos,
+                                                          float kiteStrafe,
+                                                          float kiteSwitchPeriod)
+{
+    return BZROpenShim::SetAiUnitTuningFromBridge(objectPtr,
+                                                  engageRange,
+                                                  weaponRangeMin,
+                                                  retargetPeriod,
+                                                  kiteDesiredRange,
+                                                  kiteEnterRange,
+                                                  kiteExitRange,
+                                                  kitePreserveLos != FALSE,
+                                                  kiteStrafe,
+                                                  kiteSwitchPeriod)
+               ? TRUE
+               : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimClearAiUnitTuning(void* objectPtr)
+{
+    return BZROpenShim::ClearAiUnitTuningFromBridge(objectPtr) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimClearAllAiUnitTuning()
+{
+    return BZROpenShim::ClearAllAiUnitTuningFromBridge() ? TRUE : FALSE;
+}
+
 extern "C" WINMMAPI BOOL WINAPI OpenShimSetTurretAimPitchEnabled(BOOL enabled)
 {
     return BZROpenShim::SetTurretAimPitchEnabledFromBridge(enabled != FALSE) ? TRUE : FALSE;

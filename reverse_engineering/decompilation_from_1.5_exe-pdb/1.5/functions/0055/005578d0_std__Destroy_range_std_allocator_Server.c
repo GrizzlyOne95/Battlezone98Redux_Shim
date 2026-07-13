@@ -1,0 +1,16 @@
+/*
+ * Entry: 005578d0
+ * Name: std::_Destroy_range<std::allocator<Server_*>_>
+ * Namespace: std
+ * Signature: void _Destroy_range<std::allocator<Server_*>_>(Server * * param_1, Server * * param_2, allocator<Server_*> * param_3)
+ * Symbol source: IMPORTED
+ * Export status: ok
+ */
+
+void __cdecl
+std::_Destroy_range<std::allocator<Server_*>_>
+          (Server **param_1,Server **param_2,allocator<Server_*> *param_3)
+
+{
+  return;
+}

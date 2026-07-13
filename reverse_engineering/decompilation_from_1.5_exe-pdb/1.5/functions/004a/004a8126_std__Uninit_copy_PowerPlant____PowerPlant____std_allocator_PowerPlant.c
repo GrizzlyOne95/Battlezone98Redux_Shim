@@ -1,0 +1,24 @@
+/*
+ * Entry: 004a8126
+ * Name: std::_Uninit_copy<PowerPlant_*_*,PowerPlant_*_*,std::allocator<PowerPlant_*>_>
+ * Namespace: std
+ * Signature: PowerPlant * * _Uninit_copy<PowerPlant_*_*,PowerPlant_*_*,std::allocator<PowerPlant_*>_>(PowerPlant * * param_1, PowerPlant * * param_2, PowerPlant * * param_3, allocator<PowerPlant_*> * param_4, _Scalar_ptr_iterator_tag param_5, _Range_checked_iterator_tag param_6)
+ * Symbol source: IMPORTED
+ * Export status: ok
+ */
+
+PowerPlant ** __cdecl
+std::_Uninit_copy<PowerPlant_*_*,PowerPlant_*_*,std::allocator<PowerPlant_*>_>
+          (PowerPlant **param_1,PowerPlant **param_2,PowerPlant **param_3,
+          allocator<PowerPlant_*> *param_4,_Scalar_ptr_iterator_tag param_5,
+          _Range_checked_iterator_tag param_6)
+
+{
+  int iVar1;
+  
+  iVar1 = (int)param_2 - (int)param_1 >> 2;
+  if (iVar1 != 0) {
+    memmove_s(param_3,iVar1 * 4,param_1,iVar1 * 4);
+  }
+  return param_3 + iVar1;
+}

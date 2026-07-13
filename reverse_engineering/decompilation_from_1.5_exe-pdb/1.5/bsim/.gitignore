@@ -1,0 +1,5 @@
+# Heavy / derived BSim artifacts -- regenerate with run_all.ps1
+project/            # Ghidra project database (large, binary)
+staging/            # copied bzone.exe + bzint.pdb
+*.log
+out/bsim_matches.csv   # large raw match dump; keep the merged map + discoveries instead

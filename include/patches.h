@@ -52,8 +52,6 @@ namespace BZROpenShim
         void __cdecl Trampoline_OffensiveAttackRevealHook();
         void __cdecl Trampoline_TurretTankAttackRevealHook();
         void __cdecl Trampoline_EngineFlameHoverCraftEmit();
-        void __cdecl Trampoline_ArtilleryHowitzerVolley();
-        void __cdecl Trampoline_ArtilleryHowitzerVolleyOriginal();
         void __cdecl Trampoline_DecodedWeaponMaskBias();
         void __cdecl Trampoline_RawWeaponMaskBias();
     }
@@ -97,7 +95,6 @@ namespace BZROpenShim
     inline void* g_RetAddr_OffensiveAttackRevealHook = nullptr;
     inline void* g_RetAddr_TurretTankAttackRevealHook = nullptr;
     inline void (*g_BZRFnPtr_JoinerEventOriginal)() = nullptr;
-    inline void* g_BZRFnPtr_ArtilleryHowitzerVolleyContinue = nullptr;
     inline void** g_MapListObject = nullptr;
 
     // Helper functions (implemented in trampolines.cpp or bzr_hooks.cpp)
@@ -124,7 +121,6 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::REL32, {}, "Target Reticle Popup Recent-Hit Getter Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "HoverCraft Engine Flame Emit Hook 1/2", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "HoverCraft Engine Flame Emit Hook 2/2", false, {} },
-            { 0, HookEngine::PatchType::JMP5, {}, "Artillery Howitzer Volley Hook", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Decoded Weapon Mask Carrier Bias Hook", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Raw Weapon Mask Carrier Bias Hook", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Engine Flame Control VTable Hook", false, {} },

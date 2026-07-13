@@ -6,6 +6,7 @@
 
 #include "file_io_hooks.h"
 #include "patcher.h"
+#include "shim_log.h"
 
 #include <Windows.h>
 
@@ -45,6 +46,86 @@ namespace BZROpenShim
         static std::mutex g_TrnWriteMutex;
         static std::unordered_map<uintptr_t, TrnWriteRecord> g_TrnWriteHandles;
         static thread_local bool g_InTrnNormalization = false;
+        static std::wstring ToLowerWide(std::wstring value);
+
+        static char g_BzLoggerPath[] = "logs\\BZLogger.txt";
+        static char g_BzOgreLogPath[] = "logs\\BZOgreLogfile.log";
+        static char g_Crc32HostLogPath[] = "logs\\crc32host.log";
+        static char g_Crc32MissionLogPath[] = "logs\\crc32mission.log";
+
+        static bool PatchPushStringOperand(uintptr_t instructionAddress,
+                                           uintptr_t expectedStringAddress,
+                                           const char* replacement)
+        {
+            if (!replacement)
+                return false;
+
+            __try
+            {
+                auto* instruction = reinterpret_cast<uint8_t*>(instructionAddress);
+                auto* operand = reinterpret_cast<uint32_t*>(instruction + 1);
+                if (*instruction != 0x68 || *operand != expectedStringAddress)
+                    return false;
+
+                DWORD oldProtect = 0;
+                if (!VirtualProtect(operand, sizeof(*operand), PAGE_EXECUTE_READWRITE, &oldProtect))
+                    return false;
+                *operand = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(replacement));
+                FlushInstructionCache(GetCurrentProcess(), operand, sizeof(*operand));
+                DWORD ignored = 0;
+                VirtualProtect(operand, sizeof(*operand), oldProtect, &ignored);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static bool ShouldRouteGameLog(const std::filesystem::path& path)
+        {
+            if (path.empty() || path.has_parent_path())
+                return false;
+
+            const std::wstring fileName = ToLowerWide(path.filename().wstring());
+            const std::wstring extension = ToLowerWide(path.extension().wstring());
+            return extension == L".log" || fileName == L"bzlogger.txt";
+        }
+
+        static std::string RouteGameLogPath(LPCSTR fileName)
+        {
+            if (!fileName || !*fileName || !ShouldRouteGameLog(std::filesystem::path(fileName)))
+                return fileName ? fileName : "";
+            return GetGameLogPath(fileName);
+        }
+
+        static std::wstring RouteGameLogPath(LPCWSTR fileName)
+        {
+            if (!fileName || !*fileName || !ShouldRouteGameLog(std::filesystem::path(fileName)))
+                return fileName ? fileName : L"";
+
+            const std::wstring leaf = std::filesystem::path(fileName).filename().wstring();
+            const int byteCount = WideCharToMultiByte(
+                CP_UTF8, 0, leaf.c_str(), -1, nullptr, 0, nullptr, nullptr);
+            if (byteCount <= 1)
+                return fileName;
+
+            std::string utf8(static_cast<size_t>(byteCount), '\0');
+            WideCharToMultiByte(
+                CP_UTF8, 0, leaf.c_str(), -1, utf8.data(), byteCount, nullptr, nullptr);
+            utf8.pop_back();
+            const std::string routed = GetGameLogPath(utf8.c_str());
+
+            const int wideCount = MultiByteToWideChar(
+                CP_UTF8, 0, routed.c_str(), -1, nullptr, 0);
+            if (wideCount <= 1)
+                return fileName;
+
+            std::wstring wide(static_cast<size_t>(wideCount), L'\0');
+            MultiByteToWideChar(CP_UTF8, 0, routed.c_str(), -1, wide.data(), wideCount);
+            wide.pop_back();
+            return wide;
+        }
 
         class ScopedNormalizationGuard
         {
@@ -471,8 +552,9 @@ namespace BZROpenShim
             if (!g_RealCreateFileW)
                 return INVALID_HANDLE_VALUE;
 
+            const std::wstring routedPath = RouteGameLogPath(fileName);
             const HANDLE handle = g_RealCreateFileW(
-                fileName,
+                routedPath.c_str(),
                 desiredAccess,
                 shareMode,
                 securityAttributes,
@@ -498,8 +580,9 @@ namespace BZROpenShim
             if (!g_RealCreateFileA)
                 return INVALID_HANDLE_VALUE;
 
+            const std::string routedPath = RouteGameLogPath(fileName);
             const HANDLE handle = g_RealCreateFileA(
-                fileName,
+                routedPath.c_str(),
                 desiredAccess,
                 shareMode,
                 securityAttributes,
@@ -578,6 +661,34 @@ namespace BZROpenShim
                 module);
             return patched;
         }
+    }
+
+    void ApplyEarlyGameLogHooks()
+    {
+        HMODULE mainModule = GetModuleHandleW(nullptr);
+        if (!mainModule)
+            return;
+
+        PatchIATByFuncName(
+            mainModule,
+            "CreateFileW",
+            reinterpret_cast<void*>(Hooked_CreateFileW),
+            reinterpret_cast<void**>(&g_RealCreateFileW));
+        PatchIATByFuncName(
+            mainModule,
+            "CreateFileA",
+            reinterpret_cast<void*>(Hooked_CreateFileA),
+            reinterpret_cast<void**>(&g_RealCreateFileA));
+
+        // These logger paths are passed as immediate string pointers inside
+        // the executable and bypass the Win32 imports above through the
+        // statically linked runtime. Redirect the operands before the entry
+        // point runs. GOG and Steam currently share these settled bytes.
+        PatchPushStringOperand(0x00663FF6u, 0x00892050u, g_BzOgreLogPath);
+        PatchPushStringOperand(0x0081E864u, 0x008A1EE0u, g_BzLoggerPath);
+        PatchPushStringOperand(0x00743E55u, 0x0089A794u, g_Crc32HostLogPath);
+        PatchPushStringOperand(0x0079631Fu, 0x0089A794u, g_Crc32HostLogPath);
+        PatchPushStringOperand(0x00743109u, 0x0089A760u, g_Crc32MissionLogPath);
     }
 
     void ApplyTrnSaveNormalizeHooks()

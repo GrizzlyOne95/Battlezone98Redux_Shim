@@ -10,6 +10,7 @@
 #include "patcher.h"
 #include "hook_engine.h"
 #include "shim_log.h"
+#include "file_io_hooks.h"
 #include "BZROpenShim.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -99,6 +100,10 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
             BZROpenShim::LogShimA(BZROpenShim::LogLevel::Error, "dllmain", "LoadRealWinmm failed; aborting attach");
             return FALSE;
         }
+
+        // The game creates BZLogger/Ogre logs immediately after process
+        // attach, before the normal patch thread can reliably run.
+        BZROpenShim::ApplyEarlyGameLogHooks();
 
         OutputDebugStringA("BZR-OpenShim: DLL_PROCESS_ATTACH\n");
 

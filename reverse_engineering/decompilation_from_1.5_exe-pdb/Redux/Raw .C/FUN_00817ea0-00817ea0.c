@@ -1,0 +1,10 @@
+
+bool __fastcall FUN_00817ea0(undefined4 *param_1)
+
+{
+  char cVar1;
+  
+  cVar1 = FUN_00818040(*param_1,param_1[1],param_1[2],param_1[3],&DAT_0260c0e5);
+  return cVar1 == '\0';
+}
+

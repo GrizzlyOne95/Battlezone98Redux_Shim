@@ -228,6 +228,28 @@ Expected log tags:
 - `[CHUNKMESH] payload audit hit ...` records the VDF/GEO candidates that
   resolved to a payload mesh during live chunk tracking.
 
+### Vehicle Skinning Diagnostic
+
+OpenShim inspects live Ogre entities reached through Redux's intact-object
+bridge and reports whether their materials permit hardware skeletal animation
+or force Ogre's CPU fallback. The diagnostic is enabled by default.
+
+- Set `OPENSHIM_DISABLE_VEHICLE_SKINNING_DIAGNOSTICS=1` before launch to opt
+  out. `OPENSHIM_DISABLE_SKINNING_DIAGNOSTICS=1` is accepted as a shorter
+  alias.
+- `OPENSHIM_TRACE_VEHICLE_SKINNING_INTERVAL_MS=<n>` controls the summary
+  interval (default `5000`, clamped to `100`-`60000`).
+- `OPENSHIM_TRACE_VEHICLE_SKINNING_BUDGET=<n>` limits distinct per-mesh detail
+  lines (default `64`). Summary lines continue after this budget is exhausted.
+
+`[SKINNING] mesh=...` lines include the effective mode (`gpu`,
+`cpu-fallback`, `gpu+software-request`, or `cpu-requested`), Ogre visibility,
+animation state, bone and matrix counts, explicit software-animation request
+counts, subentity count, and material names. `[SKINNING] summary ...` lines
+aggregate the active object list. Sampling runs after the stock world
+render-queue update so Ogre's material-dependent decision is current, and the
+diagnostic does not alter entity or animation state.
+
 ## Howitzer / Minelayer Weapon Mask Fix
 
 There is now a Shim-side behavior patch for the hardcoded howitzer and

@@ -49,7 +49,7 @@ if ($StartupSettleSeconds -lt 0) {
     $StartupSettleSeconds = if ($processName -ieq "battlezone98redux.exe") { 20 } else { 0 }
 }
 
-$shimLog = Join-Path $GameRoot "winmm_shim.log"
+$shimLog = Join-Path $GameRoot "logs\winmm_shim.log"
 $probeScript = Join-Path $PSScriptRoot "probe_chunk_effect_runtime.py"
 $snapshotRoot = Join-Path $PSScriptRoot "snapshots"
 $stdoutLog = Join-Path $env:TEMP "run_misn03_chunk_probe.stdout.log"

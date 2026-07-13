@@ -1,0 +1,10 @@
+
+void __fastcall FUN_0066ad70(undefined4 *param_1)
+
+{
+  *param_1 = Ogre::
+             STLAllocator<struct_std::pair<struct_std::pair<int,class_std::basic_string<char,struct_std::char_traits<char>,class_std::allocator<char>_>_>_const_,class_std::map<struct_StringHash,struct_Ogre::FileInfo,struct_std::less<struct_StringHash>,class_Ogre::STLAllocator<struct_std::pair<struct_StringHash_const_,struct_Ogre::FileInfo>,class_Ogre::CategorisedAllocPolicy<0>_>_>_>,class_Ogre::CategorisedAllocPolicy<0>_>
+             ::vftable;
+  return;
+}
+

@@ -37,13 +37,6 @@
       "offset": 13,
       "expected_size": 4,
       "fallback": "0x004EAFDF"
-    },
-    {
-      "name": "Artillery Howitzer Volley Hook",
-      "pattern": "55 8B EC 83 EC 0C 56 89 4D F8 8B 4D F8 ?? ?? ?? ?? 00 83 E8 01",
-      "offset": 0,
-      "expected_size": 6,
-      "fallback": "0x0042F840"
     }
   ],
   "globals": [
@@ -203,16 +196,6 @@
       "name": "Under Attack Alert Hook 2/2",
       "fallback": "0x0050E6DD",
       "expected_original": "0F 2F 05 D0 73"
-    },
-    {
-      "name": "Offensive Attack Reveal Hook",
-      "fallback": "0x005839E0",
-      "expected_original": "8B 4D F8 8B 55 F8 8B 42 1C 89 41 24"
-    },
-    {
-      "name": "TurretTank Attack Reveal Hook",
-      "fallback": "0x005F73F3",
-      "expected_original": "8B 55 F8 8B 45 F8 8B 48 1C 89 4A 24"
     },
     {
       "name": "Map Filters 1/8",

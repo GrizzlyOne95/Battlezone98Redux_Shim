@@ -2,6 +2,7 @@
 
 #include <cstdarg>
 #include <cstdint>
+#include <string>
 
 namespace BZROpenShim
 {
@@ -15,6 +16,10 @@ namespace BZROpenShim
 
     void InitializeShimLogger();
     void ShutdownShimLogger();
+
+    // Returns <game executable directory>\logs\<fileName>, creating the
+    // directory when possible and falling back to the game root on failure.
+    std::string GetGameLogPath(const char* fileName);
 
     void LogShimA(LogLevel level, const char* component, const char* fmt, ...);
     void LogShimW(LogLevel level, const char* component, const wchar_t* fmt, ...);

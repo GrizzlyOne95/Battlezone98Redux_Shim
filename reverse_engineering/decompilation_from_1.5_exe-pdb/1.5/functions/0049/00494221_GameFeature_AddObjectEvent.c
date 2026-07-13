@@ -1,0 +1,38 @@
+/*
+ * Entry: 00494221
+ * Name: GameFeature::AddObjectEvent
+ * Namespace: GameFeature
+ * Signature: void AddObjectEvent(GameObject * param_1)
+ * Symbol source: IMPORTED
+ * Export status: ok
+ */
+
+void __cdecl GameFeature::AddObjectEvent(GameObject *param_1)
+
+{
+  vector<GameFeature_*,std::allocator<GameFeature_*>_> *pvVar1;
+  bool bVar2;
+  GameFeature **ppGVar3;
+  _Vector_const_iterator<GameFeature_*,std::allocator<GameFeature_*>_> local_14;
+  _Vector_const_iterator<GameFeature_*,std::allocator<GameFeature_*>_> local_c;
+  
+  pvVar1 = features;
+  std::_Vector_const_iterator<GameFeature_*,std::allocator<GameFeature_*>_>::
+  _Vector_const_iterator<GameFeature_*,std::allocator<GameFeature_*>_>
+            (&local_14,features->_Myfirst,(_Container_base_aux *)features);
+  local_c._padding_ = local_14._padding_;
+  local_c._Myptr = local_14._Myptr;
+  while( true ) {
+    std::_Vector_const_iterator<GameFeature_*,std::allocator<GameFeature_*>_>::
+    _Vector_const_iterator<GameFeature_*,std::allocator<GameFeature_*>_>
+              (&local_14,pvVar1->_Mylast,(_Container_base_aux *)pvVar1);
+    bVar2 = std::_Vector_const_iterator<GameFeature_*,std::allocator<GameFeature_*>_>::operator==
+                      (&local_c,&local_14);
+    if (bVar2) break;
+    ppGVar3 = std::_Vector_const_iterator<GameFeature_*,std::allocator<GameFeature_*>_>::operator*
+                        (&local_c);
+    (**(code **)((*ppGVar3)->_padding_ + 0x30))(param_1);
+    std::_Vector_const_iterator<GameFeature_*,std::allocator<GameFeature_*>_>::operator++(&local_c);
+  }
+  return;
+}

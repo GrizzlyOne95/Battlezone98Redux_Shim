@@ -10,6 +10,50 @@ correct native patch layer and likely hook sites.
 
 Best patch home: Shim.
 
+#### 2026-07-12 artillery volley hook correction
+
+The experimental volley hook added later at `0x0042F840` was invalid and has
+been replaced. Crash dumps `12908`, `13852`, and `29888` showed the configured
+signature selecting `0x0042C9C0`; the old trampoline then shifted all five
+stack arguments by one. Both `0x0042C9C0` and `0x0042F840` are red-black-tree
+insertion helpers, not artillery firing routines. The supplied Redux decompile
+confirms their behavior, and the old signature matches many copies of the same
+STL helper.
+
+The corrected hook detours `ArtilleryProcess::DoAttack` at settled Redux
+address `0x0042AF10`. This routine has the actual artillery semantics:
+
+- obtains the controlled craft through `UnitProcess::me`
+- scans carrier slots `0..4` for the first non-null weapon
+- computes lead, terrain clearance, and aim for that weapon
+- invokes the selected weapon's virtual fire method
+
+The detour uses a validated 10-byte entry gateway. The legacy 1.5 PDB describes
+the source method as `void __thiscall ArtilleryProcess::DoAttack()`, but Redux's
+machine ABI is different: the routine consumes four stack words, uses the first
+as a hidden/result destination, and returns with `ret 0x10`. The hook must
+preserve all four words on every gateway call. For an enabled howitzer volley,
+it restores a carrier snapshot, moves each mounted weapon to slot zero, and
+replays the complete stock routine so each weapon receives its own stock aim
+and lead calculation. The carrier state is restored in `__finally`.
+
+Crash dump `battlezone98redux.exe.22488.dmp` exposed the zero-argument gateway
+regression: the stock routine received unrelated shim stack values, treated
+`0x0000000A` as a node pointer, and faulted writing to `0x0000000E` at
+`0x0042F085`. The corrected hook mirrors the Redux four-word ABI end to end.
+
+A subsequent Steam mission soak with the corrected ABI produced dump `27000`
+after 3:26 in an unrelated stock call path. Because Campaign Reimagined had
+enabled the multi-call volley replay, delayed simulator-state corruption could
+not be excluded. The full `ArtilleryProcess::DoAttack` detour is therefore not
+installed and bridge requests to enable it are rejected. The narrower decoded
+and raw weapon-mask carrier-bias hooks remain separate from this experiment.
+
+The full settled entry signature
+`55 8B EC 6A FF 68 B0 56 84 00 64 A1 00 00 00 00` was unique in the captured
+GOG process. Runtime validation confirmed that OpenShim patches `0x0042AF10`
+and leaves the former false-positive `0x0042C9C0` untouched.
+
 An experimental GOG-side behavior patch is now checked in.
 
 The legacy exact-match corpus now proves the root cause semantically:

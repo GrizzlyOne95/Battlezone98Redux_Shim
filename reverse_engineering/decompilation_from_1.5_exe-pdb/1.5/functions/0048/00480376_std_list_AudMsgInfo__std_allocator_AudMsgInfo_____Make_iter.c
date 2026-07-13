@@ -1,0 +1,24 @@
+/*
+ * Entry: 00480376
+ * Name: std::list<AudMsgInfo_*,std::allocator<AudMsgInfo_*>_>::_Make_iter
+ * Namespace: std::list<AudMsgInfo_*,std::allocator<AudMsgInfo_*>_>
+ * Signature: _Iterator<1> _Make_iter(list<AudMsgInfo_*,std::allocator<AudMsgInfo_*>_> * this, _Const_iterator<1> param_1)
+ * Symbol source: IMPORTED
+ * Export status: ok
+ */
+
+_Iterator<1> __thiscall
+std::list<AudMsgInfo_*,std::allocator<AudMsgInfo_*>_>::_Make_iter
+          (list<AudMsgInfo_*,std::allocator<AudMsgInfo_*>_> *this,_Const_iterator<1> param_1)
+
+{
+  undefined4 extraout_EDX;
+  _Iterator<1> _Var1;
+  _Node *in_stack_0000000c;
+  
+  _Const_iterator<1>::_Const_iterator<1>
+            ((_Const_iterator<1> *)param_1._padding_,in_stack_0000000c,this);
+  _Var1._4_4_ = extraout_EDX;
+  _Var1._0_4_ = param_1._padding_;
+  return _Var1;
+}

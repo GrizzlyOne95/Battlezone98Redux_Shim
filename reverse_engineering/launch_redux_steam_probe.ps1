@@ -211,7 +211,7 @@ if ($ProbeDefaultSites) {
         }
     }
 
-    $shimLog = Join-Path $gameDir "winmm_shim.log"
+$shimLog = Join-Path $gameDir "logs\winmm_shim.log"
     if (Test-Path -LiteralPath $shimLog) {
         $result["ogre_material_collision_log"] = @(Get-Content -LiteralPath $shimLog -Tail 40 |
             Where-Object { $_ -like "*OgreMaterialCollision*" })

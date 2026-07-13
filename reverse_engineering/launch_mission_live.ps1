@@ -33,7 +33,7 @@ public static class LiveInput {
 "@
 
 $gameExe = Join-Path $GameRoot "battlezone98redux.exe"
-$bzLogger = Join-Path $GameRoot "BZLogger.txt"
+$bzLogger = Join-Path $GameRoot "logs\BZLogger.txt"
 if (-not (Test-Path $gameExe)) { throw "exe not found: $gameExe" }
 
 if ($KillExisting) {

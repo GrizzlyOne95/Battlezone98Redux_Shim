@@ -11,6 +11,11 @@ EXPORTS
     OpenShimSetHowitzerVolleyEnabled
     OpenShimSetWeaponMaskCarrierBiasEnabled
     OpenShimSetAiOdfGameplayTuningEnabled
+    OpenShimSetAiUnitTuning
+    OpenShimSetAiUnitTuningV2
+    OpenShimSetAiUnitTuningV3
+    OpenShimClearAiUnitTuning
+    OpenShimClearAllAiUnitTuning
     OpenShimSetTurretAimPitchEnabled
     OpenShimSetAttackRevealEnabled
     OpenShimResetMissionHookOverrides
