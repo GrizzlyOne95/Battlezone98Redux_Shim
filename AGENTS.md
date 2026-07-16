@@ -63,3 +63,24 @@ Open `<USER_HOME>\Documents\Battlezone98Redux_Shim.code-workspace` when a task m
 - Read `AGENT_TOOLING_SETUP.md` when reproducing the toolchain on another PC.
 - Prefer the stable `bzr-*` wrappers from `<USER_HOME>\bin` over package-specific install paths.
 - The `ghidra` MCP server is expected to come from the persistent localhost service documented in `AGENT_TOOLING.md`, not a fresh per-request Ghidra launch.
+
+## Default Private-PDB Workflow
+- Read `reverse_engineering/private_pdb_semantic_ranking.md` before transferring
+  any name or local from the leaked Redux PDB to a released executable.
+- Never use leaked-PDB same-RVA equality as identity evidence. The independent
+  audit corroborated `0` of `1254` raw same-RVA rows.
+- Refresh and validate the semantic queues before a new naming or hook task:
+  `python reverse_engineering\rank_private_pdb_matches.py`, then
+  `python reverse_engineering\validate_semantic_apply.py`.
+- Search the validated data through `build_re_brief.py --supplemental-pdb
+  reverse_engineering\workshop\private_pdb_index` before starting a fresh
+  disassembly pass.
+- `semantic_ranking\binary_validation\safe_new_apply.tsv` is the only queue
+  eligible for automatic rename. `high_confidence_review.tsv` is comment/review
+  material, and `medium_hold.tsv` must remain unapplied without new evidence.
+- Use `reverse_engineering/ghidra_scripts/ApplySemanticPdbHints.java` for Ghidra
+  import. It rechecks function-start bytes and refuses unsafe replacement names.
+- Private-PDB local/parameter names are semantic hints only. Their stack or
+  register locations belong to the leaked build and are not transferable.
+- The static validator is pinned to the exact analyzed GOG SHA-256. For Steam,
+  validate the corresponding bytes in process only after SteamStub has settled.

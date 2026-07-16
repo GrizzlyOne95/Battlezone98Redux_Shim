@@ -318,6 +318,68 @@ Current blockers for the complete chain:
 - EXU full Debug build is currently blocked by an unrelated compile error in
   `ExtraUtilities-G1\src\Overlay.cpp`
 
+## Faction Jet Flames (config-driven, 2026-07-13)
+
+Added `openshim.ini [Display] JetFlames` (bool). When on, a unit's engine flame
+is tinted by its **faction** for any team an EXU script has not already colored
+(EXU `SetTeamEngineFlameColor` still wins; faction is the fallback, so it works
+in stock / Instant Action where EXU is not loaded).
+
+Faction = lowercased first character of the ODF class label:
+
+- `a` NSDF      -> blue (stock)
+- `s` CCA       -> red
+- `c` CRA       -> green
+- `b` Black Dog -> purple
+
+### Native faction (ODF-name) chain (verified on live GOG + in-game)
+
+The faction prefix lives on the **ODF name** (`avtank`, `svfigh`...), which is
+`GetOdf`, NOT `GetClassLabel`. `GetClassLabel` returns the gameplay **category**
+(`wingman`, `tank`...) with no faction prefix — using it was the original bug
+(every unit read as `wingman` -> `'w'` -> no color).
+
+Recovered from `GetOdf` (GOG `0x004FFFD0`, Redux VA per
+`bsim/out/lua_api_map.csv`). Disassembly of `0x004FFFFC..0x0050000C`:
+
+```
+mov  ecx,[obj]          ; GameObject*
+add  ecx,0x18           ; this = obj + 0x18  (class-accessor sub-object)
+mov  eax,[obj+0x18]     ; vtable of that sub-object
+mov  edx,[eax]          ; vtable[0]
+call edx                ; -> GameObjectClass* in eax
+add  eax,0x30           ; ODF name = INLINE char[8] at GameObjectClass + 0x30
+                        ; (used by address; lua_pushlstring(L, class+0x30, 8))
+```
+
+So: `class = (*(GameObject+0x18))[0](GameObject+0x18)` and the ODF name is an
+**inline `char[8]` buffer at `GameObjectClass + 0x30`** (read by address, may be
+unterminated at 8 chars). The 1.5 build had it at `+0x38`; GOG drifted to `+0x30`.
+Contrast `GetClassLabel`, which dereferences a `char*` at `class+0x18` (the
+category string). The chain uses only vtable + field offsets (no hardcoded
+function address), so `TryGetCraftOdfName` / `TryGetCraftFactionChar` are
+build-independent (Steam-safe) and SEH-guarded. `craftPtr` at the two hovercraft
+`AddFlame` callsites is the GameObject base (same pointer the handle is read
+from), so `craftPtr + 0x18` is the class sub-object.
+
+### In-game validation (2026-07-14, misn06.bzn, no EXU)
+
+Confirmed via `OPENSHIM_TRACE_JET_FLAMES` route log on the live GOG build:
+team-1 `avtank`/`avfigh` -> faction `a` -> blue (stock, unchanged); team-2
+`svfigh` -> faction `s` -> red (final=2), with `exhaust_r.0` resolving to a live
+texture handle. Emit hook fires, both managers observed, red/green variants
+initialize. Purple still `no` (no stock asset), as expected.
+
+### Purple / Black Dog asset gap
+
+Stock ships only `rflame` / `gflame` / `bflame` (no purple). The purple variant
+manager is fully wired (`kEngineFlameColorPurple`, `g_EngineFlamePrimaryPurple` /
+`g_EngineFlameSecondaryPurple`, Control/Submit loops) and resolves texture
+candidates `exhaust_p.0` / `pflame.0` / `pflame`. Until an add-on supplies one of
+those, purple degrades gracefully to stock blue (same `texture == 0` guard as
+red/green). To enable it, add a purple flame texture + material alias to the
+addon asset path.
+
 ## Commands Used
 
 ```powershell

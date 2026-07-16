@@ -157,6 +157,80 @@ def merge_function_maps(inventory_csv: Path, pdb_csv: Path, output_csv: Path) ->
     return merged_count
 
 
+def merge_private_function_maps(
+    inventory_csv: Path, pdb_csv: Path, output_csv: Path, exact_pdb_match: bool
+) -> int:
+    """Join private PDB procedures by RVA without treating a mismatched build as authoritative."""
+    if not inventory_csv.exists() or not pdb_csv.exists():
+        return 0
+
+    by_rva: dict[str, list[dict]] = {}
+    with pdb_csv.open("r", newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            rva = row.get("rva")
+            if rva:
+                by_rva.setdefault(rva, []).append(row)
+
+    merged_count = 0
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    with inventory_csv.open("r", newline="", encoding="utf-8") as source, output_csv.open(
+        "w", newline="", encoding="utf-8"
+    ) as destination:
+        reader = csv.DictReader(source)
+        writer = csv.DictWriter(
+            destination,
+            fieldnames=[
+                "entry_rva",
+                "ghidra_name",
+                "ghidra_signature",
+                "pdb_name",
+                "pdb_signature",
+                "pdb_module",
+                "pdb_object",
+                "pdb_source_files",
+                "pdb_source_line_min",
+                "pdb_source_line_max",
+                "pdb_parameter_count",
+                "pdb_local_count",
+                "pdb_candidates_at_rva",
+                "unique_pdb_candidate",
+                "trust",
+            ],
+        )
+        writer.writeheader()
+        for row in reader:
+            matches = by_rva.get(row["entry_rva"], [])
+            candidate_count = len(matches)
+            if exact_pdb_match:
+                trust = "exact_pe_pdb"
+            elif candidate_count == 1:
+                trust = "advisory_unique_rva"
+            else:
+                trust = "advisory_ambiguous_rva"
+            for match in matches:
+                writer.writerow(
+                    {
+                        "entry_rva": row["entry_rva"],
+                        "ghidra_name": row["name"],
+                        "ghidra_signature": row["signature"],
+                        "pdb_name": match["name"],
+                        "pdb_signature": match["signature"],
+                        "pdb_module": match["module_name"],
+                        "pdb_object": match["object_name"],
+                        "pdb_source_files": match["source_files"],
+                        "pdb_source_line_min": match["source_line_min"],
+                        "pdb_source_line_max": match["source_line_max"],
+                        "pdb_parameter_count": match["parameter_count"],
+                        "pdb_local_count": match["local_count"],
+                        "pdb_candidates_at_rva": candidate_count,
+                        "unique_pdb_candidate": candidate_count == 1,
+                        "trust": trust,
+                    }
+                )
+                merged_count += 1
+    return merged_count
+
+
 def write_summary(summary_path: Path, summary: dict) -> None:
     lines = [
         "# Best-Effort Global Decompile Summary",
@@ -182,7 +256,13 @@ def write_summary(summary_path: Path, summary: dict) -> None:
             "",
             f"- ASCII strings: `{summary['counts'].get('ascii_strings', 0)}`",
             f"- UTF-16 strings: `{summary['counts'].get('utf16_strings', 0)}`",
-            f"- Matched RVA names: `{summary['counts'].get('merged_rva_names', 0)}`",
+            f"- PDB private functions: `{summary['counts'].get('pdb_private_functions', 0)}`",
+            f"- PDB private locals: `{summary['counts'].get('pdb_private_locals', 0)}`",
+            f"- PDB source-line ranges: `{summary['counts'].get('pdb_source_line_ranges', 0)}`",
+            f"- PDB class/struct layouts: `{summary['counts'].get('pdb_class_layouts', 0)}`",
+            f"- PDB direct class members: `{summary['counts'].get('pdb_class_members', 0)}`",
+            f"- Public-symbol RVA matches: `{summary['counts'].get('merged_rva_names', 0)}`",
+            f"- Private-function RVA candidates: `{summary['counts'].get('merged_private_rva_candidates', 0)}`",
         ]
     )
     summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -265,6 +345,15 @@ def main() -> None:
     if pdb_reference:
         apply_pdb_in_ghidra = bool(pdb_reference["match"]["exact_match"]) or args.force_pdb_in_ghidra
         manifest["pdb_exact_match"] = bool(pdb_reference["match"]["exact_match"])
+        for key in (
+            "private_functions",
+            "private_locals",
+            "private_local_ranges",
+            "source_line_ranges",
+            "class_layouts",
+            "class_members",
+        ):
+            manifest["counts"][f"pdb_{key}"] = int(pdb_reference.get("counts", {}).get(key, 0))
     else:
         manifest["pdb_exact_match"] = False
 
@@ -332,6 +421,13 @@ def main() -> None:
         merged_dir / "function_matches_by_rva.csv",
     )
     manifest["counts"]["merged_rva_names"] = merged_count
+    private_merged_count = merge_private_function_maps(
+        inventory_dir / "functions.csv",
+        pdb_dir / "private_functions.csv",
+        merged_dir / "private_function_matches_by_rva.csv",
+        bool(manifest["pdb_exact_match"]),
+    )
+    manifest["counts"]["merged_private_rva_candidates"] = private_merged_count
 
     decomp_dir = ghidrecomp_dir / "results" / "bins" / ghidra_project_name / "decomps"
     manifest.update(

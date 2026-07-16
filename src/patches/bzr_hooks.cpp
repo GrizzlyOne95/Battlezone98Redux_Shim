@@ -16,10 +16,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <climits>
+#include <exception>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <new>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <unordered_map>
 #include <vector>
@@ -95,6 +98,7 @@ namespace BZROpenShim
                                                 float x, float y, float w, float h,
                                                 uint32_t flags, void* parent, int a);
     using FnUiSetStr = void(__thiscall*)(void* self, const char* str);
+    using FnUiSetFloat = void(__thiscall*)(void* self, float value);
     using FnUiSetInt = void(__thiscall*)(void* self, void* param);
     using FnUiSetCb  = void(__thiscall*)(void* self, void* cb);
     using FnUiSetActive = void(__thiscall*)(void* self, uint8_t value);
@@ -144,7 +148,10 @@ namespace BZROpenShim
     using FnShieldTowerSimulate = void(__thiscall*)(void* thisPtr, float dt);
     using FnMagnetMineSimulate = void(__thiscall*)(void* thisPtr, float dt);
     using FnProximityMineSimulate = void(__thiscall*)(void* thisPtr, float dt);
-    using FnSprayBuildingSimulate = void(__thiscall*)(void* thisPtr, float dt);
+	using FnSprayBuildingSimulate = void(__thiscall*)(void* thisPtr, float dt);
+	using FnTugPostLoad = bool(__thiscall*)(void* thisPtr);
+    using FnScriptProducerPredicate = bool(__cdecl*)(int handle);
+    using FnProducerPredicate = bool(__thiscall*)(void* thisPtr);
     using FnShieldTowerPowerUpdate = void(__fastcall*)(void* thisPtr);
     using FnMatrixInverse = void(__cdecl*)(void* outMatrix, const void* inMatrix);
     using FnVectorTransform = void(__cdecl*)(float* dst, const float* src, int count, const void* matrix);
@@ -177,6 +184,14 @@ namespace BZROpenShim
                                                    float* fraction,
                                                    void* outNormal);
     using FnProcessDoSubTask = bool(__thiscall*)(void* thisPtr);
+    using FnGetGameTime = float(__cdecl*)();
+    using FnFindPlanForObject = void* (__cdecl*)(void* objectPtr, float x, float z);
+    using FnAiPathGetLength = float(__thiscall*)(void* pathPtr);
+    using FnAiPathDelete = void* (__thiscall*)(void* pathPtr, uint32_t flags);
+    using FnRecycleTaskDoGotoScrap = void(__thiscall*)(void* recycleTask);
+    using FnUpdateWeaponAim = void(__thiscall*)(void* craft, float dt);
+    using FnCarrierGetWeapon = void* (__thiscall*)(void* carrier, int slot);
+    using FnRefreshWeaponTransform = void(__cdecl*)(void* weaponObject, void* transform);
     // Redux's ArtilleryProcess::DoAttack is not the zero-stack-argument method
     // described by the legacy 1.5 PDB. At the machine ABI it consumes four
     // stack words (the first is the hidden/result destination) and returns with
@@ -226,6 +241,7 @@ namespace BZROpenShim
     static FnUiSetStr g_BzrFn_SetTextureOver = nullptr; // 0x007C2F10
     static FnUiSetStr g_BzrFn_SetTextureOn = nullptr; // 0x007C2E80
     static FnUiSetStr g_BzrFn_SetButtonLabel = nullptr; // 0x007C2950
+    static FnUiSetFloat g_BzrFn_SetButtonTextScale = nullptr; // 0x007C30E0 (stock options buttons use 1.3)
     static FnUiSetStr g_BzrFn_SetTooltip = nullptr; // 0x007CC660
     static FnUiSetInt g_BzrFn_LabelState = nullptr; // 0x007CC5C0
     static FnUiSetCb g_BzrFn_SetOnClick = nullptr; // 0x007C23E0
@@ -272,13 +288,44 @@ namespace BZROpenShim
     static FnLegacyWorldUpdateRenderQueue g_BzrFn_LegacyWorldUpdateRenderQueue = nullptr;
     static FnGetPlayerHandle g_BzrFn_GetPlayerHandle = nullptr;
     static FnGameObjectGetObjByHandle g_BzrFn_GameObjectGetObjByHandle = nullptr;
+
+    // Correct GOG handle->object conversion. The engine's GameObject pool is a
+    // fixed 0x1000-slot table based at 0x0260DB20 with a 0x400-byte stride; a
+    // handle's slot index is its top 12 bits (handle >> 0x14). Verified live: a
+    // craft pointer satisfies (ptr - 0x0260DB20) == slot * 0x400 exactly. The
+    // former binding (kGogGameObjectGetObjByHandleAddr = 0x0046B160) actually
+    // pointed into an unrelated ODF class-dispatch routine, so every call
+    // crashed (deterministic null+0x19 fault via the scavenger retarget hook,
+    // 2026-07-14). Round-trips through GetHandle (0x00462380) to reject stale or
+    // empty slots; the pool memory is always mapped so the probe read is safe.
+    static void* __cdecl GameObjectFromHandleGog(int handle)
+    {
+        if (handle == 0)
+            return nullptr;
+        const uint32_t slot = (static_cast<uint32_t>(handle) >> 0x14) & 0xFFFu;
+        void* obj = reinterpret_cast<void*>(
+            static_cast<uintptr_t>(slot) * 0x400u + 0x0260DB20u);
+        using GetHandleThiscallFn = uint32_t(__thiscall*)(void*);
+        __try
+        {
+            if (reinterpret_cast<GetHandleThiscallFn>(0x00462380u)(obj) ==
+                static_cast<uint32_t>(handle))
+                return obj;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+        return nullptr;
+    }
+
     static FnPersonSimulate g_BzrFn_PersonSimulate = nullptr;
     static FnShieldTowerSimulate g_BzrFn_ShieldTowerSimulateOriginal = nullptr;
     static FnShieldTowerSimulate g_BzrFn_BuildingSimulate = nullptr;
     static FnMagnetMineSimulate g_BzrFn_MagnetMineSimulateOriginal = nullptr;
     static FnProximityMineSimulate g_BzrFn_ProximityMineSimulateOriginal = nullptr;
     static FnProximityMineSimulate g_BzrFn_MineSimulate = nullptr;
-    static FnSprayBuildingSimulate g_BzrFn_SprayBuildingSimulateOriginal = nullptr;
+	static FnSprayBuildingSimulate g_BzrFn_SprayBuildingSimulateOriginal = nullptr;
+	static FnTugPostLoad g_BzrFn_TugPostLoadOriginal = nullptr;
     static FnShieldTowerPowerUpdate g_BzrFn_ShieldTowerPowerUpdate = nullptr;
     static FnGameObjectRelation g_BzrFn_GameObjectFriendP = nullptr;
     static FnGameObjectRelation g_BzrFn_GameObjectEnemyP = nullptr;
@@ -298,6 +345,12 @@ namespace BZROpenShim
     static FnTerrainGetIntersection g_BzrFn_TerrainGetIntersection = nullptr;
     static FnProcessDoSubTask g_BzrFn_OffensiveProcessDoSubTask = nullptr;
     static FnProcessDoSubTask g_BzrFn_GunTowerProcessDoSubTask = nullptr;
+    static FnProcessDoSubTask g_BzrFn_TurretTankProcessDoSubTask = nullptr;
+    static FnGetGameTime g_BzrFn_GetGameTime = nullptr;
+    static FnFindPlanForObject g_BzrFn_FindPlanForObject = nullptr;
+    static FnAiPathGetLength g_BzrFn_AiPathGetLength = nullptr;
+    static FnAiPathDelete g_BzrFn_AiPathDelete = nullptr;
+    static FnRecycleTaskDoGotoScrap g_BzrFn_RecycleTaskDoGotoScrap = nullptr;
     static FnAIUnitRemove g_BzrFn_AIUnitRemove = nullptr;
     static FnAIBuildConstructionEnd g_BzrFn_AIBuildConstructionEnd = nullptr;
     static FnAIBuildReservedAreaRemove g_BzrFn_AIBuildReservedAreaRemove = nullptr;
@@ -313,6 +366,7 @@ namespace BZROpenShim
 
     void* __fastcall OptionsInputPopulateUiHook(void* thisPtr, void* /*edx*/);
     bool __fastcall OptionsInputKeyReleasedHook(void* thisPtr, void* /*edx*/, uint32_t key, uint32_t keyCode);
+    void* __fastcall OptionsParentCtorHook(void* thisPtr, void* /*edx*/);
     void* __fastcall ChunkEffectCreateChunkHook(void* thisPtr,
                                                 void* /*edx*/,
                                                 void* objectPtr,
@@ -335,6 +389,7 @@ namespace BZROpenShim
                                                 uint8_t preserveFlag);
 
     static void InstallArtilleryDoAttackHookIfPossible();
+    static bool SetStockScrapPilotPanelsVisible(bool visible);
 
     namespace
     {
@@ -394,6 +449,18 @@ namespace BZROpenShim
         constexpr int kEngineFlameColorBlue = 1;
         constexpr int kEngineFlameColorRed = 2;
         constexpr int kEngineFlameColorGreen = 3;
+        constexpr int kEngineFlameColorPurple = 4;
+        // GameObject -> ODF name chain, verified on the live GOG exe from GetOdf
+        // (0x004FFFD0): the class accessor is a virtual on the sub-object at
+        // GameObject+0x18 (vtable[0] returns GameObjectClass*), and the ODF name
+        // is an INLINE char[8] buffer at GameObjectClass+0x30 (read by address,
+        // not a pointer). The unit's faction is the first character of that name
+        // (a=NSDF, s=CCA, c=CRA, b=Black Dog). Note: the char* at class+0x18 that
+        // GetClassLabel returns is the gameplay category ("wingman", "tank"...),
+        // which has no faction prefix -- do not use it here.
+        constexpr size_t kGameObjectClassSubObjOffset = 0x18;
+        constexpr size_t kGameObjectClassOdfNameOffset = 0x30;
+        constexpr size_t kGameObjectClassOdfNameMax = 8;
         constexpr uintptr_t kHudSpriteNameCountAddr = 0x00920F00;
         constexpr uintptr_t kHudSpriteNameTableAddr = 0x00920F08;
         constexpr size_t kHudSpriteNameEntrySize = 0x20;
@@ -457,8 +524,14 @@ namespace BZROpenShim
         constexpr uintptr_t kGogProximityMineSimulateAddr = 0x005B0E40;
         constexpr uintptr_t kGogMineSimulateAddr = 0x00511460;
         constexpr uintptr_t kGogShieldTowerPowerUpdateAddr = 0x005D0CC0;
-        constexpr uintptr_t kGogGameObjectFriendPAddr = 0x0046BF40;
-        constexpr uintptr_t kGogGameObjectEnemyPAddr = 0x0046BFD0;
+        // GameObject::FriendP/EnemyP(GameObject*) — bool __thiscall(this, other).
+        // Verified on live GOG exe by disassembly (int3-padded prologue; null-checks
+        // other, calls other vtable[1]=GetTeamNum, then the int-overload FriendP/EnemyP
+        // at 0x4DB560/0x4DB600 → Team::FriendP/EnemyP at 0x5E1310/0x5E1350). Matches the
+        // 1.5 decomp bodies exactly. Previous values (0x0046BF40/0x0046BFD0) were WRONG —
+        // they land mid-instruction, same failure class as the fixed GetObjByHandle.
+        constexpr uintptr_t kGogGameObjectFriendPAddr = 0x004DB510;
+        constexpr uintptr_t kGogGameObjectEnemyPAddr = 0x004DB5B0;
         constexpr uintptr_t kGogGameObjectAddVelocityAddr = 0x004A75B0;
         constexpr uintptr_t kGogMatrixInverseAddr = 0x008203F0;
         constexpr uintptr_t kGogVectorTransformAddr = 0x00820180;
@@ -467,6 +540,41 @@ namespace BZROpenShim
         constexpr uintptr_t kShieldTowerSimulateVtableSlotAddr = 0x00887724;
         constexpr uintptr_t kMagnetMineSimulateVtableSlotAddr = 0x0087D574;
         constexpr uintptr_t kProximityMineSimulateVtableSlotAddr = 0x008862B4;
+        // ScriptUtils::CanBuild/IsBusy accept the four legacy producer
+        // signatures but omit the base Producer signature (PROD). The two
+        // functions are adjacent in settled Redux 2.2.301 and are identical
+        // on GOG and the settled Steam image.
+        constexpr uintptr_t kGogScriptCanBuildAddr = 0x005CB4E0;
+        constexpr uintptr_t kGogScriptIsBusyAddr = 0x005CB550;
+        constexpr uintptr_t kGogProducerCanBuildAddr = 0x004738B0;
+        constexpr uintptr_t kGogProducerIsBusyAddr = 0x004723D0;
+        constexpr uint32_t kProducerClassSignature = 0x50524F44u; // 'PROD'
+        constexpr size_t kScriptProducerPredicateDetourLen = 9;
+        // Mission briefing and mission archive callbacks use the unguarded
+        // scrolling methods. Redirect just those four calls to the guarded
+        // variants already used by the lobby/chat UI so the final partial page
+        // is clamped instead of snapping back to the top.
+        constexpr uintptr_t kGogBriefingScrollUpCallAddr = 0x0078ED29;
+        constexpr uintptr_t kGogBriefingScrollDownCallAddr = 0x0078ED39;
+        constexpr uintptr_t kGogArchiveScrollUpCallAddr = 0x00790AF9;
+        constexpr uintptr_t kGogArchiveScrollDownCallAddr = 0x00790B09;
+        constexpr uintptr_t kGogGuardedScrollUpAddr = 0x007CE730;
+        constexpr uintptr_t kGogGuardedScrollDownAddr = 0x007CE6D0;
+        constexpr uintptr_t kGogUnguardedScrollUpAddr = 0x007CE0E0;
+        constexpr uintptr_t kGogUnguardedScrollDownAddr = 0x007CE110;
+        // renderCount allocation crash (#65). The MultiRenderClass constructor
+        // (0x0044D7B0, selected by [Render] renderBase="draw_multi") reads the
+        // ODF key "rendercount" (FNV-1a 0x8C8E76EC) into this+0x108, multiplies
+        // it by 4 with overflow saturation to 0xFFFFFFFF, and passes the result
+        // straight to operator new[]. A missing/nil/garbage count therefore
+        // dies with "invalid allocation size". Clamp the stored count to
+        // [0, kMultiRenderCountMax] between the ParameterDB read and the
+        // allocation; the same field bounds the renderName%d copy loop, so the
+        // single clamp protects both the allocation and the loop.
+        constexpr uintptr_t kGogMultiRenderCountClampSiteAddr = 0x0044D858;
+        constexpr uintptr_t kGogMultiRenderCountClampResumeAddr = 0x0044D863;
+        constexpr size_t kMultiRenderCountClampDetourLen = 11;
+        constexpr int32_t kMultiRenderCountMax = 256;
         // Splinter (spraybomb) undead bug (#46). SprayBuilding::Simulate keeps
         // spinning its payload fire loop after the deployed splinter is damaged
         // below zero because it overrides Building::Simulate without preserving
@@ -474,7 +582,34 @@ namespace BZROpenShim
         // the live 2.2.301 exe (advisory-PDB VA 0x005242F0 had drifted): the
         // SprayBuilding vtable is 0x008881EC and Simulate is slot 15.
         constexpr uintptr_t kGogSprayBuildingSimulateAddr = 0x005DA6E0;
-        constexpr uintptr_t kSprayBuildingSimulateVtableSlotAddr = 0x00888228;
+		constexpr uintptr_t kSprayBuildingSimulateVtableSlotAddr = 0x00888228;
+		// Tug::PostLoad restores the cargo relationship but does not reconcile a
+		// newly created/loaded tug's deployment state.  With cargo attached and
+		// state==UNDEPLOYED, a later Deploy command starts the *load* transition
+		// instead of the drop transition.  This is the native equivalent of the
+		// long-standing Lua workaround `if HasCargo(tug) then Deploy(tug) end`.
+		// Current Redux 2.2.301 Tug primary vtable: 0x00889008; PostLoad is slot 22.
+		constexpr uintptr_t kGogTugPostLoadAddr = 0x005EC430;
+		constexpr uintptr_t kTugVtableAddr = 0x00889008;
+		constexpr uintptr_t kTugPostLoadVtableSlotAddr = 0x00889060;
+		constexpr size_t kTugDeployStateOffset = 0x228;
+		constexpr size_t kTugControlBlockOffset = 0x230;
+		constexpr size_t kTugControlDeployOffset = 0xE0;
+		constexpr size_t kTugCargoOffset = 0x300;
+		// APC::Simulate checks a selected target before its existing nearby-enemy
+		// scan.  If that target is allied, both relation failures jump straight to
+		// the "cannot deploy" result.  Retarget those two stock branches to the
+		// existing no-target scan so a selected ally does not mask nearby enemies.
+		constexpr uintptr_t kGogApcTargetActualTeamRejectBranchAddr = 0x004700E6;
+		constexpr uintptr_t kGogApcTargetPerceivedTeamRejectBranchAddr = 0x00470108;
+		constexpr uint8_t kGogApcTargetActualTeamRejectOriginal[6] =
+			{ 0x0F, 0x84, 0xA5, 0x00, 0x00, 0x00 };
+		constexpr uint8_t kGogApcTargetActualTeamRejectPatched[6] =
+			{ 0x0F, 0x84, 0xC0, 0x00, 0x00, 0x00 };
+		constexpr uint8_t kGogApcTargetPerceivedTeamRejectOriginal[6] =
+			{ 0x0F, 0x84, 0x83, 0x00, 0x00, 0x00 };
+		constexpr uint8_t kGogApcTargetPerceivedTeamRejectPatched[6] =
+			{ 0x0F, 0x84, 0x9E, 0x00, 0x00, 0x00 };
         // Building::Simulate reads flags at [[this+0xF4]+0x14] and early-outs on
         // destroyed (0x1000000) / marked-for-remove (0x200) by dispatching the
         // stock explode/remove virtuals.
@@ -492,10 +627,37 @@ namespace BZROpenShim
         constexpr uintptr_t kFlagDisplayAddr = 0x006DDD34;
         constexpr uintptr_t kFlagFilePathBufferAddr = 0x00917FAC;
         constexpr size_t kFlagFilePathBufferCapacity = MAX_PATH;
-        constexpr size_t kFlagDisplayFlagIndexOffset = 0x10;
-        constexpr size_t kFlagDisplayMakeTextureOffset = 0x14;
-        constexpr uintptr_t kGogPersonSimulateEntryAddr = 0x004F4370;
-        constexpr uintptr_t kGogGetPlayerHandleAddr = 0x00514610;
+        // Redux's FlagDisplay inherits a 0x28-byte GameFeature base. The old
+        // BZ1 layout used +0x10/+0x14; writing those offsets in Redux corrupts
+        // the base object. Redux's surviving fields are at +0x28/+0x2C.
+        constexpr size_t kFlagDisplayFlagIndexOffset = 0x28;
+        constexpr size_t kFlagDisplayMakeTextureOffset = 0x2C;
+        constexpr uintptr_t kFlagDisplaySubmitVtableSlotAddr = 0x008799A4;
+        constexpr uintptr_t kFlagDisplaySubmitAddr = 0x004D1C80;
+        constexpr uintptr_t kNetPlayerByTeamAddr = 0x009180E8;
+        constexpr uintptr_t kNetPlayerGetDataAddr = 0x00575510;
+        constexpr uintptr_t kGameObjectGetSphereAddr = 0x00462400;
+        constexpr size_t kNetPlayerFlagBufferOffset = 0x1C;
+        constexpr size_t kObjectClassTypeOffset = 0x1C;
+        constexpr size_t kObjStateFlagsOffset = 0x14;
+        constexpr uint32_t kFlagObjectExcludedStateMask = 0x600;
+        constexpr float kMultiplayerFlagRange = 100.0f;
+        constexpr float kMultiplayerFlagWidth = 2.0f;
+        constexpr float kMultiplayerFlagHeight = 1.0f;
+        constexpr float kMultiplayerFlagMinimumLift = 1.5f;
+        constexpr float kMultiplayerFlagHiddenY = -100000.0f;
+        constexpr size_t kMultiplayerFlagMaxObjects = 512;
+        // Real GOG Person::Simulate. The old 0x004F4370 was a version/string
+        // builder (advisory-PDB drift); relocated by content (SNIP sig compare
+        // + anim FSM). Prologue: 55 8B EC 6A FF 68 D6 C1 84 00.
+        constexpr uintptr_t kGogPersonSimulateEntryAddr = 0x0059D340;
+        // GetPlayerHandle() — int __cdecl(). Verified on live GOG exe: reads
+        // GameObject::userObject (via 0x417C70) + playerHandle global (0x02CC2BDC),
+        // round-trips through GameObjectHandle::GetObj (0x462630) / GameObject::GetHandle
+        // (0x477590). This is the inner void-overload the Lua wrapper (0x4FFCD0) calls on
+        // its non-numeric branch, matching the 1.5 decomp. Previous 0x00514610 was WRONG
+        // (mid-instruction, same failure class as the fixed GetObjByHandle).
+        constexpr uintptr_t kGogGetPlayerHandleAddr = 0x005C7FB0;
         constexpr uintptr_t kGogGameObjectGetObjByHandleAddr = 0x0046B160;
         // NetPlayer::RecordDeath(int killedTeam, int killerTeam) on the live
         // 2.2.301 exe (advisory-PDB VA 0x004D9210 had drifted; re-derived via
@@ -516,33 +678,138 @@ namespace BZROpenShim
         constexpr uintptr_t kOptionsInputScreenFactoryCallerAddr = 0x007C8600;
         constexpr uintptr_t kOptionsInputBackClickAddr = 0x007B2210;
         constexpr uintptr_t kOptionsInputDefaultsClickAddr = 0x007B2230;
+        // cUI_OptionsParent constructor on the live GOG/Steam 2.2.301 exe,
+        // recovered from the Redux decompile corpus (FUN_007b61a0: builds the
+        // esc_center.png overlay plus the Play/Graphic/Audio/Input buttons) and
+        // byte-verified against the installed exe (SEH prologue
+        // 55 8B EC 6A FF 68 60 13 86 00). Singleton stored at 0x009455C4.
+        constexpr uintptr_t kOptionsParentCtorAddr = 0x007B61A0;
+        constexpr size_t kOptionsParentCtorDetourLen = 10;
+        constexpr uintptr_t kOptionsParentSingletonAddr = 0x009455C4;
+        // Stock cUI_OptionsParent "Input" click thunk: loads the parent
+        // singleton and asks the options shell (this+0x138) to switch to screen
+        // id 0x15 (the input options page) via the switch fn at 0x007C7930.
+        // The OpenShim settings button reuses this exact navigation path.
+        constexpr uintptr_t kOptionsParentInputClickThunkAddr = 0x007B6100;
+        // cUI_OptionsInput singleton (DAT_009455B8); non-null while the stock
+        // input screen object is alive inside the current options shell.
+        constexpr uintptr_t kOptionsInputSingletonAddr = 0x009455B8;
         constexpr size_t kInlineDetourMaxPatchLen = 16;
         constexpr uintptr_t kGogArtilleryDoAttackEntryAddr = 0x0042AF10;
         constexpr size_t kArtilleryDoAttackDetourLen = 10;
         constexpr size_t kOptionsInputCtorDetourLen = 10;
         constexpr size_t kOptionsInputKeyReleasedDetourLen = 9;
         constexpr size_t kOptionsInputKeyConfigOffset = 0x188;
-        constexpr size_t kPersonSimulateDetourLen = 8;
+        constexpr size_t kPersonSimulateDetourLen = 10;
         constexpr size_t kRecordDeathDetourLen = 6;
         constexpr ULONGLONG kCareerStatsMpHookRetryMs = 1000;
         constexpr ULONGLONG kCareerStatsMpHookRetryWindowMs = 15000;
         constexpr DWORD kCareerStatsMpSessionPollIntervalMs = 1000;
         constexpr ULONGLONG kCareerStatsMpSessionResetMs = 15000;
         constexpr uint32_t kWeaponSigSnip = 0x534E4950u;
-        constexpr size_t kPersonObjOffset = 0x0E8;
-        constexpr size_t kPersonCarrierOffset = 0x198;
-        constexpr size_t kGameObjectVelocityYOffset = 0x124;
-        constexpr size_t kCraftStateOffset = 0x220;
-        constexpr size_t kPersonCurAnimOffset = 0x288;
-        constexpr size_t kPersonAnimHandleOffset = 0x28C;
+        // Live GOG Person offsets, re-derived from disassembly of the shipped
+        // exe (the advisory beta PDB is drifted). Uniform +8 vs the PDB through
+        // the vehicle fields, then +0x20 for the animation tail. See
+        // reverse_engineering/jump_sniping_crouch_fix_20260713.md.
+        constexpr size_t kPersonObjOffset = 0x0F0;          // PDB 0xE8 render obj
+        constexpr size_t kPersonCarrierOffset = 0x1A0;      // PDB 0x198
+        constexpr size_t kGameObjectVelocityYOffset = 0x12C; // PDB 0x124 euler.v.y
+        constexpr size_t kPersonVehiclePtrOffset = 0x230;   // PDB 0x228 vhcl (VEHICLE*)
+        constexpr size_t kVehicleGroundFlagsOffset = 0x114; // VEHICLE flags word
+        constexpr uint32_t kVehicleGroundedFlagBit = 0x80;  // set = grounded
+        // Person on-foot animation state machine index (0..3), also the field
+        // the crouch FSM switches on.
+        constexpr size_t kPersonAnimStateOffset = 0x228;    // PDB 0x220 craft state
+        constexpr size_t kPersonCurAnimOffset = 0x2A8;      // PDB 0x288
+        constexpr size_t kPersonAnimHandleOffset = 0x2AC;   // PDB 0x28C
         constexpr size_t kCarrierWeaponsOffset = 0x18;
         constexpr size_t kCarrierSelectedOffset = 0x30;
         constexpr size_t kWeaponClassOffset = 0x08;
         constexpr size_t kWeaponClassSigOffset = 0x0C;
         constexpr size_t kWeaponClassOdfOffset = 0x20;
         constexpr float kJumpSnipeVelocityBandThreshold = 0.15f;
+        // Item 23: restore legacy 1.5 crouch-on-landing while sniper-selected.
+        // Person::Simulate (GOG 0x0059D340) case-0 grounded branch tests the
+        // held-jump flag BEFORE the sniper-selected flag, so holding jump while
+        // touching ground never re-enters the crouch pose. The two adjacent
+        // frame bools are jumpHeld ([ebp-0x352]) and sniperSelected
+        // ([ebp-0x351]). Rewriting the predicate to "goto sniper-check iff
+        // jumpHeld <= sniper" makes the (jumpHeld && sniper) case crouch like
+        // 1.5 while leaving every other path byte-identical. See
+        // reverse_engineering/jump_sniping_crouch_fix_20260713.md.
+        constexpr uintptr_t kGogPersonCrouchBranchAddr = 0x0059DEA5;
+        constexpr size_t kPersonCrouchBranchPatchLen = 11;
+        // movzbl [ebp-0x352],eax ; test al,al ; je 0x59DED6
+        constexpr uint8_t kPersonCrouchBranchExpected[kPersonCrouchBranchPatchLen] =
+        {
+            0x0F, 0xB6, 0x85, 0xAE, 0xFC, 0xFF, 0xFF, 0x85, 0xC0, 0x74, 0x26
+        };
+        // mov ax,[ebp-0x352] ; cmp al,ah ; jbe 0x59DED6
+        constexpr uint8_t kPersonCrouchBranchPatched[kPersonCrouchBranchPatchLen] =
+        {
+            0x66, 0x8B, 0x85, 0xAE, 0xFC, 0xFF, 0xFF, 0x38, 0xE0, 0x76, 0x26
+        };
         constexpr uintptr_t kGogCalcRangeCraftEntryAddr = 0x00466BE0;
         constexpr size_t kCalcRangeCraftDetourLen = 9;
+        // RecycleTask::InitLookingForScrap computes a stock squared-distance
+        // score at this one call site after all team/material/region filters.
+        // Replacing only this call keeps the rest of the Redux task intact.
+        constexpr uintptr_t kGogRecycleTaskScrapDistanceCallAddr = 0x005B680E;
+        constexpr uintptr_t kGogDist3DSquaredAddr = 0x004620B0;
+        constexpr uintptr_t kGogFindPlanForObjectAddr = 0x004666C0;
+        constexpr uintptr_t kGogAiPathGetLengthAddr = 0x00461110;
+        constexpr uintptr_t kGogAiPathDeleteAddr = 0x00460640;
+        constexpr uintptr_t kGogRecycleTaskDoGotoScrapAddr = 0x005B6AE0;
+        constexpr size_t kRecycleTaskDoGotoScrapDetourLen = 7;
+        constexpr size_t kRecycleTaskOwnerOffset = 0x2C;
+        constexpr size_t kRecycleTaskSubtaskOffset = 0x30;
+        constexpr size_t kRecycleTaskScrapHandleOffset = 0x40;
+        constexpr size_t kRecycleTaskNextStateOffset = 0x4C;
+        constexpr size_t kRecycleTaskCallerThisLocalOffset = 0x20;
+        constexpr size_t kRecycleTaskCallerCandidateLocalOffset = 0x28;
+        constexpr size_t kAiPathTypeOffset = 0x10;
+        constexpr int kAiPathBadPathType = 3;
+        constexpr float kScrapRejectedScore = 1.0e30f;
+        constexpr float kScrapRetargetPeriodDefault = 2.0f;
+        constexpr float kScrapRetargetMinImprovementDefault = 25.0f;
+        constexpr float kScrapRetargetPickupGuardDistance = 20.0f;
+        // Global convergence improvements formerly owned by EXU. The first
+        // vtable slot makes hovercraft-derived wingmen use the walker's
+        // converging aim routine. The second keeps the stock hovercraft aim
+        // update, then points only the local player's weapon transforms at the
+        // smart-reticle terrain/object position.
+        constexpr uintptr_t kWingmanWeaponAimVtableSlotAddr = 0x0088A4FC;
+        constexpr uintptr_t kHovercraftWeaponAimVtableSlotAddr = 0x00889418;
+        constexpr uintptr_t kWingmanWeaponAimStockAddr = 0x004EB590;
+        constexpr uintptr_t kWalkerUpdateWeaponAimAddr = 0x0060F320;
+        constexpr uintptr_t kHovercraftUpdateWeaponAimAddr = 0x005F0930;
+        constexpr uintptr_t kCarrierGetWeaponAddr = 0x00417F60;
+        constexpr uintptr_t kRefreshWeaponTransformAddr = 0x00681A00;
+        constexpr uintptr_t kLocalUserObjectPtrAddr = 0x00917AFC;
+        constexpr uintptr_t kSmartReticlePositionAddr = 0x025CE79C;
+        constexpr uintptr_t kSmartReticleRangeAddr = 0x00886B20;
+        constexpr float kSmartReticleRangeStock = 200.0f;
+        constexpr float kSmartReticleRangeDefault = 500.0f;
+        constexpr float kSmartReticleRangeMin = 1.0f;
+        constexpr float kSmartReticleRangeMax = 10000.0f;
+        constexpr size_t kCraftCarrierOffset = 0x1A0;
+        constexpr size_t kWeaponObjectOffset = 0x10;
+        constexpr int kConvergenceWeaponSlotCount = 5;
+        constexpr float kConvergenceDirectionEpsilon = 0.001f;
+
+        // Scrap/pilot text positions used by the stock HUD draw path. The
+        // legacy layout keeps their relative spacing but moves the combined
+        // block to the familiar top-center anchor and hides the two backing
+        // panels through the existing HUD sprite bridge.
+        constexpr uintptr_t kScrapPilotHudTextPointAddresses[4][2] = {
+            { 0x0091829C, 0x009182A0 },
+            { 0x0091826C, 0x00918270 },
+            { 0x00918280, 0x00918284 },
+            { 0x00918278, 0x0091827C },
+        };
+        constexpr int kLegacyScrapPilotHudLeft = 500;
+        constexpr int kLegacyScrapPilotHudTop = 22;
+        constexpr ULONGLONG kScrapPilotHudRefreshMs = 1000;
         constexpr uintptr_t kGogAttackTaskDoStateEntryAddr = 0x00478A50;
         constexpr size_t kAttackTaskDoStateDetourLen = 9;
         constexpr uintptr_t kGogTerrainGetIntersectionAddr = 0x00784620;
@@ -553,10 +820,27 @@ namespace BZROpenShim
         constexpr size_t kAttackTaskCloseSqOffset = 0x9C;
         constexpr size_t kAttackTaskRangeSqOffset = 0xA0;
         constexpr int kAttackTaskFiringState = 5;
-        constexpr uintptr_t kGogOffensiveProcessDoSubTaskEntryAddr = 0x004DFE70;
-        constexpr size_t kOffensiveProcessDoSubTaskDetourLen = 8;
-        constexpr uintptr_t kGogGunTowerProcessDoSubTaskEntryAddr = 0x004741A0;
-        constexpr size_t kGunTowerProcessDoSubTaskDetourLen = 6;
+        // Current Redux 2.2.301 process vtables, re-derived via RTTI. Slot 11
+        // owns the target-acquisition state method which schedules the stock
+        // 7-10 second retry after a failed enemy search.
+        constexpr size_t kProcessDoSubTaskVtableSlot = 11;
+        constexpr float kGlobalRetargetPeriod = 0.75f;
+        constexpr uintptr_t kArtilleryProcessVtableAddr = 0x00876024;
+        constexpr uintptr_t kBomberProcessVtableAddr = 0x0088B178;
+        constexpr uintptr_t kGechProcessVtableAddr = 0x0087A13C;
+        constexpr uintptr_t kOffensiveProcessVtableAddr = 0x00884C28;
+        constexpr uintptr_t kPersonProcessVtableAddr = 0x00885984;
+        constexpr uintptr_t kRocketTankProcessVtableAddr = 0x0088A5C0;
+        constexpr uintptr_t kScoutProcessVtableAddr = 0x0088AF98;
+        constexpr uintptr_t kSoldierProcessVtableAddr = 0x00887D18;
+        constexpr uintptr_t kTankProcessVtableAddr = 0x0088AB9C;
+        constexpr uintptr_t kWingmanProcessVtableAddr = 0x0088A6EC;
+        constexpr uintptr_t kGunTowerProcessVtableAddr = 0x0087A87C;
+        constexpr uintptr_t kTurretTankProcessVtableAddr = 0x00889710;
+        constexpr uintptr_t kGogOffensiveProcessDoSubTaskAddr = 0x00583520;
+        constexpr uintptr_t kGogGunTowerProcessDoSubTaskAddr = 0x004E8780;
+        constexpr uintptr_t kGogTurretTankProcessDoSubTaskAddr = 0x005F6FF0;
+        constexpr uintptr_t kGogGetGameTimeAddr = 0x00822D80;
         constexpr uintptr_t kGogChunkEffectCreateChunkAddr = 0x00492AA0;
         constexpr uintptr_t kGogChunkEffectCreateChunkletAddr = 0x004927D0;
         constexpr size_t kChunkEffectCreateChunkDetourLen = 9;
@@ -581,6 +865,7 @@ namespace BZROpenShim
         constexpr uintptr_t kGogWriteInputMapKeyAddr = 0x0061F1C0;
         constexpr uintptr_t kGogMapKeyNameFromCodeAddr = 0x00434F60;
         constexpr uintptr_t kGogReloadGameKeyMapAddr = 0x00620980;
+        constexpr uintptr_t kGogReadMappingTableAddr = 0x00620010;
         constexpr uintptr_t kGogUiOverlayCtorAddr = 0x007D1CC0;
         constexpr uintptr_t kAiGameInitialisedAddr = 0x00930F08;
         constexpr uintptr_t kAiTeamTableAddr = 0x00920F04;
@@ -597,8 +882,8 @@ namespace BZROpenShim
         constexpr uint32_t kConstructorAbilityMask = 0x2;
         constexpr bool kConstructorRemoteBuildFixEnabledDefault = true;
         constexpr long kConstructorRemoteBuildTraceBudgetDefault = 32;
-        constexpr size_t kUnitProcessNextEnemyCheckOffset = 0x28;
-        constexpr size_t kUnitProcessObjectOffset = 0x2C;
+        constexpr size_t kUnitProcessNextEnemyCheckOffset = 0x30;
+        constexpr size_t kUnitProcessObjectOffset = 0x34;
 
         struct InlineDetour32
         {
@@ -607,6 +892,28 @@ namespace BZROpenShim
             void* trampoline = nullptr;
             size_t patchLen = 0;
             std::array<uint8_t, kInlineDetourMaxPatchLen> original = {};
+        };
+
+        struct RetargetPeriodState
+        {
+            float appliedDeadline = 0.0f;
+            float period = 0.0f;
+        };
+
+        struct ScrapPathFailureState
+        {
+            float retryAfter = 0.0f;
+            float x = 0.0f;
+            float z = 0.0f;
+        };
+
+        struct ScrapRetargetState
+        {
+            uintptr_t owner = 0;
+            float nextCheck = 0.0f;
+            float pendingUntil = 0.0f;
+            int incumbentHandle = 0;
+            bool rescorePending = false;
         };
 
         enum class VerticalBand
@@ -623,7 +930,8 @@ namespace BZROpenShim
             void* person = nullptr;
             void* obj = nullptr;
             float velY = 0.0f;
-            uint32_t craftState = 0;
+            uint32_t animState = 0;   // on-foot anim FSM state (0..3)
+            bool grounded = false;    // vhcl ground-contact flag bit
             long curAnim = 0;
             int animHandle = 0;
             uint32_t selectedMask = 0;
@@ -678,6 +986,9 @@ namespace BZROpenShim
             std::vector<std::string>& outMeshCandidates);
         static std::string NormalizeChunkPayloadComponentName(const char* value);
         static bool TryGetChunkProxyPosition(const uint8_t* objectBytes, float& outX, float& outY, float& outZ);
+        static void InstallMultiplayerFlagRenderHookIfPossible();
+        static void RenderMultiplayerFlags(void* camera);
+        static void ForgetMultiplayerFlagSceneResources(const wchar_t* reason);
         static bool TryResolveChunkPayloadMeshResource(
             const ChunkObjectLinkProbe& probe,
             const char* preferredMeshName,
@@ -736,6 +1047,31 @@ namespace BZROpenShim
         static bool g_JumpSnipeProbeInstallAttempted = false;
         static bool g_JumpSnipeProbeInstalled = false;
         static JumpSnipeProbeLogState g_JumpSnipeProbeLogState = {};
+        // Desired state starts from the INI baseline and may be overridden by
+        // the EXU bridge for scripted content. The refresh gate keeps it out
+        // of multiplayer.
+        static bool g_JumpSnipeCrouchEnabled = true;
+        static bool g_JumpSnipeCrouchBaselineEnabled = true;
+        // Whether the byte patch is currently live in the exe image.
+        static bool g_JumpSnipeCrouchPatchActive = false;
+        static bool g_ShotConvergenceEnabled = true;
+        static bool g_ShotConvergenceBaselineEnabled = true;
+        static bool g_PlayerReticleShotConvergenceEnabled = true;
+        static bool g_PlayerReticleShotConvergenceBaselineEnabled = true;
+        static bool g_ShotConvergencePatchActive = false;
+        static bool g_PlayerReticleShotConvergencePatchActive = false;
+        static float g_SmartReticleRange = kSmartReticleRangeDefault;
+        static float g_SmartReticleRangeBaseline = kSmartReticleRangeDefault;
+        static bool g_SmartScavengerPathingEnabled = true;
+        static bool g_TurretAimPitchBaselineEnabled = true;
+        static bool g_ScrapPilotHudLegacyLayoutEnabled = true;
+        static bool g_ScrapPilotHudBaselineCaptured = false;
+        static std::array<int, 8> g_ScrapPilotHudBaseline = {};
+        static bool g_ScrapPilotHudMissionOverrideActive = false;
+        static std::array<int, 8> g_ScrapPilotHudMissionOverride = {};
+        static bool g_ScrapPilotHudPanelOverrideActive = false;
+        static bool g_ScrapPilotHudPanelOverrideVisible = true;
+        static ULONGLONG g_ScrapPilotHudLastRefreshTick = 0;
         static HudSpriteRectRecord* g_HudSpriteRectTableBase = nullptr;
         static bool g_HudSpriteRectTableDiscoveryAttempted = false;
         static ULONGLONG g_HudSpriteRectTableDiscoveryLastTick = 0;
@@ -830,6 +1166,10 @@ namespace BZROpenShim
             float scrapHardToGetCooldownAI = 10.0f;
             bool hasScrapSearchRadiusAI = false;
             float scrapSearchRadiusAI = 0.0f;
+            bool hasScrapRetargetPeriodAI = false;
+            float scrapRetargetPeriodAI = kScrapRetargetPeriodDefault;
+            bool hasScrapRetargetMinImprovementAI = false;
+            float scrapRetargetMinImprovementAI = kScrapRetargetMinImprovementDefault;
         };
 
         struct AiTuningCache
@@ -918,14 +1258,35 @@ namespace BZROpenShim
             GameKey,
         };
 
+        // One raw "+/- <source> <token>" line inside a command block, addressed by
+        // its index in the owning document so edits can be made in place.
+        struct InputBindingLineRef
+        {
+            size_t lineIndex = SIZE_MAX;
+            bool positive = false;
+            std::string source;
+            std::string token;
+        };
+
         struct InputBindingCommandBlock
         {
             std::string command;
             std::string section;
             std::string comment;
+            size_t headerLineIndex = SIZE_MAX;
+            size_t closeLineIndex = SIZE_MAX;
+            std::vector<InputBindingLineRef> bindingLines;
             std::vector<std::string> positiveKeyboardTokens;
             std::vector<std::string> positiveNonKeyboardTokens;
             bool hasPositiveNonKeyboard = false;
+        };
+
+        // Lossless copy of a map file: every line verbatim, so structure-preserving
+        // rewrites only touch the specific lines an edit targets.
+        struct InputBindingDocument
+        {
+            std::vector<std::string> lines;
+            bool loaded = false;
         };
 
         struct InputBindingInventoryStats
@@ -944,6 +1305,7 @@ namespace BZROpenShim
         {
             std::string action;
             std::vector<std::string> chords;
+            std::vector<size_t> chordLineIndices;
         };
 
         struct InputBindingRowSeed
@@ -1276,13 +1638,14 @@ namespace BZROpenShim
         static ULONGLONG g_CareerStatsMpLastActiveTick = 0;
         static InlineDetour32 g_CalcRangeCraftDetour = {};
         static bool g_CalcRangeCraftHookInstalled = false;
+        static bool g_ScrapPathScoreHookInstalled = false;
+        static InlineDetour32 g_RecycleTaskDoGotoScrapDetour = {};
+        static bool g_ScrapRetargetHookInstalled = false;
         static InlineDetour32 g_AttackTaskDoStateDetour = {};
         static bool g_AttackTaskDoStateHookInstalled = false;
         static InlineDetour32 g_ArtilleryDoAttackDetour = {};
         static FnArtilleryDoAttack g_BzrFn_ArtilleryDoAttackOriginal = nullptr;
         static bool g_ArtilleryDoAttackHookInstalled = false;
-        static InlineDetour32 g_OffensiveProcessDoSubTaskDetour = {};
-        static InlineDetour32 g_GunTowerProcessDoSubTaskDetour = {};
         static bool g_RetargetPeriodHooksInstalled = false;
         static volatile long g_AttackRevealTraceBudget = 64;
         static InlineDetour32 g_AIUnitRemoveDetour = {};
@@ -1304,26 +1667,49 @@ namespace BZROpenShim
         static bool g_ConstructorRemoteBuildFixMismatchLogged = false;
         static bool g_MagnetMineSimulateHookInstalled = false;
         static bool g_ProximityMineSimulateHookInstalled = false;
-        static bool g_SprayBuildingSimulateHookInstalled = false;
+        static InlineDetour32 g_ScriptCanBuildDetour = {};
+        static InlineDetour32 g_ScriptIsBusyDetour = {};
+        static FnScriptProducerPredicate g_BzrFn_ScriptCanBuildOriginal = nullptr;
+        static FnScriptProducerPredicate g_BzrFn_ScriptIsBusyOriginal = nullptr;
+        static bool g_ProducerScriptPredicateHooksInstalled = false;
+        static bool g_BriefingScrollFixInstalled = false;
+        static bool g_BriefingScrollFixEnabled = true;
+        static bool g_MultiRenderCountClampInstalled = false;
+        static bool g_MultiRenderCountClampEnabled = true;
+        static volatile long g_MultiRenderCountClampLogBudget = 8;
+        static bool g_MagnetZeroRangeGuardEnabled = true;
+        static volatile long g_MagnetZeroRangeLogBudget = 8;
+		static bool g_SprayBuildingSimulateHookInstalled = false;
+		static bool g_TugCargoPostLoadFixInstalled = false;
+		static bool g_TugCargoPostLoadFixEnabled = true;
+		static volatile long g_TugCargoPostLoadLogBudget = 16;
+		static bool g_ApcAlliedTargetDeployFixInstalled = false;
+		static bool g_ApcAlliedTargetDeployFixEnabled = true;
         static bool g_SplinterUndeadFixEnabled = kSplinterUndeadFixEnabledDefault;
         static volatile long g_SplinterUndeadTraceBudget = kSplinterUndeadTraceBudgetDefault;
         static bool g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
         static volatile long g_ConstructorRemoteBuildTraceBudget = kConstructorRemoteBuildTraceBudgetDefault;
-        static std::unordered_map<uintptr_t, ULONGLONG> g_RetargetPeriodNextForceMsByProcess = {};
+        static std::unordered_map<uintptr_t, RetargetPeriodState> g_RetargetPeriodStateByProcess = {};
+        static std::unordered_map<uintptr_t, ScrapPathFailureState> g_ScrapPathFailuresByObject = {};
+        static std::unordered_map<uintptr_t, ScrapRetargetState> g_ScrapRetargetStateByTask = {};
         static std::unordered_map<uintptr_t, AiUnitTuningOverride> g_AiUnitTuningOverridesByObject = {};
         static std::unordered_map<uintptr_t, CombatKiteState> g_CombatKiteStateByObject = {};
         static volatile long g_AiUnitTuningTraceBudget = 64;
         static volatile long g_CombatKiteTraceBudget = 256;
+        static volatile long g_ScrapPathTraceBudget = 128;
         static bool g_InputBindingUiScaffoldInitialized = false;
         static bool g_InputBindingUiScaffoldLogged = false;
-        static bool g_InputBindingUiPopulateHookInstallAttempted = false;
         static bool g_InputBindingUiPopulateHookInstalled = false;
         static bool g_InputBindingUiKeyReleasedHookInstalled = false;
         static bool g_InputBindingUiPopulateHookMismatchLogged = false;
         static std::filesystem::path g_InputBindingInstallDirectory = {};
         static InputBindingInventoryStats g_InputBindingInventory = {};
+        static InputBindingDocument g_InputMapDocument = {};
+        static InputBindingDocument g_GameKeyMapDocument = {};
         static std::vector<InputBindingCommandBlock> g_InputBindingCommandBlocks = {};
         static std::vector<GameKeyBindingAction> g_GameKeyBindingActions = {};
+        static bool g_InputMapLiveReloadChecked = false;
+        static bool g_InputMapLiveReloadAvailable = false;
         static std::vector<InputBindingUiRow> g_InputBindingUiRows = {};
         static void* g_LastOptionsInputScreen = nullptr;
         static void* g_InputBindingUiScreen = nullptr;
@@ -1352,6 +1738,7 @@ namespace BZROpenShim
         static std::string g_InputBindingUiPendingDisplayText = {};
         static std::string g_InputBindingUiStatusText = {};
         static void InitializeInputBindingUiScaffold();
+        static bool TryLiveReloadInputMapTables();
         static void OnInputBindingBackClicked();
         static void OnInputBindingDefaultsClicked();
         static void OnInputBindingRowButtonClicked(size_t visibleSlot);
@@ -1445,14 +1832,121 @@ namespace BZROpenShim
             OnInputBindingRefreshClicked();
         }
 
+        // --- OpenShim settings screen (options-shell sub-page) ------------------
+        // A native "OpenShim" button is appended to the stock Options screen; it
+        // navigates to the (already hooked) input options screen with a mode flag
+        // set, and the constructor hook renders a settings page there instead of
+        // the key-binding list. Settings edit openshim.ini losslessly and apply
+        // live through each feature's existing baseline/refresh machinery.
+        constexpr size_t kShimSettingsUiColumnCount = 2;
+        constexpr size_t kShimSettingsUiRowsPerColumn = 8;
+        constexpr size_t kShimSettingsUiVisibleRowCount =
+            kShimSettingsUiColumnCount * kShimSettingsUiRowsPerColumn;
+
+        static InlineDetour32 g_OptionsParentCtorDetour = {};
+        static FnOptionsInputCtor g_BzrFn_OptionsParentCtor = nullptr;
+        static bool g_OptionsParentHookInstalled = false;
+        static bool g_OptionsParentHookMismatchLogged = false;
+        static void* g_OptionsParentScreen = nullptr;
+        static void* g_ShimSettingsMenuButton = nullptr;
+        // Set by the OpenShim button click; consumed when the input screen is
+        // (re)constructed or when it already exists and can be restyled directly.
+        // The request expires so a click that never reached a construction cannot
+        // hijack an unrelated later visit to the stock input page.
+        static bool g_ShimSettingsPageRequested = false;
+        static ULONGLONG g_ShimSettingsPageRequestTick = 0;
+        constexpr ULONGLONG kShimSettingsPageRequestTtlMs = 3000;
+        // True while the settings page owns the hooked input screen's visuals.
+        static bool g_ShimSettingsPageActive = false;
+        static void* g_ShimSettingsUiBackdrop = nullptr;
+        static void* g_ShimSettingsUiFrame = nullptr;
+        static void* g_ShimSettingsUiTopMask = nullptr;
+        static void* g_ShimSettingsUiContentMask = nullptr;
+        static void* g_ShimSettingsUiHeaderLabel = nullptr;
+        static void* g_ShimSettingsUiStatusLabel = nullptr;
+        static void* g_ShimSettingsUiFooterLabel = nullptr;
+        static void* g_ShimSettingsUiBackButton = nullptr;
+        static std::array<void*, kShimSettingsUiVisibleRowCount> g_ShimSettingsUiRowLabels = {};
+        static std::array<void*, kShimSettingsUiVisibleRowCount> g_ShimSettingsUiRowButtons = {};
+        static std::string g_ShimSettingsUiStatusText = {};
+        static void OnShimSettingsMenuClicked();
+        static void OnShimSettingsBackClicked();
+        static void OnShimSettingsRowClicked(size_t rowIndex);
+        static void ResetShimSettingsUiVisuals();
+        static void EnsureInputBindingUiControls(void* screen);
+        static void RefreshInputBindingUiControls();
+
+        static void __cdecl ShimSettingsMenuClick()
+        {
+            OnShimSettingsMenuClicked();
+        }
+
+        static void __cdecl ShimSettingsBackClick()
+        {
+            OnShimSettingsBackClicked();
+        }
+
+#define BZR_SHIM_SETTINGS_ROW_CLICK_DECL(index) \
+        static void __cdecl ShimSettingsRowClick##index() { OnShimSettingsRowClicked(index); }
+
+        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(0)
+        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(1)
+        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(2)
+        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(3)
+        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(4)
+        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(5)
+        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(6)
+        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(7)
+        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(8)
+        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(9)
+        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(10)
+        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(11)
+        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(12)
+        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(13)
+        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(14)
+        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(15)
+
+#undef BZR_SHIM_SETTINGS_ROW_CLICK_DECL
+
+        static void* const kShimSettingsRowClickCallbacks[kShimSettingsUiVisibleRowCount] =
+        {
+            reinterpret_cast<void*>(ShimSettingsRowClick0),
+            reinterpret_cast<void*>(ShimSettingsRowClick1),
+            reinterpret_cast<void*>(ShimSettingsRowClick2),
+            reinterpret_cast<void*>(ShimSettingsRowClick3),
+            reinterpret_cast<void*>(ShimSettingsRowClick4),
+            reinterpret_cast<void*>(ShimSettingsRowClick5),
+            reinterpret_cast<void*>(ShimSettingsRowClick6),
+            reinterpret_cast<void*>(ShimSettingsRowClick7),
+            reinterpret_cast<void*>(ShimSettingsRowClick8),
+            reinterpret_cast<void*>(ShimSettingsRowClick9),
+            reinterpret_cast<void*>(ShimSettingsRowClick10),
+            reinterpret_cast<void*>(ShimSettingsRowClick11),
+            reinterpret_cast<void*>(ShimSettingsRowClick12),
+            reinterpret_cast<void*>(ShimSettingsRowClick13),
+            reinterpret_cast<void*>(ShimSettingsRowClick14),
+            reinterpret_cast<void*>(ShimSettingsRowClick15),
+        };
+
         static int g_EngineFlamePrimaryRedTexture = 0;
         static int g_EngineFlamePrimaryGreenTexture = 0;
+        static int g_EngineFlamePrimaryPurpleTexture = 0;
         static void* g_EngineFlamePrimaryManager = nullptr;
         static void* g_EngineFlameSecondaryManager = nullptr;
         alignas(16) static unsigned char g_EngineFlamePrimaryRed[kEngineFlameObjectSize] = {};
         alignas(16) static unsigned char g_EngineFlamePrimaryGreen[kEngineFlameObjectSize] = {};
+        alignas(16) static unsigned char g_EngineFlamePrimaryPurple[kEngineFlameObjectSize] = {};
         alignas(16) static unsigned char g_EngineFlameSecondaryRed[kEngineFlameObjectSize] = {};
         alignas(16) static unsigned char g_EngineFlameSecondaryGreen[kEngineFlameObjectSize] = {};
+        alignas(16) static unsigned char g_EngineFlameSecondaryPurple[kEngineFlameObjectSize] = {};
+
+        // Faction jet flames (openshim.ini [Display] JetFlames). A global cosmetic
+        // preference: when on, a unit's engine flame is tinted by its faction
+        // (first char of the ODF label) for any team an EXU script has NOT already
+        // colored. Purely visual/local, so it applies everywhere including MP.
+        static constexpr bool kJetFlamesEnabledDefault = false;
+        static bool g_JetFlamesConfigInitialized = false;
+        static bool g_JetFlamesEnabled = kJetFlamesEnabledDefault;
         enum class UnderAttackAlertMode : int
         {
             None = 1,
@@ -1472,6 +1966,13 @@ namespace BZROpenShim
         static bool g_UnderAttackAlertEnabled = true;
         static float g_UnderAttackAlertCooldownSeconds = 1.0f;
         static float g_UnderAttackAlertNextAllowedTime = 0.0f;
+        // User-config baseline: the mode resolved from openshim.ini + legacy cfg
+        // + env at init. Scripted (EXU bridge) overrides revert to this, not to
+        // the hardcoded Normal default, on a mission reset.
+        static bool g_UnderAttackAlertBaselineCaptured = false;
+        static UnderAttackAlertMode g_UnderAttackAlertBaselineMode = UnderAttackAlertMode::Normal;
+        static bool g_UnderAttackAlertBaselineEnabled = true;
+        static float g_UnderAttackAlertBaselineCooldownSeconds = 1.0f;
         static constexpr const char* kUnderAttackAlertConfigName = "campaignReimagined_settings.cfg";
         static constexpr uintptr_t kUnderAttackAlertSoundAddr = 0x00877220;
         static constexpr uintptr_t kOgreSceneManagerStructureAddr = 0x00920EA0;
@@ -1516,17 +2017,24 @@ namespace BZROpenShim
             reinterpret_cast<FnPlayGlobalSound>(0x0043AA30);
         static bool g_TargetReticlePopupConfigInitialized = false;
         static TargetReticlePopupMode g_TargetReticlePopupMode = TargetReticlePopupMode::Default;
-        static bool g_TargetReticlePopupSteamNeutralAllowed = false;
-        static bool g_TargetReticlePopupSteamNeutralWarned = false;
+        // User-config baseline (see under-attack alert note above).
+        static bool g_TargetReticlePopupBaselineCaptured = false;
+        static TargetReticlePopupMode g_TargetReticlePopupBaselineMode = TargetReticlePopupMode::Default;
         static constexpr bool kBomberAiRangeEnabledDefault = false;
         static constexpr bool kHowitzerVolleyEnabledDefault = false;
+        static constexpr bool kHowitzerUndeployedRetaliationFixEnabledDefault = true;
         static constexpr bool kWeaponMaskCarrierBiasEnabledDefault = false;
         static constexpr bool kAiOdfGameplayTuningEnabledDefault = false;
-        static constexpr bool kTurretAimPitchEnabledDefault = false;
+        static constexpr bool kTurretAimPitchEnabledDefault = true;
         static constexpr bool kAttackRevealEnabledDefault = true;
         static constexpr long kAttackRevealTraceBudgetDefault = 64;
+        // Global single-player improvement. The exact-byte and live-net-id
+        // guards still keep it off unsupported builds and multiplayer.
+        static constexpr bool kJumpSnipeCrouchEnabledDefault = true;
         static bool g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
         static bool g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
+        static bool g_HowitzerUndeployedRetaliationFixEnabled =
+            kHowitzerUndeployedRetaliationFixEnabledDefault;
         static bool g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
         static bool g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
         static bool g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
@@ -1575,6 +2083,11 @@ namespace BZROpenShim
             { "zoom_factor_minus", nullptr, "Zoom Out" },
         };
         static constexpr size_t kGameObjectPlayerShotOffset = 0x1D8;
+        // SelectionDisplay::Render carries the complete Redux GameObject pointer,
+        // while the inherited GameObject interface (whose slot +4 is GetTeam)
+        // begins at +0x18. Calling slot +4 from the complete-object vtable was
+        // the crash-prone behavior in the original NEUTRAL_ONLY experiment.
+        static constexpr size_t kGameObjectInterfaceOffset = 0x18;
         static constexpr size_t kGameObjectGetTeamVtableOffset = 0x4;
         // Redux 2.2.301 stores GameObject::perceivedTeam at +0x174. The
         // GameObject interface subobject begins at +0x18 and its
@@ -1621,11 +2134,20 @@ namespace BZROpenShim
         using FnOgreAttachObject = void(__thiscall*)(void*, void*);
         using FnOgreSetBillboardsInWorldSpace = void(__thiscall*)(void*, bool);
         using FnOgreSetDefaultDimensions = void(__thiscall*)(void*, float, float);
+        using FnOgreSetBillboardMaterialName = void(__thiscall*)(void*, const std::string&, const std::string&);
         using FnOgreCreateBillboard = void*(__thiscall*)(void*, float, float, float, const OgreColourValue&);
         using FnOgreSetBillboardPosition = void(__thiscall*)(void*, float, float, float);
+        using FnOgreSetBillboardColour = void(__thiscall*)(void*, const OgreColourValue&);
+        using FnOgreDestroyBillboardSet = void(__thiscall*)(void*, void*);
         using FnOgreSetNodePosition = void(__thiscall*)(void*, float, float, float);
         using FnOgreSetNodeOrientation = void(__thiscall*)(void*, float, float, float, float);
         using FnOgreSetVisible = void(__thiscall*)(void*, bool);
+        using FnOgreGetLightColour = const OgreColourValue*(__thiscall*)(void*);
+        using FnOgreSetLightColour = void(__thiscall*)(void*, float, float, float);
+        using FnOgreGetLightRadian = const float*(__thiscall*)(void*);
+        using FnOgreGetLightFloat = float(__thiscall*)(void*);
+        using FnOgreGetLightVisible = bool(__thiscall*)(void*);
+        using FnOgreSetSpotlightRange = void(__thiscall*)(void*, const float*, const float*, float);
         using FnOgreGetRenderQueue = void*(__thiscall*)(void*);
         using FnOgreGetCurrentViewport = void*(__thiscall*)(void*);
         using FnOgreViewportGetCamera = void*(__thiscall*)(void*);
@@ -1650,6 +2172,29 @@ namespace BZROpenShim
         // the case where these were never observed.
         static FnOgreMovableObjectNotifyCurrentCamera g_OgreFn_MovableObjectNotifyCurrentCamera = nullptr;
         static FnOgreEntityUpdateRenderQueue g_OgreFn_EntityUpdateRenderQueue = nullptr;
+
+        using FnFlagDisplaySubmit = void(__thiscall*)(void*, void*);
+        using FnNetPlayerGetData = void*(__thiscall*)(void*, uint32_t);
+        using FnGameObjectGetSphere = void*(__thiscall*)(void*);
+
+        struct MultiplayerFlagRenderSet
+        {
+            uint64_t payloadHash = 0;
+            std::string materialName;
+            std::string resourceGroup;
+            std::filesystem::path resourceDirectory;
+            bool resourcesReady = false;
+            void* sceneManager = nullptr;
+            void* billboardSet = nullptr;
+            std::vector<void*> billboards;
+            size_t usedBillboards = 0;
+        };
+
+        static FnFlagDisplaySubmit g_BzrFn_FlagDisplaySubmitOriginal = nullptr;
+        static bool g_MultiplayerFlagRenderHookInstalled = false;
+        static bool g_MultiplayerFlagRenderHookFailureLogged = false;
+        static bool g_MultiplayerFlagRendererLoggedReady = false;
+        static std::unordered_map<uint64_t, MultiplayerFlagRenderSet> g_MultiplayerFlagRenderSets = {};
 
         template<typename T>
         static T ResolveOgreProc(const char* name)
@@ -1702,10 +2247,10 @@ namespace BZROpenShim
             if (s_cached < 0)
             {
                 s_cached =
-                    EnvFlagEnabled("OPENSHIM_ENABLE_MP_FLAG_UI") ||
-                    EnvFlagEnabled("OPENSHIM_ENABLE_MULTIPLAYER_FLAG_UI") ||
-                    EnvFlagEnabled("OPENSHIM_ENABLE_MP_FLAGS") ||
-                    EnvFlagEnabled("BZR_ENABLE_MP_FLAG_UI") ? 1 : 0;
+                    (EnvFlagEnabled("OPENSHIM_DISABLE_MP_FLAG_UI") ||
+                     EnvFlagEnabled("OPENSHIM_DISABLE_MULTIPLAYER_FLAG_UI") ||
+                     EnvFlagEnabled("OPENSHIM_DISABLE_MP_FLAGS") ||
+                     EnvFlagEnabled("BZR_DISABLE_MP_FLAG_UI")) ? 0 : 1;
             }
             return s_cached != 0;
         }
@@ -4853,6 +5398,60 @@ namespace BZROpenShim
             }
         }
 
+        static bool IsLikelyLiveOgreObject(const void* object)
+        {
+            if (!object)
+                return false;
+
+            void* vtable = nullptr;
+            __try
+            {
+                vtable = *reinterpret_cast<void* const*>(object);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+
+            HMODULE ogreMain = GetModuleHandleA("OgreMain.dll");
+            if (!vtable || !ogreMain)
+                return false;
+
+            MEMORY_BASIC_INFORMATION mbi = {};
+            return VirtualQuery(vtable, &mbi, sizeof(mbi)) == sizeof(mbi) &&
+                mbi.State == MEM_COMMIT &&
+                mbi.Type == MEM_IMAGE &&
+                mbi.AllocationBase == ogreMain;
+        }
+
+        static bool TryAddChunkProxyRenderableSafe(
+            void* renderQueue,
+            void* renderable,
+            uint8_t groupId,
+            uint16_t priority,
+            FnOgreRenderQueueAddRenderablePriority addRenderablePriority)
+        {
+            // A freed SubEntity can remain in committed heap memory long enough
+            // for Entity::getSubEntity to return it successfully. Validate its
+            // vtable before Ogre dereferences it, then contain any access fault
+            // from a teardown race we could not observe in advance.
+            if (!renderQueue || !addRenderablePriority ||
+                !IsLikelyLiveOgreObject(renderable))
+            {
+                return false;
+            }
+
+            __try
+            {
+                addRenderablePriority(renderQueue, renderable, groupId, priority);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         static uint8_t TryGetChunkProxyRenderQueueGroupSafe(
             void* entity,
             FnOgreGetRenderQueueGroup getRenderQueueGroup,
@@ -5032,7 +5631,23 @@ namespace BZROpenShim
                     if (!subEntity)
                         continue;
 
-                    addRenderablePriority(renderQueue, subEntity, groupId, 100u);
+                    if (!TryAddChunkProxyRenderableSafe(
+                            renderQueue,
+                            subEntity,
+                            groupId,
+                            100u,
+                            addRenderablePriority))
+                    {
+                        LogChunkManualSubmitSkip(
+                            slot,
+                            L"sub-entity-stale",
+                            sceneManager,
+                            viewport,
+                            currentCamera,
+                            resolvedCamera);
+                        ForgetChunkProxySlotOgreRefs(slot);
+                        return false;
+                    }
                     ++directAddCount;
                     if (slot.renderQueueAddCount < USHRT_MAX)
                         ++slot.renderQueueAddCount;
@@ -5487,7 +6102,25 @@ namespace BZROpenShim
                     if (!subEntity)
                         continue;
 
-                    addRenderablePriority(renderQueue, subEntity, groupId, 100u);
+                    if (!TryAddChunkProxyRenderableSafe(
+                            renderQueue,
+                            subEntity,
+                            groupId,
+                            100u,
+                            addRenderablePriority))
+                    {
+                        static volatile long s_StaleSubEntityLogBudget = 8;
+                        if (InterlockedDecrement(&s_StaleSubEntityLogBudget) >= 0)
+                        {
+                            LogChunkDiagnostic(
+                                "chunkmesh",
+                                L"[CHUNKMESH] world-rq-submit rejected stale sub-entity entity=0x%08X subEntity=0x%08X\n",
+                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.entity)),
+                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(subEntity)));
+                        }
+                        ForgetChunkProxySlotOgreRefs(slot);
+                        break;
+                    }
                     ++added;
                     if (slot.renderQueueAddCount < USHRT_MAX)
                         ++slot.renderQueueAddCount;
@@ -6282,6 +6915,79 @@ namespace BZROpenShim
                 text[--length] = '\0';
 
             return text;
+        }
+
+        // --- Global user preferences (openshim.ini) ----------------------------
+        // A single user-editable INI carrying global preferences applied to ALL
+        // single-player content (the stock campaign, Instant Action, and any
+        // mission that does not script the setting itself). Two sections encode
+        // the multiplayer-safety rule directly in the file layout:
+        //   [Display]      cosmetic/local settings; applied everywhere, incl. MP.
+        //   [SinglePlayer] sim/gameplay settings; applied in SP only, never MP.
+        // Precedence per feature: engine default -> this file (user baseline) ->
+        // mission script (EXU bridge) wins. A scripted override reverts to the
+        // baseline captured from this file, not the hardcoded default, when the
+        // mission ends (ResetMissionHookOverrides).
+        static constexpr char kUserConfigFileName[] = "openshim.ini";
+        static constexpr char kUserConfigDisplaySection[] = "Display";
+        static constexpr char kUserConfigSinglePlayerSection[] = "SinglePlayer";
+
+        static std::filesystem::path GetUserConfigPath()
+        {
+            const auto dir = GetConfigModuleDirectory();
+            if (dir.empty())
+                return {};
+            return dir / kUserConfigFileName;
+        }
+
+        // Tri-state string read: returns false when the key is absent (or the
+        // file/section is missing), so callers can distinguish "no opinion"
+        // (fall through to the next source) from an explicit value.
+        static bool TryGetUserConfigString(const char* section, const char* key, std::string& out)
+        {
+            const auto path = GetUserConfigPath();
+            if (path.empty())
+                return false;
+
+            // A sentinel default reliably detects a missing key: a present key
+            // (even blank) never yields the sentinel byte.
+            static constexpr char kUnsetSentinel[] = "\x01__openshim_unset__";
+            char buf[128] = {};
+            GetPrivateProfileStringA(section, key, kUnsetSentinel, buf,
+                static_cast<DWORD>(sizeof(buf)), path.string().c_str());
+            if (buf[0] == '\0' || std::strcmp(buf, kUnsetSentinel) == 0)
+                return false;
+
+            char* trimmed = TrimAsciiInPlace(buf);
+            if (*trimmed == '\0')
+                return false;
+            out.assign(trimmed);
+            return true;
+        }
+
+        // Tri-state boolean read over TryGetUserConfigString: returns false when
+        // the key is absent OR present-but-unparseable (both mean "no opinion").
+        // Accepts 1/0, true/false, on/off, yes/no, enabled/disabled (any case).
+        static bool TryGetUserConfigBool(const char* section, const char* key, bool& out)
+        {
+            std::string value;
+            if (!TryGetUserConfigString(section, key, value))
+                return false;
+            for (char& c : value)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (value == "1" || value == "true" || value == "on" ||
+                value == "yes" || value == "enabled")
+            {
+                out = true;
+                return true;
+            }
+            if (value == "0" || value == "false" || value == "off" ||
+                value == "no" || value == "disabled")
+            {
+                out = false;
+                return true;
+            }
+            return false;
         }
 
         static std::string NormalizeBanId(const char* value)
@@ -7170,9 +7876,10 @@ namespace BZROpenShim
 
             __try
             {
-                const int flagIndex = *reinterpret_cast<int*>(flagDisplay + kFlagDisplayFlagIndexOffset);
-                if (flagIndex != 0)
-                    *(flagDisplay + kFlagDisplayMakeTextureOffset) = 1;
+                // Redux never assigns the legacy atlas index, but its own
+                // CheckFlags path still uses this byte as the change signal.
+                // Our Ogre renderer polls the same network payload directly.
+                *(flagDisplay + kFlagDisplayMakeTextureOffset) = 1;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -7630,13 +8337,17 @@ namespace BZROpenShim
 
         static void PrimeSelectedFlagForTesting(const char* source)
         {
-            if (TryApplySelectedFlagThroughEngine(source))
-                return;
-
             if (!TryGenerateSelectedFlagArtifacts(source))
                 return;
 
-            TryApplyCachedFlagPayload(source);
+            // Redux's SetMyFlag exits when slot 0x0D already exists, which
+            // prevents a later lobby selection from replacing the first flag.
+            // The shim path deliberately overwrites both the local cache and
+            // the replicated data slot on every selection change.
+            if (TryApplyCachedFlagPayload(source))
+                return;
+
+            TryApplySelectedFlagThroughEngine(source);
         }
 
         static void SelectFlagEntryByIndex(int index, const char* source)
@@ -7765,7 +8476,7 @@ namespace BZROpenShim
                 return false;
             }
 
-            std::fprintf(file, "; OpenShim experimental ban list\n");
+            std::fprintf(file, "; OpenShim ban list\n");
             std::fprintf(file, "; Format: <stable_id> [display name]\n");
             for (const BanRecord& entry : g_BanRecords)
             {
@@ -8000,6 +8711,15 @@ namespace BZROpenShim
             ApplyUnderAttackAlertMode(UnderAttackAlertMode::Normal, true);
 
             UnderAttackAlertMode mode = UnderAttackAlertMode::Normal;
+
+            // Global user baseline (openshim.ini [Display]) — lowest-priority
+            // source above the built-in default. The legacy per-mod cfg and the
+            // env overrides below intentionally take precedence over it.
+            std::string userConfigValue;
+            if (TryGetUserConfigString(kUserConfigDisplaySection, "UnderAttackAlert", userConfigValue) &&
+                TryParseUnderAttackAlertModeValue(userConfigValue.c_str(), mode))
+                ApplyUnderAttackAlertMode(mode, true);
+
             const auto configPath = GetConfigModuleDirectory() / kUnderAttackAlertConfigName;
             if (TryLoadUnderAttackAlertModeFromConfig(configPath, mode))
                 ApplyUnderAttackAlertMode(mode, true);
@@ -8026,10 +8746,28 @@ namespace BZROpenShim
                 }
             }
 
+            // Capture the fully-resolved state as the user baseline so scripted
+            // (EXU bridge) overrides revert here on mission end.
+            g_UnderAttackAlertBaselineMode = g_UnderAttackAlertMode;
+            g_UnderAttackAlertBaselineEnabled = g_UnderAttackAlertEnabled;
+            g_UnderAttackAlertBaselineCooldownSeconds = g_UnderAttackAlertCooldownSeconds;
+            g_UnderAttackAlertBaselineCaptured = true;
+
             Log(L"[AUDIO] Under-attack alert mode=%hs enabled=%hs cooldown=%.3fs\n",
                 UnderAttackAlertModeName(g_UnderAttackAlertMode),
                 g_UnderAttackAlertEnabled ? "yes" : "no",
                 static_cast<double>(g_UnderAttackAlertCooldownSeconds));
+        }
+
+        static void RevertUnderAttackAlertToBaseline()
+        {
+            InitializeUnderAttackAlertConfig();  // idempotent; ensures baseline captured
+            if (!g_UnderAttackAlertBaselineCaptured)
+                return;
+            g_UnderAttackAlertMode = g_UnderAttackAlertBaselineMode;
+            g_UnderAttackAlertEnabled = g_UnderAttackAlertBaselineEnabled;
+            g_UnderAttackAlertCooldownSeconds = g_UnderAttackAlertBaselineCooldownSeconds;
+            g_UnderAttackAlertNextAllowedTime = 0.0f;
         }
 
         static bool SetUnderAttackAlertModeInternal(UnderAttackAlertMode mode, bool logChange)
@@ -8169,22 +8907,6 @@ namespace BZROpenShim
             return TryParseTargetReticlePopupModeValue(value, outMode);
         }
 
-        static TargetReticlePopupMode SanitizeTargetReticlePopupMode(TargetReticlePopupMode mode, bool logDowngrade)
-        {
-            if (mode == TargetReticlePopupMode::NeutralOnly &&
-                !g_TargetReticlePopupSteamNeutralAllowed)
-            {
-                if (logDowngrade && !g_TargetReticlePopupSteamNeutralWarned)
-                {
-                    g_TargetReticlePopupSteamNeutralWarned = true;
-                    Log(L"[HUD] Reticle popup NEUTRAL_ONLY is experimental and downgraded to DEFAULT; set OPENSHIM_ALLOW_NEUTRAL_RETICLE_POPUP=1 to force it\n");
-                }
-                return TargetReticlePopupMode::Default;
-            }
-
-            return mode;
-        }
-
         static void ApplyTargetReticlePopupMode(TargetReticlePopupMode mode)
         {
             g_TargetReticlePopupMode = mode;
@@ -8196,32 +8918,49 @@ namespace BZROpenShim
                 return;
 
             g_TargetReticlePopupConfigInitialized = true;
-            g_TargetReticlePopupSteamNeutralAllowed =
-                EnvFlagEnabled("OPENSHIM_ALLOW_NEUTRAL_RETICLE_POPUP") ||
-                EnvFlagEnabled("BZR_ALLOW_NEUTRAL_RETICLE_POPUP") ||
-                EnvFlagEnabled("OPENSHIM_ALLOW_STEAM_NEUTRAL_RETICLE_POPUP") ||
-                EnvFlagEnabled("BZR_ALLOW_STEAM_NEUTRAL_RETICLE_POPUP");
             ApplyTargetReticlePopupMode(TargetReticlePopupMode::Default);
 
             TargetReticlePopupMode mode = TargetReticlePopupMode::Default;
+
+            // Global user baseline (openshim.ini [Display]) — lowest-priority
+            // source above the built-in default; legacy cfg and env override it.
+            std::string userConfigValue;
+            if ((TryGetUserConfigString(kUserConfigDisplaySection, "TargetPolicy", userConfigValue) ||
+                 TryGetUserConfigString(kUserConfigDisplaySection, "TargetReticle", userConfigValue)) &&
+                TryParseTargetReticlePopupModeValue(userConfigValue.c_str(), mode))
+            {
+                ApplyTargetReticlePopupMode(mode);
+            }
+
             const auto configPath = GetConfigModuleDirectory() / kUnderAttackAlertConfigName;
             if (TryLoadTargetReticlePopupModeFromConfig(configPath, mode))
-                ApplyTargetReticlePopupMode(SanitizeTargetReticlePopupMode(mode, true));
+                ApplyTargetReticlePopupMode(mode);
 
             if (TryGetEnvTargetReticlePopupMode("OPENSHIM_TARGET_RETICLE_POPUP_MODE", mode) ||
                 TryGetEnvTargetReticlePopupMode("BZR_TARGET_RETICLE_POPUP_MODE", mode))
             {
-                ApplyTargetReticlePopupMode(SanitizeTargetReticlePopupMode(mode, true));
+                ApplyTargetReticlePopupMode(mode);
             }
+
+            // Capture the resolved mode as the user baseline for mission reset.
+            g_TargetReticlePopupBaselineMode = g_TargetReticlePopupMode;
+            g_TargetReticlePopupBaselineCaptured = true;
 
             Log(L"[HUD] Target reticle popup mode=%hs\n",
                 TargetReticlePopupModeName(g_TargetReticlePopupMode));
         }
 
+        static void RevertTargetReticlePopupToBaseline()
+        {
+            InitializeTargetReticlePopupConfig();  // idempotent; ensures baseline captured
+            if (!g_TargetReticlePopupBaselineCaptured)
+                return;
+            ApplyTargetReticlePopupMode(g_TargetReticlePopupBaselineMode);
+        }
+
         static bool SetTargetReticlePopupModeInternal(TargetReticlePopupMode mode, bool logChange)
         {
             InitializeTargetReticlePopupConfig();
-            mode = SanitizeTargetReticlePopupMode(mode, logChange);
             const bool changed = g_TargetReticlePopupMode != mode;
             ApplyTargetReticlePopupMode(mode);
             if (logChange)
@@ -8248,27 +8987,34 @@ namespace BZROpenShim
             }
         }
 
-        static bool IsNeutralTeamObject(void* objectPtr)
+        static int GetGameObjectActualTeam(void* objectPtr)
         {
             if (!objectPtr)
-                return false;
+                return INT_MIN;
 
             __try
             {
-                auto** vtable = *reinterpret_cast<void***>(objectPtr);
+                auto* gameObjectInterface =
+                    reinterpret_cast<uint8_t*>(objectPtr) + kGameObjectInterfaceOffset;
+                auto** vtable = *reinterpret_cast<void***>(gameObjectInterface);
                 if (!vtable)
-                    return false;
+                    return INT_MIN;
 
                 auto getTeam = reinterpret_cast<FnGameObjectGetTeam>(vtable[kGameObjectGetTeamVtableOffset / sizeof(void*)]);
                 if (!getTeam)
-                    return false;
+                    return INT_MIN;
 
-                return getTeam(objectPtr) == 0;
+                return getTeam(gameObjectInterface);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                return false;
+                return INT_MIN;
             }
+        }
+
+        static bool IsNeutralTeamObject(void* objectPtr)
+        {
+            return GetGameObjectActualTeam(objectPtr) == 0;
         }
 
         struct SatelliteVisibilityLogEntry
@@ -8283,25 +9029,7 @@ namespace BZROpenShim
 
         static int GetGameObjectTeamForLog(void* objectPtr)
         {
-            if (!objectPtr)
-                return INT_MIN;
-
-            __try
-            {
-                auto** vtable = *reinterpret_cast<void***>(objectPtr);
-                if (!vtable)
-                    return INT_MIN;
-
-                auto getTeam = reinterpret_cast<FnGameObjectGetTeam>(vtable[kGameObjectGetTeamVtableOffset / sizeof(void*)]);
-                if (!getTeam)
-                    return INT_MIN;
-
-                return getTeam(objectPtr);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return INT_MIN;
-            }
+            return GetGameObjectActualTeam(objectPtr);
         }
 
         static bool IsSatelliteOverviewActive()
@@ -8716,6 +9444,584 @@ namespace BZROpenShim
             return true;
         }
 
+        struct ConvergenceVec3
+        {
+            float x = 0.0f;
+            float y = 0.0f;
+            float z = 0.0f;
+        };
+
+        struct ConvergenceMatrix
+        {
+            float rightX, rightY, rightZ;
+            float upX, upY, upZ;
+            float frontX, frontY, frontZ;
+            uint8_t padding[4];
+            double positionX, positionY, positionZ;
+        };
+
+        static_assert(sizeof(ConvergenceMatrix) == 64, "Unexpected weapon transform size");
+
+        static ConvergenceVec3 CrossConvergenceVectors(
+            const ConvergenceVec3& lhs,
+            const ConvergenceVec3& rhs)
+        {
+            return {
+                lhs.y * rhs.z - lhs.z * rhs.y,
+                lhs.z * rhs.x - lhs.x * rhs.z,
+                lhs.x * rhs.y - lhs.y * rhs.x,
+            };
+        }
+
+        static bool NormalizeConvergenceVector(ConvergenceVec3& value)
+        {
+            const float lengthSquared = value.x * value.x + value.y * value.y + value.z * value.z;
+            if (!std::isfinite(lengthSquared) ||
+                lengthSquared <= kConvergenceDirectionEpsilon * kConvergenceDirectionEpsilon)
+            {
+                return false;
+            }
+
+            const float inverseLength = 1.0f / std::sqrt(lengthSquared);
+            value.x *= inverseLength;
+            value.y *= inverseLength;
+            value.z *= inverseLength;
+            return true;
+        }
+
+        static bool BuildConvergenceMatrix(
+            const ConvergenceVec3& origin,
+            ConvergenceVec3 direction,
+            ConvergenceMatrix& outMatrix)
+        {
+            if (!NormalizeConvergenceVector(direction))
+                return false;
+
+            ConvergenceVec3 right = {};
+            if (direction.x * direction.x + direction.z * direction.z >= 0.02f)
+            {
+                right = CrossConvergenceVectors({ 0.0f, 1.0f, 0.0f }, direction);
+                if (!NormalizeConvergenceVector(right))
+                    return false;
+            }
+            else
+            {
+                right = { 1.0f, 0.0f, 0.0f };
+            }
+
+            const ConvergenceVec3 up = CrossConvergenceVectors(direction, right);
+            outMatrix = {
+                right.x, right.y, right.z,
+                up.x, up.y, up.z,
+                direction.x, direction.y, direction.z,
+                {},
+                origin.x, origin.y, origin.z,
+            };
+            return true;
+        }
+
+        static void ApplyLocalPlayerReticleConvergence(void* craft)
+        {
+            if (!craft)
+                return;
+
+            auto carrierGetWeapon = reinterpret_cast<FnCarrierGetWeapon>(kCarrierGetWeaponAddr);
+            auto refreshWeaponTransform =
+                reinterpret_cast<FnRefreshWeaponTransform>(kRefreshWeaponTransformAddr);
+
+            __try
+            {
+                if (*reinterpret_cast<void**>(kLocalUserObjectPtrAddr) != craft)
+                    return;
+
+                void* carrier = *reinterpret_cast<void**>(
+                    reinterpret_cast<uint8_t*>(craft) + kCraftCarrierOffset);
+                if (!carrier)
+                    return;
+
+                const ConvergenceVec3 target =
+                    *reinterpret_cast<const ConvergenceVec3*>(kSmartReticlePositionAddr);
+                if (!std::isfinite(target.x) || !std::isfinite(target.y) || !std::isfinite(target.z))
+                    return;
+
+                for (int slot = 0; slot < kConvergenceWeaponSlotCount; ++slot)
+                {
+                    void* weapon = carrierGetWeapon(carrier, slot);
+                    if (!weapon)
+                        continue;
+
+                    void* weaponObject = *reinterpret_cast<void**>(
+                        reinterpret_cast<uint8_t*>(weapon) + kWeaponObjectOffset);
+                    if (!weaponObject)
+                        continue;
+
+                    auto* transform = reinterpret_cast<ConvergenceMatrix*>(weaponObject);
+                    const ConvergenceVec3 origin = {
+                        static_cast<float>(transform->positionX),
+                        static_cast<float>(transform->positionY),
+                        static_cast<float>(transform->positionZ),
+                    };
+                    ConvergenceMatrix converged = {};
+                    if (!BuildConvergenceMatrix(
+                            origin,
+                            { target.x - origin.x, target.y - origin.y, target.z - origin.z },
+                            converged))
+                    {
+                        continue;
+                    }
+
+                    *transform = converged;
+                    refreshWeaponTransform(weaponObject, transform);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                // Fail soft if a future build changes the carrier/weapon layout.
+            }
+        }
+
+        static void __fastcall HovercraftUpdateWeaponAimForReticle(
+            void* craft,
+            void* /*edx*/,
+            float dt)
+        {
+            reinterpret_cast<FnUpdateWeaponAim>(kHovercraftUpdateWeaponAimAddr)(craft, dt);
+            if (g_PlayerReticleShotConvergenceEnabled && ReadLocalPlayerNetIdValue() == 0)
+                ApplyLocalPlayerReticleConvergence(craft);
+        }
+
+        static void __fastcall WingmanUpdateWeaponAimWithConvergence(
+            void* craft,
+            void* /*edx*/,
+            float dt)
+        {
+            const uintptr_t target =
+                (g_ShotConvergenceEnabled && ReadLocalPlayerNetIdValue() == 0)
+                    ? kWalkerUpdateWeaponAimAddr
+                    : kWingmanWeaponAimStockAddr;
+            reinterpret_cast<FnUpdateWeaponAim>(target)(craft, dt);
+        }
+
+        static bool TryReadPointerValue(uintptr_t address, void*& outValue)
+        {
+            outValue = nullptr;
+            __try
+            {
+                outValue = *reinterpret_cast<void**>(address);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static bool RefreshConvergenceVtableSlot(
+            uintptr_t slotAddress,
+            uintptr_t stockAddress,
+            void* enabledValue,
+            bool wantEnabled,
+            bool& activeState,
+            const wchar_t* label)
+        {
+            void* current = nullptr;
+            if (!TryReadPointerValue(slotAddress, current))
+            {
+                activeState = false;
+                return false;
+            }
+
+            void* stockValue = reinterpret_cast<void*>(stockAddress);
+            void* desiredValue = wantEnabled ? enabledValue : stockValue;
+            if (current == desiredValue)
+            {
+                activeState = wantEnabled;
+                return true;
+            }
+
+            if (current != stockValue && current != enabledValue)
+            {
+                static std::unordered_set<uintptr_t> loggedSlots;
+                if (loggedSlots.insert(slotAddress).second)
+                {
+                    Log(L"[CONVERGE] %ls vtable ownership mismatch slot=0x%08X current=0x%08X; left untouched\n",
+                        label,
+                        static_cast<uint32_t>(slotAddress),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)));
+                }
+                activeState = false;
+                return false;
+            }
+
+            if (!WritePointerValue(slotAddress, desiredValue))
+            {
+                activeState = false;
+                return false;
+            }
+
+            activeState = wantEnabled;
+            Log(L"[CONVERGE] %ls %ls slot=0x%08X target=0x%08X\n",
+                label,
+                wantEnabled ? L"enabled" : L"disabled",
+                static_cast<uint32_t>(slotAddress),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(desiredValue)));
+            return true;
+        }
+
+        static void RefreshShotConvergencePatchState()
+        {
+            const bool singlePlayer = ReadLocalPlayerNetIdValue() == 0;
+            RefreshConvergenceVtableSlot(
+                kWingmanWeaponAimVtableSlotAddr,
+                kWingmanWeaponAimStockAddr,
+                reinterpret_cast<void*>(WingmanUpdateWeaponAimWithConvergence),
+                g_ShotConvergenceEnabled && singlePlayer,
+                g_ShotConvergencePatchActive,
+                L"all-craft convergence");
+            RefreshConvergenceVtableSlot(
+                kHovercraftWeaponAimVtableSlotAddr,
+                kHovercraftUpdateWeaponAimAddr,
+                reinterpret_cast<void*>(HovercraftUpdateWeaponAimForReticle),
+                g_PlayerReticleShotConvergenceEnabled && singlePlayer,
+                g_PlayerReticleShotConvergencePatchActive,
+                L"player smart-reticle convergence");
+        }
+
+        static float ClampSmartReticleRange(float range)
+        {
+            return (std::clamp)(range, kSmartReticleRangeMin, kSmartReticleRangeMax);
+        }
+
+        static bool TryReadSmartReticleRange(float& outRange)
+        {
+            __try
+            {
+                outRange = *reinterpret_cast<const float*>(kSmartReticleRangeAddr);
+                return std::isfinite(outRange);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static bool TryWriteSmartReticleRange(float range)
+        {
+            DWORD oldProtect = 0;
+            if (!VirtualProtect(
+                    reinterpret_cast<void*>(kSmartReticleRangeAddr),
+                    sizeof(float),
+                    PAGE_EXECUTE_READWRITE,
+                    &oldProtect))
+            {
+                return false;
+            }
+
+            bool wrote = false;
+            __try
+            {
+                *reinterpret_cast<float*>(kSmartReticleRangeAddr) = range;
+                wrote = true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+
+            DWORD restoreProtect = 0;
+            VirtualProtect(
+                reinterpret_cast<void*>(kSmartReticleRangeAddr),
+                sizeof(float),
+                oldProtect,
+                &restoreProtect);
+            return wrote;
+        }
+
+        static void RefreshSmartReticleRangeState()
+        {
+            const float desired = ReadLocalPlayerNetIdValue() == 0
+                ? g_SmartReticleRange
+                : kSmartReticleRangeStock;
+            float current = 0.0f;
+            if (TryReadSmartReticleRange(current) && current == desired)
+                return;
+            if (TryWriteSmartReticleRange(desired))
+            {
+                Log(L"[RETICLE] Smart-reticle range=%.3f (%hs)\n",
+                    static_cast<double>(desired),
+                    desired == kSmartReticleRangeStock ? "stock/network" : "single-player");
+            }
+        }
+
+        static bool TryCaptureScrapPilotHudBaseline()
+        {
+            std::array<int, 8> captured = {};
+            bool anyNonZero = false;
+            __try
+            {
+                size_t index = 0;
+                for (const auto& point : kScrapPilotHudTextPointAddresses)
+                {
+                    const int x = *reinterpret_cast<const int*>(point[0]);
+                    const int y = *reinterpret_cast<const int*>(point[1]);
+                    if (x < -4096 || x > 16384 || y < -4096 || y > 16384)
+                        return false;
+                    captured[index++] = x;
+                    captured[index++] = y;
+                    anyNonZero = anyNonZero || x != 0 || y != 0;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+
+            if (!anyNonZero)
+                return false;
+            g_ScrapPilotHudBaseline = captured;
+            g_ScrapPilotHudBaselineCaptured = true;
+            return true;
+        }
+
+        static std::array<int, 8> BuildScrapPilotHudIniLayout()
+        {
+            std::array<int, 8> desired = g_ScrapPilotHudBaseline;
+            if (!g_ScrapPilotHudLegacyLayoutEnabled)
+                return desired;
+
+            int left = desired[0];
+            int top = desired[1];
+            for (size_t index = 2; index + 1 < desired.size(); index += 2)
+            {
+                left = (std::min)(left, desired[index]);
+                top = (std::min)(top, desired[index + 1]);
+            }
+            const int offsetX = kLegacyScrapPilotHudLeft - left;
+            const int offsetY = kLegacyScrapPilotHudTop - top;
+            for (size_t index = 0; index + 1 < desired.size(); index += 2)
+            {
+                desired[index] += offsetX;
+                desired[index + 1] += offsetY;
+            }
+            return desired;
+        }
+
+        static bool TryWriteScrapPilotHudLayout(const std::array<int, 8>& desired)
+        {
+            __try
+            {
+                size_t index = 0;
+                for (const auto& point : kScrapPilotHudTextPointAddresses)
+                {
+                    *reinterpret_cast<int*>(point[0]) = desired[index++];
+                    *reinterpret_cast<int*>(point[1]) = desired[index++];
+                }
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void GetScrapPilotHudGroupTopLeft(
+            const std::array<int, 8>& layout,
+            size_t firstPoint,
+            int& outLeft,
+            int& outTop)
+        {
+            const size_t first = firstPoint * 2;
+            outLeft = layout[first];
+            outTop = layout[first + 1];
+            const size_t second = first + 2;
+            outLeft = (std::min)(outLeft, layout[second]);
+            outTop = (std::min)(outTop, layout[second + 1]);
+        }
+
+        static void RefreshScrapPilotHudLayout()
+        {
+            const ULONGLONG now = GetTickCount64();
+            if (g_ScrapPilotHudLastRefreshTick != 0 &&
+                now - g_ScrapPilotHudLastRefreshTick < kScrapPilotHudRefreshMs)
+            {
+                return;
+            }
+            g_ScrapPilotHudLastRefreshTick = now;
+
+            if (!g_ScrapPilotHudBaselineCaptured && !TryCaptureScrapPilotHudBaseline())
+                return;
+
+            const std::array<int, 8> desired = g_ScrapPilotHudMissionOverrideActive
+                ? g_ScrapPilotHudMissionOverride
+                : BuildScrapPilotHudIniLayout();
+            if (!TryWriteScrapPilotHudLayout(desired))
+                return;
+
+            const bool panelsVisible = g_ScrapPilotHudPanelOverrideActive
+                ? g_ScrapPilotHudPanelOverrideVisible
+                : !g_ScrapPilotHudLegacyLayoutEnabled;
+            SetStockScrapPilotPanelsVisible(panelsVisible);
+        }
+
+        static void RefreshTurretAimPitchState()
+        {
+            const bool active = g_TurretAimPitchEnabled && ReadLocalPlayerNetIdValue() == 0;
+            g_TurretAimPitchMultiplier = active ? g_TurretAimPitchMultiplierEnhanced : 0.5f;
+        }
+
+        static const char* BoolText(bool value);
+        static void RefreshJumpSnipeCrouchPatchState();
+
+        static void InitializeGlobalImprovementConfig()
+        {
+            bool value = true;
+
+            g_ScrapPilotHudLegacyLayoutEnabled = true;
+            std::string layout;
+            if (TryGetUserConfigString(kUserConfigDisplaySection, "ScrapPilotHud", layout))
+            {
+                std::transform(layout.begin(), layout.end(), layout.begin(),
+                    [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+                if (layout == "stock" || layout == "default" || layout == "0" ||
+                    layout == "off" || layout == "false")
+                {
+                    g_ScrapPilotHudLegacyLayoutEnabled = false;
+                }
+                else if (layout == "legacy" || layout == "compact" || layout == "1" ||
+                         layout == "on" || layout == "true")
+                {
+                    g_ScrapPilotHudLegacyLayoutEnabled = true;
+                }
+                else
+                {
+                    Log(L"[HUD] Ignoring invalid ScrapPilotHud=%hs\n", layout.c_str());
+                }
+            }
+
+            g_ShotConvergenceBaselineEnabled = true;
+            if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "WeaponConvergence", value))
+                g_ShotConvergenceBaselineEnabled = value;
+            g_ShotConvergenceEnabled = g_ShotConvergenceBaselineEnabled;
+
+            g_PlayerReticleShotConvergenceBaselineEnabled = true;
+            if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "PlayerReticleConvergence", value) ||
+                TryGetUserConfigBool(kUserConfigSinglePlayerSection, "SmartReticleConvergence", value))
+            {
+                g_PlayerReticleShotConvergenceBaselineEnabled = value;
+            }
+            g_PlayerReticleShotConvergenceEnabled =
+                g_PlayerReticleShotConvergenceBaselineEnabled;
+
+            g_SmartReticleRangeBaseline = kSmartReticleRangeDefault;
+            std::string reticleRangeText;
+            if (TryGetUserConfigString(
+                    kUserConfigSinglePlayerSection,
+                    "SmartReticleRange",
+                    reticleRangeText) ||
+                TryGetUserConfigString(
+                    kUserConfigSinglePlayerSection,
+                    "ReticleRange",
+                    reticleRangeText))
+            {
+                char* end = nullptr;
+                const float parsed = std::strtof(reticleRangeText.c_str(), &end);
+                if (end != reticleRangeText.c_str() && *end == '\0' && std::isfinite(parsed))
+                {
+                    g_SmartReticleRangeBaseline = ClampSmartReticleRange(parsed);
+                }
+                else
+                {
+                    Log(L"[RETICLE] Ignoring invalid SmartReticleRange=%hs\n",
+                        reticleRangeText.c_str());
+                }
+            }
+            g_SmartReticleRange = g_SmartReticleRangeBaseline;
+
+            g_SmartScavengerPathingEnabled = true;
+            if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "SmartScavengerPathing", value) ||
+                TryGetUserConfigBool(kUserConfigSinglePlayerSection, "ScavengerPathing", value))
+            {
+                g_SmartScavengerPathingEnabled = value;
+            }
+
+            g_JumpSnipeCrouchBaselineEnabled = kJumpSnipeCrouchEnabledDefault;
+            if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "JumpSnipeCrouch", value))
+                g_JumpSnipeCrouchBaselineEnabled = value;
+            g_JumpSnipeCrouchEnabled = g_JumpSnipeCrouchBaselineEnabled;
+
+            g_TurretAimPitchBaselineEnabled = kTurretAimPitchEnabledDefault;
+            if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "TurretAimPitch", value))
+                g_TurretAimPitchBaselineEnabled = value;
+            g_TurretAimPitchEnabled = g_TurretAimPitchBaselineEnabled;
+
+            float configuredMultiplier = 0.95f;
+            std::string multiplierText;
+            if (TryGetUserConfigString(
+                    kUserConfigSinglePlayerSection,
+                    "TurretAimPitchMultiplier",
+                    multiplierText))
+            {
+                char* end = nullptr;
+                const float parsed = std::strtof(multiplierText.c_str(), &end);
+                if (end != multiplierText.c_str() && *end == '\0' && std::isfinite(parsed))
+                    configuredMultiplier = parsed;
+                else
+                    Log(L"[TURRET] Ignoring invalid TurretAimPitchMultiplier=%hs\n",
+                        multiplierText.c_str());
+            }
+
+            // Environment variables remain the highest-priority compatibility
+            // override for existing installs and automation.
+            if (TryGetEnvFloat("OPENSHIM_TURRET_AIM_PITCH_MULTIPLIER", configuredMultiplier) ||
+                TryGetEnvFloat("OPENSHIM_TURRET_PITCH_MULTIPLIER", configuredMultiplier))
+            {
+            }
+            g_TurretAimPitchMultiplierEnhanced =
+                ClampTurretAimPitchMultiplier(configuredMultiplier);
+
+            g_ScrapPilotHudLastRefreshTick = 0;
+            RefreshTurretAimPitchState();
+            RefreshJumpSnipeCrouchPatchState();
+            RefreshShotConvergencePatchState();
+            RefreshSmartReticleRangeState();
+            RefreshScrapPilotHudLayout();
+
+            Log(L"[GLOBAL] scrapPilotHud=%hs weaponConvergence=%hs playerReticleConvergence=%hs smartReticleRange=%.3f smartScavengerPathing=%hs jumpSnipeCrouch=%hs turretAim=%hs multiplier=%.3f (gameplay features SP-only)\n",
+                g_ScrapPilotHudLegacyLayoutEnabled ? "legacy" : "stock",
+                BoolText(g_ShotConvergenceBaselineEnabled),
+                BoolText(g_PlayerReticleShotConvergenceBaselineEnabled),
+                static_cast<double>(g_SmartReticleRangeBaseline),
+                BoolText(g_SmartScavengerPathingEnabled),
+                BoolText(g_JumpSnipeCrouchBaselineEnabled),
+                BoolText(g_TurretAimPitchBaselineEnabled),
+                static_cast<double>(g_TurretAimPitchMultiplierEnhanced));
+        }
+
+        static bool VtableTypeNameMatches(uintptr_t vtableAddress, const char* expectedName)
+        {
+            if (!vtableAddress || !expectedName || !*expectedName)
+                return false;
+
+            __try
+            {
+                const uintptr_t completeObjectLocator =
+                    *reinterpret_cast<const uint32_t*>(vtableAddress - sizeof(uint32_t));
+                if (!completeObjectLocator)
+                    return false;
+
+                const uintptr_t typeDescriptor =
+                    *reinterpret_cast<const uint32_t*>(completeObjectLocator + 0x0C);
+                if (!typeDescriptor)
+                    return false;
+
+                const char* typeName = reinterpret_cast<const char*>(typeDescriptor + 0x08);
+                return std::strcmp(typeName, expectedName) == 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         template <typename T>
         static T ReadValueAtOffset(const void* base, size_t offset)
         {
@@ -8742,6 +10048,7 @@ namespace BZROpenShim
             }
             return s_cached != 0;
         }
+
 
         static const char* BoolText(bool value)
         {
@@ -8892,9 +10199,17 @@ namespace BZROpenShim
                 out.person = person;
                 out.obj = ReadValueAtOffset<void*>(person, kPersonObjOffset);
                 out.velY = ReadValueAtOffset<float>(person, kGameObjectVelocityYOffset);
-                out.craftState = ReadValueAtOffset<uint32_t>(person, kCraftStateOffset);
+                out.animState = ReadValueAtOffset<uint32_t>(person, kPersonAnimStateOffset);
                 out.curAnim = ReadValueAtOffset<long>(person, kPersonCurAnimOffset);
                 out.animHandle = ReadValueAtOffset<int>(person, kPersonAnimHandleOffset);
+
+                void* vhcl = ReadValueAtOffset<void*>(person, kPersonVehiclePtrOffset);
+                if (vhcl)
+                {
+                    const uint32_t flags =
+                        ReadValueAtOffset<uint32_t>(vhcl, kVehicleGroundFlagsOffset);
+                    out.grounded = (flags & kVehicleGroundedFlagBit) != 0;
+                }
 
                 void* carrier = ReadValueAtOffset<void*>(person, kPersonCarrierOffset);
                 if (!carrier)
@@ -8940,7 +10255,8 @@ namespace BZROpenShim
         {
             return lhs.person != rhs.person ||
                    lhs.obj != rhs.obj ||
-                   lhs.craftState != rhs.craftState ||
+                   lhs.animState != rhs.animState ||
+                   lhs.grounded != rhs.grounded ||
                    lhs.curAnim != rhs.curAnim ||
                    lhs.animHandle != rhs.animHandle ||
                    lhs.selectedMask != rhs.selectedMask ||
@@ -8963,13 +10279,15 @@ namespace BZROpenShim
             FormatSigString(before.selectedSig, beforeSig);
             FormatSigString(after.selectedSig, afterSig);
 
-            Log(L"[JUMPSNIPE] dt=%.3f handle=%d person=0x%08X obj=0x%08X state=%u->%u anim=%ld->%ld animH=%d->%d velY=%.3f->%.3f band=%hs->%hs sel=0x%08X->0x%08X slot=%d->%d sig=%hs->%hs odf=%hs->%hs sniper=%hs->%hs\n",
+            Log(L"[JUMPSNIPE] dt=%.3f handle=%d person=0x%08X obj=0x%08X fsm=%u->%u grounded=%hs->%hs anim=%ld->%ld animH=%d->%d velY=%.3f->%.3f band=%hs->%hs sel=0x%08X->0x%08X slot=%d->%d sig=%hs->%hs odf=%hs->%hs sniper=%hs->%hs\n",
                 dt,
                 after.playerHandle,
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(after.person)),
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(after.obj)),
-                before.craftState,
-                after.craftState,
+                before.animState,
+                after.animState,
+                BoolText(before.grounded),
+                BoolText(after.grounded),
                 before.curAnim,
                 after.curAnim,
                 before.animHandle,
@@ -9261,6 +10579,7 @@ namespace BZROpenShim
         static void __fastcall SceneManagerClearSceneHook(void* sceneManager, void* /*unusedEdx*/)
         {
             ForgetAllChunkProxySceneResources(L"clearScene");
+            ForgetMultiplayerFlagSceneResources(L"clearScene");
             if (g_OgreFn_ClearSceneOriginal)
                 g_OgreFn_ClearSceneOriginal(sceneManager);
         }
@@ -9268,6 +10587,7 @@ namespace BZROpenShim
         static void __fastcall SceneManagerDestroyAllMovablesHook(void* sceneManager, void* /*unusedEdx*/)
         {
             ForgetAllChunkProxySceneResources(L"destroyAllMovableObjects");
+            ForgetMultiplayerFlagSceneResources(L"destroyAllMovableObjects");
             if (g_OgreFn_DestroyAllMovablesOriginal)
                 g_OgreFn_DestroyAllMovablesOriginal(sceneManager);
         }
@@ -9391,11 +10711,13 @@ namespace BZROpenShim
 
             g_BzrFn_GetPlayerHandle = reinterpret_cast<FnGetPlayerHandle>(kGogGetPlayerHandleAddr);
             g_BzrFn_GameObjectGetObjByHandle =
-                reinterpret_cast<FnGameObjectGetObjByHandle>(kGogGameObjectGetObjByHandleAddr);
+                &GameObjectFromHandleGog; // was 0x0046B160 (wrong fn; crashed)
 
+            // push ebp; mov ebp,esp; push -1; push 0x84C1D6; (SEH frame setup).
+            // 10 bytes lands on the instruction boundary after the push imm32.
             static const uint8_t kExpectedPersonSimulateBytes[kPersonSimulateDetourLen] =
             {
-                0x55, 0x8B, 0xEC, 0xB8, 0x44, 0x10, 0x00, 0x00
+                0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0xD6, 0xC1, 0x84, 0x00
             };
 
             if (!ExpectedBytesMatchAt(kGogPersonSimulateEntryAddr,
@@ -9426,6 +10748,1637 @@ namespace BZROpenShim
                     g_IsSteamExe ? "Steam" : "GOG",
                     static_cast<uint32_t>(kGogPersonSimulateEntryAddr),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_PersonSimulateDetour.trampoline)));
+            }
+        }
+
+        static bool WritePersonCrouchBranchBytes(const uint8_t* bytes)
+        {
+            auto* target = reinterpret_cast<uint8_t*>(kGogPersonCrouchBranchAddr);
+            DWORD oldProtect = 0;
+            if (!VirtualProtect(target,
+                                kPersonCrouchBranchPatchLen,
+                                PAGE_EXECUTE_READWRITE,
+                                &oldProtect))
+            {
+                Log(L"[JUMPSNIPE] Crouch fix VirtualProtect failed at 0x%08X\n",
+                    static_cast<uint32_t>(kGogPersonCrouchBranchAddr));
+                return false;
+            }
+
+            memcpy(target, bytes, kPersonCrouchBranchPatchLen);
+            FlushInstructionCache(GetCurrentProcess(), target, kPersonCrouchBranchPatchLen);
+
+            DWORD restoreProtect = 0;
+            VirtualProtect(target, kPersonCrouchBranchPatchLen, oldProtect, &restoreProtect);
+            return true;
+        }
+
+        // Reconciles the live byte patch with the desired state. The fix is
+        // applied only when a script has enabled it AND we are not in a network
+        // game (net id 0). Guarded by the exact expected/patched bytes so it
+        // no-ops on any build (e.g. Steam, which relocates Person::Simulate).
+        static void RefreshJumpSnipeCrouchPatchState()
+        {
+            const bool wantActive =
+                g_JumpSnipeCrouchEnabled && (ReadLocalPlayerNetIdValue() == 0);
+            if (wantActive == g_JumpSnipeCrouchPatchActive)
+                return;
+
+            if (wantActive)
+            {
+                if (!ExpectedBytesMatchAt(kGogPersonCrouchBranchAddr,
+                                          kPersonCrouchBranchExpected,
+                                          sizeof(kPersonCrouchBranchExpected)))
+                {
+                    return;
+                }
+                if (WritePersonCrouchBranchBytes(kPersonCrouchBranchPatched))
+                {
+                    g_JumpSnipeCrouchPatchActive = true;
+                    Log(L"[JUMPSNIPE] Applied legacy crouch-on-landing fix at 0x%08X (SP-only)\n",
+                        static_cast<uint32_t>(kGogPersonCrouchBranchAddr));
+                }
+            }
+            else
+            {
+                if (ExpectedBytesMatchAt(kGogPersonCrouchBranchAddr,
+                                         kPersonCrouchBranchPatched,
+                                         sizeof(kPersonCrouchBranchPatched)))
+                {
+                    if (WritePersonCrouchBranchBytes(kPersonCrouchBranchExpected))
+                    {
+                        g_JumpSnipeCrouchPatchActive = false;
+                        Log(L"[JUMPSNIPE] Reverted crouch-on-landing fix at 0x%08X\n",
+                            static_cast<uint32_t>(kGogPersonCrouchBranchAddr));
+                    }
+                }
+                else
+                {
+                    // Bytes are not ours (unpatched or a different build);
+                    // treat as inactive without touching memory.
+                    g_JumpSnipeCrouchPatchActive = false;
+                }
+            }
+        }
+
+        // Mission-end resting state for the crouch fix: drop the scripted enable
+        // back to the build default, then reconcile the live patch (which also
+        // re-applies the multiplayer gate). Named to match the registry's
+        // revert-to-baseline contract below.
+        static void RevertJumpSnipeCrouchToBaseline()
+        {
+            g_JumpSnipeCrouchEnabled = g_JumpSnipeCrouchBaselineEnabled;
+            RefreshJumpSnipeCrouchPatchState();
+        }
+
+        static void RevertShotConvergenceToBaseline()
+        {
+            g_ShotConvergenceEnabled = g_ShotConvergenceBaselineEnabled;
+            g_PlayerReticleShotConvergenceEnabled =
+                g_PlayerReticleShotConvergenceBaselineEnabled;
+            RefreshShotConvergencePatchState();
+        }
+
+        static void RevertSmartReticleRangeToBaseline()
+        {
+            g_SmartReticleRange = g_SmartReticleRangeBaseline;
+            RefreshSmartReticleRangeState();
+        }
+
+        static void RevertScrapPilotHudToBaseline()
+        {
+            g_ScrapPilotHudMissionOverrideActive = false;
+            g_ScrapPilotHudPanelOverrideActive = false;
+            g_ScrapPilotHudLastRefreshTick = 0;
+            RefreshScrapPilotHudLayout();
+        }
+
+        static void RevertTurretAimPitchToBaseline()
+        {
+            g_TurretAimPitchEnabled = g_TurretAimPitchBaselineEnabled;
+            RefreshTurretAimPitchState();
+        }
+
+        // --- Global turbo (SinglePlayer tier) ----------------------------------
+        // Forces units to turbo, mirroring EXU's GlobalTurbo exactly: redirect the
+        // first throttle-tolerance comparison to a 0.9 constant and NOP the second
+        // turbo gate so units turbo whenever near full throttle. OpenShim owns the
+        // two byte patches plus the per-unit simulation boundary hooks. EXU's
+        // Lua APIs delegate here when the hook ownership export is available;
+        // its original native implementation remains a standalone fallback.
+        // All turbo behavior is hard-disabled in network games.
+        //
+        // Live GOG layout at 0x00601CA0:
+        //   0F 2F 05 [04 26 8A 00]   comiss xmm0,[0x008A2604]   ; operand@0x601CA3
+        //   ...
+        //   76 0C                    jbe  0x601CC3              ; gate  @0x601CB5
+        static constexpr uintptr_t kGlobalTurboComissOperandAddr = 0x00601CA3;
+        static constexpr uintptr_t kGlobalTurboSecondGateAddr = 0x00601CB5;
+        static constexpr uint8_t kGlobalTurboComissOperandExpected[4] = { 0x04, 0x26, 0x8A, 0x00 };
+        static constexpr uint8_t kGlobalTurboSecondGateExpected[2] = { 0x76, 0x0C };
+        static constexpr uint8_t kGlobalTurboSecondGatePatched[2] = { 0x90, 0x90 };
+        static constexpr uintptr_t kUnitTurboBeginHookAddr = 0x00601C92;
+        static constexpr uintptr_t kUnitTurboEndHookAddr = 0x00601CCD;
+        static constexpr uint8_t kUnitTurboBeginHookExpected[6] = {
+            0x8B, 0x45, 0x90, 0xD9, 0x58, 0x08
+        };
+        static constexpr uint8_t kUnitTurboEndHookExpected[9] = {
+            0x8B, 0x55, 0x90, 0x8B, 0x85, 0x78, 0xFF, 0xFF, 0xFF
+        };
+        static constexpr uintptr_t kGameObjectGetHandleAddr = 0x00462380;
+        static constexpr bool kGlobalTurboEnabledDefault = false;
+
+        // The comiss operand is redirected to this constant (EXU uses 0.9f). Must
+        // live for the process lifetime — its absolute address is written into the
+        // instruction, so a namespace-scope static is required.
+        static float g_GlobalTurboTolerance = 0.9f;
+        static bool g_GlobalTurboConfigInitialized = false;
+        static bool g_GlobalTurboEnabled = kGlobalTurboEnabledDefault;      // desired
+        static bool g_GlobalTurboBaselineEnabled = kGlobalTurboEnabledDefault;  // openshim.ini
+        static bool g_GlobalTurboBaselineCaptured = false;
+        static bool g_GlobalTurboPatchActive = false;
+        static bool g_UnitTurboHooksInstalled = false;
+        static bool g_UnitTurboHookMismatchLogged = false;
+        static std::unordered_map<uint32_t, bool> g_UnitTurboOverrides;
+
+        using FnGameObjectGetHandle = uint32_t(__thiscall*)(void* object);
+        using FnExuUpdateCullingForUnit = void(__cdecl*)(void* object);
+        static FnExuUpdateCullingForUnit g_ExuFn_UpdateCullingForUnit = nullptr;
+        static HMODULE g_ExuCullingCallbackModule = nullptr;
+
+        static bool IsExuModuleLoaded()
+        {
+            return GetModuleHandleA("exu.dll") != nullptr ||
+                   GetModuleHandleA("ExtraUtilities.dll") != nullptr;
+        }
+
+        // Generic protected in-place byte write (VirtualProtect + memcpy + flush).
+        static bool WritePatchBytes(uintptr_t address, const uint8_t* bytes, size_t len)
+        {
+            auto* target = reinterpret_cast<uint8_t*>(address);
+            DWORD oldProtect = 0;
+            if (!VirtualProtect(target, len, PAGE_EXECUTE_READWRITE, &oldProtect))
+                return false;
+            std::memcpy(target, bytes, len);
+            FlushInstructionCache(GetCurrentProcess(), target, len);
+            DWORD restoreProtect = 0;
+            VirtualProtect(target, len, oldProtect, &restoreProtect);
+            return true;
+        }
+
+        // --- Unit VO queue policy ---------------------------------------------
+        // This is the verified EXU Say -> QueueCB policy moved into OpenShim so
+        // it also governs stock campaign and Instant Action. EXU can still layer
+        // mission-specific overrides on top of these call sites.
+        struct UnitVoQueueItem
+        {
+            char name[16];
+            void* owner;
+            void* sound;
+            int priority;
+            DWORD time;
+            UnitVoQueueItem* next;
+        };
+
+        struct UnitVoQueueInspection
+        {
+            bool containsNonUnitVo = false;
+            bool hasDuplicate = false;
+            bool hasStale = false;
+            size_t unitVoCount = 0;
+        };
+
+        struct UnitVoQueueDecision
+        {
+            bool drop = false;
+            bool flushQueue = false;
+        };
+
+        using FnUnitVoQueue = int(__cdecl*)(const char* filename, void* owner, int priority);
+        using FnUnitVoKillQueue = void(__cdecl*)(int);
+
+        static constexpr bool kUnitVoFeedbackEnabledDefault = true;
+        static constexpr uint32_t kUnitVoThrottleMsDefault = 0;
+        static constexpr uint32_t kUnitVoQueueDepthDefault = 2;
+        static constexpr uint32_t kUnitVoQueueStaleMsDefault = 2000;
+        static constexpr uint32_t kUnitVoThrottleMsMax = 60000;
+        static constexpr uint32_t kUnitVoQueueDepthMax = 8;
+        static constexpr uint32_t kUnitVoQueueStaleMsMax = 60000;
+
+        static std::mutex g_UnitVoMutex;
+        static DWORD g_UnitVoLastAttemptTick = 0;
+        static bool g_UnitVoMuted = !kUnitVoFeedbackEnabledDefault;
+        static uint32_t g_UnitVoThrottleMs = kUnitVoThrottleMsDefault;
+        static uint32_t g_UnitVoQueueDepthLimit = kUnitVoQueueDepthDefault;
+        static uint32_t g_UnitVoQueueStaleMs = kUnitVoQueueStaleMsDefault;
+        static bool g_UnitVoConfigInitialized = false;
+        static bool g_UnitVoBaselineFeedbackEnabled = kUnitVoFeedbackEnabledDefault;
+        static bool g_UnitVoHooksInstalled = false;
+        static bool g_UnitVoHookFailureLogged = false;
+        static uintptr_t g_UnitVoSayQueueCallSite = 0;
+        static uintptr_t g_UnitVoRecycleQueueCallSite = 0;
+        static uintptr_t g_UnitVoQueueListStorageAddress = 0;
+        static FnUnitVoQueue g_BzrFn_UnitVoQueue = nullptr;
+        static FnUnitVoKillQueue g_BzrFn_UnitVoKillQueue = nullptr;
+
+        static const uint8_t kUnitVoSayQueuePattern[] = {
+            0x6A, 0x00, 0x8B, 0x4D, 0xFC, 0x83, 0xC1, 0x18, 0x8B, 0x55,
+            0xFC, 0x8B, 0x42, 0x18, 0x8B, 0x50, 0x30, 0xFF, 0xD2, 0x50,
+            0x8B, 0x45, 0xF8, 0x50, 0xE8, 0, 0, 0, 0, 0x83, 0xC4, 0x0C,
+            0x8B, 0x4D, 0x0C, 0x89, 0x0D, 0, 0, 0, 0, 0xE8, 0, 0, 0, 0,
+            0xD9, 0x1D, 0, 0, 0, 0
+        };
+        static const uint8_t kUnitVoSayQueueMask[] = {
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1,
+            1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+            1, 1, 0, 0, 0, 0
+        };
+        static const uint8_t kUnitVoRecycleQueuePattern[] = {
+            0x6A, 0x03, 0x8B, 0x4D, 0xFC, 0x83, 0xC1, 0x18, 0x8B, 0x45,
+            0xFC, 0x8B, 0x50, 0x18, 0x8B, 0x42, 0x30, 0xFF, 0xD0, 0x50,
+            0x8B, 0x4D, 0x08, 0x51, 0xE8, 0, 0, 0, 0, 0x83, 0xC4, 0x0C,
+            0x5E, 0x8B, 0xE5
+        };
+        static const uint8_t kUnitVoRecycleQueueMask[] = {
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1,
+            1, 1, 1
+        };
+
+        static bool UnitVoEndsWith(std::string_view value, std::string_view suffix)
+        {
+            return value.size() >= suffix.size() &&
+                   value.substr(value.size() - suffix.size()) == suffix;
+        }
+
+        static std::string NormalizeUnitVoFilename(const char* filename)
+        {
+            std::string normalized;
+            if (!filename)
+                return normalized;
+            normalized.reserve(std::strlen(filename));
+            for (const unsigned char c : std::string_view(filename))
+                normalized.push_back(static_cast<char>(std::tolower(c)));
+            return normalized;
+        }
+
+        static bool IsLikelyUnitVoFilename(std::string_view filename)
+        {
+            if (!UnitVoEndsWith(filename, ".wav"))
+                return false;
+
+            const std::string_view stem = filename.substr(0, filename.size() - 4);
+            if (stem.size() < 5 || stem.size() > 12)
+                return false;
+            for (const unsigned char c : stem)
+            {
+                if (!std::isalnum(c))
+                    return false;
+            }
+
+            const size_t voiceMarker = stem.rfind('v');
+            if (voiceMarker == std::string_view::npos || voiceMarker < 2)
+                return false;
+            const size_t suffixLength = stem.size() - voiceMarker - 1;
+            return suffixLength >= 1 && suffixLength <= 2;
+        }
+
+        static UnitVoQueueItem* GetUnitVoQueueHead()
+        {
+            if (!g_UnitVoQueueListStorageAddress)
+                return nullptr;
+            return *reinterpret_cast<UnitVoQueueItem**>(g_UnitVoQueueListStorageAddress);
+        }
+
+        static UnitVoQueueInspection InspectUnitVoQueueLocked(
+            DWORD now,
+            std::string_view duplicateCandidate)
+        {
+            UnitVoQueueInspection inspection;
+            for (UnitVoQueueItem* item = GetUnitVoQueueHead(); item; item = item->next)
+            {
+                const std::string queuedName = NormalizeUnitVoFilename(item->name);
+                if (!IsLikelyUnitVoFilename(queuedName))
+                {
+                    inspection.containsNonUnitVo = true;
+                    continue;
+                }
+
+                ++inspection.unitVoCount;
+                if (queuedName == duplicateCandidate)
+                    inspection.hasDuplicate = true;
+                if (g_UnitVoQueueStaleMs > 0 && now - item->time >= g_UnitVoQueueStaleMs)
+                    inspection.hasStale = true;
+            }
+            return inspection;
+        }
+
+        static UnitVoQueueDecision PrepareUnitVoQueueDecision(const char* filename)
+        {
+            UnitVoQueueDecision decision;
+            if (!filename)
+                return decision;
+
+            const std::string normalized = NormalizeUnitVoFilename(filename);
+            if (!IsLikelyUnitVoFilename(normalized))
+                return decision;
+
+            const DWORD now = GetTickCount();
+            std::lock_guard<std::mutex> lock(g_UnitVoMutex);
+            if (g_UnitVoMuted)
+            {
+                decision.drop = true;
+                return decision;
+            }
+
+            if (g_UnitVoThrottleMs > 0 && g_UnitVoLastAttemptTick != 0 &&
+                now - g_UnitVoLastAttemptTick < g_UnitVoThrottleMs)
+            {
+                g_UnitVoLastAttemptTick = now;
+                decision.drop = true;
+                return decision;
+            }
+            g_UnitVoLastAttemptTick = now;
+
+            const UnitVoQueueInspection inspection =
+                InspectUnitVoQueueLocked(now, normalized);
+            if (inspection.hasDuplicate)
+            {
+                decision.drop = true;
+                return decision;
+            }
+
+            const bool depthExceeded =
+                g_UnitVoQueueDepthLimit > 0 &&
+                inspection.unitVoCount >= g_UnitVoQueueDepthLimit;
+            if (inspection.hasStale || depthExceeded)
+            {
+                if (!inspection.containsNonUnitVo && g_BzrFn_UnitVoKillQueue)
+                    decision.flushQueue = true;
+                else
+                    decision.drop = true;
+            }
+            return decision;
+        }
+
+        static bool ShouldTraceUnitVo()
+        {
+            static const bool enabled = EnvFlagEnabled("OPENSHIM_TRACE_UNIT_VO");
+            return enabled;
+        }
+
+        static int __cdecl UnitVoQueueIntercept(const char* filename, void* owner, int priority)
+        {
+            if (!g_BzrFn_UnitVoQueue)
+                return 0;
+
+            const UnitVoQueueDecision decision = PrepareUnitVoQueueDecision(filename);
+            if (ShouldTraceUnitVo())
+            {
+                Log(L"[UNITVO] filename=%hs owner=0x%08X priority=%d action=%hs\n",
+                    filename ? filename : "<null>",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(owner)),
+                    priority,
+                    decision.drop ? "drop" : (decision.flushQueue ? "flush+queue" : "queue"));
+            }
+            if (decision.drop)
+                return 0;
+            if (decision.flushQueue && g_BzrFn_UnitVoKillQueue)
+                g_BzrFn_UnitVoKillQueue(0);
+            return g_BzrFn_UnitVoQueue(filename, owner, priority);
+        }
+
+        static uintptr_t ResolveUnitVoQueueListStorage(uintptr_t queueAddress)
+        {
+            const auto* queue = reinterpret_cast<const uint8_t*>(queueAddress);
+            if (!queue)
+                return 0;
+            constexpr size_t kScanWindow = 0x30;
+            for (size_t offset = 0; offset + 7 <= kScanWindow; ++offset)
+            {
+                if (queue[offset] != 0x83 || queue[offset + 1] != 0x3D ||
+                    queue[offset + 6] != 0x00)
+                    continue;
+                uint32_t noMoreCbAddress = 0;
+                std::memcpy(&noMoreCbAddress, queue + offset + 2, sizeof(noMoreCbAddress));
+                return static_cast<uintptr_t>(noMoreCbAddress) - sizeof(uint32_t);
+            }
+            return 0;
+        }
+
+        static bool LooksLikeUnitVoKillQueue(uintptr_t target, uintptr_t queueListAddress)
+        {
+            if (!target || !queueListAddress)
+                return false;
+            const auto* bytes = reinterpret_cast<const uint8_t*>(target);
+            if (bytes[0] != 0x55 || bytes[1] != 0x8B || bytes[2] != 0xEC ||
+                bytes[3] != 0x51 || bytes[4] != 0xA1)
+                return false;
+            uint32_t headAddress = 0;
+            std::memcpy(&headAddress, bytes + 5, sizeof(headAddress));
+            return headAddress == queueListAddress;
+        }
+
+        static FnUnitVoKillQueue ResolveUnitVoKillQueue(
+            uintptr_t queueAddress,
+            uintptr_t queueListAddress)
+        {
+            if (!queueAddress || !queueListAddress)
+                return nullptr;
+            const auto* queue = reinterpret_cast<const uint8_t*>(queueAddress);
+            constexpr size_t kScanWindow = 0x180;
+            for (size_t offset = 0; offset + 7 <= kScanWindow; ++offset)
+            {
+                if (queue[offset] != 0x6A || queue[offset + 1] != 0x00 ||
+                    queue[offset + 2] != 0xE8)
+                    continue;
+                int32_t displacement = 0;
+                std::memcpy(&displacement, queue + offset + 3, sizeof(displacement));
+                const uintptr_t callSite = queueAddress + offset + 2;
+                const uintptr_t target = callSite + 5 + static_cast<intptr_t>(displacement);
+                if (LooksLikeUnitVoKillQueue(target, queueListAddress))
+                    return reinterpret_cast<FnUnitVoKillQueue>(target);
+            }
+            return nullptr;
+        }
+
+        static bool WriteUnitVoQueueCall(uintptr_t callSite)
+        {
+            uint8_t patch[5] = { 0xE8, 0, 0, 0, 0 };
+            const int32_t relative =
+                static_cast<int32_t>(reinterpret_cast<uintptr_t>(UnitVoQueueIntercept)) -
+                static_cast<int32_t>(callSite + 5);
+            std::memcpy(patch + 1, &relative, sizeof(relative));
+            return WritePatchBytes(callSite, patch, sizeof(patch));
+        }
+
+        static void InstallUnitVoQueueHooksIfPossible()
+        {
+            if (g_UnitVoHooksInstalled)
+                return;
+
+            uint8_t* sayMatch = nullptr;
+            uint8_t* recycleMatch = nullptr;
+            if (!FindPatternInMainText(
+                    kUnitVoSayQueuePattern,
+                    kUnitVoSayQueueMask,
+                    std::size(kUnitVoSayQueuePattern),
+                    sayMatch) ||
+                !FindPatternInMainText(
+                    kUnitVoRecycleQueuePattern,
+                    kUnitVoRecycleQueueMask,
+                    std::size(kUnitVoRecycleQueuePattern),
+                    recycleMatch))
+            {
+                if (!g_UnitVoHookFailureLogged)
+                {
+                    g_UnitVoHookFailureLogged = true;
+                    Log(L"[UNITVO] Say -> QueueCB signatures not ready; deferring hooks\n");
+                }
+                return;
+            }
+
+            g_UnitVoSayQueueCallSite = reinterpret_cast<uintptr_t>(sayMatch + 24);
+            g_UnitVoRecycleQueueCallSite = reinterpret_cast<uintptr_t>(recycleMatch + 24);
+            const uintptr_t sayTarget = ResolveRel32Target(
+                reinterpret_cast<uint8_t*>(g_UnitVoSayQueueCallSite));
+            const uintptr_t recycleTarget = ResolveRel32Target(
+                reinterpret_cast<uint8_t*>(g_UnitVoRecycleQueueCallSite));
+            if (!sayTarget || sayTarget != recycleTarget)
+            {
+                Log(L"[UNITVO] QueueCB targets missing or inconsistent; hooks disabled\n");
+                return;
+            }
+
+            g_BzrFn_UnitVoQueue = reinterpret_cast<FnUnitVoQueue>(sayTarget);
+            g_UnitVoQueueListStorageAddress = ResolveUnitVoQueueListStorage(sayTarget);
+            g_BzrFn_UnitVoKillQueue = ResolveUnitVoKillQueue(
+                sayTarget,
+                g_UnitVoQueueListStorageAddress);
+            if (!g_UnitVoQueueListStorageAddress || !g_BzrFn_UnitVoKillQueue)
+            {
+                Log(L"[UNITVO] QueueCB layout validation failed; hooks disabled\n");
+                g_BzrFn_UnitVoQueue = nullptr;
+                return;
+            }
+
+            if (!WriteUnitVoQueueCall(g_UnitVoSayQueueCallSite) ||
+                !WriteUnitVoQueueCall(g_UnitVoRecycleQueueCallSite))
+            {
+                Log(L"[UNITVO] Failed patching Say -> QueueCB call sites\n");
+                return;
+            }
+
+            g_UnitVoHooksInstalled = true;
+            g_UnitVoHookFailureLogged = false;
+            Log(L"[UNITVO] Installed global queue policy say=0x%08X recycle=0x%08X queue=0x%08X list=0x%08X kill=0x%08X\n",
+                static_cast<uint32_t>(g_UnitVoSayQueueCallSite),
+                static_cast<uint32_t>(g_UnitVoRecycleQueueCallSite),
+                static_cast<uint32_t>(sayTarget),
+                static_cast<uint32_t>(g_UnitVoQueueListStorageAddress),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_UnitVoKillQueue)));
+        }
+
+        static void InitializeUnitVoConfig()
+        {
+            if (g_UnitVoConfigInitialized)
+                return;
+            g_UnitVoConfigInitialized = true;
+
+            bool feedbackEnabled = kUnitVoFeedbackEnabledDefault;
+            bool configuredValue = false;
+            if (TryGetUserConfigBool(kUserConfigDisplaySection, "UnitVoFeedback", configuredValue))
+                feedbackEnabled = configuredValue;
+
+            std::lock_guard<std::mutex> lock(g_UnitVoMutex);
+            g_UnitVoBaselineFeedbackEnabled = feedbackEnabled;
+            g_UnitVoMuted = !feedbackEnabled;
+            g_UnitVoLastAttemptTick = 0;
+            Log(L"[UNITVO] Feedback baseline=%hs depth=%u stale=%ums throttle=%ums\n",
+                feedbackEnabled ? "enabled" : "disabled",
+                g_UnitVoQueueDepthLimit,
+                g_UnitVoQueueStaleMs,
+                g_UnitVoThrottleMs);
+        }
+
+        static void RevertUnitVoToBaseline()
+        {
+            InitializeUnitVoConfig();
+            std::lock_guard<std::mutex> lock(g_UnitVoMutex);
+            g_UnitVoMuted = !g_UnitVoBaselineFeedbackEnabled;
+            g_UnitVoThrottleMs = kUnitVoThrottleMsDefault;
+            g_UnitVoQueueDepthLimit = kUnitVoQueueDepthDefault;
+            g_UnitVoQueueStaleMs = kUnitVoQueueStaleMsDefault;
+            g_UnitVoLastAttemptTick = 0;
+        }
+
+        // Writes both turbo sites for the desired state. When activating, the
+        // comiss operand is rewritten to the absolute address of our tolerance
+        // constant and the second gate is NOP'd; when reverting, both are restored
+        // to the stock bytes.
+        static bool WriteGlobalTurboPatch(bool active)
+        {
+            uint8_t operandBytes[sizeof(kGlobalTurboComissOperandExpected)];
+            if (active)
+            {
+                const uint32_t tolAddr =
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g_GlobalTurboTolerance));
+                std::memcpy(operandBytes, &tolAddr, sizeof(operandBytes));
+            }
+            else
+            {
+                std::memcpy(operandBytes, kGlobalTurboComissOperandExpected, sizeof(operandBytes));
+            }
+            const uint8_t* gateBytes =
+                active ? kGlobalTurboSecondGatePatched : kGlobalTurboSecondGateExpected;
+
+            if (!WritePatchBytes(kGlobalTurboComissOperandAddr, operandBytes, sizeof(operandBytes)))
+                return false;
+            if (!WritePatchBytes(kGlobalTurboSecondGateAddr, gateBytes, sizeof(kGlobalTurboSecondGateExpected)))
+                return false;
+            return true;
+        }
+
+        static bool ReconcileGlobalTurboPatchState(bool wantActive, bool writeLog)
+        {
+            if (wantActive == g_GlobalTurboPatchActive)
+                return true;
+
+            if (wantActive)
+            {
+                if (!ExpectedBytesMatchAt(kGlobalTurboComissOperandAddr,
+                                          kGlobalTurboComissOperandExpected,
+                                          sizeof(kGlobalTurboComissOperandExpected)) ||
+                    !ExpectedBytesMatchAt(kGlobalTurboSecondGateAddr,
+                                          kGlobalTurboSecondGateExpected,
+                                          sizeof(kGlobalTurboSecondGateExpected)))
+                {
+                    return false;
+                }
+                if (!WriteGlobalTurboPatch(true))
+                    return false;
+
+                g_GlobalTurboPatchActive = true;
+                if (writeLog)
+                {
+                    Log(L"[TURBO] Applied global turbo (tolerance=%.3f) tol@0x%08X gate@0x%08X\n",
+                        static_cast<double>(g_GlobalTurboTolerance),
+                        static_cast<uint32_t>(kGlobalTurboComissOperandAddr),
+                        static_cast<uint32_t>(kGlobalTurboSecondGateAddr));
+                }
+                return true;
+            }
+
+            // Revert only if the second gate still holds our NOPs. If it does
+            // not, another owner changed the site and we leave it untouched.
+            if (!ExpectedBytesMatchAt(kGlobalTurboSecondGateAddr,
+                                      kGlobalTurboSecondGatePatched,
+                                      sizeof(kGlobalTurboSecondGatePatched)))
+            {
+                g_GlobalTurboPatchActive = false;
+                return false;
+            }
+            if (!WriteGlobalTurboPatch(false))
+                return false;
+
+            g_GlobalTurboPatchActive = false;
+            if (writeLog)
+                Log(L"[TURBO] Reverted global turbo\n");
+            return true;
+        }
+
+        static FnExuUpdateCullingForUnit ResolveExuCullingCallback()
+        {
+            HMODULE module = GetModuleHandleA("exu.dll");
+            if (!module)
+                module = GetModuleHandleA("ExtraUtilities.dll");
+            if (module != g_ExuCullingCallbackModule)
+            {
+                g_ExuCullingCallbackModule = module;
+                g_ExuFn_UpdateCullingForUnit = module
+                    ? reinterpret_cast<FnExuUpdateCullingForUnit>(
+                        GetProcAddress(module, "EXU_UpdateCullingForUnit"))
+                    : nullptr;
+            }
+            return g_ExuFn_UpdateCullingForUnit;
+        }
+
+        static bool TryGetTurboObjectHandle(void* object, uint32_t& outHandle)
+        {
+            outHandle = 0;
+            if (!object)
+                return false;
+            __try
+            {
+                outHandle = reinterpret_cast<FnGameObjectGetHandle>(
+                    kGameObjectGetHandleAddr)(object);
+                return outHandle != 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void __cdecl HandleUnitTurboBoundary(void* object, int boundary)
+        {
+            if (boundary == 0)
+            {
+                if (FnExuUpdateCullingForUnit updateCulling = ResolveExuCullingCallback())
+                {
+                    __try
+                    {
+                        updateCulling(object);
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                    }
+                }
+            }
+
+            uint32_t handle = 0;
+            if (!TryGetTurboObjectHandle(object, handle))
+                return;
+            const auto overrideIt = g_UnitTurboOverrides.find(handle);
+            if (overrideIt == g_UnitTurboOverrides.end())
+                return;
+
+            const bool singlePlayer = ReadLocalPlayerNetIdValue() == 0;
+            const bool wantActive = boundary == 0
+                ? (singlePlayer && overrideIt->second)
+                : (singlePlayer && g_GlobalTurboEnabled);
+            ReconcileGlobalTurboPatchState(wantActive, false);
+        }
+
+        static void __declspec(naked) UnitTurboBeginHook()
+        {
+            __asm
+            {
+                pushad
+                pushfd
+                push 0
+                mov eax, [eax + 0x10]
+                push eax
+                call HandleUnitTurboBoundary
+                add esp, 8
+                popfd
+                popad
+                mov eax, [ebp - 0x70]
+                fstp dword ptr [eax + 0x08]
+                ret
+            }
+        }
+
+        static void __declspec(naked) UnitTurboEndHook()
+        {
+            __asm
+            {
+                pushad
+                pushfd
+                push 1
+                mov eax, [edx + 0x10]
+                push eax
+                call HandleUnitTurboBoundary
+                add esp, 8
+                popfd
+                popad
+                mov edx, [ebp - 0x70]
+                mov eax, [ebp - 0x88]
+                ret
+            }
+        }
+
+        static bool WriteUnitTurboCallHook(
+            uintptr_t address,
+            size_t length,
+            const void* target)
+        {
+            if (length < 5 || !target)
+                return false;
+            std::array<uint8_t, 9> patch = {};
+            patch.fill(0x90);
+            patch[0] = 0xE8;
+            const int32_t relative =
+                static_cast<int32_t>(reinterpret_cast<uintptr_t>(target)) -
+                static_cast<int32_t>(address + 5);
+            std::memcpy(patch.data() + 1, &relative, sizeof(relative));
+            return WritePatchBytes(address, patch.data(), length);
+        }
+
+        static void InstallUnitTurboHooksIfPossible()
+        {
+            if (g_UnitTurboHooksInstalled)
+                return;
+            if (!ExpectedBytesMatchAt(
+                    kUnitTurboBeginHookAddr,
+                    kUnitTurboBeginHookExpected,
+                    sizeof(kUnitTurboBeginHookExpected)) ||
+                !ExpectedBytesMatchAt(
+                    kUnitTurboEndHookAddr,
+                    kUnitTurboEndHookExpected,
+                    sizeof(kUnitTurboEndHookExpected)))
+            {
+                if (!g_UnitTurboHookMismatchLogged)
+                {
+                    g_UnitTurboHookMismatchLogged = true;
+                    Log(L"[TURBO] Per-unit hook bytes not ready/mismatched; deferring\n");
+                }
+                return;
+            }
+
+            if (!WriteUnitTurboCallHook(
+                    kUnitTurboBeginHookAddr,
+                    sizeof(kUnitTurboBeginHookExpected),
+                    reinterpret_cast<const void*>(UnitTurboBeginHook)))
+            {
+                return;
+            }
+            if (!WriteUnitTurboCallHook(
+                    kUnitTurboEndHookAddr,
+                    sizeof(kUnitTurboEndHookExpected),
+                    reinterpret_cast<const void*>(UnitTurboEndHook)))
+            {
+                WritePatchBytes(
+                    kUnitTurboBeginHookAddr,
+                    kUnitTurboBeginHookExpected,
+                    sizeof(kUnitTurboBeginHookExpected));
+                return;
+            }
+
+            g_UnitTurboHooksInstalled = true;
+            g_UnitTurboHookMismatchLogged = false;
+            Log(L"[TURBO] Installed shim-owned per-unit hooks begin=0x%08X end=0x%08X\n",
+                static_cast<uint32_t>(kUnitTurboBeginHookAddr),
+                static_cast<uint32_t>(kUnitTurboEndHookAddr));
+        }
+
+        // Reconciles the live turbo bytes with the desired global state.
+        static void RefreshGlobalTurboPatchState()
+        {
+            const bool wantActive =
+                g_GlobalTurboEnabled &&
+                (ReadLocalPlayerNetIdValue() == 0);
+            ReconcileGlobalTurboPatchState(wantActive, true);
+        }
+
+        static void InitializeGlobalTurboConfig()
+        {
+            if (g_GlobalTurboConfigInitialized)
+                return;
+            g_GlobalTurboConfigInitialized = true;
+
+            bool enabled = kGlobalTurboEnabledDefault;
+
+            // Global user baseline (openshim.ini [SinglePlayer]).
+            bool cfg = false;
+            if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "Turbo", cfg))
+                enabled = cfg;
+
+            // Env overrides / kill switch (parity with the other features).
+            if (EnvFlagEnabled("OPENSHIM_GLOBAL_TURBO") || EnvFlagEnabled("BZR_GLOBAL_TURBO"))
+                enabled = true;
+            else if (EnvFlagEnabled("OPENSHIM_DISABLE_GLOBAL_TURBO") ||
+                     EnvFlagEnabled("BZR_DISABLE_GLOBAL_TURBO"))
+                enabled = false;
+
+            // Advanced: override the throttle tolerance (default 0.9 matches EXU).
+            float tol = g_GlobalTurboTolerance;
+            if (TryGetEnvFloat("OPENSHIM_GLOBAL_TURBO_TOLERANCE", tol))
+                g_GlobalTurboTolerance = tol;
+
+            g_GlobalTurboEnabled = enabled;
+            g_GlobalTurboBaselineEnabled = enabled;
+            g_GlobalTurboBaselineCaptured = true;
+
+            InstallUnitTurboHooksIfPossible();
+            Log(L"[TURBO] Global turbo baseline=%hs tolerance=%.3f (SP-only; shim-owned)\n",
+                enabled ? "on" : "off",
+                static_cast<double>(g_GlobalTurboTolerance));
+
+            RefreshGlobalTurboPatchState();
+        }
+
+        static void RevertGlobalTurboToBaseline()
+        {
+            InitializeGlobalTurboConfig();  // idempotent; ensures baseline captured
+            if (!g_GlobalTurboBaselineCaptured)
+                return;
+            g_UnitTurboOverrides.clear();
+            g_GlobalTurboEnabled = g_GlobalTurboBaselineEnabled;
+            RefreshGlobalTurboPatchState();
+        }
+
+        // --- Stock headlights (SinglePlayer tier) -----------------------------
+        // EXU exposed these Ogre Light calls first. OpenShim applies the same
+        // controls directly to the stock GameObject list so campaign scripts are
+        // not required. The feature stands down in multiplayer and whenever EXU
+        // is loaded, leaving Campaign Reimagined's per-mission controls in charge.
+        enum class HeadlightColourMode
+        {
+            Stock,
+            Fixed,
+            Rainbow,
+        };
+
+        enum class HeadlightBeamMode
+        {
+            Stock,
+            Focused,
+            Wide,
+        };
+
+        struct HeadlightOgreApi
+        {
+            FnOgreGetLightColour getDiffuse = nullptr;
+            FnOgreSetLightColour setDiffuse = nullptr;
+            FnOgreGetLightColour getSpecular = nullptr;
+            FnOgreSetLightColour setSpecular = nullptr;
+            FnOgreGetLightRadian getInnerAngle = nullptr;
+            FnOgreGetLightRadian getOuterAngle = nullptr;
+            FnOgreGetLightFloat getFalloff = nullptr;
+            FnOgreSetSpotlightRange setRange = nullptr;
+            FnOgreGetLightVisible getVisible = nullptr;
+            FnOgreSetVisible setVisible = nullptr;
+        };
+
+        struct HeadlightOriginalState
+        {
+            bool hasColour = false;
+            bool hasBeam = false;
+            bool hasVisible = false;
+            OgreColourValue diffuse = {};
+            OgreColourValue specular = {};
+            float innerAngle = 0.0f;
+            float outerAngle = 0.0f;
+            float falloff = 1.0f;
+            bool visible = true;
+        };
+
+        static constexpr DWORD kHeadlightRefreshMs = 200;
+        static constexpr size_t kHeadlightObjectSlotCount = 4096;
+        static constexpr size_t kHeadlightObjectSlotSize = 0x400;
+        // Redux's verified handle mapping (mirrors EXU GameObject::GetObj):
+        // object = 0x0260DB20 + (handle >> 20) * 0x400.
+        static constexpr uintptr_t kHeadlightObjectArenaRva = 0x0220DB20;
+        static constexpr uintptr_t kHeadlightUserObjectRva = 0x00517AFC;
+        // LightRenderClass::Simulate iterates the Ogre lights emitted by
+        // draw_light particle records. Stock deletes a renderer when its
+        // active flag clears, which means an empty craft's running lights can
+        // never return when a pilot re-enters. The stock phase is also clamped
+        // after one interpolation instead of cycling.
+        static constexpr uintptr_t kEmissionLightStateBranchAddr = 0x0044CBD0;
+        static constexpr uintptr_t kEmissionLightActiveResumeAddr = 0x0044CBDF;
+        static constexpr uintptr_t kEmissionLightLoopResumeAddr = 0x0044CF49;
+        static constexpr size_t kEmissionLightStateBranchPatchLen = 9;
+        static bool g_HeadlightConfigInitialized = false;
+        static bool g_HeadlightPlayerVisibleConfigured = false;
+        static bool g_HeadlightPlayerVisible = true;
+        static bool g_HeadlightOtherVisibleConfigured = false;
+        static bool g_HeadlightOtherVisible = true;
+        static HeadlightColourMode g_HeadlightColourMode = HeadlightColourMode::Stock;
+        static HeadlightBeamMode g_HeadlightBeamMode = HeadlightBeamMode::Stock;
+        static float g_HeadlightColourR = 5.0f;
+        static float g_HeadlightColourG = 5.0f;
+        static float g_HeadlightColourB = 5.0f;
+        static bool g_HeadlightRuntimeActive = false;
+        static DWORD g_HeadlightLastRefreshTick = 0;
+        static std::unordered_map<void*, HeadlightOriginalState> g_HeadlightOriginalStates;
+        static InlineDetour32 g_EmissionLightStateDetour = {};
+        static uintptr_t g_EmissionLightActiveResume = kEmissionLightActiveResumeAddr;
+        static uintptr_t g_EmissionLightLoopResume = kEmissionLightLoopResumeAddr;
+        static bool g_EmissionLightFixInstallAttempted = false;
+        static bool g_EmissionLightFixInstalled = false;
+        static bool g_EmissionLightFixMismatchLogged = false;
+
+        static HeadlightOgreApi& GetHeadlightOgreApi()
+        {
+            static HeadlightOgreApi api;
+            if (!api.getDiffuse)
+                api.getDiffuse = ResolveOgreProc<FnOgreGetLightColour>(
+                    "?getDiffuseColour@Light@Ogre@@QBEABVColourValue@2@XZ");
+            if (!api.setDiffuse)
+                api.setDiffuse = ResolveOgreProc<FnOgreSetLightColour>(
+                    "?setDiffuseColour@Light@Ogre@@QAEXMMM@Z");
+            if (!api.getSpecular)
+                api.getSpecular = ResolveOgreProc<FnOgreGetLightColour>(
+                    "?getSpecularColour@Light@Ogre@@QBEABVColourValue@2@XZ");
+            if (!api.setSpecular)
+                api.setSpecular = ResolveOgreProc<FnOgreSetLightColour>(
+                    "?setSpecularColour@Light@Ogre@@QAEXMMM@Z");
+            if (!api.getInnerAngle)
+                api.getInnerAngle = ResolveOgreProc<FnOgreGetLightRadian>(
+                    "?getSpotlightInnerAngle@Light@Ogre@@QBEABVRadian@2@XZ");
+            if (!api.getOuterAngle)
+                api.getOuterAngle = ResolveOgreProc<FnOgreGetLightRadian>(
+                    "?getSpotlightOuterAngle@Light@Ogre@@QBEABVRadian@2@XZ");
+            if (!api.getFalloff)
+                api.getFalloff = ResolveOgreProc<FnOgreGetLightFloat>(
+                    "?getSpotlightFalloff@Light@Ogre@@QBEMXZ");
+            if (!api.setRange)
+                api.setRange = ResolveOgreProc<FnOgreSetSpotlightRange>(
+                    "?setSpotlightRange@Light@Ogre@@QAEXABVRadian@2@0M@Z");
+            if (!api.getVisible)
+                api.getVisible = ResolveOgreProc<FnOgreGetLightVisible>(
+                    "?getVisible@MovableObject@Ogre@@UBE_NXZ");
+            if (!api.setVisible)
+                api.setVisible = ResolveOgreProc<FnOgreSetVisible>(
+                    "?setVisible@Light@Ogre@@UAEX_N@Z");
+            return api;
+        }
+
+        static void HandleEmissionLightState(void* renderer, void* renderClass)
+        {
+            if (!renderer)
+                return;
+
+            __try
+            {
+                auto* rendererBytes = reinterpret_cast<uint8_t*>(renderer);
+                const bool active = rendererBytes[0x1C] != 0;
+                void* light = *reinterpret_cast<void**>(rendererBytes + 0x70);
+                auto& api = GetHeadlightOgreApi();
+                if (light && api.setVisible)
+                    api.setVisible(light, active);
+
+                if (!active || !renderClass)
+                    return;
+
+                // The stock blend is clamp(phase * rate, 0, 1), followed by
+                // phase += dt. Feed it a repeating cosine blend each frame so
+                // configured start/end colours and intensity visibly pulse.
+                const float rate = *reinterpret_cast<const float*>(
+                    reinterpret_cast<const uint8_t*>(renderClass) + 0x178);
+                if (std::isfinite(rate) && rate > 0.0001f)
+                {
+                    constexpr double kPi = 3.14159265358979323846;
+                    const double seconds = static_cast<double>(GetTickCount64()) / 1000.0;
+                    const float blend = static_cast<float>(
+                        0.5 - 0.5 * std::cos(kPi * seconds * static_cast<double>(rate)));
+                    *reinterpret_cast<float*>(rendererBytes + 0x60) = blend / rate;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
+        static void __declspec(naked) EmissionLightStateHook()
+        {
+            __asm
+            {
+                pushad
+                pushfd
+                push dword ptr [ebp - 0x08]
+                push dword ptr [ebp - 0x04]
+                call HandleEmissionLightState
+                add esp, 8
+                popfd
+                popad
+
+                // Replay the displaced active-state test.
+                mov eax, [ebp - 0x04]
+                movzx ecx, byte ptr [eax + 0x1C]
+                test ecx, ecx
+                jz emissionInactive
+                jmp dword ptr [g_EmissionLightActiveResume]
+
+            emissionInactive:
+                // Keep the renderer dormant instead of invoking its deleting
+                // destructor. Its producer can set active again on re-entry.
+                jmp dword ptr [g_EmissionLightLoopResume]
+            }
+        }
+
+        static void InstallEmissionLightFixIfPossible()
+        {
+            if (g_EmissionLightFixInstalled || g_EmissionLightFixInstallAttempted)
+                return;
+            g_EmissionLightFixInstallAttempted = true;
+
+            if (EnvFlagEnabled("OPENSHIM_DISABLE_EMISSION_LIGHT_FIX"))
+            {
+                Log(L"[EMISSIONLIGHT] Fix disabled by environment\n");
+                return;
+            }
+
+            static const uint8_t kExpectedBytes[kEmissionLightStateBranchPatchLen] =
+            {
+                0x8B, 0x45, 0xFC,
+                0x0F, 0xB6, 0x48, 0x1C,
+                0x85, 0xC9
+            };
+            if (!InstallInlineDetour32(
+                    g_EmissionLightStateDetour,
+                    kEmissionLightStateBranchAddr,
+                    reinterpret_cast<void*>(EmissionLightStateHook),
+                    kEmissionLightStateBranchPatchLen,
+                    kExpectedBytes,
+                    sizeof(kExpectedBytes)))
+            {
+                if (!g_EmissionLightFixMismatchLogged)
+                {
+                    Log(L"[EMISSIONLIGHT] Stock bytes not ready/mismatched; running-light fix deferred at 0x%08X\n",
+                        static_cast<uint32_t>(kEmissionLightStateBranchAddr));
+                    g_EmissionLightFixMismatchLogged = true;
+                }
+                // Steam's packed on-disk image settles to the GOG bytes after
+                // launch. Let RetryDeferredRuntimeHooks try again then.
+                if (g_IsSteamExe)
+                    g_EmissionLightFixInstallAttempted = false;
+                return;
+            }
+
+            g_EmissionLightFixInstalled = true;
+            Log(L"[EMISSIONLIGHT] Installed re-entry visibility and continuous pulse fix at 0x%08X\n",
+                static_cast<uint32_t>(kEmissionLightStateBranchAddr));
+        }
+
+        static void* TryGetGameObjectHeadlight(void* gameObject)
+        {
+            if (!gameObject)
+                return nullptr;
+            __try
+            {
+                auto* bridge = *reinterpret_cast<uint8_t**>(
+                    reinterpret_cast<uint8_t*>(gameObject) + 0xF0);
+                return bridge ? *reinterpret_cast<void**>(bridge + 0xA8) : nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
+
+        static bool IsLiveHeadlightObjectSlot(void* gameObject)
+        {
+            if (!gameObject)
+                return false;
+            __try
+            {
+                const uintptr_t vtable = *reinterpret_cast<const uintptr_t*>(gameObject);
+                const uintptr_t mainBase = GetMainModuleBase();
+                // Live GameObject primary vtables are in the exe's compact
+                // code/rdata region (observed around 0x0088xxxx). Empty handle
+                // slots are zero; this also rejects stale heap-looking values.
+                return vtable >= mainBase && vtable < mainBase + 0x00600000;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void* TryGetHeadlightPlayerObject()
+        {
+            __try
+            {
+                return *ResolveMainModulePtr<void*>(kHeadlightUserObjectRva);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
+
+        static void RestoreHeadlightState(void* light, const HeadlightOriginalState& state)
+        {
+            if (!light)
+                return;
+            auto& api = GetHeadlightOgreApi();
+            __try
+            {
+                if (state.hasColour && api.setDiffuse && api.setSpecular)
+                {
+                    api.setDiffuse(light, state.diffuse.r, state.diffuse.g, state.diffuse.b);
+                    api.setSpecular(light, state.specular.r, state.specular.g, state.specular.b);
+                }
+                if (state.hasBeam && api.setRange)
+                {
+                    float inner = state.innerAngle;
+                    float outer = state.outerAngle;
+                    api.setRange(light, &inner, &outer, state.falloff);
+                }
+                if (state.hasVisible && api.setVisible)
+                    api.setVisible(light, state.visible);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
+        static void RestoreAllHeadlightStates(bool writeBack)
+        {
+            if (writeBack)
+            {
+                for (const auto& entry : g_HeadlightOriginalStates)
+                    RestoreHeadlightState(entry.first, entry.second);
+            }
+            g_HeadlightOriginalStates.clear();
+        }
+
+        static bool CaptureHeadlightState(
+            void* light,
+            bool needColour,
+            bool needBeam,
+            bool needVisible)
+        {
+            if (!light)
+                return false;
+            auto& state = g_HeadlightOriginalStates[light];
+            auto& api = GetHeadlightOgreApi();
+            __try
+            {
+                if (needColour && !state.hasColour)
+                {
+                    if (!api.getDiffuse || !api.getSpecular || !api.setDiffuse || !api.setSpecular)
+                        return false;
+                    const OgreColourValue* diffuse = api.getDiffuse(light);
+                    const OgreColourValue* specular = api.getSpecular(light);
+                    if (!diffuse || !specular)
+                        return false;
+                    state.diffuse = *diffuse;
+                    state.specular = *specular;
+                    state.hasColour = true;
+                }
+                if (needBeam && !state.hasBeam)
+                {
+                    if (!api.getInnerAngle || !api.getOuterAngle ||
+                        !api.getFalloff || !api.setRange)
+                    {
+                        return false;
+                    }
+                    const float* inner = api.getInnerAngle(light);
+                    const float* outer = api.getOuterAngle(light);
+                    if (!inner || !outer)
+                        return false;
+                    state.innerAngle = *inner;
+                    state.outerAngle = *outer;
+                    state.falloff = api.getFalloff(light);
+                    state.hasBeam = true;
+                }
+                if (needVisible && !state.hasVisible)
+                {
+                    if (!api.getVisible || !api.setVisible)
+                        return false;
+                    state.visible = api.getVisible(light);
+                    state.hasVisible = true;
+                }
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                g_HeadlightOriginalStates.erase(light);
+                return false;
+            }
+        }
+
+        static bool ApplyHeadlightState(
+            void* light,
+            bool setColour,
+            float r,
+            float g,
+            float b,
+            bool setBeam,
+            float inner,
+            float outer,
+            float falloff,
+            bool setVisible,
+            bool visible)
+        {
+            if (!CaptureHeadlightState(light, setColour, setBeam, setVisible))
+                return false;
+            auto& api = GetHeadlightOgreApi();
+            __try
+            {
+                if (setColour)
+                {
+                    api.setDiffuse(light, r, g, b);
+                    api.setSpecular(light, r, g, b);
+                }
+                if (setBeam)
+                {
+                    float innerCopy = inner;
+                    float outerCopy = outer;
+                    api.setRange(light, &innerCopy, &outerCopy, falloff);
+                }
+                if (setVisible)
+                    api.setVisible(light, visible);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void HueToHeadlightRgb(float hue, float& r, float& g, float& b)
+        {
+            const float scaled = hue * 6.0f;
+            const int sector = static_cast<int>(std::floor(scaled)) % 6;
+            const float f = scaled - std::floor(scaled);
+            const float q = 1.0f - f;
+            switch (sector)
+            {
+            case 0: r = 1.0f; g = f;    b = 0.0f; break;
+            case 1: r = q;    g = 1.0f; b = 0.0f; break;
+            case 2: r = 0.0f; g = 1.0f; b = f;    break;
+            case 3: r = 0.0f; g = q;    b = 1.0f; break;
+            case 4: r = f;    g = 0.0f; b = 1.0f; break;
+            default:r = 1.0f; g = 0.0f; b = q;    break;
+            }
+            r *= 5.0f;
+            g *= 5.0f;
+            b *= 5.0f;
+        }
+
+        static bool ParseHeadlightColour(const std::string& raw)
+        {
+            std::string value = raw;
+            for (char& c : value)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+            g_HeadlightColourMode = HeadlightColourMode::Fixed;
+            if (value == "stock" || value == "default" || value == "off")
+            {
+                g_HeadlightColourMode = HeadlightColourMode::Stock;
+                return true;
+            }
+            if (value == "rainbow")
+            {
+                g_HeadlightColourMode = HeadlightColourMode::Rainbow;
+                return true;
+            }
+
+            struct Preset { const char* name; float r; float g; float b; };
+            static constexpr Preset presets[] = {
+                { "white",   5.0f, 5.0f, 5.0f },
+                { "red",     5.0f, 1.0f, 1.0f },
+                { "green",   1.0f, 5.0f, 1.0f },
+                { "blue",    1.0f, 1.0f, 5.0f },
+                { "yellow",  5.0f, 5.0f, 1.0f },
+                { "cyan",    1.0f, 5.0f, 5.0f },
+                { "magenta", 5.0f, 1.0f, 5.0f },
+                { "orange",  5.0f, 2.5f, 1.0f },
+                { "purple",  2.5f, 1.0f, 5.0f },
+                { "teal",    1.0f, 5.0f, 2.5f },
+            };
+            for (const auto& preset : presets)
+            {
+                if (value == preset.name)
+                {
+                    g_HeadlightColourR = preset.r;
+                    g_HeadlightColourG = preset.g;
+                    g_HeadlightColourB = preset.b;
+                    return true;
+                }
+            }
+
+            float r = 0.0f;
+            float g = 0.0f;
+            float b = 0.0f;
+            char extra = 0;
+            if (std::sscanf(value.c_str(), " %f , %f , %f %c", &r, &g, &b, &extra) == 3 &&
+                std::isfinite(r) && std::isfinite(g) && std::isfinite(b) &&
+                r >= 0.0f && g >= 0.0f && b >= 0.0f &&
+                r <= 20.0f && g <= 20.0f && b <= 20.0f)
+            {
+                g_HeadlightColourR = r;
+                g_HeadlightColourG = g;
+                g_HeadlightColourB = b;
+                return true;
+            }
+            g_HeadlightColourMode = HeadlightColourMode::Stock;
+            return false;
+        }
+
+        static bool ParseHeadlightBeam(const std::string& raw)
+        {
+            std::string value = raw;
+            for (char& c : value)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (value == "stock" || value == "default" || value == "off")
+                g_HeadlightBeamMode = HeadlightBeamMode::Stock;
+            else if (value == "focused" || value == "focus" || value == "narrow")
+                g_HeadlightBeamMode = HeadlightBeamMode::Focused;
+            else if (value == "wide")
+                g_HeadlightBeamMode = HeadlightBeamMode::Wide;
+            else
+                return false;
+            return true;
+        }
+
+        static bool IsHeadlightFeatureConfigured()
+        {
+            return g_HeadlightPlayerVisibleConfigured ||
+                   g_HeadlightOtherVisibleConfigured ||
+                   g_HeadlightColourMode != HeadlightColourMode::Stock ||
+                   g_HeadlightBeamMode != HeadlightBeamMode::Stock;
+        }
+
+        static void RefreshHeadlightState()
+        {
+            const bool exuLoaded = IsExuModuleLoaded();
+            const bool wantActive =
+                IsHeadlightFeatureConfigured() &&
+                ReadLocalPlayerNetIdValue() == 0 &&
+                !exuLoaded;
+            if (!wantActive)
+            {
+                if (g_HeadlightRuntimeActive || !g_HeadlightOriginalStates.empty())
+                {
+                    // Once EXU is present, do not write old stock values over a
+                    // campaign setting that may already have been applied.
+                    RestoreAllHeadlightStates(!exuLoaded);
+                    Log(L"[HEADLIGHT] Stood down (%hs)\n",
+                        exuLoaded ? "EXU authoritative" : "multiplayer/disabled");
+                }
+                g_HeadlightRuntimeActive = false;
+                g_HeadlightLastRefreshTick = 0;
+                return;
+            }
+
+            if (!g_HeadlightRuntimeActive)
+            {
+                g_HeadlightRuntimeActive = true;
+                g_HeadlightLastRefreshTick = 0;
+                Log(L"[HEADLIGHT] Stock headlight policy active (SP-only)\n");
+            }
+
+            const DWORD now = GetTickCount();
+            if (g_HeadlightLastRefreshTick != 0 &&
+                static_cast<DWORD>(now - g_HeadlightLastRefreshTick) < kHeadlightRefreshMs)
+            {
+                return;
+            }
+            g_HeadlightLastRefreshTick = now;
+
+            void* player = TryGetHeadlightPlayerObject();
+
+            float colourR = g_HeadlightColourR;
+            float colourG = g_HeadlightColourG;
+            float colourB = g_HeadlightColourB;
+            if (g_HeadlightColourMode == HeadlightColourMode::Rainbow)
+            {
+                const float hue = static_cast<float>(now % 5000u) / 5000.0f;
+                HueToHeadlightRgb(hue, colourR, colourG, colourB);
+            }
+
+            float inner = 0.0f;
+            float outer = 0.0f;
+            float falloff = 0.35f;
+            float colourMultiplier = 1.0f;
+            if (g_HeadlightBeamMode == HeadlightBeamMode::Focused)
+            {
+                inner = 0.2f;
+                outer = 0.4f;
+                colourMultiplier = 2.0f;
+            }
+            else if (g_HeadlightBeamMode == HeadlightBeamMode::Wide)
+            {
+                inner = 1.1f;
+                outer = 1.5f;
+                colourMultiplier = 0.8f;
+            }
+            colourR *= colourMultiplier;
+            colourG *= colourMultiplier;
+            colourB *= colourMultiplier;
+
+            std::unordered_set<void*> touched;
+            size_t scannedObjects = 0;
+            size_t lightsFound = 0;
+            const bool setPlayerColour = g_HeadlightColourMode != HeadlightColourMode::Stock;
+            const bool setPlayerBeam = g_HeadlightBeamMode != HeadlightBeamMode::Stock;
+            auto applyObject = [&](void* object, bool isPlayer)
+            {
+                void* light = TryGetGameObjectHeadlight(object);
+                if (!light)
+                    return;
+                ++lightsFound;
+                const bool setVisible = isPlayer
+                    ? g_HeadlightPlayerVisibleConfigured
+                    : g_HeadlightOtherVisibleConfigured;
+                const bool setColour = isPlayer && setPlayerColour;
+                const bool setBeam = isPlayer && setPlayerBeam;
+                if (!setVisible && !setColour && !setBeam)
+                    return;
+                const bool visible = isPlayer ? g_HeadlightPlayerVisible : g_HeadlightOtherVisible;
+                if (ApplyHeadlightState(light, setColour, colourR, colourG, colourB,
+                                        setBeam, inner, outer, falloff,
+                                        setVisible, visible))
+                {
+                    touched.insert(light);
+                }
+            };
+
+            if (player)
+                applyObject(player, true);
+
+            auto* arena = ResolveMainModulePtr<uint8_t>(kHeadlightObjectArenaRva);
+            if (arena)
+            {
+                for (size_t i = 0; i < kHeadlightObjectSlotCount; ++i)
+                {
+                    void* object = arena + i * kHeadlightObjectSlotSize;
+                    if (object != player && IsLiveHeadlightObjectSlot(object))
+                    {
+                        ++scannedObjects;
+                        applyObject(object, false);
+                    }
+                }
+            }
+
+            for (auto it = g_HeadlightOriginalStates.begin();
+                 it != g_HeadlightOriginalStates.end();)
+            {
+                if (touched.find(it->first) == touched.end())
+                {
+                    RestoreHeadlightState(it->first, it->second);
+                    it = g_HeadlightOriginalStates.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+
+            if (EnvFlagEnabled("OPENSHIM_TRACE_HEADLIGHTS"))
+            {
+                Log(L"[HEADLIGHT] refresh player=0x%08X objects=%u lights=%u touched=%u tracked=%u\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(player)),
+                    static_cast<unsigned>(scannedObjects),
+                    static_cast<unsigned>(lightsFound),
+                    static_cast<unsigned>(touched.size()),
+                    static_cast<unsigned>(g_HeadlightOriginalStates.size()));
+            }
+        }
+
+        static void InitializeHeadlightConfig()
+        {
+            if (g_HeadlightConfigInitialized)
+                return;
+            g_HeadlightConfigInitialized = true;
+
+            bool boolValue = false;
+            if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "Headlights", boolValue))
+            {
+                g_HeadlightPlayerVisibleConfigured = true;
+                g_HeadlightPlayerVisible = boolValue;
+            }
+            if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "OtherHeadlights", boolValue))
+            {
+                g_HeadlightOtherVisibleConfigured = true;
+                g_HeadlightOtherVisible = boolValue;
+            }
+
+            std::string value;
+            if (TryGetUserConfigString(kUserConfigSinglePlayerSection, "HeadlightColor", value) &&
+                !ParseHeadlightColour(value))
+            {
+                Log(L"[HEADLIGHT] Ignoring invalid HeadlightColor=%hs\n", value.c_str());
+            }
+            if (TryGetUserConfigString(kUserConfigSinglePlayerSection, "HeadlightBeam", value) &&
+                !ParseHeadlightBeam(value))
+            {
+                Log(L"[HEADLIGHT] Ignoring invalid HeadlightBeam=%hs\n", value.c_str());
+            }
+
+            const char* colourName =
+                g_HeadlightColourMode == HeadlightColourMode::Rainbow ? "rainbow" :
+                (g_HeadlightColourMode == HeadlightColourMode::Fixed ? "fixed" : "stock");
+            const char* beamName =
+                g_HeadlightBeamMode == HeadlightBeamMode::Focused ? "focused" :
+                (g_HeadlightBeamMode == HeadlightBeamMode::Wide ? "wide" : "stock");
+            Log(L"[HEADLIGHT] Baseline configured=%hs player=%hs other=%hs colour=%hs(%.2f,%.2f,%.2f) beam=%hs (SP-only; defers to EXU)\n",
+                IsHeadlightFeatureConfigured() ? "yes" : "no",
+                g_HeadlightPlayerVisibleConfigured ? (g_HeadlightPlayerVisible ? "on" : "off") : "stock",
+                g_HeadlightOtherVisibleConfigured ? (g_HeadlightOtherVisible ? "on" : "off") : "stock",
+                colourName,
+                static_cast<double>(g_HeadlightColourR),
+                static_cast<double>(g_HeadlightColourG),
+                static_cast<double>(g_HeadlightColourB),
+                beamName);
+            RefreshHeadlightState();
+        }
+
+        static void RevertHeadlightsToBaseline()
+        {
+            InitializeHeadlightConfig();
+            g_HeadlightLastRefreshTick = 0;
+            RefreshHeadlightState();
+        }
+
+        // --- Global feature registry -------------------------------------------
+        // One coordination point for the user-config / EXU-bridge driven features.
+        // Each feature keeps its own apply/parse/baseline internals; the registry
+        // only centralizes the two cross-cutting lifecycle actions so new features
+        // are a single appended row instead of another open-coded call at every
+        // reset/tick site:
+        //   revertToBaseline  restore the post-mission resting state — the user's
+        //                     openshim.ini baseline for Display features, the build
+        //                     default for gameplay features. Called on mission end.
+        //   refreshMpGate     reconcile a SinglePlayer-tier feature against the
+        //                     live net id so it can never touch a network game.
+        //                     Called on mission end and from the periodic sim tick.
+        // Tier is advisory metadata today (it documents the [Display] vs
+        // [SinglePlayer] openshim.ini section and whether refreshMpGate is required)
+        // and is the hook future native features will read to auto-gate themselves.
+        enum class FeatureTier
+        {
+            Display,       // cosmetic/local; applied everywhere, including MP.
+            SinglePlayer,  // sim/gameplay; applied in SP only, hard-off in MP.
+        };
+
+        struct FeatureDescriptor
+        {
+            const char* name;
+            FeatureTier tier;
+            void (*revertToBaseline)();  // nullptr = nothing to revert
+            void (*refreshMpGate)();     // nullptr = not multiplayer-gated
+        };
+
+        static const FeatureDescriptor g_FeatureRegistry[] = {
+            { "UnderAttackAlert", FeatureTier::Display,
+              &RevertUnderAttackAlertToBaseline, nullptr },
+            { "TargetReticle", FeatureTier::Display,
+              &RevertTargetReticlePopupToBaseline, nullptr },
+            { "UnitVoFeedback", FeatureTier::Display,
+              &RevertUnitVoToBaseline, nullptr },
+            { "ScrapPilotHud", FeatureTier::Display,
+              &RevertScrapPilotHudToBaseline, &RefreshScrapPilotHudLayout },
+            { "WeaponConvergence", FeatureTier::SinglePlayer,
+              &RevertShotConvergenceToBaseline, &RefreshShotConvergencePatchState },
+            { "SmartReticleRange", FeatureTier::SinglePlayer,
+              &RevertSmartReticleRangeToBaseline, &RefreshSmartReticleRangeState },
+            { "TurretAimPitch", FeatureTier::SinglePlayer,
+              &RevertTurretAimPitchToBaseline, &RefreshTurretAimPitchState },
+            { "JumpSnipeCrouch", FeatureTier::SinglePlayer,
+              &RevertJumpSnipeCrouchToBaseline, &RefreshJumpSnipeCrouchPatchState },
+            { "GlobalTurbo", FeatureTier::SinglePlayer,
+              &RevertGlobalTurboToBaseline, &RefreshGlobalTurboPatchState },
+            { "Headlights", FeatureTier::SinglePlayer,
+              &RevertHeadlightsToBaseline, &RefreshHeadlightState },
+        };
+
+        // Restore every registered feature to its resting state (mission end).
+        static void RevertRegisteredFeaturesToBaseline()
+        {
+            for (const auto& feature : g_FeatureRegistry)
+            {
+                if (feature.revertToBaseline)
+                    feature.revertToBaseline();
+            }
+        }
+
+        // Reconcile every multiplayer-gated feature against the current net id.
+        static void RefreshRegisteredMpGatedFeatures()
+        {
+            for (const auto& feature : g_FeatureRegistry)
+            {
+                if (feature.refreshMpGate)
+                    feature.refreshMpGate();
             }
         }
 
@@ -9996,6 +12949,554 @@ namespace BZROpenShim
             }
         }
 
+        struct ScrapScoreVector3
+        {
+            float x;
+            float y;
+            float z;
+        };
+
+        static bool ShouldTraceScrapPathing()
+        {
+            return EnvFlagEnabled("OPENSHIM_TRACE_SCAVENGER_PATH") ||
+                   EnvFlagEnabled("OPENSHIM_TRACE_AI_SCAVENGER") ||
+                   EnvFlagEnabled("BZR_TRACE_AI_SCAVENGER");
+        }
+
+        static void TraceScrapPathScore(const char* result,
+                                        void* craft,
+                                        void* scrap,
+                                        float straightDistance,
+                                        float pathLength,
+                                        float score)
+        {
+            if (!ShouldTraceScrapPathing())
+                return;
+
+            const long remaining = InterlockedDecrement(&g_ScrapPathTraceBudget);
+            if (remaining < 0)
+                return;
+
+            Log(L"[SCAVPATH] result=%hs craft=0x%08X scrap=0x%08X straight=%.2f path=%.2f score=%.2f remaining=%ld\n",
+                result,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(scrap)),
+                static_cast<double>(straightDistance),
+                static_cast<double>(pathLength),
+                static_cast<double>(score),
+                remaining);
+        }
+
+        // This helper is reached through a naked call-site thunk. originalStack
+        // points at the stock CALL return address followed by two VECTOR_3D
+        // values (candidate, scavenger); callerFrame is InitLookingForScrap's
+        // EBP and exposes only the task/candidate locals validated for 2.2.301.
+        static __declspec(noinline) float __cdecl ScoreScrapCandidateFromCallsite(
+            const uint8_t* callerFrame,
+            const uint8_t* originalStack)
+        {
+            if (!callerFrame || !originalStack)
+                return kScrapRejectedScore;
+
+            ScrapScoreVector3 candidatePosition = {};
+            ScrapScoreVector3 scavengerPosition = {};
+            void* recycleTask = nullptr;
+            void* candidateObject = nullptr;
+            void* craft = nullptr;
+            __try
+            {
+                candidatePosition = *reinterpret_cast<const ScrapScoreVector3*>(originalStack + 4);
+                scavengerPosition = *reinterpret_cast<const ScrapScoreVector3*>(originalStack + 16);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return kScrapRejectedScore;
+            }
+
+            const float dx = candidatePosition.x - scavengerPosition.x;
+            const float dy = candidatePosition.y - scavengerPosition.y;
+            const float dz = candidatePosition.z - scavengerPosition.z;
+            const float straightSquared = dx * dx + dy * dy + dz * dz;
+            if (!std::isfinite(straightSquared))
+                return kScrapRejectedScore;
+
+            __try
+            {
+                recycleTask = *reinterpret_cast<void* const*>(
+                    callerFrame - kRecycleTaskCallerThisLocalOffset);
+                candidateObject = *reinterpret_cast<void* const*>(
+                    callerFrame - kRecycleTaskCallerCandidateLocalOffset);
+                if (recycleTask)
+                {
+                    craft = *reinterpret_cast<void* const*>(
+                        reinterpret_cast<const uint8_t*>(recycleTask) + kRecycleTaskOwnerOffset);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return straightSquared;
+            }
+
+            if (!craft || !candidateObject || ReadLocalPlayerNetIdValue() != 0)
+                return straightSquared;
+
+            AiTuningConfig tuning = {};
+            const bool hasTuning = TryGetAiTuningForObject(craft, tuning);
+            bool pathingEnabled = g_SmartScavengerPathingEnabled;
+            if (g_AiOdfGameplayTuningEnabled && hasTuning && tuning.hasScrapPathingAI)
+                pathingEnabled = tuning.scrapPathingAI;
+            if (!pathingEnabled)
+            {
+                return straightSquared;
+            }
+
+            const float straightDistance = std::sqrt((std::max)(straightSquared, 0.0f));
+            if (tuning.hasScrapSearchRadiusAI &&
+                std::isfinite(tuning.scrapSearchRadiusAI) &&
+                tuning.scrapSearchRadiusAI > 0.0f &&
+                straightDistance > tuning.scrapSearchRadiusAI)
+            {
+                TraceScrapPathScore("radius-reject", craft, candidateObject,
+                                    straightDistance, 0.0f, kScrapRejectedScore);
+                return kScrapRejectedScore;
+            }
+
+            float now = 0.0f;
+            if (g_BzrFn_GetGameTime)
+                now = g_BzrFn_GetGameTime();
+
+            const uintptr_t candidateKey = reinterpret_cast<uintptr_t>(candidateObject);
+            auto failureIt = g_ScrapPathFailuresByObject.find(candidateKey);
+            if (failureIt != g_ScrapPathFailuresByObject.end())
+            {
+                const ScrapPathFailureState& failure = failureIt->second;
+                const bool sameObjectPosition =
+                    std::fabs(failure.x - candidatePosition.x) < 1.0f &&
+                    std::fabs(failure.z - candidatePosition.z) < 1.0f;
+                if (std::isfinite(now) && sameObjectPosition && now < failure.retryAfter)
+                {
+                    TraceScrapPathScore("cooldown-reject", craft, candidateObject,
+                                        straightDistance, 0.0f, kScrapRejectedScore);
+                    return kScrapRejectedScore;
+                }
+                g_ScrapPathFailuresByObject.erase(failureIt);
+            }
+
+            const float pathWeight =
+                (tuning.hasScrapPathLengthWeightAI &&
+                 std::isfinite(tuning.scrapPathLengthWeightAI))
+                    ? (std::max)(tuning.scrapPathLengthWeightAI, 0.0f)
+                    : 1.0f;
+            const float straightWeight =
+                (tuning.hasScrapStraightDistanceWeightAI &&
+                 std::isfinite(tuning.scrapStraightDistanceWeightAI))
+                    ? (std::max)(tuning.scrapStraightDistanceWeightAI, 0.0f)
+                    : 0.05f;
+            const float failPenalty =
+                (tuning.hasScrapPathFailPenaltyAI &&
+                 std::isfinite(tuning.scrapPathFailPenaltyAI))
+                    ? (std::max)(tuning.scrapPathFailPenaltyAI, 0.0f)
+                    : 250.0f;
+
+            if (!g_BzrFn_FindPlanForObject ||
+                !g_BzrFn_AiPathGetLength ||
+                !g_BzrFn_AiPathDelete)
+            {
+                return straightSquared;
+            }
+
+            void* path = nullptr;
+            float pathLength = 0.0f;
+            bool badPath = true;
+            bool pathProbeFaulted = false;
+            __try
+            {
+                path = g_BzrFn_FindPlanForObject(
+                    craft, candidatePosition.x, candidatePosition.z);
+                if (path)
+                {
+                    badPath =
+                        *reinterpret_cast<const int*>(
+                            reinterpret_cast<const uint8_t*>(path) + kAiPathTypeOffset) ==
+                        kAiPathBadPathType;
+                    if (!badPath)
+                        pathLength = g_BzrFn_AiPathGetLength(path);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                pathProbeFaulted = true;
+                badPath = true;
+                pathLength = 0.0f;
+            }
+
+            if (path)
+            {
+                __try
+                {
+                    g_BzrFn_AiPathDelete(path, 1);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    // The score hook must fail soft; the stock task still owns
+                    // its independently-created validation path.
+                }
+            }
+
+            if (pathProbeFaulted)
+            {
+                TraceScrapPathScore("probe-fallback", craft, candidateObject,
+                                    straightDistance, 0.0f, straightSquared);
+                return straightSquared;
+            }
+
+            if (badPath || !std::isfinite(pathLength))
+            {
+                const float cooldown =
+                    (tuning.hasScrapHardToGetCooldownAI &&
+                     std::isfinite(tuning.scrapHardToGetCooldownAI))
+                        ? (std::max)(tuning.scrapHardToGetCooldownAI, 0.0f)
+                        : 10.0f;
+                if (cooldown > 0.0f && std::isfinite(now))
+                {
+                    g_ScrapPathFailuresByObject[candidateKey] =
+                        { now + cooldown, candidatePosition.x, candidatePosition.z };
+                }
+
+                const float failedScore = failPenalty + straightDistance * straightWeight;
+                const float safeFailedScore = std::isfinite(failedScore)
+                    ? (std::min)(failedScore, kScrapRejectedScore)
+                    : kScrapRejectedScore;
+                TraceScrapPathScore("bad-path", craft, candidateObject,
+                                    straightDistance, 0.0f, safeFailedScore);
+                return safeFailedScore;
+            }
+
+            float score = pathLength * pathWeight + straightDistance * straightWeight;
+            bool incumbentBonusApplied = false;
+            const uintptr_t taskKey = reinterpret_cast<uintptr_t>(recycleTask);
+            auto retargetIt = g_ScrapRetargetStateByTask.find(taskKey);
+            if (retargetIt != g_ScrapRetargetStateByTask.end() &&
+                retargetIt->second.owner == reinterpret_cast<uintptr_t>(craft) &&
+                retargetIt->second.rescorePending)
+            {
+                ScrapRetargetState& retarget = retargetIt->second;
+                if (!std::isfinite(now) || now > retarget.pendingUntil)
+                {
+                    retarget.rescorePending = false;
+                }
+                else if (g_BzrFn_GameObjectGetObjByHandle && retarget.incumbentHandle != 0)
+                {
+                    void* incumbent = g_BzrFn_GameObjectGetObjByHandle(retarget.incumbentHandle);
+                    if (incumbent == candidateObject)
+                    {
+                        const float minImprovement =
+                            (tuning.hasScrapRetargetMinImprovementAI &&
+                             std::isfinite(tuning.scrapRetargetMinImprovementAI))
+                                ? (std::max)(tuning.scrapRetargetMinImprovementAI, 0.0f)
+                                : kScrapRetargetMinImprovementDefault;
+                        score -= minImprovement;
+                        incumbentBonusApplied = true;
+                    }
+                }
+            }
+
+            const float safeScore = std::isfinite(score)
+                ? (std::min)((std::max)(score, 0.0f), kScrapRejectedScore)
+                : kScrapRejectedScore;
+            TraceScrapPathScore(incumbentBonusApplied ? "path-incumbent" : "path",
+                                craft, candidateObject,
+                                straightDistance, pathLength, safeScore);
+            return safeScore;
+        }
+
+#if defined(_M_IX86)
+        static __declspec(naked) void ScrapCandidateScoreCallsiteHook()
+        {
+            __asm
+            {
+                mov eax, esp
+                push eax
+                push ebp
+                call ScoreScrapCandidateFromCallsite
+                add esp, 8
+                ret
+            }
+        }
+#endif
+
+        static void InstallScrapPathScoreHookIfPossible()
+        {
+            if (g_ScrapPathScoreHookInstalled)
+                return;
+
+#if !defined(_M_IX86)
+            return;
+#else
+            g_BzrFn_FindPlanForObject =
+                reinterpret_cast<FnFindPlanForObject>(kGogFindPlanForObjectAddr);
+            g_BzrFn_AiPathGetLength =
+                reinterpret_cast<FnAiPathGetLength>(kGogAiPathGetLengthAddr);
+            g_BzrFn_AiPathDelete =
+                reinterpret_cast<FnAiPathDelete>(kGogAiPathDeleteAddr);
+            g_BzrFn_GetGameTime = reinterpret_cast<FnGetGameTime>(kGogGetGameTimeAddr);
+            if (!g_BzrFn_GameObjectGetObjByHandle)
+            {
+                g_BzrFn_GameObjectGetObjByHandle =
+                    &GameObjectFromHandleGog; // was 0x0046B160 (wrong fn; crashed)
+            }
+
+            static const uint8_t kExpectedCall[5] =
+                { 0xE8, 0x9D, 0xB8, 0xEA, 0xFF };
+            static const uint8_t kExpectedFindPlan[8] =
+                { 0x55, 0x8B, 0xEC, 0x51, 0x8B, 0x4D, 0x08, 0x83 };
+            static const uint8_t kExpectedGetLength[8] =
+                { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x18, 0x89, 0x4D };
+            static const uint8_t kExpectedDelete[8] =
+                { 0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC, 0x8B };
+
+            auto* callBytes = reinterpret_cast<uint8_t*>(kGogRecycleTaskScrapDistanceCallAddr);
+            uintptr_t currentTarget = 0;
+            if (callBytes[0] == 0xE8)
+            {
+                int32_t currentRelative = 0;
+                std::memcpy(&currentRelative, callBytes + 1, sizeof(currentRelative));
+                currentTarget =
+                    kGogRecycleTaskScrapDistanceCallAddr + 5 + currentRelative;
+                if (currentTarget == reinterpret_cast<uintptr_t>(ScrapCandidateScoreCallsiteHook))
+                {
+                    g_ScrapPathScoreHookInstalled = true;
+                    return;
+                }
+            }
+
+            if (currentTarget != kGogDist3DSquaredAddr ||
+                !ExpectedBytesMatchAt(kGogRecycleTaskScrapDistanceCallAddr,
+                                      kExpectedCall, sizeof(kExpectedCall)) ||
+                !ExpectedBytesMatchAt(kGogFindPlanForObjectAddr,
+                                      kExpectedFindPlan, sizeof(kExpectedFindPlan)) ||
+                !ExpectedBytesMatchAt(kGogAiPathGetLengthAddr,
+                                      kExpectedGetLength, sizeof(kExpectedGetLength)) ||
+                !ExpectedBytesMatchAt(kGogAiPathDeleteAddr,
+                                      kExpectedDelete, sizeof(kExpectedDelete)))
+            {
+                Log(L"[SCAVPATH] Redux helper/call-site bytes mismatch; path-scored scrap selection disabled\n");
+                return;
+            }
+
+            uint8_t patch[5] = { 0xE8, 0, 0, 0, 0 };
+            const int32_t relative =
+                static_cast<int32_t>(reinterpret_cast<uintptr_t>(ScrapCandidateScoreCallsiteHook)) -
+                static_cast<int32_t>(kGogRecycleTaskScrapDistanceCallAddr + 5);
+            std::memcpy(patch + 1, &relative, sizeof(relative));
+            if (!WritePatchBytes(kGogRecycleTaskScrapDistanceCallAddr, patch, sizeof(patch)))
+            {
+                Log(L"[SCAVPATH] Failed patching scrap score call at 0x%08X\n",
+                    static_cast<uint32_t>(kGogRecycleTaskScrapDistanceCallAddr));
+                return;
+            }
+
+            g_ScrapPathScoreHookInstalled = true;
+            Log(L"[SCAVPATH] Installed path-scored scrap selector call=0x%08X FindPlan=0x%08X GetLength=0x%08X\n",
+                static_cast<uint32_t>(kGogRecycleTaskScrapDistanceCallAddr),
+                static_cast<uint32_t>(kGogFindPlanForObjectAddr),
+                static_cast<uint32_t>(kGogAiPathGetLengthAddr));
+#endif
+        }
+
+        static void ApplyScavengerRetargetAfterGotoScrap(void* recycleTask)
+        {
+            if (!recycleTask || !g_BzrFn_GetGameTime || ReadLocalPlayerNetIdValue() != 0)
+                return;
+
+            auto* taskBytes = reinterpret_cast<uint8_t*>(recycleTask);
+            void* craft = nullptr;
+            void* subtask = nullptr;
+            int currentHandle = 0;
+            int nextState = 0;
+            __try
+            {
+                craft = *reinterpret_cast<void**>(taskBytes + kRecycleTaskOwnerOffset);
+                subtask = *reinterpret_cast<void**>(taskBytes + kRecycleTaskSubtaskOffset);
+                currentHandle = *reinterpret_cast<int*>(taskBytes + kRecycleTaskScrapHandleOffset);
+                nextState = *reinterpret_cast<int*>(taskBytes + kRecycleTaskNextStateOffset);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return;
+            }
+
+            const uintptr_t taskKey = reinterpret_cast<uintptr_t>(recycleTask);
+            AiTuningConfig tuning = {};
+            const bool hasTuning = craft && TryGetAiTuningForObject(craft, tuning);
+            bool pathingEnabled = g_SmartScavengerPathingEnabled;
+            if (g_AiOdfGameplayTuningEnabled && hasTuning && tuning.hasScrapPathingAI)
+                pathingEnabled = tuning.scrapPathingAI;
+            if (!craft || !pathingEnabled)
+            {
+                g_ScrapRetargetStateByTask.erase(taskKey);
+                return;
+            }
+
+            const float period =
+                (tuning.hasScrapRetargetPeriodAI &&
+                 std::isfinite(tuning.scrapRetargetPeriodAI))
+                    ? tuning.scrapRetargetPeriodAI
+                    : kScrapRetargetPeriodDefault;
+            if (!std::isfinite(period) || period <= 0.0f)
+            {
+                g_ScrapRetargetStateByTask.erase(taskKey);
+                return;
+            }
+
+            const float now = g_BzrFn_GetGameTime();
+            if (!std::isfinite(now))
+                return;
+
+            ScrapRetargetState& state = g_ScrapRetargetStateByTask[taskKey];
+            const uintptr_t craftKey = reinterpret_cast<uintptr_t>(craft);
+            if (state.owner != craftKey)
+            {
+                state = {};
+                state.owner = craftKey;
+            }
+            if (state.rescorePending)
+            {
+                TraceScrapPathScore(
+                    currentHandle == state.incumbentHandle
+                        ? "retarget-keep"
+                        : "retarget-switch",
+                    craft,
+                    g_BzrFn_GameObjectGetObjByHandle
+                        ? g_BzrFn_GameObjectGetObjByHandle(currentHandle)
+                        : nullptr,
+                    0.0f,
+                    0.0f,
+                    0.0f);
+                state.rescorePending = false;
+            }
+
+            // Stock uses 8 as the no-transition sentinel. If the subtask has
+            // completed or already requested another state, preserve it.
+            if (!subtask || nextState != 8)
+                return;
+
+            if (state.nextCheck <= 0.0f)
+            {
+                state.nextCheck = now + period;
+                return;
+            }
+            if (now < state.nextCheck)
+                return;
+
+            state.nextCheck = now + period;
+
+            void* currentScrap = g_BzrFn_GameObjectGetObjByHandle
+                ? g_BzrFn_GameObjectGetObjByHandle(currentHandle)
+                : nullptr;
+            double craftX = 0.0;
+            double craftY = 0.0;
+            double craftZ = 0.0;
+            double scrapX = 0.0;
+            double scrapY = 0.0;
+            double scrapZ = 0.0;
+            if (currentScrap &&
+                TryGetGameObjectPosition(craft, craftX, craftY, craftZ) &&
+                TryGetGameObjectPosition(currentScrap, scrapX, scrapY, scrapZ))
+            {
+                const double dx = scrapX - craftX;
+                const double dy = scrapY - craftY;
+                const double dz = scrapZ - craftZ;
+                const double distanceSquared = dx * dx + dy * dy + dz * dz;
+                if (std::isfinite(distanceSquared) &&
+                    distanceSquared <=
+                        static_cast<double>(kScrapRetargetPickupGuardDistance) *
+                        static_cast<double>(kScrapRetargetPickupGuardDistance))
+                {
+                    return;
+                }
+            }
+
+            state.incumbentHandle = currentHandle;
+            state.pendingUntil = now + (std::max)(period, 1.0f);
+            state.rescorePending = true;
+            __try
+            {
+                *reinterpret_cast<int*>(taskBytes + kRecycleTaskNextStateOffset) = 1;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                state.rescorePending = false;
+                return;
+            }
+
+            TraceScrapPathScore("retarget-request", craft, currentScrap,
+                                0.0f, 0.0f, 0.0f);
+        }
+
+        static void __fastcall RecycleTaskDoGotoScrapHook(
+            void* recycleTask,
+            void* /*unusedEdx*/)
+        {
+            if (g_BzrFn_RecycleTaskDoGotoScrap)
+                g_BzrFn_RecycleTaskDoGotoScrap(recycleTask);
+            ApplyScavengerRetargetAfterGotoScrap(recycleTask);
+        }
+
+        static void InstallScavengerRetargetHookIfPossible()
+        {
+            if (g_ScrapRetargetHookInstalled)
+                return;
+
+            if (g_RecycleTaskDoGotoScrapDetour.trampoline)
+            {
+                g_BzrFn_RecycleTaskDoGotoScrap =
+                    reinterpret_cast<FnRecycleTaskDoGotoScrap>(
+                        g_RecycleTaskDoGotoScrapDetour.trampoline);
+                g_ScrapRetargetHookInstalled =
+                    (g_BzrFn_RecycleTaskDoGotoScrap != nullptr);
+                return;
+            }
+
+            static const uint8_t kExpectedBytes[kRecycleTaskDoGotoScrapDetourLen] =
+                { 0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC };
+            if (!ExpectedBytesMatchAt(kGogRecycleTaskDoGotoScrapAddr,
+                                      kExpectedBytes,
+                                      sizeof(kExpectedBytes)))
+            {
+                Log(L"[SCAVPATH] RecycleTask::DoGotoScrap bytes mismatch at 0x%08X; en-route retargeting disabled\n",
+                    static_cast<uint32_t>(kGogRecycleTaskDoGotoScrapAddr));
+                return;
+            }
+
+            if (!InstallInlineDetour32(g_RecycleTaskDoGotoScrapDetour,
+                                       kGogRecycleTaskDoGotoScrapAddr,
+                                       reinterpret_cast<void*>(RecycleTaskDoGotoScrapHook),
+                                       kRecycleTaskDoGotoScrapDetourLen,
+                                       kExpectedBytes,
+                                       sizeof(kExpectedBytes)))
+            {
+                Log(L"[SCAVPATH] Failed installing RecycleTask::DoGotoScrap retarget hook at 0x%08X\n",
+                    static_cast<uint32_t>(kGogRecycleTaskDoGotoScrapAddr));
+                return;
+            }
+
+            g_BzrFn_RecycleTaskDoGotoScrap =
+                reinterpret_cast<FnRecycleTaskDoGotoScrap>(
+                    g_RecycleTaskDoGotoScrapDetour.trampoline);
+            g_ScrapRetargetHookInstalled =
+                (g_BzrFn_RecycleTaskDoGotoScrap != nullptr);
+            if (g_ScrapRetargetHookInstalled)
+            {
+                Log(L"[SCAVPATH] Installed en-route scrap retarget hook entry=0x%08X trampoline=0x%08X periodDefault=%.2f improveDefault=%.2f\n",
+                    static_cast<uint32_t>(kGogRecycleTaskDoGotoScrapAddr),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
+                        g_RecycleTaskDoGotoScrapDetour.trampoline)),
+                    static_cast<double>(kScrapRetargetPeriodDefault),
+                    static_cast<double>(kScrapRetargetMinImprovementDefault));
+            }
+        }
+
         void __cdecl CalcRangeCraftHook(void* craft,
                                         float* closeRange,
                                         float* range,
@@ -10136,9 +13637,11 @@ namespace BZROpenShim
             if (!objectPtr)
                 return;
 
-            // Per-unit override wins over ODF tuning and ignores the master toggle.
-            float retargetPeriod = 0.0f;
-            bool hasRetargetPeriod = false;
+            // Global upgrade applies to every covered combat process. Per-unit
+            // tuning wins, followed by an enabled ODF override. An explicit
+            // non-positive ODF value disables the global upgrade for that unit.
+            float retargetPeriod = kGlobalRetargetPeriod;
+            bool hasUnitRetargetPeriod = false;
             if (!g_AiUnitTuningOverridesByObject.empty())
             {
                 const auto unitIt =
@@ -10147,50 +13650,52 @@ namespace BZROpenShim
                     unitIt->second.hasRetargetPeriod)
                 {
                     retargetPeriod = unitIt->second.retargetPeriod;
-                    hasRetargetPeriod = true;
+                    hasUnitRetargetPeriod = true;
                 }
             }
 
-            if (!hasRetargetPeriod && g_AiOdfGameplayTuningEnabled)
+            if (!hasUnitRetargetPeriod && g_AiOdfGameplayTuningEnabled)
             {
                 AiTuningConfig tuning = {};
                 if (TryGetAiTuningForObject(objectPtr, tuning) && tuning.hasRetargetPeriodAI)
                 {
                     retargetPeriod = tuning.retargetPeriodAI;
-                    hasRetargetPeriod = true;
                 }
             }
 
-            if (!hasRetargetPeriod ||
-                !std::isfinite(retargetPeriod) ||
-                retargetPeriod <= 0.0f)
+            const uintptr_t processKey = reinterpret_cast<uintptr_t>(processPtr);
+            if (!std::isfinite(retargetPeriod) ||
+                retargetPeriod <= 0.0f ||
+                !g_BzrFn_GetGameTime)
             {
-                g_RetargetPeriodNextForceMsByProcess.erase(reinterpret_cast<uintptr_t>(processPtr));
+                g_RetargetPeriodStateByProcess.erase(processKey);
                 return;
             }
 
             float& nextEnemyCheck =
                 *reinterpret_cast<float*>(processBytes + kUnitProcessNextEnemyCheckOffset);
-            if (!std::isfinite(nextEnemyCheck) || nextEnemyCheck <= 0.0f)
-                return;
-
-            const ULONGLONG nowMs = GetTickCount64();
-            const ULONGLONG periodMs = static_cast<ULONGLONG>(
-                (std::max)(retargetPeriod, 0.01f) * 1000.0f);
-            ULONGLONG& nextForceMs =
-                g_RetargetPeriodNextForceMsByProcess[reinterpret_cast<uintptr_t>(processPtr)];
-            if (nextForceMs == 0)
+            const float now = g_BzrFn_GetGameTime();
+            if (!std::isfinite(now) ||
+                !std::isfinite(nextEnemyCheck) ||
+                nextEnemyCheck <= now)
             {
-                nextForceMs = nowMs + periodMs;
+                g_RetargetPeriodStateByProcess.erase(processKey);
                 return;
             }
 
-            if (nowMs < nextForceMs)
+            const float clampedPeriod = (std::max)(retargetPeriod, 0.01f);
+            const auto stateIt = g_RetargetPeriodStateByProcess.find(processKey);
+            if (stateIt != g_RetargetPeriodStateByProcess.end() &&
+                nextEnemyCheck == stateIt->second.appliedDeadline &&
+                clampedPeriod == stateIt->second.period)
                 return;
 
-            // These processes only look for a fresh enemy when this timer expires.
-            nextEnemyCheck = 0.0f;
-            nextForceMs = nowMs + periodMs;
+            // A changed future deadline means stock just scheduled another
+            // failed-search retry. Replace that 7-10 second deadline with the
+            // per-unit/ODF period while retaining the game's pause-aware clock.
+            nextEnemyCheck = now + clampedPeriod;
+            g_RetargetPeriodStateByProcess[processKey] =
+                { nextEnemyCheck, clampedPeriod };
         }
 
         static bool ShouldTraceAttackReveal()
@@ -10268,15 +13773,126 @@ namespace BZROpenShim
             }
         }
 
-        bool __fastcall OffensiveProcessDoSubTaskHook(void* thisPtr, void* /*edx*/)
-        {
-            const bool result =
-                g_BzrFn_OffensiveProcessDoSubTask
-                    ? g_BzrFn_OffensiveProcessDoSubTask(thisPtr)
-                    : false;
-            RevealProcessOwnerPerceivedTeam(thisPtr, "offensive_post_subtask");
-            ApplyRetargetPeriodAfterDoSubTask(thisPtr);
-            return result;
+		static bool SuppressUndeployedHowitzerSniperRetaliation(
+			void* processPtr,
+			void** outCraft,
+			void** outDamageOrdnance)
+		{
+			if (outCraft)
+				*outCraft = nullptr;
+			if (outDamageOrdnance)
+				*outDamageOrdnance = nullptr;
+			if (!g_HowitzerUndeployedRetaliationFixEnabled || !processPtr ||
+				!outCraft || !outDamageOrdnance)
+				return false;
+
+			__try
+			{
+				constexpr uint32_t kHowitzerPrimaryVtable = 0x0087AD70;
+				constexpr uint32_t kHowitzerSecondaryVtable = 0x0087AE1C;
+				constexpr size_t kCraftDeployState = 0x228;
+				constexpr int32_t kDeployed = 2;
+				constexpr size_t kLastDamageOrdnance = 0x98;
+				constexpr size_t kOrdnanceClassSignature = 0x0C;
+				constexpr uint32_t kSniperSignature = 0x534E4950u; // 'SNIP'
+
+				if (*reinterpret_cast<const uint32_t*>(processPtr) !=
+					static_cast<uint32_t>(kArtilleryProcessVtableAddr))
+					return false;
+
+				auto* process = static_cast<uint8_t*>(processPtr);
+				auto* craft = *reinterpret_cast<uint8_t**>(
+					process + kProcessOwnerObjectOffset);
+				if (!craft)
+					return false;
+
+				const uint32_t craftVtable =
+					*reinterpret_cast<const uint32_t*>(craft);
+				if (craftVtable != kHowitzerPrimaryVtable &&
+					craftVtable != kHowitzerSecondaryVtable)
+					return false;
+
+				if (*reinterpret_cast<const int32_t*>(craft + kCraftDeployState) ==
+					kDeployed)
+					return false;
+
+				void* damageOrdnance =
+					*reinterpret_cast<void**>(craft + kLastDamageOrdnance);
+				if (!damageOrdnance ||
+					*reinterpret_cast<const uint32_t*>(
+						static_cast<const uint8_t*>(damageOrdnance) +
+						kOrdnanceClassSignature) != kSniperSignature)
+					return false;
+
+				// OffensiveProcess::DoSubTask has a dedicated recent-SNIP override
+				// sourced only from craft+0x98. Hide that source for this one call;
+				// follow/go processing and ordinary target acquisition remain stock.
+				*reinterpret_cast<void**>(craft + kLastDamageOrdnance) = nullptr;
+				*outCraft = craft;
+				*outDamageOrdnance = damageOrdnance;
+				return true;
+			}
+			__except (EXCEPTION_EXECUTE_HANDLER)
+			{
+				return false;
+			}
+		}
+
+		static void RestoreSuppressedSniperDamageOrdnance(
+			void* craft,
+			void* damageOrdnance)
+		{
+			if (!craft || !damageOrdnance)
+				return;
+
+			__try
+			{
+				constexpr size_t kLastDamageOrdnance = 0x98;
+				auto** slot = reinterpret_cast<void**>(
+					static_cast<uint8_t*>(craft) + kLastDamageOrdnance);
+				if (*slot == nullptr)
+					*slot = damageOrdnance;
+			}
+			__except (EXCEPTION_EXECUTE_HANDLER)
+			{
+			}
+		}
+
+		bool __fastcall OffensiveProcessDoSubTaskHook(void* thisPtr, void* /*edx*/)
+		{
+			void* suppressedCraft = nullptr;
+			void* suppressedDamageOrdnance = nullptr;
+			const bool suppressed = SuppressUndeployedHowitzerSniperRetaliation(
+				thisPtr, &suppressedCraft, &suppressedDamageOrdnance);
+
+			bool result = false;
+			__try
+			{
+				result = g_BzrFn_OffensiveProcessDoSubTask
+					? g_BzrFn_OffensiveProcessDoSubTask(thisPtr)
+					: false;
+			}
+			__finally
+			{
+				if (suppressed)
+					RestoreSuppressedSniperDamageOrdnance(
+						suppressedCraft, suppressedDamageOrdnance);
+			}
+
+			if (suppressed &&
+				(EnvFlagEnabled("OPENSHIM_TRACE_ARTILLERY_MASK") ||
+				 EnvFlagEnabled("OPENSHIM_TRACE_WEAPON_MASK")))
+			{
+				const long remaining = InterlockedDecrement(&g_ArtilleryMaskTraceBudget);
+				if (remaining >= 0)
+					Log(L"[ARTYDEPLOY] Suppressed recent-SNIP target override for undeployed howitzer process=0x%08X craft=0x%08X remaining=%ld\n",
+						static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)),
+						static_cast<uint32_t>(reinterpret_cast<uintptr_t>(suppressedCraft)),
+						remaining);
+			}
+			RevealProcessOwnerPerceivedTeam(thisPtr, "offensive_post_subtask");
+			ApplyRetargetPeriodAfterDoSubTask(thisPtr);
+			return result;
         }
 
         bool __fastcall GunTowerProcessDoSubTaskHook(void* thisPtr, void* /*edx*/)
@@ -10290,13 +13906,71 @@ namespace BZROpenShim
             return result;
         }
 
+        bool __fastcall TurretTankProcessDoSubTaskHook(void* thisPtr, void* /*edx*/)
+        {
+            const bool result =
+                g_BzrFn_TurretTankProcessDoSubTask
+                    ? g_BzrFn_TurretTankProcessDoSubTask(thisPtr)
+                    : false;
+            RevealProcessOwnerPerceivedTeam(thisPtr, "turrettank_post_subtask");
+            ApplyRetargetPeriodAfterDoSubTask(thisPtr);
+            return result;
+        }
+
         void __fastcall ShieldTowerSimulateTeamFilterHook(void* thisPtr, void* /*edx*/, float dt)
         {
             RunShieldTowerFilteredSimulate(thisPtr, dt);
         }
 
+        static bool TryGetUnsafeMagnetRange(void* magnetMinePtr, float& outRange)
+        {
+            outRange = 0.0f;
+            if (!magnetMinePtr)
+                return false;
+
+            __try
+            {
+                auto* mineBytes = reinterpret_cast<const uint8_t*>(magnetMinePtr);
+                const void* mineClass = *reinterpret_cast<void* const*>(
+                    mineBytes + kGameObjectClassOffset);
+                if (!mineClass)
+                    return false;
+
+                outRange = *reinterpret_cast<const float*>(
+                    reinterpret_cast<const uint8_t*>(mineClass) +
+                    kMagnetMineClassRangeOffset);
+                return !std::isfinite(outRange) || outRange <= 0.0f;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         void __fastcall MagnetMineSimulateTeamFilterHook(void* thisPtr, void* /*edx*/, float dt)
         {
+            float range = 0.0f;
+            if (g_MagnetZeroRangeGuardEnabled && TryGetUnsafeMagnetRange(thisPtr, range))
+            {
+                const long remaining = InterlockedDecrement(&g_MagnetZeroRangeLogBudget);
+                if (remaining >= 0)
+                {
+                    Log(L"[MAGNET] Skipped attraction for invalid range=%.6g mine=0x%08X; base Mine::Simulate preserved (remaining=%ld)\n",
+                        static_cast<double>(range),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)),
+                        remaining);
+                }
+
+                // MagnetMine::Simulate eventually delegates to Mine::Simulate.
+                // Preserve that lifetime/removal behavior while bypassing the
+                // invalid attraction bounds that trigger the zero-range fault.
+                if (g_BzrFn_MineSimulate)
+                    g_BzrFn_MineSimulate(thisPtr, dt);
+                else if (g_BzrFn_MagnetMineSimulateOriginal)
+                    g_BzrFn_MagnetMineSimulateOriginal(thisPtr, dt);
+                return;
+            }
+
             RunMagnetMineFilteredSimulate(thisPtr, dt);
         }
 
@@ -10327,7 +14001,7 @@ namespace BZROpenShim
                     reinterpret_cast<FnGameObjectRelation>(kGogGameObjectEnemyPAddr);
             if (!g_BzrFn_GameObjectGetObjByHandle)
                 g_BzrFn_GameObjectGetObjByHandle =
-                    reinterpret_cast<FnGameObjectGetObjByHandle>(kGogGameObjectGetObjByHandleAddr);
+                    &GameObjectFromHandleGog; // was 0x0046B160 (wrong fn; crashed)
             if (!g_BzrFn_MatrixInverse)
                 g_BzrFn_MatrixInverse =
                     reinterpret_cast<FnMatrixInverse>(kGogMatrixInverseAddr);
@@ -10408,7 +14082,7 @@ namespace BZROpenShim
                     reinterpret_cast<FnGameObjectRelation>(kGogGameObjectEnemyPAddr);
             if (!g_BzrFn_GameObjectGetObjByHandle)
                 g_BzrFn_GameObjectGetObjByHandle =
-                    reinterpret_cast<FnGameObjectGetObjByHandle>(kGogGameObjectGetObjByHandleAddr);
+                    &GameObjectFromHandleGog; // was 0x0046B160 (wrong fn; crashed)
             if (!g_BzrFn_CollisionRangeSearch)
                 g_BzrFn_CollisionRangeSearch =
                     reinterpret_cast<FnRangeSearch>(kGogRangeSearchAddr);
@@ -10495,6 +14169,312 @@ namespace BZROpenShim
             }
         }
 
+        static bool TryGetGameObjectClassSignature(void* objectPtr, uint32_t& outSignature)
+        {
+            outSignature = 0;
+            if (!objectPtr)
+                return false;
+
+            using FnGetObjectClass = void* (__thiscall*)(void* classInterface);
+            __try
+            {
+                void* classInterface =
+                    reinterpret_cast<uint8_t*>(objectPtr) + 0x18;
+                void** vtable = *reinterpret_cast<void***>(classInterface);
+                if (!vtable || !vtable[0])
+                    return false;
+
+                void* objectClass =
+                    reinterpret_cast<FnGetObjectClass>(vtable[0])(classInterface);
+                if (!objectClass)
+                    return false;
+
+                outSignature = *reinterpret_cast<const uint32_t*>(
+                    reinterpret_cast<const uint8_t*>(objectClass) + 0x14);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static bool CallProducerPredicateForBaseProducer(int handle,
+                                                         FnProducerPredicate predicate)
+        {
+            if (!predicate)
+                return false;
+
+            void* objectPtr = GameObjectFromHandleGog(handle);
+            uint32_t signature = 0;
+            if (!objectPtr ||
+                !TryGetGameObjectClassSignature(objectPtr, signature) ||
+                signature != kProducerClassSignature)
+            {
+                return false;
+            }
+
+            __try
+            {
+                return predicate(objectPtr);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static bool __cdecl ScriptCanBuildProducerHook(int handle)
+        {
+            if (g_BzrFn_ScriptCanBuildOriginal &&
+                g_BzrFn_ScriptCanBuildOriginal(handle))
+            {
+                return true;
+            }
+
+            return CallProducerPredicateForBaseProducer(
+                handle,
+                reinterpret_cast<FnProducerPredicate>(kGogProducerCanBuildAddr));
+        }
+
+        static bool __cdecl ScriptIsBusyProducerHook(int handle)
+        {
+            if (g_BzrFn_ScriptIsBusyOriginal &&
+                g_BzrFn_ScriptIsBusyOriginal(handle))
+            {
+                return true;
+            }
+
+            return CallProducerPredicateForBaseProducer(
+                handle,
+                reinterpret_cast<FnProducerPredicate>(kGogProducerIsBusyAddr));
+        }
+
+        static void InstallProducerScriptPredicateHooksIfPossible()
+        {
+            if (g_ProducerScriptPredicateHooksInstalled)
+                return;
+
+            static const uint8_t kExpectedPredicateEntry[
+                kScriptProducerPredicateDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08, 0x8B, 0x45, 0x08
+            };
+            static const uint8_t kExpectedCanBuildMethod[9] =
+            {
+                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08, 0x89, 0x4D, 0xFC
+            };
+            static const uint8_t kExpectedIsBusyMethod[7] =
+            {
+                0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC
+            };
+
+            if (!ExpectedBytesMatchAt(kGogProducerCanBuildAddr,
+                                      kExpectedCanBuildMethod,
+                                      sizeof(kExpectedCanBuildMethod)) ||
+                !ExpectedBytesMatchAt(kGogProducerIsBusyAddr,
+                                      kExpectedIsBusyMethod,
+                                      sizeof(kExpectedIsBusyMethod)))
+            {
+                return;
+            }
+
+            if (!g_ScriptCanBuildDetour.trampoline &&
+                !InstallInlineDetour32(g_ScriptCanBuildDetour,
+                                       kGogScriptCanBuildAddr,
+                                       reinterpret_cast<void*>(ScriptCanBuildProducerHook),
+                                       kScriptProducerPredicateDetourLen,
+                                       kExpectedPredicateEntry,
+                                       sizeof(kExpectedPredicateEntry)))
+            {
+                return;
+            }
+            g_BzrFn_ScriptCanBuildOriginal =
+                reinterpret_cast<FnScriptProducerPredicate>(
+                    g_ScriptCanBuildDetour.trampoline);
+
+            if (!g_ScriptIsBusyDetour.trampoline &&
+                !InstallInlineDetour32(g_ScriptIsBusyDetour,
+                                       kGogScriptIsBusyAddr,
+                                       reinterpret_cast<void*>(ScriptIsBusyProducerHook),
+                                       kScriptProducerPredicateDetourLen,
+                                       kExpectedPredicateEntry,
+                                       sizeof(kExpectedPredicateEntry)))
+            {
+                return;
+            }
+            g_BzrFn_ScriptIsBusyOriginal =
+                reinterpret_cast<FnScriptProducerPredicate>(
+                    g_ScriptIsBusyDetour.trampoline);
+
+            g_ProducerScriptPredicateHooksInstalled =
+                g_BzrFn_ScriptCanBuildOriginal && g_BzrFn_ScriptIsBusyOriginal;
+            if (g_ProducerScriptPredicateHooksInstalled)
+            {
+                Log(L"[PRODSCRIPT] Added PROD support to ScriptUtils CanBuild/IsBusy canBuild=0x%08X isBusy=0x%08X\n",
+                    static_cast<uint32_t>(kGogScriptCanBuildAddr),
+                    static_cast<uint32_t>(kGogScriptIsBusyAddr));
+            }
+        }
+
+        static bool RedirectCallTarget(uintptr_t callAddress,
+                                       uintptr_t originalTarget,
+                                       uintptr_t desiredTarget)
+        {
+            uint8_t call[5] = {};
+            SIZE_T read = 0;
+            if (!ReadProcessMemory(GetCurrentProcess(),
+                                   reinterpret_cast<const void*>(callAddress),
+                                   call,
+                                   sizeof(call),
+                                   &read) ||
+                read != sizeof(call) || call[0] != 0xE8)
+            {
+                return false;
+            }
+
+            int32_t currentRelative = 0;
+            std::memcpy(&currentRelative, call + 1, sizeof(currentRelative));
+            const uintptr_t currentTarget = callAddress + 5 + currentRelative;
+            if (currentTarget == desiredTarget)
+                return true;
+            if (currentTarget != originalTarget)
+                return false;
+
+            const int32_t desiredRelative =
+                static_cast<int32_t>(desiredTarget) -
+                static_cast<int32_t>(callAddress + 5);
+            std::memcpy(call + 1, &desiredRelative, sizeof(desiredRelative));
+            return WritePatchBytes(callAddress, call, sizeof(call));
+        }
+
+        static void InstallBriefingScrollFixIfPossible()
+        {
+            if (!g_BriefingScrollFixEnabled || g_BriefingScrollFixInstalled)
+                return;
+
+            const bool briefingUp = RedirectCallTarget(
+                kGogBriefingScrollUpCallAddr,
+                kGogUnguardedScrollUpAddr,
+                kGogGuardedScrollUpAddr);
+            const bool briefingDown = RedirectCallTarget(
+                kGogBriefingScrollDownCallAddr,
+                kGogUnguardedScrollDownAddr,
+                kGogGuardedScrollDownAddr);
+            const bool archiveUp = RedirectCallTarget(
+                kGogArchiveScrollUpCallAddr,
+                kGogUnguardedScrollUpAddr,
+                kGogGuardedScrollUpAddr);
+            const bool archiveDown = RedirectCallTarget(
+                kGogArchiveScrollDownCallAddr,
+                kGogUnguardedScrollDownAddr,
+                kGogGuardedScrollDownAddr);
+
+            g_BriefingScrollFixInstalled =
+                briefingUp && briefingDown && archiveUp && archiveDown;
+            if (g_BriefingScrollFixInstalled)
+            {
+                Log(L"[BRIEFSCROLL] Redirected mission briefing/archive callbacks to guarded scroll handlers\n");
+            }
+        }
+
+        // renderCount clamp (#65) helpers. The naked detour below runs between
+        // the MultiRenderClass constructor's ParameterDB read of "rendercount"
+        // and the operator new[] that consumes it.
+        static void* g_MultiRenderCountClampResumePtr =
+            reinterpret_cast<void*>(kGogMultiRenderCountClampResumeAddr);
+
+        static int32_t __stdcall ClampMultiRenderCountValue(int32_t count)
+        {
+            const int32_t clamped =
+                count < 0 ? 0 :
+                (count > kMultiRenderCountMax ? kMultiRenderCountMax : count);
+            if (InterlockedDecrement(&g_MultiRenderCountClampLogBudget) >= 0)
+            {
+                Log(L"[RENDERCOUNT] Clamped draw_multi renderCount %d -> %d (invalid allocation guard)\n",
+                    count, clamped);
+            }
+            return clamped;
+        }
+
+#if defined(_M_IX86)
+        static void __declspec(naked) MultiRenderCountClampHook()
+        {
+            __asm
+            {
+                // Stolen bytes from 0x0044D858:
+                //   33 C9              xor ecx, ecx
+                //   8B 55 AC           mov edx, [ebp-0x54]
+                //   8B 82 08 01 00 00  mov eax, [edx+0x108]
+                xor  ecx, ecx
+                mov  edx, [ebp - 0x54]
+                mov  eax, [edx + 0x108]
+                cmp  eax, 0
+                jl   clampNeeded
+                cmp  eax, 256              // kMultiRenderCountMax
+                jle  clampDone
+            clampNeeded:
+                pushad
+                push eax
+                call ClampMultiRenderCountValue
+                mov  [esp + 28], eax       // replace saved eax in the pushad frame
+                popad
+                mov  [edx + 0x108], eax    // store the clamped count for the copy loop
+            clampDone:
+                // Resume expects ecx == 0 (feeds the stock seto/neg overflow
+                // saturation) and eax == count.
+                xor  ecx, ecx
+                jmp  [g_MultiRenderCountClampResumePtr]
+            }
+        }
+#endif
+
+        static void InstallMultiRenderCountClampIfPossible()
+        {
+            if (!g_MultiRenderCountClampEnabled || g_MultiRenderCountClampInstalled)
+                return;
+
+#if !defined(_M_IX86)
+            return;
+#else
+            // xor ecx,ecx / mov edx,[ebp-0x54] / mov eax,[edx+0x108] directly
+            // after the ParameterDB::Get call for hash 0x8C8E76EC.
+            static const uint8_t kExpectedClampSiteBytes[kMultiRenderCountClampDetourLen] =
+            {
+                0x33, 0xC9, 0x8B, 0x55, 0xAC, 0x8B, 0x82, 0x08, 0x01, 0x00, 0x00
+            };
+
+            if (!ExpectedBytesMatchAt(kGogMultiRenderCountClampSiteAddr,
+                                      kExpectedClampSiteBytes,
+                                      sizeof(kExpectedClampSiteBytes)))
+            {
+                return;
+            }
+
+            uint8_t patch[kMultiRenderCountClampDetourLen] =
+            {
+                0xE9, 0x00, 0x00, 0x00, 0x00, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90
+            };
+            const int32_t relative =
+                static_cast<int32_t>(reinterpret_cast<uintptr_t>(MultiRenderCountClampHook)) -
+                static_cast<int32_t>(kGogMultiRenderCountClampSiteAddr + 5);
+            std::memcpy(patch + 1, &relative, sizeof(relative));
+
+            if (!WritePatchBytes(kGogMultiRenderCountClampSiteAddr, patch, sizeof(patch)))
+            {
+                Log(L"[RENDERCOUNT] Failed installing draw_multi renderCount clamp at 0x%08X\n",
+                    static_cast<uint32_t>(kGogMultiRenderCountClampSiteAddr));
+                return;
+            }
+
+            g_MultiRenderCountClampInstalled = true;
+            Log(L"[RENDERCOUNT] Installed draw_multi renderCount clamp site=0x%08X resume=0x%08X max=%d\n",
+                static_cast<uint32_t>(kGogMultiRenderCountClampSiteAddr),
+                static_cast<uint32_t>(kGogMultiRenderCountClampResumeAddr),
+                kMultiRenderCountMax);
+#endif
+        }
+
         static bool ShouldTraceSplinterUndeadFix()
         {
             return EnvFlagEnabled("OPENSHIM_TRACE_SPLINTER_UNDEAD") ||
@@ -10560,7 +14540,7 @@ namespace BZROpenShim
             RunSprayBuildingSimulateWithDeadGate(thisPtr, dt);
         }
 
-        static void InstallSplinterUndeadFixIfPossible()
+		static void InstallSplinterUndeadFixIfPossible()
         {
             if (!g_SplinterUndeadFixEnabled)
                 return;
@@ -10611,15 +14591,158 @@ namespace BZROpenShim
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_BuildingSimulate)),
                     BoolText(ShouldTraceSplinterUndeadFix()));
             }
-        }
+		}
 
-        static void InstallAiTuningHooksIfPossible()
+		bool __fastcall TugPostLoadCargoDeployFixHook(void* thisPtr, void* /*edx*/)
+		{
+			const bool loaded = g_BzrFn_TugPostLoadOriginal
+				? g_BzrFn_TugPostLoadOriginal(thisPtr)
+				: false;
+
+			if (!loaded || !g_TugCargoPostLoadFixEnabled || !thisPtr)
+				return loaded;
+
+			bool armedDeploy = false;
+			__try
+			{
+				auto* tug = static_cast<uint8_t*>(thisPtr);
+				const bool hasCargo =
+					*reinterpret_cast<void**>(tug + kTugCargoOffset) != nullptr;
+				const uint32_t state =
+					*reinterpret_cast<const uint32_t*>(tug + kTugDeployStateOffset);
+				auto* control =
+					*reinterpret_cast<uint8_t**>(tug + kTugControlBlockOffset);
+
+				// Craft::Deploy only arms control.deploy while UNDEPLOYED (state 0).
+				// Let Tug::Simulate perform the stock animation and state transition.
+				if (hasCargo && state == 0 && control)
+				{
+					*reinterpret_cast<uint32_t*>(control + kTugControlDeployOffset) = 1;
+					armedDeploy = true;
+				}
+			}
+			__except (EXCEPTION_EXECUTE_HANDLER)
+			{
+				armedDeploy = false;
+			}
+
+			if (armedDeploy)
+			{
+				const long remaining = InterlockedDecrement(&g_TugCargoPostLoadLogBudget);
+				if (remaining >= 0)
+					Log(L"[TUGCARGO] Armed stock deploy transition after cargo PostLoad remaining=%ld tug=0x%08X\n",
+						remaining,
+						static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)));
+			}
+
+			return loaded;
+		}
+
+		static void InstallTugCargoPostLoadFixIfPossible()
+		{
+			if (!g_TugCargoPostLoadFixEnabled || g_TugCargoPostLoadFixInstalled)
+				return;
+
+			if (!VtableTypeNameMatches(kTugVtableAddr, ".?AVTug@@"))
+			{
+				Log(L"[TUGCARGO] Tug RTTI mismatch vtable=0x%08X; cargo PostLoad fix skipped\n",
+					static_cast<uint32_t>(kTugVtableAddr));
+				return;
+			}
+
+			void* current = nullptr;
+			__try { current = *reinterpret_cast<void**>(kTugPostLoadVtableSlotAddr); }
+			__except (EXCEPTION_EXECUTE_HANDLER) { current = nullptr; }
+
+			if (current != reinterpret_cast<void*>(TugPostLoadCargoDeployFixHook) &&
+				current != reinterpret_cast<void*>(kGogTugPostLoadAddr))
+			{
+				Log(L"[TUGCARGO] Tug::PostLoad vtable mismatch slot=0x%08X current=0x%08X expected=0x%08X\n",
+					static_cast<uint32_t>(kTugPostLoadVtableSlotAddr),
+					static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
+					static_cast<uint32_t>(kGogTugPostLoadAddr));
+				return;
+			}
+
+			if (!g_BzrFn_TugPostLoadOriginal)
+				g_BzrFn_TugPostLoadOriginal =
+					reinterpret_cast<FnTugPostLoad>(kGogTugPostLoadAddr);
+
+			g_TugCargoPostLoadFixInstalled =
+				(current == reinterpret_cast<void*>(TugPostLoadCargoDeployFixHook)) ||
+				WritePointerValue(kTugPostLoadVtableSlotAddr,
+					reinterpret_cast<void*>(TugPostLoadCargoDeployFixHook));
+
+			if (g_TugCargoPostLoadFixInstalled)
+			{
+				Log(L"[TUGCARGO] Installed cargo PostLoad deploy-state fix slot=0x%08X original=0x%08X\n",
+					static_cast<uint32_t>(kTugPostLoadVtableSlotAddr),
+					static_cast<uint32_t>(kGogTugPostLoadAddr));
+			}
+		}
+
+		static void InstallApcAlliedTargetDeployFixIfPossible()
+		{
+			if (!g_ApcAlliedTargetDeployFixEnabled || g_ApcAlliedTargetDeployFixInstalled)
+				return;
+
+			const bool firstOriginal = ExpectedBytesMatchAt(
+				kGogApcTargetActualTeamRejectBranchAddr,
+				kGogApcTargetActualTeamRejectOriginal,
+				sizeof(kGogApcTargetActualTeamRejectOriginal));
+			const bool firstPatched = ExpectedBytesMatchAt(
+				kGogApcTargetActualTeamRejectBranchAddr,
+				kGogApcTargetActualTeamRejectPatched,
+				sizeof(kGogApcTargetActualTeamRejectPatched));
+			const bool secondOriginal = ExpectedBytesMatchAt(
+				kGogApcTargetPerceivedTeamRejectBranchAddr,
+				kGogApcTargetPerceivedTeamRejectOriginal,
+				sizeof(kGogApcTargetPerceivedTeamRejectOriginal));
+			const bool secondPatched = ExpectedBytesMatchAt(
+				kGogApcTargetPerceivedTeamRejectBranchAddr,
+				kGogApcTargetPerceivedTeamRejectPatched,
+				sizeof(kGogApcTargetPerceivedTeamRejectPatched));
+
+			if ((!firstOriginal && !firstPatched) || (!secondOriginal && !secondPatched))
+			{
+				Log(L"[APCDEPLOY] APC::Simulate relation branches drifted; allied-target fix skipped first=0x%08X second=0x%08X\n",
+					static_cast<uint32_t>(kGogApcTargetActualTeamRejectBranchAddr),
+					static_cast<uint32_t>(kGogApcTargetPerceivedTeamRejectBranchAddr));
+				return;
+			}
+
+			const bool firstOk = firstPatched || WritePatchBytes(
+				kGogApcTargetActualTeamRejectBranchAddr,
+				kGogApcTargetActualTeamRejectPatched,
+				sizeof(kGogApcTargetActualTeamRejectPatched));
+			const bool secondOk = secondPatched || WritePatchBytes(
+				kGogApcTargetPerceivedTeamRejectBranchAddr,
+				kGogApcTargetPerceivedTeamRejectPatched,
+				sizeof(kGogApcTargetPerceivedTeamRejectPatched));
+
+			g_ApcAlliedTargetDeployFixInstalled = firstOk && secondOk;
+			if (g_ApcAlliedTargetDeployFixInstalled)
+			{
+				Log(L"[APCDEPLOY] Allied targets now fall through to stock nearby-enemy deployment scan\n");
+			}
+			else
+			{
+				Log(L"[APCDEPLOY] Failed writing allied-target deployment branches first=%hs second=%hs\n",
+					BoolText(firstOk), BoolText(secondOk));
+			}
+		}
+
+		static void InstallAiTuningHooksIfPossible()
         {
             InstallAttackTaskKiteHookIfPossible();
+            InstallScrapPathScoreHookIfPossible();
+            InstallScavengerRetargetHookIfPossible();
 
             if (g_CalcRangeCraftHookInstalled &&
                 g_RetargetPeriodHooksInstalled &&
-                g_AttackTaskDoStateHookInstalled)
+                g_AttackTaskDoStateHookInstalled &&
+                g_ScrapPathScoreHookInstalled &&
+                g_ScrapRetargetHookInstalled)
                 return;
 
             if (g_CalcRangeCraftDetour.trampoline && g_BzrFn_CalcRangeCraft)
@@ -10668,77 +14791,123 @@ namespace BZROpenShim
             if (g_RetargetPeriodHooksInstalled)
                 return;
 
-            if (g_OffensiveProcessDoSubTaskDetour.trampoline && g_BzrFn_OffensiveProcessDoSubTask &&
-                g_GunTowerProcessDoSubTaskDetour.trampoline && g_BzrFn_GunTowerProcessDoSubTask)
-            {
-                g_RetargetPeriodHooksInstalled = true;
-                return;
-            }
+            g_BzrFn_GetGameTime = reinterpret_cast<FnGetGameTime>(kGogGetGameTimeAddr);
 
-            static const uint8_t kExpectedOffensiveProcessDoSubTaskBytes[kOffensiveProcessDoSubTaskDetourLen] =
+            struct RetargetVtableHookSpec
             {
-                0x55, 0x8B, 0xEC, 0xE8, 0xB8, 0x15, 0xF8, 0xFF
-            };
-            static const uint8_t kExpectedGunTowerProcessDoSubTaskBytes[kGunTowerProcessDoSubTaskDetourLen] =
-            {
-                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x5C
+                const wchar_t* label;
+                const char* rttiName;
+                uintptr_t vtableAddress;
+                uintptr_t originalAddress;
+                void* hook;
+                FnProcessDoSubTask* original;
             };
 
-            bool offensiveInstalled = false;
-            if (ExpectedBytesMatchAt(kGogOffensiveProcessDoSubTaskEntryAddr,
-                                     kExpectedOffensiveProcessDoSubTaskBytes,
-                                     sizeof(kExpectedOffensiveProcessDoSubTaskBytes)) &&
-                InstallInlineDetour32(g_OffensiveProcessDoSubTaskDetour,
-                                      kGogOffensiveProcessDoSubTaskEntryAddr,
-                                      reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
-                                      kOffensiveProcessDoSubTaskDetourLen,
-                                      kExpectedOffensiveProcessDoSubTaskBytes,
-                                      sizeof(kExpectedOffensiveProcessDoSubTaskBytes)))
+            RetargetVtableHookSpec hooks[] =
             {
-                g_BzrFn_OffensiveProcessDoSubTask =
-                    reinterpret_cast<FnProcessDoSubTask>(g_OffensiveProcessDoSubTaskDetour.trampoline);
-                offensiveInstalled = (g_BzrFn_OffensiveProcessDoSubTask != nullptr);
-                if (offensiveInstalled)
+                { L"ArtilleryProcess", ".?AVArtilleryProcess@@", kArtilleryProcessVtableAddr,
+                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                  &g_BzrFn_OffensiveProcessDoSubTask },
+                { L"BomberProcess", ".?AVBomberProcess@@", kBomberProcessVtableAddr,
+                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                  &g_BzrFn_OffensiveProcessDoSubTask },
+                { L"GechProcess", ".?AVGechProcess@@", kGechProcessVtableAddr,
+                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                  &g_BzrFn_OffensiveProcessDoSubTask },
+                { L"OffensiveProcess", ".?AVOffensiveProcess@@", kOffensiveProcessVtableAddr,
+                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                  &g_BzrFn_OffensiveProcessDoSubTask },
+                { L"PersonProcess", ".?AVPersonProcess@@", kPersonProcessVtableAddr,
+                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                  &g_BzrFn_OffensiveProcessDoSubTask },
+                { L"RocketTankProcess", ".?AVRocketTankProcess@@", kRocketTankProcessVtableAddr,
+                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                  &g_BzrFn_OffensiveProcessDoSubTask },
+                { L"ScoutProcess", ".?AVScoutProcess@@", kScoutProcessVtableAddr,
+                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                  &g_BzrFn_OffensiveProcessDoSubTask },
+                { L"SoldierProcess", ".?AVSoldierProcess@@", kSoldierProcessVtableAddr,
+                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                  &g_BzrFn_OffensiveProcessDoSubTask },
+                { L"TankProcess", ".?AVTankProcess@@", kTankProcessVtableAddr,
+                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                  &g_BzrFn_OffensiveProcessDoSubTask },
+                { L"WingmanProcess", ".?AVWingmanProcess@@", kWingmanProcessVtableAddr,
+                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                  &g_BzrFn_OffensiveProcessDoSubTask },
+                { L"GunTowerProcess", ".?AVGunTowerProcess@@",
+                  kGunTowerProcessVtableAddr, kGogGunTowerProcessDoSubTaskAddr,
+                  reinterpret_cast<void*>(GunTowerProcessDoSubTaskHook),
+                  &g_BzrFn_GunTowerProcessDoSubTask },
+                { L"TurretTankProcess", ".?AVTurretTankProcess@@",
+                  kTurretTankProcessVtableAddr, kGogTurretTankProcessDoSubTaskAddr,
+                  reinterpret_cast<void*>(TurretTankProcessDoSubTaskHook),
+                  &g_BzrFn_TurretTankProcessDoSubTask },
+            };
+
+            bool allInstalled = true;
+            for (RetargetVtableHookSpec& spec : hooks)
+            {
+                *spec.original = reinterpret_cast<FnProcessDoSubTask>(spec.originalAddress);
+                const uintptr_t slotAddress =
+                    spec.vtableAddress + kProcessDoSubTaskVtableSlot * sizeof(void*);
+
+                if (!VtableTypeNameMatches(spec.vtableAddress, spec.rttiName))
                 {
-                    Log(L"[AIODF] Installed OffensiveProcess::DoSubTask hook entry=0x%08X trampoline=0x%08X\n",
-                        static_cast<uint32_t>(kGogOffensiveProcessDoSubTaskEntryAddr),
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OffensiveProcessDoSubTaskDetour.trampoline)));
+                    Log(L"[AIODF] %ls RTTI mismatch vtable=0x%08X; retarget tuning disabled there\n",
+                        spec.label, static_cast<uint32_t>(spec.vtableAddress));
+                    allInstalled = false;
+                    continue;
+                }
+
+                void* current = nullptr;
+                __try
+                {
+                    current = *reinterpret_cast<void**>(slotAddress);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    current = nullptr;
+                }
+
+                if (current != spec.hook &&
+                    current != reinterpret_cast<void*>(spec.originalAddress))
+                {
+                    Log(L"[AIODF] %ls::DoSubTask vtable mismatch slot=0x%08X current=0x%08X expected=0x%08X\n",
+                        spec.label,
+                        static_cast<uint32_t>(slotAddress),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
+                        static_cast<uint32_t>(spec.originalAddress));
+                    allInstalled = false;
+                    continue;
+                }
+
+                const bool patched =
+                    current == spec.hook || WritePointerValue(slotAddress, spec.hook);
+                if (!patched)
+                {
+                    Log(L"[AIODF] Failed installing %ls::DoSubTask vtable hook slot=0x%08X\n",
+                        spec.label, static_cast<uint32_t>(slotAddress));
+                    allInstalled = false;
+                    continue;
+                }
+
+                if (current != spec.hook)
+                {
+                    Log(L"[AIODF] Installed %ls::DoSubTask vtable hook slot=0x%08X original=0x%08X\n",
+                        spec.label,
+                        static_cast<uint32_t>(slotAddress),
+                        static_cast<uint32_t>(spec.originalAddress));
                 }
             }
-            else
-            {
-                Log(L"[AIODF] OffensiveProcess::DoSubTask entry bytes mismatch at 0x%08X; shared retarget tuning disabled there\n",
-                    static_cast<uint32_t>(kGogOffensiveProcessDoSubTaskEntryAddr));
-            }
 
-            bool gunTowerInstalled = false;
-            if (ExpectedBytesMatchAt(kGogGunTowerProcessDoSubTaskEntryAddr,
-                                     kExpectedGunTowerProcessDoSubTaskBytes,
-                                     sizeof(kExpectedGunTowerProcessDoSubTaskBytes)) &&
-                InstallInlineDetour32(g_GunTowerProcessDoSubTaskDetour,
-                                      kGogGunTowerProcessDoSubTaskEntryAddr,
-                                      reinterpret_cast<void*>(GunTowerProcessDoSubTaskHook),
-                                      kGunTowerProcessDoSubTaskDetourLen,
-                                      kExpectedGunTowerProcessDoSubTaskBytes,
-                                      sizeof(kExpectedGunTowerProcessDoSubTaskBytes)))
+            g_RetargetPeriodHooksInstalled = allInstalled;
+            if (allInstalled)
             {
-                g_BzrFn_GunTowerProcessDoSubTask =
-                    reinterpret_cast<FnProcessDoSubTask>(g_GunTowerProcessDoSubTaskDetour.trampoline);
-                gunTowerInstalled = (g_BzrFn_GunTowerProcessDoSubTask != nullptr);
-                if (gunTowerInstalled)
-                {
-                    Log(L"[AIODF] Installed GunTowerProcess::DoSubTask hook entry=0x%08X trampoline=0x%08X\n",
-                        static_cast<uint32_t>(kGogGunTowerProcessDoSubTaskEntryAddr),
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_GunTowerProcessDoSubTaskDetour.trampoline)));
-                }
+                Log(L"[AIODF] Global retarget upgrade active period=%.2f classes=%u\n",
+                    kGlobalRetargetPeriod,
+                    static_cast<unsigned>(sizeof(hooks) / sizeof(hooks[0])));
             }
-            else
-            {
-                Log(L"[AIODF] GunTowerProcess::DoSubTask entry bytes mismatch at 0x%08X; tower retarget tuning disabled there\n",
-                    static_cast<uint32_t>(kGogGunTowerProcessDoSubTaskEntryAddr));
-            }
-
-            g_RetargetPeriodHooksInstalled = offensiveInstalled && gunTowerInstalled;
         }
 
         static bool ShouldTraceConstructorRemoteBuildFix()
@@ -11248,11 +15417,21 @@ namespace BZROpenShim
                 "gflame.0",
                 "gflame",
             };
+            // Purple (Black Dog) has no stock asset; these resolve only if an
+            // add-on supplies a purple flame texture/alias. Absent -> stays stock.
+            static const char* const kPurpleTextureCandidates[] =
+            {
+                "exhaust_p.0",
+                "pflame.0",
+                "pflame",
+            };
 
             g_EngineFlamePrimaryRedTexture =
                 ResolveEngineFlameTextureHandle(kRedTextureCandidates, _countof(kRedTextureCandidates), L"red");
             g_EngineFlamePrimaryGreenTexture =
                 ResolveEngineFlameTextureHandle(kGreenTextureCandidates, _countof(kGreenTextureCandidates), L"green");
+            g_EngineFlamePrimaryPurpleTexture =
+                ResolveEngineFlameTextureHandle(kPurpleTextureCandidates, _countof(kPurpleTextureCandidates), L"purple");
 
             void* primary = GetEngineFlamePrimary();
             void* secondary = GetEngineFlameSecondary();
@@ -11268,10 +15447,129 @@ namespace BZROpenShim
                 CloneEngineFlameManager(g_EngineFlameSecondaryGreen, secondary, g_EngineFlamePrimaryGreenTexture);
             }
 
+            if (g_EngineFlamePrimaryPurpleTexture != 0)
+            {
+                CloneEngineFlameManager(g_EngineFlamePrimaryPurple, primary, g_EngineFlamePrimaryPurpleTexture);
+                CloneEngineFlameManager(g_EngineFlameSecondaryPurple, secondary, g_EngineFlamePrimaryPurpleTexture);
+            }
+
             g_EngineFlameVariantsInitialized = true;
-            Log(L"[FLAME] Engine flame variants initialized red=%hs green=%hs\n",
+            Log(L"[FLAME] Engine flame variants initialized red=%hs green=%hs purple=%hs\n",
                 g_EngineFlamePrimaryRedTexture != 0 ? "yes" : "no",
-                g_EngineFlamePrimaryGreenTexture != 0 ? "yes" : "no");
+                g_EngineFlamePrimaryGreenTexture != 0 ? "yes" : "no",
+                g_EngineFlamePrimaryPurpleTexture != 0 ? "yes" : "no");
+        }
+
+        // Walks GameObject -> GameObjectClass -> ODF label and returns the
+        // lowercased first character (the faction code). Mirrors the engine's own
+        // GetClassLabel chain; SEH-guarded so a malformed object can never fault
+        // the render path. Build-independent (no hardcoded addresses), so it also
+        // works on the Steam executable.
+        static bool TryGetCraftOdfName(void* craftPtr, char* out, size_t outSize)
+        {
+            if (out && outSize)
+                out[0] = '\0';
+            if (!craftPtr || !out || outSize == 0)
+                return false;
+
+            __try
+            {
+                auto* obj = reinterpret_cast<uint8_t*>(craftPtr);
+                void* classSub = obj + kGameObjectClassSubObjOffset;
+                auto** vtbl = *reinterpret_cast<void***>(classSub);
+                if (!vtbl)
+                    return false;
+
+                using ClassGetter = void*(__thiscall*)(void*);
+                auto getClass = reinterpret_cast<ClassGetter>(vtbl[0]);
+                void* klass = getClass(classSub);
+                if (!klass)
+                    return false;
+
+                // The ODF name is an inline char[8] at class+0x30 (read by
+                // address, matching GetOdf); may be exactly 8 chars (unterminated).
+                const char* name = reinterpret_cast<const char*>(
+                    reinterpret_cast<uint8_t*>(klass) + kGameObjectClassOdfNameOffset);
+                const size_t maxCopy =
+                    (outSize - 1 < kGameObjectClassOdfNameMax) ? (outSize - 1)
+                                                              : kGameObjectClassOdfNameMax;
+                size_t i = 0;
+                for (; i < maxCopy && name[i]; ++i)
+                    out[i] = name[i];
+                out[i] = '\0';
+                return out[0] != '\0';
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                if (out && outSize)
+                    out[0] = '\0';
+                return false;
+            }
+        }
+
+        static bool TryGetCraftFactionChar(void* craftPtr, char& outFaction)
+        {
+            outFaction = 0;
+            char odf[16] = {};
+            if (!TryGetCraftOdfName(craftPtr, odf, sizeof(odf)))
+                return false;
+            outFaction = static_cast<char>(
+                std::tolower(static_cast<unsigned char>(odf[0])));
+            return outFaction != 0;
+        }
+
+        // Faction -> flame color fallback used when JetFlames is enabled and no
+        // EXU per-team color applies. a=NSDF blue, s=CCA red, c=CRA green,
+        // b=Black Dog purple; anything else keeps stock (default).
+        static int ResolveFactionEngineFlameColor(void* craftPtr)
+        {
+            char faction = 0;
+            if (!TryGetCraftFactionChar(craftPtr, faction))
+                return kEngineFlameColorDefault;
+
+            switch (faction)
+            {
+            case 'a': return kEngineFlameColorBlue;
+            case 's': return kEngineFlameColorRed;
+            case 'c': return kEngineFlameColorGreen;
+            case 'b': return kEngineFlameColorPurple;
+            default:  return kEngineFlameColorDefault;
+            }
+        }
+
+        static void InitializeJetFlamesConfig()
+        {
+            if (g_JetFlamesConfigInitialized)
+                return;
+            g_JetFlamesConfigInitialized = true;
+
+            bool enabled = kJetFlamesEnabledDefault;
+            bool cfg = false;
+            if (TryGetUserConfigBool(kUserConfigDisplaySection, "JetFlames", cfg))
+                enabled = cfg;
+
+            if (EnvFlagEnabled("OPENSHIM_FACTION_JET_FLAMES") ||
+                EnvFlagEnabled("BZR_FACTION_JET_FLAMES"))
+                enabled = true;
+            else if (EnvFlagEnabled("OPENSHIM_DISABLE_FACTION_JET_FLAMES") ||
+                     EnvFlagEnabled("BZR_DISABLE_FACTION_JET_FLAMES"))
+                enabled = false;
+
+            g_JetFlamesEnabled = enabled;
+            Log(L"[FLAME] Faction jet flames %hs (a=blue s=red c=green b=purple; EXU per-team colors win)\n",
+                enabled ? "enabled" : "disabled");
+        }
+
+        static bool ShouldTraceJetFlames()
+        {
+            static int s_cached = -1;
+            if (s_cached < 0)
+            {
+                s_cached =
+                    (EnvFlagEnabled("OPENSHIM_TRACE_JET_FLAMES") ||
+                     EnvFlagEnabled("BZR_TRACE_JET_FLAMES")) ? 1 : 0;
+            }
+            return s_cached != 0;
         }
 
         static void* SelectEngineFlameManager(void* originalManager, void* craftPtr)
@@ -11293,7 +15591,36 @@ namespace BZROpenShim
                 return originalManager;
 
             const int team = g_BzrFn_GetTeamNum(static_cast<int>(handle));
-            const int color = ResolveTeamEngineFlameColor(team);
+            // EXU per-team color wins; when it has no opinion (default) and the
+            // faction jet flames preference is on, tint by the unit's faction.
+            const int exuColor = ResolveTeamEngineFlameColor(team);
+            int color = exuColor;
+            char faction = 0;
+            const bool haveFaction = TryGetCraftFactionChar(craftPtr, faction);
+            if (color == kEngineFlameColorDefault && g_JetFlamesEnabled && haveFaction)
+                color = ResolveFactionEngineFlameColor(craftPtr);
+
+            // Diagnostics (opt-in via OPENSHIM_TRACE_JET_FLAMES): log the first
+            // several routing decisions so a stock mission shows how the unit's
+            // ODF name -> faction -> color -> texture resolved.
+            if (ShouldTraceJetFlames())
+            {
+                static int s_traceBudget = 24;
+                if (s_traceBudget > 0)
+                {
+                    --s_traceBudget;
+                    char odf[16] = {};
+                    TryGetCraftOdfName(craftPtr, odf, sizeof(odf));
+                    Log(L"[FLAME] route craft=0x%p handle=0x%08X team=%d odf='%hs' faction='%c' exuColor=%d final=%d tex(r=0x%08X g=0x%08X)\n",
+                        craftPtr, handle, team,
+                        odf[0] ? odf : "<none>",
+                        haveFaction && faction ? faction : '?',
+                        exuColor, color,
+                        static_cast<uint32_t>(g_EngineFlamePrimaryRedTexture),
+                        static_cast<uint32_t>(g_EngineFlamePrimaryGreenTexture));
+                }
+            }
+
             if (color == kEngineFlameColorDefault || color == kEngineFlameColorBlue)
                 return originalManager;
 
@@ -11311,6 +15638,13 @@ namespace BZROpenShim
                 return (originalManager == GetEngineFlamePrimary())
                     ? static_cast<void*>(g_EngineFlamePrimaryGreen)
                     : static_cast<void*>(g_EngineFlameSecondaryGreen);
+            }
+
+            if (color == kEngineFlameColorPurple && g_EngineFlamePrimaryPurpleTexture != 0)
+            {
+                return (originalManager == GetEngineFlamePrimary())
+                    ? static_cast<void*>(g_EngineFlamePrimaryPurple)
+                    : static_cast<void*>(g_EngineFlameSecondaryPurple);
             }
 
             return originalManager;
@@ -12881,29 +17215,51 @@ namespace BZROpenShim
             return moduleDir;
         }
 
+        static bool LoadInputBindingDocument(const std::filesystem::path& path,
+                                             InputBindingDocument& outDocument)
+        {
+            outDocument.lines.clear();
+            outDocument.loaded = false;
+
+            std::ifstream file(path);
+            if (!file)
+                return false;
+
+            std::string line;
+            while (std::getline(file, line))
+            {
+                if (!line.empty() && line.back() == '\r')
+                    line.pop_back();
+                outDocument.lines.push_back(line);
+            }
+
+            outDocument.loaded = true;
+            return true;
+        }
+
         static bool ParseInputBindingMapFile(
             const std::filesystem::path& inputMapPath,
+            InputBindingDocument& outDocument,
             std::vector<InputBindingCommandBlock>& outBlocks,
             InputBindingInventoryStats& outInventory)
         {
             outBlocks.clear();
             outInventory = {};
 
-            std::ifstream file(inputMapPath);
-            if (!file)
+            if (!LoadInputBindingDocument(inputMapPath, outDocument))
                 return false;
 
-            std::string line;
             std::string pendingComment;
             std::string currentSection;
             bool inBlock = false;
             InputBindingCommandBlock currentBlock = {};
 
-            auto finalizeBlock = [&]()
+            auto finalizeBlock = [&](size_t closeLineIndex)
             {
                 if (currentBlock.command.empty())
                     return;
 
+                currentBlock.closeLineIndex = closeLineIndex;
                 ++outInventory.uniqueCommandBlocks;
                 if (currentBlock.hasPositiveNonKeyboard)
                     ++outInventory.mixedBlocks;
@@ -12916,9 +17272,9 @@ namespace BZROpenShim
                 currentBlock = {};
             };
 
-            while (std::getline(file, line))
+            for (size_t lineIndex = 0; lineIndex < outDocument.lines.size(); ++lineIndex)
             {
-                const std::string trimmed = TrimAsciiCopy(line);
+                const std::string trimmed = TrimAsciiCopy(outDocument.lines[lineIndex]);
                 if (!inBlock)
                 {
                     if (trimmed.empty())
@@ -12960,6 +17316,7 @@ namespace BZROpenShim
                     currentBlock.command = command;
                     currentBlock.section = currentSection;
                     currentBlock.comment = pendingComment;
+                    currentBlock.headerLineIndex = lineIndex;
                     pendingComment.clear();
                     inBlock = true;
                     continue;
@@ -12970,7 +17327,7 @@ namespace BZROpenShim
 
                 if (trimmed[0] == '}')
                 {
-                    finalizeBlock();
+                    finalizeBlock(lineIndex);
                     inBlock = false;
                     continue;
                 }
@@ -12997,6 +17354,13 @@ namespace BZROpenShim
                 if (source.empty() || token.empty())
                     continue;
 
+                InputBindingLineRef lineRef = {};
+                lineRef.lineIndex = lineIndex;
+                lineRef.positive = trimmed[0] == '+';
+                lineRef.source = source;
+                lineRef.token = token;
+                currentBlock.bindingLines.push_back(lineRef);
+
                 if (trimmed[0] == '+')
                 {
                     if (_stricmp(source.c_str(), "keyboard") == 0)
@@ -13010,13 +17374,14 @@ namespace BZROpenShim
             }
 
             if (inBlock)
-                finalizeBlock();
+                finalizeBlock(SIZE_MAX);
 
             return true;
         }
 
         static bool ParseGameKeyBindingMapFile(
             const std::filesystem::path& gameKeyMapPath,
+            InputBindingDocument& outDocument,
             std::vector<GameKeyBindingAction>& outActions,
             InputBindingInventoryStats& outInventory)
         {
@@ -13024,14 +17389,12 @@ namespace BZROpenShim
             outInventory.uniqueGameKeyActions = 0;
             outInventory.gameKeyChords = 0;
 
-            std::ifstream file(gameKeyMapPath);
-            if (!file)
+            if (!LoadInputBindingDocument(gameKeyMapPath, outDocument))
                 return false;
 
-            std::string line;
-            while (std::getline(file, line))
+            for (size_t lineIndex = 0; lineIndex < outDocument.lines.size(); ++lineIndex)
             {
-                const std::string trimmed = TrimAsciiCopy(line);
+                const std::string trimmed = TrimAsciiCopy(outDocument.lines[lineIndex]);
                 if (trimmed.empty() || trimmed[0] == '#')
                     continue;
 
@@ -13057,11 +17420,238 @@ namespace BZROpenShim
                 }
 
                 if (AppendUniqueString(existing->chords, chord))
+                {
+                    existing->chordLineIndices.push_back(lineIndex);
                     ++outInventory.gameKeyChords;
+                }
             }
 
             outInventory.uniqueGameKeyActions = outActions.size();
             return true;
+        }
+
+        static std::string DescribeLastWin32Error()
+        {
+            const DWORD error = GetLastError();
+            char buffer[32] = {};
+            _snprintf_s(buffer, _TRUNCATE, "win32 error %lu", static_cast<unsigned long>(error));
+            return buffer;
+        }
+
+        // Writes a document to an adjacent temp file, keeps a .openshim.bak copy of
+        // the pre-edit file, and atomically swaps the temp into place.
+        static bool WriteInputBindingDocumentAtomic(const std::filesystem::path& path,
+                                                    const InputBindingDocument& document,
+                                                    std::string& outError)
+        {
+            outError.clear();
+            if (!document.loaded)
+            {
+                outError = "document was never loaded";
+                return false;
+            }
+
+            const std::filesystem::path tempPath =
+                std::filesystem::path(path.wstring() + L".openshim.tmp");
+            const std::filesystem::path backupPath =
+                std::filesystem::path(path.wstring() + L".openshim.bak");
+
+            {
+                std::ofstream file(tempPath, std::ios::trunc);
+                if (!file)
+                {
+                    outError = "could not create temp file " + tempPath.string();
+                    return false;
+                }
+
+                for (const std::string& line : document.lines)
+                    file << line << "\n";
+
+                file.flush();
+                if (!file.good())
+                {
+                    outError = "write failed for temp file " + tempPath.string();
+                    file.close();
+                    std::error_code ignored;
+                    std::filesystem::remove(tempPath, ignored);
+                    return false;
+                }
+            }
+
+            std::error_code existsError;
+            const bool targetExists = std::filesystem::exists(path, existsError);
+            if (targetExists)
+            {
+                if (!CopyFileW(path.c_str(), backupPath.c_str(), FALSE))
+                {
+                    Log(L"[INPUTUI] Backup copy failed for %hs (%hs); continuing with replace\n",
+                        path.string().c_str(),
+                        DescribeLastWin32Error().c_str());
+                }
+
+                if (!ReplaceFileW(path.c_str(),
+                                  tempPath.c_str(),
+                                  nullptr,
+                                  REPLACEFILE_IGNORE_MERGE_ERRORS,
+                                  nullptr,
+                                  nullptr) &&
+                    !MoveFileExW(tempPath.c_str(),
+                                 path.c_str(),
+                                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                {
+                    outError = "atomic replace failed for " + path.string() +
+                               " (" + DescribeLastWin32Error() + ")";
+                    std::error_code ignored;
+                    std::filesystem::remove(tempPath, ignored);
+                    return false;
+                }
+            }
+            else if (!MoveFileExW(tempPath.c_str(), path.c_str(), MOVEFILE_WRITE_THROUGH))
+            {
+                outError = "move into place failed for " + path.string() +
+                           " (" + DescribeLastWin32Error() + ")";
+                std::error_code ignored;
+                std::filesystem::remove(tempPath, ignored);
+                return false;
+            }
+
+            return true;
+        }
+
+        static const InputBindingCommandBlock* FindInputBindingCommandBlock(const std::string& command)
+        {
+            for (const InputBindingCommandBlock& block : g_InputBindingCommandBlocks)
+            {
+                if (block.command == command)
+                    return &block;
+            }
+            return nullptr;
+        }
+
+        // Rewrites only the primary positive keyboard token of a command block; all
+        // other lines (comments, mouse variants, negative guards, extra chords) are
+        // preserved verbatim.
+        static bool SetInputMapPrimaryKeyboardBinding(const std::string& command,
+                                                      const std::string& keyName,
+                                                      std::string& outError)
+        {
+            outError.clear();
+            if (!g_InputMapDocument.loaded)
+            {
+                outError = "input.map is not loaded";
+                return false;
+            }
+
+            const InputBindingCommandBlock* block = FindInputBindingCommandBlock(command);
+            if (!block)
+            {
+                outError = "command " + command + " not found in input.map";
+                return false;
+            }
+
+            const InputBindingLineRef* primary = nullptr;
+            for (const InputBindingLineRef& lineRef : block->bindingLines)
+            {
+                if (lineRef.positive && _stricmp(lineRef.source.c_str(), "keyboard") == 0)
+                {
+                    primary = &lineRef;
+                    break;
+                }
+            }
+
+            InputBindingDocument edited = g_InputMapDocument;
+            if (primary && primary->lineIndex < edited.lines.size())
+            {
+                const std::string& original = edited.lines[primary->lineIndex];
+                const size_t signPos = original.find('+');
+                const std::string prefix =
+                    signPos == std::string::npos ? std::string("\t") : original.substr(0, signPos);
+                edited.lines[primary->lineIndex] = prefix + "+ keyboard " + keyName;
+            }
+            else
+            {
+                size_t insertAt = SIZE_MAX;
+                if (block->headerLineIndex != SIZE_MAX &&
+                    block->headerLineIndex + 1 <= edited.lines.size())
+                {
+                    insertAt = block->headerLineIndex + 1;
+                }
+                else if (block->closeLineIndex != SIZE_MAX &&
+                         block->closeLineIndex <= edited.lines.size())
+                {
+                    insertAt = block->closeLineIndex;
+                }
+
+                if (insertAt == SIZE_MAX)
+                {
+                    outError = "no insertion point for " + command + " in input.map";
+                    return false;
+                }
+
+                edited.lines.insert(edited.lines.begin() + insertAt, "\t+ keyboard " + keyName);
+            }
+
+            const std::filesystem::path inputMapPath =
+                g_InputBindingInstallDirectory / "input.map";
+            return WriteInputBindingDocumentAtomic(inputMapPath, edited, outError);
+        }
+
+        // Rewrites only the first chord line of a gamekey.map action; additional
+        // chord lines and every comment stay untouched.
+        static bool SetGameKeyBindingPrimaryChord(const std::string& action,
+                                                  const std::string& newChord,
+                                                  std::string& outError)
+        {
+            outError.clear();
+            if (!g_GameKeyMapDocument.loaded)
+            {
+                outError = "gamekey.map is not loaded";
+                return false;
+            }
+
+            GameKeyBindingAction* entry =
+                FindGameKeyBindingAction(g_GameKeyBindingActions, action);
+            if (!entry)
+            {
+                outError = "action " + action + " not found in gamekey.map";
+                return false;
+            }
+
+            InputBindingDocument edited = g_GameKeyMapDocument;
+            if (!entry->chordLineIndices.empty() &&
+                entry->chordLineIndices[0] < edited.lines.size())
+            {
+                const size_t lineIndex = entry->chordLineIndices[0];
+                const std::string& original = edited.lines[lineIndex];
+
+                size_t cursor = 0;
+                while (cursor < original.size() &&
+                       std::isspace(static_cast<unsigned char>(original[cursor])))
+                {
+                    ++cursor;
+                }
+                while (cursor < original.size() &&
+                       !std::isspace(static_cast<unsigned char>(original[cursor])))
+                {
+                    ++cursor;
+                }
+                const size_t chordStart = original.find_first_not_of(" \t", cursor);
+                if (chordStart == std::string::npos)
+                {
+                    outError = "could not locate chord column for " + action;
+                    return false;
+                }
+
+                edited.lines[lineIndex] = original.substr(0, chordStart) + newChord;
+            }
+            else
+            {
+                edited.lines.push_back(action + "\t\t\t" + newChord);
+            }
+
+            const std::filesystem::path gameKeyMapPath =
+                g_InputBindingInstallDirectory / "gamekey.map";
+            return WriteInputBindingDocumentAtomic(gameKeyMapPath, edited, outError);
         }
 
         static std::string FormatInputBindingBlockValue(const InputBindingCommandBlock& block)
@@ -13242,22 +17832,29 @@ namespace BZROpenShim
             static int s_cached = -1;
             if (s_cached < 0)
             {
+                bool enabled = true;
+                bool configured = false;
+                if (TryGetUserConfigBool("General", "CustomBindsUi", configured) ||
+                    TryGetUserConfigBool("General", "CustomBindingUi", configured))
+                {
+                    enabled = configured;
+                }
                 const bool disabled =
                     EnvFlagEnabled("OPENSHIM_DISABLE_INPUT_BINDING_UI") ||
                     EnvFlagEnabled("OPENSHIM_DISABLE_INPUT_BINDING_UI_REPLACEMENT") ||
                     EnvFlagEnabled("BZR_DISABLE_INPUT_BINDING_UI");
-                const bool enabled =
+                const bool forcedEnabled =
                     EnvFlagEnabled("OPENSHIM_ENABLE_INPUT_BINDING_UI") ||
                     EnvFlagEnabled("OPENSHIM_ENABLE_INPUT_BINDING_UI_REPLACEMENT") ||
-                    EnvFlagEnabled("OPENSHIM_ENABLE_CUSTOM_KEYBIND_UI") ||
                     EnvFlagEnabled("BZR_ENABLE_INPUT_BINDING_UI");
-                s_cached = (!disabled && enabled) ? 1 : 0;
+                s_cached = disabled ? 0 : ((forcedEnabled || enabled) ? 1 : 0);
             }
             return s_cached != 0;
         }
 
         static void ResetInputBindingUiVisuals()
         {
+            ResetShimSettingsUiVisuals();
             g_InputBindingUiScreen = nullptr;
             g_InputBindingUiMiddleOverlay = nullptr;
             g_InputBindingUiBackdrop = nullptr;
@@ -13285,12 +17882,17 @@ namespace BZROpenShim
         static bool ReloadInputBindingUiInventory(bool logFailures)
         {
             g_InputBindingInventory = {};
+            g_InputMapDocument = {};
+            g_GameKeyMapDocument = {};
             g_InputBindingCommandBlocks.clear();
             g_GameKeyBindingActions.clear();
             g_InputBindingUiRows.clear();
 
             const std::filesystem::path inputMapPath = g_InputBindingInstallDirectory / "input.map";
-            if (!ParseInputBindingMapFile(inputMapPath, g_InputBindingCommandBlocks, g_InputBindingInventory))
+            if (!ParseInputBindingMapFile(inputMapPath,
+                                          g_InputMapDocument,
+                                          g_InputBindingCommandBlocks,
+                                          g_InputBindingInventory))
             {
                 if (logFailures)
                 {
@@ -13302,7 +17904,10 @@ namespace BZROpenShim
             }
 
             const std::filesystem::path gameKeyMapPath = g_InputBindingInstallDirectory / "gamekey.map";
-            if (!ParseGameKeyBindingMapFile(gameKeyMapPath, g_GameKeyBindingActions, g_InputBindingInventory) &&
+            if (!ParseGameKeyBindingMapFile(gameKeyMapPath,
+                                            g_GameKeyMapDocument,
+                                            g_GameKeyBindingActions,
+                                            g_InputBindingInventory) &&
                 logFailures)
             {
                 const std::string gameKeyMapPathText = gameKeyMapPath.string();
@@ -13782,6 +18387,644 @@ namespace BZROpenShim
             }
         }
 
+        // --- OpenShim settings page implementation ------------------------------
+
+        static void* ReadOptionsInputSingletonRaw()
+        {
+            __try
+            {
+                return *reinterpret_cast<void* const volatile*>(kOptionsInputSingletonAddr);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
+
+        static bool ShouldEnableShimSettingsUi()
+        {
+            static int s_cached = -1;
+            if (s_cached < 0)
+            {
+                bool enabled = true;
+                bool configured = false;
+                if (TryGetUserConfigBool("General", "SettingsUi", configured))
+                    enabled = configured;
+                const bool disabled =
+                    EnvFlagEnabled("OPENSHIM_DISABLE_SETTINGS_UI") ||
+                    EnvFlagEnabled("BZR_DISABLE_SETTINGS_UI");
+                s_cached = (enabled && !disabled) ? 1 : 0;
+            }
+            return s_cached != 0;
+        }
+
+        // Lossless openshim.ini value write: only the matched "Key = value" line
+        // changes; comments, blank lines, ordering, and unrelated keys survive
+        // verbatim. Missing keys are appended at the end of their section and a
+        // missing section (or file) is created. Same atomic temp/backup/replace
+        // path as the input.map writer.
+        static bool IniLineIsSectionHeader(const std::string& line, std::string& outName)
+        {
+            size_t begin = line.find_first_not_of(" \t");
+            if (begin == std::string::npos || line[begin] != '[')
+                return false;
+            const size_t end = line.find(']', begin + 1);
+            if (end == std::string::npos)
+                return false;
+            outName = line.substr(begin + 1, end - begin - 1);
+            return true;
+        }
+
+        static bool IniLineMatchesKey(const std::string& line, const char* key)
+        {
+            size_t begin = line.find_first_not_of(" \t");
+            if (begin == std::string::npos)
+                return false;
+            const char first = line[begin];
+            if (first == ';' || first == '#' || first == '[')
+                return false;
+            const size_t equals = line.find('=', begin);
+            if (equals == std::string::npos)
+                return false;
+            size_t keyEnd = equals;
+            while (keyEnd > begin &&
+                   std::isspace(static_cast<unsigned char>(line[keyEnd - 1])))
+                --keyEnd;
+            const size_t keyLen = keyEnd - begin;
+            return keyLen == std::strlen(key) &&
+                   _strnicmp(line.c_str() + begin, key, keyLen) == 0;
+        }
+
+        static bool WriteUserConfigValueLossless(const char* section,
+                                                 const char* key,
+                                                 const char* const* altKeys,
+                                                 size_t altKeyCount,
+                                                 const char* value,
+                                                 std::string& outError)
+        {
+            outError.clear();
+            const auto path = GetUserConfigPath();
+            if (path.empty())
+            {
+                outError = "config directory unavailable";
+                return false;
+            }
+
+            InputBindingDocument document;
+            document.loaded = true;
+            {
+                std::ifstream file(path);
+                if (file)
+                {
+                    std::string line;
+                    while (std::getline(file, line))
+                    {
+                        while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
+                            line.pop_back();
+                        document.lines.push_back(line);
+                    }
+                }
+            }
+
+            const std::string newLine = std::string(key) + " = " + value;
+
+            // Locate the section and the key line (canonical name first, then
+            // any legacy alias) within it.
+            size_t sectionStart = std::string::npos;
+            size_t sectionEnd = document.lines.size();  // one past last section line
+            std::string headerName;
+            for (size_t index = 0; index < document.lines.size(); ++index)
+            {
+                if (!IniLineIsSectionHeader(document.lines[index], headerName))
+                    continue;
+                if (sectionStart != std::string::npos)
+                {
+                    sectionEnd = index;
+                    break;
+                }
+                if (_stricmp(headerName.c_str(), section) == 0)
+                    sectionStart = index;
+            }
+
+            if (sectionStart == std::string::npos)
+            {
+                if (!document.lines.empty() && !document.lines.back().empty())
+                    document.lines.push_back("");
+                document.lines.push_back(std::string("[") + section + "]");
+                document.lines.push_back(newLine);
+            }
+            else
+            {
+                size_t keyLine = std::string::npos;
+                for (size_t index = sectionStart + 1; index < sectionEnd; ++index)
+                {
+                    if (IniLineMatchesKey(document.lines[index], key))
+                    {
+                        keyLine = index;
+                        break;
+                    }
+                }
+                for (size_t alt = 0; keyLine == std::string::npos && alt < altKeyCount; ++alt)
+                {
+                    for (size_t index = sectionStart + 1; index < sectionEnd; ++index)
+                    {
+                        if (IniLineMatchesKey(document.lines[index], altKeys[alt]))
+                        {
+                            keyLine = index;
+                            break;
+                        }
+                    }
+                }
+
+                if (keyLine != std::string::npos)
+                {
+                    document.lines[keyLine] = newLine;
+                }
+                else
+                {
+                    size_t insertAt = sectionEnd;
+                    while (insertAt > sectionStart + 1 && document.lines[insertAt - 1].empty())
+                        --insertAt;
+                    document.lines.insert(document.lines.begin() + insertAt, newLine);
+                }
+            }
+
+            if (!WriteInputBindingDocumentAtomic(path, document, outError))
+                return false;
+
+            Log(L"[SETTINGSUI] Wrote %hs [%hs] %hs\n", kUserConfigFileName, section, newLine.c_str());
+            return true;
+        }
+
+        // How a settings row re-applies its feature live after the ini write.
+        enum class ShimSettingApplyGroup
+        {
+            GlobalImprovement,  // InitializeGlobalImprovementConfig re-reads the ini (no latch)
+            UnderAttackAlert,
+            TargetReticle,
+            JetFlames,
+            UnitVo,
+            GlobalTurbo,
+            Headlights,         // InitializeHeadlightConfig re-reads the ini (no latch)
+            RestartRequired,    // no live path; takes effect next launch
+        };
+
+        struct ShimSettingDescriptor
+        {
+            const char* label;         // row label in the UI
+            const char* section;       // openshim.ini section
+            const char* key;           // canonical ini key
+            const char* const* altKeys;  // legacy key aliases replaced in-place
+            size_t altKeyCount;
+            const char* const* values;      // ini value written per option
+            const char* const* valueLabels; // display text per option
+            size_t valueCount;
+            size_t defaultIndex;       // shown when the key is absent/invalid
+            ShimSettingApplyGroup applyGroup;
+        };
+
+        static const char* const kShimSettingsOnOffValues[] = { "1", "0" };
+        static const char* const kShimSettingsOnOffLabels[] = { "On", "Off" };
+        static const char* const kShimSettingsUnderAttackValues[] = { "Normal", "Minimal", "None" };
+        static const char* const kShimSettingsTargetPolicyValues[] = { "Default", "NeutralOnly", "ExplicitOnly" };
+        static const char* const kShimSettingsTargetPolicyLabels[] = { "Default", "Neutral Only", "Explicit Only" };
+        static const char* const kShimSettingsScrapHudValues[] = { "Legacy", "Stock" };
+        static const char* const kShimSettingsHeadlightColorValues[] =
+        {
+            "Stock", "White", "Red", "Green", "Blue", "Yellow",
+            "Cyan", "Magenta", "Orange", "Purple", "Teal", "Rainbow"
+        };
+        static const char* const kShimSettingsHeadlightBeamValues[] = { "Stock", "Focused", "Wide" };
+        static const char* const kShimSettingsTargetPolicyAltKeys[] = { "TargetReticle" };
+        static const char* const kShimSettingsReticleConvAltKeys[] = { "SmartReticleConvergence" };
+        static const char* const kShimSettingsScavengerAltKeys[] = { "ScavengerPathing" };
+        static const char* const kShimSettingsBindsUiAltKeys[] = { "CustomBindingUi" };
+
+        static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
+        {
+            { "Attack Alert", "Display", "UnderAttackAlert", nullptr, 0,
+              kShimSettingsUnderAttackValues, kShimSettingsUnderAttackValues, 3, 0,
+              ShimSettingApplyGroup::UnderAttackAlert },
+            { "Target Popup", "Display", "TargetPolicy",
+              kShimSettingsTargetPolicyAltKeys, 1,
+              kShimSettingsTargetPolicyValues, kShimSettingsTargetPolicyLabels, 3, 0,
+              ShimSettingApplyGroup::TargetReticle },
+            { "Scrap/Pilot HUD", "Display", "ScrapPilotHud", nullptr, 0,
+              kShimSettingsScrapHudValues, kShimSettingsScrapHudValues, 2, 0,
+              ShimSettingApplyGroup::GlobalImprovement },
+            { "Faction Jet Flames", "Display", "JetFlames", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::JetFlames },
+            { "Unit Voice Feedback", "Display", "UnitVoFeedback", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::UnitVo },
+            { "Custom Binds Screen", "General", "CustomBindsUi",
+              kShimSettingsBindsUiAltKeys, 1,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired },
+            { "AI Weapon Convergence", "SinglePlayer", "WeaponConvergence", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::GlobalImprovement },
+            { "Reticle Convergence", "SinglePlayer", "PlayerReticleConvergence",
+              kShimSettingsReticleConvAltKeys, 1,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::GlobalImprovement },
+            { "Smart Scavengers", "SinglePlayer", "SmartScavengerPathing",
+              kShimSettingsScavengerAltKeys, 1,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::GlobalImprovement },
+            { "Turret Anti-Air Pitch", "SinglePlayer", "TurretAimPitch", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::GlobalImprovement },
+            { "Jump-Snipe Crouch", "SinglePlayer", "JumpSnipeCrouch", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::GlobalImprovement },
+            { "Global Turbo", "SinglePlayer", "Turbo", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::GlobalTurbo },
+            { "Player Headlight", "SinglePlayer", "Headlights", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::Headlights },
+            { "AI Headlights", "SinglePlayer", "OtherHeadlights", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::Headlights },
+            { "Headlight Color", "SinglePlayer", "HeadlightColor", nullptr, 0,
+              kShimSettingsHeadlightColorValues, kShimSettingsHeadlightColorValues, 12, 0,
+              ShimSettingApplyGroup::Headlights },
+            { "Headlight Beam", "SinglePlayer", "HeadlightBeam", nullptr, 0,
+              kShimSettingsHeadlightBeamValues, kShimSettingsHeadlightBeamValues, 3, 0,
+              ShimSettingApplyGroup::Headlights },
+        };
+        static_assert(sizeof(g_ShimSettingsRegistry) / sizeof(g_ShimSettingsRegistry[0]) <=
+                          kShimSettingsUiVisibleRowCount,
+                      "settings registry exceeds the settings page row slots");
+
+        // The UI shows the ini baseline: the value the key currently resolves to
+        // in openshim.ini (or the setting's default when absent/unrecognized).
+        static size_t GetShimSettingCurrentIndex(const ShimSettingDescriptor& setting)
+        {
+            std::string value;
+            bool found = TryGetUserConfigString(setting.section, setting.key, value);
+            for (size_t alt = 0; !found && alt < setting.altKeyCount; ++alt)
+                found = TryGetUserConfigString(setting.section, setting.altKeys[alt], value);
+            if (!found)
+                return setting.defaultIndex;
+
+            // Normalize like the feature parsers: case-insensitive, ignore
+            // spaces/underscores/hyphens so NeutralOnly == neutral-only.
+            std::string normalized;
+            normalized.reserve(value.size());
+            for (char ch : value)
+            {
+                if (ch == ' ' || ch == '\t' || ch == '_' || ch == '-')
+                    continue;
+                normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+            }
+
+            for (size_t index = 0; index < setting.valueCount; ++index)
+            {
+                std::string candidate;
+                for (const char* cursor = setting.values[index]; *cursor; ++cursor)
+                {
+                    if (*cursor == ' ' || *cursor == '_' || *cursor == '-')
+                        continue;
+                    candidate.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(*cursor))));
+                }
+                if (normalized == candidate)
+                    return index;
+            }
+
+            // Boolean rows also accept the parser's synonym set.
+            if (setting.values == kShimSettingsOnOffValues)
+            {
+                if (normalized == "1" || normalized == "true" || normalized == "on" ||
+                    normalized == "yes" || normalized == "enabled")
+                    return 0;
+                if (normalized == "0" || normalized == "false" || normalized == "off" ||
+                    normalized == "no" || normalized == "disabled")
+                    return 1;
+            }
+
+            return setting.defaultIndex;
+        }
+
+        // Re-apply the feature behind a settings row from the freshly written
+        // ini. Latched initializers get their latch cleared and re-run, which
+        // deliberately preserves the documented precedence chain (legacy cfg and
+        // env overrides still win over the ini baseline).
+        static void ApplyShimSettingLive(const ShimSettingDescriptor& setting)
+        {
+            switch (setting.applyGroup)
+            {
+            case ShimSettingApplyGroup::GlobalImprovement:
+                InitializeGlobalImprovementConfig();
+                break;
+            case ShimSettingApplyGroup::UnderAttackAlert:
+                g_UnderAttackAlertConfigInitialized = false;
+                InitializeUnderAttackAlertConfig();
+                break;
+            case ShimSettingApplyGroup::TargetReticle:
+                g_TargetReticlePopupConfigInitialized = false;
+                InitializeTargetReticlePopupConfig();
+                break;
+            case ShimSettingApplyGroup::JetFlames:
+                g_JetFlamesConfigInitialized = false;
+                InitializeJetFlamesConfig();
+                break;
+            case ShimSettingApplyGroup::UnitVo:
+                g_UnitVoConfigInitialized = false;
+                InitializeUnitVoConfig();
+                break;
+            case ShimSettingApplyGroup::GlobalTurbo:
+                g_GlobalTurboConfigInitialized = false;
+                InitializeGlobalTurboConfig();
+                break;
+            case ShimSettingApplyGroup::Headlights:
+                RevertHeadlightsToBaseline();
+                break;
+            case ShimSettingApplyGroup::RestartRequired:
+                break;
+            }
+        }
+
+        static void ResetShimSettingsUiVisuals()
+        {
+            g_ShimSettingsUiBackdrop = nullptr;
+            g_ShimSettingsUiFrame = nullptr;
+            g_ShimSettingsUiTopMask = nullptr;
+            g_ShimSettingsUiContentMask = nullptr;
+            g_ShimSettingsUiHeaderLabel = nullptr;
+            g_ShimSettingsUiStatusLabel = nullptr;
+            g_ShimSettingsUiFooterLabel = nullptr;
+            g_ShimSettingsUiBackButton = nullptr;
+            g_ShimSettingsUiRowLabels.fill(nullptr);
+            g_ShimSettingsUiRowButtons.fill(nullptr);
+        }
+
+        static void SetShimSettingsUiControlsVisible(bool visible)
+        {
+            SetInputBindingUiViewActive(g_ShimSettingsUiBackdrop, visible);
+            SetInputBindingUiViewActive(g_ShimSettingsUiFrame, visible);
+            SetInputBindingUiViewActive(g_ShimSettingsUiTopMask, visible);
+            SetInputBindingUiViewActive(g_ShimSettingsUiContentMask, visible);
+            SetInputBindingUiViewActive(g_ShimSettingsUiHeaderLabel, visible);
+            SetInputBindingUiViewActive(g_ShimSettingsUiStatusLabel, visible);
+            SetInputBindingUiViewActive(g_ShimSettingsUiFooterLabel, visible);
+            SetInputBindingUiViewActive(g_ShimSettingsUiBackButton, visible);
+            for (void* label : g_ShimSettingsUiRowLabels)
+                SetInputBindingUiViewActive(label, visible);
+            for (void* button : g_ShimSettingsUiRowButtons)
+                SetInputBindingUiViewActive(button, visible);
+        }
+
+        static void SetInputBindingUiControlsVisible(bool visible)
+        {
+            SetInputBindingUiViewActive(g_InputBindingUiBackdrop, visible);
+            SetInputBindingUiViewActive(g_InputBindingUiFrame, visible);
+            SetInputBindingUiViewActive(g_InputBindingUiTopMask, visible);
+            SetInputBindingUiViewActive(g_InputBindingUiContentMask, visible);
+            SetInputBindingUiViewActive(g_InputBindingUiHeaderLabel, visible);
+            SetInputBindingUiViewActive(g_InputBindingUiStatusLabel, visible);
+            SetInputBindingUiViewActive(g_InputBindingUiPageLabel, visible);
+            SetInputBindingUiViewActive(g_InputBindingUiBackButton, visible);
+            SetInputBindingUiViewActive(g_InputBindingUiDefaultsButton, visible);
+            SetInputBindingUiViewActive(g_InputBindingUiInputFamilyButton, visible);
+            SetInputBindingUiViewActive(g_InputBindingUiGameKeyFamilyButton, visible);
+            SetInputBindingUiViewActive(g_InputBindingUiPrevPageButton, visible);
+            SetInputBindingUiViewActive(g_InputBindingUiNextPageButton, visible);
+            SetInputBindingUiViewActive(g_InputBindingUiRefreshButton, visible);
+            for (void* label : g_InputBindingUiRowLabels)
+                SetInputBindingUiViewActive(label, visible);
+            for (void* button : g_InputBindingUiRowButtons)
+                SetInputBindingUiViewActive(button, visible);
+        }
+
+        static void RefreshShimSettingsUiControls()
+        {
+            constexpr size_t settingCount =
+                sizeof(g_ShimSettingsRegistry) / sizeof(g_ShimSettingsRegistry[0]);
+
+            SetInputBindingUiLabelText(g_ShimSettingsUiHeaderLabel, "OpenShim Settings");
+            SetInputBindingUiLabelText(g_ShimSettingsUiStatusLabel, g_ShimSettingsUiStatusText.c_str());
+            SetInputBindingUiLabelText(
+                g_ShimSettingsUiFooterLabel,
+                "Click a value to cycle it. Gameplay settings never apply in network games.");
+
+            for (size_t slot = 0; slot < kShimSettingsUiVisibleRowCount; ++slot)
+            {
+                if (slot >= settingCount)
+                {
+                    SetInputBindingUiLabelText(g_ShimSettingsUiRowLabels[slot], "");
+                    SetInputBindingUiButtonText(g_ShimSettingsUiRowButtons[slot], "");
+                    SetInputBindingUiViewActive(g_ShimSettingsUiRowLabels[slot], false);
+                    SetInputBindingUiViewActive(g_ShimSettingsUiRowButtons[slot], false);
+                    continue;
+                }
+
+                const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[slot];
+                const size_t valueIndex = GetShimSettingCurrentIndex(setting);
+                SetInputBindingUiLabelText(g_ShimSettingsUiRowLabels[slot], setting.label);
+                SetInputBindingUiButtonText(g_ShimSettingsUiRowButtons[slot],
+                                            setting.valueLabels[valueIndex]);
+                SetInputBindingUiViewActive(g_ShimSettingsUiRowLabels[slot], true);
+                SetInputBindingUiViewActive(g_ShimSettingsUiRowButtons[slot], true);
+            }
+        }
+
+        static void EnsureShimSettingsUiControls(void* screen)
+        {
+            if (!screen)
+                return;
+
+            void* const visualParent = screen;
+            void* controlParent = ResolveStockOptionsInputMiddleOverlay(screen);
+            if (!controlParent)
+                controlParent = screen;
+
+            static constexpr float kBackdropX = 0.0f;
+            static constexpr float kBackdropY = 0.0f;
+            static constexpr float kBackdropW = 1440.0f;
+            static constexpr float kBackdropH = 1080.0f;
+            static constexpr float kHeaderX = 320.0f;
+            static constexpr float kHeaderY = 176.0f;
+            static constexpr float kHeaderW = 800.0f;
+            static constexpr float kHeaderH = 28.0f;
+            static constexpr float kStatusX = 320.0f;
+            static constexpr float kStatusY = 204.0f;
+            static constexpr float kStatusW = 800.0f;
+            static constexpr float kStatusH = 24.0f;
+            static constexpr float kFooterX = 320.0f;
+            static constexpr float kFooterY = 230.0f;
+            static constexpr float kFooterW = 900.0f;
+            static constexpr float kFooterH = 22.0f;
+            static constexpr float kToolbarY = 256.0f;
+            static constexpr float kToolbarW = 150.0f;
+            static constexpr float kToolbarH = 34.0f;
+            static constexpr float kTopMaskX = 220.0f;
+            static constexpr float kTopMaskY = 122.0f;
+            static constexpr float kTopMaskW = 1000.0f;
+            static constexpr float kTopMaskH = 126.0f;
+            static constexpr float kContentMaskX = 240.0f;
+            static constexpr float kContentMaskY = 292.0f;
+            static constexpr float kContentMaskW = 980.0f;
+            static constexpr float kContentMaskH = 456.0f;
+            static constexpr float kRowLeftBaseX = 287.0f;
+            static constexpr float kRowRightBaseX = 747.0f;
+            static constexpr float kRowY = 308.0f;
+            static constexpr float kRowLabelW = 200.0f;
+            static constexpr float kRowButtonH = 30.0f;
+            static constexpr float kRowStep = 46.0f;
+            static constexpr float kRowButtonOffsetX = 220.0f;
+            static constexpr float kRowButtonW = 210.0f;
+
+            const unsigned screenTag = static_cast<unsigned>(reinterpret_cast<uintptr_t>(screen));
+            char controlName[64] = {};
+
+            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsBackdrop_%08X", screenTag);
+            CreateInputBindingUiOverlay(g_ShimSettingsUiBackdrop, visualParent, controlName,
+                                        "blackui.png", kBackdropX, kBackdropY, kBackdropW, kBackdropH, 0x60);
+            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsFrame_%08X", screenTag);
+            CreateInputBindingUiOverlay(g_ShimSettingsUiFrame, visualParent, controlName,
+                                        "keyOptions_center.png", kBackdropX, kBackdropY, kBackdropW, kBackdropH, 0x60);
+            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsTopMask_%08X", screenTag);
+            CreateInputBindingUiOverlay(g_ShimSettingsUiTopMask, visualParent, controlName,
+                                        "blackui.png", kTopMaskX, kTopMaskY, kTopMaskW, kTopMaskH, 0x60);
+            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsContentMask_%08X", screenTag);
+            CreateInputBindingUiOverlay(g_ShimSettingsUiContentMask, visualParent, controlName,
+                                        "blackui.png", kContentMaskX, kContentMaskY, kContentMaskW, kContentMaskH, 0x60);
+
+            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsHeader_%08X", screenTag);
+            CreateInputBindingUiLabel(g_ShimSettingsUiHeaderLabel, controlParent, controlName, "",
+                                      kHeaderX, kHeaderY, kHeaderW, kHeaderH);
+            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsStatus_%08X", screenTag);
+            CreateInputBindingUiLabel(g_ShimSettingsUiStatusLabel, controlParent, controlName, "",
+                                      kStatusX, kStatusY, kStatusW, kStatusH);
+            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsFooter_%08X", screenTag);
+            CreateInputBindingUiLabel(g_ShimSettingsUiFooterLabel, controlParent, controlName, "",
+                                      kFooterX, kFooterY, kFooterW, kFooterH);
+            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsBack_%08X", screenTag);
+            CreateInputBindingUiButton(g_ShimSettingsUiBackButton, controlParent, controlName, "Back",
+                                       195.0f, kToolbarY, kToolbarW, kToolbarH,
+                                       reinterpret_cast<void*>(ShimSettingsBackClick));
+
+            for (size_t slot = 0; slot < kShimSettingsUiVisibleRowCount; ++slot)
+            {
+                const size_t column = slot / kShimSettingsUiRowsPerColumn;
+                const size_t row = slot % kShimSettingsUiRowsPerColumn;
+                const float baseX = (column == 0) ? kRowLeftBaseX : kRowRightBaseX;
+                const float y = kRowY + (static_cast<float>(row) * kRowStep);
+                std::snprintf(controlName, sizeof(controlName),
+                              "OpenShimSettingsRowLabel_%08X_%02u", screenTag, static_cast<unsigned>(slot));
+                CreateInputBindingUiLabel(g_ShimSettingsUiRowLabels[slot], controlParent, controlName, "",
+                                          baseX, y + 2.0f, kRowLabelW, kRowButtonH);
+                std::snprintf(controlName, sizeof(controlName),
+                              "OpenShimSettingsRowButton_%08X_%02u", screenTag, static_cast<unsigned>(slot));
+                CreateInputBindingUiButton(g_ShimSettingsUiRowButtons[slot], controlParent, controlName, "",
+                                           baseX + kRowButtonOffsetX, y, kRowButtonW, kRowButtonH,
+                                           kShimSettingsRowClickCallbacks[slot]);
+            }
+        }
+
+        static void ActivateShimSettingsPage(void* screen)
+        {
+            if (!screen)
+                return;
+
+            if (g_InputBindingUiScreen != screen)
+            {
+                ResetInputBindingUiVisuals();
+                g_InputBindingUiScreen = screen;
+            }
+
+            g_ShimSettingsPageActive = true;
+            SetInputBindingUiControlsVisible(false);
+            SuppressStockOptionsInputWidgets(screen);
+            EnsureShimSettingsUiControls(screen);
+            RefreshShimSettingsUiControls();
+            Log(L"[SETTINGSUI] Settings page active screen=0x%08X rows=%u\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(screen)),
+                static_cast<unsigned>(sizeof(g_ShimSettingsRegistry) / sizeof(g_ShimSettingsRegistry[0])));
+        }
+
+        static void OnShimSettingsRowClicked(size_t rowIndex)
+        {
+            constexpr size_t settingCount =
+                sizeof(g_ShimSettingsRegistry) / sizeof(g_ShimSettingsRegistry[0]);
+            if (rowIndex >= settingCount || !g_ShimSettingsPageActive)
+                return;
+
+            const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[rowIndex];
+            const size_t nextIndex = (GetShimSettingCurrentIndex(setting) + 1) % setting.valueCount;
+            const char* const newValue = setting.values[nextIndex];
+
+            std::string error;
+            if (!WriteUserConfigValueLossless(setting.section, setting.key,
+                                              setting.altKeys, setting.altKeyCount,
+                                              newValue, error))
+            {
+                g_ShimSettingsUiStatusText = "Save failed: " + error;
+                Log(L"[SETTINGSUI] Save failed for %hs: %hs\n", setting.key, error.c_str());
+                RefreshShimSettingsUiControls();
+                return;
+            }
+
+            ApplyShimSettingLive(setting);
+
+            g_ShimSettingsUiStatusText = std::string(setting.label) + " = " +
+                setting.valueLabels[nextIndex] +
+                (setting.applyGroup == ShimSettingApplyGroup::RestartRequired
+                     ? "  (takes effect after restart)"
+                     : "  (applied)");
+            RefreshShimSettingsUiControls();
+        }
+
+        // Hide the settings page and hand the host screen back to the binding
+        // UI (when enabled) so a later plain "Input" visit that does not
+        // reconstruct the screen still shows the key-binding page.
+        static void DeactivateShimSettingsPage()
+        {
+            if (!g_ShimSettingsPageActive)
+                return;
+
+            g_ShimSettingsPageActive = false;
+            g_ShimSettingsUiStatusText.clear();
+            SetShimSettingsUiControlsVisible(false);
+
+            if (ShouldEnableInputBindingUiReplacement() && g_InputBindingUiScreen)
+            {
+                EnsureInputBindingUiControls(g_InputBindingUiScreen);
+                RefreshInputBindingUiControls();
+            }
+        }
+
+        static void OnShimSettingsBackClicked()
+        {
+            DeactivateShimSettingsPage();
+            OnInputBindingBackClicked();
+        }
+
+        static void OnShimSettingsMenuClicked()
+        {
+            g_ShimSettingsUiStatusText.clear();
+            g_ShimSettingsPageRequested = true;
+            g_ShimSettingsPageRequestTick = GetTickCount64();
+            auto* const navigateToInputScreen =
+                reinterpret_cast<void(__cdecl*)()>(kOptionsParentInputClickThunkAddr);
+            navigateToInputScreen();
+
+            // If the shell keeps a constructed input screen alive, the ctor hook
+            // will not re-fire for this navigation; restyle the live screen now.
+            // Guarded to a screen we already decorated (strong liveness evidence).
+            void* const liveInputScreen = ReadOptionsInputSingletonRaw();
+            if (liveInputScreen &&
+                liveInputScreen == g_LastOptionsInputScreen &&
+                liveInputScreen == g_InputBindingUiScreen)
+            {
+                g_ShimSettingsPageRequested = false;
+                ActivateShimSettingsPage(liveInputScreen);
+            }
+        }
+
         static void EnsureInputBindingUiControls(void* screen)
         {
             if (!screen)
@@ -14104,60 +19347,18 @@ namespace BZROpenShim
             return true;
         }
 
-        static bool WriteGameKeyBindingMapFile()
+        static bool AssignGameKeyBindingChord(const std::string& action,
+                                              const std::string& newChord,
+                                              std::string& outError)
         {
-            const std::filesystem::path gameKeyMapPath = g_InputBindingInstallDirectory / "gamekey.map";
-            std::ofstream file(gameKeyMapPath, std::ios::trunc);
-            if (!file)
-                return false;
-
-            file << "#***********************************************\n";
-            file << "#*\n";
-            file << "#*  BattleZone 98 Redux Keyboard Mapping File\n";
-            file << "#*\n";
-            file << "#*  Generated by OpenShim native key rebinding UI.\n";
-            file << "#*\n";
-            file << "#***********************************************\n\n";
-
-            for (size_t actionIndex = 0; actionIndex < g_GameKeyBindingActions.size(); ++actionIndex)
-            {
-                const GameKeyBindingAction& action = g_GameKeyBindingActions[actionIndex];
-                for (const std::string& chord : action.chords)
-                {
-                    if (!chord.empty())
-                        file << action.action << "\t\t\t" << chord << "\n";
-                }
-
-                if (actionIndex + 1 < g_GameKeyBindingActions.size())
-                    file << "\n";
-            }
-
-            return file.good();
-        }
-
-        static bool AssignGameKeyBindingChord(const std::string& action, const std::string& newChord)
-        {
+            outError.clear();
             if (action.empty() || newChord.empty())
-                return false;
-
-            GameKeyBindingAction* bindingAction = FindGameKeyBindingAction(g_GameKeyBindingActions, action);
-            if (!bindingAction)
-                return false;
-
-            if (bindingAction->chords.empty())
             {
-                bindingAction->chords.push_back(newChord);
-            }
-            else
-            {
-                bindingAction->chords[0] = newChord;
-                std::vector<std::string> uniqueChords;
-                for (const std::string& chord : bindingAction->chords)
-                    AppendUniqueString(uniqueChords, chord);
-                bindingAction->chords = std::move(uniqueChords);
+                outError = "empty action or chord";
+                return false;
             }
 
-            if (!WriteGameKeyBindingMapFile())
+            if (!SetGameKeyBindingPrimaryChord(action, newChord, outError))
                 return false;
 
             if (g_BzrFn_ReloadGameKeyMap)
@@ -14209,6 +19410,7 @@ namespace BZROpenShim
                 defaultsClick();
             }
 
+            TryLiveReloadInputMapTables();
             ReloadInputBindingUiInventory(true);
             g_InputBindingUiPageStart =
                 ClampInputBindingUiPageStart(g_InputBindingUiActiveFamily, g_InputBindingUiPageStart);
@@ -14252,6 +19454,127 @@ namespace BZROpenShim
             RefreshInputBindingUiControls();
         }
 
+        // KeyConfig layout confirmed against the 1.5 PDB object model: nKeyCount at
+        // +0, _KeyItem[100] at +4, each entry cKeyName[0x100] at +0,
+        // cKeyFunction[0x100] at +0x100, nReserved at +0x200 (stride 0x204).
+        struct KeyConfigEntryView
+        {
+            const char* keyName = nullptr;
+            const char* function = nullptr;
+            int reserved = 0;
+        };
+
+        static bool IsPrintableAsciiZ(const char* text, size_t maxLen)
+        {
+            for (size_t index = 0; index < maxLen; ++index)
+            {
+                const char ch = text[index];
+                if (ch == '\0')
+                    return true;
+                if (ch < 0x20 || ch > 0x7E)
+                    return false;
+            }
+            return false;
+        }
+
+        static bool TryFindKeyConfigEntry(void* keyConfig,
+                                          const char* command,
+                                          KeyConfigEntryView& outEntry,
+                                          bool& outTableValid)
+        {
+            constexpr size_t kListOffset = 4;
+            constexpr size_t kEntryStride = 0x204;
+            constexpr size_t kFunctionOffset = 0x100;
+            constexpr size_t kReservedOffset = 0x200;
+            constexpr int kMaxEntries = 100;
+
+            outEntry = {};
+            outTableValid = false;
+            if (!keyConfig || !command || !*command)
+                return false;
+
+            const int count = *reinterpret_cast<const int*>(keyConfig);
+            if (count <= 0 || count > kMaxEntries)
+                return false;
+
+            const uint8_t* listBase = reinterpret_cast<const uint8_t*>(keyConfig) + kListOffset;
+            const char* firstName = reinterpret_cast<const char*>(listBase);
+            const char* firstFunction = reinterpret_cast<const char*>(listBase + kFunctionOffset);
+            if (!IsPrintableAsciiZ(firstName, kFunctionOffset) ||
+                !IsPrintableAsciiZ(firstFunction, kFunctionOffset) ||
+                *firstFunction == '\0')
+            {
+                return false;
+            }
+
+            outTableValid = true;
+            for (int index = 0; index < count; ++index)
+            {
+                const uint8_t* entry = listBase + static_cast<size_t>(index) * kEntryStride;
+                const char* function = reinterpret_cast<const char*>(entry + kFunctionOffset);
+                if (!IsPrintableAsciiZ(function, kFunctionOffset))
+                    continue;
+                if (_stricmp(function, command) != 0)
+                    continue;
+
+                outEntry.keyName = reinterpret_cast<const char*>(entry);
+                outEntry.function = function;
+                outEntry.reserved = *reinterpret_cast<const int*>(entry + kReservedOffset);
+                return true;
+            }
+            return false;
+        }
+
+        // Mirrors the stock alreadyBound rule, but across every parsed block so
+        // extended commands participate in conflict detection too.
+        static const InputBindingCommandBlock* FindInputMapKeyOwner(
+            const std::string& keyName,
+            const std::string& excludeCommand)
+        {
+            for (const InputBindingCommandBlock& block : g_InputBindingCommandBlocks)
+            {
+                if (_stricmp(block.command.c_str(), excludeCommand.c_str()) == 0)
+                    continue;
+                for (const std::string& token : block.positiveKeyboardTokens)
+                {
+                    if (_stricmp(token.c_str(), keyName.c_str()) == 0)
+                        return &block;
+                }
+            }
+            return nullptr;
+        }
+
+        // Redux read_mapping_table (legacy 0x004BBD49) recovered at 0x00620010; it
+        // fully re-reads input.map plus the giddi device templates into the live
+        // tables. Byte-verified before first use so a drifted binary degrades to a
+        // restart notice instead of a wild call.
+        static bool TryLiveReloadInputMapTables()
+        {
+            if (!g_InputMapLiveReloadChecked)
+            {
+                g_InputMapLiveReloadChecked = true;
+                static const uint8_t kExpectedReadMappingTableBytes[] =
+                {
+                    0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xDC, 0x02, 0x00, 0x00
+                };
+                g_InputMapLiveReloadAvailable =
+                    ExpectedBytesMatchAt(kGogReadMappingTableAddr,
+                                         kExpectedReadMappingTableBytes,
+                                         sizeof(kExpectedReadMappingTableBytes));
+                Log(L"[INPUTUI] Live input.map reload %hs at 0x%08X\n",
+                    g_InputMapLiveReloadAvailable ? "available" : "unavailable (bytes mismatch)",
+                    static_cast<uint32_t>(kGogReadMappingTableAddr));
+            }
+
+            if (!g_InputMapLiveReloadAvailable)
+                return false;
+
+            auto* readMappingTable =
+                reinterpret_cast<FnReloadGameKeyMap>(kGogReadMappingTableAddr);
+            readMappingTable();
+            return true;
+        }
+
         static bool HandleCapturedInputBindingKey(void* screen, uint32_t key, uint32_t keyCode)
         {
             if (g_InputBindingUiPendingCommand.empty())
@@ -14284,8 +19607,15 @@ namespace BZROpenShim
                 return true;
             }
 
-            const InputBindingUiRow& row = g_InputBindingUiRows[rowIndex];
-            if (row.family == InputBindingMapFamily::Input)
+            // Copies, not references: ReloadInputBindingUiInventory rebuilds the row
+            // vector before the success status is composed.
+            const InputBindingMapFamily rowFamily = g_InputBindingUiRows[rowIndex].family;
+            const std::string command = g_InputBindingUiRows[rowIndex].command;
+            const std::string displayText = g_InputBindingUiRows[rowIndex].displayText.empty()
+                ? HumanizeInputBindingCommand(command)
+                : g_InputBindingUiRows[rowIndex].displayText;
+
+            if (rowFamily == InputBindingMapFamily::Input)
             {
                 const std::string keyName = BuildInputBindingKeyNameFromCode(keyCode);
                 if (keyName.empty())
@@ -14297,6 +19627,20 @@ namespace BZROpenShim
                     return true;
                 }
 
+                if (const InputBindingCommandBlock* owner = FindInputMapKeyOwner(keyName, command))
+                {
+                    const std::string ownerText = !owner->comment.empty()
+                        ? owner->comment
+                        : HumanizeInputBindingCommand(owner->command);
+                    g_InputBindingUiStatusText =
+                        keyName + " is already bound to " + ownerText + ".";
+                    Log(L"[INPUTUI] Capture rejected: key=%hs already owned by command=%hs\n",
+                        keyName.c_str(),
+                        owner->command.c_str());
+                    RefreshInputBindingUiControls();
+                    return true;
+                }
+
                 void* keyConfig = nullptr;
                 if (screen)
                 {
@@ -14304,39 +19648,69 @@ namespace BZROpenShim
                     keyConfig = *reinterpret_cast<void**>(screenBytes + kOptionsInputKeyConfigOffset);
                 }
 
-                if (!keyConfig || !g_BzrFn_KeyConfigSetKey || !g_BzrFn_WriteInputMapKey)
+                // Stock-managed commands keep KeyConfig::set_key so the native table
+                // stays consistent; extended commands are not in that table (set_key
+                // would reject them) and go straight to the file writer.
+                KeyConfigEntryView stockEntry = {};
+                bool stockTableValid = false;
+                const bool stockManaged =
+                    TryFindKeyConfigEntry(keyConfig, command.c_str(), stockEntry, stockTableValid);
+                if (keyConfig && !stockTableValid)
                 {
-                    g_InputBindingUiStatusText = "OpenShim could not reach the stock key config object.";
-                    Log(L"[INPUTUI] Capture failed: missing key config or writers keyConfig=0x%08X setKey=0x%p writeKey=0x%p\n",
+                    Log(L"[INPUTUI] KeyConfig table at 0x%08X failed layout sanity check; treating %hs as extended\n",
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(keyConfig)),
-                        reinterpret_cast<void*>(g_BzrFn_KeyConfigSetKey),
-                        reinterpret_cast<void*>(g_BzrFn_WriteInputMapKey));
-                    RefreshInputBindingUiControls();
-                    return true;
+                        command.c_str());
                 }
 
-                if (g_BzrFn_KeyConfigSetKey(keyConfig, row.command.c_str(), keyName.c_str()) == 0)
+                if (stockManaged)
                 {
-                    g_InputBindingUiStatusText =
-                        "Binding rejected for " + g_InputBindingUiPendingDisplayText +
-                        ". The key is already bound or reserved.";
-                    Log(L"[INPUTUI] Capture rejected by KeyConfig::set_key command=%hs key=%hs\n",
-                        row.command.c_str(),
-                        keyName.c_str());
+                    if (stockEntry.reserved != 0)
+                    {
+                        g_InputBindingUiStatusText =
+                            displayText + " is reserved by the game and cannot be rebound.";
+                        Log(L"[INPUTUI] Capture rejected: command=%hs is reserved\n",
+                            command.c_str());
+                        RefreshInputBindingUiControls();
+                        return true;
+                    }
+
+                    if (g_BzrFn_KeyConfigSetKey &&
+                        g_BzrFn_KeyConfigSetKey(keyConfig, command.c_str(), keyName.c_str()) == 0)
+                    {
+                        g_InputBindingUiStatusText =
+                            "Binding rejected for " + displayText +
+                            ". The stock key table refused " + keyName + ".";
+                        Log(L"[INPUTUI] Capture rejected by KeyConfig::set_key command=%hs key=%hs\n",
+                            command.c_str(),
+                            keyName.c_str());
+                        RefreshInputBindingUiControls();
+                        return true;
+                    }
+                }
+
+                std::string writeError;
+                if (!SetInputMapPrimaryKeyboardBinding(command, keyName, writeError))
+                {
+                    g_InputBindingUiStatusText = "Failed writing input.map: " + writeError;
+                    Log(L"[INPUTUI] input.map write failed command=%hs key=%hs error=%hs\n",
+                        command.c_str(),
+                        keyName.c_str(),
+                        writeError.c_str());
                     RefreshInputBindingUiControls();
                     return true;
                 }
 
-                g_BzrFn_WriteInputMapKey(row.command.c_str(), keyName.c_str());
+                const bool liveReload = TryLiveReloadInputMapTables();
                 ReloadInputBindingUiInventory(true);
                 g_InputBindingUiPendingCommand.clear();
                 g_InputBindingUiPendingDisplayText.clear();
-                const std::string displayText =
-                    row.displayText.empty() ? HumanizeInputBindingCommand(row.command) : row.displayText;
-                g_InputBindingUiStatusText = "Bound " + displayText + " to " + keyName + ".";
-                Log(L"[INPUTUI] Bound input command=%hs key=%hs\n",
-                    row.command.c_str(),
-                    keyName.c_str());
+                g_InputBindingUiStatusText = "Bound " + displayText + " to " + keyName +
+                    (liveReload ? "." : ". Takes effect after restart.");
+                Log(L"[INPUTUI] Bound input command=%hs key=%hs stockManaged=%hs liveReload=%hs\n",
+                    command.c_str(),
+                    keyName.c_str(),
+                    stockManaged ? "yes" : "no",
+                    liveReload ? "yes" : "no");
                 RefreshInputBindingUiControls();
                 return true;
             }
@@ -14347,18 +19721,21 @@ namespace BZROpenShim
                 g_InputBindingUiStatusText =
                     "Press a non-modifier key for " + g_InputBindingUiPendingDisplayText + ".";
                 Log(L"[INPUTUI] Capture rejected for gamekey command=%hs because chord build failed\n",
-                    row.command.c_str());
+                    command.c_str());
                 RefreshInputBindingUiControls();
                 return true;
             }
 
-            if (!AssignGameKeyBindingChord(row.command, chord))
+            std::string assignError;
+            if (!AssignGameKeyBindingChord(command, chord, assignError))
             {
                 g_InputBindingUiStatusText =
-                    "Failed writing gamekey.map for " + g_InputBindingUiPendingDisplayText + ".";
-                Log(L"[INPUTUI] Failed writing gamekey command=%hs chord=%hs\n",
-                    row.command.c_str(),
-                    chord.c_str());
+                    "Failed writing gamekey.map for " + g_InputBindingUiPendingDisplayText +
+                    (assignError.empty() ? "." : (": " + assignError));
+                Log(L"[INPUTUI] Failed writing gamekey command=%hs chord=%hs error=%hs\n",
+                    command.c_str(),
+                    chord.c_str(),
+                    assignError.c_str());
                 RefreshInputBindingUiControls();
                 return true;
             }
@@ -14366,11 +19743,9 @@ namespace BZROpenShim
             ReloadInputBindingUiInventory(true);
             g_InputBindingUiPendingCommand.clear();
             g_InputBindingUiPendingDisplayText.clear();
-            const std::string displayText =
-                row.displayText.empty() ? HumanizeInputBindingCommand(row.command) : row.displayText;
             g_InputBindingUiStatusText = "Bound " + displayText + " to " + chord + ".";
             Log(L"[INPUTUI] Bound gamekey action=%hs chord=%hs\n",
-                row.command.c_str(),
+                command.c_str(),
                 chord.c_str());
             RefreshInputBindingUiControls();
             return true;
@@ -14395,10 +19770,12 @@ namespace BZROpenShim
         {
             InitializeInputBindingUiScaffold();
 
-            if (g_InputBindingUiPopulateHookInstalled && g_InputBindingUiKeyReleasedHookInstalled)
+            // The settings page reuses the hooked input screen as its host, so
+            // the ctor/key hooks install when either feature is enabled.
+            if (!ShouldEnableInputBindingUiReplacement() && !ShouldEnableShimSettingsUi())
                 return;
 
-            if (!ShouldEnableInputBindingUiReplacement())
+            if (g_InputBindingUiPopulateHookInstalled && g_InputBindingUiKeyReleasedHookInstalled)
                 return;
 
             static const uint8_t kExpectedOptionsInputCtorBytes[kOptionsInputCtorDetourLen] =
@@ -14410,60 +19787,79 @@ namespace BZROpenShim
                 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x54, 0x01, 0x00, 0x00
             };
 
-            if (!ExpectedBytesMatchAt(kOptionsInputCtorAddr,
-                                      kExpectedOptionsInputCtorBytes,
-                                      sizeof(kExpectedOptionsInputCtorBytes)))
+            // The key-release hook is passive (forwards to stock while no capture is
+            // pending), so it installs first. The constructor hook is what activates
+            // the replacement UI and only installs once key capture is guaranteed.
+            // A failure therefore never strands a replacement UI that cannot capture
+            // keys, and a retry never re-validates bytes on an already-patched site.
+            if (!g_InputBindingUiKeyReleasedHookInstalled)
             {
-                if (!g_InputBindingUiPopulateHookMismatchLogged)
+                if (!ExpectedBytesMatchAt(kOptionsInputKeyReleasedAddr,
+                                          kExpectedOptionsInputKeyReleasedBytes,
+                                          sizeof(kExpectedOptionsInputKeyReleasedBytes)))
                 {
-                    Log(L"[INPUTUI] Constructor entry bytes mismatch at 0x%08X; input UI replacement remains disabled\n",
-                        static_cast<uint32_t>(kOptionsInputCtorAddr));
-                    g_InputBindingUiPopulateHookMismatchLogged = true;
+                    if (!g_InputBindingUiPopulateHookMismatchLogged)
+                    {
+                        Log(L"[INPUTUI] KeyReleased entry bytes mismatch at 0x%08X; input UI replacement remains disabled\n",
+                            static_cast<uint32_t>(kOptionsInputKeyReleasedAddr));
+                        g_InputBindingUiPopulateHookMismatchLogged = true;
+                    }
+                    return;
                 }
-                return;
+
+                if (!InstallInlineDetour32(g_OptionsInputKeyReleasedDetour,
+                                           kOptionsInputKeyReleasedAddr,
+                                           reinterpret_cast<void*>(OptionsInputKeyReleasedHook),
+                                           kOptionsInputKeyReleasedDetourLen,
+                                           kExpectedOptionsInputKeyReleasedBytes,
+                                           sizeof(kExpectedOptionsInputKeyReleasedBytes)))
+                {
+                    Log(L"[INPUTUI] Failed installing key-release hook at 0x%08X\n",
+                        static_cast<uint32_t>(kOptionsInputKeyReleasedAddr));
+                    return;
+                }
+
+                g_BzrFn_OptionsInputKeyReleased =
+                    reinterpret_cast<FnOptionsInputKeyReleased>(g_OptionsInputKeyReleasedDetour.trampoline);
+                g_InputBindingUiKeyReleasedHookInstalled = (g_BzrFn_OptionsInputKeyReleased != nullptr);
+                if (!g_InputBindingUiKeyReleasedHookInstalled)
+                    return;
             }
 
-            if (!InstallInlineDetour32(g_OptionsInputPopulateUiDetour,
-                                       kOptionsInputCtorAddr,
-                                       reinterpret_cast<void*>(OptionsInputPopulateUiHook),
-                                       kOptionsInputCtorDetourLen,
-                                       kExpectedOptionsInputCtorBytes,
-                                       sizeof(kExpectedOptionsInputCtorBytes)))
+            if (!g_InputBindingUiPopulateHookInstalled)
             {
-                Log(L"[INPUTUI] Failed installing constructor hook at 0x%08X\n",
-                    static_cast<uint32_t>(kOptionsInputCtorAddr));
-                return;
+                if (!ExpectedBytesMatchAt(kOptionsInputCtorAddr,
+                                          kExpectedOptionsInputCtorBytes,
+                                          sizeof(kExpectedOptionsInputCtorBytes)))
+                {
+                    if (!g_InputBindingUiPopulateHookMismatchLogged)
+                    {
+                        Log(L"[INPUTUI] Constructor entry bytes mismatch at 0x%08X; input UI replacement remains disabled\n",
+                            static_cast<uint32_t>(kOptionsInputCtorAddr));
+                        g_InputBindingUiPopulateHookMismatchLogged = true;
+                    }
+                    return;
+                }
+
+                if (!InstallInlineDetour32(g_OptionsInputPopulateUiDetour,
+                                           kOptionsInputCtorAddr,
+                                           reinterpret_cast<void*>(OptionsInputPopulateUiHook),
+                                           kOptionsInputCtorDetourLen,
+                                           kExpectedOptionsInputCtorBytes,
+                                           sizeof(kExpectedOptionsInputCtorBytes)))
+                {
+                    Log(L"[INPUTUI] Failed installing constructor hook at 0x%08X\n",
+                        static_cast<uint32_t>(kOptionsInputCtorAddr));
+                    return;
+                }
+
+                g_BzrFn_OptionsInputCtor =
+                    reinterpret_cast<FnOptionsInputCtor>(g_OptionsInputPopulateUiDetour.trampoline);
+                g_InputBindingUiPopulateHookInstalled = (g_BzrFn_OptionsInputCtor != nullptr);
+                if (!g_InputBindingUiPopulateHookInstalled)
+                    return;
             }
 
-            g_BzrFn_OptionsInputCtor =
-                reinterpret_cast<FnOptionsInputCtor>(g_OptionsInputPopulateUiDetour.trampoline);
-            g_InputBindingUiPopulateHookInstalled = (g_BzrFn_OptionsInputCtor != nullptr);
-
-            if (!ExpectedBytesMatchAt(kOptionsInputKeyReleasedAddr,
-                                      kExpectedOptionsInputKeyReleasedBytes,
-                                      sizeof(kExpectedOptionsInputKeyReleasedBytes)))
-            {
-                Log(L"[INPUTUI] KeyReleased entry bytes mismatch at 0x%08X; live capture remains disabled\n",
-                    static_cast<uint32_t>(kOptionsInputKeyReleasedAddr));
-                return;
-            }
-
-            if (!InstallInlineDetour32(g_OptionsInputKeyReleasedDetour,
-                                       kOptionsInputKeyReleasedAddr,
-                                       reinterpret_cast<void*>(OptionsInputKeyReleasedHook),
-                                       kOptionsInputKeyReleasedDetourLen,
-                                       kExpectedOptionsInputKeyReleasedBytes,
-                                       sizeof(kExpectedOptionsInputKeyReleasedBytes)))
-            {
-                Log(L"[INPUTUI] Failed installing key-release hook at 0x%08X\n",
-                    static_cast<uint32_t>(kOptionsInputKeyReleasedAddr));
-                return;
-            }
-
-            g_BzrFn_OptionsInputKeyReleased =
-                reinterpret_cast<FnOptionsInputKeyReleased>(g_OptionsInputKeyReleasedDetour.trampoline);
-            g_InputBindingUiKeyReleasedHookInstalled = (g_BzrFn_OptionsInputKeyReleased != nullptr);
-            g_InputBindingUiPopulateHookInstallAttempted = true;
             g_InputBindingUiPopulateHookMismatchLogged = false;
             Log(L"[INPUTUI] Installed constructor hook entry=0x%08X trampoline=0x%08X keyRelease=0x%08X\n",
                 static_cast<uint32_t>(kOptionsInputCtorAddr),
@@ -14479,13 +19875,135 @@ namespace BZROpenShim
                 return;
 
             g_LastOptionsInputScreen = screen;
+
+            const bool requestFresh =
+                g_ShimSettingsPageRequested &&
+                (GetTickCount64() - g_ShimSettingsPageRequestTick) <= kShimSettingsPageRequestTtlMs;
+            const bool settingsMode = requestFresh && ShouldEnableShimSettingsUi();
+            g_ShimSettingsPageRequested = false;
+            if (settingsMode)
+            {
+                ActivateShimSettingsPage(screen);
+                return;
+            }
+
+            g_ShimSettingsPageActive = false;
+            if (!ShouldEnableInputBindingUiReplacement())
+                return;
+
             EnsureInputBindingUiControls(screen);
+            SetShimSettingsUiControlsVisible(false);
             RefreshInputBindingUiControls();
             Log(L"[INPUTUI] Constructor hook screen=0x%08X rows=%u liveUi=%hs keyRelease=%hs\n",
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(screen)),
                 static_cast<unsigned>(g_InputBindingUiRows.size()),
                 "yes",
                 g_InputBindingUiKeyReleasedHookInstalled ? "yes" : "no");
+        }
+
+        // --- OpenShim button on the stock Options screen -------------------------
+
+        // Match the stock Play/Graphic/Audio/Input buttons (x=508, w=422, h=130,
+        // optionhv/optionck hover/click art, 1.3 text scale). The stock four sit
+        // at y=208/386/564/741; the OpenShim button takes the next slot down.
+        static void EnsureShimSettingsMenuButton(void* parentScreen)
+        {
+            if (!parentScreen || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild)
+                return;
+
+            if (g_OptionsParentScreen != parentScreen)
+            {
+                g_OptionsParentScreen = parentScreen;
+                g_ShimSettingsMenuButton = nullptr;
+            }
+
+            if (g_ShimSettingsMenuButton)
+                return;
+
+            void* buttonMem = ::operator new(0x1EC, std::nothrow);
+            if (!buttonMem)
+                return;
+
+            std::memset(buttonMem, 0, 0x1EC);
+            void* const button = g_BzrFn_ButtonCtor(buttonMem,
+                                                    "OpenShimSettingsMenuButton",
+                                                    508.0f,
+                                                    918.0f,
+                                                    422.0f,
+                                                    130.0f,
+                                                    0x20,
+                                                    parentScreen,
+                                                    0,
+                                                    0);
+            if (!button)
+                return;
+
+            if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(button, "optionhv.png");
+            if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(button, "optionck.png");
+            if (g_BzrFn_SetButtonLabel) g_BzrFn_SetButtonLabel(button, "OpenShim");
+            if (g_BzrFn_SetButtonTextScale) g_BzrFn_SetButtonTextScale(button, 1.3f);
+            if (g_BzrFn_SetOnClick)
+                g_BzrFn_SetOnClick(button, reinterpret_cast<void*>(ShimSettingsMenuClick));
+            if (g_BzrFn_SetOnHover)
+                g_BzrFn_SetOnHover(button, reinterpret_cast<void*>(InputBindingUiButtonOnHoverNoop));
+            g_BzrFn_AddChild(parentScreen, button, 0);
+            g_ShimSettingsMenuButton = button;
+            Log(L"[SETTINGSUI] OpenShim button added to options screen=0x%08X\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parentScreen)));
+        }
+
+        static void OnOptionsParentCtorScaffold(void* screen)
+        {
+            if (!screen || !ShouldEnableShimSettingsUi())
+                return;
+
+            EnsureShimSettingsMenuButton(screen);
+        }
+
+        static void EnsureOptionsParentCtorHookScaffold()
+        {
+            if (!ShouldEnableShimSettingsUi() || g_OptionsParentHookInstalled)
+                return;
+
+            static const uint8_t kExpectedOptionsParentCtorBytes[kOptionsParentCtorDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x60, 0x13, 0x86, 0x00
+            };
+
+            if (!ExpectedBytesMatchAt(kOptionsParentCtorAddr,
+                                      kExpectedOptionsParentCtorBytes,
+                                      sizeof(kExpectedOptionsParentCtorBytes)))
+            {
+                if (!g_OptionsParentHookMismatchLogged)
+                {
+                    Log(L"[SETTINGSUI] Options ctor bytes mismatch at 0x%08X; settings UI disabled\n",
+                        static_cast<uint32_t>(kOptionsParentCtorAddr));
+                    g_OptionsParentHookMismatchLogged = true;
+                }
+                return;
+            }
+
+            if (!InstallInlineDetour32(g_OptionsParentCtorDetour,
+                                       kOptionsParentCtorAddr,
+                                       reinterpret_cast<void*>(OptionsParentCtorHook),
+                                       kOptionsParentCtorDetourLen,
+                                       kExpectedOptionsParentCtorBytes,
+                                       sizeof(kExpectedOptionsParentCtorBytes)))
+            {
+                Log(L"[SETTINGSUI] Failed installing options ctor hook at 0x%08X\n",
+                    static_cast<uint32_t>(kOptionsParentCtorAddr));
+                return;
+            }
+
+            g_BzrFn_OptionsParentCtor =
+                reinterpret_cast<FnOptionsInputCtor>(g_OptionsParentCtorDetour.trampoline);
+            g_OptionsParentHookInstalled = (g_BzrFn_OptionsParentCtor != nullptr);
+            if (g_OptionsParentHookInstalled)
+            {
+                Log(L"[SETTINGSUI] Installed options ctor hook entry=0x%08X trampoline=0x%08X\n",
+                    static_cast<uint32_t>(kOptionsParentCtorAddr),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OptionsParentCtorDetour.trampoline)));
+            }
         }
 
         static bool IsIniBoolTrue(const char* value, bool fallback)
@@ -15143,6 +20661,18 @@ namespace BZROpenShim
                     outConfig.scrapSearchRadiusAI = parsedFloat;
                     foundAny = true;
                 }
+                else if (_stricmp(key, "scrapRetargetPeriodAI") == 0 && TryParseFloatValue(value, parsedFloat))
+                {
+                    outConfig.hasScrapRetargetPeriodAI = true;
+                    outConfig.scrapRetargetPeriodAI = parsedFloat;
+                    foundAny = true;
+                }
+                else if (_stricmp(key, "scrapRetargetMinImprovementAI") == 0 && TryParseFloatValue(value, parsedFloat))
+                {
+                    outConfig.hasScrapRetargetMinImprovementAI = true;
+                    outConfig.scrapRetargetMinImprovementAI = parsedFloat;
+                    foundAny = true;
+                }
                 else if (_stricmp(key, "aiName") == 0 || _stricmp(key, "aiName2") == 0)
                 {
                     char normalizedAiName[64] = {};
@@ -15200,18 +20730,24 @@ namespace BZROpenShim
             if (foundAny)
             {
                 outConfig.parsed = true;
-                Log(L"[AIODF] Loaded tuning odf=%hs engage=%hs%.2f weaponMin=%hs%.2f bomberDerived=%hs scrapPathing=%hs pathWeight=%hs%.3f straightWeight=%hs%.3f file=%hs\n",
+                Log(L"[AIODF] Loaded tuning odf=%hs engage=%hs%.2f weaponMin=%hs%.2f retarget=%hs%.2f bomberDerived=%hs scrapPathing=%hs pathWeight=%hs%.3f straightWeight=%hs%.3f scrapRetarget=%hs%.2f improve=%hs%.2f file=%hs\n",
                     odfKey.token,
                     outConfig.hasEngageRangeAI ? "" : "-",
                     outConfig.engageRangeAI,
                     outConfig.hasWeaponRangeMinAI ? "" : "-",
                     outConfig.weaponRangeMinAI,
+                    outConfig.hasRetargetPeriodAI ? "" : "-",
+                    outConfig.retargetPeriodAI,
                     outConfig.derivedBomberWeaponRangeAI ? "true" : "false",
                     outConfig.scrapPathingAI ? "true" : "false",
                     outConfig.hasScrapPathLengthWeightAI ? "" : "-",
                     outConfig.scrapPathLengthWeightAI,
                     outConfig.hasScrapStraightDistanceWeightAI ? "" : "-",
                     outConfig.scrapStraightDistanceWeightAI,
+                    outConfig.hasScrapRetargetPeriodAI ? "" : "default:",
+                    outConfig.scrapRetargetPeriodAI,
+                    outConfig.hasScrapRetargetMinImprovementAI ? "" : "default:",
+                    outConfig.scrapRetargetMinImprovementAI,
                     resolvedPath.string().c_str());
             }
 
@@ -16017,6 +21553,645 @@ namespace BZROpenShim
             void* obj76 = nullptr;
             return TryGetGameObjectObj76(gameObject, obj76) &&
                    TryGetObjectWorldPositionFromObj76(obj76, outPosition);
+        }
+
+        static uint64_t HashMultiplayerFlagPayload(const uint8_t* data, size_t size)
+        {
+            uint64_t hash = 1469598103934665603ull;
+            for (size_t i = 0; i < size; ++i)
+            {
+                hash ^= data[i];
+                hash *= 1099511628211ull;
+            }
+            return hash ? hash : 1ull;
+        }
+
+        static bool TryCopyMultiplayerFlagPayload(
+            void* netPlayer,
+            std::array<uint8_t, kLegacyFlagPayloadBytes>& outPayload)
+        {
+            outPayload.fill(0);
+            if (!netPlayer)
+                return false;
+
+            auto getData = reinterpret_cast<FnNetPlayerGetData>(kNetPlayerGetDataAddr);
+            __try
+            {
+                if (getData)
+                {
+                    auto* vectorBytes = reinterpret_cast<uint8_t*>(
+                        getData(netPlayer, kLegacyFlagDataSlot));
+                    if (vectorBytes)
+                    {
+                        const auto* begin = *reinterpret_cast<uint8_t* const*>(vectorBytes + 0x0);
+                        const auto* end = *reinterpret_cast<uint8_t* const*>(vectorBytes + 0x4);
+                        if (begin && end && end >= begin &&
+                            static_cast<size_t>(end - begin) == outPayload.size())
+                        {
+                            std::memcpy(outPayload.data(), begin, outPayload.size());
+                            return true;
+                        }
+                    }
+                }
+
+                const auto* flagBuffer = *reinterpret_cast<uint8_t* const*>(
+                    reinterpret_cast<const uint8_t*>(netPlayer) + kNetPlayerFlagBufferOffset);
+                if (flagBuffer)
+                {
+                    std::memcpy(outPayload.data(), flagBuffer, outPayload.size());
+                    return true;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+            return false;
+        }
+
+        static bool WriteMultiplayerFlagTga(
+            const std::filesystem::path& path,
+            const std::array<uint8_t, kLegacyFlagPayloadBytes>& payload)
+        {
+            FILE* file = nullptr;
+            if (fopen_s(&file, path.string().c_str(), "wb") != 0 || !file)
+                return false;
+
+            uint8_t header[18] = {};
+            header[2] = 2; // uncompressed true-colour
+            header[12] = static_cast<uint8_t>(kLegacyFlagWidth & 0xFF);
+            header[13] = static_cast<uint8_t>((kLegacyFlagWidth >> 8) & 0xFF);
+            header[14] = static_cast<uint8_t>(kLegacyFlagHeight & 0xFF);
+            header[15] = static_cast<uint8_t>((kLegacyFlagHeight >> 8) & 0xFF);
+            header[16] = 32;
+            header[17] = 8; // eight alpha bits, bottom-left origin like the BMP payload
+
+            bool ok = std::fwrite(header, 1, sizeof(header), file) == sizeof(header);
+            for (int y = 0; ok && y < kLegacyFlagHeight; ++y)
+            {
+                for (int x = 0; x < kLegacyFlagWidth; ++x)
+                {
+                    const uint8_t packed = payload[
+                        static_cast<size_t>(y) * kLegacyFlagRowBytes + static_cast<size_t>(x / 8)];
+                    const bool enabled = (packed & static_cast<uint8_t>(0x80u >> (x & 7))) != 0;
+                    const uint8_t pixel[4] = { 0xFF, 0xFF, 0xFF, enabled ? 0xFFu : 0x00u };
+                    ok = std::fwrite(pixel, 1, sizeof(pixel), file) == sizeof(pixel);
+                    if (!ok)
+                        break;
+                }
+            }
+            std::fclose(file);
+            return ok;
+        }
+
+        // POD-only SEH boundary for Ogre calls. Keep this separate from the
+        // filesystem/string-owning caller so MSVC can unwind that caller.
+        static bool InitialiseMultiplayerFlagResourceGroupSafe(
+            FnOgreGetResourceGroupManager getResourceGroupManager,
+            FnOgreResourceGroupExists resourceGroupExists,
+            FnOgreCreateResourceGroup createResourceGroup,
+            FnOgreAddResourceLocation addResourceLocation,
+            FnOgreInitialiseResourceGroup initialiseResourceGroup,
+            const std::string* directory,
+            const std::string* group)
+        {
+            if (!getResourceGroupManager || !resourceGroupExists || !createResourceGroup ||
+                !addResourceLocation || !initialiseResourceGroup || !directory || !group)
+            {
+                return false;
+            }
+            void* manager = getResourceGroupManager();
+            if (!manager)
+                return false;
+            if (!resourceGroupExists(manager, *group))
+            {
+                createResourceGroup(manager, *group, false);
+                addResourceLocation(manager, *directory, "FileSystem", *group, false, false);
+                initialiseResourceGroup(manager, *group);
+            }
+            return true;
+        }
+
+        static bool EnsureMultiplayerFlagResourceFiles(
+            MultiplayerFlagRenderSet& renderSet,
+            const std::array<uint8_t, kLegacyFlagPayloadBytes>& payload)
+        {
+            if (renderSet.resourcesReady)
+                return true;
+
+            char suffix[32] = {};
+            std::snprintf(suffix, sizeof(suffix), "%016llx",
+                static_cast<unsigned long long>(renderSet.payloadHash));
+            renderSet.materialName = std::string("OpenShimFlag_") + suffix;
+            renderSet.resourceGroup = std::string("OpenShimFlagGroup_") + suffix;
+            renderSet.resourceDirectory =
+                GetGeneratedFlagsDirectoryPath() / "runtime" / suffix;
+
+            std::error_code ec;
+            std::filesystem::create_directories(renderSet.resourceDirectory, ec);
+            if (ec)
+                return false;
+
+            const auto texturePath = renderSet.resourceDirectory / "flag.tga";
+            const auto materialPath = renderSet.resourceDirectory / "flag.material";
+            if (!std::filesystem::exists(texturePath, ec) &&
+                !WriteMultiplayerFlagTga(texturePath, payload))
+            {
+                return false;
+            }
+
+            if (!std::filesystem::exists(materialPath, ec))
+            {
+                FILE* material = nullptr;
+                if (fopen_s(&material, materialPath.string().c_str(), "w") != 0 || !material)
+                    return false;
+                std::fprintf(material,
+                    "material %s\n"
+                    "{\n"
+                    "  technique\n"
+                    "  {\n"
+                    "    pass\n"
+                    "    {\n"
+                    "      lighting off\n"
+                    "      scene_blend alpha_blend\n"
+                    "      depth_check on\n"
+                    "      depth_write off\n"
+                    "      cull_hardware none\n"
+                    "      cull_software none\n"
+                    "      texture_unit\n"
+                    "      {\n"
+                    "        texture flag.tga\n"
+                    "        filtering none\n"
+                    "      }\n"
+                    "    }\n"
+                    "  }\n"
+                    "}\n",
+                    renderSet.materialName.c_str());
+                std::fclose(material);
+            }
+
+            auto getResourceGroupManager = ResolveOgreProc<FnOgreGetResourceGroupManager>(
+                "?getSingletonPtr@ResourceGroupManager@Ogre@@SAPAV12@XZ");
+            auto resourceGroupExists = ResolveOgreProc<FnOgreResourceGroupExists>(
+                "?resourceGroupExists@ResourceGroupManager@Ogre@@QAE_NABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            auto createResourceGroup = ResolveOgreProc<FnOgreCreateResourceGroup>(
+                "?createResourceGroup@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@_N@Z");
+            auto addResourceLocation = ResolveOgreProc<FnOgreAddResourceLocation>(
+                "?addResourceLocation@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@00_N1@Z");
+            auto initialiseResourceGroup = ResolveOgreProc<FnOgreInitialiseResourceGroup>(
+                "?initialiseResourceGroup@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            if (!getResourceGroupManager || !resourceGroupExists || !createResourceGroup ||
+                !addResourceLocation || !initialiseResourceGroup)
+            {
+                return false;
+            }
+
+            const std::string resourceDirectory = renderSet.resourceDirectory.string();
+            try
+            {
+                if (!InitialiseMultiplayerFlagResourceGroupSafe(
+                        getResourceGroupManager,
+                        resourceGroupExists,
+                        createResourceGroup,
+                        addResourceLocation,
+                        initialiseResourceGroup,
+                        &resourceDirectory,
+                        &renderSet.resourceGroup))
+                {
+                    return false;
+                }
+            }
+            catch (const std::exception& ex)
+            {
+                Log(L"[FLAG] Ogre resource initialization failed material=%hs error=%hs\n",
+                    renderSet.materialName.c_str(), ex.what());
+                return false;
+            }
+            catch (...)
+            {
+                Log(L"[FLAG] Ogre resource initialization failed material=%hs (unknown exception)\n",
+                    renderSet.materialName.c_str());
+                return false;
+            }
+            renderSet.resourcesReady = true;
+
+            Log(L"[FLAG] Ogre resources ready hash=%hs material=%hs group=%hs path=%hs\n",
+                suffix,
+                renderSet.materialName.c_str(),
+                renderSet.resourceGroup.c_str(),
+                renderSet.resourceDirectory.string().c_str());
+            return true;
+        }
+
+        static void ForgetMultiplayerFlagSceneResources(const wchar_t* reason)
+        {
+            size_t forgotten = 0;
+            for (auto& pair : g_MultiplayerFlagRenderSets)
+            {
+                MultiplayerFlagRenderSet& renderSet = pair.second;
+                if (renderSet.billboardSet || !renderSet.billboards.empty())
+                    ++forgotten;
+                renderSet.sceneManager = nullptr;
+                renderSet.billboardSet = nullptr;
+                renderSet.billboards.clear();
+                renderSet.usedBillboards = 0;
+            }
+            if (forgotten > 0)
+            {
+                Log(L"[FLAG] Scene teardown (%ls): forgot %zu flag billboard set(s)\n",
+                    reason ? reason : L"<none>", forgotten);
+            }
+        }
+
+        static bool EnsureMultiplayerFlagBillboardSet(MultiplayerFlagRenderSet& renderSet)
+        {
+            void* sceneManager = GetOgreSceneManagerRuntime();
+            if (!sceneManager)
+                return false;
+            if (renderSet.billboardSet && renderSet.sceneManager == sceneManager)
+                return true;
+
+            renderSet.sceneManager = nullptr;
+            renderSet.billboardSet = nullptr;
+            renderSet.billboards.clear();
+            renderSet.usedBillboards = 0;
+
+            auto getRootSceneNode = ResolveOgreProc<FnOgreGetRootSceneNode>(
+                "?getRootSceneNode@SceneManager@Ogre@@UAEPAVSceneNode@2@XZ");
+            auto createBillboardSet = ResolveOgreProc<FnOgreCreateBillboardSet>(
+                "?createBillboardSet@SceneManager@Ogre@@UAEPAVBillboardSet@2@I@Z");
+            auto attachObject = ResolveOgreProc<FnOgreAttachObject>(
+                "?attachObject@SceneNode@Ogre@@UAEXPAVMovableObject@2@@Z");
+            auto setWorldSpace = ResolveOgreProc<FnOgreSetBillboardsInWorldSpace>(
+                "?setBillboardsInWorldSpace@BillboardSet@Ogre@@UAEX_N@Z");
+            auto setDimensions = ResolveOgreProc<FnOgreSetDefaultDimensions>(
+                "?setDefaultDimensions@BillboardSet@Ogre@@UAEXMM@Z");
+            auto setMaterialName = ResolveOgreProc<FnOgreSetBillboardMaterialName>(
+                "?setMaterialName@BillboardSet@Ogre@@UAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@0@Z");
+            if (!getRootSceneNode || !createBillboardSet || !attachObject ||
+                !setWorldSpace || !setDimensions || !setMaterialName)
+            {
+                return false;
+            }
+
+            __try
+            {
+                void* rootNode = getRootSceneNode(sceneManager);
+                void* billboardSet = createBillboardSet(sceneManager, 16);
+                if (!rootNode || !billboardSet)
+                    return false;
+                setWorldSpace(billboardSet, true);
+                setDimensions(billboardSet, kMultiplayerFlagWidth, kMultiplayerFlagHeight);
+                setMaterialName(billboardSet, renderSet.materialName, renderSet.resourceGroup);
+                attachObject(rootNode, billboardSet);
+                renderSet.sceneManager = sceneManager;
+                renderSet.billboardSet = billboardSet;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                renderSet.sceneManager = nullptr;
+                renderSet.billboardSet = nullptr;
+                return false;
+            }
+        }
+
+        static bool IsMultiplayerFlagEligibleObject(void* gameObject)
+        {
+            if (!gameObject)
+                return false;
+            __try
+            {
+                const auto* bytes = reinterpret_cast<const uint8_t*>(gameObject);
+                const auto* objectClass = *reinterpret_cast<uint8_t* const*>(
+                    bytes + kGameObjectClassOffset);
+                const auto* obj = *reinterpret_cast<uint8_t* const*>(
+                    bytes + kGameObjectObjOffset);
+                if (!objectClass || !obj)
+                    return false;
+                const int classType = *reinterpret_cast<const int*>(
+                    objectClass + kObjectClassTypeOffset);
+                if (classType != 1 && classType != 2 && classType != 4 && classType != 6)
+                    return false;
+                const uint32_t stateFlags = *reinterpret_cast<const uint32_t*>(
+                    obj + kObjStateFlagsOffset);
+                return (stateFlags & kFlagObjectExcludedStateMask) == 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static float GetMultiplayerFlagObjectLift(void* gameObject)
+        {
+            auto getSphere = reinterpret_cast<FnGameObjectGetSphere>(kGameObjectGetSphereAddr);
+            if (!gameObject || !getSphere)
+                return kMultiplayerFlagMinimumLift;
+            __try
+            {
+                const auto* sphere = reinterpret_cast<const uint8_t*>(getSphere(gameObject));
+                if (!sphere)
+                    return kMultiplayerFlagMinimumLift;
+                const float radius = *reinterpret_cast<const float*>(sphere + 0x0C);
+                if (!std::isfinite(radius) || radius <= 0.0f || radius > 100.0f)
+                    return kMultiplayerFlagMinimumLift;
+                return (std::max)(radius, kMultiplayerFlagMinimumLift);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return kMultiplayerFlagMinimumLift;
+            }
+        }
+
+        static bool ConvertMultiplayerFlagPointToRenderSpace(float (&position)[3])
+        {
+            __try
+            {
+                const float* origin = reinterpret_cast<const float*>(kGogWorldRenderOriginAddr);
+                position[0] -= origin[0];
+                position[1] -= origin[1];
+                position[2] = -position[2] - origin[2];
+                return std::isfinite(position[0]) &&
+                       std::isfinite(position[1]) &&
+                       std::isfinite(position[2]);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void HideUnusedMultiplayerFlagBillboards()
+        {
+            auto setPosition = ResolveOgreProc<FnOgreSetBillboardPosition>(
+                "?setPosition@Billboard@Ogre@@QAEXMMM@Z");
+            if (!setPosition)
+                return;
+            for (auto& pair : g_MultiplayerFlagRenderSets)
+            {
+                MultiplayerFlagRenderSet& renderSet = pair.second;
+                for (size_t i = renderSet.usedBillboards; i < renderSet.billboards.size(); ++i)
+                {
+                    __try
+                    {
+                        setPosition(renderSet.billboards[i], 0.0f, kMultiplayerFlagHiddenY, 0.0f);
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                    }
+                }
+            }
+        }
+
+        static bool TryReadMultiplayerFlagRuntimeContext(
+            void*& outUserObject,
+            int& outLocalTeam)
+        {
+            outUserObject = nullptr;
+            outLocalTeam = 0;
+            __try
+            {
+                outUserObject = *ResolveMainModulePtr<void*>(kGameObjectUserObjectRva);
+                outLocalTeam = *ResolveMainModulePtr<int>(kGameObjectUserTeamNumberRva);
+                return outUserObject != nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outUserObject = nullptr;
+                outLocalTeam = 0;
+                return false;
+            }
+        }
+
+        static void* TryCreateMultiplayerFlagBillboardSafe(
+            FnOgreCreateBillboard createBillboard,
+            void* billboardSet,
+            const OgreColourValue& colour)
+        {
+            if (!createBillboard || !billboardSet)
+                return nullptr;
+            __try
+            {
+                return createBillboard(
+                    billboardSet, 0.0f, kMultiplayerFlagHiddenY, 0.0f, colour);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
+
+        static bool TryUpdateMultiplayerFlagBillboardSafe(
+            FnOgreSetBillboardColour setColour,
+            FnOgreSetBillboardPosition setPosition,
+            void* billboard,
+            const OgreColourValue& colour,
+            const float (&position)[3])
+        {
+            if (!setColour || !setPosition || !billboard)
+                return false;
+            __try
+            {
+                setColour(billboard, colour);
+                setPosition(billboard, position[0], position[1], position[2]);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void RenderMultiplayerFlags(void* /*camera*/)
+        {
+            if (!ShouldEnableMultiplayerFlagUi())
+                return;
+
+            for (auto& pair : g_MultiplayerFlagRenderSets)
+                pair.second.usedBillboards = 0;
+
+            std::array<uint64_t, 16> teamHashes = {};
+            std::array<std::array<uint8_t, kLegacyFlagPayloadBytes>, 16> teamPayloads = {};
+            auto** playersByTeam = reinterpret_cast<void**>(kNetPlayerByTeamAddr);
+            for (int team = 1; team < 16; ++team)
+            {
+                void* player = playersByTeam[team];
+                if (!player || !TryCopyMultiplayerFlagPayload(player, teamPayloads[team]))
+                    continue;
+                teamHashes[team] = HashMultiplayerFlagPayload(
+                    teamPayloads[team].data(), teamPayloads[team].size());
+            }
+
+            void** beginPtr = nullptr;
+            void** endPtr = nullptr;
+            if (!TryGetGameObjectListRange(&beginPtr, &endPtr))
+            {
+                HideUnusedMultiplayerFlagBillboards();
+                return;
+            }
+
+            void* userObject = nullptr;
+            int localTeam = 0;
+            float userPosition[3] = {};
+            if (!TryReadMultiplayerFlagRuntimeContext(userObject, localTeam) ||
+                !TryGetGameObjectWorldPosition(userObject, userPosition))
+            {
+                HideUnusedMultiplayerFlagBillboards();
+                return;
+            }
+
+            auto createBillboard = ResolveOgreProc<FnOgreCreateBillboard>(
+                "?createBillboard@BillboardSet@Ogre@@QAEPAVBillboard@2@MMMABVColourValue@2@@Z");
+            auto setPosition = ResolveOgreProc<FnOgreSetBillboardPosition>(
+                "?setPosition@Billboard@Ogre@@QAEXMMM@Z");
+            auto setColour = ResolveOgreProc<FnOgreSetBillboardColour>(
+                "?setColour@Billboard@Ogre@@QAEXABVColourValue@2@@Z");
+            if (!createBillboard || !setPosition || !setColour)
+            {
+                HideUnusedMultiplayerFlagBillboards();
+                return;
+            }
+
+            const size_t totalObjects = static_cast<size_t>(endPtr - beginPtr);
+            const size_t objectLimit = (std::min)(totalObjects, kMultiplayerFlagMaxObjects);
+            for (size_t i = 0; i < objectLimit; ++i)
+            {
+                void* gameObject = beginPtr[i];
+                if (!gameObject || gameObject == userObject || !IsMultiplayerFlagEligibleObject(gameObject))
+                    continue;
+                const int team = GetGameObjectTeamForLog(gameObject);
+                if (team <= 0 || team >= 16 || teamHashes[team] == 0)
+                    continue;
+
+                float position[3] = {};
+                if (!TryGetGameObjectWorldPosition(gameObject, position))
+                    continue;
+                const float dx = position[0] - userPosition[0];
+                const float dy = position[1] - userPosition[1];
+                const float dz = position[2] - userPosition[2];
+                if ((dx * dx + dy * dy + dz * dz) >
+                    (kMultiplayerFlagRange * kMultiplayerFlagRange))
+                {
+                    continue;
+                }
+                if (!HasTerrainLineOfSight(
+                        userPosition[0], userPosition[1], userPosition[2],
+                        position[0], position[1], position[2]))
+                {
+                    continue;
+                }
+
+                position[1] += GetMultiplayerFlagObjectLift(gameObject);
+                if (!ConvertMultiplayerFlagPointToRenderSpace(position))
+                    continue;
+
+                const uint64_t hash = teamHashes[team];
+                auto [it, inserted] = g_MultiplayerFlagRenderSets.try_emplace(hash);
+                MultiplayerFlagRenderSet& renderSet = it->second;
+                if (inserted)
+                    renderSet.payloadHash = hash;
+                if (!EnsureMultiplayerFlagResourceFiles(renderSet, teamPayloads[team]) ||
+                    !EnsureMultiplayerFlagBillboardSet(renderSet))
+                {
+                    continue;
+                }
+
+                // Legacy used green for the local team and red for enemies.
+                // The alpha-mask texture preserves each team's distinct pattern.
+                const OgreColourValue colour =
+                    (team == localTeam)
+                        ? OgreColourValue{ 0.20f, 1.00f, 0.20f, 1.00f }
+                        : OgreColourValue{ 1.00f, 0.20f, 0.20f, 1.00f };
+
+                void* billboard = nullptr;
+                if (renderSet.usedBillboards < renderSet.billboards.size())
+                {
+                    billboard = renderSet.billboards[renderSet.usedBillboards];
+                }
+                else
+                {
+                    billboard = TryCreateMultiplayerFlagBillboardSafe(
+                        createBillboard, renderSet.billboardSet, colour);
+                    if (billboard)
+                        renderSet.billboards.push_back(billboard);
+                }
+                if (!billboard)
+                    continue;
+
+                if (TryUpdateMultiplayerFlagBillboardSafe(
+                        setColour, setPosition, billboard, colour, position))
+                    ++renderSet.usedBillboards;
+            }
+
+            HideUnusedMultiplayerFlagBillboards();
+            if (!g_MultiplayerFlagRendererLoggedReady && !g_MultiplayerFlagRenderSets.empty())
+            {
+                g_MultiplayerFlagRendererLoggedReady = true;
+                Log(L"[FLAG] Ogre multiplayer vehicle flag renderer active sets=%u range=%.1f\n",
+                    static_cast<unsigned>(g_MultiplayerFlagRenderSets.size()),
+                    static_cast<double>(kMultiplayerFlagRange));
+            }
+        }
+
+        static void __fastcall MultiplayerFlagSubmitHook(
+            void* flagDisplay,
+            void* /*unusedEdx*/,
+            void* camera)
+        {
+            if (g_BzrFn_FlagDisplaySubmitOriginal)
+                g_BzrFn_FlagDisplaySubmitOriginal(flagDisplay, camera);
+            RenderMultiplayerFlags(camera);
+        }
+
+        static void InstallMultiplayerFlagRenderHookIfPossible()
+        {
+            if (!ShouldEnableMultiplayerFlagUi() || g_MultiplayerFlagRenderHookInstalled)
+                return;
+
+            __try
+            {
+                void* current = *reinterpret_cast<void**>(kFlagDisplaySubmitVtableSlotAddr);
+                if (current == reinterpret_cast<void*>(MultiplayerFlagSubmitHook))
+                {
+                    g_MultiplayerFlagRenderHookInstalled = true;
+                    return;
+                }
+                if (current != reinterpret_cast<void*>(kFlagDisplaySubmitAddr))
+                {
+                    if (!g_MultiplayerFlagRenderHookFailureLogged)
+                    {
+                        Log(L"[FLAG] Submit hook skipped: vtable slot=0x%08X current=0x%08X expected=0x%08X\n",
+                            static_cast<uint32_t>(kFlagDisplaySubmitVtableSlotAddr),
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
+                            static_cast<uint32_t>(kFlagDisplaySubmitAddr));
+                        g_MultiplayerFlagRenderHookFailureLogged = true;
+                    }
+                    return;
+                }
+
+                g_BzrFn_FlagDisplaySubmitOriginal =
+                    reinterpret_cast<FnFlagDisplaySubmit>(current);
+                if (!WritePointerValue(
+                        kFlagDisplaySubmitVtableSlotAddr,
+                        reinterpret_cast<void*>(MultiplayerFlagSubmitHook)))
+                {
+                    return;
+                }
+                g_MultiplayerFlagRenderHookInstalled = true;
+                Log(L"[FLAG] Installed Redux FlagDisplay::Submit Ogre renderer hook slot=0x%08X original=0x%08X\n",
+                    static_cast<uint32_t>(kFlagDisplaySubmitVtableSlotAddr),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)));
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                if (!g_MultiplayerFlagRenderHookFailureLogged)
+                {
+                    Log(L"[FLAG] Submit hook install fault code=0x%08X\n",
+                        static_cast<uint32_t>(GetExceptionCode()));
+                    g_MultiplayerFlagRenderHookFailureLogged = true;
+                }
+            }
         }
 
         static bool TryGetOrdnanceWorldPosition(void* ordnance, float (&outPosition)[3])
@@ -17025,6 +23200,12 @@ namespace BZROpenShim
             char previousQueuedPath[MAX_PATH] = {};
             strncpy_s(previousQueuedPath, queuedPath ? queuedPath : "", _TRUNCATE);
 
+            // Restart state 6 skips parts of normal mission teardown. Drop all
+            // shim-owned Ogre scene references before asking the shell to enter
+            // that path; otherwise the render hook can submit a freed SubEntity
+            // while the loading screen is still drawing frames.
+            ForgetAllChunkProxySceneResources(L"restart mission");
+
             *missionSaveFlag = 0;
             *oldMissionMode = 0;
             const bool refreshedQueuedPath = RefreshQueuedPathFromMissionName();
@@ -17125,6 +23306,12 @@ namespace BZROpenShim
                                                 uint32_t key,
                                                 uint32_t keyCode)
     {
+        // A stock ESC backs out of the settings page without our Back button;
+        // hand the host screen back to the binding UI before the stock handler
+        // navigates away.
+        if (g_ShimSettingsPageActive && key == VK_ESCAPE)
+            DeactivateShimSettingsPage();
+
         if (HandleCapturedInputBindingKey(thisPtr, key, keyCode))
             return true;
 
@@ -17132,6 +23319,17 @@ namespace BZROpenShim
             return g_BzrFn_OptionsInputKeyReleased(thisPtr, key, keyCode);
 
         return false;
+    }
+
+    void* __fastcall OptionsParentCtorHook(void* thisPtr, void* /*edx*/)
+    {
+        void* screen = thisPtr;
+
+        if (g_BzrFn_OptionsParentCtor)
+            screen = g_BzrFn_OptionsParentCtor(thisPtr);
+
+        OnOptionsParentCtorScaffold(screen);
+        return screen;
     }
 
     void ResolveBzrHooks(bool isSteam)
@@ -17162,8 +23360,16 @@ namespace BZROpenShim
         g_BzrFn_RangeResultsGetNext = nullptr;
         g_BzrFn_OverlayCtor = nullptr;
         g_BzrFn_UiSetActive = nullptr;
-        g_BzrFn_OptionsInputCtor = nullptr;
-        g_BzrFn_OptionsInputKeyReleased = nullptr;
+        g_BzrFn_OptionsInputCtor = g_OptionsInputPopulateUiDetour.trampoline
+            ? reinterpret_cast<FnOptionsInputCtor>(g_OptionsInputPopulateUiDetour.trampoline)
+            : nullptr;
+        g_BzrFn_OptionsInputKeyReleased = g_OptionsInputKeyReleasedDetour.trampoline
+            ? reinterpret_cast<FnOptionsInputKeyReleased>(g_OptionsInputKeyReleasedDetour.trampoline)
+            : nullptr;
+        g_BzrFn_OptionsParentCtor = g_OptionsParentCtorDetour.trampoline
+            ? reinterpret_cast<FnOptionsInputCtor>(g_OptionsParentCtorDetour.trampoline)
+            : nullptr;
+        g_OptionsParentHookInstalled = (g_BzrFn_OptionsParentCtor != nullptr);
         g_BzrFn_KeyConfigSetKey = nullptr;
         g_BzrFn_WriteInputMapKey = nullptr;
         g_BzrFn_MapKeyNameFromCode = nullptr;
@@ -17187,10 +23393,16 @@ namespace BZROpenShim
         g_EngineFlamePrimaryManager = nullptr;
         g_EngineFlameSecondaryManager = nullptr;
         g_EngineFlameVtableHooksInstalled = false;
+        g_BzrFn_FlagDisplaySubmitOriginal = nullptr;
+        g_MultiplayerFlagRenderHookInstalled = false;
+        g_MultiplayerFlagRenderHookFailureLogged = false;
+        g_MultiplayerFlagRendererLoggedReady = false;
+        g_MultiplayerFlagRenderSets.clear();
         g_EngineFlameVariantsInitialized = false;
         g_EngineFlameVariantsInitAttempted = false;
         g_EngineFlamePrimaryRedTexture = 0;
         g_EngineFlamePrimaryGreenTexture = 0;
+        g_EngineFlamePrimaryPurpleTexture = 0;
         g_LoggedEngineFlameTargetFailure = false;
         g_LoggedEngineFlameVtableHook = false;
         g_BzrFn_ProducerModeCallOriginal = nullptr;
@@ -17201,9 +23413,10 @@ namespace BZROpenShim
         g_BzrFn_NetPlayerSetData = nullptr;
         g_InputBindingUiScaffoldInitialized = false;
         g_InputBindingUiScaffoldLogged = false;
-        g_InputBindingUiPopulateHookInstallAttempted = false;
-        g_InputBindingUiPopulateHookInstalled = false;
-        g_InputBindingUiKeyReleasedHookInstalled = false;
+        g_InputBindingUiPopulateHookInstalled =
+            (g_OptionsInputPopulateUiDetour.trampoline != nullptr);
+        g_InputBindingUiKeyReleasedHookInstalled =
+            (g_OptionsInputKeyReleasedDetour.trampoline != nullptr);
         g_InputBindingUiPopulateHookMismatchLogged = false;
         g_CareerStatsMpHookInstalled = (g_RecordDeathDetour.trampoline != nullptr);
         g_CareerStatsMpHookInstallAttempted = g_CareerStatsMpHookInstalled;
@@ -17227,6 +23440,14 @@ namespace BZROpenShim
         g_LastAppliedProducerBuildMenu = 0;
         g_LastUnknownProducerVft = 0;
         g_CalcRangeCraftHookInstalled = false;
+        g_ScrapPathScoreHookInstalled = false;
+        g_BzrFn_RecycleTaskDoGotoScrap =
+            g_RecycleTaskDoGotoScrapDetour.trampoline
+                ? reinterpret_cast<FnRecycleTaskDoGotoScrap>(
+                    g_RecycleTaskDoGotoScrapDetour.trampoline)
+                : nullptr;
+        g_ScrapRetargetHookInstalled =
+            (g_BzrFn_RecycleTaskDoGotoScrap != nullptr);
         g_BzrFn_CalcRangeCraft = nullptr;
         g_BzrFn_AttackTaskDoState = g_AttackTaskDoStateDetour.trampoline
             ? reinterpret_cast<FnAttackTaskDoState>(g_AttackTaskDoStateDetour.trampoline)
@@ -17245,6 +23466,11 @@ namespace BZROpenShim
         g_ConstructorRemoteBuildFixMismatchLogged = false;
         g_BzrFn_OffensiveProcessDoSubTask = nullptr;
         g_BzrFn_GunTowerProcessDoSubTask = nullptr;
+        g_BzrFn_TurretTankProcessDoSubTask = nullptr;
+        g_BzrFn_GetGameTime = nullptr;
+        g_BzrFn_FindPlanForObject = nullptr;
+        g_BzrFn_AiPathGetLength = nullptr;
+        g_BzrFn_AiPathDelete = nullptr;
         g_BzrFn_AIUnitRemove = nullptr;
         g_BzrFn_AIBuildConstructionEnd = nullptr;
         g_BzrFn_AIBuildReservedAreaRemove = nullptr;
@@ -17268,7 +23494,21 @@ namespace BZROpenShim
         g_ShieldTowerSimulateHookInstalled = false;
         g_MagnetMineSimulateHookInstalled = false;
         g_ProximityMineSimulateHookInstalled = false;
-        g_SprayBuildingSimulateHookInstalled = false;
+        g_BzrFn_ScriptCanBuildOriginal = g_ScriptCanBuildDetour.trampoline
+            ? reinterpret_cast<FnScriptProducerPredicate>(g_ScriptCanBuildDetour.trampoline)
+            : nullptr;
+        g_BzrFn_ScriptIsBusyOriginal = g_ScriptIsBusyDetour.trampoline
+            ? reinterpret_cast<FnScriptProducerPredicate>(g_ScriptIsBusyDetour.trampoline)
+            : nullptr;
+        g_ProducerScriptPredicateHooksInstalled =
+            g_BzrFn_ScriptCanBuildOriginal && g_BzrFn_ScriptIsBusyOriginal;
+		g_BriefingScrollFixInstalled = false;
+		g_MultiRenderCountClampLogBudget = 8;
+		g_MagnetZeroRangeLogBudget = 8;
+		g_SprayBuildingSimulateHookInstalled = false;
+		g_TugCargoPostLoadFixInstalled = false;
+		g_TugCargoPostLoadLogBudget = 16;
+		g_ApcAlliedTargetDeployFixInstalled = false;
         g_AttackRevealTraceBudget = kAttackRevealTraceBudgetDefault;
         g_HudSpriteRectTableBase = nullptr;
         g_HudSpriteRectTableDiscoveryAttempted = false;
@@ -17284,20 +23524,29 @@ namespace BZROpenShim
         g_HudSpriteFallbackDiscoveryBackoffMs = 0;
         g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
         g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
+        g_HowitzerUndeployedRetaliationFixEnabled =
+            !(EnvFlagEnabled("OPENSHIM_DISABLE_HOWITZER_DEPLOY_FIX") ||
+              EnvFlagEnabled("BZR_DISABLE_HOWITZER_DEPLOY_FIX"));
         g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
         g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
         g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
         g_AttackRevealEnabled = kAttackRevealEnabledDefault;
+        // Registered features revert to their resting state (jump-snipe enable
+        // -> default + MP-gated re-apply; Display prefs -> openshim.ini baseline).
+        RevertRegisteredFeaturesToBaseline();
         g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
         g_SplinterUndeadFixEnabled = kSplinterUndeadFixEnabledDefault;
         g_SplinterUndeadTraceBudget = kSplinterUndeadTraceBudgetDefault;
         g_TurretAimPitchMultiplier = 0.5f;
         g_TurretAimPitchMultiplierEnhanced = 0.95f;
-        g_RetargetPeriodNextForceMsByProcess.clear();
+        g_RetargetPeriodStateByProcess.clear();
+        g_ScrapPathFailuresByObject.clear();
+        g_ScrapRetargetStateByTask.clear();
         g_AiUnitTuningOverridesByObject.clear();
         g_CombatKiteStateByObject.clear();
         g_AiUnitTuningTraceBudget = 64;
         g_CombatKiteTraceBudget = 256;
+        g_ScrapPathTraceBudget = 128;
         g_VehicleSkinningTraceEnabled = false;
         g_VehicleSkinningTraceIntervalMs = kVehicleSkinningTraceIntervalMsDefault;
         g_VehicleSkinningTraceLastTick = 0;
@@ -17325,6 +23574,7 @@ namespace BZROpenShim
         g_BzrFn_SetTextureOver = reinterpret_cast<FnUiSetStr>(0x007C2F10);
         g_BzrFn_SetTextureOn = reinterpret_cast<FnUiSetStr>(0x007C2E80);
         g_BzrFn_SetButtonLabel = reinterpret_cast<FnUiSetStr>(0x007C2950);
+        g_BzrFn_SetButtonTextScale = reinterpret_cast<FnUiSetFloat>(0x007C30E0);
         g_BzrFn_SetTooltip = reinterpret_cast<FnUiSetStr>(0x007CC660);
         g_BzrFn_LabelState = reinterpret_cast<FnUiSetInt>(0x007CC5C0);
         g_BzrFn_SetOnClick = reinterpret_cast<FnUiSetCb>(0x007C23E0);
@@ -17400,16 +23650,34 @@ namespace BZROpenShim
 
         InstallJumpSnipingProbeIfRequested();
         InstallCareerStatsMpHookIfPossible();
+        InstallUnitVoQueueHooksIfPossible();
         InstallParticleTemplateDedupeHookIfPossible();
         InstallSceneTeardownForgetHooksIfPossible();
+        InstallMultiplayerFlagRenderHookIfPossible();
         StartCareerStatsMpSessionWorker();
         InstallShieldTowerTeamFilterHookIfPossible();
         InstallMineTeamFilterHooksIfPossible();
-        InstallSplinterUndeadFixIfPossible();
-        // The full ArtilleryProcess::DoAttack replay remains disabled. Even
-        // with the Redux four-word ABI preserved, replaying this large stateful
-        // routine can corrupt later simulator state. Keep the independent
-        // carrier-bias hooks, but do not install this experimental detour.
+        g_MagnetZeroRangeGuardEnabled =
+            !(EnvFlagEnabled("OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX") ||
+              EnvFlagEnabled("BZR_DISABLE_MAGNET_ZERO_RANGE_FIX"));
+		g_BriefingScrollFixEnabled =
+			!(EnvFlagEnabled("OPENSHIM_DISABLE_BRIEFING_SCROLL_FIX") ||
+			  EnvFlagEnabled("BZR_DISABLE_BRIEFING_SCROLL_FIX"));
+		g_MultiRenderCountClampEnabled =
+			!(EnvFlagEnabled("OPENSHIM_DISABLE_RENDERCOUNT_CLAMP") ||
+			  EnvFlagEnabled("BZR_DISABLE_RENDERCOUNT_CLAMP"));
+		g_TugCargoPostLoadFixEnabled =
+			!(EnvFlagEnabled("OPENSHIM_DISABLE_TUG_CARGO_FIX") ||
+			  EnvFlagEnabled("BZR_DISABLE_TUG_CARGO_FIX"));
+		g_ApcAlliedTargetDeployFixEnabled =
+			!(EnvFlagEnabled("OPENSHIM_DISABLE_APC_DEPLOY_FIX") ||
+			  EnvFlagEnabled("BZR_DISABLE_APC_DEPLOY_FIX"));
+		InstallProducerScriptPredicateHooksIfPossible();
+		InstallBriefingScrollFixIfPossible();
+		InstallMultiRenderCountClampIfPossible();
+		InstallSplinterUndeadFixIfPossible();
+		InstallTugCargoPostLoadFixIfPossible();
+		InstallApcAlliedTargetDeployFixIfPossible();
 
         if (g_IsSteamExe)
         {
@@ -17600,17 +23868,26 @@ namespace BZROpenShim
         g_ChunkPayloadResolveFailureLogCache.clear();
         g_ChunkResolvedBindingCache.clear();
         g_ChunkResolvedBindingLastPruneTick = 0;
-        float turretAimPitchMultiplier = g_TurretAimPitchMultiplierEnhanced;
-        if (TryGetEnvFloat("OPENSHIM_TURRET_AIM_PITCH_MULTIPLIER", turretAimPitchMultiplier) ||
-            TryGetEnvFloat("OPENSHIM_TURRET_PITCH_MULTIPLIER", turretAimPitchMultiplier))
+        InitializeGlobalImprovementConfig();
+        bool commandLineDisablesRawInput = false;
+        if (const char* commandLine = GetCommandLineA())
         {
-            g_TurretAimPitchMultiplierEnhanced = ClampTurretAimPitchMultiplier(turretAimPitchMultiplier);
+            std::string normalizedCommandLine(commandLine);
+            std::transform(normalizedCommandLine.begin(),
+                           normalizedCommandLine.end(),
+                           normalizedCommandLine.begin(),
+                           [](unsigned char ch) {
+                               return static_cast<char>(std::tolower(ch));
+                           });
+            commandLineDisablesRawInput =
+                normalizedCommandLine.find("norawinput") != std::string::npos;
         }
-        else
-        {
-            g_TurretAimPitchMultiplierEnhanced = 0.95f;
-        }
-        g_TurretAimPitchMultiplier = g_TurretAimPitchEnabled ? g_TurretAimPitchMultiplierEnhanced : 0.5f;
+        const bool rawInputDefaultEnabled =
+            !commandLineDisablesRawInput &&
+            !(EnvFlagEnabled("OPENSHIM_DISABLE_RAW_MOUSE_INPUT") ||
+              EnvFlagEnabled("BZR_DISABLE_RAW_MOUSE_INPUT"));
+        if (rawInputDefaultEnabled && !GetRawMouseInputEnabledFromBridge())
+            SetRawMouseInputEnabledFromBridge(true);
         LogChunkDiagnostic("chunk", L"[CHUNK] Force-first-geo fallback: %hs\n",
             g_EnableChunkRenderFallback ? "enabled" : "disabled");
         LogChunkDiagnostic("chunk", L"[CHUNK] Trace logging: %hs%s budget=%ld entryLimit=%u\n",
@@ -17651,6 +23928,23 @@ namespace BZROpenShim
             static_cast<uint32_t>(GetMainModuleBase() + kViewRecordRva),
             static_cast<uint32_t>(GetMainModuleBase() + kGameObjectObjectListRva),
             static_cast<uint32_t>(GetMainModuleBase() + kGameObjectUserObjectRva));
+        Log(L"[MAGNET] Zero/non-finite range guard: %hs hook=%hs\n",
+            g_MagnetZeroRangeGuardEnabled ? "enabled" : "disabled",
+            g_MagnetMineSimulateHookInstalled ? "installed" : "pending");
+        Log(L"[RAWINPUT] Raw mouse input: %hs (stock command-line tokens: rawinput/norawinput)\n",
+            GetRawMouseInputEnabledFromBridge() ? "enabled" : "disabled");
+        Log(L"[PRODSCRIPT] PROD CanBuild/IsBusy fix: %hs\n",
+            g_ProducerScriptPredicateHooksInstalled ? "installed" : "pending");
+		Log(L"[ARTYDEPLOY] Undeployed howitzer sniper-retaliation fix: %hs offensiveSubTaskHook=%hs\n",
+			g_HowitzerUndeployedRetaliationFixEnabled ? "enabled" : "disabled",
+			g_RetargetPeriodHooksInstalled ? "installed" : "pending");
+        Log(L"[BRIEFSCROLL] Mission briefing/archive scroll fix: %hs hook=%hs\n",
+            g_BriefingScrollFixEnabled ? "enabled" : "disabled",
+            g_BriefingScrollFixInstalled ? "installed" : "pending");
+        Log(L"[RENDERCOUNT] draw_multi renderCount clamp: %hs hook=%hs max=%d\n",
+            g_MultiRenderCountClampEnabled ? "enabled" : "disabled",
+            g_MultiRenderCountClampInstalled ? "installed" : "pending",
+            kMultiRenderCountMax);
         Log(L"[TURRET] Aim pitch multiplier: %.3f%s\n",
             static_cast<double>(g_TurretAimPitchMultiplier),
             g_TurretAimPitchMultiplier >= 0.999f ? " (full range)" : "");
@@ -17665,7 +23959,17 @@ namespace BZROpenShim
             g_AttackRevealTraceBudget);
         InitializeUnderAttackAlertConfig();
         InitializeTargetReticlePopupConfig();
+        InitializeGlobalTurboConfig();
+        InitializeHeadlightConfig();
+        InstallEmissionLightFixIfPossible();
+        InitializeJetFlamesConfig();
+        InitializeUnitVoConfig();
         EnsureInputBindingPopulateHookScaffold();
+        EnsureOptionsParentCtorHookScaffold();
+        Log(L"[SETTINGSUI] Settings UI: %hs\n",
+            ShouldEnableShimSettingsUi()
+                ? (g_OptionsParentHookInstalled ? "enabled" : "enabled (hook pending)")
+                : "disabled");
         Log(L"[MAPTRACE] Map refresh trace: %hs\n",
             (EnvFlagEnabled("OPENSHIM_TRACE_MAP_REFRESH") ||
              EnvFlagEnabled("OPENSHIM_TRACE_STEAM_MAP_REFRESH")) ? "enabled" : "disabled");
@@ -17678,7 +23982,7 @@ namespace BZROpenShim
         EnsureBansConfigLoaded();
         {
             const std::string bansConfigPath = GetBansConfigPath().string();
-            Log(L"[BAN] Experimental bans path=%hs entries=%u\n",
+            Log(L"[BAN] Ban list path=%hs entries=%u\n",
                 bansConfigPath.c_str(),
                 static_cast<unsigned>(g_BanRecords.size()));
         }
@@ -17687,16 +23991,24 @@ namespace BZROpenShim
     void RetryDeferredRuntimeHooks()
     {
         InstallJumpSnipingProbeIfRequested();
+        InstallUnitTurboHooksIfPossible();
         InstallCareerStatsMpHookIfPossible();
+        InstallUnitVoQueueHooksIfPossible();
         InstallParticleTemplateDedupeHookIfPossible();
+        InstallEmissionLightFixIfPossible();
         InstallSceneTeardownForgetHooksIfPossible();
+        InstallMultiplayerFlagRenderHookIfPossible();
         InstallShieldTowerTeamFilterHookIfPossible();
         InstallMineTeamFilterHooksIfPossible();
-        InstallSplinterUndeadFixIfPossible();
-        // Intentionally do not install the experimental full DoAttack replay.
+        InstallProducerScriptPredicateHooksIfPossible();
+		InstallBriefingScrollFixIfPossible();
+		InstallSplinterUndeadFixIfPossible();
+		InstallTugCargoPostLoadFixIfPossible();
+		InstallApcAlliedTargetDeployFixIfPossible();
         InstallAiTuningHooksIfPossible();
         InstallConstructorRemoteBuildFixIfPossible();
         EnsureInputBindingPopulateHookScaffold();
+        EnsureOptionsParentCtorHookScaffold();
     }
 
     bool AreInputBindingUiHooksInstalled()
@@ -17741,6 +24053,67 @@ namespace BZROpenShim
         return SetTargetReticlePopupModeInternal(ClampTargetReticlePopupMode(mode), true);
     }
 
+    uint32_t GetUnitVoThrottleFromBridge()
+    {
+        std::lock_guard<std::mutex> lock(g_UnitVoMutex);
+        return g_UnitVoThrottleMs;
+    }
+
+    bool SetUnitVoThrottleFromBridge(uint32_t milliseconds)
+    {
+        if (milliseconds > kUnitVoThrottleMsMax)
+            return false;
+        std::lock_guard<std::mutex> lock(g_UnitVoMutex);
+        g_UnitVoThrottleMs = milliseconds;
+        g_UnitVoLastAttemptTick = 0;
+        return true;
+    }
+
+    uint32_t GetUnitVoQueueDepthFromBridge()
+    {
+        std::lock_guard<std::mutex> lock(g_UnitVoMutex);
+        return g_UnitVoQueueDepthLimit;
+    }
+
+    bool SetUnitVoQueueDepthFromBridge(uint32_t depth)
+    {
+        if (depth > kUnitVoQueueDepthMax)
+            return false;
+        std::lock_guard<std::mutex> lock(g_UnitVoMutex);
+        g_UnitVoQueueDepthLimit = depth;
+        return true;
+    }
+
+    uint32_t GetUnitVoQueueStaleMsFromBridge()
+    {
+        std::lock_guard<std::mutex> lock(g_UnitVoMutex);
+        return g_UnitVoQueueStaleMs;
+    }
+
+    bool SetUnitVoQueueStaleMsFromBridge(uint32_t milliseconds)
+    {
+        if (milliseconds > kUnitVoQueueStaleMsMax)
+            return false;
+        std::lock_guard<std::mutex> lock(g_UnitVoMutex);
+        g_UnitVoQueueStaleMs = milliseconds;
+        return true;
+    }
+
+    bool GetUnitVoMutedFromBridge()
+    {
+        std::lock_guard<std::mutex> lock(g_UnitVoMutex);
+        return g_UnitVoMuted;
+    }
+
+    bool SetUnitVoMutedFromBridge(bool muted)
+    {
+        std::lock_guard<std::mutex> lock(g_UnitVoMutex);
+        g_UnitVoMuted = muted;
+        g_UnitVoLastAttemptTick = 0;
+        Log(L"[MISSIONHOOK] unit VO feedback %hs\n", muted ? "disabled" : "enabled");
+        return true;
+    }
+
     bool SetBomberAiRangeEnabledFromBridge(bool enabled)
     {
         RetryDeferredRuntimeHooks();
@@ -17773,6 +24146,11 @@ namespace BZROpenShim
     {
         RetryDeferredRuntimeHooks();
         g_AiOdfGameplayTuningEnabled = enabled;
+        if (!enabled)
+        {
+            g_ScrapPathFailuresByObject.clear();
+            g_ScrapRetargetStateByTask.clear();
+        }
         Log(L"[MISSIONHOOK] AI ODF gameplay tuning %hs\n", enabled ? "enabled" : "disabled");
         return true;
     }
@@ -17870,10 +24248,119 @@ namespace BZROpenShim
     bool SetTurretAimPitchEnabledFromBridge(bool enabled)
     {
         g_TurretAimPitchEnabled = enabled;
-        g_TurretAimPitchMultiplier = enabled ? g_TurretAimPitchMultiplierEnhanced : 0.5f;
+        RefreshTurretAimPitchState();
         Log(L"[MISSIONHOOK] turret aim pitch override %hs active=%.3f\n",
             enabled ? "enabled" : "disabled",
             static_cast<double>(g_TurretAimPitchMultiplier));
+        return true;
+    }
+
+    bool SetJumpSnipeCrouchEnabledFromBridge(bool enabled)
+    {
+        // Scripted content can temporarily override the INI baseline. Never
+        // applies in a network game; see RefreshJumpSnipeCrouchPatchState().
+        g_JumpSnipeCrouchEnabled = enabled;
+        RefreshJumpSnipeCrouchPatchState();
+        const bool active = g_JumpSnipeCrouchPatchActive;
+        Log(L"[MISSIONHOOK] jump-snipe crouch fix %hs (patch %hs)\n",
+            enabled ? "enabled" : "disabled",
+            active ? "active" : "inactive");
+        // Report the effective state so a script can tell it was suppressed
+        // (e.g. requested in multiplayer, or bytes did not match this build).
+        return active == enabled;
+    }
+
+    bool GetShotConvergenceFromBridge()
+    {
+        return g_ShotConvergenceEnabled;
+    }
+
+    bool SetShotConvergenceFromBridge(bool enabled)
+    {
+        g_ShotConvergenceEnabled = enabled;
+        RefreshShotConvergencePatchState();
+        Log(L"[MISSIONHOOK] all-craft weapon convergence %hs patch=%hs\n",
+            enabled ? "enabled" : "disabled",
+            g_ShotConvergencePatchActive ? "active" : "inactive");
+        return !enabled || g_ShotConvergencePatchActive;
+    }
+
+    bool GetPlayerReticleShotConvergenceFromBridge()
+    {
+        return g_PlayerReticleShotConvergenceEnabled;
+    }
+
+    bool SetPlayerReticleShotConvergenceFromBridge(bool enabled)
+    {
+        g_PlayerReticleShotConvergenceEnabled = enabled;
+        RefreshShotConvergencePatchState();
+        Log(L"[MISSIONHOOK] player smart-reticle convergence %hs patch=%hs\n",
+            enabled ? "enabled" : "disabled",
+            g_PlayerReticleShotConvergencePatchActive ? "active" : "inactive");
+        return !enabled || g_PlayerReticleShotConvergencePatchActive;
+    }
+
+    float GetSmartReticleRangeFromBridge()
+    {
+        float range = 0.0f;
+        return TryReadSmartReticleRange(range) ? range : g_SmartReticleRange;
+    }
+
+    bool SetSmartReticleRangeFromBridge(float range)
+    {
+        if (!std::isfinite(range))
+            return false;
+
+        const float clamped = ClampSmartReticleRange(range);
+        g_SmartReticleRange = clamped;
+        RefreshSmartReticleRangeState();
+        Log(L"[MISSIONHOOK] smart-reticle range requested=%.3f applied=%.3f\n",
+            static_cast<double>(range),
+            static_cast<double>(clamped));
+        float effective = 0.0f;
+        return ReadLocalPlayerNetIdValue() == 0 &&
+            TryReadSmartReticleRange(effective) && effective == clamped;
+    }
+
+    bool GetGlobalTurboFromBridge()
+    {
+        InitializeGlobalTurboConfig();
+        return g_GlobalTurboEnabled;
+    }
+
+    bool SetGlobalTurboFromBridge(bool enabled)
+    {
+        InitializeGlobalTurboConfig();
+        InstallUnitTurboHooksIfPossible();
+        g_GlobalTurboEnabled = enabled;
+        RefreshGlobalTurboPatchState();
+        Log(L"[MISSIONHOOK] global turbo %hs patch=%hs\n",
+            enabled ? "enabled" : "disabled",
+            g_GlobalTurboPatchActive ? "active" : "inactive");
+        return !enabled || g_GlobalTurboPatchActive;
+    }
+
+    bool HasUnitTurboHooksFromBridge()
+    {
+        InstallUnitTurboHooksIfPossible();
+        return g_UnitTurboHooksInstalled;
+    }
+
+    bool GetUnitTurboFromBridge(uint32_t handle)
+    {
+        const auto it = g_UnitTurboOverrides.find(handle);
+        return it != g_UnitTurboOverrides.end() && it->second;
+    }
+
+    bool SetUnitTurboFromBridge(uint32_t handle, bool enabled)
+    {
+        if (handle == 0)
+            return false;
+        // Accept the mission override even if Steam's runtime bytes have not
+        // settled yet. The deferred installer will make it effective as soon
+        // as the guarded hook sites become available.
+        g_UnitTurboOverrides[handle] = enabled;
+        InstallUnitTurboHooksIfPossible();
         return true;
     }
 
@@ -17885,6 +24372,54 @@ namespace BZROpenShim
         return true;
     }
 
+    bool GetRawMouseInputEnabledFromBridge()
+    {
+        // Set by the stock `rawinput` / `norawinput` command-line parser and
+        // consumed by startup before RegisterRawInputDevices. The stock code
+        // then stores the registration result back into the same value.
+        constexpr uintptr_t kRawInputEnabledAddr = 0x00918424;
+        __try
+        {
+            return *reinterpret_cast<const int*>(kRawInputEnabledAddr) != 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    bool SetRawMouseInputEnabledFromBridge(bool enabled)
+    {
+        constexpr uintptr_t kRawInputEnabledAddr = 0x00918424;
+
+        RAWINPUTDEVICE device = {};
+        device.usUsagePage = 0x01; // Generic desktop controls
+        device.usUsage = 0x02;     // Mouse
+        device.dwFlags = enabled ? 0u : RIDEV_REMOVE;
+        device.hwndTarget = nullptr;
+
+        if (!RegisterRawInputDevices(&device, 1, sizeof(device)))
+        {
+            Log(L"[RAWINPUT] Runtime %hs failed win32=%lu\n",
+                enabled ? "enable" : "disable",
+                static_cast<unsigned long>(GetLastError()));
+            return false;
+        }
+
+        __try
+        {
+            *reinterpret_cast<int*>(kRawInputEnabledAddr) = enabled ? 1 : 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+
+        Log(L"[RAWINPUT] Runtime raw mouse input %hs\n",
+            enabled ? "enabled" : "disabled");
+        return true;
+    }
+
     bool ResetMissionHookOverridesFromBridge()
     {
         RetryDeferredRuntimeHooks();
@@ -17892,14 +24427,21 @@ namespace BZROpenShim
         g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
         g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
         g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
-        g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
         g_AttackRevealEnabled = kAttackRevealEnabledDefault;
         g_AttackRevealTraceBudget = kAttackRevealTraceBudgetDefault;
-        g_TurretAimPitchMultiplier = 0.5f;
         g_AiUnitTuningOverridesByObject.clear();
         g_CombatKiteStateByObject.clear();
+        g_ScrapPathFailuresByObject.clear();
+        g_ScrapRetargetStateByTask.clear();
         g_AiUnitTuningTraceBudget = 64;
         g_CombatKiteTraceBudget = 256;
+        g_ScrapPathTraceBudget = 128;
+        // Registered features revert to their resting state. Gameplay features
+        // drop to their INI baseline + re-apply the MP gate; Display
+        // preferences revert to the user's openshim.ini baseline, not a hardcoded
+        // default, so global config still governs the next mission / Instant
+        // Action once a script-set mission ends.
+        RevertRegisteredFeaturesToBaseline();
         Log(L"[MISSIONHOOK] restored mission hook overrides to defaults\n");
         return true;
     }
@@ -18079,6 +24621,94 @@ namespace BZROpenShim
         return true;
     }
 
+    bool GetScrapPilotHudTopLeftsFromBridge(
+        int* scrapLeft,
+        int* scrapTop,
+        int* pilotLeft,
+        int* pilotTop)
+    {
+        if (!scrapLeft || !scrapTop || !pilotLeft || !pilotTop)
+            return false;
+        if (!g_ScrapPilotHudBaselineCaptured && !TryCaptureScrapPilotHudBaseline())
+            return false;
+
+        const std::array<int, 8> layout = g_ScrapPilotHudMissionOverrideActive
+            ? g_ScrapPilotHudMissionOverride
+            : BuildScrapPilotHudIniLayout();
+        GetScrapPilotHudGroupTopLeft(layout, 0, *scrapLeft, *scrapTop);
+        GetScrapPilotHudGroupTopLeft(layout, 2, *pilotLeft, *pilotTop);
+        return true;
+    }
+
+    bool SetScrapPilotHudTopLeftsFromBridge(
+        int scrapLeft,
+        int scrapTop,
+        int pilotLeft,
+        int pilotTop)
+    {
+        constexpr int kMinHudCoordinate = -4096;
+        constexpr int kMaxHudCoordinate = 16384;
+        const int values[] = { scrapLeft, scrapTop, pilotLeft, pilotTop };
+        for (const int value : values)
+        {
+            if (value < kMinHudCoordinate || value > kMaxHudCoordinate)
+                return false;
+        }
+        if (!g_ScrapPilotHudBaselineCaptured && !TryCaptureScrapPilotHudBaseline())
+            return false;
+
+        std::array<int, 8> desired = g_ScrapPilotHudMissionOverrideActive
+            ? g_ScrapPilotHudMissionOverride
+            : BuildScrapPilotHudIniLayout();
+        int currentScrapLeft = 0;
+        int currentScrapTop = 0;
+        int currentPilotLeft = 0;
+        int currentPilotTop = 0;
+        GetScrapPilotHudGroupTopLeft(
+            desired, 0, currentScrapLeft, currentScrapTop);
+        GetScrapPilotHudGroupTopLeft(
+            desired, 2, currentPilotLeft, currentPilotTop);
+
+        if (g_ScrapPilotHudMissionOverrideActive &&
+            currentScrapLeft == scrapLeft && currentScrapTop == scrapTop &&
+            currentPilotLeft == pilotLeft && currentPilotTop == pilotTop)
+        {
+            return true;
+        }
+
+        const int scrapOffsetX = scrapLeft - currentScrapLeft;
+        const int scrapOffsetY = scrapTop - currentScrapTop;
+        const int pilotOffsetX = pilotLeft - currentPilotLeft;
+        const int pilotOffsetY = pilotTop - currentPilotTop;
+        for (size_t point = 0; point < 2; ++point)
+        {
+            desired[point * 2] += scrapOffsetX;
+            desired[point * 2 + 1] += scrapOffsetY;
+        }
+        for (size_t point = 2; point < 4; ++point)
+        {
+            desired[point * 2] += pilotOffsetX;
+            desired[point * 2 + 1] += pilotOffsetY;
+        }
+
+        g_ScrapPilotHudMissionOverride = desired;
+        g_ScrapPilotHudMissionOverrideActive = true;
+        g_ScrapPilotHudLastRefreshTick = 0;
+        RefreshScrapPilotHudLayout();
+        return true;
+    }
+
+    bool RestoreScrapPilotHudStockFromBridge()
+    {
+        if (!g_ScrapPilotHudBaselineCaptured && !TryCaptureScrapPilotHudBaseline())
+            return false;
+        g_ScrapPilotHudMissionOverride = g_ScrapPilotHudBaseline;
+        g_ScrapPilotHudMissionOverrideActive = true;
+        g_ScrapPilotHudLastRefreshTick = 0;
+        RefreshScrapPilotHudLayout();
+        return true;
+    }
+
     bool GetHudSpriteRectFromBridge(const char* name, int* outX, int* outY, int* outW, int* outH)
     {
         if (!outX || !outY || !outW || !outH)
@@ -18113,7 +24743,11 @@ namespace BZROpenShim
     bool SetHudSpriteRectFromBridge(const char* name, int x, int y, int w, int h)
     {
         if (IsStockScrapPilotPanelName(name))
+        {
+            g_ScrapPilotHudPanelOverrideActive = true;
+            g_ScrapPilotHudPanelOverrideVisible = w != 0 || h != 0;
             return SetStockScrapPilotPanelsVisible(w != 0 || h != 0);
+        }
 
         return SetHudSpriteRectByTable(name, x, y, w, h);
     }
@@ -18121,7 +24755,11 @@ namespace BZROpenShim
     bool SetHudSpriteVisibleFromBridge(const char* name, bool visible)
     {
         if (IsStockScrapPilotPanelName(name))
+        {
+            g_ScrapPilotHudPanelOverrideActive = true;
+            g_ScrapPilotHudPanelOverrideVisible = visible;
             return SetStockScrapPilotPanelsVisible(visible);
+        }
 
         return SetHudSpriteVisibleByTable(name, visible);
     }
@@ -18129,7 +24767,11 @@ namespace BZROpenShim
     bool RestoreHudSpriteFromBridge(const char* name)
     {
         if (IsStockScrapPilotPanelName(name))
+        {
+            g_ScrapPilotHudPanelOverrideActive = true;
+            g_ScrapPilotHudPanelOverrideVisible = true;
             return SetStockScrapPilotPanelsVisible(true);
+        }
 
         const int spriteId = LookupHudSpriteId(name);
         if (spriteId <= 0)
@@ -18225,6 +24867,34 @@ namespace BZROpenShim
         g_UnderAttackAlertNextAllowedTime = currentTime + nextDelay;
     }
 
+    bool __fastcall WeaponMineFriendPGuard(void* minePtr, void* /*edx*/, void* targetPtr)
+    {
+        // Craft::AbandonPilot temporarily gives the vacated craft perceived
+        // team zero. WeaponMine's stock one-way relation check then mistakes
+        // an allied ship for a valid target even though its Team object remains
+        // intact.
+        FnGameObjectRelation friendP = g_BzrFn_GameObjectFriendP;
+        if (!friendP)
+            friendP = reinterpret_cast<FnGameObjectRelation>(kGogGameObjectFriendPAddr);
+
+        if (!friendP || !minePtr || !targetPtr)
+            return false;
+        if (friendP(minePtr, targetPtr))
+            return true;
+
+        // Preserve stock behavior for non-neutral candidates. For a
+        // perceived-neutral craft, the reciprocal relation uses its persistent
+        // Team object: allies are protected while abandoned enemies remain
+        // targetable.
+        using FnGetPerceivedTeam = int(__thiscall*)(void* thisPtr);
+        void** vtable = *reinterpret_cast<void***>(targetPtr);
+        if (!vtable || !vtable[1])
+            return false;
+        const int perceivedTeam =
+            reinterpret_cast<FnGetPerceivedTeam>(vtable[1])(targetPtr);
+        return perceivedTeam == 0 && friendP(targetPtr, minePtr);
+    }
+
     namespace
     {
         struct CarrierView
@@ -18243,6 +24913,8 @@ namespace BZROpenShim
         constexpr size_t kGameObjectWeaponMaskOffset = 0x210;
         constexpr size_t kUnitProcessMeOffset = 44;
         constexpr size_t kWeaponIndexOffset = 0xAC;
+        constexpr size_t kCraftDeployStateOffset = 0x228;
+        constexpr int32_t kCraftDeployedState = 2;
 
         constexpr uint32_t kHowitzerVftPrimary = 0x0087AD70;
         constexpr uint32_t kHowitzerVftSecondary = 0x0087AE1C;
@@ -18530,70 +25202,12 @@ namespace BZROpenShim
                                               uint32_t arg1,
                                               uint32_t arg2,
                                               uint32_t arg3)
-    {
-        if (!g_BzrFn_ArtilleryDoAttackOriginal)
-            return 0;
+	    {
+	        if (!g_BzrFn_ArtilleryDoAttackOriginal)
+	            return 0;
 
-        if (!g_HowitzerVolleyEnabled)
-        {
-            return g_BzrFn_ArtilleryDoAttackOriginal(
-                process, arg0, arg1, arg2, arg3);
-        }
-
-        void* craft = nullptr;
-        CarrierView* carrier = nullptr;
-        CarrierSnapshot snapshot = {};
-        int volleyIndices[5] = {};
-        int volleyCount = 0;
-        if (!TryPrepareArtilleryVolley(process,
-                                       &craft,
-                                       &carrier,
-                                       &snapshot,
-                                       volleyIndices,
-                                       &volleyCount))
-        {
-            return g_BzrFn_ArtilleryDoAttackOriginal(
-                process, arg0, arg1, arg2, arg3);
-        }
-
-        if (ShouldTraceArtilleryMask())
-        {
-            const long remaining = InterlockedDecrement(&g_ArtilleryMaskTraceBudget);
-            if (remaining >= 0)
-            {
-                auto* craftBytes = reinterpret_cast<const uint8_t*>(craft);
-                const uint32_t rawMask =
-                    *reinterpret_cast<const uint32_t*>(craftBytes + kGameObjectWeaponMaskOffset);
-                Log(L"[ARTYVOLLEY] process=0x%08X craft=0x%08X weapons=%d raw=0x%08X decoded=0x%08X\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(process)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
-                    volleyCount,
-                    rawMask,
-                    rawMask ^ 0x33333333u);
-            }
-        }
-
-        // The stock routine selects the first non-null Carrier weapon, computes
-        // aim/lead for that specific weapon, then invokes its virtual fire method.
-        // Replay the complete routine with each mounted weapon temporarily in
-        // slot zero so every shot receives the stock per-weapon calculations.
-        uint32_t result = 0;
-        __try
-        {
-            for (int i = 0; i < volleyCount; ++i)
-            {
-                RestoreCarrierState(carrier, snapshot);
-                MoveCarrierWeaponIndexToFront(carrier, volleyIndices[i]);
-                result = g_BzrFn_ArtilleryDoAttackOriginal(
-                    process, arg0, arg1, arg2, arg3);
-            }
-        }
-        __finally
-        {
-            RestoreCarrierState(carrier, snapshot);
-        }
-
-        return result;
+	        return g_BzrFn_ArtilleryDoAttackOriginal(
+	            process, arg0, arg1, arg2, arg3);
     }
 
     static void InstallArtilleryDoAttackHookIfPossible()
@@ -19696,6 +26310,18 @@ namespace BZROpenShim
         uint32_t scaleBits,
         void* craftPtr)
     {
+        if (ShouldTraceJetFlames())
+        {
+            static bool s_loggedEmit = false;
+            if (!s_loggedEmit)
+            {
+                s_loggedEmit = true;
+                Log(L"[FLAME] Emit hook invoked manager=0x%p transform=0x%p craft=0x%p addFlameFn=0x%p\n",
+                    managerPtr, transform, craftPtr,
+                    reinterpret_cast<void*>(g_BzrFn_EngineFlameAddFlame));
+            }
+        }
+
         if (g_IsSteamExe)
             ResolveEngineFlameRuntimeTargets();
 
@@ -19725,6 +26351,8 @@ namespace BZROpenShim
                 g_BzrFn_EngineFlameControl(g_EngineFlamePrimaryRed);
             if (g_EngineFlamePrimaryGreenTexture != 0)
                 g_BzrFn_EngineFlameControl(g_EngineFlamePrimaryGreen);
+            if (g_EngineFlamePrimaryPurpleTexture != 0)
+                g_BzrFn_EngineFlameControl(g_EngineFlamePrimaryPurple);
             return;
         }
 
@@ -19734,6 +26362,8 @@ namespace BZROpenShim
                 g_BzrFn_EngineFlameControl(g_EngineFlameSecondaryRed);
             if (g_EngineFlamePrimaryGreenTexture != 0)
                 g_BzrFn_EngineFlameControl(g_EngineFlameSecondaryGreen);
+            if (g_EngineFlamePrimaryPurpleTexture != 0)
+                g_BzrFn_EngineFlameControl(g_EngineFlameSecondaryPurple);
         }
     }
 
@@ -19752,6 +26382,8 @@ namespace BZROpenShim
                 g_BzrFn_EngineFlameSubmit(g_EngineFlamePrimaryRed, camera);
             if (g_EngineFlamePrimaryGreenTexture != 0)
                 g_BzrFn_EngineFlameSubmit(g_EngineFlamePrimaryGreen, camera);
+            if (g_EngineFlamePrimaryPurpleTexture != 0)
+                g_BzrFn_EngineFlameSubmit(g_EngineFlamePrimaryPurple, camera);
             return;
         }
 
@@ -19761,6 +26393,8 @@ namespace BZROpenShim
                 g_BzrFn_EngineFlameSubmit(g_EngineFlameSecondaryRed, camera);
             if (g_EngineFlamePrimaryGreenTexture != 0)
                 g_BzrFn_EngineFlameSubmit(g_EngineFlameSecondaryGreen, camera);
+            if (g_EngineFlamePrimaryPurpleTexture != 0)
+                g_BzrFn_EngineFlameSubmit(g_EngineFlameSecondaryPurple, camera);
         }
     }
 
@@ -19768,6 +26402,12 @@ namespace BZROpenShim
     {
         if (g_BzrFn_LegacyWorldUpdateRenderQueue && thisPtr)
             g_BzrFn_LegacyWorldUpdateRenderQueue(thisPtr, renderQueue);
+
+        // This Ogre callback is continuous while a world is rendered; unlike
+        // ChunkEffect::Simulate it does not depend on active debris/effects.
+        // RefreshHeadlightState is internally throttled to one object scan per
+        // 200 ms and also owns the live SP/MP + EXU authority gate.
+        RefreshHeadlightState();
 
         // Sample after the stock world queue update, when Ogre has evaluated
         // the entity materials and its hardware-animation decision is current.
@@ -20298,6 +26938,10 @@ namespace BZROpenShim
 
         if (!g_JumpSnipeProbeInstalled)
             InstallJumpSnipingProbeIfRequested();
+        // Continuous multiplayer guard: reverts any SinglePlayer-tier feature
+        // (e.g. the crouch patch) if a network game becomes active while it was
+        // enabled by scripted content.
+        RefreshRegisteredMpGatedFeatures();
         if (!g_CareerStatsMpHookInstalled)
             InstallCareerStatsMpHookIfPossible();
         if (!g_ChunkEffectCreateHooksInstalled)
@@ -20379,7 +27023,6 @@ namespace BZROpenShim
                 (identity.name && identity.name->size) ? BzrStringData(identity.name) : "");
             if (g_BzrFn_CommandHandler)
                 g_BzrFn_CommandHandler(id, "/kick");
-            KickBannedPlayers("/ban", 0, id, 0);
             return true;
         }
 
@@ -20436,8 +27079,8 @@ namespace BZROpenShim
         {
             if (g_FlagApplyPending)
             {
-                if (!TryApplySelectedFlagThroughEngine("ui_update"))
-                    TryApplyCachedFlagPayload("ui_update");
+                if (!TryApplyCachedFlagPayload("ui_update"))
+                    TryApplySelectedFlagThroughEngine("ui_update");
             }
 
             if (!label || !g_BzrFn_SetTooltip)
