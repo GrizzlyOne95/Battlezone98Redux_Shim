@@ -99,6 +99,7 @@ namespace BZROpenShim
 
     // Helper functions (implemented in trampolines.cpp or bzr_hooks.cpp)
     void SetProducerBuildMenuOriginal(void* original);
+    void InstallBriefingAssetOverrides();
     void InstallOgreMaterialCollisionGuard();
 
     // -----------------------------------------------------------------------
@@ -115,10 +116,11 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::JMP5, {}, "Map List Rewrite for Hop-Fix 3/3", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Map List Fix Support 1/3", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Main Menu Version Text OpenShim", false, {} },
-            { 0, HookEngine::PatchType::BYTE1, { 0xEB }, "Map Jump Fix Branch Override", false, {} },
+            { 0, HookEngine::PatchType::BYTE1, { 0xEB }, "Vehicle List Mod Fix 3/4 (Always Update Vehicle Control)", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Chunk Render Resolve Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Producer Build Menu Root Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Target Reticle Popup Recent-Hit Getter Hook", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "WeaponMine Hop-Out Friendly-Fire Fix", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "HoverCraft Engine Flame Emit Hook 1/2", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "HoverCraft Engine Flame Emit Hook 2/2", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Decoded Weapon Mask Carrier Bias Hook", false, {} },
@@ -132,6 +134,10 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::JMP5, {}, "Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Lobby BZRNET Integration HOST", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Lobby BZRNET Integration CLIENT", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "Custom Command /help Handler", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "Joiner Event Hook", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "Ban Button Hook 1/2", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "Ban Button Hook 2/2", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "AutoSave Load Button Hook", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Restart Mission Hook Pause", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Restart Mission Hook Failure", false, {} },

@@ -277,6 +277,39 @@ This is intentionally a low-risk foothold so the next step can focus on the real
 
 - can we feed a packed flag blob into the surviving Redux multiplayer player-data path and get in-world rendering "for free"?
 
+## 2026-07-12 Redux renderer reconstruction
+
+Deeper comparison with the exact legacy decompile showed that the earlier
+"rendering for free" conclusion was too optimistic:
+
+- Redux `FlagDisplay::PreLoad` sets its atlas index to zero and allocates no
+  replacement texture atlas.
+- Redux `FlagDisplay::GenerateFlags` no longer expands masks or assigns
+  `NetPlayer::flagIndex` values.
+- The surviving `Submit` routine is consequently gated off by zero display
+  and player indices.
+- Redux's `FlagDisplay` fields moved from legacy offsets `+0x10/+0x14` to
+  `+0x28/+0x2C` behind the larger `GameFeature` base.
+
+OpenShim now supplies the missing rendering stage directly through Ogre:
+
+- hooks the surviving `FlagDisplay::Submit` vtable slot for correct render
+  timing while preserving the original call;
+- reads the replicated 256-byte mask from each team's player-data slot `0x0D`;
+- generates a transparent 64x32 TGA and unlit alpha material per distinct
+  payload hash;
+- creates pooled, world-space Ogre billboard sets using those materials;
+- mirrors the legacy eligible-class, object-state, 100-unit range, height,
+  and terrain line-of-sight filters;
+- forgets all scene-owned billboard pointers before Ogre scene teardown and
+  recreates them lazily in the next match;
+- overwrites slot `0x0D` directly on every lobby selection change because
+  Redux's `SetMyFlag` returns early after the first payload already exists.
+
+This implementation deliberately avoids inserting synthetic records into the
+fixed Redux sprite table. The feature remains environment-gated for its first
+live host/client validation pass.
+
 ### 2026-03-17 test path added in OpenShim
 
 The next pass is now implemented for GOG as a real test path:

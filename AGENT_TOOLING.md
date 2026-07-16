@@ -312,6 +312,10 @@ These are installed and usable from the local Python 3.12 environment.
   - Python bridge for scripting Rizin/radare-style CLI analysis
 - `construct`
   - Binary structure parsing/building helpers
+- `pdbparse`
+  - MSF/PDB stream, DBI module, section, public-symbol, and source-file parsing
+  - Runtime-validated here with the existing `construct 2.10`; the package's
+    older dependency metadata still reports a `construct<2.10` warning
 - Supporting low-level packages already present through this stack include:
   - `capstone`
   - `keystone-engine`
@@ -384,6 +388,23 @@ Prefer these before inventing a one-off script if they already cover the task.
 - [capture_runtime_layout.ps1](/<USER_HOME>/Documents/GIT/BZR-OpenShim/reverse_engineering/capture_runtime_layout.ps1)
 - [run_misn03_chunk_probe.ps1](/<USER_HOME>/Documents/GIT/BZR-OpenShim/reverse_engineering/run_misn03_chunk_probe.ps1)
 - [run_best_effort_pipeline.py](/<USER_HOME>/Documents/GIT/BZR-OpenShim/reverse_engineering/run_best_effort_pipeline.py)
+- [rank_private_pdb_matches.py](/<USER_HOME>/Documents/GIT/BZR-OpenShim/reverse_engineering/rank_private_pdb_matches.py)
+  - triangulates leaked private names through the exact-symbol legacy build and
+    current Redux BSim/text maps; never assumes that mismatched-build RVAs agree
+- [validate_semantic_apply.py](/<USER_HOME>/Documents/GIT/BZR-OpenShim/reverse_engineering/validate_semantic_apply.py)
+  - pins candidates to the exact analyzed GOG SHA-256, Ghidra function starts,
+    executable PE sections, decodable entry instructions, and prologue hashes
+  - emits `safe_new_apply.tsv`, `high_confidence_review.tsv`, `medium_hold.tsv`,
+    `verified_existing.tsv`, and a complete validation CSV under
+    `semantic_ranking\binary_validation`
+- [ApplySemanticPdbHints.java](/<USER_HOME>/Documents/GIT/BZR-OpenShim/reverse_engineering/ghidra_scripts/ApplySemanticPdbHints.java)
+  - Ghidra post-script for `verify`, `comment`, or tightly gated `rename` mode
+  - rechecks queue prologue bytes inside the open program and only permits
+    rename mode with a file literally named `safe_new_apply.tsv`
+- [build_re_brief.py](/<USER_HOME>/Documents/GIT/BZR-OpenShim/reverse_engineering/build_re_brief.py)
+  - pass `--supplemental-pdb reverse_engineering\workshop\private_pdb_index`
+    to include semantic identities, validation dispositions, private locals,
+    source context, and class layouts in a task brief
 - [tooling_smoke_pipeline.ps1](/<USER_HOME>/Documents/GIT/BZR-OpenShim/reverse_engineering/tooling_smoke_pipeline.ps1)
   - read-only first-pass binary triage for a target executable
   - defaults to `BZR_GAME_EXE`

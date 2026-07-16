@@ -45,6 +45,46 @@ extern "C" WINMMAPI BOOL WINAPI OpenShimSetTargetReticlePopupMode(int mode)
     return BZROpenShim::SetTargetReticlePopupModeFromBridge(mode) ? TRUE : FALSE;
 }
 
+extern "C" WINMMAPI DWORD WINAPI OpenShimGetUnitVoThrottle()
+{
+    return BZROpenShim::GetUnitVoThrottleFromBridge();
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetUnitVoThrottle(DWORD milliseconds)
+{
+    return BZROpenShim::SetUnitVoThrottleFromBridge(milliseconds) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI DWORD WINAPI OpenShimGetUnitVoQueueDepth()
+{
+    return BZROpenShim::GetUnitVoQueueDepthFromBridge();
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetUnitVoQueueDepth(DWORD depth)
+{
+    return BZROpenShim::SetUnitVoQueueDepthFromBridge(depth) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI DWORD WINAPI OpenShimGetUnitVoQueueStaleMs()
+{
+    return BZROpenShim::GetUnitVoQueueStaleMsFromBridge();
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetUnitVoQueueStaleMs(DWORD milliseconds)
+{
+    return BZROpenShim::SetUnitVoQueueStaleMsFromBridge(milliseconds) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimGetUnitVoMuted()
+{
+    return BZROpenShim::GetUnitVoMutedFromBridge() ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetUnitVoMuted(BOOL muted)
+{
+    return BZROpenShim::SetUnitVoMutedFromBridge(muted != FALSE) ? TRUE : FALSE;
+}
+
 extern "C" WINMMAPI BOOL WINAPI OpenShimSetBomberAiRangeEnabled(BOOL enabled)
 {
     return BZROpenShim::SetBomberAiRangeEnabledFromBridge(enabled != FALSE) ? TRUE : FALSE;
@@ -139,6 +179,95 @@ extern "C" WINMMAPI BOOL WINAPI OpenShimSetTurretAimPitchEnabled(BOOL enabled)
 extern "C" WINMMAPI BOOL WINAPI OpenShimSetAttackRevealEnabled(BOOL enabled)
 {
     return BZROpenShim::SetAttackRevealEnabledFromBridge(enabled != FALSE) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimGetRawMouseInputEnabled()
+{
+    return BZROpenShim::GetRawMouseInputEnabledFromBridge() ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetRawMouseInputEnabled(BOOL enabled)
+{
+    return BZROpenShim::SetRawMouseInputEnabledFromBridge(enabled != FALSE) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetJumpSnipeCrouchEnabled(BOOL enabled)
+{
+    return BZROpenShim::SetJumpSnipeCrouchEnabledFromBridge(enabled != FALSE) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimGetShotConvergence()
+{
+    return BZROpenShim::GetShotConvergenceFromBridge() ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetShotConvergence(BOOL enabled)
+{
+    return BZROpenShim::SetShotConvergenceFromBridge(enabled != FALSE) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimGetPlayerReticleShotConvergence()
+{
+    return BZROpenShim::GetPlayerReticleShotConvergenceFromBridge() ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetPlayerReticleShotConvergence(BOOL enabled)
+{
+    return BZROpenShim::SetPlayerReticleShotConvergenceFromBridge(enabled != FALSE) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI float WINAPI OpenShimGetSmartReticleRange()
+{
+    return BZROpenShim::GetSmartReticleRangeFromBridge();
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetSmartReticleRange(float range)
+{
+    return BZROpenShim::SetSmartReticleRangeFromBridge(range) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimGetScrapPilotHudTopLefts(
+    int* scrapLeft, int* scrapTop, int* pilotLeft, int* pilotTop)
+{
+    return BZROpenShim::GetScrapPilotHudTopLeftsFromBridge(
+        scrapLeft, scrapTop, pilotLeft, pilotTop) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetScrapPilotHudTopLefts(
+    int scrapLeft, int scrapTop, int pilotLeft, int pilotTop)
+{
+    return BZROpenShim::SetScrapPilotHudTopLeftsFromBridge(
+        scrapLeft, scrapTop, pilotLeft, pilotTop) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimRestoreScrapPilotHudStock()
+{
+    return BZROpenShim::RestoreScrapPilotHudStockFromBridge() ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimGetGlobalTurbo()
+{
+    return BZROpenShim::GetGlobalTurboFromBridge() ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetGlobalTurbo(BOOL enabled)
+{
+    return BZROpenShim::SetGlobalTurboFromBridge(enabled != FALSE) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimHasUnitTurboHooks()
+{
+    return BZROpenShim::HasUnitTurboHooksFromBridge() ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimGetUnitTurbo(DWORD handle)
+{
+    return BZROpenShim::GetUnitTurboFromBridge(handle) ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetUnitTurbo(DWORD handle, BOOL enabled)
+{
+    return BZROpenShim::SetUnitTurboFromBridge(handle, enabled != FALSE) ? TRUE : FALSE;
 }
 
 extern "C" WINMMAPI BOOL WINAPI OpenShimResetMissionHookOverrides()

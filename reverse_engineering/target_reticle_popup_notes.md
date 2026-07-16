@@ -2,17 +2,23 @@
 
 Date: 2026-03-17
 
-Update: 2026-03-18
+Updates: 2026-03-18, 2026-07-13
 
-Shipping scope was narrowed after the earlier `NEUTRAL ONLY` attempt proved too
-fragile in practice. The normal user-facing path now ships only:
+The `NEUTRAL ONLY` option was revisited on 2026-07-13. The crash cause was not
+the recent-hit call site itself: the hook received the complete Redux
+`GameObject*`, but the old team lookup treated offset `+0x00` as the inherited
+GameObject interface. Redux places that interface at `+0x18`. The old code
+therefore loaded the wrong vtable and called slot `+0x04` with the wrong
+`this` pointer.
+
+The team lookup now uses `[object + 0x18]`, calls its `GetTeam` slot at `+0x04`,
+and passes `object + 0x18` as `this`, matching stock Redux call sites. The
+experimental downgrade/force guard has been removed, so the normal user-facing
+scope is again:
 
 - `DEFAULT`
+- `NEUTRAL ONLY`
 - `EXPLICIT ONLY`
-
-The `NEUTRAL ONLY` logic remains an experimental native path only, and legacy
-or config requests for it should downgrade to `DEFAULT` unless explicitly
-forced for testing.
 
 ## Scope
 
@@ -27,12 +33,9 @@ investigation covered these modes:
 The current intended shipping behavior is:
 
 - `DEFAULT`: keep stock behavior
+- `NEUTRAL ONLY`: suppress auto-popup reticles on team `0` neutral objects
 - `EXPLICIT ONLY`: only show the target reticle when the player explicitly
   targets something, such as with the `T` target action
-
-The shelved experimental behavior was:
-
-- `NEUTRAL ONLY`: suppress auto-popup reticles on team `0` neutral objects
 
 ## Primary Inputs
 
@@ -113,7 +116,7 @@ Relevant behavior:
 
 ## Redux GOG Symbol Mapping
 
-From `public_functions.csv`:
+The best-effort PDB export originally suggested:
 
 - `SelectionDisplay::Render`:
   `?Render@SelectionDisplay@@UAEXXZ` -> `0x0043E0E0`
@@ -122,7 +125,12 @@ From `public_functions.csv`:
 - `Targeting::Simulate`:
   `?Simulate@Targeting@@UAEXM@Z` -> `0x00527550`
 
-These are the main Redux native targets for implementation.
+Later semantic recovery showed that the `SelectionDisplay` PDB mapping is stale
+for this executable: `0x0043E100` is an audio-buffer routine, while the actual
+Redux selection render loop is `FUN_00497AA0`. Its recent-hit getter call is at
+`0x00497C26`. The `GameObject::SetDamageFlags` and `Targeting::Simulate`
+mappings remain useful, but future work should prefer the recovered render body
+over the old `0x0043E0E0` label.
 
 ## Live Redux Revalidation
 
@@ -131,8 +139,9 @@ Steam runtime revalidation was completed on March 17, 2026 against a live
 
 Verified results on the running Steam 2.2.301 process:
 
-- the first `96` bytes of `SelectionDisplay::Render` body at `0x0043E100`
-  matched the GOG executable exactly
+- the first `96` bytes at the then-PDB-labeled `0x0043E100` site matched the GOG
+  executable exactly (this was later identified as an audio-buffer routine, not
+  the selection render body)
 - the first `96` bytes of `GameObject::SetDamageFlags` at `0x0046C860`
   matched the GOG executable exactly
 - the first `96` bytes of `Targeting::Simulate` at `0x00527550`
@@ -140,11 +149,10 @@ Verified results on the running Steam 2.2.301 process:
 
 Practical takeaway:
 
-- the current Steam build can reuse the same starting function bodies as GOG
-  for these targets
+- the current Steam build matched GOG at all three probed addresses
 - the launchability blocker is gone for this feature
-- the remaining native RE work is now about selecting the cleanest branch/hook
-  inside `SelectionDisplay::Render`, not about basic address drift
+- the active reticle hook should be validated at the recovered
+  `0x00497C26`/`0x00497C27` call site rather than the stale PDB render label
 
 ## Recommended Patch Shape
 
@@ -163,8 +171,9 @@ That originally gave the three requested modes cleanly:
 - `EXPLICIT ONLY`: disable the recent-hit popup path entirely, but keep the
   explicit target path
 
-The final shipping recommendation was narrowed to `DEFAULT` and
-`EXPLICIT ONLY`, with `NEUTRAL ONLY` kept experimental only.
+The 2026-03-18 shipping recommendation temporarily narrowed this to `DEFAULT`
+and `EXPLICIT ONLY`. The corrected 2026-07-13 interface adjustment restores
+`NEUTRAL ONLY` as a normal persistent mode.
 
 ## Config Integration Plan
 
@@ -179,34 +188,41 @@ Planned chain:
 4. OpenShim exported setter, similar to `OpenShimSetUnderAttackAlertMode`
 5. OpenShim render-side native hook consults the selected mode
 
-## Current Blocker
+## 2026-07-13 Resolution
 
-The original launchability blocker has been cleared, and the live Steam body
-bytes for the three key Redux functions were revalidated successfully.
+The render-side site is now recovered and implemented:
 
-What is known:
+- `0x00497C26`: `call 0x00497890`
+- `0x00497C27`: rel32 operand patched by OpenShim
+- `0x00497890`: stock `playerShot` getter, reading `[ecx + 0x1D8]`
+- immediately before the call, Redux loads the complete rendered object into
+  `ECX`
 
-- semantic behavior from the legacy exact-match decompile
-- matching Redux GOG function names and addresses from the PDB export
-- live Steam byte parity for the first `96` bytes of the main Redux targets
-- the campaign/EXU/OpenShim config bridge pattern already used elsewhere
+The crash-prone part was the hook's team read. Stock Redux calls the relevant
+GameObject virtuals through `[object + 0x18]`; the team slot is `+0x04`. The
+fixed helper applies that same subobject adjustment and is protected by the
+existing SEH fallback. If a team cannot be read, the object is treated as
+non-neutral and stock popup behavior is preserved.
 
-What is still needed before shipping native code:
+The end-to-end persistent path was restored at the same time:
 
-- recover the exact instruction sequence around the chosen render-side branch
-- identify the cheapest team read for the neutral-only mode gate
-- choose the safest hook window inside `SelectionDisplay::Render`
+- Extra Utilities now passes mode `2` through to OpenShim instead of rewriting
+  it to mode `1`
+- Campaign Reimagined again exposes `NEUTRAL ONLY` in its PDA preset list
+- saved mode `2` values map back to that preset instead of being normalized to
+  `DEFAULT`
+
+Release/Win32 compilation completed successfully for both OpenShim and Extra
+Utilities, and `luac -p` passed for the campaign `PersistentConfig.lua` change.
+Manual in-mission behavioral validation is still recommended for neutral
+props, explicit targets, and non-neutral hit popups.
 
 ## Resume Checklist
 
-1. `SelectionDisplay::Render` live body revalidated on Steam at `0x0043E100`
-   (`0x0043E0E0` symbol entry still points at the short thunk/prelude region)
-2. locate the exact branch that corresponds to the `playerShot` popup path
-3. confirm where team number can be read cheaply for the rendered object
-4. add OpenShim mode enum and bridge export
-5. add EXU setter bridge and Lua export
-6. add persistent PDA menu entry in Campaign Reimagined
-7. test all three modes on:
+1. Deploy the corrected Release/Win32 `winmm.dll`.
+2. Select `NeutralOnly` through the PDA/EXU bridge or set
+   `[Display] TargetReticle = NeutralOnly` in `openshim.ini`.
+3. Test all three modes on:
    - neutral props and buildings
    - enemy units and buildings
    - friendly selected targets
@@ -214,13 +230,11 @@ What is still needed before shipping native code:
 
 ## Short Conclusion
 
-The investigation is complete enough to resume quickly later.
-
 The stock popup reticle is confirmed to be driven by:
 
 - explicit target selection, and
 - a two-second `playerShot` timer
 
-So the requested feature is feasible and the likely final solution is a
-render-side mode gate, but the final native patch should wait until the live
-Redux hook bytes can be revalidated in a launchable environment.
+The persistent render-side gate now supports all three requested modes. The
+neutral-only crash was caused by a missing Redux `+0x18` base-subobject
+adjustment in the hook, not by the selected rel32 call site.

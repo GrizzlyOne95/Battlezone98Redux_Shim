@@ -101,6 +101,65 @@ Useful field offsets:
 4. `CalcRange(Craft) @ 0x00466BE0`
    - Follow-up audit resolved the stale advisory address and confirmed the corrected detour installs. Use this site for gameplay validation of `engageRangeAI`, `weaponRangeMinAI`, and bomber stand-off tuning.
 
+## Scavenger path-scoring implementation, 2026-07-13
+
+The first scavenger hook is now implemented at the narrow distance-score call
+inside `RecycleTask::InitLookingForScrap`, rather than detouring the whole task.
+
+Validated Redux sites:
+
+| Item | Address | Validation |
+| --- | ---: | --- |
+| Candidate distance call | `0x005B680E` | `E8 9D B8 EA FF`, calls `Dist3D_Squared @ 0x004620B0` |
+| `FindPlan(GameObject*, float, float)` | `0x004666C0` | Same overload used by the stock final candidate validation |
+| `AiPath::GetLength` | `0x00461110` | Sums the length of consecutive points at `AiPath+0x08` |
+| `AiPath` scalar deleting destructor | `0x00460640` | Called with flag `1`, matching stock path cleanup |
+
+As of 2026-07-14 the replacement call uses pathing mode by default in
+single-player through `[SinglePlayer] SmartScavengerPathing=1`. An enabled AI
+ODF tuning layer can still set `scrapPathingAI = false` for a specific scavenger
+ODF; multiplayer always returns to the stock squared-distance behavior. In
+pathing mode it:
+
+1. preserves the stock team, ownership, region, and `GoodScrapPosition` filters;
+2. applies `scrapSearchRadiusAI` when positive;
+3. calls `FindPlan` for each surviving candidate;
+4. scores a good path as `pathLength * scrapPathLengthWeightAI + straightDistance * scrapStraightDistanceWeightAI`;
+5. scores a bad path with `scrapPathFailPenaltyAI` plus the secondary straight-distance term, allowing the unchanged stock final validation/retry loop to reject it;
+6. keeps a Shim-side failure cooldown keyed by scrap pointer and position so the
+   stock first-pass clearing of `HardToGetTo` does not defeat
+   `scrapHardToGetCooldownAI` across scans.
+
+Every address and helper prologue is byte-checked before the call is patched.
+On a mismatch, invalid pointer, missing ODF setting, or disabled master toggle,
+the path scorer fails back to the stock distance behavior. Trace output is
+available with `OPENSHIM_TRACE_SCAVENGER_PATH=1` or
+`OPENSHIM_TRACE_AI_SCAVENGER=1`.
+
+### En-route retargeting, 2026-07-13
+
+Redux `RecycleTask::DoGotoScrap @ 0x005B6AE0` only executes the existing
+`ScavGotoScrap` subtask until it finishes; it never re-enters candidate
+selection when new scrap appears. OpenShim now detours its seven-byte prologue
+(`55 8B EC 51 89 4D FC`), calls the stock routine first, and periodically asks
+the unchanged state machine to transition back to `LookingForScrap` when the
+subtask is still active.
+
+This behavior is part of `scrapPathingAI = true`. Its additional ODF controls
+are:
+
+- `scrapRetargetPeriodAI`: seconds between en-route rescoring passes; defaults
+  to `2.0`, and a non-positive value disables en-route retargeting.
+- `scrapRetargetMinImprovementAI`: score advantage a new target must have over
+  the incumbent; defaults to `25.0` path-score units.
+
+The current target receives the improvement margin as a temporary score bonus,
+which prevents comparable candidates from causing target oscillation. A fixed
+20 m pickup guard suppresses rescoring when the scavenger is already close to
+its current scrap. The stock subtask cleanup and `InitLookingForScrap` /
+`InitGotoScrap` transitions remain responsible for safely deleting and
+rebuilding the actual movement task.
+
 ## Probe helper
 
 Read-only helper used during this scan:
