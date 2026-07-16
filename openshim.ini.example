@@ -1,0 +1,215 @@
+; ============================================================================
+; openshim.ini  -  global user preferences for BZR-OpenShim
+; ============================================================================
+; Copy this file to "openshim.ini" next to winmm.dll in your Battlezone 98
+; Redux install directory and edit the values you care about.
+;
+; These are GLOBAL preferences: they apply to ALL single-player content that
+; does not set the value itself -- the stock campaign, Instant Action, and any
+; mission whose script leaves the setting alone.
+;
+; General precedence (lowest to highest):
+;     built-in default  ->  this file  ->  compatibility env/legacy override
+;     ->  mission script (EXU), where supported
+; A mission that explicitly sets a supported value overrides this file for that
+; mission only; when the mission ends the setting reverts to your value here.
+;
+; A key that is absent, blank, or invalid uses that setting's documented
+; built-in default (or preserves stock state when explicitly noted). Delete a
+; line to return to that behavior.
+;
+; BOOLEAN VALUES (case-insensitive; applies to every boolean key below):
+;   Enabled:  1, true, on, yes, enabled
+;   Disabled: 0, false, off, no, disabled
+; The example uses 1 and 0 for brevity.
+;
+; The sections encode scope and the multiplayer rule:
+;   [General]      engine/UI settings that are not mission simulation policy.
+;   [Display]      cosmetic / local-only settings. Applied everywhere,
+;                  including in multiplayer (they cannot affect the shared
+;                  simulation, so they are safe for MP).
+;   [SinglePlayer] settings that touch gameplay / the simulation. Applied in
+;                  single-player ONLY and hard-disabled in any network game,
+;                  so a local config edit can never alter an MP match.
+; ----------------------------------------------------------------------------
+
+[General]
+; Maximum simultaneous GAS sound objects.
+;   0       = disable the shim override and keep the stock engine limit
+;   1..256  = requested channel count
+;   >256    = accepted but clamped to 256
+; Value must be a non-negative whole decimal number. Default: 256.
+; Compatibility environment overrides (higher priority):
+;   OPENSHIM_MAX_SOUND_CHANNELS, then BZR_MAX_SOUND_CHANNELS
+SoundChannels = 256
+
+; Full native input.map + gamekey.map binding screen. Boolean. Default: enabled.
+; Backwards-compatible key alias: CustomBindingUi
+; Compatibility environment flags (higher priority):
+;   Enable:  OPENSHIM_ENABLE_INPUT_BINDING_UI,
+;            OPENSHIM_ENABLE_INPUT_BINDING_UI_REPLACEMENT,
+;            BZR_ENABLE_INPUT_BINDING_UI
+;   Disable: OPENSHIM_DISABLE_INPUT_BINDING_UI,
+;            OPENSHIM_DISABLE_INPUT_BINDING_UI_REPLACEMENT,
+;            BZR_DISABLE_INPUT_BINDING_UI
+; A disable environment flag wins if both enable and disable flags are present.
+CustomBindsUi = 1
+
+; In-game OpenShim settings screen: adds an "OpenShim" button to the stock
+; Options screen that opens a page for editing the settings in this file with
+; live apply. Edits are written back to this file losslessly (comments and
+; layout are preserved; a .openshim.bak backup is kept). Boolean. Default:
+; enabled.
+; Compatibility environment flags (higher priority):
+;   Disable: OPENSHIM_DISABLE_SETTINGS_UI or BZR_DISABLE_SETTINGS_UI
+SettingsUi = 1
+
+[Display]
+; Under-attack audio alert frequency.
+;   None    = silent (aliases: Off, numeric values <= 1)
+;   Minimal = rare beeps, ~10s cooldown (aliases: Low, numeric value 2)
+;   Normal  = stock/default cadence, ~1s cooldown
+;             (aliases: Default, On, numeric values >= 3)
+; Text is case-insensitive and spaces are ignored. Default: Normal.
+; Compatibility overrides, from lower to higher priority:
+;   campaignReimagined_settings.cfg: UnderAttackAlertMode=<value>
+;   OPENSHIM_UNDER_ATTACK_ALERT_MODE or BZR_UNDER_ATTACK_ALERT_MODE
+;   OPENSHIM_DISABLE_UNDER_ATTACK_ALERT or BZR_DISABLE_UNDER_ATTACK_ALERT
+; If no mode/disable environment override is set, a custom cooldown from 0 to
+; 120 seconds can be supplied with OPENSHIM_UNDER_ATTACK_ALERT_COOLDOWN,
+; BZR_UNDER_ATTACK_ALERT_COOLDOWN, or OPENSHIM_UNDER_ATTACK_ALERT_COOLDOWN_SECONDS.
+UnderAttackAlert = Normal
+
+; Target reticle pop-up policy.
+;   Default      = stock behavior (aliases: Normal, On, numeric values <= 1)
+;   NeutralOnly  = suppress recent-hit popups for team 0 objects
+;                  (aliases: Neutral, numeric value 2)
+;   ExplicitOnly = only show when explicitly targeted
+;                  (aliases: Explicit, numeric values >= 3)
+; Text is case-insensitive; spaces, underscores, and hyphens are ignored, so
+; Neutral Only, neutral_only, and neutral-only are equivalent. Default: Default.
+; Backwards-compatible key alias: TargetReticle
+; Compatibility overrides, from lower to higher priority:
+;   UnderAttackAlert.cfg: TargetReticlePopupMode=<value>
+;   OPENSHIM_TARGET_RETICLE_POPUP_MODE or BZR_TARGET_RETICLE_POPUP_MODE
+TargetPolicy = Default
+
+; Scrap/pilot readout layout.
+;   Legacy = move the text block to the compact legacy top-center location and
+;            hide the stock backing panels (aliases: Compact, 1, On, True)
+;   Stock  = preserve the Redux positions and panels
+;            (aliases: Default, 0, Off, False)
+; Text is case-insensitive. Default: Legacy.
+; EXU positioning and panel-visibility calls temporarily override this baseline
+; for the mission. Mission reset restores this INI selection.
+ScrapPilotHud = Legacy
+
+; Faction jet flames: tint each unit's engine flame by its faction (the first
+; letter of its ODF), for any team an EXU mission script has not already colored.
+; Boolean. Default: disabled (stock blue for all).
+;   a = NSDF      -> blue (stock)
+;   s = CCA       -> red
+;   c = CRA       -> green
+;   b = Black Dog -> purple  (needs an add-on purple flame texture, e.g.
+;                             exhaust_p.0 / pflame; without it, stays stock blue)
+; Compatibility environment flags (higher priority):
+;   Enable:  OPENSHIM_FACTION_JET_FLAMES or BZR_FACTION_JET_FLAMES
+;   Disable: OPENSHIM_DISABLE_FACTION_JET_FLAMES or
+;            BZR_DISABLE_FACTION_JET_FLAMES
+JetFlames = 0
+
+; Unit command/selection voice feedback. Boolean. Default: enabled. Disable to
+; mute likely stock unit barks while leaving mission audio (e.g. misn*.wav)
+; untouched.
+; EXU mission scripts can temporarily override this preference.
+UnitVoFeedback = 1
+
+; Subtitles remain a Campaign Reimagined / EXU feature; OpenShim does not
+; attempt to synthesize subtitle timing for unscripted stock audio.
+
+[SinglePlayer]
+; These gameplay-affecting improvements are hard-disabled in network games,
+; regardless of the values below.
+
+; Make hovercraft-derived AI craft use converging weapon aim instead of firing
+; parallel from offset hardpoints. Boolean. Default: enabled.
+WeaponConvergence = 1
+
+; After the stock player hovercraft aim update, converge the local player's
+; weapon hardpoints on the smart-reticle position. Boolean. Default: enabled.
+; Backwards-compatible key alias: SmartReticleConvergence
+PlayerReticleConvergence = 1
+
+; Maximum smart-reticle targeting distance in world units. Default: 500.
+; Any finite decimal value is parsed and clamped to 1..10000. The stock Redux
+; value is 200; set this to 200 for stock range.
+; Backwards-compatible key alias: ReticleRange
+; EXU SetReticleRange calls temporarily override this value for that mission;
+; the INI baseline is restored when mission overrides reset.
+SmartReticleRange = 500
+
+; Score scrap by viable path length, remember temporarily unreachable scrap,
+; and periodically reconsider the active target while en route.
+; Boolean. Default: enabled.
+; Backwards-compatible key alias: ScavengerPathing
+SmartScavengerPathing = 1
+
+; Increase TurretCraft/TurretTank pitch authority so they can engage airborne
+; targets. Boolean. Default: enabled.
+TurretAimPitch = 1
+;
+; Enhanced turret pitch multiplier. Any finite decimal value is parsed, then:
+;   <0.0       = clamped to 0.0
+;   0.0..1.25 = used as written
+;   >1.25      = clamped to 1.25
+; The stock multiplier is 0.5. Default 0.95 is intentionally just below the
+; fully vertical 1.0 multiplier.
+; Compatibility environment override (higher priority):
+;   OPENSHIM_TURRET_AIM_PITCH_MULTIPLIER
+;   OPENSHIM_TURRET_PITCH_MULTIPLIER (legacy alias)
+TurretAimPitchMultiplier = 0.95
+
+; Restore the legacy crouch-on-landing behavior while a sniper rifle is selected
+; and jump remains held. Boolean. Default: enabled. Exact-byte guarded;
+; unsupported builds fail soft.
+JumpSnipeCrouch = 1
+
+; Global turbo: forces units to turbo (near full throttle) in single-player.
+; Boolean. Default: disabled (stock behavior).
+;   - Applies to stock campaign / Instant Action and any unscripted content.
+;   - OpenShim owns the global and per-unit native turbo hooks. EXU
+;     SetGlobalTurbo / SetUnitTurbo calls delegate here when available and stay
+;     authoritative as mission overrides.
+;   - All turbo behavior is hard-disabled in network games.
+;   - Advanced: set the env var OPENSHIM_GLOBAL_TURBO_TOLERANCE to tune the
+;     throttle threshold (default 0.9; lower = turbo kicks in more easily).
+Turbo = 0
+
+; Native stock headlights. These use each craft's Ogre light directly, so they
+; do not require Campaign Reimagined shaders or EXU. All four settings stand
+; down in network games and whenever EXU is loaded for scripted content.
+;
+; Player headlight visibility. Boolean. Default in this example: enabled.
+; If the key is absent, OpenShim preserves the stock visibility.
+Headlights = 1
+;
+; Other craft/turret headlights. Set to 0 for the campaign's "AI lights off"
+; preference. Boolean. Default in this example: disabled. If the key is absent,
+; OpenShim preserves each stock object's visibility.
+OtherHeadlights = 0
+;
+; Player light color (case-insensitive):
+;   Stock (aliases: Default, Off), White, Red, Green, Blue, Yellow, Cyan,
+;   Magenta, Orange, Purple, Teal, Rainbow
+; A custom comma-separated RGB triple is also accepted. Each component must be
+; finite and within 0..20 inclusive, e.g. 5,2.5,1. If absent/invalid: Stock.
+HeadlightColor = White
+;
+; Player beam (case-insensitive):
+;   Stock (aliases: Default, Off)
+;   Focused (aliases: Focus, Narrow)
+;   Wide
+; If absent/invalid: Stock.
+HeadlightBeam = Wide
+
+; Team-1 material colors remain a Campaign Reimagined shader/mod feature.

@@ -8,6 +8,7 @@ param(
     [int]$RingRecords = 65536,
     [int]$SocketId = 0,
     [string]$PeerFilter = "",
+    [switch]$RelayCapture,
     [string]$Message = ""
 )
 
@@ -154,7 +155,8 @@ function Build-EnvAssignments {
         [int]$PayloadBytesValue,
         [int]$RingRecordsValue,
         [int]$SocketIdValue,
-        [string]$PeerFilterValue
+        [string]$PeerFilterValue,
+        [bool]$RelayCaptureValue
     )
 
     $pairs = @(
@@ -162,6 +164,10 @@ function Build-EnvAssignments {
         @{ Name = "BZ_BUFFER_LOG_BYTES"; Value = "$PayloadBytesValue" },
         @{ Name = "BZ_BUFFER_LOG_RING"; Value = "$RingRecordsValue" }
     )
+
+    if ($RelayCaptureValue) {
+        $pairs += @{ Name = "BZ_RELAY_CAPTURE"; Value = "1" }
+    }
 
     if ($SocketIdValue -gt 0) {
         $pairs += @{ Name = "BZ_BUFFER_LOG_SOCKET"; Value = "$SocketIdValue" }
@@ -180,15 +186,16 @@ function Write-SteamLaunchOptions {
         [int]$PayloadBytesValue,
         [int]$RingRecordsValue,
         [int]$SocketIdValue,
-        [string]$PeerFilterValue
+        [string]$PeerFilterValue,
+        [bool]$RelayCaptureValue
     )
 
     $parts = @()
-    foreach ($pair in (Build-EnvAssignments -PayloadBytesValue $PayloadBytesValue -RingRecordsValue $RingRecordsValue -SocketIdValue $SocketIdValue -PeerFilterValue $PeerFilterValue)) {
+    foreach ($pair in (Build-EnvAssignments -PayloadBytesValue $PayloadBytesValue -RingRecordsValue $RingRecordsValue -SocketIdValue $SocketIdValue -PeerFilterValue $PeerFilterValue -RelayCaptureValue $RelayCaptureValue)) {
         $parts += "set $($pair.Name)=$($pair.Value)"
     }
 
-    $line = ($parts -join " && ") + " && %command%"
+    $line = ($parts -join " && ") + " && %command%" + $(if ($RelayCaptureValue) { " /iprelay" } else { "" })
     @(
         "Steam launch options for this OpenShim buffer-capture session:",
         "",
@@ -203,7 +210,8 @@ function Write-DirectLaunchScript {
         [int]$PayloadBytesValue,
         [int]$RingRecordsValue,
         [int]$SocketIdValue,
-        [string]$PeerFilterValue
+        [string]$PeerFilterValue,
+        [bool]$RelayCaptureValue
     )
 
     if (-not $GameExe) {
@@ -217,11 +225,12 @@ function Write-DirectLaunchScript {
 
     $gameDir = Split-Path -Parent $GameExe
     $lines = @("@echo off")
-    foreach ($pair in (Build-EnvAssignments -PayloadBytesValue $PayloadBytesValue -RingRecordsValue $RingRecordsValue -SocketIdValue $SocketIdValue -PeerFilterValue $PeerFilterValue)) {
+    foreach ($pair in (Build-EnvAssignments -PayloadBytesValue $PayloadBytesValue -RingRecordsValue $RingRecordsValue -SocketIdValue $SocketIdValue -PeerFilterValue $PeerFilterValue -RelayCaptureValue $RelayCaptureValue)) {
         $lines += "set $($pair.Name)=$($pair.Value)"
     }
     $lines += ('pushd "{0}"' -f $gameDir)
-    $lines += ('start "" "{0}"' -f $GameExe)
+    $launchSuffix = if ($RelayCaptureValue) { " /iprelay" } else { "" }
+    $lines += (('start "" "{0}"{1}') -f $GameExe, $launchSuffix)
     $lines += "popd"
     $lines | Out-File -FilePath $OutFile -Encoding ascii
 }
@@ -252,26 +261,30 @@ function Start-Session {
         exit 1
     }
 
+    $effectivePayloadBytes = if ($RelayCapture) { 2048 } else { $PayloadBytes }
+    $effectiveRingRecords = if ($RelayCapture -and $RingRecords -eq 65536) { 32768 } else { $RingRecords }
+
     $utcStamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
     $sessionDir = Join-Path $repoRoot "test_bundles\openshim_buffer_windows_$env:COMPUTERNAME`_$utcStamp"
     New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
 
     $sessionDir | Out-File -FilePath $currentFile -Encoding utf8
     $resolvedGamePath | Out-File -FilePath (Join-Path $sessionDir "game_path.txt") -Encoding utf8
-    $PayloadBytes | Out-File -FilePath (Join-Path $sessionDir "payload_bytes.txt") -Encoding utf8
-    $RingRecords | Out-File -FilePath (Join-Path $sessionDir "ring_records.txt") -Encoding utf8
+    $effectivePayloadBytes | Out-File -FilePath (Join-Path $sessionDir "payload_bytes.txt") -Encoding utf8
+    $effectiveRingRecords | Out-File -FilePath (Join-Path $sessionDir "ring_records.txt") -Encoding utf8
+    [int][bool]$RelayCapture | Out-File -FilePath (Join-Path $sessionDir "relay_capture.txt") -Encoding utf8
     $SocketId | Out-File -FilePath (Join-Path $sessionDir "socket_filter.txt") -Encoding utf8
     $PeerFilter | Out-File -FilePath (Join-Path $sessionDir "peer_filter.txt") -Encoding utf8
     (Get-Date).ToUniversalTime().ToString("o") | Out-File -FilePath (Join-Path $sessionDir "start_utc.txt") -Encoding utf8
 
     $gameExe = Get-GameExecutable -ResolvedGamePath $resolvedGamePath
-    Write-SteamLaunchOptions -OutFile (Join-Path $sessionDir "steam_launch_options.txt") -PayloadBytesValue $PayloadBytes -RingRecordsValue $RingRecords -SocketIdValue $SocketId -PeerFilterValue $PeerFilter
-    Write-DirectLaunchScript -OutFile (Join-Path $sessionDir "launch_with_buffer_log.cmd") -GameExe $gameExe -PayloadBytesValue $PayloadBytes -RingRecordsValue $RingRecords -SocketIdValue $SocketId -PeerFilterValue $PeerFilter
+    Write-SteamLaunchOptions -OutFile (Join-Path $sessionDir "steam_launch_options.txt") -PayloadBytesValue $effectivePayloadBytes -RingRecordsValue $effectiveRingRecords -SocketIdValue $SocketId -PeerFilterValue $PeerFilter -RelayCaptureValue ([bool]$RelayCapture)
+    Write-DirectLaunchScript -OutFile (Join-Path $sessionDir "launch_with_buffer_log.cmd") -GameExe $gameExe -PayloadBytesValue $effectivePayloadBytes -RingRecordsValue $effectiveRingRecords -SocketIdValue $SocketId -PeerFilterValue $PeerFilter -RelayCaptureValue ([bool]$RelayCapture)
 
     @(
         "1. If you are using Steam, copy the launch line from steam_launch_options.txt.",
         "2. Otherwise run launch_with_buffer_log.cmd from this session folder.",
-        "3. Reproduce the multiplayer issue.",
+        $(if ($RelayCapture) { "3. Have both players launch with /iprelay, create/join a game, exchange gameplay traffic, then exit the game normally." } else { "3. Reproduce the multiplayer issue." }),
         "4. Optional marker: .\buffer_logger_windows.ps1 -Action Mark -Message ""loss spike during combat""",
         "5. When finished run: .\buffer_logger_windows.ps1 -Action Stop",
         "",
@@ -280,6 +293,7 @@ function Start-Session {
         "- BZLogger.txt",
         "- bz_buffer_log.bin",
         "- bz_buffer_log.meta.txt",
+        "- bz_relay_control.jsonl (relay capture only; excludes Authorization messages)",
         "- net.ini",
         "- multi.ini"
     ) | Out-File -FilePath (Join-Path $sessionDir "README_NEXT_STEPS.txt") -Encoding utf8
@@ -304,8 +318,9 @@ function Stop-Session {
 
     Collect-File -Source (Join-Path $gamePathResolved "logs\openshim.log") -DestinationDir $sessionDir -StatusFile $statusFile
     Collect-File -Source (Join-Path $gamePathResolved "logs\BZLogger.txt") -DestinationDir $sessionDir -StatusFile $statusFile
-    Collect-File -Source (Join-Path $gamePathResolved "bz_buffer_log.bin") -DestinationDir $sessionDir -StatusFile $statusFile
-    Collect-File -Source (Join-Path $gamePathResolved "bz_buffer_log.meta.txt") -DestinationDir $sessionDir -StatusFile $statusFile
+    Collect-File -Source (Join-Path $gamePathResolved "logs\bz_buffer_log.bin") -DestinationDir $sessionDir -StatusFile $statusFile
+    Collect-File -Source (Join-Path $gamePathResolved "logs\bz_buffer_log.meta.txt") -DestinationDir $sessionDir -StatusFile $statusFile
+    Collect-File -Source (Join-Path $gamePathResolved "logs\bz_relay_control.jsonl") -DestinationDir $sessionDir -StatusFile $statusFile
     Collect-File -Source (Join-Path $gamePathResolved "net.ini") -DestinationDir $sessionDir -StatusFile $statusFile
     Collect-File -Source (Join-Path $gamePathResolved "multi.ini") -DestinationDir $sessionDir -StatusFile $statusFile
 

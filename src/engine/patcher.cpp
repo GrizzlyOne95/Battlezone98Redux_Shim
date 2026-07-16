@@ -75,13 +75,15 @@ namespace BZROpenShim
     static PatcherConfig g_Config;
 
     static const char kOpenShimVersionTag[] = "2.2.301 + BZR Open Shim";
-    static constexpr uint32_t kDefaultMaxSoundChannels = 150;
+    static constexpr uint32_t kDefaultMaxSoundChannels = 256;
     static constexpr uint32_t kMaxSupportedSoundChannels = 256;
     static constexpr uint32_t kGASMasterMaxObjectsOffset = 0x10;
     static constexpr DWORD kSoundChannelRefreshDelayMs = 1000;
 
     struct SoundChannelOverrideConfig {
         bool enabled = true;
+        bool iniOverride = false;
+        bool iniInvalid = false;
         bool envOverride = false;
         bool envInvalid = false;
         bool envClamped = false;
@@ -192,7 +194,7 @@ namespace BZROpenShim
 
     static bool IsMapRefreshPatchName(const char* name) {
         if (!name) return false;
-        return strcmp(name, "Map Sorting") == 0 || strcmp(name, "Map List Rewrite for Hop-Fix 1/3") == 0 || strcmp(name, "Map List Rewrite for Hop-Fix 2/3") == 0 || strcmp(name, "Map List Rewrite for Hop-Fix 3/3") == 0 || strcmp(name, "Map List Fix Support 1/3") == 0 || strcmp(name, "Map Jump Fix Branch Override") == 0;
+        return strcmp(name, "Map Sorting") == 0 || strcmp(name, "Map List Rewrite for Hop-Fix 1/3") == 0 || strcmp(name, "Map List Rewrite for Hop-Fix 2/3") == 0 || strcmp(name, "Map List Rewrite for Hop-Fix 3/3") == 0 || strcmp(name, "Map List Fix Support 1/3") == 0;
     }
 
     static bool IsChunkExperimentPatchName(const char* name) {
@@ -207,6 +209,18 @@ namespace BZROpenShim
         return strcmp(name, "Lobby BZRNET Integration HOST") == 0 || strcmp(name, "Lobby BZRNET Integration CLIENT") == 0;
     }
 
+    static bool IsBanFeaturePatchName(const char* name) {
+        if (!name) return false;
+        return strcmp(name, "Custom Command /help Handler") == 0 ||
+               strcmp(name, "Joiner Event Hook") == 0 ||
+               strcmp(name, "Ban Button Hook 1/2") == 0 ||
+               strcmp(name, "Ban Button Hook 2/2") == 0;
+    }
+
+    static bool IsVehicleListModFixPatchName(const char* name) {
+        return name && strncmp(name, "Vehicle List Mod Fix ", 21) == 0;
+    }
+
     static bool ShouldEnableOgreMaterialCollisionGuard() {
         static int s_cached = -1;
         if (s_cached < 0) {
@@ -217,9 +231,11 @@ namespace BZROpenShim
                        EnvFlagEnabledByName("BZR_ENABLE_OGRE_MATERIAL_COLLISION_GUARD")) {
                 s_cached = 1;
             } else {
-                // WIP feature: off by default for the stable release. Opt back in
-                // via patches.json features or the ENABLE env vars above.
-                s_cached = g_Config.GetBool("ogre_material_collision_guard", false) ? 1 : 0;
+                // Duplicate material declarations otherwise escape Ogre's script
+                // loader as ERR_DUPLICATE_ITEM and terminate the game. Keep the
+                // guard on even if patches.json is missing; the disable variables
+                // above remain an emergency compatibility escape hatch.
+                s_cached = g_Config.GetBool("ogre_material_collision_guard", true) ? 1 : 0;
             }
         }
         return s_cached != 0;
@@ -244,6 +260,38 @@ namespace BZROpenShim
         static bool s_init = false; static SoundChannelOverrideConfig s_config = {};
         if (s_init) return s_config;
         s_init = true; s_config.enabled = true; s_config.requestedChannels = kDefaultMaxSoundChannels; s_config.maxChannels = kDefaultMaxSoundChannels;
+
+        char exePath[MAX_PATH] = {};
+        const DWORD exePathLen = GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+        if (exePathLen > 0 && exePathLen < MAX_PATH) {
+            char* slash = strrchr(exePath, '\\');
+            if (slash) {
+                *(slash + 1) = '\0';
+                strcat_s(exePath, "openshim.ini");
+                static constexpr char kUnset[] = "\x01__openshim_unset__";
+                char iniValue[32] = {};
+                GetPrivateProfileStringA("General", "SoundChannels", kUnset, iniValue,
+                    static_cast<DWORD>(sizeof(iniValue)), exePath);
+                if (strcmp(iniValue, kUnset) != 0 && iniValue[0] != '\0') {
+                    s_config.iniOverride = true;
+                    char* end = nullptr;
+                    const unsigned long parsed = strtoul(iniValue, &end, 10);
+                    if (end == iniValue || *end != '\0') {
+                        s_config.iniInvalid = true;
+                    } else {
+                        s_config.requestedChannels = static_cast<uint32_t>(parsed);
+                        if (s_config.requestedChannels == 0) {
+                            s_config.enabled = false;
+                            s_config.maxChannels = 0;
+                        } else {
+                            s_config.enabled = true;
+                            s_config.maxChannels = (std::min)(s_config.requestedChannels, kMaxSupportedSoundChannels);
+                        }
+                    }
+                }
+            }
+        }
+
         const char* envNames[] = { "OPENSHIM_MAX_SOUND_CHANNELS", "BZR_MAX_SOUND_CHANNELS" };
         for (const char* envName : envNames) {
             char value[32] = {};
@@ -254,6 +302,7 @@ namespace BZROpenShim
             if (end == value || *end != '\0') { s_config.envInvalid = true; return s_config; }
             s_config.requestedChannels = static_cast<uint32_t>(parsed);
             if (s_config.requestedChannels == 0) { s_config.enabled = false; s_config.maxChannels = 0; return s_config; }
+            s_config.enabled = true;
             s_config.maxChannels = s_config.requestedChannels;
             if (s_config.maxChannels > kMaxSupportedSoundChannels) { s_config.maxChannels = kMaxSupportedSoundChannels; s_config.envClamped = true; }
             return s_config;
@@ -335,7 +384,16 @@ namespace BZROpenShim
     }
 
     static void StartSoundChannelOverride(bool isSteam) {
-        const auto config = GetSoundChannelOverrideConfig(); if (!config.enabled) return;
+        const auto config = GetSoundChannelOverrideConfig();
+        Log(L"[SOUND] channels requested=%u applied=%u source=%hs enabled=%hs%s%s\n",
+            config.requestedChannels,
+            config.maxChannels,
+            config.envOverride ? (config.sourceEnv ? config.sourceEnv : "environment") :
+                (config.iniOverride ? "openshim.ini" : "default"),
+            config.enabled ? "yes" : "no",
+            config.envInvalid || config.iniInvalid ? " invalid-value" : "",
+            config.envClamped || config.requestedChannels > kMaxSupportedSoundChannels ? " clamped" : "");
+        if (!config.enabled) return;
         SoundChannelOverrideTargets targets = {}; if (!ResolveSoundChannelOverrideTargets(isSteam, targets)) return;
         auto* ctx = new (std::nothrow) SoundChannelOverrideThreadContext(); if (!ctx) return;
         ctx->gmStorageAddress = targets.gmStorageAddress; ctx->gasMasterAddress = targets.gasMasterAddress; ctx->maxChannels = config.maxChannels;
@@ -522,6 +580,7 @@ namespace BZROpenShim
                 void* orig = isSteam ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10) : HookEngine::ResolveRelCallTarget(p.address - 1);
                 if (!orig) continue; SetProducerBuildMenuOriginal(orig); target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ProducerBuildMenuCallHook));
             } else if (p.name == "Target Reticle Popup Recent-Hit Getter Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(TargetReticlePopupRecentHitGetterHook));
+            else if (p.name == "WeaponMine Hop-Out Friendly-Fire Fix") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(WeaponMineFriendPGuard));
             else if (p.name.find("HoverCraft Engine Flame Emit Hook") != std::string::npos) target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_EngineFlameHoverCraftEmit));
             if (target) { int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(p.address + 4); p.payload.resize(4); memcpy(p.payload.data(), &rel, 4); }
         }
@@ -553,7 +612,10 @@ namespace BZROpenShim
             for (const auto& p : patches) {
                 if (p.address == 0 || p.expected_original.empty()) continue;
                 if (p.name.find("Version Notice") == std::string::npos &&
-                    p.name.find("Offensive Attack") == std::string::npos) continue;
+                    p.name.find("Offensive Attack") == std::string::npos &&
+                    p.name != "WeaponMine Hop-Out Friendly-Fire Fix" &&
+                    !IsBanFeaturePatchName(p.name.c_str()) &&
+                    !IsVehicleListModFixPatchName(p.name.c_str())) continue;
                 std::vector<uint8_t> cur(p.expected_original.size()); SIZE_T r;
                 if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(p.address), cur.data(), cur.size(), &r) || cur != p.expected_original) { all = false; break; }
             }
@@ -594,6 +656,7 @@ namespace BZROpenShim
         }
         Log(L"[DONE] Applied=%d of %u\n", app, static_cast<unsigned>(patches.size()));
         SetPatchingComplete(true); SetAppliedPatchCount(app);
+        InstallBriefingAssetOverrides();
         if (ShouldEnableOgreMaterialCollisionGuard()) {
             InstallOgreMaterialCollisionGuard();
         }

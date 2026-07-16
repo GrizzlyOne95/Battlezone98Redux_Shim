@@ -15,8 +15,10 @@
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
+#include <iterator>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace BZROpenShim
 {
@@ -45,18 +47,23 @@ namespace
     constexpr uint32_t kReorderMaxPeers = 32;
     constexpr uint32_t kReorderMaxPacketBytes = 1500;
     constexpr uint32_t kBufferLogMagic = 0x474C5A42u; // 'BZLG'
-    constexpr uint32_t kBufferLogVersion = 1;
+    constexpr uint32_t kBufferLogVersion = 2;
     constexpr uint32_t kDefaultBufferLogPayloadBytes = 32;
     constexpr uint32_t kMinBufferLogPayloadBytes = 8;
-    constexpr uint32_t kMaxBufferLogPayloadBytes = 256;
+    constexpr uint32_t kMaxBufferLogPayloadBytes = 2048;
+    constexpr uint32_t kRelayCapturePayloadBytes = 2048;
+    constexpr uint32_t kRelayCaptureRingRecords = 32768;
+    constexpr uint32_t kRelayCaptureMaxWebSocketBytes = 1024 * 1024;
     constexpr uint32_t kDefaultBufferLogRingRecords = 65536;
     constexpr uint32_t kMinBufferLogRingRecords = 1024;
     constexpr uint32_t kMaxBufferLogRingRecords = 1000000;
     constexpr const char* kBufferLogBinName = "bz_buffer_log.bin";
     constexpr const char* kBufferLogMetaName = "bz_buffer_log.meta.txt";
+    constexpr const char* kRelayControlLogName = "bz_relay_control.jsonl";
     constexpr uint16_t kBzrNetWebSocketPort = 1337;
     constexpr uint16_t kBzrNetProbePort = 1338;
     constexpr uint16_t kBzrNetRelayPort = 1339;
+    constexpr const char* kBzrNetMatchmakingHost = "battlezone98mp.webdev.rebellion.co.uk";
     constexpr uint32_t kDefaultDscp = 46;
     constexpr uint32_t kDupQueueSlots = 128;
     constexpr uint32_t kDupTickMs = 5;
@@ -90,6 +97,10 @@ namespace
         kBufferLogEventWSARecvFrom = 2,
         kBufferLogEventIoctlSocket = 3,
         kBufferLogEventWSAIoctl = 4,
+        kBufferLogEventSendTo = 5,
+        kBufferLogEventWSASendTo = 6,
+        kBufferLogEventWSARecvCompletion = 7,
+        kBufferLogEventWSARecvFromCompletion = 8,
     };
 
 #pragma pack(push, 1)
@@ -129,6 +140,7 @@ namespace
         bool adaptivePacketReorder = true;
         bool enableReorderWake = true;
         bool enableBufferLog = false;
+        bool enableRelayCapture = false;
         bool sendDup = false;
         bool govScan = false;
         uint32_t sendBufferSize = DEFAULT_SEND_BUFFER;
@@ -156,6 +168,7 @@ namespace
         bool bufferLogSocketFilterEnabled = false;
         bool bufferLogPeerFilterEnabled = false;
         std::string bufferLogPeerText;
+        std::string matchmakingRedirectAddress;
     };
 
     struct SocketState
@@ -185,6 +198,8 @@ namespace
     using WSASendToFn = int (WSAAPI*)(SOCKET, LPWSABUF, DWORD, LPDWORD, DWORD, const sockaddr*, int, LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
     using WSARecvFromFn = int (WSAAPI*)(SOCKET, LPWSABUF, DWORD, LPDWORD, LPDWORD, sockaddr*, LPINT, LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
     using WSAIoctlFn = int (WSAAPI*)(SOCKET, DWORD, LPVOID, DWORD, LPVOID, DWORD, LPDWORD, LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
+    using SendFn = int (WSAAPI*)(SOCKET, const char*, int, int);
+    using RecvFn = int (WSAAPI*)(SOCKET, char*, int, int);
     using SendToFn = int (WSAAPI*)(SOCKET, const char*, int, int, const sockaddr*, int);
     using RecvFromFn = int (WSAAPI*)(SOCKET, char*, int, int, sockaddr*, int*);
     using IoctlSocketFn = int (WSAAPI*)(SOCKET, long, u_long*);
@@ -198,6 +213,8 @@ namespace
     using GetPeerNameFn = int (WSAAPI*)(SOCKET, sockaddr*, int*);
     using WSAGetLastErrorFn = int (WSAAPI*)();
     using WSASetLastErrorFn = void (WSAAPI*)(int);
+    using GetAddrInfoAFn = INT (WSAAPI*)(PCSTR, PCSTR, const ADDRINFOA*, PADDRINFOA*);
+    using GetQueuedCompletionStatusFn = BOOL (WINAPI*)(HANDLE, LPDWORD, PULONG_PTR, LPOVERLAPPED*, DWORD);
 
     NetConfig g_Config;
     std::string g_NetIniPath;
@@ -217,6 +234,8 @@ namespace
     WSASendToFn g_RealWSASendTo = nullptr;
     WSARecvFromFn g_RealWSARecvFrom = nullptr;
     WSAIoctlFn g_RealWSAIoctl = nullptr;
+    SendFn g_RealSend = nullptr;
+    RecvFn g_RealRecv = nullptr;
     SendToFn g_RealSendTo = nullptr;
     RecvFromFn g_RealRecvFrom = nullptr;
     IoctlSocketFn g_RealIoctlSocket = nullptr;
@@ -230,6 +249,40 @@ namespace
     GetPeerNameFn g_RealGetPeerName = nullptr;
     WSAGetLastErrorFn g_RealWSAGetLastError = nullptr;
     WSASetLastErrorFn g_RealWSASetLastError = nullptr;
+    GetAddrInfoAFn g_RealGetAddrInfoA = nullptr;
+    GetQueuedCompletionStatusFn g_RealGetQueuedCompletionStatus = nullptr;
+
+    enum class PendingIoKind : uint8_t
+    {
+        WSARecv,
+        WSARecvFrom,
+    };
+
+    struct PendingCaptureIo
+    {
+        PendingIoKind kind = PendingIoKind::WSARecv;
+        SOCKET socket = INVALID_SOCKET;
+        std::vector<WSABUF> buffers;
+        sockaddr* from = nullptr;
+        LPINT fromLen = nullptr;
+        LPWSAOVERLAPPED_COMPLETION_ROUTINE originalCompletionRoutine = nullptr;
+        uint32_t requestedLength = 0;
+        bool capturedImmediate = false;
+    };
+
+    struct WebSocketDirectionState
+    {
+        bool handshakeComplete = false;
+        uint8_t fragmentedOpcode = 0;
+        std::vector<uint8_t> pending;
+        std::vector<uint8_t> fragmented;
+    };
+
+    struct WebSocketCaptureState
+    {
+        WebSocketDirectionState outbound;
+        WebSocketDirectionState inbound;
+    };
 
     struct ReorderSlot
     {
@@ -299,10 +352,28 @@ namespace
     bool g_BufferLogEnabled = false;
     std::string g_BufferLogBinPath;
     std::string g_BufferLogMetaPath;
+    SRWLOCK g_PendingCaptureLock = SRWLOCK_INIT;
+    std::unordered_map<LPWSAOVERLAPPED, PendingCaptureIo> g_PendingCaptureIo;
+    SRWLOCK g_WebSocketCaptureLock = SRWLOCK_INIT;
+    std::unordered_map<SOCKET, WebSocketCaptureState> g_WebSocketCapture;
+    SRWLOCK g_RelayControlLogLock = SRWLOCK_INIT;
+    FILE* g_RelayControlLog = nullptr;
+    std::string g_RelayControlLogPath;
 
     uint32_t GetSocketId(SOCKET s);
     bool TryGetSockaddrPort(const sockaddr* addr, int addrLen, uint16_t* outPort);
     bool TryGetSockaddrIpv4HostOrder(const sockaddr* addr, int addrLen, uint32_t* outIpv4);
+    void HandleCompletedCaptureIo(LPWSAOVERLAPPED overlapped, DWORD transferredLength, DWORD completionError);
+    uint32_t GetRequestedWsabufBytes(LPWSABUF buffers, DWORD bufferCount);
+    void CaptureRecvPathEvent(
+        BufferLogEventType eventType,
+        SOCKET s,
+        const sockaddr* from,
+        uint16_t flags,
+        uint32_t requestedLength,
+        uint32_t transferredLength,
+        uint32_t wsaError,
+        const uint8_t* payload);
 
     void Logf(const char* fmt, ...)
     {
@@ -639,11 +710,13 @@ namespace
         g_Config.autoKickLoss = ClampUint(ReadIniUint("OpenShimSocket", "AutoKickLoss", autoKickRelax ? 200 : 0), 0, kAutokickLossMax);
         g_Config.autoKickTime = ClampUint(ReadIniUint("OpenShimSocket", "AutoKickTime", autoKickRelax ? 60000 : 0), 0, kAutokickMsMax);
         g_Config.enableBufferLog = ReadIniBool("OpenShimSocket", "EnableBufferLog", false);
+        g_Config.enableRelayCapture = ReadIniBool("OpenShimSocket", "EnableRelayCapture", false);
         g_Config.bufferLogPayloadBytes = ClampBufferLogPayloadBytes(ReadIniUint("OpenShimSocket", "BufferLogPayloadBytes", kDefaultBufferLogPayloadBytes));
         g_Config.bufferLogRingRecords = ClampBufferLogRingRecords(ReadIniUint("OpenShimSocket", "BufferLogRingRecords", kDefaultBufferLogRingRecords));
         g_Config.bufferLogSocketId = ReadIniUint("OpenShimSocket", "BufferLogSocketId", 0);
         g_Config.bufferLogSocketFilterEnabled = g_Config.bufferLogSocketId != 0;
         g_Config.bufferLogPeerText = ReadIniString("OpenShimSocket", "BufferLogPeer");
+        g_Config.matchmakingRedirectAddress = ReadIniString("OpenShimSocket", "MatchmakingRedirectAddress");
         if (!g_Config.bufferLogPeerText.empty())
         {
             std::string normalizedPeer;
@@ -658,7 +731,26 @@ namespace
             }
         }
 
-        char envValue[64] = {};
+        char envValue[256] = {};
+        if (TryReadEnvValue("BZ_MATCHMAKING_ADDRESS", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_MATCHMAKING_ADDRESS", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.matchmakingRedirectAddress = envValue;
+        }
+
+        if (g_Config.matchmakingRedirectAddress.find('/') != std::string::npos)
+        {
+            Logf("[OpenShimNet] Ignoring MatchmakingRedirectAddress containing a URL/path; use a hostname or IP only");
+            g_Config.matchmakingRedirectAddress.clear();
+        }
+
+        if (!g_Config.matchmakingRedirectAddress.empty())
+        {
+            Logf("[OpenShimNet] BZRNet matchmaking DNS redirect enabled: %s -> %s",
+                kBzrNetMatchmakingHost,
+                g_Config.matchmakingRedirectAddress.c_str());
+        }
+
         if (TryReadEnvValue("BZ_REORDER", envValue, static_cast<DWORD>(sizeof(envValue))) ||
             TryReadEnvValue("OPENSHIM_REORDER", envValue, static_cast<DWORD>(sizeof(envValue))))
         {
@@ -821,6 +913,24 @@ namespace
             }
         }
 
+        if (TryReadEnvValue("BZ_RELAY_CAPTURE", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+            TryReadEnvValue("OPENSHIM_RELAY_CAPTURE", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            g_Config.enableRelayCapture = EnvValueEnabled(envValue);
+        }
+
+        if (g_Config.enableRelayCapture)
+        {
+            g_Config.enableBufferLog = true;
+            g_Config.bufferLogPayloadBytes = kRelayCapturePayloadBytes;
+            if (g_Config.bufferLogRingRecords == kDefaultBufferLogRingRecords)
+                g_Config.bufferLogRingRecords = kRelayCaptureRingRecords;
+            g_Config.bufferLogSocketFilterEnabled = false;
+            g_Config.bufferLogPeerFilterEnabled = false;
+            g_Config.bufferLogSocketId = 0;
+            g_Config.bufferLogPeerText.clear();
+        }
+
         const std::string manifestPath = JoinPath(GetGameDir(), "netcode_manifest.json");
         if (FileExists(manifestPath))
         {
@@ -884,6 +994,8 @@ namespace
         g_RealWSASendTo = reinterpret_cast<WSASendToFn>(GetProcAddress(g_Ws2Module, "WSASendTo"));
         g_RealWSARecvFrom = reinterpret_cast<WSARecvFromFn>(GetProcAddress(g_Ws2Module, "WSARecvFrom"));
         g_RealWSAIoctl = reinterpret_cast<WSAIoctlFn>(GetProcAddress(g_Ws2Module, "WSAIoctl"));
+        g_RealSend = reinterpret_cast<SendFn>(GetProcAddress(g_Ws2Module, "send"));
+        g_RealRecv = reinterpret_cast<RecvFn>(GetProcAddress(g_Ws2Module, "recv"));
         g_RealSendTo = reinterpret_cast<SendToFn>(GetProcAddress(g_Ws2Module, "sendto"));
         g_RealRecvFrom = reinterpret_cast<RecvFromFn>(GetProcAddress(g_Ws2Module, "recvfrom"));
         g_RealIoctlSocket = reinterpret_cast<IoctlSocketFn>(GetProcAddress(g_Ws2Module, "ioctlsocket"));
@@ -897,6 +1009,13 @@ namespace
         g_RealGetPeerName = reinterpret_cast<GetPeerNameFn>(GetProcAddress(g_Ws2Module, "getpeername"));
         g_RealWSAGetLastError = reinterpret_cast<WSAGetLastErrorFn>(GetProcAddress(g_Ws2Module, "WSAGetLastError"));
         g_RealWSASetLastError = reinterpret_cast<WSASetLastErrorFn>(GetProcAddress(g_Ws2Module, "WSASetLastError"));
+        g_RealGetAddrInfoA = reinterpret_cast<GetAddrInfoAFn>(GetProcAddress(g_Ws2Module, "getaddrinfo"));
+        HMODULE kernel32 = GetModuleHandleA("kernel32.dll");
+        if (kernel32)
+        {
+            g_RealGetQueuedCompletionStatus = reinterpret_cast<GetQueuedCompletionStatusFn>(
+                GetProcAddress(kernel32, "GetQueuedCompletionStatus"));
+        }
 
         const bool ok =
             g_RealSocket &&
@@ -906,6 +1025,8 @@ namespace
             g_RealWSASendTo &&
             g_RealWSARecvFrom &&
             g_RealWSAIoctl &&
+            g_RealSend &&
+            g_RealRecv &&
             g_RealSendTo &&
             g_RealRecvFrom &&
             g_RealIoctlSocket &&
@@ -918,15 +1039,34 @@ namespace
             g_RealGetSockName &&
             g_RealGetPeerName &&
             g_RealWSAGetLastError &&
-            g_RealWSASetLastError;
+            g_RealWSASetLastError &&
+            g_RealGetAddrInfoA;
 
         if (!ok)
             LogShimA(LogLevel::Error, "net", "[OpenShimNet] Missing one or more required Winsock exports");
+        if (g_Config.enableRelayCapture && !g_RealGetQueuedCompletionStatus)
+            LogShimA(LogLevel::Error, "net", "[OpenShimNet] relay_capture cannot hook IOCP completions: GetQueuedCompletionStatus missing");
 
         g_DispatchSocket = g_RealSocket;
         g_DispatchWSASocketW = g_RealWSASocketW;
 
         return ok;
+    }
+
+    void InitializeRelayControlLog()
+    {
+        if (!g_Config.enableRelayCapture || g_RelayControlLog)
+            return;
+
+        g_RelayControlLogPath = GetGameLogPath(kRelayControlLogName);
+        fopen_s(&g_RelayControlLog, g_RelayControlLogPath.c_str(), "wb");
+        if (!g_RelayControlLog)
+        {
+            Logf("[OpenShimNet] relay_capture failed to open control log %s", g_RelayControlLogPath.c_str());
+            return;
+        }
+
+        Logf("[OpenShimNet] relay_capture control log enabled path=%s", g_RelayControlLogPath.c_str());
     }
 
     void InitializeBufferLog()
@@ -1086,7 +1226,7 @@ namespace
         if (metaFile)
         {
             std::fprintf(metaFile,
-                "format=buffer_log_v1\r\nrecord_header_size=%u\r\npayload_bytes=%u\r\nrecord_stride=%u\r\nring_records=%u\r\nrecords_written=%u\r\ntotal_events_seen=%llu\r\nsocket_filter=%u\r\npeer_filter=%s\r\n",
+                "format=buffer_log_v2\r\nrecord_header_size=%u\r\npayload_bytes=%u\r\nrecord_stride=%u\r\nring_records=%u\r\nrecords_written=%u\r\ntotal_events_seen=%llu\r\nsocket_filter=%u\r\npeer_filter=%s\r\nrelay_capture=%u\r\nrelay_control_log=%s\r\nevent_types=1:recvfrom,2:WSARecvFrom,3:ioctlsocket,4:WSAIoctl,5:sendto,6:WSASendTo,7:WSARecv_completion,8:WSARecvFrom_completion\r\n",
                 static_cast<unsigned>(sizeof(BufferLogRecordHeader)),
                 static_cast<unsigned>(g_Config.bufferLogPayloadBytes),
                 static_cast<unsigned>(g_BufferLogStride),
@@ -1094,7 +1234,9 @@ namespace
                 static_cast<unsigned>(g_BufferLogCount),
                 static_cast<unsigned long long>(g_BufferLogTotalEvents),
                 g_Config.bufferLogSocketFilterEnabled ? g_Config.bufferLogSocketId : 0,
-                g_Config.bufferLogPeerFilterEnabled ? g_Config.bufferLogPeerText.c_str() : "<off>");
+                g_Config.bufferLogPeerFilterEnabled ? g_Config.bufferLogPeerText.c_str() : "<off>",
+                g_Config.enableRelayCapture ? 1u : 0u,
+                g_Config.enableRelayCapture ? g_RelayControlLogPath.c_str() : "<off>");
             fclose(metaFile);
         }
         else
@@ -1352,6 +1494,233 @@ namespace
             return "tcp_peer";
 
         return "endpoint";
+    }
+
+    bool IsWebSocketControlSocket(SOCKET s)
+    {
+        if (!g_Config.enableRelayCapture || !g_RealGetPeerName)
+            return false;
+
+        sockaddr_storage peer = {};
+        int peerLen = static_cast<int>(sizeof(peer));
+        if (g_RealGetPeerName(s, reinterpret_cast<sockaddr*>(&peer), &peerLen) != 0)
+            return false;
+
+        uint16_t port = 0;
+        return TryGetSockaddrPort(reinterpret_cast<const sockaddr*>(&peer), peerLen, &port) &&
+            port == kBzrNetWebSocketPort;
+    }
+
+    bool IsRelayControlMessageType(const std::string& type)
+    {
+        return type == "DoUpdateLAN" ||
+            type == "DoUpdateWAN" ||
+            type == "OnLANUpdated" ||
+            type == "OnWANUpdated" ||
+            type == "DoP2PConnect" ||
+            type == "OnLobbyMemberP2PConnect" ||
+            type == "DoP2PRoute" ||
+            type == "OnP2PRoute";
+    }
+
+    bool ExtractJsonMessageType(const std::string& json, std::string& outType)
+    {
+        const size_t key = json.find("\"type\"");
+        if (key == std::string::npos)
+            return false;
+
+        const size_t colon = json.find(':', key + 6);
+        if (colon == std::string::npos)
+            return false;
+
+        size_t quote = json.find('"', colon + 1);
+        if (quote == std::string::npos)
+            return false;
+        const size_t end = json.find('"', quote + 1);
+        if (end == std::string::npos || end == quote + 1 || end - quote > 128)
+            return false;
+
+        outType.assign(json, quote + 1, end - quote - 1);
+        return true;
+    }
+
+    void WriteRelayControlMessage(SOCKET s, bool outbound, const std::string& type, const std::string& message)
+    {
+        if (!g_RelayControlLog || !IsRelayControlMessageType(type))
+            return;
+
+        std::string compact = message;
+        std::replace(compact.begin(), compact.end(), '\r', ' ');
+        std::replace(compact.begin(), compact.end(), '\n', ' ');
+
+        AcquireSRWLockExclusive(&g_RelayControlLogLock);
+        std::fprintf(
+            g_RelayControlLog,
+            "{\"tickMs\":%llu,\"direction\":\"%s\",\"socketId\":%u,\"type\":\"%s\",\"message\":%s}\n",
+            static_cast<unsigned long long>(GetTickCount64()),
+            outbound ? "outbound" : "inbound",
+            GetSocketId(s),
+            type.c_str(),
+            compact.c_str());
+        std::fflush(g_RelayControlLog);
+        ReleaseSRWLockExclusive(&g_RelayControlLogLock);
+
+        Logf("[OpenShimNet] relay_capture ws direction=%s sid=%u type=%s bytes=%u",
+            outbound ? "outbound" : "inbound",
+            GetSocketId(s),
+            type.c_str(),
+            static_cast<unsigned>(message.size()));
+    }
+
+    void ProcessWebSocketMessage(SOCKET s, bool outbound, uint8_t opcode, const std::vector<uint8_t>& payload)
+    {
+        if (opcode != 0x1 || payload.empty())
+            return;
+
+        const std::string json(payload.begin(), payload.end());
+        std::string type;
+        if (ExtractJsonMessageType(json, type))
+            WriteRelayControlMessage(s, outbound, type, json);
+    }
+
+    size_t FindHttpHeaderEnd(const std::vector<uint8_t>& data)
+    {
+        static const uint8_t delimiter[] = { '\r', '\n', '\r', '\n' };
+        const auto it = std::search(data.begin(), data.end(), std::begin(delimiter), std::end(delimiter));
+        return it == data.end() ? std::string::npos : static_cast<size_t>(it - data.begin()) + sizeof(delimiter);
+    }
+
+    void ProcessWebSocketDirection(
+        SOCKET s,
+        bool outbound,
+        WebSocketDirectionState& state,
+        const uint8_t* bytes,
+        size_t length)
+    {
+        if (!bytes || length == 0)
+            return;
+        if (state.pending.size() + length > kRelayCaptureMaxWebSocketBytes)
+        {
+            state.pending.clear();
+            state.fragmented.clear();
+            state.fragmentedOpcode = 0;
+            return;
+        }
+
+        state.pending.insert(state.pending.end(), bytes, bytes + length);
+        if (!state.handshakeComplete)
+        {
+            const size_t headerEnd = FindHttpHeaderEnd(state.pending);
+            if (headerEnd == std::string::npos)
+            {
+                if (state.pending.size() > 64 * 1024)
+                    state.pending.clear();
+                return;
+            }
+            state.pending.erase(state.pending.begin(), state.pending.begin() + headerEnd);
+            state.handshakeComplete = true;
+        }
+
+        while (state.pending.size() >= 2)
+        {
+            const uint8_t first = state.pending[0];
+            const uint8_t second = state.pending[1];
+            const bool fin = (first & 0x80u) != 0;
+            const uint8_t opcode = first & 0x0Fu;
+            const bool masked = (second & 0x80u) != 0;
+            uint64_t payloadLength = second & 0x7Fu;
+            size_t headerLength = 2;
+
+            if (payloadLength == 126)
+            {
+                if (state.pending.size() < 4)
+                    return;
+                payloadLength = (static_cast<uint64_t>(state.pending[2]) << 8) |
+                    static_cast<uint64_t>(state.pending[3]);
+                headerLength = 4;
+            }
+            else if (payloadLength == 127)
+            {
+                if (state.pending.size() < 10)
+                    return;
+                payloadLength = 0;
+                for (size_t i = 2; i < 10; ++i)
+                    payloadLength = (payloadLength << 8) | state.pending[i];
+                headerLength = 10;
+            }
+
+            if (payloadLength > kRelayCaptureMaxWebSocketBytes)
+            {
+                state.pending.clear();
+                state.fragmented.clear();
+                state.fragmentedOpcode = 0;
+                return;
+            }
+
+            uint8_t mask[4] = {};
+            if (masked)
+            {
+                if (state.pending.size() < headerLength + sizeof(mask))
+                    return;
+                std::memcpy(mask, state.pending.data() + headerLength, sizeof(mask));
+                headerLength += sizeof(mask);
+            }
+
+            if (state.pending.size() < headerLength + static_cast<size_t>(payloadLength))
+                return;
+
+            std::vector<uint8_t> payload(static_cast<size_t>(payloadLength));
+            for (size_t i = 0; i < payload.size(); ++i)
+            {
+                payload[i] = state.pending[headerLength + i];
+                if (masked)
+                    payload[i] ^= mask[i % 4];
+            }
+            state.pending.erase(
+                state.pending.begin(),
+                state.pending.begin() + headerLength + static_cast<size_t>(payloadLength));
+
+            if (opcode == 0x0)
+            {
+                if (state.fragmentedOpcode == 0 ||
+                    state.fragmented.size() + payload.size() > kRelayCaptureMaxWebSocketBytes)
+                {
+                    state.fragmented.clear();
+                    state.fragmentedOpcode = 0;
+                    continue;
+                }
+                state.fragmented.insert(state.fragmented.end(), payload.begin(), payload.end());
+                if (fin)
+                {
+                    ProcessWebSocketMessage(s, outbound, state.fragmentedOpcode, state.fragmented);
+                    state.fragmented.clear();
+                    state.fragmentedOpcode = 0;
+                }
+            }
+            else if (opcode == 0x1 || opcode == 0x2)
+            {
+                if (fin)
+                {
+                    ProcessWebSocketMessage(s, outbound, opcode, payload);
+                }
+                else
+                {
+                    state.fragmentedOpcode = opcode;
+                    state.fragmented = std::move(payload);
+                }
+            }
+        }
+    }
+
+    void FeedWebSocketCapture(SOCKET s, bool outbound, const uint8_t* bytes, size_t length)
+    {
+        if (!g_Config.enableRelayCapture || !IsWebSocketControlSocket(s) || !bytes || length == 0)
+            return;
+
+        AcquireSRWLockExclusive(&g_WebSocketCaptureLock);
+        WebSocketCaptureState& state = g_WebSocketCapture[s];
+        ProcessWebSocketDirection(s, outbound, outbound ? state.outbound : state.inbound, bytes, length);
+        ReleaseSRWLockExclusive(&g_WebSocketCaptureLock);
     }
 
     uint32_t GetSocketId(SOCKET s)
@@ -2026,6 +2395,189 @@ namespace
         return copied;
     }
 
+    bool RegisterPendingCaptureIo(
+        LPWSAOVERLAPPED overlapped,
+        PendingIoKind kind,
+        SOCKET s,
+        LPWSABUF buffers,
+        DWORD bufferCount,
+        sockaddr* from,
+        LPINT fromLen,
+        LPWSAOVERLAPPED_COMPLETION_ROUTINE originalCompletionRoutine)
+    {
+        if (!g_Config.enableRelayCapture || !overlapped || !buffers || bufferCount == 0)
+            return false;
+
+        PendingCaptureIo pending = {};
+        pending.kind = kind;
+        pending.socket = s;
+        pending.buffers.assign(buffers, buffers + bufferCount);
+        pending.from = from;
+        pending.fromLen = fromLen;
+        pending.originalCompletionRoutine = originalCompletionRoutine;
+        pending.requestedLength = GetRequestedWsabufBytes(buffers, bufferCount);
+
+        AcquireSRWLockExclusive(&g_PendingCaptureLock);
+        g_PendingCaptureIo[overlapped] = std::move(pending);
+        ReleaseSRWLockExclusive(&g_PendingCaptureLock);
+        return true;
+    }
+
+    bool TakePendingCaptureIo(LPWSAOVERLAPPED overlapped, PendingCaptureIo& outPending)
+    {
+        if (!overlapped)
+            return false;
+
+        AcquireSRWLockExclusive(&g_PendingCaptureLock);
+        const auto it = g_PendingCaptureIo.find(overlapped);
+        if (it == g_PendingCaptureIo.end())
+        {
+            ReleaseSRWLockExclusive(&g_PendingCaptureLock);
+            return false;
+        }
+        outPending = std::move(it->second);
+        g_PendingCaptureIo.erase(it);
+        ReleaseSRWLockExclusive(&g_PendingCaptureLock);
+        return true;
+    }
+
+    void MarkPendingCaptureImmediate(LPWSAOVERLAPPED overlapped)
+    {
+        if (!overlapped)
+            return;
+        AcquireSRWLockExclusive(&g_PendingCaptureLock);
+        const auto it = g_PendingCaptureIo.find(overlapped);
+        if (it != g_PendingCaptureIo.end())
+            it->second.capturedImmediate = true;
+        ReleaseSRWLockExclusive(&g_PendingCaptureLock);
+    }
+
+    void CancelPendingCaptureIo(LPWSAOVERLAPPED overlapped)
+    {
+        if (!overlapped)
+            return;
+        AcquireSRWLockExclusive(&g_PendingCaptureLock);
+        g_PendingCaptureIo.erase(overlapped);
+        ReleaseSRWLockExclusive(&g_PendingCaptureLock);
+    }
+
+    void PurgeWebSocketCaptureForSocket(SOCKET s)
+    {
+        AcquireSRWLockExclusive(&g_WebSocketCaptureLock);
+        g_WebSocketCapture.erase(s);
+        ReleaseSRWLockExclusive(&g_WebSocketCaptureLock);
+    }
+
+    void CaptureCompletedIo(const PendingCaptureIo& pending, DWORD transferredLength, DWORD completionError)
+    {
+        if (pending.capturedImmediate)
+            return;
+
+        const uint32_t captureLength = (std::min)(
+            static_cast<uint32_t>(transferredLength),
+            kRelayCaptureMaxWebSocketBytes);
+        std::vector<uint8_t> payload(captureLength);
+        const uint32_t copied = captureLength > 0
+            ? GatherWsabufPayload(
+                const_cast<LPWSABUF>(pending.buffers.data()),
+                static_cast<DWORD>(pending.buffers.size()),
+                payload.data(),
+                captureLength)
+            : 0;
+        payload.resize(copied);
+
+        sockaddr_storage peer = {};
+        int peerLen = 0;
+        const sockaddr* endpoint = nullptr;
+        if (pending.kind == PendingIoKind::WSARecvFrom && pending.from)
+        {
+            endpoint = pending.from;
+            peerLen = pending.fromLen ? *pending.fromLen : static_cast<int>(sizeof(sockaddr_in));
+        }
+        else if (g_RealGetPeerName)
+        {
+            peerLen = static_cast<int>(sizeof(peer));
+            if (g_RealGetPeerName(pending.socket, reinterpret_cast<sockaddr*>(&peer), &peerLen) == 0)
+                endpoint = reinterpret_cast<const sockaddr*>(&peer);
+            else
+                peerLen = 0;
+        }
+
+        if (pending.kind == PendingIoKind::WSARecvFrom && IsUdpSocket(pending.socket))
+        {
+            CaptureRecvPathEvent(
+                kBufferLogEventWSARecvFromCompletion,
+                pending.socket,
+                endpoint,
+                0,
+                pending.requestedLength,
+                transferredLength,
+                completionError,
+                payload.empty() ? nullptr : payload.data());
+        }
+
+        if (!payload.empty())
+            FeedWebSocketCapture(pending.socket, false, payload.data(), payload.size());
+        if (completionError == 0)
+            LogPacketActivity(
+                pending.kind == PendingIoKind::WSARecvFrom ? "WSARecvFrom/IOCP" : "WSARecv/IOCP",
+                pending.socket,
+                false,
+                static_cast<int>(transferredLength),
+                endpoint,
+                peerLen);
+    }
+
+    void HandleCompletedCaptureIo(LPWSAOVERLAPPED overlapped, DWORD transferredLength, DWORD completionError)
+    {
+        PendingCaptureIo pending = {};
+        if (TakePendingCaptureIo(overlapped, pending))
+            CaptureCompletedIo(pending, transferredLength, completionError);
+    }
+
+    void CALLBACK RelayCaptureCompletionRoutine(
+        DWORD error,
+        DWORD transferredLength,
+        LPWSAOVERLAPPED overlapped,
+        DWORD flags)
+    {
+        PendingCaptureIo pending = {};
+        LPWSAOVERLAPPED_COMPLETION_ROUTINE original = nullptr;
+        if (TakePendingCaptureIo(overlapped, pending))
+        {
+            original = pending.originalCompletionRoutine;
+            CaptureCompletedIo(pending, transferredLength, error);
+        }
+        if (original)
+            original(error, transferredLength, overlapped, flags);
+    }
+
+    BOOL WINAPI Hook_GetQueuedCompletionStatus(
+        HANDLE completionPort,
+        LPDWORD transferredLength,
+        PULONG_PTR completionKey,
+        LPOVERLAPPED* overlapped,
+        DWORD milliseconds)
+    {
+        const BOOL rc = g_RealGetQueuedCompletionStatus(
+            completionPort,
+            transferredLength,
+            completionKey,
+            overlapped,
+            milliseconds);
+        const DWORD error = rc ? ERROR_SUCCESS : GetLastError();
+        if (overlapped && *overlapped)
+        {
+            HandleCompletedCaptureIo(
+                *overlapped,
+                transferredLength ? *transferredLength : 0,
+                error);
+        }
+        if (!rc)
+            SetLastError(error);
+        return rc;
+    }
+
     void DupPurgeSocket(SOCKET s)
     {
         AcquireSRWLockExclusive(&g_DupLock);
@@ -2537,6 +3089,26 @@ namespace
             g_RealWSASetLastError(err);
     }
 
+    INT WSAAPI Hook_getaddrinfo(
+        PCSTR nodeName,
+        PCSTR serviceName,
+        const ADDRINFOA* hints,
+        PADDRINFOA* result)
+    {
+        PCSTR resolvedNode = nodeName;
+        if (nodeName &&
+            !g_Config.matchmakingRedirectAddress.empty() &&
+            _stricmp(nodeName, kBzrNetMatchmakingHost) == 0)
+        {
+            resolvedNode = g_Config.matchmakingRedirectAddress.c_str();
+            Logf("[OpenShimNet] Redirecting BZRNet lookup %s -> %s",
+                nodeName,
+                resolvedNode);
+        }
+
+        return g_RealGetAddrInfoA(resolvedNode, serviceName, hints, result);
+    }
+
     SOCKET WSAAPI Hook_socket(int af, int type, int protocol)
     {
         const SocketFn dispatch = g_DispatchSocket ? g_DispatchSocket : g_RealSocket;
@@ -2650,6 +3222,7 @@ namespace
         const int rc = g_RealCloseSocket(s);
         if (rc == 0)
         {
+            PurgeWebSocketCaptureForSocket(s);
             ClearReorderStateForSocket(s);
             DupPurgeSocket(s);
             LogSocketSummaryAndForget(s);
@@ -2668,19 +3241,67 @@ namespace
     {
         EnsureSocketOptions(s);
         const int rc = g_RealWSASend(s, buffers, bufferCount, bytesSent, flags, overlapped, completionRoutine);
+        const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
+        if (g_Config.enableRelayCapture &&
+            (rc == 0 || err == WSA_IO_PENDING) &&
+            IsWebSocketControlSocket(s))
+        {
+            const uint32_t requested = GetRequestedWsabufBytes(buffers, bufferCount);
+            const uint32_t accepted = (rc == 0 && bytesSent && *bytesSent > 0) ? *bytesSent : requested;
+            std::vector<uint8_t> payload((std::min)(accepted, kRelayCaptureMaxWebSocketBytes));
+            const uint32_t copied = payload.empty()
+                ? 0
+                : GatherWsabufPayload(buffers, bufferCount, payload.data(), static_cast<uint32_t>(payload.size()));
+            if (copied > 0)
+                FeedWebSocketCapture(s, true, payload.data(), copied);
+        }
         if (rc == 0 && bytesSent)
             LogPacketActivity("WSASend", s, true, static_cast<int>(*bytesSent), nullptr, 0);
         LogSocketError("WSASend", s, rc, &SocketState::lastSendError);
+        if (rc == SOCKET_ERROR && g_RealWSASetLastError)
+            g_RealWSASetLastError(err);
         return rc;
     }
 
     int WSAAPI Hook_WSARecv(SOCKET s, LPWSABUF buffers, DWORD bufferCount, LPDWORD bytesRecv, LPDWORD flags, LPWSAOVERLAPPED overlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE completionRoutine)
     {
         EnsureSocketOptions(s);
-        const int rc = g_RealWSARecv(s, buffers, bufferCount, bytesRecv, flags, overlapped, completionRoutine);
+        const bool pendingRegistered = RegisterPendingCaptureIo(
+            overlapped,
+            PendingIoKind::WSARecv,
+            s,
+            buffers,
+            bufferCount,
+            nullptr,
+            nullptr,
+            completionRoutine);
+        const auto effectiveCompletion = pendingRegistered && completionRoutine
+            ? RelayCaptureCompletionRoutine
+            : completionRoutine;
+        const int rc = g_RealWSARecv(s, buffers, bufferCount, bytesRecv, flags, overlapped, effectiveCompletion);
+        const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
+        if (rc == 0 && bytesRecv && *bytesRecv > 0)
+        {
+            std::vector<uint8_t> payload((std::min)(static_cast<uint32_t>(*bytesRecv), kRelayCaptureMaxWebSocketBytes));
+            const uint32_t copied = GatherWsabufPayload(
+                buffers,
+                bufferCount,
+                payload.data(),
+                static_cast<uint32_t>(payload.size()));
+            if (copied > 0)
+                FeedWebSocketCapture(s, false, payload.data(), copied);
+            if (pendingRegistered)
+                MarkPendingCaptureImmediate(overlapped);
+        }
+        else if (pendingRegistered && err != WSA_IO_PENDING)
+        {
+            CancelPendingCaptureIo(overlapped);
+        }
         if (rc == 0 && bytesRecv)
             LogPacketActivity("WSARecv", s, false, static_cast<int>(*bytesRecv), nullptr, 0);
         LogSocketError("WSARecv", s, rc, &SocketState::lastRecvError);
+        if (rc == SOCKET_ERROR && g_RealWSASetLastError)
+            g_RealWSASetLastError(err);
         return rc;
     }
 
@@ -2689,6 +3310,22 @@ namespace
         EnsureSocketOptions(s);
         const int rc = g_RealWSASendTo(s, buffers, bufferCount, bytesSent, flags, to, toLen, overlapped, completionRoutine);
         const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
+        if (g_BufferLogEnabled && IsUdpSocket(s) && (rc == 0 || err == WSA_IO_PENDING))
+        {
+            uint8_t capture[kRelayCapturePayloadBytes] = {};
+            const uint32_t requested = GetRequestedWsabufBytes(buffers, bufferCount);
+            const uint32_t copied = GatherWsabufPayload(buffers, bufferCount, capture, g_Config.bufferLogPayloadBytes);
+            BufferLogEvent(
+                kBufferLogEventWSASendTo,
+                s,
+                to,
+                static_cast<uint16_t>(flags & 0xFFFFu),
+                requested,
+                rc == 0 && bytesSent ? *bytesSent : requested,
+                static_cast<uint32_t>(err),
+                copied > 0 ? capture : nullptr,
+                static_cast<uint16_t>(copied));
+        }
         if (rc == 0 && bytesSent)
         {
             LogPacketActivity("WSASendTo", s, true, static_cast<int>(*bytesSent), to, toLen);
@@ -2706,11 +3343,57 @@ namespace
         return rc;
     }
 
+    int WSAAPI Hook_send(SOCKET s, const char* buffer, int length, int flags)
+    {
+        EnsureSocketOptions(s);
+        const int rc = g_RealSend(s, buffer, length, flags);
+        const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
+        if (rc > 0 && buffer)
+            FeedWebSocketCapture(s, true, reinterpret_cast<const uint8_t*>(buffer), static_cast<size_t>(rc));
+        if (rc >= 0)
+            LogPacketActivity("send", s, true, rc, nullptr, 0);
+        LogSocketError("send", s, rc == SOCKET_ERROR ? SOCKET_ERROR : 0, &SocketState::lastSendError);
+        if (rc == SOCKET_ERROR && g_RealWSASetLastError)
+            g_RealWSASetLastError(err);
+        return rc;
+    }
+
+    int WSAAPI Hook_recv(SOCKET s, char* buffer, int length, int flags)
+    {
+        EnsureSocketOptions(s);
+        const int rc = g_RealRecv(s, buffer, length, flags);
+        const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
+        if (rc > 0 && buffer)
+            FeedWebSocketCapture(s, false, reinterpret_cast<const uint8_t*>(buffer), static_cast<size_t>(rc));
+        if (rc >= 0)
+            LogPacketActivity("recv", s, false, rc, nullptr, 0);
+        LogSocketError("recv", s, rc == SOCKET_ERROR ? SOCKET_ERROR : 0, &SocketState::lastRecvError);
+        if (rc == SOCKET_ERROR && g_RealWSASetLastError)
+            g_RealWSASetLastError(err);
+        return rc;
+    }
+
     int WSAAPI Hook_sendto(SOCKET s, const char* buffer, int length, int flags, const sockaddr* to, int toLen)
     {
         EnsureSocketOptions(s);
         const int rc = g_RealSendTo(s, buffer, length, flags, to, toLen);
         const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
+        if (g_BufferLogEnabled && IsUdpSocket(s) && buffer && rc > 0)
+        {
+            const uint16_t captured = static_cast<uint16_t>((std::min)(
+                static_cast<uint32_t>(rc),
+                g_Config.bufferLogPayloadBytes));
+            BufferLogEvent(
+                kBufferLogEventSendTo,
+                s,
+                to,
+                static_cast<uint16_t>(flags & 0xFFFFu),
+                length > 0 ? static_cast<uint32_t>(length) : 0,
+                static_cast<uint32_t>(rc),
+                0,
+                reinterpret_cast<const uint8_t*>(buffer),
+                captured);
+        }
         if (rc != SOCKET_ERROR)
         {
             LogPacketActivity("sendto", s, true, rc, to, toLen);
@@ -2796,11 +3479,37 @@ namespace
                     reason);
             }
 
-            const int rc = g_RealWSARecvFrom(s, buffers, bufferCount, bytesRecv, flags, from, fromLen, overlapped, completionRoutine);
+            const bool pendingRegistered = RegisterPendingCaptureIo(
+                overlapped,
+                PendingIoKind::WSARecvFrom,
+                s,
+                buffers,
+                bufferCount,
+                from,
+                fromLen,
+                completionRoutine);
+            const auto effectiveCompletion = pendingRegistered && completionRoutine
+                ? RelayCaptureCompletionRoutine
+                : completionRoutine;
+            const int rc = g_RealWSARecvFrom(s, buffers, bufferCount, bytesRecv, flags, from, fromLen, overlapped, effectiveCompletion);
             const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
-            const uint8_t* payload = (rc == 0 && buffers && bufferCount > 0 && buffers[0].buf)
-                ? reinterpret_cast<const uint8_t*>(buffers[0].buf)
-                : nullptr;
+            std::vector<uint8_t> capture;
+            if (rc == 0 && bytesRecv && *bytesRecv > 0)
+            {
+                capture.resize((std::min)(static_cast<uint32_t>(*bytesRecv), g_Config.bufferLogPayloadBytes));
+                const uint32_t copied = GatherWsabufPayload(
+                    buffers,
+                    bufferCount,
+                    capture.data(),
+                    static_cast<uint32_t>(capture.size()));
+                capture.resize(copied);
+                if (pendingRegistered)
+                    MarkPendingCaptureImmediate(overlapped);
+            }
+            else if (pendingRegistered && err != WSA_IO_PENDING)
+            {
+                CancelPendingCaptureIo(overlapped);
+            }
             CaptureRecvPathEvent(
                 kBufferLogEventWSARecvFrom,
                 s,
@@ -2809,7 +3518,7 @@ namespace
                 GetRequestedWsabufBytes(buffers, bufferCount),
                 (rc == 0 && bytesRecv) ? *bytesRecv : 0,
                 static_cast<uint32_t>(err),
-                payload);
+                capture.empty() ? nullptr : capture.data());
             if (rc == 0 && bytesRecv)
                 LogPacketActivity("WSARecvFrom", s, false, static_cast<int>(*bytesRecv), from, fromLen ? *fromLen : 0);
             LogSocketError("WSARecvFrom", s, rc, &SocketState::lastRecvFromError);
@@ -3283,12 +3992,15 @@ namespace
 
             const HookTarget targets[] =
             {
+                { "getaddrinfo", 0, reinterpret_cast<FARPROC>(Hook_getaddrinfo) },
                 { "socket", 23, reinterpret_cast<FARPROC>(Hook_socket) },
                 { "WSASocketW", 0, reinterpret_cast<FARPROC>(Hook_WSASocketW) },
                 { "bind", 2, reinterpret_cast<FARPROC>(Hook_bind) },
                 { "connect", 4, reinterpret_cast<FARPROC>(Hook_connect) },
                 { "WSAConnect", 0, reinterpret_cast<FARPROC>(Hook_WSAConnect) },
                 { "closesocket", 3, reinterpret_cast<FARPROC>(Hook_closesocket) },
+                { "send", 19, reinterpret_cast<FARPROC>(Hook_send) },
+                { "recv", 16, reinterpret_cast<FARPROC>(Hook_recv) },
                 { "sendto", 20, reinterpret_cast<FARPROC>(Hook_sendto) },
                 { "recvfrom", 17, reinterpret_cast<FARPROC>(Hook_recvfrom) },
                 { "setsockopt", 21, reinterpret_cast<FARPROC>(Hook_setsockopt) },
@@ -3318,6 +4030,52 @@ namespace
 
         LogShimA(LogLevel::Debug, "net", "[OpenShimNet] Module %s does not import ws2_32.dll; no hooks installed", moduleLabel);
     }
+
+    void PatchCompletionImportsForModule(HMODULE module, const char* moduleLabel)
+    {
+        if (!g_Config.enableRelayCapture || !module || !g_RealGetQueuedCompletionStatus)
+            return;
+
+        auto* base = reinterpret_cast<uint8_t*>(module);
+        auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+        if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+            return;
+        auto* nt = reinterpret_cast<IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
+        if (nt->Signature != IMAGE_NT_SIGNATURE)
+            return;
+
+        const auto& importDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+        if (importDir.VirtualAddress == 0)
+            return;
+
+        auto* importDesc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + importDir.VirtualAddress);
+        for (; importDesc->Name; ++importDesc)
+        {
+            const char* dllName = reinterpret_cast<const char*>(base + importDesc->Name);
+            if (_stricmp(dllName, "kernel32.dll") != 0)
+                continue;
+
+            auto* origThunk = importDesc->OriginalFirstThunk
+                ? reinterpret_cast<IMAGE_THUNK_DATA32*>(base + importDesc->OriginalFirstThunk)
+                : reinterpret_cast<IMAGE_THUNK_DATA32*>(base + importDesc->FirstThunk);
+            auto* thunk = reinterpret_cast<IMAGE_THUNK_DATA32*>(base + importDesc->FirstThunk);
+            const HookTarget target = {
+                "GetQueuedCompletionStatus",
+                0,
+                reinterpret_cast<FARPROC>(Hook_GetQueuedCompletionStatus),
+            };
+            FARPROC previousTarget = nullptr;
+            if (PatchImportSlot(module, moduleLabel, origThunk, thunk, target, &previousTarget))
+            {
+                if (previousTarget && previousTarget != reinterpret_cast<FARPROC>(Hook_GetQueuedCompletionStatus))
+                    g_RealGetQueuedCompletionStatus = reinterpret_cast<GetQueuedCompletionStatusFn>(previousTarget);
+                Logf("[OpenShimNet] relay_capture IOCP completion hook installed in %s", moduleLabel);
+            }
+            return;
+        }
+
+        LogShimA(LogLevel::Warn, "net", "[OpenShimNet] relay_capture GetQueuedCompletionStatus import not found in %s", moduleLabel);
+    }
 } // namespace
 
     BOOL CALLBACK InitializeNetworkOptimizerOnce(PINIT_ONCE, PVOID, PVOID*)
@@ -3326,7 +4084,7 @@ namespace
 
         LogShimA(LogLevel::Info, "net", "[OpenShimNet] Initializing");
         LogNetIniValues();
-        Logf("[OpenShimNet] Config enabled=%d logging=%d sendBufferSize=%u recvBufferSize=%u applySocketBuffers=%d dscp=%u tcpNoDelay=%d keepAlive=%d disableUdpConnReset=%d logSocketErrors=%d logSocketLifecycle=%d logSocketPackets=%d logSockOptCalls=%d logPacketReorder=%d packetLogLimit=%u packetLogInterval=%u enablePacketReorder=%d reorderWindowMs=%u reorderMinWindowMs=%u reorderAdapt=%d reorderWake=%d reorderDepth=%u reorderPeers=%u reorderDrainCap=%u sendDup=%d dupDelayMs=%u dupMaxPps=%u govStart=%u govScan=%d autokickStart=%u autokickPing=%u autokickLoss=%u autokickTime=%u enableBufferLog=%d bufferLogPayloadBytes=%u bufferLogRingRecords=%u bufferLogSocketId=%u bufferLogPeer=%s",
+        Logf("[OpenShimNet] Config enabled=%d logging=%d sendBufferSize=%u recvBufferSize=%u applySocketBuffers=%d dscp=%u tcpNoDelay=%d keepAlive=%d disableUdpConnReset=%d logSocketErrors=%d logSocketLifecycle=%d logSocketPackets=%d logSockOptCalls=%d logPacketReorder=%d packetLogLimit=%u packetLogInterval=%u enablePacketReorder=%d reorderWindowMs=%u reorderMinWindowMs=%u reorderAdapt=%d reorderWake=%d reorderDepth=%u reorderPeers=%u reorderDrainCap=%u sendDup=%d dupDelayMs=%u dupMaxPps=%u govStart=%u govScan=%d autokickStart=%u autokickPing=%u autokickLoss=%u autokickTime=%u enableBufferLog=%d enableRelayCapture=%d bufferLogPayloadBytes=%u bufferLogRingRecords=%u bufferLogSocketId=%u bufferLogPeer=%s",
             g_Config.enabled ? 1 : 0,
             g_Config.logging ? 1 : 0,
             g_Config.sendBufferSize,
@@ -3361,6 +4119,7 @@ namespace
             g_Config.autoKickLoss,
             g_Config.autoKickTime,
             g_Config.enableBufferLog ? 1 : 0,
+            g_Config.enableRelayCapture ? 1 : 0,
             g_Config.bufferLogPayloadBytes,
             g_Config.bufferLogRingRecords,
             g_Config.bufferLogSocketFilterEnabled ? g_Config.bufferLogSocketId : 0,
@@ -3377,11 +4136,13 @@ namespace
         if (!LoadWinsockExports())
             return TRUE;
 
+        InitializeRelayControlLog();
         InitializeBufferLog();
         PatchWinsockImportsForModule(GetModuleHandleA(nullptr), "battlezone98redux.exe");
         PatchWinsockImportsForModule(GetModuleHandleA("Galaxy.dll"), "Galaxy.dll");
         PatchWinsockImportsForModule(GetModuleHandleA("GalaxyPeer.dll"), "GalaxyPeer.dll");
         PatchWinsockImportsForModule(GetModuleHandleA("steam_api.dll"), "steam_api.dll");
+        PatchCompletionImportsForModule(GetModuleHandleA(nullptr), "battlezone98redux.exe");
 
         if (g_Config.enablePacketReorder && g_Config.enableReorderWake && !g_WakeThread)
         {
@@ -3477,5 +4238,18 @@ namespace
             g_BufferLogRing = nullptr;
         }
         g_BufferLogEnabled = false;
+        AcquireSRWLockExclusive(&g_PendingCaptureLock);
+        g_PendingCaptureIo.clear();
+        ReleaseSRWLockExclusive(&g_PendingCaptureLock);
+        AcquireSRWLockExclusive(&g_WebSocketCaptureLock);
+        g_WebSocketCapture.clear();
+        ReleaseSRWLockExclusive(&g_WebSocketCaptureLock);
+        AcquireSRWLockExclusive(&g_RelayControlLogLock);
+        if (g_RelayControlLog)
+        {
+            std::fclose(g_RelayControlLog);
+            g_RelayControlLog = nullptr;
+        }
+        ReleaseSRWLockExclusive(&g_RelayControlLogLock);
     }
 }

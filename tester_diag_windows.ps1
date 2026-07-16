@@ -480,8 +480,9 @@ function Stop-Diagnostics {
     if ($gamePathResolved -and (Test-Path $gamePathResolved)) {
         Collect-File -Source (Join-Path $gamePathResolved "logs\openshim.log") -DestinationDir $sessionDir -StatusFile $statusFile
         Collect-File -Source (Join-Path $gamePathResolved "logs\BZLogger.txt") -DestinationDir $sessionDir -StatusFile $statusFile
-        Collect-File -Source (Join-Path $gamePathResolved "bz_buffer_log.bin") -DestinationDir $sessionDir -StatusFile $statusFile
-        Collect-File -Source (Join-Path $gamePathResolved "bz_buffer_log.meta.txt") -DestinationDir $sessionDir -StatusFile $statusFile
+        Collect-File -Source (Join-Path $gamePathResolved "logs\bz_buffer_log.bin") -DestinationDir $sessionDir -StatusFile $statusFile
+        Collect-File -Source (Join-Path $gamePathResolved "logs\bz_buffer_log.meta.txt") -DestinationDir $sessionDir -StatusFile $statusFile
+        Collect-File -Source (Join-Path $gamePathResolved "logs\bz_relay_control.jsonl") -DestinationDir $sessionDir -StatusFile $statusFile
         Collect-File -Source (Join-Path $gamePathResolved "net.ini") -DestinationDir $sessionDir -StatusFile $statusFile
         Collect-File -Source (Join-Path $gamePathResolved "multi.ini") -DestinationDir $sessionDir -StatusFile $statusFile
     }

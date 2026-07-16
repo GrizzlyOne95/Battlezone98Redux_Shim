@@ -6,6 +6,7 @@
 
 #include "winmm_proxy.h"
 #include "bzr_hooks.h"
+#include "crash_logger.h"
 #include "net_optimizer.h"
 #include "patcher.h"
 #include "hook_engine.h"
@@ -26,6 +27,7 @@ static uintptr_t g_PatchThread = 0;
 static unsigned __stdcall PatchThreadProc(void*)
 {
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread started");
+    BZROpenShim::InstallCrashLogger();
     BZROpenShim::InitializeNetworkOptimizer();
     BZROpenShim::RunPatcher(SHIM_VERSION);
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread exiting");

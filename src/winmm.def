@@ -7,6 +7,14 @@ LIBRARY winmm
 EXPORTS
     OpenShimSetUnderAttackAlertMode
     OpenShimSetTargetReticlePopupMode
+    OpenShimGetUnitVoThrottle
+    OpenShimSetUnitVoThrottle
+    OpenShimGetUnitVoQueueDepth
+    OpenShimSetUnitVoQueueDepth
+    OpenShimGetUnitVoQueueStaleMs
+    OpenShimSetUnitVoQueueStaleMs
+    OpenShimGetUnitVoMuted
+    OpenShimSetUnitVoMuted
     OpenShimSetBomberAiRangeEnabled
     OpenShimSetHowitzerVolleyEnabled
     OpenShimSetWeaponMaskCarrierBiasEnabled
@@ -18,6 +26,23 @@ EXPORTS
     OpenShimClearAllAiUnitTuning
     OpenShimSetTurretAimPitchEnabled
     OpenShimSetAttackRevealEnabled
+    OpenShimGetRawMouseInputEnabled
+    OpenShimSetRawMouseInputEnabled
+    OpenShimSetJumpSnipeCrouchEnabled
+    OpenShimGetShotConvergence
+    OpenShimSetShotConvergence
+    OpenShimGetPlayerReticleShotConvergence
+    OpenShimSetPlayerReticleShotConvergence
+    OpenShimGetSmartReticleRange
+    OpenShimSetSmartReticleRange
+    OpenShimGetScrapPilotHudTopLefts
+    OpenShimSetScrapPilotHudTopLefts
+    OpenShimRestoreScrapPilotHudStock
+    OpenShimGetGlobalTurbo
+    OpenShimSetGlobalTurbo
+    OpenShimHasUnitTurboHooks
+    OpenShimGetUnitTurbo
+    OpenShimSetUnitTurbo
     OpenShimResetMissionHookOverrides
     OpenShimGetHudSpriteRect
     OpenShimSetHudSpriteRect

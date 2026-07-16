@@ -51,14 +51,14 @@ def contains_any(text: str, patterns: list[re.Pattern[str]]) -> bool:
 
 
 def select_rows(rows: list[dict], patterns: list[re.Pattern[str]], fields: list[str], limit: int) -> list[dict]:
-    matches: list[dict] = []
-    for row in rows:
+    matches: list[tuple[int, int, dict]] = []
+    for index, row in enumerate(rows):
         haystack = " ".join(str(row.get(field, "")) for field in fields)
-        if contains_any(haystack, patterns):
-            matches.append(row)
-            if len(matches) >= limit:
-                break
-    return matches
+        score = sum(bool(pattern.search(haystack)) for pattern in patterns)
+        if score:
+            matches.append((score, index, row))
+    matches.sort(key=lambda item: (-item[0], item[1]))
+    return [item[2] for item in matches[:limit]]
 
 
 def rg_hits(root: Path, query: str, globs: list[str], limit: int) -> list[str]:
@@ -133,6 +133,13 @@ def main() -> None:
     parser.add_argument("--promoted-root", dest="promoted_roots", action="append", type=Path, help="Promoted corpus root. May be passed more than once.")
     parser.add_argument("--config", type=Path, help="Optional corpora config JSON. Uses all configured corpora unless --corpus-label is set.")
     parser.add_argument("--corpus-label", dest="corpus_labels", action="append", help="Corpus label from the config file. May be passed more than once.")
+    parser.add_argument(
+        "--supplemental-pdb",
+        dest="supplemental_pdbs",
+        action="append",
+        type=Path,
+        help="Additional structured PDB export directory. May be passed more than once.",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("reverse_engineering/workshop/re_briefs"))
     parser.add_argument("--limit", type=int, default=20)
     args = parser.parse_args()
@@ -168,6 +175,14 @@ def main() -> None:
     symbol_hits: list[dict] = []
     merged_hits: list[dict] = []
     pdb_hits: list[dict] = []
+    private_pdb_hits: list[dict] = []
+    private_local_hits: list[dict] = []
+    private_rva_hits: list[dict] = []
+    semantic_match_hits: list[dict] = []
+    semantic_validation_hits: list[dict] = []
+    semantic_local_hits: list[dict] = []
+    class_layout_hits: list[dict] = []
+    class_member_hits: list[dict] = []
     module_hits: list[dict] = []
     decomp_hits_all: list[str] = []
     corpus_summaries: list[dict] = []
@@ -199,20 +214,209 @@ def main() -> None:
         inventory_functions = read_csv_rows(inventory_dir / "functions.csv")
         inventory_symbols = read_csv_rows(inventory_dir / "symbols.csv")
         merged_matches = read_csv_rows(corpus_root / "merged" / "function_matches_by_rva.csv")
+        reassessed_rva_path = pdb_dir / "semantic_ranking" / "same_rva_candidates_reassessed.csv" if pdb_dir else Path()
+        private_rva_matches = (
+            read_csv_rows(reassessed_rva_path)
+            if pdb_dir and reassessed_rva_path.exists()
+            else read_csv_rows(corpus_root / "merged" / "private_function_matches_by_rva.csv")
+        )
         pdb_publics = read_csv_rows(pdb_dir / "public_functions.csv") if pdb_dir else []
+        pdb_private_functions = read_csv_rows(pdb_dir / "private_functions.csv") if pdb_dir else []
+        pdb_private_locals = read_csv_rows(pdb_dir / "private_locals.csv") if pdb_dir else []
+        pdb_class_layouts = read_csv_rows(pdb_dir / "class_layouts.csv") if pdb_dir else []
+        pdb_class_members = read_csv_rows(pdb_dir / "class_members.csv") if pdb_dir else []
+        semantic_matches = read_csv_rows(pdb_dir / "semantic_ranking" / "current_function_best_matches.csv") if pdb_dir else []
+        semantic_validation = (
+            read_csv_rows(pdb_dir / "semantic_ranking" / "binary_validation" / "prologue_boundary_validation.csv")
+            if pdb_dir
+            else []
+        )
+        semantic_locals = read_csv_rows(pdb_dir / "semantic_ranking" / "current_function_local_hints.csv") if pdb_dir else []
         pdb_modules = read_csv_rows(pdb_dir / "modules.csv") if pdb_dir else []
 
         function_hits.extend(prefix_rows(select_rows(inventory_functions, patterns, ["name", "signature", "namespace"], args.limit), label))
         symbol_hits.extend(prefix_rows(select_rows(inventory_symbols, patterns, ["name", "namespace", "symbol_type"], args.limit), label))
         merged_hits.extend(prefix_rows(select_rows(merged_matches, patterns, ["ghidra_name", "pdb_name", "ghidra_signature"], args.limit), label))
         pdb_hits.extend(prefix_rows(select_rows(pdb_publics, patterns, ["name"], args.limit), label))
+        private_pdb_hits.extend(
+            prefix_rows(
+                select_rows(
+                    pdb_private_functions,
+                    patterns,
+                    ["name", "signature", "module_name", "object_name", "source_files"],
+                    args.limit,
+                ),
+                label,
+            )
+        )
+        private_local_hits.extend(
+            prefix_rows(
+                select_rows(
+                    pdb_private_locals,
+                    patterns,
+                    ["function_name", "name", "type_name", "module_name"],
+                    args.limit,
+                ),
+                label,
+            )
+        )
+        private_rva_hits.extend(
+            prefix_rows(
+                select_rows(
+                    private_rva_matches,
+                    patterns,
+                    ["ghidra_name", "ghidra_signature", "pdb_name", "pdb_signature", "pdb_module", "pdb_source_files", "assessment", "semantic_target_rvas"],
+                    args.limit,
+                ),
+                label,
+            )
+        )
+        semantic_match_hits.extend(
+            prefix_rows(
+                select_rows(
+                    semantic_matches,
+                    patterns,
+                    ["pdb_name", "pdb_signature", "legacy_name", "redux_current_name", "pdb_source_files", "source_component"],
+                    args.limit,
+                ),
+                label,
+            )
+        )
+        semantic_validation_hits.extend(
+            prefix_rows(
+                select_rows(
+                    semantic_validation,
+                    patterns,
+                    ["qualified_name", "pdb_signature", "pdb_source_files", "source_component", "disposition", "entry_instructions"],
+                    args.limit,
+                ),
+                label,
+            )
+        )
+        semantic_local_hits.extend(
+            prefix_rows(
+                select_rows(
+                    semantic_locals,
+                    patterns,
+                    ["pdb_function_name", "pdb_function_signature", "local_name", "local_type", "pdb_source_files"],
+                    args.limit,
+                ),
+                label,
+            )
+        )
+        class_layout_hits.extend(
+            prefix_rows(select_rows(pdb_class_layouts, patterns, ["name", "base_classes"], args.limit), label)
+        )
+        class_member_hits.extend(
+            prefix_rows(
+                select_rows(pdb_class_members, patterns, ["owner_name", "declaration", "offset_hex"], args.limit),
+                label,
+            )
+        )
         module_hits.extend(prefix_rows(select_rows(pdb_modules, patterns, ["module_name", "object_name"], args.limit), label))
         decomp_hits_all.extend([f"[{label}] {line}" for line in rg_hits(decomp_dir, query, ["*.c"], args.limit)])
+
+    for supplemental_pdb in args.supplemental_pdbs or []:
+        pdb_dir = supplemental_pdb.resolve()
+        label = f"pdb:{pdb_dir.name}"
+        private_pdb_hits.extend(
+            prefix_rows(
+                select_rows(
+                    read_csv_rows(pdb_dir / "private_functions.csv"),
+                    patterns,
+                    ["name", "signature", "module_name", "object_name", "source_files"],
+                    args.limit,
+                ),
+                label,
+            )
+        )
+        private_local_hits.extend(
+            prefix_rows(
+                select_rows(
+                    read_csv_rows(pdb_dir / "private_locals.csv"),
+                    patterns,
+                    ["function_name", "name", "type_name", "module_name"],
+                    args.limit,
+                ),
+                label,
+            )
+        )
+        private_rva_hits.extend(
+            prefix_rows(
+                select_rows(
+                    read_csv_rows(pdb_dir / "semantic_ranking" / "same_rva_candidates_reassessed.csv")
+                    or read_csv_rows(pdb_dir / "private_function_matches_by_rva.csv"),
+                    patterns,
+                    ["ghidra_name", "ghidra_signature", "pdb_name", "pdb_signature", "pdb_module", "pdb_source_files", "assessment", "semantic_target_rvas"],
+                    args.limit,
+                ),
+                label,
+            )
+        )
+        ranking_dir = pdb_dir / "semantic_ranking"
+        semantic_match_hits.extend(
+            prefix_rows(
+                select_rows(
+                    read_csv_rows(ranking_dir / "current_function_best_matches.csv"),
+                    patterns,
+                    ["pdb_name", "pdb_signature", "legacy_name", "redux_current_name", "pdb_source_files", "source_component"],
+                    args.limit,
+                ),
+                label,
+            )
+        )
+        semantic_validation_hits.extend(
+            prefix_rows(
+                select_rows(
+                    read_csv_rows(ranking_dir / "binary_validation" / "prologue_boundary_validation.csv"),
+                    patterns,
+                    ["qualified_name", "pdb_signature", "pdb_source_files", "source_component", "disposition", "entry_instructions"],
+                    args.limit,
+                ),
+                label,
+            )
+        )
+        semantic_local_hits.extend(
+            prefix_rows(
+                select_rows(
+                    read_csv_rows(ranking_dir / "current_function_local_hints.csv"),
+                    patterns,
+                    ["pdb_function_name", "pdb_function_signature", "local_name", "local_type", "pdb_source_files"],
+                    args.limit,
+                ),
+                label,
+            )
+        )
+        class_layout_hits.extend(
+            prefix_rows(
+                select_rows(read_csv_rows(pdb_dir / "class_layouts.csv"), patterns, ["name", "base_classes"], args.limit),
+                label,
+            )
+        )
+        class_member_hits.extend(
+            prefix_rows(
+                select_rows(
+                    read_csv_rows(pdb_dir / "class_members.csv"),
+                    patterns,
+                    ["owner_name", "declaration", "offset_hex"],
+                    args.limit,
+                ),
+                label,
+            )
+        )
 
     function_hits = function_hits[: args.limit]
     symbol_hits = symbol_hits[: args.limit]
     merged_hits = merged_hits[: args.limit]
     pdb_hits = pdb_hits[: args.limit]
+    private_pdb_hits = private_pdb_hits[: args.limit]
+    private_local_hits = private_local_hits[: args.limit]
+    private_rva_hits = private_rva_hits[: args.limit]
+    semantic_match_hits = semantic_match_hits[: args.limit]
+    semantic_validation_hits = semantic_validation_hits[: args.limit]
+    semantic_local_hits = semantic_local_hits[: args.limit]
+    class_layout_hits = class_layout_hits[: args.limit]
+    class_member_hits = class_member_hits[: args.limit]
     module_hits = module_hits[: args.limit]
     note_hits = rg_hits(Path("reverse_engineering"), query, ["*.md", "*.txt"], args.limit)
     decomp_hits = dedupe_hits(decomp_hits_all, args.limit)
@@ -251,6 +455,47 @@ def main() -> None:
         "",
         *format_table(pdb_hits, ["corpus", "rva", "name"]),
         "",
+        "## PDB Private Functions (Advisory On Mismatched Builds)",
+        "",
+        *format_table(private_pdb_hits, ["corpus", "rva", "name", "signature", "module_name", "source_files", "source_line_min", "source_line_max"]),
+        "",
+        "## PDB Private Locals",
+        "",
+        *format_table(private_local_hits, ["corpus", "function_rva", "function_name", "name", "type_name", "flags", "inline_depth"]),
+        "",
+        "## Cross-Build Semantic PDB Matches",
+        "",
+        *format_table(
+            semantic_match_hits,
+            ["corpus", "confidence", "score", "redux_rva", "pdb_name", "pdb_signature", "source_component", "bsim_similarity", "bsim_significance", "reasons", "caveats"],
+        ),
+        "",
+        "## Exact-Binary Semantic Validation",
+        "",
+        *format_table(
+            semantic_validation_hits,
+            ["corpus", "disposition", "boundary_valid", "confidence", "score", "redux_rva", "qualified_name", "prologue_hex", "entry_instructions", "validation_failures", "validation_warnings"],
+        ),
+        "",
+        "## Cross-Build Local/Parameter Hints",
+        "",
+        *format_table(
+            semantic_local_hits,
+            ["corpus", "confidence", "redux_rva", "pdb_function_name", "local_name", "local_type", "is_function_parameter", "inline_depth", "pdb_local_record_count", "storage_transferable"],
+        ),
+        "",
+        "## Raw Same-RVA Private Candidates (Untrusted On This Build)",
+        "",
+        *format_table(private_rva_hits, ["corpus", "entry_rva", "ghidra_name", "pdb_name", "assessment", "semantic_target_rvas", "semantic_best_confidence", "same_rva_bsim_name"]),
+        "",
+        "## PDB Class/Struct Layouts",
+        "",
+        *format_table(class_layout_hits, ["corpus", "kind", "name", "size", "base_classes", "direct_member_count", "total_padding_bytes"]),
+        "",
+        "## PDB Direct Class Members",
+        "",
+        *format_table(class_member_hits, ["corpus", "owner_name", "owner_size", "member_kind", "offset_hex", "size", "declaration"]),
+        "",
         "## PDB Modules",
         "",
         *format_table(module_hits, ["corpus", "module_name", "object_name"]),
@@ -273,7 +518,8 @@ def main() -> None:
             "## Recommended Next Steps",
             "",
             "- Start with legacy exact-match hits for semantics and class names, then compare equivalent Redux hits for current patch targets.",
-            "- Treat Redux PDB-derived names as advisory until strings, callers, globals, or decomp structure confirm them.",
+            "- Treat Redux PDB-derived names as advisory until strings, callers, globals, or decomp structure confirm them; an exact-binary boundary validates the address, not the identity.",
+            "- Only `safe_new_apply.tsv` is automatic-rename input. Keep `high_review_ready` rows review/comment-only and `medium_hold` rows unapplied.",
             "- Open the matching decomp files under the listed decomp dirs and confirm behavior against nearby strings and call patterns.",
             "- Only move to interactive Ghidra after the combined corpus search stops narrowing the target meaningfully.",
             "- Record validated findings in a dedicated note under `reverse_engineering/` or `reverse_engineering/workshop/`.",

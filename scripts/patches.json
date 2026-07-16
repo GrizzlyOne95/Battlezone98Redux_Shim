@@ -1,6 +1,6 @@
 {
   "features": {
-    "ogre_material_collision_guard": false
+    "ogre_material_collision_guard": true
   },
   "patches": [
     {
@@ -32,6 +32,13 @@
       "fallback": "0x004EAD78"
     },
     {
+      "name": "WeaponMine Hop-Out Friendly-Fire Fix",
+      "pattern": "89 8D 54 FE FF FF 8B 95 54 FE FF FF 52 8B 8D 58 FE FF FF E8 ?? ?? ?? ?? 0F B6 C0 85 C0 74 02 EB 9A",
+      "offset": 20,
+      "expected_size": 4,
+      "fallback": "0x00612A52"
+    },
+    {
       "name": "HoverCraft Engine Flame Emit Hook 2/2",
       "pattern": "8D 95 ?? ?? ?? ?? 52 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? E9 ?? ?? ?? ?? 83 BD ?? ?? ?? ?? 00 0F 8E",
       "offset": 13,
@@ -51,7 +58,7 @@
       "expected_original": "89 4D FC 8B 45"
     },
     {
-      "name": "Map Jump Fix Branch Override",
+      "name": "Vehicle List Mod Fix 3/4 (Always Update Vehicle Control)",
       "fallback": "0x007AA5A1",
       "expected_original": "75"
     },
@@ -108,6 +115,11 @@
       "expected_original": "65 FC FF FF"
     },
     {
+      "name": "WeaponMine Hop-Out Friendly-Fire Fix",
+      "fallback": "0x00612A52",
+      "expected_original": "BA 8A EC FF"
+    },
+    {
       "name": "Engine Flame Control VTable Hook",
       "fallback": "0x008791A4",
       "expected_original": "A0 88 4C 00"
@@ -146,6 +158,11 @@
       "name": "Lobby BZRNET Integration CLIENT",
       "fallback": "0x0073E71C",
       "expected_original": "C6 45 FC 07 8D"
+    },
+    {
+      "name": "Custom Command /help Handler",
+      "fallback": "0x0062480B",
+      "expected_original": "68 3C D5 88 00"
     },
     {
       "name": "Joiner Event Hook",

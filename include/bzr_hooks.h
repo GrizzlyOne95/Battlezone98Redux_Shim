@@ -39,6 +39,7 @@ namespace BZROpenShim
     void __fastcall ChunkEffectSimulateHook(void* thisPtr, void* edx, float dt);
     void __fastcall LegacyWorldUpdateRenderQueueHook(void* thisPtr, void* edx, void* renderQueue);
     void __cdecl HandleUnderAttackAlert(float currentTime);
+    bool __fastcall WeaponMineFriendPGuard(void* minePtr, void* edx, void* targetPtr);
     void PrimeUnderAttackAlertConfig();
     bool SetUnderAttackAlertModeFromBridge(int mode);
     bool SetBomberAiRangeEnabledFromBridge(bool enabled);
@@ -59,11 +60,38 @@ namespace BZROpenShim
     bool ClearAllAiUnitTuningFromBridge();
     bool SetTurretAimPitchEnabledFromBridge(bool enabled);
     bool SetAttackRevealEnabledFromBridge(bool enabled);
+    bool GetRawMouseInputEnabledFromBridge();
+    bool SetRawMouseInputEnabledFromBridge(bool enabled);
+    bool SetJumpSnipeCrouchEnabledFromBridge(bool enabled);
+    bool GetShotConvergenceFromBridge();
+    bool SetShotConvergenceFromBridge(bool enabled);
+    bool GetPlayerReticleShotConvergenceFromBridge();
+    bool SetPlayerReticleShotConvergenceFromBridge(bool enabled);
+    float GetSmartReticleRangeFromBridge();
+    bool SetSmartReticleRangeFromBridge(float range);
+    bool GetScrapPilotHudTopLeftsFromBridge(
+        int* scrapLeft, int* scrapTop, int* pilotLeft, int* pilotTop);
+    bool SetScrapPilotHudTopLeftsFromBridge(
+        int scrapLeft, int scrapTop, int pilotLeft, int pilotTop);
+    bool RestoreScrapPilotHudStockFromBridge();
+    bool GetGlobalTurboFromBridge();
+    bool SetGlobalTurboFromBridge(bool enabled);
+    bool HasUnitTurboHooksFromBridge();
+    bool GetUnitTurboFromBridge(uint32_t handle);
+    bool SetUnitTurboFromBridge(uint32_t handle, bool enabled);
     bool ResetMissionHookOverridesFromBridge();
     float __fastcall TargetReticlePopupRecentHitGetterHook(void* objectPtr, void* edx);
     void __cdecl RevealProcessOwnerPerceivedTeamOnAttackStateEntry(void* processPtr);
     void PrimeTargetReticlePopupConfig();
     bool SetTargetReticlePopupModeFromBridge(int mode);
+    uint32_t GetUnitVoThrottleFromBridge();
+    bool SetUnitVoThrottleFromBridge(uint32_t milliseconds);
+    uint32_t GetUnitVoQueueDepthFromBridge();
+    bool SetUnitVoQueueDepthFromBridge(uint32_t depth);
+    uint32_t GetUnitVoQueueStaleMsFromBridge();
+    bool SetUnitVoQueueStaleMsFromBridge(uint32_t milliseconds);
+    bool GetUnitVoMutedFromBridge();
+    bool SetUnitVoMutedFromBridge(bool muted);
     bool GetHudSpriteRectFromBridge(const char* name, int* outX, int* outY, int* outW, int* outH);
     bool SetHudSpriteRectFromBridge(const char* name, int x, int y, int w, int h);
     bool SetHudSpriteVisibleFromBridge(const char* name, bool visible);

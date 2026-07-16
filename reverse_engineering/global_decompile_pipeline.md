@@ -8,17 +8,23 @@ What it does:
 - extracts PE string corpora from the target binary
 - exports advisory metadata from a nearby PDB even when the PDB does not match
   the EXE exactly
+- converts private procedure symbols, signatures, local variables, optimized
+  variable-location ranges, and source line tables into searchable CSV indexes
 - runs `ghidrecomp` over the binary to produce a cached Ghidra project and
   per-function decompilation corpus
 - exports a machine-readable Ghidra inventory after analysis
-- joins Ghidra functions to PDB public symbols by RVA where that still lines up
+- joins Ghidra functions to both public and private PDB procedures by RVA where
+  that still lines up, with explicit trust labels on private candidates
 
 Important behavior:
 
 - the PDB is only applied directly inside Ghidra when the EXE RSDS GUID and age
   exactly match the PDB, unless you force it
 - the PDB reference export still runs even when the pair is mismatched, because
-  names, classes, modules, and source paths remain useful as advisory metadata
+  names, signatures, locals, classes, modules, and source paths remain useful
+  as advisory metadata
+- a mismatched PDB private-RVA match is never applied automatically; unique and
+  ambiguous candidates are labeled separately for manual confirmation
 
 ## Background Run
 
@@ -76,17 +82,30 @@ Key artifacts:
 - `binary_strings\utf16_strings.csv`
 - `pdb_reference\reference.json`
 - `pdb_reference\public_functions.csv`
+- `pdb_reference\private_functions.csv`
+- `pdb_reference\private_locals.csv`
+- `pdb_reference\private_local_ranges.csv`
+- `pdb_reference\source_line_ranges.csv`
+- `pdb_reference\class_layouts.csv`
+- `pdb_reference\class_members.csv`
 - `pdb_reference\modules.csv`
 - `pdb_reference\llvm\*.txt`
 - `ghidrecomp\results\bins\<project>\decomps\*.c`
 - `inventory\functions.csv`
 - `inventory\symbols.csv`
 - `merged\function_matches_by_rva.csv`
+- `merged\private_function_matches_by_rva.csv`
+- semantic-ranking outputs after `rank_private_pdb_matches.py`:
+  - `pdb_reference\semantic_ranking\current_function_best_matches.csv`
+  - `pdb_reference\semantic_ranking\gameplay_engine_review_queue.csv`
+  - `pdb_reference\semantic_ranking\net_new_name_review_queue.csv`
+  - `pdb_reference\semantic_ranking\current_function_local_hints.csv`
+  - `pdb_reference\semantic_ranking\same_rva_candidates_reassessed.csv`
 
 ## Notes
 
-- `llvm-pdbutil` is auto-discovered at
-  `<LLVM_ROOT>\bin\llvm-pdbutil.exe`
+- `llvm-pdbutil` is auto-discovered from `PATH`, `LLVM_ROOT`, a standard LLVM
+  install, or Visual Studio 2022's bundled LLVM tools
 - `GHIDRA_INSTALL_DIR` is taken from the environment, which is already set in
   this environment
 - the pipeline is safe to rerun; `ghidrecomp` uses its cached project unless
@@ -114,6 +133,41 @@ After promotion, future searches should target the promoted corpus first:
 ```powershell
 .\reverse_engineering\search_global_corpus.ps1 -Pattern "weapon mask"
 ```
+
+That search includes the structured private-function and local-variable CSVs.
+For example:
+
+```powershell
+.\reverse_engineering\search_global_corpus.ps1 -Pattern "HoverCraft::Simulate"
+python reverse_engineering\build_re_brief.py --query "HoverCraft Simulate dt"
+```
+
+Before the next full corpus rebuild, include a separately generated private
+PDB index directly:
+
+```powershell
+python reverse_engineering\build_re_brief.py `
+  --query "HoverCraft Simulate dt" `
+  --supplemental-pdb reverse_engineering\workshop\private_pdb_index
+```
+
+Rank the mismatched PDB against the exact-symbol legacy corpus and current BSim
+map before using any private function identity:
+
+```powershell
+python reverse_engineering\rank_private_pdb_matches.py
+python reverse_engineering\validate_semantic_apply.py
+```
+
+This emits a best-match queue, a gameplay/engine queue, transferred
+local-variable hints, and a reassessment of raw same-RVA candidates under
+`pdb_reference\semantic_ranking` (or the supplemental PDB index). See
+`reverse_engineering\private_pdb_semantic_ranking.md` for confidence semantics.
+The validator adds `binary_validation\prologue_boundary_validation.csv` and
+separate safe-apply, high-review, and medium-hold TSV queues. Only
+`safe_new_apply.tsv` may be used for automatic naming, and Ghidra imports should
+go through `reverse_engineering\ghidra_scripts\ApplySemanticPdbHints.java` so
+the in-project bytes are rechecked.
 
 To generate a starting brief for a new agentic RE task:
 

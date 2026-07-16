@@ -544,3 +544,61 @@ As of this note, no replacement input-screen hook has been implemented yet.
 
 This file is the first running design log for that work and should be extended
 as hook sites, screen ownership, and row-model decisions are validated.
+
+## 2026-07-12 hardening update
+
+The replacement screen exists and this pass hardened its plumbing:
+
+1. **Transactional hook install.** `EnsureInputBindingPopulateHookScaffold` now
+   installs the passive KeyReleased detour first and the activating constructor
+   detour last, each guarded by its own installed flag. A partial failure can no
+   longer strand a replacement UI that cannot capture keys, and retries no
+   longer re-validate expected bytes on an already-patched site (the old code
+   logged a misleading "constructor bytes mismatch" forever after a partial
+   install). `ResolveBzrHooks` also re-derives the installed flags and function
+   pointers from the detour trampolines instead of nulling them.
+
+2. **Lossless map documents.** `input.map` and `gamekey.map` are parsed into
+   `InputBindingDocument` (verbatim line vector) plus structured indices
+   (`InputBindingLineRef` records with document line indices; gamekey chords
+   keep `chordLineIndices`). Edits touch only the targeted line; comments,
+   ordering, negative guards, and mouse variants survive verbatim. Round-trip
+   against the live GOG files is byte-identical for `input.map`; `gamekey.map`
+   only gains a trailing newline.
+
+3. **Backup + atomic writes.** `WriteInputBindingDocumentAtomic` writes
+   `<file>.openshim.tmp`, copies the pre-edit file to `<file>.openshim.bak`,
+   then swaps with `ReplaceFileW` (fallback `MoveFileExW`). Errors surface in
+   the UI status line and the log. The old truncate-and-regenerate
+   `WriteGameKeyBindingMapFile` is gone.
+
+4. **`KeyConfig::set_key` bypass for extended commands.** The stock KeyConfig
+   layout is confirmed from the 1.5 PDB object model: `nKeyCount` at +0,
+   `_KeyItem[100]` at +4, entry stride 0x204 with `cKeyName[0x100]` at +0,
+   `cKeyFunction[0x100]` at +0x100, `nReserved` at +0x200. Capture now scans
+   the table (with printable-ASCII sanity checks): stock-managed commands keep
+   `set_key` for in-memory consistency and get precise reserved-vs-duplicate
+   status text; commands not in the 62-entry table bypass `set_key` and go
+   straight to the lossless writer. Duplicate detection runs against the parsed
+   document, so extended commands participate too. The native
+   `write_input_map_key` (which rewrote every `+ keyboard` line in a block) is
+   no longer used.
+
+5. **Live reload.** Redux `read_mapping_table` recovered at `0x00620010`
+   (bsim match of legacy `0x004BBD49`; prologue `55 8B EC 81 EC DC 02 00 00`
+   verified against the live GOG exe). After a successful `input.map` write the
+   shim byte-checks and calls it so live tables re-read; if the check fails the
+   status line says "Takes effect after restart." instead. Also invoked after
+   the stock Defaults reset. `gamekey.map` keeps the existing reload at
+   `0x00620980`.
+
+6. **Fixed a latent use-after-invalidation** in `HandleCapturedInputBindingKey`:
+   the row reference was read after `ReloadInputBindingUiInventory` rebuilt the
+   row vector; row fields are now copied before any reload.
+
+Startup verification on GOG (2026-07-12): scaffold parsed 98 input blocks /
+36 gamekey actions (129 rows) and both detours installed —
+`Installed constructor hook entry=0x007B25B0 trampoline=... keyRelease=0x007B48C0`.
+Interactive screen verification (rebind stock + extended + gamekey rows,
+screenshots) is still pending; the feature remains opt-in via
+`OPENSHIM_ENABLE_INPUT_BINDING_UI=1`.

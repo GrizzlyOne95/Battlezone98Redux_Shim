@@ -15,6 +15,10 @@
 #include "scroll_helper.h"
 #include "bzr_hooks.h"
 #include <Windows.h>
+#include <algorithm>
+#include <cctype>
+#include <filesystem>
+#include <fstream>
 #include <string>
 
 // We compile this as 32-bit (/arch:IA32) -- same as BZR.exe
@@ -90,12 +94,25 @@ namespace
         }
         virtual bool resourceCollision(void* resource, void* resourceManager)
         {
-            if (previous && previous->resourceCollision(resource, resourceManager))
-                return true;
-
             using FnResourceGetName = const std::string&(__thiscall*)(void*);
             using FnResourceManagerRemove = void(__thiscall*)(void*, const std::string&);
             using FnMaterialManagerGetSingletonPtr = void*(__cdecl*)();
+
+            // Preserve any listener installed by the game or another extension.
+            // A listener is allowed to resolve the collision itself; only apply
+            // OpenShim's material policy when it declines or throws.
+            if (previous)
+            {
+                try
+                {
+                    if (previous->resourceCollision(resource, resourceManager))
+                        return true;
+                }
+                catch (...)
+                {
+                    Log(L"[OgreMaterialCollision] previous listener threw; applying material fallback\n");
+                }
+            }
 
             FnMaterialManagerGetSingletonPtr getMaterialManager =
                 ResolveOgreExport<FnMaterialManagerGetSingletonPtr>("?getSingletonPtr@MaterialManager@Ogre@@SAPAV12@XZ");
@@ -111,13 +128,25 @@ namespace
             if (resourceManager != materialManager)
                 return false;
 
-            const std::string& name = getName(resource);
-            static volatile long s_logBudget = 32;
-            if (InterlockedDecrement(&s_logBudget) >= 0)
-                Log(L"[OgreMaterialCollision] replacing duplicate material '%hs'\n", name.c_str());
+            try
+            {
+                const std::string& name = getName(resource);
+                static volatile long s_logBudget = 32;
+                if (InterlockedDecrement(&s_logBudget) >= 0)
+                    Log(L"[OgreMaterialCollision] duplicate material '%hs'; latest definition wins\n", name.c_str());
 
-            removeByName(resourceManager, name);
-            return true;
+                // Ogre's default resource groups use the global pool. Removing
+                // the manager entry does not invalidate SharedPtrs already held
+                // by live entities; it only lets Ogre's one permitted retry add
+                // the incoming definition for future lookups.
+                removeByName(resourceManager, name);
+                return true;
+            }
+            catch (...)
+            {
+                Log(L"[OgreMaterialCollision] failed to replace duplicate material safely\n");
+                return false;
+            }
         }
 
         OgreMaterialCollisionListener* previous = nullptr;
@@ -125,6 +154,132 @@ namespace
 
     static OgreMaterialCollisionListener g_OgreMaterialCollisionListener;
     static volatile long g_OgreMaterialCollisionInstallerStarted = 0;
+
+    constexpr const char* kBriefingOverrideDirectoryName = "OpenShimBriefingAssets";
+    constexpr const char* kBriefingOverrideResourceGroup = "General";
+    constexpr const char* kBriefingOverrideLocationType = "FileSystem";
+    static std::filesystem::path g_BriefingOverrideDirectory;
+    static volatile long g_BriefingOverrideInstallerStarted = 0;
+    static volatile long g_BriefingOverrideMounted = 0;
+
+    static std::string TrimAscii(std::string value)
+    {
+        const auto isSpace = [](unsigned char ch) { return std::isspace(ch) != 0; };
+        value.erase(value.begin(), std::find_if(value.begin(), value.end(),
+            [&](char ch) { return !isSpace(static_cast<unsigned char>(ch)); }));
+        value.erase(std::find_if(value.rbegin(), value.rend(),
+            [&](char ch) { return !isSpace(static_cast<unsigned char>(ch)); }).base(), value.end());
+
+        if (value.size() >= 2 &&
+            ((value.front() == '"' && value.back() == '"') ||
+             (value.front() == '\'' && value.back() == '\'')))
+        {
+            value = value.substr(1, value.size() - 2);
+        }
+        return value;
+    }
+
+    static std::filesystem::path GetGameDirectory()
+    {
+        char modulePath[MAX_PATH] = {};
+        const DWORD length = GetModuleFileNameA(nullptr, modulePath, MAX_PATH);
+        if (length == 0 || length >= MAX_PATH)
+            return {};
+        return std::filesystem::path(modulePath).parent_path();
+    }
+
+    static std::filesystem::path FindBriefingOverrideDirectory()
+    {
+        const std::filesystem::path gameDirectory = GetGameDirectory();
+        if (gameDirectory.empty())
+            return {};
+
+        std::ifstream enabledModFile(gameDirectory / "modEnabled.dat");
+        std::string enabledModPath;
+        if (!enabledModFile.is_open() || !std::getline(enabledModFile, enabledModPath))
+            return {};
+
+        enabledModPath = TrimAscii(enabledModPath);
+        if (enabledModPath.empty())
+            return {};
+
+        std::filesystem::path modRoot(enabledModPath);
+        if (modRoot.is_relative())
+            modRoot = gameDirectory / modRoot;
+
+        const std::filesystem::path overrideDirectory =
+            modRoot.lexically_normal() / kBriefingOverrideDirectoryName;
+        std::error_code ec;
+        if (!std::filesystem::is_directory(overrideDirectory, ec) || ec)
+            return {};
+        return overrideDirectory;
+    }
+
+    static bool TryMountBriefingAssetOverrides()
+    {
+        if (InterlockedCompareExchange(&g_BriefingOverrideMounted, 0, 0) != 0)
+            return true;
+        if (g_BriefingOverrideDirectory.empty())
+            return false;
+
+        using FnResourceGroupManagerGetSingletonPtr = void*(__cdecl*)();
+        using FnResourceGroupExists = bool(__thiscall*)(void*, const std::string&);
+        using FnAddResourceLocation = void(__thiscall*)(
+            void*, const std::string&, const std::string&, const std::string&, bool, bool);
+
+        FnResourceGroupManagerGetSingletonPtr getResourceGroupManager =
+            ResolveOgreExport<FnResourceGroupManagerGetSingletonPtr>(
+                "?getSingletonPtr@ResourceGroupManager@Ogre@@SAPAV12@XZ");
+        FnResourceGroupExists resourceGroupExists =
+            ResolveOgreExport<FnResourceGroupExists>(
+                "?resourceGroupExists@ResourceGroupManager@Ogre@@QAE_NABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+        FnAddResourceLocation addResourceLocation =
+            ResolveOgreExport<FnAddResourceLocation>(
+                "?addResourceLocation@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@00_N1@Z");
+
+        if (!getResourceGroupManager || !resourceGroupExists || !addResourceLocation)
+            return false;
+
+        void* resourceGroupManager = getResourceGroupManager();
+        const std::string groupName = kBriefingOverrideResourceGroup;
+        if (!resourceGroupManager || !resourceGroupExists(resourceGroupManager, groupName))
+            return false;
+
+        try
+        {
+            const std::string directory = g_BriefingOverrideDirectory.string();
+            const std::string locationType = kBriefingOverrideLocationType;
+            addResourceLocation(
+                resourceGroupManager,
+                directory,
+                locationType,
+                groupName,
+                true,
+                true);
+            InterlockedExchange(&g_BriefingOverrideMounted, 1);
+            Log(L"[BRIEFING] Mounted enabled-mod overrides group=%hs path=%hs\n",
+                groupName.c_str(), directory.c_str());
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    static DWORD WINAPI BriefingAssetOverrideInstallerThread(LPVOID)
+    {
+        for (int i = 0; i < 2400; ++i)
+        {
+            if (TryMountBriefingAssetOverrides())
+                return 0;
+            Sleep(50);
+        }
+
+        Log(L"[BRIEFING] Timed out waiting to mount enabled-mod overrides path=%hs\n",
+            g_BriefingOverrideDirectory.string().c_str());
+        return 0;
+    }
 
     static bool TryInstallOgreMaterialCollisionGuard()
     {
@@ -158,7 +313,7 @@ namespace
         setLoadingListener(resourceGroupManager, &g_OgreMaterialCollisionListener);
         if (getLoadingListener(resourceGroupManager) == &g_OgreMaterialCollisionListener)
         {
-            Log(L"[OgreMaterialCollision] installed material-only resource collision guard\n");
+            Log(L"[OgreMaterialCollision] installed material-only collision guard (latest definition wins)\n");
             return true;
         }
 
@@ -951,6 +1106,33 @@ void InstallOgreMaterialCollisionGuard()
 
     g_OgreMaterialCollisionInstallerStarted = 0;
     Log(L"[OgreMaterialCollision] failed to start installer thread\n");
+}
+
+void InstallBriefingAssetOverrides()
+{
+    if (InterlockedCompareExchange(&g_BriefingOverrideInstallerStarted, 1, 0) != 0)
+        return;
+
+    g_BriefingOverrideDirectory = FindBriefingOverrideDirectory();
+    if (g_BriefingOverrideDirectory.empty())
+    {
+        Log(L"[BRIEFING] No enabled-mod %hs directory; stock briefing assets remain active\n",
+            kBriefingOverrideDirectoryName);
+        return;
+    }
+
+    if (TryMountBriefingAssetOverrides())
+        return;
+
+    HANDLE thread = CreateThread(nullptr, 0, BriefingAssetOverrideInstallerThread, nullptr, 0, nullptr);
+    if (thread)
+    {
+        CloseHandle(thread);
+        return;
+    }
+
+    Log(L"[BRIEFING] Failed to start override installer thread path=%hs\n",
+        g_BriefingOverrideDirectory.string().c_str());
 }
 
 // -----------------------------------------------------------------------

@@ -24,7 +24,8 @@ The clean-room shim now supports both:
   bias fix, configurable turret aim-pitch multiplier hooks for `TurretCraft`
   and `TurretTank` so they are no longer hard-limited to the stock `0.5`
   radians behavior, target-reticle recent-hit popup filtering, under-attack
-  alert throttling/toggling, engine-flame color routing, AI constructor
+  alert throttling/toggling, global unit-voice queue policy and muting,
+  engine-flame color routing, AI constructor
   death cleanup for stale scripted build claims, and sound-channel cap
   overrides for large battles.
 - Single-player shell/load support includes the injected AutoSave load button
@@ -92,6 +93,21 @@ of the full stock filter set. Until the remaining behavior is fully replicated,
 OpenShim keeps the core map-list position fix active but does not patch the
 custom filter/sort stack.
 
+### Multiplayer ban controls
+
+When hosting, highlight a player and click the injected `B` button to add that
+player's Steam/GOG stable ID to `bans.cfg` and kick them. The same action is
+available through `/ban`; `/help` lists the control. Banned identities are
+checked again on lobby join events, so reconnects are removed automatically.
+The ban hooks are independent of the optional BZRNET lobby integration.
+
+### Multiplayer vehicle descriptions
+
+The four-part vehicle-list back-port keeps `.vxt` description/control loading
+scoped to the selected multiplayer map. Unrelated mod files can no longer
+replace the displayed vehicle data merely because they were discovered first.
+The vehicle-control refresh branch is independent of the map-list hop-fix.
+
 ### Steam-specific compatibility work
 
 The Steam build needs a few extra guards beyond the original GOG-oriented
@@ -121,11 +137,11 @@ Current Steam multiplayer-safe status as of March 21, 2026:
   UI.
 - Steam Lobby BZRNET Integration HOST/CLIENT hooks are disabled by default.
   Re-enable them for testing with OPENSHIM_ENABLE_LOBBY_BZRNET_INTEGRATION=1.
-- The current active patch list also leaves these multiplayer experiments out
-  until they can be reintroduced safely: Custom Command /help Handler,
-  Joiner Event Hook, Ban Button Hook 1/2, and Ban Button Hook 2/2.
-- The Steam-safe baseline for now is hop-fix/map-refresh fixes on, stock lobby
-  matching behavior, stock lobby controls, and main-menu-only branding.
+- The ban feature is active independently of BZRNET integration: hosts get the
+  `B` lobby control, `/ban` support, persistent stable-ID records in `bans.cfg`,
+  and join-time enforcement.
+- The Steam-safe baseline keeps stock lobby matching, adds only the independent
+  ban controls to the stock lobby UI, and retains main-menu-only branding.
 
 Steam hook-site validation status as of March 17, 2026:
 
@@ -153,6 +169,144 @@ Practical takeaway:
 - Steam still needs the startup settle/poll step before applying hooks
 - if a Steam hook is still skipped, treat that as an OpenShim payload or
   resolver gap first, not proof that the site moved
+
+### Ogre material-name collision guard
+
+OpenShim installs an Ogre resource-loading listener that handles duplicate
+material names instead of allowing Ogre's `ERR_DUPLICATE_ITEM` exception to
+terminate the game. The policy is **latest definition wins**: existing entities
+keep any material references they already hold, while future material lookups
+resolve to the newly loaded definition. Collisions are recorded in
+`openshim.log` with the material name.
+
+The guard is enabled by default. For compatibility diagnosis it can be disabled
+before launch with `OPENSHIM_DISABLE_OGRE_MATERIAL_COLLISION_GUARD=1` (the
+`BZR_DISABLE_OGRE_MATERIAL_COLLISION_GUARD` alias is also accepted).
+
+### Mission Briefing Asset Overrides
+
+OpenShim can replace the stock mission-briefing backdrops and planet videos
+from the currently enabled mod without modifying `BZ_ASSETS_CORE`.
+
+Create this directory inside the enabled mod root:
+
+```text
+OpenShimBriefingAssets/
+```
+
+At startup, OpenShim reads `modEnabled.dat`, finds that child directory, and
+adds it recursively as a late `FileSystem` location in Ogre's `General`
+resource group. A file with the same resource name then supersedes the stock
+copy. The mount is deliberately limited to this child directory; the rest of
+the workshop item remains in its normal mod resource scope.
+
+Common stock names include:
+
+- briefing backdrops: `bd_load.bmp`, `bd_load2.bmp`, `elload.bmp`,
+  `gaload.bmp`, and `singlep.bmp`
+- planet videos: `elspin.ogv`, `emspin.ogv`, `jespin.ogv`, `jgspin.ogv`,
+  `jispin.ogv`, `mrspin.ogv`, `stspin.ogv`, `uraspin.ogv`, and `vnspin.ogv`
+
+Image replacements must currently retain the requested `.bmp` names and be
+real BMP files. Planet videos should normally remain 15 FPS because the game
+uses fixed frame-number loop points, not timestamps. See
+`reverse_engineering/mission_briefing_ogv_loop_notes_20260712.md` for the
+exact frame behavior.
+
+### Multiplayer Vehicle Flags
+
+OpenShim restores the legacy 64x32 multiplayer vehicle flags through an
+Ogre billboard renderer. The feature is enabled by default; opt out with one
+of:
+
+```text
+OPENSHIM_DISABLE_MP_FLAGS=1
+OPENSHIM_DISABLE_MP_FLAG_UI=1
+```
+
+Place source images in a `flags` directory beside the shim. PNG, BMP, TGA,
+JPG, and JPEG sources are accepted. The lobby `F` button cycles the catalog;
+OpenShim resizes the selection to the legacy 64x32 monochrome mask, publishes
+its 256-byte payload in player-data slot `0x0D`, and persists the selection in
+`flags.cfg`.
+
+In a match, flags are rendered above nearby eligible vehicles using the
+original 100-unit range and terrain line-of-sight behavior. Each distinct
+network flag remains visually unique; the local team is tinted green and
+other teams red. Generated debug/network artifacts and Ogre runtime resources
+are written under `flags/_generated`.
+
+Live multiplayer validation on both host and client paths is still pending;
+use the disable variables above if the renderer misbehaves in a session. The
+aliases are provided for compatibility with earlier experimental builds.
+
+### Global INI Improvements
+
+OpenShim applies a stable set of global improvements even when a mission does
+not load EXU. Copy `openshim.ini.example` to `openshim.ini` beside `winmm.dll`
+to customize them.
+
+- `[Display] ScrapPilotHud=Legacy|Stock` controls the compact legacy
+  scrap/pilot text layout and its stock backing panels. EXU positioning and
+  visibility calls act as mission overrides and reset to this INI baseline.
+- `[Display] TargetPolicy=Default|ExplicitOnly|NeutralOnly` controls recent-hit
+  target-reticle popups. `TargetReticle` remains an accepted alias.
+- `[SinglePlayer] WeaponConvergence=1|0` enables converging weapon aim for
+  hovercraft-derived AI craft.
+- `[SinglePlayer] PlayerReticleConvergence=1|0` converges the local player's
+  weapon hardpoints on the smart-reticle position after the stock aim update.
+- `[SinglePlayer] SmartReticleRange=500` sets the maximum smart-reticle range
+  in world units (valid range `1..10000`; stock is `200`). EXU
+  `GetReticleRange`/`SetReticleRange` delegate to OpenShim when available.
+- `[SinglePlayer] SmartScavengerPathing=1|0` enables path-length scrap scoring,
+  unreachable-scrap cooldowns, and periodic en-route retargeting by default.
+- `[SinglePlayer] Turbo=1|0` is shim-owned globally and per unit. EXU
+  `Get/SetGlobalTurbo` and `Get/SetUnitTurbo` delegate to OpenShim when its
+  ownership hooks are available; native EXU behavior remains the standalone
+  fallback.
+- `[SinglePlayer] TurretAimPitch=1|0` and `TurretAimPitchMultiplier=0.95`
+  control the raised TurretCraft/TurretTank pitch range.
+- `[SinglePlayer] JumpSnipeCrouch=1|0` controls the legacy crouch-on-landing fix.
+- `[General] SoundChannels=256` controls the GAS sound-object cap; `0` disables
+  the override.
+- `[General] CustomBindsUi=1|0` controls the full native input/game-key binding
+  replacement.
+
+All `[SinglePlayer]` improvements are reconciled continuously against the live
+network ID and return to stock behavior in multiplayer. Scripted EXU setters
+remain higher priority for the current mission and revert to the INI baseline
+when mission overrides reset. The convergence Lua APIs delegate to OpenShim
+when its bridge exports are available, avoiding competing vtable patches.
+
+### Legacy Jump-Sniping Crouch (INI-Configured, Single-Player Only)
+
+Restores the 1.5 behavior where touching the ground with a sniper rifle
+selected re-enters the crouch pose, even while the jump key is held. In stock
+Redux the on-foot animation state machine checks the held-jump flag before the
+sniper-selected flag, so holding jump keeps you out of the crouch after landing.
+
+OpenShim owns the native patch: a single 11-byte, expected-bytes-guarded change
+to the GOG `Person::Simulate` grounded branch. It is enabled by default for
+single-player and configurable through:
+
+```ini
+[SinglePlayer]
+JumpSnipeCrouch=1
+```
+
+EXU can still override it temporarily for scripted content:
+
+```lua
+local exu = require("exu")
+exu.SetJumpSnipeCrouch(false)
+```
+
+Two hard guards keep it out of multiplayer: the shim refuses to apply the patch
+while a network game is active (local net id non-zero) and reverts it on the
+mission/network refresh, and it no-ops entirely on any build whose bytes do not
+match. The net-id guard blocks it regardless of INI or script state.
+See `reverse_engineering/jump_sniping_crouch_fix_20260713.md` for the full
+analysis. Live host/client validation is still pending.
 
 ### Legacy Chunk Render Bridge Experiment
 
@@ -326,7 +480,9 @@ Current limitation:
 OpenShim now includes a native GAS max-object override to help with sound
 dropouts during large battles.
 
-- The shim defaults to a conservative `150`-channel cap.
+- The shim defaults to a `256`-channel cap.
+- Set `[General] SoundChannels=<n>` in `openshim.ini` to configure it normally.
+- Set `[General] SoundChannels=0` to disable the override.
 - Set `OPENSHIM_MAX_SOUND_CHANNELS=<n>` to choose a different limit.
 - Set `OPENSHIM_MAX_SOUND_CHANNELS=0` to disable the override.
 - `BZR_MAX_SOUND_CHANNELS` is also accepted as a legacy/testing alias.
@@ -339,11 +495,53 @@ Notes:
 
 - This targets the legacy `GM->maxObjects` sound-channel cap, so it should help
   voice stealing and cutouts more than true mixer clipping/distortion.
-- Current Steam runtime captures suggest the stock internal cap is `100`, so
-  the default OpenShim setting is intentionally a modest step above stock.
+- Current Steam runtime captures suggest the stock internal cap is `100`; the
+  OpenShim default raises the available pool to the supported maximum of `256`.
 - The shim locates the GAS globals at runtime. If Steam's runtime layout does
   not match the current anchor yet, the log will note that the override was
   skipped instead of patching blindly.
+
+## Global Unit VO Policy
+
+OpenShim owns the verified `Say -> QueueCB` unit-bark path, so duplicate/stale
+queue handling and the global feedback preference work in the stock campaign
+and Instant Action without EXU. Mission audio such as `misn*.wav` is excluded
+by the unit-bark filename filter.
+
+- `[Display] UnitVoFeedback=1` in `openshim.ini` keeps unit feedback enabled.
+- Set it to `0` to mute likely stock unit barks globally.
+- `OPENSHIM_TRACE_UNIT_VO=1` logs enqueue, drop, and queue-flush decisions.
+- EXU's existing Unit VO Lua APIs bridge to the shim-owned scalar state when
+OpenShim is present, so mission overrides remain higher priority and reset to
+the user's global baseline when the mission ends.
+
+## Stock Headlight Policy
+
+OpenShim can now apply Campaign Reimagined's headlight preferences to the
+stock campaign and Instant Action without EXU or the CR shader set. The shim
+uses the Ogre light already attached to each game object and refreshes newly
+created craft automatically.
+
+The `[SinglePlayer]` keys in `openshim.ini` are:
+
+- `Headlights=1|0` controls the player headlight.
+- `OtherHeadlights=1|0` controls other craft/turret headlights.
+- `HeadlightColor=Stock|White|Red|Green|Blue|Yellow|Cyan|Magenta|Orange|Purple|Teal|Rainbow`
+  selects the player color. Custom `r,g,b` triples are also accepted.
+- `HeadlightBeam=Stock|Focused|Wide` selects the player spotlight cone.
+
+The named colors and beam strengths match the campaign PDA values. OpenShim
+captures the original Ogre light state before changing it and restores that
+state when the feature is gated off. It never applies in a network game and
+stands down whenever EXU is loaded, so scripted campaign controls remain
+authoritative. Set `OPENSHIM_TRACE_HEADLIGHTS=1` for periodic player/touched
+light counts.
+
+OpenShim also repairs the stock `draw_light` running-light lifecycle. Emission
+lights now remain dormant while a craft is empty, become visible again when a
+pilot re-enters, and continuously pulse between their stock start/end colors
+at the configured rate. Set `OPENSHIM_DISABLE_EMISSION_LIGHT_FIX=1` to opt out
+for compatibility testing.
 
 ## Lua Music Bridge
 
@@ -424,10 +622,11 @@ The verifier uses `openshim.log` as the source of truth and checks for:
 - latest `BZLogger.txt` interval line when present, so a shipped `net.ini`
   test profile can be confirmed quickly
 
-If buffer logging is enabled, the same game folder will also receive:
+If buffer logging is enabled, the game's `logs` folder will also receive:
 
 - `bz_buffer_log.bin`
 - `bz_buffer_log.meta.txt`
+- `bz_relay_control.jsonl` when relay capture is enabled
 
 ## LLDB Recovery
 
@@ -476,6 +675,7 @@ AutoKickPing=2000
 AutoKickLoss=200
 AutoKickTime=60000
 EnableBufferLog=0
+EnableRelayCapture=0
 BufferLogPayloadBytes=32
 BufferLogRingRecords=65536
 BufferLogSocketId=0
@@ -496,9 +696,14 @@ Notes:
 - `GovernorStart` maps to `BZ_GOV_START`; `0` disables the data-only 4000 B/s cold-start lift.
 - `AutoKickRelax=1` defaults the host-side data patch to start `60000`, ping `2000`, loss `200`, and time `60000`.
 - `LogPacketReorder=1` enables detailed reorder diagnostics in `openshim.log`.
-- `EnableBufferLog=1` writes a binary recv-path capture to `bz_buffer_log.bin`
-  plus a small metadata sidecar file.
-- `BufferLogPayloadBytes` is clamped to `8`-`256`.
+- `EnableBufferLog=1` writes a binary send/receive capture to
+  `logs\bz_buffer_log.bin` plus a small metadata sidecar file.
+- `EnableRelayCapture=1` enables the complete `/iprelay` investigation profile:
+  full 2048-byte UDP datagrams in both directions, overlapped/IOCP receive
+  completion capture, and route-related WebSocket JSON in
+  `logs\bz_relay_control.jsonl`. The control logger whitelists LAN/WAN/P2P route
+  messages and never writes `Authorization` messages or platform tickets.
+- `BufferLogPayloadBytes` is clamped to `8`-`2048`.
 - `BufferLogRingRecords` is clamped to `1024`-`1000000`.
 - `BufferLogSocketId` limits binary capture to one OpenShim socket id.
 - `BufferLogPeer` limits binary capture to one IPv4 peer, optionally with a
@@ -524,6 +729,8 @@ Notes:
   `OPENSHIM_BUFFER_LOG`, `OPENSHIM_BUFFER_LOG_BYTES`,
   `OPENSHIM_BUFFER_LOG_RING`, `OPENSHIM_BUFFER_LOG_SOCKET`, and
   `OPENSHIM_BUFFER_LOG_PEER` override the buffer-capture settings for testing.
+- `BZ_RELAY_CAPTURE=1` or `OPENSHIM_RELAY_CAPTURE=1` enables the dedicated
+  relay profile without modifying `net.ini`.
 - The reorder path is bypassed for overlapped or async `WSARecvFrom` calls.
 - Direct `recvfrom` and `FIONBIO` mode changes are also captured when the
   binary buffer log is enabled, which helps correlate nonblocking socket
@@ -568,14 +775,37 @@ For Windows session bundles, use [`buffer_logger_windows.ps1`](buffer_logger_win
 .\buffer_logger_windows.ps1 -Action Stop
 ```
 
+For a forced-relay protocol capture, run:
+
+```powershell
+.\buffer_logger_windows.ps1 -Action Start -RelayCapture
+# Use the generated Steam launch option or launch_with_buffer_log.cmd.
+# Reproduce with both players, exit the game normally, then:
+.\buffer_logger_windows.ps1 -Action Stop
+```
+
+Relay mode automatically selects 2048 payload bytes, a 32768-record ring, sets
+`BZ_RELAY_CAPTURE=1`, and appends `/iprelay` to the generated launch command.
+Both clients should use the generated relay launch command. Exit normally so
+the in-memory ring is flushed before collecting the bundle.
+
 Optional filters for tighter captures:
 
 - `-SocketId <n>` captures only one OpenShim socket id
 - `-PeerFilter 203.0.113.42:17770` captures only one IPv4 peer
 
 `Stop` writes a zipped bundle under `test_bundles\` with `openshim.log`,
-`BZLogger.txt`, `bz_buffer_log.bin`, `bz_buffer_log.meta.txt`, and the active
-`net.ini` when present.
+`BZLogger.txt`, `bz_buffer_log.bin`, `bz_buffer_log.meta.txt`, the optional
+`bz_relay_control.jsonl`, and the active `net.ini` when present. Relay bundles
+contain peer addresses, player identifiers, and raw relay datagrams; exchange
+them privately and do not commit them.
+
+Generate a redacted shape/count summary without printing endpoints or payloads:
+
+```powershell
+python reverse_engineering/analyze_relay_capture.py `
+  test_bundles/<session>/bz_buffer_log.bin
+```
 
 ## Deep Diagnostics Workflow
 
@@ -825,6 +1055,35 @@ Current scope and cautions:
 - config-driven by producer type, not by ODF field yet
 - this is the bridge experiment, not the finished submenu feature
 - final submenu navigation and leaf-build handoff still need in-game validation
+
+## ExtraUtilities Feature-List Compatibility Fixes
+
+The July 2026 audit of the requested `FeaturesToLookInto.txt` items added these
+default-on, fail-safe Redux 2.2.301 repairs:
+
+- raw mouse input is enabled unless the stock `norawinput` command-line option
+  or `OPENSHIM_DISABLE_RAW_MOUSE_INPUT=1` is present; native consumers can use
+  `OpenShimGetRawMouseInputEnabled` and `OpenShimSetRawMouseInputEnabled`
+- an APC targeting an ally falls through to its stock nearby-enemy scan when
+  deploying soldiers (`OPENSHIM_DISABLE_APC_DEPLOY_FIX=1` opts out)
+- a tug restored with cargo starts the stock deploy animation/state transition
+  so later deployment drops that cargo
+  (`OPENSHIM_DISABLE_TUG_CARGO_FIX=1` opts out)
+- undeployed howitzers suppress only the stock recent-sniper target override
+  until their deployment state is complete; follow/go behavior remains stock
+  (`OPENSHIM_DISABLE_HOWITZER_DEPLOY_FIX=1`)
+- zero/non-finite `MagnetClass` range values bypass only the unsafe attraction
+  calculation while retaining base mine simulation
+  (`OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX=1`)
+- ScriptUtils `CanBuild` and `IsBusy` now accept the base `PROD` class signature
+- mission briefing/archive scrolling uses the game's guarded scroll callbacks,
+  removing the need for trailing blank lines
+  (`OPENSHIM_DISABLE_BRIEFING_SCROLL_FIX=1`)
+
+The splinter undead fix (46A) and constructor remote-build cleanup (47) were
+already present. Detailed per-item status, including the items that still need
+runtime mapping, is in
+`reverse_engineering/features_to_look_into_requested_audit_20260714.md`.
 
 ## Debug Metadata Inspection
 
