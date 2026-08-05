@@ -7,6 +7,7 @@
 #include "file_io_hooks.h"
 #include "patcher.h"
 #include "shim_log.h"
+#include "ogre_shader_cache.h"
 
 #include <Windows.h>
 
@@ -47,6 +48,49 @@ namespace BZROpenShim
         static std::unordered_map<uintptr_t, TrnWriteRecord> g_TrnWriteHandles;
         static thread_local bool g_InTrnNormalization = false;
         static std::wstring ToLowerWide(std::wstring value);
+
+        // Cheap case-insensitive ".program" suffix test used to trigger the
+        // Ogre microcode cache before the resource-group parser compiles the
+        // mod's GPU programs. Kept tiny because it runs on every file open.
+        static bool PathEndsWithProgramW(const wchar_t* path)
+        {
+            if (!path)
+                return false;
+            size_t len = 0;
+            while (path[len])
+                ++len;
+            static const wchar_t kSuffix[] = L".program";
+            constexpr size_t kSuffixLen = 8; // wcslen(".program")
+            if (len < kSuffixLen)
+                return false;
+            const wchar_t* tail = path + (len - kSuffixLen);
+            for (size_t i = 0; i < kSuffixLen; ++i)
+            {
+                if (::towlower(tail[i]) != kSuffix[i])
+                    return false;
+            }
+            return true;
+        }
+
+        static bool PathEndsWithProgramA(const char* path)
+        {
+            if (!path)
+                return false;
+            size_t len = 0;
+            while (path[len])
+                ++len;
+            static const char kSuffix[] = ".program";
+            constexpr size_t kSuffixLen = 8;
+            if (len < kSuffixLen)
+                return false;
+            const char* tail = path + (len - kSuffixLen);
+            for (size_t i = 0; i < kSuffixLen; ++i)
+            {
+                if (static_cast<char>(::tolower(static_cast<unsigned char>(tail[i]))) != kSuffix[i])
+                    return false;
+            }
+            return true;
+        }
 
         static char g_BzLoggerPath[] = "logs\\BZLogger.txt";
         static char g_BzOgreLogPath[] = "logs\\BZOgreLogfile.log";
@@ -565,6 +609,13 @@ namespace BZROpenShim
             if (!g_InTrnNormalization && handle != INVALID_HANDLE_VALUE)
                 MaybeTrackOpenedTrnHandle(handle, fileName ? fileName : L"", desiredAccess, creationDisposition);
 
+            // Ogre parses the mod's *.program scripts (and then compiles the
+            // enhanced-lighting shaders) right after this open succeeds. Prime
+            // the microcode cache on this exact thread so a prior session's
+            // compiled shaders are available before compilation begins.
+            if (handle != INVALID_HANDLE_VALUE && PathEndsWithProgramW(fileName))
+                OgreShaderCacheOnProgramScriptOpen();
+
             return handle;
         }
 
@@ -592,6 +643,9 @@ namespace BZROpenShim
 
             if (!g_InTrnNormalization && handle != INVALID_HANDLE_VALUE)
                 MaybeTrackOpenedTrnHandle(handle, ResolveAbsolutePathFromAnsi(fileName), desiredAccess, creationDisposition);
+
+            if (handle != INVALID_HANDLE_VALUE && PathEndsWithProgramA(fileName))
+                OgreShaderCacheOnProgramScriptOpen();
 
             return handle;
         }

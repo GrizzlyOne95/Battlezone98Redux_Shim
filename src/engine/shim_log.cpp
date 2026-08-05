@@ -7,6 +7,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <share.h>
 #include <string>
 
 namespace BZROpenShim
@@ -173,7 +174,9 @@ namespace
         const std::string logPath = BuildLogPath();
         std::strncpy(g_LogPath, logPath.c_str(), MAX_PATH - 1);
 
-        fopen_s(&g_LogFile, logPath.c_str(), "w");
+        // _SH_DENYWR instead of fopen_s's deny-all sharing so the log can be
+        // tailed by external tools while the game is running.
+        g_LogFile = _fsopen(logPath.c_str(), "w", _SH_DENYWR);
         if (!g_LogFile)
             return TRUE;
 
