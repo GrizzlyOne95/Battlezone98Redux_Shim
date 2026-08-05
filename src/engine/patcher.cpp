@@ -102,8 +102,6 @@ namespace BZROpenShim
         uint32_t maxChannels = 0;
     };
 
-    static FILE* g_Log = nullptr;
-
     static bool ShouldLogHookHits() {
         static int s_cached = -1;
         if (s_cached < 0) {
@@ -401,8 +399,14 @@ namespace BZROpenShim
         if (h) CloseHandle(h); else delete ctx;
     }
 
+    // Routed through the structured shim logger (openshim.log). The old
+    // private winmm_shim.log wide stream silently dropped every line once a
+    // conversion failure latched the stream error flag, which hid all patch
+    // and hook diagnostics.
     void Log(const wchar_t* fmt, ...) {
-        if (!g_Log) return; va_list args; va_start(args, fmt); vfwprintf(g_Log, fmt, args); va_end(args); fflush(g_Log);
+        va_list args; va_start(args, fmt);
+        LogShimVW(LogLevel::Info, "patcher", fmt, args);
+        va_end(args);
     }
 
     extern "C" void LogHit(const char* name) {
@@ -625,8 +629,6 @@ namespace BZROpenShim
 
     void RunPatcher(uint32_t shimVersion) {
         g_Config.Load();
-        const std::string patchLogPath = GetGameLogPath("winmm_shim.log");
-        fopen_s(&g_Log, patchLogPath.c_str(), "w");
         const bool isSteam = IsSteamExe(); g_EnableScrollRestore = true;
         if (ShouldEnableD3DStartupHooks()) ApplyD3DStartupHooks();
         ApplyTrnSaveNormalizeHooks();

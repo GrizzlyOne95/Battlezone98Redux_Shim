@@ -342,3 +342,136 @@ Current limitations of the test path:
 - GOG only for actual upload
 - Steam currently only stages/generated the legacy artifacts and reports that apply still needs revalidation
 - `flagDisplay` refresh is still best-effort until live runtime validation confirms the exact dirty/update trigger
+
+## 2026-07-17 lobby crash + non-rendering fixes
+
+Live-session logs (`logs/openshim_crash.log`, `logs/winmm_shim.log`) showed the
+"click the flag button" lobby error and no in-world flags. Root causes found and
+fixed in `src/patches/bzr_hooks.cpp`:
+
+1. **Wild-pointer write (the lobby crash).** `kFlagDisplayAddr` was the stale
+   advisory-PDB value `0x006DDD34`, which lands inside `.text` on the live GOG
+   exe. `MarkFlagDisplayDirty()` wrote `1` to `+0x2C` of it → first-chance
+   `0xC0000005` write faults at `0x006DDD60` (three in the crash log, plus 19x
+   "Failed to mark flag display dirty" in winmm_shim.log). Re-derived the real
+   live `flagDisplay` global by content:
+   - dynamic initializer `0x00406B80`: `mov ecx, 0x9B60CC ; call 0x4D1C10`
+     (the FlagDisplay ctor; stores vtable `0x00879984`, whose slot 8 is the
+     already-verified `Submit` `0x004D1C80`).
+   - net player-data dispatcher `0x00574EE5` and shell teardown `0x0056FC8F`
+     both call a FlagDisplay method with the same `ecx = 0x9B60CC` when data
+     slot `0x0D` (the flag payload) changes.
+   - `FlagDisplay::PreLoad` `0x004D1C50` writes `+0x28 = 0` (flagIndex) and the
+     `+0x2C` byte `= 0` (makeTexture), confirming the two field offsets.
+   New constant: `kFlagDisplayAddr = 0x009B60CC` (in `.data`, writable). The
+   AV is gone and the makeTexture dirty flag now lands on the real object.
+
+2. **Overflowing lobby error text.** The status/summary strings were long
+   sentences rendered into a fixed-width lobby tooltip label (why the user
+   could not read the whole message). Shortened every `g_SelectedFlagStatus`
+   and `GetSelectedFlagSummary()` to compact phrases.
+
+3. **Lobby apply always "failed".** Pre-session there is no local `NetPlayer`
+   yet, so both apply paths necessarily failed and surfaced scary status text.
+   `PrimeSelectedFlagForTesting` / `UpdateFlagSelectionUiLabel` now skip the
+   upload attempt when `TryGetLocalPlayerForFlags` returns none and simply show
+   "Applies at match start."; the real upload runs from the in-game
+   `ui_create`/`ui_update` pass once the player object exists.
+
+4. **Renderer never observed drawing.** Added one-time diagnostics so a session
+   log proves which stage the pipeline reaches: `Submit dispatch observed`,
+   `renderer sees replicated flag payload(s) team(s)=…`, `payload(s) but no
+   local user object/position yet`. Crucially, whether Redux's surviving
+   GameFeature loop still dispatches `FlagDisplay::Submit` in live MP was never
+   confirmed — so `MaybeDriveMultiplayerFlagRenderFallback()` now drives the
+   same Ogre renderer from the per-sim-tick hook whenever Submit has not fired
+   within 2 s, logging `Submit not dispatching; driving … from sim tick`.
+
+Also fixed unrelated log spam that was drowning these lines: the HUD sprite
+lookup now memoizes ids (was rescanning the 956-entry name table and logging
+6x/sec), and "Sprite hidden" only logs on the hide transition, not every
+1 s re-enforcement tick.
+
+### In-world readback still under investigation (2026-07-17)
+
+Live log after the address fix: no more faults, payload uploads
+(`ui_create applied legacy fallback payload bytes=256 slot=0x0D`), Submit hook
+installs and `FlagDisplay::Submit dispatch observed` — but the renderer's
+`renderer sees replicated flag payload(s)` line never fires, so
+`TryCopyMultiplayerFlagPayload` reads nothing from any team slot. Disassembly of
+the engine flag path:
+
+- `FlagDisplay::Submit` (0x004D1C80) early-outs on view mode 9/0xA and on
+  `this+0x28 (flagIndex) == 0`, then reads each team's flag from
+  `netPlayerByTeam[team] + 0x50` (a baked sprite index) — Redux's stubbed
+  `GenerateFlags` never sets +0x50, which is why the native display is dead.
+  Our Ogre renderer ignores +0x50 and reads the raw 256-byte mask instead.
+- `SetMyFlag` (0x0056FA50) resolves the local player exactly like our upload:
+  `GetLocalPlayerNetId` (0x00572D90) → `BanLookup` (0x005771B0, registry
+  0x009C8FB8), then stores the mask via `SetFlagBuffer` (0x00575810) at
+  `NetPlayer + 0x1C`. So our upload target is engine-correct.
+- The renderer reads `netPlayerByTeam` (0x009180E8), an array of `NetPlayer*`
+  populated by 0x00577900 from a **different** registry (0x009C8FA0), keyed by
+  each player's team byte at `+0x68`.
+
+Open question: are the 0x9C8FB8 (BanLookup) and 0x9C8FA0 (by-team) objects the
+same `NetPlayer` instances? If not, the mask lands where the renderer never
+reads. Added a one-shot `[FLAGDIAG]` dump in `RenderMultiplayerFlags` that logs,
+per team slot, ptr / id(+0x28) / teamByte(+0x68) / sprite(+0x50) / flagBuf(+0x1C)
+/ slot-0x0D size, plus the local player and a direct `same=YES/NO` check.
+
+**RESOLVED 2026-07-18.** The `[FLAGDIAG]` dump from a live load returned
+`same=YES` (`byteam[1]=0x39E58868 == localPlayer=0x39E58868`), and
+`[FLAG] renderer sees replicated flag payload(s) team(s)=1` fired. So the object
+identity was never the problem — the two registries return the same NetPlayer
+pool, the upload lands on the right object, and the renderer reads the mask back
+correctly. The data path works end-to-end once the stale-address write fault was
+fixed. (The `flagBuf=0 / slot0x0D=-1` in the diag line is timing: the one-shot
+dump fires a couple frames before the ui_create/ui_update upload completes; the
+one-shot "renderer sees" line fires once the payload arrives.)
+
+**Why no flags were visible: the test was solo.** The renderer (like 1.5
+`Submit`) skips the local craft, and AI/enemy units are not NetPlayers with flag
+payloads, so a solo host has nothing on screen to attach a flag to. In-world
+flags require a second human player. Not a bug — matches legacy design. A future
+opt-in (`openshim.ini`) could also draw the local player's own flag for solo
+self-verification.
+
+## 2026-07-17 lobby flag preview (1.5 FlagList parity)
+
+Decomp confirms two distinct legacy render paths, settling the "flags over your
+own vehicle" question:
+
+- `FlagDisplay::Submit` (1.5 0x004cea9b) skips the local craft:
+  `(local_1c != local_30)` where `local_30 = GameObject::userObject`. So
+  over-vehicle flags never draw over your own craft, 1.5 or Redux.
+- `FlagList` (1.5 0x00550d25) — the multi-menu picker — scans `flag????.bmp`,
+  writes the selection to `Net::pcFlagName`, and builds a `ShellBitmap` at a
+  64x32 rect that `FlagList::BltBitmap` (0x00550e4d) blits into the menu. That
+  is the menu preview users remember; OpenShim never reimplemented it.
+
+Reimplemented that preview in `bzr_hooks.cpp`: `CreateFlagButtonCommon` now also
+creates a non-interactive 64x32 tile above the "F" button. `WriteFlagPreviewPng`
+renders the packed mask (white where set, over a translucent dark tile, row
+order flipped to upright) to the **mod-adjacent generated flags dir**
+`flags/_generated/openshim_flagprev_<flag>.png` — NOT the core BZ_ASSETS_CORE
+tree, since the feature ships via the flags mod and generated art must stay out
+of core game folders the mod does not own. That directory is registered as an
+Ogre FileSystem resource location (`EnsureFlagPreviewResourceLocationRegistered`,
+group "General") so the UI texture loader can still resolve the bare name. The
+tile's texture is set via the same `SetTextureOff/Over/On` path; the name is
+unique per flag so the engine's by-name texture cache maps each flag to its own
+image. The preview reuses the F button's click/hover callbacks so both
++0x150/+0x154 slots stay non-null (the AutoSave null-slot crash class) and
+clicking the tile also cycles. Refreshed on every cycle via
+`UpdateFlagPreviewWidget`. Log lines: `[FLAG] registered lobby preview resource
+location` and `[FLAG] wrote lobby preview`.
+
+Caveat to confirm from the next log: the UI texture loader's resource group is a
+function-pointer-table indirection (`[0x869ec0]` manager getter, name setter
+`0x007D3FF0`) that resolved statically to code pointers, not a group string, so
+whether "General" is the group it searches is unverified. If the tile stays
+blank, the `[FLAG] wrote lobby preview` line will still be present (PNG created)
+and the fix is to register the generated dir into the correct group (candidates:
+the group holding `BZ_ASSETS_CORE/common/ui`, or the "Modable" mod group seen in
+BZOgreLogfile) rather than "General".

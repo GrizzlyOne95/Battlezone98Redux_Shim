@@ -168,23 +168,57 @@ The encoded mask field and multiple consume paths are known, but no crash dump
 or exact failing follow consumer is available. Blindly rewriting `00000` to a
 weapon bit would change intentional no-fire behavior, so this remains open.
 
-### 56 / 78 — stale target camera in satellite/F9 view
+Update 2026-07-16: a crash-time logger now ships in the shim
+(`src/engine/crash_logger.cpp`): unhandled-exception filter plus first-chance
+vectored logger writing registers, module+RVA, a stack scan, and a minidump to
+`logs\openshim_crash.log` / `openshim_crash_<timestamp>.dmp`. One in-game repro
+of the follow crash now yields the exact failing consumer.
 
-These are duplicate reports. The advisory PDB labels for
-`OgreTargetCameraBegin`/`End` land inside unrelated functions in the settled
-executable. A correct fix should end only the target-camera overlay while
-entering overview/F9; it should not clear the gameplay target. The exact live
-overlay owner still needs relocation.
+### 56 / 78 — stale target camera in satellite/F9 view — FIXED 2026-07-16
 
-### 57 — earthquake/dayquake repeated after load
+Root cause relocated statically. The Ogre frame driver (`0x00682540`) shows
+the target-camera PiP viewport (bridge `0x00920EA0` + 0x20, camera +0x14)
+while the legacy TargetCam enabled flag (`targetCam` `0x025F5FE0` + 0x1F1)
+reads true; that flag is recomputed per frame by the legacy updater
+(`0x005DDE00`, request latch at +0x1F0), which stops running in
+satellite/editor overview, leaving the flag latched and the PiP frozen.
+Fix: only the frame driver's enabled-predicate call (`0x00682679` ->
+`0x005DDDE0`) is retargeted to a gate that reports disabled while the view
+mode global (`0x008EAAD8`) is satellite (3) or editor (9). Stock code then
+removes/re-creates the viewport itself; the gameplay target is untouched.
+Kill switch: `OPENSHIM_DISABLE_TARGETCAM_FIX`. Log tag `[TARGETCAM]`.
 
-The legacy `EarthQuake` start/update/stop surface is known, but the Redux save
-replay owner and dayquake state have not been mapped to exact settled entries.
+### 57 — earthquake/dayquake repeated after load — FIXED 2026-07-16
 
-### 58 — cinematic camera zoom during satellite view
+Full Redux chain mapped: `quakeMag` global `0x02A13D88`; SaveScriptUtils
+(`0x005C7B90`) refreshes it from `earthQuake` (`0x00992328`, scale +0x28);
+LoadScriptUtils (`0x005C7510`) zeroes then reads it (save version > 0x40C);
+PostLoadScriptUtils (`0x005C7A50`) restarts the quake via StartQuake
+(`0x004C0BB0`, call site `0x005C7B83`) when nonzero. Quake ordnance
+(QuakeBlast) drives the global quake but explosions are not persisted, so the
+replayed quake has no owner left to stop it — endless shake plus looping
+`gquak01.wav`. Fix: the restart call is retargeted to arm a fade watchdog and
+EarthQuake::Simulate (`0x004C0CF0`) is entry-detoured; the watchdog ramps the
+replayed scale to zero over `OPENSHIM_QUAKE_FADE_SECONDS` (default 5) using
+UpdateQuake (`0x004C0C40`, also rescales the loop sound) and finishes with
+StopQuake (`0x004C0CA0`), disarming immediately if any script writes the
+scale (script-owned quakes keep stock behavior). Kill switch:
+`OPENSHIM_DISABLE_QUAKE_FADE`. Log tag `[QUAKEFADE]`.
 
-Likely shared camera-stack/FOV state, but the exact transition owner is not
-validated. A global FOV reset would risk breaking authored cinematics.
+### 58 — cinematic camera zoom during satellite view — FIXED 2026-07-16
+
+Transition owner found. Satellite entry (`0x0061BD20`) rebuilds the whole
+main camera record (`0x00439E60`) via the camera-record builder
+(`0x00688370`) with pi/2 FOV and the overview zoom; the cinematic begin
+(`0x00821E30`, view mode 5) only reconfigures the window and reuses the
+record's zoom-dependent scale fields, so cinematics triggered from satellite
+inherit the overview zoom. Fix: both begin call sites (`0x004F5667`,
+`0x005CD2D9`) are retargeted to a gate that, when the view mode global is
+satellite (3) or editor (9), first rebuilds the record with cockpit
+parameters (FOV bits `0x0087256C`, zoom 1.0 bits `0x008A2604`) exactly as the
+cockpit view setter (`0x0061BAB0`) does, then runs the stock begin. Authored
+cinematics from cockpit view are untouched. Kill switch:
+`OPENSHIM_DISABLE_CINECAM_FIX`. Log tag `[CINECAM]`.
 
 ### 59 — walker cockpit jitter
 
@@ -197,17 +231,29 @@ The user-visible free-camera activation route and the authoritative net-game
 gate are not yet mapped together. No broad camera-command suppression was
 installed.
 
-### 65 — invalid renderCount allocation
+### 65 — invalid renderCount allocation — FIXED 2026-07-16
 
-The failing ParameterDB read/allocation site is not identified in the settled
-binary. A useful next artifact is the offending input plus crash stack/dump so
-the guard can clamp the exact count before allocation.
+Crash mechanism proven statically. The MultiRenderClass constructor
+(`0x0044D7B0`, selected by `[Render] renderBase="draw_multi"`) reads the ODF
+key `rendercount` (keys are lowercased before FNV-1a hashing; hash
+`0x8C8E76EC`) into `this+0x108` via the ParameterDB getter (`0x005896C0`),
+multiplies it by 4 with overflow saturation to `0xFFFFFFFF`, and passes the
+result straight to `operator new[]` (`0x0083D92C`) — a missing/nil/garbage
+count dies with "invalid allocation size". Fix: an 11-byte mid-function
+detour at `0x0044D858` clamps the stored count to [0, 256] between the
+ParameterDB read and the allocation; the same field bounds the `renderName%d`
+copy loop, so one clamp protects both. Kill switch:
+`OPENSHIM_DISABLE_RENDERCOUNT_CLAMP`. Log tag `[RENDERCOUNT]`.
 
 ### 66 — pilot hardpoints below CraftClass header
 
 This is order-sensitive ODF parsing, but the specific Pilot/Craft parser handoff
 has not been mapped. Moving or ignoring fields generically could silently alter
 valid custom ODF inheritance.
+
+Update 2026-07-16: 1.5's hardpoint build loop warns via `DEBUG_systemWarning`
+rather than crashing, so the crash site is Redux-specific. The new crash
+logger (see item 49) will pinpoint it from one repro with a malformed ODF.
 
 ### 77 — type-0 terrain texture deformation
 

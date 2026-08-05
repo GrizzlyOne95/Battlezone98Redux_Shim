@@ -508,8 +508,10 @@ queue handling and the global feedback preference work in the stock campaign
 and Instant Action without EXU. Mission audio such as `misn*.wav` is excluded
 by the unit-bark filename filter.
 
-- `[Display] UnitVoFeedback=1` in `openshim.ini` keeps unit feedback enabled.
-- Set it to `0` to mute likely stock unit barks globally.
+- `[Display] UnitVoFeedback=Normal|Reduced|None` controls stock unit feedback.
+- `Reduced` keeps important barks but limits the queue to one entry and throttles
+  repeats; `None` mutes likely stock unit barks globally.
+- Legacy boolean values remain accepted (`1` = `Normal`, `0` = `None`).
 - `OPENSHIM_TRACE_UNIT_VO=1` logs enqueue, drop, and queue-flush decisions.
 - EXU's existing Unit VO Lua APIs bridge to the shim-owned scalar state when
 OpenShim is present, so mission overrides remain higher priority and reset to
@@ -1104,4 +1106,3 @@ MIT - see LICENSE file
 - `Piercing` for technical assistance, multiplayer testing, and netcode investigation support.
 - `VTrider` and `Business Lawyer` for technical assistance and collaboration building this DLL patch.
 - `Janne` for the original work learning how to shim and hook DLLs into BZR.
-
