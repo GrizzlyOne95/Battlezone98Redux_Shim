@@ -465,12 +465,22 @@ void __declspec(naked) __cdecl Trampoline_HopFix1()
 
 // -----------------------------------------------------------------------
 // Hop-Fix 2/3
+// Site: 0x00799279 (multiplayer create-room screen builder)
+// Original bytes:
+//   6A 00                   push 0
+//   8B 85 5C FF FF FF       mov eax, [ebp-0xA4]   ; screen object
+//   8B 88 7C 01 00 00       mov ecx, [eax+0x17C]  ; filter list widget
+//   E8 ..                   call SetSelectedIndex (0x007CAFA0)
 // Purpose: Reselect the saved entry after the list rebuild completes.
-// Reverse-engineering-confirmed reference trampoline:
-//   MOV EAX,[0x0094555C]
-//   MOV ECX,[EAX]
-//   CALL restore-selection helper
-// The helper itself issues the equivalent of the original select-by-index call.
+// The helper MUST end with the equivalent of the original select-by-index
+// call in every path it can: the engine reads the selected entry's name
+// right after this site and passes it to a std::string ctor with no null
+// check, so leaving the fresh list at index -1 crashes the game (seen on
+// Steam 2026-07-19 in the "rebuilding_room" pass when hosting).
+// The screen object comes from the frame local [ebp-0xA4], exactly like the
+// original instructions; the old global 0x0094555C double-deref handed the
+// helper the screen's vtable pointer, so the helper always bailed out and
+// the select(0) we overwrote never ran.
 // -----------------------------------------------------------------------
 void __declspec(naked) __cdecl Trampoline_HopFix2()
 {
@@ -485,10 +495,9 @@ void __declspec(naked) __cdecl Trampoline_HopFix2()
         popad
         popfd
 
-        mov  eax, [g_MapListObject]
-        test eax, eax
-        jz   hop2_done
-        mov  ecx, [eax]
+        // eax/ecx are clobbered by the original instructions we replaced,
+        // so they are free here.
+        mov  ecx, [ebp - 0xA4]
         test ecx, ecx
         jz   hop2_done
         call RestoreMapListSelection
