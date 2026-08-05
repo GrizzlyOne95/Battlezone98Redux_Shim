@@ -1,8 +1,11 @@
 #include "bzr_hooks.h"
 #include "game_state.h"
+#include "openshim_ini.h"
+#include "bzr_options_ui.h"
 #include "patches.h"
 #include "patcher.h"
 #include "shim_log.h"
+#include "ogre_shader_cache.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -48,6 +51,10 @@ namespace BZROpenShim
     void* g_FlagButtonClient = nullptr;
     void* g_FlagLabelHost = nullptr;
     void* g_FlagLabelClient = nullptr;
+    // 1.5-style lobby flag preview (FlagList::BltBitmap equivalent): a
+    // non-interactive tile next to the "F" button showing the selected flag.
+    void* g_FlagPreviewHost = nullptr;
+    void* g_FlagPreviewClient = nullptr;
     void* g_HostUiParent = nullptr;
     void* g_ClientUiParent = nullptr;
     void* g_AutoSaveLoadParent = nullptr;
@@ -84,26 +91,6 @@ namespace BZROpenShim
     using FnVehicleListStep = void(__thiscall*)(void* thisPtr);
     using FnVehicleListFinalize = void(__thiscall*)(void* thisPtr);
 
-    using FnUiButtonCtor = void* (__thiscall*)(void* self,
-                                               const char* label,
-                                               float x, float y, float w, float h,
-                                               uint32_t flags, void* parent, int a, int b);
-    // The label ctor only cleans 8 stack arguments in v2.2.301.
-    using FnUiLabelCtor = void* (__thiscall*)(void* self,
-                                              const char* label,
-                                              float x, float y, float w, float h,
-                                              uint32_t flags, void* parent, int a);
-    using FnUiOverlayCtor = void* (__thiscall*)(void* self,
-                                                const char* label,
-                                                float x, float y, float w, float h,
-                                                uint32_t flags, void* parent, int a);
-    using FnUiSetStr = void(__thiscall*)(void* self, const char* str);
-    using FnUiSetFloat = void(__thiscall*)(void* self, float value);
-    using FnUiSetInt = void(__thiscall*)(void* self, void* param);
-    using FnUiSetCb  = void(__thiscall*)(void* self, void* cb);
-    using FnUiSetActive = void(__thiscall*)(void* self, uint8_t value);
-    using FnUiAddChild = void(__thiscall*)(void* parent, void* child, int flags);
-    using FnUiDialogAction = void(__thiscall*)(void* thisPtr, int value);
     using FnPlayGlobalSound = int(__cdecl*)(const char* filename, uint32_t arg1, uint32_t arg2, uint32_t arg3);
 
     using FnGetSelected = void* (__thiscall*)(void* list);
@@ -162,12 +149,6 @@ namespace BZROpenShim
                                             double maxZ,
                                             void* outResults);
     using FnRangeResultsGetNext = uint32_t(__thiscall*)(void* results, uint32_t** outHandlePtr);
-    using FnOptionsInputCtor = void* (__thiscall*)(void* thisPtr);
-    using FnOptionsInputKeyReleased = bool(__thiscall*)(void* thisPtr, uint32_t key, uint32_t keyCode);
-    using FnKeyConfigSetKey = int(__thiscall*)(void* thisPtr, const char* command, const char* keyName);
-    using FnWriteInputMapKey = void(__cdecl*)(const char* command, const char* keyName);
-    using FnMapKeyNameFromCode = void(__cdecl*)(uint32_t keyCode, char* outBuffer);
-    using FnReloadGameKeyMap = void(__cdecl*)();
     using FnRecordDeath = void(__cdecl*)(int killedTeam, int killerTeam);
     using FnCalcRangeCraft = void(__cdecl*)(void* craft,
                                             float* closeRange,
@@ -234,20 +215,20 @@ namespace BZROpenShim
     static FnVehicleListStep g_BzrFn_VehicleListRefresh1 = nullptr; // 0x007A3F80
     static FnVehicleListStep g_BzrFn_VehicleListRefresh2 = nullptr; // 0x007A4070
 
-    static FnUiButtonCtor g_BzrFn_ButtonCtor = nullptr; // 0x007C2480
-    static FnUiLabelCtor g_BzrFn_LabelCtor  = nullptr; // 0x007CC390
-    static FnUiOverlayCtor g_BzrFn_OverlayCtor = nullptr; // 0x007D1CC0
-    static FnUiSetStr g_BzrFn_SetTextureOff = nullptr; // 0x007D2870
-    static FnUiSetStr g_BzrFn_SetTextureOver = nullptr; // 0x007C2F10
-    static FnUiSetStr g_BzrFn_SetTextureOn = nullptr; // 0x007C2E80
-    static FnUiSetStr g_BzrFn_SetButtonLabel = nullptr; // 0x007C2950
-    static FnUiSetFloat g_BzrFn_SetButtonTextScale = nullptr; // 0x007C30E0 (stock options buttons use 1.3)
-    static FnUiSetStr g_BzrFn_SetTooltip = nullptr; // 0x007CC660
-    static FnUiSetInt g_BzrFn_LabelState = nullptr; // 0x007CC5C0
-    static FnUiSetCb g_BzrFn_SetOnClick = nullptr; // 0x007C23E0
-    static FnUiSetCb g_BzrFn_SetOnHover = nullptr; // 0x007C23C0
-    static FnUiSetActive g_BzrFn_UiSetActive = nullptr; // 0x007D3310
-    static FnUiAddChild g_BzrFn_AddChild = nullptr; // 0x007D2110
+    FnUiButtonCtor g_BzrFn_ButtonCtor = nullptr; // 0x007C2480
+    FnUiLabelCtor g_BzrFn_LabelCtor  = nullptr; // 0x007CC390
+    FnUiOverlayCtor g_BzrFn_OverlayCtor = nullptr; // 0x007D1CC0
+    FnUiSetStr g_BzrFn_SetTextureOff = nullptr; // 0x007D2870
+    FnUiSetStr g_BzrFn_SetTextureOver = nullptr; // 0x007C2F10
+    FnUiSetStr g_BzrFn_SetTextureOn = nullptr; // 0x007C2E80
+    FnUiSetStr g_BzrFn_SetButtonLabel = nullptr; // 0x007C2950
+    FnUiSetFloat g_BzrFn_SetButtonTextScale = nullptr; // 0x007C30E0 (stock options buttons use 1.3)
+    FnUiSetStr g_BzrFn_SetTooltip = nullptr; // 0x007CC660
+    FnUiSetInt g_BzrFn_LabelState = nullptr; // 0x007CC5C0
+    FnUiSetCb g_BzrFn_SetOnClick = nullptr; // 0x007C23E0
+    FnUiSetCb g_BzrFn_SetOnHover = nullptr; // 0x007C23C0
+    FnUiSetActive g_BzrFn_UiSetActive = nullptr; // 0x007D3310
+    FnUiAddChild g_BzrFn_AddChild = nullptr; // 0x007D2110
     static FnUiDialogAction g_BzrFn_UiDialogSetEnabled = nullptr; // 0x007C9170
     static FnUiDialogAction g_BzrFn_UiDialogAdvance = nullptr; // 0x007C7930
 
@@ -333,12 +314,10 @@ namespace BZROpenShim
     static FnVectorTransform g_BzrFn_VectorTransform = nullptr;
     static FnRangeSearch g_BzrFn_CollisionRangeSearch = nullptr;
     static FnRangeResultsGetNext g_BzrFn_RangeResultsGetNext = nullptr;
-    static FnOptionsInputCtor g_BzrFn_OptionsInputCtor = nullptr;
-    static FnOptionsInputKeyReleased g_BzrFn_OptionsInputKeyReleased = nullptr;
-    static FnKeyConfigSetKey g_BzrFn_KeyConfigSetKey = nullptr;
+    FnKeyConfigSetKey g_BzrFn_KeyConfigSetKey = nullptr;
     static FnWriteInputMapKey g_BzrFn_WriteInputMapKey = nullptr;
-    static FnMapKeyNameFromCode g_BzrFn_MapKeyNameFromCode = nullptr;
-    static FnReloadGameKeyMap g_BzrFn_ReloadGameKeyMap = nullptr;
+    FnMapKeyNameFromCode g_BzrFn_MapKeyNameFromCode = nullptr;
+    FnReloadGameKeyMap g_BzrFn_ReloadGameKeyMap = nullptr;
     static FnRecordDeath g_BzrFn_RecordDeath = nullptr;
     static FnCalcRangeCraft g_BzrFn_CalcRangeCraft = nullptr;
     static FnAttackTaskDoState g_BzrFn_AttackTaskDoState = nullptr;
@@ -364,9 +343,6 @@ namespace BZROpenShim
     static BuildItem* g_BzrBuildMenuRoot = nullptr;
     static bool g_IsSteamExe = false;
 
-    void* __fastcall OptionsInputPopulateUiHook(void* thisPtr, void* /*edx*/);
-    bool __fastcall OptionsInputKeyReleasedHook(void* thisPtr, void* /*edx*/, uint32_t key, uint32_t keyCode);
-    void* __fastcall OptionsParentCtorHook(void* thisPtr, void* /*edx*/);
     void* __fastcall ChunkEffectCreateChunkHook(void* thisPtr,
                                                 void* /*edx*/,
                                                 void* objectPtr,
@@ -424,6 +400,17 @@ namespace BZROpenShim
         constexpr char kEngineFlagResourceRootName[] = "BZ_ASSETS";
         constexpr char kEngineFlagResourceDirectoryName[] = "OpenShimFlags";
         constexpr char kEngineFlagResourcePath[] = "OpenShimFlags/openshim_selected_flag.bmp";
+        // Lobby flag preview PNGs are written into the mod-adjacent generated
+        // flags dir (flags/_generated), NOT the core BZ_ASSETS_CORE tree — the
+        // feature ships via the flags mod, so generated art must stay out of
+        // core game folders that the mod does not own. That directory is
+        // registered as an Ogre resource location so the UI texture loader can
+        // still resolve the bare filename. The name is unique per flag so the
+        // engine's by-name texture cache reuses the right image.
+        constexpr char kFlagPreviewNamePrefix[] = "openshim_flagprev_";
+        constexpr char kFlagPreviewResourceGroup[] = "General";
+        constexpr int kFlagPreviewWidth = 64;
+        constexpr int kFlagPreviewHeight = 32;
         constexpr char kProducerBuildMenuIniName[] = "openshim_producer_build_menus.ini";
         constexpr char kProducerBuildMenuSection[] = "ProducerBuildMenus";
         constexpr char kProducerBuildMenuDefaultRoot[] = "build";
@@ -596,6 +583,63 @@ namespace BZROpenShim
 		constexpr size_t kTugControlBlockOffset = 0x230;
 		constexpr size_t kTugControlDeployOffset = 0xE0;
 		constexpr size_t kTugCargoOffset = 0x300;
+		// Earthquake/dayquake save replay bug (#57). Quake ordnance (QuakeBlast,
+		// the "dayquake"/quake-weapon effects) drives the global EarthQuake
+		// object: Init starts it, Simulate decays it, Cleanup stops it.
+		// Explosions are not persisted, so a save taken mid-quake stores
+		// quakeMag != 0 and PostLoadScriptUtils (0x005C7A50) restarts the quake
+		// with no owner left to stop it -- the shake plus the looping
+		// gquak01.wav repeat forever. Keep the replay (script-started quakes
+		// still rely on it) but arm a fade watchdog on the restarted quake:
+		// EarthQuake::Simulate ramps the replayed scale to zero and calls
+		// StopQuake unless a mission script takes ownership by writing the
+		// scale itself first.
+		constexpr uintptr_t kGogPostLoadQuakeRestartCallAddr = 0x005C7B83;
+		constexpr uintptr_t kGogEarthQuakeStartQuakeAddr = 0x004C0BB0;
+		constexpr uintptr_t kGogEarthQuakeUpdateQuakeAddr = 0x004C0C40;
+		constexpr uintptr_t kGogEarthQuakeStopQuakeAddr = 0x004C0CA0;
+		constexpr uintptr_t kGogEarthQuakeSimulateAddr = 0x004C0CF0;
+		constexpr uintptr_t kGogEarthQuakeObjectAddr = 0x00992328;
+		constexpr size_t kEarthQuakeScaleOffset = 0x28;
+		constexpr size_t kEarthQuakeSimulateDetourLen = 9;
+		constexpr long kQuakeReplayFadeSecondsDefault = 5;
+		constexpr long kQuakeReplayFadeSecondsMin = 1;
+		constexpr long kQuakeReplayFadeSecondsMax = 60;
+		// Stale target camera in satellite/F9 view (#56/#78). The Ogre frame
+		// driver (0x00682540) shows the target-camera picture-in-picture
+		// viewport while the legacy TargetCam enabled flag (targetCam
+		// 0x025F5FE0 + 0x1F1) reads true. That flag is recomputed by the
+		// legacy per-frame updater (0x005DDE00), which stops running in the
+		// satellite/editor overview -- so entering F9 while targeting leaves
+		// the flag latched and the PiP frozen on screen. Retarget only the
+		// frame driver's enabled-predicate call (0x00682679 -> 0x005DDDE0) to
+		// a gate that also reports "disabled" while the view mode global
+		// (0x008EAAD8) is satellite (3) or editor (9); the stock code then
+		// removes the viewport itself and re-creates it on return to cockpit.
+		// The gameplay target is never touched.
+		constexpr uintptr_t kGogTargetCamEnabledCallAddr = 0x00682679;
+		constexpr uintptr_t kGogTargetCamEnabledWrapperAddr = 0x005DDDE0;
+		constexpr uintptr_t kGogViewModeAddr = 0x008EAAD8;
+		constexpr int32_t kGogViewModeSatellite = 3;
+		constexpr int32_t kGogViewModeEditor = 9;
+		// Cinematic camera zoomed in satellite mode (#58). Entering satellite
+		// view (0x0061BD20) rebuilds the main camera record (0x00439E60) via
+		// the camera-record builder (0x00688370) with a pi/2 FOV and the
+		// overview zoom. The cinematic-camera begin (0x00821E30, view mode 5)
+		// only reconfigures the window and reuses the record's current
+		// zoom-dependent scale fields, so a cinematic triggered from satellite
+		// inherits the overview zoom and renders incorrectly zoomed. Retarget
+		// both begin call sites to a gate that first rebuilds the record with
+		// the cockpit parameters (FOV bits at 0x0087256C, zoom 1.0 bits at
+		// 0x008A2604) exactly like the cockpit view setter (0x0061BAB0) does.
+		constexpr uintptr_t kGogCinematicCameraBeginAddr = 0x00821E30;
+		constexpr uintptr_t kGogCinematicBeginCallAddr1 = 0x004F5667;
+		constexpr uintptr_t kGogCinematicBeginCallAddr2 = 0x005CD2D9;
+		constexpr uintptr_t kGogGetCameraRecordAddr = 0x00439E60;
+		constexpr uintptr_t kGogBuildCameraRecordAddr = 0x00688370;
+		constexpr uintptr_t kGogCockpitFovBitsAddr = 0x0087256C;
+		constexpr uintptr_t kGogCockpitZoomBitsAddr = 0x008A2604;
+		constexpr size_t kGogCameraRecordDwords = 0x76;
 		// APC::Simulate checks a selected target before its existing nearby-enemy
 		// scan.  If that target is allied, both relation failures jump straight to
 		// the "cannot deploy" result.  Retarget those two stock branches to the
@@ -624,7 +668,17 @@ namespace BZROpenShim
         constexpr int kLegacyFlagHeight = 32;
         constexpr size_t kLegacyFlagPayloadBytes = 0x100;
         constexpr size_t kLegacyFlagRowBytes = 8;
-        constexpr uintptr_t kFlagDisplayAddr = 0x006DDD34;
+        // Live GOG 2.2.301 flagDisplay global object. Derived on the live exe:
+        // the dynamic initializer at 0x00406B80 constructs it via
+        // `mov ecx, 0x9B60CC; call 0x4D1C10` (ctor stores vtable 0x00879984,
+        // whose slot 8 is the verified Submit 0x004D1C80), and the net
+        // player-data dispatcher at 0x00574EE5 calls a FlagDisplay method with
+        // the same ecx when data slot 0x0D (the flag payload) changes.
+        // FlagDisplay::PreLoad (0x004D1C50) confirms the +0x28 flagIndex /
+        // +0x2C makeTexture byte offsets. The previous constant 0x006DDD34 was
+        // a stale advisory-PDB address that lands inside .text on the live exe
+        // (writes there raised first-chance C0000005 at 0x006DDD60).
+        constexpr uintptr_t kFlagDisplayAddr = 0x009B60CC;
         constexpr uintptr_t kFlagFilePathBufferAddr = 0x00917FAC;
         constexpr size_t kFlagFilePathBufferCapacity = MAX_PATH;
         // Redux's FlagDisplay inherits a 0x28-byte GameFeature base. The old
@@ -670,36 +724,8 @@ namespace BZROpenShim
         constexpr uintptr_t kSteam64GlobalAddr = 0x0260B1D0;
         constexpr uintptr_t kLocalPlayerNetIdAddr = 0x009180D4;
         constexpr uintptr_t kUiWrapperActiveAddr = 0x00918324;
-        // The shipped GOG PDB public-symbol addresses for cUI_OptionsInput methods
-        // are not reliable function-entry hooks against the current Redux binary.
-        // The stock input screen constructor was recovered from string xrefs instead.
-        constexpr uintptr_t kOptionsInputCtorAddr = 0x007B25B0;
-        constexpr uintptr_t kOptionsInputKeyReleasedAddr = 0x007B48C0;
-        constexpr uintptr_t kOptionsInputScreenFactoryCallerAddr = 0x007C8600;
-        constexpr uintptr_t kOptionsInputBackClickAddr = 0x007B2210;
-        constexpr uintptr_t kOptionsInputDefaultsClickAddr = 0x007B2230;
-        // cUI_OptionsParent constructor on the live GOG/Steam 2.2.301 exe,
-        // recovered from the Redux decompile corpus (FUN_007b61a0: builds the
-        // esc_center.png overlay plus the Play/Graphic/Audio/Input buttons) and
-        // byte-verified against the installed exe (SEH prologue
-        // 55 8B EC 6A FF 68 60 13 86 00). Singleton stored at 0x009455C4.
-        constexpr uintptr_t kOptionsParentCtorAddr = 0x007B61A0;
-        constexpr size_t kOptionsParentCtorDetourLen = 10;
-        constexpr uintptr_t kOptionsParentSingletonAddr = 0x009455C4;
-        // Stock cUI_OptionsParent "Input" click thunk: loads the parent
-        // singleton and asks the options shell (this+0x138) to switch to screen
-        // id 0x15 (the input options page) via the switch fn at 0x007C7930.
-        // The OpenShim settings button reuses this exact navigation path.
-        constexpr uintptr_t kOptionsParentInputClickThunkAddr = 0x007B6100;
-        // cUI_OptionsInput singleton (DAT_009455B8); non-null while the stock
-        // input screen object is alive inside the current options shell.
-        constexpr uintptr_t kOptionsInputSingletonAddr = 0x009455B8;
-        constexpr size_t kInlineDetourMaxPatchLen = 16;
         constexpr uintptr_t kGogArtilleryDoAttackEntryAddr = 0x0042AF10;
         constexpr size_t kArtilleryDoAttackDetourLen = 10;
-        constexpr size_t kOptionsInputCtorDetourLen = 10;
-        constexpr size_t kOptionsInputKeyReleasedDetourLen = 9;
-        constexpr size_t kOptionsInputKeyConfigOffset = 0x188;
         constexpr size_t kPersonSimulateDetourLen = 10;
         constexpr size_t kRecordDeathDetourLen = 6;
         constexpr ULONGLONG kCareerStatsMpHookRetryMs = 1000;
@@ -865,7 +891,6 @@ namespace BZROpenShim
         constexpr uintptr_t kGogWriteInputMapKeyAddr = 0x0061F1C0;
         constexpr uintptr_t kGogMapKeyNameFromCodeAddr = 0x00434F60;
         constexpr uintptr_t kGogReloadGameKeyMapAddr = 0x00620980;
-        constexpr uintptr_t kGogReadMappingTableAddr = 0x00620010;
         constexpr uintptr_t kGogUiOverlayCtorAddr = 0x007D1CC0;
         constexpr uintptr_t kAiGameInitialisedAddr = 0x00930F08;
         constexpr uintptr_t kAiTeamTableAddr = 0x00920F04;
@@ -885,14 +910,6 @@ namespace BZROpenShim
         constexpr size_t kUnitProcessNextEnemyCheckOffset = 0x30;
         constexpr size_t kUnitProcessObjectOffset = 0x34;
 
-        struct InlineDetour32
-        {
-            uintptr_t target = 0;
-            void* hook = nullptr;
-            void* trampoline = nullptr;
-            size_t patchLen = 0;
-            std::array<uint8_t, kInlineDetourMaxPatchLen> original = {};
-        };
 
         struct RetargetPeriodState
         {
@@ -968,7 +985,6 @@ namespace BZROpenShim
         static void RunMagnetMineFilteredSimulate(void* magnetMinePtr, float dt);
         static void RunProximityMineFilteredSimulate(void* proximityMinePtr, float dt);
         static void RevealProcessOwnerPerceivedTeam(void* processPtr, const char* sourceTag);
-        static std::filesystem::path GetMainModuleDirectory();
         struct ChunkObjectLinkProbe;
         struct ChunkCreateSourceTreeProbe;
         static std::filesystem::path GetChunkPayloadStockResourceDirectory();
@@ -1252,86 +1268,6 @@ namespace BZROpenShim
             float ordDrag = 0.0f;
         };
 
-        enum class InputBindingMapFamily
-        {
-            Input,
-            GameKey,
-        };
-
-        // One raw "+/- <source> <token>" line inside a command block, addressed by
-        // its index in the owning document so edits can be made in place.
-        struct InputBindingLineRef
-        {
-            size_t lineIndex = SIZE_MAX;
-            bool positive = false;
-            std::string source;
-            std::string token;
-        };
-
-        struct InputBindingCommandBlock
-        {
-            std::string command;
-            std::string section;
-            std::string comment;
-            size_t headerLineIndex = SIZE_MAX;
-            size_t closeLineIndex = SIZE_MAX;
-            std::vector<InputBindingLineRef> bindingLines;
-            std::vector<std::string> positiveKeyboardTokens;
-            std::vector<std::string> positiveNonKeyboardTokens;
-            bool hasPositiveNonKeyboard = false;
-        };
-
-        // Lossless copy of a map file: every line verbatim, so structure-preserving
-        // rewrites only touch the specific lines an edit targets.
-        struct InputBindingDocument
-        {
-            std::vector<std::string> lines;
-            bool loaded = false;
-        };
-
-        struct InputBindingInventoryStats
-        {
-            size_t uniqueCommandBlocks = 0;
-            size_t simpleKeyboardBlocks = 0;
-            size_t keyboardChordBlocks = 0;
-            size_t mixedBlocks = 0;
-            size_t uniqueGameKeyActions = 0;
-            size_t gameKeyChords = 0;
-            size_t firstPassInputRows = 0;
-            size_t firstPassGameKeyRows = 0;
-        };
-
-        struct GameKeyBindingAction
-        {
-            std::string action;
-            std::vector<std::string> chords;
-            std::vector<size_t> chordLineIndices;
-        };
-
-        struct InputBindingRowSeed
-        {
-            const char* command = nullptr;
-            const char* labelKey = nullptr;
-            const char* displayText = nullptr;
-        };
-
-        struct InputBindingUiRow
-        {
-            InputBindingMapFamily family = InputBindingMapFamily::Input;
-            std::string command;
-            std::string sectionName;
-            std::string displayLabelKey;
-            std::string displayText;
-            std::string currentBindingText;
-            bool reserved = false;
-            bool foundInMap = false;
-            size_t matchingBlockCount = 0;
-        };
-
-        constexpr size_t kInputBindingUiColumnCount = 2;
-        constexpr size_t kInputBindingUiRowsPerColumn = 10;
-        constexpr size_t kInputBindingUiVisibleRowCount =
-            kInputBindingUiColumnCount * kInputBindingUiRowsPerColumn;
 
         static bool g_BansConfigLoaded = false;
         static std::vector<BanRecord> g_BanRecords;
@@ -1341,7 +1277,7 @@ namespace BZROpenShim
         static std::filesystem::path g_ConfigRequestedFlagsDirectory;
         static std::string g_SelectedFlagFileName;
         static int g_SelectedFlagIndex = -1;
-        static std::string g_SelectedFlagStatus = "Legacy test path idle.";
+        static std::string g_SelectedFlagStatus = "Idle.";
         static std::string g_GeneratedFlagFileName;
         static std::string g_EngineStagedFlagFileName;
         static bool g_FlagPayloadReady = false;
@@ -1619,8 +1555,6 @@ namespace BZROpenShim
         static bool g_EngineFlameVariantsInitialized = false;
         static bool g_EngineFlameVariantsInitAttempted = false;
         static bool g_EngineFlameVtableHooksInstalled = false;
-        static InlineDetour32 g_OptionsInputPopulateUiDetour = {};
-        static InlineDetour32 g_OptionsInputKeyReleasedDetour = {};
         static InlineDetour32 g_RecordDeathDetour = {};
         static InlineDetour32 g_ParticleCreateTemplateDetour = {};
         static bool g_ParticleTemplateDedupeHookInstalled = false;
@@ -1679,6 +1613,20 @@ namespace BZROpenShim
         static volatile long g_MultiRenderCountClampLogBudget = 8;
         static bool g_MagnetZeroRangeGuardEnabled = true;
         static volatile long g_MagnetZeroRangeLogBudget = 8;
+        static bool g_QuakeReplayFadeInstalled = false;
+        static bool g_QuakeReplayFadeEnabled = true;
+        static long g_QuakeReplayFadeSeconds = kQuakeReplayFadeSecondsDefault;
+        static InlineDetour32 g_EarthQuakeSimulateDetour = {};
+        static volatile long g_QuakeReplayArmed = 0;
+        static uint32_t g_QuakeReplayInitialScaleBits = 0;
+        static uint32_t g_QuakeReplayLastWrittenBits = 0;
+        static ULONGLONG g_QuakeReplayArmTick = 0;
+        static bool g_TargetCamSatelliteFixInstalled = false;
+        static bool g_TargetCamSatelliteFixEnabled = true;
+        static volatile long g_TargetCamSatelliteLogBudget = 8;
+        static bool g_CinematicSatelliteZoomFixInstalled = false;
+        static bool g_CinematicSatelliteZoomFixEnabled = true;
+        static volatile long g_CinematicSatelliteZoomLogBudget = 8;
 		static bool g_SprayBuildingSimulateHookInstalled = false;
 		static bool g_TugCargoPostLoadFixInstalled = false;
 		static bool g_TugCargoPostLoadFixEnabled = true;
@@ -1697,236 +1645,7 @@ namespace BZROpenShim
         static volatile long g_AiUnitTuningTraceBudget = 64;
         static volatile long g_CombatKiteTraceBudget = 256;
         static volatile long g_ScrapPathTraceBudget = 128;
-        static bool g_InputBindingUiScaffoldInitialized = false;
-        static bool g_InputBindingUiScaffoldLogged = false;
-        static bool g_InputBindingUiPopulateHookInstalled = false;
-        static bool g_InputBindingUiKeyReleasedHookInstalled = false;
-        static bool g_InputBindingUiPopulateHookMismatchLogged = false;
-        static std::filesystem::path g_InputBindingInstallDirectory = {};
-        static InputBindingInventoryStats g_InputBindingInventory = {};
-        static InputBindingDocument g_InputMapDocument = {};
-        static InputBindingDocument g_GameKeyMapDocument = {};
-        static std::vector<InputBindingCommandBlock> g_InputBindingCommandBlocks = {};
-        static std::vector<GameKeyBindingAction> g_GameKeyBindingActions = {};
-        static bool g_InputMapLiveReloadChecked = false;
-        static bool g_InputMapLiveReloadAvailable = false;
-        static std::vector<InputBindingUiRow> g_InputBindingUiRows = {};
-        static void* g_LastOptionsInputScreen = nullptr;
-        static void* g_InputBindingUiScreen = nullptr;
-        static void* g_InputBindingUiMiddleOverlay = nullptr;
-        static void* g_InputBindingUiBackdrop = nullptr;
-        static void* g_InputBindingUiFrame = nullptr;
-        static void* g_InputBindingUiTopMask = nullptr;
-        static void* g_InputBindingUiContentMask = nullptr;
-        static void* g_InputBindingUiHeaderLabel = nullptr;
-        static void* g_InputBindingUiStatusLabel = nullptr;
-        static void* g_InputBindingUiPageLabel = nullptr;
-        static void* g_InputBindingUiBackButton = nullptr;
-        static void* g_InputBindingUiDefaultsButton = nullptr;
-        static void* g_InputBindingUiInputFamilyButton = nullptr;
-        static void* g_InputBindingUiGameKeyFamilyButton = nullptr;
-        static void* g_InputBindingUiPrevPageButton = nullptr;
-        static void* g_InputBindingUiNextPageButton = nullptr;
-        static void* g_InputBindingUiRefreshButton = nullptr;
-        static std::array<void*, kInputBindingUiVisibleRowCount> g_InputBindingUiRowLabels = {};
-        static std::array<void*, kInputBindingUiVisibleRowCount> g_InputBindingUiRowButtons = {};
-        static std::array<int, kInputBindingUiVisibleRowCount> g_InputBindingUiVisibleRowIndices = {};
-        static InputBindingMapFamily g_InputBindingUiActiveFamily = InputBindingMapFamily::Input;
-        static size_t g_InputBindingUiPageStart = 0;
-        static InputBindingMapFamily g_InputBindingUiPendingFamily = InputBindingMapFamily::Input;
-        static std::string g_InputBindingUiPendingCommand = {};
-        static std::string g_InputBindingUiPendingDisplayText = {};
-        static std::string g_InputBindingUiStatusText = {};
-        static void InitializeInputBindingUiScaffold();
-        static bool TryLiveReloadInputMapTables();
-        static void OnInputBindingBackClicked();
-        static void OnInputBindingDefaultsClicked();
-        static void OnInputBindingRowButtonClicked(size_t visibleSlot);
-        static void OnInputBindingFamilyButtonClicked(InputBindingMapFamily family);
-        static void OnInputBindingPageStepClicked(int direction);
-        static void OnInputBindingRefreshClicked();
         static ChunkBridgeSnapshot CaptureChunkBridgeSnapshot(const uint8_t* objectBytes);
-
-#define BZR_INPUT_BINDING_ROW_CLICK_DECL(index) \
-        static void __cdecl InputBindingRowClick##index() { OnInputBindingRowButtonClicked(index); }
-
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(0)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(1)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(2)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(3)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(4)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(5)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(6)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(7)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(8)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(9)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(10)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(11)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(12)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(13)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(14)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(15)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(16)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(17)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(18)
-        BZR_INPUT_BINDING_ROW_CLICK_DECL(19)
-
-#undef BZR_INPUT_BINDING_ROW_CLICK_DECL
-
-        static void* const kInputBindingRowClickCallbacks[kInputBindingUiVisibleRowCount] =
-        {
-            reinterpret_cast<void*>(InputBindingRowClick0),
-            reinterpret_cast<void*>(InputBindingRowClick1),
-            reinterpret_cast<void*>(InputBindingRowClick2),
-            reinterpret_cast<void*>(InputBindingRowClick3),
-            reinterpret_cast<void*>(InputBindingRowClick4),
-            reinterpret_cast<void*>(InputBindingRowClick5),
-            reinterpret_cast<void*>(InputBindingRowClick6),
-            reinterpret_cast<void*>(InputBindingRowClick7),
-            reinterpret_cast<void*>(InputBindingRowClick8),
-            reinterpret_cast<void*>(InputBindingRowClick9),
-            reinterpret_cast<void*>(InputBindingRowClick10),
-            reinterpret_cast<void*>(InputBindingRowClick11),
-            reinterpret_cast<void*>(InputBindingRowClick12),
-            reinterpret_cast<void*>(InputBindingRowClick13),
-            reinterpret_cast<void*>(InputBindingRowClick14),
-            reinterpret_cast<void*>(InputBindingRowClick15),
-            reinterpret_cast<void*>(InputBindingRowClick16),
-            reinterpret_cast<void*>(InputBindingRowClick17),
-            reinterpret_cast<void*>(InputBindingRowClick18),
-            reinterpret_cast<void*>(InputBindingRowClick19),
-        };
-
-        static void __cdecl InputBindingFamilyInputClick()
-        {
-            OnInputBindingFamilyButtonClicked(InputBindingMapFamily::Input);
-        }
-
-        static void __cdecl InputBindingBackClick()
-        {
-            OnInputBindingBackClicked();
-        }
-
-        static void __cdecl InputBindingDefaultsClick()
-        {
-            OnInputBindingDefaultsClicked();
-        }
-
-        static void __cdecl InputBindingFamilyGameKeyClick()
-        {
-            OnInputBindingFamilyButtonClicked(InputBindingMapFamily::GameKey);
-        }
-
-        static void __cdecl InputBindingPrevPageClick()
-        {
-            OnInputBindingPageStepClicked(-1);
-        }
-
-        static void __cdecl InputBindingNextPageClick()
-        {
-            OnInputBindingPageStepClicked(1);
-        }
-
-        static void __cdecl InputBindingRefreshClick()
-        {
-            OnInputBindingRefreshClicked();
-        }
-
-        // --- OpenShim settings screen (options-shell sub-page) ------------------
-        // A native "OpenShim" button is appended to the stock Options screen; it
-        // navigates to the (already hooked) input options screen with a mode flag
-        // set, and the constructor hook renders a settings page there instead of
-        // the key-binding list. Settings edit openshim.ini losslessly and apply
-        // live through each feature's existing baseline/refresh machinery.
-        constexpr size_t kShimSettingsUiColumnCount = 2;
-        constexpr size_t kShimSettingsUiRowsPerColumn = 8;
-        constexpr size_t kShimSettingsUiVisibleRowCount =
-            kShimSettingsUiColumnCount * kShimSettingsUiRowsPerColumn;
-
-        static InlineDetour32 g_OptionsParentCtorDetour = {};
-        static FnOptionsInputCtor g_BzrFn_OptionsParentCtor = nullptr;
-        static bool g_OptionsParentHookInstalled = false;
-        static bool g_OptionsParentHookMismatchLogged = false;
-        static void* g_OptionsParentScreen = nullptr;
-        static void* g_ShimSettingsMenuButton = nullptr;
-        // Set by the OpenShim button click; consumed when the input screen is
-        // (re)constructed or when it already exists and can be restyled directly.
-        // The request expires so a click that never reached a construction cannot
-        // hijack an unrelated later visit to the stock input page.
-        static bool g_ShimSettingsPageRequested = false;
-        static ULONGLONG g_ShimSettingsPageRequestTick = 0;
-        constexpr ULONGLONG kShimSettingsPageRequestTtlMs = 3000;
-        // True while the settings page owns the hooked input screen's visuals.
-        static bool g_ShimSettingsPageActive = false;
-        static void* g_ShimSettingsUiBackdrop = nullptr;
-        static void* g_ShimSettingsUiFrame = nullptr;
-        static void* g_ShimSettingsUiTopMask = nullptr;
-        static void* g_ShimSettingsUiContentMask = nullptr;
-        static void* g_ShimSettingsUiHeaderLabel = nullptr;
-        static void* g_ShimSettingsUiStatusLabel = nullptr;
-        static void* g_ShimSettingsUiFooterLabel = nullptr;
-        static void* g_ShimSettingsUiBackButton = nullptr;
-        static std::array<void*, kShimSettingsUiVisibleRowCount> g_ShimSettingsUiRowLabels = {};
-        static std::array<void*, kShimSettingsUiVisibleRowCount> g_ShimSettingsUiRowButtons = {};
-        static std::string g_ShimSettingsUiStatusText = {};
-        static void OnShimSettingsMenuClicked();
-        static void OnShimSettingsBackClicked();
-        static void OnShimSettingsRowClicked(size_t rowIndex);
-        static void ResetShimSettingsUiVisuals();
-        static void EnsureInputBindingUiControls(void* screen);
-        static void RefreshInputBindingUiControls();
-
-        static void __cdecl ShimSettingsMenuClick()
-        {
-            OnShimSettingsMenuClicked();
-        }
-
-        static void __cdecl ShimSettingsBackClick()
-        {
-            OnShimSettingsBackClicked();
-        }
-
-#define BZR_SHIM_SETTINGS_ROW_CLICK_DECL(index) \
-        static void __cdecl ShimSettingsRowClick##index() { OnShimSettingsRowClicked(index); }
-
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(0)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(1)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(2)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(3)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(4)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(5)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(6)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(7)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(8)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(9)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(10)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(11)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(12)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(13)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(14)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(15)
-
-#undef BZR_SHIM_SETTINGS_ROW_CLICK_DECL
-
-        static void* const kShimSettingsRowClickCallbacks[kShimSettingsUiVisibleRowCount] =
-        {
-            reinterpret_cast<void*>(ShimSettingsRowClick0),
-            reinterpret_cast<void*>(ShimSettingsRowClick1),
-            reinterpret_cast<void*>(ShimSettingsRowClick2),
-            reinterpret_cast<void*>(ShimSettingsRowClick3),
-            reinterpret_cast<void*>(ShimSettingsRowClick4),
-            reinterpret_cast<void*>(ShimSettingsRowClick5),
-            reinterpret_cast<void*>(ShimSettingsRowClick6),
-            reinterpret_cast<void*>(ShimSettingsRowClick7),
-            reinterpret_cast<void*>(ShimSettingsRowClick8),
-            reinterpret_cast<void*>(ShimSettingsRowClick9),
-            reinterpret_cast<void*>(ShimSettingsRowClick10),
-            reinterpret_cast<void*>(ShimSettingsRowClick11),
-            reinterpret_cast<void*>(ShimSettingsRowClick12),
-            reinterpret_cast<void*>(ShimSettingsRowClick13),
-            reinterpret_cast<void*>(ShimSettingsRowClick14),
-            reinterpret_cast<void*>(ShimSettingsRowClick15),
-        };
 
         static int g_EngineFlamePrimaryRedTexture = 0;
         static int g_EngineFlamePrimaryGreenTexture = 0;
@@ -1985,9 +1704,13 @@ namespace BZROpenShim
         static constexpr uintptr_t kChunkEffectVtableSimulateSlotAddr = 0x0087708C;
         static constexpr uintptr_t kChunkObjGeomRefOffset = 0x64;
         static constexpr uintptr_t kViewRecordRva = 0x004FD770;
-        static constexpr uintptr_t kGameObjectObjectListRva = 0x0050D2F0;
-        static constexpr uintptr_t kGameObjectUserObjectRva = 0x0050D2F8;
-        static constexpr uintptr_t kGameObjectUserTeamNumberRva = 0x0050D2E4;
+        // The advisory-PDB object-list/userObject/userTeam globals that used
+        // to live here (0x50D2F0/F8/E4) landed in string data on the live exe
+        // and were removed 2026-07-18. Verified replacements: userObject
+        // global 0x00917AFC (kHeadlightUserObjectRva, accessor 0x417C70),
+        // object enumeration via the 0x0260DB20 arena
+        // (CollectLiveGameObjectsFromArena), team via
+        // GetGameObjectActualTeam(userObject).
         static constexpr size_t kChunkEffectEntrySize = 0x20;
         static constexpr uint32_t kClassIdChunk = 53;
         static constexpr DWORD kChunkProxyExpireMs = 400;
@@ -2040,48 +1763,6 @@ namespace BZROpenShim
         static bool g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
         static bool g_AttackRevealEnabled = kAttackRevealEnabledDefault;
 
-        static constexpr InputBindingRowSeed kInputBindingFirstPassSeeds[] = {
-            { "turbo", nullptr, "Turbo" },
-            { "throttle_up", nullptr, "Throttle Forward" },
-            { "throttle_down", nullptr, "Throttle Back" },
-            { "steer_left", nullptr, "Steer Left" },
-            { "steer_right", nullptr, "Steer Right" },
-            { "pitch_up", nullptr, "Pitch Up" },
-            { "pitch_down", nullptr, "Pitch Down" },
-            { "strafe_left", nullptr, "Strafe Left" },
-            { "strafe_right", nullptr, "Strafe Right" },
-            { "jump", nullptr, "Jump" },
-            { "weapon_fire", nullptr, "Fire" },
-            { "weapon_cycle", nullptr, "Cycle Weapon" },
-            { "weapon_link", nullptr, "Link Weapons" },
-            { "eject", nullptr, "Eject" },
-            { "abandon", nullptr, "Abandon Vehicle" },
-            { "cloak", nullptr, "Cloak" },
-            { "deploy", nullptr, "Deploy" },
-            { "frontal_target", nullptr, "Target Ahead" },
-            { "drop_beacon", nullptr, "Drop Beacon" },
-            { "cycle_beacon", nullptr, "Cycle Beacon" },
-            { "center_player", nullptr, "Center On Player" },
-            { "center_recycler", nullptr, "Center On Recycler" },
-            { "menu_up", nullptr, "Menu Up" },
-            { "menu_down", nullptr, "Menu Down" },
-            { "menu_back", nullptr, "Menu Back" },
-            { "menu_press", nullptr, "Reticle Command" },
-            { "group_select_0", nullptr, "Select Group 1" },
-            { "group_select_1", nullptr, "Select Group 2" },
-            { "group_select_2", nullptr, "Select Group 3" },
-            { "group_select_3", nullptr, "Select Group 4" },
-            { "group_select_4", nullptr, "Select Group 5" },
-            { "group_select_5", nullptr, "Select Group 6" },
-            { "group_select_6", nullptr, "Select Group 7" },
-            { "weapon_select_0", nullptr, "Weapon Slot 1" },
-            { "weapon_select_1", nullptr, "Weapon Slot 2" },
-            { "weapon_select_2", nullptr, "Weapon Slot 3" },
-            { "weapon_select_3", nullptr, "Weapon Slot 4" },
-            { "weapon_select_4", nullptr, "Weapon Slot 5" },
-            { "zoom_factor_plus", nullptr, "Zoom In" },
-            { "zoom_factor_minus", nullptr, "Zoom Out" },
-        };
         static constexpr size_t kGameObjectPlayerShotOffset = 0x1D8;
         // SelectionDisplay::Render carries the complete Redux GameObject pointer,
         // while the inherited GameObject interface (whose slot +4 is GetTeam)
@@ -2195,6 +1876,21 @@ namespace BZROpenShim
         static bool g_MultiplayerFlagRenderHookFailureLogged = false;
         static bool g_MultiplayerFlagRendererLoggedReady = false;
         static std::unordered_map<uint64_t, MultiplayerFlagRenderSet> g_MultiplayerFlagRenderSets = {};
+        // Live-dispatch diagnostics: whether Redux ever calls the hooked
+        // FlagDisplay::Submit vtable slot, and one-time renderer gate logs so
+        // a session log shows exactly which stage the flag pipeline reached.
+        static volatile ULONGLONG g_MultiplayerFlagSubmitLastTick = 0;
+        static bool g_MultiplayerFlagSubmitObservedLogged = false;
+        static bool g_MultiplayerFlagTickFallbackLogged = false;
+        static bool g_MultiplayerFlagPayloadSeenLogged = false;
+        static bool g_MultiplayerFlagContextMissingLogged = false;
+        static bool g_MultiplayerFlagDiagLogged = false;
+        static bool g_MultiplayerFlagObjScanLogged = false;
+        static bool g_MultiplayerFlagInMatchApplyLogged = false;
+        static bool g_MultiplayerFlagCopyFailLogged = false;
+        static ULONGLONG g_MultiplayerFlagLastApplyAttemptTick = 0;
+        constexpr ULONGLONG kMultiplayerFlagSubmitStaleMs = 2000;
+        constexpr ULONGLONG kMultiplayerFlagApplyRetryMs = 500;
 
         template<typename T>
         static T ResolveOgreProc(const char* name)
@@ -2228,18 +1924,6 @@ namespace BZROpenShim
             return reinterpret_cast<T>(reinterpret_cast<uint8_t*>(ogreMain) + offset);
         }
 
-        static bool EnvFlagEnabled(const char* name)
-        {
-            if (!name || !*name)
-                return false;
-
-            char value[16] = {};
-            const DWORD len = GetEnvironmentVariableA(name, value, static_cast<DWORD>(sizeof(value)));
-            if (len == 0 || len >= sizeof(value))
-                return false;
-
-            return value[0] != '0' && value[0] != '\0';
-        }
 
         static bool ShouldEnableMultiplayerFlagUi()
         {
@@ -2750,10 +2434,76 @@ namespace BZROpenShim
             return false;
         }
 
+        // POD-only SEH boundaries (no C++ unwinding objects). Keep these
+        // separate from LookupHudSpriteId, which owns the std::string memo
+        // cache: __try cannot live in a function that requires unwinding.
+        // Returns false only if the scan faulted; outFound distinguishes a
+        // clean "scanned but not present" from a hit.
+        static bool SehScanHudSpriteTable(const char* name, uint32_t count, bool& outFound, int& outId)
+        {
+            outFound = false;
+            outId = 0;
+            __try
+            {
+                auto* table = reinterpret_cast<const char*>(kHudSpriteNameTableAddr);
+                char entryName[kHudSpriteNameEntrySize + 1] = {};
+                for (int index = static_cast<int>(count) - 1; index > 0; --index)
+                {
+                    const char* entry = table + (static_cast<size_t>(index) * kHudSpriteNameEntrySize);
+                    std::memcpy(entryName, entry, kHudSpriteNameEntrySize);
+                    entryName[kHudSpriteNameEntrySize] = '\0';
+                    if (_stricmp(entryName, name) == 0)
+                    {
+                        outFound = true;
+                        outId = index;
+                        return true;
+                    }
+                }
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static bool SehCallHudSpriteLookupFn(const char* name, int& outId)
+        {
+            outId = 0;
+            __try
+            {
+                outId = g_BzrFn_HudSpriteLookup(name);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         static int LookupHudSpriteId(const char* name)
         {
             if (!name || !name[0])
                 return 0;
+
+            // The sprite table is static for the process lifetime and this
+            // lookup runs every HUD refresh tick; memoize successful hits so
+            // steady-state refreshes neither rescan the 900+ entry table nor
+            // spam the log once per second.
+            static std::mutex s_HudSpriteCacheMutex;
+            static std::unordered_map<std::string, int> s_HudSpriteIdCache;
+            {
+                std::lock_guard<std::mutex> lock(s_HudSpriteCacheMutex);
+                const auto it = s_HudSpriteIdCache.find(name);
+                if (it != s_HudSpriteIdCache.end())
+                    return it->second;
+            }
+            const auto rememberHit = [&](int id)
+            {
+                std::lock_guard<std::mutex> lock(s_HudSpriteCacheMutex);
+                s_HudSpriteIdCache.emplace(name, id);
+                return id;
+            };
 
             uint32_t count = 0;
             if (TryReadHudSpriteNameCount(count))
@@ -2766,34 +2516,25 @@ namespace BZROpenShim
                     static_cast<unsigned>(count),
                     static_cast<unsigned>(kHudSpriteNameTableAddr));
 
-                __try
-                {
-                    auto* table = reinterpret_cast<const char*>(kHudSpriteNameTableAddr);
-                    char entryName[kHudSpriteNameEntrySize + 1] = {};
-                    for (int index = static_cast<int>(count) - 1; index > 0; --index)
-                    {
-                        const char* entry = table + (static_cast<size_t>(index) * kHudSpriteNameEntrySize);
-                        std::memcpy(entryName, entry, kHudSpriteNameEntrySize);
-                        entryName[kHudSpriteNameEntrySize] = '\0';
-                        if (_stricmp(entryName, name) == 0)
-                        {
-                            LogShimA(
-                                LogLevel::Info,
-                                "hudlookup",
-                                "table sprite=%s => id=%d",
-                                name,
-                                index);
-                            return index;
-                        }
-                    }
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
+                bool found = false;
+                int index = 0;
+                if (!SehScanHudSpriteTable(name, count, found, index))
                 {
                     LogShimA(
                         LogLevel::Warn,
                         "hudlookup",
                         "table search sprite=%s raised exception",
                         name);
+                }
+                else if (found)
+                {
+                    LogShimA(
+                        LogLevel::Info,
+                        "hudlookup",
+                        "table sprite=%s => id=%d (cached)",
+                        name,
+                        index);
+                    return rememberHit(index);
                 }
             }
             else
@@ -2812,20 +2553,8 @@ namespace BZROpenShim
             // bridge calls because it does not enter renderer-owned lookup code.
             if (g_BzrFn_HudSpriteLookup)
             {
-                __try
-                {
-                    const int id = g_BzrFn_HudSpriteLookup(name);
-                    LogShimA(
-                        LogLevel::Info,
-                        "hudlookup",
-                        "lookupFn=0x%p sprite=%s => id=%d",
-                        reinterpret_cast<void*>(g_BzrFn_HudSpriteLookup),
-                        name,
-                        id);
-                    if (id > 0)
-                        return id;
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
+                int id = 0;
+                if (!SehCallHudSpriteLookupFn(name, id))
                 {
                     LogShimA(
                         LogLevel::Warn,
@@ -2833,6 +2562,18 @@ namespace BZROpenShim
                         "lookupFn=0x%p sprite=%s raised exception",
                         reinterpret_cast<void*>(g_BzrFn_HudSpriteLookup),
                         name);
+                }
+                else
+                {
+                    LogShimA(
+                        LogLevel::Info,
+                        "hudlookup",
+                        "lookupFn=0x%p sprite=%s => id=%d (cached)",
+                        reinterpret_cast<void*>(g_BzrFn_HudSpriteLookup),
+                        name,
+                        id);
+                    if (id > 0)
+                        return rememberHit(id);
                 }
             }
 
@@ -6928,67 +6669,11 @@ namespace BZROpenShim
         // mission script (EXU bridge) wins. A scripted override reverts to the
         // baseline captured from this file, not the hardcoded default, when the
         // mission ends (ResetMissionHookOverrides).
-        static constexpr char kUserConfigFileName[] = "openshim.ini";
         static constexpr char kUserConfigDisplaySection[] = "Display";
         static constexpr char kUserConfigSinglePlayerSection[] = "SinglePlayer";
 
-        static std::filesystem::path GetUserConfigPath()
-        {
-            const auto dir = GetConfigModuleDirectory();
-            if (dir.empty())
-                return {};
-            return dir / kUserConfigFileName;
-        }
 
-        // Tri-state string read: returns false when the key is absent (or the
-        // file/section is missing), so callers can distinguish "no opinion"
-        // (fall through to the next source) from an explicit value.
-        static bool TryGetUserConfigString(const char* section, const char* key, std::string& out)
-        {
-            const auto path = GetUserConfigPath();
-            if (path.empty())
-                return false;
 
-            // A sentinel default reliably detects a missing key: a present key
-            // (even blank) never yields the sentinel byte.
-            static constexpr char kUnsetSentinel[] = "\x01__openshim_unset__";
-            char buf[128] = {};
-            GetPrivateProfileStringA(section, key, kUnsetSentinel, buf,
-                static_cast<DWORD>(sizeof(buf)), path.string().c_str());
-            if (buf[0] == '\0' || std::strcmp(buf, kUnsetSentinel) == 0)
-                return false;
-
-            char* trimmed = TrimAsciiInPlace(buf);
-            if (*trimmed == '\0')
-                return false;
-            out.assign(trimmed);
-            return true;
-        }
-
-        // Tri-state boolean read over TryGetUserConfigString: returns false when
-        // the key is absent OR present-but-unparseable (both mean "no opinion").
-        // Accepts 1/0, true/false, on/off, yes/no, enabled/disabled (any case).
-        static bool TryGetUserConfigBool(const char* section, const char* key, bool& out)
-        {
-            std::string value;
-            if (!TryGetUserConfigString(section, key, value))
-                return false;
-            for (char& c : value)
-                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            if (value == "1" || value == "true" || value == "on" ||
-                value == "yes" || value == "enabled")
-            {
-                out = true;
-                return true;
-            }
-            if (value == "0" || value == "false" || value == "off" ||
-                value == "no" || value == "disabled")
-            {
-                out = false;
-                return true;
-            }
-            return false;
-        }
 
         static std::string NormalizeBanId(const char* value)
         {
@@ -7984,7 +7669,7 @@ namespace BZROpenShim
             g_ConfigRequestedFlagsDirectory.clear();
             g_SelectedFlagFileName.clear();
             g_SelectedFlagIndex = -1;
-            g_SelectedFlagStatus = "Legacy test path idle.";
+            g_SelectedFlagStatus = "Idle.";
             InvalidateFlagPayloadCache();
 
             const auto primaryFlagsDir = GetFlagsDirectoryPath();
@@ -8037,7 +7722,7 @@ namespace BZROpenShim
                 {
                     Log(L"[FLAG] Config sourceDir does not exist path=%hs\n",
                         g_ConfigRequestedFlagsDirectory.string().c_str());
-                    g_SelectedFlagStatus = "Configured flag source directory was not found; using fallback search.";
+                    g_SelectedFlagStatus = "Configured dir missing; using fallback.";
                     g_ConfigRequestedFlagsDirectory.clear();
                 }
                 else
@@ -8081,9 +7766,9 @@ namespace BZROpenShim
             if (g_FlagCatalog.empty())
             {
                 if (!g_ConfigRequestedFlagsDirectory.empty())
-                    g_SelectedFlagStatus = "No source images found in the configured flag source directory.";
+                    g_SelectedFlagStatus = "No images in flags folder.";
                 else
-                    g_SelectedFlagStatus = "No source images found under the configured flag folders.";
+                    g_SelectedFlagStatus = "No images in flags folder.";
                 SaveSelectedFlagConfig();
                 Log(L"[FLAG] No flag source files found. Checked primary=%hs active=%hs requested=%hs\n",
                     primaryFlagsDir.string().c_str(),
@@ -8115,21 +7800,18 @@ namespace BZROpenShim
         {
             const FlagCatalogEntry* entry = GetSelectedFlagEntry();
             if (!entry)
-                return "No flag files found in the configured flag folders. Add PNG/BMP/TGA/JPG images.";
+                return "No flag images found in flags folder.";
 
-            const std::string sourceDirName =
-                g_ActiveFlagsDirectory.empty()
-                ? std::string("<none>")
-                : g_ActiveFlagsDirectory.filename().string();
-            char buffer[512] = {};
+            // Rendered in a fixed-width lobby tooltip label; keep it short so
+            // the text cannot overflow the widget.
+            char buffer[160] = {};
             std::snprintf(
                 buffer,
                 sizeof(buffer),
-                "Selected multiplayer vehicle flag: %s (%d/%u, dir=%s). %s",
+                "Flag: %s (%d/%u). %s",
                 entry->displayName.c_str(),
                 g_SelectedFlagIndex + 1,
                 static_cast<unsigned>(g_FlagCatalog.size()),
-                sourceDirName.c_str(),
                 g_SelectedFlagStatus.c_str());
             return buffer;
         }
@@ -8139,7 +7821,7 @@ namespace BZROpenShim
             const FlagCatalogEntry* entry = GetSelectedFlagEntry();
             if (!entry)
             {
-                g_SelectedFlagStatus = "No source images found under the configured flag folders.";
+                g_SelectedFlagStatus = "No images in flags folder.";
                 return false;
             }
 
@@ -8156,7 +7838,7 @@ namespace BZROpenShim
             std::string error;
             if (!TryBuildLegacyFlagPayloadFromSource(entry->sourcePath, payload, error))
             {
-                g_SelectedFlagStatus = "Legacy conversion failed; see log for source-path detail.";
+                g_SelectedFlagStatus = "Conversion failed; see log.";
                 Log(L"[FLAG] %hs failed converting source path=%hs error=%hs\n",
                     source ? source : "flag",
                     entry->sourcePath.string().c_str(),
@@ -8167,7 +7849,7 @@ namespace BZROpenShim
             const LegacyFlagArtifactPaths paths = GetLegacyFlagArtifactPaths();
             if (!WriteLegacyFlagBitmap(paths.bmpPath, payload, error))
             {
-                g_SelectedFlagStatus = "Generated payload but writing the debug BMP failed.";
+                g_SelectedFlagStatus = "BMP write failed; see log.";
                 Log(L"[FLAG] %hs failed writing BMP path=%hs error=%hs\n",
                     source ? source : "flag",
                     paths.bmpPath.string().c_str(),
@@ -8177,7 +7859,7 @@ namespace BZROpenShim
 
             if (!WriteLegacyFlagPayloadBin(paths.payloadPath, payload, error))
             {
-                g_SelectedFlagStatus = "Generated BMP but writing the legacy payload failed.";
+                g_SelectedFlagStatus = "Payload write failed; see log.";
                 Log(L"[FLAG] %hs failed writing payload path=%hs error=%hs\n",
                     source ? source : "flag",
                     paths.payloadPath.string().c_str(),
@@ -8189,7 +7871,7 @@ namespace BZROpenShim
             g_GeneratedFlagFileName = entry->fileName;
             g_FlagPayloadReady = true;
             g_FlagApplyPending = true;
-            g_SelectedFlagStatus = "Generated legacy 64x32/1-bpp BMP and 256-byte payload; upload pending.";
+            g_SelectedFlagStatus = "Applies at match start.";
             Log(L"[FLAG] %hs generated legacy artifacts source=%hs bmp=%hs payload=%hs\n",
                 source ? source : "flag",
                 entry->sourcePath.string().c_str(),
@@ -8221,12 +7903,12 @@ namespace BZROpenShim
 
                 if (flagBuffer)
                 {
-                    g_SelectedFlagStatus = "Uploaded selected flag through the engine SetMyFlag path.";
+                    g_SelectedFlagStatus = "Uploaded.";
                     g_FlagApplyPending = false;
                 }
                 else
                 {
-                    g_SelectedFlagStatus = "Engine SetMyFlag ran, but the local player flag buffer stayed empty; fallback remains pending.";
+                    g_SelectedFlagStatus = "Applies at match start.";
                     g_FlagApplyPending = true;
                 }
 
@@ -8240,7 +7922,7 @@ namespace BZROpenShim
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                g_SelectedFlagStatus = "Engine SetMyFlag apply raised an exception.";
+                g_SelectedFlagStatus = "Engine apply failed; see log.";
                 g_FlagApplyPending = true;
                 Log(L"[FLAG] %hs engine apply raised an exception path=%hs\n",
                     source ? source : "flag",
@@ -8254,13 +7936,13 @@ namespace BZROpenShim
             const FlagCatalogEntry* entry = GetSelectedFlagEntry();
             if (!entry)
             {
-                g_SelectedFlagStatus = "No source images found under the configured flag folders.";
+                g_SelectedFlagStatus = "No images in flags folder.";
                 return false;
             }
 
             if (!g_BzrFn_SetMyFlag)
             {
-                g_SelectedFlagStatus = "Engine flag upload helper was not resolved; using legacy fallback if available.";
+                g_SelectedFlagStatus = "Applies at match start.";
                 g_FlagApplyPending = true;
                 return false;
             }
@@ -8274,7 +7956,7 @@ namespace BZROpenShim
 
             if (path.empty() || path.size() >= kFlagFilePathBufferCapacity)
             {
-                g_SelectedFlagStatus = "Selected flag path is empty or too long for engine upload; using legacy fallback if available.";
+                g_SelectedFlagStatus = "Flag path too long for engine upload.";
                 g_FlagApplyPending = true;
                 return false;
             }
@@ -8292,7 +7974,7 @@ namespace BZROpenShim
                 !g_BzrFn_NetPlayerSetData ||
                 !g_BzrFn_NetPlayerSetFlagBuffer)
             {
-                g_SelectedFlagStatus = "Generated legacy files, but fallback apply helpers were not resolved.";
+                g_SelectedFlagStatus = "Apply helpers unavailable.";
                 g_FlagApplyPending = true;
                 return false;
             }
@@ -8302,7 +7984,7 @@ namespace BZROpenShim
                 void* localPlayer = nullptr;
                 if (!TryGetLocalPlayerForFlags(localPlayer))
                 {
-                    g_SelectedFlagStatus = "Generated legacy files; waiting for a local multiplayer player object.";
+                    g_SelectedFlagStatus = "Applies at match start.";
                     g_FlagApplyPending = true;
                     return false;
                 }
@@ -8317,7 +7999,7 @@ namespace BZROpenShim
                     g_SelectedFlagPayload.data(),
                     static_cast<uint32_t>(g_SelectedFlagPayload.size()));
                 MarkFlagDisplayDirty();
-                g_SelectedFlagStatus = "Uploaded 256-byte legacy fallback flag payload.";
+                g_SelectedFlagStatus = "Uploaded.";
                 g_FlagApplyPending = false;
                 Log(L"[FLAG] %hs applied legacy fallback payload bytes=%u slot=0x%02X player=0x%p\n",
                     source ? source : "flag",
@@ -8328,7 +8010,7 @@ namespace BZROpenShim
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                g_SelectedFlagStatus = "Generated legacy files, but fallback apply raised an exception.";
+                g_SelectedFlagStatus = "Apply failed; see log.";
                 g_FlagApplyPending = true;
                 Log(L"[FLAG] %hs apply raised an exception\n", source ? source : "flag");
                 return false;
@@ -8339,6 +8021,20 @@ namespace BZROpenShim
         {
             if (!TryGenerateSelectedFlagArtifacts(source))
                 return;
+
+            // In the lobby (pre-session) there is no local NetPlayer object
+            // yet, so both apply paths can only fail: the legacy fallback
+            // needs the player object and the engine SetMyFlag path leaves
+            // the flag buffer empty. Skip quietly and let the in-game
+            // ui_create/ui_update pass upload once the player exists instead
+            // of surfacing a scary-looking failure status in the lobby UI.
+            void* localPlayer = nullptr;
+            if (!TryGetLocalPlayerForFlags(localPlayer))
+            {
+                g_SelectedFlagStatus = "Applies at match start.";
+                g_FlagApplyPending = true;
+                return;
+            }
 
             // Redux's SetMyFlag exits when slot 0x0D already exists, which
             // prevents a later lobby selection from replacing the first flag.
@@ -8372,7 +8068,7 @@ namespace BZROpenShim
             if (_stricmp(previousSelection.c_str(), g_SelectedFlagFileName.c_str()) != 0)
             {
                 InvalidateFlagPayloadCache();
-                g_SelectedFlagStatus = "Selected new source image; upload pending.";
+                g_SelectedFlagStatus = "Applies at match start.";
             }
             SaveSelectedFlagConfig();
             Log(L"[FLAG] %hs selected index=%d file=%hs path=%hs\n",
@@ -9032,6 +8728,13 @@ namespace BZROpenShim
             return GetGameObjectActualTeam(objectPtr);
         }
 
+        // Defined later (headlight/flag sections); declared here so the
+        // earlier diagnostic samplers can share the verified user-object
+        // global and arena enumeration instead of the removed stale globals.
+        static void* TryGetHeadlightPlayerObject();
+        static size_t CollectLiveGameObjectsFromArena(void** outObjects, size_t capacity);
+        static constexpr size_t kGameObjectArenaSlotCapacity = 4096;
+
         static bool IsSatelliteOverviewActive()
         {
             auto* viewRecord = ResolveMainModulePtr<uint8_t>(kViewRecordRva);
@@ -9111,16 +8814,10 @@ namespace BZROpenShim
             g_SatelliteVisibilityLastTick = now;
 
             auto* viewRecord = ResolveMainModulePtr<uint8_t>(kViewRecordRva);
-            auto* userTeamNumberPtr = ResolveMainModulePtr<long>(kGameObjectUserTeamNumberRva);
-            auto* userObjectPtr = ResolveMainModulePtr<void*>(kGameObjectUserObjectRva);
-            auto* objectListBytes = ResolveMainModulePtr<uint8_t>(kGameObjectObjectListRva);
-            if (!viewRecord || !userTeamNumberPtr || !userObjectPtr || !objectListBytes)
+            if (!viewRecord)
             {
-                Log(L"[SATVIS] missing runtime pointers viewRecord=0x%08X userTeam=0x%08X userObject=0x%08X objectList=0x%08X\n",
-                    static_cast<uint32_t>(GetMainModuleBase() + kViewRecordRva),
-                    static_cast<uint32_t>(GetMainModuleBase() + kGameObjectUserTeamNumberRva),
-                    static_cast<uint32_t>(GetMainModuleBase() + kGameObjectUserObjectRva),
-                    static_cast<uint32_t>(GetMainModuleBase() + kGameObjectObjectListRva));
+                Log(L"[SATVIS] missing view record pointer 0x%08X\n",
+                    static_cast<uint32_t>(GetMainModuleBase() + kViewRecordRva));
                 return;
             }
 
@@ -9128,22 +8825,12 @@ namespace BZROpenShim
             {
                 const long currentView =
                     *reinterpret_cast<const long*>(viewRecord + kPresetViewCurrentViewOffset);
-                const long userTeam = *userTeamNumberPtr;
-                void* const userObject = *userObjectPtr;
+                void* const userObject = TryGetHeadlightPlayerObject();
+                const long userTeam = static_cast<long>(GetGameObjectActualTeam(userObject));
 
-                auto** begin = *reinterpret_cast<void***>(objectListBytes + 0x0);
-                auto** end = *reinterpret_cast<void***>(objectListBytes + 0x4);
-                auto** capacity = *reinterpret_cast<void***>(objectListBytes + 0x8);
-                if (!begin || !end || !capacity || end < begin || capacity < end)
-                {
-                    Log(L"[SATVIS] invalid objectList begin=0x%08X end=0x%08X cap=0x%08X\n",
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(begin)),
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(end)),
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(capacity)));
-                    return;
-                }
-
-                const size_t totalObjects = static_cast<size_t>(end - begin);
+                static void* s_satvisObjects[kGameObjectArenaSlotCapacity];
+                const size_t totalObjects =
+                    CollectLiveGameObjectsFromArena(s_satvisObjects, kGameObjectArenaSlotCapacity);
                 const size_t maxSampleObjects = static_cast<size_t>(g_SatelliteVisibilityObjectLimit);
                 const size_t sampleObjects =
                     (totalObjects < maxSampleObjects) ? totalObjects : maxSampleObjects;
@@ -9162,7 +8849,7 @@ namespace BZROpenShim
                 for (size_t index = 0; index < sampleObjects; ++index)
                 {
                     SatelliteVisibilityLogEntry entry = {};
-                    if (!CaptureSatelliteVisibilityEntry(begin[index], entry))
+                    if (!CaptureSatelliteVisibilityEntry(s_satvisObjects[index], entry))
                         continue;
 
                     if (entry.illumination > 0.0f)
@@ -10093,89 +9780,7 @@ namespace BZROpenShim
             }
         }
 
-        static bool InstallInlineDetour32(InlineDetour32& detour,
-                                          uintptr_t target,
-                                          void* hook,
-                                          size_t patchLen,
-                                          const uint8_t* expectedBytes,
-                                          size_t expectedLen)
-        {
-            if (!target || !hook || patchLen < 5 || patchLen > detour.original.size())
-                return false;
 
-            if (detour.trampoline)
-                return true;
-
-            auto* targetBytes = reinterpret_cast<uint8_t*>(target);
-            if (expectedBytes && expectedLen > 0)
-            {
-                if (expectedLen > patchLen || memcmp(targetBytes, expectedBytes, expectedLen) != 0)
-                    return false;
-            }
-
-            auto* trampolineBytes = reinterpret_cast<uint8_t*>(
-                VirtualAlloc(nullptr, patchLen + 5, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
-            if (!trampolineBytes)
-                return false;
-
-            memcpy(detour.original.data(), targetBytes, patchLen);
-            memcpy(trampolineBytes, targetBytes, patchLen);
-
-            const uintptr_t resumeAddr = target + patchLen;
-            trampolineBytes[patchLen] = 0xE9;
-            const int32_t trampolineRel =
-                static_cast<int32_t>(resumeAddr) -
-                static_cast<int32_t>(reinterpret_cast<uintptr_t>(trampolineBytes + patchLen) + 5);
-            memcpy(trampolineBytes + patchLen + 1, &trampolineRel, sizeof(trampolineRel));
-
-            DWORD oldProtect = 0;
-            if (!VirtualProtect(targetBytes, patchLen, PAGE_EXECUTE_READWRITE, &oldProtect))
-            {
-                VirtualFree(trampolineBytes, 0, MEM_RELEASE);
-                return false;
-            }
-
-            targetBytes[0] = 0xE9;
-            const int32_t hookRel =
-                static_cast<int32_t>(reinterpret_cast<uintptr_t>(hook)) -
-                static_cast<int32_t>(target + 5);
-            memcpy(targetBytes + 1, &hookRel, sizeof(hookRel));
-            for (size_t i = 5; i < patchLen; ++i)
-                targetBytes[i] = 0x90;
-
-            FlushInstructionCache(GetCurrentProcess(), targetBytes, patchLen);
-
-            DWORD restoreProtect = 0;
-            VirtualProtect(targetBytes, patchLen, oldProtect, &restoreProtect);
-
-            detour.target = target;
-            detour.hook = hook;
-            detour.trampoline = trampolineBytes;
-            detour.patchLen = patchLen;
-            return true;
-        }
-
-        static bool ExpectedBytesMatchAt(uintptr_t address,
-                                         const uint8_t* expectedBytes,
-                                         size_t expectedLen)
-        {
-            if (!address || !expectedBytes || expectedLen == 0 || expectedLen > kInlineDetourMaxPatchLen)
-                return false;
-
-            uint8_t current[kInlineDetourMaxPatchLen] = {};
-            SIZE_T read = 0;
-            if (!ReadProcessMemory(GetCurrentProcess(),
-                                   reinterpret_cast<const void*>(address),
-                                   current,
-                                   expectedLen,
-                                   &read) ||
-                read != expectedLen)
-            {
-                return false;
-            }
-
-            return memcmp(current, expectedBytes, expectedLen) == 0;
-        }
 
         static bool TryCaptureLocalPlayerSnapshot(JumpSnipeProbeSnapshot& out)
         {
@@ -10961,6 +10566,9 @@ namespace BZROpenShim
         static constexpr uint32_t kUnitVoThrottleMsDefault = 0;
         static constexpr uint32_t kUnitVoQueueDepthDefault = 2;
         static constexpr uint32_t kUnitVoQueueStaleMsDefault = 2000;
+        static constexpr uint32_t kUnitVoReducedThrottleMs = 2500;
+        static constexpr uint32_t kUnitVoReducedQueueDepth = 1;
+        static constexpr uint32_t kUnitVoReducedQueueStaleMs = 1500;
         static constexpr uint32_t kUnitVoThrottleMsMax = 60000;
         static constexpr uint32_t kUnitVoQueueDepthMax = 8;
         static constexpr uint32_t kUnitVoQueueStaleMsMax = 60000;
@@ -10973,6 +10581,9 @@ namespace BZROpenShim
         static uint32_t g_UnitVoQueueStaleMs = kUnitVoQueueStaleMsDefault;
         static bool g_UnitVoConfigInitialized = false;
         static bool g_UnitVoBaselineFeedbackEnabled = kUnitVoFeedbackEnabledDefault;
+        static uint32_t g_UnitVoBaselineThrottleMs = kUnitVoThrottleMsDefault;
+        static uint32_t g_UnitVoBaselineQueueDepth = kUnitVoQueueDepthDefault;
+        static uint32_t g_UnitVoBaselineQueueStaleMs = kUnitVoQueueStaleMsDefault;
         static bool g_UnitVoHooksInstalled = false;
         static bool g_UnitVoHookFailureLogged = false;
         static uintptr_t g_UnitVoSayQueueCallSite = 0;
@@ -11289,13 +10900,50 @@ namespace BZROpenShim
             g_UnitVoConfigInitialized = true;
 
             bool feedbackEnabled = kUnitVoFeedbackEnabledDefault;
-            bool configuredValue = false;
-            if (TryGetUserConfigBool(kUserConfigDisplaySection, "UnitVoFeedback", configuredValue))
-                feedbackEnabled = configuredValue;
+            uint32_t throttleMs = kUnitVoThrottleMsDefault;
+            uint32_t queueDepth = kUnitVoQueueDepthDefault;
+            uint32_t queueStaleMs = kUnitVoQueueStaleMsDefault;
+
+            std::string configuredMode;
+            if (TryGetUserConfigString(kUserConfigDisplaySection, "UnitVoFeedback", configuredMode))
+            {
+                std::string normalized;
+                normalized.reserve(configuredMode.size());
+                for (char ch : configuredMode)
+                {
+                    if (ch == ' ' || ch == '\t' || ch == '_' || ch == '-')
+                        continue;
+                    normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+                }
+
+                if (normalized == "reduced" || normalized == "minimal")
+                {
+                    feedbackEnabled = true;
+                    throttleMs = kUnitVoReducedThrottleMs;
+                    queueDepth = kUnitVoReducedQueueDepth;
+                    queueStaleMs = kUnitVoReducedQueueStaleMs;
+                }
+                else if (normalized == "none" || normalized == "off" || normalized == "0" ||
+                         normalized == "false" || normalized == "no" || normalized == "disabled")
+                {
+                    feedbackEnabled = false;
+                }
+                else if (normalized == "normal" || normalized == "on" || normalized == "1" ||
+                         normalized == "true" || normalized == "yes" || normalized == "enabled")
+                {
+                    feedbackEnabled = true;
+                }
+            }
 
             std::lock_guard<std::mutex> lock(g_UnitVoMutex);
             g_UnitVoBaselineFeedbackEnabled = feedbackEnabled;
+            g_UnitVoBaselineThrottleMs = throttleMs;
+            g_UnitVoBaselineQueueDepth = queueDepth;
+            g_UnitVoBaselineQueueStaleMs = queueStaleMs;
             g_UnitVoMuted = !feedbackEnabled;
+            g_UnitVoThrottleMs = throttleMs;
+            g_UnitVoQueueDepthLimit = queueDepth;
+            g_UnitVoQueueStaleMs = queueStaleMs;
             g_UnitVoLastAttemptTick = 0;
             Log(L"[UNITVO] Feedback baseline=%hs depth=%u stale=%ums throttle=%ums\n",
                 feedbackEnabled ? "enabled" : "disabled",
@@ -11309,9 +10957,9 @@ namespace BZROpenShim
             InitializeUnitVoConfig();
             std::lock_guard<std::mutex> lock(g_UnitVoMutex);
             g_UnitVoMuted = !g_UnitVoBaselineFeedbackEnabled;
-            g_UnitVoThrottleMs = kUnitVoThrottleMsDefault;
-            g_UnitVoQueueDepthLimit = kUnitVoQueueDepthDefault;
-            g_UnitVoQueueStaleMs = kUnitVoQueueStaleMsDefault;
+            g_UnitVoThrottleMs = g_UnitVoBaselineThrottleMs;
+            g_UnitVoQueueDepthLimit = g_UnitVoBaselineQueueDepth;
+            g_UnitVoQueueStaleMs = g_UnitVoBaselineQueueStaleMs;
             g_UnitVoLastAttemptTick = 0;
         }
 
@@ -11659,6 +11307,8 @@ namespace BZROpenShim
 
         static constexpr DWORD kHeadlightRefreshMs = 200;
         static constexpr size_t kHeadlightObjectSlotCount = 4096;
+        static_assert(kGameObjectArenaSlotCapacity == kHeadlightObjectSlotCount,
+                      "arena capacity forward constant out of sync");
         static constexpr size_t kHeadlightObjectSlotSize = 0x400;
         // Redux's verified handle mapping (mirrors EXU GameObject::GetObj):
         // object = 0x0260DB20 + (handle >> 20) * 0x400.
@@ -14475,6 +14125,313 @@ namespace BZROpenShim
 #endif
         }
 
+        // Post-load quake replay fade (#57) helpers. All calls run on the game
+        // thread: the arm hook replaces PostLoadScriptUtils' StartQuake call
+        // and the fade tick runs from the EarthQuake::Simulate entry detour.
+        using FnEarthQuakeSimulate = void(__fastcall*)(void* thisPtr, void* edx, float dt);
+        using FnEarthQuakeStartQuake = void(__fastcall*)(void* thisPtr, void* edx, float scale);
+        using FnEarthQuakeUpdateQuake = void(__fastcall*)(void* thisPtr, void* edx, float scale);
+        using FnEarthQuakeStopQuake = void(__fastcall*)(void* thisPtr, void* edx);
+        static FnEarthQuakeSimulate g_BzrFn_EarthQuakeSimulateOriginal = nullptr;
+
+        static void ArmQuakeReplayWatchdog(float scale)
+        {
+            if (!g_QuakeReplayFadeEnabled || !(scale > 0.0f))
+            {
+                InterlockedExchange(&g_QuakeReplayArmed, 0);
+                return;
+            }
+
+            std::memcpy(&g_QuakeReplayInitialScaleBits, &scale, sizeof(scale));
+            g_QuakeReplayLastWrittenBits = g_QuakeReplayInitialScaleBits;
+            g_QuakeReplayArmTick = GetTickCount64();
+            InterlockedExchange(&g_QuakeReplayArmed, 1);
+            Log(L"[QUAKEFADE] Armed post-load quake fade scale=%.3f fadeSeconds=%ld\n",
+                static_cast<double>(scale), g_QuakeReplayFadeSeconds);
+        }
+
+        static void __fastcall PostLoadQuakeRestartArmHook(void* thisPtr, void* /*edx*/, float scale)
+        {
+            ArmQuakeReplayWatchdog(scale);
+            reinterpret_cast<FnEarthQuakeStartQuake>(kGogEarthQuakeStartQuakeAddr)(
+                thisPtr, nullptr, scale);
+        }
+
+        static void QuakeReplayFadeTick(void* quakePtr)
+        {
+            if (!g_QuakeReplayArmed ||
+                reinterpret_cast<uintptr_t>(quakePtr) != kGogEarthQuakeObjectAddr)
+                return;
+
+            __try
+            {
+                auto* scalePtr = reinterpret_cast<const float*>(
+                    kGogEarthQuakeObjectAddr + kEarthQuakeScaleOffset);
+                uint32_t currentBits = 0;
+                std::memcpy(&currentBits, scalePtr, sizeof(currentBits));
+                if (currentBits != g_QuakeReplayLastWrittenBits)
+                {
+                    // A mission script (or a live QuakeBlast) wrote the scale:
+                    // that owner is responsible for stopping the quake.
+                    InterlockedExchange(&g_QuakeReplayArmed, 0);
+                    Log(L"[QUAKEFADE] Released quake fade: script took ownership of quake scale\n");
+                    return;
+                }
+
+                float current = 0.0f;
+                std::memcpy(&current, &currentBits, sizeof(current));
+                if (!(current > 0.0f))
+                {
+                    InterlockedExchange(&g_QuakeReplayArmed, 0);
+                    return;
+                }
+
+                float initial = 0.0f;
+                std::memcpy(&initial, &g_QuakeReplayInitialScaleBits, sizeof(initial));
+                const float elapsedSeconds = static_cast<float>(
+                    static_cast<double>(GetTickCount64() - g_QuakeReplayArmTick) / 1000.0);
+                const float target =
+                    initial * (1.0f - elapsedSeconds / static_cast<float>(g_QuakeReplayFadeSeconds));
+
+                if (target <= 0.01f)
+                {
+                    reinterpret_cast<FnEarthQuakeStopQuake>(kGogEarthQuakeStopQuakeAddr)(
+                        quakePtr, nullptr);
+                    InterlockedExchange(&g_QuakeReplayArmed, 0);
+                    Log(L"[QUAKEFADE] Stopped replayed quake after %lds fade\n",
+                        g_QuakeReplayFadeSeconds);
+                    return;
+                }
+
+                if (target < current)
+                {
+                    // UpdateQuake also re-scales the looping gquak01.wav.
+                    reinterpret_cast<FnEarthQuakeUpdateQuake>(kGogEarthQuakeUpdateQuakeAddr)(
+                        quakePtr, nullptr, target);
+                    std::memcpy(&g_QuakeReplayLastWrittenBits, &target, sizeof(target));
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                InterlockedExchange(&g_QuakeReplayArmed, 0);
+                Log(L"[QUAKEFADE] Quake fade tick raised an exception; watchdog disarmed\n");
+            }
+        }
+
+        static void __fastcall EarthQuakeSimulateReplayFadeHook(void* thisPtr, void* edx, float dt)
+        {
+            QuakeReplayFadeTick(thisPtr);
+            if (g_BzrFn_EarthQuakeSimulateOriginal)
+                g_BzrFn_EarthQuakeSimulateOriginal(thisPtr, edx, dt);
+        }
+
+        static void InstallQuakeReplayFadeIfPossible()
+        {
+            if (!g_QuakeReplayFadeEnabled || g_QuakeReplayFadeInstalled)
+                return;
+
+            // mov ecx, offset earthQuake (0x992328) directly before the
+            // PostLoadScriptUtils StartQuake call we redirect. This never
+            // changes, so it stays a valid guard across retries.
+            static const uint8_t kExpectedQuakeThisSetup[5] =
+            {
+                0xB9, 0x28, 0x23, 0x99, 0x00
+            };
+            if (!ExpectedBytesMatchAt(kGogPostLoadQuakeRestartCallAddr - 5,
+                                      kExpectedQuakeThisSetup,
+                                      sizeof(kExpectedQuakeThisSetup)))
+            {
+                return;
+            }
+
+            // push ebp / mov ebp, esp / sub esp, 0x90 at EarthQuake::Simulate.
+            static const uint8_t kExpectedSimulateEntry[kEarthQuakeSimulateDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x90, 0x00, 0x00, 0x00
+            };
+            if (!InstallInlineDetour32(g_EarthQuakeSimulateDetour,
+                                       kGogEarthQuakeSimulateAddr,
+                                       reinterpret_cast<void*>(EarthQuakeSimulateReplayFadeHook),
+                                       kEarthQuakeSimulateDetourLen,
+                                       kExpectedSimulateEntry,
+                                       sizeof(kExpectedSimulateEntry)))
+            {
+                return;
+            }
+            g_BzrFn_EarthQuakeSimulateOriginal =
+                reinterpret_cast<FnEarthQuakeSimulate>(g_EarthQuakeSimulateDetour.trampoline);
+
+            if (!RedirectCallTarget(kGogPostLoadQuakeRestartCallAddr,
+                                    kGogEarthQuakeStartQuakeAddr,
+                                    reinterpret_cast<uintptr_t>(PostLoadQuakeRestartArmHook)))
+            {
+                Log(L"[QUAKEFADE] Failed redirecting post-load quake restart call at 0x%08X\n",
+                    static_cast<uint32_t>(kGogPostLoadQuakeRestartCallAddr));
+                return;
+            }
+
+            g_QuakeReplayFadeInstalled = true;
+            Log(L"[QUAKEFADE] Installed post-load quake fade restartCall=0x%08X simulate=0x%08X fadeSeconds=%ld\n",
+                static_cast<uint32_t>(kGogPostLoadQuakeRestartCallAddr),
+                static_cast<uint32_t>(kGogEarthQuakeSimulateAddr),
+                g_QuakeReplayFadeSeconds);
+        }
+
+        // Stale target camera fix (#56/#78) helpers.
+        using FnTargetCamEnabled = uint8_t(__cdecl*)();
+
+        static uint8_t __cdecl TargetCamEnabledOverviewGateHook()
+        {
+            const uint8_t enabled =
+                reinterpret_cast<FnTargetCamEnabled>(kGogTargetCamEnabledWrapperAddr)();
+            if (!enabled)
+                return 0;
+
+            const int32_t viewMode =
+                *reinterpret_cast<const volatile int32_t*>(kGogViewModeAddr);
+            if (viewMode != kGogViewModeSatellite && viewMode != kGogViewModeEditor)
+                return enabled;
+
+            if (InterlockedDecrement(&g_TargetCamSatelliteLogBudget) >= 0)
+            {
+                Log(L"[TARGETCAM] Suppressed stale target camera overlay in overview viewMode=%d\n",
+                    viewMode);
+            }
+            return 0;
+        }
+
+        static void InstallTargetCamSatelliteFixIfPossible()
+        {
+            if (!g_TargetCamSatelliteFixEnabled || g_TargetCamSatelliteFixInstalled)
+                return;
+
+            // movzx ecx, al / test ecx, ecx directly after the enabled-predicate
+            // call in the Ogre frame driver.
+            static const uint8_t kExpectedAfterEnabledCall[5] =
+            {
+                0x0F, 0xB6, 0xC8, 0x85, 0xC9
+            };
+            if (!ExpectedBytesMatchAt(kGogTargetCamEnabledCallAddr + 5,
+                                      kExpectedAfterEnabledCall,
+                                      sizeof(kExpectedAfterEnabledCall)))
+            {
+                return;
+            }
+
+            if (!RedirectCallTarget(kGogTargetCamEnabledCallAddr,
+                                    kGogTargetCamEnabledWrapperAddr,
+                                    reinterpret_cast<uintptr_t>(TargetCamEnabledOverviewGateHook)))
+            {
+                Log(L"[TARGETCAM] Failed redirecting target camera predicate call at 0x%08X\n",
+                    static_cast<uint32_t>(kGogTargetCamEnabledCallAddr));
+                return;
+            }
+
+            g_TargetCamSatelliteFixInstalled = true;
+            Log(L"[TARGETCAM] Installed satellite/F9 stale target camera fix call=0x%08X viewMode=0x%08X\n",
+                static_cast<uint32_t>(kGogTargetCamEnabledCallAddr),
+                static_cast<uint32_t>(kGogViewModeAddr));
+        }
+
+        // Cinematic camera satellite zoom fix (#58) helpers.
+        using FnCinematicCameraBegin = void(__cdecl*)();
+        using FnGetCameraRecord = void*(__cdecl*)();
+        using FnBuildCameraRecord = void*(__cdecl*)(void* outBuf,
+                                                    void* viewport,
+                                                    uint32_t fovBits,
+                                                    uint32_t paneBits,
+                                                    uint32_t farBits,
+                                                    uint32_t zoomBits);
+
+        static void RestoreCockpitCameraRecordForCinematic(int32_t viewMode)
+        {
+            __try
+            {
+                auto* record = static_cast<uint8_t*>(
+                    reinterpret_cast<FnGetCameraRecord>(kGogGetCameraRecordAddr)());
+                if (!record)
+                    return;
+
+                // Mirror of the cockpit view setter's record rebuild: keep the
+                // record's viewport/pane/far values, swap in cockpit FOV and
+                // zoom 1.0 so the cinematic does not inherit the overview zoom.
+                static uint8_t rebuildBuffer[1024];
+                void* rebuilt = reinterpret_cast<FnBuildCameraRecord>(kGogBuildCameraRecordAddr)(
+                    rebuildBuffer,
+                    *reinterpret_cast<void**>(record + 0x38),
+                    *reinterpret_cast<const uint32_t*>(kGogCockpitFovBitsAddr),
+                    *reinterpret_cast<const uint32_t*>(record + 0x2C),
+                    *reinterpret_cast<const uint32_t*>(record + 0x10),
+                    *reinterpret_cast<const uint32_t*>(kGogCockpitZoomBitsAddr));
+                if (rebuilt)
+                    memcpy(record, rebuilt, kGogCameraRecordDwords * 4);
+
+                if (InterlockedDecrement(&g_CinematicSatelliteZoomLogBudget) >= 0)
+                {
+                    Log(L"[CINECAM] Rebuilt camera record with cockpit FOV/zoom before cinematic (viewMode=%d)\n",
+                        viewMode);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[CINECAM] Camera record rebuild raised an exception; using stock cinematic path\n");
+            }
+        }
+
+        static void __cdecl CinematicCameraBeginZoomFixHook()
+        {
+            const int32_t viewMode =
+                *reinterpret_cast<const volatile int32_t*>(kGogViewModeAddr);
+            if (g_CinematicSatelliteZoomFixEnabled &&
+                (viewMode == kGogViewModeSatellite || viewMode == kGogViewModeEditor))
+            {
+                RestoreCockpitCameraRecordForCinematic(viewMode);
+            }
+            reinterpret_cast<FnCinematicCameraBegin>(kGogCinematicCameraBeginAddr)();
+        }
+
+        static void InstallCinematicSatelliteZoomFixIfPossible()
+        {
+            if (!g_CinematicSatelliteZoomFixEnabled || g_CinematicSatelliteZoomFixInstalled)
+                return;
+
+            // push ebp / mov ebp, esp / push ecx at the cinematic begin entry.
+            static const uint8_t kExpectedCinematicBeginEntry[4] =
+            {
+                0x55, 0x8B, 0xEC, 0x51
+            };
+            if (!ExpectedBytesMatchAt(kGogCinematicCameraBeginAddr,
+                                      kExpectedCinematicBeginEntry,
+                                      sizeof(kExpectedCinematicBeginEntry)))
+            {
+                return;
+            }
+
+            const bool missionCall = RedirectCallTarget(
+                kGogCinematicBeginCallAddr1,
+                kGogCinematicCameraBeginAddr,
+                reinterpret_cast<uintptr_t>(CinematicCameraBeginZoomFixHook));
+            const bool scriptCall = RedirectCallTarget(
+                kGogCinematicBeginCallAddr2,
+                kGogCinematicCameraBeginAddr,
+                reinterpret_cast<uintptr_t>(CinematicCameraBeginZoomFixHook));
+
+            g_CinematicSatelliteZoomFixInstalled = missionCall && scriptCall;
+            if (g_CinematicSatelliteZoomFixInstalled)
+            {
+                Log(L"[CINECAM] Installed cinematic-from-satellite zoom fix calls=0x%08X,0x%08X begin=0x%08X\n",
+                    static_cast<uint32_t>(kGogCinematicBeginCallAddr1),
+                    static_cast<uint32_t>(kGogCinematicBeginCallAddr2),
+                    static_cast<uint32_t>(kGogCinematicCameraBeginAddr));
+            }
+            else
+            {
+                Log(L"[CINECAM] Cinematic zoom fix call redirect incomplete mission=%hs script=%hs\n",
+                    missionCall ? "ok" : "failed",
+                    scriptCall ? "ok" : "failed");
+            }
+        }
+
         static bool ShouldTraceSplinterUndeadFix()
         {
             return EnvFlagEnabled("OPENSHIM_TRACE_SPLINTER_UNDEAD") ||
@@ -15727,34 +15684,7 @@ namespace BZROpenShim
             return oldest;
         }
 
-        static std::filesystem::path GetMainModuleDirectory()
-        {
-            char path[MAX_PATH] = {};
-            const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
-            if (length == 0 || length >= MAX_PATH)
-                return {};
 
-            return std::filesystem::path(path).parent_path();
-        }
-
-        static std::string TrimAsciiCopy(const std::string& value)
-        {
-            size_t start = 0;
-            while (start < value.size() &&
-                   std::isspace(static_cast<unsigned char>(value[start])))
-            {
-                ++start;
-            }
-
-            size_t end = value.size();
-            while (end > start &&
-                   std::isspace(static_cast<unsigned char>(value[end - 1])))
-            {
-                --end;
-            }
-
-            return value.substr(start, end - start);
-        }
 
         static std::string ReadFixedAsciiField(const uint8_t* bytes, size_t length)
         {
@@ -17094,2918 +17024,6 @@ namespace BZROpenShim
             return outMeshName[0] != '\0';
         }
 
-        static std::string HumanizeInputBindingCommand(const std::string& command)
-        {
-            if (command.empty())
-                return {};
-
-            std::string text = command;
-            for (char& ch : text)
-            {
-                if (ch == '_')
-                    ch = ' ';
-                else
-                    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-            }
-
-            bool capitalizeNext = true;
-            for (char& ch : text)
-            {
-                if (std::isspace(static_cast<unsigned char>(ch)))
-                {
-                    capitalizeNext = true;
-                    continue;
-                }
-
-                if (capitalizeNext)
-                {
-                    ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
-                    capitalizeNext = false;
-                }
-            }
-
-            return text;
-        }
-
-        static bool IsInputBindingSectionHeading(const std::string& comment)
-        {
-            if (comment.empty())
-                return false;
-
-            if (_stricmp(comment.c_str(), "BATTLEZONE") == 0 ||
-                _stricmp(comment.c_str(), "Input Mapping") == 0)
-            {
-                return false;
-            }
-
-            return comment.size() >= 8 &&
-                   _stricmp(comment.c_str() + (comment.size() - 8), "CONTROLS") == 0;
-        }
-
-        static GameKeyBindingAction* FindGameKeyBindingAction(
-            std::vector<GameKeyBindingAction>& actions,
-            const std::string& action)
-        {
-            for (GameKeyBindingAction& entry : actions)
-            {
-                if (entry.action == action)
-                    return &entry;
-            }
-
-            return nullptr;
-        }
-
-        static std::string JoinStrings(const std::vector<std::string>& parts, const char* separator)
-        {
-            if (parts.empty())
-                return {};
-
-            std::string combined;
-            for (size_t index = 0; index < parts.size(); ++index)
-            {
-                if (index != 0 && separator)
-                    combined += separator;
-                combined += parts[index];
-            }
-            return combined;
-        }
-
-        static bool AppendUniqueString(std::vector<std::string>& values, const std::string& value)
-        {
-            if (value.empty())
-                return false;
-
-            if (std::find(values.begin(), values.end(), value) != values.end())
-                return false;
-
-            values.push_back(value);
-            return true;
-        }
-
-        static std::filesystem::path ResolveInputBindingInstallDirectory()
-        {
-            const auto moduleDir = GetMainModuleDirectory();
-            const auto hasInputMap = [](const std::filesystem::path& dir) -> bool
-            {
-                if (dir.empty())
-                    return false;
-
-                std::error_code error;
-                return std::filesystem::exists(dir / "input.map", error);
-            };
-
-            if (hasInputMap(moduleDir))
-                return moduleDir;
-
-            char userProfile[MAX_PATH] = {};
-            const DWORD userProfileLen =
-                GetEnvironmentVariableA("USERPROFILE", userProfile, MAX_PATH);
-            if (userProfileLen > 0 && userProfileLen < MAX_PATH)
-            {
-                const std::filesystem::path documentsInstall =
-                    std::filesystem::path(userProfile) / "Documents" / "Battlezone 98 Redux";
-                if (hasInputMap(documentsInstall))
-                    return documentsInstall;
-            }
-
-            const std::filesystem::path gogInstall("<GAME_ROOT>");
-            if (hasInputMap(gogInstall))
-                return gogInstall;
-
-            return moduleDir;
-        }
-
-        static bool LoadInputBindingDocument(const std::filesystem::path& path,
-                                             InputBindingDocument& outDocument)
-        {
-            outDocument.lines.clear();
-            outDocument.loaded = false;
-
-            std::ifstream file(path);
-            if (!file)
-                return false;
-
-            std::string line;
-            while (std::getline(file, line))
-            {
-                if (!line.empty() && line.back() == '\r')
-                    line.pop_back();
-                outDocument.lines.push_back(line);
-            }
-
-            outDocument.loaded = true;
-            return true;
-        }
-
-        static bool ParseInputBindingMapFile(
-            const std::filesystem::path& inputMapPath,
-            InputBindingDocument& outDocument,
-            std::vector<InputBindingCommandBlock>& outBlocks,
-            InputBindingInventoryStats& outInventory)
-        {
-            outBlocks.clear();
-            outInventory = {};
-
-            if (!LoadInputBindingDocument(inputMapPath, outDocument))
-                return false;
-
-            std::string pendingComment;
-            std::string currentSection;
-            bool inBlock = false;
-            InputBindingCommandBlock currentBlock = {};
-
-            auto finalizeBlock = [&](size_t closeLineIndex)
-            {
-                if (currentBlock.command.empty())
-                    return;
-
-                currentBlock.closeLineIndex = closeLineIndex;
-                ++outInventory.uniqueCommandBlocks;
-                if (currentBlock.hasPositiveNonKeyboard)
-                    ++outInventory.mixedBlocks;
-                else if (currentBlock.positiveKeyboardTokens.size() > 1)
-                    ++outInventory.keyboardChordBlocks;
-                else if (!currentBlock.positiveKeyboardTokens.empty())
-                    ++outInventory.simpleKeyboardBlocks;
-
-                outBlocks.push_back(currentBlock);
-                currentBlock = {};
-            };
-
-            for (size_t lineIndex = 0; lineIndex < outDocument.lines.size(); ++lineIndex)
-            {
-                const std::string trimmed = TrimAsciiCopy(outDocument.lines[lineIndex]);
-                if (!inBlock)
-                {
-                    if (trimmed.empty())
-                        continue;
-
-                    if (trimmed[0] == '#')
-                    {
-                        const std::string comment = TrimAsciiCopy(trimmed.substr(1));
-                        if (!comment.empty())
-                        {
-                            if (IsInputBindingSectionHeading(comment))
-                            {
-                                currentSection = comment;
-                                pendingComment.clear();
-                            }
-                            else
-                            {
-                                pendingComment = comment;
-                            }
-                        }
-                        continue;
-                    }
-
-                    const size_t bracePos = trimmed.find('{');
-                    if (bracePos == std::string::npos)
-                    {
-                        pendingComment.clear();
-                        continue;
-                    }
-
-                    const std::string command = TrimAsciiCopy(trimmed.substr(0, bracePos));
-                    if (command.empty())
-                    {
-                        pendingComment.clear();
-                        continue;
-                    }
-
-                    currentBlock = {};
-                    currentBlock.command = command;
-                    currentBlock.section = currentSection;
-                    currentBlock.comment = pendingComment;
-                    currentBlock.headerLineIndex = lineIndex;
-                    pendingComment.clear();
-                    inBlock = true;
-                    continue;
-                }
-
-                if (trimmed.empty() || trimmed[0] == '#')
-                    continue;
-
-                if (trimmed[0] == '}')
-                {
-                    finalizeBlock(lineIndex);
-                    inBlock = false;
-                    continue;
-                }
-
-                if (trimmed[0] != '+' && trimmed[0] != '-')
-                    continue;
-
-                size_t cursor = 1;
-                while (cursor < trimmed.size() &&
-                       std::isspace(static_cast<unsigned char>(trimmed[cursor])))
-                {
-                    ++cursor;
-                }
-
-                const size_t sourceStart = cursor;
-                while (cursor < trimmed.size() &&
-                       !std::isspace(static_cast<unsigned char>(trimmed[cursor])))
-                {
-                    ++cursor;
-                }
-
-                const std::string source = trimmed.substr(sourceStart, cursor - sourceStart);
-                const std::string token = TrimAsciiCopy(trimmed.substr(cursor));
-                if (source.empty() || token.empty())
-                    continue;
-
-                InputBindingLineRef lineRef = {};
-                lineRef.lineIndex = lineIndex;
-                lineRef.positive = trimmed[0] == '+';
-                lineRef.source = source;
-                lineRef.token = token;
-                currentBlock.bindingLines.push_back(lineRef);
-
-                if (trimmed[0] == '+')
-                {
-                    if (_stricmp(source.c_str(), "keyboard") == 0)
-                        currentBlock.positiveKeyboardTokens.push_back(token);
-                    else
-                    {
-                        currentBlock.hasPositiveNonKeyboard = true;
-                        currentBlock.positiveNonKeyboardTokens.push_back(source + " " + token);
-                    }
-                }
-            }
-
-            if (inBlock)
-                finalizeBlock(SIZE_MAX);
-
-            return true;
-        }
-
-        static bool ParseGameKeyBindingMapFile(
-            const std::filesystem::path& gameKeyMapPath,
-            InputBindingDocument& outDocument,
-            std::vector<GameKeyBindingAction>& outActions,
-            InputBindingInventoryStats& outInventory)
-        {
-            outActions.clear();
-            outInventory.uniqueGameKeyActions = 0;
-            outInventory.gameKeyChords = 0;
-
-            if (!LoadInputBindingDocument(gameKeyMapPath, outDocument))
-                return false;
-
-            for (size_t lineIndex = 0; lineIndex < outDocument.lines.size(); ++lineIndex)
-            {
-                const std::string trimmed = TrimAsciiCopy(outDocument.lines[lineIndex]);
-                if (trimmed.empty() || trimmed[0] == '#')
-                    continue;
-
-                size_t cursor = 0;
-                while (cursor < trimmed.size() &&
-                       !std::isspace(static_cast<unsigned char>(trimmed[cursor])))
-                {
-                    ++cursor;
-                }
-
-                const std::string action = trimmed.substr(0, cursor);
-                const std::string chord = TrimAsciiCopy(trimmed.substr(cursor));
-                if (action.empty() || chord.empty())
-                    continue;
-
-                GameKeyBindingAction* existing = FindGameKeyBindingAction(outActions, action);
-                if (!existing)
-                {
-                    GameKeyBindingAction created = {};
-                    created.action = action;
-                    outActions.push_back(std::move(created));
-                    existing = &outActions.back();
-                }
-
-                if (AppendUniqueString(existing->chords, chord))
-                {
-                    existing->chordLineIndices.push_back(lineIndex);
-                    ++outInventory.gameKeyChords;
-                }
-            }
-
-            outInventory.uniqueGameKeyActions = outActions.size();
-            return true;
-        }
-
-        static std::string DescribeLastWin32Error()
-        {
-            const DWORD error = GetLastError();
-            char buffer[32] = {};
-            _snprintf_s(buffer, _TRUNCATE, "win32 error %lu", static_cast<unsigned long>(error));
-            return buffer;
-        }
-
-        // Writes a document to an adjacent temp file, keeps a .openshim.bak copy of
-        // the pre-edit file, and atomically swaps the temp into place.
-        static bool WriteInputBindingDocumentAtomic(const std::filesystem::path& path,
-                                                    const InputBindingDocument& document,
-                                                    std::string& outError)
-        {
-            outError.clear();
-            if (!document.loaded)
-            {
-                outError = "document was never loaded";
-                return false;
-            }
-
-            const std::filesystem::path tempPath =
-                std::filesystem::path(path.wstring() + L".openshim.tmp");
-            const std::filesystem::path backupPath =
-                std::filesystem::path(path.wstring() + L".openshim.bak");
-
-            {
-                std::ofstream file(tempPath, std::ios::trunc);
-                if (!file)
-                {
-                    outError = "could not create temp file " + tempPath.string();
-                    return false;
-                }
-
-                for (const std::string& line : document.lines)
-                    file << line << "\n";
-
-                file.flush();
-                if (!file.good())
-                {
-                    outError = "write failed for temp file " + tempPath.string();
-                    file.close();
-                    std::error_code ignored;
-                    std::filesystem::remove(tempPath, ignored);
-                    return false;
-                }
-            }
-
-            std::error_code existsError;
-            const bool targetExists = std::filesystem::exists(path, existsError);
-            if (targetExists)
-            {
-                if (!CopyFileW(path.c_str(), backupPath.c_str(), FALSE))
-                {
-                    Log(L"[INPUTUI] Backup copy failed for %hs (%hs); continuing with replace\n",
-                        path.string().c_str(),
-                        DescribeLastWin32Error().c_str());
-                }
-
-                if (!ReplaceFileW(path.c_str(),
-                                  tempPath.c_str(),
-                                  nullptr,
-                                  REPLACEFILE_IGNORE_MERGE_ERRORS,
-                                  nullptr,
-                                  nullptr) &&
-                    !MoveFileExW(tempPath.c_str(),
-                                 path.c_str(),
-                                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-                {
-                    outError = "atomic replace failed for " + path.string() +
-                               " (" + DescribeLastWin32Error() + ")";
-                    std::error_code ignored;
-                    std::filesystem::remove(tempPath, ignored);
-                    return false;
-                }
-            }
-            else if (!MoveFileExW(tempPath.c_str(), path.c_str(), MOVEFILE_WRITE_THROUGH))
-            {
-                outError = "move into place failed for " + path.string() +
-                           " (" + DescribeLastWin32Error() + ")";
-                std::error_code ignored;
-                std::filesystem::remove(tempPath, ignored);
-                return false;
-            }
-
-            return true;
-        }
-
-        static const InputBindingCommandBlock* FindInputBindingCommandBlock(const std::string& command)
-        {
-            for (const InputBindingCommandBlock& block : g_InputBindingCommandBlocks)
-            {
-                if (block.command == command)
-                    return &block;
-            }
-            return nullptr;
-        }
-
-        // Rewrites only the primary positive keyboard token of a command block; all
-        // other lines (comments, mouse variants, negative guards, extra chords) are
-        // preserved verbatim.
-        static bool SetInputMapPrimaryKeyboardBinding(const std::string& command,
-                                                      const std::string& keyName,
-                                                      std::string& outError)
-        {
-            outError.clear();
-            if (!g_InputMapDocument.loaded)
-            {
-                outError = "input.map is not loaded";
-                return false;
-            }
-
-            const InputBindingCommandBlock* block = FindInputBindingCommandBlock(command);
-            if (!block)
-            {
-                outError = "command " + command + " not found in input.map";
-                return false;
-            }
-
-            const InputBindingLineRef* primary = nullptr;
-            for (const InputBindingLineRef& lineRef : block->bindingLines)
-            {
-                if (lineRef.positive && _stricmp(lineRef.source.c_str(), "keyboard") == 0)
-                {
-                    primary = &lineRef;
-                    break;
-                }
-            }
-
-            InputBindingDocument edited = g_InputMapDocument;
-            if (primary && primary->lineIndex < edited.lines.size())
-            {
-                const std::string& original = edited.lines[primary->lineIndex];
-                const size_t signPos = original.find('+');
-                const std::string prefix =
-                    signPos == std::string::npos ? std::string("\t") : original.substr(0, signPos);
-                edited.lines[primary->lineIndex] = prefix + "+ keyboard " + keyName;
-            }
-            else
-            {
-                size_t insertAt = SIZE_MAX;
-                if (block->headerLineIndex != SIZE_MAX &&
-                    block->headerLineIndex + 1 <= edited.lines.size())
-                {
-                    insertAt = block->headerLineIndex + 1;
-                }
-                else if (block->closeLineIndex != SIZE_MAX &&
-                         block->closeLineIndex <= edited.lines.size())
-                {
-                    insertAt = block->closeLineIndex;
-                }
-
-                if (insertAt == SIZE_MAX)
-                {
-                    outError = "no insertion point for " + command + " in input.map";
-                    return false;
-                }
-
-                edited.lines.insert(edited.lines.begin() + insertAt, "\t+ keyboard " + keyName);
-            }
-
-            const std::filesystem::path inputMapPath =
-                g_InputBindingInstallDirectory / "input.map";
-            return WriteInputBindingDocumentAtomic(inputMapPath, edited, outError);
-        }
-
-        // Rewrites only the first chord line of a gamekey.map action; additional
-        // chord lines and every comment stay untouched.
-        static bool SetGameKeyBindingPrimaryChord(const std::string& action,
-                                                  const std::string& newChord,
-                                                  std::string& outError)
-        {
-            outError.clear();
-            if (!g_GameKeyMapDocument.loaded)
-            {
-                outError = "gamekey.map is not loaded";
-                return false;
-            }
-
-            GameKeyBindingAction* entry =
-                FindGameKeyBindingAction(g_GameKeyBindingActions, action);
-            if (!entry)
-            {
-                outError = "action " + action + " not found in gamekey.map";
-                return false;
-            }
-
-            InputBindingDocument edited = g_GameKeyMapDocument;
-            if (!entry->chordLineIndices.empty() &&
-                entry->chordLineIndices[0] < edited.lines.size())
-            {
-                const size_t lineIndex = entry->chordLineIndices[0];
-                const std::string& original = edited.lines[lineIndex];
-
-                size_t cursor = 0;
-                while (cursor < original.size() &&
-                       std::isspace(static_cast<unsigned char>(original[cursor])))
-                {
-                    ++cursor;
-                }
-                while (cursor < original.size() &&
-                       !std::isspace(static_cast<unsigned char>(original[cursor])))
-                {
-                    ++cursor;
-                }
-                const size_t chordStart = original.find_first_not_of(" \t", cursor);
-                if (chordStart == std::string::npos)
-                {
-                    outError = "could not locate chord column for " + action;
-                    return false;
-                }
-
-                edited.lines[lineIndex] = original.substr(0, chordStart) + newChord;
-            }
-            else
-            {
-                edited.lines.push_back(action + "\t\t\t" + newChord);
-            }
-
-            const std::filesystem::path gameKeyMapPath =
-                g_InputBindingInstallDirectory / "gamekey.map";
-            return WriteInputBindingDocumentAtomic(gameKeyMapPath, edited, outError);
-        }
-
-        static std::string FormatInputBindingBlockValue(const InputBindingCommandBlock& block)
-        {
-            std::vector<std::string> parts = {};
-            if (!block.positiveKeyboardTokens.empty())
-                parts.push_back(JoinStrings(block.positiveKeyboardTokens, " + "));
-
-            for (const std::string& token : block.positiveNonKeyboardTokens)
-                AppendUniqueString(parts, token);
-
-            return JoinStrings(parts, " | ");
-        }
-
-        static std::vector<InputBindingUiRow> BuildFirstPassInputBindingRows(
-            const std::vector<InputBindingCommandBlock>& blocks)
-        {
-            std::vector<InputBindingUiRow> rows;
-            rows.reserve(blocks.size());
-            std::unordered_map<std::string, size_t> rowIndexByCommand = {};
-            std::vector<std::string> encounteredCommands = {};
-            encounteredCommands.reserve(blocks.size());
-            std::vector<std::vector<std::string>> bindingValues = {};
-            bindingValues.reserve(blocks.size());
-
-            for (const InputBindingCommandBlock& block : blocks)
-            {
-                if (block.command.empty())
-                    continue;
-
-                size_t rowIndex = rows.size();
-                const auto existing = rowIndexByCommand.find(block.command);
-                if (existing == rowIndexByCommand.end())
-                {
-                    InputBindingUiRow row = {};
-                    row.family = InputBindingMapFamily::Input;
-                    row.command = block.command;
-                    row.sectionName = block.section;
-                    row.displayText =
-                        !block.comment.empty() ? block.comment : HumanizeInputBindingCommand(block.command);
-                    row.foundInMap = true;
-                    rows.push_back(std::move(row));
-                    encounteredCommands.push_back(block.command);
-                    bindingValues.push_back({});
-                    rowIndexByCommand.emplace(block.command, rowIndex);
-                }
-                else
-                {
-                    rowIndex = existing->second;
-                }
-
-                InputBindingUiRow& row = rows[rowIndex];
-                row.foundInMap = true;
-                ++row.matchingBlockCount;
-                if (row.sectionName.empty() && !block.section.empty())
-                    row.sectionName = block.section;
-                if (row.displayText.empty() && !block.comment.empty())
-                    row.displayText = block.comment;
-
-                AppendUniqueString(bindingValues[rowIndex], FormatInputBindingBlockValue(block));
-            }
-
-            for (size_t index = 0; index < rows.size(); ++index)
-            {
-                InputBindingUiRow& row = rows[index];
-                if (row.displayText.empty())
-                    row.displayText = HumanizeInputBindingCommand(row.command);
-                row.currentBindingText = JoinStrings(bindingValues[index], ", ");
-                row.reserved = row.currentBindingText.empty();
-            }
-
-            std::vector<InputBindingUiRow> orderedRows = {};
-            orderedRows.reserve(rows.size());
-            std::unordered_set<std::string> usedCommands = {};
-
-            const auto appendOrderedRow = [&](const std::string& command, const char* displayText)
-            {
-                const auto found = rowIndexByCommand.find(command);
-                if (found == rowIndexByCommand.end())
-                    return;
-
-                InputBindingUiRow row = rows[found->second];
-                if (displayText && *displayText)
-                    row.displayText = displayText;
-
-                orderedRows.push_back(std::move(row));
-                usedCommands.insert(command);
-            };
-
-            for (const InputBindingRowSeed& seed : kInputBindingFirstPassSeeds)
-            {
-                if (!seed.command || !*seed.command)
-                    continue;
-                appendOrderedRow(seed.command, seed.displayText);
-            }
-
-            for (const std::string& command : encounteredCommands)
-            {
-                if (usedCommands.find(command) != usedCommands.end())
-                    continue;
-                appendOrderedRow(command, nullptr);
-            }
-
-            return orderedRows;
-        }
-
-        static std::vector<InputBindingUiRow> BuildFirstPassGameKeyBindingRows(
-            const std::vector<GameKeyBindingAction>& actions)
-        {
-            std::vector<InputBindingUiRow> rows;
-            rows.reserve(actions.size());
-
-            for (const GameKeyBindingAction& action : actions)
-            {
-                InputBindingUiRow row = {};
-                row.family = InputBindingMapFamily::GameKey;
-                row.command = action.action;
-                row.displayText = HumanizeInputBindingCommand(action.action);
-                row.currentBindingText = JoinStrings(action.chords, ", ");
-                row.foundInMap = true;
-                row.reserved = row.currentBindingText.empty();
-                row.matchingBlockCount = action.chords.size();
-                rows.push_back(std::move(row));
-            }
-
-            return rows;
-        }
-
-        static void LogInputBindingUiScaffoldSummary()
-        {
-            if (g_InputBindingUiScaffoldLogged)
-                return;
-            g_InputBindingUiScaffoldLogged = true;
-
-            const std::string installPath = g_InputBindingInstallDirectory.string();
-            const std::string inputMapPath =
-                (g_InputBindingInstallDirectory / "input.map").string();
-            const std::string gameKeyMapPath =
-                (g_InputBindingInstallDirectory / "gamekey.map").string();
-
-            Log(L"[INPUTUI] Scaffold install=%hs input.map=%hs gamekey.map=%hs inputBlocks=%u simple=%u chord=%u mixed=%u gameActions=%u gameChords=%u firstPassInputRows=%u firstPassGameKeyRows=%u totalRows=%u\n",
-                installPath.c_str(),
-                inputMapPath.c_str(),
-                gameKeyMapPath.c_str(),
-                static_cast<unsigned>(g_InputBindingInventory.uniqueCommandBlocks),
-                static_cast<unsigned>(g_InputBindingInventory.simpleKeyboardBlocks),
-                static_cast<unsigned>(g_InputBindingInventory.keyboardChordBlocks),
-                static_cast<unsigned>(g_InputBindingInventory.mixedBlocks),
-                static_cast<unsigned>(g_InputBindingInventory.uniqueGameKeyActions),
-                static_cast<unsigned>(g_InputBindingInventory.gameKeyChords),
-                static_cast<unsigned>(g_InputBindingInventory.firstPassInputRows),
-                static_cast<unsigned>(g_InputBindingInventory.firstPassGameKeyRows),
-                static_cast<unsigned>(g_InputBindingUiRows.size()));
-
-            const size_t previewCount = std::min<size_t>(g_InputBindingUiRows.size(), 10);
-            for (size_t index = 0; index < previewCount; ++index)
-            {
-                const InputBindingUiRow& row = g_InputBindingUiRows[index];
-                const char* familyText =
-                    row.family == InputBindingMapFamily::GameKey ? "gamekey" : "input";
-                Log(L"[INPUTUI]   row[%u] family=%hs cmd=%hs title=%hs value=%hs reserved=%hs blocks=%u\n",
-                    static_cast<unsigned>(index),
-                    familyText,
-                    row.command.c_str(),
-                    row.displayText.c_str(),
-                    row.currentBindingText.empty() ? "<none>" : row.currentBindingText.c_str(),
-                    row.reserved ? "yes" : "no",
-                    static_cast<unsigned>(row.matchingBlockCount));
-            }
-
-            Log(L"[INPUTUI] Recovered stock constructor entry=0x%08X screenFactoryCall=0x%08X\n",
-                static_cast<uint32_t>(kOptionsInputCtorAddr),
-                static_cast<uint32_t>(kOptionsInputScreenFactoryCallerAddr));
-        }
-
-        static bool ShouldEnableInputBindingUiReplacement()
-        {
-            static int s_cached = -1;
-            if (s_cached < 0)
-            {
-                bool enabled = true;
-                bool configured = false;
-                if (TryGetUserConfigBool("General", "CustomBindsUi", configured) ||
-                    TryGetUserConfigBool("General", "CustomBindingUi", configured))
-                {
-                    enabled = configured;
-                }
-                const bool disabled =
-                    EnvFlagEnabled("OPENSHIM_DISABLE_INPUT_BINDING_UI") ||
-                    EnvFlagEnabled("OPENSHIM_DISABLE_INPUT_BINDING_UI_REPLACEMENT") ||
-                    EnvFlagEnabled("BZR_DISABLE_INPUT_BINDING_UI");
-                const bool forcedEnabled =
-                    EnvFlagEnabled("OPENSHIM_ENABLE_INPUT_BINDING_UI") ||
-                    EnvFlagEnabled("OPENSHIM_ENABLE_INPUT_BINDING_UI_REPLACEMENT") ||
-                    EnvFlagEnabled("BZR_ENABLE_INPUT_BINDING_UI");
-                s_cached = disabled ? 0 : ((forcedEnabled || enabled) ? 1 : 0);
-            }
-            return s_cached != 0;
-        }
-
-        static void ResetInputBindingUiVisuals()
-        {
-            ResetShimSettingsUiVisuals();
-            g_InputBindingUiScreen = nullptr;
-            g_InputBindingUiMiddleOverlay = nullptr;
-            g_InputBindingUiBackdrop = nullptr;
-            g_InputBindingUiFrame = nullptr;
-            g_InputBindingUiTopMask = nullptr;
-            g_InputBindingUiContentMask = nullptr;
-            g_InputBindingUiHeaderLabel = nullptr;
-            g_InputBindingUiStatusLabel = nullptr;
-            g_InputBindingUiPageLabel = nullptr;
-            g_InputBindingUiBackButton = nullptr;
-            g_InputBindingUiDefaultsButton = nullptr;
-            g_InputBindingUiInputFamilyButton = nullptr;
-            g_InputBindingUiGameKeyFamilyButton = nullptr;
-            g_InputBindingUiPrevPageButton = nullptr;
-            g_InputBindingUiNextPageButton = nullptr;
-            g_InputBindingUiRefreshButton = nullptr;
-            g_InputBindingUiRowLabels.fill(nullptr);
-            g_InputBindingUiRowButtons.fill(nullptr);
-            g_InputBindingUiVisibleRowIndices.fill(-1);
-            g_InputBindingUiPendingCommand.clear();
-            g_InputBindingUiPendingDisplayText.clear();
-            g_InputBindingUiStatusText = "Click a binding button, then press a key. ESC cancels.";
-        }
-
-        static bool ReloadInputBindingUiInventory(bool logFailures)
-        {
-            g_InputBindingInventory = {};
-            g_InputMapDocument = {};
-            g_GameKeyMapDocument = {};
-            g_InputBindingCommandBlocks.clear();
-            g_GameKeyBindingActions.clear();
-            g_InputBindingUiRows.clear();
-
-            const std::filesystem::path inputMapPath = g_InputBindingInstallDirectory / "input.map";
-            if (!ParseInputBindingMapFile(inputMapPath,
-                                          g_InputMapDocument,
-                                          g_InputBindingCommandBlocks,
-                                          g_InputBindingInventory))
-            {
-                if (logFailures)
-                {
-                    const std::string inputMapPathText = inputMapPath.string();
-                    Log(L"[INPUTUI] Failed to parse input binding map at %hs\n",
-                        inputMapPathText.c_str());
-                }
-                return false;
-            }
-
-            const std::filesystem::path gameKeyMapPath = g_InputBindingInstallDirectory / "gamekey.map";
-            if (!ParseGameKeyBindingMapFile(gameKeyMapPath,
-                                            g_GameKeyMapDocument,
-                                            g_GameKeyBindingActions,
-                                            g_InputBindingInventory) &&
-                logFailures)
-            {
-                const std::string gameKeyMapPathText = gameKeyMapPath.string();
-                Log(L"[INPUTUI] Failed to parse gamekey binding map at %hs\n",
-                    gameKeyMapPathText.c_str());
-            }
-
-            std::vector<InputBindingUiRow> inputRows =
-                BuildFirstPassInputBindingRows(g_InputBindingCommandBlocks);
-            std::vector<InputBindingUiRow> gameKeyRows =
-                BuildFirstPassGameKeyBindingRows(g_GameKeyBindingActions);
-            g_InputBindingInventory.firstPassInputRows = inputRows.size();
-            g_InputBindingInventory.firstPassGameKeyRows = gameKeyRows.size();
-
-            g_InputBindingUiRows = std::move(inputRows);
-            g_InputBindingUiRows.insert(
-                g_InputBindingUiRows.end(),
-                gameKeyRows.begin(),
-                gameKeyRows.end());
-            return true;
-        }
-
-        static size_t FindInputBindingUiRowIndex(InputBindingMapFamily family, const std::string& command)
-        {
-            for (size_t index = 0; index < g_InputBindingUiRows.size(); ++index)
-            {
-                const InputBindingUiRow& row = g_InputBindingUiRows[index];
-                if (row.family == family && row.command == command)
-                    return index;
-            }
-            return g_InputBindingUiRows.size();
-        }
-
-        static size_t GetInputBindingUiRowCountForFamily(InputBindingMapFamily family)
-        {
-            size_t count = 0;
-            for (const InputBindingUiRow& row : g_InputBindingUiRows)
-            {
-                if (row.family == family)
-                    ++count;
-            }
-            return count;
-        }
-
-        static size_t ClampInputBindingUiPageStart(InputBindingMapFamily family, size_t pageStart)
-        {
-            const size_t totalRows = GetInputBindingUiRowCountForFamily(family);
-            if (totalRows <= kInputBindingUiVisibleRowCount)
-                return 0;
-
-            const size_t maxPageStart =
-                ((totalRows - 1) / kInputBindingUiVisibleRowCount) * kInputBindingUiVisibleRowCount;
-            return (std::min)(pageStart, maxPageStart);
-        }
-
-        static bool IsInputBindingUiPending(const InputBindingUiRow& row)
-        {
-            return !g_InputBindingUiPendingCommand.empty() &&
-                   row.family == g_InputBindingUiPendingFamily &&
-                   row.command == g_InputBindingUiPendingCommand;
-        }
-
-        static void SetInputBindingUiViewActive(void* view, bool active);
-
-        static bool SetInputBindingUiLabelText(void* label, const char* text)
-        {
-            if (!label || !g_BzrFn_SetTooltip)
-                return false;
-
-            g_BzrFn_SetTooltip(label, text ? text : "");
-            if (g_BzrFn_LabelState)
-                g_BzrFn_LabelState(label, nullptr);
-            return true;
-        }
-
-        static bool CreateInputBindingUiLabel(void*& slot,
-                                              void* parent,
-                                              const char* objectName,
-                                              const char* text,
-                                              float x,
-                                              float y,
-                                              float w,
-                                              float h)
-        {
-            if (!parent || !g_BzrFn_LabelCtor || !g_BzrFn_AddChild)
-                return false;
-
-            if (slot)
-            {
-                const bool updated = SetInputBindingUiLabelText(slot, text);
-                SetInputBindingUiViewActive(slot, true);
-                return updated;
-            }
-
-            void* labelMem = ::operator new(0x930, std::nothrow);
-            if (!labelMem)
-                return false;
-
-            std::memset(labelMem, 0, 0x930);
-            const char* ctorLabel =
-                (objectName && *objectName) ? objectName :
-                ((text && *text) ? text : "OpenShimInputLabel");
-            slot = g_BzrFn_LabelCtor(labelMem, ctorLabel, x, y, w, h, 0x20, parent, 0);
-            if (!slot)
-                return false;
-
-            if (g_BzrFn_LabelState)
-                g_BzrFn_LabelState(slot, nullptr);
-            g_BzrFn_AddChild(parent, slot, 0);
-            SetInputBindingUiLabelText(slot, text);
-            SetInputBindingUiViewActive(slot, true);
-            return true;
-        }
-
-        static bool CreateInputBindingUiOverlay(void*& slot,
-                                                void* parent,
-                                                const char* objectName,
-                                                const char* textureName,
-                                                float x,
-                                                float y,
-                                                float w,
-                                                float h,
-                                                uint32_t flags)
-        {
-            if (!parent || !g_BzrFn_OverlayCtor || !g_BzrFn_AddChild)
-                return false;
-
-            if (!slot)
-            {
-                void* overlayMem = ::operator new(0x144, std::nothrow);
-                if (!overlayMem)
-                    return false;
-
-                std::memset(overlayMem, 0, 0x144);
-                const char* ctorLabel =
-                    (objectName && *objectName) ? objectName : "OpenShimInputOverlay";
-                slot = g_BzrFn_OverlayCtor(overlayMem, ctorLabel, x, y, w, h, flags, parent, 0);
-                if (!slot)
-                    return false;
-
-                g_BzrFn_AddChild(parent, slot, 0);
-            }
-
-            if (textureName && *textureName && g_BzrFn_SetTextureOff)
-                g_BzrFn_SetTextureOff(slot, textureName);
-            SetInputBindingUiViewActive(slot, true);
-            return true;
-        }
-
-        // Keeps the +0x150 hover slot non-null on injected buttons. Screens that
-        // walk dialog children invoke this slot; a null slot is a call through
-        // NULL (see AutoSaveButtonOnHoverNoop for the same crash mechanism).
-        static void __cdecl InputBindingUiButtonOnHoverNoop(void* /*param*/)
-        {
-        }
-
-        static bool CreateInputBindingUiButton(void*& slot,
-                                               void* parent,
-                                               const char* objectName,
-                                               const char* text,
-                                               float x,
-                                               float y,
-                                               float w,
-                                               float h,
-                                               void* onClick)
-        {
-            if (!parent || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild)
-                return false;
-
-            if (!slot)
-            {
-                void* buttonMem = ::operator new(0x1EC, std::nothrow);
-                if (!buttonMem)
-                    return false;
-
-                std::memset(buttonMem, 0, 0x1EC);
-                const char* ctorLabel =
-                    (objectName && *objectName) ? objectName :
-                    ((text && *text) ? text : "OpenShimInputButton");
-                slot = g_BzrFn_ButtonCtor(buttonMem,
-                                          ctorLabel,
-                                          x,
-                                          y,
-                                          w,
-                                          h,
-                                          0x20,
-                                          parent,
-                                          0,
-                                          0);
-                if (!slot)
-                    return false;
-
-                if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(slot, "mpcron.png");
-                if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(slot, "mpcrclk.png");
-                if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(slot, "mpcrclk.png");
-                g_BzrFn_AddChild(parent, slot, 0);
-            }
-
-            if (g_BzrFn_SetOnClick && onClick)
-                g_BzrFn_SetOnClick(slot, onClick);
-            if (g_BzrFn_SetOnHover)
-                g_BzrFn_SetOnHover(slot, reinterpret_cast<void*>(InputBindingUiButtonOnHoverNoop));
-            if (g_BzrFn_SetButtonLabel)
-                g_BzrFn_SetButtonLabel(slot, text ? text : "");
-            SetInputBindingUiViewActive(slot, true);
-            return true;
-        }
-
-        static bool SetInputBindingUiButtonText(void* button, const char* text)
-        {
-            if (!button || !g_BzrFn_SetButtonLabel)
-                return false;
-
-            g_BzrFn_SetButtonLabel(button, text ? text : "");
-            return true;
-        }
-
-        static void* GetInputBindingUiViewParent(void* view)
-        {
-            if (!view)
-                return nullptr;
-
-            auto* viewBytes = reinterpret_cast<uint8_t*>(view);
-            return *reinterpret_cast<void**>(viewBytes + 0x13C);
-        }
-
-        static void SetInputBindingUiViewActive(void* view, bool active)
-        {
-            if (!view || !g_BzrFn_UiSetActive)
-                return;
-
-            g_BzrFn_UiSetActive(view, active ? 1 : 0);
-        }
-
-        static void* ResolveStockOptionsInputMiddleOverlay(void* screen)
-        {
-            if (!screen)
-                return nullptr;
-
-            auto* screenWords = reinterpret_cast<void**>(screen);
-            static constexpr size_t kDirectOverlayLabelOffsets[] = { 0x5D, 0x5E };
-            for (size_t wordOffset : kDirectOverlayLabelOffsets)
-            {
-                void* const label = screenWords[wordOffset];
-                void* const parent = GetInputBindingUiViewParent(label);
-                if (parent)
-                    return parent;
-            }
-
-            static constexpr size_t kKeyLabelOffsets[] =
-            {
-                0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B, 0x5C
-            };
-            for (size_t wordOffset : kKeyLabelOffsets)
-            {
-                void* const label = screenWords[wordOffset];
-                void* const button = GetInputBindingUiViewParent(label);
-                void* const parent = GetInputBindingUiViewParent(button);
-                if (parent)
-                    return parent;
-            }
-
-            return nullptr;
-        }
-
-        static void ReplaceInputBindingUiSubstring(std::string& text,
-                                                   const char* oldText,
-                                                   const char* newText)
-        {
-            if (!oldText || !*oldText)
-                return;
-
-            const std::string from(oldText);
-            const std::string to = newText ? std::string(newText) : std::string();
-            size_t position = 0;
-            while ((position = text.find(from, position)) != std::string::npos)
-            {
-                text.replace(position, from.size(), to);
-                position += to.size();
-            }
-        }
-
-        static std::string CompactInputBindingUiValueText(std::string value)
-        {
-            ReplaceInputBindingUiSubstring(value, "program ", "");
-            ReplaceInputBindingUiSubstring(value, "mouse ", "Mouse ");
-            ReplaceInputBindingUiSubstring(value, "joystick ", "Joystick ");
-            ReplaceInputBindingUiSubstring(value, "LeftBtn", "Left");
-            ReplaceInputBindingUiSubstring(value, "RightBtn", "Right");
-            ReplaceInputBindingUiSubstring(value, "MiddleBtn", "Middle");
-            ReplaceInputBindingUiSubstring(value, "HorizPos", "X Axis");
-            ReplaceInputBindingUiSubstring(value, "VertPos", "Y Axis");
-            ReplaceInputBindingUiSubstring(value, "HorizVel", "X Delta");
-            ReplaceInputBindingUiSubstring(value, "VertVel", "Y Delta");
-            return value;
-        }
-
-        static std::string GetInputBindingUiRowLabelText(const InputBindingUiRow& row)
-        {
-            return row.displayText.empty() ? HumanizeInputBindingCommand(row.command) : row.displayText;
-        }
-
-        static std::string GetInputBindingUiRowValueText(const InputBindingUiRow& row)
-        {
-            if (IsInputBindingUiPending(row))
-                return "[Press key]";
-
-            std::string value = row.currentBindingText.empty() ? "<none>" : row.currentBindingText;
-            if (row.reserved && row.family == InputBindingMapFamily::Input)
-                value += " [reserved]";
-            return CompactInputBindingUiValueText(std::move(value));
-        }
-
-        static void SuppressStockOptionsInputWidgets(void* screen)
-        {
-            if (!screen)
-                return;
-
-            static constexpr size_t kStockLabelWordOffsets[] =
-            {
-                0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E
-            };
-
-            auto* screenWords = reinterpret_cast<void**>(screen);
-            for (size_t wordOffset : kStockLabelWordOffsets)
-            {
-                void* const label = screenWords[wordOffset];
-                if (!label)
-                    continue;
-
-                SetInputBindingUiLabelText(label, "");
-                SetInputBindingUiViewActive(label, false);
-
-                if (wordOffset >= 0x51 && wordOffset <= 0x5C)
-                {
-                    void* const button = GetInputBindingUiViewParent(label);
-                    if (button)
-                    {
-                        auto* buttonBytes = reinterpret_cast<uint8_t*>(button);
-                        void* const buttonCaption = *reinterpret_cast<void**>(buttonBytes + 0x144);
-                        SetInputBindingUiLabelText(buttonCaption, "");
-                        SetInputBindingUiViewActive(buttonCaption, false);
-                    }
-                    SetInputBindingUiViewActive(button, false);
-                }
-            }
-        }
-
-        static void RefreshInputBindingUiControls()
-        {
-            if (!g_InputBindingUiScreen)
-                return;
-
-            g_InputBindingUiPageStart =
-                ClampInputBindingUiPageStart(g_InputBindingUiActiveFamily, g_InputBindingUiPageStart);
-
-            const char* familyName =
-                g_InputBindingUiActiveFamily == InputBindingMapFamily::GameKey ? "gamekey.map" : "input.map";
-            const size_t totalRows = GetInputBindingUiRowCountForFamily(g_InputBindingUiActiveFamily);
-            const size_t pageNumber = (g_InputBindingUiPageStart / kInputBindingUiVisibleRowCount) + 1;
-            const size_t pageCount =
-                totalRows == 0 ? 1 : ((totalRows - 1) / kInputBindingUiVisibleRowCount) + 1;
-
-            const char* headerText =
-                g_InputBindingUiActiveFamily == InputBindingMapFamily::GameKey
-                    ? "OpenShim Key Rebinding - Game Actions"
-                    : "OpenShim Key Rebinding - Control Channels";
-
-            SetInputBindingUiLabelText(g_InputBindingUiHeaderLabel, headerText);
-            SetInputBindingUiLabelText(g_InputBindingUiStatusLabel, g_InputBindingUiStatusText.c_str());
-            SuppressStockOptionsInputWidgets(g_InputBindingUiScreen);
-
-            if (g_BzrFn_SetButtonLabel)
-            {
-                if (g_InputBindingUiInputFamilyButton)
-                    g_BzrFn_SetButtonLabel(
-                        g_InputBindingUiInputFamilyButton,
-                        g_InputBindingUiActiveFamily == InputBindingMapFamily::Input ? "> Input <" : "Input");
-                if (g_InputBindingUiGameKeyFamilyButton)
-                    g_BzrFn_SetButtonLabel(
-                        g_InputBindingUiGameKeyFamilyButton,
-                        g_InputBindingUiActiveFamily == InputBindingMapFamily::GameKey ? "> GameKey <" : "GameKey");
-            }
-
-            g_InputBindingUiVisibleRowIndices.fill(-1);
-            size_t matchingIndex = 0;
-            size_t visibleIndex = 0;
-            for (size_t rowIndex = 0;
-                 rowIndex < g_InputBindingUiRows.size() && visibleIndex < kInputBindingUiVisibleRowCount;
-                 ++rowIndex)
-            {
-                const InputBindingUiRow& row = g_InputBindingUiRows[rowIndex];
-                if (row.family != g_InputBindingUiActiveFamily)
-                    continue;
-                if (matchingIndex++ < g_InputBindingUiPageStart)
-                    continue;
-
-                g_InputBindingUiVisibleRowIndices[visibleIndex] = static_cast<int>(rowIndex);
-                ++visibleIndex;
-            }
-
-            std::string sectionSummary;
-            if (g_InputBindingUiActiveFamily == InputBindingMapFamily::Input)
-            {
-                std::string firstSection;
-                std::string lastSection;
-                for (size_t slot = 0; slot < visibleIndex; ++slot)
-                {
-                    const int rowIndex = g_InputBindingUiVisibleRowIndices[slot];
-                    if (rowIndex < 0 || static_cast<size_t>(rowIndex) >= g_InputBindingUiRows.size())
-                        continue;
-
-                    const std::string& sectionName =
-                        g_InputBindingUiRows[static_cast<size_t>(rowIndex)].sectionName;
-                    if (sectionName.empty())
-                        continue;
-
-                    if (firstSection.empty())
-                        firstSection = sectionName;
-                    lastSection = sectionName;
-                }
-
-                if (!firstSection.empty())
-                {
-                    sectionSummary = firstSection;
-                    if (_stricmp(firstSection.c_str(), lastSection.c_str()) != 0)
-                    {
-                        sectionSummary += " -> ";
-                        sectionSummary += lastSection;
-                    }
-                }
-            }
-
-            char pageText[256] = {};
-            if (!sectionSummary.empty())
-            {
-                std::snprintf(pageText,
-                              sizeof(pageText),
-                              "%s  page %u/%u  rows=%u  section=%s",
-                              familyName,
-                              static_cast<unsigned>(pageNumber),
-                              static_cast<unsigned>(pageCount),
-                              static_cast<unsigned>(totalRows),
-                              sectionSummary.c_str());
-            }
-            else
-            {
-                std::snprintf(pageText,
-                              sizeof(pageText),
-                              "%s  page %u/%u  rows=%u",
-                              familyName,
-                              static_cast<unsigned>(pageNumber),
-                              static_cast<unsigned>(pageCount),
-                              static_cast<unsigned>(totalRows));
-            }
-            SetInputBindingUiLabelText(g_InputBindingUiPageLabel, pageText);
-
-            for (size_t slot = 0; slot < kInputBindingUiVisibleRowCount; ++slot)
-            {
-                const int rowIndex = g_InputBindingUiVisibleRowIndices[slot];
-                if (rowIndex < 0 || static_cast<size_t>(rowIndex) >= g_InputBindingUiRows.size())
-                {
-                    SetInputBindingUiLabelText(g_InputBindingUiRowLabels[slot], "");
-                    SetInputBindingUiButtonText(g_InputBindingUiRowButtons[slot], "");
-                    SetInputBindingUiViewActive(g_InputBindingUiRowLabels[slot], false);
-                    SetInputBindingUiViewActive(g_InputBindingUiRowButtons[slot], false);
-                    continue;
-                }
-
-                const InputBindingUiRow& row = g_InputBindingUiRows[static_cast<size_t>(rowIndex)];
-                const std::string labelText = GetInputBindingUiRowLabelText(row);
-                const std::string buttonText = GetInputBindingUiRowValueText(row);
-                SetInputBindingUiLabelText(g_InputBindingUiRowLabels[slot], labelText.c_str());
-                SetInputBindingUiButtonText(g_InputBindingUiRowButtons[slot], buttonText.c_str());
-                SetInputBindingUiViewActive(g_InputBindingUiRowLabels[slot], true);
-                SetInputBindingUiViewActive(g_InputBindingUiRowButtons[slot], true);
-            }
-        }
-
-        // --- OpenShim settings page implementation ------------------------------
-
-        static void* ReadOptionsInputSingletonRaw()
-        {
-            __try
-            {
-                return *reinterpret_cast<void* const volatile*>(kOptionsInputSingletonAddr);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return nullptr;
-            }
-        }
-
-        static bool ShouldEnableShimSettingsUi()
-        {
-            static int s_cached = -1;
-            if (s_cached < 0)
-            {
-                bool enabled = true;
-                bool configured = false;
-                if (TryGetUserConfigBool("General", "SettingsUi", configured))
-                    enabled = configured;
-                const bool disabled =
-                    EnvFlagEnabled("OPENSHIM_DISABLE_SETTINGS_UI") ||
-                    EnvFlagEnabled("BZR_DISABLE_SETTINGS_UI");
-                s_cached = (enabled && !disabled) ? 1 : 0;
-            }
-            return s_cached != 0;
-        }
-
-        // Lossless openshim.ini value write: only the matched "Key = value" line
-        // changes; comments, blank lines, ordering, and unrelated keys survive
-        // verbatim. Missing keys are appended at the end of their section and a
-        // missing section (or file) is created. Same atomic temp/backup/replace
-        // path as the input.map writer.
-        static bool IniLineIsSectionHeader(const std::string& line, std::string& outName)
-        {
-            size_t begin = line.find_first_not_of(" \t");
-            if (begin == std::string::npos || line[begin] != '[')
-                return false;
-            const size_t end = line.find(']', begin + 1);
-            if (end == std::string::npos)
-                return false;
-            outName = line.substr(begin + 1, end - begin - 1);
-            return true;
-        }
-
-        static bool IniLineMatchesKey(const std::string& line, const char* key)
-        {
-            size_t begin = line.find_first_not_of(" \t");
-            if (begin == std::string::npos)
-                return false;
-            const char first = line[begin];
-            if (first == ';' || first == '#' || first == '[')
-                return false;
-            const size_t equals = line.find('=', begin);
-            if (equals == std::string::npos)
-                return false;
-            size_t keyEnd = equals;
-            while (keyEnd > begin &&
-                   std::isspace(static_cast<unsigned char>(line[keyEnd - 1])))
-                --keyEnd;
-            const size_t keyLen = keyEnd - begin;
-            return keyLen == std::strlen(key) &&
-                   _strnicmp(line.c_str() + begin, key, keyLen) == 0;
-        }
-
-        static bool WriteUserConfigValueLossless(const char* section,
-                                                 const char* key,
-                                                 const char* const* altKeys,
-                                                 size_t altKeyCount,
-                                                 const char* value,
-                                                 std::string& outError)
-        {
-            outError.clear();
-            const auto path = GetUserConfigPath();
-            if (path.empty())
-            {
-                outError = "config directory unavailable";
-                return false;
-            }
-
-            InputBindingDocument document;
-            document.loaded = true;
-            {
-                std::ifstream file(path);
-                if (file)
-                {
-                    std::string line;
-                    while (std::getline(file, line))
-                    {
-                        while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
-                            line.pop_back();
-                        document.lines.push_back(line);
-                    }
-                }
-            }
-
-            const std::string newLine = std::string(key) + " = " + value;
-
-            // Locate the section and the key line (canonical name first, then
-            // any legacy alias) within it.
-            size_t sectionStart = std::string::npos;
-            size_t sectionEnd = document.lines.size();  // one past last section line
-            std::string headerName;
-            for (size_t index = 0; index < document.lines.size(); ++index)
-            {
-                if (!IniLineIsSectionHeader(document.lines[index], headerName))
-                    continue;
-                if (sectionStart != std::string::npos)
-                {
-                    sectionEnd = index;
-                    break;
-                }
-                if (_stricmp(headerName.c_str(), section) == 0)
-                    sectionStart = index;
-            }
-
-            if (sectionStart == std::string::npos)
-            {
-                if (!document.lines.empty() && !document.lines.back().empty())
-                    document.lines.push_back("");
-                document.lines.push_back(std::string("[") + section + "]");
-                document.lines.push_back(newLine);
-            }
-            else
-            {
-                size_t keyLine = std::string::npos;
-                for (size_t index = sectionStart + 1; index < sectionEnd; ++index)
-                {
-                    if (IniLineMatchesKey(document.lines[index], key))
-                    {
-                        keyLine = index;
-                        break;
-                    }
-                }
-                for (size_t alt = 0; keyLine == std::string::npos && alt < altKeyCount; ++alt)
-                {
-                    for (size_t index = sectionStart + 1; index < sectionEnd; ++index)
-                    {
-                        if (IniLineMatchesKey(document.lines[index], altKeys[alt]))
-                        {
-                            keyLine = index;
-                            break;
-                        }
-                    }
-                }
-
-                if (keyLine != std::string::npos)
-                {
-                    document.lines[keyLine] = newLine;
-                }
-                else
-                {
-                    size_t insertAt = sectionEnd;
-                    while (insertAt > sectionStart + 1 && document.lines[insertAt - 1].empty())
-                        --insertAt;
-                    document.lines.insert(document.lines.begin() + insertAt, newLine);
-                }
-            }
-
-            if (!WriteInputBindingDocumentAtomic(path, document, outError))
-                return false;
-
-            Log(L"[SETTINGSUI] Wrote %hs [%hs] %hs\n", kUserConfigFileName, section, newLine.c_str());
-            return true;
-        }
-
-        // How a settings row re-applies its feature live after the ini write.
-        enum class ShimSettingApplyGroup
-        {
-            GlobalImprovement,  // InitializeGlobalImprovementConfig re-reads the ini (no latch)
-            UnderAttackAlert,
-            TargetReticle,
-            JetFlames,
-            UnitVo,
-            GlobalTurbo,
-            Headlights,         // InitializeHeadlightConfig re-reads the ini (no latch)
-            RestartRequired,    // no live path; takes effect next launch
-        };
-
-        struct ShimSettingDescriptor
-        {
-            const char* label;         // row label in the UI
-            const char* section;       // openshim.ini section
-            const char* key;           // canonical ini key
-            const char* const* altKeys;  // legacy key aliases replaced in-place
-            size_t altKeyCount;
-            const char* const* values;      // ini value written per option
-            const char* const* valueLabels; // display text per option
-            size_t valueCount;
-            size_t defaultIndex;       // shown when the key is absent/invalid
-            ShimSettingApplyGroup applyGroup;
-        };
-
-        static const char* const kShimSettingsOnOffValues[] = { "1", "0" };
-        static const char* const kShimSettingsOnOffLabels[] = { "On", "Off" };
-        static const char* const kShimSettingsUnderAttackValues[] = { "Normal", "Minimal", "None" };
-        static const char* const kShimSettingsTargetPolicyValues[] = { "Default", "NeutralOnly", "ExplicitOnly" };
-        static const char* const kShimSettingsTargetPolicyLabels[] = { "Default", "Neutral Only", "Explicit Only" };
-        static const char* const kShimSettingsScrapHudValues[] = { "Legacy", "Stock" };
-        static const char* const kShimSettingsHeadlightColorValues[] =
-        {
-            "Stock", "White", "Red", "Green", "Blue", "Yellow",
-            "Cyan", "Magenta", "Orange", "Purple", "Teal", "Rainbow"
-        };
-        static const char* const kShimSettingsHeadlightBeamValues[] = { "Stock", "Focused", "Wide" };
-        static const char* const kShimSettingsTargetPolicyAltKeys[] = { "TargetReticle" };
-        static const char* const kShimSettingsReticleConvAltKeys[] = { "SmartReticleConvergence" };
-        static const char* const kShimSettingsScavengerAltKeys[] = { "ScavengerPathing" };
-        static const char* const kShimSettingsBindsUiAltKeys[] = { "CustomBindingUi" };
-
-        static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
-        {
-            { "Attack Alert", "Display", "UnderAttackAlert", nullptr, 0,
-              kShimSettingsUnderAttackValues, kShimSettingsUnderAttackValues, 3, 0,
-              ShimSettingApplyGroup::UnderAttackAlert },
-            { "Target Popup", "Display", "TargetPolicy",
-              kShimSettingsTargetPolicyAltKeys, 1,
-              kShimSettingsTargetPolicyValues, kShimSettingsTargetPolicyLabels, 3, 0,
-              ShimSettingApplyGroup::TargetReticle },
-            { "Scrap/Pilot HUD", "Display", "ScrapPilotHud", nullptr, 0,
-              kShimSettingsScrapHudValues, kShimSettingsScrapHudValues, 2, 0,
-              ShimSettingApplyGroup::GlobalImprovement },
-            { "Faction Jet Flames", "Display", "JetFlames", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::JetFlames },
-            { "Unit Voice Feedback", "Display", "UnitVoFeedback", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::UnitVo },
-            { "Custom Binds Screen", "General", "CustomBindsUi",
-              kShimSettingsBindsUiAltKeys, 1,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired },
-            { "AI Weapon Convergence", "SinglePlayer", "WeaponConvergence", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::GlobalImprovement },
-            { "Reticle Convergence", "SinglePlayer", "PlayerReticleConvergence",
-              kShimSettingsReticleConvAltKeys, 1,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::GlobalImprovement },
-            { "Smart Scavengers", "SinglePlayer", "SmartScavengerPathing",
-              kShimSettingsScavengerAltKeys, 1,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::GlobalImprovement },
-            { "Turret Anti-Air Pitch", "SinglePlayer", "TurretAimPitch", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::GlobalImprovement },
-            { "Jump-Snipe Crouch", "SinglePlayer", "JumpSnipeCrouch", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::GlobalImprovement },
-            { "Global Turbo", "SinglePlayer", "Turbo", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::GlobalTurbo },
-            { "Player Headlight", "SinglePlayer", "Headlights", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::Headlights },
-            { "AI Headlights", "SinglePlayer", "OtherHeadlights", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::Headlights },
-            { "Headlight Color", "SinglePlayer", "HeadlightColor", nullptr, 0,
-              kShimSettingsHeadlightColorValues, kShimSettingsHeadlightColorValues, 12, 0,
-              ShimSettingApplyGroup::Headlights },
-            { "Headlight Beam", "SinglePlayer", "HeadlightBeam", nullptr, 0,
-              kShimSettingsHeadlightBeamValues, kShimSettingsHeadlightBeamValues, 3, 0,
-              ShimSettingApplyGroup::Headlights },
-        };
-        static_assert(sizeof(g_ShimSettingsRegistry) / sizeof(g_ShimSettingsRegistry[0]) <=
-                          kShimSettingsUiVisibleRowCount,
-                      "settings registry exceeds the settings page row slots");
-
-        // The UI shows the ini baseline: the value the key currently resolves to
-        // in openshim.ini (or the setting's default when absent/unrecognized).
-        static size_t GetShimSettingCurrentIndex(const ShimSettingDescriptor& setting)
-        {
-            std::string value;
-            bool found = TryGetUserConfigString(setting.section, setting.key, value);
-            for (size_t alt = 0; !found && alt < setting.altKeyCount; ++alt)
-                found = TryGetUserConfigString(setting.section, setting.altKeys[alt], value);
-            if (!found)
-                return setting.defaultIndex;
-
-            // Normalize like the feature parsers: case-insensitive, ignore
-            // spaces/underscores/hyphens so NeutralOnly == neutral-only.
-            std::string normalized;
-            normalized.reserve(value.size());
-            for (char ch : value)
-            {
-                if (ch == ' ' || ch == '\t' || ch == '_' || ch == '-')
-                    continue;
-                normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
-            }
-
-            for (size_t index = 0; index < setting.valueCount; ++index)
-            {
-                std::string candidate;
-                for (const char* cursor = setting.values[index]; *cursor; ++cursor)
-                {
-                    if (*cursor == ' ' || *cursor == '_' || *cursor == '-')
-                        continue;
-                    candidate.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(*cursor))));
-                }
-                if (normalized == candidate)
-                    return index;
-            }
-
-            // Boolean rows also accept the parser's synonym set.
-            if (setting.values == kShimSettingsOnOffValues)
-            {
-                if (normalized == "1" || normalized == "true" || normalized == "on" ||
-                    normalized == "yes" || normalized == "enabled")
-                    return 0;
-                if (normalized == "0" || normalized == "false" || normalized == "off" ||
-                    normalized == "no" || normalized == "disabled")
-                    return 1;
-            }
-
-            return setting.defaultIndex;
-        }
-
-        // Re-apply the feature behind a settings row from the freshly written
-        // ini. Latched initializers get their latch cleared and re-run, which
-        // deliberately preserves the documented precedence chain (legacy cfg and
-        // env overrides still win over the ini baseline).
-        static void ApplyShimSettingLive(const ShimSettingDescriptor& setting)
-        {
-            switch (setting.applyGroup)
-            {
-            case ShimSettingApplyGroup::GlobalImprovement:
-                InitializeGlobalImprovementConfig();
-                break;
-            case ShimSettingApplyGroup::UnderAttackAlert:
-                g_UnderAttackAlertConfigInitialized = false;
-                InitializeUnderAttackAlertConfig();
-                break;
-            case ShimSettingApplyGroup::TargetReticle:
-                g_TargetReticlePopupConfigInitialized = false;
-                InitializeTargetReticlePopupConfig();
-                break;
-            case ShimSettingApplyGroup::JetFlames:
-                g_JetFlamesConfigInitialized = false;
-                InitializeJetFlamesConfig();
-                break;
-            case ShimSettingApplyGroup::UnitVo:
-                g_UnitVoConfigInitialized = false;
-                InitializeUnitVoConfig();
-                break;
-            case ShimSettingApplyGroup::GlobalTurbo:
-                g_GlobalTurboConfigInitialized = false;
-                InitializeGlobalTurboConfig();
-                break;
-            case ShimSettingApplyGroup::Headlights:
-                RevertHeadlightsToBaseline();
-                break;
-            case ShimSettingApplyGroup::RestartRequired:
-                break;
-            }
-        }
-
-        static void ResetShimSettingsUiVisuals()
-        {
-            g_ShimSettingsUiBackdrop = nullptr;
-            g_ShimSettingsUiFrame = nullptr;
-            g_ShimSettingsUiTopMask = nullptr;
-            g_ShimSettingsUiContentMask = nullptr;
-            g_ShimSettingsUiHeaderLabel = nullptr;
-            g_ShimSettingsUiStatusLabel = nullptr;
-            g_ShimSettingsUiFooterLabel = nullptr;
-            g_ShimSettingsUiBackButton = nullptr;
-            g_ShimSettingsUiRowLabels.fill(nullptr);
-            g_ShimSettingsUiRowButtons.fill(nullptr);
-        }
-
-        static void SetShimSettingsUiControlsVisible(bool visible)
-        {
-            SetInputBindingUiViewActive(g_ShimSettingsUiBackdrop, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiFrame, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiTopMask, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiContentMask, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiHeaderLabel, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiStatusLabel, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiFooterLabel, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiBackButton, visible);
-            for (void* label : g_ShimSettingsUiRowLabels)
-                SetInputBindingUiViewActive(label, visible);
-            for (void* button : g_ShimSettingsUiRowButtons)
-                SetInputBindingUiViewActive(button, visible);
-        }
-
-        static void SetInputBindingUiControlsVisible(bool visible)
-        {
-            SetInputBindingUiViewActive(g_InputBindingUiBackdrop, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiFrame, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiTopMask, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiContentMask, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiHeaderLabel, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiStatusLabel, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiPageLabel, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiBackButton, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiDefaultsButton, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiInputFamilyButton, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiGameKeyFamilyButton, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiPrevPageButton, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiNextPageButton, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiRefreshButton, visible);
-            for (void* label : g_InputBindingUiRowLabels)
-                SetInputBindingUiViewActive(label, visible);
-            for (void* button : g_InputBindingUiRowButtons)
-                SetInputBindingUiViewActive(button, visible);
-        }
-
-        static void RefreshShimSettingsUiControls()
-        {
-            constexpr size_t settingCount =
-                sizeof(g_ShimSettingsRegistry) / sizeof(g_ShimSettingsRegistry[0]);
-
-            SetInputBindingUiLabelText(g_ShimSettingsUiHeaderLabel, "OpenShim Settings");
-            SetInputBindingUiLabelText(g_ShimSettingsUiStatusLabel, g_ShimSettingsUiStatusText.c_str());
-            SetInputBindingUiLabelText(
-                g_ShimSettingsUiFooterLabel,
-                "Click a value to cycle it. Gameplay settings never apply in network games.");
-
-            for (size_t slot = 0; slot < kShimSettingsUiVisibleRowCount; ++slot)
-            {
-                if (slot >= settingCount)
-                {
-                    SetInputBindingUiLabelText(g_ShimSettingsUiRowLabels[slot], "");
-                    SetInputBindingUiButtonText(g_ShimSettingsUiRowButtons[slot], "");
-                    SetInputBindingUiViewActive(g_ShimSettingsUiRowLabels[slot], false);
-                    SetInputBindingUiViewActive(g_ShimSettingsUiRowButtons[slot], false);
-                    continue;
-                }
-
-                const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[slot];
-                const size_t valueIndex = GetShimSettingCurrentIndex(setting);
-                SetInputBindingUiLabelText(g_ShimSettingsUiRowLabels[slot], setting.label);
-                SetInputBindingUiButtonText(g_ShimSettingsUiRowButtons[slot],
-                                            setting.valueLabels[valueIndex]);
-                SetInputBindingUiViewActive(g_ShimSettingsUiRowLabels[slot], true);
-                SetInputBindingUiViewActive(g_ShimSettingsUiRowButtons[slot], true);
-            }
-        }
-
-        static void EnsureShimSettingsUiControls(void* screen)
-        {
-            if (!screen)
-                return;
-
-            void* const visualParent = screen;
-            void* controlParent = ResolveStockOptionsInputMiddleOverlay(screen);
-            if (!controlParent)
-                controlParent = screen;
-
-            static constexpr float kBackdropX = 0.0f;
-            static constexpr float kBackdropY = 0.0f;
-            static constexpr float kBackdropW = 1440.0f;
-            static constexpr float kBackdropH = 1080.0f;
-            static constexpr float kHeaderX = 320.0f;
-            static constexpr float kHeaderY = 176.0f;
-            static constexpr float kHeaderW = 800.0f;
-            static constexpr float kHeaderH = 28.0f;
-            static constexpr float kStatusX = 320.0f;
-            static constexpr float kStatusY = 204.0f;
-            static constexpr float kStatusW = 800.0f;
-            static constexpr float kStatusH = 24.0f;
-            static constexpr float kFooterX = 320.0f;
-            static constexpr float kFooterY = 230.0f;
-            static constexpr float kFooterW = 900.0f;
-            static constexpr float kFooterH = 22.0f;
-            static constexpr float kToolbarY = 256.0f;
-            static constexpr float kToolbarW = 150.0f;
-            static constexpr float kToolbarH = 34.0f;
-            static constexpr float kTopMaskX = 220.0f;
-            static constexpr float kTopMaskY = 122.0f;
-            static constexpr float kTopMaskW = 1000.0f;
-            static constexpr float kTopMaskH = 126.0f;
-            static constexpr float kContentMaskX = 240.0f;
-            static constexpr float kContentMaskY = 292.0f;
-            static constexpr float kContentMaskW = 980.0f;
-            static constexpr float kContentMaskH = 456.0f;
-            static constexpr float kRowLeftBaseX = 287.0f;
-            static constexpr float kRowRightBaseX = 747.0f;
-            static constexpr float kRowY = 308.0f;
-            static constexpr float kRowLabelW = 200.0f;
-            static constexpr float kRowButtonH = 30.0f;
-            static constexpr float kRowStep = 46.0f;
-            static constexpr float kRowButtonOffsetX = 220.0f;
-            static constexpr float kRowButtonW = 210.0f;
-
-            const unsigned screenTag = static_cast<unsigned>(reinterpret_cast<uintptr_t>(screen));
-            char controlName[64] = {};
-
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsBackdrop_%08X", screenTag);
-            CreateInputBindingUiOverlay(g_ShimSettingsUiBackdrop, visualParent, controlName,
-                                        "blackui.png", kBackdropX, kBackdropY, kBackdropW, kBackdropH, 0x60);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsFrame_%08X", screenTag);
-            CreateInputBindingUiOverlay(g_ShimSettingsUiFrame, visualParent, controlName,
-                                        "keyOptions_center.png", kBackdropX, kBackdropY, kBackdropW, kBackdropH, 0x60);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsTopMask_%08X", screenTag);
-            CreateInputBindingUiOverlay(g_ShimSettingsUiTopMask, visualParent, controlName,
-                                        "blackui.png", kTopMaskX, kTopMaskY, kTopMaskW, kTopMaskH, 0x60);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsContentMask_%08X", screenTag);
-            CreateInputBindingUiOverlay(g_ShimSettingsUiContentMask, visualParent, controlName,
-                                        "blackui.png", kContentMaskX, kContentMaskY, kContentMaskW, kContentMaskH, 0x60);
-
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsHeader_%08X", screenTag);
-            CreateInputBindingUiLabel(g_ShimSettingsUiHeaderLabel, controlParent, controlName, "",
-                                      kHeaderX, kHeaderY, kHeaderW, kHeaderH);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsStatus_%08X", screenTag);
-            CreateInputBindingUiLabel(g_ShimSettingsUiStatusLabel, controlParent, controlName, "",
-                                      kStatusX, kStatusY, kStatusW, kStatusH);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsFooter_%08X", screenTag);
-            CreateInputBindingUiLabel(g_ShimSettingsUiFooterLabel, controlParent, controlName, "",
-                                      kFooterX, kFooterY, kFooterW, kFooterH);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsBack_%08X", screenTag);
-            CreateInputBindingUiButton(g_ShimSettingsUiBackButton, controlParent, controlName, "Back",
-                                       195.0f, kToolbarY, kToolbarW, kToolbarH,
-                                       reinterpret_cast<void*>(ShimSettingsBackClick));
-
-            for (size_t slot = 0; slot < kShimSettingsUiVisibleRowCount; ++slot)
-            {
-                const size_t column = slot / kShimSettingsUiRowsPerColumn;
-                const size_t row = slot % kShimSettingsUiRowsPerColumn;
-                const float baseX = (column == 0) ? kRowLeftBaseX : kRowRightBaseX;
-                const float y = kRowY + (static_cast<float>(row) * kRowStep);
-                std::snprintf(controlName, sizeof(controlName),
-                              "OpenShimSettingsRowLabel_%08X_%02u", screenTag, static_cast<unsigned>(slot));
-                CreateInputBindingUiLabel(g_ShimSettingsUiRowLabels[slot], controlParent, controlName, "",
-                                          baseX, y + 2.0f, kRowLabelW, kRowButtonH);
-                std::snprintf(controlName, sizeof(controlName),
-                              "OpenShimSettingsRowButton_%08X_%02u", screenTag, static_cast<unsigned>(slot));
-                CreateInputBindingUiButton(g_ShimSettingsUiRowButtons[slot], controlParent, controlName, "",
-                                           baseX + kRowButtonOffsetX, y, kRowButtonW, kRowButtonH,
-                                           kShimSettingsRowClickCallbacks[slot]);
-            }
-        }
-
-        static void ActivateShimSettingsPage(void* screen)
-        {
-            if (!screen)
-                return;
-
-            if (g_InputBindingUiScreen != screen)
-            {
-                ResetInputBindingUiVisuals();
-                g_InputBindingUiScreen = screen;
-            }
-
-            g_ShimSettingsPageActive = true;
-            SetInputBindingUiControlsVisible(false);
-            SuppressStockOptionsInputWidgets(screen);
-            EnsureShimSettingsUiControls(screen);
-            RefreshShimSettingsUiControls();
-            Log(L"[SETTINGSUI] Settings page active screen=0x%08X rows=%u\n",
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(screen)),
-                static_cast<unsigned>(sizeof(g_ShimSettingsRegistry) / sizeof(g_ShimSettingsRegistry[0])));
-        }
-
-        static void OnShimSettingsRowClicked(size_t rowIndex)
-        {
-            constexpr size_t settingCount =
-                sizeof(g_ShimSettingsRegistry) / sizeof(g_ShimSettingsRegistry[0]);
-            if (rowIndex >= settingCount || !g_ShimSettingsPageActive)
-                return;
-
-            const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[rowIndex];
-            const size_t nextIndex = (GetShimSettingCurrentIndex(setting) + 1) % setting.valueCount;
-            const char* const newValue = setting.values[nextIndex];
-
-            std::string error;
-            if (!WriteUserConfigValueLossless(setting.section, setting.key,
-                                              setting.altKeys, setting.altKeyCount,
-                                              newValue, error))
-            {
-                g_ShimSettingsUiStatusText = "Save failed: " + error;
-                Log(L"[SETTINGSUI] Save failed for %hs: %hs\n", setting.key, error.c_str());
-                RefreshShimSettingsUiControls();
-                return;
-            }
-
-            ApplyShimSettingLive(setting);
-
-            g_ShimSettingsUiStatusText = std::string(setting.label) + " = " +
-                setting.valueLabels[nextIndex] +
-                (setting.applyGroup == ShimSettingApplyGroup::RestartRequired
-                     ? "  (takes effect after restart)"
-                     : "  (applied)");
-            RefreshShimSettingsUiControls();
-        }
-
-        // Hide the settings page and hand the host screen back to the binding
-        // UI (when enabled) so a later plain "Input" visit that does not
-        // reconstruct the screen still shows the key-binding page.
-        static void DeactivateShimSettingsPage()
-        {
-            if (!g_ShimSettingsPageActive)
-                return;
-
-            g_ShimSettingsPageActive = false;
-            g_ShimSettingsUiStatusText.clear();
-            SetShimSettingsUiControlsVisible(false);
-
-            if (ShouldEnableInputBindingUiReplacement() && g_InputBindingUiScreen)
-            {
-                EnsureInputBindingUiControls(g_InputBindingUiScreen);
-                RefreshInputBindingUiControls();
-            }
-        }
-
-        static void OnShimSettingsBackClicked()
-        {
-            DeactivateShimSettingsPage();
-            OnInputBindingBackClicked();
-        }
-
-        static void OnShimSettingsMenuClicked()
-        {
-            g_ShimSettingsUiStatusText.clear();
-            g_ShimSettingsPageRequested = true;
-            g_ShimSettingsPageRequestTick = GetTickCount64();
-            auto* const navigateToInputScreen =
-                reinterpret_cast<void(__cdecl*)()>(kOptionsParentInputClickThunkAddr);
-            navigateToInputScreen();
-
-            // If the shell keeps a constructed input screen alive, the ctor hook
-            // will not re-fire for this navigation; restyle the live screen now.
-            // Guarded to a screen we already decorated (strong liveness evidence).
-            void* const liveInputScreen = ReadOptionsInputSingletonRaw();
-            if (liveInputScreen &&
-                liveInputScreen == g_LastOptionsInputScreen &&
-                liveInputScreen == g_InputBindingUiScreen)
-            {
-                g_ShimSettingsPageRequested = false;
-                ActivateShimSettingsPage(liveInputScreen);
-            }
-        }
-
-        static void EnsureInputBindingUiControls(void* screen)
-        {
-            if (!screen)
-                return;
-
-            if (g_InputBindingUiScreen != screen)
-            {
-                ResetInputBindingUiVisuals();
-                g_InputBindingUiScreen = screen;
-            }
-
-            if (!g_InputBindingUiMiddleOverlay)
-                g_InputBindingUiMiddleOverlay = ResolveStockOptionsInputMiddleOverlay(screen);
-
-            void* const visualParent = screen;
-            void* const controlParent =
-                g_InputBindingUiMiddleOverlay ? g_InputBindingUiMiddleOverlay : screen;
-
-            static constexpr float kBackdropX = 0.0f;
-            static constexpr float kBackdropY = 0.0f;
-            static constexpr float kBackdropW = 1440.0f;
-            static constexpr float kBackdropH = 1080.0f;
-            static constexpr float kHeaderX = 320.0f;
-            static constexpr float kHeaderY = 176.0f;
-            static constexpr float kHeaderW = 800.0f;
-            static constexpr float kHeaderH = 28.0f;
-            static constexpr float kStatusX = 320.0f;
-            static constexpr float kStatusY = 204.0f;
-            static constexpr float kStatusW = 800.0f;
-            static constexpr float kStatusH = 24.0f;
-            static constexpr float kPageX = 320.0f;
-            static constexpr float kPageY = 230.0f;
-            static constexpr float kPageW = 800.0f;
-            static constexpr float kPageH = 22.0f;
-            static constexpr float kToolbarY = 256.0f;
-            static constexpr float kToolbarW = 150.0f;
-            static constexpr float kToolbarH = 34.0f;
-            static constexpr float kTopMaskX = 220.0f;
-            static constexpr float kTopMaskY = 122.0f;
-            static constexpr float kTopMaskW = 1000.0f;
-            static constexpr float kTopMaskH = 126.0f;
-            static constexpr float kContentMaskX = 240.0f;
-            static constexpr float kContentMaskY = 292.0f;
-            static constexpr float kContentMaskW = 980.0f;
-            static constexpr float kContentMaskH = 456.0f;
-            static constexpr float kRowLeftBaseX = 287.0f;
-            static constexpr float kRowRightBaseX = 747.0f;
-            static constexpr float kRowY = 308.0f;
-            static constexpr float kRowLabelW = 185.0f;
-            static constexpr float kRowButtonH = 30.0f;
-            static constexpr float kRowStep = 38.0f;
-            static constexpr float kRowButtonOffsetX = 205.0f;
-            static constexpr float kRowCompactButtonW = 225.0f;
-
-            const unsigned screenTag = static_cast<unsigned>(reinterpret_cast<uintptr_t>(screen));
-            char controlName[64] = {};
-
-            std::snprintf(controlName, sizeof(controlName), "OpenShimInputBackdrop_%08X", screenTag);
-            CreateInputBindingUiOverlay(g_InputBindingUiBackdrop,
-                                        visualParent,
-                                        controlName,
-                                        "blackui.png",
-                                        kBackdropX,
-                                        kBackdropY,
-                                        kBackdropW,
-                                        kBackdropH,
-                                        0x60);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimInputFrame_%08X", screenTag);
-            CreateInputBindingUiOverlay(g_InputBindingUiFrame,
-                                        visualParent,
-                                        controlName,
-                                        "keyOptions_center.png",
-                                        kBackdropX,
-                                        kBackdropY,
-                                        kBackdropW,
-                                        kBackdropH,
-                                        0x60);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimInputTopMask_%08X", screenTag);
-            CreateInputBindingUiOverlay(g_InputBindingUiTopMask,
-                                        visualParent,
-                                        controlName,
-                                        "blackui.png",
-                                        kTopMaskX,
-                                        kTopMaskY,
-                                        kTopMaskW,
-                                        kTopMaskH,
-                                        0x60);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimInputContentMask_%08X", screenTag);
-            CreateInputBindingUiOverlay(g_InputBindingUiContentMask,
-                                        visualParent,
-                                        controlName,
-                                        "blackui.png",
-                                        kContentMaskX,
-                                        kContentMaskY,
-                                        kContentMaskW,
-                                        kContentMaskH,
-                                        0x60);
-
-            std::snprintf(controlName, sizeof(controlName), "OpenShimInputHeader_%08X", screenTag);
-            CreateInputBindingUiLabel(g_InputBindingUiHeaderLabel, controlParent, controlName, "", kHeaderX, kHeaderY, kHeaderW, kHeaderH);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimInputStatus_%08X", screenTag);
-            CreateInputBindingUiLabel(g_InputBindingUiStatusLabel, controlParent, controlName, "", kStatusX, kStatusY, kStatusW, kStatusH);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimInputPage_%08X", screenTag);
-            CreateInputBindingUiLabel(g_InputBindingUiPageLabel, controlParent, controlName, "", kPageX, kPageY, kPageW, kPageH);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimInputBack_%08X", screenTag);
-            CreateInputBindingUiButton(g_InputBindingUiBackButton, controlParent, controlName, "Back", 195.0f, kToolbarY, kToolbarW, kToolbarH, reinterpret_cast<void*>(InputBindingBackClick));
-            std::snprintf(controlName, sizeof(controlName), "OpenShimInputDefaults_%08X", screenTag);
-            CreateInputBindingUiButton(g_InputBindingUiDefaultsButton, controlParent, controlName, "Input Defaults", 355.0f, kToolbarY, 210.0f, kToolbarH, reinterpret_cast<void*>(InputBindingDefaultsClick));
-            std::snprintf(controlName, sizeof(controlName), "OpenShimInputFamily_%08X", screenTag);
-            CreateInputBindingUiButton(g_InputBindingUiInputFamilyButton, controlParent, controlName, "Input", 585.0f, kToolbarY, kToolbarW, kToolbarH, reinterpret_cast<void*>(InputBindingFamilyInputClick));
-            std::snprintf(controlName, sizeof(controlName), "OpenShimGameKeyFamily_%08X", screenTag);
-            CreateInputBindingUiButton(g_InputBindingUiGameKeyFamilyButton, controlParent, controlName, "GameKey", 745.0f, kToolbarY, kToolbarW, kToolbarH, reinterpret_cast<void*>(InputBindingFamilyGameKeyClick));
-            std::snprintf(controlName, sizeof(controlName), "OpenShimInputPrev_%08X", screenTag);
-            CreateInputBindingUiButton(g_InputBindingUiPrevPageButton, controlParent, controlName, "Prev", 915.0f, kToolbarY, 110.0f, kToolbarH, reinterpret_cast<void*>(InputBindingPrevPageClick));
-            std::snprintf(controlName, sizeof(controlName), "OpenShimInputNext_%08X", screenTag);
-            CreateInputBindingUiButton(g_InputBindingUiNextPageButton, controlParent, controlName, "Next", 1035.0f, kToolbarY, 110.0f, kToolbarH, reinterpret_cast<void*>(InputBindingNextPageClick));
-            std::snprintf(controlName, sizeof(controlName), "OpenShimInputReload_%08X", screenTag);
-            CreateInputBindingUiButton(g_InputBindingUiRefreshButton, controlParent, controlName, "Reload", 1155.0f, kToolbarY, 90.0f, kToolbarH, reinterpret_cast<void*>(InputBindingRefreshClick));
-
-            for (size_t slot = 0; slot < kInputBindingUiVisibleRowCount; ++slot)
-            {
-                const size_t column = slot / kInputBindingUiRowsPerColumn;
-                const size_t row = slot % kInputBindingUiRowsPerColumn;
-                const float baseX = (column == 0) ? kRowLeftBaseX : kRowRightBaseX;
-                const float y = kRowY + (static_cast<float>(row) * kRowStep);
-                std::snprintf(controlName, sizeof(controlName), "OpenShimInputRowLabel_%08X_%02u", screenTag, static_cast<unsigned>(slot));
-                CreateInputBindingUiLabel(g_InputBindingUiRowLabels[slot], controlParent, controlName, "", baseX, y + 2.0f, kRowLabelW, kRowButtonH);
-                std::snprintf(controlName, sizeof(controlName), "OpenShimInputRowButton_%08X_%02u", screenTag, static_cast<unsigned>(slot));
-                CreateInputBindingUiButton(g_InputBindingUiRowButtons[slot], controlParent, controlName, "", baseX + kRowButtonOffsetX, y, kRowCompactButtonW, kRowButtonH, kInputBindingRowClickCallbacks[slot]);
-            }
-        }
-
-        static bool CreateInputBindingPreviewLabel(void* parent,
-                                                   const char* text,
-                                                   float x,
-                                                   float y,
-                                                   float w,
-                                                   float h)
-        {
-            if (!parent || !text || !*text || !g_BzrFn_LabelCtor || !g_BzrFn_AddChild)
-                return false;
-
-            void* labelMem = ::operator new(0x930, std::nothrow);
-            if (!labelMem)
-                return false;
-
-            std::memset(labelMem, 0, 0x930);
-            void* label = g_BzrFn_LabelCtor(labelMem, text, x, y, w, h, 0x20, parent, 0);
-            if (!label)
-                return false;
-
-            if (g_BzrFn_LabelState)
-                g_BzrFn_LabelState(label, nullptr);
-            g_BzrFn_AddChild(parent, label, 0);
-            return true;
-        }
-
-        static std::string FormatInputBindingPreviewLine(const InputBindingUiRow& row)
-        {
-            std::string line = row.displayText.empty() ? HumanizeInputBindingCommand(row.command) : row.displayText;
-            line += ": ";
-            line += row.currentBindingText.empty() ? "<none>" : row.currentBindingText;
-            if (row.reserved)
-                line += " [reserved]";
-            return line;
-        }
-
-        static void RenderInputBindingUiPreview(void* screen)
-        {
-            InitializeInputBindingUiScaffold();
-
-            if (!screen)
-                return;
-
-            static constexpr float kHeaderX = 170.0f;
-            static constexpr float kHeaderY = 185.0f;
-            static constexpr float kHeaderW = 980.0f;
-            static constexpr float kHeaderH = 30.0f;
-            static constexpr float kRowX = 170.0f;
-            static constexpr float kRowY = 222.0f;
-            static constexpr float kRowW = 980.0f;
-            static constexpr float kRowH = 24.0f;
-            static constexpr float kRowStep = 25.0f;
-            static constexpr size_t kMaxPreviewRows = 12;
-
-            CreateInputBindingPreviewLabel(
-                screen,
-                "OpenShim Input UI Preview",
-                kHeaderX,
-                kHeaderY,
-                kHeaderW,
-                kHeaderH);
-
-            size_t rendered = 0;
-            for (const InputBindingUiRow& row : g_InputBindingUiRows)
-            {
-                if (row.family != InputBindingMapFamily::Input)
-                    continue;
-                if (rendered >= kMaxPreviewRows)
-                    break;
-
-                const std::string line = FormatInputBindingPreviewLine(row);
-                if (CreateInputBindingPreviewLabel(
-                        screen,
-                        line.c_str(),
-                        kRowX,
-                        kRowY + (static_cast<float>(rendered) * kRowStep),
-                        kRowW,
-                        kRowH))
-                {
-                    ++rendered;
-                }
-            }
-
-            const std::string footer =
-                "OpenShim preview overlays the stock screen; capture/edit flow not wired yet.";
-            CreateInputBindingPreviewLabel(
-                screen,
-                footer.c_str(),
-                kRowX,
-                kRowY + (static_cast<float>(kMaxPreviewRows) * kRowStep) + 8.0f,
-                kRowW,
-                kRowH);
-        }
-
-        static std::string BuildInputBindingKeyNameFromCode(uint32_t keyCode)
-        {
-            if (!g_BzrFn_MapKeyNameFromCode)
-                return {};
-
-            char keyName[64] = {};
-            g_BzrFn_MapKeyNameFromCode(keyCode, keyName);
-            return TrimAsciiCopy(keyName);
-        }
-
-        static std::string BuildGameKeyTokenFromVk(uint32_t key, uint32_t keyCode)
-        {
-            switch (key)
-            {
-            case VK_BACK: return "BSP";
-            case VK_TAB: return "TAB";
-            case VK_RETURN: return "ENTER";
-            case VK_ESCAPE: return "ESC";
-            case VK_SPACE: return "SPACE";
-            case VK_PAUSE: return "PAUSE";
-            case VK_CAPITAL: return "CAPS";
-            case VK_UP: return "GreyUpArrow";
-            case VK_DOWN: return "GreyDownArrow";
-            case VK_LEFT: return "GreyLeftArrow";
-            case VK_RIGHT: return "GreyRightArrow";
-            case VK_INSERT: return "Insert";
-            case VK_DELETE: return "GreyDelete";
-            case VK_HOME: return "Home";
-            case VK_END: return "End";
-            case VK_PRIOR: return "PageUp";
-            case VK_NEXT: return "PageDown";
-            default:
-                break;
-            }
-
-            if ((key >= 'A' && key <= 'Z') || (key >= '0' && key <= '9'))
-                return std::string(1, static_cast<char>(key));
-            if (key >= VK_F1 && key <= VK_F12)
-                return "F" + std::to_string(static_cast<unsigned>(key - VK_F1 + 1));
-
-            switch (key)
-            {
-            case VK_OEM_3: return "`";
-            case VK_OEM_MINUS: return "-";
-            case VK_OEM_PLUS: return "=";
-            case VK_OEM_4: return "[";
-            case VK_OEM_6: return "]";
-            case VK_OEM_5: return "\\";
-            case VK_OEM_1: return ";";
-            case VK_OEM_7: return "'";
-            case VK_OEM_COMMA: return ",";
-            case VK_OEM_PERIOD: return ".";
-            case VK_OEM_2: return "/";
-            default:
-                break;
-            }
-
-            std::string fallback = BuildInputBindingKeyNameFromCode(keyCode);
-            if (_stricmp(fallback.c_str(), "Escape") == 0)
-                return "ESC";
-            if (_stricmp(fallback.c_str(), "Backspace") == 0)
-                return "BSP";
-            if (_stricmp(fallback.c_str(), "CapsLock") == 0 ||
-                _stricmp(fallback.c_str(), "CAPSLock") == 0)
-            {
-                return "CAPS";
-            }
-            if (_stricmp(fallback.c_str(), "Enter") == 0 ||
-                _stricmp(fallback.c_str(), "Return") == 0)
-            {
-                return "ENTER";
-            }
-            return fallback;
-        }
-
-        static bool BuildGameKeyChordFromKey(uint32_t key, uint32_t keyCode, std::string& outChord)
-        {
-            outChord.clear();
-            if (key == VK_SHIFT || key == VK_CONTROL || key == VK_MENU)
-                return false;
-
-            const std::string token = BuildGameKeyTokenFromVk(key, keyCode);
-            if (token.empty())
-                return false;
-
-            std::vector<std::string> parts;
-            if ((GetKeyState(VK_CONTROL) & 0x8000) != 0)
-                parts.push_back("CTRL");
-            if ((GetKeyState(VK_SHIFT) & 0x8000) != 0)
-                parts.push_back("SHIFT");
-            if ((GetKeyState(VK_MENU) & 0x8000) != 0)
-                parts.push_back("ALT");
-            parts.push_back(token);
-            outChord = JoinStrings(parts, "+");
-            return true;
-        }
-
-        static bool AssignGameKeyBindingChord(const std::string& action,
-                                              const std::string& newChord,
-                                              std::string& outError)
-        {
-            outError.clear();
-            if (action.empty() || newChord.empty())
-            {
-                outError = "empty action or chord";
-                return false;
-            }
-
-            if (!SetGameKeyBindingPrimaryChord(action, newChord, outError))
-                return false;
-
-            if (g_BzrFn_ReloadGameKeyMap)
-                g_BzrFn_ReloadGameKeyMap();
-            return true;
-        }
-
-        static void OnInputBindingRowButtonClicked(size_t visibleSlot)
-        {
-            if (visibleSlot >= kInputBindingUiVisibleRowCount)
-                return;
-
-            const int rowIndex = g_InputBindingUiVisibleRowIndices[visibleSlot];
-            if (rowIndex < 0 || static_cast<size_t>(rowIndex) >= g_InputBindingUiRows.size())
-                return;
-
-            const InputBindingUiRow& row = g_InputBindingUiRows[static_cast<size_t>(rowIndex)];
-            const std::string displayText =
-                row.displayText.empty() ? HumanizeInputBindingCommand(row.command) : row.displayText;
-            g_InputBindingUiPendingFamily = row.family;
-            g_InputBindingUiPendingCommand = row.command;
-            g_InputBindingUiPendingDisplayText = displayText;
-            g_InputBindingUiStatusText =
-                "Press a key for " + g_InputBindingUiPendingDisplayText + ". ESC cancels.";
-            Log(L"[INPUTUI] Pending capture family=%hs slot=%u command=%hs display=%hs\n",
-                row.family == InputBindingMapFamily::GameKey ? "gamekey" : "input",
-                static_cast<unsigned>(visibleSlot),
-                row.command.c_str(),
-                displayText.c_str());
-            RefreshInputBindingUiControls();
-        }
-
-        static void OnInputBindingBackClicked()
-        {
-            auto* const backClick = reinterpret_cast<void(__cdecl*)()>(kOptionsInputBackClickAddr);
-            if (backClick)
-            {
-                Log(L"[INPUTUI] Invoking stock Back callback\n");
-                backClick();
-            }
-        }
-
-        static void OnInputBindingDefaultsClicked()
-        {
-            auto* const defaultsClick = reinterpret_cast<void(__cdecl*)()>(kOptionsInputDefaultsClickAddr);
-            if (defaultsClick)
-            {
-                Log(L"[INPUTUI] Invoking stock input default reset callback\n");
-                defaultsClick();
-            }
-
-            TryLiveReloadInputMapTables();
-            ReloadInputBindingUiInventory(true);
-            g_InputBindingUiPageStart =
-                ClampInputBindingUiPageStart(g_InputBindingUiActiveFamily, g_InputBindingUiPageStart);
-            g_InputBindingUiPendingCommand.clear();
-            g_InputBindingUiPendingDisplayText.clear();
-            g_InputBindingUiStatusText = "Reset input.map defaults and reloaded key maps.";
-            RefreshInputBindingUiControls();
-        }
-
-        static void OnInputBindingFamilyButtonClicked(InputBindingMapFamily family)
-        {
-            g_InputBindingUiActiveFamily = family;
-            g_InputBindingUiPageStart = 0;
-            RefreshInputBindingUiControls();
-        }
-
-        static void OnInputBindingPageStepClicked(int direction)
-        {
-            const size_t current = g_InputBindingUiPageStart;
-            if (direction < 0)
-            {
-                g_InputBindingUiPageStart =
-                    current >= kInputBindingUiVisibleRowCount ? current - kInputBindingUiVisibleRowCount : 0;
-            }
-            else if (direction > 0)
-            {
-                g_InputBindingUiPageStart = current + kInputBindingUiVisibleRowCount;
-            }
-
-            g_InputBindingUiPageStart =
-                ClampInputBindingUiPageStart(g_InputBindingUiActiveFamily, g_InputBindingUiPageStart);
-            RefreshInputBindingUiControls();
-        }
-
-        static void OnInputBindingRefreshClicked()
-        {
-            ReloadInputBindingUiInventory(true);
-            g_InputBindingUiPageStart =
-                ClampInputBindingUiPageStart(g_InputBindingUiActiveFamily, g_InputBindingUiPageStart);
-            g_InputBindingUiStatusText = "Reloaded input.map and gamekey.map.";
-            RefreshInputBindingUiControls();
-        }
-
-        // KeyConfig layout confirmed against the 1.5 PDB object model: nKeyCount at
-        // +0, _KeyItem[100] at +4, each entry cKeyName[0x100] at +0,
-        // cKeyFunction[0x100] at +0x100, nReserved at +0x200 (stride 0x204).
-        struct KeyConfigEntryView
-        {
-            const char* keyName = nullptr;
-            const char* function = nullptr;
-            int reserved = 0;
-        };
-
-        static bool IsPrintableAsciiZ(const char* text, size_t maxLen)
-        {
-            for (size_t index = 0; index < maxLen; ++index)
-            {
-                const char ch = text[index];
-                if (ch == '\0')
-                    return true;
-                if (ch < 0x20 || ch > 0x7E)
-                    return false;
-            }
-            return false;
-        }
-
-        static bool TryFindKeyConfigEntry(void* keyConfig,
-                                          const char* command,
-                                          KeyConfigEntryView& outEntry,
-                                          bool& outTableValid)
-        {
-            constexpr size_t kListOffset = 4;
-            constexpr size_t kEntryStride = 0x204;
-            constexpr size_t kFunctionOffset = 0x100;
-            constexpr size_t kReservedOffset = 0x200;
-            constexpr int kMaxEntries = 100;
-
-            outEntry = {};
-            outTableValid = false;
-            if (!keyConfig || !command || !*command)
-                return false;
-
-            const int count = *reinterpret_cast<const int*>(keyConfig);
-            if (count <= 0 || count > kMaxEntries)
-                return false;
-
-            const uint8_t* listBase = reinterpret_cast<const uint8_t*>(keyConfig) + kListOffset;
-            const char* firstName = reinterpret_cast<const char*>(listBase);
-            const char* firstFunction = reinterpret_cast<const char*>(listBase + kFunctionOffset);
-            if (!IsPrintableAsciiZ(firstName, kFunctionOffset) ||
-                !IsPrintableAsciiZ(firstFunction, kFunctionOffset) ||
-                *firstFunction == '\0')
-            {
-                return false;
-            }
-
-            outTableValid = true;
-            for (int index = 0; index < count; ++index)
-            {
-                const uint8_t* entry = listBase + static_cast<size_t>(index) * kEntryStride;
-                const char* function = reinterpret_cast<const char*>(entry + kFunctionOffset);
-                if (!IsPrintableAsciiZ(function, kFunctionOffset))
-                    continue;
-                if (_stricmp(function, command) != 0)
-                    continue;
-
-                outEntry.keyName = reinterpret_cast<const char*>(entry);
-                outEntry.function = function;
-                outEntry.reserved = *reinterpret_cast<const int*>(entry + kReservedOffset);
-                return true;
-            }
-            return false;
-        }
-
-        // Mirrors the stock alreadyBound rule, but across every parsed block so
-        // extended commands participate in conflict detection too.
-        static const InputBindingCommandBlock* FindInputMapKeyOwner(
-            const std::string& keyName,
-            const std::string& excludeCommand)
-        {
-            for (const InputBindingCommandBlock& block : g_InputBindingCommandBlocks)
-            {
-                if (_stricmp(block.command.c_str(), excludeCommand.c_str()) == 0)
-                    continue;
-                for (const std::string& token : block.positiveKeyboardTokens)
-                {
-                    if (_stricmp(token.c_str(), keyName.c_str()) == 0)
-                        return &block;
-                }
-            }
-            return nullptr;
-        }
-
-        // Redux read_mapping_table (legacy 0x004BBD49) recovered at 0x00620010; it
-        // fully re-reads input.map plus the giddi device templates into the live
-        // tables. Byte-verified before first use so a drifted binary degrades to a
-        // restart notice instead of a wild call.
-        static bool TryLiveReloadInputMapTables()
-        {
-            if (!g_InputMapLiveReloadChecked)
-            {
-                g_InputMapLiveReloadChecked = true;
-                static const uint8_t kExpectedReadMappingTableBytes[] =
-                {
-                    0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xDC, 0x02, 0x00, 0x00
-                };
-                g_InputMapLiveReloadAvailable =
-                    ExpectedBytesMatchAt(kGogReadMappingTableAddr,
-                                         kExpectedReadMappingTableBytes,
-                                         sizeof(kExpectedReadMappingTableBytes));
-                Log(L"[INPUTUI] Live input.map reload %hs at 0x%08X\n",
-                    g_InputMapLiveReloadAvailable ? "available" : "unavailable (bytes mismatch)",
-                    static_cast<uint32_t>(kGogReadMappingTableAddr));
-            }
-
-            if (!g_InputMapLiveReloadAvailable)
-                return false;
-
-            auto* readMappingTable =
-                reinterpret_cast<FnReloadGameKeyMap>(kGogReadMappingTableAddr);
-            readMappingTable();
-            return true;
-        }
-
-        static bool HandleCapturedInputBindingKey(void* screen, uint32_t key, uint32_t keyCode)
-        {
-            if (g_InputBindingUiPendingCommand.empty())
-                return false;
-
-            Log(L"[INPUTUI] Capture key family=%hs command=%hs vk=0x%02X keyCode=0x%02X screen=0x%08X\n",
-                g_InputBindingUiPendingFamily == InputBindingMapFamily::GameKey ? "gamekey" : "input",
-                g_InputBindingUiPendingCommand.c_str(),
-                static_cast<unsigned>(key & 0xFFu),
-                static_cast<unsigned>(keyCode & 0xFFu),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(screen)));
-
-            if (key == VK_ESCAPE)
-            {
-                g_InputBindingUiPendingCommand.clear();
-                g_InputBindingUiPendingDisplayText.clear();
-                g_InputBindingUiStatusText = "Capture cancelled.";
-                RefreshInputBindingUiControls();
-                return true;
-            }
-
-            const size_t rowIndex =
-                FindInputBindingUiRowIndex(g_InputBindingUiPendingFamily, g_InputBindingUiPendingCommand);
-            if (rowIndex >= g_InputBindingUiRows.size())
-            {
-                g_InputBindingUiPendingCommand.clear();
-                g_InputBindingUiPendingDisplayText.clear();
-                g_InputBindingUiStatusText = "Pending binding row was no longer available.";
-                RefreshInputBindingUiControls();
-                return true;
-            }
-
-            // Copies, not references: ReloadInputBindingUiInventory rebuilds the row
-            // vector before the success status is composed.
-            const InputBindingMapFamily rowFamily = g_InputBindingUiRows[rowIndex].family;
-            const std::string command = g_InputBindingUiRows[rowIndex].command;
-            const std::string displayText = g_InputBindingUiRows[rowIndex].displayText.empty()
-                ? HumanizeInputBindingCommand(command)
-                : g_InputBindingUiRows[rowIndex].displayText;
-
-            if (rowFamily == InputBindingMapFamily::Input)
-            {
-                const std::string keyName = BuildInputBindingKeyNameFromCode(keyCode);
-                if (keyName.empty())
-                {
-                    g_InputBindingUiStatusText = "That key is not available for input.map bindings.";
-                    Log(L"[INPUTUI] Capture rejected: no stock key name for keyCode=0x%02X\n",
-                        static_cast<unsigned>(keyCode & 0xFFu));
-                    RefreshInputBindingUiControls();
-                    return true;
-                }
-
-                if (const InputBindingCommandBlock* owner = FindInputMapKeyOwner(keyName, command))
-                {
-                    const std::string ownerText = !owner->comment.empty()
-                        ? owner->comment
-                        : HumanizeInputBindingCommand(owner->command);
-                    g_InputBindingUiStatusText =
-                        keyName + " is already bound to " + ownerText + ".";
-                    Log(L"[INPUTUI] Capture rejected: key=%hs already owned by command=%hs\n",
-                        keyName.c_str(),
-                        owner->command.c_str());
-                    RefreshInputBindingUiControls();
-                    return true;
-                }
-
-                void* keyConfig = nullptr;
-                if (screen)
-                {
-                    auto* screenBytes = reinterpret_cast<uint8_t*>(screen);
-                    keyConfig = *reinterpret_cast<void**>(screenBytes + kOptionsInputKeyConfigOffset);
-                }
-
-                // Stock-managed commands keep KeyConfig::set_key so the native table
-                // stays consistent; extended commands are not in that table (set_key
-                // would reject them) and go straight to the file writer.
-                KeyConfigEntryView stockEntry = {};
-                bool stockTableValid = false;
-                const bool stockManaged =
-                    TryFindKeyConfigEntry(keyConfig, command.c_str(), stockEntry, stockTableValid);
-                if (keyConfig && !stockTableValid)
-                {
-                    Log(L"[INPUTUI] KeyConfig table at 0x%08X failed layout sanity check; treating %hs as extended\n",
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(keyConfig)),
-                        command.c_str());
-                }
-
-                if (stockManaged)
-                {
-                    if (stockEntry.reserved != 0)
-                    {
-                        g_InputBindingUiStatusText =
-                            displayText + " is reserved by the game and cannot be rebound.";
-                        Log(L"[INPUTUI] Capture rejected: command=%hs is reserved\n",
-                            command.c_str());
-                        RefreshInputBindingUiControls();
-                        return true;
-                    }
-
-                    if (g_BzrFn_KeyConfigSetKey &&
-                        g_BzrFn_KeyConfigSetKey(keyConfig, command.c_str(), keyName.c_str()) == 0)
-                    {
-                        g_InputBindingUiStatusText =
-                            "Binding rejected for " + displayText +
-                            ". The stock key table refused " + keyName + ".";
-                        Log(L"[INPUTUI] Capture rejected by KeyConfig::set_key command=%hs key=%hs\n",
-                            command.c_str(),
-                            keyName.c_str());
-                        RefreshInputBindingUiControls();
-                        return true;
-                    }
-                }
-
-                std::string writeError;
-                if (!SetInputMapPrimaryKeyboardBinding(command, keyName, writeError))
-                {
-                    g_InputBindingUiStatusText = "Failed writing input.map: " + writeError;
-                    Log(L"[INPUTUI] input.map write failed command=%hs key=%hs error=%hs\n",
-                        command.c_str(),
-                        keyName.c_str(),
-                        writeError.c_str());
-                    RefreshInputBindingUiControls();
-                    return true;
-                }
-
-                const bool liveReload = TryLiveReloadInputMapTables();
-                ReloadInputBindingUiInventory(true);
-                g_InputBindingUiPendingCommand.clear();
-                g_InputBindingUiPendingDisplayText.clear();
-                g_InputBindingUiStatusText = "Bound " + displayText + " to " + keyName +
-                    (liveReload ? "." : ". Takes effect after restart.");
-                Log(L"[INPUTUI] Bound input command=%hs key=%hs stockManaged=%hs liveReload=%hs\n",
-                    command.c_str(),
-                    keyName.c_str(),
-                    stockManaged ? "yes" : "no",
-                    liveReload ? "yes" : "no");
-                RefreshInputBindingUiControls();
-                return true;
-            }
-
-            std::string chord;
-            if (!BuildGameKeyChordFromKey(key, keyCode, chord))
-            {
-                g_InputBindingUiStatusText =
-                    "Press a non-modifier key for " + g_InputBindingUiPendingDisplayText + ".";
-                Log(L"[INPUTUI] Capture rejected for gamekey command=%hs because chord build failed\n",
-                    command.c_str());
-                RefreshInputBindingUiControls();
-                return true;
-            }
-
-            std::string assignError;
-            if (!AssignGameKeyBindingChord(command, chord, assignError))
-            {
-                g_InputBindingUiStatusText =
-                    "Failed writing gamekey.map for " + g_InputBindingUiPendingDisplayText +
-                    (assignError.empty() ? "." : (": " + assignError));
-                Log(L"[INPUTUI] Failed writing gamekey command=%hs chord=%hs error=%hs\n",
-                    command.c_str(),
-                    chord.c_str(),
-                    assignError.c_str());
-                RefreshInputBindingUiControls();
-                return true;
-            }
-
-            ReloadInputBindingUiInventory(true);
-            g_InputBindingUiPendingCommand.clear();
-            g_InputBindingUiPendingDisplayText.clear();
-            g_InputBindingUiStatusText = "Bound " + displayText + " to " + chord + ".";
-            Log(L"[INPUTUI] Bound gamekey action=%hs chord=%hs\n",
-                command.c_str(),
-                chord.c_str());
-            RefreshInputBindingUiControls();
-            return true;
-        }
-
-        static void InitializeInputBindingUiScaffold()
-        {
-            if (g_InputBindingUiScaffoldInitialized)
-                return;
-            g_InputBindingUiScaffoldInitialized = true;
-
-            g_InputBindingInstallDirectory = ResolveInputBindingInstallDirectory();
-            g_LastOptionsInputScreen = nullptr;
-            g_InputBindingUiActiveFamily = InputBindingMapFamily::Input;
-            g_InputBindingUiPageStart = 0;
-            ResetInputBindingUiVisuals();
-            ReloadInputBindingUiInventory(true);
-            LogInputBindingUiScaffoldSummary();
-        }
-
-        static void EnsureInputBindingPopulateHookScaffold()
-        {
-            InitializeInputBindingUiScaffold();
-
-            // The settings page reuses the hooked input screen as its host, so
-            // the ctor/key hooks install when either feature is enabled.
-            if (!ShouldEnableInputBindingUiReplacement() && !ShouldEnableShimSettingsUi())
-                return;
-
-            if (g_InputBindingUiPopulateHookInstalled && g_InputBindingUiKeyReleasedHookInstalled)
-                return;
-
-            static const uint8_t kExpectedOptionsInputCtorBytes[kOptionsInputCtorDetourLen] =
-            {
-                0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x73, 0x12, 0x86, 0x00
-            };
-            static const uint8_t kExpectedOptionsInputKeyReleasedBytes[kOptionsInputKeyReleasedDetourLen] =
-            {
-                0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x54, 0x01, 0x00, 0x00
-            };
-
-            // The key-release hook is passive (forwards to stock while no capture is
-            // pending), so it installs first. The constructor hook is what activates
-            // the replacement UI and only installs once key capture is guaranteed.
-            // A failure therefore never strands a replacement UI that cannot capture
-            // keys, and a retry never re-validates bytes on an already-patched site.
-            if (!g_InputBindingUiKeyReleasedHookInstalled)
-            {
-                if (!ExpectedBytesMatchAt(kOptionsInputKeyReleasedAddr,
-                                          kExpectedOptionsInputKeyReleasedBytes,
-                                          sizeof(kExpectedOptionsInputKeyReleasedBytes)))
-                {
-                    if (!g_InputBindingUiPopulateHookMismatchLogged)
-                    {
-                        Log(L"[INPUTUI] KeyReleased entry bytes mismatch at 0x%08X; input UI replacement remains disabled\n",
-                            static_cast<uint32_t>(kOptionsInputKeyReleasedAddr));
-                        g_InputBindingUiPopulateHookMismatchLogged = true;
-                    }
-                    return;
-                }
-
-                if (!InstallInlineDetour32(g_OptionsInputKeyReleasedDetour,
-                                           kOptionsInputKeyReleasedAddr,
-                                           reinterpret_cast<void*>(OptionsInputKeyReleasedHook),
-                                           kOptionsInputKeyReleasedDetourLen,
-                                           kExpectedOptionsInputKeyReleasedBytes,
-                                           sizeof(kExpectedOptionsInputKeyReleasedBytes)))
-                {
-                    Log(L"[INPUTUI] Failed installing key-release hook at 0x%08X\n",
-                        static_cast<uint32_t>(kOptionsInputKeyReleasedAddr));
-                    return;
-                }
-
-                g_BzrFn_OptionsInputKeyReleased =
-                    reinterpret_cast<FnOptionsInputKeyReleased>(g_OptionsInputKeyReleasedDetour.trampoline);
-                g_InputBindingUiKeyReleasedHookInstalled = (g_BzrFn_OptionsInputKeyReleased != nullptr);
-                if (!g_InputBindingUiKeyReleasedHookInstalled)
-                    return;
-            }
-
-            if (!g_InputBindingUiPopulateHookInstalled)
-            {
-                if (!ExpectedBytesMatchAt(kOptionsInputCtorAddr,
-                                          kExpectedOptionsInputCtorBytes,
-                                          sizeof(kExpectedOptionsInputCtorBytes)))
-                {
-                    if (!g_InputBindingUiPopulateHookMismatchLogged)
-                    {
-                        Log(L"[INPUTUI] Constructor entry bytes mismatch at 0x%08X; input UI replacement remains disabled\n",
-                            static_cast<uint32_t>(kOptionsInputCtorAddr));
-                        g_InputBindingUiPopulateHookMismatchLogged = true;
-                    }
-                    return;
-                }
-
-                if (!InstallInlineDetour32(g_OptionsInputPopulateUiDetour,
-                                           kOptionsInputCtorAddr,
-                                           reinterpret_cast<void*>(OptionsInputPopulateUiHook),
-                                           kOptionsInputCtorDetourLen,
-                                           kExpectedOptionsInputCtorBytes,
-                                           sizeof(kExpectedOptionsInputCtorBytes)))
-                {
-                    Log(L"[INPUTUI] Failed installing constructor hook at 0x%08X\n",
-                        static_cast<uint32_t>(kOptionsInputCtorAddr));
-                    return;
-                }
-
-                g_BzrFn_OptionsInputCtor =
-                    reinterpret_cast<FnOptionsInputCtor>(g_OptionsInputPopulateUiDetour.trampoline);
-                g_InputBindingUiPopulateHookInstalled = (g_BzrFn_OptionsInputCtor != nullptr);
-                if (!g_InputBindingUiPopulateHookInstalled)
-                    return;
-            }
-
-            g_InputBindingUiPopulateHookMismatchLogged = false;
-            Log(L"[INPUTUI] Installed constructor hook entry=0x%08X trampoline=0x%08X keyRelease=0x%08X\n",
-                static_cast<uint32_t>(kOptionsInputCtorAddr),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OptionsInputPopulateUiDetour.trampoline)),
-                static_cast<uint32_t>(kOptionsInputKeyReleasedAddr));
-        }
-
-        static void OnOptionsInputPopulateUiScaffold(void* screen)
-        {
-            InitializeInputBindingUiScaffold();
-
-            if (!screen)
-                return;
-
-            g_LastOptionsInputScreen = screen;
-
-            const bool requestFresh =
-                g_ShimSettingsPageRequested &&
-                (GetTickCount64() - g_ShimSettingsPageRequestTick) <= kShimSettingsPageRequestTtlMs;
-            const bool settingsMode = requestFresh && ShouldEnableShimSettingsUi();
-            g_ShimSettingsPageRequested = false;
-            if (settingsMode)
-            {
-                ActivateShimSettingsPage(screen);
-                return;
-            }
-
-            g_ShimSettingsPageActive = false;
-            if (!ShouldEnableInputBindingUiReplacement())
-                return;
-
-            EnsureInputBindingUiControls(screen);
-            SetShimSettingsUiControlsVisible(false);
-            RefreshInputBindingUiControls();
-            Log(L"[INPUTUI] Constructor hook screen=0x%08X rows=%u liveUi=%hs keyRelease=%hs\n",
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(screen)),
-                static_cast<unsigned>(g_InputBindingUiRows.size()),
-                "yes",
-                g_InputBindingUiKeyReleasedHookInstalled ? "yes" : "no");
-        }
-
-        // --- OpenShim button on the stock Options screen -------------------------
-
-        // Match the stock Play/Graphic/Audio/Input buttons (x=508, w=422, h=130,
-        // optionhv/optionck hover/click art, 1.3 text scale). The stock four sit
-        // at y=208/386/564/741; the OpenShim button takes the next slot down.
-        static void EnsureShimSettingsMenuButton(void* parentScreen)
-        {
-            if (!parentScreen || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild)
-                return;
-
-            if (g_OptionsParentScreen != parentScreen)
-            {
-                g_OptionsParentScreen = parentScreen;
-                g_ShimSettingsMenuButton = nullptr;
-            }
-
-            if (g_ShimSettingsMenuButton)
-                return;
-
-            void* buttonMem = ::operator new(0x1EC, std::nothrow);
-            if (!buttonMem)
-                return;
-
-            std::memset(buttonMem, 0, 0x1EC);
-            void* const button = g_BzrFn_ButtonCtor(buttonMem,
-                                                    "OpenShimSettingsMenuButton",
-                                                    508.0f,
-                                                    918.0f,
-                                                    422.0f,
-                                                    130.0f,
-                                                    0x20,
-                                                    parentScreen,
-                                                    0,
-                                                    0);
-            if (!button)
-                return;
-
-            if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(button, "optionhv.png");
-            if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(button, "optionck.png");
-            if (g_BzrFn_SetButtonLabel) g_BzrFn_SetButtonLabel(button, "OpenShim");
-            if (g_BzrFn_SetButtonTextScale) g_BzrFn_SetButtonTextScale(button, 1.3f);
-            if (g_BzrFn_SetOnClick)
-                g_BzrFn_SetOnClick(button, reinterpret_cast<void*>(ShimSettingsMenuClick));
-            if (g_BzrFn_SetOnHover)
-                g_BzrFn_SetOnHover(button, reinterpret_cast<void*>(InputBindingUiButtonOnHoverNoop));
-            g_BzrFn_AddChild(parentScreen, button, 0);
-            g_ShimSettingsMenuButton = button;
-            Log(L"[SETTINGSUI] OpenShim button added to options screen=0x%08X\n",
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parentScreen)));
-        }
-
-        static void OnOptionsParentCtorScaffold(void* screen)
-        {
-            if (!screen || !ShouldEnableShimSettingsUi())
-                return;
-
-            EnsureShimSettingsMenuButton(screen);
-        }
-
-        static void EnsureOptionsParentCtorHookScaffold()
-        {
-            if (!ShouldEnableShimSettingsUi() || g_OptionsParentHookInstalled)
-                return;
-
-            static const uint8_t kExpectedOptionsParentCtorBytes[kOptionsParentCtorDetourLen] =
-            {
-                0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x60, 0x13, 0x86, 0x00
-            };
-
-            if (!ExpectedBytesMatchAt(kOptionsParentCtorAddr,
-                                      kExpectedOptionsParentCtorBytes,
-                                      sizeof(kExpectedOptionsParentCtorBytes)))
-            {
-                if (!g_OptionsParentHookMismatchLogged)
-                {
-                    Log(L"[SETTINGSUI] Options ctor bytes mismatch at 0x%08X; settings UI disabled\n",
-                        static_cast<uint32_t>(kOptionsParentCtorAddr));
-                    g_OptionsParentHookMismatchLogged = true;
-                }
-                return;
-            }
-
-            if (!InstallInlineDetour32(g_OptionsParentCtorDetour,
-                                       kOptionsParentCtorAddr,
-                                       reinterpret_cast<void*>(OptionsParentCtorHook),
-                                       kOptionsParentCtorDetourLen,
-                                       kExpectedOptionsParentCtorBytes,
-                                       sizeof(kExpectedOptionsParentCtorBytes)))
-            {
-                Log(L"[SETTINGSUI] Failed installing options ctor hook at 0x%08X\n",
-                    static_cast<uint32_t>(kOptionsParentCtorAddr));
-                return;
-            }
-
-            g_BzrFn_OptionsParentCtor =
-                reinterpret_cast<FnOptionsInputCtor>(g_OptionsParentCtorDetour.trampoline);
-            g_OptionsParentHookInstalled = (g_BzrFn_OptionsParentCtor != nullptr);
-            if (g_OptionsParentHookInstalled)
-            {
-                Log(L"[SETTINGSUI] Installed options ctor hook entry=0x%08X trampoline=0x%08X\n",
-                    static_cast<uint32_t>(kOptionsParentCtorAddr),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OptionsParentCtorDetour.trampoline)));
-            }
-        }
-
         static bool IsIniBoolTrue(const char* value, bool fallback)
         {
             if (!value || !*value)
@@ -21142,32 +18160,25 @@ namespace BZROpenShim
             }
             g_ChunkObjectIdentityLastRefreshTick = now;
 
-            auto* objectListBytes = ResolveMainModulePtr<uint8_t>(kGameObjectObjectListRva);
-            if (!objectListBytes)
+            // NOTE: until 2026-07-18 this walked the stale advisory-PDB
+            // object-list global, whose sanity checks always failed — so the
+            // identity cache had silently stayed empty since it was written.
+            // The arena walk makes it populate for the first time.
+            static void* s_identityObjects[kGameObjectArenaSlotCapacity];
+            const size_t totalObjects =
+                CollectLiveGameObjectsFromArena(s_identityObjects, kGameObjectArenaSlotCapacity);
+            if (totalObjects == 0)
                 return;
 
-            __try
-            {
-                auto** begin = *reinterpret_cast<void***>(objectListBytes + 0x0);
-                auto** end = *reinterpret_cast<void***>(objectListBytes + 0x4);
-                auto** capacity = *reinterpret_cast<void***>(objectListBytes + 0x8);
-                if (!begin || !end || !capacity || end < begin || capacity < end)
-                    return;
+            const size_t objectLimit =
+                (totalObjects < kChunkObjectIdentityMaxObjectsPerRefresh)
+                    ? totalObjects
+                    : kChunkObjectIdentityMaxObjectsPerRefresh;
 
-                const size_t totalObjects = static_cast<size_t>(end - begin);
-                const size_t objectLimit =
-                    (totalObjects < kChunkObjectIdentityMaxObjectsPerRefresh)
-                        ? totalObjects
-                        : kChunkObjectIdentityMaxObjectsPerRefresh;
-
-                g_ChunkObjectIdentityCache.clear();
-                g_ChunkObjectIdentityCache.reserve(objectLimit * 8);
-                for (size_t index = 0; index < objectLimit; ++index)
-                    CacheChunkObjectIdentityTreeForGameObject(begin[index]);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-            }
+            g_ChunkObjectIdentityCache.clear();
+            g_ChunkObjectIdentityCache.reserve(objectLimit * 8);
+            for (size_t index = 0; index < objectLimit; ++index)
+                CacheChunkObjectIdentityTreeForGameObject(s_identityObjects[index]);
         }
 
         struct VehicleSkinningProbeResult
@@ -21186,37 +18197,6 @@ namespace BZROpenShim
             char entityName[96] = {};
             char materialNames[512] = {};
         };
-
-        static bool TryGetGameObjectListRange(void*** outBegin, void*** outEnd)
-        {
-            if (!outBegin || !outEnd)
-                return false;
-
-            *outBegin = nullptr;
-            *outEnd = nullptr;
-            auto* objectListBytes = ResolveMainModulePtr<uint8_t>(kGameObjectObjectListRva);
-            if (!objectListBytes)
-                return false;
-
-            __try
-            {
-                auto** begin = *reinterpret_cast<void***>(objectListBytes + 0x0);
-                auto** end = *reinterpret_cast<void***>(objectListBytes + 0x4);
-                auto** capacity = *reinterpret_cast<void***>(objectListBytes + 0x8);
-                if (!begin || !end || !capacity || end < begin || capacity < end)
-                    return false;
-
-                *outBegin = begin;
-                *outEnd = end;
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                *outBegin = nullptr;
-                *outEnd = nullptr;
-                return false;
-            }
-        }
 
         static bool TryCaptureVehicleSkinningProbe(
             void* entity,
@@ -21374,12 +18354,12 @@ namespace BZROpenShim
                 return;
             }
 
-            void** begin = nullptr;
-            void** end = nullptr;
-            if (!TryGetGameObjectListRange(&begin, &end))
+            static void* s_skinningObjects[kGameObjectArenaSlotCapacity];
+            const size_t totalObjects =
+                CollectLiveGameObjectsFromArena(s_skinningObjects, kGameObjectArenaSlotCapacity);
+            if (totalObjects == 0)
                 return;
 
-            const size_t totalObjects = static_cast<size_t>(end - begin);
             const size_t objectLimit =
                 (totalObjects < kChunkObjectIdentityMaxObjectsPerRefresh)
                     ? totalObjects
@@ -21401,7 +18381,7 @@ namespace BZROpenShim
             for (size_t index = 0; index < objectLimit; ++index)
             {
                 void* obj76 = nullptr;
-                if (!TryGetGameObjectObj76(begin[index], obj76) || !obj76)
+                if (!TryGetGameObjectObj76(s_skinningObjects[index], obj76) || !obj76)
                     continue;
 
                 const ChunkBridgeSnapshot snapshot =
@@ -21468,7 +18448,7 @@ namespace BZROpenShim
                     }
                     else
                     {
-                        TryGetGameObjectMeshName(begin[index], meshName, sizeof(meshName));
+                        TryGetGameObjectMeshName(s_skinningObjects[index], meshName, sizeof(meshName));
                     }
                     const char* const identity = meshName[0]
                         ? meshName
@@ -21785,6 +18765,14 @@ namespace BZROpenShim
 
         static void ForgetMultiplayerFlagSceneResources(const wchar_t* reason)
         {
+            // Re-arm the one-shot per-match diagnostics/logs for the next match.
+            g_MultiplayerFlagDiagLogged = false;
+            g_MultiplayerFlagObjScanLogged = false;
+            g_MultiplayerFlagPayloadSeenLogged = false;
+            g_MultiplayerFlagContextMissingLogged = false;
+            g_MultiplayerFlagInMatchApplyLogged = false;
+            g_MultiplayerFlagCopyFailLogged = false;
+            g_MultiplayerFlagLastApplyAttemptTick = 0;
             size_t forgotten = 0;
             for (auto& pair : g_MultiplayerFlagRenderSets)
             {
@@ -21944,24 +18932,51 @@ namespace BZROpenShim
             }
         }
 
+        // The advisory-PDB "object list" global (removed; it landed in string
+        // data on the live exe) never produced objects from pointer-array
+        // walks. Enumerate the verified GameObject arena instead:
+        // the same 0x400-stride pool the GetObjByHandle slot formula indexes
+        // (base 0x0260DB20, 4096 slots), filtered by the live-vtable check
+        // the headlight walker uses.
+        static size_t CollectLiveGameObjectsFromArena(void** outObjects, size_t capacity)
+        {
+            if (!outObjects || capacity == 0)
+                return 0;
+            auto* arena = ResolveMainModulePtr<uint8_t>(kHeadlightObjectArenaRva);
+            if (!arena)
+                return 0;
+            size_t count = 0;
+            for (size_t i = 0; i < kHeadlightObjectSlotCount && count < capacity; ++i)
+            {
+                void* object = arena + i * kHeadlightObjectSlotSize;
+                if (IsLiveHeadlightObjectSlot(object))
+                    outObjects[count++] = object;
+            }
+            return count;
+        }
+
         static bool TryReadMultiplayerFlagRuntimeContext(
             void*& outUserObject,
             int& outLocalTeam)
         {
             outUserObject = nullptr;
             outLocalTeam = 0;
-            __try
-            {
-                outUserObject = *ResolveMainModulePtr<void*>(kGameObjectUserObjectRva);
-                outLocalTeam = *ResolveMainModulePtr<int>(kGameObjectUserTeamNumberRva);
-                return outUserObject != nullptr;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                outUserObject = nullptr;
-                outLocalTeam = 0;
+            // GameObject::userObject global 0x00917AFC — the exact value the
+            // accessor 0x417C70 returns, which FlagDisplay::Submit itself
+            // uses for its skip-own-craft compare. The previous userObject /
+            // userTeamNumber globals (removed) were advisory-PDB drift into
+            // string data ("Chat"), so every scan read garbage. Local team
+            // comes from the object itself instead of a second unverified
+            // global.
+            void* userObject = TryGetHeadlightPlayerObject();
+            if (!userObject || !IsLiveHeadlightObjectSlot(userObject))
                 return false;
-            }
+            const int team = GetGameObjectTeamForLog(userObject);
+            if (team == INT_MIN)
+                return false;
+            outUserObject = userObject;
+            outLocalTeam = team;
+            return true;
         }
 
         static void* TryCreateMultiplayerFlagBillboardSafe(
@@ -22003,10 +19018,210 @@ namespace BZROpenShim
             }
         }
 
+        // One-shot per match: dump the by-team NetPlayer array and the local
+        // (BanLookup) player so a single reload proves where the uploaded flag
+        // mask actually lands and whether the two player views are the same
+        // objects. Every field offset here is from the disassembly of
+        // FlagDisplay::Submit (player+0x50 sprite index), NetPlayer::RecordDeath
+        // (playerId +0x28), the by-team populate (team byte +0x68), and
+        // SetFlagBuffer (mask ptr +0x1C).
+        static void DumpMultiplayerFlagDiagnosticsOnce()
+        {
+            if (g_MultiplayerFlagDiagLogged)
+                return;
+            g_MultiplayerFlagDiagLogged = true;
+
+            auto** playersByTeam = reinterpret_cast<void**>(kNetPlayerByTeamAddr);
+            auto getData = reinterpret_cast<FnNetPlayerGetData>(kNetPlayerGetDataAddr);
+            for (int team = 0; team < 16; ++team)
+            {
+                __try
+                {
+                    void* player = playersByTeam[team];
+                    if (!player)
+                        continue;
+                    const auto* p = reinterpret_cast<const uint8_t*>(player);
+                    const unsigned id = *reinterpret_cast<const uint16_t*>(p + 0x28);
+                    const unsigned teamByte = *reinterpret_cast<const uint8_t*>(p + 0x68);
+                    const int spriteIdx = *reinterpret_cast<const int*>(p + 0x50);
+                    const void* flagBuf = *reinterpret_cast<void* const*>(p + 0x1C);
+                    long slotSize = -1;
+                    if (getData)
+                    {
+                        auto* v = reinterpret_cast<const uint8_t*>(getData(player, kLegacyFlagDataSlot));
+                        if (v)
+                        {
+                            const auto* b = *reinterpret_cast<const uint8_t* const*>(v + 0x0);
+                            const auto* e = *reinterpret_cast<const uint8_t* const*>(v + 0x4);
+                            if (b && e && e >= b)
+                                slotSize = static_cast<long>(e - b);
+                        }
+                    }
+                    Log(L"[FLAGDIAG] byteam[%d]=0x%p id=%u teamByte=%u sprite=%d flagBuf=0x%p slot0x0D=%ld\n",
+                        team, player, id, teamByte, spriteIdx, flagBuf, slotSize);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    Log(L"[FLAGDIAG] byteam[%d] read faulted\n", team);
+                }
+            }
+
+            void* localPlayer = nullptr;
+            if (TryGetLocalPlayerForFlags(localPlayer) && localPlayer)
+            {
+                __try
+                {
+                    const auto* p = reinterpret_cast<const uint8_t*>(localPlayer);
+                    const unsigned id = *reinterpret_cast<const uint16_t*>(p + 0x28);
+                    const unsigned teamByte = *reinterpret_cast<const uint8_t*>(p + 0x68);
+                    const void* flagBuf = *reinterpret_cast<void* const*>(p + 0x1C);
+                    void* arrayForTeam =
+                        (teamByte < 16) ? playersByTeam[teamByte] : nullptr;
+                    Log(L"[FLAGDIAG] localPlayer=0x%p id=%u teamByte=%u flagBuf=0x%p byteam[team]=0x%p same=%hs\n",
+                        localPlayer, id, teamByte, flagBuf, arrayForTeam,
+                        (arrayForTeam == localPlayer) ? "YES" : "NO");
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    Log(L"[FLAGDIAG] localPlayer read faulted\n");
+                }
+            }
+            else
+            {
+                Log(L"[FLAGDIAG] no local player resolved (BanLookup)\n");
+            }
+        }
+
+        // Object-list reachability, latched separately so it waits until the
+        // local craft has actually spawned (the one-shot above fires on the
+        // first render frame, often before objects exist). Isolates why the
+        // render loop produces no flag: does the world scan work, is the user
+        // object inside it, and what eligible craft/teams are present?
+        static void DumpMultiplayerFlagObjectScanOnce()
+        {
+            if (g_MultiplayerFlagObjScanLogged)
+                return;
+
+            void* userObject = nullptr;
+            int localTeam = 0;
+            const bool ctxOk = TryReadMultiplayerFlagRuntimeContext(userObject, localTeam);
+            if (!ctxOk || !userObject)
+                return; // craft not spawned yet; try again next frame
+
+            g_MultiplayerFlagObjScanLogged = true;
+
+            static void* s_scanObjects[kHeadlightObjectSlotCount];
+            const long totalObjects = static_cast<long>(
+                CollectLiveGameObjectsFromArena(s_scanObjects, kHeadlightObjectSlotCount));
+            Log(L"[FLAGDIAG] arena scan liveObjects=%ld userObject=0x%p localTeam=%d\n",
+                totalObjects, userObject, localTeam);
+
+            if (totalObjects <= 0)
+                return;
+
+            const long limit = totalObjects;
+            long userFoundIndex = -1;
+            long eligibleCount = 0;
+            char teams[96] = {};
+            size_t used = 0;
+            for (long i = 0; i < limit; ++i)
+            {
+                void* obj = s_scanObjects[i];
+                if (!obj)
+                    continue;
+                if (obj == userObject)
+                    userFoundIndex = i;
+                if (IsMultiplayerFlagEligibleObject(obj))
+                {
+                    ++eligibleCount;
+                    const int t = GetGameObjectTeamForLog(obj);
+                    if (used < sizeof(teams) - 10)
+                        used += static_cast<size_t>(std::snprintf(
+                            teams + used, sizeof(teams) - used, "%s%d%s",
+                            used ? "," : "", t, (obj == userObject) ? "(self)" : ""));
+                }
+            }
+            Log(L"[FLAGDIAG] userFoundIndex=%ld eligibleCount=%ld eligibleTeams=[%hs]\n",
+                userFoundIndex, eligibleCount, teams);
+        }
+
+        // Opt-in (default off): also draw the local player's own flag over
+        // their own craft. Legacy Submit and our renderer skip userObject, so
+        // solo hosts see nothing; this lets a single player verify rendering
+        // without a second human. [Display] MultiplayerFlagShowOwnCraft in
+        // openshim.ini, or the OPENSHIM_MP_FLAG_SHOW_OWN env override.
+        static bool ShouldShowOwnMultiplayerFlag()
+        {
+            static int s_cached = -1;
+            if (s_cached < 0)
+            {
+                bool enabled = false;
+                if (EnvFlagEnabled("OPENSHIM_MP_FLAG_SHOW_OWN") ||
+                    EnvFlagEnabled("BZR_MP_FLAG_SHOW_OWN"))
+                {
+                    enabled = true;
+                }
+                else
+                {
+                    bool iniValue = false;
+                    if (TryGetUserConfigBool(kUserConfigDisplaySection, "MultiplayerFlagShowOwnCraft", iniValue))
+                        enabled = iniValue;
+                }
+                s_cached = enabled ? 1 : 0;
+                Log(L"[FLAG] show-own-craft flag: %hs\n", enabled ? "enabled" : "disabled");
+            }
+            return s_cached != 0;
+        }
+
+        // The pending flag upload was historically driven only from the flag-
+        // selection UI callback (UpdateFlagSelectionUiLabel), so once the local
+        // player left that screen for the match, the deferred apply only fired
+        // if they happened back onto the flag UI. Observed live 2026-07-18: the
+        // match started ~9s before the apply landed, leaving it applied for
+        // only ~3s before the world tore down, so the renderer never saw a
+        // payload. Drive the apply from the in-match render tick (this runs
+        // every frame via Submit or the sim-tick fallback) so the flag lands
+        // the instant the local NetPlayer exists in the match, throttled so a
+        // persistent failure does not hammer the engine every frame.
+        static void MaybeDrivePendingFlagApplyInMatch()
+        {
+            if (!g_FlagApplyPending || !g_FlagPayloadReady)
+                return;
+
+            const ULONGLONG now = GetTickCount64();
+            if (g_MultiplayerFlagLastApplyAttemptTick != 0 &&
+                now - g_MultiplayerFlagLastApplyAttemptTick < kMultiplayerFlagApplyRetryMs)
+                return;
+            g_MultiplayerFlagLastApplyAttemptTick = now;
+
+            void* localPlayer = nullptr;
+            if (!TryGetLocalPlayerForFlags(localPlayer) || !localPlayer)
+                return; // match player not spawned yet; retry next tick
+
+            const bool applied = TryApplyCachedFlagPayload("match_tick");
+            if (!applied)
+                TryApplySelectedFlagThroughEngine("match_tick");
+
+            if (!g_FlagApplyPending && !g_MultiplayerFlagInMatchApplyLogged)
+            {
+                g_MultiplayerFlagInMatchApplyLogged = true;
+                // Re-arm the payload diagnostic so the next frame's one-shot
+                // dump reflects the post-apply NetPlayer state (flagBuf / slot
+                // 0x0D populated) instead of the stale pre-apply snapshot.
+                g_MultiplayerFlagDiagLogged = false;
+                Log(L"[FLAG] in-match tick applied pending flag payload player=0x%p\n",
+                    localPlayer);
+            }
+        }
+
         static void RenderMultiplayerFlags(void* /*camera*/)
         {
             if (!ShouldEnableMultiplayerFlagUi())
                 return;
+
+            MaybeDrivePendingFlagApplyInMatch();
+            DumpMultiplayerFlagDiagnosticsOnce();
+            DumpMultiplayerFlagObjectScanOnce();
 
             for (auto& pair : g_MultiplayerFlagRenderSets)
                 pair.second.usedBillboards = 0;
@@ -22014,6 +19229,7 @@ namespace BZROpenShim
             std::array<uint64_t, 16> teamHashes = {};
             std::array<std::array<uint8_t, kLegacyFlagPayloadBytes>, 16> teamPayloads = {};
             auto** playersByTeam = reinterpret_cast<void**>(kNetPlayerByTeamAddr);
+            bool anyTeamPayload = false;
             for (int team = 1; team < 16; ++team)
             {
                 void* player = playersByTeam[team];
@@ -22021,14 +19237,60 @@ namespace BZROpenShim
                     continue;
                 teamHashes[team] = HashMultiplayerFlagPayload(
                     teamPayloads[team].data(), teamPayloads[team].size());
+                anyTeamPayload = true;
+            }
+            if (anyTeamPayload && !g_MultiplayerFlagPayloadSeenLogged)
+            {
+                g_MultiplayerFlagPayloadSeenLogged = true;
+                char teams[64] = {};
+                size_t used = 0;
+                for (int team = 1; team < 16; ++team)
+                {
+                    if (teamHashes[team] == 0)
+                        continue;
+                    used += static_cast<size_t>(std::snprintf(
+                        teams + used, sizeof(teams) - used, "%s%d",
+                        used ? "," : "", team));
+                    if (used >= sizeof(teams) - 1)
+                        break;
+                }
+                Log(L"[FLAG] renderer sees replicated flag payload(s) team(s)=%hs\n", teams);
             }
 
-            void** beginPtr = nullptr;
-            void** endPtr = nullptr;
-            if (!TryGetGameObjectListRange(&beginPtr, &endPtr))
+            // If a flag was applied (pending cleared) but the copy loop still
+            // found nothing, the payload storage the renderer reads does not
+            // match where the apply wrote. Dump the raw NetPlayer state once so
+            // the failing path is unambiguous on the next test.
+            if (!anyTeamPayload && g_FlagPayloadReady && !g_FlagApplyPending &&
+                !g_MultiplayerFlagCopyFailLogged)
             {
-                HideUnusedMultiplayerFlagBillboards();
-                return;
+                g_MultiplayerFlagCopyFailLogged = true;
+                __try
+                {
+                    void* p1 = playersByTeam[1];
+                    auto getData = reinterpret_cast<FnNetPlayerGetData>(kNetPlayerGetDataAddr);
+                    void* slotVec = (getData && p1) ? getData(p1, kLegacyFlagDataSlot) : nullptr;
+                    long slotSize = -1;
+                    if (slotVec)
+                    {
+                        const auto* b = *reinterpret_cast<uint8_t* const*>(
+                            reinterpret_cast<uint8_t*>(slotVec) + 0x0);
+                        const auto* e = *reinterpret_cast<uint8_t* const*>(
+                            reinterpret_cast<uint8_t*>(slotVec) + 0x4);
+                        if (b && e && e >= b)
+                            slotSize = static_cast<long>(e - b);
+                    }
+                    const void* flagBuf = p1
+                        ? *reinterpret_cast<void* const*>(
+                              reinterpret_cast<uint8_t*>(p1) + kNetPlayerFlagBufferOffset)
+                        : nullptr;
+                    Log(L"[FLAGDIAG] applied but copy empty: byteam[1]=0x%p getData=0x%p slot0x0D=%ld flagBuf=0x%p\n",
+                        p1, slotVec, slotSize, flagBuf);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    Log(L"[FLAGDIAG] applied but copy empty: raw read faulted\n");
+                }
             }
 
             void* userObject = nullptr;
@@ -22036,6 +19298,27 @@ namespace BZROpenShim
             float userPosition[3] = {};
             if (!TryReadMultiplayerFlagRuntimeContext(userObject, localTeam) ||
                 !TryGetGameObjectWorldPosition(userObject, userPosition))
+            {
+                if (anyTeamPayload && !g_MultiplayerFlagContextMissingLogged)
+                {
+                    g_MultiplayerFlagContextMissingLogged = true;
+                    Log(L"[FLAG] renderer has payload(s) but no local user object/position yet\n");
+                }
+                HideUnusedMultiplayerFlagBillboards();
+                return;
+            }
+
+            // Skip the arena walk entirely on frames with nothing to draw.
+            if (!anyTeamPayload)
+            {
+                HideUnusedMultiplayerFlagBillboards();
+                return;
+            }
+
+            static void* s_renderObjects[kHeadlightObjectSlotCount];
+            const size_t liveObjectCount =
+                CollectLiveGameObjectsFromArena(s_renderObjects, kHeadlightObjectSlotCount);
+            if (liveObjectCount == 0)
             {
                 HideUnusedMultiplayerFlagBillboards();
                 return;
@@ -22053,12 +19336,13 @@ namespace BZROpenShim
                 return;
             }
 
-            const size_t totalObjects = static_cast<size_t>(endPtr - beginPtr);
-            const size_t objectLimit = (std::min)(totalObjects, kMultiplayerFlagMaxObjects);
-            for (size_t i = 0; i < objectLimit; ++i)
+            for (size_t i = 0; i < liveObjectCount; ++i)
             {
-                void* gameObject = beginPtr[i];
-                if (!gameObject || gameObject == userObject || !IsMultiplayerFlagEligibleObject(gameObject))
+                void* gameObject = s_renderObjects[i];
+                const bool isOwnCraft = (gameObject == userObject);
+                if (!gameObject ||
+                    (isOwnCraft && !ShouldShowOwnMultiplayerFlag()) ||
+                    !IsMultiplayerFlagEligibleObject(gameObject))
                     continue;
                 const int team = GetGameObjectTeamForLog(gameObject);
                 if (team <= 0 || team >= 16 || teamHashes[team] == 0)
@@ -22139,9 +19423,36 @@ namespace BZROpenShim
             void* /*unusedEdx*/,
             void* camera)
         {
+            g_MultiplayerFlagSubmitLastTick = GetTickCount64();
+            if (!g_MultiplayerFlagSubmitObservedLogged)
+            {
+                g_MultiplayerFlagSubmitObservedLogged = true;
+                Log(L"[FLAG] FlagDisplay::Submit dispatch observed; renderer driven by engine submit\n");
+            }
             if (g_BzrFn_FlagDisplaySubmitOriginal)
                 g_BzrFn_FlagDisplaySubmitOriginal(flagDisplay, camera);
             RenderMultiplayerFlags(camera);
+        }
+
+        // Redux keeps the FlagDisplay vtable, but whether the surviving
+        // GameFeature loop still dispatches Submit in live multiplayer has
+        // never been observed in a session log. When Submit stays silent,
+        // drive the same renderer from the per-sim-tick hook instead so the
+        // feature does not depend on the unproven dispatch path.
+        static void MaybeDriveMultiplayerFlagRenderFallback()
+        {
+            if (!ShouldEnableMultiplayerFlagUi())
+                return;
+            const ULONGLONG now = GetTickCount64();
+            const ULONGLONG lastSubmit = g_MultiplayerFlagSubmitLastTick;
+            if (lastSubmit != 0 && now - lastSubmit < kMultiplayerFlagSubmitStaleMs)
+                return;
+            if (!g_MultiplayerFlagTickFallbackLogged)
+            {
+                g_MultiplayerFlagTickFallbackLogged = true;
+                Log(L"[FLAG] FlagDisplay::Submit not dispatching; driving Ogre flag renderer from sim tick\n");
+            }
+            RenderMultiplayerFlags(nullptr);
         }
 
         static void InstallMultiplayerFlagRenderHookIfPossible()
@@ -22190,6 +19501,168 @@ namespace BZROpenShim
                     Log(L"[FLAG] Submit hook install fault code=0x%08X\n",
                         static_cast<uint32_t>(GetExceptionCode()));
                     g_MultiplayerFlagRenderHookFailureLogged = true;
+                }
+            }
+        }
+
+        // ---- Multiplayer create-screen "Map Layout" preview overflow fix ----
+        //
+        // cUI_Multiplayer_Create (ctor 0x00796880) builds the preview as a
+        // 200x200 UI-unit image widget ("MapPreview", image ctor 0x007D1CC0),
+        // but the first selection update rewrites the widget's design size to
+        // the wire texture's pixel size (500x500), so the quad overflows the
+        // "Map Layout" frame at every resolution. The quad geometry is built
+        // only once (later texture changes just swap the Ogre material), so
+        // the fix clamps the design size back to 200x200, re-runs the
+        // engine's own layout pass, and rebuilds the quad using the same
+        // beginUpdate/rebuild/end sequence the video-texture path uses
+        // (0x7D3C92..0x7D3CEA). Driven from the screen's per-frame update
+        // virtual (vftable 0x0089EBE0 slot 13, live-verified as the only
+        // per-frame slot), so only this screen ever dispatches the hook.
+        constexpr uintptr_t kMultiCreateUpdateVtblSlotAddr = 0x0089EC14;
+        constexpr uintptr_t kMultiCreateUpdateFnAddr = 0x0079CDA0;
+        constexpr uintptr_t kMultiMapComponentPtrAddr = 0x00945574;
+        constexpr uintptr_t kUiImageWidgetVftableAddr = 0x008A0B94;
+        constexpr uintptr_t kUiWidgetLayoutFnAddr = 0x007D14B0;
+        constexpr uintptr_t kUiImageRebuildGeometryFnAddr = 0x007D2E20;
+        constexpr float kMultiMapPreviewDesignSize = 200.0f;
+
+        using FnScreenUpdate = void(__thiscall*)(void*);
+        using FnWidgetLayout = void(__thiscall*)(void*, float, float, float, float);
+        using FnImageRebuildGeometry = void(__thiscall*)(void*);
+        using FnManualObjectBeginUpdate = void(__thiscall*)(void*, uint32_t);
+        using FnManualObjectEnd = void(__thiscall*)(void*);
+
+        static FnScreenUpdate g_BzrFn_MultiCreateUpdateOriginal = nullptr;
+        static bool g_MultiCreatePreviewHookInstalled = false;
+        static bool g_MultiCreatePreviewHookFailureLogged = false;
+        static bool g_MultiCreatePreviewClampLogged = false;
+
+        static bool ShouldEnableMapPreviewFix()
+        {
+            static int s_cached = -1;
+            if (s_cached < 0)
+            {
+                s_cached =
+                    (EnvFlagEnabled("OPENSHIM_DISABLE_MAP_PREVIEW_FIX") ||
+                     EnvFlagEnabled("BZR_DISABLE_MAP_PREVIEW_FIX")) ? 0 : 1;
+            }
+            return s_cached != 0;
+        }
+
+        static void ClampMultiCreateMapPreviewIfNeeded()
+        {
+            __try
+            {
+                uint8_t* component = *reinterpret_cast<uint8_t**>(kMultiMapComponentPtrAddr);
+                if (!component)
+                    return;
+                uint8_t* widget = *reinterpret_cast<uint8_t**>(component + 0x1C);
+                if (!widget ||
+                    *reinterpret_cast<uintptr_t*>(widget) != kUiImageWidgetVftableAddr)
+                    return;
+
+                float* designW = reinterpret_cast<float*>(widget + 0xF4);
+                float* designH = reinterpret_cast<float*>(widget + 0xF8);
+                if (*designW == kMultiMapPreviewDesignSize &&
+                    *designH == kMultiMapPreviewDesignSize)
+                    return;
+
+                if (!g_MultiCreatePreviewClampLogged)
+                {
+                    g_MultiCreatePreviewClampLogged = true;
+                    Log(L"[MAPPREVIEW] clamping oversized map preview design %.0fx%.0f -> %.0fx%.0f\n",
+                        static_cast<double>(*designW),
+                        static_cast<double>(*designH),
+                        static_cast<double>(kMultiMapPreviewDesignSize),
+                        static_cast<double>(kMultiMapPreviewDesignSize));
+                }
+
+                *designW = kMultiMapPreviewDesignSize;
+                *designH = kMultiMapPreviewDesignSize;
+                const float designX = *reinterpret_cast<float*>(widget + 0xEC);
+                const float designY = *reinterpret_cast<float*>(widget + 0xF0);
+                reinterpret_cast<FnWidgetLayout>(kUiWidgetLayoutFnAddr)(
+                    widget,
+                    designX,
+                    designY,
+                    kMultiMapPreviewDesignSize,
+                    kMultiMapPreviewDesignSize);
+
+                void* manualObject = *reinterpret_cast<void**>(widget + 0x120);
+                if (manualObject)
+                {
+                    uintptr_t* vtbl = *reinterpret_cast<uintptr_t**>(manualObject);
+                    reinterpret_cast<FnManualObjectBeginUpdate>(vtbl[0x118 / 4])(manualObject, 0);
+                    reinterpret_cast<FnImageRebuildGeometry>(kUiImageRebuildGeometryFnAddr)(widget);
+                    reinterpret_cast<FnManualObjectEnd>(vtbl[0x16C / 4])(manualObject);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                if (!g_MultiCreatePreviewHookFailureLogged)
+                {
+                    g_MultiCreatePreviewHookFailureLogged = true;
+                    Log(L"[MAPPREVIEW] clamp faulted code=0x%08X; leaving preview untouched\n",
+                        static_cast<uint32_t>(GetExceptionCode()));
+                }
+            }
+        }
+
+        static void __fastcall MultiCreateUpdateHook(void* screen, void* /*unusedEdx*/)
+        {
+            if (g_BzrFn_MultiCreateUpdateOriginal)
+                g_BzrFn_MultiCreateUpdateOriginal(screen);
+            if (ShouldEnableMapPreviewFix())
+                ClampMultiCreateMapPreviewIfNeeded();
+        }
+
+        static void InstallMultiCreatePreviewFixIfPossible()
+        {
+            if (!ShouldEnableMapPreviewFix() || g_MultiCreatePreviewHookInstalled)
+                return;
+
+            __try
+            {
+                void* current = *reinterpret_cast<void**>(kMultiCreateUpdateVtblSlotAddr);
+                if (current == reinterpret_cast<void*>(MultiCreateUpdateHook))
+                {
+                    g_MultiCreatePreviewHookInstalled = true;
+                    return;
+                }
+                if (current != reinterpret_cast<void*>(kMultiCreateUpdateFnAddr))
+                {
+                    if (!g_MultiCreatePreviewHookFailureLogged)
+                    {
+                        Log(L"[MAPPREVIEW] update hook skipped: slot=0x%08X current=0x%08X expected=0x%08X\n",
+                            static_cast<uint32_t>(kMultiCreateUpdateVtblSlotAddr),
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
+                            static_cast<uint32_t>(kMultiCreateUpdateFnAddr));
+                        g_MultiCreatePreviewHookFailureLogged = true;
+                    }
+                    return;
+                }
+
+                g_BzrFn_MultiCreateUpdateOriginal =
+                    reinterpret_cast<FnScreenUpdate>(current);
+                if (!WritePointerValue(
+                        kMultiCreateUpdateVtblSlotAddr,
+                        reinterpret_cast<void*>(MultiCreateUpdateHook)))
+                {
+                    return;
+                }
+                g_MultiCreatePreviewHookInstalled = true;
+                Log(L"[MAPPREVIEW] Installed multi-create map preview fix slot=0x%08X original=0x%08X\n",
+                    static_cast<uint32_t>(kMultiCreateUpdateVtblSlotAddr),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)));
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                if (!g_MultiCreatePreviewHookFailureLogged)
+                {
+                    Log(L"[MAPPREVIEW] update hook install fault code=0x%08X\n",
+                        static_cast<uint32_t>(GetExceptionCode()));
+                    g_MultiCreatePreviewHookFailureLogged = true;
                 }
             }
         }
@@ -23290,47 +20763,230 @@ namespace BZROpenShim
     // ---------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------
-    void* __fastcall OptionsInputPopulateUiHook(void* thisPtr, void* /*edx*/)
+
+    bool EnvFlagEnabled(const char* name)
     {
-        void* screen = thisPtr;
+        if (!name || !*name)
+            return false;
 
-        if (g_BzrFn_OptionsInputCtor)
-            screen = g_BzrFn_OptionsInputCtor(thisPtr);
+        char value[16] = {};
+        const DWORD len = GetEnvironmentVariableA(name, value, static_cast<DWORD>(sizeof(value)));
+        if (len == 0 || len >= sizeof(value))
+            return false;
 
-        OnOptionsInputPopulateUiScaffold(screen);
-        return screen;
+        return value[0] != '0' && value[0] != '\0';
     }
 
-    bool __fastcall OptionsInputKeyReleasedHook(void* thisPtr,
-                                                void* /*edx*/,
-                                                uint32_t key,
-                                                uint32_t keyCode)
+    std::filesystem::path GetUserConfigPath()
     {
-        // A stock ESC backs out of the settings page without our Back button;
-        // hand the host screen back to the binding UI before the stock handler
-        // navigates away.
-        if (g_ShimSettingsPageActive && key == VK_ESCAPE)
-            DeactivateShimSettingsPage();
+        const auto dir = GetConfigModuleDirectory();
+        if (dir.empty())
+            return {};
+        return dir / kUserConfigFileName;
+    }
 
-        if (HandleCapturedInputBindingKey(thisPtr, key, keyCode))
+    // Tri-state string read: returns false when the key is absent (or the
+    // file/section is missing), so callers can distinguish "no opinion"
+    // (fall through to the next source) from an explicit value.
+    bool TryGetUserConfigString(const char* section, const char* key, std::string& out)
+    {
+        const auto path = GetUserConfigPath();
+        if (path.empty())
+            return false;
+
+        // A sentinel default reliably detects a missing key: a present key
+        // (even blank) never yields the sentinel byte.
+        constexpr char kUnsetSentinel[] = "\x01__openshim_unset__";
+        char buf[128] = {};
+        GetPrivateProfileStringA(section, key, kUnsetSentinel, buf,
+            static_cast<DWORD>(sizeof(buf)), path.string().c_str());
+        if (buf[0] == '\0' || std::strcmp(buf, kUnsetSentinel) == 0)
+            return false;
+
+        char* trimmed = TrimAsciiInPlace(buf);
+        if (*trimmed == '\0')
+            return false;
+        out.assign(trimmed);
+        return true;
+    }
+
+    // Tri-state boolean read over TryGetUserConfigString: returns false when
+    // the key is absent OR present-but-unparseable (both mean "no opinion").
+    // Accepts 1/0, true/false, on/off, yes/no, enabled/disabled (any case).
+    bool TryGetUserConfigBool(const char* section, const char* key, bool& out)
+    {
+        std::string value;
+        if (!TryGetUserConfigString(section, key, value))
+            return false;
+        for (char& c : value)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (value == "1" || value == "true" || value == "on" ||
+            value == "yes" || value == "enabled")
+        {
+            out = true;
             return true;
-
-        if (g_BzrFn_OptionsInputKeyReleased)
-            return g_BzrFn_OptionsInputKeyReleased(thisPtr, key, keyCode);
-
+        }
+        if (value == "0" || value == "false" || value == "off" ||
+            value == "no" || value == "disabled")
+        {
+            out = false;
+            return true;
+        }
         return false;
     }
 
-    void* __fastcall OptionsParentCtorHook(void* thisPtr, void* /*edx*/)
+    bool InstallInlineDetour32(InlineDetour32& detour,
+                                      uintptr_t target,
+                                      void* hook,
+                                      size_t patchLen,
+                                      const uint8_t* expectedBytes,
+                                      size_t expectedLen)
     {
-        void* screen = thisPtr;
+        if (!target || !hook || patchLen < 5 || patchLen > detour.original.size())
+            return false;
 
-        if (g_BzrFn_OptionsParentCtor)
-            screen = g_BzrFn_OptionsParentCtor(thisPtr);
+        if (detour.trampoline)
+            return true;
 
-        OnOptionsParentCtorScaffold(screen);
-        return screen;
+        auto* targetBytes = reinterpret_cast<uint8_t*>(target);
+        if (expectedBytes && expectedLen > 0)
+        {
+            if (expectedLen > patchLen || memcmp(targetBytes, expectedBytes, expectedLen) != 0)
+                return false;
+        }
+
+        auto* trampolineBytes = reinterpret_cast<uint8_t*>(
+            VirtualAlloc(nullptr, patchLen + 5, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+        if (!trampolineBytes)
+            return false;
+
+        memcpy(detour.original.data(), targetBytes, patchLen);
+        memcpy(trampolineBytes, targetBytes, patchLen);
+
+        const uintptr_t resumeAddr = target + patchLen;
+        trampolineBytes[patchLen] = 0xE9;
+        const int32_t trampolineRel =
+            static_cast<int32_t>(resumeAddr) -
+            static_cast<int32_t>(reinterpret_cast<uintptr_t>(trampolineBytes + patchLen) + 5);
+        memcpy(trampolineBytes + patchLen + 1, &trampolineRel, sizeof(trampolineRel));
+
+        DWORD oldProtect = 0;
+        if (!VirtualProtect(targetBytes, patchLen, PAGE_EXECUTE_READWRITE, &oldProtect))
+        {
+            VirtualFree(trampolineBytes, 0, MEM_RELEASE);
+            return false;
+        }
+
+        targetBytes[0] = 0xE9;
+        const int32_t hookRel =
+            static_cast<int32_t>(reinterpret_cast<uintptr_t>(hook)) -
+            static_cast<int32_t>(target + 5);
+        memcpy(targetBytes + 1, &hookRel, sizeof(hookRel));
+        for (size_t i = 5; i < patchLen; ++i)
+            targetBytes[i] = 0x90;
+
+        FlushInstructionCache(GetCurrentProcess(), targetBytes, patchLen);
+
+        DWORD restoreProtect = 0;
+        VirtualProtect(targetBytes, patchLen, oldProtect, &restoreProtect);
+
+        detour.target = target;
+        detour.hook = hook;
+        detour.trampoline = trampolineBytes;
+        detour.patchLen = patchLen;
+        return true;
     }
+
+    bool ExpectedBytesMatchAt(uintptr_t address,
+                                     const uint8_t* expectedBytes,
+                                     size_t expectedLen)
+    {
+        if (!address || !expectedBytes || expectedLen == 0 || expectedLen > kInlineDetourMaxPatchLen)
+            return false;
+
+        uint8_t current[kInlineDetourMaxPatchLen] = {};
+        SIZE_T read = 0;
+        if (!ReadProcessMemory(GetCurrentProcess(),
+                               reinterpret_cast<const void*>(address),
+                               current,
+                               expectedLen,
+                               &read) ||
+            read != expectedLen)
+        {
+            return false;
+        }
+
+        return memcmp(current, expectedBytes, expectedLen) == 0;
+    }
+
+    std::filesystem::path GetMainModuleDirectory()
+    {
+        char path[MAX_PATH] = {};
+        const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+        if (length == 0 || length >= MAX_PATH)
+            return {};
+
+        return std::filesystem::path(path).parent_path();
+    }
+
+    std::string TrimAsciiCopy(const std::string& value)
+    {
+        size_t start = 0;
+        while (start < value.size() &&
+               std::isspace(static_cast<unsigned char>(value[start])))
+        {
+            ++start;
+        }
+
+        size_t end = value.size();
+        while (end > start &&
+               std::isspace(static_cast<unsigned char>(value[end - 1])))
+        {
+            --end;
+        }
+
+        return value.substr(start, end - start);
+    }
+
+    // Re-apply the feature behind a settings row from the freshly written
+    // ini. Latched initializers get their latch cleared and re-run, which
+    // deliberately preserves the documented precedence chain (legacy cfg and
+    // env overrides still win over the ini baseline).
+    void ApplyShimSettingLive(ShimSettingApplyGroup group)
+    {
+        switch (group)
+        {
+        case ShimSettingApplyGroup::GlobalImprovement:
+            InitializeGlobalImprovementConfig();
+            break;
+        case ShimSettingApplyGroup::UnderAttackAlert:
+            g_UnderAttackAlertConfigInitialized = false;
+            InitializeUnderAttackAlertConfig();
+            break;
+        case ShimSettingApplyGroup::TargetReticle:
+            g_TargetReticlePopupConfigInitialized = false;
+            InitializeTargetReticlePopupConfig();
+            break;
+        case ShimSettingApplyGroup::JetFlames:
+            g_JetFlamesConfigInitialized = false;
+            InitializeJetFlamesConfig();
+            break;
+        case ShimSettingApplyGroup::UnitVo:
+            g_UnitVoConfigInitialized = false;
+            InitializeUnitVoConfig();
+            break;
+        case ShimSettingApplyGroup::GlobalTurbo:
+            g_GlobalTurboConfigInitialized = false;
+            InitializeGlobalTurboConfig();
+            break;
+        case ShimSettingApplyGroup::Headlights:
+            RevertHeadlightsToBaseline();
+            break;
+        case ShimSettingApplyGroup::RestartRequired:
+            break;
+        }
+    }
+
 
     void ResolveBzrHooks(bool isSteam)
     {
@@ -23360,16 +21016,7 @@ namespace BZROpenShim
         g_BzrFn_RangeResultsGetNext = nullptr;
         g_BzrFn_OverlayCtor = nullptr;
         g_BzrFn_UiSetActive = nullptr;
-        g_BzrFn_OptionsInputCtor = g_OptionsInputPopulateUiDetour.trampoline
-            ? reinterpret_cast<FnOptionsInputCtor>(g_OptionsInputPopulateUiDetour.trampoline)
-            : nullptr;
-        g_BzrFn_OptionsInputKeyReleased = g_OptionsInputKeyReleasedDetour.trampoline
-            ? reinterpret_cast<FnOptionsInputKeyReleased>(g_OptionsInputKeyReleasedDetour.trampoline)
-            : nullptr;
-        g_BzrFn_OptionsParentCtor = g_OptionsParentCtorDetour.trampoline
-            ? reinterpret_cast<FnOptionsInputCtor>(g_OptionsParentCtorDetour.trampoline)
-            : nullptr;
-        g_OptionsParentHookInstalled = (g_BzrFn_OptionsParentCtor != nullptr);
+        ResetOptionsUiResolvedState();
         g_BzrFn_KeyConfigSetKey = nullptr;
         g_BzrFn_WriteInputMapKey = nullptr;
         g_BzrFn_MapKeyNameFromCode = nullptr;
@@ -23411,25 +21058,11 @@ namespace BZROpenShim
         g_BzrBuildMenuRoot = nullptr;
         g_BzrFn_GetLocalPlayerNetId = nullptr;
         g_BzrFn_NetPlayerSetData = nullptr;
-        g_InputBindingUiScaffoldInitialized = false;
-        g_InputBindingUiScaffoldLogged = false;
-        g_InputBindingUiPopulateHookInstalled =
-            (g_OptionsInputPopulateUiDetour.trampoline != nullptr);
-        g_InputBindingUiKeyReleasedHookInstalled =
-            (g_OptionsInputKeyReleasedDetour.trampoline != nullptr);
-        g_InputBindingUiPopulateHookMismatchLogged = false;
         g_CareerStatsMpHookInstalled = (g_RecordDeathDetour.trampoline != nullptr);
         g_CareerStatsMpHookInstallAttempted = g_CareerStatsMpHookInstalled;
         g_CareerStatsMpHookMismatchLogged = false;
         g_CareerStatsMpHookFirstAttemptTick = 0;
         g_CareerStatsMpHookLastAttemptTick = 0;
-        g_InputBindingInstallDirectory.clear();
-        g_InputBindingInventory = {};
-        g_InputBindingCommandBlocks.clear();
-        g_GameKeyBindingActions.clear();
-        g_InputBindingUiRows.clear();
-        g_LastOptionsInputScreen = nullptr;
-        ResetInputBindingUiVisuals();
         g_JumpSnipeProbeLogState = {};
         g_ProducerBuildMenuConfig = {};
         g_AiTuningCache = {};
@@ -23505,6 +21138,15 @@ namespace BZROpenShim
 		g_BriefingScrollFixInstalled = false;
 		g_MultiRenderCountClampLogBudget = 8;
 		g_MagnetZeroRangeLogBudget = 8;
+		g_QuakeReplayFadeInstalled = false;
+		g_QuakeReplayArmed = 0;
+		g_BzrFn_EarthQuakeSimulateOriginal = g_EarthQuakeSimulateDetour.trampoline
+			? reinterpret_cast<FnEarthQuakeSimulate>(g_EarthQuakeSimulateDetour.trampoline)
+			: nullptr;
+		g_TargetCamSatelliteFixInstalled = false;
+		g_TargetCamSatelliteLogBudget = 8;
+		g_CinematicSatelliteZoomFixInstalled = false;
+		g_CinematicSatelliteZoomLogBudget = 8;
 		g_SprayBuildingSimulateHookInstalled = false;
 		g_TugCargoPostLoadFixInstalled = false;
 		g_TugCargoPostLoadLogBudget = 16;
@@ -23672,12 +21314,35 @@ namespace BZROpenShim
 		g_ApcAlliedTargetDeployFixEnabled =
 			!(EnvFlagEnabled("OPENSHIM_DISABLE_APC_DEPLOY_FIX") ||
 			  EnvFlagEnabled("BZR_DISABLE_APC_DEPLOY_FIX"));
+		g_QuakeReplayFadeEnabled =
+			!(EnvFlagEnabled("OPENSHIM_DISABLE_QUAKE_FADE") ||
+			  EnvFlagEnabled("BZR_DISABLE_QUAKE_FADE"));
+		g_TargetCamSatelliteFixEnabled =
+			!(EnvFlagEnabled("OPENSHIM_DISABLE_TARGETCAM_FIX") ||
+			  EnvFlagEnabled("BZR_DISABLE_TARGETCAM_FIX"));
+		g_CinematicSatelliteZoomFixEnabled =
+			!(EnvFlagEnabled("OPENSHIM_DISABLE_CINECAM_FIX") ||
+			  EnvFlagEnabled("BZR_DISABLE_CINECAM_FIX"));
+		{
+			long quakeFadeSeconds = kQuakeReplayFadeSecondsDefault;
+			if (TryGetEnvLong("OPENSHIM_QUAKE_FADE_SECONDS", quakeFadeSeconds))
+			{
+				if (quakeFadeSeconds < kQuakeReplayFadeSecondsMin)
+					quakeFadeSeconds = kQuakeReplayFadeSecondsMin;
+				if (quakeFadeSeconds > kQuakeReplayFadeSecondsMax)
+					quakeFadeSeconds = kQuakeReplayFadeSecondsMax;
+			}
+			g_QuakeReplayFadeSeconds = quakeFadeSeconds;
+		}
 		InstallProducerScriptPredicateHooksIfPossible();
 		InstallBriefingScrollFixIfPossible();
 		InstallMultiRenderCountClampIfPossible();
 		InstallSplinterUndeadFixIfPossible();
 		InstallTugCargoPostLoadFixIfPossible();
 		InstallApcAlliedTargetDeployFixIfPossible();
+		InstallQuakeReplayFadeIfPossible();
+		InstallTargetCamSatelliteFixIfPossible();
+		InstallCinematicSatelliteZoomFixIfPossible();
 
         if (g_IsSteamExe)
         {
@@ -23920,14 +21585,14 @@ namespace BZROpenShim
         {
             LogChunkDiagnostic("chunkspawn", L"[CHUNKSPAWN] Steam safety gate active; creator hooks will install after settled-byte verification and delay\n");
         }
-        Log(L"[SATVIS] Satellite visibility trace: %hs budget=%ld interval=%lums objectLimit=%u viewRecord=0x%08X objectList=0x%08X userObject=0x%08X\n",
+        Log(L"[SATVIS] Satellite visibility trace: %hs budget=%ld interval=%lums objectLimit=%u viewRecord=0x%08X userObject=0x%08X arena=0x%08X\n",
             g_TraceSatelliteVisibility ? "enabled" : "disabled",
             g_SatelliteVisibilityLogBudget,
             static_cast<unsigned long>(g_SatelliteVisibilityLogIntervalMs),
             g_SatelliteVisibilityObjectLimit,
             static_cast<uint32_t>(GetMainModuleBase() + kViewRecordRva),
-            static_cast<uint32_t>(GetMainModuleBase() + kGameObjectObjectListRva),
-            static_cast<uint32_t>(GetMainModuleBase() + kGameObjectUserObjectRva));
+            static_cast<uint32_t>(GetMainModuleBase() + kHeadlightUserObjectRva),
+            static_cast<uint32_t>(GetMainModuleBase() + kHeadlightObjectArenaRva));
         Log(L"[MAGNET] Zero/non-finite range guard: %hs hook=%hs\n",
             g_MagnetZeroRangeGuardEnabled ? "enabled" : "disabled",
             g_MagnetMineSimulateHookInstalled ? "installed" : "pending");
@@ -23945,6 +21610,16 @@ namespace BZROpenShim
             g_MultiRenderCountClampEnabled ? "enabled" : "disabled",
             g_MultiRenderCountClampInstalled ? "installed" : "pending",
             kMultiRenderCountMax);
+        Log(L"[QUAKEFADE] Post-load quake replay fade: %hs hook=%hs fadeSeconds=%ld\n",
+            g_QuakeReplayFadeEnabled ? "enabled" : "disabled",
+            g_QuakeReplayFadeInstalled ? "installed" : "pending",
+            g_QuakeReplayFadeSeconds);
+        Log(L"[TARGETCAM] Satellite/F9 stale target camera fix: %hs hook=%hs\n",
+            g_TargetCamSatelliteFixEnabled ? "enabled" : "disabled",
+            g_TargetCamSatelliteFixInstalled ? "installed" : "pending");
+        Log(L"[CINECAM] Cinematic-from-satellite zoom fix: %hs hook=%hs\n",
+            g_CinematicSatelliteZoomFixEnabled ? "enabled" : "disabled",
+            g_CinematicSatelliteZoomFixInstalled ? "installed" : "pending");
         Log(L"[TURRET] Aim pitch multiplier: %.3f%s\n",
             static_cast<double>(g_TurretAimPitchMultiplier),
             g_TurretAimPitchMultiplier >= 0.999f ? " (full range)" : "");
@@ -23966,10 +21641,7 @@ namespace BZROpenShim
         InitializeUnitVoConfig();
         EnsureInputBindingPopulateHookScaffold();
         EnsureOptionsParentCtorHookScaffold();
-        Log(L"[SETTINGSUI] Settings UI: %hs\n",
-            ShouldEnableShimSettingsUi()
-                ? (g_OptionsParentHookInstalled ? "enabled" : "enabled (hook pending)")
-                : "disabled");
+        LogShimSettingsUiStatus();
         Log(L"[MAPTRACE] Map refresh trace: %hs\n",
             (EnvFlagEnabled("OPENSHIM_TRACE_MAP_REFRESH") ||
              EnvFlagEnabled("OPENSHIM_TRACE_STEAM_MAP_REFRESH")) ? "enabled" : "disabled");
@@ -23998,6 +21670,7 @@ namespace BZROpenShim
         InstallEmissionLightFixIfPossible();
         InstallSceneTeardownForgetHooksIfPossible();
         InstallMultiplayerFlagRenderHookIfPossible();
+        InstallMultiCreatePreviewFixIfPossible();
         InstallShieldTowerTeamFilterHookIfPossible();
         InstallMineTeamFilterHooksIfPossible();
         InstallProducerScriptPredicateHooksIfPossible();
@@ -24005,16 +21678,15 @@ namespace BZROpenShim
 		InstallSplinterUndeadFixIfPossible();
 		InstallTugCargoPostLoadFixIfPossible();
 		InstallApcAlliedTargetDeployFixIfPossible();
+		InstallQuakeReplayFadeIfPossible();
+		InstallTargetCamSatelliteFixIfPossible();
+		InstallCinematicSatelliteZoomFixIfPossible();
         InstallAiTuningHooksIfPossible();
         InstallConstructorRemoteBuildFixIfPossible();
         EnsureInputBindingPopulateHookScaffold();
         EnsureOptionsParentCtorHookScaffold();
     }
 
-    bool AreInputBindingUiHooksInstalled()
-    {
-        return g_InputBindingUiPopulateHookInstalled && g_InputBindingUiKeyReleasedHookInstalled;
-    }
 
     bool AreRequiredDeferredRuntimeHooksInstalled()
     {
@@ -24518,7 +22190,8 @@ namespace BZROpenShim
                 return false;
             }
 
-            if (hiddenIt == g_HudSpriteHiddenEntries.end())
+            const bool firstHide = hiddenIt == g_HudSpriteHiddenEntries.end();
+            if (firstHide)
             {
                 g_HudSpriteOriginalEntries.emplace(spriteId, current);
                 g_HudSpriteHiddenEntries[spriteId] = current;
@@ -24535,7 +22208,10 @@ namespace BZROpenShim
                 return false;
             }
 
-            Log(L"[HUD] Sprite hidden %hs id=%d\n", name ? name : "<null>", spriteId);
+            // The hide is re-enforced every HUD refresh tick; only log the
+            // transition so steady state does not spam once per second.
+            if (firstHide)
+                Log(L"[HUD] Sprite hidden %hs id=%d\n", name ? name : "<null>", spriteId);
             return true;
         }
 
@@ -26942,6 +24618,10 @@ namespace BZROpenShim
         // (e.g. the crouch patch) if a network game becomes active while it was
         // enabled by scripted content.
         RefreshRegisteredMpGatedFeatures();
+        // Multiplayer vehicle flags: render from the sim tick whenever the
+        // engine is not dispatching the hooked FlagDisplay::Submit slot.
+        MaybeDriveMultiplayerFlagRenderFallback();
+        OgreShaderCacheTick();
         if (!g_CareerStatsMpHookInstalled)
             InstallCareerStatsMpHookIfPossible();
         if (!g_ChunkEffectCreateHooksInstalled)
@@ -27049,6 +24729,7 @@ namespace BZROpenShim
             g_BanLabelHost = nullptr;
             g_FlagButtonHost = nullptr;
             g_FlagLabelHost = nullptr;
+            g_FlagPreviewHost = nullptr;
         }
 
         static void ResetClientUiCache()
@@ -27057,6 +24738,7 @@ namespace BZROpenShim
             g_BanLabelClient = nullptr;
             g_FlagButtonClient = nullptr;
             g_FlagLabelClient = nullptr;
+            g_FlagPreviewClient = nullptr;
         }
 
         static void EnsureUiCacheMatchesParent(void* parent, bool host)
@@ -27075,12 +24757,53 @@ namespace BZROpenShim
                 ResetClientUiCache();
         }
 
+        // Strongest liveness proof available without a per-screen dtor hook: a
+        // cached child widget is only trusted if the live parent's child vector
+        // (+0x12C begin / +0x130 end, same layout the stock-button finder walks)
+        // still contains it. A screen rebuilt at a recycled heap address fills a
+        // fresh vector, so a stale cached pointer fails this check and the
+        // widget is recreated instead of being updated through freed memory.
+        static bool IsWidgetLiveChildOfParent(void* parent, void* widget)
+        {
+            if (!parent || !widget)
+                return false;
+
+            __try
+            {
+                auto* const parentBytes = reinterpret_cast<uint8_t*>(parent);
+                void** const begin = *reinterpret_cast<void***>(parentBytes + 0x12C);
+                void** const end = *reinterpret_cast<void***>(parentBytes + 0x130);
+                if (!begin || !end || begin > end || (end - begin) > 1024)
+                    return false;
+                for (void** it = begin; it != end; ++it)
+                {
+                    if (*it == widget)
+                        return true;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+            return false;
+        }
+
         static void UpdateFlagSelectionUiLabel(void* label)
         {
             if (g_FlagApplyPending)
             {
-                if (!TryApplyCachedFlagPayload("ui_update"))
-                    TryApplySelectedFlagThroughEngine("ui_update");
+                // Only attempt the upload once a local NetPlayer exists;
+                // pre-session lobby attempts always fail and would replace
+                // the status text with a failure message.
+                void* localPlayer = nullptr;
+                if (TryGetLocalPlayerForFlags(localPlayer))
+                {
+                    if (!TryApplyCachedFlagPayload("ui_update"))
+                        TryApplySelectedFlagThroughEngine("ui_update");
+                }
+                else
+                {
+                    g_SelectedFlagStatus = "Applies at match start.";
+                }
             }
 
             if (!label || !g_BzrFn_SetTooltip)
@@ -27090,12 +24813,198 @@ namespace BZROpenShim
             g_BzrFn_SetTooltip(label, summary.c_str());
         }
 
+        static std::filesystem::path GetFlagPreviewUiDirectory()
+        {
+            return GetGeneratedFlagsDirectoryPath();
+        }
+
+        // Register the generated-flags directory as a FileSystem resource
+        // location in the UI texture group once, so SetTextureOff can resolve
+        // the preview PNG by bare name from a mod-owned folder instead of the
+        // core UI tree. Best-effort: if Ogre is not ready the preview simply
+        // will not show (cosmetic), and the write path stays out of core.
+        static void EnsureFlagPreviewResourceLocationRegistered()
+        {
+            static bool s_Registered = false;
+            if (s_Registered)
+                return;
+
+            auto getResourceGroupManager = ResolveOgreProc<FnOgreGetResourceGroupManager>(
+                "?getSingletonPtr@ResourceGroupManager@Ogre@@SAPAV12@XZ");
+            auto addResourceLocation = ResolveOgreProc<FnOgreAddResourceLocation>(
+                "?addResourceLocation@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@00_N1@Z");
+            if (!getResourceGroupManager || !addResourceLocation)
+                return;
+
+            const std::string dir = GetFlagPreviewUiDirectory().string();
+            const std::string type = "FileSystem";
+            const std::string group = kFlagPreviewResourceGroup;
+            std::error_code ec;
+            std::filesystem::create_directories(dir, ec);
+
+            try
+            {
+                void* manager = getResourceGroupManager();
+                if (!manager)
+                    return;
+                addResourceLocation(manager, dir, type, group, false, false);
+            }
+            catch (...)
+            {
+                return;
+            }
+
+            s_Registered = true;
+            Log(L"[FLAG] registered lobby preview resource location dir=%hs group=%hs\n",
+                dir.c_str(), group.c_str());
+        }
+
+        static std::string SanitizeForFileName(const std::string& value)
+        {
+            std::string out;
+            out.reserve(value.size());
+            for (char ch : value)
+            {
+                const unsigned char uch = static_cast<unsigned char>(ch);
+                out.push_back(std::isalnum(uch) ? static_cast<char>(std::tolower(uch)) : '_');
+            }
+            if (out.empty())
+                out = "flag";
+            return out;
+        }
+
+        // Bare texture name (no directory) the UI loader resolves from
+        // common/ui. Unique per source flag so the engine's texture cache maps
+        // each flag to its own preview image.
+        static std::string GetSelectedFlagPreviewName()
+        {
+            const FlagCatalogEntry* entry = GetSelectedFlagEntry();
+            if (!entry)
+                return std::string();
+            std::filesystem::path stem = std::filesystem::path(entry->fileName).stem();
+            return std::string(kFlagPreviewNamePrefix) + SanitizeForFileName(stem.string()) + ".png";
+        }
+
+        static bool GetPngEncoderClsid(CLSID& outClsid)
+        {
+            UINT count = 0;
+            UINT bytes = 0;
+            if (Gdiplus::GetImageEncodersSize(&count, &bytes) != Gdiplus::Ok || bytes == 0)
+                return false;
+            std::vector<uint8_t> buffer(bytes);
+            auto* encoders = reinterpret_cast<Gdiplus::ImageCodecInfo*>(buffer.data());
+            if (Gdiplus::GetImageEncoders(count, bytes, encoders) != Gdiplus::Ok)
+                return false;
+            for (UINT i = 0; i < count; ++i)
+            {
+                if (encoders[i].MimeType && wcscmp(encoders[i].MimeType, L"image/png") == 0)
+                {
+                    outClsid = encoders[i].Clsid;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Render the packed 64x32 1-bpp flag mask into a PNG the lobby widget
+        // can display: white where a bit is set, over a translucent dark tile
+        // so the shape reads on any menu background. Row order mirrors the
+        // bottom-up legacy payload so the preview is upright like the source.
+        static bool WriteFlagPreviewPng(
+            const std::array<uint8_t, kLegacyFlagPayloadBytes>& payload,
+            const std::filesystem::path& outPath)
+        {
+            std::string gdiplusError;
+            if (!EnsureGdiplusInitialized(gdiplusError))
+            {
+                Log(L"[FLAG] preview GDI+ init failed: %hs\n", gdiplusError.c_str());
+                return false;
+            }
+
+            Gdiplus::Bitmap bitmap(kFlagPreviewWidth, kFlagPreviewHeight, PixelFormat32bppARGB);
+            if (bitmap.GetLastStatus() != Gdiplus::Ok)
+                return false;
+
+            for (int y = 0; y < kFlagPreviewHeight; ++y)
+            {
+                const int payloadRow = (kLegacyFlagHeight - 1) - y;
+                for (int x = 0; x < kFlagPreviewWidth; ++x)
+                {
+                    const uint8_t packed = payload[
+                        static_cast<size_t>(payloadRow) * kLegacyFlagRowBytes +
+                        static_cast<size_t>(x / 8)];
+                    const bool on = (packed & static_cast<uint8_t>(0x80u >> (x & 7))) != 0;
+                    const Gdiplus::Color color = on
+                        ? Gdiplus::Color(255, 255, 255, 255)
+                        : Gdiplus::Color(150, 0, 0, 0);
+                    bitmap.SetPixel(x, y, color);
+                }
+            }
+
+            CLSID pngClsid = {};
+            if (!GetPngEncoderClsid(pngClsid))
+            {
+                Log(L"[FLAG] preview PNG encoder unavailable\n");
+                return false;
+            }
+
+            std::error_code ec;
+            std::filesystem::create_directories(outPath.parent_path(), ec);
+            const Gdiplus::Status saved = bitmap.Save(outPath.wstring().c_str(), &pngClsid, nullptr);
+            if (saved != Gdiplus::Ok)
+            {
+                Log(L"[FLAG] preview PNG save failed path=%hs status=%d\n",
+                    outPath.string().c_str(), static_cast<int>(saved));
+                return false;
+            }
+            return true;
+        }
+
+        // Ensure the preview PNG for the current selection exists on disk and
+        // return its bare texture name (empty on failure). Generated once per
+        // flag per session.
+        static std::string EnsureSelectedFlagPreviewImage()
+        {
+            const std::string name = GetSelectedFlagPreviewName();
+            if (name.empty())
+                return std::string();
+            if (!g_FlagPayloadReady)
+                return std::string();
+
+            const std::filesystem::path outPath = GetFlagPreviewUiDirectory() / name;
+            static std::string s_LastPreviewName;
+            std::error_code ec;
+            if (name == s_LastPreviewName && std::filesystem::exists(outPath, ec))
+                return name;
+
+            if (!WriteFlagPreviewPng(g_SelectedFlagPayload, outPath))
+                return std::string();
+            s_LastPreviewName = name;
+            Log(L"[FLAG] wrote lobby preview name=%hs path=%hs\n",
+                name.c_str(), outPath.string().c_str());
+            return name;
+        }
+
+        static void UpdateFlagPreviewWidget(void* widget)
+        {
+            if (!widget)
+                return;
+            EnsureFlagPreviewResourceLocationRegistered();
+            const std::string name = EnsureSelectedFlagPreviewImage();
+            if (name.empty())
+                return;
+            if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(widget, name.c_str());
+            if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(widget, name.c_str());
+            if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(widget, name.c_str());
+        }
+
         static void CreateFlagButtonCommon(
             void* parent,
             float x,
             float y,
             void** outButton,
             void** outLabel,
+            void** outPreview,
             void* onClick,
             void* onHover)
         {
@@ -27155,6 +25064,39 @@ namespace BZROpenShim
             }
 
             UpdateFlagSelectionUiLabel(*outLabel);
+
+            // 1.5-style preview tile showing the selected flag, placed just
+            // above the "F" button. It reuses the same click/hover callbacks as
+            // the button, so clicking the preview also cycles and — critically
+            // — both +0x150/+0x154 callback slots are non-null (a null slot on
+            // an active dialog child crashes when the lobby walks its children;
+            // see the AutoSave button note).
+            if (outPreview && g_BzrFn_ButtonCtor)
+            {
+                void* previewMem = ::operator new(0x1EC, std::nothrow);
+                if (previewMem)
+                {
+                    std::memset(previewMem, 0, 0x1EC);
+                    *outPreview = g_BzrFn_ButtonCtor(
+                        previewMem,
+                        "Flag Preview",
+                        x,
+                        y - static_cast<float>(kFlagPreviewHeight) - 6.0f,
+                        static_cast<float>(kFlagPreviewWidth),
+                        static_cast<float>(kFlagPreviewHeight),
+                        0x20,
+                        parent,
+                        0,
+                        0);
+                    if (*outPreview)
+                    {
+                        UpdateFlagPreviewWidget(*outPreview);
+                        if (g_BzrFn_SetOnClick && onClick) g_BzrFn_SetOnClick(*outPreview, onClick);
+                        if (g_BzrFn_SetOnHover && onHover) g_BzrFn_SetOnHover(*outPreview, onHover);
+                        g_BzrFn_AddChild(parent, *outPreview, 0);
+                    }
+                }
+            }
         }
 
         static void CycleSelectedFlag(int delta, const char* source)
@@ -27267,12 +25209,14 @@ namespace BZROpenShim
     {
         CycleSelectedFlag(1, "host_button");
         UpdateFlagSelectionUiLabel(g_FlagLabelHost);
+        UpdateFlagPreviewWidget(g_FlagPreviewHost);
     }
 
     void __cdecl FlagButtonOnClickClient()
     {
         CycleSelectedFlag(1, "client_button");
         UpdateFlagSelectionUiLabel(g_FlagLabelClient);
+        UpdateFlagPreviewWidget(g_FlagPreviewClient);
     }
 
     void __cdecl FlagButtonOnHoverHost(void* param)
@@ -27363,7 +25307,11 @@ namespace BZROpenShim
             return;
 
         const std::string autoSaveLabel = GetAutoSaveButtonLabel();
-        if (g_AutoSaveLoadButton && g_AutoSaveLoadParent == parent && g_AutoSaveLoadScreen == screen)
+        // Pointer equality alone cannot prove the cached button survived a
+        // screen rebuild at a recycled address; require it to still be linked
+        // into the live parent's child vector before updating it in place.
+        if (g_AutoSaveLoadButton && g_AutoSaveLoadParent == parent && g_AutoSaveLoadScreen == screen &&
+            IsWidgetLiveChildOfParent(parent, g_AutoSaveLoadButton))
         {
             if (TryUpdateAutoSaveLoadButton(autoSaveLabel.c_str()))
                 return;
@@ -27493,7 +25441,9 @@ namespace BZROpenShim
             g_BzrFn_AddChild(parent, g_BanLabelHost, 0);
         }
 
-        if (ShouldEnableMultiplayerFlagUi() && (!g_FlagButtonHost || !g_FlagLabelHost))
+        if (ShouldEnableMultiplayerFlagUi() &&
+            (!g_FlagButtonHost || !g_FlagLabelHost ||
+             !IsWidgetLiveChildOfParent(parent, g_FlagButtonHost)))
         {
             CreateFlagButtonCommon(
                 parent,
@@ -27501,6 +25451,7 @@ namespace BZROpenShim
                 g_BanY + 96.0f,
                 &g_FlagButtonHost,
                 &g_FlagLabelHost,
+                &g_FlagPreviewHost,
                 reinterpret_cast<void*>(FlagButtonOnClickHost),
                 reinterpret_cast<void*>(FlagButtonOnHoverHost));
         }
@@ -27563,7 +25514,9 @@ namespace BZROpenShim
             g_BzrFn_AddChild(parent, g_BanLabelClient, 0);
         }
 
-        if (ShouldEnableMultiplayerFlagUi() && (!g_FlagButtonClient || !g_FlagLabelClient))
+        if (ShouldEnableMultiplayerFlagUi() &&
+            (!g_FlagButtonClient || !g_FlagLabelClient ||
+             !IsWidgetLiveChildOfParent(parent, g_FlagButtonClient)))
         {
             CreateFlagButtonCommon(
                 parent,
@@ -27571,6 +25524,7 @@ namespace BZROpenShim
                 942.0f,
                 &g_FlagButtonClient,
                 &g_FlagLabelClient,
+                &g_FlagPreviewClient,
                 reinterpret_cast<void*>(FlagButtonOnClickClient),
                 reinterpret_cast<void*>(FlagButtonOnHoverClient));
         }

@@ -94,6 +94,15 @@ UnderAttackAlert = Normal
 ;   OPENSHIM_TARGET_RETICLE_POPUP_MODE or BZR_TARGET_RETICLE_POPUP_MODE
 TargetPolicy = Default
 
+; Multiplayer vehicle flags: also draw YOUR OWN flag over your own craft.
+; Normally (matching BZ1.5) only other players' flags render and your own is
+; skipped, so a solo host sees nothing. Turn this on to render your own flag
+; too, e.g. to verify a flag looks right without a second human player.
+;   Off / 0 (default) = only other players' flags render
+;   On  / 1           = also render your own flag over your own craft
+; Env override: OPENSHIM_MP_FLAG_SHOW_OWN or BZR_MP_FLAG_SHOW_OWN
+; MultiplayerFlagShowOwnCraft = 0
+
 ; Scrap/pilot readout layout.
 ;   Legacy = move the text block to the compact legacy top-center location and
 ;            hide the stock backing panels (aliases: Compact, 1, On, True)

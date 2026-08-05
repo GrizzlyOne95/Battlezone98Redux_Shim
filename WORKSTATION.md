@@ -97,7 +97,10 @@ Copy-Item "C:\Users\iestu\Documents\GIT\BZR-OpenShim\bin\Release\winmm.dll" `
 Copy-Item "C:\Users\iestu\Documents\GIT\BZR-OpenShim\bin\Release\winmm.dll" `
   "C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux\winmm.dll" -Force
 ```
-Runtime log after launch: `winmm_shim.log` in the install root.
+Runtime log after launch: `logs\openshim.log` in the install root (patcher lines
+carry the `[patcher]` component; `winmm_shim.log` is no longer written as of
+2026-07-18). The log is opened share-readable, so it can be tailed while the
+game is running.
 
 ---
 
