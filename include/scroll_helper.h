@@ -274,84 +274,92 @@ namespace BZROpenShim
     // -----------------------------------------------------------------------
     // Hop-Fix 2 helper: reselect entry by saved name.
     // Mirrors the reference patch semantics in clean-room form.
-    // ECX = map list object (this-ptr).
+    // ECX = screen object (this-ptr); list widget at +0x17C, entries at +0x1C8.
+    //
+    // IMPORTANT: the trampoline overwrote the engine's unconditional
+    // "SetSelectedIndex(0)" on the list widget, and the engine dereferences
+    // the selected entry's name immediately after with no null check.  Every
+    // early-out in the entry-matching logic below must therefore still fall
+    // through to a select call (index 0) — skipping it leaves the fresh list
+    // at -1 and crashes the game (Steam create-room rebuild, 2026-07-19).
     // -----------------------------------------------------------------------
     extern "C" inline void __fastcall RestoreMapListSelection(void* this_ptr)
     {
-        if (!this_ptr) return;
+        if (!this_ptr || !g_BZRFnPtr_HopFix2) return;
         if (IsMapRefreshTraceEnabled())
             TraceMapRefreshContext(L"RestoreMapListSelection_enter", this_ptr);
+
+        // Resolve the list widget first; it is the receiver of the original
+        // select(0) call we replaced, so without it we cannot replay anything.
+        uint8_t* base = reinterpret_cast<uint8_t*>(this_ptr);
+        void* selectThis = nullptr;
+        if (!TryReadPtr(base + 0x17C, selectThis) || !selectThis)
+            return;
 
         if (g_SavedMapNameLen == 0)
             SetSavedMapNameLiteral("All Maps");
 
-        // Resolve list root at [this + 0x1C8]
-        uint8_t* base = reinterpret_cast<uint8_t*>(this_ptr);
-        void* listRootRaw = nullptr;
-        if (!TryReadPtr(base + 0x1C8, listRootRaw) || !listRootRaw) return;
-        void** listRoot = reinterpret_cast<void**>(listRootRaw);
-
-        void* beginRaw = nullptr;
-        void* endRaw = nullptr;
-        if (!TryReadPtr(listRoot, beginRaw)) return;
-        if (!TryReadPtr(listRoot + 1, endRaw)) return;
-        if (!beginRaw || !endRaw) return;
-
-        uint8_t* begin = reinterpret_cast<uint8_t*>(beginRaw);
-        uint8_t* end = reinterpret_cast<uint8_t*>(endRaw);
-        if (end < begin) return;
-        const int32_t entryCount = static_cast<int32_t>((end - begin) / 0x18);
-        if (entryCount <= 0)
-            return;
-
+        // Best-effort: find the saved entry so the selection survives the
+        // rebuild.  Any failure below just keeps the original index 0.
+        int32_t targetIndex = 0;
         int32_t foundIndex = -1;
         const int32_t savedIndex = g_SavedMapIndex;
 
-        if (savedIndex >= 0 && savedIndex < entryCount)
+        void* listRootRaw = nullptr;
+        void* beginRaw = nullptr;
+        void* endRaw = nullptr;
+        if (TryReadPtr(base + 0x1C8, listRootRaw) && listRootRaw)
         {
-            uint8_t* entry = begin + (savedIndex * 0x18);
-            uint32_t entryLen = 0;
-            const char* entryStr = ResolveEntryString(entry, entryLen);
-            if (entryStr && entryLen == g_SavedMapNameLen &&
-                memcmp(entryStr, g_SavedMapName, entryLen) == 0)
-            {
-                foundIndex = savedIndex;
-            }
+            void** listRoot = reinterpret_cast<void**>(listRootRaw);
+            if (!TryReadPtr(listRoot, beginRaw)) beginRaw = nullptr;
+            if (!TryReadPtr(listRoot + 1, endRaw)) endRaw = nullptr;
         }
 
-        if (foundIndex < 0)
+        if (beginRaw && endRaw && endRaw >= beginRaw)
         {
-            uint8_t* entry = begin;
-            for (; entry != end; entry += 0x18)
+            uint8_t* begin = reinterpret_cast<uint8_t*>(beginRaw);
+            uint8_t* end = reinterpret_cast<uint8_t*>(endRaw);
+            const int32_t entryCount = static_cast<int32_t>((end - begin) / 0x18);
+
+            if (savedIndex >= 0 && savedIndex < entryCount)
             {
+                uint8_t* entry = begin + (savedIndex * 0x18);
                 uint32_t entryLen = 0;
                 const char* entryStr = ResolveEntryString(entry, entryLen);
-                if (!entryStr || entryLen == 0) continue;
-
-                if (entryLen == g_SavedMapNameLen &&
+                if (entryStr && entryLen == g_SavedMapNameLen &&
                     memcmp(entryStr, g_SavedMapName, entryLen) == 0)
                 {
-                    foundIndex = static_cast<int32_t>((entry - begin) / 0x18);
-                    break;
+                    foundIndex = savedIndex;
                 }
             }
-        }
 
-        int32_t targetIndex = 0;
-        if (foundIndex >= 0)
-        {
-            targetIndex = foundIndex;
-        }
-        else if (savedIndex >= 0)
-        {
-            targetIndex = (savedIndex < entryCount) ? savedIndex : (entryCount - 1);
-        }
+            if (foundIndex < 0)
+            {
+                uint8_t* entry = begin;
+                for (; entry != end; entry += 0x18)
+                {
+                    uint32_t entryLen = 0;
+                    const char* entryStr = ResolveEntryString(entry, entryLen);
+                    if (!entryStr || entryLen == 0) continue;
 
-        if (!g_BZRFnPtr_HopFix2) return;
+                    if (entryLen == g_SavedMapNameLen &&
+                        memcmp(entryStr, g_SavedMapName, entryLen) == 0)
+                    {
+                        foundIndex = static_cast<int32_t>((entry - begin) / 0x18);
+                        break;
+                    }
+                }
+            }
 
-        void* selectThis = nullptr;
-        if (!TryReadPtr(base + 0x17C, selectThis) || !selectThis)
-            return;
+            if (foundIndex >= 0)
+            {
+                targetIndex = foundIndex;
+            }
+            else if (savedIndex >= 0 && entryCount > 0)
+            {
+                targetIndex = (savedIndex < entryCount) ? savedIndex : (entryCount - 1);
+            }
+        }
 
         void (*fn)() = g_BZRFnPtr_HopFix2;
         __try
