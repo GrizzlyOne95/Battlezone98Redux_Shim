@@ -74,6 +74,7 @@ namespace
     constexpr uint32_t kReorderWakeBurstCap = 8;
     constexpr uint8_t kWakeMagic[8] = { 'B', 'Z', 'W', 'K', 'P', 'K', 'T', '1' };
     constexpr DWORD kGovPollMs = 100;
+    constexpr DWORD kGovObservationLogMs = 10000;
     constexpr uint32_t kGovColdStart = 4000;
     constexpr uint32_t kGovStartMax = 200000;
     constexpr uint32_t kAutokickMsMax = 600000;
@@ -136,7 +137,7 @@ namespace
         bool logSockOptCalls = true;
         bool logPacketReorder = true;
         bool applySocketBuffers = true;
-        bool enablePacketReorder = true;
+        bool enablePacketReorder = false;
         bool adaptivePacketReorder = true;
         bool enableReorderWake = true;
         bool enableBufferLog = false;
@@ -338,6 +339,9 @@ namespace
     volatile LONG g_GovStop = 0;
     HANDLE g_GovScanThread = nullptr;
     HANDLE g_GovPatchThread = nullptr;
+    volatile LONG g_GovLastObserved = 0;
+    volatile LONG g_GovObservationValid = 0;
+    volatile LONG g_GovBumps = 0;
     volatile LONG g_AutoKickStop = 0;
     HANDLE g_AutoKickThread = nullptr;
 
@@ -691,7 +695,7 @@ namespace
         g_Config.recvBufferSize = std::max<uint32_t>(g_Config.recvBufferSize, 32 * 1024);
         g_Config.packetLogLimit = std::max<uint32_t>(ReadIniUint("OpenShimSocket", "PacketLogLimit", kDefaultPacketLogLimit), 1);
         g_Config.packetLogInterval = ReadIniUint("OpenShimSocket", "PacketLogInterval", kDefaultPacketLogInterval);
-        g_Config.enablePacketReorder = ReadIniBool("OpenShimSocket", "EnablePacketReorder", true);
+        g_Config.enablePacketReorder = ReadIniBool("OpenShimSocket", "EnablePacketReorder", false);
         g_Config.reorderWindowMs = ClampReorderWindow(ReadIniUint("OpenShimSocket", "PacketReorderWindowMs", kDefaultReorderWindowMs));
         g_Config.reorderMinWindowMs = ClampReorderMinWindow(ReadIniUint("OpenShimSocket", "PacketReorderMinWindowMs", kDefaultReorderMinWindowMs), g_Config.reorderWindowMs);
         g_Config.adaptivePacketReorder = ReadIniBool("OpenShimSocket", "EnableAdaptivePacketReorder", true);
@@ -2766,6 +2770,9 @@ namespace
             return 0;
 
         Sleep(15000);
+        if (InterlockedCompareExchange(&g_GovStop, 0, 0) != 0)
+            return 0;
+
         const int matches = CountGovernorSignatureMatches();
         if (matches != 1)
         {
@@ -2779,23 +2786,68 @@ namespace
             g_Config.govStart);
 
         uint32_t bumps = 0;
+        uint32_t lastObserved = *kGovRateAddr;
+        uint64_t lastObservationLogMs = GetTickCount64();
+        InterlockedExchange(&g_GovLastObserved, static_cast<LONG>(lastObserved));
+        InterlockedExchange(&g_GovObservationValid, 1);
+        InterlockedExchange(&g_GovBumps, 0);
+        Logf("[OpenShimNet] governor_patch: initial observed=%u target=%u",
+            lastObserved,
+            g_Config.govStart);
+
         while (InterlockedCompareExchange(&g_GovStop, 0, 0) == 0)
         {
-            if (*kGovRateAddr == kGovColdStart)
+            const uint32_t observed = *kGovRateAddr;
+            if (observed != lastObserved)
+            {
+                const char* reason = observed == kGovColdStart
+                    ? "cold-start trigger"
+                    : (observed == g_Config.govStart ? "target restored" : "game overwrite or clamp");
+                Logf("[OpenShimNet] governor_patch: observed transition %u -> %u reason=%s",
+                    lastObserved,
+                    observed,
+                    reason);
+                lastObserved = observed;
+                InterlockedExchange(&g_GovLastObserved, static_cast<LONG>(observed));
+            }
+
+            if (observed == kGovColdStart)
             {
                 *kGovRateAddr = g_Config.govStart;
-                if (bumps == 0)
-                {
-                    Logf("[OpenShimNet] governor_patch: cold-start caught %u -> %u",
-                        kGovColdStart,
-                        g_Config.govStart);
-                }
+                const uint32_t readback = *kGovRateAddr;
                 ++bumps;
+                lastObserved = readback;
+                lastObservationLogMs = GetTickCount64();
+                InterlockedExchange(&g_GovLastObserved, static_cast<LONG>(readback));
+                InterlockedExchange(&g_GovBumps, static_cast<LONG>(bumps));
+                Logf("[OpenShimNet] governor_patch: applied cold-start previous=%u requested=%u readback=%u bump=%u",
+                    observed,
+                    g_Config.govStart,
+                    readback,
+                    bumps);
             }
+            else
+            {
+                const uint64_t nowMs = GetTickCount64();
+                if (nowMs - lastObservationLogMs >= kGovObservationLogMs)
+                {
+                    Logf("[OpenShimNet] governor_patch: periodic observed=%u target=%u bumps=%u",
+                        observed,
+                        g_Config.govStart,
+                        bumps);
+                    lastObservationLogMs = nowMs;
+                }
+            }
+
             Sleep(kGovPollMs);
         }
 
-        Logf("[OpenShimNet] governor_patch: stopping after %u bump(s)", bumps);
+        const LONG finalObserved = InterlockedCompareExchange(&g_GovLastObserved, 0, 0);
+        const LONG finalBumps = InterlockedCompareExchange(&g_GovBumps, 0, 0);
+        Logf("[OpenShimNet] governor_patch: thread exit bumps=%ld finalObserved=%ld target=%u",
+            static_cast<long>(finalBumps),
+            static_cast<long>(finalObserved),
+            g_Config.govStart);
         return 0;
     }
 
@@ -4133,6 +4185,17 @@ namespace
             return TRUE;
         }
 
+        if (g_Config.enablePacketReorder)
+        {
+            LogShimA(LogLevel::Warn, "net",
+                "[OpenShimNet] EXPERIMENTAL packet reordering is enabled. The wire sequence field is unresolved and overlapped WSARecvFrom traffic bypasses this path; use only for controlled diagnostics.");
+        }
+        if (g_Config.sendDup)
+        {
+            LogShimA(LogLevel::Warn, "net",
+                "[OpenShimNet] DEPRECATED packet duplication is enabled. Testing indicates duplication may worsen constrained uplinks; use only for controlled diagnostics.");
+        }
+
         if (!LoadWinsockExports())
             return TRUE;
 
@@ -4173,6 +4236,9 @@ namespace
         if (g_Config.govStart != 0 && !g_GovPatchThread)
         {
             InterlockedExchange(&g_GovStop, 0);
+            InterlockedExchange(&g_GovLastObserved, 0);
+            InterlockedExchange(&g_GovObservationValid, 0);
+            InterlockedExchange(&g_GovBumps, 0);
             g_GovPatchThread = CreateThread(nullptr, 0, GovernorPatchThread, nullptr, 0, nullptr);
             if (!g_GovPatchThread)
                 LogShimA(LogLevel::Warn, "net", "[OpenShimNet] Failed to start governor patch thread err=%lu", GetLastError());
@@ -4201,6 +4267,16 @@ namespace
         InterlockedExchange(&g_DupStop, 1);
         InterlockedExchange(&g_GovStop, 1);
         InterlockedExchange(&g_AutoKickStop, 1);
+        if (g_Config.govStart != 0 &&
+            InterlockedCompareExchange(&g_GovObservationValid, 0, 0) != 0)
+        {
+            const LONG finalObserved = InterlockedCompareExchange(&g_GovLastObserved, 0, 0);
+            const LONG finalBumps = InterlockedCompareExchange(&g_GovBumps, 0, 0);
+            Logf("[OpenShimNet] governor_patch: shutdown snapshot bumps=%ld finalObserved=%ld target=%u",
+                static_cast<long>(finalBumps),
+                static_cast<long>(finalObserved),
+                g_Config.govStart);
+        }
         if (g_WakeSender != INVALID_SOCKET && g_RealCloseSocket)
         {
             g_RealCloseSocket(g_WakeSender);
