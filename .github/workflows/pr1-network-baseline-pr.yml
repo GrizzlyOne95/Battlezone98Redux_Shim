@@ -1,0 +1,70 @@
+name: PR1 network baseline validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr1-network-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  patch-build-commit:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'agent/network-correctness-baseline'
+    runs-on: windows-2022
+
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/network-correctness-baseline
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply asserted PR1 runtime edits
+        shell: pwsh
+        run: python tools/pr1_network_baseline_patch.py
+
+      - name: Verify changed invariants
+        shell: pwsh
+        run: |
+          $source = Get-Content src/patches/net_optimizer.cpp -Raw
+          if ($source -notmatch 'bool enablePacketReorder = false;') { throw 'Built-in reorder default was not disabled' }
+          if ($source -notmatch 'EnablePacketReorder", false') { throw 'INI reorder fallback was not disabled' }
+          if ($source -notmatch 'EXPERIMENTAL packet reordering is enabled') { throw 'Reorder warning missing' }
+          if ($source -notmatch 'DEPRECATED packet duplication is enabled') { throw 'Duplication warning missing' }
+          if ($source -notmatch 'governor_patch: periodic observed=') { throw 'Periodic governor observation missing' }
+          if ($source -notmatch 'governor_patch: shutdown snapshot') { throw 'Governor shutdown snapshot missing' }
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Release Win32
+        shell: pwsh
+        run: msbuild BZROpenShim.sln /m /p:Configuration=Release /p:Platform=Win32 /v:minimal
+
+      - name: Upload validated DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: PR1-winmm-Release-Win32
+          path: |
+            bin/Release/winmm.dll
+            bin/Release/winmm.pdb
+          if-no-files-found: error
+
+      - name: Commit validated runtime changes
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/patches/net_optimizer.cpp
+          git diff --cached --check
+          git commit -m "Complete network correctness runtime baseline"
+          git push origin HEAD:agent/network-correctness-baseline
