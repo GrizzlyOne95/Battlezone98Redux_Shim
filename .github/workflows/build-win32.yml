@@ -19,12 +19,16 @@ concurrency:
 jobs:
   release-win32:
     name: Release Win32
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 20
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Validate network safety baseline
+        shell: pwsh
+        run: ./tools/validate-network-baseline.ps1
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
