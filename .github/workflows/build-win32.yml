@@ -1,0 +1,74 @@
+name: Build Win32
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+      - "agent/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-win32:
+    name: Release Win32
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build BZROpenShim
+        shell: pwsh
+        run: |
+          msbuild BZROpenShim.sln `
+            /m `
+            /t:Build `
+            /p:Configuration=Release `
+            /p:Platform=Win32 `
+            /p:GenerateFullPaths=true `
+            /verbosity:minimal
+
+      - name: Verify build outputs
+        shell: pwsh
+        run: |
+          $dll = Join-Path $PWD "bin/Release/winmm.dll"
+          $pdb = Join-Path $PWD "bin/Release/winmm.pdb"
+
+          if (-not (Test-Path -LiteralPath $dll -PathType Leaf)) {
+            throw "Expected build output was not produced: $dll"
+          }
+
+          $dllInfo = Get-Item -LiteralPath $dll
+          $dllHash = Get-FileHash -LiteralPath $dll -Algorithm SHA256
+
+          "winmm.dll size: $($dllInfo.Length) bytes" | Tee-Object -FilePath build-summary.txt
+          "winmm.dll SHA-256: $($dllHash.Hash.ToLowerInvariant())" | Tee-Object -FilePath build-summary.txt -Append
+
+          if (Test-Path -LiteralPath $pdb -PathType Leaf) {
+            $pdbInfo = Get-Item -LiteralPath $pdb
+            "winmm.pdb size: $($pdbInfo.Length) bytes" | Tee-Object -FilePath build-summary.txt -Append
+          } else {
+            "winmm.pdb was not produced" | Tee-Object -FilePath build-summary.txt -Append
+          }
+
+          Get-Content -LiteralPath build-summary.txt
+
+      - name: Upload Release Win32 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BZROpenShim-Release-Win32
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            bin/Release/winmm.dll
+            bin/Release/winmm.pdb
+            build-summary.txt
