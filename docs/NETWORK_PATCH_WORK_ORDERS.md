@@ -19,6 +19,8 @@ The sequence is deliberate: establish a safe baseline first, add measured tuning
 
 ## PR1 — Network correctness baseline
 
+**Status:** Implemented in pull request #5. Release|Win32 builds successfully. In-game smoke validation remains recommended before merge.
+
 ### Objective
 
 Remove unsafe or unproven behavior from the default path and make experimental networking features unmistakable in configuration and logs.
@@ -47,9 +49,9 @@ Remove unsafe or unproven behavior from the default path and make experimental n
 - Enabling reorder produces one clear warning that it is experimental and depends on an unresolved wire-sequence interpretation.
 - Enabling duplication produces one clear warning that testing found it may worsen constrained uplinks.
 - With `GovernorStart=0`, no governor patch thread runs.
-- With `GovernorStart>0`, logs show the requested value, every detected overwrite/clamp transition, and the final observed value at shutdown.
+- With `GovernorStart>0`, logs show the requested value, every detected overwrite/clamp transition, periodic observed values, and a final shutdown snapshot.
 - Release Win32 builds successfully.
-- Existing tests pass.
+- Existing tests pass, where present.
 
 ### Out of scope
 
@@ -278,75 +280,77 @@ Separate packet algorithms and telemetry serialization from Winsock/IAT plumbing
 
 ### Acceptance criteria
 
-- Core tests run without the game.
-- Runtime hook code does not duplicate packet-algorithm logic.
-- Existing runtime behavior remains unchanged unless explicitly configured.
+- Core tests build and run without Battlezone or Winsock hooks.
+- Runtime adapter behavior remains unchanged unless explicitly covered by another PR.
+- Test fixtures are deterministic and contain no sensitive capture data.
 
 ---
 
-## PR6 — Measured outbound telemetry and optional pacing
+## PR6 — Outbound metrics and optional pacing
 
 ### Objective
 
-Measure the sender-side retransmission/burst problem before introducing any new packet-shaping behavior.
+Measure actual sender behavior before deciding whether pacing improves constrained or burst-sensitive connections.
 
 ### Scope
 
-1. Always-on lightweight counters when network optimization is enabled:
-   - packets and bytes sent
-   - peak packets/second
-   - peak bytes/second
-   - burst-duration counters
-2. Session summaries emitted on socket close and through a detach-safe fallback.
-3. Optional token-bucket pacing, disabled by default.
-4. Never delay short control/ping packets.
-5. Never drop packets.
-6. Preserve sequenced-packet order.
-7. Abandon pacing and send immediately when the configured delay ceiling would be exceeded.
+- Always-on counters when network diagnostics are enabled:
+  - packets and bytes sent
+  - peak packets per second
+  - peak bytes per second
+  - burst-second count
+  - send API and socket class
+- Per-session summary at socket close and process shutdown.
+- Optional token-bucket pacing behind a default-off key.
+- Preserve packet order.
+- Never drop packets.
+- Exempt small control/ping traffic from pacing unless evidence supports pacing it.
 
 ### Acceptance criteria
 
-- Measurement-only mode has no intentional packet delay.
-- Metrics survive a process exit that skips `closesocket` where loader-lock safety permits.
-- Pacing remains disabled by default.
-- Tests verify order preservation, no-drop behavior, delay ceilings, and socket purge behavior.
+- Metrics impose negligible measured overhead.
+- Pacing disabled is behaviorally identical to the metrics-only path.
+- Pacing cannot reorder or discard packets.
+- Queue saturation fails open by sending immediately and logs the condition.
+- A/B captures compare pacing off/on under controlled bandwidth and latency conditions.
 
 ---
 
-## PR7 — Experimental protocol/network changes
+## PR7 — Controlled experiments
 
 ### Objective
 
-Only after sufficient telemetry exists, evaluate transport changes against controlled multiplayer sessions.
+Keep unresolved protocol and transport ideas out of production defaults while providing reproducible experiments to confirm or reject them.
 
 ### Candidate experiments
 
-- definitive packet sequence-field validation
-- role-controlled governor-start A/B tests
-- `UpCount`/`DownCount` A/B tests
-- auto-kick bad-link validation
-- `syncJoin` correlation testing
-- corrected reorder implementation, only if real links demonstrate meaningful reordering
-- forward-error correction between patched peers, only after compatibility and packet-type safety are proven
+- Wire sequence-field scanner across candidate offsets, widths, and byte orders.
+- Correlate candidate fields against capture order, duplicates, retransmits, and game state.
+- Governor target A/B tests with live readback.
+- Auto-kick threshold verification under simulated loss/latency.
+- Reorder necessity test using observed out-of-order rates.
+- Patched-peer-only FEC or redundancy experiments, never enabled against stock peers by default.
 
-### Rules
+### Promotion rule
 
-- Every experiment is opt-in.
-- Every experiment has a kill switch.
-- Every experiment records its configuration in the telemetry manifest.
-- No experiment is promoted to default from a single session or uncontrolled host/client comparison.
-- Results must separate host and client roles, map/mod, peer set, and network conditions.
+An experiment can move into a production PR only when:
+
+1. The field or behavior is reproducibly identified across Steam and GOG builds.
+2. The implementation covers synchronous and overlapped I/O paths or explicitly proves one path is irrelevant.
+3. Tests cover wraparound, malformed traffic, queue pressure, shutdown, and caller-buffer semantics.
+4. Controlled A/B captures show a measurable benefit without regressions.
+5. The feature remains opt-in until sufficient community validation exists.
 
 ---
 
-## Proposed merge order
+## Merge order
 
-1. PR1 — Network correctness baseline
-2. PR2 — Guarded direct `[Net]` tuning
-3. PR3 — Telemetry foundation
-4. PR4 — Matchmaking analyzer/replay corpus
-5. PR5 — Core refactor/tests
-6. PR6 — Outbound metrics and optional pacing
-7. PR7 — Controlled experiments
+1. PR1 — correctness baseline
+2. PR2 — guarded direct tuning
+3. PR3 — telemetry foundation
+4. PR4 — transcript analyzer and replay corpus
+5. PR5 — core refactor/tests (may begin in parallel after PR3 schema stabilizes)
+6. PR6 — outbound metrics/pacing
+7. PR7 — experiments as evidence becomes available
 
-PR3 and PR5 may be partially developed in parallel, but PR3 should not expose a stable schema until its redaction and serialization tests exist.
+PR3 and PR4 are the path toward an independent clean-room matchmaking service. PR7 experiments must not block that work or contaminate its protocol evidence with default packet manipulation.
