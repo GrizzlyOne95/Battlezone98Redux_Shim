@@ -479,9 +479,31 @@ namespace BZROpenShim
         return false;
     }
 
-    static void ResolvePointers(uint32_t mapS, uint32_t h1, uint32_t h2, uint32_t h3, uint32_t pF1, uint32_t pL1, uint32_t pL2, uint32_t tc, uint32_t tt, uint32_t ua1, uint32_t ua2, uint32_t oa, uint32_t tta) {
-        if (h1) { g_RetAddr_HopFix1 = reinterpret_cast<void*>(h1 + g_Config.GetStaticPointer("RetAddr_HopFix1_Offset", 0x0E)); g_BZRFnPtr_HopFix1 = reinterpret_cast<void(*)()>(HookEngine::ResolveRelCallTarget(h1 + 9)); }
-        if (h2) { g_RetAddr_HopFix2 = reinterpret_cast<void*>(h2 + g_Config.GetStaticPointer("RetAddr_HopFix2_Offset", 0x13)); g_BZRFnPtr_HopFix2 = reinterpret_cast<void(*)()>(HookEngine::ResolveRelCallTarget(h2 + 0x0E)); g_MapListObject = reinterpret_cast<void**>(g_Config.GetStaticPointer("MapListObject", 0x0094555C)); }
+    // Steam decrypts .text lazily, so a single read of a call opcode can come
+    // back as ciphertext and resolve to null - permanently, because nothing
+    // retried. Retry briefly, then fall back to the address for the build we
+    // already version-gated on in RunPatcher.
+    static void* ResolveCallTargetWithFallback(uint32_t instrAddr, bool isSteam, const char* cfgName, uint32_t fallback, const char* label) {
+        void* target = isSteam ? HookEngine::ResolveRelCallTargetWithRetry(instrAddr, 100, 5) : HookEngine::ResolveRelCallTarget(instrAddr);
+        if (target) return target;
+        const uint32_t fb = g_Config.GetStaticPointer(cfgName, fallback);
+        Log(L"[WARN] %hs call target unresolved at 0x%08X; using fallback 0x%08X\n", label, instrAddr, fb);
+        return reinterpret_cast<void*>(fb);
+    }
+
+    static void ResolvePointers(uint32_t mapS, uint32_t h1, uint32_t h2, uint32_t h3, uint32_t pF1, uint32_t pL1, uint32_t pL2, uint32_t tc, uint32_t tt, uint32_t ua1, uint32_t ua2, uint32_t oa, uint32_t tta, bool isSteam) {
+        if (h1) { g_RetAddr_HopFix1 = reinterpret_cast<void*>(h1 + g_Config.GetStaticPointer("RetAddr_HopFix1_Offset", 0x0E)); g_BZRFnPtr_HopFix1 = reinterpret_cast<void(*)()>(ResolveCallTargetWithFallback(h1 + 9, isSteam, "HopFix1Call_Fallback", 0x005D4260, "Hop-Fix 1")); }
+        if (h2) {
+            g_RetAddr_HopFix2 = reinterpret_cast<void*>(h2 + g_Config.GetStaticPointer("RetAddr_HopFix2_Offset", 0x13));
+            // Record the site and fallback so RestoreMapListSelection can
+            // re-derive the select target later if this resolve still fails;
+            // a null there means the replaced select(0) never runs and the
+            // engine faults on the unselected list.
+            g_HopFix2SelectCallSite = h2 + 0x0E;
+            g_HopFix2SelectFallback = g_Config.GetStaticPointer("HopFix2Select_Fallback", 0x007CAFA0);
+            g_BZRFnPtr_HopFix2 = reinterpret_cast<void(*)()>(ResolveCallTargetWithFallback(h2 + 0x0E, isSteam, "HopFix2Select_Fallback", 0x007CAFA0, "Hop-Fix 2 select"));
+            g_MapListObject = reinterpret_cast<void**>(g_Config.GetStaticPointer("MapListObject", 0x0094555C));
+        }
         if (h3) g_RetAddr_HopFix3 = reinterpret_cast<void*>(h3 + g_Config.GetStaticPointer("RetAddr_HopFix3_Offset", 0x07));
         g_BZRFnPtr_HopFix3Step = reinterpret_cast<void(*)()>(g_Config.GetStaticPointer("HopFix3Step_Fallback", 0x007A3130));
         if (mapS) g_RetAddr_Probe_MapSorting = reinterpret_cast<void*>(mapS + g_Config.GetStaticPointer("RetAddr_HopFix3_Offset", 0x07));
@@ -638,7 +660,7 @@ namespace BZROpenShim
         StartSoundChannelOverride(isSteam);
         g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForRuntime(patches, isSteam); ScanForPatchAddresses(patches, isSteam);
         auto findAddr = [&patches](const char* n) -> uint32_t { for (const auto& p : patches) { if (p.name == n) return p.address; } return 0; };
-        ResolvePointers(findAddr("Map Sorting"), findAddr("Map List Rewrite for Hop-Fix 1/3"), findAddr("Map List Rewrite for Hop-Fix 2/3"), findAddr("Map List Rewrite for Hop-Fix 3/3"), findAddr("Probe Refresh Path MapFilter1"), findAddr("Map List Fix Support 1/3"), findAddr("Probe MapListFix2"), findAddr("TurretCraft Aim Pitch Multiplier"), findAddr("TurretTank Aim Pitch Multiplier"), findAddr("Under Attack Alert Hook 1/2"), findAddr("Under Attack Alert Hook 2/2"), findAddr("Offensive Attack Reveal Hook"), findAddr("TurretTank Attack Reveal Hook"));
+        ResolvePointers(findAddr("Map Sorting"), findAddr("Map List Rewrite for Hop-Fix 1/3"), findAddr("Map List Rewrite for Hop-Fix 2/3"), findAddr("Map List Rewrite for Hop-Fix 3/3"), findAddr("Probe Refresh Path MapFilter1"), findAddr("Map List Fix Support 1/3"), findAddr("Probe MapListFix2"), findAddr("TurretCraft Aim Pitch Multiplier"), findAddr("TurretTank Aim Pitch Multiplier"), findAddr("Under Attack Alert Hook 1/2"), findAddr("Under Attack Alert Hook 2/2"), findAddr("Offensive Attack Reveal Hook"), findAddr("TurretTank Attack Reveal Hook"), isSteam);
         ResolveStaticReturnPointers();
         ResolveBzrHooks(isSteam); InitBzrHookStrings(); SuppressStartupShellAutoLoad();
         FillJmp5Payloads(patches); FillVersionNoticePayloads(patches); FillRel32Payloads(patches, isSteam); WaitForExpectedBytes(patches, isSteam);

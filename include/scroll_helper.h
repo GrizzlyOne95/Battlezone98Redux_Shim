@@ -41,6 +41,16 @@ namespace BZROpenShim
     inline void (*g_BZRFnPtr_HopFix2)() = nullptr;
     inline void (*g_BZRFnPtr_HopFix3Step)() = nullptr;
 
+    // Address of the engine's `call SetSelectedIndex` instruction inside the
+    // Hop-Fix 2 site, plus the known-good target for the supported game build.
+    // Both are recorded by the patcher so the select target can be recovered
+    // lazily: on Steam the first resolve attempt can lose the race with
+    // SteamStub's code-page decryption and read ciphertext instead of the
+    // 0xE8 opcode, which used to leave g_BZRFnPtr_HopFix2 null for the whole
+    // process lifetime (create-room crash, 2026-08-05).
+    inline uint32_t g_HopFix2SelectCallSite = 0;
+    inline uint32_t g_HopFix2SelectFallback = 0;
+
     // Steam build uses different internal addresses for scroll helpers.
     // When false, HopFix3 will skip scroll-restore helpers entirely.
     inline bool g_EnableScrollRestore = true;
@@ -135,6 +145,20 @@ namespace BZROpenShim
         }
     }
 
+    inline bool TryReadU8(const void* p, uint8_t& out)
+    {
+        __try
+        {
+            out = *reinterpret_cast<const volatile uint8_t*>(p);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            out = 0;
+            return false;
+        }
+    }
+
     inline const char* ResolveEntryString(const uint8_t* entry, uint32_t& out_len)
     {
         out_len = 0;
@@ -177,6 +201,46 @@ namespace BZROpenShim
     inline void SetSavedMapNameLiteral(const char* value)
     {
         SetSavedMapName(value, value ? static_cast<uint32_t>(strlen(value)) : 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Recover the engine's select-by-index function pointer.
+    //
+    // The patcher resolves this once at startup, but on Steam that read can
+    // land before SteamStub has decrypted the page holding the call opcode,
+    // in which case it yields null and never retries.  Everything downstream
+    // of a null pointer here is a skipped select, which the engine turns into
+    // a null-deref one instruction later, so re-derive it on demand instead:
+    // first from the live call site, then from the build-gated fallback.
+    // -----------------------------------------------------------------------
+    inline void (*ResolveHopFix2SelectFn())()
+    {
+        if (g_BZRFnPtr_HopFix2) return g_BZRFnPtr_HopFix2;
+
+        if (g_HopFix2SelectCallSite)
+        {
+            uint8_t op = 0;
+            uint32_t rel = 0;
+            if (TryReadU8(reinterpret_cast<const void*>(g_HopFix2SelectCallSite), op) && op == 0xE8 &&
+                TryReadU32(reinterpret_cast<const void*>(g_HopFix2SelectCallSite + 1), rel))
+            {
+                const uint32_t target = g_HopFix2SelectCallSite + 5 + rel;
+                g_BZRFnPtr_HopFix2 = reinterpret_cast<void(*)()>(target);
+                Log(L"[HOP2] late-resolved select fn from site 0x%08X -> 0x%08X\n",
+                    g_HopFix2SelectCallSite, target);
+                return g_BZRFnPtr_HopFix2;
+            }
+        }
+
+        if (g_HopFix2SelectFallback)
+        {
+            g_BZRFnPtr_HopFix2 = reinterpret_cast<void(*)()>(g_HopFix2SelectFallback);
+            Log(L"[HOP2] select fn unresolved at site 0x%08X; using static fallback 0x%08X\n",
+                g_HopFix2SelectCallSite, g_HopFix2SelectFallback);
+            return g_BZRFnPtr_HopFix2;
+        }
+
+        return nullptr;
     }
 
     // -----------------------------------------------------------------------
@@ -285,7 +349,20 @@ namespace BZROpenShim
     // -----------------------------------------------------------------------
     extern "C" inline void __fastcall RestoreMapListSelection(void* this_ptr)
     {
-        if (!this_ptr || !g_BZRFnPtr_HopFix2) return;
+        if (!this_ptr) return;
+
+        // Resolve the select target before anything else.  A null here means
+        // the replaced select(0) cannot be replayed at all, which is the one
+        // outcome this helper must never reach quietly.
+        void (*selectFn)() = ResolveHopFix2SelectFn();
+        if (!selectFn)
+        {
+            Log(L"[ERROR] RestoreMapListSelection: no select fn (site=0x%08X fallback=0x%08X);"
+                L" list stays unselected and the engine will fault\n",
+                g_HopFix2SelectCallSite, g_HopFix2SelectFallback);
+            return;
+        }
+
         if (IsMapRefreshTraceEnabled())
             TraceMapRefreshContext(L"RestoreMapListSelection_enter", this_ptr);
 
@@ -361,7 +438,7 @@ namespace BZROpenShim
             }
         }
 
-        void (*fn)() = g_BZRFnPtr_HopFix2;
+        void (*fn)() = selectFn;
         __try
         {
             __asm
