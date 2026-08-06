@@ -49,7 +49,14 @@ namespace BZROpenShim
         constexpr uintptr_t kOptionsInputJoystickClickAddr = 0x007B2220;
         constexpr size_t kUiViewChildBeginOffset = 0x12C;
         constexpr size_t kUiViewChildEndOffset = 0x130;
+        constexpr size_t kUiButtonOnHoverOffset = 0x150;
         constexpr size_t kUiButtonOnClickOffset = 0x154;
+        // cUI_View debug name: char[0xC8] copied by the view ctor (0x007D1CC0)
+        // from its first argument. cUI_Button installs vtable 0x008A0470 over
+        // the cUI_View vtable 0x008A0B94, which is how a node is identified as
+        // a button when walking a screen's child tree.
+        constexpr size_t kUiViewNameOffset = 0x20;
+        constexpr uintptr_t kUiButtonVtableAddr = 0x008A0470;
         // cUI_OptionsParent constructor on the live GOG/Steam 2.2.301 exe,
         // recovered from the Redux decompile corpus (FUN_007b61a0: builds the
         // esc_center.png overlay plus the Play/Graphic/Audio/Input buttons) and
@@ -3822,27 +3829,205 @@ namespace BZROpenShim
 
         // --- OpenShim button on the stock Options screen -------------------------
 
-        // The stock options column is centered inside a 1440-wide middle panel.
-        // Its first direct child is that panel; stock buttons are children of it,
-        // not of the full screen. Using the same parent is important for click
-        // dispatch as well as widescreen coordinate translation.
+        // The stock options column lives inside "Middle_Overlay", the centered
+        // 1440-wide panel the cUI_OptionsParent ctor (0x007B61A0) creates; the
+        // Back button and the four option buttons are all its children.
+        //
+        // It is NOT the screen's first child. The screen is built with four
+        // full-bleed frame views first, so the child list measured live on the
+        // GOG 2.2.301 build is:
+        //   [0] Border_Top    (0,0,3840,136)   [1] Border_Bot
+        //   [2] Border_Left   [3] Border_Right [4] Middle_Overlay (480,0,2880,2160)
+        // Taking begin[0] therefore landed the OpenShim button under Border_Top,
+        // which is what killed the top-left Back button: cUI_View's mouse
+        // dispatch (0x007D2570 down / 0x007D26C0 up) walks the child list in two
+        // passes -- children that themselves have children first, then leaf
+        // children -- taking the first that returns true, and a view whose own
+        // rect is hit consumes the event after its children decline it. An empty
+        // Border_Top is a leaf, so Middle_Overlay (5 children) was dispatched
+        // first and Back got the click. Parenting one button to Border_Top
+        // promoted that 3840x136 top strip into the first pass ahead of
+        // Middle_Overlay, so it swallowed every click in the top 136px -- which
+        // is where Back sits. Back's rect is 154px tall, so only the bottom
+        // ~18px sliver still reached it: exactly the "sometimes needs a second
+        // click" symptom, and a dead button for clicks aimed at its centre.
+        //
+        // Match the panel by the engine's own view name instead, falling back to
+        // the child with the most children (the borders have none) so a renamed
+        // view still resolves rather than silently re-breaking Back.
+        static const char* ReadUiViewName(void* view);
+
         static void* ResolveOptionsParentMiddleOverlay(void* parentScreen)
         {
             if (!parentScreen)
                 return nullptr;
 
+            void* bestByChildCount = nullptr;
+            ptrdiff_t bestChildCount = 0;
+            ptrdiff_t bestIndex = -1;
+
             __try
             {
                 auto* const screenBytes = reinterpret_cast<uint8_t*>(parentScreen);
-                void** const begin = *reinterpret_cast<void***>(screenBytes + 0x12C);
-                void** const end = *reinterpret_cast<void***>(screenBytes + 0x130);
-                if (begin && end && begin < end && (end - begin) < 64)
-                    return begin[0];
+                void** const begin =
+                    *reinterpret_cast<void***>(screenBytes + kUiViewChildBeginOffset);
+                void** const end =
+                    *reinterpret_cast<void***>(screenBytes + kUiViewChildEndOffset);
+                if (!begin || !end || begin >= end || (end - begin) >= 64)
+                    return nullptr;
+
+                for (void** slot = begin; slot != end; ++slot)
+                {
+                    void* const child = *slot;
+                    if (!child)
+                        continue;
+
+                    auto* const childBytes = reinterpret_cast<uint8_t*>(child);
+                    if (std::strncmp(reinterpret_cast<const char*>(childBytes + kUiViewNameOffset),
+                                     "Middle_Overlay",
+                                     sizeof("Middle_Overlay")) == 0)
+                    {
+                        Log(L"[SETTINGSUI] options parent resolved by name: index=%d "
+                            L"view=0x%08X name=%hs\n",
+                            static_cast<int>(slot - begin),
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(child)),
+                            ReadUiViewName(child));
+                        return child;
+                    }
+
+                    void** const childBegin =
+                        *reinterpret_cast<void***>(childBytes + kUiViewChildBeginOffset);
+                    void** const childEnd =
+                        *reinterpret_cast<void***>(childBytes + kUiViewChildEndOffset);
+                    if (!childBegin || !childEnd || childBegin > childEnd ||
+                        (childEnd - childBegin) >= 256)
+                    {
+                        continue;
+                    }
+
+                    const ptrdiff_t childCount = childEnd - childBegin;
+                    if (childCount > bestChildCount)
+                    {
+                        bestChildCount = childCount;
+                        bestByChildCount = child;
+                        bestIndex = slot - begin;
+                    }
+                }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
+                return nullptr;
             }
-            return nullptr;
+
+            // The name match is the expected path. Reaching the fallback means the
+            // screen layout moved, so say so loudly rather than silently adopting
+            // whichever view happened to have the most children.
+            Log(L"[SETTINGSUI] options parent NAME MATCH FAILED; fallback index=%d "
+                L"view=0x%08X name=%hs children=%d\n",
+                static_cast<int>(bestIndex),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bestByChildCount)),
+                ReadUiViewName(bestByChildCount),
+                static_cast<int>(bestChildCount));
+
+            return bestByChildCount;
+        }
+
+        // --- Options-screen tree instrumentation ---------------------------------
+        //
+        // The Back-button quirk (design doc UI #4) was root-caused from the
+        // cUI_OptionsParent ctor decompile alone. Disassembling the dispatch
+        // itself (2026-08-05) showed that model cannot produce the symptom:
+        //   cUI_View::OnMouseDown 0x7D2570 / OnMouseUp 0x7D26C0 walk +0x12C in
+        //   two passes -- children that themselves have children first, then
+        //   leaf children -- taking the first that returns true, and finally
+        //   consuming the event themselves if their own rect is hit. Buttons
+        //   are leaves (the caption at +0x144 is not AddChild'd), Back is the
+        //   overlay's child[0], so appending a sixth leaf cannot starve it.
+        //
+        // Rather than guess again, measure: dump the real tree once per Options
+        // construction so the rects, flags, parents and click slots that the
+        // dispatch actually sees are on the record.
+        static const char* ReadUiViewName(void* view)
+        {
+            static char name[0xC8 + 1];
+            name[0] = '\0';
+            if (!view)
+                return name;
+
+            __try
+            {
+                const char* const raw = reinterpret_cast<const char*>(
+                    reinterpret_cast<uint8_t*>(view) + kUiViewNameOffset);
+                size_t index = 0;
+                for (; index < 0xC8; ++index)
+                {
+                    const char ch = raw[index];
+                    if (ch == '\0')
+                        break;
+                    name[index] = (ch >= 0x20 && ch <= 0x7E) ? ch : '?';
+                }
+                name[index] = '\0';
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                name[0] = '\0';
+            }
+            return name;
+        }
+
+        static void LogUiViewNode(const wchar_t* tag, void* view, unsigned depth)
+        {
+            if (!view || depth > 2)
+                return;
+
+            __try
+            {
+                auto* const bytes = reinterpret_cast<uint8_t*>(view);
+                const auto* const rect = reinterpret_cast<const float*>(bytes + 4);
+                void** const begin = *reinterpret_cast<void***>(bytes + kUiViewChildBeginOffset);
+                void** const end = *reinterpret_cast<void***>(bytes + kUiViewChildEndOffset);
+                const ptrdiff_t childCount =
+                    (begin && end && begin <= end && (end - begin) < 256) ? (end - begin) : -1;
+                const uintptr_t vtable = *reinterpret_cast<uintptr_t*>(bytes);
+                const bool isButton = (vtable == kUiButtonVtableAddr);
+
+                Log(L"[SETTINGSUI] %ls depth=%u view=0x%08X vt=0x%08X name=%hs "
+                    L"rect=(%.1f,%.1f,%.1f,%.1f) flags=0x%X vis=%u layer=%u "
+                    L"parent=0x%08X shell=0x%08X children=%d%ls\n",
+                    tag,
+                    depth,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(view)),
+                    static_cast<uint32_t>(vtable),
+                    ReadUiViewName(view),
+                    rect[0], rect[1], rect[2], rect[3],
+                    *reinterpret_cast<uint32_t*>(bytes + 0x14),
+                    static_cast<unsigned>(bytes[0xE9]),
+                    static_cast<unsigned>(bytes[0xE8]),
+                    static_cast<uint32_t>(*reinterpret_cast<uintptr_t*>(bytes + 0x13C)),
+                    static_cast<uint32_t>(*reinterpret_cast<uintptr_t*>(bytes + 0x138)),
+                    static_cast<int>(childCount),
+                    isButton ? L" [button]" : L"");
+
+                if (isButton)
+                {
+                    Log(L"[SETTINGSUI]   button enabled=%u onHover=0x%08X onClick=0x%08X\n",
+                        static_cast<unsigned>(bytes[0x148]),
+                        static_cast<uint32_t>(
+                            *reinterpret_cast<uintptr_t*>(bytes + kUiButtonOnHoverOffset)),
+                        static_cast<uint32_t>(
+                            *reinterpret_cast<uintptr_t*>(bytes + kUiButtonOnClickOffset)));
+                }
+
+                for (ptrdiff_t index = 0; index < childCount; ++index)
+                    LogUiViewNode(tag, begin[index], depth + 1);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[SETTINGSUI] %ls depth=%u view=0x%08X <faulted while reading>\n",
+                    tag,
+                    depth,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(view)));
+            }
         }
 
         // A shorter final row keeps the button inside the frame at 16:9 instead
@@ -3861,9 +4046,21 @@ namespace BZROpenShim
             if (g_ShimSettingsMenuButton)
                 return;
 
-            void* buttonParent = ResolveOptionsParentMiddleOverlay(parentScreen);
+            // Middle_Overlay or nothing. Every other parent on this screen is a
+            // full-bleed frame view, and giving any of them a child reorders the
+            // screen's click dispatch and starves a stock button (the screen
+            // itself is no better: Middle_Overlay spans the whole play area and
+            // would then eat this button's own clicks, which is what the
+            // 2026-07-17 "parent to screen root" attempt hit). A missing entry
+            // point beats a dead Back button, so bail instead of guessing.
+            void* const buttonParent = ResolveOptionsParentMiddleOverlay(parentScreen);
             if (!buttonParent)
-                buttonParent = parentScreen;
+            {
+                Log(L"[SETTINGSUI] Middle_Overlay not found on options screen=0x%08X; "
+                    L"skipping OpenShim button\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parentScreen)));
+                return;
+            }
 
             void* buttonMem = ::operator new(0x1EC, std::nothrow);
             if (!buttonMem)
@@ -3874,7 +4071,11 @@ namespace BZROpenShim
                                                     "OpenShimSettingsMenuButton",
                                                     // Continue the stock options column with a compact fifth row.
                                                     // The shorter height keeps it above the lower frame at 16:9.
-                                                    747.0f,
+                                                    // x/w match the stock Play/Graphic/Audio/Input buttons because
+                                                    // this shares their parent: the layout pass (0x007D14B0) adds
+                                                    // Middle_Overlay's absolute origin on top of these design
+                                                    // coordinates, so 508 lands the column-aligned 1496 at 4K.
+                                                    508.0f,
                                                     882.0f,
                                                     422.0f,
                                                     58.0f,
@@ -3894,18 +4095,26 @@ namespace BZROpenShim
                 g_BzrFn_SetOnClick(button, reinterpret_cast<void*>(ShimSettingsMenuClick));
             if (g_BzrFn_SetOnHover)
                 g_BzrFn_SetOnHover(button, reinterpret_cast<void*>(InputBindingUiButtonOnHoverNoop));
-            // Attach to the same full-screen Middle_Overlay the four stock option
-            // buttons live under. Adding to the screen's own child list instead
-            // (tried 2026-07-17) makes the overlay — which sits earlier in the
-            // screen list and spans the whole screen — consume our button's
-            // clicks before they reach it, so the OpenShim button stops
-            // navigating. Keeping it in the overlay is the working trade-off; the
-            // cost is the stock top-left Back occasionally needing a second click
-            // (pre-existing, see options_ui_improvements_design_20260717.md #4).
+            // Append as Middle_Overlay's sixth child, alongside Back and the four
+            // stock option buttons. All six are leaf views, so they share the
+            // dispatch pass and are tried in list order; Back stays at index 0
+            // and keeps first refusal on the top-left clicks.
             g_BzrFn_AddChild(buttonParent, button, 0);
             g_ShimSettingsMenuButton = button;
-            Log(L"[SETTINGSUI] OpenShim button added to options screen=0x%08X\n",
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parentScreen)));
+
+            const auto* const buttonRect =
+                reinterpret_cast<const float*>(reinterpret_cast<uint8_t*>(button) + 4);
+            void** const parentBegin = *reinterpret_cast<void***>(
+                reinterpret_cast<uint8_t*>(buttonParent) + kUiViewChildBeginOffset);
+            void** const parentEnd = *reinterpret_cast<void***>(
+                reinterpret_cast<uint8_t*>(buttonParent) + kUiViewChildEndOffset);
+            Log(L"[SETTINGSUI] OpenShim button added to options screen=0x%08X parent=0x%08X "
+                L"parentName=%hs parentChildren=%d rect=(%.1f,%.1f,%.1f,%.1f)\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parentScreen)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(buttonParent)),
+                ReadUiViewName(buttonParent),
+                static_cast<int>(parentEnd - parentBegin),
+                buttonRect[0], buttonRect[1], buttonRect[2], buttonRect[3]);
         }
 
         static void OnOptionsParentCtorScaffold(void* screen)
@@ -3918,7 +4127,22 @@ namespace BZROpenShim
             g_ParentScreenBinding.BindConstructed(screen);
             g_ShimSettingsMenuButton = nullptr;
             g_ShimSettingsNavigationTick = 0;
+            // This dump is how the Back-button starvation was finally measured,
+            // and it is the tool to reach for whenever a widget on this screen
+            // stops receiving clicks. Dump the first Options construction of
+            // every session unconditionally -- the whole reason this bug
+            // survived two fix attempts is that reproducing it required a flag
+            // nobody had set -- and let the env var force it on every open.
+            static bool dumpedThisSession = false;
+            const bool dumpTree =
+                !dumpedThisSession || EnvFlagEnabled("OPENSHIM_LOG_OPTIONS_TREE");
+            dumpedThisSession = true;
+
+            if (dumpTree)
+                LogUiViewNode(L"options-tree-before", screen, 0);
             EnsureShimSettingsMenuButton(screen);
+            if (dumpTree)
+                LogUiViewNode(L"options-tree-after", screen, 0);
         }
 
 
