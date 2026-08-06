@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+"""Apply the PR1 network correctness runtime edits with exact source assertions.
+
+This script is intentionally temporary. The PR workbench removes it after a
+successful Release|Win32 build and commit.
+"""
+
+from pathlib import Path
+
+SOURCE = Path("src/patches/net_optimizer.cpp")
+
+
+def replace_once(source: str, old: str, new: str, label: str) -> str:
+    count = source.count(old)
+    if count != 1:
+        raise RuntimeError(f"{label}: expected exactly one match, found {count}")
+    return source.replace(old, new, 1)
+
+
+def main() -> None:
+    text = SOURCE.read_text(encoding="utf-8")
+
+    text = replace_once(
+        text,
+        "    constexpr DWORD kGovPollMs = 100;\n    constexpr uint32_t kGovColdStart = 4000;",
+        "    constexpr DWORD kGovPollMs = 100;\n    constexpr DWORD kGovObservationLogMs = 10000;\n    constexpr uint32_t kGovColdStart = 4000;",
+        "governor observation interval",
+    )
+
+    text = replace_once(
+        text,
+        "        bool enablePacketReorder = true;",
+        "        bool enablePacketReorder = false;",
+        "built-in reorder default",
+    )
+
+    text = replace_once(
+        text,
+        '        g_Config.enablePacketReorder = ReadIniBool("OpenShimSocket", "EnablePacketReorder", true);',
+        '        g_Config.enablePacketReorder = ReadIniBool("OpenShimSocket", "EnablePacketReorder", false);',
+        "INI reorder fallback",
+    )
+
+    text = replace_once(
+        text,
+        "    volatile LONG g_GovStop = 0;\n    HANDLE g_GovScanThread = nullptr;\n    HANDLE g_GovPatchThread = nullptr;\n    volatile LONG g_AutoKickStop = 0;",
+        "    volatile LONG g_GovStop = 0;\n    HANDLE g_GovScanThread = nullptr;\n    HANDLE g_GovPatchThread = nullptr;\n    volatile LONG g_GovLastObserved = 0;\n    volatile LONG g_GovObservationValid = 0;\n    volatile LONG g_GovBumps = 0;\n    volatile LONG g_AutoKickStop = 0;",
+        "governor observation state",
+    )
+
+    old_governor = '''    DWORD WINAPI GovernorPatchThread(LPVOID)
+    {
+        if (g_Config.govStart == 0)
+            return 0;
+
+        Sleep(15000);
+        const int matches = CountGovernorSignatureMatches();
+        if (matches != 1)
+        {
+            Logf("[OpenShimNet] governor_patch: %d signature matches; disabled", matches);
+            return 0;
+        }
+
+        Logf("[OpenShimNet] governor_patch: version confirmed; watching 0x%08lX coldStart=%u target=%u",
+            static_cast<unsigned long>(reinterpret_cast<uintptr_t>(kGovRateAddr)),
+            kGovColdStart,
+            g_Config.govStart);
+
+        uint32_t bumps = 0;
+        while (InterlockedCompareExchange(&g_GovStop, 0, 0) == 0)
+        {
+            if (*kGovRateAddr == kGovColdStart)
+            {
+                *kGovRateAddr = g_Config.govStart;
+                if (bumps == 0)
+                {
+                    Logf("[OpenShimNet] governor_patch: cold-start caught %u -> %u",
+                        kGovColdStart,
+                        g_Config.govStart);
+                }
+                ++bumps;
+            }
+            Sleep(kGovPollMs);
+        }
+
+        Logf("[OpenShimNet] governor_patch: stopping after %u bump(s)", bumps);
+        return 0;
+    }'''
+
+    new_governor = '''    DWORD WINAPI GovernorPatchThread(LPVOID)
+    {
+        if (g_Config.govStart == 0)
+            return 0;
+
+        Sleep(15000);
+        if (InterlockedCompareExchange(&g_GovStop, 0, 0) != 0)
+            return 0;
+
+        const int matches = CountGovernorSignatureMatches();
+        if (matches != 1)
+        {
+            Logf("[OpenShimNet] governor_patch: %d signature matches; disabled", matches);
+            return 0;
+        }
+
+        Logf("[OpenShimNet] governor_patch: version confirmed; watching 0x%08lX coldStart=%u target=%u",
+            static_cast<unsigned long>(reinterpret_cast<uintptr_t>(kGovRateAddr)),
+            kGovColdStart,
+            g_Config.govStart);
+
+        uint32_t bumps = 0;
+        uint32_t lastObserved = *kGovRateAddr;
+        uint64_t lastObservationLogMs = GetTickCount64();
+        InterlockedExchange(&g_GovLastObserved, static_cast<LONG>(lastObserved));
+        InterlockedExchange(&g_GovObservationValid, 1);
+        InterlockedExchange(&g_GovBumps, 0);
+        Logf("[OpenShimNet] governor_patch: initial observed=%u target=%u",
+            lastObserved,
+            g_Config.govStart);
+
+        while (InterlockedCompareExchange(&g_GovStop, 0, 0) == 0)
+        {
+            const uint32_t observed = *kGovRateAddr;
+            if (observed != lastObserved)
+            {
+                const char* reason = observed == kGovColdStart
+                    ? "cold-start trigger"
+                    : (observed == g_Config.govStart ? "target restored" : "game overwrite or clamp");
+                Logf("[OpenShimNet] governor_patch: observed transition %u -> %u reason=%s",
+                    lastObserved,
+                    observed,
+                    reason);
+                lastObserved = observed;
+                InterlockedExchange(&g_GovLastObserved, static_cast<LONG>(observed));
+            }
+
+            if (observed == kGovColdStart)
+            {
+                *kGovRateAddr = g_Config.govStart;
+                const uint32_t readback = *kGovRateAddr;
+                ++bumps;
+                lastObserved = readback;
+                lastObservationLogMs = GetTickCount64();
+                InterlockedExchange(&g_GovLastObserved, static_cast<LONG>(readback));
+                InterlockedExchange(&g_GovBumps, static_cast<LONG>(bumps));
+                Logf("[OpenShimNet] governor_patch: applied cold-start previous=%u requested=%u readback=%u bump=%u",
+                    observed,
+                    g_Config.govStart,
+                    readback,
+                    bumps);
+            }
+            else
+            {
+                const uint64_t nowMs = GetTickCount64();
+                if (nowMs - lastObservationLogMs >= kGovObservationLogMs)
+                {
+                    Logf("[OpenShimNet] governor_patch: periodic observed=%u target=%u bumps=%u",
+                        observed,
+                        g_Config.govStart,
+                        bumps);
+                    lastObservationLogMs = nowMs;
+                }
+            }
+
+            Sleep(kGovPollMs);
+        }
+
+        const LONG finalObserved = InterlockedCompareExchange(&g_GovLastObserved, 0, 0);
+        const LONG finalBumps = InterlockedCompareExchange(&g_GovBumps, 0, 0);
+        Logf("[OpenShimNet] governor_patch: thread exit bumps=%ld finalObserved=%ld target=%u",
+            static_cast<long>(finalBumps),
+            static_cast<long>(finalObserved),
+            g_Config.govStart);
+        return 0;
+    }'''
+
+    text = replace_once(text, old_governor, new_governor, "governor observer implementation")
+
+    text = replace_once(
+        text,
+        '''        if (!g_Config.enabled)
+        {
+            LogShimA(LogLevel::Info, "net", "[OpenShimNet] Socket optimizer disabled by configuration");
+            return TRUE;
+        }
+
+        if (!LoadWinsockExports())''',
+        '''        if (!g_Config.enabled)
+        {
+            LogShimA(LogLevel::Info, "net", "[OpenShimNet] Socket optimizer disabled by configuration");
+            return TRUE;
+        }
+
+        if (g_Config.enablePacketReorder)
+        {
+            LogShimA(LogLevel::Warn, "net",
+                "[OpenShimNet] EXPERIMENTAL packet reordering is enabled. The wire sequence field is unresolved and overlapped WSARecvFrom traffic bypasses this path; use only for controlled diagnostics.");
+        }
+        if (g_Config.sendDup)
+        {
+            LogShimA(LogLevel::Warn, "net",
+                "[OpenShimNet] DEPRECATED packet duplication is enabled. Testing indicates duplication may worsen constrained uplinks; use only for controlled diagnostics.");
+        }
+
+        if (!LoadWinsockExports())''',
+        "experimental startup warnings",
+    )
+
+    text = replace_once(
+        text,
+        '''        if (g_Config.govStart != 0 && !g_GovPatchThread)
+        {
+            InterlockedExchange(&g_GovStop, 0);
+            g_GovPatchThread = CreateThread(nullptr, 0, GovernorPatchThread, nullptr, 0, nullptr);''',
+        '''        if (g_Config.govStart != 0 && !g_GovPatchThread)
+        {
+            InterlockedExchange(&g_GovStop, 0);
+            InterlockedExchange(&g_GovLastObserved, 0);
+            InterlockedExchange(&g_GovObservationValid, 0);
+            InterlockedExchange(&g_GovBumps, 0);
+            g_GovPatchThread = CreateThread(nullptr, 0, GovernorPatchThread, nullptr, 0, nullptr);''',
+        "governor observer reset",
+    )
+
+    text = replace_once(
+        text,
+        '''        InterlockedExchange(&g_WakeStop, 1);
+        InterlockedExchange(&g_DupStop, 1);
+        InterlockedExchange(&g_GovStop, 1);
+        InterlockedExchange(&g_AutoKickStop, 1);
+        if (g_WakeSender != INVALID_SOCKET && g_RealCloseSocket)''',
+        '''        InterlockedExchange(&g_WakeStop, 1);
+        InterlockedExchange(&g_DupStop, 1);
+        InterlockedExchange(&g_GovStop, 1);
+        InterlockedExchange(&g_AutoKickStop, 1);
+        if (g_Config.govStart != 0 &&
+            InterlockedCompareExchange(&g_GovObservationValid, 0, 0) != 0)
+        {
+            const LONG finalObserved = InterlockedCompareExchange(&g_GovLastObserved, 0, 0);
+            const LONG finalBumps = InterlockedCompareExchange(&g_GovBumps, 0, 0);
+            Logf("[OpenShimNet] governor_patch: shutdown snapshot bumps=%ld finalObserved=%ld target=%u",
+                static_cast<long>(finalBumps),
+                static_cast<long>(finalObserved),
+                g_Config.govStart);
+        }
+        if (g_WakeSender != INVALID_SOCKET && g_RealCloseSocket)''',
+        "governor shutdown snapshot",
+    )
+
+    SOURCE.write_text(text, encoding="utf-8", newline="\n")
+    print("PR1 runtime edits applied successfully")
+
+
+if __name__ == "__main__":
+    main()
