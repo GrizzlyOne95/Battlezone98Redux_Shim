@@ -6884,29 +6884,85 @@ namespace BZROpenShim
             }
         }
 
+        // Written through a temp file and swapped into place. Truncating the
+        // real file first meant a crash mid-write (and this shim ships a crash
+        // logger precisely because crashes happen) left career_stats.cfg empty
+        // or half-written, losing the player's whole career record. RecordDeath
+        // saves often, so that window came around constantly.
         static bool SaveCareerStatsFile(const std::unordered_map<std::string, std::string>& data)
         {
             const std::filesystem::path path = GetCareerStatsPath();
-            std::ofstream output(path, std::ios::trunc);
-            if (!output.is_open())
-                return false;
+            const std::filesystem::path tempPath =
+                std::filesystem::path(path.wstring() + L".openshim.tmp");
 
-            std::vector<std::string> keys;
-            keys.reserve(data.size());
-            for (const auto& entry : data)
-                keys.push_back(entry.first);
-
-            std::sort(keys.begin(), keys.end());
-            for (const auto& key : keys)
             {
-                const auto it = data.find(key);
-                if (it == data.end())
-                    continue;
+                std::ofstream output(tempPath, std::ios::trunc);
+                if (!output.is_open())
+                    return false;
 
-                output << it->first << '=' << it->second << '\n';
+                std::vector<std::string> keys;
+                keys.reserve(data.size());
+                for (const auto& entry : data)
+                    keys.push_back(entry.first);
+
+                std::sort(keys.begin(), keys.end());
+                for (const auto& key : keys)
+                {
+                    const auto it = data.find(key);
+                    if (it == data.end())
+                        continue;
+
+                    output << it->first << '=' << it->second << '\n';
+                }
+
+                output.flush();
+                if (!output.good())
+                {
+                    output.close();
+                    std::error_code ignored;
+                    std::filesystem::remove(tempPath, ignored);
+                    return false;
+                }
             }
 
-            return output.good();
+            std::error_code existsError;
+            if (!std::filesystem::exists(path, existsError))
+            {
+                if (MoveFileExW(tempPath.c_str(), path.c_str(), MOVEFILE_WRITE_THROUGH))
+                    return true;
+
+                std::error_code ignored;
+                std::filesystem::remove(tempPath, ignored);
+                return false;
+            }
+
+            bool replaced = ReplaceFileW(path.c_str(),
+                                         tempPath.c_str(),
+                                         nullptr,
+                                         REPLACEFILE_IGNORE_MERGE_ERRORS,
+                                         nullptr,
+                                         nullptr) != FALSE;
+            if (!replaced)
+            {
+                replaced = MoveFileExW(tempPath.c_str(),
+                                       path.c_str(),
+                                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != FALSE;
+            }
+            if (!replaced && CopyFileW(tempPath.c_str(), path.c_str(), FALSE))
+            {
+                std::error_code ignored;
+                std::filesystem::remove(tempPath, ignored);
+                replaced = true;
+            }
+            if (!replaced)
+            {
+                std::error_code ignored;
+                std::filesystem::remove(tempPath, ignored);
+                Log(L"[CAREER] Atomic replace failed for %hs\n", path.string().c_str());
+                return false;
+            }
+
+            return true;
         }
 
         static int GetCareerStatsInteger(const std::unordered_map<std::string, std::string>& data,
@@ -7882,11 +7938,29 @@ namespace BZROpenShim
 
         static bool TryApplySelectedFlagThroughEnginePath(const char* source, const char* path)
         {
+            // The destination is a fixed MAX_PATH engine global, so the length
+            // has to be enforced here rather than trusted from the call site.
+            // The one current caller does check, but a silent overrun of an
+            // engine global would corrupt unrelated state instead of faulting,
+            // which the surrounding __try would not catch.
+            if (!path)
+                return false;
+
+            const size_t pathLength = std::strlen(path);
+            if (pathLength >= kFlagFilePathBufferCapacity)
+            {
+                Log(L"[FLAG] %hs refusing engine upload: path is %zu bytes, buffer holds %zu\n",
+                    source ? source : "flag",
+                    pathLength,
+                    kFlagFilePathBufferCapacity);
+                return false;
+            }
+
             __try
             {
                 auto* pathBuffer = reinterpret_cast<char*>(kFlagFilePathBufferAddr);
                 std::memset(pathBuffer, 0, kFlagFilePathBufferCapacity);
-                std::memcpy(pathBuffer, path, std::strlen(path));
+                std::memcpy(pathBuffer, path, pathLength);
                 g_BzrFn_SetMyFlag();
                 MarkFlagDisplayDirty();
 
