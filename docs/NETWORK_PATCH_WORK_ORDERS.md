@@ -19,7 +19,7 @@ The sequence is deliberate: establish a safe baseline first, add measured tuning
 
 ## PR1 — Network correctness baseline
 
-**Status:** Implemented in pull request #5. Release|Win32 builds successfully. In-game smoke validation remains recommended before merge.
+**Status:** Implemented in pull request #5. Release|Win32 builds successfully with Visual Studio 2022/MSBuild. An equivalent GitHub Actions build now runs for pull requests, pushes to `main`, and manual dispatch. In-game smoke validation remains recommended before merge.
 
 ### Objective
 
@@ -34,11 +34,13 @@ Remove unsafe or unproven behavior from the default path and make experimental n
 5. Log the observed live governor value periodically while `GovernorStart` is enabled, including when the game overwrites or clamps the requested value.
 6. Do not change socket-buffer sizing, DSCP marking, auto-kick relaxation, relay capture, or ordinary socket diagnostics.
 7. Add documentation explaining why reordering is opt-in: the sequence field is not sufficiently validated and the game commonly uses overlapped receives that bypass the existing synchronous reorder path.
+8. Add a reproducible GitHub Actions `Release|Win32` build that verifies `winmm.dll`, records its SHA-256, and publishes the DLL/PDB as a short-lived artifact.
 
 ### Files expected to change
 
 - `src/patches/net_optimizer.cpp`
 - `net.ini`
+- `.github/workflows/build-win32.yml`
 - Network documentation
 
 ### Acceptance criteria
@@ -50,7 +52,7 @@ Remove unsafe or unproven behavior from the default path and make experimental n
 - Enabling duplication produces one clear warning that testing found it may worsen constrained uplinks.
 - With `GovernorStart=0`, no governor patch thread runs.
 - With `GovernorStart>0`, logs show the requested value, every detected overwrite/clamp transition, periodic observed values, and a final shutdown snapshot.
-- Release Win32 builds successfully.
+- Release Win32 builds successfully locally and in GitHub Actions.
 - Existing tests pass, where present.
 
 ### Out of scope
