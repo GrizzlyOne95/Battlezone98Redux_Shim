@@ -4,13 +4,11 @@
 // Copyright (C) 2025-2026 BZR Open Shim contributors
 // SPDX-License-Identifier: MIT
 //
-// This is an independent OpenShim implementation of BZR's native save call.
-// The calling convention and stable byte signature were established by prior
-// reverse-engineering/testing in Extra Utilities; OpenShim does not load or
-// link EXU and does not require mission Lua to participate.
+// Independent OpenShim implementation of BZR's native save call. The calling
+// convention and stable byte signature were established by prior BZR 2.2.301
+// reverse-engineering/testing. OpenShim does not link or require EXU/Lua.
 
 #include "autosave.h"
-
 #include "game_state.h"
 #include "shim_log.h"
 
@@ -34,7 +32,6 @@ namespace BZROpenShim
         using NativeSaveGameFn = bool(__cdecl*)(char*, int);
         using WorldUpdateRenderQueueFn = void(__thiscall*)(void*, void*);
 
-        // BZR 2.2.301 runtime state already used elsewhere in OpenShim/EXU.
         constexpr uintptr_t kIsNetGameAddr = 0x00917F7B;
         constexpr uintptr_t kUserObjectAddr = 0x00917AFC;
         constexpr uintptr_t kEditModeAddr = 0x009454B8;
@@ -42,17 +39,17 @@ namespace BZROpenShim
         constexpr uintptr_t kUiWrapperActiveAddr = 0x00918324;
         constexpr uintptr_t kUiCurrentScreenTypeAddr = 0x00918328;
 
-        // Existing OpenShim patch catalog entry "Legacy World Update RenderQueue
-        // VTable Hook". We stack the autosave hook after RunPatcher(), so the
-        // previous target is either stock BZR or OpenShim's existing wrapper.
+        // Existing patch-catalog slot for LegacyWorld::updateRenderQueue.
+        // Installed after RunPatcher() so this chains either stock BZR or the
+        // OpenShim wrapper already present in the slot.
         constexpr uintptr_t kWorldUpdateRenderQueueVtableSlot = 0x00892728;
 
         constexpr DWORD kDefaultIntervalSeconds = 120;
         constexpr DWORD kDefaultInitialDelaySeconds = 10;
         constexpr DWORD kDefaultRetrySeconds = 15;
 
-        // Proven BZR 2.2.301 native SaveGame(char*, int) signature. -1 denotes
-        // bytes that vary because they contain call targets/data addresses.
+        // Native bool __cdecl SaveGame(char* filename, int saveType).
+        // -1 represents a wildcard byte.
         constexpr std::array<int, 54> kNativeSaveGameSignature = {
             0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x94, 0x00, 0x00, 0x00, 0xC6, 0x45, 0xFF, 0x01, 0xE8, -1, -1,
             -1, -1, 0x89, 0x85, 0x78, 0xFF, 0xFF, 0xFF, 0x68, -1, -1, -1, -1, 0xE8, -1, -1, -1, -1,
@@ -144,28 +141,23 @@ namespace BZROpenShim
             }
         }
 
-        bool IsExecutableProtect(DWORD protect) noexcept
-        {
-            if ((protect & PAGE_GUARD) != 0 || (protect & PAGE_NOACCESS) != 0)
-                return false;
-
-            const DWORD baseProtect = protect & 0xFF;
-            return baseProtect == PAGE_EXECUTE ||
-                   baseProtect == PAGE_EXECUTE_READ ||
-                   baseProtect == PAGE_EXECUTE_READWRITE ||
-                   baseProtect == PAGE_EXECUTE_WRITECOPY;
-        }
-
         bool IsExecutableAddress(const void* address) noexcept
         {
             if (!address)
                 return false;
 
             MEMORY_BASIC_INFORMATION mbi{};
-            if (VirtualQuery(address, &mbi, sizeof(mbi)) != sizeof(mbi))
+            if (VirtualQuery(address, &mbi, sizeof(mbi)) != sizeof(mbi) || mbi.State != MEM_COMMIT)
                 return false;
 
-            return mbi.State == MEM_COMMIT && IsExecutableProtect(mbi.Protect);
+            if ((mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0)
+                return false;
+
+            const DWORD protect = mbi.Protect & 0xFF;
+            return protect == PAGE_EXECUTE ||
+                   protect == PAGE_EXECUTE_READ ||
+                   protect == PAGE_EXECUTE_READWRITE ||
+                   protect == PAGE_EXECUTE_WRITECOPY;
         }
 
         std::filesystem::path GetGameDirectory()
@@ -186,10 +178,7 @@ namespace BZROpenShim
             DWORD maximum)
         {
             const UINT raw = GetPrivateProfileIntA(
-                "AutoSave",
-                key,
-                static_cast<INT>(defaultValue),
-                iniPath.string().c_str());
+                "AutoSave", key, static_cast<INT>(defaultValue), iniPath.string().c_str());
             return (std::clamp)(static_cast<DWORD>(raw), minimum, maximum);
         }
 
@@ -197,13 +186,12 @@ namespace BZROpenShim
         {
             g_config = {};
             const std::filesystem::path iniPath = g_gameDirectory / "openshim.ini";
+            const std::string ini = iniPath.string();
 
-            g_config.enabled = GetPrivateProfileIntA(
-                "AutoSave", "Enabled", 1, iniPath.string().c_str()) != 0;
-            g_config.backupExisting = GetPrivateProfileIntA(
-                "AutoSave", "BackupExisting", 1, iniPath.string().c_str()) != 0;
-            g_config.respectExternalAutoSave = GetPrivateProfileIntA(
-                "AutoSave", "RespectExternalAutoSave", 1, iniPath.string().c_str()) != 0;
+            g_config.enabled = GetPrivateProfileIntA("AutoSave", "Enabled", 1, ini.c_str()) != 0;
+            g_config.backupExisting = GetPrivateProfileIntA("AutoSave", "BackupExisting", 1, ini.c_str()) != 0;
+            g_config.respectExternalAutoSave =
+                GetPrivateProfileIntA("AutoSave", "RespectExternalAutoSave", 1, ini.c_str()) != 0;
 
             const DWORD intervalSeconds = ReadIniDword(
                 iniPath, "IntervalSeconds", kDefaultIntervalSeconds, 10, 3600);
@@ -217,21 +205,18 @@ namespace BZROpenShim
             g_config.retryMs = static_cast<ULONGLONG>(retrySeconds) * 1000ULL;
         }
 
-        const uint8_t* FindPattern(
-            const uint8_t* start,
-            size_t size,
-            const std::array<int, 54>& pattern) noexcept
+        const uint8_t* FindPattern(const uint8_t* start, size_t size) noexcept
         {
-            if (!start || size < pattern.size())
+            if (!start || size < kNativeSaveGameSignature.size())
                 return nullptr;
 
-            const size_t last = size - pattern.size();
+            const size_t last = size - kNativeSaveGameSignature.size();
             for (size_t offset = 0; offset <= last; ++offset)
             {
                 bool matched = true;
-                for (size_t index = 0; index < pattern.size(); ++index)
+                for (size_t index = 0; index < kNativeSaveGameSignature.size(); ++index)
                 {
-                    const int expected = pattern[index];
+                    const int expected = kNativeSaveGameSignature[index];
                     if (expected >= 0 && start[offset + index] != static_cast<uint8_t>(expected))
                     {
                         matched = false;
@@ -242,7 +227,6 @@ namespace BZROpenShim
                 if (matched)
                     return start + offset;
             }
-
             return nullptr;
         }
 
@@ -265,7 +249,9 @@ namespace BZROpenShim
             const uint8_t* resolved = nullptr;
             size_t matchCount = 0;
 
-            for (WORD index = 0; index < nt->FileHeader.NumberOfSections; ++index, ++section)
+            for (WORD sectionIndex = 0;
+                 sectionIndex < nt->FileHeader.NumberOfSections;
+                 ++sectionIndex, ++section)
             {
                 if ((section->Characteristics & IMAGE_SCN_MEM_EXECUTE) == 0)
                     continue;
@@ -273,13 +259,12 @@ namespace BZROpenShim
                 const size_t sectionSize = section->Misc.VirtualSize != 0
                     ? static_cast<size_t>(section->Misc.VirtualSize)
                     : static_cast<size_t>(section->SizeOfRawData);
-                const uint8_t* sectionBase = base + section->VirtualAddress;
-
-                const uint8_t* cursor = sectionBase;
+                const uint8_t* cursor = base + section->VirtualAddress;
                 size_t remaining = sectionSize;
+
                 while (remaining >= kNativeSaveGameSignature.size())
                 {
-                    const uint8_t* match = FindPattern(cursor, remaining, kNativeSaveGameSignature);
+                    const uint8_t* match = FindPattern(cursor, remaining);
                     if (!match)
                         break;
 
@@ -316,7 +301,6 @@ namespace BZROpenShim
             {
                 return false;
             }
-
             return isNetGame == 0 && userObject != nullptr;
         }
 
@@ -341,12 +325,11 @@ namespace BZROpenShim
 
             if (wrapperActive != 0 && currentScreen != nullptr && screenType != 0)
             {
-                CURSORINFO cursorInfo{};
-                cursorInfo.cbSize = sizeof(cursorInfo);
-                if (GetCursorInfo(&cursorInfo) && (cursorInfo.flags & CURSOR_SHOWING) != 0)
+                CURSORINFO info{};
+                info.cbSize = sizeof(info);
+                if (GetCursorInfo(&info) && (info.flags & CURSOR_SHOWING) != 0)
                     return true;
             }
-
             return false;
         }
 
@@ -399,7 +382,6 @@ namespace BZROpenShim
                 g_haveObservedAutoSaveWriteTime = true;
                 return false;
             }
-
             if (writeTime == g_observedAutoSaveWriteTime)
                 return false;
 
@@ -428,12 +410,10 @@ namespace BZROpenShim
             if (error)
                 return false;
 
-            error.clear();
             std::filesystem::create_directories(g_autoSaveBackupPath.parent_path(), error);
             if (error)
                 return false;
 
-            error.clear();
             const bool copied = std::filesystem::copy_file(
                 g_autoSavePath,
                 g_autoSaveBackupPath,
@@ -461,25 +441,19 @@ namespace BZROpenShim
         void WriteAutoSaveLabel()
         {
             std::ofstream label(g_autoSaveLabelPath, std::ios::binary | std::ios::trunc);
-            if (!label.is_open())
-            {
+            if (label.is_open())
+                label << "AutoSave";
+            else
                 LogShimA(
                     LogLevel::Warn,
                     "autosave",
                     "Could not write AutoSave label %s",
                     g_autoSaveLabelPath.string().c_str());
-                return;
-            }
-
-            label << "AutoSave";
         }
 
         bool PerformAutoSave()
         {
-            if (!g_nativeSaveGame)
-                return false;
-
-            if (InterlockedCompareExchange(&g_saveInProgress, 1, 0) != 0)
+            if (!g_nativeSaveGame || InterlockedCompareExchange(&g_saveInProgress, 1, 0) != 0)
                 return false;
 
             bool success = false;
@@ -504,11 +478,7 @@ namespace BZROpenShim
                 {
                     std::string filename = g_autoSavePath.string();
                     DWORD exceptionCode = 0;
-                    const bool saved = InvokeNativeSaveGame(
-                        g_nativeSaveGame,
-                        filename.data(),
-                        0,
-                        exceptionCode);
+                    const bool saved = InvokeNativeSaveGame(g_nativeSaveGame, filename.data(), 0, exceptionCode);
 
                     if (exceptionCode != 0)
                     {
@@ -521,11 +491,7 @@ namespace BZROpenShim
                     }
                     else if (!saved)
                     {
-                        LogShimA(
-                            LogLevel::Warn,
-                            "autosave",
-                            "Native SaveGame returned false for %s",
-                            filename.c_str());
+                        LogShimA(LogLevel::Warn, "autosave", "Native SaveGame returned false for %s", filename.c_str());
                     }
                     else
                     {
@@ -546,21 +512,17 @@ namespace BZROpenShim
             return success;
         }
 
-        void __fastcall AutoSaveWorldUpdateRenderQueueHook(
-            void* thisPtr,
-            void*,
-            void* renderQueue)
+        void __fastcall AutoSaveWorldUpdateRenderQueueHook(void* thisPtr, void*, void* renderQueue)
         {
-            WorldUpdateRenderQueueFn previous = g_previousWorldUpdateRenderQueue;
+            const WorldUpdateRenderQueueFn previous = g_previousWorldUpdateRenderQueue;
             if (previous)
                 previous(thisPtr, renderQueue);
-
             AutoSaveTick();
         }
 
         bool InstallMainThreadHook()
         {
-            auto* const slot = reinterpret_cast<void* volatile*>(kWorldUpdateRenderQueueVtableSlot);
+            auto* const slot = reinterpret_cast<PVOID volatile*>(kWorldUpdateRenderQueueVtableSlot);
             void* current = nullptr;
             __try
             {
@@ -571,51 +533,38 @@ namespace BZROpenShim
                 current = nullptr;
             }
 
-            void* hook = reinterpret_cast<void*>(&AutoSaveWorldUpdateRenderQueueHook);
+            void* const hook = reinterpret_cast<void*>(&AutoSaveWorldUpdateRenderQueueHook);
             if (current == hook)
             {
                 g_hookInstalled = true;
                 return true;
             }
-
             if (!current || !IsExecutableAddress(current))
             {
-                LogShimA(
-                    LogLevel::Error,
-                    "autosave",
-                    "World-update vtable target is invalid (%p); autosave hook not installed",
-                    current);
+                LogShimA(LogLevel::Error, "autosave", "World-update vtable target is invalid (%p)", current);
                 return false;
             }
 
             DWORD oldProtect = 0;
             if (!VirtualProtect(
                     reinterpret_cast<void*>(kWorldUpdateRenderQueueVtableSlot),
-                    sizeof(void*),
-                    PAGE_READWRITE,
-                    &oldProtect))
+                    sizeof(void*), PAGE_READWRITE, &oldProtect))
             {
-                LogShimA(
-                    LogLevel::Error,
-                    "autosave",
-                    "VirtualProtect failed for world-update vtable slot (err=%lu)",
-                    GetLastError());
+                LogShimA(LogLevel::Error, "autosave", "VirtualProtect failed for update hook (err=%lu)", GetLastError());
                 return false;
             }
 
             g_previousWorldUpdateRenderQueue = reinterpret_cast<WorldUpdateRenderQueueFn>(current);
-            void* observed = InterlockedCompareExchangePointer(
-                reinterpret_cast<PVOID volatile*>(const_cast<void**>(reinterpret_cast<void* const*>(slot))),
-                hook,
-                current);
+            void* const observed = InterlockedCompareExchangePointer(slot, hook, current);
 
             DWORD ignored = 0;
             VirtualProtect(
                 reinterpret_cast<void*>(kWorldUpdateRenderQueueVtableSlot),
-                sizeof(void*),
-                oldProtect,
-                &ignored);
-            FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void*>(kWorldUpdateRenderQueueVtableSlot), sizeof(void*));
+                sizeof(void*), oldProtect, &ignored);
+            FlushInstructionCache(
+                GetCurrentProcess(),
+                reinterpret_cast<void*>(kWorldUpdateRenderQueueVtableSlot),
+                sizeof(void*));
 
             if (observed != current)
             {
@@ -623,18 +572,14 @@ namespace BZROpenShim
                 LogShimA(
                     LogLevel::Warn,
                     "autosave",
-                    "World-update vtable changed during install (%p -> %p); autosave hook skipped",
+                    "World-update vtable changed during install (%p -> %p); hook skipped",
                     current,
                     observed);
                 return false;
             }
 
             g_hookInstalled = true;
-            LogShimA(
-                LogLevel::Info,
-                "autosave",
-                "Installed main-thread autosave hook; chained previous target %p",
-                current);
+            LogShimA(LogLevel::Info, "autosave", "Installed main-thread hook; chained target %p", current);
             return true;
         }
 
@@ -643,29 +588,26 @@ namespace BZROpenShim
             if (!g_hookInstalled || !g_previousWorldUpdateRenderQueue)
                 return;
 
-            auto* const slot = reinterpret_cast<void* volatile*>(kWorldUpdateRenderQueueVtableSlot);
-            void* hook = reinterpret_cast<void*>(&AutoSaveWorldUpdateRenderQueueHook);
+            auto* const slot = reinterpret_cast<PVOID volatile*>(kWorldUpdateRenderQueueVtableSlot);
+            void* const hook = reinterpret_cast<void*>(&AutoSaveWorldUpdateRenderQueueHook);
+
             DWORD oldProtect = 0;
             if (!VirtualProtect(
                     reinterpret_cast<void*>(kWorldUpdateRenderQueueVtableSlot),
-                    sizeof(void*),
-                    PAGE_READWRITE,
-                    &oldProtect))
+                    sizeof(void*), PAGE_READWRITE, &oldProtect))
             {
                 return;
             }
 
             InterlockedCompareExchangePointer(
-                reinterpret_cast<PVOID volatile*>(const_cast<void**>(reinterpret_cast<void* const*>(slot))),
+                slot,
                 reinterpret_cast<void*>(g_previousWorldUpdateRenderQueue),
                 hook);
 
             DWORD ignored = 0;
             VirtualProtect(
                 reinterpret_cast<void*>(kWorldUpdateRenderQueueVtableSlot),
-                sizeof(void*),
-                oldProtect,
-                &ignored);
+                sizeof(void*), oldProtect, &ignored);
 
             g_hookInstalled = false;
             g_previousWorldUpdateRenderQueue = nullptr;
@@ -684,10 +626,11 @@ namespace BZROpenShim
             return false;
         }
 
-        // Keep the existing Campaign Reimagined/OpenShim load-button contract.
+        // Existing Campaign Reimagined/OpenShim load-button contract.
         g_autoSavePath = g_gameDirectory / "Save" / "auto.sav";
         g_autoSaveLabelPath = g_gameDirectory / "Save" / "auto.label.txt";
-        g_autoSaveBackupPath = g_gameDirectory / "Save" / "AutoSaveBackups" / "auto.pre_autosave.sav";
+        g_autoSaveBackupPath =
+            g_gameDirectory / "Save" / "AutoSaveBackups" / "auto.pre_autosave.sav";
 
         LoadConfig();
         if (!g_config.enabled)
@@ -697,10 +640,7 @@ namespace BZROpenShim
         }
 
         g_nativeSaveGame = ResolveNativeSaveGame();
-        if (!g_nativeSaveGame)
-            return false;
-
-        if (!InstallMainThreadHook())
+        if (!g_nativeSaveGame || !InstallMainThreadHook())
         {
             g_nativeSaveGame = nullptr;
             return false;
@@ -712,13 +652,13 @@ namespace BZROpenShim
             LogShimA(
                 LogLevel::Info,
                 "autosave",
-                "EXU detected; OpenShim remains self-contained and will defer when another component updates Save\\auto.sav");
+                "EXU detected; OpenShim stays self-contained and defers when another component updates Save\\auto.sav");
         }
 
         LogShimA(
             LogLevel::Info,
             "autosave",
-            "Enabled: path=%s interval=%llu ms initialDelay=%llu ms backup=%d externalCoexistence=%d",
+            "Enabled path=%s interval=%llu ms initialDelay=%llu ms backup=%d externalCoexistence=%d",
             g_autoSavePath.string().c_str(),
             g_config.intervalMs,
             g_config.initialDelayMs,
@@ -762,21 +702,16 @@ namespace BZROpenShim
             return;
         }
 
-        if (ObserveExternalAutoSave(now))
+        if (ObserveExternalAutoSave(now) || now < g_nextSaveTick)
             return;
 
-        if (now < g_nextSaveTick)
-            return;
-
-        // Leave the deadline expired while unsafe. The first normal gameplay
-        // update after a pause/menu/loading transition will perform the save.
+        // Keep the deadline expired while paused/in shell UI. The first normal
+        // gameplay update after the unsafe state clears performs the save.
         if (IsUnsafeUiState())
             return;
 
-        if (PerformAutoSave())
-            g_nextSaveTick = GetTickCount64() + g_config.intervalMs;
-        else
-            g_nextSaveTick = GetTickCount64() + g_config.retryMs;
+        const ULONGLONG base = GetTickCount64();
+        g_nextSaveTick = base + (PerformAutoSave() ? g_config.intervalMs : g_config.retryMs);
     }
 
     bool TriggerAutoSaveNow()
