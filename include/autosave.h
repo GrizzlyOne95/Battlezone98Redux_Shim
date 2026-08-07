@@ -21,10 +21,11 @@ namespace BZROpenShim
     // world-update hook rather than directly by consumers.
     void AutoSaveTick();
 
-    // Requests an immediate save using the same safety gates as scheduled
-    // autosaves. Primarily useful for diagnostics and future UI/bridge work.
+    // Re-reads [AutoSave] from openshim.ini and applies Enabled/Interval
+    // changes immediately. Returns false if enabling cannot initialize safely.
     bool ReloadAutoSaveConfig();
 
-    // Re-reads [AutoSave] from openshim.ini and applies Enabled/Interval changes live.
+    // Requests an immediate save using the same safety gates as scheduled
+    // autosaves. Primarily useful for diagnostics and future UI/bridge work.
     bool TriggerAutoSaveNow();
 }
