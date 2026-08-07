@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from align_bzrnet_traces import merge_timelines
 from analyze_bzrnet_trace import correlate_relay, load_trace, summarize
 from compare_bzrnet_traces import compare_sequences, semantic_messages
 
@@ -16,6 +17,12 @@ class BzrNetTraceToolTests(unittest.TestCase):
         with handle:
             for row in rows:
                 handle.write(json.dumps(row) + "\n")
+        return Path(handle.name)
+
+    def write_json(self, value: dict) -> Path:
+        handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, suffix=".json")
+        with handle:
+            json.dump(value, handle)
         return Path(handle.name)
 
     @staticmethod
@@ -109,6 +116,17 @@ class BzrNetTraceToolTests(unittest.TestCase):
         ])
         report = compare_sequences(semantic_messages(official), semantic_messages(replacement))
         self.assertFalse(report["pass"])
+
+    def test_two_pc_qpc_alignment(self) -> None:
+        # A and B use different QPC origins/frequencies but describe events 2 ms
+        # apart in UTC after applying their own startup calibrations.
+        session_a = self.write_json({"clockCalibration": {"qpc": 1000, "qpcFrequency": 1000, "fileTimeUtc": 10_000_000_000}})
+        session_b = self.write_json({"clockCalibration": {"qpc": 5000, "qpcFrequency": 2000, "fileTimeUtc": 10_000_000_000}})
+        trace_a = self.write_trace([{ "qpc": 1010, "seq": 1, "layer": "websocket", "event": "BZR_WS_TX", "direction": "outbound", "messageType": "DoP2PRoute", "socketId": 1, "socketGeneration": 1 }])
+        trace_b = self.write_trace([{ "qpc": 5024, "seq": 1, "layer": "websocket", "event": "BZR_WS_RX", "direction": "inbound", "messageType": "OnP2PRoute", "socketId": 2, "socketGeneration": 1 }])
+        merged = merge_timelines([("A", session_a, trace_a), ("B", session_b, trace_b)])
+        self.assertEqual([row["label"] for row in merged], ["A", "B"])
+        self.assertAlmostEqual(merged[1]["relativeMs"], 2.0, places=3)
 
 
 if __name__ == "__main__":
