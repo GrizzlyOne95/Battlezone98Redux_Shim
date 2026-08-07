@@ -1,0 +1,35 @@
+name: BZRNet instrumentation validation
+
+on:
+  push:
+    branches:
+      - agent/bzrnet-native-instrumentation
+  pull_request:
+    paths:
+      - 'include/bzrnet_*'
+      - 'src/patches/bzrnet_*'
+      - 'tests/bzrnet_*'
+      - 'tests/CMakeLists.txt'
+      - 'BZROpenShim.vcxproj'
+      - 'src/dllmain.cpp'
+      - '.github/workflows/bzrnet-instrumentation.yml'
+
+jobs:
+  protocol-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure standalone protocol tests
+        run: cmake -S tests -B build/bzrnet-tests -A Win32
+      - name: Build standalone protocol tests
+        run: cmake --build build/bzrnet-tests --config Release
+      - name: Run standalone protocol tests
+        run: .\build\bzrnet-tests\Release\bzrnet_protocol_tests.exe
+
+  shim-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build OpenShim Release Win32
+        run: msbuild BZROpenShim.sln /m /p:Configuration=Release /p:Platform=Win32
