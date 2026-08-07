@@ -133,10 +133,21 @@ namespace
         std::string value=std::string(prefix)+std::to_string(table.size()+1);table.emplace(key,value);return value;
     }
 
-    bool ReplaceOne(std::string& json,std::string_view key,const std::string& replacement,size_t* oldLength=nullptr)
+    size_t RedactAll(std::string& json,std::string_view key,size_t* maxOriginalLength=nullptr)
     {
-        size_t start=0,end=0;std::string decoded;if(!FindValue(json,key,start,end,&decoded))return false;
-        if(oldLength)*oldLength=decoded.size();json.replace(start,end-start,replacement);return true;
+        const std::string replacement=Quote("<REDACTED>");
+        size_t scan=0,count=0,maxLength=0;
+        while(scan<json.size())
+        {
+            size_t start=0,end=0;std::string decoded;
+            if(!FindValue(json,key,start,end,&decoded,scan))break;
+            maxLength=(std::max)(maxLength,decoded.size());
+            json.replace(start,end-start,replacement);
+            scan=start+replacement.size();
+            ++count;
+        }
+        if(maxOriginalLength)*maxOriginalLength=maxLength;
+        return count;
     }
 
     void AliasAll(std::string& json,std::string_view key,std::unordered_map<std::string,std::string>& table,const char* prefix)
@@ -196,8 +207,20 @@ BzrNetSanitizedMessage SanitizeBzrNetJson(std::string_view json,bool privateFore
 {
     BzrNetSanitizedMessage result;result.json.assign(json.begin(),json.end());
     for(const char* key:{"steamAppTicket","gogAppTicket","authTicket","platformTicket"})
-    {size_t n=0;if(ReplaceOne(result.json,key,Quote("<REDACTED>"),&n)){result.authTicketRedacted=true;result.authTicketLength=(std::max)(result.authTicketLength,n);}}
-    size_t passwordLength=0;if(ReplaceOne(result.json,"password",Quote("<REDACTED>"),&passwordLength)){result.passwordRedacted=true;result.passwordLength=passwordLength;}
+    {
+        size_t n=0;
+        if(RedactAll(result.json,key,&n)>0)
+        {
+            result.authTicketRedacted=true;
+            result.authTicketLength=(std::max)(result.authTicketLength,n);
+        }
+    }
+    size_t passwordLength=0;
+    if(RedactAll(result.json,"password",&passwordLength)>0)
+    {
+        result.passwordRedacted=true;
+        result.passwordLength=passwordLength;
+    }
     if(!privateForensic)
     {
         for(const char* key:{"userId","player","speakerId","owner","member"})AliasAll(result.json,key,g_Identities,"player_");
