@@ -455,7 +455,7 @@ namespace
     {
         if (!transferred || io.buffers.empty()) return;
         const uint32_t limit = io.kind == PendingKind::Stream ? static_cast<uint32_t>(kMaxWsBytes) : 2048u;
-        const uint32_t capacity = (std::min)(transferred, limit);
+        const uint32_t capacity = (std::min)(static_cast<uint32_t>(transferred), limit);
         std::vector<uint8_t> data(capacity);
         const uint32_t copied = Gather(const_cast<WSABUF*>(io.buffers.data()), static_cast<DWORD>(io.buffers.size()), data.data(), capacity);
         if (!copied) return;
@@ -562,7 +562,7 @@ namespace
         const int err = rc == SOCKET_ERROR ? WSAGetLastError() : 0;
         if (rc == 0 && bytesRecv && *bytesRecv)
         {
-            const uint32_t capacity = (std::min)(*bytesRecv, 2048u);
+            const uint32_t capacity = (std::min)(static_cast<uint32_t>(*bytesRecv), 2048u);
             std::vector<uint8_t> data(capacity);
             const uint32_t copied = Gather(buffers, count, data.data(), capacity);
             if (copied) TraceWire(s, false, from, fromLen ? *fromLen : 0, data.data(), copied, false);
@@ -638,6 +638,13 @@ namespace
                     if (!match) continue;
                     const FARPROC prior = reinterpret_cast<FARPROC>(t->u1.Function);
                     if (prior == specs[specIndex].replacement) break;
+                    if (specs[specIndex].previous && *specs[specIndex].previous && *specs[specIndex].previous != prior)
+                    {
+                        LogShimA(LogLevel::Warn, "bzrnet",
+                            "[BZRNetTrace] %s %s prior target differs for %s; hook skipped to preserve chaining",
+                            moduleLabel, dllName, specs[specIndex].name);
+                        break;
+                    }
                     DWORD oldProtect = 0;
                     if (!VirtualProtect(&t->u1.Function, sizeof(t->u1.Function), PAGE_READWRITE, &oldProtect)) break;
                     t->u1.Function = reinterpret_cast<ULONG_PTR>(specs[specIndex].replacement);
