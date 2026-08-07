@@ -1,0 +1,16 @@
+name: AutoSave Win32 Build Check
+
+on:
+  push:
+    branches:
+      - agent/autosave-engine
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release Win32
+        run: msbuild BZROpenShim.sln /m /p:Configuration=Release /p:Platform=Win32
