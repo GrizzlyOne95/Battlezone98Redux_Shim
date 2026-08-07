@@ -1,9 +1,9 @@
 name: Apply AutoSave options UI patch
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - agent/autosave-options-ui
 
 permissions:
   contents: write
