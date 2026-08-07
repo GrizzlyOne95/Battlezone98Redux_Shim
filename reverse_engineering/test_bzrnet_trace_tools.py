@@ -9,6 +9,7 @@ from pathlib import Path
 from align_bzrnet_traces import merge_timelines
 from analyze_bzrnet_trace import correlate_relay, load_trace, summarize
 from compare_bzrnet_traces import compare_sequences, semantic_messages
+from validate_bzrnet_trace import validate_trace
 
 
 class BzrNetTraceToolTests(unittest.TestCase):
@@ -31,6 +32,35 @@ class BzrNetTraceToolTests(unittest.TestCase):
         details = {"messageJson": json.dumps({"type": message_type, envelope: payload}, separators=(",", ":"))}
         details.update(detail_fields)
         return {"event": "BZR_WS_RX" if direction == "inbound" else "BZR_WS_TX", "direction": direction, "messageType": message_type, "details": details}
+
+    @staticmethod
+    def traced(seq: int, event: str, details: dict, message_type: str = "") -> dict:
+        return {
+            "captureId": "capture-test",
+            "processId": 123,
+            "seq": seq,
+            "tickMs": 100 + seq,
+            "qpc": 1000 + seq,
+            "qpcFrequency": 10_000_000,
+            "threadId": 1,
+            "layer": "websocket" if event.startswith("BZR_WS") else "trace",
+            "event": event,
+            "direction": "outbound" if event == "BZR_WS_TX" else "inbound",
+            "socketId": 1,
+            "socketGeneration": 1,
+            "messageType": message_type,
+            "details": details,
+        }
+
+    def valid_session(self, *, private: bool = False, dropped: int = 0) -> Path:
+        return self.write_json({
+            "captureId": "capture-test",
+            "processId": 123,
+            "privateForensic": private,
+            "clockCalibration": {"qpc": 1000, "qpcFrequency": 10_000_000, "fileTimeUtc": 20_000_000_000},
+            "droppedEvents": dropped,
+            "writerShutdownClean": True,
+        })
 
     def test_summary_and_drop(self) -> None:
         path = self.write_trace([
@@ -118,8 +148,6 @@ class BzrNetTraceToolTests(unittest.TestCase):
         self.assertFalse(report["pass"])
 
     def test_two_pc_qpc_alignment(self) -> None:
-        # A and B use different QPC origins/frequencies but describe events 2 ms
-        # apart in UTC after applying their own startup calibrations.
         session_a = self.write_json({"clockCalibration": {"qpc": 1000, "qpcFrequency": 1000, "fileTimeUtc": 10_000_000_000}})
         session_b = self.write_json({"clockCalibration": {"qpc": 5000, "qpcFrequency": 2000, "fileTimeUtc": 10_000_000_000}})
         trace_a = self.write_trace([{ "qpc": 1010, "seq": 1, "layer": "websocket", "event": "BZR_WS_TX", "direction": "outbound", "messageType": "DoP2PRoute", "socketId": 1, "socketGeneration": 1 }])
@@ -127,6 +155,55 @@ class BzrNetTraceToolTests(unittest.TestCase):
         merged = merge_timelines([("A", session_a, trace_a), ("B", session_b, trace_b)])
         self.assertEqual([row["label"] for row in merged], ["A", "B"])
         self.assertAlmostEqual(merged[1]["relativeMs"], 2.0, places=3)
+
+    def test_validator_accepts_redacted_sanitized_trace(self) -> None:
+        message = {"type": "Authorization", "content": {
+            "steamAppTicket": "<REDACTED>",
+            "password": "<REDACTED>",
+            "userId": "player_1",
+            "name": "identity_1",
+            "wanAddress": "endpoint_1",
+            "lanAddresses": ["endpoint_2"],
+        }}
+        trace = self.write_trace([
+            self.traced(1, "BZR_WS_TX", {"knownMessage": True, "messageJson": json.dumps(message)}, "Authorization")
+        ])
+        report = validate_trace(trace, self.valid_session())
+        self.assertTrue(report["valid"], report["errors"])
+
+    def test_validator_rejects_secret_leak(self) -> None:
+        message = {"type": "Authorization", "content": {
+            "steamAppTicket": "THIS-MUST-NOT-LEAK",
+            "userId": "player_1",
+            "name": "identity_1",
+            "wanAddress": "endpoint_1",
+            "lanAddresses": ["endpoint_2"],
+        }}
+        trace = self.write_trace([
+            self.traced(1, "BZR_WS_TX", {"knownMessage": True, "messageJson": json.dumps(message)}, "Authorization")
+        ])
+        report = validate_trace(trace, self.valid_session())
+        self.assertFalse(report["valid"])
+        self.assertTrue(any("secret field" in error for error in report["errors"]))
+
+    def test_validator_rejects_unsanitized_identity(self) -> None:
+        message = {"type": "OnUserDataChanged", "data": {"userId": "raw-user", "name": "Raw Name", "wanAddress": "1.2.3.4"}}
+        trace = self.write_trace([
+            self.traced(1, "BZR_WS_RX", {"knownMessage": True, "messageJson": json.dumps(message)}, "OnUserDataChanged")
+        ])
+        report = validate_trace(trace, self.valid_session())
+        self.assertFalse(report["valid"])
+        self.assertTrue(any("not aliased" in error for error in report["errors"]))
+
+    def test_validator_rejects_dropped_events_unless_allowed(self) -> None:
+        trace = self.write_trace([
+            self.traced(1, "TRACE_DROPPED_EVENTS", {"droppedSinceLastReport": 2})
+        ])
+        strict = validate_trace(trace, self.valid_session(dropped=2))
+        permissive = validate_trace(trace, self.valid_session(dropped=2), allow_drops=True)
+        self.assertFalse(strict["valid"])
+        self.assertTrue(permissive["valid"])
+        self.assertTrue(permissive["warnings"])
 
 
 if __name__ == "__main__":
