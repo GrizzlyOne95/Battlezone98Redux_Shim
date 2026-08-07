@@ -1,0 +1,44 @@
+fragment_program Ogre/Compositor/FXAA3FP hlsl
+{
+	source fxaa3.hlsl
+	entry_point fxaa_ps
+	target ps_3_0
+	
+	default_params
+	{
+		param_named_auto texSize texture_size 0
+	}
+}
+
+
+
+material Ogre/Compositor/FXAA3
+{
+	technique
+	{
+
+		pass
+		{
+			cull_hardware none
+			cull_software none
+			depth_func always_pass
+
+			vertex_program_ref StdQuad_Tex2a_vp
+			{
+			}
+
+			fragment_program_ref Ogre/Compositor/FXAA3FP
+			{
+			
+			}
+
+			texture_unit RT
+			{
+                tex_coord_set 0
+				tex_address_mode clamp
+				filtering bilinear
+			}
+
+		}
+	}
+}
