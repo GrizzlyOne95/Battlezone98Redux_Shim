@@ -40,6 +40,84 @@ function Get-TraceEnvironmentLines {
     return $lines
 }
 
+function Get-GameExecutableInfo {
+    param([string]$ResolvedGamePath)
+
+    $steamExe = Join-Path $ResolvedGamePath "battlezone98redux.exe"
+    if (Test-Path $steamExe) {
+        return [pscustomobject]@{ Platform = "Steam"; Path = $steamExe }
+    }
+
+    $gogExe = Join-Path $ResolvedGamePath "BZR.exe"
+    if (Test-Path $gogExe) {
+        return [pscustomobject]@{ Platform = "GOG"; Path = $gogExe }
+    }
+
+    return [pscustomobject]@{ Platform = "Unknown"; Path = "" }
+}
+
+function Get-SafeFileIdentity {
+    param([string]$Path)
+
+    if (-not $Path -or -not (Test-Path $Path)) { return $null }
+    $item = Get-Item $Path
+    $version = $null
+    try { $version = $item.VersionInfo.FileVersion } catch { }
+    $sha = (Get-FileHash -Algorithm SHA256 -Path $Path).Hash.ToLowerInvariant()
+    return [ordered]@{
+        fileName = $item.Name
+        sizeBytes = $item.Length
+        fileVersion = $version
+        sha256 = $sha
+    }
+}
+
+function Write-CaptureIdentity {
+    param(
+        [string]$SessionDir,
+        [ValidateSet("start", "stop")]
+        [string]$Stage
+    )
+
+    $gamePathFile = Join-Path $SessionDir "game_path.txt"
+    if (-not (Test-Path $gamePathFile)) { return }
+    $resolvedGamePath = (Get-Content $gamePathFile -Raw).Trim()
+    $game = Get-GameExecutableInfo -ResolvedGamePath $resolvedGamePath
+    $winmm = Join-Path $resolvedGamePath "winmm.dll"
+
+    $identityPath = Join-Path $SessionDir "bzrnet_capture_identity.json"
+    $existing = $null
+    if (Test-Path $identityPath) {
+        try { $existing = Get-Content $identityPath -Raw | ConvertFrom-Json } catch { }
+    }
+
+    $startUtc = if ($existing -and $existing.captureStartUtc) {
+        [string]$existing.captureStartUtc
+    } else {
+        (Get-Date).ToUniversalTime().ToString("o")
+    }
+
+    $identity = [ordered]@{
+        formatVersion = 1
+        captureStartUtc = $startUtc
+        captureStopUtc = $(if ($Stage -eq "stop") { (Get-Date).ToUniversalTime().ToString("o") } else { $null })
+        platform = $game.Platform
+        gameExecutable = $(Get-SafeFileIdentity -Path $game.Path)
+        openShim = $(Get-SafeFileIdentity -Path $winmm)
+        launchProfile = [ordered]@{
+            bzrNetTrace = $true
+            relayCaptureRequested = [bool]$RelayCapture
+            privateForensic = [bool]$PrivateForensic
+            allUdpHighlights = [bool]$AllUdp
+            traceQueueRecords = $TraceQueueRecords
+            bufferPayloadBytes = $(if ($RelayCapture) { 2048 } else { $PayloadBytes })
+            bufferRingRecords = $RingRecords
+        }
+        note = "Launch-profile fields record wrapper-requested settings, not proof of engine-effective values. Runtime trace/config evidence should be used for effective-state claims."
+    }
+    $identity | ConvertTo-Json -Depth 6 | Out-File -FilePath $identityPath -Encoding utf8
+}
+
 function Update-LaunchArtifacts {
     param([string]$SessionDir)
 
@@ -88,6 +166,7 @@ function Add-CaptureReadme {
         "Expected additional game log files:",
         "- logs\bzrnet_session.json",
         "- logs\bzrnet_trace.jsonl",
+        "- bzrnet_capture_identity.json (platform/build/hash + requested capture profile)",
         "",
         "Raw binary/Wireshark captures and private-forensic traces may contain endpoint or identity data.",
         "Authentication tickets and lobby passwords are always redacted from bzrnet_trace.jsonl.",
@@ -161,6 +240,7 @@ function Start-BzrNetCapture {
 
     Update-LaunchArtifacts -SessionDir $sessionDir
     Add-CaptureReadme -SessionDir $sessionDir
+    Write-CaptureIdentity -SessionDir $sessionDir -Stage start
 
     @(
         "BZRNet native capture session prepared.",
@@ -177,15 +257,15 @@ function Stop-BzrNetCapture {
         throw "No active OpenShim capture session found."
     }
 
-    # The base Stop command zips every file already present in the session, so
-    # copy the new native artifacts into it before delegating.
+    # Copy native artifacts before the base Stop creates its archive, then let
+    # the base logger collect all legacy evidence in its established workflow.
     Copy-NativeTraceBeforeBaseStop -SessionDir $sessionDir
+    Write-CaptureIdentity -SessionDir $sessionDir -Stage stop
 
     & $baseLogger -Action Stop
 
-    # The base Stop command collects the legacy logs immediately before its ZIP
-    # is created. Rebuild that archive once so SHA256SUMS.txt covers the final
-    # complete evidence directory, including the newly collected legacy files.
+    # Rebuild once so SHA256SUMS.txt describes the final complete evidence
+    # directory, including files collected by the base logger during Stop.
     Rebuild-ArchiveWithFinalHashes -SessionDir $sessionDir
     Write-Host "BZRNet native capture stopped: $sessionDir"
     Write-Host "Final archive: $sessionDir.zip"
