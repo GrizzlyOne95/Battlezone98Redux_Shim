@@ -5,6 +5,7 @@
 // declared in bzr_options_ui.h and implemented by bzr_hooks.cpp.
 #include "bzr_options_ui.h"
 
+#include "autosave.h"
 #include "bzr_hooks.h"
 #include "openshim_ini.h"
 #include "patcher.h"
@@ -2381,6 +2382,8 @@ namespace BZROpenShim
 
         static const char* const kShimSettingsOnOffValues[] = { "1", "0" };
         static const char* const kShimSettingsOnOffLabels[] = { "On", "Off" };
+        static const char* const kShimSettingsAutoSaveIntervalValues[] = { "60", "120", "180", "300", "600" };
+        static const char* const kShimSettingsAutoSaveIntervalLabels[] = { "1 min", "2 min", "3 min", "5 min", "10 min" };
         static const char* const kShimSettingsUnderAttackValues[] = { "Normal", "Minimal", "None" };
         static const char* const kShimSettingsUnitVoValues[] = { "Normal", "Reduced", "None" };
         static const char* const kShimSettingsTargetPolicyValues[] = { "Default", "NeutralOnly", "ExplicitOnly" };
@@ -2425,6 +2428,14 @@ namespace BZROpenShim
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::RestartRequired,
               "Key-binding editor on the Input options page. Restart required." },
+            { "AutoSave", "AutoSave", "Enabled", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::AutoSave,
+              "Rolling recovery save for single-player missions; manual saves remain your checkpoints." },
+            { "AutoSave Interval", "AutoSave", "IntervalSeconds", nullptr, 0,
+              kShimSettingsAutoSaveIntervalValues, kShimSettingsAutoSaveIntervalLabels, 5, 1,
+              ShimSettingApplyGroup::AutoSave,
+              "How often OpenShim refreshes the rolling AutoSave recovery slot." },
             { "Weapon Convergence", "SinglePlayer", "WeaponConvergence", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::GlobalImprovement,
@@ -2853,13 +2864,20 @@ namespace BZROpenShim
                 return;
             }
 
-            ApplyShimSettingLive(setting.applyGroup);
+            bool liveApplyOk = true;
+            if (setting.applyGroup == ShimSettingApplyGroup::AutoSave)
+                liveApplyOk = ReloadAutoSaveConfig();
+            else
+                ApplyShimSettingLive(setting.applyGroup);
 
             g_ShimSettingsUiStatusText = std::string(setting.label) + " = " +
-                setting.valueLabels[nextIndex] +
-                (setting.applyGroup == ShimSettingApplyGroup::RestartRequired
-                     ? "  (takes effect after restart)"
-                     : "  (applied)");
+                setting.valueLabels[nextIndex];
+            if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
+                g_ShimSettingsUiStatusText += "  (takes effect after restart)";
+            else if (!liveApplyOk)
+                g_ShimSettingsUiStatusText += "  (saved; runtime apply failed - see openshim.log)";
+            else
+                g_ShimSettingsUiStatusText += "  (applied)";
             RefreshShimSettingsUiControls();
         }
 

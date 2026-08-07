@@ -667,6 +667,57 @@ namespace BZROpenShim
         return true;
     }
 
+    bool ReloadAutoSaveConfig()
+    {
+        if (g_gameDirectory.empty())
+            return InitializeAutoSave();
+
+        const bool wasEnabled = g_config.enabled;
+        const ULONGLONG previousIntervalMs = g_config.intervalMs;
+        LoadConfig();
+
+        if (!g_config.enabled)
+        {
+            ResetMissionState();
+            LogShimA(LogLevel::Info, "autosave", "Disabled live from OpenShim settings");
+            return true;
+        }
+
+        // A game launched with AutoSave disabled never resolved SaveGame or
+        // installed the recurring hook, so enabling it must finish setup live.
+        if (!g_nativeSaveGame)
+        {
+            g_nativeSaveGame = ResolveNativeSaveGame();
+            if (!g_nativeSaveGame)
+                return false;
+        }
+        if (!g_hookInstalled && !InstallMainThreadHook())
+        {
+            g_nativeSaveGame = nullptr;
+            return false;
+        }
+
+        if (!wasEnabled)
+        {
+            // Re-enter through normal mission detection so the initial grace
+            // period still applies when AutoSave is enabled mid-mission.
+            ResetMissionState();
+        }
+        else if (g_missionActive && previousIntervalMs != g_config.intervalMs)
+        {
+            // A changed interval starts fresh from the moment it is selected.
+            g_nextSaveTick = GetTickCount64() + g_config.intervalMs;
+        }
+
+        LogShimA(
+            LogLevel::Info,
+            "autosave",
+            "Reloaded live config enabled=1 interval=%llu ms initialDelay=%llu ms",
+            g_config.intervalMs,
+            g_config.initialDelayMs);
+        return true;
+    }
+
     void ShutdownAutoSave()
     {
         RestoreMainThreadHook();

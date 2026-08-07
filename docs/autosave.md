@@ -19,7 +19,14 @@ The default schedule matches the existing Campaign Reimagined autosave behavior:
 
 ## Configuration
 
-Add an optional section to `<BZR game directory>\openshim.ini`:
+The in-game **OpenShim Settings** page exposes the two player-facing controls:
+
+- **AutoSave** - On/Off. Applies immediately.
+- **AutoSave Interval** - 1, 2, 3, 5, or 10 minutes. Applies immediately and restarts the current interval from the time it is changed.
+
+The 10-second initial grace period, retry timing, migration backup, and EXU/legacy coexistence controls remain advanced INI-only settings.
+
+The same values are stored in `<BZR game directory>\openshim.ini`:
 
 ```ini
 [AutoSave]
@@ -33,7 +40,7 @@ RespectExternalAutoSave=1
 
 `IntervalSeconds` is clamped to 10-3600 seconds. `InitialDelaySeconds` is clamped to 0-600 seconds. `RetrySeconds` is clamped to 5-120 seconds.
 
-Set `Enabled=0` to retain OpenShim's AutoSave load-button support while disabling engine-level automatic save creation.
+Set `Enabled=0` to retain OpenShim's AutoSave load-button support while disabling engine-level automatic save creation. The in-game AutoSave toggle writes this same key.
 
 ## EXU coexistence
 
