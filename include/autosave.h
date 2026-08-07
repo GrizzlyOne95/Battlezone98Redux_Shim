@@ -23,5 +23,8 @@ namespace BZROpenShim
 
     // Requests an immediate save using the same safety gates as scheduled
     // autosaves. Primarily useful for diagnostics and future UI/bridge work.
+    bool ReloadAutoSaveConfig();
+
+    // Re-reads [AutoSave] from openshim.ini and applies Enabled/Interval changes live.
     bool TriggerAutoSaveNow();
 }
