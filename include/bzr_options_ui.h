@@ -100,6 +100,7 @@ namespace BZROpenShim
         UnitVo,
         GlobalTurbo,
         Headlights,         // InitializeHeadlightConfig re-reads the ini (no latch)
+        AutoSave,           // ReloadAutoSaveConfig re-reads the ini and applies immediately
         RestartRequired,    // no live path; takes effect next launch
     };
     void ApplyShimSettingLive(ShimSettingApplyGroup group);
