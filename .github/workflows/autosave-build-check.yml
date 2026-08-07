@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/autosave-engine
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
