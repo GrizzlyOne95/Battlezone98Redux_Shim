@@ -137,7 +137,7 @@ namespace
         const std::string event = JsonEscape(record.event);
         const std::string direction = JsonEscape(record.direction);
         const std::string type = JsonEscape(record.messageType);
-        const std::string& details = record.detailsJson.empty() ? std::string("{}") : record.detailsJson;
+        const char* details = record.detailsJson.empty() ? "{}" : record.detailsJson.c_str();
         std::fprintf(
             g_TraceFile,
             "{\"captureId\":\"%s\",\"processId\":%lu,\"seq\":%llu,\"tickMs\":%llu,\"qpc\":%lld,\"qpcFrequency\":%lld,\"threadId\":%u,\"layer\":\"%s\",\"event\":\"%s\",\"direction\":\"%s\",\"socketId\":%u,\"socketGeneration\":%u,\"messageType\":\"%s\",\"details\":%s}\n",
@@ -154,7 +154,7 @@ namespace
             record.socketId,
             record.socketGeneration,
             type.c_str(),
-            details.c_str());
+            details);
     }
 
     void WriteDroppedRecord(uint64_t total, uint64_t delta)
@@ -233,7 +233,7 @@ namespace
         fopen_s(&file, g_SessionPath.c_str(), "wb");
         if (!file)
             return;
-        const uint64_t endTime = finalState ? g_StopFileTime : 0;
+        const std::string endText = finalState ? std::to_string(g_StopFileTime) : "null";
         std::fprintf(file,
             "{\n"
             "  \"captureFormatVersion\": 1,\n"
@@ -254,7 +254,7 @@ namespace
             static_cast<unsigned long>(GetCurrentProcessId()),
             g_Config.privateForensic ? "true" : "false",
             static_cast<unsigned long long>(g_StartFileTime),
-            finalState ? std::to_string(endTime).c_str() : "null",
+            endText.c_str(),
             static_cast<long long>(g_StartQpc.QuadPart),
             static_cast<long long>(g_QpcFrequency.QuadPart),
             static_cast<unsigned long long>(g_StartTickMs),
@@ -354,7 +354,12 @@ void ShutdownBzrNetTrace()
         SetEvent(g_WakeEvent);
     if (g_WriterThread)
     {
-        const DWORD wait = WaitForSingleObject(g_WriterThread, 5000);
+        DWORD wait = WaitForSingleObject(g_WriterThread, 5000);
+        if (wait != WAIT_OBJECT_0)
+        {
+            LogShimA(LogLevel::Warn, "bzrnet", "[BZRNetTrace] writer exceeded graceful shutdown window wait=%lu; waiting for bounded queue drain", wait);
+            wait = WaitForSingleObject(g_WriterThread, INFINITE);
+        }
         if (wait == WAIT_OBJECT_0)
         {
             CloseHandle(g_WriterThread);
@@ -362,18 +367,22 @@ void ShutdownBzrNetTrace()
         }
         else
         {
-            LogShimA(LogLevel::Warn, "bzrnet", "[BZRNetTrace] writer did not stop cleanly wait=%lu", wait);
+            // Do not close resources that a still-running writer could touch.
+            // This path is only expected for a broken OS handle; process teardown
+            // will reclaim them and the session records an unclean shutdown.
+            LogShimA(LogLevel::Error, "bzrnet", "[BZRNetTrace] writer wait failed wait=%lu err=%lu", wait, GetLastError());
         }
     }
 
     g_StopFileTime = FileTimeNow();
     WriteSessionFile(true);
-    if (g_TraceFile && InterlockedCompareExchange(&g_WriterShutdownClean, 0, 0))
+    const bool writerStopped = g_WriterThread == nullptr;
+    if (g_TraceFile && writerStopped)
     {
         std::fclose(g_TraceFile);
         g_TraceFile = nullptr;
     }
-    if (g_WakeEvent)
+    if (g_WakeEvent && writerStopped)
     {
         CloseHandle(g_WakeEvent);
         g_WakeEvent = nullptr;
@@ -382,7 +391,8 @@ void ShutdownBzrNetTrace()
     g_SocketGenerations.clear();
     ReleaseSRWLockExclusive(&g_SocketGenerationLock);
     ResetBzrNetSanitizationAliases();
-    InterlockedExchange(&g_Initialized, 0);
+    if (writerStopped)
+        InterlockedExchange(&g_Initialized, 0);
 }
 
 bool IsBzrNetTraceEnabled()
