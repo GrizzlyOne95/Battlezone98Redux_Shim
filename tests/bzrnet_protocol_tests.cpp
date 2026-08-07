@@ -44,6 +44,18 @@ int main()
     Check(repeated.json.find("\"A\"") == std::string::npos && repeated.json.find("\"B\"") == std::string::npos, "all repeated identities redacted");
     Check(repeated.json.find("8.8.8.8") == std::string::npos && repeated.json.find("10.2.2.2") == std::string::npos, "all repeated endpoints redacted");
 
+    auto repeatedSecrets = SanitizeBzrNetJson(
+        R"({"type":"Unknown","content":{"steamAppTicket":"FIRST","nested":{"steamAppTicket":"SECOND","password":"one"},"password":"two"}})",
+        true);
+    Check(
+        repeatedSecrets.authTicketRedacted &&
+        repeatedSecrets.passwordRedacted &&
+        repeatedSecrets.json.find("FIRST") == std::string::npos &&
+        repeatedSecrets.json.find("SECOND") == std::string::npos &&
+        repeatedSecrets.json.find("\"one\"") == std::string::npos &&
+        repeatedSecrets.json.find("\"two\"") == std::string::npos,
+        "all repeated secrets redacted");
+
     const uint8_t pp[] = {'P','P',1,0,0,0,2,0,0,0,3,0,0,0,4,0,0,0,5,0,0,0};
     const auto udp = DecodeBzrUdpControl(pp, sizeof(pp));
     Check(udp.recognized && udp.marker == "PP" && udp.fieldCount == 5 && udp.field4 == 5, "PP decoder");
