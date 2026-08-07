@@ -10,6 +10,7 @@ on:
       - 'src/patches/bzrnet_*'
       - 'tests/bzrnet_*'
       - 'tests/CMakeLists.txt'
+      - 'reverse_engineering/*bzrnet_trace*'
       - 'BZROpenShim.vcxproj'
       - 'src/dllmain.cpp'
       - '.github/workflows/bzrnet-instrumentation.yml'
@@ -25,6 +26,8 @@ jobs:
         run: cmake --build build/bzrnet-tests --config Release
       - name: Run standalone protocol tests
         run: .\build\bzrnet-tests\Release\bzrnet_protocol_tests.exe
+      - name: Run trace-tool tests
+        run: python reverse_engineering/test_bzrnet_trace_tools.py
 
   shim-build:
     runs-on: windows-latest
