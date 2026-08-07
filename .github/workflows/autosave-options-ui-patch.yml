@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/autosave-options-ui
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -32,19 +35,16 @@ jobs:
                   raise SystemExit(f'{path}: expected one match, found {count}: {old[:80]!r}')
               p.write_text(text.replace(old, new, 1), encoding='utf-8')
 
-          # Public AutoSave live-reload entry point.
           replace_once(
               'include/autosave.h',
               '    void AutoSaveTick();\n    bool TriggerAutoSaveNow();\n',
               '    void AutoSaveTick();\n    bool ReloadAutoSaveConfig();\n    bool TriggerAutoSaveNow();\n')
 
-          # Give the settings registry an AutoSave-specific live-apply group.
           replace_once(
               'include/bzr_options_ui.h',
               '        Headlights,         // InitializeHeadlightConfig re-reads the ini (no latch)\n        RestartRequired,    // no live path; takes effect next launch\n',
               '        Headlights,         // InitializeHeadlightConfig re-reads the ini (no latch)\n        AutoSave,           // ReloadAutoSaveConfig re-reads the ini and applies immediately\n        RestartRequired,    // no live path; takes effect next launch\n')
 
-          # Wire AutoSave into the existing OpenShim settings page.
           replace_once(
               'src/patches/bzr_options_ui.cpp',
               '#include "bzr_options_ui.h"\n\n#include "bzr_hooks.h"\n',
@@ -65,13 +65,11 @@ jobs:
               '''            ApplyShimSettingLive(setting.applyGroup);\n\n            g_ShimSettingsUiStatusText = std::string(setting.label) + " = " +\n                setting.valueLabels[nextIndex] +\n                (setting.applyGroup == ShimSettingApplyGroup::RestartRequired\n                     ? "  (takes effect after restart)"\n                     : "  (applied)");\n''',
               '''            bool liveApplyOk = true;\n            if (setting.applyGroup == ShimSettingApplyGroup::AutoSave)\n                liveApplyOk = ReloadAutoSaveConfig();\n            else\n                ApplyShimSettingLive(setting.applyGroup);\n\n            g_ShimSettingsUiStatusText = std::string(setting.label) + " = " +\n                setting.valueLabels[nextIndex];\n            if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)\n                g_ShimSettingsUiStatusText += "  (takes effect after restart)";\n            else if (!liveApplyOk)\n                g_ShimSettingsUiStatusText += "  (saved; runtime apply failed - see openshim.log)";\n            else\n                g_ShimSettingsUiStatusText += "  (applied)";\n''')
 
-          # Runtime config reload supports enable/disable and interval changes without restart.
           replace_once(
               'src/patches/autosave.cpp',
               '''    void ShutdownAutoSave()\n    {\n''',
               '''    bool ReloadAutoSaveConfig()\n    {\n        // InitializeAutoSave always resolves these paths before reading config,\n        // including when AutoSave starts disabled. Keep this fallback for any\n        // future caller that reaches the settings UI before normal startup init.\n        if (g_gameDirectory.empty())\n            return InitializeAutoSave();\n\n        const bool wasEnabled = g_config.enabled;\n        const ULONGLONG previousIntervalMs = g_config.intervalMs;\n        LoadConfig();\n\n        if (!g_config.enabled)\n        {\n            ResetMissionState();\n            LogShimA(LogLevel::Info, "autosave", "Disabled live from OpenShim settings");\n            return true;\n        }\n\n        // A game that launched with AutoSave disabled never resolved SaveGame\n        // or installed the recurring hook. Enabling it in Options must therefore\n        // complete the same one-time runtime setup without requiring a restart.\n        if (!g_nativeSaveGame)\n        {\n            g_nativeSaveGame = ResolveNativeSaveGame();\n            if (!g_nativeSaveGame)\n                return false;\n        }\n        if (!g_hookInstalled && !InstallMainThreadHook())\n        {\n            g_nativeSaveGame = nullptr;\n            return false;\n        }\n\n        if (!wasEnabled)\n        {\n            // Re-enter through the normal mission-detection path so the initial\n            // grace period still applies when AutoSave is enabled mid-mission.\n            ResetMissionState();\n        }\n        else if (g_missionActive && previousIntervalMs != g_config.intervalMs)\n        {\n            // Treat an interval edit as a fresh interval from the moment the\n            // player changes it instead of unexpectedly firing on the old timer.\n            g_nextSaveTick = GetTickCount64() + g_config.intervalMs;\n        }\n\n        LogShimA(\n            LogLevel::Info,\n            "autosave",\n            "Reloaded live config enabled=1 interval=%llu ms initialDelay=%llu ms",\n            g_config.intervalMs,\n            g_config.initialDelayMs);\n        return true;\n    }\n\n    void ShutdownAutoSave()\n    {\n''')
 
-          # Player docs: settings UI owns the common knobs; advanced safeguards remain INI-only.
           replace_once(
               'docs/autosave.md',
               '## Configuration\n\nAdd an optional section to `<BZR game directory>\\openshim.ini`:\n',
@@ -82,7 +80,6 @@ jobs:
               'Set `Enabled=0` to retain OpenShim\'s AutoSave load-button support while disabling engine-level automatic save creation.\n',
               'Set `Enabled=0` to retain OpenShim\'s AutoSave load-button support while disabling engine-level automatic save creation. The in-game AutoSave toggle writes this same key.\n')
 
-          # Put the complete AutoSave section into the shipped config example.
           replace_once(
               'openshim.ini.example',
               '[SinglePlayer]\n; These gameplay-affecting improvements are hard-disabled in network games,\n',
