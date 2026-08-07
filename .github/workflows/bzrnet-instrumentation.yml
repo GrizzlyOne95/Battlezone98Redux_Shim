@@ -1,0 +1,54 @@
+name: BZRNet instrumentation validation
+
+on:
+  push:
+    branches:
+      - agent/bzrnet-native-instrumentation
+  pull_request:
+    paths:
+      - 'include/bzrnet_*'
+      - 'src/patches/bzrnet_*'
+      - 'tests/bzrnet_*'
+      - 'tests/CMakeLists.txt'
+      - 'reverse_engineering/*bzrnet*'
+      - 'reverse_engineering/BZRNET_NATIVE_INSTRUMENTATION.md'
+      - 'bzrnet_capture_windows.ps1'
+      - 'BZROpenShim.vcxproj'
+      - 'src/dllmain.cpp'
+      - '.github/workflows/bzrnet-instrumentation.yml'
+
+jobs:
+  protocol-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure standalone protocol tests
+        run: cmake -S tests -B build/bzrnet-tests -A Win32
+      - name: Build standalone protocol tests
+        run: cmake --build build/bzrnet-tests --config Release
+      - name: Run standalone protocol tests
+        run: .\build\bzrnet-tests\Release\bzrnet_protocol_tests.exe
+      - name: Run BZRNet Python tool tests
+        run: python -m unittest discover -s reverse_engineering -p "test_bzrnet*.py"
+      - name: Parse BZRNet PowerShell capture wrapper
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path '.\bzrnet_capture_windows.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | Format-List | Out-String | Write-Error
+            exit 1
+          }
+
+  shim-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build OpenShim Release Win32
+        run: msbuild BZROpenShim.sln /m /p:Configuration=Release /p:Platform=Win32
