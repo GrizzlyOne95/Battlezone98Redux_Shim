@@ -8,6 +8,7 @@
 #include "bzr_hooks.h"
 #include "crash_logger.h"
 #include "net_optimizer.h"
+#include "bzrnet_instrumentation.h"
 #include "patcher.h"
 #include "hook_engine.h"
 #include "shim_log.h"
@@ -29,6 +30,9 @@ static unsigned __stdcall PatchThreadProc(void*)
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread started");
     BZROpenShim::InstallCrashLogger();
     BZROpenShim::InitializeNetworkOptimizer();
+    // Install BZRNet observation after the optimizer so it can chain through
+    // the optimizer's existing IAT targets without changing network behavior.
+    BZROpenShim::InitializeBzrNetInstrumentation();
     BZROpenShim::RunPatcher(SHIM_VERSION);
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread exiting");
     return 0;
@@ -82,6 +86,9 @@ namespace BZROpenShim
             g_PatchThread = 0;
         }
         BZROpenShim::FlushChunkFragmentEventsForShutdown();
+        // Stop the upper observation layer before the lower Winsock optimizer
+        // it chains through, then let the existing optimizer flush its logs.
+        BZROpenShim::ShutdownBzrNetInstrumentation();
         BZROpenShim::ShutdownNetworkOptimizer();
         FreeRealWinmm();
         BZROpenShim::ShutdownShimLogger();
