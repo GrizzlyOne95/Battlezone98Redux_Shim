@@ -12,6 +12,7 @@
 #include "hook_engine.h"
 #include "shim_log.h"
 #include "file_io_hooks.h"
+#include "autosave.h"
 #include "BZROpenShim.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -30,6 +31,22 @@ static unsigned __stdcall PatchThreadProc(void*)
     BZROpenShim::InstallCrashLogger();
     BZROpenShim::InitializeNetworkOptimizer();
     BZROpenShim::RunPatcher(SHIM_VERSION);
+
+    // AutoSave stacks its main-thread update hook after the normal patch set so
+    // it chains whichever world-update target (stock or OpenShim) is active.
+    // Never install version-specific runtime addresses if the core compatibility
+    // check failed.
+    if (BZROpenShim::IsCompatibleGameVersion())
+    {
+        if (!BZROpenShim::InitializeAutoSave())
+        {
+            BZROpenShim::LogShimA(
+                BZROpenShim::LogLevel::Warn,
+                "dllmain",
+                "Engine-level AutoSave initialization failed; normal manual saves remain available");
+        }
+    }
+
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread exiting");
     return 0;
 }
@@ -81,6 +98,7 @@ namespace BZROpenShim
             CloseHandle(reinterpret_cast<HANDLE>(g_PatchThread));
             g_PatchThread = 0;
         }
+        BZROpenShim::ShutdownAutoSave();
         BZROpenShim::FlushChunkFragmentEventsForShutdown();
         BZROpenShim::ShutdownNetworkOptimizer();
         FreeRealWinmm();
