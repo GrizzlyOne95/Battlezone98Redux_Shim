@@ -10,7 +10,7 @@ on:
       - 'src/patches/bzrnet_*'
       - 'tests/bzrnet_*'
       - 'tests/CMakeLists.txt'
-      - 'reverse_engineering/*bzrnet_trace*'
+      - 'reverse_engineering/*bzrnet*'
       - 'reverse_engineering/BZRNET_NATIVE_INSTRUMENTATION.md'
       - 'bzrnet_capture_windows.ps1'
       - 'BZROpenShim.vcxproj'
@@ -28,8 +28,8 @@ jobs:
         run: cmake --build build/bzrnet-tests --config Release
       - name: Run standalone protocol tests
         run: .\build\bzrnet-tests\Release\bzrnet_protocol_tests.exe
-      - name: Run trace-tool tests
-        run: python reverse_engineering/test_bzrnet_trace_tools.py
+      - name: Run BZRNet Python tool tests
+        run: python -m unittest discover -s reverse_engineering -p "test_bzrnet*.py"
       - name: Parse BZRNet PowerShell capture wrapper
         shell: pwsh
         run: |
