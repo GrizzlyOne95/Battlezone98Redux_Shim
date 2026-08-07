@@ -127,6 +127,16 @@ function Write-Hashes {
     $rows | Out-File -FilePath $hashFile -Encoding ascii
 }
 
+function Rebuild-ArchiveWithFinalHashes {
+    param([string]$SessionDir)
+
+    if (-not (Test-Path $SessionDir)) { return }
+    Write-Hashes -SessionDir $SessionDir
+    $zipPath = "$SessionDir.zip"
+    if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+    Compress-Archive -Path (Join-Path $SessionDir "*") -DestinationPath $zipPath
+}
+
 function Start-BzrNetCapture {
     if ($TraceQueueRecords -lt 256 -or $TraceQueueRecords -gt 65536) {
         throw "TraceQueueRecords must be between 256 and 65536."
@@ -143,9 +153,6 @@ function Start-BzrNetCapture {
     if ($RelayCapture) { $baseArgs["RelayCapture"] = $true }
 
     & $baseLogger @baseArgs
-    if ($LASTEXITCODE -ne $null -and $LASTEXITCODE -ne 0) {
-        throw "buffer_logger_windows.ps1 Start failed with exit code $LASTEXITCODE"
-    }
 
     $sessionDir = Get-CurrentSessionDir
     if (-not $sessionDir -or -not (Test-Path $sessionDir)) {
@@ -173,25 +180,20 @@ function Stop-BzrNetCapture {
     # The base Stop command zips every file already present in the session, so
     # copy the new native artifacts into it before delegating.
     Copy-NativeTraceBeforeBaseStop -SessionDir $sessionDir
-    Write-Hashes -SessionDir $sessionDir
 
     & $baseLogger -Action Stop
-    if ($LASTEXITCODE -ne $null -and $LASTEXITCODE -ne 0) {
-        throw "buffer_logger_windows.ps1 Stop failed with exit code $LASTEXITCODE"
-    }
 
-    # The base logger may have collected additional files during Stop. Refresh
-    # the directory hash manifest for the unzipped evidence directory as well.
-    if (Test-Path $sessionDir) { Write-Hashes -SessionDir $sessionDir }
+    # The base Stop command collects the legacy logs immediately before its ZIP
+    # is created. Rebuild that archive once so SHA256SUMS.txt covers the final
+    # complete evidence directory, including the newly collected legacy files.
+    Rebuild-ArchiveWithFinalHashes -SessionDir $sessionDir
     Write-Host "BZRNet native capture stopped: $sessionDir"
+    Write-Host "Final archive: $sessionDir.zip"
 }
 
 function Mark-BzrNetCapture {
     if (-not $Message) { throw "-Message is required for Mark." }
     & $baseLogger -Action Mark -Message $Message
-    if ($LASTEXITCODE -ne $null -and $LASTEXITCODE -ne 0) {
-        throw "buffer_logger_windows.ps1 Mark failed with exit code $LASTEXITCODE"
-    }
 }
 
 switch ($Action) {
