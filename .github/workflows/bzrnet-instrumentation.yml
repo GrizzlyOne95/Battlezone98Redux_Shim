@@ -11,6 +11,8 @@ on:
       - 'tests/bzrnet_*'
       - 'tests/CMakeLists.txt'
       - 'reverse_engineering/*bzrnet_trace*'
+      - 'reverse_engineering/BZRNET_NATIVE_INSTRUMENTATION.md'
+      - 'bzrnet_capture_windows.ps1'
       - 'BZROpenShim.vcxproj'
       - 'src/dllmain.cpp'
       - '.github/workflows/bzrnet-instrumentation.yml'
@@ -28,6 +30,20 @@ jobs:
         run: .\build\bzrnet-tests\Release\bzrnet_protocol_tests.exe
       - name: Run trace-tool tests
         run: python reverse_engineering/test_bzrnet_trace_tools.py
+      - name: Parse BZRNet PowerShell capture wrapper
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path '.\bzrnet_capture_windows.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | Format-List | Out-String | Write-Error
+            exit 1
+          }
 
   shim-build:
     runs-on: windows-latest
