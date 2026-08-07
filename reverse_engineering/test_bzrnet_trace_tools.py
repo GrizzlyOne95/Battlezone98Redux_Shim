@@ -18,6 +18,13 @@ class BzrNetTraceToolTests(unittest.TestCase):
                 handle.write(json.dumps(row) + "\n")
         return Path(handle.name)
 
+    @staticmethod
+    def ws(message_type: str, payload: dict, direction: str = "inbound", **detail_fields: object) -> dict:
+        envelope = "data" if direction == "inbound" else "content"
+        details = {"messageJson": json.dumps({"type": message_type, envelope: payload}, separators=(",", ":"))}
+        details.update(detail_fields)
+        return {"event": "BZR_WS_RX" if direction == "inbound" else "BZR_WS_TX", "direction": direction, "messageType": message_type, "details": details}
+
     def test_summary_and_drop(self) -> None:
         path = self.write_trace([
             {"seq": 1, "tickMs": 100, "event": "BZR_WS_TX", "direction": "outbound", "messageType": "DoEnterLounge", "details": {"messageJson": "{\"type\":\"DoEnterLounge\",\"content\":{}}"}},
@@ -55,6 +62,50 @@ class BzrNetTraceToolTests(unittest.TestCase):
         ])
         replacement = self.write_trace([
             {"event": "BZR_WS_RX", "direction": "inbound", "messageType": "OnLobbyJoined", "details": {"reasonCode": 5, "success": False, "messageJson": "{\"type\":\"OnLobbyJoined\",\"data\":{\"reasonCode\":5}}"}},
+        ])
+        report = compare_sequences(semantic_messages(official), semantic_messages(replacement))
+        self.assertFalse(report["pass"])
+
+    def test_async_broadcast_order_may_vary_within_same_causal_gap(self) -> None:
+        official = self.write_trace([
+            self.ws("DoEnterLounge", {}, direction="outbound"),
+            self.ws("OnWANUpdated", {"userId": "A", "wanAddress": "1.1.1.1"}),
+            self.ws("OnLobbyListChanged", {"lobbies": []}),
+            self.ws("OnLobbyCreated", {"lobbyId": "L1"}),
+        ])
+        replacement = self.write_trace([
+            self.ws("DoEnterLounge", {}, direction="outbound"),
+            self.ws("OnLobbyListChanged", {"lobbies": []}),
+            self.ws("OnWANUpdated", {"userId": "B", "wanAddress": "9.9.9.9"}),
+            self.ws("OnLobbyCreated", {"lobbyId": "OTHER"}),
+        ])
+        report = compare_sequences(semantic_messages(official), semantic_messages(replacement))
+        self.assertTrue(report["pass"])
+        self.assertFalse(report["asyncMismatches"])
+
+    def test_async_broadcast_cannot_cross_strict_boundary(self) -> None:
+        official = self.write_trace([
+            self.ws("DoEnterLounge", {}, direction="outbound"),
+            self.ws("OnLobbyListChanged", {"lobbies": []}),
+            self.ws("CreateGame", {"memberLimit": 4}, direction="outbound"),
+        ])
+        replacement = self.write_trace([
+            self.ws("DoEnterLounge", {}, direction="outbound"),
+            self.ws("CreateGame", {"memberLimit": 4}, direction="outbound"),
+            self.ws("OnLobbyListChanged", {"lobbies": []}),
+        ])
+        report = compare_sequences(semantic_messages(official), semantic_messages(replacement))
+        self.assertFalse(report["pass"])
+        self.assertTrue(report["asyncMismatches"])
+
+    def test_async_payload_difference_fails(self) -> None:
+        official = self.write_trace([
+            self.ws("DoEnterLounge", {}, direction="outbound"),
+            self.ws("OnLobbyListChanged", {"lobbies": [{"memberLimit": 4}]}),
+        ])
+        replacement = self.write_trace([
+            self.ws("DoEnterLounge", {}, direction="outbound"),
+            self.ws("OnLobbyListChanged", {"lobbies": [{"memberLimit": 8}]}),
         ])
         report = compare_sequences(semantic_messages(official), semantic_messages(replacement))
         self.assertFalse(report["pass"])
