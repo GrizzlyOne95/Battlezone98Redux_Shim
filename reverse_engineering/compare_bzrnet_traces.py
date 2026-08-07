@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +14,19 @@ from analyze_bzrnet_trace import details, load_trace, parse_message
 
 
 IGNORED_MESSAGE_TYPES = {"OnHeartbeat"}
+# These are server broadcasts whose relative ordering may legitimately vary
+# while the client's causal request/reply sequence remains equivalent. They are
+# compared as semantic multisets inside the gap between adjacent strict events.
+ASYNC_MESSAGE_TYPES = {
+    "OnLANUpdated",
+    "OnWANUpdated",
+    "OnLobbyListChanged",
+    "OnLobbyChanged",
+    "OnLobbyDataChanged",
+    "OnUserDataChanged",
+    "OnLobbyMemberListChanged",
+    "OnWhitelistUpdated",
+}
 VARIABLE_KEYS = {"time", "steamAppTicket", "gogAppTicket", "authTicket", "platformTicket", "wanAddress", "lanAddresses"}
 IDENTITY_KEYS = {"userId", "player", "owner", "speakerId", "member", "realname"}
 LOBBY_KEYS = {"lobbyId", "lobby"}
@@ -69,29 +83,86 @@ def semantic_messages(path: Path, *, include_heartbeats: bool = False) -> list[d
     return rows
 
 
-def compare_sequences(official: list[dict[str, Any]], replacement: list[dict[str, Any]]) -> dict[str, Any]:
-    """Compare client-observable message semantics, not raw JSONL lines.
+def canonical(row: dict[str, Any]) -> str:
+    return json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
-    Heartbeats are ignored by default and JSON object-key ordering/identity-like
-    values are normalized. Meaningful missing/extra messages, fields, reason
-    codes and success values remain mismatches.
+
+def partition_sequence(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[list[dict[str, Any]]]]:
+    """Return strict events plus async broadcast gaps.
+
+    async_gaps[0] is before the first strict event, async_gaps[1] lies between
+    strict events 0 and 1, and the final gap follows the last strict event.
+    This tolerates harmless reordering of broadcasts without allowing one to
+    drift across a causal client request/reply boundary unnoticed.
     """
-    mismatches: list[dict[str, Any]] = []
-    common = min(len(official), len(replacement))
+    strict: list[dict[str, Any]] = []
+    gaps: list[list[dict[str, Any]]] = [[]]
+    for row in rows:
+        if str(row.get("messageType", "")) in ASYNC_MESSAGE_TYPES:
+            gaps[-1].append(row)
+        else:
+            strict.append(row)
+            gaps.append([])
+    return strict, gaps
+
+
+def compare_sequences(official: list[dict[str, Any]], replacement: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compare client-observable semantics with controlled async tolerance.
+
+    Causal/non-broadcast events remain strictly ordered and value-sensitive.
+    Known asynchronous broadcasts may reorder only within the same gap between
+    strict events. Object-key ordering, generated identity-like values, and the
+    explicitly variable protocol fields are normalized upstream. Missing fields,
+    wrong values, reason-code differences, and messages crossing causal gaps are
+    still reported as mismatches.
+    """
+    official_strict, official_gaps = partition_sequence(official)
+    replacement_strict, replacement_gaps = partition_sequence(replacement)
+
+    strict_mismatches: list[dict[str, Any]] = []
+    common = min(len(official_strict), len(replacement_strict))
     for index in range(common):
-        if official[index] != replacement[index]:
-            mismatches.append({"index": index, "official": official[index], "replacement": replacement[index]})
-    if len(official) != len(replacement):
-        mismatches.append({
+        if official_strict[index] != replacement_strict[index]:
+            strict_mismatches.append({
+                "index": index,
+                "official": official_strict[index],
+                "replacement": replacement_strict[index],
+            })
+    if len(official_strict) != len(replacement_strict):
+        strict_mismatches.append({
             "index": common,
-            "officialRemaining": official[common:],
-            "replacementRemaining": replacement[common:],
+            "officialRemaining": official_strict[common:],
+            "replacementRemaining": replacement_strict[common:],
         })
+
+    async_mismatches: list[dict[str, Any]] = []
+    gap_count = max(len(official_gaps), len(replacement_gaps))
+    for gap_index in range(gap_count):
+        official_gap = official_gaps[gap_index] if gap_index < len(official_gaps) else []
+        replacement_gap = replacement_gaps[gap_index] if gap_index < len(replacement_gaps) else []
+        official_counter = collections.Counter(canonical(row) for row in official_gap)
+        replacement_counter = collections.Counter(canonical(row) for row in replacement_gap)
+        if official_counter == replacement_counter:
+            continue
+        missing = list((official_counter - replacement_counter).elements())
+        extra = list((replacement_counter - official_counter).elements())
+        async_mismatches.append({
+            "gapIndex": gap_index,
+            "missingFromReplacement": [json.loads(row) for row in missing],
+            "extraInReplacement": [json.loads(row) for row in extra],
+        })
+
+    passed = not strict_mismatches and not async_mismatches
     return {
-        "pass": not mismatches,
+        "pass": passed,
         "officialCount": len(official),
         "replacementCount": len(replacement),
-        "mismatches": mismatches,
+        "officialStrictCount": len(official_strict),
+        "replacementStrictCount": len(replacement_strict),
+        "strictMismatches": strict_mismatches,
+        "asyncMismatches": async_mismatches,
+        # Compatibility field for older callers.
+        "mismatches": strict_mismatches + async_mismatches,
     }
 
 
@@ -109,7 +180,12 @@ def main() -> None:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
         status = "PASS" if report["pass"] else "FAIL"
-        print(f"{status}: official_messages={report['officialCount']} replacement_messages={report['replacementCount']}")
+        print(
+            f"{status}: official_messages={report['officialCount']} "
+            f"replacement_messages={report['replacementCount']} "
+            f"strict_mismatches={len(report['strictMismatches'])} "
+            f"async_mismatches={len(report['asyncMismatches'])}"
+        )
         for mismatch in report["mismatches"][:20]:
             print(json.dumps(mismatch, indent=2, sort_keys=True))
     raise SystemExit(0 if report["pass"] else 1)
