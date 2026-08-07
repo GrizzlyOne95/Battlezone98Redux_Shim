@@ -136,6 +136,18 @@ UnitVoFeedback = 1
 ; Subtitles remain a Campaign Reimagined / EXU feature; OpenShim does not
 ; attempt to synthesize subtitle timing for unscripted stock audio.
 
+[AutoSave]
+; Rolling single-player recovery save. These two common controls are also
+; available on the in-game OpenShim Settings page and apply immediately.
+Enabled = 1
+; Seconds between rolling AutoSave writes. UI choices: 60/120/180/300/600.
+IntervalSeconds = 120
+; Advanced safety/compatibility controls (INI-only).
+InitialDelaySeconds = 10
+RetrySeconds = 15
+BackupExisting = 1
+RespectExternalAutoSave = 1
+
 [SinglePlayer]
 ; These gameplay-affecting improvements are hard-disabled in network games,
 ; regardless of the values below.
