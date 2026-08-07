@@ -36,7 +36,9 @@ function Get-TraceEnvironmentLines {
     $lines.Add("set BZ_BZRNET_TRACE=1")
     $lines.Add("set BZ_BZRNET_TRACE_QUEUE=$TraceQueueRecords")
     if ($PrivateForensic) { $lines.Add("set BZ_BZRNET_TRACE_PRIVATE=1") }
-    if ($AllUdp) { $lines.Add("set BZ_BZRNET_TRACE_ALL_UDP=1") }
+    # Relay captures intentionally keep dynamic direct/candidate UDP visible as
+    # well as 1338/1339 so fallback/selection attempts are not hidden.
+    if ($AllUdp -or $RelayCapture) { $lines.Add("set BZ_BZRNET_TRACE_ALL_UDP=1") }
     return $lines
 }
 
@@ -72,6 +74,33 @@ function Get-SafeFileIdentity {
     }
 }
 
+function New-LaunchProfile {
+    return [ordered]@{
+        bzrNetTrace = $true
+        relayCaptureRequested = [bool]$RelayCapture
+        privateForensic = [bool]$PrivateForensic
+        allUdpHighlights = [bool]($AllUdp -or $RelayCapture)
+        traceQueueRecords = $TraceQueueRecords
+        bufferPayloadBytes = $(if ($RelayCapture) { 2048 } else { $PayloadBytes })
+        bufferRingRecords = $RingRecords
+    }
+}
+
+function Copy-ExistingLaunchProfile {
+    param($ExistingProfile)
+
+    if (-not $ExistingProfile) { return $null }
+    return [ordered]@{
+        bzrNetTrace = [bool]$ExistingProfile.bzrNetTrace
+        relayCaptureRequested = [bool]$ExistingProfile.relayCaptureRequested
+        privateForensic = [bool]$ExistingProfile.privateForensic
+        allUdpHighlights = [bool]$ExistingProfile.allUdpHighlights
+        traceQueueRecords = [int]$ExistingProfile.traceQueueRecords
+        bufferPayloadBytes = [int]$ExistingProfile.bufferPayloadBytes
+        bufferRingRecords = [int]$ExistingProfile.bufferRingRecords
+    }
+}
+
 function Write-CaptureIdentity {
     param(
         [string]$SessionDir,
@@ -97,6 +126,17 @@ function Write-CaptureIdentity {
         (Get-Date).ToUniversalTime().ToString("o")
     }
 
+    # Stop is normally invoked without repeating Start's switches. Preserve the
+    # profile captured at Start instead of accidentally rewriting it with Stop's
+    # default parameter values.
+    $launchProfile = $null
+    if ($Stage -eq "stop" -and $existing -and $existing.launchProfile) {
+        $launchProfile = Copy-ExistingLaunchProfile -ExistingProfile $existing.launchProfile
+    }
+    if (-not $launchProfile) {
+        $launchProfile = New-LaunchProfile
+    }
+
     $identity = [ordered]@{
         formatVersion = 1
         captureStartUtc = $startUtc
@@ -104,15 +144,7 @@ function Write-CaptureIdentity {
         platform = $game.Platform
         gameExecutable = $(Get-SafeFileIdentity -Path $game.Path)
         openShim = $(Get-SafeFileIdentity -Path $winmm)
-        launchProfile = [ordered]@{
-            bzrNetTrace = $true
-            relayCaptureRequested = [bool]$RelayCapture
-            privateForensic = [bool]$PrivateForensic
-            allUdpHighlights = [bool]$AllUdp
-            traceQueueRecords = $TraceQueueRecords
-            bufferPayloadBytes = $(if ($RelayCapture) { 2048 } else { $PayloadBytes })
-            bufferRingRecords = $RingRecords
-        }
+        launchProfile = $launchProfile
         note = "Launch-profile fields record wrapper-requested settings, not proof of engine-effective values. Runtime trace/config evidence should be used for effective-state claims."
     }
     $identity | ConvertTo-Json -Depth 6 | Out-File -FilePath $identityPath -Encoding utf8
@@ -159,7 +191,7 @@ function Add-CaptureReadme {
         "BZRNet native trace profile:",
         "- BZ_BZRNET_TRACE=1",
         "- private forensic trace: $([int][bool]$PrivateForensic)",
-        "- all UDP semantic wire highlights: $([int][bool]$AllUdp)",
+        "- all UDP semantic wire highlights: $([int][bool]($AllUdp -or $RelayCapture))",
         "- trace queue records: $TraceQueueRecords",
         "- relay capture: $([int][bool]$RelayCapture)",
         "",
@@ -247,7 +279,7 @@ function Start-BzrNetCapture {
         "Session: $sessionDir",
         "Steam: use the updated steam_launch_options.txt line.",
         "Direct/GOG: use the updated launch_with_buffer_log.cmd.",
-        $(if ($RelayCapture) { "Relay profile includes /iprelay and the 2048-byte binary UDP capture." } else { "BZRNet tracing is enabled without forcing relay." })
+        $(if ($RelayCapture) { "Relay profile includes /iprelay, dynamic UDP semantic highlights, and the 2048-byte binary UDP capture." } else { "BZRNet tracing is enabled without forcing relay." })
     ) | ForEach-Object { Write-Host $_ }
 }
 
