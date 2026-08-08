@@ -34,7 +34,7 @@ The capture includes, when available:
 - D3D11 device/feature-level activation;
 - active D3D11 viewport dimensions;
 - swapchain format and dimensions;
-- `IDXGISwapChain3` color-space state where supported;
+- `IDXGISwapChain3::SetColorSpace1` requests and their HRESULTs when BZR/Ogre makes one;
 - backbuffer resource format;
 - RTV resource and view formats independently;
 - texture creation format/dimensions/mips/array/cube state;
@@ -42,6 +42,8 @@ The capture includes, when available:
 - typeless, `_SRGB`, and floating-point classification;
 - DSV/depth formats;
 - intermediate render-target bindings.
+
+DXGI does not expose a public `IDXGISwapChain3` getter for the currently selected color space. The probe therefore does **not** infer current state from `CheckColorSpaceSupport` or from the swapchain format. If no `SetColorSpace1` call is observed, the DXGI color-space selection remains unresolved and is logged that way.
 
 The shader-resource binding records include Campaign Reimagined register hints for the current SM4 Enhanced base/terrain layouts. These hints are variant-dependent context, not an invented resource name.
 
@@ -78,6 +80,7 @@ The observer uses public D3D11/DXGI COM ABI methods rather than guessed Ogre obj
 6. Preserve the OpenShim log and matching `BZOgreLogfile` from the same run.
 7. Extract all `[DX11 ColorSpace]` lines.
 8. Record both resource and SRV formats for representative color/data resources and both backbuffer resource and RTV formats.
+9. If any `SetColorSpace1` record exists, include it. If none exists, mark DXGI color-space selection as unresolved rather than assuming the default.
 
 Do not describe the pipeline as proven linear/nonlinear until that capture exists.
 
