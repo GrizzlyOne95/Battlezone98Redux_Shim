@@ -14,6 +14,7 @@
 #include "shim_log.h"
 #include "file_io_hooks.h"
 #include "autosave.h"
+#include "dx11_colorspace_diagnostic.h"
 #include "BZROpenShim.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -29,6 +30,9 @@ static uintptr_t g_PatchThread = 0;
 static unsigned __stdcall PatchThreadProc(void*)
 {
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread started");
+    // Start the opt-in DX11 diagnostic immediately so its worker can observe
+    // RenderSystem_Direct3D11.dll before Ogre creates the D3D11 device.
+    BZROpenShim::InitializeDx11ColorSpaceDiagnostic();
     BZROpenShim::InstallCrashLogger();
     BZROpenShim::InitializeNetworkOptimizer();
     // Install BZRNet observation after the optimizer so it can chain through
@@ -102,6 +106,7 @@ namespace BZROpenShim
             CloseHandle(reinterpret_cast<HANDLE>(g_PatchThread));
             g_PatchThread = 0;
         }
+        BZROpenShim::ShutdownDx11ColorSpaceDiagnostic();
         BZROpenShim::ShutdownAutoSave();
         BZROpenShim::FlushChunkFragmentEventsForShutdown();
         // Stop the upper observation layer before the lower Winsock optimizer
