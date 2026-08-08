@@ -122,6 +122,7 @@
     <ClCompile Include="src\patches\bzrnet_trace.cpp" />
     <ClCompile Include="src\patches\bzrnet_instrumentation.cpp" />
     <ClCompile Include="src\patches\d3d_startup_hooks.cpp" />
+    <ClCompile Include="src\patches\dx11_colorspace_diagnostic.cpp" />
     <ClCompile Include="src\patches\file_io_hooks.cpp" />
     <ClCompile Include="src\patches\game_state.cpp" />
     <ClCompile Include="src\patches\net_optimizer.cpp" />
@@ -146,6 +147,7 @@
     <ClInclude Include="include\crash_logger.h" />
     <ClInclude Include="include\bzr_string.h" />
     <ClInclude Include="include\d3d_startup_hooks.h" />
+    <ClInclude Include="include\dx11_colorspace_diagnostic.h" />
     <ClInclude Include="include\file_io_hooks.h" />
     <ClInclude Include="include\ogre_shader_cache.h" />
     <ClInclude Include="include\game_state.h" />
