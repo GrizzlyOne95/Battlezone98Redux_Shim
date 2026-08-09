@@ -64,6 +64,27 @@ CustomBindsUi = 1
 ;   Disable: OPENSHIM_DISABLE_SETTINGS_UI or BZR_DISABLE_SETTINGS_UI
 SettingsUi = 1
 
+; Phase 2 terrain-rendering proof of concept. Everything is disabled by
+; default and exact-build gated. The proxy clones one stock 16x16-cell terrain
+; cluster, leaves the stock cluster visible, and mirrors terrain rebuilds.
+; TerrainProxyZone/TerrainProxyCluster select construction ordinals; the
+; optional X/Z keys select the native identifiers embedded in the stock mesh
+; name (RenderableTileCluster_<zoneX>x<zoneZ>_<clusterX>x<clusterZ>).
+[Terrain]
+TerrainProxyEnabled = 0
+TerrainProxyZone = -1
+TerrainProxyCluster = -1
+; TerrainProxyZoneX = 0
+; TerrainProxyZoneZ = 0
+; TerrainProxyClusterX = 0
+; TerrainProxyClusterZ = 0
+TerrainProxyOffsetX = 0.0
+TerrainProxyOffsetY = 0.0
+TerrainProxyOffsetZ = 0.0
+TerrainProxyVisible = 1
+TerrainSemanticCapture = 0
+TerrainSemanticDumpJson = 1
+
 [Display]
 ; Under-attack audio alert frequency.
 ;   None    = silent (aliases: Off, numeric values <= 1)
@@ -234,3 +255,24 @@ HeadlightColor = White
 HeadlightBeam = Wide
 
 ; Team-1 material colors remain a Campaign Reimagined shader/mod feature.
+
+[Diagnostics]
+; Read-only DX11 terrain construction capture. Default: disabled.
+; The observer recognizes the released terrain cluster's completed D3D11 draw
+; signature and never changes geometry, UVs, materials, shaders, or draw state.
+; DX9 is untouched. Environment enable override:
+;   OPENSHIM_TERRAIN_RENDER_PROBE=1
+TerrainRenderProbe = 0
+;
+; With TerrainRenderProbe enabled, capture the first N distinct terrain
+; clusters observed after hook installation. Clamped to 1..16. Default: 1.
+TerrainRenderProbeMaxClusters = 1
+;
+; -1 captures the first cluster(s). A zero-based value captures only that
+; distinct observed cluster ordinal; this is a diagnostic ordinal, not the
+; game's zone/cluster coordinate. Default: -1.
+TerrainRenderProbeCluster = -1
+; Write the full one-shot buffer snapshot beside the game executable as
+; terrain_probe.json (or terrain_probe_NNN.json for multiple captures).
+; Boolean. Default: enabled whenever TerrainRenderProbe itself is enabled.
+TerrainRenderProbeDumpJson = 1
