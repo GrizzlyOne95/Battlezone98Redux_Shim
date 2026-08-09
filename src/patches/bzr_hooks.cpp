@@ -1,6 +1,7 @@
 #include "bzr_hooks.h"
 #include "game_state.h"
 #include "openshim_ini.h"
+#include "terrain_proxy.h"
 #include "bzr_options_ui.h"
 #include "patches.h"
 #include "patcher.h"
@@ -10257,18 +10258,22 @@ namespace BZROpenShim
 
         static void __fastcall SceneManagerClearSceneHook(void* sceneManager, void* /*unusedEdx*/)
         {
+            TerrainProxySceneTeardownBegin(sceneManager, true);
             ForgetAllChunkProxySceneResources(L"clearScene");
             ForgetMultiplayerFlagSceneResources(L"clearScene");
             if (g_OgreFn_ClearSceneOriginal)
                 g_OgreFn_ClearSceneOriginal(sceneManager);
+            TerrainProxySceneTeardownComplete(sceneManager, true);
         }
 
         static void __fastcall SceneManagerDestroyAllMovablesHook(void* sceneManager, void* /*unusedEdx*/)
         {
+            TerrainProxySceneTeardownBegin(sceneManager, false);
             ForgetAllChunkProxySceneResources(L"destroyAllMovableObjects");
             ForgetMultiplayerFlagSceneResources(L"destroyAllMovableObjects");
             if (g_OgreFn_DestroyAllMovablesOriginal)
                 g_OgreFn_DestroyAllMovablesOriginal(sceneManager);
+            TerrainProxySceneTeardownComplete(sceneManager, false);
         }
 
         static void InstallSceneTeardownForgetHooksIfPossible()

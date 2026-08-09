@@ -129,6 +129,7 @@
     <ClCompile Include="src\patches\openshim_ini.cpp" />
     <ClCompile Include="src\patches\bzr_options_ui.cpp" />
     <ClCompile Include="src\patches\ogre_shader_cache.cpp" />
+    <ClCompile Include="src\patches\terrain_proxy.cpp" />
     <ClCompile Include="src\engine\crash_logger.cpp" />
     <ClCompile Include="src\engine\shim_log.cpp" />
     <ClCompile Include="src\engine\winmm_proxy.cpp" />
@@ -150,6 +151,7 @@
     <ClInclude Include="include\dx11_colorspace_diagnostic.h" />
     <ClInclude Include="include\file_io_hooks.h" />
     <ClInclude Include="include\ogre_shader_cache.h" />
+    <ClInclude Include="include\terrain_proxy.h" />
     <ClInclude Include="include\game_state.h" />
     <ClInclude Include="include\net_optimizer.h" />
     <ClInclude Include="include\shim_log.h" />
