@@ -61,7 +61,13 @@ Native fixes and restorations for Redux behavior, including:
 
 ### Global Gameplay Improvements
 
-Optional improvements can be configured through `openshim.ini`, including:
+Optional improvements can be configured through:
+
+```text
+openshim.ini
+```
+
+including:
 
 - smart reticle range
 - weapon and player reticle convergence
@@ -207,7 +213,16 @@ Requirements:
 
 - Visual Studio 2022 or newer
 - C++ development tools
+- Git
 - Win32/x86 target
+
+Fetch the pinned Ogre 1.10.0 reference headers once after cloning:
+
+```powershell
+.\setup-dev.ps1
+```
+
+The current renderer diagnostics compile against these reference declarations. OpenShim does **not** build or link a replacement `OgreMain.dll`; runtime integration continues to target the game's already-loaded Ogre module. The shipped BZR Ogre binary has known ABI differences from pristine upstream 1.10.0, so runtime-facing hooks must still validate the actual BZR DLL.
 
 Open:
 
