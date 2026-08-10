@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+
 namespace BZROpenShim
 {
     // Returns true when the opt-in Ogre animation/render profiler was requested
