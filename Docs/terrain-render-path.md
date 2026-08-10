@@ -147,10 +147,12 @@ The OGRE declaration and the D3D11 mapping agree on this three-stream layout:
 | 1 / 4 | `BLEND_INDICES`, `VET_UBYTE4` | 0..3 | Quantized atlas U, atlas V, encoded normal X, encoded render-normal Z | `R8G8B8A8_UINT`; UV and normal are reconstructed in the vertex shader |
 | 2 / 4 | `TEXCOORD`, index 1, `VET_FLOAT1` | 0..3 | Terrain height multiplied by 0.1 | Becomes final position Y |
 
-For packed bytes `(pu, pv, nx, nz)`:
+For packed bytes `(pu, pv, nx, nz)`, the normal reconstruction is stable but
+the final UV center convention belongs to the active vertex program:
 
 ```text
-finalAtlasUV = (float2(pu, pv) + 0.5) / 160
+stock terrain program: finalAtlasUV = float2(pu, pv) / 160
+CR SM4 program:        finalAtlasUV = (float2(pu, pv) + 0.5) / 160
 normalXZ     = (float2(nx, nz) - 127) / 127
 normalY      = sqrt(saturate(1 - dot(normalXZ, normalXZ)))
 renderNormal = float3(normalXZ.x, normalY, normalXZ.y)
@@ -188,17 +190,19 @@ variant     =  w        & 0x3
 lookupIndex = typeA * 64 + typeB * 8 + variant * 2 + ((mix >> 3) & 1)
 tileIndex   = TileTextureIndex[lookupIndex]        // uint8 logical index
 rect        = AtlasRects[tileIndex]                // float u, v, width, height
-orientation = MIX2UV[mix]                          // eight floats
+orientation = MIX2UV[mix]                          // full 0..15 index
 ```
 
-The 16 `MIX2UV` records contain two identical copies of eight transforms. The
-low three mix bits therefore choose the eight rotations/reflections. The high
-mix bit changes the logical-tile lookup variant but not the UV orientation.
+The released code indexes all 16 `MIX2UV` records with the complete mix nibble.
+Records 0..11 repeat transforms 0..3 in three groups. Records 12..15 use
+transforms 5, 6, 7, and 4 in that order. Consequently `mix & 7` is not a valid
+general orientation decoder even though it agrees with many cells. The high mix
+bit also participates in `lookupIndex` above.
 
 The first eight records, shown as the four normalized rectangle corners
 `(bottomLeft, topLeft, topRight, bottomRight)`, are:
 
-| mix & 7 | corners |
+| transform | corners |
 |---:|---|
 | 0 | `(0,1) (0,0) (1,0) (1,1)` |
 | 1 | `(0,0) (1,0) (1,1) (0,1)` |
@@ -222,14 +226,15 @@ atlasUV(qx, qz) = P00
                   + (qx / 5) * (P10 - P00)
 
 packedUV = uint8(atlasUV * 160)          // truncation
-shaderUV = (packedUV + 0.5) / 160
+shaderUV = active-program convention (packedUV / 160, optionally +0.5 first)
 ```
 
 There is no separate per-vertex tile index in the finished mesh. UVs are
 generated directly in final atlas space. No additional CPU-side padding offset
 was found: named atlas definitions control each rect, while the fallback is an
-8-by-8 grid of 0.125 rects. The byte quantization plus shader half-step provides
-the final sample-center convention.
+8-by-8 grid of 0.125 rects. Byte quantization is always present in the released
+mesh. The optional shader half-step is material-program policy, not part of the
+CPU packing contract.
 
 Atlas setup parses named records containing `u,v,w,h`, maps each terrain texture
 name to a rect, and fills a 256-entry logical-index vector from the global
@@ -243,7 +248,7 @@ Before packing, the exact future representation is already available:
 ```text
 tileIndex   = TileTextureIndex[lookupIndex]
 localUV     = float2(qx, qz) / 5
-orientation = mix & 7
+orientation = mix                         // full 0..15 MIX2UV index
 atlasRect   = AtlasRects[tileIndex]
 ```
 
@@ -259,7 +264,7 @@ unknown; the probe therefore emits final UV and raw packed bytes but leaves
 The cell word preserves more information than the final vertex buffer:
 
 - two four-bit terrain codes (`typeA` and `typeB`);
-- a four-bit mix value whose low three bits select rotation/reflection;
+- a four-bit mix value that selects one of 16 `MIX2UV` records;
 - a two-bit variant;
 - the high mix bit as an additional `TileTextureIndex` lookup selector.
 
@@ -302,7 +307,8 @@ Campaign Reimagined preserves this contract. For example,
 `CR_BZTerrainBase` and assigns `achilles_atlas_d.dds` through the `DiffuseMap`
 alias. `Shaders/CR_terrain-sm4.hlsl` consumes the exact `POSITION`,
 `BLENDINDICES`, `COLOR0`, and `TEXCOORD1` fields described above. It reconstructs
-height, normal, and `(packedUV+0.5)/160` before sampling the atlas. This is a
+height, normal, and `(packedUV+0.5)/160` before sampling the atlas. The stock
+terrain program uses `packedUV/160`; the active program is authoritative. This is a
 material/shader extension over the same stock mesh, not a separate CR geometry
 path.
 
@@ -431,7 +437,7 @@ file SHA-256 was
    ```
 
 5. Spot-check that `vertexCount=9409`, `indexCount=38400`, indices stay below
-   9409, packed UV bytes decode by `(byte+0.5)/160`, and COLOR0 contains the
+   9409, packed UV bytes decode using the active shader's `/160` convention, and COLOR0 contains the
    expected white RGB with observed alpha values. Deform terrain and select a
    later cluster ordinal in a second run to confirm the refreshed height/normal
    stream appears.
@@ -642,3 +648,488 @@ repeatable comparison. The stock Entity is never hidden by this subsystem.
 
 Texture arrays, new terrain formats/shaders, PBR, stock-terrain suppression,
 terrain LOD, and gameplay/physics changes remain outside Phase 2.
+
+## Phase 3A result
+
+Phase 3A adds an opt-in semantic atlas renderer to the existing one-cluster
+proxy. It still renders the stock atlas and preserves the stock entity. Its
+vertex shader no longer uses stream 1's packed `pu,pv` bytes to address that
+atlas. Those bytes remain present only as a CPU-validation oracle and for any
+untouched auxiliary material techniques.
+
+### Semantic vertex representation
+
+`src/patches/terrain_semantic.cpp` reproduces the released clipped 17-by-17
+tile-generation order, including duplicated tile-edge vertices, to produce the
+same 9,409-element ordering as the completed stock cluster. Each generated
+vertex carries this 28-byte stream in slot 3:
+
+| Offset | OGRE / HLSL input | Value |
+|---:|---|---|
+| 0 | `TEXCOORD2`, `float2` | Cell-local `localUV = (qx,qz)/5` |
+| 8 | `TEXCOORD3`, `ubyte4` / `uint4` | `tileIndex`, full-nibble orientation, `typeA`, `typeB` |
+| 12 | `TEXCOORD4`, `float4` | `AtlasRect = (u,v,w,h)` |
+
+The AtlasRect is deliberately repeated per vertex for this proof. This avoids
+introducing a second global table ABI before texture-array design while keeping
+`tileIndex` explicit as the future lookup/slice key. `mix` and `variant` remain
+in the CPU representation for validation and future translation.
+
+The orientation transform uses the full 0..15 `MIX2UV` index described above.
+This differs from the original Phase 1 inference and was required for exact
+parity. The shader computes:
+
+```text
+orientedUV = OpenShimApplyTerrainOrientation(localUV, orientation)
+atlasUV    = AtlasRect.xy + orientedUV * AtlasRect.zw
+```
+
+### CPU proof
+
+**Proven:** on the live released GOG DX11 build with `misn04.bzn`, the CPU path
+reconstructed packed UV bytes solely from cell word fields, the runtime
+`TileTextureIndex` lookup, full-nibble `MIX2UV` orientation, AtlasRect, and local
+sample coordinates. Readback of stock stream 1 was used only after reconstruction
+for comparison:
+
+```text
+[TERRAIN-P3-UV] checked=9409 matched=9409 mismatched=0 maxUvErrorBeforeQuantization=0.006249998
+```
+
+The exact result also validates the released vertex emission order and the
+single-precision multiply/add/truncate sequence. The reported maximum is the
+distance from the unquantized semantic coordinate to the lower quantization
+edge represented by the stock byte; it is not a packed-byte mismatch.
+
+### Shader and material architecture
+
+The proxy adds a dynamic DX11 slot-3 buffer and clones the selected stock
+material (`MA_DETAIL_ATLAS` in `misn04`, `MN_DETAIL_ATLAS` in `misn01`). For each
+active DX11 terrain vertex-program delegate, OpenShim creates a separately named
+HLSL program from that delegate's source, adds the semantic inputs and
+orientation helper, and replaces only the packed-UV assignment. Pixel programs,
+textures, atlas binding, lighting, fog, COLOR0 behavior, techniques, passes,
+render queue, and the stock position/normal/height streams remain inherited.
+The tested materials required 13 unique semantic vertex programs across 109
+passes.
+
+This runtime-source specialization is intentional: it preserves the active
+material's shader permutations and its sample-center convention. In legacy
+quantization mode the semantic shader evaluates `floor(atlasUV*160)` and then
+applies the active program's `/160` rule, including `+0.5` only when that source
+used it. In experimental unquantized mode it feeds the semantic `atlasUV`
+directly. Neither mode reads stock `pu,pv` for texture addressing.
+
+### Configuration
+
+All Phase 3A settings default off. Existing proxy selectors and offsets choose
+the semantic cluster and provide both overlay and side-by-side modes.
+
+```ini
+[Terrain]
+TerrainProxyEnabled = 1
+TerrainSemanticRenderer = 0
+TerrainSemanticValidateUV = 0
+TerrainSemanticLegacyUVQuantization = 1
+TerrainSemanticDumpMismatches = 0
+TerrainSemanticLifecycleLog = 0
+TerrainSemanticDebug = 0
+TerrainSemanticFrameCapture = 0
+TerrainSemanticFrameCaptureStride = 300
+```
+
+`openshim.ini.example` carries the full per-key documentation. Environment
+overrides exist for every run-varying key so an automated series does not have
+to depend on profile-API write caching:
+
+| Key | Environment override |
+|---|---|
+| `TerrainProxyEnabled` | `OPENSHIM_TERRAIN_PROXY` |
+| `TerrainSemanticRenderer` | `OPENSHIM_TERRAIN_SEMANTIC_RENDERER` |
+| `TerrainSemanticValidateUV` | `OPENSHIM_TERRAIN_SEMANTIC_VALIDATE_UV` |
+| `TerrainSemanticLegacyUVQuantization` | `OPENSHIM_TERRAIN_SEMANTIC_LEGACY_UV_QUANTIZATION` |
+| `TerrainSemanticLifecycleLog` | `OPENSHIM_TERRAIN_SEMANTIC_LIFECYCLE_LOG` |
+| `TerrainSemanticDebug` | `OPENSHIM_TERRAIN_SEMANTIC_DEBUG` |
+| `TerrainSemanticFrameCapture` | `OPENSHIM_TERRAIN_SEMANTIC_FRAME_CAPTURE` |
+| `TerrainSemanticFrameCaptureStride` | `OPENSHIM_TERRAIN_SEMANTIC_FRAME_CAPTURE_STRIDE` |
+
+### Semantic debug visualization
+
+`TerrainSemanticDebug` replaces the shaded color of the semantic proxy cluster
+with a false color derived from the slot-3 stream. It is DX11-only, has no
+effect unless `TerrainSemanticRenderer = 1`, never touches DX9 or the stock
+entity, and leaves geometry, normals, depth, queue order and draw execution
+untouched.
+
+| Mode | Name | Output |
+|---:|---|---|
+| 0 | off | normal semantic rendering |
+| 1 | `tileIndex` | deterministic hashed color per runtime tile id |
+| 2 | `orientation` | full 0..15 nibble, 16 separated colors |
+| 3 | `typeA` | high type nibble, same palette |
+| 4 | `typeB` | low type nibble, same palette |
+| 5 | `localUV` | post-orientation local UV as red/green gradients |
+| 6 | `atlasRect` | AtlasRect origin in red/green, width in blue |
+| 7 | `uvDelta` | `|semanticUV - stockPackedUV|` amplified 640x |
+
+The palette gives values 8..15 their own colors rather than aliasing them onto
+0..7, so a regression back to `mix & 7` is visible on screen rather than only in
+a log. Mode 7 is the in-frame parity check: in legacy quantization mode the
+semantic UV and the stock packed UV are the same value, so a correct cluster
+renders black. It needs no correlation between separate runs because both
+values are computed in the same vertex invocation.
+
+The false color travels through the stock `COLOR0` interpolator. To stop the
+pixel program from modulating it with lighting and the atlas sample, debug modes
+additionally specialize each pass's fragment program with a single edit that
+replaces `oColor.a = vColor.a;` with `oColor = float4(saturate(vColor.xyz), 1.0);`.
+Everything else in the inherited fragment program is preserved. If a program
+permutation does not expose the expected assignment the specialization is
+skipped with a warning and that pass keeps modulated color; rendering never
+fails because of a debug mode.
+
+`OPENSHIM_TERRAIN_SEMANTIC_RENDERER=1` and
+`OPENSHIM_TERRAIN_SEMANTIC_VALIDATE_UV=1` are enable overrides. The renderer
+requires the proxy. If CPU validation is enabled, a mismatch prevents semantic
+material installation and leaves the stock-material proxy in place.
+
+### Validation and lifecycle status
+
+**Proven:** both legacy-quantized and unquantized semantic programs compiled,
+installed, and rendered an offset `misn01` proxy without OpenShim shader errors.
+The legacy-quantized `misn04` run reached normal mission completion. The stock
+terrain remained present and visible by construction.
+
+**Observed:** static captures of the offset quantized and unquantized `misn01`
+proxy showed the same tile selection and transition orientation, with no obvious
+seams or atlas bleeding. A coarse screenshot comparison contained normal
+time-dependent frame differences, so it is not a pixel-equivalence proof. No
+visible sharpness difference was established, and texture stability in motion
+was not tested.
+
+**Inferred:** the 9,409/9,409 packed-byte proof plus a shader transform using the
+same inputs is strong evidence for legacy-quantized raster parity. A correlated
+stock/proxy draw or controlled framebuffer diff is still required before calling
+visual output byte- or pixel-identical.
+
+**Implemented; runtime proof pending:** a
+full dirty event regenerates semantic cells and refreshes slot 3 after the stock
+rebuild. A height-only event retains slot 3/material state and mirrors only the
+existing height/normal path. Semantic programs and the cloned material are
+removed through the Phase 2 `clearScene`/teardown owner before mesh-state reset.
+
+## Phase 3A closeout: lifecycle, ownership and parity tooling
+
+This section supersedes the Phase 3A validation notes above where they conflict.
+It records what is instrumented, what was actually reproduced on the live build,
+and what is still untested. Nothing here changes the rendering design: the
+atlas, pixel programs, lighting, fog, `COLOR0`, geometry, transitions and
+orientation mapping are unchanged, and the stable path is untouched when the
+semantic renderer is off.
+
+### Semantic resource ownership
+
+| Resource | Created by | Owned/destroyed by | Shim identity |
+|---|---|---|---|
+| slot-3 vertex buffer | `HardwareBufferManager::createVertexBuffer` | the proxy mesh's `VertexBufferBinding`; released when the cloned mesh dies | `vbGeneration` (process-lifetime serial) |
+| slot-3 declaration elements | `VertexDeclaration::addElement` | the cloned mesh's shared declaration | audited via `findElementBySemantic` |
+| cloned terrain material | `Material::clone` | shim, by name, at teardown or material change | `materialGeneration` |
+| specialized vertex/fragment programs | `HighLevelGpuProgramManager::createProgram` | shim, by name, at teardown or material change | names carry both generations |
+
+Resource names embed `proxyGeneration/materialGeneration`, where
+`materialGeneration` is a process-lifetime serial. A recreated cluster therefore
+cannot collide with a name the resource manager may still hold, which is the
+failure mode that a per-proxy-generation name alone would not prevent when the
+stock material changes inside one proxy lifetime.
+
+The shim does not destroy the slot-3 buffer itself. Its handoff `SharedPtr`
+reference is conservatively retained when the observed count is one, exactly as
+for the Phase 2 mesh clone, because the Redux/OpenShim CRT boundary makes that
+destruction unsafe. `ReleaseSemanticStreamOwnership` therefore forgets the
+identity and records the release rather than freeing memory; retained handoffs
+are counted in `totals={...,handoffRetained:N}`. This remains a bounded,
+one-cluster leak.
+
+### Update classification and diagnostics
+
+Three update classes are distinguishable in the log, all state-change or
+one-shot gated rather than per frame:
+
+```text
+[TERRAIN-PROXY] refresh mirrored ... type=full ...        full geometry rebuild
+[TERRAIN-P3] terrain_semantic: semantic_rebuild ...       semantic regeneration
+[TERRAIN-P3] terrain_semantic: height_update ... retained=1 rebuilt=0
+```
+
+The `height_update` record is produced by re-reading slot 3, the declaration and
+the active material back out of OGRE after the stock height path has run, and
+comparing the resource pointer with the one recorded at creation. Retention is
+therefore asserted from engine state, not inferred from shim bookkeeping.
+
+Semantic regeneration hashes the 28-byte GPU payload. When a full dirty event
+produces identical tile semantics the existing GPU copy is kept and the upload
+is skipped (`semantic_unchanged`, `retained=1`), so semantic data is not
+needlessly regenerated when only geometry changed.
+
+Guarded invariants run on every audited transition and log rather than abort:
+slot-3 present, stride exactly 28, vertex count at least 9,409, buffer identity
+unchanged, `TEXCOORD2/3/4` still sourced from slot 3, active material still the
+semantic clone while it is installed, and CPU vertex count exactly 9,409. Per
+vertex, generation additionally rejects orientation above 15, a non-finite or
+out-of-range `AtlasRect`, and local UV outside 0..1; a failure skips the upload
+and leaves the stock material in place.
+
+Shader specialization is reported in the requested form, including reuse:
+
+```text
+[TERRAIN-P3] terrain_semantic_shader: material="MA_DETAIL_ATLAS"
+clone="OpenShim/TerrainSemantic/Material/1/1" materialGeneration=1
+passes=109 specialized_passes=109 semantic_programs=13 created=13 reused=96
+debug=off debug_fragment_programs={created:0,reused:0,api:1}
+```
+
+A material that yields no compatible DX11 terrain vertex program is marked
+unsupported so later dirty events do not clone a fresh material per rebuild.
+That flag is cleared if the stock material name itself changes, which is the one
+case where a retry is meaningful.
+
+### Parity capture
+
+Two capture mechanisms exist, and they are not equivalent.
+
+`TerrainSemanticFrameCapture` writes full framebuffers through OGRE's own
+`RenderTarget::writeContentsToFile` at fixed *rendered world-frame* indices,
+counted from the frame the proxy exists. It is driven from the existing legacy
+world render-queue detour, so it costs nothing when the count is zero. Because
+two runs of the same mission capture the same frame index, the resulting PNGs
+are directly differenceable. This is the mechanism to use.
+
+`scripts/Test-TerrainSemanticParity.ps1` drives a series of runs over the modes
+`stock`, `packed` (proxy with the stock packed-UV material -- the legacy parity
+reference), `quantized`, `unquantized` and `uvdelta`, collects both the engine
+captures and wall-clock desktop screenshots, and hands pairs to
+`scripts/Compare-TerrainCaptures.ps1`, which reports `different_pixels`,
+`different_fraction`, `max_channel_error`, `mean_absolute_error` and `rmse`, and
+optionally writes an amplified difference image. `-Region left,top,w,h`
+restricts the metrics to terrain so HUD and sky do not count as mismatches.
+
+Limitations, stated plainly: the desktop screenshot path is only wall-clock
+aligned and cannot guarantee the same frame; it also captures the lock screen if
+the workstation session is locked. Even the engine captures are the same *frame
+index*, not the same simulation state, so animation, particles and unit motion
+still differ between runs. `TerrainSemanticDebug = 7` is the only exact,
+in-frame, per-pixel parity answer available.
+
+### Motion stability procedure
+
+Not a temporal filter and not an automated pass/fail; this is the repeatable
+procedure to run by hand:
+
+1. Enable the proxy with a lateral `TerrainProxyOffset` so the semantic cluster
+   is visible next to the stock terrain, and set
+   `TerrainSemanticFrameCapture = 12`, `TerrainSemanticFrameCaptureStride = 30`.
+2. Run the mission twice with the same starting position and the same camera
+   path: once with `TerrainSemanticLegacyUVQuantization = 1`, once with `0`.
+   Drive the camera slowly across rotated tiles, a transition boundary, a
+   high-frequency texture and distant terrain.
+3. Difference the two capture sets by index with `Compare-TerrainCaptures.ps1`.
+   Frame-to-frame instability that is present in one mode and absent in the
+   other shows up as a large `max_channel_error` in tile interiors rather than
+   only along silhouettes.
+4. Watch for texture swimming, subpixel UV instability, tile-edge shimmer,
+   orientation-dependent jitter, and seams that only appear while moving.
+
+`TerrainSemanticLegacyUVQuantization` is read at startup, so switching modes is
+a relaunch, not a live toggle.
+
+### What was reproduced on the live build
+
+Run on the pinned GOG DX11 build with Campaign Reimagined and EXU loaded,
+`misn04.bzn -renderer:dx11`, Win32 Release shim, hash-verified at deploy.
+
+**Proven in this closeout:**
+
+- CPU reconstruction is still exact, in every mode exercised:
+  `checked=9409 matched=9409 mismatched=0 maxUvErrorBeforeQuantization=0.006249998`.
+- Slot-3 declaration audit reports
+  `declSlot3={localUV:1,semantic:1,atlasRect:1,audited:1}`, i.e. all three
+  semantic elements resolve and are sourced from slot 3.
+- Creation/bind lifecycle is recorded with stable identities:
+  `terrain_semantic: create generation=1 vertices=9409 stride=28 bytes=263452`
+  followed by `bind ... slot3=1 stride=28 vertices=9409` and
+  `material-installed ... semanticMaterial=1`.
+- Specialization is deterministic on `MA_DETAIL_ATLAS` under Campaign
+  Reimagined: `passes=109 specialized_passes=109 semantic_programs=13
+  created=13 reused=96` in every run, quantized, unquantized and debug.
+- Legacy-quantized, unquantized, `TerrainSemanticDebug=2` and
+  `TerrainSemanticDebug=7` all compiled, loaded and installed with zero OpenShim
+  shader errors and zero new OGRE errors mentioning an OpenShim resource.
+- Debug fragment specialization works on the Campaign Reimagined terrain
+  material: `debug_fragment_programs={created:28,reused:81,api:1}`.
+- The in-process capture writes real 3840x2160 framebuffers at the requested
+  render-frame indices (`frame_capture index=N renderFrame=300/600/900`).
+
+**Instrumented but not reproduced:** height-only deformation, a controlled full
+tile/transition rebuild, mission A -> B and A -> B -> A recreation, and the
+debug modes' actual on-screen color. All of these require getting past the
+mission briefing screen, which needs interactive input. The workstation session
+was locked for this pass, so every capture landed on the loading or briefing
+screen and no terrain pixels were obtained. The lifecycle code paths for these
+cases are implemented and logged, but they were not executed.
+
+**Not tested:** device loss and swap-chain recreation. See below.
+
+### Device loss and resource recreation audit
+
+What was inspected: OpenShim installs no device-reset, swap-chain or
+`RenderSystem` recreation hook, and none exists in the Phase 2/3A code. The
+semantic path holds exactly four kinds of engine-owned state: the slot-3
+`HardwareVertexBuffer` (an OGRE `D3D11HardwareVertexBuffer`, written through the
+mapped D3D11 buffer), the shared `VertexDeclaration` elements, the cloned
+`Material`, and the named `HighLevelGpuProgram`s. All four are ordinary OGRE
+resources; OGRE 1.10's D3D11 render system owns their device-side recreation,
+and the shim never caches an `ID3D11Buffer*`, view, or device pointer across
+calls -- `ReadD3D11VertexBuffer`/`WriteD3D11VertexBuffer` re-resolve the buffer
+and re-acquire the device and context on every use, then release them.
+
+Protections that do exist: the binding audit re-reads slot 3 from OGRE and
+detects a buffer whose identity changed under the shim, adopts it under a new
+`vbGeneration`, invalidates the cached payload hash so the next semantic build
+re-uploads, and logs `slot 3 resource replaced by owner`. A lost declaration
+element, a lost slot-3 binding, or a silent revert to the packed-UV material are
+each reported as a named invariant violation.
+
+What remains untested: no device-loss event was forced, so it is not known
+whether Redux's D3D11 render system recreates buffer contents, whether the
+dynamic slot-3 buffer comes back empty, or whether the specialized programs
+survive a device reset. The residual risk is that after a real device loss the
+slot-3 contents are undefined until the next full dirty event triggers a
+re-upload. This is documented as an open risk, not as a validated behavior.
+
+### Known remaining limitations
+
+- One retained `SharedPtr` handoff reference per semantic buffer and per mesh
+  clone; bounded, one cluster, unresolved.
+- The debug false color is injected after the stock `COLOR0` assignment. One of
+  the thirteen Campaign Reimagined terrain vertex programs
+  (the glow permutation) does not contain that assignment, so its passes keep
+  stock coloring; this is logged by program name and does not affect the other
+  twelve.
+- Campaign Reimagined queues its own OpenShim replacement on game exit, so a
+  deployed `winmm.dll` can be silently replaced between test runs. Always verify
+  the deployed hash; `Test-TerrainSemanticParity.ps1 -DeployShim` now fails loudly
+  if it does not match.
+- Writing `[Terrain]` keys with the Windows profile API proved unreliable across
+  back-to-back launches; the harness rewrites the section as text instead.
+- Transition-shape friendly names remain unknown; numeric transition selection
+  and orientation are preserved and authoritative.
+
+**Conclusion:** the semantic bridge's ownership model, identity scheme,
+invariants and diagnostics are now in place and the shader/material
+specialization is deterministic across repeated installs within a process. The
+lifecycle cases that Phase 3A most needed to prove -- height-only retention,
+full rebuild replacement, and same-process mission recreation -- are instrumented
+but were not executed in this pass, so they remain unproven. No texture-array,
+new terrain-format, PBR, stock terrain suppression, LOD, physics, or gameplay
+work was added here.
+
+## Phase 3A interactive validation (supersedes the GPU-side claims above)
+
+An interactive pass on the live GOG DX11 build re-ran the closeout on real
+gameplay frames. It invalidated part of the record above and found three
+defects. Read this section before trusting any GPU-side statement earlier in
+this document.
+
+### Stale microcode invalidates the earlier cross-mode comparisons
+
+`src/patches/ogre_shader_cache.cpp` enables Ogre's microcode cache, which is
+keyed by **program name**, and its invalidation fingerprint covers only the
+mod's shader *files on disk*. The specialized programs are generated at runtime
+and formerly used stable names (`OpenShim/TerrainSemantic/Vertex/<gen>/<n>`),
+so after their first compile every later run was handed back that microcode
+regardless of the source actually set. `setProgramSource` succeeded, the Pass
+reported the program bound, and Ogre logged no error -- the only wrong thing was
+which microcode the cache returned.
+
+Consequences for the record above:
+
+- Every debug mode rendered the cluster opaque white, because the vertex
+  programs came from a cached non-debug compile while the debug fragment
+  programs compiled fresh.
+- `quantized` and `unquantized` emit identically named programs from different
+  source, so a session that compiled one mode could silently reuse it for the
+  other. **Any claim that those two modes were observed to render differently is
+  unsupported.** The claim that both compiled and installed still holds.
+
+Fixed by hashing the generated source into the program name
+(`SourceHashSuffix`). Verified: with a populated cache present, debug mode 2 now
+renders the 16-colour palette and mode 7 renders black.
+
+### Two further defects found
+
+- The debug false colour is skipped for a vertex program that lacks the stock
+  `vColor = iColor.bgra;` token (the glow permutation), but the matching
+  fragment specialization was still applied to those passes. That rewrite
+  replaces the whole `oColor` *after* the fog blend, so such a pass emitted
+  stock COLOR0 -- opaque, unfogged white -- over the cluster. The fragment
+  specialization is now gated on the vertex program having received the colour,
+  and the count is reported as `skipped_no_vertex_color`.
+- Program binds were credited from the call succeeding. A bind audit now reads
+  the program back off the Pass and reports
+  `bind audit: vertex={verified,mismatched} fragment={...}`.
+
+### Verified on real gameplay frames
+
+- CPU reconstruction still exact in every mode:
+  `checked=9409 matched=9409 mismatched=0 maxUvErrorBeforeQuantization=0.006249998`.
+- `TerrainSemanticDebug=7` renders pure black over the cluster: across five
+  3840x2160 captures, 4,348,401 cluster pixels, **zero** with a nonzero delta at
+  640x amplification. This is the per-pixel packed-vs-semantic parity proof.
+- Full-nibble orientation reaches the GPU. Exact framebuffer classification
+  against the palette confirms values 1,2,3,4,5,6,10,11,12,13 -- including 12 and
+  13, which occupy one cell each out of 256. Since 2,3,4,5 are observed
+  simultaneously, a `mix & 7` collapse is excluded. Value 14 was not observed
+  (2 cells, never in frame); 0, 7 and 15 are achromatic and cannot be told apart
+  from cockpit/HUD pixels, so they are recorded as inconclusive.
+- Height-only deformation retains semantics, asserted from engine state:
+  `height_update ... retained=1 rebuilt=0` across 8 events, with slot-3 buffer
+  identity, `vbGeneration` and payload hash unchanged while `heightHash` changed.
+- Disabled path clean: with no `[Terrain]` section, zero terrain records.
+- Zero OpenShim errors, zero Ogre errors naming an OpenShim resource, zero new
+  crash dumps across the whole session.
+
+### Blocker: in-process mission transition is not observed
+
+Redux changes mission in-process via `RUN_STARTED -> RUN_WAS_BOOKMARK ->
+RUN_STARTED`, which never reaches the `clearScene` /
+`destroyAllMovableObjects` seams Phase 2 relies on. Those hooks install and then
+never fire. `g_proxy.selected` therefore stays true for the life of the process,
+and `ObserveZone` early-returns for every zone of every later mission.
+
+Reproduced twice, in two processes, misn04 -> misn03 (different terrain):
+
+- no `teardown-begin`, no `lifecycle released`, no new `selected`, no new proxy;
+- **no semantic rendering at all in any mission after the first in a process**;
+- the mission-A proxy keeps pointers to destroyed mesh/entity/node. It is inert
+  only because the rebuild dispatcher's zone-pointer comparison does not match a
+  reallocated zone. If a new zone were allocated at the old address it would
+  match and mirror into freed resources.
+
+This blocks mission A -> B -> A, which is an explicit Phase 3B readiness
+requirement. A fix needs a reliable "new map" signal, since zone construction
+alone cannot distinguish a new map from the remaining zones of the current one.
+
+### Cross-run framebuffer parity is not achievable by hand
+
+Correlated packed-vs-quantized captures were attempted with a hand-driven
+camera. The viewpoint cannot be reproduced closely enough: 97-99% of pixels
+differed with max channel error 255 on frames whose terrain is identical. These
+metrics measure camera mismatch, not terrain, and are recorded as inconclusive
+by construction. `TerrainSemanticDebug=7` remains the only exact answer, and it
+is unambiguous.
+
+Also note: `Test-TerrainSemanticParity.ps1` sends SPACE on `Waiting For VO` to
+skip the briefing. SPACE is a bound in-game action and ends the mission roughly
+190 ms after the first frame, so every automated series it produced measured a
+mission that had already terminated. It needs a different skip key before it can
+be trusted.
