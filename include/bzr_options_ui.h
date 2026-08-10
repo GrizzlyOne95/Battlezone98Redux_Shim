@@ -151,9 +151,14 @@ namespace BZROpenShim
         GlobalTurbo,
         Headlights,         // InitializeHeadlightConfig re-reads the ini (no latch)
         AutoSave,           // ReloadAutoSaveConfig re-reads the ini and applies immediately
+        BzrNetRoute,        // the engine re-reads the relay flag per connection attempt
         RestartRequired,    // no live path; takes effect next launch
     };
     void ApplyShimSettingLive(ShimSettingApplyGroup group);
+
+    // Persist one openshim.ini key through the settings page's lossless writer
+    // (comments, ordering and the .openshim.bak backup are preserved).
+    bool WriteShimUserConfigValue(const char* section, const char* key, const char* value);
 
     // --- options-UI entry points (implemented in bzr_options_ui.cpp) ---
     void EnsureInputBindingPopulateHookScaffold();

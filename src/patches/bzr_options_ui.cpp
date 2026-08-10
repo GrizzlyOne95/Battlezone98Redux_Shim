@@ -2395,6 +2395,8 @@ namespace BZROpenShim
             "Cyan", "Magenta", "Orange", "Purple", "Teal", "Rainbow"
         };
         static const char* const kShimSettingsHeadlightBeamValues[] = { "Stock", "Focused", "Wide" };
+        static const char* const kShimSettingsNetRouteValues[] = { "Stock", "Direct", "Relay" };
+        static const char* const kShimSettingsNetRouteLabels[] = { "Stock", "Prefer Direct", "Force Relay" };
         static const char* const kShimSettingsTargetPolicyAltKeys[] = { "TargetReticle" };
         static const char* const kShimSettingsReticleConvAltKeys[] = { "SmartReticleConvergence" };
         static const char* const kShimSettingsScavengerAltKeys[] = { "ScavengerPathing" };
@@ -2478,6 +2480,11 @@ namespace BZROpenShim
               kShimSettingsHeadlightBeamValues, kShimSettingsHeadlightBeamValues, 3, 0,
               ShimSettingApplyGroup::Headlights,
               "Headlight beam shape: Stock, Focused (narrow), or Wide." },
+            { "Net Route", "Network", "RoutePreference", nullptr, 0,
+              kShimSettingsNetRouteValues, kShimSettingsNetRouteLabels, 3, 0,
+              ShimSettingApplyGroup::BzrNetRoute,
+              "Preferred peer path: try LAN then direct WAN, or force the BZRNet relay. "
+              "Does not add LAN or direct-IP hosting." },
         };
         // The page count adapts to the registry (see the paging controls in
         // RefreshShimSettingsUiControls), so the registry may exceed the
@@ -4274,6 +4281,23 @@ namespace BZROpenShim
             static_cast<uint32_t>(kOptionsInputCtorAddr),
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OptionsInputPopulateUiDetour.trampoline)),
             static_cast<uint32_t>(kOptionsInputKeyReleasedAddr));
+    }
+
+    // Thin public wrapper so features outside the settings page (the lobby
+    // nickname entry) can persist a single key through the same lossless
+    // writer, keeping comments, ordering and the .openshim.bak backup intact.
+    bool WriteShimUserConfigValue(const char* section, const char* key, const char* value)
+    {
+        if (!section || !key || !value)
+            return false;
+
+        std::string error;
+        if (WriteUserConfigValueLossless(section, key, nullptr, 0, value, error))
+            return true;
+
+        Log(L"[SETTINGSUI] Failed to write [%hs] %hs: %hs\n",
+            section, key, error.c_str());
+        return false;
     }
 
     void EnsureOptionsParentCtorHookScaffold()

@@ -230,6 +230,39 @@ RespectExternalAutoSave = 1
 ; See reverse_engineering/OGRE_ANIMATION_PROFILER.md for the test procedure.
 ProfileOgreAnimation = 0
 
+[Network]
+; Multiplayer transport preferences.
+;
+; IMPORTANT: these change which path peers PREFER, not how sessions are found.
+; Redux has no LAN browser, no offline lobby, and no direct-IP join: players
+; always meet in an authenticated BZRNet lobby, which then hands each peer the
+; others' LAN and WAN UDP endpoints. Only after that do the peers pick a
+; gameplay path. Nothing here creates a LAN or TCP/IP hosting mode.
+;
+; Preferred peer path. Case-insensitive; spaces, underscores and hyphens are
+; ignored.
+;   Stock  = leave the engine's own choice alone (aliases: Auto, Default)
+;   Direct = try LAN, then direct WAN, then fall back to relay
+;            (equivalent to the stock /ipdirect switch; aliases: PreferDirect)
+;   Relay  = skip both direct paths and always use the BZRNet relay. Slower,
+;            but a reliable fallback behind a strict NAT or firewall.
+;            (equivalent to /iprelay; aliases: ForceRelay)
+; Default: Stock. Also available on the in-game OpenShim Settings page, where
+; it applies to the next connection attempt without a restart.
+RoutePreference = Stock
+
+; Fixed local UDP port for BZRNet peer traffic, for firewall/port-forward
+; rules. 0 (default) keeps the stock behavior of letting Winsock pick an
+; ephemeral port. Valid range 0..65535.
+; INI-only and applied once at startup: the engine overwrites this same
+; variable with the port it actually bound, so it can only be honored while the
+; peer socket is still closed. Changing it requires a restart.
+UdpPort = 0
+
+; Multiplayer name override, equivalent to the stock /nickname= switch. When
+; blank or absent, Redux uses your Steam/GOG account name. Maximum 127
+; characters. Also editable from the lobby.
+; Nickname =
 [SinglePlayer]
 ; These gameplay-affecting improvements are hard-disabled in network games,
 ; regardless of the values below.
