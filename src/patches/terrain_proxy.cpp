@@ -2474,6 +2474,17 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                     createdFragmentPrograms, reusedFragmentPrograms,
                     fragmentApiAvailable ? 1 : 0, debugColorSkippedPasses,
                     g_config.semanticLegacyUvQuantization ? 1 : 0);
+                // Generated program identity, once per material install. The
+                // microcode cache is keyed by program name, so proving that a
+                // changed generated source produces a changed name is the only
+                // way to show the cache cannot serve a stale compile. Without
+                // this the property can only be inferred from cache growth.
+                for (const std::string& name : g_proxy.semanticProgramNames)
+                {
+                    LogShimA(LogLevel::Info, "terrain-p3",
+                        "[TERRAIN-P3] terrain_semantic_shader program materialGeneration=%u name=\"%s\"",
+                        g_proxy.semanticMaterialGeneration, name.c_str());
+                }
                 LogShimA(
                     (vertexBindMismatched || fragmentBindMismatched)
                         ? LogLevel::Warn : LogLevel::Info,

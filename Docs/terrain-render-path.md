@@ -1133,3 +1133,177 @@ skip the briefing. SPACE is a bound in-game action and ends the mission roughly
 190 ms after the first frame, so every automated series it produced measured a
 mission that had already terminated. It needs a different skip key before it can
 be trusted.
+
+## Phase 3A mission lifecycle repair (supersedes the blocker section above)
+
+Session of 2026-08-09/10, live GOG DX11 build. Claims below are tagged
+**PROVEN**, **TESTED WITH LIMITATION**, **AUDITED ONLY** or **UNTESTED**.
+
+### Why the Phase 2 teardown seams never fired -- PROVEN
+
+The shipped executable contains **no call to `SceneManager::clearScene` or
+`destroyAllMovableObjects` at all** -- zero call sites across 31,948 decompiled
+functions. `Ogre::Root::createSceneManager` is reached from `FUN_00664110`
+once and the manager is never destroyed. A mission is torn down by the terrain
+zone destructor `FUN_00777EF0`, which destroys only the stock cluster entities,
+meshes and nodes it created, and notifies nobody.
+
+Both Phase 2 teardown hooks therefore installed and never fired,
+`g_proxy.selected` stayed true for the life of the process, and `ObserveZone`
+early-returned for every zone of every later mission. Confirmed at runtime:
+`sceneTeardownSeamsObserved=0` in every session since.
+
+### The seam that does work -- PROVEN
+
+`FUN_00434170` is `void __cdecl SetRunning(int)`. It stores the run state at
+`0x008E706C` (sticky once `RUN_WAS_EXITED`) and logs
+`"SetRunning: was %s, now %s"` from an eleven-entry name table at `0x00871690`:
+
+```text
+0 RUN_WAS_FAILURE   4 RUN_WAS_ERROR        8 RUN_WAS_BOOKMARK
+1 RUN_WAS_SUCCESS   5 RUN_STARTED          9 RUN_WAS_EXITED
+2 RUN_WAS_QUIT      6 RUN_WAS_REPLAYED    10 RUN_WAS_CHEATED
+3 RUN_WAS_NETWORK   7 RUN_WAS_RECONFIGURED
+```
+
+**Leaving `RUN_STARTED` is the mission boundary.** `FUN_004341C0` is the
+mission driver: on state 6 or 8 it copies the next map name, loads it, then
+calls `SetRunning(5)`. At the transition the outgoing scene is still fully
+alive -- the zone destructor has not run -- which makes it a safe place to
+release. The detour lives in `bzr_hooks.cpp`, because chunk proxies and the
+flag UI need the same boundary whether or not the terrain opt-in is set; the
+terrain module subscribes through `TerrainProxyMissionRunStateChanged`.
+Installation verifies the entry bytes, that name-table index 5 reads
+`RUN_STARTED`, and that the image sits at its preferred base -- the stolen
+prologue carries an absolute operand, and the executable is /FIXED with no
+relocations and `DYNAMIC_BASE` clear.
+
+### Ownership: address scene objects by name -- PROVEN
+
+Destroying the proxy `Entity` through a stored pointer at the seam crashed.
+In dump `battlezone98redux.exe.1916.dmp` the generation-2 Entity allocation had
+already been recycled -- its vtable slot read `0x00000008`, and Ogre made a
+virtual call through `[8+0x4C]`. The proxy `SceneNode`, proxy `Mesh` and every
+stock cluster object were still valid at that moment, so **the engine destroys
+the proxy Entity underneath OpenShim** at an unpredictable point during a
+mission change.
+
+Everything now goes through `hasEntity` / `hasSceneNode` /
+`destroyEntity(const String&)` / `destroySceneNode(const String&)`. A name
+lookup is a safe no-op once the object is gone, and resource names carry a
+process-lifetime serial, so a stale name can only ever resolve to OpenShim's
+own object. `ForgetTerrainProxy(reason, destroyEntity, destroyNode)` is the
+single idempotent operation, reachable from the mission seam, from both
+teardown seams and from process shutdown; repeat calls report
+`lifecycle already-forgotten`.
+
+A by-name liveness probe on the rebuild dispatcher detects an engine-destroyed
+proxy, forgets it and rebuilds within the same dispatch, so a mission cannot
+silently render without semantic terrain. Runtime evidence:
+`proxy entity destroyed by the engine ... losses=1; rebuilding` followed by
+`scene-objects ... entityPresent=0 destroyedByOpenShim=0`.
+
+### Discovery arming -- PROVEN
+
+Discovery is gated on an arm flag set at `RUN_STARTED` and cleared at the
+transition. Without it the dispatcher immediately re-selected the outgoing
+mission's still-live zone and built a complete proxy -- entity, buffer,
+material, thirteen programs -- which the engine then destroyed on the map
+change: six generations for three missions, every even one pure churn, two
+`proxy_lost` events. With it: three generations for three missions, zero
+losses.
+
+### A to B to A in one process -- PROVEN
+
+`misn04 -> main menu -> misn03 -> main menu -> misn04`, single PID:
+
+| mission | gen | stock material | slot-3 VB | payload hash | CPU validation |
+|---|---|---|---|---|---|
+| A misn04 | 1 | `MA_DETAIL_ATLAS` | `296611D8` | `27434B6B` | 9409/9409, 0 mismatched |
+| B misn03 | 2 | `MN_DETAIL_ATLAS` | `2CFBC5E0` | `0299AD7B` | 9409/9409, 0 mismatched |
+| A2 misn04 | 3 | `MA_DETAIL_ATLAS` | `30DD9980` | `0D0885AF` | 9409/9409, 0 mismatched |
+
+Totals `vbCreated:3 vbReleased:3, materialCreated:3 materialRemoved:3,
+programsCreated:39 programsRemoved:39` -- matched and bounded at exactly one
+set per mission. Every transition reported `entityPresent=1
+destroyedByOpenShim=1 nodePresent=1 nodeDestroyedByOpenShim=1`, and no stale
+generation responded after a transition. A2's payload hash differs from A's
+because terrain was deformed in between; that is the semantic stream correctly
+tracking a changed cluster.
+
+### Microcode cache regression, cache never deleted -- PROVEN
+
+Six launches in sequence against a populated cache (1,435,850 bytes, unchanged
+throughout, never deleted). Generated program identity comes from the new
+`terrain_semantic_shader program ... name=` record:
+
+| step | mode | first vertex program | name-set hash |
+|---|---|---|---|
+| 1 | quantized | `.../Vertex/1/1/0/c60fedcf` | `C6F69C8CB3FAC96D` |
+| 2 | unquantized | `.../Vertex/1/1/0/253e68b2` | `AF142404D392A1EC` |
+| 3 | quantized | `.../Vertex/1/1/0/c60fedcf` | `C6F69C8CB3FAC96D` |
+| 4 | orientation | `.../Vertex/1/1/0/3d29e1bb` | `F4B480AACFA6E7D4` |
+| 5 | uvDelta | `.../Vertex/1/1/0/d796620a` | `B6BFFAECCBD35FAF` |
+| 6 | orientation | `.../Vertex/1/1/0/3d29e1bb` | `F4B480AACFA6E7D4` |
+
+Different generated source produces a different identity; identical source
+reuses its original identity (step 3 equals step 1, step 6 equals step 4).
+Debug modes add twenty-seven fragment programs each. The cache cannot alias
+differing generated source.
+
+### Full terrain rebuild: the premise was wrong -- PROVEN (analysis), UNTESTED (execution)
+
+Every writer of the per-cluster full-dirty byte at `zone+0x270` was traced.
+There are exactly two:
+
+- `FUN_0077C750`, the terrain manager's Ogre event listener, on **`"DeviceLost"`**,
+  marks every cluster of every zone full-dirty.
+- `FUN_00778290` via `FUN_0077BE80` via `FUN_007777F0`, a world-space rect,
+  reachable only from the map editor tool-apply `FUN_004C3BF0` and the editor's
+  lighting-rect recompute `FUN_00780B80`.
+
+Gameplay deformation -- Thumper, mortar craters **and building-placement
+levelling** -- goes through `FUN_00777730` to `FUN_0077BDD0` to `FUN_007780F0`,
+which sets the **height**-dirty byte at `0x250` only. The expectation that
+constructor placement triggers a full rebuild is therefore wrong for this
+build; it provably cannot. The editor is present behind the `/edit` and
+`/startedit` command-line switches and is the only deterministic
+non-device-loss route to a real `type=full` rebuild. **Not executed.**
+
+### GPU parity re-verification -- TESTED WITH LIMITATION
+
+`TerrainSemanticDebug=7` writes
+`float3(saturate(abs(vTexCoord - openShimStockUV) * 640.0), 0.0)`, so the proxy
+renders with B exactly 0 and a matching UV is pure black. The specialization
+installs correctly: `debug=uvDelta`, 109 passes specialized, bind audit
+`vertex={verified:109,mismatched:0} fragment={verified:108,mismatched:0}`.
+
+Automated re-measurement **failed to frame the cluster**. The mission-start
+camera does not see it: sixteen captures across cluster ordinals 0-7, plus an
+offset proxy moved to the world origin, all returned an identical ~6,000
+B == 0 pixels, which is static UI rather than terrain. The earlier per-pixel
+proof (4,348,401 cluster pixels, zero nonzero delta) stands, and the shader
+generation code was not modified during this session, but a fresh proof needs
+a human-framed capture with the cluster on screen.
+
+### Status of the Phase 3A gate
+
+| test | status |
+|---|---|
+| Release\|Win32 build | **PROVEN** -- exit 0 |
+| CPU semantic validation | **PROVEN** -- 9409/9409, 0 mismatched, maxUvError 0.006249998, every run |
+| A to B to A same process | **PROVEN** |
+| No stale generation after transition | **PROVEN** |
+| Deterministic and bounded resources | **PROVEN** |
+| Shader cache cannot alias source | **PROVEN** |
+| Disabled path | **PROVEN** -- zero terrain records with no `[Terrain]` |
+| Runtime errors | **PROVEN** -- zero `[ERROR]`, zero new dumps across roughly sixteen launches |
+| GPU quantized parity | **TESTED WITH LIMITATION** -- needs a framed capture |
+| Quantized vs unquantized | **UNTESTED** this session -- needs visual judgement |
+| Height-only retention | **UNTESTED** this session -- deformation missed the selected cluster (`refreshes={height:0,full:0,total:0}`) |
+| Full rebuild | **UNTESTED** -- trigger identified, not executed |
+| Device recreation | **AUDITED ONLY** |
+
+Most launches this session were force-terminated, so the shutdown-order path
+was largely not exercised and the D3D11 module pin remains **UNTESTED** in
+practice.
