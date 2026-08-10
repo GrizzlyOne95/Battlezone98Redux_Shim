@@ -1560,6 +1560,10 @@ namespace BZROpenShim
         static InlineDetour32 g_ParticleCreateTemplateDetour = {};
         static bool g_ParticleTemplateDedupeHookInstalled = false;
         static bool g_ParticleTemplateDedupeFailureLogged = false;
+        static InlineDetour32 g_UiManualObjectEnsureDetour = {};
+        static bool g_UiManualObjectDedupeHookInstalled = false;
+        static bool g_UiManualObjectDedupeFailureLogged = false;
+        static bool g_UiManualObjectDedupeTestInjected = false;
         static bool g_CareerStatsMpHookInstalled = false;
         static bool g_CareerStatsMpHookInstallAttempted = false;
         static bool g_CareerStatsMpHookMismatchLogged = false;
@@ -5011,21 +5015,44 @@ namespace BZROpenShim
             }
         }
 
+        // A chunk mesh has a handful of sub-entities. A destroyed Entity whose
+        // allocation has been recycled usually does not fault on this read --
+        // it just returns whatever the reused memory holds. Freeze
+        // C:\BZDumps\hang2_34268.dmp came back with 0x0086C62F (8,832,559)
+        // here, and the caller then took one swallowed access violation per
+        // iteration; SEH dispatch is a kernel transition, so a single stale
+        // slot cost minutes of CPU per frame and read as a hang rather than a
+        // crash. Treat an implausible count as proof the entity is stale.
+        static constexpr uint32_t kChunkProxyMaxSubEntities = 32;
+
         static uint32_t TryGetChunkProxySubEntityCountSafe(
             void* entity,
-            FnOgreGetNumSubEntities getNumSubEntities)
+            FnOgreGetNumSubEntities getNumSubEntities,
+            bool* faulted = nullptr)
         {
+            if (faulted)
+                *faulted = false;
             if (!entity || !getNumSubEntities)
                 return 0;
 
+            uint32_t count = 0;
             __try
             {
-                return getNumSubEntities(entity);
+                count = getNumSubEntities(entity);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
+                if (faulted)
+                    *faulted = true;
                 return 0;
             }
+            if (count > kChunkProxyMaxSubEntities)
+            {
+                if (faulted)
+                    *faulted = true;
+                return 0;
+            }
+            return count;
         }
 
         static void* TryGetChunkProxySubEntitySafe(
@@ -5362,16 +5389,30 @@ namespace BZROpenShim
                     ForgetChunkProxySlotOgreRefs(slot);
                     return false;
                 }
-                const uint32_t subEntityCount =
-                    TryGetChunkProxySubEntityCountSafe(slot.entity, getNumSubEntities);
+                bool countFaulted = false;
+                const uint32_t subEntityCount = TryGetChunkProxySubEntityCountSafe(
+                    slot.entity, getNumSubEntities, &countFaulted);
+                if (countFaulted)
+                {
+                    LogChunkManualSubmitSkip(slot, L"entity-fault-sub-entity-count", sceneManager, viewport, currentCamera, resolvedCamera);
+                    ForgetChunkProxySlotOgreRefs(slot);
+                    return false;
+                }
 
                 for (uint32_t index = 0; index < subEntityCount; ++index)
                 {
                     void* const subEntity =
                         TryGetChunkProxySubEntitySafe(slot.entity, index, getSubEntity);
 
+                    // A live Entity never returns null below its own count, so
+                    // this is a stale entity. Stop touching it immediately
+                    // rather than faulting once per remaining index.
                     if (!subEntity)
-                        continue;
+                    {
+                        LogChunkManualSubmitSkip(slot, L"entity-fault-sub-entity", sceneManager, viewport, currentCamera, resolvedCamera);
+                        ForgetChunkProxySlotOgreRefs(slot);
+                        return false;
+                    }
 
                     if (!TryAddChunkProxyRenderableSafe(
                             renderQueue,
@@ -5833,16 +5874,28 @@ namespace BZROpenShim
                     ForgetChunkProxySlotOgreRefs(slot);
                     continue;
                 }
-                const uint32_t subEntityCount =
-                    TryGetChunkProxySubEntityCountSafe(slot.entity, getNumSubEntities);
+                bool countFaulted = false;
+                const uint32_t subEntityCount = TryGetChunkProxySubEntityCountSafe(
+                    slot.entity, getNumSubEntities, &countFaulted);
+                if (countFaulted)
+                {
+                    ForgetChunkProxySlotOgreRefs(slot);
+                    continue;
+                }
                 uint32_t added = 0;
 
+                bool slotWentStale = false;
                 for (uint32_t index = 0; index < subEntityCount; ++index)
                 {
                     void* const subEntity =
                         TryGetChunkProxySubEntitySafe(slot.entity, index, getSubEntity);
+                    // A live Entity never returns null below its own count.
+                    // Bail out instead of faulting once per remaining index.
                     if (!subEntity)
-                        continue;
+                    {
+                        slotWentStale = true;
+                        break;
+                    }
 
                     if (!TryAddChunkProxyRenderableSafe(
                             renderQueue,
@@ -5866,6 +5919,21 @@ namespace BZROpenShim
                     ++added;
                     if (slot.renderQueueAddCount < USHRT_MAX)
                         ++slot.renderQueueAddCount;
+                }
+                if (slotWentStale)
+                {
+                    static volatile long s_StaleEntityLogBudget = 8;
+                    if (InterlockedDecrement(&s_StaleEntityLogBudget) >= 0)
+                    {
+                        LogChunkDiagnostic(
+                            "chunkmesh",
+                            L"[CHUNKMESH] world-rq-submit stale entity=0x%08X dropped after %u/%u sub-entities\n",
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(slot.entity)),
+                            added,
+                            subEntityCount);
+                    }
+                    ForgetChunkProxySlotOgreRefs(slot);
+                    continue;
                 }
 
                 static volatile long s_FirstWorldRqSubmitLogBudget = 12;
@@ -10238,6 +10306,181 @@ namespace BZROpenShim
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_ParticleCreateTemplateDetour.trampoline)));
         }
 
+        // Redux UI widgets lazily create a named ManualObject in FUN_007D2B70.
+        // Dump 29188 proved that the widget's cached pointer can be null while
+        // SceneManager still owns the old "Top Screen" object. Stock then
+        // calls createManualObject with the duplicate name; Ogre throws an
+        // ItemIdentityException which escapes the main loop and terminates the
+        // process. Remove only this verified orphan immediately before the
+        // stock widget rebuild. ManualObject destruction detaches it from its
+        // old SceneNode, and Redux creates/attaches a fresh object normally.
+        constexpr uintptr_t kUiEnsureManualObjectAddr = 0x007D2B70;
+        constexpr size_t kUiManualObjectPtrOffset = 0x120;
+        constexpr size_t kUiWidgetNameOffset = 0x20;
+        constexpr uintptr_t kBzrSceneRootPtrAddr = 0x00920EA0;
+
+        struct UiOgreSharedPtr
+        {
+            void* rep;
+            void* info;
+        };
+        static_assert(sizeof(UiOgreSharedPtr) == 8, "Redux Ogre SharedPtr ABI changed");
+
+        // FUN_007D2B70 receives an Ogre SharedPtr by value in two stack
+        // dwords and returns with `ret 8`; preserving that hidden-looking
+        // argument is mandatory even though the best-effort decompiler omits
+        // it from the prototype.
+        using FnUiEnsureManualObject = void(__thiscall*)(void*, UiOgreSharedPtr);
+        using FnOgreHasManualObject = bool(__thiscall*)(void*, const std::string&);
+        using FnOgreDestroyManualObject = void(__thiscall*)(void*, const std::string&);
+
+        static FnUiEnsureManualObject g_BzrFn_UiEnsureManualObjectOriginal = nullptr;
+        static FnOgreHasManualObject g_OgreFn_HasManualObject = nullptr;
+        static FnOgreDestroyManualObject g_OgreFn_DestroyManualObject = nullptr;
+
+        static bool ShouldEnableUiManualObjectDedupe()
+        {
+            return !(EnvFlagEnabled("OPENSHIM_DISABLE_UI_MANUAL_OBJECT_DEDUPE") ||
+                     EnvFlagEnabled("BZR_DISABLE_UI_MANUAL_OBJECT_DEDUPE"));
+        }
+
+        static bool ShouldInjectUiManualObjectOrphanTest()
+        {
+            return EnvFlagEnabled("OPENSHIM_TEST_UI_MANUAL_OBJECT_ORPHAN");
+        }
+
+        static void __fastcall UiEnsureManualObjectDedupeHook(
+            void* widget, void* /*unusedEdx*/, UiOgreSharedPtr resource)
+        {
+            if (widget && g_OgreFn_HasManualObject && g_OgreFn_DestroyManualObject)
+            {
+                try
+                {
+                    auto* bytes = reinterpret_cast<uint8_t*>(widget);
+                    void** cachedManualObjectSlot =
+                        reinterpret_cast<void**>(bytes + kUiManualObjectPtrOffset);
+                    void* cachedManualObject = *cachedManualObjectSlot;
+                    const std::string& name =
+                        *reinterpret_cast<const std::string*>(bytes + kUiWidgetNameOffset);
+                    if (name == "Top Screen")
+                    {
+                        void* sceneRoot = *reinterpret_cast<void**>(kBzrSceneRootPtrAddr);
+                        void* sceneManager = sceneRoot
+                            ? *reinterpret_cast<void**>(
+                                reinterpret_cast<uint8_t*>(sceneRoot) + 8)
+                            : nullptr;
+                        const bool registered = sceneManager &&
+                            g_OgreFn_HasManualObject(sceneManager, name);
+
+                        // Deterministic regression path for dump 29188. The
+                        // inherited environment flag is test-only and off by
+                        // default; when set, manufacture the exact proven
+                        // state once (null widget cache, still-registered Ogre
+                        // object) and immediately exercise normal recovery.
+                        if (cachedManualObject && registered &&
+                            !g_UiManualObjectDedupeTestInjected &&
+                            ShouldInjectUiManualObjectOrphanTest())
+                        {
+                            g_UiManualObjectDedupeTestInjected = true;
+                            *cachedManualObjectSlot = nullptr;
+                            cachedManualObject = nullptr;
+                            Log(L"[UI-DEDUPE] TEST injected orphan ManualObject '%hs'\n",
+                                name.c_str());
+                        }
+
+                        if (!cachedManualObject && registered)
+                        {
+                            Log(L"[UI-DEDUPE] Removing orphan ManualObject '%hs' before stock rebuild (dump 29188)\n",
+                                name.c_str());
+                            g_OgreFn_DestroyManualObject(sceneManager, name);
+                        }
+                    }
+                }
+                catch (...)
+                {
+                    if (!g_UiManualObjectDedupeFailureLogged)
+                    {
+                        Log(L"[UI-DEDUPE] Orphan lookup/removal threw; stock UI path retained\n");
+                        g_UiManualObjectDedupeFailureLogged = true;
+                    }
+                }
+            }
+
+            if (g_BzrFn_UiEnsureManualObjectOriginal)
+                g_BzrFn_UiEnsureManualObjectOriginal(widget, resource);
+        }
+
+        static void InstallUiManualObjectDedupeHookIfPossible()
+        {
+            if (!ShouldEnableUiManualObjectDedupe() ||
+                g_UiManualObjectDedupeHookInstalled)
+                return;
+
+            HMODULE ogreMain = GetModuleHandleA("OgreMain.dll");
+            if (!ogreMain)
+                return;
+
+            g_OgreFn_HasManualObject = ResolveOgreProc<FnOgreHasManualObject>(
+                "?hasManualObject@SceneManager@Ogre@@UBE_NABV?$basic_string@"
+                "DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            g_OgreFn_DestroyManualObject = ResolveOgreProc<FnOgreDestroyManualObject>(
+                "?destroyManualObject@SceneManager@Ogre@@UAEXABV?$basic_string@"
+                "DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            if (!g_OgreFn_HasManualObject || !g_OgreFn_DestroyManualObject)
+            {
+                if (!g_UiManualObjectDedupeFailureLogged)
+                {
+                    Log(L"[UI-DEDUPE] Ogre ManualObject exports unresolved; recovery skipped\n");
+                    g_UiManualObjectDedupeFailureLogged = true;
+                }
+                return;
+            }
+
+            static const uint8_t kExpectedBytes[] =
+            {
+                0x55, 0x8B, 0xEC, 0x6A, 0xFF
+            };
+            if (!ExpectedBytesMatchAt(kUiEnsureManualObjectAddr,
+                                      kExpectedBytes,
+                                      sizeof(kExpectedBytes)))
+            {
+                if (!g_UiManualObjectDedupeFailureLogged)
+                {
+                    Log(L"[UI-DEDUPE] FUN_007D2B70 entry mismatch; recovery skipped\n");
+                    g_UiManualObjectDedupeFailureLogged = true;
+                }
+                return;
+            }
+
+            if (!InstallInlineDetour32(g_UiManualObjectEnsureDetour,
+                                       kUiEnsureManualObjectAddr,
+                                       reinterpret_cast<void*>(UiEnsureManualObjectDedupeHook),
+                                       sizeof(kExpectedBytes),
+                                       kExpectedBytes,
+                                       sizeof(kExpectedBytes)))
+            {
+                if (!g_UiManualObjectDedupeFailureLogged)
+                {
+                    Log(L"[UI-DEDUPE] Failed installing FUN_007D2B70 recovery hook\n");
+                    g_UiManualObjectDedupeFailureLogged = true;
+                }
+                return;
+            }
+
+            g_BzrFn_UiEnsureManualObjectOriginal =
+                reinterpret_cast<FnUiEnsureManualObject>(
+                    g_UiManualObjectEnsureDetour.trampoline);
+            g_UiManualObjectDedupeHookInstalled =
+                g_BzrFn_UiEnsureManualObjectOriginal != nullptr;
+            if (g_UiManualObjectDedupeHookInstalled)
+            {
+                Log(L"[UI-DEDUPE] Installed Top Screen ManualObject orphan recovery entry=0x%08X trampoline=0x%08X\n",
+                    static_cast<uint32_t>(kUiEnsureManualObjectAddr),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
+                        g_UiManualObjectEnsureDetour.trampoline)));
+            }
+        }
+
         // ---- Scene teardown observation --------------------------------
         // Loading a save (and any mission teardown) clears the Ogre scene,
         // destroying the chunk proxies' billboard set, scene nodes, and
@@ -10380,6 +10623,236 @@ namespace BZROpenShim
             }
 
             g_SceneTeardownHooksInstalled = true;
+        }
+
+        // --- mission lifetime seam -------------------------------------------
+        //
+        // The scene teardown hooks above never fire. The shipped executable
+        // contains no call to Ogre::SceneManager::clearScene or
+        // destroyAllMovableObjects at all -- it creates one SceneManager and
+        // keeps it for the life of the process, and a mission change is torn
+        // down by the terrain zone destructor destroying only the objects it
+        // created. Every "forget our Ogre references" path that hangs off those
+        // two hooks is therefore dead code in practice, which is how chunk proxy
+        // slots kept entities from a previous mission: on the next mission the
+        // manual submit path called getSubEntity on freed memory, the
+        // __try/__except swallowed the access violation, and the render loop
+        // retried it every frame -- a 100% CPU freeze rather than a crash
+        // (captured in C:\BZDumps\hang_7700.dmp).
+        //
+        // The one mission boundary Redux does cross in-process is
+        // SetRunning (FUN_00434170) leaving RUN_STARTED. The scene is still
+        // fully alive at that point, so it is a safe place to drop references.
+        constexpr uintptr_t kBzrSetRunningAddr = 0x00434170;
+        constexpr uintptr_t kBzrRunStateAddr = 0x008E706C;
+        constexpr uintptr_t kBzrRunStateNameTableAddr = 0x00871690;
+        constexpr int kBzrRunStateStarted = 5;
+        constexpr int kBzrRunStateUnknown = -1;
+
+        using FnBzrSetRunning = void(__cdecl*)(int);
+        static InlineDetour32 g_BzrSetRunningDetour = {};
+        static FnBzrSetRunning g_BzrFn_SetRunningOriginal = nullptr;
+        static bool g_MissionSeamInstalled = false;
+        static bool g_MissionSeamFailureLogged = false;
+        static uint32_t g_MissionTransitionCount = 0;
+
+        static bool TryReadBzrRunState(int& value)
+        {
+            __try
+            {
+                value = *reinterpret_cast<const int*>(kBzrRunStateAddr);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static const char* BzrRunStateName(int state)
+        {
+            if (state < 0 || state >= 11)
+                return "<out-of-range>";
+            __try
+            {
+                const char* const* const table =
+                    reinterpret_cast<const char* const*>(kBzrRunStateNameTableAddr);
+                const char* const name = table[state];
+                return name ? name : "<null>";
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return "<unreadable>";
+            }
+        }
+
+        static bool BzrRunStateNameMatches(int state, const char* expected)
+        {
+            __try
+            {
+                const char* const* const table =
+                    reinterpret_cast<const char* const*>(kBzrRunStateNameTableAddr);
+                const char* const name = table[state];
+                if (!name)
+                    return false;
+                for (size_t index = 0;; ++index)
+                {
+                    if (name[index] != expected[index])
+                        return false;
+                    if (expected[index] == '\0')
+                        return true;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void __cdecl BzrSetRunningHook(int state)
+        {
+            int previous = kBzrRunStateUnknown;
+            const bool readPrevious = TryReadBzrRunState(previous);
+            if (g_BzrFn_SetRunningOriginal)
+                g_BzrFn_SetRunningOriginal(state);
+            // Re-read instead of trusting the argument: SetRunning refuses every
+            // change once the state is RUN_WAS_EXITED.
+            int current = kBzrRunStateUnknown;
+            if (!readPrevious || !TryReadBzrRunState(current) || current == previous)
+                return;
+
+            if (previous == kBzrRunStateStarted && current != kBzrRunStateStarted)
+            {
+                ++g_MissionTransitionCount;
+                Log(L"[MISSION] Mission left simulation: was %hs(%d) now %hs(%d) transitions=%u\n",
+                    BzrRunStateName(previous), previous,
+                    BzrRunStateName(current), current,
+                    g_MissionTransitionCount);
+                // Deliberately NOT forgetting chunk proxy or multiplayer flag
+                // scene resources here. Both forget paths hang off the
+                // clearScene / destroyAllMovableObjects hooks, which never fire
+                // in this build, so neither had ever executed in a live process
+                // -- and they are written for a scene that is already gone. At
+                // this seam the scene is still alive, so forgetting makes the
+                // owning subsystem lazily recreate resources whose Ogre objects
+                // still exist. Driving the flag path from here aborted the
+                // process inside RenderMultiplayerFlags
+                // (C:\BZDumps\battlezone98redux.exe.35108.dmp), and the chunk
+                // path carries the same hazard. Stale chunk slots are handled
+                // where the damage actually occurs, by the fail-fast checks in
+                // SubmitChunkProxiesToRenderQueue.
+            }
+            TerrainProxyMissionRunStateChanged(previous, current);
+        }
+
+        static void InstallMissionTransitionSeamIfPossible()
+        {
+            if (g_MissionSeamInstalled || g_MissionSeamFailureLogged)
+                return;
+            // GOG-only absolute addresses, and the stolen prologue carries an
+            // absolute operand, so require the pinned image at its fixed base.
+            if (g_IsSteamExe ||
+                reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)) != 0x00400000)
+            {
+                Log(L"[MISSION] Mission transition seam unavailable (%hs)\n",
+                    g_IsSteamExe ? "Steam executable" : "executable relocated");
+                g_MissionSeamFailureLogged = true;
+                return;
+            }
+
+            // push ebp; mov ebp,esp; cmp dword ptr [runState],9
+            static const uint8_t kExpectedSetRunningBytes[] =
+            {
+                0x55, 0x8B, 0xEC, 0x83, 0x3D, 0x6C, 0x70, 0x8E, 0x00, 0x09
+            };
+            if (!ExpectedBytesMatchAt(kBzrSetRunningAddr,
+                                      kExpectedSetRunningBytes,
+                                      sizeof(kExpectedSetRunningBytes)) ||
+                !BzrRunStateNameMatches(kBzrRunStateStarted, "RUN_STARTED"))
+            {
+                Log(L"[MISSION] SetRunning signature mismatch at 0x%08X (index %d reads \"%hs\"); mission transition seam unavailable\n",
+                    static_cast<uint32_t>(kBzrSetRunningAddr),
+                    kBzrRunStateStarted,
+                    BzrRunStateName(kBzrRunStateStarted));
+                g_MissionSeamFailureLogged = true;
+                return;
+            }
+
+            if (!InstallInlineDetour32(g_BzrSetRunningDetour,
+                                       kBzrSetRunningAddr,
+                                       reinterpret_cast<void*>(BzrSetRunningHook),
+                                       sizeof(kExpectedSetRunningBytes),
+                                       kExpectedSetRunningBytes,
+                                       sizeof(kExpectedSetRunningBytes)))
+            {
+                Log(L"[MISSION] Mission transition seam install failed at 0x%08X\n",
+                    static_cast<uint32_t>(kBzrSetRunningAddr));
+                g_MissionSeamFailureLogged = true;
+                return;
+            }
+            g_BzrFn_SetRunningOriginal =
+                reinterpret_cast<FnBzrSetRunning>(g_BzrSetRunningDetour.trampoline);
+            g_MissionSeamInstalled = true;
+            int initial = kBzrRunStateUnknown;
+            TryReadBzrRunState(initial);
+            Log(L"[MISSION] Installed mission transition seam SetRunning=0x%08X initialState=%hs(%d)\n",
+                static_cast<uint32_t>(kBzrSetRunningAddr),
+                BzrRunStateName(initial), initial);
+        }
+
+        // --- D3D11 shutdown unload-order guard ---------------------------------
+        //
+        // The D3D11 render system is an Ogre plugin. When Root unloads plugins
+        // at exit, FreeLibrary on RenderSystem_Direct3D11.dll drops its
+        // reference to d3d11.dll, and if that was the last one the module
+        // unmaps. A driver/worker thread whose callback is still pending then
+        // jumps into unmapped memory. Crash dump
+        // C:\BZDumps\battlezone98redux.exe.35596.dmp is exactly that:
+        // <Unloaded_d3d11.dll>+0xa9f10 on thread 40, while the main thread was
+        // still inside Ogre scene destruction.
+        //
+        // Ogre's teardown assumes the module outlives the render system but
+        // does not enforce it. Take a process-lifetime reference on the D3D
+        // modules and the plugin so their code stays mapped until the OS tears
+        // the process down, which supplies the missing ordering guarantee.
+        //
+        // Note this extends module lifetime; it does not change when the device
+        // is released. A late callback now runs real code instead of faulting
+        // on unmapped memory, which is what the shutdown path already assumed.
+        static bool g_D3D11ModulesPinned[3] = { false, false, false };
+
+        static void PinDirect3DModulesForShutdown()
+        {
+            static const wchar_t* const kModules[] =
+            {
+                L"d3d11.dll",
+                L"dxgi.dll",
+                L"RenderSystem_Direct3D11.dll"
+            };
+            static_assert(
+                sizeof(kModules) / sizeof(kModules[0]) ==
+                sizeof(g_D3D11ModulesPinned) / sizeof(g_D3D11ModulesPinned[0]),
+                "pin bookkeeping must cover every module");
+
+            for (size_t index = 0; index < sizeof(kModules) / sizeof(kModules[0]); ++index)
+            {
+                if (g_D3D11ModulesPinned[index])
+                    continue;
+
+                HMODULE module = nullptr;
+                if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN, kModules[index], &module) ||
+                    module == nullptr)
+                {
+                    // Not loaded yet (or a DX9 run). Retried from
+                    // RetryDeferredRuntimeHooks until it appears.
+                    continue;
+                }
+
+                g_D3D11ModulesPinned[index] = true;
+                Log(L"[D3D11] Pinned %ls at 0x%08X for process lifetime (shutdown unload-order guard)\n",
+                    kModules[index],
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(module)));
+            }
         }
 
         static void InstallJumpSnipingProbeIfRequested()
@@ -21373,7 +21846,10 @@ namespace BZROpenShim
         InstallCareerStatsMpHookIfPossible();
         InstallUnitVoQueueHooksIfPossible();
         InstallParticleTemplateDedupeHookIfPossible();
+        InstallUiManualObjectDedupeHookIfPossible();
         InstallSceneTeardownForgetHooksIfPossible();
+        InstallMissionTransitionSeamIfPossible();
+        PinDirect3DModulesForShutdown();
         InstallMultiplayerFlagRenderHookIfPossible();
         StartCareerStatsMpSessionWorker();
         InstallShieldTowerTeamFilterHookIfPossible();
@@ -21746,8 +22222,11 @@ namespace BZROpenShim
         InstallCareerStatsMpHookIfPossible();
         InstallUnitVoQueueHooksIfPossible();
         InstallParticleTemplateDedupeHookIfPossible();
+        InstallUiManualObjectDedupeHookIfPossible();
         InstallEmissionLightFixIfPossible();
         InstallSceneTeardownForgetHooksIfPossible();
+        InstallMissionTransitionSeamIfPossible();
+        PinDirect3DModulesForShutdown();
         InstallMultiplayerFlagRenderHookIfPossible();
         InstallMultiCreatePreviewFixIfPossible();
         InstallShieldTowerTeamFilterHookIfPossible();
@@ -24179,6 +24658,10 @@ namespace BZROpenShim
         }
 
         SubmitChunkProxiesToRenderQueue(renderQueue);
+
+        // Opt-in Phase 3A parity capture. Inert unless a semantic frame
+        // capture count is configured.
+        TerrainProxyRenderFrameTick();
     }
 
     static volatile long g_ChunkGeomDumpFragmentBudget = 8;
