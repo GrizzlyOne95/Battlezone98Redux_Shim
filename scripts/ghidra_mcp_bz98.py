@@ -42,7 +42,6 @@ _ADVISORY_SYMBOL_CACHE: dict[str, dict[str, object] | None] = {}
 
 
 def candidate_binary_paths() -> list[Path]:
-    user_profile = Path(os.environ.get("USERPROFILE", ""))
     paths: list[Path] = []
     explicit_binary = os.environ.get("BZR_GAME_EXE") or os.environ.get("BZR_REDUX_EXE")
     explicit_game_dir = os.environ.get("BZR_GAME_DIR") or os.environ.get("BZR_REDUX_GAME_DIR")
@@ -52,11 +51,9 @@ def candidate_binary_paths() -> list[Path]:
     if explicit_game_dir:
         paths.append(Path(explicit_game_dir) / "battlezone98redux.exe")
 
-    if user_profile:
-        paths.append(user_profile / "Documents" / "Battlezone 98 Redux" / "battlezone98redux.exe")
-        paths.append(user_profile / "Downloads" / "Battlezone 98 Redux" / "battlezone98redux.exe")
-
-    paths.append(Path("<GAME_ROOT>/battlezone98redux.exe"))
+    paths.append(
+        Path(r"C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux\battlezone98redux.exe")
+    )
     return paths
 
 
