@@ -65,6 +65,7 @@ reverse_engineering/badlands/
 # Tools and references
 tools/*
 !tools/export-bz15-ui.py
+!tools/find-redux-ui-ctors.py
 ref/
 scripts/
 !scripts/

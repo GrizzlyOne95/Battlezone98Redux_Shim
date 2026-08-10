@@ -118,37 +118,117 @@ as follows.
 | `TextLabel` | `LabelCtor` | direct |
 | `ShellBitmap` background | `OverlayCtor` | one full-screen plate per transport mode |
 | `FlagList` | existing flag preview tile | `CreateFlagButtonCommon` already does this |
-| `OptionBox` | **no equivalent resolved** | a cycling `ButtonCtor` whose label shows the current value is the cheap substitute |
-| `LISTBOX` | **no equivalent resolved** | the blocker; see below |
-| `EDIT` | **no equivalent resolved** | the blocker; see below |
+| `OptionBox` | `cUI_Multiplayer_SettingButton` | Redux's own per-setting control on the create-game screen |
+| `LISTBOX` | `cUI_Selectlist` | resolved, see below |
+| `EDIT` | `cUI_TextEntry` | resolved, see below |
 
-**This is the real gap, and it should be settled before any layout work.**
-Redux plainly has list and text-entry widgets — the join-game browser and the
-name field exist in its own shell — but OpenShim has not RE'd their
-constructors, so today a nickname field or a session list cannot be built at
-all. Finding those two constructors is worth more than everything else in this
-document; without them the port is buttons and labels only, which is roughly
-what the current hacked-together UI already is.
+### The rest of the toolkit, located
 
-### Coordinate space
+Redux has a far richer widget set than the three constructors OpenShim
+currently binds. The shipped executable carries RTTI, so every polymorphic
+`cUI_*` class can be found by name; `tools/find-redux-ui-ctors.py` walks
+`.?AVcUI_X@@` → TypeDescriptor → CompleteObjectLocator → vftable → the
+functions that store that vftable, and tells the constructor from the
+destructors by its `ret N` (a `__thiscall` cleans its own arguments, so N is
+four times the argument count).
 
-The 1.5 layout is 640x480. Redux's widgets are placed in a larger virtual
-canvas — the existing OpenShim widgets sit at coordinates like
-`(135, 860, 1100x58)` and `(270, 960, 338x43)`, which is consistent with
-something near **1280x1024**, but that is inferred from the call sites rather
-than established. **Confirm the canvas dimensions first**; a wrong assumption
-scales the entire port.
+The method is calibrated: it reproduces all three addresses OpenShim already
+had hard-coded — `cUI_Button` `0x007C2480`, `cUI_Text` `0x007CC390` and
+`cUI_View` `0x007D1CC0`, which is what `g_BzrFn_OverlayCtor` actually is.
 
-Once known, the conversion is uniform:
+| class | ctor | args |
+|---|---|---|
+| `cUI_View` | `0x007D1CC0` | 8 |
+| `cUI_Button` | `0x007C2480` | 9 |
+| `cUI_Text` | `0x007CC390` | 8 |
+| **`cUI_TextEntry`** | **`0x007CF410`** | **10** |
+| **`cUI_Selectlist`** | **`0x007C9DE0`** | **11** |
+| `cUI_Checklist` | `0x007C3150` | 7 |
+| `cUI_Slider` | `0x007CBD60` | 7 |
+| `cUI_ProgressBar` | `0x007C9A10` | 7 |
+| `cUI_Alert` | `0x007C1EF0` | 7 |
+| `cUI_Parent` | `0x007C6360` | 3 |
+| `cUI_Multiplayer_SettingButton` | `0x007C3E30` | 16 |
+
+`cUI_TextPopup`'s vftable is at `0x008A0B54` but no function with the expected
+`ret` was found, so its argument count differs from the reference PDB and is
+still open. `cUI_UserBar` and `cUI_Multiplayer_UserSelect` exist in the PDB but
+have **no RTTI in the shipped build** — assume they were cut.
+
+### The two that matter, with signatures
+
+The private PDB in this repo is from a *different* build (different CodeView
+GUID, `.text` about half the size), so its RVAs are unusable and several
+constructors gained parameters. The signatures below were therefore measured at
+the shipped call sites rather than taken from the PDB — `--call-sites` on the
+tool dumps them, resolving string pointers and the `movss` constants used to
+pass floats.
+
+```c
+// 0x007CF410, 7 call sites
+void* __thiscall cUI_TextEntry(void* self,
+                               int   flagA,        // 1 mostly, 0 at one chatEntry
+                               int   flagB,        // always 1 so far
+                               int   maxLength,    // 42 or 36
+                               const char* name,
+                               float x, float y, float w, float h,
+                               int   flags,        // 0x8020
+                               void* parent);
+
+// 0x007C9DE0, 18 call sites
+void* __thiscall cUI_Selectlist(void* self,
+                                const char* name,
+                                float x, float y, float w, float h,
+                                void (*onSelect)(),
+                                void (*onDoubleClick)(),
+                                int   flags,        // 0
+                                void* parent,
+                                uint32_t colour,    // 0xFF00FF00
+                                float rowScale);    // 1.0f
+```
+
+Observed live examples: `("CreateTextEntry", 760, 945, 580x40)` and
+`("chatEntry", 470, 945, 520x40)`; `("Mission_List", 290, 260, 530x450)` and
+`("FriendList", 260, 160, 720x540)`. Note `cUI_TextEntry` takes flags `0x8020`
+where the existing OpenShim buttons pass `0x20`.
+
+Field offsets, from the other build's PDB and therefore **advisory — validate at
+runtime before writing through them**:
 
 ```
-redux_x = bz15_x * (canvas_w / 640)
-redux_y = bz15_y * (canvas_h / 480)
+cUI_TextEntry (extends cUI_Text)      cUI_Selectlist (extends cUI_View)
+  +0x930  std::string  text            +0x14C  int   mCurrentSelectedIndex
+  +0x948  uint  mBufferLength          +0x150  int   mCurrentPage
+  +0x94C  void (*mEnterCallback)(...)  +0x154  float entryHeight
+  +0x950  bool  mAllowEnter            +0x158  bool  mEnabled
+  +0x954  cUI_View* mCursor            +0x15C  std::vector<cUI_Text*>
+                                       +0x168  std::vector<valuedata>  // items
+                                       +0x178  cUI_Button* mPageUp
+                                       +0x17C  cUI_Button* mPageDn
 ```
 
-The 1.5 shell is 4:3 and Redux is not, so a straight stretch will distort the
-button art. Scale uniformly by the vertical ratio and centre horizontally, the
-same choice `MirrorAspect=fit` makes in the 1.5 shim.
+`mBufferLength` lining up with the 42/36 third argument is what identifies that
+parameter; the two leading flags are not yet pinned to `mAllowEnter` or
+anything else, so treat them as opaque and copy a working call site.
+
+### Coordinate space — settled
+
+The Redux UI canvas is **1440 x 1080**. `MainScreen_Overlay`, `Middle_Overlay`
+and `temp overlay` are each constructed as `cUI_View(name, 0, 0, 1440, 1080,
+0x60, ...)`. (The 1920x1080 `movie` views are a separate full-screen video
+layer, not the UI canvas.)
+
+That is 4:3, and so is the 1.5 shell, so the conversion is a single uniform
+factor with no letterboxing and no distortion:
+
+```
+redux_x = bz15_x * 2.25          // 1440 / 640
+redux_y = bz15_y * 2.25          // 1080 / 480
+```
+
+Every 1.5 coordinate in the manifest can be multiplied by 2.25 and used
+directly. The `BACK` button at `(1, 0, 152x34)` becomes `(2.25, 0, 342x76.5)`;
+the flag arrows at `(90, 114, 18x19)` become `(202.5, 256.5, 40.5x42.75)`.
 
 ## What already exists on the Redux side
 
@@ -169,17 +249,35 @@ Worth reusing rather than rebuilding:
 
 ## Suggested order
 
-1. **RE the Redux list and edit-box constructors.** Everything else is gated on
-   this. Confirm the UI canvas size in the same pass.
+1. **Bind the two new constructors** in `bzr_options_ui.h` / `bzr_hooks.cpp`
+   alongside the existing three, and stand up one `cUI_TextEntry` and one
+   `cUI_Selectlist` on the lobby to prove the ABI. Allocate with the same
+   `::operator new` + `memset` pattern the button and label paths use; note
+   that `cUI_TextEntry` is 2400 bytes in the reference build and
+   `cUI_Selectlist` 384, both larger than the `0x1EC` currently used for
+   buttons, so sizes must be re-measured rather than assumed.
 2. **Port the game-setup option rows.** `NetGameDlgProc`'s 12 option boxes and
-   29 buttons are the highest-value cut content and need only buttons and
-   labels, so they can land before step 1 completes.
-3. **Port the transport screen's static furniture** — background plate,
-   nav buttons, section labels — as a skeleton with the real 1.5 art.
+   29 buttons are the highest-value cut content, and
+   `cUI_Multiplayer_SettingButton` is Redux's own equivalent.
+3. **Port the transport screen's static furniture** — background plate, nav
+   buttons, section labels — as a skeleton with the real 1.5 art at 2.25x.
 4. **Wire the flag selector** to the existing OpenShim flag catalogue, replacing
    the single cycling `F` button with the 1.5 left/right pair and its label.
-5. **Character profiles and the player-information card**, once edit boxes
-   exist.
+5. **Character profiles and the player-information card**, on `cUI_Selectlist`
+   and `cUI_TextEntry`.
+
+Two cautions carried over from the existing widgets: both callback slots
+(`+0x150` / `+0x154`) must be non-null on any active dialog child or the lobby
+crashes walking its children, and `IsWidgetLiveChildOfParent` exists because
+widgets do not survive a parent rebuild.
+
+## Also worth knowing
+
+`FnUiButtonCtor` and `FnUiLabelCtor` in `bzr_options_ui.h` declare their
+trailing parameters as `int`, but the decorated names say **float**
+(`??0cUI_Button@@QAE@PBDMMMMHPAVcUI_View@@MM@Z`). The existing call sites pass
+`0`, which has the same bit pattern as `0.0f`, so nothing is broken today —
+but anything non-zero passed there would be wrong.
 
 ## Provenance
 
