@@ -799,11 +799,12 @@ namespace BZROpenShim
         constexpr float kScrapRetargetPeriodDefault = 2.0f;
         constexpr float kScrapRetargetMinImprovementDefault = 25.0f;
         constexpr float kScrapRetargetPickupGuardDistance = 20.0f;
-        // Global convergence improvements formerly owned by EXU. The first
-        // vtable slot makes hovercraft-derived wingmen use the walker's
-        // converging aim routine. The second keeps the stock hovercraft aim
-        // update, then points only the local player's weapon transforms at the
-        // smart-reticle terrain/object position.
+        // Global convergence improvements formerly owned by EXU. Wingman has
+        // its own UpdateWeaponAim override, so the primary wrapper must live on
+        // the Wingman slot: it selects stock-vs-walker aim, then optionally
+        // redirects only the local player's weapons toward the smart reticle.
+        // Keep the Hovercraft slot wrapped as a fallback for craft that dispatch
+        // directly through the base Hovercraft implementation.
         constexpr uintptr_t kWingmanWeaponAimVtableSlotAddr = 0x0088A4FC;
         constexpr uintptr_t kHovercraftWeaponAimVtableSlotAddr = 0x00889418;
         constexpr uintptr_t kWingmanWeaponAimStockAddr = 0x004EB590;
@@ -818,7 +819,9 @@ namespace BZROpenShim
         constexpr float kSmartReticleRangeDefault = 500.0f;
         constexpr float kSmartReticleRangeMin = 1.0f;
         constexpr float kSmartReticleRangeMax = 10000.0f;
-        constexpr size_t kCraftCarrierOffset = 0x1A0;
+        // Live Redux craft layout: Carrier* is at +0x198. +0x1A0 belongs to
+        // the separately re-derived Person layout and is not valid for craft.
+        constexpr size_t kCraftCarrierOffset = 0x198;
         constexpr size_t kWeaponObjectOffset = 0x10;
         constexpr int kConvergenceWeaponSlotCount = 5;
         constexpr float kConvergenceDirectionEpsilon = 0.001f;
@@ -1074,6 +1077,13 @@ namespace BZROpenShim
         static bool g_ShotConvergenceBaselineEnabled = true;
         static bool g_PlayerReticleShotConvergenceEnabled = true;
         static bool g_PlayerReticleShotConvergenceBaselineEnabled = true;
+        // The Wingman wrapper is shared by both convergence features. Keep its
+        // ownership state separate from the user-facing feature states so
+        // enabling PlayerReticleConvergence alone does not make
+        // WeaponConvergence report itself as active.
+        static bool g_WingmanWeaponAimWrapperActive = false;
+        static bool g_PlayerReticleHovercraftPatchActive = false;
+        static bool g_PlayerReticleConvergenceLayoutFaultLogged = false;
         static bool g_ShotConvergencePatchActive = false;
         static bool g_PlayerReticleShotConvergencePatchActive = false;
         static float g_SmartReticleRange = kSmartReticleRangeDefault;
@@ -9337,7 +9347,16 @@ namespace BZROpenShim
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                // Fail soft if a future build changes the carrier/weapon layout.
+                // Fail soft if a future build changes the carrier/weapon layout,
+                // but leave one breadcrumb instead of silently disabling the
+                // player-only feature forever.
+                if (!g_PlayerReticleConvergenceLayoutFaultLogged)
+                {
+                    Log(L"[CONVERGE] player reticle convergence faulted while reading craft/carrier/weapon layout (craft=0x%p carrierOffset=0x%X)\n",
+                        craft,
+                        static_cast<uint32_t>(kCraftCarrierOffset));
+                    g_PlayerReticleConvergenceLayoutFaultLogged = true;
+                }
             }
         }
 
@@ -9356,11 +9375,18 @@ namespace BZROpenShim
             void* /*edx*/,
             float dt)
         {
+            const bool singlePlayer = ReadLocalPlayerNetIdValue() == 0;
             const uintptr_t target =
-                (g_ShotConvergenceEnabled && ReadLocalPlayerNetIdValue() == 0)
+                (g_ShotConvergenceEnabled && singlePlayer)
                     ? kWalkerUpdateWeaponAimAddr
                     : kWingmanWeaponAimStockAddr;
             reinterpret_cast<FnUpdateWeaponAim>(target)(craft, dt);
+
+            // Normal player vehicles dispatch through Wingman's override rather
+            // than the Hovercraft base slot. Apply smart-reticle convergence
+            // here after the stock/walker aim update so the local reticle wins.
+            if (g_PlayerReticleShotConvergenceEnabled && singlePlayer)
+                ApplyLocalPlayerReticleConvergence(craft);
         }
 
         static bool TryReadPointerValue(uintptr_t address, void*& outValue)
@@ -9432,20 +9458,37 @@ namespace BZROpenShim
         static void RefreshShotConvergencePatchState()
         {
             const bool singlePlayer = ReadLocalPlayerNetIdValue() == 0;
+            const bool wantWingmanWrapper =
+                singlePlayer &&
+                (g_ShotConvergenceEnabled || g_PlayerReticleShotConvergenceEnabled);
+
             RefreshConvergenceVtableSlot(
                 kWingmanWeaponAimVtableSlotAddr,
                 kWingmanWeaponAimStockAddr,
                 reinterpret_cast<void*>(WingmanUpdateWeaponAimWithConvergence),
-                g_ShotConvergenceEnabled && singlePlayer,
-                g_ShotConvergencePatchActive,
-                L"all-craft convergence");
+                wantWingmanWrapper,
+                g_WingmanWeaponAimWrapperActive,
+                L"wingman convergence dispatcher");
             RefreshConvergenceVtableSlot(
                 kHovercraftWeaponAimVtableSlotAddr,
                 kHovercraftUpdateWeaponAimAddr,
                 reinterpret_cast<void*>(HovercraftUpdateWeaponAimForReticle),
                 g_PlayerReticleShotConvergenceEnabled && singlePlayer,
-                g_PlayerReticleShotConvergencePatchActive,
-                L"player smart-reticle convergence");
+                g_PlayerReticleHovercraftPatchActive,
+                L"player smart-reticle convergence (hovercraft fallback)");
+
+            // Feature state is reported independently even though the Wingman
+            // dispatcher is shared. For normal player craft, the Wingman slot
+            // is the required dispatch path; the Hovercraft hook only extends
+            // coverage to direct base-derived craft.
+            g_ShotConvergencePatchActive =
+                g_ShotConvergenceEnabled &&
+                singlePlayer &&
+                g_WingmanWeaponAimWrapperActive;
+            g_PlayerReticleShotConvergencePatchActive =
+                g_PlayerReticleShotConvergenceEnabled &&
+                singlePlayer &&
+                g_WingmanWeaponAimWrapperActive;
         }
 
         static float ClampSmartReticleRange(float range)
