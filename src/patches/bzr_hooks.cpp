@@ -219,6 +219,11 @@ namespace BZROpenShim
     FnUiButtonCtor g_BzrFn_ButtonCtor = nullptr; // 0x007C2480
     FnUiLabelCtor g_BzrFn_LabelCtor  = nullptr; // 0x007CC390
     FnUiOverlayCtor g_BzrFn_OverlayCtor = nullptr; // 0x007D1CC0
+    FnUiTextEntryCtor g_BzrFn_TextEntryCtor = nullptr; // 0x007CF410
+    FnUiSelectlistCtor g_BzrFn_SelectlistCtor = nullptr; // 0x007C9DE0
+    FnUiSelectlistSetItem g_BzrFn_SelectlistSetItem = nullptr; // 0x007CABF0
+    FnUiSetCb g_BzrFn_TextEntrySetEnterCb = nullptr; // 0x007CF940
+    FnUiSetCb g_BzrFn_SelectlistSetOnSelect = nullptr; // 0x007CB3E0
     FnUiSetStr g_BzrFn_SetTextureOff = nullptr; // 0x007D2870
     FnUiSetStr g_BzrFn_SetTextureOver = nullptr; // 0x007C2F10
     FnUiSetStr g_BzrFn_SetTextureOn = nullptr; // 0x007C2E80
@@ -21764,6 +21769,11 @@ namespace BZROpenShim
         g_BzrFn_ButtonCtor = reinterpret_cast<FnUiButtonCtor>(0x007C2480);
         g_BzrFn_LabelCtor  = reinterpret_cast<FnUiLabelCtor>(0x007CC390);
         g_BzrFn_OverlayCtor = reinterpret_cast<FnUiOverlayCtor>(kGogUiOverlayCtorAddr);
+        g_BzrFn_TextEntryCtor = reinterpret_cast<FnUiTextEntryCtor>(0x007CF410);
+        g_BzrFn_SelectlistCtor = reinterpret_cast<FnUiSelectlistCtor>(0x007C9DE0);
+        g_BzrFn_SelectlistSetItem = reinterpret_cast<FnUiSelectlistSetItem>(0x007CABF0);
+        g_BzrFn_TextEntrySetEnterCb = reinterpret_cast<FnUiSetCb>(0x007CF940);
+        g_BzrFn_SelectlistSetOnSelect = reinterpret_cast<FnUiSetCb>(0x007CB3E0);
         g_BzrFn_SetTextureOff = reinterpret_cast<FnUiSetStr>(0x007D2870);
         g_BzrFn_SetTextureOver = reinterpret_cast<FnUiSetStr>(0x007C2F10);
         g_BzrFn_SetTextureOn = reinterpret_cast<FnUiSetStr>(0x007C2E80);
@@ -25285,6 +25295,10 @@ namespace BZROpenShim
 
     namespace
     {
+        // Widgets built by the cUI_TextEntry / cUI_Selectlist ABI probe below.
+        static void* g_ProbeTextEntry = nullptr;
+        static void* g_ProbeSelectlist = nullptr;
+
         static void ResetHostUiCache()
         {
             g_BanButtonHost = nullptr;
@@ -25292,6 +25306,8 @@ namespace BZROpenShim
             g_FlagButtonHost = nullptr;
             g_FlagLabelHost = nullptr;
             g_FlagPreviewHost = nullptr;
+            g_ProbeTextEntry = nullptr;
+            g_ProbeSelectlist = nullptr;
         }
 
         static void ResetClientUiCache()
@@ -25347,6 +25363,219 @@ namespace BZROpenShim
             {
             }
             return false;
+        }
+
+        // ---- cUI_TextEntry / cUI_Selectlist ABI probe ----
+        //
+        // Stands up one of each on the lobby through the same allocate + ctor +
+        // AddChild sequence the ban and flag buttons use, then reads back the
+        // fields the two ctors are known to initialise. Sizes and offsets come
+        // from this build's own code rather than the reference PDB (see
+        // bzr_options_ui.h), so the read-back is a real test of the binding: if
+        // an argument were misplaced, maxLength and mAllowEnter would not
+        // survive the trip, and the vtable pointer would not match.
+        //
+        // Off by default. Set OPENSHIM_UI_WIDGET_PROBE=1 to build the widgets
+        // and write the results to the log.
+        constexpr uint32_t kUiTextEntryVtable = 0x008A0AA0;
+        constexpr uint32_t kUiSelectlistVtable = 0x008A08B0;
+
+        static bool ShouldRunUiWidgetProbe()
+        {
+            static int s_cached = -1;
+            if (s_cached < 0)
+                s_cached = EnvFlagEnabled("OPENSHIM_UI_WIDGET_PROBE") ? 1 : 0;
+            return s_cached != 0;
+        }
+
+        static bool ReadWidgetDword(const void* widget, size_t offset, uint32_t& out)
+        {
+            if (!widget)
+                return false;
+            __try
+            {
+                out = *reinterpret_cast<const uint32_t*>(
+                    static_cast<const uint8_t*>(widget) + offset);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+            return false;
+        }
+
+        // MSVC std::string: 16-byte inline buffer, length at +0x10, capacity at
+        // +0x14, and the buffer becomes a pointer once capacity exceeds 15.
+        static bool ReadEngineStdString(const void* str, char* out, size_t outSize)
+        {
+            if (!str || !out || outSize == 0)
+                return false;
+
+            out[0] = '\0';
+            __try
+            {
+                const uint8_t* const bytes = static_cast<const uint8_t*>(str);
+                const size_t length = *reinterpret_cast<const size_t*>(bytes + 0x10);
+                const size_t capacity = *reinterpret_cast<const size_t*>(bytes + 0x14);
+                if (length > capacity || capacity > 0x10000)
+                    return false;
+
+                const char* const chars = (capacity < 16)
+                    ? reinterpret_cast<const char*>(bytes)
+                    : *reinterpret_cast<const char* const*>(bytes);
+                if (!chars)
+                    return false;
+
+                const size_t copy = (length < outSize - 1) ? length : outSize - 1;
+                std::memcpy(out, chars, copy);
+                out[copy] = '\0';
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+            return false;
+        }
+
+        // The Selectlist ctor installs these as the click callbacks of the two
+        // arrow buttons it builds for itself; the engine calls them through
+        // +0x154 with no arguments.
+        static void __cdecl UiWidgetProbePageUp()
+        {
+        }
+
+        static void __cdecl UiWidgetProbePageDown()
+        {
+        }
+
+        static void ReportProbeTextEntry(void* widget)
+        {
+            uint32_t vtable = 0;
+            uint32_t maxLength = 0;
+            uint32_t allowEnter = 0;
+            char text[64] = {};
+
+            const bool haveVtable = ReadWidgetDword(widget, 0, vtable);
+            ReadWidgetDword(widget, kUiTextEntryMaxLengthOffset, maxLength);
+            ReadWidgetDword(widget, kUiTextEntryAllowEnterOffset, allowEnter);
+            const bool haveText = ReadEngineStdString(
+                static_cast<uint8_t*>(widget) + kUiTextEntryTextOffset, text, sizeof(text));
+
+            Log(L"[UIPROBE] cUI_TextEntry ptr=%p vtable=0x%08X(want 0x%08X %hs) "
+                L"maxLength=%u(want 36 %hs) allowEnter=%u(want 1 %hs) text=\"%hs\"(%hs)\n",
+                widget,
+                haveVtable ? vtable : 0,
+                kUiTextEntryVtable,
+                (haveVtable && vtable == kUiTextEntryVtable) ? "ok" : "MISMATCH",
+                maxLength,
+                maxLength == 0x24 ? "ok" : "MISMATCH",
+                allowEnter & 0xFF,
+                (allowEnter & 0xFF) == 1 ? "ok" : "MISMATCH",
+                text,
+                haveText ? "readable" : "UNREADABLE");
+        }
+
+        static void ReportProbeSelectlist(void* widget)
+        {
+            uint32_t vtable = 0;
+            uint32_t selected = 0;
+            uint32_t scroll = 0;
+            uint32_t pageUp = 0;
+            uint32_t pageDown = 0;
+
+            const bool haveVtable = ReadWidgetDword(widget, 0, vtable);
+            ReadWidgetDword(widget, kUiSelectlistSelectedOffset, selected);
+            ReadWidgetDword(widget, kUiSelectlistScrollOffset, scroll);
+            ReadWidgetDword(widget, kUiSelectlistPageUpOffset, pageUp);
+            ReadWidgetDword(widget, kUiSelectlistPageDownOffset, pageDown);
+
+            Log(L"[UIPROBE] cUI_Selectlist ptr=%p vtable=0x%08X(want 0x%08X %hs) "
+                L"selected=%d(want -1 %hs) scroll=%u pageUp=0x%08X pageDown=0x%08X(%hs)\n",
+                widget,
+                haveVtable ? vtable : 0,
+                kUiSelectlistVtable,
+                (haveVtable && vtable == kUiSelectlistVtable) ? "ok" : "MISMATCH",
+                static_cast<int>(selected),
+                static_cast<int>(selected) == -1 ? "ok" : "MISMATCH",
+                scroll,
+                pageUp,
+                pageDown,
+                (pageUp && pageDown) ? "arrows built" : "ARROWS MISSING");
+        }
+
+        static void CreateUiWidgetProbe(void* parent)
+        {
+            if (!parent || !g_BzrFn_AddChild || !g_BzrFn_TextEntryCtor || !g_BzrFn_SelectlistCtor)
+                return;
+
+            if (!g_ProbeTextEntry || !IsWidgetLiveChildOfParent(parent, g_ProbeTextEntry))
+            {
+                g_ProbeTextEntry = nullptr;
+                void* const mem = ::operator new(kUiTextEntrySize, std::nothrow);
+                if (mem)
+                {
+                    std::memset(mem, 0, kUiTextEntrySize);
+                    // Geometry follows the stock "chatEntry" row (520x40 at
+                    // y=945), lifted clear of it. 0x8020 is the flag word every
+                    // shipped text entry passes; maxLength 0x24 matches chatEntry.
+                    g_ProbeTextEntry = g_BzrFn_TextEntryCtor(
+                        mem, 0, 1, 0x24, "OpenShimProbeEntry",
+                        470.0f, 872.0f, 520.0f, 40.0f, 0x8020, parent);
+                    if (g_ProbeTextEntry)
+                    {
+                        g_BzrFn_AddChild(parent, g_ProbeTextEntry, 0);
+                        ReportProbeTextEntry(g_ProbeTextEntry);
+                    }
+                    else
+                    {
+                        // A ctor that returned null may still have run far
+                        // enough to own resources, so the block is leaked
+                        // rather than freed under a half-built engine object.
+                        Log(L"[UIPROBE] cUI_TextEntry ctor returned null\n");
+                    }
+                }
+            }
+
+            if (!g_ProbeSelectlist || !IsWidgetLiveChildOfParent(parent, g_ProbeSelectlist))
+            {
+                g_ProbeSelectlist = nullptr;
+                void* const mem = ::operator new(kUiSelectlistSize, std::nothrow);
+                if (mem)
+                {
+                    std::memset(mem, 0, kUiSelectlistSize);
+                    // Colour and row scale are the values every stock list
+                    // passes. The ctor pre-creates row labels to fill the
+                    // height, so it is safe to construct with no items.
+                    g_ProbeSelectlist = g_BzrFn_SelectlistCtor(
+                        mem, "OpenShimProbeList",
+                        60.0f, 560.0f, 380.0f, 240.0f,
+                        reinterpret_cast<void*>(UiWidgetProbePageUp),
+                        reinterpret_cast<void*>(UiWidgetProbePageDown),
+                        0, parent, 0xFF00FF00, 1.0f);
+                    if (g_ProbeSelectlist)
+                    {
+                        g_BzrFn_AddChild(parent, g_ProbeSelectlist, 0);
+
+                        // SetItem appends whenever index == size(), so walking
+                        // the index up from zero fills an empty list.
+                        if (g_BzrFn_SelectlistSetItem)
+                        {
+                            static const char* const kRows[] = {
+                                "TCP/IP", "IPX", "Modem", "Serial", "Local Area Network"
+                            };
+                            constexpr int kRowCount = static_cast<int>(sizeof(kRows) / sizeof(kRows[0]));
+                            for (int i = 0; i < kRowCount; ++i)
+                                g_BzrFn_SelectlistSetItem(g_ProbeSelectlist, kRows[i], i, 100 + i);
+                        }
+
+                        ReportProbeSelectlist(g_ProbeSelectlist);
+                    }
+                    else
+                    {
+                        Log(L"[UIPROBE] cUI_Selectlist ctor returned null\n");
+                    }
+                }
+            }
         }
 
         static void UpdateFlagSelectionUiLabel(void* label)
@@ -26017,6 +26246,9 @@ namespace BZROpenShim
                 reinterpret_cast<void*>(FlagButtonOnClickHost),
                 reinterpret_cast<void*>(FlagButtonOnHoverHost));
         }
+
+        if (ShouldRunUiWidgetProbe())
+            CreateUiWidgetProbe(parent);
     }
 
     void BanButtonCreateClient()

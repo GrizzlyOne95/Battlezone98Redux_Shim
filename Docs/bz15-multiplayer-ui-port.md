@@ -165,25 +165,25 @@ tool dumps them, resolving string pointers and the `movss` constants used to
 pass floats.
 
 ```c
-// 0x007CF410, 7 call sites
+// 0x007CF410, 7 call sites. Extends cUI_Text and forwards args 4..10 to it.
 void* __thiscall cUI_TextEntry(void* self,
-                               int   flagA,        // 1 mostly, 0 at one chatEntry
-                               int   flagB,        // always 1 so far
-                               int   maxLength,    // 42 or 36
+                               int   flagA,        // -> byte at +0x960; 1 or 0
+                               int   allowEnter,   // -> byte at +0x950; always 1
+                               int   maxLength,    // -> +0x948; 42 or 36
                                const char* name,
                                float x, float y, float w, float h,
                                int   flags,        // 0x8020
                                void* parent);
 
-// 0x007C9DE0, 18 call sites
+// 0x007C9DE0, 18 call sites. Extends cUI_View, which it calls with flags|0x20.
 void* __thiscall cUI_Selectlist(void* self,
                                 const char* name,
                                 float x, float y, float w, float h,
-                                void (*onSelect)(),
-                                void (*onDoubleClick)(),
+                                void (*onPageUp)(),    // NOT selection handlers
+                                void (*onPageDown)(),  // see below
                                 int   flags,        // 0
                                 void* parent,
-                                uint32_t colour,    // 0xFF00FF00
+                                uint32_t rowColour, // 0xFF00FF00
                                 float rowScale);    // 1.0f
 ```
 
@@ -192,24 +192,95 @@ Observed live examples: `("CreateTextEntry", 760, 945, 580x40)` and
 `("FriendList", 260, 160, 720x540)`. Note `cUI_TextEntry` takes flags `0x8020`
 where the existing OpenShim buttons pass `0x20`.
 
-Field offsets, from the other build's PDB and therefore **advisory — validate at
-runtime before writing through them**:
+**The two `cUI_Selectlist` callbacks are not selection handlers.** The ctor
+builds its own page-up/page-down arrow buttons and installs these as their
+*click* callbacks via `0x007C23E0` — the same setter OpenShim already binds as
+`g_BzrFn_SetOnClick`. Selection-changed is a separate setter, `0x007CB3E0`,
+called right after construction at every stock site. An earlier draft of this
+document had them as `onSelect`/`onDoubleClick`; that was wrong.
+
+### Sizes and offsets, confirmed against this build
+
+The repo also contains a Ghidra decompile of the *shipped* exe
+(`reverse_engineering/repo_corpora/bzr_gog_best_effort/.../decomps/`), which
+settles all of this from the binary itself — the PDB is not needed and is not
+trusted here.
+
+Every call site allocates with a literal `operator new`, and the two ctors are
+unanimous across all of them:
 
 ```
-cUI_TextEntry (extends cUI_Text)      cUI_Selectlist (extends cUI_View)
-  +0x930  std::string  text            +0x14C  int   mCurrentSelectedIndex
-  +0x948  uint  mBufferLength          +0x150  int   mCurrentPage
-  +0x94C  void (*mEnterCallback)(...)  +0x154  float entryHeight
-  +0x950  bool  mAllowEnter            +0x158  bool  mEnabled
-  +0x954  cUI_View* mCursor            +0x15C  std::vector<cUI_Text*>
-                                       +0x168  std::vector<valuedata>  // items
-                                       +0x178  cUI_Button* mPageUp
-                                       +0x17C  cUI_Button* mPageDn
+sizeof(cUI_TextEntry)  = 0x968   (2408)   <-- PDB says 2400; it is EIGHT SHORT
+sizeof(cUI_Selectlist) = 0x180   (384)
 ```
 
-`mBufferLength` lining up with the 42/36 third argument is what identifies that
-parameter; the two leading flags are not yet pinned to `mAllowEnter` or
-anything else, so treat them as opaque and copy a working call site.
+The undersized PDB figure is not academic: the shipped ctor writes a field at
+`+0x964`, so a 2400-byte allocation would be overrun by the constructor itself.
+The three sizes OpenShim already uses are confirmed the same way, because these
+two ctors allocate those very classes for their own children — `0x1EC` for the
+arrow buttons (`cUI_Button`), `0x930` for the row labels (`cUI_Text`), and
+`0x144` for the text cursor (`cUI_View`).
+
+Offsets below are read out of this build's constructor code, so they are no
+longer advisory:
+
+```
+cUI_TextEntry (extends cUI_Text)       cUI_Selectlist (extends cUI_View)
+  +0x930  std::string text              +0x14C  int  selectedIndex   (init -1)
+  +0x948  uint  maxLength   (= arg3)    +0x150  int  scrollOffset    (init 0)
+  +0x94C  void (*enterCallback)()       +0x168  vector<item>         (items)
+  +0x950  bool  allowEnter  (= arg2)    +0x174  float rowScale       (= arg11)
+  +0x954  cUI_View* cursor              +0x178  cUI_Button* pageUp
+  +0x960  bool  flagA       (= arg1)    +0x17C  cUI_Button* pageDown
+  +0x964  int   (init -1)
+```
+
+RTTI vftables, for identifying an instance: `cUI_TextEntry` `0x008A0AA0`,
+`cUI_Selectlist` `0x008A08B0` (`cUI_Button` `0x008A0470`, `cUI_Text`
+`0x008A096C`, `cUI_View` `0x008A0B94`).
+
+### Driving a list
+
+Items are `{ std::string label; int value; }`, stride `0x1C`, value at `+0x18`.
+
+* **`0x007CABF0`** `SetItem(const char* label, int index, int value)` — overwrites
+  entry `index`, or **appends when `index == size()`**, so walking the index up
+  from zero fills an empty list. It also truncates the label to the list width,
+  relabels the affected visible row, and shows or hides the arrows.
+* **`0x007CB1A0`** — already bound in OpenShim as `g_BzrFn_GetSelected`; it
+  returns the selected item's `int` value, or 0 when `selectedIndex < 0`.
+* **`0x007CB3E0`** — selection-changed callback setter.
+
+The ctor pre-creates as many row labels as fit the requested height and stops,
+so **it is safe to construct a list with no items** — no separate "populate
+before display" step is required.
+
+### Confirmed in the running game
+
+Both bindings are exercised by an ABI probe in `bzr_hooks.cpp`
+(`CreateUiWidgetProbe`), off unless `OPENSHIM_UI_WIDGET_PROBE=1`. It builds one
+of each on the multiplayer screen through the same allocate + ctor + `AddChild`
+sequence the ban and flag buttons use, then reads the fields back:
+
+```
+[UIPROBE] cUI_TextEntry  vtable=0x008A0AA0(ok) maxLength=36(ok) allowEnter=1(ok) text=""(readable)
+[UIPROBE] cUI_Selectlist vtable=0x008A08B0(ok) selected=-1(ok) scroll=0 pageUp/pageDown(arrows built)
+```
+
+`maxLength` and `allowEnter` arriving intact is what proves the argument order:
+they are arguments 3 and 2 of ten, so a misplaced parameter could not leave both
+correct. The list also renders its five seeded rows on screen, which exercises
+`SetItem`'s append path.
+
+A whole-heap scan of the live process (walking committed private pages for the
+five vftables) corroborates the offsets against **stock** instances rather than
+only our own: a shipped `cUI_TextEntry` reads `maxLength=36, allowEnter=1,
+enterCallback=0x0079D5F0` — that callback being exactly the function the
+decompile passes to `0x007CF940` — while another reads `maxLength=15,
+allowEnter=0`, so the fields track per-instance state rather than coincidence.
+All live lists have `+0x178`/`+0x17C` pointing at objects whose vftable is
+`cUI_Button`. The image loads at `0x400000` with no relocation, which is what
+makes every hard-coded address here valid.
 
 ### Coordinate space — settled
 
@@ -249,13 +320,9 @@ Worth reusing rather than rebuilding:
 
 ## Suggested order
 
-1. **Bind the two new constructors** in `bzr_options_ui.h` / `bzr_hooks.cpp`
-   alongside the existing three, and stand up one `cUI_TextEntry` and one
-   `cUI_Selectlist` on the lobby to prove the ABI. Allocate with the same
-   `::operator new` + `memset` pattern the button and label paths use; note
-   that `cUI_TextEntry` is 2400 bytes in the reference build and
-   `cUI_Selectlist` 384, both larger than the `0x1EC` currently used for
-   buttons, so sizes must be re-measured rather than assumed.
+1. ~~**Bind the two new constructors** and prove the ABI.~~ **Done** — bound in
+   `bzr_options_ui.h` / `bzr_hooks.cpp` next to the existing three, with sizes,
+   offsets and argument order confirmed in the running game (see above).
 2. **Port the game-setup option rows.** `NetGameDlgProc`'s 12 option boxes and
    29 buttons are the highest-value cut content, and
    `cUI_Multiplayer_SettingButton` is Redux's own equivalent.
