@@ -326,12 +326,76 @@ Worth reusing rather than rebuilding:
 2. **Port the game-setup option rows.** `NetGameDlgProc`'s 12 option boxes and
    29 buttons are the highest-value cut content, and
    `cUI_Multiplayer_SettingButton` is Redux's own equivalent.
-3. **Port the transport screen's static furniture** — background plate, nav
-   buttons, section labels — as a skeleton with the real 1.5 art at 2.25x.
-4. **Wire the flag selector** to the existing OpenShim flag catalogue, replacing
-   the single cycling `F` button with the 1.5 left/right pair and its label.
+3. ~~**Port the transport screen's static furniture**~~ — **dropped.** The
+   transport picker is the one piece of this screen that cannot be made to mean
+   anything: Redux has no `dp_*` transport stack, no LAN browser and no
+   direct-IP join, so every row would dead-end. See
+   `reverse_engineering/redux_tcpip_lan_multiplayer_investigation_20260713.md`.
+   What replaced it is the **route readout and preference** below, which
+   describes and controls transport behaviour Redux genuinely has.
+4. ~~**Wire the flag selector** to the existing OpenShim flag catalogue, replacing
+   the single cycling `F` button with the 1.5 left/right pair and its label.~~
+   **Done** — `CreateFlagButtonCommon` now builds the 1.5 pair at the retail
+   40.5x42.75 (18x19 at 2.25x), side by side, driving `CycleSelectedFlag(-1)`
+   and `(+1)`. The preview tile keeps the forward callback. Retail arrow art
+   (bitmaps 2049/2050/2070/2071) is not extracted yet, so the buttons carry
+   `<` / `>` captions over the stock Redux button texture.
 5. **Character profiles and the player-information card**, on `cUI_Selectlist`
-   and `cUI_TextEntry`.
+   and `cUI_TextEntry`. The nickname half of this is **done** — see below.
+
+## Transport, for real: what Redux actually exposes
+
+Everything here is confirmed against the shipped GOG image, whose sha256
+(`8d71f56c1314e69a8ad38f4eeaf20a8ff825965a84cf196e5f77ea4cc3377413`) is
+byte-identical to the decompile corpus, so the corpus addresses are
+authoritative rather than advisory. Each global below has exactly four `.text`
+references and no others.
+
+| what | address | width | notes |
+|---|---|---|---|
+| force-relay flag | `0x00946708` | dword | `/iprelay` writes 1 at `0x007D5CB9`, `/ipdirect` 0 at `0x007D5CE1`; read at `0x0075F09F` and `0x0075DDC6` |
+| BZRNet UDP port | `0x00945704` | **uint16** | requested port read at `0x006BE7B8`, then overwritten at `0x006BE7FF` with the port Winsock bound |
+| nickname override | `0x009453E0` | `char[0x80]` | `/nickname=` copies at `0x007D5947`; consumed at `0x006C7D87` |
+
+Three consequences that are easy to get wrong:
+
+* The port is a **word**, not a dword, and it is **read then overwritten**. It
+  only takes effect while the peer socket is still closed, and afterwards the
+  same variable reads back as the true bound port — which is what the lobby
+  readout reports.
+* The relay flag is re-read on **every** connection attempt, so it can be
+  changed live; the port cannot.
+* The nickname is read when `FUN_006C6E60` builds the identity message, not
+  latched at startup. Byte 0 being NUL is the "use the platform account name"
+  signal. An edit therefore applies on the **next connect**, not immediately.
+
+### Reading the negotiated route without walking the peer container
+
+Peer connection state lives at `peer+0x00`: 1 = LAN connecting, 2 = LAN
+connected, 3 = WAN connecting, 4 = WAN connected, 7 = RELAY connected. That
+2/4/7 mapping is exactly what `FUN_0075D800` uses to choose the literal it
+prints.
+
+The peer records are only reachable through opaque STL iteration inside that
+function, so OpenShim does not walk the container. Instead it redirects the
+`call` at two sites into the shared BZRNet logger (`0x007D6A70`, cdecl, 272
+call sites image-wide) using the existing `RedirectCallTarget`:
+
+```
+0x0075ED1D  logger(fmt, route, name, address)   fmt @ 0x0089BC78
+0x0075EF99  logger(fmt, name)                   fmt @ 0x0089BCBC  (reset)
+```
+
+Redirecting one `call` rel32 rather than detouring the logger itself means each
+hook receives a **fixed, known signature instead of varargs**, and no other log
+line in the game is affected. The argument order was read off the push sequence
+at the call site (`push eax; push eax; push ecx; push fmt`), not guessed from
+Ghidra's varargs reconstruction, which shows only two arguments for a
+three-`%s` format. Each format string has exactly one push site in `.text`, so
+there is no ambiguity about which call is being redirected.
+
+Both hooks record and then forward to the real logger with identical arguments,
+so the game's own log is unchanged.
 
 Two cautions carried over from the existing widgets: both callback slots
 (`+0x150` / `+0x154`) must be non-null on any active dialog child or the lobby
