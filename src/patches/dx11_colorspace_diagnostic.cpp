@@ -10,11 +10,17 @@
 #include <process.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <cmath>
 #include <cctype>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
+#include <iomanip>
+#include <limits>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -27,8 +33,27 @@ namespace BZROpenShim
         constexpr char kEnvironmentSwitch[] = "OPENSHIM_TRACE_DX11_COLORSPACE";
         constexpr char kIniSection[] = "Diagnostics";
         constexpr char kIniKey[] = "TraceDX11ColorSpace";
+        constexpr char kTerrainEnvironmentSwitch[] = "OPENSHIM_TERRAIN_RENDER_PROBE";
+        constexpr char kTerrainIniKey[] = "TerrainRenderProbe";
+        constexpr char kTerrainMaxClustersIniKey[] = "TerrainRenderProbeMaxClusters";
+        constexpr char kTerrainSelectedClusterIniKey[] = "TerrainRenderProbeCluster";
+        constexpr char kTerrainDumpJsonIniKey[] = "TerrainRenderProbeDumpJson";
         constexpr unsigned kDiscoveryAttempts = 1200; // 30 seconds at 25 ms.
         constexpr DWORD kDiscoverySleepMs = 25;
+
+        // The released renderer builds one 16x16-cell cluster from 289 tile
+        // samples. Interior tiles contribute 6x6 vertices, while the outside
+        // samples contribute clipped outside edges. This produces 9,409
+        // vertices and 38,400 16-bit triangle-list indices. Requiring the
+        // complete input-assembler signature keeps this observer away from
+        // unrelated 16/4/4-stride geometry without relying on an executable
+        // address.
+        constexpr UINT kTerrainExpectedVertexCount = 9409;
+        constexpr UINT kTerrainExpectedIndexCount = 38400;
+        constexpr UINT kTerrainMaxSampleClusters = 16;
+        constexpr UINT kTerrainMaxObservedClusters = 4096;
+        constexpr UINT kTerrainShaderResourceSlots = 8;
+        constexpr size_t kTerrainMaxBufferBytes = 4u * 1024u * 1024u;
 
         constexpr size_t kMaxTextureCreateLogs = 384;
         constexpr size_t kMaxSrvCreateLogs = 512;
@@ -42,10 +67,25 @@ namespace BZROpenShim
 
         std::atomic<bool> g_ShutdownRequested{ false };
         std::atomic<uintptr_t> g_BackbufferIdentity{ 0 };
+        std::atomic<bool> g_ColorSpaceDiagnosticEnabled{ false };
+        std::atomic<bool> g_TerrainProbeEnabled{ false };
+        std::atomic<unsigned> g_TerrainCaptureCount{ 0 };
         uintptr_t g_DiscoveryThread = 0;
 
         std::mutex g_HookMutex;
         std::mutex g_LogSetMutex;
+        std::mutex g_TerrainProbeMutex;
+
+        struct TerrainProbeConfig
+        {
+            unsigned maxClusters = 1;
+            int selectedCluster = -1;
+            bool dumpJson = true;
+        };
+
+        TerrainProbeConfig g_TerrainProbeConfig;
+        std::unordered_set<uintptr_t> g_TerrainObservedBuffers;
+        unsigned g_TerrainNextOrdinal = 0;
 
         std::unordered_set<uint64_t> g_TextureCreateKeys;
         std::unordered_set<uint64_t> g_SrvCreateKeys;
@@ -95,11 +135,20 @@ namespace BZROpenShim
             ID3D11Device*, ID3D11Resource*, const D3D11_DEPTH_STENCIL_VIEW_DESC*,
             ID3D11DepthStencilView**);
 
+        using FnDeviceCreateDeferredContext = HRESULT(STDMETHODCALLTYPE*)(
+            ID3D11Device*, UINT, ID3D11DeviceContext**);
+
         using FnContextPSSetShaderResources = void(STDMETHODCALLTYPE*)(
             ID3D11DeviceContext*, UINT, UINT, ID3D11ShaderResourceView* const*);
 
         using FnContextOMSetRenderTargets = void(STDMETHODCALLTYPE*)(
             ID3D11DeviceContext*, UINT, ID3D11RenderTargetView* const*, ID3D11DepthStencilView*);
+
+        using FnContextDrawIndexed = void(STDMETHODCALLTYPE*)(
+            ID3D11DeviceContext*, UINT, UINT, INT);
+
+        using FnContextIASetPrimitiveTopology = void(STDMETHODCALLTYPE*)(
+            ID3D11DeviceContext*, D3D11_PRIMITIVE_TOPOLOGY);
 
         FnD3D11CreateDevice g_RealD3D11CreateDevice = nullptr;
         FnD3D11CreateDeviceAndSwapChain g_RealD3D11CreateDeviceAndSwapChain = nullptr;
@@ -110,8 +159,11 @@ namespace BZROpenShim
         FnDeviceCreateSRV g_RealCreateSRV = nullptr;
         FnDeviceCreateRTV g_RealCreateRTV = nullptr;
         FnDeviceCreateDSV g_RealCreateDSV = nullptr;
+        FnDeviceCreateDeferredContext g_RealCreateDeferredContext = nullptr;
         FnContextPSSetShaderResources g_RealPSSetShaderResources = nullptr;
         FnContextOMSetRenderTargets g_RealOMSetRenderTargets = nullptr;
+        FnContextDrawIndexed g_RealDrawIndexed = nullptr;
+        FnContextIASetPrimitiveTopology g_RealIASetPrimitiveTopology = nullptr;
 
         uint64_t MixKey(uint64_t seed, uint64_t value)
         {
@@ -210,6 +262,65 @@ namespace BZROpenShim
 
             const std::string iniPath = GetOpenShimIniPath();
             return GetPrivateProfileIntA(kIniSection, kIniKey, 0, iniPath.c_str()) != 0;
+        }
+
+        bool TerrainProbeRequested()
+        {
+            char envValue[64] = {};
+            const DWORD envLength = GetEnvironmentVariableA(
+                kTerrainEnvironmentSwitch,
+                envValue,
+                static_cast<DWORD>(sizeof(envValue)));
+
+            if (envLength > 0 && envLength < sizeof(envValue))
+                return StringIsTruthy(envValue);
+
+            const std::string iniPath = GetOpenShimIniPath();
+            return GetPrivateProfileIntA(
+                       kIniSection,
+                       kTerrainIniKey,
+                       0,
+                       iniPath.c_str()) != 0;
+        }
+
+        TerrainProbeConfig ReadTerrainProbeConfig()
+        {
+            TerrainProbeConfig config;
+            const std::string iniPath = GetOpenShimIniPath();
+
+            const int requestedMax = GetPrivateProfileIntA(
+                kIniSection,
+                kTerrainMaxClustersIniKey,
+                1,
+                iniPath.c_str());
+            config.maxClusters = static_cast<unsigned>(std::clamp(
+                requestedMax,
+                1,
+                static_cast<int>(kTerrainMaxSampleClusters)));
+
+            config.selectedCluster = GetPrivateProfileIntA(
+                kIniSection,
+                kTerrainSelectedClusterIniKey,
+                -1,
+                iniPath.c_str());
+            if (config.selectedCluster < -1)
+                config.selectedCluster = -1;
+
+            config.dumpJson = GetPrivateProfileIntA(
+                                  kIniSection,
+                                  kTerrainDumpJsonIniKey,
+                                  1,
+                                  iniPath.c_str()) != 0;
+            return config;
+        }
+
+        std::string GetExecutableDirectory()
+        {
+            std::string iniPath = GetOpenShimIniPath();
+            const size_t slash = iniPath.find_last_of("\\/");
+            if (slash == std::string::npos)
+                return {};
+            return iniPath.substr(0, slash + 1);
         }
 
         const char* DxgiFormatName(DXGI_FORMAT format)
@@ -375,6 +486,315 @@ namespace BZROpenShim
 
             buffer.back() = '\0';
             return std::string(buffer.data());
+        }
+
+        std::string JsonEscape(const std::string& value)
+        {
+            std::ostringstream escaped;
+            for (const unsigned char c : value)
+            {
+                switch (c)
+                {
+                case '"': escaped << "\\\""; break;
+                case '\\': escaped << "\\\\"; break;
+                case '\b': escaped << "\\b"; break;
+                case '\f': escaped << "\\f"; break;
+                case '\n': escaped << "\\n"; break;
+                case '\r': escaped << "\\r"; break;
+                case '\t': escaped << "\\t"; break;
+                default:
+                    if (c < 0x20)
+                    {
+                        escaped << "\\u"
+                                << std::hex << std::setw(4) << std::setfill('0')
+                                << static_cast<unsigned>(c)
+                                << std::dec << std::setfill(' ');
+                    }
+                    else
+                    {
+                        escaped << static_cast<char>(c);
+                    }
+                    break;
+                }
+            }
+            return escaped.str();
+        }
+
+        struct TerrainTextureRecord
+        {
+            UINT slot = 0;
+            std::string viewName;
+            std::string resourceName;
+            DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+            UINT width = 0;
+            UINT height = 0;
+        };
+
+        bool ReadBufferSnapshot(
+            ID3D11DeviceContext* context,
+            ID3D11Buffer* source,
+            std::vector<unsigned char>& bytes,
+            D3D11_BUFFER_DESC& sourceDesc)
+        {
+            if (!context || !source)
+                return false;
+
+            source->GetDesc(&sourceDesc);
+            if (sourceDesc.ByteWidth == 0 || sourceDesc.ByteWidth > kTerrainMaxBufferBytes)
+                return false;
+
+            ID3D11Device* device = nullptr;
+            context->GetDevice(&device);
+            if (!device)
+                return false;
+
+            D3D11_BUFFER_DESC stagingDesc = sourceDesc;
+            stagingDesc.Usage = D3D11_USAGE_STAGING;
+            stagingDesc.BindFlags = 0;
+            stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+            stagingDesc.MiscFlags = 0;
+            stagingDesc.StructureByteStride = 0;
+
+            ID3D11Buffer* staging = nullptr;
+            const HRESULT createHr = device->CreateBuffer(&stagingDesc, nullptr, &staging);
+            device->Release();
+            if (FAILED(createHr) || !staging)
+                return false;
+
+            context->CopyResource(staging, source);
+
+            D3D11_MAPPED_SUBRESOURCE mapped = {};
+            const HRESULT mapHr = context->Map(staging, 0, D3D11_MAP_READ, 0, &mapped);
+            if (SUCCEEDED(mapHr) && mapped.pData)
+            {
+                const auto* begin = static_cast<const unsigned char*>(mapped.pData);
+                bytes.assign(begin, begin + sourceDesc.ByteWidth);
+                context->Unmap(staging, 0);
+            }
+
+            staging->Release();
+            return SUCCEEDED(mapHr) && !bytes.empty();
+        }
+
+        template <typename T>
+        bool ReadSnapshotValue(
+            const std::vector<unsigned char>& bytes,
+            size_t offset,
+            T& value)
+        {
+            if (offset > bytes.size() || sizeof(T) > bytes.size() - offset)
+                return false;
+            std::memcpy(&value, bytes.data() + offset, sizeof(T));
+            return true;
+        }
+
+        std::vector<TerrainTextureRecord> CaptureTerrainShaderResources(
+            ID3D11DeviceContext* context)
+        {
+            std::vector<TerrainTextureRecord> records;
+            std::array<ID3D11ShaderResourceView*, kTerrainShaderResourceSlots> views = {};
+            context->PSGetShaderResources(
+                0,
+                static_cast<UINT>(views.size()),
+                views.data());
+
+            for (UINT slot = 0; slot < views.size(); ++slot)
+            {
+                ID3D11ShaderResourceView* view = views[slot];
+                if (!view)
+                    continue;
+
+                TerrainTextureRecord record;
+                record.slot = slot;
+                record.viewName = GetDebugName(view);
+
+                ID3D11Resource* resource = nullptr;
+                view->GetResource(&resource);
+                if (resource)
+                {
+                    record.resourceName = GetDebugName(resource);
+
+                    ID3D11Texture2D* texture = nullptr;
+                    if (SUCCEEDED(resource->QueryInterface(
+                            __uuidof(ID3D11Texture2D),
+                            reinterpret_cast<void**>(&texture))) &&
+                        texture)
+                    {
+                        D3D11_TEXTURE2D_DESC desc = {};
+                        texture->GetDesc(&desc);
+                        record.format = desc.Format;
+                        record.width = desc.Width;
+                        record.height = desc.Height;
+                        texture->Release();
+                    }
+
+                    resource->Release();
+                }
+
+                records.push_back(std::move(record));
+                view->Release();
+            }
+            return records;
+        }
+
+        std::string TerrainProbeJsonPath(unsigned captureIndex)
+        {
+            std::ostringstream name;
+            if (g_TerrainProbeConfig.selectedCluster >= 0 ||
+                g_TerrainProbeConfig.maxClusters == 1)
+            {
+                name << "terrain_probe.json";
+            }
+            else
+            {
+                name << "terrain_probe_" << std::setw(3) << std::setfill('0')
+                     << captureIndex << ".json";
+            }
+            return GetExecutableDirectory() + name.str();
+        }
+
+        bool WriteTerrainProbeJson(
+            const std::string& path,
+            unsigned clusterOrdinal,
+            uintptr_t clusterIdentity,
+            const std::array<std::vector<unsigned char>, 3>& vertexBytes,
+            const std::vector<unsigned char>& indexBytes,
+            const std::array<UINT, 3>& strides,
+            const std::array<UINT, 3>& offsets,
+            DXGI_FORMAT indexFormat,
+            UINT indexBufferOffset,
+            UINT indexCount,
+            UINT startIndexLocation,
+            INT baseVertexLocation,
+            const std::vector<TerrainTextureRecord>& resources)
+        {
+            std::ofstream output(path, std::ios::binary | std::ios::trunc);
+            if (!output)
+                return false;
+
+            output << std::setprecision(9);
+            output << "{\n";
+            output << "  \"schema\": \"bzr-openshim-terrain-probe-v1\",\n";
+            output << "  \"captureBasis\": \"completed D3D11 input-assembler state; no engine address hook\",\n";
+            output << "  \"clusterOrdinal\": " << clusterOrdinal << ",\n";
+            output << "  \"clusterIdentity\": \"0x" << std::hex << clusterIdentity
+                   << std::dec << "\",\n";
+            output << "  \"worldPosition\": null,\n";
+            output << "  \"materialName\": null,\n";
+            output << "  \"logicalTileIds\": null,\n";
+            output << "  \"orientationFlags\": null,\n";
+            output << "  \"unavailableReason\": \"These CPU/OGRE identities are already compiled into buffers at the D3D11 observation boundary.\",\n";
+            output << "  \"topology\": \"D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST\",\n";
+            output << "  \"vertexCount\": " << kTerrainExpectedVertexCount << ",\n";
+            output << "  \"indexCount\": " << indexCount << ",\n";
+            output << "  \"expectedSubmission\": {\"startIndexLocation\": " << startIndexLocation
+                   << ", \"baseVertexLocation\": " << baseVertexLocation << "},\n";
+            output << "  \"layout\": [\n";
+            output << "    {\"slot\":0,\"stride\":" << strides[0]
+                   << ",\"offset\":" << offsets[0]
+                   << ",\"fields\":[\"POSITION:R32G32B32_FLOAT@0\",\"COLOR0:R8G8B8A8_UNORM@12\"]},\n";
+            output << "    {\"slot\":1,\"stride\":" << strides[1]
+                   << ",\"offset\":" << offsets[1]
+                   << ",\"fields\":[\"BLENDINDICES:R8G8B8A8_UINT@0 (atlasU,atlasV,normalX,normalZ)\"]},\n";
+            output << "    {\"slot\":2,\"stride\":" << strides[2]
+                   << ",\"offset\":" << offsets[2]
+                   << ",\"fields\":[\"TEXCOORD1:R32_FLOAT@0 (height)\"]}\n";
+            output << "  ],\n";
+            output << "  \"atlasDecode\": \"finalUV=(blendIndices.xy+0.5)/160; exact tile/local UV requires the CPU AtlasRect and mix/orientation record\",\n";
+            output << "  \"shaderResources\": [\n";
+            for (size_t i = 0; i < resources.size(); ++i)
+            {
+                const TerrainTextureRecord& record = resources[i];
+                output << "    {\"slot\":" << record.slot
+                       << ",\"viewName\":\"" << JsonEscape(record.viewName)
+                       << "\",\"resourceName\":\"" << JsonEscape(record.resourceName)
+                       << "\",\"format\":\"" << DxgiFormatName(record.format)
+                       << "\",\"width\":" << record.width
+                       << ",\"height\":" << record.height << "}";
+                output << (i + 1 == resources.size() ? "\n" : ",\n");
+            }
+            output << "  ],\n";
+            output << "  \"vertices\": [\n";
+
+            for (UINT vertex = 0; vertex < kTerrainExpectedVertexCount; ++vertex)
+            {
+                const size_t stream0 = static_cast<size_t>(offsets[0]) +
+                    static_cast<size_t>(vertex) * strides[0];
+                const size_t stream1 = static_cast<size_t>(offsets[1]) +
+                    static_cast<size_t>(vertex) * strides[1];
+                const size_t stream2 = static_cast<size_t>(offsets[2]) +
+                    static_cast<size_t>(vertex) * strides[2];
+
+                float x = 0.0f;
+                float sourceY = 0.0f;
+                float z = 0.0f;
+                float height = 0.0f;
+                ReadSnapshotValue(vertexBytes[0], stream0 + 0, x);
+                ReadSnapshotValue(vertexBytes[0], stream0 + 4, sourceY);
+                ReadSnapshotValue(vertexBytes[0], stream0 + 8, z);
+                ReadSnapshotValue(vertexBytes[2], stream2, height);
+
+                std::array<unsigned char, 4> color = {};
+                std::array<unsigned char, 4> packed = {};
+                if (stream0 + 16 <= vertexBytes[0].size())
+                    std::memcpy(color.data(), vertexBytes[0].data() + stream0 + 12, 4);
+                if (stream1 + 4 <= vertexBytes[1].size())
+                    std::memcpy(packed.data(), vertexBytes[1].data() + stream1, 4);
+
+                const float atlasU = (static_cast<float>(packed[0]) + 0.5f) / 160.0f;
+                const float atlasV = (static_cast<float>(packed[1]) + 0.5f) / 160.0f;
+                const float normalX = (static_cast<float>(packed[2]) - 127.0f) / 127.0f;
+                const float normalZ = (static_cast<float>(packed[3]) - 127.0f) / 127.0f;
+                const float normalY = std::sqrt((std::max)(
+                    0.0f,
+                    1.0f - normalX * normalX - normalZ * normalZ));
+
+                output << "    {\"position\":[" << x << ',' << height << ',' << z
+                       << "],\"sourcePositionY\":" << sourceY
+                       << ",\"normal\":[" << normalX << ',' << normalY << ',' << normalZ
+                       << "],\"finalAtlasUV\":[" << atlasU << ',' << atlasV
+                       << "],\"color0Bytes\":["
+                       << static_cast<unsigned>(color[0]) << ','
+                       << static_cast<unsigned>(color[1]) << ','
+                       << static_cast<unsigned>(color[2]) << ','
+                       << static_cast<unsigned>(color[3])
+                       << "],\"packedTerrainBytes\":["
+                       << static_cast<unsigned>(packed[0]) << ','
+                       << static_cast<unsigned>(packed[1]) << ','
+                       << static_cast<unsigned>(packed[2]) << ','
+                       << static_cast<unsigned>(packed[3]) << "]}";
+                output << (vertex + 1 == kTerrainExpectedVertexCount ? "\n" : ",\n");
+            }
+
+            output << "  ],\n";
+            output << "  \"indices\": [";
+            const size_t indexSize = indexFormat == DXGI_FORMAT_R16_UINT ? 2u : 4u;
+            const size_t firstIndexByte = static_cast<size_t>(indexBufferOffset) +
+                static_cast<size_t>(startIndexLocation) * indexSize;
+            for (UINT i = 0; i < indexCount; ++i)
+            {
+                uint32_t index = 0;
+                const size_t byteOffset = firstIndexByte + static_cast<size_t>(i) * indexSize;
+                if (indexSize == 2)
+                {
+                    uint16_t value = 0;
+                    ReadSnapshotValue(indexBytes, byteOffset, value);
+                    index = value;
+                }
+                else
+                {
+                    ReadSnapshotValue(indexBytes, byteOffset, index);
+                }
+
+                if ((i % 24) == 0)
+                    output << "\n    ";
+                output << index;
+                if (i + 1 != indexCount)
+                    output << ',';
+            }
+            output << "\n  ]\n";
+            output << "}\n";
+            return output.good();
         }
 
         std::string LowerCopy(std::string value)
@@ -802,6 +1222,264 @@ namespace BZROpenShim
         void InstallFactoryHooks(IDXGIFactory* factory);
         void CaptureSwapChain(IDXGISwapChain* swapChain, const char* source);
 
+        void ObserveTerrainState(
+            ID3D11DeviceContext* context,
+            UINT indexCount,
+            UINT startIndexLocation,
+            INT baseVertexLocation)
+        {
+            if (!g_TerrainProbeEnabled.load(std::memory_order_acquire))
+                return;
+
+            const unsigned captureLimit = g_TerrainProbeConfig.selectedCluster >= 0
+                ? 1u
+                : g_TerrainProbeConfig.maxClusters;
+            if (g_TerrainCaptureCount.load(std::memory_order_acquire) >= captureLimit)
+                return;
+            if (indexCount != kTerrainExpectedIndexCount ||
+                startIndexLocation != 0 ||
+                baseVertexLocation != 0)
+            {
+                return;
+            }
+
+            D3D11_PRIMITIVE_TOPOLOGY topology = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
+            context->IAGetPrimitiveTopology(&topology);
+            if (topology != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
+                return;
+
+            std::array<ID3D11Buffer*, 3> vertexBuffers = {};
+            std::array<UINT, 3> strides = {};
+            std::array<UINT, 3> offsets = {};
+            context->IAGetVertexBuffers(
+                0,
+                static_cast<UINT>(vertexBuffers.size()),
+                vertexBuffers.data(),
+                strides.data(),
+                offsets.data());
+
+            ID3D11Buffer* indexBuffer = nullptr;
+            DXGI_FORMAT indexFormat = DXGI_FORMAT_UNKNOWN;
+            UINT indexBufferOffset = 0;
+            context->IAGetIndexBuffer(&indexBuffer, &indexFormat, &indexBufferOffset);
+
+            const auto releaseBuffers = [&]()
+            {
+                for (ID3D11Buffer* buffer : vertexBuffers)
+                {
+                    if (buffer)
+                        buffer->Release();
+                }
+                if (indexBuffer)
+                    indexBuffer->Release();
+            };
+
+            if (!vertexBuffers[0] || !vertexBuffers[1] || !vertexBuffers[2] ||
+                !indexBuffer ||
+                strides[0] != 16 || strides[1] != 4 || strides[2] != 4 ||
+                offsets[0] != 0 || offsets[1] != 0 || offsets[2] != 0 ||
+                (indexFormat != DXGI_FORMAT_R16_UINT &&
+                 indexFormat != DXGI_FORMAT_R32_UINT))
+            {
+                releaseBuffers();
+                return;
+            }
+
+            std::array<D3D11_BUFFER_DESC, 3> vertexDescs = {};
+            for (size_t slot = 0; slot < vertexBuffers.size(); ++slot)
+            {
+                vertexBuffers[slot]->GetDesc(&vertexDescs[slot]);
+                const size_t needed = static_cast<size_t>(offsets[slot]) +
+                    static_cast<size_t>(kTerrainExpectedVertexCount) * strides[slot];
+                if (needed > vertexDescs[slot].ByteWidth)
+                {
+                    releaseBuffers();
+                    return;
+                }
+            }
+
+            D3D11_BUFFER_DESC indexDesc = {};
+            indexBuffer->GetDesc(&indexDesc);
+            const size_t indexSize = indexFormat == DXGI_FORMAT_R16_UINT ? 2u : 4u;
+            const size_t neededIndexBytes = static_cast<size_t>(indexBufferOffset) +
+                static_cast<size_t>(indexCount) * indexSize;
+            if (neededIndexBytes > indexDesc.ByteWidth)
+            {
+                releaseBuffers();
+                return;
+            }
+
+            const uintptr_t clusterIdentity = ComIdentity(vertexBuffers[1]);
+            unsigned clusterOrdinal = 0;
+            unsigned captureIndex = 0;
+            {
+                std::lock_guard<std::mutex> lock(g_TerrainProbeMutex);
+                if (g_TerrainObservedBuffers.find(clusterIdentity) !=
+                    g_TerrainObservedBuffers.end())
+                {
+                    releaseBuffers();
+                    return;
+                }
+                if (g_TerrainObservedBuffers.size() >= kTerrainMaxObservedClusters)
+                {
+                    g_TerrainProbeEnabled.store(false, std::memory_order_release);
+                    LogShimA(
+                        LogLevel::Warn,
+                        kComponent,
+                        "[TERRAIN-PROBE] distinct-cluster safety limit reached; observer disabled");
+                    releaseBuffers();
+                    return;
+                }
+
+                g_TerrainObservedBuffers.insert(clusterIdentity);
+                clusterOrdinal = g_TerrainNextOrdinal++;
+                if (g_TerrainProbeConfig.selectedCluster >= 0 &&
+                    clusterOrdinal != static_cast<unsigned>(g_TerrainProbeConfig.selectedCluster))
+                {
+                    releaseBuffers();
+                    return;
+                }
+
+                captureIndex = g_TerrainCaptureCount.load(std::memory_order_relaxed);
+                if (captureIndex >= captureLimit)
+                {
+                    releaseBuffers();
+                    return;
+                }
+                g_TerrainCaptureCount.store(captureIndex + 1, std::memory_order_release);
+            }
+
+            std::array<std::vector<unsigned char>, 3> vertexBytes;
+            std::vector<unsigned char> indexBytes;
+            bool snapshotsOk = true;
+            for (size_t slot = 0; slot < vertexBuffers.size(); ++slot)
+            {
+                D3D11_BUFFER_DESC capturedDesc = {};
+                snapshotsOk = ReadBufferSnapshot(
+                                  context,
+                                  vertexBuffers[slot],
+                                  vertexBytes[slot],
+                                  capturedDesc) && snapshotsOk;
+            }
+            D3D11_BUFFER_DESC capturedIndexDesc = {};
+            snapshotsOk = ReadBufferSnapshot(
+                              context,
+                              indexBuffer,
+                              indexBytes,
+                              capturedIndexDesc) && snapshotsOk;
+
+            const std::vector<TerrainTextureRecord> resources =
+                CaptureTerrainShaderResources(context);
+
+            releaseBuffers();
+
+            if (!snapshotsOk)
+            {
+                LogShimA(
+                    LogLevel::Warn,
+                    kComponent,
+                    "[TERRAIN-PROBE] clusterOrdinal=%u identity=0x%p matched terrain draw but a read-only staging snapshot failed",
+                    clusterOrdinal,
+                    reinterpret_cast<void*>(clusterIdentity));
+                return;
+            }
+
+            float minHeight = (std::numeric_limits<float>::max)();
+            float maxHeight = -(std::numeric_limits<float>::max)();
+            float minU = (std::numeric_limits<float>::max)();
+            float minV = (std::numeric_limits<float>::max)();
+            float maxU = -(std::numeric_limits<float>::max)();
+            float maxV = -(std::numeric_limits<float>::max)();
+            unsigned minAlpha = 255;
+            unsigned maxAlpha = 0;
+            for (UINT vertex = 0; vertex < kTerrainExpectedVertexCount; ++vertex)
+            {
+                float height = 0.0f;
+                ReadSnapshotValue(
+                    vertexBytes[2],
+                    static_cast<size_t>(vertex) * strides[2],
+                    height);
+                minHeight = (std::min)(minHeight, height);
+                maxHeight = (std::max)(maxHeight, height);
+
+                const size_t packedOffset = static_cast<size_t>(vertex) * strides[1];
+                const float u = (static_cast<float>(vertexBytes[1][packedOffset]) + 0.5f) / 160.0f;
+                const float v = (static_cast<float>(vertexBytes[1][packedOffset + 1]) + 0.5f) / 160.0f;
+                minU = (std::min)(minU, u);
+                minV = (std::min)(minV, v);
+                maxU = (std::max)(maxU, u);
+                maxV = (std::max)(maxV, v);
+
+                const unsigned alpha = vertexBytes[0][
+                    static_cast<size_t>(vertex) * strides[0] + 15];
+                minAlpha = (std::min)(minAlpha, alpha);
+                maxAlpha = (std::max)(maxAlpha, alpha);
+            }
+
+            LogShimA(
+                LogLevel::Info,
+                kComponent,
+                "[TERRAIN-PROBE] clusterOrdinal=%u identity=0x%p vertexCount=%u indexCount=%u topology=triangle-list strides=16/4/4 worldPosition=<unavailable-at-D3D-boundary> material=<unavailable-at-D3D-boundary>",
+                clusterOrdinal,
+                reinterpret_cast<void*>(clusterIdentity),
+                kTerrainExpectedVertexCount,
+                indexCount);
+            LogShimA(
+                LogLevel::Info,
+                kComponent,
+                "[TERRAIN-PROBE] clusterOrdinal=%u height=[%.3f,%.3f] finalAtlasUV=[%.6f,%.6f]-[%.6f,%.6f] COLOR0.rgb=static-white COLOR0.alpha=[%u,%u]",
+                clusterOrdinal,
+                minHeight,
+                maxHeight,
+                minU,
+                minV,
+                maxU,
+                maxV,
+                minAlpha,
+                maxAlpha);
+
+            for (const TerrainTextureRecord& resource : resources)
+            {
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    "[TERRAIN-PROBE] clusterOrdinal=%u psResourceSlot=%u viewName=\"%s\" resourceName=\"%s\" format=%s size=%ux%u",
+                    clusterOrdinal,
+                    resource.slot,
+                    resource.viewName.c_str(),
+                    resource.resourceName.c_str(),
+                    DxgiFormatName(resource.format),
+                    resource.width,
+                    resource.height);
+            }
+
+            if (g_TerrainProbeConfig.dumpJson)
+            {
+                const std::string path = TerrainProbeJsonPath(captureIndex);
+                const bool wrote = WriteTerrainProbeJson(
+                    path,
+                    clusterOrdinal,
+                    clusterIdentity,
+                    vertexBytes,
+                    indexBytes,
+                    strides,
+                    offsets,
+                    indexFormat,
+                    indexBufferOffset,
+                    indexCount,
+                    startIndexLocation,
+                    baseVertexLocation,
+                    resources);
+                LogShimA(
+                    wrote ? LogLevel::Info : LogLevel::Warn,
+                    kComponent,
+                    "[TERRAIN-PROBE] clusterOrdinal=%u json=%s path=\"%s\"",
+                    clusterOrdinal,
+                    wrote ? "written" : "write-failed",
+                    path.c_str());
+            }
+        }
+
         HRESULT STDMETHODCALLTYPE HookCreateTexture2D(
             ID3D11Device* self,
             const D3D11_TEXTURE2D_DESC* desc,
@@ -866,6 +1544,28 @@ namespace BZROpenShim
             return hr;
         }
 
+        HRESULT STDMETHODCALLTYPE HookCreateDeferredContext(
+            ID3D11Device* self,
+            UINT contextFlags,
+            ID3D11DeviceContext** deferredContext)
+        {
+            const HRESULT hr = g_RealCreateDeferredContext(
+                self,
+                contextFlags,
+                deferredContext);
+            if (SUCCEEDED(hr) && deferredContext && *deferredContext)
+            {
+                InstallContextHooks(*deferredContext);
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    "[TERRAIN-PROBE] installed observers on newly-created deferred context=0x%p flags=0x%X",
+                    *deferredContext,
+                    contextFlags);
+            }
+            return hr;
+        }
+
         void STDMETHODCALLTYPE HookPSSetShaderResources(
             ID3D11DeviceContext* self,
             UINT startSlot,
@@ -897,6 +1597,43 @@ namespace BZROpenShim
 
             LogDepthStencilView(dsv, "bind");
             LogCurrentViewports(self, "OMSetRenderTargets");
+        }
+
+        void STDMETHODCALLTYPE HookDrawIndexed(
+            ID3D11DeviceContext* self,
+            UINT indexCount,
+            UINT startIndexLocation,
+            INT baseVertexLocation)
+        {
+            ObserveTerrainState(
+                self,
+                indexCount,
+                startIndexLocation,
+                baseVertexLocation);
+            g_RealDrawIndexed(
+                self,
+                indexCount,
+                startIndexLocation,
+                baseVertexLocation);
+        }
+
+        void STDMETHODCALLTYPE HookIASetPrimitiveTopology(
+            ID3D11DeviceContext* self,
+            D3D11_PRIMITIVE_TOPOLOGY topology)
+        {
+            g_RealIASetPrimitiveTopology(self, topology);
+            if (topology == D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
+            {
+                // Ogre has already bound the render operation's vertex and
+                // index buffers before selecting topology. Inspecting that
+                // completed IA state avoids depending on which draw entry the
+                // renderer ultimately uses.
+                ObserveTerrainState(
+                    self,
+                    kTerrainExpectedIndexCount,
+                    0,
+                    0);
+            }
         }
 
         HRESULT STDMETHODCALLTYPE HookFactoryCreateSwapChain(
@@ -984,21 +1721,41 @@ namespace BZROpenShim
                 return;
 
             // Public ID3D11DeviceContext COM ABI ordinals from d3d11.h.
-            PatchComVtableEntry(
-                context,
-                8,
-                &HookPSSetShaderResources,
-                g_RealPSSetShaderResources,
-                "ID3D11DeviceContext::PSSetShaderResources");
+            if (g_ColorSpaceDiagnosticEnabled.load(std::memory_order_acquire))
+            {
+                PatchComVtableEntry(
+                    context,
+                    8,
+                    &HookPSSetShaderResources,
+                    g_RealPSSetShaderResources,
+                    "ID3D11DeviceContext::PSSetShaderResources");
 
-            PatchComVtableEntry(
-                context,
-                33,
-                &HookOMSetRenderTargets,
-                g_RealOMSetRenderTargets,
-                "ID3D11DeviceContext::OMSetRenderTargets");
+                PatchComVtableEntry(
+                    context,
+                    33,
+                    &HookOMSetRenderTargets,
+                    g_RealOMSetRenderTargets,
+                    "ID3D11DeviceContext::OMSetRenderTargets");
 
-            LogCurrentViewports(context, "device-capture");
+                LogCurrentViewports(context, "device-capture");
+            }
+
+            if (g_TerrainProbeEnabled.load(std::memory_order_acquire))
+            {
+                PatchComVtableEntry(
+                    context,
+                    12,
+                    &HookDrawIndexed,
+                    g_RealDrawIndexed,
+                    "ID3D11DeviceContext::DrawIndexed (terrain probe)");
+
+                PatchComVtableEntry(
+                    context,
+                    24,
+                    &HookIASetPrimitiveTopology,
+                    g_RealIASetPrimitiveTopology,
+                    "ID3D11DeviceContext::IASetPrimitiveTopology (terrain probe)");
+            }
         }
 
         void InstallFactoryHooks(IDXGIFactory* factory)
@@ -1052,36 +1809,49 @@ namespace BZROpenShim
             if (!device)
                 return;
 
-            // Public ID3D11Device COM ABI ordinals from d3d11.h.
-            PatchComVtableEntry(
-                device,
-                5,
-                &HookCreateTexture2D,
-                g_RealCreateTexture2D,
-                "ID3D11Device::CreateTexture2D");
+            if (g_ColorSpaceDiagnosticEnabled.load(std::memory_order_acquire))
+            {
+                // Public ID3D11Device COM ABI ordinals from d3d11.h.
+                PatchComVtableEntry(
+                    device,
+                    5,
+                    &HookCreateTexture2D,
+                    g_RealCreateTexture2D,
+                    "ID3D11Device::CreateTexture2D");
 
-            PatchComVtableEntry(
-                device,
-                7,
-                &HookCreateSRV,
-                g_RealCreateSRV,
-                "ID3D11Device::CreateShaderResourceView");
+                PatchComVtableEntry(
+                    device,
+                    7,
+                    &HookCreateSRV,
+                    g_RealCreateSRV,
+                    "ID3D11Device::CreateShaderResourceView");
 
-            PatchComVtableEntry(
-                device,
-                9,
-                &HookCreateRTV,
-                g_RealCreateRTV,
-                "ID3D11Device::CreateRenderTargetView");
+                PatchComVtableEntry(
+                    device,
+                    9,
+                    &HookCreateRTV,
+                    g_RealCreateRTV,
+                    "ID3D11Device::CreateRenderTargetView");
 
-            PatchComVtableEntry(
-                device,
-                10,
-                &HookCreateDSV,
-                g_RealCreateDSV,
-                "ID3D11Device::CreateDepthStencilView");
+                PatchComVtableEntry(
+                    device,
+                    10,
+                    &HookCreateDSV,
+                    g_RealCreateDSV,
+                    "ID3D11Device::CreateDepthStencilView");
 
-            InstallFactoryFromDevice(device);
+                InstallFactoryFromDevice(device);
+            }
+
+            if (g_TerrainProbeEnabled.load(std::memory_order_acquire))
+            {
+                PatchComVtableEntry(
+                    device,
+                    27,
+                    &HookCreateDeferredContext,
+                    g_RealCreateDeferredContext,
+                    "ID3D11Device::CreateDeferredContext (terrain probe)");
+            }
 
             ID3D11DeviceContext* context = nullptr;
             device->GetImmediateContext(&context);
@@ -1215,7 +1985,7 @@ namespace BZROpenShim
                 LogShimA(
                     LogLevel::Info,
                     kComponent,
-                    "[DX11 ColorSpace] RenderSystem = Direct3D11 Rendering Subsystem (RenderSystem_Direct3D11.dll created device); device=0x%p featureLevel=0x%X",
+                    "[DX11 Observer] RenderSystem = Direct3D11 Rendering Subsystem (RenderSystem_Direct3D11.dll created device); device=0x%p featureLevel=0x%X",
                     device ? *device : nullptr,
                     featureLevel ? static_cast<unsigned>(*featureLevel) : 0u);
 
@@ -1261,7 +2031,7 @@ namespace BZROpenShim
                 LogShimA(
                     LogLevel::Info,
                     kComponent,
-                    "[DX11 ColorSpace] RenderSystem = Direct3D11 Rendering Subsystem (RenderSystem_Direct3D11.dll created device+swapchain); device=0x%p swapChain=0x%p featureLevel=0x%X",
+                    "[DX11 Observer] RenderSystem = Direct3D11 Rendering Subsystem (RenderSystem_Direct3D11.dll created device+swapchain); device=0x%p swapChain=0x%p featureLevel=0x%X",
                     device ? *device : nullptr,
                     swapChain ? *swapChain : nullptr,
                     featureLevel ? static_cast<unsigned>(*featureLevel) : 0u);
@@ -1270,7 +2040,8 @@ namespace BZROpenShim
                     InstallDeviceHooks(*device);
                 if (immediateContext && *immediateContext)
                     InstallContextHooks(*immediateContext);
-                if (swapChain && *swapChain)
+                if (g_ColorSpaceDiagnosticEnabled.load(std::memory_order_acquire) &&
+                    swapChain && *swapChain)
                     CaptureSwapChain(*swapChain, "D3D11CreateDeviceAndSwapChain");
             }
 
@@ -1391,7 +2162,7 @@ namespace BZROpenShim
             LogShimA(
                 installed ? LogLevel::Info : LogLevel::Warn,
                 kComponent,
-                "[DX11 ColorSpace] RenderSystem_Direct3D11.dll D3D11 creation observers installed=%u; no rendering state was changed",
+                "[DX11 Observer] RenderSystem_Direct3D11.dll D3D11 creation observers installed=%u; no rendering state was changed",
                 installed);
         }
 
@@ -1400,12 +2171,26 @@ namespace BZROpenShim
             LogShimA(
                 LogLevel::Info,
                 kComponent,
-                "[DX11 ColorSpace] probe enabled; waiting for RenderSystem_Direct3D11.dll (DX9 remains untouched)");
+                "[DX11 Observer] opt-in diagnostics enabled; waiting for RenderSystem_Direct3D11.dll (DX9 remains untouched)");
 
-            LogShimA(
-                LogLevel::Info,
-                kComponent,
-                "[DX11 ColorSpace] Ogre RenderWindow mHwGamma is not read through hardcoded object layout; effective backbuffer/RTV state and matching BZOgreLogfile gamma lines are the proof inputs");
+            if (g_ColorSpaceDiagnosticEnabled.load(std::memory_order_acquire))
+            {
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    "[DX11 ColorSpace] Ogre RenderWindow mHwGamma is not read through hardcoded object layout; effective backbuffer/RTV state and matching BZOgreLogfile gamma lines are the proof inputs");
+            }
+
+            if (g_TerrainProbeEnabled.load(std::memory_order_acquire))
+            {
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    "[TERRAIN-PROBE] enabled maxClusters=%u selectedCluster=%d dumpJson=%s; observation uses completed D3D11 input-assembler state and does not modify rendering state",
+                    g_TerrainProbeConfig.maxClusters,
+                    g_TerrainProbeConfig.selectedCluster,
+                    g_TerrainProbeConfig.dumpJson ? "yes" : "no");
+            }
 
             for (unsigned attempt = 0;
                  attempt < kDiscoveryAttempts &&
@@ -1418,7 +2203,7 @@ namespace BZROpenShim
                     LogShimA(
                         LogLevel::Info,
                         kComponent,
-                        "[DX11 ColorSpace] found RenderSystem_Direct3D11.dll module=0x%p",
+                        "[DX11 Observer] found RenderSystem_Direct3D11.dll module=0x%p",
                         renderer);
 
                     PatchRendererImports(renderer);
@@ -1433,7 +2218,7 @@ namespace BZROpenShim
                 LogShimA(
                     LogLevel::Info,
                     kComponent,
-                    "[DX11 ColorSpace] Direct3D11 renderer was not observed during discovery window; installed no D3D11 hooks (likely DX9 or renderer initialization was not reached)");
+                    "[DX11 Observer] Direct3D11 renderer was not observed during discovery window; installed no D3D11 hooks (likely DX9 or renderer initialization was not reached)");
             }
 
             return 0;
@@ -1442,10 +2227,23 @@ namespace BZROpenShim
 
     void InitializeDx11ColorSpaceDiagnostic()
     {
-        if (!DiagnosticRequested())
+        const bool colorSpaceRequested = DiagnosticRequested();
+        const bool terrainProbeRequested = TerrainProbeRequested();
+        if (!colorSpaceRequested && !terrainProbeRequested)
             return;
         if (g_DiscoveryThread)
             return;
+
+        g_ColorSpaceDiagnosticEnabled.store(colorSpaceRequested, std::memory_order_release);
+        g_TerrainProbeEnabled.store(terrainProbeRequested, std::memory_order_release);
+        if (terrainProbeRequested)
+        {
+            g_TerrainProbeConfig = ReadTerrainProbeConfig();
+            g_TerrainCaptureCount.store(0, std::memory_order_release);
+            std::lock_guard<std::mutex> lock(g_TerrainProbeMutex);
+            g_TerrainObservedBuffers.clear();
+            g_TerrainNextOrdinal = 0;
+        }
 
         g_ShutdownRequested.store(false, std::memory_order_release);
         g_DiscoveryThread = _beginthreadex(
@@ -1461,7 +2259,7 @@ namespace BZROpenShim
             LogShimA(
                 LogLevel::Warn,
                 kComponent,
-                "[DX11 ColorSpace] failed to start discovery thread (err=%lu); diagnostic disabled",
+                "[DX11 Observer] failed to start discovery thread (err=%lu); diagnostics disabled",
                 GetLastError());
         }
     }

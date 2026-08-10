@@ -25,6 +25,51 @@ namespace BZROpenShim
                                                 const char* label,
                                                 float x, float y, float w, float h,
                                                 uint32_t flags, void* parent, int a);
+    // cUI_TextEntry ctor 0x007CF410. The two leading flags are byte fields:
+    // arg2 lands at +0x950 (mAllowEnter, 1 at every shipped call site) and arg1
+    // at +0x960 (0 or 1 depending on screen). maxLength is 0x24 or 0x2A in
+    // stock code. Derives from cUI_Text, whose ctor it forwards args 4..10 to.
+    using FnUiTextEntryCtor = void* (__thiscall*)(void* self,
+                                                  int flagA, int allowEnter, int maxLength,
+                                                  const char* name,
+                                                  float x, float y, float w, float h,
+                                                  uint32_t flags, void* parent);
+    // cUI_Selectlist ctor 0x007C9DE0. onPageUp/onPageDown are installed as the
+    // click callbacks of the two arrow buttons the ctor builds for itself at
+    // +0x178/+0x17C -- they are NOT selection handlers; that is a separate
+    // setter (0x007CB3E0). The ctor pre-creates as many row labels as fit the
+    // requested height, so it is safe to construct with no items.
+    using FnUiSelectlistCtor = void* (__thiscall*)(void* self,
+                                                   const char* name,
+                                                   float x, float y, float w, float h,
+                                                   void* onPageUp, void* onPageDown,
+                                                   uint32_t flags, void* parent,
+                                                   uint32_t rowColour, float rowScale);
+    // 0x007CABF0. Overwrites entry `index`, or appends when index == size(),
+    // truncating the label to the list width and updating arrow visibility.
+    using FnUiSelectlistSetItem = void(__thiscall*)(void* self,
+                                                    const char* label, int index, int value);
+
+    // Object sizes, taken from the `operator new` at every shipped call site of
+    // each ctor rather than from the reference PDB -- that PDB is a different
+    // build and reports cUI_TextEntry as 2400, eight bytes short of the 0x968
+    // this build allocates (its ctor writes a field at +0x964).
+    inline constexpr size_t kUiButtonSize = 0x1EC;
+    inline constexpr size_t kUiTextSize = 0x930;
+    inline constexpr size_t kUiViewSize = 0x144;
+    inline constexpr size_t kUiTextEntrySize = 0x968;
+    inline constexpr size_t kUiSelectlistSize = 0x180;
+
+    // Field offsets confirmed against this build's ctor code, not the PDB.
+    inline constexpr size_t kUiTextEntryTextOffset = 0x930;       // std::string
+    inline constexpr size_t kUiTextEntryMaxLengthOffset = 0x948;
+    inline constexpr size_t kUiTextEntryEnterCbOffset = 0x94C;
+    inline constexpr size_t kUiTextEntryAllowEnterOffset = 0x950; // byte
+    inline constexpr size_t kUiSelectlistSelectedOffset = 0x14C;  // -1 when none
+    inline constexpr size_t kUiSelectlistScrollOffset = 0x150;
+    inline constexpr size_t kUiSelectlistPageUpOffset = 0x178;
+    inline constexpr size_t kUiSelectlistPageDownOffset = 0x17C;
+
     using FnUiSetStr = void(__thiscall*)(void* self, const char* str);
     using FnUiSetFloat = void(__thiscall*)(void* self, float value);
     using FnUiSetInt = void(__thiscall*)(void* self, void* param);
@@ -44,6 +89,11 @@ namespace BZROpenShim
     extern FnUiButtonCtor g_BzrFn_ButtonCtor;
     extern FnUiLabelCtor g_BzrFn_LabelCtor;
     extern FnUiOverlayCtor g_BzrFn_OverlayCtor;
+    extern FnUiTextEntryCtor g_BzrFn_TextEntryCtor;
+    extern FnUiSelectlistCtor g_BzrFn_SelectlistCtor;
+    extern FnUiSelectlistSetItem g_BzrFn_SelectlistSetItem;
+    extern FnUiSetCb g_BzrFn_TextEntrySetEnterCb;
+    extern FnUiSetCb g_BzrFn_SelectlistSetOnSelect;
     extern FnUiSetStr g_BzrFn_SetTextureOff;
     extern FnUiSetStr g_BzrFn_SetTextureOver;
     extern FnUiSetStr g_BzrFn_SetTextureOn;
