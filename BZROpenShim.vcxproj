@@ -123,7 +123,9 @@
     <ClCompile Include="src\patches\bzrnet_instrumentation.cpp" />
     <ClCompile Include="src\patches\d3d_startup_hooks.cpp" />
     <ClCompile Include="src\patches\dx11_colorspace_diagnostic.cpp" />
-    <ClCompile Include="src\patches\ogre_animation_profiler.cpp" />
+    <ClCompile Include="src\patches\ogre_animation_profiler.cpp">
+      <LanguageStandard>stdcpp14</LanguageStandard>
+    </ClCompile>
     <ClCompile Include="src\patches\file_io_hooks.cpp" />
     <ClCompile Include="src\patches\game_state.cpp" />
     <ClCompile Include="src\patches\net_optimizer.cpp" />
