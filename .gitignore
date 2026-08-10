@@ -63,13 +63,19 @@ reverse_engineering/badlands/
 39024
 
 # Tools and references
-tools/
+tools/*
+!tools/export-bz15-ui.py
+!tools/find-redux-ui-ctors.py
 ref/
 scripts/
 !scripts/
 scripts/*
 !scripts/Apply-StockDx11ShaderHardening.ps1
-docs/
+!scripts/Test-TerrainSemanticParity.ps1
+!scripts/Compare-TerrainCaptures.ps1
+docs/*
+!docs/terrain-render-path.md
+!docs/bz15-multiplayer-ui-port.md
 
 # Local third-party source/reference checkouts
 third_party/ogre-1.10.0-bzr/_work/

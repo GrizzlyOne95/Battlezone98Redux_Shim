@@ -64,6 +64,79 @@ CustomBindsUi = 1
 ;   Disable: OPENSHIM_DISABLE_SETTINGS_UI or BZR_DISABLE_SETTINGS_UI
 SettingsUi = 1
 
+; Phase 2 terrain-rendering proof of concept. Everything is disabled by
+; default and exact-build gated. The proxy clones one stock 16x16-cell terrain
+; cluster, leaves the stock cluster visible, and mirrors terrain rebuilds.
+; TerrainProxyZone/TerrainProxyCluster select construction ordinals; the
+; optional X/Z keys select the native identifiers embedded in the stock mesh
+; name (RenderableTileCluster_<zoneX>x<zoneZ>_<clusterX>x<clusterZ>).
+[Terrain]
+TerrainProxyEnabled = 0
+TerrainProxyZone = -1
+TerrainProxyCluster = -1
+; TerrainProxyZoneX = 0
+; TerrainProxyZoneZ = 0
+; TerrainProxyClusterX = 0
+; TerrainProxyClusterZ = 0
+TerrainProxyOffsetX = 0.0
+TerrainProxyOffsetY = 0.0
+TerrainProxyOffsetZ = 0.0
+TerrainProxyVisible = 1
+TerrainSemanticCapture = 0
+TerrainSemanticDumpJson = 1
+; Phase 3A derives atlas UVs from logical terrain semantics on an OpenShim proxy.
+; The stock terrain remains visible and its material, atlas, lighting, and fog
+; remain authoritative. The validator may be enabled without the renderer.
+TerrainSemanticRenderer = 0
+TerrainSemanticValidateUV = 0
+TerrainSemanticLegacyUVQuantization = 1
+TerrainSemanticDumpMismatches = 0
+;
+; Semantic resource lifecycle tracing. Adds one-shot / state-change records for
+; semantic vertex-buffer create, bind, refresh, retain and destroy, for
+; height-only updates that intentionally keep the existing slot-3 buffer, and
+; for material/vertex-program specialization counts. Records are emitted on
+; state changes rather than per frame. Boolean. Default: disabled.
+; Environment enable override: OPENSHIM_TERRAIN_SEMANTIC_LIFECYCLE_LOG=1
+TerrainSemanticLifecycleLog = 0
+;
+; Semantic debug visualization. Requires TerrainSemanticRenderer = 1 and only
+; affects the DX11 semantic proxy cluster. DX9 and stock rendering are never
+; touched, and the mode does nothing at all when the semantic renderer is off.
+; Geometry, normals, depth and draw order are preserved; only the shaded color
+; is replaced.
+;   0 = disabled (normal semantic rendering)
+;   1 = tileIndex   deterministic color per runtime tile id
+;   2 = orientation full 0..15 mix/orientation nibble, 16 distinct colors.
+;                   Values 8..15 are deliberately NOT aliased onto 0..7, so a
+;                   regression back to `mix & 7` is visible immediately.
+;   3 = typeA       high terrain type nibble, same 16-color palette
+;   4 = typeB       low terrain type nibble, same 16-color palette
+;   5 = localUV     post-orientation local UV as red/green gradients, so tile
+;                   rotation and flipping are directly readable
+;   6 = atlasRect   AtlasRect origin (u,v) with width in blue
+;   7 = uvDelta     |semantic UV - stock packed UV| amplified 640x. In legacy
+;                   quantization mode a black cluster is an in-frame, per-pixel
+;                   parity proof against the stock packed-UV path.
+; Environment override: OPENSHIM_TERRAIN_SEMANTIC_DEBUG=<0..7>
+TerrainSemanticDebug = 0
+;
+; Deterministic parity capture. Writes up to this many full framebuffer PNGs
+; beside the game executable as terrain_semantic_frame_s<r>q<q>d<debug>_NN.png,
+; using OGRE's own render-target writer. Captures are taken at fixed rendered
+; world-frame indices while the proxy exists, so two runs of the same mission
+; capture the same logical frame and can be differenced directly -- which a
+; desktop screenshot cannot do. Requires TerrainProxyEnabled = 1; it does not
+; require the semantic renderer, so the legacy packed-UV proxy can be captured
+; as the parity reference. 0 disables. Clamped to 0..64. Default: 0.
+; Environment override: OPENSHIM_TERRAIN_SEMANTIC_FRAME_CAPTURE=<count>
+TerrainSemanticFrameCapture = 0
+;
+; Rendered world frames between captures. Minimum 1. Default: 300 (about five
+; seconds at 60 FPS).
+; Environment override: OPENSHIM_TERRAIN_SEMANTIC_FRAME_CAPTURE_STRIDE=<frames>
+TerrainSemanticFrameCaptureStride = 300
+
 [Display]
 ; Under-attack audio alert frequency.
 ;   None    = silent (aliases: Off, numeric values <= 1)
@@ -243,3 +316,24 @@ HeadlightColor = White
 HeadlightBeam = Wide
 
 ; Team-1 material colors remain a Campaign Reimagined shader/mod feature.
+
+[Diagnostics]
+; Read-only DX11 terrain construction capture. Default: disabled.
+; The observer recognizes the released terrain cluster's completed D3D11 draw
+; signature and never changes geometry, UVs, materials, shaders, or draw state.
+; DX9 is untouched. Environment enable override:
+;   OPENSHIM_TERRAIN_RENDER_PROBE=1
+TerrainRenderProbe = 0
+;
+; With TerrainRenderProbe enabled, capture the first N distinct terrain
+; clusters observed after hook installation. Clamped to 1..16. Default: 1.
+TerrainRenderProbeMaxClusters = 1
+;
+; -1 captures the first cluster(s). A zero-based value captures only that
+; distinct observed cluster ordinal; this is a diagnostic ordinal, not the
+; game's zone/cluster coordinate. Default: -1.
+TerrainRenderProbeCluster = -1
+; Write the full one-shot buffer snapshot beside the game executable as
+; terrain_probe.json (or terrain_probe_NNN.json for multiple captures).
+; Boolean. Default: enabled whenever TerrainRenderProbe itself is enabled.
+TerrainRenderProbeDumpJson = 1
