@@ -25,10 +25,15 @@ namespace BZROpenShim
     void __cdecl BanButtonOnClickClient();
     void __cdecl BanButtonOnHoverHost(void* param);
     void __cdecl BanButtonOnHoverClient(void* param);
+    // 1.5 used a left/right pair; OnClick* advances, OnClickPrev* steps back.
     void __cdecl FlagButtonOnClickHost();
     void __cdecl FlagButtonOnClickClient();
+    void __cdecl FlagButtonOnClickPrevHost();
+    void __cdecl FlagButtonOnClickPrevClient();
     void __cdecl FlagButtonOnHoverHost(void* param);
     void __cdecl FlagButtonOnHoverClient(void* param);
+    void __cdecl NicknameEntryOnEnterHost();
+    void __cdecl NicknameEntryOnEnterClient();
     void __cdecl AutoSaveButtonOnClickLoad();
     void AutoSaveLoadButtonCreateFromFrame(void* frameBase);
     void __fastcall RestartMissionPauseHook(void* thisPtr);
