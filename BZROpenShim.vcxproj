@@ -67,7 +67,7 @@
       <PreprocessorDefinitions>BZROPENSHIM_EXPORTS;WIN32;_DEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions);WIN32_LEAN_AND_MEAN;_CRT_SECURE_NO_WARNINGS</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)src;$(ProjectDir)third_party;$(ProjectDir)..\BZRModInterop\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)third_party\ogre-1.10.0-bzr;$(ProjectDir)third_party\ogre-1.10.0-bzr\_work\OgreMain\include;$(ProjectDir)third_party\ogre-1.10.0-bzr\_work\Components\Overlay\include;$(ProjectDir)include;$(ProjectDir)src;$(ProjectDir)third_party;$(ProjectDir)..\BZRModInterop\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <ExceptionHandling>Sync</ExceptionHandling>
@@ -94,7 +94,7 @@
       <PreprocessorDefinitions>BZROPENSHIM_EXPORTS;WIN32;NDEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions);WIN32_LEAN_AND_MEAN;_CRT_SECURE_NO_WARNINGS</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)src;$(ProjectDir)third_party;$(ProjectDir)..\BZRModInterop\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)third_party\ogre-1.10.0-bzr;$(ProjectDir)third_party\ogre-1.10.0-bzr\_work\OgreMain\include;$(ProjectDir)third_party\ogre-1.10.0-bzr\_work\Components\Overlay\include;$(ProjectDir)include;$(ProjectDir)src;$(ProjectDir)third_party;$(ProjectDir)..\BZRModInterop\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <ExceptionHandling>Sync</ExceptionHandling>
@@ -134,6 +134,7 @@
     <ClCompile Include="src\engine\winmm_proxy.cpp" />
     <ClCompile Include="src\engine\patcher.cpp" />
     <ClCompile Include="src\engine\hook_engine.cpp" />
+    <ClCompile Include="src\engine\ogre_runtime.cpp" />
     <ClCompile Include="src\patches\trampolines.cpp" />
     <ClCompile Include="src\patches\netcode_hooks.cpp" />
   </ItemGroup>
@@ -150,6 +151,7 @@
     <ClInclude Include="include\dx11_colorspace_diagnostic.h" />
     <ClInclude Include="include\file_io_hooks.h" />
     <ClInclude Include="include\ogre_shader_cache.h" />
+    <ClInclude Include="include\ogre_runtime.h" />
     <ClInclude Include="include\game_state.h" />
     <ClInclude Include="include\net_optimizer.h" />
     <ClInclude Include="include\shim_log.h" />
