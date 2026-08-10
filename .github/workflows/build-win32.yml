@@ -30,6 +30,10 @@ jobs:
         shell: pwsh
         run: ./tools/validate-network-baseline.ps1
 
+      - name: Fetch pinned Ogre reference headers
+        shell: pwsh
+        run: ./setup-dev.ps1
+
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
