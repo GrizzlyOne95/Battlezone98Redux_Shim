@@ -63,7 +63,8 @@ reverse_engineering/badlands/
 39024
 
 # Tools and references
-tools/
+tools/*
+!tools/export-bz15-ui.py
 ref/
 scripts/
 !scripts/
@@ -73,6 +74,7 @@ scripts/*
 !scripts/Compare-TerrainCaptures.ps1
 docs/*
 !docs/terrain-render-path.md
+!docs/bz15-multiplayer-ui-port.md
 
 # VS Extensions
 *.vsix
