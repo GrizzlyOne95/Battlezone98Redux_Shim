@@ -221,6 +221,15 @@ RetrySeconds = 15
 BackupExisting = 1
 RespectExternalAutoSave = 1
 
+[Diagnostics]
+; Read-only Ogre animation/render overhead profiler. Default: disabled.
+; Logs ~1 second samples covering Entity::_updateAnimation,
+; Mesh::softwareVertexBlend, Entity::_updateRenderQueue (when the retail vtable
+; can be verified), and basic DX11 Draw/DrawIndexed/Present activity.
+; Environment override: OPENSHIM_PROFILE_OGRE_ANIMATION
+; See reverse_engineering/OGRE_ANIMATION_PROFILER.md for the test procedure.
+ProfileOgreAnimation = 0
+
 [SinglePlayer]
 ; These gameplay-affecting improvements are hard-disabled in network games,
 ; regardless of the values below.
