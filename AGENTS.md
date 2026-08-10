@@ -1,13 +1,15 @@
 # BZR-OpenShim
 
 This repo is part of the local Battlezone workspace opened via
-`<USER_HOME>\Documents\Battlezone98Redux_Shim.code-workspace`.
+`C:\Users\iestu\Documents\GIT\BZR-Workspace\Battlezone98.code-workspace`.
 
 ## Workspace Layout
-- Sibling repos normally live under `<USER_HOME>\Documents\GIT\...`.
-- The primary local game install is typically `<USER_HOME>\Documents\Battlezone 98 Redux`.
-- Some machines also keep a baseline install at `<GAME_ROOT>`.
-- Prefer the workspace file and these conventions over hardcoded profile-specific paths.
+- Campaign Reimagined canonical source: `C:\Users\iestu\Documents\Google Drive\Ian Files\Battlezone Files\Redux Maps\Open Patch - CampaignReimagined`.
+- Working game/test copy: `C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux`.
+- Working Campaign Reimagined runtime: `C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux\mods\3686673790`.
+- Sibling Battlezone Git repos live under `C:\Users\iestu\Documents\GIT`.
+- Steam is the final post-upload verification environment, not the development deploy target. Upload the validated mod to Workshop first, let Steam download item `3686673790`, then test the subscribed payload.
+- Never deploy development files directly into Steam's Workshop download cache.
 
 
 ## Refactored Architecture (2025)
@@ -52,11 +54,12 @@ This repo is part of the local Battlezone workspace opened via
   offset or subsystem mismatch rather than assuming the full executable differs.
 
 ## Cross-Repo Pointers
-- Addon-side consumers and Lua integration points live in the deployed campaign addon under the workspace game install, usually `<USER_HOME>\Documents\Battlezone 98 Redux\addon\campaignReimagined`.
-- Subtitle integration work may involve `<USER_HOME>\Documents\GIT\BZR-Subtitles`.
-- Rendering-adjacent work may involve the deployed shader addon under the workspace game install, `<USER_HOME>\Documents\GIT\Battlezone98Redux_EnhancedShaders`, or `<USER_HOME>\Documents\GIT\ogre-1.10.0`.
+- Addon-side consumers and Lua integration points live in the Campaign Reimagined canonical source tree above.
+- Deploy active test builds to the GOG runtime folder above, preferably through the canonical repo's `Manage-CampaignFiles.ps1`.
+- Rendering-adjacent engine reference work may involve `C:\Users\iestu\Documents\GIT\ogre-1.10.0`.
+- Discover any additional Battlezone repos beneath `C:\Users\iestu\Documents\GIT`; do not invent or reuse retired paths.
 
-Open `<USER_HOME>\Documents\Battlezone98Redux_Shim.code-workspace` when a task may span repos.
+Open `C:\Users\iestu\Documents\GIT\BZR-Workspace\Battlezone98.code-workspace` when a task may span repos.
 
 ## Agent Tooling
 - Read `AGENT_TOOLING.md` at repo start for the current local RE/tooling inventory.

@@ -69,7 +69,10 @@ scripts/
 !scripts/
 scripts/*
 !scripts/Apply-StockDx11ShaderHardening.ps1
-docs/
+!scripts/Test-TerrainSemanticParity.ps1
+!scripts/Compare-TerrainCaptures.ps1
+docs/*
+!docs/terrain-render-path.md
 
 # VS Extensions
 *.vsix

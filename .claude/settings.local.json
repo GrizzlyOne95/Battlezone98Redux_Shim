@@ -78,7 +78,8 @@
       "Bash('/c/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/Llvm/ARM64/bin/llvm-symbolizer.exe' --obj=C:/Users/iestu/Documents/GIT/BZR-OpenShim/bin/Release/winmm.dll 0x1002152F)",
       "Bash(grep -v \"^$\")",
       "Bash(python /tmp/unwind.py)",
-      "Bash(python /tmp/unwind2.py)"
+      "Bash(python /tmp/unwind2.py)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\Users\\\\iestu\\\\Documents\\\\GIT\\\\BZR-OpenShim\\\\BZROpenShim.sln\" /p:Configuration=Release /p:Platform=Win32 /p:VCToolsVersion=14.44.35207 /m /v:m /nologo)"
     ]
   }
 }
