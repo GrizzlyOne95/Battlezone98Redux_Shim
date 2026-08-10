@@ -49,6 +49,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch pinned Ogre reference headers
+        shell: pwsh
+        run: ./setup-dev.ps1
       - uses: microsoft/setup-msbuild@v2
       - name: Build OpenShim Release Win32
         run: msbuild BZROpenShim.sln /m /p:Configuration=Release /p:Platform=Win32

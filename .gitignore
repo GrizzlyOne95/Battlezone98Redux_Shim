@@ -77,6 +77,9 @@ docs/*
 !docs/terrain-render-path.md
 !docs/bz15-multiplayer-ui-port.md
 
+# Local third-party source/reference checkouts
+third_party/ogre-1.10.0-bzr/_work/
+
 # VS Extensions
 *.vsix
 .db/
