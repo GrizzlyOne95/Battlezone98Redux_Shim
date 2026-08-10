@@ -56,6 +56,16 @@ namespace BZROpenShim
     // non-interactive tile next to the "F" button showing the selected flag.
     void* g_FlagPreviewHost = nullptr;
     void* g_FlagPreviewClient = nullptr;
+    // 1.5 drove the flag catalogue with a left/right arrow pair
+    // (flagLeftButton/flagRightButton, 18x19 at 90,114 and 108,114) rather than
+    // one cycling button. g_FlagButton* is the left arrow; these are the right.
+    void* g_FlagButtonHostRight = nullptr;
+    void* g_FlagButtonClientRight = nullptr;
+    // cUI_TextEntry over the /nickname= buffer, and the negotiated-route readout.
+    void* g_NicknameEntryHost = nullptr;
+    void* g_NicknameEntryClient = nullptr;
+    void* g_NetRouteLabelHost = nullptr;
+    void* g_NetRouteLabelClient = nullptr;
     void* g_HostUiParent = nullptr;
     void* g_ClientUiParent = nullptr;
     void* g_AutoSaveLoadParent = nullptr;
@@ -12560,6 +12570,327 @@ namespace BZROpenShim
             RefreshHeadlightState();
         }
 
+        // --- BZRNet route preference and UDP port ------------------------------
+        // Redux has no LAN browser, offline lobby, or direct-IP join: peers meet
+        // in a BZRNet lobby over an authenticated WebSocket, the service hands
+        // each peer the others' LAN and WAN UDP endpoints, and only then do the
+        // peers choose a gameplay path themselves (LAN UDP -> direct WAN UDP ->
+        // relay). What IS genuinely user-controllable is which path they prefer
+        // and which local UDP port they bind. Stock exposes both only as
+        // command-line switches, so these two settings persist them instead.
+        //
+        // This changes route preference, NOT session discovery. Neither setting
+        // creates a LAN or direct-IP mode; see
+        // reverse_engineering/redux_tcpip_lan_multiplayer_investigation_20260713.md.
+        //
+        // Both globals were confirmed against the shipped GOG image (sha256
+        // 8d71f56c1314e69a8ad38f4eeaf20a8ff825965a84cf196e5f77ea4cc3377413,
+        // byte-identical to the decompile corpus) from the instruction encodings
+        // that reference them, not from the advisory PDB. Each has exactly four
+        // .text references and no others.
+        static constexpr char kUserConfigNetworkSection[] = "Network";
+
+        // dword. /iprelay writes 1 at 0x007D5CB9, /ipdirect writes 0 at
+        // 0x007D5CE1. Read at 0x0075F09F (the per-peer connect decision in
+        // FUN_0075EEA0) and 0x0075DDC6, both as `cmp dword ptr [addr], 0` -- so
+        // it is consulted per connection attempt and may be changed live.
+        constexpr uintptr_t kBzrNetForceRelayFlagAddr = 0x00946708;
+        constexpr uintptr_t kBzrNetForceRelayReadSiteAddr = 0x0075F09F;
+        constexpr uint8_t kBzrNetForceRelayReadSiteBytes[] =
+            { 0x83, 0x3D, 0x08, 0x67, 0x94, 0x00, 0x00 }; // cmp dword [946708],0
+
+        // WORD, not dword: /bzrnetport= stores it with `mov word ptr` at
+        // 0x007D5DB9. FUN_006BE750 reads it as the REQUESTED port at 0x006BE7B8
+        // and then overwrites it at 0x006BE7FF with the port Winsock actually
+        // bound. So it must be written before the socket opens -- and after the
+        // socket opens it reads back as the true bound port, which is what the
+        // lobby readout reports.
+        constexpr uintptr_t kBzrNetUdpPortAddr = 0x00945704;
+        constexpr uintptr_t kBzrNetUdpPortReadSiteAddr = 0x006BE7B8;
+        constexpr uint8_t kBzrNetUdpPortReadSiteBytes[] =
+            { 0x0F, 0xB7, 0x15, 0x04, 0x57, 0x94, 0x00 }; // movzx edx,word [945704]
+
+        // char[0x80] multiplayer name override, the /nickname= destination
+        // (strncpy at 0x007D5947, terminator guard written at 0x007D5974).
+        // FUN_006C6E60 consumes it when it builds the BZRNet identity message:
+        // 0x006C7D87 tests byte 0 and falls back to the platform "realname"
+        // when it is NUL, otherwise 0x006C7DA4 passes the buffer to a
+        // std::string ctor. Because it is read at identity time rather than
+        // latched at startup, an edit only reaches the service on the next
+        // connect -- see the note on the lobby entry.
+        constexpr uintptr_t kBzrNetNicknameAddr = 0x009453E0;
+        constexpr size_t kBzrNetNicknameCapacity = 0x80; // last byte kept NUL
+        constexpr uintptr_t kBzrNetNicknameReadSiteAddr = 0x006C7D87;
+        constexpr uint8_t kBzrNetNicknameReadSiteBytes[] =
+            { 0x0F, 0xBE, 0x91, 0xE0, 0x53, 0x94, 0x00 }; // movsx edx,byte [ecx+9453E0]
+
+        enum class BzrNetRoutePreference
+        {
+            Stock,   // leave the engine's own value alone
+            Direct,  // /ipdirect  -- try LAN, then direct WAN, then relay
+            Relay,   // /iprelay   -- skip both direct paths
+        };
+
+        static bool g_BzrNetConfigInitialized = false;
+        static bool g_BzrNetGlobalsVerified = false;
+        static bool g_BzrNetGlobalsChecked = false;
+        static BzrNetRoutePreference g_BzrNetRoutePreference = BzrNetRoutePreference::Stock;
+        static int g_BzrNetConfiguredUdpPort = -1; // <0 leaves the stock ephemeral bind
+
+        // Guard the writes on the two read sites still carrying the exact
+        // instruction encodings that name these addresses. A build whose layout
+        // moved fails this and the feature stands down rather than writing into
+        // whatever now lives at the old address.
+        static bool VerifyBzrNetGlobals()
+        {
+            if (g_BzrNetGlobalsChecked)
+                return g_BzrNetGlobalsVerified;
+            g_BzrNetGlobalsChecked = true;
+
+            const bool relayOk = ExpectedBytesMatchAt(
+                kBzrNetForceRelayReadSiteAddr,
+                kBzrNetForceRelayReadSiteBytes,
+                sizeof(kBzrNetForceRelayReadSiteBytes));
+            const bool portOk = ExpectedBytesMatchAt(
+                kBzrNetUdpPortReadSiteAddr,
+                kBzrNetUdpPortReadSiteBytes,
+                sizeof(kBzrNetUdpPortReadSiteBytes));
+            const bool nicknameOk = ExpectedBytesMatchAt(
+                kBzrNetNicknameReadSiteAddr,
+                kBzrNetNicknameReadSiteBytes,
+                sizeof(kBzrNetNicknameReadSiteBytes));
+
+            g_BzrNetGlobalsVerified = relayOk && portOk && nicknameOk;
+            if (!g_BzrNetGlobalsVerified)
+            {
+                Log(L"[BZRNET] Globals failed byte guard (relay=%hs port=%hs nickname=%hs); "
+                    L"settings stand down on this build\n",
+                    relayOk ? "ok" : "mismatch",
+                    portOk ? "ok" : "mismatch",
+                    nicknameOk ? "ok" : "mismatch");
+            }
+            return g_BzrNetGlobalsVerified;
+        }
+
+        // Both sides of the nickname buffer, in functions free of unwindable
+        // objects so they can use __try (C2712).
+        static bool ReadBzrNetNickname(char* out, size_t outSize)
+        {
+            if (!out || outSize == 0)
+                return false;
+            out[0] = '\0';
+            if (!VerifyBzrNetGlobals())
+                return false;
+            __try
+            {
+                const char* const buffer = reinterpret_cast<const char*>(kBzrNetNicknameAddr);
+                size_t i = 0;
+                for (; i + 1 < outSize && i < kBzrNetNicknameCapacity && buffer[i] != '\0'; ++i)
+                    out[i] = buffer[i];
+                out[i] = '\0';
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                out[0] = '\0';
+            }
+            return false;
+        }
+
+        static bool WriteBzrNetNickname(const char* value)
+        {
+            if (!VerifyBzrNetGlobals())
+                return false;
+            __try
+            {
+                char* const buffer = reinterpret_cast<char*>(kBzrNetNicknameAddr);
+                size_t i = 0;
+                if (value)
+                {
+                    for (; i + 1 < kBzrNetNicknameCapacity && value[i] != '\0'; ++i)
+                        buffer[i] = value[i];
+                }
+                // Clear the tail so a shorter name cannot leave the previous
+                // one's suffix behind, and keep the engine's own guard byte NUL.
+                for (; i < kBzrNetNicknameCapacity; ++i)
+                    buffer[i] = '\0';
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[BZRNET] Failed to write nickname buffer\n");
+            }
+            return false;
+        }
+
+        static const char* BzrNetRoutePreferenceName(BzrNetRoutePreference value)
+        {
+            switch (value)
+            {
+            case BzrNetRoutePreference::Direct: return "direct";
+            case BzrNetRoutePreference::Relay:  return "relay";
+            default:                            return "stock";
+            }
+        }
+
+        static bool ParseBzrNetRoutePreference(const std::string& raw,
+                                               BzrNetRoutePreference& out)
+        {
+            std::string token;
+            token.reserve(raw.size());
+            for (const char ch : ToLowerAscii(TrimAsciiCopy(raw)))
+            {
+                if (ch != ' ' && ch != '_' && ch != '-')
+                    token.push_back(ch);
+            }
+
+            if (token.empty() || token == "stock" || token == "auto" || token == "default")
+            {
+                out = BzrNetRoutePreference::Stock;
+                return true;
+            }
+            if (token == "direct" || token == "preferdirect" || token == "ipdirect")
+            {
+                out = BzrNetRoutePreference::Direct;
+                return true;
+            }
+            if (token == "relay" || token == "forcerelay" || token == "iprelay")
+            {
+                out = BzrNetRoutePreference::Relay;
+                return true;
+            }
+            return false;
+        }
+
+        // Reads back as the requested port before the socket opens and as the
+        // actually bound port afterwards.
+        static int GetBzrNetUdpPort()
+        {
+            if (!VerifyBzrNetGlobals())
+                return -1;
+            __try
+            {
+                return static_cast<int>(*reinterpret_cast<volatile uint16_t*>(kBzrNetUdpPortAddr));
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return -1;
+            }
+        }
+
+        static bool IsBzrNetForceRelayActive()
+        {
+            if (!VerifyBzrNetGlobals())
+                return false;
+            __try
+            {
+                return *reinterpret_cast<volatile uint32_t*>(kBzrNetForceRelayFlagAddr) != 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void ApplyBzrNetRoutePreference()
+        {
+            if (g_BzrNetRoutePreference == BzrNetRoutePreference::Stock)
+                return;
+            if (!VerifyBzrNetGlobals())
+                return;
+
+            const uint32_t value =
+                (g_BzrNetRoutePreference == BzrNetRoutePreference::Relay) ? 1u : 0u;
+            __try
+            {
+                *reinterpret_cast<volatile uint32_t*>(kBzrNetForceRelayFlagAddr) = value;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[BZRNET] Failed to write route preference flag\n");
+            }
+        }
+
+        // Split out so InitializeBzrNetConfig can hold std::string locals: a
+        // function using __try must not also require object unwinding (C2712).
+        static void WriteBzrNetUdpPort(uint16_t port)
+        {
+            if (!VerifyBzrNetGlobals())
+                return;
+            __try
+            {
+                *reinterpret_cast<volatile uint16_t*>(kBzrNetUdpPortAddr) = port;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[BZRNET] Failed to write requested UDP port\n");
+            }
+        }
+
+        static void InitializeBzrNetConfig()
+        {
+            const bool firstRun = !g_BzrNetConfigInitialized;
+            g_BzrNetConfigInitialized = true;
+
+            std::string value;
+            g_BzrNetRoutePreference = BzrNetRoutePreference::Stock;
+            if (TryGetUserConfigString(kUserConfigNetworkSection, "RoutePreference", value) &&
+                !ParseBzrNetRoutePreference(value, g_BzrNetRoutePreference))
+            {
+                Log(L"[BZRNET] Ignoring invalid RoutePreference=%hs\n", value.c_str());
+                g_BzrNetRoutePreference = BzrNetRoutePreference::Stock;
+            }
+            ApplyBzrNetRoutePreference();
+
+            // Applied on every pass, unlike the port: the engine reads the
+            // nickname at identity time rather than latching it at startup, so
+            // a later edit is still meaningful. An absent or blank key leaves
+            // the buffer alone so the platform account name keeps winning.
+            if (TryGetUserConfigString(kUserConfigNetworkSection, "Nickname", value))
+            {
+                const std::string nickname = TrimAsciiCopy(value);
+                if (!nickname.empty())
+                    WriteBzrNetNickname(nickname.c_str());
+            }
+
+            // The port is deliberately applied once, on the first pass. The
+            // engine overwrites the same variable with the bound port, so a
+            // later re-apply would either be ignored (socket already open) or
+            // clobber the readout the lobby reports.
+            if (!firstRun)
+                return;
+
+            g_BzrNetConfiguredUdpPort = -1;
+            if (TryGetUserConfigString(kUserConfigNetworkSection, "UdpPort", value))
+            {
+                const std::string trimmed = TrimAsciiCopy(value);
+                if (!trimmed.empty())
+                {
+                    char* end = nullptr;
+                    const long parsed = std::strtol(trimmed.c_str(), &end, 10);
+                    if (end && *end == '\0' && parsed >= 0 && parsed <= 65535)
+                    {
+                        g_BzrNetConfiguredUdpPort = static_cast<int>(parsed);
+                    }
+                    else
+                    {
+                        Log(L"[BZRNET] Ignoring invalid UdpPort=%hs (expected 0..65535)\n",
+                            trimmed.c_str());
+                    }
+                }
+            }
+
+            if (g_BzrNetConfiguredUdpPort > 0)
+                WriteBzrNetUdpPort(static_cast<uint16_t>(g_BzrNetConfiguredUdpPort));
+
+            Log(L"[BZRNET] Route preference=%hs port=%hs guard=%hs "
+                L"(preference only; Redux still has no LAN browser or direct-IP join)\n",
+                BzrNetRoutePreferenceName(g_BzrNetRoutePreference),
+                g_BzrNetConfiguredUdpPort > 0 ? std::to_string(g_BzrNetConfiguredUdpPort).c_str()
+                                              : "ephemeral",
+                g_BzrNetGlobalsVerified ? "ok" : "failed");
+        }
+
         // --- Global feature registry -------------------------------------------
         // One coordination point for the user-config / EXU-bridge driven features.
         // Each feature keeps its own apply/parse/baseline internals; the registry
@@ -14596,6 +14927,200 @@ namespace BZROpenShim
                 static_cast<int32_t>(callAddress + 5);
             std::memcpy(call + 1, &desiredRelative, sizeof(desiredRelative));
             return WritePatchBytes(callAddress, call, sizeof(call));
+        }
+
+        // --- Negotiated peer route readout -------------------------------------
+        // Redux chooses each peer's gameplay path itself (LAN UDP -> direct WAN
+        // UDP -> BZRNet relay) and announces the outcome, but never surfaces it
+        // anywhere the player can see. The peer records are only reachable
+        // through opaque STL iteration inside FUN_0075D800, so instead of
+        // walking that container we observe the two announcements the engine
+        // already makes, at their single call sites.
+        //
+        // Both sites push their arguments and call the shared BZRNet logger at
+        // 0x007D6A70 (cdecl, 272 call sites across the image). Redirecting one
+        // `call` rel32 -- rather than detouring the logger itself -- means each
+        // hook receives a fixed, known signature instead of varargs, and no
+        // other log line in the game is affected. Each format string below has
+        // exactly one push site in .text, so there is no ambiguity about which
+        // call is being redirected.
+        //
+        //   0x0075ED1D  logger(fmt, route, name, address)
+        //     fmt @ 0x0089BC78 "BZRNet P2P Completed %s Connect For Client %s,
+        //                       using address %s\n"
+        //     route is the literal "LAN" / "WAN" / "RELAY" the engine selected
+        //     from the peer state at peer+0x00 (2 = LAN, 4 = WAN, 7 = RELAY).
+        //   0x0075EF99  logger(fmt, name)
+        //     fmt @ 0x0089BCBC "BZRNet P2P Fully Resetting Connection Status
+        //                       For Client %s\n"
+        constexpr uintptr_t kBzrNetLoggerAddr = 0x007D6A70;
+        constexpr uintptr_t kBzrNetRouteCompletedCallAddr = 0x0075ED1D;
+        constexpr uintptr_t kBzrNetRouteResetCallAddr = 0x0075EF99;
+
+        struct BzrNetPeerRoute
+        {
+            std::string name;
+            std::string route;   // "LAN", "WAN" or "RELAY"
+            std::string address;
+        };
+
+        // Written from the BZRNet worker thread, read from the UI thread.
+        static std::mutex g_BzrNetRouteMutex;
+        static std::vector<BzrNetPeerRoute> g_BzrNetPeerRoutes;
+        static bool g_BzrNetRouteObserverInstalled = false;
+
+        // The engine hands us raw char* it owns. Copy defensively in a function
+        // with no unwindable objects (__try and object unwinding cannot share a
+        // function -- C2712).
+        static bool CopyEngineCString(const char* src, char* out, size_t outSize)
+        {
+            if (!out || outSize == 0)
+                return false;
+            out[0] = '\0';
+            if (!src)
+                return false;
+            __try
+            {
+                size_t i = 0;
+                for (; i + 1 < outSize && src[i] != '\0'; ++i)
+                    out[i] = src[i];
+                out[i] = '\0';
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                out[0] = '\0';
+            }
+            return false;
+        }
+
+        static void RecordBzrNetPeerRoute(const char* name, const char* route, const char* address)
+        {
+            char nameBuf[128] = {};
+            char routeBuf[16] = {};
+            char addressBuf[80] = {};
+            if (!CopyEngineCString(name, nameBuf, sizeof(nameBuf)) || nameBuf[0] == '\0')
+                return;
+            CopyEngineCString(route, routeBuf, sizeof(routeBuf));
+            CopyEngineCString(address, addressBuf, sizeof(addressBuf));
+
+            bool changed = false;
+            {
+                std::lock_guard<std::mutex> lock(g_BzrNetRouteMutex);
+                auto it = std::find_if(
+                    g_BzrNetPeerRoutes.begin(), g_BzrNetPeerRoutes.end(),
+                    [&](const BzrNetPeerRoute& entry) { return entry.name == nameBuf; });
+                if (it == g_BzrNetPeerRoutes.end())
+                {
+                    g_BzrNetPeerRoutes.push_back({ nameBuf, routeBuf, addressBuf });
+                    changed = true;
+                }
+                else
+                {
+                    changed = (it->route != routeBuf);
+                    it->route = routeBuf;
+                    it->address = addressBuf;
+                }
+            }
+
+            if (changed)
+            {
+                Log(L"[BZRNET] Peer route client=%hs route=%hs address=%hs\n",
+                    nameBuf, routeBuf[0] ? routeBuf : "?", addressBuf);
+            }
+        }
+
+        static void ForgetBzrNetPeerRoute(const char* name)
+        {
+            char nameBuf[128] = {};
+            if (!CopyEngineCString(name, nameBuf, sizeof(nameBuf)) || nameBuf[0] == '\0')
+                return;
+
+            std::lock_guard<std::mutex> lock(g_BzrNetRouteMutex);
+            g_BzrNetPeerRoutes.erase(
+                std::remove_if(g_BzrNetPeerRoutes.begin(), g_BzrNetPeerRoutes.end(),
+                               [&](const BzrNetPeerRoute& entry) { return entry.name == nameBuf; }),
+                g_BzrNetPeerRoutes.end());
+        }
+
+        // "Alice:LAN Bob:RELAY" plus the bound UDP port, or a resting string
+        // when no peer has completed a handshake yet.
+        static void FormatBzrNetRouteSummary(char* out, size_t outSize)
+        {
+            if (!out || outSize == 0)
+                return;
+
+            std::string summary;
+            {
+                std::lock_guard<std::mutex> lock(g_BzrNetRouteMutex);
+                for (const BzrNetPeerRoute& entry : g_BzrNetPeerRoutes)
+                {
+                    if (!summary.empty())
+                        summary.push_back(' ');
+                    summary += entry.name;
+                    summary.push_back(':');
+                    summary += entry.route.empty() ? "?" : entry.route;
+                }
+            }
+
+            const int port = GetBzrNetUdpPort();
+            char portText[32] = {};
+            if (port > 0)
+                std::snprintf(portText, sizeof(portText), " (udp %d)", port);
+
+            // Echo the active name override so the player can confirm the entry
+            // took. An empty buffer means the platform account name is winning.
+            char nickname[128] = {};
+            char nicknameText[144] = {};
+            if (ReadBzrNetNickname(nickname, sizeof(nickname)) && nickname[0] != '\0')
+                std::snprintf(nicknameText, sizeof(nicknameText), "You: %s | ", nickname);
+
+            std::snprintf(out, outSize, "%sNet: %s%s%s",
+                          nicknameText,
+                          summary.empty() ? "no peers connected" : summary.c_str(),
+                          IsBzrNetForceRelayActive() ? " [relay forced]" : "",
+                          portText);
+        }
+
+        using FnBzrNetLogger = void(__cdecl*)(const char* fmt, ...);
+
+        // Observe, then forward to the real logger with the identical arguments
+        // so the game's own log is unchanged. Both are __cdecl: the engine's
+        // call site cleans its own pushes, so these must not.
+        static void __cdecl BzrNetRouteCompletedLogHook(const char* fmt,
+                                                        const char* route,
+                                                        const char* name,
+                                                        const char* address)
+        {
+            RecordBzrNetPeerRoute(name, route, address);
+            reinterpret_cast<FnBzrNetLogger>(kBzrNetLoggerAddr)(fmt, route, name, address);
+        }
+
+        static void __cdecl BzrNetRouteResetLogHook(const char* fmt, const char* name)
+        {
+            ForgetBzrNetPeerRoute(name);
+            reinterpret_cast<FnBzrNetLogger>(kBzrNetLoggerAddr)(fmt, name);
+        }
+
+        static void InstallBzrNetRouteObserverIfPossible()
+        {
+            if (g_BzrNetRouteObserverInstalled)
+                return;
+
+            const bool completed = RedirectCallTarget(
+                kBzrNetRouteCompletedCallAddr,
+                kBzrNetLoggerAddr,
+                reinterpret_cast<uintptr_t>(&BzrNetRouteCompletedLogHook));
+            const bool reset = RedirectCallTarget(
+                kBzrNetRouteResetCallAddr,
+                kBzrNetLoggerAddr,
+                reinterpret_cast<uintptr_t>(&BzrNetRouteResetLogHook));
+
+            g_BzrNetRouteObserverInstalled = completed && reset;
+            Log(L"[BZRNET] Peer route observer: %hs (completed=%hs reset=%hs)\n",
+                g_BzrNetRouteObserverInstalled ? "installed" : "unavailable",
+                completed ? "ok" : "mismatch",
+                reset ? "ok" : "mismatch");
         }
 
         static void InstallBriefingScrollFixIfPossible()
@@ -21582,6 +22107,12 @@ namespace BZROpenShim
         case ShimSettingApplyGroup::Headlights:
             RevertHeadlightsToBaseline();
             break;
+        case ShimSettingApplyGroup::BzrNetRoute:
+            // Only the route preference re-applies live; the port is latched on
+            // the first pass because the engine overwrites that variable with
+            // the port it actually bound.
+            InitializeBzrNetConfig();
+            break;
         case ShimSettingApplyGroup::RestartRequired:
             break;
         }
@@ -22247,6 +22778,10 @@ namespace BZROpenShim
         InstallEmissionLightFixIfPossible();
         InitializeJetFlamesConfig();
         InitializeUnitVoConfig();
+        // Must run before the game reaches BZRNet init: the requested UDP port
+        // is only honoured while the P2P socket is still closed.
+        InitializeBzrNetConfig();
+        InstallBzrNetRouteObserverIfPossible();
         EnsureInputBindingPopulateHookScaffold();
         EnsureOptionsParentCtorHookScaffold();
         LogShimSettingsUiStatus();
@@ -25347,8 +25882,11 @@ namespace BZROpenShim
             g_BanButtonHost = nullptr;
             g_BanLabelHost = nullptr;
             g_FlagButtonHost = nullptr;
+            g_FlagButtonHostRight = nullptr;
             g_FlagLabelHost = nullptr;
             g_FlagPreviewHost = nullptr;
+            g_NicknameEntryHost = nullptr;
+            g_NetRouteLabelHost = nullptr;
             g_ProbeTextEntry = nullptr;
             g_ProbeSelectlist = nullptr;
         }
@@ -25358,8 +25896,11 @@ namespace BZROpenShim
             g_BanButtonClient = nullptr;
             g_BanLabelClient = nullptr;
             g_FlagButtonClient = nullptr;
+            g_FlagButtonClientRight = nullptr;
             g_FlagLabelClient = nullptr;
             g_FlagPreviewClient = nullptr;
+            g_NicknameEntryClient = nullptr;
+            g_NetRouteLabelClient = nullptr;
         }
 
         static void EnsureUiCacheMatchesParent(void* parent, bool host)
@@ -25832,14 +26373,24 @@ namespace BZROpenShim
             if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(widget, name.c_str());
         }
 
+        // 1.5 shell pixels scale onto the 1440x1080 Redux canvas by a single
+        // uniform 2.25 factor (both are 4:3), so the arrow pair keeps its retail
+        // proportions: flagLeftButton/flagRightButton are 18x19 at 90,114 and
+        // 108,114, i.e. 40.5x42.75 side by side with no gap.
+        constexpr float kBz15UiScale = 2.25f;
+        constexpr float kFlagArrowWidth = 18.0f * kBz15UiScale;   // 40.5
+        constexpr float kFlagArrowHeight = 19.0f * kBz15UiScale;  // 42.75
+
         static void CreateFlagButtonCommon(
             void* parent,
             float x,
             float y,
             void** outButton,
+            void** outButtonRight,
             void** outLabel,
             void** outPreview,
-            void* onClick,
+            void* onClickLeft,
+            void* onClickRight,
             void* onHover)
         {
             if (!parent || !outButton || !outLabel || !g_BzrFn_ButtonCtor || !g_BzrFn_LabelCtor || !g_BzrFn_AddChild)
@@ -25848,31 +26399,57 @@ namespace BZROpenShim
             EnsureFlagCatalogLoaded();
             PrimeSelectedFlagForTesting("ui_create");
 
-            void* buttonMem = ::operator new(0x1EC, std::nothrow);
-            if (!buttonMem)
-                return;
-            std::memset(buttonMem, 0, 0x1EC);
-
-            *outButton = g_BzrFn_ButtonCtor(
-                buttonMem,
-                "Flag Select",
-                x,
-                y,
-                kFlagButtonSize,
-                kFlagButtonSize,
-                0x20,
-                parent,
-                0,
-                0);
-            if (*outButton)
+            // The 1.5 pair, in place of the single cycling "F" button. The retail
+            // arrows are bitmaps 2049/2050/2070/2071; until those are extracted
+            // the stock Redux button art carries a "<" / ">" caption, which keeps
+            // the widget legible without inventing a texture.
+            struct FlagArrowSpec
             {
-                if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(*outButton, "MultiplayerModeButton_off.png");
-                if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(*outButton, "MultiplayerModeButton_over.png");
-                if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(*outButton, "MultiplayerModeButton_on.png");
-                if (g_BzrFn_SetButtonLabel) g_BzrFn_SetButtonLabel(*outButton, "F");
-                if (g_BzrFn_SetOnClick) g_BzrFn_SetOnClick(*outButton, onClick);
-                if (g_BzrFn_SetOnHover) g_BzrFn_SetOnHover(*outButton, onHover);
-                g_BzrFn_AddChild(parent, *outButton, 0);
+                void** out;
+                const char* name;
+                const char* caption;
+                float offsetX;
+                void* onClick;
+            };
+            const FlagArrowSpec arrows[] =
+            {
+                { outButton,      "Flag Prev", "<", 0.0f,             onClickLeft },
+                { outButtonRight, "Flag Next", ">", kFlagArrowWidth,  onClickRight },
+            };
+
+            for (const FlagArrowSpec& arrow : arrows)
+            {
+                if (!arrow.out)
+                    continue;
+
+                void* buttonMem = ::operator new(0x1EC, std::nothrow);
+                if (!buttonMem)
+                    return;
+                std::memset(buttonMem, 0, 0x1EC);
+
+                *arrow.out = g_BzrFn_ButtonCtor(
+                    buttonMem,
+                    arrow.name,
+                    x + arrow.offsetX,
+                    y,
+                    kFlagArrowWidth,
+                    kFlagArrowHeight,
+                    0x20,
+                    parent,
+                    0,
+                    0);
+                if (!*arrow.out)
+                    continue;
+
+                if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(*arrow.out, "MultiplayerModeButton_off.png");
+                if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(*arrow.out, "MultiplayerModeButton_over.png");
+                if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(*arrow.out, "MultiplayerModeButton_on.png");
+                if (g_BzrFn_SetButtonLabel) g_BzrFn_SetButtonLabel(*arrow.out, arrow.caption);
+                // Both callback slots must be non-null on an active dialog child
+                // or the lobby crashes walking its children (see AutoSave note).
+                if (g_BzrFn_SetOnClick) g_BzrFn_SetOnClick(*arrow.out, arrow.onClick);
+                if (g_BzrFn_SetOnHover) g_BzrFn_SetOnHover(*arrow.out, onHover);
+                g_BzrFn_AddChild(parent, *arrow.out, 0);
             }
 
             void* labelMem = ::operator new(0x930, std::nothrow);
@@ -25900,11 +26477,12 @@ namespace BZROpenShim
             UpdateFlagSelectionUiLabel(*outLabel);
 
             // 1.5-style preview tile showing the selected flag, placed just
-            // above the "F" button. It reuses the same click/hover callbacks as
-            // the button, so clicking the preview also cycles and — critically
-            // — both +0x150/+0x154 callback slots are non-null (a null slot on
+            // above the arrow pair. It reuses the forward callback, so clicking
+            // the preview advances like the right arrow, and — critically —
+            // both +0x150/+0x154 callback slots stay non-null (a null slot on
             // an active dialog child crashes when the lobby walks its children;
             // see the AutoSave button note).
+            void* const onClick = onClickRight;
             if (outPreview && g_BzrFn_ButtonCtor)
             {
                 void* previewMem = ::operator new(0x1EC, std::nothrow);
@@ -25928,6 +26506,119 @@ namespace BZROpenShim
                         if (g_BzrFn_SetOnClick && onClick) g_BzrFn_SetOnClick(*outPreview, onClick);
                         if (g_BzrFn_SetOnHover && onHover) g_BzrFn_SetOnHover(*outPreview, onHover);
                         g_BzrFn_AddChild(parent, *outPreview, 0);
+                    }
+                }
+            }
+        }
+
+        // Refresh the negotiated-route readout from the observer's table.
+        static void UpdateNetRouteLabel(void* label)
+        {
+            // Labels are cUI_Text; the ban and flag labels already drive their
+            // visible text through the tooltip setter, so match that rather
+            // than SetButtonLabel (which belongs to cUI_Button).
+            if (!label || !g_BzrFn_SetTooltip)
+                return;
+            char summary[256] = {};
+            FormatBzrNetRouteSummary(summary, sizeof(summary));
+            g_BzrFn_SetTooltip(label, summary);
+        }
+
+        // Read what the player typed and push it into the /nickname= buffer,
+        // then persist it so it survives the session. The engine reads that
+        // buffer when it builds its BZRNet identity message, so an edit made
+        // while already connected only takes effect on the next connect.
+        static void ApplyNicknameFromEntry(void* entry, const char* source)
+        {
+            if (!entry)
+                return;
+
+            char text[192] = {};
+            if (!ReadEngineStdString(
+                    static_cast<uint8_t*>(entry) + kUiTextEntryTextOffset,
+                    text, sizeof(text)))
+            {
+                Log(L"[BZRNET] Nickname entry unreadable (source=%hs)\n", source);
+                return;
+            }
+
+            const std::string trimmed = TrimAsciiCopy(text);
+            if (trimmed.empty())
+                return;
+            if (!WriteBzrNetNickname(trimmed.c_str()))
+                return;
+
+            WriteShimUserConfigValue(kUserConfigNetworkSection, "Nickname", trimmed.c_str());
+            Log(L"[BZRNET] Nickname set to \"%hs\" (source=%hs); applies on next connect\n",
+                trimmed.c_str(), source);
+        }
+
+        // A cUI_TextEntry over the nickname buffer plus the route readout label.
+        // maxLength is 63 rather than the buffer's 127 because the lobby name
+        // column is narrow; the buffer itself would accept more.
+        static void CreateNicknameAndRouteWidgets(
+            void* parent,
+            float x,
+            float y,
+            void** outEntry,
+            void** outRouteLabel,
+            void* onEnter,
+            void* onHover)
+        {
+            if (!parent || !g_BzrFn_AddChild)
+                return;
+
+            if (outEntry && g_BzrFn_TextEntryCtor)
+            {
+                void* entryMem = ::operator new(kUiTextEntrySize, std::nothrow);
+                if (entryMem)
+                {
+                    std::memset(entryMem, 0, kUiTextEntrySize);
+                    *outEntry = g_BzrFn_TextEntryCtor(
+                        entryMem,
+                        0,      // flagA  -> +0x960
+                        1,      // allowEnter -> +0x950, as every stock call site
+                        63,     // maxLength -> +0x948
+                        "Nickname",
+                        x,
+                        y,
+                        360.0f,
+                        40.0f,
+                        0x8020, // stock text entries pass 0x8020, not 0x20
+                        parent);
+                    if (*outEntry)
+                    {
+                        if (g_BzrFn_TextEntrySetEnterCb && onEnter)
+                            g_BzrFn_TextEntrySetEnterCb(*outEntry, onEnter);
+                        if (g_BzrFn_SetOnHover && onHover)
+                            g_BzrFn_SetOnHover(*outEntry, onHover);
+                        g_BzrFn_AddChild(parent, *outEntry, 0);
+                    }
+                }
+            }
+
+            if (outRouteLabel && g_BzrFn_LabelCtor)
+            {
+                void* labelMem = ::operator new(kUiTextSize, std::nothrow);
+                if (labelMem)
+                {
+                    std::memset(labelMem, 0, kUiTextSize);
+                    *outRouteLabel = g_BzrFn_LabelCtor(
+                        labelMem,
+                        "Net Route",
+                        x,
+                        y + 44.0f,
+                        520.0f,
+                        38.0f,
+                        0x20,
+                        parent,
+                        0);
+                    if (*outRouteLabel)
+                    {
+                        if (g_BzrFn_LabelState)
+                            g_BzrFn_LabelState(*outRouteLabel, nullptr);
+                        g_BzrFn_AddChild(parent, *outRouteLabel, 0);
+                        UpdateNetRouteLabel(*outRouteLabel);
                     }
                 }
             }
@@ -26053,11 +26744,41 @@ namespace BZROpenShim
         UpdateFlagPreviewWidget(g_FlagPreviewClient);
     }
 
+    void __cdecl FlagButtonOnClickPrevHost()
+    {
+        CycleSelectedFlag(-1, "host_button_prev");
+        UpdateFlagSelectionUiLabel(g_FlagLabelHost);
+        UpdateFlagPreviewWidget(g_FlagPreviewHost);
+    }
+
+    void __cdecl FlagButtonOnClickPrevClient()
+    {
+        CycleSelectedFlag(-1, "client_button_prev");
+        UpdateFlagSelectionUiLabel(g_FlagLabelClient);
+        UpdateFlagPreviewWidget(g_FlagPreviewClient);
+    }
+
+    void __cdecl NicknameEntryOnEnterHost()
+    {
+        ApplyNicknameFromEntry(g_NicknameEntryHost, "host_lobby");
+        UpdateNetRouteLabel(g_NetRouteLabelHost);
+    }
+
+    void __cdecl NicknameEntryOnEnterClient()
+    {
+        ApplyNicknameFromEntry(g_NicknameEntryClient, "client_lobby");
+        UpdateNetRouteLabel(g_NetRouteLabelClient);
+    }
+
+    // The route table is filled from the BZRNet worker thread, so the label is
+    // refreshed from UI-thread events rather than pushed from the observer.
+    // Hover is the same refresh point the flag label already uses.
     void __cdecl FlagButtonOnHoverHost(void* param)
     {
         if (g_BzrFn_LabelState && g_FlagLabelHost)
             g_BzrFn_LabelState(g_FlagLabelHost, param);
         UpdateFlagSelectionUiLabel(g_FlagLabelHost);
+        UpdateNetRouteLabel(g_NetRouteLabelHost);
     }
 
     void __cdecl FlagButtonOnHoverClient(void* param)
@@ -26065,6 +26786,7 @@ namespace BZROpenShim
         if (g_BzrFn_LabelState && g_FlagLabelClient)
             g_BzrFn_LabelState(g_FlagLabelClient, param);
         UpdateFlagSelectionUiLabel(g_FlagLabelClient);
+        UpdateNetRouteLabel(g_NetRouteLabelClient);
     }
 
     // The native load screen sets BOTH callback slots on every load-slot button:
@@ -26284,10 +27006,28 @@ namespace BZROpenShim
                 g_BanX - 104.0f,
                 g_BanY + 96.0f,
                 &g_FlagButtonHost,
+                &g_FlagButtonHostRight,
                 &g_FlagLabelHost,
                 &g_FlagPreviewHost,
+                reinterpret_cast<void*>(FlagButtonOnClickPrevHost),
                 reinterpret_cast<void*>(FlagButtonOnClickHost),
                 reinterpret_cast<void*>(FlagButtonOnHoverHost));
+        }
+
+        if (!g_NicknameEntryHost || !IsWidgetLiveChildOfParent(parent, g_NicknameEntryHost))
+        {
+            CreateNicknameAndRouteWidgets(
+                parent,
+                270.0f,
+                860.0f,
+                &g_NicknameEntryHost,
+                &g_NetRouteLabelHost,
+                reinterpret_cast<void*>(NicknameEntryOnEnterHost),
+                reinterpret_cast<void*>(FlagButtonOnHoverHost));
+        }
+        else
+        {
+            UpdateNetRouteLabel(g_NetRouteLabelHost);
         }
 
         if (ShouldRunUiWidgetProbe())
@@ -26360,10 +27100,28 @@ namespace BZROpenShim
                 -85.0f,
                 942.0f,
                 &g_FlagButtonClient,
+                &g_FlagButtonClientRight,
                 &g_FlagLabelClient,
                 &g_FlagPreviewClient,
+                reinterpret_cast<void*>(FlagButtonOnClickPrevClient),
                 reinterpret_cast<void*>(FlagButtonOnClickClient),
                 reinterpret_cast<void*>(FlagButtonOnHoverClient));
+        }
+
+        if (!g_NicknameEntryClient || !IsWidgetLiveChildOfParent(parent, g_NicknameEntryClient))
+        {
+            CreateNicknameAndRouteWidgets(
+                parent,
+                -85.0f,
+                806.0f,
+                &g_NicknameEntryClient,
+                &g_NetRouteLabelClient,
+                reinterpret_cast<void*>(NicknameEntryOnEnterClient),
+                reinterpret_cast<void*>(FlagButtonOnHoverClient));
+        }
+        else
+        {
+            UpdateNetRouteLabel(g_NetRouteLabelClient);
         }
     }
 
