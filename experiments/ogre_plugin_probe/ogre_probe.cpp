@@ -36,16 +36,11 @@ extern "C" void __cdecl dllStopPlugin()
 
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID reserved)
 {
-    (void)module;
     (void)reserved;
 
     if (reason == DLL_PROCESS_ATTACH)
     {
-        WriteMarker("[OpenShimOgreProbe] DLL_PROCESS_ATTACH");
-    }
-    else if (reason == DLL_PROCESS_DETACH)
-    {
-        WriteMarker("[OpenShimOgreProbe] DLL_PROCESS_DETACH");
+        ::DisableThreadLibraryCalls(module);
     }
 
     return TRUE;
