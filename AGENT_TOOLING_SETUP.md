@@ -113,7 +113,7 @@ The repo tooling also honors these user or process environment variables:
 
 These are useful when:
 
-- the game is not under `<USER_HOME>\Documents\Battlezone 98 Redux`
+- the game is not in the configured/default GOG working location
 - you want to force a specific executable
 - Ghidra is installed somewhere other than `<GHIDRA_ROOT>`
 - you want to pin the debugger backend to a specific install

@@ -15,6 +15,7 @@
 #include "file_io_hooks.h"
 #include "autosave.h"
 #include "dx11_colorspace_diagnostic.h"
+#include "terrain_proxy.h"
 #include "ogre_animation_profiler.h"
 #include "BZROpenShim.h"
 
@@ -42,6 +43,13 @@ static unsigned __stdcall PatchThreadProc(void*)
     // the optimizer's existing IAT targets without changing network behavior.
     BZROpenShim::InitializeBzrNetInstrumentation();
     BZROpenShim::RunPatcher(SHIM_VERSION);
+
+    // Phase 2 is safe to ask to initialize on every build: it is dormant by
+    // default and independently verifies exact executable/Ogre hashes before
+    // it resolves addresses or installs either terrain hook.  Do not put it
+    // behind g_CompatibleVersion; the legacy patcher currently never promotes
+    // that flag after its version check.
+    BZROpenShim::InitializeTerrainProxyPhase2();
 
     // AutoSave stacks its main-thread update hook after the normal patch set so
     // it chains whichever world-update target (stock or OpenShim) is active.
@@ -111,6 +119,7 @@ namespace BZROpenShim
         }
         BZROpenShim::ShutdownOgreAnimationProfiler();
         BZROpenShim::ShutdownDx11ColorSpaceDiagnostic();
+        BZROpenShim::ShutdownTerrainProxyPhase2();
         BZROpenShim::ShutdownAutoSave();
         BZROpenShim::FlushChunkFragmentEventsForShutdown();
         // Stop the upper observation layer before the lower Winsock optimizer

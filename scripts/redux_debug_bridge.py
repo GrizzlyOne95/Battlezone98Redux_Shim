@@ -75,14 +75,11 @@ class SessionInfo:
 
 
 def candidate_game_dirs() -> list[Path]:
-    user_profile = Path(os.environ.get("USERPROFILE", ""))
     dirs: list[Path] = []
     explicit = os.environ.get("BZR_GAME_DIR") or os.environ.get("BZR_REDUX_GAME_DIR")
     if explicit:
         dirs.append(Path(explicit))
-    if user_profile:
-        dirs.append(user_profile / "Documents" / "Battlezone 98 Redux")
-    dirs.append(Path("<GAME_ROOT>"))
+    dirs.append(Path(r"C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux"))
     return dirs
 
 
