@@ -27,10 +27,12 @@ namespace BZROpenShim
                                                 uint32_t flags, void* parent, int a);
     // cUI_TextEntry ctor 0x007CF410. The two leading flags are byte fields:
     // arg2 lands at +0x950 (mAllowEnter, 1 at every shipped call site) and arg1
-    // at +0x960 (0 or 1 depending on screen). maxLength is 0x24 or 0x2A in
-    // stock code. Derives from cUI_Text, whose ctor it forwards args 4..10 to.
+    // at +0x960 (0 or 1 depending on screen). displayLength is 0x24 or 0x2A in
+    // stock code and controls the rendered tail, not the total input length;
+    // +0x964 is the optional total input limit. Derives from cUI_Text, whose
+    // ctor it forwards args 4..10 to.
     using FnUiTextEntryCtor = void* (__thiscall*)(void* self,
-                                                  int flagA, int allowEnter, int maxLength,
+                                                  int flagA, int allowEnter, int displayLength,
                                                   const char* name,
                                                   float x, float y, float w, float h,
                                                   uint32_t flags, void* parent);
@@ -61,10 +63,17 @@ namespace BZROpenShim
     inline constexpr size_t kUiSelectlistSize = 0x180;
 
     // Field offsets confirmed against this build's ctor code, not the PDB.
+    // cUI_View's input-active byte, set by its ctor and by SetActive
+    // (0x007D3310, which also drives the Ogre element's visibility). While it
+    // is set, cUI_View::MousePressed/MouseReleased report any click inside the
+    // view's own rect as handled -- without a callback -- so a decorative
+    // overlay silently blocks every widget the parent visits after it.
+    inline constexpr size_t kUiViewInputActiveOffset = 0xE9;
     inline constexpr size_t kUiTextEntryTextOffset = 0x930;       // std::string
-    inline constexpr size_t kUiTextEntryMaxLengthOffset = 0x948;
+    inline constexpr size_t kUiTextEntryMaxLengthOffset = 0x948;  // rendered tail length
     inline constexpr size_t kUiTextEntryEnterCbOffset = 0x94C;
     inline constexpr size_t kUiTextEntryAllowEnterOffset = 0x950; // byte
+    inline constexpr size_t kUiTextEntryInputLimitOffset = 0x964; // -1 means unlimited
     inline constexpr size_t kUiSelectlistSelectedOffset = 0x14C;  // -1 when none
     inline constexpr size_t kUiSelectlistScrollOffset = 0x150;
     inline constexpr size_t kUiSelectlistPageUpOffset = 0x178;

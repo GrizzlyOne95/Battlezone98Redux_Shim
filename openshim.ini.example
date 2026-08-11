@@ -261,8 +261,30 @@ UdpPort = 0
 
 ; Multiplayer name override, equivalent to the stock /nickname= switch. When
 ; blank or absent, Redux uses your Steam/GOG account name. Maximum 127
-; characters. Also editable from the lobby.
+; characters.
+; The injected lobby name field can edit this value; set it here instead, or
+; use "/name <text>" in lobby chat. The service is told your name once per
+; connection, in its login message, so a change needs a fresh authorisation --
+; see ReauthOnNicknameChange below.
 ; Nickname =
+
+; Re-authorise with BZRNet immediately after a nickname change, so the new name
+; appears without restarting the game. Boolean. Default: enabled.
+; Leaving the multiplayer screens is NOT enough on its own: the websocket lives
+; for the whole process, which is why the name used to need a restart. This
+; queues the same SendAuthorization the engine runs when it first connects.
+; It is a live service round trip, and the service decides what that does to
+; any lobby you are sitting in - turn it off to go back to apply-on-next-connect.
+; Environment override: OPENSHIM_DISABLE_BZRNET_REAUTH=1
+ReauthOnNicknameChange = 1
+
+; Injected lobby readouts: the multiplayer name row and the negotiated-route
+; readout ("Net: idle udp 51330", or "Alice:LAN Bob:RELAY" once peers connect)
+; in the lobby's left margin. Boolean. Default: enabled.
+; Turn this off if the lobby misbehaves; it disables only the injected readouts,
+; not the route preference, port, or /name command.
+; Environment override: OPENSHIM_DISABLE_LOBBY_READOUTS=1
+LobbyReadouts = 1
 [SinglePlayer]
 ; These gameplay-affecting improvements are hard-disabled in network games,
 ; regardless of the values below.

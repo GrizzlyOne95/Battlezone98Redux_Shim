@@ -34,6 +34,10 @@ namespace BZROpenShim
     void __cdecl FlagButtonOnHoverClient(void* param);
     void __cdecl NicknameEntryOnEnterHost();
     void __cdecl NicknameEntryOnEnterClient();
+    void __cdecl NicknameEditOnClickHost();
+    void __cdecl NicknameEditOnClickClient();
+    void __cdecl NetRouteRefreshHost();
+    void __cdecl NetRouteRefreshClient();
     void __cdecl AutoSaveButtonOnClickLoad();
     void AutoSaveLoadButtonCreateFromFrame(void* frameBase);
     void __fastcall RestartMissionPauseHook(void* thisPtr);

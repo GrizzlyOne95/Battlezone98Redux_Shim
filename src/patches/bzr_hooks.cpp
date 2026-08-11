@@ -61,9 +61,15 @@ namespace BZROpenShim
     // one cycling button. g_FlagButton* is the left arrow; these are the right.
     void* g_FlagButtonHostRight = nullptr;
     void* g_FlagButtonClientRight = nullptr;
-    // cUI_TextEntry over the /nickname= buffer, and the negotiated-route readout.
+    // Framed cUI_TextEntry over the /nickname= buffer, and the negotiated-route readout.
+    void* g_NicknamePanelHost = nullptr;
+    void* g_NicknamePanelClient = nullptr;
     void* g_NicknameEntryHost = nullptr;
     void* g_NicknameEntryClient = nullptr;
+    void* g_NicknameEditButtonHost = nullptr;
+    void* g_NicknameEditButtonClient = nullptr;
+    void* g_NicknameConfirmButtonHost = nullptr;
+    void* g_NicknameConfirmButtonClient = nullptr;
     void* g_NetRouteLabelHost = nullptr;
     void* g_NetRouteLabelClient = nullptr;
     void* g_HostUiParent = nullptr;
@@ -233,6 +239,12 @@ namespace BZROpenShim
     FnUiSelectlistCtor g_BzrFn_SelectlistCtor = nullptr; // 0x007C9DE0
     FnUiSelectlistSetItem g_BzrFn_SelectlistSetItem = nullptr; // 0x007CABF0
     FnUiSetCb g_BzrFn_TextEntrySetEnterCb = nullptr; // 0x007CF940
+    static FnUiSetStr g_BzrFn_TextEntryAppendText = nullptr; // 0x007CF980
+    using FnUiTextEntryAppendChar = uint8_t (__thiscall*)(void*, uint8_t);
+    using FnUiTextEntryClear = void (__thiscall*)(void*);
+    static FnUiTextEntryAppendChar g_BzrFn_TextEntryAppendChar = nullptr; // 0x007CFA70
+    static FnUiTextEntryClear g_BzrFn_TextEntryClear = nullptr; // 0x007CF9F0
+    static void (__thiscall* g_BzrFn_TextEntrySetInputLimit)(void*, int) = nullptr; // 0x00795BD0
     FnUiSetCb g_BzrFn_SelectlistSetOnSelect = nullptr; // 0x007CB3E0
     FnUiSetStr g_BzrFn_SetTextureOff = nullptr; // 0x007D2870
     FnUiSetStr g_BzrFn_SetTextureOver = nullptr; // 0x007C2F10
@@ -385,6 +397,10 @@ namespace BZROpenShim
 
     namespace
     {
+        static bool IsWidgetLiveChildOfParent(void* parent, void* widget);
+        static void InstallNicknameTextEntryInputHookIfPossible();
+        static void ShowNicknameApplyConfirmation(void* entry);
+
         constexpr DWORD kDbgPrintExceptionAnsi = 0x40010006u;
         constexpr DWORD kDbgPrintExceptionWide = 0x4001000Au;
         constexpr DWORD kVehicleAssetRetryDelayMs = 1500u;
@@ -424,9 +440,42 @@ namespace BZROpenShim
         // still resolve the bare filename. The name is unique per flag so the
         // engine's by-name texture cache reuses the right image.
         constexpr char kFlagPreviewNamePrefix[] = "openshim_flagprev_";
+        constexpr char kNicknamePanelTextureName[] = "openshim_nickname_panel.png";
         constexpr char kFlagPreviewResourceGroup[] = "General";
         constexpr int kFlagPreviewWidth = 64;
         constexpr int kFlagPreviewHeight = 32;
+        // 1.5 put the flag in a titled panel. Redux has no resizable frame
+        // widget to borrow: its lobby panels ("Rooms", "Games", "Chat") are
+        // whole pre-rendered panels packed into ui/Multiplayer/multipe_center.png
+        // and multipc_center.png, sized for the slots they occupy. So the panel
+        // is drawn into the generated PNG instead, matching that art's own edge
+        // profile -- sampled off multipe_center.png at 1440x1080, which is the
+        // canvas the widget is placed on, so these are 1:1 screen pixels:
+        //   border   3px (0,42,0) | 2px (0,127,0) | 2px (0,84,0) | 2px (0,42,0)
+        //   header   fill (0,42,0), then 4px (0,127,0) | 3px (0,84,0) | 2px dark
+        //   field    1.5-style red with the one-bit emblem rendered black
+        constexpr int kFlagPanelBorder = 9;
+        constexpr int kFlagPanelHeaderHeight = 49;
+        // Leave a real gutter before the stock W/M buttons. The old 240px plate
+        // ended only a few pixels before their hit rectangles and its bright
+        // border visibly covered their left edge.
+        constexpr int kFlagPanelWidth = 224;
+        constexpr int kFlagPreviewFieldScale = 3;
+        constexpr int kFlagPanelFieldWidth = kFlagPreviewWidth * kFlagPreviewFieldScale;   // 192
+        constexpr int kFlagPanelFieldHeight = kFlagPreviewHeight * kFlagPreviewFieldScale; // 96
+        constexpr int kFlagPanelFieldPadY = 8;
+        constexpr int kFlagPanelHeight =
+            kFlagPanelHeaderHeight + 2 * kFlagPanelFieldPadY + kFlagPanelFieldHeight + kFlagPanelBorder; // 170
+        constexpr int kFlagPanelFieldX =
+            kFlagPanelBorder + (kFlagPanelWidth - 2 * kFlagPanelBorder - kFlagPanelFieldWidth) / 2;      // 24
+        constexpr int kFlagPanelFieldY = kFlagPanelHeaderHeight + kFlagPanelFieldPadY;                   // 57
+        constexpr int kNicknamePanelWidth = 240;
+        // Header, then the entry on its own full-width row, then the OK button
+        // under it. The entry had to stop sharing its row with OK: a cUI_Text
+        // renders only the trailing kNicknameVisibleCharacters of its string,
+        // and the width left over beside the button was ten characters.
+        constexpr int kNicknamePanelHeight = 144;
+        constexpr int kNicknamePanelHeaderHeight = 40;
         constexpr char kProducerBuildMenuIniName[] = "openshim_producer_build_menus.ini";
         constexpr char kProducerBuildMenuSection[] = "ProducerBuildMenus";
         constexpr char kProducerBuildMenuDefaultRoot[] = "build";
@@ -1589,6 +1638,19 @@ namespace BZROpenShim
         static bool g_UiManualObjectDedupeHookInstalled = false;
         static bool g_UiManualObjectDedupeFailureLogged = false;
         static bool g_UiManualObjectDedupeTestInjected = false;
+        static InlineDetour32 g_TextEntryAppendCharDetour = {};
+        static FnUiTextEntryAppendChar g_BzrFn_TextEntryAppendCharOriginal = nullptr;
+        static bool g_LobbyNicknameInputHookInstalled = false;
+        static bool g_LobbyNicknameInputHookFailureLogged = false;
+        static void* g_ActiveNicknameEntry = nullptr;
+        static void* g_ActiveNicknameParent = nullptr;
+        static void* g_NicknameEnterDispatchEntry = nullptr;
+        static void* g_PendingNicknameConfirmationEntry = nullptr;
+        static bool g_ReplaceNicknameOnNextInput = false;
+        // Whether the apply that is about to be acknowledged also queued a
+        // re-authorisation, so the row can say which one happened.
+        static bool g_PendingNicknameReauth = false;
+        static volatile long g_NicknameInputTraceBudget = 16;
         static bool g_CareerStatsMpHookInstalled = false;
         static bool g_CareerStatsMpHookInstallAttempted = false;
         static bool g_CareerStatsMpHookMismatchLogged = false;
@@ -7946,26 +8008,6 @@ namespace BZROpenShim
             return &g_FlagCatalog[static_cast<size_t>(g_SelectedFlagIndex)];
         }
 
-        static std::string GetSelectedFlagSummary()
-        {
-            const FlagCatalogEntry* entry = GetSelectedFlagEntry();
-            if (!entry)
-                return "No flag images found in flags folder.";
-
-            // Rendered in a fixed-width lobby tooltip label; keep it short so
-            // the text cannot overflow the widget.
-            char buffer[160] = {};
-            std::snprintf(
-                buffer,
-                sizeof(buffer),
-                "Flag: %s (%d/%u). %s",
-                entry->displayName.c_str(),
-                g_SelectedFlagIndex + 1,
-                static_cast<unsigned>(g_FlagCatalog.size()),
-                g_SelectedFlagStatus.c_str());
-            return buffer;
-        }
-
         static bool TryGenerateSelectedFlagArtifacts(const char* source)
         {
             const FlagCatalogEntry* entry = GetSelectedFlagEntry();
@@ -11681,21 +11723,27 @@ namespace BZROpenShim
             }
         }
 
+        // Keep SEH in a leaf with no STL/RAII locals. Debug MSVC iterators
+        // require object unwinding, which cannot coexist with __try in the same
+        // function (C2712).
+        static void TryUpdateExuCullingForUnit(FnExuUpdateCullingForUnit updateCulling,
+                                               void* object)
+        {
+            if (!updateCulling)
+                return;
+            __try
+            {
+                updateCulling(object);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
         static void __cdecl HandleUnitTurboBoundary(void* object, int boundary)
         {
             if (boundary == 0)
-            {
-                if (FnExuUpdateCullingForUnit updateCulling = ResolveExuCullingCallback())
-                {
-                    __try
-                    {
-                        updateCulling(object);
-                    }
-                    __except (EXCEPTION_EXECUTE_HANDLER)
-                    {
-                    }
-                }
-            }
+                TryUpdateExuCullingForUnit(ResolveExuCullingCallback(), object);
 
             uint32_t handle = 0;
             if (!TryGetTurboObjectHandle(object, handle))
@@ -12595,7 +12643,10 @@ namespace BZROpenShim
         // FUN_0075EEA0) and 0x0075DDC6, both as `cmp dword ptr [addr], 0` -- so
         // it is consulted per connection attempt and may be changed live.
         constexpr uintptr_t kBzrNetForceRelayFlagAddr = 0x00946708;
-        constexpr uintptr_t kBzrNetForceRelayReadSiteAddr = 0x0075F09F;
+        // NB: the guard site is the INSTRUCTION address, which starts two bytes
+        // before the disp32 operand that names the global (`83 3D` opcode +
+        // modrm). Anchoring on the operand instead silently fails the guard.
+        constexpr uintptr_t kBzrNetForceRelayReadSiteAddr = 0x0075F09D;
         constexpr uint8_t kBzrNetForceRelayReadSiteBytes[] =
             { 0x83, 0x3D, 0x08, 0x67, 0x94, 0x00, 0x00 }; // cmp dword [946708],0
 
@@ -12606,7 +12657,7 @@ namespace BZROpenShim
         // socket opens it reads back as the true bound port, which is what the
         // lobby readout reports.
         constexpr uintptr_t kBzrNetUdpPortAddr = 0x00945704;
-        constexpr uintptr_t kBzrNetUdpPortReadSiteAddr = 0x006BE7B8;
+        constexpr uintptr_t kBzrNetUdpPortReadSiteAddr = 0x006BE7B5; // instr, not operand
         constexpr uint8_t kBzrNetUdpPortReadSiteBytes[] =
             { 0x0F, 0xB7, 0x15, 0x04, 0x57, 0x94, 0x00 }; // movzx edx,word [945704]
 
@@ -12620,7 +12671,7 @@ namespace BZROpenShim
         // connect -- see the note on the lobby entry.
         constexpr uintptr_t kBzrNetNicknameAddr = 0x009453E0;
         constexpr size_t kBzrNetNicknameCapacity = 0x80; // last byte kept NUL
-        constexpr uintptr_t kBzrNetNicknameReadSiteAddr = 0x006C7D87;
+        constexpr uintptr_t kBzrNetNicknameReadSiteAddr = 0x006C7D84; // instr, not operand
         constexpr uint8_t kBzrNetNicknameReadSiteBytes[] =
             { 0x0F, 0xBE, 0x91, 0xE0, 0x53, 0x94, 0x00 }; // movsx edx,byte [ecx+9453E0]
 
@@ -12721,6 +12772,146 @@ namespace BZROpenShim
                 Log(L"[BZRNET] Failed to write nickname buffer\n");
             }
             return false;
+        }
+
+        // ---- forcing a BZRNet re-authorisation ----
+        //
+        // The service is told the player's name exactly once per connection, in
+        // the Authorization message, so a rename needs a fresh authorisation.
+        // Leaving the multiplayer screen is not enough: the websocket lives for
+        // the whole process, which is why only a restart used to work.
+        //
+        // The client's own connected-handler does this at 0x0075E06A:
+        //     client = *(void**)(x + 0x78);  client->SendAuthorization();
+        // SendAuthorization (0x006C6DF0) sends nothing itself. It binds the
+        // authorisation body (0x006C83F0) together with two flag bytes read
+        // from 0x0260B0CC / 0x0260B098 and posts it to the client's io context
+        // at +0xC18 -- so calling it only enqueues work on the network thread,
+        // which is what makes it callable from a widget callback at all.
+        constexpr uintptr_t kBzrNetSendAuthorizationAddr = 0x006C6DF0;
+        // Holds the ADDRESS of a shared_ptr; the client is its first dword.
+        // 0x007656BA copies that same shared_ptr into every new lobby at +0xC8,
+        // which is the cross-check below -- the client class has no RTTI, so
+        // there is no vftable to validate it against.
+        constexpr uintptr_t kBzrNetClientHolderAddr = 0x00945484;
+        constexpr uintptr_t kBzrNetLobbyVftable = 0x0089ADDC;
+        constexpr uintptr_t kBzrNetGetLobbyAddr = 0x00764760;
+        constexpr size_t kBzrNetLobbyClientOffset = 0xC8;
+
+        // `mov eax,[0x00945470]; ret` -- the global the lobby is published to on
+        // construction and zeroed on teardown. Guarded on the instruction.
+        static void* TryGetStockBzrNetLobby()
+        {
+            static constexpr uint8_t kExpectedBytes[] =
+            {
+                0x55, 0x8B, 0xEC, 0xA1, 0x70, 0x54, 0x94, 0x00, 0x5D, 0xC3
+            };
+            if (!ExpectedBytesMatchAt(
+                    kBzrNetGetLobbyAddr, kExpectedBytes, sizeof(kExpectedBytes)))
+                return nullptr;
+            return reinterpret_cast<void* (__cdecl*)()>(kBzrNetGetLobbyAddr)();
+        }
+
+        // Only hand back a client that the live lobby agrees with. A lobby
+        // exists exactly while the multiplayer screens do, which is also the
+        // only time a re-authorisation is wanted.
+        static void* ResolveBzrNetClientChecked()
+        {
+            __try
+            {
+                void* const holder =
+                    *reinterpret_cast<void**>(kBzrNetClientHolderAddr);
+                if (!holder)
+                    return nullptr;
+                void* const client = *reinterpret_cast<void**>(holder);
+                if (!client)
+                    return nullptr;
+
+                void* const lobby = TryGetStockBzrNetLobby();
+                if (!lobby ||
+                    *reinterpret_cast<uintptr_t*>(lobby) != kBzrNetLobbyVftable)
+                    return nullptr;
+                if (*reinterpret_cast<void**>(
+                        static_cast<uint8_t*>(lobby) + kBzrNetLobbyClientOffset) != client)
+                    return nullptr;
+                return client;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+            return nullptr;
+        }
+
+        static bool TryCallBzrNetSendAuthorization(void* client)
+        {
+            __try
+            {
+                reinterpret_cast<void(__thiscall*)(void*)>(
+                    kBzrNetSendAuthorizationAddr)(client);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[BZRNET] SendAuthorization faulted code=0x%08X\n",
+                    static_cast<uint32_t>(GetExceptionCode()));
+            }
+            return false;
+        }
+
+        // openshim.ini [Network] ReauthOnNicknameChange = 0, or
+        // OPENSHIM_DISABLE_BZRNET_REAUTH=1, to keep the old restart-to-apply
+        // behaviour -- re-authorising is a live service round trip and the
+        // service decides what it does to lobby membership.
+        static bool ShouldReauthOnNicknameChange()
+        {
+            if (EnvFlagEnabled("OPENSHIM_DISABLE_BZRNET_REAUTH"))
+                return false;
+            bool enabled = true;
+            if (TryGetUserConfigBool(
+                    kUserConfigNetworkSection, "ReauthOnNicknameChange", enabled))
+                return enabled;
+            return true;
+        }
+
+        static bool ForceBzrNetReauth(const char* source)
+        {
+            // push ebp; mov ebp,esp; sub esp,0x14; mov [ebp-4],ecx;
+            // mov eax,[0x0260B0CC]
+            static constexpr uint8_t kExpectedBytes[] =
+            {
+                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x14, 0x89, 0x4D, 0xFC,
+                0xA1, 0xCC, 0xB0, 0x60, 0x02
+            };
+            static bool s_MismatchLogged = false;
+
+            if (!ExpectedBytesMatchAt(
+                    kBzrNetSendAuthorizationAddr, kExpectedBytes, sizeof(kExpectedBytes)))
+            {
+                if (!s_MismatchLogged)
+                {
+                    s_MismatchLogged = true;
+                    Log(L"[BZRNET] SendAuthorization byte guard failed at 0x%08X; "
+                        L"nickname still applies on the next connect\n",
+                        static_cast<uint32_t>(kBzrNetSendAuthorizationAddr));
+                }
+                return false;
+            }
+
+            void* const client = ResolveBzrNetClientChecked();
+            if (!client)
+            {
+                Log(L"[BZRNET] No live BZRNet client to re-authorise (source=%hs); "
+                    L"nickname applies on the next connect\n",
+                    source);
+                return false;
+            }
+
+            if (!TryCallBzrNetSendAuthorization(client))
+                return false;
+
+            Log(L"[BZRNET] Queued BZRNet re-authorisation (source=%hs client=0x%08X)\n",
+                source, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(client)));
+            return true;
         }
 
         static const char* BzrNetRoutePreferenceName(BzrNetRoutePreference value)
@@ -13199,6 +13390,146 @@ namespace BZROpenShim
             }
         }
 
+        // SEH leaves used by AttackTaskDoStateTuningHook. Keep all checked
+        // STL iterators/RAII in the caller so Debug builds do not hit C2712.
+        static bool TryReadAttackTaskEndpoints(const uint8_t* taskBytes,
+                                               void*& craft,
+                                               void*& target)
+        {
+            craft = nullptr;
+            target = nullptr;
+            if (!taskBytes)
+                return false;
+            __try
+            {
+                craft = *reinterpret_cast<void* const*>(taskBytes + kAttackTaskCraftOffset);
+                target = *reinterpret_cast<void* const*>(taskBytes + kAttackTaskTargetOffset);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                craft = nullptr;
+                target = nullptr;
+                return false;
+            }
+        }
+
+        static bool TryRaiseAttackTaskRangeSq(uint8_t* taskBytes,
+                                              float engageSq,
+                                              float& previousRangeSq,
+                                              bool& changed)
+        {
+            previousRangeSq = 0.0f;
+            changed = false;
+            if (!taskBytes)
+                return false;
+            __try
+            {
+                float& rangeSq = *reinterpret_cast<float*>(
+                    taskBytes + kAttackTaskRangeSqOffset);
+                previousRangeSq = rangeSq;
+                if (!std::isfinite(rangeSq) || rangeSq < engageSq)
+                {
+                    rangeSq = engageSq;
+                    changed = true;
+                }
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static bool TryReadAttackTaskRangeSq(const uint8_t* taskBytes, float& rangeSq)
+        {
+            rangeSq = 0.0f;
+            if (!taskBytes)
+                return false;
+            __try
+            {
+                rangeSq = *reinterpret_cast<const float*>(
+                    taskBytes + kAttackTaskRangeSqOffset);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                rangeSq = 0.0f;
+                return false;
+            }
+        }
+
+        static bool TryApplyAttackTaskFiringOverride(uint8_t* taskBytes,
+                                                     float movementCloseSq,
+                                                     float& savedCloseSq)
+        {
+            savedCloseSq = 0.0f;
+            if (!taskBytes)
+                return false;
+            __try
+            {
+                savedCloseSq = *reinterpret_cast<float*>(
+                    taskBytes + kAttackTaskCloseSqOffset);
+                *reinterpret_cast<float*>(taskBytes + kAttackTaskCloseSqOffset) =
+                    movementCloseSq;
+                *reinterpret_cast<int*>(taskBytes + kAttackTaskCurStateOffset) =
+                    kAttackTaskFiringState;
+                *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) =
+                    kAttackTaskFiringState;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static bool TryRestoreAttackTaskFiringOverride(uint8_t* taskBytes,
+                                                       float savedCloseSq)
+        {
+            if (!taskBytes)
+                return false;
+            __try
+            {
+                *reinterpret_cast<float*>(taskBytes + kAttackTaskCloseSqOffset) =
+                    savedCloseSq;
+                *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) =
+                    kAttackTaskFiringState;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void TryApplyAttackTaskStrafeControl(void* craft,
+                                                    int strafeDirection,
+                                                    float kiteStrafe,
+                                                    bool reverseLos)
+        {
+            if (!craft)
+                return;
+            __try
+            {
+                void* vehicle = *reinterpret_cast<void**>(
+                    reinterpret_cast<uint8_t*>(craft) + 0x230);
+                if (!vehicle)
+                    return;
+                float* control = reinterpret_cast<float*>(
+                    reinterpret_cast<uint8_t*>(vehicle) + 0xC4);
+                if (std::fabs(control[2]) > 0.001f || std::fabs(control[3]) > 0.001f)
+                {
+                    control[2] = static_cast<float>(strafeDirection) * kiteStrafe;
+                    if (!reverseLos)
+                        control[3] = 0.0f;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
         void __fastcall AttackTaskDoStateTuningHook(void* taskPtr, void* /*edx*/)
         {
             if (!g_BzrFn_AttackTaskDoState || !taskPtr)
@@ -13207,12 +13538,7 @@ namespace BZROpenShim
             auto* taskBytes = reinterpret_cast<uint8_t*>(taskPtr);
             void* craft = nullptr;
             void* target = nullptr;
-            __try
-            {
-                craft = *reinterpret_cast<void**>(taskBytes + kAttackTaskCraftOffset);
-                target = *reinterpret_cast<void**>(taskBytes + kAttackTaskTargetOffset);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            if (!TryReadAttackTaskEndpoints(taskBytes, craft, target))
             {
                 g_BzrFn_AttackTaskDoState(taskPtr);
                 return;
@@ -13238,41 +13564,33 @@ namespace BZROpenShim
             // engine or another tuning source has already made larger.
             if (tuning.hasEngageRange && std::isfinite(tuning.engageRange))
             {
-                __try
+                const float engageSq = tuning.engageRange * tuning.engageRange;
+                float previousRangeSq = 0.0f;
+                bool rangeChanged = false;
+                if (std::isfinite(engageSq) &&
+                    TryRaiseAttackTaskRangeSq(
+                        taskBytes, engageSq, previousRangeSq, rangeChanged) &&
+                    rangeChanged &&
+                    (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE") ||
+                     EnvFlagEnabled("OPENSHIM_TRACE_AI_KITE")))
                 {
-                    float& rangeSq = *reinterpret_cast<float*>(
-                        taskBytes + kAttackTaskRangeSqOffset);
-                    const float engageSq = tuning.engageRange * tuning.engageRange;
-                    if (std::isfinite(engageSq) &&
-                        (!std::isfinite(rangeSq) || rangeSq < engageSq))
+                    const long remaining = InterlockedDecrement(
+                        &g_AiUnitTuningTraceBudget);
+                    if (remaining >= 0)
                     {
-                        const float previousRangeSq = rangeSq;
-                        rangeSq = engageSq;
-                        if (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE") ||
-                            EnvFlagEnabled("OPENSHIM_TRACE_AI_KITE"))
-                        {
-                            const long remaining = InterlockedDecrement(
-                                &g_AiUnitTuningTraceBudget);
-                            if (remaining >= 0)
-                            {
-                                char odfToken[kProducerBuildMenuTokenLen + 1] = {};
-                                TryGetObjectOdfToken(craft, odfToken);
-                                const float previousRange =
-                                    std::isfinite(previousRangeSq) && previousRangeSq > 0.0f
-                                        ? std::sqrt(previousRangeSq)
-                                        : 0.0f;
-                                Log(L"[AIUNIT] live-task craft=0x%08X odf=%hs range=%.2f->%.2f remaining=%ld\n",
-                                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
-                                    odfToken[0] ? odfToken : "-",
-                                    static_cast<double>(previousRange),
-                                    static_cast<double>(tuning.engageRange),
-                                    remaining);
-                            }
-                        }
+                        char odfToken[kProducerBuildMenuTokenLen + 1] = {};
+                        TryGetObjectOdfToken(craft, odfToken);
+                        const float previousRange =
+                            std::isfinite(previousRangeSq) && previousRangeSq > 0.0f
+                                ? std::sqrt(previousRangeSq)
+                                : 0.0f;
+                        Log(L"[AIUNIT] live-task craft=0x%08X odf=%hs range=%.2f->%.2f remaining=%ld\n",
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
+                            odfToken[0] ? odfToken : "-",
+                            static_cast<double>(previousRange),
+                            static_cast<double>(tuning.engageRange),
+                            remaining);
                     }
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
                 }
             }
 
@@ -13343,14 +13661,7 @@ namespace BZROpenShim
                                                    targetZ);
 
                 float rangeSq = 0.0f;
-                __try
-                {
-                    rangeSq = *reinterpret_cast<float*>(taskBytes + kAttackTaskRangeSqOffset);
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    rangeSq = 0.0f;
-                }
+                TryReadAttackTaskRangeSq(taskBytes, rangeSq);
 
                 if (currentLos && std::isfinite(rangeSq) && distanceSqD <= rangeSq)
                 {
@@ -13399,21 +13710,11 @@ namespace BZROpenShim
                         }
                     }
 
-                    __try
-                    {
-                        savedCloseSq = *reinterpret_cast<float*>(taskBytes + kAttackTaskCloseSqOffset);
-                        movementCloseSq = reverseLos
-                            ? tuning.kiteDesiredRange * tuning.kiteDesiredRange
-                            : 0.0f;
-                        *reinterpret_cast<float*>(taskBytes + kAttackTaskCloseSqOffset) = movementCloseSq;
-                        *reinterpret_cast<int*>(taskBytes + kAttackTaskCurStateOffset) = kAttackTaskFiringState;
-                        *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = kAttackTaskFiringState;
-                        applied = true;
-                    }
-                    __except (EXCEPTION_EXECUTE_HANDLER)
-                    {
-                        applied = false;
-                    }
+                    movementCloseSq = reverseLos
+                        ? tuning.kiteDesiredRange * tuning.kiteDesiredRange
+                        : 0.0f;
+                    applied = TryApplyAttackTaskFiringOverride(
+                        taskBytes, movementCloseSq, savedCloseSq);
                 }
             }
 
@@ -13421,32 +13722,18 @@ namespace BZROpenShim
 
             if (applied)
             {
-                __try
-                {
-                    // The temporary closeSq is a movement potential only. Fire
-                    // permission remains governed by rangeSq + stock AbleToHit.
-                    *reinterpret_cast<float*>(taskBytes + kAttackTaskCloseSqOffset) = savedCloseSq;
-                    *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = kAttackTaskFiringState;
+                // The temporary closeSq is a movement potential only. Fire
+                // permission remains governed by rangeSq + stock AbleToHit.
+                const bool restored = TryRestoreAttackTaskFiringOverride(
+                    taskBytes, savedCloseSq);
 
-                    // Preserve the stock terrain/obstacle stop: only add the
-                    // lateral component when DoBlast produced movement of its
-                    // own and the projected side-step retains terrain LOS.
-                    if (lateralLos && tuning.kiteStrafe > 0.0f)
-                    {
-                        void* vehicle = *reinterpret_cast<void**>(
-                            reinterpret_cast<uint8_t*>(craft) + 0x230);
-                        float* control = reinterpret_cast<float*>(
-                            reinterpret_cast<uint8_t*>(vehicle) + 0xC4);
-                        if (std::fabs(control[2]) > 0.001f || std::fabs(control[3]) > 0.001f)
-                        {
-                            control[2] = static_cast<float>(state.strafeDirection) * tuning.kiteStrafe;
-                            if (!reverseLos)
-                                control[3] = 0.0f;
-                        }
-                    }
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
+                // Preserve the stock terrain/obstacle stop: only add the
+                // lateral component when DoBlast produced movement of its own
+                // and the projected side-step retains terrain LOS.
+                if (restored && lateralLos && tuning.kiteStrafe > 0.0f)
                 {
+                    TryApplyAttackTaskStrafeControl(
+                        craft, state.strafeDirection, tuning.kiteStrafe, reverseLos);
                 }
             }
 
@@ -13572,6 +13859,105 @@ namespace BZROpenShim
         // points at the stock CALL return address followed by two VECTOR_3D
         // values (candidate, scavenger); callerFrame is InitLookingForScrap's
         // EBP and exposes only the task/candidate locals validated for 2.2.301.
+        // SEH leaves for the scavenger score hook. The caller owns checked
+        // unordered_map iterators in Debug, so no __try may remain in it.
+        static bool TryReadScrapScorePositions(const uint8_t* originalStack,
+                                               ScrapScoreVector3& candidatePosition,
+                                               ScrapScoreVector3& scavengerPosition)
+        {
+            if (!originalStack)
+                return false;
+            __try
+            {
+                candidatePosition = *reinterpret_cast<const ScrapScoreVector3*>(originalStack + 4);
+                scavengerPosition = *reinterpret_cast<const ScrapScoreVector3*>(originalStack + 16);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static bool TryReadScrapScoreContext(const uint8_t* callerFrame,
+                                             void*& recycleTask,
+                                             void*& candidateObject,
+                                             void*& craft)
+        {
+            recycleTask = nullptr;
+            candidateObject = nullptr;
+            craft = nullptr;
+            if (!callerFrame)
+                return false;
+            __try
+            {
+                recycleTask = *reinterpret_cast<void* const*>(
+                    callerFrame - kRecycleTaskCallerThisLocalOffset);
+                candidateObject = *reinterpret_cast<void* const*>(
+                    callerFrame - kRecycleTaskCallerCandidateLocalOffset);
+                if (recycleTask)
+                {
+                    craft = *reinterpret_cast<void* const*>(
+                        reinterpret_cast<const uint8_t*>(recycleTask) + kRecycleTaskOwnerOffset);
+                }
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                recycleTask = nullptr;
+                candidateObject = nullptr;
+                craft = nullptr;
+                return false;
+            }
+        }
+
+        static bool TryProbeScrapPath(void* craft,
+                                      float targetX,
+                                      float targetZ,
+                                      void*& path,
+                                      bool& badPath,
+                                      float& pathLength)
+        {
+            path = nullptr;
+            badPath = true;
+            pathLength = 0.0f;
+            __try
+            {
+                path = g_BzrFn_FindPlanForObject(craft, targetX, targetZ);
+                if (path)
+                {
+                    badPath =
+                        *reinterpret_cast<const int*>(
+                            reinterpret_cast<const uint8_t*>(path) + kAiPathTypeOffset) ==
+                        kAiPathBadPathType;
+                    if (!badPath)
+                        pathLength = g_BzrFn_AiPathGetLength(path);
+                }
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                badPath = true;
+                pathLength = 0.0f;
+                return false;
+            }
+        }
+
+        static void TryDeleteScrapProbePath(void* path)
+        {
+            if (!path || !g_BzrFn_AiPathDelete)
+                return;
+            __try
+            {
+                g_BzrFn_AiPathDelete(path, 1);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                // The score hook must fail soft; the stock task still owns its
+                // independently-created validation path.
+            }
+        }
+
         static __declspec(noinline) float __cdecl ScoreScrapCandidateFromCallsite(
             const uint8_t* callerFrame,
             const uint8_t* originalStack)
@@ -13584,12 +13970,8 @@ namespace BZROpenShim
             void* recycleTask = nullptr;
             void* candidateObject = nullptr;
             void* craft = nullptr;
-            __try
-            {
-                candidatePosition = *reinterpret_cast<const ScrapScoreVector3*>(originalStack + 4);
-                scavengerPosition = *reinterpret_cast<const ScrapScoreVector3*>(originalStack + 16);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            if (!TryReadScrapScorePositions(
+                    originalStack, candidatePosition, scavengerPosition))
             {
                 return kScrapRejectedScore;
             }
@@ -13601,19 +13983,8 @@ namespace BZROpenShim
             if (!std::isfinite(straightSquared))
                 return kScrapRejectedScore;
 
-            __try
-            {
-                recycleTask = *reinterpret_cast<void* const*>(
-                    callerFrame - kRecycleTaskCallerThisLocalOffset);
-                candidateObject = *reinterpret_cast<void* const*>(
-                    callerFrame - kRecycleTaskCallerCandidateLocalOffset);
-                if (recycleTask)
-                {
-                    craft = *reinterpret_cast<void* const*>(
-                        reinterpret_cast<const uint8_t*>(recycleTask) + kRecycleTaskOwnerOffset);
-                }
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            if (!TryReadScrapScoreContext(
+                    callerFrame, recycleTask, candidateObject, craft))
             {
                 return straightSquared;
             }
@@ -13689,42 +14060,13 @@ namespace BZROpenShim
             void* path = nullptr;
             float pathLength = 0.0f;
             bool badPath = true;
-            bool pathProbeFaulted = false;
-            __try
-            {
-                path = g_BzrFn_FindPlanForObject(
-                    craft, candidatePosition.x, candidatePosition.z);
-                if (path)
-                {
-                    badPath =
-                        *reinterpret_cast<const int*>(
-                            reinterpret_cast<const uint8_t*>(path) + kAiPathTypeOffset) ==
-                        kAiPathBadPathType;
-                    if (!badPath)
-                        pathLength = g_BzrFn_AiPathGetLength(path);
-                }
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                pathProbeFaulted = true;
-                badPath = true;
-                pathLength = 0.0f;
-            }
+            const bool pathProbeSucceeded = TryProbeScrapPath(
+                craft, candidatePosition.x, candidatePosition.z,
+                path, badPath, pathLength);
 
-            if (path)
-            {
-                __try
-                {
-                    g_BzrFn_AiPathDelete(path, 1);
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    // The score hook must fail soft; the stock task still owns
-                    // its independently-created validation path.
-                }
-            }
+            TryDeleteScrapProbePath(path);
 
-            if (pathProbeFaulted)
+            if (!pathProbeSucceeded)
             {
                 TraceScrapPathScore("probe-fallback", craft, candidateObject,
                                     straightDistance, 0.0f, straightSquared);
@@ -15043,8 +15385,9 @@ namespace BZROpenShim
                 g_BzrNetPeerRoutes.end());
         }
 
-        // "Alice:LAN Bob:RELAY" plus the bound UDP port, or a resting string
-        // when no peer has completed a handshake yet.
+        // Compact route-only status plus the bound UDP port. Peer names made
+        // this narrow sidebar caption unreadable as soon as a platform ID or a
+        // moderately long nickname appeared.
         static void FormatBzrNetRouteSummary(char* out, size_t outSize)
         {
             if (!out || outSize == 0)
@@ -15055,31 +15398,35 @@ namespace BZROpenShim
                 std::lock_guard<std::mutex> lock(g_BzrNetRouteMutex);
                 for (const BzrNetPeerRoute& entry : g_BzrNetPeerRoutes)
                 {
-                    if (!summary.empty())
-                        summary.push_back(' ');
-                    summary += entry.name;
-                    summary.push_back(':');
-                    summary += entry.route.empty() ? "?" : entry.route;
+                    const std::string route = entry.route.empty() ? "?" : entry.route;
+                    const bool alreadyShown =
+                        summary == route ||
+                        summary.find(route + "/") == 0 ||
+                        summary.find("/" + route) != std::string::npos;
+                    if (!alreadyShown)
+                    {
+                        if (!summary.empty())
+                            summary.push_back('/');
+                        summary += route;
+                    }
                 }
             }
 
             const int port = GetBzrNetUdpPort();
             char portText[32] = {};
             if (port > 0)
-                std::snprintf(portText, sizeof(portText), " (udp %d)", port);
+                std::snprintf(portText, sizeof(portText), " %d", port);
 
-            // Echo the active name override so the player can confirm the entry
-            // took. An empty buffer means the platform account name is winning.
-            char nickname[128] = {};
-            char nicknameText[144] = {};
-            if (ReadBzrNetNickname(nickname, sizeof(nickname)) && nickname[0] != '\0')
-                std::snprintf(nicknameText, sizeof(nicknameText), "You: %s | ", nickname);
+            if (summary.empty())
+            {
+                std::snprintf(out, outSize, "Net: idle%s%s",
+                              IsBzrNetForceRelayActive() ? "/relay" : "",
+                              portText);
+                return;
+            }
 
-            std::snprintf(out, outSize, "%sNet: %s%s%s",
-                          nicknameText,
-                          summary.empty() ? "no peers connected" : summary.c_str(),
-                          IsBzrNetForceRelayActive() ? " [relay forced]" : "",
-                          portText);
+            std::snprintf(out, outSize, "Net: %.12s%s",
+                          summary.c_str(), portText);
         }
 
         using FnBzrNetLogger = void(__cdecl*)(const char* fmt, ...);
@@ -20339,6 +20686,39 @@ namespace BZROpenShim
             }
         }
 
+        // Raw diagnostic reads are isolated from the renderer because the
+        // renderer owns Debug STL iterators/range-for state. Mixing those with
+        // SEH in one function triggers MSVC C2712.
+        static void DumpMultiplayerFlagCopyFailureDiagnostics(void** playersByTeam)
+        {
+            __try
+            {
+                void* p1 = playersByTeam ? playersByTeam[1] : nullptr;
+                auto getData = reinterpret_cast<FnNetPlayerGetData>(kNetPlayerGetDataAddr);
+                void* slotVec = (getData && p1) ? getData(p1, kLegacyFlagDataSlot) : nullptr;
+                long slotSize = -1;
+                if (slotVec)
+                {
+                    const auto* b = *reinterpret_cast<uint8_t* const*>(
+                        reinterpret_cast<uint8_t*>(slotVec) + 0x0);
+                    const auto* e = *reinterpret_cast<uint8_t* const*>(
+                        reinterpret_cast<uint8_t*>(slotVec) + 0x4);
+                    if (b && e && e >= b)
+                        slotSize = static_cast<long>(e - b);
+                }
+                const void* flagBuf = p1
+                    ? *reinterpret_cast<void* const*>(
+                          reinterpret_cast<uint8_t*>(p1) + kNetPlayerFlagBufferOffset)
+                    : nullptr;
+                Log(L"[FLAGDIAG] applied but copy empty: byteam[1]=0x%p getData=0x%p slot0x0D=%ld flagBuf=0x%p\n",
+                    p1, slotVec, slotSize, flagBuf);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[FLAGDIAG] applied but copy empty: raw read faulted\n");
+            }
+        }
+
         static void RenderMultiplayerFlags(void* /*camera*/)
         {
             if (!ShouldEnableMultiplayerFlagUi())
@@ -20390,32 +20770,7 @@ namespace BZROpenShim
                 !g_MultiplayerFlagCopyFailLogged)
             {
                 g_MultiplayerFlagCopyFailLogged = true;
-                __try
-                {
-                    void* p1 = playersByTeam[1];
-                    auto getData = reinterpret_cast<FnNetPlayerGetData>(kNetPlayerGetDataAddr);
-                    void* slotVec = (getData && p1) ? getData(p1, kLegacyFlagDataSlot) : nullptr;
-                    long slotSize = -1;
-                    if (slotVec)
-                    {
-                        const auto* b = *reinterpret_cast<uint8_t* const*>(
-                            reinterpret_cast<uint8_t*>(slotVec) + 0x0);
-                        const auto* e = *reinterpret_cast<uint8_t* const*>(
-                            reinterpret_cast<uint8_t*>(slotVec) + 0x4);
-                        if (b && e && e >= b)
-                            slotSize = static_cast<long>(e - b);
-                    }
-                    const void* flagBuf = p1
-                        ? *reinterpret_cast<void* const*>(
-                              reinterpret_cast<uint8_t*>(p1) + kNetPlayerFlagBufferOffset)
-                        : nullptr;
-                    Log(L"[FLAGDIAG] applied but copy empty: byteam[1]=0x%p getData=0x%p slot0x0D=%ld flagBuf=0x%p\n",
-                        p1, slotVec, slotSize, flagBuf);
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    Log(L"[FLAGDIAG] applied but copy empty: raw read faulted\n");
-                }
+                DumpMultiplayerFlagCopyFailureDiagnostics(playersByTeam);
             }
 
             void* userObject = nullptr;
@@ -20628,6 +20983,106 @@ namespace BZROpenShim
                     g_MultiplayerFlagRenderHookFailureLogged = true;
                 }
             }
+        }
+
+        // Lobby screens route keyboard characters to their own stock chat
+        // entries through cUI_TextEntry::AppendChar (0x007CFA70), but they do
+        // not share one reliable screen-level OnChar target. Intercept the
+        // common append operation instead. The detour is inert unless the
+        // player explicitly activated our live nickname entry.
+        static uint8_t __fastcall TextEntryAppendCharNicknameHook(
+            void* thisPtr,
+            void* /*unusedEdx*/,
+            uint8_t character)
+        {
+            void* const entry = g_ActiveNicknameEntry;
+            void* const parent = g_ActiveNicknameParent;
+            if (entry && parent && g_BzrFn_TextEntryAppendChar &&
+                IsWidgetLiveChildOfParent(parent, entry))
+            {
+                // A click means "replace" when a configured nickname is
+                // already displayed. Keep it visible until the first actual
+                // edit so clicking and pressing Enter remains a no-op update.
+                if (g_ReplaceNicknameOnNextInput && character != '\r' && character != '\n')
+                {
+                    if (g_BzrFn_TextEntryClear)
+                        g_BzrFn_TextEntryClear(entry);
+                    g_ReplaceNicknameOnNextInput = false;
+                }
+                if (InterlockedDecrement(&g_NicknameInputTraceBudget) >= 0)
+                    Log(L"[BZRNET] Nickname input routed (enter=%hs)\n",
+                        (character == '\r' || character == '\n') ? "yes" : "no");
+                const bool isEnter = (character == '\r' || character == '\n');
+                if (isEnter)
+                    g_NicknameEnterDispatchEntry = entry;
+                const uint8_t result = g_BzrFn_TextEntryAppendCharOriginal
+                    ? g_BzrFn_TextEntryAppendCharOriginal(entry, character)
+                    : 0;
+                if (isEnter)
+                {
+                    g_NicknameEnterDispatchEntry = nullptr;
+                    // AppendChar rebuilds the rendered text after invoking its
+                    // Enter callback. Paint confirmation only after it returns
+                    // so the rebuild cannot immediately erase the message.
+                    if (g_PendingNicknameConfirmationEntry == entry)
+                    {
+                        g_PendingNicknameConfirmationEntry = nullptr;
+                        ShowNicknameApplyConfirmation(entry);
+                    }
+                }
+                return result;
+            }
+
+            if (entry || parent)
+            {
+                // A rebuilt lobby invalidates injected children. Drop edit
+                // mode before falling back so stale pointers receive no input.
+                g_ActiveNicknameEntry = nullptr;
+                g_ActiveNicknameParent = nullptr;
+                g_NicknameEnterDispatchEntry = nullptr;
+                g_ReplaceNicknameOnNextInput = false;
+            }
+            return g_BzrFn_TextEntryAppendCharOriginal
+                ? g_BzrFn_TextEntryAppendCharOriginal(thisPtr, character)
+                : 0;
+        }
+
+        static void InstallNicknameTextEntryInputHookIfPossible()
+        {
+            if (g_LobbyNicknameInputHookInstalled)
+                return;
+
+            constexpr uintptr_t kTextEntryAppendCharAddr = 0x007CFA70;
+            // push ebp; mov ebp,esp; push -1 -- complete instructions only.
+            static constexpr uint8_t kExpectedBytes[] =
+            {
+                0x55, 0x8B, 0xEC, 0x6A, 0xFF
+            };
+
+            if (!InstallInlineDetour32(
+                    g_TextEntryAppendCharDetour,
+                    kTextEntryAppendCharAddr,
+                    reinterpret_cast<void*>(TextEntryAppendCharNicknameHook),
+                    sizeof(kExpectedBytes),
+                    kExpectedBytes,
+                    sizeof(kExpectedBytes)))
+            {
+                if (!g_LobbyNicknameInputHookFailureLogged)
+                {
+                    Log(L"[BZRNET] TextEntry AppendChar bytes mismatch at 0x%08X; nickname editing disabled\n",
+                        static_cast<uint32_t>(kTextEntryAppendCharAddr));
+                    g_LobbyNicknameInputHookFailureLogged = true;
+                }
+                return;
+            }
+
+            g_BzrFn_TextEntryAppendCharOriginal =
+                reinterpret_cast<FnUiTextEntryAppendChar>(g_TextEntryAppendCharDetour.trampoline);
+            g_LobbyNicknameInputHookInstalled =
+                (g_BzrFn_TextEntryAppendCharOriginal != nullptr);
+            if (g_LobbyNicknameInputHookInstalled)
+                Log(L"[BZRNET] Installed TextEntry nickname input routing hook at 0x%08X\n",
+                    static_cast<uint32_t>(kTextEntryAppendCharAddr));
         }
 
         // ---- Multiplayer create-screen "Map Layout" preview overflow fix ----
@@ -22347,6 +22802,11 @@ namespace BZROpenShim
         g_BzrFn_SelectlistCtor = reinterpret_cast<FnUiSelectlistCtor>(0x007C9DE0);
         g_BzrFn_SelectlistSetItem = reinterpret_cast<FnUiSelectlistSetItem>(0x007CABF0);
         g_BzrFn_TextEntrySetEnterCb = reinterpret_cast<FnUiSetCb>(0x007CF940);
+        g_BzrFn_TextEntryAppendText = reinterpret_cast<FnUiSetStr>(0x007CF980);
+        g_BzrFn_TextEntryAppendChar = reinterpret_cast<FnUiTextEntryAppendChar>(0x007CFA70);
+        g_BzrFn_TextEntryClear = reinterpret_cast<FnUiTextEntryClear>(0x007CF9F0);
+        g_BzrFn_TextEntrySetInputLimit =
+            reinterpret_cast<void (__thiscall*)(void*, int)>(0x00795BD0);
         g_BzrFn_SelectlistSetOnSelect = reinterpret_cast<FnUiSetCb>(0x007CB3E0);
         g_BzrFn_SetTextureOff = reinterpret_cast<FnUiSetStr>(0x007D2870);
         g_BzrFn_SetTextureOver = reinterpret_cast<FnUiSetStr>(0x007C2F10);
@@ -22435,6 +22895,7 @@ namespace BZROpenShim
         InstallMissionTransitionSeamIfPossible();
         PinDirect3DModulesForShutdown();
         InstallMultiplayerFlagRenderHookIfPossible();
+        InstallNicknameTextEntryInputHookIfPossible();
         StartCareerStatsMpSessionWorker();
         InstallShieldTowerTeamFilterHookIfPossible();
         InstallMineTeamFilterHooksIfPossible();
@@ -22816,6 +23277,7 @@ namespace BZROpenShim
         InstallMissionTransitionSeamIfPossible();
         PinDirect3DModulesForShutdown();
         InstallMultiplayerFlagRenderHookIfPossible();
+        InstallNicknameTextEntryInputHookIfPossible();
         InstallMultiCreatePreviewFixIfPossible();
         InstallShieldTowerTeamFilterHookIfPossible();
         InstallMineTeamFilterHooksIfPossible();
@@ -25808,6 +26270,7 @@ namespace BZROpenShim
                 "[B] - ban - select the player in the list and click \"B\"",
                 "/lock - prevent new players from joining",
                 "/unlock - allow new players to join",
+                "/name <text> - set your multiplayer name",
             };
 
             void* helpObj = (g_BzrPtr_920168 && *g_BzrPtr_920168) ? *g_BzrPtr_920168 : nullptr;
@@ -25818,6 +26281,63 @@ namespace BZROpenShim
                 if (g_BzrFn_HelpUi)
                     g_BzrFn_HelpUi(0, line);
             }
+            return true;
+        }
+
+        // The lobby screen keeps keyboard focus on its own chatEntry, so a
+        // cUI_TextEntry we construct can be shown but never typed into. The
+        // chat line is therefore the real input path for the multiplayer name,
+        // reusing the command interception that already backs /ban.
+        if (_strnicmp(cmd, "/name", 5) == 0 && (cmd[5] == '\0' || cmd[5] == ' '))
+        {
+            void* helpObj = (g_BzrPtr_920168 && *g_BzrPtr_920168) ? *g_BzrPtr_920168 : nullptr;
+            const auto report = [&](const char* line)
+            {
+                if (g_BzrFn_HelpLog && helpObj)
+                    g_BzrFn_HelpLog(helpObj, line);
+                if (g_BzrFn_HelpUi)
+                    g_BzrFn_HelpUi(0, line);
+            };
+
+            const std::string requested = TrimAsciiCopy(cmd + 5);
+            char message[256] = {};
+            if (requested.empty())
+            {
+                char current[128] = {};
+                if (ReadBzrNetNickname(current, sizeof(current)) && current[0] != '\0')
+                {
+                    std::snprintf(message, sizeof(message),
+                                  "Multiplayer name is \"%s\" - /name <text> to change it", current);
+                }
+                else
+                {
+                    std::snprintf(message, sizeof(message),
+                                  "Using your platform account name - /name <text> to override it");
+                }
+                report(message);
+                return true;
+            }
+
+            if (!WriteBzrNetNickname(requested.c_str()))
+            {
+                report("Could not set the multiplayer name on this build.");
+                Log(L"[BZRNET] /name refused (byte guard failed)\n");
+                return true;
+            }
+
+            WriteShimUserConfigValue(kUserConfigNetworkSection, "Nickname", requested.c_str());
+            const bool reauthQueued =
+                ShouldReauthOnNicknameChange() && ForceBzrNetReauth("chat_command");
+            std::snprintf(message, sizeof(message),
+                          reauthQueued
+                              ? "Multiplayer name set to \"%s\" - reconnecting to apply it"
+                              : "Multiplayer name set to \"%s\" - applies on your next connect",
+                          requested.c_str());
+            report(message);
+            Log(L"[BZRNET] /name set nickname to \"%hs\" (reauth=%hs)\n",
+                requested.c_str(), reauthQueued ? "queued" : "no");
+            NetRouteRefreshHost();
+            NetRouteRefreshClient();
             return true;
         }
 
@@ -25879,13 +26399,26 @@ namespace BZROpenShim
 
         static void ResetHostUiCache()
         {
+            if (g_ActiveNicknameEntry == g_NicknameEntryHost)
+            {
+                g_ActiveNicknameEntry = nullptr;
+                g_ActiveNicknameParent = nullptr;
+                g_ReplaceNicknameOnNextInput = false;
+            }
+            if (g_NicknameEnterDispatchEntry == g_NicknameEntryHost)
+                g_NicknameEnterDispatchEntry = nullptr;
+            if (g_PendingNicknameConfirmationEntry == g_NicknameEntryHost)
+                g_PendingNicknameConfirmationEntry = nullptr;
             g_BanButtonHost = nullptr;
             g_BanLabelHost = nullptr;
             g_FlagButtonHost = nullptr;
             g_FlagButtonHostRight = nullptr;
             g_FlagLabelHost = nullptr;
             g_FlagPreviewHost = nullptr;
+            g_NicknamePanelHost = nullptr;
             g_NicknameEntryHost = nullptr;
+            g_NicknameEditButtonHost = nullptr;
+            g_NicknameConfirmButtonHost = nullptr;
             g_NetRouteLabelHost = nullptr;
             g_ProbeTextEntry = nullptr;
             g_ProbeSelectlist = nullptr;
@@ -25893,13 +26426,26 @@ namespace BZROpenShim
 
         static void ResetClientUiCache()
         {
+            if (g_ActiveNicknameEntry == g_NicknameEntryClient)
+            {
+                g_ActiveNicknameEntry = nullptr;
+                g_ActiveNicknameParent = nullptr;
+                g_ReplaceNicknameOnNextInput = false;
+            }
+            if (g_NicknameEnterDispatchEntry == g_NicknameEntryClient)
+                g_NicknameEnterDispatchEntry = nullptr;
+            if (g_PendingNicknameConfirmationEntry == g_NicknameEntryClient)
+                g_PendingNicknameConfirmationEntry = nullptr;
             g_BanButtonClient = nullptr;
             g_BanLabelClient = nullptr;
             g_FlagButtonClient = nullptr;
             g_FlagButtonClientRight = nullptr;
             g_FlagLabelClient = nullptr;
             g_FlagPreviewClient = nullptr;
+            g_NicknamePanelClient = nullptr;
             g_NicknameEntryClient = nullptr;
+            g_NicknameEditButtonClient = nullptr;
+            g_NicknameConfirmButtonClient = nullptr;
             g_NetRouteLabelClient = nullptr;
         }
 
@@ -26184,8 +26730,14 @@ namespace BZROpenShim
             if (!label || !g_BzrFn_SetTooltip)
                 return;
 
-            const std::string summary = GetSelectedFlagSummary();
-            g_BzrFn_SetTooltip(label, summary.c_str());
+            char summary[32] = {};
+            std::snprintf(
+                summary,
+                sizeof(summary),
+                "%d/%u",
+                g_SelectedFlagIndex + 1,
+                static_cast<unsigned>(g_FlagCatalog.size()));
+            g_BzrFn_SetTooltip(label, summary);
         }
 
         static std::filesystem::path GetFlagPreviewUiDirectory()
@@ -26208,8 +26760,22 @@ namespace BZROpenShim
                 "?getSingletonPtr@ResourceGroupManager@Ogre@@SAPAV12@XZ");
             auto addResourceLocation = ResolveOgreProc<FnOgreAddResourceLocation>(
                 "?addResourceLocation@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@00_N1@Z");
+            // Both exports exist in the shipped OgreMain.dll with exactly these
+            // mangled names, so a failure here means the module was not loaded
+            // yet, not that the symbol is absent.
             if (!getResourceGroupManager || !addResourceLocation)
+            {
+                static bool s_LoggedResolveFailure = false;
+                if (!s_LoggedResolveFailure)
+                {
+                    s_LoggedResolveFailure = true;
+                    Log(L"[FLAG] preview resource location: Ogre exports unresolved "
+                        L"(getSingletonPtr=%hs addResourceLocation=%hs)\n",
+                        getResourceGroupManager ? "ok" : "null",
+                        addResourceLocation ? "ok" : "null");
+                }
                 return;
+            }
 
             const std::string dir = GetFlagPreviewUiDirectory().string();
             const std::string type = "FileSystem";
@@ -26221,11 +26787,20 @@ namespace BZROpenShim
             {
                 void* manager = getResourceGroupManager();
                 if (!manager)
+                {
+                    Log(L"[FLAG] preview resource location: ResourceGroupManager singleton is null\n");
                     return;
+                }
                 addResourceLocation(manager, dir, type, group, false, false);
             }
             catch (...)
             {
+                // Ogre throws on an unknown group or a duplicate location, and
+                // the std::string arguments cross a toolset boundary (OgreMain
+                // is MSVC120, OpenShim is v143), so swallowing this silently
+                // hid the failure entirely.
+                Log(L"[FLAG] preview resource location: addResourceLocation threw dir=%hs group=%hs\n",
+                    dir.c_str(), group.c_str());
                 return;
             }
 
@@ -26282,11 +26857,15 @@ namespace BZROpenShim
         }
 
         // Render the packed 64x32 1-bpp flag mask into a PNG the lobby widget
-        // can display: white where a bit is set, over a translucent dark tile
-        // so the shape reads on any menu background. Row order mirrors the
+        // can display: black where a bit is set, over the red field used by
+        // Battlezone 1.5, inside a titled panel drawn in Redux's own lobby
+        // chrome. Row order mirrors the
         // bottom-up legacy payload so the preview is upright like the source.
+        // The field is nearest-neighbour tripled here rather than left to the
+        // GPU, which would filter the 1-bpp mask into mush.
         static bool WriteFlagPreviewPng(
             const std::array<uint8_t, kLegacyFlagPayloadBytes>& payload,
+            const std::string& title,
             const std::filesystem::path& outPath)
         {
             std::string gdiplusError;
@@ -26296,9 +26875,59 @@ namespace BZROpenShim
                 return false;
             }
 
-            Gdiplus::Bitmap bitmap(kFlagPreviewWidth, kFlagPreviewHeight, PixelFormat32bppARGB);
+            Gdiplus::Bitmap bitmap(kFlagPanelWidth, kFlagPanelHeight, PixelFormat32bppARGB);
             if (bitmap.GetLastStatus() != Gdiplus::Ok)
                 return false;
+
+            {
+                Gdiplus::Graphics gfx(&bitmap);
+                gfx.SetSmoothingMode(Gdiplus::SmoothingModeNone);
+                gfx.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+                gfx.SetTextRenderingHint(Gdiplus::TextRenderingHintSingleBitPerPixelGridFit);
+
+                Gdiplus::SolidBrush edgeDark(Gdiplus::Color(255, 0, 42, 0));
+                Gdiplus::SolidBrush edgeBright(Gdiplus::Color(255, 0, 127, 0));
+                Gdiplus::SolidBrush edgeMid(Gdiplus::Color(255, 0, 84, 0));
+                Gdiplus::SolidBrush field(Gdiplus::Color(255, 0, 0, 0));
+
+                // Border, drawn as nested fills so the profile above reads in
+                // source order from outside in.
+                gfx.FillRectangle(&edgeDark, 0, 0, kFlagPanelWidth, kFlagPanelHeight);
+                gfx.FillRectangle(&edgeBright, 3, 3, kFlagPanelWidth - 6, kFlagPanelHeight - 6);
+                gfx.FillRectangle(&edgeMid, 5, 5, kFlagPanelWidth - 10, kFlagPanelHeight - 10);
+                gfx.FillRectangle(&edgeDark, 7, 7, kFlagPanelWidth - 14, kFlagPanelHeight - 14);
+
+                const int inner = kFlagPanelWidth - 2 * kFlagPanelBorder;
+                gfx.FillRectangle(
+                    &field,
+                    kFlagPanelBorder,
+                    kFlagPanelHeaderHeight,
+                    inner,
+                    kFlagPanelHeight - kFlagPanelBorder - kFlagPanelHeaderHeight);
+
+                // Rule under the header band.
+                gfx.FillRectangle(&edgeBright, kFlagPanelBorder, 40, inner, 4);
+                gfx.FillRectangle(&edgeMid, kFlagPanelBorder, 44, inner, 3);
+                gfx.FillRectangle(&edgeDark, kFlagPanelBorder, 47, inner, 2);
+
+                if (!title.empty())
+                {
+                    std::wstring wide(title.begin(), title.end());
+                    Gdiplus::Font font(L"Lucida Console", 13.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+                    Gdiplus::StringFormat format;
+                    format.SetAlignment(Gdiplus::StringAlignmentCenter);
+                    format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+                    format.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
+                    format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+                    Gdiplus::SolidBrush text(Gdiplus::Color(255, 64, 220, 64));
+                    const Gdiplus::RectF layout(
+                        static_cast<float>(kFlagPanelBorder),
+                        9.0f,
+                        static_cast<float>(inner),
+                        30.0f);
+                    gfx.DrawString(wide.c_str(), -1, &font, layout, &format, &text);
+                }
+            }
 
             for (int y = 0; y < kFlagPreviewHeight; ++y)
             {
@@ -26309,10 +26938,22 @@ namespace BZROpenShim
                         static_cast<size_t>(payloadRow) * kLegacyFlagRowBytes +
                         static_cast<size_t>(x / 8)];
                     const bool on = (packed & static_cast<uint8_t>(0x80u >> (x & 7))) != 0;
+                    // Opaque now that there is a panel around it: a translucent
+                    // field let the menu art through and made the panel look
+                    // like it was floating over nothing.
                     const Gdiplus::Color color = on
-                        ? Gdiplus::Color(255, 255, 255, 255)
-                        : Gdiplus::Color(150, 0, 0, 0);
-                    bitmap.SetPixel(x, y, color);
+                        ? Gdiplus::Color(255, 0, 0, 0)
+                        : Gdiplus::Color(255, 232, 31, 18);
+                    for (int sy = 0; sy < kFlagPreviewFieldScale; ++sy)
+                    {
+                        for (int sx = 0; sx < kFlagPreviewFieldScale; ++sx)
+                        {
+                            bitmap.SetPixel(
+                                kFlagPanelFieldX + x * kFlagPreviewFieldScale + sx,
+                                kFlagPanelFieldY + y * kFlagPreviewFieldScale + sy,
+                                color);
+                        }
+                    }
                 }
             }
 
@@ -26352,7 +26993,29 @@ namespace BZROpenShim
             if (name == s_LastPreviewName && std::filesystem::exists(outPath, ec))
                 return name;
 
-            if (!WriteFlagPreviewPng(g_SelectedFlagPayload, outPath))
+            // The panel header carries both the flag name and the position in
+            // the catalogue. Keeping the counter in the texture removes the
+            // old label below the arrows, where it collided with the lobby's
+            // bottom Options strip.
+            std::string title;
+            if (const FlagCatalogEntry* entry = GetSelectedFlagEntry())
+            {
+                char compactTitle[96] = {};
+                std::snprintf(
+                    compactTitle,
+                    sizeof(compactTitle),
+                    "%s  %d/%u",
+                    entry->displayName.c_str(),
+                    g_SelectedFlagIndex + 1,
+                    static_cast<unsigned>(g_FlagCatalog.size()));
+                title = compactTitle;
+            }
+            for (char& ch : title)
+                ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+            if (title.empty())
+                title = "FLAGS";
+
+            if (!WriteFlagPreviewPng(g_SelectedFlagPayload, title, outPath))
                 return std::string();
             s_LastPreviewName = name;
             Log(L"[FLAG] wrote lobby preview name=%hs path=%hs\n",
@@ -26377,10 +27040,21 @@ namespace BZROpenShim
         // uniform 2.25 factor (both are 4:3), so the arrow pair keeps its retail
         // proportions: flagLeftButton/flagRightButton are 18x19 at 90,114 and
         // 108,114, i.e. 40.5x42.75 side by side with no gap.
+        // A literal 2.25x of the retail 18x19 arrows gives 40.5x42.75, which
+        // measured too small to use against Redux's own chrome and -- at 81px
+        // for the pair -- overran the 56px of clearance before the Ban button.
+        // Keep the retail 18:19 aspect but size the pair to the stock Redux
+        // button instead, and give the cluster its own room (see the call sites).
         constexpr float kBz15UiScale = 2.25f;
-        constexpr float kFlagArrowWidth = 18.0f * kBz15UiScale;   // 40.5
-        constexpr float kFlagArrowHeight = 19.0f * kBz15UiScale;  // 42.75
-
+        constexpr float kFlagArrowWidth = kFlagButtonSize;                 // 48
+        constexpr float kFlagArrowHeight = kFlagButtonSize * (19.0f / 18.0f); // ~50.7
+        constexpr float kFlagArrowGap = 4.0f;
+        // The panel is authored at the canvas resolution it is displayed on, so
+        // it goes up 1:1 -- any scale here would resample chrome that was
+        // measured in screen pixels.
+        constexpr float kFlagPreviewDisplayWidth = static_cast<float>(kFlagPanelWidth);   // 224
+        constexpr float kFlagPreviewDisplayHeight = static_cast<float>(kFlagPanelHeight); // 170
+        constexpr float kFlagPreviewGap = 8.0f;
         static void CreateFlagButtonCommon(
             void* parent,
             float x,
@@ -26398,6 +27072,7 @@ namespace BZROpenShim
 
             EnsureFlagCatalogLoaded();
             PrimeSelectedFlagForTesting("ui_create");
+            *outLabel = nullptr;
 
             // The 1.5 pair, in place of the single cycling "F" button. The retail
             // arrows are bitmaps 2049/2050/2070/2071; until those are extracted
@@ -26413,8 +27088,8 @@ namespace BZROpenShim
             };
             const FlagArrowSpec arrows[] =
             {
-                { outButton,      "Flag Prev", "<", 0.0f,             onClickLeft },
-                { outButtonRight, "Flag Next", ">", kFlagArrowWidth,  onClickRight },
+                { outButton,      "Flag Prev", "<", 0.0f,                               onClickLeft },
+                { outButtonRight, "Flag Next", ">", kFlagArrowWidth + kFlagArrowGap,    onClickRight },
             };
 
             for (const FlagArrowSpec& arrow : arrows)
@@ -26452,29 +27127,7 @@ namespace BZROpenShim
                 g_BzrFn_AddChild(parent, *arrow.out, 0);
             }
 
-            void* labelMem = ::operator new(0x930, std::nothrow);
-            if (!labelMem)
-                return;
-            std::memset(labelMem, 0, 0x930);
-
-            *outLabel = g_BzrFn_LabelCtor(
-                labelMem,
-                "Lobby",
-                270.0f,
-                960.0f,
-                338.0f,
-                43.0f,
-                0x20,
-                parent,
-                0);
-            if (*outLabel)
-            {
-                if (g_BzrFn_LabelState)
-                    g_BzrFn_LabelState(*outLabel, nullptr);
-                g_BzrFn_AddChild(parent, *outLabel, 0);
-            }
-
-            UpdateFlagSelectionUiLabel(*outLabel);
+            const float previewY = y - kFlagPreviewDisplayHeight - kFlagPreviewGap;
 
             // 1.5-style preview tile showing the selected flag, placed just
             // above the arrow pair. It reuses the forward callback, so clicking
@@ -26489,13 +27142,17 @@ namespace BZROpenShim
                 if (previewMem)
                 {
                     std::memset(previewMem, 0, 0x1EC);
+                    // The payload is a fixed 64x32 legacy flag mask, so the PNG
+                    // stays at payload resolution (plus its plate) and only the
+                    // widget is scaled up -- at 1:1 it was too small to read
+                    // against Redux's chrome.
                     *outPreview = g_BzrFn_ButtonCtor(
                         previewMem,
                         "Flag Preview",
                         x,
-                        y - static_cast<float>(kFlagPreviewHeight) - 6.0f,
-                        static_cast<float>(kFlagPreviewWidth),
-                        static_cast<float>(kFlagPreviewHeight),
+                        previewY,
+                        kFlagPreviewDisplayWidth,
+                        kFlagPreviewDisplayHeight,
                         0x20,
                         parent,
                         0,
@@ -26512,26 +27169,182 @@ namespace BZROpenShim
         }
 
         // Refresh the negotiated-route readout from the observer's table.
-        static void UpdateNetRouteLabel(void* label)
+        // The route readout is a cUI_Button, not a cUI_Text. The ban and flag
+        // "labels" in this file are hover-driven status text: the engine only
+        // renders them while LabelState is being fed a live hover parameter,
+        // which is why a plain label created here shows nothing at rest. A
+        // button paints its caption unconditionally, so the readout is visible
+        // without hovering; clicking it just refreshes.
+        // Kept short: these captions are centred inside a 240-wide button in the
+        // lobby's narrow left margin, and an over-long caption overflows the
+        // button on both sides and runs off the screen edge.
+        constexpr char kNicknamePlaceholder[] = "Name: click to edit";
+        constexpr float kLobbySidebarWidth = 240.0f;
+        constexpr float kNicknamePanelPadding = 12.0f;
+        constexpr float kNicknameControlY = 48.0f;
+        constexpr float kNicknameControlHeight = 40.0f;
+        constexpr float kNicknameRouteGap = 12.0f;
+        constexpr float kNicknameConfirmGap = 8.0f;
+        constexpr float kNicknameConfirmWidth = 100.0f;
+        constexpr float kNicknameConfirmHeight = 36.0f;
+        constexpr float kNicknameEntryWidth =
+            kLobbySidebarWidth - 2.0f * kNicknamePanelPadding;
+        // cUI_TextEntry::AppendChar rebuilds the rendered string as the *last*
+        // N characters of the backing string, N being the ctor's display-length
+        // argument (+0x948). It is a width budget, not an input limit: stock
+        // "chatEntry" is 520 wide and asks for 36, i.e. ~14.4 units per glyph.
+        // Sizing it any smaller silently eats the front of the name -- at 10 on
+        // the old 164-wide field, "TheGrizzler" rendered as "heGrizzler".
+        constexpr float kNicknameCharacterWidth = 14.4f;
+        constexpr int kNicknameVisibleCharacters =
+            static_cast<int>(kNicknameEntryWidth / kNicknameCharacterWidth);
+        static_assert(kNicknameVisibleCharacters >= 15,
+                      "nickname field must render at least 15 characters");
+
+        // Kill switch for the injected lobby readouts. They are the newest
+        // children on that screen and the lobby crashes on teardown if any child
+        // is bad, so there has to be a way to turn them off without a rebuild.
+        //   openshim.ini  [Network] LobbyReadouts = 0
+        //   environment   OPENSHIM_DISABLE_LOBBY_READOUTS=1
+        static bool ShouldEnableLobbyReadouts()
         {
-            // Labels are cUI_Text; the ban and flag labels already drive their
-            // visible text through the tooltip setter, so match that rather
-            // than SetButtonLabel (which belongs to cUI_Button).
-            if (!label || !g_BzrFn_SetTooltip)
-                return;
-            char summary[256] = {};
-            FormatBzrNetRouteSummary(summary, sizeof(summary));
-            g_BzrFn_SetTooltip(label, summary);
+            if (EnvFlagEnabled("OPENSHIM_DISABLE_LOBBY_READOUTS"))
+                return false;
+            bool enabled = true;
+            if (TryGetUserConfigBool(kUserConfigNetworkSection, "LobbyReadouts", enabled))
+                return enabled;
+            return true;
         }
 
-        // Read what the player typed and push it into the /nickname= buffer,
-        // then persist it so it survives the session. The engine reads that
-        // buffer when it builds its BZRNet identity message, so an edit made
-        // while already connected only takes effect on the next connect.
-        static void ApplyNicknameFromEntry(void* entry, const char* source)
+        // A plain cUI_View eats every click that lands on it. cUI_View::
+        // MousePressed (0x007D2570) walks the parent's children in insertion
+        // order, stops at the first one that reports the press as handled, and
+        // -- once no child has taken it -- reports it handled itself whenever
+        // the point is inside its own rect and its input-active byte (+0xE9) is
+        // set. It invokes no callback while doing so, so the click simply
+        // disappears. Decoration is therefore never passive: the nickname panel
+        // is created before the controls it frames so that it draws behind
+        // them, which is exactly the order that put it ahead of them in that
+        // walk, and it swallowed every click on the entry and on OK.
+        //
+        // Clearing the byte directly is what makes the view input-transparent.
+        // SetActive (0x007D3310) is not usable here -- it forwards the same
+        // value to the Ogre element's visibility, so it would take the artwork
+        // down with the hit rectangle. Nothing else in the image reads +0xE9
+        // except the input handlers, all through the getter at 0x007D3360.
+        static void MakeViewInputTransparent(void* view)
+        {
+            if (!view)
+                return;
+            *(static_cast<uint8_t*>(view) + kUiViewInputActiveOffset) = 0;
+        }
+
+        static void InitializeNicknameEntry(void* entry)
         {
             if (!entry)
                 return;
+
+            if (g_BzrFn_TextEntrySetInputLimit)
+                g_BzrFn_TextEntrySetInputLimit(entry, static_cast<int>(kBzrNetNicknameCapacity - 1));
+
+            char current[128] = {};
+            if (ReadBzrNetNickname(current, sizeof(current)) && current[0] != '\0')
+            {
+                // This is the TextEntry API, not cUI_Text::SetText: it updates
+                // both the backing std::string and the rendered tail.
+                if (g_BzrFn_TextEntryAppendText)
+                    g_BzrFn_TextEntryAppendText(entry, current);
+            }
+            else if (g_BzrFn_SetTooltip)
+            {
+                // Show a prompt without putting it in the backing string. The
+                // first typed character replaces this display through the
+                // entry's normal input path, and Enter on an empty entry is a
+                // no-op in ApplyNicknameFromEntry.
+                g_BzrFn_SetTooltip(entry, kNicknamePlaceholder);
+            }
+        }
+
+        static void BeginNicknameEdit(void* entry, void* parent, const char* source)
+        {
+            if (!entry || !parent || !g_LobbyNicknameInputHookInstalled ||
+                !IsWidgetLiveChildOfParent(parent, entry))
+            {
+                Log(L"[BZRNET] Nickname edit unavailable (source=%hs)\n", source);
+                return;
+            }
+
+            // This lobby replays the focused transparent button's click
+            // callback for keyboard events. Do not restart an edit already in
+            // progress: doing so would re-arm replace-on-first-character for
+            // every key and leave only the final character in the entry.
+            if (g_ActiveNicknameEntry == entry && g_ActiveNicknameParent == parent)
+                return;
+
+            // Remove the display-only prompt before the first key arrives. If
+            // an actual nickname is present, retain it until the first edited
+            // character and then replace it as a unit.
+            char current[192] = {};
+            const bool haveText = ReadEngineStdString(
+                static_cast<uint8_t*>(entry) + kUiTextEntryTextOffset,
+                current,
+                sizeof(current));
+            if (g_BzrFn_SetTooltip)
+            {
+                // A successful apply leaves a display-only confirmation in
+                // the row. Restore the real backing value on the next click.
+                g_BzrFn_SetTooltip(entry, (haveText && current[0] != '\0') ? current : "");
+            }
+
+            g_ActiveNicknameEntry = entry;
+            g_ActiveNicknameParent = parent;
+            g_ReplaceNicknameOnNextInput = haveText && current[0] != '\0';
+            Log(L"[BZRNET] Nickname edit active (source=%hs replace=%hs)\n",
+                source,
+                g_ReplaceNicknameOnNextInput ? "yes" : "no");
+        }
+
+        static void EndNicknameEdit(void* entry)
+        {
+            if (g_ActiveNicknameEntry != entry)
+                return;
+            g_ActiveNicknameEntry = nullptr;
+            g_ActiveNicknameParent = nullptr;
+            g_ReplaceNicknameOnNextInput = false;
+        }
+
+        // Say which of the two things actually happened, and say it in the 15
+        // characters the field renders (kNicknameVisibleCharacters).
+        static void ShowNicknameApplyConfirmation(void* entry)
+        {
+            if (entry && g_BzrFn_SetTooltip)
+            {
+                g_BzrFn_SetTooltip(
+                    entry,
+                    g_PendingNicknameReauth ? "Reconnecting..." : "Saved-reconnect");
+            }
+        }
+
+        static void UpdateNetRouteLabel(void* readout)
+        {
+            if (!readout || !g_BzrFn_SetButtonLabel)
+                return;
+            char summary[256] = {};
+            FormatBzrNetRouteSummary(summary, sizeof(summary));
+            g_BzrFn_SetButtonLabel(readout, summary);
+        }
+
+
+        // Persist the launch/auth nickname. There is no live rename: BZRNet
+        // takes the displayed name from the Authorization message's `name`
+        // field -- which is this very buffer -- so it lands on the next
+        // connect. See "Renaming is a connect-time operation" in
+        // Docs/bz15-multiplayer-ui-port.md for why the player-data route that
+        // looked like a live path is not one.
+        static bool ApplyNicknameFromEntry(void* entry, const char* source)
+        {
+            if (!entry)
+                return false;
 
             char text[192] = {};
             if (!ReadEngineStdString(
@@ -26539,34 +27352,187 @@ namespace BZROpenShim
                     text, sizeof(text)))
             {
                 Log(L"[BZRNET] Nickname entry unreadable (source=%hs)\n", source);
-                return;
+                return false;
             }
 
             const std::string trimmed = TrimAsciiCopy(text);
-            if (trimmed.empty())
-                return;
+            if (trimmed.empty() || trimmed == kNicknamePlaceholder)
+                return false;
             if (!WriteBzrNetNickname(trimmed.c_str()))
-                return;
+            {
+                Log(L"[BZRNET] Nickname write refused (byte guard failed)\n");
+                return false;
+            }
 
             WriteShimUserConfigValue(kUserConfigNetworkSection, "Nickname", trimmed.c_str());
-            Log(L"[BZRNET] Nickname set to \"%hs\" (source=%hs); applies on next connect\n",
-                trimmed.c_str(), source);
+            g_PendingNicknameReauth =
+                ShouldReauthOnNicknameChange() && ForceBzrNetReauth(source);
+            Log(L"[BZRNET] Nickname set to \"%hs\" (source=%hs reauth=%hs)\n",
+                trimmed.c_str(),
+                source,
+                g_PendingNicknameReauth ? "queued" : "no (applies on next connect)");
+            return true;
         }
 
-        // A cUI_TextEntry over the nickname buffer plus the route readout label.
-        // maxLength is 63 rather than the buffer's 127 because the lobby name
-        // column is narrow; the buffer itself would accept more.
+        // Redux's multiplayer panels are pre-rendered artwork rather than a
+        // resizable frame widget. Generate a small matching plate for the
+        // nickname controls and place the native entry/button over its field.
+        static bool WriteNicknamePanelPng(const std::filesystem::path& outPath)
+        {
+            std::string gdiplusError;
+            if (!EnsureGdiplusInitialized(gdiplusError))
+            {
+                Log(L"[BZRNET] nickname panel GDI+ init failed: %hs\n", gdiplusError.c_str());
+                return false;
+            }
+
+            Gdiplus::Bitmap bitmap(kNicknamePanelWidth, kNicknamePanelHeight, PixelFormat32bppARGB);
+            if (bitmap.GetLastStatus() != Gdiplus::Ok)
+                return false;
+
+            {
+                Gdiplus::Graphics gfx(&bitmap);
+                gfx.SetSmoothingMode(Gdiplus::SmoothingModeNone);
+                gfx.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+                gfx.SetTextRenderingHint(Gdiplus::TextRenderingHintSingleBitPerPixelGridFit);
+
+                Gdiplus::SolidBrush edgeDark(Gdiplus::Color(255, 0, 42, 0));
+                Gdiplus::SolidBrush edgeBright(Gdiplus::Color(255, 0, 127, 0));
+                Gdiplus::SolidBrush edgeMid(Gdiplus::Color(255, 0, 84, 0));
+                Gdiplus::SolidBrush field(Gdiplus::Color(255, 0, 0, 0));
+
+                gfx.FillRectangle(&edgeDark, 0, 0, kNicknamePanelWidth, kNicknamePanelHeight);
+                gfx.FillRectangle(&edgeBright, 3, 3, kNicknamePanelWidth - 6, kNicknamePanelHeight - 6);
+                gfx.FillRectangle(&edgeMid, 5, 5, kNicknamePanelWidth - 10, kNicknamePanelHeight - 10);
+                gfx.FillRectangle(&edgeDark, 7, 7, kNicknamePanelWidth - 14, kNicknamePanelHeight - 14);
+
+                const int inner = kNicknamePanelWidth - 18;
+                gfx.FillRectangle(
+                    &field,
+                    9,
+                    kNicknamePanelHeaderHeight,
+                    inner,
+                    kNicknamePanelHeight - kNicknamePanelHeaderHeight - 9);
+                gfx.FillRectangle(&edgeBright, 9, 32, inner, 4);
+                gfx.FillRectangle(&edgeMid, 9, 36, inner, 2);
+                gfx.FillRectangle(&edgeDark, 9, 38, inner, 2);
+
+                Gdiplus::Font font(L"Lucida Console", 13.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+                Gdiplus::StringFormat format;
+                format.SetAlignment(Gdiplus::StringAlignmentCenter);
+                format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+                format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+                Gdiplus::SolidBrush text(Gdiplus::Color(255, 64, 220, 64));
+                const Gdiplus::RectF layout(9.0f, 4.0f, static_cast<float>(inner), 28.0f);
+                gfx.DrawString(L"PLAYER NAME", -1, &font, layout, &format, &text);
+            }
+
+            CLSID pngClsid = {};
+            if (!GetPngEncoderClsid(pngClsid))
+                return false;
+            std::error_code ec;
+            std::filesystem::create_directories(outPath.parent_path(), ec);
+            const Gdiplus::Status saved = bitmap.Save(outPath.wstring().c_str(), &pngClsid, nullptr);
+            if (saved != Gdiplus::Ok)
+            {
+                Log(L"[BZRNET] nickname panel PNG save failed path=%hs status=%d\n",
+                    outPath.string().c_str(), static_cast<int>(saved));
+                return false;
+            }
+            return true;
+        }
+
+        static std::string EnsureNicknamePanelImage()
+        {
+            EnsureFlagPreviewResourceLocationRegistered();
+            const std::filesystem::path outPath =
+                GetFlagPreviewUiDirectory() / kNicknamePanelTextureName;
+            static bool s_Written = false;
+            std::error_code ec;
+            if (s_Written && std::filesystem::exists(outPath, ec))
+                return kNicknamePanelTextureName;
+            if (!WriteNicknamePanelPng(outPath))
+                return std::string();
+            s_Written = true;
+            Log(L"[BZRNET] wrote nickname panel path=%hs\n", outPath.string().c_str());
+            return kNicknamePanelTextureName;
+        }
+
+        static void CompleteNicknameEdit(
+            void* entry,
+            void* routeLabel,
+            const char* source)
+        {
+            const bool applied = ApplyNicknameFromEntry(entry, source);
+            EndNicknameEdit(entry);
+            UpdateNetRouteLabel(routeLabel);
+            if (!applied)
+                return;
+
+            if (g_NicknameEnterDispatchEntry == entry)
+                g_PendingNicknameConfirmationEntry = entry;
+            else
+                ShowNicknameApplyConfirmation(entry);
+        }
+
+        // A native cUI_TextEntry over the nickname buffer plus the route readout.
+        // Do not install cUI_Button callbacks on the entry: the button setters
+        // write +0x150/+0x154, which lie inside cUI_Text's 2000-byte display
+        // buffer and corrupt it. A transparent button supplies the proven click
+        // path; the guarded TextEntry append hook supplies keyboard input.
         static void CreateNicknameAndRouteWidgets(
             void* parent,
             float x,
             float y,
+            void** outPanel,
             void** outEntry,
+            void** outEditProxy,
+            void** outConfirm,
             void** outRouteLabel,
             void* onEnter,
+            void* onEdit,
+            void* onRefresh,
             void* onHover)
         {
-            if (!parent || !g_BzrFn_AddChild)
+            if (!parent || !g_BzrFn_AddChild || !ShouldEnableLobbyReadouts())
                 return;
+
+            // Draw first so the interactive children are above it in the
+            // dialog's child order, then hand the mouse back with
+            // MakeViewInputTransparent -- that same order is the hit-test
+            // order, and a live cUI_View consumes anything inside its rect.
+            if (outPanel && g_BzrFn_OverlayCtor)
+            {
+                const std::string textureName = EnsureNicknamePanelImage();
+                if (!textureName.empty())
+                {
+                    void* panelMem = ::operator new(0x144, std::nothrow);
+                    if (panelMem)
+                    {
+                        std::memset(panelMem, 0, 0x144);
+                        *outPanel = g_BzrFn_OverlayCtor(
+                            panelMem,
+                            "Nickname Panel",
+                            x,
+                            y,
+                            static_cast<float>(kNicknamePanelWidth),
+                            static_cast<float>(kNicknamePanelHeight),
+                            0x20,
+                            parent,
+                            0);
+                        if (*outPanel)
+                        {
+                            if (g_BzrFn_SetTextureOff)
+                                g_BzrFn_SetTextureOff(*outPanel, textureName.c_str());
+                            MakeViewInputTransparent(*outPanel);
+                            g_BzrFn_AddChild(parent, *outPanel, 0);
+                        }
+                    }
+                }
+            }
+
+            const float controlX = x + kNicknamePanelPadding;
+            const float controlY = y + kNicknameControlY;
 
             if (outEntry && g_BzrFn_TextEntryCtor)
             {
@@ -26576,47 +27542,112 @@ namespace BZROpenShim
                     std::memset(entryMem, 0, kUiTextEntrySize);
                     *outEntry = g_BzrFn_TextEntryCtor(
                         entryMem,
-                        0,      // flagA  -> +0x960
-                        1,      // allowEnter -> +0x950, as every stock call site
-                        63,     // maxLength -> +0x948
+                        0,      // matches this lobby's stock chatEntry
+                        1,      // allow Enter
+                        kNicknameVisibleCharacters,
                         "Nickname",
-                        x,
-                        y,
-                        360.0f,
-                        40.0f,
-                        0x8020, // stock text entries pass 0x8020, not 0x20
+                        controlX,
+                        controlY,
+                        kNicknameEntryWidth,
+                        kNicknameControlHeight,
+                        0x8020,
                         parent);
                     if (*outEntry)
                     {
                         if (g_BzrFn_TextEntrySetEnterCb && onEnter)
                             g_BzrFn_TextEntrySetEnterCb(*outEntry, onEnter);
-                        if (g_BzrFn_SetOnHover && onHover)
-                            g_BzrFn_SetOnHover(*outEntry, onHover);
+                        InitializeNicknameEntry(*outEntry);
                         g_BzrFn_AddChild(parent, *outEntry, 0);
                     }
                 }
             }
 
-            if (outRouteLabel && g_BzrFn_LabelCtor)
+            // The lobby's OnChar virtual calls AppendChar directly on its stock
+            // chatEntry member, so ordinary UI focus cannot redirect it. A
+            // textureless cUI_Button over the same rectangle enters our guarded
+            // nickname-edit mode. It draws nothing, leaving the entry visible.
+            if (outEditProxy && onEdit && g_BzrFn_ButtonCtor)
             {
-                void* labelMem = ::operator new(kUiTextSize, std::nothrow);
-                if (labelMem)
+                void* focusMem = ::operator new(kUiButtonSize, std::nothrow);
+                if (focusMem)
                 {
-                    std::memset(labelMem, 0, kUiTextSize);
-                    *outRouteLabel = g_BzrFn_LabelCtor(
-                        labelMem,
-                        "Net Route",
-                        x,
-                        y + 44.0f,
-                        520.0f,
-                        38.0f,
+                    std::memset(focusMem, 0, kUiButtonSize);
+                    *outEditProxy = g_BzrFn_ButtonCtor(
+                        focusMem,
+                        "Nickname Edit",
+                        controlX,
+                        controlY,
+                        kNicknameEntryWidth,
+                        kNicknameControlHeight,
                         0x20,
                         parent,
+                        0,
+                        0);
+                    if (*outEditProxy)
+                    {
+                        if (g_BzrFn_SetOnClick) g_BzrFn_SetOnClick(*outEditProxy, onEdit);
+                        if (g_BzrFn_SetOnHover) g_BzrFn_SetOnHover(*outEditProxy, onHover);
+                        g_BzrFn_AddChild(parent, *outEditProxy, 0);
+                    }
+                }
+            }
+
+            if (outConfirm && onEnter && g_BzrFn_ButtonCtor)
+            {
+                void* confirmMem = ::operator new(kUiButtonSize, std::nothrow);
+                if (confirmMem)
+                {
+                    std::memset(confirmMem, 0, kUiButtonSize);
+                    *outConfirm = g_BzrFn_ButtonCtor(
+                        confirmMem,
+                        "Apply Nickname",
+                        x + 0.5f * (kLobbySidebarWidth - kNicknameConfirmWidth),
+                        controlY + kNicknameControlHeight + kNicknameConfirmGap,
+                        kNicknameConfirmWidth,
+                        kNicknameConfirmHeight,
+                        0x20,
+                        parent,
+                        0,
+                        0);
+                    if (*outConfirm)
+                    {
+                        if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(*outConfirm, "MultiplayerModeButton_off.png");
+                        if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(*outConfirm, "MultiplayerModeButton_over.png");
+                        if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(*outConfirm, "MultiplayerModeButton_on.png");
+                        if (g_BzrFn_SetButtonLabel) g_BzrFn_SetButtonLabel(*outConfirm, "OK");
+                        if (g_BzrFn_SetOnClick) g_BzrFn_SetOnClick(*outConfirm, onEnter);
+                        if (g_BzrFn_SetOnHover) g_BzrFn_SetOnHover(*outConfirm, onHover);
+                        g_BzrFn_AddChild(parent, *outConfirm, 0);
+                    }
+                }
+            }
+
+            if (outRouteLabel && g_BzrFn_ButtonCtor)
+            {
+                void* readoutMem = ::operator new(kUiButtonSize, std::nothrow);
+                if (readoutMem)
+                {
+                    std::memset(readoutMem, 0, kUiButtonSize);
+                    *outRouteLabel = g_BzrFn_ButtonCtor(
+                        readoutMem,
+                        "Net Route",
+                        x,
+                        y + static_cast<float>(kNicknamePanelHeight) + kNicknameRouteGap,
+                        kLobbySidebarWidth,
+                        44.0f,
+                        0x20,
+                        parent,
+                        0,
                         0);
                     if (*outRouteLabel)
                     {
-                        if (g_BzrFn_LabelState)
-                            g_BzrFn_LabelState(*outRouteLabel, nullptr);
+                        if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(*outRouteLabel, "MultiplayerModeButton_off.png");
+                        if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(*outRouteLabel, "MultiplayerModeButton_over.png");
+                        if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(*outRouteLabel, "MultiplayerModeButton_on.png");
+                        // Both slots must stay non-null on an active dialog
+                        // child; clicking simply refreshes the readout.
+                        if (g_BzrFn_SetOnClick && onRefresh) g_BzrFn_SetOnClick(*outRouteLabel, onRefresh);
+                        if (g_BzrFn_SetOnHover && onHover) g_BzrFn_SetOnHover(*outRouteLabel, onHover);
                         g_BzrFn_AddChild(parent, *outRouteLabel, 0);
                         UpdateNetRouteLabel(*outRouteLabel);
                     }
@@ -26758,16 +27789,40 @@ namespace BZROpenShim
         UpdateFlagPreviewWidget(g_FlagPreviewClient);
     }
 
+    void __cdecl NetRouteRefreshHost()
+    {
+        UpdateNetRouteLabel(g_NetRouteLabelHost);
+    }
+
+    void __cdecl NetRouteRefreshClient()
+    {
+        UpdateNetRouteLabel(g_NetRouteLabelClient);
+    }
+
     void __cdecl NicknameEntryOnEnterHost()
     {
-        ApplyNicknameFromEntry(g_NicknameEntryHost, "host_lobby");
-        UpdateNetRouteLabel(g_NetRouteLabelHost);
+        CompleteNicknameEdit(
+            g_NicknameEntryHost,
+            g_NetRouteLabelHost,
+            "host_lobby");
     }
 
     void __cdecl NicknameEntryOnEnterClient()
     {
-        ApplyNicknameFromEntry(g_NicknameEntryClient, "client_lobby");
-        UpdateNetRouteLabel(g_NetRouteLabelClient);
+        CompleteNicknameEdit(
+            g_NicknameEntryClient,
+            g_NetRouteLabelClient,
+            "client_lobby");
+    }
+
+    void __cdecl NicknameEditOnClickHost()
+    {
+        BeginNicknameEdit(g_NicknameEntryHost, g_HostUiParent, "host_lobby_click");
+    }
+
+    void __cdecl NicknameEditOnClickClient()
+    {
+        BeginNicknameEdit(g_NicknameEntryClient, g_ClientUiParent, "client_lobby_click");
     }
 
     // The route table is filled from the BZRNet worker thread, so the label is
@@ -26998,12 +28053,14 @@ namespace BZROpenShim
         }
 
         if (ShouldEnableMultiplayerFlagUi() &&
-            (!g_FlagButtonHost || !g_FlagLabelHost ||
+            (!g_FlagButtonHost ||
              !IsWidgetLiveChildOfParent(parent, g_FlagButtonHost)))
         {
+            // The pair plus its gap is 100px wide, so it starts far enough left
+            // of the Ban button (g_BanX - 48, 48 wide) to clear it entirely.
             CreateFlagButtonCommon(
                 parent,
-                g_BanX - 104.0f,
+                g_BanX - 224.0f,
                 g_BanY + 96.0f,
                 &g_FlagButtonHost,
                 &g_FlagButtonHostRight,
@@ -27014,19 +28071,35 @@ namespace BZROpenShim
                 reinterpret_cast<void*>(FlagButtonOnHoverHost));
         }
 
-        if (!g_NicknameEntryHost || !IsWidgetLiveChildOfParent(parent, g_NicknameEntryHost))
+        if (!g_NicknamePanelHost || !g_NicknameEntryHost || !g_NicknameEditButtonHost ||
+            !g_NicknameConfirmButtonHost ||
+            !IsWidgetLiveChildOfParent(parent, g_NicknamePanelHost) ||
+            !IsWidgetLiveChildOfParent(parent, g_NicknameEntryHost) ||
+            !IsWidgetLiveChildOfParent(parent, g_NicknameEditButtonHost) ||
+            !IsWidgetLiveChildOfParent(parent, g_NicknameConfirmButtonHost))
         {
+            // Use the otherwise empty upper-left column. This keeps the name,
+            // explicit OK button and compact route row together and leaves a
+            // clear gap above the framed flag selector and stock W/M controls.
             CreateNicknameAndRouteWidgets(
                 parent,
-                270.0f,
-                860.0f,
+                g_BanX - 208.0f,
+                g_BanY - 360.0f,
+                &g_NicknamePanelHost,
                 &g_NicknameEntryHost,
+                &g_NicknameEditButtonHost,
+                &g_NicknameConfirmButtonHost,
                 &g_NetRouteLabelHost,
                 reinterpret_cast<void*>(NicknameEntryOnEnterHost),
+                reinterpret_cast<void*>(NicknameEditOnClickHost),
+                reinterpret_cast<void*>(NetRouteRefreshHost),
                 reinterpret_cast<void*>(FlagButtonOnHoverHost));
         }
         else
         {
+            // Re-assert it: SetActive on a surviving panel would restore the
+            // byte and put the click-swallowing rectangle back over the row.
+            MakeViewInputTransparent(g_NicknamePanelHost);
             UpdateNetRouteLabel(g_NetRouteLabelHost);
         }
 
@@ -27092,12 +28165,12 @@ namespace BZROpenShim
         }
 
         if (ShouldEnableMultiplayerFlagUi() &&
-            (!g_FlagButtonClient || !g_FlagLabelClient ||
+            (!g_FlagButtonClient ||
              !IsWidgetLiveChildOfParent(parent, g_FlagButtonClient)))
         {
             CreateFlagButtonCommon(
                 parent,
-                -85.0f,
+                -205.0f,
                 942.0f,
                 &g_FlagButtonClient,
                 &g_FlagButtonClientRight,
@@ -27108,19 +28181,33 @@ namespace BZROpenShim
                 reinterpret_cast<void*>(FlagButtonOnHoverClient));
         }
 
-        if (!g_NicknameEntryClient || !IsWidgetLiveChildOfParent(parent, g_NicknameEntryClient))
+        if (!g_NicknamePanelClient || !g_NicknameEntryClient || !g_NicknameEditButtonClient ||
+            !g_NicknameConfirmButtonClient ||
+            !IsWidgetLiveChildOfParent(parent, g_NicknamePanelClient) ||
+            !IsWidgetLiveChildOfParent(parent, g_NicknameEntryClient) ||
+            !IsWidgetLiveChildOfParent(parent, g_NicknameEditButtonClient) ||
+            !IsWidgetLiveChildOfParent(parent, g_NicknameConfirmButtonClient))
         {
+            // Mirror the host layout in the client's empty left column.
             CreateNicknameAndRouteWidgets(
                 parent,
-                -85.0f,
-                806.0f,
+                -189.0f,
+                496.0f,
+                &g_NicknamePanelClient,
                 &g_NicknameEntryClient,
+                &g_NicknameEditButtonClient,
+                &g_NicknameConfirmButtonClient,
                 &g_NetRouteLabelClient,
                 reinterpret_cast<void*>(NicknameEntryOnEnterClient),
+                reinterpret_cast<void*>(NicknameEditOnClickClient),
+                reinterpret_cast<void*>(NetRouteRefreshClient),
                 reinterpret_cast<void*>(FlagButtonOnHoverClient));
         }
         else
         {
+            // Re-assert it: SetActive on a surviving panel would restore the
+            // byte and put the click-swallowing rectangle back over the row.
+            MakeViewInputTransparent(g_NicknamePanelClient);
             UpdateNetRouteLabel(g_NetRouteLabelClient);
         }
     }
