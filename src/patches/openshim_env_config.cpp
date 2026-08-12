@@ -1,0 +1,289 @@
+#include "openshim_env_config.h"
+
+// This translation unit is itself compiled with openshim_env_config.h forced in.
+// Undefine the redirect here so the final fallback reaches the real Win32 API.
+#undef GetEnvironmentVariableA
+
+#include <algorithm>
+#include <cctype>
+#include <cstring>
+#include <filesystem>
+#include <string>
+
+namespace
+{
+    constexpr char kUnsetValue[] = "\x01__openshim_unset__";
+
+    std::filesystem::path GetModuleDirectory()
+    {
+        char path[MAX_PATH] = {};
+        const DWORD length = GetModuleFileNameA(nullptr, path, static_cast<DWORD>(sizeof(path)));
+        if (length == 0 || length >= sizeof(path))
+            return {};
+        return std::filesystem::path(path).parent_path();
+    }
+
+    bool TryReadIniValue(const std::filesystem::path& path,
+                         const char* section,
+                         const char* key,
+                         std::string& out)
+    {
+        if (path.empty() || !section || !key)
+            return false;
+
+        char value[1024] = {};
+        const DWORD length = GetPrivateProfileStringA(
+            section,
+            key,
+            kUnsetValue,
+            value,
+            static_cast<DWORD>(sizeof(value)),
+            path.string().c_str());
+        if (length == 0 || std::strcmp(value, kUnsetValue) == 0)
+            return false;
+
+        out.assign(value, length);
+        return true;
+    }
+
+    bool ParseBool(const std::string& raw, bool& out)
+    {
+        std::string value = raw;
+        value.erase(value.begin(), std::find_if(value.begin(), value.end(), [](unsigned char ch)
+        {
+            return !std::isspace(ch);
+        }));
+        value.erase(std::find_if(value.rbegin(), value.rend(), [](unsigned char ch)
+        {
+            return !std::isspace(ch);
+        }).base(), value.end());
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch)
+        {
+            return static_cast<char>(std::tolower(ch));
+        });
+
+        if (value == "1" || value == "true" || value == "on" ||
+            value == "yes" || value == "enabled")
+        {
+            out = true;
+            return true;
+        }
+        if (value == "0" || value == "false" || value == "off" ||
+            value == "no" || value == "disabled")
+        {
+            out = false;
+            return true;
+        }
+        return false;
+    }
+
+    bool TryReadMappedBool(const std::filesystem::path& configPath,
+                           const char* section,
+                           const char* key,
+                           bool invert,
+                           std::string& out)
+    {
+        std::string value;
+        if (!TryReadIniValue(configPath, section, key, value))
+            return false;
+
+        bool enabled = false;
+        if (!ParseBool(value, enabled))
+            return false;
+        if (invert)
+            enabled = !enabled;
+        out = enabled ? "1" : "0";
+        return true;
+    }
+
+    bool Equals(const char* left, const char* right)
+    {
+        return left && right && _stricmp(left, right) == 0;
+    }
+
+    bool TryReadFriendlyMapping(const char* name,
+                                const std::filesystem::path& moduleDir,
+                                std::string& out)
+    {
+        const auto mainIni = moduleDir / "openshim.ini";
+
+        // Startup / patcher diagnostics.
+        if (Equals(name, "OPENSHIM_TRACE_HITS"))
+            return TryReadMappedBool(mainIni, "Diagnostics", "TraceHookHits", false, out);
+        if (Equals(name, "OPENSHIM_ENABLE_D3D_STARTUP_HOOKS"))
+            return TryReadMappedBool(mainIni, "Startup", "D3DStartupHooks", false, out);
+        if (Equals(name, "OPENSHIM_ALLOW_STARTUP_AUTOLOAD"))
+            return TryReadMappedBool(mainIni, "Startup", "AllowStartupAutoLoad", false, out);
+        if (Equals(name, "OPENSHIM_TRACE_ARTILLERY_MASK") ||
+            Equals(name, "OPENSHIM_TRACE_WEAPON_MASK"))
+        {
+            return TryReadMappedBool(mainIni, "Diagnostics", "TraceArtilleryMask", false, out);
+        }
+
+        // Working runtime features use positive INI keys; legacy DISABLE_*
+        // environment names are inverted here so old call-site semantics remain
+        // unchanged.
+        if (Equals(name, "OPENSHIM_DISABLE_CHUNK_EXPERIMENTS") ||
+            Equals(name, "BZR_DISABLE_CHUNK_EXPERIMENTS"))
+        {
+            return TryReadMappedBool(mainIni, "General", "ChunkMeshes", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_MAP_REFRESH_FIXES") ||
+            Equals(name, "BZR_DISABLE_MAP_REFRESH_FIXES"))
+        {
+            return TryReadMappedBool(mainIni, "General", "MapRefreshFixes", true, out);
+        }
+        if (Equals(name, "OPENSHIM_ENABLE_OGRE_MATERIAL_COLLISION_GUARD") ||
+            Equals(name, "BZR_ENABLE_OGRE_MATERIAL_COLLISION_GUARD"))
+        {
+            return TryReadMappedBool(mainIni, "General", "OgreMaterialCollisionGuard", false, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_OGRE_MATERIAL_COLLISION_GUARD") ||
+            Equals(name, "BZR_DISABLE_OGRE_MATERIAL_COLLISION_GUARD"))
+        {
+            return TryReadMappedBool(mainIni, "General", "OgreMaterialCollisionGuard", true, out);
+        }
+
+        // Producer submenus are deliberately default-on for the current test
+        // cycle. The dedicated producer INI is the authoritative opt-out.
+        if (Equals(name, "OPENSHIM_ENABLE_PRODUCER_BUILD_MENU") ||
+            Equals(name, "OPENSHIM_ENABLE_PRODUCER_BUILD_MENU_EXPERIMENT") ||
+            Equals(name, "BZR_ENABLE_PRODUCER_BUILD_MENU"))
+        {
+            const auto producerIni = moduleDir / "openshim_producer_build_menus.ini";
+            std::string value;
+            if (!TryReadIniValue(producerIni, "ProducerBuildMenus", "Enabled", value))
+            {
+                out = "1";
+                return true;
+            }
+            bool enabled = true;
+            if (!ParseBool(value, enabled))
+                enabled = true;
+            out = enabled ? "1" : "0";
+            return true;
+        }
+
+        // Multiplayer lobby integration preserves the existing code's platform
+        // default when the INI key is omitted. Setting the key makes testing
+        // explicit without needing a process environment variable.
+        if (Equals(name, "OPENSHIM_ENABLE_LOBBY_BZRNET_INTEGRATION") ||
+            Equals(name, "OPENSHIM_ENABLE_LOBBY_UI_BZRNET") ||
+            Equals(name, "BZR_ENABLE_LOBBY_BZRNET_INTEGRATION"))
+        {
+            return TryReadMappedBool(mainIni, "Network", "LobbyBzrnetIntegration", false, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_LOBBY_BZRNET_INTEGRATION") ||
+            Equals(name, "BZR_DISABLE_LOBBY_BZRNET_INTEGRATION"))
+        {
+            return TryReadMappedBool(mainIni, "Network", "LobbyBzrnetIntegration", true, out);
+        }
+
+        // Existing user-facing INI settings. These mappings make the old env
+        // names aliases of the documented INI keys rather than prerequisites.
+        if (Equals(name, "OPENSHIM_MAX_SOUND_CHANNELS") || Equals(name, "BZR_MAX_SOUND_CHANNELS"))
+        {
+            return TryReadIniValue(mainIni, "General", "SoundChannels", out);
+        }
+        if (Equals(name, "OPENSHIM_ENABLE_INPUT_BINDING_UI") ||
+            Equals(name, "OPENSHIM_ENABLE_INPUT_BINDING_UI_REPLACEMENT") ||
+            Equals(name, "BZR_ENABLE_INPUT_BINDING_UI"))
+        {
+            return TryReadMappedBool(mainIni, "General", "CustomBindsUi", false, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_INPUT_BINDING_UI") ||
+            Equals(name, "OPENSHIM_DISABLE_INPUT_BINDING_UI_REPLACEMENT") ||
+            Equals(name, "BZR_DISABLE_INPUT_BINDING_UI"))
+        {
+            return TryReadMappedBool(mainIni, "General", "CustomBindsUi", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_SETTINGS_UI") || Equals(name, "BZR_DISABLE_SETTINGS_UI"))
+            return TryReadMappedBool(mainIni, "General", "SettingsUi", true, out);
+
+        if (Equals(name, "OPENSHIM_TERRAIN_SEMANTIC_LIFECYCLE_LOG"))
+            return TryReadIniValue(mainIni, "Terrain", "TerrainSemanticLifecycleLog", out);
+        if (Equals(name, "OPENSHIM_TERRAIN_SEMANTIC_DEBUG"))
+            return TryReadIniValue(mainIni, "Terrain", "TerrainSemanticDebug", out);
+        if (Equals(name, "OPENSHIM_TERRAIN_SEMANTIC_FRAME_CAPTURE"))
+            return TryReadIniValue(mainIni, "Terrain", "TerrainSemanticFrameCapture", out);
+        if (Equals(name, "OPENSHIM_TERRAIN_SEMANTIC_FRAME_CAPTURE_STRIDE"))
+            return TryReadIniValue(mainIni, "Terrain", "TerrainSemanticFrameCaptureStride", out);
+        if (Equals(name, "OPENSHIM_TERRAIN_HD"))
+            return TryReadIniValue(mainIni, "Terrain", "TerrainHdEnabled", out);
+        if (Equals(name, "OPENSHIM_TERRAIN_HD_MANIFEST"))
+            return TryReadIniValue(mainIni, "Terrain", "TerrainHdManifest", out);
+
+        if (Equals(name, "OPENSHIM_MP_FLAG_SHOW_OWN") || Equals(name, "BZR_MP_FLAG_SHOW_OWN"))
+            return TryReadIniValue(mainIni, "Display", "MultiplayerFlagShowOwnCraft", out);
+        if (Equals(name, "OPENSHIM_FACTION_JET_FLAMES") || Equals(name, "BZR_FACTION_JET_FLAMES"))
+            return TryReadMappedBool(mainIni, "Display", "JetFlames", false, out);
+        if (Equals(name, "OPENSHIM_DISABLE_FACTION_JET_FLAMES") ||
+            Equals(name, "BZR_DISABLE_FACTION_JET_FLAMES"))
+        {
+            return TryReadMappedBool(mainIni, "Display", "JetFlames", true, out);
+        }
+
+        if (Equals(name, "OPENSHIM_PROFILE_OGRE_ANIMATION"))
+            return TryReadIniValue(mainIni, "Diagnostics", "ProfileOgreAnimation", out);
+        if (Equals(name, "OPENSHIM_TERRAIN_RENDER_PROBE"))
+            return TryReadIniValue(mainIni, "Diagnostics", "TerrainRenderProbe", out);
+
+        if (Equals(name, "OPENSHIM_DISABLE_LIVE_NICKNAME"))
+            return TryReadMappedBool(mainIni, "Network", "LiveNicknameKeys", true, out);
+        if (Equals(name, "OPENSHIM_DISABLE_BZRNET_REAUTH"))
+            return TryReadMappedBool(mainIni, "Network", "ReauthOnNicknameChange", true, out);
+        if (Equals(name, "OPENSHIM_DISABLE_LOBBY_READOUTS"))
+            return TryReadMappedBool(mainIni, "Network", "LobbyReadouts", true, out);
+
+        if (Equals(name, "OPENSHIM_TURRET_AIM_PITCH_MULTIPLIER") ||
+            Equals(name, "OPENSHIM_TURRET_PITCH_MULTIPLIER"))
+        {
+            return TryReadIniValue(mainIni, "SinglePlayer", "TurretAimPitchMultiplier", out);
+        }
+        if (Equals(name, "OPENSHIM_GLOBAL_TURBO_TOLERANCE"))
+            return TryReadIniValue(mainIni, "SinglePlayer", "TurboTolerance", out);
+
+        return false;
+    }
+
+    DWORD CopyEnvironmentValue(const std::string& value, LPSTR buffer, DWORD size)
+    {
+        const DWORD required = static_cast<DWORD>(value.size() + 1);
+        if (size == 0)
+            return required;
+        if (!buffer)
+            return 0;
+        if (required > size)
+        {
+            buffer[0] = '\0';
+            return required;
+        }
+        std::memcpy(buffer, value.c_str(), required);
+        return static_cast<DWORD>(value.size());
+    }
+}
+
+DWORD WINAPI OpenShimGetEnvironmentVariableA(LPCSTR name, LPSTR buffer, DWORD size)
+{
+    if (!name || !*name)
+        return ::GetEnvironmentVariableA(name, buffer, size);
+
+    const auto moduleDir = GetModuleDirectory();
+    if (!moduleDir.empty())
+    {
+        std::string value;
+        if (TryReadFriendlyMapping(name, moduleDir, value))
+            return CopyEnvironmentValue(value, buffer, size);
+
+        // Universal compatibility escape hatch: any old or newly-added
+        // OPENSHIM_*/BZR_* environment key can be placed verbatim under
+        // [Environment] in openshim.ini. This means new diagnostics do not need
+        // another round of process-level launch configuration just to be tested.
+        const auto mainIni = moduleDir / "openshim.ini";
+        if (TryReadIniValue(mainIni, "Environment", name, value))
+            return CopyEnvironmentValue(value, buffer, size);
+    }
+
+    // Backward compatibility for existing launch scripts and developer setups.
+    return ::GetEnvironmentVariableA(name, buffer, size);
+}
