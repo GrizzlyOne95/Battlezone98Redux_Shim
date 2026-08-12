@@ -1,6 +1,7 @@
 ## Producer Build Menu RE Notes
 
-Date: 2026-03-15
+Date: 2026-03-15  
+Current implementation status updated: 2026-08-12
 
 Goal: find a viable native path for submenu-capable producer build menus so
 `Producer` descendants like Recycler, Factory, Armory, and Constructor can use
@@ -13,8 +14,10 @@ Goal: find a viable native path for submenu-capable producer build menus so
 - That submenu system appears to be the editor / placement build tree, not the
   stock in-mission producer build menu path.
 - Stock producer units still use flat `[ProducerClass] buildItem1..10` lists.
-- The best path forward is to graft the existing native `BuildItem` recursion
-  onto the producer menu flow, gated by a new producer-side menu-root override.
+- OpenShim now has an opt-in producer bridge that reuses the native recursive
+  `BuildItem` loader and can select a root directly from the producer's ODF.
+- The remaining proof is runtime UI navigation and leaf handoff into the normal
+  producer build path.
 
 ### Confirmed Native Builder Tree Behavior
 
@@ -135,39 +138,30 @@ The problem is "bridge Producer build selection to the existing BuildItem tree".
 
 Recommended implementation strategy:
 
-1. Add a new producer-facing ODF field such as:
-   - `buildMenuRoot = "..."`, or
-   - `buildMenuRootPacked = "..."` and `buildMenuRootDeployed = "..."` if
-     deployed vs packed producers need separate trees later.
+1. Read a producer-facing ODF field such as `buildMenuRoot`.
 2. Hook the producer menu setup path for `Producer` descendants.
-3. If the selected unit is an eligible producer class and the new field exists,
+3. If the selected unit is an eligible producer class and the field exists,
    build a `BuildItem` tree from that root using the existing native recursive
    loader behavior instead of the stock flat `buildItem1..10` path.
 4. Keep the stock behavior as fallback when the override field is absent.
 5. Return leaf selections back into the normal `Producer::StartBuild` flow so
    actual construction remains native.
 
-### Best Targets To Investigate Next
+Steps 1-4 now have a first implementation. Step 5 is the main live-validation
+question.
 
-The likely producer-side hook area is the cluster around:
+### Builder-tree Side Reused
 
-- `Producer::UpdateModeList`
-- `Producer::SetActiveMode`
-- `Producer::StartBuild`
-
-The exact byte-perfect symbol alignment from the PDB should be rechecked before
-patching, but these are the right semantic targets.
-
-The builder-tree side to reuse is the cluster around:
+The bridge uses the native cluster around:
 
 - `0x0049F5C0` recursive `BuildItem` loader behavior
 - `0x0049F880` recursive cleanup behavior
-- `0x004A0185` `build.odf` root initialization behavior
+- global build-menu root at `0x009174C4`
 
 ### Why This Looks Safer Than ODF Hot-Swapping
 
 - It preserves the game's existing native submenu semantics.
-- It keeps leaf builds in the normal producer construction path.
+- It aims to keep leaf builds in the normal producer construction path.
 - It can be opt-in per producer ODF.
 - It avoids mutating global stock build ODFs at runtime.
 - It should support class-specific menus for Recycler / Factory / Armory /
@@ -175,55 +169,95 @@ The builder-tree side to reuse is the cluster around:
 
 ### Cautions
 
-- The stock builder-tree path appears to use globals, which is fine for editor
-  usage but may be unsafe to share directly across multiple live producer units.
-- A producer implementation should probably create or cache a per-instance or
-  per-class `BuildItem` tree instead of directly reusing the global editor menu
-  state.
+- The stock builder-tree path uses global state, which may be unsafe to share
+  across multiple live producer units if selection boundaries do not rebuild it
+  reliably.
+- A production implementation may need per-instance/per-class `BuildItem` state
+  or deterministic root restoration.
 - Constructor uses `classLabel = "constructionrig"`, not `"constructor"`.
-- The PDB is directionally useful, but byte-level patch points should always be
-  revalidated against the Steam target EXE before shipping a hook.
+- Steam still needs explicit runtime validation. Current `bzr_hooks.cpp` stops
+  producer-menu config loading on Steam even though `patcher.cpp` has
+  Steam-aware rel32 target resolution for the hook.
+- Do not promote the feature until normal mission exit and producer switching
+  have both been exercised.
 
-### Current Best Guess
+## Current OpenShim Implementation
 
-The most realistic forward path is an OpenShim native hook that:
+The first bridge is still present in current `main` and is more advanced than
+the original March note described.
 
-- reads a custom producer menu root from ODF
-- converts that root into a recursive `BuildItem` tree using the already-shipped
-  Builder loader behavior
-- exposes submenu navigation through the producer menu path
-- hands final leaf selections back to the stock producer build code
+### Runtime hook
 
-That would give Recycler / Factory / Armory / Constructor nested menus without
-the current ODF hot-swap hacks.
+- patch name: `Producer Build Menu Root Hook`
+- the runtime patch is enabled through `openshim_producer_build_menus.ini`; no
+  process environment variable is required
+- `[ProducerBuildMenus] Enabled=1` is the test/default state and `Enabled=0`
+  opts out before the producer hook is applied
+- legacy producer-menu environment names remain accepted only as compatibility
+  aliases through OpenShim's INI-aware environment shim
+- the rel32 hook calls `MaybeApplyProducerBuildMenu(producerPtr)` before calling
+  the original producer helper
+- common producer types are classified as Recycler, Factory, Armory, and
+  ConstructionRig
 
-### First Implementation Stab
+### Root selection precedence
 
-OpenShim now has a first-pass bridge experiment wired in:
+For a selected producer, current code chooses the root in this order:
 
-- rel32 hook at the GOG `Producer::UpdateModeList` helper call site
-- config file: `openshim_producer_build_menus.ini`
-- producer-type detection by known GOG vtable addresses
-- root swaps performed through the game's own:
-  - `InitBuildItem(BuildItem&, __int64)`
-  - `CleanupBuildItem(BuildItem&)`
+1. ODF-local `[ProducerClass] buildMenuRoot = <root>` or `buildMenu = <root>`
+2. per-ODF override from `openshim_producer_build_menus.ini`
+3. producer-type mapping (`Recycler`, `Factory`, `Armory`, `ConstructionRig`)
+4. fallback root
 
-Current behavior:
+The ODF-local path resolves the producer's real ODF token, looks for
+`<token>_mp.odf` before `<token>.odf`, then reads the producer section. The
+filesystem candidate list includes campaign/mod ODF roots and `Edit\stock`.
 
-- supported producer buckets:
-  - Recycler
-  - Factory
-  - Armory
-  - ConstructionRig
-- uses an external INI mapping for roots instead of reading a new ODF key yet
-- restores the stock `build` root for unmatched producer types
-- Steam intentionally skips this hook until the equivalent call site is
-  revalidated there
+This means the intended mod-facing syntax now exists. A test Factory can use:
 
-This is intentionally only the first bridge step. It proves out the safest
-native reuse path, but it still needs live in-game validation to confirm:
+```ini
+[ProducerClass]
+buildMenuRoot = b_amcmbt
+```
 
-- whether `UpdateModeList` alone is enough for full submenu navigation
-- whether `SetActiveMode` / `StartBuild` also need companion hooks
-- whether the global `buildMenu` object needs per-instance caching instead of
-  repeated root swapping
+The root is a native eight-character `[Builder]` token, not an arbitrary file
+path. Use an unquoted token for the first validation pass.
+
+### Config requirement
+
+`openshim_producer_build_menus.ini` must still exist and contain at least one
+configured mapping/override for the current producer config loader to become
+active. The checked-in example is ready for testing as-is after it is copied
+beside the executable:
+
+```ini
+[ProducerBuildMenus]
+Enabled=1
+Factory=build
+```
+
+Factories with no ODF-local field retain the stock `build` root; a test Factory
+with `buildMenuRoot = b_amcmbt` overrides it. No launch environment setup is
+needed.
+
+The remaining file/mapping requirement is a convenience limitation of the
+current experiment, not a fundamental requirement of the ODF-local design.
+
+### What still needs live proof
+
+The hook and ODF parsing are implemented. The unanswered runtime questions are:
+
+- Does the producer UI actually render and navigate the recursive children after
+  the root is swapped?
+- Does selecting a recursive leaf naturally reach the stock
+  `Producer::SetActiveMode` / `Producer::StartBuild` path?
+- Does the global `buildMenu` state remain correct while switching between
+  producers and multiple producer instances?
+- Does mission exit remain clean?
+
+If nested entries render but leaf construction fails, the next implementation
+should be a narrowly scoped leaf-handoff bridge around `SetActiveMode` and/or
+`StartBuild`, not another submenu parser.
+
+See `Docs/producer-build-menu-test.md` for the exact GOG live-test procedure and
+failure interpretation.
