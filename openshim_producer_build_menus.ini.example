@@ -1,0 +1,35 @@
+[ProducerBuildMenus]
+Enabled=1
+
+; EXPERIMENTAL / GOG LIVE-TEST PATH
+;
+; The hook itself must also be enabled before launch with one of:
+;   OPENSHIM_ENABLE_PRODUCER_BUILD_MENU=1
+;   OPENSHIM_ENABLE_PRODUCER_BUILD_MENU_EXPERIMENT=1
+;   BZR_ENABLE_PRODUCER_BUILD_MENU=1
+;
+; Current bzr_hooks.cpp intentionally disables the runtime feature on Steam.
+;
+; The preferred test is ODF-local configuration. Add this to the producer ODF:
+;
+;   [ProducerClass]
+;   buildMenuRoot = b_amcmbt
+;
+; OpenShim reads buildMenuRoot (or buildMenu) from the selected producer's
+; *_mp.odf / .odf before the generic mappings below. The root is the native
+; 8-character [Builder] token, not an arbitrary filesystem path.
+;
+; Keep Factory=build while testing ODF-local roots. It both enables the config
+; path and leaves factories without a buildMenuRoot override on the stock root.
+Factory=build
+
+; Alternative global smoke test, without editing a Factory ODF:
+; Factory=b_amcmbt
+;
+; Additional type-wide mappings can be tested independently:
+; Recycler=b_amcmbt
+; Armory=b_amprod
+; ConstructionRig=b_ambldg
+;
+; Per-ODF overrides are also supported by the bridge config; see
+; Docs/producer-build-menu-test.md for the ODF-local path and diagnostics.
