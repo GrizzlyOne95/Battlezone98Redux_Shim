@@ -136,6 +136,24 @@ TerrainSemanticFrameCapture = 0
 ; seconds at 60 FPS).
 ; Environment override: OPENSHIM_TERRAIN_SEMANTIC_FRAME_CAPTURE_STRIDE=<frames>
 TerrainSemanticFrameCaptureStride = 300
+;
+; Phase 3B HD-tile smoke path. DX11 only, disabled by default. Enabling this
+; automatically enables the one-cluster terrain proxy and semantic renderer.
+; The JSON manifest maps the selected stock terrain material to ordinary Ogre
+; image resources. OpenShim builds a Texture2DArray at runtime and samples its
+; slice by the semantic tileIndex. Only diffuse is replaced in this first
+; slice; stock detail/normal/specular/emissive maps, lighting and fog remain.
+;
+; Every source image in one material binding must have identical width, height,
+; mip count and pixel format. sliceCount is 1..256. Missing tile entries use
+; the required fallback image. A missing/invalid manifest, material binding,
+; image, shader seam or Ogre API logs [TERRAIN-HD] and retains the stock atlas.
+; The manifest path is relative to battlezone98redux.exe unless absolute.
+; Environment overrides:
+;   OPENSHIM_TERRAIN_HD=1
+;   OPENSHIM_TERRAIN_HD_MANIFEST=<path>
+TerrainHdEnabled = 0
+TerrainHdManifest = terrain_hd_tiles.json
 
 [Display]
 ; Under-attack audio alert frequency.
@@ -263,20 +281,34 @@ UdpPort = 0
 ; blank or absent, Redux uses your Steam/GOG account name. Maximum 127
 ; characters.
 ; The injected lobby name field can edit this value; set it here instead, or
-; use "/name <text>" in lobby chat. The service is told your name once per
-; connection, in its login message, so a change needs a fresh authorisation --
-; see ReauthOnNicknameChange below.
+; use "/name <text>" in lobby chat. This value is always what BZRNet is told in
+; its login message, so it applies on your next connection at the latest; the
+; two settings below control what is attempted on the connection you already
+; have.
 ; Nickname =
 
-; Re-authorise with BZRNet immediately after a nickname change, so the new name
-; appears without restarting the game. Boolean. Default: enabled.
-; Leaving the multiplayer screens is NOT enough on its own: the websocket lives
-; for the whole process, which is why the name used to need a restart. This
-; queues the same SendAuthorization the engine runs when it first connects.
-; It is a live service round trip, and the service decides what that does to
-; any lobby you are sitting in - turn it off to go back to apply-on-next-connect.
+; On a nickname change, publish it to BZRNet on the open connection as the
+; player-data keys "name" and "playerName". Boolean. Default: enabled.
+; This is the same SetPlayerData the game uses for team, ready state and the
+; rest of its live lobby metadata, so sending it is cheap and safe. What is not
+; established is whether the service acts on those two keys for an already
+; authorised client - Redux itself never re-sends them, so the shipped game
+; proves nothing either way. Each send is logged to openshim.log as
+; "TX SetPlayerData ...", and the engine's own websocket trace is turned up for
+; the duration of the two messages so BZLogger.txt records the JSON.
+; Environment override: OPENSHIM_DISABLE_LIVE_NICKNAME=1
+LiveNicknameKeys = 1
+
+; Additionally re-authorise with BZRNet after a nickname change. Boolean.
+; Default: DISABLED.
+; The service is told your name in its login message, so a fresh authorisation
+; would certainly carry a new one - leaving the multiplayer screens does not,
+; since the websocket lives for the whole process. But this sends a second
+; Authorization on an already-authorised socket, nothing shows the protocol
+; allows that, and the service decides what it does to any lobby you are sitting
+; in. Turn it on only to test that route.
 ; Environment override: OPENSHIM_DISABLE_BZRNET_REAUTH=1
-ReauthOnNicknameChange = 1
+ReauthOnNicknameChange = 0
 
 ; Injected lobby readouts: the multiplayer name row and the negotiated-route
 ; readout ("Net: idle udp 51330", or "Alice:LAN Bob:RELAY" once peers connect)

@@ -422,13 +422,14 @@ Worth reusing rather than rebuilding:
    common append operation while nickname editing is active. Enter invokes the
    injected entry's own callback; a small `OK` button invokes the same path.
    Applying persists the value to `openshim.ini` and the native `/nickname=`
-   buffer, and that is the whole of it — the name reaches the service in the
-   login message, so it takes effect on the next connect and **not** in the
-   open lobby (see "Renaming is a connect-time operation" below). The
-   acknowledgment says so: a display-only `Saved-reconnect` is painted after the
-   entry's Enter handler finishes, then clicking the row restores the real
-   backing value for another edit. `/name <text>` remains a chat fallback and
-   goes through the same path.
+   buffer, which is what the login message carries, and then tries to publish it
+   on the open connection as player data (see "Renaming: what the client
+   settles, and what it does not" below). The acknowledgment reports which of
+   those happened — `Sent to server`, `Reconnecting...`, or `Saved-reconnect` —
+   in the 15 characters the field renders, and stops short of claiming the
+   rename took, because only another client can show that. Clicking the row
+   restores the real backing value for another edit. `/name <text>` remains a
+   chat fallback and goes through the same path.
 
    Do not call the button callback setters (`0x007C23C0` / `0x007C23E0`) on a
    text entry. Their `+0x150` / `+0x154` fields are valid only in `cUI_Button`;
@@ -473,42 +474,65 @@ Three consequences that are easy to get wrong:
   name the service is ever told, so the buffer decides the displayed name from
   the **next connect** onwards — see below.
 
-### Renaming is a connect-time operation — so force a new connect
+### Renaming: what the client settles, and what it does not
 
-**There is no live rename, and the code that tried to do one has been removed.**
-The lobby displays the identity the service holds for the account, and the only
-place the client ever supplies that is the `Authorization` message's `name`
-field — built in `FUN_006C6E60`, which reads the `/nickname=` buffer and falls
-back to the platform `realname` when byte 0 is NUL. That builder has exactly one
-caller, inside the connect handshake (`0x006C844E`), so the value is fixed for
-the lifetime of the connection. Persisting the buffer *is* the whole feature;
-the name lands on the next connect.
+**The client tells the service its name exactly once per connection.** The
+`Authorization` message's `name` field is built in `FUN_006C6E60`, which reads
+the `/nickname=` buffer and falls back to the platform `realname` when byte 0 is
+NUL. That builder has exactly one caller, inside the connect handshake
+(`0x006C844E`), so the field is fixed for the lifetime of the connection.
+Persisting the buffer is therefore the one thing guaranteed to work, and it is
+done first and unconditionally on every apply.
 
-The route that looked live does not exist. `BZRNetLobby::SetPlayerData` (vtable
-slot 7, `0x0074BF60`) is real and callable, and OpenShim did call it correctly
-with key `name` — the log line `Requested live lobby nickname update ... (lobby=
-global player=B1004)` is a successful send. Nothing changed, because **no
-consumer reads a member-data key `name`.** The evidence, in order of weight:
+**What the shipped binary does not settle is whether the service accepts a
+rename over an open connection.** It is worth being precise about the limit of
+the local evidence, because an earlier revision of this document overstated it:
 
-* The player-data keys the lobby actually uses are `friendID`, `team`, `miniid`
-  and `knownPlayers`, read back per member through vtable slot 10
-  (`GetLobbyMemberData(memberId, key)`, e.g. `0x0073D9C2` for `team`).
-* Every `name` in the lobby code is a *lobby* name, not a player's: both uses
-  (`0x00741041` in `OnLobbyListReceived`, `0x00743743`) sit beside `gameType`,
-  `gameSettings` and `GameVersion` and feed the games list. Reading that one as
-  the row's player name was the mistake that produced the dead code.
-* `playerName` does not appear anywhere in the image.
+* Redux never re-sends `name` after `Authorization`, and `playerName` does not
+  appear in the image at all. That is evidence about *Redux*, which has no
+  rename feature — not about what BZRNet does with those keys.
+* Nothing in Redux reads a member-data key `name` back. The keys it consumes per
+  member through vtable slot 10 (`GetLobbyMemberData(memberId, key)`) are
+  `friendID`, `team`, `miniid` and `knownPlayers` — `0x0073D9C2` reads `team`.
+  Every `name` in the lobby code is a *lobby* name: both uses (`0x00741041` in
+  `OnLobbyListReceived`, `0x00743743`) sit beside `gameType`, `gameSettings` and
+  `GameVersion` and feed the games list. So a local read-back cannot confirm a
+  rename even if the service performed one.
+* Other BZRNet clients write `name` and `playerName` together as an identity
+  pair, including on an already-connected socket. The service may well treat
+  that pair specially in its `SetPlayerData` handler.
 
-Two things worth keeping from the attempt, because both are correct and reusable:
+So OpenShim sends the pair (`[Network] LiveNicknameKeys`, default on) and logs
+every attempt, and treats re-authorisation as the fallback rather than the plan.
+**Confirming the result has to come from outside this process**: a second client,
+or an external BZRNet client watching the lobby. There is no inbound trace to
+read (see the wire trace below).
+
+`BZRNetLobby::SetPlayerData` is vtable slot 7 at `0x0074BF60`:
 
 ```c
-// vtable slot 7 on BZRNetLobby (vftable 0x0089ADDC). Sets the LOCAL player's
-// data in the given lobby -- the member is implicit, the server knows it.
+// __thiscall on the lobby (vftable 0x0089ADDC).
 void __thiscall BZRNetLobby::SetPlayerData(void* lobby,
                                            const StableId*    lobbyId,  // lobby+0x28
                                            const std::string* key,
                                            const std::string* value);
 ```
+
+The first argument is the **lobby's** identity, not a player's — an earlier
+comment here named it `playerId`, which is wrong even though the value passed was
+right. The disassembly is unambiguous:
+
+* `0x0074BF71` uses it as the key into the lobby map at `0x0260B1C0`.
+* `0x0074BF99` pushes the *local user's* `StableId` global, `0x0260B1C8`, to find
+  that user among the lobby's members at `entry+0x48`; only then is the pair
+  written into the member's own map at `+0x4C`. The player is implicit, and this
+  local cache write is conditional on the lookup succeeding.
+* `0x0074BFFB` resolves `lobby+0xC8` and sends **unconditionally**, whether or
+  not either lookup matched. The send is inline on the calling thread, not
+  posted.
+
+That last point is what makes the wire trace below usable, and it also means a
+send with no local echo is still a send.
 
 The live lobby is reachable without hooking anything: the accessor at
 `0x00764760` (`mov eax,[0x00945470]; ret`) returns the instance published on
@@ -531,12 +555,36 @@ guard passes, but it is a `__thiscall` on the *websocket service* the lobby
 holds at `+0xC8`; its third instruction is `mov ecx,[ebp-0xC4]` / `add ecx,
 0x2E0`, so calling it without that `this` faults immediately.
 
+#### The wire trace
+
+`0x006C4F70` prints the outgoing JSON under `WebSocket Message Sent:` when the
+log level at `0x008EDA28` is at least 3. It ships at **1**, and the 48 `.text`
+references to it are all `cmp` — nothing writes it, so raising it is safe and
+entirely ours to undo. Guard on `0x006C5178` (`83 3D 28 DA 8E 00 03`), which is
+the instruction; the reference scan lands on the operand at `0x006C517A`.
+
+`SendBzrNetNicknameLive` raises the level, sends, and restores it, so
+`BZLogger.txt` gains exactly the two messages a rename produces rather than
+every websocket send for the rest of the session. This works only because the
+send at `0x0074BFFB` is inline.
+
+**There is no receive-side logger.** Every `WebSocket Message` string in the
+image is `Sent`; the inbound dispatcher is `FUN_006BF2A0`, a long
+`if`/`else if` chain over the message type at `[ebp-0x28]` — `OnUserDataChanged`
+compares at `0x006C08AC`, `OnLobbyChanged` at `0x006C0A7C` — and it logs
+nothing. Observing what the service sends back means either detouring into that
+chain or, far more cheaply, watching from a second client.
+
 #### Re-authorising on demand
 
 Leaving the multiplayer screens does not help: the websocket lives for the whole
 process, so no second `Authorization` is ever sent and only a restart changed
-the name. OpenShim now queues one itself after a nickname change
-(`ForceBzrNetReauth`, `[Network] ReauthOnNicknameChange`, default on).
+the name. OpenShim can queue one itself after a nickname change
+(`ForceBzrNetReauth`, `[Network] ReauthOnNicknameChange`) — but this is **off by
+default**. It is the most invasive of the options: nothing shows the protocol's
+state machine accepts `AUTHORIZED -> Authorization`, and the service decides
+what a second authorisation does to a lobby you are sitting in. The player-data
+route above is tried first.
 
 ```
 0x006C6DF0  void __thiscall BZRNetClient::SendAuthorization(void*)

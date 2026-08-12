@@ -73,6 +73,8 @@ scripts/*
 !scripts/Apply-StockDx11ShaderHardening.ps1
 !scripts/Test-TerrainSemanticParity.ps1
 !scripts/Compare-TerrainCaptures.ps1
+!scripts/New-TerrainHdSmokeTiles.ps1
+!scripts/terrain_hd_tiles.example.json
 docs/*
 !docs/terrain-render-path.md
 !docs/bz15-multiplayer-ui-port.md

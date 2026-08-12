@@ -1307,3 +1307,103 @@ a human-framed capture with the cluster on screen.
 Most launches this session were force-terminated, so the shutdown-order path
 was largely not exercised and the D3D11 module pin remains **UNTESTED** in
 practice.
+
+## Phase 3B slice 1: manifest-driven HD diffuse tiles
+
+Phase 3B now has an opt-in, one-cluster smoke path for real per-tile diffuse
+resources. It preserves the Phase 2/3A ownership model and all disabled-path
+behavior. `TerrainHdEnabled=1` activates the terrain proxy and semantic renderer,
+selects a manifest binding by the stock material name, builds an Ogre
+`Texture2DArray`, and samples slice `tileIndex` using the already-proven oriented
+local UV. The stock terrain entity remains visible and untouched.
+
+Only the diffuse sample changes in this slice. Stock detail, normal, specular,
+emissive, shadow, IBL, lighting, fog and COLOR0 behavior retain their original
+textures and atlas UV. This deliberately makes the first test small enough to
+diagnose tile selection, orientation and filtering independently of a new PBR
+material design.
+
+### Why the manifest lists ordinary images
+
+This Ogre branch supports `TEX_TYPE_2D_ARRAY`, but its DDS codec reads the DX10
+format field and does not apply the DX10 `arraySize` field. Treating a packaged
+DDS array as a normal resource would therefore be unsafe. OpenShim instead
+loads ordinary Ogre image resources and copies their hardware pixel buffers
+into a manual array. The copy requires identical width, height, mip count and
+pixel format for every source in a binding. A required fallback fills every
+slice without an explicit override.
+
+The manifest schema is `bzr-openshim-terrain-hd-v1`:
+
+```json
+{
+  "schema": "bzr-openshim-terrain-hd-v1",
+  "materials": {
+    "MA_DETAIL_ATLAS": {
+      "sliceCount": 256,
+      "fallback": "openshim_hd_fallback.png",
+      "tiles": {
+        "11": "openshim_hd_tile_011.png"
+      }
+    },
+    "*": {
+      "sliceCount": 256,
+      "fallback": "openshim_hd_fallback.png",
+      "tiles": {}
+    }
+  }
+}
+```
+
+Exact material names win; `*` is the optional fallback binding. Numeric tile
+keys must be below `sliceCount`, which is capped at 256 because the released
+terrain lookup returns an 8-bit index. Resource names are resolved by Ogre, so
+the images must be in a resource directory registered by the active mod. The
+manifest itself is read from the filesystem beside the executable by default;
+an absolute path is accepted for development.
+
+### Configuration and smoke assets
+
+```ini
+[Terrain]
+TerrainHdEnabled = 1
+TerrainHdManifest = C:\absolute\development\path\terrain_hd_tiles.json
+TerrainProxyOffsetX = 400.0
+TerrainSemanticValidateUV = 1
+```
+
+Environment equivalents are `OPENSHIM_TERRAIN_HD=1` and
+`OPENSHIM_TERRAIN_HD_MANIFEST=<path>`. `TerrainHdEnabled` automatically enables
+`TerrainProxyEnabled` and `TerrainSemanticRenderer`; all three remain off when
+the HD switch is absent.
+
+`scripts/New-TerrainHdSmokeTiles.ps1` creates a full set of numbered,
+asymmetric PNG tiles and a matching manifest. Point `OutputDirectory` at a
+registered resource directory in the active development mod, and point
+`ManifestPath` at the file named by `TerrainHdManifest`. The red top edge,
+green left edge, white corner marker and printed slice number make rotation,
+reflection and lookup mistakes visible immediately.
+
+Expected success records include:
+
+```text
+[TERRAIN-HD] manifest loaded ...
+[TERRAIN-HD] array ready material="MA_DETAIL_ATLAS" ... slices=256 ...
+... hdDiffuse={requested:1,active:1,passes:...,array:"OpenShim/TerrainHD/..."}
+```
+
+Every failure is fail-soft and says `stock atlas retained`. Shader
+specialization is source-hashed as in Phase 3A, so the Ogre microcode cache
+cannot alias stock-atlas and HD-array fragment programs.
+
+### Current validation boundary
+
+- **PROVEN:** Win32 Release rebuild succeeds with the new path compiled in.
+- **PROVEN:** disabled/default configuration and manifest parsing remain
+  fail-soft by construction.
+- **PROVEN:** the smoke-asset generator and both existing parity scripts parse.
+- **UNTESTED:** live Ogre array construction, pixel-buffer copies, generated
+  fragment-program compilation and visible slice/orientation output.
+- **OUTSIDE THIS SLICE:** whole-map proxying, stock-terrain suppression,
+  normal/specular/emissive arrays, PBR material replacement, LOD and device-loss
+  recreation.
