@@ -189,10 +189,12 @@ the original March note described.
 ### Runtime hook
 
 - patch name: `Producer Build Menu Root Hook`
-- opt-in environment variables accepted by `patcher.cpp`:
-  - `OPENSHIM_ENABLE_PRODUCER_BUILD_MENU=1`
-  - `OPENSHIM_ENABLE_PRODUCER_BUILD_MENU_EXPERIMENT=1`
-  - `BZR_ENABLE_PRODUCER_BUILD_MENU=1`
+- the runtime patch is enabled through `openshim_producer_build_menus.ini`; no
+  process environment variable is required
+- `[ProducerBuildMenus] Enabled=1` is the test/default state and `Enabled=0`
+  opts out before the producer hook is applied
+- legacy producer-menu environment names remain accepted only as compatibility
+  aliases through OpenShim's INI-aware environment shim
 - the rel32 hook calls `MaybeApplyProducerBuildMenu(producerPtr)` before calling
   the original producer helper
 - common producer types are classified as Recycler, Factory, Armory, and
@@ -223,9 +225,10 @@ path. Use an unquoted token for the first validation pass.
 
 ### Config requirement
 
-`openshim_producer_build_menus.ini` must still exist and must contain at least
-one configured mapping/override for the config loader to become enabled. The
-recommended ODF-local smoke configuration is therefore:
+`openshim_producer_build_menus.ini` must still exist and contain at least one
+configured mapping/override for the current producer config loader to become
+active. The checked-in example is ready for testing as-is after it is copied
+beside the executable:
 
 ```ini
 [ProducerBuildMenus]
@@ -234,11 +237,11 @@ Factory=build
 ```
 
 Factories with no ODF-local field retain the stock `build` root; a test Factory
-with `buildMenuRoot = b_amcmbt` overrides it.
+with `buildMenuRoot = b_amcmbt` overrides it. No launch environment setup is
+needed.
 
-This requirement is a convenience limitation of the current experiment, not a
-fundamental requirement of the ODF-local design. Once runtime behavior is
-proven, allowing `Enabled=1` with ODF-only roots would be a sensible cleanup.
+The remaining file/mapping requirement is a convenience limitation of the
+current experiment, not a fundamental requirement of the ODF-local design.
 
 ### What still needs live proof
 
