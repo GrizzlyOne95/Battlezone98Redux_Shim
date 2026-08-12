@@ -17,20 +17,11 @@ Current `main` already contains the experimental bridge:
 - `[ProducerClass] buildMenuRoot = ...` and `buildMenu = ...` are both recognized
 - `*_mp.odf` is checked before `.odf`
 - the root value is normalized to Redux's native eight-character Builder token
+- the runtime patch is enabled by the producer INI; no process environment variable is required
 
 The bridge is still experimental and currently disabled on Steam by the producer-menu config loader. Use the GOG executable for this test.
 
-## 1. Enable the hook
-
-Set this environment variable before starting Battlezone 98 Redux:
-
-```text
-OPENSHIM_ENABLE_PRODUCER_BUILD_MENU=1
-```
-
-The aliases `OPENSHIM_ENABLE_PRODUCER_BUILD_MENU_EXPERIMENT=1` and `BZR_ENABLE_PRODUCER_BUILD_MENU=1` also enable the runtime patch.
-
-## 2. Enable the producer-menu config path
+## 1. Enable the producer-menu config
 
 Copy:
 
@@ -46,7 +37,7 @@ openshim_producer_build_menus.ini
 
 beside the game executable.
 
-For the ODF-local test, keep:
+The example is already enabled for testing:
 
 ```ini
 [ProducerBuildMenus]
@@ -54,9 +45,11 @@ Enabled=1
 Factory=build
 ```
 
+No environment variable or command-line setup is required. Set `Enabled=0` to opt out completely.
+
 `Factory=build` is a stock fallback for factories without an ODF-local override. It also ensures the experimental config path is enabled before a producer ODF is examined.
 
-## 3. Add an ODF-local root to a test Factory
+## 2. Add an ODF-local root to a test Factory
 
 In the Factory ODF used by the test map/mod, add this line to its existing `[ProducerClass]` section:
 
@@ -81,7 +74,7 @@ or:
 buildMenuRoot = b_amprod
 ```
 
-## 4. Expected result
+## 3. Expected result
 
 Enter a mission with that Factory and select the Factory.
 
@@ -108,7 +101,7 @@ The stock American combat Builder tree includes leaves/subentries such as:
 
 The important test is not only whether these entries appear. Select a leaf, confirm that normal build progress starts, and confirm the expected unit is actually produced.
 
-## 5. Regression checks
+## 4. Regression checks
 
 After the first successful menu display:
 
@@ -123,7 +116,7 @@ After the first successful menu display:
 
 ### No `[PRODMENU]` hook/config records
 
-The runtime patch was filtered out. Check the environment variable and confirm the GOG executable is being used.
+Confirm `openshim_producer_build_menus.ini` is beside the executable, `Enabled=1`, and the GOG executable is being used. There is no longer an environment-variable prerequisite.
 
 ### Config loads, but no `ODF root` record
 
