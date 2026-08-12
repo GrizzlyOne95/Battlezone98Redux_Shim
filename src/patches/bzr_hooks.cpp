@@ -1524,6 +1524,9 @@ namespace BZROpenShim
         static bool g_EnableChunkRenderFallback = false;
         static bool g_EnableChunkProxyDebug = false;
         static bool g_EnableChunkMeshProxy = false;
+        static bool g_EnablePartialFragmentBoneCollapse = false;
+        // Guards against a craft mesh with an implausible bone count being walked.
+        static constexpr uint16_t kMaxOwnerSkeletonBones = 1024;
         // Building geo nodes carry no owner GameObject link (+0x8C is null),
         // so chunks born from a building can't identify their craft through
         // the bridge. The fragment ROOT still can. FragmentObject calls
@@ -1531,6 +1534,10 @@ namespace BZROpenShim
         // resolved mesh name is handed down through this scoped global while
         // the walk is on the stack.
         static char g_ActiveFragmentSourceMeshName[48] = {};
+        // Set only while PartialFragmentObject is on the stack. Full fragmentation
+        // hides the whole source mesh instead, so per-piece bone collapse there
+        // would be wasted work on an already-invisible entity.
+        static bool g_ActivePartialFragment = false;
         static bool g_TraceChunkRender = false;
         static bool g_TraceChunkRenderVerbose = false;
         static bool g_TraceChunkEffectRuntime = false;
@@ -1936,6 +1943,9 @@ namespace BZROpenShim
         using FnOgreEntityU16Query = uint16_t(__thiscall*)(void*);
         using FnOgreEntityIntQuery = int(__thiscall*)(void*);
         using FnOgreEntityGetSkeleton = void*(__thiscall*)(void*);
+        using FnOgreSkeletonGetBoneByIndex = void*(__thiscall*)(void*, uint16_t);
+        using FnOgreBoneSetManuallyControlled = void(__thiscall*)(void*, bool);
+        using FnOgreNodeSetScale = void(__thiscall*)(void*, float, float, float);
         using FnOgreStringQuery = const std::string&(__thiscall*)(void*);
         using FnOgreProcessQueuedUpdates = void(__cdecl*)();
         using FnOgreNumAttachedObjects = uint16_t(__thiscall*)(void*);
@@ -23230,6 +23240,9 @@ namespace BZROpenShim
         g_EnableChunkMeshProxy =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_MESH_PROXY") ||
               EnvFlagEnabled("BZR_DISABLE_CHUNK_MESH_PROXY"));
+        g_EnablePartialFragmentBoneCollapse =
+            !(EnvFlagEnabled("OPENSHIM_DISABLE_PARTIAL_FRAGMENT_BONE_COLLAPSE") ||
+              EnvFlagEnabled("BZR_DISABLE_PARTIAL_FRAGMENT_BONE_COLLAPSE"));
         g_VehicleSkinningTraceEnabled =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_VEHICLE_SKINNING_DIAGNOSTICS") ||
               EnvFlagEnabled("OPENSHIM_DISABLE_SKINNING_DIAGNOSTICS") ||
@@ -26099,6 +26112,134 @@ namespace BZROpenShim
         }
     }
 
+    static volatile long g_PartialFragmentBoneCollapseLogBudget = 24;
+
+    // Raw Ogre calls kept in their own frame so a bad entity/skeleton pointer
+    // cannot take the fragment walk down with it. No named C++ objects here:
+    // __try cannot coexist with object unwinding.
+    static bool TryCollapseOwnerBoneSeh(
+        FnOgreEntityGetSkeleton getSkeleton,
+        FnOgreEntityU16Query getNumBones,
+        FnOgreSkeletonGetBoneByIndex getBoneByIndex,
+        FnOgreStringQuery getBoneName,
+        FnOgreBoneSetManuallyControlled setManuallyControlled,
+        FnOgreNodeSetScale setScale,
+        void* ownerEntity,
+        const char* geomName,
+        uint16_t& outBoneIndex,
+        uint16_t& outBoneCount)
+    {
+        __try
+        {
+            void* const skeleton = getSkeleton(ownerEntity);
+            if (!skeleton)
+                return false;
+
+            const uint16_t boneCount = getNumBones(skeleton);
+            outBoneCount = boneCount;
+            if (boneCount == 0 || boneCount > kMaxOwnerSkeletonBones)
+                return false;
+
+            for (uint16_t index = 0; index < boneCount; ++index)
+            {
+                void* const bone = getBoneByIndex(skeleton, index);
+                if (!bone)
+                    continue;
+
+                if (_stricmp(getBoneName(bone).c_str(), geomName) != 0)
+                    continue;
+
+                // Manual control stops the skeleton's animation pass restoring
+                // the bone next frame; the zero scale is what actually removes
+                // the piece's vertices.
+                setManuallyControlled(bone, true);
+                setScale(bone, 0.0f, 0.0f, 0.0f);
+                outBoneIndex = index;
+                return true;
+            }
+
+            return false;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    // Partial fragmentation detaches individual geos while the hull keeps
+    // rendering. The legacy engine unparented each detached geo from the craft's
+    // object tree, so it stopped drawing on the model the same frame its debris
+    // appeared. Redux bakes the whole craft into a single skinned Ogre mesh that
+    // cannot unparent anything, so the piece stays welded to the body until
+    // FullFragmentObject hides the entire mesh — a tank flies its blown-off wing
+    // away while a second copy rides along on the hull.
+    //
+    // Every stock craft mesh skins each geo rigidly to one identically-named bone
+    // (all vertex weights are exactly 1.0), so zeroing that bone removes exactly
+    // the piece that just detached. Ogre propagates scale down the bone tree,
+    // which matches the legacy semantics: unparenting a geo took its children
+    // with it, and those children spawn as their own chunks anyway.
+    static void CollapseOwnerBoneForDetachedPiece(const ChunkCreateSourceTreeProbe& probe)
+    {
+        if (!g_EnablePartialFragmentBoneCollapse || !g_ActivePartialFragment)
+            return;
+        if (!probe.valid || !probe.ownerEntity || !probe.source.geomName[0])
+            return;
+
+        static FnOgreEntityGetSkeleton getSkeleton =
+            ResolveOgreProc<FnOgreEntityGetSkeleton>("?getSkeleton@Entity@Ogre@@QBEPAVSkeletonInstance@2@XZ");
+        static FnOgreEntityU16Query getNumBones =
+            ResolveOgreProc<FnOgreEntityU16Query>("?getNumBones@Skeleton@Ogre@@UBEGXZ");
+        static FnOgreSkeletonGetBoneByIndex getBoneByIndex =
+            ResolveOgreProc<FnOgreSkeletonGetBoneByIndex>("?getBone@Skeleton@Ogre@@UBEPAVBone@2@G@Z");
+        static FnOgreStringQuery getBoneName =
+            ResolveOgreProc<FnOgreStringQuery>("?getName@Node@Ogre@@QBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
+        static FnOgreBoneSetManuallyControlled setManuallyControlled =
+            ResolveOgreProc<FnOgreBoneSetManuallyControlled>("?setManuallyControlled@Bone@Ogre@@QAEX_N@Z");
+        static FnOgreNodeSetScale setScale =
+            ResolveOgreProc<FnOgreNodeSetScale>("?setScale@Node@Ogre@@UAEXMMM@Z");
+
+        if (!getSkeleton || !getNumBones || !getBoneByIndex || !getBoneName ||
+            !setManuallyControlled || !setScale)
+        {
+            static bool s_ProcFailureLogged = false;
+            if (!s_ProcFailureLogged)
+            {
+                s_ProcFailureLogged = true;
+                LogChunkDiagnostic(
+                    "chunkspawn",
+                    L"[CHUNKSPAWN] bone-collapse unavailable; skeleton procs unresolved\n");
+            }
+            return;
+        }
+
+        uint16_t boneIndex = 0;
+        uint16_t boneCount = 0;
+        const bool collapsed = TryCollapseOwnerBoneSeh(
+            getSkeleton,
+            getNumBones,
+            getBoneByIndex,
+            getBoneName,
+            setManuallyControlled,
+            setScale,
+            probe.ownerEntity,
+            probe.source.geomName,
+            boneIndex,
+            boneCount);
+
+        if (InterlockedDecrement(&g_PartialFragmentBoneCollapseLogBudget) >= 0)
+        {
+            LogChunkDiagnostic(
+                "chunkspawn",
+                L"[CHUNKSPAWN] bone-collapse geo=%hs owner=0x%08X bones=%u %hs=%u\n",
+                probe.source.geomName,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(probe.ownerEntity)),
+                static_cast<uint32_t>(boneCount),
+                collapsed ? "boneIndex" : "unmatched",
+                static_cast<uint32_t>(boneIndex));
+        }
+    }
+
     void* __fastcall ChunkEffectCreateChunkHook(void* thisPtr,
                                                 void* /*edx*/,
                                                 void* objectPtr,
@@ -26143,6 +26284,10 @@ namespace BZROpenShim
 
         if (boundObjectBytes)
             StoreChunkResolvedBinding(boundObjectBytes, sourceTreeProbe);
+
+        // Now that the debris exists, stop the intact hull from drawing the piece
+        // that just left it. No-op unless PartialFragmentObject is on the stack.
+        CollapseOwnerBoneForDetachedPiece(sourceTreeProbe);
 
         LogChunkCreateLifecycle(
             L"CreateChunk",
@@ -26370,12 +26515,14 @@ namespace BZROpenShim
             LogChunkFragmentWalkTree(L"PartialFragmentObject", thisPtr, objectPtr, preserveFlag);
             TryReadChunkEffectCount(reinterpret_cast<const uint8_t*>(thisPtr), countBefore);
             BeginActiveFragmentSourceContext(objectPtr);
+            g_ActivePartialFragment = true;
         }
         ++g_ChunkFragmentHookDepth;
         g_BzrFn_ChunkEffectPartialFragment(thisPtr, objectPtr, velocity, preserveFlag);
         --g_ChunkFragmentHookDepth;
         if (outermost)
         {
+            g_ActivePartialFragment = false;
             g_ActiveFragmentSourceMeshName[0] = '\0';
             uint32_t countAfter = countBefore;
             TryReadChunkEffectCount(reinterpret_cast<const uint8_t*>(thisPtr), countAfter);
