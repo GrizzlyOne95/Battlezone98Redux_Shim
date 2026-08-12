@@ -1,0 +1,18 @@
+{
+  "schema": "bzr-openshim-terrain-hd-v1",
+  "materials": {
+    "MA_DETAIL_ATLAS": {
+      "sliceCount": 256,
+      "fallback": "openshim_hd_fallback.png",
+      "tiles": {
+        "11": "openshim_hd_tile_011.png",
+        "12": "openshim_hd_tile_012.png"
+      }
+    },
+    "*": {
+      "sliceCount": 256,
+      "fallback": "openshim_hd_fallback.png",
+      "tiles": {}
+    }
+  }
+}

@@ -4,6 +4,7 @@
 
 #include "bzr_options_ui.h"
 #include "shim_log.h"
+#include <nlohmann/json.hpp>
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -12,6 +13,7 @@
 #include <bcrypt.h>
 #include <d3d11.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -24,6 +26,7 @@
 #include <mutex>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -84,6 +87,11 @@ namespace BZROpenShim
         constexpr int kSemanticDebugAtlasRect = 6;
         constexpr int kSemanticDebugUvDelta = 7;
         constexpr int kSemanticDebugModeMaximum = kSemanticDebugUvDelta;
+        constexpr int kOgreTextureType2D = 2;
+        constexpr int kOgreTextureType2DArray = 5;
+        constexpr int kOgreTextureUsageStaticWriteOnly = 5;
+        constexpr int kOgreMipDefault = -1;
+        constexpr int kOgrePixelFormatUnknown = 0;
 
         const char* SemanticDebugModeName(int mode)
         {
@@ -120,6 +128,16 @@ namespace BZROpenShim
             Vector3 minimum;
             Vector3 maximum;
             int extent;
+        };
+
+        struct OgreBox
+        {
+            uint32_t left;
+            uint32_t top;
+            uint32_t right;
+            uint32_t bottom;
+            uint32_t front;
+            uint32_t back;
         };
 
         struct OgreSharedPtr
@@ -188,6 +206,8 @@ namespace BZROpenShim
             int semanticDebugMode = 0;
             int semanticFrameCaptures = 0;
             int semanticFrameCaptureStride = 300;
+            bool hdEnabled = false;
+            std::string hdManifest = "terrain_hd_tiles.json";
             int zoneOrdinal = -1;
             int clusterOrdinal = -1;
             int zoneX = INT_MIN;
@@ -251,6 +271,26 @@ namespace BZROpenShim
             size_t semanticPassesSeen = 0;
             size_t semanticFragmentProgramsCreated = 0;
             std::vector<TerrainSemantic::Vertex> semanticVertices;
+            std::string hdTextureName;
+            std::string hdDiffuseFallback;
+            uint32_t hdSliceCount = 0;
+            uint32_t hdWidth = 0;
+            uint32_t hdHeight = 0;
+            uint32_t hdMipmaps = 0;
+        };
+
+        struct TerrainHdMaterialBinding
+        {
+            uint32_t sliceCount = 0;
+            std::string fallback;
+            std::unordered_map<uint32_t, std::string> tiles;
+        };
+
+        struct TerrainHdManifest
+        {
+            std::filesystem::path path;
+            std::unordered_map<std::string, TerrainHdMaterialBinding> materials;
+            bool loaded = false;
         };
 
         // Although the decompiler labels this as void, the placement-new
@@ -343,6 +383,24 @@ namespace BZROpenShim
         using FnGetElementUShort = uint16_t(__thiscall*)(const void*);
         using FnGetElementInt = int(__thiscall*)(const void*);
         using FnGetElementUInt = uint32_t(__thiscall*)(const void*);
+        using FnGetNumTextureUnitStates = uint16_t(__thiscall*)(void*);
+        using FnGetTextureUnitState = void* (__thiscall*)(void*, uint16_t);
+        using FnSetTexture = void(__thiscall*)(void*, const OgreSharedPtr&);
+        using FnGetTextureManager = void* (__cdecl*)();
+        using FnLoadTexture = OgreSharedPtr* (__thiscall*)(
+            void*, OgreSharedPtr*, const std::string&, const std::string&,
+            int, int, float, bool, int, bool);
+        using FnCreateManualTexture = OgreSharedPtr* (__thiscall*)(
+            void*, OgreSharedPtr*, const std::string&, const std::string&,
+            int, uint32_t, uint32_t, uint32_t, int, int, int, void*, bool,
+            uint32_t, const std::string&);
+        using FnGetTextureUInt = uint32_t(__thiscall*)(void*);
+        using FnGetTextureByte = uint8_t(__thiscall*)(void*);
+        using FnGetTextureInt = int(__thiscall*)(void*);
+        using FnGetTextureBuffer = OgreSharedPtr* (__thiscall*)(
+            void*, OgreSharedPtr*, uint32_t, uint32_t);
+        using FnBlitPixelBuffer = void(__thiscall*)(
+            void*, const OgreSharedPtr&, const OgreBox&, const OgreBox&);
 
         struct OgreApi
         {
@@ -425,11 +483,28 @@ namespace BZROpenShim
             FnGetElementUShort getElementSource = nullptr;
             FnGetElementInt getElementType = nullptr;
             FnGetElementUInt getElementOffset = nullptr;
+            // Optional Phase 3B smoke-path APIs. Their absence disables only
+            // TerrainHdEnabled and leaves the Phase 3A stock-atlas path intact.
+            FnGetNumTextureUnitStates getNumTextureUnitStates = nullptr;
+            FnGetTextureUnitState getTextureUnitState = nullptr;
+            FnSetTexture setTexture = nullptr;
+            FnGetTextureManager getTextureManager = nullptr;
+            FnLoadTexture loadTexture = nullptr;
+            FnCreateManualTexture createManualTexture = nullptr;
+            FnGetTextureUInt getTextureWidth = nullptr;
+            FnGetTextureUInt getTextureHeight = nullptr;
+            FnGetTextureUInt getTextureDepth = nullptr;
+            FnGetTextureByte getTextureMipmaps = nullptr;
+            FnGetTextureInt getTextureType = nullptr;
+            FnGetTextureInt getTextureFormat = nullptr;
+            FnGetTextureBuffer getTextureBuffer = nullptr;
+            FnBlitPixelBuffer blitPixelBuffer = nullptr;
         };
 
         TerrainConfig g_config;
         ProxyState g_proxy;
         OgreApi g_ogre;
+        TerrainHdManifest g_hdManifest;
         InlineDetour32 g_zoneConstructDetour;
         InlineDetour32 g_zoneProcessDetour;
         FnZoneConstruct g_originalZoneConstruct = nullptr;
@@ -553,6 +628,27 @@ namespace BZROpenShim
             return end != value && *end == '\0' ? parsed : fallback;
         }
 
+        std::string ReadIniString(const std::string& iniPath,
+                                  const char* key,
+                                  const char* fallback)
+        {
+            std::array<char, 1024> value = {};
+            GetPrivateProfileStringA("Terrain", key, fallback, value.data(),
+                static_cast<DWORD>(value.size()), iniPath.c_str());
+            return value.data();
+        }
+
+        bool ReadEnvString(const char* name, std::string& value)
+        {
+            std::array<char, 4096> text = {};
+            const DWORD length = GetEnvironmentVariableA(
+                name, text.data(), static_cast<DWORD>(text.size()));
+            if (length == 0 || length >= text.size())
+                return false;
+            value.assign(text.data(), length);
+            return true;
+        }
+
         TerrainConfig ReadConfig()
         {
             TerrainConfig config;
@@ -570,6 +666,10 @@ namespace BZROpenShim
             config.semanticDebugMode = GetPrivateProfileIntA("Terrain", "TerrainSemanticDebug", 0, iniText.c_str());
             config.semanticFrameCaptures = GetPrivateProfileIntA("Terrain", "TerrainSemanticFrameCapture", 0, iniText.c_str());
             config.semanticFrameCaptureStride = GetPrivateProfileIntA("Terrain", "TerrainSemanticFrameCaptureStride", 300, iniText.c_str());
+            config.hdEnabled = GetPrivateProfileIntA(
+                "Terrain", "TerrainHdEnabled", 0, iniText.c_str()) != 0;
+            config.hdManifest = ReadIniString(
+                iniText, "TerrainHdManifest", "terrain_hd_tiles.json");
             config.zoneOrdinal = GetPrivateProfileIntA("Terrain", "TerrainProxyZone", -1, iniText.c_str());
             config.clusterOrdinal = GetPrivateProfileIntA("Terrain", "TerrainProxyCluster", -1, iniText.c_str());
             config.zoneX = GetPrivateProfileIntA("Terrain", "TerrainProxyZoneX", INT_MIN, iniText.c_str());
@@ -589,6 +689,9 @@ namespace BZROpenShim
                 config.semanticRenderer = true;
             if (IsEnvEnabled("OPENSHIM_TERRAIN_SEMANTIC_LIFECYCLE_LOG"))
                 config.semanticLifecycleLog = true;
+            if (IsEnvEnabled("OPENSHIM_TERRAIN_HD"))
+                config.hdEnabled = true;
+            ReadEnvString("OPENSHIM_TERRAIN_HD_MANIFEST", config.hdManifest);
             int debugOverride = 0;
             if (ReadEnvInt("OPENSHIM_TERRAIN_SEMANTIC_DEBUG", debugOverride))
                 config.semanticDebugMode = debugOverride;
@@ -612,6 +715,128 @@ namespace BZROpenShim
             if (config.semanticFrameCaptureStride < 1)
                 config.semanticFrameCaptureStride = 1;
             return config;
+        }
+
+        std::filesystem::path ResolveHdManifestPath(const std::string& configured)
+        {
+            if (configured.empty())
+                return {};
+            std::filesystem::path path(configured);
+            if (path.is_absolute())
+                return path.lexically_normal();
+            wchar_t executable[MAX_PATH] = {};
+            const DWORD length = GetModuleFileNameW(nullptr, executable, MAX_PATH);
+            if (length == 0 || length >= MAX_PATH)
+                return {};
+            return (std::filesystem::path(executable).parent_path() / path)
+                .lexically_normal();
+        }
+
+        bool LoadTerrainHdManifest()
+        {
+            g_hdManifest = {};
+            if (!g_config.hdEnabled)
+                return false;
+
+            const std::filesystem::path path =
+                ResolveHdManifestPath(g_config.hdManifest);
+            if (path.empty())
+            {
+                LogShimA(LogLevel::Warn, "terrain-hd",
+                    "[TERRAIN-HD] manifest path is empty; stock atlas retained");
+                return false;
+            }
+
+            try
+            {
+                std::ifstream stream(path);
+                if (!stream)
+                {
+                    LogShimA(LogLevel::Warn, "terrain-hd",
+                        "[TERRAIN-HD] manifest unavailable path=\"%s\"; stock atlas retained",
+                        path.string().c_str());
+                    return false;
+                }
+                nlohmann::json root;
+                stream >> root;
+                if (root.value("schema", std::string()) !=
+                        "bzr-openshim-terrain-hd-v1" ||
+                    !root.contains("materials") ||
+                    !root["materials"].is_object())
+                {
+                    LogShimA(LogLevel::Warn, "terrain-hd",
+                        "[TERRAIN-HD] manifest schema/materials invalid path=\"%s\"; stock atlas retained",
+                        path.string().c_str());
+                    return false;
+                }
+
+                TerrainHdManifest parsed;
+                parsed.path = path;
+                for (auto materialIt = root["materials"].begin();
+                     materialIt != root["materials"].end(); ++materialIt)
+                {
+                    if (!materialIt.value().is_object())
+                        throw std::runtime_error("material binding is not an object");
+                    TerrainHdMaterialBinding binding;
+                    binding.sliceCount = materialIt.value().value(
+                        "sliceCount", 0u);
+                    binding.fallback = materialIt.value().value(
+                        "fallback", std::string());
+                    if (binding.sliceCount == 0 || binding.sliceCount > 256 ||
+                        binding.fallback.empty())
+                        throw std::runtime_error(
+                            "sliceCount must be 1..256 and fallback must be non-empty");
+                    if (materialIt.value().contains("tiles"))
+                    {
+                        const auto& tiles = materialIt.value()["tiles"];
+                        if (!tiles.is_object())
+                            throw std::runtime_error("tiles must be an object");
+                        for (auto tileIt = tiles.begin(); tileIt != tiles.end(); ++tileIt)
+                        {
+                            char* end = nullptr;
+                            const unsigned long index = std::strtoul(
+                                tileIt.key().c_str(), &end, 10);
+                            if (end == tileIt.key().c_str() || *end != '\0' ||
+                                index >= binding.sliceCount ||
+                                !tileIt.value().is_string() ||
+                                tileIt.value().get<std::string>().empty())
+                                throw std::runtime_error("invalid tile override");
+                            binding.tiles.emplace(static_cast<uint32_t>(index),
+                                tileIt.value().get<std::string>());
+                        }
+                    }
+                    parsed.materials.emplace(materialIt.key(), std::move(binding));
+                }
+                if (parsed.materials.empty())
+                    throw std::runtime_error("materials is empty");
+                parsed.loaded = true;
+                g_hdManifest = std::move(parsed);
+                LogShimA(LogLevel::Info, "terrain-hd",
+                    "[TERRAIN-HD] manifest loaded path=\"%s\" materials=%zu",
+                    g_hdManifest.path.string().c_str(),
+                    g_hdManifest.materials.size());
+                return true;
+            }
+            catch (const std::exception& error)
+            {
+                LogShimA(LogLevel::Warn, "terrain-hd",
+                    "[TERRAIN-HD] manifest parse failed path=\"%s\" error=\"%s\"; stock atlas retained",
+                    path.string().c_str(), error.what());
+            }
+            return false;
+        }
+
+        const TerrainHdMaterialBinding* FindTerrainHdBinding(
+            const std::string& material)
+        {
+            if (!g_hdManifest.loaded)
+                return nullptr;
+            const auto exact = g_hdManifest.materials.find(material);
+            if (exact != g_hdManifest.materials.end())
+                return &exact->second;
+            const auto fallback = g_hdManifest.materials.find("*");
+            return fallback != g_hdManifest.materials.end()
+                ? &fallback->second : nullptr;
         }
 
         bool ComputeSha256(const wchar_t* path, std::string& outHash)
@@ -839,6 +1064,32 @@ namespace BZROpenShim
                 "?getType@VertexElement@Ogre@@QBE?AW4VertexElementType@2@XZ");
             g_ogre.getElementOffset = Resolve<FnGetElementUInt>(module,
                 "?getOffset@VertexElement@Ogre@@QBEIXZ");
+            g_ogre.getNumTextureUnitStates = Resolve<FnGetNumTextureUnitStates>(module,
+                "?getNumTextureUnitStates@Pass@Ogre@@QBEGXZ");
+            g_ogre.getTextureUnitState = Resolve<FnGetTextureUnitState>(module,
+                "?getTextureUnitState@Pass@Ogre@@QAEPAVTextureUnitState@2@G@Z");
+            g_ogre.setTexture = Resolve<FnSetTexture>(module,
+                "?setTexture@TextureUnitState@Ogre@@QAEXABV?$SharedPtr@VTexture@Ogre@@@2@@Z");
+            g_ogre.getTextureManager = Resolve<FnGetTextureManager>(module,
+                "?getSingletonPtr@TextureManager@Ogre@@SAPAV12@XZ");
+            g_ogre.loadTexture = Resolve<FnLoadTexture>(module,
+                "?load@TextureManager@Ogre@@UAE?AV?$SharedPtr@VTexture@Ogre@@@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@0W4TextureType@2@HM_NW4PixelFormat@2@2@Z");
+            g_ogre.createManualTexture = Resolve<FnCreateManualTexture>(module,
+                "?createManual@TextureManager@Ogre@@UAE?AV?$SharedPtr@VTexture@Ogre@@@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@0W4TextureType@2@IIIHW4PixelFormat@2@HPAVManualResourceLoader@2@_NI0@Z");
+            g_ogre.getTextureWidth = Resolve<FnGetTextureUInt>(module,
+                "?getWidth@Texture@Ogre@@UBEIXZ");
+            g_ogre.getTextureHeight = Resolve<FnGetTextureUInt>(module,
+                "?getHeight@Texture@Ogre@@UBEIXZ");
+            g_ogre.getTextureDepth = Resolve<FnGetTextureUInt>(module,
+                "?getDepth@Texture@Ogre@@UBEIXZ");
+            g_ogre.getTextureMipmaps = Resolve<FnGetTextureByte>(module,
+                "?getNumMipmaps@Texture@Ogre@@UBEEXZ");
+            g_ogre.getTextureType = Resolve<FnGetTextureInt>(module,
+                "?getTextureType@Texture@Ogre@@UBE?AW4TextureType@2@XZ");
+            g_ogre.getTextureFormat = Resolve<FnGetTextureInt>(module,
+                "?getFormat@Texture@Ogre@@UBE?AW4PixelFormat@2@XZ");
+            g_ogre.blitPixelBuffer = Resolve<FnBlitPixelBuffer>(module,
+                "?blit@HardwarePixelBuffer@Ogre@@UAEXABVHardwarePixelBufferSharedPtr@2@ABUBox@2@1@Z");
 
             const void* const required[] = {
                 reinterpret_cast<void*>(g_ogre.cloneMesh), reinterpret_cast<void*>(g_ogre.createEntity),
@@ -875,6 +1126,18 @@ namespace BZROpenShim
                 if (!function)
                     return false;
             return true;
+        }
+
+        bool ResolveD3D11TextureApi()
+        {
+            if (g_ogre.getTextureBuffer)
+                return true;
+            HMODULE renderer = GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
+            if (!renderer)
+                return false;
+            g_ogre.getTextureBuffer = Resolve<FnGetTextureBuffer>(renderer,
+                "?getBuffer@D3D11Texture@Ogre@@UAE?AVHardwarePixelBufferSharedPtr@2@II@Z");
+            return g_ogre.getTextureBuffer != nullptr;
         }
 
         bool SafeReadZoneInt(void* zone, size_t offset, int& value)
@@ -1646,11 +1909,236 @@ namespace BZROpenShim
             }
         }
 
+        bool TerrainHdApiAvailable()
+        {
+            return g_ogre.getNumTextureUnitStates &&
+                g_ogre.getTextureUnitState && g_ogre.setTexture &&
+                g_ogre.getTextureManager && g_ogre.loadTexture &&
+                g_ogre.createManualTexture && g_ogre.getTextureWidth &&
+                g_ogre.getTextureHeight && g_ogre.getTextureDepth &&
+                g_ogre.getTextureMipmaps && g_ogre.getTextureType &&
+                g_ogre.getTextureFormat && g_ogre.blitPixelBuffer &&
+                ResolveD3D11TextureApi();
+        }
+
+        void RemoveTerrainHdTextureResource(const char* reason)
+        {
+            if (g_proxy.hdTextureName.empty())
+                return;
+            try
+            {
+                if (g_ogre.getTextureManager && g_ogre.removeResource)
+                {
+                    if (void* manager = g_ogre.getTextureManager())
+                        g_ogre.removeResource(manager, g_proxy.hdTextureName);
+                }
+            }
+            catch (...)
+            {
+                LogShimA(LogLevel::Warn, "terrain-hd",
+                    "[TERRAIN-HD] texture removal raised an OGRE exception name=\"%s\"",
+                    g_proxy.hdTextureName.c_str());
+            }
+            LogShimA(LogLevel::Info, "terrain-hd",
+                "[TERRAIN-HD] texture released reason=%s name=\"%s\" slices=%u size=%ux%u mips=%u",
+                reason, g_proxy.hdTextureName.c_str(), g_proxy.hdSliceCount,
+                g_proxy.hdWidth, g_proxy.hdHeight, g_proxy.hdMipmaps + 1);
+            g_proxy.hdTextureName.clear();
+            g_proxy.hdDiffuseFallback.clear();
+            g_proxy.hdSliceCount = 0;
+            g_proxy.hdWidth = 0;
+            g_proxy.hdHeight = 0;
+            g_proxy.hdMipmaps = 0;
+        }
+
+        bool LoadTerrainHdSourceTexture(void* textureManager,
+                                        const std::string& resource,
+                                        OgreSharedPtr& texture)
+        {
+            const std::string autodetect = "Autodetect";
+            g_ogre.loadTexture(textureManager, &texture, resource, autodetect,
+                kOgreTextureType2D, kOgreMipDefault, 1.0f, false,
+                kOgrePixelFormatUnknown, false);
+            return texture.rep && texture.info &&
+                g_ogre.getTextureType(texture.rep) == kOgreTextureType2D;
+        }
+
+        bool CopyTerrainHdSlice(void* arrayTexture,
+                                void* sourceTexture,
+                                uint32_t slice,
+                                uint32_t width,
+                                uint32_t height,
+                                uint32_t mipmaps)
+        {
+            for (uint32_t mip = 0; mip <= mipmaps; ++mip)
+            {
+                OgreSharedPtr sourceBuffer;
+                OgreSharedPtr destinationBuffer;
+                g_ogre.getTextureBuffer(sourceTexture, &sourceBuffer, 0, mip);
+                g_ogre.getTextureBuffer(arrayTexture, &destinationBuffer, 0, mip);
+                if (!sourceBuffer.rep || !sourceBuffer.info ||
+                    !destinationBuffer.rep || !destinationBuffer.info)
+                {
+                    ReleaseCloneHandoff(sourceBuffer);
+                    ReleaseCloneHandoff(destinationBuffer);
+                    return false;
+                }
+                const uint32_t mipWidth = (std::max)(1u, width >> mip);
+                const uint32_t mipHeight = (std::max)(1u, height >> mip);
+                const OgreBox sourceBox = {
+                    0, 0, mipWidth, mipHeight, 0, 1
+                };
+                const OgreBox destinationBox = {
+                    0, 0, mipWidth, mipHeight, slice, slice + 1
+                };
+                g_ogre.blitPixelBuffer(destinationBuffer.rep, sourceBuffer,
+                    sourceBox, destinationBox);
+                ReleaseCloneHandoff(sourceBuffer);
+                ReleaseCloneHandoff(destinationBuffer);
+            }
+            return true;
+        }
+
+        bool BuildTerrainHdTextureArray(
+            const TerrainHdMaterialBinding& binding,
+            OgreSharedPtr& arrayTexture)
+        {
+            if (!TerrainHdApiAvailable())
+            {
+                LogShimA(LogLevel::Warn, "terrain-hd",
+                    "[TERRAIN-HD] required Ogre/D3D11 texture APIs unresolved; stock atlas retained");
+                return false;
+            }
+            uint32_t maximumTileIndex = 0;
+            for (const TerrainSemantic::Vertex& vertex : g_proxy.semanticVertices)
+                maximumTileIndex = (std::max)(maximumTileIndex,
+                    static_cast<uint32_t>(vertex.gpu.tileIndex));
+            if (maximumTileIndex >= binding.sliceCount)
+            {
+                LogShimA(LogLevel::Warn, "terrain-hd",
+                    "[TERRAIN-HD] manifest has too few slices material=\"%s\" slices=%u selectedMaxTileIndex=%u; stock atlas retained",
+                    g_proxy.materialName.c_str(), binding.sliceCount,
+                    maximumTileIndex);
+                return false;
+            }
+
+            void* textureManager = g_ogre.getTextureManager();
+            if (!textureManager)
+                return false;
+            OgreSharedPtr fallbackTexture;
+            try
+            {
+                if (!LoadTerrainHdSourceTexture(textureManager,
+                        binding.fallback, fallbackTexture))
+                {
+                    LogShimA(LogLevel::Warn, "terrain-hd",
+                        "[TERRAIN-HD] fallback texture failed resource=\"%s\"; stock atlas retained",
+                        binding.fallback.c_str());
+                    ReleaseCloneHandoff(fallbackTexture);
+                    return false;
+                }
+                const uint32_t width = g_ogre.getTextureWidth(fallbackTexture.rep);
+                const uint32_t height = g_ogre.getTextureHeight(fallbackTexture.rep);
+                const uint32_t mipmaps = g_ogre.getTextureMipmaps(fallbackTexture.rep);
+                const int format = g_ogre.getTextureFormat(fallbackTexture.rep);
+                if (width == 0 || height == 0 || format == kOgrePixelFormatUnknown)
+                {
+                    ReleaseCloneHandoff(fallbackTexture);
+                    return false;
+                }
+
+                g_proxy.hdTextureName = "OpenShim/TerrainHD/Diffuse/" +
+                    std::to_string(g_proxy.generation) + "/" +
+                    std::to_string(g_proxy.semanticMaterialGeneration);
+                const std::string group = "General";
+                const std::string empty;
+                g_ogre.createManualTexture(textureManager, &arrayTexture,
+                    g_proxy.hdTextureName, group, kOgreTextureType2DArray,
+                    width, height, binding.sliceCount,
+                    static_cast<int>(mipmaps), format,
+                    kOgreTextureUsageStaticWriteOnly, nullptr, false, 0, empty);
+                if (!arrayTexture.rep || !arrayTexture.info ||
+                    g_ogre.getTextureType(arrayTexture.rep) !=
+                        kOgreTextureType2DArray ||
+                    g_ogre.getTextureDepth(arrayTexture.rep) < binding.sliceCount)
+                {
+                    LogShimA(LogLevel::Warn, "terrain-hd",
+                        "[TERRAIN-HD] Ogre failed to create array name=\"%s\" slices=%u; stock atlas retained",
+                        g_proxy.hdTextureName.c_str(), binding.sliceCount);
+                    ReleaseCloneHandoff(fallbackTexture);
+                    ReleaseCloneHandoff(arrayTexture);
+                    RemoveTerrainHdTextureResource("create-failed");
+                    return false;
+                }
+
+                size_t overrideCopies = 0;
+                for (uint32_t slice = 0; slice < binding.sliceCount; ++slice)
+                {
+                    const auto overrideIt = binding.tiles.find(slice);
+                    const std::string& resource = overrideIt != binding.tiles.end()
+                        ? overrideIt->second : binding.fallback;
+                    OgreSharedPtr sourceTexture;
+                    void* source = fallbackTexture.rep;
+                    if (resource != binding.fallback)
+                    {
+                        if (!LoadTerrainHdSourceTexture(textureManager,
+                                resource, sourceTexture))
+                        {
+                            LogShimA(LogLevel::Warn, "terrain-hd",
+                                "[TERRAIN-HD] tile load failed slice=%u resource=\"%s\"; stock atlas retained",
+                                slice, resource.c_str());
+                            ReleaseCloneHandoff(sourceTexture);
+                            throw std::runtime_error("tile load failed");
+                        }
+                        source = sourceTexture.rep;
+                        ++overrideCopies;
+                    }
+                    if (g_ogre.getTextureWidth(source) != width ||
+                        g_ogre.getTextureHeight(source) != height ||
+                        g_ogre.getTextureMipmaps(source) != mipmaps ||
+                        g_ogre.getTextureFormat(source) != format ||
+                        !CopyTerrainHdSlice(arrayTexture.rep, source, slice,
+                            width, height, mipmaps))
+                    {
+                        LogShimA(LogLevel::Warn, "terrain-hd",
+                            "[TERRAIN-HD] tile contract/copy failed slice=%u resource=\"%s\" expected=%ux%u mips=%u format=%d; stock atlas retained",
+                            slice, resource.c_str(), width, height, mipmaps + 1,
+                            format);
+                        ReleaseCloneHandoff(sourceTexture);
+                        throw std::runtime_error("tile contract/copy failed");
+                    }
+                    ReleaseCloneHandoff(sourceTexture);
+                }
+
+                ReleaseCloneHandoff(fallbackTexture);
+                g_proxy.hdDiffuseFallback = binding.fallback;
+                g_proxy.hdSliceCount = binding.sliceCount;
+                g_proxy.hdWidth = width;
+                g_proxy.hdHeight = height;
+                g_proxy.hdMipmaps = mipmaps;
+                LogShimA(LogLevel::Info, "terrain-hd",
+                    "[TERRAIN-HD] array ready material=\"%s\" name=\"%s\" slices=%u overrides=%zu selectedMaxTileIndex=%u size=%ux%u mips=%u format=%d fallback=\"%s\"",
+                    g_proxy.materialName.c_str(), g_proxy.hdTextureName.c_str(),
+                    binding.sliceCount, overrideCopies, maximumTileIndex,
+                    width, height, mipmaps + 1, format,
+                    binding.fallback.c_str());
+                return true;
+            }
+            catch (...)
+            {
+                ReleaseCloneHandoff(fallbackTexture);
+                ReleaseCloneHandoff(arrayTexture);
+                RemoveTerrainHdTextureResource("build-failed");
+                return false;
+            }
+        }
+
         void RemoveSemanticResources(const char* reason)
         {
             const bool hadMaterial = !g_proxy.semanticMaterialName.empty();
             const size_t programCount = g_proxy.semanticProgramNames.size();
-            if (!hadMaterial && programCount == 0)
+            if (!hadMaterial && programCount == 0 &&
+                g_proxy.hdTextureName.empty())
             {
                 g_proxy.semanticMaterialInstalled = false;
                 return;
@@ -1697,6 +2185,7 @@ namespace BZROpenShim
             g_proxy.semanticPassesSpecialized = 0;
             g_proxy.semanticPassesSeen = 0;
             g_proxy.semanticFragmentProgramsCreated = 0;
+            RemoveTerrainHdTextureResource(reason);
         }
 
         // The slot-3 buffer lives inside the proxy mesh's VertexBufferBinding,
@@ -1721,25 +2210,57 @@ namespace BZROpenShim
             g_proxy.semanticBindingSignature = 0;
         }
 
-        // Debug visualization writes its false color through the stock COLOR0
-        // interpolator, so the pixel program needs one matching edit to stop
-        // modulating it with lighting and the atlas sample. Everything else in
-        // the inherited fragment program -- shadows, fog, detail, log depth --
-        // is left exactly as authored.
-        bool BuildSemanticDebugFragmentSource(
+        // Phase 3B changes only the diffuse sample. Detail, normal, specular,
+        // emissive, shadow and IBL inputs retain the stock atlas UV. The debug
+        // visualization can additionally replace final shading as in Phase 3A.
+        bool BuildSemanticFragmentSource(
             const std::string& source,
+            bool debugColor,
+            bool hdDiffuse,
             std::string& output)
         {
-            static const char kAlphaToken[] = "oColor.a = vColor.a;";
-            const size_t alpha = source.find(kAlphaToken);
-            if (alpha == std::string::npos)
-            {
-                output.clear();
-                return false;
-            }
             output = source;
-            output.replace(alpha, sizeof(kAlphaToken) - 1,
-                "oColor = float4(saturate(vColor.xyz), 1.0);");
+            if (hdDiffuse)
+            {
+                static const char kDiffuseDeclaration[] =
+                    "uniform Texture2D diffuseMap : register(t0),";
+                static const char kFragmentUv[] =
+                    "in float2 vTexCoord : TEXCOORD0,";
+                static const char kDiffuseSample[] =
+                    "diffuseMap.Sample(diffuseSam, vTexCoord)";
+                const size_t declaration = output.find(kDiffuseDeclaration);
+                const size_t fragmentUv = output.find(kFragmentUv);
+                const size_t sample = output.find(kDiffuseSample);
+                if (declaration == std::string::npos ||
+                    fragmentUv == std::string::npos ||
+                    sample == std::string::npos)
+                {
+                    output.clear();
+                    return false;
+                }
+                output.replace(declaration, sizeof(kDiffuseDeclaration) - 1,
+                    "uniform Texture2DArray diffuseMap : register(t0),");
+                const size_t shiftedFragmentUv = output.find(kFragmentUv);
+                output.insert(shiftedFragmentUv + sizeof(kFragmentUv) - 1,
+                    "\n    in float2 openShimHdUV : TEXCOORD9,"
+                    "\n    in float openShimTileSlice : TEXCOORD10,");
+                const size_t shiftedSample = output.find(kDiffuseSample);
+                output.replace(shiftedSample, sizeof(kDiffuseSample) - 1,
+                    "diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice))");
+            }
+
+            if (debugColor)
+            {
+                static const char kAlphaToken[] = "oColor.a = vColor.a;";
+                const size_t alpha = output.find(kAlphaToken);
+                if (alpha == std::string::npos)
+                {
+                    output.clear();
+                    return false;
+                }
+                output.replace(alpha, sizeof(kAlphaToken) - 1,
+                    "oColor = float4(saturate(vColor.xyz), 1.0);");
+            }
             return true;
         }
 
@@ -1773,6 +2294,7 @@ namespace BZROpenShim
         bool BuildSemanticProgramSource(
             const std::string& source,
             bool legacyQuantization,
+            bool hdDiffuse,
             int debugMode,
             const std::string& programName,
             std::string& output,
@@ -1876,6 +2398,21 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
 )HLSL";
             output.insert(signatureLineEnd + 1, kSemanticInputs);
 
+            if (hdDiffuse)
+            {
+                static const char kVertexUvOutput[] =
+                    "out float2 vTexCoord : TEXCOORD0,";
+                const size_t vertexUv = output.find(kVertexUvOutput);
+                if (vertexUv == std::string::npos)
+                {
+                    output.clear();
+                    return false;
+                }
+                output.insert(vertexUv + sizeof(kVertexUvOutput) - 1,
+                    "\n    out float2 openShimHdUV : TEXCOORD9,"
+                    "\n    out float openShimTileSlice : TEXCOORD10,");
+            }
+
             const size_t shiftedStockUvToken = output.find("vTexCoord =");
             size_t shiftedStockUvLineStart = output.rfind(
                 '\n', shiftedStockUvToken);
@@ -1887,8 +2424,9 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 shiftedStockUvLineEnd = output.size();
 
             // Keep the stock packed-UV expression verbatim, renamed to a local.
-            // Texture addressing no longer uses it, but retaining it lets the
-            // parity debug mode difference both paths inside a single frame.
+            // The HD diffuse sample bypasses it while the other stock maps keep
+            // using atlas UV; retaining it also lets the parity debug mode
+            // difference both paths inside a single frame.
             std::string stockUvStatement = output.substr(
                 shiftedStockUvLineStart,
                 shiftedStockUvLineEnd - shiftedStockUvLineStart);
@@ -1908,6 +2446,12 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
     float2 openShimAtlasUV = openShimAtlasRect.xy +
         openShimOrientedUV * openShimAtlasRect.zw;
 )HLSL";
+            if (hdDiffuse)
+            {
+                semanticUv += R"HLSL(    openShimHdUV = openShimOrientedUV;
+    openShimTileSlice = float(openShimSemantic.x);
+)HLSL";
+            }
             if (legacyQuantization)
             {
                 semanticUv += R"HLSL(    float2 openShimPackedUV = clamp(
@@ -2137,6 +2681,25 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 if (!semanticMaterial.rep || !semanticMaterial.info)
                     return false;
 
+                OgreSharedPtr hdDiffuseArray;
+                bool hdDiffuseReady = false;
+                if (g_config.hdEnabled)
+                {
+                    const TerrainHdMaterialBinding* binding =
+                        FindTerrainHdBinding(g_proxy.materialName);
+                    if (!binding)
+                    {
+                        LogShimA(LogLevel::Warn, "terrain-hd",
+                            "[TERRAIN-HD] no manifest binding for material=\"%s\"; stock atlas retained",
+                            g_proxy.materialName.c_str());
+                    }
+                    else
+                    {
+                        hdDiffuseReady = BuildTerrainHdTextureArray(
+                            *binding, hdDiffuseArray);
+                    }
+                }
+
                 size_t replacedPasses = 0;
                 size_t createdPrograms = 0;
                 size_t reusedPrograms = 0;
@@ -2154,6 +2717,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 // actually received the debug false colour.
                 std::set<std::string> semanticProgramsWithDebugColor;
                 size_t debugColorSkippedPasses = 0;
+                size_t hdDiffusePasses = 0;
                 // A bind is only credited when the Pass reports our program
                 // back. Asserting the swap from the call succeeding is what
                 // let a silently ineffective bind look like a working one.
@@ -2195,6 +2759,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 };
                 const auto bindFragmentProgram = [&](void* pass,
                                                      const std::string& programName)
+                    -> bool
                 {
                     OgreSharedPtr oldParameters;
                     g_ogre.getFragmentProgramParameters(pass, &oldParameters);
@@ -2210,9 +2775,12 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                         bound && bound->rep
                             ? g_ogre.getResourceName(bound->rep) : nullptr;
                     if (boundName && *boundName == programName)
+                    {
                         ++fragmentBindVerified;
-                    else
-                        ++fragmentBindMismatched;
+                        return true;
+                    }
+                    ++fragmentBindMismatched;
+                    return false;
                 };
                 // Resolve a Pass program to the HLSL delegate that actually
                 // carries source; unified programs hold none themselves.
@@ -2271,12 +2839,23 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                         // other pass and hides the debug output entirely.
                         const auto specializeFragment = [&](bool hasDebugColor)
                         {
-                            if (debugMode == 0 || !fragmentApiAvailable)
-                                return;
-                            if (!hasDebugColor)
+                            const bool addDebugColor = debugMode != 0 && hasDebugColor;
+                            if (debugMode != 0 && !hasDebugColor)
                             {
                                 ++debugColorSkippedPasses;
+                            }
+                            if (!addDebugColor && !hdDiffuseReady)
                                 return;
+                            if (!fragmentApiAvailable)
+                                return;
+                            void* hdTextureUnit = nullptr;
+                            if (hdDiffuseReady)
+                            {
+                                if (g_ogre.getNumTextureUnitStates(pass) == 0)
+                                    return;
+                                hdTextureUnit = g_ogre.getTextureUnitState(pass, 0);
+                                if (!hdTextureUnit)
+                                    return;
                             }
                             const OgreSharedPtr* fragmentProgram =
                                 resolveProgram(g_ogre.getFragmentProgram(pass));
@@ -2289,11 +2868,19 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                             if (!fragmentSource || fragmentSource->empty() ||
                                 !fragmentName)
                                 return;
+                            const std::string fragmentCacheKey = *fragmentName +
+                                (addDebugColor ? "|debug" : "|normal");
                             const auto known =
-                                semanticFragmentPrograms.find(*fragmentName);
+                                semanticFragmentPrograms.find(fragmentCacheKey);
                             if (known != semanticFragmentPrograms.end())
                             {
-                                bindFragmentProgram(pass, known->second);
+                                if (!bindFragmentProgram(pass, known->second))
+                                    return;
+                                if (hdTextureUnit)
+                                {
+                                    g_ogre.setTexture(hdTextureUnit, hdDiffuseArray);
+                                    ++hdDiffusePasses;
+                                }
                                 ++reusedFragmentPrograms;
                                 return;
                             }
@@ -2310,9 +2897,10 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                             if (fragmentTarget.rfind("ps_4", 0) != 0 ||
                                 fragmentEntry != "terrain_fragment")
                                 return;
-                            std::string debugFragmentSource;
-                            if (!BuildSemanticDebugFragmentSource(
-                                    *fragmentSource, debugFragmentSource))
+                            std::string semanticFragmentSource;
+                            if (!BuildSemanticFragmentSource(
+                                    *fragmentSource, addDebugColor,
+                                    hdDiffuseReady, semanticFragmentSource))
                                 return;
                             // The name carries a hash of the generated source.
                             // Ogre's microcode cache is keyed by program name
@@ -2324,35 +2912,45 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                                 "OpenShim/TerrainSemantic/Fragment/" +
                                 generationSuffix + "/" +
                                 std::to_string(createdFragmentPrograms) + "/" +
-                                SourceHashSuffix(debugFragmentSource);
-                            OgreSharedPtr debugProgram;
+                                SourceHashSuffix(semanticFragmentSource);
+                            OgreSharedPtr generatedFragmentProgram;
                             const std::string group = "General";
                             const std::string language = "hlsl";
                             g_ogre.createHighLevelProgram(programManager,
-                                &debugProgram, fragmentProgramName, group,
+                                &generatedFragmentProgram, fragmentProgramName, group,
                                 language, 1);
-                            if (!debugProgram.rep || !debugProgram.info)
+                            if (!generatedFragmentProgram.rep ||
+                                !generatedFragmentProgram.info)
                                 return;
-                            g_ogre.setProgramSource(debugProgram.rep,
-                                debugFragmentSource);
-                            if (!g_ogre.setStringParameter(debugProgram.rep,
+                            g_ogre.setProgramSource(generatedFragmentProgram.rep,
+                                semanticFragmentSource);
+                            if (!g_ogre.setStringParameter(generatedFragmentProgram.rep,
                                     std::string("target"), fragmentTarget) ||
-                                !g_ogre.setStringParameter(debugProgram.rep,
+                                !g_ogre.setStringParameter(generatedFragmentProgram.rep,
                                     std::string("entry_point"), fragmentEntry))
                             {
-                                ReleaseCloneHandoff(debugProgram);
+                                ReleaseCloneHandoff(generatedFragmentProgram);
                                 return;
                             }
-                            g_ogre.setStringParameter(debugProgram.rep,
+                            g_ogre.setStringParameter(generatedFragmentProgram.rep,
                                 std::string("preprocessor_defines"),
                                 fragmentDefines);
-                            g_ogre.loadResource(debugProgram.rep, true);
-                            bindFragmentProgram(pass, fragmentProgramName);
-                            semanticFragmentPrograms.emplace(*fragmentName,
+                            g_ogre.loadResource(generatedFragmentProgram.rep, true);
+                            if (!bindFragmentProgram(pass, fragmentProgramName))
+                            {
+                                ReleaseCloneHandoff(generatedFragmentProgram);
+                                return;
+                            }
+                            if (hdTextureUnit)
+                            {
+                                g_ogre.setTexture(hdTextureUnit, hdDiffuseArray);
+                                ++hdDiffusePasses;
+                            }
+                            semanticFragmentPrograms.emplace(fragmentCacheKey,
                                 fragmentProgramName);
                             g_proxy.semanticProgramNames.push_back(
                                 fragmentProgramName);
-                            ReleaseCloneHandoff(debugProgram);
+                            ReleaseCloneHandoff(generatedFragmentProgram);
                             ++createdFragmentPrograms;
                             ++g_semanticProgramsCreatedTotal;
                         };
@@ -2385,6 +2983,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                         const bool compatibleSource =
                             BuildSemanticProgramSource(*source,
                                 g_config.semanticLegacyUvQuantization,
+                                hdDiffuseReady,
                                 debugMode, *sourceProgramName, semanticSource,
                                 debugColorInstalled);
                         LogShimA(LogLevel::Info, "terrain-p3",
@@ -2444,6 +3043,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
 
                 if (replacedPasses == 0)
                 {
+                    ReleaseCloneHandoff(hdDiffuseArray);
+                    RemoveTerrainHdTextureResource("no-compatible-vertex-program");
                     ReleaseCloneHandoff(semanticMaterial);
                     RemoveSemanticResources("no-compatible-vertex-program");
                     g_proxy.semanticMaterialName.clear();
@@ -2454,8 +3055,18 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                     return false;
                 }
 
+                if (hdDiffuseReady && hdDiffusePasses == 0)
+                {
+                    LogShimA(LogLevel::Warn, "terrain-hd",
+                        "[TERRAIN-HD] no compatible terrain fragment pass accepted the array; stock atlas retained material=\"%s\"",
+                        g_proxy.materialName.c_str());
+                    RemoveTerrainHdTextureResource("no-compatible-fragment-program");
+                    hdDiffuseReady = false;
+                }
+
                 g_ogre.setMaterialName(g_proxy.proxyEntity,
                     g_proxy.semanticMaterialName, autodetect);
+                ReleaseCloneHandoff(hdDiffuseArray);
                 ReleaseCloneHandoff(semanticMaterial);
                 g_proxy.semanticMaterialInstalled = true;
                 ++g_semanticMaterialCreated;
@@ -2465,7 +3076,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 g_proxy.semanticPassesSeen = seenPasses;
                 g_proxy.semanticFragmentProgramsCreated = createdFragmentPrograms;
                 LogShimA(LogLevel::Info, "terrain-p3",
-                    "[TERRAIN-P3] terrain_semantic_shader: material=\"%s\" clone=\"%s\" materialGeneration=%u passes=%zu specialized_passes=%zu semantic_programs=%zu created=%zu reused=%zu debug=%s debug_fragment_programs={created:%zu,reused:%zu,api:%d,skipped_no_vertex_color:%zu} legacyUVQuantization=%d atlasRects=per-vertex",
+                    "[TERRAIN-P3] terrain_semantic_shader: material=\"%s\" clone=\"%s\" materialGeneration=%u passes=%zu specialized_passes=%zu semantic_programs=%zu created=%zu reused=%zu debug=%s fragment_programs={created:%zu,reused:%zu,api:%d,skipped_no_vertex_color:%zu} legacyUVQuantization=%d atlasRects=per-vertex hdDiffuse={requested:%d,active:%d,passes:%zu,array:\"%s\"}",
                     g_proxy.materialName.c_str(),
                     g_proxy.semanticMaterialName.c_str(),
                     g_proxy.semanticMaterialGeneration, seenPasses,
@@ -2473,7 +3084,9 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                     reusedPrograms, SemanticDebugModeName(debugMode),
                     createdFragmentPrograms, reusedFragmentPrograms,
                     fragmentApiAvailable ? 1 : 0, debugColorSkippedPasses,
-                    g_config.semanticLegacyUvQuantization ? 1 : 0);
+                    g_config.semanticLegacyUvQuantization ? 1 : 0,
+                    g_config.hdEnabled ? 1 : 0, hdDiffuseReady ? 1 : 0,
+                    hdDiffusePasses, g_proxy.hdTextureName.c_str());
                 // Generated program identity, once per material install. The
                 // microcode cache is keyed by program name, so proving that a
                 // changed generated source produces a changed name is the only
@@ -3632,6 +4245,20 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         if (g_worker || g_active.load())
             return;
         g_config = ReadConfig();
+        if (g_config.hdEnabled)
+        {
+            // The HD smoke path is a Phase 3B specialization of the semantic
+            // proxy. One opt-in switch activates its two prerequisites so a
+            // missing secondary setting cannot silently turn the test into a
+            // stock-atlas run.
+            if (LoadTerrainHdManifest())
+            {
+                g_config.proxyEnabled = true;
+                g_config.semanticRenderer = true;
+            }
+            else
+                g_config.hdEnabled = false;
+        }
         if (g_config.semanticRenderer && !g_config.proxyEnabled)
         {
             LogShimA(LogLevel::Warn, "terrain-p3",
@@ -3655,6 +4282,12 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 SemanticDebugModeName(g_config.semanticDebugMode),
                 g_config.semanticDebugMode,
                 g_config.semanticLifecycleLog ? 1 : 0);
+        }
+        if (g_config.hdEnabled)
+        {
+            LogShimA(LogLevel::Info, "terrain-hd",
+                "[TERRAIN-HD] initialized manifest=\"%s\" proxy=1 semanticRenderer=1 stockFallback=enabled",
+                g_hdManifest.path.string().c_str());
         }
         g_worker = CreateThread(nullptr, 0, WorkerProc, nullptr, 0, nullptr);
         if (!g_worker)
