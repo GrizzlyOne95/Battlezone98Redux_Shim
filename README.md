@@ -2,7 +2,7 @@
 
 An open-source runtime patch and compatibility layer for **Battlezone 98 Redux v2.2.301**.
 
-OpenShim provides engine-level bug fixes, quality-of-life improvements, restored legacy behavior, multiplayer fixes, modding extensions, and optional experimental features that cannot be implemented through normal Redux modding alone.
+OpenShim provides engine-level bug fixes, quality-of-life improvements, restored legacy behavior, multiplayer fixes, modding extensions, and opt-in native features that cannot be implemented through normal Redux modding alone.
 
 Supported executables:
 
@@ -39,6 +39,37 @@ Battlezone 98 Redux
 
 OpenShim is a clean-room implementation and runs independently of any closed-source patch DLL.
 
+## Project Status
+
+OpenShim is mature enough that most of the repository should **not** be read as unfinished end-user functionality. Much of its size is reverse-engineering evidence, validation tooling, diagnostics, compatibility infrastructure, and records of experiments used to arrive at the current implementations.
+
+### Working functionality
+
+The main runtime patch layer and most user-facing features are implemented and usable. This includes the engine/gameplay fixes described below plus features such as:
+
+- native legacy death-chunk rendering using `chunkMeshes`
+- native input/options UI extensions
+- multiplayer host controls and persistent bans
+- multiplayer vehicle flags and flag-selection UI
+- native nickname and network-preference UI
+- Lua/ExtraUtilities bridge functionality
+- mission briefing and media compatibility fixes
+- Ogre/resource compatibility fixes and runtime integration
+
+Some working features are still opt-in because they intentionally change stock behavior. **Opt-in does not automatically mean experimental.**
+
+### Active development
+
+The remaining larger feature work is concentrated in a few areas:
+
+- **HD terrain replacement:** the semantic terrain path, mission lifecycle, shader specialization, and initial texture-array path exist; whole-map HD replacement and the remaining material/lifetime validation are still in progress.
+- **Producer build-menu extensions:** native recursive build-menu behavior has been reverse engineered and is being exposed as an opt-in nested-menu path for testing before it is promoted to a supported modding extension.
+- **Battlezone 1.5 multiplayer UI restoration:** flag selection and nickname/network controls are implemented; game-option controls and persistent profile/player-card functionality remain.
+- **Shutdown/lifetime validation:** renderer and Ogre ownership fixes exist, but normal-exit regression coverage and loader-lock-safe shutdown remain completion work.
+- **UDP packet reordering:** retained as an opt-in networking experiment/diagnostic until its long-term design is settled.
+
+Developer probes, packet capture, renderer diagnostics, ABI tests, reverse-engineering scripts, and similar tooling are intentionally not part of the normal user-facing feature set.
+
 ## What does it do?
 
 OpenShim is primarily intended to fix or extend parts of Redux that are inaccessible to Lua, ODFs, shaders, or normal Workshop mods.
@@ -58,6 +89,7 @@ Native fixes and restorations for Redux behavior, including:
 - legacy jump-sniping behavior
 - engine light and visual-state fixes
 - increased sound-channel capacity
+- restored legacy death-chunk rendering
 
 ### Global Gameplay Improvements
 
@@ -79,6 +111,7 @@ including:
 - scrap/pilot HUD behavior
 - target-reticle behavior
 - sound-channel limits
+- native input and options UI extensions
 
 Single-player-specific patches are automatically gated from multiplayer where required.
 
@@ -88,13 +121,14 @@ OpenShim also contains multiplayer fixes and diagnostic tooling, including:
 
 - host ban controls and persistent ban lists
 - multiplayer vehicle data fixes
+- multiplayer vehicle flag support and flag selection
+- native nickname and network-preference controls
 - socket and buffer tuning
-- UDP packet-reorder handling
 - network route diagnostics
 - optional packet/session capture tools
-- multiplayer vehicle flag support
+- opt-in UDP packet-reorder experimentation
 
-Experimental multiplayer features are disabled by default unless explicitly enabled.
+Diagnostics and experimental networking behavior are disabled by default unless explicitly enabled.
 
 ### Modding Extensions
 
@@ -108,6 +142,8 @@ Examples include:
 - music-control bridge support
 - native gameplay-state access for EXU
 - runtime Ogre integration
+- legacy `chunkMeshes` rendering support
+- ongoing native producer build-menu extensions
 
 When EXU and OpenShim expose the same feature, OpenShim can provide the native implementation while EXU provides the Lua-facing API.
 
@@ -141,7 +177,7 @@ net.ini
 
 Environment variables are also available for development, diagnostics, compatibility testing, and experimental features.
 
-See the example configuration files and `reverse_engineering/` documentation for detailed options.
+See the example configuration files and `Docs/` / `reverse_engineering/` documentation for detailed options and validation notes.
 
 ## Safety & Compatibility
 
@@ -159,27 +195,29 @@ Battlezone 98 Redux 2.2.301
 
 Other game versions should not be assumed compatible.
 
-## Experimental Features
+## Development & Diagnostics
 
-The repository also contains ongoing reverse-engineering work and experimental native extensions.
+The repository contains substantial reverse-engineering and validation material alongside the runtime patch itself. This is intentional: native hooks depend on exact executable behavior, ABI layout, ownership rules, and patch-site validation.
 
 Examples include:
 
-- legacy death-chunk rendering
-- producer build-menu extensions
-- additional multiplayer integration
-- renderer/Ogre diagnostics
-- input-system extensions
+- renderer/Ogre diagnostics and profiling
+- terrain semantic/parity validation
+- multiplayer packet/session capture and route diagnostics
+- UI ABI probes and Battlezone 1.5 UI recovery tools
+- producer/build-menu reverse engineering
+- executable address, signature, and lifecycle research
 
-Experimental features are normally gated behind configuration or environment variables and should not be considered part of the stable feature set until validated.
+These tools may be incomplete, highly specialized, or development-only even when the runtime feature they helped produce is already working.
 
 Detailed research, addresses, traces, validation results, and test procedures belong under:
 
 ```text
+Docs/
 reverse_engineering/
 ```
 
-rather than this README.
+rather than being treated as the public feature list.
 
 ## Installation
 
