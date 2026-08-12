@@ -1,241 +1,526 @@
 ; ============================================================================
-; openshim.ini  -  global user/developer configuration for BZR-OpenShim
+; openshim.ini  -  authoritative global user/developer configuration reference
 ; ============================================================================
 ; Copy this file to "openshim.ini" beside battlezone98redux.exe / winmm.dll.
 ;
-; openshim.ini is the normal control surface for runtime features and testing.
-; Process environment variables are no longer required for the settings mapped
-; below. Existing OPENSHIM_* / BZR_* environment variables remain accepted as
-; compatibility fallbacks when no corresponding INI value is present.
+; This file documents every first-class openshim.ini key supported by the
+; current OpenShim runtime, including accepted values, aliases, ranges, defaults,
+; scope, and restart/live-apply behavior where known.
 ;
-; [Environment] at the end of this file is a universal compatibility escape
-; hatch: any legacy or newly-added OPENSHIM_* / BZR_* variable can be placed
-; there verbatim and OpenShim will see it as though it were a process variable.
-; This makes one-off diagnostics testable without changing Windows launch state.
+; Separate configuration files are intentionally not duplicated here:
+;   openshim_producer_build_menus.ini  = producer/nested build-menu experiment
+;   net.ini                            = low-level socket optimizer/reorder lab
 ;
-; BOOLEAN VALUES are case-insensitive:
-;   Enabled:  1, true, on, yes, enabled
-;   Disabled: 0, false, off, no, disabled
-; The example uses 1 and 0 for brevity.
+; Environment compatibility:
+;   Friendly INI keys below are the normal control surface. Historical
+;   OPENSHIM_* / BZR_* process variables remain backward-compatible fallbacks.
+;   [Environment] at the end of this file can also supply raw legacy/probe
+;   variables without changing the Windows process environment.
 ;
-; A missing/blank/invalid key uses that setting's built-in default unless the
-; comment says otherwise. Mission-script/EXU overrides remain authoritative for
-; the lifetime of that mission where supported.
+; BOOLEAN PARSING
+;   Most first-class boolean settings use the friendly parser:
+;     ON:  1, true, on, yes, enabled
+;     OFF: 0, false, off, no, disabled
+;   Matching is case-insensitive.
+;
+;   IMPORTANT: settings explicitly marked "integer flag" are read by Win32
+;   integer APIs. For those, use 0 for OFF and 1 for ON. Any non-zero integer is
+;   treated as ON, but 0/1 is the supported/documented form.
+;
+; ENUM PARSING
+;   Text enums are case-insensitive. Where noted, spaces, underscores, and
+;   hyphens are ignored. Prefer the canonical values shown first.
+;
+; A missing, blank, or invalid value falls back to the documented default unless
+; a setting says otherwise. Mission/EXU overrides remain authoritative for the
+; lifetime of that mission where supported.
+;
+; Section scope:
+;   [General]      engine/UI behavior
+;   [Startup]      startup-only hooks/behavior
+;   [Terrain]      terrain replacement/proxy development controls
+;   [Display]      local/cosmetic behavior
+;   [AutoSave]     rolling single-player recovery save
+;   [Diagnostics]  read-only traces/probes unless explicitly noted
+;   [Network]      BZRNet/user-facing multiplayer preferences
+;   [SinglePlayer] simulation-affecting improvements; forced off in MP
 ; ----------------------------------------------------------------------------
 
 [General]
+
 ; Maximum simultaneous GAS sound objects.
-; 0 keeps the stock engine limit. 1..256 requests that many channels; larger
-; values are clamped to 256. Default: 256.
+; Accepted:
+;   0       = disable OpenShim's override; retain the stock engine limit
+;   1..256  = requested channel count
+;   >256    = accepted but clamped to 256
+; Use a non-negative whole decimal number. Default: 256.
+; Legacy env aliases: OPENSHIM_MAX_SOUND_CHANNELS, BZR_MAX_SOUND_CHANNELS
 SoundChannels = 256
 
-; Full native input.map + gamekey.map binding screen. Default: enabled.
-; Backwards-compatible key alias: CustomBindingUi.
+; Full native input.map + gamekey.map binding screen.
+; Accepted: boolean. Default: ON. Restart required after changing.
+; Legacy INI alias: CustomBindingUi
+; Legacy env aliases:
+;   enable  OPENSHIM_ENABLE_INPUT_BINDING_UI
+;           OPENSHIM_ENABLE_INPUT_BINDING_UI_REPLACEMENT
+;           BZR_ENABLE_INPUT_BINDING_UI
+;   disable OPENSHIM_DISABLE_INPUT_BINDING_UI
+;           OPENSHIM_DISABLE_INPUT_BINDING_UI_REPLACEMENT
+;           BZR_DISABLE_INPUT_BINDING_UI
 CustomBindsUi = 1
 
-; Adds the native OpenShim settings page to Redux Options. Default: enabled.
-; Writes edits back to this file losslessly and keeps a .openshim.bak backup.
+; Adds the native OpenShim Settings page to Redux Options.
+; Accepted: boolean. Default: ON.
+; The page edits this file losslessly and keeps a .openshim.bak backup.
+; Legacy env aliases: OPENSHIM_DISABLE_SETTINGS_UI, BZR_DISABLE_SETTINGS_UI
 SettingsUi = 1
 
-; Restored legacy death-chunk rendering / chunkMeshes support. Default: enabled.
-; Set to 0 as an emergency compatibility opt-out.
+; Restored legacy death-chunk rendering / chunkMeshes support.
+; Accepted: boolean. Default: ON.
+; Set OFF only as a compatibility/emergency opt-out.
+; Legacy env aliases: OPENSHIM_DISABLE_CHUNK_EXPERIMENTS,
+;                     BZR_DISABLE_CHUNK_EXPERIMENTS
 ChunkMeshes = 1
 
-; Redux multiplayer map-list/map-refresh fixes. Default: enabled.
+; Redux multiplayer map-list refresh/selection preservation fixes.
+; Accepted: boolean. Default: ON.
+; Legacy env aliases: OPENSHIM_DISABLE_MAP_REFRESH_FIXES,
+;                     BZR_DISABLE_MAP_REFRESH_FIXES
 MapRefreshFixes = 1
 
-; Prevent duplicate Ogre material declarations from terminating the game.
-; Default: enabled. Keep this on unless isolating an Ogre compatibility issue.
+; Prevent duplicate Ogre material declarations from escaping script parsing as
+; ERR_DUPLICATE_ITEM and terminating the game.
+; Accepted: boolean. Default: ON.
+; Legacy env aliases:
+;   enable  OPENSHIM_ENABLE_OGRE_MATERIAL_COLLISION_GUARD
+;           BZR_ENABLE_OGRE_MATERIAL_COLLISION_GUARD
+;   disable OPENSHIM_DISABLE_OGRE_MATERIAL_COLLISION_GUARD
+;           BZR_DISABLE_OGRE_MATERIAL_COLLISION_GUARD
 OgreMaterialCollisionGuard = 1
 
+
 [Startup]
-; Early D3D startup hook probe. Development/diagnostic path; default: disabled.
+
+; Early D3D startup-hook path used for renderer/startup development.
+; Accepted: boolean. Default: OFF. Restart required.
+; Legacy env alias: OPENSHIM_ENABLE_D3D_STARTUP_HOOKS
 D3DStartupHooks = 0
 
-; Allow Redux's stock startup shell/autoload behavior. Default: disabled because
-; OpenShim normally suppresses the problematic startup autoload path.
-; 0 = suppress stock startup autoload, 1 = allow it.
+; Whether to allow Redux's stock startup shell/autoload behavior.
+; Accepted: boolean. Default: OFF.
+;   OFF = OpenShim suppresses the stock startup autoload path
+;   ON  = allow the stock path
+; Legacy env alias: OPENSHIM_ALLOW_STARTUP_AUTOLOAD
 AllowStartupAutoLoad = 0
 
+
 [Terrain]
-; Phase 2 one-cluster terrain proxy proof. Disabled by default and exact-build
-; gated. The stock cluster remains visible.
+
+; NOTE: terrain booleans below are integer flags; use 0/1.
+
+; Master one-cluster terrain proxy proof path.
+; Accepted: 0/1. Default: 0.
+; The proxy clones one stock 16x16-cell cluster and leaves stock terrain visible.
 TerrainProxyEnabled = 0
+
+; Optional construction-ordinal selectors.
+; Accepted: integer.
+;   -1 = no ordinal filter; first cluster matching the remaining selectors wins
+;   0+ = select that observed construction ordinal
 TerrainProxyZone = -1
+; Cluster ordinal is clusterX*4 + clusterZ, so native clusters are normally 0..15.
 TerrainProxyCluster = -1
+
+; Optional native coordinate selectors. Commented/absent = no coordinate filter.
+; Native cluster X/Z are 0..3. Zone X/Z are the native identifiers embedded in
+; RenderableTileCluster_<zoneX>x<zoneZ>_<clusterX>x<clusterZ>.
 ; TerrainProxyZoneX = 0
 ; TerrainProxyZoneZ = 0
 ; TerrainProxyClusterX = 0
 ; TerrainProxyClusterZ = 0
+
+; Proxy translation in world units. Accepted: finite decimal; default 0.0.
 TerrainProxyOffsetX = 0.0
 TerrainProxyOffsetY = 0.0
 TerrainProxyOffsetZ = 0.0
+
+; Show the proxy mesh. Accepted: integer flag 0/1. Default: 1.
 TerrainProxyVisible = 1
+
+; Capture logical terrain semantics for the selected proxy.
+; Accepted: integer flag 0/1. Default: 0.
 TerrainSemanticCapture = 0
+
+; Write semantic capture JSON when capture is enabled.
+; Accepted: integer flag 0/1. Default: 1.
 TerrainSemanticDumpJson = 1
 
-; Phase 3A semantic terrain renderer/validator. Stock terrain remains visible.
+; Phase 3A semantic renderer. Stock terrain remains authoritative/visible.
+; Accepted: integer flag 0/1. Default: 0.
 TerrainSemanticRenderer = 0
+
+; Compare semantic UV reconstruction against stock packed UVs.
+; Accepted: integer flag 0/1. Default: 0.
 TerrainSemanticValidateUV = 0
+
+; Preserve stock legacy UV quantization in semantic rendering.
+; Accepted: integer flag 0/1. Default: 1.
 TerrainSemanticLegacyUVQuantization = 1
+
+; Dump individual semantic UV mismatches.
+; Accepted: integer flag 0/1. Default: 0.
 TerrainSemanticDumpMismatches = 0
 
-; One-shot/state-change semantic resource lifecycle records. Default: disabled.
+; Log semantic vertex-buffer/material/program create/bind/retain/destroy state.
+; Accepted: integer flag 0/1. Default: 0.
 TerrainSemanticLifecycleLog = 0
 
 ; Semantic debug visualization. Requires TerrainSemanticRenderer=1.
-; 0 normal, 1 tileIndex, 2 orientation, 3 typeA, 4 typeB, 5 localUV,
-; 6 atlasRect, 7 amplified semantic-vs-stock UV delta.
+; Accepted integer modes:
+;   0 = normal semantic shading / debug OFF
+;   1 = tileIndex: deterministic color per runtime tile id
+;   2 = orientation: all 16 orientation/mix values rendered distinctly
+;   3 = typeA: high terrain-type nibble
+;   4 = typeB: low terrain-type nibble
+;   5 = localUV: post-orientation local UV as red/green gradients
+;   6 = atlasRect: atlas origin (u,v) with width in blue
+;   7 = uvDelta: |semantic UV - stock packed UV| amplified 640x
+; Any value outside 0..7 falls back to 0. Default: 0.
 TerrainSemanticDebug = 0
 
-; Deterministic framebuffer parity capture count, clamped to 0..64. 0 disables.
+; Deterministic full-frame PNG captures for semantic parity testing.
+; Accepted: integer 0..64; values <0 become 0, >64 become 64.
+; 0 disables capture. Default: 0.
 TerrainSemanticFrameCapture = 0
-; Rendered world frames between parity captures. Minimum 1. Default: 300.
+
+; Rendered world frames between deterministic captures.
+; Accepted: integer >=1. Values <1 become 1. Default: 300.
 TerrainSemanticFrameCaptureStride = 300
 
-; Phase 3B HD diffuse tile-array smoke path. DX11 only. Enabling this also
-; enables the one-cluster proxy and semantic renderer. Missing/invalid resources
-; fail soft to the stock atlas.
+; Phase 3B HD diffuse tile-array smoke path. DX11 only.
+; Accepted: integer flag 0/1. Default: 0.
+; ON also enables the one-cluster proxy and semantic renderer. Missing/invalid
+; resources fail soft to the stock atlas.
 TerrainHdEnabled = 0
+
+; HD tile manifest path. Accepted: non-empty path string.
+; Relative paths resolve from battlezone98redux.exe; absolute paths are allowed.
+; Default: terrain_hd_tiles.json
 TerrainHdManifest = terrain_hd_tiles.json
 
+
 [Display]
-; Under-attack audio alert frequency: None, Minimal, or Normal. Default: Normal.
+
+; Under-attack audio alert frequency.
+; Canonical values:
+;   None    = silent
+;   Minimal = rare warning beeps, roughly 10-second cooldown
+;   Normal  = stock/default cadence, roughly 1-second cooldown
+; Accepted aliases:
+;   None    : Off, numeric <=1
+;   Minimal : Low, numeric 2
+;   Normal  : Default, On, numeric >=3
+; Text is case-insensitive and spaces are ignored. Default: Normal.
 UnderAttackAlert = Normal
 
-; Target reticle pop-up policy: Default, NeutralOnly, ExplicitOnly.
-; Backwards-compatible key alias: TargetReticle.
+; Target-reticle popup policy.
+; Canonical values:
+;   Default      = stock behavior
+;   NeutralOnly  = suppress recent-hit popups for team-0/neutral objects
+;   ExplicitOnly = only show when explicitly targeted
+; Accepted aliases:
+;   Default      : Normal, On, numeric <=1
+;   NeutralOnly  : Neutral, numeric 2
+;   ExplicitOnly : Explicit, numeric >=3
+; Spaces, underscores, and hyphens are ignored. Default: Default.
+; Legacy INI alias: TargetReticle
 TargetPolicy = Default
 
-; Draw your own multiplayer vehicle flag as well as other players' flags.
-; Useful for solo flag validation. Default: disabled.
+; Also draw your own multiplayer vehicle flag over your own craft.
+; Accepted: boolean. Default: OFF.
+; OFF = only other players' flags render; ON = render your own flag too.
+; Legacy env aliases: OPENSHIM_MP_FLAG_SHOW_OWN, BZR_MP_FLAG_SHOW_OWN
 MultiplayerFlagShowOwnCraft = 0
 
-; Scrap/pilot readout layout: Legacy or Stock. Default: Legacy.
+; Scrap/pilot readout layout.
+; Canonical:
+;   Legacy = compact legacy top-center layout; hide stock backing panels
+;   Stock  = Redux positions/panels
+; Accepted aliases:
+;   Legacy : Compact, 1, On, True
+;   Stock  : Default, 0, Off, False
+; Default: Legacy.
 ScrapPilotHud = Legacy
 
-; Tint engine flames by faction when EXU has not supplied a mission override.
-; Default: disabled. NSDF blue, CCA red, CRA green, Black Dog purple when the
-; optional purple flame texture is available.
+; Faction-colored jet/thruster flames.
+; Accepted: boolean. Default: OFF.
+;   a / NSDF      = stock blue
+;   s / CCA       = red
+;   c / CRA       = green
+;   b / Black Dog = purple when the optional purple flame asset is present
+; Legacy env aliases:
+;   enable  OPENSHIM_FACTION_JET_FLAMES, BZR_FACTION_JET_FLAMES
+;   disable OPENSHIM_DISABLE_FACTION_JET_FLAMES,
+;           BZR_DISABLE_FACTION_JET_FLAMES
 JetFlames = 0
 
-; Unit command/selection voice feedback. Default: enabled.
-UnitVoFeedback = 1
+; Unit command/selection voice feedback.
+; Canonical values:
+;   Normal  = normal stock feedback
+;   Reduced = reduced chatter
+;   None    = mute the unit-feedback category
+; Boolean aliases are also accepted:
+;   ON/true/1  -> Normal
+;   OFF/false/0 -> None
+; Default: Normal. Mission/EXU overrides may temporarily supersede it.
+UnitVoFeedback = Normal
+
 
 [AutoSave]
-; Rolling single-player recovery save. Default: enabled.
+
+; NOTE: AutoSave values are read as integers. Use numeric values shown below.
+
+; Rolling single-player recovery save.
+; Accepted: 0 = OFF, non-zero = ON. Default: 1.
 Enabled = 1
+
 ; Seconds between rolling AutoSave writes.
+; Accepted: integer; clamped to 10..3600 seconds. Default: 120.
+; In-game Settings page presets: 60, 120, 180, 300, 600.
 IntervalSeconds = 120
-; Advanced safety/compatibility controls.
+
+; Delay after mission start before AutoSave may first write.
+; Accepted: integer; clamped to 0..600 seconds. Default: 10.
 InitialDelaySeconds = 10
+
+; Delay before retrying after a failed/deferred AutoSave.
+; Accepted: integer; clamped to 5..120 seconds. Default: 15.
 RetrySeconds = 15
+
+; Back up an existing AutoSave before replacement.
+; Accepted: 0 = OFF, non-zero = ON. Default: 1.
 BackupExisting = 1
+
+; Avoid fighting another system/script that owns the AutoSave slot.
+; Accepted: 0 = OFF, non-zero = ON. Default: 1.
 RespectExternalAutoSave = 1
 
+
 [Diagnostics]
-; Log a limited sample of native hook hits. Noisy; default: disabled.
+
+; Log a limited sample of native patch/hook hits.
+; Accepted: boolean. Default: OFF. Noisy.
+; Legacy env alias: OPENSHIM_TRACE_HITS
 TraceHookHits = 0
 
-; Enable the artillery/weapon-mask trace patch used for mask RE/validation.
-; Development-only; default: disabled.
+; Enable artillery/weapon-mask tracing for RE/validation.
+; Accepted: boolean. Default: OFF. Development-only.
+; Legacy env aliases: OPENSHIM_TRACE_ARTILLERY_MASK,
+;                     OPENSHIM_TRACE_WEAPON_MASK
 TraceArtilleryMask = 0
 
-; Read-only Ogre animation/render overhead profiler. Default: disabled.
+; Trace DX11 texture/SRV/backbuffer/color-space activity.
+; Accepted: integer flag 0/1. Default: 0. Very noisy diagnostic.
+; Legacy env alias: OPENSHIM_TRACE_DX11_COLORSPACE
+TraceDX11ColorSpace = 0
+
+; Read-only Ogre animation/render overhead profiler.
+; Accepted: boolean. Default: OFF.
+; Emits roughly one-second samples for animation, software vertex blending,
+; render-queue work, Draw/DrawIndexed, and Present activity.
+; Legacy env alias: OPENSHIM_PROFILE_OGRE_ANIMATION
 ProfileOgreAnimation = 0
 
-; Read-only DX11 terrain construction capture. Default: disabled.
+; Read-only DX11 terrain-construction capture.
+; Accepted: boolean/integer flag; use 0/1. Default: 0.
+; Legacy env alias: OPENSHIM_TERRAIN_RENDER_PROBE
 TerrainRenderProbe = 0
-; Capture the first N distinct terrain clusters. Clamped to 1..16.
+
+; Number of distinct terrain clusters to capture.
+; Accepted: integer; clamped to 1..16. Default: 1.
 TerrainRenderProbeMaxClusters = 1
-; -1 captures the first cluster(s); otherwise use a zero-based observed ordinal.
+
+; Select one observed terrain-cluster ordinal.
+; Accepted: integer >=-1.
+;   -1 = capture the first clusters up to TerrainRenderProbeMaxClusters
+;   0+ = only capture that zero-based observed ordinal
+; Values below -1 become -1. Default: -1.
 TerrainRenderProbeCluster = -1
-; Write terrain_probe.json / terrain_probe_NNN.json. Default: enabled when probe
-; itself is enabled.
+
+; Write terrain_probe.json / terrain_probe_NNN.json.
+; Accepted: integer flag 0/1. Default: 1.
 TerrainRenderProbeDumpJson = 1
 
+
 [Network]
-; Multiplayer transport preference. This changes peer path preference only; it
-; does not create a LAN browser/direct-IP matchmaking mode.
-; Stock = engine choice, Direct = LAN/WAN direct then relay, Relay = relay only.
+
+; Preferred gameplay peer route. This changes route preference only; it does
+; not add LAN browsing or direct-IP matchmaking.
+; Canonical:
+;   Stock  = leave Redux's route choice alone
+;   Direct = try LAN, then direct WAN, then relay fallback
+;   Relay  = skip direct paths and use BZRNet relay
+; Accepted aliases:
+;   Stock  : Auto, Default
+;   Direct : PreferDirect
+;   Relay  : ForceRelay
+; Spaces, underscores, and hyphens are ignored. Default: Stock.
 RoutePreference = Stock
 
-; Fixed local UDP peer port. 0 lets Winsock choose an ephemeral port.
+; Fixed local UDP port for BZRNet peer traffic.
+; Accepted: integer 0..65535.
+;   0 = stock behavior / Winsock chooses an ephemeral port
+; Changing this requires restart because the value is consumed before bind.
+; Default: 0.
 UdpPort = 0
 
-; Multiplayer nickname override. Blank/absent uses the account name.
+; Multiplayer nickname override.
+; Accepted: text up to 127 characters.
+; Blank/absent = use the Steam/GOG account name.
 ; Nickname =
 
-; Publish nickname changes through BZRNet SetPlayerData on the live connection.
+; Publish nickname edits to the open BZRNet connection via live player-data keys.
+; Accepted: boolean. Default: ON.
+; Legacy env alias: OPENSHIM_DISABLE_LIVE_NICKNAME
 LiveNicknameKeys = 1
 
-; Re-authorise BZRNet after nickname changes. Experimental; default: disabled.
+; Re-authorise BZRNet after a nickname edit.
+; Accepted: boolean. Default: OFF. Experimental; use only for testing.
+; Legacy env alias: OPENSHIM_DISABLE_BZRNET_REAUTH
 ReauthOnNicknameChange = 0
 
-; Inject native nickname/network-route readouts into the multiplayer lobby.
+; Inject the native nickname and negotiated-route readouts into the MP lobby.
+; Accepted: boolean. Default: ON.
+; Legacy env alias: OPENSHIM_DISABLE_LOBBY_READOUTS
 LobbyReadouts = 1
 
-; Native BZRNet lobby integration hook.
-;   Auto = preserve the existing build-specific default (GOG on, Steam off)
-;   1    = explicitly enable for testing
-;   0    = explicitly disable
-; Auto is recommended until the Steam path is fully revalidated.
+; Native BZRNet lobby-integration patch gate.
+; Canonical:
+;   Auto = preserve current platform default (GOG ON, Steam OFF)
+; Boolean values are also accepted:
+;   ON/true/1  = explicitly enable
+;   OFF/false/0 = explicitly disable
+; Default: Auto. Auto is recommended until the Steam hook path is revalidated.
 LobbyBzrnetIntegration = Auto
 
-[SinglePlayer]
-; Gameplay-affecting settings in this section are hard-disabled in network games.
 
-; Make hovercraft-derived AI craft converge weapon aim. Default: enabled.
+[SinglePlayer]
+
+; All simulation-affecting settings in this section are hard-disabled in
+; network games regardless of their configured values.
+
+; Make hovercraft-derived AI craft converge fixed-weapon fire on the aim point.
+; Accepted: boolean. Default: ON.
 WeaponConvergence = 1
 
-; Converge local-player weapon hardpoints on the smart-reticle point.
-; Backwards-compatible key alias: SmartReticleConvergence.
+; Converge the local player's weapon hardpoints on the smart-reticle position.
+; Accepted: boolean. Default: ON.
+; Legacy INI alias: SmartReticleConvergence
 PlayerReticleConvergence = 1
 
-; Smart-reticle targeting distance, clamped to 1..10000. Redux stock is 200.
+; Smart-reticle targeting distance.
+; Accepted: finite decimal; clamped to 1..10000.
+; Default: 500. Redux stock value: 200.
+; Legacy INI alias: ReticleRange
 SmartReticleRange = 500
 
-; Path-aware scavenger scrap scoring/reconsideration. Default: enabled.
+; Score scrap by viable path length and reconsider temporarily unreachable scrap.
+; Accepted: boolean. Default: ON.
+; Legacy INI alias: ScavengerPathing
 SmartScavengerPathing = 1
 
-; Increased turret pitch authority for airborne targets. Default: enabled.
+; Give defensive turrets increased pitch authority against airborne targets.
+; Accepted: boolean. Default: ON.
 TurretAimPitch = 1
-; Multiplier clamped to 0..1.25. Stock is 0.5; default enhanced value is 0.95.
+
+; Enhanced turret pitch multiplier.
+; Accepted: finite decimal; clamped:
+;   <0.0       -> 0.0
+;   0.0..1.25  -> used as written
+;   >1.25      -> 1.25
+; Default: 0.95. Redux stock multiplier: 0.5.
+; Legacy env aliases: OPENSHIM_TURRET_AIM_PITCH_MULTIPLIER,
+;                     OPENSHIM_TURRET_PITCH_MULTIPLIER
 TurretAimPitchMultiplier = 0.95
 
-; Restore legacy crouch-on-landing while jump-sniping. Default: enabled.
+; Restore legacy crouch-on-landing while jump-sniping.
+; Accepted: boolean. Default: ON.
 JumpSnipeCrouch = 1
 
-; Force near-full-throttle turbo behavior in single-player. Default: disabled.
+; Make turbo available globally on drivable units.
+; Accepted: boolean. Default: OFF.
 Turbo = 0
-; Throttle threshold used by the global turbo path. Default: 0.9.
+
+; Throttle threshold used by the global turbo path.
+; Accepted: finite decimal. Default: 0.9.
+; Legacy env alias: OPENSHIM_GLOBAL_TURBO_TOLERANCE
 TurboTolerance = 0.9
 
-; Native stock headlights. These stand down in multiplayer and when EXU owns
-; scripted lighting for the mission.
+; Native stock headlight control. These stand down in multiplayer and when EXU
+; owns scripted mission lighting.
+; Accepted: boolean. Default: Player ON, AI OFF.
 Headlights = 1
 OtherHeadlights = 0
-; Stock, White, Red, Green, Blue, Yellow, Cyan, Magenta, Orange, Purple, Teal,
-; Rainbow, or a finite custom r,g,b triple with components in 0..20.
+
+; Player headlight color.
+; Canonical palette:
+;   Stock, White, Red, Green, Blue, Yellow, Cyan, Magenta,
+;   Orange, Purple, Teal, Rainbow
+; Stock aliases: Default, Off
+; Custom RGB is also accepted as r,g,b; every component must be finite and
+; within 0..20 inclusive, e.g. 5,2.5,1.
+; Invalid/absent values fall back to Stock.
 HeadlightColor = White
-; Stock, Focused, or Wide.
+
+; Player headlight beam shape.
+; Canonical:
+;   Stock
+;   Focused
+;   Wide
+; Accepted aliases:
+;   Stock   : Default, Off
+;   Focused : Focus, Narrow
+; Invalid/absent values fall back to Stock.
 HeadlightBeam = Wide
 
+
 [Environment]
+
 ; ---------------------------------------------------------------------------
-; Legacy/raw environment compatibility
+; Raw legacy / developer compatibility
 ; ---------------------------------------------------------------------------
-; Any OPENSHIM_* or BZR_* variable that is not yet represented by a friendly
-; key above can be placed here verbatim. OpenShim checks this section before the
-; real process environment. This is primarily for developer diagnostics and
-; temporary RE probes; prefer the friendly keys above for normal configuration.
+; Any OPENSHIM_* or BZR_* variable not represented by a friendly key above can
+; be supplied here verbatim. OpenShim checks this section before falling back to
+; the real process environment. Prefer the first-class keys above for routine
+; configuration; use this area for old launch-script compatibility and one-off
+; reverse-engineering probes.
 ;
-; Examples (uncomment only when needed):
+; Common raw-only examples (leave commented unless intentionally testing):
+;
+; Route forcing / migration:
 ; OPENSHIM_FORCE_PUBLIC_ROUTE = 1
 ; OPENSHIM_FORCE_RELAY_ROUTE = 1
 ; OPENSHIM_FORCE_P2P_ROUTE = 1
 ; OPENSHIM_FORCE_NET_INTERFACE = 192.168.1.10
 ; OPENSHIM_MIGRATE_NETWORK_INI = 1
 ;
-; Existing process environment variables remain accepted as a final backward-
-; compatibility fallback, so old launch scripts continue to work.
+; Shader-cache emergency opt-out:
+; OPENSHIM_DISABLE_SHADER_CACHE = 1
+; BZR_DISABLE_SHADER_CACHE = 1
+;
+; Terrain compatibility override retained for old scripts:
+; OPENSHIM_TERRAIN_SEMANTIC_LEGACY_UV_QUANTIZATION = 0
+;
+; Older display-policy overrides are still understood by their legacy readers:
+; OPENSHIM_UNDER_ATTACK_ALERT_MODE = Normal
+; BZR_UNDER_ATTACK_ALERT_MODE = Normal
+; OPENSHIM_DISABLE_UNDER_ATTACK_ALERT = 1
+; BZR_DISABLE_UNDER_ATTACK_ALERT = 1
+; OPENSHIM_UNDER_ATTACK_ALERT_COOLDOWN = 1.0
+; BZR_UNDER_ATTACK_ALERT_COOLDOWN = 1.0
+; OPENSHIM_UNDER_ATTACK_ALERT_COOLDOWN_SECONDS = 1.0
+; OPENSHIM_TARGET_RETICLE_POPUP_MODE = Default
+; BZR_TARGET_RETICLE_POPUP_MODE = Default
+;
+; Existing real process environment variables remain a final backward-
+; compatibility fallback when no friendly/raw INI value supplies that name.
