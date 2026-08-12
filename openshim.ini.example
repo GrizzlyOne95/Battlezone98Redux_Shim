@@ -1,76 +1,65 @@
 ; ============================================================================
-; openshim.ini  -  global user preferences for BZR-OpenShim
+; openshim.ini  -  global user/developer configuration for BZR-OpenShim
 ; ============================================================================
-; Copy this file to "openshim.ini" next to winmm.dll in your Battlezone 98
-; Redux install directory and edit the values you care about.
+; Copy this file to "openshim.ini" beside battlezone98redux.exe / winmm.dll.
 ;
-; These are GLOBAL preferences: they apply to ALL single-player content that
-; does not set the value itself -- the stock campaign, Instant Action, and any
-; mission whose script leaves the setting alone.
+; openshim.ini is the normal control surface for runtime features and testing.
+; Process environment variables are no longer required for the settings mapped
+; below. Existing OPENSHIM_* / BZR_* environment variables remain accepted as
+; compatibility fallbacks when no corresponding INI value is present.
 ;
-; General precedence (lowest to highest):
-;     built-in default  ->  this file  ->  compatibility env/legacy override
-;     ->  mission script (EXU), where supported
-; A mission that explicitly sets a supported value overrides this file for that
-; mission only; when the mission ends the setting reverts to your value here.
+; [Environment] at the end of this file is a universal compatibility escape
+; hatch: any legacy or newly-added OPENSHIM_* / BZR_* variable can be placed
+; there verbatim and OpenShim will see it as though it were a process variable.
+; This makes one-off diagnostics testable without changing Windows launch state.
 ;
-; A key that is absent, blank, or invalid uses that setting's documented
-; built-in default (or preserves stock state when explicitly noted). Delete a
-; line to return to that behavior.
-;
-; BOOLEAN VALUES (case-insensitive; applies to every boolean key below):
+; BOOLEAN VALUES are case-insensitive:
 ;   Enabled:  1, true, on, yes, enabled
 ;   Disabled: 0, false, off, no, disabled
 ; The example uses 1 and 0 for brevity.
 ;
-; The sections encode scope and the multiplayer rule:
-;   [General]      engine/UI settings that are not mission simulation policy.
-;   [Display]      cosmetic / local-only settings. Applied everywhere,
-;                  including in multiplayer (they cannot affect the shared
-;                  simulation, so they are safe for MP).
-;   [SinglePlayer] settings that touch gameplay / the simulation. Applied in
-;                  single-player ONLY and hard-disabled in any network game,
-;                  so a local config edit can never alter an MP match.
+; A missing/blank/invalid key uses that setting's built-in default unless the
+; comment says otherwise. Mission-script/EXU overrides remain authoritative for
+; the lifetime of that mission where supported.
 ; ----------------------------------------------------------------------------
 
 [General]
 ; Maximum simultaneous GAS sound objects.
-;   0       = disable the shim override and keep the stock engine limit
-;   1..256  = requested channel count
-;   >256    = accepted but clamped to 256
-; Value must be a non-negative whole decimal number. Default: 256.
-; Compatibility environment overrides (higher priority):
-;   OPENSHIM_MAX_SOUND_CHANNELS, then BZR_MAX_SOUND_CHANNELS
+; 0 keeps the stock engine limit. 1..256 requests that many channels; larger
+; values are clamped to 256. Default: 256.
 SoundChannels = 256
 
-; Full native input.map + gamekey.map binding screen. Boolean. Default: enabled.
-; Backwards-compatible key alias: CustomBindingUi
-; Compatibility environment flags (higher priority):
-;   Enable:  OPENSHIM_ENABLE_INPUT_BINDING_UI,
-;            OPENSHIM_ENABLE_INPUT_BINDING_UI_REPLACEMENT,
-;            BZR_ENABLE_INPUT_BINDING_UI
-;   Disable: OPENSHIM_DISABLE_INPUT_BINDING_UI,
-;            OPENSHIM_DISABLE_INPUT_BINDING_UI_REPLACEMENT,
-;            BZR_DISABLE_INPUT_BINDING_UI
-; A disable environment flag wins if both enable and disable flags are present.
+; Full native input.map + gamekey.map binding screen. Default: enabled.
+; Backwards-compatible key alias: CustomBindingUi.
 CustomBindsUi = 1
 
-; In-game OpenShim settings screen: adds an "OpenShim" button to the stock
-; Options screen that opens a page for editing the settings in this file with
-; live apply. Edits are written back to this file losslessly (comments and
-; layout are preserved; a .openshim.bak backup is kept). Boolean. Default:
-; enabled.
-; Compatibility environment flags (higher priority):
-;   Disable: OPENSHIM_DISABLE_SETTINGS_UI or BZR_DISABLE_SETTINGS_UI
+; Adds the native OpenShim settings page to Redux Options. Default: enabled.
+; Writes edits back to this file losslessly and keeps a .openshim.bak backup.
 SettingsUi = 1
 
-; Phase 2 terrain-rendering proof of concept. Everything is disabled by
-; default and exact-build gated. The proxy clones one stock 16x16-cell terrain
-; cluster, leaves the stock cluster visible, and mirrors terrain rebuilds.
-; TerrainProxyZone/TerrainProxyCluster select construction ordinals; the
-; optional X/Z keys select the native identifiers embedded in the stock mesh
-; name (RenderableTileCluster_<zoneX>x<zoneZ>_<clusterX>x<clusterZ>).
+; Restored legacy death-chunk rendering / chunkMeshes support. Default: enabled.
+; Set to 0 as an emergency compatibility opt-out.
+ChunkMeshes = 1
+
+; Redux multiplayer map-list/map-refresh fixes. Default: enabled.
+MapRefreshFixes = 1
+
+; Prevent duplicate Ogre material declarations from terminating the game.
+; Default: enabled. Keep this on unless isolating an Ogre compatibility issue.
+OgreMaterialCollisionGuard = 1
+
+[Startup]
+; Early D3D startup hook probe. Development/diagnostic path; default: disabled.
+D3DStartupHooks = 0
+
+; Allow Redux's stock startup shell/autoload behavior. Default: disabled because
+; OpenShim normally suppresses the problematic startup autoload path.
+; 0 = suppress stock startup autoload, 1 = allow it.
+AllowStartupAutoLoad = 0
+
 [Terrain]
+; Phase 2 one-cluster terrain proxy proof. Disabled by default and exact-build
+; gated. The stock cluster remains visible.
 TerrainProxyEnabled = 0
 TerrainProxyZone = -1
 TerrainProxyCluster = -1
@@ -84,343 +73,169 @@ TerrainProxyOffsetZ = 0.0
 TerrainProxyVisible = 1
 TerrainSemanticCapture = 0
 TerrainSemanticDumpJson = 1
-; Phase 3A derives atlas UVs from logical terrain semantics on an OpenShim proxy.
-; The stock terrain remains visible and its material, atlas, lighting, and fog
-; remain authoritative. The validator may be enabled without the renderer.
+
+; Phase 3A semantic terrain renderer/validator. Stock terrain remains visible.
 TerrainSemanticRenderer = 0
 TerrainSemanticValidateUV = 0
 TerrainSemanticLegacyUVQuantization = 1
 TerrainSemanticDumpMismatches = 0
-;
-; Semantic resource lifecycle tracing. Adds one-shot / state-change records for
-; semantic vertex-buffer create, bind, refresh, retain and destroy, for
-; height-only updates that intentionally keep the existing slot-3 buffer, and
-; for material/vertex-program specialization counts. Records are emitted on
-; state changes rather than per frame. Boolean. Default: disabled.
-; Environment enable override: OPENSHIM_TERRAIN_SEMANTIC_LIFECYCLE_LOG=1
+
+; One-shot/state-change semantic resource lifecycle records. Default: disabled.
 TerrainSemanticLifecycleLog = 0
-;
-; Semantic debug visualization. Requires TerrainSemanticRenderer = 1 and only
-; affects the DX11 semantic proxy cluster. DX9 and stock rendering are never
-; touched, and the mode does nothing at all when the semantic renderer is off.
-; Geometry, normals, depth and draw order are preserved; only the shaded color
-; is replaced.
-;   0 = disabled (normal semantic rendering)
-;   1 = tileIndex   deterministic color per runtime tile id
-;   2 = orientation full 0..15 mix/orientation nibble, 16 distinct colors.
-;                   Values 8..15 are deliberately NOT aliased onto 0..7, so a
-;                   regression back to `mix & 7` is visible immediately.
-;   3 = typeA       high terrain type nibble, same 16-color palette
-;   4 = typeB       low terrain type nibble, same 16-color palette
-;   5 = localUV     post-orientation local UV as red/green gradients, so tile
-;                   rotation and flipping are directly readable
-;   6 = atlasRect   AtlasRect origin (u,v) with width in blue
-;   7 = uvDelta     |semantic UV - stock packed UV| amplified 640x. In legacy
-;                   quantization mode a black cluster is an in-frame, per-pixel
-;                   parity proof against the stock packed-UV path.
-; Environment override: OPENSHIM_TERRAIN_SEMANTIC_DEBUG=<0..7>
+
+; Semantic debug visualization. Requires TerrainSemanticRenderer=1.
+; 0 normal, 1 tileIndex, 2 orientation, 3 typeA, 4 typeB, 5 localUV,
+; 6 atlasRect, 7 amplified semantic-vs-stock UV delta.
 TerrainSemanticDebug = 0
-;
-; Deterministic parity capture. Writes up to this many full framebuffer PNGs
-; beside the game executable as terrain_semantic_frame_s<r>q<q>d<debug>_NN.png,
-; using OGRE's own render-target writer. Captures are taken at fixed rendered
-; world-frame indices while the proxy exists, so two runs of the same mission
-; capture the same logical frame and can be differenced directly -- which a
-; desktop screenshot cannot do. Requires TerrainProxyEnabled = 1; it does not
-; require the semantic renderer, so the legacy packed-UV proxy can be captured
-; as the parity reference. 0 disables. Clamped to 0..64. Default: 0.
-; Environment override: OPENSHIM_TERRAIN_SEMANTIC_FRAME_CAPTURE=<count>
+
+; Deterministic framebuffer parity capture count, clamped to 0..64. 0 disables.
 TerrainSemanticFrameCapture = 0
-;
-; Rendered world frames between captures. Minimum 1. Default: 300 (about five
-; seconds at 60 FPS).
-; Environment override: OPENSHIM_TERRAIN_SEMANTIC_FRAME_CAPTURE_STRIDE=<frames>
+; Rendered world frames between parity captures. Minimum 1. Default: 300.
 TerrainSemanticFrameCaptureStride = 300
-;
-; Phase 3B HD-tile smoke path. DX11 only, disabled by default. Enabling this
-; automatically enables the one-cluster terrain proxy and semantic renderer.
-; The JSON manifest maps the selected stock terrain material to ordinary Ogre
-; image resources. OpenShim builds a Texture2DArray at runtime and samples its
-; slice by the semantic tileIndex. Only diffuse is replaced in this first
-; slice; stock detail/normal/specular/emissive maps, lighting and fog remain.
-;
-; Every source image in one material binding must have identical width, height,
-; mip count and pixel format. sliceCount is 1..256. Missing tile entries use
-; the required fallback image. A missing/invalid manifest, material binding,
-; image, shader seam or Ogre API logs [TERRAIN-HD] and retains the stock atlas.
-; The manifest path is relative to battlezone98redux.exe unless absolute.
-; Environment overrides:
-;   OPENSHIM_TERRAIN_HD=1
-;   OPENSHIM_TERRAIN_HD_MANIFEST=<path>
+
+; Phase 3B HD diffuse tile-array smoke path. DX11 only. Enabling this also
+; enables the one-cluster proxy and semantic renderer. Missing/invalid resources
+; fail soft to the stock atlas.
 TerrainHdEnabled = 0
 TerrainHdManifest = terrain_hd_tiles.json
 
 [Display]
-; Under-attack audio alert frequency.
-;   None    = silent (aliases: Off, numeric values <= 1)
-;   Minimal = rare beeps, ~10s cooldown (aliases: Low, numeric value 2)
-;   Normal  = stock/default cadence, ~1s cooldown
-;             (aliases: Default, On, numeric values >= 3)
-; Text is case-insensitive and spaces are ignored. Default: Normal.
-; Compatibility overrides, from lower to higher priority:
-;   campaignReimagined_settings.cfg: UnderAttackAlertMode=<value>
-;   OPENSHIM_UNDER_ATTACK_ALERT_MODE or BZR_UNDER_ATTACK_ALERT_MODE
-;   OPENSHIM_DISABLE_UNDER_ATTACK_ALERT or BZR_DISABLE_UNDER_ATTACK_ALERT
-; If no mode/disable environment override is set, a custom cooldown from 0 to
-; 120 seconds can be supplied with OPENSHIM_UNDER_ATTACK_ALERT_COOLDOWN,
-; BZR_UNDER_ATTACK_ALERT_COOLDOWN, or OPENSHIM_UNDER_ATTACK_ALERT_COOLDOWN_SECONDS.
+; Under-attack audio alert frequency: None, Minimal, or Normal. Default: Normal.
 UnderAttackAlert = Normal
 
-; Target reticle pop-up policy.
-;   Default      = stock behavior (aliases: Normal, On, numeric values <= 1)
-;   NeutralOnly  = suppress recent-hit popups for team 0 objects
-;                  (aliases: Neutral, numeric value 2)
-;   ExplicitOnly = only show when explicitly targeted
-;                  (aliases: Explicit, numeric values >= 3)
-; Text is case-insensitive; spaces, underscores, and hyphens are ignored, so
-; Neutral Only, neutral_only, and neutral-only are equivalent. Default: Default.
-; Backwards-compatible key alias: TargetReticle
-; Compatibility overrides, from lower to higher priority:
-;   UnderAttackAlert.cfg: TargetReticlePopupMode=<value>
-;   OPENSHIM_TARGET_RETICLE_POPUP_MODE or BZR_TARGET_RETICLE_POPUP_MODE
+; Target reticle pop-up policy: Default, NeutralOnly, ExplicitOnly.
+; Backwards-compatible key alias: TargetReticle.
 TargetPolicy = Default
 
-; Multiplayer vehicle flags: also draw YOUR OWN flag over your own craft.
-; Normally (matching BZ1.5) only other players' flags render and your own is
-; skipped, so a solo host sees nothing. Turn this on to render your own flag
-; too, e.g. to verify a flag looks right without a second human player.
-;   Off / 0 (default) = only other players' flags render
-;   On  / 1           = also render your own flag over your own craft
-; Env override: OPENSHIM_MP_FLAG_SHOW_OWN or BZR_MP_FLAG_SHOW_OWN
-; MultiplayerFlagShowOwnCraft = 0
+; Draw your own multiplayer vehicle flag as well as other players' flags.
+; Useful for solo flag validation. Default: disabled.
+MultiplayerFlagShowOwnCraft = 0
 
-; Scrap/pilot readout layout.
-;   Legacy = move the text block to the compact legacy top-center location and
-;            hide the stock backing panels (aliases: Compact, 1, On, True)
-;   Stock  = preserve the Redux positions and panels
-;            (aliases: Default, 0, Off, False)
-; Text is case-insensitive. Default: Legacy.
-; EXU positioning and panel-visibility calls temporarily override this baseline
-; for the mission. Mission reset restores this INI selection.
+; Scrap/pilot readout layout: Legacy or Stock. Default: Legacy.
 ScrapPilotHud = Legacy
 
-; Faction jet flames: tint each unit's engine flame by its faction (the first
-; letter of its ODF), for any team an EXU mission script has not already colored.
-; Boolean. Default: disabled (stock blue for all).
-;   a = NSDF      -> blue (stock)
-;   s = CCA       -> red
-;   c = CRA       -> green
-;   b = Black Dog -> purple  (needs an add-on purple flame texture, e.g.
-;                             exhaust_p.0 / pflame; without it, stays stock blue)
-; Compatibility environment flags (higher priority):
-;   Enable:  OPENSHIM_FACTION_JET_FLAMES or BZR_FACTION_JET_FLAMES
-;   Disable: OPENSHIM_DISABLE_FACTION_JET_FLAMES or
-;            BZR_DISABLE_FACTION_JET_FLAMES
+; Tint engine flames by faction when EXU has not supplied a mission override.
+; Default: disabled. NSDF blue, CCA red, CRA green, Black Dog purple when the
+; optional purple flame texture is available.
 JetFlames = 0
 
-; Unit command/selection voice feedback. Boolean. Default: enabled. Disable to
-; mute likely stock unit barks while leaving mission audio (e.g. misn*.wav)
-; untouched.
-; EXU mission scripts can temporarily override this preference.
+; Unit command/selection voice feedback. Default: enabled.
 UnitVoFeedback = 1
 
-; Subtitles remain a Campaign Reimagined / EXU feature; OpenShim does not
-; attempt to synthesize subtitle timing for unscripted stock audio.
-
 [AutoSave]
-; Rolling single-player recovery save. These two common controls are also
-; available on the in-game OpenShim Settings page and apply immediately.
+; Rolling single-player recovery save. Default: enabled.
 Enabled = 1
-; Seconds between rolling AutoSave writes. UI choices: 60/120/180/300/600.
+; Seconds between rolling AutoSave writes.
 IntervalSeconds = 120
-; Advanced safety/compatibility controls (INI-only).
+; Advanced safety/compatibility controls.
 InitialDelaySeconds = 10
 RetrySeconds = 15
 BackupExisting = 1
 RespectExternalAutoSave = 1
 
 [Diagnostics]
+; Log a limited sample of native hook hits. Noisy; default: disabled.
+TraceHookHits = 0
+
+; Enable the artillery/weapon-mask trace patch used for mask RE/validation.
+; Development-only; default: disabled.
+TraceArtilleryMask = 0
+
 ; Read-only Ogre animation/render overhead profiler. Default: disabled.
-; Logs ~1 second samples covering Entity::_updateAnimation,
-; Mesh::softwareVertexBlend, Entity::_updateRenderQueue (when the retail vtable
-; can be verified), and basic DX11 Draw/DrawIndexed/Present activity.
-; Environment override: OPENSHIM_PROFILE_OGRE_ANIMATION
-; See reverse_engineering/OGRE_ANIMATION_PROFILER.md for the test procedure.
 ProfileOgreAnimation = 0
 
+; Read-only DX11 terrain construction capture. Default: disabled.
+TerrainRenderProbe = 0
+; Capture the first N distinct terrain clusters. Clamped to 1..16.
+TerrainRenderProbeMaxClusters = 1
+; -1 captures the first cluster(s); otherwise use a zero-based observed ordinal.
+TerrainRenderProbeCluster = -1
+; Write terrain_probe.json / terrain_probe_NNN.json. Default: enabled when probe
+; itself is enabled.
+TerrainRenderProbeDumpJson = 1
+
 [Network]
-; Multiplayer transport preferences.
-;
-; IMPORTANT: these change which path peers PREFER, not how sessions are found.
-; Redux has no LAN browser, no offline lobby, and no direct-IP join: players
-; always meet in an authenticated BZRNet lobby, which then hands each peer the
-; others' LAN and WAN UDP endpoints. Only after that do the peers pick a
-; gameplay path. Nothing here creates a LAN or TCP/IP hosting mode.
-;
-; Preferred peer path. Case-insensitive; spaces, underscores and hyphens are
-; ignored.
-;   Stock  = leave the engine's own choice alone (aliases: Auto, Default)
-;   Direct = try LAN, then direct WAN, then fall back to relay
-;            (equivalent to the stock /ipdirect switch; aliases: PreferDirect)
-;   Relay  = skip both direct paths and always use the BZRNet relay. Slower,
-;            but a reliable fallback behind a strict NAT or firewall.
-;            (equivalent to /iprelay; aliases: ForceRelay)
-; Default: Stock. Also available on the in-game OpenShim Settings page, where
-; it applies to the next connection attempt without a restart.
+; Multiplayer transport preference. This changes peer path preference only; it
+; does not create a LAN browser/direct-IP matchmaking mode.
+; Stock = engine choice, Direct = LAN/WAN direct then relay, Relay = relay only.
 RoutePreference = Stock
 
-; Fixed local UDP port for BZRNet peer traffic, for firewall/port-forward
-; rules. 0 (default) keeps the stock behavior of letting Winsock pick an
-; ephemeral port. Valid range 0..65535.
-; INI-only and applied once at startup: the engine overwrites this same
-; variable with the port it actually bound, so it can only be honored while the
-; peer socket is still closed. Changing it requires a restart.
+; Fixed local UDP peer port. 0 lets Winsock choose an ephemeral port.
 UdpPort = 0
 
-; Multiplayer name override, equivalent to the stock /nickname= switch. When
-; blank or absent, Redux uses your Steam/GOG account name. Maximum 127
-; characters.
-; The injected lobby name field can edit this value; set it here instead, or
-; use "/name <text>" in lobby chat. This value is always what BZRNet is told in
-; its login message, so it applies on your next connection at the latest; the
-; two settings below control what is attempted on the connection you already
-; have.
+; Multiplayer nickname override. Blank/absent uses the account name.
 ; Nickname =
 
-; On a nickname change, publish it to BZRNet on the open connection as the
-; player-data keys "name" and "playerName". Boolean. Default: enabled.
-; This is the same SetPlayerData the game uses for team, ready state and the
-; rest of its live lobby metadata, so sending it is cheap and safe. What is not
-; established is whether the service acts on those two keys for an already
-; authorised client - Redux itself never re-sends them, so the shipped game
-; proves nothing either way. Each send is logged to openshim.log as
-; "TX SetPlayerData ...", and the engine's own websocket trace is turned up for
-; the duration of the two messages so BZLogger.txt records the JSON.
-; Environment override: OPENSHIM_DISABLE_LIVE_NICKNAME=1
+; Publish nickname changes through BZRNet SetPlayerData on the live connection.
 LiveNicknameKeys = 1
 
-; Additionally re-authorise with BZRNet after a nickname change. Boolean.
-; Default: DISABLED.
-; The service is told your name in its login message, so a fresh authorisation
-; would certainly carry a new one - leaving the multiplayer screens does not,
-; since the websocket lives for the whole process. But this sends a second
-; Authorization on an already-authorised socket, nothing shows the protocol
-; allows that, and the service decides what it does to any lobby you are sitting
-; in. Turn it on only to test that route.
-; Environment override: OPENSHIM_DISABLE_BZRNET_REAUTH=1
+; Re-authorise BZRNet after nickname changes. Experimental; default: disabled.
 ReauthOnNicknameChange = 0
 
-; Injected lobby readouts: the multiplayer name row and the negotiated-route
-; readout ("Net: idle udp 51330", or "Alice:LAN Bob:RELAY" once peers connect)
-; in the lobby's left margin. Boolean. Default: enabled.
-; Turn this off if the lobby misbehaves; it disables only the injected readouts,
-; not the route preference, port, or /name command.
-; Environment override: OPENSHIM_DISABLE_LOBBY_READOUTS=1
+; Inject native nickname/network-route readouts into the multiplayer lobby.
 LobbyReadouts = 1
-[SinglePlayer]
-; These gameplay-affecting improvements are hard-disabled in network games,
-; regardless of the values below.
 
-; Make hovercraft-derived AI craft use converging weapon aim instead of firing
-; parallel from offset hardpoints. Boolean. Default: enabled.
+; Native BZRNet lobby integration hook.
+;   Auto = preserve the existing build-specific default (GOG on, Steam off)
+;   1    = explicitly enable for testing
+;   0    = explicitly disable
+; Auto is recommended until the Steam path is fully revalidated.
+LobbyBzrnetIntegration = Auto
+
+[SinglePlayer]
+; Gameplay-affecting settings in this section are hard-disabled in network games.
+
+; Make hovercraft-derived AI craft converge weapon aim. Default: enabled.
 WeaponConvergence = 1
 
-; After the stock player hovercraft aim update, converge the local player's
-; weapon hardpoints on the smart-reticle position. Boolean. Default: enabled.
-; Backwards-compatible key alias: SmartReticleConvergence
+; Converge local-player weapon hardpoints on the smart-reticle point.
+; Backwards-compatible key alias: SmartReticleConvergence.
 PlayerReticleConvergence = 1
 
-; Maximum smart-reticle targeting distance in world units. Default: 500.
-; Any finite decimal value is parsed and clamped to 1..10000. The stock Redux
-; value is 200; set this to 200 for stock range.
-; Backwards-compatible key alias: ReticleRange
-; EXU SetReticleRange calls temporarily override this value for that mission;
-; the INI baseline is restored when mission overrides reset.
+; Smart-reticle targeting distance, clamped to 1..10000. Redux stock is 200.
 SmartReticleRange = 500
 
-; Score scrap by viable path length, remember temporarily unreachable scrap,
-; and periodically reconsider the active target while en route.
-; Boolean. Default: enabled.
-; Backwards-compatible key alias: ScavengerPathing
+; Path-aware scavenger scrap scoring/reconsideration. Default: enabled.
 SmartScavengerPathing = 1
 
-; Increase TurretCraft/TurretTank pitch authority so they can engage airborne
-; targets. Boolean. Default: enabled.
+; Increased turret pitch authority for airborne targets. Default: enabled.
 TurretAimPitch = 1
-;
-; Enhanced turret pitch multiplier. Any finite decimal value is parsed, then:
-;   <0.0       = clamped to 0.0
-;   0.0..1.25 = used as written
-;   >1.25      = clamped to 1.25
-; The stock multiplier is 0.5. Default 0.95 is intentionally just below the
-; fully vertical 1.0 multiplier.
-; Compatibility environment override (higher priority):
-;   OPENSHIM_TURRET_AIM_PITCH_MULTIPLIER
-;   OPENSHIM_TURRET_PITCH_MULTIPLIER (legacy alias)
+; Multiplier clamped to 0..1.25. Stock is 0.5; default enhanced value is 0.95.
 TurretAimPitchMultiplier = 0.95
 
-; Restore the legacy crouch-on-landing behavior while a sniper rifle is selected
-; and jump remains held. Boolean. Default: enabled. Exact-byte guarded;
-; unsupported builds fail soft.
+; Restore legacy crouch-on-landing while jump-sniping. Default: enabled.
 JumpSnipeCrouch = 1
 
-; Global turbo: forces units to turbo (near full throttle) in single-player.
-; Boolean. Default: disabled (stock behavior).
-;   - Applies to stock campaign / Instant Action and any unscripted content.
-;   - OpenShim owns the global and per-unit native turbo hooks. EXU
-;     SetGlobalTurbo / SetUnitTurbo calls delegate here when available and stay
-;     authoritative as mission overrides.
-;   - All turbo behavior is hard-disabled in network games.
-;   - Advanced: set the env var OPENSHIM_GLOBAL_TURBO_TOLERANCE to tune the
-;     throttle threshold (default 0.9; lower = turbo kicks in more easily).
+; Force near-full-throttle turbo behavior in single-player. Default: disabled.
 Turbo = 0
+; Throttle threshold used by the global turbo path. Default: 0.9.
+TurboTolerance = 0.9
 
-; Native stock headlights. These use each craft's Ogre light directly, so they
-; do not require Campaign Reimagined shaders or EXU. All four settings stand
-; down in network games and whenever EXU is loaded for scripted content.
-;
-; Player headlight visibility. Boolean. Default in this example: enabled.
-; If the key is absent, OpenShim preserves the stock visibility.
+; Native stock headlights. These stand down in multiplayer and when EXU owns
+; scripted lighting for the mission.
 Headlights = 1
-;
-; Other craft/turret headlights. Set to 0 for the campaign's "AI lights off"
-; preference. Boolean. Default in this example: disabled. If the key is absent,
-; OpenShim preserves each stock object's visibility.
 OtherHeadlights = 0
-;
-; Player light color (case-insensitive):
-;   Stock (aliases: Default, Off), White, Red, Green, Blue, Yellow, Cyan,
-;   Magenta, Orange, Purple, Teal, Rainbow
-; A custom comma-separated RGB triple is also accepted. Each component must be
-; finite and within 0..20 inclusive, e.g. 5,2.5,1. If absent/invalid: Stock.
+; Stock, White, Red, Green, Blue, Yellow, Cyan, Magenta, Orange, Purple, Teal,
+; Rainbow, or a finite custom r,g,b triple with components in 0..20.
 HeadlightColor = White
-;
-; Player beam (case-insensitive):
-;   Stock (aliases: Default, Off)
-;   Focused (aliases: Focus, Narrow)
-;   Wide
-; If absent/invalid: Stock.
+; Stock, Focused, or Wide.
 HeadlightBeam = Wide
 
-; Team-1 material colors remain a Campaign Reimagined shader/mod feature.
-
-[Diagnostics]
-; Read-only DX11 terrain construction capture. Default: disabled.
-; The observer recognizes the released terrain cluster's completed D3D11 draw
-; signature and never changes geometry, UVs, materials, shaders, or draw state.
-; DX9 is untouched. Environment enable override:
-;   OPENSHIM_TERRAIN_RENDER_PROBE=1
-TerrainRenderProbe = 0
+[Environment]
+; ---------------------------------------------------------------------------
+; Legacy/raw environment compatibility
+; ---------------------------------------------------------------------------
+; Any OPENSHIM_* or BZR_* variable that is not yet represented by a friendly
+; key above can be placed here verbatim. OpenShim checks this section before the
+; real process environment. This is primarily for developer diagnostics and
+; temporary RE probes; prefer the friendly keys above for normal configuration.
 ;
-; With TerrainRenderProbe enabled, capture the first N distinct terrain
-; clusters observed after hook installation. Clamped to 1..16. Default: 1.
-TerrainRenderProbeMaxClusters = 1
+; Examples (uncomment only when needed):
+; OPENSHIM_FORCE_PUBLIC_ROUTE = 1
+; OPENSHIM_FORCE_RELAY_ROUTE = 1
+; OPENSHIM_FORCE_P2P_ROUTE = 1
+; OPENSHIM_FORCE_NET_INTERFACE = 192.168.1.10
+; OPENSHIM_MIGRATE_NETWORK_INI = 1
 ;
-; -1 captures the first cluster(s). A zero-based value captures only that
-; distinct observed cluster ordinal; this is a diagnostic ordinal, not the
-; game's zone/cluster coordinate. Default: -1.
-TerrainRenderProbeCluster = -1
-; Write the full one-shot buffer snapshot beside the game executable as
-; terrain_probe.json (or terrain_probe_NNN.json for multiple captures).
-; Boolean. Default: enabled whenever TerrainRenderProbe itself is enabled.
-TerrainRenderProbeDumpJson = 1
+; Existing process environment variables remain accepted as a final backward-
+; compatibility fallback, so old launch scripts continue to work.
