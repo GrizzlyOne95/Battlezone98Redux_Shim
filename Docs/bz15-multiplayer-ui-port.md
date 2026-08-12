@@ -227,12 +227,12 @@ longer advisory:
 ```
 cUI_TextEntry (extends cUI_Text)       cUI_Selectlist (extends cUI_View)
   +0x930  std::string text              +0x14C  int  selectedIndex   (init -1)
-  +0x948  uint  maxLength   (= arg3)    +0x150  int  scrollOffset    (init 0)
+  +0x948  uint  displayTail (= arg3)    +0x150  int  scrollOffset    (init 0)
   +0x94C  void (*enterCallback)()       +0x168  vector<item>         (items)
   +0x950  bool  allowEnter  (= arg2)    +0x174  float rowScale       (= arg11)
   +0x954  cUI_View* cursor              +0x178  cUI_Button* pageUp
   +0x960  bool  flagA       (= arg1)    +0x17C  cUI_Button* pageDown
-  +0x964  int   (init -1)
+  +0x964  int   inputLimit  (init -1)
 ```
 
 RTTI vftables, for identifying an instance: `cUI_TextEntry` `0x008A0AA0`,
@@ -254,6 +254,44 @@ Items are `{ std::string label; int value; }`, stride `0x1C`, value at `+0x18`.
 The ctor pre-creates as many row labels as fit the requested height and stops,
 so **it is safe to construct a list with no items** — no separate "populate
 before display" step is required.
+
+### Hit-testing: decoration is not passive
+
+`cUI_View::MousePressed` (`0x007D2570`, and `MouseReleased` `0x007D26C0` in the
+same shape) walks the parent's children twice — first those that have children
+of their own, then the leaves — in **insertion order**, stopping at the first
+one that reports the event as handled. If no child takes it, the view reports
+the event handled itself whenever the point is inside its own rect and its
+input-active byte at **`+0xE9`** is set, and it invokes no callback while doing
+so. A plain `cUI_View` is therefore a black hole for clicks, not a passive
+backdrop.
+
+That is the reverse of the drawing order in the sense that matters: a plate has
+to be added *before* the widgets it frames so it draws behind them, and that is
+exactly what puts it ahead of them in the walk. It swallowed every click on the
+nickname entry and on `OK` — the callbacks were correct and simply never ran.
+
+Two ways out, both used in this repo:
+
+* Give the controls a **different parent that already has children**, so they
+  are visited in the first pass ahead of the decoration in the second. This is
+  what the injected options pages do: backdrops go on the screen, controls go on
+  the stock `Middle_Overlay`.
+* Clear `+0xE9` on the plate (`MakeViewInputTransparent` in `bzr_hooks.cpp`).
+  Not `SetActive` (`0x007D3310`) — that forwards the same value to the Ogre
+  element's visibility and would take the artwork down with the hit rectangle.
+  Nothing else in the image reads `+0xE9`; every consumer goes through the
+  getter at `0x007D3360`, and all of them are input handlers.
+
+`cUI_Text` overrides `MousePressed` (`0x007CC9C0`) and claims a click only when
+`flags & 0x400` is set, so labels and text entries are transparent by default.
+`cUI_TextEntry::MouseReleased` additionally calls the global function pointer at
+`0x009456C8` with `(entry, 1)` — the engine's own "focus this entry" hook, and
+`(entry, 0)` from the destructor. **Nothing in `.text` ever writes that global**
+(its only four references are the two `cmp`/`call` pairs), so the focus path is
+dead in this build. That is the reason for the `AppendChar` detour below; it is
+also an unused, code-free extension point, since installing a function there
+would report entry focus without patching anything.
 
 ### Confirmed in the running game
 
@@ -340,8 +378,65 @@ Worth reusing rather than rebuilding:
    and `(+1)`. The preview tile keeps the forward callback. Retail arrow art
    (bitmaps 2049/2050/2070/2071) is not extracted yet, so the buttons carry
    `<` / `>` captions over the stock Redux button texture.
+
+   1.5 framed the flag in a recessed plate. Redux binds no 9-slice frame widget
+   here, so the border is **baked into the generated PNG**: the image is the
+   64x32 payload plus a 4px bezel (72x40), drawn at a flat 2x so the border is
+   an even 8px on screen and the tile keeps the height it had before the frame
+   existed. It is a *raised* bezel — grey body, dark rule inside and out,
+   highlight along the top and left — because the lobby background is dark
+   enough to swallow a sunken bevel's shadow side. The flag field is opaque for
+   the same reason: translucent, it left the frame looking like it floated over
+   nothing. The one-bit preview now follows the 1.5 palette as well: black
+   emblem pixels on an opaque red field rather than Redux's earlier white-on-
+   black diagnostic rendering.
+
+   The flag summary text lives in the cluster's own column, above the preview
+   tile. It used to sit at a fixed `(270, 960)`, which is the lobby's
+   packet/latency strip — and since a `cUI_Text` is hover-reactive over its own
+   rect, hovering the packet readout popped the flag text. The arrows were never
+   the only trigger. The client-side nickname/route readouts moved from 746/798
+   to 694/746 to open the slot at 802.
 5. **Character profiles and the player-information card**, on `cUI_Selectlist`
    and `cUI_TextEntry`. The nickname half of this is **done** — see below.
+
+   The injected nickname row is a real `cUI_TextEntry`, not a button-shaped
+   readout. It sits in a generated 240x144 Redux-style `PLAYER NAME` panel whose
+   border and header are pre-rendered like the flag preview; the native entry
+   and `OK` button are separate interactive children over that plate, which is
+   held **input-transparent** because a live `cUI_View` would otherwise eat
+   their clicks (see "Hit-testing" above — that bug shipped once).
+
+   The entry gets the panel's full inner width, 216, with `OK` on its own row
+   underneath. Constructor argument 3 is a *width budget*, not an input limit:
+   the rendered string is the **last** N characters of the backing string, and
+   stock entries spend about 14.4 units per glyph (`chatEntry` is 520 wide and
+   asks for 36). While the entry shared its row with `OK` it was 164 wide at
+   N = 10, which rendered `TheGrizzler` as `heGrizzler`. It is now derived from
+   the field width rather than picked, and 216 units carry 15 characters.
+
+   These lobby screens have no usable general text-focus path and do
+   not share a single reliable `OnChar` target. They do all feed their stock
+   chat entry through `cUI_TextEntry::AppendChar` (`0x007CFA70`), however. A
+   transparent button over the row therefore enables a guarded detour of that
+   common append operation while nickname editing is active. Enter invokes the
+   injected entry's own callback; a small `OK` button invokes the same path.
+   Applying persists the value to `openshim.ini` and the native `/nickname=`
+   buffer, which is what the login message carries, and then tries to publish it
+   on the open connection as player data (see "Renaming: what the client
+   settles, and what it does not" below). The acknowledgment reports which of
+   those happened — `Sent to server`, `Reconnecting...`, or `Saved-reconnect` —
+   in the 15 characters the field renders, and stops short of claiming the
+   rename took, because only another client can show that. Clicking the row
+   restores the real backing value for another edit. `/name <text>` remains a
+   chat fallback and goes through the same path.
+
+   Do not call the button callback setters (`0x007C23C0` / `0x007C23E0`) on a
+   text entry. Their `+0x150` / `+0x154` fields are valid only in `cUI_Button`;
+   those offsets lie in `cUI_Text`'s inline display buffer. That mistake was the
+   reason the first injected entry was unstable. The
+   lobby-style input cap is installed with `0x00795BD0` at `+0x964`; constructor
+   argument 3 at `+0x948` is only the number of trailing characters rendered.
 
 ## Transport, for real: what Redux actually exposes
 
@@ -351,11 +446,19 @@ byte-identical to the decompile corpus, so the corpus addresses are
 authoritative rather than advisory. Each global below has exactly four `.text`
 references and no others.
 
-| what | address | width | notes |
-|---|---|---|---|
-| force-relay flag | `0x00946708` | dword | `/iprelay` writes 1 at `0x007D5CB9`, `/ipdirect` 0 at `0x007D5CE1`; read at `0x0075F09F` and `0x0075DDC6` |
-| BZRNet UDP port | `0x00945704` | **uint16** | requested port read at `0x006BE7B8`, then overwritten at `0x006BE7FF` with the port Winsock bound |
-| nickname override | `0x009453E0` | `char[0x80]` | `/nickname=` copies at `0x007D5947`; consumed at `0x006C7D87` |
+| what | address | width | guard site (instruction) | notes |
+|---|---|---|---|---|
+| force-relay flag | `0x00946708` | dword | `0x0075F09D` `83 3D ..` | `/iprelay` writes 1, `/ipdirect` 0; read per connection attempt |
+| BZRNet UDP port | `0x00945704` | **uint16** | `0x006BE7B5` `0F B7 15 ..` | requested port read here, then overwritten at `0x006BE7FF` with the port Winsock bound |
+| nickname override | `0x009453E0` | `char[0x80]` | `0x006C7D84` `0F BE 91 ..` | `/nickname=` copies at `0x007D5947`; consumed by `FUN_006C6E60` |
+
+**The guard site is the instruction address, not the operand address.** A scan
+for `.text` references to a global finds the 4-byte disp32 *operand*; the
+instruction starts 2 bytes earlier for `83 3D` (cmp) and 3 for `0F B7 15` /
+`0F BE 91` (movzx/movsx). Anchoring an exact-byte guard on the operand address
+fails silently and stands the whole feature down — which is exactly what
+happened on the first in-game run here (`relay=mismatch port=mismatch
+nickname=mismatch`) even though every data address was correct.
 
 Three consequences that are easy to get wrong:
 
@@ -365,9 +468,141 @@ Three consequences that are easy to get wrong:
   readout reports.
 * The relay flag is re-read on **every** connection attempt, so it can be
   changed live; the port cannot.
-* The nickname is read when `FUN_006C6E60` builds the identity message, not
-  latched at startup. Byte 0 being NUL is the "use the platform account name"
-  signal. An edit therefore applies on the **next connect**, not immediately.
+* The nickname buffer is read when `FUN_006C6E60` builds the identity message,
+  not latched at startup. Byte 0 being NUL is the "use the platform account
+  name" signal. The field it fills is that message's `name`, which is the only
+  name the service is ever told, so the buffer decides the displayed name from
+  the **next connect** onwards — see below.
+
+### Renaming: what the client settles, and what it does not
+
+**The client tells the service its name exactly once per connection.** The
+`Authorization` message's `name` field is built in `FUN_006C6E60`, which reads
+the `/nickname=` buffer and falls back to the platform `realname` when byte 0 is
+NUL. That builder has exactly one caller, inside the connect handshake
+(`0x006C844E`), so the field is fixed for the lifetime of the connection.
+Persisting the buffer is therefore the one thing guaranteed to work, and it is
+done first and unconditionally on every apply.
+
+**What the shipped binary does not settle is whether the service accepts a
+rename over an open connection.** It is worth being precise about the limit of
+the local evidence, because an earlier revision of this document overstated it:
+
+* Redux never re-sends `name` after `Authorization`, and `playerName` does not
+  appear in the image at all. That is evidence about *Redux*, which has no
+  rename feature — not about what BZRNet does with those keys.
+* Nothing in Redux reads a member-data key `name` back. The keys it consumes per
+  member through vtable slot 10 (`GetLobbyMemberData(memberId, key)`) are
+  `friendID`, `team`, `miniid` and `knownPlayers` — `0x0073D9C2` reads `team`.
+  Every `name` in the lobby code is a *lobby* name: both uses (`0x00741041` in
+  `OnLobbyListReceived`, `0x00743743`) sit beside `gameType`, `gameSettings` and
+  `GameVersion` and feed the games list. So a local read-back cannot confirm a
+  rename even if the service performed one.
+* Other BZRNet clients write `name` and `playerName` together as an identity
+  pair, including on an already-connected socket. The service may well treat
+  that pair specially in its `SetPlayerData` handler.
+
+So OpenShim sends the pair (`[Network] LiveNicknameKeys`, default on) and logs
+every attempt, and treats re-authorisation as the fallback rather than the plan.
+**Confirming the result has to come from outside this process**: a second client,
+or an external BZRNet client watching the lobby. There is no inbound trace to
+read (see the wire trace below).
+
+`BZRNetLobby::SetPlayerData` is vtable slot 7 at `0x0074BF60`:
+
+```c
+// __thiscall on the lobby (vftable 0x0089ADDC).
+void __thiscall BZRNetLobby::SetPlayerData(void* lobby,
+                                           const StableId*    lobbyId,  // lobby+0x28
+                                           const std::string* key,
+                                           const std::string* value);
+```
+
+The first argument is the **lobby's** identity, not a player's — an earlier
+comment here named it `playerId`, which is wrong even though the value passed was
+right. The disassembly is unambiguous:
+
+* `0x0074BF71` uses it as the key into the lobby map at `0x0260B1C0`.
+* `0x0074BF99` pushes the *local user's* `StableId` global, `0x0260B1C8`, to find
+  that user among the lobby's members at `entry+0x48`; only then is the pair
+  written into the member's own map at `+0x4C`. The player is implicit, and this
+  local cache write is conditional on the lookup succeeding.
+* `0x0074BFFB` resolves `lobby+0xC8` and sends **unconditionally**, whether or
+  not either lookup matched. The send is inline on the calling thread, not
+  posted.
+
+That last point is what makes the wire trace below usable, and it also means a
+send with no local echo is still a send.
+
+The live lobby is reachable without hooking anything: the accessor at
+`0x00764760` (`mov eax,[0x00945470]; ret`) returns the instance published on
+construction and zeroed on teardown. Validate `*(void**)lobby == 0x0089ADDC`
+before use — that global also carries other lobby implementations.
+
+**`StableId` is not a string**: `{ uint32 kind; uint32 pad; uint64 id }`, kind
+indexing `ISGB` (`0x0073AAF5` builds the prefixes), the same pair the ban list
+prints as `S<id>`/`G<id>`. `B` is a BZRNet-issued id, which is what lobbies get
+— the live value read `B1004`, and the map at `0x0260B1C0` is keyed by it, with
+the local user's own `StableId` in the global right after it at `0x0260B1C8`.
+
+Overlaying `BzrString` on that struct is what crashed the game: `kind` landed on
+the `heap` pointer and the bytes at the capacity offset happened to be > 0xF, so
+`BzrStringData` returned `0x00000003` as a string. **A wrong overlay is silent
+until something dereferences it** — here, a `%hs` in a log line.
+
+**Do not call `0x006C4F70` directly.** It looks like the sender and its byte
+guard passes, but it is a `__thiscall` on the *websocket service* the lobby
+holds at `+0xC8`; its third instruction is `mov ecx,[ebp-0xC4]` / `add ecx,
+0x2E0`, so calling it without that `this` faults immediately.
+
+#### The wire trace
+
+`0x006C4F70` prints the outgoing JSON under `WebSocket Message Sent:` when the
+log level at `0x008EDA28` is at least 3. It ships at **1**, and the 48 `.text`
+references to it are all `cmp` — nothing writes it, so raising it is safe and
+entirely ours to undo. Guard on `0x006C5178` (`83 3D 28 DA 8E 00 03`), which is
+the instruction; the reference scan lands on the operand at `0x006C517A`.
+
+`SendBzrNetNicknameLive` raises the level, sends, and restores it, so
+`BZLogger.txt` gains exactly the two messages a rename produces rather than
+every websocket send for the rest of the session. This works only because the
+send at `0x0074BFFB` is inline.
+
+**There is no receive-side logger.** Every `WebSocket Message` string in the
+image is `Sent`; the inbound dispatcher is `FUN_006BF2A0`, a long
+`if`/`else if` chain over the message type at `[ebp-0x28]` — `OnUserDataChanged`
+compares at `0x006C08AC`, `OnLobbyChanged` at `0x006C0A7C` — and it logs
+nothing. Observing what the service sends back means either detouring into that
+chain or, far more cheaply, watching from a second client.
+
+#### Re-authorising on demand
+
+Leaving the multiplayer screens does not help: the websocket lives for the whole
+process, so no second `Authorization` is ever sent and only a restart changed
+the name. OpenShim can queue one itself after a nickname change
+(`ForceBzrNetReauth`, `[Network] ReauthOnNicknameChange`) — but this is **off by
+default**. It is the most invasive of the options: nothing shows the protocol's
+state machine accepts `AUTHORIZED -> Authorization`, and the service decides
+what a second authorisation does to a lobby you are sitting in. The player-data
+route above is tried first.
+
+```
+0x006C6DF0  void __thiscall BZRNetClient::SendAuthorization(void*)
+```
+
+It sends nothing directly — it binds the authorisation body (`0x006C83F0`)
+with two flag bytes read through `0x0260B0CC` / `0x0260B098` and posts it to the
+client's io context at `+0xC18`. **That is what makes it callable from a widget
+callback**: the UI thread only enqueues, and the network thread does the work,
+exactly as the engine's own connected-handler does at `0x0075E06A`.
+
+The client comes from `0x00945484`, which holds the *address* of a shared_ptr
+whose first dword is the object. It has no RTTI — the class is not polymorphic,
+which is also why all of these are direct calls — so it cannot be validated the
+way the lobby can. Instead it is cross-checked against the live lobby's copy of
+the same shared_ptr at `lobby+0xC8` (`0x007656BA` is where the lobby ctor is
+handed it), and refused if they disagree or if no lobby exists. No lobby means
+no multiplayer screen, which is also the only place a rename happens.
 
 ### Reading the negotiated route without walking the peer container
 
@@ -398,9 +633,10 @@ Both hooks record and then forward to the real logger with identical arguments,
 so the game's own log is unchanged.
 
 Two cautions carried over from the existing widgets: both callback slots
-(`+0x150` / `+0x154`) must be non-null on any active dialog child or the lobby
-crashes walking its children, and `IsWidgetLiveChildOfParent` exists because
-widgets do not survive a parent rebuild.
+(`+0x150` / `+0x154`) must be non-null on injected **buttons** used by the
+active dialog, but those offsets must never be written on a `cUI_Text` or
+`cUI_TextEntry`; and `IsWidgetLiveChildOfParent` exists because widgets do not
+survive a parent rebuild.
 
 ## Also worth knowing
 
