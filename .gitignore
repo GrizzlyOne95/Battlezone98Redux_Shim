@@ -32,6 +32,9 @@
 !reverse_engineering/bzrnet_server/*.py
 !reverse_engineering/decompilation_from_1.5_exe-pdb/package_clean_pdb_c.py
 reverse_engineering/decompilation_from_1.5_exe-pdb/1.5_decompile.zip
+# Local Battlezone 1.5 decompiler corpus; retain for private analysis only.
+reverse_engineering/decompilation_from_1.5_exe-pdb/1.5/
+reverse_engineering/corpus_artifacts/legacy_15227_clean_pdb_c.zip
 __pycache__/
 
 # Analysis results
