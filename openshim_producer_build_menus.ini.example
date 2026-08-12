@@ -1,0 +1,32 @@
+[ProducerBuildMenus]
+Enabled=1
+
+; EXPERIMENTAL / GOG-FIRST TEST PATH
+;
+; OpenShim's producer-menu bridge reuses Redux's native recursive [Builder]
+; loader. Each value below is an 8-character Builder root token. Plain tokens,
+; .odf names, and _mp.odf names normalize to the same root, e.g.:
+;
+;   b_amcmbt
+;   b_amcmbt.odf
+;   b_amcmbt_mp.odf
+;
+; all select the native b_amcmbt Builder tree.
+;
+; Copy this file beside the game executable as:
+;   openshim_producer_build_menus.ini
+;
+; For the smallest live test, leave only Factory set and select a Factory in
+; game. The expected result is that its production menu is rooted at the chosen
+; [Builder] ODF instead of the normal flat ProducerClass buildItem1..10 list.
+;
+; The current bridge is a validation experiment: submenu navigation and final
+; leaf handoff into Producer::StartBuild still need in-game confirmation.
+
+; Recommended first test: expose the American combat Builder tree from Factory.
+Factory=b_amcmbt
+
+; Additional roots can be enabled independently after the Factory test.
+; Recycler=b_amcmbt
+; Armory=b_amprod
+; ConstructionRig=b_ambldg
