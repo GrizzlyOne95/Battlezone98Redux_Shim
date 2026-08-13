@@ -1515,7 +1515,12 @@ namespace BZROpenShim
             ChunkObjectLinkProbe parent = {};
             ChunkObjectLinkProbe sibling = {};
             ChunkObjectLinkProbe child = {};
+            // The game-side tagENTITY for the owning craft. NOT an Ogre object:
+            // it is only good for reading names off fixed offsets.
             void* ownerEntity = nullptr;
+            // The craft's Ogre::Entity, reached through the render bridge. This
+            // is the one that accepts Ogre calls (getSkeleton, setVisible, ...).
+            void* ownerOgreEntity = nullptr;
             char ownerEntityBaseName[32] = {};
             char ownerOgreFilename[32] = {};
             char ownerResolvedMeshName[48] = {};
@@ -1524,6 +1529,9 @@ namespace BZROpenShim
         static bool g_EnableChunkRenderFallback = false;
         static bool g_EnableChunkProxyDebug = false;
         static bool g_EnableChunkMeshProxy = false;
+        static bool g_EnablePartialFragmentBoneCollapse = false;
+        // Guards against a craft mesh with an implausible bone count being walked.
+        static constexpr uint16_t kMaxOwnerSkeletonBones = 1024;
         // Building geo nodes carry no owner GameObject link (+0x8C is null),
         // so chunks born from a building can't identify their craft through
         // the bridge. The fragment ROOT still can. FragmentObject calls
@@ -1531,6 +1539,20 @@ namespace BZROpenShim
         // resolved mesh name is handed down through this scoped global while
         // the walk is on the stack.
         static char g_ActiveFragmentSourceMeshName[48] = {};
+        // The craft's Ogre::Entity for the fragment walk currently on the stack.
+        // Geo nodes below the root do not carry a bridge link of their own, so
+        // the entity is resolved once at the root and handed down the same way
+        // the mesh name is.
+        static void* g_ActiveFragmentSourceOgreEntity = nullptr;
+        static const char* g_ActiveFragmentSourceOgreEntityVia = "none";
+        // ODF name of the craft being fragmented, read off its GameObject class.
+        // The tagENTITY name probe never resolved a real name, so this is the
+        // only stated (rather than inferred) identity the payload lookup gets.
+        static char g_ActiveFragmentSourceOdfName[16] = {};
+        // Set only while PartialFragmentObject is on the stack. Full fragmentation
+        // hides the whole source mesh instead, so per-piece bone collapse there
+        // would be wasted work on an already-invisible entity.
+        static bool g_ActivePartialFragment = false;
         static bool g_TraceChunkRender = false;
         static bool g_TraceChunkRenderVerbose = false;
         static bool g_TraceChunkEffectRuntime = false;
@@ -1936,6 +1958,9 @@ namespace BZROpenShim
         using FnOgreEntityU16Query = uint16_t(__thiscall*)(void*);
         using FnOgreEntityIntQuery = int(__thiscall*)(void*);
         using FnOgreEntityGetSkeleton = void*(__thiscall*)(void*);
+        using FnOgreSkeletonGetBoneByIndex = void*(__thiscall*)(void*, uint16_t);
+        using FnOgreBoneSetManuallyControlled = void(__thiscall*)(void*, bool);
+        using FnOgreNodeSetScale = void(__thiscall*)(void*, float, float, float);
         using FnOgreStringQuery = const std::string&(__thiscall*)(void*);
         using FnOgreProcessQueuedUpdates = void(__cdecl*)();
         using FnOgreNumAttachedObjects = uint16_t(__thiscall*)(void*);
@@ -1998,6 +2023,88 @@ namespace BZROpenShim
                 return nullptr;
 
             return reinterpret_cast<T>(GetProcAddress(ogreMain, name));
+        }
+
+        // The render-bridge offsets do not hold a bridge on every object that
+        // reaches the fragment hooks, and what comes back instead is not even
+        // pointer-shaped: observed values include 0x3F3F3F3F ("????") and
+        // 0x003D003C (UTF-16 "<="), i.e. the read landed inside a string. Handing
+        // those to a __thiscall Ogre method is a virtual dispatch through text --
+        // that is the OgreMain write fault at 0x3F3F3F6C in the crash log. Every
+        // Ogre object begins with a vtable pointer into OgreMain.dll, so require
+        // that before making any call on a candidate.
+        static bool IsReadableDataProtect(DWORD protect);
+
+        static bool TryGetOgreModuleRange(uintptr_t& outBase, uintptr_t& outEnd)
+        {
+            static uintptr_t s_base = 0;
+            static uintptr_t s_end = 0;
+            static bool s_attempted = false;
+
+            if (!s_attempted)
+            {
+                s_attempted = true;
+                // Image size straight off the PE headers, so this needs no psapi.
+                if (const HMODULE ogreMain = GetModuleHandleA("OgreMain.dll"))
+                {
+                    __try
+                    {
+                        const auto* moduleBytes = reinterpret_cast<const uint8_t*>(ogreMain);
+                        const auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(moduleBytes);
+                        if (dosHeader->e_magic == IMAGE_DOS_SIGNATURE)
+                        {
+                            const auto* ntHeaders =
+                                reinterpret_cast<const IMAGE_NT_HEADERS*>(moduleBytes + dosHeader->e_lfanew);
+                            if (ntHeaders->Signature == IMAGE_NT_SIGNATURE &&
+                                ntHeaders->OptionalHeader.SizeOfImage > 0)
+                            {
+                                s_base = reinterpret_cast<uintptr_t>(moduleBytes);
+                                s_end = s_base + ntHeaders->OptionalHeader.SizeOfImage;
+                            }
+                        }
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        s_base = 0;
+                        s_end = 0;
+                    }
+                }
+            }
+
+            outBase = s_base;
+            outEnd = s_end;
+            return s_base != 0 && s_end > s_base;
+        }
+
+        static bool LooksLikeOgreObject(const void* candidate)
+        {
+            const uintptr_t address = reinterpret_cast<uintptr_t>(candidate);
+            // Cheap shape rejects first: null, misaligned, or in the bottom 64K.
+            if (address < 0x00010000 || (address % sizeof(void*)) != 0)
+                return false;
+
+            uintptr_t ogreBase = 0;
+            uintptr_t ogreEnd = 0;
+            if (!TryGetOgreModuleRange(ogreBase, ogreEnd))
+                return false;
+
+            MEMORY_BASIC_INFORMATION mbi = {};
+            if (VirtualQuery(candidate, &mbi, sizeof(mbi)) != sizeof(mbi))
+                return false;
+            if (mbi.State != MEM_COMMIT || !IsReadableDataProtect(mbi.Protect))
+                return false;
+
+            uintptr_t vtable = 0;
+            __try
+            {
+                vtable = *reinterpret_cast<const uintptr_t*>(candidate);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+
+            return vtable >= ogreBase && vtable < ogreEnd;
         }
 
         // Some render-queue helpers are inlined or unexported from the shipped
@@ -2438,6 +2545,85 @@ namespace BZROpenShim
             return outMeshName[0] != '\0';
         }
 
+        // The owner-name offsets below are guesses across two candidate tagENTITY
+        // layouts, and TryReadInlineAsciiBuffer accepts any printable ASCII. That
+        // is too weak: an avtank's entity holds the bytes "cd=@" at the first
+        // probed offset, which sailed through as a name and became "cd=@.mesh".
+        // A bogus name is worse than no name, because a resolved owner mesh wins
+        // over every downstream fallback -- it suppressed the VDF candidate list
+        // and dropped every avtank chunk onto the generic placeholder payloads.
+        // Model names are identifiers, so hold candidates to that shape.
+        static bool IsPlausibleOwnerEntityName(const char* text)
+        {
+            if (!text || !*text)
+                return false;
+
+            size_t length = 0;
+            size_t alphaNumeric = 0;
+            size_t dots = 0;
+            for (const unsigned char* cursor = reinterpret_cast<const unsigned char*>(text); *cursor; ++cursor)
+            {
+                const unsigned char ch = *cursor;
+                if (std::isalnum(ch))
+                {
+                    ++alphaNumeric;
+                }
+                else if (ch == '.')
+                {
+                    // One extension separator at most, and never leading.
+                    if (++dots > 1 || length == 0)
+                        return false;
+                }
+                else if (ch != '_' && ch != '-')
+                {
+                    return false;
+                }
+
+                ++length;
+                if (length > 24)
+                    return false;
+            }
+
+            // "avtank", "avfigh.mesh" pass; "cd=@", "a", "12" do not.
+            return length >= 3 && alphaNumeric >= 3 && std::isalpha(static_cast<unsigned char>(text[0]));
+        }
+
+        // Takes the first offset whose contents actually look like a name instead
+        // of short-circuiting on the first offset that holds any readable ASCII.
+        static bool TryReadOwnerEntityNameField(
+            const uint8_t* entityBytes,
+            const uintptr_t* probeOffsets,
+            size_t probeOffsetCount,
+            char* outText,
+            size_t outTextCapacity)
+        {
+            if (!entityBytes || !probeOffsets || !outText || outTextCapacity == 0)
+                return false;
+
+            outText[0] = '\0';
+
+            char candidate[32] = {};
+            for (size_t index = 0; index < probeOffsetCount; ++index)
+            {
+                if (!TryReadInlineAsciiBuffer(
+                        entityBytes + probeOffsets[index],
+                        16,
+                        candidate,
+                        sizeof(candidate)))
+                {
+                    continue;
+                }
+
+                if (!IsPlausibleOwnerEntityName(candidate))
+                    continue;
+
+                strncpy_s(outText, outTextCapacity, candidate, _TRUNCATE);
+                return true;
+            }
+
+            return false;
+        }
+
         static bool TryReadOwnerEntityNames(
             const void* ownerEntity,
             char* outEntityBaseName,
@@ -2461,14 +2647,23 @@ namespace BZROpenShim
             char ogreFilename[32] = {};
 
             // The current best-effort corpora disagree on the inline string offsets for
-            // tagENTITY. Probe both candidate layouts and keep whichever yields sane ASCII.
+            // tagENTITY. Probe both candidate layouts and keep whichever yields a name.
+            static constexpr uintptr_t kBaseNameProbeOffsets[] = { 0xC4, 0x84 };
+            static constexpr uintptr_t kFilenameProbeOffsets[] = { 0xD4, 0x94 };
+
             const auto* entityBytes = reinterpret_cast<const uint8_t*>(ownerEntity);
-            const bool baseRead =
-                TryReadInlineAsciiBuffer(entityBytes + 0xC4, 16, entityBaseName, sizeof(entityBaseName)) ||
-                TryReadInlineAsciiBuffer(entityBytes + 0x84, 16, entityBaseName, sizeof(entityBaseName));
-            const bool fileRead =
-                TryReadInlineAsciiBuffer(entityBytes + 0xD4, 16, ogreFilename, sizeof(ogreFilename)) ||
-                TryReadInlineAsciiBuffer(entityBytes + 0x94, 16, ogreFilename, sizeof(ogreFilename));
+            const bool baseRead = TryReadOwnerEntityNameField(
+                entityBytes,
+                kBaseNameProbeOffsets,
+                _countof(kBaseNameProbeOffsets),
+                entityBaseName,
+                sizeof(entityBaseName));
+            const bool fileRead = TryReadOwnerEntityNameField(
+                entityBytes,
+                kFilenameProbeOffsets,
+                _countof(kFilenameProbeOffsets),
+                ogreFilename,
+                sizeof(ogreFilename));
 
             if (outEntityBaseName && outEntityBaseNameCapacity > 0 && baseRead)
                 strncpy_s(outEntityBaseName, outEntityBaseNameCapacity, entityBaseName, _TRUNCATE);
@@ -3580,6 +3775,10 @@ namespace BZROpenShim
 
             const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(sourceBytes);
             outProbe.ownerEntity = bridgeSnapshot.ownerEntity;
+            outProbe.ownerOgreEntity =
+                LooksLikeOgreObject(bridgeSnapshot.directOgreEntity) ? bridgeSnapshot.directOgreEntity
+                : LooksLikeOgreObject(bridgeSnapshot.ownerOgreEntity) ? bridgeSnapshot.ownerOgreEntity
+                                                                      : nullptr;
             if (bridgeSnapshot.ownerEntityBaseName[0])
                 strncpy_s(outProbe.ownerEntityBaseName, bridgeSnapshot.ownerEntityBaseName, _TRUNCATE);
             if (bridgeSnapshot.ownerOgreFilename[0])
@@ -6041,6 +6240,52 @@ namespace BZROpenShim
             }
         }
 
+        // Pieces the simulation still fragments but the Redux model no longer
+        // renders separately. Each was verified against the shipped .mesh in
+        // Blender, and there is no geometry to draw for any of them -- a proxy
+        // here can only ever be a generic rock or a billboard standing in for
+        // something that is already gone. Suppressing is closer to the legacy
+        // look than inventing debris.
+        //
+        // Keyed on the ODF name, which is the craft identity the engine states
+        // outright, so a faction twin sharing a piece name is unaffected.
+        struct SuppressedChunkPiece
+        {
+            const char* odfName;
+            const char* geomName;
+            const char* reason;
+        };
+
+        static constexpr SuppressedChunkPiece kSuppressedChunkPieces[] = {
+            // abhang models two door panels of 88 verts where bbhang models four
+            // of 44 -- same 176 total, so doors C and D are already inside the
+            // geometry that flies off as abh11dra/abh11drb.
+            { "abhang", "abh11drc", "merged into abh11dra/abh11drb" },
+            { "abhang", "abh11drd", "merged into abh11dra/abh11drb" },
+            // Bone exists but carries 4 verts and zero complete faces.
+            { "abhang", "abh11bli", "degenerate: 4 verts, 0 faces" },
+            // No such bone in abspow.mesh at all (21 geometry bones, none is bul).
+            { "abspow", "asp11bul", "absent from abspow.mesh" },
+            { "bbspow", "asp11bul", "absent from abspow.mesh" },
+        };
+
+        static const SuppressedChunkPiece* FindSuppressedChunkPiece(const char* geomName)
+        {
+            if (!geomName || !*geomName || !g_ActiveFragmentSourceOdfName[0])
+                return nullptr;
+
+            for (const SuppressedChunkPiece& entry : kSuppressedChunkPieces)
+            {
+                if (_stricmp(entry.odfName, g_ActiveFragmentSourceOdfName) == 0 &&
+                    _stricmp(entry.geomName, geomName) == 0)
+                {
+                    return &entry;
+                }
+            }
+
+            return nullptr;
+        }
+
         static void TrackChunkProxyDebugEntry(
             const uint8_t* objectBytes,
             const void* geomRef,
@@ -6051,6 +6296,24 @@ namespace BZROpenShim
         {
             if ((!g_EnableChunkProxyDebug && !g_EnableChunkMeshProxy) || !objectBytes)
                 return;
+
+            // Before a slot is taken: no slot means no mesh and no billboard,
+            // which is the whole point -- an empty payload name still draws a
+            // billboard sprite.
+            if (const SuppressedChunkPiece* suppressed = FindSuppressedChunkPiece(geomName))
+            {
+                static volatile long s_SuppressedPieceLogBudget = 32;
+                if (InterlockedDecrement(&s_SuppressedPieceLogBudget) >= 0)
+                {
+                    LogChunkDiagnostic(
+                        "chunkmesh",
+                        L"[CHUNKMESH] suppressed geom=%hs odf=%hs reason=%hs\n",
+                        geomName,
+                        g_ActiveFragmentSourceOdfName,
+                        suppressed->reason);
+                }
+                return;
+            }
 
             if (g_ChunkProxySlots.size() != g_ChunkProxyCapacity)
                 g_ChunkProxySlots.resize(g_ChunkProxyCapacity);
@@ -17663,6 +17926,71 @@ namespace BZROpenShim
             return exists;
         }
 
+        // Lowercased payload stems per craft directory, built once on demand.
+        static std::unordered_map<std::string, std::vector<std::string>> g_ChunkPayloadDirListingCache;
+
+        static const std::vector<std::string>& GetChunkPayloadDirListing(const std::string& meshBase)
+        {
+            const auto cached = g_ChunkPayloadDirListingCache.find(meshBase);
+            if (cached != g_ChunkPayloadDirListingCache.end())
+                return cached->second;
+
+            std::vector<std::string> stems;
+            for (const std::filesystem::path& resourceRoot : GetChunkPayloadResourceDirectories())
+            {
+                std::error_code error;
+                for (std::filesystem::directory_iterator it(resourceRoot / meshBase, error);
+                     !error && it != std::filesystem::directory_iterator();
+                     it.increment(error))
+                {
+                    const auto& entry = *it;
+                    if (!entry.is_regular_file(error) || error)
+                        continue;
+
+                    std::string extension = entry.path().extension().string();
+                    std::transform(
+                        extension.begin(),
+                        extension.end(),
+                        extension.begin(),
+                        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+                    if (extension != ".mesh")
+                        continue;
+
+                    stems.emplace_back(NormalizeChunkPayloadComponentName(
+                        entry.path().stem().string().c_str()));
+                }
+            }
+
+            return g_ChunkPayloadDirListingCache.emplace(meshBase, std::move(stems)).first->second;
+        }
+
+        // A payload whose name is this geo's with a different three-character
+        // prefix -- same length, same tail -- and only when exactly one file in
+        // the craft's own directory qualifies.
+        static const std::string* FindChunkPayloadByGeomSuffix(
+            const std::string& meshBase,
+            const std::string& geomBase)
+        {
+            const std::vector<std::string>& stems = GetChunkPayloadDirListing(meshBase);
+
+            const std::string* match = nullptr;
+            for (const std::string& stem : stems)
+            {
+                if (stem.size() != geomBase.size())
+                    continue;
+                if (stem.compare(3, std::string::npos, geomBase, 3, std::string::npos) != 0)
+                    continue;
+                if (stem.compare(0, 3, geomBase, 0, 3) == 0)
+                    continue;
+
+                if (match)
+                    return nullptr;
+                match = &stem;
+            }
+
+            return match;
+        }
+
         static bool TryResolveChunkPayloadMeshResourceForMeshAndGeom(
             const char* meshName,
             const char* geomName,
@@ -17709,6 +18037,66 @@ namespace BZROpenShim
             {
                 strncpy_s(outMeshName, outMeshNameCapacity, nestedResourceName.c_str(), _TRUNCATE);
                 return outMeshName[0] != '\0';
+            }
+
+            // Some models name their bones "<craft>_<geo>" (sbsilo ships
+            // sbsilo_sss11bda.mesh and friends), so the export carried the prefix
+            // through. Cheap exact probe before the directory scan below.
+            const std::string prefixedFileName = meshBase + "_" + payloadFileName;
+            std::string prefixedResourceName = meshBase;
+            prefixedResourceName += "/";
+            prefixedResourceName += prefixedFileName;
+
+            auto prefixedCacheIt = g_ChunkPayloadMeshExistsCache.find(prefixedResourceName);
+            bool prefixedExists = false;
+            if (prefixedCacheIt != g_ChunkPayloadMeshExistsCache.end())
+            {
+                prefixedExists = prefixedCacheIt->second;
+            }
+            else
+            {
+                for (const std::filesystem::path& resourceRoot : GetChunkPayloadResourceDirectories())
+                {
+                    const std::filesystem::path payloadPath = resourceRoot / meshBase / prefixedFileName;
+                    std::error_code error;
+                    if (std::filesystem::exists(payloadPath, error) && !error)
+                    {
+                        prefixedExists = true;
+                        break;
+                    }
+                }
+                g_ChunkPayloadMeshExistsCache.emplace(prefixedResourceName, prefixedExists);
+            }
+
+            if (prefixedExists)
+            {
+                strncpy_s(outMeshName, outMeshNameCapacity, prefixedResourceName.c_str(), _TRUNCATE);
+                return outMeshName[0] != '\0';
+            }
+
+            // Two Black Dog buildings carry piece names in their Redux models
+            // that differ from the names the simulation uses, in the first three
+            // characters only: bbhang's sim geos are abh11* while its payloads
+            // are bbh11*, and bbsilo runs the other way (bss11* -> ass11*). Every
+            // other twin matches outright. Without this they resolve nothing and
+            // every Black Dog hangar/silo chunk becomes a placeholder.
+            //
+            // Scoped to the already-resolved craft directory, so it can only ever
+            // pick a piece of the right building with the right material -- it
+            // cannot reach across to the NSDF twin. Requires a unique hit.
+            if (geomBase.size() > 4)
+            {
+                if (const std::string* translated =
+                        FindChunkPayloadByGeomSuffix(meshBase, geomBase))
+                {
+                    std::string translatedResourceName = meshBase;
+                    translatedResourceName += "/";
+                    translatedResourceName += *translated;
+                    translatedResourceName += ".mesh";
+                    strncpy_s(
+                        outMeshName, outMeshNameCapacity, translatedResourceName.c_str(), _TRUNCATE);
+                    return outMeshName[0] != '\0';
+                }
             }
 
             auto flatCacheIt = g_ChunkPayloadMeshExistsCache.find(payloadFileName);
@@ -17816,6 +18204,17 @@ namespace BZROpenShim
                 }
             }
 
+            // The ODF name off the owning GameObject's class is the one piece of
+            // craft identity the engine states outright rather than us inferring
+            // it, so it settles faction twins the geo name cannot: an abhang and
+            // a bbhang share every geo name but never share an ODF. It goes in
+            // ahead of the try-every-twin sweep below and behind the identity
+            // caches above, and like every candidate here it only wins if its
+            // payload file actually exists -- an ODF whose model differs from its
+            // own name (variant ODFs) simply misses and costs nothing.
+            AppendUniqueChunkPayloadCandidate(
+                meshCandidates, NormalizeChunkMeshBaseName(g_ActiveFragmentSourceOdfName));
+
             // Faction twins (abspow/bbspow, abtowe/bbtowe, ...) share their
             // entire piece list, so the single-craft inference above refuses
             // them. The lookup below is gated on the payload file actually
@@ -17828,6 +18227,16 @@ namespace BZROpenShim
                     (explicitGeomName && explicitGeomName[0]) ? explicitGeomName : probe.geomName;
                 AppendAllChunkMeshBasesForGeom(inferGeomName, probe.classId, meshCandidates);
             }
+
+            // Last resort: some pieces were exported into a folder named after
+            // the geo itself rather than the craft (apc11bda/apc11bda.mesh,
+            // apm11bda/apm11bda.mesh) while the craft folder holds unrelated
+            // exporter node names. Tried after every craft-scoped candidate so a
+            // correct craft folder always wins.
+            AppendUniqueChunkPayloadCandidate(
+                meshCandidates, NormalizeChunkPayloadComponentName(explicitGeomName));
+            AppendUniqueChunkPayloadCandidate(
+                meshCandidates, NormalizeChunkPayloadComponentName(probe.geomName));
 
             std::vector<std::string> geomCandidates;
             geomCandidates.reserve(4);
@@ -23230,6 +23639,9 @@ namespace BZROpenShim
         g_EnableChunkMeshProxy =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_MESH_PROXY") ||
               EnvFlagEnabled("BZR_DISABLE_CHUNK_MESH_PROXY"));
+        g_EnablePartialFragmentBoneCollapse =
+            !(EnvFlagEnabled("OPENSHIM_DISABLE_PARTIAL_FRAGMENT_BONE_COLLAPSE") ||
+              EnvFlagEnabled("BZR_DISABLE_PARTIAL_FRAGMENT_BONE_COLLAPSE"));
         g_VehicleSkinningTraceEnabled =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_VEHICLE_SKINNING_DIAGNOSTICS") ||
               EnvFlagEnabled("OPENSHIM_DISABLE_SKINNING_DIAGNOSTICS") ||
@@ -26099,6 +26511,213 @@ namespace BZROpenShim
         }
     }
 
+    static volatile long g_PartialFragmentBoneCollapseLogBudget = 24;
+
+    // The bridge offsets are only sometimes populated on the objects the fragment
+    // hooks see -- a fragment root is not always the same node the renderer keeps
+    // the craft's entity on. Try every route to the entity and take the first that
+    // is actually an Ogre object, rather than trusting a single offset:
+    //   direct/owner  - the bridge hanging off this node, when it has one
+    //   gameobj       - round-trip out to the owning GameObject and back to the
+    //                   node the renderer uses, which is the path the skinning
+    //                   sweep walks and the only one proven to work for every craft
+    static void* ResolveCraftOgreEntity(void* objectPtr, const char*& outVia)
+    {
+        outVia = "none";
+        if (!objectPtr)
+            return nullptr;
+
+        const ChunkBridgeSnapshot snapshot =
+            CaptureChunkBridgeSnapshot(reinterpret_cast<const uint8_t*>(objectPtr));
+        if (LooksLikeOgreObject(snapshot.directOgreEntity))
+        {
+            outVia = "direct";
+            return snapshot.directOgreEntity;
+        }
+        if (LooksLikeOgreObject(snapshot.ownerOgreEntity))
+        {
+            outVia = "owner";
+            return snapshot.ownerOgreEntity;
+        }
+
+        void* gameObject = nullptr;
+        if (!TryGetGameObjectFromObj76(objectPtr, gameObject) || !gameObject)
+            return nullptr;
+
+        void* liveObj76 = nullptr;
+        if (!TryGetGameObjectObj76(gameObject, liveObj76) || !liveObj76 || liveObj76 == objectPtr)
+            return nullptr;
+
+        const ChunkBridgeSnapshot liveSnapshot =
+            CaptureChunkBridgeSnapshot(reinterpret_cast<const uint8_t*>(liveObj76));
+        if (LooksLikeOgreObject(liveSnapshot.directOgreEntity))
+        {
+            outVia = "gameobj";
+            return liveSnapshot.directOgreEntity;
+        }
+        if (LooksLikeOgreObject(liveSnapshot.ownerOgreEntity))
+        {
+            outVia = "gameobj-owner";
+            return liveSnapshot.ownerOgreEntity;
+        }
+
+        return nullptr;
+    }
+
+    // Raw Ogre calls kept in their own frame so a bad entity/skeleton pointer
+    // cannot take the fragment walk down with it. No named C++ objects here:
+    // __try cannot coexist with object unwinding.
+    static bool TryCollapseOwnerBoneSeh(
+        FnOgreEntityGetSkeleton getSkeleton,
+        FnOgreEntityU16Query getNumBones,
+        FnOgreSkeletonGetBoneByIndex getBoneByIndex,
+        FnOgreStringQuery getBoneName,
+        FnOgreBoneSetManuallyControlled setManuallyControlled,
+        FnOgreNodeSetScale setScale,
+        void* ownerEntity,
+        const char* geomName,
+        uint16_t& outBoneIndex,
+        uint16_t& outBoneCount)
+    {
+        __try
+        {
+            void* const skeleton = getSkeleton(ownerEntity);
+            if (!skeleton)
+                return false;
+
+            const uint16_t boneCount = getNumBones(skeleton);
+            outBoneCount = boneCount;
+            if (boneCount == 0 || boneCount > kMaxOwnerSkeletonBones)
+                return false;
+
+            for (uint16_t index = 0; index < boneCount; ++index)
+            {
+                void* const bone = getBoneByIndex(skeleton, index);
+                if (!bone)
+                    continue;
+
+                if (_stricmp(getBoneName(bone).c_str(), geomName) != 0)
+                    continue;
+
+                // Manual control stops the skeleton's animation pass restoring
+                // the bone next frame; the zero scale is what actually removes
+                // the piece's vertices.
+                setManuallyControlled(bone, true);
+                setScale(bone, 0.0f, 0.0f, 0.0f);
+                outBoneIndex = index;
+                return true;
+            }
+
+            return false;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    // Partial fragmentation detaches individual geos while the hull keeps
+    // rendering. The legacy engine unparented each detached geo from the craft's
+    // object tree, so it stopped drawing on the model the same frame its debris
+    // appeared. Redux bakes the whole craft into a single skinned Ogre mesh that
+    // cannot unparent anything, so the piece stays welded to the body until
+    // FullFragmentObject hides the entire mesh — a tank flies its blown-off wing
+    // away while a second copy rides along on the hull.
+    //
+    // Every stock craft mesh skins each geo rigidly to one identically-named bone
+    // (all vertex weights are exactly 1.0), so zeroing that bone removes exactly
+    // the piece that just detached. Ogre propagates scale down the bone tree,
+    // which matches the legacy semantics: unparenting a geo took its children
+    // with it, and those children spawn as their own chunks anyway.
+    static void CollapseOwnerBoneForDetachedPiece(const ChunkCreateSourceTreeProbe& probe)
+    {
+        if (!g_EnablePartialFragmentBoneCollapse || !g_ActivePartialFragment)
+            return;
+        if (!probe.valid || !probe.source.geomName[0])
+            return;
+
+        // probe.ownerEntity is the game-side tagENTITY, not an Ogre object, so it
+        // can never answer getSkeleton. The bridge on the geo node itself is the
+        // next best thing, and the root-scoped entity is the backstop; every
+        // candidate is vetted before any Ogre call is made on it.
+        const char* entityVia = "none";
+        const char* entitySource = "node";
+        void* ownerOgreEntity =
+            ResolveCraftOgreEntity(const_cast<void*>(static_cast<const void*>(probe.source.objectBytes)), entityVia);
+        if (!ownerOgreEntity)
+        {
+            entitySource = "root";
+            ownerOgreEntity = g_ActiveFragmentSourceOgreEntity;
+            entityVia = g_ActiveFragmentSourceOgreEntityVia;
+        }
+        if (!ownerOgreEntity)
+        {
+            if (InterlockedDecrement(&g_PartialFragmentBoneCollapseLogBudget) >= 0)
+            {
+                LogChunkDiagnostic(
+                    "chunkspawn",
+                    L"[CHUNKSPAWN] bone-collapse geo=%hs skipped=no-owner-entity\n",
+                    probe.source.geomName);
+            }
+            return;
+        }
+
+        static FnOgreEntityGetSkeleton getSkeleton =
+            ResolveOgreProc<FnOgreEntityGetSkeleton>("?getSkeleton@Entity@Ogre@@QBEPAVSkeletonInstance@2@XZ");
+        static FnOgreEntityU16Query getNumBones =
+            ResolveOgreProc<FnOgreEntityU16Query>("?getNumBones@Skeleton@Ogre@@UBEGXZ");
+        static FnOgreSkeletonGetBoneByIndex getBoneByIndex =
+            ResolveOgreProc<FnOgreSkeletonGetBoneByIndex>("?getBone@Skeleton@Ogre@@UBEPAVBone@2@G@Z");
+        static FnOgreStringQuery getBoneName =
+            ResolveOgreProc<FnOgreStringQuery>("?getName@Node@Ogre@@QBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
+        static FnOgreBoneSetManuallyControlled setManuallyControlled =
+            ResolveOgreProc<FnOgreBoneSetManuallyControlled>("?setManuallyControlled@Bone@Ogre@@QAEX_N@Z");
+        static FnOgreNodeSetScale setScale =
+            ResolveOgreProc<FnOgreNodeSetScale>("?setScale@Node@Ogre@@UAEXMMM@Z");
+
+        if (!getSkeleton || !getNumBones || !getBoneByIndex || !getBoneName ||
+            !setManuallyControlled || !setScale)
+        {
+            static bool s_ProcFailureLogged = false;
+            if (!s_ProcFailureLogged)
+            {
+                s_ProcFailureLogged = true;
+                LogChunkDiagnostic(
+                    "chunkspawn",
+                    L"[CHUNKSPAWN] bone-collapse unavailable; skeleton procs unresolved\n");
+            }
+            return;
+        }
+
+        uint16_t boneIndex = 0;
+        uint16_t boneCount = 0;
+        const bool collapsed = TryCollapseOwnerBoneSeh(
+            getSkeleton,
+            getNumBones,
+            getBoneByIndex,
+            getBoneName,
+            setManuallyControlled,
+            setScale,
+            ownerOgreEntity,
+            probe.source.geomName,
+            boneIndex,
+            boneCount);
+
+        if (InterlockedDecrement(&g_PartialFragmentBoneCollapseLogBudget) >= 0)
+        {
+            LogChunkDiagnostic(
+                "chunkspawn",
+                L"[CHUNKSPAWN] bone-collapse geo=%hs entity=0x%08X from=%hs via=%hs bones=%u %hs=%u\n",
+                probe.source.geomName,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ownerOgreEntity)),
+                entitySource,
+                entityVia,
+                static_cast<uint32_t>(boneCount),
+                collapsed ? "boneIndex" : "unmatched",
+                static_cast<uint32_t>(boneIndex));
+        }
+    }
+
     void* __fastcall ChunkEffectCreateChunkHook(void* thisPtr,
                                                 void* /*edx*/,
                                                 void* objectPtr,
@@ -26143,6 +26762,10 @@ namespace BZROpenShim
 
         if (boundObjectBytes)
             StoreChunkResolvedBinding(boundObjectBytes, sourceTreeProbe);
+
+        // Now that the debris exists, stop the intact hull from drawing the piece
+        // that just left it. No-op unless PartialFragmentObject is on the stack.
+        CollapseOwnerBoneForDetachedPiece(sourceTreeProbe);
 
         LogChunkCreateLifecycle(
             L"CreateChunk",
@@ -26327,6 +26950,9 @@ namespace BZROpenShim
     static void BeginActiveFragmentSourceContext(void* rootObjectPtr)
     {
         g_ActiveFragmentSourceMeshName[0] = '\0';
+        g_ActiveFragmentSourceOgreEntity = nullptr;
+        g_ActiveFragmentSourceOgreEntityVia = "none";
+        g_ActiveFragmentSourceOdfName[0] = '\0';
         if (!rootObjectPtr)
             return;
 
@@ -26340,15 +26966,32 @@ namespace BZROpenShim
                 _TRUNCATE);
         }
 
+        g_ActiveFragmentSourceOgreEntity =
+            ResolveCraftOgreEntity(rootObjectPtr, g_ActiveFragmentSourceOgreEntityVia);
+
+        // Fragment nodes are render-tree nodes; the ODF lives on the GameObject
+        // that owns them, one hop out through the obj76 back-link.
+        void* rootGameObject = nullptr;
+        if (TryGetGameObjectFromObj76(rootObjectPtr, rootGameObject) && rootGameObject)
+        {
+            TryGetCraftOdfName(
+                rootGameObject,
+                g_ActiveFragmentSourceOdfName,
+                sizeof(g_ActiveFragmentSourceOdfName));
+        }
+
         if (AcquireChunkFragmentWalkLogSlot())
         {
             LogChunkDiagnostic(
                 "chunkspawn",
-                L"[CHUNKSPAWN] frag-source obj=0x%08X mesh=%hs base=%hs file=%hs\n",
+                L"[CHUNKSPAWN] frag-source obj=0x%08X mesh=%hs odf=%hs base=%hs file=%hs ogreEntity=0x%08X via=%hs\n",
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rootObjectPtr)),
                 g_ActiveFragmentSourceMeshName[0] ? g_ActiveFragmentSourceMeshName : "<none>",
+                g_ActiveFragmentSourceOdfName[0] ? g_ActiveFragmentSourceOdfName : "<none>",
                 rootSnapshot.ownerEntityBaseName[0] ? rootSnapshot.ownerEntityBaseName : "<none>",
-                rootSnapshot.ownerOgreFilename[0] ? rootSnapshot.ownerOgreFilename : "<none>");
+                rootSnapshot.ownerOgreFilename[0] ? rootSnapshot.ownerOgreFilename : "<none>",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_ActiveFragmentSourceOgreEntity)),
+                g_ActiveFragmentSourceOgreEntityVia);
         }
     }
 
@@ -26370,13 +27013,18 @@ namespace BZROpenShim
             LogChunkFragmentWalkTree(L"PartialFragmentObject", thisPtr, objectPtr, preserveFlag);
             TryReadChunkEffectCount(reinterpret_cast<const uint8_t*>(thisPtr), countBefore);
             BeginActiveFragmentSourceContext(objectPtr);
+            g_ActivePartialFragment = true;
         }
         ++g_ChunkFragmentHookDepth;
         g_BzrFn_ChunkEffectPartialFragment(thisPtr, objectPtr, velocity, preserveFlag);
         --g_ChunkFragmentHookDepth;
         if (outermost)
         {
+            g_ActivePartialFragment = false;
             g_ActiveFragmentSourceMeshName[0] = '\0';
+            g_ActiveFragmentSourceOgreEntity = nullptr;
+            g_ActiveFragmentSourceOgreEntityVia = "none";
+            g_ActiveFragmentSourceOdfName[0] = '\0';
             uint32_t countAfter = countBefore;
             TryReadChunkEffectCount(reinterpret_cast<const uint8_t*>(thisPtr), countAfter);
             if (AcquireChunkFragmentWalkLogSlot())
@@ -26401,7 +27049,11 @@ namespace BZROpenShim
         void* movable,
         bool visible)
     {
-        if (!setVisible || !movable)
+        // Same trap as the bone collapse: these bridge slots sometimes hold text
+        // rather than a movable, and setVisible on text is a virtual call into
+        // string bytes. Vet before dispatching -- SEH turns that into a caught
+        // fault, not a safe no-op.
+        if (!setVisible || !LooksLikeOgreObject(movable))
             return false;
 
         __try
@@ -26428,11 +27080,16 @@ namespace BZROpenShim
         const ChunkBridgeSnapshot snapshot =
             CaptureChunkBridgeSnapshot(reinterpret_cast<const uint8_t*>(objectPtr));
 
+        // When this node's own bridge slots are bogus the resolver still reaches
+        // the craft's entity through the owning GameObject, so full fragmentation
+        // stops depending on the same offset the collapse could not trust either.
+        const char* resolvedVia = "none";
+        void* const resolvedEntity = ResolveCraftOgreEntity(objectPtr, resolvedVia);
+
         uint32_t hiddenCount = 0;
         void* const candidates[] = {
-            snapshot.directOgreEntity,
+            resolvedEntity,
             snapshot.directOgreLight,
-            (snapshot.ownerOgreEntity != snapshot.directOgreEntity) ? snapshot.ownerOgreEntity : nullptr,
             (snapshot.ownerOgreLight != snapshot.directOgreLight) ? snapshot.ownerOgreLight : nullptr,
         };
         for (void* candidate : candidates)
@@ -26445,8 +27102,10 @@ namespace BZROpenShim
         {
             LogChunkDiagnostic(
                 "chunkspawn",
-                L"[CHUNKSPAWN] hide-source obj=0x%08X directEntity=0x%08X ownerEntity=0x%08X hidden=%u\n",
+                L"[CHUNKSPAWN] hide-source obj=0x%08X entity=0x%08X via=%hs directEntity=0x%08X ownerEntity=0x%08X hidden=%u\n",
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectPtr)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(resolvedEntity)),
+                resolvedVia,
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(snapshot.directOgreEntity)),
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(snapshot.ownerOgreEntity)),
                 hiddenCount);
@@ -26477,6 +27136,9 @@ namespace BZROpenShim
         if (outermost)
         {
             g_ActiveFragmentSourceMeshName[0] = '\0';
+            g_ActiveFragmentSourceOgreEntity = nullptr;
+            g_ActiveFragmentSourceOgreEntityVia = "none";
+            g_ActiveFragmentSourceOdfName[0] = '\0';
             uint32_t countAfter = countBefore;
             TryReadChunkEffectCount(reinterpret_cast<const uint8_t*>(thisPtr), countAfter);
             if (AcquireChunkFragmentWalkLogSlot())
