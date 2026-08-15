@@ -79,6 +79,7 @@ scripts/*
 !scripts/New-TerrainHdSmokeTiles.ps1
 !scripts/terrain_hd_tiles.example.json
 !scripts/audit_chunk_payload_coverage.py
+!scripts/match_legacy_chunk_pieces.py
 docs/*
 !docs/terrain-render-path.md
 !docs/bz15-multiplayer-ui-port.md
