@@ -7238,6 +7238,21 @@ namespace BZROpenShim
             return fallback ? fallback : "unknown";
         }
 
+        // Last mission name seen in the engine's queued-load name buffer.
+        //
+        // That buffer is shared state: the shell fills it with the current
+        // mission, and QueueAutoSaveLoadPath blanks it so the load screen uses
+        // the explicit autosave path instead of re-deriving one from the name.
+        // Blanking it destroys the only mission identity the career stats had,
+        // so keep a copy of it here before it goes.
+        static char g_LastKnownQueuedMissionName[kQueuedLoadNameBufferLen + 1] = {};
+
+        static void RememberQueuedMissionName(const char* name)
+        {
+            if (name && name[0])
+                strncpy_s(g_LastKnownQueuedMissionName, name, _TRUNCATE);
+        }
+
         static std::string ResolveCareerStatsMissionKey()
         {
             const auto normalizeCandidate = [](const std::string& candidate) -> std::string
@@ -7258,9 +7273,25 @@ namespace BZROpenShim
             const std::string queuedName =
                 normalizeCandidate(ReadInlineAsciiBuffer(kQueuedLoadNameBufferAddr, kQueuedLoadNameBufferLen));
             if (!queuedName.empty())
+            {
+                RememberQueuedMissionName(queuedName.c_str());
                 return queuedName;
+            }
 
-            return normalizeCandidate(ReadInlineAsciiBuffer(kQueuedLoadPathBufferAddr, MAX_PATH));
+            if (g_LastKnownQueuedMissionName[0])
+                return normalizeCandidate(g_LastKnownQueuedMissionName);
+
+            // Falling back to the queued path only works while it names a
+            // mission. After an autosave load it names the save file, whose stem
+            // is "auto" -- a single bogus key every autosave-resumed session
+            // would file its stats under. It is not a mission, so refuse it
+            // rather than inventing one.
+            const std::string queuedPath =
+                normalizeCandidate(ReadInlineAsciiBuffer(kQueuedLoadPathBufferAddr, MAX_PATH));
+            if (_stricmp(queuedPath.c_str(), "auto") == 0)
+                return {};
+
+            return queuedPath;
         }
 
         static std::string ResolveCareerStatsProfileKey()
@@ -22939,6 +22970,10 @@ namespace BZROpenShim
             if (!queuedPath || !queuedName)
                 return false;
 
+            // Blanking the name is deliberate -- it makes the load screen use the
+            // explicit path below rather than re-deriving one -- but it is also
+            // the moment the mission identity is lost, so keep a copy first.
+            RememberQueuedMissionName(queuedName);
             queuedName[0] = '\0';
             return strncpy_s(queuedPath, MAX_PATH, autoSavePath, _TRUNCATE) == 0;
         }
@@ -23477,6 +23512,7 @@ namespace BZROpenShim
 		g_TugCargoPostLoadLogBudget = 16;
 		g_ApcAlliedTargetDeployFixInstalled = false;
         g_AttackRevealTraceBudget = kAttackRevealTraceBudgetDefault;
+        g_LastKnownQueuedMissionName[0] = '\0';
         g_HudSpriteRectTableBase = nullptr;
         g_HudSpriteRectTableDiscoveryAttempted = false;
         g_HudSpriteRectTableDiscoveryLastTick = 0;
