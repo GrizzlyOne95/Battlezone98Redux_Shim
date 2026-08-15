@@ -38,6 +38,8 @@ namespace BZROpenShim
         constexpr uintptr_t kUiCurrentScreenAddr = 0x00918320;
         constexpr uintptr_t kUiWrapperActiveAddr = 0x00918324;
         constexpr uintptr_t kUiCurrentScreenTypeAddr = 0x00918328;
+        constexpr uintptr_t kQueuedLoadNameBufferAddr = 0x00915540;
+        constexpr size_t kQueuedLoadNameBufferLen = 16;
 
         // Existing patch-catalog slot for LegacyWorld::updateRenderQueue.
         // Installed after RunPatcher() so this chains either stock BZR or the
@@ -92,6 +94,39 @@ namespace BZROpenShim
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 value = 0;
+                return false;
+            }
+        }
+
+        // The engine keeps the current mission's short name here; it is the same
+        // buffer the shell fills when a mission is queued for load.
+        bool SafeReadMissionName(char (&value)[kQueuedLoadNameBufferLen + 1]) noexcept
+        {
+            value[0] = '\0';
+            __try
+            {
+                const auto* text =
+                    reinterpret_cast<const volatile char*>(kQueuedLoadNameBufferAddr);
+                for (size_t index = 0; index < kQueuedLoadNameBufferLen; ++index)
+                {
+                    const char ch = text[index];
+                    if (ch == '\0')
+                        break;
+                    // Mission names are identifiers; anything else means the
+                    // buffer holds something that is not a name right now.
+                    if (ch < 0x20 || ch > 0x7E)
+                    {
+                        value[0] = '\0';
+                        return false;
+                    }
+                    value[index] = ch;
+                    value[index + 1] = '\0';
+                }
+                return value[0] != '\0';
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                value[0] = '\0';
                 return false;
             }
         }
@@ -440,9 +475,21 @@ namespace BZROpenShim
 
         void WriteAutoSaveLabel()
         {
+            // This file is the text drawn on the injected AutoSave load button,
+            // so it is for the player, not for parsing. Naming the mission is
+            // the difference between "AutoSave" and knowing which one it is --
+            // parity with the label EXU writes, without depending on EXU.
+            char missionName[kQueuedLoadNameBufferLen + 1] = {};
+            const bool haveMission = SafeReadMissionName(missionName);
+
             std::ofstream label(g_autoSaveLabelPath, std::ios::binary | std::ios::trunc);
             if (label.is_open())
-                label << "AutoSave";
+            {
+                if (haveMission)
+                    label << missionName << " - AutoSave";
+                else
+                    label << "AutoSave";
+            }
             else
                 LogShimA(
                     LogLevel::Warn,
