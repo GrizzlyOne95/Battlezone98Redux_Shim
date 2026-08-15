@@ -122,6 +122,12 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help="Disable custom-normal import for meshes that crash Blender on import",
     )
     parser.add_argument(
+        "--piece-aliases",
+        default=str(Path(__file__).resolve().parent / "chunk_payload_piece_aliases.txt"),
+        help="Bone-name to simulation-piece-name overrides (see "
+             "scripts/match_legacy_chunk_pieces.py); pass an empty string to disable",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Print extra progress logs",
@@ -605,6 +611,53 @@ def _split_objects_into_connected_face_islands(
     return export_map
 
 
+def _load_piece_aliases(path: Optional[Path], mesh_basename: str) -> Dict[str, str]:
+    """Bone-name -> simulation-piece-name overrides for one craft.
+
+    Some models bind their geometry to exporter node names (hbhydr1_polymsh7)
+    rather than the piece names the simulation fragments (hhy11bdg), and nothing
+    in the model itself records the correspondence. The table is recovered
+    offline by scripts/match_legacy_chunk_pieces.py, which matches each Redux
+    piece against the legacy .geo of the same name.
+    """
+    if path is None or not path.exists():
+        return {}
+
+    aliases: Dict[str, str] = {}
+    craft = mesh_basename.lower()
+    for line in path.read_text(encoding="ascii", errors="replace").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        fields = line.split("|")
+        if len(fields) != 3:
+            continue
+        if fields[0].strip().lower() != craft:
+            continue
+        aliases[fields[1].strip().lower()] = fields[2].strip()
+    return aliases
+
+
+def _apply_piece_aliases(
+    export_map: Dict[str, List[bpy.types.Object]],
+    aliases: Dict[str, str],
+    verbose: bool,
+) -> None:
+    for bone_name, piece_name in aliases.items():
+        match = next((key for key in export_map if key.lower() == bone_name), None)
+        if match is None:
+            continue
+        if any(key.lower() == piece_name.lower() for key in export_map):
+            print(
+                f"[WARNING] alias {bone_name} -> {piece_name} skipped; "
+                "the target name is already exported"
+            )
+            continue
+        export_map[piece_name] = export_map.pop(match)
+        if verbose:
+            print(f"Aliased piece {match} -> {piece_name}")
+
+
 def _rename_pieces_onto_empty_base_bones(
     export_map: Dict[str, List[bpy.types.Object]],
     allowed_group_names: Sequence[str],
@@ -649,6 +702,7 @@ def _split_objects_into_chunk_payloads(
     include_pattern: re.Pattern[str],
     exclude_pattern: re.Pattern[str],
     rebase_to_pivot: bool,
+    piece_aliases: Dict[str, str],
     verbose: bool,
 ) -> Dict[str, List[bpy.types.Object]]:
     export_map: Dict[str, List[bpy.types.Object]] = defaultdict(list)
@@ -687,6 +741,11 @@ def _split_objects_into_chunk_payloads(
                     f"pivot={tuple(round(v, 6) for v in pivot_local)}"
                 )
 
+        # Explicit aliases first: they name a specific bone, so they must get to
+        # claim it before the generic duplicate-bone rename below rewrites that
+        # bone's key out from under them (aprock1 -> aprock would otherwise beat
+        # the aprock1 -> apr11bda alias).
+        _apply_piece_aliases(export_map, piece_aliases, verbose)
         _rename_pieces_onto_empty_base_bones(
             export_map, allowed_group_names, verbose
         )
@@ -786,6 +845,7 @@ def _process_single_mesh(
     export_tangents: bool,
     import_normals: bool,
     staging_root: Path,
+    piece_aliases_path: Optional[Path],
     verbose: bool,
 ) -> List[Path]:
     _clear_scene()
@@ -823,6 +883,7 @@ def _process_single_mesh(
         include_pattern=include_pattern,
         exclude_pattern=exclude_pattern,
         rebase_to_pivot=rebase_to_pivot,
+        piece_aliases=_load_piece_aliases(piece_aliases_path, mesh_path.stem),
         verbose=verbose,
     )
     if not export_map:
@@ -853,6 +914,7 @@ def main(argv: Sequence[str]) -> int:
     include_pattern = re.compile(args.include_regex, re.IGNORECASE)
     exclude_pattern = re.compile(args.exclude_regex, re.IGNORECASE)
     xml_converter = args.xml_converter or None
+    piece_aliases_path = Path(args.piece_aliases).expanduser() if args.piece_aliases else None
     input_meshes = _collect_input_meshes(mesh_path, mesh_root)
 
     ogre_backend, OgreImport, OgreExport = _bootstrap_toolkit(repo_root)
@@ -880,6 +942,7 @@ def main(argv: Sequence[str]) -> int:
                 export_tangents=not args.skip_tangents,
                 import_normals=not args.skip_import_normals,
                 staging_root=staging_root,
+                piece_aliases_path=piece_aliases_path,
                 verbose=args.verbose,
             )
             all_exported_paths.extend(exported_paths)
