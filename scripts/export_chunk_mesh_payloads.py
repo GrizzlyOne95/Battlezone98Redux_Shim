@@ -605,6 +605,43 @@ def _split_objects_into_connected_face_islands(
     return export_map
 
 
+def _rename_pieces_onto_empty_base_bones(
+    export_map: Dict[str, List[bpy.types.Object]],
+    allowed_group_names: Sequence[str],
+    verbose: bool,
+) -> None:
+    """Re-key geometry that landed on a duplicate-suffixed bone.
+
+    Some models carry two parallel bone sets: the names the simulation
+    fragments by, and digit-suffixed duplicates. abhang is the clearest case --
+    it has both abh11bla and abh11bla0, and every piece of its geometry is
+    bound to the suffixed set, so the export named all nine payloads
+    abh11bla0..abh11lot9 and every NSDF hangar chunk resolved to nothing.
+
+    The rename is driven by which bone actually holds geometry, never by name
+    alone: it fires only when the base name produced no piece and exactly one
+    digit-suffixed sibling did. That distinction matters, because a trailing
+    digit is usually meaningful -- Bip01_Spine/Bip01_Spine1 on the pilot rigs
+    and polymsh/polymsh1..13 on the Hadean buildings are genuinely separate
+    bones, and all of them carry their own geometry, so none of them match.
+    """
+    for base_name in allowed_group_names:
+        if base_name in export_map:
+            continue
+
+        pattern = re.compile(rf"^{re.escape(base_name)}\d+$")
+        candidates = [name for name in export_map if pattern.match(name)]
+        if len(candidates) != 1:
+            continue
+
+        export_map[base_name] = export_map.pop(candidates[0])
+        if verbose:
+            print(
+                f"Renamed piece {candidates[0]} -> {base_name} "
+                "(base bone carries no geometry)"
+            )
+
+
 def _split_objects_into_chunk_payloads(
     mesh_objects: Sequence[bpy.types.Object],
     armature: Optional[bpy.types.Object],
@@ -649,6 +686,10 @@ def _split_objects_into_chunk_payloads(
                     f"Created piece {piece_obj.name} from {mesh_obj.name} "
                     f"pivot={tuple(round(v, 6) for v in pivot_local)}"
                 )
+
+        _rename_pieces_onto_empty_base_bones(
+            export_map, allowed_group_names, verbose
+        )
 
     if export_map:
         return export_map
