@@ -17964,6 +17964,49 @@ namespace BZROpenShim
             return g_ChunkPayloadDirListingCache.emplace(meshBase, std::move(stems)).first->second;
         }
 
+        // A payload whose name matches this geo once punctuation is ignored.
+        //
+        // ablpad's Redux model names its first piece bone "alp11_bda" where the
+        // simulation fragments "alp11bda" -- a stray underscore, and the only
+        // instance of its kind across every stock model (ablpad and bblpad share
+        // the bone). Scoped to the craft's own directory and requiring a unique
+        // hit, exactly like the prefix translation below, so it cannot reach
+        // across to another building or pick between ambiguous candidates.
+        static const std::string* FindChunkPayloadByRelaxedGeomName(
+            const std::string& meshBase,
+            const std::string& geomBase)
+        {
+            const auto strip = [](const std::string& value) {
+                std::string out;
+                out.reserve(value.size());
+                for (const char ch : value)
+                {
+                    if (std::isalnum(static_cast<unsigned char>(ch)))
+                        out.push_back(ch);
+                }
+                return out;
+            };
+
+            // The punctuation is on the payload side, not in the name the
+            // simulation asks for, so do not gate on geomBase being dirty.
+            const std::string wanted = strip(geomBase);
+            if (wanted.empty())
+                return nullptr;
+
+            const std::string* match = nullptr;
+            for (const std::string& stem : GetChunkPayloadDirListing(meshBase))
+            {
+                if (stem == geomBase || strip(stem) != wanted)
+                    continue;
+
+                if (match)
+                    return nullptr;
+                match = &stem;
+            }
+
+            return match;
+        }
+
         // A payload whose name is this geo's with a different three-character
         // prefix -- same length, same tail -- and only when exactly one file in
         // the craft's own directory qualifies.
@@ -18071,6 +18114,21 @@ namespace BZROpenShim
             if (prefixedExists)
             {
                 strncpy_s(outMeshName, outMeshNameCapacity, prefixedResourceName.c_str(), _TRUNCATE);
+                return outMeshName[0] != '\0';
+            }
+
+            // Punctuation-insensitive match inside the craft's own directory,
+            // for models whose bone names carry a stray separator (ablpad's
+            // alp11_bda against the simulation's alp11bda).
+            if (const std::string* relaxed =
+                    FindChunkPayloadByRelaxedGeomName(meshBase, geomBase))
+            {
+                std::string relaxedResourceName = meshBase;
+                relaxedResourceName += "/";
+                relaxedResourceName += *relaxed;
+                relaxedResourceName += ".mesh";
+                strncpy_s(
+                    outMeshName, outMeshNameCapacity, relaxedResourceName.c_str(), _TRUNCATE);
                 return outMeshName[0] != '\0';
             }
 

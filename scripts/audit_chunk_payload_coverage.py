@@ -83,6 +83,18 @@ def resolve(
     if f"{craft}_{geo}" in stems:
         return "prefixed"
 
+    # Punctuation-insensitive match, scoped to the craft directory and requiring
+    # a unique hit -- ablpad's alp11_bda bone against the sim's alp11bda.
+    wanted = re.sub(r"[^a-z0-9]", "", geo)
+    if wanted:
+        relaxed = [
+            stem
+            for stem in stems
+            if stem != geo and re.sub(r"[^a-z0-9]", "", stem) == wanted
+        ]
+        if len(relaxed) == 1:
+            return f"relaxed->{relaxed[0]}"
+
     # Suffix translation, scoped to the craft directory and requiring a unique
     # hit -- the bbhang abh11* -> bbh11* and bbsilo bss11* -> ass11* cases.
     if len(geo) > 4:
@@ -165,7 +177,7 @@ def main(argv: Sequence[str]) -> int:
                 reachable[craft].add(geo)
             elif rule == "prefixed":
                 reachable[craft].add(f"{craft}_{geo}")
-            elif rule and rule.startswith("suffix->"):
+            elif rule and ("->" in rule):
                 reachable[craft].add(rule.split("->")[1])
 
         orphans: Dict[str, List[str]] = defaultdict(list)
