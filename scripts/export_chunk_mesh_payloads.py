@@ -21,7 +21,10 @@ import bmesh
 import importlib
 import os
 import re
+import shutil
+import struct
 import sys
+import tempfile
 import traceback
 from collections import defaultdict
 from pathlib import Path
@@ -29,6 +32,11 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import bpy
 from mathutils import Matrix, Vector
+
+
+# Face attribute used to remember which source polygon each extracted face came
+# from, so the piece can recover its original corner normals after extraction.
+SOURCE_FACE_ATTRIBUTE = "openshim_src_face"
 
 
 class ScriptOperator:
@@ -192,6 +200,79 @@ def _find_imported_objects(before_names: set[str]) -> Tuple[List[bpy.types.Objec
     return imported_meshes, imported_armature
 
 
+def _read_mesh_skeleton_link(mesh_path: Path) -> Optional[str]:
+    """Return the skeleton filename a .mesh declares, if any.
+
+    Only enough of the Ogre chunk format to walk M_HEADER -> M_MESH ->
+    M_MESH_SKELETON_LINK; anything unexpected yields None and the caller falls
+    back to whatever the importer does on its own.
+    """
+    try:
+        data = mesh_path.read_bytes()
+    except OSError:
+        return None
+
+    def chunks(offset: int, end: int):
+        while offset + 6 <= end:
+            chunk_id, length = struct.unpack_from("<HI", data, offset)
+            if length < 6 or offset + length > end:
+                return
+            yield chunk_id, offset + 6, offset + length
+            offset += length
+
+    try:
+        if struct.unpack_from("<H", data, 0)[0] != 0x1000:
+            return None
+        offset = data.index(b"\n", 2) + 1
+        for chunk_id, start, stop in chunks(offset, len(data)):
+            if chunk_id != 0x3000:
+                continue
+            # M_MESH opens with a bool skeletallyAnimated.
+            for sub_id, sub_start, _sub_stop in chunks(start + 1, stop):
+                if sub_id == 0x6000:
+                    end = data.index(b"\n", sub_start)
+                    return data[sub_start:end].decode("latin-1").strip()
+    except (struct.error, ValueError):
+        return None
+    return None
+
+
+def _stage_mesh_with_skeleton(mesh_path: Path, staging_root: Path) -> Path:
+    """Place a mesh beside the skeleton it links, so the importer can find it.
+
+    Redux ships two faction-twin models under TRO/ whose skeleton link names a
+    file that lives one directory up (TRO/bbstor.mesh -> abstor.skeleton). The
+    importer only looks next to the mesh, finds no armature, and the caller
+    silently degrades to island splitting -- which is where the mis-named
+    bbstor_part01..03 payloads came from. Staging both files together keeps the
+    per-bone path working and matches what Ogre does at runtime, where the
+    skeleton is resolved by name across the whole resource group.
+    """
+    link = _read_mesh_skeleton_link(mesh_path)
+    if not link or (mesh_path.parent / link).exists():
+        return mesh_path
+
+    for candidate_dir in mesh_path.parents:
+        candidate = candidate_dir / link
+        if candidate.exists():
+            staged_dir = staging_root / mesh_path.stem
+            staged_dir.mkdir(parents=True, exist_ok=True)
+            staged_mesh = staged_dir / mesh_path.name
+            shutil.copyfile(mesh_path, staged_mesh)
+            shutil.copyfile(candidate, staged_dir / link)
+            print(
+                f"[INFO] {mesh_path.name} links '{link}', which is not beside it; "
+                f"staged with {candidate}"
+            )
+            return staged_mesh
+
+    print(
+        f"[WARNING] {mesh_path.name} links '{link}' but it was not found in any "
+        "parent directory; per-bone extraction will not be possible"
+    )
+    return mesh_path
+
+
 def _collect_input_meshes(mesh_path: Optional[Path], mesh_root: Optional[Path]) -> List[Path]:
     if mesh_path is not None:
         if not mesh_path.exists():
@@ -325,6 +406,13 @@ def _filter_piece_object_to_vertex_indices(
     try:
         bm.from_mesh(piece_obj.data)
         bm.verts.ensure_lookup_table()
+        bm.faces.ensure_lookup_table()
+        # Tag each face with the source polygon it came from. The delete below
+        # renumbers everything, and this tag is what lets the piece pull its
+        # original corner normals back out afterwards.
+        face_layer = bm.faces.layers.int.new(SOURCE_FACE_ATTRIBUTE)
+        for face in bm.faces:
+            face[face_layer] = face.index
         delete_verts = [vert for vert in bm.verts if vert.index not in keep_vertex_indices]
         if delete_verts:
             bmesh.ops.delete(bm, geom=delete_verts, context="VERTS")
@@ -358,19 +446,70 @@ def _extract_piece_object(
     _strip_vertex_group_data(temp_obj, source_obj)
     _strip_armature_dependencies(temp_obj)
     _rebase_piece_to_pivot(temp_obj, pivot_local, rebase_to_pivot)
-    _reset_piece_custom_normals(temp_obj)
+    _apply_source_custom_normals(temp_obj, source_obj)
     return temp_obj
 
 
-def _reset_piece_custom_normals(piece_obj: bpy.types.Object) -> None:
-    if len(piece_obj.data.vertices) == 0:
+def _apply_source_custom_normals(
+    piece_obj: bpy.types.Object,
+    source_obj: bpy.types.Object,
+) -> None:
+    """Carry the source's corner normals onto the extracted piece.
+
+    Handing Blender zero vectors here instead -- "recompute from topology" --
+    silently discards the authored normals. On 4.5 the rebuilt normals come
+    back smoothed, which shades a blocky building chunk like a balloon and
+    matches none of the source values.
+
+    The importer welds coincident vertices, so a vertex on a hard edge carries
+    several different corner normals and any per-vertex reduction loses them.
+    Copying per loop, via the source polygon each face was tagged with, is what
+    keeps the hard edges hard.
+    """
+    mesh = piece_obj.data
+    if not mesh.polygons:
         return
 
-    # Zero vectors tell Blender to rebuild normals from the current topology.
-    piece_obj.data.normals_split_custom_set_from_vertices(
-        [(0.0, 0.0, 0.0)] * len(piece_obj.data.vertices)
-    )
-    piece_obj.data.update()
+    source_mesh = source_obj.data
+    corner_normals = getattr(source_mesh, "corner_normals", None)
+    attribute = mesh.attributes.get(SOURCE_FACE_ATTRIBUTE)
+
+    normals: Optional[List[Tuple[float, float, float]]] = None
+    if (
+        attribute is not None
+        and corner_normals is not None
+        and len(corner_normals) == len(source_mesh.loops)
+    ):
+        normals = [(0.0, 0.0, 0.0)] * len(mesh.loops)
+        for polygon in mesh.polygons:
+            source_index = attribute.data[polygon.index].value
+            if not 0 <= source_index < len(source_mesh.polygons):
+                normals = None
+                break
+            source_polygon = source_mesh.polygons[source_index]
+            if source_polygon.loop_total != polygon.loop_total:
+                normals = None
+                break
+            for offset in range(polygon.loop_total):
+                normals[polygon.loop_start + offset] = tuple(
+                    corner_normals[source_polygon.loop_start + offset].vector
+                )
+
+    if normals is None:
+        print(
+            f"[WARNING] {piece_obj.name}: could not map source corner normals; "
+            "falling back to topology-derived normals"
+        )
+        mesh.normals_split_custom_set_from_vertices(
+            [(0.0, 0.0, 0.0)] * len(mesh.vertices)
+        )
+    else:
+        mesh.normals_split_custom_set(normals)
+
+    if attribute is not None:
+        # Bookkeeping only -- never let it reach the exported payload.
+        mesh.attributes.remove(mesh.attributes[SOURCE_FACE_ATTRIBUTE])
+    mesh.update()
 
 
 def _extract_piece_object_by_group(
@@ -424,6 +563,15 @@ def _split_objects_into_connected_face_islands(
     verbose: bool,
 ) -> Dict[str, List[bpy.types.Object]]:
     export_map: Dict[str, List[bpy.types.Object]] = defaultdict(list)
+
+    # Islands are named <mesh>_partNN, which matches no piece name the
+    # simulation ever asks for, so payloads produced here resolve to nothing at
+    # runtime. It is a last resort, not a normal outcome -- say so loudly.
+    print(
+        f"[WARNING] {mesh_basename}: no armature or vertex groups found; falling "
+        "back to connected-island splitting. The resulting <mesh>_partNN names "
+        "will not match the simulation's piece names."
+    )
 
     for mesh_obj in mesh_objects:
         if mesh_obj.type != "MESH" or len(mesh_obj.data.polygons) == 0:
@@ -596,16 +744,19 @@ def _process_single_mesh(
     rebase_to_pivot: bool,
     export_tangents: bool,
     import_normals: bool,
+    staging_root: Path,
     verbose: bool,
 ) -> List[Path]:
     _clear_scene()
     operator = ScriptOperator()
 
+    import_path = _stage_mesh_with_skeleton(mesh_path, staging_root)
+
     before_names = {obj.name for obj in bpy.data.objects}
     import_result = ogre_backend.import_mesh(
         operator,
         bpy.context,
-        str(mesh_path),
+        str(import_path),
         legacy_handler=OgreImport.load,
         xml_converter=xml_converter,
         keep_xml=keep_xml,
@@ -667,27 +818,30 @@ def main(argv: Sequence[str]) -> int:
 
     all_exported_paths: List[Path] = []
     multi_input = len(input_meshes) > 1
-    for current_mesh_path in input_meshes:
-        current_output_dir = output_dir / current_mesh_path.stem if multi_input else output_dir
-        print(f"Processing {current_mesh_path}")
-        exported_paths = _process_single_mesh(
-            ogre_backend=ogre_backend,
-            OgreImport=OgreImport,
-            OgreExport=OgreExport,
-            mesh_path=current_mesh_path,
-            output_dir=current_output_dir,
-            include_pattern=include_pattern,
-            exclude_pattern=exclude_pattern,
-            xml_converter=xml_converter,
-            keep_xml=args.keep_xml,
-            preserve_case=args.preserve_case,
-            export_materials=args.export_materials,
-            rebase_to_pivot=not args.skip_pivot_rebase,
-            export_tangents=not args.skip_tangents,
-            import_normals=not args.skip_import_normals,
-            verbose=args.verbose,
-        )
-        all_exported_paths.extend(exported_paths)
+    with tempfile.TemporaryDirectory(prefix="openshim_chunk_stage_") as staging_text:
+        staging_root = Path(staging_text)
+        for current_mesh_path in input_meshes:
+            current_output_dir = output_dir / current_mesh_path.stem if multi_input else output_dir
+            print(f"Processing {current_mesh_path}")
+            exported_paths = _process_single_mesh(
+                ogre_backend=ogre_backend,
+                OgreImport=OgreImport,
+                OgreExport=OgreExport,
+                mesh_path=current_mesh_path,
+                output_dir=current_output_dir,
+                include_pattern=include_pattern,
+                exclude_pattern=exclude_pattern,
+                xml_converter=xml_converter,
+                keep_xml=args.keep_xml,
+                preserve_case=args.preserve_case,
+                export_materials=args.export_materials,
+                rebase_to_pivot=not args.skip_pivot_rebase,
+                export_tangents=not args.skip_tangents,
+                import_normals=not args.skip_import_normals,
+                staging_root=staging_root,
+                verbose=args.verbose,
+            )
+            all_exported_paths.extend(exported_paths)
 
     print(f"Exported {len(all_exported_paths)} chunk payload mesh(es) to {output_dir}")
     for path in all_exported_paths:
