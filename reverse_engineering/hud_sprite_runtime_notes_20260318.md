@@ -109,6 +109,18 @@ No stable global owner pointer for that dynamic rect table was pinned yet, so
 the initial bridge discovers it by scanning committed readable memory for the
 known pilot/scrap pattern and validating the full six-entry cluster.
 
+> **Correction (2026-08-15).** The rect table is not dynamic. Reading the PE
+> headers of the shipped `battlezone98redux.exe` shows `ImageBase 0x00400000`
+> and `SizeOfImage 0x0292F000`, with `.data` spanning
+> `0x008E7000 - 0x02CF44A4` — a ~36 MB virtual section that is almost entirely
+> uninitialized. The observed table addresses fall inside it, so this is a
+> static array in the image whose address is stable across runs and missions,
+> not a heap allocation. `bzr_hooks.cpp` reflects this: it hardcodes
+> `kHudSpriteRectTableAddr` and validates the base by checking the six panel
+> records still carry their stock atlas UVs, with no memory scan. Treat the
+> "scan committed memory" description above as superseded, and do not reach for
+> a stale-base explanation when HUD sprites misbehave — the base does not move.
+
 ## OpenShim Implementation
 
 Bridge surface added in `src\winmm_proxy.cpp` and `src\winmm.def`:
