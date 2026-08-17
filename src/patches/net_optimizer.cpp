@@ -73,6 +73,11 @@ namespace
     constexpr uint32_t kReorderWakeIdleMs = 10;
     constexpr uint32_t kReorderWakeBurstCap = 8;
     constexpr uint8_t kWakeMagic[8] = { 'B', 'Z', 'W', 'K', 'P', 'K', 'T', '1' };
+    // A window carrying more than this many datagrams counts as a burst second.
+    // The game's steady outbound rate is roughly 30 packets/sec, so 100 is well
+    // clear of normal play and still catches the onset of a retransmit storm.
+    constexpr uint32_t kBurstThresholdPps = 100;
+    constexpr uint64_t kBurstReportMs = 30000;
     constexpr DWORD kGovPollMs = 100;
     constexpr DWORD kGovObservationLogMs = 10000;
     constexpr uint32_t kGovColdStart = 4000;
@@ -81,16 +86,114 @@ namespace
     constexpr uint32_t kAutokickPingMax = 60000;
     constexpr uint32_t kAutokickLossMax = 100000;
     static uint32_t* const kGovRateAddr = reinterpret_cast<uint32_t*>(0x008e8d14);
-    static uint32_t* const kAkStartAddr = reinterpret_cast<uint32_t*>(0x008e8d0c);
-    static uint32_t* const kAkPingAddr = reinterpret_cast<uint32_t*>(0x008e8cf8);
-    static uint32_t* const kAkLossAddr = reinterpret_cast<uint32_t*>(0x008e8bfc);
-    static uint32_t* const kAkTimeAddr = reinterpret_cast<uint32_t*>(0x008e8ce4);
     constexpr uint8_t kGovSig[15] =
     {
         0x68, 0xA0, 0x0F, 0x00, 0x00,
         0x68, 0xE8, 0x03, 0x00, 0x00,
         0x68, 0x48, 0xF4, 0xFF, 0xFF,
     };
+
+    // The 2026-08-12 xxMonke1.bzn match disproved the assumption the cold-start
+    // watcher was built on. The comment justifying "a read of exactly 4000 is a
+    // match start" claimed the ramp moves off 4000 immediately and never returns
+    // to it exactly. It does return: four runaway repair-kit objects flooded the
+    // reliable channel, ping went past MaxPing, and the governor took 54
+    // consecutive DownCount steps over 107 seconds -- 25,900 -> 4,150 -> the
+    // floor -- with no up-step in between. Thirteen minutes into the match the
+    // governor walked DOWN onto the sentinel and the watcher read it as a match
+    // start, jumping the rate 10x mid-fight with nobody asking.
+    //
+    // So classify the sentinel by how it was ARRIVED AT. A match start writes
+    // 4000 over a value that has been sitting still (the lobby's, or the previous
+    // match's parting rate, held for as long as the lobby lasted). A collapse
+    // arrives from just above 4000, off a value that itself lasted one governor
+    // step. A sentinel read reached from within kGovDescentBand bytes above it,
+    // off a value held for less than kGovDescentMs, is a floor rescue: we still
+    // write the target, because the alternative is a match that spends the rest
+    // of its life at 4 kB/s, but it is named and counted apart from real match
+    // starts so a sample set stays scoreable.
+    //
+    // Note it is the PREVIOUS value's lifetime that decides, not the age of the
+    // change into the sentinel. That change is always "just now" whichever thing
+    // happened, so its own age tells you nothing.
+    //
+    // The widest single step the governor can be seen to take between two 100 ms
+    // polls: the collapse above stepped 400 B/s every 2 s at DownCount=200, so
+    // 2000 is an order of magnitude of headroom and still less than half the
+    // sentinel. A match start writes 4000 over a value nowhere near this close.
+    constexpr uint32_t kGovDescentBand = 2000;
+    // A collapse steps every couple of seconds; a lobby sits unchanged for
+    // minutes. Doubles as the rescue cooldown so a governor parked on the floor
+    // reports once rather than ten times a second.
+    constexpr uint32_t kGovDescentMs = 30000;
+
+    // ---- The game's [Net] tunables, written directly in .data ---------------
+    //
+    // Battlezone reads its whole [Net] block out of net.ini at match start into
+    // a set of fixed .data globals. That path is not reliable: BZLogger reports
+    // `MOD FOUND net.ini` while the values in the file are demonstrably not
+    // applied, because only the session's active mod is parsed. Shipping tuning
+    // through net.ini therefore does not work, and a copy in the game folder
+    // root is ignored outright.
+    //
+    // So write the globals. This is the same DRM-safe mechanism the governor
+    // cold-start fix uses and for the same reason: rewriting .text applies
+    // cleanly and then trips SteamStub's code-integrity check about twelve
+    // seconds later, while .data carries no integrity check. Aligned 32-bit
+    // stores are atomic on x86. The session parser rewrites these at every match
+    // start, so the poll loop re-asserts: within one tick of any match starting,
+    // our value wins over both net.ini and the stock default.
+    //
+    // Addresses are only trusted after the unique 15-byte governor signature has
+    // confirmed the build, and each entry is additionally sanity-gated on first
+    // contact: if the value the game currently holds is outside a plausible
+    // range, the address is not what we think it is for this build and the entry
+    // is vetoed permanently rather than written blind.
+    //
+    // Ranges credit the PiercingXX/battlezone-netcode-patch field measurements;
+    // the `stock` column there is phase-dependent (menu reads differ from
+    // in-match reads for MinBandwidth, MaxBandwidth, MaxPing and the auto-kick
+    // trio), so each range is wide enough to admit every value the entry has
+    // legitimately been observed holding and narrow enough to reject a pointer,
+    // a zero, or garbage.
+    struct NetGlobalDef
+    {
+        uintptr_t address;
+        const char* name;
+        uint32_t plausibleMin;
+        uint32_t plausibleMax;
+    };
+
+    constexpr NetGlobalDef kNetGlobals[] =
+    {
+        { 0x008e8cf4, "MinBandwidth",  500,  100000 },
+        { 0x008e8d08, "MaxBandwidth", 1000, 4000000 },
+        { 0x008e8cf0, "UpCount",         1,  100000 },
+        { 0x008e8d10, "DownCount",       1,  100000 },
+        { 0x008e8cec, "MaxPing",        50,   60000 },
+        { 0x008e8cfc, "MaxPingsLost",    1,  100000 },
+        { 0x008e8d0c, "AutoKickStart", 1000,  600000 },
+        { 0x008e8cf8, "AutoKickPing",    50,   60000 },
+        { 0x008e8bfc, "AutoKickLoss",     1,  100000 },
+        { 0x008e8ce4, "AutoKickTime", 1000,  600000 },
+    };
+
+    enum NetGlobalIndex : size_t
+    {
+        kNgMinBandwidth = 0,
+        kNgMaxBandwidth,
+        kNgUpCount,
+        kNgDownCount,
+        kNgMaxPing,
+        kNgMaxPingsLost,
+        kNgAutoKickStart,
+        kNgAutoKickPing,
+        kNgAutoKickLoss,
+        kNgAutoKickTime,
+        kNgCount,
+    };
+
+    static_assert(std::size(kNetGlobals) == kNgCount, "net global table/index drift");
 
     enum BufferLogEventType : uint32_t
     {
@@ -142,6 +245,8 @@ namespace
         bool enableReorderWake = true;
         bool enableBufferLog = false;
         bool enableRelayCapture = false;
+        bool relayLogAllControl = false;
+        bool relayLogDatagrams = false;
         bool sendDup = false;
         bool govScan = false;
         uint32_t sendBufferSize = DEFAULT_SEND_BUFFER;
@@ -154,6 +259,12 @@ namespace
         uint32_t autoKickPing = 2000;
         uint32_t autoKickLoss = 200;
         uint32_t autoKickTime = 60000;
+        uint32_t netMinBandwidth = 16000;
+        uint32_t netMaxBandwidth = 320000;
+        uint32_t netUpCount = 100;
+        uint32_t netDownCount = 50;
+        uint32_t netMaxPing = 450;
+        uint32_t netMaxPingsLost = 0;
         uint32_t packetLogLimit = kDefaultPacketLogLimit;
         uint32_t packetLogInterval = kDefaultPacketLogInterval;
         uint32_t reorderWindowMs = kDefaultReorderWindowMs;
@@ -344,6 +455,29 @@ namespace
     volatile LONG g_GovBumps = 0;
     volatile LONG g_AutoKickStop = 0;
     HANDLE g_AutoKickThread = nullptr;
+
+    // Outbound burst measurement. The failure that actually ends matches is not
+    // receive-side reordering: it is a peer's reliable-send queue backing up and
+    // then burst-retransmitting. One measured case pushed 1,179 datagrams
+    // carrying a single reliable message in 13.4 seconds and drowned the ping
+    // exchange badly enough that the host's auto-kick fired ten seconds after
+    // the flood ended. Receive-side buffering cannot help with that, and until
+    // the local machine measures its own outbound behaviour there is no evidence
+    // about whether it produces these floods at all. So this measures and does
+    // not act: a one-second window, its peaks, and how many windows ran above
+    // the burst threshold. Session peaks separate a healthy evening (175-442
+    // packets/sec, 3-10 burst seconds) from a storm (1,646-4,186 packets/sec,
+    // 283-1,914 burst seconds) at a glance.
+    SRWLOCK g_BurstLock = SRWLOCK_INIT;
+    uint64_t g_BurstWindowStartMs = 0;
+    uint32_t g_BurstWindowPackets = 0;
+    uint32_t g_BurstWindowBytes = 0;
+    uint32_t g_BurstPeakPps = 0;
+    uint32_t g_BurstPeakBps = 0;
+    uint64_t g_BurstSeconds = 0;
+    uint64_t g_BurstTotalPackets = 0;
+    uint64_t g_BurstTotalBytes = 0;
+    uint64_t g_BurstLastReportMs = 0;
 
     SRWLOCK g_BufferLogLock = SRWLOCK_INIT;
     uint8_t* g_BufferLogRing = nullptr;
@@ -713,8 +847,49 @@ namespace
         g_Config.autoKickPing = ClampUint(ReadIniUint("OpenShimSocket", "AutoKickPing", autoKickRelax ? 2000 : 0), 0, kAutokickPingMax);
         g_Config.autoKickLoss = ClampUint(ReadIniUint("OpenShimSocket", "AutoKickLoss", autoKickRelax ? 200 : 0), 0, kAutokickLossMax);
         g_Config.autoKickTime = ClampUint(ReadIniUint("OpenShimSocket", "AutoKickTime", autoKickRelax ? 60000 : 0), 0, kAutokickMsMax);
+
+        // The governor/bandwidth half of the [Net] block, on the same "0 leaves
+        // the game's own value alone" convention as the auto-kick keys above.
+        //
+        // MinBandwidth is the collapse floor. The 2026-08-12 session took 54
+        // consecutive DownCount steps and bottomed out at 4,150 -> 4,000 B/s --
+        // the stock floor, not net.ini's documented 16000, which is how we know
+        // the file was not being applied. 16000 makes that collapse survivable
+        // and, as a bonus, lifts the floor out of the cold-start sentinel's
+        // reach, which is the structural fix for the misfire rather than the
+        // defensive one.
+        //
+        // MaxBandwidth at 320000 effectively removes the cap. A lower "safe"
+        // ceiling is a regression: sessions have been measured ramping to 79,600
+        // B/s, and the 2026-08-15/16 storms sustained peaks of 86k-224k B/s. A
+        // 64000 ceiling tried in the upstream V5.0 sat BELOW real traffic, so
+        // the governor spent whole matches throttling against it. The governor
+        // is closed-loop -- it only climbs while ping < MaxPing -- so a high
+        // ceiling is not itself a risk.
+        //
+        // UpCount/DownCount at 100/50 restores stock's 2:1 up-bias while keeping
+        // the 10x scale-up that is the point of tuning them. Measured at the old
+        // 50/200 the governor fell -203 B/s per second and climbed +40.5: five
+        // to one, so a two-minute collapse needed nine minutes to undo and in a
+        // real fight it never recovered before the next spike.
+        //
+        // MaxPing 450 gives a jittery link headroom before the governor bites;
+        // stock 300 turns a jitter spike into a rate cut into fewer state
+        // updates into more warping, and the cut itself keeps ping high.
+        //
+        // MaxPingsLost is left alone by default: no evidence a change helps.
+        const bool netTune = ReadIniBool("OpenShimSocket", "NetTune", true);
+        g_Config.netMinBandwidth = ReadIniUint("OpenShimSocket", "NetMinBandwidth", netTune ? 16000 : 0);
+        g_Config.netMaxBandwidth = ReadIniUint("OpenShimSocket", "NetMaxBandwidth", netTune ? 320000 : 0);
+        g_Config.netUpCount = ReadIniUint("OpenShimSocket", "NetUpCount", netTune ? 100 : 0);
+        g_Config.netDownCount = ReadIniUint("OpenShimSocket", "NetDownCount", netTune ? 50 : 0);
+        g_Config.netMaxPing = ReadIniUint("OpenShimSocket", "NetMaxPing", netTune ? 450 : 0);
+        g_Config.netMaxPingsLost = ReadIniUint("OpenShimSocket", "NetMaxPingsLost", 0);
+
         g_Config.enableBufferLog = ReadIniBool("OpenShimSocket", "EnableBufferLog", false);
         g_Config.enableRelayCapture = ReadIniBool("OpenShimSocket", "EnableRelayCapture", false);
+        g_Config.relayLogAllControl = ReadIniBool("OpenShimSocket", "RelayLogAllControl", false);
+        g_Config.relayLogDatagrams = ReadIniBool("OpenShimSocket", "RelayLogDatagrams", false);
         g_Config.bufferLogPayloadBytes = ClampBufferLogPayloadBytes(ReadIniUint("OpenShimSocket", "BufferLogPayloadBytes", kDefaultBufferLogPayloadBytes));
         g_Config.bufferLogRingRecords = ClampBufferLogRingRecords(ReadIniUint("OpenShimSocket", "BufferLogRingRecords", kDefaultBufferLogRingRecords));
         g_Config.bufferLogSocketId = ReadIniUint("OpenShimSocket", "BufferLogSocketId", 0);
@@ -917,11 +1092,26 @@ namespace
             }
         }
 
+        // openshim.ini [Diagnostics] RelayLogging maps onto OPENSHIM_RELAY_CAPTURE
+        // through the friendly-key redirect in openshim_env_config.cpp, so the
+        // one toggle a tester is told about reaches every part of this: the
+        // relay-control JSONL, the WebSocket control-plane capture, and the raw
+        // buffer ring the two are carried on.
         if (TryReadEnvValue("BZ_RELAY_CAPTURE", envValue, static_cast<DWORD>(sizeof(envValue))) ||
             TryReadEnvValue("OPENSHIM_RELAY_CAPTURE", envValue, static_cast<DWORD>(sizeof(envValue))))
         {
             g_Config.enableRelayCapture = EnvValueEnabled(envValue);
         }
+
+        if (TryReadEnvValue("OPENSHIM_RELAY_LOG_ALL_CONTROL", envValue, static_cast<DWORD>(sizeof(envValue))))
+            g_Config.relayLogAllControl = EnvValueEnabled(envValue);
+        if (TryReadEnvValue("OPENSHIM_RELAY_LOG_DATAGRAMS", envValue, static_cast<DWORD>(sizeof(envValue))))
+            g_Config.relayLogDatagrams = EnvValueEnabled(envValue);
+
+        // Both detail switches imply the capture they add detail to: a tester who
+        // sets one and not the master toggle would otherwise get silence.
+        if (g_Config.relayLogAllControl || g_Config.relayLogDatagrams)
+            g_Config.enableRelayCapture = true;
 
         if (g_Config.enableRelayCapture)
         {
@@ -955,6 +1145,19 @@ namespace
         {
             Logf("[OpenShimNet] buffer_log peer filter ignored: invalid BufferLogPeer value");
         }
+
+        // State what relay logging is actually doing, always. "Relay logging was
+        // on but produced nothing" and "relay logging was never on" look the same
+        // in a bug report otherwise, and both have happened.
+        Logf("[OpenShimNet] relay_logging: capture=%s allControl=%s datagrams=%s "
+            "matchmakingRedirect=%s controlPorts=ws:%u,probe:%u,relay:%u",
+            g_Config.enableRelayCapture ? "on" : "off",
+            g_Config.relayLogAllControl ? "on" : "off",
+            g_Config.relayLogDatagrams ? "on" : "off",
+            g_Config.matchmakingRedirectAddress.empty() ? "<stock>" : g_Config.matchmakingRedirectAddress.c_str(),
+            static_cast<unsigned>(kBzrNetWebSocketPort),
+            static_cast<unsigned>(kBzrNetProbePort),
+            static_cast<unsigned>(kBzrNetRelayPort));
     }
 
     void LogNetIniValues()
@@ -1515,8 +1718,23 @@ namespace
             port == kBzrNetWebSocketPort;
     }
 
+    // The eight message types that decide the gameplay route: endpoint exchange
+    // and the two connect/route handoffs. These are what an /iprelay vs /ipdirect
+    // investigation needs and nothing else, so they are what the default capture
+    // records.
+    //
+    // RelayLogAllControl widens this to every control-plane message the service
+    // exchanges -- Authorization, DoEnterLounge, DoJoinLobby, SetPlayerData,
+    // game creation, chat, member joins and leaves. That is the traffic a
+    // replacement/dedicated matchmaking service has to reproduce, so growing one
+    // needs the whole conversation rather than the routing slice of it. It is
+    // off by default because the wider capture carries account identity and
+    // lobby metadata; see the privacy note in openshim.ini.
     bool IsRelayControlMessageType(const std::string& type)
     {
+        if (g_Config.relayLogAllControl)
+            return !type.empty();
+
         return type == "DoUpdateLAN" ||
             type == "DoUpdateWAN" ||
             type == "OnLANUpdated" ||
@@ -1771,8 +1989,37 @@ namespace
             (g_Config.packetLogInterval > 0 && (packetCount % g_Config.packetLogInterval) == 0);
     }
 
+    // Every datagram on the BZRNet endpoint-probe (1338) and UDP relay (1339)
+    // ports, unsampled. LogPacketActivity below samples by packet count, which
+    // is right for gameplay traffic and wrong here: relay and probe exchanges
+    // are sparse and each one is a decision point, so a sampled view can miss
+    // the entire negotiation. Off by default because it is per-packet.
+    void LogRelayDatagram(const char* api, SOCKET s, bool outbound, int bytes, const sockaddr* addr, int addrLen)
+    {
+        if (!g_Config.relayLogDatagrams || !addr || addrLen <= 0)
+            return;
+
+        uint16_t port = 0;
+        if (!TryGetSockaddrPort(addr, addrLen, &port))
+            return;
+        if (port != kBzrNetProbePort && port != kBzrNetRelayPort)
+            return;
+
+        Logf("[OpenShimNet] relay_datagram sid=%u api=%s direction=%s bytes=%d port=%u peer=%s",
+            GetSocketId(s),
+            api,
+            outbound ? "outbound" : "inbound",
+            bytes,
+            static_cast<unsigned>(port),
+            FormatSockaddr(addr, addrLen).c_str());
+    }
+
     void LogPacketActivity(const char* api, SOCKET s, bool outbound, int bytes, const sockaddr* addr, int addrLen)
     {
+        // Ahead of the sampling and the socket-table lookup below, both of which
+        // can return early.
+        LogRelayDatagram(api, s, outbound, bytes, addr, addrLen);
+
         SocketState snapshot = {};
         bool found = false;
 
@@ -2539,6 +2786,103 @@ namespace
             CaptureCompletedIo(pending, transferredLength, completionError);
     }
 
+    // Count one outbound datagram, closing the one-second window when it expires.
+    // Called from every UDP send path, including failed sends: sendto promises
+    // handoff rather than delivery, and a send that errors still consumed the
+    // queue slot and the CPU that produced it.
+    void MeasureOutboundBurst(uint32_t bytes)
+    {
+        uint32_t closedPackets = 0;
+        uint32_t closedBytes = 0;
+        bool report = false;
+        uint32_t peakPps = 0;
+        uint32_t peakBps = 0;
+        uint64_t burstSeconds = 0;
+        uint64_t totalPackets = 0;
+        uint64_t totalBytes = 0;
+
+        const uint64_t nowMs = GetTickCount64();
+        AcquireSRWLockExclusive(&g_BurstLock);
+        if (g_BurstWindowStartMs == 0)
+        {
+            g_BurstWindowStartMs = nowMs;
+            g_BurstLastReportMs = nowMs;
+        }
+        if (nowMs - g_BurstWindowStartMs >= 1000)
+        {
+            closedPackets = g_BurstWindowPackets;
+            closedBytes = g_BurstWindowBytes;
+            if (closedPackets > g_BurstPeakPps)
+                g_BurstPeakPps = closedPackets;
+            if (closedBytes > g_BurstPeakBps)
+                g_BurstPeakBps = closedBytes;
+            if (closedPackets > kBurstThresholdPps)
+                ++g_BurstSeconds;
+            g_BurstWindowStartMs = nowMs;
+            g_BurstWindowPackets = 0;
+            g_BurstWindowBytes = 0;
+        }
+        ++g_BurstWindowPackets;
+        g_BurstWindowBytes += bytes;
+        ++g_BurstTotalPackets;
+        g_BurstTotalBytes += bytes;
+
+        if (nowMs - g_BurstLastReportMs >= kBurstReportMs)
+        {
+            g_BurstLastReportMs = nowMs;
+            report = true;
+            peakPps = g_BurstPeakPps;
+            peakBps = g_BurstPeakBps;
+            burstSeconds = g_BurstSeconds;
+            totalPackets = g_BurstTotalPackets;
+            totalBytes = g_BurstTotalBytes;
+        }
+        ReleaseSRWLockExclusive(&g_BurstLock);
+
+        if (report)
+        {
+            Logf("[OpenShimNet] send_burst: packets=%llu bytes=%llu peakPps=%u peakBps=%u burstSeconds=%llu threshold=%u",
+                static_cast<unsigned long long>(totalPackets),
+                static_cast<unsigned long long>(totalBytes),
+                peakPps,
+                peakBps,
+                static_cast<unsigned long long>(burstSeconds),
+                kBurstThresholdPps);
+        }
+    }
+
+    // Close the trailing window and emit the session totals. A burst that ends
+    // the traffic -- exactly the case worth catching -- would otherwise never
+    // have its window accounted, and the peak would read low or zero.
+    void LogOutboundBurstSummary()
+    {
+        AcquireSRWLockExclusive(&g_BurstLock);
+        if (g_BurstWindowPackets > g_BurstPeakPps)
+            g_BurstPeakPps = g_BurstWindowPackets;
+        if (g_BurstWindowBytes > g_BurstPeakBps)
+            g_BurstPeakBps = g_BurstWindowBytes;
+        if (g_BurstWindowPackets > kBurstThresholdPps)
+            ++g_BurstSeconds;
+        g_BurstWindowPackets = 0;
+        g_BurstWindowBytes = 0;
+        const uint32_t peakPps = g_BurstPeakPps;
+        const uint32_t peakBps = g_BurstPeakBps;
+        const uint64_t burstSeconds = g_BurstSeconds;
+        const uint64_t totalPackets = g_BurstTotalPackets;
+        const uint64_t totalBytes = g_BurstTotalBytes;
+        ReleaseSRWLockExclusive(&g_BurstLock);
+
+        if (totalPackets == 0)
+            return;
+
+        Logf("[OpenShimNet] send_burst session: packets=%llu bytes=%llu peakPps=%u peakBps=%u burstSeconds=%llu",
+            static_cast<unsigned long long>(totalPackets),
+            static_cast<unsigned long long>(totalBytes),
+            peakPps,
+            peakBps,
+            static_cast<unsigned long long>(burstSeconds));
+    }
+
     void CALLBACK RelayCaptureCompletionRoutine(
         DWORD error,
         DWORD transferredLength,
@@ -2786,131 +3130,260 @@ namespace
             g_Config.govStart);
 
         uint32_t bumps = 0;
+        uint32_t rescues = 0;
+        uint32_t peak = 0;
+        uint32_t windowMin = 0xFFFFFFFFu;
+        uint32_t windowMax = 0;
+        uint32_t windowSamples = 0;
         uint32_t lastObserved = *kGovRateAddr;
+        // The value held before the most recent change, and how long it was held
+        // for. The poll runs ~20x faster than the governor adjusts, so comparing
+        // against the previous poll alone would see "unchanged" almost every time
+        // and lose the arrival that classifies a sentinel read.
+        uint32_t previousDistinct = lastObserved;
+        uint64_t lastChangeMs = GetTickCount64();
+        uint64_t previousHoldMs = 0;
+        uint64_t lastRescueMs = 0;
         uint64_t lastObservationLogMs = GetTickCount64();
         InterlockedExchange(&g_GovLastObserved, static_cast<LONG>(lastObserved));
         InterlockedExchange(&g_GovObservationValid, 1);
         InterlockedExchange(&g_GovBumps, 0);
-        Logf("[OpenShimNet] governor_patch: initial observed=%u target=%u",
+        Logf("[OpenShimNet] governor_patch: initial observed=%u target=%u descentBand=%u descentMs=%u",
             lastObserved,
-            g_Config.govStart);
+            g_Config.govStart,
+            kGovDescentBand,
+            kGovDescentMs);
 
         while (InterlockedCompareExchange(&g_GovStop, 0, 0) == 0)
         {
+            const uint64_t nowMs = GetTickCount64();
             const uint32_t observed = *kGovRateAddr;
-            if (observed != lastObserved)
+            const uint32_t previousPoll = lastObserved;
+
+            if (observed != previousPoll)
+            {
+                previousDistinct = previousPoll;
+                previousHoldMs = nowMs - lastChangeMs;
+                lastChangeMs = nowMs;
+            }
+            if (observed > peak)
+                peak = observed;
+            if (observed < windowMin)
+                windowMin = observed;
+            if (observed > windowMax)
+                windowMax = observed;
+            ++windowSamples;
+
+            // Was the sentinel WRITTEN here (a match start) or WALKED onto (the
+            // governor collapsing to its floor mid-match)? `arrivedFrom` is the
+            // value immediately before this one: the previous poll if it
+            // differed, otherwise the value held before the most recent change,
+            // which is what a run of identical polls sitting on the floor sees.
+            bool descentArrival = false;
+            if (observed == kGovColdStart)
+            {
+                const uint32_t arrivedFrom = (observed != previousPoll) ? previousPoll : previousDistinct;
+                descentArrival = arrivedFrom > kGovColdStart &&
+                    (arrivedFrom - kGovColdStart) <= kGovDescentBand &&
+                    previousHoldMs <= kGovDescentMs;
+            }
+
+            if (observed != previousPoll)
             {
                 const char* reason = observed == kGovColdStart
-                    ? "cold-start trigger"
+                    ? (descentArrival ? "governor collapsed onto its floor" : "cold-start trigger")
                     : (observed == g_Config.govStart ? "target restored" : "game overwrite or clamp");
-                Logf("[OpenShimNet] governor_patch: observed transition %u -> %u reason=%s",
-                    lastObserved,
+                Logf("[OpenShimNet] governor_patch: observed transition %u -> %u reason=%s heldMs=%llu",
+                    previousPoll,
                     observed,
-                    reason);
+                    reason,
+                    static_cast<unsigned long long>(previousHoldMs));
                 lastObserved = observed;
                 InterlockedExchange(&g_GovLastObserved, static_cast<LONG>(observed));
             }
 
-            if (observed == kGovColdStart)
+            // A floor rescue still writes the target -- with the game's own floor
+            // at 4000 the alternative is a match that spends the rest of its life
+            // at 4 kB/s -- but it is rate-limited and counted apart from real
+            // match starts, because counting them together is what put 32
+            // "matches" into an evening that had three.
+            const bool rescueDue = descentArrival &&
+                (rescues == 0 || (nowMs - lastRescueMs) >= kGovDescentMs);
+
+            if (observed == kGovColdStart && (!descentArrival || rescueDue))
             {
                 *kGovRateAddr = g_Config.govStart;
                 const uint32_t readback = *kGovRateAddr;
-                ++bumps;
+                if (descentArrival)
+                {
+                    ++rescues;
+                    lastRescueMs = nowMs;
+                }
+                else
+                {
+                    ++bumps;
+                    InterlockedExchange(&g_GovBumps, static_cast<LONG>(bumps));
+                }
                 lastObserved = readback;
-                lastObservationLogMs = GetTickCount64();
+                previousDistinct = kGovColdStart;
+                previousHoldMs = 0;
+                lastChangeMs = nowMs;
+                lastObservationLogMs = nowMs;
                 InterlockedExchange(&g_GovLastObserved, static_cast<LONG>(readback));
-                InterlockedExchange(&g_GovBumps, static_cast<LONG>(bumps));
-                Logf("[OpenShimNet] governor_patch: applied cold-start previous=%u requested=%u readback=%u bump=%u",
+                Logf("[OpenShimNet] governor_patch: applied %s previous=%u requested=%u readback=%u bumps=%u rescues=%u",
+                    descentArrival ? "floor-rescue" : "cold-start",
                     observed,
                     g_Config.govStart,
                     readback,
-                    bumps);
+                    bumps,
+                    rescues);
             }
-            else
+            else if (nowMs - lastObservationLogMs >= kGovObservationLogMs)
             {
-                const uint64_t nowMs = GetTickCount64();
-                if (nowMs - lastObservationLogMs >= kGovObservationLogMs)
-                {
-                    Logf("[OpenShimNet] governor_patch: periodic observed=%u target=%u bumps=%u",
-                        observed,
-                        g_Config.govStart,
-                        bumps);
-                    lastObservationLogMs = nowMs;
-                }
+                Logf("[OpenShimNet] governor_trace: observed=%u target=%u windowMin=%u windowMax=%u samples=%u peak=%u bumps=%u rescues=%u",
+                    observed,
+                    g_Config.govStart,
+                    windowSamples ? windowMin : 0u,
+                    windowMax,
+                    windowSamples,
+                    peak,
+                    bumps,
+                    rescues);
+                lastObservationLogMs = nowMs;
+                windowMin = 0xFFFFFFFFu;
+                windowMax = 0;
+                windowSamples = 0;
             }
 
             Sleep(kGovPollMs);
         }
 
         const LONG finalObserved = InterlockedCompareExchange(&g_GovLastObserved, 0, 0);
-        const LONG finalBumps = InterlockedCompareExchange(&g_GovBumps, 0, 0);
-        Logf("[OpenShimNet] governor_patch: thread exit bumps=%ld finalObserved=%ld target=%u",
-            static_cast<long>(finalBumps),
+        Logf("[OpenShimNet] governor_patch: thread exit bumps=%u rescues=%u peak=%u finalObserved=%ld target=%u",
+            bumps,
+            rescues,
+            peak,
             static_cast<long>(finalObserved),
             g_Config.govStart);
         return 0;
     }
 
-    DWORD WINAPI AutoKickPatchThread(LPVOID)
+    // Re-asserts the [Net] tunables the game parses out of net.ini at every match
+    // start. Named for what it now covers: it began as the auto-kick-only patch
+    // and the four auto-kick INI keys are unchanged.
+    DWORD WINAPI NetGlobalsPatchThread(LPVOID)
     {
-        if (g_Config.autoKickStart == 0 && g_Config.autoKickPing == 0 &&
-            g_Config.autoKickLoss == 0 && g_Config.autoKickTime == 0)
+        struct Slot
         {
-            return 0;
+            const NetGlobalDef* def;
+            uint32_t want;
+            uint32_t seen;
+            bool gated;
+            bool vetoed;
+        };
+
+        Slot slots[kNgCount] =
+        {
+            { &kNetGlobals[kNgMinBandwidth], g_Config.netMinBandwidth, 0, false, false },
+            { &kNetGlobals[kNgMaxBandwidth], g_Config.netMaxBandwidth, 0, false, false },
+            { &kNetGlobals[kNgUpCount],      g_Config.netUpCount,      0, false, false },
+            { &kNetGlobals[kNgDownCount],    g_Config.netDownCount,    0, false, false },
+            { &kNetGlobals[kNgMaxPing],      g_Config.netMaxPing,      0, false, false },
+            { &kNetGlobals[kNgMaxPingsLost], g_Config.netMaxPingsLost, 0, false, false },
+            { &kNetGlobals[kNgAutoKickStart], g_Config.autoKickStart,  0, false, false },
+            { &kNetGlobals[kNgAutoKickPing],  g_Config.autoKickPing,   0, false, false },
+            { &kNetGlobals[kNgAutoKickLoss],  g_Config.autoKickLoss,   0, false, false },
+            { &kNetGlobals[kNgAutoKickTime],  g_Config.autoKickTime,   0, false, false },
+        };
+
+        // Never write something the sanity gate would reject on read-back anyway:
+        // a configured value outside the plausible range would veto the entry on
+        // the very next poll and produce a confusing pair of log lines.
+        bool anyWanted = false;
+        for (Slot& slot : slots)
+        {
+            if (slot.want == 0)
+                continue;
+            if (slot.want < slot.def->plausibleMin || slot.want > slot.def->plausibleMax)
+            {
+                Logf("[OpenShimNet] net_globals: %s=%u outside the plausible range %u..%u; ignoring",
+                    slot.def->name,
+                    slot.want,
+                    slot.def->plausibleMin,
+                    slot.def->plausibleMax);
+                slot.want = 0;
+                continue;
+            }
+            anyWanted = true;
         }
+        if (!anyWanted)
+            return 0;
 
         Sleep(15000);
         const int matches = CountGovernorSignatureMatches();
         if (matches != 1)
         {
-            Logf("[OpenShimNet] autokick_patch: %d signature matches; disabled", matches);
+            Logf("[OpenShimNet] net_globals: %d signature matches; disabled", matches);
             return 0;
         }
 
-        struct Slot
-        {
-            uint32_t* addr;
-            uint32_t value;
-            const char* name;
-            bool logged;
-        };
-
-        Slot slots[] =
-        {
-            { kAkStartAddr, g_Config.autoKickStart, "AutoKickStart", false },
-            { kAkPingAddr, g_Config.autoKickPing, "AutoKickPing", false },
-            { kAkLossAddr, g_Config.autoKickLoss, "AutoKickLoss", false },
-            { kAkTimeAddr, g_Config.autoKickTime, "AutoKickTime", false },
-        };
-
-        Logf("[OpenShimNet] autokick_patch: version confirmed; overriding start=%u ping=%u loss=%u time=%u",
-            g_Config.autoKickStart,
-            g_Config.autoKickPing,
-            g_Config.autoKickLoss,
-            g_Config.autoKickTime);
+        Logf("[OpenShimNet] net_globals: version confirmed; asserting "
+            "MinBandwidth=%u MaxBandwidth=%u UpCount=%u DownCount=%u MaxPing=%u MaxPingsLost=%u "
+            "AutoKickStart=%u AutoKickPing=%u AutoKickLoss=%u AutoKickTime=%u (0 = leave alone)",
+            slots[kNgMinBandwidth].want,
+            slots[kNgMaxBandwidth].want,
+            slots[kNgUpCount].want,
+            slots[kNgDownCount].want,
+            slots[kNgMaxPing].want,
+            slots[kNgMaxPingsLost].want,
+            slots[kNgAutoKickStart].want,
+            slots[kNgAutoKickPing].want,
+            slots[kNgAutoKickLoss].want,
+            slots[kNgAutoKickTime].want);
 
         while (InterlockedCompareExchange(&g_AutoKickStop, 0, 0) == 0)
         {
             for (Slot& slot : slots)
             {
-                if (slot.value == 0 || *slot.addr == slot.value)
+                if (slot.want == 0 || slot.vetoed)
                     continue;
 
-                const uint32_t previous = *slot.addr;
-                *slot.addr = slot.value;
-                if (!slot.logged)
+                uint32_t* const address = reinterpret_cast<uint32_t*>(slot.def->address);
+                const uint32_t live = *address;
+
+                if (!slot.gated)
                 {
-                    slot.logged = true;
-                    Logf("[OpenShimNet] autokick_patch: %s %u -> %u",
-                        slot.name,
-                        previous,
-                        slot.value);
+                    // First contact. If the game is not holding a plausible value
+                    // for this tunable, the address is not what we think it is on
+                    // this build -- refuse to write rather than corrupt whatever
+                    // it really is.
+                    slot.gated = true;
+                    slot.seen = live;
+                    if (live < slot.def->plausibleMin || live > slot.def->plausibleMax)
+                    {
+                        slot.vetoed = true;
+                        Logf("[OpenShimNet] net_globals: %s vetoed; 0x%08lX holds %u, outside %u..%u",
+                            slot.def->name,
+                            static_cast<unsigned long>(slot.def->address),
+                            live,
+                            slot.def->plausibleMin,
+                            slot.def->plausibleMax);
+                        continue;
+                    }
+                    Logf("[OpenShimNet] net_globals: %s %u -> %u (as found at 0x%08lX)",
+                        slot.def->name,
+                        live,
+                        slot.want,
+                        static_cast<unsigned long>(slot.def->address));
                 }
+
+                if (live != slot.want)
+                    *address = slot.want;
             }
             Sleep(kGovPollMs);
         }
 
-        Logf("[OpenShimNet] autokick_patch: stopping");
+        Logf("[OpenShimNet] net_globals: stopping");
         return 0;
     }
 
@@ -3362,6 +3835,8 @@ namespace
         EnsureSocketOptions(s);
         const int rc = g_RealWSASendTo(s, buffers, bufferCount, bytesSent, flags, to, toLen, overlapped, completionRoutine);
         const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
+        if (IsUdpSocket(s) && !IsLoopbackDestination(to))
+            MeasureOutboundBurst(GetRequestedWsabufBytes(buffers, bufferCount));
         if (g_BufferLogEnabled && IsUdpSocket(s) && (rc == 0 || err == WSA_IO_PENDING))
         {
             uint8_t capture[kRelayCapturePayloadBytes] = {};
@@ -3430,6 +3905,8 @@ namespace
         EnsureSocketOptions(s);
         const int rc = g_RealSendTo(s, buffer, length, flags, to, toLen);
         const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
+        if (IsUdpSocket(s) && !IsLoopbackDestination(to))
+            MeasureOutboundBurst(length > 0 ? static_cast<uint32_t>(length) : 0);
         if (g_BufferLogEnabled && IsUdpSocket(s) && buffer && rc > 0)
         {
             const uint16_t captured = static_cast<uint16_t>((std::min)(
@@ -4244,12 +4721,16 @@ namespace
                 LogShimA(LogLevel::Warn, "net", "[OpenShimNet] Failed to start governor patch thread err=%lu", GetLastError());
         }
 
-        if ((g_Config.autoKickStart || g_Config.autoKickPing || g_Config.autoKickLoss || g_Config.autoKickTime) && !g_AutoKickThread)
+        const bool wantNetGlobals =
+            g_Config.autoKickStart || g_Config.autoKickPing || g_Config.autoKickLoss || g_Config.autoKickTime ||
+            g_Config.netMinBandwidth || g_Config.netMaxBandwidth || g_Config.netUpCount ||
+            g_Config.netDownCount || g_Config.netMaxPing || g_Config.netMaxPingsLost;
+        if (wantNetGlobals && !g_AutoKickThread)
         {
             InterlockedExchange(&g_AutoKickStop, 0);
-            g_AutoKickThread = CreateThread(nullptr, 0, AutoKickPatchThread, nullptr, 0, nullptr);
+            g_AutoKickThread = CreateThread(nullptr, 0, NetGlobalsPatchThread, nullptr, 0, nullptr);
             if (!g_AutoKickThread)
-                LogShimA(LogLevel::Warn, "net", "[OpenShimNet] Failed to start autokick patch thread err=%lu", GetLastError());
+                LogShimA(LogLevel::Warn, "net", "[OpenShimNet] Failed to start net globals patch thread err=%lu", GetLastError());
         }
 
         LogShimA(LogLevel::Info, "net", "[OpenShimNet] Initialization complete");
@@ -4307,6 +4788,7 @@ namespace
             CloseHandle(g_AutoKickThread);
             g_AutoKickThread = nullptr;
         }
+        LogOutboundBurstSummary();
         FlushBufferLog();
         if (g_BufferLogRing)
         {

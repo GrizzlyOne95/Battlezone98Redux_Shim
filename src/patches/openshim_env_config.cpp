@@ -114,6 +114,16 @@ namespace
             return TryReadMappedBool(mainIni, "Startup", "D3DStartupHooks", false, out);
         if (Equals(name, "OPENSHIM_ALLOW_STARTUP_AUTOLOAD"))
             return TryReadMappedBool(mainIni, "Startup", "AllowStartupAutoLoad", false, out);
+        if (Equals(name, "OPENSHIM_TRACE_MAP_REFRESH") ||
+            Equals(name, "OPENSHIM_TRACE_STEAM_MAP_REFRESH"))
+        {
+            return TryReadMappedBool(mainIni, "Diagnostics", "TraceMapRefresh", false, out);
+        }
+        if (Equals(name, "OPENSHIM_TRACE_JUMP_SNIPING") ||
+            Equals(name, "OPENSHIM_TRACE_JUMPSNIPE"))
+        {
+            return TryReadMappedBool(mainIni, "Diagnostics", "TraceJumpSniping", false, out);
+        }
         if (Equals(name, "OPENSHIM_TRACE_ARTILLERY_MASK") ||
             Equals(name, "OPENSHIM_TRACE_WEAPON_MASK"))
         {
@@ -221,6 +231,38 @@ namespace
             Equals(name, "BZR_DISABLE_FACTION_JET_FLAMES"))
         {
             return TryReadMappedBool(mainIni, "Display", "JetFlames", true, out);
+        }
+
+        // One master switch for the whole BZRNet/relay control-plane capture, so
+        // a tester is told one key rather than four. It reaches the relay-control
+        // JSONL and raw buffer ring in net_optimizer.cpp and the structured
+        // BZRNet trace in bzrnet_instrumentation.cpp, both of which already read
+        // these legacy names through this redirect.
+        if (Equals(name, "OPENSHIM_RELAY_CAPTURE") ||
+            Equals(name, "BZ_RELAY_CAPTURE") ||
+            Equals(name, "OPENSHIM_BZRNET_TRACE") ||
+            Equals(name, "BZ_BZRNET_TRACE"))
+        {
+            return TryReadMappedBool(mainIni, "Diagnostics", "RelayLogging", false, out);
+        }
+        if (Equals(name, "OPENSHIM_RELAY_LOG_ALL_CONTROL"))
+            return TryReadMappedBool(mainIni, "Diagnostics", "RelayLogAllControl", false, out);
+        if (Equals(name, "OPENSHIM_RELAY_LOG_DATAGRAMS"))
+            return TryReadMappedBool(mainIni, "Diagnostics", "RelayLogDatagrams", false, out);
+        if (Equals(name, "OPENSHIM_BZRNET_TRACE_PRIVATE") ||
+            Equals(name, "BZ_BZRNET_TRACE_PRIVATE"))
+        {
+            return TryReadMappedBool(mainIni, "Diagnostics", "RelayLoggingPrivateForensic", false, out);
+        }
+        if (Equals(name, "OPENSHIM_BZRNET_TRACE_ALL_UDP") ||
+            Equals(name, "BZ_BZRNET_TRACE_ALL_UDP"))
+        {
+            return TryReadMappedBool(mainIni, "Diagnostics", "RelayLoggingAllUdp", false, out);
+        }
+        if (Equals(name, "OPENSHIM_BZRNET_TRACE_QUEUE") ||
+            Equals(name, "BZ_BZRNET_TRACE_QUEUE"))
+        {
+            return TryReadIniValue(mainIni, "Diagnostics", "RelayLoggingQueueRecords", out);
         }
 
         if (Equals(name, "OPENSHIM_PROFILE_OGRE_ANIMATION"))

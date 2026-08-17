@@ -9,7 +9,15 @@
 ;
 ; Separate configuration files are intentionally not duplicated here:
 ;   openshim_producer_build_menus.ini  = producer/nested build-menu experiment
-;   net.ini                            = low-level socket optimizer/reorder lab
+;   net.ini                            = low-level socket optimizer/reorder lab,
+;                                        netcode tuning ([OpenShimSocket] Net*,
+;                                        AutoKick*, GovernorStart) and the raw
+;                                        capture switches. Every key there is
+;                                        documented in that file. The one
+;                                        crossover is [Diagnostics] RelayLogging
+;                                        below, which drives the relay capture
+;                                        from here so testers have a single
+;                                        switch to set.
 ;
 ; Environment compatibility:
 ;   Friendly INI keys below are the normal control surface. Historical
@@ -377,6 +385,21 @@ TraceArtilleryMask = 0
 ; Legacy env alias: OPENSHIM_TRACE_DX11_COLORSPACE
 TraceDX11ColorSpace = 0
 
+; Trace the multiplayer map-list refresh, filter and scroll path.
+; Accepted: boolean. Default: OFF.
+; Logs [MAPTRACE] lines for list rebuilds, selection restore, and each
+; filter scroll step. Use when investigating the map list or the menu hop.
+; Legacy env aliases: OPENSHIM_TRACE_MAP_REFRESH,
+;                     OPENSHIM_TRACE_STEAM_MAP_REFRESH
+TraceMapRefresh = 0
+
+; Trace the player Person::Simulate jump-snipe probe.
+; Accepted: boolean. Default: OFF.
+; Installs an observational probe on the local player's simulate path and
+; logs [JUMPSNIPE] lines. Development-only; adds per-frame work.
+; Legacy env aliases: OPENSHIM_TRACE_JUMP_SNIPING, OPENSHIM_TRACE_JUMPSNIPE
+TraceJumpSniping = 0
+
 ; Read-only Ogre animation/render overhead profiler.
 ; Accepted: boolean. Default: OFF.
 ; Emits roughly one-second samples for animation, software vertex blending,
@@ -404,8 +427,68 @@ TerrainRenderProbeCluster = -1
 ; Accepted: integer flag 0/1. Default: 1.
 TerrainRenderProbeDumpJson = 1
 
+; ---------------------------------------------------------------------------
+; BZRNet relay / dedicated-server control-plane logging
+; ---------------------------------------------------------------------------
+; PRIVACY: these captures record public endpoints, account identity, lobby
+; metadata, and packet payload fragments belonging to everyone in the session,
+; not just you. Keep them local, read them before sharing, and get the other
+; participants' consent. All of it is OFF by default.
+
+; Master switch for BZRNet relay and control-plane logging.
+; Accepted: boolean. Default: OFF.
+; Turning this on enables, together:
+;   - bz_relay_control.jsonl, the WebSocket control-plane message log
+;   - the structured BZRNet trace (socket lifecycle, WS frames, UDP)
+;   - the raw datagram ring the two are carried on
+; This is the one key to set when asked for relay logs. The individual
+; net.ini [OpenShimSocket] switches remain available for finer control.
+; Legacy env aliases: OPENSHIM_RELAY_CAPTURE, BZ_RELAY_CAPTURE,
+;                     OPENSHIM_BZRNET_TRACE, BZ_BZRNET_TRACE
+RelayLogging = 0
+
+; Log every control-plane message instead of only the eight route-deciding
+; ones (DoUpdateLAN/WAN, OnLAN/WANUpdated, DoP2PConnect,
+; OnLobbyMemberP2PConnect, DoP2PRoute, OnP2PRoute).
+; Accepted: boolean. Default: OFF. Implies RelayLogging.
+; Turn this on to capture the whole conversation a dedicated/replacement
+; matchmaking service has to reproduce: Authorization, DoEnterLounge,
+; DoJoinLobby, SetPlayerData, game creation, chat, member join/leave.
+; Legacy env alias: OPENSHIM_RELAY_LOG_ALL_CONTROL
+RelayLogAllControl = 0
+
+; Log every datagram on the BZRNet endpoint-probe (1338) and UDP relay (1339)
+; ports, unsampled.
+; Accepted: boolean. Default: OFF. Implies RelayLogging.
+; Ordinary packet logging is sampled by count, which can miss a whole sparse
+; relay negotiation; this is the unsampled view of it. Per-packet volume.
+; Legacy env alias: OPENSHIM_RELAY_LOG_DATAGRAMS
+RelayLogDatagrams = 0
+
+; Include full payloads and unredacted identity in the structured trace.
+; Accepted: boolean. Default: OFF. Forensic use only; review before sharing.
+; Legacy env aliases: OPENSHIM_BZRNET_TRACE_PRIVATE, BZ_BZRNET_TRACE_PRIVATE
+RelayLoggingPrivateForensic = 0
+
+; Trace all UDP sockets, not only the BZRNet ports.
+; Accepted: boolean. Default: OFF. High volume during a match.
+; Legacy env aliases: OPENSHIM_BZRNET_TRACE_ALL_UDP, BZ_BZRNET_TRACE_ALL_UDP
+RelayLoggingAllUdp = 0
+
+; Depth of the trace's in-memory queue, in records.
+; Accepted: integer; clamped to 256..65536. Default: 4096.
+; Raise this if the log reports dropped records under load.
+; Legacy env aliases: OPENSHIM_BZRNET_TRACE_QUEUE, BZ_BZRNET_TRACE_QUEUE
+RelayLoggingQueueRecords = 4096
+
 
 [Network]
+
+; Netcode tuning -- the send-rate governor, bandwidth floor/ceiling, ramp rates
+; and auto-kick envelope -- lives in net.ini under [OpenShimSocket], because it
+; is applied by the socket layer. It is on by default and needs no
+; configuration here; see net.ini for what each value does and why. Relay and
+; control-plane logging is under [Diagnostics] above.
 
 ; Preferred gameplay peer route. This changes route preference only; it does
 ; not add LAN browsing or direct-IP matchmaking.
