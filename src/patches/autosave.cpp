@@ -9,6 +9,7 @@
 // reverse-engineering/testing. OpenShim does not link or require EXU/Lua.
 
 #include "autosave.h"
+#include "BZROpenShim.h"
 #include "game_state.h"
 #include "shim_log.h"
 
@@ -717,7 +718,22 @@ namespace BZROpenShim
     bool ReloadAutoSaveConfig()
     {
         if (g_gameDirectory.empty())
+        {
+            // Nothing has initialized yet. That is either a first enable on a
+            // build where startup skipped setup, or a build the patcher refused.
+            // Re-check the gate rather than inheriting the caller's: the settings
+            // page is reachable independently of it, and InitializeAutoSave
+            // resolves version-specific addresses.
+            if (!IsCompatibleGameVersion())
+            {
+                LogShimA(
+                    LogLevel::Warn,
+                    "autosave",
+                    "Cannot enable AutoSave: this build did not pass the version check");
+                return false;
+            }
             return InitializeAutoSave();
+        }
 
         const bool wasEnabled = g_config.enabled;
         const ULONGLONG previousIntervalMs = g_config.intervalMs;
