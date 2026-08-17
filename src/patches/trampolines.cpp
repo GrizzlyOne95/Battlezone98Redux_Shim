@@ -4,8 +4,7 @@
 // Copyright (C) 2025 BZR Open Shim contributors
 // SPDX-License-Identifier: MIT
 //
-// Reconstructed from analysis of the reference patch behavior and the
-// GOG v2.2.301 executable.
+// Reconstructed from analysis of the GOG v2.2.301 executable.
 // All logic is described in terms of the purpose of each operation, not
 // copied bytes.
 
@@ -545,7 +544,7 @@ void __declspec(naked) __cdecl Trampoline_HopFix3()
 // -----------------------------------------------------------------------
 // Map List Fix Support 1/3
 // Site: 0x00799774
-// Purpose: mirror the reference patch's manual-refresh scroll path.
+// Purpose: restore the scroll position across a manual map-list refresh.
 // The helper consumes the saved row delta when possible; otherwise we fall
 // back to the original 0x007A3BD0 call using the outer frame context at [ebp].
 // -----------------------------------------------------------------------
@@ -1048,9 +1047,8 @@ void __declspec(naked) __cdecl Trampoline_VersionNotice()
 // -----------------------------------------------------------------------
 // Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)
 // Site: 0x00766C4A (CALL 0x00481AF0)
-// Stub mirrors the reference patch: call 0x481EA0, then original 0x481AF0,
-// then jump
-// to return address after the original stack cleanup.
+// Stub calls 0x481EA0, then the original 0x481AF0, then jumps to the return
+// address after the original stack cleanup.
 // -----------------------------------------------------------------------
 void __declspec(naked) __cdecl Trampoline_VehicleListModFix1()
 {

@@ -11,7 +11,7 @@ The reproducible workflow lives in:
 
 Generated output from the current GOG sample is stored at:
 
-- `reverse_engineering/workshop/[redacted]/ghidra_gog_exe_summary.md`
+- `reverse_engineering/ghidra_gog_exe_summary.md`
 
 ## PDB match status
 
@@ -79,7 +79,7 @@ Headless Ghidra analysis of the GOG executable lines up cleanly with the PDB nam
 
 - `0x00796880`
   - sets `cUI_Multiplayer_Create::vftable`
-  - acts as the main create-screen setup root containing several patch sites used by `[third-party patch DLL]`
+  - acts as the main create-screen setup root, and contains several of the patch sites OpenShim hooks
 
 - `0x00752A50`
   - compares the active filter string against `All Maps`, `Strategy`, `Death Match`, and

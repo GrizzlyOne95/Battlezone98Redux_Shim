@@ -58,7 +58,7 @@ namespace BZROpenShim
 
     // -----------------------------------------------------------------------
     // Return-jump pointer storage (filled at patch time by the loader).
-    // These mirror the reference patch's hop-fix return-address pointers.
+    // Each holds the address in BZR.exe where its trampoline resumes.
     // -----------------------------------------------------------------------
     inline void* g_RetAddr_HopFix1           = nullptr;
     inline void* g_RetAddr_HopFix2           = nullptr;
