@@ -258,6 +258,21 @@
       "name": "Music Buffer Global Focus",
       "fallback": "0x0043F20C",
       "expected_original": "68 88 01 01 00"
+    },
+    {
+      "name": "Artillery Weapon Mask Select Hook",
+      "fallback": "0x00475DDC",
+      "expected_original": "80 21 FA FF"
+    },
+    {
+      "name": "LayMines Weapon Mask Select Hook",
+      "fallback": "0x005128F7",
+      "expected_original": "65 56 F0 FF"
+    },
+    {
+      "name": "LayMines Weapon Mask Trigger Hook",
+      "fallback": "0x00512922",
+      "expected_original": "5A 6F FC FF"
     }
   ],
   "static_pointers": [
