@@ -1540,4 +1540,66 @@ void __declspec(naked) __cdecl Trampoline_RawWeaponMaskBias()
     }
 }
 
+// ---------------------------------------------------------------------------
+// AI weapon-mask hardpoint selection.
+//
+// Each of these replaces one `call rel32` to a __thiscall engine routine, so on
+// entry ecx holds the object, [esp] is the return address, [esp+4] is the single
+// stack argument, and the callee owns that argument (ret 4).
+//
+// ebp still belongs to the patched routine's own frame -- nothing here builds a
+// frame -- which is how the owning craft is recovered. The C helpers verify the
+// recovered craft actually owns the carrier before using it, so frame drift in a
+// future build falls back to stock rather than reading arbitrary memory.
+// ---------------------------------------------------------------------------
+
+// ArtilleryProcess::DoAttack @ 0x00475B30; patch the GetWeapon call at
+// 0x00475DDB. [ebp-0x250] is the ArtilleryProcess*, stored at 0x00475B45.
+void __declspec(naked) __cdecl Trampoline_ArtilleryWeaponSelect()
+{
+    __asm
+    {
+        mov  eax, [ebp - 0x250]     // ArtilleryProcess*
+        push eax                    // arg3: process
+        push dword ptr [esp + 8]    // arg2: slot
+        push ecx                    // arg1: carrier
+        call OpenShimArtillerySelectWeapon
+        add  esp, 12
+        ret  4
+    }
+}
+
+// LayMinesTask::DoArrived @ 0x005128D0; patch the GetWeapon call at 0x005128F6,
+// whose slot argument is the literal 0 pushed at 0x005128F1.
+// [ebp-0x0C] is the LayMinesTask*, stored at 0x005128D6.
+void __declspec(naked) __cdecl Trampoline_LayMinesWeaponSelect()
+{
+    __asm
+    {
+        mov  eax, [ebp - 0x0C]      // LayMinesTask*
+        push eax                    // arg3: task
+        push dword ptr [esp + 8]    // arg2: slot (stock literal 0)
+        push ecx                    // arg1: carrier
+        call OpenShimLayMinesGetWeapon
+        add  esp, 12
+        ret  4
+    }
+}
+
+// LayMinesTask::DoArrived; patch the SetSelected call at 0x00512921, whose mask
+// argument is the literal 1 pushed at 0x0051291C.
+void __declspec(naked) __cdecl Trampoline_LayMinesSetSelected()
+{
+    __asm
+    {
+        mov  eax, [ebp - 0x0C]      // LayMinesTask*
+        push eax                    // arg3: task
+        push dword ptr [esp + 8]    // arg2: mask (stock literal 1)
+        push ecx                    // arg1: carrier
+        call OpenShimLayMinesSetSelected
+        add  esp, 12
+        ret  4
+    }
+}
+
 } // namespace BZROpenShim

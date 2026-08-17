@@ -626,6 +626,30 @@ TurretAimPitchMultiplier = 0.95
 ; Accepted: boolean. Default: ON.
 JumpSnipeCrouch = 1
 
+; Make artillery and lay-mines AI honour the unit's weaponMask when choosing a
+; hardpoint.
+;
+; This is NOT a bug fix. Battlezone 1.5 behaves exactly as stock Redux does:
+; artillery AI takes the first fitted weapon in hardpoint order and the lay-mines
+; task hard-codes hardpoint 0, and neither one reads weaponMask in either build.
+; Turning this on is a deliberate departure from original Battlezone behaviour,
+; which is why it defaults OFF.
+;
+; The rule is "lowest set bit of (weaponMask AND fitted hardpoints)", falling
+; back to stock whenever the mask selects nothing that is actually fitted. With
+; the default ODF mask 11111 that resolves to the first fitted hardpoint -- the
+; same weapon stock would have picked -- so units without an explicit,
+; non-default mask are completely unaffected.
+;
+; ODF masks are read as decimal digits with the rightmost digit as hardpoint 0:
+;   00001 -> hardpoint 0    00010 -> hardpoint 1    00100 -> hardpoint 2
+;
+; Simulation-affecting, so like everything in this section it is hard-disabled in
+; network games regardless of the value set here.
+;
+; Accepted: boolean. Default: OFF.
+AiWeaponMaskSelection = 0
+
 ; Make turbo available globally on drivable units.
 ; Accepted: boolean. Default: OFF.
 Turbo = 0
