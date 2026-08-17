@@ -656,6 +656,14 @@ namespace BZROpenShim
         ApplyTrnSaveNormalizeHooks();
         uint32_t gameVer = GetBZRVersion();
         if (gameVer != static_cast<uint32_t>(g_Config.GetStaticPointer("BZR_EXPECTED_VERSION", BZR_EXPECTED_VERSION))) return;
+        // Publish the result of the check above. Everything past this point
+        // writes version-specific addresses, so reaching here IS the definition
+        // of a compatible build -- and callers outside the patcher have no other
+        // way to ask. This was never being set: the check early-returns on a
+        // mismatch and simply fell through on success, leaving the flag false
+        // forever. dllmain gates engine-level AutoSave on it, so AutoSave never
+        // initialized on any build.
+        SetCompatibleVersion(true);
         std::vector<uint8_t> sig; if (ReadExeSignature(sig)) WaitForSignature(sig);
         StartSoundChannelOverride(isSteam);
         g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForRuntime(patches, isSteam); ScanForPatchAddresses(patches, isSteam);

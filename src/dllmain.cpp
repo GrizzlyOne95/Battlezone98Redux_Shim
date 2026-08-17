@@ -46,9 +46,8 @@ static unsigned __stdcall PatchThreadProc(void*)
 
     // Phase 2 is safe to ask to initialize on every build: it is dormant by
     // default and independently verifies exact executable/Ogre hashes before
-    // it resolves addresses or installs either terrain hook.  Do not put it
-    // behind g_CompatibleVersion; the legacy patcher currently never promotes
-    // that flag after its version check.
+    // it resolves addresses or installs either terrain hook, so it does not
+    // need the version gate below.
     BZROpenShim::InitializeTerrainProxyPhase2();
 
     // AutoSave stacks its main-thread update hook after the normal patch set so
