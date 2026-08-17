@@ -117,6 +117,13 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::JMP5, {}, "Map List Fix Support 1/3", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Main Menu Version Text OpenShim", false, {} },
             { 0, HookEngine::PatchType::BYTE1, { 0xEB }, "Vehicle List Mod Fix 3/4 (Always Update Vehicle Control)", false, {} },
+            // Rewrites the whole `push 0x10188` that supplies DSBUFFERDESC.dwFlags
+            // for the streaming music buffer, adding DSBCAPS_GLOBALFOCUS (0x8000)
+            // so DirectSound stops muting it when the game loses foreground. The
+            // guard and the payload both cover the five-byte instruction rather
+            // than the immediate alone, so a build whose layout moved cannot land
+            // this on some other instruction's operand.
+            { 0, HookEngine::PatchType::BYTES, { 0x68, 0x88, 0x81, 0x01, 0x00 }, "Music Buffer Global Focus", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Chunk Render Resolve Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Producer Build Menu Root Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Target Reticle Popup Recent-Hit Getter Hook", false, {} },

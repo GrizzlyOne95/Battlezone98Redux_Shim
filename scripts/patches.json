@@ -253,6 +253,11 @@
       "name": "Map Filters 8/8",
       "fallback": "0x007997A9",
       "expected_original": "8B 45 F8 8B 88"
+    },
+    {
+      "name": "Music Buffer Global Focus",
+      "fallback": "0x0043F20C",
+      "expected_original": "68 88 01 01 00"
     }
   ],
   "static_pointers": [
