@@ -1882,7 +1882,19 @@ namespace BZROpenShim
         static constexpr uintptr_t kChunkEffectEntryBaseOffset = 0x28;
         static constexpr uintptr_t kChunkEffectVtableSimulateSlotAddr = 0x0087708C;
         static constexpr uintptr_t kChunkObjGeomRefOffset = 0x64;
-        static constexpr uintptr_t kViewRecordRva = 0x004FD770;
+        // Live GOG 2.2.301 View_Record. The previous value 0x004FD770 (VA
+        // 0x008FD770) has *zero* cross-references anywhere in .text -- the
+        // satellite gate below was reading unreferenced memory, so every
+        // [SATVIS] sample taken before 2026-08-17 is void. The real record is
+        // written by the satellite view setter (0x0061BD20) at 0x0061BE27:
+        //   mov [0x008EAAD4], 0            ; previous view
+        //   mov [0x008EAAD8], 3            ; Current_View = OVER_VIEW
+        //   mov [0x008EACB8], ecx          ; overview object
+        //   mov [0x008EAAD0], 0x0061BC90   ; Update_Camera = Set_Satellite_View
+        // Base 0x008EAAD0 + kPresetViewCurrentViewOffset (0x8) lands on
+        // 0x008EAAD8, which matches the independently derived
+        // kGogViewModeAddr used by the target-camera fix.
+        static constexpr uintptr_t kViewRecordRva = 0x004EAAD0;
         // The advisory-PDB object-list/userObject/userTeam globals that used
         // to live here (0x50D2F0/F8/E4) landed in string data on the live exe
         // and were removed 2026-07-18. Verified replacements: userObject
@@ -1961,9 +1973,35 @@ namespace BZROpenShim
         static constexpr int kGameTeamMax = 15;
         static constexpr size_t kProcessOwnerObjectOffset = 0x34;
         static constexpr size_t kPresetViewCurrentViewOffset = 0x8;
+        // GameObject visibility fields, complete-object relative. Derived from
+        // the shipped GOG image, not the advisory PDB: GameObject::Save passes
+        // each field name as a string literal to
+        // ::out(file, &this->field, size, "name"), and every one of those
+        // literals has exactly one .text cross-reference, immediately preceded
+        // by the `add reg, <offset>` that forms &this->field.
+        //
+        //   "illumination"  .rdata 0x00879D3C  xref 0x004DE199  add ecx, 0x0E8
+        //   "seqNo"         .rdata 0x0087405C  xref 0x004DE211  add ecx, 0x15C
+        //   "isObjective"   .rdata 0x00879D14  xref 0x004DE28B  add eax, 0x189
+        //   "isSelected"    .rdata 0x00879D08  xref 0x004DE2AE  add eax, 0x18A
+        //   "isVisible"     .rdata 0x00879CFC  xref 0x004DE2D1  add eax, 0x18C
+        //   "seen"          .rdata 0x00879CF4  xref 0x004DE2F4  add eax, 0x190
+        //   "perceivedTeam" .rdata 0x00879E2C  xref 0x004DE7E0  add ecx, 0x180
+        //
+        // Save's base register is complete-object minus 0xC, pinned by
+        // GameObject::GetPerceivedTeam (0x00462450) reading [interface+0x15C]
+        // together with the interface subobject living at complete+0x18:
+        // 0x180 - 0xC == 0x174 == kGameObjectPerceivedTeamOffset. So
+        // complete_offset = save_offset - 0xC for every field above.
+        //
+        // isVisible/seen were previously 0x184/0x188 here (the BZ 1.5 layout);
+        // that made the probe log `seen` in the isVisible column and an
+        // unrelated field as `seen`. Illumination at 0xDC was already correct.
         static constexpr size_t kGameObjectIlluminationOffset = 0xDC;
-        static constexpr size_t kGameObjectIsVisibleOffset = 0x184;
-        static constexpr size_t kGameObjectSeenOffset = 0x188;
+        static constexpr size_t kGameObjectIsObjectiveOffset = 0x17D;
+        static constexpr size_t kGameObjectIsSelectedOffset = 0x17E;
+        static constexpr size_t kGameObjectIsVisibleOffset = 0x180;
+        static constexpr size_t kGameObjectSeenOffset = 0x184;
         static constexpr size_t kGameObjectTargetHandleOffset = 0x214;
         static constexpr long kCameraTypeOverView = 3;
         static constexpr float kSuppressedRecentHitTime = -1.0e30f;
@@ -9286,10 +9324,19 @@ namespace BZROpenShim
         {
             void* objectPtr = nullptr;
             int team = INT_MIN;
+            int perceivedTeam = INT_MIN;
             float illumination = 0.0f;
             uint32_t isVisible = 0;
             uint32_t seen = 0;
             int targetHandle = 0;
+            int classType = -1;
+            bool isObjective = false;
+            bool isSelected = false;
+            // Derived, so a capture can be scored straight against the BZ 1.5
+            // behaviour table without post-processing.
+            bool detectedByUserTeam = false;   // (isVisible  >> userTeam) & 1
+            bool discoveredByUserTeam = false; // (seen       >> userTeam) & 1
+            bool legacyVisible = false;        // illumination > 0  -- the 1.5 gate
         };
 
         static int GetGameObjectTeamForLog(void* objectPtr)
@@ -9322,7 +9369,9 @@ namespace BZROpenShim
             }
         }
 
-        static bool CaptureSatelliteVisibilityEntry(void* objectPtr, SatelliteVisibilityLogEntry& outEntry)
+        static bool CaptureSatelliteVisibilityEntry(void* objectPtr,
+                                                    long userTeam,
+                                                    SatelliteVisibilityLogEntry& outEntry)
         {
             if (!objectPtr)
                 return false;
@@ -9332,6 +9381,8 @@ namespace BZROpenShim
                 auto* bytes = reinterpret_cast<uint8_t*>(objectPtr);
                 outEntry.objectPtr = objectPtr;
                 outEntry.team = GetGameObjectTeamForLog(objectPtr);
+                outEntry.perceivedTeam =
+                    *reinterpret_cast<const int*>(bytes + kGameObjectPerceivedTeamOffset);
                 outEntry.illumination =
                     *reinterpret_cast<const float*>(bytes + kGameObjectIlluminationOffset);
                 outEntry.isVisible =
@@ -9340,6 +9391,34 @@ namespace BZROpenShim
                     *reinterpret_cast<const uint32_t*>(bytes + kGameObjectSeenOffset);
                 outEntry.targetHandle =
                     *reinterpret_cast<const int*>(bytes + kGameObjectTargetHandleOffset);
+                outEntry.isObjective =
+                    *reinterpret_cast<const uint8_t*>(bytes + kGameObjectIsObjectiveOffset) != 0;
+                outEntry.isSelected =
+                    *reinterpret_cast<const uint8_t*>(bytes + kGameObjectIsSelectedOffset) != 0;
+
+                // Class type drives the BZ 1.5 special cases: category 2
+                // (building) is skipped by Scanner::BasicVisibility's per-frame
+                // reset, which is what makes discovered buildings stay visible,
+                // and category 4 (person) is skipped by SweepVisibility so
+                // pilots never appear. The Redux enum's mapping onto those
+                // legacy values is NOT yet confirmed -- log the raw value and
+                // read the mapping off a capture containing a known building
+                // and a known pilot.
+                outEntry.classType = -1;
+                if (const auto* objectClass = *reinterpret_cast<uint8_t* const*>(
+                        bytes + kGameObjectClassOffset))
+                {
+                    outEntry.classType =
+                        *reinterpret_cast<const int*>(objectClass + kObjectClassTypeOffset);
+                }
+
+                if (userTeam >= kGameTeamMin && userTeam <= kGameTeamMax)
+                {
+                    const uint32_t mask = 1u << static_cast<uint32_t>(userTeam);
+                    outEntry.detectedByUserTeam = (outEntry.isVisible & mask) != 0;
+                    outEntry.discoveredByUserTeam = (outEntry.seen & mask) != 0;
+                }
+                outEntry.legacyVisible = outEntry.illumination > 0.0f;
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -9353,13 +9432,24 @@ namespace BZROpenShim
             if (!tag)
                 return;
 
-            Log(L"[SATVIS]   %ls obj=0x%08X team=%d illum=%.3f isVisible=0x%08X seen=0x%08X target=0x%08X\n",
+            // Field order mirrors the BZ 1.5 decision chain: what the object
+            // is, then what the scanner pass decided, then what the legacy
+            // overview gate would have concluded.
+            Log(L"[SATVIS]   %ls obj=0x%08X team=%d perceivedTeam=%d class=%d objective=%d selected=%d "
+                L"illum=%.3f isVisible=0x%08X seen=0x%08X detected=%d discovered=%d legacyVisible=%d target=0x%08X\n",
                 tag,
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entry.objectPtr)),
                 entry.team,
+                entry.perceivedTeam,
+                entry.classType,
+                entry.isObjective ? 1 : 0,
+                entry.isSelected ? 1 : 0,
                 static_cast<double>(entry.illumination),
                 entry.isVisible,
                 entry.seen,
+                entry.detectedByUserTeam ? 1 : 0,
+                entry.discoveredByUserTeam ? 1 : 0,
+                entry.legacyVisible ? 1 : 0,
                 static_cast<uint32_t>(entry.targetHandle));
         }
 
@@ -9405,11 +9495,14 @@ namespace BZROpenShim
                     (totalObjects < maxSampleObjects) ? totalObjects : maxSampleObjects;
 
                 SatelliteVisibilityLogEntry userEntry = {};
-                const bool haveUserEntry = CaptureSatelliteVisibilityEntry(userObject, userEntry);
+                const bool haveUserEntry =
+                    CaptureSatelliteVisibilityEntry(userObject, userTeam, userEntry);
 
                 uint32_t illuminatedCount = 0;
                 uint32_t visibleCount = 0;
                 uint32_t seenCount = 0;
+                uint32_t detectedCount = 0;
+                uint32_t discoveredCount = 0;
                 std::array<SatelliteVisibilityLogEntry, 3> hiddenEntries = {};
                 std::array<SatelliteVisibilityLogEntry, 3> visibleEntries = {};
                 size_t hiddenLogged = 0;
@@ -9418,7 +9511,7 @@ namespace BZROpenShim
                 for (size_t index = 0; index < sampleObjects; ++index)
                 {
                     SatelliteVisibilityLogEntry entry = {};
-                    if (!CaptureSatelliteVisibilityEntry(s_satvisObjects[index], entry))
+                    if (!CaptureSatelliteVisibilityEntry(s_satvisObjects[index], userTeam, entry))
                         continue;
 
                     if (entry.illumination > 0.0f)
@@ -9427,8 +9520,15 @@ namespace BZROpenShim
                         ++visibleCount;
                     if (entry.seen != 0)
                         ++seenCount;
+                    if (entry.detectedByUserTeam)
+                        ++detectedCount;
+                    if (entry.discoveredByUserTeam)
+                        ++discoveredCount;
 
-                    if (entry.illumination <= 0.0f && entry.isVisible == 0)
+                    // Split on the legacy gate itself (illumination > 0), not
+                    // on the raw bitmask, so the two buckets mean exactly what
+                    // BZ 1.5's Submit_Overview_Entities would have decided.
+                    if (!entry.legacyVisible)
                     {
                         if (hiddenLogged < hiddenEntries.size())
                             hiddenEntries[hiddenLogged++] = entry;
@@ -9439,7 +9539,8 @@ namespace BZROpenShim
                     }
                 }
 
-                Log(L"[SATVIS] view=%ld userTeam=%ld userObj=0x%08X total=%u sampled=%u illum=%u visible=%u seen=%u interval=%lums remaining=%ld\n",
+                Log(L"[SATVIS] view=%ld userTeam=%ld userObj=0x%08X total=%u sampled=%u illum=%u visible=%u seen=%u "
+                    L"detected=%u discovered=%u interval=%lums remaining=%ld\n",
                     currentView,
                     userTeam,
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(userObject)),
@@ -9448,6 +9549,8 @@ namespace BZROpenShim
                     illuminatedCount,
                     visibleCount,
                     seenCount,
+                    detectedCount,
+                    discoveredCount,
                     static_cast<unsigned long>(g_SatelliteVisibilityLogIntervalMs),
                     g_SatelliteVisibilityLogBudget);
 
