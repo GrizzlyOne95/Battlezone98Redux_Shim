@@ -1623,7 +1623,12 @@ namespace BZROpenShim
         static bool g_TraceSatelliteVisibility = false;
         static uint32_t g_LastChunkEffectLoggedCount = UINT32_MAX;
         static volatile long g_ChunkRenderLogBudget = 12;
-        static volatile long g_SatelliteVisibilityLogBudget = 8;
+        // 8 was sized for an opt-in probe and burns out after 8 seconds of
+        // cumulative satellite viewing -- far too few to walk the validation
+        // matrix now that the trace defaults on. Budget is consumed only while
+        // the overview is actually open and is rate-limited to one sample per
+        // g_SatelliteVisibilityLogIntervalMs.
+        static volatile long g_SatelliteVisibilityLogBudget = 120;
         static uint32_t g_ChunkTraceEntryLimit = 32;
         // 96 slots exhaust in multi-craft battles (each death emits ~10 geo
         // pieces plus impact chunklets); once full, new chunks are silently
@@ -24089,10 +24094,40 @@ namespace BZROpenShim
              EnvFlagEnabled("OPENSHIM_CHUNK_EFFECT_TRACE"));
         InstallChunkEffectCreateHooksIfRequested();
         InstallChunkFragmentWalkHooksIfRequested();
-        g_TraceSatelliteVisibility =
-            EnvFlagEnabled("BZR_TRACE_SAT_VIS") ||
-            EnvFlagEnabled("OPENSHIM_TRACE_SAT_VIS") ||
-            EnvFlagEnabled("OPENSHIM_TRACE_SATELLITE_VISIBILITY");
+        // Satellite fog-of-war investigation (feature item 24). Defaulted ON
+        // for now so an ordinary session produces a scoreable capture with no
+        // launch-time setup; see
+        // reverse_engineering/satellite_fow_root_cause_20260817.md. Revert to
+        // default-OFF once the regression is characterised.
+        //
+        // Read the INI key directly rather than through the env-mapping shim:
+        // the mapping collapses to EnvFlagEnabled, which cannot tell "absent"
+        // from "0", and a default-ON option needs that distinction.
+        //
+        // Precedence, most specific first:
+        //   1. [Diagnostics] TraceSatelliteVisibility  (explicit, either way)
+        //   2. OPENSHIM_DISABLE_SAT_VIS / BZR_DISABLE_SAT_VIS
+        //   3. the legacy positive TRACE_* aliases (still honoured, though the
+        //      default now makes them redundant)
+        //   4. ON
+        {
+            bool satelliteVisibilityConfig = false;
+            if (TryGetUserConfigBool("Diagnostics", "TraceSatelliteVisibility",
+                                     satelliteVisibilityConfig))
+            {
+                g_TraceSatelliteVisibility = satelliteVisibilityConfig;
+            }
+            else if (EnvFlagEnabled("OPENSHIM_DISABLE_SAT_VIS") ||
+                     EnvFlagEnabled("BZR_DISABLE_SAT_VIS") ||
+                     EnvFlagEnabled("OPENSHIM_DISABLE_SATELLITE_VISIBILITY"))
+            {
+                g_TraceSatelliteVisibility = false;
+            }
+            else
+            {
+                g_TraceSatelliteVisibility = true;
+            }
+        }
         g_ConstructorRemoteBuildFixEnabled =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX") ||
               EnvFlagEnabled("BZR_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX"));
@@ -24135,7 +24170,7 @@ namespace BZROpenShim
         {
             g_ChunkProxyDebugSize = 2.5f;
         }
-        long satelliteVisibilityBudget = 8;
+        long satelliteVisibilityBudget = g_SatelliteVisibilityLogBudget;
         if (TryGetEnvLong("OPENSHIM_SAT_VIS_BUDGET", satelliteVisibilityBudget) ||
             TryGetEnvLong("BZR_SAT_VIS_BUDGET", satelliteVisibilityBudget))
         {
@@ -24246,6 +24281,16 @@ namespace BZROpenShim
             static_cast<uint32_t>(GetMainModuleBase() + kViewRecordRva),
             static_cast<uint32_t>(GetMainModuleBase() + kHeadlightUserObjectRva),
             static_cast<uint32_t>(GetMainModuleBase() + kHeadlightObjectArenaRva));
+        // Record the layout the sample lines were produced with, so a captured
+        // log stays interpretable if these offsets are ever revised again.
+        Log(L"[SATVIS]   offsets illum=+0x%02X isVisible=+0x%03X seen=+0x%03X perceivedTeam=+0x%03X objective=+0x%03X currentView=%ld expects=%ld\n",
+            static_cast<unsigned>(kGameObjectIlluminationOffset),
+            static_cast<unsigned>(kGameObjectIsVisibleOffset),
+            static_cast<unsigned>(kGameObjectSeenOffset),
+            static_cast<unsigned>(kGameObjectPerceivedTeamOffset),
+            static_cast<unsigned>(kGameObjectIsObjectiveOffset),
+            IsSatelliteOverviewActive() ? kCameraTypeOverView : -1L,
+            kCameraTypeOverView);
         Log(L"[MAGNET] Zero/non-finite range guard: %hs hook=%hs\n",
             g_MagnetZeroRangeGuardEnabled ? "enabled" : "disabled",
             g_MagnetMineSimulateHookInstalled ? "installed" : "pending");
