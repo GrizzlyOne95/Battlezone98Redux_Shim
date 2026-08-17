@@ -143,6 +143,8 @@ namespace
         {
             return TryReadMappedBool(mainIni, "General", "MapRefreshFixes", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_MUSIC_GLOBAL_FOCUS"))
+            return TryReadMappedBool(mainIni, "General", "MusicGlobalFocus", true, out);
         if (Equals(name, "OPENSHIM_ENABLE_OGRE_MATERIAL_COLLISION_GUARD") ||
             Equals(name, "BZR_ENABLE_OGRE_MATERIAL_COLLISION_GUARD"))
         {

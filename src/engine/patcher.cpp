@@ -157,6 +157,29 @@ namespace BZROpenShim
         return s_cached != 0;
     }
 
+    // Redux creates the streaming music buffer with dwFlags 0x10188 --
+    // LOCSOFTWARE | CTRLVOLUME | CTRLPOSITIONNOTIFY | GETCURRENTPOSITION2 --
+    // and neither DSBCAPS_GLOBALFOCUS nor DSBCAPS_STICKYFOCUS. DirectSound
+    // therefore stops the buffer whenever the game is not the foreground
+    // window. That alone would only mute it, but the refill runs off play
+    // position notifications: a stopped buffer's play cursor does not advance,
+    // no notification fires, and the streaming thread blocks in
+    // MsgWaitForMultipleObjects(INFINITE) without decoding. When focus returns
+    // the ring is replayed while the thread catches up, so the music keeps
+    // sounding but skips -- and anything that takes focus briefly (an overlay,
+    // a notification toast) does the same thing for a shorter moment.
+    //
+    // Adding GLOBALFOCUS keeps the buffer playing across focus changes, which
+    // keeps the notifications coming and the decoder fed.
+    static bool ShouldEnableMusicBufferGlobalFocus() {
+        static int s_cached = -1;
+        if (s_cached < 0) {
+            if (EnvFlagEnabledByName("OPENSHIM_DISABLE_MUSIC_GLOBAL_FOCUS")) s_cached = 0;
+            else s_cached = 1;
+        }
+        return s_cached != 0;
+    }
+
     static bool ShouldEnableProducerBuildMenuExperiment() {
         static int s_cached = -1;
         if (s_cached < 0) {
@@ -201,6 +224,8 @@ namespace BZROpenShim
     }
 
     static bool IsProducerBuildMenuExperimentPatchName(const char* name) { return name && strcmp(name, "Producer Build Menu Root Hook") == 0; }
+
+    static bool IsMusicBufferGlobalFocusPatchName(const char* name) { return name && strcmp(name, "Music Buffer Global Focus") == 0; }
 
     static bool IsLobbyBzrnetIntegrationPatchName(const char* name) {
         if (!name) return false;
@@ -251,6 +276,9 @@ namespace BZROpenShim
         }
         if (!ShouldEnableLobbyBzrnetIntegration(isSteam)) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsLobbyBzrnetIntegrationPatchName(p.name.c_str()); }), patches.end());
+        }
+        if (!ShouldEnableMusicBufferGlobalFocus()) {
+            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsMusicBufferGlobalFocusPatchName(p.name.c_str()); }), patches.end());
         }
     }
 

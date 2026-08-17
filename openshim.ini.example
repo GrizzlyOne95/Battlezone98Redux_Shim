@@ -96,6 +96,18 @@ ChunkMeshes = 1
 ;                     BZR_DISABLE_MAP_REFRESH_FIXES
 MapRefreshFixes = 1
 
+; Keep the soundtrack playing when the game is not the foreground window.
+; Accepted: boolean. Default: ON. Restart required.
+; Redux creates its streaming music buffer without DirectSound's GLOBALFOCUS
+; flag, so Windows stops that buffer on every focus change. Because the decoder
+; is woken by play-position notifications, a stopped buffer also stops being
+; refilled -- so on returning to the game the music audibly skips while the
+; streaming thread catches up. Alt-tab is the obvious trigger; overlays and
+; notification popups do the same thing more briefly.
+; Set OFF to restore stock behavior (music mutes while alt-tabbed).
+; Legacy env alias: OPENSHIM_DISABLE_MUSIC_GLOBAL_FOCUS
+MusicGlobalFocus = 1
+
 ; Prevent duplicate Ogre material declarations from escaping script parsing as
 ; ERR_DUPLICATE_ITEM and terminating the game.
 ; Accepted: boolean. Default: ON.
