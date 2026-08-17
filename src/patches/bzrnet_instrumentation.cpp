@@ -683,6 +683,15 @@ namespace
     BOOL CALLBACK InitializeOnce(PINIT_ONCE, PVOID, PVOID*)
     {
         g_Config = LoadConfig();
+        // Say so either way. A trace that never started and a trace that started
+        // and captured nothing are indistinguishable in a bug report otherwise.
+        LogShimA(LogLevel::Info, "bzrnet",
+            "[BZRNetTrace] relay logging %s (openshim.ini [Diagnostics] RelayLogging); "
+            "privateForensic=%d allUdp=%d queueRecords=%u",
+            g_Config.enabled ? "enabled" : "disabled",
+            g_Config.privateForensic ? 1 : 0,
+            g_Config.allUdp ? 1 : 0,
+            g_Config.queueRecords);
         if (!g_Config.enabled) return TRUE;
         BzrNetTraceConfig trace;
         trace.enabled = true;
