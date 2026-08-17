@@ -24,7 +24,7 @@ namespace BZROpenShim
 
     // -----------------------------------------------------------------------
     // Entry point - called on background thread from DllMain.
-    // Mirrors the reference patch startup flow:
+    // Startup flow:
     //   1. Opens a patch log
     //   2. Checks BZR.exe file version == 301
     //   3. Polls 0x00868300 until signature matches

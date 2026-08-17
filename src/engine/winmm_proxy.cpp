@@ -538,7 +538,8 @@ void FreeRealWinmm()
 
 // ---------------------------------------------------------------------------
 // All winmm.dll exports forwarded to the real DLL.
-// The complete export list was extracted from [third-party proxy DLL] via Ghidra.
+// The list mirrors the export table of the system winmm.dll (SysWOW64); a proxy
+// has to reproduce every name the loader may bind.
 // ---------------------------------------------------------------------------
 
 extern "C"

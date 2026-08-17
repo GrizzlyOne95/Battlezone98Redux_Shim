@@ -80,11 +80,9 @@ scripts/*
 !scripts/terrain_hd_tiles.example.json
 !scripts/audit_chunk_payload_coverage.py
 !scripts/match_legacy_chunk_pieces.py
-!scripts/extract[third-party patch DLL]_slot_table.py
 docs/*
 !docs/terrain-render-path.md
 !docs/bz15-multiplayer-ui-port.md
-!docs/[third-party patch]_MAP_FILTER_RE.md
 !docs/NETCODE_UPSTREAM_PARITY.md
 
 # Local third-party source/reference checkouts

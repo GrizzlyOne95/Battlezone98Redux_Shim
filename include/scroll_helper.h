@@ -245,7 +245,6 @@ namespace BZROpenShim
 
     // -----------------------------------------------------------------------
     // Hop-Fix 1 helper: capture selected entry + index.
-    // Mirrors the reference patch semantics in clean-room form.
     // ECX = map list context pointer.
     // -----------------------------------------------------------------------
     extern "C" inline void __fastcall SaveMapListSelection(void* ctx)
@@ -337,7 +336,6 @@ namespace BZROpenShim
 
     // -----------------------------------------------------------------------
     // Hop-Fix 2 helper: reselect entry by saved name.
-    // Mirrors the reference patch semantics in clean-room form.
     // ECX = screen object (this-ptr); list widget at +0x17C, entries at +0x1C8.
     //
     // IMPORTANT: the trampoline overwrote the engine's unconditional
@@ -466,7 +464,6 @@ namespace BZROpenShim
 
     // -----------------------------------------------------------------------
     // Hop-Fix 3 helper: restore visible row index by replaying list-step calls.
-    // Mirrors the reference patch semantics in clean-room form.
     // ECX = map list context pointer (frame-local).
     // -----------------------------------------------------------------------
     extern "C" inline void __fastcall RestoreMapListVisibleIndex(void* ctx)
@@ -999,7 +996,7 @@ namespace BZROpenShim
         }
     }
 
-    // Selects HopFix2 this-pointer using the reference patch's global map object.
+    // Selects HopFix2 this-pointer using the engine's global map-list object.
     // If unavailable, returns null and caller skips the helper call.
     inline void* __cdecl SelectHopFix2This(void* stack_this)
     {

@@ -150,7 +150,7 @@ namespace BZROpenShim
     extern float g_BanY;
     extern float g_TurretAimPitchMultiplier;
 
-    // Map filter state flags recovered from the reference patch analysis.
+    // Map filter state flags recovered from BZR.exe create-screen analysis.
     extern uint8_t g_MapFilterFlag11;
     extern uint8_t g_MapFilterFlag12;
     extern void* g_BzrFn_MapFilter8Check;
