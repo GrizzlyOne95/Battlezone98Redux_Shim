@@ -412,6 +412,37 @@ TraceMapRefresh = 0
 ; Legacy env aliases: OPENSHIM_TRACE_JUMP_SNIPING, OPENSHIM_TRACE_JUMPSNIPE
 TraceJumpSniping = 0
 
+; Sample per-object satellite/overview visibility state.
+; Accepted: boolean. Default: ON (temporarily, see below).
+; Logs [SATVIS] lines while the satellite view is open, sampling the
+; GameObject fields that Battlezone 1.5 used to decide what appeared in
+; satellite view: illumination, isVisible, seen, perceivedTeam, class type
+; and isObjective, plus derived detected/discovered/legacyVisible columns.
+; legacyVisible is `illumination > 0` -- the exact test 1.5's
+; Submit_Overview_Entities applied per object -- so a capture can be scored
+; directly against the legacy behaviour table.
+;
+; This is ON by default only while the satellite fog-of-war regression is
+; being characterised (feature item 24); it will return to OFF once that is
+; resolved. Read-only sampling, no gameplay effect. It costs nothing outside
+; satellite view: the sampler returns immediately when the view mode is not
+; overview, is rate-limited to one sample per second, and stops entirely once
+; its budget is spent. Set to 0 to silence it.
+;
+; Background and the live-test plan:
+;   reverse_engineering/satellite_fow_root_cause_20260817.md
+; Legacy env aliases: OPENSHIM_TRACE_SAT_VIS,
+;                     OPENSHIM_TRACE_SATELLITE_VISIBILITY, BZR_TRACE_SAT_VIS
+; To force it off from the environment instead: OPENSHIM_DISABLE_SAT_VIS=1
+TraceSatelliteVisibility = 1
+
+; Tuning for the sampler above. These have no dedicated INI keys yet; set the
+; environment names verbatim under [Environment] at the end of this file if
+; you need to change them:
+;   OPENSHIM_SAT_VIS_BUDGET        total samples per session   (default 120)
+;   OPENSHIM_SAT_VIS_INTERVAL_MS   minimum ms between samples  (default 1000)
+;   OPENSHIM_SAT_VIS_OBJECT_LIMIT  objects inspected per sample (default 96)
+
 ; Read-only Ogre animation/render overhead profiler.
 ; Accepted: boolean. Default: OFF.
 ; Emits roughly one-second samples for animation, software vertex blending,

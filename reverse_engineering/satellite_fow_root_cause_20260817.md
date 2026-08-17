@@ -435,8 +435,38 @@ the raw bitmask, so the two buckets mean precisely what 1.5's
 [SATVIS]   hidden obj=0x… team=2 perceivedTeam=2 class=1 objective=0 selected=0 illum=0.000 isVisible=0x00000004 seen=0x00000004 detected=0 discovered=0 legacyVisible=0 target=0x…
 ```
 
-Still gated behind `OPENSHIM_TRACE_SAT_VIS` / `OPENSHIM_TRACE_SATELLITE_VISIBILITY`,
-budgeted, and rate-limited. Release Win32 builds clean.
+**The trace now defaults ON**, gated by `[Diagnostics] TraceSatelliteVisibility`
+in `openshim.ini`, so an ordinary session produces a scoreable capture with no
+launch-time setup. This is temporary — it should return to default-OFF once the
+regression is characterised. Precedence, most specific first:
+
+1. `[Diagnostics] TraceSatelliteVisibility` — explicit, either direction
+2. `OPENSHIM_DISABLE_SAT_VIS` / `BZR_DISABLE_SAT_VIS`
+3. the legacy positive `OPENSHIM_TRACE_SAT_VIS` aliases (still honoured, now
+   redundant)
+4. ON
+
+The INI key is read directly rather than through the env-mapping shim in
+`openshim_env_config.cpp`: that shim collapses to `EnvFlagEnabled`, which cannot
+distinguish "absent" from "0", and a default-ON option needs that distinction.
+
+The sample budget moved from 8 to 120. Eight was sized for an opt-in probe and
+exhausts after eight seconds of cumulative satellite viewing — not enough to
+walk the section 9 matrix. Budget is consumed only while the overview is
+actually open, and sampling is rate-limited to once per second, so the trace
+costs nothing in normal play. `OPENSHIM_SAT_VIS_BUDGET`,
+`OPENSHIM_SAT_VIS_INTERVAL_MS` and `OPENSHIM_SAT_VIS_OBJECT_LIMIT` still tune it
+and can be set from the INI's `[Environment]` section without a rebuild.
+
+The startup banner now also prints the offsets each capture was produced with,
+so a saved log stays interpretable if these are ever revised again:
+
+```
+[SATVIS] Satellite visibility trace: enabled budget=120 interval=1000ms objectLimit=96 viewRecord=0x008EAAD0 …
+[SATVIS]   offsets illum=+0xDC isVisible=+0x180 seen=+0x184 perceivedTeam=+0x174 objective=+0x17D currentView=… expects=3
+```
+
+Release Win32 builds clean.
 
 One caveat: the `class=` value is the Redux class-type enum read at
 `objClass+0x1C`. Its mapping onto the legacy category values (2 = building,
