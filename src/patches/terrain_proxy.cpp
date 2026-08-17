@@ -2,6 +2,7 @@
 
 #include "terrain_semantic.h"
 
+#include "bzr_hooks.h"
 #include "bzr_options_ui.h"
 #include "shim_log.h"
 #include <nlohmann/json.hpp>
@@ -23,6 +24,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <map>
 #include <mutex>
 #include <set>
 #include <sstream>
@@ -130,6 +132,31 @@ namespace BZROpenShim
             int extent;
         };
 
+        // Ogre::Matrix4 is row-major float[4][4]; m[row][column]. Only used to
+        // project the proxy's world bounds into viewport pixels for the
+        // capture-framing diagnostic, never to drive rendering.
+        struct Matrix4
+        {
+            float m[4][4];
+        };
+
+        // Screen-space answer for one proxy/camera pair. `visible` is Ogre's
+        // own frustum test; the rect is the screen bounding box of the eight
+        // projected world-AABB corners, clamped to the viewport.
+        struct ProxyScreenRect
+        {
+            bool valid = false;
+            bool visible = false;
+            int viewportWidth = 0;
+            int viewportHeight = 0;
+            int left = 0;
+            int top = 0;
+            int right = 0;
+            int bottom = 0;
+            int cornersInFront = 0;
+            float coverage = 0.0f;
+        };
+
         struct OgreBox
         {
             uint32_t left;
@@ -191,6 +218,7 @@ namespace BZROpenShim
         static_assert(sizeof(IndexDataPrefix) == 16, "Redux Ogre IndexData ABI changed");
         static_assert(sizeof(RenderOperation) == 28, "Redux Ogre RenderOperation ABI changed");
         static_assert(sizeof(AxisAlignedBox) == 28, "Redux Ogre AxisAlignedBox ABI changed");
+        static_assert(sizeof(Matrix4) == 64, "Redux Ogre Matrix4 ABI changed");
 
         struct TerrainConfig
         {
@@ -206,6 +234,21 @@ namespace BZROpenShim
             int semanticDebugMode = 0;
             int semanticFrameCaptures = 0;
             int semanticFrameCaptureStride = 300;
+            // A capture that does not contain the cluster answers nothing, so
+            // the default is to wait for a framed one rather than spend the
+            // capture slot. Set to 0 for the old fixed-frame-index behaviour.
+            bool semanticFrameCaptureRequireOnScreen = true;
+            // 0.02 was guessed and proved too strict: on the live build no
+            // cluster exceeded 0.0164 of a 3840x2160 viewport, because terrain
+            // is seen at a grazing angle and projects to a thin band. A band of
+            // ~500x250 px is entirely measurable.
+            float semanticFrameCaptureMinCoverage = 0.005f;
+            bool followCamera = false;
+            // How far ahead of the eye the aim point is pushed, in world units.
+            float followCameraAimDistance = 35.0f;
+            // Re-choose the cluster when the proxy has gone this many rendered
+            // frames without being framed. 0 disables re-selection.
+            int followCameraReselectFrames = 300;
             bool hdEnabled = false;
             std::string hdManifest = "terrain_hd_tiles.json";
             int zoneOrdinal = -1;
@@ -401,6 +444,15 @@ namespace BZROpenShim
             void*, OgreSharedPtr*, uint32_t, uint32_t);
         using FnBlitPixelBuffer = void(__thiscall*)(
             void*, const OgreSharedPtr&, const OgreBox&, const OgreBox&);
+        using FnGetViewport = void* (__thiscall*)(void*, uint16_t);
+        using FnGetViewportCamera = void* (__thiscall*)(void*);
+        using FnGetViewportInt = int(__thiscall*)(void*);
+        using FnGetMatrix4 = const Matrix4* (__thiscall*)(void*);
+        // Ogre::Camera::isVisible(const AxisAlignedBox&, FrustumPlane*). The
+        // culling-plane out-parameter is always passed null here.
+        using FnCameraBoxVisible = bool(__thiscall*)(void*, const AxisAlignedBox&, int*);
+        using FnGetWorldBoundingBox = const AxisAlignedBox* (__thiscall*)(void*, bool);
+        using FnGetDerivedPosition = const Vector3* (__thiscall*)(void*);
 
         struct OgreApi
         {
@@ -499,6 +551,19 @@ namespace BZROpenShim
             FnGetTextureInt getTextureFormat = nullptr;
             FnGetTextureBuffer getTextureBuffer = nullptr;
             FnBlitPixelBuffer blitPixelBuffer = nullptr;
+            // Optional capture-framing APIs. Their absence disables only the
+            // screen-rect diagnostic and the camera-aware selection mode; the
+            // Phase 2/3A/3B render paths never depend on them.
+            FnGetViewport getViewport = nullptr;
+            FnGetViewportCamera getViewportCamera = nullptr;
+            FnGetViewportInt getViewportWidth = nullptr;
+            FnGetViewportInt getViewportHeight = nullptr;
+            FnGetMatrix4 getViewMatrix = nullptr;
+            FnGetMatrix4 getProjectionMatrix = nullptr;
+            FnCameraBoxVisible cameraBoxVisible = nullptr;
+            FnGetWorldBoundingBox getWorldBoundingBox = nullptr;
+            FnGetDerivedPosition getCameraDerivedPosition = nullptr;
+            FnGetQuaternion getCameraDerivedOrientation = nullptr;
         };
 
         TerrainConfig g_config;
@@ -565,6 +630,7 @@ namespace BZROpenShim
             SceneTeardown,
             ProcessShutdown,
             ProxyLost,
+            FramingStale,
         };
 
         const char* ForgetReasonName(TerrainForgetReason reason)
@@ -575,6 +641,7 @@ namespace BZROpenShim
             case TerrainForgetReason::SceneTeardown: return "scene_teardown";
             case TerrainForgetReason::ProcessShutdown: return "process_shutdown";
             case TerrainForgetReason::ProxyLost: return "proxy_lost";
+            case TerrainForgetReason::FramingStale: return "framing_stale";
             default: return "unknown";
             }
         }
@@ -603,6 +670,21 @@ namespace BZROpenShim
             if (end == text || *end != '\0')
                 return false;
             value = static_cast<int>(parsed);
+            return true;
+        }
+
+        bool ReadEnvFloat(const char* name, float& value)
+        {
+            char text[64] = {};
+            const DWORD length = GetEnvironmentVariableA(
+                name, text, static_cast<DWORD>(sizeof(text)));
+            if (length == 0 || length >= sizeof(text))
+                return false;
+            char* end = nullptr;
+            const float parsed = std::strtof(text, &end);
+            if (end == text || *end != '\0')
+                return false;
+            value = parsed;
             return true;
         }
 
@@ -666,6 +748,16 @@ namespace BZROpenShim
             config.semanticDebugMode = GetPrivateProfileIntA("Terrain", "TerrainSemanticDebug", 0, iniText.c_str());
             config.semanticFrameCaptures = GetPrivateProfileIntA("Terrain", "TerrainSemanticFrameCapture", 0, iniText.c_str());
             config.semanticFrameCaptureStride = GetPrivateProfileIntA("Terrain", "TerrainSemanticFrameCaptureStride", 300, iniText.c_str());
+            config.semanticFrameCaptureRequireOnScreen = GetPrivateProfileIntA(
+                "Terrain", "TerrainSemanticFrameCaptureRequireOnScreen", 1, iniText.c_str()) != 0;
+            config.semanticFrameCaptureMinCoverage = ReadIniFloat(
+                ini.c_str(), "TerrainSemanticFrameCaptureMinCoverage", 0.005f);
+            config.followCamera = GetPrivateProfileIntA(
+                "Terrain", "TerrainProxyFollowCamera", 0, iniText.c_str()) != 0;
+            config.followCameraAimDistance = ReadIniFloat(
+                ini.c_str(), "TerrainProxyFollowCameraAimDistance", 35.0f);
+            config.followCameraReselectFrames = GetPrivateProfileIntA(
+                "Terrain", "TerrainProxyFollowCameraReselectFrames", 300, iniText.c_str());
             config.hdEnabled = GetPrivateProfileIntA(
                 "Terrain", "TerrainHdEnabled", 0, iniText.c_str()) != 0;
             config.hdManifest = ReadIniString(
@@ -708,12 +800,33 @@ namespace BZROpenShim
             if (ReadEnvInt("OPENSHIM_TERRAIN_SEMANTIC_LEGACY_UV_QUANTIZATION",
                     quantizationOverride))
                 config.semanticLegacyUvQuantization = quantizationOverride != 0;
+            if (IsEnvEnabled("OPENSHIM_TERRAIN_PROXY_FOLLOW_CAMERA"))
+                config.followCamera = true;
+            int onScreenOverride = 0;
+            if (ReadEnvInt("OPENSHIM_TERRAIN_SEMANTIC_FRAME_CAPTURE_REQUIRE_ON_SCREEN",
+                    onScreenOverride))
+                config.semanticFrameCaptureRequireOnScreen = onScreenOverride != 0;
+            ReadEnvFloat("OPENSHIM_TERRAIN_SEMANTIC_FRAME_CAPTURE_MIN_COVERAGE",
+                config.semanticFrameCaptureMinCoverage);
+            ReadEnvFloat("OPENSHIM_TERRAIN_PROXY_FOLLOW_CAMERA_AIM_DISTANCE",
+                config.followCameraAimDistance);
+            if (!(config.followCameraAimDistance >= 0.0f))
+                config.followCameraAimDistance = 35.0f;
+            int reselectOverride = 0;
+            if (ReadEnvInt("OPENSHIM_TERRAIN_PROXY_FOLLOW_CAMERA_RESELECT_FRAMES",
+                    reselectOverride))
+                config.followCameraReselectFrames = reselectOverride;
+            if (config.followCameraReselectFrames < 0)
+                config.followCameraReselectFrames = 0;
             if (config.semanticFrameCaptures < 0)
                 config.semanticFrameCaptures = 0;
             if (config.semanticFrameCaptures > 64)
                 config.semanticFrameCaptures = 64;
             if (config.semanticFrameCaptureStride < 1)
                 config.semanticFrameCaptureStride = 1;
+            if (!(config.semanticFrameCaptureMinCoverage >= 0.0f) ||
+                config.semanticFrameCaptureMinCoverage > 1.0f)
+                config.semanticFrameCaptureMinCoverage = 0.005f;
             return config;
         }
 
@@ -1090,6 +1203,32 @@ namespace BZROpenShim
                 "?getFormat@Texture@Ogre@@UBE?AW4PixelFormat@2@XZ");
             g_ogre.blitPixelBuffer = Resolve<FnBlitPixelBuffer>(module,
                 "?blit@HardwarePixelBuffer@Ogre@@UAEXABVHardwarePixelBufferSharedPtr@2@ABUBox@2@1@Z");
+            g_ogre.getViewport = Resolve<FnGetViewport>(module,
+                "?getViewport@RenderTarget@Ogre@@UAEPAVViewport@2@G@Z");
+            g_ogre.getViewportCamera = Resolve<FnGetViewportCamera>(module,
+                "?getCamera@Viewport@Ogre@@QBEPAVCamera@2@XZ");
+            g_ogre.getViewportWidth = Resolve<FnGetViewportInt>(module,
+                "?getActualWidth@Viewport@Ogre@@QBEHXZ");
+            g_ogre.getViewportHeight = Resolve<FnGetViewportInt>(module,
+                "?getActualHeight@Viewport@Ogre@@QBEHXZ");
+            // Camera overrides getViewMatrix, so the Camera export is the
+            // correct implementation to call on a Camera*. getProjectionMatrix
+            // is only implemented by Frustum and is not overridden by Camera.
+            g_ogre.getViewMatrix = Resolve<FnGetMatrix4>(module,
+                "?getViewMatrix@Camera@Ogre@@UBEABVMatrix4@2@XZ");
+            g_ogre.getProjectionMatrix = Resolve<FnGetMatrix4>(module,
+                "?getProjectionMatrix@Frustum@Ogre@@UBEABVMatrix4@2@XZ");
+            g_ogre.cameraBoxVisible = Resolve<FnCameraBoxVisible>(module,
+                "?isVisible@Camera@Ogre@@UBE_NABVAxisAlignedBox@2@PAW4FrustumPlane@2@@Z");
+            g_ogre.getWorldBoundingBox = Resolve<FnGetWorldBoundingBox>(module,
+                "?getWorldBoundingBox@Entity@Ogre@@UBEABVAxisAlignedBox@2@_N@Z");
+            g_ogre.getCameraDerivedPosition = Resolve<FnGetDerivedPosition>(module,
+                "?getDerivedPosition@Camera@Ogre@@QBEABVVector3@2@XZ");
+            // Orientation rather than getDirection: the direction getters
+            // return Vector3 by value, which on x86 __thiscall needs a hidden
+            // return pointer. This one returns a const reference.
+            g_ogre.getCameraDerivedOrientation = Resolve<FnGetQuaternion>(module,
+                "?getDerivedOrientation@Camera@Ogre@@QBEABVQuaternion@2@XZ");
 
             const void* const required[] = {
                 reinterpret_cast<void*>(g_ogre.cloneMesh), reinterpret_cast<void*>(g_ogre.createEntity),
@@ -1542,7 +1681,10 @@ namespace BZROpenShim
             return true;
         }
 
-        bool MatchSelection(int zoneOrdinal, int zoneX, int zoneZ, int clusterX, int clusterZ)
+        // Configured selectors only. The implicit "first cluster" default is
+        // deliberately left to the caller so camera-aware selection can weigh
+        // all sixteen clusters instead of stopping at ordinal 0.
+        bool MatchExplicitSelection(int zoneOrdinal, int zoneX, int zoneZ, int clusterX, int clusterZ)
         {
             const int clusterOrdinal = clusterX * kClusterAxisCount + clusterZ;
             if (g_config.zoneOrdinal >= 0 && zoneOrdinal != g_config.zoneOrdinal)
@@ -1557,8 +1699,21 @@ namespace BZROpenShim
                 return false;
             if (g_config.clusterZ != INT_MIN && clusterZ != g_config.clusterZ)
                 return false;
-            if (g_config.clusterOrdinal < 0 && g_config.clusterX == INT_MIN && g_config.clusterZ == INT_MIN)
-                return clusterOrdinal == 0;
+            return true;
+        }
+
+        bool HasExplicitClusterSelector()
+        {
+            return g_config.clusterOrdinal >= 0 ||
+                g_config.clusterX != INT_MIN || g_config.clusterZ != INT_MIN;
+        }
+
+        bool MatchSelection(int zoneOrdinal, int zoneX, int zoneZ, int clusterX, int clusterZ)
+        {
+            if (!MatchExplicitSelection(zoneOrdinal, zoneX, zoneZ, clusterX, clusterZ))
+                return false;
+            if (!HasExplicitClusterSelector())
+                return clusterX * kClusterAxisCount + clusterZ == 0;
             return true;
         }
 
@@ -1831,6 +1986,195 @@ namespace BZROpenShim
             g_proxy.semanticBindingSignature = signature;
         }
 
+        // ---------------------------------------------------- capture framing --
+        // Everything below answers one question: is the proxy cluster actually
+        // on screen, and where? Sixteen captures across cluster ordinals 0-7
+        // once returned an identical ~6,000 pixels of static UI because nothing
+        // checked. It is diagnostic only and never influences rendering.
+
+        constexpr int kAabbExtentFinite = 1;
+
+        bool CaptureFramingApiAvailable()
+        {
+            return g_ogre.getRoot && g_ogre.getAutoCreatedWindow &&
+                g_ogre.getViewport && g_ogre.getViewportCamera &&
+                g_ogre.getViewportWidth && g_ogre.getViewportHeight &&
+                g_ogre.getViewMatrix && g_ogre.getProjectionMatrix &&
+                g_ogre.cameraBoxVisible && g_ogre.getWorldBoundingBox &&
+                g_ogre.getCameraDerivedPosition;
+        }
+
+        // Ogre::Matrix4 is row-major, so a point transform is
+        // result_i = sum_j m[i][j] * v_j with v_3 = 1.
+        Matrix4 MultiplyMatrix(const Matrix4& left, const Matrix4& right)
+        {
+            Matrix4 product = {};
+            for (int row = 0; row < 4; ++row)
+                for (int column = 0; column < 4; ++column)
+                    product.m[row][column] =
+                        left.m[row][0] * right.m[0][column] +
+                        left.m[row][1] * right.m[1][column] +
+                        left.m[row][2] * right.m[2][column] +
+                        left.m[row][3] * right.m[3][column];
+            return product;
+        }
+
+        // Resolves the camera the auto-created window is actually rendering
+        // through, which is the only one whose framing matches a capture.
+        bool GetActiveCamera(void*& camera, int& width, int& height)
+        {
+            camera = nullptr;
+            width = 0;
+            height = 0;
+            if (!CaptureFramingApiAvailable())
+                return false;
+            try
+            {
+                void* root = g_ogre.getRoot();
+                void* window = root ? g_ogre.getAutoCreatedWindow(root) : nullptr;
+                void* viewport = window ? g_ogre.getViewport(window, 0) : nullptr;
+                if (!viewport)
+                    return false;
+                camera = g_ogre.getViewportCamera(viewport);
+                if (!camera)
+                    return false;
+                width = g_ogre.getViewportWidth(viewport);
+                height = g_ogre.getViewportHeight(viewport);
+                return width > 0 && height > 0;
+            }
+            catch (...)
+            {
+                camera = nullptr;
+                return false;
+            }
+        }
+
+        // Screen bounding box of a world AABB's eight projected corners.
+        // Corners behind the eye plane are excluded and counted rather than
+        // wrapped around, so a partially clipped cluster reports a real rect
+        // plus an honest cornersInFront value instead of a plausible lie.
+        bool ProjectBoundsToScreen(void* camera,
+                                   const AxisAlignedBox& bounds,
+                                   int width,
+                                   int height,
+                                   ProxyScreenRect& out)
+        {
+            const Matrix4* view = g_ogre.getViewMatrix(camera);
+            const Matrix4* projection = g_ogre.getProjectionMatrix(camera);
+            if (!view || !projection)
+                return false;
+            const Matrix4 viewProjection = MultiplyMatrix(*projection, *view);
+
+            float minimumX = 0.0f;
+            float minimumY = 0.0f;
+            float maximumX = 0.0f;
+            float maximumY = 0.0f;
+            int inFront = 0;
+            for (int corner = 0; corner < 8; ++corner)
+            {
+                const Vector3 point = {
+                    (corner & 1) ? bounds.maximum.x : bounds.minimum.x,
+                    (corner & 2) ? bounds.maximum.y : bounds.minimum.y,
+                    (corner & 4) ? bounds.maximum.z : bounds.minimum.z
+                };
+                const float clipW =
+                    viewProjection.m[3][0] * point.x + viewProjection.m[3][1] * point.y +
+                    viewProjection.m[3][2] * point.z + viewProjection.m[3][3];
+                if (clipW <= 1e-4f)
+                    continue;
+                const float clipX =
+                    viewProjection.m[0][0] * point.x + viewProjection.m[0][1] * point.y +
+                    viewProjection.m[0][2] * point.z + viewProjection.m[0][3];
+                const float clipY =
+                    viewProjection.m[1][0] * point.x + viewProjection.m[1][1] * point.y +
+                    viewProjection.m[1][2] * point.z + viewProjection.m[1][3];
+                // Ogre normalized device coordinates put +1 at the top; the
+                // captured image is top-down, hence the Y inversion.
+                const float screenX = (clipX / clipW * 0.5f + 0.5f) * static_cast<float>(width);
+                const float screenY = (0.5f - clipY / clipW * 0.5f) * static_cast<float>(height);
+                if (inFront == 0)
+                {
+                    minimumX = maximumX = screenX;
+                    minimumY = maximumY = screenY;
+                }
+                else
+                {
+                    minimumX = (std::min)(minimumX, screenX);
+                    maximumX = (std::max)(maximumX, screenX);
+                    minimumY = (std::min)(minimumY, screenY);
+                    maximumY = (std::max)(maximumY, screenY);
+                }
+                ++inFront;
+            }
+
+            out.cornersInFront = inFront;
+            if (inFront == 0)
+            {
+                out.left = out.top = out.right = out.bottom = 0;
+                out.coverage = 0.0f;
+                return true;
+            }
+
+            const int left = static_cast<int>((std::max)(0.0f,
+                (std::min)(static_cast<float>(width), std::floor(minimumX))));
+            const int top = static_cast<int>((std::max)(0.0f,
+                (std::min)(static_cast<float>(height), std::floor(minimumY))));
+            const int right = static_cast<int>((std::max)(0.0f,
+                (std::min)(static_cast<float>(width), std::ceil(maximumX))));
+            const int bottom = static_cast<int>((std::max)(0.0f,
+                (std::min)(static_cast<float>(height), std::ceil(maximumY))));
+            out.left = left;
+            out.top = top;
+            out.right = right;
+            out.bottom = bottom;
+            const double area = static_cast<double>((std::max)(0, right - left)) *
+                static_cast<double>((std::max)(0, bottom - top));
+            out.coverage = static_cast<float>(
+                area / (static_cast<double>(width) * static_cast<double>(height)));
+            return true;
+        }
+
+        bool QueryProxyScreenRect(ProxyScreenRect& out)
+        {
+            out = {};
+            if (!g_proxy.proxyCreated || !g_proxy.proxyEntity)
+                return false;
+            void* camera = nullptr;
+            int width = 0;
+            int height = 0;
+            if (!GetActiveCamera(camera, width, height))
+                return false;
+            try
+            {
+                const AxisAlignedBox* bounds =
+                    g_ogre.getWorldBoundingBox(g_proxy.proxyEntity, true);
+                if (!bounds || bounds->extent != kAabbExtentFinite)
+                    return false;
+                out.viewportWidth = width;
+                out.viewportHeight = height;
+                // Ogre's own frustum test is authoritative for "visible";
+                // the projected rect only says where.
+                out.visible = g_ogre.cameraBoxVisible(camera, *bounds, nullptr);
+                if (!ProjectBoundsToScreen(camera, *bounds, width, height, out))
+                    return false;
+                out.valid = true;
+                return true;
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        // A capture is only worth writing when the cluster covers enough of the
+        // frame to measure. Both conditions are reported so a run that never
+        // frames the cluster says so instead of producing static-UI pixels.
+        bool ProxyIsFramed(const ProxyScreenRect& rect)
+        {
+            return rect.valid && rect.visible && rect.cornersInFront > 0 &&
+                rect.coverage >= g_config.semanticFrameCaptureMinCoverage;
+        }
+
         // Deterministic in-process frame capture. The stock desktop-screenshot
         // route cannot correlate two runs to the same logical frame; counting
         // terrain dispatches since semantic installation can. Opt-in only.
@@ -1838,7 +2182,29 @@ namespace BZROpenShim
         // means the same thing in two runs of the same mission.
         uint32_t g_semanticRenderFrames = 0;
         uint32_t g_semanticFramesWritten = 0;
+        uint32_t g_semanticNextCaptureFrame = 0;
+        uint32_t g_semanticFramingWaits = 0;
+        uint32_t g_semanticFramedStreak = 0;
         bool g_semanticCaptureUnavailable = false;
+        bool g_semanticFramingWaitLogged = false;
+
+        // The tick runs during the world render-queue update, so the buffer
+        // written by writeContentsToFile is the previously presented frame
+        // while the camera matrices describe the frame about to be drawn.
+        // Requiring the cluster to be framed for two consecutive frames keeps
+        // a capture off that one-frame boundary.
+        constexpr uint32_t kFramedStreakRequired = 2;
+
+        // Re-selection state. Selection runs once against whatever camera
+        // exists at the time; a live misn04 run showed the chosen cluster
+        // sitting entirely behind the gameplay camera (cornersInFront=0) for
+        // 12,600 consecutive frames, so an unframed proxy has to be re-chosen
+        // or the capture simply never happens. Bounded: each re-selection
+        // rebuilds a material and thirteen programs.
+        uint32_t g_unframedStreak = 0;
+        uint32_t g_reselectCount = 0;
+        bool g_reselectRequested = false;
+        constexpr uint32_t kMaxReselects = 16;
 
         void MaybeCaptureSemanticFrame()
         {
@@ -1852,9 +2218,68 @@ namespace BZROpenShim
                 g_semanticFramesWritten >=
                     static_cast<uint32_t>(g_config.semanticFrameCaptures))
                 return;
-            if (g_semanticRenderFrames %
-                    static_cast<uint32_t>(g_config.semanticFrameCaptureStride) != 0)
+            if (g_semanticRenderFrames < g_semanticNextCaptureFrame)
                 return;
+
+            // Framing gate. A capture that does not contain the cluster cannot
+            // answer a parity question, so by default the capture slot waits
+            // for a framed frame instead of being spent on one.
+            ProxyScreenRect rect;
+            const bool framingKnown = QueryProxyScreenRect(rect);
+            g_semanticFramedStreak = (framingKnown && ProxyIsFramed(rect))
+                ? g_semanticFramedStreak + 1 : 0;
+
+            // Ask the rebuild dispatcher to re-choose a cluster when this one
+            // has stopped being visible. The request is only raised here; the
+            // teardown itself happens at the dispatcher, which is the seam
+            // already proven safe for destroying proxy scene objects.
+            g_unframedStreak = g_semanticFramedStreak == 0 ? g_unframedStreak + 1 : 0;
+            if (g_config.followCamera && g_config.followCameraReselectFrames > 0 &&
+                !g_reselectRequested && g_reselectCount < kMaxReselects &&
+                g_unframedStreak >=
+                    static_cast<uint32_t>(g_config.followCameraReselectFrames))
+            {
+                g_reselectRequested = true;
+                LogShimA(LogLevel::Info, "terrain-proxy",
+                    "[TERRAIN-PROXY] follow-camera reselect requested unframedFrames=%u proxyGeneration=%u cluster=(%d,%d) reselects=%u/%u",
+                    g_unframedStreak, g_proxy.generation, g_proxy.clusterX,
+                    g_proxy.clusterZ, g_reselectCount, kMaxReselects);
+            }
+            if (g_config.semanticFrameCaptureRequireOnScreen)
+            {
+                if (!framingKnown)
+                {
+                    // Never let a diagnostic block the thing it measures: if
+                    // framing cannot be evaluated at all, say so once and fall
+                    // back to the old fixed-frame behaviour.
+                    if (!g_semanticFramingWaitLogged)
+                    {
+                        g_semanticFramingWaitLogged = true;
+                        LogShimA(LogLevel::Warn, "terrain-p3",
+                            "[TERRAIN-P3] frame capture framing unavailable; capturing without an on-screen check apiResolved=%d",
+                            CaptureFramingApiAvailable() ? 1 : 0);
+                    }
+                }
+                else if (g_semanticFramedStreak < kFramedStreakRequired)
+                {
+                    // Log the first wait and then periodically: a single record
+                    // cannot show whether coverage is trending toward the
+                    // threshold or the cluster is simply never framed.
+                    const uint32_t waits = ++g_semanticFramingWaits;
+                    if (!g_semanticFramingWaitLogged || waits % 600 == 0)
+                    {
+                        g_semanticFramingWaitLogged = true;
+                        LogShimA(LogLevel::Info, "terrain-p3",
+                            "[TERRAIN-P3] terrain_semantic: frame_capture waiting for framing renderFrame=%u visible=%d cornersInFront=%d coverage=%.5f minCoverage=%.5f streak=%u waits=%u",
+                            g_semanticRenderFrames, rect.visible ? 1 : 0,
+                            rect.cornersInFront, static_cast<double>(rect.coverage),
+                            static_cast<double>(g_config.semanticFrameCaptureMinCoverage),
+                            g_semanticFramedStreak, waits);
+                    }
+                    return;
+                }
+            }
+
             if (!g_ogre.getRoot || !g_ogre.getAutoCreatedWindow ||
                 !g_ogre.writeContentsToFile)
             {
@@ -1894,11 +2319,25 @@ namespace BZROpenShim
                 }
                 g_ogre.writeContentsToFile(window, path);
                 ++g_semanticFramesWritten;
+                g_semanticNextCaptureFrame = g_semanticRenderFrames +
+                    static_cast<uint32_t>(g_config.semanticFrameCaptureStride);
+                // The rect is emitted in the exact form the parity harness
+                // feeds back as -Region, so metrics can be restricted to the
+                // cluster instead of scoring HUD and sky as mismatches.
                 LogShimA(LogLevel::Info, "terrain-p3",
-                    "[TERRAIN-P3] terrain_semantic: frame_capture index=%u renderFrame=%u debug=%s legacyUVQuantization=%d path=\"%s\"",
+                    "[TERRAIN-P3] terrain_semantic: frame_capture index=%u renderFrame=%u debug=%s legacyUVQuantization=%d framed=%d visible=%d cornersInFront=%d coverage=%.5f viewport=%dx%d region=%d,%d,%d,%d waits=%u path=\"%s\"",
                     g_semanticFramesWritten, g_semanticRenderFrames,
                     SemanticDebugModeName(g_config.semanticDebugMode),
-                    g_config.semanticLegacyUvQuantization ? 1 : 0, path.c_str());
+                    g_config.semanticLegacyUvQuantization ? 1 : 0,
+                    framingKnown ? (ProxyIsFramed(rect) ? 1 : 0) : -1,
+                    framingKnown ? (rect.visible ? 1 : 0) : -1,
+                    framingKnown ? rect.cornersInFront : -1,
+                    static_cast<double>(framingKnown ? rect.coverage : 0.0f),
+                    rect.viewportWidth, rect.viewportHeight,
+                    rect.left, rect.top,
+                    (std::max)(0, rect.right - rect.left),
+                    (std::max)(0, rect.bottom - rect.top),
+                    g_semanticFramingWaits, path.c_str());
             }
             catch (...)
             {
@@ -1997,6 +2436,57 @@ namespace BZROpenShim
                 ReleaseCloneHandoff(destinationBuffer);
             }
             return true;
+        }
+
+        // Reports which array slices the selected cluster actually samples, and
+        // whether those slices carry distinct manifest images. This decides
+        // whether the run can demonstrate anything: if every tile index the
+        // cluster uses resolves to the same fallback image, the terrain will
+        // render plausibly no matter how wrong the slice mapping is, and a
+        // visual "looks right" would be worth nothing.
+        void LogTerrainHdTileCoverage(const TerrainHdMaterialBinding& binding)
+        {
+            std::map<uint32_t, uint32_t> usage;
+            for (const TerrainSemantic::Vertex& vertex : g_proxy.semanticVertices)
+                ++usage[static_cast<uint32_t>(vertex.gpu.tileIndex)];
+            if (usage.empty())
+            {
+                LogShimA(LogLevel::Warn, "terrain-hd",
+                    "[TERRAIN-HD] tile coverage unavailable: no semantic vertices for the selected cluster");
+                return;
+            }
+
+            size_t overridden = 0;
+            std::string detail;
+            for (const auto& entry : usage)
+            {
+                const bool hasOverride =
+                    binding.tiles.find(entry.first) != binding.tiles.end();
+                if (hasOverride)
+                    ++overridden;
+                if (!detail.empty())
+                    detail += ",";
+                char item[64] = {};
+                sprintf_s(item, "%u:%s:%u", entry.first,
+                    hasOverride ? "override" : "fallback", entry.second);
+                detail += item;
+            }
+
+            LogShimA(LogLevel::Info, "terrain-hd",
+                "[TERRAIN-HD] tile coverage material=\"%s\" distinctTiles=%zu overridden=%zu fallbackOnly=%zu tiles=[%s]",
+                g_proxy.materialName.c_str(), usage.size(), overridden,
+                usage.size() - overridden, detail.c_str());
+
+            if (overridden == 0)
+            {
+                LogShimA(LogLevel::Warn, "terrain-hd",
+                    "[TERRAIN-HD] every slice this cluster samples holds the fallback image; a correct-looking frame would not prove slice selection. Add manifest overrides for the tile indices above.");
+            }
+            else if (usage.size() < 2)
+            {
+                LogShimA(LogLevel::Warn, "terrain-hd",
+                    "[TERRAIN-HD] the cluster samples a single tile index, so this frame cannot distinguish correct slice ordering from a constant slice. Select a cluster spanning a transition.");
+            }
         }
 
         bool BuildTerrainHdTextureArray(
@@ -2122,6 +2612,7 @@ namespace BZROpenShim
                     binding.sliceCount, overrideCopies, maximumTileIndex,
                     width, height, mipmaps + 1, format,
                     binding.fallback.c_str());
+                LogTerrainHdTileCoverage(binding);
                 return true;
             }
             catch (...)
@@ -3302,6 +3793,17 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 g_semanticVbReleased, g_semanticMaterialCreated,
                 g_semanticMaterialRemoved, g_semanticProgramsCreatedTotal,
                 g_semanticProgramsRemovedTotal);
+            // Let the next mission report its own framing state. The capture
+            // budget itself stays process-wide, as it always has.
+            g_semanticFramingWaitLogged = false;
+            g_semanticFramingWaits = 0;
+            g_semanticFramedStreak = 0;
+            g_unframedStreak = 0;
+            g_reselectRequested = false;
+            // The re-selection budget is per mission, not per process.
+            if (reason == TerrainForgetReason::MissionTransition ||
+                reason == TerrainForgetReason::SceneTeardown)
+                g_reselectCount = 0;
             ResetSelectedState();
         }
 
@@ -3842,6 +4344,249 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             }
         }
 
+        struct ClusterCandidate
+        {
+            void* mesh = nullptr;
+            void* entity = nullptr;
+            void* node = nullptr;
+            int clusterX = 0;
+            int clusterZ = 0;
+            std::string meshName;
+            float cameraDistance = 0.0f;
+            float coverage = 0.0f;
+        };
+
+        // Resolves and identity-checks one cluster of a zone. `abort` means the
+        // layout assumption itself is wrong, so nothing in this zone can be
+        // trusted and the whole scan stops. A merely absent cluster is not an
+        // abort: camera-aware selection walks all sixteen, and one unpopulated
+        // entry must not veto the other fifteen. For the single-candidate case
+        // this is equivalent to the original behaviour, since the scan then
+        // ends with nothing selected either way.
+        bool ResolveClusterCandidate(void* zone, int zoneX, int zoneZ,
+                                     int clusterX, int clusterZ,
+                                     ClusterCandidate& candidate, bool& abort)
+        {
+            abort = false;
+            const size_t meshOffset = kZoneMeshPtrBase +
+                clusterX * kClusterXStride + clusterZ * kClusterZStride;
+            const size_t pointerOffset = clusterX * 0x10 + clusterZ * 4;
+            void* mesh = nullptr;
+            void* entity = nullptr;
+            void* node = nullptr;
+            if (!SafeReadZonePointer(zone, meshOffset, mesh) ||
+                !SafeReadZonePointer(zone, kZoneEntityBase + pointerOffset, entity) ||
+                !SafeReadZonePointer(zone, kZoneNodeBase + pointerOffset, node) ||
+                !mesh || !entity || !node)
+            {
+                return false;
+            }
+            const std::string* meshName = nullptr;
+            try
+            {
+                meshName = g_ogre.getResourceName(mesh);
+            }
+            catch (...)
+            {
+                abort = true;
+                return false;
+            }
+            int nameZoneX = 0;
+            int nameZoneZ = 0;
+            int nameClusterX = 0;
+            int nameClusterZ = 0;
+            if (!meshName ||
+                !ParseTerrainMeshName(*meshName, nameZoneX, nameZoneZ, nameClusterX, nameClusterZ) ||
+                nameZoneX != zoneX || nameZoneZ != zoneZ ||
+                nameClusterX != clusterX || nameClusterZ != clusterZ)
+            {
+                LogShimA(LogLevel::Warn, "terrain-proxy",
+                    "[TERRAIN-PROXY] native identity validation failed; selected cluster skipped");
+                abort = true;
+                return false;
+            }
+            candidate.mesh = mesh;
+            candidate.entity = entity;
+            candidate.node = node;
+            candidate.clusterX = clusterX;
+            candidate.clusterZ = clusterZ;
+            candidate.meshName = *meshName;
+            return true;
+        }
+
+        bool GetActiveCameraPosition(void*& camera, Vector3& position)
+        {
+            camera = nullptr;
+            position = {};
+            int width = 0;
+            int height = 0;
+            if (!GetActiveCamera(camera, width, height))
+                return false;
+            try
+            {
+                const Vector3* derived = g_ogre.getCameraDerivedPosition(camera);
+                if (!derived)
+                    return false;
+                position = *derived;
+                return true;
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        // Rotates a vector by a quaternion: v' = v + 2w(q x v) + 2(q x (q x v)).
+        Vector3 RotateByQuaternion(const Quaternion& q, const Vector3& v)
+        {
+            const Vector3 qv = { q.x, q.y, q.z };
+            const Vector3 t = {
+                2.0f * (qv.y * v.z - qv.z * v.y),
+                2.0f * (qv.z * v.x - qv.x * v.z),
+                2.0f * (qv.x * v.y - qv.y * v.x)
+            };
+            return {
+                v.x + q.w * t.x + (qv.y * t.z - qv.z * t.y),
+                v.y + q.w * t.y + (qv.z * t.x - qv.x * t.z),
+                v.z + q.w * t.z + (qv.x * t.y - qv.y * t.x)
+            };
+        }
+
+        // The ground the player is looking at: the player's own simulation
+        // position pushed forward along the view direction. An Ogre camera
+        // looks down local -Z.
+        //
+        // The origin is the player rather than the eye because the render
+        // camera can be a chase or satellite view far from them, and because
+        // the player is by definition standing on terrain, which makes the
+        // containment test below resolve instead of falling between clusters.
+        // The eye is used only as a fallback before the player object exists.
+        // A whole BZ98R map is 4x4 zones of 1,280 units. Anything further than
+        // this between the player and the render camera is a bad read.
+        constexpr float kMaxPlayerEyeSeparation = 5120.0f;
+        bool g_playerPositionRejectedLogged = false;
+
+        bool GetCameraAimPoint(void* camera, float aimDistance, Vector3& aim,
+                               bool& usedPlayer)
+        {
+            aim = {};
+            usedPlayer = false;
+            if (!g_ogre.getCameraDerivedPosition || !g_ogre.getCameraDerivedOrientation)
+                return false;
+            try
+            {
+                const Vector3* eye = g_ogre.getCameraDerivedPosition(camera);
+                const Quaternion* orientation = g_ogre.getCameraDerivedOrientation(camera);
+                if (!eye || !orientation)
+                    return false;
+
+                Vector3 origin = *eye;
+                float playerX = 0.0f;
+                float playerY = 0.0f;
+                float playerZ = 0.0f;
+                if (TryGetLocalPlayerWorldPosition(playerX, playerY, playerZ))
+                {
+                    // Sanity-gate the simulation read against the render camera.
+                    // Even a chase or satellite view stays within a few hundred
+                    // units of the player, so a position further away than a
+                    // whole map is a bad read, not a distant player. Observed:
+                    // z reads ~100797 on a 5120-unit map while x and y look
+                    // sane, which then makes every zone fail containment and
+                    // the mode defer forever. Falling back to the eye keeps
+                    // selection working while that offset is chased down.
+                    const float dx = playerX - eye->x;
+                    const float dy = playerY - eye->y;
+                    const float dz = playerZ - eye->z;
+                    const bool finite = std::isfinite(playerX) &&
+                                        std::isfinite(playerY) &&
+                                        std::isfinite(playerZ);
+                    const float distanceSquared = dx * dx + dy * dy + dz * dz;
+                    if (finite && distanceSquared <=
+                            kMaxPlayerEyeSeparation * kMaxPlayerEyeSeparation)
+                    {
+                        origin = { playerX, playerY, playerZ };
+                        usedPlayer = true;
+                    }
+                    else if (!g_playerPositionRejectedLogged)
+                    {
+                        g_playerPositionRejectedLogged = true;
+                        LogShimA(LogLevel::Warn, "terrain-proxy",
+                            "[TERRAIN-PROXY] follow-camera rejecting implausible player position player=(%.1f,%.1f,%.1f) eye=(%.1f,%.1f,%.1f) separation=%.1f limit=%.1f; anchoring on the camera instead",
+                            static_cast<double>(playerX), static_cast<double>(playerY),
+                            static_cast<double>(playerZ), static_cast<double>(eye->x),
+                            static_cast<double>(eye->y), static_cast<double>(eye->z),
+                            static_cast<double>(std::sqrt(distanceSquared)),
+                            static_cast<double>(kMaxPlayerEyeSeparation));
+                    }
+                }
+
+                const Vector3 forward =
+                    RotateByQuaternion(*orientation, Vector3{ 0.0f, 0.0f, -1.0f });
+                aim.x = origin.x + forward.x * aimDistance;
+                aim.y = origin.y + forward.y * aimDistance;
+                aim.z = origin.z + forward.z * aimDistance;
+                return true;
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        // Ground-plane distance from the aim point to a cluster's world bounds,
+        // zero when the aim point lands inside it. This is the whole selection
+        // rule: take the ground the player is looking at.
+        //
+        // It deliberately replaces an earlier screen-coverage ranking, which
+        // systematically preferred distant clusters: a cluster you are standing
+        // on has most of its corners behind the eye plane, so a rect built only
+        // from in-front corners underestimates exactly the cluster that fills
+        // the view. Y is ignored because terrain clusters tile the XZ plane.
+        bool ScoreClusterAgainstAim(void* entity, const Vector3& aim,
+                                    float& groundDistance, bool& contains)
+        {
+            groundDistance = 0.0f;
+            contains = false;
+            try
+            {
+                const AxisAlignedBox* bounds = g_ogre.getWorldBoundingBox(entity, true);
+                if (!bounds || bounds->extent != kAabbExtentFinite)
+                    return false;
+                const float dx = (std::max)(
+                    (std::max)(bounds->minimum.x - aim.x, aim.x - bounds->maximum.x), 0.0f);
+                const float dz = (std::max)(
+                    (std::max)(bounds->minimum.z - aim.z, aim.z - bounds->maximum.z), 0.0f);
+                contains = dx <= 0.0f && dz <= 0.0f;
+                groundDistance = std::sqrt(dx * dx + dz * dz);
+                return true;
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        uint32_t g_followCameraDeferrals = 0;
+        bool g_followCameraUnavailableLogged = false;
+
+        // Camera-aware selection needs the projection API. If it is missing the
+        // mode stands down to ordinal selection rather than never selecting.
+        bool FollowCameraUsable()
+        {
+            if (!g_config.followCamera)
+                return false;
+            if (CaptureFramingApiAvailable())
+                return true;
+            if (!g_followCameraUnavailableLogged)
+            {
+                g_followCameraUnavailableLogged = true;
+                LogShimA(LogLevel::Warn, "terrain-proxy",
+                    "[TERRAIN-PROXY] TerrainProxyFollowCamera requested but the OGRE camera exports are unresolved; falling back to ordinal selection");
+            }
+            g_config.followCamera = false;
+            return false;
+        }
+
         bool ObserveZone(void* zone)
         {
             if (!zone || g_proxy.tearingDown || g_proxy.selected || !g_discoveryArmed)
@@ -3861,45 +4606,105 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 g_zoneOrdinals.emplace(zone, zoneOrdinal);
             }
 
-            for (int clusterX = 0; clusterX < kClusterAxisCount; ++clusterX)
+            const bool followCamera = FollowCameraUsable();
+            void* camera = nullptr;
+            Vector3 cameraPosition = {};
+            Vector3 aim = {};
+            bool aimUsedPlayer = false;
+            int viewportWidth = 0;
+            int viewportHeight = 0;
+            if (followCamera &&
+                (!GetActiveCameraPosition(camera, cameraPosition) ||
+                 !GetActiveCamera(camera, viewportWidth, viewportHeight) ||
+                 !GetCameraAimPoint(camera, g_config.followCameraAimDistance, aim,
+                     aimUsedPlayer)))
             {
-                for (int clusterZ = 0; clusterZ < kClusterAxisCount; ++clusterZ)
+                // Zone construction can precede the gameplay camera. The
+                // rebuild dispatcher calls back on later dispatches, so defer
+                // rather than settle for a cluster nobody will ever see.
+                return false;
+            }
+
+            ClusterCandidate best;
+            bool haveBest = false;
+            int evaluated = 0;
+            int visible = 0;
+            for (int ordinal = 0; ordinal < kClusterAxisCount * kClusterAxisCount; ++ordinal)
+            {
+                const int clusterX = ordinal / kClusterAxisCount;
+                const int clusterZ = ordinal % kClusterAxisCount;
+                if (!MatchExplicitSelection(zoneOrdinal, zoneX, zoneZ, clusterX, clusterZ))
+                    continue;
+                if (!followCamera &&
+                    !MatchSelection(zoneOrdinal, zoneX, zoneZ, clusterX, clusterZ))
+                    continue;
+
+                ClusterCandidate candidate;
+                bool abort = false;
+                if (!ResolveClusterCandidate(zone, zoneX, zoneZ, clusterX, clusterZ,
+                        candidate, abort))
                 {
-                    if (!MatchSelection(zoneOrdinal, zoneX, zoneZ, clusterX, clusterZ))
-                        continue;
-                    const size_t meshOffset = kZoneMeshPtrBase + clusterX * kClusterXStride + clusterZ * kClusterZStride;
-                    const size_t pointerOffset = clusterX * 0x10 + clusterZ * 4;
-                    void* mesh = nullptr;
-                    void* entity = nullptr;
-                    void* node = nullptr;
-                    if (!SafeReadZonePointer(zone, meshOffset, mesh) ||
-                        !SafeReadZonePointer(zone, kZoneEntityBase + pointerOffset, entity) ||
-                        !SafeReadZonePointer(zone, kZoneNodeBase + pointerOffset, node) ||
-                        !mesh || !entity || !node)
-                    {
+                    if (abort)
                         return false;
-                    }
-                    const std::string* meshName = nullptr;
-                    try
+                    continue;
+                }
+                ++evaluated;
+
+                if (!followCamera)
+                {
+                    best = candidate;
+                    haveBest = true;
+                    break;
+                }
+
+                float groundDistance = 0.0f;
+                bool contains = false;
+                if (!ScoreClusterAgainstAim(candidate.entity, aim,
+                        groundDistance, contains))
+                    continue;
+                // Containment, not proximity. ObserveZone only ever sees the
+                // clusters of the zone currently being dispatched, so a
+                // "nearest within N units" rule happily settles for a cluster
+                // 2,000 units from where the player is looking simply because
+                // the right zone had not been dispatched yet. Requiring the
+                // aim point to land inside the cluster makes the wrong zone
+                // defer, and zones are re-dispatched constantly.
+                if (!contains)
+                    continue;
+                ++visible;
+                candidate.cameraDistance = groundDistance;
+                best = candidate;
+                haveBest = true;
+                break;
+            }
+
+            if (!haveBest)
+            {
+                if (followCamera)
+                {
+                    // Runs per zone per dispatch, so report the first deferral
+                    // and then only occasionally.
+                    const uint32_t deferrals = ++g_followCameraDeferrals;
+                    if (deferrals == 1 || deferrals % 600 == 0)
                     {
-                        meshName = g_ogre.getResourceName(mesh);
+                        LogShimA(LogLevel::Info, "terrain-proxy",
+                            "[TERRAIN-PROXY] follow-camera deferring selection zone=%d nativeZone=(%d,%d) evaluated=%d containing=%d aim=(%.1f,%.1f,%.1f) aimOrigin=%s deferrals=%u",
+                            zoneOrdinal, zoneX, zoneZ, evaluated, visible,
+                            static_cast<double>(aim.x), static_cast<double>(aim.y),
+                            static_cast<double>(aim.z),
+                            aimUsedPlayer ? "player" : "camera", deferrals);
                     }
-                    catch (...)
-                    {
-                        return false;
-                    }
-                    int nameZoneX = 0;
-                    int nameZoneZ = 0;
-                    int nameClusterX = 0;
-                    int nameClusterZ = 0;
-                    if (!meshName || !ParseTerrainMeshName(*meshName, nameZoneX, nameZoneZ, nameClusterX, nameClusterZ) ||
-                        nameZoneX != zoneX || nameZoneZ != zoneZ ||
-                        nameClusterX != clusterX || nameClusterZ != clusterZ)
-                    {
-                        LogShimA(LogLevel::Warn, "terrain-proxy",
-                            "[TERRAIN-PROXY] native identity validation failed; selected cluster skipped");
-                        return false;
-                    }
+                }
+                return false;
+            }
+
+            {
+                const int clusterX = best.clusterX;
+                const int clusterZ = best.clusterZ;
+                void* const mesh = best.mesh;
+                void* const entity = best.entity;
+                void* const node = best.node;
+                const std::string* const meshName = &best.meshName;
                     void* sceneManager = SafeGetSceneManager();
                     if (!sceneManager)
                         return false;
@@ -3920,20 +4725,39 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                     CaptureClusterHeightSignature(
                         g_proxy.heightHash, g_proxy.heightMinimum, g_proxy.heightMaximum);
                     LogShimA(LogLevel::Info, "terrain-proxy",
-                        "[TERRAIN-PROXY] selected zone=%d nativeZone=(%d,%d) cluster=%d nativeCluster=(%d,%d) zonePtr=%p sourceMesh=%p sourceEntity=%p sourceNode=%p heightHash=%08X heightRange=[%u,%u] mesh=\"%s\"",
+                        "[TERRAIN-PROXY] selected zone=%d nativeZone=(%d,%d) cluster=%d nativeCluster=(%d,%d) zonePtr=%p sourceMesh=%p sourceEntity=%p sourceNode=%p heightHash=%08X heightRange=[%u,%u] followCamera=%d evaluated=%d containing=%d aim=(%.1f,%.1f,%.1f) aimOrigin=%s aimAhead=%.1f aimGap=%.1f mesh=\"%s\"",
                         zoneOrdinal, zoneX, zoneZ, g_proxy.clusterOrdinal, clusterX, clusterZ,
                         g_proxy.zone, g_proxy.sourceMesh, g_proxy.sourceEntity,
                         g_proxy.sourceNode, g_proxy.heightHash,
                         static_cast<unsigned>(g_proxy.heightMinimum),
                         static_cast<unsigned>(g_proxy.heightMaximum),
+                        followCamera ? 1 : 0, evaluated, visible,
+                        static_cast<double>(aim.x), static_cast<double>(aim.y),
+                        static_cast<double>(aim.z),
+                        aimUsedPlayer ? "player" : "camera",
+                        static_cast<double>(g_config.followCameraAimDistance),
+                        static_cast<double>(best.cameraDistance),
                         g_proxy.sourceMeshName.c_str());
                     CreateProxy();
                     CaptureSemantics(true);
                     BuildAndValidateSemanticVertices(true);
+                    // With the proxy live, report where it actually lands on
+                    // screen. This is the value the harness needs and the one
+                    // that was missing when sixteen captures returned static UI.
+                    ProxyScreenRect rect;
+                    if (QueryProxyScreenRect(rect))
+                    {
+                        LogShimA(LogLevel::Info, "terrain-proxy",
+                            "[TERRAIN-PROXY] proxy framing visible=%d cornersInFront=%d coverage=%.5f viewport=%dx%d region=%d,%d,%d,%d",
+                            rect.visible ? 1 : 0, rect.cornersInFront,
+                            static_cast<double>(rect.coverage),
+                            rect.viewportWidth, rect.viewportHeight,
+                            rect.left, rect.top,
+                            (std::max)(0, rect.right - rect.left),
+                            (std::max)(0, rect.bottom - rect.top));
+                    }
                     return true;
-                }
             }
-            return false;
         }
 
         void* __fastcall ZoneConstructHook(
@@ -4013,6 +4837,26 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                     g_proxy.proxyEntityName.c_str(), g_proxyLostCount);
                 selectedZone = false;
                 ForgetTerrainProxy(TerrainForgetReason::ProxyLost, true, true);
+            }
+            // Honour a re-selection raised by the render tick. Doing it here
+            // rather than in the tick keeps proxy destruction on the seam that
+            // already handles it, instead of inside render-queue traversal.
+            // ObserveZone scores against the current camera, so a cluster that
+            // is behind the player cannot simply be re-chosen.
+            if (g_reselectRequested && !g_proxy.tearingDown)
+            {
+                g_reselectRequested = false;
+                g_unframedStreak = 0;
+                if (g_proxy.proxyCreated)
+                {
+                    ++g_reselectCount;
+                    LogShimA(LogLevel::Info, "terrain-proxy",
+                        "[TERRAIN-PROXY] follow-camera reselecting proxyGeneration=%u cluster=(%d,%d) reselects=%u/%u",
+                        g_proxy.generation, g_proxy.clusterX, g_proxy.clusterZ,
+                        g_reselectCount, kMaxReselects);
+                    selectedZone = false;
+                    ForgetTerrainProxy(TerrainForgetReason::FramingStale, true, true);
+                }
             }
             if (!g_proxy.selected && !g_proxy.tearingDown)
                 ObserveZone(zone);
@@ -4197,6 +5041,11 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 return 0;
             }
             LogShimA(LogLevel::Info, "terrain-proxy", "[TERRAIN-PROXY] exact executable build validated");
+
+            // The follow-camera aim point anchors on the player, which needs the
+            // GOG-build player-handle lookup wired up. The hash check above is
+            // what makes that address safe to take.
+            ResolveLocalPlayerLookupForVerifiedGogBuild();
 
             HMODULE ogre = nullptr;
             for (int attempt = 0; attempt < 600 && !g_shutdown.load(); ++attempt)

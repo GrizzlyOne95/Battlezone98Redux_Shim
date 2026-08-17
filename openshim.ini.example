@@ -139,7 +139,38 @@ TerrainProxyCluster = -1
 ; TerrainProxyClusterX = 0
 ; TerrainProxyClusterZ = 0
 
+; Pick the cluster the active camera can actually see, instead of the implicit
+; "first constructed cluster" default. Accepted: integer flag 0/1. Default: 0.
+; Without this, selection settles on cluster ordinal 0, which the mission-start
+; camera does not look at -- captures then contain only static UI. Selection is
+; deferred until the player object and a camera exist and some cluster of the
+; dispatched zone contains the aim point, so it normally lands a few dispatches
+; into gameplay rather than at zone construction. Explicit ordinal/coordinate
+; selectors above still constrain the candidates. Falls back to ordinal
+; selection if the OGRE camera exports do not resolve.
+TerrainProxyFollowCamera = 0
+
+; How far ahead of the player the aim point is pushed, in world units.
+; Accepted: finite decimal >= 0. Default: 35.0.
+; The aim point is the player's own simulation position projected along the
+; camera's view direction; the cluster whose world bounds contain it is the one
+; selected. The player is used rather than the eye because the render camera can
+; be a chase or satellite view far from them, and because the player is always
+; standing on terrain, which makes containment resolve.
+TerrainProxyFollowCameraAimDistance = 35.0
+
+; Re-choose the cluster after this many rendered frames with the proxy unframed.
+; Accepted: integer >= 0; 0 disables re-selection. Default: 300.
+; Selection runs once against whatever camera exists at the time, and a player
+; moves, so without this the proxy can sit behind the camera for the rest of the
+; mission. Each re-selection rebuilds a material and its programs, so the count
+; is capped at 16 per mission.
+TerrainProxyFollowCameraReselectFrames = 300
+
 ; Proxy translation in world units. Accepted: finite decimal; default 0.0.
+; NOTE: with TerrainProxyFollowCamera=1 a large offset moves the proxy away
+; from the visible stock cluster that was selected, so the proxy itself may be
+; off screen. The capture framing check below tests the proxy, not the source.
 TerrainProxyOffsetX = 0.0
 TerrainProxyOffsetY = 0.0
 TerrainProxyOffsetZ = 0.0
@@ -195,7 +226,29 @@ TerrainSemanticFrameCapture = 0
 
 ; Rendered world frames between deterministic captures.
 ; Accepted: integer >=1. Values <1 become 1. Default: 300.
+; With the framing gate below this is a minimum spacing rather than an exact
+; frame index: a capture slot waits past its stride boundary until the cluster
+; is framed.
 TerrainSemanticFrameCaptureStride = 300
+
+; Only write a capture when the proxy cluster is actually on screen.
+; Accepted: integer flag 0/1. Default: 1.
+; The shim projects the proxy's world bounds through the active camera; a
+; capture is written only when Ogre's frustum test passes, at least one bounds
+; corner is in front of the eye plane, and the projected rect covers at least
+; TerrainSemanticFrameCaptureMinCoverage of the viewport, for two consecutive
+; frames. Set to 0 for the old fixed-frame-index behaviour, which will happily
+; write captures containing nothing but HUD. If the camera exports cannot be
+; resolved at all, the shim logs once and captures without the check rather
+; than blocking.
+TerrainSemanticFrameCaptureRequireOnScreen = 1
+
+; Minimum fraction of the viewport the projected cluster must cover before a
+; capture counts as framed. Accepted: decimal 0.0..1.0. Default: 0.005.
+; Terrain is seen at a grazing angle, so a cluster projects to a thin band: on
+; the live build none exceeded 0.0164 of a 3840x2160 viewport. A band of roughly
+; 500x250 px is entirely measurable, so the bar is deliberately low.
+TerrainSemanticFrameCaptureMinCoverage = 0.005
 
 ; Phase 3B HD diffuse tile-array smoke path. DX11 only.
 ; Accepted: integer flag 0/1. Default: 0.

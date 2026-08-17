@@ -878,16 +878,66 @@ namespace BZROpenShim
         constexpr uintptr_t kCarrierGetWeaponAddr = 0x00417F60;
         constexpr uintptr_t kRefreshWeaponTransformAddr = 0x00681A00;
         constexpr uintptr_t kLocalUserObjectPtrAddr = 0x00917AFC;
-        constexpr uintptr_t kSmartReticlePositionAddr = 0x025CE79C;
-        constexpr uintptr_t kSmartReticleRangeAddr = 0x00886B20;
+        // The global Reticle lives at 0x025CE6D0 (its ctor at 0x005BA170 is
+        // called with that `this` from 0x0040B013). Member addresses below come
+        // from the class layout; nothing references them absolutely from inside
+        // Reticle itself because member access goes through its own `this`.
+        //
+        // Reticle::Simulate (0x005BA560) resolves the crosshair in a strict
+        // order, and convergence has to follow the same one:
+        //   selectObj = FindReticleObject(...)      ; object under the crosshair
+        //   if (selectObj == 0)                     ; ONLY THEN
+        //       groundPos = FindGroundPos()         ; terrain hit, writes gPos
+        //   else
+        //       groundPos = 0
+        // So gPos is stale whenever the crosshair is sitting on something, and
+        // reading it unconditionally aims at wherever the ground last was.
+        constexpr uintptr_t kSmartReticleSelectObjectAddr = 0x025CE77C;  // +0xAC
+        constexpr uintptr_t kSmartReticlePositionAddr = 0x025CE79C;      // +0xCC gPos
+        // 0x00886B20 is NOT a reticle range variable: it is a pooled read-only
+        // 200.0f literal in .rdata that 112 unrelated .text sites also load
+        // (comparisons, field initializers, arithmetic all over the game).
+        // Writing it moves the reticle range and 107 other things with it, so
+        // it is only ever read here as a byte guard, never written. The five
+        // reticle loads are redirected to g_SmartReticleRangeCell instead:
+        //
+        //   Reticle::FindReticleObject (0x005BC640)
+        //     0x005BC6CF F3 0F 10 05 [20 6B 88 00] movss  ; radius = range*0.5
+        //     0x005BC6F6 F3 0F 59 05 [20 6B 88 00] mulss  ; search center x
+        //     0x005BC728 F3 0F 59 05 [20 6B 88 00] mulss  ; search center z
+        //     0x005BC8BD 0F 2F 05    [20 6B 88 00] comiss ; depth cull
+        //   Reticle::FindGroundPos (0x005BCCA0)
+        //     0x005BCCB3 F3 0F 10 05 [20 6B 88 00] movss  ; terrain ray length
+        //
+        // The last one is what player reticle convergence ultimately aims at,
+        // since it caps how far down the sight gPos can land.
+        constexpr uintptr_t kSmartReticleRangePooledLiteralAddr = 0x00886B20;
+        struct SmartReticleRangeSite
+        {
+            uintptr_t instructionAddr;
+            uint8_t opcode[4];
+            uint8_t opcodeLen;
+        };
+        constexpr SmartReticleRangeSite kSmartReticleRangeSites[] = {
+            { 0x005BC6CF, { 0xF3, 0x0F, 0x10, 0x05 }, 4 },
+            { 0x005BC6F6, { 0xF3, 0x0F, 0x59, 0x05 }, 4 },
+            { 0x005BC728, { 0xF3, 0x0F, 0x59, 0x05 }, 4 },
+            { 0x005BC8BD, { 0x0F, 0x2F, 0x05, 0x00 }, 3 },
+            { 0x005BCCB3, { 0xF3, 0x0F, 0x10, 0x05 }, 4 },
+        };
         constexpr float kSmartReticleRangeStock = 200.0f;
         constexpr float kSmartReticleRangeDefault = 500.0f;
         constexpr float kSmartReticleRangeMin = 1.0f;
         constexpr float kSmartReticleRangeMax = 10000.0f;
-        // Live Redux craft layout: Carrier* is at +0x198. +0x1A0 belongs to
-        // the separately re-derived Person layout and is not valid for craft.
-        constexpr size_t kCraftCarrierOffset = 0x198;
+        // Craft layout taken from the stock aim updates themselves: all three
+        // UpdateWeaponAim bodies load the Carrier* from +0x1A0 right before
+        // calling Carrier::GetWeapon (0x005F0993, 0x004EB62C, 0x0060F3BC each
+        // `mov ecx,[this+0x1A0]` / `call 0x00417F60`).
+        constexpr size_t kCraftCarrierOffset = 0x1A0;
         constexpr size_t kWeaponObjectOffset = 0x10;
+        // The weapon's _OBJ76 carries its MAT_3D at kObj76TransformOffset, not
+        // at the object head. Stock pushes obj+0x20 into RefreshWeaponTransform
+        // at 0x005F0A38.
         constexpr int kConvergenceWeaponSlotCount = 5;
         constexpr float kConvergenceDirectionEpsilon = 0.001f;
 
@@ -1043,6 +1093,8 @@ namespace BZROpenShim
             uint32_t account = 0;
         };
 
+        static bool WritePatchBytes(uintptr_t address, const uint8_t* bytes, size_t len);
+        static bool TryGetGameObjectWorldPosition(void* gameObject, float (&outPosition)[3]);
         struct AiTuningConfig;
         static bool TryGetAiTuningForObject(void* objectPtr, AiTuningConfig& outConfig);
         static bool TryGetObjectOdfToken(void* objectPtr, char (&outToken)[kProducerBuildMenuTokenLen + 1]);
@@ -1149,10 +1201,22 @@ namespace BZROpenShim
         static bool g_WingmanWeaponAimWrapperActive = false;
         static bool g_PlayerReticleHovercraftPatchActive = false;
         static bool g_PlayerReticleConvergenceLayoutFaultLogged = false;
+        static constexpr int kPlayerReticleConvergenceLogLimit = 6;
+        static constexpr ULONGLONG kPlayerReticleConvergenceLogIntervalMs = 10000;
+        static int g_PlayerReticleConvergenceLogCount = 0;
+        static ULONGLONG g_PlayerReticleConvergenceLastLogTick = 0;
         static bool g_ShotConvergencePatchActive = false;
         static bool g_PlayerReticleShotConvergencePatchActive = false;
         static float g_SmartReticleRange = kSmartReticleRangeDefault;
         static float g_SmartReticleRangeBaseline = kSmartReticleRangeDefault;
+        // The reticle reads its range straight out of this cell once the
+        // redirect is installed, so it must live for the process lifetime --
+        // its absolute address is written into the instruction stream. It
+        // starts at the stock value, so installing the redirect on its own
+        // changes nothing.
+        static float g_SmartReticleRangeCell = kSmartReticleRangeStock;
+        static bool g_SmartReticleRangeRedirectActive = false;
+        static bool g_SmartReticleRangeRedirectFaultLogged = false;
         static bool g_SmartScavengerPathingEnabled = true;
         static bool g_TurretAimPitchBaselineEnabled = true;
         static bool g_ScrapPilotHudLegacyLayoutEnabled = true;
@@ -9731,11 +9795,33 @@ namespace BZROpenShim
                 if (!carrier)
                     return;
 
-                const ConvergenceVec3 target =
-                    *reinterpret_cast<const ConvergenceVec3*>(kSmartReticlePositionAddr);
+                // Mirror Reticle::Simulate's precedence: an object under the
+                // crosshair wins, and the terrain point is only the fallback.
+                // Taking gPos unconditionally would aim at stale ground every
+                // time the crosshair is over a unit -- exactly the case where
+                // convergence matters most.
+                ConvergenceVec3 target = {};
+                const char* targetSource = "ground";
+                void* selectObject =
+                    *reinterpret_cast<void* const*>(kSmartReticleSelectObjectAddr);
+                if (selectObject)
+                {
+                    float objectPosition[3] = {};
+                    if (!TryGetGameObjectWorldPosition(selectObject, objectPosition))
+                        return;
+                    target = { objectPosition[0], objectPosition[1], objectPosition[2] };
+                    targetSource = "object";
+                }
+                else
+                {
+                    target = *reinterpret_cast<const ConvergenceVec3*>(kSmartReticlePositionAddr);
+                }
+
                 if (!std::isfinite(target.x) || !std::isfinite(target.y) || !std::isfinite(target.z))
                     return;
 
+                int retargeted = 0;
+                ConvergenceVec3 lastOrigin = {};
                 for (int slot = 0; slot < kConvergenceWeaponSlotCount; ++slot)
                 {
                     void* weapon = carrierGetWeapon(carrier, slot);
@@ -9747,7 +9833,8 @@ namespace BZROpenShim
                     if (!weaponObject)
                         continue;
 
-                    auto* transform = reinterpret_cast<ConvergenceMatrix*>(weaponObject);
+                    auto* transform = reinterpret_cast<ConvergenceMatrix*>(
+                        reinterpret_cast<uint8_t*>(weaponObject) + kObj76TransformOffset);
                     const ConvergenceVec3 origin = {
                         static_cast<float>(transform->positionX),
                         static_cast<float>(transform->positionY),
@@ -9764,6 +9851,40 @@ namespace BZROpenShim
 
                     *transform = converged;
                     refreshWeaponTransform(weaponObject, transform);
+                    lastOrigin = origin;
+                    ++retargeted;
+                }
+
+                // Breadcrumbs proving the feature reaches a weapon, and where it
+                // is pointing it. Spaced out and capped: a single sample taken
+                // on the first simulated frame says nothing useful, because the
+                // sight matrix has not settled yet, but a handful spread across
+                // the first minute of play shows whether the reticle point
+                // tracks the craft or runs off the map.
+                if (retargeted > 0 &&
+                    g_PlayerReticleConvergenceLogCount < kPlayerReticleConvergenceLogLimit)
+                {
+                    const ULONGLONG now = GetTickCount64();
+                    if (g_PlayerReticleConvergenceLastLogTick == 0 ||
+                        now - g_PlayerReticleConvergenceLastLogTick >=
+                            kPlayerReticleConvergenceLogIntervalMs)
+                    {
+                        g_PlayerReticleConvergenceLastLogTick = now;
+                        ++g_PlayerReticleConvergenceLogCount;
+                        const float dx = target.x - lastOrigin.x;
+                        const float dy = target.y - lastOrigin.y;
+                        const float dz = target.z - lastOrigin.z;
+                        Log(L"[CONVERGE] player reticle convergence applied to %d hardpoint(s) source=%hs muzzle=(%.1f, %.1f, %.1f) target=(%.1f, %.1f, %.1f) distance=%.1f\n",
+                            retargeted,
+                            targetSource,
+                            static_cast<double>(lastOrigin.x),
+                            static_cast<double>(lastOrigin.y),
+                            static_cast<double>(lastOrigin.z),
+                            static_cast<double>(target.x),
+                            static_cast<double>(target.y),
+                            static_cast<double>(target.z),
+                            static_cast<double>(std::sqrt(dx * dx + dy * dy + dz * dz)));
+                    }
                 }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -9917,48 +10038,94 @@ namespace BZROpenShim
             return (std::clamp)(range, kSmartReticleRangeMin, kSmartReticleRangeMax);
         }
 
-        static bool TryReadSmartReticleRange(float& outRange)
+        // Builds the full stock instruction (opcode + the pooled literal's
+        // address as the disp32) so the guard anchors on the instruction rather
+        // than on the operand alone.
+        static void BuildSmartReticleRangeSiteBytes(
+            const SmartReticleRangeSite& site,
+            uint8_t (&outBytes)[8])
         {
-            __try
-            {
-                outRange = *reinterpret_cast<const float*>(kSmartReticleRangeAddr);
-                return std::isfinite(outRange);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
+            const uint32_t pooled = static_cast<uint32_t>(kSmartReticleRangePooledLiteralAddr);
+            std::memcpy(outBytes, site.opcode, site.opcodeLen);
+            std::memcpy(outBytes + site.opcodeLen, &pooled, sizeof(pooled));
         }
 
-        static bool TryWriteSmartReticleRange(float range)
+        // Points all five reticle range loads at our own cell. Either every
+        // site moves or none does -- a partial redirect would leave the reticle
+        // taking its range from two different places.
+        static bool EnsureSmartReticleRangeRedirect()
         {
-            DWORD oldProtect = 0;
-            if (!VirtualProtect(
-                    reinterpret_cast<void*>(kSmartReticleRangeAddr),
-                    sizeof(float),
-                    PAGE_EXECUTE_READWRITE,
-                    &oldProtect))
+            if (g_SmartReticleRangeRedirectActive)
+                return true;
+
+            for (const auto& site : kSmartReticleRangeSites)
             {
+                uint8_t expected[8] = {};
+                BuildSmartReticleRangeSiteBytes(site, expected);
+                if (ExpectedBytesMatchAt(site.instructionAddr, expected, site.opcodeLen + 4u))
+                    continue;
+
+                if (!g_SmartReticleRangeRedirectFaultLogged)
+                {
+                    Log(L"[RETICLE] Smart-reticle range redirect stood down: site 0x%08X does not hold the stock load; leaving the shared 200.0 literal alone\n",
+                        static_cast<uint32_t>(site.instructionAddr));
+                    g_SmartReticleRangeRedirectFaultLogged = true;
+                }
                 return false;
             }
 
-            bool wrote = false;
-            __try
+            const uint32_t cellAddr =
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g_SmartReticleRangeCell));
+            size_t written = 0;
+            for (const auto& site : kSmartReticleRangeSites)
             {
-                *reinterpret_cast<float*>(kSmartReticleRangeAddr) = range;
-                wrote = true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
+                if (!WritePatchBytes(
+                        site.instructionAddr + site.opcodeLen,
+                        reinterpret_cast<const uint8_t*>(&cellAddr),
+                        sizeof(cellAddr)))
+                {
+                    break;
+                }
+                ++written;
             }
 
-            DWORD restoreProtect = 0;
-            VirtualProtect(
-                reinterpret_cast<void*>(kSmartReticleRangeAddr),
-                sizeof(float),
-                oldProtect,
-                &restoreProtect);
-            return wrote;
+            if (written != std::size(kSmartReticleRangeSites))
+            {
+                // Put back whatever landed so the reticle stays wholly stock.
+                for (size_t index = 0; index < written; ++index)
+                {
+                    const auto& site = kSmartReticleRangeSites[index];
+                    const uint32_t pooled =
+                        static_cast<uint32_t>(kSmartReticleRangePooledLiteralAddr);
+                    WritePatchBytes(
+                        site.instructionAddr + site.opcodeLen,
+                        reinterpret_cast<const uint8_t*>(&pooled),
+                        sizeof(pooled));
+                }
+                if (!g_SmartReticleRangeRedirectFaultLogged)
+                {
+                    Log(L"[RETICLE] Smart-reticle range redirect failed to write (%zu of %zu sites); rolled back\n",
+                        written,
+                        std::size(kSmartReticleRangeSites));
+                    g_SmartReticleRangeRedirectFaultLogged = true;
+                }
+                return false;
+            }
+
+            g_SmartReticleRangeRedirectActive = true;
+            Log(L"[RETICLE] Smart-reticle range redirected to 0x%08X across %zu site(s); shared 200.0 literal at 0x%08X left untouched\n",
+                cellAddr,
+                std::size(kSmartReticleRangeSites),
+                static_cast<uint32_t>(kSmartReticleRangePooledLiteralAddr));
+            return true;
+        }
+
+        static bool TryReadSmartReticleRange(float& outRange)
+        {
+            if (!g_SmartReticleRangeRedirectActive)
+                return false;
+            outRange = g_SmartReticleRangeCell;
+            return std::isfinite(outRange);
         }
 
         static void RefreshSmartReticleRangeState()
@@ -9966,15 +10133,20 @@ namespace BZROpenShim
             const float desired = ReadLocalPlayerNetIdValue() == 0
                 ? g_SmartReticleRange
                 : kSmartReticleRangeStock;
-            float current = 0.0f;
-            if (TryReadSmartReticleRange(current) && current == desired)
+
+            // Without the redirect the only place left to put the value is the
+            // shared literal, which is what this feature must not touch. Stand
+            // down and leave the reticle at its stock range.
+            if (!EnsureSmartReticleRangeRedirect())
                 return;
-            if (TryWriteSmartReticleRange(desired))
-            {
-                Log(L"[RETICLE] Smart-reticle range=%.3f (%hs)\n",
-                    static_cast<double>(desired),
-                    desired == kSmartReticleRangeStock ? "stock/network" : "single-player");
-            }
+
+            if (g_SmartReticleRangeCell == desired)
+                return;
+
+            g_SmartReticleRangeCell = desired;
+            Log(L"[RETICLE] Smart-reticle range=%.3f (%hs)\n",
+                static_cast<double>(desired),
+                desired == kSmartReticleRangeStock ? "stock/network" : "single-player");
         }
 
         static bool TryCaptureScrapPilotHudBaseline()
@@ -29254,6 +29426,58 @@ namespace BZROpenShim
             MakeViewInputTransparent(g_NicknamePanelClient);
             UpdateNetRouteLabel(g_NetRouteLabelClient);
         }
+    }
+
+    // Authoritative local-player world position. Consumers that need to know
+    // where the player actually is should use this rather than the render
+    // camera, which can be a chase or satellite view a long way from them.
+    // Reuses the handle -> object -> transform path the chunk proxy path
+    // already depends on; no new offsets are introduced here.
+    // g_BzrFn_GetPlayerHandle used to be assigned in exactly one place: inside
+    // InstallJumpSnipingProbeIfRequested, which early-returns unless
+    // OPENSHIM_TRACE_JUMP_SNIPING is set. Every other caller therefore got a
+    // null pointer and a silent "no player" forever -- which is how the terrain
+    // follow-camera rule reported aimOrigin=camera on every record while
+    // claiming to anchor on the player. The address is a GOG-build constant, so
+    // callers must have already established they are on that exact build; the
+    // terrain proxy gates its whole worker on an exe SHA-256 match before
+    // calling this.
+    void ResolveLocalPlayerLookupForVerifiedGogBuild()
+    {
+        if (!g_BzrFn_GetPlayerHandle)
+        {
+            g_BzrFn_GetPlayerHandle =
+                reinterpret_cast<FnGetPlayerHandle>(kGogGetPlayerHandleAddr);
+        }
+        if (!g_BzrFn_GameObjectGetObjByHandle)
+        {
+            g_BzrFn_GameObjectGetObjByHandle =
+                &GameObjectFromHandleGog; // was 0x0046B160 (wrong fn; crashed)
+        }
+    }
+
+    bool TryGetLocalPlayerWorldPosition(float& x, float& y, float& z)
+    {
+        x = 0.0f;
+        y = 0.0f;
+        z = 0.0f;
+        if (!g_BzrFn_GetPlayerHandle || !g_BzrFn_GameObjectGetObjByHandle)
+            return false;
+
+        const int handle = g_BzrFn_GetPlayerHandle();
+        if (handle == 0)
+            return false;
+        void* person = g_BzrFn_GameObjectGetObjByHandle(handle);
+        if (!person)
+            return false;
+
+        float position[3] = {};
+        if (!TryGetGameObjectWorldPosition(person, position))
+            return false;
+        x = position[0];
+        y = position[1];
+        z = position[2];
+        return true;
     }
 
     // Stub: chunk fragment event flush not present in this revision.

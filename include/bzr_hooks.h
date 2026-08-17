@@ -14,6 +14,16 @@ namespace BZROpenShim
     void SetProducerBuildMenuOriginal(void* target);
     void FlushChunkFragmentEventsForShutdown();
 
+    // Wire up the GOG-build player-handle lookup. Only call this once the exact
+    // GOG executable has been confirmed (e.g. by SHA-256), because the address
+    // is a build constant. Without it TryGetLocalPlayerWorldPosition below can
+    // never succeed unless the jump-sniping probe happens to be enabled.
+    void ResolveLocalPlayerLookupForVerifiedGogBuild();
+
+    // Local-player world position from the simulation, not the render camera.
+    // False when the player handle or object is not resolvable yet.
+    bool TryGetLocalPlayerWorldPosition(float& x, float& y, float& z);
+
     // Vehicle list mod fix helpers (rel32 patch target + helper for jmp stub).
     void __fastcall VehicleListModFix2(void* thisPtr, void* edx, BzrString* name);
     void VehicleListModFix4Helper();

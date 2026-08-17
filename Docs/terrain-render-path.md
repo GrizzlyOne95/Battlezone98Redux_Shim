@@ -752,6 +752,11 @@ to depend on profile-API write caching:
 | `TerrainSemanticDebug` | `OPENSHIM_TERRAIN_SEMANTIC_DEBUG` |
 | `TerrainSemanticFrameCapture` | `OPENSHIM_TERRAIN_SEMANTIC_FRAME_CAPTURE` |
 | `TerrainSemanticFrameCaptureStride` | `OPENSHIM_TERRAIN_SEMANTIC_FRAME_CAPTURE_STRIDE` |
+| `TerrainSemanticFrameCaptureRequireOnScreen` | `OPENSHIM_TERRAIN_SEMANTIC_FRAME_CAPTURE_REQUIRE_ON_SCREEN` |
+| `TerrainSemanticFrameCaptureMinCoverage` | `OPENSHIM_TERRAIN_SEMANTIC_FRAME_CAPTURE_MIN_COVERAGE` |
+| `TerrainProxyFollowCamera` | `OPENSHIM_TERRAIN_PROXY_FOLLOW_CAMERA` |
+| `TerrainProxyFollowCameraAimDistance` | `OPENSHIM_TERRAIN_PROXY_FOLLOW_CAMERA_AIM_DISTANCE` |
+| `TerrainProxyFollowCameraReselectFrames` | `OPENSHIM_TERRAIN_PROXY_FOLLOW_CAMERA_RESELECT_FRAMES` |
 
 ### Semantic debug visualization
 
@@ -1085,6 +1090,10 @@ renders the 16-colour palette and mode 7 renders black.
 - `TerrainSemanticDebug=7` renders pure black over the cluster: across five
   3840x2160 captures, 4,348,401 cluster pixels, **zero** with a nonzero delta at
   640x amplification. This is the per-pixel packed-vs-semantic parity proof.
+  **DISPUTED as of 2026-08-17** — see "BLOCKER: the proxy entity renders no
+  pixels". The proxy has since been shown not to draw when displaced from the
+  stock cluster, and this measurement was taken at zero offset where the two are
+  coincident. Those black pixels may not have come from the proxy at all.
 - Full-nibble orientation reaches the GPU. Exact framebuffer classification
   against the palette confirms values 1,2,3,4,5,6,10,11,12,13 -- including 12 and
   13, which occupy one cell each out of 256. Since 2,3,4,5 are observed
@@ -1281,10 +1290,15 @@ installs correctly: `debug=uvDelta`, 109 passes specialized, bind audit
 Automated re-measurement **failed to frame the cluster**. The mission-start
 camera does not see it: sixteen captures across cluster ordinals 0-7, plus an
 offset proxy moved to the world origin, all returned an identical ~6,000
-B == 0 pixels, which is static UI rather than terrain. The earlier per-pixel
-proof (4,348,401 cluster pixels, zero nonzero delta) stands, and the shader
-generation code was not modified during this session, but a fresh proof needs
-a human-framed capture with the cluster on screen.
+B == 0 pixels, which is static UI rather than terrain. The shader generation
+code was not modified during this session, but a fresh proof needs a capture
+with the cluster on screen.
+
+The earlier per-pixel proof (4,348,401 cluster pixels, zero nonzero delta) was
+treated as still standing here. As of 2026-08-17 it does not — the proxy has
+been shown not to render at all when displaced, so a black cluster observed at
+zero offset proves nothing about the proxy. See "BLOCKER: the proxy entity
+renders no pixels".
 
 ### Status of the Phase 3A gate
 
@@ -1407,3 +1421,374 @@ cannot alias stock-atlas and HD-array fragment programs.
 - **OUTSIDE THIS SLICE:** whole-map proxying, stock-terrain suppression,
   normal/specular/emissive arrays, PBR material replacement, LOD and device-loss
   recreation.
+
+### Whether an HD run can prove anything
+
+`[TERRAIN-HD] tile coverage` reports which slices the selected cluster actually
+samples, how many of them carry an explicit manifest image, and the vertex count
+per tile index:
+
+```text
+[TERRAIN-HD] tile coverage material="MA_DETAIL_ATLAS" distinctTiles=5 overridden=5 fallbackOnly=0 tiles=[11:override:1204,12:override:880,...]
+```
+
+Two cases are called out because they make a visual pass meaningless:
+
+- `overridden=0` — every slice the cluster samples holds the same fallback
+  image, so the terrain renders plausibly regardless of how wrong the slice
+  mapping is.
+- `distinctTiles=1` — the cluster samples one tile index, so a correct mapping
+  and a constant slice are indistinguishable in that frame.
+
+Check this record before judging an HD frame. It is the difference between "the
+terrain looked fine" and "slice selection was exercised and was correct".
+
+## Self-framing capture
+
+The Phase 3A closeout and the interactive pass both failed the same way: the
+GPU-side proof needed the cluster on screen, and nothing checked that it was.
+Sixteen captures across cluster ordinals 0-7, plus a proxy moved to the world
+origin, all returned an identical ~6,000 pixels of static UI. Two causes, both
+now addressed. Neither mechanism can influence rendering; both are diagnostics.
+
+### Selection: the ground the player is looking at
+
+Selection previously defaulted to construction ordinal 0 of the first zone,
+which the mission-start camera does not look at. `TerrainProxyFollowCamera = 1`
+instead computes an **aim point** — the player's own simulation position pushed
+`TerrainProxyFollowCameraAimDistance` world units along the camera's view
+direction — and selects the cluster whose world bounds contain it.
+
+Three earlier rules were tried and discarded against live evidence, which is
+worth recording because each looked reasonable:
+
+1. **Nearest visible cluster by 3D distance.** Picked a cluster 929.8 units away
+   that projected to 0.64% of a 3840x2160 viewport, hard against the left edge.
+2. **Largest projected screen coverage.** Better (1.64%) but still wrong in a
+   systematic way: a cluster you are standing on has most of its corners behind
+   the eye plane, and a rect built only from in-front corners underestimates
+   exactly the cluster that fills the view. The ranking therefore preferred
+   distant, fully-visible clusters over near ones.
+3. **Nearest to the aim point within a distance bound.** `ObserveZone` only ever
+   sees the clusters of the zone currently being dispatched, so a "nearest
+   within N units" rule happily settled for a cluster 1,966 units from the aim
+   point simply because the player's zone had not been dispatched yet.
+
+The rule is now strict containment. A zone that does not contain the aim point
+defers, and zones are re-dispatched constantly, so the player's own zone comes
+around. `TerrainProxyFollowCameraMaxDistance` was removed rather than left as a
+knob that no longer does anything.
+
+The aim origin is the player, not the eye, for two reasons: the render camera
+can be a chase or satellite view a long way from them, and the player is by
+definition standing on terrain, which makes containment resolve instead of
+falling between clusters. It comes from
+`TryGetLocalPlayerWorldPosition` in `bzr_hooks.cpp`, which reuses the
+`GetPlayerHandle` -> `GameObjectGetObjByHandle` -> world-transform path the
+chunk proxy path already depends on; no new offsets were introduced. The eye is
+used as a fallback before the player object resolves, and the record reports
+which was used as `aimOrigin=player|camera`.
+
+Selection is deferred, not forced: zone construction can precede the gameplay
+camera, so when no camera exists or no cluster is visible, `ObserveZone` returns
+without selecting and the rebuild dispatcher retries on a later dispatch. That
+retry path already existed for proxy-loss recovery. Deferrals are logged on the
+first occurrence and then every 600th, so a mission that never frames a cluster
+says so rather than sitting silent. If the OGRE camera exports do not resolve,
+the mode logs once and stands down to ordinal selection.
+
+Explicit ordinal and native-coordinate selectors still constrain the candidate
+set, so a pinned cluster stays pinned.
+
+### Reselection: the player moves, so the cluster has to
+
+Selecting once is not enough. A player drives away from the cluster they started
+on within seconds, and a proxy pinned to it is then permanently off screen for
+the rest of the mission — which is exactly the failure the framing gate would
+otherwise report forever as `waiting for framing`.
+
+When the proxy has gone `TerrainProxyFollowCameraReselectFrames` rendered frames
+without being framed (default 300, `0` disables), the render tick raises a
+request; it does **not** tear anything down there. The teardown happens at the
+rebuild dispatcher, the seam already proven safe for destroying proxy scene
+objects, reusing the `ForgetTerrainProxy` + by-name rebuild path. Reselection is
+bounded at 16 per process so a mission that can never frame anything degrades to
+a quiet pin rather than churning the scene graph forever.
+
+```text
+[TERRAIN-PROXY] follow-camera reselect requested unframedFrames=300 proxyGeneration=2 cluster=(3,2) reselects=1/16
+```
+
+This costs the cross-run comparability that a fixed cluster would have had. That
+was the trade considered when the choice was recorded as open; it was resolved
+in favour of reselection because a fixed cluster's captures are only comparable
+when they contain terrain at all, and on a moving player they usually do not.
+
+### Capture: the rect is measured, not assumed
+
+At capture time the shim reads the render window's viewport 0, takes its camera,
+and projects the **proxy** entity's world AABB — not the source cluster's —
+through `Camera::getViewMatrix` composed with `Frustum::getProjectionMatrix`.
+Corners behind the eye plane are excluded and counted rather than wrapped
+around, so a partially clipped cluster reports a real rect plus an honest
+`cornersInFront` instead of a plausible lie. The screen bounding box of the
+projected corners is clamped to the viewport and emitted as `region=L,T,W,H`.
+
+A capture is written only when Ogre's own frustum test passes, at least one
+corner is in front, and the rect covers at least
+`TerrainSemanticFrameCaptureMinCoverage` of the viewport. Because the render
+tick runs during the world render-queue update, `writeContentsToFile` writes the
+previously presented frame while the matrices describe the frame about to be
+drawn; the gate therefore requires two consecutive framed frames so a capture
+cannot land on that one-frame boundary.
+
+The default threshold is `0.005`, not the `0.02` first guessed. `0.02` was
+picked without measuring anything and turned out to be unreachable: terrain seen
+from a vehicle sits at a grazing angle and projects to a wide, thin band, so
+nothing on the live build ever exceeded `0.0164` and every capture was
+suppressed. `0.005` of a 3840x2160 viewport is still roughly a 500x250 pixel
+band — comfortably enough pixels to measure — while remaining far above the
+handful of pixels a cluster contributes when it is only clipping the frame edge.
+Set the threshold from a run's observed `coverage` values, not from intuition
+about what fraction of a screen looks like "enough".
+
+The trade this makes is deliberate. Capture indices are no longer identical
+frame numbers across runs — a slot waits past its stride boundary until the
+cluster is framed. That cross-run correlation was already inconclusive by
+construction (see "Cross-run framebuffer parity is not achievable by hand"),
+whereas a capture containing no terrain is worthless for every stated purpose.
+`TerrainSemanticFrameCaptureRequireOnScreen = 0` restores the old behaviour.
+If the framing API cannot be resolved at all, the shim logs once and captures
+without the check: a diagnostic must never block the thing it measures.
+
+Records:
+
+```text
+[TERRAIN-PROXY] selected ... followCamera=1 evaluated=16 visible=3 cameraDistance=412.7 mesh="RenderableTileCluster_2x2_1x0"
+[TERRAIN-PROXY] proxy framing visible=1 cornersInFront=8 coverage=0.31250 viewport=3840x2160 region=980,412,1400,900
+[TERRAIN-P3] terrain_semantic: frame_capture index=1 ... framed=1 visible=1 cornersInFront=8 coverage=0.31250 viewport=3840x2160 region=980,412,1400,900 waits=12 path="..."
+[TERRAIN-P3] terrain_semantic: frame_capture waiting for framing renderFrame=12 visible=0 cornersInFront=0 coverage=0.00000 minCoverage=0.00500 streak=0
+```
+
+`framed=-1` means framing could not be evaluated for that capture.
+
+### Harness
+
+`Test-TerrainSemanticParity.ps1` gains `-FollowCamera`, `-RequireOnScreen`,
+`-MinCoverage` and `-FailOnUnframed`, writes the matching `[Terrain]` keys, and
+reads the framing records back out of the shim log. It reports `framed_captures`
+per run, and:
+
+- computes each run's union framed rect, intersects the reference and candidate
+  rects, and passes that to `Compare-TerrainCaptures.ps1` as `-Region`, so
+  metrics cover pixels where **both** runs framed the cluster rather than HUD
+  and sky. An explicit `-Region` still wins; `region_source` records which
+  applied;
+- throws when a mode produced zero framed captures, quoting the last
+  `waiting for framing` record, instead of handing the comparer static UI. Set
+  `-FailOnUnframed $false` to downgrade that to a warning.
+
+The parse helpers were unit-tested against synthetic log lines by extracting
+them from the script through its AST.
+
+### Live results, 2026-08-16
+
+Two runs on the pinned GOG DX11 build, `misn04.bzn -renderer:dx11`, Win32
+Release shim hash-verified at deploy. Both exe and `OgreMain.dll` hash gates
+passed. The workstation was **locked**, so the mission never left the briefing
+and `BZLogger.txt` was never written; no gameplay camera was ever obtained. What
+follows is therefore about the mechanism, not about rendered terrain.
+
+**PROVEN:**
+
+- The OGRE camera/viewport exports resolve on the shipped `OgreMain.dll` and the
+  projection runs without error. Zero `[ERROR]` records, zero Ogre errors naming
+  an OpenShim resource, across both runs.
+- Deferral works: the first zone reported
+  `follow-camera deferring selection zone=0 nativeZone=(0,0) evaluated=16 visible=0`,
+  i.e. all sixteen clusters were considered and none passed the frustum test,
+  so nothing was selected.
+- Selection works and does **not** land on ordinal 0:
+  `selected zone=6 nativeZone=(1,2) cluster=14 nativeCluster=(3,2) followCamera=1 evaluated=16 visible=6 cameraDistance=1131.9 coverage=0.01642`.
+- The projected rect is self-consistent: eight of eight corners in front of the
+  eye plane, Ogre's own `isVisible` agreeing, and a rect inside the viewport
+  (`region=0,911,806,169` of `3840x2160`).
+- The gate does its job. Coverage 0.0164 was below the 0.02 threshold and
+  **zero PNGs were written**. That is the correct outcome, and it is exactly the
+  case where the old code silently produced sixteen files of static UI.
+- CPU semantic reconstruction is still exact: `checked=9409 matched=9409
+  mismatched=0 maxUvErrorBeforeQuantization=0.006249998`.
+- Shader specialization is unaffected: `passes=109 specialized_passes=109
+  semantic_programs=13 debug=uvDelta
+  fragment_programs={created:27,reused:81,api:1,skipped_no_vertex_color:1}`.
+
+**Changed as a result:** the first run ranked candidates by 3D distance and
+picked the nearest visible cluster at 929.8 units, which projected to 0.0064 of
+the viewport hard against the left edge. Ranking was changed to maximise
+projected screen coverage. The second run picked a different cluster at 0.0164.
+Distance is a poor proxy for on-screen size — but coverage ranking was itself
+discarded later the same day; see below.
+
+### Live results, 2026-08-17: unlocked session
+
+Further runs on the same pinned build, this time with a usable console. These
+retired the open reselection question and killed two more selection rules.
+
+**PROVEN on the coverage-ranking build:**
+
+- Hooks install and both the exe and `OgreMain.dll` hash gates pass.
+- Deferral works end to end: `evaluated=16 visible=0` and nothing selected.
+- Reselection works, with balanced lifecycles across three selections —
+  `created:3 released:3`, programs `120/120`, and the torn-down proxy confirmed
+  gone by engine state (`entityPresent=1 destroyedByOpenShim=1`). This is what
+  resolved the open question in favour of design 1.
+- The capture gate is correct in both directions: it suppressed everything at
+  the unreachable `0.02` threshold, and wrote four framed PNGs containing real
+  terrain once the threshold was set from measured coverage.
+- CPU reconstruction stayed exact on every run: `checked=9409 matched=9409
+  mismatched=0`. Zero `[ERROR]` records throughout.
+
+**Two selection rules died here, both by live evidence:**
+
+Coverage ranking is wrong in a way that is invisible until you stand on a
+cluster. A cluster you are standing on has most of its corners behind the eye
+plane, and a rect built only from in-front corners underestimates it — so the
+ranking systematically preferred distant, fully-visible clusters over the one
+filling the screen. Replacing it with "nearest to the aim point within a
+distance bound" then failed differently: `ObserveZone` only ever sees the zone
+currently being dispatched, so the rule settled for a cluster 1,966 units from
+the aim point because the player's own zone had not come around yet.
+
+The rule is now strict containment of an aim point anchored on the player, as
+described under "Selection". `TerrainProxyFollowCameraMaxDistance` was deleted
+rather than left as a knob that no longer does anything.
+
+**Retracted, and never write it down again:** a `uvDelta` "parity proof" was
+claimed off these captures on the strength of 16,731 zero-delta pixels. It was
+wrong, and it is recorded here only so the mistake is not repeated. Those
+pixels were the black
+letterbox bar, not the cluster: a naive `B == 0` test counts any pure-black
+pixel, which is the achromatic trap already documented above for palette
+classification. It was only caught by cropping the image. Disregard that
+measurement; it says nothing about parity. Note that the reported `region` can
+itself overlap letterboxing, so a region-scoped metric is not automatically
+terrain-scoped — crop and look before believing a per-pixel count.
+
+The surviving exact per-pixel answer remains `TerrainSemanticDebug = 7`, whose
+proof (4,348,401 cluster pixels, zero nonzero delta) was measured with the
+achromatic cases explicitly excluded.
+
+### Live results, 2026-08-17: the aim-point rule, and a blocker
+
+Five runs on the unlocked console, `misn04.bzn -renderer:dx11`, uvdelta and
+packed, with the proxy displaced so it could not be confused with stock terrain.
+
+**PROVEN:**
+
+- The aim-point containment rule works. `containing=1` on every selection, and
+  it lands on a cluster the camera is pointed at rather than ordinal 0.
+- Deferral works: `deferring selection zone=0 evaluated=16 containing=0`.
+- Reselection works and *rescued a bad selection in situ*. Generation 1 was
+  chosen against the briefing camera, went unframed for exactly 300 frames, and
+  the dispatcher rebuilt onto a cluster that framed at 0.149 coverage — with
+  balanced lifecycle counters (`vbCreated:1 vbReleased:1`,
+  `programsCreated:40 programsRemoved:40`, `entityPresent=1
+  destroyedByOpenShim=1`).
+- The two-frame streak gate fires correctly on real captures: `streak=1` waits
+  at `renderFrame=603`, `streak=2` captures at `renderFrame=604`.
+- `0.005` is the right coverage default. Observed coverage was 0.13-0.15, i.e.
+  ~25x the threshold and ~8x the old unreachable `0.02`.
+- CPU reconstruction stayed exact throughout: `checked=9409 matched=9409
+  mismatched=0`. Zero `[ERROR]` records in any run.
+
+### BLOCKER: the proxy entity renders no pixels
+
+This is the finding that matters, and the framing work is what exposed it.
+
+With `TerrainProxyOffsetY = 150` the proxy is a 320x320 terrain patch floating
+150 units above the ground — unmissable if drawn. It is not drawn. Not in
+`uvdelta` (which would paint it black), and not in `packed` (which would paint
+it as ordinary terrain). The captures show untouched stock terrain and no proxy
+anywhere in frame. The same is true at `TerrainProxyOffsetX = 160`.
+
+Every diagnostic simultaneously reports success:
+
+```text
+lifecycle created generation=2 ... material="MA_DETAIL_ATLAS" worldPosition=(-800.000,150.000,-160.000) visible=1
+terrain_semantic_shader bind audit: vertex={verified:109,mismatched:0} fragment={verified:108,mismatched:0}
+terrain_semantic: material-installed proxyGeneration=2 ... semanticMaterial=1
+proxy framing visible=1 cornersInFront=6 coverage=0.14944 region=1336,0,2504,495
+```
+
+Entity created, node positioned, visible flag set, material installed, programs
+bound and verified, AABB inside the frustum at 15% of the viewport — and no
+geometry reaches the framebuffer. Zero errors.
+
+**The consequence for everything above:** a `visible=1` framing record is
+evidence that the proxy's *bounds* project into the frustum. It is **not**
+evidence that the proxy rendered. Do not read coverage as proof of anything
+being drawn. The framing gate now correctly declines to write captures of
+nothing, but it cannot tell "framed and drawn" from "framed and absent".
+
+**This also puts the earlier `TerrainSemanticDebug = 7` proof in question.** That
+measurement (4,348,401 cluster pixels, zero nonzero delta) was taken at zero
+offset, where the proxy is coincident with the stock cluster. If the proxy does
+not render, those black pixels cannot have come from it, and the proof needs
+re-establishing against a proxy that is demonstrably drawn. Do not cite it again
+until then.
+
+Untried leads, in the order worth trying: whether Redux submits terrain to the
+render queue explicitly rather than by scene-graph traversal, in which case an
+entity attached to a new node is never visited; whether the proxy node is
+parented outside the traversed graph; and whether the terrain render queue group
+is culled separately.
+
+### Open defect: the player position read is wrong
+
+`TryGetLocalPlayerWorldPosition` had never once succeeded, because
+`g_BzrFn_GetPlayerHandle` was only ever assigned inside
+`InstallJumpSnipingProbeIfRequested`, which early-returns unless
+`OPENSHIM_TRACE_JUMP_SNIPING` is set. Every `aimOrigin=player` claim in the
+design was therefore silently false; the mode had been running on the camera eye
+the whole time. The pointer is now resolved from the terrain worker, after the
+exe SHA-256 gate that makes the GOG build constant safe to take.
+
+With the lookup live, the read itself is wrong:
+
+```text
+follow-camera rejecting implausible player position player=(1908.5,25.9,100764.0) eye=(-651.8,27.3,-282.8) separation=101079.3 limit=5120.0
+```
+
+X and Z are both far outside a 5,120-unit map while Y is plausible, which points
+at a field-offset or object-layout mismatch — `GetPlayerHandle` returns the
+pilot Person, and the `obj76` path this reuses was derived against ordinary game
+objects. Left unguarded this is worse than the old behaviour: containment fails
+for every zone and the mode defers forever. So the aim point now sanity-gates
+the simulation read against the render camera, logs the rejection once with both
+vectors, and falls back to the eye. Selection recovers fully — three framed
+captures, clean reselection, zero errors.
+
+Until that offset is chased down, `aimOrigin` reads `camera` in practice and the
+player-anchoring rationale is aspirational, not operative.
+
+**Still untested:** the harness's unframed-failure path, and every Phase 3B HD
+claim. Both are downstream of the rendering blocker.
+
+Note for a first run: displace the proxy (`TerrainProxyOffsetY = 150` is the
+clearest) so it cannot be confused with stock terrain. At zero offset it is
+coincident with the stock cluster and loses the depth fight, which makes "not
+rendering" and "rendering correctly" look identical — which is precisely how
+this blocker stayed hidden.
+
+### Standing caveats for anyone running this
+
+- The one-frame skew between the matrices and the written buffer is mitigated,
+  not eliminated. A fast camera can still move between the gate and the write.
+- `TerrainSemanticDebug = 7` remains the only exact, in-frame, per-pixel parity
+  answer. Framing makes its captures contain the cluster; it does not replace
+  it, and it does not make two runs the same simulation state.
+- `query session` reporting the console as `Active` does **not** mean the
+  session is usable: it reads Active while locked. Confirm with a screen capture
+  before trusting an automated series, or it will measure the lock screen.
+- Framing and reselection are diagnostics. Neither can influence what is
+  rendered; both only decide which cluster is proxied and when a PNG is written.
