@@ -20,15 +20,33 @@
                    in-frame, per-pixel parity proof that needs no correlation
                    between separate runs.
 
+    FRAMING: the shim projects the proxy's world bounds through the active
+    camera and reports, per capture, whether the cluster was on screen and
+    where. This script reads those records back, restricts the comparison to
+    the pixels where both runs framed the cluster, and fails the series when a
+    mode never framed it at all. Without this a run happily produces captures
+    that contain nothing but static UI, which is how sixteen captures across
+    cluster ordinals 0-7 once returned an identical ~6,000 pixels.
+
+    Use -FollowCamera to let the shim select a cluster the camera can actually
+    see instead of cluster ordinal 0, which the mission-start camera does not
+    look at.
+
     LIMITATION: separate runs are separate frames. Even with an identical input
     timeline the captures are only approximately correlated, so lighting
-    animation, particles, HUD and unit motion all register as differences. Use
-    -Region to restrict metrics to terrain, and prefer the uvdelta mode when an
-    exact answer is required.
+    animation, particles, HUD and unit motion all register as differences.
+    Framing makes the metrics cover terrain rather than sky, but it does not
+    make two runs the same simulation state. The uvdelta mode remains the only
+    exact, in-frame, per-pixel parity answer.
 
 .EXAMPLE
     .\Test-TerrainSemanticParity.ps1 -Modes packed,quantized -Mission "misn04.bzn" `
-        -DeployShim -KillExistingGame
+        -DeployShim -KillExistingGame -FollowCamera
+
+.EXAMPLE
+    # The exact parity proof: a black cluster means semantic UV == packed UV.
+    .\Test-TerrainSemanticParity.ps1 -Modes uvdelta -Mission "misn04.bzn" `
+        -FollowCamera -DeployShim -KillExistingGame
 #>
 [CmdletBinding()]
 param(
@@ -52,11 +70,37 @@ param(
     [int]$FrameCaptureStride = 300,
     [switch]$DeployShim,
     [switch]$KillExistingGame,
-    [switch]$SkipCompare
+    [switch]$SkipCompare,
+    # Let the shim pick a cluster the camera can actually see instead of
+    # cluster ordinal 0, which the mission-start camera does not look at.
+    [switch]$FollowCamera,
+    # World units ahead of the player the aim point is pushed. The cluster whose
+    # bounds contain that point is the one selected.
+    [double]$FollowCameraAimDistance = 35.0,
+    # Rendered frames unframed before the shim re-chooses a cluster; 0 disables.
+    [int]$FollowCameraReselectFrames = 300,
+    # A capture that does not contain the cluster answers nothing. Off only
+    # for reproducing the old fixed-frame-index behaviour.
+    [bool]$RequireOnScreen = $true,
+    [double]$MinCoverage = 0.005,
+    # Fail the series when a mode produced no framed capture, instead of
+    # handing the comparer images that contain only static UI.
+    [bool]$FailOnUnframed = $true
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+# Get-ModeSettings indexes $ProxyOffset[0..2] directly. A shorter array -- which
+# is what "-ProxyOffset 160,0,0" degrades to when the script is invoked through
+# "powershell -File" -- otherwise fails deep inside the run loop with a bare
+# IndexOutOfRangeException and no clue which parameter was wrong.
+if (@($ProxyOffset).Count -ne 3) {
+    throw ("-ProxyOffset needs exactly 3 values (X,Y,Z); got {0}: '{1}'. " +
+           "When invoking through 'powershell -File', pass them as separate " +
+           "tokens or call the script directly." -f
+           @($ProxyOffset).Count, ($ProxyOffset -join ','))
+}
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -156,6 +200,11 @@ function Get-ModeSettings {
         TerrainSemanticLifecycleLog         = "1"
         TerrainSemanticFrameCapture         = "$FrameCaptures"
         TerrainSemanticFrameCaptureStride   = "$FrameCaptureStride"
+        TerrainSemanticFrameCaptureRequireOnScreen = if ($RequireOnScreen) { "1" } else { "0" }
+        TerrainSemanticFrameCaptureMinCoverage     = ("{0:0.#####}" -f $MinCoverage)
+        TerrainProxyFollowCamera            = if ($FollowCamera) { "1" } else { "0" }
+        TerrainProxyFollowCameraAimDistance = ("{0:0.###}" -f $FollowCameraAimDistance)
+        TerrainProxyFollowCameraReselectFrames = "$FollowCameraReselectFrames"
         TerrainProxyOffsetX                 = ("{0:0.###}" -f $ProxyOffset[0])
         TerrainProxyOffsetY                 = ("{0:0.###}" -f $ProxyOffset[1])
         TerrainProxyOffsetZ                 = ("{0:0.###}" -f $ProxyOffset[2])
@@ -282,6 +331,78 @@ function Wait-ForSimulationReady {
         Start-Sleep -Milliseconds 150
     }
     return $null
+}
+
+# The shim projects the proxy's world bounds through the active camera and
+# reports where the cluster actually landed. Reading it back is what turns a
+# capture series into a measurement instead of a pile of static-UI pixels.
+function Get-CaptureFraming {
+    param([string[]]$Lines)
+
+    $records = @()
+    foreach ($line in $Lines) {
+        if ($line -notmatch 'frame_capture index=(\d+)') { continue }
+        $index = [int]$Matches[1]
+        $framed = -1
+        if ($line -match 'framed=(-?\d+)') { $framed = [int]$Matches[1] }
+        $coverage = 0.0
+        if ($line -match 'coverage=([0-9.]+)') { $coverage = [double]$Matches[1] }
+        $rect = $null
+        if ($line -match 'region=(\d+),(\d+),(\d+),(\d+)') {
+            $rect = [pscustomobject]@{
+                Left   = [int]$Matches[1]
+                Top    = [int]$Matches[2]
+                Width  = [int]$Matches[3]
+                Height = [int]$Matches[4]
+            }
+        }
+        $records += [pscustomobject]@{
+            index    = $index
+            framed   = $framed
+            coverage = $coverage
+            rect     = $rect
+        }
+    }
+    return $records
+}
+
+# Union of every framed capture's rect, so a region passed to the comparer
+# covers the cluster in all of that run's captures.
+function Get-UnionRegion {
+    param([object[]]$Records)
+
+    $framed = @($Records | Where-Object { $_.framed -eq 1 -and $_.rect })
+    if ($framed.Count -eq 0) { return $null }
+    $left = ($framed | ForEach-Object { $_.rect.Left } | Measure-Object -Minimum).Minimum
+    $top = ($framed | ForEach-Object { $_.rect.Top } | Measure-Object -Minimum).Minimum
+    $right = ($framed | ForEach-Object { $_.rect.Left + $_.rect.Width } | Measure-Object -Maximum).Maximum
+    $bottom = ($framed | ForEach-Object { $_.rect.Top + $_.rect.Height } | Measure-Object -Maximum).Maximum
+    if ($right -le $left -or $bottom -le $top) { return $null }
+    return [pscustomobject]@{
+        Left = $left; Top = $top; Width = $right - $left; Height = $bottom - $top
+    }
+}
+
+# Two runs are only comparable over pixels where BOTH framed the cluster.
+function Get-IntersectRegion {
+    param($First, $Second)
+
+    if (-not $First) { return $Second }
+    if (-not $Second) { return $First }
+    $left = [Math]::Max($First.Left, $Second.Left)
+    $top = [Math]::Max($First.Top, $Second.Top)
+    $right = [Math]::Min($First.Left + $First.Width, $Second.Left + $Second.Width)
+    $bottom = [Math]::Min($First.Top + $First.Height, $Second.Top + $Second.Height)
+    if ($right -le $left -or $bottom -le $top) { return $null }
+    return [pscustomobject]@{
+        Left = $left; Top = $top; Width = $right - $left; Height = $bottom - $top
+    }
+}
+
+function Format-Region {
+    param($Rect)
+    if (-not $Rect) { return "" }
+    return "$($Rect.Left),$($Rect.Top),$($Rect.Width),$($Rect.Height)"
 }
 
 function Get-VirtualKeyCode {
@@ -422,13 +543,38 @@ try {
             }
         }
 
-        $shimSlice = Get-LinesAfterOffset -Path $shimLog -StartOffset $preShim
+        # Slice by pid, not by byte offset. The shim truncates openshim.log at
+        # process start, so a pre-launch offset points into the MIDDLE of the new
+        # run once it grows past the previous run's size -- which silently ate
+        # the first ~35 seconds of a run, including selection and the early
+        # frame_capture records, and made framed_captures under-report. Every
+        # shim line carries [pid:N], so the pid is the exact discriminator.
+        $shimSlice = Get-LinesAfterOffset -Path $shimLog -StartOffset 0
+        $pidSlice = @($shimSlice | Where-Object { $_ -match "\[pid:$($process.Id) " })
+        if ($pidSlice.Count -gt 0) {
+            $shimSlice = $pidSlice
+        }
+        else {
+            Write-Warning ("No shim records for pid {0}; falling back to the byte-offset slice, which may be partial." -f $process.Id)
+            $shimSlice = Get-LinesAfterOffset -Path $shimLog -StartOffset $preShim
+        }
         $slicePath = Join-Path $modeRoot "openshim.slice.log"
         [System.IO.File]::WriteAllLines($slicePath, [string[]]$shimSlice)
 
         $terrainLines = @($shimSlice | Where-Object { $_ -match 'TERRAIN-P3|TERRAIN-PROXY' })
         $uvLine = @($terrainLines | Where-Object { $_ -match 'TERRAIN-P3-UV\] checked=' }) | Select-Object -Last 1
         $shaderLine = @($terrainLines | Where-Object { $_ -match 'terrain_semantic_shader: material=' }) | Select-Object -Last 1
+        $selectedLine = @($terrainLines | Where-Object { $_ -match 'TERRAIN-PROXY\] selected ' }) | Select-Object -Last 1
+
+        $framing = @(Get-CaptureFraming -Lines $terrainLines)
+        $framedCount = @($framing | Where-Object { $_.framed -eq 1 }).Count
+        $unionRegion = Get-UnionRegion -Records $framing
+        if ($framedCount -eq 0) {
+            $waiting = @($terrainLines | Where-Object { $_ -match 'frame_capture waiting for framing' }) | Select-Object -Last 1
+            $message = "Mode '$mode' produced no framed capture: the proxy cluster was never on screen. $waiting"
+            if ($FailOnUnframed) { throw $message }
+            Write-Warning $message
+        }
 
         $runs += [pscustomobject][ordered]@{
             mode              = $mode
@@ -444,6 +590,11 @@ try {
             terrain_log_lines = $terrainLines.Count
             uv_validation     = $uvLine
             shader_summary    = $shaderLine
+            selection         = $selectedLine
+            framed_captures   = $framedCount
+            capture_framing   = $framing
+            capture_region    = (Format-Region $unionRegion)
+            region_rect       = $unionRegion
         }
     }
 }
@@ -470,17 +621,34 @@ if (-not $SkipCompare -and $runs.Count -ge 2) {
         if ($reference.captures -and $candidate.captures) {
             $pairs += @{ kind = "desktop"; ref = $reference.capture_directory; cand = $candidate.capture_directory }
         }
+        # An explicit -Region still wins. Otherwise restrict the metrics to the
+        # pixels where both runs framed the cluster, so HUD, sky and cockpit
+        # cannot be scored as terrain mismatches.
+        $pairRegion = $Region
+        $regionSource = if ($Region) { "explicit" } else { "none" }
+        if (-not $Region) {
+            $shared = Get-IntersectRegion $reference.region_rect $candidate.region_rect
+            if ($shared) {
+                $pairRegion = Format-Region $shared
+                $regionSource = "framing"
+            }
+            else {
+                Write-Warning ("No shared framed region between '{0}' and '{1}'; metrics cover the whole frame and are not a terrain measurement." -f $reference.mode, $candidate.mode)
+            }
+        }
         foreach ($pair in $pairs) {
             $diffRoot = Join-Path $seriesRoot `
                 ("diff_" + $pair.kind + "_" + $reference.mode + "_vs_" + $candidate.mode)
             $json = & $comparer -Reference $pair.ref -Candidate $pair.cand `
-                -OutputDirectory $diffRoot -Region $Region 2>$null | Select-Object -Last 1
+                -OutputDirectory $diffRoot -Region $pairRegion 2>$null | Select-Object -Last 1
             $comparisons += [pscustomobject]@{
-                kind      = $pair.kind
-                reference = $reference.mode
-                candidate = $candidate.mode
-                output    = $diffRoot
-                metrics   = $json
+                kind          = $pair.kind
+                reference     = $reference.mode
+                candidate     = $candidate.mode
+                output        = $diffRoot
+                region        = $pairRegion
+                region_source = $regionSource
+                metrics       = $json
             }
         }
     }
@@ -496,6 +664,11 @@ $summary = [ordered]@{
     motion_sweep       = [bool]$MotionSweep
     motion_key         = $MotionKey
     region             = $Region
+    follow_camera      = [bool]$FollowCamera
+    aim_distance       = $FollowCameraAimDistance
+    reselect_frames    = $FollowCameraReselectFrames
+    require_on_screen  = $RequireOnScreen
+    min_coverage       = $MinCoverage
     series_root        = $seriesRoot
     runs               = $runs
     comparisons        = $comparisons
