@@ -445,6 +445,7 @@ The original community tracker also contains a number of feature requests that a
 [*] [b]AI-passable building / bridge class behavior[/b] - investigate a building/object type that AI pathing can intentionally ignore or drive through, useful for bridge/cave-style geometry.
 [*] [b]Team filters for shield towers, magnets, mines and similar systems[/b] - shield filtering already exists; extend the same concept selectively where class semantics make sense.
 [*] [b]Selectable skeletal vs VDF animation mode[/b] - allow an object/class to choose which animation system drives it instead of hard-wiring pilots/person objects to skeletal behavior and most others to VDF.
+[*] [b]Walker quake/thump resistance ODF control[/b] - expose a per-walker ODF scalar or override controlling how strongly QuakeClass/thumper-style impulses affect it, so heavy walkers can resist launch/knockback while preserving stock behavior by default.
 [/list]
 
 [h3]Multiplayer Options / Shell[/h3]
@@ -483,6 +484,8 @@ The original community tracker also contains a number of feature requests that a
 [*] Remove or relax the legacy 8-character filename assumptions where this can be done without breaking fixed buffers, save formats, networking or parsers.
 [*] Larger Ogre/shader architecture rewrites and GPU skinning experiments after renderer correctness/stability is substantially settled.
 [*] Higher-level environment/planet preset system built on the environment controls EXU already exposes.
+[*] [b]Carrier / hangar vessel class[/b] - explore a large mostly stationary or slow-moving carrier/recycler-style object with walkable interior collision, BZ2-style attachment points for defensive gun turrets, and the ability to build/spawn empty craft inside a hangar for pilots to board and launch into battle.
+[*] [b]Dropship / aircraft class backport[/b] - investigate backporting BZ2-style aircraft/dropship behavior, including flying AI and support for zero/low-gravity environments. Carrier hangars would also need workable AI launch/return pathing through enclosed corridors or openings.
 [/list]
 
 Several historical feature requests are already effectively complete and therefore belong in the implemented section rather than here: Lua/Ogre material control, protected Lua file I/O through bzfile, bans/host controls, increased sound channels, destruction chunks, the EXU function surface itself, and ScriptUtils support for base ProducerClass objects.
