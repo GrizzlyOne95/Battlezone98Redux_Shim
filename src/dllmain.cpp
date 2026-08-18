@@ -19,6 +19,7 @@
 #include "dx11_enhanced_fxaa.h"
 #include "terrain_proxy.h"
 #include "ogre_animation_profiler.h"
+#include "pilot_fp_animation_trace.h"
 #include "BZROpenShim.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -34,9 +35,10 @@ static uintptr_t g_PatchThread = 0;
 static unsigned __stdcall PatchThreadProc(void*)
 {
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread started");
-    // Start opt-in renderer diagnostics/features immediately so their workers
-    // can observe Ogre/D3D11 module creation before the renderer creates
-    // devices, swapchains, or begins normal animation submission.
+    // Start renderer diagnostics/features immediately so their workers can
+    // observe Ogre/D3D11 module creation before the renderer creates devices,
+    // swapchains, entities, or begins normal animation submission.
+    BZROpenShim::InitializePilotFpAnimationTrace();
     BZROpenShim::InitializeOgreAnimationProfiler();
     BZROpenShim::InitializeDx11ColorSpaceDiagnostic();
     BZROpenShim::InitializeDx11EnhancedFxaa();
@@ -119,6 +121,7 @@ namespace BZROpenShim
             CloseHandle(reinterpret_cast<HANDLE>(g_PatchThread));
             g_PatchThread = 0;
         }
+        BZROpenShim::ShutdownPilotFpAnimationTrace();
         BZROpenShim::ShutdownOgreAnimationProfiler();
         // Stop the mutating presentation experiment before the read-only DX11
         // observer it can chain with, then release its private D3D resources.
