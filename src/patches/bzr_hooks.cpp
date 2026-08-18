@@ -403,6 +403,7 @@ namespace BZROpenShim
         static bool IsWidgetLiveChildOfParent(void* parent, void* widget);
         static void InstallNicknameTextEntryInputHookIfPossible();
         static void ShowNicknameApplyConfirmation(void* entry);
+        static void SyncNicknameEntriesFromAuthoritativeValue(const char* value);
 
         constexpr DWORD kDbgPrintExceptionAnsi = 0x40010006u;
         constexpr DWORD kDbgPrintExceptionWide = 0x4001000Au;
@@ -13874,97 +13875,129 @@ namespace BZROpenShim
             return true;
         }
 
-        // ---- live rename through player data ----
+        // ---- live rename through native BZRNetLobby user data ----
         //
-        // BZRNetLobby::SetPlayerData is vtable slot 7 at 0x0074BF60:
-        //     __thiscall(lobby, const StableId* lobbyId,
-        //                const std::string* key, const std::string* value)
-        // The first argument is the *lobby's* identity, not a player's -- it is
-        // the key into the lobby map at 0x0260B1C0 (0x0074BF71). When that lobby
-        // is known and the local user (0x0260B1C8, pushed literally at
-        // 0x0074BF99) is one of its members, the pair is also written into that
-        // member's own map at +0x4C. The send at 0x0074BFFB happens either way,
-        // through the websocket service held at lobby+0xC8.
+        // Redux already exposes the exact live operation we need through
+        // BZRNetLobby. Slot 14 returns the local player's opaque 16-byte BZRNet
+        // identity and slot 7 consumes that identity plus native Redux strings
+        // for key/value. Slot 7 updates the lobby's local user-data cache and
+        // sends the stock SetPlayerData request. Keep the identity opaque: the
+        // field meanings are intentionally not guessed here.
         //
-        // Never call the raw sender 0x006C4F70 directly. It is a __thiscall on
-        // that service and faults on ecx+0x2E0 without it.
-        //
-        // What the shipped binary does not settle is the service side. Redux
-        // never re-sends "name"/"playerName" after Authorization and never reads
-        // them back through GetLobbyMemberData -- which is evidence that Redux
-        // has no rename feature, not that BZRNet refuses one. Other BZRNet
-        // clients write the two keys together as an identity pair on an
-        // already-open connection, and that pair is what this sends. Whether
-        // the service honours it is what a run is meant to answer, so the
-        // durable nickname buffer is still written first and every send is
-        // logged either way.
-        struct BzrNetStableId
+        // These 2.2.301 addresses are validation anchors, not unconditional call
+        // targets. Every invocation is derived from the live lobby vtable and
+        // must agree with the expected executable address before we cross the ABI.
+        struct BzrNetNativeIdentity
         {
-            uint32_t kind;      // 0 = I, 1 = S(team), 2 = G(alaxy), 3 = B(ZRNet)
-            uint32_t reserved;
-            uint64_t value;
+            uint8_t bytes[16];
         };
+        static_assert(sizeof(BzrNetNativeIdentity) == 0x10,
+                      "Redux BZRNet identity size changed");
+        static_assert(sizeof(BzrString) == 0x18,
+                      "Redux native string ABI must remain 24 bytes");
 
-        static char BzrNetStableIdPrefix(uint32_t kind)
-        {
-            // The parser at 0x0073ABD0 maps the wire form's leading letter onto
-            // the tag in this order.
-            static constexpr char kPrefixes[] = "ISGB";
-            return (kind < 4) ? kPrefixes[kind] : '?';
-        }
-
-        using FnBzrNetLobbySetPlayerData = void(__thiscall*)(void* lobby,
-                                                             const BzrNetStableId* lobbyId,
-                                                             const BzrString* key,
-                                                             const BzrString* value);
+        using FnBzrNetLobbyGetLocalIdentity = void(__thiscall*)(
+            void* lobby, BzrNetNativeIdentity* outIdentity);
+        using FnBzrNetLobbySetPlayerData = void(__thiscall*)(
+            void* lobby,
+            const BzrNetNativeIdentity* identity,
+            const BzrString* key,
+            const BzrString* value);
 
         constexpr uintptr_t kBzrNetLobbySetPlayerDataAddr = 0x0074BF60;
         constexpr size_t kBzrNetLobbySetPlayerDataSlot = 7;
-        constexpr size_t kBzrNetLobbyIdOffset = 0x28;
-        constexpr uintptr_t kBzrNetLocalUserStableIdAddr = 0x0260B1C8;
+        constexpr uintptr_t kBzrNetLobbyGetLocalIdentityAddr = 0x0074B670;
+        constexpr size_t kBzrNetLobbyGetLocalIdentitySlot = 14;
+        constexpr size_t kBzrNetNativeClientBackPointerOffset = 0xC38;
+        constexpr uintptr_t kBzrNetNativeStringCtorAddr = 0x00416EF0;
+        constexpr uintptr_t kBzrNetNativeStringDtorAddr = 0x00416F30;
 
-        // The engine's own websocket trace. 0x006C4F70 prints the outgoing JSON
-        // under "WebSocket Message Sent:" when this level reaches 3; it ships at
-        // 1. Raising it only around our own call keeps BZLogger.txt to the two
-        // messages sent here, and the send really is inline -- 0x0074BFFB
-        // resolves lobby+0xC8 and calls straight through rather than posting.
-        constexpr uintptr_t kBzrNetLogLevelAddr = 0x008EDA28;
-        constexpr uintptr_t kBzrNetLogLevelReadSiteAddr = 0x006C5178; // instr, not operand
-        constexpr uint8_t kBzrNetLogLevelReadSiteBytes[] =
+        static bool IsExecutableGameImageAddress(uintptr_t address)
         {
-            0x83, 0x3D, 0x28, 0xDA, 0x8E, 0x00, 0x03 // cmp dword [0x008EDA28], 3
-        };
+            if (!address)
+                return false;
+            MEMORY_BASIC_INFORMATION mbi = {};
+            if (VirtualQuery(reinterpret_cast<const void*>(address), &mbi, sizeof(mbi)) != sizeof(mbi))
+                return false;
+            if (mbi.State != MEM_COMMIT || mbi.Type != MEM_IMAGE ||
+                mbi.AllocationBase != GetModuleHandleA(nullptr))
+                return false;
+            if ((mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0)
+                return false;
+            switch (mbi.Protect & 0xFFu)
+            {
+            case PAGE_EXECUTE:
+            case PAGE_EXECUTE_READ:
+            case PAGE_EXECUTE_READWRITE:
+            case PAGE_EXECUTE_WRITECOPY:
+                return true;
+            default:
+                return false;
+            }
+        }
 
-        static void* ResolveBzrNetLobbyChecked()
+        static bool HasRet4Epilogue(uintptr_t address)
         {
-            void* const lobby = TryGetStockBzrNetLobby();
-            if (!lobby)
-                return nullptr;
+            if (!IsExecutableGameImageAddress(address))
+                return false;
             __try
             {
-                if (*reinterpret_cast<uintptr_t*>(lobby) != kBzrNetLobbyVftable)
-                    return nullptr;
-                return lobby;
+                const auto* bytes = reinterpret_cast<const uint8_t*>(address);
+                // Slot 14 is a compact accessor in 2.2.301. Qualify it by the
+                // observed callee-cleanup ABI without inventing undocumented
+                // prologue bytes that could make the resolver more brittle.
+                for (size_t i = 0; i + 2 < 0x80; ++i)
+                {
+                    if (bytes[i] == 0xC2 && bytes[i + 1] == 0x04 && bytes[i + 2] == 0x00)
+                        return true;
+                }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
             }
-            return nullptr;
+            return false;
         }
 
-        // Take the sender from the live vftable rather than the literal, then
-        // insist the two agree -- a relocated or replaced lobby has to stand the
-        // feature down instead of calling into whatever sits at the old address.
+        static bool ValidateBzrNetLobbyState(void* lobby)
+        {
+            if (!lobby)
+                return false;
+            __try
+            {
+                if (*reinterpret_cast<uintptr_t*>(lobby) != kBzrNetLobbyVftable)
+                    return false;
+                void* const client = *reinterpret_cast<void**>(
+                    static_cast<uint8_t*>(lobby) + kBzrNetLobbyClientOffset);
+                if (!client)
+                    return false;
+                // The native client owns a back-pointer to the lobby. Requiring
+                // the pair to agree prevents calls through stale lobby memory.
+                return *reinterpret_cast<void**>(
+                    static_cast<uint8_t*>(client) + kBzrNetNativeClientBackPointerOffset) == lobby;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+            return false;
+        }
+
         static FnBzrNetLobbySetPlayerData ResolveBzrNetSetPlayerData(void* lobby)
         {
             __try
             {
                 auto* const vtable = *reinterpret_cast<void***>(lobby);
-                auto* const sender = reinterpret_cast<FnBzrNetLobbySetPlayerData>(
+                const uintptr_t target = reinterpret_cast<uintptr_t>(
                     vtable[kBzrNetLobbySetPlayerDataSlot]);
-                if (reinterpret_cast<uintptr_t>(sender) != kBzrNetLobbySetPlayerDataAddr)
+                if (target != kBzrNetLobbySetPlayerDataAddr ||
+                    !IsExecutableGameImageAddress(target))
                     return nullptr;
-                return sender;
+                static constexpr uint8_t kExpectedBytes[] =
+                {
+                    0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x14, 0x89, 0x4D, 0xF4
+                };
+                if (!ExpectedBytesMatchAt(target, kExpectedBytes, sizeof(kExpectedBytes)))
+                    return nullptr;
+                return reinterpret_cast<FnBzrNetLobbySetPlayerData>(target);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -13972,67 +14005,102 @@ namespace BZROpenShim
             return nullptr;
         }
 
-        static bool TryReadBzrNetStableId(const void* address, BzrNetStableId* out)
+        static FnBzrNetLobbyGetLocalIdentity ResolveBzrNetGetLocalIdentity(void* lobby)
         {
             __try
             {
-                *out = *static_cast<const BzrNetStableId*>(address);
-                return true;
+                auto* const vtable = *reinterpret_cast<void***>(lobby);
+                const uintptr_t target = reinterpret_cast<uintptr_t>(
+                    vtable[kBzrNetLobbyGetLocalIdentitySlot]);
+                if (target != kBzrNetLobbyGetLocalIdentityAddr || !HasRet4Epilogue(target))
+                    return nullptr;
+                return reinterpret_cast<FnBzrNetLobbyGetLocalIdentity>(target);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
             }
-            return false;
+            return nullptr;
         }
 
-        static bool TrySendBzrNetPlayerData(FnBzrNetLobbySetPlayerData sender,
-                                            void* lobby,
-                                            const BzrNetStableId* lobbyId,
-                                            const BzrString* key,
-                                            const BzrString* value)
+        static bool TryGetBzrNetLocalIdentity(FnBzrNetLobbyGetLocalIdentity getter,
+                                               void* lobby,
+                                               BzrNetNativeIdentity* outIdentity)
         {
-            if (!sender || !lobby || !lobbyId || !key || !value)
+            if (!getter || !lobby || !outIdentity)
                 return false;
+            std::memset(outIdentity, 0, sizeof(*outIdentity));
             __try
             {
-                sender(lobby, lobbyId, key, value);
+                getter(lobby, outIdentity);
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                Log(L"[BZRNET] SetPlayerData faulted code=0x%08X; the nickname "
-                    L"keeps its persisted value only\n",
+                Log(L"[BZRNET] Native self-identity getter faulted code=0x%08X\n",
                     static_cast<uint32_t>(GetExceptionCode()));
             }
             return false;
         }
 
-        // Returns the level to hand back to RestoreBzrNetWireLog, or -1 when the
-        // guard failed and nothing was touched.
-        static int RaiseBzrNetWireLog()
+        static bool TryConstructNativeBzrString(BzrString* out, const char* text)
         {
-            if (!ExpectedBytesMatchAt(kBzrNetLogLevelReadSiteAddr,
-                                      kBzrNetLogLevelReadSiteBytes,
-                                      sizeof(kBzrNetLogLevelReadSiteBytes)))
-                return -1;
-            auto* const level = reinterpret_cast<volatile int32_t*>(kBzrNetLogLevelAddr);
-            const int previous = static_cast<int>(*level);
-            if (previous < 3)
-                *level = 3;
-            return previous;
+            if (!out || !text || !IsExecutableGameImageAddress(kBzrNetNativeStringCtorAddr))
+                return false;
+            std::memset(out, 0, sizeof(*out));
+            __try
+            {
+                reinterpret_cast<FnBzrStringCtorFromCStr>(
+                    kBzrNetNativeStringCtorAddr)(out, text);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[BZRNET] Native string constructor faulted code=0x%08X\n",
+                    static_cast<uint32_t>(GetExceptionCode()));
+            }
+            return false;
         }
 
-        static void RestoreBzrNetWireLog(int previous)
+        static void DestroyNativeBzrStringNoThrow(BzrString* value)
         {
-            if (previous < 0)
+            if (!value || !IsExecutableGameImageAddress(kBzrNetNativeStringDtorAddr))
                 return;
-            *reinterpret_cast<volatile int32_t*>(kBzrNetLogLevelAddr) =
-                static_cast<int32_t>(previous);
+            __try
+            {
+                reinterpret_cast<FnBzrStringDtor>(kBzrNetNativeStringDtorAddr)(value);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[BZRNET] Native string destructor faulted code=0x%08X\n",
+                    static_cast<uint32_t>(GetExceptionCode()));
+            }
+        }
+
+        static bool TrySendBzrNetNicknameNative(FnBzrNetLobbySetPlayerData sender,
+                                                 void* lobby,
+                                                 const BzrNetNativeIdentity* identity,
+                                                 const BzrString* key,
+                                                 const BzrString* value)
+        {
+            if (!sender || !lobby || !identity || !key || !value)
+                return false;
+            __try
+            {
+                sender(lobby, identity, key, value);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[BZRNET] SetPlayerData(name) faulted code=0x%08X; "
+                    L"persisted nickname is retained\n",
+                    static_cast<uint32_t>(GetExceptionCode()));
+            }
+            return false;
         }
 
         // openshim.ini [Network] LiveNicknameKeys = 0, or
-        // OPENSHIM_DISABLE_LIVE_NICKNAME=1, to leave the nickname a
-        // connect-time setting and send nothing on an open connection.
+        // OPENSHIM_DISABLE_LIVE_NICKNAME=1, keeps nickname mutation strictly
+        // connect-time. This is a fail-safe switch, not a tracing dependency.
         static bool ShouldSendLiveNicknameKeys()
         {
             if (EnvFlagEnabled("OPENSHIM_DISABLE_LIVE_NICKNAME"))
@@ -14044,103 +14112,131 @@ namespace BZROpenShim
             return true;
         }
 
-        static bool SendBzrNetNicknameLive(const char* value, const char* source)
+        static bool IsValidBzrNetNickname(const std::string& value)
         {
-            // push ebp; mov ebp,esp; sub esp,0x14; mov [ebp-0xC],ecx
-            static constexpr uint8_t kExpectedBytes[] =
-            {
-                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x14, 0x89, 0x4D, 0xF4
-            };
-            static bool s_MismatchLogged = false;
-            static bool s_NoLobbyLogged = false;
-
-            if (!value || !*value)
+            if (value.empty() || value.size() >= kBzrNetNicknameCapacity)
                 return false;
-            if (!ExpectedBytesMatchAt(kBzrNetLobbySetPlayerDataAddr,
-                                      kExpectedBytes,
-                                      sizeof(kExpectedBytes)))
+            for (const unsigned char ch : value)
             {
-                if (!s_MismatchLogged)
+                // Preserve printable UTF-8 bytes while rejecting ASCII control
+                // characters that could corrupt chat/config presentation.
+                if (ch < 0x20 || ch == 0x7F)
+                    return false;
+            }
+            return true;
+        }
+
+        static const char* BzrNetNicknameResultName(BzrNetNicknameResult result)
+        {
+            switch (result)
+            {
+            case BzrNetNicknameResult::AppliedLive: return "applied-live";
+            case BzrNetNicknameResult::StoredForNextConnection: return "stored-next-connect";
+            case BzrNetNicknameResult::InvalidNickname: return "invalid";
+            case BzrNetNicknameResult::UnsupportedBuild: return "unsupported-build";
+            case BzrNetNicknameResult::NativeStateInvalid: return "native-state-invalid";
+            case BzrNetNicknameResult::PersistenceFailed: return "persistence-failed";
+            default: return "unknown";
+            }
+        }
+
+        static bool IsAcceptedBzrNetNicknameResult(BzrNetNicknameResult result)
+        {
+            return result == BzrNetNicknameResult::AppliedLive ||
+                   result == BzrNetNicknameResult::StoredForNextConnection ||
+                   result == BzrNetNicknameResult::UnsupportedBuild ||
+                   result == BzrNetNicknameResult::NativeStateInvalid;
+        }
+
+        static BzrNetNicknameResult ApplyBzrNetNicknameAuthoritative(
+            const char* requestedValue, const char* source)
+        {
+            const std::string nickname = TrimAsciiCopy(requestedValue ? requestedValue : "");
+            if (!IsValidBzrNetNickname(nickname))
+            {
+                Log(L"[BZRNET] Nickname rejected (source=%hs reason=invalid)\n",
+                    source ? source : "unknown");
+                return BzrNetNicknameResult::InvalidNickname;
+            }
+
+            Log(L"[BZRNET] Nickname requested: \"%hs\" (source=%hs)\n",
+                nickname.c_str(), source ? source : "unknown");
+
+            // Keep both durable sources synchronized before any native send.
+            // The fixed buffer feeds Authorization on a reconnect in this same
+            // process; openshim.ini preserves the value for the next launch.
+            const bool persisted = WriteShimUserConfigValue(
+                kUserConfigNetworkSection, "Nickname", nickname.c_str());
+            if (!WriteBzrNetNickname(nickname.c_str()))
+            {
+                Log(L"[BZRNET] Nickname buffer update failed; refusing native live call\n");
+                return persisted
+                    ? BzrNetNicknameResult::UnsupportedBuild
+                    : BzrNetNicknameResult::PersistenceFailed;
+            }
+
+            BzrNetNicknameResult liveResult = BzrNetNicknameResult::StoredForNextConnection;
+            if (ShouldSendLiveNicknameKeys())
+            {
+                void* const lobby = TryGetStockBzrNetLobby();
+                if (lobby)
                 {
-                    s_MismatchLogged = true;
-                    Log(L"[BZRNET] SetPlayerData byte guard failed at 0x%08X; the "
-                        L"nickname applies on the next connect\n",
-                        static_cast<uint32_t>(kBzrNetLobbySetPlayerDataAddr));
+                    if (!ValidateBzrNetLobbyState(lobby))
+                    {
+                        liveResult = BzrNetNicknameResult::NativeStateInvalid;
+                    }
+                    else
+                    {
+                        FnBzrNetLobbySetPlayerData const sender = ResolveBzrNetSetPlayerData(lobby);
+                        FnBzrNetLobbyGetLocalIdentity const identityGetter =
+                            ResolveBzrNetGetLocalIdentity(lobby);
+                        if (!sender || !identityGetter ||
+                            !IsExecutableGameImageAddress(kBzrNetNativeStringCtorAddr) ||
+                            !IsExecutableGameImageAddress(kBzrNetNativeStringDtorAddr))
+                        {
+                            liveResult = BzrNetNicknameResult::UnsupportedBuild;
+                        }
+                        else
+                        {
+                            BzrNetNativeIdentity identity = {};
+                            if (!TryGetBzrNetLocalIdentity(identityGetter, lobby, &identity))
+                            {
+                                liveResult = BzrNetNicknameResult::NativeStateInvalid;
+                            }
+                            else
+                            {
+                                BzrString keyString = {};
+                                BzrString valueString = {};
+                                const bool keyReady = TryConstructNativeBzrString(&keyString, "name");
+                                const bool valueReady = keyReady &&
+                                    TryConstructNativeBzrString(&valueString, nickname.c_str());
+                                bool sent = false;
+                                if (valueReady)
+                                    sent = TrySendBzrNetNicknameNative(
+                                        sender, lobby, &identity, &keyString, &valueString);
+                                if (valueReady)
+                                    DestroyNativeBzrStringNoThrow(&valueString);
+                                if (keyReady)
+                                    DestroyNativeBzrStringNoThrow(&keyString);
+
+                                liveResult = sent
+                                    ? BzrNetNicknameResult::AppliedLive
+                                    : BzrNetNicknameResult::NativeStateInvalid;
+                            }
+                        }
+                    }
                 }
-                return false;
             }
 
-            void* const lobby = ResolveBzrNetLobbyChecked();
-            if (!lobby)
+            if (!persisted)
             {
-                if (!s_NoLobbyLogged)
-                {
-                    s_NoLobbyLogged = true;
-                    Log(L"[BZRNET] No live BZRNetLobby (source=%hs); the nickname "
-                        L"applies on the next connect\n",
-                        source);
-                }
-                return false;
+                Log(L"[BZRNET] Live/session nickname changed but openshim.ini persistence failed\n");
+                return BzrNetNicknameResult::PersistenceFailed;
             }
 
-            FnBzrNetLobbySetPlayerData const sender = ResolveBzrNetSetPlayerData(lobby);
-            if (!sender)
-            {
-                Log(L"[BZRNET] Lobby vftable slot %zu is not SetPlayerData; "
-                    L"standing down\n",
-                    kBzrNetLobbySetPlayerDataSlot);
-                return false;
-            }
-
-            BzrNetStableId lobbyId = {};
-            if (!TryReadBzrNetStableId(
-                    static_cast<const uint8_t*>(lobby) + kBzrNetLobbyIdOffset, &lobbyId))
-                return false;
-
-            // Logged beside the lobby id purely so a run can show whether the
-            // two are ever confused; only the lobby id is passed on.
-            BzrNetStableId localId = {};
-            const bool haveLocalId = TryReadBzrNetStableId(
-                reinterpret_cast<const void*>(kBzrNetLocalUserStableIdAddr), &localId);
-
-            static const char* const kNicknameKeys[] = { "name", "playerName" };
-            const int previousLogLevel = RaiseBzrNetWireLog();
-            bool sentAll = true;
-            for (const char* const key : kNicknameKeys)
-            {
-                BzrString keyString = {};
-                BzrString valueString = {};
-                BzrStringInitEmpty(&keyString);
-                BzrStringInitEmpty(&valueString);
-                BzrStringAssign(&keyString, key, std::strlen(key));
-                BzrStringAssign(&valueString, value, std::strlen(value));
-                const bool sent = TrySendBzrNetPlayerData(
-                    sender, lobby, &lobbyId, &keyString, &valueString);
-                BzrStringFree(&valueString);
-                BzrStringFree(&keyString);
-
-                Log(L"[BZRNET] TX SetPlayerData %hs=\"%hs\" (%hs)\n",
-                    key, value, sent ? "sent" : "failed");
-                sentAll = sentAll && sent;
-                if (!sent)
-                    break;
-            }
-            RestoreBzrNetWireLog(previousLogLevel);
-
-            Log(L"[BZRNET] Live rename attempt done (source=%hs lobby=%hc%llu "
-                L"local=%hs wirelog=%hs)\n",
-                source,
-                BzrNetStableIdPrefix(lobbyId.kind),
-                static_cast<unsigned long long>(lobbyId.value),
-                haveLocalId ? "read" : "unreadable",
-                (previousLogLevel >= 0) ? "raised" : "guard failed");
-            if (haveLocalId)
-            {
-                Log(L"[BZRNET] Local user is %hc%llu\n",
-                    BzrNetStableIdPrefix(localId.kind),
-                    static_cast<unsigned long long>(localId.value));
-            }
-            return sentAll;
+            Log(L"[BZRNET] Nickname result=%hs (source=%hs)\n",
+                BzrNetNicknameResultName(liveResult), source ? source : "unknown");
+            return liveResult;
         }
 
         static const char* BzrNetRoutePreferenceName(BzrNetRoutePreference value)
@@ -28705,7 +28801,7 @@ namespace BZROpenShim
                 "[B] - ban - select the player in the list and click \"B\"",
                 "/lock - prevent new players from joining",
                 "/unlock - allow new players to join",
-                "/name <text> - set your multiplayer name",
+                "/nickname <text> - set your multiplayer name (/name alias)",
             };
 
             void* helpObj = (g_BzrPtr_920168 && *g_BzrPtr_920168) ? *g_BzrPtr_920168 : nullptr;
@@ -28719,11 +28815,17 @@ namespace BZROpenShim
             return true;
         }
 
-        // The lobby screen keeps keyboard focus on its own chatEntry, so a
-        // cUI_TextEntry we construct can be shown but never typed into. The
-        // chat line is therefore the real input path for the multiplayer name,
-        // reusing the command interception that already backs /ban.
-        if (_strnicmp(cmd, "/name", 5) == 0 && (cmd[5] == '\0' || cmd[5] == ' '))
+        // OpenShim already owns the multiplayer chat-command interception used
+        // by /help and /ban. Keep nickname handling here instead of adding a
+        // second EXU detour over the same Redux text path. /name remains as a
+        // compatibility alias; /nickname is the documented command.
+        const char* nicknameArgs = nullptr;
+        if (_strnicmp(cmd, "/nickname", 9) == 0 && (cmd[9] == '\0' || cmd[9] == ' '))
+            nicknameArgs = cmd + 9;
+        else if (_strnicmp(cmd, "/name", 5) == 0 && (cmd[5] == '\0' || cmd[5] == ' '))
+            nicknameArgs = cmd + 5;
+
+        if (nicknameArgs)
         {
             void* helpObj = (g_BzrPtr_920168 && *g_BzrPtr_920168) ? *g_BzrPtr_920168 : nullptr;
             const auto report = [&](const char* line)
@@ -28734,7 +28836,7 @@ namespace BZROpenShim
                     g_BzrFn_HelpUi(0, line);
             };
 
-            const std::string requested = TrimAsciiCopy(cmd + 5);
+            const std::string requested = TrimAsciiCopy(nicknameArgs);
             char message[256] = {};
             if (requested.empty())
             {
@@ -28742,43 +28844,47 @@ namespace BZROpenShim
                 if (ReadBzrNetNickname(current, sizeof(current)) && current[0] != '\0')
                 {
                     std::snprintf(message, sizeof(message),
-                                  "Multiplayer name is \"%s\" - /name <text> to change it", current);
+                                  "Multiplayer name is \"%s\" - /nickname <text> to change it", current);
                 }
                 else
                 {
-                    std::snprintf(message, sizeof(message),
-                                  "Using your platform account name - /name <text> to override it");
+                    std::snprintf(message, sizeof(message), "Usage: /nickname <text>");
                 }
                 report(message);
                 return true;
             }
 
-            if (!WriteBzrNetNickname(requested.c_str()))
+            const BzrNetNicknameResult result = ApplyBzrNetNicknameAuthoritative(
+                requested.c_str(), "chat_command");
+            if (!IsAcceptedBzrNetNicknameResult(result))
             {
-                report("Could not set the multiplayer name on this build.");
-                Log(L"[BZRNET] /name refused (byte guard failed)\n");
+                if (result == BzrNetNicknameResult::InvalidNickname)
+                    report("Invalid nickname. Use 1-127 printable characters.");
+                else
+                    report("Could not persist the multiplayer nickname.");
                 return true;
             }
 
-            WriteShimUserConfigValue(kUserConfigNetworkSection, "Nickname", requested.c_str());
-            const bool liveSent =
-                ShouldSendLiveNicknameKeys() &&
-                SendBzrNetNicknameLive(requested.c_str(), "chat_command");
-            const bool reauthQueued =
+            SyncNicknameEntriesFromAuthoritativeValue(requested.c_str());
+            const bool liveApplied = result == BzrNetNicknameResult::AppliedLive;
+            const bool reauthQueued = !liveApplied &&
                 ShouldReauthOnNicknameChange() && ForceBzrNetReauth("chat_command");
-            const char* outcome = "applies on your next connect";
-            if (reauthQueued)
+            const char* outcome = "saved for the next BZRNet connection";
+            if (liveApplied)
+                outcome = "applied live";
+            else if (reauthQueued)
                 outcome = "reconnecting to apply it";
-            else if (liveSent)
-                outcome = "sent to the server";
+            else if (result == BzrNetNicknameResult::UnsupportedBuild)
+                outcome = "saved; live rename unsupported on this build";
+            else if (result == BzrNetNicknameResult::NativeStateInvalid)
+                outcome = "saved; live BZRNet state unavailable";
+
             std::snprintf(message, sizeof(message),
                           "Multiplayer name set to \"%s\" - %s",
                           requested.c_str(), outcome);
             report(message);
-            Log(L"[BZRNET] /name set nickname to \"%hs\" (live=%hs reauth=%hs)\n",
-                requested.c_str(),
-                liveSent ? "sent" : "no",
-                reauthQueued ? "queued" : "no");
+            Log(L"[BZRNET] /nickname result=%hs reauth=%hs\n",
+                BzrNetNicknameResultName(result), reauthQueued ? "queued" : "no");
             NetRouteRefreshHost();
             NetRouteRefreshClient();
             return true;
@@ -29765,11 +29871,11 @@ namespace BZROpenShim
         {
             if (!entry || !g_BzrFn_SetTooltip)
                 return;
-            const char* text = "Saved-reconnect";
+            const char* text = "Saved-next conn";
             if (g_PendingNicknameReauth)
                 text = "Reconnecting...";
             else if (g_PendingNicknameLiveSend)
-                text = "Sent to server";
+                text = "Applied live";
             g_BzrFn_SetTooltip(entry, text);
         }
 
@@ -29783,11 +29889,39 @@ namespace BZROpenShim
         }
 
 
-        // Persist the launch/auth nickname, then try to make it take effect on
-        // the open connection. The buffer at 0x009453E0 is written first and
-        // unconditionally: it is the Authorization message's own `name` field,
-        // so it is the one thing guaranteed to land, on the next connect at the
-        // latest. Everything after it is the live attempt.
+        // Keep the launch/auth nickname synchronized with the committed UI
+        // value, then try the native live SetPlayerData path. The fixed buffer
+        // at 0x009453E0 remains the Authorization `name` source for a later
+        // reconnect in this same process.
+        static void SyncOneNicknameEntry(void* parent, void* entry, const char* value)
+        {
+            if (!entry || !value || !g_BzrFn_TextEntryClear || !g_BzrFn_TextEntryAppendText)
+                return;
+            if (parent && !IsWidgetLiveChildOfParent(parent, entry))
+                return;
+            __try
+            {
+                g_BzrFn_TextEntryClear(entry);
+                g_BzrFn_TextEntryAppendText(entry, value);
+                if (g_BzrFn_SetTooltip)
+                    g_BzrFn_SetTooltip(entry, value);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[BZRNET] Nickname UI synchronization faulted code=0x%08X\n",
+                    static_cast<uint32_t>(GetExceptionCode()));
+            }
+        }
+
+        static void SyncNicknameEntriesFromAuthoritativeValue(const char* value)
+        {
+            SyncOneNicknameEntry(g_HostUiParent, g_NicknameEntryHost, value);
+            SyncOneNicknameEntry(g_ClientUiParent, g_NicknameEntryClient, value);
+        }
+
+        // Commit through the same authoritative operation used by chat and the
+        // exported bridge. This is the UI's natural Apply/Enter event, so no
+        // SetPlayerData traffic is generated for intermediate keystrokes.
         static bool ApplyNicknameFromEntry(void* entry, const char* source)
         {
             if (!entry)
@@ -29805,22 +29939,18 @@ namespace BZROpenShim
             const std::string trimmed = TrimAsciiCopy(text);
             if (trimmed.empty() || trimmed == kNicknamePlaceholder)
                 return false;
-            if (!WriteBzrNetNickname(trimmed.c_str()))
-            {
-                Log(L"[BZRNET] Nickname write refused (byte guard failed)\n");
-                return false;
-            }
 
-            WriteShimUserConfigValue(kUserConfigNetworkSection, "Nickname", trimmed.c_str());
-            g_PendingNicknameLiveSend =
-                ShouldSendLiveNicknameKeys() &&
-                SendBzrNetNicknameLive(trimmed.c_str(), source);
-            g_PendingNicknameReauth =
+            const BzrNetNicknameResult result = ApplyBzrNetNicknameAuthoritative(
+                trimmed.c_str(), source);
+            if (!IsAcceptedBzrNetNicknameResult(result))
+                return false;
+
+            SyncNicknameEntriesFromAuthoritativeValue(trimmed.c_str());
+            g_PendingNicknameLiveSend = result == BzrNetNicknameResult::AppliedLive;
+            g_PendingNicknameReauth = !g_PendingNicknameLiveSend &&
                 ShouldReauthOnNicknameChange() && ForceBzrNetReauth(source);
-            Log(L"[BZRNET] Nickname set to \"%hs\" (source=%hs live=%hs reauth=%hs)\n",
-                trimmed.c_str(),
-                source,
-                g_PendingNicknameLiveSend ? "sent" : "no",
+            Log(L"[BZRNET] Nickname UI apply result=%hs (source=%hs reauth=%hs)\n",
+                BzrNetNicknameResultName(result), source,
                 g_PendingNicknameReauth ? "queued" : "no");
             return true;
         }
@@ -30663,6 +30793,20 @@ namespace BZROpenShim
         }
     }
 
+    BzrNetNicknameResult SetBzrNetNicknameFromBridge(const char* nickname)
+    {
+        const BzrNetNicknameResult result = ApplyBzrNetNicknameAuthoritative(
+            nickname, "external_bridge");
+        if (IsAcceptedBzrNetNicknameResult(result))
+        {
+            const std::string normalized = TrimAsciiCopy(nickname ? nickname : "");
+            SyncNicknameEntriesFromAuthoritativeValue(normalized.c_str());
+            NetRouteRefreshHost();
+            NetRouteRefreshClient();
+        }
+        return result;
+    }
+
     // Authoritative local-player world position. Consumers that need to know
     // where the player actually is should use this rather than the render
     // camera, which can be a chase or satellite view a long way from them.
@@ -30719,4 +30863,11 @@ namespace BZROpenShim
     void FlushChunkFragmentEventsForShutdown()
     {
     }
+}
+
+// Optional high-level bridge used by EXU and other companion DLLs. BZRNet/native
+// details remain entirely inside OpenShim; callers receive only a stable status.
+extern "C" __declspec(dllexport) DWORD WINAPI OpenShimSetBZRNetNickname(LPCSTR nickname)
+{
+    return static_cast<DWORD>(BZROpenShim::SetBzrNetNicknameFromBridge(nickname));
 }
