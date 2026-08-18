@@ -41,6 +41,14 @@ This repo is part of the local Battlezone workspace opened via
 - If future work returns to map filters, keep the core hop-fix and manual
   refresh preservation behavior separate from the filter/sort port.
 
+## Steam Roadmap / Forum Post Source
+- `Docs/STEAM_ROADMAP_BBCODE.txt` is the canonical source for the public Steam
+  Community roadmap/forum post.
+- When a roadmap-relevant fix, feature, research status, or completed item changes,
+  update this BBCode source alongside the normal patch notes/changelog/release notes.
+- Keep engine/runtime work in this roadmap; stock asset/content corrections belong
+  in Campaign Reimagined rather than being mixed into the OpenShim/EXU bug list.
+
 ## Executable Baseline Notes
 - For the Battlezone 98 Redux builds checked so far, the Steam executable has
   matched the GOG executable byte-for-byte once the game has launched and the
