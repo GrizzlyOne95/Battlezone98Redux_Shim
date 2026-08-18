@@ -34,6 +34,36 @@ jobs:
         shell: pwsh
         run: ./setup-dev.ps1
 
+      - name: Validate DX11 Enhanced FXAA shader
+        shell: pwsh
+        run: |
+          $kitsBin = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+          $fxc = Get-ChildItem -LiteralPath $kitsBin -Filter fxc.exe -File -Recurse |
+            Where-Object { $_.FullName -match '\\x86\\fxc\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+
+          if (-not $fxc) {
+            throw "Windows SDK fxc.exe was not found under $kitsBin"
+          }
+
+          $shader = Join-Path $PWD "shaders\dx11_enhanced_fxaa.hlsl"
+          $includeDir = Join-Path $PWD "reverse_engineering\prerelease_2016\removed_files"
+          $vsOut = Join-Path $env:RUNNER_TEMP "dx11_enhanced_fxaa_vs.cso"
+          $psOut = Join-Path $env:RUNNER_TEMP "dx11_enhanced_fxaa_ps.cso"
+
+          & $fxc.FullName /nologo /Ges /O3 /I $includeDir /T vs_5_0 /E VSMain /Fo $vsOut $shader
+          if ($LASTEXITCODE -ne 0) {
+            throw "DX11 Enhanced FXAA VSMain / vs_5_0 compilation failed"
+          }
+
+          & $fxc.FullName /nologo /Ges /O3 /I $includeDir /T ps_5_0 /E PSMain /Fo $psOut $shader
+          if ($LASTEXITCODE -ne 0) {
+            throw "DX11 Enhanced FXAA PSMain / ps_5_0 compilation failed"
+          }
+
+          "FXAA 3.11 HLSL5 validation passed using $($fxc.FullName)"
+
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
