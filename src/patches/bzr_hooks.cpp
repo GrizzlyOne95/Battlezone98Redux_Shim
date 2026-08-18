@@ -2041,7 +2041,9 @@ namespace BZROpenShim
         // is not illumination at all. Sanity check for any future revision:
         // Redux is the BZ 1.5 layout shifted by +0xC, and 1.5 has illumination
         // at 0xDC, so 0xDC here was the *1.5* offset, not the Redux one.
-        static constexpr size_t kGameObjectOgreScanBytes = 0x400;
+        // Verified against ExtraUtilities' GetOgreEntity chain.
+        static constexpr size_t kGameObjectRenderOwnerOffset = 0xF0;
+        static constexpr size_t kRenderOwnerOgreEntityOffset = 0x94;
         static constexpr size_t kGameObjectIlluminationOffset = 0xE8;
         static constexpr size_t kGameObjectIsObjectiveOffset = 0x189;
         static constexpr size_t kGameObjectIsSelectedOffset = 0x18A;
@@ -9453,8 +9455,9 @@ namespace BZROpenShim
             // never been derived, so rather than assume one, record which
             // fields of the object hold a pointer whose vtable lives inside
             // OgreMain. A capture turns that into a known offset.
-            uint32_t ogreHandleOffset = 0xFFFFFFFFu;
+            void* renderOwner = nullptr;
             void* ogreHandle = nullptr;
+            int ogreVisible = -1;          // -1 = unknown, 0/1 = Ogre getVisible()
             char ogreClassName[64] = {};
             uint32_t isVisible = 0;
             uint32_t seen = 0;
@@ -9536,6 +9539,80 @@ namespace BZROpenShim
             }
         }
 
+        // Ogre::MovableObject::getVisible, resolved by module offset exactly as
+        // ExtraUtilities does. Read-only. Isolated here because the cached
+        // static cannot share a frame with __try.
+        static FnOgreEntityBoolQuery GetOgreVisibleProc()
+        {
+            static FnOgreEntityBoolQuery fn =
+                ResolveOgreProcByOffset<FnOgreEntityBoolQuery>(0x00005E70);
+            return fn;
+        }
+
+        static int TryReadOgreVisible(FnOgreEntityBoolQuery getVisible, void* entity)
+        {
+            __try
+            {
+                return getVisible(entity) ? 1 : 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return -1;
+            }
+        }
+
+        // GameObject -> [+0xF0] -> [+0x94] = Ogre entity. Taken from
+        // ExtraUtilities (BZR::GameObject::GetOgreEntity, src/bzr.h), which
+        // drives its distance culling through exactly this chain. EXU's
+        // GameObject base is the same complete object this probe walks: its
+        // struct puts carrier at +0x1A0, and Redux's Craft::AbandonPilot reads
+        // the carrier at complete+0x1A0.
+        //
+        // A blind one-level scan could never have found this: the entity is two
+        // hops out, and the intermediate at +0xF0 is not itself an Ogre object.
+        //
+        // Kept in its own function because the Ogre proc is resolved into a
+        // function-local static, which cannot live inside a __try frame.
+        static void ResolveGameObjectOgreState(const uint8_t* bytes,
+                                               void*& outRenderOwner,
+                                               void*& outEntity,
+                                               int& outVisible,
+                                               char* outClassName,
+                                               size_t classNameSize)
+        {
+            outRenderOwner = nullptr;
+            outEntity = nullptr;
+            outVisible = -1;
+            if (!bytes)
+                return;
+
+            void* renderOwner = nullptr;
+            void* entity = nullptr;
+            __try
+            {
+                renderOwner = *reinterpret_cast<void* const*>(bytes + kGameObjectRenderOwnerOffset);
+                if (renderOwner)
+                    entity = *reinterpret_cast<void* const*>(
+                        reinterpret_cast<const uint8_t*>(renderOwner) + kRenderOwnerOgreEntityOffset);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return;
+            }
+
+            outRenderOwner = renderOwner;
+            if (!LooksLikeOgreObject(entity))
+                return;
+
+            outEntity = entity;
+            TryGetRttiClassName(entity, outClassName, classNameSize);
+
+            FnOgreEntityBoolQuery getVisible = GetOgreVisibleProc();
+            if (!getVisible)
+                return;
+            outVisible = TryReadOgreVisible(getVisible, entity);
+        }
+
         static bool CaptureSatelliteVisibilityEntry(void* objectPtr,
                                                     long userTeam,
                                                     SatelliteVisibilityLogEntry& outEntry)
@@ -9565,19 +9642,9 @@ namespace BZROpenShim
                     *reinterpret_cast<const uint32_t*>(bytes + kGameObjectSeenOffset);
                 outEntry.targetHandle =
                     *reinterpret_cast<const int*>(bytes + kGameObjectTargetHandleOffset);
-                for (size_t off = 0; off + sizeof(void*) <= kGameObjectOgreScanBytes; off += sizeof(void*))
-                {
-                    void* candidate = nullptr;
-                    __try { candidate = *reinterpret_cast<void* const*>(bytes + off); }
-                    __except (EXCEPTION_EXECUTE_HANDLER) { break; }
-                    if (!LooksLikeOgreObject(candidate))
-                        continue;
-                    outEntry.ogreHandleOffset = static_cast<uint32_t>(off);
-                    outEntry.ogreHandle = candidate;
-                    TryGetRttiClassName(candidate, outEntry.ogreClassName,
-                                        sizeof(outEntry.ogreClassName));
-                    break;
-                }
+                ResolveGameObjectOgreState(bytes, outEntry.renderOwner, outEntry.ogreHandle,
+                                           outEntry.ogreVisible, outEntry.ogreClassName,
+                                           sizeof(outEntry.ogreClassName));
 
                 outEntry.isObjective =
                     *reinterpret_cast<const uint8_t*>(bytes + kGameObjectIsObjectiveOffset) != 0;
@@ -9645,15 +9712,18 @@ namespace BZROpenShim
 
             // Second line only when an Ogre handle was actually found, so the
             // absence of one is itself visible in the capture.
-            if (entry.ogreHandleOffset != 0xFFFFFFFFu)
-            {
-                Log(L"[SATVIS]     %ls ogre +0x%03X=0x%08X (%hs) legacyVisible=%d\n",
-                    tag,
-                    entry.ogreHandleOffset,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entry.ogreHandle)),
-                    entry.ogreClassName,
-                    entry.legacyVisible ? 1 : 0);
-            }
+            // Always emitted, so a missing Ogre entity is as visible in the
+            // capture as a present one. The pairing that matters is
+            // legacyVisible=0 with ogreVis=1: an object BZ 1.5 would have
+            // withheld from the overview that Redux is still drawing.
+            Log(L"[SATVIS]     %ls owner=0x%08X ogre=0x%08X (%hs) ogreVis=%d legacyVisible=%d%hs\n",
+                tag,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entry.renderOwner)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entry.ogreHandle)),
+                entry.ogreClassName[0] ? entry.ogreClassName : "?",
+                entry.ogreVisible,
+                entry.legacyVisible ? 1 : 0,
+                (!entry.legacyVisible && entry.ogreVisible == 1) ? "  <== LEAK" : "");
         }
 
         // Stop the stale under-attack growl that fires the instant you hop out.
@@ -9748,8 +9818,11 @@ namespace BZROpenShim
         {
             if (!g_TraceSatelliteVisibility)
                 return;
-            if (!IsSatelliteOverviewActive())
-                return;
+            // Deliberately NOT gated on the overview any more. The question is
+            // whether an object's effective Ogre visibility changes as the
+            // player enters and leaves view 3, so the sampler has to run on
+            // both sides of the transition. Every line carries the view id, and
+            // the same one-per-second rate limit and sample budget still apply.
 
             const DWORD now = GetTickCount();
             if (g_SatelliteVisibilityLastTick != 0 &&

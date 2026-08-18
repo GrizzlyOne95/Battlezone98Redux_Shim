@@ -495,10 +495,19 @@ TraceJumpSniping = 0
 ;
 ; This is ON by default only while the satellite fog-of-war regression is
 ; being characterised (feature item 24); it will return to OFF once that is
-; resolved. Read-only sampling, no gameplay effect. It costs nothing outside
-; satellite view: the sampler returns immediately when the view mode is not
-; overview, is rate-limited to one sample per second, and stops entirely once
-; its budget is spent. Set to 0 to silence it.
+; resolved. Read-only sampling, no gameplay effect.
+;
+; As of 2026-08-18 it also resolves each object to its Ogre entity via
+; GameObject -> [+0xF0] -> [+0x94] (the chain ExtraUtilities uses for its
+; distance culling) and records Ogre's own getVisible() alongside the legacy
+; illumination gate. A line marked LEAK is an object BZ 1.5 would have kept
+; out of the overview that Redux is still drawing -- that pairing is the whole
+; point of the capture.
+;
+; It no longer returns early outside satellite view, because the question is
+; how effective visibility changes as you enter and leave view 3, and that
+; needs samples on both sides. Still rate-limited to one sample per second and
+; still stops once the budget is spent. Set to 0 to silence it.
 ;
 ; Background and the live-test plan:
 ;   reverse_engineering/satellite_fow_root_cause_20260817.md
