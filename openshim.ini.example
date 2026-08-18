@@ -108,6 +108,30 @@ MapRefreshFixes = 1
 ; Legacy env alias: OPENSHIM_DISABLE_MUSIC_GLOBAL_FOCUS
 MusicGlobalFocus = 1
 
+; Win32 raw mouse input for camera look.
+; Accepted: boolean. Default: ON. Restart required.
+; Redux already implements a complete raw-input path -- it registers the mouse
+; with RegisterRawInputDevices, handles WM_INPUT, and feeds the relative deltas
+; into the same look accumulator and the same sensitivity setting the ordinary
+; mouse path uses -- but the enable flag it keys off is zero-initialised, so
+; nothing turns it on unless you pass the stock `rawinput` command-line token.
+; This setting turns it on by default.
+; With it ON the engine reads mouse movement straight from the device, so look
+; is unaffected by pointer acceleration, by the desktop pointer-speed slider,
+; and by the screen edge. The stock code already skips its legacy
+; WM_MOUSEMOVE look path whenever raw input is active, so the two never
+; contribute at once. Controller and keyboard input are untouched.
+; Set OFF to restore the stock behavior (legacy mouse-message path).
+; Sensitivity is unchanged: both paths share the in-game sensitivity setting.
+; Precedence: `rawinput` / `norawinput` on the command line beat the env
+; overrides, which beat this file.
+; Legacy env aliases: OPENSHIM_DISABLE_RAW_MOUSE_INPUT,
+;                     BZR_DISABLE_RAW_MOUSE_INPUT
+; Diagnostics: set OPENSHIM_TRACE_RAW_INPUT=1 to log raw packet flags and
+; deltas to logs\; the [RAWINPUT] startup lines report whether the path
+; verified and engaged.
+RawMouseInput = 1
+
 ; Prevent duplicate Ogre material declarations from escaping script parsing as
 ; ERR_DUPLICATE_ITEM and terminating the game.
 ; Accepted: boolean. Default: ON.
