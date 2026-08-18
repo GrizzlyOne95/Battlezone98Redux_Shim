@@ -74,7 +74,14 @@ views 9 and 10; view 3 falls through to the same ungated path used by first
 person. That is precisely where the 1.5 gate went, and it explains the capture
 in §1 with no other mechanism required.
 
-`FUN_004D4610` is the entity submitter and matches the 1.5 shape:
+**CORRECTION (later the same day): `FUN_004D4610` is NOT the entity
+submitter.** Its container `[0x00917A68]` is a list of `GameFeature` objects —
+the constructor at `FUN_004D4980` stores `GameFeature::vftable` (`0x00879B20`)
+and registers into that vector. `FUN_004D4610` is therefore a *GameFeature
+render pass*, one of several (`FUN_004D46B0` dispatches slot 9 for a different
+pass). Game-object submission happens inside one of the 28 GameFeature
+subclasses, 14 of which override the submit slot. The shape below is still
+accurately described, it just is not the analogue of `Submit_All_Entities`:
 
 ```
 FUN_004D4610(camera):
@@ -136,6 +143,37 @@ added term is conditioned on view 3.
 | --- | --- |
 | 1.5 gate is `illumination > 0`, overview-only, at submission | **Very high** — disassembled; single caller |
 | Redux has no overview-specific submitter and view 3 uses the ungated path | **High** — frame body read in full; branch excludes only views 9/10 |
-| `FUN_004D4610` is the entity submitter | **High** — Get_Visible_Lights prologue + per-object virtual submit |
+| `FUN_004D4610` is the entity submitter | **RETRACTED** — it is a GameFeature render pass; see the correction in §4 and §8 |
 | `[0x00917A68]` holds renderer-registry objects, not GameObjects | **High** — comparator, pass id, flag bits, two dispatch slots |
 | Back-pointer to GameObject | **Not established** — the blocker |
+
+
+---
+
+## 8. Addendum: GameFeature architecture (2026-08-18)
+
+Redux does not submit entities from the frame body. It maintains a global
+`GameFeature` registry and renders through it:
+
+* `GameFeature::vftable` = `0x00879B20`; base slots are all no-op stubs
+  (`0x00417C60` / `0x004178A0`), so it is a pure interface.
+* Constructor `FUN_004D4980` sets `+0x24 = 0xFF` (pass id, "any"), sets flag
+  bits 1/2/3 at `+0x25`, and lazily creates the registry vector at
+  `[0x00917A68]`.
+* 28 subclass constructors call it. 14 override the submit slot (`+0x20`):
+  `0x00451F80 0x0049C150 0x0049C3E0 0x004C0680 0x004C88C0 0x004C9630 0x004C9930
+  0x004D1A00 0x004D1C80 0x004FAAF0 0x0058BA60 0x005BABB0 0x005D1FE0 0x00660A80`.
+* The registry siblings expose a sort key at `+0x1C` (comparator
+  `FUN_004D4150`), the pass id at `+0x24`, and flag bits at `+0x25` selecting
+  which pass dispatches which slot.
+
+Useful discriminator for the next pass: `FUN_006895D0` is the
+`Camera_Bounding_Sphere_Test` analogue — callers test its result `< 1` exactly
+as 1.5 does. It has 32 call sites, and notably one at `0x004AD273` inside the
+**Craft** module, which means game objects carry their own submit methods rather
+than being submitted by a shared entity loop. The remaining work is to identify
+which GameFeature drives those per-object submits, and gate there.
+
+The GameObject arena (`VA 0x0260DB20`, stride 0x400, 4096 slots) is referenced
+from only three places, all in `0x004D9F..0x004DA0` — the object
+allocator/manager — confirming the renderer does not walk the arena directly.
