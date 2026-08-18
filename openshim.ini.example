@@ -759,6 +759,27 @@ HeadlightColor = White
 HeadlightBeam = Wide
 
 
+
+; Reveal an attacker's perceived team when it engages you, not only when its
+; damage lands.
+;
+; Stock reveals an attacker only inside SetDamageFlags, which runs when a shot
+; actually connects -- in both BZ 1.5 and Redux. An enemy that fires and misses
+; therefore keeps whatever perceived team it was disguised with, so it can keep
+; shooting at you while still reading as neutral or friendly on the satellite
+; view and radar. This hooks the offensive/gun-tower/turret-tank attack paths
+; and sets the attacker's perceivedTeam to its real team as it engages.
+;
+; NOTE: effective for the first time in this build. It previously wrote the
+; actual-team field back over itself and always short-circuited, so it has
+; never once run despite being enabled by default. If you see a behaviour
+; change in enemy visibility after updating, this is the most likely cause --
+; set it to 0 to get the previous (inert) behaviour back.
+;
+; Accepted: boolean. Default: ON.
+; Trace: OPENSHIM_TRACE_ATTACK_REVEAL=1  (logs skip/noop/write per event)
+; Legacy env alias to force it off: OPENSHIM_DISABLE_ATTACK_REVEAL
+AttackRevealPerceivedTeam = 1
 [Environment]
 
 ; ---------------------------------------------------------------------------

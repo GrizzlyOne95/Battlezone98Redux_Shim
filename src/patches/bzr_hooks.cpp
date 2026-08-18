@@ -15749,23 +15749,22 @@ namespace BZROpenShim
                 }
 
                 auto* objectBytes = reinterpret_cast<uint8_t*>(objectPtr);
-                // KNOWN DEFECT, deliberately left as-is for now.
+                // This wrote the ACTUAL team field until 2026-08-17, because
+                // kGameObjectPerceivedTeamOffset was 0x174. actualTeam above is
+                // read from that same +0x174, so the equality check below
+                // always succeeded and the function returned "already_revealed"
+                // every time without ever writing: the reveal has never once
+                // run, despite defaulting to enabled.
                 //
-                // This writes the ACTUAL team field, not perceivedTeam, because
-                // kGameObjectPerceivedTeamOffset used to be 0x174. Since
-                // actualTeam above is read from that same +0x174, the equality
-                // check below always succeeds and the function has always
-                // returned "already_revealed" without writing anything. The
-                // attack-reveal feature has therefore never run, despite
-                // defaulting to enabled.
-                //
-                // Repointing this at kGameObjectPerceivedTeamOffset (now the
-                // correct 0x180) would switch a never-exercised gameplay
-                // feature on for the first time, which is a bigger change than
-                // the diagnostic fix this commit is making. Behaviour is left
-                // byte-identical until that is a deliberate, tested decision.
+                // Now pointed at the real perceivedTeam. Stock only reveals an
+                // attacker once its damage lands -- SetDamageFlags' tail does
+                // damager->SetPerceivedTeam(damager->GetTeam()) in both 1.5 and
+                // Redux -- so an enemy that fires and misses stays disguised.
+                // Closing that is what this feature was added for, and it can
+                // only do so by writing the field the satellite/radar actually
+                // reads.
                 int& perceivedTeam =
-                    *reinterpret_cast<int*>(objectBytes + kGameObjectActualTeamOffset);
+                    *reinterpret_cast<int*>(objectBytes + kGameObjectPerceivedTeamOffset);
                 const int previousPerceivedTeam = perceivedTeam;
                 if (previousPerceivedTeam == actualTeam)
                 {
@@ -24714,6 +24713,30 @@ namespace BZROpenShim
             g_HopOutAlertLastUserObject = nullptr;
             g_HopOutAlertPrimed = false;
         }
+
+        // Attack reveal. Effective for the first time as of 2026-08-17: it had
+        // been writing the actual-team field back over itself, so it always
+        // short-circuited on "already_revealed". Now that it reaches the real
+        // perceivedTeam it needs a kill switch that is not the exported bridge
+        // API, because this is the first build in which turning it off can
+        // actually change anything.
+        {
+            bool attackRevealConfig = false;
+            if (TryGetUserConfigBool("SinglePlayer", "AttackRevealPerceivedTeam",
+                                     attackRevealConfig))
+            {
+                g_AttackRevealEnabled = attackRevealConfig;
+            }
+            else if (EnvFlagEnabled("OPENSHIM_DISABLE_ATTACK_REVEAL") ||
+                     EnvFlagEnabled("BZR_DISABLE_ATTACK_REVEAL"))
+            {
+                g_AttackRevealEnabled = false;
+            }
+            else
+            {
+                g_AttackRevealEnabled = kAttackRevealEnabledDefault;
+            }
+        }
         g_ConstructorRemoteBuildFixEnabled =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX") ||
               EnvFlagEnabled("BZR_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX"));
@@ -25860,34 +25883,6 @@ namespace BZROpenShim
         const float nextDelay =
             (std::max)(g_UnderAttackAlertCooldownSeconds, minSpacing);
         g_UnderAttackAlertNextAllowedTime = currentTime + nextDelay;
-    }
-
-    bool __fastcall WeaponMineFriendPGuard(void* minePtr, void* /*edx*/, void* targetPtr)
-    {
-        // Craft::AbandonPilot temporarily gives the vacated craft perceived
-        // team zero. WeaponMine's stock one-way relation check then mistakes
-        // an allied ship for a valid target even though its Team object remains
-        // intact.
-        FnGameObjectRelation friendP = g_BzrFn_GameObjectFriendP;
-        if (!friendP)
-            friendP = reinterpret_cast<FnGameObjectRelation>(kGogGameObjectFriendPAddr);
-
-        if (!friendP || !minePtr || !targetPtr)
-            return false;
-        if (friendP(minePtr, targetPtr))
-            return true;
-
-        // Preserve stock behavior for non-neutral candidates. For a
-        // perceived-neutral craft, the reciprocal relation uses its persistent
-        // Team object: allies are protected while abandoned enemies remain
-        // targetable.
-        using FnGetPerceivedTeam = int(__thiscall*)(void* thisPtr);
-        void** vtable = *reinterpret_cast<void***>(targetPtr);
-        if (!vtable || !vtable[1])
-            return false;
-        const int perceivedTeam =
-            reinterpret_cast<FnGetPerceivedTeam>(vtable[1])(targetPtr);
-        return perceivedTeam == 0 && friendP(targetPtr, minePtr);
     }
 
     namespace

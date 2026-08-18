@@ -130,7 +130,6 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::REL32, {}, "Chunk Render Resolve Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Producer Build Menu Root Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Target Reticle Popup Recent-Hit Getter Hook", false, {} },
-            { 0, HookEngine::PatchType::REL32, {}, "WeaponMine Hop-Out Friendly-Fire Fix", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "HoverCraft Engine Flame Emit Hook 1/2", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "HoverCraft Engine Flame Emit Hook 2/2", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Decoded Weapon Mask Carrier Bias Hook", false, {} },

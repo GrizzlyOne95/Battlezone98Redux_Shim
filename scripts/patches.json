@@ -32,13 +32,6 @@
       "fallback": "0x004EAD78"
     },
     {
-      "name": "WeaponMine Hop-Out Friendly-Fire Fix",
-      "pattern": "89 8D 54 FE FF FF 8B 95 54 FE FF FF 52 8B 8D 58 FE FF FF E8 ?? ?? ?? ?? 0F B6 C0 85 C0 74 02 EB 9A",
-      "offset": 20,
-      "expected_size": 4,
-      "fallback": "0x00612A52"
-    },
-    {
       "name": "HoverCraft Engine Flame Emit Hook 2/2",
       "pattern": "8D 95 ?? ?? ?? ?? 52 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? E9 ?? ?? ?? ?? 83 BD ?? ?? ?? ?? 00 0F 8E",
       "offset": 13,
@@ -113,11 +106,6 @@
       "name": "Target Reticle Popup Recent-Hit Getter Hook",
       "fallback": "0x00497C27",
       "expected_original": "65 FC FF FF"
-    },
-    {
-      "name": "WeaponMine Hop-Out Friendly-Fire Fix",
-      "fallback": "0x00612A52",
-      "expected_original": "BA 8A EC FF"
     },
     {
       "name": "Engine Flame Control VTable Hook",

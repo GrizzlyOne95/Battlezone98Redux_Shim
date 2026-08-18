@@ -58,7 +58,6 @@ namespace BZROpenShim
     void __fastcall ChunkEffectSimulateHook(void* thisPtr, void* edx, float dt);
     void __fastcall LegacyWorldUpdateRenderQueueHook(void* thisPtr, void* edx, void* renderQueue);
     void __cdecl HandleUnderAttackAlert(float currentTime);
-    bool __fastcall WeaponMineFriendPGuard(void* minePtr, void* edx, void* targetPtr);
     void PrimeUnderAttackAlertConfig();
     bool SetUnderAttackAlertModeFromBridge(int mode);
     bool SetBomberAiRangeEnabledFromBridge(bool enabled);
