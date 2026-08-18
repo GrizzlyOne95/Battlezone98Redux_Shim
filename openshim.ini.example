@@ -47,6 +47,7 @@
 ;   [General]      engine/UI behavior
 ;   [Startup]      startup-only hooks/behavior
 ;   [Terrain]      terrain replacement/proxy development controls
+;   [DX11Enhanced] experimental modern DX11 Enhanced presentation controls
 ;   [Display]      local/cosmetic behavior
 ;   [AutoSave]     rolling single-player recovery save
 ;   [Diagnostics]  read-only traces/probes unless explicitly noted
@@ -257,7 +258,6 @@ TerrainProxyFollowCameraAimDistance = 35.0
 ; mission. Each re-selection rebuilds a material and its programs, so the count
 ; is capped at 16 per mission.
 TerrainProxyFollowCameraReselectFrames = 300
-
 ; Proxy translation in world units. Accepted: finite decimal; default 0.0.
 ; NOTE: with TerrainProxyFollowCamera=1 a large offset moves the proxy away
 ; from the visible stock cluster that was selected, so the proxy itself may be
@@ -351,6 +351,19 @@ TerrainHdEnabled = 0
 ; Relative paths resolve from battlezone98redux.exe; absolute paths are allowed.
 ; Default: terrain_hd_tiles.json
 TerrainHdManifest = terrain_hd_tiles.json
+
+
+[DX11Enhanced]
+
+; NVIDIA FXAA 3.11 terminal presentation pass for the experimental DX11
+; Enhanced pipeline. The reference INI enables it by default so Enhanced
+; rendering tests exercise the modern AA path without changing stock shaders.
+; Accepted: boolean/integer flag; use 0/1. Default in this reference INI: ON.
+; Applies only when RenderSystem_Direct3D11.dll is active. DX9 is untouched.
+; The runtime still fails closed if this key/section is absent, preserving
+; existing stock/default DX11 installations that have not opted into this INI.
+; Legacy environment override: OPENSHIM_DX11_ENHANCED_FXAA
+FXAA = 1
 
 
 [Display]
