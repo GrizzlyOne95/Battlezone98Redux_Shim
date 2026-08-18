@@ -177,3 +177,62 @@ which GameFeature drives those per-object submits, and gate there.
 The GameObject arena (`VA 0x0260DB20`, stride 0x400, 4096 slots) is referenced
 from only three places, all in `0x004D9F..0x004DA0` — the object
 allocator/manager — confirming the renderer does not walk the arena directly.
+
+---
+
+## 9. Why there is no submission gate to restore (2026-08-18, second pass)
+
+RTTI names every `GameFeature` subclass. The 28 registered classes are:
+
+`AudioMessageMgr ParticleSystem AiUtilFeature BettyVoice ChunkEffect ColorFade
+ConstructionBlob ConstructionDisplay DustEffect EarthQuake EngineFlame
+EngineSplash ExplosionFeature FireballEffect FlagDisplay GameObjectFeature
+LensFlare LightningFeature ParameterDBFeature ParticleEffect RecycleFeature
+Reticle DropoffFeature ScrapFieldFeature ShockWaveEffect SmokeEffect PortalBlob
+AIScheduleFeature`
+
+**`GameObjectFeature`** (vtable `0x00879E98`) overrides only slots 2, 6 and 15.
+Its render-submit slot (`+0x20`) is the base no-op stub, and its slot 6
+(`FUN_004D9DA0`, dispatched by the `FUN_004D44F0` pass) takes no camera and
+scans for `'PRCS'`-tagged objects — gameplay bookkeeping, not rendering.
+
+**Game objects are therefore never submitted through the feature registry.**
+
+Decisive confirmation: `Ogre::RenderQueue::addRenderable` has exactly **one**
+call site in the entire executable — `FUN_00679570`, which OpenShim already
+hooks as `LegacyWorldUpdateRenderQueueHook`:
+
+```
+LegacyWorld::updateRenderQueue(RenderQueue* q):   ; ecx = this
+    if (!FUN_006796B0(this)) return
+    if (!this->[0xD8]) return
+    for rend in list at this+0x1A4:
+        addRenderable(q, rend, (uchar)rend->[0xAC])
+```
+
+That list is legacy *world* geometry, not per-object proxies — the shim's own
+chunk-proxy code submits Ogre SubEntities alongside it.
+
+### Conclusion
+
+Redux replaced 1.5's per-object submission loop with Ogre scene-graph
+traversal. Game objects are Ogre entities under the SceneManager, culled and
+drawn by Ogre. **There is no per-object submission call in which to place the
+legacy predicate**, which is precisely why the gate is absent rather than
+merely mis-wired.
+
+Reproducing `illumination > 0` therefore cannot be done "at object submission"
+in Redux, because no such site exists. The only faithful placement left is
+per-object Ogre visibility, toggled on entering/leaving view 3 — which is the
+"new Ogre visibility system" the brief asked to avoid. That trade is a design
+decision, not a reverse-engineering one, so it is left open rather than
+resolved unilaterally.
+
+### Recommended next move: measure instead of infer
+
+Static archaeology has now overturned three successive identifications in this
+file. The cheap, decisive alternative is a read-only probe: on entering view 3,
+walk the arena and log, for each object, whether it has an Ogre entity and what
+that entity's visibility flag currently reads. That settles in one capture
+whether Redux exposes any per-object visibility handle worth gating, and it
+reuses the SATVIS sampler that is already validated.
