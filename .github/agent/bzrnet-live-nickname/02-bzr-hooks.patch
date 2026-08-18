@@ -1,0 +1,119 @@
+--- a/src/patches/bzr_hooks.cpp
++++ b/src/patches/bzr_hooks.cpp
+@@ -13972,67 +14022,85 @@
+             return nullptr;
+         }
+ 
+-        static bool TryReadBzrNetStableId(const void* address, BzrNetStableId* out)
++        static bool TryGetBzrNetLocalIdentity(FnBzrNetLobbyGetLocalIdentity getter,
++                                               void* lobby,
++                                               BzrNetNativeIdentity* outIdentity)
+         {
++            if (!getter || !lobby || !outIdentity)
++                return false;
++            std::memset(outIdentity, 0, sizeof(*outIdentity));
+             __try
+             {
+-                *out = *static_cast<const BzrNetStableId*>(address);
++                getter(lobby, outIdentity);
+                 return true;
+             }
+             __except (EXCEPTION_EXECUTE_HANDLER)
+             {
++                Log(L"[BZRNET] Native self-identity getter faulted code=0x%08X\n",
++                    static_cast<uint32_t>(GetExceptionCode()));
+             }
+             return false;
+         }
+ 
+-        static bool TrySendBzrNetPlayerData(FnBzrNetLobbySetPlayerData sender,
+-                                            void* lobby,
+-                                            const BzrNetStableId* lobbyId,
+-                                            const BzrString* key,
+-                                            const BzrString* value)
++        static bool TryConstructNativeBzrString(BzrString* out, const char* text)
+         {
+-            if (!sender || !lobby || !lobbyId || !key || !value)
++            if (!out || !text || !IsExecutableGameImageAddress(kBzrNetNativeStringCtorAddr))
+                 return false;
++            std::memset(out, 0, sizeof(*out));
+             __try
+             {
+-                sender(lobby, lobbyId, key, value);
++                reinterpret_cast<FnBzrStringCtorFromCStr>(
++                    kBzrNetNativeStringCtorAddr)(out, text);
+                 return true;
+             }
+             __except (EXCEPTION_EXECUTE_HANDLER)
+             {
+-                Log(L"[BZRNET] SetPlayerData faulted code=0x%08X; the nickname "
+-                    L"keeps its persisted value only\n",
++                Log(L"[BZRNET] Native string constructor faulted code=0x%08X\n",
+                     static_cast<uint32_t>(GetExceptionCode()));
+             }
+             return false;
+         }
+ 
+-        // Returns the level to hand back to RestoreBzrNetWireLog, or -1 when the
+-        // guard failed and nothing was touched.
+-        static int RaiseBzrNetWireLog()
+-        {
+-            if (!ExpectedBytesMatchAt(kBzrNetLogLevelReadSiteAddr,
+-                                      kBzrNetLogLevelReadSiteBytes,
+-                                      sizeof(kBzrNetLogLevelReadSiteBytes)))
+-                return -1;
+-            auto* const level = reinterpret_cast<volatile int32_t*>(kBzrNetLogLevelAddr);
+-            const int previous = static_cast<int>(*level);
+-            if (previous < 3)
+-                *level = 3;
+-            return previous;
++        static void DestroyNativeBzrStringNoThrow(BzrString* value)
++        {
++            if (!value || !IsExecutableGameImageAddress(kBzrNetNativeStringDtorAddr))
++                return;
++            __try
++            {
++                reinterpret_cast<FnBzrStringDtor>(kBzrNetNativeStringDtorAddr)(value);
++            }
++            __except (EXCEPTION_EXECUTE_HANDLER)
++            {
++                Log(L"[BZRNET] Native string destructor faulted code=0x%08X\n",
++                    static_cast<uint32_t>(GetExceptionCode()));
++            }
+         }
+ 
+-        static void RestoreBzrNetWireLog(int previous)
++        static bool TrySendBzrNetNicknameNative(FnBzrNetLobbySetPlayerData sender,
++                                                 void* lobby,
++                                                 const BzrNetNativeIdentity* identity,
++                                                 const BzrString* key,
++                                                 const BzrString* value)
+         {
+-            if (previous < 0)
+-                return;
+-            *reinterpret_cast<volatile int32_t*>(kBzrNetLogLevelAddr) =
+-                static_cast<int32_t>(previous);
++            if (!sender || !lobby || !identity || !key || !value)
++                return false;
++            __try
++            {
++                sender(lobby, identity, key, value);
++                return true;
++            }
++            __except (EXCEPTION_EXECUTE_HANDLER)
++            {
++                Log(L"[BZRNET] SetPlayerData(name) faulted code=0x%08X; "
++                    L"persisted nickname is retained\n",
++                    static_cast<uint32_t>(GetExceptionCode()));
++            }
++            return false;
+         }
+ 
+         // openshim.ini [Network] LiveNicknameKeys = 0, or
+-        // OPENSHIM_DISABLE_LIVE_NICKNAME=1, to leave the nickname a
+-        // connect-time setting and send nothing on an open connection.
++        // OPENSHIM_DISABLE_LIVE_NICKNAME=1, keeps nickname mutation strictly
++        // connect-time. This is a fail-safe switch, not a tracing dependency.
+         static bool ShouldSendLiveNicknameKeys()
+         {
+             if (EnvFlagEnabled("OPENSHIM_DISABLE_LIVE_NICKNAME"))
