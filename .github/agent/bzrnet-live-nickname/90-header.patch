@@ -1,6 +1,6 @@
 --- a/include/bzr_hooks.h
 +++ b/include/bzr_hooks.h
-@@ -5,6 +5,19 @@
+@@ -5,6 +5,20 @@
  
  namespace BZROpenShim
  {
@@ -17,14 +17,7 @@
 +        PersistenceFailed = 5,
 +    };
 +
++    BzrNetNicknameResult SetBzrNetNicknameFromBridge(const char* nickname);
      // Runtime-resolved BZR pointers and helpers.
      void ResolveBzrHooks(bool isSteam);
      void RetryDeferredRuntimeHooks();
-@@ -66,6 +79,7 @@
-     void __cdecl DamageRevealProbeHook(void* victim, void* edx, void* damage);
-     void PrimeUnderAttackAlertConfig();
-     bool SetUnderAttackAlertModeFromBridge(int mode);
-+    BzrNetNicknameResult SetBzrNetNicknameFromBridge(const char* nickname);
-     bool SetBomberAiRangeEnabledFromBridge(bool enabled);
-     bool SetHowitzerVolleyEnabledFromBridge(bool enabled);
-     bool SetWeaponMaskCarrierBiasEnabledFromBridge(bool enabled);
