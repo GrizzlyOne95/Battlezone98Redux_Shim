@@ -7,9 +7,10 @@ namespace BZROpenShim
     // be disabled with either the INI key or OPENSHIM_TRACE_PILOT_FP_ANIMATIONS=0.
     bool IsPilotFpAnimationTraceRequested();
 
-    // Starts the read-only aspilo_fp animation observer. The worker waits for
-    // OgreMain.dll, resolves the retail Ogre exports by semantic name, and
-    // installs only exact call/IAT observers. It never changes animation state.
+    // Starts the read-only local-Person animation observer. The worker waits for
+    // OgreMain.dll, resolves the retail Ogre exports by semantic name, and binds
+    // AnimationState traffic only when the calling Ogre Entity is the current
+    // local userObject's Person render entity. It never changes animation state.
     void InitializePilotFpAnimationTrace();
 
     // Stops trace collection. Installed process-lifetime observers become
