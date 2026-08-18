@@ -1,3 +1,24 @@
+> **SUPERSEDED — 2026-08-17.** Read
+> `howitzer_minelayer_weapon_mask_root_cause_20260817.md` instead. Several
+> load-bearing claims below are now disproved:
+>
+> - `0x0042AF10` is **not** `ArtilleryProcess::DoAttack`. It is an SEH-framed
+>   STL red-black-tree insert, and the "four stack words with a hidden result
+>   destination, `ret 0x10`" ABI documented below is that routine's sret
+>   `std::pair<iterator,bool>` return. This is why the detour crashed. The real
+>   function is at `0x00475B30`. `0x0042BB1A` is likewise inside the STL routine.
+> - Redux `GameObject::weaponMask` is at **`+0x218`**, not `+0x210`, and is
+>   **not** obfuscated. The `^ 0x33333333` field at `+0x210` is an unrelated
+>   0..3 enum. `carrier` is at `+0x1A0`, not `+0x198`; `UnitProcess::me` is at
+>   `+0x34`, not `44`. The offsets below are BZ 1.5 values.
+> - The behaviour is **not a Redux regression**. BZ 1.5 does exactly the same
+>   thing on both paths, so there is nothing to restore.
+> - Howitzer and minelayer do **not** share a root cause.
+>
+> The carrier-reordering approach recommended at the end has been abandoned: it
+> mutates simulation state that many other subsystems read. The shipped
+> replacement redirects the two AI call sites instead.
+
 ## Howitzer / Minelayer Weapon Mask RE Notes
 
 Date: 2026-03-16

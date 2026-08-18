@@ -636,6 +636,9 @@ namespace BZROpenShim
             } else if (p.name == "Target Reticle Popup Recent-Hit Getter Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(TargetReticlePopupRecentHitGetterHook));
             else if (p.name == "WeaponMine Hop-Out Friendly-Fire Fix") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(WeaponMineFriendPGuard));
             else if (p.name.find("HoverCraft Engine Flame Emit Hook") != std::string::npos) target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_EngineFlameHoverCraftEmit));
+            else if (p.name == "Artillery Weapon Mask Select Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_ArtilleryWeaponSelect));
+            else if (p.name == "LayMines Weapon Mask Select Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_LayMinesWeaponSelect));
+            else if (p.name == "LayMines Weapon Mask Trigger Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_LayMinesSetSelected));
             if (target) { int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(p.address + 4); p.payload.resize(4); memcpy(p.payload.data(), &rel, 4); }
         }
     }

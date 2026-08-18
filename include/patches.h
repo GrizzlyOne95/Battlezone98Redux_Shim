@@ -54,6 +54,9 @@ namespace BZROpenShim
         void __cdecl Trampoline_EngineFlameHoverCraftEmit();
         void __cdecl Trampoline_DecodedWeaponMaskBias();
         void __cdecl Trampoline_RawWeaponMaskBias();
+        void __cdecl Trampoline_ArtilleryWeaponSelect();
+        void __cdecl Trampoline_LayMinesWeaponSelect();
+        void __cdecl Trampoline_LayMinesSetSelected();
     }
 
     // -----------------------------------------------------------------------
@@ -132,6 +135,13 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::REL32, {}, "HoverCraft Engine Flame Emit Hook 2/2", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Decoded Weapon Mask Carrier Bias Hook", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Raw Weapon Mask Carrier Bias Hook", false, {} },
+            // Redirect the two AI weapon-selection call sites so artillery and
+            // lay-mines honour weaponMask. Each guard covers the original rel32
+            // operand, so a build whose layout moved fails closed and the stock
+            // call stays in place.
+            { 0, HookEngine::PatchType::REL32, {}, "Artillery Weapon Mask Select Hook", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "LayMines Weapon Mask Select Hook", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "LayMines Weapon Mask Trigger Hook", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Engine Flame Control VTable Hook", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Engine Flame Submit VTable Hook", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Chunk Effect Simulate VTable Hook", false, {} },
