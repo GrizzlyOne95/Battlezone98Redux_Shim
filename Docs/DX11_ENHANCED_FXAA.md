@@ -2,9 +2,9 @@
 
 ## Scope
 
-This is an **experimental DX11 Enhanced-only presentation feature**. It is deliberately OFF by default and is not part of the stock shader path.
+This is an **experimental DX11 Enhanced-only presentation feature**. The branch's reference `openshim.ini` enables it by default so DX11 Enhanced testing exercises the FXAA path, while the runtime still fails closed when the `DX11Enhanced/FXAA` key is absent. It is not part of the stock shader path.
 
-Activation:
+Reference configuration:
 
 ```ini
 [DX11Enhanced]
@@ -13,7 +13,7 @@ FXAA = 1
 
 The environment fallback is `OPENSHIM_DX11_ENHANCED_FXAA=1`.
 
-Only `RenderSystem_Direct3D11.dll` is observed or patched. DX9 is never hooked by this feature. Keep the switch disabled when testing ordinary/stock DX11; the current milestone intentionally has no general-purpose antialiasing toggle or renderer-wide quality menu.
+Only `RenderSystem_Direct3D11.dll` is observed or patched. DX9 is never hooked by this feature. An existing installation whose INI does not contain the `DX11Enhanced/FXAA` key remains unchanged; set `FXAA = 0` explicitly when testing ordinary/stock DX11. The current milestone intentionally has no general-purpose antialiasing toggle or renderer-wide quality menu.
 
 Campaign Reimagined's intended test target is **DX11 Enhanced High** (`ENHigh*` / `ENHANCED_MODE`). Lower/shared shader delegates remain compatibility paths and are outside this experiment.
 
@@ -102,7 +102,7 @@ Automated validation must establish both of these before runtime testing:
 For the first in-game proof run:
 
 1. select Campaign Reimagined **DX11 Enhanced High**;
-2. add `[DX11Enhanced] FXAA = 1` to `openshim.ini`;
+2. use the branch reference `openshim.ini`, where `[DX11Enhanced] FXAA = 1` is already enabled;
 3. clear Ogre's shader/microcode cache if the surrounding Enhanced shader work requires it;
 4. launch a mission with strong diagonal geometry, terrain silhouettes, vehicle edges, wires/antennae, and HUD text;
 5. confirm the OpenShim log reports the D3D11 renderer, swapchain attachment, accepted LDR format, and `preset=39` presentation resources;
