@@ -1,6 +1,6 @@
 --- a/include/bzr_hooks.h
 +++ b/include/bzr_hooks.h
-@@ -5,6 +5,17 @@
+@@ -5,6 +5,19 @@
  
  namespace BZROpenShim
  {
@@ -20,7 +20,7 @@
      // Runtime-resolved BZR pointers and helpers.
      void ResolveBzrHooks(bool isSteam);
      void RetryDeferredRuntimeHooks();
-@@ -66,6 +77,7 @@
+@@ -66,6 +79,7 @@
      void __cdecl DamageRevealProbeHook(void* victim, void* edx, void* damage);
      void PrimeUnderAttackAlertConfig();
      bool SetUnderAttackAlertModeFromBridge(int mode);
