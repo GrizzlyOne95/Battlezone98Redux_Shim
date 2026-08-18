@@ -1,0 +1,224 @@
+--- a/src/patches/bzr_hooks.cpp
++++ b/src/patches/bzr_hooks.cpp
+@@ -28719,11 +28815,17 @@
+             return true;
+         }
+ 
+-        // The lobby screen keeps keyboard focus on its own chatEntry, so a
+-        // cUI_TextEntry we construct can be shown but never typed into. The
+-        // chat line is therefore the real input path for the multiplayer name,
+-        // reusing the command interception that already backs /ban.
+-        if (_strnicmp(cmd, "/name", 5) == 0 && (cmd[5] == '\0' || cmd[5] == ' '))
++        // OpenShim already owns the multiplayer chat-command interception used
++        // by /help and /ban. Keep nickname handling here instead of adding a
++        // second EXU detour over the same Redux text path. /name remains as a
++        // compatibility alias; /nickname is the documented command.
++        const char* nicknameArgs = nullptr;
++        if (_strnicmp(cmd, "/nickname", 9) == 0 && (cmd[9] == '\0' || cmd[9] == ' '))
++            nicknameArgs = cmd + 9;
++        else if (_strnicmp(cmd, "/name", 5) == 0 && (cmd[5] == '\0' || cmd[5] == ' '))
++            nicknameArgs = cmd + 5;
++
++        if (nicknameArgs)
+         {
+             void* helpObj = (g_BzrPtr_920168 && *g_BzrPtr_920168) ? *g_BzrPtr_920168 : nullptr;
+             const auto report = [&](const char* line)
+@@ -28734,7 +28836,7 @@
+                     g_BzrFn_HelpUi(0, line);
+             };
+ 
+-            const std::string requested = TrimAsciiCopy(cmd + 5);
++            const std::string requested = TrimAsciiCopy(nicknameArgs);
+             char message[256] = {};
+             if (requested.empty())
+             {
+@@ -28742,43 +28844,47 @@
+                 if (ReadBzrNetNickname(current, sizeof(current)) && current[0] != '\0')
+                 {
+                     std::snprintf(message, sizeof(message),
+-                                  "Multiplayer name is \"%s\" - /name <text> to change it", current);
++                                  "Multiplayer name is \"%s\" - /nickname <text> to change it", current);
+                 }
+                 else
+                 {
+-                    std::snprintf(message, sizeof(message),
+-                                  "Using your platform account name - /name <text> to override it");
++                    std::snprintf(message, sizeof(message), "Usage: /nickname <text>");
+                 }
+                 report(message);
+                 return true;
+             }
+ 
+-            if (!WriteBzrNetNickname(requested.c_str()))
++            const BzrNetNicknameResult result = ApplyBzrNetNicknameAuthoritative(
++                requested.c_str(), "chat_command");
++            if (!IsAcceptedBzrNetNicknameResult(result))
+             {
+-                report("Could not set the multiplayer name on this build.");
+-                Log(L"[BZRNET] /name refused (byte guard failed)\n");
++                if (result == BzrNetNicknameResult::InvalidNickname)
++                    report("Invalid nickname. Use 1-127 printable characters.");
++                else
++                    report("Could not persist the multiplayer nickname.");
+                 return true;
+             }
+ 
+-            WriteShimUserConfigValue(kUserConfigNetworkSection, "Nickname", requested.c_str());
+-            const bool liveSent =
+-                ShouldSendLiveNicknameKeys() &&
+-                SendBzrNetNicknameLive(requested.c_str(), "chat_command");
+-            const bool reauthQueued =
++            SyncNicknameEntriesFromAuthoritativeValue(requested.c_str());
++            const bool liveApplied = result == BzrNetNicknameResult::AppliedLive;
++            const bool reauthQueued = !liveApplied &&
+                 ShouldReauthOnNicknameChange() && ForceBzrNetReauth("chat_command");
+-            const char* outcome = "applies on your next connect";
+-            if (reauthQueued)
++            const char* outcome = "saved for the next BZRNet connection";
++            if (liveApplied)
++                outcome = "applied live";
++            else if (reauthQueued)
+                 outcome = "reconnecting to apply it";
+-            else if (liveSent)
+-                outcome = "sent to the server";
++            else if (result == BzrNetNicknameResult::UnsupportedBuild)
++                outcome = "saved; live rename unsupported on this build";
++            else if (result == BzrNetNicknameResult::NativeStateInvalid)
++                outcome = "saved; live BZRNet state unavailable";
++
+             std::snprintf(message, sizeof(message),
+                           "Multiplayer name set to \"%s\" - %s",
+                           requested.c_str(), outcome);
+             report(message);
+-            Log(L"[BZRNET] /name set nickname to \"%hs\" (live=%hs reauth=%hs)\n",
+-                requested.c_str(),
+-                liveSent ? "sent" : "no",
+-                reauthQueued ? "queued" : "no");
++            Log(L"[BZRNET] /nickname result=%hs reauth=%hs\n",
++                BzrNetNicknameResultName(result), reauthQueued ? "queued" : "no");
+             NetRouteRefreshHost();
+             NetRouteRefreshClient();
+             return true;
+@@ -29765,11 +29871,11 @@
+         {
+             if (!entry || !g_BzrFn_SetTooltip)
+                 return;
+-            const char* text = "Saved-reconnect";
++            const char* text = "Saved-next conn";
+             if (g_PendingNicknameReauth)
+                 text = "Reconnecting...";
+             else if (g_PendingNicknameLiveSend)
+-                text = "Sent to server";
++                text = "Applied live";
+             g_BzrFn_SetTooltip(entry, text);
+         }
+ 
+@@ -29783,11 +29889,39 @@
+         }
+ 
+ 
+-        // Persist the launch/auth nickname, then try to make it take effect on
+-        // the open connection. The buffer at 0x009453E0 is written first and
+-        // unconditionally: it is the Authorization message's own `name` field,
+-        // so it is the one thing guaranteed to land, on the next connect at the
+-        // latest. Everything after it is the live attempt.
++        // Keep the launch/auth nickname synchronized with the committed UI
++        // value, then try the native live SetPlayerData path. The fixed buffer
++        // at 0x009453E0 remains the Authorization `name` source for a later
++        // reconnect in this same process.
++        static void SyncOneNicknameEntry(void* parent, void* entry, const char* value)
++        {
++            if (!entry || !value || !g_BzrFn_TextEntryClear || !g_BzrFn_TextEntryAppendText)
++                return;
++            if (parent && !IsWidgetLiveChildOfParent(parent, entry))
++                return;
++            __try
++            {
++                g_BzrFn_TextEntryClear(entry);
++                g_BzrFn_TextEntryAppendText(entry, value);
++                if (g_BzrFn_SetTooltip)
++                    g_BzrFn_SetTooltip(entry, value);
++            }
++            __except (EXCEPTION_EXECUTE_HANDLER)
++            {
++                Log(L"[BZRNET] Nickname UI synchronization faulted code=0x%08X\n",
++                    static_cast<uint32_t>(GetExceptionCode()));
++            }
++        }
++
++        static void SyncNicknameEntriesFromAuthoritativeValue(const char* value)
++        {
++            SyncOneNicknameEntry(g_HostUiParent, g_NicknameEntryHost, value);
++            SyncOneNicknameEntry(g_ClientUiParent, g_NicknameEntryClient, value);
++        }
++
++        // Commit through the same authoritative operation used by chat and the
++        // exported bridge. This is the UI's natural Apply/Enter event, so no
++        // SetPlayerData traffic is generated for intermediate keystrokes.
+         static bool ApplyNicknameFromEntry(void* entry, const char* source)
+         {
+             if (!entry)
+@@ -29805,22 +29939,18 @@
+             const std::string trimmed = TrimAsciiCopy(text);
+             if (trimmed.empty() || trimmed == kNicknamePlaceholder)
+                 return false;
+-            if (!WriteBzrNetNickname(trimmed.c_str()))
+-            {
+-                Log(L"[BZRNET] Nickname write refused (byte guard failed)\n");
++
++            const BzrNetNicknameResult result = ApplyBzrNetNicknameAuthoritative(
++                trimmed.c_str(), source);
++            if (!IsAcceptedBzrNetNicknameResult(result))
+                 return false;
+-            }
+ 
+-            WriteShimUserConfigValue(kUserConfigNetworkSection, "Nickname", trimmed.c_str());
+-            g_PendingNicknameLiveSend =
+-                ShouldSendLiveNicknameKeys() &&
+-                SendBzrNetNicknameLive(trimmed.c_str(), source);
+-            g_PendingNicknameReauth =
++            SyncNicknameEntriesFromAuthoritativeValue(trimmed.c_str());
++            g_PendingNicknameLiveSend = result == BzrNetNicknameResult::AppliedLive;
++            g_PendingNicknameReauth = !g_PendingNicknameLiveSend &&
+                 ShouldReauthOnNicknameChange() && ForceBzrNetReauth(source);
+-            Log(L"[BZRNET] Nickname set to \"%hs\" (source=%hs live=%hs reauth=%hs)\n",
+-                trimmed.c_str(),
+-                source,
+-                g_PendingNicknameLiveSend ? "sent" : "no",
++            Log(L"[BZRNET] Nickname UI apply result=%hs (source=%hs reauth=%hs)\n",
++                BzrNetNicknameResultName(result), source,
+                 g_PendingNicknameReauth ? "queued" : "no");
+             return true;
+         }
+@@ -30663,6 +30793,20 @@
+         }
+     }
+ 
++    BzrNetNicknameResult SetBzrNetNicknameFromBridge(const char* nickname)
++    {
++        const BzrNetNicknameResult result = ApplyBzrNetNicknameAuthoritative(
++            nickname, "external_bridge");
++        if (IsAcceptedBzrNetNicknameResult(result))
++        {
++            const std::string normalized = TrimAsciiCopy(nickname ? nickname : "");
++            SyncNicknameEntriesFromAuthoritativeValue(normalized.c_str());
++            NetRouteRefreshHost();
++            NetRouteRefreshClient();
++        }
++        return result;
++    }
++
+     // Authoritative local-player world position. Consumers that need to know
+     // where the player actually is should use this rather than the render
+     // camera, which can be a chase or satellite view a long way from them.
+@@ -30720,3 +30864,10 @@
+     {
+     }
+ }
++
++// Optional high-level bridge used by EXU and other companion DLLs. BZRNet/native
++// details remain entirely inside OpenShim; callers receive only a stable status.
++extern "C" __declspec(dllexport) DWORD WINAPI OpenShimSetBZRNetNickname(LPCSTR nickname)
++{
++    return static_cast<DWORD>(BZROpenShim::SetBzrNetNicknameFromBridge(nickname));
++}
