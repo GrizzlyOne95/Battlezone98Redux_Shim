@@ -336,6 +336,9 @@ namespace BZROpenShim
 	static FnSprayBuildingSimulate g_BzrFn_SprayBuildingSimulateOriginal = nullptr;
 	static FnTugPostLoad g_BzrFn_TugPostLoadOriginal = nullptr;
     static FnShieldTowerPowerUpdate g_BzrFn_ShieldTowerPowerUpdate = nullptr;
+    using FnResolveObj76GameObject = void*(__cdecl*)(void*);
+    static FnResolveObj76GameObject g_BzrFn_ResolveObj76GameObject =
+        reinterpret_cast<FnResolveObj76GameObject>(0x00479F30);
     static FnGameObjectRelation g_BzrFn_GameObjectFriendP = nullptr;
     static FnGameObjectRelation g_BzrFn_GameObjectEnemyP = nullptr;
     static FnMatrixInverse g_BzrFn_MatrixInverse = nullptr;
@@ -583,6 +586,12 @@ namespace BZROpenShim
         // 1.5 decomp bodies exactly. Previous values (0x0046BF40/0x0046BFD0) were WRONG —
         // they land mid-instruction, same failure class as the fixed GetObjByHandle.
         constexpr uintptr_t kGogGameObjectFriendPAddr = 0x004DB510;
+        // GameObject::SetDamageFlags, and the obj76 -> GameObject accessor it
+        // uses itself (0x00479F30). Both are read straight from the shipped
+        // image; nothing about the DAMAGE layout is assumed beyond the two
+        // fields SetDamageFlags itself reads ([0] damager, [1] dmg_source).
+        constexpr uintptr_t kGogSetDamageFlagsAddr = 0x004DC130;
+        constexpr uintptr_t kGogResolveObj76GameObjectAddr = 0x00479F30;
         constexpr uintptr_t kGogGameObjectEnemyPAddr = 0x004DB5B0;
         constexpr uintptr_t kGogGameObjectAddVelocityAddr = 0x004A75B0;
         constexpr uintptr_t kGogMatrixInverseAddr = 0x008203F0;
@@ -2032,6 +2041,7 @@ namespace BZROpenShim
         // is not illumination at all. Sanity check for any future revision:
         // Redux is the BZ 1.5 layout shifted by +0xC, and 1.5 has illumination
         // at 0xDC, so 0xDC here was the *1.5* offset, not the Redux one.
+        static constexpr size_t kGameObjectOgreScanBytes = 0x400;
         static constexpr size_t kGameObjectIlluminationOffset = 0xE8;
         static constexpr size_t kGameObjectIsObjectiveOffset = 0x189;
         static constexpr size_t kGameObjectIsSelectedOffset = 0x18A;
@@ -9396,6 +9406,12 @@ namespace BZROpenShim
             }
         }
 
+        static bool IsLikelyGameObjectEntry(void* objectPtr)
+        {
+            uint8_t* base = nullptr;
+            return TryGetGameObjectFieldBase(objectPtr, base);
+        }
+
         static int GetGameObjectActualTeam(void* objectPtr)
         {
             uint8_t* base = nullptr;
@@ -9433,6 +9449,13 @@ namespace BZROpenShim
             // int -- not the other way round.
             uint32_t illuminationRaw = 0;
             float illumination = 0.0f;
+            // Ogre handle discovery. The GameObject -> Ogre entity offset has
+            // never been derived, so rather than assume one, record which
+            // fields of the object hold a pointer whose vtable lives inside
+            // OgreMain. A capture turns that into a known offset.
+            uint32_t ogreHandleOffset = 0xFFFFFFFFu;
+            void* ogreHandle = nullptr;
+            char ogreClassName[64] = {};
             uint32_t isVisible = 0;
             uint32_t seen = 0;
             int targetHandle = 0;
@@ -9476,6 +9499,43 @@ namespace BZROpenShim
             }
         }
 
+        static bool g_TraceDamageReveal = false;
+        static volatile long g_DamageRevealTraceBudget = 0;
+        static constexpr long kDamageRevealTraceBudgetDefault = 400;
+
+        // MSVC RTTI: vtable[-1] -> CompleteObjectLocator, +12 -> TypeDescriptor,
+        // +8 -> the decorated name. Every step is bounds-checked and the whole
+        // walk sits under SEH, so an object without RTTI yields "?" rather than
+        // a fault.
+        static const char* TryGetRttiClassName(const void* object, char* buffer, size_t bufferSize)
+        {
+            if (!object || !buffer || bufferSize == 0)
+                return "?";
+            buffer[0] = '\0';
+            __try
+            {
+                auto* const* vtable = *reinterpret_cast<void* const* const*>(object);
+                if (!vtable)
+                    return "?";
+                const auto* col = reinterpret_cast<const uint8_t*>(vtable[-1]);
+                if (!col)
+                    return "?";
+                const auto* descriptor = *reinterpret_cast<const uint8_t* const*>(col + 12);
+                if (!descriptor)
+                    return "?";
+                const char* name = reinterpret_cast<const char*>(descriptor + 8);
+                size_t i = 0;
+                for (; i + 1 < bufferSize && name[i] >= 0x20 && name[i] < 0x7F; ++i)
+                    buffer[i] = name[i];
+                buffer[i] = '\0';
+                return (i > 0) ? buffer : "?";
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return "?";
+            }
+        }
+
         static bool CaptureSatelliteVisibilityEntry(void* objectPtr,
                                                     long userTeam,
                                                     SatelliteVisibilityLogEntry& outEntry)
@@ -9505,6 +9565,20 @@ namespace BZROpenShim
                     *reinterpret_cast<const uint32_t*>(bytes + kGameObjectSeenOffset);
                 outEntry.targetHandle =
                     *reinterpret_cast<const int*>(bytes + kGameObjectTargetHandleOffset);
+                for (size_t off = 0; off + sizeof(void*) <= kGameObjectOgreScanBytes; off += sizeof(void*))
+                {
+                    void* candidate = nullptr;
+                    __try { candidate = *reinterpret_cast<void* const*>(bytes + off); }
+                    __except (EXCEPTION_EXECUTE_HANDLER) { break; }
+                    if (!LooksLikeOgreObject(candidate))
+                        continue;
+                    outEntry.ogreHandleOffset = static_cast<uint32_t>(off);
+                    outEntry.ogreHandle = candidate;
+                    TryGetRttiClassName(candidate, outEntry.ogreClassName,
+                                        sizeof(outEntry.ogreClassName));
+                    break;
+                }
+
                 outEntry.isObjective =
                     *reinterpret_cast<const uint8_t*>(bytes + kGameObjectIsObjectiveOffset) != 0;
                 outEntry.isSelected =
@@ -9568,6 +9642,18 @@ namespace BZROpenShim
                 entry.discoveredByUserTeam ? 1 : 0,
                 entry.legacyVisible ? 1 : 0,
                 static_cast<uint32_t>(entry.targetHandle));
+
+            // Second line only when an Ogre handle was actually found, so the
+            // absence of one is itself visible in the capture.
+            if (entry.ogreHandleOffset != 0xFFFFFFFFu)
+            {
+                Log(L"[SATVIS]     %ls ogre +0x%03X=0x%08X (%hs) legacyVisible=%d\n",
+                    tag,
+                    entry.ogreHandleOffset,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entry.ogreHandle)),
+                    entry.ogreClassName,
+                    entry.legacyVisible ? 1 : 0);
+            }
         }
 
         // Stop the stale under-attack growl that fires the instant you hop out.
@@ -9602,6 +9688,7 @@ namespace BZROpenShim
         // fire on the craft you just abandoned. nextBeep is only ever raised,
         // never lowered, so the worst case for a misread is one missing audio
         // cue rather than a suppressed warning stream.
+
         static void MaybeSuppressStaleHopOutAttackAlert()
         {
             if (!g_HopOutAttackAlertFixEnabled)
@@ -21699,6 +21786,88 @@ namespace BZROpenShim
         // the same 0x400-stride pool the GetObjByHandle slot formula indexes
         // (base 0x0260DB20, 4096 slots), filtered by the live-vtable check
         // the headlight walker uses.
+        // Read-only runtime probes (2026-08-18).
+        //
+        // Static tracing has repeatedly named the wrong function in this
+        // codebase, so these two probes answer the remaining questions by
+        // observation instead. Both are diagnostic only: they read memory,
+        // format a log line, and change nothing.
+        // ---------------------------------------------------------------
+
+        // Discovers owner/parent links empirically rather than assuming an
+        // offset: reports which dwords inside `object` point at another live
+        // slot of the GameObject arena. That is what turns "the damager might
+        // be owned by a craft" into a measured field offset.
+        static void LogArenaPointerFields(const wchar_t* tag, void* object, size_t scanBytes)
+        {
+            if (!object)
+                return;
+            auto* arena = ResolveMainModulePtr<uint8_t>(kHeadlightObjectArenaRva);
+            if (!arena)
+                return;
+            const uintptr_t arenaLow = reinterpret_cast<uintptr_t>(arena);
+            const uintptr_t arenaHigh = arenaLow + kHeadlightObjectSlotCount * kHeadlightObjectSlotSize;
+
+            wchar_t line[512];
+            int used = _snwprintf_s(line, _countof(line), _TRUNCATE, L"[DMGREVEAL]     %ls arenaRefs:", tag);
+            if (used < 0)
+                return;
+            int found = 0;
+            for (size_t off = 0; off + sizeof(void*) <= scanBytes && found < 8; off += sizeof(void*))
+            {
+                uintptr_t value = 0;
+                __try
+                {
+                    value = *reinterpret_cast<const uintptr_t*>(reinterpret_cast<uint8_t*>(object) + off);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    break;
+                }
+                if (value < arenaLow || value >= arenaHigh)
+                    continue;
+                if (((value - arenaLow) % kHeadlightObjectSlotSize) != 0)
+                    continue;
+                if (!IsLikelyGameObjectEntry(reinterpret_cast<void*>(value)))
+                    continue;
+                const int wrote = _snwprintf_s(line + used, _countof(line) - used, _TRUNCATE,
+                                               L" +0x%03X=0x%08X", static_cast<unsigned>(off),
+                                               static_cast<uint32_t>(value));
+                if (wrote < 0)
+                    break;
+                used += wrote;
+                ++found;
+            }
+            if (found == 0)
+                return;
+            Log(L"%ls\n", line);
+        }
+
+        struct DamageRevealSnapshot
+        {
+            void* gameObject = nullptr;
+            int team = INT_MIN;
+            int perceivedTeam = INT_MIN;
+            char className[96] = {};
+        };
+
+        static void CaptureDamageRevealSnapshot(void* gameObject, DamageRevealSnapshot& out)
+        {
+            out.gameObject = gameObject;
+            TryGetRttiClassName(gameObject, out.className, sizeof(out.className));
+            uint8_t* base = nullptr;
+            if (!TryGetGameObjectFieldBase(gameObject, base))
+                return;
+            __try
+            {
+                out.team = *reinterpret_cast<const int*>(base + kGameObjectActualTeamOffset);
+                out.perceivedTeam = *reinterpret_cast<const int*>(base + kGameObjectPerceivedTeamOffset);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
         static size_t CollectLiveGameObjectsFromArena(void** outObjects, size_t capacity)
         {
             if (!outObjects || capacity == 0)
@@ -24691,6 +24860,18 @@ namespace BZROpenShim
                 g_TraceSatelliteVisibility = true;
             }
         }
+        // Read-only damage-reveal probe. Default OFF: it is an investigation
+        // tool, and its per-hit logging is far too chatty for normal play.
+        {
+            bool damageRevealConfig = false;
+            if (TryGetUserConfigBool("Diagnostics", "TraceDamageReveal", damageRevealConfig))
+                g_TraceDamageReveal = damageRevealConfig;
+            else
+                g_TraceDamageReveal = EnvFlagEnabled("OPENSHIM_TRACE_DAMAGE_REVEAL") ||
+                                      EnvFlagEnabled("BZR_TRACE_DAMAGE_REVEAL");
+            g_DamageRevealTraceBudget = kDamageRevealTraceBudgetDefault;
+        }
+
         {
             bool hopOutAlertConfig = false;
             // [General], not [SinglePlayer]: this is audio-only and has no
@@ -25857,6 +26038,97 @@ namespace BZROpenShim
         default:
             return playerShotTime;
         }
+    }
+
+    // Redirected from all four GameObject::SetDamageFlags call sites (the
+    // *::DamageAlloc family). Read-only: it records state, calls the stock
+    // function, and records state again. Nothing is altered.
+    //
+    // The question this exists to answer: when a disguised captured craft lands
+    // a shot, which object does the reveal tail actually operate on? 1.5's
+    // Explosion::Init puts the OWNER (the firing craft) in damage.damager while
+    // damage.dmg_source is the explosion itself, so 1.5 reveals the craft. If
+    // Redux instead reaches the reveal with an ordnance/explosion object, the
+    // craft keeps its disguise -- which is BZ98ReduxBugTracker #38 ("Owned
+    // objects will not cause your unit to lose PerceivedTeam").
+    //
+    // The class names come from RTTI, so the log says Craft vs Explosion vs
+    // Ordnance outright rather than leaving it to be inferred from an address.
+    void __fastcall DamageRevealProbeHook(void* victim, void* /*edx*/, void* damage)
+    {
+        using FnSetDamageFlags = void(__fastcall*)(void*, void*, void*);
+        auto stock = reinterpret_cast<FnSetDamageFlags>(kGogSetDamageFlagsAddr);
+
+        if (!g_TraceDamageReveal || InterlockedDecrement(&g_DamageRevealTraceBudget) < 0)
+        {
+            if (stock) stock(victim, nullptr, damage);
+            return;
+        }
+
+        void* damagerObj76 = nullptr;
+        void* sourceObj76 = nullptr;
+        __try
+        {
+            auto* fields = reinterpret_cast<void* const*>(damage);
+            damagerObj76 = fields[0];
+            sourceObj76 = fields[1];
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+
+        // Resolve obj76 -> GameObject with the engine's own accessor, the same
+        // one SetDamageFlags uses, so no offset is assumed here.
+        void* damagerGameObj = nullptr;
+        void* sourceGameObj = nullptr;
+        if (g_BzrFn_ResolveObj76GameObject)
+        {
+            __try
+            {
+                if (damagerObj76) damagerGameObj = g_BzrFn_ResolveObj76GameObject(damagerObj76);
+                if (sourceObj76) sourceGameObj = g_BzrFn_ResolveObj76GameObject(sourceObj76);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
+        DamageRevealSnapshot victimBefore = {}, damagerBefore = {}, sourceBefore = {};
+        CaptureDamageRevealSnapshot(victim, victimBefore);
+        CaptureDamageRevealSnapshot(damagerGameObj, damagerBefore);
+        CaptureDamageRevealSnapshot(sourceGameObj, sourceBefore);
+
+        if (stock)
+            stock(victim, nullptr, damage);
+
+        DamageRevealSnapshot victimAfter = {}, damagerAfter = {}, sourceAfter = {};
+        CaptureDamageRevealSnapshot(victim, victimAfter);
+        CaptureDamageRevealSnapshot(damagerGameObj, damagerAfter);
+        CaptureDamageRevealSnapshot(sourceGameObj, sourceAfter);
+
+        const bool collision = (damagerObj76 != nullptr) && (damagerObj76 == sourceObj76);
+        Log(L"[DMGREVEAL] %hs victim=0x%08X(%hs) team=%d pt=%d->%d\n"
+            L"[DMGREVEAL]   damager obj76=0x%08X gameObj=0x%08X(%hs) team=%d pt=%d->%d%hs\n"
+            L"[DMGREVEAL]   source  obj76=0x%08X gameObj=0x%08X(%hs) team=%d pt=%d->%d\n",
+            collision ? "collide" : "shot",
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(victim)),
+            victimBefore.className, victimBefore.team,
+            victimBefore.perceivedTeam, victimAfter.perceivedTeam,
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(damagerObj76)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(damagerGameObj)),
+            damagerBefore.className, damagerBefore.team,
+            damagerBefore.perceivedTeam, damagerAfter.perceivedTeam,
+            (damagerAfter.perceivedTeam != damagerBefore.perceivedTeam) ? "  <== REVEALED" : "",
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceObj76)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sourceGameObj)),
+            sourceBefore.className, sourceBefore.team,
+            sourceBefore.perceivedTeam, sourceAfter.perceivedTeam);
+
+        // Empirical owner chain: which fields of the damager point at another
+        // live GameObject. If the damager is ordnance owned by the firing
+        // craft, the craft shows up here as a concrete offset.
+        LogArenaPointerFields(L"damager", damagerGameObj, 0x400);
+        LogArenaPointerFields(L"source", sourceGameObj, 0x400);
     }
 
     void __cdecl RevealProcessOwnerPerceivedTeamOnAttackStateEntry(void* processPtr)
