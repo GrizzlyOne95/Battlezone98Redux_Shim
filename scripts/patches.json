@@ -108,6 +108,26 @@
       "expected_original": "65 FC FF FF"
     },
     {
+      "name": "Damage Reveal Probe 1/4",
+      "fallback": "0x0047EFA0",
+      "expected_original": "8C D1 05 00"
+    },
+    {
+      "name": "Damage Reveal Probe 2/4",
+      "fallback": "0x004AA678",
+      "expected_original": "B4 1A 03 00"
+    },
+    {
+      "name": "Damage Reveal Probe 3/4",
+      "fallback": "0x005A0CE2",
+      "expected_original": "4A B4 F3 FF"
+    },
+    {
+      "name": "Damage Reveal Probe 4/4",
+      "fallback": "0x005AA372",
+      "expected_original": "BA 1D F3 FF"
+    },
+    {
       "name": "Engine Flame Control VTable Hook",
       "fallback": "0x008791A4",
       "expected_original": "A0 88 4C 00"

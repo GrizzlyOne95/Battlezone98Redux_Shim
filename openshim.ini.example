@@ -190,7 +190,6 @@ EditorOverheadPlacementOrder = 0
 ; Accepted: boolean. Default: ON.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_HOP_OUT_ATTACK_ALERT_FIX
 SuppressHopOutAttackAlert = 1
-
 [Startup]
 
 ; Early D3D startup-hook path used for renderer/startup development.
@@ -596,6 +595,33 @@ RelayLoggingAllUdp = 0
 ; Legacy env aliases: OPENSHIM_BZRNET_TRACE_QUEUE, BZ_BZRNET_TRACE_QUEUE
 RelayLoggingQueueRecords = 4096
 
+
+
+; Read-only probe: log what GameObject::SetDamageFlags actually reveals.
+;
+; When a captured/disguised craft lands a shot, the reveal tail sets
+; perceivedTeam on the DAMAGE struct's damager field. In BZ 1.5 that field
+; holds the OWNER -- Explosion::Init stores the firing craft there while
+; dmg_source holds the explosion -- so 1.5 reveals the craft itself. Whether
+; Redux reaches the reveal with the craft or with an owned projectile has not
+; been established statically, and that distinction is the difference between
+; a stolen tank being unmasked and it staying disguised while it kills your
+; units (BZ98ReduxBugTracker #38).
+;
+; Emits [DMGREVEAL] lines carrying, for the victim, the damager and the
+; damage source: pointer, RTTI class name, actual team, and perceivedTeam
+; before and after the stock call. The line that changed is marked REVEALED.
+; It also lists which fields of the damager point at another live GameObject,
+; which locates any owner link by measurement instead of a guessed offset.
+;
+; Read-only: the probe records state, calls the stock function, records state
+; again, and changes nothing. Budgeted (400 events) and OFF by default -- it
+; logs on every damaging hit, so leave it off for normal play.
+;
+; Decisive test: have a sniped/captured craft land exactly one damaging shot.
+; Accepted: boolean. Default: OFF.
+; Legacy env aliases: OPENSHIM_TRACE_DAMAGE_REVEAL, BZR_TRACE_DAMAGE_REVEAL
+TraceDamageReveal = 0
 
 [Network]
 
