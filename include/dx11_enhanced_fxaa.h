@@ -22,17 +22,18 @@ namespace BZROpenShim
             IDXGIFactory*, IUnknown*, DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**);
     }
 
-    // Starts the opt-in DX11 Enhanced presentation-stage FXAA path.
+    // Starts the DX11 Enhanced presentation-stage FXAA path when requested.
     //
-    // Activation is deliberately explicit and defaults OFF:
+    // The reference openshim.ini enables it for Enhanced testing:
     //
     //   [DX11Enhanced]
     //   FXAA = 1
     //
     // or OPENSHIM_DX11_ENHANCED_FXAA=1.
     //
-    // The implementation only watches RenderSystem_Direct3D11.dll and leaves
-    // DX9 and ordinary/default-off DX11 execution untouched.
+    // A missing key still fails closed, so existing stock/default DX11 installs
+    // that have not adopted the Enhanced reference INI remain untouched. The
+    // implementation watches only RenderSystem_Direct3D11.dll; DX9 is untouched.
     void InitializeDx11EnhancedFxaa();
 
     // Stops the short-lived renderer-discovery worker. Installed COM/IAT hooks
