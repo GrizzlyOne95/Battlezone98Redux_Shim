@@ -13,6 +13,7 @@
 #include "hook_engine.h"
 #include "shim_log.h"
 #include "file_io_hooks.h"
+#include "editor_view_order.h"
 #include "autosave.h"
 #include "dx11_colorspace_diagnostic.h"
 #include "terrain_proxy.h"
@@ -148,6 +149,10 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
         // The game creates BZLogger/Ogre logs immediately after process
         // attach, before the normal patch thread can reliably run.
         BZROpenShim::ApplyEarlyGameLogHooks();
+
+        // Both patch sites are global constructors that run from the CRT's
+        // _initterm before main, so this cannot wait for the patch thread.
+        BZROpenShim::ApplyEditorOverheadPlacementOrderFix();
 
         OutputDebugStringA("BZR-OpenShim: DLL_PROCESS_ATTACH\n");
 

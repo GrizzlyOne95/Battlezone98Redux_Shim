@@ -143,6 +143,33 @@ RawMouseInput = 1
 OgreMaterialCollisionGuard = 1
 
 
+; Restore the BZ 1.5 display order of the overhead view and the control panel,
+; which is what makes editor object placement work in the Shift+F10 overhead
+; view while the simulation is running.
+;
+; Redux transposed two DisplayInterface::AddView priority constants, so the
+; control panel renders before the overhead view instead of after it. The
+; control panel is what turns a build-menu keypress into an object, and it
+; needs the ground position that the overhead view publishes earlier in the
+; same frame. With the order reversed it reads the stale null that
+; Reticle::Simulate writes each simulated frame: the keypress plays its click
+; sound and nothing is placed. Pausing works around it only because the
+; simulation stops nulling the pointer, which is also why the cursor freezes.
+;
+; Only affects sessions that reach the overhead view with editor/arcade mode
+; on, which requires the game to have been launched with /edit.
+;
+; NOTE: unlike the [SinglePlayer] section, this one cannot be hard-disabled in
+; network games. It is applied from DllMain, before the executable's entry
+; point, because both patch sites are global constructors that have already run
+; by the time the normal patch thread starts -- and no network state exists that
+; early. The change restores stock 1.5 ordering rather than inventing new
+; behavior, but it does move where the control panel emits its commands within
+; the frame, so leave it off unless you are using the editor.
+;
+; Accepted: boolean. Default: OFF. Restart required after changing.
+EditorOverheadPlacementOrder = 0
+
 [Startup]
 
 ; Early D3D startup-hook path used for renderer/startup development.
