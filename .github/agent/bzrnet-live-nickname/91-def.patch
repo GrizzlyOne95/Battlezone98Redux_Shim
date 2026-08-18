@@ -1,0 +1,17 @@
+--- a/src/winmm.def
++++ b/src/winmm.def
+@@ -1,11 +1,12 @@
+ ; winmm.def
+ ; BZR Open Shim - module definition file for winmm.dll proxy
+-; All exports are implemented in winmm_proxy.cpp
++; Proxy exports live primarily in winmm_proxy.cpp; small feature bridges may
++; live beside their owning implementation to keep native details isolated.
+ 
+ LIBRARY winmm
+ 
+ EXPORTS
+     OpenShimSetUnderAttackAlertMode
++    OpenShimSetBZRNetNickname
+     OpenShimSetTargetReticlePopupMode
+     OpenShimGetUnitVoThrottle
+     OpenShimSetUnitVoThrottle
