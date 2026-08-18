@@ -634,7 +634,6 @@ namespace BZROpenShim
                 void* orig = isSteam ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10) : HookEngine::ResolveRelCallTarget(p.address - 1);
                 if (!orig) continue; SetProducerBuildMenuOriginal(orig); target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ProducerBuildMenuCallHook));
             } else if (p.name == "Target Reticle Popup Recent-Hit Getter Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(TargetReticlePopupRecentHitGetterHook));
-            else if (p.name == "WeaponMine Hop-Out Friendly-Fire Fix") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(WeaponMineFriendPGuard));
             else if (p.name.find("HoverCraft Engine Flame Emit Hook") != std::string::npos) target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_EngineFlameHoverCraftEmit));
             else if (p.name == "Artillery Weapon Mask Select Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_ArtilleryWeaponSelect));
             else if (p.name == "LayMines Weapon Mask Select Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_LayMinesWeaponSelect));
@@ -670,7 +669,6 @@ namespace BZROpenShim
                 if (p.address == 0 || p.expected_original.empty()) continue;
                 if (p.name.find("Version Notice") == std::string::npos &&
                     p.name.find("Offensive Attack") == std::string::npos &&
-                    p.name != "WeaponMine Hop-Out Friendly-Fire Fix" &&
                     !IsBanFeaturePatchName(p.name.c_str()) &&
                     !IsVehicleListModFixPatchName(p.name.c_str())) continue;
                 std::vector<uint8_t> cur(p.expected_original.size()); SIZE_T r;
