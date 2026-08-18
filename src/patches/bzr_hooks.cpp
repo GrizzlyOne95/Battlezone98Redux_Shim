@@ -1969,20 +1969,43 @@ namespace BZROpenShim
         static bool g_AttackRevealEnabled = kAttackRevealEnabledDefault;
 
         static constexpr size_t kGameObjectPlayerShotOffset = 0x1D8;
+        static constexpr size_t kGameObjectEnemyShotOffset = 0x1E8;
+        // CockpitRadar::Render's "a friendly is under attack" cooldown, the
+        // float the growl alert compares enemyShot against
+        // (comiss xmm0, [0x009173D0] at 0x00494D35).
+        static constexpr uintptr_t kRadarAttackAlertNextBeepRva = 0x005173D0;
+        static constexpr bool kHopOutAttackAlertFixEnabledDefault = true;
+        static bool g_HopOutAttackAlertFixEnabled = kHopOutAttackAlertFixEnabledDefault;
+        static void* g_HopOutAlertLastUserObject = nullptr;
+        static bool g_HopOutAlertPrimed = false;
         // SelectionDisplay::Render carries the complete Redux GameObject pointer,
         // while the inherited GameObject interface (whose slot +4 is GetTeam)
         // begins at +0x18. Calling slot +4 from the complete-object vtable was
         // the crash-prone behavior in the original NEUTRAL_ONLY experiment.
         static constexpr size_t kGameObjectInterfaceOffset = 0x18;
         static constexpr size_t kGameObjectGetTeamVtableOffset = 0x4;
-        // Redux 2.2.301 stores GameObject::perceivedTeam at +0x174. The
-        // GameObject interface subobject begins at +0x18 and its
-        // GetPerceivedTeam implementation (0x00462450) reads [this+0x15C],
-        // which resolves to +0x174 from the complete object. The old +0x180
-        // value targeted a neighboring field and left newly spawned Wingmen
-        // with an uninitialized perceived team, eventually causing the stock
-        // team-table lookup at 0x005E0BC6 to index with garbage.
-        static constexpr size_t kGameObjectPerceivedTeamOffset = 0x174;
+        // CORRECTED 2026-08-17. 0x00462450 is NOT GetPerceivedTeam -- it is
+        // GameObject::GetTeam, and it returns the *actual* team. It occupies
+        // slot 1 of the interface vtable in all twelve GameObject-family
+        // vtables in .rdata, beside GetClass/SetTeam/GetPosition. The
+        // non-virtual GetPerceivedTeam is 0x004625B0, it reads
+        // [complete+0x180], and it appears in no vtable at all.
+        //
+        // Because 0x00462450 runs on the interface subobject (complete+0x18),
+        // its [this+0x15C] resolves to complete+0x174 -- the actual team, a
+        // different field 0xC below perceivedTeam. Reading that operand as if
+        // it were perceivedTeam is what produced the bogus "save base is
+        // complete-0xC" rule that shifted every visibility offset below.
+        //
+        // The save walker's base register IS the complete object. Two
+        // independent confirmations:
+        //   * SetPerceivedTeam (0x004DB4F0) writes [this+0x180] and is called
+        //     with the complete pointer from Craft::AbandonPilot (0x004ADF20)
+        //     and SetDamageFlags (0x004DC29C).
+        //   * WeaponMine::Simulate reads the mine position at complete+0x108 /
+        //     +0x10C / +0x110, and the walker records "pos" size=12 at +0x108.
+        static constexpr size_t kGameObjectActualTeamOffset = 0x174;
+        static constexpr size_t kGameObjectPerceivedTeamOffset = 0x180;
         static constexpr int kGameTeamMin = 0;
         static constexpr int kGameTeamMax = 15;
         static constexpr size_t kProcessOwnerObjectOffset = 0x34;
@@ -2002,20 +2025,22 @@ namespace BZROpenShim
         //   "seen"          .rdata 0x00879CF4  xref 0x004DE2F4  add eax, 0x190
         //   "perceivedTeam" .rdata 0x00879E2C  xref 0x004DE7E0  add ecx, 0x180
         //
-        // Save's base register is complete-object minus 0xC, pinned by
-        // GameObject::GetPerceivedTeam (0x00462450) reading [interface+0x15C]
-        // together with the interface subobject living at complete+0x18:
-        // 0x180 - 0xC == 0x174 == kGameObjectPerceivedTeamOffset. So
-        // complete_offset = save_offset - 0xC for every field above.
-        //
-        // isVisible/seen were previously 0x184/0x188 here (the BZ 1.5 layout);
-        // that made the probe log `seen` in the isVisible column and an
-        // unrelated field as `seen`. Illumination at 0xDC was already correct.
-        static constexpr size_t kGameObjectIlluminationOffset = 0xDC;
-        static constexpr size_t kGameObjectIsObjectiveOffset = 0x17D;
-        static constexpr size_t kGameObjectIsSelectedOffset = 0x17E;
-        static constexpr size_t kGameObjectIsVisibleOffset = 0x180;
-        static constexpr size_t kGameObjectSeenOffset = 0x184;
+        // The walker offsets ARE complete-object relative -- see the note on
+        // kGameObjectActualTeamOffset above. The former "-0xC" rule was wrong
+        // and shifted every field here onto its neighbour, which is why
+        // illumination read as tiny denormals (0x00000005, 0x001AFC44): +0xDC
+        // is not illumination at all. Sanity check for any future revision:
+        // Redux is the BZ 1.5 layout shifted by +0xC, and 1.5 has illumination
+        // at 0xDC, so 0xDC here was the *1.5* offset, not the Redux one.
+        static constexpr size_t kGameObjectIlluminationOffset = 0xE8;
+        static constexpr size_t kGameObjectIsObjectiveOffset = 0x189;
+        static constexpr size_t kGameObjectIsSelectedOffset = 0x18A;
+        static constexpr size_t kGameObjectIsVisibleOffset = 0x18C;
+        static constexpr size_t kGameObjectSeenOffset = 0x190;
+        // UNVERIFIED: not derived from the save walker, so it was never subject
+        // to the -0xC error above and has been left alone. Treat the `target`
+        // column as advisory until it is pinned the same way the fields above
+        // now are.
         static constexpr size_t kGameObjectTargetHandleOffset = 0x214;
         static constexpr long kCameraTypeOverView = 3;
         static constexpr float kSuppressedRecentHitTime = -1.0e30f;
@@ -9304,24 +9329,85 @@ namespace BZROpenShim
             }
         }
 
-        static int GetGameObjectActualTeam(void* objectPtr)
+        // Identifies a raw arena entry as a live GameObject WITHOUT calling
+        // anything through its vtable.
+        //
+        // The arena hands back entries that are not GameObjects at all --
+        // including objects whose vtable is an abstract base table. One such
+        // table is 0x00878E94, whose slots 0, 1 and 3 all point at 0x0083E98E,
+        // the import thunk for msvcr120!_purecall. Calling slot 1 there reaches
+        // _purecall -> abort -> __fastfail(7), which raises 0xC0000409 with
+        // subcode 7. __fastfail bypasses SEH entirely, so the __try below (and
+        // any other handler) cannot contain it: the process dies immediately.
+        // That is the crash captured in battlezone98redux.exe.23280.dmp.
+        //
+        // So the vtable is used only as a type tag -- compared, never invoked.
+        // Slot 1 of every GameObject-family vtable in .rdata is the same
+        // GameObject::GetTeam (0x00462450), which makes an exact pointer
+        // compare a positive identification rather than a heuristic, and
+        // rejects abstract/_purecall tables and foreign objects alike.
+        static constexpr uintptr_t kGogGameObjectGetTeamAddr = 0x00462450;
+        static constexpr uintptr_t kGogPreferredImageBase = 0x00400000;
+
+        static bool TryGetGameObjectFieldBase(void* objectPtr, uint8_t*& outBase)
         {
-            if (!objectPtr)
-                return INT_MIN;
+            outBase = nullptr;
+            const auto address = reinterpret_cast<uintptr_t>(objectPtr);
+            if (address < 0x00010000 || (address % sizeof(void*)) != 0)
+                return false;
+
+            MEMORY_BASIC_INFORMATION mbi = {};
+            if (VirtualQuery(objectPtr, &mbi, sizeof(mbi)) != sizeof(mbi))
+                return false;
+            if (mbi.State != MEM_COMMIT || !IsReadableDataProtect(mbi.Protect))
+                return false;
 
             __try
             {
-                auto* gameObjectInterface =
-                    reinterpret_cast<uint8_t*>(objectPtr) + kGameObjectInterfaceOffset;
-                auto** vtable = *reinterpret_cast<void***>(gameObjectInterface);
+                auto* bytes = reinterpret_cast<uint8_t*>(objectPtr);
+                auto** vtable = *reinterpret_cast<void***>(bytes + kGameObjectInterfaceOffset);
                 if (!vtable)
-                    return INT_MIN;
+                    return false;
 
-                auto getTeam = reinterpret_cast<FnGameObjectGetTeam>(vtable[kGameObjectGetTeamVtableOffset / sizeof(void*)]);
-                if (!getTeam)
-                    return INT_MIN;
+                MEMORY_BASIC_INFORMATION vtableInfo = {};
+                if (VirtualQuery(vtable, &vtableInfo, sizeof(vtableInfo)) != sizeof(vtableInfo))
+                    return false;
+                if (vtableInfo.State != MEM_COMMIT || !IsReadableDataProtect(vtableInfo.Protect))
+                    return false;
 
-                return getTeam(gameObjectInterface);
+                // Absolute VA, matching kGogGameObjectFriendPAddr and the rest
+                // of this file; the shim already assumes the image loads at its
+                // preferred base. Rebase defensively anyway so a relocated
+                // image degrades to "no entries match" rather than to a
+                // mis-identification.
+                const uintptr_t base = GetMainModuleBase();
+                const uintptr_t expected = base
+                    ? base + (kGogGameObjectGetTeamAddr - kGogPreferredImageBase)
+                    : kGogGameObjectGetTeamAddr;
+                if (reinterpret_cast<uintptr_t>(vtable[kGameObjectGetTeamVtableOffset / sizeof(void*)]) != expected)
+                    return false;
+
+                outBase = bytes;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static int GetGameObjectActualTeam(void* objectPtr)
+        {
+            uint8_t* base = nullptr;
+            if (!TryGetGameObjectFieldBase(objectPtr, base))
+                return INT_MIN;
+
+            // Direct field read. GetTeam's whole body is
+            // `mov eax,[interface+0x15C]; ret`, and interface is complete+0x18,
+            // so this reads exactly what the virtual would have returned.
+            __try
+            {
+                return *reinterpret_cast<const int*>(base + kGameObjectActualTeamOffset);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -9339,6 +9425,13 @@ namespace BZROpenShim
             void* objectPtr = nullptr;
             int team = INT_MIN;
             int perceivedTeam = INT_MIN;
+            // Logged three ways at once so the field's type is decided from a
+            // capture instead of assumed. BZ 1.5 treats illumination as float
+            // (CockpitRadar::Render computes `illumination * 15.0` and uses the
+            // result as a colour-ramp index), so a correctly located Redux
+            // field should read as a small non-denormal float and as a garbage
+            // int -- not the other way round.
+            uint32_t illuminationRaw = 0;
             float illumination = 0.0f;
             uint32_t isVisible = 0;
             uint32_t seen = 0;
@@ -9387,18 +9480,25 @@ namespace BZROpenShim
                                                     long userTeam,
                                                     SatelliteVisibilityLogEntry& outEntry)
         {
-            if (!objectPtr)
+            // Reject anything that is not positively a GameObject before
+            // touching a single field. The arena also holds entries whose
+            // vtable is an abstract base table, and those are unrecoverable if
+            // dispatched through -- see TryGetGameObjectFieldBase.
+            uint8_t* bytes = nullptr;
+            if (!TryGetGameObjectFieldBase(objectPtr, bytes))
                 return false;
 
             __try
             {
-                auto* bytes = reinterpret_cast<uint8_t*>(objectPtr);
                 outEntry.objectPtr = objectPtr;
-                outEntry.team = GetGameObjectTeamForLog(objectPtr);
+                outEntry.team =
+                    *reinterpret_cast<const int*>(bytes + kGameObjectActualTeamOffset);
                 outEntry.perceivedTeam =
                     *reinterpret_cast<const int*>(bytes + kGameObjectPerceivedTeamOffset);
-                outEntry.illumination =
-                    *reinterpret_cast<const float*>(bytes + kGameObjectIlluminationOffset);
+                outEntry.illuminationRaw =
+                    *reinterpret_cast<const uint32_t*>(bytes + kGameObjectIlluminationOffset);
+                std::memcpy(&outEntry.illumination, &outEntry.illuminationRaw,
+                            sizeof(outEntry.illumination));
                 outEntry.isVisible =
                     *reinterpret_cast<const uint32_t*>(bytes + kGameObjectIsVisibleOffset);
                 outEntry.seen =
@@ -9450,7 +9550,8 @@ namespace BZROpenShim
             // is, then what the scanner pass decided, then what the legacy
             // overview gate would have concluded.
             Log(L"[SATVIS]   %ls obj=0x%08X team=%d perceivedTeam=%d class=%d objective=%d selected=%d "
-                L"illum=%.3f isVisible=0x%08X seen=0x%08X detected=%d discovered=%d legacyVisible=%d target=0x%08X\n",
+                L"illumRaw=0x%08X illumInt=%d illumFlt=%.6g "
+                L"isVisible=0x%08X seen=0x%08X detected=%d discovered=%d legacyVisible=%d target=0x%08X\n",
                 tag,
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entry.objectPtr)),
                 entry.team,
@@ -9458,6 +9559,8 @@ namespace BZROpenShim
                 entry.classType,
                 entry.isObjective ? 1 : 0,
                 entry.isSelected ? 1 : 0,
+                entry.illuminationRaw,
+                static_cast<int>(entry.illuminationRaw),
                 static_cast<double>(entry.illumination),
                 entry.isVisible,
                 entry.seen,
@@ -9465,6 +9568,93 @@ namespace BZROpenShim
                 entry.discoveredByUserTeam ? 1 : 0,
                 entry.legacyVisible ? 1 : 0,
                 static_cast<uint32_t>(entry.targetHandle));
+        }
+
+        // Stop the stale under-attack growl that fires the instant you hop out.
+        //
+        // CockpitRadar::Render alerts for any friendly whose enemyShot
+        // timestamp is newer than the global cooldown, and it excludes exactly
+        // one object: the one the player currently is.
+        //
+        //   0x00494D11  movzx ecx, [ebp-0x131]      ; is this object friendly
+        //   0x00494D1A  je   skip
+        //   0x00494D28  cmp  eax, [edx+0xc]         ; obj == userObj
+        //   0x00494D2B  je   skip                   ; <- the only mask
+        //   0x00494D35  comiss xmm0, [0x009173D0]   ; enemyShot > nextBeep
+        //   0x00494D3C  jbe  skip
+        //                                           ; -> push "cgrowl.wav"
+        //
+        // Hopping out moves userObj to the pilot, so the craft you just left
+        // stops being masked. If an enemy shot it at any point since the last
+        // alert, its enemyShot is still sitting there and the very next radar
+        // frame replays that old event as a fresh warning -- once, because the
+        // alert then sets nextBeep = enemyShot + 1.
+        //
+        // This is stock behaviour: BZ 1.5's CockpitRadar::Render has the same
+        // three conditions, so this is a deliberate quality-of-life deviation
+        // rather than a compatibility fix.
+        //
+        // The fix is deliberately the narrowest thing that works: on the frame
+        // the player object changes, raise nextBeep to exactly the previous
+        // object's enemyShot. That one stale value stops satisfying the strict
+        // `>` comparison, and nothing else changes -- any genuinely newer hit
+        // still carries a later timestamp and still beeps, including further
+        // fire on the craft you just abandoned. nextBeep is only ever raised,
+        // never lowered, so the worst case for a misread is one missing audio
+        // cue rather than a suppressed warning stream.
+        static void MaybeSuppressStaleHopOutAttackAlert()
+        {
+            if (!g_HopOutAttackAlertFixEnabled)
+                return;
+
+            void* const userObject = TryGetHeadlightPlayerObject();
+            if (!userObject)
+                return;
+
+            void* const previousObject = g_HopOutAlertLastUserObject;
+            g_HopOutAlertLastUserObject = userObject;
+
+            // Never treat the first observation of a session as a transition.
+            if (!g_HopOutAlertPrimed)
+            {
+                g_HopOutAlertPrimed = true;
+                return;
+            }
+            if (!previousObject || previousObject == userObject)
+                return;
+
+            // Validates the pointer and confirms the GameObject vtable tag, so
+            // a stale pointer left by a mission change is rejected rather than
+            // dereferenced.
+            uint8_t* previousBase = nullptr;
+            if (!TryGetGameObjectFieldBase(previousObject, previousBase))
+                return;
+
+            auto* nextBeep = ResolveMainModulePtr<float>(kRadarAttackAlertNextBeepRva);
+            if (!nextBeep)
+                return;
+
+            __try
+            {
+                const float staleEnemyShot =
+                    *reinterpret_cast<const float*>(previousBase + kGameObjectEnemyShotOffset);
+
+                // Objects start at -1e30 and only ever receive a real game
+                // timestamp from SetDamageFlags' EnemyP branch, so anything
+                // non-positive means this object was never shot by an enemy and
+                // there is nothing stale to suppress.
+                if (!(staleEnemyShot > 0.0f) || !std::isfinite(staleEnemyShot))
+                    return;
+
+                const float currentNextBeep = *nextBeep;
+                if (std::isfinite(currentNextBeep) && currentNextBeep >= staleEnemyShot)
+                    return;
+
+                *nextBeep = staleEnemyShot;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
         }
 
         static void MaybeLogSatelliteVisibilitySample()
@@ -9512,6 +9702,7 @@ namespace BZROpenShim
                 const bool haveUserEntry =
                     CaptureSatelliteVisibilityEntry(userObject, userTeam, userEntry);
 
+                uint32_t rejectedCount = 0;
                 uint32_t illuminatedCount = 0;
                 uint32_t visibleCount = 0;
                 uint32_t seenCount = 0;
@@ -9526,7 +9717,12 @@ namespace BZROpenShim
                 {
                     SatelliteVisibilityLogEntry entry = {};
                     if (!CaptureSatelliteVisibilityEntry(s_satvisObjects[index], userTeam, entry))
+                    {
+                        // Arena entries that are not GameObjects, including the
+                        // abstract-vtable ones that used to be fatal.
+                        ++rejectedCount;
                         continue;
+                    }
 
                     if (entry.illumination > 0.0f)
                         ++illuminatedCount;
@@ -9553,13 +9749,14 @@ namespace BZROpenShim
                     }
                 }
 
-                Log(L"[SATVIS] view=%ld userTeam=%ld userObj=0x%08X total=%u sampled=%u illum=%u visible=%u seen=%u "
+                Log(L"[SATVIS] view=%ld userTeam=%ld userObj=0x%08X total=%u sampled=%u rejected=%u illum=%u visible=%u seen=%u "
                     L"detected=%u discovered=%u interval=%lums remaining=%ld\n",
                     currentView,
                     userTeam,
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(userObject)),
                     static_cast<unsigned>(totalObjects),
                     static_cast<unsigned>(sampleObjects),
+                    rejectedCount,
                     illuminatedCount,
                     visibleCount,
                     seenCount,
@@ -15552,8 +15749,23 @@ namespace BZROpenShim
                 }
 
                 auto* objectBytes = reinterpret_cast<uint8_t*>(objectPtr);
+                // KNOWN DEFECT, deliberately left as-is for now.
+                //
+                // This writes the ACTUAL team field, not perceivedTeam, because
+                // kGameObjectPerceivedTeamOffset used to be 0x174. Since
+                // actualTeam above is read from that same +0x174, the equality
+                // check below always succeeds and the function has always
+                // returned "already_revealed" without writing anything. The
+                // attack-reveal feature has therefore never run, despite
+                // defaulting to enabled.
+                //
+                // Repointing this at kGameObjectPerceivedTeamOffset (now the
+                // correct 0x180) would switch a never-exercised gameplay
+                // feature on for the first time, which is a bigger change than
+                // the diagnostic fix this commit is making. Behaviour is left
+                // byte-identical until that is a deliberate, tested decision.
                 int& perceivedTeam =
-                    *reinterpret_cast<int*>(objectBytes + kGameObjectPerceivedTeamOffset);
+                    *reinterpret_cast<int*>(objectBytes + kGameObjectActualTeamOffset);
                 const int previousPerceivedTeam = perceivedTeam;
                 if (previousPerceivedTeam == actualTeam)
                 {
@@ -24480,6 +24692,28 @@ namespace BZROpenShim
                 g_TraceSatelliteVisibility = true;
             }
         }
+        {
+            bool hopOutAlertConfig = false;
+            // [General], not [SinglePlayer]: this is audio-only and has no
+            // simulation effect, so it does not need that section's
+            // hard-disable-in-network-games contract.
+            if (TryGetUserConfigBool("General", "SuppressHopOutAttackAlert",
+                                     hopOutAlertConfig))
+            {
+                g_HopOutAttackAlertFixEnabled = hopOutAlertConfig;
+            }
+            else if (EnvFlagEnabled("OPENSHIM_DISABLE_HOP_OUT_ATTACK_ALERT_FIX") ||
+                     EnvFlagEnabled("BZR_DISABLE_HOP_OUT_ATTACK_ALERT_FIX"))
+            {
+                g_HopOutAttackAlertFixEnabled = false;
+            }
+            else
+            {
+                g_HopOutAttackAlertFixEnabled = kHopOutAttackAlertFixEnabledDefault;
+            }
+            g_HopOutAlertLastUserObject = nullptr;
+            g_HopOutAlertPrimed = false;
+        }
         g_ConstructorRemoteBuildFixEnabled =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX") ||
               EnvFlagEnabled("BZR_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX"));
@@ -24639,10 +24873,11 @@ namespace BZROpenShim
             static_cast<uint32_t>(GetMainModuleBase() + kHeadlightObjectArenaRva));
         // Record the layout the sample lines were produced with, so a captured
         // log stays interpretable if these offsets are ever revised again.
-        Log(L"[SATVIS]   offsets illum=+0x%02X isVisible=+0x%03X seen=+0x%03X perceivedTeam=+0x%03X objective=+0x%03X currentView=%ld expects=%ld\n",
+        Log(L"[SATVIS]   offsets illum=+0x%03X isVisible=+0x%03X seen=+0x%03X team=+0x%03X perceivedTeam=+0x%03X objective=+0x%03X currentView=%ld expects=%ld\n",
             static_cast<unsigned>(kGameObjectIlluminationOffset),
             static_cast<unsigned>(kGameObjectIsVisibleOffset),
             static_cast<unsigned>(kGameObjectSeenOffset),
+            static_cast<unsigned>(kGameObjectActualTeamOffset),
             static_cast<unsigned>(kGameObjectPerceivedTeamOffset),
             static_cast<unsigned>(kGameObjectIsObjectiveOffset),
             IsSatelliteOverviewActive() ? kCameraTypeOverView : -1L,
@@ -28100,6 +28335,7 @@ namespace BZROpenShim
         if (!g_ChunkEffectFragmentHooksInstalled)
             InstallChunkFragmentWalkHooksIfRequested();
 
+        MaybeSuppressStaleHopOutAttackAlert();
         MaybeLogSatelliteVisibilitySample();
         RefreshChunkObjectIdentityCacheIfNeeded();
         TrackChunkEffectActiveEntries(thisPtr);

@@ -170,6 +170,27 @@ OgreMaterialCollisionGuard = 1
 ; Accepted: boolean. Default: OFF. Restart required after changing.
 EditorOverheadPlacementOrder = 0
 
+; Suppress the stale "under attack" growl that fires the instant you hop out.
+;
+; The cockpit radar warns about any friendly whose enemyShot timestamp is
+; newer than the alert cooldown, and it excludes exactly one object: the one
+; you currently are. Hopping out moves that to the pilot, so the craft you
+; just left stops being excluded, and if an enemy shot it at any point since
+; the last warning its old timestamp is replayed as a fresh alert -- once.
+;
+; With this on, the alert cooldown is raised to exactly that one stale
+; timestamp at the moment the player object changes. Nothing else moves: any
+; genuinely newer hit still carries a later timestamp and still warns you,
+; including further fire on the craft you just abandoned.
+;
+; NOTE: this is a deliberate deviation from stock. Battlezone 1.5's
+; CockpitRadar::Render has the same three conditions, so the beep is original
+; behaviour, not a Redux regression. Audio only -- no simulation effect.
+;
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_HOP_OUT_ATTACK_ALERT_FIX
+SuppressHopOutAttackAlert = 1
+
 [Startup]
 
 ; Early D3D startup-hook path used for renderer/startup development.
