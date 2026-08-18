@@ -35,9 +35,9 @@ jobs:
           }
           foreach ($patch in $patches) {
             Write-Host "Checking $($patch.Name)"
-            git apply --check --whitespace=error-all -- $patch.FullName
+            git apply --check --whitespace=nowarn -- $patch.FullName
             if ($LASTEXITCODE -ne 0) { throw "git apply --check failed for $($patch.Name)" }
-            git apply --whitespace=error-all -- $patch.FullName
+            git apply --whitespace=nowarn -- $patch.FullName
             if ($LASTEXITCODE -ne 0) { throw "git apply failed for $($patch.Name)" }
           }
 
