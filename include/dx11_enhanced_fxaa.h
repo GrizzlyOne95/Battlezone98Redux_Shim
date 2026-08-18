@@ -1,7 +1,27 @@
 #pragma once
 
+#include <algorithm>
+
+// Forward declarations keep the public control surface lightweight while also
+// letting the implementation declare its factory hook before the concrete DXGI
+// headers are included by the translation unit.
+struct IDXGIFactory;
+struct IUnknown;
+struct DXGI_SWAP_CHAIN_DESC;
+struct IDXGISwapChain;
+
 namespace BZROpenShim
 {
+    namespace
+    {
+        // Implementation-only forward declaration. `long` is HRESULT's Win32
+        // underlying type and __stdcall is STDMETHODCALLTYPE on the 32-bit
+        // target; the definition in dx11_enhanced_fxaa.cpp uses the canonical
+        // SDK spellings after including Windows/DXGI headers.
+        long __stdcall HookFactoryCreateSwapChain(
+            IDXGIFactory*, IUnknown*, DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**);
+    }
+
     // Starts the opt-in DX11 Enhanced presentation-stage FXAA path.
     //
     // Activation is deliberately explicit and defaults OFF:
