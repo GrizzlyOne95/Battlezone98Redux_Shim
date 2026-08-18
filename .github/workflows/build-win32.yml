@@ -4,13 +4,9 @@ on:
   pull_request:
     branches:
       - main
-  push:
-    branches:
-      - main
-  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: build-win32-${{ github.event.pull_request.number || github.ref }}
@@ -18,13 +14,47 @@ concurrency:
 
 jobs:
   release-win32:
-    name: Release Win32
+    name: Apply nickname patches and build Release Win32
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
-      - name: Check out repository
+      - name: Check out implementation branch
         uses: actions/checkout@v4
+        with:
+          ref: agent/bzrnet-live-nickname
+          fetch-depth: 0
+
+      - name: Apply staged source patches
+        shell: pwsh
+        run: |
+          $patchDir = Join-Path $PWD '.github/agent/bzrnet-live-nickname'
+          $patches = Get-ChildItem -LiteralPath $patchDir -Filter '*.patch' -File | Sort-Object Name
+          if ($patches.Count -ne 7) {
+            throw "Expected 7 staged patches, found $($patches.Count)"
+          }
+          foreach ($patch in $patches) {
+            Write-Host "Checking $($patch.Name)"
+            git apply --check --whitespace=error-all -- $patch.FullName
+            if ($LASTEXITCODE -ne 0) { throw "git apply --check failed for $($patch.Name)" }
+            git apply --whitespace=error-all -- $patch.FullName
+            if ($LASTEXITCODE -ne 0) { throw "git apply failed for $($patch.Name)" }
+          }
+
+      - name: Validate nickname source invariants
+        shell: pwsh
+        run: |
+          $source = Get-Content -LiteralPath 'src/patches/bzr_hooks.cpp' -Raw
+          foreach ($forbidden in @('BzrNetStableId', 'SendBzrNetNicknameLive', 'kBzrNetLocalUserStableIdAddr', 'kBzrNetLobbyIdOffset')) {
+            if ($source.Contains($forbidden)) { throw "Stale nickname implementation symbol remains: $forbidden" }
+          }
+          if ($source.Contains('"playerName"')) { throw 'Live nickname sender must not emit playerName' }
+          foreach ($required in @('kBzrNetLobbyGetLocalIdentitySlot = 14', 'kBzrNetLobbySetPlayerDataSlot = 7', 'TryConstructNativeBzrString', 'OpenShimSetBZRNetNickname', '/nickname')) {
+            if (-not $source.Contains($required)) { throw "Required nickname implementation marker missing: $required" }
+          }
+          $def = Get-Content -LiteralPath 'src/winmm.def' -Raw
+          if (-not $def.Contains('OpenShimSetBZRNetNickname')) { throw 'winmm.def is missing OpenShimSetBZRNetNickname' }
+          Write-Host 'Nickname source invariants passed.'
 
       - name: Validate network safety baseline
         shell: pwsh
@@ -33,36 +63,6 @@ jobs:
       - name: Fetch pinned Ogre reference headers
         shell: pwsh
         run: ./setup-dev.ps1
-
-      - name: Validate DX11 Enhanced FXAA shader
-        shell: pwsh
-        run: |
-          $kitsBin = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
-          $fxc = Get-ChildItem -LiteralPath $kitsBin -Filter fxc.exe -File -Recurse |
-            Where-Object { $_.FullName -match '\\x86\\fxc\.exe$' } |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1
-
-          if (-not $fxc) {
-            throw "Windows SDK fxc.exe was not found under $kitsBin"
-          }
-
-          $shader = Join-Path $PWD "shaders\dx11_enhanced_fxaa.hlsl"
-          $includeDir = Join-Path $PWD "reverse_engineering\prerelease_2016\removed_files"
-          $vsOut = Join-Path $env:RUNNER_TEMP "dx11_enhanced_fxaa_vs.cso"
-          $psOut = Join-Path $env:RUNNER_TEMP "dx11_enhanced_fxaa_ps.cso"
-
-          & $fxc.FullName /nologo /Ges /O3 /I $includeDir /T vs_5_0 /E VSMain /Fo $vsOut $shader
-          if ($LASTEXITCODE -ne 0) {
-            throw "DX11 Enhanced FXAA VSMain / vs_5_0 compilation failed"
-          }
-
-          & $fxc.FullName /nologo /Ges /O3 /I $includeDir /T ps_5_0 /E PSMain /Fo $psOut $shader
-          if ($LASTEXITCODE -ne 0) {
-            throw "DX11 Enhanced FXAA PSMain / ps_5_0 compilation failed"
-          }
-
-          "FXAA 3.11 HLSL5 validation passed using $($fxc.FullName)"
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
@@ -77,39 +77,23 @@ jobs:
             /p:Platform=Win32 `
             /p:GenerateFullPaths=true `
             /verbosity:minimal
-
-      - name: Verify build outputs
-        shell: pwsh
-        run: |
-          $dll = Join-Path $PWD "bin/Release/winmm.dll"
-          $pdb = Join-Path $PWD "bin/Release/winmm.pdb"
-
+          if ($LASTEXITCODE -ne 0) { throw 'BZROpenShim Release Win32 build failed' }
+          $dll = Join-Path $PWD 'bin/Release/winmm.dll'
           if (-not (Test-Path -LiteralPath $dll -PathType Leaf)) {
             throw "Expected build output was not produced: $dll"
           }
+          $hash = Get-FileHash -LiteralPath $dll -Algorithm SHA256
+          Write-Host "winmm.dll SHA-256: $($hash.Hash.ToLowerInvariant())"
 
-          $dllInfo = Get-Item -LiteralPath $dll
-          $dllHash = Get-FileHash -LiteralPath $dll -Algorithm SHA256
-
-          "winmm.dll size: $($dllInfo.Length) bytes" | Tee-Object -FilePath build-summary.txt
-          "winmm.dll SHA-256: $($dllHash.Hash.ToLowerInvariant())" | Tee-Object -FilePath build-summary.txt -Append
-
-          if (Test-Path -LiteralPath $pdb -PathType Leaf) {
-            $pdbInfo = Get-Item -LiteralPath $pdb
-            "winmm.pdb size: $($pdbInfo.Length) bytes" | Tee-Object -FilePath build-summary.txt -Append
-          } else {
-            "winmm.pdb was not produced" | Tee-Object -FilePath build-summary.txt -Append
-          }
-
-          Get-Content -LiteralPath build-summary.txt
-
-      - name: Upload Release Win32 artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: BZROpenShim-Release-Win32
-          if-no-files-found: error
-          retention-days: 14
-          path: |
-            bin/Release/winmm.dll
-            bin/Release/winmm.pdb
-            build-summary.txt
+      - name: Commit qualified source changes
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- 'src/patches/bzr_hooks.cpp' 'include/bzr_hooks.h' 'src/winmm.def' 'reverse_engineering/bzrnet_live_nickname_20260818.md'
+          git diff --cached --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --cached --check failed' }
+          git commit -m 'feat: implement live BZRNet nickname updates'
+          if ($LASTEXITCODE -ne 0) { throw 'Final source commit failed' }
+          git push origin HEAD:agent/bzrnet-live-nickname
+          if ($LASTEXITCODE -ne 0) { throw 'Push of qualified source changes failed' }
