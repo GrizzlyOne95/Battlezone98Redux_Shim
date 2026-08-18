@@ -1,0 +1,4 @@
+#pragma once
+
+#define IDR_DX11_ENHANCED_FXAA_HLSL 4301
+#define IDR_NVIDIA_FXAA3_11_HEADER   4302
