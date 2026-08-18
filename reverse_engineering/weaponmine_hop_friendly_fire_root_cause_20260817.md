@@ -265,3 +265,85 @@ and `SetPerceivedTeam` remain distinct and only the former can affect mines.
 * Steam-build VAs assumed to match GOG, per existing OpenShim convention.
 * Specific community Lua swap scripts were not read; the claim is about which
   engine API can affect mine hostility, not about what any given script does.
+
+---
+
+## 12. Addendum: the perceivedTeam lifecycle and the stolen-vehicle case (2026-08-17)
+
+Prompted by the report that a sniped-then-stolen tank attacks freely while
+friendly AI ignores it. Every stage below was compared between builds.
+
+### 12.1 Capture is a deliberate disguise, and both builds do it identically
+
+1.5 `Person::RegCollision` (`0x004A6E06`), Redux `FUN_005A1550`:
+
+```
+oldTeam = craft->GetTeam()            ; vtable slot 1, read BEFORE the change
+craft->SetTeam(person->team)          ; slot 2 -> Cleanup(); Init(newTeam)
+craft->curPilot = person->objClass
+...AI attach / user hand-off...
+craft->SetPerceivedTeam(oldTeam)      ; <- deliberately the PREVIOUS owner's team
+```
+
+A stolen craft is *supposed* to keep looking like yours. That is the mechanic,
+not the defect, and Redux reproduces it line for line — including reading the
+old team before `SetTeam` rather than after.
+
+`GameObject::Init(team)` writes team, teamList and the group index, and calls
+`AssignColor`; it never touches perceivedTeam. So `SetTeam` alone never
+re-syncs the disguise, in either build.
+
+### 12.2 Every perceivedTeam writer, both builds
+
+| Writer | 1.5 | Redux |
+| --- | --- | --- |
+| `Craft::AbandonPilot` -> 0 | `0x00488EA3` | `FUN_004ADF20` |
+| `Craft::ExplodePilot` | `0x00488BDB` | `FUN_004AD700` |
+| capture (`Person::RegCollision`) -> old team | `0x004A6F1F` | `FUN_005A1550` |
+| `SetDamageFlags` -> damager reveals itself | direct store | `0x004DC29F` |
+| `OffensiveProcess::DoSubTask` | `0x0044DFA1` | `0x00583690` |
+| `TurretTankProcess::DoSubTask` | `0x00467B88` | `0x005F7143` |
+| Lua/global setter | `0x0045EEF9` | `FUN_005C88B0` |
+
+The set matches. Redux is not missing a reveal that 1.5 performs.
+
+### 12.3 What the two DoSubTask reveals actually do
+
+Not what their name suggests. Both builds reveal **`GameObject::userObject`** —
+the player — not the attacking unit:
+
+```c
+if (attackUser && target != userObject) {
+    if (target == NULL) { ...
+        this->attackUser = true;
+        if (userObject) userObject->SetPerceivedTeam(userObject->GetTeam());
+    }
+}
+```
+
+Redux `FUN_00583520` is structurally identical. So stock never reveals an
+attacker at the moment it engages. The only thing that reveals an attacker is
+`SetDamageFlags`, and that requires a shot to actually **land**.
+
+### 12.4 Consequence for the reported scenario
+
+A stolen craft keeps the previous owner's perceived team until one of its shots
+connects. Until then it reads as friendly to anything keyed on perceivedTeam.
+**This is stock behaviour in Battlezone 1.5 as well** — it is not a Redux
+regression, which answers the open question in the original report.
+
+That makes OpenShim's attack-reveal an **enhancement**, not a compatibility
+restoration: it reveals the *process owner* as it engages, which is something
+neither build does. It is the right shape for the complaint, since it no longer
+depends on rounds connecting.
+
+Two consequences worth stating:
+
+* It deliberately weakens the AI stolen-vehicle disguise. An AI-driven captured
+  craft now gives itself away when it engages rather than when it first hits.
+* The player is unaffected: player craft are not driven by
+  Offensive/GunTower/TurretTank processes, so a vehicle the *player* steals
+  keeps the stock disguise until its damage lands.
+
+Until 2026-08-17 the feature wrote the actual-team field over itself and always
+short-circuited, so none of this had ever taken effect.
