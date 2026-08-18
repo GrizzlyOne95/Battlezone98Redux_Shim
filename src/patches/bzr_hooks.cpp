@@ -1623,7 +1623,12 @@ namespace BZROpenShim
         static bool g_TraceSatelliteVisibility = false;
         static uint32_t g_LastChunkEffectLoggedCount = UINT32_MAX;
         static volatile long g_ChunkRenderLogBudget = 12;
-        static volatile long g_SatelliteVisibilityLogBudget = 8;
+        // 8 was sized for an opt-in probe and burns out after 8 seconds of
+        // cumulative satellite viewing -- far too few to walk the validation
+        // matrix now that the trace defaults on. Budget is consumed only while
+        // the overview is actually open and is rate-limited to one sample per
+        // g_SatelliteVisibilityLogIntervalMs.
+        static volatile long g_SatelliteVisibilityLogBudget = 120;
         static uint32_t g_ChunkTraceEntryLimit = 32;
         // 96 slots exhaust in multi-craft battles (each death emits ~10 geo
         // pieces plus impact chunklets); once full, new chunks are silently
@@ -1882,7 +1887,19 @@ namespace BZROpenShim
         static constexpr uintptr_t kChunkEffectEntryBaseOffset = 0x28;
         static constexpr uintptr_t kChunkEffectVtableSimulateSlotAddr = 0x0087708C;
         static constexpr uintptr_t kChunkObjGeomRefOffset = 0x64;
-        static constexpr uintptr_t kViewRecordRva = 0x004FD770;
+        // Live GOG 2.2.301 View_Record. The previous value 0x004FD770 (VA
+        // 0x008FD770) has *zero* cross-references anywhere in .text -- the
+        // satellite gate below was reading unreferenced memory, so every
+        // [SATVIS] sample taken before 2026-08-17 is void. The real record is
+        // written by the satellite view setter (0x0061BD20) at 0x0061BE27:
+        //   mov [0x008EAAD4], 0            ; previous view
+        //   mov [0x008EAAD8], 3            ; Current_View = OVER_VIEW
+        //   mov [0x008EACB8], ecx          ; overview object
+        //   mov [0x008EAAD0], 0x0061BC90   ; Update_Camera = Set_Satellite_View
+        // Base 0x008EAAD0 + kPresetViewCurrentViewOffset (0x8) lands on
+        // 0x008EAAD8, which matches the independently derived
+        // kGogViewModeAddr used by the target-camera fix.
+        static constexpr uintptr_t kViewRecordRva = 0x004EAAD0;
         // The advisory-PDB object-list/userObject/userTeam globals that used
         // to live here (0x50D2F0/F8/E4) landed in string data on the live exe
         // and were removed 2026-07-18. Verified replacements: userObject
@@ -1926,6 +1943,10 @@ namespace BZROpenShim
         static constexpr bool kHowitzerVolleyEnabledDefault = false;
         static constexpr bool kHowitzerUndeployedRetaliationFixEnabledDefault = true;
         static constexpr bool kWeaponMaskCarrierBiasEnabledDefault = false;
+        // Makes artillery and lay-mines AI honour weaponMask. This is an
+        // enhancement, not a restoration -- BZ 1.5 ignores the mask on both
+        // paths exactly as stock Redux does -- so it defaults OFF.
+        static constexpr bool kAiWeaponMaskSelectionEnabledDefault = false;
         static constexpr bool kAiOdfGameplayTuningEnabledDefault = false;
         static constexpr bool kTurretAimPitchEnabledDefault = true;
         static constexpr bool kAttackRevealEnabledDefault = true;
@@ -1938,6 +1959,11 @@ namespace BZROpenShim
         static bool g_HowitzerUndeployedRetaliationFixEnabled =
             kHowitzerUndeployedRetaliationFixEnabledDefault;
         static bool g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
+        static bool g_AiWeaponMaskSelectionEnabled = kAiWeaponMaskSelectionEnabledDefault;
+        // Configured value AND'd with the single-player gate. The three call
+        // redirects stay installed either way; when this is false they pass
+        // straight through to the stock engine routines.
+        static bool g_AiWeaponMaskSelectionActive = false;
         static bool g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
         static bool g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
         static bool g_AttackRevealEnabled = kAttackRevealEnabledDefault;
@@ -1961,9 +1987,35 @@ namespace BZROpenShim
         static constexpr int kGameTeamMax = 15;
         static constexpr size_t kProcessOwnerObjectOffset = 0x34;
         static constexpr size_t kPresetViewCurrentViewOffset = 0x8;
+        // GameObject visibility fields, complete-object relative. Derived from
+        // the shipped GOG image, not the advisory PDB: GameObject::Save passes
+        // each field name as a string literal to
+        // ::out(file, &this->field, size, "name"), and every one of those
+        // literals has exactly one .text cross-reference, immediately preceded
+        // by the `add reg, <offset>` that forms &this->field.
+        //
+        //   "illumination"  .rdata 0x00879D3C  xref 0x004DE199  add ecx, 0x0E8
+        //   "seqNo"         .rdata 0x0087405C  xref 0x004DE211  add ecx, 0x15C
+        //   "isObjective"   .rdata 0x00879D14  xref 0x004DE28B  add eax, 0x189
+        //   "isSelected"    .rdata 0x00879D08  xref 0x004DE2AE  add eax, 0x18A
+        //   "isVisible"     .rdata 0x00879CFC  xref 0x004DE2D1  add eax, 0x18C
+        //   "seen"          .rdata 0x00879CF4  xref 0x004DE2F4  add eax, 0x190
+        //   "perceivedTeam" .rdata 0x00879E2C  xref 0x004DE7E0  add ecx, 0x180
+        //
+        // Save's base register is complete-object minus 0xC, pinned by
+        // GameObject::GetPerceivedTeam (0x00462450) reading [interface+0x15C]
+        // together with the interface subobject living at complete+0x18:
+        // 0x180 - 0xC == 0x174 == kGameObjectPerceivedTeamOffset. So
+        // complete_offset = save_offset - 0xC for every field above.
+        //
+        // isVisible/seen were previously 0x184/0x188 here (the BZ 1.5 layout);
+        // that made the probe log `seen` in the isVisible column and an
+        // unrelated field as `seen`. Illumination at 0xDC was already correct.
         static constexpr size_t kGameObjectIlluminationOffset = 0xDC;
-        static constexpr size_t kGameObjectIsVisibleOffset = 0x184;
-        static constexpr size_t kGameObjectSeenOffset = 0x188;
+        static constexpr size_t kGameObjectIsObjectiveOffset = 0x17D;
+        static constexpr size_t kGameObjectIsSelectedOffset = 0x17E;
+        static constexpr size_t kGameObjectIsVisibleOffset = 0x180;
+        static constexpr size_t kGameObjectSeenOffset = 0x184;
         static constexpr size_t kGameObjectTargetHandleOffset = 0x214;
         static constexpr long kCameraTypeOverView = 3;
         static constexpr float kSuppressedRecentHitTime = -1.0e30f;
@@ -9286,10 +9338,19 @@ namespace BZROpenShim
         {
             void* objectPtr = nullptr;
             int team = INT_MIN;
+            int perceivedTeam = INT_MIN;
             float illumination = 0.0f;
             uint32_t isVisible = 0;
             uint32_t seen = 0;
             int targetHandle = 0;
+            int classType = -1;
+            bool isObjective = false;
+            bool isSelected = false;
+            // Derived, so a capture can be scored straight against the BZ 1.5
+            // behaviour table without post-processing.
+            bool detectedByUserTeam = false;   // (isVisible  >> userTeam) & 1
+            bool discoveredByUserTeam = false; // (seen       >> userTeam) & 1
+            bool legacyVisible = false;        // illumination > 0  -- the 1.5 gate
         };
 
         static int GetGameObjectTeamForLog(void* objectPtr)
@@ -9322,7 +9383,9 @@ namespace BZROpenShim
             }
         }
 
-        static bool CaptureSatelliteVisibilityEntry(void* objectPtr, SatelliteVisibilityLogEntry& outEntry)
+        static bool CaptureSatelliteVisibilityEntry(void* objectPtr,
+                                                    long userTeam,
+                                                    SatelliteVisibilityLogEntry& outEntry)
         {
             if (!objectPtr)
                 return false;
@@ -9332,6 +9395,8 @@ namespace BZROpenShim
                 auto* bytes = reinterpret_cast<uint8_t*>(objectPtr);
                 outEntry.objectPtr = objectPtr;
                 outEntry.team = GetGameObjectTeamForLog(objectPtr);
+                outEntry.perceivedTeam =
+                    *reinterpret_cast<const int*>(bytes + kGameObjectPerceivedTeamOffset);
                 outEntry.illumination =
                     *reinterpret_cast<const float*>(bytes + kGameObjectIlluminationOffset);
                 outEntry.isVisible =
@@ -9340,6 +9405,34 @@ namespace BZROpenShim
                     *reinterpret_cast<const uint32_t*>(bytes + kGameObjectSeenOffset);
                 outEntry.targetHandle =
                     *reinterpret_cast<const int*>(bytes + kGameObjectTargetHandleOffset);
+                outEntry.isObjective =
+                    *reinterpret_cast<const uint8_t*>(bytes + kGameObjectIsObjectiveOffset) != 0;
+                outEntry.isSelected =
+                    *reinterpret_cast<const uint8_t*>(bytes + kGameObjectIsSelectedOffset) != 0;
+
+                // Class type drives the BZ 1.5 special cases: category 2
+                // (building) is skipped by Scanner::BasicVisibility's per-frame
+                // reset, which is what makes discovered buildings stay visible,
+                // and category 4 (person) is skipped by SweepVisibility so
+                // pilots never appear. The Redux enum's mapping onto those
+                // legacy values is NOT yet confirmed -- log the raw value and
+                // read the mapping off a capture containing a known building
+                // and a known pilot.
+                outEntry.classType = -1;
+                if (const auto* objectClass = *reinterpret_cast<uint8_t* const*>(
+                        bytes + kGameObjectClassOffset))
+                {
+                    outEntry.classType =
+                        *reinterpret_cast<const int*>(objectClass + kObjectClassTypeOffset);
+                }
+
+                if (userTeam >= kGameTeamMin && userTeam <= kGameTeamMax)
+                {
+                    const uint32_t mask = 1u << static_cast<uint32_t>(userTeam);
+                    outEntry.detectedByUserTeam = (outEntry.isVisible & mask) != 0;
+                    outEntry.discoveredByUserTeam = (outEntry.seen & mask) != 0;
+                }
+                outEntry.legacyVisible = outEntry.illumination > 0.0f;
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -9353,13 +9446,24 @@ namespace BZROpenShim
             if (!tag)
                 return;
 
-            Log(L"[SATVIS]   %ls obj=0x%08X team=%d illum=%.3f isVisible=0x%08X seen=0x%08X target=0x%08X\n",
+            // Field order mirrors the BZ 1.5 decision chain: what the object
+            // is, then what the scanner pass decided, then what the legacy
+            // overview gate would have concluded.
+            Log(L"[SATVIS]   %ls obj=0x%08X team=%d perceivedTeam=%d class=%d objective=%d selected=%d "
+                L"illum=%.3f isVisible=0x%08X seen=0x%08X detected=%d discovered=%d legacyVisible=%d target=0x%08X\n",
                 tag,
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entry.objectPtr)),
                 entry.team,
+                entry.perceivedTeam,
+                entry.classType,
+                entry.isObjective ? 1 : 0,
+                entry.isSelected ? 1 : 0,
                 static_cast<double>(entry.illumination),
                 entry.isVisible,
                 entry.seen,
+                entry.detectedByUserTeam ? 1 : 0,
+                entry.discoveredByUserTeam ? 1 : 0,
+                entry.legacyVisible ? 1 : 0,
                 static_cast<uint32_t>(entry.targetHandle));
         }
 
@@ -9405,11 +9509,14 @@ namespace BZROpenShim
                     (totalObjects < maxSampleObjects) ? totalObjects : maxSampleObjects;
 
                 SatelliteVisibilityLogEntry userEntry = {};
-                const bool haveUserEntry = CaptureSatelliteVisibilityEntry(userObject, userEntry);
+                const bool haveUserEntry =
+                    CaptureSatelliteVisibilityEntry(userObject, userTeam, userEntry);
 
                 uint32_t illuminatedCount = 0;
                 uint32_t visibleCount = 0;
                 uint32_t seenCount = 0;
+                uint32_t detectedCount = 0;
+                uint32_t discoveredCount = 0;
                 std::array<SatelliteVisibilityLogEntry, 3> hiddenEntries = {};
                 std::array<SatelliteVisibilityLogEntry, 3> visibleEntries = {};
                 size_t hiddenLogged = 0;
@@ -9418,7 +9525,7 @@ namespace BZROpenShim
                 for (size_t index = 0; index < sampleObjects; ++index)
                 {
                     SatelliteVisibilityLogEntry entry = {};
-                    if (!CaptureSatelliteVisibilityEntry(s_satvisObjects[index], entry))
+                    if (!CaptureSatelliteVisibilityEntry(s_satvisObjects[index], userTeam, entry))
                         continue;
 
                     if (entry.illumination > 0.0f)
@@ -9427,8 +9534,15 @@ namespace BZROpenShim
                         ++visibleCount;
                     if (entry.seen != 0)
                         ++seenCount;
+                    if (entry.detectedByUserTeam)
+                        ++detectedCount;
+                    if (entry.discoveredByUserTeam)
+                        ++discoveredCount;
 
-                    if (entry.illumination <= 0.0f && entry.isVisible == 0)
+                    // Split on the legacy gate itself (illumination > 0), not
+                    // on the raw bitmask, so the two buckets mean exactly what
+                    // BZ 1.5's Submit_Overview_Entities would have decided.
+                    if (!entry.legacyVisible)
                     {
                         if (hiddenLogged < hiddenEntries.size())
                             hiddenEntries[hiddenLogged++] = entry;
@@ -9439,7 +9553,8 @@ namespace BZROpenShim
                     }
                 }
 
-                Log(L"[SATVIS] view=%ld userTeam=%ld userObj=0x%08X total=%u sampled=%u illum=%u visible=%u seen=%u interval=%lums remaining=%ld\n",
+                Log(L"[SATVIS] view=%ld userTeam=%ld userObj=0x%08X total=%u sampled=%u illum=%u visible=%u seen=%u "
+                    L"detected=%u discovered=%u interval=%lums remaining=%ld\n",
                     currentView,
                     userTeam,
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(userObject)),
@@ -9448,6 +9563,8 @@ namespace BZROpenShim
                     illuminatedCount,
                     visibleCount,
                     seenCount,
+                    detectedCount,
+                    discoveredCount,
                     static_cast<unsigned long>(g_SatelliteVisibilityLogIntervalMs),
                     g_SatelliteVisibilityLogBudget);
 
@@ -10265,6 +10382,18 @@ namespace BZROpenShim
             g_TurretAimPitchMultiplier = active ? g_TurretAimPitchMultiplierEnhanced : 0.5f;
         }
 
+        static void RefreshAiWeaponMaskSelectionState()
+        {
+            g_AiWeaponMaskSelectionActive =
+                g_AiWeaponMaskSelectionEnabled && ReadLocalPlayerNetIdValue() == 0;
+        }
+
+        static void RevertAiWeaponMaskSelectionToBaseline()
+        {
+            g_AiWeaponMaskSelectionEnabled = kAiWeaponMaskSelectionEnabledDefault;
+            g_AiWeaponMaskSelectionActive = false;
+        }
+
         static const char* BoolText(bool value);
         static void RefreshJumpSnipeCrouchPatchState();
 
@@ -10350,6 +10479,10 @@ namespace BZROpenShim
                 g_TurretAimPitchBaselineEnabled = value;
             g_TurretAimPitchEnabled = g_TurretAimPitchBaselineEnabled;
 
+            g_AiWeaponMaskSelectionEnabled = kAiWeaponMaskSelectionEnabledDefault;
+            if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "AiWeaponMaskSelection", value))
+                g_AiWeaponMaskSelectionEnabled = value;
+
             float configuredMultiplier = 0.95f;
             std::string multiplierText;
             if (TryGetUserConfigString(
@@ -10377,6 +10510,7 @@ namespace BZROpenShim
 
             g_ScrapPilotHudLastRefreshTick = 0;
             RefreshTurretAimPitchState();
+            RefreshAiWeaponMaskSelectionState();
             RefreshJumpSnipeCrouchPatchState();
             RefreshShotConvergencePatchState();
             RefreshSmartReticleRangeState();
@@ -13870,6 +14004,8 @@ namespace BZROpenShim
               &RevertGlobalTurboToBaseline, &RefreshGlobalTurboPatchState },
             { "Headlights", FeatureTier::SinglePlayer,
               &RevertHeadlightsToBaseline, &RefreshHeadlightState },
+            { "AiWeaponMaskSelection", FeatureTier::SinglePlayer,
+              &RevertAiWeaponMaskSelectionToBaseline, &RefreshAiWeaponMaskSelectionState },
         };
 
         // Restore every registered feature to its resting state (mission end).
@@ -23986,10 +24122,40 @@ namespace BZROpenShim
              EnvFlagEnabled("OPENSHIM_CHUNK_EFFECT_TRACE"));
         InstallChunkEffectCreateHooksIfRequested();
         InstallChunkFragmentWalkHooksIfRequested();
-        g_TraceSatelliteVisibility =
-            EnvFlagEnabled("BZR_TRACE_SAT_VIS") ||
-            EnvFlagEnabled("OPENSHIM_TRACE_SAT_VIS") ||
-            EnvFlagEnabled("OPENSHIM_TRACE_SATELLITE_VISIBILITY");
+        // Satellite fog-of-war investigation (feature item 24). Defaulted ON
+        // for now so an ordinary session produces a scoreable capture with no
+        // launch-time setup; see
+        // reverse_engineering/satellite_fow_root_cause_20260817.md. Revert to
+        // default-OFF once the regression is characterised.
+        //
+        // Read the INI key directly rather than through the env-mapping shim:
+        // the mapping collapses to EnvFlagEnabled, which cannot tell "absent"
+        // from "0", and a default-ON option needs that distinction.
+        //
+        // Precedence, most specific first:
+        //   1. [Diagnostics] TraceSatelliteVisibility  (explicit, either way)
+        //   2. OPENSHIM_DISABLE_SAT_VIS / BZR_DISABLE_SAT_VIS
+        //   3. the legacy positive TRACE_* aliases (still honoured, though the
+        //      default now makes them redundant)
+        //   4. ON
+        {
+            bool satelliteVisibilityConfig = false;
+            if (TryGetUserConfigBool("Diagnostics", "TraceSatelliteVisibility",
+                                     satelliteVisibilityConfig))
+            {
+                g_TraceSatelliteVisibility = satelliteVisibilityConfig;
+            }
+            else if (EnvFlagEnabled("OPENSHIM_DISABLE_SAT_VIS") ||
+                     EnvFlagEnabled("BZR_DISABLE_SAT_VIS") ||
+                     EnvFlagEnabled("OPENSHIM_DISABLE_SATELLITE_VISIBILITY"))
+            {
+                g_TraceSatelliteVisibility = false;
+            }
+            else
+            {
+                g_TraceSatelliteVisibility = true;
+            }
+        }
         g_ConstructorRemoteBuildFixEnabled =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX") ||
               EnvFlagEnabled("BZR_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX"));
@@ -24032,7 +24198,7 @@ namespace BZROpenShim
         {
             g_ChunkProxyDebugSize = 2.5f;
         }
-        long satelliteVisibilityBudget = 8;
+        long satelliteVisibilityBudget = g_SatelliteVisibilityLogBudget;
         if (TryGetEnvLong("OPENSHIM_SAT_VIS_BUDGET", satelliteVisibilityBudget) ||
             TryGetEnvLong("BZR_SAT_VIS_BUDGET", satelliteVisibilityBudget))
         {
@@ -24143,6 +24309,16 @@ namespace BZROpenShim
             static_cast<uint32_t>(GetMainModuleBase() + kViewRecordRva),
             static_cast<uint32_t>(GetMainModuleBase() + kHeadlightUserObjectRva),
             static_cast<uint32_t>(GetMainModuleBase() + kHeadlightObjectArenaRva));
+        // Record the layout the sample lines were produced with, so a captured
+        // log stays interpretable if these offsets are ever revised again.
+        Log(L"[SATVIS]   offsets illum=+0x%02X isVisible=+0x%03X seen=+0x%03X perceivedTeam=+0x%03X objective=+0x%03X currentView=%ld expects=%ld\n",
+            static_cast<unsigned>(kGameObjectIlluminationOffset),
+            static_cast<unsigned>(kGameObjectIsVisibleOffset),
+            static_cast<unsigned>(kGameObjectSeenOffset),
+            static_cast<unsigned>(kGameObjectPerceivedTeamOffset),
+            static_cast<unsigned>(kGameObjectIsObjectiveOffset),
+            IsSatelliteOverviewActive() ? kCameraTypeOverView : -1L,
+            kCameraTypeOverView);
         Log(L"[MAGNET] Zero/non-finite range guard: %hs hook=%hs\n",
             g_MagnetZeroRangeGuardEnabled ? "enabled" : "disabled",
             g_MagnetMineSimulateHookInstalled ? "installed" : "pending");
@@ -25290,41 +25466,174 @@ namespace BZROpenShim
 
     }
 
-    void __cdecl ApplyWeaponMaskCarrierBiasForCraft(void* craft)
+    // Retired. This helper reordered Carrier::weapon[]/hardpoint[] and the
+    // existant/selected/enabled bitfields to trick the stock "first slot" AI
+    // into picking a different weapon. It is kept only as a symbol for the two
+    // never-installed bias trampolines and the hovercraft-refresh call site.
+    //
+    // It must not be revived as written. Three reasons, in order of severity:
+    //
+    //  1. It reached the carrier through kGameObjectCarrierOffset (0x198) and
+    //     read the mask from kGameObjectWeaponMaskOffset (0x210). Both are the
+    //     BZ 1.5 offsets. Redux is +0x1A0 and +0x218 -- confirmed from
+    //     GameObject::GetWeaponMask (0x00462510), GameObject::SetWeaponMask
+    //     (0x005C7450) and the ODF digit decode in the ctor (0x004DA0B0). The
+    //     0x198 read yields a non-carrier pointer that this code then *wrote
+    //     through*, which the __except cannot catch because a wrong-but-mapped
+    //     pointer does not fault.
+    //  2. The rawMask ^ 0x33333333 decode is spurious. Redux's weapon mask is a
+    //     plain load; the obfuscated field at +0x210 is an unrelated 0..3 enum.
+    //  3. Even with correct offsets, permuting carrier slots mutates simulation
+    //     state that UpdateWeaponAim, GetRank, the HUD, save/load and the
+    //     slot-ordered weapon hash at 0x005FED30 all read.
+    //
+    // The supported replacement selects the weapon at the point of use without
+    // writing to the carrier -- see ResolveAiPreferredHardpoint below.
+    void __cdecl ApplyWeaponMaskCarrierBiasForCraft(void* /*craft*/)
     {
-        if (!g_WeaponMaskCarrierBiasEnabled)
-            return;
+    }
 
-        if (!craft)
-            return;
+    namespace
+    {
+        // ------------------------------------------------------------------
+        // AI weapon-mask hardpoint selection.
+        //
+        // NOT a regression fix. BZ 1.5 behaves exactly as stock Redux does:
+        // ArtilleryProcess::DoAttack (1.5 0x0040D498 / Redux 0x00475B30) takes
+        // the first existant weapon in slots 0..4, and LayMinesTask::DoArrived
+        // (1.5 0x0041D5B2 / Redux 0x005128D0) hard-codes hardpoint 0 and
+        // selected-mask 1. Neither reads weaponMask in either build. This is a
+        // deliberate enhancement, off by default.
+        //
+        // Full derivation:
+        // reverse_engineering/howitzer_minelayer_weapon_mask_root_cause_20260817.md
+        // ------------------------------------------------------------------
 
-        __try
+        // Redux GameObject / Carrier layout. Do not substitute the 1.5 values;
+        // GameObject gained eight bytes between the builds (0x198 -> 0x1A0,
+        // 0x210 -> 0x218) and UnitProcess gained the same eight (0x2C -> 0x34).
+        constexpr size_t kReduxGameObjectCarrierOffset = 0x1A0;
+        constexpr size_t kReduxGameObjectWeaponMaskOffset = 0x218;
+        constexpr size_t kReduxCarrierExistantOffset = 0x2C;
+        constexpr size_t kReduxUnitProcessMeOffset = 0x34;
+        constexpr size_t kReduxLayMinesTaskMeOffset = 0x10;
+
+        constexpr uintptr_t kReduxCarrierGetWeaponAddr = 0x00417F60;
+        constexpr uintptr_t kReduxCarrierSetSelectedAddr = 0x004D9880;
+
+        // Both are __thiscall: `this` in ecx, one stack argument, callee-cleaned.
+        // __fastcall with an ignored second parameter is the exact same ABI.
+        using FnCarrierGetWeaponThiscall = void* (__fastcall*)(void*, void*, int);
+        using FnCarrierSetSelectedThiscall = void (__fastcall*)(void*, void*, uint32_t);
+
+        // Returns the hardpoint the AI should prefer, or -1 to leave stock
+        // behaviour completely untouched.
+        //
+        // The rule is lowest_set_bit(weaponMask & existant). With the default
+        // ODF mask 11111 (0x1F) that is precisely the first existant slot --
+        // exactly what stock picks -- so this is a bit-exact no-op for every
+        // unit that does not carry an explicit non-default mask.
+        int ResolveAiPreferredHardpoint(void* carrier, void* craft)
         {
-            if (!IsWeaponMaskCarrierBiasCraft(craft))
-                return;
+            if (!g_AiWeaponMaskSelectionActive || !carrier || !craft)
+                return -1;
 
-            const int desiredSlot = FindPreferredWeaponSlot(craft);
-            if (desiredSlot < 0 || desiredSlot >= 5)
-                return;
+            __try
+            {
+                // The craft is recovered from the AI routine's stack frame, so
+                // verify the round trip before trusting either pointer: the
+                // craft we found must be the owner of the carrier we were
+                // handed. Any frame drift in a future build fails this and
+                // falls back to stock instead of reading arbitrary memory.
+                const auto* craftBytes = reinterpret_cast<const uint8_t*>(craft);
+                if (*reinterpret_cast<void* const*>(craftBytes + kReduxGameObjectCarrierOffset) != carrier)
+                    return -1;
 
-            auto* craftBytes = reinterpret_cast<uint8_t*>(craft);
-            auto* carrier = *reinterpret_cast<CarrierView**>(craftBytes + kGameObjectCarrierOffset);
-            if (!carrier)
-                return;
+                const uint32_t mask =
+                    *reinterpret_cast<const uint32_t*>(craftBytes + kReduxGameObjectWeaponMaskOffset);
+                const uint32_t existant = *reinterpret_cast<const uint32_t*>(
+                    reinterpret_cast<const uint8_t*>(carrier) + kReduxCarrierExistantOffset);
 
-            const int currentIndex = FindWeaponArrayIndexForSlot(carrier, desiredSlot);
-            if (currentIndex <= 0)
-                return;
+                const uint32_t desired = mask & existant & 0x1Fu;
+                if (desired == 0)
+                    return -1;  // mask selects nothing fitted -> stock
 
-            std::swap(carrier->hardpoint[0], carrier->hardpoint[currentIndex]);
-            std::swap(carrier->weapon[0], carrier->weapon[currentIndex]);
-            SwapCarrierBits(carrier->existant, 0, currentIndex);
-            SwapCarrierBits(carrier->selected, 0, currentIndex);
-            SwapCarrierBits(carrier->enabled, 0, currentIndex);
+                for (int slot = 0; slot < 5; ++slot)
+                {
+                    if (desired & (1u << slot))
+                        return slot;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+
+            return -1;
         }
-        __except (EXCEPTION_EXECUTE_HANDLER)
+
+        void* ReadAiOwnerCraft(void* aiState, size_t meOffset)
         {
+            if (!aiState)
+                return nullptr;
+
+            __try
+            {
+                return *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(aiState) + meOffset);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
         }
+    }
+
+    // Replaces the single `call Carrier::GetWeapon` inside the artillery slot
+    // loop at 0x00475DDB. Stock walks slots 0..4 and keeps the first non-null
+    // result; we answer the very first probe with the mask-preferred weapon so
+    // the loop converges there immediately, and pass every other probe through
+    // untouched.
+    void* __cdecl OpenShimArtillerySelectWeapon(void* carrier, int slot, void* process)
+    {
+        auto getWeapon = reinterpret_cast<FnCarrierGetWeaponThiscall>(kReduxCarrierGetWeaponAddr);
+
+        if (slot != 0)
+            return getWeapon(carrier, nullptr, slot);
+
+        const int preferred =
+            ResolveAiPreferredHardpoint(carrier, ReadAiOwnerCraft(process, kReduxUnitProcessMeOffset));
+
+        // `preferred` is only ever a slot that is set in `existant`, so
+        // GetWeapon cannot return null for it and the loop still terminates.
+        return getWeapon(carrier, nullptr, preferred >= 0 ? preferred : 0);
+    }
+
+    // Replaces the `call Carrier::GetWeapon` at 0x005128F6, whose slot argument
+    // is the literal 0 pushed at 0x005128F1.
+    void* __cdecl OpenShimLayMinesGetWeapon(void* carrier, int slot, void* task)
+    {
+        auto getWeapon = reinterpret_cast<FnCarrierGetWeaponThiscall>(kReduxCarrierGetWeaponAddr);
+
+        const int preferred =
+            ResolveAiPreferredHardpoint(carrier, ReadAiOwnerCraft(task, kReduxLayMinesTaskMeOffset));
+
+        return getWeapon(carrier, nullptr, preferred >= 0 ? preferred : slot);
+    }
+
+    // Replaces the `call Carrier::SetSelected` at 0x00512921, whose mask
+    // argument is the literal 1 pushed at 0x0051291C.
+    //
+    // A single bit is selected rather than the whole `weaponMask & existant`
+    // set: stock never lays more than one mine per arrival, and handing
+    // SetSelected a multi-bit mask would make TriggerSelected fire several
+    // hardpoints at once, which has no legacy precedent.
+    void __cdecl OpenShimLayMinesSetSelected(void* carrier, uint32_t mask, void* task)
+    {
+        auto setSelected = reinterpret_cast<FnCarrierSetSelectedThiscall>(kReduxCarrierSetSelectedAddr);
+
+        const int preferred =
+            ResolveAiPreferredHardpoint(carrier, ReadAiOwnerCraft(task, kReduxLayMinesTaskMeOffset));
+
+        setSelected(carrier, nullptr, preferred >= 0 ? (1u << preferred) : mask);
     }
 
     void __cdecl TraceArtilleryMaskFromProcess(void* process)

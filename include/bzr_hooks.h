@@ -131,6 +131,12 @@ namespace BZROpenShim
     void __cdecl MapFilters2Filter(void* listPtr, BzrString* filter);
     void __cdecl ApplyWeaponMaskCarrierBiasForCraft(void* craft);
     void __cdecl TraceArtilleryMaskFromProcess(void* process);
+    // AI weapon-mask hardpoint selection. Each replaces one call to a
+    // __thiscall engine routine; the trampolines supply the third argument from
+    // the patched routine's own stack frame.
+    void* __cdecl OpenShimArtillerySelectWeapon(void* carrier, int slot, void* process);
+    void* __cdecl OpenShimLayMinesGetWeapon(void* carrier, int slot, void* task);
+    void __cdecl OpenShimLayMinesSetSelected(void* carrier, uint32_t mask, void* task);
     // Shared state for trampolines.
     extern void* g_VehicleListContext;
     extern void* g_VehicleListParam;
