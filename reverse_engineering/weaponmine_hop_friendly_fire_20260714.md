@@ -1,5 +1,11 @@
 # WeaponMine hop-out friendly-fire investigation (2026-07-14)
 
+> **Superseded (2026-08-17).** The central claim below - that WeaponMine reads
+> `perceivedTeam` via virtual slot 1 - is disproved. Slot 1 is
+> `GameObject::GetTeam` and returns the *actual* team in both builds, so
+> `Craft::AbandonPilot` cannot influence mine hostility. See
+> `weaponmine_hop_friendly_fire_root_cause_20260817.md`.
+
 ## Finding
 
 Redux `WeaponMine::Simulate` is at GOG VA `0x00612950` (RVA `0x00212950`).
