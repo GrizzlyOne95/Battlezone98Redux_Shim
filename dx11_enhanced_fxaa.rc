@@ -1,0 +1,10 @@
+#include "include/dx11_enhanced_fxaa_resources.h"
+#include <windows.h>
+
+// Keep the original removed-beta NVIDIA FXAA 3.11 header as the algorithm
+// source of truth. The runtime compiler receives both resources entirely from
+// winmm.dll, so no loose shader file is required in the game directory.
+// Forward slashes avoid RC string escape sequences such as \r in
+// "reverse_engineering" while remaining valid Windows resource paths.
+IDR_DX11_ENHANCED_FXAA_HLSL RCDATA "shaders/dx11_enhanced_fxaa.hlsl"
+IDR_NVIDIA_FXAA3_11_HEADER   RCDATA "reverse_engineering/prerelease_2016/removed_files/Fxaa3_11.h"

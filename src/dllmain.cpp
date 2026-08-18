@@ -16,6 +16,7 @@
 #include "editor_view_order.h"
 #include "autosave.h"
 #include "dx11_colorspace_diagnostic.h"
+#include "dx11_enhanced_fxaa.h"
 #include "terrain_proxy.h"
 #include "ogre_animation_profiler.h"
 #include "BZROpenShim.h"
@@ -33,11 +34,12 @@ static uintptr_t g_PatchThread = 0;
 static unsigned __stdcall PatchThreadProc(void*)
 {
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread started");
-    // Start opt-in renderer diagnostics immediately so their workers can
-    // observe Ogre/D3D11 module creation before the renderer creates devices
-    // or begins normal animation submission.
+    // Start opt-in renderer diagnostics/features immediately so their workers
+    // can observe Ogre/D3D11 module creation before the renderer creates
+    // devices, swapchains, or begins normal animation submission.
     BZROpenShim::InitializeOgreAnimationProfiler();
     BZROpenShim::InitializeDx11ColorSpaceDiagnostic();
+    BZROpenShim::InitializeDx11EnhancedFxaa();
     BZROpenShim::InstallCrashLogger();
     BZROpenShim::InitializeNetworkOptimizer();
     // Install BZRNet observation after the optimizer so it can chain through
@@ -118,6 +120,9 @@ namespace BZROpenShim
             g_PatchThread = 0;
         }
         BZROpenShim::ShutdownOgreAnimationProfiler();
+        // Stop the mutating presentation experiment before the read-only DX11
+        // observer it can chain with, then release its private D3D resources.
+        BZROpenShim::ShutdownDx11EnhancedFxaa();
         BZROpenShim::ShutdownDx11ColorSpaceDiagnostic();
         BZROpenShim::ShutdownTerrainProxyPhase2();
         BZROpenShim::ShutdownAutoSave();
