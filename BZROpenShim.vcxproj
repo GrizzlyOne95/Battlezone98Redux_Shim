@@ -129,6 +129,7 @@
     <ClCompile Include="src\patches\ogre_animation_profiler.cpp">
       <LanguageStandard>stdcpp14</LanguageStandard>
     </ClCompile>
+    <ClCompile Include="src\patches\pilot_fp_animation_trace.cpp" />
     <ClCompile Include="src\patches\editor_view_order.cpp" />
     <ClCompile Include="src\patches\file_io_hooks.cpp" />
     <ClCompile Include="src\patches\game_state.cpp" />
@@ -162,6 +163,7 @@
     <ClInclude Include="include\dx11_enhanced_fxaa.h" />
     <ClInclude Include="include\dx11_enhanced_fxaa_resources.h" />
     <ClInclude Include="include\ogre_animation_profiler.h" />
+    <ClInclude Include="include\pilot_fp_animation_trace.h" />
     <ClInclude Include="include\file_io_hooks.h" />
     <ClInclude Include="include\ogre_shader_cache.h" />
     <ClInclude Include="include\terrain_proxy.h" />
