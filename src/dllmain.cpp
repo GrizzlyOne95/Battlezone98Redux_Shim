@@ -20,6 +20,7 @@
 #include "terrain_proxy.h"
 #include "ogre_animation_profiler.h"
 #include "pilot_fp_animation_trace.h"
+#include "openshim_sdk_v2.h"
 #include "BZROpenShim.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -100,14 +101,39 @@ namespace BZROpenShim
     BZRO_API bool IsPatchingComplete() { return g_PatchingComplete; }
     BZRO_API uint32_t GetAppliedPatchCount() { return g_AppliedPatches; }
 
-    void SetPatchingComplete(bool complete) { g_PatchingComplete = complete; }
+    void SetPatchingComplete(bool complete)
+    {
+        const bool changed = g_PatchingComplete != complete;
+        g_PatchingComplete = complete;
+        if (changed)
+        {
+            PublishOpenShimEvent(OpenShimEventType::PatchingCompleted,
+                                 complete ? 1u : 0u,
+                                 g_AppliedPatches,
+                                 complete ? "OpenShim patching completed" : "OpenShim patching reset");
+        }
+    }
+
     void SetAppliedPatchCount(uint32_t count) { g_AppliedPatches = count; }
-    void SetCompatibleVersion(bool compatible) { g_CompatibleVersion = compatible; }
+
+    void SetCompatibleVersion(bool compatible)
+    {
+        const bool changed = g_CompatibleVersion != compatible;
+        g_CompatibleVersion = compatible;
+        if (changed)
+        {
+            PublishOpenShimEvent(OpenShimEventType::CompatibilityChanged,
+                                 compatible ? 1u : 0u,
+                                 SHIM_VERSION,
+                                 compatible ? "Compatible game build" : "Unsupported game build");
+        }
+    }
 
     BZRO_API void Initialize() {
         static bool s_Initialized = false;
         if (s_Initialized) return;
         BZROpenShim::InitializeShimLogger();
+        BZROpenShim::InitializeOpenShimSdkV2();
         HMODULE hMod = GetModuleHandleA("winmm.dll");
         if (hMod) BZROpenShim::SetupLibrarySearchPath(hMod);
         s_Initialized = true;
@@ -121,6 +147,7 @@ namespace BZROpenShim
             CloseHandle(reinterpret_cast<HANDLE>(g_PatchThread));
             g_PatchThread = 0;
         }
+        BZROpenShim::ShutdownOpenShimSdkV2();
         BZROpenShim::ShutdownPilotFpAnimationTrace();
         BZROpenShim::ShutdownOgreAnimationProfiler();
         // Stop the mutating presentation experiment before the read-only DX11
