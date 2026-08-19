@@ -9,6 +9,7 @@
 #include "file_io_hooks.h"
 #include "bzr_hooks.h"
 #include "shim_log.h"
+#include "openshim_sdk_v2.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -218,6 +219,13 @@ namespace BZROpenShim
         return strcmp(name, "Map Sorting") == 0 || strcmp(name, "Map List Rewrite for Hop-Fix 1/3") == 0 || strcmp(name, "Map List Rewrite for Hop-Fix 2/3") == 0 || strcmp(name, "Map List Rewrite for Hop-Fix 3/3") == 0 || strcmp(name, "Map List Fix Support 1/3") == 0;
     }
 
+    static bool IsSteamOnlyPatchName(const char* name) {
+        if (!name) return false;
+        return strcmp(name, "Map List Rewrite for Hop-Fix 1/3") == 0 ||
+               strcmp(name, "Map List Rewrite for Hop-Fix 2/3") == 0 ||
+               strcmp(name, "Map List Rewrite for Hop-Fix 3/3") == 0;
+    }
+
     static bool IsChunkExperimentPatchName(const char* name) {
         if (!name) return false;
         return strcmp(name, "Chunk Render Resolve Hook") == 0 || strcmp(name, "Chunk Effect Simulate VTable Hook") == 0 || strcmp(name, "Legacy World Update RenderQueue VTable Hook") == 0;
@@ -264,7 +272,11 @@ namespace BZROpenShim
         return s_cached != 0;
     }
 
-    static void FilterPatchesForRuntime(std::vector<HookEngine::PatchDef>& patches, bool isSteam) {
+    static void FilterPatchesForRuntime(std::vector<HookEngine::PatchDef>& patches, BzrDistribution distribution) {
+        const bool isSteam = distribution == BzrDistribution::Steam;
+        if (!isSteam) {
+            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsSteamOnlyPatchName(p.name.c_str()); }), patches.end());
+        }
         if (!ShouldEnableMapRefreshFixes(isSteam)) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsMapRefreshPatchName(p.name.c_str()); }), patches.end());
         }
@@ -681,11 +693,17 @@ namespace BZROpenShim
 
     void RunPatcher(uint32_t shimVersion) {
         g_Config.Load();
+        SetBzrDistribution(BzrDistribution::Unknown);
         const bool isSteam = IsSteamExe(); g_EnableScrollRestore = true;
         if (ShouldEnableD3DStartupHooks()) ApplyD3DStartupHooks();
         ApplyTrnSaveNormalizeHooks();
         uint32_t gameVer = GetBZRVersion();
         if (gameVer != static_cast<uint32_t>(g_Config.GetStaticPointer("BZR_EXPECTED_VERSION", BZR_EXPECTED_VERSION))) return;
+        const BzrDistribution distribution = isSteam ? BzrDistribution::Steam : BzrDistribution::GOG;
+        SetBzrDistribution(distribution);
+        Log(L"[PLATFORM] distribution=%hs steamStub=%hs\n",
+            distribution == BzrDistribution::Steam ? "Steam" : "GOG",
+            isSteam ? "yes" : "no");
         // Publish the result of the check above. Everything past this point
         // writes version-specific addresses, so reaching here IS the definition
         // of a compatible build -- and callers outside the patcher have no other
@@ -696,7 +714,7 @@ namespace BZROpenShim
         SetCompatibleVersion(true);
         std::vector<uint8_t> sig; if (ReadExeSignature(sig)) WaitForSignature(sig);
         StartSoundChannelOverride(isSteam);
-        g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForRuntime(patches, isSteam); ScanForPatchAddresses(patches, isSteam);
+        g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForRuntime(patches, distribution); ScanForPatchAddresses(patches, isSteam);
         auto findAddr = [&patches](const char* n) -> uint32_t { for (const auto& p : patches) { if (p.name == n) return p.address; } return 0; };
         ResolvePointers(findAddr("Map Sorting"), findAddr("Map List Rewrite for Hop-Fix 1/3"), findAddr("Map List Rewrite for Hop-Fix 2/3"), findAddr("Map List Rewrite for Hop-Fix 3/3"), findAddr("Probe Refresh Path MapFilter1"), findAddr("Map List Fix Support 1/3"), findAddr("Probe MapListFix2"), findAddr("TurretCraft Aim Pitch Multiplier"), findAddr("TurretTank Aim Pitch Multiplier"), findAddr("Under Attack Alert Hook 1/2"), findAddr("Under Attack Alert Hook 2/2"), findAddr("Offensive Attack Reveal Hook"), findAddr("TurretTank Attack Reveal Hook"), isSteam);
         ResolveStaticReturnPointers();
