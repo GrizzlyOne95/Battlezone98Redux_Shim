@@ -25,6 +25,12 @@ namespace BZROpenShim
 
     uint64_t GetOpenShimCapabilityMask();
 
+    // Qualified storefront/provenance state. The patcher only calls the setter
+    // after the supported BZR version gate succeeds; until then this remains
+    // Unknown so unsupported executables fail closed.
+    void SetGameDistribution(OpenShimGameDistribution distribution);
+    OpenShimGameDistribution GetGameDistribution();
+
     // Shared implementation used by the exported C entry point and the v2
     // function table.
     bool CaptureDeveloperSnapshot(OpenShimDeveloperSnapshot& outSnapshot);
