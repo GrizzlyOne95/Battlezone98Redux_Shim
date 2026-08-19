@@ -1,4 +1,4 @@
-// Unit tests for BZROpenShim::GetGameLogPath sanitization logic
+// Unit tests for BZROpenShim::SanitizeLogFilename sanitization logic
 // (src/engine/shim_log.cpp).
 
 #include "shim_log.h"
@@ -6,7 +6,7 @@
 #include <cstdio>
 #include <string>
 
-using BZROpenShim::GetGameLogPath;
+using BZROpenShim::SanitizeLogFilename;
 
 namespace
 {
@@ -26,31 +26,48 @@ namespace
 int main()
 {
     // Normal filenames remain intact.
-    CheckEq(GetGameLogPath("openshim.log"), "openshim.log", "normal log name");
-    CheckEq(GetGameLogPath("custom_test.log"), "custom_test.log", "custom log name");
+    CheckEq(SanitizeLogFilename("openshim.log"), "openshim.log", "normal log name");
+    CheckEq(SanitizeLogFilename("custom_test.log"), "custom_test.log", "custom log name");
 
     // Subdirectory paths strip directory component to leaf name.
-    CheckEq(GetGameLogPath("logs/custom.log"), "custom.log", "forward slash strip");
-    CheckEq(GetGameLogPath("logs\\custom.log"), "custom.log", "backward slash strip");
+    CheckEq(SanitizeLogFilename("logs/custom.log"), "custom.log", "forward slash strip");
+    CheckEq(SanitizeLogFilename("logs\\custom.log"), "custom.log", "backward slash strip");
 
-    // Path traversal inputs fall back to openshim.log.
-    CheckEq(GetGameLogPath(".."), "openshim.log", "dot dot traversal");
-    CheckEq(GetGameLogPath("../.."), "openshim.log", "double dot dot traversal");
-    CheckEq(GetGameLogPath("dir/.."), "openshim.log", "dir dot dot traversal");
-    CheckEq(GetGameLogPath("."), "openshim.log", "single dot traversal");
+    // Relative path navigation tokens fall back to openshim.log.
+    CheckEq(SanitizeLogFilename(".."), "openshim.log", "dot dot traversal");
+    CheckEq(SanitizeLogFilename("../.."), "openshim.log", "double dot dot traversal");
+    CheckEq(SanitizeLogFilename("dir/.."), "openshim.log", "dir dot dot traversal");
+    CheckEq(SanitizeLogFilename("."), "openshim.log", "single dot traversal");
 
     // Null and empty strings fall back to openshim.log.
-    CheckEq(GetGameLogPath(nullptr), "openshim.log", "null pointer fallback");
-    CheckEq(GetGameLogPath(""), "openshim.log", "empty string fallback");
-    CheckEq(GetGameLogPath("folder/"), "openshim.log", "trailing slash fallback");
+    CheckEq(SanitizeLogFilename(nullptr), "openshim.log", "null pointer fallback");
+    CheckEq(SanitizeLogFilename(""), "openshim.log", "empty string fallback");
+    CheckEq(SanitizeLogFilename("folder/"), "openshim.log", "trailing slash fallback");
 
-    // Invalid path characters fall back to openshim.log.
-    CheckEq(GetGameLogPath("test:stream.log"), "openshim.log", "colon in filename");
-    CheckEq(GetGameLogPath("test*file.log"), "openshim.log", "wildcard in filename");
-    CheckEq(GetGameLogPath("test?file.log"), "openshim.log", "question mark in filename");
-    CheckEq(GetGameLogPath("test<file.log"), "openshim.log", "less than in filename");
-    CheckEq(GetGameLogPath("test>file.log"), "openshim.log", "greater than in filename");
-    CheckEq(GetGameLogPath("test|file.log"), "openshim.log", "pipe in filename");
+    // Invalid path and NTFS ADS characters fall back to openshim.log.
+    CheckEq(SanitizeLogFilename("test:stream.log"), "openshim.log", "colon in filename");
+    CheckEq(SanitizeLogFilename("test*file.log"), "openshim.log", "wildcard in filename");
+    CheckEq(SanitizeLogFilename("test?file.log"), "openshim.log", "question mark in filename");
+    CheckEq(SanitizeLogFilename("test<file.log"), "openshim.log", "less than in filename");
+    CheckEq(SanitizeLogFilename("test>file.log"), "openshim.log", "greater than in filename");
+    CheckEq(SanitizeLogFilename("test|file.log"), "openshim.log", "pipe in filename");
+
+    // Control characters fall back to openshim.log.
+    CheckEq(SanitizeLogFilename("test\nfile.log"), "openshim.log", "newline in filename");
+    CheckEq(SanitizeLogFilename("test\tfile.log"), "openshim.log", "tab in filename");
+
+    // Trailing dots and spaces fall back to openshim.log.
+    CheckEq(SanitizeLogFilename("test.log."), "openshim.log", "trailing dot");
+    CheckEq(SanitizeLogFilename("test.log "), "openshim.log", "trailing space");
+
+    // Windows reserved device names fall back to openshim.log.
+    CheckEq(SanitizeLogFilename("CON"), "openshim.log", "CON device name");
+    CheckEq(SanitizeLogFilename("con.log"), "openshim.log", "con.log device name");
+    CheckEq(SanitizeLogFilename("PRN.txt"), "openshim.log", "PRN device name");
+    CheckEq(SanitizeLogFilename("AUX"), "openshim.log", "AUX device name");
+    CheckEq(SanitizeLogFilename("NUL.log"), "openshim.log", "NUL device name");
+    CheckEq(SanitizeLogFilename("COM1.log"), "openshim.log", "COM1 device name");
+    CheckEq(SanitizeLogFilename("LPT9.txt"), "openshim.log", "LPT9 device name");
 
     std::printf("%d checks, %d failures\n", g_Checks, g_Failures);
     return g_Failures == 0 ? 0 : 1;
