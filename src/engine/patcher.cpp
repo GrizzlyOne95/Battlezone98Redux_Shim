@@ -9,6 +9,7 @@
 #include "file_io_hooks.h"
 #include "bzr_hooks.h"
 #include "shim_log.h"
+#include "openshim_sdk_v2.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -242,6 +243,44 @@ namespace BZROpenShim
 
     static bool IsVehicleListModFixPatchName(const char* name) {
         return name && strncmp(name, "Vehicle List Mod Fix ", 21) == 0;
+    }
+
+    static const char* DistributionConfigKey(OpenShimGameDistribution distribution) {
+        switch (distribution) {
+        case OpenShimGameDistribution::GOG: return "gog";
+        case OpenShimGameDistribution::Steam: return "steam";
+        default: return nullptr;
+        }
+    }
+
+    static bool ConfigNodeAllowsDistribution(const nlohmann::json& node, OpenShimGameDistribution distribution) {
+        if (!node.contains("platforms")) return true;
+        if (!node["platforms"].is_array()) return false;
+        const char* key = DistributionConfigKey(distribution);
+        if (!key) return false;
+        for (const auto& platform : node["platforms"]) {
+            if (platform.is_string() && platform.get<std::string>() == key) return true;
+        }
+        return false;
+    }
+
+    static bool PatchAllowsDistribution(const HookEngine::PatchDef& patch, OpenShimGameDistribution distribution) {
+        static const char* groups[] = { "patches", "globals" };
+        for (const char* group : groups) {
+            if (!g_Config.data.contains(group) || !g_Config.data[group].is_array()) continue;
+            for (const auto& node : g_Config.data[group]) {
+                if (!node.contains("name") || !node["name"].is_string()) continue;
+                if (node["name"].get<std::string>() == patch.name)
+                    return ConfigNodeAllowsDistribution(node, distribution);
+            }
+        }
+        return true;
+    }
+
+    static void FilterPatchesForDistribution(std::vector<HookEngine::PatchDef>& patches, OpenShimGameDistribution distribution) {
+        patches.erase(std::remove_if(patches.begin(), patches.end(), [distribution](const HookEngine::PatchDef& patch) {
+            return !PatchAllowsDistribution(patch, distribution);
+        }), patches.end());
     }
 
     static bool ShouldEnableOgreMaterialCollisionGuard() {
@@ -582,7 +621,12 @@ namespace BZROpenShim
         try {
             if (g_Config.data.contains("patches")) {
                 for (const auto& p : g_Config.data["patches"]) {
-                    HookEngine::ScanTarget t; t.name = p["name"]; t.ida_pattern = p["pattern"]; t.offset = p["offset"]; t.expected_size = p["expected_size"]; t.fallback_addr = std::stoul(p["fallback"].get<std::string>(), nullptr, 16); targets.push_back(t);
+                    const std::string name = p["name"].get<std::string>();
+                    const bool active = std::any_of(patches.begin(), patches.end(), [&name](const HookEngine::PatchDef& patch) {
+                        return patch.name == name;
+                    });
+                    if (!active) continue;
+                    HookEngine::ScanTarget t; t.name = name; t.ida_pattern = p["pattern"]; t.offset = p["offset"]; t.expected_size = p["expected_size"]; t.fallback_addr = std::stoul(p["fallback"].get<std::string>(), nullptr, 16); targets.push_back(t);
                 }
             }
             if (g_Config.data.contains("globals")) {
@@ -681,22 +725,25 @@ namespace BZROpenShim
 
     void RunPatcher(uint32_t shimVersion) {
         g_Config.Load();
+        SetGameDistribution(OpenShimGameDistribution::Unknown);
         const bool isSteam = IsSteamExe(); g_EnableScrollRestore = true;
         if (ShouldEnableD3DStartupHooks()) ApplyD3DStartupHooks();
         ApplyTrnSaveNormalizeHooks();
         uint32_t gameVer = GetBZRVersion();
         if (gameVer != static_cast<uint32_t>(g_Config.GetStaticPointer("BZR_EXPECTED_VERSION", BZR_EXPECTED_VERSION))) return;
-        // Publish the result of the check above. Everything past this point
-        // writes version-specific addresses, so reaching here IS the definition
-        // of a compatible build -- and callers outside the patcher have no other
-        // way to ask. This was never being set: the check early-returns on a
-        // mismatch and simply fell through on success, leaving the flag false
-        // forever. dllmain gates engine-level AutoSave on it, so AutoSave never
-        // initialized on any build.
+        // Publish compatibility and storefront only after the supported-version
+        // gate succeeds. IsSteamExe() is a raw PE/SteamStub hint needed by the
+        // patcher, not sufficient evidence to classify an unknown executable as
+        // GOG merely because a .bind section is absent.
         SetCompatibleVersion(true);
+        const OpenShimGameDistribution distribution = isSteam
+            ? OpenShimGameDistribution::Steam
+            : OpenShimGameDistribution::GOG;
+        SetGameDistribution(distribution);
+        Log(L"[DIST] Qualified BZR distribution: %hs\n", isSteam ? "Steam" : "GOG");
         std::vector<uint8_t> sig; if (ReadExeSignature(sig)) WaitForSignature(sig);
         StartSoundChannelOverride(isSteam);
-        g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForRuntime(patches, isSteam); ScanForPatchAddresses(patches, isSteam);
+        g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForDistribution(patches, distribution); FilterPatchesForRuntime(patches, isSteam); ScanForPatchAddresses(patches, isSteam);
         auto findAddr = [&patches](const char* n) -> uint32_t { for (const auto& p : patches) { if (p.name == n) return p.address; } return 0; };
         ResolvePointers(findAddr("Map Sorting"), findAddr("Map List Rewrite for Hop-Fix 1/3"), findAddr("Map List Rewrite for Hop-Fix 2/3"), findAddr("Map List Rewrite for Hop-Fix 3/3"), findAddr("Probe Refresh Path MapFilter1"), findAddr("Map List Fix Support 1/3"), findAddr("Probe MapListFix2"), findAddr("TurretCraft Aim Pitch Multiplier"), findAddr("TurretTank Aim Pitch Multiplier"), findAddr("Under Attack Alert Hook 1/2"), findAddr("Under Attack Alert Hook 2/2"), findAddr("Offensive Attack Reveal Hook"), findAddr("TurretTank Attack Reveal Hook"), isSteam);
         ResolveStaticReturnPointers();

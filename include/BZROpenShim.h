@@ -28,6 +28,18 @@ namespace BZROpenShim
         OPENSHIM_CAP_STATUS              = 1ull << 0,
         OPENSHIM_CAP_EVENT_QUEUE         = 1ull << 1,
         OPENSHIM_CAP_DEVELOPER_INSPECTOR = 1ull << 2,
+        OPENSHIM_CAP_GAME_DISTRIBUTION   = 1ull << 3,
+    };
+
+    // Storefront/provenance classification for a qualified Battlezone build.
+    // Unknown is deliberate: callers must fail closed when OpenShim has not
+    // qualified the running executable rather than assuming "not Steam" means
+    // GOG. The numeric values are part of the public ABI.
+    enum class OpenShimGameDistribution : uint32_t
+    {
+        Unknown = 0,
+        GOG     = 1,
+        Steam   = 2,
     };
 
     enum class OpenShimEventType : uint32_t
@@ -57,10 +69,8 @@ namespace BZROpenShim
         char text[64] = {};
     };
 
-    // Read-only developer snapshot. v2 intentionally exposes only fields whose
-    // ownership/path is already established. Future SDK revisions can append
-    // GameObject/Ogre/AI fields without changing the v2 layout or requiring
-    // consumers to dereference native engine pointers.
+    // Read-only developer snapshot. New fields consume reserved storage where
+    // possible so existing v2 consumers retain the same record size.
     struct OpenShimDeveloperSnapshot
     {
         uint32_t structSize = sizeof(OpenShimDeveloperSnapshot);
@@ -85,12 +95,14 @@ namespace BZROpenShim
         float localPlayerY = 0.0f;
         float localPlayerZ = 0.0f;
 
-        uint32_t reserved[8] = {};
+        uint32_t gameDistribution = static_cast<uint32_t>(OpenShimGameDistribution::Unknown);
+        uint32_t reserved[7] = {};
     };
 
     // All function pointers use cdecl explicitly so companion DLLs do not
     // inherit compiler defaults. Boolean results use uint8_t/int32_t at the
-    // public ABI instead of C++ bool.
+    // public ABI instead of C++ bool. New entries are append-only; consumers
+    // must check structSize before calling fields added after their SDK copy.
     struct OpenShimApiV2
     {
         uint32_t structSize = sizeof(OpenShimApiV2);
@@ -111,6 +123,9 @@ namespace BZROpenShim
 
         int32_t  (__cdecl* captureDeveloperSnapshot)(OpenShimDeveloperSnapshot* outSnapshot) = nullptr;
         int32_t  (__cdecl* logDeveloperSnapshot)() = nullptr;
+
+        // Added append-only to SDK v2. Returns OpenShimGameDistribution.
+        uint32_t (__cdecl* getGameDistribution)() = nullptr;
     };
 
     /**
