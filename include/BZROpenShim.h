@@ -4,8 +4,10 @@
 /**
  * BZR Open Shim SDK
  *
- * Public interface for interacting with the Open Shim from mission scripts
- * or other third-party DLLs.
+ * Public interface for interacting with OpenShim from companion DLLs such as
+ * Extra Utilities. The original v1 exports below remain source/binary stable.
+ * SDK v2 adds one versioned function-table entry point so future capabilities
+ * do not require every consumer to resolve a growing collection of exports.
  */
 
 #ifdef BZROPENSHIM_EXPORTS
@@ -16,8 +18,100 @@
 
 namespace BZROpenShim
 {
-    // Current SDK Interface version
-    static constexpr uint32_t SDK_VERSION = 1;
+    // Latest public SDK interface version. v1 was the individual status exports
+    // at the bottom of this header; v2 adds OpenShimGetApi().
+    static constexpr uint32_t SDK_VERSION = 2;
+    static constexpr uint32_t SDK_API_V2 = 2;
+
+    enum OpenShimCapability : uint64_t
+    {
+        OPENSHIM_CAP_STATUS              = 1ull << 0,
+        OPENSHIM_CAP_EVENT_QUEUE         = 1ull << 1,
+        OPENSHIM_CAP_DEVELOPER_INSPECTOR = 1ull << 2,
+    };
+
+    enum class OpenShimEventType : uint32_t
+    {
+        None                      = 0,
+        ShimInitialized           = 1,
+        CompatibilityChanged      = 2,
+        PatchingCompleted         = 3,
+        ShutdownStarted           = 4,
+        DeveloperSnapshotCaptured = 5,
+    };
+
+    // ABI-stable copied event record. No pointers into Battlezone/Ogre memory
+    // cross this boundary. `sequence` is process-wide and monotonically
+    // increasing. `text` is optional diagnostic context and always NUL-ended.
+    struct OpenShimEvent
+    {
+        uint32_t structSize = sizeof(OpenShimEvent);
+        uint32_t apiVersion = SDK_API_V2;
+        uint32_t type = static_cast<uint32_t>(OpenShimEventType::None);
+        uint32_t threadId = 0;
+        uint64_t sequence = 0;
+        uint64_t qpc = 0;
+        uint64_t tickMs = 0;
+        uint64_t arg0 = 0;
+        uint64_t arg1 = 0;
+        char text[64] = {};
+    };
+
+    // Read-only developer snapshot. v2 intentionally exposes only fields whose
+    // ownership/path is already established. Future SDK revisions can append
+    // GameObject/Ogre/AI fields without changing the v2 layout or requiring
+    // consumers to dereference native engine pointers.
+    struct OpenShimDeveloperSnapshot
+    {
+        uint32_t structSize = sizeof(OpenShimDeveloperSnapshot);
+        uint32_t apiVersion = SDK_API_V2;
+        uint64_t capabilities = 0;
+
+        uint32_t shimVersion = 0;
+        uint32_t sdkVersion = SDK_VERSION;
+        uint32_t processId = 0;
+        uint32_t captureThreadId = 0;
+
+        uint32_t appliedPatchCount = 0;
+        uint32_t pendingEventCount = 0;
+        uint64_t droppedEventCount = 0;
+
+        uint8_t compatibleGameVersion = 0;
+        uint8_t patchingComplete = 0;
+        uint8_t localPlayerResolved = 0;
+        uint8_t reservedFlags = 0;
+
+        float localPlayerX = 0.0f;
+        float localPlayerY = 0.0f;
+        float localPlayerZ = 0.0f;
+
+        uint32_t reserved[8] = {};
+    };
+
+    // All function pointers use cdecl explicitly so companion DLLs do not
+    // inherit compiler defaults. Boolean results use uint8_t/int32_t at the
+    // public ABI instead of C++ bool.
+    struct OpenShimApiV2
+    {
+        uint32_t structSize = sizeof(OpenShimApiV2);
+        uint32_t apiVersion = SDK_API_V2;
+        uint64_t capabilities = 0;
+
+        uint32_t (__cdecl* getShimVersion)() = nullptr;
+        uint32_t (__cdecl* getSdkVersion)() = nullptr;
+        uint64_t (__cdecl* getCapabilities)() = nullptr;
+        uint8_t  (__cdecl* isCompatibleGameVersion)() = nullptr;
+        uint8_t  (__cdecl* isPatchingComplete)() = nullptr;
+        uint32_t (__cdecl* getAppliedPatchCount)() = nullptr;
+
+        int32_t  (__cdecl* pollEvent)(OpenShimEvent* outEvent) = nullptr;
+        uint32_t (__cdecl* getPendingEventCount)() = nullptr;
+        uint64_t (__cdecl* getDroppedEventCount)() = nullptr;
+        void     (__cdecl* clearEventQueue)() = nullptr;
+
+        int32_t  (__cdecl* captureDeveloperSnapshot)(OpenShimDeveloperSnapshot* outSnapshot) = nullptr;
+        int32_t  (__cdecl* logDeveloperSnapshot)() = nullptr;
+    };
 
     /**
      * Retrieves the internal version of the shim.
@@ -50,4 +144,19 @@ namespace BZROpenShim
      * Explicit shutdown and cleanup entry point.
      */
     BZRO_API void Shutdown();
+
+    /**
+     * Versioned SDK entry point. requestedVersion=0 means "latest supported".
+     * v2 is the first function-table ABI; requesting unsupported versions
+     * returns nullptr rather than returning a partially compatible table.
+     */
+    extern "C" BZRO_API const OpenShimApiV2* __cdecl OpenShimGetApi(uint32_t requestedVersion);
+
+    /**
+     * Convenience exports for tools/companions that only need the read-only
+     * developer snapshot and do not want to retain the v2 table pointer.
+     */
+    extern "C" BZRO_API int32_t __cdecl OpenShimCaptureDeveloperSnapshot(
+        OpenShimDeveloperSnapshot* outSnapshot);
+    extern "C" BZRO_API int32_t __cdecl OpenShimLogDeveloperSnapshot();
 }
