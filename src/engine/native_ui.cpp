@@ -1,9 +1,9 @@
 // OpenShim native Redux UI framework.
 //
-// The public surface is intentionally pointer-free: callers own logical
-// surfaces/widgets by opaque handles while Redux continues to own the actual
-// cUI objects through its screen child tree. Button callbacks are converted to
-// queued SDK events instead of invoking companion/Lua code from cUI dispatch.
+// Callers own logical surfaces/widgets by opaque handles while Redux owns the
+// actual cUI objects through its screen child tree. Native button callbacks are
+// converted to queued SDK events instead of invoking companion/Lua code from
+// cUI dispatch.
 
 #include "native_ui.h"
 
@@ -58,7 +58,7 @@ namespace BZROpenShim
         struct WidgetRecord
         {
             bool allocated = false;
-            bool visible = true;
+            bool requestedVisible = true;
             OpenShimUiHandle handle = OPENSHIM_UI_INVALID_HANDLE;
             OpenShimUiHandle surface = OPENSHIM_UI_INVALID_HANDLE;
             NativeWidgetKind kind = NativeWidgetKind::None;
@@ -81,6 +81,7 @@ namespace BZROpenShim
         OpenShimUiHandle g_NextHandle = 1;
         void* g_CurrentOptionsScreen = nullptr;
         void* g_CurrentOptionsParent = nullptr;
+        ptrdiff_t g_CurrentOptionsBaselineChildCount = -1;
         DWORD g_UiThreadId = 0;
 
         template <size_t N>
@@ -107,8 +108,7 @@ namespace BZROpenShim
             DWORD processId = 0;
             const DWORD threadId = GetWindowThreadProcessId(foreground, &processId);
             return processId == GetCurrentProcessId() &&
-                   threadId != 0 &&
-                   threadId == GetCurrentThreadId();
+                   threadId != 0 && threadId == GetCurrentThreadId();
         }
 
         bool HasRequiredNativeUiBindings()
@@ -124,10 +124,35 @@ namespace BZROpenShim
                    g_BzrFn_SetTooltip;
         }
 
-        bool ResolveOptionsParentHost(void*& outScreen, void*& outParent)
+        ptrdiff_t ReadUiChildCount(void* view)
+        {
+            if (!view)
+                return -1;
+
+            __try
+            {
+                auto* const bytes = reinterpret_cast<uint8_t*>(view);
+                void** const begin =
+                    *reinterpret_cast<void***>(bytes + kUiViewChildBeginOffset);
+                void** const end =
+                    *reinterpret_cast<void***>(bytes + kUiViewChildEndOffset);
+                if (!begin || !end || begin > end || (end - begin) >= 256)
+                    return -1;
+                return end - begin;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return -1;
+            }
+        }
+
+        bool ResolveOptionsParentHost(void*& outScreen,
+                                      void*& outParent,
+                                      ptrdiff_t& outChildCount)
         {
             outScreen = nullptr;
             outParent = nullptr;
+            outChildCount = -1;
             if (!IsCompatibleGameVersion())
                 return false;
 
@@ -156,8 +181,12 @@ namespace BZROpenShim
                         reinterpret_cast<const char*>(childBytes + kUiViewNameOffset);
                     if (std::strncmp(name, "Middle_Overlay", sizeof("Middle_Overlay")) == 0)
                     {
+                        const ptrdiff_t childCount = ReadUiChildCount(child);
+                        if (childCount < 0)
+                            return false;
                         outScreen = screen;
                         outParent = child;
+                        outChildCount = childCount;
                         return true;
                     }
                 }
@@ -167,49 +196,98 @@ namespace BZROpenShim
                 return false;
             }
 
-            // Do not guess another parent. The existing options work proved that
-            // parenting a button to one of the full-bleed frame views can reorder
-            // cUI input dispatch and starve stock controls such as Back.
+            // Never guess another parent. Parenting to a full-bleed frame view
+            // can reorder cUI input dispatch and starve stock controls.
             return false;
         }
 
-        bool ResolveHost(OpenShimUiHost host, void*& outScreen, void*& outParent)
+        bool ResolveHost(OpenShimUiHost host,
+                         void*& outScreen,
+                         void*& outParent,
+                         ptrdiff_t& outChildCount)
         {
             switch (host)
             {
             case OpenShimUiHost::OptionsParent:
-                return ResolveOptionsParentHost(outScreen, outParent);
+                return ResolveOptionsParentHost(outScreen, outParent, outChildCount);
             default:
                 outScreen = nullptr;
                 outParent = nullptr;
+                outChildCount = -1;
                 return false;
             }
         }
 
-        void ResetRecordsForNewHostLocked(void* screen, void* parent)
+        size_t CountAllocatedWidgetsForCurrentHost()
+        {
+            size_t count = 0;
+            for (const WidgetRecord& widget : g_Widgets)
+            {
+                if (widget.allocated)
+                    ++count;
+            }
+            return count;
+        }
+
+        void ResetRecordsForNewHostLocked(void* screen,
+                                          void* parent,
+                                          ptrdiff_t baselineChildCount)
         {
             g_Surfaces = {};
             g_Widgets = {};
             g_ActionSlots = {};
             g_CurrentOptionsScreen = screen;
             g_CurrentOptionsParent = parent;
+            g_CurrentOptionsBaselineChildCount = baselineChildCount;
             g_UiThreadId = GetCurrentThreadId();
         }
 
-        bool PrepareHostLocked(OpenShimUiHost host, void* screen, void* parent)
+        bool CurrentHostFingerprintMatches(ptrdiff_t currentChildCount)
         {
-            if (host != OpenShimUiHost::OptionsParent || !screen || !parent)
+            if (g_CurrentOptionsBaselineChildCount < 0 || currentChildCount < 0)
                 return false;
+            const ptrdiff_t expected =
+                g_CurrentOptionsBaselineChildCount +
+                static_cast<ptrdiff_t>(CountAllocatedWidgetsForCurrentHost());
+            return currentChildCount == expected;
+        }
 
-            if (g_CurrentOptionsScreen != screen || g_CurrentOptionsParent != parent)
+        bool PrepareHostLocked(OpenShimUiHost host,
+                               void* screen,
+                               void* parent,
+                               ptrdiff_t childCount)
+        {
+            if (host != OpenShimUiHost::OptionsParent ||
+                !screen || !parent || childCount < 0)
             {
-                // A fresh Redux screen owns a fresh cUI child tree. Any pointers
-                // from the previous host lifetime died with that old screen and
-                // can now be forgotten without calling their destructors here.
-                ResetRecordsForNewHostLocked(screen, parent);
+                return false;
+            }
+
+            if (g_CurrentOptionsScreen != screen ||
+                g_CurrentOptionsParent != parent ||
+                !CurrentHostFingerprintMatches(childCount))
+            {
+                // Screen addresses are recycled by Redux. Child-count accounting
+                // adds a generation fingerprint: after we inject N widgets, a
+                // destroy/reconstruct at the same addresses returns to the stock
+                // child count and therefore invalidates every stale handle.
+                ResetRecordsForNewHostLocked(screen, parent, childCount);
             }
 
             return g_UiThreadId == GetCurrentThreadId();
+        }
+
+        bool IsSurfaceHostStillLive(const SurfaceRecord& surface)
+        {
+            void* screen = nullptr;
+            void* parent = nullptr;
+            ptrdiff_t childCount = -1;
+            if (!ResolveHost(surface.host, screen, parent, childCount) ||
+                screen != surface.screen || parent != surface.parent)
+            {
+                return false;
+            }
+            return CurrentHostFingerprintMatches(childCount);
         }
 
         OpenShimUiHandle AllocateHandleLocked()
@@ -256,9 +334,8 @@ namespace BZROpenShim
 
         WidgetRecord* FindFreeWidgetLocked()
         {
-            // Widget records deliberately are not reused during one host lifetime.
-            // releaseSurface hides the engine-owned children but leaves their
-            // callback identity retired until Redux destroys the whole screen.
+            // Never recycle a widget record during one host lifetime. Released
+            // engine children remain owned by Redux until that screen dies.
             for (WidgetRecord& widget : g_Widgets)
             {
                 if (!widget.allocated)
@@ -267,34 +344,30 @@ namespace BZROpenShim
             return nullptr;
         }
 
-        int AllocateActionSlotLocked(OpenShimUiHandle widget, uint64_t actionId)
+        int FindFreeActionSlotLocked()
         {
-            // As with widget records, callback slots are not recycled while the
-            // same engine screen lives. A hidden retired button can therefore
-            // never accidentally acquire a later button's action identity.
             for (size_t index = 0; index < g_ActionSlots.size(); ++index)
             {
-                ActionSlot& slot = g_ActionSlots[index];
-                if (!slot.allocated)
-                {
-                    slot.allocated = true;
-                    slot.widget = widget;
-                    slot.actionId = actionId;
+                if (!g_ActionSlots[index].allocated)
                     return static_cast<int>(index);
-                }
             }
             return -1;
         }
 
-        bool IsSurfaceHostStillLive(const SurfaceRecord& surface)
+        void ReleaseReservedWidgetLocked(OpenShimUiHandle handle, int actionSlot)
         {
-            void* screen = nullptr;
-            void* parent = nullptr;
-            return ResolveHost(surface.host, screen, parent) &&
-                   screen == surface.screen && parent == surface.parent;
+            WidgetRecord* const widget = FindWidgetLocked(handle);
+            if (widget && !widget->native)
+                *widget = {};
+            if (actionSlot >= 0 &&
+                static_cast<size_t>(actionSlot) < g_ActionSlots.size() &&
+                g_ActionSlots[actionSlot].widget == handle)
+            {
+                g_ActionSlots[actionSlot] = {};
+            }
         }
 
-        void __cdecl NativeUiHoverNoop()
+        void __cdecl NativeUiHoverNoop(void* /*param*/)
         {
         }
 
@@ -322,13 +395,10 @@ namespace BZROpenShim
             }
             ReleaseSRWLockShared(&g_NativeUiLock);
 
-            if (!action.allocated || !widget.allocated || !surface.live ||
-                widget.kind != NativeWidgetKind::Button || !widget.native)
-            {
-                return;
-            }
-
-            if (surface.ownerThreadId != GetCurrentThreadId() ||
+            if (!action.allocated || !widget.allocated || !widget.native ||
+                widget.kind != NativeWidgetKind::Button ||
+                !surface.live || !surface.visible || !widget.requestedVisible ||
+                surface.ownerThreadId != GetCurrentThreadId() ||
                 !IsSurfaceHostStillLive(surface))
             {
                 return;
@@ -429,8 +499,8 @@ namespace BZROpenShim
         OpenShimUiHandle __cdecl ApiCreateSurface(const OpenShimUiSurfaceDesc* desc)
         {
             if (!desc || desc->structSize < sizeof(OpenShimUiSurfaceDesc) ||
-                desc->apiVersion != NATIVE_UI_API_V1 || !HasRequiredNativeUiBindings() ||
-                !IsOnForegroundGameUiThread())
+                desc->apiVersion != NATIVE_UI_API_V1 ||
+                !HasRequiredNativeUiBindings() || !IsOnForegroundGameUiThread())
             {
                 return OPENSHIM_UI_INVALID_HANDLE;
             }
@@ -438,11 +508,12 @@ namespace BZROpenShim
             const OpenShimUiHost host = static_cast<OpenShimUiHost>(desc->host);
             void* screen = nullptr;
             void* parent = nullptr;
-            if (!ResolveHost(host, screen, parent))
+            ptrdiff_t childCount = -1;
+            if (!ResolveHost(host, screen, parent, childCount))
                 return OPENSHIM_UI_INVALID_HANDLE;
 
             AcquireSRWLockExclusive(&g_NativeUiLock);
-            if (!PrepareHostLocked(host, screen, parent))
+            if (!PrepareHostLocked(host, screen, parent, childCount))
             {
                 ReleaseSRWLockExclusive(&g_NativeUiLock);
                 return OPENSHIM_UI_INVALID_HANDLE;
@@ -489,7 +560,9 @@ namespace BZROpenShim
 
             AcquireSRWLockExclusive(&g_NativeUiLock);
             SurfaceRecord* const surface = FindSurfaceLocked(surfaceHandle);
-            if (!surface || !surface->live || surface->ownerThreadId != GetCurrentThreadId())
+            if (!surface || !surface->live ||
+                surface->ownerThreadId != GetCurrentThreadId() ||
+                !IsSurfaceHostStillLive(*surface))
             {
                 ReleaseSRWLockExclusive(&g_NativeUiLock);
                 return 0;
@@ -497,20 +570,18 @@ namespace BZROpenShim
 
             surface->live = false;
             surface->visible = false;
-            for (WidgetRecord& widget : g_Widgets)
+            for (const WidgetRecord& widget : g_Widgets)
             {
-                if (widget.allocated && widget.surface == surfaceHandle && widget.native)
+                if (widget.allocated && widget.surface == surfaceHandle && widget.native &&
+                    nativeCount < nativeViews.size())
                 {
-                    widget.visible = false;
-                    if (nativeCount < nativeViews.size())
-                        nativeViews[nativeCount++] = widget.native;
+                    nativeViews[nativeCount++] = widget.native;
                 }
             }
             ReleaseSRWLockExclusive(&g_NativeUiLock);
 
             for (size_t i = 0; i < nativeCount; ++i)
                 g_BzrFn_UiSetActive(nativeViews[i], 0);
-
             return 1;
         }
 
@@ -519,12 +590,18 @@ namespace BZROpenShim
             if (!IsOnForegroundGameUiThread())
                 return 0;
 
-            std::array<void*, kMaxWidgetsPerHostLifetime> nativeViews = {};
-            size_t nativeCount = 0;
+            struct PendingVisibility
+            {
+                void* native = nullptr;
+                uint8_t active = 0;
+            };
+            std::array<PendingVisibility, kMaxWidgetsPerHostLifetime> pending = {};
+            size_t pendingCount = 0;
 
             AcquireSRWLockExclusive(&g_NativeUiLock);
             SurfaceRecord* const surface = FindSurfaceLocked(surfaceHandle);
-            if (!surface || !surface->live || surface->ownerThreadId != GetCurrentThreadId() ||
+            if (!surface || !surface->live ||
+                surface->ownerThreadId != GetCurrentThreadId() ||
                 !IsSurfaceHostStillLive(*surface))
             {
                 ReleaseSRWLockExclusive(&g_NativeUiLock);
@@ -532,20 +609,21 @@ namespace BZROpenShim
             }
 
             surface->visible = visible != 0;
-            for (WidgetRecord& widget : g_Widgets)
+            for (const WidgetRecord& widget : g_Widgets)
             {
-                if (widget.allocated && widget.surface == surfaceHandle && widget.native)
+                if (widget.allocated && widget.surface == surfaceHandle && widget.native &&
+                    pendingCount < pending.size())
                 {
-                    widget.visible = visible != 0;
-                    if (nativeCount < nativeViews.size())
-                        nativeViews[nativeCount++] = widget.native;
+                    pending[pendingCount].native = widget.native;
+                    pending[pendingCount].active =
+                        (surface->visible && widget.requestedVisible) ? 1u : 0u;
+                    ++pendingCount;
                 }
             }
             ReleaseSRWLockExclusive(&g_NativeUiLock);
 
-            for (size_t i = 0; i < nativeCount; ++i)
-                g_BzrFn_UiSetActive(nativeViews[i], visible ? 1u : 0u);
-
+            for (size_t i = 0; i < pendingCount; ++i)
+                g_BzrFn_UiSetActive(pending[i].native, pending[i].active);
             return 1;
         }
 
@@ -560,30 +638,36 @@ namespace BZROpenShim
 
             SurfaceRecord surfaceCopy = {};
             OpenShimUiHandle handle = OPENSHIM_UI_INVALID_HANDLE;
-            WidgetRecord* widgetSlot = nullptr;
 
             AcquireSRWLockExclusive(&g_NativeUiLock);
             SurfaceRecord* const surface = FindSurfaceLocked(desc->surface);
-            if (!surface || !surface->live || surface->ownerThreadId != GetCurrentThreadId() ||
+            WidgetRecord* const widgetSlot = FindFreeWidgetLocked();
+            if (!surface || !surface->live || !widgetSlot ||
+                surface->ownerThreadId != GetCurrentThreadId() ||
                 !IsSurfaceHostStillLive(*surface))
             {
                 ReleaseSRWLockExclusive(&g_NativeUiLock);
                 return OPENSHIM_UI_INVALID_HANDLE;
             }
 
-            widgetSlot = FindFreeWidgetLocked();
-            if (!widgetSlot)
-            {
-                ReleaseSRWLockExclusive(&g_NativeUiLock);
-                return OPENSHIM_UI_INVALID_HANDLE;
-            }
             surfaceCopy = *surface;
             handle = AllocateHandleLocked();
+            *widgetSlot = {};
+            widgetSlot->allocated = true;
+            widgetSlot->requestedVisible = true;
+            widgetSlot->handle = handle;
+            widgetSlot->surface = desc->surface;
+            widgetSlot->kind = NativeWidgetKind::Label;
             ReleaseSRWLockExclusive(&g_NativeUiLock);
 
             void* labelMem = ::operator new(kUiTextSize, std::nothrow);
             if (!labelMem)
+            {
+                AcquireSRWLockExclusive(&g_NativeUiLock);
+                ReleaseReservedWidgetLocked(handle, -1);
+                ReleaseSRWLockExclusive(&g_NativeUiLock);
                 return OPENSHIM_UI_INVALID_HANDLE;
+            }
             std::memset(labelMem, 0, kUiTextSize);
 
             char generatedName[64] = {};
@@ -606,7 +690,12 @@ namespace BZROpenShim
                                                   surfaceCopy.parent,
                                                   0);
             if (!label)
+            {
+                AcquireSRWLockExclusive(&g_NativeUiLock);
+                ReleaseReservedWidgetLocked(handle, -1);
+                ReleaseSRWLockExclusive(&g_NativeUiLock);
                 return OPENSHIM_UI_INVALID_HANDLE;
+            }
 
             if (g_BzrFn_LabelState)
                 g_BzrFn_LabelState(label, reinterpret_cast<void*>(1));
@@ -615,35 +704,16 @@ namespace BZROpenShim
             g_BzrFn_UiSetActive(label, surfaceCopy.visible ? 1u : 0u);
 
             AcquireSRWLockExclusive(&g_NativeUiLock);
-            // The host cannot be destroyed/replaced without leaving this UI
-            // thread, but validate identity again before publishing the handle.
-            SurfaceRecord* const currentSurface = FindSurfaceLocked(desc->surface);
-            if (!currentSurface || !currentSurface->live ||
-                currentSurface->screen != surfaceCopy.screen ||
-                currentSurface->parent != surfaceCopy.parent)
+            WidgetRecord* const finalWidget = FindWidgetLocked(handle);
+            if (!finalWidget)
             {
                 ReleaseSRWLockExclusive(&g_NativeUiLock);
                 g_BzrFn_UiSetActive(label, 0);
                 return OPENSHIM_UI_INVALID_HANDLE;
             }
-
-            widgetSlot = FindFreeWidgetLocked();
-            if (!widgetSlot)
-            {
-                ReleaseSRWLockExclusive(&g_NativeUiLock);
-                g_BzrFn_UiSetActive(label, 0);
-                return OPENSHIM_UI_INVALID_HANDLE;
-            }
-            *widgetSlot = {};
-            widgetSlot->allocated = true;
-            widgetSlot->visible = surfaceCopy.visible;
-            widgetSlot->handle = handle;
-            widgetSlot->surface = desc->surface;
-            widgetSlot->kind = NativeWidgetKind::Label;
-            widgetSlot->native = label;
-            CopyText(widgetSlot->name, objectName);
+            finalWidget->native = label;
+            CopyText(finalWidget->name, objectName);
             ReleaseSRWLockExclusive(&g_NativeUiLock);
-
             return handle;
         }
 
@@ -662,8 +732,11 @@ namespace BZROpenShim
 
             AcquireSRWLockExclusive(&g_NativeUiLock);
             SurfaceRecord* const surface = FindSurfaceLocked(desc->surface);
-            if (!surface || !surface->live || surface->ownerThreadId != GetCurrentThreadId() ||
-                !IsSurfaceHostStillLive(*surface) || !FindFreeWidgetLocked())
+            WidgetRecord* const widgetSlot = FindFreeWidgetLocked();
+            actionSlot = FindFreeActionSlotLocked();
+            if (!surface || !surface->live || !widgetSlot || actionSlot < 0 ||
+                surface->ownerThreadId != GetCurrentThreadId() ||
+                !IsSurfaceHostStillLive(*surface))
             {
                 ReleaseSRWLockExclusive(&g_NativeUiLock);
                 return OPENSHIM_UI_INVALID_HANDLE;
@@ -671,14 +744,26 @@ namespace BZROpenShim
 
             surfaceCopy = *surface;
             handle = AllocateHandleLocked();
-            actionSlot = AllocateActionSlotLocked(handle, desc->actionId);
+            *widgetSlot = {};
+            widgetSlot->allocated = true;
+            widgetSlot->requestedVisible = true;
+            widgetSlot->handle = handle;
+            widgetSlot->surface = desc->surface;
+            widgetSlot->kind = NativeWidgetKind::Button;
+            widgetSlot->actionSlot = actionSlot;
+            g_ActionSlots[actionSlot].allocated = true;
+            g_ActionSlots[actionSlot].widget = handle;
+            g_ActionSlots[actionSlot].actionId = desc->actionId;
             ReleaseSRWLockExclusive(&g_NativeUiLock);
-            if (actionSlot < 0)
-                return OPENSHIM_UI_INVALID_HANDLE;
 
             void* buttonMem = ::operator new(kUiButtonSize, std::nothrow);
             if (!buttonMem)
+            {
+                AcquireSRWLockExclusive(&g_NativeUiLock);
+                ReleaseReservedWidgetLocked(handle, actionSlot);
+                ReleaseSRWLockExclusive(&g_NativeUiLock);
                 return OPENSHIM_UI_INVALID_HANDLE;
+            }
             std::memset(buttonMem, 0, kUiButtonSize);
 
             char generatedName[64] = {};
@@ -702,7 +787,12 @@ namespace BZROpenShim
                                                     0,
                                                     0);
             if (!button)
+            {
+                AcquireSRWLockExclusive(&g_NativeUiLock);
+                ReleaseReservedWidgetLocked(handle, actionSlot);
+                ReleaseSRWLockExclusive(&g_NativeUiLock);
                 return OPENSHIM_UI_INVALID_HANDLE;
+            }
 
             if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(button, "mpcron.png");
             if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(button, "mpcrclk.png");
@@ -715,28 +805,16 @@ namespace BZROpenShim
             g_BzrFn_UiSetActive(button, surfaceCopy.visible ? 1u : 0u);
 
             AcquireSRWLockExclusive(&g_NativeUiLock);
-            SurfaceRecord* const currentSurface = FindSurfaceLocked(desc->surface);
-            WidgetRecord* const widgetSlot = FindFreeWidgetLocked();
-            if (!currentSurface || !currentSurface->live || !widgetSlot ||
-                currentSurface->screen != surfaceCopy.screen ||
-                currentSurface->parent != surfaceCopy.parent)
+            WidgetRecord* const finalWidget = FindWidgetLocked(handle);
+            if (!finalWidget)
             {
                 ReleaseSRWLockExclusive(&g_NativeUiLock);
                 g_BzrFn_UiSetActive(button, 0);
                 return OPENSHIM_UI_INVALID_HANDLE;
             }
-
-            *widgetSlot = {};
-            widgetSlot->allocated = true;
-            widgetSlot->visible = surfaceCopy.visible;
-            widgetSlot->handle = handle;
-            widgetSlot->surface = desc->surface;
-            widgetSlot->kind = NativeWidgetKind::Button;
-            widgetSlot->native = button;
-            widgetSlot->actionSlot = actionSlot;
-            CopyText(widgetSlot->name, objectName);
+            finalWidget->native = button;
+            CopyText(finalWidget->name, objectName);
             ReleaseSRWLockExclusive(&g_NativeUiLock);
-
             return handle;
         }
 
@@ -786,7 +864,9 @@ namespace BZROpenShim
                 return 0;
 
             void* native = nullptr;
+            uint8_t effective = 0;
             SurfaceRecord surface = {};
+
             AcquireSRWLockExclusive(&g_NativeUiLock);
             WidgetRecord* const widget = FindWidgetLocked(widgetHandle);
             if (widget)
@@ -794,18 +874,20 @@ namespace BZROpenShim
                 SurfaceRecord* const foundSurface = FindSurfaceLocked(widget->surface);
                 if (foundSurface)
                     surface = *foundSurface;
-                widget->visible = visible != 0;
+                widget->requestedVisible = visible != 0;
                 native = widget->native;
+                effective = (surface.live && surface.visible && widget->requestedVisible) ? 1u : 0u;
             }
             ReleaseSRWLockExclusive(&g_NativeUiLock);
 
-            if (!native || !surface.live || surface.ownerThreadId != GetCurrentThreadId() ||
+            if (!native || !surface.live ||
+                surface.ownerThreadId != GetCurrentThreadId() ||
                 !IsSurfaceHostStillLive(surface))
             {
                 return 0;
             }
 
-            g_BzrFn_UiSetActive(native, visible ? 1u : 0u);
+            g_BzrFn_UiSetActive(native, effective);
             return 1;
         }
 
@@ -845,6 +927,7 @@ namespace BZROpenShim
         g_ActionSlots = {};
         g_CurrentOptionsScreen = nullptr;
         g_CurrentOptionsParent = nullptr;
+        g_CurrentOptionsBaselineChildCount = -1;
         g_UiThreadId = 0;
         ReleaseSRWLockExclusive(&g_NativeUiLock);
     }
