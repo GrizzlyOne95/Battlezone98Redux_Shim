@@ -6,6 +6,9 @@
 LIBRARY winmm
 
 EXPORTS
+    OpenShimGetApi
+    OpenShimCaptureDeveloperSnapshot
+    OpenShimLogDeveloperSnapshot
     OpenShimSetUnderAttackAlertMode
     OpenShimSetBZRNetNickname
     OpenShimSetTargetReticlePopupMode
