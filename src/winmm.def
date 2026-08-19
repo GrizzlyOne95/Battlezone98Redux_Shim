@@ -6,6 +6,9 @@
 LIBRARY winmm
 
 EXPORTS
+    OpenShimGetApi
+    OpenShimCaptureDeveloperSnapshot
+    OpenShimLogDeveloperSnapshot
     OpenShimSetUnderAttackAlertMode
     OpenShimSetBZRNetNickname
     OpenShimSetTargetReticlePopupMode
@@ -258,4 +261,3 @@ EXPORTS
     mxd32Message
     tid32Message
     wid32Message
-    wod32Message
