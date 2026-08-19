@@ -3,16 +3,19 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#ifdef _WIN32
 #include <Windows.h>
+#include <share.h>
+#endif
 
+#include <cctype>
 #include <cstdio>
 #include <cstring>
-#include <share.h>
 #include <string>
 
 namespace BZROpenShim
 {
-    std::string GetGameLogPath(const char* fileName)
+    std::string SanitizeLogFilename(const char* fileName)
     {
         const char* safeName = (fileName && fileName[0]) ? fileName : "openshim.log";
         if (const char* slash = std::strrchr(safeName, '\\'))
@@ -20,6 +23,63 @@ namespace BZROpenShim
         if (const char* slash = std::strrchr(safeName, '/'))
             safeName = slash + 1;
 
+        if (!safeName[0] ||
+            std::strcmp(safeName, ".") == 0 ||
+            std::strcmp(safeName, "..") == 0 ||
+            std::strpbrk(safeName, "\\/:*?\"<>|") != nullptr)
+        {
+            return "openshim.log";
+        }
+
+        const size_t len = std::strlen(safeName);
+        for (size_t i = 0; i < len; ++i)
+        {
+            if (static_cast<unsigned char>(safeName[i]) < 32)
+                return "openshim.log";
+        }
+
+        if (safeName[len - 1] == '.' || safeName[len - 1] == ' ')
+            return "openshim.log";
+
+        // Check for Windows reserved device names in the filename stem.
+        size_t stemLen = 0;
+        while (safeName[stemLen] && safeName[stemLen] != '.')
+            ++stemLen;
+
+        if (stemLen == 3 || stemLen == 4)
+        {
+            char stemUpper[5] = {};
+            for (size_t i = 0; i < stemLen; ++i)
+                stemUpper[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(safeName[i])));
+
+            if (stemLen == 3)
+            {
+                if (std::strcmp(stemUpper, "CON") == 0 ||
+                    std::strcmp(stemUpper, "PRN") == 0 ||
+                    std::strcmp(stemUpper, "AUX") == 0 ||
+                    std::strcmp(stemUpper, "NUL") == 0)
+                {
+                    return "openshim.log";
+                }
+            }
+            else if (stemLen == 4)
+            {
+                if ((std::strncmp(stemUpper, "COM", 3) == 0 || std::strncmp(stemUpper, "LPT", 3) == 0) &&
+                    stemUpper[3] >= '1' && stemUpper[3] <= '9')
+                {
+                    return "openshim.log";
+                }
+            }
+        }
+
+        return safeName;
+    }
+
+    std::string GetGameLogPath(const char* fileName)
+    {
+        const std::string safeName = SanitizeLogFilename(fileName);
+
+#ifdef _WIN32
         char modulePath[MAX_PATH] = {};
         if (GetModuleFileNameA(nullptr, modulePath, MAX_PATH) == 0)
             return safeName;
@@ -38,8 +98,12 @@ namespace BZROpenShim
         }
 
         return gameRoot + safeName;
+#else
+        return safeName;
+#endif
     }
 
+#ifdef _WIN32
 namespace
 {
     INIT_ONCE g_LogInitOnce = INIT_ONCE_STATIC_INIT;
@@ -172,7 +236,7 @@ namespace
     BOOL CALLBACK InitLoggerOnce(PINIT_ONCE, PVOID, PVOID*)
     {
         const std::string logPath = BuildLogPath();
-        std::strncpy(g_LogPath, logPath.c_str(), MAX_PATH - 1);
+        strncpy_s(g_LogPath, logPath.c_str(), _TRUNCATE);
 
         // _SH_DENYWR instead of fopen_s's deny-all sharing so the log can be
         // tailed by external tools while the game is running.
@@ -304,4 +368,12 @@ namespace
         LogShimVW(level, component, fmt, args);
         va_end(args);
     }
+#else
+    void InitializeShimLogger() {}
+    void ShutdownShimLogger() {}
+    void LogShimVA(LogLevel, const char*, const char*, va_list) {}
+    void LogShimVW(LogLevel, const char*, const wchar_t*, va_list) {}
+    void LogShimA(LogLevel, const char*, const char*, ...) {}
+    void LogShimW(LogLevel, const char*, const wchar_t*, ...) {}
+#endif
 }

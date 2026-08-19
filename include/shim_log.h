@@ -17,6 +17,10 @@ namespace BZROpenShim
     void InitializeShimLogger();
     void ShutdownShimLogger();
 
+    // Sanitizes log filenames against relative path traversal, invalid characters,
+    // control characters, Windows reserved device names, and trailing dots/spaces.
+    std::string SanitizeLogFilename(const char* fileName);
+
     // Returns <game executable directory>\logs\<fileName>, creating the
     // directory when possible and falling back to the game root on failure.
     std::string GetGameLogPath(const char* fileName);
