@@ -18875,9 +18875,13 @@ namespace BZROpenShim
             if (candidate.empty())
                 return;
 
+            // Candidate strings are pre-normalized to lowercase by callers via
+            // NormalizeChunkMeshBaseName / NormalizeChunkPayloadComponentName.
+            // Using operator== provides O(1) string length short-circuiting
+            // and fast byte comparison without CRT locale overhead (_stricmp).
             for (const std::string& existing : candidates)
             {
-                if (_stricmp(existing.c_str(), candidate.c_str()) == 0)
+                if (existing == candidate)
                     return;
             }
 
