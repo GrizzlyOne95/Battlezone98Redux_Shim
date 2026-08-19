@@ -1,13 +1,88 @@
 #include "shim_log.h"
 
+#ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
+#else
+#include <cstdarg>
+#include <cstdint>
+#include <cwchar>
+#define MAX_PATH 260
+#define ERROR_ALREADY_EXISTS 183L
+#define CALLBACK
+#define _countof(a) (sizeof(a)/sizeof(*(a)))
+typedef void* HANDLE;
+typedef void* PVOID;
+typedef void* PINIT_ONCE;
+typedef void* INIT_ONCE;
+typedef void* SRWLOCK;
+typedef uint32_t DWORD;
+typedef int32_t LONG;
+typedef int BOOL;
+typedef const char* LPCSTR;
+typedef char* LPSTR;
+#define FALSE 0
+#define TRUE 1
+#define SRWLOCK_INIT nullptr
+#define INIT_ONCE_STATIC_INIT nullptr
+inline DWORD GetModuleFileNameA(HANDLE, char* buffer, DWORD size) {
+    if (size > 0) buffer[0] = '\0';
+    return 0;
+}
+inline BOOL CreateDirectoryA(const char*, void*) { return FALSE; }
+inline DWORD GetLastError() { return 0; }
+inline DWORD GetCurrentProcessId() { return 1000; }
+inline DWORD GetCurrentThreadId() { return 2000; }
+inline void OutputDebugStringA(const char*) {}
+struct SYSTEMTIME {
+    uint16_t wYear, wMonth, wDayOfWeek, wDay, wHour, wMinute, wSecond, wMilliseconds;
+};
+inline void GetSystemTime(SYSTEMTIME* st) { if (st) *st = {2026, 1, 1, 1, 0, 0, 0, 0}; }
+inline void GetLocalTime(SYSTEMTIME* st) { if (st) *st = {2026, 1, 1, 1, 0, 0, 0, 0}; }
+struct DYNAMIC_TIME_ZONE_INFORMATION { LONG Bias; LONG StandardBias; LONG DaylightBias; };
+#define TIME_ZONE_ID_STANDARD 1
+#define TIME_ZONE_ID_DAYLIGHT 2
+inline DWORD GetDynamicTimeZoneInformation(DYNAMIC_TIME_ZONE_INFORMATION* tz) { if (tz) *tz = {0, 0, 0}; return TIME_ZONE_ID_STANDARD; }
+typedef BOOL (*PINIT_ONCE_FN)(PINIT_ONCE, PVOID, PVOID*);
+inline BOOL InitOnceExecuteOnce(PINIT_ONCE*, PINIT_ONCE_FN fn, void* param, void** context) { return fn(nullptr, param, context); }
+inline void AcquireSRWLockExclusive(SRWLOCK*) {}
+inline void ReleaseSRWLockExclusive(SRWLOCK*) {}
+inline FILE* _fsopen(const char* filename, const char* mode, int) { return std::fopen(filename, mode); }
+#define _SH_DENYWR 0
+#define _TRUNCATE ((size_t)-1)
+template <size_t N>
+inline int _snprintf_s(char (&buffer)[N], size_t, const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    int rc = vsnprintf(buffer, N, format, args);
+    va_end(args);
+    return rc;
+}
+inline int _snprintf_s(char* buffer, size_t size, size_t, const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    int rc = vsnprintf(buffer, size, format, args);
+    va_end(args);
+    return rc;
+}
+inline int _vsnprintf_s(char* buffer, size_t size, size_t, const char* format, va_list args) {
+    return vsnprintf(buffer, size, format, args);
+}
+inline int _vsnwprintf_s(wchar_t* buffer, size_t size, size_t, const wchar_t* format, va_list args) {
+    return vswprintf(buffer, size, format, args);
+}
+#define CP_UTF8 65001
+inline int WideCharToMultiByte(uint32_t, uint32_t, const wchar_t*, int, char*, int, const char*, void*) { return 0; }
+inline int MultiByteToWideChar(uint32_t, uint32_t, const char*, int, wchar_t*, int) { return 0; }
+#endif
 
 #include <cstdio>
 #include <cstring>
+#ifdef _WIN32
 #include <share.h>
+#endif
 #include <string>
 
 namespace BZROpenShim
@@ -19,6 +94,15 @@ namespace BZROpenShim
             safeName = slash + 1;
         if (const char* slash = std::strrchr(safeName, '/'))
             safeName = slash + 1;
+
+        // Sanitize log filename against path traversal and invalid characters.
+        if (!safeName[0] ||
+            std::strcmp(safeName, ".") == 0 ||
+            std::strcmp(safeName, "..") == 0 ||
+            std::strpbrk(safeName, "\\/:*?\"<>|") != nullptr)
+        {
+            safeName = "openshim.log";
+        }
 
         char modulePath[MAX_PATH] = {};
         if (GetModuleFileNameA(nullptr, modulePath, MAX_PATH) == 0)
