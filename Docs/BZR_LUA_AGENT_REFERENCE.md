@@ -4,20 +4,23 @@ This is the agent-oriented reference for the **stock Battlezone 98 Redux LuaMiss
 
 Its purpose is not to reproduce the HTML site page-for-page. It is to give coding and review agents the information they actually need to produce correct BZR Lua: signatures, overloads, lifecycle rules, multiplayer locality, stock engine bugs, version differences, and project-validated quirks.
 
-The original HTML reference remains valuable and should be consulted for examples and individual function pages. This file is the compact operational reference.
+The original HTML reference remains valuable and should be consulted for examples and individual function pages. It was assembled primarily from current Battlezone 1.5 knowledge, so **current Redux runtime notes and reproducible Redux tests take precedence whenever Redux behavior conflicts with the HTML text**.
 
 ---
 
 # Evidence hierarchy
 
-When sources disagree, use this order:
+When sources disagree, use this order for **Redux-targeted work**:
 
 1. **Current BZR runtime-validated project findings** in `Text/ScriptingGuide.txt`, dedicated tests, or reproducible mission behavior.
-2. **`References/StockLuaAPI-Functions/` and `References/StockLuaAPI-Expressions/`** for definitions, intended behavior, version tags, examples, and known issues.
+2. **`References/StockLuaAPI-Functions/` and `References/StockLuaAPI-Expressions/`** for definitions, intended behavior, examples, and 1.5-derived quirks that have not been contradicted by Redux testing.
 3. **`Scripts/scriptutils.lua`** for canonical searchable signatures, overloads, LuaLS types, enums, and availability markers.
 4. Historical Battlezone 1.5 notes only when the target behavior has not been validated in Redux.
 
-This order is deliberate. The HTML corpus is extremely useful, but it contains at least one incorrect Redux claim: its `ObjectiveObjects()` page says the 1.5 iterator bug was solved in Redux, while current Redux project testing confirms that the stock iterator is **still broken**.
+This order is deliberate. The HTML corpus is the most comprehensive stock API reference, but it was assembled mainly from current Battlezone 1.5 knowledge and therefore contains some statements that do not match Redux. Two known examples are:
+
+- its `ObjectiveObjects()` page says the iterator issue was solved in Redux, while current Redux project testing confirms the stock iterator is still broken;
+- its objective-message `Known Issues` text says `duration` is ignored, while Redux behavior uses the supplied duration and defaults to 8 seconds only when duration is omitted.
 
 When a runtime finding contradicts the HTML reference, document both rather than silently erasing the discrepancy.
 
@@ -43,11 +46,11 @@ When a runtime finding contradicts the HTML reference, document both rather than
 5. **Treat network ownership as part of the design.** A local mutation is not proof that the same state exists on peers.
 6. **`SetAIControl` is startup configuration.** Calling it after strategic-AI initialization can crash the game.
 7. **Never exceed ten simultaneous objective messages.** The stock objective panel uses a fixed buffer and can overflow.
-8. **Do not rely on the `duration` argument of `AddObjective` or `UpdateObjective`.** It is ignored; the effective duration is fixed to eight seconds.
+8. **Redux objective-message duration is configurable.** `AddObjective` / `UpdateObjective` use the supplied duration; omitting it defaults to 8 seconds.
 9. **Differentiate `BuildObject` from `Build`/`BuildAt`.** `BuildObject` creates immediately; `Build` and `BuildAt` command producers.
 10. **Use `TeamSlot`, `AiCommand`, `PathType`, and `ClassId` instead of magic numeric constants.**
 11. **Exact capitalization is part of the API.** Do not “correct” names such as `UpdateEarthQuake` or `isPortalActive`.
-12. **Project/runtime findings outrank an HTML statement when the conflict is explicit and reproducible.**
+12. **Project/runtime findings outrank an HTML statement when the conflict is explicit and reproducible in Redux.**
 
 ---
 
@@ -99,20 +102,23 @@ The HTML reference documents that in Redux, calling `LockAllies(...)` from `Star
 
 If the mission requires locked alliances, issue the one-shot lock after startup has advanced sufficiently and validate the result in-game.
 
-## Objective panel: fixed duration and fixed capacity
+## Objective panel: configurable duration, fixed capacity
 
 ```text
 AddObjective(name, color?, duration?, text?)
 UpdateObjective(name, color?, duration?, text?)
 ```
 
-Documented hazards:
+Redux behavior:
 
-- `duration` is ignored; effective duration is fixed to **8 seconds**.
+- the supplied `duration` is honored;
+- if `duration` is omitted, the message defaults to **8 seconds**;
 - only **10 simultaneous objectives** are safe;
 - adding more can overflow the stock buffer and eventually crash the game.
 
 Prefer named reusable slots and `UpdateObjective` instead of endlessly appending entries.
+
+The HTML `Known Issues` text claiming duration is always fixed to eight seconds is treated as a 1.5-derived/stale statement for Redux.
 
 ## Multiplayer cockpit timer override
 
@@ -214,6 +220,7 @@ These are historical compatibility issues. Do not automatically apply them to Re
 | `GetAIControl` | missing/broken on some 1.5 builds and implemented through a Lua workaround |
 | string-returning getters | 1.5 documentation reports unexpected null characters |
 | `ObjectiveObjects` | old docs describe a 1.5 loop-counter bug; stock Redux is also broken, but current Redux behavior is documented separately above |
+| objective-message `duration` | HTML `Known Issues` says it is ignored/fixed to 8 seconds; Redux uses the supplied duration |
 
 Cross-version compatibility code may use:
 
@@ -746,9 +753,10 @@ RemoveObjective(string name)
 
 Supported colors include white/black/grey/blue/green/yellow/red plus dark variants.
 
-Remember:
+Redux behavior:
 
-- duration is effectively fixed to eight seconds;
+- a supplied `duration` controls how long the message lasts;
+- omitting `duration` defaults to 8 seconds;
 - keep simultaneous entries <= 10.
 
 ## Cockpit timer
@@ -1096,9 +1104,11 @@ end
 ```lua
 local objectives = {}
 
-local function SetObjectiveSlot(key, text, color)
+local function SetObjectiveSlot(key, text, color, duration)
+    duration = duration or 8
+
     if objectives[key] then
-        UpdateObjective(key, color or "white", 8, text)
+        UpdateObjective(key, color or "white", duration, text)
         return
     end
 
@@ -1111,12 +1121,12 @@ local function SetObjectiveSlot(key, text, color)
         error("stock objective-message limit reached")
     end
 
-    AddObjective(key, color or "white", 8, text)
+    AddObjective(key, color or "white", duration, text)
     objectives[key] = true
 end
 ```
 
-The `8` does not actually configure duration; it documents the stock effective duration.
+Redux honors the supplied duration; `8` here simply matches the stock default when the caller does not provide one.
 
 ## Objective-object enumeration without stock `ObjectiveObjects()`
 
@@ -1160,6 +1170,14 @@ This is a content/integration constraint rather than a Lua language rule, but ag
 
 **Decision:** treat it as broken in stock Redux. A shim/EXU patch may make it usable, but that is an optional runtime capability and must be verified separately.
 
+## Objective-message `duration`
+
+**HTML `Known Issues` claim:** `duration` is ignored and fixed to 8 seconds.
+
+**Redux finding:** the supplied duration works; 8 seconds is the default only when duration is omitted.
+
+**Decision:** for Redux-targeted code, treat `duration` as supported.
+
 ## Null-padded string getters
 
 **HTML claim:** the null-character defect is a 1.5.2.x issue.
@@ -1175,15 +1193,16 @@ This is a content/integration constraint rather than a Lua language rule, but ag
 When updating this reference:
 
 1. Check the relevant HTML leaf page, including `Known Issues`.
-2. Check `Scripts/scriptutils.lua` for the canonical signature/availability marker.
-3. Check current BZR runtime notes/tests before declaring a historical bug fixed.
-4. Runtime-validated Redux behavior overrides an inaccurate historical/reference statement, but preserve the disagreement in `Known source conflicts`.
-5. Separate **stock BZR**, **Battlezone 1.5 compatibility**, **Campaign Reimagined helpers**, and **OpenShim/EXU-patched behavior**.
-6. Never describe a shim/EXU fix as stock behavior.
-7. For multiplayer findings, identify whether behavior is local-only, host-sensitive, ownership-sensitive, replicated, or explicitly synchronized.
-8. Preserve odd stock capitalization exactly.
-9. Keep project-only functions out of the stock function index.
-10. If a stock bug is fixed by OpenShim or EXU, document the required component/version/feature gate once confirmed.
+2. Remember that the HTML was assembled primarily from current Battlezone 1.5 knowledge; do not automatically promote every 1.5 quirk to Redux.
+3. Check `Scripts/scriptutils.lua` for the canonical signature/availability marker.
+4. Check current BZR runtime notes/tests before declaring a behavior broken or fixed in Redux.
+5. Runtime-validated Redux behavior overrides an inaccurate or 1.5-derived reference statement, but preserve the disagreement in `Known source conflicts`.
+6. Separate **stock BZR**, **Battlezone 1.5 compatibility**, **Campaign Reimagined helpers**, and **OpenShim/EXU-patched behavior**.
+7. Never describe a shim/EXU fix as stock behavior.
+8. For multiplayer findings, identify whether behavior is local-only, host-sensitive, ownership-sensitive, replicated, or explicitly synchronized.
+9. Preserve odd stock capitalization exactly.
+10. Keep project-only functions out of the stock function index.
+11. If a stock bug is fixed by OpenShim or EXU, document the required component/version/feature gate once confirmed.
 
 ## Primary repository sources
 
@@ -1192,4 +1211,4 @@ When updating this reference:
 - `References/StockLuaAPI-Expressions/`
 - `Scripts/scriptutils.lua`
 
-For runtime conflicts, current validated BZR findings take precedence over the static HTML statement.
+For Redux conflicts, current validated BZR findings take precedence over the static HTML statement.
