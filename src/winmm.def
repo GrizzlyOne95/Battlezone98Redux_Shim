@@ -261,3 +261,4 @@ EXPORTS
     mxd32Message
     tid32Message
     wid32Message
+    wod32Message
