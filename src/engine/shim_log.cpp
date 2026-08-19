@@ -236,7 +236,7 @@ namespace
     BOOL CALLBACK InitLoggerOnce(PINIT_ONCE, PVOID, PVOID*)
     {
         const std::string logPath = BuildLogPath();
-        std::strncpy(g_LogPath, logPath.c_str(), MAX_PATH - 1);
+        strncpy_s(g_LogPath, logPath.c_str(), _TRUNCATE);
 
         // _SH_DENYWR instead of fopen_s's deny-all sharing so the log can be
         // tailed by external tools while the game is running.
