@@ -11,12 +11,6 @@ namespace BZROpenShim
     // already-resolved cUI constructor/mutation bindings.
     const OpenShimNativeUiApiV1* GetOpenShimNativeUiApi(uint32_t requestedVersion);
 
-    // Optional in-game acceptance surface. Called from the validated Options
-    // constructor hook and remains dormant unless OPENSHIM_NATIVE_UI_PROOF=1.
-    // It intentionally uses the same public v1 functions a future consumer
-    // would use rather than directly constructing cUI objects here.
-    void MaybeCreateNativeUiProofSurface();
-
     // Process-shutdown bookkeeping only. Engine-owned cUI children are not
     // destructed here; their owning Redux screen tears them down normally.
     void ShutdownNativeUi();
