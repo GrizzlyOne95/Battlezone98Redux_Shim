@@ -2,8 +2,7 @@
 
 Native `winmm.dll` shim for Battlezone 98 Redux. This repo owns low-level engine hooks/patches, SDK/native integration, patch trampolines, and reverse-engineering work.
 
-## Workspace
-- Primary workspace: `%USERPROFILE%\Documents\GIT\BZR-Workspace\Battlezone98.code-workspace`.
+## Local Environment
 - Sibling Battlezone repos normally live under `%USERPROFILE%\Documents\GIT`. Prefer a local sibling checkout for reference when present; verify its `origin` before editing because historical folder names may differ from GitHub names.
 - Working game/test copy is the GOG install at `C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux`.
 - Campaign content/deployment rules belong to Campaign Reimagined's `AGENTS.md`. Never use Steam's Workshop download cache as a development deploy target.
