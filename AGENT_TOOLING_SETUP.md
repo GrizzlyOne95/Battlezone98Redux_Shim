@@ -1,91 +1,22 @@
-# Agent Tooling Setup
+# OpenShim Agent RE Tooling Setup
 
-This file is the portable setup guide for the Battlezone reverse-engineering
-toolchain on a different Windows PC.
-
-Use this when you want the same agent-capable tooling stack on another machine
-without copying machine-specific absolute paths from the current workstation.
-
-## What This Sets Up
-
-- Ghidra MCP wrapper for Battlezone binaries
-- Debugger bridge wrapper and MCP server
-- WinDbg `cdb` 32-bit CLI
-- x32dbg wrapper
-- Frida CLI wrappers
-- angr CLI wrapper
-- ghidriff CLI wrapper
-- Qiling wrapper
-- Rizin CLI wrappers
-- Cutter GUI wrapper
-- Detect It Easy CLI and GUI wrappers
-- Process Monitor wrapper
-- Process Explorer wrapper
-- CMake / Ninja / 7-Zip wrappers
-- Visual Studio compiler, linker, dumpbin, and IDE wrappers
-- Unreal Engine editor/build automation wrappers
-- Retoolkit CLI wrappers for capability/string/YARA/packer triage
-- Codex MCP config entries for:
-  - `ghidra`
-  - `redux_debug`
+Use this only to install, repair, or reproduce the Battlezone reverse-engineering toolchain on a Windows PC. For normal RE work after setup, use `AGENT_TOOLING.md`.
 
 ## Requirements
+- Windows with `python` and `winget` on `PATH`.
+- A clone of OpenShim.
+- Ghidra is strongly recommended but may require separate/manual installation.
 
-- Windows
-- `python` on `PATH`
-- `winget` on `PATH`
-- a clone of this repo
-- optional but strongly recommended: a Ghidra install
-
-## One-Command Install
-
-From a PowerShell prompt in the repo:
+## Install / Refresh
+From the repo root:
 
 ```powershell
 .\scripts\install_agent_re_tooling.ps1
 ```
 
-That script installs the free packages it can acquire automatically:
+The installer is intended to be rerunnable. It installs/refreshes supported packages, writes stable `bzr-*` wrappers into `<USER_HOME>\bin`, updates the marked Battlezone entries in `<USER_HOME>\.codex\config.toml`, and configures the persistent local Ghidra MCP service.
 
-- `Microsoft.WinDbg`
-- `x64dbg.x64dbg`
-- `Rizin.Rizin`
-- `Rizin.Cutter`
-- `horsicq.DIE-engine`
-- `Microsoft.Sysinternals.ProcessMonitor`
-- `Microsoft.Sysinternals.ProcessExplorer`
-- `Kitware.CMake`
-- `Ninja-build.Ninja`
-- `7zip.7zip`
-- `mentebinaria.retoolkit`
-- Python packages:
-  - `pyghidra-mcp`
-  - `angr`
-  - `frida`
-  - `frida-tools`
-  - `qiling`
-  - `ghidriff`
-  - `r2pipe`
-  - `construct`
-
-It also writes stable `bzr-*` wrappers into `<USER_HOME>\bin`, adds that
-directory to the user `PATH`, updates `<USER_HOME>\.codex\config.toml`, and
-registers a persistent local Ghidra MCP service in the user startup run key.
-
-## Paths That Commonly Vary By PC
-
-These are intentionally configurable:
-
-- repo clone root
-- game install directory
-- explicit game executable path
-- Ghidra install directory
-- Unreal Engine install directory
-- Retoolkit install directory
-- user bin directory
-- Codex config path
-
-The installer supports parameters:
+Common optional parameters:
 
 ```powershell
 .\scripts\install_agent_re_tooling.ps1 `
@@ -96,186 +27,52 @@ The installer supports parameters:
   -RetoolkitDir "<RETOOLKIT_ROOT>"
 ```
 
-## Environment Variable Overrides
+Supported environment overrides include `BZR_GAME_DIR`, `BZR_GAME_EXE`, `BZR_REDUX_GAME_DIR`, `BZR_REDUX_EXE`, `BZR_GHIDRA_INSTALL_DIR`, `BZR_CDB_PATH`, `BZR_WINDBG_ROOT`, `BZR_X32DBG_PATH`, `UE_ROOT`, and `UE_ENGINE_DIR`.
 
-The repo tooling also honors these user or process environment variables:
+## What It Provides
+The automated stack covers the agent-facing tools needed for most work:
+- Ghidra/pyghidra MCP and persistent local service.
+- Redux debugger bridge plus WinDbg `cdb` and x32dbg wrappers.
+- Frida, angr, ghidriff, Qiling, Rizin/Cutter, Detect It Easy.
+- Process Monitor / Process Explorer.
+- CMake, Ninja, 7-Zip, Visual Studio compiler/linker/dumpbin/IDE wrappers.
+- Retoolkit CLI surfaces such as capa/FLOSS/YARA/packer/PE triage helpers.
+- Unreal editor/build automation wrappers when Unreal is installed.
 
-- `BZR_GAME_DIR`
-- `BZR_GAME_EXE`
-- `BZR_REDUX_GAME_DIR`
-- `BZR_REDUX_EXE`
-- `BZR_GHIDRA_INSTALL_DIR`
-- `BZR_CDB_PATH`
-- `BZR_WINDBG_ROOT`
-- `BZR_X32DBG_PATH`
-- `UE_ROOT`
-- `UE_ENGINE_DIR`
+After setup, prefer the `bzr-*` commands described in `AGENT_TOOLING.md` rather than raw package paths. Do not spend context enumerating every wrapper unless troubleshooting installation.
 
-These are useful when:
+## Ghidra
+If Ghidra is not installed automatically, install it separately and either pass `-GhidraInstallDir` or set `BZR_GHIDRA_INSTALL_DIR` / `GHIDRA_INSTALL_DIR`.
 
-- the game is not in the configured/default GOG working location
-- you want to force a specific executable
-- Ghidra is installed somewhere other than `<GHIDRA_ROOT>`
-- you want to pin the debugger backend to a specific install
-- Unreal is installed somewhere other than the newest `C:\Program Files\Epic Games\UE_*`
+The preferred MCP model is a persistent local service:
+- endpoint: `http://127.0.0.1:8765/mcp`
+- startup wrapper: `bzr-ghidra-mcp-service.cmd`
+- user startup entry: `BzrGhidraMcp`
 
-## Ghidra Note
+This avoids per-session Ghidra startup/handshake cost. Restart an already-running agent session if it still caches an older MCP configuration.
 
-`winget` does not currently expose a good Ghidra package on this machine, so
-the installer does not auto-download Ghidra.
+## Human-Assisted Extras
+These are optional and should not block normal agent work:
+- Ghidrathon — Python inside the Ghidra GUI.
+- ReClass.NET — live class/vtable reconstruction.
+- API Monitor — manual Windows API/COM tracing.
+- x32dbg/Cutter/Process Explorer — useful GUI inspection surfaces, but generally secondary to agent-friendly CLI/MCP tools.
 
-Install Ghidra separately, then either:
-
-- pass `-GhidraInstallDir ...` to the installer, or
-- set `BZR_GHIDRA_INSTALL_DIR`, or
-- set `GHIDRA_INSTALL_DIR`
-
-## What Agents Should Use After Setup
-
-Once installed, agents should prefer these stable wrappers from `<USER_HOME>\bin`:
-
-- `bzr-ghidra-mcp.cmd`
-- `bzr-ghidra-mcp-service.cmd`
-- `bzr-redux-debug.cmd`
-- `bzr-frida.cmd`
-- `bzr-frida-ps.cmd`
-- `bzr-frida-trace.cmd`
-- `bzr-angr.cmd`
-- `bzr-ghidriff.cmd`
-- `bzr-qiling.cmd`
-- `bzr-rizin.cmd`
-- `bzr-rz-bin.cmd`
-- `bzr-rz-asm.cmd`
-- `bzr-cutter.cmd`
-- `bzr-cdb32.cmd`
-- `bzr-x32dbg.cmd`
-- `bzr-die.cmd`
-- `bzr-diec.cmd`
-- `bzr-procmon.cmd`
-- `bzr-procexp.cmd`
-- `bzr-cmake.cmd`
-- `bzr-ninja.cmd`
-- `bzr-7z.cmd`
-- `bzr-vsdevcmd.cmd`
-- `bzr-cl.cmd`
-- `bzr-link.cmd`
-- `bzr-dumpbin.cmd`
-- `bzr-devenv.cmd`
-- `bzr-unreal-editor.cmd`
-- `bzr-unreal-editor-cmd.cmd`
-- `bzr-runuat.cmd`
-- `bzr-ue-build.cmd`
-- `bzr-capa.cmd`
-- `bzr-floss.cmd`
-- `bzr-yara.cmd`
-- `bzr-yarac.cmd`
-- `bzr-upx.cmd`
-- `bzr-pe-sieve.cmd`
-- `bzr-entropy.cmd`
-- `bzr-goresym.cmd`
-- `bzr-redress.cmd`
-
-The detailed local usage guide for agents lives in `AGENT_TOOLING.md` in the
-repo root after setup.
-
-## Ghidra MCP Startup Model
-
-The installer now configures Ghidra MCP as a persistent local HTTP endpoint
-instead of a fresh stdio spawn per Codex session.
-
-- Codex config entry:
-  - `http://127.0.0.1:8765/mcp`
-- Startup wrapper:
-  - `bzr-ghidra-mcp-service.cmd`
-- User startup run-key entry:
-  - `BzrGhidraMcp`
-
-This avoids Codex startup handshakes timing out while Ghidra initializes and
-keeps the Windows project-reopen patch in one repo-owned wrapper.
-
-## Tooling Categories
-
-Use this split when deciding what to automate on another PC.
-
-- Autonomous or mostly autonomous:
-  - `ghidra` MCP
-  - `redux_debug` bridge
-  - Frida CLIs
-  - `angr`
-  - `ghidriff`
-  - `diec`
-  - Rizin CLIs
-  - Qiling wrapper
-  - CMake / Ninja / 7-Zip wrappers
-  - Retoolkit CLI tools
-  - Visual Studio compiler/linker/dumpbin wrappers
-  - Unreal Automation Tool / Unreal build wrappers
-- Partially agent-usable:
-  - `Process Monitor`
-    - usable for scripted capture, backing-file collection, and export flows
-    - still benefits from a human when refining filters interactively
-  - `Process Explorer`
-    - callable, but mainly useful as a human inspection surface
-- Human-driven or manual-install extras:
-  - Unreal Editor GUI
-  - `Ghidrathon`
-    - useful inside Ghidra, but not the first agent interface in this repo
-  - `ReClass.NET`
-    - useful for live class-layout reconstruction, but not unattended
-  - `API Monitor`
-    - strong manual tracing tool, weak autonomous-agent surface
-
-## Manual Extras Not Automated By This Script
-
-These are worth documenting for another PC, but they are not currently installed
-by `install_agent_re_tooling.ps1`.
-
-- `Ghidrathon`
-  - install as a Ghidra extension if you specifically want Python 3 inside the
-    Ghidra GUI
-- `ReClass.NET`
-  - install manually if the task is live class/vtable reconstruction
-- `API Monitor`
-  - install manually if the task is targeted Win32 or COM tracing without
-    writing Frida scripts first
-
-## Re-Running Safely
-
-The installer is intended to be re-runnable.
-
-- already-installed winget packages are skipped
-- Python packages are refreshed idempotently
-- wrapper files are regenerated
-- Codex config entries are replaced inside a marked block
-- the Ghidra MCP startup wrapper and run-key entry are refreshed
-
-## Recommended Validation
-
-After install, open a fresh shell and run:
+## Validation
+After setup, validate only the surfaces relevant to the machine/task. A practical smoke set is:
 
 ```powershell
 bzr-ghidra-mcp.cmd --help
-bzr-ghidra-mcp-service.cmd
 bzr-redux-debug.cmd doctor
 bzr-frida-ps.cmd --help
-bzr-angr.cmd --help
 bzr-ghidriff.cmd --help
 bzr-qiling.cmd version
 bzr-rizin.cmd -v
-bzr-rz-bin.cmd -h
 bzr-cdb32.cmd -version
 bzr-diec.cmd $env:BZR_GAME_EXE
-Get-Command bzr-procmon.cmd
 bzr-cmake.cmd --version
 bzr-ninja.cmd --version
 bzr-cl.cmd /Bv
-bzr-capa.cmd --version
-bzr-floss.cmd --version
-bzr-yara.cmd --version
-Get-Command bzr-runuat.cmd
 ```
 
-If `Ghidra` is installed and `BZR_GAME_EXE` points at a valid executable, the
-MCP service should be reachable at `http://127.0.0.1:8765/mcp` and ready for
-Codex and CLI use immediately. Restart any already-running Codex session if it
-still has the older stdio-based `ghidra` MCP entry cached.
+If Ghidra and a valid Redux executable are configured, confirm the MCP endpoint is reachable and then use `AGENT_TOOLING.md` to choose the smallest tool for each RE question.
