@@ -66,6 +66,8 @@ Allow an explicit `--binary` override; otherwise use the normal BZR executable r
 8. Emit both human-readable output and a machine-readable JSON representation suitable for `scripts/patches.json` review.
 9. Fail closed if decoding fails, address mapping is invalid, the pattern has zero matches, remains ambiguous, or the requested patch span crosses an invalid boundary.
 
+The initial generator should be **advisory**: it proposes a pattern and evidence but does not edit `patches.json` or source automatically. A generated signature becomes patch-ready only after the existing OpenShim byte/build checks and, where relevant, runtime validation confirm the target semantics.
+
 ### Validation mode
 
 `--validate-patches scripts\patches.json` should audit existing pattern-backed entries and report at minimum:
