@@ -323,6 +323,13 @@ EXU can already manipulate a surprising amount of the live environment:
 [*] Visibility
 [/list]
 
+[b]DX11 Enhanced PSSM experiment:[/b] Campaign Reimagined now has an isolated
+BZCC-informed shadow upgrade branch with comparison PCF, overlap-aware cascade
+blending, bounded normal receiver offset, and outer-cascade fade. Static shader,
+math, and DX11 format validation pass; live visual tuning remains pending. The
+baseline renderer and Ogre binaries are unchanged, and stabilization remains a
+separate CPU-camera investigation rather than an assumed shader fix.
+
 Eventually I'd like to wrap this into higher-level environment presets.
 
 For example:
