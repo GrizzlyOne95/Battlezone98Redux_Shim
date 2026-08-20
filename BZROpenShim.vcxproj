@@ -138,10 +138,12 @@
     <ClCompile Include="src\patches\openshim_env_config.cpp" />
     <ClCompile Include="src\patches\bzr_options_ui.cpp" />
     <ClCompile Include="src\patches\ogre_shader_cache.cpp" />
+    <ClCompile Include="src\patches\ogre_enhanced_light_selection.cpp" />
     <ClCompile Include="src\patches\terrain_proxy.cpp" />
     <ClCompile Include="src\patches\terrain_semantic.cpp" />
     <ClCompile Include="src\engine\crash_logger.cpp" />
     <ClCompile Include="src\engine\shim_log.cpp" />
+    <ClCompile Include="src\engine\enhanced_light_selection.cpp" />
     <ClCompile Include="src\engine\winmm_proxy.cpp" />
     <ClCompile Include="src\engine\patcher.cpp" />
     <ClCompile Include="src\engine\hook_engine.cpp" />
@@ -168,6 +170,8 @@
     <ClInclude Include="include\pilot_fp_animation_trace.h" />
     <ClInclude Include="include\file_io_hooks.h" />
     <ClInclude Include="include\ogre_shader_cache.h" />
+    <ClInclude Include="include\ogre_enhanced_light_selection.h" />
+    <ClInclude Include="include\enhanced_light_selection.h" />
     <ClInclude Include="include\terrain_proxy.h" />
     <ClInclude Include="include\terrain_semantic.h" />
     <ClInclude Include="include\ogre_runtime.h" />

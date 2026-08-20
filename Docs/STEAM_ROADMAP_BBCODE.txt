@@ -441,6 +441,7 @@ The original community tracker also contains a number of feature requests that a
 [*] [b]Restore additional legacy TRN lighting parameters[/b] - investigate parameters that no longer influence Redux rendering, including vehicle/car shadow-related settings.
 [*] [b]Multiple terrain atlases / per-tile material selection[/b] - allow terrain tiles to reference different materials/atlases rather than requiring one monolithic CSV/atlas arrangement.
 [*] [b]Ogre headlight controls[/b] - expose brightness, color, range and related headlight properties to EXU/ODF where practical.
+[*] [b]Stable DX11 Enhanced dynamic lights[/b] - source, binary, and unattended runtime evidence confirms Enhanced High already reaches its 24-light shader capacity despite Ogre's eight-light default sentinel. An experimental OpenShim path contribution-ranks each object's candidates with deterministic cutoff retention; static, shader, simulation, and non-interactive runtime tests pass, while live visual/performance acceptance remains before release.
 [*] [b]Improved Ogre lighting / normal-map response[/b] - continue enhanced-lighting work, but keep broad shader/renderer rewrites below correctness and stability work.
 [*] [b]Backport draw_geom or equivalent geometry render effect[/b] - only if it provides capabilities not already covered cleanly by EXU/Ogre entity APIs and the restored destruction-chunk path.
 [/list]
