@@ -4,6 +4,7 @@
 #include "openshim_sdk_v2.h"
 
 #include "bzr_hooks.h"
+#include "native_ui.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -125,6 +126,11 @@ namespace BZROpenShim
             return OpenShimLogDeveloperSnapshot();
         }
 
+        static const OpenShimNativeUiApiV1* __cdecl ApiGetNativeUiApi(uint32_t requestedVersion)
+        {
+            return GetOpenShimNativeUiApi(requestedVersion);
+        }
+
         static const OpenShimApiV2& GetApiV2Table()
         {
             static const OpenShimApiV2 api = []
@@ -145,6 +151,7 @@ namespace BZROpenShim
                 value.clearEventQueue = ApiClearEventQueue;
                 value.captureDeveloperSnapshot = ApiCaptureDeveloperSnapshot;
                 value.logDeveloperSnapshot = ApiLogDeveloperSnapshot;
+                value.getNativeUiApi = ApiGetNativeUiApi;
                 return value;
             }();
             return api;
@@ -175,7 +182,8 @@ namespace BZROpenShim
     {
         return OPENSHIM_CAP_STATUS |
                OPENSHIM_CAP_EVENT_QUEUE |
-               OPENSHIM_CAP_DEVELOPER_INSPECTOR;
+               OPENSHIM_CAP_DEVELOPER_INSPECTOR |
+               OPENSHIM_CAP_NATIVE_UI;
     }
 
     void InitializeOpenShimSdkV2()
@@ -205,6 +213,7 @@ namespace BZROpenShim
                              0,
                              0,
                              "OpenShim shutdown started");
+        ShutdownNativeUi();
         SetBzrDistribution(BzrDistribution::Unknown);
         g_SdkInitialized.store(false);
     }
