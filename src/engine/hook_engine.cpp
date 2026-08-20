@@ -165,7 +165,9 @@ namespace HookEngine
             auto idaPattern = ParseIdaPattern(target.ida_pattern);
             if (idaPattern.empty()) continue;
 
-            bool found = false;
+            size_t matchCount = 0;
+            uint32_t matchedAddress = 0;
+            std::vector<uint8_t> matchedExpected;
             for (const auto& region : regions)
             {
                 std::vector<uint8_t> buf(region.second);
@@ -189,26 +191,43 @@ namespace HookEngine
 
                     if (match)
                     {
-                        uint32_t patchAddr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(region.first + i + target.offset));
-
-                        for (auto& p : patches)
+                        ++matchCount;
+                        if (matchCount == 1)
                         {
-                            if (p.name == target.name)
-                            {
-                                p.address = patchAddr;
-                                p.verified = true;
-                                p.expected_original.clear();
-                                for (size_t j = 0; j < target.expected_size && (i + target.offset + j) < read; ++j)
-                                    p.expected_original.push_back(buf[i + target.offset + j]);
-
-                                found = true;
-                                break;
-                            }
+                            matchedAddress = static_cast<uint32_t>(
+                                reinterpret_cast<uintptr_t>(region.first + i + target.offset));
+                            matchedExpected.clear();
+                            for (size_t j = 0; j < target.expected_size && (i + target.offset + j) < read; ++j)
+                                matchedExpected.push_back(buf[i + target.offset + j]);
                         }
-                        break;
+                        if (!target.require_unique)
+                            break;
                     }
                 }
-                if (found) break;
+                if (matchCount > 0 && !target.require_unique)
+                    break;
+            }
+
+            if (matchCount == 1 || (matchCount > 0 && !target.require_unique))
+            {
+                for (auto& patch : patches)
+                {
+                    if (patch.name != target.name)
+                        continue;
+                    patch.address = matchedAddress;
+                    patch.verified = true;
+                    patch.expected_original = matchedExpected;
+                    break;
+                }
+            }
+            if (target.require_unique)
+            {
+                BZROpenShim::LogShimA(
+                    matchCount == 1 ? BZROpenShim::LogLevel::Info : BZROpenShim::LogLevel::Warn,
+                    "patch-scan",
+                    "[PATCH-SCAN] name=\"%s\" matches=%zu address=0x%08X state=%s",
+                    target.name.c_str(), matchCount, matchedAddress,
+                    matchCount == 1 ? "unique" : "failed-closed");
             }
         }
     }

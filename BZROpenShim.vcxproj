@@ -132,6 +132,9 @@
     <ClCompile Include="src\patches\pilot_fp_animation_trace.cpp" />
     <ClCompile Include="src\patches\editor_view_order.cpp" />
     <ClCompile Include="src\patches\file_io_hooks.cpp" />
+    <ClCompile Include="src\patches\numeric_locale_compat.cpp" />
+    <ClCompile Include="src\patches\redux_compatibility.cpp" />
+    <ClCompile Include="src\patches\trn_codec.cpp" />
     <ClCompile Include="src\patches\game_state.cpp" />
     <ClCompile Include="src\patches\net_optimizer.cpp" />
     <ClCompile Include="src\patches\openshim_ini.cpp" />
@@ -166,6 +169,9 @@
     <ClInclude Include="include\ogre_animation_profiler.h" />
     <ClInclude Include="include\pilot_fp_animation_trace.h" />
     <ClInclude Include="include\file_io_hooks.h" />
+    <ClInclude Include="include\numeric_locale_compat.h" />
+    <ClInclude Include="include\redux_compatibility.h" />
+    <ClInclude Include="include\trn_codec.h" />
     <ClInclude Include="include\ogre_shader_cache.h" />
     <ClInclude Include="include\terrain_proxy.h" />
     <ClInclude Include="include\terrain_semantic.h" />
