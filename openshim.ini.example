@@ -365,6 +365,17 @@ TerrainHdManifest = terrain_hd_tiles.json
 ; Legacy environment override: OPENSHIM_DX11_ENHANCED_FXAA
 FXAA = 1
 
+; Contribution-ranked, deterministic per-object local-light ordering for
+; Campaign Reimagined en-* material schemes. High keeps the shader's existing
+; 24-slot budget; directional lights retain producer order so the PSSM sun is
+; not displaced. Set 0 and restart for the exact stock distance-order A/B path.
+; Default: ON.
+; DX11 and exact supported OgreMain builds only; DX9/Classic are untouched.
+; Environment overrides:
+;   OPENSHIM_ENABLE_ENHANCED_LIGHT_SELECTION_V2
+;   OPENSHIM_DISABLE_ENHANCED_LIGHT_SELECTION_V2
+EnhancedLightSelectionV2 = 1
+
 
 [Display]
 
@@ -464,6 +475,12 @@ RespectExternalAutoSave = 1
 
 
 [Diagnostics]
+
+; Bounded [LIGHTSEL] records for CR Enhanced candidate count, cutoff,
+; replacements, stock/V2 selection differences and the four strongest lights.
+; Accepted: boolean. Default: OFF. Maximum 64 summary records per process.
+; Legacy env alias: OPENSHIM_TRACE_ENHANCED_LIGHT_SELECTION
+EnhancedLightSelectionTrace = 0
 
 ; Log a limited sample of native patch/hook hits.
 ; Accepted: boolean. Default: OFF. Noisy.
