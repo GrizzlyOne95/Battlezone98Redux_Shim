@@ -147,6 +147,7 @@
     <ClCompile Include="src\engine\hook_engine.cpp" />
     <ClCompile Include="src\engine\ogre_runtime.cpp" />
     <ClCompile Include="src\engine\openshim_sdk_v2.cpp" />
+    <ClCompile Include="src\engine\native_ui.cpp" />
     <ClCompile Include="src\patches\trampolines.cpp" />
     <ClCompile Include="src\patches\netcode_hooks.cpp" />
   </ItemGroup>
@@ -179,6 +180,8 @@
     <ClInclude Include="include\hook_engine.h" />
     <ClInclude Include="include\BZROpenShim.h" />
     <ClInclude Include="include\openshim_sdk_v2.h" />
+    <ClInclude Include="include\native_ui.h" />
+    <ClInclude Include="src\engine\native_ui_validation.h" />
     <ClInclude Include="include\trampolines.h" />
     <ClInclude Include="include\scroll_helper.h" />
     <ClInclude Include="include\netcode_hooks.h" />
