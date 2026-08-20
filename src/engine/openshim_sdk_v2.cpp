@@ -30,6 +30,8 @@ namespace BZROpenShim
         uint64_t g_NextEventSequence = 1;
         uint64_t g_DroppedEventCount = 0;
         std::atomic<bool> g_SdkInitialized{ false };
+        std::atomic<uint32_t> g_BzrDistribution{
+            static_cast<uint32_t>(BzrDistribution::Unknown) };
 
         struct EventQueueStats
         {
@@ -156,6 +158,26 @@ namespace BZROpenShim
         }
     }
 
+    BzrDistribution GetBzrDistribution()
+    {
+        const uint32_t raw = g_BzrDistribution.load(std::memory_order_acquire);
+        switch (raw)
+        {
+        case static_cast<uint32_t>(BzrDistribution::GOG):
+            return BzrDistribution::GOG;
+        case static_cast<uint32_t>(BzrDistribution::Steam):
+            return BzrDistribution::Steam;
+        default:
+            return BzrDistribution::Unknown;
+        }
+    }
+
+    void SetBzrDistribution(BzrDistribution distribution)
+    {
+        g_BzrDistribution.store(static_cast<uint32_t>(distribution),
+                                std::memory_order_release);
+    }
+
     uint64_t GetOpenShimCapabilityMask()
     {
         return OPENSHIM_CAP_STATUS |
@@ -170,6 +192,7 @@ namespace BZROpenShim
         if (!g_SdkInitialized.compare_exchange_strong(expected, true))
             return;
 
+        SetBzrDistribution(BzrDistribution::Unknown);
         PublishOpenShimEvent(OpenShimEventType::ShimInitialized,
                              GetShimVersion(),
                              SDK_VERSION,
@@ -191,6 +214,7 @@ namespace BZROpenShim
                              0,
                              "OpenShim shutdown started");
         ShutdownNativeUi();
+        SetBzrDistribution(BzrDistribution::Unknown);
         g_SdkInitialized.store(false);
     }
 
@@ -223,10 +247,6 @@ namespace BZROpenShim
         AcquireSRWLockExclusive(&g_EventQueueLock);
         event.sequence = g_NextEventSequence++;
 
-        // Keep the newest state when a consumer falls behind. The queue is a
-        // diagnostic/notification surface, not authoritative game state; a
-        // dropped counter makes overflow explicit instead of silently growing
-        // memory from arbitrary engine hooks.
         if (g_EventQueueCount == kEventQueueCapacity)
         {
             g_EventQueueHead = (g_EventQueueHead + 1) % kEventQueueCapacity;
@@ -320,6 +340,11 @@ namespace BZROpenShim
         if (requestedVersion != 0 && requestedVersion != SDK_API_V2)
             return nullptr;
         return &GetApiV2Table();
+    }
+
+    extern "C" BZRO_API uint32_t __cdecl OpenShimGetBzrDistribution()
+    {
+        return static_cast<uint32_t>(GetBzrDistribution());
     }
 
     extern "C" BZRO_API int32_t __cdecl OpenShimCaptureDeveloperSnapshot(
