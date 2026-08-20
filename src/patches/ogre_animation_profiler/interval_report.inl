@@ -1,0 +1,263 @@
+        void ReportAndResetInterval(ULONGLONG intervalMs)
+        {
+            const uint64_t animationCalls = g_AnimationCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t animationTicks = g_AnimationTicks.exchange(0, std::memory_order_acq_rel);
+            const uint64_t renderDrivenCalls = g_RenderDrivenAnimationCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t renderDrivenTicks = g_RenderDrivenAnimationTicks.exchange(0, std::memory_order_acq_rel);
+            const uint64_t externalCalls = g_ExternalAnimationCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t externalTicks = g_ExternalAnimationTicks.exchange(0, std::memory_order_acq_rel);
+            const uint64_t animationWithBlend = g_AnimationWithBlendCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t animationWithoutBlend = g_AnimationWithoutBlendCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t blendCallsInAnimations = g_BlendCallsInAnimations.exchange(0, std::memory_order_acq_rel);
+            const uint64_t blendVerticesInAnimations = g_BlendVerticesInAnimations.exchange(0, std::memory_order_acq_rel);
+            const uint64_t duplicateAnimation = g_DuplicateAnimationSameFrame.exchange(0, std::memory_order_acq_rel);
+            const uint64_t duplicateSkin = g_DuplicateSkinSameFrame.exchange(0, std::memory_order_acq_rel);
+            const uint64_t blendCalls = g_SoftwareBlendCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t blendVertices = g_SoftwareBlendVertices.exchange(0, std::memory_order_acq_rel);
+            const uint64_t blendTicks = g_SoftwareBlendTicks.exchange(0, std::memory_order_acq_rel);
+            const uint64_t blendTicksInAnimation = g_SoftwareBlendTicksInAnimation.exchange(0, std::memory_order_acq_rel);
+            const uint64_t orphanBlendCalls = g_OrphanBlendCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t matrixTotal = g_BlendMatrixTotal.exchange(0, std::memory_order_acq_rel);
+            const uint64_t matrixMax = g_BlendMatrixMax.exchange(0, std::memory_order_acq_rel);
+            const uint64_t blendNormals = g_BlendNormalsCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t animationMaxTicks = g_AnimationMaxTicks.exchange(0, std::memory_order_acq_rel);
+            const uint64_t blendMaxTicks = g_SoftwareBlendMaxTicks.exchange(0, std::memory_order_acq_rel);
+            const uint64_t renderCalls = g_RenderQueueCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t drawCalls = g_DrawCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t drawVertices = g_DrawVertices.exchange(0, std::memory_order_acq_rel);
+            const uint64_t drawIndexedCalls = g_DrawIndexedCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t drawIndexedIndices = g_DrawIndexedIndices.exchange(0, std::memory_order_acq_rel);
+            const uint64_t drawIndexedInstancedCalls = g_DrawIndexedInstancedCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t drawIndexedInstancedIndices = g_DrawIndexedInstancedIndices.exchange(0, std::memory_order_acq_rel);
+            const uint64_t drawInstancedCalls = g_DrawInstancedCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t drawInstancedVertices = g_DrawInstancedVertices.exchange(0, std::memory_order_acq_rel);
+            const uint64_t drawIndexedIndirectCalls = g_DrawIndexedInstancedIndirectCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t drawIndirectCalls = g_DrawInstancedIndirectCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t mapCalls = g_MapCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t mapDuringAnimation = g_MapDuringAnimationCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t mapDuringBlend = g_MapDuringBlendCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t mapTicks = g_MapTicks.exchange(0, std::memory_order_acq_rel);
+            const uint64_t mapMaxTicks = g_MapMaxTicks.exchange(0, std::memory_order_acq_rel);
+            const uint64_t mapWrite = g_MapWriteCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t mapDiscard = g_MapWriteDiscardCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t mapNoOverwrite = g_MapWriteNoOverwriteCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t mapOther = g_MapOtherCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t unmapCalls = g_UnmapCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t unmapDuringAnimation = g_UnmapDuringAnimationCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t updateCalls = g_UpdateSubresourceCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t updateDuringAnimation = g_UpdateSubresourceDuringAnimationCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t updateDuringBlend = g_UpdateSubresourceDuringBlendCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t updateTicks = g_UpdateSubresourceTicks.exchange(0, std::memory_order_acq_rel);
+            const uint64_t updateMaxTicks = g_UpdateSubresourceMaxTicks.exchange(0, std::memory_order_acq_rel);
+            const uint64_t presents = g_Presents.exchange(0, std::memory_order_acq_rel);
+            const uint64_t frameSamples = g_FrameTimeSamples.exchange(0, std::memory_order_acq_rel);
+            const uint64_t frameTicks = g_FrameTimeTicks.exchange(0, std::memory_order_acq_rel);
+            const uint64_t frameMaxTicks = g_FrameTimeMaxTicks.exchange(0, std::memory_order_acq_rel);
+            const uint64_t over1667 = g_FrameOver1667.exchange(0, std::memory_order_acq_rel);
+            const uint64_t over2500 = g_FrameOver2500.exchange(0, std::memory_order_acq_rel);
+            const uint64_t over3333 = g_FrameOver3333.exchange(0, std::memory_order_acq_rel);
+
+            uint64_t animationUnique = 0;
+            uint64_t skinnedUnique = 0;
+            uint64_t renderUnique = 0;
+            uint64_t skinnedNotRendered = 0;
+            for (size_t i = 0; i < kBloomWords; ++i)
+            {
+                const uint64_t animationWord = g_AnimationEntityBloom[i].exchange(0, std::memory_order_acq_rel);
+                const uint64_t skinnedWord = g_SkinnedEntityBloom[i].exchange(0, std::memory_order_acq_rel);
+                const uint64_t renderWord = g_RenderEntityBloom[i].exchange(0, std::memory_order_acq_rel);
+                animationUnique += static_cast<uint64_t>(std::popcount(animationWord));
+                skinnedUnique += static_cast<uint64_t>(std::popcount(skinnedWord));
+                renderUnique += static_cast<uint64_t>(std::popcount(renderWord));
+                skinnedNotRendered += static_cast<uint64_t>(std::popcount(skinnedWord & ~renderWord));
+            }
+
+            std::array<uint64_t, kLatencyBucketCount> animationLatency{};
+            std::array<uint64_t, kLatencyBucketCount> blendLatency{};
+            for (size_t i = 0; i < kLatencyBucketCount; ++i)
+            {
+                animationLatency[i] = g_AnimationLatencyBuckets[i].exchange(0, std::memory_order_acq_rel);
+                blendLatency[i] = g_SoftwareBlendLatencyBuckets[i].exchange(0, std::memory_order_acq_rel);
+            }
+
+            std::array<uint64_t, kVertexBucketCount> vertexCalls{};
+            std::array<uint64_t, kVertexBucketCount> vertexVertices{};
+            std::array<uint64_t, kVertexBucketCount> vertexTicks{};
+            for (size_t i = 0; i < kVertexBucketCount; ++i)
+            {
+                vertexCalls[i] = g_VertexBucketCalls[i].exchange(0, std::memory_order_acq_rel);
+                vertexVertices[i] = g_VertexBucketVertices[i].exchange(0, std::memory_order_acq_rel);
+                vertexTicks[i] = g_VertexBucketTicks[i].exchange(0, std::memory_order_acq_rel);
+            }
+
+            std::array<uint64_t, kMatrixBucketCount> matrixBuckets{};
+            for (size_t i = 0; i < kMatrixBucketCount; ++i)
+                matrixBuckets[i] = g_MatrixBucketCalls[i].exchange(0, std::memory_order_acq_rel);
+
+            std::array<uint64_t, kFrameTimeBucketCount> frameBuckets{};
+            for (size_t i = 0; i < kFrameTimeBucketCount; ++i)
+                frameBuckets[i] = g_FrameTimeBuckets[i].exchange(0, std::memory_order_acq_rel);
+
+            const double frameDivisor = presents ? static_cast<double>(presents) : 1.0;
+            const double animationMs = TicksToMs(animationTicks);
+            const double blendMs = TicksToMs(blendTicks);
+            const uint64_t nonBlendTicks = animationTicks > blendTicksInAnimation
+                ? animationTicks - blendTicksInAnimation
+                : 0;
+            const double unnecessaryPct = skinnedUnique
+                ? (100.0 * static_cast<double>(skinnedNotRendered) / static_cast<double>(skinnedUnique))
+                : 0.0;
+            const double renderDrivenPct = animationCalls
+                ? (100.0 * static_cast<double>(renderDrivenCalls) / static_cast<double>(animationCalls))
+                : 0.0;
+            const double matrixAverage = blendCalls
+                ? static_cast<double>(matrixTotal) / static_cast<double>(blendCalls)
+                : 0.0;
+            const double fps = intervalMs
+                ? static_cast<double>(presents) * 1000.0 / static_cast<double>(intervalMs)
+                : 0.0;
+            const double frameMeanMs = frameSamples ? TicksToMs(frameTicks) / frameSamples : 0.0;
+            const double frameP50Ms = PercentileFromHistogram(frameBuckets, frameSamples, 50);
+            const double frameP95Ms = PercentileFromHistogram(frameBuckets, frameSamples, 95);
+            const double frameP99Ms = PercentileFromHistogram(frameBuckets, frameSamples, 99);
+            const double frameMaxMs = TicksToMs(frameMaxTicks);
+
+            LogShimA(
+                LogLevel::Info,
+                kComponent,
+                "[OgreProfile] fps=%.1f frameMean=%.2f p50=%.2f p95=%.2f p99=%.2f max=%.2f | anim=%.1f/f renderDriven=%.1f%% external=%.2f/f animCPU=%.3fms/f nonBlend=%.3fms/f | skin=%.1f/f verts=%.0f/f swCPU=%.3fms/f dupAnim=%llu dupSkin=%llu orphan=%llu",
+                fps, frameMeanMs, frameP50Ms, frameP95Ms, frameP99Ms, frameMaxMs,
+                static_cast<double>(animationCalls) / frameDivisor,
+                renderDrivenPct,
+                static_cast<double>(externalCalls) / frameDivisor,
+                animationMs / frameDivisor,
+                TicksToMs(nonBlendTicks) / frameDivisor,
+                static_cast<double>(blendCalls) / frameDivisor,
+                static_cast<double>(blendVertices) / frameDivisor,
+                blendMs / frameDivisor,
+                static_cast<unsigned long long>(duplicateAnimation),
+                static_cast<unsigned long long>(duplicateSkin),
+                static_cast<unsigned long long>(orphanBlendCalls));
+
+            LogShimA(
+                LogLevel::Info,
+                kComponent,
+                "[OgreProfile][Anim] renderDriven=%llu cpu=%.3fms/f external=%llu cpu=%.3fms/f withBlend=%llu withoutBlend=%llu blendCalls/anim=%.2f verts/anim=%.0f maxAnim=%.3fms latency=[%llu,%llu,%llu,%llu,%llu,%llu,%llu]",
+                static_cast<unsigned long long>(renderDrivenCalls), TicksToMs(renderDrivenTicks) / frameDivisor,
+                static_cast<unsigned long long>(externalCalls), TicksToMs(externalTicks) / frameDivisor,
+                static_cast<unsigned long long>(animationWithBlend),
+                static_cast<unsigned long long>(animationWithoutBlend),
+                animationCalls ? static_cast<double>(blendCallsInAnimations) / animationCalls : 0.0,
+                animationCalls ? static_cast<double>(blendVerticesInAnimations) / animationCalls : 0.0,
+                TicksToMs(animationMaxTicks),
+                static_cast<unsigned long long>(animationLatency[0]),
+                static_cast<unsigned long long>(animationLatency[1]),
+                static_cast<unsigned long long>(animationLatency[2]),
+                static_cast<unsigned long long>(animationLatency[3]),
+                static_cast<unsigned long long>(animationLatency[4]),
+                static_cast<unsigned long long>(animationLatency[5]),
+                static_cast<unsigned long long>(animationLatency[6]));
+
+            LogShimA(
+                LogLevel::Info,
+                kComponent,
+                "[OgreProfile][SkinSize] calls=[%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu] verts/f=[%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f] cpuMs/f=[%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f] maxSkin=%.3fms latency=[%llu,%llu,%llu,%llu,%llu,%llu,%llu]",
+                static_cast<unsigned long long>(vertexCalls[0]), static_cast<unsigned long long>(vertexCalls[1]),
+                static_cast<unsigned long long>(vertexCalls[2]), static_cast<unsigned long long>(vertexCalls[3]),
+                static_cast<unsigned long long>(vertexCalls[4]), static_cast<unsigned long long>(vertexCalls[5]),
+                static_cast<unsigned long long>(vertexCalls[6]), static_cast<unsigned long long>(vertexCalls[7]),
+                static_cast<double>(vertexVertices[0]) / frameDivisor, static_cast<double>(vertexVertices[1]) / frameDivisor,
+                static_cast<double>(vertexVertices[2]) / frameDivisor, static_cast<double>(vertexVertices[3]) / frameDivisor,
+                static_cast<double>(vertexVertices[4]) / frameDivisor, static_cast<double>(vertexVertices[5]) / frameDivisor,
+                static_cast<double>(vertexVertices[6]) / frameDivisor, static_cast<double>(vertexVertices[7]) / frameDivisor,
+                TicksToMs(vertexTicks[0]) / frameDivisor, TicksToMs(vertexTicks[1]) / frameDivisor,
+                TicksToMs(vertexTicks[2]) / frameDivisor, TicksToMs(vertexTicks[3]) / frameDivisor,
+                TicksToMs(vertexTicks[4]) / frameDivisor, TicksToMs(vertexTicks[5]) / frameDivisor,
+                TicksToMs(vertexTicks[6]) / frameDivisor, TicksToMs(vertexTicks[7]) / frameDivisor,
+                TicksToMs(blendMaxTicks),
+                static_cast<unsigned long long>(blendLatency[0]), static_cast<unsigned long long>(blendLatency[1]),
+                static_cast<unsigned long long>(blendLatency[2]), static_cast<unsigned long long>(blendLatency[3]),
+                static_cast<unsigned long long>(blendLatency[4]), static_cast<unsigned long long>(blendLatency[5]),
+                static_cast<unsigned long long>(blendLatency[6]));
+
+            LogShimA(
+                LogLevel::Info,
+                kComponent,
+                "[OgreProfile][SkinMeta] matrices avg=%.1f max=%llu buckets=[%llu,%llu,%llu,%llu,%llu] blendNormals=%.1f%% | renderQueue=%.1f/f anim/render=%.2f skin/render=%.2f unique anim~=%llu skin~=%llu render~=%llu skinNotRendered~=%llu (%.1f%%)",
+                matrixAverage,
+                static_cast<unsigned long long>(matrixMax),
+                static_cast<unsigned long long>(matrixBuckets[0]), static_cast<unsigned long long>(matrixBuckets[1]),
+                static_cast<unsigned long long>(matrixBuckets[2]), static_cast<unsigned long long>(matrixBuckets[3]),
+                static_cast<unsigned long long>(matrixBuckets[4]),
+                blendCalls ? 100.0 * static_cast<double>(blendNormals) / blendCalls : 0.0,
+                static_cast<double>(renderCalls) / frameDivisor,
+                renderCalls ? static_cast<double>(animationCalls) / renderCalls : 0.0,
+                renderCalls ? static_cast<double>(blendCalls) / renderCalls : 0.0,
+                static_cast<unsigned long long>(animationUnique),
+                static_cast<unsigned long long>(skinnedUnique),
+                static_cast<unsigned long long>(renderUnique),
+                static_cast<unsigned long long>(skinnedNotRendered),
+                unnecessaryPct);
+
+            LogShimA(
+                LogLevel::Info,
+                kComponent,
+                "[OgreProfile][Uploads] Map=%llu anim=%llu blend=%llu cpu=%.3fms/f max=%.3fms types[W=%llu WD=%llu WNO=%llu other=%llu] Unmap=%llu anim=%llu | Update=%llu anim=%llu blend=%llu cpu=%.3fms/f max=%.3fms",
+                static_cast<unsigned long long>(mapCalls),
+                static_cast<unsigned long long>(mapDuringAnimation),
+                static_cast<unsigned long long>(mapDuringBlend),
+                TicksToMs(mapTicks) / frameDivisor,
+                TicksToMs(mapMaxTicks),
+                static_cast<unsigned long long>(mapWrite),
+                static_cast<unsigned long long>(mapDiscard),
+                static_cast<unsigned long long>(mapNoOverwrite),
+                static_cast<unsigned long long>(mapOther),
+                static_cast<unsigned long long>(unmapCalls),
+                static_cast<unsigned long long>(unmapDuringAnimation),
+                static_cast<unsigned long long>(updateCalls),
+                static_cast<unsigned long long>(updateDuringAnimation),
+                static_cast<unsigned long long>(updateDuringBlend),
+                TicksToMs(updateTicks) / frameDivisor,
+                TicksToMs(updateMaxTicks));
+
+            LogShimA(
+                LogLevel::Info,
+                kComponent,
+                "[OgreProfile][Render] Draw=%llu verts=%llu DrawIndexed=%llu indices=%llu DrawInstanced=%llu verts=%llu DrawIndexedInstanced=%llu indices=%llu indirect=[%llu,%llu] frameSlow[>16.67=%llu >25=%llu >33.33=%llu]",
+                static_cast<unsigned long long>(drawCalls),
+                static_cast<unsigned long long>(drawVertices),
+                static_cast<unsigned long long>(drawIndexedCalls),
+                static_cast<unsigned long long>(drawIndexedIndices),
+                static_cast<unsigned long long>(drawInstancedCalls),
+                static_cast<unsigned long long>(drawInstancedVertices),
+                static_cast<unsigned long long>(drawIndexedInstancedCalls),
+                static_cast<unsigned long long>(drawIndexedInstancedIndices),
+                static_cast<unsigned long long>(drawIndirectCalls),
+                static_cast<unsigned long long>(drawIndexedIndirectCalls),
+                static_cast<unsigned long long>(over1667),
+                static_cast<unsigned long long>(over2500),
+                static_cast<unsigned long long>(over3333));
+
+            if (duplicateSkin || duplicateAnimation)
+            {
+                LogShimA(
+                    LogLevel::Warn,
+                    kComponent,
+                    "[OgreProfile][WARN] same-frame repeat detected duplicateAnimation=%llu duplicateSkin=%llu",
+                    static_cast<unsigned long long>(duplicateAnimation),
+                    static_cast<unsigned long long>(duplicateSkin));
+            }
+
+            ReportTopContributors(frameDivisor);
+            AppendCsvRow(
+                GetTickCount64(), fps, frameMeanMs, frameP50Ms, frameP95Ms, frameP99Ms, frameMaxMs,
+                animationCalls, renderDrivenCalls, externalCalls,
+                animationMs / frameDivisor, TicksToMs(nonBlendTicks) / frameDivisor,
+                blendCalls, blendVertices, blendMs / frameDivisor,
+                duplicateAnimation, duplicateSkin, orphanBlendCalls,
+                matrixAverage, matrixMax,
+                mapCalls, mapDuringAnimation, mapDuringBlend, TicksToMs(mapTicks) / frameDivisor,
+                updateCalls, updateDuringAnimation,
+                drawCalls, drawIndexedCalls, drawInstancedCalls, drawIndexedInstancedCalls);
+        }
+
