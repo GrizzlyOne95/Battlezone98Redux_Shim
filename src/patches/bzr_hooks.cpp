@@ -7,6 +7,7 @@
 #include "patcher.h"
 #include "shim_log.h"
 #include "ogre_shader_cache.h"
+#include "native_ui.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -25614,6 +25615,7 @@ namespace BZROpenShim
         InstallBzrNetRouteObserverIfPossible();
         EnsureInputBindingPopulateHookScaffold();
         EnsureOptionsParentCtorHookScaffold();
+        EnsureNativeUiMainMenuDiagnosticScaffold();
         LogShimSettingsUiStatus();
         Log(L"[MAPTRACE] Map refresh trace: %hs\n",
             (EnvFlagEnabled("OPENSHIM_TRACE_MAP_REFRESH") ||
@@ -25662,6 +25664,7 @@ namespace BZROpenShim
         InstallConstructorRemoteBuildFixIfPossible();
         EnsureInputBindingPopulateHookScaffold();
         EnsureOptionsParentCtorHookScaffold();
+        EnsureNativeUiMainMenuDiagnosticScaffold();
     }
 
 

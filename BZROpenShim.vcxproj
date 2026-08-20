@@ -181,6 +181,7 @@
     <ClInclude Include="include\BZROpenShim.h" />
     <ClInclude Include="include\openshim_sdk_v2.h" />
     <ClInclude Include="include\native_ui.h" />
+    <ClInclude Include="src\engine\native_ui_validation.h" />
     <ClInclude Include="include\trampolines.h" />
     <ClInclude Include="include\scroll_helper.h" />
     <ClInclude Include="include\netcode_hooks.h" />
