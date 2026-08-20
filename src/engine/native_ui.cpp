@@ -6,6 +6,7 @@
 // cUI dispatch.
 
 #include "native_ui.h"
+#include "native_ui_validation.h"
 
 #include "bzr_options_ui.h"
 #include "openshim_sdk_v2.h"
@@ -17,6 +18,7 @@
 #include <Windows.h>
 
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -28,6 +30,15 @@ namespace BZROpenShim
     namespace
     {
         constexpr uintptr_t kOptionsParentSingletonAddr = 0x009455C4;
+        constexpr uintptr_t kMainScreenSingletonAddr = 0x0094551C;
+        constexpr uintptr_t kMainScreenVtableAddr = 0x0089E178;
+        constexpr uintptr_t kMainScreenOverlayVtableAddr = 0x008A0B94;
+        constexpr uintptr_t kMainScreenCtorAddr = 0x0078E670;
+        constexpr uintptr_t kMainScreenDtorAddr = 0x0078ECA0;
+        constexpr size_t kMainScreenDetourLen = 10;
+        constexpr uint32_t kInternalMainMenuHostValue =
+            NativeUiValidation::kMainMenuHost;
+        constexpr uint64_t kMainMenuDiagnosticActionId = 0x4D4D50524F424501ull; // MainMenu probe v1
         constexpr size_t kUiViewChildBeginOffset = 0x12C;
         constexpr size_t kUiViewChildEndOffset = 0x130;
         constexpr size_t kUiViewNameOffset = 0x20;
@@ -52,6 +63,8 @@ namespace BZROpenShim
             void* screen = nullptr;
             void* parent = nullptr;
             DWORD ownerThreadId = 0;
+            uint64_t hostGeneration = 0;
+            uint64_t hostFingerprint = 0;
             char name[64] = {};
         };
 
@@ -79,10 +92,28 @@ namespace BZROpenShim
         std::array<WidgetRecord, kMaxWidgetsPerHostLifetime> g_Widgets = {};
         std::array<ActionSlot, kMaxActionSlotsPerHostLifetime> g_ActionSlots = {};
         OpenShimUiHandle g_NextHandle = 1;
-        void* g_CurrentOptionsScreen = nullptr;
-        void* g_CurrentOptionsParent = nullptr;
-        ptrdiff_t g_CurrentOptionsBaselineChildCount = -1;
+        OpenShimUiHost g_CurrentHost = OpenShimUiHost::None;
+        void* g_CurrentScreen = nullptr;
+        void* g_CurrentParent = nullptr;
+        ptrdiff_t g_CurrentBaselineChildCount = -1;
+        uint64_t g_CurrentHostGeneration = 0;
+        uint64_t g_CurrentHostFingerprint = 0;
         DWORD g_UiThreadId = 0;
+
+        using FnMainScreenCtor = void* (__thiscall*)(void* self);
+        using FnMainScreenDtor = void(__thiscall*)(void* self);
+        InlineDetour32 g_MainScreenCtorDetour = {};
+        InlineDetour32 g_MainScreenDtorDetour = {};
+        FnMainScreenCtor g_MainScreenCtorOriginal = nullptr;
+        FnMainScreenDtor g_MainScreenDtorOriginal = nullptr;
+        bool g_MainMenuDiagnosticsEnabled = false;
+        bool g_MainScreenHooksInstalled = false;
+        bool g_MainScreenHookMismatchLogged = false;
+        std::atomic<uint64_t> g_MainScreenGeneration{0};
+        std::atomic<uint32_t> g_MainMenuDiagnosticHoverCount{0};
+        std::atomic<uint32_t> g_MainMenuDiagnosticActionCount{0};
+        OpenShimUiHandle g_MainMenuDiagnosticSurface = OPENSHIM_UI_INVALID_HANDLE;
+        OpenShimUiHandle g_MainMenuDiagnosticButton = OPENSHIM_UI_INVALID_HANDLE;
 
         template <size_t N>
         void CopyText(char (&dest)[N], const char* source)
@@ -146,6 +177,151 @@ namespace BZROpenShim
             }
         }
 
+        bool UiNameEquals(void* object, const char* expected)
+        {
+            if (!object || !expected)
+                return false;
+
+            const size_t expectedLength = std::strlen(expected);
+            if (expectedLength >= 128)
+                return false;
+
+            __try
+            {
+                const auto* const name =
+                    reinterpret_cast<const uint8_t*>(object) + kUiViewNameOffset;
+                for (size_t index = 0; index < expectedLength; ++index)
+                {
+                    if (name[index] != static_cast<uint8_t>(expected[index]))
+                        return false;
+                }
+                return name[expectedLength] == 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        uint64_t HashFingerprintBytes(uint64_t hash, const void* bytes, size_t length)
+        {
+            constexpr uint64_t kFnvPrime = 1099511628211ull;
+            const auto* cursor = static_cast<const uint8_t*>(bytes);
+            for (size_t index = 0; index < length; ++index)
+            {
+                hash ^= cursor[index];
+                hash *= kFnvPrime;
+            }
+            return hash;
+        }
+
+        bool ResolveMainMenuHost(void*& outScreen,
+                                 void*& outParent,
+                                 ptrdiff_t& outChildCount,
+                                 uint64_t& outFingerprint,
+                                 uint64_t& outGeneration)
+        {
+            outScreen = nullptr;
+            outParent = nullptr;
+            outChildCount = -1;
+            outFingerprint = 0;
+            outGeneration = 0;
+            if (!g_MainMenuDiagnosticsEnabled || !IsCompatibleGameVersion())
+                return false;
+
+            constexpr const char* kRequiredChildren[] =
+            {
+                "ExitGame_MainScreen",
+                "Options_MainScreen",
+                "Mods",
+                "SinglePlayer_MainScreen",
+                "MultiPlayer_MainScreen",
+                "ViewCredits_MainScreen",
+                "Replay Intro_MainScreen",
+            };
+
+            __try
+            {
+                void* const screen = *reinterpret_cast<void**>(kMainScreenSingletonAddr);
+                if (!screen || *reinterpret_cast<uintptr_t*>(screen) != kMainScreenVtableAddr)
+                    return false;
+
+                auto* const screenBytes = reinterpret_cast<uint8_t*>(screen);
+                void** const begin =
+                    *reinterpret_cast<void***>(screenBytes + kUiViewChildBeginOffset);
+                void** const end =
+                    *reinterpret_cast<void***>(screenBytes + kUiViewChildEndOffset);
+                if (!begin || !end || begin >= end || (end - begin) >= 64)
+                    return false;
+
+                void* overlay = nullptr;
+                size_t overlayMatches = 0;
+                for (void** slot = begin; slot != end; ++slot)
+                {
+                    if (UiNameEquals(*slot, "MainScreen_Overlay"))
+                    {
+                        overlay = *slot;
+                        ++overlayMatches;
+                    }
+                }
+                if (overlayMatches != 1 || !overlay ||
+                    *reinterpret_cast<uintptr_t*>(overlay) != kMainScreenOverlayVtableAddr)
+                {
+                    return false;
+                }
+
+                auto* const overlayBytes = reinterpret_cast<uint8_t*>(overlay);
+                void** const childBegin =
+                    *reinterpret_cast<void***>(overlayBytes + kUiViewChildBeginOffset);
+                void** const childEnd =
+                    *reinterpret_cast<void***>(overlayBytes + kUiViewChildEndOffset);
+                if (!childBegin || !childEnd || childBegin >= childEnd ||
+                    (childEnd - childBegin) >= 128)
+                {
+                    return false;
+                }
+
+                std::array<size_t, std::size(kRequiredChildren)> matches = {};
+                uint64_t fingerprint = 1469598103934665603ull;
+                fingerprint = HashFingerprintBytes(fingerprint, &screen, sizeof(screen));
+                fingerprint = HashFingerprintBytes(fingerprint, &overlay, sizeof(overlay));
+                for (void** slot = childBegin; slot != childEnd; ++slot)
+                {
+                    for (size_t required = 0; required < std::size(kRequiredChildren); ++required)
+                    {
+                        if (!UiNameEquals(*slot, kRequiredChildren[required]))
+                            continue;
+                        ++matches[required];
+                        fingerprint = HashFingerprintBytes(fingerprint, slot, sizeof(*slot));
+                        fingerprint = HashFingerprintBytes(
+                            fingerprint,
+                            kRequiredChildren[required],
+                            std::strlen(kRequiredChildren[required]));
+                    }
+                }
+                for (const size_t matchCount : matches)
+                {
+                    if (matchCount != 1)
+                        return false;
+                }
+
+                const uint64_t generation = g_MainScreenGeneration.load();
+                if (generation == 0)
+                    return false;
+
+                outScreen = screen;
+                outParent = overlay;
+                outChildCount = childEnd - childBegin;
+                outFingerprint = fingerprint;
+                outGeneration = generation;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         bool ResolveOptionsParentHost(void*& outScreen,
                                       void*& outParent,
                                       ptrdiff_t& outChildCount)
@@ -204,13 +380,30 @@ namespace BZROpenShim
         bool ResolveHost(OpenShimUiHost host,
                          void*& outScreen,
                          void*& outParent,
-                         ptrdiff_t& outChildCount)
+                         ptrdiff_t& outChildCount,
+                         uint64_t& outFingerprint,
+                         uint64_t& outGeneration)
         {
+            outFingerprint = 0;
+            outGeneration = 0;
             switch (host)
             {
             case OpenShimUiHost::OptionsParent:
-                return ResolveOptionsParentHost(outScreen, outParent, outChildCount);
+                if (!ResolveOptionsParentHost(outScreen, outParent, outChildCount))
+                    return false;
+                outFingerprint =
+                    static_cast<uint64_t>(reinterpret_cast<uintptr_t>(outScreen)) << 32 |
+                    static_cast<uint64_t>(reinterpret_cast<uintptr_t>(outParent));
+                return true;
             default:
+                if (static_cast<uint32_t>(host) == kInternalMainMenuHostValue)
+                {
+                    return ResolveMainMenuHost(outScreen,
+                                               outParent,
+                                               outChildCount,
+                                               outFingerprint,
+                                               outGeneration);
+                }
                 outScreen = nullptr;
                 outParent = nullptr;
                 outChildCount = -1;
@@ -229,49 +422,70 @@ namespace BZROpenShim
             return count;
         }
 
-        void ResetRecordsForNewHostLocked(void* screen,
+        void ResetRecordsForNewHostLocked(OpenShimUiHost host,
+                                          void* screen,
                                           void* parent,
-                                          ptrdiff_t baselineChildCount)
+                                          ptrdiff_t baselineChildCount,
+                                          uint64_t fingerprint,
+                                          uint64_t generation)
         {
             g_Surfaces = {};
             g_Widgets = {};
             g_ActionSlots = {};
-            g_CurrentOptionsScreen = screen;
-            g_CurrentOptionsParent = parent;
-            g_CurrentOptionsBaselineChildCount = baselineChildCount;
+            g_CurrentHost = host;
+            g_CurrentScreen = screen;
+            g_CurrentParent = parent;
+            g_CurrentBaselineChildCount = baselineChildCount;
+            g_CurrentHostFingerprint = fingerprint;
+            g_CurrentHostGeneration = generation;
             g_UiThreadId = GetCurrentThreadId();
         }
 
-        bool CurrentHostFingerprintMatches(ptrdiff_t currentChildCount)
+        bool CurrentHostFingerprintMatches(ptrdiff_t currentChildCount,
+                                           uint64_t fingerprint,
+                                           uint64_t generation)
         {
-            if (g_CurrentOptionsBaselineChildCount < 0 || currentChildCount < 0)
-                return false;
-            const ptrdiff_t expected =
-                g_CurrentOptionsBaselineChildCount +
-                static_cast<ptrdiff_t>(CountAllocatedWidgetsForCurrentHost());
-            return currentChildCount == expected;
+            NativeUiValidation::HostIdentity identity = {};
+            identity.host = static_cast<uint32_t>(g_CurrentHost);
+            identity.screen = reinterpret_cast<uintptr_t>(g_CurrentScreen);
+            identity.parent = reinterpret_cast<uintptr_t>(g_CurrentParent);
+            identity.baselineChildCount = g_CurrentBaselineChildCount;
+            identity.currentChildCount = currentChildCount;
+            identity.allocatedWidgetCount = CountAllocatedWidgetsForCurrentHost();
+            identity.fingerprint = fingerprint;
+            identity.generation = generation;
+            return fingerprint == g_CurrentHostFingerprint &&
+                   generation == g_CurrentHostGeneration &&
+                   NativeUiValidation::IsValidHostIdentity(
+                       identity, g_MainMenuDiagnosticsEnabled);
         }
 
         bool PrepareHostLocked(OpenShimUiHost host,
                                void* screen,
                                void* parent,
-                               ptrdiff_t childCount)
+                               ptrdiff_t childCount,
+                               uint64_t fingerprint,
+                               uint64_t generation)
         {
-            if (host != OpenShimUiHost::OptionsParent ||
+            const bool supportedHost = NativeUiValidation::IsSupportedHost(
+                static_cast<uint32_t>(host), g_MainMenuDiagnosticsEnabled);
+            if (!supportedHost ||
                 !screen || !parent || childCount < 0)
             {
                 return false;
             }
 
-            if (g_CurrentOptionsScreen != screen ||
-                g_CurrentOptionsParent != parent ||
-                !CurrentHostFingerprintMatches(childCount))
+            if (g_CurrentHost != host ||
+                g_CurrentScreen != screen ||
+                g_CurrentParent != parent ||
+                !CurrentHostFingerprintMatches(childCount, fingerprint, generation))
             {
                 // Screen addresses are recycled by Redux. Child-count accounting
                 // adds a generation fingerprint: after we inject N widgets, a
                 // destroy/reconstruct at the same addresses returns to the stock
                 // child count and therefore invalidates every stale handle.
-                ResetRecordsForNewHostLocked(screen, parent, childCount);
+                ResetRecordsForNewHostLocked(
+                    host, screen, parent, childCount, fingerprint, generation);
             }
 
             return g_UiThreadId == GetCurrentThreadId();
@@ -282,12 +496,36 @@ namespace BZROpenShim
             void* screen = nullptr;
             void* parent = nullptr;
             ptrdiff_t childCount = -1;
-            if (!ResolveHost(surface.host, screen, parent, childCount) ||
-                screen != surface.screen || parent != surface.parent)
+            uint64_t fingerprint = 0;
+            uint64_t generation = 0;
+            if (!ResolveHost(surface.host,
+                             screen,
+                             parent,
+                             childCount,
+                             fingerprint,
+                             generation))
             {
                 return false;
             }
-            return CurrentHostFingerprintMatches(childCount);
+
+            NativeUiValidation::HostIdentity expected = {};
+            expected.host = static_cast<uint32_t>(surface.host);
+            expected.screen = reinterpret_cast<uintptr_t>(surface.screen);
+            expected.parent = reinterpret_cast<uintptr_t>(surface.parent);
+            expected.baselineChildCount = g_CurrentBaselineChildCount;
+            expected.currentChildCount = childCount;
+            expected.allocatedWidgetCount = CountAllocatedWidgetsForCurrentHost();
+            expected.fingerprint = surface.hostFingerprint;
+            expected.generation = surface.hostGeneration;
+
+            NativeUiValidation::HostIdentity current = expected;
+            current.screen = reinterpret_cast<uintptr_t>(screen);
+            current.parent = reinterpret_cast<uintptr_t>(parent);
+            current.fingerprint = fingerprint;
+            current.generation = generation;
+            return CurrentHostFingerprintMatches(childCount, fingerprint, generation) &&
+                   NativeUiValidation::SameHostLifetime(
+                       expected, current, g_MainMenuDiagnosticsEnabled);
         }
 
         OpenShimUiHandle AllocateHandleLocked()
@@ -371,6 +609,17 @@ namespace BZROpenShim
         {
         }
 
+        void __cdecl NativeUiMainMenuDiagnosticHover(void* /*param*/)
+        {
+            const uint32_t count = g_MainMenuDiagnosticHoverCount.fetch_add(1) + 1;
+            if (count == 1)
+            {
+                LogShimA(LogLevel::Info,
+                         "native_ui_probe",
+                         "MainMenu probe hover count=1");
+            }
+        }
+
         void DispatchActionSlot(size_t index)
         {
             if (index >= g_ActionSlots.size())
@@ -408,6 +657,21 @@ namespace BZROpenShim
                                  action.actionId,
                                  0,
                                  widget.name);
+
+            if (action.actionId == kMainMenuDiagnosticActionId)
+            {
+                const uint32_t count = g_MainMenuDiagnosticActionCount.fetch_add(1) + 1;
+                AcquireSRWLockExclusive(&g_NativeUiLock);
+                WidgetRecord* const liveWidget = FindWidgetLocked(widget.handle);
+                if (liveWidget)
+                    liveWidget->requestedVisible = false;
+                ReleaseSRWLockExclusive(&g_NativeUiLock);
+                g_BzrFn_UiSetActive(widget.native, 0);
+                LogShimA(LogLevel::Info,
+                         "native_ui_probe",
+                         "MainMenu probe click/action count=%u; probe deactivated",
+                         count);
+            }
             LogShimA(LogLevel::Debug,
                      "native_ui",
                      "action surface=%llu widget=%llu action=%llu name=%s",
@@ -509,11 +773,19 @@ namespace BZROpenShim
             void* screen = nullptr;
             void* parent = nullptr;
             ptrdiff_t childCount = -1;
-            if (!ResolveHost(host, screen, parent, childCount))
+            uint64_t fingerprint = 0;
+            uint64_t generation = 0;
+            if (!ResolveHost(host,
+                             screen,
+                             parent,
+                             childCount,
+                             fingerprint,
+                             generation))
                 return OPENSHIM_UI_INVALID_HANDLE;
 
             AcquireSRWLockExclusive(&g_NativeUiLock);
-            if (!PrepareHostLocked(host, screen, parent, childCount))
+            if (!PrepareHostLocked(
+                    host, screen, parent, childCount, fingerprint, generation))
             {
                 ReleaseSRWLockExclusive(&g_NativeUiLock);
                 return OPENSHIM_UI_INVALID_HANDLE;
@@ -535,17 +807,21 @@ namespace BZROpenShim
             slot->screen = screen;
             slot->parent = parent;
             slot->ownerThreadId = GetCurrentThreadId();
+            slot->hostGeneration = generation;
+            slot->hostFingerprint = fingerprint;
             CopyText(slot->name, desc->name);
             const OpenShimUiHandle handle = slot->handle;
             ReleaseSRWLockExclusive(&g_NativeUiLock);
 
             LogShimA(LogLevel::Info,
                      "native_ui",
-                     "surface created handle=%llu host=%u screen=0x%p parent=0x%p name=%s",
+                     "surface created handle=%llu host=%u screen=0x%p parent=0x%p generation=%llu fingerprint=0x%llX name=%s",
                      static_cast<unsigned long long>(handle),
                      static_cast<unsigned>(host),
                      screen,
                      parent,
+                     static_cast<unsigned long long>(generation),
+                     static_cast<unsigned long long>(fingerprint),
                      desc->name);
             return handle;
         }
@@ -616,7 +892,8 @@ namespace BZROpenShim
                 {
                     pending[pendingCount].native = widget.native;
                     pending[pendingCount].active =
-                        (surface->visible && widget.requestedVisible) ? 1u : 0u;
+                        NativeUiValidation::EffectiveVisibility(
+                            surface->live, surface->visible, widget.requestedVisible) ? 1u : 0u;
                     ++pendingCount;
                 }
             }
@@ -701,7 +978,10 @@ namespace BZROpenShim
                 g_BzrFn_LabelState(label, reinterpret_cast<void*>(1));
             g_BzrFn_AddChild(surfaceCopy.parent, label, 0);
             g_BzrFn_SetTooltip(label, desc->text);
-            g_BzrFn_UiSetActive(label, surfaceCopy.visible ? 1u : 0u);
+            g_BzrFn_UiSetActive(
+                label,
+                NativeUiValidation::EffectiveVisibility(
+                    surfaceCopy.live, surfaceCopy.visible, true) ? 1u : 0u);
 
             AcquireSRWLockExclusive(&g_NativeUiLock);
             WidgetRecord* const finalWidget = FindWidgetLocked(handle);
@@ -800,9 +1080,16 @@ namespace BZROpenShim
             if (g_BzrFn_SetButtonTextScale) g_BzrFn_SetButtonTextScale(button, 0.85f);
             g_BzrFn_SetButtonLabel(button, desc->text);
             g_BzrFn_SetOnClick(button, kActionThunks[actionSlot]);
-            g_BzrFn_SetOnHover(button, reinterpret_cast<void*>(NativeUiHoverNoop));
+            g_BzrFn_SetOnHover(
+                button,
+                desc->actionId == kMainMenuDiagnosticActionId
+                    ? reinterpret_cast<void*>(NativeUiMainMenuDiagnosticHover)
+                    : reinterpret_cast<void*>(NativeUiHoverNoop));
             g_BzrFn_AddChild(surfaceCopy.parent, button, 0);
-            g_BzrFn_UiSetActive(button, surfaceCopy.visible ? 1u : 0u);
+            g_BzrFn_UiSetActive(
+                button,
+                NativeUiValidation::EffectiveVisibility(
+                    surfaceCopy.live, surfaceCopy.visible, true) ? 1u : 0u);
 
             AcquireSRWLockExclusive(&g_NativeUiLock);
             WidgetRecord* const finalWidget = FindWidgetLocked(handle);
@@ -876,7 +1163,8 @@ namespace BZROpenShim
                     surface = *foundSurface;
                 widget->requestedVisible = visible != 0;
                 native = widget->native;
-                effective = (surface.live && surface.visible && widget->requestedVisible) ? 1u : 0u;
+                effective = NativeUiValidation::EffectiveVisibility(
+                    surface.live, surface.visible, widget->requestedVisible) ? 1u : 0u;
             }
             ReleaseSRWLockExclusive(&g_NativeUiLock);
 
@@ -910,6 +1198,195 @@ namespace BZROpenShim
             }();
             return api;
         }
+
+        void ResetMainMenuRecordsForLifetimeChange()
+        {
+            AcquireSRWLockExclusive(&g_NativeUiLock);
+            if (static_cast<uint32_t>(g_CurrentHost) == kInternalMainMenuHostValue)
+            {
+                g_Surfaces = {};
+                g_Widgets = {};
+                g_ActionSlots = {};
+                g_CurrentHost = OpenShimUiHost::None;
+                g_CurrentScreen = nullptr;
+                g_CurrentParent = nullptr;
+                g_CurrentBaselineChildCount = -1;
+                g_CurrentHostGeneration = 0;
+                g_CurrentHostFingerprint = 0;
+                g_UiThreadId = 0;
+            }
+            g_MainMenuDiagnosticSurface = OPENSHIM_UI_INVALID_HANDLE;
+            g_MainMenuDiagnosticButton = OPENSHIM_UI_INVALID_HANDLE;
+            ReleaseSRWLockExclusive(&g_NativeUiLock);
+        }
+
+        void OnMainScreenConstructed(void* screen)
+        {
+            const uint64_t generation = g_MainScreenGeneration.fetch_add(1) + 1;
+            ResetMainMenuRecordsForLifetimeChange();
+            g_MainMenuDiagnosticHoverCount.store(0);
+            g_MainMenuDiagnosticActionCount.store(0);
+
+            if (!g_MainMenuDiagnosticsEnabled || !screen)
+                return;
+
+            __try
+            {
+                if (*reinterpret_cast<void**>(kMainScreenSingletonAddr) != screen)
+                {
+                    LogShimA(LogLevel::Warn,
+                             "native_ui_probe",
+                             "MainScreen ctor generation=%llu singleton mismatch; probe not created",
+                             static_cast<unsigned long long>(generation));
+                    return;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                LogShimA(LogLevel::Warn,
+                         "native_ui_probe",
+                         "MainScreen ctor generation=%llu singleton unreadable; probe not created",
+                         static_cast<unsigned long long>(generation));
+                return;
+            }
+
+            OpenShimUiSurfaceDesc surface = {};
+            surface.host = kInternalMainMenuHostValue;
+            CopyText(surface.name, "MainMenuDiagnosticProbe");
+            g_MainMenuDiagnosticSurface = ApiCreateSurface(&surface);
+            if (g_MainMenuDiagnosticSurface == OPENSHIM_UI_INVALID_HANDLE)
+            {
+                LogShimA(LogLevel::Warn,
+                         "native_ui_probe",
+                         "MainScreen generation=%llu host validation failed; probe not created",
+                         static_cast<unsigned long long>(generation));
+                return;
+            }
+
+            OpenShimUiButtonDesc button = {};
+            button.surface = g_MainMenuDiagnosticSurface;
+            button.rect = {20.0f, 970.0f, 260.0f, 58.0f};
+            button.actionId = kMainMenuDiagnosticActionId;
+            CopyText(button.name, "OpenShim_MainMenuProbe");
+            CopyText(button.text, "OPENSHIM PROBE");
+            g_MainMenuDiagnosticButton = ApiAddButton(&button);
+            if (g_MainMenuDiagnosticButton == OPENSHIM_UI_INVALID_HANDLE)
+            {
+                ApiReleaseSurface(g_MainMenuDiagnosticSurface);
+                g_MainMenuDiagnosticSurface = OPENSHIM_UI_INVALID_HANDLE;
+                LogShimA(LogLevel::Warn,
+                         "native_ui_probe",
+                         "MainScreen generation=%llu button creation failed; probe disabled",
+                         static_cast<unsigned long long>(generation));
+                return;
+            }
+
+            LogShimA(LogLevel::Info,
+                     "native_ui_probe",
+                     "MainMenu probe created generation=%llu surface=%llu button=%llu rect=(20,970,260,58)",
+                     static_cast<unsigned long long>(generation),
+                     static_cast<unsigned long long>(g_MainMenuDiagnosticSurface),
+                     static_cast<unsigned long long>(g_MainMenuDiagnosticButton));
+        }
+
+        void OnMainScreenDestroyed(void* screen)
+        {
+            const uint64_t retiredGeneration = g_MainScreenGeneration.fetch_add(1);
+            const uint32_t hoverCount = g_MainMenuDiagnosticHoverCount.load();
+            const uint32_t actionCount = g_MainMenuDiagnosticActionCount.load();
+            ResetMainMenuRecordsForLifetimeChange();
+            LogShimA(LogLevel::Info,
+                     "native_ui_probe",
+                     "MainScreen destroyed screen=0x%p generation=%llu hoverCount=%u actionCount=%u; handles invalidated without deleting Redux children",
+                     screen,
+                     static_cast<unsigned long long>(retiredGeneration),
+                     hoverCount,
+                     actionCount);
+        }
+
+        void* __fastcall MainScreenCtorHook(void* self, void* /*edx*/)
+        {
+            void* screen = self;
+            if (g_MainScreenCtorOriginal)
+                screen = g_MainScreenCtorOriginal(self);
+            OnMainScreenConstructed(screen);
+            return screen;
+        }
+
+        void __fastcall MainScreenDtorHook(void* self, void* /*edx*/)
+        {
+            OnMainScreenDestroyed(self);
+            if (g_MainScreenDtorOriginal)
+                g_MainScreenDtorOriginal(self);
+        }
+
+        void InstallMainScreenDiagnosticHooks()
+        {
+            if (g_MainScreenHooksInstalled)
+                return;
+
+            const uint8_t expectedDtor[kMainScreenDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x6A, 0xFF,
+                0x68, 0xC8, 0xE6, 0x85, 0x00,
+            };
+            const uint8_t expectedCtor[kMainScreenDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x6A, 0xFF,
+                0x68, 0x54, 0xEC, 0x85, 0x00,
+            };
+
+            if (!ExpectedBytesMatchAt(kMainScreenDtorAddr, expectedDtor, sizeof(expectedDtor)) ||
+                !ExpectedBytesMatchAt(kMainScreenCtorAddr, expectedCtor, sizeof(expectedCtor)))
+            {
+                if (!g_MainScreenHookMismatchLogged)
+                {
+                    LogShimA(LogLevel::Warn,
+                             "native_ui_probe",
+                             "MainScreen ctor/dtor bytes mismatch; diagnostic probe disabled");
+                    g_MainScreenHookMismatchLogged = true;
+                }
+                return;
+            }
+
+            if (!InstallInlineDetour32(g_MainScreenDtorDetour,
+                                       kMainScreenDtorAddr,
+                                       reinterpret_cast<void*>(MainScreenDtorHook),
+                                       kMainScreenDetourLen,
+                                       expectedDtor,
+                                       sizeof(expectedDtor)))
+            {
+                LogShimA(LogLevel::Warn,
+                         "native_ui_probe",
+                         "Failed installing MainScreen destructor hook; probe disabled");
+                return;
+            }
+            g_MainScreenDtorOriginal =
+                reinterpret_cast<FnMainScreenDtor>(g_MainScreenDtorDetour.trampoline);
+
+            if (!InstallInlineDetour32(g_MainScreenCtorDetour,
+                                       kMainScreenCtorAddr,
+                                       reinterpret_cast<void*>(MainScreenCtorHook),
+                                       kMainScreenDetourLen,
+                                       expectedCtor,
+                                       sizeof(expectedCtor)))
+            {
+                LogShimA(LogLevel::Warn,
+                         "native_ui_probe",
+                         "Failed installing MainScreen constructor hook; probe disabled");
+                return;
+            }
+            g_MainScreenCtorOriginal =
+                reinterpret_cast<FnMainScreenCtor>(g_MainScreenCtorDetour.trampoline);
+            g_MainScreenHooksInstalled =
+                g_MainScreenCtorOriginal != nullptr && g_MainScreenDtorOriginal != nullptr;
+            if (g_MainScreenHooksInstalled)
+            {
+                LogShimA(LogLevel::Info,
+                         "native_ui_probe",
+                         "Installed opt-in MainScreen diagnostic lifetime hooks");
+            }
+        }
     }
 
     const OpenShimNativeUiApiV1* GetOpenShimNativeUiApi(uint32_t requestedVersion)
@@ -919,16 +1396,34 @@ namespace BZROpenShim
         return &GetNativeUiApiTable();
     }
 
+    void EnsureNativeUiMainMenuDiagnosticScaffold()
+    {
+        bool enabled = false;
+        if (!TryGetUserConfigBool("NativeUiDiagnostics", "MainMenuProbe", enabled) ||
+            !enabled || !IsCompatibleGameVersion())
+        {
+            return;
+        }
+
+        g_MainMenuDiagnosticsEnabled = true;
+        InstallMainScreenDiagnosticHooks();
+    }
+
     void ShutdownNativeUi()
     {
         AcquireSRWLockExclusive(&g_NativeUiLock);
         g_Surfaces = {};
         g_Widgets = {};
         g_ActionSlots = {};
-        g_CurrentOptionsScreen = nullptr;
-        g_CurrentOptionsParent = nullptr;
-        g_CurrentOptionsBaselineChildCount = -1;
+        g_CurrentHost = OpenShimUiHost::None;
+        g_CurrentScreen = nullptr;
+        g_CurrentParent = nullptr;
+        g_CurrentBaselineChildCount = -1;
+        g_CurrentHostGeneration = 0;
+        g_CurrentHostFingerprint = 0;
         g_UiThreadId = 0;
+        g_MainMenuDiagnosticSurface = OPENSHIM_UI_INVALID_HANDLE;
+        g_MainMenuDiagnosticButton = OPENSHIM_UI_INVALID_HANDLE;
         ReleaseSRWLockExclusive(&g_NativeUiLock);
     }
 }
