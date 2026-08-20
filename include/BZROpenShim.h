@@ -32,6 +32,16 @@ namespace BZROpenShim
         OPENSHIM_CAP_NATIVE_UI           = 1ull << 3,
     };
 
+    // Storefront provenance is separate from game-version compatibility.
+    // Unknown is intentionally fail-closed until a supported executable has
+    // been positively qualified by the patcher.
+    enum class BzrDistribution : uint32_t
+    {
+        Unknown = 0,
+        GOG = 1,
+        Steam = 2,
+    };
+
     enum class OpenShimEventType : uint32_t
     {
         None                       = 0,
@@ -211,6 +221,12 @@ namespace BZROpenShim
     BZRO_API uint32_t GetAppliedPatchCount();
 
     /**
+     * Returns the positively identified storefront for the running supported
+     * executable. Unsupported/unqualified builds return Unknown.
+     */
+    BZRO_API BzrDistribution GetBzrDistribution();
+
+    /**
      * Explicit initialization entry point for the shim.
      * Normally called automatically by DLL_PROCESS_ATTACH, but can be
      * called manually if late-loading.
@@ -228,6 +244,12 @@ namespace BZROpenShim
      * returns nullptr rather than returning a partially compatible table.
      */
     extern "C" BZRO_API const OpenShimApiV2* __cdecl OpenShimGetApi(uint32_t requestedVersion);
+
+    /**
+     * Stable storefront query for companion DLLs. Integer values match
+     * BzrDistribution exactly without changing the established v2 table ABI.
+     */
+    extern "C" BZRO_API uint32_t __cdecl OpenShimGetBzrDistribution();
 
     /**
      * Convenience exports for tools/companions that only need the read-only
