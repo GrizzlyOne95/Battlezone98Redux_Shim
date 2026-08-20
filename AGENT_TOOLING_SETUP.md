@@ -41,6 +41,8 @@ The automated stack covers the agent-facing tools needed for most work:
 
 After setup, prefer the `bzr-*` commands described in `AGENT_TOOLING.md` rather than raw package paths. Do not spend context enumerating every wrapper unless troubleshooting installation.
 
+The installer changes user-level tooling state (wrappers, PATH, Codex MCP configuration, and optionally the Ghidra startup entry). Re-run it only for installation, repair, or an intentional refresh; a normal task should start with `bzr-redux-debug.cmd doctor` and the smallest relevant smoke check instead.
+
 ## Ghidra
 If Ghidra is not installed automatically, install it separately and either pass `-GhidraInstallDir` or set `BZR_GHIDRA_INSTALL_DIR` / `GHIDRA_INSTALL_DIR`.
 
@@ -76,3 +78,22 @@ bzr-cl.cmd /Bv
 ```
 
 If Ghidra and a valid Redux executable are configured, confirm the MCP endpoint is reachable and then use `AGENT_TOOLING.md` to choose the smallest tool for each RE question.
+
+For a minimal live verification, use the native backend so the PID remains readable:
+
+```powershell
+bzr-redux-debug.cmd launch --backend native --wait-seconds 15
+bzr-redux-debug.cmd status
+bzr-redux-debug.cmd read 0x00400000 --length 64
+bzr-redux-debug.cmd terminate
+```
+
+For a feature-specific hook, replace `0x00400000` with the validated patch site and preserve the emitted PID, bytes, and executable identity in the investigation notes. `--backend cdb` is a one-shot startup probe; its default `read` behavior relaunches the game, so it must not be used as proof about an earlier live session.
+
+For broad offline availability validation without polluting the worktree, run:
+
+```powershell
+.\reverse_engineering\tooling_smoke_pipeline.ps1 -TargetPath $env:BZR_GAME_EXE
+```
+
+The generated report and raw outputs are ignored under `reverse_engineering/tooling_smoke/`; review failures before treating a missing tool as an installer defect because optional Retoolkit components may be absent by design.

@@ -23,6 +23,54 @@ Already integrated through `scripts/install_agent_re_tooling.ps1` and/or the sta
 
 Do not re-add these as TODO items unless a concrete missing workflow or reliability problem is identified.
 
+## Verified Baseline — 2026-08-20
+
+This host has the configured GOG executable, Ghidra MCP wrapper/service launcher, Redux debugger bridge, x86 cdb, Frida process listing, ghidriff, Qiling, Rizin, DIE, Retoolkit (CAPA, FLOSS, YARA, entropy, PE-sieve, GoReSym, and Redress wrappers), CMake, Ninja, and MSVC wrappers on `PATH`. `bzr-redux-debug.cmd doctor` resolved the expected GOG install and debugger paths. The local Ghidra MCP endpoint was listening; a bare HTTP GET returned its expected protocol-level `406 Not Acceptable` response.
+
+The live validation used:
+
+```powershell
+bzr-redux-debug.cmd launch --backend native --wait-seconds 15
+bzr-redux-debug.cmd read 0x00400000 --length 64
+bzr-redux-debug.cmd read 0x00577290 --length 16
+bzr-redux-debug.cmd terminate
+```
+
+It read the active process (rather than a relaunch): the image base began with the expected `MZ` header and the active `0x00577290` site began `E9 9B 9D 77 6E`, consistent with the installed career-hook trampoline. Frida also enumerated `battlezone98redux.exe` during the session. The process was terminated after verification.
+
+The ignored offline smoke pipeline also completed successfully for DIE, Rizin information/imports/sections, `dumpbin` headers/imports, and entropy against the same executable. CAPA, FLOSS, and YARA returned their installed version surfaces; a future feature-specific task should run the potentially longer CAPA/FLOSS analyses instead of assuming their output is useful for every binary.
+
+### Confirmed Reliability Gap — Redux cdb sessions
+
+**Status:** Must be corrected or constrained before claiming persistent cdb live capture.
+
+During the same scan, `launch --backend cdb` reached game/shim initialization but encountered a first-chance access violation in `WINMM!wod32Message`; its target/controller were no longer alive after the wait. Further, `read` without `--pid` on a saved cdb/windbg state uses the bridge's deliberate `cdb_relaunch` fallback. That supplies a reproducible startup/base-image probe, not bytes from the earlier running game.
+
+Until the bridge changes, agents must use `--backend native` plus saved/explicit PID for persistent live memory reads. Treat the cdb path as one-shot and preserve its raw debugger output when it is used. Follow-up implementation/validation should determine whether cdb can remain attached through expected first-chance exceptions and should make stale-session detection explicit.
+
+## Priority 0 — Make Runtime Capture Semantics Explicit and Reliable
+
+**Status:** Documentation constrained; bridge hardening pending.
+
+### Goal
+
+Make the debugger bridge distinguish a one-shot cdb startup probe from a persistent live session, reject stale saved state, and provide an evidence-preserving capture path for hook bytes.
+
+### Required work
+
+1. Add an `alive`/stale-state indication to `status`; clear or reject a state whose target is gone.
+2. Make `read` report a relaunch only when the caller explicitly opts into a one-shot probe, rather than silently treating it like a session read.
+3. Add a named `probe`/`capture` mode with returned process lifetime, debugger return code, and a short raw-output artifact path.
+4. Investigate the cdb first-chance `WINMM!wod32Message` stop: classify it as expected/handled versus a debugger-launch regression before using cdb for settled capture.
+5. Add automated tests for native saved-PID reads, stale state, explicit cdb one-shot reads, and termination cleanup.
+
+### Acceptance criteria
+
+- A command cannot label relaunch bytes as an active-session read.
+- Stale saved state is visible and does not cause an implicit semantic switch.
+- Native capture records PID and reads the same process after settling.
+- cdb behavior is either proven persistent through relevant first-chance exceptions or is exposed solely as a one-shot probe.
+
 ## Priority 1 — Automated Patch Signature Pipeline
 
 **Status:** Next implementation target.
