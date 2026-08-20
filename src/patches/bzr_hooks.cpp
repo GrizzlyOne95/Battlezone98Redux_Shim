@@ -7,6 +7,7 @@
 #include "patcher.h"
 #include "shim_log.h"
 #include "ogre_shader_cache.h"
+#include "ogre_enhanced_light_selection.h"
 #include "native_ui.h"
 
 #include <Windows.h>
@@ -25637,6 +25638,7 @@ namespace BZROpenShim
 
     void RetryDeferredRuntimeHooks()
     {
+        InstallEnhancedLightSelectionIfPossible();
         InstallJumpSnipingProbeIfRequested();
         InstallUnitTurboHooksIfPossible();
         InstallCareerStatsMpHookIfPossible();
