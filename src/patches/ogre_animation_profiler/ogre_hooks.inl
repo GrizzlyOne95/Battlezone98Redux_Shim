@@ -45,7 +45,62 @@
                 }
             }
             SceneRenderScope scope;
+            SceneCameraScope cameraScope(camera);
             real(self, camera, viewport, includeOverlays);
+        }
+
+        void __fastcall HookSceneManagerRenderSingleObject(
+            void* self,
+            void*,
+            void* renderable,
+            const void* pass,
+            bool lightScissoringClipping,
+            bool doLightIteration,
+            const void* manualLightList)
+        {
+            FnSceneManagerRenderSingleObject real =
+                g_RealSceneManagerRenderSingleObject
+                    ? g_RealSceneManagerRenderSingleObject
+                    : reinterpret_cast<FnSceneManagerRenderSingleObject>(
+                        g_SceneManagerRenderSingleObjectDetour.trampoline);
+            if (!real)
+                return;
+            if (!g_Enabled.load(std::memory_order_relaxed))
+            {
+                real(
+                    self, renderable, pass, lightScissoringClipping,
+                    doLightIteration, manualLightList);
+                return;
+            }
+
+            const void* owner = nullptr;
+            const void* mesh = nullptr;
+            ResolveSubEntityOwnerAndMesh(renderable, owner, mesh);
+            RenderContributorSlot* slot = FindOrClaimRenderContributorSlot(
+                renderable, pass, t_CurrentSceneCamera, mesh);
+            CaptureRenderContributorMetadata(
+                slot, renderable, pass, t_CurrentSceneCamera, owner, mesh);
+            if (slot)
+            {
+                slot->calls.fetch_add(1, std::memory_order_relaxed);
+                if (t_SceneRenderDepth > 1)
+                    slot->shadowCalls.fetch_add(1, std::memory_order_relaxed);
+                else
+                    slot->mainCalls.fetch_add(1, std::memory_order_relaxed);
+            }
+
+            const uint64_t start = ReadQpc();
+            {
+                RenderContributorScope scope(slot);
+                real(
+                    self, renderable, pass, lightScissoringClipping,
+                    doLightIteration, manualLightList);
+            }
+            if (slot)
+            {
+                slot->ticks.fetch_add(
+                    ReadQpc() - start, std::memory_order_relaxed);
+            }
         }
 
         void __fastcall HookEntityUpdateRenderQueue(void* self, void*, void* renderQueue)

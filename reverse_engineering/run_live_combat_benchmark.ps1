@@ -3,9 +3,14 @@ param(
     [string]$MissionArgs = "lcbench.bzn",
     [ValidateSet("DX11", "DX9")]
     [string[]]$Renderer = @("DX11"),
-    [ValidateSet("quiet", "idle", "movement", "firing", "ai_idle", "combat")]
+    [ValidateSet(
+        "quiet", "idle", "movement", "firing", "flight", "ai_idle", "combat",
+        "dispersed")]
     [string[]]$Scenario = @("quiet", "idle", "movement", "firing", "combat"),
-    [ValidateSet("svtank", "svfigh", "avtank")]
+    [ValidateSet(
+        "svtank", "svfigh", "avtank", "avfigh", "avrckt", "avartl",
+        "avapc", "avwalk", "avmine", "avturr", "aspilo", "svapc",
+        "svwalk", "svmine", "svturr", "sspilo")]
     [string[]]$UnitOdf = @("avtank"),
     [int[]]$Count = @(0, 5, 10, 20, 40, 80),
     [double[]]$Distance = @(50.0),
@@ -13,6 +18,10 @@ param(
     [string[]]$Orientation = @("facing"),
     [double]$WarmupSeconds = 4.0,
     [double]$MeasureSeconds = 8.0,
+    # Dispersed-scenario geometry. Ignored by every other scenario.
+    [int]$ClusterCount = 4,
+    [double]$ClusterRadius = 300.0,
+    [double]$SpinSeconds = 0.0,
     [int]$RunTimeoutSeconds = 50,
     [string]$OutputRoot = "",
     [switch]$KillExisting,
@@ -52,6 +61,15 @@ foreach ($required in @(
 
 if ($Count | Where-Object { $_ -lt 0 -or $_ -gt 200 }) {
     throw "Count values must be within 0..200"
+}
+if ($ClusterCount -lt 1 -or $ClusterCount -gt 8) {
+    throw "ClusterCount must be within 1..8"
+}
+if ($ClusterRadius -lt 50.0 -or $ClusterRadius -gt 1500.0) {
+    throw "ClusterRadius must be within 50..1500"
+}
+if ($SpinSeconds -lt 0.0 -or $SpinSeconds -gt 60.0) {
+    throw "SpinSeconds must be within 0..60"
 }
 if ($ExternalPresentMon -and -not (Test-Path -LiteralPath $presentMonExe)) {
     throw "PresentMon was requested but not found: $presentMonExe"
@@ -155,6 +173,9 @@ distance = $($SpawnDistance.ToString("0.0###", $invariant))
 orientation = "$ViewOrientation"
 warmupSeconds = $($WarmupSeconds.ToString("0.0###", $invariant))
 measureSeconds = $($MeasureSeconds.ToString("0.0###", $invariant))
+clusterCount = $($ClusterCount.ToString($invariant))
+clusterRadius = $($ClusterRadius.ToString("0.0###", $invariant))
+spinSeconds = $($SpinSeconds.ToString("0.0###", $invariant))
 "@
     [System.IO.File]::WriteAllText($missionConfig, $content)
 }
@@ -322,6 +343,9 @@ try {
                             external_presentmon = [bool]$ExternalPresentMon
                             warmup_seconds = $WarmupSeconds
                             measure_seconds = $MeasureSeconds
+                            cluster_count = $ClusterCount
+                            cluster_radius = $ClusterRadius
+                            spin_seconds = $SpinSeconds
                             started_at = $startedAt.ToString("o")
                             ended_at = (Get-Date).ToString("o")
                             completed = $completed

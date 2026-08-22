@@ -417,6 +417,34 @@
             }
         };
 
+        struct SceneCameraScope
+        {
+            void* previous = nullptr;
+            explicit SceneCameraScope(void* current)
+                : previous(t_CurrentSceneCamera)
+            {
+                t_CurrentSceneCamera = current;
+            }
+            ~SceneCameraScope()
+            {
+                t_CurrentSceneCamera = previous;
+            }
+        };
+
+        struct RenderContributorScope
+        {
+            RenderContributorSlot* previous = nullptr;
+            explicit RenderContributorScope(RenderContributorSlot* current)
+                : previous(t_CurrentRenderContributor)
+            {
+                t_CurrentRenderContributor = current;
+            }
+            ~RenderContributorScope()
+            {
+                t_CurrentRenderContributor = previous;
+            }
+        };
+
         struct SceneRenderScope
         {
             // SceneManager::_renderScene is re-entrant while Ogre renders shadow
