@@ -7,6 +7,10 @@
 #include "patcher.h"
 #include "shim_log.h"
 #include "ogre_shader_cache.h"
+#include "ogre_enhanced_light_selection.h"
+#include "native_ui.h"
+#include "ogre_animation_profiler.h"
+#include "ogre_profiler_algorithms.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -145,6 +149,11 @@ namespace BZROpenShim
     using FnGameObjectGetTeam = int(__thiscall*)(void* thisPtr);
     using FnGameObjectRelation = bool(__thiscall*)(void* thisPtr, void* other);
     using FnChunkEffectSimulate = void(__thiscall*)(void* self, float dt);
+    using FnDynamicGeometryPrepare = void(__thiscall*)(void* self);
+    using FnDynamicGeometrySetSquaredViewDepth =
+        void(__thiscall*)(void* self, float squaredViewDepth);
+    using FnRenderQueueAddRenderable =
+        void(__thiscall*)(void* renderQueue, void* renderable, uint8_t queueGroup);
     using FnLegacyWorldUpdateRenderQueue = void(__thiscall*)(void* self, void* renderQueue);
     using FnGetPlayerHandle = int(__cdecl*)();
     using FnGameObjectGetObjByHandle = void* (__cdecl*)(int handle);
@@ -294,6 +303,10 @@ namespace BZROpenShim
     static FnExuGetTeamEngineFlameColor g_ExuFn_GetTeamEngineFlameColor = nullptr;
     static HMODULE g_ExuTeamEngineFlameColorModule = nullptr;
     static FnChunkEffectSimulate g_BzrFn_ChunkEffectSimulate = nullptr;
+    static FnDynamicGeometryPrepare g_BzrFn_DynamicGeometryPrepare = nullptr;
+    static FnDynamicGeometrySetSquaredViewDepth
+        g_BzrFn_DynamicGeometrySetSquaredViewDepth = nullptr;
+    static FnRenderQueueAddRenderable g_BzrFn_RenderQueueAddRenderable = nullptr;
     static FnLegacyWorldUpdateRenderQueue g_BzrFn_LegacyWorldUpdateRenderQueue = nullptr;
     static FnGetPlayerHandle g_BzrFn_GetPlayerHandle = nullptr;
     static FnGameObjectGetObjByHandle g_BzrFn_GameObjectGetObjByHandle = nullptr;
@@ -1777,6 +1790,25 @@ namespace BZROpenShim
         static bool g_RetargetPeriodHooksInstalled = false;
         static volatile long g_AttackRevealTraceBudget = 64;
         static InlineDetour32 g_AIUnitRemoveDetour = {};
+        static InlineDetour32 g_DynamicGeometryPrepareDetour = {};
+        static InlineDetour32 g_DynamicGeometrySetSquaredViewDepthDetour = {};
+        static bool g_DynamicAlphaDepthBatchingEnabled = true;
+        static uint32_t g_DynamicAlphaDepthBucketStride = 8;
+        thread_local bool g_InDynamicGeometryQueueUpdate = false;
+        thread_local uint32_t g_DynamicGeometryQueuedBatches = 0;
+        thread_local uint32_t g_DynamicGeometryMergeableBatches = 0;
+        thread_local uint32_t g_DynamicGeometryBlendedBatches = 0;
+        thread_local uint64_t g_DynamicGeometryQueuedVertices = 0;
+        thread_local uint64_t g_DynamicGeometryQueuedIndices = 0;
+        static constexpr size_t kDynamicGeometryMaterialSampleCapacity = 64;
+        thread_local uintptr_t
+            g_DynamicGeometryMaterialSamples[kDynamicGeometryMaterialSampleCapacity] = {};
+        thread_local uint32_t
+            g_DynamicGeometryMaterialBatchCounts[kDynamicGeometryMaterialSampleCapacity] = {};
+        thread_local uint32_t
+            g_DynamicGeometryMaterialBlendedCounts[kDynamicGeometryMaterialSampleCapacity] = {};
+        thread_local uint32_t g_DynamicGeometryDistinctMaterials = 0;
+
         static InlineDetour32 g_ChunkEffectCreateChunkDetour = {};
         static InlineDetour32 g_ChunkEffectCreateChunkletDetour = {};
         static bool g_ChunkEffectCreateHooksInstalled = false;
@@ -24815,6 +24847,10 @@ namespace BZROpenShim
         g_BzrFn_EngineFlameResolveTexture = nullptr;
         g_BzrFn_GetTeamNum = nullptr;
         g_BzrFn_ChunkEffectSimulate = nullptr;
+        g_BzrFn_DynamicGeometryPrepare = g_DynamicGeometryPrepareDetour.trampoline
+            ? reinterpret_cast<FnDynamicGeometryPrepare>(
+                g_DynamicGeometryPrepareDetour.trampoline)
+            : nullptr;
         g_BzrFn_LegacyWorldUpdateRenderQueue = nullptr;
         g_BzrFn_GetPlayerHandle = nullptr;
         g_BzrFn_GameObjectGetObjByHandle = nullptr;
@@ -25100,6 +25136,138 @@ namespace BZROpenShim
         g_BzrFn_HudSpriteLookup = reinterpret_cast<FnHudSpriteLookup>(0x0068BED0);
         g_BzrFn_GetTeamNum = reinterpret_cast<FnGetTeamNum>(0x005C8800);
         g_BzrFn_ChunkEffectSimulate = reinterpret_cast<FnChunkEffectSimulate>(0x004917F0);
+        g_DynamicAlphaDepthBatchingEnabled =
+            !(EnvFlagEnabled("OPENSHIM_DISABLE_DYNAMIC_ALPHA_BATCHING") ||
+              EnvFlagEnabled("BZR_DISABLE_DYNAMIC_ALPHA_BATCHING"));
+        long dynamicAlphaDepthStride =
+            static_cast<long>(g_DynamicAlphaDepthBucketStride);
+        if (TryGetEnvLong(
+                "OPENSHIM_DYNAMIC_ALPHA_DEPTH_BUCKET_STRIDE",
+                dynamicAlphaDepthStride))
+        {
+            if (dynamicAlphaDepthStride < 1)
+                dynamicAlphaDepthStride = 1;
+            if (dynamicAlphaDepthStride > 32)
+                dynamicAlphaDepthStride = 32;
+            g_DynamicAlphaDepthBucketStride =
+                static_cast<uint32_t>(dynamicAlphaDepthStride);
+            if (g_DynamicAlphaDepthBucketStride <= 1)
+                g_DynamicAlphaDepthBatchingEnabled = false;
+        }
+        if (!g_IsSteamExe && g_DynamicAlphaDepthBatchingEnabled)
+        {
+            static const uint8_t kDynamicGeometryDepthPrologue[] =
+            {
+                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08
+            };
+            if (InstallInlineDetour32(
+                    g_DynamicGeometrySetSquaredViewDepthDetour,
+                    0x0067A780,
+                    reinterpret_cast<void*>(
+                        &DynamicGeometrySetSquaredViewDepthHook),
+                    sizeof(kDynamicGeometryDepthPrologue),
+                    kDynamicGeometryDepthPrologue,
+                    sizeof(kDynamicGeometryDepthPrologue)))
+            {
+                g_BzrFn_DynamicGeometrySetSquaredViewDepth =
+                    reinterpret_cast<FnDynamicGeometrySetSquaredViewDepth>(
+                        g_DynamicGeometrySetSquaredViewDepthDetour.trampoline);
+                LogShimA(
+                    LogLevel::Info,
+                    "render",
+                    "Dynamic alpha batching installed target=0x0067A780 stride=%u optOut=OPENSHIM_DISABLE_DYNAMIC_ALPHA_BATCHING",
+                    g_DynamicAlphaDepthBucketStride);
+            }
+            else
+            {
+                g_DynamicAlphaDepthBatchingEnabled = false;
+                LogShimA(
+                    LogLevel::Warn,
+                    "render",
+                    "Dynamic alpha batching unavailable: GOG depth-key prologue mismatch");
+            }
+        }
+        if (!g_IsSteamExe && IsOgreAnimationProfilerCollecting())
+        {
+            static const uint8_t kDynamicGeometryPreparePrologue[] =
+            {
+                0x55, 0x8B, 0xEC, 0x6A, 0xFF
+            };
+            if (InstallInlineDetour32(
+                    g_DynamicGeometryPrepareDetour,
+                    0x00678CD0,
+                    reinterpret_cast<void*>(&DynamicGeometryPrepareHook),
+                    sizeof(kDynamicGeometryPreparePrologue),
+                    kDynamicGeometryPreparePrologue,
+                    sizeof(kDynamicGeometryPreparePrologue)))
+            {
+                g_BzrFn_DynamicGeometryPrepare =
+                    reinterpret_cast<FnDynamicGeometryPrepare>(
+                        g_DynamicGeometryPrepareDetour.trampoline);
+                LogShimA(
+                    LogLevel::Info,
+                    "ogre-profile",
+                    "[OgreProfile] installed GOG DynamicGeometry::prepareForSubmit observer target=0x00678CD0 trampoline=0x%p",
+                    g_DynamicGeometryPrepareDetour.trampoline);
+            }
+            else
+            {
+                LogShimA(
+                    LogLevel::Warn,
+                    "ogre-profile",
+                    "[OgreProfile] GOG DynamicGeometry::prepareForSubmit prologue mismatch; native rebuild attribution unavailable");
+            }
+
+            constexpr uintptr_t kRenderQueueAddRenderableIatSlot = 0x00869B64;
+            void* const currentAddRenderable =
+                *reinterpret_cast<void**>(kRenderQueueAddRenderableIatSlot);
+            if (currentAddRenderable ==
+                reinterpret_cast<void*>(&DynamicGeometryAddRenderableHook))
+            {
+                // A repeated resolver pass keeps the original captured below.
+            }
+            else if (currentAddRenderable)
+            {
+                MEMORY_BASIC_INFORMATION targetInfo{};
+                const bool executableTarget =
+                    VirtualQuery(
+                        currentAddRenderable, &targetInfo, sizeof(targetInfo)) ==
+                        sizeof(targetInfo) &&
+                    targetInfo.State == MEM_COMMIT &&
+                    targetInfo.Type == MEM_IMAGE &&
+                    (targetInfo.Protect & (PAGE_GUARD | PAGE_NOACCESS)) == 0 &&
+                    ((targetInfo.Protect & 0xFFu) == PAGE_EXECUTE ||
+                     (targetInfo.Protect & 0xFFu) == PAGE_EXECUTE_READ ||
+                     (targetInfo.Protect & 0xFFu) == PAGE_EXECUTE_READWRITE ||
+                     (targetInfo.Protect & 0xFFu) == PAGE_EXECUTE_WRITECOPY);
+                if (executableTarget)
+                {
+                    g_BzrFn_RenderQueueAddRenderable =
+                        reinterpret_cast<FnRenderQueueAddRenderable>(currentAddRenderable);
+                    if (!WritePointerValue(
+                            kRenderQueueAddRenderableIatSlot,
+                            reinterpret_cast<void*>(&DynamicGeometryAddRenderableHook)))
+                    {
+                        g_BzrFn_RenderQueueAddRenderable = nullptr;
+                    }
+                }
+            }
+            if (g_BzrFn_RenderQueueAddRenderable)
+            {
+                LogShimA(
+                    LogLevel::Info,
+                    "ogre-profile",
+                    "[OgreProfile] installed DynamicGeometry addRenderable batch counter IAT=0x00869B64 original=0x%p",
+                    reinterpret_cast<void*>(g_BzrFn_RenderQueueAddRenderable));
+            }
+            else
+            {
+                LogShimA(
+                    LogLevel::Warn,
+                    "ogre-profile",
+                    "[OgreProfile] DynamicGeometry addRenderable batch counter unavailable");
+            }
+        }
         // FUN_00679570: _updateRenderQueue override of the game's world
         // renderable container — the only exe-side caller of
         // Ogre::RenderQueue::addRenderable. Vtable slot 0x00892728.
@@ -25614,6 +25782,7 @@ namespace BZROpenShim
         InstallBzrNetRouteObserverIfPossible();
         EnsureInputBindingPopulateHookScaffold();
         EnsureOptionsParentCtorHookScaffold();
+        EnsureNativeUiMainMenuDiagnosticScaffold();
         LogShimSettingsUiStatus();
         Log(L"[MAPTRACE] Map refresh trace: %hs\n",
             (EnvFlagEnabled("OPENSHIM_TRACE_MAP_REFRESH") ||
@@ -25635,6 +25804,7 @@ namespace BZROpenShim
 
     void RetryDeferredRuntimeHooks()
     {
+        InstallEnhancedLightSelectionIfPossible();
         InstallJumpSnipingProbeIfRequested();
         InstallUnitTurboHooksIfPossible();
         InstallCareerStatsMpHookIfPossible();
@@ -25662,6 +25832,7 @@ namespace BZROpenShim
         InstallConstructorRemoteBuildFixIfPossible();
         EnsureInputBindingPopulateHookScaffold();
         EnsureOptionsParentCtorHookScaffold();
+        EnsureNativeUiMainMenuDiagnosticScaffold();
     }
 
 
@@ -28265,7 +28436,43 @@ namespace BZROpenShim
     void __fastcall LegacyWorldUpdateRenderQueueHook(void* thisPtr, void* /*edx*/, void* renderQueue)
     {
         if (g_BzrFn_LegacyWorldUpdateRenderQueue && thisPtr)
-            g_BzrFn_LegacyWorldUpdateRenderQueue(thisPtr, renderQueue);
+        {
+            if (IsOgreAnimationProfilerCollecting() &&
+                g_BzrFn_RenderQueueAddRenderable)
+            {
+                g_DynamicGeometryQueuedBatches = 0;
+                g_DynamicGeometryMergeableBatches = 0;
+                g_DynamicGeometryBlendedBatches = 0;
+                g_DynamicGeometryQueuedVertices = 0;
+                g_DynamicGeometryQueuedIndices = 0;
+                g_DynamicGeometryDistinctMaterials = 0;
+                g_InDynamicGeometryQueueUpdate = true;
+                g_BzrFn_LegacyWorldUpdateRenderQueue(thisPtr, renderQueue);
+                g_InDynamicGeometryQueueUpdate = false;
+                RecordNativeDynamicGeometryQueueSample(
+                    thisPtr,
+                    g_DynamicGeometryQueuedBatches,
+                    g_DynamicGeometryMergeableBatches,
+                    g_DynamicGeometryBlendedBatches,
+                    g_DynamicGeometryDistinctMaterials,
+                    g_DynamicGeometryQueuedVertices,
+                    g_DynamicGeometryQueuedIndices);
+                for (uint32_t i = 0;
+                     i < g_DynamicGeometryDistinctMaterials;
+                     ++i)
+                {
+                    RecordNativeDynamicGeometryMaterialSample(
+                        reinterpret_cast<const void*>(
+                            g_DynamicGeometryMaterialSamples[i]),
+                        g_DynamicGeometryMaterialBatchCounts[i],
+                        g_DynamicGeometryMaterialBlendedCounts[i]);
+                }
+            }
+            else
+            {
+                g_BzrFn_LegacyWorldUpdateRenderQueue(thisPtr, renderQueue);
+            }
+        }
 
         // This Ogre callback is continuous while a world is rendered; unlike
         // ChunkEffect::Simulate it does not depend on active debris/effects.
@@ -29049,6 +29256,147 @@ namespace BZROpenShim
         }
     }
 
+    void __fastcall DynamicGeometryPrepareHook(void* thisPtr, void* /*edx*/)
+    {
+        if (!g_BzrFn_DynamicGeometryPrepare || !thisPtr)
+            return;
+        if (!IsOgreAnimationProfilerCollecting())
+        {
+            g_BzrFn_DynamicGeometryPrepare(thisPtr);
+            return;
+        }
+
+        bool preparedBefore = false;
+        __try
+        {
+            const auto* bytes = static_cast<const uint8_t*>(thisPtr);
+            preparedBefore = bytes[0x1DC] != 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            preparedBefore = false;
+        }
+
+        LARGE_INTEGER start{};
+        LARGE_INTEGER end{};
+        QueryPerformanceCounter(&start);
+        g_BzrFn_DynamicGeometryPrepare(thisPtr);
+        QueryPerformanceCounter(&end);
+
+        bool preparedAfter = false;
+        __try
+        {
+            preparedAfter = static_cast<const uint8_t*>(thisPtr)[0x1DC] != 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            preparedAfter = false;
+        }
+        RecordNativeDynamicGeometryPrepareSample(
+            thisPtr,
+            !preparedBefore && preparedAfter,
+            static_cast<uint64_t>(end.QuadPart - start.QuadPart));
+    }
+
+    void __fastcall DynamicGeometrySetSquaredViewDepthHook(
+        void* thisPtr,
+        void* /*edx*/,
+        float squaredViewDepth)
+    {
+        if (!g_BzrFn_DynamicGeometrySetSquaredViewDepth || !thisPtr)
+            return;
+
+        g_BzrFn_DynamicGeometrySetSquaredViewDepth(thisPtr, squaredViewDepth);
+        if (!g_DynamicAlphaDepthBatchingEnabled)
+            return;
+
+        __try
+        {
+            auto* bytes = static_cast<uint8_t*>(thisPtr);
+            // +0x31 is the stock material-derived blending classification and
+            // +0xAC is the render-queue group. Stock already quantizes groups
+            // below 100 to 32 logarithmic depth slices per distance doubling.
+            // Coarsen only blended world effects; opaque geometry, overlays,
+            // the true squared view depth at +0xB0, and material state remain
+            // untouched.
+            if (bytes[0x31] != 0 && bytes[0xAC] < 100)
+            {
+                auto* depthKey = reinterpret_cast<float*>(bytes + 0x34);
+                *depthKey = OgreProfilerAlgorithms::QuantizeDynamicAlphaDepthKey(
+                    *depthKey,
+                    g_DynamicAlphaDepthBucketStride);
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            // Preserve stock behavior if an unexpected batch layout appears.
+        }
+    }
+
+    void __fastcall DynamicGeometryAddRenderableHook(
+        void* renderQueue,
+        void* /*edx*/,
+        void* renderable,
+        uint8_t queueGroup)
+    {
+        if (!g_BzrFn_RenderQueueAddRenderable)
+            return;
+        if (g_InDynamicGeometryQueueUpdate)
+        {
+            ++g_DynamicGeometryQueuedBatches;
+            __try
+            {
+                const auto* bytes = static_cast<const uint8_t*>(renderable);
+                if (bytes[0x30] != 0)
+                    ++g_DynamicGeometryMergeableBatches;
+                if (bytes[0x31] != 0)
+                    ++g_DynamicGeometryBlendedBatches;
+                g_DynamicGeometryQueuedVertices +=
+                    *reinterpret_cast<const uint32_t*>(bytes + 0x58);
+                g_DynamicGeometryQueuedIndices +=
+                    *reinterpret_cast<const uint32_t*>(bytes + 0x88);
+
+                const uintptr_t materialIdentity =
+                    *reinterpret_cast<const uintptr_t*>(bytes + 0x3C);
+                if (materialIdentity != 0)
+                {
+                    uint32_t materialIndex = g_DynamicGeometryDistinctMaterials;
+                    for (uint32_t i = 0;
+                         i < g_DynamicGeometryDistinctMaterials;
+                         ++i)
+                    {
+                        if (g_DynamicGeometryMaterialSamples[i] == materialIdentity)
+                        {
+                            materialIndex = i;
+                            break;
+                        }
+                    }
+                    if (materialIndex == g_DynamicGeometryDistinctMaterials &&
+                        g_DynamicGeometryDistinctMaterials <
+                            kDynamicGeometryMaterialSampleCapacity)
+                    {
+                        g_DynamicGeometryMaterialSamples[materialIndex] = materialIdentity;
+                        g_DynamicGeometryMaterialBatchCounts[materialIndex] = 0;
+                        g_DynamicGeometryMaterialBlendedCounts[materialIndex] = 0;
+                        ++g_DynamicGeometryDistinctMaterials;
+                    }
+                    if (materialIndex < g_DynamicGeometryDistinctMaterials)
+                    {
+                        ++g_DynamicGeometryMaterialBatchCounts[materialIndex];
+                        if (bytes[0x31] != 0)
+                            ++g_DynamicGeometryMaterialBlendedCounts[materialIndex];
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                // Keep the aggregate batch count even when an unsupported
+                // DynamicGeometryBatch layout is encountered.
+            }
+        }
+        g_BzrFn_RenderQueueAddRenderable(renderQueue, renderable, queueGroup);
+    }
+
     void __fastcall ChunkEffectSimulateHook(void* thisPtr, void* /*edx*/, float dt)
     {
         if (!g_BzrFn_ChunkEffectSimulate || !thisPtr)
@@ -29085,7 +29433,25 @@ namespace BZROpenShim
         // render queue every rendered frame.
         TickChunkProxyDebug(nullptr, false);
         LogChunkEffectRuntimeSample(thisPtr, dt);
-        g_BzrFn_ChunkEffectSimulate(thisPtr, dt);
+        if (IsOgreAnimationProfilerCollecting())
+        {
+            uint32_t activeChunks = 0;
+            TryReadChunkEffectCount(
+                reinterpret_cast<const uint8_t*>(thisPtr),
+                activeChunks);
+            LARGE_INTEGER start{};
+            LARGE_INTEGER end{};
+            QueryPerformanceCounter(&start);
+            g_BzrFn_ChunkEffectSimulate(thisPtr, dt);
+            QueryPerformanceCounter(&end);
+            RecordNativeChunkSimulationSample(
+                activeChunks,
+                static_cast<uint64_t>(end.QuadPart - start.QuadPart));
+        }
+        else
+        {
+            g_BzrFn_ChunkEffectSimulate(thisPtr, dt);
+        }
     }
 
     bool __cdecl HandleCommandHelpBan(uint16_t id, const char* cmd)

@@ -34,6 +34,14 @@ jobs:
         shell: pwsh
         run: ./setup-dev.ps1
 
+      - name: Run Ogre profiler algorithm tests
+        shell: pwsh
+        run: ./scripts/run_ogre_profiler_tests.ps1
+
+      - name: Run INI/config tests
+        shell: pwsh
+        run: ./scripts/run_ini_tests.ps1
+
       - name: Validate DX11 Enhanced FXAA shader
         shell: pwsh
         run: |

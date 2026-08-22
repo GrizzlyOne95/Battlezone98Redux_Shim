@@ -175,6 +175,32 @@ function Get-FileLengthOrZero {
     }
 }
 
+function Get-FilePrefixSignature {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) {
+        return $null
+    }
+    try {
+        $stream = [System.IO.File]::Open(
+            $Path,
+            [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::Read,
+            [System.IO.FileShare]::ReadWrite)
+        try {
+            $buffer = New-Object byte[] 256
+            $count = $stream.Read($buffer, 0, $buffer.Length)
+            if ($count -le 0) {
+                return ""
+            }
+            return [Convert]::ToBase64String($buffer, 0, $count)
+        } finally {
+            $stream.Dispose()
+        }
+    } catch {
+        return $null
+    }
+}
+
 function Get-LinesAfterOffset {
     param(
         [string]$Path,
@@ -452,6 +478,8 @@ foreach ($delayMs in $SpaceDelaysMs) {
 
     $preShimOffset = Get-FileLengthOrZero -Path $gameLog
     $preBzOffset = Get-FileLengthOrZero -Path $bzLogger
+    $preShimPrefix = Get-FilePrefixSignature -Path $gameLog
+    $preBzPrefix = Get-FilePrefixSignature -Path $bzLogger
     $preDumpNames = @()
     if (Test-Path $dumpRoot) {
         $preDumpNames = @(Get-ChildItem -LiteralPath $dumpRoot -File | Select-Object -ExpandProperty Name)
@@ -472,6 +500,18 @@ foreach ($delayMs in $SpaceDelaysMs) {
     $windowReady = $false
     if ($windowWaitSeconds -gt 0) {
         $windowReady = Wait-ForMainWindow -Process $gameProc -TimeoutSeconds $windowWaitSeconds
+    }
+
+    # Redux truncates and recreates its logs on a normal launch. A new log can
+    # grow past the old byte offset before the window appears, so length alone
+    # cannot detect the replacement. Reset only when the stable prefix changed.
+    if ((Get-FilePrefixSignature -Path $gameLog) -ne $preShimPrefix) {
+        $preShimOffset = 0L
+        $liveShimOffset = 0L
+    }
+    if ((Get-FilePrefixSignature -Path $bzLogger) -ne $preBzPrefix) {
+        $preBzOffset = 0L
+        $liveBzOffset = 0L
     }
     $spaceSent = $false
     $spaceSentAt = $null
@@ -619,7 +659,10 @@ foreach ($delayMs in $SpaceDelaysMs) {
             if ($chunkActivityLines.Count -gt 0) {
                 $chunkActivityDetected = $true
                 $chunkActivityDetectedAt = Get-Date
-                $tailDeadline = [DateTime]::Max($tailDeadline, $chunkActivityDetectedAt.AddSeconds($PostChunkActivitySeconds))
+                $postActivityDeadline = $chunkActivityDetectedAt.AddSeconds($PostChunkActivitySeconds)
+                if ($postActivityDeadline -gt $tailDeadline) {
+                    $tailDeadline = $postActivityDeadline
+                }
                 continue
             }
 
