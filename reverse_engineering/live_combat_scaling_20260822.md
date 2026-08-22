@@ -212,9 +212,14 @@ Raw timestamped captures are under the ignored `reverse_engineering/snapshots/li
 Investigation commits:
 
 - `6b38d016` — deterministic Instant Action mission, runner, and analyzer;
-- `9d0fb5ca` — pass/source diagnostics and the DX11 skin-source correction.
+- `9d0fb5ca` — pass/source diagnostics and the DX11 skin-source correction;
+- `adf484e0` — technical report and roadmap status.
 
 The branch is `agent/live-combat-scaling`. It is intentionally separate from
-PR #41 and does not merge that PR. Push/PR/CI state is recorded in the final
-task handoff because it is external state that can change after this report is
-committed.
+PR #41 and does not merge that PR. The branch is pushed to `origin`; no pull
+request was opened. The manually dispatched GitHub `Build Win32` workflow
+passed on `adf484e0`, including the network baseline check, pinned Ogre setup,
+profiler/INI tests, FXAA validation, Release Win32 build, output verification,
+and artifact upload:
+
+https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/actions/runs/32558118526
