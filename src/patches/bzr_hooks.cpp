@@ -1541,6 +1541,7 @@ namespace BZROpenShim
         };
 
 #include "chunk_proxy_generic_meshes.inl"
+#include "ogre_entity_frustum_cull.inl"
 
         struct ChunkProxySlot
         {
@@ -26050,6 +26051,7 @@ namespace BZROpenShim
         InstallParticleTemplateDedupeHookIfPossible();
         InstallUiManualObjectDedupeHookIfPossible();
         InstallSceneTeardownForgetHooksIfPossible();
+        InstallEntityFrustumCullingIfEnabled();
         InstallMissionTransitionSeamIfPossible();
         PinDirect3DModulesForShutdown();
         InstallMultiplayerFlagRenderHookIfPossible();
@@ -26120,6 +26122,15 @@ namespace BZROpenShim
             g_EnableChunkMeshProxy &&
             !(EnvFlagEnabled("OPENSHIM_DISABLE_GENERIC_CHUNK_BATCH") ||
               EnvFlagEnabled("BZR_DISABLE_GENERIC_CHUNK_BATCH"));
+        // Restores the per-object frustum test that Redux's DefaultSceneManager
+        // never performs. Measured: 20 tanks 50 m behind the camera cost exactly
+        // as many main-view submissions as 20 tanks in front of it.
+        g_EntityFrustumCullEnabled =
+            !(EnvFlagEnabled("OPENSHIM_DISABLE_ENTITY_FRUSTUM_CULLING") ||
+              EnvFlagEnabled("BZR_DISABLE_ENTITY_FRUSTUM_CULLING"));
+        g_FrustumCullCensusEnabled =
+            EnvFlagEnabled("OPENSHIM_FRUSTUM_CULL_CENSUS") ||
+            EnvFlagEnabled("BZR_FRUSTUM_CULL_CENSUS");
         // Diagnostic/regression seam, not a gameplay policy. It exists so the
         // batch-failure fallback can be proven at runtime rather than argued
         // from the source; see RehydrateGenericChunkBatchSlotsToEntities().
@@ -26617,6 +26628,7 @@ namespace BZROpenShim
         InstallUiManualObjectDedupeHookIfPossible();
         InstallEmissionLightFixIfPossible();
         InstallSceneTeardownForgetHooksIfPossible();
+        InstallEntityFrustumCullingIfEnabled();
         InstallMissionTransitionSeamIfPossible();
         PinDirect3DModulesForShutdown();
         InstallMultiplayerFlagRenderHookIfPossible();
