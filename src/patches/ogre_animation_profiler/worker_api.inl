@@ -64,6 +64,21 @@
                     if (renderer)
                     {
                         dx11CreationAttempted = true;
+                        // GetModuleHandleA answers while the loader may still
+                        // be finishing this module, and patching in that window
+                        // is what crashed the DX11 colorspace observer twice on
+                        // 2026-08-22. Take a real reference first so this waits
+                        // on the loader lock. See include/iat_patch.h.
+                        DWORD loaderWaitError = 0;
+                        if (!BZROpenShim::IatPatch::WaitForModuleLoadToFinish(
+                                renderer, &loaderWaitError))
+                        {
+                            LogShimA(
+                                LogLevel::Warn,
+                                kComponent,
+                                "[OgreProfile] could not take a loader reference on RenderSystem_Direct3D11.dll (err=%lu); patching without a loader wait",
+                                loaderWaitError);
+                        }
                         g_Dx11ImportsPatched.store(
                             InstallDx11CreationObservers(renderer),
                             std::memory_order_release);
