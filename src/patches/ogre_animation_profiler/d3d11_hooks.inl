@@ -58,6 +58,7 @@
             if (enabled)
             {
                 const uint64_t elapsed = ReadQpc() - start;
+                RecordCurrentRenderOperation(renderOperation);
                 g_RenderSystemSubmissions.fetch_add(1, std::memory_order_relaxed);
                 g_RenderSystemSubmissionTicks.fetch_add(elapsed, std::memory_order_relaxed);
                 AtomicMax(g_RenderSystemSubmissionMaxTicks, elapsed);
@@ -74,6 +75,13 @@
             {
                 g_DrawIndexedCalls.fetch_add(1, std::memory_order_relaxed);
                 g_DrawIndexedIndices.fetch_add(indexCount, std::memory_order_relaxed);
+                if (t_CurrentRenderContributor)
+                {
+                    t_CurrentRenderContributor->indexedDraws.fetch_add(
+                        1, std::memory_order_relaxed);
+                    t_CurrentRenderContributor->drawnIndices.fetch_add(
+                        indexCount, std::memory_order_relaxed);
+                }
             }
             g_RealDrawIndexed(self, indexCount, startIndexLocation, baseVertexLocation);
         }
@@ -87,6 +95,13 @@
             {
                 g_DrawCalls.fetch_add(1, std::memory_order_relaxed);
                 g_DrawVertices.fetch_add(vertexCount, std::memory_order_relaxed);
+                if (t_CurrentRenderContributor)
+                {
+                    t_CurrentRenderContributor->draws.fetch_add(
+                        1, std::memory_order_relaxed);
+                    t_CurrentRenderContributor->drawnVertices.fetch_add(
+                        vertexCount, std::memory_order_relaxed);
+                }
             }
             g_RealDraw(self, vertexCount, startVertexLocation);
         }
@@ -170,6 +185,14 @@
                 g_DrawIndexedInstancedIndices.fetch_add(
                     static_cast<uint64_t>(indexCountPerInstance) * instanceCount,
                     std::memory_order_relaxed);
+                if (t_CurrentRenderContributor)
+                {
+                    t_CurrentRenderContributor->indexedDraws.fetch_add(
+                        1, std::memory_order_relaxed);
+                    t_CurrentRenderContributor->drawnIndices.fetch_add(
+                        static_cast<uint64_t>(indexCountPerInstance) * instanceCount,
+                        std::memory_order_relaxed);
+                }
             }
             g_RealDrawIndexedInstanced(
                 self, indexCountPerInstance, instanceCount, startIndexLocation,
@@ -186,6 +209,14 @@
                 g_DrawInstancedVertices.fetch_add(
                     static_cast<uint64_t>(vertexCountPerInstance) * instanceCount,
                     std::memory_order_relaxed);
+                if (t_CurrentRenderContributor)
+                {
+                    t_CurrentRenderContributor->draws.fetch_add(
+                        1, std::memory_order_relaxed);
+                    t_CurrentRenderContributor->drawnVertices.fetch_add(
+                        static_cast<uint64_t>(vertexCountPerInstance) * instanceCount,
+                        std::memory_order_relaxed);
+                }
             }
             g_RealDrawInstanced(
                 self, vertexCountPerInstance, instanceCount,

@@ -71,6 +71,7 @@
             if (enabled)
             {
                 const uint64_t elapsed = ReadQpc() - start;
+                RecordCurrentRenderOperation(renderOperation);
                 g_RenderSystemSubmissions.fetch_add(1, std::memory_order_relaxed);
                 g_RenderSystemSubmissionTicks.fetch_add(elapsed, std::memory_order_relaxed);
                 AtomicMax(g_RenderSystemSubmissionMaxTicks, elapsed);
@@ -111,9 +112,18 @@
             if (g_Enabled.load(std::memory_order_relaxed))
             {
                 g_DrawCalls.fetch_add(1, std::memory_order_relaxed);
+                const uint64_t vertices =
+                    D3D9PrimitiveVertexCount(primitiveType, primitiveCount);
                 g_DrawVertices.fetch_add(
-                    D3D9PrimitiveVertexCount(primitiveType, primitiveCount),
+                    vertices,
                     std::memory_order_relaxed);
+                if (t_CurrentRenderContributor)
+                {
+                    t_CurrentRenderContributor->draws.fetch_add(
+                        1, std::memory_order_relaxed);
+                    t_CurrentRenderContributor->drawnVertices.fetch_add(
+                        vertices, std::memory_order_relaxed);
+                }
             }
             return g_RealD3D9DrawPrimitive(
                 self, primitiveType, startVertex, primitiveCount);
@@ -131,9 +141,18 @@
             if (g_Enabled.load(std::memory_order_relaxed))
             {
                 g_DrawIndexedCalls.fetch_add(1, std::memory_order_relaxed);
+                const uint64_t indices =
+                    D3D9PrimitiveVertexCount(primitiveType, primitiveCount);
                 g_DrawIndexedIndices.fetch_add(
-                    D3D9PrimitiveVertexCount(primitiveType, primitiveCount),
+                    indices,
                     std::memory_order_relaxed);
+                if (t_CurrentRenderContributor)
+                {
+                    t_CurrentRenderContributor->indexedDraws.fetch_add(
+                        1, std::memory_order_relaxed);
+                    t_CurrentRenderContributor->drawnIndices.fetch_add(
+                        indices, std::memory_order_relaxed);
+                }
             }
             return g_RealD3D9DrawIndexedPrimitive(
                 self, primitiveType, baseVertexIndex, minVertexIndex,
@@ -148,6 +167,9 @@
             if (g_Enabled.load(std::memory_order_relaxed))
             {
                 g_D3D9RenderStateCalls.fetch_add(1, std::memory_order_relaxed);
+                if (t_CurrentRenderContributor)
+                    t_CurrentRenderContributor->renderStates.fetch_add(
+                        1, std::memory_order_relaxed);
                 if (state == D3DRS_ALPHABLENDENABLE || state == D3DRS_SRCBLEND ||
                     state == D3DRS_DESTBLEND || state == D3DRS_BLENDOP ||
                     state == D3DRS_SEPARATEALPHABLENDENABLE ||
@@ -155,6 +177,9 @@
                     state == D3DRS_DESTBLENDALPHA || state == D3DRS_BLENDOPALPHA)
                 {
                     g_D3D9BlendStateCalls.fetch_add(1, std::memory_order_relaxed);
+                    if (t_CurrentRenderContributor)
+                        t_CurrentRenderContributor->blendStates.fetch_add(
+                            1, std::memory_order_relaxed);
                 }
             }
             return g_RealD3D9SetRenderState(self, state, value);
@@ -166,7 +191,12 @@
             IDirect3DBaseTexture9* texture)
         {
             if (g_Enabled.load(std::memory_order_relaxed))
+            {
                 g_D3D9TextureCalls.fetch_add(1, std::memory_order_relaxed);
+                if (t_CurrentRenderContributor)
+                    t_CurrentRenderContributor->textureSets.fetch_add(
+                        1, std::memory_order_relaxed);
+            }
             return g_RealD3D9SetTexture(self, stage, texture);
         }
 
@@ -177,7 +207,12 @@
             DWORD value)
         {
             if (g_Enabled.load(std::memory_order_relaxed))
+            {
                 g_D3D9TextureStageStateCalls.fetch_add(1, std::memory_order_relaxed);
+                if (t_CurrentRenderContributor)
+                    t_CurrentRenderContributor->textureStageSets.fetch_add(
+                        1, std::memory_order_relaxed);
+            }
             return g_RealD3D9SetTextureStageState(self, stage, state, value);
         }
 
@@ -188,7 +223,12 @@
             DWORD value)
         {
             if (g_Enabled.load(std::memory_order_relaxed))
+            {
                 g_D3D9SamplerStateCalls.fetch_add(1, std::memory_order_relaxed);
+                if (t_CurrentRenderContributor)
+                    t_CurrentRenderContributor->samplerSets.fetch_add(
+                        1, std::memory_order_relaxed);
+            }
             return g_RealD3D9SetSamplerState(self, sampler, state, value);
         }
 
@@ -197,7 +237,12 @@
             IDirect3DVertexShader9* shader)
         {
             if (g_Enabled.load(std::memory_order_relaxed))
+            {
                 g_D3D9VertexShaderCalls.fetch_add(1, std::memory_order_relaxed);
+                if (t_CurrentRenderContributor)
+                    t_CurrentRenderContributor->vertexShaderSets.fetch_add(
+                        1, std::memory_order_relaxed);
+            }
             return g_RealD3D9SetVertexShader(self, shader);
         }
 
@@ -206,7 +251,12 @@
             IDirect3DPixelShader9* shader)
         {
             if (g_Enabled.load(std::memory_order_relaxed))
+            {
                 g_D3D9PixelShaderCalls.fetch_add(1, std::memory_order_relaxed);
+                if (t_CurrentRenderContributor)
+                    t_CurrentRenderContributor->pixelShaderSets.fetch_add(
+                        1, std::memory_order_relaxed);
+            }
             return g_RealD3D9SetPixelShader(self, shader);
         }
 
