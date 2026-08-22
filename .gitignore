@@ -78,6 +78,7 @@ scripts/*
 !scripts/Compare-TerrainCaptures.ps1
 !scripts/New-TerrainHdSmokeTiles.ps1
 !scripts/run_ogre_profiler_tests.ps1
+!scripts/run_ini_tests.ps1
 !scripts/terrain_hd_tiles.example.json
 !scripts/audit_chunk_payload_coverage.py
 !scripts/match_legacy_chunk_pieces.py
