@@ -11,10 +11,26 @@
                     : "[OgreProfile] diagnostics disabled source=%s; installing native chunk shadow policy only",
                 g_ProfilerRequestSource);
 
+            const ConfiguredRenderer configuredRenderer =
+                ReadConfiguredRenderer();
+            const bool observeD3D11 =
+                configuredRenderer == ConfiguredRenderer::Direct3D11;
+            const bool observeD3D9 =
+                configuredRenderer == ConfiguredRenderer::Direct3D9;
+            if (collectProfilerData)
+            {
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    "[OgreProfile] configured renderer=%s; renderer-specific observers are restricted to the selected backend",
+                    ConfiguredRendererName(configuredRenderer));
+            }
+
             unsigned ogreAttempts = 0;
             bool ogreInstallFinished = false;
-            bool dx11Attempted = false;
-            unsigned rendererObserverAttempts = 0;
+            bool dx11CreationAttempted = false;
+            unsigned dx11ObserverAttempts = 0;
+            unsigned d3d9ObserverAttempts = 0;
             ULONGLONG nextOgreAttempt = 0;
             ULONGLONG nextRendererObserverAttempt = 0;
             ULONGLONG lastReport = GetTickCount64();
@@ -37,18 +53,12 @@
                     nextOgreAttempt = loopNow + 100;
                 }
 
-                if (collectProfilerData && !dx11Attempted)
+                if (collectProfilerData && observeD3D11 && !dx11CreationAttempted)
                 {
                     HMODULE renderer = GetModuleHandleA("RenderSystem_Direct3D11.dll");
                     if (renderer)
                     {
-                        if (!g_RenderSystemObserverInstalled.load(std::memory_order_acquire))
-                        {
-                            ++rendererObserverAttempts;
-                            InstallRendererSubmissionObserver(renderer);
-                            nextRendererObserverAttempt = loopNow + 100;
-                        }
-                        dx11Attempted = true;
+                        dx11CreationAttempted = true;
                         g_Dx11ImportsPatched.store(
                             InstallDx11CreationObservers(renderer),
                             std::memory_order_release);
@@ -56,18 +66,39 @@
                     }
                 }
 
-                if (collectProfilerData && dx11Attempted &&
-                    !g_RenderSystemObserverInstalled.load(std::memory_order_acquire) &&
-                    loopNow >= nextRendererObserverAttempt &&
-                    rendererObserverAttempts < 50)
+                if (collectProfilerData && loopNow >= nextRendererObserverAttempt)
                 {
-                    HMODULE renderer = GetModuleHandleA("RenderSystem_Direct3D11.dll");
-                    if (renderer)
+                    bool retryNeeded = false;
+                    if (observeD3D11 &&
+                        !g_D3D11RenderSystemObserverInstalled.load(
+                            std::memory_order_acquire) &&
+                        dx11ObserverAttempts < 50)
                     {
-                        ++rendererObserverAttempts;
-                        InstallRendererSubmissionObserver(renderer);
-                        nextRendererObserverAttempt = loopNow + 100;
+                        HMODULE renderer =
+                            GetModuleHandleA("RenderSystem_Direct3D11.dll");
+                        if (renderer)
+                        {
+                            ++dx11ObserverAttempts;
+                            InstallD3D11RendererSubmissionObserver(renderer);
+                        }
+                        retryNeeded = true;
                     }
+                    if (observeD3D9 &&
+                        !g_D3D9RenderSystemObserverInstalled.load(
+                            std::memory_order_acquire) &&
+                        d3d9ObserverAttempts < 50)
+                    {
+                        HMODULE renderer =
+                            GetModuleHandleA("RenderSystem_Direct3D9.dll");
+                        if (renderer)
+                        {
+                            ++d3d9ObserverAttempts;
+                            InstallD3D9RendererObservers(renderer);
+                        }
+                        retryNeeded = true;
+                    }
+                    if (retryNeeded)
+                        nextRendererObserverAttempt = loopNow + 100;
                 }
 
                 const ULONGLONG now = GetTickCount64();
@@ -76,6 +107,7 @@
                     if (g_OgreHooksInstalled.load(std::memory_order_acquire) ||
                         g_RenderQueueHookInstalled.load(std::memory_order_acquire) ||
                         g_Dx11ContextObserved.load(std::memory_order_acquire) ||
+                        g_D3D9DeviceObserved.load(std::memory_order_acquire) ||
                         g_PresentObserved.load(std::memory_order_acquire))
                         ReportAndResetInterval(now - lastReport);
                     lastReport = now;

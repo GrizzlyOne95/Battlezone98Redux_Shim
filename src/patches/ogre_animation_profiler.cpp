@@ -3,6 +3,7 @@
 #include "ogre_animation_profiler/patch_scopes.inl"
 #include "ogre_animation_profiler/ogre_hooks.inl"
 #include "ogre_animation_profiler/d3d11_hooks.inl"
+#include "ogre_animation_profiler/d3d9_hooks.inl"
 #include "ogre_animation_profiler/observer_install.inl"
 #include "ogre_animation_profiler/csv_top.inl"
 #include "ogre_animation_profiler/interval_report.inl"

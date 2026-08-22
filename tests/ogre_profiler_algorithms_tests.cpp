@@ -101,7 +101,7 @@ namespace
         Require(ComputeProfilerState(true, true, true, false, false, false, false) ==
                 ProfilerState::OgreReady, "Ogre-ready state failed");
         Require(ComputeProfilerState(true, true, true, true, true, false, false) ==
-                ProfilerState::WaitingForDX11, "waiting-for-Present state failed");
+                ProfilerState::WaitingForRenderer, "waiting-for-Present state failed");
         Require(ComputeProfilerState(true, true, true, true, true, true, false) ==
                 ProfilerState::FullyActive, "fully-active state failed");
         Require(ComputeProfilerState(true, true, false, true, true, false, true) ==

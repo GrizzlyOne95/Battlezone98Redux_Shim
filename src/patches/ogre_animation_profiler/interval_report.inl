@@ -60,6 +60,20 @@
             const uint64_t updateTicks = g_UpdateSubresourceTicks.exchange(0, std::memory_order_acq_rel);
             const uint64_t updateMaxTicks = g_UpdateSubresourceMaxTicks.exchange(0, std::memory_order_acq_rel);
             const uint64_t presents = g_Presents.exchange(0, std::memory_order_acq_rel);
+            const uint64_t d3d9RenderStates =
+                g_D3D9RenderStateCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t d3d9BlendStates =
+                g_D3D9BlendStateCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t d3d9Textures =
+                g_D3D9TextureCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t d3d9TextureStages =
+                g_D3D9TextureStageStateCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t d3d9Samplers =
+                g_D3D9SamplerStateCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t d3d9VertexShaders =
+                g_D3D9VertexShaderCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t d3d9PixelShaders =
+                g_D3D9PixelShaderCalls.exchange(0, std::memory_order_acq_rel);
             const uint64_t frameSamples = g_FrameTimeSamples.exchange(0, std::memory_order_acq_rel);
             const uint64_t frameTicks = g_FrameTimeTicks.exchange(0, std::memory_order_acq_rel);
             const uint64_t frameMaxTicks = g_FrameTimeMaxTicks.exchange(0, std::memory_order_acq_rel);
@@ -341,6 +355,23 @@
                 static_cast<unsigned long long>(over1667),
                 static_cast<unsigned long long>(over2500),
                 static_cast<unsigned long long>(over3333));
+
+            if (g_D3D9DeviceObserved.load(std::memory_order_acquire))
+            {
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    "[OgreProfile][D3D9] DrawPrimitive=%.1f/f DrawIndexedPrimitive=%.1f/f renderState=%.1f/f blendState=%.1f/f texture=%.1f/f textureStage=%.1f/f sampler=%.1f/f vertexShader=%.1f/f pixelShader=%.1f/f",
+                    static_cast<double>(drawCalls) / frameDivisor,
+                    static_cast<double>(drawIndexedCalls) / frameDivisor,
+                    static_cast<double>(d3d9RenderStates) / frameDivisor,
+                    static_cast<double>(d3d9BlendStates) / frameDivisor,
+                    static_cast<double>(d3d9Textures) / frameDivisor,
+                    static_cast<double>(d3d9TextureStages) / frameDivisor,
+                    static_cast<double>(d3d9Samplers) / frameDivisor,
+                    static_cast<double>(d3d9VertexShaders) / frameDivisor,
+                    static_cast<double>(d3d9PixelShaders) / frameDivisor);
+            }
 
             if (duplicateSkin || duplicateAnimation || duplicateRenderQueue)
             {

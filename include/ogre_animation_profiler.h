@@ -31,7 +31,7 @@ namespace BZROpenShim
     bool IsOgreAnimationProfilerRequested();
 
     // Starts the read-only profiler. The profiler observes Ogre animation and
-    // render submission plus basic DX11 Draw/DrawIndexed activity. It does not
+    // render submission plus bounded DX9/DX11 draw and state activity. It does not
     // change animation state, culling decisions, materials, or render state.
     void InitializeOgreAnimationProfiler();
 

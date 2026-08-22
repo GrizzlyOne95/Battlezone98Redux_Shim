@@ -26,7 +26,7 @@
             return installed != 0;
         }
 
-        bool InstallRendererSubmissionObserver(HMODULE renderer)
+        bool InstallD3D11RendererSubmissionObserver(HMODULE renderer)
         {
             if (!renderer)
                 return false;
@@ -89,6 +89,8 @@
                 g_RealD3D11RenderSystemRender =
                     reinterpret_cast<FnD3D11RenderSystemRender>(
                         g_D3D11RenderSystemRenderDetour.trampoline);
+                g_D3D11RenderSystemObserverInstalled.store(
+                    true, std::memory_order_release);
                 g_RenderSystemObserverInstalled.store(true, std::memory_order_release);
             }
             return installed;
@@ -129,7 +131,19 @@
                 g_OgreGetCastShadows ? "yes" : "no",
                 g_OgreSetCastShadows ? "yes" : "no");
 
+            const bool validatedChunkShadowRuntime =
+                IsValidatedGogChunkShadowRuntime(ogreModule);
             if (g_ChunkShadowPolicyEnabled.load(std::memory_order_acquire) &&
+                !validatedChunkShadowRuntime)
+            {
+                LogShimA(
+                    LogLevel::Warn,
+                    kComponent,
+                    "[OgreProfile][ChunkShadowPolicy] unavailable: executable/Ogre PE identity is not the validated GOG 2.2.301 runtime");
+            }
+
+            if (g_ChunkShadowPolicyEnabled.load(std::memory_order_acquire) &&
+                validatedChunkShadowRuntime &&
                 g_OgreGetCastShadows && g_OgreEntityGetMesh &&
                 g_OgreGetResourceName && g_OgreSetCastShadows &&
                 !g_ChunkShadowHookInstalled.load(std::memory_order_acquire))

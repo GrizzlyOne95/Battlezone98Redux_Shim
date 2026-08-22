@@ -9,6 +9,7 @@
 #include <Windows.h>
 #include <TlHelp32.h>
 #include <d3d11.h>
+#include <d3d9.h>
 #include <dxgi.h>
 #include <process.h>
 
@@ -89,6 +90,8 @@ namespace BZROpenShim
         using FnMovableGetCastShadows = bool(__thiscall*)(const void*);
         using FnMovableSetCastShadows = void(__thiscall*)(void*, bool);
         using FnD3D11RenderSystemRender = void(__thiscall*)(void*, const void*);
+        using FnD3D9RenderSystemRender = void(__thiscall*)(void*, const void*);
+        using FnD3D9GetActiveDevice = IDirect3DDevice9*(__cdecl*)();
         using FnD3D11RenderSystemGetDevice = void*(__thiscall*)(void*);
         using FnOgreD3D11DeviceGetImmediateContext =
             ID3D11DeviceContext*(__thiscall*)(void*);
@@ -134,6 +137,25 @@ namespace BZROpenShim
             ID3D11DeviceContext*, ID3D11Buffer*, UINT);
         using FnSwapChainPresent = HRESULT(STDMETHODCALLTYPE*)(
             IDXGISwapChain*, UINT, UINT);
+        using FnD3D9SwapChainPresent = HRESULT(STDMETHODCALLTYPE*)(
+            IDirect3DSwapChain9*, const RECT*, const RECT*, HWND,
+            const RGNDATA*, DWORD);
+        using FnD3D9DrawPrimitive = HRESULT(STDMETHODCALLTYPE*)(
+            IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT);
+        using FnD3D9DrawIndexedPrimitive = HRESULT(STDMETHODCALLTYPE*)(
+            IDirect3DDevice9*, D3DPRIMITIVETYPE, INT, UINT, UINT, UINT, UINT);
+        using FnD3D9SetRenderState = HRESULT(STDMETHODCALLTYPE*)(
+            IDirect3DDevice9*, D3DRENDERSTATETYPE, DWORD);
+        using FnD3D9SetTexture = HRESULT(STDMETHODCALLTYPE*)(
+            IDirect3DDevice9*, DWORD, IDirect3DBaseTexture9*);
+        using FnD3D9SetTextureStageState = HRESULT(STDMETHODCALLTYPE*)(
+            IDirect3DDevice9*, DWORD, D3DTEXTURESTAGESTATETYPE, DWORD);
+        using FnD3D9SetSamplerState = HRESULT(STDMETHODCALLTYPE*)(
+            IDirect3DDevice9*, DWORD, D3DSAMPLERSTATETYPE, DWORD);
+        using FnD3D9SetVertexShader = HRESULT(STDMETHODCALLTYPE*)(
+            IDirect3DDevice9*, IDirect3DVertexShader9*);
+        using FnD3D9SetPixelShader = HRESULT(STDMETHODCALLTYPE*)(
+            IDirect3DDevice9*, IDirect3DPixelShader9*);
 
         using OgreProfilerAlgorithms::ProfilerState;
 
@@ -257,6 +279,9 @@ namespace BZROpenShim
         std::atomic<bool> g_ChunkShadowPolicyEnabled{ false };
         std::atomic<bool> g_Dx11ImportsPatched{ false };
         std::atomic<bool> g_Dx11ContextObserved{ false };
+        std::atomic<bool> g_D3D9DeviceObserved{ false };
+        std::atomic<bool> g_D3D11RenderSystemObserverInstalled{ false };
+        std::atomic<bool> g_D3D9RenderSystemObserverInstalled{ false };
         std::atomic<bool> g_PresentObserved{ false };
         std::atomic<bool> g_RenderSystemObserverInstalled{ false };
         std::atomic<uintptr_t> g_RenderContextIdentity{ 0 };
@@ -272,6 +297,7 @@ namespace BZROpenShim
         EntryDetour32 g_EntityUpdateAnimationCoreDetour{};
         EntryDetour32 g_SoftwareVertexBlendDetour{};
         EntryDetour32 g_D3D11RenderSystemRenderDetour{};
+        EntryDetour32 g_D3D9RenderSystemRenderDetour{};
 
         FnEntityUpdateAnimation g_RealEntityUpdateAnimation = nullptr;
         FnEntityUpdateAnimation g_RealEntityUpdateAnimationCore = nullptr;
@@ -283,6 +309,8 @@ namespace BZROpenShim
         FnMovableSetCastShadows g_OgreSetCastShadows = nullptr;
         FnSoftwareVertexBlend g_RealSoftwareVertexBlend = nullptr;
         FnD3D11RenderSystemRender g_RealD3D11RenderSystemRender = nullptr;
+        FnD3D9RenderSystemRender g_RealD3D9RenderSystemRender = nullptr;
+        FnD3D9GetActiveDevice g_D3D9GetActiveDevice = nullptr;
         FnD3D11RenderSystemGetDevice g_D3D11RenderSystemGetDevice = nullptr;
         FnOgreD3D11DeviceGetImmediateContext g_OgreD3D11DeviceGetImmediateContext = nullptr;
 
@@ -300,6 +328,15 @@ namespace BZROpenShim
         FnContextDrawIndexedInstancedIndirect g_RealDrawIndexedInstancedIndirect = nullptr;
         FnContextDrawInstancedIndirect g_RealDrawInstancedIndirect = nullptr;
         FnSwapChainPresent g_RealPresent = nullptr;
+        FnD3D9SwapChainPresent g_RealD3D9SwapChainPresent = nullptr;
+        FnD3D9DrawPrimitive g_RealD3D9DrawPrimitive = nullptr;
+        FnD3D9DrawIndexedPrimitive g_RealD3D9DrawIndexedPrimitive = nullptr;
+        FnD3D9SetRenderState g_RealD3D9SetRenderState = nullptr;
+        FnD3D9SetTexture g_RealD3D9SetTexture = nullptr;
+        FnD3D9SetTextureStageState g_RealD3D9SetTextureStageState = nullptr;
+        FnD3D9SetSamplerState g_RealD3D9SetSamplerState = nullptr;
+        FnD3D9SetVertexShader g_RealD3D9SetVertexShader = nullptr;
+        FnD3D9SetPixelShader g_RealD3D9SetPixelShader = nullptr;
 
         std::atomic<uint64_t> g_AnimationCalls{ 0 };
         std::atomic<uint64_t> g_AnimationTicks{ 0 };
@@ -356,6 +393,13 @@ namespace BZROpenShim
         std::atomic<uint64_t> g_UpdateSubresourceTicks{ 0 };
         std::atomic<uint64_t> g_UpdateSubresourceMaxTicks{ 0 };
         std::atomic<uint64_t> g_Presents{ 0 };
+        std::atomic<uint64_t> g_D3D9RenderStateCalls{ 0 };
+        std::atomic<uint64_t> g_D3D9BlendStateCalls{ 0 };
+        std::atomic<uint64_t> g_D3D9TextureCalls{ 0 };
+        std::atomic<uint64_t> g_D3D9TextureStageStateCalls{ 0 };
+        std::atomic<uint64_t> g_D3D9SamplerStateCalls{ 0 };
+        std::atomic<uint64_t> g_D3D9VertexShaderCalls{ 0 };
+        std::atomic<uint64_t> g_D3D9PixelShaderCalls{ 0 };
         std::atomic<uint64_t> g_FrameEpoch{ 1 };
         std::atomic<uint64_t> g_LastPresentQpc{ 0 };
         std::atomic<uint64_t> g_FrameTimeSamples{ 0 };

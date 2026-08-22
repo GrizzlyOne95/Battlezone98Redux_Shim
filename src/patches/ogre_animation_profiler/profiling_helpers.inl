@@ -6,6 +6,118 @@
             return std::string(path) + "openshim.ini";
         }
 
+        enum class ConfiguredRenderer
+        {
+            Unknown,
+            Direct3D9,
+            Direct3D11,
+            Other,
+        };
+
+        const char* ConfiguredRendererName(ConfiguredRenderer renderer)
+        {
+            switch (renderer)
+            {
+            case ConfiguredRenderer::Direct3D9:
+                return "Direct3D9";
+            case ConfiguredRenderer::Direct3D11:
+                return "Direct3D11";
+            case ConfiguredRenderer::Other:
+                return "other";
+            default:
+                return "unknown";
+            }
+        }
+
+        ConfiguredRenderer ReadConfiguredRenderer()
+        {
+            char path[MAX_PATH] = {};
+            const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+            if (!length || length >= MAX_PATH)
+                return ConfiguredRenderer::Unknown;
+
+            char* slash = std::strrchr(path, '\\');
+            if (!slash)
+                return ConfiguredRenderer::Unknown;
+            const size_t directoryLength = static_cast<size_t>(slash + 1 - path);
+            if (directoryLength + sizeof("Ogre.cfg") > MAX_PATH)
+                return ConfiguredRenderer::Unknown;
+            strcpy_s(slash + 1, MAX_PATH - directoryLength, "Ogre.cfg");
+
+            HANDLE file = CreateFileA(
+                path,
+                GENERIC_READ,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                nullptr,
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                nullptr);
+            if (file == INVALID_HANDLE_VALUE)
+                return ConfiguredRenderer::Unknown;
+
+            char contents[4096] = {};
+            DWORD bytesRead = 0;
+            const BOOL readOk = ReadFile(
+                file,
+                contents,
+                static_cast<DWORD>(sizeof(contents) - 1),
+                &bytesRead,
+                nullptr);
+            CloseHandle(file);
+            if (!readOk || !bytesRead)
+                return ConfiguredRenderer::Unknown;
+            contents[bytesRead] = '\0';
+
+            const char key[] = "Render System=";
+            const char* value = std::strstr(contents, key);
+            if (!value)
+                return ConfiguredRenderer::Unknown;
+            value += sizeof(key) - 1;
+            if (std::strncmp(value, "Direct3D9 Rendering Subsystem", 29) == 0)
+                return ConfiguredRenderer::Direct3D9;
+            if (std::strncmp(value, "Direct3D11 Rendering Subsystem", 30) == 0)
+                return ConfiguredRenderer::Direct3D11;
+            return ConfiguredRenderer::Other;
+        }
+
+        bool ModuleImageMatches(
+            HMODULE module,
+            DWORD expectedTimestamp,
+            DWORD expectedImageSize)
+        {
+            if (!module)
+                return false;
+            __try
+            {
+                const auto* base = reinterpret_cast<const uint8_t*>(module);
+                const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+                if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+                    return false;
+                const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+                    base + dos->e_lfanew);
+                return nt->Signature == IMAGE_NT_SIGNATURE &&
+                    nt->FileHeader.TimeDateStamp == expectedTimestamp &&
+                    nt->OptionalHeader.SizeOfImage == expectedImageSize;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        bool IsValidatedGogChunkShadowRuntime(HMODULE ogreModule)
+        {
+            // Battlezone 2.2.301 GOG executable SHA-256:
+            // 8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413.
+            // Retail OgreMain.dll SHA-256:
+            // E5E693960B95AD0D60733A3B688464A6C6CBA234E86950698F9C2BEA4ACFEB45.
+            // PE identity is checked before touching a vtable; exports and the
+            // exact target function pointer provide a second ABI check.
+            return ModuleImageMatches(
+                       GetModuleHandleA(nullptr), 0x58D9D6CCu, 0x0290F000u) &&
+                ModuleImageMatches(ogreModule, 0x5866BF6Au, 0x00A65000u);
+        }
+
         DWORD ReadProcessEnvironmentValue(
             const char* name,
             char* value,
@@ -131,7 +243,7 @@
             case ProfilerState::Disabled: return "Disabled";
             case ProfilerState::WaitingForOgre: return "WaitingForOgre";
             case ProfilerState::OgreReady: return "OgreReady";
-            case ProfilerState::WaitingForDX11: return "WaitingForDX11";
+            case ProfilerState::WaitingForRenderer: return "WaitingForRenderer";
             case ProfilerState::FullyActive: return "FullyActive";
             case ProfilerState::PartialDiagnostics: return "PartialDiagnostics";
             case ProfilerState::Failed: return "Failed";
@@ -149,13 +261,14 @@
             LogShimA(
                 next == ProfilerState::Failed ? LogLevel::Warn : LogLevel::Info,
                 kComponent,
-                "[OgreProfile] state %s -> %s reason=%s ogre=%s renderQueue=%s dx11Context=%s present=%s",
+                "[OgreProfile] state %s -> %s reason=%s ogre=%s renderQueue=%s dx11Context=%s d3d9Device=%s present=%s",
                 ProfilerStateName(previous),
                 ProfilerStateName(next),
                 reason ? reason : "unspecified",
                 g_OgreHooksInstalled.load(std::memory_order_acquire) ? "active" : "unavailable",
                 g_RenderQueueHookInstalled.load(std::memory_order_acquire) ? "active" : "unavailable",
                 g_Dx11ContextObserved.load(std::memory_order_acquire) ? "active" : "unavailable",
+                g_D3D9DeviceObserved.load(std::memory_order_acquire) ? "active" : "unavailable",
                 g_PresentObserved.load(std::memory_order_acquire) ? "active" : "unavailable");
         }
 
@@ -164,6 +277,7 @@
             const bool ogre = g_OgreHooksInstalled.load(std::memory_order_acquire);
             const bool dx11Imports = g_Dx11ImportsPatched.load(std::memory_order_acquire);
             const bool dx11Context = g_Dx11ContextObserved.load(std::memory_order_acquire);
+            const bool d3d9Device = g_D3D9DeviceObserved.load(std::memory_order_acquire);
             const bool present = g_PresentObserved.load(std::memory_order_acquire);
             const bool partial =
                 g_RenderQueueHookInstalled.load(std::memory_order_acquire) ||
@@ -173,8 +287,10 @@
                     g_Enabled.load(std::memory_order_acquire),
                     g_OgreInstallAttempted.load(std::memory_order_acquire),
                     ogre,
-                    dx11Imports,
-                    dx11Context,
+                    dx11Imports ||
+                        g_D3D9RenderSystemObserverInstalled.load(
+                            std::memory_order_acquire),
+                    dx11Context || d3d9Device,
                     present,
                     partial),
                 reason);
