@@ -279,7 +279,12 @@ Investigation commits so far:
 - `f666045b` — technique/pass metadata, analyzer output, and weapon/flight test
   matrix extensions;
 - `4957d318` — hash-gated canonical generic chunklet batch.
+- `123d60ec` — technical report, profiler documentation, and roadmap status.
 
-The branch is `agent/live-render-optimization`. It has not been merged and no
-PR was opened. Push and GitHub Build Win32 validation are pending the report
-commit and will be recorded in a final status update.
+The branch is `agent/live-render-optimization` and is pushed to `origin`. It
+has not been merged and no PR was opened. Manually dispatched GitHub
+`Build Win32` run
+[`32580118488`](https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/actions/runs/32580118488)
+passed on `123d60ec`, including the network baseline, pinned Ogre setup,
+profiler/INI tests, FXAA shader validation, Release Win32 build, output
+verification, and artifact upload.
