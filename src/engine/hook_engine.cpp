@@ -151,6 +151,17 @@ namespace HookEngine
 
         for (const auto& target : targets)
         {
+            // Runtime filtering happens on PatchDef before this function is
+            // called. Do not scan a target that no longer has an eligible
+            // patch definition; this keeps storefront/feature-disabled hooks
+            // from paying even the signature-scan cost on an inapplicable
+            // runtime.
+            const bool targetEligible = std::any_of(
+                patches.begin(), patches.end(),
+                [&target](const PatchDef& patch) { return patch.name == target.name; });
+            if (!targetEligible)
+                continue;
+
             auto idaPattern = ParseIdaPattern(target.ida_pattern);
             if (idaPattern.empty()) continue;
 

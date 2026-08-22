@@ -173,7 +173,8 @@ namespace
             while(p<end)
             {
                 p=json.find('"',p);if(p==std::string::npos||p>=end)break;size_t strEnd=0;std::string decoded;
-                if(!ParseString(json,p,strEnd,&decoded)||strEnd>end)break;if(!first)replacement+=',';
+                if (!ParseString(json, p, strEnd, &decoded) || strEnd > end) break;
+                if (!first) replacement += ',';
                 replacement+=Quote(Alias(g_Endpoints,decoded,"endpoint_"));first=false;p=strEnd;
             }
             replacement+=']';json.replace(start,end-start,replacement);scan=start+replacement.size();

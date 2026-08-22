@@ -25,12 +25,13 @@ namespace std
 
 namespace BZROpenShim
 {
-    // Returns true when the opt-in Ogre animation/render profiler was requested
-    // through OPENSHIM_PROFILE_OGRE_ANIMATION=1 or openshim.ini.
+    // Returns true when the Ogre animation/render profiler is enabled. The
+    // diagnostic build defaults it on; OPENSHIM_PROFILE_OGRE_ANIMATION or
+    // [Diagnostics] ProfileOgreAnimation can explicitly override that default.
     bool IsOgreAnimationProfilerRequested();
 
     // Starts the read-only profiler. The profiler observes Ogre animation and
-    // render submission plus basic DX11 Draw/DrawIndexed activity. It does not
+    // render submission plus bounded DX9/DX11 draw and state activity. It does not
     // change animation state, culling decisions, materials, or render state.
     void InitializeOgreAnimationProfiler();
 
@@ -38,4 +39,28 @@ namespace BZROpenShim
     // process-lifetime, matching the lifetime of the Ogre/D3D objects they wrap;
     // after shutdown they simply forward without collecting data.
     void ShutdownOgreAnimationProfiler();
+
+    // Hot-path bridge used by the native ChunkEffect hook. The elapsed value
+    // is in QueryPerformanceCounter ticks; collection is lock-free and does
+    // nothing while the profiler is disabled.
+    bool IsOgreAnimationProfilerCollecting() noexcept;
+    void RecordNativeChunkSimulationSample(
+        uint32_t activeChunks,
+        uint64_t elapsedQpcTicks) noexcept;
+    void RecordNativeDynamicGeometryPrepareSample(
+        const void* objectIdentity,
+        bool rebuilt,
+        uint64_t elapsedQpcTicks) noexcept;
+    void RecordNativeDynamicGeometryQueueSample(
+        const void* objectIdentity,
+        uint32_t batchCount,
+        uint32_t mergeableBatchCount,
+        uint32_t blendedBatchCount,
+        uint32_t distinctMaterialCount,
+        uint64_t vertexCount,
+        uint64_t indexCount) noexcept;
+    void RecordNativeDynamicGeometryMaterialSample(
+        const void* materialIdentity,
+        uint32_t batchCount,
+        uint32_t blendedBatchCount) noexcept;
 }

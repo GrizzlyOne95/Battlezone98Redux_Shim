@@ -323,6 +323,13 @@ EXU can already manipulate a surprising amount of the live environment:
 [*] Visibility
 [/list]
 
+[b]DX11 Enhanced PSSM experiment:[/b] Campaign Reimagined now has an isolated
+BZCC-informed shadow upgrade branch with comparison PCF, overlap-aware cascade
+blending, bounded normal receiver offset, and outer-cascade fade. Static shader,
+math, and DX11 format validation pass; live visual tuning remains pending. The
+baseline renderer and Ogre binaries are unchanged, and stabilization remains a
+separate CPU-camera investigation rather than an assumed shader fix.
+
 Eventually I'd like to wrap this into higher-level environment presets.
 
 For example:
@@ -434,6 +441,7 @@ The original community tracker also contains a number of feature requests that a
 [*] [b]Restore additional legacy TRN lighting parameters[/b] - investigate parameters that no longer influence Redux rendering, including vehicle/car shadow-related settings.
 [*] [b]Multiple terrain atlases / per-tile material selection[/b] - allow terrain tiles to reference different materials/atlases rather than requiring one monolithic CSV/atlas arrangement.
 [*] [b]Ogre headlight controls[/b] - expose brightness, color, range and related headlight properties to EXU/ODF where practical.
+[*] [b]Stable DX11 Enhanced dynamic lights[/b] - source, binary, and unattended runtime evidence confirms Enhanced High already reaches its 24-light shader capacity despite Ogre's eight-light default sentinel. An experimental OpenShim path contribution-ranks each object's candidates with deterministic cutoff retention; static, shader, simulation, and non-interactive runtime tests pass, while live visual/performance acceptance remains before release.
 [*] [b]Improved Ogre lighting / normal-map response[/b] - continue enhanced-lighting work, but keep broad shader/renderer rewrites below correctness and stability work.
 [*] [b]Backport draw_geom or equivalent geometry render effect[/b] - only if it provides capabilities not already covered cleanly by EXU/Ogre entity APIs and the restored destruction-chunk path.
 [/list]
@@ -496,6 +504,7 @@ A lot of things that used to be on this roadmap have already moved into working 
 
 [list]
 [*] Restored physical destruction chunks
+[*] Stock GOG DX9/DX11 destruction-tail submission reduction (coarser compatible smoke/effect batching plus no shadow passes for exact native chunk1/chunk2 debris)
 [*] Lua-driven Ogre UI/overlay support
 [*] Runtime material swapping
 [*] Radar scaling
