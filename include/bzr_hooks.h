@@ -70,6 +70,11 @@ namespace BZROpenShim
     void __fastcall EngineFlameControlHook(void* thisPtr, void* edx);
     void __fastcall EngineFlameSubmitHook(void* thisPtr, void* edx, void* camera);
     void __fastcall ChunkEffectSimulateHook(void* thisPtr, void* edx, float dt);
+    void __fastcall DynamicGeometryPrepareHook(void* thisPtr, void* edx);
+    void __fastcall DynamicGeometrySetSquaredViewDepthHook(
+        void* thisPtr, void* edx, float squaredViewDepth);
+    void __fastcall DynamicGeometryAddRenderableHook(
+        void* renderQueue, void* edx, void* renderable, uint8_t queueGroup);
     void __fastcall LegacyWorldUpdateRenderQueueHook(void* thisPtr, void* edx, void* renderQueue);
     void __cdecl HandleUnderAttackAlert(float currentTime);
     void __fastcall DamageRevealProbeHook(void* victim, void* edx, void* damage);
