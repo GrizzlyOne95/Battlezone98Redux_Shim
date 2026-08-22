@@ -115,6 +115,10 @@ The reports include:
 - exact `chunk1/chunk2` Entity names, meshes, stored shadow state, and
   render-queue calls;
 - native chunk shadow-policy query/suppression counts.
+- bounded top render-contributor rows keyed by renderable type, mesh, material,
+  technique/scheme/LOD/pass, and camera, with main/shadow, RenderOperation,
+  draw, vertex/index, CPU, and DX9 state attribution. The live-combat analyzer
+  aggregates these rows into `render_contributors.csv`.
 
 A stable core subset is appended to `openshim_ogre_profile.csv`; the more
 detailed chunk/renderer histograms remain in the one-second log rows. The CSV
@@ -158,6 +162,11 @@ These policies are separate from collection and default on in the validated GOG
 - blended world-effect logarithmic depth keys use stride 8 to permit compatible
   `DynamicGeometry` batches to merge; opt out with
   `OPENSHIM_DISABLE_DYNAMIC_ALPHA_BATCHING=1`.
+- exact canonical generic impact `chunk1/chunk2` geometry is rebuilt into one
+  dynamic ManualObject section while preserving native simulation, transforms,
+  `scarpmat2`, and its normal/glow schemes. Any changed payload hash keeps the
+  exact per-Entity path. Opt out with
+  `OPENSHIM_DISABLE_GENERIC_CHUNK_BATCH=1`.
 
 Neither policy changes piece count, native simulation/lifetime, main-pass mesh,
 opaque geometry, material, or shader selection. See
@@ -181,6 +190,8 @@ OPENSHIM_DISABLE_DX11_SKIN_SOURCE_SHADOW_FIX=1
 
 See `live_combat_scaling_20260822.md` for the deterministic IA mission, layout
 evidence, and profiler-enabled/disabled DX9/DX11 A/B results.
+See `live_render_optimization_20260822.md` for contributor attribution,
+generic-impact batching, distance, DX9-state, and stock-asset sweep evidence.
 
 ## Tests
 

@@ -504,7 +504,7 @@ A lot of things that used to be on this roadmap have already moved into working 
 
 [list]
 [*] Restored physical destruction chunks
-[*] Stock GOG DX9/DX11 destruction-tail submission reduction (coarser compatible smoke/effect batching plus no shadow passes for exact native chunk1/chunk2 debris)
+[*] Stock GOG DX9/DX11 destruction/live-fire submission reduction (coarser compatible smoke/effect batching, no shadow passes for exact native chunk1/chunk2 debris, and hash-gated batching of identical generic impact chunklets while preserving custom/authored debris)
 [*] GOG DX11 animated-mesh readback fix (software-skinned position/normal sources are given CPU shadow buffers on first use instead of forcing a GPU staging readback for every visible unit every frame)
 [*] Lua-driven Ogre UI/overlay support
 [*] Runtime material swapping
