@@ -24,6 +24,7 @@
 #define _STLP_MSVC 1
 #endif
 #include <OgreVertexIndexData.h>
+#include <OgreHardwareBufferManager.h>
 #ifdef OPENSHIM_OGRE_RESTORE_REGISTER
 #undef register
 #undef OPENSHIM_OGRE_RESTORE_REGISTER
@@ -52,6 +53,10 @@ namespace BZROpenShim
             "OPENSHIM_DISABLE_NATIVE_CHUNK_SHADOW_FIX";
         constexpr char kLegacyDisableChunkShadowFixSwitch[] =
             "BZR_DISABLE_NATIVE_CHUNK_SHADOW_FIX";
+        constexpr char kDisableDx11SkinSourceShadowFixSwitch[] =
+            "OPENSHIM_DISABLE_DX11_SKIN_SOURCE_SHADOW_FIX";
+        constexpr char kLegacyDisableDx11SkinSourceShadowFixSwitch[] =
+            "BZR_DISABLE_DX11_SKIN_SOURCE_SHADOW_FIX";
         constexpr char kIniSection[] = "Diagnostics";
         constexpr char kIniKey[] = "ProfileOgreAnimation";
         constexpr int kDefaultProfilerEnabled = 1;
@@ -74,6 +79,7 @@ namespace BZROpenShim
         constexpr size_t kEntityMetadataLength = 96;
         constexpr size_t kDynamicGeometryTableSize = 16;
         constexpr size_t kDynamicMaterialTableSize = 128;
+        constexpr size_t kCameraTableSize = 16;
         constexpr unsigned kMaxExportThunkDepth = 2;
         constexpr size_t kMaxSuspendedThreads = 128;
         constexpr size_t kEntryDetourMaxPatchLen = 16;
@@ -85,10 +91,35 @@ namespace BZROpenShim
 
         using FnEntityUpdateAnimation = void(__thiscall*)(void*);
         using FnEntityUpdateRenderQueue = void(__thiscall*)(void*, void*);
+        using FnSceneManagerRenderScene =
+            void(__thiscall*)(void*, void*, void*, bool);
         using FnOgreStringQuery = const std::string&(__thiscall*)(const void*);
         using FnEntityGetMesh = const void*(__thiscall*)(const void*);
         using FnMovableGetCastShadows = bool(__thiscall*)(const void*);
         using FnMovableSetCastShadows = void(__thiscall*)(void*, bool);
+        using FnVertexElementGetSource =
+            unsigned short(__thiscall*)(const Ogre::VertexElement*);
+        using FnVertexElementGetType =
+            Ogre::VertexElementType(__thiscall*)(const Ogre::VertexElement*);
+        using FnVertexElementGetTypeCount =
+            unsigned short(__cdecl*)(Ogre::VertexElementType);
+        using FnHardwareVertexBufferGetVertexSize =
+            size_t(__thiscall*)(const void*);
+        using FnHardwareBufferGetSizeInBytes = size_t(__thiscall*)(const void*);
+        using FnHardwareBufferGetUsage =
+            Ogre::HardwareBuffer::Usage(__thiscall*)(const void*);
+        using FnHardwareBufferBoolQuery = bool(__thiscall*)(const void*);
+        using FnHardwareBufferManagerGetSingletonPtr = void*(__cdecl*)();
+        using FnHardwareBufferManagerCreateVertexBuffer = void*(__thiscall*)(
+            void*, void*, size_t, size_t, Ogre::HardwareBuffer::Usage, bool);
+        using FnHardwareBufferLock = void*(__thiscall*)(
+            void*, Ogre::HardwareBuffer::LockOptions,
+            Ogre::HardwareBuffer::UploadOptions);
+        using FnHardwareBufferUnlock = void(__thiscall*)(void*);
+        using FnVertexBufferBindingSetBinding =
+            void(__thiscall*)(void*, unsigned short, const void*);
+        using FnHardwareVertexBufferSharedPtrDestructor =
+            void(__thiscall*)(void*);
         using FnD3D11RenderSystemRender = void(__thiscall*)(void*, const void*);
         using FnD3D9RenderSystemRender = void(__thiscall*)(void*, const void*);
         using FnD3D9GetActiveDevice = IDirect3DDevice9*(__cdecl*)();
@@ -201,10 +232,19 @@ namespace BZROpenShim
         struct SourceProfileSlot
         {
             std::atomic<uintptr_t> key{ 0 };
+            std::atomic<uint32_t> metadataState{ 0 };
             std::atomic<uint64_t> calls{ 0 };
             std::atomic<uint64_t> vertices{ 0 };
             std::atomic<uint64_t> ticks{ 0 };
             std::atomic<uint64_t> sourceVertices{ 0 };
+            uint32_t positionStride = 0;
+            uint32_t normalStride = 0;
+            uint32_t weightStride = 0;
+            uint32_t indexStride = 0;
+            uint32_t weightsPerVertex = 0;
+            bool positionShadowed = false;
+            bool positionSystemMemory = false;
+            bool weightShadowed = false;
         };
 
         struct DynamicGeometryProfileSlot
@@ -225,6 +265,15 @@ namespace BZROpenShim
             std::atomic<uint64_t> blendedBatches{ 0 };
             std::atomic<uint32_t> metadataState{ 0 };
             std::array<char, kEntityMetadataLength> materialName{};
+        };
+
+        struct CameraProfileSlot
+        {
+            std::atomic<uintptr_t> key{ 0 };
+            std::atomic<uint32_t> metadataState{ 0 };
+            std::atomic<uint64_t> renderCalls{ 0 };
+            std::atomic<uint64_t> nestedRenderCalls{ 0 };
+            std::array<char, kEntityMetadataLength> cameraName{};
         };
 
         struct EntityTopSample
@@ -249,6 +298,15 @@ namespace BZROpenShim
             uint64_t vertices = 0;
             uint64_t ticks = 0;
             uint64_t sourceVertices = 0;
+            uint32_t positionStride = 0;
+            uint32_t normalStride = 0;
+            uint32_t weightStride = 0;
+            uint32_t indexStride = 0;
+            uint32_t weightsPerVertex = 0;
+            bool positionShadowed = false;
+            bool positionSystemMemory = false;
+            bool weightShadowed = false;
+            bool metadataReady = false;
         };
 
         struct DynamicGeometryTopSample
@@ -277,6 +335,8 @@ namespace BZROpenShim
         std::atomic<bool> g_RenderQueueHookInstalled{ false };
         std::atomic<bool> g_ChunkShadowHookInstalled{ false };
         std::atomic<bool> g_ChunkShadowPolicyEnabled{ false };
+        std::atomic<bool> g_Dx11SkinSourceShadowPolicyEnabled{ false };
+        std::atomic<bool> g_Dx11SkinSourceShadowHookInstalled{ false };
         std::atomic<bool> g_Dx11ImportsPatched{ false };
         std::atomic<bool> g_Dx11ContextObserved{ false };
         std::atomic<bool> g_D3D9DeviceObserved{ false };
@@ -296,17 +356,36 @@ namespace BZROpenShim
         EntryDetour32 g_EntityUpdateAnimationDetour{};
         EntryDetour32 g_EntityUpdateAnimationCoreDetour{};
         EntryDetour32 g_SoftwareVertexBlendDetour{};
+        EntryDetour32 g_SceneManagerRenderSceneDetour{};
         EntryDetour32 g_D3D11RenderSystemRenderDetour{};
         EntryDetour32 g_D3D9RenderSystemRenderDetour{};
 
         FnEntityUpdateAnimation g_RealEntityUpdateAnimation = nullptr;
         FnEntityUpdateAnimation g_RealEntityUpdateAnimationCore = nullptr;
         FnEntityUpdateRenderQueue g_RealEntityUpdateRenderQueue = nullptr;
+        FnSceneManagerRenderScene g_RealSceneManagerRenderScene = nullptr;
         FnOgreStringQuery g_OgreGetEntityName = nullptr;
         FnEntityGetMesh g_OgreEntityGetMesh = nullptr;
         FnOgreStringQuery g_OgreGetResourceName = nullptr;
         FnMovableGetCastShadows g_OgreGetCastShadows = nullptr;
         FnMovableSetCastShadows g_OgreSetCastShadows = nullptr;
+        FnVertexElementGetSource g_OgreVertexElementGetSource = nullptr;
+        FnVertexElementGetType g_OgreVertexElementGetType = nullptr;
+        FnVertexElementGetTypeCount g_OgreVertexElementGetTypeCount = nullptr;
+        FnHardwareVertexBufferGetVertexSize g_OgreVertexBufferGetVertexSize = nullptr;
+        FnHardwareBufferGetSizeInBytes g_OgreHardwareBufferGetSizeInBytes = nullptr;
+        FnHardwareBufferGetUsage g_OgreHardwareBufferGetUsage = nullptr;
+        FnHardwareBufferBoolQuery g_OgreHardwareBufferHasShadow = nullptr;
+        FnHardwareBufferBoolQuery g_OgreHardwareBufferIsSystemMemory = nullptr;
+        FnHardwareBufferManagerGetSingletonPtr
+            g_OgreHardwareBufferManagerGetSingletonPtr = nullptr;
+        FnHardwareBufferManagerCreateVertexBuffer
+            g_OgreHardwareBufferManagerCreateVertexBuffer = nullptr;
+        FnHardwareBufferLock g_OgreHardwareBufferLock = nullptr;
+        FnHardwareBufferUnlock g_OgreHardwareBufferUnlock = nullptr;
+        FnVertexBufferBindingSetBinding g_OgreVertexBufferBindingSetBinding = nullptr;
+        FnHardwareVertexBufferSharedPtrDestructor
+            g_OgreHardwareVertexBufferSharedPtrDestructor = nullptr;
         FnSoftwareVertexBlend g_RealSoftwareVertexBlend = nullptr;
         FnD3D11RenderSystemRender g_RealD3D11RenderSystemRender = nullptr;
         FnD3D9RenderSystemRender g_RealD3D9RenderSystemRender = nullptr;
@@ -362,6 +441,14 @@ namespace BZROpenShim
         std::atomic<uint64_t> g_SoftwareBlendMaxTicks{ 0 };
         std::atomic<uint64_t> g_RenderQueueCalls{ 0 };
         std::atomic<uint64_t> g_DuplicateRenderQueueSameFrame{ 0 };
+        std::atomic<uint64_t> g_SceneRenderCalls{ 0 };
+        std::atomic<uint64_t> g_ShadowSceneRenderCalls{ 0 };
+        std::atomic<uint64_t> g_MainRenderQueueCalls{ 0 };
+        std::atomic<uint64_t> g_ShadowRenderQueueCalls{ 0 };
+        std::atomic<uint64_t> g_MainAnimationCalls{ 0 };
+        std::atomic<uint64_t> g_ShadowAnimationCalls{ 0 };
+        std::atomic<uint64_t> g_MainSoftwareBlendCalls{ 0 };
+        std::atomic<uint64_t> g_ShadowSoftwareBlendCalls{ 0 };
         std::atomic<uint64_t> g_RenderSystemSubmissions{ 0 };
         std::atomic<uint64_t> g_RenderSystemSubmissionTicks{ 0 };
         std::atomic<uint64_t> g_RenderSystemSubmissionMaxTicks{ 0 };
@@ -426,6 +513,11 @@ namespace BZROpenShim
         std::atomic<uint64_t> g_DynamicGeometryIndexTotal{ 0 };
         std::atomic<uint64_t> g_ChunkShadowQueries{ 0 };
         std::atomic<uint64_t> g_ChunkShadowSuppressions{ 0 };
+        std::atomic<uint64_t> g_Dx11SkinSourceShadowQueries{ 0 };
+        std::atomic<uint64_t> g_Dx11SkinSourceShadowRepairs{ 0 };
+        std::atomic<uint64_t> g_Dx11SkinSourceShadowRepairBytes{ 0 };
+        std::atomic<uint64_t> g_Dx11SkinSourceShadowFailures{ 0 };
+        std::atomic<uint32_t> g_Dx11SkinSourceShadowFailureStage{ 0 };
 
         std::array<std::atomic<uint64_t>, kBloomWords> g_AnimationEntityBloom{};
         std::array<std::atomic<uint64_t>, kBloomWords> g_SkinnedEntityBloom{};
@@ -443,6 +535,7 @@ namespace BZROpenShim
             g_DynamicGeometryProfileSlots{};
         std::array<DynamicMaterialProfileSlot, kDynamicMaterialTableSize>
             g_DynamicMaterialProfileSlots{};
+        std::array<CameraProfileSlot, kCameraTableSize> g_CameraProfileSlots{};
 
         LARGE_INTEGER g_QpcFrequency{};
         const char* g_ProfilerRequestSource = "build-default";
@@ -451,7 +544,9 @@ namespace BZROpenShim
         thread_local uint32_t t_CurrentAnimationBlendCalls = 0;
         thread_local uint64_t t_CurrentAnimationBlendVertices = 0;
         thread_local unsigned t_SoftwareBlendDepth = 0;
+        thread_local unsigned t_SceneRenderDepth = 0;
         thread_local uint64_t t_LastRenderContextCheckFrame = 0;
+        std::mutex g_Dx11SkinSourceShadowMutex;
 
         bool StringIsTruthy(const char* value)
         {
