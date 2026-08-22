@@ -1,10 +1,23 @@
         void __fastcall HookEntityUpdateAnimation(void* self, void*)
         {
-            if (!g_RealEntityUpdateAnimation)
+            FnEntityUpdateAnimation real = g_RealEntityUpdateAnimation
+                ? g_RealEntityUpdateAnimation
+                : reinterpret_cast<FnEntityUpdateAnimation>(g_EntityUpdateAnimationDetour.trampoline);
+            if (!real)
+                return;
+            real(self);
+        }
+
+        void __fastcall HookEntityUpdateAnimationCore(void* self, void*)
+        {
+            FnEntityUpdateAnimation real = g_RealEntityUpdateAnimationCore
+                ? g_RealEntityUpdateAnimationCore
+                : reinterpret_cast<FnEntityUpdateAnimation>(g_EntityUpdateAnimationCoreDetour.trampoline);
+            if (!real)
                 return;
             if (!g_Enabled.load(std::memory_order_relaxed))
             {
-                g_RealEntityUpdateAnimation(self);
+                real(self);
                 return;
             }
 
@@ -29,7 +42,7 @@
             uint64_t blendVerticesForAnimation = 0;
             {
                 CurrentEntityScope scope(self);
-                g_RealEntityUpdateAnimation(self);
+                real(self);
                 blendCallsForAnimation = t_CurrentAnimationBlendCalls;
                 blendVerticesForAnimation = t_CurrentAnimationBlendVertices;
             }
@@ -74,11 +87,14 @@
             size_t numMatrices,
             bool blendNormals)
         {
-            if (!g_RealSoftwareVertexBlend)
+            FnSoftwareVertexBlend real = g_RealSoftwareVertexBlend
+                ? g_RealSoftwareVertexBlend
+                : reinterpret_cast<FnSoftwareVertexBlend>(g_SoftwareVertexBlendDetour.trampoline);
+            if (!real)
                 return;
             if (!g_Enabled.load(std::memory_order_relaxed))
             {
-                g_RealSoftwareVertexBlend(
+                real(
                     sourceVertexData,
                     targetVertexData,
                     blendMatrices,
@@ -128,7 +144,7 @@
             const uint64_t start = ReadQpc();
             {
                 SoftwareBlendScope scope;
-                g_RealSoftwareVertexBlend(
+                real(
                     sourceVertexData,
                     targetVertexData,
                     blendMatrices,

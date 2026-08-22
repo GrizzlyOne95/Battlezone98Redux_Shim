@@ -1,4 +1,5 @@
 #include "ogre_animation_profiler.h"
+#include "ogre_profiler_algorithms.h"
 #include "ogre_runtime.h"
 #include "shim_log.h"
 
@@ -6,6 +7,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
+#include <TlHelp32.h>
 #include <d3d11.h>
 #include <dxgi.h>
 #include <process.h>
@@ -56,12 +58,17 @@ namespace BZROpenShim
         constexpr size_t kLatencyBucketCount = 7;
         constexpr size_t kVertexBucketCount = 8;
         constexpr size_t kMatrixBucketCount = 5;
-        constexpr size_t kFrameTimeBucketCount = 401; // 0.25 ms buckets through 100 ms + overflow.
-        constexpr uint64_t kFrameTimeBucketUs = 250;
+        constexpr size_t kFrameTimeBucketCount =
+            OgreProfilerAlgorithms::kFrameTimeBucketCount;
+        constexpr uint64_t kFrameTimeBucketUs =
+            OgreProfilerAlgorithms::kFrameTimeBucketUs;
         constexpr size_t kEntityTableSize = 4096;
         constexpr size_t kSourceTableSize = 2048;
         constexpr size_t kProfileProbeCount = 8;
         constexpr size_t kTopContributorCount = 5;
+        constexpr unsigned kMaxExportThunkDepth = 2;
+        constexpr size_t kMaxSuspendedThreads = 128;
+        constexpr size_t kEntryDetourMaxPatchLen = 16;
 
         static_assert((kEntityTableSize & (kEntityTableSize - 1)) == 0,
                       "entity table must remain power-of-two");
@@ -70,6 +77,10 @@ namespace BZROpenShim
 
         using FnEntityUpdateAnimation = void(__thiscall*)(void*);
         using FnEntityUpdateRenderQueue = void(__thiscall*)(void*, void*);
+        using FnD3D11RenderSystemRender = void(__thiscall*)(void*, const void*);
+        using FnD3D11RenderSystemGetDevice = void*(__thiscall*)(void*);
+        using FnOgreD3D11DeviceGetImmediateContext =
+            ID3D11DeviceContext*(__thiscall*)(void*);
         using FnSoftwareVertexBlend = void(__cdecl*)(
             const Ogre::VertexData*,
             const Ogre::VertexData*,
@@ -88,6 +99,8 @@ namespace BZROpenShim
             ID3D11Device**, D3D_FEATURE_LEVEL*, ID3D11DeviceContext**);
         using FnFactoryCreateSwapChain = HRESULT(STDMETHODCALLTYPE*)(
             IDXGIFactory*, IUnknown*, DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**);
+        using FnDeviceCreateDeferredContext = HRESULT(STDMETHODCALLTYPE*)(
+            ID3D11Device*, UINT, ID3D11DeviceContext**);
         using FnContextDrawIndexed = void(STDMETHODCALLTYPE*)(
             ID3D11DeviceContext*, UINT, UINT, INT);
         using FnContextDraw = void(STDMETHODCALLTYPE*)(
@@ -111,10 +124,15 @@ namespace BZROpenShim
         using FnSwapChainPresent = HRESULT(STDMETHODCALLTYPE*)(
             IDXGISwapChain*, UINT, UINT);
 
-        struct Rel32Patch
+        using OgreProfilerAlgorithms::ProfilerState;
+
+        struct EntryDetour32
         {
-            uint8_t* operand = nullptr;
-            int32_t original = 0;
+            uint8_t* target = nullptr;
+            void* hook = nullptr;
+            void* trampoline = nullptr;
+            size_t patchLen = 0;
+            std::array<uint8_t, kEntryDetourMaxPatchLen> original{};
         };
 
         struct PointerPatch
@@ -176,19 +194,33 @@ namespace BZROpenShim
         std::atomic<bool> g_Dx11ImportsPatched{ false };
         std::atomic<bool> g_Dx11ContextObserved{ false };
         std::atomic<bool> g_PresentObserved{ false };
+        std::atomic<bool> g_RenderSystemObserverInstalled{ false };
+        std::atomic<uintptr_t> g_RenderContextIdentity{ 0 };
+        std::atomic<bool> g_OgreInstallAttempted{ false };
+        std::atomic<ProfilerState> g_ProfilerState{ ProfilerState::Disabled };
         uintptr_t g_WorkerThread = 0;
 
         std::mutex g_PatchMutex;
-        std::vector<Rel32Patch> g_Rel32Patches;
         std::vector<PointerPatch> g_PointerPatches;
+        bool g_EntryInstallRetryRequested = false;
+
+        EntryDetour32 g_EntityUpdateAnimationDetour{};
+        EntryDetour32 g_EntityUpdateAnimationCoreDetour{};
+        EntryDetour32 g_SoftwareVertexBlendDetour{};
+        EntryDetour32 g_D3D11RenderSystemRenderDetour{};
 
         FnEntityUpdateAnimation g_RealEntityUpdateAnimation = nullptr;
+        FnEntityUpdateAnimation g_RealEntityUpdateAnimationCore = nullptr;
         FnEntityUpdateRenderQueue g_RealEntityUpdateRenderQueue = nullptr;
         FnSoftwareVertexBlend g_RealSoftwareVertexBlend = nullptr;
+        FnD3D11RenderSystemRender g_RealD3D11RenderSystemRender = nullptr;
+        FnD3D11RenderSystemGetDevice g_D3D11RenderSystemGetDevice = nullptr;
+        FnOgreD3D11DeviceGetImmediateContext g_OgreD3D11DeviceGetImmediateContext = nullptr;
 
         FnD3D11CreateDevice g_RealD3D11CreateDevice = nullptr;
         FnD3D11CreateDeviceAndSwapChain g_RealD3D11CreateDeviceAndSwapChain = nullptr;
         FnFactoryCreateSwapChain g_RealFactoryCreateSwapChain = nullptr;
+        FnDeviceCreateDeferredContext g_RealCreateDeferredContext = nullptr;
         FnContextDrawIndexed g_RealDrawIndexed = nullptr;
         FnContextDraw g_RealDraw = nullptr;
         FnContextMap g_RealMap = nullptr;
@@ -223,6 +255,10 @@ namespace BZROpenShim
         std::atomic<uint64_t> g_AnimationMaxTicks{ 0 };
         std::atomic<uint64_t> g_SoftwareBlendMaxTicks{ 0 };
         std::atomic<uint64_t> g_RenderQueueCalls{ 0 };
+        std::atomic<uint64_t> g_RenderSystemSubmissions{ 0 };
+        std::atomic<uint64_t> g_RenderSystemSubmissionTicks{ 0 };
+        std::atomic<uint64_t> g_RenderSystemSubmissionMaxTicks{ 0 };
+        std::atomic<uint64_t> g_ContextVtableRefreshes{ 0 };
         std::atomic<uint64_t> g_DrawCalls{ 0 };
         std::atomic<uint64_t> g_DrawVertices{ 0 };
         std::atomic<uint64_t> g_DrawIndexedCalls{ 0 };
@@ -258,6 +294,10 @@ namespace BZROpenShim
         std::atomic<uint64_t> g_FrameOver1667{ 0 };
         std::atomic<uint64_t> g_FrameOver2500{ 0 };
         std::atomic<uint64_t> g_FrameOver3333{ 0 };
+        std::atomic<uint64_t> g_NativeChunkSimCalls{ 0 };
+        std::atomic<uint64_t> g_NativeChunkSimTicks{ 0 };
+        std::atomic<uint64_t> g_NativeChunkActiveTotal{ 0 };
+        std::atomic<uint64_t> g_NativeChunkActiveMax{ 0 };
 
         std::array<std::atomic<uint64_t>, kBloomWords> g_AnimationEntityBloom{};
         std::array<std::atomic<uint64_t>, kBloomWords> g_SkinnedEntityBloom{};
@@ -279,16 +319,11 @@ namespace BZROpenShim
         thread_local uint32_t t_CurrentAnimationBlendCalls = 0;
         thread_local uint64_t t_CurrentAnimationBlendVertices = 0;
         thread_local unsigned t_SoftwareBlendDepth = 0;
+        thread_local uint64_t t_LastRenderContextCheckFrame = 0;
 
         bool StringIsTruthy(const char* value)
         {
-            if (!value || !*value)
-                return false;
-
-            std::string v(value);
-            for (char& ch : v)
-                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-            return v != "0" && v != "false" && v != "no" && v != "off";
+            return OgreProfilerAlgorithms::StringIsTruthy(value);
         }
 
         std::string GetOpenShimIniPath()

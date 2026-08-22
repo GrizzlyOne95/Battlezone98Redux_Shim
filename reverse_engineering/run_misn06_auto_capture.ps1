@@ -619,7 +619,10 @@ foreach ($delayMs in $SpaceDelaysMs) {
             if ($chunkActivityLines.Count -gt 0) {
                 $chunkActivityDetected = $true
                 $chunkActivityDetectedAt = Get-Date
-                $tailDeadline = [DateTime]::Max($tailDeadline, $chunkActivityDetectedAt.AddSeconds($PostChunkActivitySeconds))
+                $postActivityDeadline = $chunkActivityDetectedAt.AddSeconds($PostChunkActivitySeconds)
+                if ($postActivityDeadline -gt $tailDeadline) {
+                    $tailDeadline = $postActivityDeadline
+                }
                 continue
             }
 

@@ -1,3 +1,69 @@
+        void InstallContextHooks(ID3D11DeviceContext* context);
+        bool RefreshContextHooks(ID3D11DeviceContext* context);
+        void STDMETHODCALLTYPE HookDrawIndexed(
+            ID3D11DeviceContext* self,
+            UINT indexCount,
+            UINT startIndexLocation,
+            INT baseVertexLocation);
+
+        void __fastcall HookD3D11RenderSystemRender(
+            void* self,
+            void*,
+            const void* renderOperation)
+        {
+            FnD3D11RenderSystemRender real = g_RealD3D11RenderSystemRender;
+            if (!real)
+                return;
+
+            const uint64_t frame = g_FrameEpoch.load(std::memory_order_relaxed);
+            if (t_LastRenderContextCheckFrame != frame &&
+                g_D3D11RenderSystemGetDevice &&
+                g_OgreD3D11DeviceGetImmediateContext)
+            {
+                t_LastRenderContextCheckFrame = frame;
+                void* deviceWrapper = g_D3D11RenderSystemGetDevice(self);
+                ID3D11DeviceContext* context = deviceWrapper
+                    ? g_OgreD3D11DeviceGetImmediateContext(deviceWrapper)
+                    : nullptr;
+                if (context)
+                {
+                    void*** objectVtable = reinterpret_cast<void***>(context);
+                    const bool drawObserverMissing = !objectVtable || !*objectVtable ||
+                        (*objectVtable)[12] != reinterpret_cast<void*>(&HookDrawIndexed);
+                    const uintptr_t identity = reinterpret_cast<uintptr_t>(context);
+                    const uintptr_t previous =
+                        g_RenderContextIdentity.load(std::memory_order_relaxed);
+                    if (identity != previous)
+                    {
+                        InstallContextHooks(context);
+                        g_RenderContextIdentity.store(identity, std::memory_order_release);
+                        LogShimA(
+                            LogLevel::Info,
+                            kComponent,
+                            "[OgreProfile] captured renderer-owned immediate context=0x%p previous=0x%p drawObserverWasMissing=%s",
+                            context,
+                            reinterpret_cast<void*>(previous),
+                            drawObserverMissing ? "yes" : "no");
+                    }
+                    else if (drawObserverMissing && RefreshContextHooks(context))
+                    {
+                        g_ContextVtableRefreshes.fetch_add(1, std::memory_order_relaxed);
+                    }
+                }
+            }
+
+            const bool enabled = g_Enabled.load(std::memory_order_relaxed);
+            const uint64_t start = enabled ? ReadQpc() : 0;
+            real(self, renderOperation);
+            if (enabled)
+            {
+                const uint64_t elapsed = ReadQpc() - start;
+                g_RenderSystemSubmissions.fetch_add(1, std::memory_order_relaxed);
+                g_RenderSystemSubmissionTicks.fetch_add(elapsed, std::memory_order_relaxed);
+                AtomicMax(g_RenderSystemSubmissionMaxTicks, elapsed);
+            }
+        }
+
         void __fastcall HookEntityUpdateRenderQueue(void* self, void*, void* renderQueue)
         {
             if (!g_RealEntityUpdateRenderQueue)
@@ -169,7 +235,8 @@
                 g_Presents.fetch_add(1, std::memory_order_relaxed);
                 g_FrameEpoch.fetch_add(1, std::memory_order_relaxed);
             }
-            g_PresentObserved.store(true, std::memory_order_release);
+            if (!g_PresentObserved.exchange(true, std::memory_order_acq_rel))
+                RefreshProfilerState("first DX11 Present observed");
             return g_RealPresent(self, syncInterval, flags);
         }
 
@@ -211,7 +278,86 @@
                 indexedIndirect || indirect || updateSubresource)
             {
                 g_Dx11ContextObserved.store(true, std::memory_order_release);
+                RefreshProfilerState("DX11 context observers active");
             }
+        }
+
+        bool RefreshContextHooks(ID3D11DeviceContext* context)
+        {
+            if (!context || !g_RealDrawIndexed || !g_RealDraw || !g_RealMap ||
+                !g_RealUnmap || !g_RealDrawIndexedInstanced || !g_RealDrawInstanced ||
+                !g_RealDrawIndexedInstancedIndirect || !g_RealDrawInstancedIndirect ||
+                !g_RealUpdateSubresource)
+            {
+                return false;
+            }
+
+            struct RefreshEntry
+            {
+                size_t index;
+                void* hook;
+                void* original;
+            };
+            const RefreshEntry entries[] =
+            {
+                { 12, reinterpret_cast<void*>(&HookDrawIndexed), reinterpret_cast<void*>(g_RealDrawIndexed) },
+                { 13, reinterpret_cast<void*>(&HookDraw), reinterpret_cast<void*>(g_RealDraw) },
+                { 14, reinterpret_cast<void*>(&HookMap), reinterpret_cast<void*>(g_RealMap) },
+                { 15, reinterpret_cast<void*>(&HookUnmap), reinterpret_cast<void*>(g_RealUnmap) },
+                { 20, reinterpret_cast<void*>(&HookDrawIndexedInstanced), reinterpret_cast<void*>(g_RealDrawIndexedInstanced) },
+                { 21, reinterpret_cast<void*>(&HookDrawInstanced), reinterpret_cast<void*>(g_RealDrawInstanced) },
+                { 39, reinterpret_cast<void*>(&HookDrawIndexedInstancedIndirect), reinterpret_cast<void*>(g_RealDrawIndexedInstancedIndirect) },
+                { 40, reinterpret_cast<void*>(&HookDrawInstancedIndirect), reinterpret_cast<void*>(g_RealDrawInstancedIndirect) },
+                { 48, reinterpret_cast<void*>(&HookUpdateSubresource), reinterpret_cast<void*>(g_RealUpdateSubresource) }
+            };
+
+            std::lock_guard<std::mutex> lock(g_PatchMutex);
+            void*** objectVtable = reinterpret_cast<void***>(context);
+            if (!objectVtable || !*objectVtable)
+                return false;
+            void** vtable = *objectVtable;
+            bool needsWrite = false;
+            for (const RefreshEntry& entry : entries)
+            {
+                void* current = vtable[entry.index];
+                if (current == entry.hook)
+                    continue;
+                if (current != entry.original)
+                    return false;
+                needsWrite = true;
+            }
+            if (!needsWrite)
+                return true;
+
+            DWORD oldProtection = 0;
+            void** begin = &vtable[entries[0].index];
+            const size_t byteLength =
+                (entries[(sizeof(entries) / sizeof(entries[0])) - 1].index -
+                 entries[0].index + 1) * sizeof(void*);
+            if (!VirtualProtect(begin, byteLength, PAGE_READWRITE, &oldProtection))
+                return false;
+            for (const RefreshEntry& entry : entries)
+            {
+                if (vtable[entry.index] == entry.original)
+                    vtable[entry.index] = entry.hook;
+            }
+            DWORD ignored = 0;
+            VirtualProtect(begin, byteLength, oldProtection, &ignored);
+            return true;
+        }
+
+        HRESULT STDMETHODCALLTYPE HookCreateDeferredContext(
+            ID3D11Device* self,
+            UINT contextFlags,
+            ID3D11DeviceContext** deferredContext)
+        {
+            const HRESULT hr = g_RealCreateDeferredContext(
+                self,
+                contextFlags,
+                deferredContext);
+            if (SUCCEEDED(hr) && deferredContext && *deferredContext)
+                InstallContextHooks(*deferredContext);
+            return hr;
         }
 
         void CaptureSwapChain(IDXGISwapChain* swapChain)
@@ -275,6 +421,14 @@
                 return;
 
             InstallFactoryFromDevice(device);
+            // Public ID3D11Device ABI ordinal. Ogre can record all work on
+            // deferred contexts and execute command lists on the immediate
+            // context, so observing only the supplied immediate context misses
+            // every Draw/Map in that renderer configuration.
+            PatchComVtableEntry(
+                device, 27, &HookCreateDeferredContext,
+                g_RealCreateDeferredContext,
+                "ID3D11Device::CreateDeferredContext");
             if (suppliedContext)
             {
                 InstallContextHooks(suppliedContext);
