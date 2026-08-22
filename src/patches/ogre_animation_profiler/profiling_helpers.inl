@@ -98,37 +98,75 @@
             }
         }
 
+        const char* ProfilerStateName(ProfilerState state)
+        {
+            switch (state)
+            {
+            case ProfilerState::Disabled: return "Disabled";
+            case ProfilerState::WaitingForOgre: return "WaitingForOgre";
+            case ProfilerState::OgreReady: return "OgreReady";
+            case ProfilerState::WaitingForDX11: return "WaitingForDX11";
+            case ProfilerState::FullyActive: return "FullyActive";
+            case ProfilerState::PartialDiagnostics: return "PartialDiagnostics";
+            case ProfilerState::Failed: return "Failed";
+            }
+            return "Unknown";
+        }
+
+        void SetProfilerState(ProfilerState next, const char* reason)
+        {
+            const ProfilerState previous =
+                g_ProfilerState.exchange(next, std::memory_order_acq_rel);
+            if (previous == next)
+                return;
+
+            LogShimA(
+                next == ProfilerState::Failed ? LogLevel::Warn : LogLevel::Info,
+                kComponent,
+                "[OgreProfile] state %s -> %s reason=%s ogre=%s renderQueue=%s dx11Context=%s present=%s",
+                ProfilerStateName(previous),
+                ProfilerStateName(next),
+                reason ? reason : "unspecified",
+                g_OgreHooksInstalled.load(std::memory_order_acquire) ? "active" : "unavailable",
+                g_RenderQueueHookInstalled.load(std::memory_order_acquire) ? "active" : "unavailable",
+                g_Dx11ContextObserved.load(std::memory_order_acquire) ? "active" : "unavailable",
+                g_PresentObserved.load(std::memory_order_acquire) ? "active" : "unavailable");
+        }
+
+        void RefreshProfilerState(const char* reason)
+        {
+            const bool ogre = g_OgreHooksInstalled.load(std::memory_order_acquire);
+            const bool dx11Imports = g_Dx11ImportsPatched.load(std::memory_order_acquire);
+            const bool dx11Context = g_Dx11ContextObserved.load(std::memory_order_acquire);
+            const bool present = g_PresentObserved.load(std::memory_order_acquire);
+            const bool partial =
+                g_RenderQueueHookInstalled.load(std::memory_order_acquire) ||
+                g_RenderSystemObserverInstalled.load(std::memory_order_acquire);
+            SetProfilerState(
+                OgreProfilerAlgorithms::ComputeProfilerState(
+                    g_Enabled.load(std::memory_order_acquire),
+                    g_OgreInstallAttempted.load(std::memory_order_acquire),
+                    ogre,
+                    dx11Imports,
+                    dx11Context,
+                    present,
+                    partial),
+                reason);
+        }
+
         size_t LatencyBucket(uint64_t ticks)
         {
-            const double ms = TicksToMs(ticks);
-            if (ms < 0.025) return 0;
-            if (ms < 0.050) return 1;
-            if (ms < 0.100) return 2;
-            if (ms < 0.200) return 3;
-            if (ms < 0.400) return 4;
-            if (ms < 0.800) return 5;
-            return 6;
+            return OgreProfilerAlgorithms::LatencyBucketFromMicroseconds(TicksToUs(ticks));
         }
 
         size_t VertexBucket(size_t vertices)
         {
-            if (vertices < 1024) return 0;
-            if (vertices < 2048) return 1;
-            if (vertices < 4096) return 2;
-            if (vertices < 8192) return 3;
-            if (vertices < 12288) return 4;
-            if (vertices < 16384) return 5;
-            if (vertices < 32768) return 6;
-            return 7;
+            return OgreProfilerAlgorithms::VertexBucket(vertices);
         }
 
         size_t MatrixBucket(size_t matrices)
         {
-            if (matrices <= 8) return 0;
-            if (matrices <= 16) return 1;
-            if (matrices <= 32) return 2;
-            if (matrices <= 64) return 3;
-            return 4;
+            return OgreProfilerAlgorithms::MatrixBucket(matrices);
         }
 
         EntityProfileSlot* FindOrClaimEntitySlot(const void* pointer)
@@ -193,9 +231,7 @@
             AtomicMax(g_FrameTimeMaxTicks, ticks);
 
             const uint64_t us = TicksToUs(ticks);
-            size_t bucket = static_cast<size_t>(us / kFrameTimeBucketUs);
-            if (bucket >= kFrameTimeBucketCount)
-                bucket = kFrameTimeBucketCount - 1;
+            const size_t bucket = OgreProfilerAlgorithms::FrameBucket(us);
             g_FrameTimeBuckets[bucket].fetch_add(1, std::memory_order_relaxed);
             if (us > 16667) g_FrameOver1667.fetch_add(1, std::memory_order_relaxed);
             if (us > 25000) g_FrameOver2500.fetch_add(1, std::memory_order_relaxed);
@@ -207,17 +243,8 @@
             uint64_t samples,
             unsigned percentile)
         {
-            if (!samples)
-                return 0.0;
-            const uint64_t target = (samples * percentile + 99u) / 100u;
-            uint64_t cumulative = 0;
-            for (size_t i = 0; i < buckets.size(); ++i)
-            {
-                cumulative += buckets[i];
-                if (cumulative >= target)
-                    return static_cast<double>((i + 1) * kFrameTimeBucketUs) / 1000.0;
-            }
-            return static_cast<double>(kFrameTimeBucketCount * kFrameTimeBucketUs) / 1000.0;
+            return OgreProfilerAlgorithms::PercentileFromHistogram(
+                buckets, samples, percentile, kFrameTimeBucketUs);
         }
 
         size_t ReadVertexCount(const Ogre::VertexData* data)
@@ -238,20 +265,6 @@
             return value <= kMaxSaneVertexCount ? value : 0;
         }
 
-        bool WriteRel32(uint8_t* operand, int32_t value)
-        {
-            if (!operand)
-                return false;
-            DWORD oldProtect = 0;
-            if (!VirtualProtect(operand, sizeof(value), PAGE_EXECUTE_READWRITE, &oldProtect))
-                return false;
-            std::memcpy(operand, &value, sizeof(value));
-            DWORD ignored = 0;
-            VirtualProtect(operand, sizeof(value), oldProtect, &ignored);
-            FlushInstructionCache(GetCurrentProcess(), operand - 1, 5);
-            return true;
-        }
-
         bool WritePointer(void** slot, void* value)
         {
             if (!slot)
@@ -264,6 +277,107 @@
             VirtualProtect(slot, sizeof(void*), oldProtect, &ignored);
             FlushInstructionCache(GetCurrentProcess(), slot, sizeof(void*));
             return true;
+        }
+
+        bool ModuleContainsAddress(HMODULE module, const void* address)
+        {
+            if (!module || !address)
+                return false;
+            const auto* base = reinterpret_cast<const uint8_t*>(module);
+            const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+            if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+                return false;
+            const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+            if (nt->Signature != IMAGE_NT_SIGNATURE)
+                return false;
+            const auto* candidate = static_cast<const uint8_t*>(address);
+            return candidate >= base &&
+                candidate < base + nt->OptionalHeader.SizeOfImage;
+        }
+
+        bool IsExecutableModuleAddress(HMODULE module, const void* address)
+        {
+            if (!ModuleContainsAddress(module, address))
+                return false;
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (VirtualQuery(address, &mbi, sizeof(mbi)) != sizeof(mbi) ||
+                mbi.State != MEM_COMMIT || (mbi.Protect & PAGE_GUARD) != 0)
+            {
+                return false;
+            }
+            const DWORD protection = mbi.Protect & 0xffu;
+            return protection == PAGE_EXECUTE ||
+                protection == PAGE_EXECUTE_READ ||
+                protection == PAGE_EXECUTE_READWRITE ||
+                protection == PAGE_EXECUTE_WRITECOPY;
+        }
+
+        bool IsExecutableOgreAddress(const void* address)
+        {
+            return IsExecutableModuleAddress(GetModuleHandleA("OgreMain.dll"), address);
+        }
+
+        void* ResolveModuleExportImplementation(
+            HMODULE module,
+            void* exportAddress,
+            const char* label)
+        {
+            if (!IsExecutableModuleAddress(module, exportAddress))
+                return nullptr;
+
+            uint8_t* current = static_cast<uint8_t*>(exportAddress);
+            unsigned depth = 0;
+            for (; depth < kMaxExportThunkDepth; ++depth)
+            {
+                if (current[0] != 0xE9)
+                    break;
+
+                int32_t relative = 0;
+                std::memcpy(&relative, current + 1, sizeof(relative));
+                uint8_t* destination = current + 5 + relative;
+                if (!IsExecutableModuleAddress(module, destination) || destination == current)
+                {
+                    LogShimA(
+                        LogLevel::Warn,
+                        kComponent,
+                        "[OgreProfile] %s unsupported export thunk depth=%u export=0x%p source=0x%p destination=0x%p",
+                        label,
+                        depth,
+                        exportAddress,
+                        current,
+                        destination);
+                    return nullptr;
+                }
+                current = destination;
+            }
+
+            if (depth == kMaxExportThunkDepth && current[0] == 0xE9)
+            {
+                LogShimA(
+                    LogLevel::Warn,
+                    kComponent,
+                    "[OgreProfile] %s export thunk exceeded maximum depth=%u export=0x%p",
+                    label,
+                    kMaxExportThunkDepth,
+                    exportAddress);
+                return nullptr;
+            }
+
+            LogShimA(
+                LogLevel::Info,
+                kComponent,
+                "[OgreProfile] resolved %s implementation export=0x%p implementation=0x%p thunkDepth=%u",
+                label,
+                exportAddress,
+                current,
+                depth);
+            return current;
+        }
+
+        void* ResolveOgreExportImplementation(void* exportAddress, const char* label)
+        {
+            return ResolveModuleExportImplementation(
+                GetModuleHandleA("OgreMain.dll"), exportAddress, label);
         }
 
         std::vector<ExportMatch> FindExportsContaining(const char* token)

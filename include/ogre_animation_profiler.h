@@ -39,4 +39,12 @@ namespace BZROpenShim
     // process-lifetime, matching the lifetime of the Ogre/D3D objects they wrap;
     // after shutdown they simply forward without collecting data.
     void ShutdownOgreAnimationProfiler();
+
+    // Hot-path bridge used by the native ChunkEffect hook. The elapsed value
+    // is in QueryPerformanceCounter ticks; collection is lock-free and does
+    // nothing while the profiler is disabled.
+    bool IsOgreAnimationProfilerCollecting() noexcept;
+    void RecordNativeChunkSimulationSample(
+        uint32_t activeChunks,
+        uint64_t elapsedQpcTicks) noexcept;
 }

@@ -23,6 +23,14 @@
             const uint64_t animationMaxTicks = g_AnimationMaxTicks.exchange(0, std::memory_order_acq_rel);
             const uint64_t blendMaxTicks = g_SoftwareBlendMaxTicks.exchange(0, std::memory_order_acq_rel);
             const uint64_t renderCalls = g_RenderQueueCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t renderSystemSubmissions =
+                g_RenderSystemSubmissions.exchange(0, std::memory_order_acq_rel);
+            const uint64_t renderSystemSubmissionTicks =
+                g_RenderSystemSubmissionTicks.exchange(0, std::memory_order_acq_rel);
+            const uint64_t renderSystemSubmissionMaxTicks =
+                g_RenderSystemSubmissionMaxTicks.exchange(0, std::memory_order_acq_rel);
+            const uint64_t contextVtableRefreshes =
+                g_ContextVtableRefreshes.exchange(0, std::memory_order_acq_rel);
             const uint64_t drawCalls = g_DrawCalls.exchange(0, std::memory_order_acq_rel);
             const uint64_t drawVertices = g_DrawVertices.exchange(0, std::memory_order_acq_rel);
             const uint64_t drawIndexedCalls = g_DrawIndexedCalls.exchange(0, std::memory_order_acq_rel);
@@ -56,6 +64,10 @@
             const uint64_t over1667 = g_FrameOver1667.exchange(0, std::memory_order_acq_rel);
             const uint64_t over2500 = g_FrameOver2500.exchange(0, std::memory_order_acq_rel);
             const uint64_t over3333 = g_FrameOver3333.exchange(0, std::memory_order_acq_rel);
+            const uint64_t nativeChunkSimCalls = g_NativeChunkSimCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t nativeChunkSimTicks = g_NativeChunkSimTicks.exchange(0, std::memory_order_acq_rel);
+            const uint64_t nativeChunkActiveTotal = g_NativeChunkActiveTotal.exchange(0, std::memory_order_acq_rel);
+            const uint64_t nativeChunkActiveMax = g_NativeChunkActiveMax.exchange(0, std::memory_order_acq_rel);
 
             uint64_t animationUnique = 0;
             uint64_t skinnedUnique = 0;
@@ -121,6 +133,10 @@
             const double frameP95Ms = PercentileFromHistogram(frameBuckets, frameSamples, 95);
             const double frameP99Ms = PercentileFromHistogram(frameBuckets, frameSamples, 99);
             const double frameMaxMs = TicksToMs(frameMaxTicks);
+            const double nativeChunkActiveAverage = nativeChunkSimCalls
+                ? static_cast<double>(nativeChunkActiveTotal) /
+                    static_cast<double>(nativeChunkSimCalls)
+                : 0.0;
 
             LogShimA(
                 LogLevel::Info,
@@ -138,6 +154,15 @@
                 static_cast<unsigned long long>(duplicateAnimation),
                 static_cast<unsigned long long>(duplicateSkin),
                 static_cast<unsigned long long>(orphanBlendCalls));
+
+            LogShimA(
+                LogLevel::Info,
+                kComponent,
+                "[OgreProfile][Chunk] activeAvg=%.1f activeMax=%llu simCalls=%llu simCPU=%.3fms/f maxAttribution=stock-native-only",
+                nativeChunkActiveAverage,
+                static_cast<unsigned long long>(nativeChunkActiveMax),
+                static_cast<unsigned long long>(nativeChunkSimCalls),
+                TicksToMs(nativeChunkSimTicks) / frameDivisor);
 
             LogShimA(
                 LogLevel::Info,
@@ -223,17 +248,21 @@
             LogShimA(
                 LogLevel::Info,
                 kComponent,
-                "[OgreProfile][Render] Draw=%llu verts=%llu DrawIndexed=%llu indices=%llu DrawInstanced=%llu verts=%llu DrawIndexedInstanced=%llu indices=%llu indirect=[%llu,%llu] frameSlow[>16.67=%llu >25=%llu >33.33=%llu]",
-                static_cast<unsigned long long>(drawCalls),
-                static_cast<unsigned long long>(drawVertices),
-                static_cast<unsigned long long>(drawIndexedCalls),
-                static_cast<unsigned long long>(drawIndexedIndices),
-                static_cast<unsigned long long>(drawInstancedCalls),
-                static_cast<unsigned long long>(drawInstancedVertices),
-                static_cast<unsigned long long>(drawIndexedInstancedCalls),
-                static_cast<unsigned long long>(drawIndexedInstancedIndices),
-                static_cast<unsigned long long>(drawIndirectCalls),
-                static_cast<unsigned long long>(drawIndexedIndirectCalls),
+                "[OgreProfile][Render] OgreSubmit=%.1f/f cpu=%.3fms/f max=%.3fms Draw=%.1f/f verts=%.0f/f DrawIndexed=%.1f/f indices=%.0f/f DrawInstanced=%.1f/f verts=%.0f/f DrawIndexedInstanced=%.1f/f indices=%.0f/f indirect=[%.2f,%.2f]/f contextRefresh=%llu frameSlow[>16.67=%llu >25=%llu >33.33=%llu]",
+                static_cast<double>(renderSystemSubmissions) / frameDivisor,
+                TicksToMs(renderSystemSubmissionTicks) / frameDivisor,
+                TicksToMs(renderSystemSubmissionMaxTicks),
+                static_cast<double>(drawCalls) / frameDivisor,
+                static_cast<double>(drawVertices) / frameDivisor,
+                static_cast<double>(drawIndexedCalls) / frameDivisor,
+                static_cast<double>(drawIndexedIndices) / frameDivisor,
+                static_cast<double>(drawInstancedCalls) / frameDivisor,
+                static_cast<double>(drawInstancedVertices) / frameDivisor,
+                static_cast<double>(drawIndexedInstancedCalls) / frameDivisor,
+                static_cast<double>(drawIndexedInstancedIndices) / frameDivisor,
+                static_cast<double>(drawIndirectCalls) / frameDivisor,
+                static_cast<double>(drawIndexedIndirectCalls) / frameDivisor,
+                static_cast<unsigned long long>(contextVtableRefreshes),
                 static_cast<unsigned long long>(over1667),
                 static_cast<unsigned long long>(over2500),
                 static_cast<unsigned long long>(over3333));

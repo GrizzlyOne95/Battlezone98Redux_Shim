@@ -1,128 +1,128 @@
 # Ogre Animation / Render Overhead Profiler
 
-This diagnostic measures whether Battlezone 98 Redux is spending CPU time animating and software-skinning Ogre entities that never reach render submission.
-
-It is **opt-in** and observation-only. It does not change animation state, VDF state, culling, materials, shader selection, or D3D11 render state.
-
-## Developer setup
-
-The profiler uses the pinned Ogre 1.10 reference headers added to OpenShim.
-
-Run once after cloning/updating the branch:
-
-```powershell
-.\setup-dev.ps1
-```
-
-Then build `Release | Win32` normally.
-
-The retail BZR `OgreMain.dll` is not assumed to be ABI-identical to pristine upstream Ogre 1.10. The profiler resolves the retail DLL's exports at runtime and only installs observers when the expected semantic exports/call sites can be identified.
+This opt-in diagnostic correlates Ogre animation, software deformation, native
+chunk simulation, renderer submissions, D3D11 work, and `Present` frame time.
+It does not change animation state, culling, materials, shaders, or gameplay.
 
 ## Enable
 
-Either set the environment variable before starting BZR:
-
-```powershell
-$env:OPENSHIM_PROFILE_OGRE_ANIMATION = "1"
-```
-
-or add this to `openshim.ini`:
+Set `OPENSHIM_PROFILE_OGRE_ANIMATION=1`, or configure:
 
 ```ini
 [Diagnostics]
 ProfileOgreAnimation = 1
 ```
 
-Remove/disable the setting for normal play.
+The environment value takes precedence over the INI value. Disable profiling
+for normal play after collecting a capture.
 
-## What is measured
+## Observer architecture
 
-Once per approximately one second, OpenShim reports:
+The retail GOG `OgreMain.dll` used for validation has SHA-256
+`E5E693960B95AD0D60733A3B688464A6C6CBA234E86950698F9C2BEA4ACFEB45`.
+The profiler enumerates semantic exports, follows at most two in-module
+`JMP rel32` export thunks, verifies complete instruction-aligned prologues, and
+installs process-lifetime x86 entry detours for:
 
-- `frames` - DX11 `Present` calls observed during the interval.
-- `animCalls` - calls into `Ogre::Entity::_updateAnimation`.
-- `animUnique~` - approximate unique Entity pointers seen by animation during the interval.
-- `animCPU` - measured wall-clock CPU time spent inside `_updateAnimation` (includes nested animation work).
-- `swBlend` - calls to `Ogre::Mesh::softwareVertexBlend`.
-- `verts` - source vertices submitted to software vertex blending.
-- `swCPU` - measured wall-clock CPU time spent specifically inside `softwareVertexBlend`.
-- `skinnedUnique~` - approximate unique Entities attributable to software skinning.
-- `renderQueue` - calls to `Ogre::Entity::_updateRenderQueue` when the retail Entity vtable can be verified and patched.
-- `renderUnique~` - approximate unique Entities reaching that render-submission path.
-- `skinnedNotRendered~` - approximate software-skinned Entity set not seen in the render-submission set during the same interval.
-- `Draw` / `DrawIndexed` - basic immediate-context D3D11 draw calls.
-- `submittedVerts` / `submittedIndices` - vertex/index counts passed to those two D3D11 draw APIs.
+- public `Ogre::Entity::_updateAnimation`;
+- protected `Ogre::Entity::updateAnimation`, which the retail render path calls
+  directly instead of passing through the public wrapper;
+- `Ogre::Mesh::softwareVertexBlend`.
 
-The `~` metrics use a 65,536-bit pointer bloom set to avoid allocating or locking a hash table in the hot animation/render paths. At normal BZR entity counts the collision error should be small, but these values are intentionally labelled approximate.
+The protected core detour is required for actual attribution; the public
+wrapper is retained as a validated observer seam and compatibility check.
+`Entity::_updateRenderQueue` remains observed through an exact-match Entity
+vtable slot.
 
-`animCPU` contains `swCPU`; do not add them together.
+Entry installation suspends other process threads, refuses to patch while an
+instruction pointer is in the overwrite span, constructs an RX trampoline, and
+fails closed when a thunk, target, prologue, or thread state is unsupported.
+Transient thread-open races are retried for a bounded five-second window.
 
-## Recommended large-battle test
+For the validated GOG renderer (`RenderSystem_Direct3D11.dll` SHA-256
+`78A1D8E13C8BD71983B09A39A3DCF7783E6C34DDE577DE3B9202460DB500AAE0`),
+the profiler also observes `D3D11RenderSystem::_render`. BZR creates its real
+immediate context before the renderer IAT observer can see it, so the profiler
+obtains that context through the renderer's exported `_getDevice` and
+`D3D11Device::GetImmediateContext` accessors. The runtime restores the context
+vtable at frame boundaries; one validated, batched vtable refresh per frame
+keeps aggregate D3D11 counters attached without per-call logging.
 
-Use the same mission/save and avoid changing unit count between samples.
+## State model
 
-### A. Face the battle
+State transitions are explicit:
 
-Keep the camera aimed at the densest group of units for 10-20 seconds. Save several consecutive `[OgreProfile]` lines.
+- `Disabled`: collection is off.
+- `WaitingForOgre`: requested, but no Ogre install attempt has completed.
+- `OgreReady`: all required Ogre observers are active and DX11 has not begun.
+- `WaitingForDX11`: Ogre is active; a usable DX11 context/`Present` pair is not.
+- `FullyActive`: Ogre hooks, DX11 context hooks, and `Present` correlation work.
+- `PartialDiagnostics`: at least one useful observer works, but full attribution
+  does not.
+- `Failed`: installation was attempted and no useful observer remains active.
 
-### B. Turn 180 degrees away
+Installed detours and vtable observers are process-lifetime. Shutdown disables
+collection first; hooks then become pass-through until process exit.
 
-Do not move the player or change the battle. Point the camera away so the units are outside the view frustum. Record another 10-20 seconds.
+## Telemetry
 
-### C. Move well outside rendering range
+Reports are aggregated approximately once per second. Hot paths use atomics,
+fixed tables, and bounded bloom sets; they do not format strings, write files,
+allocate, or acquire heavyweight contributor maps.
 
-If practical, move far enough away that the battle should not be submitted for rendering, while allowing the simulation to continue. Record another sample.
+The reports include:
 
-## Interpreting the result
+- `Present`-epoch FPS plus frame mean, p50, p95, p99, maximum, and slow-frame
+  counts;
+- animation calls, approximate unique entities, render-driven versus external
+  provenance, CPU time, and same-entity/same-frame repeats;
+- software blends, vertices, matrices, normals, CPU time, size/latency buckets,
+  and blends per animation update;
+- fixed-size per-Entity and per-source-`VertexData` top contributors;
+- render-queue calls and approximate visible-versus-skinned sets;
+- Ogre render operations and CPU submission time;
+- D3D11 `Draw`, `DrawIndexed`, instanced and indirect variants, normalized per
+  frame;
+- `Map`, `Unmap`, and `UpdateSubresource`, including write-mode and animation
+  TLS attribution;
+- native `ChunkEffect::Simulate` active count and CPU time.
 
-### Expected efficient behavior
+A stable core subset is appended to `openshim_ogre_profile.csv`; the more
+detailed chunk/renderer histograms remain in the one-second log rows. The CSV
+schema is centralized in `include/ogre_profiler_algorithms.h` and protected by
+unit tests.
 
-When looking away, all or most of these should collapse together:
+`animCPU` contains nested blend work, so it must not be added to `swCPU`.
+Approximate unique counts use a 65,536-bit pointer bloom set and are labelled
+with `~` in logs.
 
-```text
-animCalls
-swBlend
-verts
-renderQueue
-Draw / DrawIndexed
+## Duplicate semantics
+
+Duplicate animation detection keys on `(Entity*, Present frame epoch)`. Multiple
+`softwareVertexBlend` calls inside one Entity update are reported as
+blends/update; they are not counted as duplicate Entity updates.
+
+## Recommended visible-destruction capture
+
+Use the same mission/save and keep the camera aimed at the debris for 10–20
+seconds. Record a quiet interval, a creation burst, and a sustained interval
+while the pieces remain both alive and visible. Then turn away without changing
+the simulation to separate visible rendering work from native simulation.
+
+Do not treat an interval after a cinematic camera relocates the player away
+from the battle as a sustained visible-debris sample. It remains useful for
+native `ChunkEffect` simulation scaling only.
+
+## Tests
+
+Run:
+
+```powershell
+.\scripts\run_ogre_profiler_tests.ps1
+.\scripts\run_ini_tests.ps1
 ```
 
-That indicates Ogre is avoiding most software animation work for invisible objects.
-
-### Suspected Redux behavior
-
-A strong confirmation of unnecessary software skinning would look like:
-
-```text
-Facing battle:
-  skinnedUnique~=90
-  renderUnique~=25
-
-Looking away:
-  skinnedUnique~=90
-  renderUnique~=0-3
-```
-
-with `verts` and `swCPU` staying high while render submission/draw activity collapses.
-
-That means the CPU is continuing to deform meshes that the renderer will not submit.
-
-### Rendering is not the main bottleneck
-
-If turning away materially reduces `renderQueue` and D3D11 draw activity but frame rate remains poor while `swCPU` is already small, large-battle cost is likely dominated elsewhere (simulation, collision, AI, pathing, etc.).
-
-## Safety / fail-closed behavior
-
-The profiler does not hardcode guessed retail Ogre addresses.
-
-For Ogre it:
-
-1. Enumerates exports in the already-loaded retail `OgreMain.dll`.
-2. Resolves semantic export names for `_updateAnimation`, `softwareVertexBlend`, and `_updateRenderQueue`.
-3. Rewrites only direct `CALL rel32` sites whose decoded destination exactly equals the resolved retail function.
-4. Rewrites the Entity vtable only when a slot value exactly equals the resolved retail `_updateRenderQueue` function.
-5. If any required match is missing or ambiguous, that observer stays disabled and a warning is logged.
-
-For DX11 it observes the render system's imported D3D11 device creation calls, then wraps the public COM vtable entries for `DrawIndexed`, `Draw`, and `Present`.
-
-The D3D11 counters currently cover the normal `Draw` and `DrawIndexed` paths only. If Redux is later found to use instanced or indirect draw APIs materially, those can be added separately.
+The pure profiler tests cover histogram percentiles, frame/vertex/matrix/latency
+buckets, duplicate semantics, bounded top-contributor replacement, state
+transitions, environment/INI/default precedence, CSV stability, bounded rel32
+thunk resolution, and detour prologue validation.

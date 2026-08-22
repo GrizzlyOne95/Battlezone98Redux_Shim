@@ -45,14 +45,7 @@
             const long size = ftell(file);
             if (size == 0)
             {
-                std::fputs(
-                    "tick_ms,fps,frame_mean_ms,frame_p50_ms,frame_p95_ms,frame_p99_ms,frame_max_ms,"
-                    "anim_calls,anim_render_driven,anim_external,anim_ms_per_frame,nonblend_ms_per_frame,"
-                    "skin_calls,skin_vertices,skin_ms_per_frame,dup_anim_same_frame,dup_skin_same_frame,"
-                    "orphan_skin_calls,matrix_avg,matrix_max,map_calls,map_during_anim,map_during_blend,"
-                    "map_ms_per_frame,update_subresource_calls,update_during_anim,draw_calls,draw_indexed_calls,"
-                    "draw_instanced_calls,draw_indexed_instanced_calls\n",
-                    file);
+                std::fprintf(file, "%s\n", OgreProfilerAlgorithms::kCsvHeader);
             }
 
             std::fprintf(

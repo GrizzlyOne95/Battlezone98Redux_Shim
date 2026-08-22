@@ -9,6 +9,7 @@
 #include "ogre_shader_cache.h"
 #include "ogre_enhanced_light_selection.h"
 #include "native_ui.h"
+#include "ogre_animation_profiler.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -29090,7 +29091,25 @@ namespace BZROpenShim
         // render queue every rendered frame.
         TickChunkProxyDebug(nullptr, false);
         LogChunkEffectRuntimeSample(thisPtr, dt);
-        g_BzrFn_ChunkEffectSimulate(thisPtr, dt);
+        if (IsOgreAnimationProfilerCollecting())
+        {
+            uint32_t activeChunks = 0;
+            TryReadChunkEffectCount(
+                reinterpret_cast<const uint8_t*>(thisPtr),
+                activeChunks);
+            LARGE_INTEGER start{};
+            LARGE_INTEGER end{};
+            QueryPerformanceCounter(&start);
+            g_BzrFn_ChunkEffectSimulate(thisPtr, dt);
+            QueryPerformanceCounter(&end);
+            RecordNativeChunkSimulationSample(
+                activeChunks,
+                static_cast<uint64_t>(end.QuadPart - start.QuadPart));
+        }
+        else
+        {
+            g_BzrFn_ChunkEffectSimulate(thisPtr, dt);
+        }
     }
 
     bool __cdecl HandleCommandHelpBan(uint16_t id, const char* cmd)
