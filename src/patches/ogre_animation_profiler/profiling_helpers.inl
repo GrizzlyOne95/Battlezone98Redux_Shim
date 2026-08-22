@@ -570,6 +570,20 @@
                     g_OgreGetResourceName)
                 {
                     const void* technique = g_OgrePassGetParent(pass);
+                    if (technique && g_OgreTechniqueGetName)
+                    {
+                        CopyEntityMetadataString(
+                            slot->techniqueName,
+                            g_OgreTechniqueGetName(technique));
+                    }
+                    if (technique && g_OgreTechniqueGetSchemeName)
+                    {
+                        CopyEntityMetadataString(
+                            slot->schemeName,
+                            g_OgreTechniqueGetSchemeName(technique));
+                    }
+                    if (technique && g_OgreTechniqueGetLodIndex)
+                        slot->lodIndex = g_OgreTechniqueGetLodIndex(technique);
                     const void* material = technique
                         ? g_OgreTechniqueGetParent(technique)
                         : nullptr;
@@ -582,6 +596,12 @@
                 }
                 if (pass && g_OgrePassGetIndex)
                     slot->passIndex = g_OgrePassGetIndex(pass);
+                if (pass && g_OgrePassGetName)
+                {
+                    CopyEntityMetadataString(
+                        slot->passName,
+                        g_OgrePassGetName(pass));
+                }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {

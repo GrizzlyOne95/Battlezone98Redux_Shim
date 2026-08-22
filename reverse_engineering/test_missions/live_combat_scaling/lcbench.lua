@@ -7,6 +7,7 @@ local VALID_SCENARIOS = {
     idle = true,
     movement = true,
     firing = true,
+    flight = true,
     ai_idle = true,
     combat = true,
 }
@@ -15,6 +16,19 @@ local VALID_UNIT_ODFS = {
     svtank = true,
     svfigh = true,
     avtank = true,
+    avfigh = true,
+    avrckt = true,
+    avartl = true,
+    avapc = true,
+    avwalk = true,
+    avmine = true,
+    avturr = true,
+    aspilo = true,
+    svapc = true,
+    svwalk = true,
+    svmine = true,
+    svturr = true,
+    sspilo = true,
 }
 
 local function readConfig()
@@ -41,7 +55,8 @@ local function readConfig()
     count = math.max(0, math.min(200, math.floor(count or 20)))
     if scenario == "quiet" then
         count = 0
-    elseif (scenario == "firing" or scenario == "combat") and count < 2 then
+    elseif (scenario == "firing" or scenario == "flight" or
+            scenario == "combat") and count < 2 then
         count = 2
     end
     distance = math.max(20.0, math.min(2000.0, distance or 50.0))
@@ -104,12 +119,20 @@ local function formationPosition(playerPos, transform, index, teamSide)
     local row = math.floor(index / columns)
     local column = index % columns
     local lateral = (column - (columns - 1) * 0.5) * 8.0
-    if teamSide ~= 0 then
+    if teamSide ~= 0 and BENCH_SCENARIO ~= "flight" then
         lateral = lateral + teamSide * 42.0
     end
 
     local orientationSign = BENCH_ORIENTATION == "away" and -1.0 or 1.0
-    local forward = orientationSign * (BENCH_DISTANCE + row * 10.0)
+    local forward = BENCH_DISTANCE + row * 10.0
+    -- The flight phase keeps one formation near the selected view distance
+    -- and places its opponent 400 m farther along the same sight line. A short
+    -- measurement window therefore captures muzzle flashes and projectiles in
+    -- flight with very few impacts, using the stock weapon and ordnance paths.
+    if BENCH_SCENARIO == "flight" and teamSide > 0 then
+        forward = forward + 400.0
+    end
+    forward = orientationSign * forward
     local frontX = transform.front_x or 0.0
     local frontZ = transform.front_z or 1.0
     local rightX = transform.right_x or 1.0
@@ -129,6 +152,7 @@ local function spawnUnits(player)
     local transform = GetTransform(player)
     local playerPos = GetPosition(player)
     local splitTeams = BENCH_SCENARIO == "firing" or
+        BENCH_SCENARIO == "flight" or
         BENCH_SCENARIO == "combat"
 
     for index = 0, BENCH_COUNT - 1 do
@@ -235,7 +259,7 @@ end
 function Update(dt)
     elapsed = elapsed + (dt or 0.0)
 
-    if BENCH_SCENARIO == "firing" then
+    if BENCH_SCENARIO == "firing" or BENCH_SCENARIO == "flight" then
         maintainFiringWorkload()
     end
 

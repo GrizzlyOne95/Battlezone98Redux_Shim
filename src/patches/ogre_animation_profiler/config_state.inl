@@ -87,7 +87,7 @@ namespace BZROpenShim
         // long firing captures representative instead of filling with dead IDs.
         constexpr size_t kRenderContributorTableSize = 2048;
         constexpr size_t kRenderContributorProbeCount = 16;
-        constexpr size_t kRenderContributorTopCount = 20;
+        constexpr size_t kRenderContributorTopCount = 48;
         constexpr unsigned kMaxExportThunkDepth = 2;
         constexpr size_t kMaxSuspendedThreads = 128;
         constexpr size_t kEntryDetourMaxPatchLen = 16;
@@ -113,6 +113,7 @@ namespace BZROpenShim
         using FnPassGetParent = const void*(__thiscall*)(const void*);
         using FnTechniqueGetParent = const void*(__thiscall*)(const void*);
         using FnPassGetIndex = unsigned short(__thiscall*)(const void*);
+        using FnTechniqueGetLodIndex = unsigned short(__thiscall*)(const void*);
         using FnMovableGetCastShadows = bool(__thiscall*)(const void*);
         using FnMovableSetCastShadows = void(__thiscall*)(void*, bool);
         using FnVertexElementGetSource =
@@ -324,8 +325,12 @@ namespace BZROpenShim
             std::array<char, kEntityMetadataLength> ownerName{};
             std::array<char, kEntityMetadataLength> meshName{};
             std::array<char, kEntityMetadataLength> materialName{};
+            std::array<char, kEntityMetadataLength> techniqueName{};
+            std::array<char, kEntityMetadataLength> schemeName{};
+            std::array<char, kEntityMetadataLength> passName{};
             std::array<char, kEntityMetadataLength> cameraName{};
             uint32_t passIndex = 0;
+            uint32_t lodIndex = 0;
         };
 
         struct RenderContributorSample
@@ -353,8 +358,12 @@ namespace BZROpenShim
             std::array<char, kEntityMetadataLength> ownerName{};
             std::array<char, kEntityMetadataLength> meshName{};
             std::array<char, kEntityMetadataLength> materialName{};
+            std::array<char, kEntityMetadataLength> techniqueName{};
+            std::array<char, kEntityMetadataLength> schemeName{};
+            std::array<char, kEntityMetadataLength> passName{};
             std::array<char, kEntityMetadataLength> cameraName{};
             uint32_t passIndex = 0;
+            uint32_t lodIndex = 0;
             bool metadataReady = false;
         };
 
@@ -455,6 +464,10 @@ namespace BZROpenShim
         FnPassGetParent g_OgrePassGetParent = nullptr;
         FnTechniqueGetParent g_OgreTechniqueGetParent = nullptr;
         FnPassGetIndex g_OgrePassGetIndex = nullptr;
+        FnOgreStringQuery g_OgreTechniqueGetName = nullptr;
+        FnOgreStringQuery g_OgreTechniqueGetSchemeName = nullptr;
+        FnTechniqueGetLodIndex g_OgreTechniqueGetLodIndex = nullptr;
+        FnOgreStringQuery g_OgrePassGetName = nullptr;
         void* g_OgreSubEntityVtable = nullptr;
         FnOgreStringQuery g_OgreGetResourceName = nullptr;
         FnMovableGetCastShadows g_OgreGetCastShadows = nullptr;
