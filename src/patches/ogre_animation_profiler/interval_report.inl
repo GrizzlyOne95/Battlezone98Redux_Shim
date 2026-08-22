@@ -12,6 +12,8 @@
             const uint64_t blendVerticesInAnimations = g_BlendVerticesInAnimations.exchange(0, std::memory_order_acq_rel);
             const uint64_t duplicateAnimation = g_DuplicateAnimationSameFrame.exchange(0, std::memory_order_acq_rel);
             const uint64_t duplicateSkin = g_DuplicateSkinSameFrame.exchange(0, std::memory_order_acq_rel);
+            const uint64_t duplicateRenderQueue =
+                g_DuplicateRenderQueueSameFrame.exchange(0, std::memory_order_acq_rel);
             const uint64_t blendCalls = g_SoftwareBlendCalls.exchange(0, std::memory_order_acq_rel);
             const uint64_t blendVertices = g_SoftwareBlendVertices.exchange(0, std::memory_order_acq_rel);
             const uint64_t blendTicks = g_SoftwareBlendTicks.exchange(0, std::memory_order_acq_rel);
@@ -68,6 +70,39 @@
             const uint64_t nativeChunkSimTicks = g_NativeChunkSimTicks.exchange(0, std::memory_order_acq_rel);
             const uint64_t nativeChunkActiveTotal = g_NativeChunkActiveTotal.exchange(0, std::memory_order_acq_rel);
             const uint64_t nativeChunkActiveMax = g_NativeChunkActiveMax.exchange(0, std::memory_order_acq_rel);
+            const uint64_t dynamicPrepareCalls =
+                g_DynamicGeometryPrepareCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t dynamicRebuilds =
+                g_DynamicGeometryRebuilds.exchange(0, std::memory_order_acq_rel);
+            const uint64_t dynamicPrepareTicks =
+                g_DynamicGeometryPrepareTicks.exchange(0, std::memory_order_acq_rel);
+            const uint64_t dynamicPrepareMaxTicks =
+                g_DynamicGeometryPrepareMaxTicks.exchange(0, std::memory_order_acq_rel);
+            const uint64_t dynamicQueueCalls =
+                g_DynamicGeometryQueueCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t dynamicBatchTotal =
+                g_DynamicGeometryBatchTotal.exchange(0, std::memory_order_acq_rel);
+            const uint64_t dynamicBatchMax =
+                g_DynamicGeometryBatchMax.exchange(0, std::memory_order_acq_rel);
+            const uint64_t dynamicMergeableBatches =
+                g_DynamicGeometryMergeableBatchTotal.exchange(
+                    0, std::memory_order_acq_rel);
+            const uint64_t dynamicBlendedBatches =
+                g_DynamicGeometryBlendedBatchTotal.exchange(
+                    0, std::memory_order_acq_rel);
+            const uint64_t dynamicDistinctMaterials =
+                g_DynamicGeometryDistinctMaterialTotal.exchange(
+                    0, std::memory_order_acq_rel);
+            const uint64_t dynamicVertices =
+                g_DynamicGeometryVertexTotal.exchange(
+                    0, std::memory_order_acq_rel);
+            const uint64_t dynamicIndices =
+                g_DynamicGeometryIndexTotal.exchange(
+                    0, std::memory_order_acq_rel);
+            const uint64_t chunkShadowQueries =
+                g_ChunkShadowQueries.exchange(0, std::memory_order_acq_rel);
+            const uint64_t chunkShadowSuppressions =
+                g_ChunkShadowSuppressions.exchange(0, std::memory_order_acq_rel);
 
             uint64_t animationUnique = 0;
             uint64_t skinnedUnique = 0;
@@ -167,6 +202,45 @@
             LogShimA(
                 LogLevel::Info,
                 kComponent,
+                "[OgreProfile][DynamicGeometry] prepare=%.2f/f rebuilds=%.2f/f queue=%.2f/f batchesAvg=%.1f batchesMax=%llu mergeable=%.1f/call blended=%.1f/call materials=%.1f/call vertices=%.0f/call indices=%.0f/call cpu=%.3fms/f max=%.3fms",
+                static_cast<double>(dynamicPrepareCalls) / frameDivisor,
+                static_cast<double>(dynamicRebuilds) / frameDivisor,
+                static_cast<double>(dynamicQueueCalls) / frameDivisor,
+                dynamicQueueCalls
+                    ? static_cast<double>(dynamicBatchTotal) / dynamicQueueCalls
+                    : 0.0,
+                static_cast<unsigned long long>(dynamicBatchMax),
+                dynamicQueueCalls
+                    ? static_cast<double>(dynamicMergeableBatches) / dynamicQueueCalls
+                    : 0.0,
+                dynamicQueueCalls
+                    ? static_cast<double>(dynamicBlendedBatches) / dynamicQueueCalls
+                    : 0.0,
+                dynamicQueueCalls
+                    ? static_cast<double>(dynamicDistinctMaterials) / dynamicQueueCalls
+                    : 0.0,
+                dynamicQueueCalls
+                    ? static_cast<double>(dynamicVertices) / dynamicQueueCalls
+                    : 0.0,
+                dynamicQueueCalls
+                    ? static_cast<double>(dynamicIndices) / dynamicQueueCalls
+                    : 0.0,
+                TicksToMs(dynamicPrepareTicks) / frameDivisor,
+                TicksToMs(dynamicPrepareMaxTicks));
+            ReportDynamicGeometryContributors(frameDivisor);
+
+            LogShimA(
+                LogLevel::Info,
+                kComponent,
+                "[OgreProfile][ChunkShadowPolicy] enabled=%s installed=%s queries=%.2f/f suppressed=%.2f/f",
+                g_ChunkShadowPolicyEnabled.load(std::memory_order_acquire) ? "yes" : "no",
+                g_ChunkShadowHookInstalled.load(std::memory_order_acquire) ? "yes" : "no",
+                static_cast<double>(chunkShadowQueries) / frameDivisor,
+                static_cast<double>(chunkShadowSuppressions) / frameDivisor);
+
+            LogShimA(
+                LogLevel::Info,
+                kComponent,
                 "[OgreProfile][Anim] renderDriven=%llu cpu=%.3fms/f external=%llu cpu=%.3fms/f withBlend=%llu withoutBlend=%llu blendCalls/anim=%.2f verts/anim=%.0f maxAnim=%.3fms latency=[%llu,%llu,%llu,%llu,%llu,%llu,%llu]",
                 static_cast<unsigned long long>(renderDrivenCalls), TicksToMs(renderDrivenTicks) / frameDivisor,
                 static_cast<unsigned long long>(externalCalls), TicksToMs(externalTicks) / frameDivisor,
@@ -208,7 +282,7 @@
             LogShimA(
                 LogLevel::Info,
                 kComponent,
-                "[OgreProfile][SkinMeta] matrices avg=%.1f max=%llu buckets=[%llu,%llu,%llu,%llu,%llu] blendNormals=%.1f%% | renderQueue=%.1f/f anim/render=%.2f skin/render=%.2f unique anim~=%llu skin~=%llu render~=%llu skinNotRendered~=%llu (%.1f%%)",
+                "[OgreProfile][SkinMeta] matrices avg=%.1f max=%llu buckets=[%llu,%llu,%llu,%llu,%llu] blendNormals=%.1f%% | renderQueue=%.1f/f duplicateRenderQueue=%llu anim/render=%.2f skin/render=%.2f unique anim~=%llu skin~=%llu render~=%llu skinNotRendered~=%llu (%.1f%%)",
                 matrixAverage,
                 static_cast<unsigned long long>(matrixMax),
                 static_cast<unsigned long long>(matrixBuckets[0]), static_cast<unsigned long long>(matrixBuckets[1]),
@@ -216,6 +290,7 @@
                 static_cast<unsigned long long>(matrixBuckets[4]),
                 blendCalls ? 100.0 * static_cast<double>(blendNormals) / blendCalls : 0.0,
                 static_cast<double>(renderCalls) / frameDivisor,
+                static_cast<unsigned long long>(duplicateRenderQueue),
                 renderCalls ? static_cast<double>(animationCalls) / renderCalls : 0.0,
                 renderCalls ? static_cast<double>(blendCalls) / renderCalls : 0.0,
                 static_cast<unsigned long long>(animationUnique),
@@ -267,14 +342,15 @@
                 static_cast<unsigned long long>(over2500),
                 static_cast<unsigned long long>(over3333));
 
-            if (duplicateSkin || duplicateAnimation)
+            if (duplicateSkin || duplicateAnimation || duplicateRenderQueue)
             {
                 LogShimA(
                     LogLevel::Warn,
                     kComponent,
-                    "[OgreProfile][WARN] same-frame repeat detected duplicateAnimation=%llu duplicateSkin=%llu",
+                    "[OgreProfile][WARN] same-frame repeat detected duplicateAnimation=%llu duplicateSkin=%llu duplicateRenderQueue=%llu",
                     static_cast<unsigned long long>(duplicateAnimation),
-                    static_cast<unsigned long long>(duplicateSkin));
+                    static_cast<unsigned long long>(duplicateSkin),
+                    static_cast<unsigned long long>(duplicateRenderQueue));
             }
 
             ReportTopContributors(frameDivisor);

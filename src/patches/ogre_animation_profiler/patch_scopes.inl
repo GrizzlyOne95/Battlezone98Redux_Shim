@@ -239,7 +239,10 @@
             return true;
         }
 
-        size_t PatchEntityVtables(void* target, void* replacement)
+        size_t PatchEntityVtables(
+            void* target,
+            void* replacement,
+            const char* observerLabel)
         {
             const auto vtables = FindExportsContaining("??_7Entity@Ogre@@");
             size_t patched = 0;
@@ -265,7 +268,8 @@
                     LogShimA(
                         LogLevel::Info,
                         kComponent,
-                        "[OgreProfile] Entity vtable render-queue observer export=%s slot=%u",
+                        "[OgreProfile] Entity vtable %s export=%s slot=%u",
+                        observerLabel ? observerLabel : "observer",
                         match.name.c_str(),
                         static_cast<unsigned>(i));
                 }

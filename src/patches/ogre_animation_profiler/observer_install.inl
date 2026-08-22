@@ -94,11 +94,63 @@
             return installed;
         }
 
-        bool InstallOgreObservers()
+        bool InstallOgreObservers(bool installProfilerObservers)
         {
             g_EntryInstallRetryRequested = false;
             if (!OgreRuntime::IsLoaded())
                 return false;
+
+            const HMODULE ogreModule = GetModuleHandleA("OgreMain.dll");
+            g_OgreGetEntityName = reinterpret_cast<FnOgreStringQuery>(GetProcAddress(
+                ogreModule,
+                "?getName@MovableObject@Ogre@@UBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ"));
+            g_OgreEntityGetMesh = reinterpret_cast<FnEntityGetMesh>(GetProcAddress(
+                ogreModule,
+                "?getMesh@Entity@Ogre@@QBEABV?$SharedPtr@VMesh@Ogre@@@2@XZ"));
+            g_OgreGetResourceName = reinterpret_cast<FnOgreStringQuery>(GetProcAddress(
+                ogreModule,
+                "?getName@Resource@Ogre@@UBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ"));
+            g_OgreGetCastShadows = reinterpret_cast<FnMovableGetCastShadows>(GetProcAddress(
+                ogreModule,
+                "?getCastShadows@MovableObject@Ogre@@UBE_NXZ"));
+            g_OgreSetCastShadows = reinterpret_cast<FnMovableSetCastShadows>(GetProcAddress(
+                ogreModule,
+                "?setCastShadows@MovableObject@Ogre@@QAEX_N@Z"));
+            LogShimA(
+                (g_OgreGetEntityName && g_OgreEntityGetMesh &&
+                 g_OgreGetResourceName && g_OgreGetCastShadows &&
+                 g_OgreSetCastShadows)
+                    ? LogLevel::Info : LogLevel::Warn,
+                kComponent,
+                "[OgreProfile] Entity metadata observers name=%s mesh=%s resourceName=%s getCastShadows=%s setCastShadows=%s",
+                g_OgreGetEntityName ? "yes" : "no",
+                g_OgreEntityGetMesh ? "yes" : "no",
+                g_OgreGetResourceName ? "yes" : "no",
+                g_OgreGetCastShadows ? "yes" : "no",
+                g_OgreSetCastShadows ? "yes" : "no");
+
+            if (g_ChunkShadowPolicyEnabled.load(std::memory_order_acquire) &&
+                g_OgreGetCastShadows && g_OgreEntityGetMesh &&
+                g_OgreGetResourceName && g_OgreSetCastShadows &&
+                !g_ChunkShadowHookInstalled.load(std::memory_order_acquire))
+            {
+                const size_t shadowVtables = PatchEntityVtables(
+                    reinterpret_cast<void*>(g_OgreGetCastShadows),
+                    reinterpret_cast<void*>(&HookEntityGetCastShadows),
+                    "native-chunk shadow policy");
+                g_ChunkShadowHookInstalled.store(
+                    shadowVtables != 0,
+                    std::memory_order_release);
+                LogShimA(
+                    shadowVtables ? LogLevel::Info : LogLevel::Warn,
+                    kComponent,
+                    "[OgreProfile][ChunkShadowPolicy] %s exactMeshes=chunk1/chunk1.mesh,chunk2/chunk2.mesh patchedVtables=%u",
+                    shadowVtables ? "active" : "unavailable",
+                    static_cast<unsigned>(shadowVtables));
+            }
+
+            if (!installProfilerObservers)
+                return g_ChunkShadowHookInstalled.load(std::memory_order_acquire);
 
             void* updateAnimation = FindUniqueFunctionExport(
                 "_updateAnimation@Entity@Ogre@@",
@@ -158,7 +210,6 @@
                 0x81, 0xEC, 0x24, 0x04, 0x00, 0x00 // sub esp, 424h
             };
 
-            const HMODULE ogreModule = GetModuleHandleA("OgreMain.dll");
             const bool animationEntry = g_EntityUpdateAnimationDetour.trampoline ||
                 InstallEntryDetour32(
                     g_EntityUpdateAnimationDetour,
@@ -211,7 +262,8 @@
                     reinterpret_cast<FnEntityUpdateRenderQueue>(updateRenderQueue);
                 const size_t renderVtables = PatchEntityVtables(
                     updateRenderQueue,
-                    reinterpret_cast<void*>(&HookEntityUpdateRenderQueue));
+                    reinterpret_cast<void*>(&HookEntityUpdateRenderQueue),
+                    "render-queue observer");
                 g_RenderQueueHookInstalled.store(renderVtables != 0, std::memory_order_release);
                 if (!renderVtables)
                 {

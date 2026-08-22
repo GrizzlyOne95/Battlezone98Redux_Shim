@@ -2,7 +2,9 @@
 
 This opt-in diagnostic correlates Ogre animation, software deformation, native
 chunk simulation, renderer submissions, D3D11 work, and `Present` frame time.
-It does not change animation state, culling, materials, shaders, or gameplay.
+The diagnostic observers do not change animation state, culling, materials,
+shaders, or gameplay. The independently controlled native-chunk performance
+policies documented below can remain active when profiling is disabled.
 
 ## Enable
 
@@ -86,6 +88,11 @@ The reports include:
 - `Map`, `Unmap`, and `UpdateSubresource`, including write-mode and animation
   TLS attribution;
 - native `ChunkEffect::Simulate` active count and CPU time.
+- native `DynamicGeometry` rebuild, queue, batch, material, vertex, and index
+  attribution;
+- exact `chunk1/chunk2` Entity names, meshes, stored shadow state, and
+  render-queue calls;
+- native chunk shadow-policy query/suppression counts.
 
 A stable core subset is appended to `openshim_ogre_profile.csv`; the more
 detailed chunk/renderer histograms remain in the one-second log rows. The CSV
@@ -113,6 +120,27 @@ Do not treat an interval after a cinematic camera relocates the player away
 from the battle as a sustained visible-debris sample. It remains useful for
 native `ChunkEffect` simulation scaling only.
 
+For a deterministic visible tail, deploy
+`reverse_engineering/test_missions/stock_chunk_tail.lua` beside a copied stock
+`.bzn` with the same basename. It creates 28 `svtank`, destroys them once at
+three seconds, and leaves the camera/load unchanged afterward.
+
+## Native chunk performance policies
+
+These policies are separate from collection and default on in the validated GOG
+build:
+
+- exact `chunk1/chunk1.mesh` and `chunk2/chunk2.mesh` Entities have their real
+  Ogre shadow flag cleared once; opt out with
+  `OPENSHIM_DISABLE_NATIVE_CHUNK_SHADOW_FIX=1`;
+- blended world-effect logarithmic depth keys use stride 8 to permit compatible
+  `DynamicGeometry` batches to merge; opt out with
+  `OPENSHIM_DISABLE_DYNAMIC_ALPHA_BATCHING=1`.
+
+Neither policy changes piece count, native simulation/lifetime, main-pass mesh,
+opaque geometry, material, or shader selection. See
+`stock_dx11_chunk_performance_20260821.md` for the RE and A/B evidence.
+
 ## Tests
 
 Run:
@@ -125,4 +153,5 @@ Run:
 The pure profiler tests cover histogram percentiles, frame/vertex/matrix/latency
 buckets, duplicate semantics, bounded top-contributor replacement, state
 transitions, environment/INI/default precedence, CSV stability, bounded rel32
-thunk resolution, and detour prologue validation.
+thunk resolution, detour prologue validation, exact native-chunk mesh
+classification, and blended depth-key quantization.
