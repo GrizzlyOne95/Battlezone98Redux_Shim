@@ -504,6 +504,7 @@ A lot of things that used to be on this roadmap have already moved into working 
 
 [list]
 [*] Restored physical destruction chunks
+[*] Stock GOG DX9/DX11 destruction-tail submission reduction (coarser compatible smoke/effect batching plus no shadow passes for exact native chunk1/chunk2 debris)
 [*] Lua-driven Ogre UI/overlay support
 [*] Runtime material swapping
 [*] Radar scaling

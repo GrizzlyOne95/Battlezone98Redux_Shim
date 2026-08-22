@@ -45,14 +45,7 @@
             const long size = ftell(file);
             if (size == 0)
             {
-                std::fputs(
-                    "tick_ms,fps,frame_mean_ms,frame_p50_ms,frame_p95_ms,frame_p99_ms,frame_max_ms,"
-                    "anim_calls,anim_render_driven,anim_external,anim_ms_per_frame,nonblend_ms_per_frame,"
-                    "skin_calls,skin_vertices,skin_ms_per_frame,dup_anim_same_frame,dup_skin_same_frame,"
-                    "orphan_skin_calls,matrix_avg,matrix_max,map_calls,map_during_anim,map_during_blend,"
-                    "map_ms_per_frame,update_subresource_calls,update_during_anim,draw_calls,draw_indexed_calls,"
-                    "draw_instanced_calls,draw_indexed_instanced_calls\n",
-                    file);
+                std::fprintf(file, "%s\n", OgreProfilerAlgorithms::kCsvHeader);
             }
 
             std::fprintf(
@@ -87,6 +80,107 @@
             std::fclose(file);
         }
 
+        void ReportDynamicGeometryContributors(double frameDivisor)
+        {
+            std::vector<DynamicGeometryTopSample> samples;
+            samples.reserve(kDynamicGeometryTableSize);
+            for (DynamicGeometryProfileSlot& slot : g_DynamicGeometryProfileSlots)
+            {
+                const uintptr_t key = slot.key.load(std::memory_order_relaxed);
+                if (!key)
+                    continue;
+                DynamicGeometryTopSample sample{};
+                sample.key = key;
+                sample.prepareCalls = slot.prepareCalls.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.rebuilds = slot.rebuilds.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.prepareTicks = slot.prepareTicks.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.queueCalls = slot.queueCalls.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.batches = slot.batches.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.batchMax = slot.batchMax.exchange(
+                    0, std::memory_order_acq_rel);
+                if (sample.prepareCalls || sample.queueCalls)
+                    samples.push_back(sample);
+            }
+            std::sort(
+                samples.begin(), samples.end(),
+                [](const DynamicGeometryTopSample& a,
+                   const DynamicGeometryTopSample& b)
+                {
+                    return a.batches != b.batches
+                        ? a.batches > b.batches
+                        : a.prepareTicks > b.prepareTicks;
+                });
+            for (size_t i = 0; i < samples.size(); ++i)
+            {
+                const DynamicGeometryTopSample& sample = samples[i];
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    "[OgreProfile][DynamicGeometryTop] rank=%u object=0x%p prepare=%.2f/f rebuilds=%.2f/f queue=%.2f/f batches=%.1f/call batchesMax=%llu cpu=%.3fms/f",
+                    static_cast<unsigned>(i + 1),
+                    reinterpret_cast<void*>(sample.key),
+                    static_cast<double>(sample.prepareCalls) / frameDivisor,
+                    static_cast<double>(sample.rebuilds) / frameDivisor,
+                    static_cast<double>(sample.queueCalls) / frameDivisor,
+                    sample.queueCalls
+                        ? static_cast<double>(sample.batches) / sample.queueCalls
+                        : 0.0,
+                    static_cast<unsigned long long>(sample.batchMax),
+                    TicksToMs(sample.prepareTicks) / frameDivisor);
+            }
+
+            std::vector<DynamicMaterialTopSample> materials;
+            materials.reserve(kDynamicMaterialTableSize);
+            for (DynamicMaterialProfileSlot& slot : g_DynamicMaterialProfileSlots)
+            {
+                const uintptr_t key = slot.key.load(std::memory_order_relaxed);
+                if (!key)
+                    continue;
+                DynamicMaterialTopSample sample{};
+                sample.key = key;
+                sample.batches = slot.batches.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.blendedBatches = slot.blendedBatches.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.metadataReady =
+                    slot.metadataState.load(std::memory_order_acquire) == 2;
+                if (sample.metadataReady)
+                    sample.materialName = slot.materialName;
+                if (sample.batches)
+                    materials.push_back(sample);
+            }
+            std::sort(
+                materials.begin(), materials.end(),
+                [](const DynamicMaterialTopSample& a,
+                   const DynamicMaterialTopSample& b)
+                {
+                    return a.batches != b.batches
+                        ? a.batches > b.batches
+                        : a.blendedBatches > b.blendedBatches;
+                });
+            const size_t materialCount = std::min(
+                materials.size(), kTopContributorCount);
+            for (size_t i = 0; i < materialCount; ++i)
+            {
+                const DynamicMaterialTopSample& sample = materials[i];
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    "[OgreProfile][DynamicMaterialTop] rank=%u material=0x%p name=%s batches=%.1f/f blended=%.1f/f",
+                    static_cast<unsigned>(i + 1),
+                    reinterpret_cast<void*>(sample.key),
+                    sample.metadataReady && sample.materialName[0]
+                        ? sample.materialName.data() : "<unknown>",
+                    static_cast<double>(sample.batches) / frameDivisor,
+                    static_cast<double>(sample.blendedBatches) / frameDivisor);
+            }
+        }
+
         void ReportTopContributors(double frameDivisor)
         {
             std::vector<EntityTopSample> entities;
@@ -104,16 +198,79 @@
                 sample.skinCalls = slot.skinCalls.exchange(0, std::memory_order_acq_rel);
                 sample.skinVertices = slot.skinVertices.exchange(0, std::memory_order_acq_rel);
                 sample.skinTicks = slot.skinTicks.exchange(0, std::memory_order_acq_rel);
-                if (sample.animationCalls || sample.skinCalls)
+                sample.renderQueueCalls = slot.renderQueueCalls.exchange(0, std::memory_order_acq_rel);
+                sample.metadataReady =
+                    slot.metadataState.load(std::memory_order_acquire) == 2;
+                if (sample.metadataReady)
+                {
+                    sample.entityName = slot.entityName;
+                    sample.meshName = slot.meshName;
+                    sample.castShadows = slot.castShadows;
+                }
+                if (sample.animationCalls || sample.skinCalls || sample.renderQueueCalls)
                     entities.push_back(sample);
             }
+
+            std::vector<EntityTopSample> chunkEntities;
+            uint64_t chunkRenderQueueCalls = 0;
+            uint64_t chunkAnimationCalls = 0;
+            uint64_t chunkSkinCalls = 0;
+            size_t shadowCastingChunkEntities = 0;
+            for (const EntityTopSample& sample : entities)
+            {
+                if (!IsChunkNamedEntity(sample))
+                    continue;
+                chunkEntities.push_back(sample);
+                chunkRenderQueueCalls += sample.renderQueueCalls;
+                chunkAnimationCalls += sample.animationCalls;
+                chunkSkinCalls += sample.skinCalls;
+                if (sample.castShadows)
+                    ++shadowCastingChunkEntities;
+            }
+            std::sort(
+                chunkEntities.begin(), chunkEntities.end(),
+                [](const EntityTopSample& a, const EntityTopSample& b)
+                {
+                    if (a.renderQueueCalls != b.renderQueueCalls)
+                        return a.renderQueueCalls > b.renderQueueCalls;
+                    return a.skinTicks > b.skinTicks;
+                });
+            LogShimA(
+                LogLevel::Info,
+                kComponent,
+                "[OgreProfile][ChunkEntitySummary] namedEntities=%u shadows=%u renderQueue=%.2f/f anim=%.2f/f skin=%.2f/f",
+                static_cast<unsigned>(chunkEntities.size()),
+                static_cast<unsigned>(shadowCastingChunkEntities),
+                static_cast<double>(chunkRenderQueueCalls) / frameDivisor,
+                static_cast<double>(chunkAnimationCalls) / frameDivisor,
+                static_cast<double>(chunkSkinCalls) / frameDivisor);
+            for (size_t i = 0; i < chunkEntities.size() && i < 16; ++i)
+            {
+                const EntityTopSample& sample = chunkEntities[i];
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    "[OgreProfile][ChunkEntityTop] rank=%u entity=0x%p name=%s mesh=%s shadows=%s renderQueue/f=%.2f animCalls/f=%.2f skinCalls/f=%.2f swCPU=%.3fms/f",
+                    static_cast<unsigned>(i + 1),
+                    reinterpret_cast<void*>(sample.key),
+                    sample.entityName[0] ? sample.entityName.data() : "<unavailable>",
+                    sample.meshName[0] ? sample.meshName.data() : "<unavailable>",
+                    sample.castShadows ? "yes" : "no",
+                    static_cast<double>(sample.renderQueueCalls) / frameDivisor,
+                    static_cast<double>(sample.animationCalls) / frameDivisor,
+                    static_cast<double>(sample.skinCalls) / frameDivisor,
+                    TicksToMs(sample.skinTicks) / frameDivisor);
+            }
+
             std::sort(
                 entities.begin(), entities.end(),
                 [](const EntityTopSample& a, const EntityTopSample& b)
                 {
-                    return a.skinTicks != b.skinTicks
-                        ? a.skinTicks > b.skinTicks
-                        : a.animationTicks > b.animationTicks;
+                    if (a.skinTicks != b.skinTicks)
+                        return a.skinTicks > b.skinTicks;
+                    if (a.animationTicks != b.animationTicks)
+                        return a.animationTicks > b.animationTicks;
+                    return a.renderQueueCalls > b.renderQueueCalls;
                 });
             for (size_t i = 0; i < entities.size() && i < kTopContributorCount; ++i)
             {
@@ -121,9 +278,15 @@
                 LogShimA(
                     LogLevel::Info,
                     kComponent,
-                    "[OgreProfile][EntityTop] rank=%u entity=0x%p animCalls/f=%.2f animCPU=%.3fms/f skinCalls/f=%.2f skinVerts/f=%.0f swCPU=%.3fms/f",
+                    "[OgreProfile][EntityTop] rank=%u entity=0x%p name=%s mesh=%s shadows=%s renderQueue/f=%.2f animCalls/f=%.2f animCPU=%.3fms/f skinCalls/f=%.2f skinVerts/f=%.0f swCPU=%.3fms/f",
                     static_cast<unsigned>(i + 1),
                     reinterpret_cast<void*>(sample.key),
+                    sample.metadataReady && sample.entityName[0]
+                        ? sample.entityName.data() : "<unavailable>",
+                    sample.metadataReady && sample.meshName[0]
+                        ? sample.meshName.data() : "<unavailable>",
+                    sample.metadataReady ? (sample.castShadows ? "yes" : "no") : "unknown",
+                    static_cast<double>(sample.renderQueueCalls) / frameDivisor,
                     static_cast<double>(sample.animationCalls) / frameDivisor,
                     TicksToMs(sample.animationTicks) / frameDivisor,
                     static_cast<double>(sample.skinCalls) / frameDivisor,
