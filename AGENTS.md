@@ -16,6 +16,9 @@ Core sibling repos:
 
 Cross-repo reading is encouraged to avoid duplicate APIs or repeated RE. Do not edit another repo merely because it was consulted; read that repo's `AGENTS.md` before coordinated changes.
 
+## Shared BZR Lua Reference
+Before writing, reviewing, or changing BZR Lua behavior—or adding Lua-facing native APIs—read `Docs/BZR_LUA_AGENT_REFERENCE.md`. This document is mirrored across the four core BZR repos and should remain byte-identical. Repo-specific `AGENTS.md`/architecture docs still govern implementation ownership. When the shared reference changes, mirror the same content to OpenShim, EXU, Campaign Reimagined, and bzfile in the same workstream.
+
 Reference/tooling repos commonly available under `%USERPROFILE%\Documents\GIT` (reference, not default edit targets): `BZ98RBlenderToolKit`, `Battlezone98Redux_DedicatedServer`, `BZ1-GameWatcher`, `BZ1_Source`, `BZ2_Source`, `Battlezone_LobbyMonitor`, `BZNTools`, `Battlezone98Redux_AudioTool`, `Battlezone98Redux_WorldBuilder`, `Battlezone98Redux_ZFSSpecialist`. Rendering work may also consult local `ogre-1.10.0`.
 
 ## Architecture
@@ -39,5 +42,5 @@ Reference/tooling repos commonly available under `%USERPROFILE%\Documents\GIT` (
 - **Installing/repairing/reproducing the RE toolchain:** read `AGENT_TOOLING_SETUP.md` only for that task.
 - **Private leaked-PDB hints:** first read `reverse_engineering/private_pdb_semantic_ranking.md` and follow its validation policy. Never treat same-RVA equality as identity evidence; never transfer leaked-build stack/register locations as released-build facts.
 - **Steam/GOG executable comparison:** checked builds have matched after SteamStub/runtime bytes settle; GOG is acceptable for static RE unless a concrete mismatch is found. Account for settle delay before declaring Steam divergence.
-- **Roadmap-relevant work:** update `Docs/STEAM_ROADMAP_BBCODE.txt` alongside normal release/changelog notes. Engine/runtime work belongs there; stock content corrections belong in CR.
+- **Roadmap / Workshop publication:** `Docs/STEAM_ROADMAP_BBCODE.txt` is the canonical source for the Steam Roadmap discussion at `https://steamcommunity.com/workshop/filedetails/discussion/3686673790/216888303627073611/`. Update it alongside normal release/changelog notes whenever roadmap-relevant OpenShim/EXU/runtime work changes status. For **every real Campaign Reimagined Workshop upload**, review/update this file and then synchronize the complete BBCode into the Steam discussion before the publication is considered complete. Dry-run publishes do not require a public Steam edit. Campaign Reimagined owns the full checklist in `docs/STEAM_PUBLISH_CHECKLIST.md`.
 - **Multiplayer map filtering/sorting:** keep the validated hop/refresh preservation behavior separate from the currently disabled clean-room filter/sort port unless that subsystem is explicitly being revisited.

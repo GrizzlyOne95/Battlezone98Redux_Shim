@@ -219,6 +219,18 @@ namespace BZROpenShim
         return strcmp(name, "Map Sorting") == 0 || strcmp(name, "Map List Rewrite for Hop-Fix 1/3") == 0 || strcmp(name, "Map List Rewrite for Hop-Fix 2/3") == 0 || strcmp(name, "Map List Rewrite for Hop-Fix 3/3") == 0 || strcmp(name, "Map List Fix Support 1/3") == 0;
     }
 
+    // Declarative gating lives in scripts/patches.json ("platforms": ["steam"]),
+    // applied by FilterPatchesForDistribution. This name list is kept as a
+    // fail-safe for a deployed patches.json that predates that metadata: a
+    // Steam-only rewrite applied to a GOG executable would patch the wrong
+    // bytes, so both gates must agree before these survive on GOG.
+    static bool IsSteamOnlyPatchName(const char* name) {
+        if (!name) return false;
+        return strcmp(name, "Map List Rewrite for Hop-Fix 1/3") == 0 ||
+               strcmp(name, "Map List Rewrite for Hop-Fix 2/3") == 0 ||
+               strcmp(name, "Map List Rewrite for Hop-Fix 3/3") == 0;
+    }
+
     static bool IsChunkExperimentPatchName(const char* name) {
         if (!name) return false;
         return strcmp(name, "Chunk Render Resolve Hook") == 0 || strcmp(name, "Chunk Effect Simulate VTable Hook") == 0 || strcmp(name, "Legacy World Update RenderQueue VTable Hook") == 0;
@@ -245,15 +257,15 @@ namespace BZROpenShim
         return name && strncmp(name, "Vehicle List Mod Fix ", 21) == 0;
     }
 
-    static const char* DistributionConfigKey(OpenShimGameDistribution distribution) {
+    static const char* DistributionConfigKey(BzrDistribution distribution) {
         switch (distribution) {
-        case OpenShimGameDistribution::GOG: return "gog";
-        case OpenShimGameDistribution::Steam: return "steam";
+        case BzrDistribution::GOG: return "gog";
+        case BzrDistribution::Steam: return "steam";
         default: return nullptr;
         }
     }
 
-    static bool ConfigNodeAllowsDistribution(const nlohmann::json& node, OpenShimGameDistribution distribution) {
+    static bool ConfigNodeAllowsDistribution(const nlohmann::json& node, BzrDistribution distribution) {
         if (!node.contains("platforms")) return true;
         if (!node["platforms"].is_array()) return false;
         const char* key = DistributionConfigKey(distribution);
@@ -264,7 +276,7 @@ namespace BZROpenShim
         return false;
     }
 
-    static bool PatchAllowsDistribution(const HookEngine::PatchDef& patch, OpenShimGameDistribution distribution) {
+    static bool PatchAllowsDistribution(const HookEngine::PatchDef& patch, BzrDistribution distribution) {
         static const char* groups[] = { "patches", "globals" };
         for (const char* group : groups) {
             if (!g_Config.data.contains(group) || !g_Config.data[group].is_array()) continue;
@@ -277,7 +289,7 @@ namespace BZROpenShim
         return true;
     }
 
-    static void FilterPatchesForDistribution(std::vector<HookEngine::PatchDef>& patches, OpenShimGameDistribution distribution) {
+    static void FilterPatchesForDistribution(std::vector<HookEngine::PatchDef>& patches, BzrDistribution distribution) {
         patches.erase(std::remove_if(patches.begin(), patches.end(), [distribution](const HookEngine::PatchDef& patch) {
             return !PatchAllowsDistribution(patch, distribution);
         }), patches.end());
@@ -303,7 +315,11 @@ namespace BZROpenShim
         return s_cached != 0;
     }
 
-    static void FilterPatchesForRuntime(std::vector<HookEngine::PatchDef>& patches, bool isSteam) {
+    static void FilterPatchesForRuntime(std::vector<HookEngine::PatchDef>& patches, BzrDistribution distribution) {
+        const bool isSteam = distribution == BzrDistribution::Steam;
+        if (!isSteam) {
+            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsSteamOnlyPatchName(p.name.c_str()); }), patches.end());
+        }
         if (!ShouldEnableMapRefreshFixes(isSteam)) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsMapRefreshPatchName(p.name.c_str()); }), patches.end());
         }
@@ -725,25 +741,28 @@ namespace BZROpenShim
 
     void RunPatcher(uint32_t shimVersion) {
         g_Config.Load();
-        SetGameDistribution(OpenShimGameDistribution::Unknown);
+        SetBzrDistribution(BzrDistribution::Unknown);
         const bool isSteam = IsSteamExe(); g_EnableScrollRestore = true;
         if (ShouldEnableD3DStartupHooks()) ApplyD3DStartupHooks();
         ApplyTrnSaveNormalizeHooks();
         uint32_t gameVer = GetBZRVersion();
         if (gameVer != static_cast<uint32_t>(g_Config.GetStaticPointer("BZR_EXPECTED_VERSION", BZR_EXPECTED_VERSION))) return;
-        // Publish compatibility and storefront only after the supported-version
-        // gate succeeds. IsSteamExe() is a raw PE/SteamStub hint needed by the
-        // patcher, not sufficient evidence to classify an unknown executable as
-        // GOG merely because a .bind section is absent.
+        const BzrDistribution distribution = isSteam ? BzrDistribution::Steam : BzrDistribution::GOG;
+        SetBzrDistribution(distribution);
+        Log(L"[PLATFORM] distribution=%hs steamStub=%hs\n",
+            distribution == BzrDistribution::Steam ? "Steam" : "GOG",
+            isSteam ? "yes" : "no");
+        // Publish the result of the check above. Everything past this point
+        // writes version-specific addresses, so reaching here IS the definition
+        // of a compatible build -- and callers outside the patcher have no other
+        // way to ask. This was never being set: the check early-returns on a
+        // mismatch and simply fell through on success, leaving the flag false
+        // forever. dllmain gates engine-level AutoSave on it, so AutoSave never
+        // initialized on any build.
         SetCompatibleVersion(true);
-        const OpenShimGameDistribution distribution = isSteam
-            ? OpenShimGameDistribution::Steam
-            : OpenShimGameDistribution::GOG;
-        SetGameDistribution(distribution);
-        Log(L"[DIST] Qualified BZR distribution: %hs\n", isSteam ? "Steam" : "GOG");
         std::vector<uint8_t> sig; if (ReadExeSignature(sig)) WaitForSignature(sig);
         StartSoundChannelOverride(isSteam);
-        g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForDistribution(patches, distribution); FilterPatchesForRuntime(patches, isSteam); ScanForPatchAddresses(patches, isSteam);
+        g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForDistribution(patches, distribution); FilterPatchesForRuntime(patches, distribution); ScanForPatchAddresses(patches, isSteam);
         auto findAddr = [&patches](const char* n) -> uint32_t { for (const auto& p : patches) { if (p.name == n) return p.address; } return 0; };
         ResolvePointers(findAddr("Map Sorting"), findAddr("Map List Rewrite for Hop-Fix 1/3"), findAddr("Map List Rewrite for Hop-Fix 2/3"), findAddr("Map List Rewrite for Hop-Fix 3/3"), findAddr("Probe Refresh Path MapFilter1"), findAddr("Map List Fix Support 1/3"), findAddr("Probe MapListFix2"), findAddr("TurretCraft Aim Pitch Multiplier"), findAddr("TurretTank Aim Pitch Multiplier"), findAddr("Under Attack Alert Hook 1/2"), findAddr("Under Attack Alert Hook 2/2"), findAddr("Offensive Attack Reveal Hook"), findAddr("TurretTank Attack Reveal Hook"), isSteam);
         ResolveStaticReturnPointers();

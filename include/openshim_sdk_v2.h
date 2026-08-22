@@ -25,11 +25,11 @@ namespace BZROpenShim
 
     uint64_t GetOpenShimCapabilityMask();
 
-    // Qualified storefront/provenance state. The patcher only calls the setter
-    // after the supported BZR version gate succeeds; until then this remains
-    // Unknown so unsupported executables fail closed.
-    void SetGameDistribution(OpenShimGameDistribution distribution);
-    OpenShimGameDistribution GetGameDistribution();
+    // Patcher-owned storefront state. It remains Unknown until the supported
+    // BZR version gate has succeeded, then becomes GOG or Steam for the life of
+    // the process. Keeping the setter internal prevents companions from
+    // spoofing platform policy.
+    void SetBzrDistribution(BzrDistribution distribution);
 
     // Shared implementation used by the exported C entry point and the v2
     // function table.

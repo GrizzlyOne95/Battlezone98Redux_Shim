@@ -4,6 +4,7 @@
 #include "openshim_sdk_v2.h"
 
 #include "bzr_hooks.h"
+#include "native_ui.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -29,9 +30,8 @@ namespace BZROpenShim
         uint64_t g_NextEventSequence = 1;
         uint64_t g_DroppedEventCount = 0;
         std::atomic<bool> g_SdkInitialized{ false };
-        std::atomic<uint32_t> g_GameDistribution{
-            static_cast<uint32_t>(OpenShimGameDistribution::Unknown)
-        };
+        std::atomic<uint32_t> g_BzrDistribution{
+            static_cast<uint32_t>(BzrDistribution::Unknown) };
 
         struct EventQueueStats
         {
@@ -126,9 +126,9 @@ namespace BZROpenShim
             return OpenShimLogDeveloperSnapshot();
         }
 
-        static uint32_t __cdecl ApiGetGameDistribution()
+        static const OpenShimNativeUiApiV1* __cdecl ApiGetNativeUiApi(uint32_t requestedVersion)
         {
-            return static_cast<uint32_t>(GetGameDistribution());
+            return GetOpenShimNativeUiApi(requestedVersion);
         }
 
         static const OpenShimApiV2& GetApiV2Table()
@@ -151,11 +151,31 @@ namespace BZROpenShim
                 value.clearEventQueue = ApiClearEventQueue;
                 value.captureDeveloperSnapshot = ApiCaptureDeveloperSnapshot;
                 value.logDeveloperSnapshot = ApiLogDeveloperSnapshot;
-                value.getGameDistribution = ApiGetGameDistribution;
+                value.getNativeUiApi = ApiGetNativeUiApi;
                 return value;
             }();
             return api;
         }
+    }
+
+    BzrDistribution GetBzrDistribution()
+    {
+        const uint32_t raw = g_BzrDistribution.load(std::memory_order_acquire);
+        switch (raw)
+        {
+        case static_cast<uint32_t>(BzrDistribution::GOG):
+            return BzrDistribution::GOG;
+        case static_cast<uint32_t>(BzrDistribution::Steam):
+            return BzrDistribution::Steam;
+        default:
+            return BzrDistribution::Unknown;
+        }
+    }
+
+    void SetBzrDistribution(BzrDistribution distribution)
+    {
+        g_BzrDistribution.store(static_cast<uint32_t>(distribution),
+                                std::memory_order_release);
     }
 
     uint64_t GetOpenShimCapabilityMask()
@@ -163,36 +183,7 @@ namespace BZROpenShim
         return OPENSHIM_CAP_STATUS |
                OPENSHIM_CAP_EVENT_QUEUE |
                OPENSHIM_CAP_DEVELOPER_INSPECTOR |
-               OPENSHIM_CAP_GAME_DISTRIBUTION;
-    }
-
-    void SetGameDistribution(OpenShimGameDistribution distribution)
-    {
-        switch (distribution)
-        {
-        case OpenShimGameDistribution::GOG:
-        case OpenShimGameDistribution::Steam:
-            g_GameDistribution.store(static_cast<uint32_t>(distribution), std::memory_order_release);
-            return;
-        default:
-            g_GameDistribution.store(static_cast<uint32_t>(OpenShimGameDistribution::Unknown),
-                                     std::memory_order_release);
-            return;
-        }
-    }
-
-    OpenShimGameDistribution GetGameDistribution()
-    {
-        const uint32_t raw = g_GameDistribution.load(std::memory_order_acquire);
-        switch (static_cast<OpenShimGameDistribution>(raw))
-        {
-        case OpenShimGameDistribution::GOG:
-            return OpenShimGameDistribution::GOG;
-        case OpenShimGameDistribution::Steam:
-            return OpenShimGameDistribution::Steam;
-        default:
-            return OpenShimGameDistribution::Unknown;
-        }
+               OPENSHIM_CAP_NATIVE_UI;
     }
 
     void InitializeOpenShimSdkV2()
@@ -201,7 +192,7 @@ namespace BZROpenShim
         if (!g_SdkInitialized.compare_exchange_strong(expected, true))
             return;
 
-        SetGameDistribution(OpenShimGameDistribution::Unknown);
+        SetBzrDistribution(BzrDistribution::Unknown);
         PublishOpenShimEvent(OpenShimEventType::ShimInitialized,
                              GetShimVersion(),
                              SDK_VERSION,
@@ -222,7 +213,8 @@ namespace BZROpenShim
                              0,
                              0,
                              "OpenShim shutdown started");
-        SetGameDistribution(OpenShimGameDistribution::Unknown);
+        ShutdownNativeUi();
+        SetBzrDistribution(BzrDistribution::Unknown);
         g_SdkInitialized.store(false);
     }
 
@@ -255,10 +247,6 @@ namespace BZROpenShim
         AcquireSRWLockExclusive(&g_EventQueueLock);
         event.sequence = g_NextEventSequence++;
 
-        // Keep the newest state when a consumer falls behind. The queue is a
-        // diagnostic/notification surface, not authoritative game state; a
-        // dropped counter makes overflow explicit instead of silently growing
-        // memory from arbitrary engine hooks.
         if (g_EventQueueCount == kEventQueueCapacity)
         {
             g_EventQueueHead = (g_EventQueueHead + 1) % kEventQueueCapacity;
@@ -285,7 +273,6 @@ namespace BZROpenShim
         outSnapshot.appliedPatchCount = GetAppliedPatchCount();
         outSnapshot.compatibleGameVersion = IsCompatibleGameVersion() ? 1u : 0u;
         outSnapshot.patchingComplete = IsPatchingComplete() ? 1u : 0u;
-        outSnapshot.gameDistribution = static_cast<uint32_t>(GetGameDistribution());
 
         const EventQueueStats stats = ReadEventQueueStats();
         outSnapshot.pendingEventCount = stats.pending;
@@ -315,11 +302,10 @@ namespace BZROpenShim
         {
             LogShimA(LogLevel::Info,
                      "dev_inspector",
-                     "snapshot shim=%u sdk=%u compatible=%u distribution=%u patchingComplete=%u patches=%u events=%u dropped=%llu player={resolved:1,x:%.3f,y:%.3f,z:%.3f}",
+                     "snapshot shim=%u sdk=%u compatible=%u patchingComplete=%u patches=%u events=%u dropped=%llu player={resolved:1,x:%.3f,y:%.3f,z:%.3f}",
                      snapshot.shimVersion,
                      snapshot.sdkVersion,
                      static_cast<unsigned>(snapshot.compatibleGameVersion),
-                     snapshot.gameDistribution,
                      static_cast<unsigned>(snapshot.patchingComplete),
                      snapshot.appliedPatchCount,
                      snapshot.pendingEventCount,
@@ -332,11 +318,10 @@ namespace BZROpenShim
         {
             LogShimA(LogLevel::Info,
                      "dev_inspector",
-                     "snapshot shim=%u sdk=%u compatible=%u distribution=%u patchingComplete=%u patches=%u events=%u dropped=%llu player={resolved:0}",
+                     "snapshot shim=%u sdk=%u compatible=%u patchingComplete=%u patches=%u events=%u dropped=%llu player={resolved:0}",
                      snapshot.shimVersion,
                      snapshot.sdkVersion,
                      static_cast<unsigned>(snapshot.compatibleGameVersion),
-                     snapshot.gameDistribution,
                      static_cast<unsigned>(snapshot.patchingComplete),
                      snapshot.appliedPatchCount,
                      snapshot.pendingEventCount,
@@ -355,6 +340,11 @@ namespace BZROpenShim
         if (requestedVersion != 0 && requestedVersion != SDK_API_V2)
             return nullptr;
         return &GetApiV2Table();
+    }
+
+    extern "C" BZRO_API uint32_t __cdecl OpenShimGetBzrDistribution()
+    {
+        return static_cast<uint32_t>(GetBzrDistribution());
     }
 
     extern "C" BZRO_API int32_t __cdecl OpenShimCaptureDeveloperSnapshot(
