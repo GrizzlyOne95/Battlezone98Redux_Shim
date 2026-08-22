@@ -9957,25 +9957,34 @@ namespace BZROpenShim
         // earlier diagnostic samplers can share the verified user-object
         // global and arena enumeration instead of the removed stale globals.
         static void* TryGetHeadlightPlayerObject();
+        static bool IsLiveHeadlightObjectSlot(void* gameObject);
         static size_t CollectLiveGameObjectsFromArena(void** outObjects, size_t capacity);
         static constexpr size_t kGameObjectArenaSlotCapacity = 4096;
 
-        static bool IsSatelliteOverviewActive()
+        static bool TryReadCurrentViewId(long& outView)
         {
+            outView = -1;
             auto* viewRecord = ResolveMainModulePtr<uint8_t>(kViewRecordRva);
             if (!viewRecord)
                 return false;
 
             __try
             {
-                const long currentView =
+                outView =
                     *reinterpret_cast<const long*>(viewRecord + kPresetViewCurrentViewOffset);
-                return currentView == kCameraTypeOverView;
+                return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 return false;
             }
+        }
+
+        static bool IsSatelliteOverviewActive()
+        {
+            long currentView = -1;
+            return TryReadCurrentViewId(currentView) &&
+                   currentView == kCameraTypeOverView;
         }
 
         static bool g_TraceDamageReveal = false;
@@ -9993,11 +10002,43 @@ namespace BZROpenShim
             void* entity = nullptr;
             bool originalVisible = true;
             bool appliedVisible = true;
+            // Mark-and-sweep stamp. The arena has 4096 slots, so pruning by
+            // rescanning it once per map entry is quadratic on a busy map;
+            // stamping each entry as it is visited makes the sweep linear.
+            uint32_t lastSeenTick = 0;
         };
 
         static bool g_SatelliteVisibilityFixEnabled = true;
         static bool g_SatVisWasActive = false;
+        static uint32_t g_SatVisSweepTick = 0;
         static std::unordered_map<void*, SatelliteEntityVisibility> g_SatelliteVisibilityState;
+
+        // Validation-only pre-hide hook. Battlezone Lua cannot reach Ogre, so
+        // lcbench has no way to construct the "entity was already hidden
+        // before satellite was entered" case on its own. When this names a
+        // team, every live GameObject on that team has its Ogre entity hidden
+        // exactly once, outside satellite, and is then never touched again --
+        // which is precisely a pre-hidden entity. Environment-only on purpose:
+        // it is a test fixture, not a user-facing option, and it is inert
+        // unless OPENSHIM_SATVIS_TEST_PREHIDE_TEAM is set.
+        static bool g_SatVisTestPreHideEnabled = false;
+        static int g_SatVisTestPreHideTeam = 0;
+        static std::unordered_set<void*> g_SatVisTestPreHidden;
+
+        // Bounded validation capture. The general [SATVIS] sampler prints three
+        // hidden and three visible objects per sample, which is the right shape
+        // for characterising a defect but cannot score a fixture that separates
+        // its cases by team. This aggregates the whole arena into one row per
+        // team -- population, legacy gate, resulting Ogre visibility, and what
+        // the fix believes it did -- so a single line per team per second is
+        // enough to score every case. Environment-only, rate-limited, and hard
+        // budget capped.
+        static bool g_SatVisValidateEnabled = false;
+        static volatile long g_SatVisValidateBudget = 0;
+        static DWORD g_SatVisValidateLastTick = 0;
+        static constexpr long kSatVisValidateBudgetDefault = 240;
+        static constexpr DWORD kSatVisValidateIntervalMs = 1000;
+        static constexpr int kSatVisValidateTeamCount = 16;
 
         // MSVC RTTI: vtable[-1] -> CompleteObjectLocator, +12 -> TypeDescriptor,
         // +8 -> the decorated name. Every step is bounds-checked and the whole
@@ -10524,6 +10565,60 @@ namespace BZROpenShim
             }
         }
 
+        // A mission change destroys every GameObject without any teardown
+        // callback, and the arena is a fixed-address slot table, so the next
+        // mission allocates objects at exactly the addresses the previous one
+        // used. A state map carried across that boundary can therefore match a
+        // brand-new object by address. Rather than try to reconcile it, detect
+        // that the world is gone and drop the map -- no pointer in it is worth
+        // anything at that point, and the entities it named are already
+        // destroyed, so there is nothing to restore.
+        static bool SatelliteWorldIsLive()
+        {
+            void* player = TryGetHeadlightPlayerObject();
+            return player != nullptr && IsLiveHeadlightObjectSlot(player);
+        }
+
+        // Validation fixture; see g_SatVisTestPreHideEnabled. Runs only outside
+        // satellite and only touches an entity once, so the satellite path sees
+        // a genuinely pre-hidden entity rather than one this hook keeps forcing.
+        static void ApplySatelliteVisibilityTestPreHide(FnOgreSetVisible setVisible)
+        {
+            if (!g_SatVisTestPreHideEnabled || !setVisible)
+                return;
+
+            static void* s_preHideObjects[kGameObjectArenaSlotCapacity];
+            const size_t totalObjects =
+                CollectLiveGameObjectsFromArena(s_preHideObjects, kGameObjectArenaSlotCapacity);
+
+            for (size_t i = 0; i < totalObjects; ++i)
+            {
+                void* obj = s_preHideObjects[i];
+                if (GetGameObjectActualTeam(obj) != g_SatVisTestPreHideTeam)
+                    continue;
+
+                void* entity = nullptr;
+                if (!TryResolveEntityFromGameObject(obj, entity))
+                    continue;
+                if (!LooksLikeOgreObject(entity))
+                    continue;
+                if (g_SatVisTestPreHidden.count(entity) != 0)
+                    continue;
+
+                if (TryCallEntitySetVisible(setVisible, entity, false))
+                {
+                    g_SatVisTestPreHidden.insert(entity);
+                    if (EnvFlagEnabled("OPENSHIM_TRACE_SATELLITE_VISIBILITY_FIX"))
+                    {
+                        Log(L"[SATVISFIX] test pre-hide obj=0x%08X ogre=0x%08X team=%d\n",
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(obj)),
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(entity)),
+                            g_SatVisTestPreHideTeam);
+                    }
+                }
+            }
+        }
+
         static void SyncSatelliteVisibility()
         {
             if (!g_SatelliteVisibilityFixEnabled)
@@ -10536,14 +10631,36 @@ namespace BZROpenShim
             if (!setVisible || !getVisible)
                 return;
 
+            // Mission teardown: forget everything without dereferencing any of
+            // it. Must be checked before the exit transition, otherwise the
+            // restore pass would walk a fresh mission's arena holding the
+            // previous mission's expectations.
+            if (!SatelliteWorldIsLive())
+            {
+                if (!g_SatelliteVisibilityState.empty() || g_SatVisWasActive)
+                {
+                    if (EnvFlagEnabled("OPENSHIM_TRACE_SATELLITE_VISIBILITY_FIX"))
+                    {
+                        Log(L"[SATVISFIX] world torn down — dropped %zu tracked objects\n",
+                            g_SatelliteVisibilityState.size());
+                    }
+                    g_SatelliteVisibilityState.clear();
+                    g_SatVisWasActive = false;
+                }
+                g_SatVisTestPreHidden.clear();
+                return;
+            }
+
             const bool currentSatellite = IsSatelliteOverviewActive();
 
             // --- Transition: leaving satellite ---
             // Restore original visibility for every tracked entity that is
-            // still live with the same Ogre entity pointer.
+            // still live, still owns the same Ogre entity, and still carries
+            // the visibility this pass last wrote to it.
             if (!currentSatellite && g_SatVisWasActive)
             {
                 size_t restored = 0;
+                size_t deferred = 0;
                 static void* s_exitObjects[kGameObjectArenaSlotCapacity];
                 const size_t totalObjects =
                     CollectLiveGameObjectsFromArena(s_exitObjects, kGameObjectArenaSlotCapacity);
@@ -10560,7 +10677,32 @@ namespace BZROpenShim
                     if (!TryResolveEntityFromGameObject(saved.gameObject, currentEntity))
                         continue;
 
+                    // The slot was reused, or the GameObject swapped entities
+                    // after the last sync tick. Either way this entity was
+                    // never written by us, so there is nothing to undo.
                     if (currentEntity != saved.entity)
+                        continue;
+
+                    // Re-vet before dispatching a virtual: an entity freed and
+                    // its allocation reused would otherwise be called through.
+                    if (!LooksLikeOgreObject(currentEntity))
+                        continue;
+
+                    bool now = false;
+                    if (!TryCallEntityGetVisible(getVisible, currentEntity, now))
+                        continue;
+
+                    // Somebody else -- chunk fragmentation hiding a source
+                    // mesh, for instance -- took ownership of this entity while
+                    // satellite was open. Restoring the pre-satellite value
+                    // here would clobber their decision, so leave it alone.
+                    if (now != saved.appliedVisible)
+                    {
+                        ++deferred;
+                        continue;
+                    }
+
+                    if (now == saved.originalVisible)
                         continue;
 
                     if (TryCallEntitySetVisible(setVisible, currentEntity, saved.originalVisible))
@@ -10572,17 +10714,21 @@ namespace BZROpenShim
 
                 if (EnvFlagEnabled("OPENSHIM_TRACE_SATELLITE_VISIBILITY_FIX"))
                 {
-                    Log(L"[SATVISFIX] satellite exited — restored %zu objects\n",
-                        restored);
+                    Log(L"[SATVISFIX] satellite exited — restored %zu objects (%zu deferred to other owners)\n",
+                        restored, deferred);
                 }
                 return;
             }
 
             if (!currentSatellite)
+            {
+                ApplySatelliteVisibilityTestPreHide(setVisible);
                 return;
+            }
 
             // --- Entering or already in satellite ---
             const bool entering = !g_SatVisWasActive;
+            const uint32_t tick = ++g_SatVisSweepTick;
             size_t synced = 0;
             size_t hidden = 0;
 
@@ -10594,6 +10740,16 @@ namespace BZROpenShim
             {
                 void* obj = s_satObjects[i];
 
+                auto it = g_SatelliteVisibilityState.find(obj);
+
+                // Stamp on arena presence, not on a successful entity read.
+                // A tracked object whose entity fails to resolve for one tick
+                // must keep its record: re-capturing later would read back the
+                // visibility this pass had already applied and latch it in as
+                // the "original", leaving the object hidden after satellite.
+                if (it != g_SatelliteVisibilityState.end())
+                    it->second.lastSeenTick = tick;
+
                 float illumination = 0.0f;
                 void* entity = nullptr;
                 if (!TryReadObjectIlluminationAndEntity(obj, illumination, entity))
@@ -10601,8 +10757,6 @@ namespace BZROpenShim
 
                 if (!LooksLikeOgreObject(entity))
                     continue;
-
-                auto it = g_SatelliteVisibilityState.find(obj);
 
                 if (it == g_SatelliteVisibilityState.end())
                 {
@@ -10619,8 +10773,10 @@ namespace BZROpenShim
                     entry.entity = entity;
                     entry.originalVisible = original;
                     entry.appliedVisible = desired;
+                    entry.lastSeenTick = tick;
 
-                    if (!TryCallEntitySetVisible(setVisible, entity, desired))
+                    if (desired != original &&
+                        !TryCallEntitySetVisible(setVisible, entity, desired))
                         continue;
 
                     g_SatelliteVisibilityState[obj] = entry;
@@ -10632,16 +10788,21 @@ namespace BZROpenShim
                 {
                     SatelliteEntityVisibility& saved = it->second;
 
-                    // Lifecycle check: if the entity pointer changed, the old
-                    // object was destroyed and the slot reused. Re-capture.
+                    // Lifecycle check: if the entity pointer changed, this
+                    // GameObject was rebuilt (or the slot was reused) and the
+                    // new entity has never been written by us. Re-capture its
+                    // own visibility as the original rather than carrying the
+                    // previous entity's state onto it.
                     if (saved.entity != entity)
                     {
                         bool original = true;
                         if (!TryCallEntityGetVisible(getVisible, entity, original))
                             continue;
 
+                        saved.gameObject = obj;
                         saved.entity = entity;
                         saved.originalVisible = original;
+                        saved.appliedVisible = original;
                     }
 
                     const bool desired = saved.originalVisible &&
@@ -10660,20 +10821,15 @@ namespace BZROpenShim
                 }
             }
 
-            // Prune GameObjects that are no longer in the arena.
+            // Sweep entries this pass did not visit: the GameObject left the
+            // arena (destroyed during satellite), or stopped resolving to a
+            // usable Ogre entity. Dropping the record is the whole cleanup --
+            // the entity died with the object, so there is nothing to restore
+            // and nothing to dereference.
             for (auto it = g_SatelliteVisibilityState.begin();
                  it != g_SatelliteVisibilityState.end();)
             {
-                bool found = false;
-                for (size_t i = 0; i < totalObjects; ++i)
-                {
-                    if (s_satObjects[i] == it->first)
-                    {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found)
+                if (it->second.lastSeenTick != tick)
                     it = g_SatelliteVisibilityState.erase(it);
                 else
                     ++it;
@@ -10685,6 +10841,128 @@ namespace BZROpenShim
             {
                 Log(L"[SATVISFIX] satellite entered — synced %zu objects (%zu hidden)\n",
                     synced, hidden);
+            }
+        }
+
+        // One row per populated team. Deliberately free of __try: every read it
+        // performs goes through an existing SEH-guarded helper, so the function
+        // itself can hold ordinary C++ state.
+        struct SatelliteValidationTeamRow
+        {
+            uint32_t objects = 0;
+            uint32_t illuminated = 0;      // the BZ 1.5 gate: illumination > 0
+            uint32_t ogreVisible = 0;      // what Ogre will actually draw
+            uint32_t ogreUnreadable = 0;   // no entity, or getVisible faulted
+            uint32_t tracked = 0;          // present in the satellite state map
+            uint32_t trackedOriginal = 0;  // ... of which were visible pre-satellite
+            uint32_t trackedApplied = 0;   // ... of which the fix last set visible
+        };
+
+        static void LogSatelliteVisibilityValidationSample()
+        {
+            if (!g_SatVisValidateEnabled)
+                return;
+
+            const DWORD now = GetTickCount();
+            if (g_SatVisValidateLastTick != 0 &&
+                (now - g_SatVisValidateLastTick) < kSatVisValidateIntervalMs)
+            {
+                return;
+            }
+            if (InterlockedDecrement(&g_SatVisValidateBudget) < 0)
+                return;
+            g_SatVisValidateLastTick = now;
+
+            FnOgreEntityBoolQuery getVisible = GetOgreVisibleProc();
+            if (!getVisible)
+                return;
+
+            long currentView = -1;
+            TryReadCurrentViewId(currentView);
+            void* const userObject = TryGetHeadlightPlayerObject();
+            const int userTeam = GetGameObjectActualTeam(userObject);
+
+            static void* s_validateObjects[kGameObjectArenaSlotCapacity];
+            const size_t totalObjects =
+                CollectLiveGameObjectsFromArena(s_validateObjects, kGameObjectArenaSlotCapacity);
+
+            SatelliteValidationTeamRow rows[kSatVisValidateTeamCount];
+            uint32_t offTeam = 0;
+
+            for (size_t i = 0; i < totalObjects; ++i)
+            {
+                void* obj = s_validateObjects[i];
+                const int team = GetGameObjectActualTeam(obj);
+                if (team < 0 || team >= kSatVisValidateTeamCount)
+                {
+                    ++offTeam;
+                    continue;
+                }
+
+                SatelliteValidationTeamRow& row = rows[team];
+                ++row.objects;
+
+                float illumination = 0.0f;
+                void* entity = nullptr;
+                if (!TryReadObjectIlluminationAndEntity(obj, illumination, entity) ||
+                    !LooksLikeOgreObject(entity))
+                {
+                    ++row.ogreUnreadable;
+                    continue;
+                }
+
+                if (illumination > 0.0f)
+                    ++row.illuminated;
+
+                bool visible = false;
+                if (TryCallEntityGetVisible(getVisible, entity, visible))
+                {
+                    if (visible)
+                        ++row.ogreVisible;
+                }
+                else
+                {
+                    ++row.ogreUnreadable;
+                }
+
+                auto it = g_SatelliteVisibilityState.find(obj);
+                if (it != g_SatelliteVisibilityState.end() && it->second.entity == entity)
+                {
+                    ++row.tracked;
+                    if (it->second.originalVisible)
+                        ++row.trackedOriginal;
+                    if (it->second.appliedVisible)
+                        ++row.trackedApplied;
+                }
+            }
+
+            Log(L"[SATVISCHK] view=%ld satellite=%d userTeam=%d userObj=0x%08X total=%u "
+                L"offTeam=%u tracked=%zu fix=%d remaining=%ld\n",
+                currentView,
+                IsSatelliteOverviewActive() ? 1 : 0,
+                userTeam,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(userObject)),
+                static_cast<unsigned>(totalObjects),
+                offTeam,
+                g_SatelliteVisibilityState.size(),
+                g_SatelliteVisibilityFixEnabled ? 1 : 0,
+                g_SatVisValidateBudget);
+
+            for (int team = 0; team < kSatVisValidateTeamCount; ++team)
+            {
+                const SatelliteValidationTeamRow& row = rows[team];
+                if (row.objects == 0)
+                    continue;
+                Log(L"[SATVISCHK]   team=%d n=%u illum=%u ogreVis=%u unreadable=%u "
+                    L"tracked=%u orig=%u applied=%u\n",
+                    team,
+                    row.objects,
+                    row.illuminated,
+                    row.ogreVisible,
+                    row.ogreUnreadable,
+                    row.tracked,
+                    row.trackedOriginal,
+                    row.trackedApplied);
             }
         }
 
@@ -25893,16 +26171,16 @@ namespace BZROpenShim
         // reverse_engineering/satellite_fow_root_cause_20260817.md. Revert to
         // default-OFF once the regression is characterised.
         //
-        // Read the INI key directly rather than through the env-mapping shim:
-        // the mapping collapses to EnvFlagEnabled, which cannot tell "absent"
-        // from "0", and a default-ON option needs that distinction.
+        // Back to default OFF. It was temporarily default-ON only while the
+        // satellite fog-of-war regression was being characterised; that work is
+        // finished and the fix is validated, so its per-object sampling is now
+        // just noise in every normal session. The bounded [SATVISCHK] capture
+        // (OPENSHIM_SATVIS_VALIDATE) is the tool for re-scoring the fix.
         //
         // Precedence, most specific first:
         //   1. [Diagnostics] TraceSatelliteVisibility  (explicit, either way)
-        //   2. OPENSHIM_DISABLE_SAT_VIS / BZR_DISABLE_SAT_VIS
-        //   3. the legacy positive TRACE_* aliases (still honoured, though the
-        //      default now makes them redundant)
-        //   4. ON
+        //   2. the positive TRACE_* env aliases
+        //   3. OFF
         {
             bool satelliteVisibilityConfig = false;
             if (TryGetUserConfigBool("Diagnostics", "TraceSatelliteVisibility",
@@ -25910,15 +26188,12 @@ namespace BZROpenShim
             {
                 g_TraceSatelliteVisibility = satelliteVisibilityConfig;
             }
-            else if (EnvFlagEnabled("OPENSHIM_DISABLE_SAT_VIS") ||
-                     EnvFlagEnabled("BZR_DISABLE_SAT_VIS") ||
-                     EnvFlagEnabled("OPENSHIM_DISABLE_SATELLITE_VISIBILITY"))
-            {
-                g_TraceSatelliteVisibility = false;
-            }
             else
             {
-                g_TraceSatelliteVisibility = true;
+                g_TraceSatelliteVisibility =
+                    EnvFlagEnabled("OPENSHIM_TRACE_SAT_VIS") ||
+                    EnvFlagEnabled("OPENSHIM_TRACE_SATELLITE_VISIBILITY") ||
+                    EnvFlagEnabled("BZR_TRACE_SAT_VIS");
             }
         }
         // Read-only damage-reveal probe. Default OFF: it is an investigation
@@ -25976,7 +26251,40 @@ namespace BZROpenShim
                 g_SatelliteVisibilityFixEnabled = true;
             }
             g_SatVisWasActive = false;
+            g_SatVisSweepTick = 0;
             g_SatelliteVisibilityState.clear();
+
+            // Validation fixture (see g_SatVisTestPreHideEnabled). Environment
+            // only -- deliberately absent from openshim.ini so it cannot be
+            // switched on by a user config.
+            long preHideTeam = 0;
+            g_SatVisTestPreHideEnabled =
+                TryGetEnvLong("OPENSHIM_SATVIS_TEST_PREHIDE_TEAM", preHideTeam) &&
+                preHideTeam >= 0 && preHideTeam <= 15;
+            g_SatVisTestPreHideTeam =
+                g_SatVisTestPreHideEnabled ? static_cast<int>(preHideTeam) : 0;
+            g_SatVisTestPreHidden.clear();
+            if (g_SatVisTestPreHideEnabled)
+            {
+                Log(L"[SATVISFIX] validation pre-hide fixture armed for team %d\n",
+                    g_SatVisTestPreHideTeam);
+            }
+
+            g_SatVisValidateEnabled = EnvFlagEnabled("OPENSHIM_SATVIS_VALIDATE");
+            long validateBudget = kSatVisValidateBudgetDefault;
+            if (!TryGetEnvLong("OPENSHIM_SATVIS_VALIDATE_BUDGET", validateBudget) ||
+                validateBudget <= 0 || validateBudget > 100000)
+            {
+                validateBudget = kSatVisValidateBudgetDefault;
+            }
+            g_SatVisValidateBudget = validateBudget;
+            g_SatVisValidateLastTick = 0;
+            if (g_SatVisValidateEnabled)
+            {
+                Log(L"[SATVISCHK] validation capture armed: budget=%ld interval=%lums\n",
+                    validateBudget,
+                    static_cast<unsigned long>(kSatVisValidateIntervalMs));
+            }
         }
 
         // Attack reveal. Effective for the first time as of 2026-08-17: it had
@@ -29877,6 +30185,7 @@ namespace BZROpenShim
 
         MaybeSuppressStaleHopOutAttackAlert();
         SyncSatelliteVisibility();
+        LogSatelliteVisibilityValidationSample();
         MaybeLogSatelliteVisibilitySample();
         RefreshChunkObjectIdentityCacheIfNeeded();
         TrackChunkEffectActiveEntries(thisPtr);
