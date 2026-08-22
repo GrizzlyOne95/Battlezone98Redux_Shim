@@ -2117,6 +2117,17 @@ namespace BZROpenShim
         static bool g_GenericChunkBatchRuntimeAvailable = true;
         static int g_GenericChunkBatchEligibility[2] = { -1, -1 };
         static DWORD g_GenericChunkBatchLastLogTick = 0;
+        // Bounded diagnostics for the per-frame submission question: the game
+        // drives its _updateRenderQueue override more than once per frame (one
+        // traversal per active material scheme), and the ManualObject is also
+        // attached to the scene graph, so the number of rebuilds and the number
+        // of render-queue submissions per frame must be counted, not assumed.
+        static bool g_GenericChunkBatchRateDiagnostics = false;
+        static uint64_t g_GenericChunkBatchSubmitCalls = 0;
+        static uint64_t g_GenericChunkBatchRebuilds = 0;
+        static DWORD g_GenericChunkBatchRateLogTick = 0;
+        static uint64_t g_GenericChunkBatchSubmitCallsAtLastLog = 0;
+        static uint64_t g_GenericChunkBatchRebuildsAtLastLog = 0;
         static const std::string g_GenericChunkBatchMaterialName = "scarpmat2";
         static const std::string g_GenericChunkBatchMaterialGroup = "General";
         // TEST/DIAGNOSTIC seam only. Set by the environment gate below and
@@ -2197,6 +2208,11 @@ namespace BZROpenShim
         using FnOgreManualObjectEnd = void*(__thiscall*)(void*);
         using FnOgreManualObjectUpdateRenderQueue = void(__thiscall*)(void*, void*);
         using FnOgreMovableSetCastShadows = void(__thiscall*)(void*, bool);
+        // Diagnostic-only. Ogre grows ManualObject::mAABB monotonically across
+        // beginUpdate() cycles (it is reset only by clear()), so the batch's
+        // aggregate bounds are read back rather than assumed.
+        using FnOgreManualObjectGetBoundingBox = const void*(__thiscall*)(void*);
+        using FnOgreManualObjectGetBoundingRadius = float(__thiscall*)(void*);
 
         // Render-pass procs captured at hook time when available; the mangled
         // export fallback in TrySubmitChunkMeshProxyToCurrentRenderQueue covers
@@ -6617,12 +6633,29 @@ namespace BZROpenShim
         // run: it skips any slot with a null `entity`, which is exactly the
         // slots that were classified batch-ready, and the debris disappears.
         //
-        // The batch is therefore never "half recovered". The slots are
-        // demoted back to the Entity path in the same frame, before the
-        // per-Entity submission loop reads them, so no frame is ever missing
-        // debris that was visible in the previous one. Recovering a partially
-        // constructed ManualObject is deliberately not attempted -- the Entity
-        // path is the known-good fidelity path and is cheap to rehydrate.
+        // Two different strengths of assurance apply here, and they should
+        // not be conflated.
+        //
+        // Guaranteed by construction: batch ownership is always released.
+        // genericBatchTransformReady/genericBatchKind are cleared before any
+        // Ogre call and on every path, including both `continue`s below, so a
+        // slot can never stay stranded claiming the batch owns it. That is
+        // what makes the pre-fix pathological state unreachable.
+        //
+        // Attempted but not guaranteed: same-frame Entity restoration.
+        // EnsureChunkMeshProxySlot() and TryUpdateChunkMeshProxyTransform()
+        // can both fail (SceneManager unavailable, entity creation failure,
+        // unresolved Ogre export). Such a slot is counted in `demoted` but
+        // not in `restored`, is invisible for that one frame, and is retried
+        // by the ordinary per-Entity path on later frames because its flags
+        // are already clear. The forced-failure test observed
+        // demoted == restored across 39,688 rehydrations, so restoration was
+        // complete on the tested workload -- but this code does not prove it
+        // must be.
+        //
+        // Recovering a partially constructed ManualObject is deliberately not
+        // attempted -- the Entity path is the known-good fidelity path and is
+        // cheap to rehydrate.
         static void RehydrateGenericChunkBatchSlotsToEntities(const wchar_t* reason)
         {
             static FnOgreSetNodePosition setNodePosition =
@@ -6689,6 +6722,11 @@ namespace BZROpenShim
         {
             size_t chunkCount = 0;
             size_t vertexCount = 0;
+            // Tight bounds of the live chunk set, for the diagnostic comparison
+            // against Ogre's own accumulated ManualObject AABB below. Chunk
+            // half-extent is under a metre, so slot origins are a fair proxy.
+            float tightMin[3] = { FLT_MAX, FLT_MAX, FLT_MAX };
+            float tightMax[3] = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
             for (const ChunkProxySlot& slot : g_ChunkProxySlots)
             {
                 if (!slot.active || !slot.genericBatchTransformReady)
@@ -6696,6 +6734,17 @@ namespace BZROpenShim
                 ++chunkCount;
                 vertexCount += slot.genericBatchKind == 1
                     ? std::size(kChunk1Vertices) : std::size(kChunk2Vertices);
+                const float slotOrigin[3] = {
+                    slot.genericBatchTransform.x,
+                    slot.genericBatchTransform.y,
+                    slot.genericBatchTransform.z };
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    if (slotOrigin[axis] < tightMin[axis])
+                        tightMin[axis] = slotOrigin[axis];
+                    if (slotOrigin[axis] > tightMax[axis])
+                        tightMax[axis] = slotOrigin[axis];
+                }
             }
             if (chunkCount == 0)
                 return false;
@@ -6908,6 +6957,52 @@ namespace BZROpenShim
                     L"[CHUNKBATCH] active=%zu vertices=%zu sections=1\n",
                     chunkCount,
                     vertexCount);
+
+                // Diagnostic-only, once per second, never on the hot path.
+                // Ogre resets ManualObject::mAABB only in clear(); beginUpdate()
+                // leaves it alone, so the aggregate bounds are expected to grow
+                // monotonically over a mission. Read Ogre's own box back and log
+                // it beside the tight box, so the claim is measured not argued.
+                static FnOgreManualObjectGetBoundingBox getBoundingBox =
+                    ResolveOgreProc<FnOgreManualObjectGetBoundingBox>(
+                        "?getBoundingBox@ManualObject@Ogre@@UBEABVAxisAlignedBox@2@XZ");
+                static FnOgreManualObjectGetBoundingRadius getBoundingRadius =
+                    ResolveOgreProc<FnOgreManualObjectGetBoundingRadius>(
+                        "?getBoundingRadius@ManualObject@Ogre@@UBEMXZ");
+                if (getBoundingBox && getBoundingRadius &&
+                    g_GenericChunkBatchManualObject && chunkCount > 0)
+                {
+                    try
+                    {
+                        const float* const box = static_cast<const float*>(
+                            getBoundingBox(g_GenericChunkBatchManualObject));
+                        if (box)
+                        {
+                            const uint32_t extentEnum =
+                                *reinterpret_cast<const uint32_t*>(box + 6);
+                            const float radius = getBoundingRadius(
+                                g_GenericChunkBatchManualObject);
+                            LogChunkDiagnostic(
+                                "chunkbatch",
+                                L"[CHUNKBATCH] bounds ogre=(%.1f,%.1f,%.1f)-(%.1f,%.1f,%.1f)"
+                                L" ogreSpan=(%.1f,%.1f,%.1f) extentEnum=%u radius=%.1f"
+                                L" tight=(%.1f,%.1f,%.1f)-(%.1f,%.1f,%.1f)"
+                                L" tightSpan=(%.1f,%.1f,%.1f)\n",
+                                box[0], box[1], box[2],
+                                box[3], box[4], box[5],
+                                box[3] - box[0], box[4] - box[1], box[5] - box[2],
+                                extentEnum, radius,
+                                tightMin[0], tightMin[1], tightMin[2],
+                                tightMax[0], tightMax[1], tightMax[2],
+                                tightMax[0] - tightMin[0],
+                                tightMax[1] - tightMin[1],
+                                tightMax[2] - tightMin[2]);
+                        }
+                    }
+                    catch (...)
+                    {
+                    }
+                }
             }
             return true;
         }
@@ -6928,6 +7023,38 @@ namespace BZROpenShim
 
             const bool genericBatchSubmitted =
                 RebuildAndSubmitGenericChunkBatch(renderQueue);
+            if (g_GenericChunkBatchRateDiagnostics)
+            {
+                ++g_GenericChunkBatchSubmitCalls;
+                if (genericBatchSubmitted)
+                    ++g_GenericChunkBatchRebuilds;
+                const DWORD rateNow = GetTickCount();
+                if (g_GenericChunkBatchRateLogTick == 0)
+                {
+                    g_GenericChunkBatchRateLogTick = rateNow;
+                }
+                else if (static_cast<DWORD>(
+                             rateNow - g_GenericChunkBatchRateLogTick) >= 1000)
+                {
+                    const DWORD windowMs = static_cast<DWORD>(
+                        rateNow - g_GenericChunkBatchRateLogTick);
+                    LogChunkDiagnostic(
+                        "chunkbatch",
+                        L"[CHUNKBATCH] rate windowMs=%lu submitCalls=%llu rebuilds=%llu\n",
+                        static_cast<unsigned long>(windowMs),
+                        static_cast<unsigned long long>(
+                            g_GenericChunkBatchSubmitCalls -
+                            g_GenericChunkBatchSubmitCallsAtLastLog),
+                        static_cast<unsigned long long>(
+                            g_GenericChunkBatchRebuilds -
+                            g_GenericChunkBatchRebuildsAtLastLog));
+                    g_GenericChunkBatchRateLogTick = rateNow;
+                    g_GenericChunkBatchSubmitCallsAtLastLog =
+                        g_GenericChunkBatchSubmitCalls;
+                    g_GenericChunkBatchRebuildsAtLastLog =
+                        g_GenericChunkBatchRebuilds;
+                }
+            }
             if (!genericBatchSubmitted)
             {
                 // Same frame, before the per-Entity loop below reads the slots.
@@ -26004,6 +26131,19 @@ namespace BZROpenShim
             LogChunkDiagnostic(
                 "chunkbatch",
                 L"[CHUNKBATCH] DIAGNOSTIC: forced generic chunk batch failure is ENABLED\n");
+        }
+        // Opt-in measurement seam. The game drives its _updateRenderQueue
+        // override more than once per rendered frame, so the number of batch
+        // rebuilds per frame has to be counted rather than assumed. Off by
+        // default: when disabled not even the counters are touched.
+        g_GenericChunkBatchRateDiagnostics =
+            EnvFlagEnabled("OPENSHIM_CHUNK_BATCH_RATE_DIAGNOSTICS") ||
+            EnvFlagEnabled("BZR_CHUNK_BATCH_RATE_DIAGNOSTICS");
+        if (g_GenericChunkBatchRateDiagnostics)
+        {
+            LogChunkDiagnostic(
+                "chunkbatch",
+                L"[CHUNKBATCH] DIAGNOSTIC: batch submit-rate counters are ENABLED\n");
         }
         g_ForceGenericChunkNonUnitScale =
             EnvFlagEnabled("OPENSHIM_FORCE_GENERIC_CHUNK_NON_UNIT_SCALE") ||
