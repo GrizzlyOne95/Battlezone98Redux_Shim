@@ -241,8 +241,12 @@
                     sample.ownerName = slot.ownerName;
                     sample.meshName = slot.meshName;
                     sample.materialName = slot.materialName;
+                    sample.techniqueName = slot.techniqueName;
+                    sample.schemeName = slot.schemeName;
+                    sample.passName = slot.passName;
                     sample.cameraName = slot.cameraName;
                     sample.passIndex = slot.passIndex;
+                    sample.lodIndex = slot.lodIndex;
                 }
                 if (!sample.calls && !sample.ogreSubmissions)
                     continue;
@@ -292,7 +296,7 @@
                 LogShimA(
                     LogLevel::Info,
                     kComponent,
-                    "[OgreProfile][RenderContributorTop] rank=%u type=%s owner=%s mesh=%s material=%s pass=%u camera=%s main=%.1f/f shadow=%.1f/f renderCalls=%.1f/f OgreSubmit=%.1f/f opVerts=%.0f/f opIndices=%.0f/f Draw=%.1f/f DrawIndexed=%.1f/f drawnVerts=%.0f/f drawnIndices=%.0f/f cpu=%.3fms/f d3d9[state=%.1f blend=%.1f texture=%.1f stage=%.1f sampler=%.1f vs=%.1f ps=%.1f]/f",
+                    "[OgreProfile][RenderContributorTop] rank=%u type=%s ownerSample=%s mesh=%s material=%s technique=%s scheme=%s lod=%u pass=%u/%s camera=%s main=%.1f/f shadow=%.1f/f renderCalls=%.1f/f OgreSubmit=%.1f/f opVerts=%.0f/f opIndices=%.0f/f Draw=%.1f/f DrawIndexed=%.1f/f drawnVerts=%.0f/f drawnIndices=%.0f/f cpu=%.3fms/f d3d9[state=%.1f blend=%.1f texture=%.1f stage=%.1f sampler=%.1f vs=%.1f ps=%.1f]/f",
                     static_cast<unsigned>(i + 1),
                     sample.metadataReady && sample.typeName[0]
                         ? sample.typeName.data() : "<unknown>",
@@ -302,7 +306,14 @@
                         ? sample.meshName.data() : "<none>",
                     sample.metadataReady && sample.materialName[0]
                         ? sample.materialName.data() : "<unknown>",
+                    sample.metadataReady && sample.techniqueName[0]
+                        ? sample.techniqueName.data() : "<unnamed>",
+                    sample.metadataReady && sample.schemeName[0]
+                        ? sample.schemeName.data() : "<default>",
+                    sample.lodIndex,
                     sample.passIndex,
+                    sample.metadataReady && sample.passName[0]
+                        ? sample.passName.data() : "<unnamed>",
                     sample.metadataReady && sample.cameraName[0]
                         ? sample.cameraName.data() : "<unknown>",
                     static_cast<double>(sample.mainCalls) / frameDivisor,

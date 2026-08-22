@@ -123,6 +123,21 @@
             g_OgrePassGetIndex = reinterpret_cast<FnPassGetIndex>(GetProcAddress(
                 ogreModule,
                 "?getIndex@Pass@Ogre@@QBEGXZ"));
+            g_OgreTechniqueGetName = reinterpret_cast<FnOgreStringQuery>(
+                GetProcAddress(
+                    ogreModule,
+                    "?getName@Technique@Ogre@@QBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ"));
+            g_OgreTechniqueGetSchemeName = reinterpret_cast<FnOgreStringQuery>(
+                GetProcAddress(
+                    ogreModule,
+                    "?getSchemeName@Technique@Ogre@@QBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ"));
+            g_OgreTechniqueGetLodIndex =
+                reinterpret_cast<FnTechniqueGetLodIndex>(GetProcAddress(
+                    ogreModule,
+                    "?getLodIndex@Technique@Ogre@@QBEGXZ"));
+            g_OgrePassGetName = reinterpret_cast<FnOgreStringQuery>(GetProcAddress(
+                ogreModule,
+                "?getName@Pass@Ogre@@QBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ"));
             const auto subEntityVtables = FindExportsContaining(
                 "??_7SubEntity@Ogre@@");
             g_OgreSubEntityVtable = subEntityVtables.size() == 1
