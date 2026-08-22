@@ -417,6 +417,22 @@
             }
         };
 
+        struct SceneRenderScope
+        {
+            // SceneManager::_renderScene is re-entrant while Ogre renders shadow
+            // textures. Depth therefore distinguishes main-view traversal from
+            // shadow-camera traversal without relying on retail object layouts.
+            SceneRenderScope()
+            {
+                ++t_SceneRenderDepth;
+            }
+
+            ~SceneRenderScope()
+            {
+                --t_SceneRenderDepth;
+            }
+        };
+
         struct SoftwareBlendScope
         {
             SoftwareBlendScope() { ++t_SoftwareBlendDepth; }

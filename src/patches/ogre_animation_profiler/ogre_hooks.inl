@@ -8,6 +8,46 @@
             real(self);
         }
 
+        void __fastcall HookSceneManagerRenderScene(
+            void* self,
+            void*,
+            void* camera,
+            void* viewport,
+            bool includeOverlays)
+        {
+            FnSceneManagerRenderScene real = g_RealSceneManagerRenderScene
+                ? g_RealSceneManagerRenderScene
+                : reinterpret_cast<FnSceneManagerRenderScene>(
+                    g_SceneManagerRenderSceneDetour.trampoline);
+            if (!real)
+                return;
+
+            if (!g_Enabled.load(std::memory_order_relaxed))
+            {
+                real(self, camera, viewport, includeOverlays);
+                return;
+            }
+
+            // Ogre documents shadow-texture rendering as re-entrant calls to
+            // this method, so the pre-entry depth classifies the camera pass.
+            g_SceneRenderCalls.fetch_add(1, std::memory_order_relaxed);
+            if (t_SceneRenderDepth != 0)
+                g_ShadowSceneRenderCalls.fetch_add(1, std::memory_order_relaxed);
+            CameraProfileSlot* cameraSlot = FindOrClaimCameraSlot(camera);
+            CaptureCameraMetadata(cameraSlot, camera);
+            if (cameraSlot)
+            {
+                cameraSlot->renderCalls.fetch_add(1, std::memory_order_relaxed);
+                if (t_SceneRenderDepth != 0)
+                {
+                    cameraSlot->nestedRenderCalls.fetch_add(
+                        1, std::memory_order_relaxed);
+                }
+            }
+            SceneRenderScope scope;
+            real(self, camera, viewport, includeOverlays);
+        }
+
         void __fastcall HookEntityUpdateRenderQueue(void* self, void*, void* renderQueue)
         {
             if (!g_RealEntityUpdateRenderQueue)
@@ -19,6 +59,10 @@
             }
 
             g_RenderQueueCalls.fetch_add(1, std::memory_order_relaxed);
+            if (t_SceneRenderDepth > 1)
+                g_ShadowRenderQueueCalls.fetch_add(1, std::memory_order_relaxed);
+            else
+                g_MainRenderQueueCalls.fetch_add(1, std::memory_order_relaxed);
             BloomAdd(g_RenderEntityBloom, self);
             EntityProfileSlot* entitySlot = FindOrClaimEntitySlot(self);
             CaptureEntityMetadata(entitySlot, self);
@@ -106,6 +150,10 @@
             }
 
             g_AnimationCalls.fetch_add(1, std::memory_order_relaxed);
+            if (renderDriven && t_SceneRenderDepth > 1)
+                g_ShadowAnimationCalls.fetch_add(1, std::memory_order_relaxed);
+            else if (renderDriven)
+                g_MainAnimationCalls.fetch_add(1, std::memory_order_relaxed);
             BloomAdd(g_AnimationEntityBloom, self);
             const uint64_t start = ReadQpc();
             uint32_t blendCallsForAnimation = 0;
@@ -162,6 +210,7 @@
                 : reinterpret_cast<FnSoftwareVertexBlend>(g_SoftwareVertexBlendDetour.trampoline);
             if (!real)
                 return;
+            EnsureDx11SoftwareSkinSourceShadows(sourceVertexData);
             if (!g_Enabled.load(std::memory_order_relaxed))
             {
                 real(
@@ -180,6 +229,10 @@
                 t_CurrentAnimationEntity && t_CurrentAnimationBlendCalls == 0;
 
             g_SoftwareBlendCalls.fetch_add(1, std::memory_order_relaxed);
+            if (t_SceneRenderDepth > 1)
+                g_ShadowSoftwareBlendCalls.fetch_add(1, std::memory_order_relaxed);
+            else
+                g_MainSoftwareBlendCalls.fetch_add(1, std::memory_order_relaxed);
             g_SoftwareBlendVertices.fetch_add(vertices, std::memory_order_relaxed);
             g_VertexBucketCalls[vertexBucket].fetch_add(1, std::memory_order_relaxed);
             g_VertexBucketVertices[vertexBucket].fetch_add(vertices, std::memory_order_relaxed);
@@ -211,6 +264,7 @@
             }
 
             SourceProfileSlot* sourceSlot = FindOrClaimSourceSlot(sourceVertexData, vertices);
+            CaptureSourceLayout(sourceSlot, sourceVertexData);
             const uint64_t start = ReadQpc();
             {
                 SoftwareBlendScope scope;

@@ -8,7 +8,7 @@
                 kComponent,
                 collectProfilerData
                     ? "[OgreProfile] enabled source=%s; observers are read-only and entry detours fail closed when retail Ogre thunks/prologues do not match"
-                    : "[OgreProfile] diagnostics disabled source=%s; installing native chunk shadow policy only",
+                    : "[OgreProfile] diagnostics disabled source=%s; installing validated runtime performance policies only",
                 g_ProfilerRequestSource);
 
             const ConfiguredRenderer configuredRenderer =
@@ -17,6 +17,11 @@
                 configuredRenderer == ConfiguredRenderer::Direct3D11;
             const bool observeD3D9 =
                 configuredRenderer == ConfiguredRenderer::Direct3D9;
+            if (!observeD3D11)
+            {
+                g_Dx11SkinSourceShadowPolicyEnabled.store(
+                    false, std::memory_order_release);
+            }
             if (collectProfilerData)
             {
                 LogShimA(
@@ -135,11 +140,19 @@
         const bool chunkShadowPolicyEnabled =
             !EnvironmentFlagEnabled(kDisableChunkShadowFixSwitch) &&
             !EnvironmentFlagEnabled(kLegacyDisableChunkShadowFixSwitch);
+        const bool dx11SkinSourceShadowPolicyEnabled =
+            !EnvironmentFlagEnabled(kDisableDx11SkinSourceShadowFixSwitch) &&
+            !EnvironmentFlagEnabled(
+                kLegacyDisableDx11SkinSourceShadowFixSwitch);
         g_ChunkShadowPolicyEnabled.store(
             chunkShadowPolicyEnabled,
             std::memory_order_release);
+        g_Dx11SkinSourceShadowPolicyEnabled.store(
+            dx11SkinSourceShadowPolicyEnabled,
+            std::memory_order_release);
 
-        if (!profilerRequested && !chunkShadowPolicyEnabled)
+        if (!profilerRequested && !chunkShadowPolicyEnabled &&
+            !dx11SkinSourceShadowPolicyEnabled)
         {
             LogShimA(
                 LogLevel::Info,
@@ -178,6 +191,8 @@
     void ShutdownOgreAnimationProfiler()
     {
         g_ChunkShadowPolicyEnabled.store(false, std::memory_order_release);
+        g_Dx11SkinSourceShadowPolicyEnabled.store(
+            false, std::memory_order_release);
         g_Enabled.store(false, std::memory_order_release);
         g_ShutdownRequested.store(true, std::memory_order_release);
         SetProfilerState(ProfilerState::Disabled, "shutdown requested");
