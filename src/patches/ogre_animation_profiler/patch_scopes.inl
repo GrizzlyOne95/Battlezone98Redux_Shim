@@ -1,129 +1,248 @@
-        size_t PatchDirectCallsInModule(
-            HMODULE module,
-            void* target,
-            void* replacement,
-            const char* label)
+        struct SuspendedThreadSet
         {
-            if (!module || !target || !replacement)
-                return 0;
+            std::array<HANDLE, kMaxSuspendedThreads> handles{};
+            size_t count = 0;
+            bool ready = false;
+            DWORD failureError = ERROR_SUCCESS;
+            DWORD blockingThreadId = 0;
+            uintptr_t blockingInstruction = 0;
 
-            auto* base = reinterpret_cast<uint8_t*>(module);
-            auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
-            if (dos->e_magic != IMAGE_DOS_SIGNATURE)
-                return 0;
-            auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
-            if (nt->Signature != IMAGE_NT_SIGNATURE)
-                return 0;
-
-            const size_t imageSize = nt->OptionalHeader.SizeOfImage;
-            auto* section = IMAGE_FIRST_SECTION(nt);
-            size_t patched = 0;
-
-            std::lock_guard<std::mutex> lock(g_PatchMutex);
-            for (WORD sectionIndex = 0; sectionIndex < nt->FileHeader.NumberOfSections; ++sectionIndex, ++section)
+            SuspendedThreadSet(const uint8_t* patchBegin, size_t patchLength)
             {
-                if ((section->Characteristics & IMAGE_SCN_MEM_EXECUTE) == 0)
-                    continue;
-
-                size_t sectionSize = static_cast<size_t>(section->Misc.VirtualSize);
-                if (sectionSize == 0)
-                    sectionSize = static_cast<size_t>(section->SizeOfRawData);
-                if (section->VirtualAddress >= imageSize)
-                    continue;
-                sectionSize = (std::min)(
-                    sectionSize,
-                    imageSize - static_cast<size_t>(section->VirtualAddress));
-                if (sectionSize < 5)
-                    continue;
-
-                uint8_t* code = base + section->VirtualAddress;
-                for (size_t i = 0; i + 5 <= sectionSize; ++i)
+                const DWORD processId = GetCurrentProcessId();
+                const DWORD currentThreadId = GetCurrentThreadId();
+                HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+                if (snapshot == INVALID_HANDLE_VALUE)
                 {
-                    if (code[i] != 0xE8)
-                        continue;
-
-                    int32_t relative = 0;
-                    std::memcpy(&relative, code + i + 1, sizeof(relative));
-                    uint8_t* destination = code + i + 5 + relative;
-                    if (destination != target)
-                        continue;
-
-                    const intptr_t delta =
-                        reinterpret_cast<uint8_t*>(replacement) - (code + i + 5);
-                    const int32_t newRelative = static_cast<int32_t>(delta);
-                    if (!WriteRel32(code + i + 1, newRelative))
-                        continue;
-
-                    g_Rel32Patches.push_back({ code + i + 1, relative });
-                    ++patched;
-                    i += 4;
+                    failureError = GetLastError();
+                    return;
                 }
+
+                THREADENTRY32 entry{};
+                entry.dwSize = sizeof(entry);
+                bool success = true;
+                BOOL hasEntry = Thread32First(snapshot, &entry);
+                if (!hasEntry)
+                    success = false;
+                while (success && hasEntry)
+                {
+                    if (entry.th32OwnerProcessID == processId &&
+                        entry.th32ThreadID != currentThreadId)
+                    {
+                        if (count == handles.size())
+                        {
+                            failureError = ERROR_INSUFFICIENT_BUFFER;
+                            success = false;
+                            break;
+                        }
+
+                        HANDLE thread = OpenThread(
+                            THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION,
+                            FALSE,
+                            entry.th32ThreadID);
+                        if (!thread)
+                        {
+                            if (GetLastError() != ERROR_INVALID_PARAMETER)
+                            {
+                                failureError = GetLastError();
+                                success = false;
+                            }
+                        }
+                        else if (SuspendThread(thread) == static_cast<DWORD>(-1))
+                        {
+                            failureError = GetLastError();
+                            CloseHandle(thread);
+                            success = false;
+                        }
+                        else
+                        {
+                            CONTEXT context{};
+                            context.ContextFlags = CONTEXT_CONTROL;
+                            if (!GetThreadContext(thread, &context))
+                            {
+                                failureError = GetLastError();
+                                ResumeThread(thread);
+                                CloseHandle(thread);
+                                success = false;
+                            }
+                            else
+                            {
+                                const uintptr_t instruction = static_cast<uintptr_t>(context.Eip);
+                                const uintptr_t begin = reinterpret_cast<uintptr_t>(patchBegin);
+                                if (instruction >= begin && instruction < begin + patchLength)
+                                {
+                                    failureError = ERROR_BUSY;
+                                    blockingThreadId = entry.th32ThreadID;
+                                    blockingInstruction = instruction;
+                                    ResumeThread(thread);
+                                    CloseHandle(thread);
+                                    success = false;
+                                }
+                                else
+                                {
+                                    handles[count++] = thread;
+                                }
+                            }
+                        }
+                    }
+
+                    if (success)
+                        hasEntry = Thread32Next(snapshot, &entry);
+                }
+                CloseHandle(snapshot);
+
+                if (!success)
+                {
+                    Release();
+                    return;
+                }
+                ready = true;
             }
 
-            LogShimA(
-                patched ? LogLevel::Info : LogLevel::Warn,
-                kComponent,
-                "[OgreProfile] %s direct-call observers installed=%u module=0x%p",
-                label,
-                static_cast<unsigned>(patched),
-                module);
-            return patched;
-        }
-
-        size_t PatchIatEntriesByTarget(
-            HMODULE module,
-            void* target,
-            void* replacement,
-            const char* label)
-        {
-            if (!module || !target || !replacement)
-                return 0;
-
-            auto* base = reinterpret_cast<uint8_t*>(module);
-            auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
-            if (dos->e_magic != IMAGE_DOS_SIGNATURE)
-                return 0;
-            auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
-            if (nt->Signature != IMAGE_NT_SIGNATURE)
-                return 0;
-
-            const IMAGE_DATA_DIRECTORY& imports =
-                nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-            if (!imports.VirtualAddress)
-                return 0;
-
-            size_t patched = 0;
-            auto* descriptor = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + imports.VirtualAddress);
-            std::lock_guard<std::mutex> lock(g_PatchMutex);
-            for (; descriptor->Name; ++descriptor)
+            ~SuspendedThreadSet()
             {
-                auto* thunk = reinterpret_cast<IMAGE_THUNK_DATA*>(base + descriptor->FirstThunk);
-                for (; thunk->u1.Function; ++thunk)
-                {
-                    void** slot = reinterpret_cast<void**>(&thunk->u1.Function);
-                    if (*slot != target)
-                        continue;
-                    if (!WritePointer(slot, replacement))
-                        continue;
-                    g_PointerPatches.push_back({ slot, target });
-                    ++patched;
-                }
+                Release();
             }
 
-            if (patched)
+            void Release()
+            {
+                while (count != 0)
+                {
+                    HANDLE thread = handles[--count];
+                    ResumeThread(thread);
+                    CloseHandle(thread);
+                }
+                ready = false;
+            }
+        };
+
+        bool InstallEntryDetour32(
+            EntryDetour32& detour,
+            HMODULE ownerModule,
+            void* target,
+            void* hook,
+            const uint8_t* expectedBytes,
+            size_t patchLength,
+            const char* label)
+        {
+            if (!target || !hook || !expectedBytes ||
+                patchLength > detour.original.size() ||
+                !IsExecutableModuleAddress(ownerModule, target))
+            {
+                return false;
+            }
+
+            std::lock_guard<std::mutex> lock(g_PatchMutex);
+            if (detour.trampoline)
+                return detour.target == target && detour.hook == hook;
+            if (!OgreProfilerAlgorithms::ValidateDetourPrologue(
+                    static_cast<const uint8_t*>(target), expectedBytes,
+                    patchLength, detour.original.size()))
             {
                 LogShimA(
-                    LogLevel::Info,
+                    LogLevel::Warn,
                     kComponent,
-                    "[OgreProfile] %s IAT observers installed=%u module=0x%p",
+                    "[OgreProfile] %s implementation prologue is unsupported address=0x%p length=%u",
                     label,
-                    static_cast<unsigned>(patched),
-                    module);
+                    target,
+                    static_cast<unsigned>(patchLength));
+                return false;
             }
-            return patched;
+
+            auto* trampoline = static_cast<uint8_t*>(VirtualAlloc(
+                nullptr,
+                patchLength + 5,
+                MEM_COMMIT | MEM_RESERVE,
+                PAGE_READWRITE));
+            if (!trampoline)
+                return false;
+
+            std::memcpy(trampoline, target, patchLength);
+            trampoline[patchLength] = 0xE9;
+            const intptr_t resumeDelta =
+                (static_cast<uint8_t*>(target) + patchLength) -
+                (trampoline + patchLength + 5);
+            if (resumeDelta < (std::numeric_limits<int32_t>::min)() ||
+                resumeDelta > (std::numeric_limits<int32_t>::max)())
+            {
+                VirtualFree(trampoline, 0, MEM_RELEASE);
+                return false;
+            }
+            const int32_t resumeRelative = static_cast<int32_t>(resumeDelta);
+            std::memcpy(trampoline + patchLength + 1, &resumeRelative, sizeof(resumeRelative));
+            DWORD ignored = 0;
+            if (!VirtualProtect(trampoline, patchLength + 5, PAGE_EXECUTE_READ, &ignored))
+            {
+                VirtualFree(trampoline, 0, MEM_RELEASE);
+                return false;
+            }
+            FlushInstructionCache(GetCurrentProcess(), trampoline, patchLength + 5);
+
+            std::array<uint8_t, kEntryDetourMaxPatchLen> replacement{};
+            replacement.fill(0x90);
+            replacement[0] = 0xE9;
+            const intptr_t hookDelta = static_cast<uint8_t*>(hook) -
+                (static_cast<uint8_t*>(target) + 5);
+            if (hookDelta < (std::numeric_limits<int32_t>::min)() ||
+                hookDelta > (std::numeric_limits<int32_t>::max)())
+            {
+                VirtualFree(trampoline, 0, MEM_RELEASE);
+                return false;
+            }
+            const int32_t hookRelative = static_cast<int32_t>(hookDelta);
+            std::memcpy(replacement.data() + 1, &hookRelative, sizeof(hookRelative));
+
+            SuspendedThreadSet suspended(static_cast<uint8_t*>(target), patchLength);
+            if (!suspended.ready || std::memcmp(target, expectedBytes, patchLength) != 0)
+            {
+                g_EntryInstallRetryRequested = !suspended.ready &&
+                    std::memcmp(target, expectedBytes, patchLength) == 0;
+                LogShimA(
+                    LogLevel::Warn,
+                    kComponent,
+                    "[OgreProfile] deferred %s entry observer target=0x%p suspendReady=%s error=%lu blockingThread=%lu blockingEip=0x%p bytesStillMatch=%s",
+                    label,
+                    target,
+                    suspended.ready ? "yes" : "no",
+                    suspended.failureError,
+                    suspended.blockingThreadId,
+                    reinterpret_cast<void*>(suspended.blockingInstruction),
+                    std::memcmp(target, expectedBytes, patchLength) == 0 ? "yes" : "no");
+                VirtualFree(trampoline, 0, MEM_RELEASE);
+                return false;
+            }
+
+            DWORD oldProtection = 0;
+            if (!VirtualProtect(target, patchLength, PAGE_EXECUTE_READWRITE, &oldProtection))
+            {
+                VirtualFree(trampoline, 0, MEM_RELEASE);
+                return false;
+            }
+            std::memcpy(detour.original.data(), target, patchLength);
+            std::memcpy(target, replacement.data(), patchLength);
+            FlushInstructionCache(GetCurrentProcess(), target, patchLength);
+            DWORD restoredProtection = 0;
+            VirtualProtect(target, patchLength, oldProtection, &restoredProtection);
+
+            detour.target = static_cast<uint8_t*>(target);
+            detour.hook = hook;
+            detour.trampoline = trampoline;
+            detour.patchLen = patchLength;
+            LogShimA(
+                LogLevel::Info,
+                kComponent,
+                "[OgreProfile] installed %s entry observer implementation=0x%p trampoline=0x%p prologueBytes=%u",
+                label,
+                target,
+                trampoline,
+                static_cast<unsigned>(patchLength));
+            return true;
         }
 
-        size_t PatchEntityVtables(void* target, void* replacement)
+        size_t PatchEntityVtables(
+            void* target,
+            void* replacement,
+            const char* observerLabel)
         {
             const auto vtables = FindExportsContaining("??_7Entity@Ogre@@");
             size_t patched = 0;
@@ -149,7 +268,8 @@
                     LogShimA(
                         LogLevel::Info,
                         kComponent,
-                        "[OgreProfile] Entity vtable render-queue observer export=%s slot=%u",
+                        "[OgreProfile] Entity vtable %s export=%s slot=%u",
+                        observerLabel ? observerLabel : "observer",
                         match.name.c_str(),
                         static_cast<unsigned>(i));
                 }

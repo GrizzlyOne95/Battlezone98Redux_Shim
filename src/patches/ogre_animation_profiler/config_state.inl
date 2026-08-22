@@ -1,4 +1,5 @@
 #include "ogre_animation_profiler.h"
+#include "ogre_profiler_algorithms.h"
 #include "ogre_runtime.h"
 #include "shim_log.h"
 
@@ -6,7 +7,9 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
+#include <TlHelp32.h>
 #include <d3d11.h>
+#include <d3d9.h>
 #include <dxgi.h>
 #include <process.h>
 
@@ -45,6 +48,10 @@ namespace BZROpenShim
     {
         constexpr char kComponent[] = "ogre-profile";
         constexpr char kEnvironmentSwitch[] = "OPENSHIM_PROFILE_OGRE_ANIMATION";
+        constexpr char kDisableChunkShadowFixSwitch[] =
+            "OPENSHIM_DISABLE_NATIVE_CHUNK_SHADOW_FIX";
+        constexpr char kLegacyDisableChunkShadowFixSwitch[] =
+            "BZR_DISABLE_NATIVE_CHUNK_SHADOW_FIX";
         constexpr char kIniSection[] = "Diagnostics";
         constexpr char kIniKey[] = "ProfileOgreAnimation";
         constexpr int kDefaultProfilerEnabled = 1;
@@ -56,12 +63,20 @@ namespace BZROpenShim
         constexpr size_t kLatencyBucketCount = 7;
         constexpr size_t kVertexBucketCount = 8;
         constexpr size_t kMatrixBucketCount = 5;
-        constexpr size_t kFrameTimeBucketCount = 401; // 0.25 ms buckets through 100 ms + overflow.
-        constexpr uint64_t kFrameTimeBucketUs = 250;
+        constexpr size_t kFrameTimeBucketCount =
+            OgreProfilerAlgorithms::kFrameTimeBucketCount;
+        constexpr uint64_t kFrameTimeBucketUs =
+            OgreProfilerAlgorithms::kFrameTimeBucketUs;
         constexpr size_t kEntityTableSize = 4096;
         constexpr size_t kSourceTableSize = 2048;
         constexpr size_t kProfileProbeCount = 8;
         constexpr size_t kTopContributorCount = 5;
+        constexpr size_t kEntityMetadataLength = 96;
+        constexpr size_t kDynamicGeometryTableSize = 16;
+        constexpr size_t kDynamicMaterialTableSize = 128;
+        constexpr unsigned kMaxExportThunkDepth = 2;
+        constexpr size_t kMaxSuspendedThreads = 128;
+        constexpr size_t kEntryDetourMaxPatchLen = 16;
 
         static_assert((kEntityTableSize & (kEntityTableSize - 1)) == 0,
                       "entity table must remain power-of-two");
@@ -70,6 +85,16 @@ namespace BZROpenShim
 
         using FnEntityUpdateAnimation = void(__thiscall*)(void*);
         using FnEntityUpdateRenderQueue = void(__thiscall*)(void*, void*);
+        using FnOgreStringQuery = const std::string&(__thiscall*)(const void*);
+        using FnEntityGetMesh = const void*(__thiscall*)(const void*);
+        using FnMovableGetCastShadows = bool(__thiscall*)(const void*);
+        using FnMovableSetCastShadows = void(__thiscall*)(void*, bool);
+        using FnD3D11RenderSystemRender = void(__thiscall*)(void*, const void*);
+        using FnD3D9RenderSystemRender = void(__thiscall*)(void*, const void*);
+        using FnD3D9GetActiveDevice = IDirect3DDevice9*(__cdecl*)();
+        using FnD3D11RenderSystemGetDevice = void*(__thiscall*)(void*);
+        using FnOgreD3D11DeviceGetImmediateContext =
+            ID3D11DeviceContext*(__thiscall*)(void*);
         using FnSoftwareVertexBlend = void(__cdecl*)(
             const Ogre::VertexData*,
             const Ogre::VertexData*,
@@ -88,6 +113,8 @@ namespace BZROpenShim
             ID3D11Device**, D3D_FEATURE_LEVEL*, ID3D11DeviceContext**);
         using FnFactoryCreateSwapChain = HRESULT(STDMETHODCALLTYPE*)(
             IDXGIFactory*, IUnknown*, DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**);
+        using FnDeviceCreateDeferredContext = HRESULT(STDMETHODCALLTYPE*)(
+            ID3D11Device*, UINT, ID3D11DeviceContext**);
         using FnContextDrawIndexed = void(STDMETHODCALLTYPE*)(
             ID3D11DeviceContext*, UINT, UINT, INT);
         using FnContextDraw = void(STDMETHODCALLTYPE*)(
@@ -110,11 +137,35 @@ namespace BZROpenShim
             ID3D11DeviceContext*, ID3D11Buffer*, UINT);
         using FnSwapChainPresent = HRESULT(STDMETHODCALLTYPE*)(
             IDXGISwapChain*, UINT, UINT);
+        using FnD3D9SwapChainPresent = HRESULT(STDMETHODCALLTYPE*)(
+            IDirect3DSwapChain9*, const RECT*, const RECT*, HWND,
+            const RGNDATA*, DWORD);
+        using FnD3D9DrawPrimitive = HRESULT(STDMETHODCALLTYPE*)(
+            IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT);
+        using FnD3D9DrawIndexedPrimitive = HRESULT(STDMETHODCALLTYPE*)(
+            IDirect3DDevice9*, D3DPRIMITIVETYPE, INT, UINT, UINT, UINT, UINT);
+        using FnD3D9SetRenderState = HRESULT(STDMETHODCALLTYPE*)(
+            IDirect3DDevice9*, D3DRENDERSTATETYPE, DWORD);
+        using FnD3D9SetTexture = HRESULT(STDMETHODCALLTYPE*)(
+            IDirect3DDevice9*, DWORD, IDirect3DBaseTexture9*);
+        using FnD3D9SetTextureStageState = HRESULT(STDMETHODCALLTYPE*)(
+            IDirect3DDevice9*, DWORD, D3DTEXTURESTAGESTATETYPE, DWORD);
+        using FnD3D9SetSamplerState = HRESULT(STDMETHODCALLTYPE*)(
+            IDirect3DDevice9*, DWORD, D3DSAMPLERSTATETYPE, DWORD);
+        using FnD3D9SetVertexShader = HRESULT(STDMETHODCALLTYPE*)(
+            IDirect3DDevice9*, IDirect3DVertexShader9*);
+        using FnD3D9SetPixelShader = HRESULT(STDMETHODCALLTYPE*)(
+            IDirect3DDevice9*, IDirect3DPixelShader9*);
 
-        struct Rel32Patch
+        using OgreProfilerAlgorithms::ProfilerState;
+
+        struct EntryDetour32
         {
-            uint8_t* operand = nullptr;
-            int32_t original = 0;
+            uint8_t* target = nullptr;
+            void* hook = nullptr;
+            void* trampoline = nullptr;
+            size_t patchLen = 0;
+            std::array<uint8_t, kEntryDetourMaxPatchLen> original{};
         };
 
         struct PointerPatch
@@ -132,13 +183,19 @@ namespace BZROpenShim
         struct EntityProfileSlot
         {
             std::atomic<uintptr_t> key{ 0 };
+            std::atomic<uint32_t> metadataState{ 0 }; // 0=empty, 1=capturing, 2=ready
             std::atomic<uint64_t> lastAnimationFrame{ 0 };
             std::atomic<uint64_t> lastSkinFrame{ 0 };
+            std::atomic<uint64_t> lastRenderQueueFrame{ 0 };
             std::atomic<uint64_t> animationCalls{ 0 };
             std::atomic<uint64_t> animationTicks{ 0 };
             std::atomic<uint64_t> skinCalls{ 0 };
             std::atomic<uint64_t> skinVertices{ 0 };
             std::atomic<uint64_t> skinTicks{ 0 };
+            std::atomic<uint64_t> renderQueueCalls{ 0 };
+            std::array<char, kEntityMetadataLength> entityName{};
+            std::array<char, kEntityMetadataLength> meshName{};
+            bool castShadows = false;
         };
 
         struct SourceProfileSlot
@@ -150,6 +207,26 @@ namespace BZROpenShim
             std::atomic<uint64_t> sourceVertices{ 0 };
         };
 
+        struct DynamicGeometryProfileSlot
+        {
+            std::atomic<uintptr_t> key{ 0 };
+            std::atomic<uint64_t> prepareCalls{ 0 };
+            std::atomic<uint64_t> rebuilds{ 0 };
+            std::atomic<uint64_t> prepareTicks{ 0 };
+            std::atomic<uint64_t> queueCalls{ 0 };
+            std::atomic<uint64_t> batches{ 0 };
+            std::atomic<uint64_t> batchMax{ 0 };
+        };
+
+        struct DynamicMaterialProfileSlot
+        {
+            std::atomic<uintptr_t> key{ 0 };
+            std::atomic<uint64_t> batches{ 0 };
+            std::atomic<uint64_t> blendedBatches{ 0 };
+            std::atomic<uint32_t> metadataState{ 0 };
+            std::array<char, kEntityMetadataLength> materialName{};
+        };
+
         struct EntityTopSample
         {
             uintptr_t key = 0;
@@ -158,6 +235,11 @@ namespace BZROpenShim
             uint64_t skinCalls = 0;
             uint64_t skinVertices = 0;
             uint64_t skinTicks = 0;
+            uint64_t renderQueueCalls = 0;
+            std::array<char, kEntityMetadataLength> entityName{};
+            std::array<char, kEntityMetadataLength> meshName{};
+            bool castShadows = false;
+            bool metadataReady = false;
         };
 
         struct SourceTopSample
@@ -169,26 +251,73 @@ namespace BZROpenShim
             uint64_t sourceVertices = 0;
         };
 
+        struct DynamicGeometryTopSample
+        {
+            uintptr_t key = 0;
+            uint64_t prepareCalls = 0;
+            uint64_t rebuilds = 0;
+            uint64_t prepareTicks = 0;
+            uint64_t queueCalls = 0;
+            uint64_t batches = 0;
+            uint64_t batchMax = 0;
+        };
+
+        struct DynamicMaterialTopSample
+        {
+            uintptr_t key = 0;
+            uint64_t batches = 0;
+            uint64_t blendedBatches = 0;
+            std::array<char, kEntityMetadataLength> materialName{};
+            bool metadataReady = false;
+        };
+
         std::atomic<bool> g_Enabled{ false };
         std::atomic<bool> g_ShutdownRequested{ false };
         std::atomic<bool> g_OgreHooksInstalled{ false };
         std::atomic<bool> g_RenderQueueHookInstalled{ false };
+        std::atomic<bool> g_ChunkShadowHookInstalled{ false };
+        std::atomic<bool> g_ChunkShadowPolicyEnabled{ false };
         std::atomic<bool> g_Dx11ImportsPatched{ false };
         std::atomic<bool> g_Dx11ContextObserved{ false };
+        std::atomic<bool> g_D3D9DeviceObserved{ false };
+        std::atomic<bool> g_D3D11RenderSystemObserverInstalled{ false };
+        std::atomic<bool> g_D3D9RenderSystemObserverInstalled{ false };
         std::atomic<bool> g_PresentObserved{ false };
+        std::atomic<bool> g_RenderSystemObserverInstalled{ false };
+        std::atomic<uintptr_t> g_RenderContextIdentity{ 0 };
+        std::atomic<bool> g_OgreInstallAttempted{ false };
+        std::atomic<ProfilerState> g_ProfilerState{ ProfilerState::Disabled };
         uintptr_t g_WorkerThread = 0;
 
         std::mutex g_PatchMutex;
-        std::vector<Rel32Patch> g_Rel32Patches;
         std::vector<PointerPatch> g_PointerPatches;
+        bool g_EntryInstallRetryRequested = false;
+
+        EntryDetour32 g_EntityUpdateAnimationDetour{};
+        EntryDetour32 g_EntityUpdateAnimationCoreDetour{};
+        EntryDetour32 g_SoftwareVertexBlendDetour{};
+        EntryDetour32 g_D3D11RenderSystemRenderDetour{};
+        EntryDetour32 g_D3D9RenderSystemRenderDetour{};
 
         FnEntityUpdateAnimation g_RealEntityUpdateAnimation = nullptr;
+        FnEntityUpdateAnimation g_RealEntityUpdateAnimationCore = nullptr;
         FnEntityUpdateRenderQueue g_RealEntityUpdateRenderQueue = nullptr;
+        FnOgreStringQuery g_OgreGetEntityName = nullptr;
+        FnEntityGetMesh g_OgreEntityGetMesh = nullptr;
+        FnOgreStringQuery g_OgreGetResourceName = nullptr;
+        FnMovableGetCastShadows g_OgreGetCastShadows = nullptr;
+        FnMovableSetCastShadows g_OgreSetCastShadows = nullptr;
         FnSoftwareVertexBlend g_RealSoftwareVertexBlend = nullptr;
+        FnD3D11RenderSystemRender g_RealD3D11RenderSystemRender = nullptr;
+        FnD3D9RenderSystemRender g_RealD3D9RenderSystemRender = nullptr;
+        FnD3D9GetActiveDevice g_D3D9GetActiveDevice = nullptr;
+        FnD3D11RenderSystemGetDevice g_D3D11RenderSystemGetDevice = nullptr;
+        FnOgreD3D11DeviceGetImmediateContext g_OgreD3D11DeviceGetImmediateContext = nullptr;
 
         FnD3D11CreateDevice g_RealD3D11CreateDevice = nullptr;
         FnD3D11CreateDeviceAndSwapChain g_RealD3D11CreateDeviceAndSwapChain = nullptr;
         FnFactoryCreateSwapChain g_RealFactoryCreateSwapChain = nullptr;
+        FnDeviceCreateDeferredContext g_RealCreateDeferredContext = nullptr;
         FnContextDrawIndexed g_RealDrawIndexed = nullptr;
         FnContextDraw g_RealDraw = nullptr;
         FnContextMap g_RealMap = nullptr;
@@ -199,6 +328,15 @@ namespace BZROpenShim
         FnContextDrawIndexedInstancedIndirect g_RealDrawIndexedInstancedIndirect = nullptr;
         FnContextDrawInstancedIndirect g_RealDrawInstancedIndirect = nullptr;
         FnSwapChainPresent g_RealPresent = nullptr;
+        FnD3D9SwapChainPresent g_RealD3D9SwapChainPresent = nullptr;
+        FnD3D9DrawPrimitive g_RealD3D9DrawPrimitive = nullptr;
+        FnD3D9DrawIndexedPrimitive g_RealD3D9DrawIndexedPrimitive = nullptr;
+        FnD3D9SetRenderState g_RealD3D9SetRenderState = nullptr;
+        FnD3D9SetTexture g_RealD3D9SetTexture = nullptr;
+        FnD3D9SetTextureStageState g_RealD3D9SetTextureStageState = nullptr;
+        FnD3D9SetSamplerState g_RealD3D9SetSamplerState = nullptr;
+        FnD3D9SetVertexShader g_RealD3D9SetVertexShader = nullptr;
+        FnD3D9SetPixelShader g_RealD3D9SetPixelShader = nullptr;
 
         std::atomic<uint64_t> g_AnimationCalls{ 0 };
         std::atomic<uint64_t> g_AnimationTicks{ 0 };
@@ -223,6 +361,11 @@ namespace BZROpenShim
         std::atomic<uint64_t> g_AnimationMaxTicks{ 0 };
         std::atomic<uint64_t> g_SoftwareBlendMaxTicks{ 0 };
         std::atomic<uint64_t> g_RenderQueueCalls{ 0 };
+        std::atomic<uint64_t> g_DuplicateRenderQueueSameFrame{ 0 };
+        std::atomic<uint64_t> g_RenderSystemSubmissions{ 0 };
+        std::atomic<uint64_t> g_RenderSystemSubmissionTicks{ 0 };
+        std::atomic<uint64_t> g_RenderSystemSubmissionMaxTicks{ 0 };
+        std::atomic<uint64_t> g_ContextVtableRefreshes{ 0 };
         std::atomic<uint64_t> g_DrawCalls{ 0 };
         std::atomic<uint64_t> g_DrawVertices{ 0 };
         std::atomic<uint64_t> g_DrawIndexedCalls{ 0 };
@@ -250,6 +393,13 @@ namespace BZROpenShim
         std::atomic<uint64_t> g_UpdateSubresourceTicks{ 0 };
         std::atomic<uint64_t> g_UpdateSubresourceMaxTicks{ 0 };
         std::atomic<uint64_t> g_Presents{ 0 };
+        std::atomic<uint64_t> g_D3D9RenderStateCalls{ 0 };
+        std::atomic<uint64_t> g_D3D9BlendStateCalls{ 0 };
+        std::atomic<uint64_t> g_D3D9TextureCalls{ 0 };
+        std::atomic<uint64_t> g_D3D9TextureStageStateCalls{ 0 };
+        std::atomic<uint64_t> g_D3D9SamplerStateCalls{ 0 };
+        std::atomic<uint64_t> g_D3D9VertexShaderCalls{ 0 };
+        std::atomic<uint64_t> g_D3D9PixelShaderCalls{ 0 };
         std::atomic<uint64_t> g_FrameEpoch{ 1 };
         std::atomic<uint64_t> g_LastPresentQpc{ 0 };
         std::atomic<uint64_t> g_FrameTimeSamples{ 0 };
@@ -258,6 +408,24 @@ namespace BZROpenShim
         std::atomic<uint64_t> g_FrameOver1667{ 0 };
         std::atomic<uint64_t> g_FrameOver2500{ 0 };
         std::atomic<uint64_t> g_FrameOver3333{ 0 };
+        std::atomic<uint64_t> g_NativeChunkSimCalls{ 0 };
+        std::atomic<uint64_t> g_NativeChunkSimTicks{ 0 };
+        std::atomic<uint64_t> g_NativeChunkActiveTotal{ 0 };
+        std::atomic<uint64_t> g_NativeChunkActiveMax{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryPrepareCalls{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryRebuilds{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryPrepareTicks{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryPrepareMaxTicks{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryQueueCalls{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryBatchTotal{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryBatchMax{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryMergeableBatchTotal{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryBlendedBatchTotal{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryDistinctMaterialTotal{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryVertexTotal{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryIndexTotal{ 0 };
+        std::atomic<uint64_t> g_ChunkShadowQueries{ 0 };
+        std::atomic<uint64_t> g_ChunkShadowSuppressions{ 0 };
 
         std::array<std::atomic<uint64_t>, kBloomWords> g_AnimationEntityBloom{};
         std::array<std::atomic<uint64_t>, kBloomWords> g_SkinnedEntityBloom{};
@@ -271,6 +439,10 @@ namespace BZROpenShim
         std::array<std::atomic<uint64_t>, kFrameTimeBucketCount> g_FrameTimeBuckets{};
         std::array<EntityProfileSlot, kEntityTableSize> g_EntityProfileSlots{};
         std::array<SourceProfileSlot, kSourceTableSize> g_SourceProfileSlots{};
+        std::array<DynamicGeometryProfileSlot, kDynamicGeometryTableSize>
+            g_DynamicGeometryProfileSlots{};
+        std::array<DynamicMaterialProfileSlot, kDynamicMaterialTableSize>
+            g_DynamicMaterialProfileSlots{};
 
         LARGE_INTEGER g_QpcFrequency{};
         const char* g_ProfilerRequestSource = "build-default";
@@ -279,16 +451,11 @@ namespace BZROpenShim
         thread_local uint32_t t_CurrentAnimationBlendCalls = 0;
         thread_local uint64_t t_CurrentAnimationBlendVertices = 0;
         thread_local unsigned t_SoftwareBlendDepth = 0;
+        thread_local uint64_t t_LastRenderContextCheckFrame = 0;
 
         bool StringIsTruthy(const char* value)
         {
-            if (!value || !*value)
-                return false;
-
-            std::string v(value);
-            for (char& ch : v)
-                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-            return v != "0" && v != "false" && v != "no" && v != "off";
+            return OgreProfilerAlgorithms::StringIsTruthy(value);
         }
 
         std::string GetOpenShimIniPath()

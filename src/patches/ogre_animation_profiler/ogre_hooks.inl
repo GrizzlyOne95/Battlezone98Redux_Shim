@@ -1,10 +1,92 @@
         void __fastcall HookEntityUpdateAnimation(void* self, void*)
         {
-            if (!g_RealEntityUpdateAnimation)
+            FnEntityUpdateAnimation real = g_RealEntityUpdateAnimation
+                ? g_RealEntityUpdateAnimation
+                : reinterpret_cast<FnEntityUpdateAnimation>(g_EntityUpdateAnimationDetour.trampoline);
+            if (!real)
+                return;
+            real(self);
+        }
+
+        void __fastcall HookEntityUpdateRenderQueue(void* self, void*, void* renderQueue)
+        {
+            if (!g_RealEntityUpdateRenderQueue)
                 return;
             if (!g_Enabled.load(std::memory_order_relaxed))
             {
-                g_RealEntityUpdateAnimation(self);
+                g_RealEntityUpdateRenderQueue(self, renderQueue);
+                return;
+            }
+
+            g_RenderQueueCalls.fetch_add(1, std::memory_order_relaxed);
+            BloomAdd(g_RenderEntityBloom, self);
+            EntityProfileSlot* entitySlot = FindOrClaimEntitySlot(self);
+            CaptureEntityMetadata(entitySlot, self);
+            if (entitySlot)
+            {
+                entitySlot->renderQueueCalls.fetch_add(1, std::memory_order_relaxed);
+                if (g_PresentObserved.load(std::memory_order_acquire))
+                {
+                    const uint64_t frame = g_FrameEpoch.load(std::memory_order_relaxed);
+                    const uint64_t previous = entitySlot->lastRenderQueueFrame.exchange(
+                        frame, std::memory_order_relaxed);
+                    if (previous == frame)
+                    {
+                        g_DuplicateRenderQueueSameFrame.fetch_add(
+                            1, std::memory_order_relaxed);
+                    }
+                }
+            }
+            RenderQueueScope scope(self);
+            g_RealEntityUpdateRenderQueue(self, renderQueue);
+        }
+
+        bool __fastcall HookEntityGetCastShadows(const void* self, void*)
+        {
+            if (!g_OgreGetCastShadows)
+                return false;
+
+            const bool stockResult = g_OgreGetCastShadows(self);
+            if (!stockResult ||
+                !g_ChunkShadowPolicyEnabled.load(std::memory_order_relaxed) ||
+                !self || !g_OgreEntityGetMesh || !g_OgreGetResourceName ||
+                !g_OgreSetCastShadows)
+            {
+                return stockResult;
+            }
+
+            g_ChunkShadowQueries.fetch_add(1, std::memory_order_relaxed);
+            __try
+            {
+                const void* meshSharedPtr = g_OgreEntityGetMesh(self);
+                const void* mesh = meshSharedPtr
+                    ? *reinterpret_cast<void* const*>(meshSharedPtr)
+                    : nullptr;
+                if (mesh && OgreProfilerAlgorithms::IsNativeTransientChunkMeshName(
+                                g_OgreGetResourceName(mesh).c_str()))
+                {
+                    g_OgreSetCastShadows(const_cast<void*>(self), false);
+                    g_ChunkShadowSuppressions.fetch_add(1, std::memory_order_relaxed);
+                    return false;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                // Preserve the engine result if retail Ogre metadata is unavailable.
+            }
+            return stockResult;
+        }
+
+        void __fastcall HookEntityUpdateAnimationCore(void* self, void*)
+        {
+            FnEntityUpdateAnimation real = g_RealEntityUpdateAnimationCore
+                ? g_RealEntityUpdateAnimationCore
+                : reinterpret_cast<FnEntityUpdateAnimation>(g_EntityUpdateAnimationCoreDetour.trampoline);
+            if (!real)
+                return;
+            if (!g_Enabled.load(std::memory_order_relaxed))
+            {
+                real(self);
                 return;
             }
 
@@ -14,6 +96,7 @@
                 ? g_FrameEpoch.load(std::memory_order_relaxed)
                 : 0;
             EntityProfileSlot* entitySlot = FindOrClaimEntitySlot(self);
+            CaptureEntityMetadata(entitySlot, self);
             if (entitySlot && frameTracking)
             {
                 const uint64_t previous =
@@ -29,7 +112,7 @@
             uint64_t blendVerticesForAnimation = 0;
             {
                 CurrentEntityScope scope(self);
-                g_RealEntityUpdateAnimation(self);
+                real(self);
                 blendCallsForAnimation = t_CurrentAnimationBlendCalls;
                 blendVerticesForAnimation = t_CurrentAnimationBlendVertices;
             }
@@ -74,11 +157,14 @@
             size_t numMatrices,
             bool blendNormals)
         {
-            if (!g_RealSoftwareVertexBlend)
+            FnSoftwareVertexBlend real = g_RealSoftwareVertexBlend
+                ? g_RealSoftwareVertexBlend
+                : reinterpret_cast<FnSoftwareVertexBlend>(g_SoftwareVertexBlendDetour.trampoline);
+            if (!real)
                 return;
             if (!g_Enabled.load(std::memory_order_relaxed))
             {
-                g_RealSoftwareVertexBlend(
+                real(
                     sourceVertexData,
                     targetVertexData,
                     blendMatrices,
@@ -128,7 +214,7 @@
             const uint64_t start = ReadQpc();
             {
                 SoftwareBlendScope scope;
-                g_RealSoftwareVertexBlend(
+                real(
                     sourceVertexData,
                     targetVertexData,
                     blendMatrices,
