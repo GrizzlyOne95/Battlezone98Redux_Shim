@@ -20,7 +20,7 @@ namespace OgreProfilerAlgorithms
         Disabled,
         WaitingForOgre,
         OgreReady,
-        WaitingForDX11,
+        WaitingForRenderer,
         FullyActive,
         PartialDiagnostics,
         Failed
@@ -131,8 +131,8 @@ namespace OgreProfilerAlgorithms
         bool enabled,
         bool ogreInstallAttempted,
         bool ogreHooks,
-        bool dx11Imports,
-        bool dx11Context,
+        bool rendererCreationObserved,
+        bool backendContextObserved,
         bool present,
         bool partialObserver)
     {
@@ -140,13 +140,14 @@ namespace OgreProfilerAlgorithms
             return ProfilerState::Disabled;
         if (!ogreInstallAttempted)
             return ProfilerState::WaitingForOgre;
-        if (ogreHooks && dx11Context && present)
+        if (ogreHooks && backendContextObserved && present)
             return ProfilerState::FullyActive;
-        if (ogreHooks && !dx11Imports)
+        if (ogreHooks && !rendererCreationObserved)
             return ProfilerState::OgreReady;
         if (ogreHooks)
-            return ProfilerState::WaitingForDX11;
-        if (partialObserver || dx11Imports || dx11Context || present)
+            return ProfilerState::WaitingForRenderer;
+        if (partialObserver || rendererCreationObserved ||
+            backendContextObserved || present)
             return ProfilerState::PartialDiagnostics;
         return ProfilerState::Failed;
     }

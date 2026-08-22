@@ -33,12 +33,13 @@ local function spawnTestGroup()
     local rightX = transform.right_x or 1.0
     local rightZ = transform.right_z or 0.0
 
-    -- Four staggered rows keep the burst visible while avoiding overlapping
-    -- craft. svtank is a known positive control for full native fragmentation.
-    for row = 0, 3 do
-        for column = -3, 3 do
+    -- Seven staggered rows of eight craft keep the burst visible while
+    -- producing a sustained CPU-side submission tail on fast modern systems.
+    -- svtank is a known positive control for full native fragmentation.
+    for row = 0, 6 do
+        for column = 0, 7 do
             local forward = 34.0 + row * 9.0
-            local lateral = column * 8.0
+            local lateral = (column - 3.5) * 8.0
             local x = playerPos.x + frontX * forward + rightX * lateral
             local z = playerPos.z + frontZ * forward + rightZ * lateral
             -- BuildObject settles craft onto the terrain; keeping the player's

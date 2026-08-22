@@ -1,7 +1,7 @@
 # Ogre Animation / Render Overhead Profiler
 
 This opt-in diagnostic correlates Ogre animation, software deformation, native
-chunk simulation, renderer submissions, D3D11 work, and `Present` frame time.
+chunk simulation, renderer submissions, DX9/DX11 work, and `Present` frame time.
 The diagnostic observers do not change animation state, culling, materials,
 shaders, or gameplay. The independently controlled native-chunk performance
 policies documented below can remain active when profiling is disabled.
@@ -50,15 +50,26 @@ obtains that context through the renderer's exported `_getDevice` and
 vtable at frame boundaries; one validated, batched vtable refresh per frame
 keeps aggregate D3D11 counters attached without per-call logging.
 
+For the validated GOG DX9 renderer (`RenderSystem_Direct3D9.dll` SHA-256
+`822D26CA4B9CCE82DDD2FCA5E31E7D3A0CD8D05032130A987830143E3D0F95E1`),
+the profiler observes `D3D9RenderSystem::_render`, obtains the renderer-owned
+active device only after the first render operation, and attaches bounded
+observers to the active device and primary swap chain. Renderer selection from
+`Ogre.cfg` gates DX9 versus DX11 observer installation so the inactive
+renderer's enumeration objects are never patched.
+
 ## State model
 
 State transitions are explicit:
 
 - `Disabled`: collection is off.
 - `WaitingForOgre`: requested, but no Ogre install attempt has completed.
-- `OgreReady`: all required Ogre observers are active and DX11 has not begun.
-- `WaitingForDX11`: Ogre is active; a usable DX11 context/`Present` pair is not.
-- `FullyActive`: Ogre hooks, DX11 context hooks, and `Present` correlation work.
+- `OgreReady`: all required Ogre observers are active and renderer capture has
+  not begun.
+- `WaitingForRenderer`: Ogre is active; a usable DX9/DX11 device and `Present`
+  pair is not yet available.
+- `FullyActive`: Ogre hooks, the selected DX9/DX11 device hooks, and `Present`
+  correlation work.
 - `PartialDiagnostics`: at least one useful observer works, but full attribution
   does not.
 - `Failed`: installation was attempted and no useful observer remains active.
@@ -85,6 +96,8 @@ The reports include:
 - Ogre render operations and CPU submission time;
 - D3D11 `Draw`, `DrawIndexed`, instanced and indirect variants, normalized per
   frame;
+- D3D9 `DrawPrimitive`/`DrawIndexedPrimitive` plus bounded render-state,
+  blend-state, texture, texture-stage, sampler, and shader setter counts;
 - `Map`, `Unmap`, and `UpdateSubresource`, including write-mode and animation
   TLS attribution;
 - native `ChunkEffect::Simulate` active count and CPU time.
@@ -122,13 +135,13 @@ native `ChunkEffect` simulation scaling only.
 
 For a deterministic visible tail, deploy
 `reverse_engineering/test_missions/stock_chunk_tail.lua` beside a copied stock
-`.bzn` with the same basename. It creates 28 `svtank`, destroys them once at
+`.bzn` with the same basename. It creates 56 `svtank`, destroys them once at
 three seconds, and leaves the camera/load unchanged afterward.
 
 ## Native chunk performance policies
 
 These policies are separate from collection and default on in the validated GOG
-build:
+2.2.301 build for both DX9 and DX11:
 
 - exact `chunk1/chunk1.mesh` and `chunk2/chunk2.mesh` Entities have their real
   Ogre shadow flag cleared once; opt out with
@@ -139,7 +152,10 @@ build:
 
 Neither policy changes piece count, native simulation/lifetime, main-pass mesh,
 opaque geometry, material, or shader selection. See
-`stock_dx11_chunk_performance_20260821.md` for the RE and A/B evidence.
+`stock_destruction_render_submission_performance_20260821.md` for the RE and
+A/B evidence. The chunk policy additionally checks the exact validated GOG
+executable and Ogre PE identities before writing an Entity vtable; unsupported
+builds fail closed. Steam is not claimed by this investigation.
 
 ## Tests
 
