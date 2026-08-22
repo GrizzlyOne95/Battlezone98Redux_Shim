@@ -181,6 +181,162 @@
             }
         }
 
+        void ReportRenderContributors(
+            double frameDivisor,
+            uint64_t totalOgreSubmissions)
+        {
+            std::vector<RenderContributorSample> samples;
+            samples.reserve(256);
+            uint64_t attributedCalls = 0;
+            uint64_t attributedSubmissions = 0;
+            uint64_t attributedDraws = 0;
+            uint64_t attributedIndexedDraws = 0;
+
+            for (RenderContributorSlot& slot : g_RenderContributorSlots)
+            {
+                const uintptr_t key = slot.key.load(std::memory_order_relaxed);
+                if (!key)
+                    continue;
+
+                RenderContributorSample sample{};
+                sample.key = key;
+                sample.calls = slot.calls.exchange(0, std::memory_order_acq_rel);
+                sample.mainCalls = slot.mainCalls.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.shadowCalls = slot.shadowCalls.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.ticks = slot.ticks.exchange(0, std::memory_order_acq_rel);
+                sample.ogreSubmissions = slot.ogreSubmissions.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.operationVertices = slot.operationVertices.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.operationIndices = slot.operationIndices.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.draws = slot.draws.exchange(0, std::memory_order_acq_rel);
+                sample.indexedDraws = slot.indexedDraws.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.drawnVertices = slot.drawnVertices.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.drawnIndices = slot.drawnIndices.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.renderStates = slot.renderStates.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.blendStates = slot.blendStates.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.textureSets = slot.textureSets.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.textureStageSets = slot.textureStageSets.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.samplerSets = slot.samplerSets.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.vertexShaderSets = slot.vertexShaderSets.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.pixelShaderSets = slot.pixelShaderSets.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.metadataReady = slot.metadataState.load(
+                    std::memory_order_acquire) == 2;
+                if (sample.metadataReady)
+                {
+                    sample.typeName = slot.typeName;
+                    sample.ownerName = slot.ownerName;
+                    sample.meshName = slot.meshName;
+                    sample.materialName = slot.materialName;
+                    sample.techniqueName = slot.techniqueName;
+                    sample.schemeName = slot.schemeName;
+                    sample.passName = slot.passName;
+                    sample.cameraName = slot.cameraName;
+                    sample.passIndex = slot.passIndex;
+                    sample.lodIndex = slot.lodIndex;
+                }
+                if (!sample.calls && !sample.ogreSubmissions)
+                    continue;
+                attributedCalls += sample.calls;
+                attributedSubmissions += sample.ogreSubmissions;
+                attributedDraws += sample.draws;
+                attributedIndexedDraws += sample.indexedDraws;
+                samples.push_back(sample);
+            }
+
+            const uint64_t drops = g_RenderContributorDrops.exchange(
+                0, std::memory_order_acq_rel);
+            LogShimA(
+                LogLevel::Info,
+                kComponent,
+                "[OgreProfile][RenderContributorSummary] installed=%s groups=%u renderCalls=%.1f/f OgreSubmit=%.1f/f coverage=%.1f%% Draw=%.1f/f DrawIndexed=%.1f/f drops=%llu",
+                g_RenderSingleObjectHookInstalled.load(
+                    std::memory_order_acquire) ? "yes" : "no",
+                static_cast<unsigned>(samples.size()),
+                static_cast<double>(attributedCalls) / frameDivisor,
+                static_cast<double>(attributedSubmissions) / frameDivisor,
+                totalOgreSubmissions
+                    ? 100.0 * static_cast<double>(attributedSubmissions) /
+                        static_cast<double>(totalOgreSubmissions)
+                    : 0.0,
+                static_cast<double>(attributedDraws) / frameDivisor,
+                static_cast<double>(attributedIndexedDraws) / frameDivisor,
+                static_cast<unsigned long long>(drops));
+
+            std::sort(
+                samples.begin(), samples.end(),
+                [](const RenderContributorSample& left,
+                   const RenderContributorSample& right)
+                {
+                    if (left.ogreSubmissions != right.ogreSubmissions)
+                        return left.ogreSubmissions > right.ogreSubmissions;
+                    if (left.calls != right.calls)
+                        return left.calls > right.calls;
+                    return left.ticks > right.ticks;
+                });
+
+            const size_t count = (std::min)(
+                samples.size(), kRenderContributorTopCount);
+            for (size_t i = 0; i < count; ++i)
+            {
+                const RenderContributorSample& sample = samples[i];
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    "[OgreProfile][RenderContributorTop] rank=%u type=%s ownerSample=%s mesh=%s material=%s technique=%s scheme=%s lod=%u pass=%u/%s camera=%s main=%.1f/f shadow=%.1f/f renderCalls=%.1f/f OgreSubmit=%.1f/f opVerts=%.0f/f opIndices=%.0f/f Draw=%.1f/f DrawIndexed=%.1f/f drawnVerts=%.0f/f drawnIndices=%.0f/f cpu=%.3fms/f d3d9[state=%.1f blend=%.1f texture=%.1f stage=%.1f sampler=%.1f vs=%.1f ps=%.1f]/f",
+                    static_cast<unsigned>(i + 1),
+                    sample.metadataReady && sample.typeName[0]
+                        ? sample.typeName.data() : "<unknown>",
+                    sample.metadataReady && sample.ownerName[0]
+                        ? sample.ownerName.data() : "<none>",
+                    sample.metadataReady && sample.meshName[0]
+                        ? sample.meshName.data() : "<none>",
+                    sample.metadataReady && sample.materialName[0]
+                        ? sample.materialName.data() : "<unknown>",
+                    sample.metadataReady && sample.techniqueName[0]
+                        ? sample.techniqueName.data() : "<unnamed>",
+                    sample.metadataReady && sample.schemeName[0]
+                        ? sample.schemeName.data() : "<default>",
+                    sample.lodIndex,
+                    sample.passIndex,
+                    sample.metadataReady && sample.passName[0]
+                        ? sample.passName.data() : "<unnamed>",
+                    sample.metadataReady && sample.cameraName[0]
+                        ? sample.cameraName.data() : "<unknown>",
+                    static_cast<double>(sample.mainCalls) / frameDivisor,
+                    static_cast<double>(sample.shadowCalls) / frameDivisor,
+                    static_cast<double>(sample.calls) / frameDivisor,
+                    static_cast<double>(sample.ogreSubmissions) / frameDivisor,
+                    static_cast<double>(sample.operationVertices) / frameDivisor,
+                    static_cast<double>(sample.operationIndices) / frameDivisor,
+                    static_cast<double>(sample.draws) / frameDivisor,
+                    static_cast<double>(sample.indexedDraws) / frameDivisor,
+                    static_cast<double>(sample.drawnVertices) / frameDivisor,
+                    static_cast<double>(sample.drawnIndices) / frameDivisor,
+                    TicksToMs(sample.ticks) / frameDivisor,
+                    static_cast<double>(sample.renderStates) / frameDivisor,
+                    static_cast<double>(sample.blendStates) / frameDivisor,
+                    static_cast<double>(sample.textureSets) / frameDivisor,
+                    static_cast<double>(sample.textureStageSets) / frameDivisor,
+                    static_cast<double>(sample.samplerSets) / frameDivisor,
+                    static_cast<double>(sample.vertexShaderSets) / frameDivisor,
+                    static_cast<double>(sample.pixelShaderSets) / frameDivisor);
+            }
+        }
+
         void ReportTopContributors(double frameDivisor)
         {
             std::vector<EntityTopSample> entities;
