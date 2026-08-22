@@ -1,7 +1,8 @@
 param(
     [string]$SnapshotRoot = (Join-Path $PSScriptRoot "snapshots\live_combat"),
     [string]$OutputCsv = "",
-    [string]$PresentMonOutputCsv = ""
+    [string]$PresentMonOutputCsv = "",
+    [string]$ContributorOutputCsv = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,6 +12,9 @@ if (-not $OutputCsv) {
 }
 if (-not $PresentMonOutputCsv) {
     $PresentMonOutputCsv = Join-Path $SnapshotRoot "presentmon_results.csv"
+}
+if (-not $ContributorOutputCsv) {
+    $ContributorOutputCsv = Join-Path $SnapshotRoot "render_contributors.csv"
 }
 
 function Get-Number {
@@ -44,6 +48,21 @@ function Get-Average {
     }
 
     return ($numbers | Measure-Object -Average).Average
+}
+
+function Get-TextValue {
+    param(
+        [string]$Text,
+        [string]$Name
+    )
+
+    $match = [regex]::Match(
+        $Text,
+        "(?:^|[ ])$([regex]::Escape($Name))=(?<value>[^ ]+)")
+    if (-not $match.Success) {
+        return $null
+    }
+    return $match.Groups["value"].Value
 }
 
 function Get-UtcMarker {
@@ -95,6 +114,7 @@ if ($metadataFiles.Count -eq 0) {
 }
 
 $externalResults = @()
+$contributorResults = @()
 $results = foreach ($metadataFile in $metadataFiles) {
     $runRoot = $metadataFile.DirectoryName
     $bzLogPath = Join-Path $runRoot "BZLogger.slice.txt"
@@ -168,6 +188,69 @@ $results = foreach ($metadataFile in $metadataFiles) {
         ForEach-Object { Get-ProfileRecord -Line $_ } |
         Where-Object { $null -ne $_ -and $_.Stamp -ge $measureBegin -and $_.Stamp -le $measureEnd })
 
+    $contributorRows = @($records |
+        Where-Object { $_.Line -match '\[OgreProfile\]\[RenderContributorTop\]' } |
+        ForEach-Object {
+            [pscustomobject]@{
+                type = Get-TextValue $_.Line "type"
+                owner_sample = Get-TextValue $_.Line "ownerSample"
+                mesh = Get-TextValue $_.Line "mesh"
+                material = Get-TextValue $_.Line "material"
+                technique = Get-TextValue $_.Line "technique"
+                scheme = Get-TextValue $_.Line "scheme"
+                lod = Get-Number $_.Line "lod"
+                pass = Get-TextValue $_.Line "pass"
+                camera = Get-TextValue $_.Line "camera"
+                rank = Get-Number $_.Line "rank"
+                main_per_frame = Get-Number $_.Line "main"
+                shadow_per_frame = Get-Number $_.Line "shadow"
+                render_calls_per_frame = Get-Number $_.Line "renderCalls"
+                ogre_submissions_per_frame = Get-Number $_.Line "OgreSubmit"
+                operation_vertices_per_frame = Get-Number $_.Line "opVerts"
+                operation_indices_per_frame = Get-Number $_.Line "opIndices"
+                draw_per_frame = Get-Number $_.Line "Draw"
+                indexed_draw_per_frame = Get-Number $_.Line "DrawIndexed"
+                drawn_vertices_per_frame = Get-Number $_.Line "drawnVerts"
+                drawn_indices_per_frame = Get-Number $_.Line "drawnIndices"
+                cpu_ms_per_frame = Get-Number $_.Line "cpu"
+            }
+        })
+    foreach ($group in @($contributorRows | Group-Object `
+            type, mesh, material, technique, scheme, lod, pass, camera)) {
+        $first = $group.Group[0]
+        $contributorResults += [pscustomobject][ordered]@{
+            run_id = $metadata.run_id
+            renderer = $metadata.renderer
+            unit_odf = $metadata.unit_odf
+            scenario = $metadata.scenario
+            count = $metadata.count
+            distance = $metadata.distance
+            orientation = $metadata.orientation
+            type = $first.type
+            owner_sample = $first.owner_sample
+            mesh = $first.mesh
+            material = $first.material
+            technique = $first.technique
+            scheme = $first.scheme
+            lod = $first.lod
+            pass = $first.pass
+            camera = $first.camera
+            samples = $group.Count
+            rank_mean = Get-Average @($group.Group.rank)
+            main_per_frame = Get-Average @($group.Group.main_per_frame)
+            shadow_per_frame = Get-Average @($group.Group.shadow_per_frame)
+            render_calls_per_frame = Get-Average @($group.Group.render_calls_per_frame)
+            ogre_submissions_per_frame = Get-Average @($group.Group.ogre_submissions_per_frame)
+            operation_vertices_per_frame = Get-Average @($group.Group.operation_vertices_per_frame)
+            operation_indices_per_frame = Get-Average @($group.Group.operation_indices_per_frame)
+            draw_per_frame = Get-Average @($group.Group.draw_per_frame)
+            indexed_draw_per_frame = Get-Average @($group.Group.indexed_draw_per_frame)
+            drawn_vertices_per_frame = Get-Average @($group.Group.drawn_vertices_per_frame)
+            drawn_indices_per_frame = Get-Average @($group.Group.drawn_indices_per_frame)
+            cpu_ms_per_frame = Get-Average @($group.Group.cpu_ms_per_frame)
+        }
+    }
+
     # All category records from one report share a timestamp. Indexing them lets
     # duplicate totals be normalized by the corresponding interval's frame count.
     $main = @($records | Where-Object { $_.Line -match '\[OgreProfile\] fps=' })
@@ -178,6 +261,8 @@ $results = foreach ($metadataFile in $metadataFiles) {
 
     $skinByStamp = @{}
     $renderByStamp = @{}
+    $d3d9ByStamp = @{}
+    $skinSourceByStamp = @{}
     $dynamicByStamp = @{}
     $passesByStamp = @{}
     foreach ($record in $records) {
@@ -185,6 +270,10 @@ $results = foreach ($metadataFile in $metadataFiles) {
             $skinByStamp[$record.StampText] = $record.Line
         } elseif ($record.Line -match '\[OgreProfile\]\[Render\]') {
             $renderByStamp[$record.StampText] = $record.Line
+        } elseif ($record.Line -match '\[OgreProfile\]\[D3D9\]') {
+            $d3d9ByStamp[$record.StampText] = $record.Line
+        } elseif ($record.Line -match '\[OgreProfile\]\[DX11SkinSourceShadow\]') {
+            $skinSourceByStamp[$record.StampText] = $record.Line
         } elseif ($record.Line -match '\[OgreProfile\]\[DynamicGeometry\]') {
             $dynamicByStamp[$record.StampText] = $record.Line
         } elseif ($record.Line -match '\[OgreProfile\]\[Passes\]') {
@@ -192,10 +281,26 @@ $results = foreach ($metadataFile in $metadataFiles) {
         }
     }
 
-    $sampleRows = foreach ($sample in $main) {
+    $d3d9Lines = @($records |
+        Where-Object { $_.Line -match '\[OgreProfile\]\[D3D9\]' })
+    $skinSourceLines = @($records |
+        Where-Object { $_.Line -match '\[OgreProfile\]\[DX11SkinSourceShadow\]' })
+    $sampleRows = for ($sampleOrdinal = 0; $sampleOrdinal -lt $main.Count; $sampleOrdinal++) {
+        $sample = $main[$sampleOrdinal]
         $fps = Get-Number $sample.Line "fps"
         $skinLine = $skinByStamp[$sample.StampText]
         $renderLine = $renderByStamp[$sample.StampText]
+        $d3d9Line = $d3d9ByStamp[$sample.StampText]
+        if (-not $d3d9Line -and $sampleOrdinal -lt $d3d9Lines.Count) {
+            # D3D9 is emitted at the end of the same report block and can cross
+            # the logger's millisecond boundary. Preserve interval order as the
+            # fallback instead of dropping otherwise valid backend counters.
+            $d3d9Line = $d3d9Lines[$sampleOrdinal].Line
+        }
+        $skinSourceLine = $skinSourceByStamp[$sample.StampText]
+        if (-not $skinSourceLine -and $sampleOrdinal -lt $skinSourceLines.Count) {
+            $skinSourceLine = $skinSourceLines[$sampleOrdinal].Line
+        }
         $dynamicLine = $dynamicByStamp[$sample.StampText]
         $passesLine = $passesByStamp[$sample.StampText]
         $dupAnim = Get-Number $sample.Line "dupAnim"
@@ -229,6 +334,17 @@ $results = foreach ($metadataFile in $metadataFiles) {
             ogre_submission_cpu_ms_per_frame = Get-Number $renderLine "cpu"
             draw_calls_per_frame = Get-Number $renderLine "Draw"
             indexed_draw_calls_per_frame = Get-Number $renderLine "DrawIndexed"
+            d3d9_render_state_per_frame = Get-Number $d3d9Line "renderState"
+            d3d9_blend_state_per_frame = Get-Number $d3d9Line "blendState"
+            d3d9_texture_per_frame = Get-Number $d3d9Line "texture"
+            d3d9_texture_stage_per_frame = Get-Number $d3d9Line "textureStage"
+            d3d9_sampler_per_frame = Get-Number $d3d9Line "sampler"
+            d3d9_vertex_shader_per_frame = Get-Number $d3d9Line "vertexShader"
+            d3d9_pixel_shader_per_frame = Get-Number $d3d9Line "pixelShader"
+            skin_source_queries = Get-Number $skinSourceLine "queries"
+            skin_source_repairs = Get-Number $skinSourceLine "repairs"
+            skin_source_bytes = Get-Number $skinSourceLine "bytes"
+            skin_source_failures = Get-Number $skinSourceLine "failures"
             dynamic_batches = Get-Number $dynamicLine "batchesAvg"
             dynamic_materials = Get-Number $dynamicLine "materials"
             dynamic_vertices = Get-Number $dynamicLine "vertices"
@@ -281,6 +397,18 @@ if ($results.Count) {
         fps, frame_mean_ms, frame_p95_ms, anim_cpu_ms_per_frame,
         skin_cpu_ms_per_frame, duplicate_anim_per_frame, ogre_submissions_per_frame -AutoSize
     Write-Host "Wrote $($results.Count) profiler run(s) to $OutputCsv"
+}
+
+if ($contributorResults.Count) {
+    $contributorResults = @($contributorResults | Sort-Object `
+        renderer, unit_odf, scenario, count, distance, orientation,
+        @{ Expression = "ogre_submissions_per_frame"; Descending = $true })
+    $contributorDirectory = Split-Path -Parent $ContributorOutputCsv
+    if ($contributorDirectory) {
+        New-Item -ItemType Directory -Path $contributorDirectory -Force | Out-Null
+    }
+    $contributorResults | Export-Csv -LiteralPath $ContributorOutputCsv -NoTypeInformation
+    Write-Host "Wrote $($contributorResults.Count) contributor group(s) to $ContributorOutputCsv"
 }
 
 if ($externalResults.Count) {

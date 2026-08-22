@@ -435,6 +435,8 @@
                 static_cast<unsigned long long>(over2500),
                 static_cast<unsigned long long>(over3333));
 
+            ReportRenderContributors(frameDivisor, renderSystemSubmissions);
+
             if (g_D3D9DeviceObserved.load(std::memory_order_acquire))
             {
                 LogShimA(
