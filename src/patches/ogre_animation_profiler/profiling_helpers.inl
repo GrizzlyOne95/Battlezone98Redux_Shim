@@ -6,10 +6,26 @@
             return std::string(path) + "openshim.ini";
         }
 
+        DWORD ReadProcessEnvironmentValue(
+            const char* name,
+            char* value,
+            DWORD capacity)
+        {
+            using FnGetEnvironmentVariableA =
+                DWORD(WINAPI*)(LPCSTR, LPSTR, DWORD);
+            static const FnGetEnvironmentVariableA getEnvironmentVariable =
+                reinterpret_cast<FnGetEnvironmentVariableA>(GetProcAddress(
+                    GetModuleHandleA("kernel32.dll"),
+                    "GetEnvironmentVariableA"));
+            return getEnvironmentVariable
+                ? getEnvironmentVariable(name, value, capacity)
+                : 0;
+        }
+
         bool ProfilerRequested()
         {
             char envValue[64] = {};
-            const DWORD envLength = GetEnvironmentVariableA(
+            const DWORD envLength = ReadProcessEnvironmentValue(
                 kEnvironmentSwitch,
                 envValue,
                 static_cast<DWORD>(sizeof(envValue)));
@@ -36,6 +52,16 @@
 
             g_ProfilerRequestSource = "build-default";
             return kDefaultProfilerEnabled != 0;
+        }
+
+        bool EnvironmentFlagEnabled(const char* name)
+        {
+            char value[64] = {};
+            const DWORD length = ReadProcessEnvironmentValue(
+                name,
+                value,
+                static_cast<DWORD>(sizeof(value)));
+            return length > 0 && length < sizeof(value) && StringIsTruthy(value);
         }
 
         uint32_t HashPointer(const void* pointer)
@@ -193,6 +219,61 @@
             return nullptr;
         }
 
+        void CopyEntityMetadataString(
+            std::array<char, kEntityMetadataLength>& destination,
+            const std::string& source)
+        {
+            const size_t count = (std::min)(source.size(), destination.size() - 1);
+            if (count)
+                std::memcpy(destination.data(), source.data(), count);
+            destination[count] = '\0';
+        }
+
+        void CaptureEntityMetadata(EntityProfileSlot* slot, const void* entity)
+        {
+            if (!slot || !entity || !g_OgreGetEntityName || !g_OgreEntityGetMesh ||
+                !g_OgreGetResourceName || !g_OgreGetCastShadows)
+            {
+                return;
+            }
+
+            uint32_t expected = 0;
+            if (!slot->metadataState.compare_exchange_strong(
+                    expected, 1, std::memory_order_acq_rel, std::memory_order_relaxed))
+            {
+                return;
+            }
+
+            __try
+            {
+                CopyEntityMetadataString(slot->entityName, g_OgreGetEntityName(entity));
+                const void* meshSharedPtr = g_OgreEntityGetMesh(entity);
+                const void* mesh = meshSharedPtr
+                    ? *reinterpret_cast<void* const*>(meshSharedPtr)
+                    : nullptr;
+                if (mesh)
+                    CopyEntityMetadataString(slot->meshName, g_OgreGetResourceName(mesh));
+                slot->castShadows = g_OgreGetCastShadows(entity);
+                slot->metadataState.store(2, std::memory_order_release);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                slot->entityName[0] = '\0';
+                slot->meshName[0] = '\0';
+                slot->castShadows = false;
+                slot->metadataState.store(2, std::memory_order_release);
+            }
+        }
+
+        bool IsChunkNamedEntity(const EntityTopSample& sample)
+        {
+            return sample.metadataReady &&
+                (OgreProfilerAlgorithms::ContainsAsciiCaseInsensitive(
+                     sample.entityName.data(), "chunk") ||
+                 OgreProfilerAlgorithms::ContainsAsciiCaseInsensitive(
+                     sample.meshName.data(), "chunk"));
+        }
+
         SourceProfileSlot* FindOrClaimSourceSlot(const void* pointer, size_t sourceVertices)
         {
             if (!pointer)
@@ -220,6 +301,84 @@
                 }
             }
             return nullptr;
+        }
+
+        DynamicGeometryProfileSlot* FindOrClaimDynamicGeometrySlot(
+            const void* pointer)
+        {
+            if (!pointer)
+                return nullptr;
+            const uintptr_t key = reinterpret_cast<uintptr_t>(pointer);
+            const size_t start = HashPointer(pointer) % kDynamicGeometryTableSize;
+            for (size_t probe = 0; probe < kDynamicGeometryTableSize; ++probe)
+            {
+                DynamicGeometryProfileSlot& slot =
+                    g_DynamicGeometryProfileSlots[
+                        (start + probe) % kDynamicGeometryTableSize];
+                uintptr_t current = slot.key.load(std::memory_order_relaxed);
+                if (current == key)
+                    return &slot;
+                if (current == 0 && slot.key.compare_exchange_strong(
+                        current, key,
+                        std::memory_order_relaxed,
+                        std::memory_order_relaxed))
+                {
+                    return &slot;
+                }
+            }
+            return nullptr;
+        }
+
+        DynamicMaterialProfileSlot* FindOrClaimDynamicMaterialSlot(
+            const void* pointer)
+        {
+            if (!pointer)
+                return nullptr;
+            const uintptr_t key = reinterpret_cast<uintptr_t>(pointer);
+            const size_t start = HashPointer(pointer) % kDynamicMaterialTableSize;
+            for (size_t probe = 0; probe < kDynamicMaterialTableSize; ++probe)
+            {
+                DynamicMaterialProfileSlot& slot =
+                    g_DynamicMaterialProfileSlots[
+                        (start + probe) % kDynamicMaterialTableSize];
+                uintptr_t current = slot.key.load(std::memory_order_relaxed);
+                if (current == key)
+                    return &slot;
+                if (current == 0 &&
+                    slot.key.compare_exchange_strong(
+                        current, key,
+                        std::memory_order_relaxed,
+                        std::memory_order_relaxed))
+                {
+                    return &slot;
+                }
+            }
+            return nullptr;
+        }
+
+        void CaptureDynamicMaterialMetadata(
+            DynamicMaterialProfileSlot* slot,
+            const void* material)
+        {
+            if (!slot || !material || !g_OgreGetResourceName)
+                return;
+            uint32_t expected = 0;
+            if (!slot->metadataState.compare_exchange_strong(
+                    expected, 1, std::memory_order_acq_rel, std::memory_order_relaxed))
+            {
+                return;
+            }
+            __try
+            {
+                CopyEntityMetadataString(
+                    slot->materialName,
+                    g_OgreGetResourceName(material));
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                slot->materialName[0] = '\0';
+            }
+            slot->metadataState.store(2, std::memory_order_release);
         }
 
         void RecordFrameTime(uint64_t ticks)

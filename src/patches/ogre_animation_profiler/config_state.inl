@@ -47,6 +47,10 @@ namespace BZROpenShim
     {
         constexpr char kComponent[] = "ogre-profile";
         constexpr char kEnvironmentSwitch[] = "OPENSHIM_PROFILE_OGRE_ANIMATION";
+        constexpr char kDisableChunkShadowFixSwitch[] =
+            "OPENSHIM_DISABLE_NATIVE_CHUNK_SHADOW_FIX";
+        constexpr char kLegacyDisableChunkShadowFixSwitch[] =
+            "BZR_DISABLE_NATIVE_CHUNK_SHADOW_FIX";
         constexpr char kIniSection[] = "Diagnostics";
         constexpr char kIniKey[] = "ProfileOgreAnimation";
         constexpr int kDefaultProfilerEnabled = 1;
@@ -66,6 +70,9 @@ namespace BZROpenShim
         constexpr size_t kSourceTableSize = 2048;
         constexpr size_t kProfileProbeCount = 8;
         constexpr size_t kTopContributorCount = 5;
+        constexpr size_t kEntityMetadataLength = 96;
+        constexpr size_t kDynamicGeometryTableSize = 16;
+        constexpr size_t kDynamicMaterialTableSize = 128;
         constexpr unsigned kMaxExportThunkDepth = 2;
         constexpr size_t kMaxSuspendedThreads = 128;
         constexpr size_t kEntryDetourMaxPatchLen = 16;
@@ -77,6 +84,10 @@ namespace BZROpenShim
 
         using FnEntityUpdateAnimation = void(__thiscall*)(void*);
         using FnEntityUpdateRenderQueue = void(__thiscall*)(void*, void*);
+        using FnOgreStringQuery = const std::string&(__thiscall*)(const void*);
+        using FnEntityGetMesh = const void*(__thiscall*)(const void*);
+        using FnMovableGetCastShadows = bool(__thiscall*)(const void*);
+        using FnMovableSetCastShadows = void(__thiscall*)(void*, bool);
         using FnD3D11RenderSystemRender = void(__thiscall*)(void*, const void*);
         using FnD3D11RenderSystemGetDevice = void*(__thiscall*)(void*);
         using FnOgreD3D11DeviceGetImmediateContext =
@@ -150,13 +161,19 @@ namespace BZROpenShim
         struct EntityProfileSlot
         {
             std::atomic<uintptr_t> key{ 0 };
+            std::atomic<uint32_t> metadataState{ 0 }; // 0=empty, 1=capturing, 2=ready
             std::atomic<uint64_t> lastAnimationFrame{ 0 };
             std::atomic<uint64_t> lastSkinFrame{ 0 };
+            std::atomic<uint64_t> lastRenderQueueFrame{ 0 };
             std::atomic<uint64_t> animationCalls{ 0 };
             std::atomic<uint64_t> animationTicks{ 0 };
             std::atomic<uint64_t> skinCalls{ 0 };
             std::atomic<uint64_t> skinVertices{ 0 };
             std::atomic<uint64_t> skinTicks{ 0 };
+            std::atomic<uint64_t> renderQueueCalls{ 0 };
+            std::array<char, kEntityMetadataLength> entityName{};
+            std::array<char, kEntityMetadataLength> meshName{};
+            bool castShadows = false;
         };
 
         struct SourceProfileSlot
@@ -168,6 +185,26 @@ namespace BZROpenShim
             std::atomic<uint64_t> sourceVertices{ 0 };
         };
 
+        struct DynamicGeometryProfileSlot
+        {
+            std::atomic<uintptr_t> key{ 0 };
+            std::atomic<uint64_t> prepareCalls{ 0 };
+            std::atomic<uint64_t> rebuilds{ 0 };
+            std::atomic<uint64_t> prepareTicks{ 0 };
+            std::atomic<uint64_t> queueCalls{ 0 };
+            std::atomic<uint64_t> batches{ 0 };
+            std::atomic<uint64_t> batchMax{ 0 };
+        };
+
+        struct DynamicMaterialProfileSlot
+        {
+            std::atomic<uintptr_t> key{ 0 };
+            std::atomic<uint64_t> batches{ 0 };
+            std::atomic<uint64_t> blendedBatches{ 0 };
+            std::atomic<uint32_t> metadataState{ 0 };
+            std::array<char, kEntityMetadataLength> materialName{};
+        };
+
         struct EntityTopSample
         {
             uintptr_t key = 0;
@@ -176,6 +213,11 @@ namespace BZROpenShim
             uint64_t skinCalls = 0;
             uint64_t skinVertices = 0;
             uint64_t skinTicks = 0;
+            uint64_t renderQueueCalls = 0;
+            std::array<char, kEntityMetadataLength> entityName{};
+            std::array<char, kEntityMetadataLength> meshName{};
+            bool castShadows = false;
+            bool metadataReady = false;
         };
 
         struct SourceTopSample
@@ -187,10 +229,32 @@ namespace BZROpenShim
             uint64_t sourceVertices = 0;
         };
 
+        struct DynamicGeometryTopSample
+        {
+            uintptr_t key = 0;
+            uint64_t prepareCalls = 0;
+            uint64_t rebuilds = 0;
+            uint64_t prepareTicks = 0;
+            uint64_t queueCalls = 0;
+            uint64_t batches = 0;
+            uint64_t batchMax = 0;
+        };
+
+        struct DynamicMaterialTopSample
+        {
+            uintptr_t key = 0;
+            uint64_t batches = 0;
+            uint64_t blendedBatches = 0;
+            std::array<char, kEntityMetadataLength> materialName{};
+            bool metadataReady = false;
+        };
+
         std::atomic<bool> g_Enabled{ false };
         std::atomic<bool> g_ShutdownRequested{ false };
         std::atomic<bool> g_OgreHooksInstalled{ false };
         std::atomic<bool> g_RenderQueueHookInstalled{ false };
+        std::atomic<bool> g_ChunkShadowHookInstalled{ false };
+        std::atomic<bool> g_ChunkShadowPolicyEnabled{ false };
         std::atomic<bool> g_Dx11ImportsPatched{ false };
         std::atomic<bool> g_Dx11ContextObserved{ false };
         std::atomic<bool> g_PresentObserved{ false };
@@ -212,6 +276,11 @@ namespace BZROpenShim
         FnEntityUpdateAnimation g_RealEntityUpdateAnimation = nullptr;
         FnEntityUpdateAnimation g_RealEntityUpdateAnimationCore = nullptr;
         FnEntityUpdateRenderQueue g_RealEntityUpdateRenderQueue = nullptr;
+        FnOgreStringQuery g_OgreGetEntityName = nullptr;
+        FnEntityGetMesh g_OgreEntityGetMesh = nullptr;
+        FnOgreStringQuery g_OgreGetResourceName = nullptr;
+        FnMovableGetCastShadows g_OgreGetCastShadows = nullptr;
+        FnMovableSetCastShadows g_OgreSetCastShadows = nullptr;
         FnSoftwareVertexBlend g_RealSoftwareVertexBlend = nullptr;
         FnD3D11RenderSystemRender g_RealD3D11RenderSystemRender = nullptr;
         FnD3D11RenderSystemGetDevice g_D3D11RenderSystemGetDevice = nullptr;
@@ -255,6 +324,7 @@ namespace BZROpenShim
         std::atomic<uint64_t> g_AnimationMaxTicks{ 0 };
         std::atomic<uint64_t> g_SoftwareBlendMaxTicks{ 0 };
         std::atomic<uint64_t> g_RenderQueueCalls{ 0 };
+        std::atomic<uint64_t> g_DuplicateRenderQueueSameFrame{ 0 };
         std::atomic<uint64_t> g_RenderSystemSubmissions{ 0 };
         std::atomic<uint64_t> g_RenderSystemSubmissionTicks{ 0 };
         std::atomic<uint64_t> g_RenderSystemSubmissionMaxTicks{ 0 };
@@ -298,6 +368,20 @@ namespace BZROpenShim
         std::atomic<uint64_t> g_NativeChunkSimTicks{ 0 };
         std::atomic<uint64_t> g_NativeChunkActiveTotal{ 0 };
         std::atomic<uint64_t> g_NativeChunkActiveMax{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryPrepareCalls{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryRebuilds{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryPrepareTicks{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryPrepareMaxTicks{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryQueueCalls{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryBatchTotal{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryBatchMax{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryMergeableBatchTotal{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryBlendedBatchTotal{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryDistinctMaterialTotal{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryVertexTotal{ 0 };
+        std::atomic<uint64_t> g_DynamicGeometryIndexTotal{ 0 };
+        std::atomic<uint64_t> g_ChunkShadowQueries{ 0 };
+        std::atomic<uint64_t> g_ChunkShadowSuppressions{ 0 };
 
         std::array<std::atomic<uint64_t>, kBloomWords> g_AnimationEntityBloom{};
         std::array<std::atomic<uint64_t>, kBloomWords> g_SkinnedEntityBloom{};
@@ -311,6 +395,10 @@ namespace BZROpenShim
         std::array<std::atomic<uint64_t>, kFrameTimeBucketCount> g_FrameTimeBuckets{};
         std::array<EntityProfileSlot, kEntityTableSize> g_EntityProfileSlots{};
         std::array<SourceProfileSlot, kSourceTableSize> g_SourceProfileSlots{};
+        std::array<DynamicGeometryProfileSlot, kDynamicGeometryTableSize>
+            g_DynamicGeometryProfileSlots{};
+        std::array<DynamicMaterialProfileSlot, kDynamicMaterialTableSize>
+            g_DynamicMaterialProfileSlots{};
 
         LARGE_INTEGER g_QpcFrequency{};
         const char* g_ProfilerRequestSource = "build-default";

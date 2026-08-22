@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <cmath>
 
 namespace BZROpenShim
 {
@@ -58,6 +59,58 @@ namespace OgreProfilerAlgorithms
             std::strcmp(normalized, "false") != 0 &&
             std::strcmp(normalized, "no") != 0 &&
             std::strcmp(normalized, "off") != 0;
+    }
+
+    inline bool ContainsAsciiCaseInsensitive(const char* text, const char* token)
+    {
+        if (!text || !token || !*token)
+            return false;
+        for (const char* start = text; *start; ++start)
+        {
+            const char* haystack = start;
+            const char* needle = token;
+            while (*haystack && *needle &&
+                   std::tolower(static_cast<unsigned char>(*haystack)) ==
+                       std::tolower(static_cast<unsigned char>(*needle)))
+            {
+                ++haystack;
+                ++needle;
+            }
+            if (!*needle)
+                return true;
+        }
+        return false;
+    }
+
+    inline bool EqualsAsciiCaseInsensitive(const char* left, const char* right)
+    {
+        if (!left || !right)
+            return false;
+        while (*left && *right)
+        {
+            if (std::tolower(static_cast<unsigned char>(*left)) !=
+                std::tolower(static_cast<unsigned char>(*right)))
+            {
+                return false;
+            }
+            ++left;
+            ++right;
+        }
+        return *left == '\0' && *right == '\0';
+    }
+
+    inline bool IsNativeTransientChunkMeshName(const char* meshName)
+    {
+        return EqualsAsciiCaseInsensitive(meshName, "chunk1/chunk1.mesh") ||
+            EqualsAsciiCaseInsensitive(meshName, "chunk2/chunk2.mesh");
+    }
+
+    inline float QuantizeDynamicAlphaDepthKey(float key, std::uint32_t stride)
+    {
+        if (stride <= 1 || !std::isfinite(key))
+            return key;
+        const float width = static_cast<float>(stride);
+        return std::floor(key / width) * width;
     }
 
     inline RequestDecision ResolveRequest(

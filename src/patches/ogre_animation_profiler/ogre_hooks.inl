@@ -27,6 +27,7 @@
                 ? g_FrameEpoch.load(std::memory_order_relaxed)
                 : 0;
             EntityProfileSlot* entitySlot = FindOrClaimEntitySlot(self);
+            CaptureEntityMetadata(entitySlot, self);
             if (entitySlot && frameTracking)
             {
                 const uint64_t previous =

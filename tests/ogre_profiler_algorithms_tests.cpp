@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 
 namespace
 {
@@ -125,6 +126,47 @@ namespace
             "truthy parser semantics changed");
     }
 
+    void TestChunkNameClassificationPrimitive()
+    {
+        Require(ContainsAsciiCaseInsensitive("iechunk1.mesh", "chunk"),
+            "lowercase chunk mesh was not classified");
+        Require(ContainsAsciiCaseInsensitive("Redux/CHUNK_42", "chunk"),
+            "mixed-case chunk entity was not classified");
+        Require(!ContainsAsciiCaseInsensitive("avtank.mesh", "chunk"),
+            "ordinary vehicle mesh was classified as chunk-like");
+        Require(!ContainsAsciiCaseInsensitive(nullptr, "chunk") &&
+                !ContainsAsciiCaseInsensitive("chunk", ""),
+            "empty chunk classifier input was accepted");
+    }
+
+    void TestNativeTransientChunkMeshClassification()
+    {
+        Require(IsNativeTransientChunkMeshName("chunk1/chunk1.mesh"),
+            "stock chunk1 mesh was not classified");
+        Require(IsNativeTransientChunkMeshName("CHUNK2/CHUNK2.MESH"),
+            "stock chunk2 mesh classification was not case-insensitive");
+        Require(!IsNativeTransientChunkMeshName("chunk3/chunk3.mesh") &&
+                !IsNativeTransientChunkMeshName("vehicles/chunk1/chunk1.mesh") &&
+                !IsNativeTransientChunkMeshName("iechunk1.mesh") &&
+                !IsNativeTransientChunkMeshName(nullptr),
+            "non-stock or non-exact mesh was classified as native transient debris");
+    }
+
+    void TestDynamicAlphaDepthQuantization()
+    {
+        RequireNear(QuantizeDynamicAlphaDepthKey(31.0f, 8), 24.0,
+            "alpha depth key did not round down to the configured bucket");
+        RequireNear(QuantizeDynamicAlphaDepthKey(32.0f, 8), 32.0,
+            "alpha depth key moved across an exact bucket boundary");
+        RequireNear(QuantizeDynamicAlphaDepthKey(-1.0f, 8), -8.0,
+            "negative near-camera alpha depth key rounded in the wrong direction");
+        RequireNear(QuantizeDynamicAlphaDepthKey(31.0f, 1), 31.0,
+            "disabled alpha depth quantization changed the key");
+        const float infinity = std::numeric_limits<float>::infinity();
+        Require(std::isinf(QuantizeDynamicAlphaDepthKey(infinity, 8)),
+            "non-finite alpha depth key was modified");
+    }
+
     void TestThunkAndDetourValidation()
     {
         std::array<std::uint8_t, 32> image = {};
@@ -182,6 +224,9 @@ int main()
     TestBoundedContributorRanking();
     TestProfilerStates();
     TestConfigurationPrecedence();
+    TestChunkNameClassificationPrimitive();
+    TestNativeTransientChunkMeshClassification();
+    TestDynamicAlphaDepthQuantization();
     TestThunkAndDetourValidation();
     TestCsvSchema();
     std::puts("ogre_profiler_algorithms_tests: all tests passed");

@@ -47,4 +47,20 @@ namespace BZROpenShim
     void RecordNativeChunkSimulationSample(
         uint32_t activeChunks,
         uint64_t elapsedQpcTicks) noexcept;
+    void RecordNativeDynamicGeometryPrepareSample(
+        const void* objectIdentity,
+        bool rebuilt,
+        uint64_t elapsedQpcTicks) noexcept;
+    void RecordNativeDynamicGeometryQueueSample(
+        const void* objectIdentity,
+        uint32_t batchCount,
+        uint32_t mergeableBatchCount,
+        uint32_t blendedBatchCount,
+        uint32_t distinctMaterialCount,
+        uint64_t vertexCount,
+        uint64_t indexCount) noexcept;
+    void RecordNativeDynamicGeometryMaterialSample(
+        const void* materialIdentity,
+        uint32_t batchCount,
+        uint32_t blendedBatchCount) noexcept;
 }
