@@ -186,8 +186,12 @@ unchanged on DX9. The DX9 firing backend records 124.6 render-state, 40.7
 blend-state, 246.5 texture, 48.0 texture-stage, 65.8 sampler, and 131.0 each
 vertex/pixel shader sets per frame. Quiet still performs 94 render-state, 129
 texture, 44 sampler, and 37 each shader sets/frame. The low-load gap is
-therefore renderer/backend/driver overhead and repeated D3D9 state validation,
-not extra Battlezone objects or shadow behavior. No state cache was changed
+consistent with renderer/backend/driver and state-management overhead rather
+than extra Battlezone objects or different shadow behaviour: Ogre content and
+submission counts are identical on both renderers. No timing experiment in this
+investigation isolated the cost of D3D9 state validation specifically, so the
+state-traffic counts above are a plausible mechanism, not a measured
+attribution. No state cache was changed
 without proof that Ogre's setter calls are redundant at the actual device.
 
 ## Stock animated-mesh source survey
@@ -281,10 +285,312 @@ Investigation commits so far:
 - `4957d318` — hash-gated canonical generic chunklet batch.
 - `123d60ec` — technical report, profiler documentation, and roadmap status.
 
-The branch is `agent/live-render-optimization` and is pushed to `origin`. It
-has not been merged and no PR was opened. Manually dispatched GitHub
+The branch is `agent/live-render-optimization` and is pushed to `origin`. Manually dispatched GitHub
 `Build Win32` run
 [`32580118488`](https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/actions/runs/32580118488)
 passed on `123d60ec`, including the network baseline, pinned Ogre setup,
 profiler/INI tests, FXAA shader validation, Release Win32 build, output
 verification, and artifact upload.
+
+---
+
+# Post-reconciliation addendum (2026-08-22)
+
+Everything above this line is the **OLD** capture set, taken on branch head
+`5638bce3` before the repository was reconciled. Everything below is the
+**FINAL** state. Where the two disagree, the FINAL numbers govern.
+
+## Repository reconciliation baseline
+
+The branch was rebuilt on a deliberately re-established baseline.
+
+- New `main` baseline SHA: **`c0bcf0ab`** — `f23b7cc3` (PR #45) plus PR #43.
+- PR #43 (`agent/live-combat-scaling`) was landed first as a prerequisite. It
+  was a strict ancestor of this branch, so leaving it open would have shown the
+  same four commits in two open PRs. Landing it reduces this branch's own
+  history from nine commits to five render-optimization commits.
+- Baseline verification on `c0bcf0ab`: network-safety baseline (10 checks),
+  Ogre profiler algorithm tests, INI/config tests (23 checks, 0 failures),
+  DX11 Enhanced FXAA `vs_5_0`/`ps_5_0` compilation, and a clean Release Win32
+  MSBuild producing `winmm.dll` (2,182,656 bytes, SHA-256
+  `5D2685E1A02224496573FAF1DB7597CE73E38A45759A3CF77D324055E0EFD497`).
+
+## Final branch ancestry
+
+```text
+c0bcf0ab  main baseline
+  6b38d016  test: add deterministic live combat benchmark   -+
+  9d0fb5ca  perf: avoid DX11 software skin readbacks         | landed via PR #43,
+  adf484e0  docs: report live combat scaling results         | now in main
+  6ff74dd9  docs: record branch validation status           -+
+  a828130c  WIP: epitaxy pre-switch                         -+
+  f666045b  profile: attribute live render submissions       | this PR
+  4957d318  perf: batch canonical generic impact chunks      |
+  123d60ec  docs: report live render optimization results    |
+  5638bce3  docs: record live render validation status       |
+  265c7026  Merge main (c0bcf0ab)                            |
+  0ad135fd  fix: guarantee the batch always falls back       |
+  <docs>    this addendum                                   -+
+```
+
+History was merged, not rebased: the investigation commits and their evidence
+are preserved exactly as they were pushed.
+
+## Unit-scale safety change
+
+`AppendGenericChunkBatchGeometry()` applies orientation and translation to the
+baked positions. Once a chunklet is inside the shared ManualObject section
+there is no per-chunk scene node left to carry a scale, so a scaled chunk would
+be batched at the wrong size with nothing to detect it.
+
+`IsUnitScaleForGenericChunkBatch()` now gates classification: a tracked
+transform whose scale is not `(1, 1, 1)` within `1e-3` per component (or is
+non-finite) falls back to the per-Entity fidelity path.
+
+**This is a latent-defect barrier, not a fix for observable breakage, and the
+report should not be read as claiming otherwise.** `ChunkProxyTransform::scale`
+is structurally unit today: `TryBuildOgreQuaternionFromLegacyTransform()`
+normalises the legacy basis vectors — which is where a `LegacyMat3` would carry
+scale — and `TryGetChunkProxyTransform()` never writes the field. Every
+assignment to `.scale` in `bzr_hooks.cpp` writes `(1, 1, 1)` or copies another
+default. The gate converts that from an assumption into an enforced invariant.
+
+One honest qualification: the per-Entity fallback calls
+`TryUpdateChunkMeshProxyTransform()`, which sets node position and orientation
+only. It does **not** apply scale either. So the fallback does not render a
+scaled chunk correctly — what the gate guarantees is that a scale is never
+silently baked away into shared geometry, and that the chunk keeps rendering
+through the fidelity path. Since no path populates scale, neither behaviour is
+observable today.
+
+Arbitrary scale in the batch is deliberately not implemented: it would need
+inverse-transpose handling for normals and tangents, and no evidence shows
+stock or modded generic chunklets require it.
+
+Rejections are counted and logged with a 5-second throttle. In the forced test
+below, **152,618 rejections produced 3 log lines**.
+
+## Batch-failure fallback: a real defect, found and repaired
+
+This was not a hardening pass. The pre-existing code had a genuine
+missing-debris bug.
+
+`UpdateChunkProxySlotPosition()` hides the per-Entity mesh proxy — and for a
+slot born batch-eligible, never creates one — the moment a slot is classified
+batch-ready. If `RebuildAndSubmitGenericChunkBatch()` then returned `false`,
+`SubmitChunkProxiesToRenderQueue()` fell through to the per-Entity loop, which
+skips every slot failing its `!slot.entity` check. That is precisely the set of
+slots that had just been classified. The debris disappeared.
+
+The `!sceneManager` early return makes this worse than a one-frame glitch: it
+returns `false` *without* clearing `g_GenericChunkBatchRuntimeAvailable`, so the
+slots stayed batch-classified and kept vanishing on subsequent frames.
+
+`RehydrateGenericChunkBatchSlotsToEntities()` now demotes every
+batch-classified slot back to the Entity path **in the same frame**, before the
+per-Entity loop reads the slots, using the transform the batch would have
+baked. The flags are cleared unconditionally, so a slot can never remain
+stranded claiming the batch owns it even if Ogre cannot supply an Entity that
+frame. Recovering a partially constructed ManualObject is deliberately not
+attempted; the Entity path is the known-good fidelity path and is cheap to
+rehydrate.
+
+## Forced-failure regression test and its result
+
+`OPENSHIM_FORCE_GENERIC_CHUNK_BATCH_FAILURE=1` makes
+`RebuildAndSubmitGenericChunkBatch()` report failure **after** the eligible
+slots have been counted — the same window a real Ogre construction failure
+would land in. `OPENSHIM_FORCE_GENERIC_CHUNK_NON_UNIT_SCALE=1` forces a
+`(1.25, 0.75, 1.0)` scale so the scale gate, which has no natural trigger, can
+be exercised. Both are environment-gated, log that they are active, and are
+unreachable from gameplay.
+
+The A/B is the proof. Same build, same 20-tank DX11 firing workload, same
+forced-failure flag; the only difference is whether the rehydration call is
+compiled in:
+
+| | Rehydration removed (pre-fix behaviour) | Rehydration present (final) |
+|---|---:|---:|
+| Forced failures injected | 8 | 8 |
+| Rehydrate events | 0 | 24 logged (39,688 counted) |
+| Per-Entity `chunk1`/`chunk2` submissions | **0** | 24 logged |
+| Unhandled exceptions | 0 | 0 |
+
+Zero submissions through **any** path confirms the debris was entirely dropped
+before the fix. Afterwards every rehydrate line reported `demoted == restored`,
+and `world-rq-submit` entries for `chunk1/chunk1.mesh` and `chunk2/chunk2.mesh`
+appear in the same millisecond as the rehydrate line — the same frame, no
+missing-debris interval. Sustained for the whole run with `runtimeAvailable=1`
+and no stale ManualObject, duplicate rendering, or crash.
+
+Checklist requested for this test:
+
+1. canonical `chunk1`/`chunk2` detected — yes (`batching=enabled`, correct byte
+   counts and FNV-1a hashes);
+2. slots classified for batching — yes (`eligible=12`, rising to 37);
+3. forced failure occurs after batch setup — yes, by construction;
+4. per-Entity fallback renders the same frame — yes, same-millisecond
+   `world-rq-submit`;
+5. subsequent frames stable — yes, 39,688 rehydrations over the run;
+6. no stale ManualObject — the object is never begun on the forced path;
+7. no duplicate rendering — `demoted == restored` and the batch submitted
+   nothing;
+8. policy after failure — a *forced* failure deliberately leaves
+   `runtimeAvailable=1`; a real construction failure still clears it and
+   permanently stands the batch down;
+9. mission teardown — scene-teardown forget hooks (`clearScene`,
+   `destroyAllMovableObjects`) install and clear the batch flags. **Save/load
+   and interactive menu-driven mission exit were not exercised in this pass.**
+
+## FINAL performance
+
+All FINAL runs are GOG 2.2.301, `lcbench`, `avtank`, 50 m, facing, on branch
+head `0ad135fd`.
+
+### Profiler-disabled PresentMon, 20 tanks firing, DX11 — the headline result
+
+| Metric | Batch (final) | Legacy opt-out | Change |
+|---|---:|---:|---:|
+| Frame mean | 4.204 ms | 7.215 ms | **-41.7%** |
+| Frame p95 | 4.908 ms | 8.071 ms | -39.2% |
+| Frame p99 | 5.366 ms | 8.480 ms | -36.7% |
+| Frame max | 13.150 ms | 9.530 ms | +38.0% |
+| FPS | 237.84 | 138.60 | **+71.6%** |
+| GPU active | 3.789 ms | 3.606 ms | +5.1% |
+| Samples | 2,401 | 1,399 | |
+
+GPU-active time is essentially unchanged while CPU frame time drops by 42%,
+which is the expected signature of a render-*submission* saving rather than a
+GPU saving. The single worse number is frame max: the batched run's 13.150 ms
+outlier exceeds the legacy run's 9.530 ms. With one sample each this is not
+evidence of a systematic hitch, but it is not evidence against one either, and
+it is recorded rather than averaged away.
+
+### Profiler-enabled DX11
+
+| Workload | Batch | Legacy opt-out | Submissions change |
+|---|---|---|---|
+| 20 firing | 6.526 ms / p95 9.594 / p99 10.50 / **488.57** submits | 29.640 ms / p95 46.94 / p99 61.56 / **866.69** submits | -43.6% |
+| 80 firing | 19.626 ms / p95 25.03 / p99 27.13 / **1,598.42** submits | 32.965 ms / p95 41.47 / p99 55.72 / **2,565.87** submits | -37.7% |
+| 20 idle | 5.279 ms / **391.64** submits | 5.199 ms / **391.84** submits | none |
+| 80 idle | 10.880 ms / **1,304.14** submits | 14.914 ms / **1,307.67** submits | none |
+
+**The frame-time column in this table is not trustworthy** and should not be
+quoted. These captures ran while the machine was also compiling; the 20-tank
+legacy figure (29.64 ms mean, 61.56 ms p99) is slower than the same run's
+80-tank figure, which is incoherent. Use the PresentMon table above for timing.
+
+The **submission** counts are load-independent and are the robust result. They
+reproduce the OLD capture almost exactly (OLD: 488.42 and 1,597.98 batched),
+which is itself useful evidence that the scale gate and rehydration changed
+nothing on the normal path.
+
+The idle rows are the control: with no impacts there is no debris, and the
+batch changes nothing (391.64 vs 391.84). The optimization only touches impact
+chunklets.
+
+### DX9
+
+| Workload | Batch | Legacy opt-out | Change |
+|---|---|---|---|
+| 20 firing | 4.869 ms / p95 5.75 / **487.66** submits | 7.961 ms / p95 8.88 / **849.38** submits | **-38.8% ms, -42.6% submits** |
+| 20 idle | 4.474 ms / **391.70** submits | 4.436 ms / **391.73** submits | none |
+
+The batch is confirmed active on DX9 (`active=112 vertices=2016 sections=1`).
+DX9 frame times were captured in a quieter interval than the DX11
+profiler-enabled set and are internally consistent.
+
+## FINAL validation performed
+
+18 harness runs plus 3 manual capture launches, all on `0ad135fd`.
+
+Build and static:
+
+- Release Win32 MSBuild — clean, no new warnings;
+- Ogre profiler algorithm tests — passed;
+- INI/config tests — 23 checks, 0 failures;
+- network-safety baseline — 10 checks passed;
+- DX11 Enhanced FXAA `vs_5_0` and `ps_5_0` — compiled;
+- `git diff --check` — clean;
+- no Lua was modified in this change, so no Lua re-validation was required.
+
+Runtime DX11: idle and firing at 20 and 80, batch enabled and
+`OPENSHIM_DISABLE_GENERIC_CHUNK_BATCH=1` opt-out; profiler-disabled PresentMon
+A/B; forced batch-failure; forced non-unit scale.
+
+Runtime DX9: idle and firing at 20, batch enabled and opt-out.
+
+Log scan across all 18 harness runs: **0** `[ERROR]`, unhandled access
+violations, shader failures, material failures, `Ogre::Exception`, stale
+scene-object errors, or renderer failures.
+
+Visual: side-by-side firing-phase captures with the batch enabled and disabled.
+Both render terrain, vehicle geometry, impact fire, smoke plumes, ground scorch
+marks, HUD and radar, with no missing or duplicated geometry apparent. These
+frames were **not** time-synchronized, so effect shapes differ between them;
+this is a sanity check, not a pixel-difference proof. The fixed-camera
+comparison in the OLD section remains the stronger visual evidence, and the
+normal-path rendering code is unchanged by this addendum's commits.
+
+## A pre-existing crash found during validation (not this branch)
+
+One of the 21 launches died with an unhandled access violation about 100 ms
+into startup, before any mission loaded:
+
+```text
+[CRASH] 2026-08-22 11:35:20 unhandled code=0xC0000005 eip=0x6DFF70C2
+        (WINMM.dll+0x000970C2) write=0x00869140 tid=37464
+```
+
+Symbolized against the matching `winmm.pdb`:
+
+- `0x970C2` -> `PatchIATByFuncName`, `src/patches/file_io_hooks.cpp:236`
+- `0x98B93` -> `ApplyTrnSaveNormalizeHooks`, `src/patches/file_io_hooks.cpp:759`
+- `0xF24CE` -> `RunPatcher`, `src/engine/patcher.cpp:700`
+
+Line 236 is `*iatEntry = newFunc;`, immediately after a
+`VirtualProtect(PAGE_READWRITE)` that returned success — so the page protection
+was changed by another thread between the call and the store. `0x00869140` is
+in the game's import address table.
+
+`src/patches/file_io_hooks.cpp` is **byte-identical to `main`** on this branch
+and is not touched by any commit in this PR. Two further unhandled access
+violations were recorded in this environment earlier the same day, before this
+branch's changes were ever built. It is tracked as separate work, and PR #42
+rewrites this file, so a fix belongs there or alongside it.
+
+Note that *first-chance* `0xC0000005` records appear in every run of this
+codebase and are expected: the chunk-proxy and Ogre probes are deliberately
+wrapped in `__try`/`__except`. Only the `unhandled` record is a real crash.
+
+## Known limitations, restated for the final state
+
+1. The unit-scale gate is a barrier against a future defect, not a fix for one
+   observed. The per-Entity fallback does not render scale either.
+2. A *forced* batch failure intentionally leaves the batch runtime available,
+   so the same run keeps re-failing and re-rehydrating. Only a real failure
+   stands the batch down permanently. Do not read the forced test as proving
+   the stand-down policy.
+3. Save/load and interactive menu-driven mission exit were not exercised in
+   this pass. The teardown forget hooks are installed and the OLD capture set
+   covers mission startup and shutdown, but no save/load cycle was run.
+4. Frame max regressed in the single PresentMon batched sample (13.150 ms vs
+   9.530 ms). One sample each; unexplained.
+5. Profiler-enabled DX11 frame times in this pass are contaminated by
+   concurrent machine load and are reported only so they are not hidden.
+6. DX9's remaining low-load gap is consistent with backend/driver and
+   state-management overhead; no experiment isolated state-validation cost.
+7. Not claimed: Steam binaries, multiplayer, every stock animated mesh, every
+   weapon family, or a pixel-difference proof of every transient effect.
+
+## FINAL commit SHAs
+
+- `265c7026` — merge of baseline `c0bcf0ab` into the branch;
+- `0ad135fd` — unit-scale gate, same-frame rehydration fallback, and the two
+  diagnostic test seams.
+
+Raw FINAL captures are under the ignored
+`reverse_engineering/snapshots/live_combat` tree plus the out-of-tree
+`C:\bzrwt-final` session directories (`dx11_batch_on`, `dx11_batch_off`,
+`dx9_batch_on`, `dx9_batch_off`, `pm2_batch_on`, `pm2_batch_off`,
+`forced_failure`, `scale_fallback`, `visual`).
