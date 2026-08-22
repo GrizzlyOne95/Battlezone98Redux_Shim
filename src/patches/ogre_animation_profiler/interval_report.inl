@@ -25,6 +25,22 @@
             const uint64_t animationMaxTicks = g_AnimationMaxTicks.exchange(0, std::memory_order_acq_rel);
             const uint64_t blendMaxTicks = g_SoftwareBlendMaxTicks.exchange(0, std::memory_order_acq_rel);
             const uint64_t renderCalls = g_RenderQueueCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t sceneRenderCalls =
+                g_SceneRenderCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t shadowSceneRenderCalls =
+                g_ShadowSceneRenderCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t mainRenderQueueCalls =
+                g_MainRenderQueueCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t shadowRenderQueueCalls =
+                g_ShadowRenderQueueCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t mainAnimationCalls =
+                g_MainAnimationCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t shadowAnimationCalls =
+                g_ShadowAnimationCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t mainSoftwareBlendCalls =
+                g_MainSoftwareBlendCalls.exchange(0, std::memory_order_acq_rel);
+            const uint64_t shadowSoftwareBlendCalls =
+                g_ShadowSoftwareBlendCalls.exchange(0, std::memory_order_acq_rel);
             const uint64_t renderSystemSubmissions =
                 g_RenderSystemSubmissions.exchange(0, std::memory_order_acq_rel);
             const uint64_t renderSystemSubmissionTicks =
@@ -117,6 +133,18 @@
                 g_ChunkShadowQueries.exchange(0, std::memory_order_acq_rel);
             const uint64_t chunkShadowSuppressions =
                 g_ChunkShadowSuppressions.exchange(0, std::memory_order_acq_rel);
+            const uint64_t skinSourceShadowQueries =
+                g_Dx11SkinSourceShadowQueries.exchange(
+                    0, std::memory_order_acq_rel);
+            const uint64_t skinSourceShadowRepairs =
+                g_Dx11SkinSourceShadowRepairs.exchange(
+                    0, std::memory_order_acq_rel);
+            const uint64_t skinSourceShadowRepairBytes =
+                g_Dx11SkinSourceShadowRepairBytes.exchange(
+                    0, std::memory_order_acq_rel);
+            const uint64_t skinSourceShadowFailures =
+                g_Dx11SkinSourceShadowFailures.exchange(
+                    0, std::memory_order_acq_rel);
 
             uint64_t animationUnique = 0;
             uint64_t skinnedUnique = 0;
@@ -255,6 +283,21 @@
             LogShimA(
                 LogLevel::Info,
                 kComponent,
+                "[OgreProfile][DX11SkinSourceShadow] enabled=%s installed=%s queries=%llu repairs=%llu bytes=%llu failures=%llu failureStage=%u",
+                g_Dx11SkinSourceShadowPolicyEnabled.load(
+                    std::memory_order_acquire) ? "yes" : "no",
+                g_Dx11SkinSourceShadowHookInstalled.load(
+                    std::memory_order_acquire) ? "yes" : "no",
+                static_cast<unsigned long long>(skinSourceShadowQueries),
+                static_cast<unsigned long long>(skinSourceShadowRepairs),
+                static_cast<unsigned long long>(skinSourceShadowRepairBytes),
+                static_cast<unsigned long long>(skinSourceShadowFailures),
+                g_Dx11SkinSourceShadowFailureStage.load(
+                    std::memory_order_relaxed));
+
+            LogShimA(
+                LogLevel::Info,
+                kComponent,
                 "[OgreProfile][Anim] renderDriven=%llu cpu=%.3fms/f external=%llu cpu=%.3fms/f withBlend=%llu withoutBlend=%llu blendCalls/anim=%.2f verts/anim=%.0f maxAnim=%.3fms latency=[%llu,%llu,%llu,%llu,%llu,%llu,%llu]",
                 static_cast<unsigned long long>(renderDrivenCalls), TicksToMs(renderDrivenTicks) / frameDivisor,
                 static_cast<unsigned long long>(externalCalls), TicksToMs(externalTicks) / frameDivisor,
@@ -312,6 +355,42 @@
                 static_cast<unsigned long long>(renderUnique),
                 static_cast<unsigned long long>(skinnedNotRendered),
                 unnecessaryPct);
+
+            LogShimA(
+                LogLevel::Info,
+                kComponent,
+                "[OgreProfile][Passes] scene=%.2f/f shadowScene=%.2f/f | rqMain=%.2f/f rqShadow=%.2f/f | animMain=%.2f/f animShadow=%.2f/f | skinMain=%.2f/f skinShadow=%.2f/f",
+                static_cast<double>(sceneRenderCalls) / frameDivisor,
+                static_cast<double>(shadowSceneRenderCalls) / frameDivisor,
+                static_cast<double>(mainRenderQueueCalls) / frameDivisor,
+                static_cast<double>(shadowRenderQueueCalls) / frameDivisor,
+                static_cast<double>(mainAnimationCalls) / frameDivisor,
+                static_cast<double>(shadowAnimationCalls) / frameDivisor,
+                static_cast<double>(mainSoftwareBlendCalls) / frameDivisor,
+                static_cast<double>(shadowSoftwareBlendCalls) / frameDivisor);
+
+            for (CameraProfileSlot& cameraSlot : g_CameraProfileSlots)
+            {
+                const uint64_t calls = cameraSlot.renderCalls.exchange(
+                    0, std::memory_order_acq_rel);
+                const uint64_t nestedCalls = cameraSlot.nestedRenderCalls.exchange(
+                    0, std::memory_order_acq_rel);
+                if (!calls)
+                    continue;
+                const bool metadataReady = cameraSlot.metadataState.load(
+                    std::memory_order_acquire) == 2;
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    "[OgreProfile][Camera] camera=0x%p name=%s renders=%.2f/f nested=%.2f/f",
+                    reinterpret_cast<void*>(cameraSlot.key.load(
+                        std::memory_order_relaxed)),
+                    metadataReady && cameraSlot.cameraName[0]
+                        ? cameraSlot.cameraName.data()
+                        : "<unknown>",
+                    static_cast<double>(calls) / frameDivisor,
+                    static_cast<double>(nestedCalls) / frameDivisor);
+            }
 
             LogShimA(
                 LogLevel::Info,

@@ -308,6 +308,16 @@
                 sample.vertices = slot.vertices.exchange(0, std::memory_order_acq_rel);
                 sample.ticks = slot.ticks.exchange(0, std::memory_order_acq_rel);
                 sample.sourceVertices = slot.sourceVertices.load(std::memory_order_relaxed);
+                sample.metadataReady = slot.metadataState.load(
+                    std::memory_order_acquire) == 2;
+                sample.positionStride = slot.positionStride;
+                sample.normalStride = slot.normalStride;
+                sample.weightStride = slot.weightStride;
+                sample.indexStride = slot.indexStride;
+                sample.weightsPerVertex = slot.weightsPerVertex;
+                sample.positionShadowed = slot.positionShadowed;
+                sample.positionSystemMemory = slot.positionSystemMemory;
+                sample.weightShadowed = slot.weightShadowed;
                 if (sample.calls)
                     sources.push_back(sample);
             }
@@ -323,13 +333,21 @@
                 LogShimA(
                     LogLevel::Info,
                     kComponent,
-                    "[OgreProfile][SkinTop] rank=%u sourceVD=0x%p sourceVerts=%llu calls/f=%.2f verts/f=%.0f swCPU=%.3fms/f",
+                    "[OgreProfile][SkinTop] rank=%u sourceVD=0x%p sourceVerts=%llu calls/f=%.2f verts/f=%.0f swCPU=%.3fms/f layout[pos=%u norm=%u weight=%u index=%u weights=%u posShadow=%s posSystem=%s weightShadow=%s]",
                     static_cast<unsigned>(i + 1),
                     reinterpret_cast<void*>(sample.key),
                     static_cast<unsigned long long>(sample.sourceVertices),
                     static_cast<double>(sample.calls) / frameDivisor,
                     static_cast<double>(sample.vertices) / frameDivisor,
-                    TicksToMs(sample.ticks) / frameDivisor);
+                    TicksToMs(sample.ticks) / frameDivisor,
+                    sample.metadataReady ? sample.positionStride : 0,
+                    sample.metadataReady ? sample.normalStride : 0,
+                    sample.metadataReady ? sample.weightStride : 0,
+                    sample.metadataReady ? sample.indexStride : 0,
+                    sample.metadataReady ? sample.weightsPerVertex : 0,
+                    sample.metadataReady && sample.positionShadowed ? "yes" : "no",
+                    sample.metadataReady && sample.positionSystemMemory ? "yes" : "no",
+                    sample.metadataReady && sample.weightShadowed ? "yes" : "no");
             }
         }
 

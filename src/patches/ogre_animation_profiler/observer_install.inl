@@ -118,6 +118,65 @@
             g_OgreSetCastShadows = reinterpret_cast<FnMovableSetCastShadows>(GetProcAddress(
                 ogreModule,
                 "?setCastShadows@MovableObject@Ogre@@QAEX_N@Z"));
+            g_OgreVertexElementGetSource =
+                reinterpret_cast<FnVertexElementGetSource>(GetProcAddress(
+                    ogreModule,
+                    "?getSource@VertexElement@Ogre@@QBEGXZ"));
+            g_OgreVertexElementGetType =
+                reinterpret_cast<FnVertexElementGetType>(GetProcAddress(
+                    ogreModule,
+                    "?getType@VertexElement@Ogre@@QBE?AW4VertexElementType@2@XZ"));
+            g_OgreVertexElementGetTypeCount =
+                reinterpret_cast<FnVertexElementGetTypeCount>(GetProcAddress(
+                    ogreModule,
+                    "?getTypeCount@VertexElement@Ogre@@SAGW4VertexElementType@2@@Z"));
+            g_OgreVertexBufferGetVertexSize =
+                reinterpret_cast<FnHardwareVertexBufferGetVertexSize>(GetProcAddress(
+                    ogreModule,
+                    "?getVertexSize@HardwareVertexBuffer@Ogre@@QBEIXZ"));
+            g_OgreHardwareBufferGetSizeInBytes =
+                reinterpret_cast<FnHardwareBufferGetSizeInBytes>(GetProcAddress(
+                    ogreModule,
+                    "?getSizeInBytes@HardwareBuffer@Ogre@@QBEIXZ"));
+            g_OgreHardwareBufferGetUsage =
+                reinterpret_cast<FnHardwareBufferGetUsage>(GetProcAddress(
+                    ogreModule,
+                    "?getUsage@HardwareBuffer@Ogre@@QBE?AW4Usage@12@XZ"));
+            g_OgreHardwareBufferHasShadow =
+                reinterpret_cast<FnHardwareBufferBoolQuery>(GetProcAddress(
+                    ogreModule,
+                    "?hasShadowBuffer@HardwareBuffer@Ogre@@QBE_NXZ"));
+            g_OgreHardwareBufferIsSystemMemory =
+                reinterpret_cast<FnHardwareBufferBoolQuery>(GetProcAddress(
+                    ogreModule,
+                    "?isSystemMemory@HardwareBuffer@Ogre@@QBE_NXZ"));
+            g_OgreHardwareBufferManagerGetSingletonPtr =
+                reinterpret_cast<FnHardwareBufferManagerGetSingletonPtr>(
+                    GetProcAddress(
+                        ogreModule,
+                        "?getSingletonPtr@HardwareBufferManager@Ogre@@SAPAV12@XZ"));
+            g_OgreHardwareBufferManagerCreateVertexBuffer =
+                reinterpret_cast<FnHardwareBufferManagerCreateVertexBuffer>(
+                    GetProcAddress(
+                        ogreModule,
+                        "?createVertexBuffer@HardwareBufferManager@Ogre@@UAE?AVHardwareVertexBufferSharedPtr@2@IIW4Usage@HardwareBuffer@2@_N@Z"));
+            g_OgreHardwareBufferLock = reinterpret_cast<FnHardwareBufferLock>(
+                GetProcAddress(
+                    ogreModule,
+                    "?lock@HardwareBuffer@Ogre@@QAEPAXW4LockOptions@12@W4UploadOptions@12@@Z"));
+            g_OgreHardwareBufferUnlock =
+                reinterpret_cast<FnHardwareBufferUnlock>(GetProcAddress(
+                    ogreModule,
+                    "?unlock@HardwareBuffer@Ogre@@UAEXXZ"));
+            g_OgreVertexBufferBindingSetBinding =
+                reinterpret_cast<FnVertexBufferBindingSetBinding>(GetProcAddress(
+                    ogreModule,
+                    "?setBinding@VertexBufferBinding@Ogre@@UAEXGABVHardwareVertexBufferSharedPtr@2@@Z"));
+            g_OgreHardwareVertexBufferSharedPtrDestructor =
+                reinterpret_cast<FnHardwareVertexBufferSharedPtrDestructor>(
+                    GetProcAddress(
+                        ogreModule,
+                        "??1HardwareVertexBufferSharedPtr@Ogre@@QAE@XZ"));
             LogShimA(
                 (g_OgreGetEntityName && g_OgreEntityGetMesh &&
                  g_OgreGetResourceName && g_OgreGetCastShadows &&
@@ -163,23 +222,101 @@
                     static_cast<unsigned>(shadowVtables));
             }
 
+            const bool skinSourcePolicyRequested =
+                g_Dx11SkinSourceShadowPolicyEnabled.load(
+                    std::memory_order_acquire);
+            const bool skinSourcePolicyAvailable =
+                skinSourcePolicyRequested && validatedChunkShadowRuntime &&
+                g_OgreVertexElementGetSource &&
+                g_OgreVertexBufferGetVertexSize &&
+                g_OgreHardwareBufferGetSizeInBytes &&
+                g_OgreHardwareBufferGetUsage &&
+                g_OgreHardwareBufferHasShadow &&
+                g_OgreHardwareBufferManagerGetSingletonPtr &&
+                g_OgreHardwareBufferManagerCreateVertexBuffer &&
+                g_OgreHardwareBufferLock && g_OgreHardwareBufferUnlock &&
+                g_OgreVertexBufferBindingSetBinding &&
+                g_OgreHardwareVertexBufferSharedPtrDestructor;
+            if (skinSourcePolicyRequested && !skinSourcePolicyAvailable)
+            {
+                g_Dx11SkinSourceShadowPolicyEnabled.store(
+                    false, std::memory_order_release);
+                LogShimA(
+                    LogLevel::Warn,
+                    kComponent,
+                    "[OgreProfile][DX11SkinSourceShadow] unavailable: validated GOG 2.2.301 runtime or required Ogre buffer exports missing");
+            }
+
+            void* softwareVertexBlend =
+                (installProfilerObservers || skinSourcePolicyAvailable)
+                    ? FindUniqueFunctionExport(
+                          "softwareVertexBlend@Mesh@Ogre@@",
+                          "Mesh::softwareVertexBlend")
+                    : nullptr;
+            void* softwareVertexBlendImplementation = softwareVertexBlend
+                ? (g_SoftwareVertexBlendDetour.trampoline
+                       ? g_SoftwareVertexBlendDetour.target
+                       : ResolveOgreExportImplementation(
+                             softwareVertexBlend,
+                             "Mesh::softwareVertexBlend"))
+                : nullptr;
+            static const uint8_t kSoftwareVertexBlendPrologue[] =
+            {
+                0x55,                         // push ebp
+                0x8B, 0xEC,                   // mov ebp, esp
+                0x6A, 0xFF                    // push -1
+            };
+            const bool blendEntry = softwareVertexBlendImplementation &&
+                (g_SoftwareVertexBlendDetour.trampoline ||
+                 InstallEntryDetour32(
+                     g_SoftwareVertexBlendDetour,
+                     ogreModule,
+                     softwareVertexBlendImplementation,
+                     reinterpret_cast<void*>(&HookSoftwareVertexBlend),
+                     kSoftwareVertexBlendPrologue,
+                     sizeof(kSoftwareVertexBlendPrologue),
+                     "Mesh::softwareVertexBlend"));
+            if (blendEntry)
+            {
+                g_RealSoftwareVertexBlend = reinterpret_cast<FnSoftwareVertexBlend>(
+                    g_SoftwareVertexBlendDetour.trampoline);
+            }
+            if (skinSourcePolicyAvailable)
+            {
+                g_Dx11SkinSourceShadowHookInstalled.store(
+                    blendEntry, std::memory_order_release);
+                LogShimA(
+                    (blendEntry || g_EntryInstallRetryRequested)
+                        ? LogLevel::Info : LogLevel::Warn,
+                    kComponent,
+                    "[OgreProfile][DX11SkinSourceShadow] %s exactRuntime=GOG-2.2.301 scope=software-skinned-position-normal-sources",
+                    blendEntry ? "active" :
+                        (g_EntryInstallRetryRequested ? "deferred" : "unavailable"));
+            }
+
             if (!installProfilerObservers)
-                return g_ChunkShadowHookInstalled.load(std::memory_order_acquire);
+            {
+                if (skinSourcePolicyAvailable && !blendEntry)
+                    return false;
+                return g_ChunkShadowHookInstalled.load(std::memory_order_acquire) ||
+                    g_Dx11SkinSourceShadowHookInstalled.load(
+                        std::memory_order_acquire);
+            }
 
             void* updateAnimation = FindUniqueFunctionExport(
                 "_updateAnimation@Entity@Ogre@@",
                 "Entity::_updateAnimation");
-            void* softwareVertexBlend = FindUniqueFunctionExport(
-                "softwareVertexBlend@Mesh@Ogre@@",
-                "Mesh::softwareVertexBlend");
             void* updateAnimationCore = FindUniqueFunctionExport(
                 "?updateAnimation@Entity@Ogre@@",
                 "Entity::updateAnimation core");
             void* updateRenderQueue = FindUniqueFunctionExport(
                 "_updateRenderQueue@Entity@Ogre@@",
                 "Entity::_updateRenderQueue");
+            void* renderScene = FindUniqueFunctionExport(
+                "_renderScene@SceneManager@Ogre@@",
+                "SceneManager::_renderScene");
 
-            if (!updateAnimation || !updateAnimationCore || !softwareVertexBlend)
+            if (!updateAnimation || !updateAnimationCore || !blendEntry)
                 return false;
 
             void* updateAnimationImplementation = g_EntityUpdateAnimationDetour.trampoline
@@ -187,18 +324,17 @@
                 : ResolveOgreExportImplementation(
                     updateAnimation,
                     "Entity::_updateAnimation");
-            void* softwareVertexBlendImplementation = g_SoftwareVertexBlendDetour.trampoline
-                ? g_SoftwareVertexBlendDetour.target
-                : ResolveOgreExportImplementation(
-                    softwareVertexBlend,
-                    "Mesh::softwareVertexBlend");
             void* updateAnimationCoreImplementation = g_EntityUpdateAnimationCoreDetour.trampoline
                 ? g_EntityUpdateAnimationCoreDetour.target
                 : ResolveOgreExportImplementation(
                     updateAnimationCore,
                     "Entity::updateAnimation core");
-            if (!updateAnimationImplementation || !updateAnimationCoreImplementation ||
-                !softwareVertexBlendImplementation)
+            void* renderSceneImplementation = g_SceneManagerRenderSceneDetour.trampoline
+                ? g_SceneManagerRenderSceneDetour.target
+                : ResolveOgreExportImplementation(
+                    renderScene,
+                    "SceneManager::_renderScene");
+            if (!updateAnimationImplementation || !updateAnimationCoreImplementation)
                 return false;
 
             // GOG OgreMain.dll SHA-256
@@ -211,17 +347,17 @@
                 0x8B, 0xF1,                   // mov esi, ecx
                 0x83, 0xBE, 0xBC, 0x01, 0x00, 0x00, 0x00 // cmp [esi+1BCh], 0
             };
-            static const uint8_t kSoftwareVertexBlendPrologue[] =
-            {
-                0x55,                         // push ebp
-                0x8B, 0xEC,                   // mov ebp, esp
-                0x6A, 0xFF                    // push -1
-            };
             static const uint8_t kUpdateAnimationCorePrologue[] =
             {
                 0x55,                         // push ebp
                 0x8B, 0xEC,                   // mov ebp, esp
                 0x81, 0xEC, 0x24, 0x04, 0x00, 0x00 // sub esp, 424h
+            };
+            static const uint8_t kRenderScenePrologue[] =
+            {
+                0x55,                         // push ebp
+                0x8B, 0xEC,                   // mov ebp, esp
+                0x6A, 0xFF                    // push -1
             };
 
             const bool animationEntry = g_EntityUpdateAnimationDetour.trampoline ||
@@ -254,19 +390,21 @@
                     g_EntityUpdateAnimationCoreDetour.trampoline);
             }
 
-            const bool blendEntry = g_SoftwareVertexBlendDetour.trampoline ||
-                InstallEntryDetour32(
-                    g_SoftwareVertexBlendDetour,
+            const bool renderSceneEntry = renderSceneImplementation &&
+                (g_SceneManagerRenderSceneDetour.trampoline ||
+                 InstallEntryDetour32(
+                    g_SceneManagerRenderSceneDetour,
                     ogreModule,
-                    softwareVertexBlendImplementation,
-                    reinterpret_cast<void*>(&HookSoftwareVertexBlend),
-                    kSoftwareVertexBlendPrologue,
-                    sizeof(kSoftwareVertexBlendPrologue),
-                    "Mesh::softwareVertexBlend");
-            if (blendEntry)
+                    renderSceneImplementation,
+                    reinterpret_cast<void*>(&HookSceneManagerRenderScene),
+                    kRenderScenePrologue,
+                    sizeof(kRenderScenePrologue),
+                    "SceneManager::_renderScene"));
+            if (renderSceneEntry)
             {
-                g_RealSoftwareVertexBlend = reinterpret_cast<FnSoftwareVertexBlend>(
-                    g_SoftwareVertexBlendDetour.trampoline);
+                g_RealSceneManagerRenderScene =
+                    reinterpret_cast<FnSceneManagerRenderScene>(
+                        g_SceneManagerRenderSceneDetour.trampoline);
             }
 
             if (updateRenderQueue &&
@@ -305,11 +443,12 @@
             LogShimA(
                 LogLevel::Info,
                 kComponent,
-                "[OgreProfile] Ogre observers active animationWrapperEntry=%s animationCoreEntry=%s softwareBlendEntry=%s renderQueue=%s",
+                "[OgreProfile] Ogre observers active animationWrapperEntry=%s animationCoreEntry=%s softwareBlendEntry=%s renderQueue=%s sceneRender=%s",
                 animationEntry ? "yes" : "no",
                 animationCoreEntry ? "yes" : "no",
                 blendEntry ? "yes" : "no",
-                g_RenderQueueHookInstalled.load(std::memory_order_acquire) ? "yes" : "no");
+                g_RenderQueueHookInstalled.load(std::memory_order_acquire) ? "yes" : "no",
+                renderSceneEntry ? "yes" : "no");
             return true;
         }
 
