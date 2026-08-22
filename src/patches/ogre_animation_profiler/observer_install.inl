@@ -108,7 +108,26 @@
                 "?getName@MovableObject@Ogre@@UBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ"));
             g_OgreEntityGetMesh = reinterpret_cast<FnEntityGetMesh>(GetProcAddress(
                 ogreModule,
-                "?getMesh@Entity@Ogre@@QBEABV?$SharedPtr@VMesh@Ogre@@@2@XZ"));
+                 "?getMesh@Entity@Ogre@@QBEABV?$SharedPtr@VMesh@Ogre@@@2@XZ"));
+            g_OgreSubEntityGetParent = reinterpret_cast<FnSubEntityGetParent>(
+                GetProcAddress(
+                    ogreModule,
+                    "?getParent@SubEntity@Ogre@@QBEPAVEntity@2@XZ"));
+            g_OgrePassGetParent = reinterpret_cast<FnPassGetParent>(GetProcAddress(
+                ogreModule,
+                "?getParent@Pass@Ogre@@QBEPAVTechnique@2@XZ"));
+            g_OgreTechniqueGetParent = reinterpret_cast<FnTechniqueGetParent>(
+                GetProcAddress(
+                    ogreModule,
+                    "?getParent@Technique@Ogre@@QBEPAVMaterial@2@XZ"));
+            g_OgrePassGetIndex = reinterpret_cast<FnPassGetIndex>(GetProcAddress(
+                ogreModule,
+                "?getIndex@Pass@Ogre@@QBEGXZ"));
+            const auto subEntityVtables = FindExportsContaining(
+                "??_7SubEntity@Ogre@@");
+            g_OgreSubEntityVtable = subEntityVtables.size() == 1
+                ? subEntityVtables[0].address
+                : nullptr;
             g_OgreGetResourceName = reinterpret_cast<FnOgreStringQuery>(GetProcAddress(
                 ogreModule,
                 "?getName@Resource@Ogre@@UBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ"));
@@ -315,6 +334,9 @@
             void* renderScene = FindUniqueFunctionExport(
                 "_renderScene@SceneManager@Ogre@@",
                 "SceneManager::_renderScene");
+            void* renderSingleObject = FindUniqueFunctionExport(
+                "?renderSingleObject@SceneManager@Ogre@@",
+                "SceneManager::renderSingleObject");
 
             if (!updateAnimation || !updateAnimationCore || !blendEntry)
                 return false;
@@ -334,6 +356,12 @@
                 : ResolveOgreExportImplementation(
                     renderScene,
                     "SceneManager::_renderScene");
+            void* renderSingleObjectImplementation =
+                g_SceneManagerRenderSingleObjectDetour.trampoline
+                    ? g_SceneManagerRenderSingleObjectDetour.target
+                    : ResolveOgreExportImplementation(
+                        renderSingleObject,
+                        "SceneManager::renderSingleObject");
             if (!updateAnimationImplementation || !updateAnimationCoreImplementation)
                 return false;
 
@@ -354,6 +382,12 @@
                 0x81, 0xEC, 0x24, 0x04, 0x00, 0x00 // sub esp, 424h
             };
             static const uint8_t kRenderScenePrologue[] =
+            {
+                0x55,                         // push ebp
+                0x8B, 0xEC,                   // mov ebp, esp
+                0x6A, 0xFF                    // push -1
+            };
+            static const uint8_t kRenderSingleObjectPrologue[] =
             {
                 0x55,                         // push ebp
                 0x8B, 0xEC,                   // mov ebp, esp
@@ -407,6 +441,25 @@
                         g_SceneManagerRenderSceneDetour.trampoline);
             }
 
+            const bool renderSingleObjectEntry = renderSingleObjectImplementation &&
+                (g_SceneManagerRenderSingleObjectDetour.trampoline ||
+                 InstallEntryDetour32(
+                    g_SceneManagerRenderSingleObjectDetour,
+                    ogreModule,
+                    renderSingleObjectImplementation,
+                    reinterpret_cast<void*>(&HookSceneManagerRenderSingleObject),
+                    kRenderSingleObjectPrologue,
+                    sizeof(kRenderSingleObjectPrologue),
+                    "SceneManager::renderSingleObject"));
+            if (renderSingleObjectEntry)
+            {
+                g_RealSceneManagerRenderSingleObject =
+                    reinterpret_cast<FnSceneManagerRenderSingleObject>(
+                        g_SceneManagerRenderSingleObjectDetour.trampoline);
+            }
+            g_RenderSingleObjectHookInstalled.store(
+                renderSingleObjectEntry, std::memory_order_release);
+
             if (updateRenderQueue &&
                 !g_RenderQueueHookInstalled.load(std::memory_order_acquire))
             {
@@ -443,12 +496,13 @@
             LogShimA(
                 LogLevel::Info,
                 kComponent,
-                "[OgreProfile] Ogre observers active animationWrapperEntry=%s animationCoreEntry=%s softwareBlendEntry=%s renderQueue=%s sceneRender=%s",
+                "[OgreProfile] Ogre observers active animationWrapperEntry=%s animationCoreEntry=%s softwareBlendEntry=%s renderQueue=%s sceneRender=%s renderSingleObject=%s",
                 animationEntry ? "yes" : "no",
                 animationCoreEntry ? "yes" : "no",
                 blendEntry ? "yes" : "no",
                 g_RenderQueueHookInstalled.load(std::memory_order_acquire) ? "yes" : "no",
-                renderSceneEntry ? "yes" : "no");
+                renderSceneEntry ? "yes" : "no",
+                renderSingleObjectEntry ? "yes" : "no");
             return true;
         }
 

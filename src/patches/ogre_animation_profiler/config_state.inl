@@ -25,6 +25,7 @@
 #endif
 #include <OgreVertexIndexData.h>
 #include <OgreHardwareBufferManager.h>
+#include <OgreRenderOperation.h>
 #ifdef OPENSHIM_OGRE_RESTORE_REGISTER
 #undef register
 #undef OPENSHIM_OGRE_RESTORE_REGISTER
@@ -80,6 +81,13 @@ namespace BZROpenShim
         constexpr size_t kDynamicGeometryTableSize = 16;
         constexpr size_t kDynamicMaterialTableSize = 128;
         constexpr size_t kCameraTableSize = 16;
+        // Aggregate render work by semantic identity rather than transient
+        // Renderable address. Weapon effects churn object instances rapidly;
+        // a fixed table keyed by type/pass/camera/mesh stays bounded and keeps
+        // long firing captures representative instead of filling with dead IDs.
+        constexpr size_t kRenderContributorTableSize = 2048;
+        constexpr size_t kRenderContributorProbeCount = 16;
+        constexpr size_t kRenderContributorTopCount = 20;
         constexpr unsigned kMaxExportThunkDepth = 2;
         constexpr size_t kMaxSuspendedThreads = 128;
         constexpr size_t kEntryDetourMaxPatchLen = 16;
@@ -88,13 +96,23 @@ namespace BZROpenShim
                       "entity table must remain power-of-two");
         static_assert((kSourceTableSize & (kSourceTableSize - 1)) == 0,
                       "source table must remain power-of-two");
+        static_assert(
+            (kRenderContributorTableSize &
+             (kRenderContributorTableSize - 1)) == 0,
+            "render contributor table must remain power-of-two");
 
         using FnEntityUpdateAnimation = void(__thiscall*)(void*);
         using FnEntityUpdateRenderQueue = void(__thiscall*)(void*, void*);
         using FnSceneManagerRenderScene =
             void(__thiscall*)(void*, void*, void*, bool);
+        using FnSceneManagerRenderSingleObject = void(__thiscall*)(
+            void*, void*, const void*, bool, bool, const void*);
         using FnOgreStringQuery = const std::string&(__thiscall*)(const void*);
         using FnEntityGetMesh = const void*(__thiscall*)(const void*);
+        using FnSubEntityGetParent = const void*(__thiscall*)(const void*);
+        using FnPassGetParent = const void*(__thiscall*)(const void*);
+        using FnTechniqueGetParent = const void*(__thiscall*)(const void*);
+        using FnPassGetIndex = unsigned short(__thiscall*)(const void*);
         using FnMovableGetCastShadows = bool(__thiscall*)(const void*);
         using FnMovableSetCastShadows = void(__thiscall*)(void*, bool);
         using FnVertexElementGetSource =
@@ -276,6 +294,70 @@ namespace BZROpenShim
             std::array<char, kEntityMetadataLength> cameraName{};
         };
 
+        struct RenderContributorSlot
+        {
+            std::atomic<uintptr_t> key{ 0 };
+            std::atomic<uint32_t> metadataState{ 0 };
+            uintptr_t renderableVtable = 0;
+            uintptr_t pass = 0;
+            uintptr_t camera = 0;
+            uintptr_t mesh = 0;
+            std::atomic<uint64_t> calls{ 0 };
+            std::atomic<uint64_t> mainCalls{ 0 };
+            std::atomic<uint64_t> shadowCalls{ 0 };
+            std::atomic<uint64_t> ticks{ 0 };
+            std::atomic<uint64_t> ogreSubmissions{ 0 };
+            std::atomic<uint64_t> operationVertices{ 0 };
+            std::atomic<uint64_t> operationIndices{ 0 };
+            std::atomic<uint64_t> draws{ 0 };
+            std::atomic<uint64_t> indexedDraws{ 0 };
+            std::atomic<uint64_t> drawnVertices{ 0 };
+            std::atomic<uint64_t> drawnIndices{ 0 };
+            std::atomic<uint64_t> renderStates{ 0 };
+            std::atomic<uint64_t> blendStates{ 0 };
+            std::atomic<uint64_t> textureSets{ 0 };
+            std::atomic<uint64_t> textureStageSets{ 0 };
+            std::atomic<uint64_t> samplerSets{ 0 };
+            std::atomic<uint64_t> vertexShaderSets{ 0 };
+            std::atomic<uint64_t> pixelShaderSets{ 0 };
+            std::array<char, kEntityMetadataLength> typeName{};
+            std::array<char, kEntityMetadataLength> ownerName{};
+            std::array<char, kEntityMetadataLength> meshName{};
+            std::array<char, kEntityMetadataLength> materialName{};
+            std::array<char, kEntityMetadataLength> cameraName{};
+            uint32_t passIndex = 0;
+        };
+
+        struct RenderContributorSample
+        {
+            uintptr_t key = 0;
+            uint64_t calls = 0;
+            uint64_t mainCalls = 0;
+            uint64_t shadowCalls = 0;
+            uint64_t ticks = 0;
+            uint64_t ogreSubmissions = 0;
+            uint64_t operationVertices = 0;
+            uint64_t operationIndices = 0;
+            uint64_t draws = 0;
+            uint64_t indexedDraws = 0;
+            uint64_t drawnVertices = 0;
+            uint64_t drawnIndices = 0;
+            uint64_t renderStates = 0;
+            uint64_t blendStates = 0;
+            uint64_t textureSets = 0;
+            uint64_t textureStageSets = 0;
+            uint64_t samplerSets = 0;
+            uint64_t vertexShaderSets = 0;
+            uint64_t pixelShaderSets = 0;
+            std::array<char, kEntityMetadataLength> typeName{};
+            std::array<char, kEntityMetadataLength> ownerName{};
+            std::array<char, kEntityMetadataLength> meshName{};
+            std::array<char, kEntityMetadataLength> materialName{};
+            std::array<char, kEntityMetadataLength> cameraName{};
+            uint32_t passIndex = 0;
+            bool metadataReady = false;
+        };
+
         struct EntityTopSample
         {
             uintptr_t key = 0;
@@ -333,6 +415,7 @@ namespace BZROpenShim
         std::atomic<bool> g_ShutdownRequested{ false };
         std::atomic<bool> g_OgreHooksInstalled{ false };
         std::atomic<bool> g_RenderQueueHookInstalled{ false };
+        std::atomic<bool> g_RenderSingleObjectHookInstalled{ false };
         std::atomic<bool> g_ChunkShadowHookInstalled{ false };
         std::atomic<bool> g_ChunkShadowPolicyEnabled{ false };
         std::atomic<bool> g_Dx11SkinSourceShadowPolicyEnabled{ false };
@@ -357,6 +440,7 @@ namespace BZROpenShim
         EntryDetour32 g_EntityUpdateAnimationCoreDetour{};
         EntryDetour32 g_SoftwareVertexBlendDetour{};
         EntryDetour32 g_SceneManagerRenderSceneDetour{};
+        EntryDetour32 g_SceneManagerRenderSingleObjectDetour{};
         EntryDetour32 g_D3D11RenderSystemRenderDetour{};
         EntryDetour32 g_D3D9RenderSystemRenderDetour{};
 
@@ -364,8 +448,14 @@ namespace BZROpenShim
         FnEntityUpdateAnimation g_RealEntityUpdateAnimationCore = nullptr;
         FnEntityUpdateRenderQueue g_RealEntityUpdateRenderQueue = nullptr;
         FnSceneManagerRenderScene g_RealSceneManagerRenderScene = nullptr;
+        FnSceneManagerRenderSingleObject g_RealSceneManagerRenderSingleObject = nullptr;
         FnOgreStringQuery g_OgreGetEntityName = nullptr;
         FnEntityGetMesh g_OgreEntityGetMesh = nullptr;
+        FnSubEntityGetParent g_OgreSubEntityGetParent = nullptr;
+        FnPassGetParent g_OgrePassGetParent = nullptr;
+        FnTechniqueGetParent g_OgreTechniqueGetParent = nullptr;
+        FnPassGetIndex g_OgrePassGetIndex = nullptr;
+        void* g_OgreSubEntityVtable = nullptr;
         FnOgreStringQuery g_OgreGetResourceName = nullptr;
         FnMovableGetCastShadows g_OgreGetCastShadows = nullptr;
         FnMovableSetCastShadows g_OgreSetCastShadows = nullptr;
@@ -452,6 +542,7 @@ namespace BZROpenShim
         std::atomic<uint64_t> g_RenderSystemSubmissions{ 0 };
         std::atomic<uint64_t> g_RenderSystemSubmissionTicks{ 0 };
         std::atomic<uint64_t> g_RenderSystemSubmissionMaxTicks{ 0 };
+        std::atomic<uint64_t> g_RenderContributorDrops{ 0 };
         std::atomic<uint64_t> g_ContextVtableRefreshes{ 0 };
         std::atomic<uint64_t> g_DrawCalls{ 0 };
         std::atomic<uint64_t> g_DrawVertices{ 0 };
@@ -536,11 +627,15 @@ namespace BZROpenShim
         std::array<DynamicMaterialProfileSlot, kDynamicMaterialTableSize>
             g_DynamicMaterialProfileSlots{};
         std::array<CameraProfileSlot, kCameraTableSize> g_CameraProfileSlots{};
+        std::array<RenderContributorSlot, kRenderContributorTableSize>
+            g_RenderContributorSlots{};
 
         LARGE_INTEGER g_QpcFrequency{};
         const char* g_ProfilerRequestSource = "build-default";
         thread_local void* t_CurrentAnimationEntity = nullptr;
         thread_local void* t_RenderQueueEntity = nullptr;
+        thread_local void* t_CurrentSceneCamera = nullptr;
+        thread_local RenderContributorSlot* t_CurrentRenderContributor = nullptr;
         thread_local uint32_t t_CurrentAnimationBlendCalls = 0;
         thread_local uint64_t t_CurrentAnimationBlendVertices = 0;
         thread_local unsigned t_SoftwareBlendDepth = 0;
