@@ -2,11 +2,12 @@
 //
 // Copyright (C) 2026 BZR Open Shim contributors
 //
-// Main-view frustum culling for craft whose Ogre bounds were made infinite.
+// Craft visibility: restoring finite Ogre bounds, and the superseded private
+// frustum test kept beside it as a fallback.
 //
 // The defect
 // ----------
-// Battlezone 98 Redux gives every craft mesh an infinite Ogre bounding box at
+// Battlezone 98 Redux gives craft meshes an infinite Ogre bounding box at
 // runtime. Measured, from the opt-in census below:
 //
 //     type=Ogre::Entity extent=2 meshExtent=2 sampleMesh=avtank.mesh
@@ -14,9 +15,16 @@
 // `extent=2` is `AxisAlignedBox::EXTENT_INFINITE`, and `meshExtent=2` places it
 // on `Mesh::getBounds()` itself rather than on an attachment. The shipped asset
 // is fine -- `avtank.mesh` declares min=(-3.16,-0.06,-3.74) max=(3.16,2.76,2.96)
-// radius=4.27 in its M_MESH_BOUNDS chunk -- so something overwrites those bounds
-// after load. Terrain entities keep finite bounds (`RenderableTileCluster_*`,
-// extent=1), so this is specific to craft, not global.
+// in its M_MESH_BOUNDS chunk -- so something overwrites those bounds after load.
+// Terrain entities keep finite bounds (`RenderableTileCluster_*`, extent=1).
+//
+// That "something" is now known exactly, and the block comment above
+// MeshSetBoundsHook carries the full call-site derivation: Redux's first-person
+// view entity builder at 0x0067E5A0 writes an unconditional never-cull box onto
+// the mesh it is given, and for craft that ship no dedicated cockpit model it is
+// given the craft's *own* mesh name. Ogre::Mesh is a shared resource, so a
+// cockpit's "always visible" policy lands on the mesh every world instance of
+// that craft renders from.
 //
 // Ogre's frustum test short-circuits on an infinite box ("Infinite boxes always
 // visible"), and `SceneNode::_updateBounds` merges object boxes into the node's,
@@ -31,51 +39,86 @@
 //     orientation=away   (all 20 BEHIND)    avtank00 high-pssm  20.6 submits/f
 //
 // Identical. Every craft in the mission is submitted to the main camera every
-// frame no matter where the camera points. This is also why an earlier profiling
-// pass found vehicle submissions unchanged at 50 m, 250 m and 1000 m.
+// frame no matter where the camera points, and every craft is submitted to every
+// PSSM cascade as well.
 //
-// What this does
-// --------------
-// It does not modify any Ogre state. `Mesh::_setBounds` is observed, not
-// altered: the last *finite* box each mesh was given -- which is the box the
-// mesh serializer set from the asset -- is remembered in a fixed-size table.
-// When an entity would otherwise be untestable because its world box is
-// infinite, that remembered local box is inflated by a safety margin,
-// transformed by the entity's own node transform, and tested against the
-// camera's frustum with Ogre's own `Camera::isVisible`.
+// Two repairs live in this file
+// -----------------------------
+// 1. RESTORED BOUNDS (`OPENSHIM_RESTORE_CRAFT_BOUNDS=1`) -- the current
+//    architecture. `Mesh::_setBounds` substitutes a finite box, derived from the
+//    serializer's own M_MESH_BOUNDS box, on exactly the meshes that were handed
+//    an infinite one. Ogre's native visibility traversal then works normally.
+//    Nothing else is patched: with this path alone, `processVisibleObject` and
+//    `Entity::_updateRenderQueue` keep their stock instruction stream.
 //
-// Restoring the finite bounds globally was considered and rejected: Redux may
-// depend on infinite craft bounds for scene queries such as targeting or
-// picking, and this optimization must not change gameplay behaviour to buy
-// frame time. Keeping the recovered box private to the cull decision means the
-// only observable delta is which renderables reach the render queue.
+// 2. PRIVATE FRUSTUM CULL (on by default, `OPENSHIM_DISABLE_ENTITY_FRUSTUM_
+//    CULLING=1` to disable) -- the first repair experiment, retained as a
+//    fallback. It modifies no Ogre state: the last finite box each mesh was
+//    given is remembered, inflated by a margin, transformed by the entity's node
+//    transform, and tested with Ogre's own `Camera::isVisible`; an entity that
+//    fails is suppressed by making `Entity::_updateRenderQueue` a no-op for that
+//    one object.
 //
-// Scope, deliberately narrow for a first implementation:
+// Enabling restoration stands the private cull down, so the two never overlap
+// unless `OPENSHIM_FRUSTUM_CULL_WITH_RESTORE=1` asks for both.
+//
+// Why restoration is preferred, measured on identical workloads:
+//
+//   * the two reach *identical* main-view decisions -- 21.0 craft submitted by
+//     both with everything on screen, 1.0 by both with the camera turned away;
+//   * only restoration fixes shadow traversal, which the private cull cannot
+//     touch without reimplementing PSSM cascade fitting. Per-cascade craft
+//     submissions at idle 20 go from 63/63/63 to 3/60/14.3, using Ogre's own
+//     cascade volumes and intersection test;
+//   * total submissions fall 23-73% against stock depending on workload, versus
+//     0-26% for the private cull.
+//
+// An earlier version of this file justified *not* restoring the bounds on the
+// grounds that Redux might depend on infinite craft bounds for scene queries
+// such as targeting or picking. That justification was wrong and is withdrawn.
+// Ogre is the renderer; the legacy Battlezone engine owns physics, collision,
+// AI, targeting and weapons. The executable imports no Ogre scene-query factory,
+// and -- since SceneManager's factories are virtual and could have been reached
+// through the vtable without an import -- the five factory slots were located in
+// OgreMain's SceneManager vtable (0x354 createAABBQuery, 0x358 createSphereQuery,
+// 0x35C createPlaneBoundedVolumeQuery, 0x360 createRayQuery, 0x364
+// createIntersectionQuery) and every one of the executable's 171,727 decoded
+// instructions was checked: no instruction anywhere references any of those five
+// displacements on any register. No Ogre scene query is ever created, so an Ogre
+// bounding box cannot feed a gameplay decision.
+//
+// Deliberate scope limits on the private cull, unchanged:
 //
 //   * Main-camera traversals only (`onlyShadowCasters == false`). Shadow passes
 //     are counted but never culled, so every cascade, every caster and every
-//     cascade transition is bit-identical to stock. The shadow half is left for
-//     separate work with its own validation.
+//     cascade transition is bit-identical to stock.
 //   * Entities only. Particle systems, billboard sets and manual objects keep
 //     their exact stock submission behaviour.
-//   * Suppression is done by making `Entity::_updateRenderQueue` a no-op for the
-//     one object being processed, while the original `processVisibleObject` runs
-//     in full. The `visibleBounds->merge()` bookkeeping that feeds PSSM cascade
-//     fitting is therefore bit-identical by construction rather than replicated.
+//   * Suppression runs while the original `processVisibleObject` runs in full,
+//     so the `visibleBounds->merge()` bookkeeping that feeds PSSM cascade
+//     fitting is bit-identical by construction rather than replicated.
 //
 // Skipping `Entity::_updateRenderQueue` also skips the `updateAnimation()` call
 // at its tail. That is correct rather than incidental: an entity animates iff it
 // is submitted to at least one camera, and shadow passes never cull here, so any
 // entity that casts a shadow still animates.
 //
-// Fail-safe throughout: unresolved exports or a byte-guard mismatch stand the
-// feature down permanently; a null box, an infinite box with no remembered
-// asset bounds, a missing node transform, or a fault anywhere in the decision
-// all submit the object.
+// Fail-safe throughout: unresolved exports or a byte-guard mismatch stand both
+// features down permanently; a null box, an infinite box with no remembered
+// asset bounds, a missing node transform, a mesh with no recorded asset box, or
+// a fault anywhere in either decision all fall through to exactly what Redux
+// asked for.
 //
-// Opt-outs:
-//   OPENSHIM_DISABLE_ENTITY_FRUSTUM_CULLING=1   disable entirely
-//   OPENSHIM_FRUSTUM_CULL_MARGIN=<float>        half-extent safety margin
+// Controls:
+//   OPENSHIM_RESTORE_CRAFT_BOUNDS=1             restore finite bounds
+//   OPENSHIM_RESTORE_CRAFT_BOUNDS_SCALE=<k>     centre inflation, default 2.0
+//   OPENSHIM_RESTORE_CRAFT_BOUNDS_SCOPE=all     do not exempt *_c/*_fp/*_cockpit
+//   OPENSHIM_RESTORE_CRAFT_BOUNDS_MODE=observe  decide and trace, change nothing
+//   OPENSHIM_RESTORE_CRAFT_BOUNDS_MODE=infinite substitute infinite writes only
+//   OPENSHIM_BOUNDS_TRACE=1                     bounded per-mesh call-site trace
+//   OPENSHIM_FRUSTUM_CULL_WITH_RESTORE=1        run both mechanisms
+//   OPENSHIM_DISABLE_ENTITY_FRUSTUM_CULLING=1   disable the private cull
+//   OPENSHIM_FRUSTUM_CULL_MARGIN=<float>        private-cull half-extent margin
 //                                               (default 0.25 = 25%)
 //   OPENSHIM_FRUSTUM_CULL_CENSUS=1              per-type bounds census at 1 Hz
 
@@ -757,7 +800,13 @@ static FrustumCullOutcome DecideFrustumCull(
 // places in `.text`:
 //
 //   0x0067E76F  <- the only infinite one; see below
-//   0x0067F860  craft setup: bounds = Entity::getBoundingBox() scaled by 2
+//   0x0067F860  bounds = Entity::getBoundingBox() scaled by 2 -- but the whole
+//               block is behind an inlined strcmp against "abspow"
+//               (0x00878A48) at 0x0067F6EE..0x0067F776, so it runs for that one
+//               object and for no craft. An earlier revision of this comment
+//               claimed it scaled every craft on every spawn and compounded;
+//               that was inferred from the block's contents without reading its
+//               guard, and a 20-walker observe run recorded zero such writes.
 //   0x0077945F  procedural geometry, finite AABB(min,max) ctor
 //   0x00779B05  procedural geometry, finite AABB(min,max) ctor
 //
@@ -803,12 +852,11 @@ static FrustumCullOutcome DecideFrustumCull(
 //     `*_fp` and `*_cockpit` meshes infinite keeps the intended behaviour for
 //     models that really are only ever drawn from inside the cockpit, and
 //     repairs exactly the shared craft meshes.
-//  2. The policy must be derived from the *asset* box. 0x0067F860 re-reads
-//     `Entity::getBoundingBox()` and writes it back scaled by 2 on every spawn,
-//     so any mesh that is not subsequently made infinite doubles once per
-//     spawned craft. Deriving from the last finite value would inherit that
-//     compounding; deriving from the serializer's box does not, and the
-//     optional pin below stops the compounding outright.
+//  2. The policy must be derived from the *asset* box rather than from whatever
+//     finite box the mesh happens to be holding when the infinite write lands.
+//     For stock craft those are the same value, but the serializer's box is the
+//     only one with a defined provenance, so using it keeps the repair
+//     idempotent regardless of what else rewrote the bounds first.
 
 static bool MeshIsFirstPersonOnly(const void* mesh)
 {
@@ -986,21 +1034,26 @@ static bool DecideRestoredBounds(
         return false;
     }
 
-    if (extent != 2u && !entry->sawInfinite)
+    if (extent != 2u && !entry->sawInfinite && !g_RestoreCraftBoundsObserveOnly)
     {
         // This mesh has never been given an infinite box, so there is nothing
-        // here to repair and no reason to touch its bounds.
+        // here to repair and no reason to touch its bounds. Observe mode is
+        // exempt because it changes nothing and this gate would otherwise hide
+        // any post-load rewrite on exactly the meshes worth measuring: craft
+        // that own a dedicated cockpit model never go infinite, so their world
+        // mesh is the one nothing else would ever report on.
         return false;
     }
 
     float policy[6];
     for (int axis = 0; axis < 3; ++axis)
     {
-        // Inflate about the box centre, not about the origin. Redux's own
-        // AxisAlignedBox::scale() at 0x0067F860 scales about the origin, which
-        // is *not* containment-preserving: apammo.mesh has assetMin.y = 0.29,
-        // so scaling by 2 lifts the floor of the box to 0.58 and leaves real
-        // geometry outside it. Centre inflation always contains the asset box.
+        // Inflate about the box centre, not about the origin. Ogre's
+        // AxisAlignedBox::scale(), which 0x0067F860 uses, scales about the
+        // origin and is *not* containment-preserving: apammo.mesh has
+        // assetMin.y = 0.29, so scaling by 2 lifts the floor of the box to 0.58
+        // and leaves real geometry outside it. Centre inflation always contains
+        // the asset box.
         const float centre =
             0.5f * (entry->assetMinimum[axis] + entry->assetMaximum[axis]);
         const float half =
@@ -1025,10 +1078,12 @@ static bool DecideRestoredBounds(
     }
 
     // A finite write to a mesh the defect *did* touch, landing outside the
-    // policy box: 0x0067F860 re-reads Entity::getBoundingBox() and writes it
-    // back scaled by 2 on every spawn. On these meshes the infinite write that
-    // follows immediately overwrites it, so pinning is a safety net rather than
-    // a correction, but it keeps the mesh at a single deterministic box.
+    // policy box. No stock path is known to produce one -- the only scale-by-2
+    // in the executable is guarded on the name "abspow", which never goes
+    // infinite -- so in practice this clamp does not fire; a 20-walker observe
+    // run recorded zero. It is kept because it costs nothing and it pins the
+    // mesh to one deterministic box if a mod or a future build does rewrite
+    // bounds after the infinite write.
     // Only oversized writes are traced; ordinary load-time writes would swamp
     // the budget.
     bool oversized = false;
