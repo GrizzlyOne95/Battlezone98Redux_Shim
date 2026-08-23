@@ -87,6 +87,21 @@ static bool g_EntityFrustumCullStoodDown = false;
 static bool g_FrustumCullCensusEnabled = false;
 static float g_FrustumCullMargin = 0.25f;
 
+// ------------------------------------------------ restored craft bounds -----
+//
+// Independent, opt-in experiment: instead of emulating culling privately,
+// repair the renderer state that made culling impossible. See the block comment
+// above MeshSetBoundsHook for the located call site and the reasoning.
+static bool g_RestoreCraftBoundsEnabled = false;
+static float g_RestoreCraftBoundsScale = 2.0f;
+static bool g_RestoreCraftBoundsAllMeshes = false;
+static bool g_RestoreCraftBoundsPin = true;
+// Observe-only: run the whole decision and trace it, but hand Ogre exactly what
+// Redux asked for. This is how the stock call site was characterised without
+// perturbing the behaviour being characterised.
+static bool g_RestoreCraftBoundsObserveOnly = false;
+static bool g_BoundsTraceEnabled = false;
+
 // Set only while the original processVisibleObject runs for an object this pass
 // decided to cull. Thread-local because Ogre's render traversal is not
 // contractually single-threaded even though Redux drives it from one thread.
@@ -102,6 +117,11 @@ using FnOgreMovableGetFullTransform = const void*(__thiscall*)(const void*);
 using FnOgreEntityGetMeshPtr = const void*(__thiscall*)(const void*);
 using FnOgreMeshGetBoundsQuery = const void*(__thiscall*)(const void*);
 using FnOgreResourceGetName = const std::string&(__thiscall*)(const void*);
+using FnOgreAabbCtor6 =
+    void*(__thiscall*)(void*, float, float, float, float, float, float);
+using FnOgreMovableGetParentSceneNode = const void*(__thiscall*)(const void*);
+using FnOgreNodeGetParent = const void*(__thiscall*)(const void*);
+using FnOgreSceneNodeGetWorldAabb = const void*(__thiscall*)(const void*);
 
 static InlineDetour32 g_ProcessVisibleObjectDetour;
 static InlineDetour32 g_EntityUpdateRenderQueueDetour;
@@ -115,6 +135,10 @@ static FnOgreMovableGetFullTransform g_OgreFn_MovableGetFullTransform = nullptr;
 static FnOgreEntityGetMeshPtr g_OgreFn_EntityGetMeshPtr = nullptr;
 static FnOgreMeshGetBoundsQuery g_OgreFn_MeshGetBounds = nullptr;
 static FnOgreResourceGetName g_OgreFn_ResourceGetName = nullptr;
+static FnOgreAabbCtor6 g_OgreFn_AabbCtor6 = nullptr;
+static FnOgreMovableGetParentSceneNode g_OgreFn_MovableGetParentSceneNode = nullptr;
+static FnOgreNodeGetParent g_OgreFn_NodeGetParent = nullptr;
+static FnOgreSceneNodeGetWorldAabb g_OgreFn_SceneNodeGetWorldAabb = nullptr;
 
 // Bounded 1 Hz telemetry.
 static uint64_t g_FrustumCullTested = 0;
@@ -131,6 +155,22 @@ static uint64_t g_FrustumCullUnrecoverableAtLastLog = 0;
 static uint64_t g_FrustumCullShadowSkippedAtLastLog = 0;
 static DWORD g_FrustumCullLogTick = 0;
 
+// Restored-bounds telemetry. Bounded: the trace stops after a fixed number of
+// lines and the aggregate is folded into the existing 1 Hz report.
+static uint64_t g_RestoreBoundsSubstituted = 0;
+static uint64_t g_RestoreBoundsPinned = 0;
+static uint64_t g_RestoreBoundsExcluded = 0;
+static uint64_t g_RestoreBoundsUnknownAsset = 0;
+static uint64_t g_RestoreBoundsSubstitutedAtLastLog = 0;
+static uint64_t g_RestoreBoundsPinnedAtLastLog = 0;
+static uint32_t g_BoundsTraceFiniteEmitted = 0;
+static uint32_t g_BoundsTraceInfiniteEmitted = 0;
+// Separate budgets so a flood of ordinary finite writes cannot starve the
+// infinite ones, which are the whole point of the instrument.
+constexpr uint32_t kBoundsTraceFiniteLimit = 64;
+constexpr uint32_t kBoundsTraceInfiniteLimit = 64;
+constexpr uint8_t kBoundsTracePerMeshLimit = 3;
+
 // --------------------------------------------- remembered asset bounds ------
 //
 // Fixed capacity, no allocation on any hot path, no unbounded growth. A mesh
@@ -140,8 +180,31 @@ static DWORD g_FrustumCullLogTick = 0;
 struct RememberedMeshBounds
 {
     const void* mesh = nullptr;
+    // The most recent finite box the mesh was given. Redux rewrites this on
+    // every spawn (see the asset box below), so it is a working value and not a
+    // statement about the asset.
     float minimum[3] = {};
     float maximum[3] = {};
+    // The *first* finite box the mesh was given, which is the one
+    // MeshSerializerImpl::readBoundsInfo set straight out of M_MESH_BOUNDS.
+    // Every restored-bounds policy is derived from this and never from the
+    // working value, because Redux's own per-spawn scale(2,2,2) compounds.
+    float assetMinimum[3] = {};
+    float assetMaximum[3] = {};
+    bool haveAsset = false;
+    // Cached "is this mesh only ever a first-person view model" verdict, so the
+    // name test runs once per mesh rather than once per _setBounds call.
+    bool restoreClassified = false;
+    bool restoreExcluded = false;
+    // Per-mesh trace budget. Without it a 16x16 terrain grid spends the whole
+    // global budget before a single craft has spawned.
+    uint8_t tracedFinite = 0;
+    uint8_t tracedInfinite = 0;
+    // Set the first time this mesh is handed an EXTENT_INFINITE box. Nothing is
+    // repaired until that has happened, so meshes the defect never touched --
+    // terrain clusters, buildings, ordnance, effects -- keep bit-identical
+    // bounds and cannot be culled differently than they are today.
+    bool sawInfinite = false;
 };
 
 // Open-addressed, power-of-two, linear probe. A linear scan was measured to
@@ -179,6 +242,11 @@ static const RememberedMeshBounds* FindRememberedMeshBounds(const void* mesh)
     return nullptr;
 }
 
+static RememberedMeshBounds* FindRememberedMeshBoundsMutable(const void* mesh)
+{
+    return const_cast<RememberedMeshBounds*>(FindRememberedMeshBounds(mesh));
+}
+
 static void RememberMeshBounds(const void* mesh, const float* box)
 {
     if (!mesh)
@@ -202,6 +270,12 @@ static void RememberMeshBounds(const void* mesh, const float* box)
         {
             std::memcpy(candidate.minimum, box, sizeof(float) * 3);
             std::memcpy(candidate.maximum, box + 3, sizeof(float) * 3);
+            if (!candidate.haveAsset)
+            {
+                std::memcpy(candidate.assetMinimum, box, sizeof(float) * 3);
+                std::memcpy(candidate.assetMaximum, box + 3, sizeof(float) * 3);
+                candidate.haveAsset = true;
+            }
             return;
         }
         slot = (slot + 1) & (kRememberedMeshBoundsCapacity - 1);
@@ -331,6 +405,12 @@ struct FrustumCullCensusSlot
     uint64_t seen = 0;
     uint64_t culled = 0;
     uint64_t recovered = 0;
+    // Bitmask of AxisAlignedBox::Extent values observed on the object's own
+    // SceneNode and on that node's parent: bit 0 null, bit 1 finite,
+    // bit 2 infinite. This is what answers whether one pathological child can
+    // still drag an ancestor's world box to infinite.
+    uint8_t nodeExtentMask = 0;
+    uint8_t parentNodeExtentMask = 0;
 };
 
 static FrustumCullCensusSlot g_FrustumCullCensus[24];
@@ -444,6 +524,65 @@ static void RecordFrustumCullCensus(
         ++slot->culled;
     if (recovered)
         ++slot->recovered;
+
+    // Node-chain sampling. Opt-in with the census, so the extra pair of virtual
+    // calls per visit never runs in a normal session.
+    if (g_OgreFn_MovableGetParentSceneNode && g_OgreFn_SceneNodeGetWorldAabb)
+    {
+        __try
+        {
+            const void* node = g_OgreFn_MovableGetParentSceneNode(object);
+            if (node)
+            {
+                const auto* box =
+                    static_cast<const float*>(g_OgreFn_SceneNodeGetWorldAabb(node));
+                if (box)
+                {
+                    uint32_t extent = 0;
+                    std::memcpy(&extent, box + 6, sizeof(extent));
+                    if (extent < 3u)
+                        slot->nodeExtentMask |= static_cast<uint8_t>(1u << extent);
+                }
+                if (g_OgreFn_NodeGetParent)
+                {
+                    const void* parent = g_OgreFn_NodeGetParent(node);
+                    if (parent)
+                    {
+                        const auto* parentBox = static_cast<const float*>(
+                            g_OgreFn_SceneNodeGetWorldAabb(parent));
+                        if (parentBox)
+                        {
+                            uint32_t extent = 0;
+                            std::memcpy(&extent, parentBox + 6, sizeof(extent));
+                            if (extent < 3u)
+                            {
+                                slot->parentNodeExtentMask |=
+                                    static_cast<uint8_t>(1u << extent);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+    }
+}
+
+static const char* DescribeExtentMask(uint8_t mask)
+{
+    switch (mask & 0x7u)
+    {
+    case 0: return "-";
+    case 1: return "null";
+    case 2: return "finite";
+    case 3: return "null|finite";
+    case 4: return "INFINITE";
+    case 5: return "null|INFINITE";
+    case 6: return "finite|INFINITE";
+    default: return "null|finite|INFINITE";
+    }
 }
 
 static void DumpFrustumCullCensus()
@@ -455,17 +594,21 @@ static void DumpFrustumCullCensus()
             LogLevel::Info,
             "frustumcull",
             "[FRUSTUMCULL][census] type=%s extent=%d meshExtent=%d sampleMesh=%s "
-            "seen=%llu recovered=%llu culled=%llu",
+            "nodeExtents=%s parentNodeExtents=%s seen=%llu recovered=%llu culled=%llu",
             slot.typeName[0] ? slot.typeName : "<unknown>",
             slot.extentKind,
             slot.sampleMeshExtent,
             slot.sampleMesh[0] ? slot.sampleMesh : "<none>",
+            DescribeExtentMask(slot.nodeExtentMask),
+            DescribeExtentMask(slot.parentNodeExtentMask),
             static_cast<unsigned long long>(slot.seen),
             static_cast<unsigned long long>(slot.recovered),
             static_cast<unsigned long long>(slot.culled));
         slot.seen = 0;
         slot.culled = 0;
         slot.recovered = 0;
+        slot.nodeExtentMask = 0;
+        slot.parentNodeExtentMask = 0;
     }
     if (g_FrustumCullCensusDropped)
     {
@@ -607,12 +750,371 @@ static FrustumCullOutcome DecideFrustumCull(
 
 // --------------------------------------------------------------- hooks ------
 
+// ------------------------------------------- restored-bounds decision -------
+//
+// Located call site (battlezone98redux.exe 2.2.301, GOG, ImageBase 0x00400000).
+// `Mesh::_setBounds` is imported once, at IAT 0x0086979C, and reached from four
+// places in `.text`:
+//
+//   0x0067E76F  <- the only infinite one; see below
+//   0x0067F860  craft setup: bounds = Entity::getBoundingBox() scaled by 2
+//   0x0077945F  procedural geometry, finite AABB(min,max) ctor
+//   0x00779B05  procedural geometry, finite AABB(min,max) ctor
+//
+// `??0AxisAlignedBox@Ogre@@QAE@W4Extent@01@@Z` -- the only way this binary can
+// name an extent kind directly -- is called exactly once, at 0x0067E744, with
+// `push 2` (EXTENT_INFINITE), and its result goes straight into the
+// `_setBounds` at 0x0067E76F. So there is one infinite-bounds assignment in the
+// whole executable, and it is unconditional within its function.
+//
+// That function, 0x0067E5A0, builds the *first-person view* entity:
+//
+//     sprintf(name, "%.*s.mesh", 26, requestedName)
+//     entity = sceneManager->createEntity(...)
+//     entity->setCastShadows(false)
+//     ... store entity/skeleton into the caller's view state ...
+//     mesh->_setBounds(AxisAlignedBox(EXTENT_INFINITE), true)
+//
+// `setCastShadows(false)` plus an unconditional never-cull box is a coherent
+// "always draw the cockpit I am sitting in" policy, and for a mesh used only as
+// a first-person model it is harmless.
+//
+// The defect is which mesh it lands on. Its single caller, 0x0067F480, picks the
+// first-person mesh name in three ways:
+//
+//   * a 15-entry table at 0x008ED2E8 -> 0x008ED308 mapping craft to a dedicated
+//     model: avartl->avartl_c, avturr->avturr_c, avwalk->avwalk_c, ...,
+//     aspilo->aspilo_fp, bsheav->bsheav_fp;
+//   * "<name>_cockpit" when that resource exists;
+//   * otherwise, at 0x0067FDE8, the craft's *own* mesh name -- taken when the
+//     skeleton carries a bone whose fourth character is '2' (the AGR2* group;
+//     avtank.skeleton has AGR21bga/agr21bda).
+//
+// `Ogre::Mesh` is a shared resource. On that third path the never-cull policy is
+// written onto the same Mesh every world instance of the craft renders from, so
+// an ordinary hovertank standing in the desert inherits a cockpit's
+// "always visible" flag. That is the whole of the missing-culling defect, and it
+// is renderer state only: Battlezone's own engine owns physics, collision, AI,
+// targeting and weapons, and never consults an Ogre bounding box for any of it.
+//
+// Two consequences drive the policy below.
+//
+//  1. The repair must be scoped by *mesh*, not by call site. Leaving `*_c`,
+//     `*_fp` and `*_cockpit` meshes infinite keeps the intended behaviour for
+//     models that really are only ever drawn from inside the cockpit, and
+//     repairs exactly the shared craft meshes.
+//  2. The policy must be derived from the *asset* box. 0x0067F860 re-reads
+//     `Entity::getBoundingBox()` and writes it back scaled by 2 on every spawn,
+//     so any mesh that is not subsequently made infinite doubles once per
+//     spawned craft. Deriving from the last finite value would inherit that
+//     compounding; deriving from the serializer's box does not, and the
+//     optional pin below stops the compounding outright.
+
+static bool MeshIsFirstPersonOnly(const void* mesh)
+{
+    if (!g_OgreFn_ResourceGetName)
+        return false;
+    char lowered[128] = {};
+    const std::string& name = g_OgreFn_ResourceGetName(mesh);
+    const size_t length = (std::min)(name.size(), sizeof(lowered) - 1);
+    for (size_t i = 0; i < length; ++i)
+        lowered[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(name[i])));
+    lowered[length] = 0;
+
+    // Compare on the stem so both "avwalk_c" and "avwalk_c.mesh" match.
+    size_t stem = length;
+    if (stem >= 5 && std::strcmp(lowered + stem - 5, ".mesh") == 0)
+        stem -= 5;
+
+    static const char* const kFirstPersonSuffixes[] = { "_c", "_fp", "_cockpit" };
+    for (const char* suffix : kFirstPersonSuffixes)
+    {
+        const size_t suffixLength = std::strlen(suffix);
+        if (stem >= suffixLength &&
+            std::strncmp(lowered + stem - suffixLength, suffix, suffixLength) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void CopyMeshNameForTrace(char* destination, size_t capacity, const void* mesh)
+{
+    destination[0] = 0;
+    if (!g_OgreFn_ResourceGetName)
+        return;
+    __try
+    {
+        const std::string& name = g_OgreFn_ResourceGetName(mesh);
+        const size_t length = (std::min)(name.size(), capacity - 1);
+        if (length)
+            std::memcpy(destination, name.c_str(), length);
+        destination[length] = 0;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        destination[0] = 0;
+    }
+}
+
+static float AssetBoxRadius(const RememberedMeshBounds& entry)
+{
+    const float dx = entry.assetMaximum[0] - entry.assetMinimum[0];
+    const float dy = entry.assetMaximum[1] - entry.assetMinimum[1];
+    const float dz = entry.assetMaximum[2] - entry.assetMinimum[2];
+    return 0.5f * std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+// Bounded: at most kBoundsTraceLimit lines for the whole process lifetime, so a
+// mission with hundreds of spawns cannot turn this into per-frame logging.
+static void TraceBoundsDecision(
+    const void* mesh,
+    const char* action,
+    uint32_t incomingExtent,
+    const float* incoming,
+    RememberedMeshBounds& entry,
+    const float* substitute,
+    const void* callSite)
+{
+    if (!g_BoundsTraceEnabled)
+        return;
+    const bool infinite = (incomingExtent == 2u);
+    uint8_t& perMesh = infinite ? entry.tracedInfinite : entry.tracedFinite;
+    uint32_t& emitted =
+        infinite ? g_BoundsTraceInfiniteEmitted : g_BoundsTraceFiniteEmitted;
+    const uint32_t limit =
+        infinite ? kBoundsTraceInfiniteLimit : kBoundsTraceFiniteLimit;
+    if (perMesh >= kBoundsTracePerMeshLimit || emitted >= limit)
+        return;
+    ++perMesh;
+    ++emitted;
+    const uint32_t sequence = emitted;
+
+    char meshName[96] = {};
+    CopyMeshNameForTrace(meshName, sizeof(meshName), mesh);
+
+    uintptr_t callOffset = 0;
+    char callModule[MAX_PATH] = "?";
+    HMODULE owner = nullptr;
+    if (GetModuleHandleExA(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            static_cast<LPCSTR>(callSite),
+            &owner) &&
+        owner)
+    {
+        char modulePath[MAX_PATH] = {};
+        if (GetModuleFileNameA(owner, modulePath, MAX_PATH))
+        {
+            const char* slash = std::strrchr(modulePath, '\\');
+            const char* leaf = slash ? slash + 1 : modulePath;
+            std::strncpy(callModule, leaf, sizeof(callModule) - 1);
+            callModule[sizeof(callModule) - 1] = 0;
+        }
+        callOffset =
+            reinterpret_cast<uintptr_t>(callSite) - reinterpret_cast<uintptr_t>(owner);
+    }
+
+    const bool incomingFinite = (incomingExtent == 1u);
+    const char* incomingKind =
+        incomingExtent == 0u ? "NULL" : (incomingFinite ? "FINITE" : "INFINITE");
+
+    LogShimA(
+        LogLevel::Info,
+        "frustumcull",
+        "[BOUNDSTRACE] #%u mesh=%s action=%s incoming=%s "
+        "incomingMin=(%.2f,%.2f,%.2f) incomingMax=(%.2f,%.2f,%.2f) "
+        "assetMin=(%.2f,%.2f,%.2f) assetMax=(%.2f,%.2f,%.2f) assetRadius=%.2f "
+        "newMin=(%.2f,%.2f,%.2f) newMax=(%.2f,%.2f,%.2f) callSite=%s+0x%IX tid=%lu",
+        sequence,
+        meshName[0] ? meshName : "<unnamed>",
+        action,
+        incomingKind,
+        incomingFinite ? incoming[0] : 0.0f,
+        incomingFinite ? incoming[1] : 0.0f,
+        incomingFinite ? incoming[2] : 0.0f,
+        incomingFinite ? incoming[3] : 0.0f,
+        incomingFinite ? incoming[4] : 0.0f,
+        incomingFinite ? incoming[5] : 0.0f,
+        entry.assetMinimum[0], entry.assetMinimum[1], entry.assetMinimum[2],
+        entry.assetMaximum[0], entry.assetMaximum[1], entry.assetMaximum[2],
+        AssetBoxRadius(entry),
+        substitute ? substitute[0] : 0.0f,
+        substitute ? substitute[1] : 0.0f,
+        substitute ? substitute[2] : 0.0f,
+        substitute ? substitute[3] : 0.0f,
+        substitute ? substitute[4] : 0.0f,
+        substitute ? substitute[5] : 0.0f,
+        callModule,
+        callOffset,
+        GetCurrentThreadId());
+}
+
+// Fills `out` with min[3],max[3] and returns true when this _setBounds call
+// should be replaced. Runs inside the caller's __try.
+static bool DecideRestoredBounds(
+    const void* mesh,
+    const float* box,
+    uint32_t extent,
+    float* out,
+    const void* callSite)
+{
+    if (extent != 1u && extent != 2u)
+        return false;
+
+    RememberedMeshBounds* entry = FindRememberedMeshBoundsMutable(mesh);
+    if (!entry || !entry->haveAsset)
+    {
+        // No serializer box on record, so there is nothing trustworthy to
+        // restore. Stock behaviour, including an infinite box, is preserved.
+        if (extent == 2u)
+            ++g_RestoreBoundsUnknownAsset;
+        return false;
+    }
+
+    if (!entry->restoreClassified)
+    {
+        entry->restoreClassified = true;
+        entry->restoreExcluded =
+            !g_RestoreCraftBoundsAllMeshes && MeshIsFirstPersonOnly(mesh);
+    }
+    if (entry->restoreExcluded)
+    {
+        if (extent == 2u)
+            ++g_RestoreBoundsExcluded;
+        return false;
+    }
+
+    if (extent != 2u && !entry->sawInfinite)
+    {
+        // This mesh has never been given an infinite box, so there is nothing
+        // here to repair and no reason to touch its bounds.
+        return false;
+    }
+
+    float policy[6];
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        // Inflate about the box centre, not about the origin. Redux's own
+        // AxisAlignedBox::scale() at 0x0067F860 scales about the origin, which
+        // is *not* containment-preserving: apammo.mesh has assetMin.y = 0.29,
+        // so scaling by 2 lifts the floor of the box to 0.58 and leaves real
+        // geometry outside it. Centre inflation always contains the asset box.
+        const float centre =
+            0.5f * (entry->assetMinimum[axis] + entry->assetMaximum[axis]);
+        const float half =
+            0.5f * (entry->assetMaximum[axis] - entry->assetMinimum[axis]) *
+            g_RestoreCraftBoundsScale;
+        policy[axis] = centre - half;
+        policy[3 + axis] = centre + half;
+    }
+
+    if (extent == 2u)
+    {
+        entry->sawInfinite = true;
+        std::memcpy(out, policy, sizeof(policy));
+        if (g_RestoreCraftBoundsObserveOnly)
+        {
+            TraceBoundsDecision(mesh, "observed", extent, box, *entry, out, callSite);
+            return false;
+        }
+        ++g_RestoreBoundsSubstituted;
+        TraceBoundsDecision(mesh, "restored", extent, box, *entry, out, callSite);
+        return true;
+    }
+
+    // A finite write to a mesh the defect *did* touch, landing outside the
+    // policy box: 0x0067F860 re-reads Entity::getBoundingBox() and writes it
+    // back scaled by 2 on every spawn. On these meshes the infinite write that
+    // follows immediately overwrites it, so pinning is a safety net rather than
+    // a correction, but it keeps the mesh at a single deterministic box.
+    // Only oversized writes are traced; ordinary load-time writes would swamp
+    // the budget.
+    bool oversized = false;
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        const float tolerance =
+            0.02f * std::fabs(policy[3 + axis] - policy[axis]) + 1.0e-3f;
+        if (box[axis] < policy[axis] - tolerance ||
+            box[3 + axis] > policy[3 + axis] + tolerance)
+        {
+            oversized = true;
+            break;
+        }
+    }
+    if (!oversized)
+        return false;
+
+    std::memcpy(out, policy, sizeof(policy));
+    if (g_RestoreCraftBoundsObserveOnly)
+    {
+        TraceBoundsDecision(mesh, "observed-oversized", extent, box, *entry, out, callSite);
+        return false;
+    }
+    if (!g_RestoreCraftBoundsPin)
+    {
+        TraceBoundsDecision(mesh, "left-oversized", extent, box, *entry, out, callSite);
+        return false;
+    }
+
+    ++g_RestoreBoundsPinned;
+    TraceBoundsDecision(mesh, "pinned", extent, box, *entry, out, callSite);
+    return true;
+}
+
+// Reported per event rather than on a timer. Bounds writes only happen when a
+// craft is created, so the rate is naturally low, and a 1 Hz aggregate loses
+// the tail: nothing calls _setBounds again after the last spawn, so the final
+// state would never be logged. The hard cap keeps a long mission with heavy
+// respawning bounded.
+static uint32_t g_RestoreBoundsReportsEmitted = 0;
+constexpr uint32_t kRestoreBoundsReportLimit = 256;
+
+static void ReportRestoreBoundsIfDue()
+{
+    if (!g_RestoreCraftBoundsEnabled)
+        return;
+    if (g_RestoreBoundsSubstituted == g_RestoreBoundsSubstitutedAtLastLog &&
+        g_RestoreBoundsPinned == g_RestoreBoundsPinnedAtLastLog)
+    {
+        return;
+    }
+    g_RestoreBoundsSubstitutedAtLastLog = g_RestoreBoundsSubstituted;
+    g_RestoreBoundsPinnedAtLastLog = g_RestoreBoundsPinned;
+    if (g_RestoreBoundsReportsEmitted >= kRestoreBoundsReportLimit)
+        return;
+    ++g_RestoreBoundsReportsEmitted;
+
+    LogShimA(
+        LogLevel::Info,
+        "frustumcull",
+        "[RESTOREBOUNDS] restored=%llu pinned=%llu firstPersonLeftInfinite=%llu "
+        "noAssetBox=%llu knownMeshes=%u scale=%.2f scope=%s mode=%s",
+        static_cast<unsigned long long>(g_RestoreBoundsSubstituted),
+        static_cast<unsigned long long>(g_RestoreBoundsPinned),
+        static_cast<unsigned long long>(g_RestoreBoundsExcluded),
+        static_cast<unsigned long long>(g_RestoreBoundsUnknownAsset),
+        g_RememberedMeshBoundsUsed,
+        g_RestoreCraftBoundsScale,
+        g_RestoreCraftBoundsAllMeshes ? "all" : "shared",
+        g_RestoreCraftBoundsObserveOnly
+            ? "observe"
+            : (g_RestoreCraftBoundsPin ? "pin" : "infinite"));
+}
+
 static void __fastcall MeshSetBoundsHook(
     void* mesh, void* /*unusedEdx*/, const void* bounds, bool pad)
 {
-    // Observe only. The asset's finite box is captured on its way past so the
-    // cull decision has something to fall back on once Redux replaces it with
-    // an infinite one; Ogre's own state is left exactly as Redux wants it.
+    const void* const callSite = _ReturnAddress();
+
+    // With OPENSHIM_RESTORE_CRAFT_BOUNDS off this is observe-only, exactly as
+    // the first repair experiment shipped it: the asset's finite box is
+    // captured on its way past so the private cull has something to fall back
+    // on, and Ogre's own state is left exactly as Redux wants it.
+    float substitute[6] = {};
+    bool haveSubstitute = false;
+
     if (bounds)
     {
         __try
@@ -622,13 +1124,43 @@ static void __fastcall MeshSetBoundsHook(
             std::memcpy(&extent, box + 6, sizeof(extent));
             if (extent == 1u)
                 RememberMeshBounds(mesh, box);
+            if (g_RestoreCraftBoundsEnabled)
+            {
+                haveSubstitute =
+                    DecideRestoredBounds(mesh, box, extent, substitute, callSite);
+            }
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
+            haveSubstitute = false;
         }
     }
+
+    if (haveSubstitute && g_OgreFn_AabbCtor6 && g_OgreFn_MeshSetBoundsOriginal)
+    {
+        // Build the replacement with Ogre's own constructor rather than by
+        // writing a hand-laid struct, so the object is correct for whatever
+        // AxisAlignedBox layout this OgreMain build actually uses.
+        __try
+        {
+            alignas(16) unsigned char storage[64] = {};
+            g_OgreFn_AabbCtor6(
+                storage,
+                substitute[0], substitute[1], substitute[2],
+                substitute[3], substitute[4], substitute[5]);
+            g_OgreFn_MeshSetBoundsOriginal(mesh, storage, pad);
+            ReportRestoreBoundsIfDue();
+            return;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            // Fall through and let the stock call happen.
+        }
+    }
+
     if (g_OgreFn_MeshSetBoundsOriginal)
         g_OgreFn_MeshSetBoundsOriginal(mesh, bounds, pad);
+    ReportRestoreBoundsIfDue();
 }
 
 static void __fastcall EntityUpdateRenderQueueHook(
@@ -763,7 +1295,9 @@ static void __fastcall ProcessVisibleObjectHook(
 
 static void InstallEntityFrustumCullingIfEnabled()
 {
-    if (g_EntityFrustumCullInstalled || !g_EntityFrustumCullEnabled)
+    if (g_EntityFrustumCullInstalled)
+        return;
+    if (!g_EntityFrustumCullEnabled && !g_RestoreCraftBoundsEnabled)
         return;
     if (!GetModuleHandleA("OgreMain.dll"))
         return;
@@ -774,6 +1308,28 @@ static void InstallEntityFrustumCullingIfEnabled()
         const double parsed = std::atof(marginText);
         if (parsed >= 0.0 && parsed <= 4.0)
             g_FrustumCullMargin = static_cast<float>(parsed);
+    }
+    if (const char* scaleText = std::getenv("OPENSHIM_RESTORE_CRAFT_BOUNDS_SCALE"))
+    {
+        // 1.0 is the asset's own box; 2.0 reproduces Redux's own scale(2,2,2).
+        const double parsed = std::atof(scaleText);
+        if (parsed >= 1.0 && parsed <= 8.0)
+            g_RestoreCraftBoundsScale = static_cast<float>(parsed);
+    }
+    if (const char* scopeText = std::getenv("OPENSHIM_RESTORE_CRAFT_BOUNDS_SCOPE"))
+    {
+        // "shared" (default) leaves dedicated first-person models infinite;
+        // "all" repairs every mesh whose serializer box was observed.
+        g_RestoreCraftBoundsAllMeshes = (std::strcmp(scopeText, "all") == 0);
+    }
+    if (const char* modeText = std::getenv("OPENSHIM_RESTORE_CRAFT_BOUNDS_MODE"))
+    {
+        // "pin" (default) also clamps Redux's per-spawn doubling; "infinite"
+        // touches nothing but the EXTENT_INFINITE write itself; "observe"
+        // changes nothing at all and only traces.
+        g_RestoreCraftBoundsObserveOnly = (std::strcmp(modeText, "observe") == 0);
+        g_RestoreCraftBoundsPin =
+            (std::strcmp(modeText, "infinite") != 0) && !g_RestoreCraftBoundsObserveOnly;
     }
 
     void* const processVisibleObjectBody = ResolveOgreExportBody(
@@ -798,11 +1354,41 @@ static void InstallEntityFrustumCullingIfEnabled()
     g_OgreFn_ResourceGetName = reinterpret_cast<FnOgreResourceGetName>(
         ResolveOgreExportBody(
             "?getName@Resource@Ogre@@UBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ"));
+    g_OgreFn_AabbCtor6 = reinterpret_cast<FnOgreAabbCtor6>(
+        ResolveOgreExportBody("??0AxisAlignedBox@Ogre@@QAE@MMMMMM@Z"));
+    g_OgreFn_MovableGetParentSceneNode =
+        reinterpret_cast<FnOgreMovableGetParentSceneNode>(ResolveOgreExportBody(
+            "?getParentSceneNode@MovableObject@Ogre@@UBEPAVSceneNode@2@XZ"));
+    g_OgreFn_NodeGetParent = reinterpret_cast<FnOgreNodeGetParent>(
+        ResolveOgreExportBody("?getParent@Node@Ogre@@UBEPAV12@XZ"));
+    g_OgreFn_SceneNodeGetWorldAabb = reinterpret_cast<FnOgreSceneNodeGetWorldAabb>(
+        ResolveOgreExportBody("?_getWorldAABB@SceneNode@Ogre@@UBEABVAxisAlignedBox@2@XZ"));
 
-    if (!processVisibleObjectBody || !entityUpdateRenderQueueBody ||
-        !meshSetBoundsBody || !g_OgreFn_CameraIsVisibleBox ||
-        !g_OgreFn_MovableGetWorldBoundingBox || !g_OgreFn_MovableGetFullTransform ||
-        !g_OgreFn_EntityGetMeshPtr)
+    const bool cullExportsReady =
+        processVisibleObjectBody && entityUpdateRenderQueueBody &&
+        g_OgreFn_CameraIsVisibleBox && g_OgreFn_MovableGetWorldBoundingBox &&
+        g_OgreFn_MovableGetFullTransform && g_OgreFn_EntityGetMeshPtr;
+    const bool restoreExportsReady =
+        meshSetBoundsBody && g_OgreFn_AabbCtor6 && g_OgreFn_ResourceGetName;
+
+    if (g_RestoreCraftBoundsEnabled && !restoreExportsReady)
+    {
+        g_RestoreCraftBoundsEnabled = false;
+        LogShimA(
+            LogLevel::Warn,
+            "frustumcull",
+            "[RESTOREBOUNDS] required Ogre exports unavailable (setBounds=%s "
+            "aabbCtor=%s resourceName=%s); bounds restoration stood down",
+            meshSetBoundsBody ? "yes" : "no",
+            g_OgreFn_AabbCtor6 ? "yes" : "no",
+            g_OgreFn_ResourceGetName ? "yes" : "no");
+    }
+    if (!g_EntityFrustumCullEnabled && !g_RestoreCraftBoundsEnabled)
+    {
+        g_EntityFrustumCullStoodDown = true;
+        return;
+    }
+    if (!meshSetBoundsBody || (g_EntityFrustumCullEnabled && !cullExportsReady))
     {
         g_EntityFrustumCullStoodDown = true;
         LogShimA(
@@ -850,7 +1436,10 @@ static void InstallEntityFrustumCullingIfEnabled()
         const uint8_t* expected;
         size_t expectedLength;
     };
-    const DetourRequest requests[] =
+    // Mesh::_setBounds is needed by both features. The other two exist only
+    // to suppress submissions, so with restoration alone they are not patched
+    // and the render traversal keeps its stock instruction stream.
+    const DetourRequest allRequests[] =
     {
         { "Mesh::_setBounds", &g_MeshSetBoundsDetour, meshSetBoundsBody,
           reinterpret_cast<void*>(MeshSetBoundsHook),
@@ -864,9 +1453,11 @@ static void InstallEntityFrustumCullingIfEnabled()
           reinterpret_cast<void*>(ProcessVisibleObjectHook),
           kExpectedProcessVisibleObject, sizeof(kExpectedProcessVisibleObject) },
     };
+    const size_t requestCount = g_EntityFrustumCullEnabled ? 3u : 1u;
 
-    for (const DetourRequest& request : requests)
+    for (size_t index = 0; index < requestCount; ++index)
     {
+        const DetourRequest& request = allRequests[index];
         if (InstallInlineDetour32(
                 *request.detour,
                 reinterpret_cast<uintptr_t>(request.body),
@@ -881,6 +1472,7 @@ static void InstallEntityFrustumCullingIfEnabled()
         // processVisibleObject hook nothing ever sets the suppression flag, and
         // remembering asset bounds has no effect on its own.
         g_EntityFrustumCullStoodDown = true;
+        g_RestoreCraftBoundsEnabled = false;
         LogShimA(
             LogLevel::Warn,
             "frustumcull",
@@ -892,21 +1484,33 @@ static void InstallEntityFrustumCullingIfEnabled()
 
     g_OgreFn_MeshSetBoundsOriginal = reinterpret_cast<FnOgreMeshSetBounds>(
         g_MeshSetBoundsDetour.trampoline);
-    g_OgreFn_EntityUpdateRenderQueueOriginal =
-        reinterpret_cast<FnOgreEntityUpdateRenderQueueBody>(
-            g_EntityUpdateRenderQueueDetour.trampoline);
-    g_OgreFn_ProcessVisibleObjectOriginal =
-        reinterpret_cast<FnOgreProcessVisibleObject>(
-            g_ProcessVisibleObjectDetour.trampoline);
+    if (g_EntityFrustumCullEnabled)
+    {
+        g_OgreFn_EntityUpdateRenderQueueOriginal =
+            reinterpret_cast<FnOgreEntityUpdateRenderQueueBody>(
+                g_EntityUpdateRenderQueueDetour.trampoline);
+        g_OgreFn_ProcessVisibleObjectOriginal =
+            reinterpret_cast<FnOgreProcessVisibleObject>(
+                g_ProcessVisibleObjectDetour.trampoline);
+    }
 
     LogShimA(
         LogLevel::Info,
         "frustumcull",
-        "[FRUSTUMCULL] main-view Entity frustum culling installed margin=%.2f "
+        "[FRUSTUMCULL] installed privateCull=%s restoreBounds=%s margin=%.2f "
+        "restoreScale=%.2f restoreScope=%s restoreMode=%s trace=%s "
         "processVisibleObject=0x%p entityUpdateRenderQueue=0x%p meshSetBounds=0x%p "
         "optOut=OPENSHIM_DISABLE_ENTITY_FRUSTUM_CULLING",
+        g_EntityFrustumCullEnabled ? "on" : "off",
+        g_RestoreCraftBoundsEnabled ? "on" : "off",
         g_FrustumCullMargin,
-        processVisibleObjectBody,
-        entityUpdateRenderQueueBody,
+        g_RestoreCraftBoundsScale,
+        g_RestoreCraftBoundsAllMeshes ? "all" : "shared",
+        g_RestoreCraftBoundsObserveOnly
+            ? "observe"
+            : (g_RestoreCraftBoundsPin ? "pin" : "infinite"),
+        g_BoundsTraceEnabled ? "on" : "off",
+        g_EntityFrustumCullEnabled ? processVisibleObjectBody : nullptr,
+        g_EntityFrustumCullEnabled ? entityUpdateRenderQueueBody : nullptr,
         meshSetBoundsBody);
 }

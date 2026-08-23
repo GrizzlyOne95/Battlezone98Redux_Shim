@@ -1,3 +1,22 @@
+> **Status: first repair experiment, superseded but retained.**
+>
+> This document records the pass that *found* the missing-culling defect and the
+> private frustum test built to work around it. Its measurements stand and are
+> not restated elsewhere. Two of its conclusions were later overturned:
+>
+> * its stated reason for not restoring finite bounds -- that Redux might depend
+>   on infinite craft bounds for targeting or picking -- is wrong. The executable
+>   creates no Ogre scene query at all; Ogre is the renderer and the legacy
+>   Battlezone engine owns physics, collision, AI, targeting and weapons.
+> * the `Mesh::_setBounds(infinite)` call site it could not locate was located.
+>   It is the first-person view entity builder writing an "always visible" policy
+>   onto a shared craft mesh.
+>
+> The shipped architecture is now the restored-bounds repair in
+> `craft_bounds_architecture_20260822.md`, which reaches identical main-view
+> decisions and additionally fixes shadow-cascade traversal. The private cull in
+> `ogre_entity_frustum_cull.inl` is retained as an opt-in fallback.
+
 # Craft frustum culling: a missing-culling defect and its repair (2026-08-22)
 
 Starting commit: `8cf4e2ee` (`main`, immediately after PR #46 merged).
