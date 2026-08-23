@@ -271,6 +271,45 @@ Behaviour is otherwise unchanged: the other nineteen pointers already resolved
 on the first call, and `api.getCastShadows` is read at exactly one site — a
 diagnostic trace line gated behind the headlight light-trace flag.
 
+### 4.2 Preventing a recurrence, not just fixing the instance
+
+Repairing the call site leaves the shape that produced it intact. A survey found
+the retry shape (`if (!field) field = ResolveOgreProc<T>(...)`) at exactly 20
+sites, all inside `GetHeadlightOgreApi`, so no other call site currently has the
+bug — but the next one written would.
+
+Two changes push the guarantee down to where it cannot drift:
+
+**The resolver caches failure.** `ResolveOgreProcRaw` memoises both outcomes, so
+a name that does not resolve is looked up once for the lifetime of the process
+no matter how the caller is written, and logs one warning naming it. A miss is
+only cached once `OgreMain.dll` is actually loaded — a lookup made before the
+module exists is an answer about timing, not about the name, and must not be
+recorded as one.
+
+**A startup sweep runs before any frame.** `VerifyExpectedOgreExportsIfPossible`
+resolves thirteen hot-path exports plus the twenty light entry points as soon as
+OgreMain is present, from the existing deferred-hook retry pass. A bad
+decoration is now one clear line in the log at startup rather than a runtime tax
+discovered by a profiler. Verified live:
+
+```
+[HEADLIGHT] Ogre entry points resolved once: 20 of 20
+[OGRE-EXPORTS] Startup verification: 13 of 13 hot-path exports resolved
+```
+
+Each appears exactly once per process, on the patch thread, with no warnings.
+
+The sweep's list is deliberately short and can drift from the full set of names
+the shim uses; when it does, the consequence is only that those names are
+reported later by the resolver rather than at startup. The resolver's warning is
+the drift-proof half.
+
+Cost, measured the same way as the repair itself (DX11 firing, interleaved,
+profiler and sampler off): **5.303 → 5.267 ms, −0.7%, inside the run-to-run
+noise** (sd 0.025–0.036). The added mutex is taken once per distinct name, not
+per call.
+
 ---
 
 ## 5. Frame-time result (profiler disabled, external PresentMon)
@@ -635,10 +674,24 @@ divides roughly 35% rendering, 20% simulation, 15% object-class processing and
 
 Now that the defect is repaired: **native AI engagement**, at 5.07 ms over idle
 for 80 craft and roughly linear in population. It is the only remaining
-multi-millisecond term and it is the one real missions actually incur. It is
-also the riskiest, because it is gameplay behaviour rather than presentation,
-and §12 shows it is spread across four subsystems rather than concentrated in
-one.
+multi-millisecond term and it is the one real missions actually incur.
+
+It should **not** be optimized on that basis alone. It is an aggregate, not a
+subsystem: the 5.07 ms divides roughly 1.80 ms rendering, 1.01 ms world
+simulation, 0.78 ms object-class processing and 0.49 ms render preparation, so
+there is no single hot loop to attack and no evidence yet that any of the four
+is pathological rather than simply necessary.
+
+The next phase should therefore attribute those four terms separately and ask,
+of each: is this genuinely necessary tactical simulation, is it repeated or
+redundant work, and does it scale with active combatants, with weapons and
+projectiles in flight, or with candidate targets? The scaling data here says the
+aggregate is roughly linear in craft count, which is consistent with necessary
+per-combatant work and inconsistent with a combinatorial blow-up — but it does
+not separate "linear in combatants" from "linear in projectiles", because in
+this benchmark those two move together.
+
+That is the Phase 3 question. Nothing in it has been started.
 
 ---
 
