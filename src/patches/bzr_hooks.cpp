@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <intrin.h>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -26131,6 +26132,24 @@ namespace BZROpenShim
         g_FrustumCullCensusEnabled =
             EnvFlagEnabled("OPENSHIM_FRUSTUM_CULL_CENSUS") ||
             EnvFlagEnabled("BZR_FRUSTUM_CULL_CENSUS");
+
+        // Second, independent repair experiment: restore finite Ogre bounds on
+        // the shared craft meshes instead of emulating the frustum test
+        // privately. Opt-in, and it stands the private cull down by default so
+        // the two mechanisms are never measured on top of each other. Set
+        // OPENSHIM_FRUSTUM_CULL_WITH_RESTORE=1 to run both deliberately.
+        g_RestoreCraftBoundsEnabled =
+            EnvFlagEnabled("OPENSHIM_RESTORE_CRAFT_BOUNDS") ||
+            EnvFlagEnabled("BZR_RESTORE_CRAFT_BOUNDS");
+        g_BoundsTraceEnabled =
+            EnvFlagEnabled("OPENSHIM_BOUNDS_TRACE") ||
+            EnvFlagEnabled("BZR_BOUNDS_TRACE");
+        if (g_RestoreCraftBoundsEnabled &&
+            !(EnvFlagEnabled("OPENSHIM_FRUSTUM_CULL_WITH_RESTORE") ||
+              EnvFlagEnabled("BZR_FRUSTUM_CULL_WITH_RESTORE")))
+        {
+            g_EntityFrustumCullEnabled = false;
+        }
         // Diagnostic/regression seam, not a gameplay policy. It exists so the
         // batch-failure fallback can be proven at runtime rather than argued
         // from the source; see RehydrateGenericChunkBatchSlotsToEntities().
