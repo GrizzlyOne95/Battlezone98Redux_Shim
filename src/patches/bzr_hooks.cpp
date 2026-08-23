@@ -14512,9 +14512,24 @@ namespace BZROpenShim
         static bool g_EmissionLightFixInstalled = false;
         static bool g_EmissionLightFixMismatchLogged = false;
 
+        // Resolves the Ogre Light/MovableObject entry points the headlight and
+        // emission-light work needs. This runs exactly once.
+        //
+        // It used to retry every still-null field on every call, which looks
+        // harmless until one of the names cannot resolve: that field stays null
+        // forever and its GetProcAddress runs again on the next call. One of the
+        // twenty names below was mis-mangled -- getCastShadows is virtual on
+        // MovableObject, so it is `U`, not `Q` -- and HandleEmissionLightState
+        // runs per emission light per frame. Sampling an 80-craft four-team
+        // battle put that single failing lookup, plus the loader's error
+        // reporting for it, at 43% of the main thread's CPU.
         static HeadlightOgreApi& GetHeadlightOgreApi()
         {
             static HeadlightOgreApi api;
+            static bool resolved = false;
+            if (resolved)
+                return api;
+
             if (!api.getDiffuse)
                 api.getDiffuse = ResolveOgreProc<FnOgreGetLightColour>(
                     "?getDiffuseColour@Light@Ogre@@QBEABVColourValue@2@XZ");
@@ -14574,7 +14589,47 @@ namespace BZROpenShim
                     "?getDerivedDirection@Light@Ogre@@QBEABVVector3@2@XZ");
             if (!api.getCastShadows)
                 api.getCastShadows = ResolveOgreProc<FnOgreGetCastShadows>(
-                    "?getCastShadows@MovableObject@Ogre@@QBE_NXZ");
+                    "?getCastShadows@MovableObject@Ogre@@UBE_NXZ");
+
+            resolved = true;
+
+            // Name anything that did not resolve, once. A null entry point here
+            // degrades a headlight behaviour silently; the mis-mangled name
+            // above survived because nothing ever said it had failed.
+            const struct { const wchar_t* field; const void* value; } audit[] = {
+                { L"getDiffuseColour", reinterpret_cast<const void*>(api.getDiffuse) },
+                { L"setDiffuseColour", reinterpret_cast<const void*>(api.setDiffuse) },
+                { L"getSpecularColour", reinterpret_cast<const void*>(api.getSpecular) },
+                { L"setSpecularColour", reinterpret_cast<const void*>(api.setSpecular) },
+                { L"getSpotlightInnerAngle", reinterpret_cast<const void*>(api.getInnerAngle) },
+                { L"getSpotlightOuterAngle", reinterpret_cast<const void*>(api.getOuterAngle) },
+                { L"getSpotlightFalloff", reinterpret_cast<const void*>(api.getFalloff) },
+                { L"setSpotlightRange", reinterpret_cast<const void*>(api.setRange) },
+                { L"getVisible", reinterpret_cast<const void*>(api.getVisible) },
+                { L"setVisible", reinterpret_cast<const void*>(api.setVisible) },
+                { L"setAttenuation", reinterpret_cast<const void*>(api.setAttenuation) },
+                { L"getAttenuationRange", reinterpret_cast<const void*>(api.getAttenuationRange) },
+                { L"getAttenuationConstant", reinterpret_cast<const void*>(api.getAttenuationConstant) },
+                { L"getAttenuationLinear", reinterpret_cast<const void*>(api.getAttenuationLinear) },
+                { L"getAttenuationQuadric", reinterpret_cast<const void*>(api.getAttenuationQuadratic) },
+                { L"getPowerScale", reinterpret_cast<const void*>(api.getPowerScale) },
+                { L"getType", reinterpret_cast<const void*>(api.getType) },
+                { L"getDerivedPosition", reinterpret_cast<const void*>(api.getDerivedPosition) },
+                { L"getDerivedDirection", reinterpret_cast<const void*>(api.getDerivedDirection) },
+                { L"getCastShadows", reinterpret_cast<const void*>(api.getCastShadows) },
+            };
+            int unresolved = 0;
+            for (const auto& entry : audit)
+            {
+                if (!entry.value)
+                {
+                    ++unresolved;
+                    Log(L"[HEADLIGHT] Ogre entry point %ls did not resolve\n", entry.field);
+                }
+            }
+            Log(L"[HEADLIGHT] Ogre entry points resolved once: %d of %d\n",
+                static_cast<int>(_countof(audit)) - unresolved,
+                static_cast<int>(_countof(audit)));
             return api;
         }
 
