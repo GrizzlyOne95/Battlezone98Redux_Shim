@@ -38,6 +38,10 @@ add_executable(headlight_falloff_tests
     headlight_falloff_tests.cpp
 )
 
+add_executable(chunk_batch_invalidation_tests
+    chunk_batch_invalidation_tests.cpp
+)
+
 target_include_directories(shim_log_tests PRIVATE ../include)
 target_compile_features(shim_log_tests PRIVATE cxx_std_20)
 target_compile_features(native_ui_validation_tests PRIVATE cxx_std_20)
@@ -49,6 +53,8 @@ target_include_directories(weapon_convergence_tests PRIVATE ../include)
 target_compile_features(weapon_convergence_tests PRIVATE cxx_std_20)
 target_include_directories(headlight_falloff_tests PRIVATE ../include)
 target_compile_features(headlight_falloff_tests PRIVATE cxx_std_20)
+target_include_directories(chunk_batch_invalidation_tests PRIVATE ../include)
+target_compile_features(chunk_batch_invalidation_tests PRIVATE cxx_std_20)
 
 if(MSVC)
     target_compile_options(bzrnet_protocol_tests PRIVATE /W4 /WX)
@@ -58,6 +64,7 @@ if(MSVC)
     target_compile_options(enhanced_light_selection_bench PRIVATE /W4 /WX)
     target_compile_options(weapon_convergence_tests PRIVATE /W4 /WX)
     target_compile_options(headlight_falloff_tests PRIVATE /W4 /WX)
+    target_compile_options(chunk_batch_invalidation_tests PRIVATE /W4 /WX)
 else()
     target_compile_options(bzrnet_protocol_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(shim_log_tests PRIVATE -Wall -Wextra -Werror)
@@ -66,6 +73,7 @@ else()
     target_compile_options(enhanced_light_selection_bench PRIVATE -Wall -Wextra -Werror)
     target_compile_options(weapon_convergence_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(headlight_falloff_tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(chunk_batch_invalidation_tests PRIVATE -Wall -Wextra -Werror)
 endif()
 
 add_test(NAME bzrnet_protocol_tests COMMAND bzrnet_protocol_tests)
@@ -74,3 +82,4 @@ add_test(NAME native_ui_validation_tests COMMAND native_ui_validation_tests)
 add_test(NAME enhanced_light_selection_tests COMMAND enhanced_light_selection_tests)
 add_test(NAME weapon_convergence_tests COMMAND weapon_convergence_tests)
 add_test(NAME headlight_falloff_tests COMMAND headlight_falloff_tests)
+add_test(NAME chunk_batch_invalidation_tests COMMAND chunk_batch_invalidation_tests)
