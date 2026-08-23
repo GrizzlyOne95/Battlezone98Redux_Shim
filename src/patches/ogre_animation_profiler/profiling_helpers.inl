@@ -176,6 +176,70 @@
             return length > 0 && length < sizeof(value) && StringIsTruthy(value);
         }
 
+        // Parse OPENSHIM_PROFILE_ISOLATE once. Unknown tokens are ignored so a
+        // future category name cannot silently turn the whole switch off.
+        unsigned ResolveIsolationMask()
+        {
+            char value[128] = {};
+            const DWORD length = ReadProcessEnvironmentValue(
+                kIsolationSwitch, value, static_cast<DWORD>(sizeof(value)));
+            if (length == 0 || length >= sizeof(value))
+                return 0;
+            unsigned mask = 0;
+            if (OgreProfilerAlgorithms::ContainsAsciiCaseInsensitive(value, "glow"))
+                mask |= kIsolateGlow;
+            if (OgreProfilerAlgorithms::ContainsAsciiCaseInsensitive(value, "shadow"))
+                mask |= kIsolateShadow;
+            return mask;
+        }
+
+        // Scheme name for a pass, resolved straight from Ogre. Needed because an
+        // isolation arm may run with collection disabled, where no contributor
+        // slot exists to read the cached metadata from.
+        bool PassSchemeContains(const void* pass, const char* token)
+        {
+            if (!pass || !g_OgrePassGetParent || !g_OgreTechniqueGetSchemeName)
+                return false;
+            bool matched = false;
+            __try
+            {
+                const void* technique = g_OgrePassGetParent(pass);
+                if (technique)
+                {
+                    const std::string& scheme =
+                        g_OgreTechniqueGetSchemeName(technique);
+                    matched = OgreProfilerAlgorithms::ContainsAsciiCaseInsensitive(
+                        scheme.c_str(), token);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                matched = false;
+            }
+            return matched;
+        }
+
+        // True when this renderable belongs to a category the capture is asked
+        // to suppress. Only consulted when the isolation mask is non-zero.
+        bool ShouldIsolateRenderable(
+            const RenderContributorSlot* slot,
+            unsigned mask,
+            const void* pass)
+        {
+            // Depth > 1 is Ogre's re-entrant shadow-texture render, which is how
+            // every other counter in this profiler classifies a shadow pass.
+            if ((mask & kIsolateShadow) != 0 && t_SceneRenderDepth > 1)
+                return true;
+            if ((mask & kIsolateGlow) == 0)
+                return false;
+            if (slot && slot->metadataState.load(std::memory_order_acquire) == 2)
+            {
+                return OgreProfilerAlgorithms::ContainsAsciiCaseInsensitive(
+                    slot->schemeName.data(), "glow");
+            }
+            return PassSchemeContains(pass, "glow");
+        }
+
         uint32_t HashPointer(const void* pointer)
         {
             uintptr_t value = reinterpret_cast<uintptr_t>(pointer);
@@ -670,6 +734,131 @@
             {
                 // Retail RenderOperation layout is only diagnostic metadata;
                 // preserve submission attribution if count fields ever differ.
+            }
+        }
+
+        // Ogre's own primitive-count arithmetic, reproduced so the profiler can
+        // say *why* a submission issued no API draw.
+        //
+        // D3D11RenderSystem::_render wraps its draw in `if (primCount)` and
+        // returns early when the vertex buffer is empty; D3D9RenderSystem::_render
+        // has the same early return but no primCount guard, so it issues
+        // DrawIndexedPrimitive/DrawPrimitive even for zero primitives. That single
+        // asymmetry is the documented reason an Ogre submission is not
+        // interchangeable with an API draw across the two backends.
+        //
+        // Returns false when the operation could not be read at all.
+        bool ComputeOperationPrimitiveCount(
+            const void* operation,
+            uint64_t& vertexCount,
+            uint64_t& primitiveCount)
+        {
+            vertexCount = 0;
+            primitiveCount = 0;
+            if (!operation)
+                return false;
+            __try
+            {
+                const Ogre::RenderOperation* op =
+                    static_cast<const Ogre::RenderOperation*>(operation);
+                if (!op->vertexData)
+                    return true;
+                vertexCount = op->vertexData->vertexCount;
+                if (vertexCount == 0 || vertexCount > kMaxSaneVertexCount)
+                    return true;
+                const bool useIndexes = op->useIndexes && op->indexData != nullptr;
+                const uint64_t elementCount = useIndexes
+                    ? static_cast<uint64_t>(op->indexData->indexCount)
+                    : vertexCount;
+                switch (op->operationType)
+                {
+                case Ogre::RenderOperation::OT_POINT_LIST:
+                    primitiveCount = elementCount;
+                    break;
+                case Ogre::RenderOperation::OT_LINE_LIST:
+                    primitiveCount = elementCount / 2u;
+                    break;
+                case Ogre::RenderOperation::OT_LINE_STRIP:
+                    primitiveCount = elementCount ? elementCount - 1u : 0u;
+                    break;
+                case Ogre::RenderOperation::OT_TRIANGLE_LIST:
+                    primitiveCount = elementCount / 3u;
+                    break;
+                case Ogre::RenderOperation::OT_TRIANGLE_STRIP:
+                case Ogre::RenderOperation::OT_TRIANGLE_FAN:
+                    primitiveCount = elementCount >= 2u ? elementCount - 2u : 0u;
+                    break;
+                default:
+                    primitiveCount = elementCount;
+                    break;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+            return true;
+        }
+
+        // Classify one render-system submission by how many API draws it issued.
+        // drawsIssued is measured from the thread-local draw ticket, so it is the
+        // real observed count rather than a prediction.
+        void RecordSubmissionDrawOutcome(
+            const void* operation,
+            uint64_t drawsIssued,
+            bool observerInstalled)
+        {
+            RenderContributorSlot* slot = t_CurrentRenderContributor;
+            if (!observerInstalled)
+            {
+                // Draws from this submission were not observable; counting it as
+                // a no-draw submission would manufacture a fake backend finding.
+                g_UnobservedSubmissions.fetch_add(1, std::memory_order_relaxed);
+                if (slot)
+                {
+                    slot->unobservedSubmissions.fetch_add(
+                        1, std::memory_order_relaxed);
+                }
+                return;
+            }
+            if (drawsIssued > 1)
+            {
+                // Pass iteration (Pass::setPassIterationCount) loops the draw
+                // inside one submission.
+                g_MultiDrawSubmissions.fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
+            if (drawsIssued != 0)
+                return;
+
+            g_NoDrawSubmissions.fetch_add(1, std::memory_order_relaxed);
+            if (slot)
+                slot->noDrawSubmissions.fetch_add(1, std::memory_order_relaxed);
+
+            uint64_t vertexCount = 0;
+            uint64_t primitiveCount = 0;
+            if (!ComputeOperationPrimitiveCount(
+                    operation, vertexCount, primitiveCount))
+            {
+                return;
+            }
+            if (vertexCount == 0)
+            {
+                g_EmptyVertexSubmissions.fetch_add(1, std::memory_order_relaxed);
+                if (slot)
+                {
+                    slot->emptyVertexSubmissions.fetch_add(
+                        1, std::memory_order_relaxed);
+                }
+            }
+            else if (primitiveCount == 0)
+            {
+                g_ZeroPrimSubmissions.fetch_add(1, std::memory_order_relaxed);
+                if (slot)
+                {
+                    slot->zeroPrimSubmissions.fetch_add(
+                        1, std::memory_order_relaxed);
+                }
             }
         }
 

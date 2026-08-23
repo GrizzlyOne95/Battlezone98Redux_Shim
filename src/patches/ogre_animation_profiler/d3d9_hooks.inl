@@ -66,12 +66,47 @@
             }
 
             const bool enabled = g_Enabled.load(std::memory_order_relaxed);
+            // Mirror of the DX11 per-submission observer check so the two
+            // backends are measured the same way and the submission/draw ratio
+            // can be compared without an instrumentation caveat.
+            bool observerInstalled = false;
+            if (enabled && g_D3D9GetActiveDevice)
+            {
+                IDirect3DDevice9* observedDevice = g_D3D9GetActiveDevice();
+                if (observedDevice)
+                {
+                    __try
+                    {
+                        void** vtable = *reinterpret_cast<void***>(observedDevice);
+                        observerInstalled = vtable &&
+                            vtable[82] == reinterpret_cast<void*>(
+                                &HookD3D9DrawIndexedPrimitive);
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        observerInstalled = false;
+                    }
+                    if (!observerInstalled)
+                    {
+                        InstallD3D9DeviceHooks(observedDevice);
+                        g_ContextVtableRefreshes.fetch_add(
+                            1, std::memory_order_relaxed);
+                        observerInstalled = true;
+                    }
+                }
+            }
+
             const uint64_t start = enabled ? ReadQpc() : 0;
+            const uint64_t drawsBefore = t_ThreadDrawCalls;
             real(self, renderOperation);
             if (enabled)
             {
                 const uint64_t elapsed = ReadQpc() - start;
                 RecordCurrentRenderOperation(renderOperation);
+                RecordSubmissionDrawOutcome(
+                    renderOperation,
+                    t_ThreadDrawCalls - drawsBefore,
+                    observerInstalled);
                 g_RenderSystemSubmissions.fetch_add(1, std::memory_order_relaxed);
                 g_RenderSystemSubmissionTicks.fetch_add(elapsed, std::memory_order_relaxed);
                 AtomicMax(g_RenderSystemSubmissionMaxTicks, elapsed);
@@ -111,6 +146,7 @@
         {
             if (g_Enabled.load(std::memory_order_relaxed))
             {
+                ++t_ThreadDrawCalls;
                 g_DrawCalls.fetch_add(1, std::memory_order_relaxed);
                 const uint64_t vertices =
                     D3D9PrimitiveVertexCount(primitiveType, primitiveCount);
@@ -140,6 +176,7 @@
         {
             if (g_Enabled.load(std::memory_order_relaxed))
             {
+                ++t_ThreadDrawCalls;
                 g_DrawIndexedCalls.fetch_add(1, std::memory_order_relaxed);
                 const uint64_t indices =
                     D3D9PrimitiveVertexCount(primitiveType, primitiveCount);

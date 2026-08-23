@@ -151,8 +151,27 @@
             dx11SkinSourceShadowPolicyEnabled,
             std::memory_order_release);
 
+        // Isolation is a capture-time A/B arm, not a shipped behavior. It is
+        // deliberately independent of whether the profiler itself is collecting,
+        // so a frame-time arm can be captured with the profiler disabled and
+        // PresentMon attached -- which is the only frame-time evidence this
+        // work treats as decisive. Announce it loudly whenever it is on so no
+        // measurement is ever read as stock rendering.
+        const unsigned isolationMask = ResolveIsolationMask();
+        g_IsolationMask.store(isolationMask, std::memory_order_release);
+        if (isolationMask != 0)
+        {
+            LogShimA(
+                LogLevel::Warn,
+                kComponent,
+                "[OgreProfile][Isolation] ACTIVE mask=0x%X glow=%s shadow=%s -- rendering is deliberately incomplete for measurement",
+                isolationMask,
+                (isolationMask & kIsolateGlow) ? "suppressed" : "normal",
+                (isolationMask & kIsolateShadow) ? "suppressed" : "normal");
+        }
+
         if (!profilerRequested && !chunkShadowPolicyEnabled &&
-            !dx11SkinSourceShadowPolicyEnabled)
+            !dx11SkinSourceShadowPolicyEnabled && isolationMask == 0)
         {
             LogShimA(
                 LogLevel::Info,
