@@ -65,8 +65,19 @@
                         g_SceneManagerRenderSingleObjectDetour.trampoline);
             if (!real)
                 return;
+            // Isolation is checked before the profiler-enabled gate so an
+            // isolation arm can be captured with collection off and PresentMon
+            // attached. With no isolation requested this is one relaxed load.
+            const unsigned isolationMask =
+                g_IsolationMask.load(std::memory_order_relaxed);
             if (!g_Enabled.load(std::memory_order_relaxed))
             {
+                if (isolationMask != 0 &&
+                    ShouldIsolateRenderable(nullptr, isolationMask, pass))
+                {
+                    g_IsolatedRenderables.fetch_add(1, std::memory_order_relaxed);
+                    return;
+                }
                 real(
                     self, renderable, pass, lightScissoringClipping,
                     doLightIteration, manualLightList);
@@ -87,6 +98,19 @@
                     slot->shadowCalls.fetch_add(1, std::memory_order_relaxed);
                 else
                     slot->mainCalls.fetch_add(1, std::memory_order_relaxed);
+            }
+
+            // Measurement-only isolation arm. Suppressing the renderable here
+            // rather than at the render-system boundary removes the material,
+            // technique and scheme setup as well as the submission, so the
+            // frame-time delta reflects the whole category and not just its
+            // backend cost. Default mask is zero, so stock behavior is
+            // bit-for-bit unchanged unless OPENSHIM_PROFILE_ISOLATE is set.
+            if (isolationMask != 0 &&
+                ShouldIsolateRenderable(slot, isolationMask, pass))
+            {
+                g_IsolatedRenderables.fetch_add(1, std::memory_order_relaxed);
+                return;
             }
 
             const uint64_t start = ReadQpc();
