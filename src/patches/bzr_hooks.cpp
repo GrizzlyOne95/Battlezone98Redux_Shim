@@ -13,6 +13,7 @@
 #include "ogre_profiler_algorithms.h"
 #include "weapon_convergence.h"
 #include "headlight_falloff.h"
+#include "chunk_batch_invalidation.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -2175,10 +2176,34 @@ namespace BZROpenShim
         // of render-queue submissions per frame must be counted, not assumed.
         static bool g_GenericChunkBatchRateDiagnostics = false;
         static uint64_t g_GenericChunkBatchSubmitCalls = 0;
+        // Counts successful *submissions*, not geometry rebuilds. Since
+        // state-version reuse landed those are different numbers: the rebuild
+        // count lives in g_GenericChunkBatchTelemetry.
         static uint64_t g_GenericChunkBatchRebuilds = 0;
         static DWORD g_GenericChunkBatchRateLogTick = 0;
         static uint64_t g_GenericChunkBatchSubmitCallsAtLastLog = 0;
         static uint64_t g_GenericChunkBatchRebuildsAtLastLog = 0;
+        // State-version reuse. The batch is re-submitted to every camera/scheme
+        // traversal, but the geometry is only re-emitted when the slot state it
+        // is built from actually differs. See include/chunk_batch_invalidation.h
+        // for why the version is derived from the source rather than declared by
+        // its mutators.
+        static bool g_GenericChunkBatchReuseEnabled = true;
+        // Observer mode: take the decision and count it, then rebuild anyway.
+        // This is how the pre-optimization baseline and the dedup opportunity
+        // are measured from the same binary, without changing what is drawn.
+        static bool g_GenericChunkBatchReuseObserveOnly = false;
+        static uint64_t g_GenericChunkBatchBuiltVersion =
+            ChunkBatchInvalidation::kUnbuiltVersion;
+        static std::string g_GenericChunkBatchBuiltMaterial = {};
+        static ChunkBatchInvalidation::Telemetry g_GenericChunkBatchTelemetry = {};
+        static ChunkBatchInvalidation::Telemetry g_GenericChunkBatchTelemetryAtLastLog = {};
+        static int64_t g_GenericChunkBatchQpcFrequency = 0;
+        // Last visibility written to the batch object, so setVisible is only
+        // called on a transition. Without this the empty path would push
+        // setVisible(false) three times per frame for as long as there is no
+        // debris, which is most of a normal mission.
+        static bool g_GenericChunkBatchVisible = false;
         static const std::string g_GenericChunkBatchMaterialName = "scarpmat2";
         static const std::string g_GenericChunkBatchMaterialGroup = "General";
         // TEST/DIAGNOSTIC seam only. Set by the environment gate below and
@@ -5527,7 +5552,13 @@ namespace BZROpenShim
             }
             g_ChunkProxyBillboardSet = nullptr;
             g_GenericChunkBatchManualObject = nullptr;
+            // The recorded visibility described the object just dropped.
+            g_GenericChunkBatchVisible = false;
             g_GenericChunkBatchSceneNode = nullptr;
+            // A destroyed scene invalidates the cached geometry too.
+            g_GenericChunkBatchBuiltVersion =
+                ChunkBatchInvalidation::kUnbuiltVersion;
+            g_GenericChunkBatchBuiltMaterial.clear();
             g_GenericChunkBatchSceneManager = nullptr;
             g_GenericChunkBatchSectionCreated = false;
 
@@ -6774,6 +6805,197 @@ namespace BZROpenShim
                 g_GenericChunkBatchRuntimeAvailable ? 1u : 0u);
         }
 
+        // High-resolution rebuild cost. Sampled unconditionally because the
+        // rebuild path is already thousands of virtual Ogre calls, so two QPC
+        // reads are noise -- and a cost figure that only exists when
+        // diagnostics are on cannot be used to justify the optimization.
+        static int64_t ReadChunkBatchQpc()
+        {
+            LARGE_INTEGER counter = {};
+            QueryPerformanceCounter(&counter);
+            return counter.QuadPart;
+        }
+
+        static void NoteChunkBatchRebuildCost(int64_t startTicks)
+        {
+            if (g_GenericChunkBatchQpcFrequency == 0)
+            {
+                LARGE_INTEGER frequency = {};
+                QueryPerformanceFrequency(&frequency);
+                g_GenericChunkBatchQpcFrequency = frequency.QuadPart;
+            }
+            if (g_GenericChunkBatchQpcFrequency <= 0)
+                return;
+            const int64_t elapsed = ReadChunkBatchQpc() - startTicks;
+            if (elapsed <= 0)
+                return;
+            const uint64_t nanoseconds = static_cast<uint64_t>(
+                (elapsed * 1000000000ll) / g_GenericChunkBatchQpcFrequency);
+            g_GenericChunkBatchTelemetry.rebuildNanoseconds += nanoseconds;
+            if (nanoseconds > g_GenericChunkBatchTelemetry.maxRebuildNanoseconds)
+                g_GenericChunkBatchTelemetry.maxRebuildNanoseconds = nanoseconds;
+        }
+
+        // Which pass is asking. Ogre drives the world _updateRenderQueue
+        // override once per camera traversal per active material scheme, so the
+        // viewport's scheme is what distinguishes the repeats from each other.
+        // Measured on lcbench: exactly three per rendered frame, named
+        // "high-pssm", "glow" and "ShaderGeneratorDefaultScheme". They are one
+        // world camera path visited once per scheme -- not three PSSM shadow
+        // cameras, which was the standing assumption before this instrument.
+        //
+        // Declared as a pointer return rather than a reference: a reference
+        // binding makes MSVC treat the frame as requiring object unwinding,
+        // which __try forbids. The ABI is identical.
+        using FnOgreGetCurrentViewport = void*(__thiscall*)(void*);
+        using FnOgreGetViewportMaterialScheme = const std::string*(__thiscall*)(void*);
+
+        // SEH-only leaf: no statics, no objects, so the frame needs no
+        // unwinding. The returned pointer is into Ogre's own string and is only
+        // ever read by the immediate caller.
+        static const char* TryReadViewportSchemeName(
+            void* sceneManager,
+            FnOgreGetCurrentViewport getCurrentViewport,
+            FnOgreGetViewportMaterialScheme getMaterialScheme)
+        {
+            __try
+            {
+                void* const viewport = getCurrentViewport(sceneManager);
+                if (!viewport)
+                    return "<no-viewport>";
+                const std::string* const scheme = getMaterialScheme(viewport);
+                if (!scheme || scheme->empty())
+                    return "<empty>";
+                return scheme->c_str();
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return "<faulted>";
+            }
+        }
+
+        static const char* GetCurrentOgreMaterialSchemeName(void* sceneManager)
+        {
+            static FnOgreGetCurrentViewport getCurrentViewport =
+                ResolveOgreProc<FnOgreGetCurrentViewport>(
+                    "?getCurrentViewport@SceneManager@Ogre@@QBEPAVViewport@2@XZ");
+            static FnOgreGetViewportMaterialScheme getMaterialScheme =
+                ResolveOgreProc<FnOgreGetViewportMaterialScheme>(
+                    "?getMaterialScheme@Viewport@Ogre@@QBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
+            if (!sceneManager || !getCurrentViewport || !getMaterialScheme)
+                return "<unavailable>";
+            return TryReadViewportSchemeName(
+                sceneManager, getCurrentViewport, getMaterialScheme);
+        }
+
+        // Interval telemetry for the state-version reuse. Everything here is
+        // a delta over the reporting window, so the numbers can be divided by
+        // the frame count of the same window to get per-frame rates without
+        // needing a frame hook of our own.
+        static void LogGenericChunkBatchTelemetry(DWORD windowMs)
+        {
+            using namespace ChunkBatchInvalidation;
+            const Telemetry& now = g_GenericChunkBatchTelemetry;
+            const Telemetry& then = g_GenericChunkBatchTelemetryAtLastLog;
+            const unsigned long long requests = now.requests - then.requests;
+            const unsigned long long rebuilds = now.rebuilds - then.rebuilds;
+            const unsigned long long reused = now.reused - then.reused;
+            const unsigned long long emptySkips = now.emptySkips - then.emptySkips;
+            const unsigned long long vertices = now.verticesRebuilt - then.verticesRebuilt;
+            const unsigned long long indices = now.indicesRebuilt - then.indicesRebuilt;
+            const unsigned long long nanos =
+                now.rebuildNanoseconds - then.rebuildNanoseconds;
+
+            LogChunkDiagnostic(
+                "chunkbatch",
+                L"[CHUNKBATCH] reuse windowMs=%lu requests=%llu rebuilds=%llu reused=%llu "
+                L"emptySkips=%llu dedupPct=%.1f verts=%llu indices=%llu rebuildMs=%.3f maxRebuildMs=%.3f"
+                L" mode=%hs\n",
+                static_cast<unsigned long>(windowMs),
+                requests, rebuilds, reused, emptySkips,
+                requests ? (100.0 * static_cast<double>(reused) /
+                            static_cast<double>(requests)) : 0.0,
+                vertices, indices,
+                static_cast<double>(nanos) / 1000000.0,
+                static_cast<double>(now.maxRebuildNanoseconds) / 1000000.0,
+                g_GenericChunkBatchReuseObserveOnly
+                    ? "observe"
+                    : (g_GenericChunkBatchReuseEnabled ? "reuse" : "always-rebuild"));
+
+            for (int index = 0; index < 8; ++index)
+            {
+                const unsigned long long count =
+                    now.reasonCounts[index] - then.reasonCounts[index];
+                if (count == 0)
+                    continue;
+                LogChunkDiagnostic(
+                    "chunkbatch",
+                    L"[CHUNKBATCH] reuse   reason=%hs count=%llu\n",
+                    ReasonName(static_cast<Reason>(index)),
+                    count);
+            }
+            for (size_t index = 0; index < now.schemeCount; ++index)
+            {
+                const SchemeCounters& scheme = now.schemes[index];
+                const SchemeCounters& previous =
+                    index < then.schemeCount ? then.schemes[index] : SchemeCounters{};
+                const unsigned long long schemeRequests =
+                    scheme.requests - previous.requests;
+                if (schemeRequests == 0)
+                    continue;
+                LogChunkDiagnostic(
+                    "chunkbatch",
+                    L"[CHUNKBATCH] reuse   scheme=%hs requests=%llu rebuilds=%llu\n",
+                    scheme.name,
+                    schemeRequests,
+                    static_cast<unsigned long long>(scheme.rebuilds - previous.rebuilds));
+            }
+            g_GenericChunkBatchTelemetryAtLastLog = now;
+        }
+
+        // Takes the batch out of the scene without destroying it, so the next
+        // explosion reuses the same ManualObject and section rather than
+        // paying for a fresh one. The built version is deliberately left
+        // alone: the geometry in the object is still valid, it is simply not
+        // wanted right now, and clearing it would force a needless rebuild
+        // the moment the same debris set comes back.
+        static void HideGenericChunkBatchIfBuilt()
+        {
+            static FnOgreSetVisible setVisible =
+                ResolveOgreProc<FnOgreSetVisible>(
+                    "?setVisible@MovableObject@Ogre@@UAEX_N@Z");
+            if (!g_GenericChunkBatchManualObject || !setVisible)
+                return;
+            if (!g_GenericChunkBatchVisible)
+                return;
+            try
+            {
+                setVisible(g_GenericChunkBatchManualObject, false);
+                g_GenericChunkBatchVisible = false;
+            }
+            catch (...)
+            {
+                // Deliberately does NOT clear g_GenericChunkBatchRuntimeAvailable,
+                // unlike the emit and submit failures below. Those happen while
+                // slots are classified batch-ready and their per-Entity proxies
+                // are already hidden, so the batch has promised to draw geometry
+                // it can no longer produce and standing down permanently is the
+                // safe answer. This path only runs when there is nothing to draw
+                // at all, so dropping the object and letting the next explosion
+                // recreate it is a recovery, not a risk.
+                LogChunkDiagnostic(
+                    "chunkbatch",
+                    L"[CHUNKBATCH] hide threw; dropping cached batch\n");
+                g_GenericChunkBatchManualObject = nullptr;
+                // The recorded visibility described the object just dropped.
+                g_GenericChunkBatchVisible = false;
+                g_GenericChunkBatchSceneNode = nullptr;
+                g_GenericChunkBatchSectionCreated = false;
+                g_GenericChunkBatchBuiltVersion =
+                    ChunkBatchInvalidation::kUnbuiltVersion;
+            }
+        }
+
         static bool RebuildAndSubmitGenericChunkBatch(void* renderQueue)
         {
             size_t chunkCount = 0;
@@ -6783,6 +7005,11 @@ namespace BZROpenShim
             // half-extent is under a metre, so slot origins are a fair proxy.
             float tightMin[3] = { FLT_MAX, FLT_MAX, FLT_MAX };
             float tightMax[3] = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+            // The state version is accumulated inside this existing scan, so
+            // the reuse check costs no extra pass over the slots -- only a few
+            // integer mixes per eligible chunk.
+            ChunkBatchInvalidation::SourceVersion sourceVersion;
+            uint32_t ordinal = 0;
             for (const ChunkProxySlot& slot : g_ChunkProxySlots)
             {
                 if (!slot.active || !slot.genericBatchTransformReady)
@@ -6790,10 +7017,24 @@ namespace BZROpenShim
                 ++chunkCount;
                 vertexCount += slot.genericBatchKind == 1
                     ? std::size(kChunk1Vertices) : std::size(kChunk2Vertices);
+                const ChunkProxyTransform& batchTransform = slot.genericBatchTransform;
+                ChunkBatchInvalidation::SlotState slotState = {};
+                slotState.kind = slot.genericBatchKind;
+                slotState.x = batchTransform.x;
+                slotState.y = batchTransform.y;
+                slotState.z = batchTransform.z;
+                slotState.qw = batchTransform.orientation.w;
+                slotState.qx = batchTransform.orientation.x;
+                slotState.qy = batchTransform.orientation.y;
+                slotState.qz = batchTransform.orientation.z;
+                slotState.sx = batchTransform.scale.x;
+                slotState.sy = batchTransform.scale.y;
+                slotState.sz = batchTransform.scale.z;
+                ChunkBatchInvalidation::MixSlot(sourceVersion, ordinal++, slotState);
                 const float slotOrigin[3] = {
-                    slot.genericBatchTransform.x,
-                    slot.genericBatchTransform.y,
-                    slot.genericBatchTransform.z };
+                    batchTransform.x,
+                    batchTransform.y,
+                    batchTransform.z };
                 for (int axis = 0; axis < 3; ++axis)
                 {
                     if (slotOrigin[axis] < tightMin[axis])
@@ -6803,7 +7044,20 @@ namespace BZROpenShim
                 }
             }
             if (chunkCount == 0)
+            {
+                // Nothing eligible. Not submitting is necessary but not
+                // sufficient: the ManualObject still holds the last geometry
+                // and is attached to a node under the root, so it would remain
+                // eligible for Ogre's own traversal. Hide it as well, so the
+                // frame the last chunk expires is the frame it stops drawing --
+                // with or without reuse, and whether or not Ogre traverses it
+                // independently of this hook.
+                HideGenericChunkBatchIfBuilt();
+                ++g_GenericChunkBatchTelemetry.emptySkips;
                 return false;
+            }
+            ChunkBatchInvalidation::MixCount(
+                sourceVersion, static_cast<uint32_t>(chunkCount));
 
             // TEST/DIAGNOSTIC ONLY. Placed deliberately *after* the eligible
             // slots have been counted, so the injected failure lands in the
@@ -6895,13 +7149,102 @@ namespace BZROpenShim
             void* const sceneManager = GetOgreSceneManagerRuntime();
             if (!sceneManager)
                 return false;
-            if (g_GenericChunkBatchSceneManager != sceneManager)
+            const bool sceneManagerChanged =
+                g_GenericChunkBatchSceneManager != sceneManager;
+            if (sceneManagerChanged)
             {
+                // A new SceneManager means the previous ManualObject belongs to
+                // a destroyed scene. Drop the cached version with it, or reuse
+                // would submit a dangling object across a mission boundary.
                 g_GenericChunkBatchManualObject = nullptr;
+                // The recorded visibility described the object just dropped.
+                g_GenericChunkBatchVisible = false;
                 g_GenericChunkBatchSceneNode = nullptr;
                 g_GenericChunkBatchSceneManager = sceneManager;
                 g_GenericChunkBatchSectionCreated = false;
+                g_GenericChunkBatchBuiltVersion =
+                    ChunkBatchInvalidation::kUnbuiltVersion;
             }
+
+            // ---- reuse decision -------------------------------------------
+            // Everything below this point that can invalidate the built
+            // geometry has already been resolved: the ManualObject exists or
+            // does not, the SceneManager has been compared, and the source
+            // version is computed. Anything uncertain resolves toward
+            // rebuilding inside DecideRebuild().
+            ChunkBatchInvalidation::BuiltState builtState = {};
+            builtState.version = g_GenericChunkBatchBuiltVersion;
+            builtState.objectAlive = g_GenericChunkBatchManualObject != nullptr;
+            builtState.sectionCreated = g_GenericChunkBatchSectionCreated;
+            // Redundant with objectAlive today, because the SceneManager check
+            // above already nulls the object. Fed anyway so the policy states
+            // the requirement itself rather than relying on a side effect
+            // several lines up.
+            builtState.objectIdentityStable = !sceneManagerChanged;
+            builtState.materialStable =
+                g_GenericChunkBatchBuiltMaterial == g_GenericChunkBatchMaterialName;
+
+            const ChunkBatchInvalidation::Reason reason =
+                ChunkBatchInvalidation::DecideRebuild(
+                    builtState,
+                    sourceVersion.Value(),
+                    !g_GenericChunkBatchReuseEnabled);
+            const bool wantRebuild = ChunkBatchInvalidation::ShouldRebuild(reason);
+
+            ++g_GenericChunkBatchTelemetry.requests;
+            g_GenericChunkBatchTelemetry.NoteReason(reason);
+            // Pass attribution costs two virtual Ogre calls plus a short string
+            // walk on every traversal, which is real work on a path that runs
+            // three times a frame. The counters above are a handful of
+            // increments and stay unconditional; this part is opt-in.
+            if (g_GenericChunkBatchRateDiagnostics)
+            {
+                g_GenericChunkBatchTelemetry.NoteScheme(
+                    GetCurrentOgreMaterialSchemeName(sceneManager), wantRebuild);
+            }
+
+            if (!wantRebuild && !g_GenericChunkBatchReuseObserveOnly)
+            {
+                // The geometry already in the ManualObject is byte-identical to
+                // what a rebuild would produce, so this traversal only needs the
+                // submission. This is the whole optimization: one emit per
+                // source-state change instead of one per camera/scheme pass.
+                ++g_GenericChunkBatchTelemetry.reused;
+                try
+                {
+                    if (!g_GenericChunkBatchVisible)
+                    {
+                        setVisible(g_GenericChunkBatchManualObject, true);
+                        g_GenericChunkBatchVisible = true;
+                    }
+                    updateRenderQueue(g_GenericChunkBatchManualObject, renderQueue);
+                }
+                catch (...)
+                {
+                    LogChunkDiagnostic(
+                        "chunkbatch",
+                        L"[CHUNKBATCH] reuse submit threw; dropping cached batch\n");
+                    g_GenericChunkBatchRuntimeAvailable = false;
+                    g_GenericChunkBatchManualObject = nullptr;
+                    // The recorded visibility described the object just dropped.
+                    g_GenericChunkBatchVisible = false;
+                    g_GenericChunkBatchSceneNode = nullptr;
+                    g_GenericChunkBatchSectionCreated = false;
+                    g_GenericChunkBatchBuiltVersion =
+                        ChunkBatchInvalidation::kUnbuiltVersion;
+                    return false;
+                }
+                return true;
+            }
+
+            // Observer mode still rebuilds, but the counters above already
+            // recorded what reuse would have skipped.
+            if (!wantRebuild)
+                ++g_GenericChunkBatchTelemetry.reused;
+            ++g_GenericChunkBatchTelemetry.rebuilds;
+            g_GenericChunkBatchTelemetry.verticesRebuilt += vertexCount;
+            g_GenericChunkBatchTelemetry.indicesRebuilt += vertexCount;
+            const int64_t rebuildStartTicks = ReadChunkBatchQpc();
 
             bool updateStarted = false;
             try
@@ -6987,7 +7330,18 @@ namespace BZROpenShim
                 end(g_GenericChunkBatchManualObject);
                 updateStarted = false;
                 g_GenericChunkBatchSectionCreated = true;
-                setVisible(g_GenericChunkBatchManualObject, true);
+                // Only stamp the version once the emit has actually completed.
+                // A throw between begin and end leaves the object half-built,
+                // and the catch below clears the stamp so the next call cannot
+                // mistake that wreckage for valid cached geometry.
+                g_GenericChunkBatchBuiltVersion = sourceVersion.Value();
+                g_GenericChunkBatchBuiltMaterial = g_GenericChunkBatchMaterialName;
+                NoteChunkBatchRebuildCost(rebuildStartTicks);
+                if (!g_GenericChunkBatchVisible)
+                {
+                    setVisible(g_GenericChunkBatchManualObject, true);
+                    g_GenericChunkBatchVisible = true;
+                }
                 updateRenderQueue(g_GenericChunkBatchManualObject, renderQueue);
             }
             catch (...)
@@ -6998,8 +7352,12 @@ namespace BZROpenShim
                     updateStarted ? 1u : 0u);
                 g_GenericChunkBatchRuntimeAvailable = false;
                 g_GenericChunkBatchManualObject = nullptr;
+                // The recorded visibility described the object just dropped.
+                g_GenericChunkBatchVisible = false;
                 g_GenericChunkBatchSceneNode = nullptr;
                 g_GenericChunkBatchSectionCreated = false;
+                g_GenericChunkBatchBuiltVersion =
+                    ChunkBatchInvalidation::kUnbuiltVersion;
                 return false;
             }
 
@@ -7096,7 +7454,7 @@ namespace BZROpenShim
                         rateNow - g_GenericChunkBatchRateLogTick);
                     LogChunkDiagnostic(
                         "chunkbatch",
-                        L"[CHUNKBATCH] rate windowMs=%lu submitCalls=%llu rebuilds=%llu\n",
+                        L"[CHUNKBATCH] rate windowMs=%lu submitCalls=%llu submissions=%llu\n",
                         static_cast<unsigned long>(windowMs),
                         static_cast<unsigned long long>(
                             g_GenericChunkBatchSubmitCalls -
@@ -7104,6 +7462,7 @@ namespace BZROpenShim
                         static_cast<unsigned long long>(
                             g_GenericChunkBatchRebuilds -
                             g_GenericChunkBatchRebuildsAtLastLog));
+                    LogGenericChunkBatchTelemetry(windowMs);
                     g_GenericChunkBatchRateLogTick = rateNow;
                     g_GenericChunkBatchSubmitCallsAtLastLog =
                         g_GenericChunkBatchSubmitCalls;
@@ -26587,6 +26946,28 @@ namespace BZROpenShim
                 "chunkbatch",
                 L"[CHUNKBATCH] DIAGNOSTIC: batch submit-rate counters are ENABLED\n");
         }
+        // Reuse is on by default; the opt-out restores the pre-optimization
+        // behaviour of re-emitting the geometry on every traversal, and observe
+        // mode takes the decision without acting on it so the baseline and the
+        // dedup opportunity can be measured from one binary.
+        g_GenericChunkBatchReuseEnabled =
+            !(EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_BATCH_REUSE") ||
+              EnvFlagEnabled("BZR_DISABLE_CHUNK_BATCH_REUSE"));
+        g_GenericChunkBatchReuseObserveOnly =
+            EnvFlagEnabled("OPENSHIM_CHUNK_BATCH_REUSE_OBSERVE") ||
+            EnvFlagEnabled("BZR_CHUNK_BATCH_REUSE_OBSERVE");
+        {
+            bool configured = false;
+            if (TryGetUserConfigBool("Diagnostics", "ChunkBatchReuse", configured))
+                g_GenericChunkBatchReuseEnabled = configured;
+            if (TryGetUserConfigBool("Diagnostics", "ChunkBatchReuseObserve", configured))
+                g_GenericChunkBatchReuseObserveOnly = configured;
+        }
+        LogChunkDiagnostic(
+            "chunkbatch",
+            L"[CHUNKBATCH] generic batch state-version reuse=%hs observeOnly=%hs\n",
+            g_GenericChunkBatchReuseEnabled ? "on" : "off",
+            g_GenericChunkBatchReuseObserveOnly ? "yes" : "no");
         g_ForceGenericChunkNonUnitScale =
             EnvFlagEnabled("OPENSHIM_FORCE_GENERIC_CHUNK_NON_UNIT_SCALE") ||
             EnvFlagEnabled("BZR_FORCE_GENERIC_CHUNK_NON_UNIT_SCALE");
@@ -26881,9 +27262,15 @@ namespace BZROpenShim
         g_ChunkProxyBillboardSet = nullptr;
         g_ChunkProxySlots.clear();
         g_GenericChunkBatchManualObject = nullptr;
+        // The recorded visibility described the object just dropped.
+        g_GenericChunkBatchVisible = false;
         g_GenericChunkBatchSceneNode = nullptr;
         g_GenericChunkBatchSceneManager = nullptr;
         g_GenericChunkBatchSectionCreated = false;
+        // Process/scene shutdown drops the cached geometry with the object it
+        // lived in, so reuse can never straddle a lifetime boundary.
+        g_GenericChunkBatchBuiltVersion = ChunkBatchInvalidation::kUnbuiltVersion;
+        g_GenericChunkBatchBuiltMaterial.clear();
         g_GenericChunkBatchRuntimeAvailable = true;
         g_GenericChunkBatchEligibility[0] = -1;
         g_GenericChunkBatchEligibility[1] = -1;
