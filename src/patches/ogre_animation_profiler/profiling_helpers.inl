@@ -240,6 +240,33 @@
             return PassSchemeContains(pass, "glow");
         }
 
+        // Periodic proof that an isolation arm is really suppressing something.
+        // The interval report only runs with collection enabled, and the most
+        // valuable isolation captures are the profiler-disabled ones, so those
+        // would otherwise have no evidence that the arm engaged at all.
+        void ReportIsolationProgress()
+        {
+            const unsigned mask = g_IsolationMask.load(std::memory_order_relaxed);
+            if (mask == 0)
+                return;
+            const DWORD now = static_cast<DWORD>(GetTickCount64());
+            DWORD last = g_IsolationLogTick.load(std::memory_order_relaxed);
+            if (last != 0 && now - last < 2000u)
+                return;
+            if (!g_IsolationLogTick.compare_exchange_strong(
+                    last, now, std::memory_order_relaxed))
+            {
+                return;
+            }
+            LogShimA(
+                LogLevel::Warn,
+                kComponent,
+                "[OgreProfile][Isolation] mask=0x%X suppressedTotal=%llu -- capture is NOT stock rendering",
+                mask,
+                static_cast<unsigned long long>(
+                    g_IsolatedRenderables.load(std::memory_order_relaxed)));
+        }
+
         uint32_t HashPointer(const void* pointer)
         {
             uintptr_t value = reinterpret_cast<uintptr_t>(pointer);

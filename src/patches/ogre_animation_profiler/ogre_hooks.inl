@@ -24,6 +24,17 @@
 
             if (!g_Enabled.load(std::memory_order_relaxed))
             {
+                if (g_IsolationMask.load(std::memory_order_relaxed) != 0)
+                {
+                    // Shadow isolation classifies a renderable by Ogre's
+                    // re-entrant shadow-texture render, so the scene depth has
+                    // to be tracked even with collection off -- otherwise the
+                    // arm silently suppresses nothing and reports a null result.
+                    SceneRenderScope isolationScope;
+                    real(self, camera, viewport, includeOverlays);
+                    ReportIsolationProgress();
+                    return;
+                }
                 real(self, camera, viewport, includeOverlays);
                 return;
             }
