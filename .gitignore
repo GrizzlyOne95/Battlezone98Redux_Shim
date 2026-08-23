@@ -33,6 +33,8 @@
 !reverse_engineering/analyze_headlight_terminator.py
 !reverse_engineering/analyze_chunk_batch_reuse.py
 !reverse_engineering/analyze_chunk_batch_presentmon.py
+!reverse_engineering/analyze_presentmon_runs.py
+!reverse_engineering/analyze_cpu_samples.py
 !reverse_engineering/analyze_fourteam_phase1.py
 !reverse_engineering/bzrnet_server/*.py
 !reverse_engineering/decompilation_from_1.5_exe-pdb/package_clean_pdb_c.py
