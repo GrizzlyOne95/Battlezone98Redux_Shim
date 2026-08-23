@@ -596,6 +596,7 @@ namespace BZROpenShim
         std::atomic<uint64_t> g_UnobservedSubmissions{ 0 };
         std::atomic<unsigned> g_IsolationMask{ 0 };
         std::atomic<uint64_t> g_IsolatedRenderables{ 0 };
+        std::atomic<DWORD> g_IsolationLogTick{ 0 };
         std::atomic<uint64_t> g_DrawCalls{ 0 };
         std::atomic<uint64_t> g_DrawVertices{ 0 };
         std::atomic<uint64_t> g_DrawIndexedCalls{ 0 };
