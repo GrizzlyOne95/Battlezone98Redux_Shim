@@ -2339,19 +2339,59 @@ namespace BZROpenShim
         constexpr ULONGLONG kMultiplayerFlagSubmitStaleMs = 2000;
         constexpr ULONGLONG kMultiplayerFlagApplyRetryMs = 500;
 
-        template<typename T>
-        static T ResolveOgreProc(const char* name)
+        // Resolves one decorated export from the shipped OgreMain.dll, caching
+        // both outcomes.
+        //
+        // Caching the *failure* is the point. A caller written as
+        // `if (!fn) fn = ResolveOgreProc<T>("...")` retries forever when the
+        // name is wrong, because the field it guards on can never be filled.
+        // That is not hypothetical: one mis-decorated name in
+        // GetHeadlightOgreApi -- `Q` where Ogre::MovableObject::getCastShadows
+        // is virtual, so `U` -- turned into a GetProcAddress per emission light
+        // per frame and measured 45% of the main thread's CPU in an 80-craft
+        // battle. The call sites have been repaired, but the resolver is the
+        // place where a *future* typo stops being able to recreate that.
+        //
+        // A miss is only cached once OgreMain is actually loaded; a lookup made
+        // before the module exists is a timing answer, not an answer about the
+        // name, and must not be recorded as one.
+        static void* ResolveOgreProcRaw(const char* name)
         {
             if (!name || !*name)
                 return nullptr;
 
-            static HMODULE ogreMain = nullptr;
-            if (!ogreMain)
-                ogreMain = GetModuleHandleA("OgreMain.dll");
+            static std::mutex cacheMutex;
+            static std::unordered_map<std::string, void*> cache;
+
+            const HMODULE ogreMain = GetModuleHandleA("OgreMain.dll");
             if (!ogreMain)
                 return nullptr;
 
-            return reinterpret_cast<T>(GetProcAddress(ogreMain, name));
+            std::lock_guard<std::mutex> lock(cacheMutex);
+            const auto existing = cache.find(name);
+            if (existing != cache.end())
+                return existing->second;
+
+            void* const resolved =
+                reinterpret_cast<void*>(GetProcAddress(ogreMain, name));
+            cache.emplace(name, resolved);
+            if (!resolved)
+            {
+                // One warning per distinct name, for the lifetime of the
+                // process. A null Ogre entry point degrades a feature silently,
+                // which is exactly how the getCastShadows typo survived.
+                Log(L"[OGRE-EXPORTS] WARNING: OgreMain.dll has no export '%hs'. "
+                    L"The feature using it will be degraded; the lookup will not "
+                    L"be retried.\n",
+                    name);
+            }
+            return resolved;
+        }
+
+        template<typename T>
+        static T ResolveOgreProc(const char* name)
+        {
+            return reinterpret_cast<T>(ResolveOgreProcRaw(name));
         }
 
         // The render-bridge offsets do not hold a bridge on every object that
@@ -14631,6 +14671,70 @@ namespace BZROpenShim
                 static_cast<int>(_countof(audit)) - unresolved,
                 static_cast<int>(_countof(audit)));
             return api;
+        }
+
+        // Startup sweep over the Ogre exports the shim depends on in hot paths.
+        //
+        // ResolveOgreProcRaw already warns once per bad name, but only when
+        // something asks for it -- so a typo in a feature that has not run yet
+        // stays invisible until it does, and then it is a runtime warning
+        // rather than a startup one. This forces the load-bearing names to
+        // resolve as soon as OgreMain is present, so a bad decoration is a
+        // single clear line in the log before any frame is drawn.
+        //
+        // The list is deliberately short: hot-path entry points, plus the
+        // headlight/light API by way of GetHeadlightOgreApi's own audit. It can
+        // drift from the full set of names the shim uses; when it does, the
+        // consequence is only that those names are reported later, by the
+        // resolver, rather than here.
+        static void VerifyExpectedOgreExportsIfPossible()
+        {
+            static bool verified = false;
+            if (verified || !GetModuleHandleA("OgreMain.dll"))
+                return;
+            verified = true;
+
+            static const char* const kHotPathExports[] = {
+                "?getRenderQueue@SceneManager@Ogre@@UAEPAVRenderQueue@2@XZ",
+                "?getCurrentViewport@SceneManager@Ogre@@QBEPAVViewport@2@XZ",
+                "?getCamera@Viewport@Ogre@@QBEPAVCamera@2@XZ",
+                "?getNumSubEntities@Entity@Ogre@@QBEIXZ",
+                "?getSubEntity@Entity@Ogre@@QBEPAVSubEntity@2@I@Z",
+                "?_notifyCurrentCamera@Entity@Ogre@@UAEXPAVCamera@2@@Z",
+                "?_updateRenderQueue@Entity@Ogre@@UAEXPAVRenderQueue@2@@Z",
+                "?setVisible@MovableObject@Ogre@@UAEX_N@Z",
+                "?setPosition@Node@Ogre@@UAEXMMM@Z",
+                "?setOrientation@Node@Ogre@@UAEXMMMM@Z",
+                "?getRootSceneNode@SceneManager@Ogre@@UAEPAVSceneNode@2@XZ",
+                "?attachObject@SceneNode@Ogre@@UAEXPAVMovableObject@2@@Z",
+                "?getDerivedPosition@Camera@Ogre@@QBEABVVector3@2@XZ",
+            };
+
+            int missing = 0;
+            for (const char* const name : kHotPathExports)
+            {
+                if (!ResolveOgreProcRaw(name))
+                {
+                    ++missing;
+                }
+            }
+
+            // Forces the twenty light entry points to resolve and audit now
+            // rather than on the first emission light of the first battle.
+            GetHeadlightOgreApi();
+
+            if (missing == 0)
+            {
+                Log(L"[OGRE-EXPORTS] Startup verification: %d of %d hot-path exports resolved\n",
+                    static_cast<int>(_countof(kHotPathExports)),
+                    static_cast<int>(_countof(kHotPathExports)));
+            }
+            else
+            {
+                Log(L"[OGRE-EXPORTS] WARNING: startup verification found %d of %d "
+                    L"hot-path exports missing; see the per-name warnings above\n",
+                    missing, static_cast<int>(_countof(kHotPathExports)));
+            }
         }
 
         // Full parameter dump for one Ogre Light. This is the instrument that
@@ -27462,6 +27566,7 @@ namespace BZROpenShim
         InitializeGlobalTurboConfig();
         InitializeHeadlightConfig();
         InstallEmissionLightFixIfPossible();
+        VerifyExpectedOgreExportsIfPossible();
         InitializeJetFlamesConfig();
         InitializeUnitVoConfig();
         // Must run before the game reaches BZRNet init: the requested UDP port
@@ -27500,6 +27605,7 @@ namespace BZROpenShim
         InstallParticleTemplateDedupeHookIfPossible();
         InstallUiManualObjectDedupeHookIfPossible();
         InstallEmissionLightFixIfPossible();
+        VerifyExpectedOgreExportsIfPossible();
         InstallSceneTeardownForgetHooksIfPossible();
         InstallEntityFrustumCullingIfEnabled();
         InstallMissionTransitionSeamIfPossible();
