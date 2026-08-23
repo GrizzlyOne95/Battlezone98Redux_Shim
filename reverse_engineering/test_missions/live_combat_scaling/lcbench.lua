@@ -15,6 +15,18 @@ local VALID_SCENARIOS = {
     -- hundreds of metres apart, so only one cluster can be inside the frustum
     -- at a time and the rest are off-screen or behind the camera.
     dispersed = true,
+    -- Four-team distant battle. Two opposing fronts sit side by side ahead of
+    -- the player at the configured distance; each front is a pair of teams
+    -- facing each other, giving teams 2/3 and 4/5 in a single frustum. The
+    -- layout is identical for both variants so the only difference between the
+    -- captures is whether weapons are discharged.
+    fourteam = true,
+    fourteam_fire = true,
+    -- Same layout again, but the engagement is started once through the native
+    -- AI instead of being driven by a per-frame Lua loop. Its only purpose is
+    -- to separate the harness's own scripting cost from the cost of the battle,
+    -- so fourteam_fire's frame time is never read as pure render cost.
+    fourteam_ai = true,
 }
 
 local VALID_UNIT_ODFS = {
@@ -67,6 +79,9 @@ local function readConfig()
     elseif (scenario == "firing" or scenario == "flight" or
             scenario == "combat") and count < 2 then
         count = 2
+    elseif (scenario == "fourteam" or scenario == "fourteam_fire" or
+            scenario == "fourteam_ai") and count < 4 then
+        count = 4
     end
     distance = math.max(20.0, math.min(2000.0, distance or 50.0))
     if orientation ~= "away" then
@@ -207,6 +222,50 @@ local function faceCluster(clusterIndex)
     return true
 end
 
+-- Four-team layout.
+--
+-- index -> (front, line, rank):
+--   front 0 sits left of the sight line, front 1 right of it;
+--   within a front, line 0 is the near battle line and line 1 the far one,
+--   FOURTEAM_LINE_GAP metres beyond it and facing back toward the near line;
+--   rank spreads the units of one line laterally.
+-- Team number is 2 + front * 2 + line, so the four teams are 2, 3, 4 and 5 and
+-- each front is a genuine two-team engagement rather than one team split.
+--
+-- The lateral extents are chosen so the whole battle stays inside the player's
+-- frustum at the distances this benchmark is run at. That matters because craft
+-- outside the frustum are culled, and a formation that spills off-screen would
+-- quietly measure a smaller battle than the one it claims to.
+local FOURTEAM_LINE_GAP = 60.0
+local FOURTEAM_RANK_SPACING = 7.0
+local FOURTEAM_FRONT_OFFSET = 85.0
+
+local function fourTeamSlot(index)
+    local front = index % 2
+    local ordinal = math.floor(index / 2)
+    return front, ordinal % 2, math.floor(ordinal / 2)
+end
+
+local function fourTeamTeam(index)
+    local front, line = fourTeamSlot(index)
+    return 2 + front * 2 + line
+end
+
+local function fourTeamPosition(playerPos, transform, index, rankCount)
+    local front, line, rank = fourTeamSlot(index)
+    local forward = BENCH_DISTANCE + line * FOURTEAM_LINE_GAP
+    local lateral = (front == 0 and -1.0 or 1.0) * FOURTEAM_FRONT_OFFSET +
+        (rank - (rankCount - 1) * 0.5) * FOURTEAM_RANK_SPACING
+    local frontX = transform.front_x or 0.0
+    local frontZ = transform.front_z or 1.0
+    local rightX = transform.right_x or 1.0
+    local rightZ = transform.right_z or 0.0
+    return SetVector(
+        playerPos.x + frontX * forward + rightX * lateral,
+        playerPos.y,
+        playerPos.z + frontZ * forward + rightZ * lateral)
+end
+
 local function formationPosition(playerPos, transform, index, teamSide)
     local columns = 10
     local row = math.floor(index / columns)
@@ -248,6 +307,13 @@ local function spawnUnits(player)
         BENCH_SCENARIO == "flight" or
         BENCH_SCENARIO == "combat" or
         BENCH_SCENARIO == "dispersed"
+    local fourTeam = BENCH_SCENARIO == "fourteam" or
+        BENCH_SCENARIO == "fourteam_fire" or
+        BENCH_SCENARIO == "fourteam_ai"
+    -- Ranks are shared by every line so the four blocks stay the same shape
+    -- whatever the population is.
+    local fourTeamRanks = math.max(1, math.ceil(BENCH_COUNT / 4))
+    local spawnedByIndex = {}
 
     for index = 0, BENCH_COUNT - 1 do
         local side = 0
@@ -259,14 +325,25 @@ local function spawnUnits(player)
             team = side < 0 and 2 or 3
         end
 
+        if fourTeam then
+            team = fourTeamTeam(index)
+        end
+
         local position
-        if BENCH_SCENARIO == "dispersed" then
+        if fourTeam then
+            position = fourTeamPosition(
+                playerPos, transform, index, fourTeamRanks)
+        elseif BENCH_SCENARIO == "dispersed" then
             position = dispersedPosition(playerPos, transform, index)
         else
             position = formationPosition(playerPos, transform, index, side)
         end
         local handle = BuildObject(BENCH_UNIT_ODF, team, position)
         if IsValid(handle) then
+            -- Keyed by spawn index as well as appended, because the four-team
+            -- pairing addresses units by their layout slot and must not be
+            -- silently shifted by a single failed BuildObject.
+            spawnedByIndex[index] = handle
             units[#units + 1] = handle
             SetIndependence(handle, BENCH_SCENARIO == "ai_idle" and 1 or 0)
             Stop(handle, 1)
@@ -276,7 +353,23 @@ local function spawnUnits(player)
         end
     end
 
-    if BENCH_SCENARIO == "dispersed" then
+    if fourTeam then
+        -- Pair the near-line unit of a rank with the far-line unit of the same
+        -- rank in the same front, so every engagement is across its own front
+        -- and no unit shoots into the neighbouring battle.
+        for index = 0, BENCH_COUNT - 1 do
+            local front, line, rank = fourTeamSlot(index)
+            if line == 0 then
+                local partner = (2 * rank + 1) * 2 + front
+                local a = spawnedByIndex[index]
+                local b = spawnedByIndex[partner]
+                if a and b then
+                    opponents[a] = b
+                    opponents[b] = a
+                end
+            end
+        end
+    elseif BENCH_SCENARIO == "dispersed" then
         -- Pair consecutive spawn indices. Within a cluster those two units sit
         -- 40 m apart on the radial axis facing each other, so every impact and
         -- every chunklet it spawns belongs to that cluster and nothing fires
@@ -317,7 +410,7 @@ local function beginWorkload()
                 Goto(handle, moveTargets[index], 1)
             end
         end
-    elseif BENCH_SCENARIO == "combat" then
+    elseif BENCH_SCENARIO == "combat" or BENCH_SCENARIO == "fourteam_ai" then
         for _, handle in ipairs(units) do
             local target = opponents[handle]
             if IsValid(handle) and IsValid(target) then
@@ -386,7 +479,7 @@ function Update(dt)
     elapsed = elapsed + (dt or 0.0)
 
     if BENCH_SCENARIO == "firing" or BENCH_SCENARIO == "flight" or
-       BENCH_SCENARIO == "dispersed" then
+       BENCH_SCENARIO == "dispersed" or BENCH_SCENARIO == "fourteam_fire" then
         maintainFiringWorkload()
     end
 
