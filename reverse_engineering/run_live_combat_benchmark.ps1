@@ -81,6 +81,21 @@ if ($ExternalPresentMon -and -not (Test-Path -LiteralPath $presentMonExe)) {
     throw "PresentMon was requested but not found: $presentMonExe"
 }
 
+if ($ExternalPresentMon) {
+    # A benchmark killed mid-run leaves its ETW session behind, and a stale
+    # lcbench session makes every later PresentMon start "Started recording"
+    # and then write no CSV at all. That failure is silent and looks exactly
+    # like a run that produced no frames, so clear the leftovers up front.
+    $staleSessions = @(
+        (logman query -ets 2>$null) |
+            Select-String -Pattern '^(lcbench_\S+)' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value })
+    foreach ($stale in $staleSessions) {
+        Write-Host "Terminating stale PresentMon session $stale"
+        & $presentMonExe --terminate_existing_session --session_name $stale *> $null
+    }
+}
+
 if ($KillExisting) {
     Get-Process -Name "battlezone98redux" -ErrorAction SilentlyContinue |
         Stop-Process -Force
