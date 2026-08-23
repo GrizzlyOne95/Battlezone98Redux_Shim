@@ -5,7 +5,7 @@ param(
     [string[]]$Renderer = @("DX11"),
     [ValidateSet(
         "quiet", "idle", "movement", "firing", "flight", "ai_idle", "combat",
-        "dispersed")]
+        "dispersed", "fourteam", "fourteam_fire", "fourteam_ai")]
     [string[]]$Scenario = @("quiet", "idle", "movement", "firing", "combat"),
     [ValidateSet(
         "svtank", "svfigh", "avtank", "avfigh", "avrckt", "avartl",
@@ -26,7 +26,13 @@ param(
     [string]$OutputRoot = "",
     [switch]$KillExisting,
     [switch]$ProfilerDisabled,
-    [switch]$ExternalPresentMon
+    [switch]$ExternalPresentMon,
+    # Measurement-only render isolation passed through to the profiler as
+    # OPENSHIM_PROFILE_ISOLATE. A run using this is NOT stock rendering and the
+    # value is recorded in metadata.json so a capture can never be mistaken for
+    # a baseline.
+    [ValidateSet("none", "glow", "shadow", "glow+shadow")]
+    [string]$Isolate = "none"
 )
 
 $ErrorActionPreference = "Stop"
@@ -95,6 +101,8 @@ $originalProfileCsv = if (Test-Path $profileCsv) {
 } else { $null }
 $priorProfileEnv = [Environment]::GetEnvironmentVariable(
     "OPENSHIM_PROFILE_OGRE_ANIMATION", "Process")
+$priorIsolateEnv = [Environment]::GetEnvironmentVariable(
+    "OPENSHIM_PROFILE_ISOLATE", "Process")
 
 # Redux may pause mission startup for loading VO. Bounded synthetic Space input
 # mirrors launch_mission_live.ps1 and is used only after that exact log cue.
@@ -197,6 +205,10 @@ try {
         "OPENSHIM_PROFILE_OGRE_ANIMATION",
         $(if ($ProfilerDisabled) { "0" } else { "1" }),
         "Process")
+    [Environment]::SetEnvironmentVariable(
+        "OPENSHIM_PROFILE_ISOLATE",
+        $(if ($Isolate -eq "none") { $null } else { $Isolate }),
+        "Process")
 
     foreach ($rendererName in $Renderer) {
         Set-RendererConfig $rendererName
@@ -230,6 +242,10 @@ try {
                             $population,
                             $spawnDistance.ToString("0", [Globalization.CultureInfo]::InvariantCulture),
                             $viewOrientation)
+                        if ($Isolate -ne "none") {
+                            $runId = "{0}_iso-{1}" -f @(
+                                $runId, $Isolate.Replace("+", "-"))
+                        }
                         $runRoot = Join-Path $sessionRoot $runId
                         New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
                         Write-Host "Starting $runId"
@@ -341,6 +357,7 @@ try {
                             orientation = $viewOrientation
                             profiler_enabled = -not $ProfilerDisabled
                             external_presentmon = [bool]$ExternalPresentMon
+                            isolate = $Isolate
                             warmup_seconds = $WarmupSeconds
                             measure_seconds = $MeasureSeconds
                             cluster_count = $ClusterCount
@@ -378,6 +395,8 @@ try {
     }
     [Environment]::SetEnvironmentVariable(
         "OPENSHIM_PROFILE_OGRE_ANIMATION", $priorProfileEnv, "Process")
+    [Environment]::SetEnvironmentVariable(
+        "OPENSHIM_PROFILE_ISOLATE", $priorIsolateEnv, "Process")
 }
 
 Write-Host "Benchmark session complete: $sessionRoot"
