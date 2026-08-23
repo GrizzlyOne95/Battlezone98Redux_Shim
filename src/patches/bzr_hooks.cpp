@@ -11,6 +11,8 @@
 #include "native_ui.h"
 #include "ogre_animation_profiler.h"
 #include "ogre_profiler_algorithms.h"
+#include "weapon_convergence.h"
+#include "headlight_falloff.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -916,6 +918,20 @@ namespace BZROpenShim
         //       groundPos = 0
         // So gPos is stale whenever the crosshair is sitting on something, and
         // reading it unconditionally aims at wherever the ground last was.
+        //
+        // Reticle::FindGroundPos (0x005BCCA0) only writes gPos when its ray
+        // actually hits terrain:
+        //
+        //   if (TerrainRaycast(...) != 0) {
+        //       this->gPos = origin + t * direction;   ; +0xCC..+0xD4
+        //   }
+        //   return hit;                                ; stored to this->+0xA8
+        //
+        // So +0xA8 is the per-frame "the crosshair is on the ground" flag, and
+        // gPos keeps the last hit forever once the crosshair leaves the
+        // terrain. Convergence has to consult the flag, not just gPos, or
+        // aiming at the sky keeps firing at wherever the ground last was.
+        constexpr uintptr_t kSmartReticleGroundHitAddr = 0x025CE778;     // +0xA8
         constexpr uintptr_t kSmartReticleSelectObjectAddr = 0x025CE77C;  // +0xAC
         constexpr uintptr_t kSmartReticlePositionAddr = 0x025CE79C;      // +0xCC gPos
         // 0x00886B20 is NOT a reticle range variable: it is a pooled read-only
@@ -962,8 +978,38 @@ namespace BZROpenShim
         // The weapon's _OBJ76 carries its MAT_3D at kObj76TransformOffset, not
         // at the object head. Stock pushes obj+0x20 into RefreshWeaponTransform
         // at 0x005F0A38.
+        //
+        // That MAT_3D is NOT a world transform. Weapon::Control (Redux
+        // 0x00611610) recomputes, every frame:
+        //
+        //   this->M = MountWorldMatrix(this)            ; weapon+0x28
+        //   this->I = Matrix_Inverse(this->M)           ; weapon+0x68
+        //
+        // where MountWorldMatrix (0x006116A0) is
+        // obj_rel_parent_matrix(this->hard /*weapon+0x14*/, nullptr) with its
+        // position replaced by the muzzle offset at weapon+0x1C pushed through
+        // that matrix. So M is the muzzle frame in world space.
+        //
+        // Every firing site in the exe then spawns ordnance from
+        //
+        //   fireMatrix = Matrix_Multiply(weapon->obj->mat /*obj+0x20*/, M)
+        //
+        // (0x005B1E10, 0x005B2010, 0x005B8FF0, 0x005D6330, 0x005DFCB0,
+        // 0x005E1EA0, 0x004F2210, 0x00582190, ... all share the shape
+        // `FUN_0081fe60(out, *(weapon+0x10)+0x20, weapon+0x28)`), and
+        // Matrix_Multiply (0x0081FE60) is row-vector `inner * outer`.
+        //
+        // The consequence for convergence: obj+0x20 is the weapon's transform
+        // *in the mount frame*, so a world-space basis written there is wrong
+        // by the whole mount transform, and its position field is a mount-local
+        // offset that stock deliberately preserves (Hovercraft::UpdateWeaponAim
+        // saves it at 0x005F0930 and restores it after RefreshWeaponTransform).
+        constexpr size_t kWeaponMountWorldMatrixOffset = 0x28;
+        constexpr size_t kWeaponMountInverseMatrixOffset = 0x68;
         constexpr int kConvergenceWeaponSlotCount = 5;
-        constexpr float kConvergenceDirectionEpsilon = 0.001f;
+        // The convergence tuning constants (minimum target distance, maximum
+        // deviation from the stock aim) live alongside the math in
+        // include/weapon_convergence.h.
 
         // Scrap/pilot text positions used by the stock HUD draw path. The
         // legacy layout keeps their relative spacing but moves the combined
@@ -1225,6 +1271,9 @@ namespace BZROpenShim
         static bool g_WingmanWeaponAimWrapperActive = false;
         static bool g_PlayerReticleHovercraftPatchActive = false;
         static bool g_PlayerReticleConvergenceLayoutFaultLogged = false;
+        static bool g_PlayerReticleConvergenceMountFaultLogged = false;
+        static bool g_PlayerReticleConvergenceSkyStandDownLogged = false;
+        static bool g_PlayerReticleConvergenceLayoutCheckLogged = false;
         static constexpr int kPlayerReticleConvergenceLogLimit = 6;
         static constexpr ULONGLONG kPlayerReticleConvergenceLogIntervalMs = 10000;
         static int g_PlayerReticleConvergenceLogCount = 0;
@@ -2178,6 +2227,11 @@ namespace BZROpenShim
         using FnOgreGetLightFloat = float(__thiscall*)(void*);
         using FnOgreGetLightVisible = bool(__thiscall*)(void*);
         using FnOgreSetSpotlightRange = void(__thiscall*)(void*, const float*, const float*, float);
+        using FnOgreSetAttenuation = void(__thiscall*)(void*, float, float, float, float);
+        using FnOgreGetLightType = int(__thiscall*)(void*);
+        using FnOgreGetLightVector3 = const OgreVector3*(__thiscall*)(void*);
+        using FnOgreGetLightDerivedPosition = const OgreVector3*(__thiscall*)(void*, bool);
+        using FnOgreGetCastShadows = bool(__thiscall*)(void*);
         using FnOgreGetRenderQueue = void*(__thiscall*)(void*);
         using FnOgreGetCurrentViewport = void*(__thiscall*)(void*);
         using FnOgreViewportGetCamera = void*(__thiscall*)(void*);
@@ -11239,80 +11293,96 @@ namespace BZROpenShim
             return true;
         }
 
-        struct ConvergenceVec3
-        {
-            float x = 0.0f;
-            float y = 0.0f;
-            float z = 0.0f;
-        };
+        // The coordinate-space math lives in include/weapon_convergence.h so it
+        // can be exercised on the host by tests/weapon_convergence_tests.cpp
+        // without dragging in Windows or the live game layout.
+        using ConvergenceVec3 = WeaponConvergence::Vec3;
+        using ConvergenceMatrix = WeaponConvergence::Matrix;
 
-        struct ConvergenceMatrix
+        // One breadcrumb per session the first time the crosshair leaves the
+        // terrain, proving the stale-gPos guard is live rather than silently
+        // never taken.
+        static void LogPlayerConvergenceSkyStandDownOnce()
         {
-            float rightX, rightY, rightZ;
-            float upX, upY, upZ;
-            float frontX, frontY, frontZ;
-            uint8_t padding[4];
-            double positionX, positionY, positionZ;
-        };
-
-        static_assert(sizeof(ConvergenceMatrix) == 64, "Unexpected weapon transform size");
-
-        static ConvergenceVec3 CrossConvergenceVectors(
-            const ConvergenceVec3& lhs,
-            const ConvergenceVec3& rhs)
-        {
-            return {
-                lhs.y * rhs.z - lhs.z * rhs.y,
-                lhs.z * rhs.x - lhs.x * rhs.z,
-                lhs.x * rhs.y - lhs.y * rhs.x,
-            };
+            if (g_PlayerReticleConvergenceSkyStandDownLogged)
+                return;
+            g_PlayerReticleConvergenceSkyStandDownLogged = true;
+            Log(L"[CONVERGE] player reticle convergence stood down: no object and no ground hit "
+                L"(Reticle+0xA8 == 0), so gPos is stale; stock aim retained\n");
         }
 
-        static bool NormalizeConvergenceVector(ConvergenceVec3& value)
+        // One breadcrumb per session if the mount frame at weapon+0x28 does not
+        // look like the orthonormal MAT_3D Weapon::Control writes there. That is
+        // the single assumption the whole convergence solution rests on, so it
+        // gets its own diagnostic rather than being folded into the generic
+        // layout fault below.
+        static void LogPlayerConvergenceMountFault(
+            void* weapon,
+            int slot,
+            const ConvergenceMatrix& mountWorld)
         {
-            const float lengthSquared = value.x * value.x + value.y * value.y + value.z * value.z;
-            if (!std::isfinite(lengthSquared) ||
-                lengthSquared <= kConvergenceDirectionEpsilon * kConvergenceDirectionEpsilon)
-            {
-                return false;
-            }
-
-            const float inverseLength = 1.0f / std::sqrt(lengthSquared);
-            value.x *= inverseLength;
-            value.y *= inverseLength;
-            value.z *= inverseLength;
-            return true;
+            if (g_PlayerReticleConvergenceMountFaultLogged)
+                return;
+            g_PlayerReticleConvergenceMountFaultLogged = true;
+            Log(L"[CONVERGE] player reticle convergence rejected weapon=0x%p slot=%d: mount frame at +0x%X is not an orthonormal MAT_3D "
+                L"(right=(%.3f, %.3f, %.3f) up=(%.3f, %.3f, %.3f) front=(%.3f, %.3f, %.3f) pos=(%.1f, %.1f, %.1f))\n",
+                weapon,
+                slot,
+                static_cast<uint32_t>(kWeaponMountWorldMatrixOffset),
+                static_cast<double>(mountWorld.rightX),
+                static_cast<double>(mountWorld.rightY),
+                static_cast<double>(mountWorld.rightZ),
+                static_cast<double>(mountWorld.upX),
+                static_cast<double>(mountWorld.upY),
+                static_cast<double>(mountWorld.upZ),
+                static_cast<double>(mountWorld.frontX),
+                static_cast<double>(mountWorld.frontY),
+                static_cast<double>(mountWorld.frontZ),
+                mountWorld.positionX,
+                mountWorld.positionY,
+                mountWorld.positionZ);
         }
 
-        static bool BuildConvergenceMatrix(
-            const ConvergenceVec3& origin,
-            ConvergenceVec3 direction,
-            ConvergenceMatrix& outMatrix)
+        // Weapon::Control caches Matrix_Inverse(M) at weapon+0x68 right after it
+        // writes M at weapon+0x28. Comparing our own inverse against that cached
+        // one, once per session, is a direct assertion that both offsets really
+        // are the fields the decompile says they are -- if the layout ever
+        // shifts, this prints a mismatch instead of the feature silently aiming
+        // through a garbage frame.
+        static void LogPlayerConvergenceLayoutCrossCheck(
+            void* weapon,
+            const ConvergenceMatrix& computedInverse)
         {
-            if (!NormalizeConvergenceVector(direction))
-                return false;
+            if (g_PlayerReticleConvergenceLayoutCheckLogged)
+                return;
+            g_PlayerReticleConvergenceLayoutCheckLogged = true;
 
-            ConvergenceVec3 right = {};
-            if (direction.x * direction.x + direction.z * direction.z >= 0.02f)
-            {
-                right = CrossConvergenceVectors({ 0.0f, 1.0f, 0.0f }, direction);
-                if (!NormalizeConvergenceVector(right))
-                    return false;
-            }
-            else
-            {
-                right = { 1.0f, 0.0f, 0.0f };
-            }
+            const ConvergenceMatrix cached = *reinterpret_cast<const ConvergenceMatrix*>(
+                reinterpret_cast<const uint8_t*>(weapon) + kWeaponMountInverseMatrixOffset);
 
-            const ConvergenceVec3 up = CrossConvergenceVectors(direction, right);
-            outMatrix = {
-                right.x, right.y, right.z,
-                up.x, up.y, up.z,
-                direction.x, direction.y, direction.z,
-                {},
-                origin.x, origin.y, origin.z,
-            };
-            return true;
+            float worstRotation = 0.0f;
+            const float* lhs = &computedInverse.rightX;
+            const float* rhs = &cached.rightX;
+            for (int i = 0; i < 9; ++i)
+            {
+                const float delta = std::fabs(lhs[i] - rhs[i]);
+                if (delta > worstRotation)
+                    worstRotation = delta;
+            }
+            const double worstPosition = (std::max)(
+                (std::max)(std::fabs(computedInverse.positionX - cached.positionX),
+                           std::fabs(computedInverse.positionY - cached.positionY)),
+                std::fabs(computedInverse.positionZ - cached.positionZ));
+
+            Log(L"[CONVERGE] weapon layout cross-check weapon=0x%p M@+0x%X I@+0x%X worstRotationDelta=%.6f worstPositionDelta=%.4f (%hs)\n",
+                weapon,
+                static_cast<uint32_t>(kWeaponMountWorldMatrixOffset),
+                static_cast<uint32_t>(kWeaponMountInverseMatrixOffset),
+                static_cast<double>(worstRotation),
+                worstPosition,
+                (worstRotation <= 0.01f && worstPosition <= 0.5)
+                    ? "layout confirmed"
+                    : "LAYOUT MISMATCH -- convergence offsets need re-deriving");
         }
 
         static void ApplyLocalPlayerReticleConvergence(void* craft)
@@ -11353,6 +11423,16 @@ namespace BZROpenShim
                 }
                 else
                 {
+                    // No object under the crosshair and no ground hit this
+                    // frame means there is no reticle point at all -- the
+                    // player is aiming at the sky. Stand down and leave the
+                    // stock aim, which already points straight down the sight,
+                    // instead of converging on a stale gPos.
+                    if (*reinterpret_cast<const int*>(kSmartReticleGroundHitAddr) == 0)
+                    {
+                        LogPlayerConvergenceSkyStandDownOnce();
+                        return;
+                    }
                     target = *reinterpret_cast<const ConvergenceVec3*>(kSmartReticlePositionAddr);
                 }
 
@@ -11360,7 +11440,9 @@ namespace BZROpenShim
                     return;
 
                 int retargeted = 0;
-                ConvergenceVec3 lastOrigin = {};
+                int clamped = 0;
+                ConvergenceVec3 lastMuzzle = {};
+                float lastResidualDegrees = 0.0f;
                 for (int slot = 0; slot < kConvergenceWeaponSlotCount; ++slot)
                 {
                     void* weapon = carrierGetWeapon(carrier, slot);
@@ -11372,25 +11454,44 @@ namespace BZROpenShim
                     if (!weaponObject)
                         continue;
 
-                    auto* transform = reinterpret_cast<ConvergenceMatrix*>(
-                        reinterpret_cast<uint8_t*>(weaponObject) + kObj76TransformOffset);
-                    const ConvergenceVec3 origin = {
-                        static_cast<float>(transform->positionX),
-                        static_cast<float>(transform->positionY),
-                        static_cast<float>(transform->positionZ),
-                    };
-                    ConvergenceMatrix converged = {};
-                    if (!BuildConvergenceMatrix(
-                            origin,
-                            { target.x - origin.x, target.y - origin.y, target.z - origin.z },
-                            converged))
+                    // The mount frame the engine itself fires through. Reading
+                    // it (rather than composing the _OBJ76 parent chain here)
+                    // guarantees convergence solves the same equation the
+                    // ordnance spawn evaluates, even if Weapon::Control has not
+                    // refreshed M yet this frame.
+                    const ConvergenceMatrix mountWorld =
+                        *reinterpret_cast<const ConvergenceMatrix*>(
+                            reinterpret_cast<const uint8_t*>(weapon) +
+                            kWeaponMountWorldMatrixOffset);
+                    if (!WeaponConvergence::IsFinite(mountWorld) ||
+                        !WeaponConvergence::IsRotationOrthonormal(mountWorld))
                     {
+                        LogPlayerConvergenceMountFault(weapon, slot, mountWorld);
                         continue;
                     }
 
-                    *transform = converged;
+                    LogPlayerConvergenceLayoutCrossCheck(
+                        weapon, WeaponConvergence::Invert(mountWorld));
+
+                    auto* transform = reinterpret_cast<ConvergenceMatrix*>(
+                        reinterpret_cast<uint8_t*>(weaponObject) + kObj76TransformOffset);
+
+                    WeaponConvergence::Solution solution = {};
+                    const WeaponConvergence::SolveResult result =
+                        WeaponConvergence::Solve(*transform, mountWorld, target, solution);
+                    if (result == WeaponConvergence::SolveResult::ExceedsDeviationLimit)
+                    {
+                        ++clamped;
+                        continue;
+                    }
+                    if (result != WeaponConvergence::SolveResult::Converged)
+                        continue;
+
+                    *transform = solution.mountLocal;
                     refreshWeaponTransform(weaponObject, transform);
-                    lastOrigin = origin;
+                    lastResidualDegrees = solution.residualDegrees;
+
+                    lastMuzzle = solution.muzzle;
                     ++retargeted;
                 }
 
@@ -11410,19 +11511,21 @@ namespace BZROpenShim
                     {
                         g_PlayerReticleConvergenceLastLogTick = now;
                         ++g_PlayerReticleConvergenceLogCount;
-                        const float dx = target.x - lastOrigin.x;
-                        const float dy = target.y - lastOrigin.y;
-                        const float dz = target.z - lastOrigin.z;
-                        Log(L"[CONVERGE] player reticle convergence applied to %d hardpoint(s) source=%hs muzzle=(%.1f, %.1f, %.1f) target=(%.1f, %.1f, %.1f) distance=%.1f\n",
+                        const float dx = target.x - lastMuzzle.x;
+                        const float dy = target.y - lastMuzzle.y;
+                        const float dz = target.z - lastMuzzle.z;
+                        Log(L"[CONVERGE] player reticle convergence applied to %d hardpoint(s) (clamped=%d) source=%hs muzzle=(%.1f, %.1f, %.1f) target=(%.1f, %.1f, %.1f) distance=%.1f residualError=%.3fdeg\n",
                             retargeted,
+                            clamped,
                             targetSource,
-                            static_cast<double>(lastOrigin.x),
-                            static_cast<double>(lastOrigin.y),
-                            static_cast<double>(lastOrigin.z),
+                            static_cast<double>(lastMuzzle.x),
+                            static_cast<double>(lastMuzzle.y),
+                            static_cast<double>(lastMuzzle.z),
                             static_cast<double>(target.x),
                             static_cast<double>(target.y),
                             static_cast<double>(target.z),
-                            static_cast<double>(std::sqrt(dx * dx + dy * dy + dz * dz)));
+                            static_cast<double>(std::sqrt(dx * dx + dy * dy + dz * dz)),
+                            static_cast<double>(lastResidualDegrees));
                     }
                 }
             }
@@ -13971,6 +14074,19 @@ namespace BZROpenShim
             FnOgreSetSpotlightRange setRange = nullptr;
             FnOgreGetLightVisible getVisible = nullptr;
             FnOgreSetVisible setVisible = nullptr;
+            // Attenuation half of the light. Stock BZR sets this once at
+            // headlight creation (0x0067F599: setAttenuation(600, 1, 0.007,
+            // 0.0002)) and never revisits it, so the shim owns any change.
+            FnOgreSetAttenuation setAttenuation = nullptr;
+            FnOgreGetLightFloat getAttenuationRange = nullptr;
+            FnOgreGetLightFloat getAttenuationConstant = nullptr;
+            FnOgreGetLightFloat getAttenuationLinear = nullptr;
+            FnOgreGetLightFloat getAttenuationQuadratic = nullptr;
+            FnOgreGetLightFloat getPowerScale = nullptr;
+            FnOgreGetLightType getType = nullptr;
+            FnOgreGetLightDerivedPosition getDerivedPosition = nullptr;
+            FnOgreGetLightVector3 getDerivedDirection = nullptr;
+            FnOgreGetCastShadows getCastShadows = nullptr;
         };
 
         struct HeadlightOriginalState
@@ -13978,15 +14094,20 @@ namespace BZROpenShim
             bool hasColour = false;
             bool hasBeam = false;
             bool hasVisible = false;
+            bool hasAttenuation = false;
             OgreColourValue diffuse = {};
             OgreColourValue specular = {};
             float innerAngle = 0.0f;
             float outerAngle = 0.0f;
             float falloff = 1.0f;
             bool visible = true;
+            HeadlightFalloff::Attenuation attenuation = {};
         };
 
         static constexpr DWORD kHeadlightRefreshMs = 200;
+        // The exponent the shim shipped before the falloff repair. Kept only
+        // so the A/B switch can reproduce the hard cone terminator on demand.
+        static constexpr float kHeadlightPreRepairSpotFalloff = 0.35f;
         static constexpr size_t kHeadlightObjectSlotCount = 4096;
         static_assert(kGameObjectArenaSlotCapacity == kHeadlightObjectSlotCount,
                       "arena capacity forward constant out of sync");
@@ -14015,6 +14136,14 @@ namespace BZROpenShim
         static float g_HeadlightColourG = 5.0f;
         static float g_HeadlightColourB = 5.0f;
         static bool g_HeadlightRuntimeActive = false;
+        static bool g_HeadlightLightTraceEnabled = false;
+        // A/B switch for validation: restores the pre-repair constants
+        // (cone falloff 0.35, stock attenuation untouched) so a capture run
+        // can show the hard terminator and its repair from one binary.
+        static bool g_HeadlightFalloffRepairEnabled = true;
+        static std::unordered_set<void*> g_HeadlightFalloffPlanLogged;
+        static int g_HeadlightLightTraceCount = 0;
+        static constexpr int kHeadlightLightTraceLimit = 40;
         static DWORD g_HeadlightLastRefreshTick = 0;
         static std::unordered_map<void*, HeadlightOriginalState> g_HeadlightOriginalStates;
         static InlineDetour32 g_EmissionLightStateDetour = {};
@@ -14057,7 +14186,124 @@ namespace BZROpenShim
             if (!api.setVisible)
                 api.setVisible = ResolveOgreProc<FnOgreSetVisible>(
                     "?setVisible@Light@Ogre@@UAEX_N@Z");
+            if (!api.setAttenuation)
+                api.setAttenuation = ResolveOgreProc<FnOgreSetAttenuation>(
+                    "?setAttenuation@Light@Ogre@@QAEXMMMM@Z");
+            if (!api.getAttenuationRange)
+                api.getAttenuationRange = ResolveOgreProc<FnOgreGetLightFloat>(
+                    "?getAttenuationRange@Light@Ogre@@QBEMXZ");
+            if (!api.getAttenuationConstant)
+                api.getAttenuationConstant = ResolveOgreProc<FnOgreGetLightFloat>(
+                    "?getAttenuationConstant@Light@Ogre@@QBEMXZ");
+            if (!api.getAttenuationLinear)
+                api.getAttenuationLinear = ResolveOgreProc<FnOgreGetLightFloat>(
+                    "?getAttenuationLinear@Light@Ogre@@QBEMXZ");
+            if (!api.getAttenuationQuadratic)
+                api.getAttenuationQuadratic = ResolveOgreProc<FnOgreGetLightFloat>(
+                    "?getAttenuationQuadric@Light@Ogre@@QBEMXZ");
+            if (!api.getPowerScale)
+                api.getPowerScale = ResolveOgreProc<FnOgreGetLightFloat>(
+                    "?getPowerScale@Light@Ogre@@QBEMXZ");
+            if (!api.getType)
+                api.getType = ResolveOgreProc<FnOgreGetLightType>(
+                    "?getType@Light@Ogre@@QBE?AW4LightTypes@12@XZ");
+            if (!api.getDerivedPosition)
+                api.getDerivedPosition = ResolveOgreProc<FnOgreGetLightDerivedPosition>(
+                    "?getDerivedPosition@Light@Ogre@@QBEABVVector3@2@_N@Z");
+            if (!api.getDerivedDirection)
+                api.getDerivedDirection = ResolveOgreProc<FnOgreGetLightVector3>(
+                    "?getDerivedDirection@Light@Ogre@@QBEABVVector3@2@XZ");
+            if (!api.getCastShadows)
+                api.getCastShadows = ResolveOgreProc<FnOgreGetCastShadows>(
+                    "?getCastShadows@MovableObject@Ogre@@QBE_NXZ");
             return api;
+        }
+
+        // Full parameter dump for one Ogre Light. This is the instrument that
+        // decides between the four candidate causes of a hard terrain
+        // terminator -- outer-cone cutoff, attenuation range cutoff,
+        // attenuation curve, or a backend difference -- because every one of
+        // them is visible in these numbers.
+        //
+        // Enable with [Diagnostics] HeadlightLightTrace = 1 (or
+        // OPENSHIM_TRACE_HEADLIGHT_LIGHT=1).
+        static void LogHeadlightLightParameters(void* light, bool isPlayer, const wchar_t* phase)
+        {
+            if (!light)
+                return;
+
+            auto& api = GetHeadlightOgreApi();
+            __try
+            {
+                const int type = api.getType ? api.getType(light) : -1;
+                const OgreVector3* position =
+                    api.getDerivedPosition ? api.getDerivedPosition(light, false) : nullptr;
+                const OgreVector3* direction =
+                    api.getDerivedDirection ? api.getDerivedDirection(light) : nullptr;
+                const OgreColourValue* diffuse = api.getDiffuse ? api.getDiffuse(light) : nullptr;
+                const OgreColourValue* specular = api.getSpecular ? api.getSpecular(light) : nullptr;
+                const float* inner = api.getInnerAngle ? api.getInnerAngle(light) : nullptr;
+                const float* outer = api.getOuterAngle ? api.getOuterAngle(light) : nullptr;
+                const float range = api.getAttenuationRange ? api.getAttenuationRange(light) : -1.0f;
+                const float constant =
+                    api.getAttenuationConstant ? api.getAttenuationConstant(light) : -1.0f;
+                const float linear =
+                    api.getAttenuationLinear ? api.getAttenuationLinear(light) : -1.0f;
+                const float quadratic =
+                    api.getAttenuationQuadratic ? api.getAttenuationQuadratic(light) : -1.0f;
+
+                // The number that actually decides whether the cutoff is
+                // visible: how much light still reaches the terrain at the
+                // instant the range clamp zeroes it. Anything above roughly
+                // 1/255 of a diffuse unit is a step a player can see.
+                const float peakDiffuse = diffuse
+                    ? (std::max)((std::max)(diffuse->r, diffuse->g), diffuse->b)
+                    : 0.0f;
+                const float denominatorAtRange =
+                    constant + range * (linear + range * quadratic);
+                const float edgeIntensity = (denominatorAtRange > 0.0f && range > 0.0f)
+                    ? peakDiffuse / denominatorAtRange
+                    : -1.0f;
+
+                Log(L"[HEADLIGHT-PROBE] %ls light=0x%p owner=%hs type=%d pos=(%.2f, %.2f, %.2f) dir=(%.3f, %.3f, %.3f) "
+                    L"diffuse=(%.3f, %.3f, %.3f) specular=(%.3f, %.3f, %.3f) power=%.3f "
+                    L"range=%.1f attenuation=(c=%.4f l=%.5f q=%.6f) inner=%.2fdeg outer=%.2fdeg falloff=%.3f "
+                    L"visible=%hs castShadows=%hs edgeIntensityAtRange=%.5f (%hs)\n",
+                    phase,
+                    light,
+                    isPlayer ? "player" : "other",
+                    type,
+                    position ? static_cast<double>(position->x) : 0.0,
+                    position ? static_cast<double>(position->y) : 0.0,
+                    position ? static_cast<double>(position->z) : 0.0,
+                    direction ? static_cast<double>(direction->x) : 0.0,
+                    direction ? static_cast<double>(direction->y) : 0.0,
+                    direction ? static_cast<double>(direction->z) : 0.0,
+                    diffuse ? static_cast<double>(diffuse->r) : 0.0,
+                    diffuse ? static_cast<double>(diffuse->g) : 0.0,
+                    diffuse ? static_cast<double>(diffuse->b) : 0.0,
+                    specular ? static_cast<double>(specular->r) : 0.0,
+                    specular ? static_cast<double>(specular->g) : 0.0,
+                    specular ? static_cast<double>(specular->b) : 0.0,
+                    api.getPowerScale ? static_cast<double>(api.getPowerScale(light)) : -1.0,
+                    static_cast<double>(range),
+                    static_cast<double>(constant),
+                    static_cast<double>(linear),
+                    static_cast<double>(quadratic),
+                    inner ? static_cast<double>(*inner) * (180.0 / 3.14159265358979) : -1.0,
+                    outer ? static_cast<double>(*outer) * (180.0 / 3.14159265358979) : -1.0,
+                    api.getFalloff ? static_cast<double>(api.getFalloff(light)) : -1.0,
+                    (api.getVisible && api.getVisible(light)) ? "yes" : "no",
+                    (api.getCastShadows && api.getCastShadows(light)) ? "yes" : "no",
+                    static_cast<double>(edgeIntensity),
+                    (edgeIntensity > (1.0f / 255.0f))
+                        ? "VISIBLE STEP AT RANGE"
+                        : "below 8-bit floor");
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[HEADLIGHT-PROBE] faulted reading light=0x%p\n", light);
+            }
         }
 
         static void HandleEmissionLightState(void* renderer, void* renderClass)
@@ -14232,6 +14478,15 @@ namespace BZROpenShim
                     float outer = state.outerAngle;
                     api.setRange(light, &inner, &outer, state.falloff);
                 }
+                if (state.hasAttenuation && api.setAttenuation)
+                {
+                    api.setAttenuation(
+                        light,
+                        state.attenuation.range,
+                        state.attenuation.constant,
+                        state.attenuation.linear,
+                        state.attenuation.quadratic);
+                }
                 if (state.hasVisible && api.setVisible)
                     api.setVisible(light, state.visible);
             }
@@ -14254,6 +14509,7 @@ namespace BZROpenShim
             void* light,
             bool needColour,
             bool needBeam,
+            bool needAttenuation,
             bool needVisible)
         {
             if (!light)
@@ -14290,6 +14546,22 @@ namespace BZROpenShim
                     state.falloff = api.getFalloff(light);
                     state.hasBeam = true;
                 }
+                if (needAttenuation && !state.hasAttenuation)
+                {
+                    if (!api.setAttenuation || !api.getAttenuationRange ||
+                        !api.getAttenuationConstant || !api.getAttenuationLinear ||
+                        !api.getAttenuationQuadratic)
+                    {
+                        return false;
+                    }
+                    state.attenuation.range = api.getAttenuationRange(light);
+                    state.attenuation.constant = api.getAttenuationConstant(light);
+                    state.attenuation.linear = api.getAttenuationLinear(light);
+                    state.attenuation.quadratic = api.getAttenuationQuadratic(light);
+                    if (!HeadlightFalloff::IsUsable(state.attenuation))
+                        return false;
+                    state.hasAttenuation = true;
+                }
                 if (needVisible && !state.hasVisible)
                 {
                     if (!api.getVisible || !api.setVisible)
@@ -14306,6 +14578,79 @@ namespace BZROpenShim
             }
         }
 
+        // One line per light per session recording what the falloff repair
+        // actually changed, so a regression shows up as a number in the log
+        // rather than as "the boundary is back".
+        static void LogHeadlightFalloffPlanOnce(
+            void* light,
+            float peakDiffuse,
+            const HeadlightFalloff::Plan& plan)
+        {
+            if (!g_HeadlightFalloffPlanLogged.insert(light).second)
+                return;
+            Log(L"[HEADLIGHT] falloff repair light=0x%p peak=%.2f range %.1f -> %.1f "
+                L"edgeIntensity %.5f -> %.5f (floor %.5f) coneFalloff ramp %.4f -> %.4f of penumbra (%hs)\n",
+                light,
+                static_cast<double>(peakDiffuse),
+                static_cast<double>(plan.rangeBefore),
+                static_cast<double>(plan.attenuation.range),
+                static_cast<double>(plan.edgeIntensityBefore),
+                static_cast<double>(plan.edgeIntensityAfter),
+                static_cast<double>(HeadlightFalloff::kDisplayFloor),
+                static_cast<double>(plan.rampFractionBefore),
+                static_cast<double>(plan.rampFractionAfter),
+                (plan.edgeIntensityAfter <= HeadlightFalloff::kDisplayFloor &&
+                 plan.rampFractionAfter >= HeadlightFalloff::kMinAcceptableRampFraction)
+                    ? "both terminators below the visible threshold"
+                    : "TERMINATOR STILL VISIBLE");
+        }
+
+        // Recomputes the truncation radius and the cone exponent for whatever
+        // brightness is about to be written, so neither terminator lands where
+        // a player can see it. Returns false if the light's own attenuation
+        // cannot be read, in which case the caller leaves attenuation alone.
+        static bool BuildHeadlightFalloffPlan(
+            void* light,
+            float peakDiffuse,
+            HeadlightFalloff::Plan& outPlan)
+        {
+            auto& api = GetHeadlightOgreApi();
+            if (!api.setAttenuation || !api.getAttenuationRange ||
+                !api.getAttenuationConstant || !api.getAttenuationLinear ||
+                !api.getAttenuationQuadratic || !api.getFalloff)
+            {
+                return false;
+            }
+
+            HeadlightFalloff::Attenuation stock = {};
+            float previousFalloff = 1.0f;
+            __try
+            {
+                stock.range = api.getAttenuationRange(light);
+                stock.constant = api.getAttenuationConstant(light);
+                stock.linear = api.getAttenuationLinear(light);
+                stock.quadratic = api.getAttenuationQuadratic(light);
+                previousFalloff = api.getFalloff(light);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+
+            if (!HeadlightFalloff::IsUsable(stock))
+                return false;
+
+            // The captured baseline is the engine's own curve, not whatever a
+            // previous refresh already widened it to, so the solve stays
+            // idempotent across the 200 ms refresh tick.
+            const auto existing = g_HeadlightOriginalStates.find(light);
+            if (existing != g_HeadlightOriginalStates.end() && existing->second.hasAttenuation)
+                stock = existing->second.attenuation;
+
+            outPlan = HeadlightFalloff::BuildPlan(stock, peakDiffuse, previousFalloff);
+            return true;
+        }
+
         static bool ApplyHeadlightState(
             void* light,
             bool setColour,
@@ -14315,11 +14660,23 @@ namespace BZROpenShim
             bool setBeam,
             float inner,
             float outer,
-            float falloff,
             bool setVisible,
             bool visible)
         {
-            if (!CaptureHeadlightState(light, setColour, setBeam, setVisible))
+            // Only a shim-owned brightness or beam change can push a terminator
+            // into view, so a run that is merely toggling visibility leaves the
+            // engine's own falloff untouched and stays stock-identical.
+            const bool setFalloff =
+                g_HeadlightFalloffRepairEnabled && (setColour || setBeam);
+            const float peakDiffuse = setColour
+                ? (std::max)((std::max)(r, g), b)
+                : 1.0f;
+
+            HeadlightFalloff::Plan plan = {};
+            const bool haveFalloffPlan =
+                setFalloff && BuildHeadlightFalloffPlan(light, peakDiffuse, plan);
+
+            if (!CaptureHeadlightState(light, setColour, setBeam, haveFalloffPlan, setVisible))
                 return false;
             auto& api = GetHeadlightOgreApi();
             __try
@@ -14329,11 +14686,43 @@ namespace BZROpenShim
                     api.setDiffuse(light, r, g, b);
                     api.setSpecular(light, r, g, b);
                 }
-                if (setBeam)
+                if (setBeam || haveFalloffPlan)
                 {
+                    // setSpotlightRange carries the falloff exponent, so a
+                    // beam-less colour override still has to go through it to
+                    // soften the cone; reuse the light's current angles in that
+                    // case rather than inventing new ones.
                     float innerCopy = inner;
                     float outerCopy = outer;
-                    api.setRange(light, &innerCopy, &outerCopy, falloff);
+                    if (!setBeam)
+                    {
+                        const float* currentInner =
+                            api.getInnerAngle ? api.getInnerAngle(light) : nullptr;
+                        const float* currentOuter =
+                            api.getOuterAngle ? api.getOuterAngle(light) : nullptr;
+                        if (!currentInner || !currentOuter)
+                            return false;
+                        innerCopy = *currentInner;
+                        outerCopy = *currentOuter;
+                    }
+                    api.setRange(
+                        light,
+                        &innerCopy,
+                        &outerCopy,
+                        g_HeadlightFalloffRepairEnabled
+                            ? (haveFalloffPlan ? plan.falloff
+                                               : HeadlightFalloff::kSmoothSpotFalloff)
+                            : kHeadlightPreRepairSpotFalloff);
+                }
+                if (haveFalloffPlan)
+                {
+                    api.setAttenuation(
+                        light,
+                        plan.attenuation.range,
+                        plan.attenuation.constant,
+                        plan.attenuation.linear,
+                        plan.attenuation.quadratic);
+                    LogHeadlightFalloffPlanOnce(light, peakDiffuse, plan);
                 }
                 if (setVisible)
                     api.setVisible(light, visible);
@@ -14497,9 +14886,12 @@ namespace BZROpenShim
                 HueToHeadlightRgb(hue, colourR, colourG, colourB);
             }
 
+            // Beam shape only. The cone exponent and the attenuation cutoff are
+            // no longer hard-coded here: ApplyHeadlightState solves both from
+            // the brightness actually being written, because a fixed exponent
+            // that looks smooth at peak 1.0 is a hard edge at peak 10.
             float inner = 0.0f;
             float outer = 0.0f;
-            float falloff = 0.35f;
             float colourMultiplier = 1.0f;
             if (g_HeadlightBeamMode == HeadlightBeamMode::Focused)
             {
@@ -14536,11 +14928,20 @@ namespace BZROpenShim
                 if (!setVisible && !setColour && !setBeam)
                     return;
                 const bool visible = isPlayer ? g_HeadlightPlayerVisible : g_HeadlightOtherVisible;
+                const bool trace = g_HeadlightLightTraceEnabled && isPlayer &&
+                                   g_HeadlightLightTraceCount < kHeadlightLightTraceLimit;
+                if (trace)
+                    LogHeadlightLightParameters(light, isPlayer, L"before");
                 if (ApplyHeadlightState(light, setColour, colourR, colourG, colourB,
-                                        setBeam, inner, outer, falloff,
+                                        setBeam, inner, outer,
                                         setVisible, visible))
                 {
                     touched.insert(light);
+                }
+                if (trace)
+                {
+                    ++g_HeadlightLightTraceCount;
+                    LogHeadlightLightParameters(light, isPlayer, L"after ");
                 }
             };
 
@@ -14593,6 +14994,17 @@ namespace BZROpenShim
             g_HeadlightConfigInitialized = true;
 
             bool boolValue = false;
+            if (TryGetUserConfigBool("Diagnostics", "HeadlightLightTrace", boolValue))
+                g_HeadlightLightTraceEnabled = boolValue;
+            if (EnvFlagEnabled("OPENSHIM_TRACE_HEADLIGHT_LIGHT"))
+                g_HeadlightLightTraceEnabled = true;
+            if (TryGetUserConfigBool(
+                    kUserConfigSinglePlayerSection, "HeadlightFalloffRepair", boolValue))
+            {
+                g_HeadlightFalloffRepairEnabled = boolValue;
+            }
+            if (EnvFlagEnabled("OPENSHIM_DISABLE_HEADLIGHT_FALLOFF_REPAIR"))
+                g_HeadlightFalloffRepairEnabled = false;
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "Headlights", boolValue))
             {
                 g_HeadlightPlayerVisibleConfigured = true;
