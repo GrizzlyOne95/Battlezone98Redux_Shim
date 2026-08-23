@@ -22,6 +22,11 @@ local VALID_SCENARIOS = {
     -- captures is whether weapons are discharged.
     fourteam = true,
     fourteam_fire = true,
+    -- Same layout, ordered to advance across its own front but never given a
+    -- target. Separates the cost of moving 80 craft from the cost of the
+    -- shooting: without it, "firing minus idle" also contains all the movement,
+    -- physics and terrain-following work that only starts when units unpark.
+    fourteam_move = true,
     -- Same layout again, but the engagement is started once through the native
     -- AI instead of being driven by a per-frame Lua loop. Its only purpose is
     -- to separate the harness's own scripting cost from the cost of the battle,
@@ -80,7 +85,7 @@ local function readConfig()
             scenario == "combat") and count < 2 then
         count = 2
     elseif (scenario == "fourteam" or scenario == "fourteam_fire" or
-            scenario == "fourteam_ai") and count < 4 then
+            scenario == "fourteam_ai" or scenario == "fourteam_move") and count < 4 then
         count = 4
     end
     distance = math.max(20.0, math.min(2000.0, distance or 50.0))
@@ -246,6 +251,14 @@ local function fourTeamSlot(index)
     return front, ordinal % 2, math.floor(ordinal / 2)
 end
 
+-- The unit directly opposite in the same front and rank: same front, same
+-- rank, the other line. This is both the firing partner and, for the movement
+-- control, the point a unit is ordered to advance to.
+local function fourTeamPartner(index)
+    local front, line, rank = fourTeamSlot(index)
+    return front + 2 * ((1 - line) + 2 * rank)
+end
+
 local function fourTeamTeam(index)
     local front, line = fourTeamSlot(index)
     return 2 + front * 2 + line
@@ -309,7 +322,8 @@ local function spawnUnits(player)
         BENCH_SCENARIO == "dispersed"
     local fourTeam = BENCH_SCENARIO == "fourteam" or
         BENCH_SCENARIO == "fourteam_fire" or
-        BENCH_SCENARIO == "fourteam_ai"
+        BENCH_SCENARIO == "fourteam_ai" or
+        BENCH_SCENARIO == "fourteam_move"
     -- Ranks are shared by every line so the four blocks stay the same shape
     -- whatever the population is.
     local fourTeamRanks = math.max(1, math.ceil(BENCH_COUNT / 4))
@@ -347,9 +361,17 @@ local function spawnUnits(player)
             units[#units + 1] = handle
             SetIndependence(handle, BENCH_SCENARIO == "ai_idle" and 1 or 0)
             Stop(handle, 1)
-            local targetSide = index % 2 == 0 and 1 or -1
-            moveTargets[#moveTargets + 1] = formationPosition(
-                playerPos, transform, index, targetSide)
+            if fourTeam then
+                -- Advance onto the opposing rank of the same front, so the
+                -- movement control drives the same 80 craft over the same
+                -- ground the firing run fights over.
+                moveTargets[#moveTargets + 1] = fourTeamPosition(
+                    playerPos, transform, fourTeamPartner(index), fourTeamRanks)
+            else
+                local targetSide = index % 2 == 0 and 1 or -1
+                moveTargets[#moveTargets + 1] = formationPosition(
+                    playerPos, transform, index, targetSide)
+            end
         end
     end
 
@@ -404,7 +426,7 @@ local function spawnUnits(player)
 end
 
 local function beginWorkload()
-    if BENCH_SCENARIO == "movement" then
+    if BENCH_SCENARIO == "movement" or BENCH_SCENARIO == "fourteam_move" then
         for index, handle in ipairs(units) do
             if IsValid(handle) then
                 Goto(handle, moveTargets[index], 1)
