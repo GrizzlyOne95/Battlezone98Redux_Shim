@@ -41,15 +41,48 @@ executable imports is renderer-facing: `Mesh::_setBounds`,
 `MovableObject::getDarkCapBounds`, `ShadowCaster::extrudeBounds` and
 `ManualObject::getBoundingBox`/`getBoundingRadius`.
 
-More decisively, the executable imports **no Ogre scene-query factory at all** --
-no `SceneManager::createRayQuery`, `createSphereQuery`,
-`createAxisAlignedBoxQuery`, `createIntersectionQuery` or
-`createPlaneBoundedVolumeQuery`, and no `SceneQuery::execute`. It does import the
-`MovableObject` query-*flag* accessors (`setQueryFlags`, `addQueryFlags`,
-`removeQueryFlags`, `getQueryFlags`), but those flags are only ever consulted by
-a query object, and this binary never creates one. So no Redux code path can
-reach a bounds-driven Ogre spatial query even in principle, and changing an Ogre
-bounding box cannot change Battlezone simulation semantics.
+The executable also imports **no Ogre scene-query factory at all** -- no
+`SceneManager::createRayQuery`, `createSphereQuery`, `createAABBQuery`,
+`createIntersectionQuery` or `createPlaneBoundedVolumeQuery`, and no
+`SceneQuery::execute`. It does import the `MovableObject` query-*flag* accessors
+(`setQueryFlags`, `addQueryFlags`, `removeQueryFlags`, `getQueryFlags`), but
+those flags are only ever consulted by a query object.
+
+**The import table alone does not settle it**, because those factories are
+`virtual` on `SceneManager` and Redux does dispatch through the SceneManager
+vtable -- `0x0067E66C` calls `createEntity` as `[vtable+0x17C]`, never by import.
+So the vtable path was checked directly.
+
+In `OgreMain.dll` the five factory bodies are reached through their export
+thunks, and both the `SceneManager` and `DefaultSceneManager` vtables reference
+those thunks at a consistent set of offsets. Anchoring each table on the
+`createEntity(name, mesh, group)` slot the executable is known to call
+(`0x17C`) gives:
+
+| vtable slot | factory |
+|---|---|
+| `0x354` | `createAABBQuery` |
+| `0x358` | `createSphereQuery` |
+| `0x35C` | `createPlaneBoundedVolumeQuery` |
+| `0x360` | `createRayQuery` |
+| `0x364` | `createIntersectionQuery` |
+
+Both tables agree (`0x106E6EBC` and `0x106E84B0` bases, identical relative
+offsets). Disassembling the whole of `.text` -- **171,727 instructions** -- and
+inspecting every register-relative memory operand finds **zero** instructions
+referencing any of those five displacements, on any register, anywhere in the
+executable. The `0x17C` positive control finds 63 sites in the same pass, so the
+scan does detect displacements in that range.
+
+**Measured conclusion:** Redux never creates an Ogre scene query, by import or by
+virtual dispatch, so no Ogre bounding box can feed a gameplay decision. Changing
+one cannot change Battlezone simulation semantics.
+
+*Residual caveat, stated honestly:* linear disassembly can misalign across
+data-in-code, so a small number of instructions may be decoded at the wrong
+boundary. Five independent displacements all returning zero, plus the absence of
+any import, makes a missed call site very unlikely rather than formally
+impossible.
 
 The remaining reasons to be careful with finite bounds are purely visual, and
 they are the ones this pass actually investigated:
@@ -75,7 +108,7 @@ from exactly four places in `.text`:
 | Call site | What it passes |
 |---|---|
 | **`0x0067E76F`** | **`AxisAlignedBox(EXTENT_INFINITE)`** |
-| `0x0067F860` | `Entity::getBoundingBox()` scaled by 2 |
+| `0x0067F860` | `Entity::getBoundingBox()` scaled by 2 -- **only for `abspow`** |
 | `0x0077945F` | finite `AxisAlignedBox(min,max)`, procedural terrain geometry |
 | `0x00779B05` | finite `AxisAlignedBox(min,max)`, procedural terrain geometry |
 
@@ -205,26 +238,41 @@ workaround, a debug leftover or an Ogre compatibility shim: no such guard,
 version check or comment-shaped constant exists near the call site, and the
 behaviour is unconditional within its function.
 
-### 2.5 A second, separate stock defect found on the way
+### 2.5 The `0x0067F860` scale-by-2, and a claim that did not survive checking
 
-**Measured.** `0x0067F860` sets craft bounds to
-`Entity::getBoundingBox() * Vector3(2,2,2)` -- and `Entity::getBoundingBox()`
-re-reads the mesh's *current* bounds. Nothing resets it between spawns, so on
-any craft mesh that is not subsequently made infinite the box doubles once per
-spawned craft.
+An earlier revision of this document reported a second stock defect: that
+`0x0067F860` sets craft bounds to `Entity::getBoundingBox() * Vector3(2,2,2)`,
+that `Entity::getBoundingBox()` re-reads the mesh's *current* bounds, and that
+the box therefore doubles once per spawned craft on any mesh not subsequently
+made infinite -- walkers, turret tanks, artillery and pilots in particular.
 
-Two consequences:
+**That was wrong, and the correction is the more interesting result.** The whole
+block from `0x0067F77C` to `0x0067F882` -- the bounding-radius read, the
+`Vector3(2,2,2)`, the `AxisAlignedBox::scale()`, the
+`_setBoundingSphereRadius(r * 1.5)` and the `_setBounds` -- sits behind an
+inlined string comparison at `0x0067F6EE`..`0x0067F776` against the literal
+`"abspow"` at `0x00878A48`. A name mismatch jumps to `0x0067F888`, straight past
+all of it, into the cockpit-name resolution.
 
-* On path-3 craft the infinite write immediately follows and masks it.
-* On table craft (walkers, turret tanks, artillery, pilots) it does not: their
-  world mesh grows by 2x per spawn without limit, so whatever culling Ogre could
-  have done for them decays away as a mission fills up.
+So `0x0067F860` is a **single-object special case**, not the general craft path.
+No craft mesh is scaled by 2 on spawn, and nothing compounds.
 
-Also **measured**, and the reason the restored-bounds policy below does *not*
-copy Redux's transform: `AxisAlignedBox::scale()` multiplies both corners about
-the **origin**, which does not preserve containment. `apammo.mesh` has
-`assetMin.y = 0.29`; scaling by 2 lifts the floor of its box to `0.58` and
-leaves real geometry outside the box it just computed.
+**How the error was caught, and how it should have been caught earlier.** The
+`observe` diagnostic was pointed at a 20-walker mission specifically to measure
+the predicted compounding. It recorded **zero** oversized finite writes, and
+`avwalk.mesh` never appeared in the trace at all. Rather than treat the silence
+as a diagnostic gap, the guard was disassembled -- and the prediction was simply
+false. The original claim had been inferred from the call site's *contents*
+without reading its *guard*, which is the same class of mistake as anchoring a
+byte guard on an operand instead of an instruction.
+
+One part of the original observation does survive, and it still shapes the
+policy: `AxisAlignedBox::scale()` multiplies both corners about the **origin**,
+which does not preserve containment. `apammo.mesh` has `assetMin.y = 0.29`, so
+scaling by 2 lifts the floor of its box to `0.58` and leaves real geometry
+outside the box just computed. That is why the restored-bounds policy inflates
+about the box centre and not about the origin -- it is a reason not to copy the
+transform, independent of how often the transform runs.
 
 ---
 
@@ -238,7 +286,9 @@ hook now, when restoration is enabled:
 
 1. remembers the **first** finite box each mesh is given -- the one
    `MeshSerializerImpl::readBoundsInfo` set from `M_MESH_BOUNDS`. The *first*,
-   not the last, because the last inherits section 2.5's compounding;
+   not the last, because the serializer's box is the only one with a defined
+   provenance, which keeps the repair idempotent whatever else rewrites the
+   mesh's bounds first (section 2.5);
 2. when Ogre is handed `EXTENT_INFINITE` for a mesh whose asset box is known and
    which is not a first-person-only model, substitutes a finite box built with
    Ogre's own `AxisAlignedBox(Real,Real,Real,Real,Real,Real)` constructor;
@@ -383,18 +433,21 @@ and from 0.349 to 0.157 ms/f dispersed (-55.0%).
 ### 4.4 Bounds policy
 
 Only one policy was carried into the benchmark matrix, `scale = 2.0` about the
-box centre, chosen for these reasons rather than by sweeping arbitrary margins:
+box centre:
 
-* **it is not arbitrary.** Redux itself already inflates craft bounds by a factor
-  of 2 at `0x0067F860`. Matching the magnitude keeps the repaired box no tighter
-  than the box the game computes for itself on every spawn;
-* **`scale = 1.0` (exact serialized bounds) was rejected without testing it in
-  the matrix**, because the asset box is a bind-pose box and the animation
-  excursion argument against it is real;
+* **the factor is a judgement, not a derivation.** An earlier draft justified it
+  as "matching what Redux already does to craft bounds"; section 2.5 retracts
+  that -- Redux applies its factor of 2 to one object, `abspow`, and to no craft
+  at all. The honest statement is that 2.0 is a deliberately generous margin
+  chosen to make the first measurement safe, and the measurements below show it
+  is already generous enough to cull nothing that is on screen;
+* **`scale = 1.0` (exact serialized bounds) was not tested in the matrix**,
+  because the asset box is a bind-pose box and the animation-excursion argument
+  against it is real;
 * the axis of the change that mattered was **centre versus origin**, not the
-  factor. Redux scales about the origin, which is not containment-preserving --
-  `apammo.mesh` (`assetMin.y = 0.29`) loses the bottom of its own box under
-  Redux's own transform. Centre inflation always contains the asset box.
+  factor. Ogre's `scale()` is about the origin and is not containment-preserving
+  -- `apammo.mesh` (`assetMin.y = 0.29`) loses the bottom of its own box under
+  it. Centre inflation always contains the asset box.
 
 `OPENSHIM_RESTORE_CRAFT_BOUNDS_SCALE` remains tunable, and under-inflation can
 only cause visible clipping, never a crash or a gameplay change.
@@ -435,14 +488,49 @@ the unit positions fixed so the two runs are directly comparable:
 The operator also watched the full benchmark campaign live at native resolution
 and reported no visual artefacts.
 
-**Not done, and it is the main gap:** the satellite view was not exercised, and
-neither were mission cinematics, alternate camera modes, save/load, or a walker
-under restored bounds. Walkers are the specific class most likely to exceed a
-bind-pose box, *and* the class whose world mesh this repair does not touch (see
-2.3), so the risk there is low but it is untested. Driving the satellite view
-needs scripted scan-code input which was not built in this pass.
+**Not done:** the satellite view, mission cinematics, alternate camera modes and
+save/load were not exercised. Driving them needs scripted scan-code input that
+was not built in this pass, and the work was explicitly deferred. Walkers *were*
+resolved -- see 4.6; restoration is a measured no-op on them.
 
-### 4.6 Hierarchy propagation
+### 4.6 Walkers, and how far the headline numbers generalise
+
+Walkers were the class flagged as highest visual risk: the largest skeletal pose
+excursion, so the most likely to leave a bind-pose box. Measured, `avwalk`
+firing 20 at 50 m, three modes:
+
+| Workload | stock | private | restore |
+|---|---:|---:|---:|
+| DX11 `avwalk` firing 20 facing | 362.7 | *(run lost)* | 357.5 (-1.4%) |
+| DX11 `avwalk` firing 20 away | 164.3 | 161.6 (-1.6%) | 155.4 (-5.4%) |
+| DX11 `avtank` firing 20 away (same session) | 474.6 | 350.6 (-26.1%) | 166.0 (-65.0%) |
+
+With the camera turned away from twenty walkers, **`avwalk.mesh` contributes zero
+submissions in all three modes** -- it does not appear in the contributor rows at
+all. Walkers are already fully culled in stock, and this repair does not change
+them: `avwalk` is in the cockpit-mesh table, so the infinite box lands on
+`avwalk_c.mesh` and its world mesh keeps the serializer's bounds. The residual
+1-5% deltas are ordnance and effects, not walkers.
+
+Two things follow.
+
+* **The walker visual risk is nil, by construction rather than by inspection.**
+  Restoration is a measured no-op on every mesh a walker renders from. No
+  screenshot can be more conclusive than "the code path is never entered", and
+  this is why no walker capture was taken.
+* **The headline numbers in 4.1 are an upper bound, not a mission average.** They
+  were measured on `avtank`, which is in the affected class. A mission made
+  entirely of walkers, turret tanks, artillery or pilots would see close to
+  nothing from this change. Real missions are dominated by the affected class
+  (scouts, tanks, bombers, minelayers, rockets -- everything with no dedicated
+  cockpit model), so the true figure sits between the two, and this pass did not
+  measure a mixed-unit mission to pin it down.
+
+One run of twelve (`private`, `avwalk` facing) did not reach `benchmark-end` and
+was dropped by the analyzer rather than partially counted; the `away` case, which
+carries the argument, has all three modes.
+
+### 4.7 Hierarchy propagation
 
 `Entity::getBoundingBox()` recomputes from `Mesh::getBounds()` on every call and
 `SceneNode::_updateBounds` re-merges every frame, so restored mesh bounds
@@ -450,9 +538,17 @@ propagate to existing entities and their nodes without any invalidation step --
 confirmed by the fact that culling starts working on craft that were already
 spawned before the repair applied.
 
-No ancestor was observed to stay infinite. The measured proof is indirect but
-strong: if any craft's node chain were still infinite, that craft could not be
-culled, and `firing 20 away` would not have fallen from 21.0 to 1.0 craft
+No ancestor was observed to stay infinite, and the walker result in 4.6 settles
+the specific worry directly. Every walker carries an `avwalk_c.mesh` first-person
+entity whose bounds *are* infinite -- yet walkers are culled perfectly in stock.
+If that entity were attached anywhere in the walker's own SceneNode chain,
+`SceneNode::_updateBounds` would merge its infinite box upward and no walker
+could ever be culled. They are culled, so **the first-person entity does not
+share the craft's node chain**, and one pathological child is not dragging an
+ancestor infinite here.
+
+The main-camera evidence points the same way: if any craft's node chain were
+still infinite, `firing 20 away` could not have fallen from 21.0 to 1.0 craft
 submissions. Lights attached to craft report a null box, which merges as a no-op.
 
 The census now reports `nodeExtents=` and `parentNodeExtents=` per object type
@@ -491,10 +587,10 @@ Restoration wins on every axis that matters:
 * **Repairing every mesh** (`SCOPE=all`) -- it would also strip the
   always-visible policy from `*_c`/`*_fp` cockpit models, where that policy is
   correct and deliberate. Retained as an A/B switch only.
-* **Reproducing Redux's own `scale(2,2,2)`** -- scales about the origin and is
-  not containment-preserving.
-* **Deriving the policy from the last finite box** -- inherits the per-spawn
-  doubling at `0x0067F860`.
+* **Reproducing Ogre's `scale(2,2,2)`, as `0x0067F860` does for `abspow`** --
+  it scales about the origin and is not containment-preserving.
+* **Deriving the policy from the last finite box** -- the asset box is the only
+  value with a defined provenance; see 2.5.
 * **A custom per-cascade shadow policy** -- unnecessary. Ogre does it correctly
   once the bounds are correct, which is exactly the outcome Phase 7 was written
   to look for.
