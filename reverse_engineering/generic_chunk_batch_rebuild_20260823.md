@@ -129,6 +129,7 @@ Deliberate properties:
 | `reverse_engineering/run_chunk_batch_reuse_matrix.ps1` | New. observe/reuse/opt-out matrix runner. |
 | `reverse_engineering/analyze_chunk_batch_reuse.py` | New. Derives per-frame rates by pairing batch telemetry with the profiler's fps line over the same interval. |
 | `reverse_engineering/capture_chunk_batch_visuals.ps1` | New. Frame capture during *active* destruction. |
+| `reverse_engineering/analyze_chunk_batch_presentmon.py` | New. Summarises profiler-disabled PresentMon captures. |
 
 Three modes share one binary so comparisons cannot drift on build differences:
 
@@ -221,12 +222,35 @@ Unchanged, as required -- reuse removes CPU emission work, not submissions.
 Residual differences are chunk-population noise between runs, not a change in
 what is drawn.
 
-### Frame time (indicative only)
+### Frame time -- profiler-disabled, PresentMon
 
-Frame means moved -1.8% to -2.9% at 20 units and -0.9% to -3.2% at 80. **These
-runs all have the profiler attached, which perturbs frame time, so they do not
-support a frame-rate claim.** The profiler-disabled PresentMon A/B that would
-support one has not been run -- see section 7.
+The profiler-attached matrix above cannot support a frame-rate claim, and the
+size of the perturbation is worth stating: the same DX11 dispersed-20 workload
+runs at ~90 fps with the profiler attached and ~204-214 fps without it.
+
+These are external ETW captures (PresentMon v1 metrics, `--process_id`), started
+at the mission's own `measure-begin` marker so no loading frames are included.
+Percentiles are over raw per-present samples, not per-second aggregates, so a
+hitch shows in p99 rather than being averaged away. Arm A is the explicit
+opt-out; arm B is shipped reuse.
+
+| Scenario | Units | fps opt-out | fps reuse | mean ms | p95 ms | p99 ms |
+|---|---:|---:|---:|---|---|---|
+| dispersed | 20 | 203.5 | **214.1** (+5.2%) | 4.91 -> 4.67 (-4.9%) | 6.32 -> 6.20 | 7.27 -> 6.50 (-10.6%) |
+| dispersed | 80 | 66.0 | **68.5** (+3.8%) | 15.15 -> 14.59 (-3.7%) | 21.97 -> 21.61 | 23.26 -> 22.81 (-1.9%) |
+| firing | 20 | 140.4 | **153.3** (+9.2%) | 7.12 -> 6.52 (-8.4%) | 9.39 -> 8.49 (-9.6%) | 10.94 -> 9.07 (-17.1%) |
+| firing | 80 | 44.9 | **46.3** (+3.1%) | 22.29 -> 21.58 (-3.2%) | 30.86 -> 29.88 | 33.43 -> 32.73 (-2.1%) |
+
+All four cells move the same way, which is the part worth trusting. GPU-active
+time is flat (1.8-4.5 ms mean, no consistent direction), as expected for a
+CPU-side change -- the one cell that rose, firing-80, is a single sample and is
+not read as a regression.
+
+**Caveat: n=1 per cell.** These are single 20-second captures, not repeated
+trials. The consistent direction across four independent workloads is the
+evidence; the individual percentages are not precise to the tenth. The relative
+gain is largest where frames are cheapest (firing-20, +9.2%), which is what a
+fixed ~0.15 ms/frame saving predicts.
 
 ### Worst-case single rebuild
 
@@ -268,18 +292,22 @@ never thrashes through `object-recreated` or `section-missing`.
 
 ### NOT validated
 
-**Visual A/B during active destruction: not obtained.** Four capture runs
-(DX11/DX9 x reuse/opt-out) were attempted and every frame recorded the Windows
-lock screen instead of the game. `query session` reported the session as
-`Active` throughout, which it does even when locked. The captures were discarded
-rather than kept. The game itself continued rendering behind the lock (fps
-99-110 in those runs' own logs), so their telemetry is sound, but no visual
-claim is made from them.
+**Visual A/B during active destruction: qualitative only.** Captured on both
+backends in both modes during sustained firing at 20 units, with chunklets
+continuously spawning, moving and expiring. Debris renders normally under reuse
+-- no frozen or lagging chunks, none missing, no artefacts at batch boundaries.
 
-**Profiler-disabled PresentMon frame-time A/B: not run.** Deferred rather than
-attempted, because the locked session measurably changes rendering behaviour --
-the same DX11 dispersed-20 workload reported ~99 fps locked versus ~91 fps
-unlocked -- so any frame-time result taken in that state would be unsound.
+What this cannot do is prove pixel equality, and it should not be presented as
+if it did: an lcbench battle is stochastic, so two runs never occupy the same
+state and a frame-by-frame diff is meaningless. (An earlier attempt to A/B a
+*lighting* question from single frames this way produced a conclusion that had
+to be retracted.) The real evidence that reused output is identical is
+structural: the version covers every field the emitter reads, the unit tests pin
+that, and submissions and draw calls per frame are unchanged.
+
+A first capture attempt was lost entirely -- every frame recorded the Windows
+lock screen while `query session` reported `Active`, which it does even when
+locked. Those captures were discarded, not kept.
 
 **Scene teardown and mission transition: code inspection only.** The benchmark
 harness force-kills the process at the end of every run, so no log in this set
