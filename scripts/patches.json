@@ -135,6 +135,11 @@
       "expected_original": "65 FC FF FF"
     },
     {
+      "name": "Sun Screen Flash Contribution Hook",
+      "fallback": "0x004F9FD4",
+      "expected_original": "E8 14 FA FF"
+    },
+    {
       "name": "Damage Reveal Probe 1/4",
       "fallback": "0x0047EFA0",
       "expected_original": "8C D1 05 00"

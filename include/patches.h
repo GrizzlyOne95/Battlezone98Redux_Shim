@@ -130,6 +130,14 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::REL32, {}, "Chunk Render Resolve Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Producer Build Menu Root Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Target Reticle Popup Recent-Hit Getter Hook", false, {} },
+            // Redirect the sun's one contribution to the global ScreenFlash so
+            // the fullscreen white quad can be dropped without touching the sun
+            // disc, the six lens-flare sprites, or the two explosion callers of
+            // the same ScreenFlash method. See include/sun_flash.h. The guard
+            // covers the original rel32 operand, and the payload is only built
+            // after SunFlash::VerifyCallSite confirms the preceding byte is a
+            // CALL rel32 that resolves to ScreenFlash::AddFlash.
+            { 0, HookEngine::PatchType::REL32, {}, "Sun Screen Flash Contribution Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Damage Reveal Probe 1/4", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Damage Reveal Probe 2/4", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Damage Reveal Probe 3/4", false, {} },
