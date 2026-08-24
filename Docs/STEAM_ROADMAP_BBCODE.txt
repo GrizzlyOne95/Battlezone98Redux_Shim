@@ -396,10 +396,10 @@ reproduction
 
 [list]
 [*] [b]Editor Shift-F10 object-placement regression[/b] - pre-Redux behavior allowed placement without manually pausing. Reproduce and compare the placement gate against legacy behavior.
-[*] [b]Campaign mission-end screens[/b] - end-of-mission screens remain broken in some campaign/custom-campaign paths and need a dedicated shell/state transition audit.
-[*] [b]Custom-campaign end screen focus/minimize bug[/b] - the game can lose focus/minimize when the custom campaign end screen appears.
-[*] [b]TRN newline/encoding corruption[/b] - Redux can produce or reject TRN files with non-CRLF/non-compatible encoding. Prefer fixing the parser/save path rather than relying on mass conversion.
-[*] [b]Non-English localization resource/render failures[/b] - some terrain/textures can fail to load or render incorrectly under non-English locale settings. Locale-sensitive parsing/path/number conversion should be audited.
+[*] [b]Campaign mission-end screens[/b] - the 2026-08-20 audit confirms stock/custom paths share result IDs 0x13/0x14; custom divergence is later metadata/progression and generic screen-0x25 reconstruction. A one-run state/media/focus trace is prepared; capture the failing custom-final transition before patching.
+[*] [b]Custom-campaign end screen focus/minimize bug[/b] - Redux explicitly calls SW_MINIMIZE on fullscreen WM_ACTIVATEAPP deactivation; end-screen/video code has no direct external-launch/window-recreation path. The prepared trace records every relevant message, ShowWindow caller, foreground process and Theora event; do not change minimize policy until it identifies the activation-loss producer.
+[*] [b]TRN newline/encoding corruption[/b] - fixed in OpenShim for exact GOG/Steam 2.2.301: the producer now normalizes LF/CRLF/CR/corrupt CR-runs and compatible UTF-8/CP1252 into logical LF, then emits deterministic CP1252 CRLF through binary I/O. UTF-16 is detected and preserved unchanged; the corrected close-time normalizer remains a safety layer for other writers.
+[*] [b]Non-English localization resource/render failures[/b] - fixed in OpenShim for exact GOG/Steam 2.2.301: after Redux selects its presentation language, a guarded call through Redux's own MSVCR120 enforces only LC_NUMERIC=C. Automated English/German probes preserve presentation categories and parse dot-decimal 0.8 exactly.
 [*] [b]Heightmap smoothing default behavior[/b] - Redux enables smoothing by default in a way that can alter stock terrain and therefore pathing. Verify exactly where the default changed and whether legacy-compatible behavior can be restored safely.
 [/list]
 
