@@ -89,6 +89,7 @@ scripts/*
 !scripts/New-TerrainHdSmokeTiles.ps1
 !scripts/run_ogre_profiler_tests.ps1
 !scripts/run_ini_tests.ps1
+!scripts/run_render_profile_tests.ps1
 !scripts/Invoke-SunFlashTrace.ps1
 !scripts/Deploy-OpenShim.ps1
 !scripts/terrain_hd_tiles.example.json
@@ -101,6 +102,7 @@ docs/*
 !docs/raw-mouse-input.md
 !docs/DX11_ENHANCED_DYNAMIC_LIGHT_AUDIT.md
 !docs/SATELLITE_VISIBILITY_FIX_PLAN.md
+!docs/OPENSHIM_RENDER_PROFILE_ARCHITECTURE.md
 
 # Local third-party source/reference checkouts
 third_party/ogre-1.10.0-bzr/_work/
