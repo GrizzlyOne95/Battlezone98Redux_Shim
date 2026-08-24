@@ -1,0 +1,10 @@
+run_id,captures,frame_samples_total,frame_mean_ms,frame_mean_sd_ms,frame_p95_ms,frame_p99_ms,gpu_active_ms
+dx11_avtank_fourteam_080_400_facing,3,8617,3.4438,0.0769,3.829,4.392,1.806
+dx11_avtank_fourteam_080_400_facing_iso-glow,3,9188,3.2527,0.0157,3.561,3.898,1.712
+dx11_avtank_fourteam_080_400_facing_iso-glow-shadow,3,10978,2.6973,0.0147,2.975,3.303,1.699
+dx11_avtank_fourteam_080_400_facing_iso-shadow,3,10195,2.9238,0.0152,3.216,3.522,1.766
+dx11_avtank_fourteam_ai_080_400_facing,3,3405,8.6635,0.1053,10.964,11.585,1.979
+dx11_avtank_fourteam_fire_080_400_facing,3,3246,9.2292,0.0906,11.409,12.171,1.939
+dx11_avtank_fourteam_fire_080_400_facing_iso-glow,3,3414,8.7646,0.0879,10.878,11.651,1.813
+dx11_avtank_fourteam_fire_080_400_facing_iso-glow-shadow,3,3572,8.3255,0.1087,10.391,11.221,1.717
+dx11_avtank_fourteam_fire_080_400_facing_iso-shadow,3,3381,8.6902,0.0653,10.876,11.751,1.842

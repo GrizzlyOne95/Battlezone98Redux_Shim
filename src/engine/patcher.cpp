@@ -11,6 +11,7 @@
 #include "shim_log.h"
 #include "sun_flash.h"
 #include "openshim_sdk_v2.h"
+#include "redux_compatibility.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -220,6 +221,11 @@ namespace BZROpenShim
         return strcmp(name, "Map Sorting") == 0 || strcmp(name, "Map List Rewrite for Hop-Fix 1/3") == 0 || strcmp(name, "Map List Rewrite for Hop-Fix 2/3") == 0 || strcmp(name, "Map List Rewrite for Hop-Fix 3/3") == 0 || strcmp(name, "Map List Fix Support 1/3") == 0;
     }
 
+    // Declarative gating lives in scripts/patches.json ("platforms": ["steam"]),
+    // applied by FilterPatchesForDistribution. This name list is kept as a
+    // fail-safe for a deployed patches.json that predates that metadata: a
+    // Steam-only rewrite applied to a GOG executable would patch the wrong
+    // bytes, so both gates must agree before these survive on GOG.
     static bool IsSteamOnlyPatchName(const char* name) {
         if (!name) return false;
         return strcmp(name, "Map List Rewrite for Hop-Fix 1/3") == 0 ||
@@ -251,6 +257,44 @@ namespace BZROpenShim
 
     static bool IsVehicleListModFixPatchName(const char* name) {
         return name && strncmp(name, "Vehicle List Mod Fix ", 21) == 0;
+    }
+
+    static const char* DistributionConfigKey(BzrDistribution distribution) {
+        switch (distribution) {
+        case BzrDistribution::GOG: return "gog";
+        case BzrDistribution::Steam: return "steam";
+        default: return nullptr;
+        }
+    }
+
+    static bool ConfigNodeAllowsDistribution(const nlohmann::json& node, BzrDistribution distribution) {
+        if (!node.contains("platforms")) return true;
+        if (!node["platforms"].is_array()) return false;
+        const char* key = DistributionConfigKey(distribution);
+        if (!key) return false;
+        for (const auto& platform : node["platforms"]) {
+            if (platform.is_string() && platform.get<std::string>() == key) return true;
+        }
+        return false;
+    }
+
+    static bool PatchAllowsDistribution(const HookEngine::PatchDef& patch, BzrDistribution distribution) {
+        static const char* groups[] = { "patches", "globals" };
+        for (const char* group : groups) {
+            if (!g_Config.data.contains(group) || !g_Config.data[group].is_array()) continue;
+            for (const auto& node : g_Config.data[group]) {
+                if (!node.contains("name") || !node["name"].is_string()) continue;
+                if (node["name"].get<std::string>() == patch.name)
+                    return ConfigNodeAllowsDistribution(node, distribution);
+            }
+        }
+        return true;
+    }
+
+    static void FilterPatchesForDistribution(std::vector<HookEngine::PatchDef>& patches, BzrDistribution distribution) {
+        patches.erase(std::remove_if(patches.begin(), patches.end(), [distribution](const HookEngine::PatchDef& patch) {
+            return !PatchAllowsDistribution(patch, distribution);
+        }), patches.end());
     }
 
     static bool ShouldEnableOgreMaterialCollisionGuard() {
@@ -590,15 +634,28 @@ namespace BZROpenShim
             g_Config.GetStaticPointer("JoinerEventOriginal", 0x00742560));
     }
 
-    static void ScanForPatchAddresses(std::vector<HookEngine::PatchDef>& patches, bool isSteam) {
+    static void ScanForPatchAddresses(
+        std::vector<HookEngine::PatchDef>& patches,
+        bool isSteam,
+        bool compatibilityOnly = false) {
         std::vector<HookEngine::ScanTarget> targets;
         try {
             if (g_Config.data.contains("patches")) {
                 for (const auto& p : g_Config.data["patches"]) {
-                    HookEngine::ScanTarget t; t.name = p["name"]; t.ida_pattern = p["pattern"]; t.offset = p["offset"]; t.expected_size = p["expected_size"]; t.fallback_addr = std::stoul(p["fallback"].get<std::string>(), nullptr, 16); targets.push_back(t);
+                    const std::string name = p["name"].get<std::string>();
+                    // Two independent skips: the compatibility-only pass scans
+                    // just the Redux compatibility group, and no pass ever
+                    // scans a pattern whose patch the distribution/runtime
+                    // filters already dropped from the list.
+                    if (compatibilityOnly && !IsReduxCompatibilityPatchName(name.c_str())) continue;
+                    const bool active = std::any_of(patches.begin(), patches.end(), [&name](const HookEngine::PatchDef& patch) {
+                        return patch.name == name;
+                    });
+                    if (!active) continue;
+                    HookEngine::ScanTarget t; t.name = name; t.ida_pattern = p["pattern"]; t.offset = p["offset"]; t.expected_size = p["expected_size"]; t.fallback_addr = std::stoul(p["fallback"].get<std::string>(), nullptr, 16); t.require_unique = p.value("require_unique", false); targets.push_back(t);
                 }
             }
-            if (g_Config.data.contains("globals")) {
+            if (!compatibilityOnly && g_Config.data.contains("globals")) {
                 for (const auto& g : g_Config.data["globals"]) {
                     uint32_t fb = 0; if (isSteam && g.contains("fallback_steam")) fb = std::stoul(g["fallback_steam"].get<std::string>(), nullptr, 16);
                     else if (!isSteam && g.contains("fallback_gog")) fb = std::stoul(g["fallback_gog"].get<std::string>(), nullptr, 16);
@@ -612,7 +669,7 @@ namespace BZROpenShim
         HookEngine::ScanForPatterns("", patches, targets);
         for (const auto& t : targets) {
             for (auto& p : patches) {
-                if (!p.verified && p.name == t.name) {
+                if (!p.verified && p.name == t.name && !t.require_unique) {
                     p.address = t.fallback_addr; p.verified = true;
                     auto ida = HookEngine::ParseIdaPattern(t.ida_pattern);
                     if (t.expected_size > 0) { p.expected_original.clear(); for (size_t j = 0; j < t.expected_size && j < ida.size(); ++j) p.expected_original.push_back(static_cast<uint8_t>(ida[j])); }
@@ -723,8 +780,25 @@ namespace BZROpenShim
         // initialized on any build.
         SetCompatibleVersion(true);
         std::vector<uint8_t> sig; if (ReadExeSignature(sig)) WaitForSignature(sig);
+        const ReduxCompatibilityGate compatibilityGate = PrepareReduxCompatibilityGate(isSteam);
         StartSoundChannelOverride(isSteam);
-        g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForRuntime(patches, distribution); ScanForPatchAddresses(patches, isSteam);
+        g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForDistribution(patches, distribution); FilterPatchesForRuntime(patches, distribution); ScanForPatchAddresses(patches, isSteam);
+        if (isSteam && compatibilityGate.supportedHash && compatibilityGate.settledBytes) {
+            const auto compatibilitySignaturesReady = [&patches]() {
+                for (const auto& patch : patches) {
+                    if (IsReduxCompatibilityPatchName(patch.name.c_str()) && !patch.verified)
+                        return false;
+                }
+                return true;
+            };
+            // SteamStub can rewrite one of these pages in the few milliseconds
+            // between the settlement sample and the unique scan. Retry only
+            // this three-signature group; no fallback address is ever enabled.
+            for (int attempt = 0; !compatibilitySignaturesReady() && attempt < 10; ++attempt) {
+                Sleep(100);
+                ScanForPatchAddresses(patches, isSteam, true);
+            }
+        }
         auto findAddr = [&patches](const char* n) -> uint32_t { for (const auto& p : patches) { if (p.name == n) return p.address; } return 0; };
         ResolvePointers(findAddr("Map Sorting"), findAddr("Map List Rewrite for Hop-Fix 1/3"), findAddr("Map List Rewrite for Hop-Fix 2/3"), findAddr("Map List Rewrite for Hop-Fix 3/3"), findAddr("Probe Refresh Path MapFilter1"), findAddr("Map List Fix Support 1/3"), findAddr("Probe MapListFix2"), findAddr("TurretCraft Aim Pitch Multiplier"), findAddr("TurretTank Aim Pitch Multiplier"), findAddr("Under Attack Alert Hook 1/2"), findAddr("Under Attack Alert Hook 2/2"), findAddr("Offensive Attack Reveal Hook"), findAddr("TurretTank Attack Reveal Hook"), isSteam);
         ResolveStaticReturnPointers();
@@ -735,7 +809,10 @@ namespace BZROpenShim
         // Steam input binding UI hooks, and the game may crash during that
         // window if critical fixes (e.g. AutoSave +0x150 null callback) are
         // not yet installed.
-        int app = 0;
+        int app = ApplyReduxCompatibilityPatches(patches, compatibilityGate);
+        patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& patch) {
+            return IsReduxCompatibilityPatchName(patch.name.c_str());
+        }), patches.end());
         for (const auto& p : patches) {
             if (HookEngine::ApplyPatch(p)) {
                 app++;

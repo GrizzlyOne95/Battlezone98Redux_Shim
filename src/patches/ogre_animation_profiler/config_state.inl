@@ -50,6 +50,16 @@ namespace BZROpenShim
     {
         constexpr char kComponent[] = "ogre-profile";
         constexpr char kEnvironmentSwitch[] = "OPENSHIM_PROFILE_OGRE_ANIMATION";
+        // Measurement-only render isolation. Set OPENSHIM_PROFILE_ISOLATE to a
+        // '+'-separated list of categories to suppress while capturing, so the
+        // frame-time cost of a category can be measured rather than inferred
+        // from its submission count. This deliberately changes what is drawn and
+        // is never enabled by default; it exists so an A/B has a real arm.
+        //   glow    - every technique whose scheme is "glow"
+        //   shadow  - every renderable submitted to a shadow-texture camera
+        constexpr char kIsolationSwitch[] = "OPENSHIM_PROFILE_ISOLATE";
+        constexpr unsigned kIsolateGlow = 1u << 0;
+        constexpr unsigned kIsolateShadow = 1u << 1;
         constexpr char kDisableChunkShadowFixSwitch[] =
             "OPENSHIM_DISABLE_NATIVE_CHUNK_SHADOW_FIX";
         constexpr char kLegacyDisableChunkShadowFixSwitch[] =
@@ -87,7 +97,12 @@ namespace BZROpenShim
         // long firing captures representative instead of filling with dead IDs.
         constexpr size_t kRenderContributorTableSize = 2048;
         constexpr size_t kRenderContributorProbeCount = 16;
-        constexpr size_t kRenderContributorTopCount = 48;
+        // A four-team battle produces well over 48 distinct contributor groups
+        // (three PSSM cascades x every mesh/material, plus effect materials and
+        // post-process quads). Truncating the log at 48 silently drops the tail
+        // that attribution has to account for, so the cap covers the observed
+        // group count with headroom.
+        constexpr size_t kRenderContributorTopCount = 160;
         constexpr unsigned kMaxExportThunkDepth = 2;
         constexpr size_t kMaxSuspendedThreads = 128;
         constexpr size_t kEntryDetourMaxPatchLen = 16;
@@ -314,6 +329,19 @@ namespace BZROpenShim
             std::atomic<uint64_t> indexedDraws{ 0 };
             std::atomic<uint64_t> drawnVertices{ 0 };
             std::atomic<uint64_t> drawnIndices{ 0 };
+            // Submission-to-draw outcome. An Ogre submission is not an API draw:
+            // D3D11RenderSystem::_render guards its draw with `if (primCount)`
+            // and returns early on an empty vertex buffer, while D3D9 issues the
+            // draw unconditionally. These three counters say which submissions
+            // produced no API draw and why, so the backend difference can be
+            // measured instead of assumed.
+            std::atomic<uint64_t> noDrawSubmissions{ 0 };
+            std::atomic<uint64_t> emptyVertexSubmissions{ 0 };
+            std::atomic<uint64_t> zeroPrimSubmissions{ 0 };
+            // Submissions entered while the draw observer was not installed on
+            // the device-context vtable. Draws issued during such a submission
+            // are invisible to the profiler, so this bounds instrumentation loss.
+            std::atomic<uint64_t> unobservedSubmissions{ 0 };
             std::atomic<uint64_t> renderStates{ 0 };
             std::atomic<uint64_t> blendStates{ 0 };
             std::atomic<uint64_t> textureSets{ 0 };
@@ -347,6 +375,10 @@ namespace BZROpenShim
             uint64_t indexedDraws = 0;
             uint64_t drawnVertices = 0;
             uint64_t drawnIndices = 0;
+            uint64_t noDrawSubmissions = 0;
+            uint64_t emptyVertexSubmissions = 0;
+            uint64_t zeroPrimSubmissions = 0;
+            uint64_t unobservedSubmissions = 0;
             uint64_t renderStates = 0;
             uint64_t blendStates = 0;
             uint64_t textureSets = 0;
@@ -557,6 +589,14 @@ namespace BZROpenShim
         std::atomic<uint64_t> g_RenderSystemSubmissionMaxTicks{ 0 };
         std::atomic<uint64_t> g_RenderContributorDrops{ 0 };
         std::atomic<uint64_t> g_ContextVtableRefreshes{ 0 };
+        std::atomic<uint64_t> g_NoDrawSubmissions{ 0 };
+        std::atomic<uint64_t> g_EmptyVertexSubmissions{ 0 };
+        std::atomic<uint64_t> g_ZeroPrimSubmissions{ 0 };
+        std::atomic<uint64_t> g_MultiDrawSubmissions{ 0 };
+        std::atomic<uint64_t> g_UnobservedSubmissions{ 0 };
+        std::atomic<unsigned> g_IsolationMask{ 0 };
+        std::atomic<uint64_t> g_IsolatedRenderables{ 0 };
+        std::atomic<DWORD> g_IsolationLogTick{ 0 };
         std::atomic<uint64_t> g_DrawCalls{ 0 };
         std::atomic<uint64_t> g_DrawVertices{ 0 };
         std::atomic<uint64_t> g_DrawIndexedCalls{ 0 };
@@ -654,6 +694,10 @@ namespace BZROpenShim
         thread_local unsigned t_SoftwareBlendDepth = 0;
         thread_local unsigned t_SceneRenderDepth = 0;
         thread_local uint64_t t_LastRenderContextCheckFrame = 0;
+        // Monotonic per-thread count of API draw calls seen by the observers.
+        // The render-system hooks snapshot it around the real _render call, so
+        // the draw count belonging to one submission needs no shared state.
+        thread_local uint64_t t_ThreadDrawCalls = 0;
         std::mutex g_Dx11SkinSourceShadowMutex;
 
         bool StringIsTruthy(const char* value)
