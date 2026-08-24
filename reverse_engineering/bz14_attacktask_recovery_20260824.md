@@ -16,25 +16,35 @@ Claim tags: **PROVEN** (decompile/disassembly/runtime bytes read directly),
    1.4 runtime-unpacked corpus and cross-checked line-by-line against the
    PDB-named 1.5 source tree (`BZ1_Source\1.5`). See §3.
 2. The prior report's claim that Redux executes this machine at
-   `AttackTask::DoState = 0x00478A50` is correct statically but wrong
-   dynamically: in live GOG build 2.2.301 gameplay that function **never
-   executes** during tank attack engagements. Multiple independent
-   instrumentation methods agree (§6). Byte-presence validation
+   `AttackTask::DoState = 0x00478A50` is correct statically but was wrong for
+   the workloads tested first: in live GOG build 2.2.301 gameplay that function
+   never executes during **tank-family** attack engagements (multiple
+   independent instrumentation methods agree, §6.1). Byte-presence validation
    ("hook-validated") does not establish execution.
-3. Live tank combat in 2.2.301 runs through per-family **blast-skeleton task**
-   bodies — states `{2,3,5,D}`; e.g. body `0x00614DD0` in RocketTankAttack
-   (RTTI vftable `0x0088AE6C`), observed ~35k ticks during one
-   avtank-vs-svtank engagement — plus the process layer
+3. **Correction by live task census (§6.4): the same function is fully live
+   for fighter/scout engagements.** Under `avfigh` ATTACK and HUNT orders,
+   `0x00478A50` executed ~43–45k ticks per engagement cycling states
+   {2 APPROACH, 3 UNSTUCK, 7 SLIDE, 9 FLEE, 10 BLAST-HOLD} — the complete
+   strafe/stand/blast/flee combat loop of the reconstructed 1.4 machine.
+   The execution-dead result is therefore workload-specific, not universal:
+   **tank/scout/bomber all route through one generic AttackTask is FALSE;
+   only the fighter/scout family provably uses it on this build.**
+4. Tank-family units (`avtank`, `svtank`, `cvtank`, `avrckt`, and the walker
+   family) run reduced per-family blast-skeleton tasks instead — e.g.
+   RocketTankAttack (vftable `0x0088AE6C`, body `0x00614DD0`, states
+   {2,3,5}) plus an unnamed defender-side family (vftable `0x0088590C`,
+   body `0x005A5C00`) — with the process layer
    (`OffensiveProcess::DoSubTask` @`0x583520`, `WingmanProcess::ShouldAttack`
-   @`0x613B70`; both confirmed executing tens of thousands of times). The
-   generic AttackTask object is constructed by the live process layer (ctor
-   `0x00477E60`, called from `0x00583CF0` and `0x00613C10`) but its `DoState`
-   was never observed on the executed path.
-4. The planned seam — post-decision override of recorded transitions inside
-   `AttackTask::DoState` — is therefore **not viable on this build**. Per the
-   task's decision gate, implementation stops here. A validated, fail-closed,
-   default-off OpenShim implementation of the recovered policy plus unit tests
-   ships for the future (§8), together with candidate future strategies (§7).
+   @`0x613B70`; both executing tens of thousands of times in every scenario)
+   driving commitment above them.
+5. Port consequence: the shipped recorded-transition override seam IS the
+   correct integration point for AttackTask-using families (fighter/scout
+   proven live), and is inert for tank-family units until their own decision
+   bodies gain equivalent transitions (Strategy B, §7). The feature stays
+   quarantined behind developer-only environment controls because enabling
+   it today restores 1.4 behavior for scouts while leaving tanks on Redux —
+   a historically inconsistent partial restoration that must not ship as a
+   normal user-facing option.
 
 ## 2. Conventions and evidence sources
 
@@ -274,9 +284,12 @@ Evidence lines:
    counted tens of thousands of calls during the same windows in which the
    DoState probes counted zero.
 
-Conclusion (HIGH CONFIDENCE, approaching certain): the corpus body at
-0x00478A50 is not on the executed path of these engagements. The prior
+Conclusion (RUNTIME-PROVEN for the tested workloads): the corpus body at
+0x00478A50 is not on the executed path of these tank engagements. The prior
 report's "hook-validated runtime anchor" established byte presence only.
+Scope correction: §6.4's census later proved the SAME body fully live for
+fighter/scout engagements — deadness is a family property, not a build-wide
+one.
 
 ### 6.2 What actually executes
 
@@ -310,68 +323,145 @@ ATTACK vs autonomous engagement) remains UNKNOWN and needs its own RE pass.
 - Module pages at the AttackTask cluster were observed holding non-code data
   ("abstor"/"abshld" patterns) at various times, while other module code kept
   executing; private RWX arena copies of code exist at randomized bases.
+  This session's census additionally found the static .rdata vtable region
+  reading as all zeros at runtime while live objects carried correct-looking
+  vtable pointer VALUES (e.g. 0x88AE6C) — i.e. neither byte validation nor
+  static-vtable seeding proves anything on this build; hook bodies located by
+  unique-prologue scans across all r-x ranges is the only method proven to
+  reach real executing copies.
   Any address-pinned hooking scheme in this environment must re-validate
   execution assumptions at runtime rather than trusting install-time bytes.
   This caveat applies to the whole constant-address inline-hook layer, not
   just this feature.
 
-## 7. Decision gate verdict and future strategy
+### 6.4 Live task census (RUNTIME-PROVEN, this session)
 
-Verdict: **stop** — the planned narrow seam cannot influence live behavior on
-this build because its target function is execution-dead there. This is a
-precise incompatibility, not a general one: the recovered policy, the Redux
-primitive set, and the dispatcher mechanics are all fully compatible; only the
-anchor's liveness fails.
+Tooling: `reverse_engineering/bz14_task_census.js` +
+`reverse_engineering/run_bz14_task_census.py`; raw per-scenario evidence
+under `reverse_engineering/snapshots/bz14_census/20260824_164128/`. Method:
+normal game launch, Frida attach after mission telemetry appears, unique-
+prologue pattern scan across r-x ranges, dynamic subtask discovery through
+the two proven process seams. Mission: `bz14atk` with per-scenario config.
 
-Best candidate future strategies (in order):
+Matrix (attacker family × order → observed live decision task):
 
-1. **Identify the live attack-task families' decision bodies** (the unnamed
-   vtable regions around 0x88590C and their DoState equivalents) and map the
-   1.4 decisions onto them. The blast-skeleton lacks the entire
-   slide/stand/flee surface, so this likely becomes strategy 2 anyway.
-2. **Full replacement DoState for the live attack-task class(es)**: OpenShim
-   already owns every required primitive signature (DoGoto/DoSlide/DoStand/
-   DoBlast/DoFlee/DoStuck/SidewaysAndClose/DistanceSq/GetTime — PROVEN above)
-   plus the recorded-transition protocol; a replacement virtual dispatched
-   through the same vtable slot would restore the complete 1.4 machine while
-   keeping movement/weapons authoritative. Higher risk than the abandoned
-   seam (reimplements the tail too), so gate behind the same default-off
-   configuration and shadow mode.
-3. **Process-layer route**: ShouldAttack/DoSubTask are proven-live narrower
-   surfaces for commitment/retarget behavior, complementing either of the
-   above.
+| Unit | Order | Attacker-side process vt | Live attack subtask (vt / DoState body) | States observed | Notes |
+|---|---|---|---|---|---|
+| avtank (tank) | ATTACK | 0x88A7DC | RocketTankAttack 0x88AE6C / 0x614DD0 | {2,3,5} | generic AttackTask 0 calls |
+| avtank | HUNT | 0x88A7DC | HuntTask 0x87AEBC / 0x4E63C0 {2} + RocketTankAttack | {5} combat | dedicated hunt task then family brain |
+| avtank | FOLLOW | 0x88A7DC | FollowTask 0x879AE4 / 0x4D3B80 {4} + unknown 0x88A6B0 / 0x614570 {5} + RocketTankAttack | {5} engagement | follow-family tasks + family brain when engaged |
+| avtank | DEFEND2 | 0x88A7DC | DefendTask 0x8785F4 / 0x4B1250 {6} + unnamed 0x88590C / 0x5A5C00 {2,5} + RocketTankAttack | {5} | most passive; defender-family skeleton also seen |
+| avtank | FORMATION | 0x88A7DC | SitTask 0x889F50 / 0x608630 {6} + RocketTankAttack {5} | {5,6} | no dedicated formation task; same combat brain as ATTACK |
+| avtank | AUTO (retaliation) | 0x88A7DC | RocketTankAttack | {3,5} | autonomous engagement uses same family brain |
+| svtank | ATTACK | 0x88A7DC | RocketTankAttack | {3,5} | SV tank attacker = same family task |
+| cvtank | ATTACK | 0x88A7DC | RocketTankAttack | {3,5} | TRO Chinese tank = same family task |
+| avfigh (scout) | ATTACK | 0x88AAAC | **generic AttackTask 0x00876358 / 0x00478A50** | **{2,3,7,9,10}** | full strafe-duel machine LIVE (~44k ticks) |
+| avfigh | HUNT | 0x88AAAC | **generic AttackTask 0x876358 / 0x478A50** (+HuntTask transiently) | **{2,3,7,9,10}** | same machine under HUNT |
+| avrckt (rocket tk) | ATTACK | 0x88AC8C | RocketTankAttack | {3,5} | guided-missile family brain; defender ran unnamed 0x88590C |
+| avartl (howitzer) | ATTACK | 0x88A7DC | RocketTankAttack {3,5} + SitTask 0x889F50 / 0x608630 {6} | sit-to-fire | class label "howitzer"; sits while its blast-skeleton fights |
+| avwalk (walker) | ATTACK | 0x87A04C | **walker family task 0x87A22C / 0x4E2530** | {2,5} | distinct family; own reduced skeleton; label "walker" |
+| avturr (turret) | AUTO | 0x885BE4 | unnamed defender family 0x88590C / 0x5A5C00 | {2,5} | deployable turret uses the defender-side skeleton |
+
+Cross-cutting facts:
+
+- `OffensiveProcess::DoSubTask` and `WingmanProcess::ShouldAttack` executed in
+  every scenario (10k–55k calls each) — the process layer is universally live.
+- Generic `AttackTask::DoState` counted ZERO calls in every tank-family
+  scenario despite a constructed object and valid bytes — the §6.1 verdict
+  holds for that family — while running at full rate in both scout scenarios.
+  Both an RWX arena copy and the module copy of the body were hooked where
+  found; counts agreed, consistent with a mirrored-page packer scheme.
+- Bomber: no bomber unit ODF ships in this install's archives (`bzone.zfs`
+  contains no spawnable bomber craft), so bombers could not be exercised;
+  their path remains UNKNOWN (see §11).
+
+Confidence: state histograms and call counts are direct Interceptor tallies
+from the live process (raw files preserved). Family naming beyond the repo's
+RTTI catalog (RocketTankAttack, Follow/Hunt/Defend/Sit tasks, AttackTask) is
+by vtable-pointer identity only; RTTI name walks returned null on this packed
+build, so names like "defender-side family" are placeholders pending a static
+Ghidra pass.
+
+## 7. Decision gate verdict and strategy selection
+
+Verdict (updated after the §6.4 census):
+
+**Strategy A — patch family-specific live decision bodies — is validated for
+AttackTask-using families.** The fighter/scout family provably executes the
+generic machine at 0x00478A50 with exactly the state surface the recovered
+policy modifies ({2,7,8,9,10}); the shipped recorded-transition override
+attaches to a proven-live seam for those units and requires no new
+engineering. For the tank/rocket/walker families the blast skeletons lack the
+entire slide/stand/flee surface, so restoring 1.4 dueling there means:
+
+2. **Strategy B — full replacement DoState for those live task classes**
+   dispatched through their existing vtable slot (+0x30). OpenShim already
+   owns every required primitive signature (DoGoto/DoSlide/DoStand/DoBlast/
+   DoFlee/DoStuck/SidewaysAndClose/DistanceSq/GetTime — PROVEN above) plus
+   the recorded-transition protocol; a replacement virtual restores the
+   complete 1.4 machine while keeping movement/weapons authoritative.
+   Higher risk than Strategy A: it reimplements the common tail too. Not
+   started; must not ship until each target class is runtime-proven live
+   per workload.
+
+3. **Strategy C — process-layer route** (`ShouldAttack` / `DoSubTask`) is
+   proven-live in every scenario and remains available as a complementary,
+   narrower surface (commitment/retarget policy), but cannot by itself
+   reproduce strafe-duel movement policy.
+
+4. **Hybrid (Strategy D)** is the honest end-state if restoration proceeds:
+   Strategy A for AttackTask users now; per-family B later, gated on census
+   evidence per class.
+
+Because enabling Strategy A today changes scouts while leaving tanks on
+Redux, the feature remains quarantined behind developer-only environment
+controls rather than being promoted to a user-facing option. That is a
+fidelity decision, not an engineering one: partial restoration would produce
+a battlefield mixing 1.4 and Redux combat doctrines.
 
 Additional RE needed before resuming:
 
-- Enumerate which orders/unit classes actually construct and tick which attack
-  task classes in 2.2.301 (the ctor callers 0x583CF0/0x613C10 contexts).
-- Name the unnamed vtable families (RTTI walk around 0x885xxx/0x889xxx) and
-  recover their DoState bodies.
-- Confirm whether the module-page mutation observed at the AttackTask cluster
-  affects long-lived hooks generally (relevant repo-wide).
+- Name the unnamed vtable families (0x88590C defender-side, 0x88A6B0
+  follow-engagement side, walker 0x87A22C) via static RTTI/Ghidra walk of
+  the unpacked corpus; recover their DoState bodies fully.
+- Determine which unit/order combinations construct generic AttackTask
+  besides fighter/scout (bomber candidates absent from this install;
+  TRO content may differ).
+- Confirm whether the module-page mutation observed at the AttackTask
+  cluster affects long-lived hooks generally (relevant repo-wide).
 
-## 8. Shipped implementation (validated, inert by default)
+## 8. Shipped implementation (validated; live seam proven for scout family)
 
 Files: `include/bz14_attack_policy.h` (pure decision core),
 `include/bz14_attack_redux.h` + `src/patches/bz14_attack_redux.cpp`
 (SEH-guarded accessors), `src/patches/bz14_attack_policy.cpp`
 (config/detour/hook), `tests/bz14_attack_policy_tests.cpp`.
 
-- Config `[AI] Legacy14AttackBehavior` (default OFF), env aliases
-  `OPENSHIM_LEGACY_ATTACK`-style documented in `openshim.ini.example`;
-  shadow mode `Legacy14AttackShadow` evaluates both policies and logs
-  divergences under `OPENSHIM_TRACE_AI_BZ14=<budget>` without applying them;
-  single-player-only gate (net id 0) like other sim-affecting settings;
-  arbitration with the AIKITE kite hook (legacy wins the shared detour site
-  when enabled; kite unavailable simultaneously, logged).
-- Decision core unit-tested (11/11 suite green): D1/D2/D2c/D3/D4/D5 outcomes,
-  engaged-set differences, ring boundaries (no invented smoothing),
-  quad math replication of get_weapon_quad.
-- Build: Release Win32 DLL links clean; tests pass under ctest.
-- Runtime status on current build: installs fail-closed, never fires (target
-  function execution-dead; §6), i.e. stock behavior is untouched whether the
-  option is off or on. When a live seam lands (§7), the same binary surface
-  becomes functional without redesign.
+- QUARANTINED, developer-only: activation is environment-only
+  (`OPENSHIM_LEGACY14_ATTACK`, `OPENSHIM_LEGACY14_ATTACK_SHADOW`,
+  optional `OPENSHIM_LEGACY14_EXCLUSIVE`). There are deliberately NO
+  openshim.ini keys: enabling today restores 1.4 behavior only where the
+  generic machine runs (fighter/scout proven) and leaves tank families on
+  Redux, which must never present as a normal "legacy attack behavior"
+  feature.
+- Arbitration (corrected this pass): AIKITE claims the shared
+  AttackTask::DoState detour site FIRST; the legacy layer defers unless
+  `OPENSHIM_LEGACY14_EXCLUSIVE=1`. An instrumentation mode can no longer
+  silently disable another feature.
+- Telemetry distinguishes all four validation claims separately:
+  byte-valid / hook-installed / hook-executing (first-entry log) /
+  behavior-affecting (override counter). One-shot session summaries at
+  shutdown: `[AIKITE] hook-installed=... hook-calls=... applied=...
+  units-seen=...` and `[BZ14] byte-valid=... hook-calls=... affecting=...`.
+- Single-player gate unchanged (net id 0); SEH guards on all game-memory
+  access; fail-closed on any validation failure.
+- Decision core unit-tested (suite green, expanded): D1/D2/D2c/D3/D4/D5
+  outcomes, engaged-set differences, ring boundaries (no invented
+  smoothing), quad math replication of get_weapon_quad.
+- Runtime status on current build: **live and behavior-affecting for
+  fighter/scout engagements under ATTACK/HUNT** (seam proven by census);
+  inert for tank/rocket/walker/howitzer families (their tasks never call
+  the hooked function).
 
 ## 9. Performance, multiplayer, safety notes (design-level)
 
@@ -390,11 +480,55 @@ Files: `include/bz14_attack_policy.h` (pure decision core),
   weapon-accuracy or aggression changes; stun-lock weakness reproduced
   deliberately as historical behavior.
 
-## 10. Artifact index
+## 10. Established vs unknown (read this before citing the report)
+
+Established (each backed by sections above):
+
+- Original 1.4 attack-policy reconstruction, and the 1.4 → 1.5/Redux deltas
+  D1/D2/D2c/D3/D4/D5 (§3, §4).
+- Generic Redux `AttackTask` static presence with byte-valid body and
+  vtable at 0x00876358 / 0x00478A50 (§4).
+- Tested workloads where `AttackTask::DoState` never executes: every
+  tank-family engagement probed (tank/rocket/walker/turret, all orders
+  tried) — execution-dead there (§6.1, §6.4).
+- Proven-live paths: `OffensiveProcess::DoSubTask`, `WingmanProcess::
+  ShouldAttack` (all scenarios), family blast-skeleton tasks
+  (RocketTankAttack et al.), and **generic `AttackTask::DoState` for
+  fighter/scout ATTACK and HUNT** (~43–45k ticks/engagement) (§6.4).
+- AIKITE's kite surface shares that seam: hook-executing proven for scout
+  engagements; inert for tank-family units; its CalcRange/retarget-period
+  surfaces are separately live everywhere (§6.4, openshim.log evidence).
+
+Unknown until resolved by new evidence:
+
+- Whether generic `AttackTask` serves any unit/order combination beyond
+  fighter/scout ATTACK/HUNT on this build (bomber untestable here: no
+  bomber ODF ships in this install).
+- Which live classes own the unnamed families (defender-side 0x88590C,
+  follow-engagement 0x88A6B0, walker 0x87A22C) and their full bodies.
+- Whether one common hook can restore 1.4 policy across ALL families
+  (Strategy B per class) without per-family divergence.
+- Steam-build portability of every anchor beyond validated GOG layouts.
+- Whether the packer's mirrored-page scheme (module VA + RWX arena copies
+  counting identically) can alias inline hooks in harmful ways long-term.
+
+Hypothesis discipline: nothing in this report promotes a HIGH CONFIDENCE
+claim to PROVEN without a live probe or direct decompile citation; census
+family names without RTTI are placeholders by construction.
+
+## 11. Artifact index
 
 - Implementation: files listed in section 8 (this branch).
-- Validation mission: `reverse_engineering/test_missions/bz14atk/`.
-- Session evidence: `%TEMP%\opencode\frida_spawn_out.txt`, `stack_out.txt`,
-  harness snapshots under `reverse_engineering/snapshots/live_combat/20260824_*`.
+- Validation mission: `reverse_engineering/test_missions/bz14atk/`
+  (census-capable: command matrix config, pcall-guarded orders,
+  per-second class/team/who telemetry).
+- Census tooling + raw evidence:
+  - `reverse_engineering/bz14_task_census.js`
+  - `reverse_engineering/run_bz14_task_census.py`
+  - `reverse_engineering/snapshots/bz14_census/20260824_164128/`
+    (13 scenarios + formation/scout-hunt fills)
+- Session evidence (earlier phases): `%TEMP%\opencode\frida_spawn_out.txt`,
+  `stack_out.txt`, harness snapshots under
+  `reverse_engineering/snapshots/live_combat/20260824_*`.
 - Prior context: `bz14_evasive_ai_investigation_20260823.md` (sections 9-10
   corrected here), scratch corpora under `%TEMP%\opencode\bz14_diff\`.
