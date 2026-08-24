@@ -432,6 +432,25 @@ ScrapPilotHud = Legacy
 ;           BZR_DISABLE_FACTION_JET_FLAMES
 JetFlames = 0
 
+; Fullscreen white "flashbang" when you look toward the sun.
+; Accepted: boolean. Default: 1 (stock).
+;   1 = stock: the sun adds to the engine's ScreenFlash, which paints a
+;       fullscreen white quad at up to 224/255 alpha
+;   0 = suppress only that contribution
+; Inverted spelling DisableSunFlashbang = 1 does the same thing and wins if
+; both keys are present. Legacy env alias: OPENSHIM_DISABLE_SUN_FLASHBANG.
+;
+; This is NOT bloom, the Glow compositor, the sun sprite material, or
+; atmospheric scattering. LensFlare::Render multiplies
+;   dot(cameraForward, sunDirection)^32
+; by the RAW visible-pixel count of the sun's occlusion query and hands the
+; product to ScreenFlash, which only clamps it at 1.0 -- so it saturates at
+; full white for any pose with the sun near centre-screen. Suppressing it
+; leaves the sun disc, the six lens-flare sprites, the sky, directional
+; lighting, shadows/PSSM and the Glow compositor exactly as they were, and
+; does not touch the explosion flashes that share the same ScreenFlash.
+SunFlashbang = 1
+
 ; Unit command/selection voice feedback.
 ; Canonical values:
 ;   Normal  = normal stock feedback
@@ -492,6 +511,24 @@ TraceHookHits = 0
 ; Legacy env aliases: OPENSHIM_TRACE_ARTILLERY_MASK,
 ;                     OPENSHIM_TRACE_WEAPON_MASK
 TraceArtilleryMask = 0
+
+; Trace the sun's contribution to the engine's fullscreen ScreenFlash.
+; Accepted: boolean. Default: OFF. Maximum 1200 records per process.
+; Logs one [SUNFLASH] line per frame in which the sun is in front of the
+; camera and its occlusion query reports visible pixels, with the camera-to-sun
+; dot product and the angle it implies, dot^32, the visible pixel count, the
+; lens-flare scale, the resulting flash value, and the whiteout alpha
+; ScreenFlash::Render would draw from it (marked SATURATED once the value
+; passes 1.0 and the clamp takes over). Each line also says which arm ran,
+; STOCK or SUPPRESSED, so a sweep across the sun can be graphed directly and an
+; arm that never engaged is visible as such.
+;
+; The dot/px/scale columns are recovered from LensFlare::Render's own stack
+; frame and are only printed when the three of them reproduce the flash value
+; the call site passed; otherwise the line falls back to the flash value alone
+; and says "frame unverified".
+; Legacy env alias: OPENSHIM_TRACE_SUN_FLASH
+TraceSunFlash = 0
 
 ; Trace DX11 texture/SRV/backbuffer/color-space activity.
 ; Accepted: integer flag 0/1. Default: 0. Very noisy diagnostic.
