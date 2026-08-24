@@ -25,9 +25,11 @@ namespace BZROpenShim::RenderProfiles
     // ResetMissionHookOverridesFromBridge(); also exported for companions.
     void ClearContentRenderProfileOverride(const char* context);
 
-    // Re-applies the effective profile to currently active viewports (used
-    // after user/EXU-driven profile changes so feedback is immediate instead
-    // of waiting for the engine's ~1 Hz scheme reassert pass).
+    // Applies the effective profile to currently active viewports (scheme
+    // rewrite + Glow compositor assertion). THREADING CONTRACT: mutates Ogre
+    // state, so it must only run on the game/render thread. Off-thread
+    // requesters set s_reapplyPending instead; the viewport scheme hook drains
+    // it here on the engine's thread at its next setMaterialScheme call.
     void ReapplyEffectiveProfileToViewports(const char* context);
 
     namespace Exports

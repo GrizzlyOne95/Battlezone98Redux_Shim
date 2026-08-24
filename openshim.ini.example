@@ -214,9 +214,11 @@ AllowStartupAutoLoad = 0
 ;   DX9  = prefer the Direct3D 9 render system
 ;   DX11 = prefer the Direct3D 11 render system
 ; Accepted aliases: d3d9/directx9, d3d11/directx11 (case-insensitive).
-; This is a player/system preference and is RESTART REQUIRED when changed:
-; OpenShim records it and reports requested-vs-effective divergence in the
-; [RENDER] diagnostics rather than attempting a live Ogre RenderSystem switch.
+; NOTE: OpenShim does not yet steer which render system the game starts on.
+; Today this key is parsed and reported only: requested-vs-effective
+; divergence appears in the [RENDER] diagnostics, and OpenShim never attempts
+; a live Ogre RenderSystem switch. Because the preference cannot yet control
+; startup, it is deliberately NOT exposed in the OpenShim settings UI.
 ; Default: Auto.
 Renderer = Auto
 

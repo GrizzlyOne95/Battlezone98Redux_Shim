@@ -28516,6 +28516,7 @@ namespace BZROpenShim
     bool ResetMissionHookOverridesFromBridge()
     {
         RetryDeferredRuntimeHooks();
+        g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
         // Content render-profile requests are mission/session scoped: the
         // authoritative lifecycle seam clears them so an EXU override from one
         // mission can never leak into the shell or unrelated content.
