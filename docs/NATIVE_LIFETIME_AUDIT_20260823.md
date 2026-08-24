@@ -217,3 +217,24 @@ the defect lives in stock engine code or in a shim trampoline.
 - Graceful `WM_CLOSE` shutdown twice on the final binary: exit code 0 both
   times; net worker joins all succeeded within budget; sampler shutdown
   silent; final session log contains zero `[ERROR]` lines.
+
+### Post-review revalidation (2026-08-24)
+
+After the lifecycle-oracle and detach-architecture corrections, with current
+`main` merged into the branch:
+
+- Release|Win32 rebuild clean; all 10 ctest suites pass.
+- `fourteam_fire`, 80 units, DX11 and DX9 arms: seam installed, headlight
+  policy active, falloff repair applied, zero `[ERROR]`/join-window/violation
+  lines. Arms end in a hard kill, so no transition edges are expected there.
+- Graceful `WM_CLOSE`: exit code 0;
+  `[MISSION] Mission left simulation ... transitions=1` followed by
+  `[HEADLIGHT] world generation advanced to 2` — the lifecycle oracle fired
+  on the real leaving edge; zero error/warning lines in the final session log.
+  The entering edge shares the same counter path and was exercised in prior
+  sessions where the shell started before the mission; a scripted
+  shell→mission→shell→mission cycle remains manual-validation work.
+- Explicit `FreeLibrary` unload of the shim itself is not exercisable by the
+  game (the module is a statically imported proxy); its safety claim is the
+  structural pin guarantee (code pages cannot unmap under live workers), not
+  a dynamically tested unload.
