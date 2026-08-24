@@ -330,7 +330,47 @@ namespace BZROpenShim
                 return;
 
             std::lock_guard<std::mutex> lock(g_TrnWriteMutex);
+            // Growth cap. Entries are removed only by a hooked CloseHandle in
+            // a patched module; a close from any other module (or NtClose)
+            // leaks the entry. Windows reuses HANDLE values aggressively, so
+            // an unbounded leak eventually turns into a stale record for an
+            // unrelated file. Eviction is arbitrary because every entry over
+            // the cap is, by construction, already orphaned.
+            constexpr size_t kMaxTrackedTrnHandles = 4096;
+            if (g_TrnWriteHandles.size() >= kMaxTrackedTrnHandles &&
+                g_TrnWriteHandles.find(reinterpret_cast<uintptr_t>(handle)) ==
+                    g_TrnWriteHandles.end())
+            {
+                g_TrnWriteHandles.erase(g_TrnWriteHandles.begin());
+            }
             g_TrnWriteHandles[reinterpret_cast<uintptr_t>(handle)] = { path };
+        }
+
+        // A tracked record must only drive normalization while the closing
+        // HANDLE still refers to the file that was recorded. Handles leaked
+        // past the hooked modules stay in the map and Windows hands their
+        // numeric values back out, so identity has to be re-verified against
+        // the still-open handle at close time.
+        static bool TrackedHandleMatchesRecord(HANDLE handle, const TrnWriteRecord& record)
+        {
+            if (record.path.empty())
+                return false;
+
+            wchar_t buffer[1024] = {};
+            const DWORD written = GetFinalPathNameByHandleW(
+                handle, buffer, static_cast<DWORD>(std::size(buffer)),
+                FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+            if (written == 0 || written >= std::size(buffer))
+                return false;
+
+            // GetFinalPathNameByHandleW returns \\?\C:\... for DOS paths; the
+            // recorded path came from GetFullPathNameW without the prefix.
+            std::wstring actual = buffer;
+            const wchar_t kNtDosPrefix[] = L"\\\\?\\";
+            if (_wcsnicmp(actual.c_str(), kNtDosPrefix, 4) == 0)
+                actual.erase(0, 4);
+
+            return _wcsicmp(actual.c_str(), record.path.c_str()) == 0;
         }
 
         static bool PopTrackedTrnWriteHandle(HANDLE handle, TrnWriteRecord& outRecord)
@@ -531,10 +571,24 @@ namespace BZROpenShim
 
             TrnWriteRecord record = {};
             const bool tracked = !g_InTrnNormalization && PopTrackedTrnWriteHandle(object, record);
+            // Identity check must run before the real close, while the handle
+            // still resolves. A mismatch means the map held a stale numeric
+            // handle value (leaked past a hooked closer and reused by
+            // Windows); rewriting the recorded path then would corrupt an
+            // unrelated file.
+            const bool matches = tracked && TrackedHandleMatchesRecord(object, record);
             const BOOL result = g_RealCloseHandle(object);
 
-            if (tracked && result && !record.path.empty())
+            if (tracked && result && matches)
                 NormalizeTrnFileIfNeeded(record.path, L"CloseHandle");
+            else if (tracked)
+            {
+                Log(L"[TRN] Dropping stale tracked write handle=0x%p path=%ls closeOk=%d identity=%d\n",
+                    object,
+                    record.path.c_str(),
+                    static_cast<int>(result),
+                    static_cast<int>(matches));
+            }
 
             return result;
         }

@@ -4758,56 +4758,73 @@ namespace
                 static_cast<long>(finalObserved),
                 g_Config.govStart);
         }
-        if (g_WakeSender != INVALID_SOCKET && g_RealCloseSocket)
+        // Join before freeing anything the workers touch. Closing a thread
+        // handle without waiting leaves its final iteration free to run
+        // against state torn down below (the ring buffer, capture maps and
+        // relay log). Mirrors the ShutdownBzrNetTrace contract: bounded wait,
+        // then refuse to free what a still-running worker could reach.
+        auto stopWorkerThread = [](void** slot) -> bool
+        {
+            if (!*slot)
+                return true;
+            const DWORD wait =
+                WaitForSingleObject(static_cast<HANDLE>(*slot), 1500);
+            if (wait != WAIT_OBJECT_0)
+                return false;
+            CloseHandle(static_cast<HANDLE>(*slot));
+            *slot = nullptr;
+            return true;
+        };
+        const bool wakeStopped = stopWorkerThread(reinterpret_cast<void**>(&g_WakeThread));
+        const bool dupStopped = stopWorkerThread(reinterpret_cast<void**>(&g_DupThread));
+        const bool govScanStopped = stopWorkerThread(reinterpret_cast<void**>(&g_GovScanThread));
+        const bool govPatchStopped = stopWorkerThread(reinterpret_cast<void**>(&g_GovPatchThread));
+        const bool autoKickStopped = stopWorkerThread(reinterpret_cast<void**>(&g_AutoKickThread));
+        const bool allStopped = wakeStopped && dupStopped && govScanStopped &&
+                                govPatchStopped && autoKickStopped;
+        // The wake sender is owned by ReorderWakeThread, which reads and
+        // recreates g_WakeSender without a lock. Closing it before that worker
+        // is joined let its final iteration send through a closed (and
+        // potentially recycled) SOCKET value, or leak a sender it had just
+        // created. Close it only after the owning thread has been joined.
+        if (wakeStopped && g_WakeSender != INVALID_SOCKET && g_RealCloseSocket)
         {
             g_RealCloseSocket(g_WakeSender);
             g_WakeSender = INVALID_SOCKET;
         }
-        if (g_WakeThread)
+        if (!allStopped)
         {
-            CloseHandle(g_WakeThread);
-            g_WakeThread = nullptr;
-        }
-        if (g_DupThread)
-        {
-            CloseHandle(g_DupThread);
-            g_DupThread = nullptr;
-        }
-        if (g_GovScanThread)
-        {
-            CloseHandle(g_GovScanThread);
-            g_GovScanThread = nullptr;
-        }
-        if (g_GovPatchThread)
-        {
-            CloseHandle(g_GovPatchThread);
-            g_GovPatchThread = nullptr;
-        }
-        if (g_AutoKickThread)
-        {
-            CloseHandle(g_AutoKickThread);
-            g_AutoKickThread = nullptr;
+            Logf("[OpenShimNet] shutdown: workers exceeded join window "
+                 "wake=%d dup=%d govScan=%d govPatch=%d autoKick=%d; leaking "
+                 "shared buffers rather than freeing under live threads",
+                 static_cast<int>(wakeStopped), static_cast<int>(dupStopped),
+                 static_cast<int>(govScanStopped),
+                 static_cast<int>(govPatchStopped),
+                 static_cast<int>(autoKickStopped));
         }
         LogOutboundBurstSummary();
-        FlushBufferLog();
-        if (g_BufferLogRing)
+        if (allStopped)
         {
-            HeapFree(GetProcessHeap(), 0, g_BufferLogRing);
-            g_BufferLogRing = nullptr;
+            FlushBufferLog();
+            if (g_BufferLogRing)
+            {
+                HeapFree(GetProcessHeap(), 0, g_BufferLogRing);
+                g_BufferLogRing = nullptr;
+            }
+            g_BufferLogEnabled = false;
+            AcquireSRWLockExclusive(&g_PendingCaptureLock);
+            g_PendingCaptureIo.clear();
+            ReleaseSRWLockExclusive(&g_PendingCaptureLock);
+            AcquireSRWLockExclusive(&g_WebSocketCaptureLock);
+            g_WebSocketCapture.clear();
+            ReleaseSRWLockExclusive(&g_WebSocketCaptureLock);
+            AcquireSRWLockExclusive(&g_RelayControlLogLock);
+            if (g_RelayControlLog)
+            {
+                std::fclose(g_RelayControlLog);
+                g_RelayControlLog = nullptr;
+            }
+            ReleaseSRWLockExclusive(&g_RelayControlLogLock);
         }
-        g_BufferLogEnabled = false;
-        AcquireSRWLockExclusive(&g_PendingCaptureLock);
-        g_PendingCaptureIo.clear();
-        ReleaseSRWLockExclusive(&g_PendingCaptureLock);
-        AcquireSRWLockExclusive(&g_WebSocketCaptureLock);
-        g_WebSocketCapture.clear();
-        ReleaseSRWLockExclusive(&g_WebSocketCaptureLock);
-        AcquireSRWLockExclusive(&g_RelayControlLogLock);
-        if (g_RelayControlLog)
-        {
-            std::fclose(g_RelayControlLog);
-            g_RelayControlLog = nullptr;
-        }
-        ReleaseSRWLockExclusive(&g_RelayControlLogLock);
     }
 }
