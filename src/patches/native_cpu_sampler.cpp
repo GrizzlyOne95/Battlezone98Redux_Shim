@@ -1015,7 +1015,17 @@ namespace BZROpenShim
         {
             SetEvent(g_WakeEvent);
         }
-        WaitForSingleObject(g_WorkerThread, 5000);
+        // Bounded join. If the sampler misses the window, leave the thread
+        // handle and its wake event alone: closing them under a still-running
+        // worker hands it an invalid event and frees state it can still touch.
+        const DWORD wait = WaitForSingleObject(g_WorkerThread, 5000);
+        if (wait != WAIT_OBJECT_0)
+        {
+            LogShimA(LogLevel::Warn, kComponent,
+                     "CPU sampler thread exceeded its shutdown join window; "
+                     "leaking thread and wake event rather than freeing under it");
+            return;
+        }
         CloseHandle(g_WorkerThread);
         g_WorkerThread = nullptr;
         if (g_WakeEvent)
