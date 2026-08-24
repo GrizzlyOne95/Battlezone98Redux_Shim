@@ -2401,9 +2401,20 @@ namespace BZROpenShim
         static const char* const kShimSettingsReticleConvAltKeys[] = { "SmartReticleConvergence" };
         static const char* const kShimSettingsScavengerAltKeys[] = { "ScavengerPathing" };
         static const char* const kShimSettingsBindsUiAltKeys[] = { "CustomBindingUi" };
+        static const char* const kShimSettingsRendererValues[] = { "Auto", "DX9", "DX11" };
+        static const char* const kShimSettingsRendererLabels[] = { "Auto", "DirectX 9", "DirectX 11" };
+        static const char* const kShimSettingsRenderProfileValues[] = { "Retro", "Redux", "Enhanced" };
 
         static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
         {
+            { "Renderer", "Graphics", "Renderer", nullptr, 0,
+              kShimSettingsRendererValues, kShimSettingsRendererLabels, 3, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Graphics renderer backend: Auto, DirectX 9, or DirectX 11. Restart required." },
+            { "Render Profile", "Graphics", "RenderProfile", nullptr, 0,
+              kShimSettingsRenderProfileValues, kShimSettingsRenderProfileValues, 3, 1,
+              ShimSettingApplyGroup::RenderProfile,
+              "Visual rendering policy: Redux (stock baseline), Enhanced, or Retro. Applies live." },
             { "Attack Alert", "Display", "UnderAttackAlert", nullptr, 0,
               kShimSettingsUnderAttackValues, kShimSettingsUnderAttackValues, 3, 0,
               ShimSettingApplyGroup::UnderAttackAlert,
