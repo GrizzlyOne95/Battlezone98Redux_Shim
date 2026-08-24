@@ -417,6 +417,50 @@
             }
         };
 
+        struct SceneCameraScope
+        {
+            void* previous = nullptr;
+            explicit SceneCameraScope(void* current)
+                : previous(t_CurrentSceneCamera)
+            {
+                t_CurrentSceneCamera = current;
+            }
+            ~SceneCameraScope()
+            {
+                t_CurrentSceneCamera = previous;
+            }
+        };
+
+        struct RenderContributorScope
+        {
+            RenderContributorSlot* previous = nullptr;
+            explicit RenderContributorScope(RenderContributorSlot* current)
+                : previous(t_CurrentRenderContributor)
+            {
+                t_CurrentRenderContributor = current;
+            }
+            ~RenderContributorScope()
+            {
+                t_CurrentRenderContributor = previous;
+            }
+        };
+
+        struct SceneRenderScope
+        {
+            // SceneManager::_renderScene is re-entrant while Ogre renders shadow
+            // textures. Depth therefore distinguishes main-view traversal from
+            // shadow-camera traversal without relying on retail object layouts.
+            SceneRenderScope()
+            {
+                ++t_SceneRenderDepth;
+            }
+
+            ~SceneRenderScope()
+            {
+                --t_SceneRenderDepth;
+            }
+        };
+
         struct SoftwareBlendScope
         {
             SoftwareBlendScope() { ++t_SoftwareBlendDepth; }

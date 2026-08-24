@@ -3,8 +3,9 @@
 This opt-in diagnostic correlates Ogre animation, software deformation, native
 chunk simulation, renderer submissions, DX9/DX11 work, and `Present` frame time.
 The diagnostic observers do not change animation state, culling, materials,
-shaders, or gameplay. The independently controlled native-chunk performance
-policies documented below can remain active when profiling is disabled.
+shaders, or gameplay. The independently controlled validated-runtime
+performance policies documented below can remain active when profiling is
+disabled.
 
 ## Enable
 
@@ -29,7 +30,9 @@ installs process-lifetime x86 entry detours for:
 - public `Ogre::Entity::_updateAnimation`;
 - protected `Ogre::Entity::updateAnimation`, which the retail render path calls
   directly instead of passing through the public wrapper;
-- `Ogre::Mesh::softwareVertexBlend`.
+- `Ogre::Mesh::softwareVertexBlend`;
+- `Ogre::SceneManager::_renderScene`, including re-entrant shadow-camera
+  attribution.
 
 The protected core detour is required for actual attribution; the public
 wrapper is retained as a validated observer seam and compatibility check.
@@ -79,9 +82,11 @@ collection first; hooks then become pass-through until process exit.
 
 ## Telemetry
 
-Reports are aggregated approximately once per second. Hot paths use atomics,
-fixed tables, and bounded bloom sets; they do not format strings, write files,
-allocate, or acquire heavyweight contributor maps.
+Reports are aggregated approximately once per second. Diagnostic hot paths use
+atomics, fixed tables, and bounded bloom sets; they do not format strings,
+write files, allocate, or acquire heavyweight contributor maps. The independent
+DX11 skin-source correction can allocate once per previously unshadowed shared
+source, then returns to a pointer/flag fast path.
 
 The reports include:
 
@@ -92,6 +97,10 @@ The reports include:
 - software blends, vertices, matrices, normals, CPU time, size/latency buckets,
   and blends per animation update;
 - fixed-size per-Entity and per-source-`VertexData` top contributors;
+- source position/normal/weight/index stride, weights-per-vertex, and buffer
+  shadow/system-memory state;
+- named main and shadow cameras plus main-versus-nested render-queue,
+  animation, and software-blend attribution;
 - render-queue calls and approximate visible-versus-skinned sets;
 - Ogre render operations and CPU submission time;
 - D3D11 `Draw`, `DrawIndexed`, instanced and indirect variants, normalized per
@@ -106,6 +115,10 @@ The reports include:
 - exact `chunk1/chunk2` Entity names, meshes, stored shadow state, and
   render-queue calls;
 - native chunk shadow-policy query/suppression counts.
+- bounded top render-contributor rows keyed by renderable type, mesh, material,
+  technique/scheme/LOD/pass, and camera, with main/shadow, RenderOperation,
+  draw, vertex/index, CPU, and DX9 state attribution. The live-combat analyzer
+  aggregates these rows into `render_contributors.csv`.
 
 A stable core subset is appended to `openshim_ogre_profile.csv`; the more
 detailed chunk/renderer histograms remain in the one-second log rows. The CSV
@@ -138,7 +151,7 @@ For a deterministic visible tail, deploy
 `.bzn` with the same basename. It creates 56 `svtank`, destroys them once at
 three seconds, and leaves the camera/load unchanged afterward.
 
-## Native chunk performance policies
+## Validated runtime performance policies
 
 These policies are separate from collection and default on in the validated GOG
 2.2.301 build for both DX9 and DX11:
@@ -149,6 +162,11 @@ These policies are separate from collection and default on in the validated GOG
 - blended world-effect logarithmic depth keys use stride 8 to permit compatible
   `DynamicGeometry` batches to merge; opt out with
   `OPENSHIM_DISABLE_DYNAMIC_ALPHA_BATCHING=1`.
+- exact canonical generic impact `chunk1/chunk2` geometry is rebuilt into one
+  dynamic ManualObject section while preserving native simulation, transforms,
+  `scarpmat2`, and its normal/glow schemes. Any changed payload hash keeps the
+  exact per-Entity path. Opt out with
+  `OPENSHIM_DISABLE_GENERIC_CHUNK_BATCH=1`.
 
 Neither policy changes piece count, native simulation/lifetime, main-pass mesh,
 opaque geometry, material, or shader selection. See
@@ -156,6 +174,24 @@ opaque geometry, material, or shader selection. See
 A/B evidence. The chunk policy additionally checks the exact validated GOG
 executable and Ogre PE identities before writing an Entity vtable; unsupported
 builds fail closed. Steam is not claimed by this investigation.
+
+DX11 additionally enables a software-skin source correction on the same exact
+GOG executable/Ogre identities. If the position/normal stream read by
+`Mesh::softwareVertexBlend` lacks an Ogre CPU shadow, OpenShim pays one staging
+readback, creates an equivalent CPU-shadowed vertex buffer, copies the exact
+interleaved bytes, and replaces that shared binding. This avoids a synchronous
+GPU readback for every affected Entity every frame without changing the mesh,
+animation, draw, or shadow policy. Any failed repair disables the correction
+for the process and leaves stock behavior in place. Opt out with:
+
+```text
+OPENSHIM_DISABLE_DX11_SKIN_SOURCE_SHADOW_FIX=1
+```
+
+See `live_combat_scaling_20260822.md` for the deterministic IA mission, layout
+evidence, and profiler-enabled/disabled DX9/DX11 A/B results.
+See `live_render_optimization_20260822.md` for contributor attribution,
+generic-impact batching, distance, DX9-state, and stock-asset sweep evidence.
 
 ## Tests
 
