@@ -68,15 +68,102 @@ Documented here because they bound the same audit scope:
   now probed by name before use, and retry-path creation verifies the zone
   table still advertises the recorded source objects (`source_mismatch`
   forget).
-- **Headlight baselines across worlds** — captured light baselines were keyed
-  by raw pointer only; recycled light addresses inherited dead baselines and
-  write-back hit freed memory. Baselines now carry a world generation derived
-  from tracked player identity; stale entries discard instead of restore.
 - **TRN handle reuse** — leaked tracked HANDLE values could be reused by
   Windows and rewrite unrelated files at close; identity is now re-verified
   against the still-open handle before normalization, and the map is capped.
 - **Net worker joins** — worker threads are joined before flushing/freeing
   shared buffers, refusing to free under live workers.
+
+## Headlight world generation: authoritative mission lifecycle oracle
+
+Review finding against the first repair: deriving
+`s_HeadlightWorldGeneration` from raw local-player pointer inequality is not
+proof that a world ended. A destroyed player object can be replaced by the
+next mission's object at the *same address* while no refresh observes the
+intermediate null, so the generation would not advance and a recycled
+`Ogre::Light` address could inherit the previous world's baseline and receive
+stale writes through it.
+
+Final model (bzr_hooks.cpp):
+
+- **Authoritative oracle — mission lifecycle seam.** `BzrSetRunningHook`
+  (the proven `SetRunning` detour at `0x00434170`, byte-guarded, GOG-pinned)
+  advances `s_HeadlightWorldGeneration` on *both* edges of `RUN_STARTED`:
+  leaving simulation invalidates every captured baseline, entering
+  simulation starts the next world's numbering. The seam fires before any
+  headlight refresh reads or writes baseline state.
+- **Baseline stamps.** Every entry in `g_HeadlightOriginalStates` carries the
+  generation it was captured under. All restore paths
+  (`RefreshHeadlightState`'s erase loop, `RestoreAllHeadlightStates`
+  stand-down, and the falloff plan's idempotent-baseline reuse) treat a
+  non-current stamp as discard-only: the stored light pointer is never
+  dereferenced. `CaptureHeadlightState` resets an entry whose stamp does not
+  match, so an address recycled by a new world's light captures fresh stock
+  values instead of inheriting another object's baseline.
+- **Fallback sanity signal only.** The tracked player-object pointer still
+  advances the generation when it changes, for installs where the seam could
+  not be installed (Steam/relocated executables). A changed pointer still
+  proves the previous world is gone; an unchanged pointer proves nothing,
+  which is why it is no longer the primary oracle.
+- **Discard accounting.** Stale-world discards are counted and the first few
+  per transition are logged (`[HEADLIGHT] stale-world baseline discarded`),
+  so session logs show invalidation working without allowing a pathological
+  map to flood the log.
+
+Acceptance properties: no stale-world baseline can be restored into a later
+world; pointer reuse cannot defeat invalidation (the seam advances regardless
+of allocator behavior); same-world refreshes remain idempotent (baselines are
+reused only under a matching generation); disabling the headlight feature
+still restores current-generation baselines and silently drops stale ones;
+and mission transitions never dereference old Ogre light pointers because the
+seam callback only bumps a counter.
+
+## Shutdown ownership model: loader-lock-safe detach
+
+Review finding: `DllMain(DLL_PROCESS_DETACH)` called `BZROpenShim::Shutdown`,
+which performs bounded joins (patch thread up to 2 s, CPU sampler up to 5 s,
+each network worker up to 1.5 s). Waiting for arbitrary worker threads while
+holding the Windows loader lock is unsafe — a worker needing loader service
+during teardown deadlocks against the detach thread — and "leak the worker
+after timeout" does not protect an explicit-unload path whose module then
+unmaps under the surviving thread.
+
+Final architecture (dllmain.cpp):
+
+1. **Process-lifetime module pin.** At attach the module pins itself with
+   `GetModuleHandleExW(PIN | FROM_ADDRESS)`. From that point an explicit
+   `FreeLibrary` becomes reference-count noise: the loader will not unmap
+   this DLL while the process runs. Unmapping executable code under a live
+   OpenShim worker is therefore structurally impossible, not merely unlikely.
+   This extends the shutdown paths' existing leak-rather-than-free policy to
+   the module itself.
+2. **Process termination (`lpvReserved != NULL`).** Per the DllMain contract,
+   every other thread has already been terminated (e.g. by `ExitProcess`)
+   before detach notifications run, and the whole address space is about to
+   disappear. The detach handler logs to the debugger trace and does nothing
+   else: no joins, no frees, no logger or heap work that could touch a lock a
+   dying thread held. The shim relies on OS process teardown deliberately.
+   (The structured log already flushes each line as it is written, so no
+   end-of-session flush is lost.)
+3. **Explicit unload (`lpvReserved == NULL`, FreeLibrary/load-failure).**
+   Documented contract: a host that intends to unload must call the public
+   `BZROpenShim::Shutdown()` export first, from one of its own normal
+   threads — that is the orderly, joined, child-before-parent teardown, and
+   it remains the supported path. If the module is freed without that call,
+   the detach handler only stores the patcher stop flag (a plain atomic
+   write) and returns; it performs no waits and no cleanup, relying on the
+   process-lifetime pin to keep mapped whatever code workers still execute.
+4. **No TerminateThread anywhere; no new synchronization dependencies.** The
+   subsystem-level bounded joins and refuse-to-free guards reviewed on this
+   branch are unchanged — they live inside `Shutdown()` and its callees,
+   which now only run from normal execution contexts.
+
+Ownership summary: worker threads own their run loops and stop on atomic
+flags; `Shutdown()` owns joined, ordered teardown and may only be called from
+a normal context; the detach handler owns nothing except the decision between
+"OS will reclaim everything" and "signal-only wind-down"; and the module pin
+guarantees that whichever path runs, OpenShim code pages outlive every
+OpenShim thread.
 
 ## False positives (audited, protected by construction)
 
@@ -101,8 +188,9 @@ Documented here because they bound the same audit scope:
 - **AutoSave** (`autosave.cpp`): config/tick state only, no raw caches;
   save/load hooks re-resolve per use.
 - **dllmain shutdown order**: layered child-before-parent (FXAA before
-  colorspace observer, instrumentation before optimizer); patch-thread join
-  is bounded.
+  colorspace observer, instrumentation before optimizer); the joined
+  `Shutdown()` path runs only from normal execution contexts — detach no
+  longer waits (see the shutdown ownership model above).
 
 ## High-confidence hazard, not repaired today
 
