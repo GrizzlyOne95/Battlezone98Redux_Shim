@@ -551,7 +551,7 @@ TraceMapRefresh = 0
 TraceJumpSniping = 0
 
 ; Sample per-object satellite/overview visibility state.
-; Accepted: boolean. Default: ON (temporarily, see below).
+; Accepted: boolean. Default: OFF.
 ; Logs [SATVIS] lines while the satellite view is open, sampling the
 ; GameObject fields that Battlezone 1.5 used to decide what appeared in
 ; satellite view: illumination, isVisible, seen, perceivedTeam, class type
@@ -560,9 +560,16 @@ TraceJumpSniping = 0
 ; Submit_Overview_Entities applied per object -- so a capture can be scored
 ; directly against the legacy behaviour table.
 ;
-; This is ON by default only while the satellite fog-of-war regression is
-; being characterised (feature item 24); it will return to OFF once that is
-; resolved. Read-only sampling, no gameplay effect.
+; This was ON by default only while the satellite fog-of-war regression was
+; being characterised (feature item 24). That is resolved -- see
+; SatelliteVisibilityFix in [SinglePlayer] -- so it is back to OFF. Read-only
+; sampling, no gameplay effect.
+;
+; For re-scoring the fix rather than characterising the defect, prefer the
+; bounded per-team capture: set OPENSHIM_SATVIS_VALIDATE=1 (optionally
+; OPENSHIM_SATVIS_VALIDATE_BUDGET=<n>) for one [SATVISCHK] line per populated
+; team per second giving population, illumination, resulting Ogre visibility
+; and what the fix believes it applied.
 ;
 ; As of 2026-08-18 it also resolves each object to its Ogre entity via
 ; GameObject -> [+0xF0] -> [+0x94] (the chain ExtraUtilities uses for its
@@ -571,10 +578,10 @@ TraceJumpSniping = 0
 ; out of the overview that Redux is still drawing -- that pairing is the whole
 ; point of the capture.
 ;
-; It no longer returns early outside satellite view, because the question is
-; how effective visibility changes as you enter and leave view 3, and that
-; needs samples on both sides. Still rate-limited to one sample per second and
-; still stops once the budget is spent. Set to 0 to silence it.
+; It does not return early outside satellite view, because the question it was
+; built for is how effective visibility changes as you enter and leave view 3,
+; and that needs samples on both sides. Rate-limited to one sample per second
+; and stops once the budget is spent.
 ;
 ; Background and the live-test plan:
 ;   reverse_engineering/satellite_fow_root_cause_20260817.md
@@ -882,6 +889,30 @@ HeadlightBeam = Wide
 ; Trace: OPENSHIM_TRACE_ATTACK_REVEAL=1  (logs skip/noop/write per event)
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_ATTACK_REVEAL
 AttackRevealPerceivedTeam = 1
+
+; Hide undetected objects on the satellite view again.
+;
+; BZ 1.5 rendered the overview through Submit_Overview_Entities, which tested
+; each object's illumination and submitted only those with illumination > 0.
+; Redux dropped that submitter: view 3 goes through the same ungated Ogre scene
+; traversal first person uses, so every enemy on the map is drawn on the
+; satellite whether or not your team has ever seen it.
+;
+; This restores the legacy gate at the Ogre layer. While the satellite view is
+; open, each GameObject-backed entity is shown only if it was already visible
+; *and* its illumination is above zero; the pre-satellite visibility of every
+; entity is recorded and put back when you leave the view. Nothing outside
+; view 3 is touched -- a zero-illumination object is still correctly visible in
+; first person -- and an entity that was already hidden for some other reason
+; stays hidden.
+;
+; Accepted: boolean. Default: ON.
+; Trace: OPENSHIM_TRACE_SATELLITE_VISIBILITY_FIX=1 (logs [SATVISFIX] entry,
+;        exit and teardown transitions with per-transition counts)
+; Legacy env aliases to force it off: OPENSHIM_DISABLE_SATELLITE_VISIBILITY_FIX,
+;                                     BZR_DISABLE_SATELLITE_VISIBILITY_FIX
+SatelliteVisibilityFix = 1
+
 [Environment]
 
 ; ---------------------------------------------------------------------------

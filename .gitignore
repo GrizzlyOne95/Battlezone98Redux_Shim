@@ -96,6 +96,7 @@ docs/*
 !docs/NETCODE_UPSTREAM_PARITY.md
 !docs/raw-mouse-input.md
 !docs/DX11_ENHANCED_DYNAMIC_LIGHT_AUDIT.md
+!docs/SATELLITE_VISIBILITY_FIX_PLAN.md
 
 # Local third-party source/reference checkouts
 third_party/ogre-1.10.0-bzr/_work/

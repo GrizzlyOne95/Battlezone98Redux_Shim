@@ -6,3 +6,14 @@ distance = 50.0
 orientation = "facing"
 warmupSeconds = 4.0
 measureSeconds = 8.0
+
+[Satellite]
+friendlyTeam = 1
+detectedTeam = 6
+undetectedTeam = 7
+preHideTeam = 8
+revealTeam = 9
+groupCount = 3
+nearDistance = 60.0
+farDistance = 1400.0
+recyclerOdf = "avrecy"
