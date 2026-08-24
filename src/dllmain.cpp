@@ -22,6 +22,7 @@
 #include "native_cpu_sampler.h"
 #include "pilot_fp_animation_trace.h"
 #include "openshim_sdk_v2.h"
+#include "render_profile_runtime.h"
 #include "BZROpenShim.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -44,6 +45,10 @@ static unsigned __stdcall PatchThreadProc(void*)
     BZROpenShim::InitializeOgreAnimationProfiler();
     BZROpenShim::InitializeDx11ColorSpaceDiagnostic();
     BZROpenShim::InitializeDx11EnhancedFxaa();
+    // Renderer-profile ownership (backend observation, scheme-policy takeover,
+    // capability reporting) starts with the other renderer observers so it can
+    // see the render-system modules load and be ready before first mission.
+    BZROpenShim::RenderProfiles::InitializeOgreRenderProfiles();
     BZROpenShim::InstallCrashLogger();
     BZROpenShim::InitializeNetworkOptimizer();
     // Install BZRNet observation after the optimizer so it can chain through

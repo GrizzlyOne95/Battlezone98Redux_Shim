@@ -1,0 +1,2823 @@
+//VERTEX PROGRAMS
+
+
+//GLSLES VERSIONS
+
+//LOWEST
+
+vertex_program OSE_TerrainLowestNoShadow_vertexGLSLES glsles
+{
+	source openshim_enhanced_terrain-vertex.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1
+}
+
+vertex_program OSE_TerrainLowestShadow_vertexGLSLES glsles
+{
+	source openshim_enhanced_terrain-vertex.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_TerrainLowestPSSM_vertexGLSLES glsles
+{
+	source openshim_enhanced_terrain-vertex.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//LOW
+
+vertex_program OSE_TerrainLowNoShadow_vertexGLSLES glsles
+{
+	source openshim_enhanced_terrain-vertex.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=1
+}
+
+vertex_program OSE_TerrainLowShadow_vertexGLSLES glsles
+{
+	source openshim_enhanced_terrain-vertex.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_TerrainLowPSSM_vertexGLSLES glsles
+{
+	source openshim_enhanced_terrain-vertex.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//MEDIUM
+
+vertex_program OSE_TerrainMediumNoShadow_vertexGLSLES glsles
+{
+	source openshim_enhanced_terrain-vertex.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8
+}
+
+vertex_program OSE_TerrainMediumShadow_vertexGLSLES glsles
+{
+	source openshim_enhanced_terrain-vertex.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_TerrainMediumPSSM_vertexGLSLES glsles
+{
+	source openshim_enhanced_terrain-vertex.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//HIGH
+
+vertex_program OSE_TerrainHighNoShadow_vertexGLSLES glsles
+{
+	source openshim_enhanced_terrain-vertex.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=24
+}
+
+vertex_program OSE_TerrainHighShadow_vertexGLSLES glsles
+{
+	source openshim_enhanced_terrain-vertex.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_TerrainHighPSSM_vertexGLSLES glsles
+{
+	source openshim_enhanced_terrain-vertex.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//GLOW
+
+vertex_program OSE_TerrainGlow_vertexGLSLES glsles
+{
+	source openshim_enhanced_terrain_glow-vertex.glsles
+	syntax glsles
+	entry_point main
+}
+
+
+//GLSL VERSIONS
+
+//LOWEST
+
+vertex_program OSE_TerrainLowestNoShadow_vertexGLSL glsl
+{
+	source openshim_enhanced_terrain-vertex.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1
+}
+
+vertex_program OSE_TerrainLowestShadow_vertexGLSL glsl
+{
+	source openshim_enhanced_terrain-vertex.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_TerrainLowestPSSM_vertexGLSL glsl
+{
+	source openshim_enhanced_terrain-vertex.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//LOW
+
+vertex_program OSE_TerrainLowNoShadow_vertexGLSL glsl
+{
+	source openshim_enhanced_terrain-vertex.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=1
+}
+
+vertex_program OSE_TerrainLowShadow_vertexGLSL glsl
+{
+	source openshim_enhanced_terrain-vertex.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_TerrainLowPSSM_vertexGLSL glsl
+{
+	source openshim_enhanced_terrain-vertex.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//MEDIUM
+
+vertex_program OSE_TerrainMediumNoShadow_vertexGLSL glsl
+{
+	source openshim_enhanced_terrain-vertex.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8 
+}
+
+vertex_program OSE_TerrainMediumShadow_vertexGLSL glsl
+{
+	source openshim_enhanced_terrain-vertex.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_TerrainMediumPSSM_vertexGLSL glsl
+{
+	source openshim_enhanced_terrain-vertex.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//HIGH
+
+vertex_program OSE_TerrainHighNoShadow_vertexGLSL glsl
+{
+	source openshim_enhanced_terrain-vertex.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=24
+}
+
+vertex_program OSE_TerrainHighShadow_vertexGLSL glsl
+{
+	source openshim_enhanced_terrain-vertex.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_TerrainHighPSSM_vertexGLSL glsl
+{
+	source openshim_enhanced_terrain-vertex.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//GLOW
+
+vertex_program OSE_TerrainGlow_vertexGLSL glsl
+{
+	source openshim_enhanced_terrain_glow-vertex.glsl
+	syntax glsl120
+	entry_point main
+}
+
+
+//HLSL SHADER MODEL 4 VERSIONS
+
+//LOWEST
+
+vertex_program OSE_TerrainLowestNoShadow_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target vs_4_0
+	entry_point terrain_vertex
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1
+}
+
+vertex_program OSE_TerrainLowestShadow_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target vs_4_0
+	entry_point terrain_vertex
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER
+}
+
+vertex_program OSE_TerrainLowestPSSM_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target vs_4_0
+	entry_point terrain_vertex
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER,PSSM_ENABLED
+}
+
+//LOW
+
+vertex_program OSE_TerrainLowNoShadow_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target vs_4_0
+	entry_point terrain_vertex
+	preprocessor_defines MAX_LIGHTS=1
+}
+
+vertex_program OSE_TerrainLowShadow_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target vs_4_0
+	entry_point terrain_vertex
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER
+}
+
+vertex_program OSE_TerrainLowPSSM_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target vs_4_0
+	entry_point terrain_vertex
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PSSM_ENABLED
+}
+
+//MEDIUM
+
+vertex_program OSE_TerrainMediumNoShadow_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target vs_4_0
+	entry_point terrain_vertex
+	preprocessor_defines MAX_LIGHTS=8 
+}
+
+vertex_program OSE_TerrainMediumShadow_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target vs_4_0
+	entry_point terrain_vertex
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER
+}
+
+vertex_program OSE_TerrainMediumPSSM_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target vs_4_0
+	entry_point terrain_vertex
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PSSM_ENABLED
+}
+
+//HIGH
+
+vertex_program OSE_TerrainHighNoShadow_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target vs_4_0
+	entry_point terrain_vertex
+	preprocessor_defines MAX_LIGHTS=24
+}
+
+vertex_program OSE_TerrainHighShadow_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target vs_4_0
+	entry_point terrain_vertex
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER
+}
+
+vertex_program OSE_TerrainHighPSSM_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target vs_4_0
+	entry_point terrain_vertex
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PSSM_ENABLED
+}
+
+//GLOW
+
+vertex_program OSE_TerrainGlow_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_terrain_glow-sm4.hlsl
+	target vs_4_0
+	entry_point terrain_vertex
+}
+
+
+//HLSL SHADER MODEL 3 VERSIONS
+
+//LOWEST
+
+vertex_program OSE_TerrainLowestNoShadow_vertexHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target vs_3_0
+	entry_point terrain_vertex
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1
+}
+
+vertex_program OSE_TerrainLowestShadow_vertexHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target vs_3_0
+	entry_point terrain_vertex
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER
+}
+
+vertex_program OSE_TerrainLowestPSSM_vertexHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target vs_3_0
+	entry_point terrain_vertex
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER,PSSM_ENABLED
+}
+
+//LOW
+
+vertex_program OSE_TerrainLowNoShadow_vertexHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target vs_3_0
+	entry_point terrain_vertex
+	preprocessor_defines MAX_LIGHTS=1
+}
+
+vertex_program OSE_TerrainLowShadow_vertexHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target vs_3_0
+	entry_point terrain_vertex
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER
+}
+
+vertex_program OSE_TerrainLowPSSM_vertexHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target vs_3_0
+	entry_point terrain_vertex
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PSSM_ENABLED
+}
+
+//MEDIUM
+
+vertex_program OSE_TerrainMediumNoShadow_vertexHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target vs_3_0
+	entry_point terrain_vertex
+	preprocessor_defines MAX_LIGHTS=8 
+}
+
+vertex_program OSE_TerrainMediumShadow_vertexHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target vs_3_0
+	entry_point terrain_vertex
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER
+}
+
+vertex_program OSE_TerrainMediumPSSM_vertexHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target vs_3_0
+	entry_point terrain_vertex
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PSSM_ENABLED
+}
+
+//HIGH
+
+vertex_program OSE_TerrainHighNoShadow_vertexHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target vs_3_0
+	entry_point terrain_vertex
+	preprocessor_defines MAX_LIGHTS=24
+}
+
+vertex_program OSE_TerrainHighShadow_vertexHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target vs_3_0
+	entry_point terrain_vertex
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER
+}
+
+vertex_program OSE_TerrainHighPSSM_vertexHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target vs_3_0
+	entry_point terrain_vertex
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PSSM_ENABLED
+}
+
+//GLOW
+
+vertex_program OSE_TerrainGlow_vertexHLSL hlsl
+{
+	source openshim_enhanced_terrain_glow-sm3.hlsl
+	target vs_3_0
+	entry_point terrain_vertex
+}
+
+
+//END VERTEX PROGRAMS
+
+
+//FRAGMENT PROGRAMS
+
+
+//GLSLES VERSIONS
+
+//LOWEST
+
+fragment_program OSE_TerrainLowestNoShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,EMISSIVEMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap  int 1
+		param_named emissiveMap int 4
+	}
+}
+
+fragment_program OSE_TerrainLowestShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,EMISSIVEMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap  int 1
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+	}
+}
+
+fragment_program OSE_TerrainLowestPSSM_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,PSSM_ENABLED=1,EMISSIVEMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap  int 1
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+		param_named shadowMap2 int 6
+		param_named shadowMap3 int 7
+	}
+}
+
+//LOW
+
+fragment_program OSE_TerrainLowNoShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=1,EMISSIVEMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap  int 1
+		param_named emissiveMap int 4
+	}
+}
+
+fragment_program OSE_TerrainLowShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,EMISSIVEMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap  int 1
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+	}
+}
+
+fragment_program OSE_TerrainLowPSSM_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,PSSM_ENABLED=1,EMISSIVEMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap  int 1
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+		param_named shadowMap2 int 6
+		param_named shadowMap3 int 7
+	}
+}
+
+//MEDIUM
+
+fragment_program OSE_TerrainMediumNoShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,EMISSIVEMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap  int 1
+		param_named emissiveMap int 4
+	}
+}
+
+fragment_program OSE_TerrainMediumShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=2,EMISSIVEMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap  int 1
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+	}
+}
+
+fragment_program OSE_TerrainMediumPSSM_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=2,PSSM_ENABLED=1,EMISSIVEMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap  int 1
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+		param_named shadowMap2 int 6
+		param_named shadowMap3 int 7
+	}
+}
+
+//HIGH
+
+fragment_program OSE_TerrainHighNoShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=24,EMISSIVEMAP_ENABLED=1,SPECULARMAP_ENABLED=1,NORMALMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap int 1
+		param_named normalMap int 2
+		param_named specularMap int 3
+		param_named emissiveMap int 4
+	}
+}
+
+fragment_program OSE_TerrainHighShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PCF_SIZE=3,EMISSIVEMAP_ENABLED=1,SPECULARMAP_ENABLED=1,NORMALMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap int 1
+		param_named normalMap int 2
+		param_named specularMap int 3
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+	}
+}
+
+fragment_program OSE_TerrainHighPSSM_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PCF_SIZE=3,PSSM_ENABLED=1,EMISSIVEMAP_ENABLED=1,SPECULARMAP_ENABLED=1,NORMALMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap int 1
+		param_named normalMap int 2
+		param_named specularMap int 3
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+		param_named shadowMap2 int 6
+		param_named shadowMap3 int 7
+	}
+}
+
+//OG
+
+fragment_program OSE_TerrainOGLowestNoShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+	}
+}
+
+fragment_program OSE_TerrainOGLowestShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+		param_named shadowMap1 int 1
+	}
+}
+
+fragment_program OSE_TerrainOGLowestPSSM_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,PSSM_ENABLED=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+		param_named shadowMap1 int 1
+		param_named shadowMap2 int 2
+		param_named shadowMap3 int 3
+	}
+}
+
+fragment_program OSE_TerrainOGLowNoShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+	}
+}
+
+fragment_program OSE_TerrainOGLowShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+		param_named shadowMap1 int 1
+	}
+}
+
+fragment_program OSE_TerrainOGLowPSSM_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,PSSM_ENABLED=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+		param_named shadowMap1 int 1
+		param_named shadowMap2 int 2
+		param_named shadowMap3 int 3
+	}
+}
+
+fragment_program OSE_TerrainOGMediumNoShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+	}
+}
+
+fragment_program OSE_TerrainOGMediumShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+		param_named shadowMap1 int 1
+	}
+}
+
+fragment_program OSE_TerrainOGMediumPSSM_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=2,PSSM_ENABLED=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+		param_named shadowMap1 int 1
+		param_named shadowMap2 int 2
+		param_named shadowMap3 int 3
+	}
+}
+
+fragment_program OSE_TerrainOGHighNoShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+	}
+}
+
+fragment_program OSE_TerrainOGHighShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=3,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+		param_named shadowMap1 int 1
+	}
+}
+
+fragment_program OSE_TerrainOGHighPSSM_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=3,PSSM_ENABLED=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+		param_named shadowMap1 int 1
+		param_named shadowMap2 int 2
+		param_named shadowMap3 int 3
+	}
+}
+
+//GLOW
+
+fragment_program OSE_TerrainGlow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain_glow-fragment.glsles
+	syntax glsles
+	entry_point main
+	default_params
+	{
+		param_named diffuseMap int 0
+	}
+}
+
+
+//GLSL VERSIONS
+
+//LOWEST
+
+fragment_program OSE_TerrainLowestNoShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,EMISSIVEMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap  int 1
+		param_named emissiveMap int 4
+	}
+}
+
+fragment_program OSE_TerrainLowestShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,EMISSIVEMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap  int 1
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+	}
+}
+
+fragment_program OSE_TerrainLowestPSSM_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,PSSM_ENABLED=1,EMISSIVEMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap  int 1
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+		param_named shadowMap2 int 6
+		param_named shadowMap3 int 7
+	}
+}
+
+//LOW
+
+fragment_program OSE_TerrainLowNoShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=1,EMISSIVEMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap  int 1
+		param_named emissiveMap int 4
+	}
+}
+
+fragment_program OSE_TerrainLowShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,EMISSIVEMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap  int 1
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+	}
+}
+
+fragment_program OSE_TerrainLowPSSM_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,PSSM_ENABLED=1,EMISSIVEMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap  int 1
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+		param_named shadowMap2 int 6
+		param_named shadowMap3 int 7
+	}
+}
+
+//MEDIUM
+
+fragment_program OSE_TerrainMediumNoShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,EMISSIVEMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap  int 1
+		param_named emissiveMap int 4
+	}
+}
+
+fragment_program OSE_TerrainMediumShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=2,EMISSIVEMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap  int 1
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+	}
+}
+
+fragment_program OSE_TerrainMediumPSSM_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=2,PSSM_ENABLED=1,EMISSIVEMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap  int 1
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+		param_named shadowMap2 int 6
+		param_named shadowMap3 int 7
+	}
+}
+
+//HIGH
+
+fragment_program OSE_TerrainHighNoShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=24,EMISSIVEMAP_ENABLED=1,SPECULARMAP_ENABLED=1,NORMALMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap int 1
+		param_named normalMap int 2
+		param_named specularMap int 3
+		param_named emissiveMap int 4
+	}
+}
+
+fragment_program OSE_TerrainHighShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PCF_SIZE=3,EMISSIVEMAP_ENABLED=1,SPECULARMAP_ENABLED=1,NORMALMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap int 1
+		param_named normalMap int 2
+		param_named specularMap int 3
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+	}
+}
+
+fragment_program OSE_TerrainHighPSSM_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PCF_SIZE=3,PSSM_ENABLED=1,EMISSIVEMAP_ENABLED=1,SPECULARMAP_ENABLED=1,NORMALMAP_ENABLED=1,DETAILMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap int 1
+		param_named normalMap int 2
+		param_named specularMap int 3
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+		param_named shadowMap2 int 6
+		param_named shadowMap3 int 7
+	}
+}
+
+//OG
+
+fragment_program OSE_TerrainOGLowestNoShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+	}
+}
+
+fragment_program OSE_TerrainOGLowestShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+		param_named shadowMap1 int 1
+	}
+}
+
+fragment_program OSE_TerrainOGLowestPSSM_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,PSSM_ENABLED=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+		param_named shadowMap1 int 1
+		param_named shadowMap2 int 2
+		param_named shadowMap3 int 3
+	}
+}
+
+fragment_program OSE_TerrainOGLowNoShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+	}
+}
+
+fragment_program OSE_TerrainOGLowShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+		param_named shadowMap1 int 1
+	}
+}
+
+fragment_program OSE_TerrainOGLowPSSM_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,PSSM_ENABLED=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+		param_named shadowMap1 int 1
+		param_named shadowMap2 int 2
+		param_named shadowMap3 int 3
+	}
+}
+
+fragment_program OSE_TerrainOGMediumNoShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+	}
+}
+
+fragment_program OSE_TerrainOGMediumShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+		param_named shadowMap1 int 1
+	}
+}
+
+fragment_program OSE_TerrainOGMediumPSSM_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=2,PSSM_ENABLED=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+		param_named shadowMap1 int 1
+		param_named shadowMap2 int 2
+		param_named shadowMap3 int 3
+	}
+}
+
+fragment_program OSE_TerrainOGHighNoShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+	}
+}
+
+fragment_program OSE_TerrainOGHighShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=3,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+		param_named shadowMap1 int 1
+	}
+}
+
+fragment_program OSE_TerrainOGHighPSSM_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl120
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=3,PSSM_ENABLED=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+
+		param_named shadowMap1 int 1
+		param_named shadowMap2 int 2
+		param_named shadowMap3 int 3
+	}
+}
+
+//GLOW
+
+fragment_program OSE_TerrainGlow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain_glow-fragment.glsl
+	syntax glsl120
+	entry_point main
+	default_params
+	{
+		param_named diffuseMap int 0
+	}
+}
+
+
+//HLSL SHADER MODEL 4 VERSIONS
+
+//LOWEST
+
+fragment_program OSE_TerrainLowestNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+fragment_program OSE_TerrainLowestShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+fragment_program OSE_TerrainLowestPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,PSSM_ENABLED,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+//LOW
+
+fragment_program OSE_TerrainLowNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=1,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+fragment_program OSE_TerrainLowShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+fragment_program OSE_TerrainLowPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,PSSM_ENABLED,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+//MEDIUM
+
+fragment_program OSE_TerrainMediumNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=8,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+fragment_program OSE_TerrainMediumShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=2,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+fragment_program OSE_TerrainMediumPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=2,PSSM_ENABLED,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+//HIGH
+
+fragment_program OSE_TerrainHighNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=24,EMISSIVEMAP_ENABLED,SPECULARMAP_ENABLED,NORMALMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+fragment_program OSE_TerrainHighShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PCF_SIZE=3,EMISSIVEMAP_ENABLED,SPECULARMAP_ENABLED,NORMALMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+fragment_program OSE_TerrainHighPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PCF_SIZE=3,PSSM_ENABLED,EMISSIVEMAP_ENABLED,SPECULARMAP_ENABLED,NORMALMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+//OG
+
+fragment_program OSE_TerrainOGLowestNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGLowestShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGLowestPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,PSSM_ENABLED,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGLowNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGLowShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGLowPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,PSSM_ENABLED,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGMediumNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=8,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGMediumShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGMediumPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=2,PSSM_ENABLED,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGHighNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=8,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGHighShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=3,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGHighPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=3,PSSM_ENABLED,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+//GLOW
+
+fragment_program OSE_TerrainGlow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain_glow-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+}
+
+
+//HLSL SHADER MODEL 3 VERSIONS
+
+//LOWEST
+
+fragment_program OSE_TerrainLowestNoShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,DETAILMAP_ENABLED
+}
+
+fragment_program OSE_TerrainLowestShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+fragment_program OSE_TerrainLowestPSSM_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,PSSM_ENABLED,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+//LOW
+
+fragment_program OSE_TerrainLowNoShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=1,DETAILMAP_ENABLED
+}
+
+fragment_program OSE_TerrainLowShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+fragment_program OSE_TerrainLowPSSM_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,PSSM_ENABLED,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+//MEDIUM
+
+fragment_program OSE_TerrainMediumNoShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=8,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+fragment_program OSE_TerrainMediumShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=2,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+fragment_program OSE_TerrainMediumPSSM_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=2,PSSM_ENABLED,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+//HIGH
+
+fragment_program OSE_TerrainHighNoShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=24,EMISSIVEMAP_ENABLED,SPECULARMAP_ENABLED,NORMALMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+fragment_program OSE_TerrainHighShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PCF_SIZE=3,EMISSIVEMAP_ENABLED,SPECULARMAP_ENABLED,NORMALMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+fragment_program OSE_TerrainHighPSSM_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PCF_SIZE=3,PSSM_ENABLED,EMISSIVEMAP_ENABLED,SPECULARMAP_ENABLED,NORMALMAP_ENABLED,DETAILMAP_ENABLED
+}
+
+//OG
+
+fragment_program OSE_TerrainOGLowestNoShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGLowestShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGLowestPSSM_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,PSSM_ENABLED,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGLowNoShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGLowShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGLowPSSM_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,PSSM_ENABLED,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGMediumNoShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=8,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGMediumShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGMediumPSSM_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=2,PSSM_ENABLED,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGHighNoShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=8,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGHighShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=3,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_TerrainOGHighPSSM_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=3,PSSM_ENABLED,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+//GLOW
+
+fragment_program OSE_TerrainGlow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain_glow-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+}
+
+
+// END FRAGMENT PROGRAMS
+
+
+//UNIFIED
+
+//VERTEX
+
+//LOWEST
+
+vertex_program OSE_TerrainLowestNoShadow_vertex unified
+{
+	delegate OSE_TerrainLowestNoShadow_vertexGLSLES
+	delegate OSE_TerrainLowestNoShadow_vertexGLSL
+	delegate OSE_TerrainLowestNoShadow_vertexHLSL4
+	delegate OSE_TerrainLowestNoShadow_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+		// vertex lighting
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+	}
+}
+
+vertex_program OSE_TerrainLowestShadow_vertex unified
+{
+	delegate OSE_TerrainLowestShadow_vertexGLSLES
+	delegate OSE_TerrainLowestShadow_vertexGLSL
+	delegate OSE_TerrainLowestShadow_vertexHLSL4
+	delegate OSE_TerrainLowestShadow_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+		// vertex lighting
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		// shadow texture projections
+		param_named_auto texWorldViewProj1 texture_worldviewproj_matrix 0
+	}
+}
+
+vertex_program OSE_TerrainLowestPSSM_vertex unified
+{
+	delegate OSE_TerrainLowestPSSM_vertexGLSLES
+	delegate OSE_TerrainLowestPSSM_vertexGLSL
+	delegate OSE_TerrainLowestPSSM_vertexHLSL4
+	delegate OSE_TerrainLowestPSSM_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+		// vertex lighting
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		// shadow texture projections
+		param_named_auto texWorldViewProj1 texture_worldviewproj_matrix 0
+		param_named_auto texWorldViewProj2 texture_worldviewproj_matrix 1
+		param_named_auto texWorldViewProj3 texture_worldviewproj_matrix 2
+	}
+}
+
+//LOW
+
+vertex_program OSE_TerrainLowNoShadow_vertex unified
+{
+	delegate OSE_TerrainLowNoShadow_vertexGLSLES
+	delegate OSE_TerrainLowNoShadow_vertexGLSL
+	delegate OSE_TerrainLowNoShadow_vertexHLSL4
+	delegate OSE_TerrainLowNoShadow_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+	}
+}
+
+vertex_program OSE_TerrainLowShadow_vertex unified
+{
+	delegate OSE_TerrainLowShadow_vertexGLSLES
+	delegate OSE_TerrainLowShadow_vertexGLSL
+	delegate OSE_TerrainLowShadow_vertexHLSL4
+	delegate OSE_TerrainLowShadow_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+		// shadow texture projections
+		param_named_auto texWorldViewProj1 texture_worldviewproj_matrix 0
+	}
+}
+
+vertex_program OSE_TerrainLowPSSM_vertex unified
+{
+	delegate OSE_TerrainLowPSSM_vertexGLSLES
+	delegate OSE_TerrainLowPSSM_vertexGLSL
+	delegate OSE_TerrainLowPSSM_vertexHLSL4
+	delegate OSE_TerrainLowPSSM_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+		// shadow texture projections
+		param_named_auto texWorldViewProj1 texture_worldviewproj_matrix 0
+		param_named_auto texWorldViewProj2 texture_worldviewproj_matrix 1
+		param_named_auto texWorldViewProj3 texture_worldviewproj_matrix 2
+	}
+}
+
+//MEDIUM
+
+vertex_program OSE_TerrainMediumNoShadow_vertex unified
+{
+	delegate OSE_TerrainMediumNoShadow_vertexGLSLES
+	delegate OSE_TerrainMediumNoShadow_vertexGLSL
+	delegate OSE_TerrainMediumNoShadow_vertexHLSL4
+	delegate OSE_TerrainMediumNoShadow_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+	}
+}
+
+vertex_program OSE_TerrainMediumShadow_vertex unified
+{
+	delegate OSE_TerrainMediumShadow_vertexGLSLES
+	delegate OSE_TerrainMediumShadow_vertexGLSL
+	delegate OSE_TerrainMediumShadow_vertexHLSL4
+	delegate OSE_TerrainMediumShadow_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+		// shadow texture projections
+		param_named_auto texWorldViewProj1 texture_worldviewproj_matrix 0
+	}
+}
+
+vertex_program OSE_TerrainMediumPSSM_vertex unified
+{
+	delegate OSE_TerrainMediumPSSM_vertexGLSLES
+	delegate OSE_TerrainMediumPSSM_vertexGLSL
+	delegate OSE_TerrainMediumPSSM_vertexHLSL4
+	delegate OSE_TerrainMediumPSSM_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+		// shadow texture projections
+		param_named_auto texWorldViewProj1 texture_worldviewproj_matrix 0
+		param_named_auto texWorldViewProj2 texture_worldviewproj_matrix 1
+		param_named_auto texWorldViewProj3 texture_worldviewproj_matrix 2
+	}
+}
+
+//HIGH
+
+vertex_program OSE_TerrainHighNoShadow_vertex unified
+{
+	delegate OSE_TerrainHighNoShadow_vertexGLSLES
+	delegate OSE_TerrainHighNoShadow_vertexGLSL
+	delegate OSE_TerrainHighNoShadow_vertexHLSL4
+	delegate OSE_TerrainHighNoShadow_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+	}
+}
+
+vertex_program OSE_TerrainHighShadow_vertex unified
+{
+	delegate OSE_TerrainHighShadow_vertexGLSLES
+	delegate OSE_TerrainHighShadow_vertexGLSL
+	delegate OSE_TerrainHighShadow_vertexHLSL4
+	delegate OSE_TerrainHighShadow_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+		// shadow texture projections
+		param_named_auto texWorldViewProj1 texture_worldviewproj_matrix 0
+	}
+}
+
+vertex_program OSE_TerrainHighPSSM_vertex unified
+{
+	delegate OSE_TerrainHighPSSM_vertexGLSLES
+	delegate OSE_TerrainHighPSSM_vertexGLSL
+	delegate OSE_TerrainHighPSSM_vertexHLSL4
+	delegate OSE_TerrainHighPSSM_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+		// shadow texture projections
+		param_named_auto texWorldViewProj1 texture_worldviewproj_matrix 0
+		param_named_auto texWorldViewProj2 texture_worldviewproj_matrix 1
+		param_named_auto texWorldViewProj3 texture_worldviewproj_matrix 2
+	}
+}
+
+//GLOW
+
+vertex_program OSE_TerrainGlow_vertex unified
+{
+	delegate OSE_TerrainGlow_vertexGLSLES
+	delegate OSE_TerrainGlow_vertexGLSL
+	delegate OSE_TerrainGlow_vertexHLSL4
+	delegate OSE_TerrainGlow_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto diffuseColor surface_diffuse_colour
+	}
+}
+
+
+//FRAGMENT
+
+//LOWEST
+
+fragment_program OSE_TerrainLowestPSSM_fragment unified
+{
+	delegate OSE_TerrainLowestPSSM_fragmentGLSLES
+	delegate OSE_TerrainLowestPSSM_fragmentGLSL
+	delegate OSE_TerrainLowestPSSM_fragmentHLSL4
+	delegate OSE_TerrainLowestPSSM_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto invShadowMapSize1 inverse_texture_size 5
+		param_named_auto invShadowMapSize2 inverse_texture_size 6
+		param_named_auto invShadowMapSize3 inverse_texture_size 7
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+	}
+}
+
+fragment_program OSE_TerrainLowestShadow_fragment unified
+{
+	delegate OSE_TerrainLowestShadow_fragmentGLSLES
+	delegate OSE_TerrainLowestShadow_fragmentGLSL
+	delegate OSE_TerrainLowestShadow_fragmentHLSL4
+	delegate OSE_TerrainLowestShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto invShadowMapSize1 inverse_texture_size 5
+	}
+}
+
+fragment_program OSE_TerrainLowestNoShadow_fragment unified
+{
+	delegate OSE_TerrainLowestNoShadow_fragmentGLSLES
+	delegate OSE_TerrainLowestNoShadow_fragmentGLSL
+	delegate OSE_TerrainLowestNoShadow_fragmentHLSL4
+	delegate OSE_TerrainLowestNoShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+	}
+}
+
+//LOW
+
+fragment_program OSE_TerrainLowPSSM_fragment unified
+{
+	delegate OSE_TerrainLowPSSM_fragmentGLSLES
+	delegate OSE_TerrainLowPSSM_fragmentGLSL
+	delegate OSE_TerrainLowPSSM_fragmentHLSL4
+	delegate OSE_TerrainLowPSSM_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightAttenuation light_attenuation_array 1
+		param_named_auto spotLightParams spotlight_params_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto lightDirection light_direction_view_space_array 1
+		param_named_auto invShadowMapSize1 inverse_texture_size 5
+		param_named_auto invShadowMapSize2 inverse_texture_size 6
+		param_named_auto invShadowMapSize3 inverse_texture_size 7
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+	}
+}
+
+fragment_program OSE_TerrainLowShadow_fragment unified
+{
+	delegate OSE_TerrainLowShadow_fragmentGLSLES
+	delegate OSE_TerrainLowShadow_fragmentGLSL
+	delegate OSE_TerrainLowShadow_fragmentHLSL4
+	delegate OSE_TerrainLowShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightAttenuation light_attenuation_array 1
+		param_named_auto spotLightParams spotlight_params_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto lightDirection light_direction_view_space_array 1
+		param_named_auto invShadowMapSize1 inverse_texture_size 5
+	}
+}
+
+fragment_program OSE_TerrainLowNoShadow_fragment unified
+{
+	delegate OSE_TerrainLowNoShadow_fragmentGLSLES
+	delegate OSE_TerrainLowNoShadow_fragmentGLSL
+	delegate OSE_TerrainLowNoShadow_fragmentHLSL4
+	delegate OSE_TerrainLowNoShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightAttenuation light_attenuation_array 1
+		param_named_auto spotLightParams spotlight_params_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto lightDirection light_direction_view_space_array 1
+	}
+}
+
+//MEDIUM
+
+fragment_program OSE_TerrainMediumNoShadow_fragment unified
+{
+	delegate OSE_TerrainMediumNoShadow_fragmentGLSLES
+	delegate OSE_TerrainMediumNoShadow_fragmentGLSL
+	delegate OSE_TerrainMediumNoShadow_fragmentHLSL4
+	delegate OSE_TerrainMediumNoShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightAttenuation light_attenuation_array 8
+		param_named_auto spotLightParams spotlight_params_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightDirection light_direction_view_space_array 8
+		param_named_auto lightCount light_count
+	}
+}
+
+fragment_program OSE_TerrainMediumShadow_fragment unified
+{
+	delegate OSE_TerrainMediumShadow_fragmentGLSLES
+	delegate OSE_TerrainMediumShadow_fragmentGLSL
+	delegate OSE_TerrainMediumShadow_fragmentHLSL4
+	delegate OSE_TerrainMediumShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightAttenuation light_attenuation_array 8
+		param_named_auto spotLightParams spotlight_params_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightDirection light_direction_view_space_array 8
+		param_named_auto lightCount light_count
+		param_named_auto invShadowMapSize1 inverse_texture_size 5
+	}
+}
+
+fragment_program OSE_TerrainMediumPSSM_fragment unified
+{
+	delegate OSE_TerrainMediumPSSM_fragmentGLSLES
+	delegate OSE_TerrainMediumPSSM_fragmentGLSL
+	delegate OSE_TerrainMediumPSSM_fragmentHLSL4
+	delegate OSE_TerrainMediumPSSM_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightAttenuation light_attenuation_array 8
+		param_named_auto spotLightParams spotlight_params_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightDirection light_direction_view_space_array 8
+		param_named_auto lightCount light_count
+		param_named_auto invShadowMapSize1 inverse_texture_size 5
+		param_named_auto invShadowMapSize2 inverse_texture_size 6
+		param_named_auto invShadowMapSize3 inverse_texture_size 7
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+	}
+}
+
+//HIGH
+
+fragment_program OSE_TerrainHighNoShadow_fragment unified
+{
+	delegate OSE_TerrainHighNoShadow_fragmentGLSLES
+	delegate OSE_TerrainHighNoShadow_fragmentGLSL
+	delegate OSE_TerrainHighNoShadow_fragmentHLSL4
+	delegate OSE_TerrainHighNoShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 24
+		param_named_auto lightSpecular derived_light_specular_colour_array 24
+		param_named_auto lightAttenuation light_attenuation_array 24
+		param_named_auto spotLightParams spotlight_params_array 24
+		param_named_auto lightPosition light_position_view_space_array 24
+		param_named_auto lightDirection light_direction_view_space_array 24
+		param_named_auto lightCount light_count
+	}
+}
+
+fragment_program OSE_TerrainHighShadow_fragment unified
+{
+	delegate OSE_TerrainHighShadow_fragmentGLSLES
+	delegate OSE_TerrainHighShadow_fragmentGLSL
+	delegate OSE_TerrainHighShadow_fragmentHLSL4
+	delegate OSE_TerrainHighShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 24
+		param_named_auto lightSpecular derived_light_specular_colour_array 24
+		param_named_auto lightAttenuation light_attenuation_array 24
+		param_named_auto spotLightParams spotlight_params_array 24
+		param_named_auto lightPosition light_position_view_space_array 24
+		param_named_auto lightDirection light_direction_view_space_array 24
+		param_named_auto lightCount light_count
+		param_named_auto invShadowMapSize1 inverse_texture_size 5
+	}
+}
+
+fragment_program OSE_TerrainHighPSSM_fragment unified
+{
+	delegate OSE_TerrainHighPSSM_fragmentGLSLES
+	delegate OSE_TerrainHighPSSM_fragmentGLSL
+	delegate OSE_TerrainHighPSSM_fragmentHLSL4
+	delegate OSE_TerrainHighPSSM_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 24
+		param_named_auto lightSpecular derived_light_specular_colour_array 24
+		param_named_auto lightAttenuation light_attenuation_array 24
+		param_named_auto spotLightParams spotlight_params_array 24
+		param_named_auto lightPosition light_position_view_space_array 24
+		param_named_auto lightDirection light_direction_view_space_array 24
+		param_named_auto lightCount light_count
+		param_named_auto invShadowMapSize1 inverse_texture_size 5
+		param_named_auto invShadowMapSize2 inverse_texture_size 6
+		param_named_auto invShadowMapSize3 inverse_texture_size 7
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+	}
+}
+
+//GLOW
+
+fragment_program OSE_TerrainGlow_fragment unified
+{
+	delegate OSE_TerrainGlow_fragmentGLSLES
+	delegate OSE_TerrainGlow_fragmentGLSL
+	delegate OSE_TerrainGlow_fragmentHLSL4
+	delegate OSE_TerrainGlow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+	}
+}
+
+//OG
+
+fragment_program OSE_TerrainOGLowestPSSM_fragment unified
+{
+	delegate OSE_TerrainOGLowestPSSM_fragmentGLSLES
+	delegate OSE_TerrainOGLowestPSSM_fragmentGLSL
+	delegate OSE_TerrainOGLowestPSSM_fragmentHLSL4
+	delegate OSE_TerrainOGLowestPSSM_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto invShadowMapSize1 inverse_texture_size 1
+		param_named_auto invShadowMapSize2 inverse_texture_size 2
+		param_named_auto invShadowMapSize3 inverse_texture_size 3
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+	}
+}
+
+fragment_program OSE_TerrainOGLowestShadow_fragment unified
+{
+	delegate OSE_TerrainOGLowestShadow_fragmentGLSLES
+	delegate OSE_TerrainOGLowestShadow_fragmentGLSL
+	delegate OSE_TerrainOGLowestShadow_fragmentHLSL4
+	delegate OSE_TerrainOGLowestShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto invShadowMapSize1 inverse_texture_size 1
+	}
+}
+
+fragment_program OSE_TerrainOGLowestNoShadow_fragment unified
+{
+	delegate OSE_TerrainOGLowestNoShadow_fragmentGLSLES
+	delegate OSE_TerrainOGLowestNoShadow_fragmentGLSL
+	delegate OSE_TerrainOGLowestNoShadow_fragmentHLSL4
+	delegate OSE_TerrainOGLowestNoShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+	}
+}
+
+fragment_program OSE_TerrainOGLowPSSM_fragment unified
+{
+	delegate OSE_TerrainOGLowPSSM_fragmentGLSLES
+	delegate OSE_TerrainOGLowPSSM_fragmentGLSL
+	delegate OSE_TerrainOGLowPSSM_fragmentHLSL4
+	delegate OSE_TerrainOGLowPSSM_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto invShadowMapSize1 inverse_texture_size 1
+		param_named_auto invShadowMapSize2 inverse_texture_size 2
+		param_named_auto invShadowMapSize3 inverse_texture_size 3
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+	}
+}
+
+fragment_program OSE_TerrainOGLowShadow_fragment unified
+{
+	delegate OSE_TerrainOGLowShadow_fragmentGLSLES
+	delegate OSE_TerrainOGLowShadow_fragmentGLSL
+	delegate OSE_TerrainOGLowShadow_fragmentHLSL4
+	delegate OSE_TerrainOGLowShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto invShadowMapSize1 inverse_texture_size 1
+	}
+}
+
+fragment_program OSE_TerrainOGLowNoShadow_fragment unified
+{
+	delegate OSE_TerrainOGLowNoShadow_fragmentGLSLES
+	delegate OSE_TerrainOGLowNoShadow_fragmentGLSL
+	delegate OSE_TerrainOGLowNoShadow_fragmentHLSL4
+	delegate OSE_TerrainOGLowNoShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+	}
+}
+
+fragment_program OSE_TerrainOGMediumNoShadow_fragment unified
+{
+	delegate OSE_TerrainOGMediumNoShadow_fragmentGLSLES
+	delegate OSE_TerrainOGMediumNoShadow_fragmentGLSL
+	delegate OSE_TerrainOGMediumNoShadow_fragmentHLSL4
+	delegate OSE_TerrainOGMediumNoShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightCount light_count
+	}
+}
+
+fragment_program OSE_TerrainOGMediumShadow_fragment unified
+{
+	delegate OSE_TerrainOGMediumShadow_fragmentGLSLES
+	delegate OSE_TerrainOGMediumShadow_fragmentGLSL
+	delegate OSE_TerrainOGMediumShadow_fragmentHLSL4
+	delegate OSE_TerrainOGMediumShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightCount light_count
+		param_named_auto invShadowMapSize1 inverse_texture_size 1
+	}
+}
+
+fragment_program OSE_TerrainOGMediumPSSM_fragment unified
+{
+	delegate OSE_TerrainOGMediumPSSM_fragmentGLSLES
+	delegate OSE_TerrainOGMediumPSSM_fragmentGLSL
+	delegate OSE_TerrainOGMediumPSSM_fragmentHLSL4
+	delegate OSE_TerrainOGMediumPSSM_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightCount light_count
+		param_named_auto invShadowMapSize1 inverse_texture_size 1
+		param_named_auto invShadowMapSize2 inverse_texture_size 2
+		param_named_auto invShadowMapSize3 inverse_texture_size 3
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+	}
+}
+
+fragment_program OSE_TerrainOGHighNoShadow_fragment unified
+{
+	delegate OSE_TerrainOGHighNoShadow_fragmentGLSLES
+	delegate OSE_TerrainOGHighNoShadow_fragmentGLSL
+	delegate OSE_TerrainOGHighNoShadow_fragmentHLSL4
+	delegate OSE_TerrainOGHighNoShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightCount light_count
+	}
+}
+
+fragment_program OSE_TerrainOGHighShadow_fragment unified
+{
+	delegate OSE_TerrainOGHighShadow_fragmentGLSLES
+	delegate OSE_TerrainOGHighShadow_fragmentGLSL
+	delegate OSE_TerrainOGHighShadow_fragmentHLSL4
+	delegate OSE_TerrainOGHighShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightCount light_count
+		param_named_auto invShadowMapSize1 inverse_texture_size 1
+	}
+}
+
+fragment_program OSE_TerrainOGHighPSSM_fragment unified
+{
+	delegate OSE_TerrainOGHighPSSM_fragmentGLSLES
+	delegate OSE_TerrainOGHighPSSM_fragmentGLSL
+	delegate OSE_TerrainOGHighPSSM_fragmentHLSL4
+	delegate OSE_TerrainOGHighPSSM_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightCount light_count
+		param_named_auto invShadowMapSize1 inverse_texture_size 1
+		param_named_auto invShadowMapSize2 inverse_texture_size 2
+		param_named_auto invShadowMapSize3 inverse_texture_size 3
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+	}
+}
+
+//ENHANCED
+// Keep distinct en-* program names for bundled materials while sharing the
+// modern low/medium delegates and using ENHANCED_MODE for the high tier.
+
+fragment_program OSE_TerrainENHighNoShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=24,EMISSIVEMAP_ENABLED=1,SPECULARMAP_ENABLED=1,NORMALMAP_ENABLED=1,DETAILMAP_ENABLED=1,ENHANCED_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap int 1
+		param_named normalMap int 2
+		param_named specularMap int 3
+		param_named emissiveMap int 4
+	}
+}
+
+fragment_program OSE_TerrainENHighShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PCF_SIZE=4,EMISSIVEMAP_ENABLED=1,SPECULARMAP_ENABLED=1,NORMALMAP_ENABLED=1,DETAILMAP_ENABLED=1,ENHANCED_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap int 1
+		param_named normalMap int 2
+		param_named specularMap int 3
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+	}
+}
+
+fragment_program OSE_TerrainENHighPSSM_fragmentGLSLES glsles
+{
+	source openshim_enhanced_terrain-fragment.glsles
+	syntax glsles
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PCF_SIZE=4,PSSM_ENABLED=1,EMISSIVEMAP_ENABLED=1,SPECULARMAP_ENABLED=1,NORMALMAP_ENABLED=1,DETAILMAP_ENABLED=1,ENHANCED_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap int 1
+		param_named normalMap int 2
+		param_named specularMap int 3
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+		param_named shadowMap2 int 6
+		param_named shadowMap3 int 7
+	}
+}
+
+fragment_program OSE_TerrainENHighNoShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=24,EMISSIVEMAP_ENABLED=1,SPECULARMAP_ENABLED=1,NORMALMAP_ENABLED=1,DETAILMAP_ENABLED=1,ENHANCED_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap int 1
+		param_named normalMap int 2
+		param_named specularMap int 3
+		param_named emissiveMap int 4
+	}
+}
+
+fragment_program OSE_TerrainENHighShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PCF_SIZE=4,EMISSIVEMAP_ENABLED=1,SPECULARMAP_ENABLED=1,NORMALMAP_ENABLED=1,DETAILMAP_ENABLED=1,ENHANCED_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap int 1
+		param_named normalMap int 2
+		param_named specularMap int 3
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+	}
+}
+
+fragment_program OSE_TerrainENHighPSSM_fragmentGLSL glsl
+{
+	source openshim_enhanced_terrain-fragment.glsl
+	syntax glsl
+	entry_point main
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PCF_SIZE=4,PSSM_ENABLED=1,EMISSIVEMAP_ENABLED=1,SPECULARMAP_ENABLED=1,NORMALMAP_ENABLED=1,DETAILMAP_ENABLED=1,ENHANCED_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named detailMap int 1
+		param_named normalMap int 2
+		param_named specularMap int 3
+		param_named emissiveMap int 4
+		param_named shadowMap1 int 5
+		param_named shadowMap2 int 6
+		param_named shadowMap3 int 7
+	}
+}
+
+fragment_program OSE_TerrainENHighNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=24,EMISSIVEMAP_ENABLED,SPECULARMAP_ENABLED,NORMALMAP_ENABLED,DETAILMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1
+}
+
+fragment_program OSE_TerrainENHighShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PCF_SIZE=4,EMISSIVEMAP_ENABLED,SPECULARMAP_ENABLED,NORMALMAP_ENABLED,DETAILMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1
+}
+
+fragment_program OSE_TerrainENHighPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PCF_SIZE=4,PSSM_ENABLED,EMISSIVEMAP_ENABLED,SPECULARMAP_ENABLED,NORMALMAP_ENABLED,DETAILMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1
+}
+
+fragment_program OSE_TerrainENHighNoShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=24,EMISSIVEMAP_ENABLED,SPECULARMAP_ENABLED,NORMALMAP_ENABLED,DETAILMAP_ENABLED,ENHANCED_MODE
+}
+
+fragment_program OSE_TerrainENHighShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PCF_SIZE=4,EMISSIVEMAP_ENABLED,SPECULARMAP_ENABLED,NORMALMAP_ENABLED,DETAILMAP_ENABLED,ENHANCED_MODE
+}
+
+fragment_program OSE_TerrainENHighPSSM_fragmentHLSL hlsl
+{
+	source openshim_enhanced_terrain-sm3.hlsl
+	target ps_3_0
+	entry_point terrain_fragment
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PCF_SIZE=4,PSSM_ENABLED,EMISSIVEMAP_ENABLED,SPECULARMAP_ENABLED,NORMALMAP_ENABLED,DETAILMAP_ENABLED,ENHANCED_MODE
+}
+
+fragment_program OSE_TerrainENLowestPSSM_fragment unified
+{
+	delegate OSE_TerrainLowestPSSM_fragmentGLSLES
+	delegate OSE_TerrainLowestPSSM_fragmentGLSL
+	delegate OSE_TerrainLowestPSSM_fragmentHLSL4
+	delegate OSE_TerrainLowestPSSM_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto invShadowMapSize1 inverse_texture_size 5
+		param_named_auto invShadowMapSize2 inverse_texture_size 6
+		param_named_auto invShadowMapSize3 inverse_texture_size 7
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+	}
+}
+
+fragment_program OSE_TerrainENLowestShadow_fragment unified
+{
+	delegate OSE_TerrainLowestShadow_fragmentGLSLES
+	delegate OSE_TerrainLowestShadow_fragmentGLSL
+	delegate OSE_TerrainLowestShadow_fragmentHLSL4
+	delegate OSE_TerrainLowestShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto invShadowMapSize1 inverse_texture_size 5
+	}
+}
+
+fragment_program OSE_TerrainENLowestNoShadow_fragment unified
+{
+	delegate OSE_TerrainLowestNoShadow_fragmentGLSLES
+	delegate OSE_TerrainLowestNoShadow_fragmentGLSL
+	delegate OSE_TerrainLowestNoShadow_fragmentHLSL4
+	delegate OSE_TerrainLowestNoShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+	}
+}
+
+fragment_program OSE_TerrainENLowPSSM_fragment unified
+{
+	delegate OSE_TerrainLowPSSM_fragmentGLSLES
+	delegate OSE_TerrainLowPSSM_fragmentGLSL
+	delegate OSE_TerrainLowPSSM_fragmentHLSL4
+	delegate OSE_TerrainLowPSSM_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightAttenuation light_attenuation_array 1
+		param_named_auto spotLightParams spotlight_params_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto lightDirection light_direction_view_space_array 1
+		param_named_auto invShadowMapSize1 inverse_texture_size 5
+		param_named_auto invShadowMapSize2 inverse_texture_size 6
+		param_named_auto invShadowMapSize3 inverse_texture_size 7
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+	}
+}
+
+fragment_program OSE_TerrainENLowShadow_fragment unified
+{
+	delegate OSE_TerrainLowShadow_fragmentGLSLES
+	delegate OSE_TerrainLowShadow_fragmentGLSL
+	delegate OSE_TerrainLowShadow_fragmentHLSL4
+	delegate OSE_TerrainLowShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightAttenuation light_attenuation_array 1
+		param_named_auto spotLightParams spotlight_params_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto lightDirection light_direction_view_space_array 1
+		param_named_auto invShadowMapSize1 inverse_texture_size 5
+	}
+}
+
+fragment_program OSE_TerrainENLowNoShadow_fragment unified
+{
+	delegate OSE_TerrainLowNoShadow_fragmentGLSLES
+	delegate OSE_TerrainLowNoShadow_fragmentGLSL
+	delegate OSE_TerrainLowNoShadow_fragmentHLSL4
+	delegate OSE_TerrainLowNoShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightAttenuation light_attenuation_array 1
+		param_named_auto spotLightParams spotlight_params_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto lightDirection light_direction_view_space_array 1
+	}
+}
+
+fragment_program OSE_TerrainENMediumNoShadow_fragment unified
+{
+	delegate OSE_TerrainMediumNoShadow_fragmentGLSLES
+	delegate OSE_TerrainMediumNoShadow_fragmentGLSL
+	delegate OSE_TerrainMediumNoShadow_fragmentHLSL4
+	delegate OSE_TerrainMediumNoShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightAttenuation light_attenuation_array 8
+		param_named_auto spotLightParams spotlight_params_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightDirection light_direction_view_space_array 8
+		param_named_auto lightCount light_count
+	}
+}
+
+fragment_program OSE_TerrainENMediumShadow_fragment unified
+{
+	delegate OSE_TerrainMediumShadow_fragmentGLSLES
+	delegate OSE_TerrainMediumShadow_fragmentGLSL
+	delegate OSE_TerrainMediumShadow_fragmentHLSL4
+	delegate OSE_TerrainMediumShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightAttenuation light_attenuation_array 8
+		param_named_auto spotLightParams spotlight_params_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightDirection light_direction_view_space_array 8
+		param_named_auto lightCount light_count
+		param_named_auto invShadowMapSize1 inverse_texture_size 5
+	}
+}
+
+fragment_program OSE_TerrainENMediumPSSM_fragment unified
+{
+	delegate OSE_TerrainMediumPSSM_fragmentGLSLES
+	delegate OSE_TerrainMediumPSSM_fragmentGLSL
+	delegate OSE_TerrainMediumPSSM_fragmentHLSL4
+	delegate OSE_TerrainMediumPSSM_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightAttenuation light_attenuation_array 8
+		param_named_auto spotLightParams spotlight_params_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightDirection light_direction_view_space_array 8
+		param_named_auto lightCount light_count
+		param_named_auto invShadowMapSize1 inverse_texture_size 5
+		param_named_auto invShadowMapSize2 inverse_texture_size 6
+		param_named_auto invShadowMapSize3 inverse_texture_size 7
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+	}
+}
+
+fragment_program OSE_TerrainENHighNoShadow_fragment unified
+{
+	delegate OSE_TerrainENHighNoShadow_fragmentGLSLES
+	delegate OSE_TerrainENHighNoShadow_fragmentGLSL
+	delegate OSE_TerrainENHighNoShadow_fragmentHLSL4
+	delegate OSE_TerrainENHighNoShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 24
+		param_named_auto lightSpecular derived_light_specular_colour_array 24
+		param_named_auto lightAttenuation light_attenuation_array 24
+		param_named_auto spotLightParams spotlight_params_array 24
+		param_named_auto lightPosition light_position_view_space_array 24
+		param_named_auto lightDirection light_direction_view_space_array 24
+		param_named_auto lightCount light_count
+	}
+}
+
+fragment_program OSE_TerrainENHighShadow_fragment unified
+{
+	delegate OSE_TerrainENHighShadow_fragmentGLSLES
+	delegate OSE_TerrainENHighShadow_fragmentGLSL
+	delegate OSE_TerrainENHighShadow_fragmentHLSL4
+	delegate OSE_TerrainENHighShadow_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 24
+		param_named_auto lightSpecular derived_light_specular_colour_array 24
+		param_named_auto lightAttenuation light_attenuation_array 24
+		param_named_auto spotLightParams spotlight_params_array 24
+		param_named_auto lightPosition light_position_view_space_array 24
+		param_named_auto lightDirection light_direction_view_space_array 24
+		param_named_auto lightCount light_count
+		param_named_auto invShadowMapSize1 inverse_texture_size 5
+	}
+}
+
+fragment_program OSE_TerrainENHighPSSM_fragment unified
+{
+	delegate OSE_TerrainENHighPSSM_fragmentGLSLES
+	delegate OSE_TerrainENHighPSSM_fragmentGLSL
+	delegate OSE_TerrainENHighPSSM_fragmentHLSL4
+	delegate OSE_TerrainENHighPSSM_fragmentHLSL
+
+	default_params
+	{
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 24
+		param_named_auto lightSpecular derived_light_specular_colour_array 24
+		param_named_auto lightAttenuation light_attenuation_array 24
+		param_named_auto spotLightParams spotlight_params_array 24
+		param_named_auto lightPosition light_position_view_space_array 24
+		param_named_auto lightDirection light_direction_view_space_array 24
+		param_named_auto lightCount light_count
+		param_named_auto invShadowMapSize1 inverse_texture_size 5
+		param_named_auto invShadowMapSize2 inverse_texture_size 6
+		param_named_auto invShadowMapSize3 inverse_texture_size 7
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+	}
+}
+
+
+
+
+
