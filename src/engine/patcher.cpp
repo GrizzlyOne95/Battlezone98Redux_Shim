@@ -823,6 +823,26 @@ namespace BZROpenShim
             }
         }
         Log(L"[DONE] Applied=%d of %u\n", app, static_cast<unsigned>(patches.size()));
+        // A patch this build knows about but that resolved to address 0 was
+        // never looked up at all: its scripts/patches.json entry is missing.
+        // That is almost always a deploy where winmm.dll moved and patches.json
+        // did not, and the only prior symptom was one [SKIP] line among forty.
+        // Name them together so a stale json is obvious in the log.
+        {
+            std::string unresolved;
+            int unresolvedCount = 0;
+            for (const auto& p : patches) {
+                if (p.address != 0) continue;
+                if (!unresolved.empty()) unresolved += ", ";
+                unresolved += p.name;
+                ++unresolvedCount;
+            }
+            if (unresolvedCount > 0) {
+                Log(L"[STALE-CONFIG] %d patch(es) had no scripts/patches.json entry and were never "
+                    L"attempted: %hs -- check that patches.json was deployed alongside winmm.dll\n",
+                    unresolvedCount, unresolved.c_str());
+            }
+        }
         SetPatchingComplete(true); SetAppliedPatchCount(app);
         InstallBriefingAssetOverrides();
         if (ShouldEnableOgreMaterialCollisionGuard()) {
