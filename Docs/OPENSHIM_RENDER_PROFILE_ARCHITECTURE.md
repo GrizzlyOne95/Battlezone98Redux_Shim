@@ -208,13 +208,32 @@ Automated (this branch):
 - `tests/ini_writer_tests.cpp`: lossless INI writes still green.
 - Release Win32 build of winmm.dll and exu.dll green; exports verified via
   dumpbin.
+- **Headless runtime qualification** (GOG install, lcbench harness; driver:
+  untracked `tmp/render_profile_matrix.ps1`, logs under
+  `reverse_engineering/snapshots/render_profile_matrix/`). All cases PASS:
 
-Runtime matrix (requires game execution — pending, see limitations):
-backend × user profile × EXU override incl. persistence across restart and
-mission transitions; DX9+Redux regression; DX11+Redux baseline parity;
-DX11+Enhanced parity vs current CR-owned path (screenshots across terrain/
-object lighting, shadows/cascade transitions, glow, IBL, cockpit, satellite);
-non-CR Enhanced activation once retrofit lands.
+| Case | Asserts |
+| --- | --- |
+| DX11 + Redux | takeover installed ×3 (byte-verified), backend observed DX11, resources compatible, Redux passthrough with zero rewrites, full modern capability bits, FXAA attach unchanged |
+| DX11 + Enhanced | effective Enhanced, engine schemes rewritten to `en-*` by the takeover, modern bits incl. light selection, FXAA unchanged |
+| DX11 + Enhanced + new EXU | canonical chain: bridge-capable EXU paired with shim; same asserts as above |
+| DX11 + Retro | effective Retro, `og-*` rewrites applied |
+| DX9 + Redux | backend observed DX9, baseline intact, legacy-only bits |
+| DX9 + Enhanced | **stays Enhanced** (no silent degrade), `en-*` SM3 delegates requested, DX11-only bits honestly absent, no fallback fired |
+| resources.version mismatch | deterministic detection, `resources.compatible=no`, retrofit path gated while scheme layer stays intact |
+| resource set absent | clean detection line, CR-supplied techniques path unaffected |
+| old EXU + new shim | legacy EXU keeps working; new bridge untouched by it |
+| new EXU + pre-migration shim | no render-profile block emitted; EXU legacy behavior unchanged |
+| baseline control | pre-migration stack shows identical harness behavior for subsystem installs driven by EXU-bearing content |
+
+Defects caught and fixed by this pass: init-before-compatibility-gate,
+plugin-order backend race, cached-null export resolution (see commit
+"three defects caught by the runtime qualification matrix").
+
+Remaining manual/interactive sign-off (requires real content and eyes):
+visual parity captures per profile, in-process Enhanced→Retro→Redux→Enhanced
+cycling contamination checks, CR mission → shell → stock mission → IA/MP
+transition matrix, restart persistence through the actual UI.
 
 ## 11. Known limitations / future work
 
