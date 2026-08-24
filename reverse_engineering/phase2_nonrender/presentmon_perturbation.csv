@@ -1,0 +1,2 @@
+arm,repeat,run_id,scenario,count,renderer,isolate,present_mode,present_mode_purity,frames,span_s,mean_ms,median_ms,p95_ms,p99_ms,drift_ms,gpu_ms,dropped,path
+phase2_perturbation,,dx11_avtank_fourteam_fire_080_400_facing,fourteam_fire,80,DX11,none,Hardware: Independent Flip,1.0,2590,15.0228696,5.802565945945946,5.6861,6.842,7.77,0.2903448066771297,1.9856045173745174,0,reverse_engineering/snapshots/phase2_perturbation\20260823_150021\dx11_avtank_fourteam_fire_080_400_facing\presentmon.csv

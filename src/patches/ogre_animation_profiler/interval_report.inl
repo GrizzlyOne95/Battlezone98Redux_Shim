@@ -435,6 +435,20 @@
                 static_cast<unsigned long long>(over2500),
                 static_cast<unsigned long long>(over3333));
 
+            const unsigned isolationMask =
+                g_IsolationMask.load(std::memory_order_relaxed);
+            const uint64_t isolatedRenderables =
+                g_IsolatedRenderables.exchange(0, std::memory_order_acq_rel);
+            if (isolationMask != 0 || isolatedRenderables != 0)
+            {
+                LogShimA(
+                    LogLevel::Warn,
+                    kComponent,
+                    "[OgreProfile][Isolation] mask=0x%X suppressed=%.1f/f -- capture is NOT stock rendering",
+                    isolationMask,
+                    static_cast<double>(isolatedRenderables) / frameDivisor);
+            }
+
             ReportRenderContributors(frameDivisor, renderSystemSubmissions);
 
             if (g_D3D9DeviceObserved.load(std::memory_order_acquire))

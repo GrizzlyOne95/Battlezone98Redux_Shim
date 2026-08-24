@@ -53,12 +53,46 @@
             }
 
             const bool enabled = g_Enabled.load(std::memory_order_relaxed);
+            // Per-submission observer check. The once-per-frame check above is
+            // enough to notice a context swap, but the draw observers were
+            // measurably absent for part of a loaded frame, which silently lost
+            // draws from whatever rendered late in that frame. Verifying the one
+            // vtable slot on every submission costs two loads and a compare and
+            // keeps draw attribution honest; the repair itself still only runs
+            // when the entry is actually missing.
+            bool observerInstalled = false;
+            ID3D11DeviceContext* observedContext = reinterpret_cast<ID3D11DeviceContext*>(
+                g_RenderContextIdentity.load(std::memory_order_acquire));
+            if (enabled && observedContext)
+            {
+                __try
+                {
+                    void** vtable = *reinterpret_cast<void***>(observedContext);
+                    observerInstalled = vtable &&
+                        vtable[12] == reinterpret_cast<void*>(&HookDrawIndexed);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    observerInstalled = false;
+                }
+                if (!observerInstalled && RefreshContextHooks(observedContext))
+                {
+                    g_ContextVtableRefreshes.fetch_add(1, std::memory_order_relaxed);
+                    observerInstalled = true;
+                }
+            }
+
             const uint64_t start = enabled ? ReadQpc() : 0;
+            const uint64_t drawsBefore = t_ThreadDrawCalls;
             real(self, renderOperation);
             if (enabled)
             {
                 const uint64_t elapsed = ReadQpc() - start;
                 RecordCurrentRenderOperation(renderOperation);
+                RecordSubmissionDrawOutcome(
+                    renderOperation,
+                    t_ThreadDrawCalls - drawsBefore,
+                    observerInstalled);
                 g_RenderSystemSubmissions.fetch_add(1, std::memory_order_relaxed);
                 g_RenderSystemSubmissionTicks.fetch_add(elapsed, std::memory_order_relaxed);
                 AtomicMax(g_RenderSystemSubmissionMaxTicks, elapsed);
@@ -73,6 +107,7 @@
         {
             if (g_Enabled.load(std::memory_order_relaxed))
             {
+                ++t_ThreadDrawCalls;
                 g_DrawIndexedCalls.fetch_add(1, std::memory_order_relaxed);
                 g_DrawIndexedIndices.fetch_add(indexCount, std::memory_order_relaxed);
                 if (t_CurrentRenderContributor)
@@ -93,6 +128,7 @@
         {
             if (g_Enabled.load(std::memory_order_relaxed))
             {
+                ++t_ThreadDrawCalls;
                 g_DrawCalls.fetch_add(1, std::memory_order_relaxed);
                 g_DrawVertices.fetch_add(vertexCount, std::memory_order_relaxed);
                 if (t_CurrentRenderContributor)
@@ -181,6 +217,7 @@
         {
             if (g_Enabled.load(std::memory_order_relaxed))
             {
+                ++t_ThreadDrawCalls;
                 g_DrawIndexedInstancedCalls.fetch_add(1, std::memory_order_relaxed);
                 g_DrawIndexedInstancedIndices.fetch_add(
                     static_cast<uint64_t>(indexCountPerInstance) * instanceCount,
@@ -205,6 +242,7 @@
         {
             if (g_Enabled.load(std::memory_order_relaxed))
             {
+                ++t_ThreadDrawCalls;
                 g_DrawInstancedCalls.fetch_add(1, std::memory_order_relaxed);
                 g_DrawInstancedVertices.fetch_add(
                     static_cast<uint64_t>(vertexCountPerInstance) * instanceCount,
@@ -227,7 +265,10 @@
             ID3D11DeviceContext* self, ID3D11Buffer* args, UINT offset)
         {
             if (g_Enabled.load(std::memory_order_relaxed))
+            {
+                ++t_ThreadDrawCalls;
                 g_DrawIndexedInstancedIndirectCalls.fetch_add(1, std::memory_order_relaxed);
+            }
             g_RealDrawIndexedInstancedIndirect(self, args, offset);
         }
 
@@ -235,7 +276,10 @@
             ID3D11DeviceContext* self, ID3D11Buffer* args, UINT offset)
         {
             if (g_Enabled.load(std::memory_order_relaxed))
+            {
+                ++t_ThreadDrawCalls;
                 g_DrawInstancedIndirectCalls.fetch_add(1, std::memory_order_relaxed);
+            }
             g_RealDrawInstancedIndirect(self, args, offset);
         }
 
