@@ -14878,12 +14878,16 @@ namespace BZROpenShim
         // the mission lifecycle seam (BzrSetRunningHook leaving/entering
         // RUN_STARTED): every baseline captured before a mission left
         // simulation refers to objects from a destroyed world, and anything
-        // captured between missions belongs to no world at all. The tracked
-        // player object pointer is only a fallback sanity signal for installs
-        // where the seam could not be installed (Steam/relocated): a changed
-        // player pointer still proves the previous world is gone, but an
-        // unchanged pointer proves nothing because the allocator can hand the
-        // next mission the same address.
+        // captured between missions belongs to no world at all. While the
+        // seam is installed it is the SOLE generation authority: the player
+        // object can legitimately change during a live world (ejection,
+        // vehicle transition, engine-side recreation), so a pointer change
+        // must not invalidate current-world baselines. The tracked player
+        // pointer gates the generation only on installs where the seam could
+        // not be installed (Steam/relocated): there a changed pointer still
+        // proves the previous world is gone, while an unchanged pointer
+        // proves nothing because the allocator can hand the next mission the
+        // same address.
         static uint32_t s_HeadlightWorldGeneration = 0;
         static void* s_HeadlightWorldPlayerIdentity = nullptr;
         // Discarded-without-restore accounting; budgeted log only. The log
@@ -15792,13 +15796,17 @@ namespace BZROpenShim
 
             void* player = TryGetHeadlightPlayerObject();
 
-            // Fallback sanity signal only -- the lifecycle seam owns world
-            // changes. A changed player pointer still proves the previously
-            // captured baselines refer to a destroyed world (this covers
-            // installs where the seam could not be installed), but an
-            // unchanged pointer no longer proves anything, so it is never used
-            // to keep a baseline alive across the seam.
-            if (player != s_HeadlightWorldPlayerIdentity)
+            // Fallback sanity signal, and ONLY while the lifecycle seam is
+            // unavailable. When g_MissionSeamInstalled is true, its enter/
+            // leave edges are the sole world-generation authority: the player
+            // object can legitimately change during a live world (ejection,
+            // vehicle transition, engine-side recreation), so a pointer
+            // change must not invalidate current-world baselines or recapture
+            // already-modified values as stock. On installs where the seam
+            // could not be installed (Steam/relocated builds) a changed
+            // pointer is the only available evidence that the previous
+            // world's lights are gone.
+            if (!g_MissionSeamInstalled && player != s_HeadlightWorldPlayerIdentity)
             {
                 s_HeadlightWorldPlayerIdentity = player;
                 ++s_HeadlightWorldGeneration;

@@ -100,11 +100,17 @@ Final model (bzr_hooks.cpp):
   dereferenced. `CaptureHeadlightState` resets an entry whose stamp does not
   match, so an address recycled by a new world's light captures fresh stock
   values instead of inheriting another object's baseline.
-- **Fallback sanity signal only.** The tracked player-object pointer still
-  advances the generation when it changes, for installs where the seam could
-  not be installed (Steam/relocated executables). A changed pointer still
-  proves the previous world is gone; an unchanged pointer proves nothing,
-  which is why it is no longer the primary oracle.
+- **Fallback sanity signal only, gated on seam availability.** While the
+  mission lifecycle seam is installed it is the *sole* generation authority:
+  `RefreshHeadlightState` advances the generation from player-pointer
+  changes only when `g_MissionSeamInstalled` is false. Rationale: the player
+  object can legitimately change during a live world (ejection, vehicle
+  transition, engine-side recreation), so treating pointer change as world
+  death would discard current-world baselines and recapture already-modified
+  values as stock. On installs without the seam (Steam/relocated
+  executables), a changed pointer remains the only available evidence that
+  the previous world ended; an unchanged pointer proves nothing there,
+  which is why it is never the primary oracle.
 - **Discard accounting.** Stale-world discards are counted and the first few
   per transition are logged (`[HEADLIGHT] stale-world baseline discarded`),
   so session logs show invalidation working without allowing a pathological
