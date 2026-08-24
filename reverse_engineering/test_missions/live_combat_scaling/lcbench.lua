@@ -33,6 +33,12 @@ local VALID_SCENARIOS = {
     -- to separate the harness's own scripting cost from the cost of the battle,
     -- so fourteam_fire's frame time is never read as pure render cost.
     fourteam_ai = true,
+    -- Static props/buildings spawned in the idle formation and left parked.
+    -- Exists for the stock-asset audit: it renders a configurable prop ODF
+    -- (default sbsilo) at the configured distance so bounds/material-LOD
+    -- behaviour can be observed on non-craft classes, which the craft
+    -- scenarios can never spawn.
+    props = true,
 }
 
 local VALID_UNIT_ODFS = {
@@ -52,6 +58,35 @@ local VALID_UNIT_ODFS = {
     svmine = true,
     svturr = true,
     sspilo = true,
+    -- Stock-asset audit (2026-08-23): additional faction variants and service
+    -- craft for the skin-source sweep, plus static props/buildings for the
+    -- null-bounds repair validation ("props" scenario).
+    bvtank = true,
+    bvwalk = true,
+    bvturr = true,
+    bvartl = true,
+    bvapc = true,
+    bvmine = true,
+    bspilo = true,
+    bsheav = true,
+    cvtnk = true,
+    cvwalk = true,
+    cvturr = true,
+    cvartl = true,
+    cvfigh = true,
+    cvmine = true,
+    cspilo = true,
+    avhaul = true,
+    svhaul = true,
+    avcnst = true,
+    svcnst = true,
+    avrecy = true,
+    svrecy = true,
+    avscav = true,
+    svscav = true,
+    sbsilo = true,
+    abbarr = true,
+    sbtowe = true,
 }
 
 local function readConfig()

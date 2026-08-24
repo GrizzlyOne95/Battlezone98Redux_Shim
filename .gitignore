@@ -26,6 +26,9 @@
 !reverse_engineering/complete_cached_project_pipeline.py
 !reverse_engineering/capture_runtime_layout.py
 !reverse_engineering/probe_chunk_effect_runtime.py
+!reverse_engineering/audit_stock_assets.py
+!reverse_engineering/merge_asset_audit_runtime.py
+reverse_engineering/asset_audit/
 !reverse_engineering/build_netcode_index.py
 !reverse_engineering/analyze_bzrnet_capture.py
 !reverse_engineering/analyze_relay_capture.py
