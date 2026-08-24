@@ -3558,13 +3558,48 @@ namespace BZROpenShim
                 return true;
 
             bool anySucceeded = false;
+            std::vector<uintptr_t> staleRestoreAddresses;
             for (const auto& entry : g_HudSpriteOriginalEntriesByAddress)
             {
                 if (g_HudSpriteHiddenAddresses.find(entry.first) == g_HudSpriteHiddenAddresses.end())
                     continue;
 
+                // The hide path re-reads each cached address and requires the
+                // stock panel UV block before it writes, because the engine can
+                // free and rebuild the HUD rect heap (mission restart,
+                // resolution change). The restore path must apply the same
+                // evidence: after such a rebuild the cached address is freed or
+                // reused, and VirtualProtect+write would then corrupt whatever
+                // owns the memory now.
+                HudSpriteRectRecord live = {};
+                if (!TryReadHudSpriteRectRecord(
+                        reinterpret_cast<const HudSpriteRectRecord*>(entry.first), live) ||
+                    !HudSpriteRecordMatchesStockScrapOrPilotUv(live))
+                {
+                    staleRestoreAddresses.push_back(entry.first);
+                    continue;
+                }
+
                 if (WriteHudSpriteRectRecordAtAddress(entry.first, entry.second))
                     anySucceeded = true;
+            }
+
+            if (!staleRestoreAddresses.empty())
+            {
+                for (uintptr_t address : staleRestoreAddresses)
+                {
+                    g_HudSpriteOriginalEntriesByAddress.erase(address);
+                    g_HudSpriteHiddenAddresses.erase(address);
+                }
+                // Drop the cache so the next request rediscovers the rebuilt
+                // records instead of writing into freed memory.
+                g_HudSpriteCachedPanelAddresses.clear();
+                g_HudSpriteFallbackDiscoveryAttempted = false;
+                LogShimA(
+                    LogLevel::Warn,
+                    "hudfallback",
+                    "restore dropped %zu stale panel record address(es); rediscovery scheduled",
+                    staleRestoreAddresses.size());
             }
 
             if (anySucceeded)
@@ -13559,6 +13594,12 @@ namespace BZROpenShim
         static bool g_MissionSeamFailureLogged = false;
         static uint32_t g_MissionTransitionCount = 0;
 
+        // Defined with the headlight state below. The headlight baselines are
+        // stamped with a world generation that this proven lifecycle seam
+        // advances, so baseline invalidation never has to infer a world change
+        // from allocator behavior.
+        static void HeadlightNotifyMissionRunStateChanged(bool enteringSimulation);
+
         static bool TryReadBzrRunState(int& value)
         {
             __try
@@ -13644,6 +13685,11 @@ namespace BZROpenShim
                 // path carries the same hazard. Stale chunk slots are handled
                 // where the damage actually occurs, by the fail-fast checks in
                 // SubmitChunkProxiesToRenderQueue.
+                HeadlightNotifyMissionRunStateChanged(false);
+            }
+            else if (previous != kBzrRunStateStarted && current == kBzrRunStateStarted)
+            {
+                HeadlightNotifyMissionRunStateChanged(true);
             }
             TerrainProxyMissionRunStateChanged(previous, current);
         }
@@ -14828,15 +14874,41 @@ namespace BZROpenShim
         static constexpr int kHeadlightLightTraceLimit = 40;
         static DWORD g_HeadlightLastRefreshTick = 0;
         static std::unordered_map<void*, HeadlightOriginalState> g_HeadlightOriginalStates;
-        // World identity for headlight baselines. The tracked player object
-        // pointer is a stable within-world identity: a new mission (or the
-        // shell) allocates a different player object, so an identity change is
-        // evidence that every previously captured baseline refers to objects
-        // from a destroyed world.
+        // World identity for headlight baselines. The authoritative oracle is
+        // the mission lifecycle seam (BzrSetRunningHook leaving/entering
+        // RUN_STARTED): every baseline captured before a mission left
+        // simulation refers to objects from a destroyed world, and anything
+        // captured between missions belongs to no world at all. While the
+        // seam is installed it is the SOLE generation authority: the player
+        // object can legitimately change during a live world (ejection,
+        // vehicle transition, engine-side recreation), so a pointer change
+        // must not invalidate current-world baselines. The tracked player
+        // pointer gates the generation only on installs where the seam could
+        // not be installed (Steam/relocated): there a changed pointer still
+        // proves the previous world is gone, while an unchanged pointer
+        // proves nothing because the allocator can hand the next mission the
+        // same address.
         static uint32_t s_HeadlightWorldGeneration = 0;
         static void* s_HeadlightWorldPlayerIdentity = nullptr;
-        // Discarded-without-restore accounting; budgeted log only.
+        // Discarded-without-restore accounting; budgeted log only. The log
+        // budget makes the first few discards of each world transition visible
+        // in the session log without letting a pathological map flood it.
         static uint32_t g_HeadlightStaleEntryDiscards = 0;
+        static constexpr uint32_t kHeadlightStaleDiscardLogBudget = 3;
+        static uint32_t g_HeadlightStaleDiscardsLogged = 0;
+        static void LogHeadlightStaleDiscard(
+            const void* light, uint32_t entryGeneration)
+        {
+            ++g_HeadlightStaleEntryDiscards;
+            if (g_HeadlightStaleDiscardsLogged >= kHeadlightStaleDiscardLogBudget)
+                return;
+            ++g_HeadlightStaleDiscardsLogged;
+            Log(L"[HEADLIGHT] stale-world baseline discarded (not restored) "
+                L"light=0x%p entryGen=%u currentGen=%u total=%u\n",
+                light, entryGeneration,
+                static_cast<unsigned>(s_HeadlightWorldGeneration),
+                static_cast<unsigned>(g_HeadlightStaleEntryDiscards));
+        }
         static InlineDetour32 g_EmissionLightStateDetour = {};
         static uintptr_t g_EmissionLightActiveResume = kEmissionLightActiveResumeAddr;
         static uintptr_t g_EmissionLightLoopResume = kEmissionLightLoopResumeAddr;
@@ -15315,11 +15387,9 @@ namespace BZROpenShim
                     // through its stored pointer: the light is either freed or
                     // the address was recycled by an unrelated object.
                     if (entry.second.worldGeneration != s_HeadlightWorldGeneration)
-                    {
-                        ++g_HeadlightStaleEntryDiscards;
-                        continue;
-                    }
-                    RestoreHeadlightState(entry.first, entry.second);
+                        LogHeadlightStaleDiscard(entry.first, entry.second.worldGeneration);
+                    else
+                        RestoreHeadlightState(entry.first, entry.second);
                 }
             }
             g_HeadlightOriginalStates.clear();
@@ -15668,6 +15738,25 @@ namespace BZROpenShim
                    g_HeadlightBeamMode != HeadlightBeamMode::Stock;
         }
 
+        // Lifecycle-seam hook: advances the headlight world generation from
+        // the mission run-state machine. Leaving RUN_STARTED means the world's
+        // lights are going away; entering it means a fresh world is starting.
+        // Both edges invalidate every tracked baseline, so a baseline can only
+        // ever be restored within the single mission whose scene it was
+        // captured in. Entries invalidated here become discard-only: the
+        // restore paths refuse to write through their stored pointers.
+        static void HeadlightNotifyMissionRunStateChanged(bool enteringSimulation)
+        {
+            if (!g_HeadlightRuntimeActive && g_HeadlightOriginalStates.empty())
+                return;
+            ++s_HeadlightWorldGeneration;
+            g_HeadlightStaleEntryDiscards = 0;
+            g_HeadlightStaleDiscardsLogged = 0;
+            Log(L"[HEADLIGHT] Mission %hs simulation: world generation advanced to %u\n",
+                enteringSimulation ? "entered" : "left",
+                static_cast<unsigned>(s_HeadlightWorldGeneration));
+        }
+
         static void RefreshHeadlightState()
         {
             const bool exuLoaded = IsExuModuleLoaded();
@@ -15707,14 +15796,22 @@ namespace BZROpenShim
 
             void* player = TryGetHeadlightPlayerObject();
 
-            // Advance world identity before anything reads or writes a
-            // baseline. A changed player pointer means the previous world's
-            // lights are gone; stale entries become discard-only from here on.
-            if (player != s_HeadlightWorldPlayerIdentity)
+            // Fallback sanity signal, and ONLY while the lifecycle seam is
+            // unavailable. When g_MissionSeamInstalled is true, its enter/
+            // leave edges are the sole world-generation authority: the player
+            // object can legitimately change during a live world (ejection,
+            // vehicle transition, engine-side recreation), so a pointer
+            // change must not invalidate current-world baselines or recapture
+            // already-modified values as stock. On installs where the seam
+            // could not be installed (Steam/relocated builds) a changed
+            // pointer is the only available evidence that the previous
+            // world's lights are gone.
+            if (!g_MissionSeamInstalled && player != s_HeadlightWorldPlayerIdentity)
             {
                 s_HeadlightWorldPlayerIdentity = player;
                 ++s_HeadlightWorldGeneration;
                 g_HeadlightStaleEntryDiscards = 0;
+                g_HeadlightStaleDiscardsLogged = 0;
             }
 
             float colourR = g_HeadlightColourR;
@@ -15813,7 +15910,7 @@ namespace BZROpenShim
                     const bool staleWorld =
                         it->second.worldGeneration != s_HeadlightWorldGeneration;
                     if (staleWorld)
-                        ++g_HeadlightStaleEntryDiscards;
+                        LogHeadlightStaleDiscard(it->first, it->second.worldGeneration);
                     else
                         RestoreHeadlightState(it->first, it->second);
                     it = g_HeadlightOriginalStates.erase(it);

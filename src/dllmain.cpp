@@ -100,6 +100,29 @@ namespace BZROpenShim
         }
     }
 
+    // Pins this module for the life of the process. OpenShim spawns worker
+    // threads whose lifetimes are independent of any particular caller's
+    // reference count, so an undisciplined FreeLibrary must never be able to
+    // unmap code those threads are still executing. With the pin in place,
+    // FreeLibrary becomes reference-count noise: the executable pages stay
+    // mapped and a worker that outlives its join window keeps running in
+    // mapped code instead of unmapped memory. This is the same
+    // leak-rather-than-free policy the shutdown paths apply to shared buffers,
+    // extended to the module itself.
+    static void PinModuleForProcessLifetime(HINSTANCE hModule)
+    {
+        HMODULE pinned = nullptr;
+        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN |
+                                    GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                                reinterpret_cast<LPCWSTR>(hModule), &pinned))
+        {
+            LogShimA(LogLevel::Warn, "dllmain",
+                     "Could not pin module for process lifetime (err=%lu); "
+                     "explicit FreeLibrary during worker activity is unsupported",
+                     GetLastError());
+        }
+    }
+
     static bool g_PatchingComplete = false;
     static uint32_t g_AppliedPatches = 0;
     static bool g_CompatibleVersion = false;
@@ -147,6 +170,18 @@ namespace BZROpenShim
         s_Initialized = true;
     }
 
+    // Full joined shutdown. This waits for the patch thread, the native CPU
+    // sampler and the network workers (up to 5 s and 1.5 s per worker), so it
+    // is only valid from a normal execution context. Never call this from
+    // DllMain: the detach path runs under the loader lock, where waiting for a
+    // worker that needs loader service can deadlock, and a timed-out worker
+    // would keep executing code from a module the caller is unloading.
+    //
+    // Unload contract: a host that intends to FreeLibrary this module must
+    // call Shutdown() first, from one of its own normal threads. If the module
+    // is unloaded without that call, DLL_PROCESS_DETACH only signals (never
+    // joins) and relies on the process-lifetime pin to keep mapped whatever
+    // the workers still touch.
     BZRO_API void Shutdown() {
         if (g_PatchThread)
         {
@@ -190,6 +225,8 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
             return FALSE;
         }
 
+        BZROpenShim::PinModuleForProcessLifetime(hModule);
+
         // The game creates BZLogger/Ogre logs immediately after process
         // attach, before the normal patch thread can reliably run.
         BZROpenShim::ApplyEarlyGameLogHooks();
@@ -210,8 +247,28 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
         break;
 
     case DLL_PROCESS_DETACH:
-        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "DLL_PROCESS_DETACH reserved=0x%p", reserved);
-        BZROpenShim::Shutdown();
+        if (reserved != nullptr)
+        {
+            // Process termination (reserved is the termination flag, not an
+            // LPVOID). The OS has already terminated every other thread and
+            // the loader will not return here; joins are impossible and
+            // cleanup is unnecessary because the whole address space, handle
+            // table and kernel state are going away together. Do no work that
+            // could touch a lock or a runtime object another dying thread
+            // still held.
+            OutputDebugStringA("BZR-OpenShim: DLL_PROCESS_DETACH (process termination)\n");
+            break;
+        }
+        // Explicit FreeLibrary without a prior Shutdown() call. The detach
+        // thread owns the loader lock, so this path must not wait on workers
+        // (deadlock) and must not run logger/heap work that a live worker
+        // could be holding or feeding (lock-order cycle through the loader
+        // lock). Signal the patch loop to wind down -- a plain atomic store --
+        // and rely on the process-lifetime pin: the module's code pages stay
+        // mapped for the workers the caller chose not to drain.
+        OutputDebugStringA("BZR-OpenShim: DLL_PROCESS_DETACH (explicit unload without Shutdown(); "
+                           "workers left running in pinned module)\n");
+        BZROpenShim::SignalPatcherShutdown();
         break;
     }
     return TRUE;
