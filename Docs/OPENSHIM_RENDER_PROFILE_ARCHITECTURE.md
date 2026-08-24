@@ -1,0 +1,237 @@
+# OpenShim Render Profile Architecture
+
+Status: implemented (state model, policy, EXU bridge, resource ownership);
+stock-material retrofit is scaffolded but runtime validation pending. See
+"Known limitations / future work".
+
+Related work orders: canonical Enhanced renderer ownership migration
+(this document); PSSM terrain cutoff investigation (next dedicated task).
+
+---
+
+## 1. Ownership model
+
+### Old model (before migration)
+
+| Concern | Owner | Mechanism |
+| --- | --- | --- |
+| Lighting-mode state (Default/Enhanced/Retro) | EXU `Environment.cpp` | `g_desiredLightingMode`, never cleared |
+| Viewport scheme application | EXU | `setMaterialScheme` IAT takeover (`0x869810`, 3 call sites) + Lua-driven per-frame enforcement |
+| Scheme naming (`en-`, `og-`) | EXU string builders | `"en-" .. modern` / `"og-" .. modern` |
+| All Enhanced shaders/materials | Campaign Reimagined | `CR_base-sm4.hlsl`, `CR_terrain-sm4.hlsl`, ~300 stock-named materials with `en-*`/`og-*` techniques |
+| Light selection for `en-*` schemes | OpenShim | `ogre_enhanced_light_selection.cpp` budget keyed on scheme prefix |
+| User-facing lighting mode UI | CR `PersistentConfig.lua` | `LightingMode = 1/2/3` |
+
+Problems: two renderer owners evolving in parallel, Enhanced impossible without
+CR installed, mission overrides never cleared, no requested-vs-effective
+distinction, no capability reporting, no resource/deployment integrity story.
+
+### New model
+
+```
+OpenShim owns renderer CAPABILITY + POLICY
+    RendererBackend (DX9/DX11 observation, restart-scoped preference)
+    RenderProfile state: user preference (openshim.ini) +
+                         content override (EXU bridge, mission-scoped)
+                         -> resolver -> effective profile + fallback reason
+    Scheme policy application (viewport setMaterialScheme takeover)
+    Capability reporting ([RENDER] diagnostics + winmm ABI)
+
+EXU owns content INTENT
+    exu.RequestRenderProfile(Inherit|Retro|Redux|Enhanced) -> winmm bridge
+    Legacy SetLightingMode/SetRetroLightingMode forward when bridge present;
+    full legacy behavior preserved on old/absent shims.
+
+Campaign Reimagined owns CONTENT + ART DIRECTION
+    sun color/intensity, ambient, fog, sky, IBL art assets unique to CR,
+    mission light placement, custom material variants.
+    Consumes the canonical renderer via EXU; no rendering implementation.
+```
+
+Core principle: **OpenShim owns renderer capabilities. EXU communicates
+content intent. Campaign Reimagined owns content and art direction.**
+
+---
+
+## 2. RendererBackend semantics
+
+- `Auto` (default): use whatever the game selects this session. Observation
+  watches which render system module loads (`RenderSystem_Direct3D11.dll` vs
+  `RenderSystem_Direct3D9.dll`).
+- `DX9` / `DX11`: a player/system preference recorded in openshim.ini and
+  applied at next launch. OpenShim deliberately does NOT attempt a live Ogre
+  RenderSystem switch; divergence between requested and effective backend is
+  reported ("restart required") rather than hidden or acted on unsafely.
+- EXU/content cannot force a backend; the bridge exposes read-only queries.
+
+## 3. RenderProfile semantics
+
+- **Redux** — stock Battlezone 98 Redux rendering behavior as closely as
+  practical on the selected backend. The compatibility baseline; the engine's
+  native scheme flow passes through untouched (fail-open by construction).
+- **Enhanced** — OpenShim's canonical graphics upgrade. Supported on BOTH
+  backends, capability-dependent rather than all-or-nothing:
+  - DX11 (primary development platform): linear-lighting/colorspace path,
+    enhanced terrain/object shader families, modern PSSM behavior (cascade
+    blending, comparison PCF, receiver normal offset, terminal fade),
+    contribution-ranked enhanced light selection, neutral IBL resources.
+  - DX9 (feature-frozen maintenance mode): proven legacy enhancements only —
+    distance-faded normal-map sharpening plus the SM3 enhanced technique
+    delegates. Correctness/crash fixes yes; new visual work targets DX11
+    first. A missing DX11-only bit is an expected report, NOT a fallback
+    failure: DX9+Enhanced remains effective rather than silently degrading
+    to Redux.
+- **Retro** — classic-style presentation through the `og-*` material scheme
+  family (fewer texture units, simpler lighting, Glow compositor suppressed).
+  Status: **experimental**. The scheme family legitimately exists (it is not
+  fabricated), but OpenShim asserts glow suppression only on explicit
+  reapplies, so engine viewport rebuilds can temporarily re-enable bloom
+  until the next reassert. Documented limitation, not a fabricated mode.
+
+Profiles are policy layered over the backend; shadow QUALITY controls remain
+independent of shadow BEHAVIOR, as do FXAA, sun-flash suppression, FOV/UI,
+raw input, chunk/TRN/satellite correctness repairs — none of those are profile
+semantics and none were folded into Enhanced.
+
+## 4. Profile precedence
+
+1. Hard compatibility/safety constraints (scheme layer unavailable → Enhanced
+   reports itself unsupported rather than half-working).
+2. Content override via EXU (mission/session scoped).
+3. User preference from openshim.ini.
+
+Examples:
+
+| Backend | User | Content override | Effective |
+| --- | --- | --- | --- |
+| DX11 | Redux | Inherit | Redux |
+| DX11 | Redux | Enhanced | Enhanced |
+| DX11 | Enhanced | Redux | Redux |
+| DX9 | Enhanced | Inherit | **Enhanced (legacy capability set)** |
+| any | Enhanced | – | Redux only if scheme layer inactive, reason logged |
+
+The resolver lives in `src/engine/render_profile.cpp` (pure, unit-tested via
+`scripts/run_render_profile_tests.ps1`).
+
+## 5. EXU API
+
+Native winmm exports (stable integer ABI, mirrored in EXU's
+`src/RenderProfileBridge.h`; requests: 0=Inherit, 1=Retro, 2=Redux, 3=Enhanced):
+
+- `OpenShimGetRenderApiVersion()`
+- `OpenShimRequestRenderProfile(req)` → applied-live / stored-deferred / rejected
+- `OpenShimGetUserRenderProfile()`, `OpenShimGetRequestedContentRenderProfile()`,
+  `OpenShimGetEffectiveRenderProfile()`
+- `OpenShimGetActiveRendererBackend()`
+- `OpenShimGetRenderCapabilities()` (bitmask), `OpenShimSupportsRenderProfile(p)`
+
+Capability negotiation: presence of the `OpenShimRequestRenderProfile` export
+means the render-profile API exists; version query guards future evolution.
+Absent export ⇒ old shim ⇒ EXU uses its legacy local path unchanged; new EXU
+APIs map onto it so content written either way keeps working.
+
+Lua surface (documented in EXU `Definitions/ExtraUtils.lua`):
+`RequestRenderProfile`, `GetRequestedRenderProfile`,
+`GetEffectiveRenderProfile`, `GetUserRenderProfile`,
+`SupportsRenderProfile`, `GetRenderCapabilities`.
+
+## 6. Mission lifecycle
+
+Content overrides are cleared by the authoritative mission-lifecycle seam:
+`ResetMissionHookOverridesFromBridge()` (exported as
+`OpenShimResetMissionHookOverrides`, invoked by EXU at mission init) now also
+calls `ClearContentRenderProfileOverride`. Shell → CR Enhanced mission → shell
+→ stock mission → shell resolves to user preference at every transition; an
+override cannot leak into unrelated subsequent content.
+
+## 7. Material compatibility strategy
+
+Policy (implemented in the scheme hook):
+
+```
+known modern base (high-pssm … lowest-noshadow)  -> profile prefix applied
+OpenShim's own en-/og- prefixed schemes          -> renormalized to effective profile
+foreign/custom scheme (Workshop mods)            -> PASSED THROUGH UNTOUCHED (fail open)
+```
+
+Unknown custom rendering is never rewritten; rate-limited `[RENDER]` logging
+identifies rewrites without spamming. This deliberately improves on the legacy
+EXU behavior, which rewrote unrecognized schemes to the last known modern base.
+
+Stock-family retrofit (giving stock materials real `en-*` techniques without
+CR installed) is the next task: it requires Ogre resource-location injection
+and per-family technique generation driven by the stock asset audit
+(`reverse_engineering/asset_audit/`), validated in-game before enabling.
+The capability bit `CapIblResources` already gates on deployed-resource
+validation so the retrofit path can fail closed cleanly.
+
+## 8. Resource packaging and deployment integrity
+
+- OpenShim ships the generic Enhanced core under `resources/renderer/enhanced/`:
+  `openshim_enhanced_{base,terrain}[-sm4|-sm3].hlsl` (+ GLSL variants),
+  `openshim_enhanced_*.program` (program names namespaced `OSE_*` so they can
+  never collide with CR's during transition), neutral IBL set renamed
+  `openshim_ibl_*.dds`, and a `resources.version` marker.
+- `Deploy-OpenShim.ps1` deploys winmm.dll + patches.json + renderer resources
+  together, extending the existing "DLL and patch definitions move as one
+  unit" rule.
+- At startup the DLL validates `resources.version` against its compiled
+  expectation. Mismatch ⇒ `[RENDER] Enhanced unavailable: resource version
+  mismatch` ⇒ effective profile falls back to Redux. A stale pairing can
+  never silently run.
+
+## 9. Diagnostics
+
+One concise block on change only:
+
+```
+[RENDER] backend.requested=Auto backend.effective=DX11
+[RENDER] profile.user=Redux profile.content=Enhanced profile.effective=Enhanced profile.source=EXU
+[RENDER] enhanced.supported=yes resources.compatible=yes capabilities=0x000000FF
+[RENDER] enhanced.sharpening=yes enhanced.linearLighting=yes enhanced.pssm=yes enhanced.lightSelection=yes
+```
+
+Fallback example:
+
+```
+[RENDER] fallback=Enhanced unavailable: scheme policy layer inactive
+```
+
+## 10. Validation matrix
+
+Automated (this branch):
+
+- `tests/render_profile_tests.cpp`: resolution table (override precedence,
+  inherit, DX9 legacy retention, scheme-layer fallback with reason,
+  requested-vs-effective backend reporting, override clearing, invalid inputs),
+  scheme mapping round-trips, stable ABI values.
+- `tests/ini_writer_tests.cpp`: lossless INI writes still green.
+- Release Win32 build of winmm.dll and exu.dll green; exports verified via
+  dumpbin.
+
+Runtime matrix (requires game execution — pending, see limitations):
+backend × user profile × EXU override incl. persistence across restart and
+mission transitions; DX9+Redux regression; DX11+Redux baseline parity;
+DX11+Enhanced parity vs current CR-owned path (screenshots across terrain/
+object lighting, shadows/cascade transitions, glow, IBL, cockpit, satellite);
+non-CR Enhanced activation once retrofit lands.
+
+## 11. Known limitations / future work
+
+1. **Stock-material retrofit** (Phase 8 completion): scaffold exists
+   (capability gating, resource validation, fail-open policy); technique
+   injection for audited stock families needs in-game iteration. Until then,
+   non-CR Enhanced renders through whatever techniques the active content
+   provides (stock materials keep their native look).
+2. **PSSM terrain cutoff**: explicitly deferred to the next dedicated task,
+   per sequencing: canonical ownership first, then cutoff fix, then broader
+   quality/performance refinement.
+3. **Retro glow drift**: glow suppression asserted on explicit reapplies;
+   engine viewport rebuilds can transiently re-enable bloom until the next
+   reassert (~1 Hz) — acceptable for experimental status.
+4. **Renderer forcing**: `Renderer=DX9/DX11` records preference and reports
+   divergence; actually steering the game's render-system selection needs
+   further RE and stays out of scope until safe.
+5. **CR duplicate removal** (Phase 14) happens in the CR repo only after
+   parity validation above; both implementations coexist harmlessly meanwhile
+   (disjoint program namespaces).
