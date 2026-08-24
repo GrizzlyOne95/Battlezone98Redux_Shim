@@ -1,0 +1,17 @@
+; Scenario configuration for the bz14atk validation mission.
+[Bz14Attack]
+; Number of attacker/target pairs (1..12).
+count = 1
+; Initial separation between each attacker and its target, metres.
+distance = 80.0
+; Target movement during the engagement:
+;   none   - target holds position (stationary-target scenario)
+;   away   - target repeatedly retreats from its attacker
+;   toward - target drives at its attacker
+;   perp   - target crosses laterally in front of its attacker
+targetMove = "none"
+; Engagement length before the script stops issuing new orders.
+runSeconds = 40.0
+; Attacker ODF. Targets use the same ODF unless targetOdf is set.
+unitOdf = "avtank"
+targetOdf = "svtank"

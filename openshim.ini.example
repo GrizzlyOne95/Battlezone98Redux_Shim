@@ -867,6 +867,38 @@ HeadlightColor = White
 ; Invalid/absent values fall back to Stock.
 HeadlightBeam = Wide
 
+[AI]
+
+; Restore the Battlezone 1.4 AttackTask tactical policy on top of Redux.
+;
+; This is NOT an AI improvement. It re-applies four decision branches that
+; Battlezone 1.5 (and therefore Redux) changed inside AttackTask::DoState:
+;   - a chasing tank with a firing solution strafe-duels (SLIDE) instead of
+;     stopping to blast from range;
+;   - the slide-exit engagement test is the enemy's activity state {2,5,7}
+;     instead of Redux's extended {2,5,7,10};
+;   - sliding has no 10 s hard cap and fleeing has no 3 s bound (1.4 exits);
+;   - standing past the 8 s window rotates back into SLIDE instead of fleeing,
+;     and a lost firing solution in BLAST-HOLD returns to SLIDE.
+; Movement, steering, navigation, weapons and all other engine systems stay
+; stock; only those recorded transition decisions are overridden. Applies to
+; AttackTask users (tank/scout/bomber processes); RocketTankAttack and turret
+; families are structurally unaffected.
+;
+; Simulation-affecting: inert in network games regardless of this value.
+; While enabled, the per-unit AIKITE kite-tuning hook cannot claim the same
+; AttackTask::DoState detour site for that session.
+;
+; Accepted: boolean. Default: OFF (stock Redux behavior).
+Legacy14AttackBehavior = 0
+
+; Divergence measurement mode: installs the same hook, evaluates both the
+; stock and legacy decisions each tick, logs differences when
+; OPENSHIM_TRACE_AI_BZ14=<budget> is set, but never applies anything.
+; Ignored when Legacy14AttackBehavior is ON.
+; Accepted: boolean. Default: OFF.
+Legacy14AttackShadow = 0
+
 
 
 ; Reveal an attacker's perceived team when it engages you, not only when its

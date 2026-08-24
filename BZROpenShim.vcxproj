@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -119,6 +119,8 @@
   <ItemGroup>
     <ClCompile Include="src\dllmain.cpp" />
     <ClCompile Include="src\patches\autosave.cpp" />
+    <ClCompile Include="src\patches\bz14_attack_policy.cpp" />
+    <ClCompile Include="src\patches\bz14_attack_redux.cpp" />
     <ClCompile Include="src\patches\bzr_hooks.cpp" />
     <ClCompile Include="src\patches\bzrnet_protocol.cpp" />
     <ClCompile Include="src\patches\bzrnet_trace.cpp" />
@@ -161,6 +163,8 @@
   <ItemGroup>
     <ClInclude Include="include\autosave.h" />
     <ClInclude Include="include\bzr_hooks.h" />
+    <ClInclude Include="include\bz14_attack_policy.h" />
+    <ClInclude Include="include\bz14_attack_redux.h" />
     <ClInclude Include="include\bzr_options_ui.h" />
     <ClInclude Include="include\bzrnet_protocol.h" />
     <ClInclude Include="include\bzrnet_trace.h" />

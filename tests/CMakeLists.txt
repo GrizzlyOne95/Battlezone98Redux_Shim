@@ -62,6 +62,13 @@ add_executable(sun_flash_tests
     sun_flash_tests.cpp
 )
 
+add_executable(bz14_attack_policy_tests
+    bz14_attack_policy_tests.cpp
+    ../src/patches/bz14_attack_redux.cpp
+)
+target_include_directories(bz14_attack_policy_tests PRIVATE ../include)
+target_compile_features(bz14_attack_policy_tests PRIVATE cxx_std_20)
+
 target_include_directories(shim_log_tests PRIVATE ../include)
 target_compile_features(shim_log_tests PRIVATE cxx_std_20)
 target_compile_features(native_ui_validation_tests PRIVATE cxx_std_20)
@@ -79,6 +86,7 @@ target_include_directories(sun_flash_tests PRIVATE ../include)
 target_compile_features(sun_flash_tests PRIVATE cxx_std_20)
 
 if(MSVC)
+    target_compile_options(bz14_attack_policy_tests PRIVATE /W4 /WX)
     target_compile_options(bzrnet_protocol_tests PRIVATE /W4 /WX)
     target_compile_options(shim_log_tests PRIVATE /W4 /WX)
     target_compile_options(trn_codec_tests PRIVATE /W4 /WX)
@@ -91,6 +99,7 @@ if(MSVC)
     target_compile_options(chunk_batch_invalidation_tests PRIVATE /W4 /WX)
     target_compile_options(sun_flash_tests PRIVATE /W4 /WX)
 else()
+    target_compile_options(bz14_attack_policy_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(bzrnet_protocol_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(shim_log_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(trn_codec_tests PRIVATE -Wall -Wextra -Werror)
@@ -114,3 +123,4 @@ add_test(NAME weapon_convergence_tests COMMAND weapon_convergence_tests)
 add_test(NAME headlight_falloff_tests COMMAND headlight_falloff_tests)
 add_test(NAME chunk_batch_invalidation_tests COMMAND chunk_batch_invalidation_tests)
 add_test(NAME sun_flash_tests COMMAND sun_flash_tests)
+add_test(NAME bz14_attack_policy_tests COMMAND bz14_attack_policy_tests)

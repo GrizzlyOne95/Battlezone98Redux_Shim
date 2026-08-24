@@ -3,6 +3,7 @@
 #include "openshim_ini.h"
 #include "terrain_proxy.h"
 #include "bzr_options_ui.h"
+#include "bz14_attack_policy.h"
 #include "patches.h"
 #include "patcher.h"
 #include "shim_log.h"
@@ -1842,6 +1843,7 @@ namespace BZROpenShim
         static bool g_ScrapRetargetHookInstalled = false;
         static InlineDetour32 g_AttackTaskDoStateDetour = {};
         static bool g_AttackTaskDoStateHookInstalled = false;
+        static bool g_AttackTaskKiteArbitrationLogged = false;
         static InlineDetour32 g_ArtilleryDoAttackDetour = {};
         static FnArtilleryDoAttack g_BzrFn_ArtilleryDoAttackOriginal = nullptr;
         static bool g_ArtilleryDoAttackHookInstalled = false;
@@ -17522,6 +17524,21 @@ namespace BZROpenShim
             if (g_AttackTaskDoStateHookInstalled)
                 return;
 
+            // The legacy-1.4 attack policy detours the same AttackTask::
+            // DoState entry; only one owner is possible. When the policy
+            // (or its shadow mode) is enabled it wins the site and the
+            // per-unit kite tuning stays unavailable for this session.
+            if (bz14::OwnsAttackTaskDetour())
+            {
+                if (!g_AttackTaskKiteArbitrationLogged)
+                {
+                    Log(L"[AIKITE] AttackTask::DoState owned by legacy 1.4 "
+                        L"attack policy; kite tuning unavailable\n");
+                    g_AttackTaskKiteArbitrationLogged = true;
+                }
+                return;
+            }
+
             if (g_AttackTaskDoStateDetour.trampoline && g_BzrFn_AttackTaskDoState)
             {
                 g_AttackTaskDoStateHookInstalled = true;
@@ -19925,8 +19942,11 @@ namespace BZROpenShim
 			}
 		}
 
-		static void InstallAiTuningHooksIfPossible()
+ 		static void InstallAiTuningHooksIfPossible()
         {
+            // Legacy 1.4 attack policy first: it can claim the shared
+            // AttackTask::DoState detour site (kite installer defers).
+            bz14::InstallPolicyHookIfPossible();
             InstallAttackTaskKiteHookIfPossible();
             InstallScrapPathScoreHookIfPossible();
             InstallScavengerRetargetHookIfPossible();
