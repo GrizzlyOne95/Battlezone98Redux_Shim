@@ -345,6 +345,58 @@
             destination[count] = '\0';
         }
 
+        CameraProfileSlot* FindOrClaimCameraSlot(const void* pointer)
+        {
+            if (!pointer)
+                return nullptr;
+            const uintptr_t key = reinterpret_cast<uintptr_t>(pointer);
+            const size_t start = HashPointer(pointer) & (kCameraTableSize - 1);
+            for (size_t probe = 0; probe < kCameraTableSize; ++probe)
+            {
+                CameraProfileSlot& slot =
+                    g_CameraProfileSlots[(start + probe) & (kCameraTableSize - 1)];
+                uintptr_t current = slot.key.load(std::memory_order_relaxed);
+                if (current == key)
+                    return &slot;
+                if (current == 0 && slot.key.compare_exchange_strong(
+                        current, key,
+                        std::memory_order_relaxed,
+                        std::memory_order_relaxed))
+                {
+                    return &slot;
+                }
+            }
+            return nullptr;
+        }
+
+        void CaptureCameraMetadata(CameraProfileSlot* slot, const void* camera)
+        {
+            if (!slot || !camera || !g_OgreGetEntityName)
+                return;
+
+            uint32_t expected = 0;
+            if (!slot->metadataState.compare_exchange_strong(
+                    expected, 1, std::memory_order_acq_rel,
+                    std::memory_order_relaxed))
+            {
+                return;
+            }
+
+            __try
+            {
+                // Camera derives from MovableObject in the validated Ogre ABI,
+                // so the existing name accessor safely identifies render targets.
+                CopyEntityMetadataString(
+                    slot->cameraName, g_OgreGetEntityName(camera));
+                slot->metadataState.store(2, std::memory_order_release);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                slot->cameraName[0] = '\0';
+                slot->metadataState.store(2, std::memory_order_release);
+            }
+        }
+
         void CaptureEntityMetadata(EntityProfileSlot* slot, const void* entity)
         {
             if (!slot || !entity || !g_OgreGetEntityName || !g_OgreEntityGetMesh ||
@@ -378,6 +430,246 @@
                 slot->meshName[0] = '\0';
                 slot->castShadows = false;
                 slot->metadataState.store(2, std::memory_order_release);
+            }
+        }
+
+        uintptr_t MixRenderContributorKey(uintptr_t hash, uintptr_t value)
+        {
+            // 32-bit FNV-1a is sufficient here because the immutable identity
+            // fields are also retained for diagnostics and the table is small.
+            hash ^= value;
+            hash *= static_cast<uintptr_t>(16777619u);
+            return hash;
+        }
+
+        RenderContributorSlot* FindOrClaimRenderContributorSlot(
+            const void* renderable,
+            const void* pass,
+            const void* camera,
+            const void* mesh)
+        {
+            if (!renderable || !pass)
+                return nullptr;
+
+            uintptr_t vtable = 0;
+            __try
+            {
+                vtable = reinterpret_cast<uintptr_t>(
+                    *reinterpret_cast<void* const*>(renderable));
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+            if (!vtable)
+                return nullptr;
+
+            uintptr_t key = static_cast<uintptr_t>(2166136261u);
+            key = MixRenderContributorKey(key, vtable);
+            key = MixRenderContributorKey(key, reinterpret_cast<uintptr_t>(pass));
+            key = MixRenderContributorKey(key, reinterpret_cast<uintptr_t>(camera));
+            key = MixRenderContributorKey(key, reinterpret_cast<uintptr_t>(mesh));
+            if (!key)
+                key = 1;
+
+            const size_t start = key & (kRenderContributorTableSize - 1);
+            for (size_t probe = 0; probe < kRenderContributorProbeCount; ++probe)
+            {
+                RenderContributorSlot& slot = g_RenderContributorSlots[
+                    (start + probe) & (kRenderContributorTableSize - 1)];
+                uintptr_t current = slot.key.load(std::memory_order_relaxed);
+                if (current == key)
+                    return &slot;
+                if (current == 0 && slot.key.compare_exchange_strong(
+                        current, key,
+                        std::memory_order_relaxed,
+                        std::memory_order_relaxed))
+                {
+                    slot.renderableVtable = vtable;
+                    slot.pass = reinterpret_cast<uintptr_t>(pass);
+                    slot.camera = reinterpret_cast<uintptr_t>(camera);
+                    slot.mesh = reinterpret_cast<uintptr_t>(mesh);
+                    return &slot;
+                }
+            }
+            g_RenderContributorDrops.fetch_add(1, std::memory_order_relaxed);
+            return nullptr;
+        }
+
+        void CopyRttiTypeName(
+            std::array<char, kEntityMetadataLength>& destination,
+            const void* renderable)
+        {
+            destination[0] = '\0';
+            if (!renderable)
+                return;
+
+            struct CompleteObjectLocator32
+            {
+                uint32_t signature;
+                uint32_t offset;
+                uint32_t constructorDisplacement;
+                const void* typeDescriptor;
+                const void* classDescriptor;
+            };
+
+            __try
+            {
+                void* const* vtable = *reinterpret_cast<void* const* const*>(
+                    renderable);
+                const CompleteObjectLocator32* locator = vtable
+                    ? reinterpret_cast<const CompleteObjectLocator32*>(vtable[-1])
+                    : nullptr;
+                const char* name = locator && locator->typeDescriptor
+                    ? static_cast<const char*>(locator->typeDescriptor) + 8
+                    : nullptr;
+                if (!name)
+                    return;
+                size_t length = 0;
+                while (length + 1 < destination.size() && name[length])
+                    ++length;
+                if (length)
+                    std::memcpy(destination.data(), name, length);
+                destination[length] = '\0';
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                destination[0] = '\0';
+            }
+        }
+
+        void CaptureRenderContributorMetadata(
+            RenderContributorSlot* slot,
+            const void* renderable,
+            const void* pass,
+            const void* camera,
+            const void* owner,
+            const void* mesh)
+        {
+            if (!slot)
+                return;
+            uint32_t expected = 0;
+            if (!slot->metadataState.compare_exchange_strong(
+                    expected, 1, std::memory_order_acq_rel,
+                    std::memory_order_relaxed))
+            {
+                return;
+            }
+
+            __try
+            {
+                CopyRttiTypeName(slot->typeName, renderable);
+                if (owner && g_OgreGetEntityName)
+                    CopyEntityMetadataString(slot->ownerName, g_OgreGetEntityName(owner));
+                if (mesh && g_OgreGetResourceName)
+                    CopyEntityMetadataString(slot->meshName, g_OgreGetResourceName(mesh));
+                if (camera && g_OgreGetEntityName)
+                    CopyEntityMetadataString(slot->cameraName, g_OgreGetEntityName(camera));
+
+                if (pass && g_OgrePassGetParent && g_OgreTechniqueGetParent &&
+                    g_OgreGetResourceName)
+                {
+                    const void* technique = g_OgrePassGetParent(pass);
+                    if (technique && g_OgreTechniqueGetName)
+                    {
+                        CopyEntityMetadataString(
+                            slot->techniqueName,
+                            g_OgreTechniqueGetName(technique));
+                    }
+                    if (technique && g_OgreTechniqueGetSchemeName)
+                    {
+                        CopyEntityMetadataString(
+                            slot->schemeName,
+                            g_OgreTechniqueGetSchemeName(technique));
+                    }
+                    if (technique && g_OgreTechniqueGetLodIndex)
+                        slot->lodIndex = g_OgreTechniqueGetLodIndex(technique);
+                    const void* material = technique
+                        ? g_OgreTechniqueGetParent(technique)
+                        : nullptr;
+                    if (material)
+                    {
+                        CopyEntityMetadataString(
+                            slot->materialName,
+                            g_OgreGetResourceName(material));
+                    }
+                }
+                if (pass && g_OgrePassGetIndex)
+                    slot->passIndex = g_OgrePassGetIndex(pass);
+                if (pass && g_OgrePassGetName)
+                {
+                    CopyEntityMetadataString(
+                        slot->passName,
+                        g_OgrePassGetName(pass));
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                // A malformed or transient diagnostic object must never alter
+                // the stock render path. Keep whatever metadata was safe.
+            }
+            slot->metadataState.store(2, std::memory_order_release);
+        }
+
+        void ResolveSubEntityOwnerAndMesh(
+            const void* renderable,
+            const void*& owner,
+            const void*& mesh)
+        {
+            owner = nullptr;
+            mesh = nullptr;
+            if (!renderable || !g_OgreSubEntityVtable ||
+                !g_OgreSubEntityGetParent || !g_OgreEntityGetMesh)
+            {
+                return;
+            }
+            __try
+            {
+                const void* vtable = *reinterpret_cast<void* const*>(renderable);
+                if (vtable != g_OgreSubEntityVtable)
+                    return;
+                owner = g_OgreSubEntityGetParent(renderable);
+                const void* sharedMesh = owner ? g_OgreEntityGetMesh(owner) : nullptr;
+                mesh = sharedMesh ? *reinterpret_cast<void* const*>(sharedMesh) : nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                owner = nullptr;
+                mesh = nullptr;
+            }
+        }
+
+        void RecordCurrentRenderOperation(const void* operation)
+        {
+            RenderContributorSlot* slot = t_CurrentRenderContributor;
+            if (!slot)
+                return;
+            slot->ogreSubmissions.fetch_add(1, std::memory_order_relaxed);
+            if (!operation)
+                return;
+            __try
+            {
+                const Ogre::RenderOperation* renderOperation =
+                    static_cast<const Ogre::RenderOperation*>(operation);
+                if (renderOperation->vertexData &&
+                    renderOperation->vertexData->vertexCount <= kMaxSaneVertexCount)
+                {
+                    slot->operationVertices.fetch_add(
+                        renderOperation->vertexData->vertexCount,
+                        std::memory_order_relaxed);
+                }
+                if (renderOperation->useIndexes && renderOperation->indexData &&
+                    renderOperation->indexData->indexCount <= kMaxSaneVertexCount * 6u)
+                {
+                    slot->operationIndices.fetch_add(
+                        renderOperation->indexData->indexCount,
+                        std::memory_order_relaxed);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                // Retail RenderOperation layout is only diagnostic metadata;
+                // preserve submission attribution if count fields ever differ.
             }
         }
 
@@ -417,6 +709,301 @@
                 }
             }
             return nullptr;
+        }
+
+        uint32_t ReadVertexBufferStride(
+            const Ogre::VertexData* vertexData,
+            const Ogre::VertexElement* element)
+        {
+            // Keep the SharedPtr temporary outside the SEH-guarded caller;
+            // MSVC cannot unwind C++ objects from a function containing __try.
+            const auto& buffer = vertexData->vertexBufferBinding->getBuffer(
+                g_OgreVertexElementGetSource(element));
+            const void* rawBuffer = *reinterpret_cast<void* const*>(&buffer);
+            return static_cast<uint32_t>(
+                g_OgreVertexBufferGetVertexSize(rawBuffer));
+        }
+
+        const void* ReadVertexBufferPointer(
+            const Ogre::VertexData* vertexData,
+            const Ogre::VertexElement* element)
+        {
+            const auto& buffer = vertexData->vertexBufferBinding->getBuffer(
+                g_OgreVertexElementGetSource(element));
+            return *reinterpret_cast<void* const*>(&buffer);
+        }
+
+        bool RetrofitVertexSourceShadow(
+            const Ogre::VertexData* vertexData,
+            unsigned short source)
+        {
+            if (!vertexData || !vertexData->vertexBufferBinding ||
+                !g_OgreHardwareBufferHasShadow ||
+                !g_OgreHardwareBufferGetSizeInBytes ||
+                !g_OgreHardwareBufferGetUsage ||
+                !g_OgreVertexBufferGetVertexSize ||
+                !g_OgreHardwareBufferManagerGetSingletonPtr ||
+                !g_OgreHardwareBufferManagerCreateVertexBuffer ||
+                !g_OgreHardwareBufferLock || !g_OgreHardwareBufferUnlock ||
+                !g_OgreVertexBufferBindingSetBinding ||
+                !g_OgreHardwareVertexBufferSharedPtrDestructor)
+            {
+                return false;
+            }
+
+            const Ogre::HardwareVertexBufferSharedPtr& currentSharedPtr =
+                vertexData->vertexBufferBinding->getBuffer(source);
+            void* currentBuffer =
+                *reinterpret_cast<void* const*>(&currentSharedPtr);
+            if (!currentBuffer || g_OgreHardwareBufferHasShadow(currentBuffer))
+            {
+                return true;
+            }
+
+            g_Dx11SkinSourceShadowQueries.fetch_add(1, std::memory_order_relaxed);
+            std::lock_guard<std::mutex> guard(g_Dx11SkinSourceShadowMutex);
+
+            // Re-read the binding after taking the lock. Multiple Entity instances
+            // normally share this VertexData, so the first repair serves all of them.
+            const Ogre::HardwareVertexBufferSharedPtr& oldSharedPtr =
+                vertexData->vertexBufferBinding->getBuffer(source);
+            void* oldBuffer = *reinterpret_cast<void* const*>(&oldSharedPtr);
+            if (!oldBuffer || g_OgreHardwareBufferHasShadow(oldBuffer))
+                return true;
+
+            const size_t vertexSize = g_OgreVertexBufferGetVertexSize(oldBuffer);
+            const size_t sizeBytes = g_OgreHardwareBufferGetSizeInBytes(oldBuffer);
+            if (!vertexSize || !sizeBytes || sizeBytes % vertexSize != 0 ||
+                sizeBytes / vertexSize > kMaxSaneVertexCount)
+            {
+                g_Dx11SkinSourceShadowFailureStage.store(
+                    1, std::memory_order_relaxed);
+                g_Dx11SkinSourceShadowFailures.fetch_add(1, std::memory_order_relaxed);
+                g_Dx11SkinSourceShadowPolicyEnabled.store(
+                    false, std::memory_order_release);
+                return false;
+            }
+
+            void* manager = g_OgreHardwareBufferManagerGetSingletonPtr();
+            if (!manager)
+            {
+                g_Dx11SkinSourceShadowFailureStage.store(
+                    2, std::memory_order_relaxed);
+                g_Dx11SkinSourceShadowFailures.fetch_add(1, std::memory_order_relaxed);
+                g_Dx11SkinSourceShadowPolicyEnabled.store(
+                    false, std::memory_order_release);
+                return false;
+            }
+
+            bool oldLocked = false;
+            bool replacementLocked = false;
+            bool replacementConstructed = false;
+            uint32_t failureStage = 3;
+            struct SharedPtrStorage
+            {
+                void* object = nullptr;
+                void* control = nullptr;
+            } replacement;
+            static_assert(
+                sizeof(SharedPtrStorage) == sizeof(void*) * 2,
+                "validated Ogre SharedPtr ABI uses two pointers");
+            try
+            {
+                // Pay the D3D11 staging readback once, then preserve the exact
+                // interleaved source bytes in a normal Ogre CPU-shadowed buffer.
+                // Subsequent software skinning reads the shadow instead of forcing
+                // CopyResource + Map synchronization every Entity every frame.
+                std::vector<uint8_t> copy(sizeBytes);
+                const void* sourceBytes = g_OgreHardwareBufferLock(
+                    oldBuffer,
+                    Ogre::HardwareBuffer::HBL_READ_ONLY,
+                    Ogre::HardwareBuffer::HBU_DEFAULT);
+                oldLocked = true;
+                if (!sourceBytes)
+                    throw std::bad_alloc();
+                std::memcpy(copy.data(), sourceBytes, sizeBytes);
+                g_OgreHardwareBufferUnlock(oldBuffer);
+                oldLocked = false;
+
+                failureStage = 4;
+                g_OgreHardwareBufferManagerCreateVertexBuffer(
+                    manager,
+                    &replacement,
+                    vertexSize,
+                    sizeBytes / vertexSize,
+                    g_OgreHardwareBufferGetUsage(oldBuffer),
+                    true);
+                replacementConstructed = true;
+                if (!replacement.object)
+                    throw std::bad_alloc();
+
+                failureStage = 5;
+                void* destinationBytes = g_OgreHardwareBufferLock(
+                    replacement.object,
+                    Ogre::HardwareBuffer::HBL_DISCARD,
+                    Ogre::HardwareBuffer::HBU_DEFAULT);
+                replacementLocked = true;
+                if (!destinationBytes)
+                    throw std::bad_alloc();
+                std::memcpy(destinationBytes, copy.data(), sizeBytes);
+                g_OgreHardwareBufferUnlock(replacement.object);
+                replacementLocked = false;
+
+                failureStage = 6;
+                g_OgreVertexBufferBindingSetBinding(
+                    vertexData->vertexBufferBinding, source, &replacement);
+                g_OgreHardwareVertexBufferSharedPtrDestructor(&replacement);
+                replacementConstructed = false;
+                g_Dx11SkinSourceShadowRepairs.fetch_add(1, std::memory_order_relaxed);
+                g_Dx11SkinSourceShadowRepairBytes.fetch_add(
+                    sizeBytes, std::memory_order_relaxed);
+                return true;
+            }
+            catch (...)
+            {
+                g_Dx11SkinSourceShadowFailureStage.store(
+                    failureStage, std::memory_order_relaxed);
+                if (replacementLocked && replacement.object)
+                {
+                    try { g_OgreHardwareBufferUnlock(replacement.object); }
+                    catch (...) {}
+                }
+                if (oldLocked)
+                {
+                    try { g_OgreHardwareBufferUnlock(oldBuffer); }
+                    catch (...) {}
+                }
+                if (replacementConstructed)
+                {
+                    try
+                    {
+                        g_OgreHardwareVertexBufferSharedPtrDestructor(
+                            &replacement);
+                    }
+                    catch (...) {}
+                }
+                g_Dx11SkinSourceShadowFailures.fetch_add(1, std::memory_order_relaxed);
+                // A failed retrofit must remain stock behavior, not become a
+                // repeated allocation/readback attempt on this hot path.
+                g_Dx11SkinSourceShadowPolicyEnabled.store(
+                    false, std::memory_order_release);
+                return false;
+            }
+        }
+
+        void EnsureDx11SoftwareSkinSourceShadows(
+            const Ogre::VertexData* vertexData)
+        {
+            if (!g_Dx11SkinSourceShadowPolicyEnabled.load(
+                    std::memory_order_relaxed) ||
+                !vertexData || !vertexData->vertexDeclaration)
+            {
+                return;
+            }
+            if (!g_OgreVertexElementGetSource)
+                return;
+
+            const Ogre::VertexElement* position =
+                vertexData->vertexDeclaration->findElementBySemantic(
+                    Ogre::VES_POSITION);
+            const Ogre::VertexElement* normal =
+                vertexData->vertexDeclaration->findElementBySemantic(
+                    Ogre::VES_NORMAL);
+            if (position)
+            {
+                const unsigned short positionSource =
+                    g_OgreVertexElementGetSource(position);
+                RetrofitVertexSourceShadow(vertexData, positionSource);
+                if (normal)
+                {
+                    const unsigned short normalSource =
+                        g_OgreVertexElementGetSource(normal);
+                    if (normalSource != positionSource)
+                        RetrofitVertexSourceShadow(vertexData, normalSource);
+                }
+            }
+            else if (normal)
+            {
+                RetrofitVertexSourceShadow(
+                    vertexData, g_OgreVertexElementGetSource(normal));
+            }
+        }
+
+        void CaptureSourceLayout(
+            SourceProfileSlot* slot,
+            const Ogre::VertexData* vertexData)
+        {
+            if (!slot || !vertexData || !vertexData->vertexDeclaration ||
+                !vertexData->vertexBufferBinding ||
+                !g_OgreVertexElementGetSource ||
+                !g_OgreVertexElementGetType ||
+                !g_OgreVertexElementGetTypeCount ||
+                !g_OgreVertexBufferGetVertexSize ||
+                !g_OgreHardwareBufferHasShadow ||
+                !g_OgreHardwareBufferIsSystemMemory)
+            {
+                return;
+            }
+
+            uint32_t expected = 0;
+            if (!slot->metadataState.compare_exchange_strong(
+                    expected, 1, std::memory_order_acq_rel,
+                    std::memory_order_relaxed))
+            {
+                return;
+            }
+
+            __try
+            {
+                const Ogre::VertexElement* position =
+                    vertexData->vertexDeclaration->findElementBySemantic(
+                        Ogre::VES_POSITION);
+                const Ogre::VertexElement* normal =
+                    vertexData->vertexDeclaration->findElementBySemantic(
+                        Ogre::VES_NORMAL);
+                const Ogre::VertexElement* weights =
+                    vertexData->vertexDeclaration->findElementBySemantic(
+                        Ogre::VES_BLEND_WEIGHTS);
+                const Ogre::VertexElement* indices =
+                    vertexData->vertexDeclaration->findElementBySemantic(
+                        Ogre::VES_BLEND_INDICES);
+                if (position)
+                {
+                    slot->positionStride =
+                        ReadVertexBufferStride(vertexData, position);
+                    const void* positionBuffer =
+                        ReadVertexBufferPointer(vertexData, position);
+                    slot->positionShadowed =
+                        g_OgreHardwareBufferHasShadow(positionBuffer);
+                    slot->positionSystemMemory =
+                        g_OgreHardwareBufferIsSystemMemory(positionBuffer);
+                }
+                if (normal)
+                {
+                    slot->normalStride =
+                        ReadVertexBufferStride(vertexData, normal);
+                }
+                if (weights)
+                {
+                    slot->weightStride =
+                        ReadVertexBufferStride(vertexData, weights);
+                    slot->weightShadowed = g_OgreHardwareBufferHasShadow(
+                        ReadVertexBufferPointer(vertexData, weights));
+                    slot->weightsPerVertex = static_cast<uint32_t>(
+                        g_OgreVertexElementGetTypeCount(
+                            g_OgreVertexElementGetType(weights)));
+                }
+                if (indices)
+                {
+                    slot->indexStride =
+                        ReadVertexBufferStride(vertexData, indices);
+                }
+                slot->metadataState.store(2, std::memory_order_release);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                slot->metadataState.store(2, std::memory_order_release);
+            }
         }
 
         DynamicGeometryProfileSlot* FindOrClaimDynamicGeometrySlot(

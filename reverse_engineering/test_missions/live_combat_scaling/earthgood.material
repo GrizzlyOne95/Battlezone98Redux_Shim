@@ -1,0 +1,24 @@
+material EARTHGOOD.MAP
+{
+    technique
+    {
+        pass
+        {
+            vertex_program_ref Sky_vertex
+            {
+            }
+            fragment_program_ref Sky_fragment
+            {
+            } 
+
+            lighting off
+            fog_override true none
+            scene_blend alpha_blend
+            depth_write off
+            texture_unit
+            {
+                texture EARTHGOOD.dds
+            }
+        }
+    }
+}

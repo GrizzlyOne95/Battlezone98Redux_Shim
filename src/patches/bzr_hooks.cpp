@@ -1540,6 +1540,8 @@ namespace BZROpenShim
             OgreVector3 scale = { 1.0f, 1.0f, 1.0f };
         };
 
+#include "chunk_proxy_generic_meshes.inl"
+
         struct ChunkProxySlot
         {
             const uint8_t* objectBytes = nullptr;
@@ -1565,9 +1567,12 @@ namespace BZROpenShim
             uint16_t cameraNotifyCount = 0;
             uint16_t entityUpdateQueueCount = 0;
             uint16_t renderQueueAddCount = 0;
+            ChunkProxyTransform genericBatchTransform = {};
+            uint8_t genericBatchKind = 0;
             bool active = false;
             bool billboardAssigned = false;
             bool meshAssigned = false;
+            bool genericBatchTransformReady = false;
         };
 
         struct ChunkEffectActiveEntry
@@ -1616,6 +1621,7 @@ namespace BZROpenShim
         static bool g_EnableChunkRenderFallback = false;
         static bool g_EnableChunkProxyDebug = false;
         static bool g_EnableChunkMeshProxy = false;
+        static bool g_EnableGenericChunkBatch = false;
         static bool g_EnablePartialFragmentBoneCollapse = false;
         // Guards against a craft mesh with an implausible bone count being walked.
         static constexpr uint16_t kMaxOwnerSkeletonBones = 1024;
@@ -2104,10 +2110,50 @@ namespace BZROpenShim
         static std::vector<std::filesystem::path> g_ChunkPayloadResourceDirectories = {};
         static void* g_ChunkProxyBillboardSet = nullptr;
         static std::vector<ChunkProxySlot> g_ChunkProxySlots = {};
+        static void* g_GenericChunkBatchManualObject = nullptr;
+        static void* g_GenericChunkBatchSceneNode = nullptr;
+        static void* g_GenericChunkBatchSceneManager = nullptr;
+        static bool g_GenericChunkBatchSectionCreated = false;
+        static bool g_GenericChunkBatchRuntimeAvailable = true;
+        static int g_GenericChunkBatchEligibility[2] = { -1, -1 };
+        static DWORD g_GenericChunkBatchLastLogTick = 0;
+        // Bounded diagnostics for the per-frame submission question: the game
+        // drives its _updateRenderQueue override more than once per frame (one
+        // traversal per active material scheme), and the ManualObject is also
+        // attached to the scene graph, so the number of rebuilds and the number
+        // of render-queue submissions per frame must be counted, not assumed.
+        static bool g_GenericChunkBatchRateDiagnostics = false;
+        static uint64_t g_GenericChunkBatchSubmitCalls = 0;
+        static uint64_t g_GenericChunkBatchRebuilds = 0;
+        static DWORD g_GenericChunkBatchRateLogTick = 0;
+        static uint64_t g_GenericChunkBatchSubmitCallsAtLastLog = 0;
+        static uint64_t g_GenericChunkBatchRebuildsAtLastLog = 0;
+        static const std::string g_GenericChunkBatchMaterialName = "scarpmat2";
+        static const std::string g_GenericChunkBatchMaterialGroup = "General";
+        // TEST/DIAGNOSTIC seam only. Set by the environment gate below and
+        // never by gameplay: RebuildAndSubmitGenericChunkBatch() reports
+        // failure once the slots are already classified batch-ready, which is
+        // precisely the window the per-Entity fallback has to cover.
+        static bool g_ForceGenericChunkBatchFailure = false;
+        // TEST/DIAGNOSTIC seam only. ChunkProxyTransform::scale is structurally
+        // unit today (the legacy basis vectors are normalised when the
+        // quaternion is built), so the unit-scale gate below has no natural
+        // trigger. This forces a non-unit scale on tracked generic chunks so
+        // the rejection and per-Entity fallback can actually be exercised.
+        static bool g_ForceGenericChunkNonUnitScale = false;
+        // Bounded diagnostics. A mod or future runtime that gives a stock
+        // chunk1/chunk2 a non-unit transform scale would otherwise be batched
+        // with the scale silently dropped, so count the rejections instead of
+        // logging one line per chunk per frame.
+        static uint64_t g_GenericChunkBatchNonUnitScaleRejections = 0;
+        static DWORD g_GenericChunkBatchScaleLogTick = 0;
+        static uint64_t g_GenericChunkBatchRehydrations = 0;
+        static DWORD g_GenericChunkBatchRehydrateLogTick = 0;
         using FnOgreGetRootSceneNode = void*(__thiscall*)(void*);
         using FnOgreCreateBillboardSet = void*(__thiscall*)(void*, uint32_t);
         using FnOgreCreateChildSceneNode = void*(__thiscall*)(void*, const OgreVector3&, const OgreQuaternion&);
         using FnOgreCreateEntity = void*(__thiscall*)(void*, const std::string&);
+        using FnOgreCreateManualObject = void*(__thiscall*)(void*);
         using FnOgreGetResourceGroupManager = void*(__cdecl*)();
         using FnOgreResourceGroupExists = bool(__thiscall*)(void*, const std::string&);
         using FnOgreCreateResourceGroup = void(__thiscall*)(void*, const std::string&, bool);
@@ -2151,6 +2197,22 @@ namespace BZROpenShim
         using FnOgreProcessQueuedUpdates = void(__cdecl*)();
         using FnOgreNumAttachedObjects = uint16_t(__thiscall*)(void*);
         using FnOgreGetAttachedObjectByIndex = void*(__thiscall*)(void*, uint16_t);
+        using FnOgreManualObjectSetDynamic = void(__thiscall*)(void*, bool);
+        using FnOgreManualObjectEstimateCount = void(__thiscall*)(void*, uint32_t);
+        using FnOgreManualObjectBegin = void(__thiscall*)(
+            void*, const std::string&, int, const std::string&);
+        using FnOgreManualObjectBeginUpdate = void(__thiscall*)(void*, uint32_t);
+        using FnOgreManualObjectVertex3 = void(__thiscall*)(void*, float, float, float);
+        using FnOgreManualObjectTexture2 = void(__thiscall*)(void*, float, float);
+        using FnOgreManualObjectIndex = void(__thiscall*)(void*, uint32_t);
+        using FnOgreManualObjectEnd = void*(__thiscall*)(void*);
+        using FnOgreManualObjectUpdateRenderQueue = void(__thiscall*)(void*, void*);
+        using FnOgreMovableSetCastShadows = void(__thiscall*)(void*, bool);
+        // Diagnostic-only. Ogre grows ManualObject::mAABB monotonically across
+        // beginUpdate() cycles (it is reset only by clear()), so the batch's
+        // aggregate bounds are read back rather than assumed.
+        using FnOgreManualObjectGetBoundingBox = const void*(__thiscall*)(void*);
+        using FnOgreManualObjectGetBoundingRadius = float(__thiscall*)(void*);
 
         // Render-pass procs captured at hook time when available; the mangled
         // export fallback in TrySubmitChunkMeshProxyToCurrentRenderQueue covers
@@ -5358,6 +5420,8 @@ namespace BZROpenShim
             slot.active = false;
             slot.billboardAssigned = false;
             slot.meshAssigned = false;
+            slot.genericBatchKind = 0;
+            slot.genericBatchTransformReady = false;
         }
 
         // Drops every Ogre reference a slot holds WITHOUT calling into Ogre.
@@ -5385,6 +5449,8 @@ namespace BZROpenShim
             slot.useEntryPosition = false;
             slot.lastSeenTick = 0;
             slot.active = false;
+            slot.genericBatchKind = 0;
+            slot.genericBatchTransformReady = false;
         }
 
         // Save-load and mission teardown destroy the whole Ogre scene
@@ -5404,6 +5470,10 @@ namespace BZROpenShim
                 ForgetChunkProxySlotOgreRefs(slot);
             }
             g_ChunkProxyBillboardSet = nullptr;
+            g_GenericChunkBatchManualObject = nullptr;
+            g_GenericChunkBatchSceneNode = nullptr;
+            g_GenericChunkBatchSceneManager = nullptr;
+            g_GenericChunkBatchSectionCreated = false;
 
             if (forgotten > 0)
             {
@@ -6055,6 +6125,163 @@ namespace BZROpenShim
             return true;
         }
 
+        static bool TryHashGenericChunkPayload(
+            const std::filesystem::path& path,
+            uintmax_t expectedBytes,
+            uint64_t& outHash)
+        {
+            outHash = 0;
+            std::error_code error;
+            if (!std::filesystem::is_regular_file(path, error) || error ||
+                std::filesystem::file_size(path, error) != expectedBytes || error)
+            {
+                return false;
+            }
+
+            std::ifstream input(path, std::ios::binary);
+            if (!input)
+                return false;
+
+            uint64_t hash = 14695981039346656037ull;
+            std::array<char, 4096> buffer = {};
+            while (input)
+            {
+                input.read(buffer.data(), buffer.size());
+                const std::streamsize count = input.gcount();
+                for (std::streamsize index = 0; index < count; ++index)
+                {
+                    hash ^= static_cast<uint8_t>(buffer[static_cast<size_t>(index)]);
+                    hash *= 1099511628211ull;
+                }
+            }
+            if (!input.eof())
+                return false;
+
+            outHash = hash;
+            return true;
+        }
+
+        static bool IsCanonicalGenericChunkPayload(uint8_t kind)
+        {
+            if (kind < 1 || kind > 2)
+                return false;
+
+            int& cached = g_GenericChunkBatchEligibility[kind - 1];
+            if (cached >= 0)
+                return cached != 0;
+
+            if (g_ChunkPayloadResourceDirectories.empty())
+                RefreshChunkPayloadResourceDirectories();
+
+            const std::filesystem::path relativePath = kind == 1
+                ? std::filesystem::path("chunk1") / "chunk1.mesh"
+                : std::filesystem::path("chunk2") / "chunk2.mesh";
+            const uintmax_t expectedBytes = kind == 1
+                ? kChunk1MeshBytes : kChunk2MeshBytes;
+            const uint64_t expectedHash = kind == 1
+                ? kChunk1MeshFnv1a : kChunk2MeshFnv1a;
+
+            bool found = false;
+            bool canonical = true;
+            for (const std::filesystem::path& root : g_ChunkPayloadResourceDirectories)
+            {
+                const std::filesystem::path candidate = root / relativePath;
+                std::error_code existsError;
+                if (!std::filesystem::exists(candidate, existsError) || existsError)
+                    continue;
+
+                found = true;
+                uint64_t actualHash = 0;
+                if (!TryHashGenericChunkPayload(
+                        candidate, expectedBytes, actualHash) ||
+                    actualHash != expectedHash)
+                {
+                    canonical = false;
+                    break;
+                }
+            }
+
+            cached = found && canonical ? 1 : 0;
+            LogChunkDiagnostic(
+                "chunkbatch",
+                L"[CHUNKBATCH] canonical chunk%u batching=%hs roots=%zu expectedBytes=%zu hash=0x%016llX\n",
+                static_cast<unsigned>(kind),
+                cached ? "enabled" : "fallback-entity",
+                g_ChunkPayloadResourceDirectories.size(),
+                static_cast<size_t>(expectedBytes),
+                static_cast<unsigned long long>(expectedHash));
+            return cached != 0;
+        }
+
+        // The batch bakes every chunklet into one shared ManualObject section,
+        // and AppendGenericChunkBatchGeometry() applies orientation and
+        // translation only -- there is no per-chunk node left to carry a
+        // scale. Batching a scaled chunk would therefore render it at the
+        // wrong size with no way to notice.
+        //
+        // Today ChunkProxyTransform::scale is structurally unit: the legacy
+        // basis vectors are normalised when the quaternion is built, so no
+        // code path ever populates a non-unit value. This gate exists so that
+        // stays an enforced invariant rather than an assumption -- if a future
+        // change or runtime does populate scale, the chunk falls back to the
+        // per-Entity path instead of being silently mis-sized.
+        //
+        // Correct arbitrary scale in the batch would additionally require
+        // inverse-transpose handling for normals and tangents. That is not
+        // implemented deliberately: no evidence shows stock or modded generic
+        // chunklets need it, and the fallback path already renders them.
+        static bool IsUnitScaleForGenericChunkBatch(const OgreVector3& scale)
+        {
+            // Loose enough to absorb float round-trips through a matrix
+            // decomposition, tight enough that a real authored scale (the
+            // smallest plausible being a few percent) is always rejected.
+            constexpr float kEpsilon = 1.0e-3f;
+            const float components[3] = { scale.x, scale.y, scale.z };
+            for (const float component : components)
+            {
+                if (!std::isfinite(component) ||
+                    std::fabs(component - 1.0f) > kEpsilon)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        static void NoteGenericChunkBatchScaleRejection(const OgreVector3& scale)
+        {
+            ++g_GenericChunkBatchNonUnitScaleRejections;
+            const DWORD now = GetTickCount();
+            if (g_GenericChunkBatchScaleLogTick != 0 &&
+                static_cast<DWORD>(now - g_GenericChunkBatchScaleLogTick) < 5000)
+            {
+                return;
+            }
+            g_GenericChunkBatchScaleLogTick = now;
+            LogChunkDiagnostic(
+                "chunkbatch",
+                L"[CHUNKBATCH] non-unit scale (%.4f, %.4f, %.4f); per-entity fallback, total=%llu\n",
+                static_cast<double>(scale.x),
+                static_cast<double>(scale.y),
+                static_cast<double>(scale.z),
+                static_cast<unsigned long long>(
+                    g_GenericChunkBatchNonUnitScaleRejections));
+        }
+
+        static uint8_t GetGenericChunkBatchKind(const char* meshName)
+        {
+            if (!g_EnableGenericChunkBatch ||
+                !g_GenericChunkBatchRuntimeAvailable || !meshName)
+            {
+                return 0;
+            }
+            if (_stricmp(meshName, "chunk1/chunk1.mesh") == 0)
+                return IsCanonicalGenericChunkPayload(1) ? 1 : 0;
+            if (_stricmp(meshName, "chunk2/chunk2.mesh") == 0)
+                return IsCanonicalGenericChunkPayload(2) ? 2 : 0;
+            return 0;
+        }
+
         static void UpdateChunkProxySlotPosition(
             ChunkProxySlot& slot,
             void* currentCamera = nullptr,
@@ -6070,6 +6297,9 @@ namespace BZROpenShim
                 ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
             if (!slot.active)
                 return;
+
+            slot.genericBatchKind = 0;
+            slot.genericBatchTransformReady = false;
 
             if (slot.objectBytes)
             {
@@ -6186,6 +6416,31 @@ namespace BZROpenShim
 
             if (haveTransform)
             {
+                uint8_t genericBatchKind =
+                    GetGenericChunkBatchKind(slot.proofMeshName);
+                if (genericBatchKind != 0 && g_ForceGenericChunkNonUnitScale)
+                    transform.scale = { 1.25f, 0.75f, 1.0f };
+                if (genericBatchKind != 0 &&
+                    !IsUnitScaleForGenericChunkBatch(transform.scale))
+                {
+                    // Not batchable: fall through to the per-Entity fidelity
+                    // path below, which keeps its own scene node.
+                    NoteGenericChunkBatchScaleRejection(transform.scale);
+                    genericBatchKind = 0;
+                }
+                if (genericBatchKind != 0)
+                {
+                    if (slot.meshAssigned)
+                    {
+                        HideChunkProxyMesh(slot);
+                        slot.meshAssigned = false;
+                    }
+                    slot.genericBatchTransform = transform;
+                    slot.genericBatchKind = genericBatchKind;
+                    slot.genericBatchTransformReady = true;
+                    return;
+                }
+
                 if (!EnsureChunkMeshProxySlot(slot))
                     return;
 
@@ -6296,6 +6551,462 @@ namespace BZROpenShim
             }
         }
 
+        static OgreVector3 RotateGenericChunkVector(
+            const OgreQuaternion& q,
+            const OgreVector3& value)
+        {
+            const OgreVector3 qv = { q.x, q.y, q.z };
+            const float dotQvValue =
+                qv.x * value.x + qv.y * value.y + qv.z * value.z;
+            const float dotQvQv = qv.x * qv.x + qv.y * qv.y + qv.z * qv.z;
+            const OgreVector3 cross = {
+                qv.y * value.z - qv.z * value.y,
+                qv.z * value.x - qv.x * value.z,
+                qv.x * value.y - qv.y * value.x
+            };
+            return {
+                2.0f * dotQvValue * qv.x +
+                    (q.w * q.w - dotQvQv) * value.x + 2.0f * q.w * cross.x,
+                2.0f * dotQvValue * qv.y +
+                    (q.w * q.w - dotQvQv) * value.y + 2.0f * q.w * cross.y,
+                2.0f * dotQvValue * qv.z +
+                    (q.w * q.w - dotQvQv) * value.z + 2.0f * q.w * cross.z
+            };
+        }
+
+        static void AppendGenericChunkBatchGeometry(
+            void* manualObject,
+            const GenericChunkVertex* vertices,
+            size_t vertexCount,
+            const ChunkProxyTransform& transform,
+            uint32_t& nextIndex,
+            FnOgreManualObjectVertex3 position,
+            FnOgreManualObjectVertex3 normal,
+            FnOgreManualObjectVertex3 tangent,
+            FnOgreManualObjectTexture2 textureCoord,
+            FnOgreManualObjectIndex addIndex)
+        {
+            const uint32_t firstIndex = nextIndex;
+            for (size_t index = 0; index < vertexCount; ++index)
+            {
+                const GenericChunkVertex& source = vertices[index];
+                OgreVector3 transformedPosition = RotateGenericChunkVector(
+                    transform.orientation, source.position);
+                transformedPosition.x += transform.x;
+                transformedPosition.y += transform.y;
+                transformedPosition.z += transform.z;
+                const OgreVector3 transformedNormal = RotateGenericChunkVector(
+                    transform.orientation, source.normal);
+                const OgreVector3 transformedTangent = RotateGenericChunkVector(
+                    transform.orientation, source.tangent);
+
+                position(
+                    manualObject,
+                    transformedPosition.x,
+                    transformedPosition.y,
+                    transformedPosition.z);
+                normal(
+                    manualObject,
+                    transformedNormal.x,
+                    transformedNormal.y,
+                    transformedNormal.z);
+                tangent(
+                    manualObject,
+                    transformedTangent.x,
+                    transformedTangent.y,
+                    transformedTangent.z);
+                textureCoord(manualObject, source.u, source.v);
+                ++nextIndex;
+            }
+            for (uint32_t index = firstIndex; index < nextIndex; ++index)
+                addIndex(manualObject, index);
+        }
+
+        // Failure invariant for the generic chunk batch.
+        //
+        // UpdateChunkProxySlotPosition() hides (and for a slot born eligible,
+        // never creates) the per-Entity mesh proxy the moment a slot is
+        // classified batch-ready. From that point until the ManualObject is
+        // successfully submitted, the *only* thing that will draw those
+        // chunklets is the batch. So if RebuildAndSubmitGenericChunkBatch()
+        // returns false, the per-Entity loop below cannot simply be allowed to
+        // run: it skips any slot with a null `entity`, which is exactly the
+        // slots that were classified batch-ready, and the debris disappears.
+        //
+        // Two different strengths of assurance apply here, and they should
+        // not be conflated.
+        //
+        // Guaranteed by construction: batch ownership is always released.
+        // genericBatchTransformReady/genericBatchKind are cleared before any
+        // Ogre call and on every path, including both `continue`s below, so a
+        // slot can never stay stranded claiming the batch owns it. That is
+        // what makes the pre-fix pathological state unreachable.
+        //
+        // Attempted but not guaranteed: same-frame Entity restoration.
+        // EnsureChunkMeshProxySlot() and TryUpdateChunkMeshProxyTransform()
+        // can both fail (SceneManager unavailable, entity creation failure,
+        // unresolved Ogre export). Such a slot is counted in `demoted` but
+        // not in `restored`, is invisible for that one frame, and is retried
+        // by the ordinary per-Entity path on later frames because its flags
+        // are already clear. The forced-failure test observed
+        // demoted == restored across 39,688 rehydrations, so restoration was
+        // complete on the tested workload -- but this code does not prove it
+        // must be.
+        //
+        // Recovering a partially constructed ManualObject is deliberately not
+        // attempted -- the Entity path is the known-good fidelity path and is
+        // cheap to rehydrate.
+        static void RehydrateGenericChunkBatchSlotsToEntities(const wchar_t* reason)
+        {
+            static FnOgreSetNodePosition setNodePosition =
+                ResolveOgreProc<FnOgreSetNodePosition>("?setPosition@Node@Ogre@@UAEXMMM@Z");
+            static FnOgreSetNodeOrientation setNodeOrientation =
+                ResolveOgreProc<FnOgreSetNodeOrientation>("?setOrientation@Node@Ogre@@UAEXMMMM@Z");
+            static FnOgreSetVisible setVisible =
+                ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
+
+            size_t demoted = 0;
+            size_t restored = 0;
+            for (ChunkProxySlot& slot : g_ChunkProxySlots)
+            {
+                if (!slot.active || !slot.genericBatchTransformReady)
+                    continue;
+
+                const ChunkProxyTransform transform = slot.genericBatchTransform;
+                // Clear first and unconditionally. Even if the Entity cannot
+                // be built this frame (Ogre not ready), the slot must stop
+                // claiming the batch owns it, or the per-Entity loop will keep
+                // skipping it forever.
+                slot.genericBatchTransformReady = false;
+                slot.genericBatchKind = 0;
+                ++demoted;
+
+                if (!EnsureChunkMeshProxySlot(slot))
+                    continue;
+                if (!TryUpdateChunkMeshProxyTransform(
+                        slot.sceneNode,
+                        slot.entity,
+                        setNodePosition,
+                        setNodeOrientation,
+                        setVisible,
+                        transform))
+                {
+                    continue;
+                }
+                slot.meshAssigned = true;
+                ++restored;
+            }
+
+            if (demoted == 0)
+                return;
+
+            g_GenericChunkBatchRehydrations += demoted;
+            const DWORD now = GetTickCount();
+            if (g_GenericChunkBatchRehydrateLogTick != 0 &&
+                static_cast<DWORD>(now - g_GenericChunkBatchRehydrateLogTick) < 1000)
+            {
+                return;
+            }
+            g_GenericChunkBatchRehydrateLogTick = now;
+            LogChunkDiagnostic(
+                "chunkbatch",
+                L"[CHUNKBATCH] rehydrate (%ls): demoted=%zu restored=%zu total=%llu runtimeAvailable=%u\n",
+                reason ? reason : L"<none>",
+                demoted,
+                restored,
+                static_cast<unsigned long long>(g_GenericChunkBatchRehydrations),
+                g_GenericChunkBatchRuntimeAvailable ? 1u : 0u);
+        }
+
+        static bool RebuildAndSubmitGenericChunkBatch(void* renderQueue)
+        {
+            size_t chunkCount = 0;
+            size_t vertexCount = 0;
+            // Tight bounds of the live chunk set, for the diagnostic comparison
+            // against Ogre's own accumulated ManualObject AABB below. Chunk
+            // half-extent is under a metre, so slot origins are a fair proxy.
+            float tightMin[3] = { FLT_MAX, FLT_MAX, FLT_MAX };
+            float tightMax[3] = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+            for (const ChunkProxySlot& slot : g_ChunkProxySlots)
+            {
+                if (!slot.active || !slot.genericBatchTransformReady)
+                    continue;
+                ++chunkCount;
+                vertexCount += slot.genericBatchKind == 1
+                    ? std::size(kChunk1Vertices) : std::size(kChunk2Vertices);
+                const float slotOrigin[3] = {
+                    slot.genericBatchTransform.x,
+                    slot.genericBatchTransform.y,
+                    slot.genericBatchTransform.z };
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    if (slotOrigin[axis] < tightMin[axis])
+                        tightMin[axis] = slotOrigin[axis];
+                    if (slotOrigin[axis] > tightMax[axis])
+                        tightMax[axis] = slotOrigin[axis];
+                }
+            }
+            if (chunkCount == 0)
+                return false;
+
+            // TEST/DIAGNOSTIC ONLY. Placed deliberately *after* the eligible
+            // slots have been counted, so the injected failure lands in the
+            // same window a real Ogre construction failure would: the mesh
+            // proxies are already hidden or unbuilt and the batch has promised
+            // to draw them. Production never sets this flag.
+            if (g_ForceGenericChunkBatchFailure)
+            {
+                static volatile long s_ForcedFailureLogBudget = 4;
+                if (InterlockedDecrement(&s_ForcedFailureLogBudget) >= 0)
+                {
+                    LogChunkDiagnostic(
+                        "chunkbatch",
+                        L"[CHUNKBATCH] forced failure injected (diagnostic): eligible=%zu\n",
+                        chunkCount);
+                }
+                return false;
+            }
+
+            static FnOgreCreateManualObject createManualObject =
+                ResolveOgreProc<FnOgreCreateManualObject>(
+                    "?createManualObject@SceneManager@Ogre@@UAEPAVManualObject@2@XZ");
+            static FnOgreGetRootSceneNode getRootSceneNode =
+                ResolveOgreProc<FnOgreGetRootSceneNode>(
+                    "?getRootSceneNode@SceneManager@Ogre@@UAEPAVSceneNode@2@XZ");
+            static FnOgreCreateChildSceneNode createChildSceneNode =
+                ResolveOgreProc<FnOgreCreateChildSceneNode>(
+                    "?createChildSceneNode@SceneNode@Ogre@@UAEPAV12@ABVVector3@2@ABVQuaternion@2@@Z");
+            static FnOgreAttachObject attachObject =
+                ResolveOgreProc<FnOgreAttachObject>(
+                    "?attachObject@SceneNode@Ogre@@UAEXPAVMovableObject@2@@Z");
+            static FnOgreManualObjectSetDynamic setDynamic =
+                ResolveOgreProc<FnOgreManualObjectSetDynamic>(
+                    "?setDynamic@ManualObject@Ogre@@UAEX_N@Z");
+            static FnOgreManualObjectEstimateCount estimateVertices =
+                ResolveOgreProc<FnOgreManualObjectEstimateCount>(
+                    "?estimateVertexCount@ManualObject@Ogre@@UAEXI@Z");
+            static FnOgreManualObjectEstimateCount estimateIndices =
+                ResolveOgreProc<FnOgreManualObjectEstimateCount>(
+                    "?estimateIndexCount@ManualObject@Ogre@@UAEXI@Z");
+            static FnOgreManualObjectBegin begin =
+                ResolveOgreProc<FnOgreManualObjectBegin>(
+                    "?begin@ManualObject@Ogre@@UAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@W4OperationType@RenderOperation@2@0@Z");
+            static FnOgreManualObjectBeginUpdate beginUpdate =
+                ResolveOgreProc<FnOgreManualObjectBeginUpdate>(
+                    "?beginUpdate@ManualObject@Ogre@@UAEXI@Z");
+            static FnOgreManualObjectVertex3 position =
+                ResolveOgreProc<FnOgreManualObjectVertex3>(
+                    "?position@ManualObject@Ogre@@UAEXMMM@Z");
+            static FnOgreManualObjectVertex3 normal =
+                ResolveOgreProc<FnOgreManualObjectVertex3>(
+                    "?normal@ManualObject@Ogre@@UAEXMMM@Z");
+            static FnOgreManualObjectVertex3 tangent =
+                ResolveOgreProc<FnOgreManualObjectVertex3>(
+                    "?tangent@ManualObject@Ogre@@UAEXMMM@Z");
+            static FnOgreManualObjectTexture2 textureCoord =
+                ResolveOgreProc<FnOgreManualObjectTexture2>(
+                    "?textureCoord@ManualObject@Ogre@@UAEXMM@Z");
+            static FnOgreManualObjectIndex addIndex =
+                ResolveOgreProc<FnOgreManualObjectIndex>(
+                    "?index@ManualObject@Ogre@@UAEXI@Z");
+            static FnOgreManualObjectEnd end =
+                ResolveOgreProc<FnOgreManualObjectEnd>(
+                    "?end@ManualObject@Ogre@@UAEPAVManualObjectSection@12@XZ");
+            static FnOgreManualObjectUpdateRenderQueue updateRenderQueue =
+                ResolveOgreProc<FnOgreManualObjectUpdateRenderQueue>(
+                    "?_updateRenderQueue@ManualObject@Ogre@@UAEXPAVRenderQueue@2@@Z");
+            static FnOgreMovableSetCastShadows setCastShadows =
+                ResolveOgreProc<FnOgreMovableSetCastShadows>(
+                    "?setCastShadows@MovableObject@Ogre@@QAEX_N@Z");
+            static FnOgreSetVisible setVisible =
+                ResolveOgreProc<FnOgreSetVisible>(
+                    "?setVisible@MovableObject@Ogre@@UAEX_N@Z");
+
+            if (!createManualObject || !getRootSceneNode ||
+                !createChildSceneNode || !attachObject || !setDynamic ||
+                !estimateVertices || !estimateIndices || !begin ||
+                !beginUpdate || !position || !normal || !tangent ||
+                !textureCoord || !addIndex || !end || !updateRenderQueue ||
+                !setCastShadows || !setVisible)
+            {
+                LogChunkDiagnostic(
+                    "chunkbatch",
+                    L"[CHUNKBATCH] required Ogre exports unavailable; falling back to per-entity chunks\n");
+                g_GenericChunkBatchRuntimeAvailable = false;
+                return false;
+            }
+
+            void* const sceneManager = GetOgreSceneManagerRuntime();
+            if (!sceneManager)
+                return false;
+            if (g_GenericChunkBatchSceneManager != sceneManager)
+            {
+                g_GenericChunkBatchManualObject = nullptr;
+                g_GenericChunkBatchSceneNode = nullptr;
+                g_GenericChunkBatchSceneManager = sceneManager;
+                g_GenericChunkBatchSectionCreated = false;
+            }
+
+            bool updateStarted = false;
+            try
+            {
+                if (!g_GenericChunkBatchManualObject)
+                {
+                    void* const rootNode = getRootSceneNode(sceneManager);
+                    const OgreVector3 origin = { 0.0f, 0.0f, 0.0f };
+                    const OgreQuaternion identity = { 1.0f, 0.0f, 0.0f, 0.0f };
+                    g_GenericChunkBatchSceneNode = rootNode
+                        ? createChildSceneNode(rootNode, origin, identity)
+                        : nullptr;
+                    g_GenericChunkBatchManualObject = createManualObject(sceneManager);
+                    if (!g_GenericChunkBatchSceneNode ||
+                        !g_GenericChunkBatchManualObject)
+                    {
+                        g_GenericChunkBatchRuntimeAvailable = false;
+                        return false;
+                    }
+                    attachObject(
+                        g_GenericChunkBatchSceneNode,
+                        g_GenericChunkBatchManualObject);
+                    setDynamic(g_GenericChunkBatchManualObject, true);
+                    estimateVertices(
+                        g_GenericChunkBatchManualObject,
+                        static_cast<uint32_t>(
+                            g_ChunkProxyCapacity * std::size(kChunk2Vertices)));
+                    estimateIndices(
+                        g_GenericChunkBatchManualObject,
+                        static_cast<uint32_t>(
+                            g_ChunkProxyCapacity * std::size(kChunk2Vertices)));
+                    setCastShadows(g_GenericChunkBatchManualObject, false);
+                    LogChunkDiagnostic(
+                        "chunkbatch",
+                        L"[CHUNKBATCH] initialized dynamic generic chunk batch capacity=%u material=scarpmat2\n",
+                        g_ChunkProxyCapacity);
+                }
+
+                if (g_GenericChunkBatchSectionCreated)
+                    beginUpdate(g_GenericChunkBatchManualObject, 0);
+                else
+                    begin(
+                        g_GenericChunkBatchManualObject,
+                        g_GenericChunkBatchMaterialName,
+                        4,
+                        g_GenericChunkBatchMaterialGroup);
+                updateStarted = true;
+
+                uint32_t nextIndex = 0;
+                for (const ChunkProxySlot& slot : g_ChunkProxySlots)
+                {
+                    if (!slot.active || !slot.genericBatchTransformReady)
+                        continue;
+                    if (slot.genericBatchKind == 1)
+                    {
+                        AppendGenericChunkBatchGeometry(
+                            g_GenericChunkBatchManualObject,
+                            kChunk1Vertices,
+                            std::size(kChunk1Vertices),
+                            slot.genericBatchTransform,
+                            nextIndex,
+                            position,
+                            normal,
+                            tangent,
+                            textureCoord,
+                            addIndex);
+                    }
+                    else
+                    {
+                        AppendGenericChunkBatchGeometry(
+                            g_GenericChunkBatchManualObject,
+                            kChunk2Vertices,
+                            std::size(kChunk2Vertices),
+                            slot.genericBatchTransform,
+                            nextIndex,
+                            position,
+                            normal,
+                            tangent,
+                            textureCoord,
+                            addIndex);
+                    }
+                }
+                end(g_GenericChunkBatchManualObject);
+                updateStarted = false;
+                g_GenericChunkBatchSectionCreated = true;
+                setVisible(g_GenericChunkBatchManualObject, true);
+                updateRenderQueue(g_GenericChunkBatchManualObject, renderQueue);
+            }
+            catch (...)
+            {
+                LogChunkDiagnostic(
+                    "chunkbatch",
+                    L"[CHUNKBATCH] Ogre batch update threw started=%u; falling back to per-entity chunks\n",
+                    updateStarted ? 1u : 0u);
+                g_GenericChunkBatchRuntimeAvailable = false;
+                g_GenericChunkBatchManualObject = nullptr;
+                g_GenericChunkBatchSceneNode = nullptr;
+                g_GenericChunkBatchSectionCreated = false;
+                return false;
+            }
+
+            const DWORD now = GetTickCount();
+            if (g_GenericChunkBatchLastLogTick == 0 ||
+                static_cast<DWORD>(now - g_GenericChunkBatchLastLogTick) >= 1000)
+            {
+                g_GenericChunkBatchLastLogTick = now;
+                LogChunkDiagnostic(
+                    "chunkbatch",
+                    L"[CHUNKBATCH] active=%zu vertices=%zu sections=1\n",
+                    chunkCount,
+                    vertexCount);
+
+                // Diagnostic-only, once per second, never on the hot path.
+                // Ogre resets ManualObject::mAABB only in clear(); beginUpdate()
+                // leaves it alone, so the aggregate bounds are expected to grow
+                // monotonically over a mission. Read Ogre's own box back and log
+                // it beside the tight box, so the claim is measured not argued.
+                static FnOgreManualObjectGetBoundingBox getBoundingBox =
+                    ResolveOgreProc<FnOgreManualObjectGetBoundingBox>(
+                        "?getBoundingBox@ManualObject@Ogre@@UBEABVAxisAlignedBox@2@XZ");
+                static FnOgreManualObjectGetBoundingRadius getBoundingRadius =
+                    ResolveOgreProc<FnOgreManualObjectGetBoundingRadius>(
+                        "?getBoundingRadius@ManualObject@Ogre@@UBEMXZ");
+                if (getBoundingBox && getBoundingRadius &&
+                    g_GenericChunkBatchManualObject && chunkCount > 0)
+                {
+                    try
+                    {
+                        const float* const box = static_cast<const float*>(
+                            getBoundingBox(g_GenericChunkBatchManualObject));
+                        if (box)
+                        {
+                            const uint32_t extentEnum =
+                                *reinterpret_cast<const uint32_t*>(box + 6);
+                            const float radius = getBoundingRadius(
+                                g_GenericChunkBatchManualObject);
+                            LogChunkDiagnostic(
+                                "chunkbatch",
+                                L"[CHUNKBATCH] bounds ogre=(%.1f,%.1f,%.1f)-(%.1f,%.1f,%.1f)"
+                                L" ogreSpan=(%.1f,%.1f,%.1f) extentEnum=%u radius=%.1f"
+                                L" tight=(%.1f,%.1f,%.1f)-(%.1f,%.1f,%.1f)"
+                                L" tightSpan=(%.1f,%.1f,%.1f)\n",
+                                box[0], box[1], box[2],
+                                box[3], box[4], box[5],
+                                box[3] - box[0], box[4] - box[1], box[5] - box[2],
+                                extentEnum, radius,
+                                tightMin[0], tightMin[1], tightMin[2],
+                                tightMax[0], tightMax[1], tightMax[2],
+                                tightMax[0] - tightMin[0],
+                                tightMax[1] - tightMin[1],
+                                tightMax[2] - tightMin[2]);
+                        }
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+            }
+            return true;
+        }
+
         // Render-time injection: called from the game's own _updateRenderQueue
         // override (0x00679570), the only exe-side path that feeds Ogre's
         // RenderQueue. Adding our sub-entities to the queue passed here puts
@@ -6309,6 +7020,47 @@ namespace BZROpenShim
                 return;
             if (g_ChunkProxySlots.empty())
                 return;
+
+            const bool genericBatchSubmitted =
+                RebuildAndSubmitGenericChunkBatch(renderQueue);
+            if (g_GenericChunkBatchRateDiagnostics)
+            {
+                ++g_GenericChunkBatchSubmitCalls;
+                if (genericBatchSubmitted)
+                    ++g_GenericChunkBatchRebuilds;
+                const DWORD rateNow = GetTickCount();
+                if (g_GenericChunkBatchRateLogTick == 0)
+                {
+                    g_GenericChunkBatchRateLogTick = rateNow;
+                }
+                else if (static_cast<DWORD>(
+                             rateNow - g_GenericChunkBatchRateLogTick) >= 1000)
+                {
+                    const DWORD windowMs = static_cast<DWORD>(
+                        rateNow - g_GenericChunkBatchRateLogTick);
+                    LogChunkDiagnostic(
+                        "chunkbatch",
+                        L"[CHUNKBATCH] rate windowMs=%lu submitCalls=%llu rebuilds=%llu\n",
+                        static_cast<unsigned long>(windowMs),
+                        static_cast<unsigned long long>(
+                            g_GenericChunkBatchSubmitCalls -
+                            g_GenericChunkBatchSubmitCallsAtLastLog),
+                        static_cast<unsigned long long>(
+                            g_GenericChunkBatchRebuilds -
+                            g_GenericChunkBatchRebuildsAtLastLog));
+                    g_GenericChunkBatchRateLogTick = rateNow;
+                    g_GenericChunkBatchSubmitCallsAtLastLog =
+                        g_GenericChunkBatchSubmitCalls;
+                    g_GenericChunkBatchRebuildsAtLastLog =
+                        g_GenericChunkBatchRebuilds;
+                }
+            }
+            if (!genericBatchSubmitted)
+            {
+                // Same frame, before the per-Entity loop below reads the slots.
+                RehydrateGenericChunkBatchSlotsToEntities(
+                    g_ForceGenericChunkBatchFailure ? L"forced" : L"batch-unavailable");
+            }
 
             static FnOgreRenderQueueAddRenderablePriority addRenderablePriority =
                 ResolveOgreProcByOffset<FnOgreRenderQueueAddRenderablePriority>(0x00026850);
@@ -6336,6 +7088,11 @@ namespace BZROpenShim
 
             for (ChunkProxySlot& slot : g_ChunkProxySlots)
             {
+                if (genericBatchSubmitted &&
+                    slot.genericBatchTransformReady)
+                {
+                    continue;
+                }
                 if (!slot.active || !slot.entity)
                     continue;
 
@@ -25359,6 +26116,44 @@ namespace BZROpenShim
         g_EnableChunkMeshProxy =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_MESH_PROXY") ||
               EnvFlagEnabled("BZR_DISABLE_CHUNK_MESH_PROXY"));
+        g_EnableGenericChunkBatch =
+            g_EnableChunkMeshProxy &&
+            !(EnvFlagEnabled("OPENSHIM_DISABLE_GENERIC_CHUNK_BATCH") ||
+              EnvFlagEnabled("BZR_DISABLE_GENERIC_CHUNK_BATCH"));
+        // Diagnostic/regression seam, not a gameplay policy. It exists so the
+        // batch-failure fallback can be proven at runtime rather than argued
+        // from the source; see RehydrateGenericChunkBatchSlotsToEntities().
+        g_ForceGenericChunkBatchFailure =
+            EnvFlagEnabled("OPENSHIM_FORCE_GENERIC_CHUNK_BATCH_FAILURE") ||
+            EnvFlagEnabled("BZR_FORCE_GENERIC_CHUNK_BATCH_FAILURE");
+        if (g_ForceGenericChunkBatchFailure)
+        {
+            LogChunkDiagnostic(
+                "chunkbatch",
+                L"[CHUNKBATCH] DIAGNOSTIC: forced generic chunk batch failure is ENABLED\n");
+        }
+        // Opt-in measurement seam. The game drives its _updateRenderQueue
+        // override more than once per rendered frame, so the number of batch
+        // rebuilds per frame has to be counted rather than assumed. Off by
+        // default: when disabled not even the counters are touched.
+        g_GenericChunkBatchRateDiagnostics =
+            EnvFlagEnabled("OPENSHIM_CHUNK_BATCH_RATE_DIAGNOSTICS") ||
+            EnvFlagEnabled("BZR_CHUNK_BATCH_RATE_DIAGNOSTICS");
+        if (g_GenericChunkBatchRateDiagnostics)
+        {
+            LogChunkDiagnostic(
+                "chunkbatch",
+                L"[CHUNKBATCH] DIAGNOSTIC: batch submit-rate counters are ENABLED\n");
+        }
+        g_ForceGenericChunkNonUnitScale =
+            EnvFlagEnabled("OPENSHIM_FORCE_GENERIC_CHUNK_NON_UNIT_SCALE") ||
+            EnvFlagEnabled("BZR_FORCE_GENERIC_CHUNK_NON_UNIT_SCALE");
+        if (g_ForceGenericChunkNonUnitScale)
+        {
+            LogChunkDiagnostic(
+                "chunkbatch",
+                L"[CHUNKBATCH] DIAGNOSTIC: forced non-unit generic chunk scale is ENABLED\n");
+        }
         g_EnablePartialFragmentBoneCollapse =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_PARTIAL_FRAGMENT_BONE_COLLAPSE") ||
               EnvFlagEnabled("BZR_DISABLE_PARTIAL_FRAGMENT_BONE_COLLAPSE"));
@@ -25643,6 +26438,14 @@ namespace BZROpenShim
         g_ChunkPayloadResourceLocationsFailureLogged = false;
         g_ChunkProxyBillboardSet = nullptr;
         g_ChunkProxySlots.clear();
+        g_GenericChunkBatchManualObject = nullptr;
+        g_GenericChunkBatchSceneNode = nullptr;
+        g_GenericChunkBatchSceneManager = nullptr;
+        g_GenericChunkBatchSectionCreated = false;
+        g_GenericChunkBatchRuntimeAvailable = true;
+        g_GenericChunkBatchEligibility[0] = -1;
+        g_GenericChunkBatchEligibility[1] = -1;
+        g_GenericChunkBatchLastLogTick = 0;
         g_ChunkPayloadResourceDirectories.clear();
         g_ChunkPayloadMeshExistsCache.clear();
         g_ChunkPayloadResolveFailureLogCache.clear();
@@ -25683,8 +26486,9 @@ namespace BZROpenShim
             g_EnableChunkProxyDebug ? "enabled" : "disabled",
             g_ChunkProxyCapacity,
             g_ChunkProxyDebugSize);
-        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Chunk mesh proxy: %hs stockRoot=%hs modRelative=%hs|%hs\n",
+        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Chunk mesh proxy: %hs genericBatch=%hs stockRoot=%hs modRelative=%hs|%hs\n",
             g_EnableChunkMeshProxy ? "enabled" : "disabled",
+            g_EnableGenericChunkBatch ? "enabled" : "disabled",
             GetChunkPayloadStockResourceDirectory().string().c_str(),
             kChunkPayloadModRelativeDirName,
             kChunkPayloadModRelativeDirNameAlt);
