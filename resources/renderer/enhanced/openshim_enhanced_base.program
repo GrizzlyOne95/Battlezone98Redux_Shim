@@ -1,0 +1,2874 @@
+//VERTEX PROGRAMS
+
+
+//GLSLES VERSIONS
+
+//LOWEST
+
+vertex_program OSE_BaseLowestNoShadow_vertexGLSLES glsles
+{
+	source openshim_enhanced_base-vertex.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1
+}
+
+vertex_program OSE_BaseLowestShadow_vertexGLSLES glsles
+{
+	source openshim_enhanced_base-vertex.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_BaseLowestPSSM_vertexGLSLES glsles
+{
+	source openshim_enhanced_base-vertex.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//LOW
+
+vertex_program OSE_BaseLowNoShadow_vertexGLSLES glsles
+{
+	source openshim_enhanced_base-vertex.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=1
+}
+
+vertex_program OSE_BaseLowShadow_vertexGLSLES glsles
+{
+	source openshim_enhanced_base-vertex.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_BaseLowPSSM_vertexGLSLES glsles
+{
+	source openshim_enhanced_base-vertex.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//MEDIUM
+
+vertex_program OSE_BaseMediumNoShadow_vertexGLSLES glsles
+{
+	source openshim_enhanced_base-vertex.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8
+}
+
+vertex_program OSE_BaseMediumShadow_vertexGLSLES glsles
+{
+	source openshim_enhanced_base-vertex.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_BaseMediumPSSM_vertexGLSLES glsles
+{
+	source openshim_enhanced_base-vertex.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//HIGH
+
+vertex_program OSE_BaseHighNoShadow_vertexGLSLES glsles
+{
+	source openshim_enhanced_base-vertex.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=24,NORMALMAP_ENABLED=1
+}
+
+vertex_program OSE_BaseHighShadow_vertexGLSLES glsles
+{
+	source openshim_enhanced_base-vertex.glsles
+	syntax glsles
+	entry_point main
+
+	//preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,NORMALMAP_ENABLED=1
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_BaseHighPSSM_vertexGLSLES glsles
+{
+	source openshim_enhanced_base-vertex.glsles
+	syntax glsles
+	entry_point main
+
+	//preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PSSM_ENABLED=1,NORMALMAP_ENABLED=1
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+
+//GLSL VERSIONS
+
+//LOWEST
+
+vertex_program OSE_BaseLowestNoShadow_vertexGLSL glsl
+{
+	source openshim_enhanced_base-vertex.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1
+}
+
+vertex_program OSE_BaseLowestShadow_vertexGLSL glsl
+{
+	source openshim_enhanced_base-vertex.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_BaseLowestPSSM_vertexGLSL glsl
+{
+	source openshim_enhanced_base-vertex.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//LOW
+
+vertex_program OSE_BaseLowNoShadow_vertexGLSL glsl
+{
+	source openshim_enhanced_base-vertex.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=1
+}
+
+vertex_program OSE_BaseLowShadow_vertexGLSL glsl
+{
+	source openshim_enhanced_base-vertex.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_BaseLowPSSM_vertexGLSL glsl
+{
+	source openshim_enhanced_base-vertex.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//MEDIUM
+
+vertex_program OSE_BaseMediumNoShadow_vertexGLSL glsl
+{
+	source openshim_enhanced_base-vertex.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8
+}
+
+vertex_program OSE_BaseMediumShadow_vertexGLSL glsl
+{
+	source openshim_enhanced_base-vertex.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_BaseMediumPSSM_vertexGLSL glsl
+{
+	source openshim_enhanced_base-vertex.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//HIGH
+
+vertex_program OSE_BaseHighNoShadow_vertexGLSL glsl
+{
+	source openshim_enhanced_base-vertex.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=24,NORMALMAP_ENABLED=1
+}
+
+vertex_program OSE_BaseHighShadow_vertexGLSL glsl
+{
+	source openshim_enhanced_base-vertex.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,NORMALMAP_ENABLED=1
+}
+
+vertex_program OSE_BaseHighPSSM_vertexGLSL glsl
+{
+	source openshim_enhanced_base-vertex.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PSSM_ENABLED=1,NORMALMAP_ENABLED=1
+}
+
+
+//HLSL SHADER MODEL 4 VERSIONS
+
+//LOWEST
+
+vertex_program OSE_BaseLowestNoShadow_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target vs_4_0
+	entry_point base_vertex
+
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1
+}
+
+vertex_program OSE_BaseLowestShadow_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target vs_4_0
+	entry_point base_vertex
+
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_BaseLowestPSSM_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target vs_4_0
+	entry_point base_vertex
+
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//LOW
+
+vertex_program OSE_BaseLowNoShadow_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target vs_4_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=1
+}
+
+vertex_program OSE_BaseLowShadow_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target vs_4_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_BaseLowPSSM_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target vs_4_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//MEDIUM
+
+vertex_program OSE_BaseMediumNoShadow_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target vs_4_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=8
+}
+
+vertex_program OSE_BaseMediumShadow_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target vs_4_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_BaseMediumPSSM_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target vs_4_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//HIGH
+
+vertex_program OSE_BaseHighNoShadow_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target vs_4_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=24,NORMALMAP_ENABLED
+}
+
+vertex_program OSE_BaseHighShadow_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target vs_4_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,NORMALMAP_ENABLED=1
+}
+
+vertex_program OSE_BaseHighPSSM_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target vs_4_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PSSM_ENABLED=1,NORMALMAP_ENABLED=1
+}
+
+
+//HLSL SHADER MODEL 3 VERSIONS
+
+//LOWEST
+
+vertex_program OSE_BaseLowestNoShadow_vertexHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target vs_3_0
+	entry_point base_vertex
+
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1
+}
+
+vertex_program OSE_BaseLowestShadow_vertexHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target vs_3_0
+	entry_point base_vertex
+
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_BaseLowestPSSM_vertexHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target vs_3_0
+	entry_point base_vertex
+
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//LOW
+
+vertex_program OSE_BaseLowNoShadow_vertexHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target vs_3_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=1
+}
+
+vertex_program OSE_BaseLowShadow_vertexHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target vs_3_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_BaseLowPSSM_vertexHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target vs_3_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//MEDIUM
+
+vertex_program OSE_BaseMediumNoShadow_vertexHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target vs_3_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=8
+}
+
+vertex_program OSE_BaseMediumShadow_vertexHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target vs_3_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1
+}
+
+vertex_program OSE_BaseMediumPSSM_vertexHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target vs_3_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PSSM_ENABLED=1
+}
+
+//HIGH
+
+vertex_program OSE_BaseHighNoShadow_vertexHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target vs_3_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=24,NORMALMAP_ENABLED
+}
+
+vertex_program OSE_BaseHighShadow_vertexHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target vs_3_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,NORMALMAP_ENABLED=1
+}
+
+vertex_program OSE_BaseHighPSSM_vertexHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target vs_3_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PSSM_ENABLED=1,NORMALMAP_ENABLED=1
+}
+
+
+//END VERTEX PROGRAMS
+
+
+//FRAGMENT PROGRAMS
+
+
+//GLSLES VERSIONS
+
+//LOWEST
+
+fragment_program OSE_BaseLowestNoShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named emissiveMap int 3
+	}
+}
+
+fragment_program OSE_BaseLowestShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+	}
+}
+
+fragment_program OSE_BaseLowestPSSM_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=2,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+		param_named shadowMap2 int 5
+		param_named shadowMap3 int 6
+	}
+}
+
+//LOW
+
+fragment_program OSE_BaseLowNoShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=1,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+	}
+}
+
+fragment_program OSE_BaseLowShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	//preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+	}
+}
+
+fragment_program OSE_BaseLowPSSM_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	//preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=2,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=2,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+		param_named shadowMap2 int 5
+		param_named shadowMap3 int 6
+	}
+}
+
+//MEDIUM
+
+fragment_program OSE_BaseMediumNoShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	//preprocessor_defines MAX_LIGHTS=8,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1
+	preprocessor_defines MAX_LIGHTS=8,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+	}
+}
+
+fragment_program OSE_BaseMediumShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	//preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=3,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=3,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+	}
+}
+
+fragment_program OSE_BaseMediumPSSM_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	//preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=3,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=3,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+		param_named shadowMap2 int 5
+		param_named shadowMap3 int 6
+	}
+}
+
+//HIGH
+
+fragment_program OSE_BaseHighNoShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=24,NORMALMAP_ENABLED=1,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named normalMap int 1
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+	}
+}
+
+fragment_program OSE_BaseHighShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PCF_SIZE=3,NORMALMAP_ENABLED=1,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named normalMap int 1
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+	}
+}
+
+fragment_program OSE_BaseHighPSSM_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=3,NORMALMAP_ENABLED=1,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named normalMap int 1
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+		param_named shadowMap2 int 5
+		param_named shadowMap3 int 6
+	}
+}
+
+//OG
+
+fragment_program OSE_BaseOGLowestNoShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+	}
+}
+
+fragment_program OSE_BaseOGLowestShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named shadowMap1 int 1
+	}
+}
+
+fragment_program OSE_BaseOGLowestPSSM_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named shadowMap1 int 1
+		param_named shadowMap2 int 2
+		param_named shadowMap3 int 3
+	}
+}
+
+fragment_program OSE_BaseOGLowNoShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+	}
+}
+
+fragment_program OSE_BaseOGLowShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named shadowMap1 int 1
+	}
+}
+
+fragment_program OSE_BaseOGLowPSSM_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named shadowMap1 int 1
+		param_named shadowMap2 int 2
+		param_named shadowMap3 int 3
+	}
+}
+
+fragment_program OSE_BaseOGMediumNoShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+	}
+}
+
+fragment_program OSE_BaseOGMediumShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named shadowMap1 int 1
+	}
+}
+
+fragment_program OSE_BaseOGMediumPSSM_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named shadowMap1 int 1
+		param_named shadowMap2 int 2
+		param_named shadowMap3 int 3
+	}
+}
+
+fragment_program OSE_BaseOGHighNoShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+	}
+}
+
+fragment_program OSE_BaseOGHighShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=3,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named shadowMap1 int 1
+	}
+}
+
+fragment_program OSE_BaseOGHighPSSM_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=3,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named shadowMap1 int 1
+		param_named shadowMap2 int 2
+		param_named shadowMap3 int 3
+	}
+}
+
+
+
+//GLSL VERSIONS
+
+//LOWEST
+
+fragment_program OSE_BaseLowestNoShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named emissiveMap int 3
+	}
+}
+
+fragment_program OSE_BaseLowestShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+	}
+}
+
+fragment_program OSE_BaseLowestPSSM_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=2,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+		param_named shadowMap2 int 5
+		param_named shadowMap3 int 6
+	}
+}
+
+//LOW
+
+fragment_program OSE_BaseLowNoShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=1,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+	}
+}
+
+fragment_program OSE_BaseLowShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+	}
+}
+
+fragment_program OSE_BaseLowPSSM_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=2,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+		param_named shadowMap2 int 5
+		param_named shadowMap3 int 6
+	}
+}
+
+//MEDIUM
+
+fragment_program OSE_BaseMediumNoShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+	}
+}
+
+fragment_program OSE_BaseMediumShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=3,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+	}
+}
+
+fragment_program OSE_BaseMediumPSSM_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=3,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+		param_named shadowMap2 int 5
+		param_named shadowMap3 int 6
+	}
+}
+
+//HIGH
+
+fragment_program OSE_BaseHighNoShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=24,NORMALMAP_ENABLED=1,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named normalMap int 1
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+	}
+}
+
+fragment_program OSE_BaseHighShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PCF_SIZE=3,NORMALMAP_ENABLED=1,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named normalMap int 1
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+	}
+}
+
+fragment_program OSE_BaseHighPSSM_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=3,NORMALMAP_ENABLED=1,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named normalMap int 1
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+		param_named shadowMap2 int 5
+		param_named shadowMap3 int 6
+	}
+}
+
+//OG
+
+fragment_program OSE_BaseOGLowestNoShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+	}
+}
+
+fragment_program OSE_BaseOGLowestShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named shadowMap1 int 1
+	}
+}
+
+fragment_program OSE_BaseOGLowestPSSM_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines VERTEX_LIGHTING=1,MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named shadowMap1 int 1
+		param_named shadowMap2 int 2
+		param_named shadowMap3 int 3
+	}
+}
+
+fragment_program OSE_BaseOGLowNoShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+	}
+}
+
+fragment_program OSE_BaseOGLowShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named shadowMap1 int 1
+	}
+}
+
+fragment_program OSE_BaseOGLowPSSM_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named shadowMap1 int 1
+		param_named shadowMap2 int 2
+		param_named shadowMap3 int 3
+	}
+}
+
+fragment_program OSE_BaseOGMediumNoShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+	}
+}
+
+fragment_program OSE_BaseOGMediumShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named shadowMap1 int 1
+	}
+}
+
+fragment_program OSE_BaseOGMediumPSSM_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named shadowMap1 int 1
+		param_named shadowMap2 int 2
+		param_named shadowMap3 int 3
+	}
+}
+
+fragment_program OSE_BaseOGHighNoShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+	}
+}
+
+fragment_program OSE_BaseOGHighShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PCF_SIZE=3,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named shadowMap1 int 1
+	}
+}
+
+fragment_program OSE_BaseOGHighPSSM_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl120
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=3,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named shadowMap1 int 1
+		param_named shadowMap2 int 2
+		param_named shadowMap3 int 3
+	}
+}
+
+
+//HLSL SHADER MODEL 4 VERSIONS
+
+//LOWEST
+
+fragment_program OSE_BaseLowestNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,EMISSIVEMAP_ENABLED
+}
+
+fragment_program OSE_BaseLowestShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,EMISSIVEMAP_ENABLED
+}
+
+fragment_program OSE_BaseLowestPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=2,EMISSIVEMAP_ENABLED
+}
+
+//LOW
+
+fragment_program OSE_BaseLowNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED
+}
+
+fragment_program OSE_BaseLowShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED
+}
+
+fragment_program OSE_BaseLowPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED
+}
+
+//MEDIUM
+
+fragment_program OSE_BaseMediumNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED
+}
+
+fragment_program OSE_BaseMediumShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED
+}
+
+fragment_program OSE_BaseMediumPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED
+}
+
+//HIGH
+
+fragment_program OSE_BaseHighNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=24,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED
+}
+
+fragment_program OSE_BaseHighShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PCF_SIZE=3,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED
+}
+
+fragment_program OSE_BaseHighPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=3,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED
+}
+
+//OG
+
+fragment_program OSE_BaseOGLowestNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGLowestShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGLowestPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGLowNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGLowShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGLowPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGMediumNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGMediumShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGMediumPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGHighNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGHighShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=3,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGHighPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=3,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+
+//HLSL SHADER MODEL 3 VERSIONS
+
+//LOWEST
+
+fragment_program OSE_BaseLowestNoShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,EMISSIVEMAP_ENABLED
+}
+
+fragment_program OSE_BaseLowestShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,EMISSIVEMAP_ENABLED
+}
+
+fragment_program OSE_BaseLowestPSSM_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=2,EMISSIVEMAP_ENABLED
+}
+
+//LOW
+
+fragment_program OSE_BaseLowNoShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED
+}
+
+fragment_program OSE_BaseLowShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED
+}
+
+fragment_program OSE_BaseLowPSSM_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED
+}
+
+//MEDIUM
+
+fragment_program OSE_BaseMediumNoShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED
+}
+
+fragment_program OSE_BaseMediumShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED
+}
+
+fragment_program OSE_BaseMediumPSSM_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED
+}
+
+//HIGH
+
+fragment_program OSE_BaseHighNoShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=24,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED
+}
+
+fragment_program OSE_BaseHighShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PCF_SIZE=3,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED
+}
+
+fragment_program OSE_BaseHighPSSM_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=3,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED
+}
+
+//OG
+
+fragment_program OSE_BaseOGLowestNoShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGLowestShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGLowestPSSM_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGLowNoShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGLowShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGLowPSSM_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGMediumNoShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGMediumShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGMediumPSSM_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=2,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGHighNoShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGHighShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=3,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+fragment_program OSE_BaseOGHighPSSM_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=3,OG_RETRO_MODE=1,RETRO_UNLIT_MODE=1
+}
+
+
+//UNIFIED
+
+//VERTEX
+
+//LOWEST
+
+vertex_program OSE_BaseLowestNoShadow_vertex unified
+{
+	delegate OSE_BaseLowestNoShadow_vertexGLSLES
+	delegate OSE_BaseLowestNoShadow_vertexGLSL
+	delegate OSE_BaseLowestNoShadow_vertexHLSL4
+	delegate OSE_BaseLowestNoShadow_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+		
+		// vertex lighting
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+	}
+}
+
+vertex_program OSE_BaseLowestShadow_vertex unified
+{
+	delegate OSE_BaseLowestShadow_vertexGLSLES
+	delegate OSE_BaseLowestShadow_vertexGLSL
+	delegate OSE_BaseLowestShadow_vertexHLSL4
+	delegate OSE_BaseLowestShadow_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+		
+		// vertex lighting
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+
+		//shadow texture projections
+		param_named_auto texWorldViewProj1 texture_worldviewproj_matrix 0
+	}
+}
+
+vertex_program OSE_BaseLowestPSSM_vertex unified
+{
+	delegate OSE_BaseLowestPSSM_vertexGLSLES
+	delegate OSE_BaseLowestPSSM_vertexGLSL
+	delegate OSE_BaseLowestPSSM_vertexHLSL4
+	delegate OSE_BaseLowestPSSM_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+		
+		// vertex lighting
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+
+		//shadow texture projections
+		param_named_auto texWorldViewProj1 texture_worldviewproj_matrix 0
+		param_named_auto texWorldViewProj2 texture_worldviewproj_matrix 1
+		param_named_auto texWorldViewProj3 texture_worldviewproj_matrix 2
+	}
+}
+
+//LOW
+
+vertex_program OSE_BaseLowNoShadow_vertex unified
+{
+	delegate OSE_BaseLowNoShadow_vertexGLSLES
+	delegate OSE_BaseLowNoShadow_vertexGLSL
+	delegate OSE_BaseLowNoShadow_vertexHLSL4
+	delegate OSE_BaseLowNoShadow_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+	}
+}
+
+vertex_program OSE_BaseLowShadow_vertex unified
+{
+	delegate OSE_BaseLowShadow_vertexGLSLES
+	delegate OSE_BaseLowShadow_vertexGLSL
+	delegate OSE_BaseLowShadow_vertexHLSL4
+	delegate OSE_BaseLowShadow_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+
+		//shadow texture projections
+		param_named_auto texWorldViewProj1 texture_worldviewproj_matrix 0
+	}
+}
+
+vertex_program OSE_BaseLowPSSM_vertex unified
+{
+	delegate OSE_BaseLowPSSM_vertexGLSLES
+	delegate OSE_BaseLowPSSM_vertexGLSL
+	delegate OSE_BaseLowPSSM_vertexHLSL4
+	delegate OSE_BaseLowPSSM_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+
+		//shadow texture projections
+		param_named_auto texWorldViewProj1 texture_worldviewproj_matrix 0
+		param_named_auto texWorldViewProj2 texture_worldviewproj_matrix 1
+		param_named_auto texWorldViewProj3 texture_worldviewproj_matrix 2
+	}
+}
+
+//MEDIUM
+
+vertex_program OSE_BaseMediumNoShadow_vertex unified
+{
+	delegate OSE_BaseMediumNoShadow_vertexGLSLES
+	delegate OSE_BaseMediumNoShadow_vertexGLSL
+	delegate OSE_BaseMediumNoShadow_vertexHLSL4
+	delegate OSE_BaseMediumNoShadow_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+	}
+}
+
+vertex_program OSE_BaseMediumShadow_vertex unified
+{
+	delegate OSE_BaseMediumShadow_vertexGLSLES
+	delegate OSE_BaseMediumShadow_vertexGLSL
+	delegate OSE_BaseMediumShadow_vertexHLSL4
+	delegate OSE_BaseMediumShadow_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+
+		//shadow texture projections
+		param_named_auto texWorldViewProj1 texture_worldviewproj_matrix 0
+	}
+}
+
+vertex_program OSE_BaseMediumPSSM_vertex unified
+{
+	delegate OSE_BaseMediumPSSM_vertexGLSLES
+	delegate OSE_BaseMediumPSSM_vertexGLSL
+	delegate OSE_BaseMediumPSSM_vertexHLSL4
+	delegate OSE_BaseMediumPSSM_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+
+		//shadow texture projections
+		param_named_auto texWorldViewProj1 texture_worldviewproj_matrix 0
+		param_named_auto texWorldViewProj2 texture_worldviewproj_matrix 1
+		param_named_auto texWorldViewProj3 texture_worldviewproj_matrix 2
+	}
+}
+
+//HIGH
+
+vertex_program OSE_BaseHighNoShadow_vertex unified
+{
+	delegate OSE_BaseHighNoShadow_vertexGLSLES
+	delegate OSE_BaseHighNoShadow_vertexGLSL
+	delegate OSE_BaseHighNoShadow_vertexHLSL4
+	delegate OSE_BaseHighNoShadow_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+	}
+}
+
+vertex_program OSE_BaseHighShadow_vertex unified
+{
+	delegate OSE_BaseHighShadow_vertexGLSLES
+	delegate OSE_BaseHighShadow_vertexGLSL
+	delegate OSE_BaseHighShadow_vertexHLSL4
+	delegate OSE_BaseHighShadow_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+
+		//shadow texture projections
+		param_named_auto texWorldViewProj1 texture_worldviewproj_matrix 0
+	}
+}
+
+vertex_program OSE_BaseHighPSSM_vertex unified
+{
+	delegate OSE_BaseHighPSSM_vertexGLSLES
+	delegate OSE_BaseHighPSSM_vertexGLSL
+	delegate OSE_BaseHighPSSM_vertexHLSL4
+	delegate OSE_BaseHighPSSM_vertexHLSL
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+
+		//shadow texture projections
+		param_named_auto texWorldViewProj1 texture_worldviewproj_matrix 0
+		param_named_auto texWorldViewProj2 texture_worldviewproj_matrix 1
+		param_named_auto texWorldViewProj3 texture_worldviewproj_matrix 2
+	}
+}
+
+//FRAGMENT
+
+//LOWEST
+
+fragment_program OSE_BaseLowestNoShadow_fragment unified
+{
+	delegate OSE_BaseLowestNoShadow_fragmentGLSLES
+	delegate OSE_BaseLowestNoShadow_fragmentGLSL
+	delegate OSE_BaseLowestNoShadow_fragmentHLSL4
+	delegate OSE_BaseLowestNoShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseLowestShadow_fragment unified
+{
+	delegate OSE_BaseLowestShadow_fragmentGLSLES
+	delegate OSE_BaseLowestShadow_fragmentGLSL
+	delegate OSE_BaseLowestShadow_fragmentHLSL4
+	delegate OSE_BaseLowestShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseLowestPSSM_fragment unified
+{
+	delegate OSE_BaseLowestPSSM_fragmentGLSLES
+	delegate OSE_BaseLowestPSSM_fragmentGLSL
+	delegate OSE_BaseLowestPSSM_fragmentHLSL4
+	delegate OSE_BaseLowestPSSM_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named_auto invShadowMapSize2 inverse_texture_size 5
+		param_named_auto invShadowMapSize3 inverse_texture_size 6
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+		param_named transparency float 0.0
+	}
+}
+
+//LOW
+
+fragment_program OSE_BaseLowNoShadow_fragment unified
+{
+	delegate OSE_BaseLowNoShadow_fragmentGLSLES
+	delegate OSE_BaseLowNoShadow_fragmentGLSL
+	delegate OSE_BaseLowNoShadow_fragmentHLSL4
+	delegate OSE_BaseLowNoShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightSpecular derived_light_specular_colour_array 1
+		param_named_auto lightAttenuation light_attenuation_array 1
+		param_named_auto spotLightParams spotlight_params_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto lightDirection light_direction_view_space_array 1
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseLowShadow_fragment unified
+{
+	delegate OSE_BaseLowShadow_fragmentGLSLES
+	delegate OSE_BaseLowShadow_fragmentGLSL
+	delegate OSE_BaseLowShadow_fragmentHLSL4
+	delegate OSE_BaseLowShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightSpecular derived_light_specular_colour_array 1
+		param_named_auto lightAttenuation light_attenuation_array 1
+		param_named_auto spotLightParams spotlight_params_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto lightDirection light_direction_view_space_array 1
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseLowPSSM_fragment unified
+{
+	delegate OSE_BaseLowPSSM_fragmentGLSLES
+	delegate OSE_BaseLowPSSM_fragmentGLSL
+	delegate OSE_BaseLowPSSM_fragmentHLSL4
+	delegate OSE_BaseLowPSSM_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightSpecular derived_light_specular_colour_array 1
+		param_named_auto lightAttenuation light_attenuation_array 1
+		param_named_auto spotLightParams spotlight_params_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto lightDirection light_direction_view_space_array 1
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named_auto invShadowMapSize2 inverse_texture_size 5
+		param_named_auto invShadowMapSize3 inverse_texture_size 6
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+		param_named transparency float 0.0
+	}
+}
+
+//MEDIUM
+
+fragment_program OSE_BaseMediumNoShadow_fragment unified
+{
+	delegate OSE_BaseMediumNoShadow_fragmentGLSLES
+	delegate OSE_BaseMediumNoShadow_fragmentGLSL
+	delegate OSE_BaseMediumNoShadow_fragmentHLSL4
+	delegate OSE_BaseMediumNoShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightSpecular derived_light_specular_colour_array 8
+		param_named_auto lightAttenuation light_attenuation_array 8
+		param_named_auto spotLightParams spotlight_params_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightDirection light_direction_view_space_array 8
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto lightCount light_count
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseMediumShadow_fragment unified
+{
+	delegate OSE_BaseMediumShadow_fragmentGLSLES
+	delegate OSE_BaseMediumShadow_fragmentGLSL
+	delegate OSE_BaseMediumShadow_fragmentHLSL4
+	delegate OSE_BaseMediumShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightSpecular derived_light_specular_colour_array 8
+		param_named_auto lightAttenuation light_attenuation_array 8
+		param_named_auto spotLightParams spotlight_params_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightDirection light_direction_view_space_array 8
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named_auto lightCount light_count
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseMediumPSSM_fragment unified
+{
+	delegate OSE_BaseMediumPSSM_fragmentGLSLES
+	delegate OSE_BaseMediumPSSM_fragmentGLSL
+	delegate OSE_BaseMediumPSSM_fragmentHLSL4
+	delegate OSE_BaseMediumPSSM_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightSpecular derived_light_specular_colour_array 8
+		param_named_auto lightAttenuation light_attenuation_array 8
+		param_named_auto spotLightParams spotlight_params_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightDirection light_direction_view_space_array 8
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named_auto invShadowMapSize2 inverse_texture_size 5
+		param_named_auto invShadowMapSize3 inverse_texture_size 6
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+		param_named_auto lightCount light_count
+		param_named transparency float 0.0
+	}
+}
+
+//HIGH
+
+fragment_program OSE_BaseHighNoShadow_fragment unified
+{
+	delegate OSE_BaseHighNoShadow_fragmentGLSLES
+	delegate OSE_BaseHighNoShadow_fragmentGLSL
+	delegate OSE_BaseHighNoShadow_fragmentHLSL4
+	delegate OSE_BaseHighNoShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 24
+		param_named_auto lightSpecular derived_light_specular_colour_array 24
+		param_named_auto lightAttenuation light_attenuation_array 24
+		param_named_auto spotLightParams spotlight_params_array 24
+		param_named_auto lightPosition light_position_view_space_array 24
+		param_named_auto lightDirection light_direction_view_space_array 24
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto lightCount light_count
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseHighShadow_fragment unified
+{
+	delegate OSE_BaseHighShadow_fragmentGLSLES
+	delegate OSE_BaseHighShadow_fragmentGLSL
+	delegate OSE_BaseHighShadow_fragmentHLSL4
+	delegate OSE_BaseHighShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 24
+		param_named_auto lightSpecular derived_light_specular_colour_array 24
+		param_named_auto lightAttenuation light_attenuation_array 24
+		param_named_auto spotLightParams spotlight_params_array 24
+		param_named_auto lightPosition light_position_view_space_array 24
+		param_named_auto lightDirection light_direction_view_space_array 24
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named_auto lightCount light_count
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseHighPSSM_fragment unified
+{
+	delegate OSE_BaseHighPSSM_fragmentGLSLES
+	delegate OSE_BaseHighPSSM_fragmentGLSL
+	delegate OSE_BaseHighPSSM_fragmentHLSL4
+	delegate OSE_BaseHighPSSM_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 24
+		param_named_auto lightSpecular derived_light_specular_colour_array 24
+		param_named_auto lightAttenuation light_attenuation_array 24
+		param_named_auto spotLightParams spotlight_params_array 24
+		param_named_auto lightPosition light_position_view_space_array 24
+		param_named_auto lightDirection light_direction_view_space_array 24
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named_auto invShadowMapSize2 inverse_texture_size 5
+		param_named_auto invShadowMapSize3 inverse_texture_size 6
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+		param_named_auto lightCount light_count
+		param_named transparency float 0.0
+	}
+}
+
+//OG
+
+fragment_program OSE_BaseOGLowestNoShadow_fragment unified
+{
+	delegate OSE_BaseOGLowestNoShadow_fragmentGLSLES
+	delegate OSE_BaseOGLowestNoShadow_fragmentGLSL
+	delegate OSE_BaseOGLowestNoShadow_fragmentHLSL4
+	delegate OSE_BaseOGLowestNoShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseOGLowestShadow_fragment unified
+{
+	delegate OSE_BaseOGLowestShadow_fragmentGLSLES
+	delegate OSE_BaseOGLowestShadow_fragmentGLSL
+	delegate OSE_BaseOGLowestShadow_fragmentHLSL4
+	delegate OSE_BaseOGLowestShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 1
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseOGLowestPSSM_fragment unified
+{
+	delegate OSE_BaseOGLowestPSSM_fragmentGLSLES
+	delegate OSE_BaseOGLowestPSSM_fragmentGLSL
+	delegate OSE_BaseOGLowestPSSM_fragmentHLSL4
+	delegate OSE_BaseOGLowestPSSM_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 1
+		param_named_auto invShadowMapSize2 inverse_texture_size 2
+		param_named_auto invShadowMapSize3 inverse_texture_size 3
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseOGLowNoShadow_fragment unified
+{
+	delegate OSE_BaseOGLowNoShadow_fragmentGLSLES
+	delegate OSE_BaseOGLowNoShadow_fragmentGLSL
+	delegate OSE_BaseOGLowNoShadow_fragmentHLSL4
+	delegate OSE_BaseOGLowNoShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseOGLowShadow_fragment unified
+{
+	delegate OSE_BaseOGLowShadow_fragmentGLSLES
+	delegate OSE_BaseOGLowShadow_fragmentGLSL
+	delegate OSE_BaseOGLowShadow_fragmentHLSL4
+	delegate OSE_BaseOGLowShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseOGLowPSSM_fragment unified
+{
+	delegate OSE_BaseOGLowPSSM_fragmentGLSLES
+	delegate OSE_BaseOGLowPSSM_fragmentGLSL
+	delegate OSE_BaseOGLowPSSM_fragmentHLSL4
+	delegate OSE_BaseOGLowPSSM_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named_auto invShadowMapSize2 inverse_texture_size 5
+		param_named_auto invShadowMapSize3 inverse_texture_size 6
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseOGMediumNoShadow_fragment unified
+{
+	delegate OSE_BaseOGMediumNoShadow_fragmentGLSLES
+	delegate OSE_BaseOGMediumNoShadow_fragmentGLSL
+	delegate OSE_BaseOGMediumNoShadow_fragmentHLSL4
+	delegate OSE_BaseOGMediumNoShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseOGMediumShadow_fragment unified
+{
+	delegate OSE_BaseOGMediumShadow_fragmentGLSLES
+	delegate OSE_BaseOGMediumShadow_fragmentGLSL
+	delegate OSE_BaseOGMediumShadow_fragmentHLSL4
+	delegate OSE_BaseOGMediumShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseOGMediumPSSM_fragment unified
+{
+	delegate OSE_BaseOGMediumPSSM_fragmentGLSLES
+	delegate OSE_BaseOGMediumPSSM_fragmentGLSL
+	delegate OSE_BaseOGMediumPSSM_fragmentHLSL4
+	delegate OSE_BaseOGMediumPSSM_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named_auto invShadowMapSize2 inverse_texture_size 5
+		param_named_auto invShadowMapSize3 inverse_texture_size 6
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseOGHighNoShadow_fragment unified
+{
+	delegate OSE_BaseOGHighNoShadow_fragmentGLSLES
+	delegate OSE_BaseOGHighNoShadow_fragmentGLSL
+	delegate OSE_BaseOGHighNoShadow_fragmentHLSL4
+	delegate OSE_BaseOGHighNoShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseOGHighShadow_fragment unified
+{
+	delegate OSE_BaseOGHighShadow_fragmentGLSLES
+	delegate OSE_BaseOGHighShadow_fragmentGLSL
+	delegate OSE_BaseOGHighShadow_fragmentHLSL4
+	delegate OSE_BaseOGHighShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseOGHighPSSM_fragment unified
+{
+	delegate OSE_BaseOGHighPSSM_fragmentGLSLES
+	delegate OSE_BaseOGHighPSSM_fragmentGLSL
+	delegate OSE_BaseOGHighPSSM_fragmentHLSL4
+	delegate OSE_BaseOGHighPSSM_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named_auto invShadowMapSize2 inverse_texture_size 5
+		param_named_auto invShadowMapSize3 inverse_texture_size 6
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+		param_named transparency float 0.0
+	}
+}
+
+//ENHANCED
+// Keep distinct en-* program names for bundled materials while sharing the
+// modern low/medium delegates and using ENHANCED_MODE for the high tier.
+
+fragment_program OSE_BaseENHighNoShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=24,NORMALMAP_ENABLED=1,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1,ENHANCED_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named normalMap int 1
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+	}
+}
+
+fragment_program OSE_BaseENHighShadow_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PCF_SIZE=4,NORMALMAP_ENABLED=1,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1,ENHANCED_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named normalMap int 1
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+	}
+}
+
+fragment_program OSE_BaseENHighPSSM_fragmentGLSLES glsles
+{
+	source openshim_enhanced_base-fragment.glsles
+	syntax glsles
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=4,NORMALMAP_ENABLED=1,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1,ENHANCED_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named normalMap int 1
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+		param_named shadowMap2 int 5
+		param_named shadowMap3 int 6
+	}
+}
+
+fragment_program OSE_BaseENHighNoShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=24,NORMALMAP_ENABLED=1,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1,ENHANCED_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named normalMap int 1
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+	}
+}
+
+fragment_program OSE_BaseENHighShadow_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PCF_SIZE=4,NORMALMAP_ENABLED=1,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1,ENHANCED_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named normalMap int 1
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+	}
+}
+
+fragment_program OSE_BaseENHighPSSM_fragmentGLSL glsl
+{
+	source openshim_enhanced_base-fragment.glsl
+	syntax glsl
+	entry_point main
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PSSM_ENABLED=1,PCF_SIZE=4,NORMALMAP_ENABLED=1,SPECULARMAP_ENABLED=1,EMISSIVEMAP_ENABLED=1,ENHANCED_MODE=1
+	default_params
+	{
+		param_named diffuseMap int 0
+		param_named normalMap int 1
+		param_named specularMap int 2
+		param_named emissiveMap int 3
+		param_named shadowMap1 int 4
+		param_named shadowMap2 int 5
+		param_named shadowMap3 int 6
+	}
+}
+
+fragment_program OSE_BaseENHighNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+	preprocessor_defines MAX_LIGHTS=24,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1
+}
+
+fragment_program OSE_BaseENHighShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PCF_SIZE=4,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1
+}
+
+fragment_program OSE_BaseENHighPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=4,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1
+}
+
+fragment_program OSE_BaseENHighNoShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+	preprocessor_defines MAX_LIGHTS=24,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE
+}
+
+fragment_program OSE_BaseENHighShadow_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PCF_SIZE=4,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE
+}
+
+fragment_program OSE_BaseENHighPSSM_fragmentHLSL hlsl
+{
+	source openshim_enhanced_base-sm3.hlsl
+	target ps_3_0
+	entry_point base_fragment
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=4,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE
+}
+
+fragment_program OSE_BaseENLowestNoShadow_fragment unified
+{
+	delegate OSE_BaseLowestNoShadow_fragmentGLSLES
+	delegate OSE_BaseLowestNoShadow_fragmentGLSL
+	delegate OSE_BaseLowestNoShadow_fragmentHLSL4
+	delegate OSE_BaseLowestNoShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseENLowestShadow_fragment unified
+{
+	delegate OSE_BaseLowestShadow_fragmentGLSLES
+	delegate OSE_BaseLowestShadow_fragmentGLSL
+	delegate OSE_BaseLowestShadow_fragmentHLSL4
+	delegate OSE_BaseLowestShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseENLowestPSSM_fragment unified
+{
+	delegate OSE_BaseLowestPSSM_fragmentGLSLES
+	delegate OSE_BaseLowestPSSM_fragmentGLSL
+	delegate OSE_BaseLowestPSSM_fragmentHLSL4
+	delegate OSE_BaseLowestPSSM_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named_auto invShadowMapSize2 inverse_texture_size 5
+		param_named_auto invShadowMapSize3 inverse_texture_size 6
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseENLowNoShadow_fragment unified
+{
+	delegate OSE_BaseLowNoShadow_fragmentGLSLES
+	delegate OSE_BaseLowNoShadow_fragmentGLSL
+	delegate OSE_BaseLowNoShadow_fragmentHLSL4
+	delegate OSE_BaseLowNoShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightSpecular derived_light_specular_colour_array 1
+		param_named_auto lightAttenuation light_attenuation_array 1
+		param_named_auto spotLightParams spotlight_params_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto lightDirection light_direction_view_space_array 1
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseENLowShadow_fragment unified
+{
+	delegate OSE_BaseLowShadow_fragmentGLSLES
+	delegate OSE_BaseLowShadow_fragmentGLSL
+	delegate OSE_BaseLowShadow_fragmentHLSL4
+	delegate OSE_BaseLowShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightSpecular derived_light_specular_colour_array 1
+		param_named_auto lightAttenuation light_attenuation_array 1
+		param_named_auto spotLightParams spotlight_params_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto lightDirection light_direction_view_space_array 1
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseENLowPSSM_fragment unified
+{
+	delegate OSE_BaseLowPSSM_fragmentGLSLES
+	delegate OSE_BaseLowPSSM_fragmentGLSL
+	delegate OSE_BaseLowPSSM_fragmentHLSL4
+	delegate OSE_BaseLowPSSM_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightSpecular derived_light_specular_colour_array 1
+		param_named_auto lightAttenuation light_attenuation_array 1
+		param_named_auto spotLightParams spotlight_params_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto lightDirection light_direction_view_space_array 1
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named_auto invShadowMapSize2 inverse_texture_size 5
+		param_named_auto invShadowMapSize3 inverse_texture_size 6
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseENMediumNoShadow_fragment unified
+{
+	delegate OSE_BaseMediumNoShadow_fragmentGLSLES
+	delegate OSE_BaseMediumNoShadow_fragmentGLSL
+	delegate OSE_BaseMediumNoShadow_fragmentHLSL4
+	delegate OSE_BaseMediumNoShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightSpecular derived_light_specular_colour_array 8
+		param_named_auto lightAttenuation light_attenuation_array 8
+		param_named_auto spotLightParams spotlight_params_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightDirection light_direction_view_space_array 8
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto lightCount light_count
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseENMediumShadow_fragment unified
+{
+	delegate OSE_BaseMediumShadow_fragmentGLSLES
+	delegate OSE_BaseMediumShadow_fragmentGLSL
+	delegate OSE_BaseMediumShadow_fragmentHLSL4
+	delegate OSE_BaseMediumShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightSpecular derived_light_specular_colour_array 8
+		param_named_auto lightAttenuation light_attenuation_array 8
+		param_named_auto spotLightParams spotlight_params_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightDirection light_direction_view_space_array 8
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named_auto lightCount light_count
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseENMediumPSSM_fragment unified
+{
+	delegate OSE_BaseMediumPSSM_fragmentGLSLES
+	delegate OSE_BaseMediumPSSM_fragmentGLSL
+	delegate OSE_BaseMediumPSSM_fragmentHLSL4
+	delegate OSE_BaseMediumPSSM_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightSpecular derived_light_specular_colour_array 8
+		param_named_auto lightAttenuation light_attenuation_array 8
+		param_named_auto spotLightParams spotlight_params_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightDirection light_direction_view_space_array 8
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named_auto invShadowMapSize2 inverse_texture_size 5
+		param_named_auto invShadowMapSize3 inverse_texture_size 6
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+		param_named_auto lightCount light_count
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseENHighNoShadow_fragment unified
+{
+	delegate OSE_BaseENHighNoShadow_fragmentGLSLES
+	delegate OSE_BaseENHighNoShadow_fragmentGLSL
+	delegate OSE_BaseENHighNoShadow_fragmentHLSL4
+	delegate OSE_BaseENHighNoShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto materialEmissive surface_emissive_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 24
+		param_named_auto lightSpecular derived_light_specular_colour_array 24
+		param_named_auto lightAttenuation light_attenuation_array 24
+		param_named_auto spotLightParams spotlight_params_array 24
+		param_named_auto lightPosition light_position_view_space_array 24
+		param_named_auto lightDirection light_direction_view_space_array 24
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto lightCount light_count
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseENHighShadow_fragment unified
+{
+	delegate OSE_BaseENHighShadow_fragmentGLSLES
+	delegate OSE_BaseENHighShadow_fragmentGLSL
+	delegate OSE_BaseENHighShadow_fragmentHLSL4
+	delegate OSE_BaseENHighShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto materialEmissive surface_emissive_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 24
+		param_named_auto lightSpecular derived_light_specular_colour_array 24
+		param_named_auto lightAttenuation light_attenuation_array 24
+		param_named_auto spotLightParams spotlight_params_array 24
+		param_named_auto lightPosition light_position_view_space_array 24
+		param_named_auto lightDirection light_direction_view_space_array 24
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named_auto lightCount light_count
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseENHighPSSM_fragment unified
+{
+	delegate OSE_BaseENHighPSSM_fragmentGLSLES
+	delegate OSE_BaseENHighPSSM_fragmentGLSL
+	delegate OSE_BaseENHighPSSM_fragmentHLSL4
+	delegate OSE_BaseENHighPSSM_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto materialEmissive surface_emissive_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 24
+		param_named_auto lightSpecular derived_light_specular_colour_array 24
+		param_named_auto lightAttenuation light_attenuation_array 24
+		param_named_auto spotLightParams spotlight_params_array 24
+		param_named_auto lightPosition light_position_view_space_array 24
+		param_named_auto lightDirection light_direction_view_space_array 24
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named_auto invShadowMapSize2 inverse_texture_size 5
+		param_named_auto invShadowMapSize3 inverse_texture_size 6
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+		param_named_auto lightCount light_count
+		param_named transparency float 0.0
+	}
+}
+
+
+
+
+

@@ -40,6 +40,11 @@ $pairs = @(
     @{ Source = Join-Path $repoRoot 'scripts\patches.json';         Target = Join-Path $GameDir 'scripts\patches.json' }
 )
 
+# Renderer resources move with the DLL by the same rule as patches.json: a new
+# DLL paired with stale Enhanced shaders must fail loudly, not silently.
+$renderSourceDir = Join-Path $repoRoot 'resources\renderer\enhanced'
+$renderTargetDir = Join-Path $GameDir 'openshim\renderer\enhanced'
+
 foreach ($pair in $pairs) {
     if (-not (Test-Path -LiteralPath $pair.Source)) {
         throw "Missing build output: $($pair.Source). Build $Configuration|Win32 first."
@@ -74,6 +79,17 @@ foreach ($group in 'patches', 'globals', 'static_pointers') {
 if ($missing.Count -gt 0) {
     throw "Deployed patches.json is missing: $($missing -join ', ')"
 }
+
+# Deploy the OpenShim-owned Enhanced renderer resources (winmm.dll and these
+# files must move together; the DLL validates the version marker at startup).
+if (-not (Test-Path -LiteralPath (Join-Path $renderSourceDir 'resources.version'))) {
+    throw "Missing renderer resource manifest: $renderSourceDir\resources.version"
+}
+New-Item -ItemType Directory -Force -Path $renderTargetDir | Out-Null
+Copy-Item -Path (Join-Path $renderSourceDir '*') -Destination $renderTargetDir -Force
+$deployedVersion = Get-Content -Raw -LiteralPath (Join-Path $renderTargetDir 'resources.version')
+Write-Host ("renderer resources deployed: {0} files, resources.version={1}" -f
+    @((Get-ChildItem -LiteralPath $renderTargetDir).Count, $deployedVersion.Trim()))
 
 Write-Host ""
 Write-Host "patches.json verified: all $(@($repoJson.patches).Count + @($repoJson.globals).Count + @($repoJson.static_pointers).Count) declared names present."
