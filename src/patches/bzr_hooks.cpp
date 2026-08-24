@@ -1843,7 +1843,16 @@ namespace BZROpenShim
         static bool g_ScrapRetargetHookInstalled = false;
         static InlineDetour32 g_AttackTaskDoStateDetour = {};
         static bool g_AttackTaskDoStateHookInstalled = false;
-        static bool g_AttackTaskKiteArbitrationLogged = false;
+        // Liveness telemetry for the AIKITE AttackTask::DoState detour.
+        // Byte-valid + installed logs prove strictly less than these
+        // counters: the 2026-08-24 audit proved this exact target
+        // execution-dead during live tank engagements, so hook-call counts
+        // are mandatory evidence before claiming the kite surface affects
+        // any unit. Counters are plain integers (sim is single-threaded).
+        static unsigned long g_AttackTaskKiteHookCalls = 0;
+        static unsigned long g_AttackTaskKiteHookApplied = 0;
+        static std::unordered_map<uintptr_t, char> g_AttackTaskKiteUnitsSeen;
+        static bool g_AttackTaskKiteFirstExecutionLogged = false;
         static InlineDetour32 g_ArtilleryDoAttackDetour = {};
         static FnArtilleryDoAttack g_BzrFn_ArtilleryDoAttackOriginal = nullptr;
         static bool g_ArtilleryDoAttackHookInstalled = false;
@@ -17287,6 +17296,16 @@ namespace BZROpenShim
             if (!g_BzrFn_AttackTaskDoState || !taskPtr)
                 return;
 
+            ++g_AttackTaskKiteHookCalls;
+            if (!g_AttackTaskKiteFirstExecutionLogged)
+            {
+                g_AttackTaskKiteFirstExecutionLogged = true;
+                Log(L"[AIKITE] hook-executing: first AttackTask::DoState "
+                    L"entry observed task=0x%08X\n",
+                    static_cast<uint32_t>(
+                        reinterpret_cast<uintptr_t>(taskPtr)));
+            }
+
             auto* taskBytes = reinterpret_cast<uint8_t*>(taskPtr);
             void* craft = nullptr;
             void* target = nullptr;
@@ -17295,6 +17314,9 @@ namespace BZROpenShim
                 g_BzrFn_AttackTaskDoState(taskPtr);
                 return;
             }
+
+            if (craft && g_AttackTaskKiteUnitsSeen.size() < 4096)
+                g_AttackTaskKiteUnitsSeen[reinterpret_cast<uintptr_t>(craft)] = 1;
 
             const auto tuningIt = g_AiUnitTuningOverridesByObject.find(
                 reinterpret_cast<uintptr_t>(craft));
@@ -17467,6 +17489,8 @@ namespace BZROpenShim
                         : 0.0f;
                     applied = TryApplyAttackTaskFiringOverride(
                         taskBytes, movementCloseSq, savedCloseSq);
+                    if (applied)
+                        ++g_AttackTaskKiteHookApplied;
                 }
             }
 
@@ -17524,21 +17548,6 @@ namespace BZROpenShim
             if (g_AttackTaskDoStateHookInstalled)
                 return;
 
-            // The legacy-1.4 attack policy detours the same AttackTask::
-            // DoState entry; only one owner is possible. When the policy
-            // (or its shadow mode) is enabled it wins the site and the
-            // per-unit kite tuning stays unavailable for this session.
-            if (bz14::OwnsAttackTaskDetour())
-            {
-                if (!g_AttackTaskKiteArbitrationLogged)
-                {
-                    Log(L"[AIKITE] AttackTask::DoState owned by legacy 1.4 "
-                        L"attack policy; kite tuning unavailable\n");
-                    g_AttackTaskKiteArbitrationLogged = true;
-                }
-                return;
-            }
-
             if (g_AttackTaskDoStateDetour.trampoline && g_BzrFn_AttackTaskDoState)
             {
                 g_AttackTaskDoStateHookInstalled = true;
@@ -17577,11 +17586,31 @@ namespace BZROpenShim
                 g_BzrFn_AttackTaskDoState && g_BzrFn_TerrainGetIntersection;
             if (g_AttackTaskDoStateHookInstalled)
             {
-                Log(L"[AIKITE] Installed AttackTask::DoState hook entry=0x%08X trampoline=0x%08X terrainLos=0x%08X\n",
+                // byte-valid + hook-installed only. Hook-executing is proven
+                // by the first-entry log in the tuning hook; behavior-
+                // affecting by g_AttackTaskKiteHookApplied > 0. The 2026-08-24
+                // audit proved this target execution-dead for live tank
+                // engagements on GOG 2.2.301 — treat those two counters as
+                // mandatory evidence per workload before crediting this hook.
+                Log(L"[AIKITE] byte-valid=YES hook-installed=YES "
+                    L"entry=0x%08X trampoline=0x%08X terrainLos=0x%08X "
+                    L"(liveness unproven until first-entry log appears)\n",
                     static_cast<uint32_t>(kGogAttackTaskDoStateEntryAddr),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_AttackTaskDoStateDetour.trampoline)),
                     static_cast<uint32_t>(kGogTerrainGetIntersectionAddr));
             }
+        }
+
+        void ReportAttackTaskKiteLivenessStats()
+        {
+            // One-shot session summary (Phase 10 of the 2026-08-24 audit):
+            // distinguishes installed / executing / behavior-affecting
+            // instead of implying that an installed detour reaches live code.
+            Log(L"[AIKITE] hook-installed=%s hook-calls=%lu applied=%lu units-seen=%zu\n",
+                g_AttackTaskDoStateHookInstalled ? L"yes" : L"no",
+                g_AttackTaskKiteHookCalls,
+                g_AttackTaskKiteHookApplied,
+                g_AttackTaskKiteUnitsSeen.size());
         }
 
         struct ScrapScoreVector3
@@ -19942,12 +19971,15 @@ namespace BZROpenShim
 			}
 		}
 
- 		static void InstallAiTuningHooksIfPossible()
+  		static void InstallAiTuningHooksIfPossible()
         {
-            // Legacy 1.4 attack policy first: it can claim the shared
-            // AttackTask::DoState detour site (kite installer defers).
-            bz14::InstallPolicyHookIfPossible();
+            // AIKITE claims the shared AttackTask::DoState detour site
+            // first. The quarantined legacy-1.4 policy layer (env-gated,
+            // experimental) defers to it unless the developer explicitly
+            // sets OPENSHIM_LEGACY14_EXCLUSIVE=1: an instrumentation mode
+            // must never silently disable a working feature.
             InstallAttackTaskKiteHookIfPossible();
+            bz14::InstallPolicyHookIfPossible(g_AttackTaskDoStateHookInstalled);
             InstallScrapPathScoreHookIfPossible();
             InstallScavengerRetargetHookIfPossible();
 
@@ -28337,6 +28369,11 @@ namespace BZROpenShim
         g_AiUnitTuningOverridesByObject.clear();
         g_CombatKiteStateByObject.clear();
         return true;
+    }
+
+    void ReportAiHookLivenessStats()
+    {
+        ReportAttackTaskKiteLivenessStats();
     }
 
     bool SetTurretAimPitchEnabledFromBridge(bool enabled)

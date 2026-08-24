@@ -19,12 +19,23 @@
 // never fire and never skip movement primitives; originals are restored
 // before returning.
 //
-// Configuration (openshim.ini):
-//   [AI] Legacy14AttackBehavior = 0|1  master switch, default off
-//   [AI] Legacy14AttackShadow   = 0|1  evaluate + log both policies, apply
-//                                      none (divergence measurement mode)
-//   Env aliases: OPENSHIM_LEGACY14_ATTACK / OPENSHIM_LEGACY14_ATTACK_SHADOW
-// Diagnostics: OPENSHIM_TRACE_AI_BZ14=<budget> enables divergence logging.
+// QUARANTINED EXPERIMENT (2026-08-24 audit): runtime probing proved generic
+// AttackTask::DoState @0x00478A50 execution-dead during live GOG 2.2.301
+// combat engagements (recovery report §6), so this layer cannot affect live
+// behavior on that build. It is developer-only research instrumentation:
+//
+//   OPENSHIM_LEGACY14_ATTACK=1        apply-mode (sim-affecting, SP only)
+//   OPENSHIM_LEGACY14_ATTACK_SHADOW=1 measure-only mode
+//   OPENSHIM_LEGACY14_EXCLUSIVE=1     explicitly displace an existing owner
+//                                     of the DoState detour site (AIKITE);
+//                                     never set this casually
+//   OPENSHIM_TRACE_AI_BZ14=<budget>   divergence logging budget
+//   OPENSHIM_TRACE_AI_BZ14_TICKS=<n>  per-tick entry/eval logging budget
+//
+// There are deliberately NO openshim.ini keys for this feature: it must not
+// look like a working user-facing restoration while it is proven inert.
+// Telemetry distinguishes all four validation claims separately:
+// byte-valid, hook-installed, hook-executing, behavior-affecting.
 // ============================================================================
 
 #include "bz14_attack_policy.h"
@@ -37,10 +48,6 @@
 
 namespace bz14
 {
-    bool OwnsAttackTaskDetour();
-    bool InstallPolicyHookIfPossible();
-    void ReportPolicyStats();
-
     namespace
     {
         using BZROpenShim::EnvFlagEnabled;
@@ -48,7 +55,6 @@ namespace bz14
         using BZROpenShim::InlineDetour32;
         using BZROpenShim::InstallInlineDetour32;
         using BZROpenShim::Log;
-        using BZROpenShim::TryGetUserConfigBool;
 
         // GOG-layout anchors (byte-validated; fails closed on mismatch).
         constexpr uintptr_t kAttackTaskDoStateEntry = 0x00478A50;
@@ -94,6 +100,9 @@ namespace bz14
         bool g_policyActive = false; // apply legacy transitions
         bool g_shadowMode = false;   // evaluate + log both, apply none
         bool g_configLoaded = false;
+        bool g_bytesValidated = false;
+        bool g_siteDeferralLogged = false;
+        bool g_firstExecutionLogged = false;
 
         long g_traceBudget = 0;
         long g_tickBudget = 0;
@@ -111,15 +120,10 @@ namespace bz14
                 return;
             g_configLoaded = true;
 
-            bool enabled = false;
-            bool shadow = false;
-            // Tri-state reads: absent keys leave the defaults untouched.
-            TryGetUserConfigBool("AI", "Legacy14AttackBehavior", enabled);
-            TryGetUserConfigBool("AI", "Legacy14AttackShadow", shadow);
-            if (EnvFlagEnabled("OPENSHIM_LEGACY14_ATTACK"))
-                enabled = true;
-            if (EnvFlagEnabled("OPENSHIM_LEGACY14_ATTACK_SHADOW"))
-                shadow = true;
+            // Quarantined feature: environment-only activation. There are no
+            // openshim.ini keys on purpose (see file header).
+            bool enabled = EnvFlagEnabled("OPENSHIM_LEGACY14_ATTACK");
+            bool shadow = EnvFlagEnabled("OPENSHIM_LEGACY14_ATTACK_SHADOW");
 
             // Apply wins over shadow; shadow evaluates without applying.
             g_shadowMode = shadow && !enabled;
@@ -320,6 +324,17 @@ namespace bz14
                 return;
 
             ++g_hookCalls;
+            if (!g_firstExecutionLogged)
+            {
+                // First actual execution: this is the only proof that the
+                // detour target is live code. Byte-valid + install logs prove
+                // strictly less and must never be conflated with this.
+                g_firstExecutionLogged = true;
+                Log(L"[BZ14] hook-executing: first DoState entry observed "
+                    L"task=0x%08X\n",
+                    static_cast<uint32_t>(
+                        reinterpret_cast<uintptr_t>(task)));
+            }
 
             uint8_t* taskBytes = reinterpret_cast<uint8_t*>(task);
             const bool sp = SinglePlayerSession();
@@ -389,7 +404,7 @@ namespace bz14
         return g_ownsDetour;
     }
 
-    bool InstallPolicyHookIfPossible()
+    bool InstallPolicyHookIfPossible(bool attackTaskSiteTaken)
     {
         LoadConfig();
         if (!g_policyActive && !g_shadowMode)
@@ -397,15 +412,38 @@ namespace bz14
         if (g_hookInstalled)
             return true;
 
+        if (attackTaskSiteTaken && !EnvFlagEnabled("OPENSHIM_LEGACY14_EXCLUSIVE"))
+        {
+            // Another OpenShim feature owns the shared detour site. An
+            // instrumentation/quarantined mode never silently displaces a
+            // working feature; only an explicit developer override may.
+            if (!g_siteDeferralLogged)
+            {
+                g_siteDeferralLogged = true;
+                Log(L"[BZ14] AttackTask::DoState detour site already owned "
+                    L"by another OpenShim feature; legacy 1.4 policy stays "
+                    L"inert (set OPENSHIM_LEGACY14_EXCLUSIVE=1 to displace "
+                    L"it deliberately)\n");
+            }
+            return false;
+        }
+        if (attackTaskSiteTaken)
+        {
+            Log(L"[BZ14] OPENSHIM_LEGACY14_EXCLUSIVE=1: deliberately "
+                L"displacing the existing AttackTask::DoState owner; the "
+                L"displaced feature is unavailable for this session\n");
+        }
+
         if (!ExpectedBytesMatchAt(kAttackTaskDoStateEntry,
                                   kDoStateExpectedBytes,
                                   sizeof(kDoStateExpectedBytes)))
         {
-            Log(L"[BZ14] AttackTask::DoState entry bytes mismatch at 0x%08X; "
-                L"legacy attack policy unavailable\n",
+            Log(L"[BZ14] byte-valid=NO: AttackTask::DoState entry bytes "
+                L"mismatch at 0x%08X; legacy attack policy unavailable\n",
                 static_cast<uint32_t>(kAttackTaskDoStateEntry));
             return false;
         }
+        g_bytesValidated = true;
 
         g_GetTime = reinterpret_cast<FnGetTime>(kGetGameTime);
         g_DoSlide = reinterpret_cast<FnDoSlide>(kUnitTaskDoSlide);
@@ -425,21 +463,34 @@ namespace bz14
 
         g_hookInstalled = true;
         g_ownsDetour = true;
-        Log(L"[BZ14] Legacy 1.4 attack policy %s at DoState=0x%08X "
-            L"trampoline=0x%08X\n",
-            g_policyActive ? L"ENABLED" : L"SHADOW",
+        // Byte-valid and hook-installed are recorded here. Hook-executing is
+        // proven by the first-entry log in the hook body; behavior-affecting
+        // by g_overrides > 0 at shutdown.
+        Log(L"[BZ14] byte-valid=YES hook-installed=%s at DoState=0x%08X "
+            L"trampoline=0x%08X mode=%s (target proven execution-dead on "
+            L"GOG 2.2.301; experimental)\n",
+            L"YES",
             static_cast<uint32_t>(kAttackTaskDoStateEntry),
             static_cast<uint32_t>(
-                reinterpret_cast<uintptr_t>(g_doStateDetour.trampoline)));
+                reinterpret_cast<uintptr_t>(g_doStateDetour.trampoline)),
+            g_policyActive ? L"apply" : L"shadow");
         return true;
     }
 
     void ReportPolicyStats()
     {
-        if (!g_hookInstalled)
-            return;
-        Log(L"[BZ14] ticks=%lu overrides=%lu divergences=%lu mode=%s\n",
-            g_hookCalls, g_overrides, g_divergences,
+        if (!g_configLoaded)
+            LoadConfig();
+        // One-shot session summary making all four validation claims
+        // separately visible (Phase 10 of the 2026-08-24 audit).
+        Log(L"[BZ14] byte-valid=%s hook-installed=%s hook-calls=%lu "
+            L"affecting=%lu overrides=%lu divergences=%lu mode=%s\n",
+            g_bytesValidated ? L"yes" : L"no",
+            g_hookInstalled ? L"yes" : L"no",
+            g_hookCalls,
+            g_overrides,
+            g_overrides,
+            g_divergences,
             g_policyActive ? L"apply"
                            : (g_shadowMode ? L"shadow" : L"off"));
     }

@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "winmm_proxy.h"
+#include "bz14_attack_policy.h"
 #include "bzr_hooks.h"
 #include "crash_logger.h"
 #include "net_optimizer.h"
@@ -200,6 +201,10 @@ namespace BZROpenShim
         BZROpenShim::ShutdownDx11ColorSpaceDiagnostic();
         BZROpenShim::ShutdownTerrainProxyPhase2();
         BZROpenShim::ShutdownAutoSave();
+        // One-shot AI-hook liveness summaries before the logger goes away:
+        // installed / executing / behavior-affecting are separate claims.
+        BZROpenShim::ReportAiHookLivenessStats();
+        bz14::ReportPolicyStats();
         BZROpenShim::FlushChunkFragmentEventsForShutdown();
         // Stop the upper observation layer before the lower Winsock optimizer
         // it chains through, then let the existing optimizer flush its logs.

@@ -96,6 +96,8 @@ namespace BZROpenShim
                                    float kiteSwitchPeriod = -1.0f);
     bool ClearAiUnitTuningFromBridge(void* objectPtr);
     bool ClearAllAiUnitTuningFromBridge();
+    // One-shot liveness telemetry for the AI-tuning detours (shutdown).
+    void ReportAiHookLivenessStats();
     bool SetTurretAimPitchEnabledFromBridge(bool enabled);
     bool SetAttackRevealEnabledFromBridge(bool enabled);
     bool GetRawMouseInputEnabledFromBridge();

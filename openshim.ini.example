@@ -869,35 +869,27 @@ HeadlightBeam = Wide
 
 [AI]
 
-; Restore the Battlezone 1.4 AttackTask tactical policy on top of Redux.
+; There are deliberately NO user-facing AI behavior options here.
 ;
-; This is NOT an AI improvement. It re-applies four decision branches that
-; Battlezone 1.5 (and therefore Redux) changed inside AttackTask::DoState:
-;   - a chasing tank with a firing solution strafe-duels (SLIDE) instead of
-;     stopping to blast from range;
-;   - the slide-exit engagement test is the enemy's activity state {2,5,7}
-;     instead of Redux's extended {2,5,7,10};
-;   - sliding has no 10 s hard cap and fleeing has no 3 s bound (1.4 exits);
-;   - standing past the 8 s window rotates back into SLIDE instead of fleeing,
-;     and a lost firing solution in BLAST-HOLD returns to SLIDE.
-; Movement, steering, navigation, weapons and all other engine systems stay
-; stock; only those recorded transition decisions are overridden. Applies to
-; AttackTask users (tank/scout/bomber processes); RocketTankAttack and turret
-; families are structurally unaffected.
+; The legacy Battlezone 1.4 attack-policy experiment that once exposed
+; Legacy14AttackBehavior / Legacy14AttackShadow has been QUARANTINED. Live
+; instrumentation (2026-08-24 census) proved its target function, the
+; generic AttackTask::DoState @0x00478A50, executes for fighter/scout
+; combat but NEVER for tank-family combat (tank/rocket/walker/turret run
+; reduced family-specific task skeletons instead). Enabling it today would
+; restore 1.4 behavior only for scouts while tanks stay on Redux - a
+; historically inconsistent mix that must not ship as a normal option.
+; An installed hook is not a working feature until per-workload execution
+; is proven. See reverse_engineering/bz14_attacktask_recovery_20260824.md
+; for the evidence and for the developer-only OPENSHIM_LEGACY14_*
+; environment controls used to run the quarantined experiment.
 ;
-; Simulation-affecting: inert in network games regardless of this value.
-; While enabled, the per-unit AIKITE kite-tuning hook cannot claim the same
-; AttackTask::DoState detour site for that session.
-;
-; Accepted: boolean. Default: OFF (stock Redux behavior).
-Legacy14AttackBehavior = 0
-
-; Divergence measurement mode: installs the same hook, evaluates both the
-; stock and legacy decisions each tick, logs differences when
-; OPENSHIM_TRACE_AI_BZ14=<budget> is set, but never applies anything.
-; Ignored when Legacy14AttackBehavior is ON.
-; Accepted: boolean. Default: OFF.
-Legacy14AttackShadow = 0
+; The AIKITE per-unit kite-tuning surface is driven exclusively through the
+; EXU Lua bridge (exu.SetAiUnitTuning), not through this file. Its
+; AttackTask::DoState detour reaches live code only where the generic
+; machine runs (fighter/scout proven); range/retarget tuning surfaces are
+; live everywhere. Session telemetry at shutdown reports installed /
+; executing / applied counts separately.
 
 
 

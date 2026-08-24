@@ -19,6 +19,8 @@ using namespace bz14;
 namespace
 {
     int g_failures = 0;
+    // 2pi used as a heading to exercise wrap equivalence in quad math.
+    constexpr double kTwoPiHead = 6.283185307179586477;
 
     void Check(bool cond, const char* what)
     {
@@ -167,17 +169,73 @@ namespace
                       d.targetState == StateSlide,
                   "blast-hold lost shot -> slide (D5)");
         }
-        // Fresh-hit handoff to FLEE is identical: defer.
+        // D5 requires a genuinely lost shot: a fresh-hit flee recorded by
+        // stock is identical behavior in both builds and must defer even
+        // though the recorded transition is APPROACH-shaped elsewhere.
         {
             AttackFacts f = Base(StateBlastHold, StateFlee);
             f.freshHit = true;
             Check(Bz14Defer(Decide(f)), "blast-hold fresh-hit defers");
+        }
+        // A fresh hit while stock records APPROACH still defers: the
+        // recovered 1.4 machine routes fresh hits to FLEE before the
+        // lost-shot rule applies, and fresh-hit routing is identical.
+        {
+            AttackFacts f = Base(StateBlastHold, StateApproach);
+            f.ableToHit = false;
+            f.freshHit = true;
+            Check(Bz14Defer(Decide(f)),
+                  "blast-hold fresh-hit approach defers (freshness wins)");
         }
         // Regained firing solution blasts in both: defer.
         {
             AttackFacts f = Base(StateBlastHold, StateNone);
             f.ableToHit = true;
             Check(Bz14Defer(Decide(f)), "blast-hold firing defers");
+        }
+    }
+
+    void TestSlidePredicateOrder()
+    {
+        // Recovered order inside SLIDE: range-exceed and stuck exit first,
+        // then the engagement predicate, then SaC. An engaged enemy plus SaC
+        // therefore agrees on BLAST-HOLD (engagement checked first), which
+        // is exactly what both builds record.
+        {
+            AttackFacts f = Base(StateSlide, StateBlastHold);
+            f.enemyTaskState = StateSlide;
+            f.sidewaysAndClose = true;
+            Check(Bz14Defer(Decide(f)),
+                  "engaged enemy wins over SaC (order preserved)");
+        }
+        // Non-engaged enemy plus SaC without a firing solution: 1.4 stands
+        // regardless of the firing solution (D2c).
+        {
+            AttackFacts f = Base(StateSlide, StateNone);
+            f.enemyTaskState = StateWait; // non-engaged in both predicates
+            f.sidewaysAndClose = true;
+            const Bz14Decision d = Decide(f);
+            Check(d.kind == Bz14Decision::TransitionTo &&
+                      d.targetState == StateStand,
+                  "non-engaged + SaC stands (D2c)");
+        }
+        // Enemy state unavailable (-1) reads as non-engaged: premature
+        // blast-hold without arrival stays suppressed.
+        {
+            AttackFacts f = Base(StateSlide, StateBlastHold);
+            f.enemyTaskState = -1;
+            const Bz14Decision d = Decide(f);
+            Check(d.kind == Bz14Decision::StayButRunSlide,
+                  "unavailable enemy state keeps the duel alive");
+        }
+        // Genuine slide arrival agrees with stock's BLAST-HOLD even when no
+        // enemy activity was observable.
+        {
+            AttackFacts f = Base(StateSlide, StateBlastHold);
+            f.enemyTaskState = -1;
+            f.slideArrived = true;
+            Check(Bz14Defer(Decide(f)),
+                  "arrival honors stock blast-hold");
         }
     }
 
@@ -231,6 +289,14 @@ namespace
         Check(WeaponQuad(0.0, 22.4 * kDeg) == 0 ||
                   WeaponQuad(0.0, 22.6 * kDeg) == 1,
               "sector edge near half-octant");
+        // Bearing wraps into [0,2pi): -90 degrees must equal +270.
+        Check(WeaponQuad(0.0, 270.0 * kDeg) ==
+                  WeaponQuad(0.0, -90.0 * kDeg),
+              "bearing wrap equivalence");
+        // Heading wrap: 2*pi is the same heading as 0 -> target ahead.
+        Check(WeaponQuad(kTwoPiHead, 0.0) == 0 &&
+                  WeaponQuad(0.0, 0.0) == 0,
+              "heading wrap equivalence");
         Check(QuadIsAbeam(2) && QuadIsAbeam(6) && !QuadIsAbeam(0),
               "abeam set is {2,6}");
         Check(!EnemyEngaged14(StateBlastHold) &&
@@ -244,6 +310,7 @@ int main()
     TestApproachD1();
     TestSlideEngagementPredicate();
     TestSlideAbeam();
+    TestSlidePredicateOrder();
     TestStandExpiry();
     TestBlastHoldLostShot();
     TestOtherStatesNeverDiverge();
