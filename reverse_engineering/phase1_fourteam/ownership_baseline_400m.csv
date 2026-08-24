@@ -1,0 +1,27 @@
+run_id,family,submissions_per_frame,api_draws_per_frame,draws_per_submission,triangles_per_frame,cpu_ms_per_frame,no_draw_submissions_per_frame,unobserved_submissions_per_frame
+dx11_avtank_fourteam_080_400_facing,vehicle shadow caster,728.73,728.43,0.9996,2304006.0,0.5953,0.04,0.14
+dx11_avtank_fourteam_080_400_facing,vehicle main view,486.0,485.99,1.0,1536583.0,0.9074,0.0,0.0
+dx11_avtank_fourteam_080_400_facing,terrain main view,58.0,58.0,1.0,742409.0,0.1657,0.0,0.0
+dx11_avtank_fourteam_080_400_facing,effects (DynamicGeometry),11.0,11.0,1.0,6847.0,0.023,0.0,0.0
+dx11_avtank_fourteam_080_400_facing,post-process quads,4.0,4.0,1.0,0.0,0.011,0.0,0.0
+dx11_avtank_fourteam_080_400_facing,sky,3.0,3.0,1.0,72.0,0.0272,0.0,0.0
+dx11_avtank_fourteam_fire_080_400_facing,vehicle shadow caster,729.14,728.92,0.9997,2305414.0,0.6068,0.09,0.14
+dx11_avtank_fourteam_fire_080_400_facing,vehicle main view,485.63,485.43,0.9996,1535312.0,0.9958,0.03,0.05
+dx11_avtank_fourteam_fire_080_400_facing,ordnance / prop meshes,357.82,357.76,0.9998,2147.0,0.8605,0.0,0.07
+dx11_avtank_fourteam_fire_080_400_facing,terrain main view,58.0,58.0,1.0,741794.0,0.1928,0.0,0.0
+dx11_avtank_fourteam_fire_080_400_facing,effects (DynamicGeometry),53.04,53.01,0.9994,61922.0,0.0909,0.0,0.0
+dx11_avtank_fourteam_fire_080_400_facing,post-process quads,4.0,4.0,1.0,0.0,0.012,0.0,0.0
+dx11_avtank_fourteam_fire_080_400_facing,sky,3.0,3.0,1.0,72.0,0.0323,0.0,0.0
+dx9_avtank_fourteam_080_400_facing,vehicle shadow caster,729.12,729.12,1.0,2305309.0,0.6135,0.0,0.0
+dx9_avtank_fourteam_080_400_facing,vehicle main view,486.01,486.01,1.0,1536590.0,0.8601,0.0,0.0
+dx9_avtank_fourteam_080_400_facing,terrain main view,58.0,58.0,1.0,742442.0,0.1661,0.0,0.0
+dx9_avtank_fourteam_080_400_facing,effects (DynamicGeometry),11.0,11.0,1.0,6847.0,0.0132,0.0,0.0
+dx9_avtank_fourteam_080_400_facing,post-process quads,4.0,4.0,1.0,0.0,0.009,0.0,0.0
+dx9_avtank_fourteam_080_400_facing,sky,3.0,3.0,1.0,72.0,0.0133,0.0,0.0
+dx9_avtank_fourteam_fire_080_400_facing,vehicle shadow caster,728.34,728.34,1.0,2302717.0,0.6401,0.0,0.0
+dx9_avtank_fourteam_fire_080_400_facing,vehicle main view,485.79,485.79,1.0,1535878.0,0.9153,0.0,0.0
+dx9_avtank_fourteam_fire_080_400_facing,ordnance / prop meshes,358.82,358.82,1.0,2153.0,0.7622,0.0,0.0
+dx9_avtank_fourteam_fire_080_400_facing,terrain main view,58.0,58.0,1.0,741962.0,0.1979,0.0,0.0
+dx9_avtank_fourteam_fire_080_400_facing,effects (DynamicGeometry),53.09,53.09,1.0,61695.0,0.0534,0.0,0.0
+dx9_avtank_fourteam_fire_080_400_facing,post-process quads,4.0,4.0,1.0,0.0,0.0096,0.0,0.0
+dx9_avtank_fourteam_fire_080_400_facing,sky,3.0,3.0,1.0,72.0,0.0177,0.0,0.0

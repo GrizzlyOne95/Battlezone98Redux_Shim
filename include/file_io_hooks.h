@@ -12,7 +12,8 @@ namespace BZROpenShim
     // process attach before the game opens its stock logger files.
     void ApplyEarlyGameLogHooks();
 
-    // Installs startup-time file IAT hooks that track .trn writes and
-    // normalize saved terrain files to Windows CRLF line endings after close.
+    // Compatibility/safety layer for .trn writes outside Redux's corrected
+    // producer. Canonicalizes tracked files after close and leaves unsupported
+    // UTF-16 untouched instead of guessing an encoding.
     void ApplyTrnSaveNormalizeHooks();
 }

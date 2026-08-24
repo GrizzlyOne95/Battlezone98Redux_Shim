@@ -175,6 +175,12 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::JMP5, {}, "Under Attack Alert Hook 2/2", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Offensive Attack Reveal Hook", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "TurretTank Attack Reveal Hook", false, {} },
+            // Confirmed Redux 2.2.301 compatibility defects. These three sites
+            // are hash-gated, must resolve uniquely, and are applied by
+            // redux_compatibility.cpp rather than the generic patch loop.
+            { 0, HookEngine::PatchType::BYTES, {}, "Redux Numeric Locale Compatibility Call", false, {} },
+            { 0, HookEngine::PatchType::BYTES, {}, "Redux TRN Binary Writer Mode", false, {} },
+            { 0, HookEngine::PatchType::BYTES, {}, "Redux TRN Canonical Fwrite Hook", false, {} },
         };
 
         // Future: could also load this list from JSON

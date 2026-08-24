@@ -19,6 +19,7 @@
 #include "dx11_enhanced_fxaa.h"
 #include "terrain_proxy.h"
 #include "ogre_animation_profiler.h"
+#include "native_cpu_sampler.h"
 #include "pilot_fp_animation_trace.h"
 #include "openshim_sdk_v2.h"
 #include "BZROpenShim.h"
@@ -70,6 +71,13 @@ static unsigned __stdcall PatchThreadProc(void*)
                 "Engine-level AutoSave initialization failed; normal manual saves remain available");
         }
     }
+
+    // The sampling CPU profiler starts last so its first thread enumeration
+    // sees the shim's own workers already running: they are threads of this
+    // process and their cost has to be visible in the capture rather than
+    // hidden from it. It is dormant unless OPENSHIM_PROFILE_NATIVE_CPU asks
+    // for it.
+    BZROpenShim::InitializeNativeCpuSampler();
 
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread exiting");
     return 0;
@@ -147,6 +155,7 @@ namespace BZROpenShim
             CloseHandle(reinterpret_cast<HANDLE>(g_PatchThread));
             g_PatchThread = 0;
         }
+        BZROpenShim::ShutdownNativeCpuSampler();
         BZROpenShim::ShutdownOpenShimSdkV2();
         BZROpenShim::ShutdownPilotFpAnimationTrace();
         BZROpenShim::ShutdownOgreAnimationProfiler();
