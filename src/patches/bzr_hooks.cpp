@@ -14772,6 +14772,11 @@ namespace BZROpenShim
             bool hasBeam = false;
             bool hasVisible = false;
             bool hasAttenuation = false;
+            // World stamp. A mission change destroys every GameObject and its
+            // Ogre light without any teardown callback, so an entry whose
+            // worldGeneration no longer matches names either freed memory or a
+            // recycled address. Such entries are discarded instead of restored.
+            uint32_t worldGeneration = 0;
             OgreColourValue diffuse = {};
             OgreColourValue specular = {};
             float innerAngle = 0.0f;
@@ -14823,6 +14828,15 @@ namespace BZROpenShim
         static constexpr int kHeadlightLightTraceLimit = 40;
         static DWORD g_HeadlightLastRefreshTick = 0;
         static std::unordered_map<void*, HeadlightOriginalState> g_HeadlightOriginalStates;
+        // World identity for headlight baselines. The tracked player object
+        // pointer is a stable within-world identity: a new mission (or the
+        // shell) allocates a different player object, so an identity change is
+        // evidence that every previously captured baseline refers to objects
+        // from a destroyed world.
+        static uint32_t s_HeadlightWorldGeneration = 0;
+        static void* s_HeadlightWorldPlayerIdentity = nullptr;
+        // Discarded-without-restore accounting; budgeted log only.
+        static uint32_t g_HeadlightStaleEntryDiscards = 0;
         static InlineDetour32 g_EmissionLightStateDetour = {};
         static uintptr_t g_EmissionLightActiveResume = kEmissionLightActiveResumeAddr;
         static uintptr_t g_EmissionLightLoopResume = kEmissionLightLoopResumeAddr;
@@ -15296,7 +15310,17 @@ namespace BZROpenShim
             if (writeBack)
             {
                 for (const auto& entry : g_HeadlightOriginalStates)
+                {
+                    // A baseline from a previous world must not be written
+                    // through its stored pointer: the light is either freed or
+                    // the address was recycled by an unrelated object.
+                    if (entry.second.worldGeneration != s_HeadlightWorldGeneration)
+                    {
+                        ++g_HeadlightStaleEntryDiscards;
+                        continue;
+                    }
                     RestoreHeadlightState(entry.first, entry.second);
+                }
             }
             g_HeadlightOriginalStates.clear();
         }
@@ -15311,6 +15335,14 @@ namespace BZROpenShim
             if (!light)
                 return false;
             auto& state = g_HeadlightOriginalStates[light];
+            // A recycled light address must not inherit the dead light's
+            // baseline: the has* flags below would suppress recapture and the
+            // new light would be restored from another object's values. Reset
+            // on a world change so every property is captured fresh (capture
+            // runs before any modification, so the fresh values are stock).
+            if (state.worldGeneration != s_HeadlightWorldGeneration)
+                state = {};
+            state.worldGeneration = s_HeadlightWorldGeneration;
             auto& api = GetHeadlightOgreApi();
             __try
             {
@@ -15440,7 +15472,9 @@ namespace BZROpenShim
             // previous refresh already widened it to, so the solve stays
             // idempotent across the 200 ms refresh tick.
             const auto existing = g_HeadlightOriginalStates.find(light);
-            if (existing != g_HeadlightOriginalStates.end() && existing->second.hasAttenuation)
+            if (existing != g_HeadlightOriginalStates.end() &&
+                existing->second.hasAttenuation &&
+                existing->second.worldGeneration == s_HeadlightWorldGeneration)
                 stock = existing->second.attenuation;
 
             outPlan = HeadlightFalloff::BuildPlan(stock, peakDiffuse, previousFalloff);
@@ -15673,6 +15707,16 @@ namespace BZROpenShim
 
             void* player = TryGetHeadlightPlayerObject();
 
+            // Advance world identity before anything reads or writes a
+            // baseline. A changed player pointer means the previous world's
+            // lights are gone; stale entries become discard-only from here on.
+            if (player != s_HeadlightWorldPlayerIdentity)
+            {
+                s_HeadlightWorldPlayerIdentity = player;
+                ++s_HeadlightWorldGeneration;
+                g_HeadlightStaleEntryDiscards = 0;
+            }
+
             float colourR = g_HeadlightColourR;
             float colourG = g_HeadlightColourG;
             float colourB = g_HeadlightColourB;
@@ -15763,7 +15807,15 @@ namespace BZROpenShim
             {
                 if (touched.find(it->first) == touched.end())
                 {
-                    RestoreHeadlightState(it->first, it->second);
+                    // An entry from a previous world is erased only. Its
+                    // pointer refers to a destroyed world's light, and writing
+                    // through it would hit freed or recycled memory.
+                    const bool staleWorld =
+                        it->second.worldGeneration != s_HeadlightWorldGeneration;
+                    if (staleWorld)
+                        ++g_HeadlightStaleEntryDiscards;
+                    else
+                        RestoreHeadlightState(it->first, it->second);
                     it = g_HeadlightOriginalStates.erase(it);
                 }
                 else
@@ -15774,12 +15826,14 @@ namespace BZROpenShim
 
             if (EnvFlagEnabled("OPENSHIM_TRACE_HEADLIGHTS"))
             {
-                Log(L"[HEADLIGHT] refresh player=0x%08X objects=%u lights=%u touched=%u tracked=%u\n",
+                Log(L"[HEADLIGHT] refresh player=0x%08X objects=%u lights=%u touched=%u tracked=%u worldGen=%u staleDiscards=%u\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(player)),
                     static_cast<unsigned>(scannedObjects),
                     static_cast<unsigned>(lightsFound),
                     static_cast<unsigned>(touched.size()),
-                    static_cast<unsigned>(g_HeadlightOriginalStates.size()));
+                    static_cast<unsigned>(g_HeadlightOriginalStates.size()),
+                    static_cast<unsigned>(s_HeadlightWorldGeneration),
+                    static_cast<unsigned>(g_HeadlightStaleEntryDiscards));
             }
         }
 
