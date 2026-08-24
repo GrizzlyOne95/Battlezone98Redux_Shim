@@ -1,0 +1,8 @@
+[Benchmark]
+scenario = "idle"
+unitOdf = "avtank"
+count = 20
+distance = 50.0
+orientation = "facing"
+warmupSeconds = 4.0
+measureSeconds = 8.0
