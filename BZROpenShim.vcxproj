@@ -139,6 +139,7 @@
     <ClCompile Include="src\patches\bzr_options_ui.cpp" />
     <ClCompile Include="src\patches\ogre_shader_cache.cpp" />
     <ClCompile Include="src\patches\ogre_enhanced_light_selection.cpp" />
+    <ClCompile Include="src\patches\sun_flash.cpp" />
     <ClCompile Include="src\patches\terrain_proxy.cpp" />
     <ClCompile Include="src\patches\terrain_semantic.cpp" />
     <ClCompile Include="src\engine\crash_logger.cpp" />
@@ -172,6 +173,7 @@
     <ClInclude Include="include\ogre_shader_cache.h" />
     <ClInclude Include="include\ogre_enhanced_light_selection.h" />
     <ClInclude Include="include\enhanced_light_selection.h" />
+    <ClInclude Include="include\sun_flash.h" />
     <ClInclude Include="include\terrain_proxy.h" />
     <ClInclude Include="include\terrain_semantic.h" />
     <ClInclude Include="include\ogre_runtime.h" />

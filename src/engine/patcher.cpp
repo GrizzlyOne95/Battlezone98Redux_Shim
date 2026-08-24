@@ -9,6 +9,7 @@
 #include "file_io_hooks.h"
 #include "bzr_hooks.h"
 #include "shim_log.h"
+#include "sun_flash.h"
 #include "openshim_sdk_v2.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -646,6 +647,15 @@ namespace BZROpenShim
                 void* orig = isSteam ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10) : HookEngine::ResolveRelCallTarget(p.address - 1);
                 if (!orig) continue; SetProducerBuildMenuOriginal(orig); target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ProducerBuildMenuCallHook));
             } else if (p.name == "Target Reticle Popup Recent-Hit Getter Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(TargetReticlePopupRecentHitGetterHook));
+            else if (p.name == "Sun Screen Flash Contribution Hook") {
+                // Verify the instruction, not just the operand: the byte in
+                // front has to be a CALL rel32 and it has to resolve to
+                // ScreenFlash::AddFlash. A build whose layout moved leaves the
+                // payload empty, so ApplyPatch skips it and stock stands.
+                if (!SunFlash::VerifyCallSite(isSteam ? 300 : 1, 10)) { Log(L"[SUNFLASH] call site verify failed at 0x%08X; leaving stock flash in place\n", p.address); continue; }
+                SunFlash::LoadConfig();
+                target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(SunFlash::ThunkAddress()));
+            }
             else if (p.name.find("Damage Reveal Probe") != std::string::npos) target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(DamageRevealProbeHook));
             else if (p.name.find("HoverCraft Engine Flame Emit Hook") != std::string::npos) target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_EngineFlameHoverCraftEmit));
             else if (p.name == "Artillery Weapon Mask Select Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_ArtilleryWeaponSelect));
@@ -729,6 +739,7 @@ namespace BZROpenShim
         for (const auto& p : patches) {
             if (HookEngine::ApplyPatch(p)) {
                 app++;
+                if (p.name == "Sun Screen Flash Contribution Hook") SunFlash::SetPatchInstalled(true);
                 Log(L"[OK]   %hs wrote %u bytes to 0x%08X\n", p.name.c_str(), static_cast<unsigned>(p.payload.size()), p.address);
             } else {
                 Log(L"[SKIP] %hs address=0x%08X verified=%hs payload=%u\n", p.name.c_str(), p.address, p.verified ? "yes" : "no", static_cast<unsigned>(p.payload.size()));
