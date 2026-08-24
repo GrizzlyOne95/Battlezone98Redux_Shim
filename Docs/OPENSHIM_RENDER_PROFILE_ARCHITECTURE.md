@@ -209,7 +209,8 @@ Automated (this branch):
 - Release Win32 build of winmm.dll and exu.dll green; exports verified via
   dumpbin.
 - **Headless runtime qualification** (GOG install, lcbench harness; driver:
-  untracked `tmp/render_profile_matrix.ps1`, logs under
+  `scripts/render_profile_matrix.ps1`, full report and evidence index in
+  `Docs/RENDER_PROFILE_RUNTIME_QUALIFICATION_20260824.md`, per-case logs under
   `reverse_engineering/snapshots/render_profile_matrix/`). All cases PASS:
 
 | Case | Asserts |
