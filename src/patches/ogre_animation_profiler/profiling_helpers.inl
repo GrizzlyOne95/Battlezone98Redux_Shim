@@ -1343,6 +1343,24 @@
             return value <= kMaxSaneVertexCount ? value : 0;
         }
 
+        // The store itself is guarded. This writes into memory owned by
+        // another module -- an import table or a COM vtable -- and the Windows
+        // loader can re-protect that page between the VirtualProtect here and
+        // the store, which is exactly how the DX11 observer took the process
+        // down twice on 2026-08-22. See include/iat_patch.h.
+        bool WritePointerGuarded(void** slot, void* value)
+        {
+            __try
+            {
+                *slot = value;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         bool WritePointer(void** slot, void* value)
         {
             if (!slot)
@@ -1350,9 +1368,11 @@
             DWORD oldProtect = 0;
             if (!VirtualProtect(slot, sizeof(void*), PAGE_EXECUTE_READWRITE, &oldProtect))
                 return false;
-            *slot = value;
+            const bool wrote = WritePointerGuarded(slot, value);
             DWORD ignored = 0;
             VirtualProtect(slot, sizeof(void*), oldProtect, &ignored);
+            if (!wrote)
+                return false;
             FlushInstructionCache(GetCurrentProcess(), slot, sizeof(void*));
             return true;
         }

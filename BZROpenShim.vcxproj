@@ -184,6 +184,7 @@
     <ClInclude Include="include\patches.h" />
     <ClInclude Include="include\patcher.h" />
     <ClInclude Include="include\hook_engine.h" />
+    <ClInclude Include="include\iat_patch.h" />
     <ClInclude Include="include\BZROpenShim.h" />
     <ClInclude Include="include\openshim_sdk_v2.h" />
     <ClInclude Include="include\native_ui.h" />
