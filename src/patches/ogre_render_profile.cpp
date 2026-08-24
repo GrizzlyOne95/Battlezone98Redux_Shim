@@ -321,30 +321,188 @@ namespace BZROpenShim::RenderProfiles
             EmitDiagnosticsLocked();
         }
 
+        // ---- guarded direct-Ogre helpers -------------------------------------
+        //
+        // MSVC forbids __try in functions that require object unwinding, so
+        // every SEH body lives in a noinline core whose scope holds only POD;
+        // all std::string construction and export resolution happens in the
+        // wrappers outside the guarded region.
+
+        template <typename T>
+        T ResolveOgreExport(const char* mangled)
+        {
+            const HMODULE ogre = GetModuleHandleA("OgreMain.dll");
+            if (ogre == nullptr)
+            {
+                return nullptr;
+            }
+            return reinterpret_cast<T>(GetProcAddress(ogre, mangled));
+        }
+
+        using FnRootGetSingletonPtr = void* (*)();
+        using FnRootGetRenderSystem = void* (__thiscall*)(void*);
+        using FnRsGetViewport = void* (__thiscall*)(void*);
+        using FnVpGetScheme = const std::string& (__thiscall*)(void*);
+        using FnVpSetScheme = void (__thiscall*)(void*, const std::string&);
+        using FnCompositorGetSingletonPtr = void* (*)();
+        using FnCompositorSetEnabled =
+            void (__thiscall*)(void*, void*, const std::string&, bool);
+
         // ---- backend observation --------------------------------------------
+
+        using FnRsGetNameByName =
+            void* (__thiscall*)(void*, const std::string&);
+
+        // Built once on first use; lives here so the SEH core below holds no
+        // destructor-bearing objects.
+        const std::string& KnownRenderSystemName(int index)
+        {
+            static const std::string kNames[3] = {
+                "Direct3D11 Rendering Subsystem",
+                "Direct3D9 Rendering Subsystem",
+                "OpenGL Rendering Subsystem",
+            };
+            return kNames[index];
+        }
+
+        // Returns 0 = not ready, 1 = DX11, 2 = DX9, 3 = other/unknown,
+        // -1 = transient fault (retry).
+        __declspec(noinline) static int GuardedIdentifyActiveBackend(
+            FnRootGetSingletonPtr rootSingleton,
+            FnRootGetRenderSystem getRenderSystem,
+            FnRsGetNameByName getRenderSystemByName)
+        {
+            // No dynamic locals allowed in an SEH scope: KnownRenderSystemName
+            // hands back references to storage built elsewhere.
+            __try
+            {
+                void* root = (rootSingleton != nullptr) ? rootSingleton() : nullptr;
+                if (root == nullptr || getRenderSystem == nullptr ||
+                    getRenderSystemByName == nullptr)
+                {
+                    return 0;
+                }
+                void* active = getRenderSystem(root);
+                if (active == nullptr)
+                {
+                    return 0;
+                }
+                // Identity comparison against the known render systems avoids
+                // RenderSystem::getName entirely: it is virtual and this build
+                // does not export it.
+                if (getRenderSystemByName(root, KnownRenderSystemName(0)) == active)
+                {
+                    return 1;
+                }
+                if (getRenderSystemByName(root, KnownRenderSystemName(1)) == active)
+                {
+                    return 2;
+                }
+                if (getRenderSystemByName(root, KnownRenderSystemName(2)) == active)
+                {
+                    return 3;
+                }
+                return 4;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return -1;
+            }
+        }
+
+        int DetectActiveBackend()
+        {
+            // Deliberately NOT cached in function-local statics: this polls
+            // from a worker that starts before OgreMain.dll loads, and a
+            // first-call nullptr would otherwise be cached for the process
+            // lifetime (the exact failure the matrix caught).
+            const FnRootGetSingletonPtr rootSingleton =
+                ResolveOgreExport<FnRootGetSingletonPtr>("?getSingletonPtr@Root@Ogre@@SAPAV12@XZ");
+            if (rootSingleton == nullptr)
+            {
+                static bool s_loggedRootWait = false;
+                if (!s_loggedRootWait)
+                {
+                    s_loggedRootWait = true;
+                    LogShimA(LogLevel::Info, kLogTag,
+                             "observation: waiting for OgreMain Root export");
+                }
+                return 0;
+            }
+            static bool s_loggedRootReady = false;
+            if (!s_loggedRootReady)
+            {
+                s_loggedRootReady = true;
+                LogShimA(LogLevel::Info, kLogTag,
+                         "observation: Root export resolved");
+            }
+            static FnRootGetRenderSystem getRenderSystem = nullptr;
+            static FnRsGetNameByName getRenderSystemByName = nullptr;
+            if (getRenderSystem == nullptr)
+            {
+                getRenderSystem =
+                    ResolveOgreExport<FnRootGetRenderSystem>("?getRenderSystem@Root@Ogre@@QAEPAVRenderSystem@2@XZ");
+                getRenderSystemByName =
+                    ResolveOgreExport<FnRsGetNameByName>(
+                        "?getRenderSystemByName@Root@Ogre@@QAEPAVRenderSystem@2@"
+                        "ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            }
+            if (getRenderSystem == nullptr || getRenderSystemByName == nullptr)
+            {
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "observation: Root render-system exports unresolved");
+                return 0;
+            }
+            return GuardedIdentifyActiveBackend(
+                rootSingleton, getRenderSystem, getRenderSystemByName);
+        }
 
         unsigned __stdcall BackendObservationThread(void*)
         {
-            // Watch which render system the engine actually loads.
+            LogShimA(LogLevel::Info, kLogTag, "backend observation thread started");
             constexpr DWORD pollMs = 250;
-            constexpr DWORD timeoutMs = 60000;
+            constexpr DWORD timeoutMs = 90000;
             DWORD waited = 0;
             bool decided = false;
             bool dx11 = false;
 
             while (waited < timeoutMs)
             {
-                if (GetModuleHandleA("RenderSystem_Direct3D11.dll") != nullptr)
+                // Authoritative signal only: pointer-identity comparison of the
+                // engine's ACTIVE render system against the known subsystems
+                // via exported Root APIs. Module presence is NOT used: Ogre
+                // loads every configured render-system plugin, so module
+                // enumeration races plugin order and misreports the backend.
+                const int identified = DetectActiveBackend();
+                if (identified == 1)
                 {
                     dx11 = true;
                     decided = true;
+                    LogShimA(LogLevel::Info, kLogTag,
+                             "backend identified: active render system is Direct3D11");
                     break;
                 }
-                if (GetModuleHandleA("RenderSystem_Direct3D9.dll") != nullptr)
+                if (identified == 2)
                 {
                     dx11 = false;
                     decided = true;
+                    LogShimA(LogLevel::Info, kLogTag,
+                             "backend identified: active render system is Direct3D9");
                     break;
+                }
+                if (identified == 3)
+                {
+                    LogShimA(LogLevel::Warn, kLogTag,
+                             "backend observation: active render system is OpenGL; "
+                             "conservative DX9 assumptions stay active");
+                    return 0;
+                }
+                if (identified == 4)
+                {
+                    LogShimA(LogLevel::Warn, kLogTag,
+                             "backend observation: active render system unrecognized; "
+                             "conservative DX9 assumptions stay active");
+                    return 0;
                 }
                 Sleep(pollMs);
                 waited += pollMs;
@@ -363,6 +521,7 @@ namespace BZROpenShim::RenderProfiles
             s_backendDetected = true;
             ResolveAndPublishLocked("backend observed");
             ReleaseSRWLockExclusive(&s_stateLock);
+            ReapplyEffectiveProfileToViewports("backend observed");
             return 0;
         }
 
@@ -430,8 +589,8 @@ namespace BZROpenShim::RenderProfiles
         {
             const FnViewportSetMaterialScheme original = OriginalSetMaterialSchemeFromIat();
 
-            const std::string_view incoming =
-                (scheme != nullptr) ? std::string_view(*scheme) : std::string_view();
+            const char* incomingRaw = (scheme != nullptr) ? scheme->c_str() : "";
+            const std::string_view incoming(incomingRaw);
 
             if (IsModernMaterialScheme(incoming))
             {
@@ -473,6 +632,20 @@ namespace BZROpenShim::RenderProfiles
             {
                 if (rewritten)
                 {
+                    // Rate-limited visibility: one line per distinct final
+                    // scheme, not per call (~1 Hz reassert loop otherwise).
+                    static char s_lastLogged[48] = {};
+                    if (!std::equal(s_lastLogged,
+                                    s_lastLogged + sizeof(s_lastLogged),
+                                    finalScheme.c_str()))
+                    {
+                        strncpy_s(s_lastLogged, sizeof(s_lastLogged),
+                                  finalScheme.c_str(), _TRUNCATE);
+                        LogShimA(LogLevel::Info, kLogTag,
+                                 "scheme rewrite incoming=%hs final=%hs",
+                                 incomingRaw,
+                                 finalScheme.c_str());
+                    }
                     original(viewport, finalScheme);
                 }
                 else if (scheme != nullptr)
@@ -561,32 +734,10 @@ namespace BZROpenShim::RenderProfiles
             return true;
         }
 
-        // ---- guarded direct-Ogre helpers for active-viewport application -----
+        // ---- active-viewport application API --------------------------------
         //
-        // MSVC forbids __try in functions that require object unwinding, so
-        // every SEH body lives in a noinline core whose scope holds only POD;
-        // all std::string construction and export resolution happens in the
-        // wrappers outside the guarded region.
-
-        template <typename T>
-        T ResolveOgreExport(const char* mangled)
-        {
-            const HMODULE ogre = GetModuleHandleA("OgreMain.dll");
-            if (ogre == nullptr)
-            {
-                return nullptr;
-            }
-            return reinterpret_cast<T>(GetProcAddress(ogre, mangled));
-        }
-
-        using FnRootGetSingletonPtr = void* (*)();
-        using FnRootGetRenderSystem = void* (__thiscall*)(void*);
-        using FnRsGetViewport = void* (__thiscall*)(void*);
-        using FnVpGetScheme = const std::string& (__thiscall*)(void*);
-        using FnVpSetScheme = void (__thiscall*)(void*, const std::string&);
-        using FnCompositorGetSingletonPtr = void* (*)();
-        using FnCompositorSetEnabled =
-            void (__thiscall*)(void*, void*, const std::string&, bool);
+        // Export resolution and SEH-free wrappers; the guarded cores live in
+        // small noinline POD-only functions below.
 
         struct OgreViewportApi
         {
