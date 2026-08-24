@@ -5,12 +5,17 @@ param(
     [string[]]$Renderer = @("DX11"),
     [ValidateSet(
         "quiet", "idle", "movement", "firing", "flight", "ai_idle", "combat",
-        "dispersed", "fourteam", "fourteam_fire", "fourteam_move", "fourteam_ai")]
+        "dispersed", "fourteam", "fourteam_fire", "fourteam_move", "fourteam_ai",
+        "props")]
     [string[]]$Scenario = @("quiet", "idle", "movement", "firing", "combat"),
     [ValidateSet(
         "svtank", "svfigh", "avtank", "avfigh", "avrckt", "avartl",
         "avapc", "avwalk", "avmine", "avturr", "aspilo", "svapc",
-        "svwalk", "svmine", "svturr", "sspilo")]
+        "svwalk", "svmine", "svturr", "sspilo",
+        "bvtank", "bvwalk", "bvturr", "bvartl", "bvapc", "bvmine", "bspilo",
+        "bsheav", "cvtnk", "cvwalk", "cvturr", "cvartl", "cvfigh", "cvmine",
+        "cspilo", "avhaul", "svhaul", "avcnst", "svcnst", "avrecy", "svrecy",
+        "avscav", "svscav", "sbsilo", "abbarr", "sbtowe")]
     [string[]]$UnitOdf = @("avtank"),
     [int[]]$Count = @(0, 5, 10, 20, 40, 80),
     [double[]]$Distance = @(50.0),
