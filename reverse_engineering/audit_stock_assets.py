@@ -43,7 +43,7 @@ from pathlib import Path
 DEFAULT_GAME_ROOT = (
     r"C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux"
 )
-DEFAULT_TOOLKIT = r"C:\Users\iestu\Documents\GIT\BZ98RBlenderToolKit"
+DEFAULT_TOOLKIT = str(Path.home() / "Documents" / "GIT" / "BZ98RBlenderToolKit")
 
 CHUNK_HEADER_SIZE = 6  # ushort id + uint length (Ogre chunked serialization)
 
@@ -174,7 +174,10 @@ def parse_mesh_header_and_special_chunks(
             result["mesh_bone_assignments"] = True
             cur.pos = cend
         elif cid == M_MESH_LOD:
-            lod = parse_mesh_lod_chunk(ChunkCursor(cur.data, cur.pos), csize)
+            # header() returns csize that includes the 6-byte header; cur.pos
+            # is already past the header, so pass the absolute end offset to
+            # avoid parsing 6 bytes into the following sibling chunk.
+            lod = parse_mesh_lod_chunk(ChunkCursor(cur.data, cur.pos), cend - cur.pos)
             result["mesh_lod"] = lod
             cur.pos = cend
         else:
