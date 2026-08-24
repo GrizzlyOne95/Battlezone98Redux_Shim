@@ -404,6 +404,12 @@ namespace bz14
         return g_ownsDetour;
     }
 
+    bool PolicyHookRequested()
+    {
+        LoadConfig();
+        return g_policyActive || g_shadowMode;
+    }
+
     bool InstallPolicyHookIfPossible(bool attackTaskSiteTaken)
     {
         LoadConfig();
@@ -412,26 +418,28 @@ namespace bz14
         if (g_hookInstalled)
             return true;
 
-        if (attackTaskSiteTaken && !EnvFlagEnabled("OPENSHIM_LEGACY14_EXCLUSIVE"))
+        if (attackTaskSiteTaken)
         {
-            // Another OpenShim feature owns the shared detour site. An
-            // instrumentation/quarantined mode never silently displaces a
-            // working feature; only an explicit developer override may.
+            // Another OpenShim feature already detours this entry. Runtime
+            // displacement cannot be done safely (the owner's patch has
+            // replaced the bytes we would validate and copy) and shadow
+            // mode must stay behavior-neutral regardless, so both modes
+            // defer. The exclusive path is decided at install order in
+            // bzr_hooks.cpp: OPENSHIM_LEGACY14_EXCLUSIVE=1 leaves the site
+            // free for us INSTEAD of AIKITE before anything installs.
             if (!g_siteDeferralLogged)
             {
                 g_siteDeferralLogged = true;
-                Log(L"[BZ14] AttackTask::DoState detour site already owned "
-                    L"by another OpenShim feature; legacy 1.4 policy stays "
-                    L"inert (set OPENSHIM_LEGACY14_EXCLUSIVE=1 to displace "
-                    L"it deliberately)\n");
+                Log(L"[BZ14] AttackTask::DoState detour site owned by "
+                    L"another OpenShim feature; legacy policy %s stays "
+                    L"inert%s\n",
+                    g_policyActive ? L"apply" : L"shadow",
+                    g_policyActive
+                        ? L" (set OPENSHIM_LEGACY14_EXCLUSIVE=1 to give "
+                          L"it the site instead of AIKITE at next launch)"
+                        : L"");
             }
             return false;
-        }
-        if (attackTaskSiteTaken)
-        {
-            Log(L"[BZ14] OPENSHIM_LEGACY14_EXCLUSIVE=1: deliberately "
-                L"displacing the existing AttackTask::DoState owner; the "
-                L"displaced feature is unavailable for this session\n");
         }
 
         if (!ExpectedBytesMatchAt(kAttackTaskDoStateEntry,
@@ -467,8 +475,9 @@ namespace bz14
         // proven by the first-entry log in the hook body; behavior-affecting
         // by g_overrides > 0 at shutdown.
         Log(L"[BZ14] byte-valid=YES hook-installed=%s at DoState=0x%08X "
-            L"trampoline=0x%08X mode=%s (target proven execution-dead on "
-            L"GOG 2.2.301; experimental)\n",
+            L"trampoline=0x%08X mode=%s (experimental: reaches live combat "
+            L"only where generic AttackTask runs - fighter/scout proven; "
+            L"tank families use other task bodies)\n",
             L"YES",
             static_cast<uint32_t>(kAttackTaskDoStateEntry),
             static_cast<uint32_t>(

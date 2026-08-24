@@ -15,13 +15,15 @@
 // applies the verdict by rewriting task+0x0C (nextState) at the sites where
 // 1.4 and Redux provably diverge.
 //
-// STATUS (2026-08-24 audit): EXPERIMENTAL / QUARANTINED. The detour target,
-// generic AttackTask::DoState @0x00478A50, was proven execution-dead during
-// live GOG 2.2.301 combat engagements (see reverse_engineering/
-// bz14_attacktask_recovery_20260824.md §6). Enabling this feature today
-// cannot restore 1.4 behavior anywhere; it ships as developer-only research
-// instrumentation so the recovered policy stays testable until a live seam
-// lands. It is intentionally NOT exposed as a normal user-facing option.
+// STATUS (2026-08-24 audit): EXPERIMENTAL / QUARANTINED. Runtime census
+// proved the detour target, generic AttackTask::DoState @0x00478A50, executes
+// live for fighter/scout engagements (full 1.4 duel machine observed) but
+// NEVER for tank-family combat, which runs reduced family-specific task
+// skeletons instead (see reverse_engineering/bz14_attacktask_recovery_20260824.md
+// §6.4). Enabling this feature therefore restores 1.4 behavior only for some
+// unit families while others stay on Redux - a historically inconsistent mix.
+// It ships as developer-only research instrumentation (environment-variable
+// activation, no ini keys) until family-complete restoration exists.
 //
 // Redux object layouts remain authoritative: no 1.4 memory is injected and
 // movement/steering/navigation/weapon systems are not replaced. The only
@@ -209,12 +211,21 @@ namespace bz14
     // True when this layer would own (or owns) the DoState detour.
     bool OwnsAttackTaskDetour();
 
+    // True when developer environment controls request either mode. Read
+    // BEFORE the AIKITE kite installer runs so an exclusive reservation can
+    // leave the shared AttackTask::DoState site free for this layer instead
+    // of trying to displace an already-installed detour.
+    bool PolicyHookRequested();
+
     // Attempts installation. attackTaskSiteTaken must be true when another
     // OpenShim feature already detours AttackTask::DoState (AIKITE kite
-    // tuning). Without OPENSHIM_LEGACY14_EXCLUSIVE=1 this layer defers to the
-    // live owner; with it, the operator explicitly accepts displacing that
-    // feature for the session (logged loudly). Returns true when installed or
-    // already live.
+    // tuning). This layer ALWAYS defers in that case - shadow because pure
+    // measurement must stay behavior-neutral, apply because displacing an
+    // installed inline detour cannot be done safely or validably. A
+    // developer who wants the legacy policy exclusively sets
+    // OPENSHIM_LEGACY14_EXCLUSIVE=1 (and bzr_hooks.cpp then leaves the site
+    // free at install time); nothing displaces anything at runtime. Returns
+    // true when installed or already live.
     bool InstallPolicyHookIfPossible(bool attackTaskSiteTaken);
 
     // One-shot session summary via [BZ14] log line (call at shutdown).

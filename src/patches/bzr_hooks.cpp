@@ -19973,12 +19973,26 @@ namespace BZROpenShim
 
   		static void InstallAiTuningHooksIfPossible()
         {
-            // AIKITE claims the shared AttackTask::DoState detour site
-            // first. The quarantined legacy-1.4 policy layer (env-gated,
-            // experimental) defers to it unless the developer explicitly
-            // sets OPENSHIM_LEGACY14_EXCLUSIVE=1: an instrumentation mode
-            // must never silently disable a working feature.
-            InstallAttackTaskKiteHookIfPossible();
+            // AIKITE normally claims the shared AttackTask::DoState detour
+            // site first. The quarantined legacy-1.4 policy layer (env-
+            // gated, experimental) never displaces an installed detour at
+            // runtime; the only way it gets the site is an explicit
+            // developer reservation (OPENSHIM_LEGACY14_EXCLUSIVE=1), which
+            // skips AIKITE's install for that session - loudly, and only
+            // when the legacy layer was actually requested.
+            const bool bz14Exclusive =
+                bz14::PolicyHookRequested() &&
+                EnvFlagEnabled("OPENSHIM_LEGACY14_EXCLUSIVE");
+            if (bz14Exclusive)
+            {
+                Log(L"[AIKITE] site reserved for legacy 1.4 policy "
+                    L"(OPENSHIM_LEGACY14_EXCLUSIVE=1); kite tuning "
+                    L"unavailable this session\n");
+            }
+            else
+            {
+                InstallAttackTaskKiteHookIfPossible();
+            }
             bz14::InstallPolicyHookIfPossible(g_AttackTaskDoStateHookInstalled);
             InstallScrapPathScoreHookIfPossible();
             InstallScavengerRetargetHookIfPossible();
