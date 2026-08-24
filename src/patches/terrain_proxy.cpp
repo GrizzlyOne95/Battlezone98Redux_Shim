@@ -616,6 +616,13 @@ namespace BZROpenShim
         bool g_runStateHookInstalled = false;
 
         uint32_t g_proxyLostCount = 0;
+        // Render-tick probe: how many frames observed the proxy entity
+        // unregistered (see QueryProxyScreenRect).
+        uint32_t g_proxyTickProbeLostCount = 0;
+        // Retry-path source verification: how many selections were forgotten
+        // because the live zone table no longer advertised the stored source
+        // objects.
+        uint32_t g_sourceMismatchForgetCount = 0;
         // Discovery gate. Without it the zone dispatcher immediately re-selects
         // the outgoing mission's still-live zone after a transition forget and
         // builds a complete proxy -- entity, mesh, slot-3 buffer, material and
@@ -631,6 +638,7 @@ namespace BZROpenShim
             ProcessShutdown,
             ProxyLost,
             FramingStale,
+            SourceMismatch,
         };
 
         const char* ForgetReasonName(TerrainForgetReason reason)
@@ -642,6 +650,7 @@ namespace BZROpenShim
             case TerrainForgetReason::ProcessShutdown: return "process_shutdown";
             case TerrainForgetReason::ProxyLost: return "proxy_lost";
             case TerrainForgetReason::FramingStale: return "framing_stale";
+            case TerrainForgetReason::SourceMismatch: return "source_mismatch";
             default: return "unknown";
             }
         }
@@ -2134,11 +2143,35 @@ namespace BZROpenShim
             return true;
         }
 
+        // Defined near the lifecycle block; name-based liveness probe for the
+        // stored proxy entity.
+        bool ProxyEntityStillRegistered();
+
         bool QueryProxyScreenRect(ProxyScreenRect& out)
         {
             out = {};
             if (!g_proxy.proxyCreated || !g_proxy.proxyEntity)
                 return false;
+            // The render tick has no zone dispatch around it, so the
+            // ProxyLost probe that guards the sim path never runs here. The
+            // engine can destroy the proxy entity at an unpredictable point
+            // (documented asymmetric teardown; the loading screen keeps
+            // rendering frames through the window), and this call is the one
+            // place a stored proxyEntity pointer would be dereferenced without
+            // any registration evidence. Re-probe by name before use.
+            if (!ProxyEntityStillRegistered())
+            {
+                ++g_proxyTickProbeLostCount;
+                if (g_proxyTickProbeLostCount <= 4 ||
+                    g_proxyTickProbeLostCount % 512 == 0)
+                {
+                    LogShimA(LogLevel::Warn, "terrain-proxy",
+                        "[TERRAIN-PROXY] render-tick probe found proxy entity unregistered losses=%u proxyGeneration=%u missionGeneration=%u",
+                        g_proxyTickProbeLostCount, g_proxy.generation,
+                        g_missionGeneration);
+                }
+                return false;
+            }
             void* camera = nullptr;
             int width = 0;
             int height = 0;
@@ -4856,6 +4889,37 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                         g_reselectCount, kMaxReselects);
                     selectedZone = false;
                     ForgetTerrainProxy(TerrainForgetReason::FramingStale, true, true);
+                }
+            }
+            // Retry-path source verification. A stored sourceMesh/Entity/Node
+            // triple can predate an engine-side rebuild of this cluster; every
+            // dereference below CreateProxy is a virtual call on that stored
+            // state, and catch(...) cannot intercept the resulting fault under
+            // /EHsc. Require the live zone table to still advertise exactly the
+            // stored objects (SEH reads plus mesh-name identity) before they
+            // are used again. An unreadable table without a layout abort is
+            // not proof of staleness: fail open and keep waiting.
+            if (!g_proxy.proxyCreated && !g_proxy.tearingDown &&
+                g_proxy.selected && g_proxy.zone == zone)
+            {
+                ClusterCandidate fresh;
+                bool layoutAbort = false;
+                const bool resolved = ResolveClusterCandidate(
+                    zone, g_proxy.zoneX, g_proxy.zoneZ,
+                    g_proxy.clusterX, g_proxy.clusterZ, fresh, layoutAbort);
+                const bool sourcesVerified = layoutAbort ? false :
+                    (!resolved || (fresh.mesh == g_proxy.sourceMesh &&
+                                   fresh.entity == g_proxy.sourceEntity &&
+                                   fresh.node == g_proxy.sourceNode));
+                if (!sourcesVerified)
+                {
+                    ++g_sourceMismatchForgetCount;
+                    LogShimA(LogLevel::Warn, "terrain-proxy",
+                        "[TERRAIN-PROXY] stored source objects no longer match the live zone table proxyGeneration=%u missionGeneration=%u losses=%u; reselecting",
+                        g_proxy.generation, g_missionGeneration,
+                        g_sourceMismatchForgetCount);
+                    selectedZone = false;
+                    ForgetTerrainProxy(TerrainForgetReason::SourceMismatch, true, true);
                 }
             }
             if (!g_proxy.selected && !g_proxy.tearingDown)
