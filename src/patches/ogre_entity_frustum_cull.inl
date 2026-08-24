@@ -145,60 +145,6 @@ static bool g_RestoreCraftBoundsPin = true;
 static bool g_RestoreCraftBoundsObserveOnly = false;
 static bool g_BoundsTraceEnabled = false;
 
-// --------------------------------------------- null mesh bounds repair -------
-//
-// Second, independent stock-asset defect class found by the 2026-08-23 static
-// asset audit (reverse_engineering/asset_audit): a small number of stock
-// meshes serialize NO M_MESH_BOUNDS chunk at all. Ogre leaves such a Mesh's
-// box EXTENT_NULL and its bounding radius 0. A null box merges as a no-op and
-// Ogre's frustum test treats it as always visible, so the object can never be
-// culled; the zero radius also collapses material-LOD distance selection, so
-// the object renders permanently at one technique regardless of distance.
-//
-// The audit derived exact replacement boxes from each mesh's own serialized
-// vertex positions (tight AABB plus max vertex distance from the origin, the
-// same quantity the stock pipeline stores for every healthy mesh). Repairing
-// from audited constants avoids walking Ogre SubMesh/VertexData structures in
-// this DLL: only already-resolved Mesh accessors are used.
-//
-// Opt-in via OPENSHIM_REPAIR_NULL_MESH_BOUNDS=1. Any OTHER mesh observed with
-// a null box is counted and logged (throttled) rather than guessed at, so a
-// future defective asset shows up as evidence instead of a silent repair.
-
-struct KnownNullBoundsAsset
-{
-    const char* name;
-    float minimum[3];
-    float maximum[3];
-    float radius;
-};
-
-// gsand00.mesh sha256 ca6b0f499e9d7e99..., sbsilo.mesh 35cffc206f5c5573...
-static const KnownNullBoundsAsset kKnownNullBoundsAssets[] = {
-    {"gsand00.mesh",
-     {-0.11f, -0.11f, -0.154703f},
-     {0.11f, 0.11f, 0.154703f},
-     0.219392f},
-    {"sbsilo.mesh",
-     {-14.670441f, -0.018333f, -15.534653f},
-     {14.670454f, 8.579114f, 15.534649f},
-     18.332536f},
-};
-
-static bool g_RepairNullMeshBoundsEnabled = false;
-
-using FnOgreSceneCreateEntityString =
-    void*(__thiscall*)(void*, const std::string&);
-using FnOgreMeshSetBoundingSphereRadius = void(__thiscall*)(void*, float);
-static FnOgreSceneCreateEntityString g_OgreFn_SceneCreateEntityOriginal = nullptr;
-static FnOgreMeshSetBoundingSphereRadius g_OgreFn_MeshSetBoundingSphereRadius =
-    nullptr;
-static InlineDetour32 g_SceneCreateEntityDetour;
-static uint64_t g_NullBoundsRepaired = 0;
-static uint64_t g_NullBoundsUnknownMeshes = 0;
-static uint32_t g_NullBoundsUnknownLogged = 0;
-constexpr uint32_t kNullBoundsUnknownLogLimit = 8;
-
 // Set only while the original processVisibleObject runs for an object this pass
 // decided to cull. Thread-local because Ogre's render traversal is not
 // contractually single-threaded even though Redux drives it from one thread.
@@ -1400,157 +1346,14 @@ static void __fastcall ProcessVisibleObjectHook(
     ReportFrustumCullIntervalIfDue();
 }
 
-// --------------------------------------- null-bounds repair implementation ---
-
-// Runs once per created Entity, on the thread that created it. Everything is
-// read-only until a mesh is positively identified as a known defective stock
-// asset with a still-null box; any fault lands in the SEH guard in the caller
-// and leaves Ogre exactly as it was.
-static void TryRepairNullMeshBoundsOnEntity(void* entity)
-{
-    if (!g_RepairNullMeshBoundsEnabled || !entity)
-        return;
-    if (!g_OgreFn_EntityGetMeshPtr || !g_OgreFn_MeshGetBounds ||
-        !g_OgreFn_ResourceGetName || !g_OgreFn_AabbCtor6 ||
-        !g_OgreFn_MeshSetBoundsOriginal ||
-        !g_OgreFn_MeshSetBoundingSphereRadius)
-    {
-        return;
-    }
-
-    const void* const meshSharedPtr = g_OgreFn_EntityGetMeshPtr(entity);
-    if (!meshSharedPtr)
-        return;
-    void* const mesh = *reinterpret_cast<void* const*>(meshSharedPtr);
-    if (!mesh)
-        return;
-
-    // AxisAlignedBox layout (pinned ogre-1.10.0 OgreAxisAlignedBox.h):
-    // mMinimum@0, mMaximum@12, Extent mExtent@24, mCorners@28.
-    // EXTENT_NULL = 0. Craft world/cockpit meshes are FINITE(1)/INFINITE(2)
-    // and never reach the repair.
-    const void* const bounds = g_OgreFn_MeshGetBounds(mesh);
-    if (!bounds)
-        return;
-    const int extent = *reinterpret_cast<const int*>(
-        reinterpret_cast<const uint8_t*>(bounds) + 24);
-    if (extent != 0 /* EXTENT_NULL */)
-        return;
-
-    char lowered[128] = {};
-    {
-        const std::string& name = g_OgreFn_ResourceGetName(mesh);
-        const size_t length = (std::min)(name.size(), sizeof(lowered) - 1);
-        for (size_t i = 0; i < length; ++i)
-            lowered[i] =
-                static_cast<char>(std::tolower(static_cast<unsigned char>(name[i])));
-        lowered[length] = 0;
-    }
-
-    const KnownNullBoundsAsset* asset = nullptr;
-    for (const KnownNullBoundsAsset& candidate : kKnownNullBoundsAssets)
-    {
-        if (std::strcmp(lowered, candidate.name) == 0)
-        {
-            asset = &candidate;
-            break;
-        }
-        std::string stem(candidate.name);
-        const size_t dot = stem.rfind('.');
-        if (dot != std::string::npos)
-            stem.resize(dot);
-        if (std::strcmp(lowered, stem.c_str()) == 0)
-        {
-            asset = &candidate;
-            break;
-        }
-    }
-
-    if (!asset)
-    {
-        ++g_NullBoundsUnknownMeshes;
-        if (g_NullBoundsUnknownLogged < kNullBoundsUnknownLogLimit)
-        {
-            ++g_NullBoundsUnknownLogged;
-            LogShimA(
-                LogLevel::Warn,
-                "frustumcull",
-                "[NULLBOUNDS] unknown null-box mesh '%s' at first entity "
-                "creation; not repaired (audit follow-up required)",
-                lowered);
-        }
-        return;
-    }
-
-    // Build the replacement box with Ogre's own six-float constructor so the
-    // object layout is exactly what this OgreMain build expects. Storage is
-    // deliberately over-sized to match the existing restore-bounds call site.
-    alignas(16) unsigned char boxStorage[64] = {};
-    void* const box = g_OgreFn_AabbCtor6(
-        boxStorage,
-        asset->minimum[0],
-        asset->minimum[1],
-        asset->minimum[2],
-        asset->maximum[0],
-        asset->maximum[1],
-        asset->maximum[2]);
-    if (!box)
-        return;
-    g_OgreFn_MeshSetBoundsOriginal(mesh, box, false);
-    g_OgreFn_MeshSetBoundingSphereRadius(mesh, asset->radius);
-    ++g_NullBoundsRepaired;
-    LogShimA(
-        LogLevel::Info,
-        "frustumcull",
-        "[NULLBOUNDS] repaired '%s' from audited geometry: min=(%.4f, %.4f, %.4f) "
-        "max=(%.4f, %.4f, %.4f) radius=%.6f",
-        lowered,
-        asset->minimum[0],
-        asset->minimum[1],
-        asset->minimum[2],
-        asset->maximum[0],
-        asset->maximum[1],
-        asset->maximum[2],
-        asset->radius);
-}
-
-static void* __fastcall SceneCreateEntityStringHook(
-    void* self, void* /*edx*/, const std::string& name)
-{
-    // The original call must stay outside __try: MSVC cannot unwind C++
-    // objects from a function containing SEH.
-    void* entity = g_OgreFn_SceneCreateEntityOriginal(self, name);
-    if (entity)
-    {
-        __try
-        {
-            TryRepairNullMeshBoundsOnEntity(entity);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            // A repair fault must never take the spawn down with it.
-        }
-    }
-    return entity;
-}
-
 // -------------------------------------------------------------- install -----
 
 static void InstallEntityFrustumCullingIfEnabled()
 {
-    if (const char* repairText = std::getenv("OPENSHIM_REPAIR_NULL_MESH_BOUNDS"))
-    {
-        g_RepairNullMeshBoundsEnabled =
-            !(std::strcmp(repairText, "0") == 0 ||
-              _stricmp(repairText, "false") == 0);
-    }
     if (g_EntityFrustumCullInstalled)
         return;
-    if (!g_EntityFrustumCullEnabled && !g_RestoreCraftBoundsEnabled &&
-        !g_RepairNullMeshBoundsEnabled)
-    {
+    if (!g_EntityFrustumCullEnabled && !g_RestoreCraftBoundsEnabled)
         return;
-    }
     if (!GetModuleHandleA("OgreMain.dll"))
         return;
     g_EntityFrustumCullInstalled = true;
@@ -1590,15 +1393,6 @@ static void InstallEntityFrustumCullingIfEnabled()
         "?_updateRenderQueue@Entity@Ogre@@UAEXPAVRenderQueue@2@@Z");
     void* const meshSetBoundsBody = ResolveOgreExportBody(
         "?_setBounds@Mesh@Ogre@@QAEXABVAxisAlignedBox@2@_N@Z");
-    void* const sceneCreateEntityBody = g_RepairNullMeshBoundsEnabled
-        ? ResolveOgreExportBody(
-            "?createEntity@SceneManager@Ogre@@UAEPAVEntity@2@ABV?$basic_string@"
-            "DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z")
-        : nullptr;
-    g_OgreFn_MeshSetBoundingSphereRadius = g_RepairNullMeshBoundsEnabled
-        ? reinterpret_cast<FnOgreMeshSetBoundingSphereRadius>(ResolveOgreExportBody(
-            "?_setBoundingSphereRadius@Mesh@Ogre@@QAEXM@Z"))
-        : nullptr;
     g_OgreFn_CameraIsVisibleBox = reinterpret_cast<FnOgreCameraIsVisibleBox>(
         ResolveOgreExportBody(
             "?isVisible@Camera@Ogre@@UBE_NABVAxisAlignedBox@2@PAW4FrustumPlane@2@@Z"));
@@ -1631,22 +1425,7 @@ static void InstallEntityFrustumCullingIfEnabled()
         g_OgreFn_MovableGetFullTransform && g_OgreFn_EntityGetMeshPtr;
     const bool restoreExportsReady =
         meshSetBoundsBody && g_OgreFn_AabbCtor6 && g_OgreFn_ResourceGetName;
-    const bool nullRepairExportsReady =
-        sceneCreateEntityBody && g_OgreFn_MeshSetBoundingSphereRadius &&
-        meshSetBoundsBody && g_OgreFn_AabbCtor6 && g_OgreFn_ResourceGetName &&
-        g_OgreFn_EntityGetMeshPtr && g_OgreFn_MeshGetBounds;
 
-    if (g_RepairNullMeshBoundsEnabled && !nullRepairExportsReady)
-    {
-        g_RepairNullMeshBoundsEnabled = false;
-        LogShimA(
-            LogLevel::Warn,
-            "frustumcull",
-            "[NULLBOUNDS] required Ogre exports unavailable (createEntity=%s "
-            "setSphereRadius=%s); null-bounds repair stood down",
-            sceneCreateEntityBody ? "yes" : "no",
-            g_OgreFn_MeshSetBoundingSphereRadius ? "yes" : "no");
-    }
     if (g_RestoreCraftBoundsEnabled && !restoreExportsReady)
     {
         g_RestoreCraftBoundsEnabled = false;
@@ -1659,8 +1438,7 @@ static void InstallEntityFrustumCullingIfEnabled()
             g_OgreFn_AabbCtor6 ? "yes" : "no",
             g_OgreFn_ResourceGetName ? "yes" : "no");
     }
-    if (!g_EntityFrustumCullEnabled && !g_RestoreCraftBoundsEnabled &&
-        !g_RepairNullMeshBoundsEnabled)
+    if (!g_EntityFrustumCullEnabled && !g_RestoreCraftBoundsEnabled)
     {
         g_EntityFrustumCullStoodDown = true;
         return;
@@ -1703,11 +1481,6 @@ static void InstallEntityFrustumCullingIfEnabled()
     {
         0x55, 0x8B, 0xEC, 0x8B, 0x55, 0x08
     };
-    // push ebp; mov ebp,esp; push -1; push imm32; mov eax,fs:[...]  -- 12 bytes
-    static const uint8_t kExpectedSceneCreateEntity[] =
-    {
-        0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0xD8, 0x8B, 0x69, 0x10, 0x64, 0xA1
-    };
 
     struct DetourRequest
     {
@@ -1718,19 +1491,14 @@ static void InstallEntityFrustumCullingIfEnabled()
         const uint8_t* expected;
         size_t expectedLength;
     };
-    // Mesh::_setBounds is needed by both features. The two traversal hooks
-    // exist only to suppress submissions, so with restoration alone they are
-    // not patched and the render traversal keeps its stock instruction stream.
-    // The createEntity hook exists only for the null-bounds repair.
-    DetourRequest allRequests[] =
+    // Mesh::_setBounds is needed by both features. The other two exist only
+    // to suppress submissions, so with restoration alone they are not patched
+    // and the render traversal keeps its stock instruction stream.
+    const DetourRequest allRequests[] =
     {
         { "Mesh::_setBounds", &g_MeshSetBoundsDetour, meshSetBoundsBody,
           reinterpret_cast<void*>(MeshSetBoundsHook),
           kExpectedMeshSetBounds, sizeof(kExpectedMeshSetBounds) },
-        { "SceneManager::createEntity", &g_SceneCreateEntityDetour,
-          sceneCreateEntityBody,
-          reinterpret_cast<void*>(SceneCreateEntityStringHook),
-          kExpectedSceneCreateEntity, sizeof(kExpectedSceneCreateEntity) },
         { "Entity::_updateRenderQueue", &g_EntityUpdateRenderQueueDetour,
           entityUpdateRenderQueueBody,
           reinterpret_cast<void*>(EntityUpdateRenderQueueHook),
@@ -1740,11 +1508,7 @@ static void InstallEntityFrustumCullingIfEnabled()
           reinterpret_cast<void*>(ProcessVisibleObjectHook),
           kExpectedProcessVisibleObject, sizeof(kExpectedProcessVisibleObject) },
     };
-    size_t requestCount = 1;
-    if (g_RepairNullMeshBoundsEnabled)
-        ++requestCount;
-    if (g_EntityFrustumCullEnabled)
-        requestCount += 2;
+    const size_t requestCount = g_EntityFrustumCullEnabled ? 3u : 1u;
 
     for (size_t index = 0; index < requestCount; ++index)
     {
@@ -1764,7 +1528,6 @@ static void InstallEntityFrustumCullingIfEnabled()
         // remembering asset bounds has no effect on its own.
         g_EntityFrustumCullStoodDown = true;
         g_RestoreCraftBoundsEnabled = false;
-        g_RepairNullMeshBoundsEnabled = false;
         LogShimA(
             LogLevel::Warn,
             "frustumcull",
@@ -1776,12 +1539,6 @@ static void InstallEntityFrustumCullingIfEnabled()
 
     g_OgreFn_MeshSetBoundsOriginal = reinterpret_cast<FnOgreMeshSetBounds>(
         g_MeshSetBoundsDetour.trampoline);
-    if (g_RepairNullMeshBoundsEnabled)
-    {
-        g_OgreFn_SceneCreateEntityOriginal =
-            reinterpret_cast<FnOgreSceneCreateEntityString>(
-                g_SceneCreateEntityDetour.trampoline);
-    }
     if (g_EntityFrustumCullEnabled)
     {
         g_OgreFn_EntityUpdateRenderQueueOriginal =
@@ -1795,15 +1552,12 @@ static void InstallEntityFrustumCullingIfEnabled()
     LogShimA(
         LogLevel::Info,
         "frustumcull",
-        "[FRUSTUMCULL] installed privateCull=%s restoreBounds=%s nullRepair=%s "
-        "margin=%.2f "
+        "[FRUSTUMCULL] installed privateCull=%s restoreBounds=%s margin=%.2f "
         "restoreScale=%.2f restoreScope=%s restoreMode=%s trace=%s "
         "processVisibleObject=0x%p entityUpdateRenderQueue=0x%p meshSetBounds=0x%p "
-        "createEntity=0x%p "
         "optOut=OPENSHIM_DISABLE_ENTITY_FRUSTUM_CULLING",
         g_EntityFrustumCullEnabled ? "on" : "off",
         g_RestoreCraftBoundsEnabled ? "on" : "off",
-        g_RepairNullMeshBoundsEnabled ? "on" : "off",
         g_FrustumCullMargin,
         g_RestoreCraftBoundsScale,
         g_RestoreCraftBoundsAllMeshes ? "all" : "shared",
@@ -1813,6 +1567,5 @@ static void InstallEntityFrustumCullingIfEnabled()
         g_BoundsTraceEnabled ? "on" : "off",
         g_EntityFrustumCullEnabled ? processVisibleObjectBody : nullptr,
         g_EntityFrustumCullEnabled ? entityUpdateRenderQueueBody : nullptr,
-        meshSetBoundsBody,
-        g_RepairNullMeshBoundsEnabled ? sceneCreateEntityBody : nullptr);
+        meshSetBoundsBody);
 }
