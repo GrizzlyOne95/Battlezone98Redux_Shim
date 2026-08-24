@@ -8,6 +8,7 @@
 #include "patcher.h"
 #include "shim_log.h"
 #include "ogre_shader_cache.h"
+#include "trn_codec.h"
 
 #include <Windows.h>
 
@@ -394,134 +395,6 @@ namespace BZROpenShim
             return true;
         }
 
-        static bool ConvertWideToAnsiBytes(const wchar_t* wide, int wideLenChars, std::vector<uint8_t>& outBytes)
-        {
-            const int bytesNeeded = WideCharToMultiByte(CP_ACP, 0, wide, wideLenChars, nullptr, 0, nullptr, nullptr);
-            if (bytesNeeded < 0)
-                return false;
-
-            outBytes.resize(static_cast<size_t>(bytesNeeded));
-            return WideCharToMultiByte(
-                CP_ACP,
-                0,
-                wide,
-                wideLenChars,
-                reinterpret_cast<char*>(outBytes.data()),
-                bytesNeeded,
-                nullptr,
-                nullptr) == bytesNeeded;
-        }
-
-        static bool ConvertUtfBomToAnsiBytes(const std::vector<uint8_t>& input, std::vector<uint8_t>& outBytes)
-        {
-            if (input.size() >= 3 &&
-                input[0] == 0xEF &&
-                input[1] == 0xBB &&
-                input[2] == 0xBF)
-            {
-                const char* utf8 = reinterpret_cast<const char*>(input.data() + 3);
-                const int utf8Len = static_cast<int>(input.size() - 3);
-                const int wideChars = MultiByteToWideChar(CP_UTF8, 0, utf8, utf8Len, nullptr, 0);
-                if (wideChars <= 0)
-                    return false;
-
-                std::vector<wchar_t> wide(static_cast<size_t>(wideChars), L'\0');
-                if (MultiByteToWideChar(CP_UTF8, 0, utf8, utf8Len, wide.data(), wideChars) != wideChars)
-                    return false;
-
-                return ConvertWideToAnsiBytes(wide.data(), wideChars, outBytes);
-            }
-
-            if (input.size() >= 2 &&
-                input[0] == 0xFF &&
-                input[1] == 0xFE)
-            {
-                const size_t rawBytes = input.size() - 2;
-                const size_t wideChars = rawBytes / sizeof(wchar_t);
-                if (wideChars == 0)
-                {
-                    outBytes.clear();
-                    return true;
-                }
-
-                return ConvertWideToAnsiBytes(
-                    reinterpret_cast<const wchar_t*>(input.data() + 2),
-                    static_cast<int>(wideChars),
-                    outBytes);
-            }
-
-            if (input.size() >= 2 &&
-                input[0] == 0xFE &&
-                input[1] == 0xFF)
-            {
-                const size_t rawBytes = input.size() - 2;
-                const size_t codeUnits = rawBytes / 2;
-                if (codeUnits == 0)
-                {
-                    outBytes.clear();
-                    return true;
-                }
-
-                std::vector<wchar_t> wide(codeUnits, L'\0');
-                for (size_t i = 0; i < codeUnits; ++i)
-                {
-                    const uint16_t value =
-                        (static_cast<uint16_t>(input[2 + (i * 2)]) << 8) |
-                        static_cast<uint16_t>(input[3 + (i * 2)]);
-                    wide[i] = static_cast<wchar_t>(value);
-                }
-
-                return ConvertWideToAnsiBytes(wide.data(), static_cast<int>(wide.size()), outBytes);
-            }
-
-            return false;
-        }
-
-        static bool NormalizeLineEndingsToCrLf(const std::vector<uint8_t>& input, std::vector<uint8_t>& output)
-        {
-            output.clear();
-            output.reserve(input.size() + 32);
-
-            bool changed = false;
-            for (size_t i = 0; i < input.size(); ++i)
-            {
-                const uint8_t ch = input[i];
-                if (ch == '\r')
-                {
-                    output.push_back('\r');
-                    if (i + 1 < input.size() && input[i + 1] == '\n')
-                    {
-                        output.push_back('\n');
-                        ++i;
-                    }
-                    else
-                    {
-                        output.push_back('\n');
-                        changed = true;
-                    }
-                }
-                else if (ch == '\n')
-                {
-                    output.push_back('\r');
-                    output.push_back('\n');
-                    changed = true;
-                }
-                else
-                {
-                    output.push_back(ch);
-                }
-            }
-
-            if (!changed &&
-                (output.size() != input.size() ||
-                 std::memcmp(output.data(), input.data(), input.size()) != 0))
-            {
-                changed = true;
-            }
-
-            return changed;
-        }
-
         static void NormalizeTrnFileIfNeeded(const std::wstring& path, const wchar_t* reason)
         {
             if (path.empty() || g_InTrnNormalization)
@@ -538,17 +411,18 @@ namespace BZROpenShim
                 return;
             }
 
-            std::vector<uint8_t> workingBytes;
-            const bool convertedEncoding = ConvertUtfBomToAnsiBytes(originalBytes, workingBytes);
-            if (!convertedEncoding)
-                workingBytes = originalBytes;
-
-            std::vector<uint8_t> normalizedBytes;
-            const bool changedNewlines = NormalizeLineEndingsToCrLf(workingBytes, normalizedBytes);
-            if (!changedNewlines && !convertedEncoding)
+            const TrnCanonicalResult result = CanonicalizeTrnBytes(originalBytes);
+            if (result.status != TrnCodecStatus::Ok)
+            {
+                Log(L"[TRN] Safety normalizer left file unchanged path=%ls reason=%ls status=%hs\n",
+                    path.c_str(), reason ? reason : L"<unknown>",
+                    TrnCodecStatusName(result.status));
+                return;
+            }
+            if (!result.changed)
                 return;
 
-            if (!WriteBinaryFileAtomic(path, normalizedBytes))
+            if (!WriteBinaryFileAtomic(path, result.serializedCrLf))
             {
                 Log(L"[TRN] Failed to rewrite normalized file path=%ls reason=%ls\n",
                     path.c_str(),
@@ -556,12 +430,12 @@ namespace BZROpenShim
                 return;
             }
 
-            Log(L"[TRN] Normalized file path=%ls reason=%ls encodingFix=%hs bytes=%u->%u\n",
+            Log(L"[TRN] Safety-normalized file path=%ls reason=%ls encoding=%hs bytes=%u->%u\n",
                 path.c_str(),
                 reason ? reason : L"<unknown>",
-                convertedEncoding ? "yes" : "no",
+                TrnSourceEncodingName(result.sourceEncoding),
                 static_cast<unsigned>(originalBytes.size()),
-                static_cast<unsigned>(normalizedBytes.size()));
+                static_cast<unsigned>(result.serializedCrLf.size()));
         }
 
         static void MaybeTrackOpenedTrnHandle(HANDLE handle, const std::wstring& path, DWORD desiredAccess, DWORD creationDisposition)

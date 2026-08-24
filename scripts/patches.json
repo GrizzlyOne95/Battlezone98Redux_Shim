@@ -40,6 +40,30 @@
       "offset": 13,
       "expected_size": 4,
       "fallback": "0x004EAFDF"
+    },
+    {
+      "name": "Redux Numeric Locale Compatibility Call",
+      "pattern": "E8 7F 80 20 00 E8 BA 50 20 00 E8 95 22 07 00 68 18 3C 87 00",
+      "offset": 5,
+      "expected_size": 5,
+      "fallback": "0x00618E41",
+      "require_unique": true
+    },
+    {
+      "name": "Redux TRN Binary Writer Mode",
+      "pattern": "68 5C 67 87 00 8D 85 7C EF FF FF 50 FF 15 E0 94 86 00",
+      "offset": 0,
+      "expected_size": 5,
+      "fallback": "0x00786E5F",
+      "require_unique": true
+    },
+    {
+      "name": "Redux TRN Canonical Fwrite Hook",
+      "pattern": "51 8B 95 3C DF FF FF 52 6A 01 8B 85 44 DF FF FF 50 FF 15 84 94 86 00 83 C4 10",
+      "offset": 17,
+      "expected_size": 6,
+      "fallback": "0x00786E9A",
+      "require_unique": true
     }
   ],
   "globals": [
