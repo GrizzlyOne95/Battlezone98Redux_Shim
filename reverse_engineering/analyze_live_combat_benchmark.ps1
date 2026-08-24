@@ -212,6 +212,10 @@ $results = foreach ($metadataFile in $metadataFiles) {
                 indexed_draw_per_frame = Get-Number $_.Line "DrawIndexed"
                 drawn_vertices_per_frame = Get-Number $_.Line "drawnVerts"
                 drawn_indices_per_frame = Get-Number $_.Line "drawnIndices"
+                no_draw_per_frame = Get-Number $_.Line "noDraw"
+                empty_vertex_per_frame = Get-Number $_.Line "emptyVerts"
+                zero_prim_per_frame = Get-Number $_.Line "zeroPrim"
+                unobserved_per_frame = Get-Number $_.Line "unobserved"
                 cpu_ms_per_frame = Get-Number $_.Line "cpu"
             }
         })
@@ -247,6 +251,10 @@ $results = foreach ($metadataFile in $metadataFiles) {
             indexed_draw_per_frame = Get-Average @($group.Group.indexed_draw_per_frame)
             drawn_vertices_per_frame = Get-Average @($group.Group.drawn_vertices_per_frame)
             drawn_indices_per_frame = Get-Average @($group.Group.drawn_indices_per_frame)
+            no_draw_per_frame = Get-Average @($group.Group.no_draw_per_frame)
+            empty_vertex_per_frame = Get-Average @($group.Group.empty_vertex_per_frame)
+            zero_prim_per_frame = Get-Average @($group.Group.zero_prim_per_frame)
+            unobserved_per_frame = Get-Average @($group.Group.unobserved_per_frame)
             cpu_ms_per_frame = Get-Average @($group.Group.cpu_ms_per_frame)
         }
     }
@@ -261,6 +269,7 @@ $results = foreach ($metadataFile in $metadataFiles) {
 
     $skinByStamp = @{}
     $renderByStamp = @{}
+    $contributorSummaryByStamp = @{}
     $d3d9ByStamp = @{}
     $skinSourceByStamp = @{}
     $dynamicByStamp = @{}
@@ -270,6 +279,8 @@ $results = foreach ($metadataFile in $metadataFiles) {
             $skinByStamp[$record.StampText] = $record.Line
         } elseif ($record.Line -match '\[OgreProfile\]\[Render\]') {
             $renderByStamp[$record.StampText] = $record.Line
+        } elseif ($record.Line -match '\[OgreProfile\]\[RenderContributorSummary\]') {
+            $contributorSummaryByStamp[$record.StampText] = $record.Line
         } elseif ($record.Line -match '\[OgreProfile\]\[D3D9\]') {
             $d3d9ByStamp[$record.StampText] = $record.Line
         } elseif ($record.Line -match '\[OgreProfile\]\[DX11SkinSourceShadow\]') {
@@ -285,11 +296,22 @@ $results = foreach ($metadataFile in $metadataFiles) {
         Where-Object { $_.Line -match '\[OgreProfile\]\[D3D9\]' })
     $skinSourceLines = @($records |
         Where-Object { $_.Line -match '\[OgreProfile\]\[DX11SkinSourceShadow\]' })
+    $contributorSummaryLines = @($records |
+        Where-Object { $_.Line -match '\[OgreProfile\]\[RenderContributorSummary\]' })
     $sampleRows = for ($sampleOrdinal = 0; $sampleOrdinal -lt $main.Count; $sampleOrdinal++) {
         $sample = $main[$sampleOrdinal]
         $fps = Get-Number $sample.Line "fps"
         $skinLine = $skinByStamp[$sample.StampText]
         $renderLine = $renderByStamp[$sample.StampText]
+        $contributorSummaryLine = $contributorSummaryByStamp[$sample.StampText]
+        if (-not $contributorSummaryLine -and
+            $sampleOrdinal -lt $contributorSummaryLines.Count) {
+            # The contributor summary is emitted later in the same report block
+            # and can cross the logger's millisecond boundary, exactly like the
+            # D3D9 record below. Fall back to interval order rather than dropping
+            # the submission-to-draw accounting for that interval.
+            $contributorSummaryLine = $contributorSummaryLines[$sampleOrdinal].Line
+        }
         $d3d9Line = $d3d9ByStamp[$sample.StampText]
         if (-not $d3d9Line -and $sampleOrdinal -lt $d3d9Lines.Count) {
             # D3D9 is emitted at the end of the same report block and can cross
@@ -334,6 +356,17 @@ $results = foreach ($metadataFile in $metadataFiles) {
             ogre_submission_cpu_ms_per_frame = Get-Number $renderLine "cpu"
             draw_calls_per_frame = Get-Number $renderLine "Draw"
             indexed_draw_calls_per_frame = Get-Number $renderLine "DrawIndexed"
+            instanced_draw_calls_per_frame = Get-Number $renderLine "DrawInstanced"
+            indexed_instanced_draw_calls_per_frame = Get-Number $renderLine "DrawIndexedInstanced"
+            context_vtable_refreshes = Get-Number $renderLine "contextRefresh"
+            # Submission-to-draw accounting. An Ogre submission is not an API
+            # draw: these say how many submissions issued none, and why.
+            no_draw_submissions_per_frame = Get-Number $contributorSummaryLine "noDraw"
+            empty_vertex_submissions_per_frame = Get-Number $contributorSummaryLine "emptyVerts"
+            zero_prim_submissions_per_frame = Get-Number $contributorSummaryLine "zeroPrim"
+            multi_draw_submissions_per_frame = Get-Number $contributorSummaryLine "multiDraw"
+            unobserved_submissions_per_frame = Get-Number $contributorSummaryLine "unobserved"
+            contributor_coverage_percent = Get-Number $contributorSummaryLine "coverage"
             d3d9_render_state_per_frame = Get-Number $d3d9Line "renderState"
             d3d9_blend_state_per_frame = Get-Number $d3d9Line "blendState"
             d3d9_texture_per_frame = Get-Number $d3d9Line "texture"

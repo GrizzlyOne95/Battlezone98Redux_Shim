@@ -5,7 +5,7 @@ param(
     [string[]]$Renderer = @("DX11"),
     [ValidateSet(
         "quiet", "idle", "movement", "firing", "flight", "ai_idle", "combat",
-        "dispersed")]
+        "dispersed", "fourteam", "fourteam_fire", "fourteam_move", "fourteam_ai")]
     [string[]]$Scenario = @("quiet", "idle", "movement", "firing", "combat"),
     [ValidateSet(
         "svtank", "svfigh", "avtank", "avfigh", "avrckt", "avartl",
@@ -26,7 +26,23 @@ param(
     [string]$OutputRoot = "",
     [switch]$KillExisting,
     [switch]$ProfilerDisabled,
-    [switch]$ExternalPresentMon
+    [switch]$ExternalPresentMon,
+    # Measurement-only render isolation passed through to the profiler as
+    # OPENSHIM_PROFILE_ISOLATE. A run using this is NOT stock rendering and the
+    # value is recorded in metadata.json so a capture can never be mistaken for
+    # a baseline.
+    [ValidateSet("none", "glow", "shadow", "glow+shadow")]
+    [string]$Isolate = "none",
+    # Phase 2 native CPU attribution. The sampler installs no detours and
+    # changes no game behavior, but it does suspend and resume process threads,
+    # so a sampled run's frame times are attribution input only -- never a
+    # performance result. Sampling and the Ogre profiler are independent and
+    # may be requested together or separately.
+    [switch]$SampleCpu,
+    [ValidateRange(50, 4000)]
+    [int]$SampleHz = 1000,
+    [ValidateRange(1, 64)]
+    [int]$SampleDepth = 48
 )
 
 $ErrorActionPreference = "Stop"
@@ -75,6 +91,21 @@ if ($ExternalPresentMon -and -not (Test-Path -LiteralPath $presentMonExe)) {
     throw "PresentMon was requested but not found: $presentMonExe"
 }
 
+if ($ExternalPresentMon) {
+    # A benchmark killed mid-run leaves its ETW session behind, and a stale
+    # lcbench session makes every later PresentMon start "Started recording"
+    # and then write no CSV at all. That failure is silent and looks exactly
+    # like a run that produced no frames, so clear the leftovers up front.
+    $staleSessions = @(
+        (logman query -ets 2>$null) |
+            Select-String -Pattern '^(lcbench_\S+)' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value })
+    foreach ($stale in $staleSessions) {
+        Write-Host "Terminating stale PresentMon session $stale"
+        & $presentMonExe --terminate_existing_session --session_name $stale *> $null
+    }
+}
+
 if ($KillExisting) {
     Get-Process -Name "battlezone98redux" -ErrorAction SilentlyContinue |
         Stop-Process -Force
@@ -95,6 +126,19 @@ $originalProfileCsv = if (Test-Path $profileCsv) {
 } else { $null }
 $priorProfileEnv = [Environment]::GetEnvironmentVariable(
     "OPENSHIM_PROFILE_OGRE_ANIMATION", "Process")
+$priorIsolateEnv = [Environment]::GetEnvironmentVariable(
+    "OPENSHIM_PROFILE_ISOLATE", "Process")
+$samplerEnvNames = @(
+    "OPENSHIM_PROFILE_NATIVE_CPU",
+    "OPENSHIM_PROFILE_NATIVE_CPU_HZ",
+    "OPENSHIM_PROFILE_NATIVE_CPU_DEPTH",
+    "OPENSHIM_PROFILE_NATIVE_CPU_LABEL")
+$priorSamplerEnv = @{}
+foreach ($samplerEnvName in $samplerEnvNames) {
+    $priorSamplerEnv[$samplerEnvName] =
+        [Environment]::GetEnvironmentVariable($samplerEnvName, "Process")
+}
+$gameLogRoot = Join-Path $GameRoot "logs"
 
 # Redux may pause mission startup for loading VO. Bounded synthetic Space input
 # mirrors launch_mission_live.ps1 and is used only after that exact log cue.
@@ -121,6 +165,26 @@ public static class LiveCombatBenchmarkInput {
     }
 }
 "@
+
+# Whether DWM grants the game an independent flip decides its frame time far
+# more than anything a benchmark arm changes: the same scene, with identical
+# GPU-active time, measured 3.4 ms in "Hardware: Independent Flip" and 9.6 ms
+# in "Composed: Flip". The game only gets the independent flip while it is the
+# foreground window, so the foreground is asserted before the measurement
+# window opens. The present mode is still recorded per run and must be checked
+# before two captures are compared.
+function Set-GameForeground {
+    param([System.Diagnostics.Process]$Process)
+    $Process.Refresh()
+    if ($Process.MainWindowHandle -eq 0) { return }
+    [void][LiveCombatBenchmarkInput]::ShowWindow(
+        $Process.MainWindowHandle, [LiveCombatBenchmarkInput]::SW_RESTORE)
+    [void][LiveCombatBenchmarkInput]::SetForegroundWindow($Process.MainWindowHandle)
+    try {
+        (New-Object -ComObject WScript.Shell).AppActivate($Process.Id) | Out-Null
+    } catch {
+    }
+}
 
 function Send-LoadSkip {
     param([System.Diagnostics.Process]$Process)
@@ -197,6 +261,22 @@ try {
         "OPENSHIM_PROFILE_OGRE_ANIMATION",
         $(if ($ProfilerDisabled) { "0" } else { "1" }),
         "Process")
+    [Environment]::SetEnvironmentVariable(
+        "OPENSHIM_PROFILE_ISOLATE",
+        $(if ($Isolate -eq "none") { $null } else { $Isolate }),
+        "Process")
+    [Environment]::SetEnvironmentVariable(
+        "OPENSHIM_PROFILE_NATIVE_CPU",
+        $(if ($SampleCpu) { "1" } else { $null }),
+        "Process")
+    [Environment]::SetEnvironmentVariable(
+        "OPENSHIM_PROFILE_NATIVE_CPU_HZ",
+        $(if ($SampleCpu) { "$SampleHz" } else { $null }),
+        "Process")
+    [Environment]::SetEnvironmentVariable(
+        "OPENSHIM_PROFILE_NATIVE_CPU_DEPTH",
+        $(if ($SampleCpu) { "$SampleDepth" } else { $null }),
+        "Process")
 
     foreach ($rendererName in $Renderer) {
         Set-RendererConfig $rendererName
@@ -230,8 +310,25 @@ try {
                             $population,
                             $spawnDistance.ToString("0", [Globalization.CultureInfo]::InvariantCulture),
                             $viewOrientation)
+                        if ($Isolate -ne "none") {
+                            $runId = "{0}_iso-{1}" -f @(
+                                $runId, $Isolate.Replace("+", "-"))
+                        }
                         $runRoot = Join-Path $sessionRoot $runId
                         New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
+                        if ($SampleCpu) {
+                            # The sampler names its file after the label and the
+                            # process id, so a previous run's file can never be
+                            # mistaken for this one's. Clear leftovers anyway:
+                            # a recycled pid would otherwise leave an ambiguous
+                            # pair in the game log directory.
+                            [Environment]::SetEnvironmentVariable(
+                                "OPENSHIM_PROFILE_NATIVE_CPU_LABEL", $runId, "Process")
+                            Get-ChildItem -LiteralPath $gameLogRoot `
+                                -Filter "openshim_cpu_samples_*.bin" `
+                                -ErrorAction SilentlyContinue |
+                                Remove-Item -Force -ErrorAction SilentlyContinue
+                        }
                         Write-Host "Starting $runId"
                         $startedAt = Get-Date
                         $process = Start-Process -FilePath $gameExe `
@@ -240,6 +337,7 @@ try {
                         $deadline = (Get-Date).AddSeconds($RunTimeoutSeconds)
                         $completed = $false
                         $nextLoadSkip = Get-Date
+                        $foregroundAsserted = $false
                         $presentMon = $null
                         $presentMonSession = "lcbench_$($process.Id)"
 
@@ -263,6 +361,11 @@ try {
                                     '\[LIVE_COMBAT_BENCH\].*benchmark-end') {
                                     $completed = $true
                                     break
+                                }
+                                if (-not $foregroundAsserted -and
+                                    $tail -match '\[LIVE_COMBAT_BENCH\].*warmup-begin') {
+                                    Set-GameForeground $process
+                                    $foregroundAsserted = $true
                                 }
                                 if ($ExternalPresentMon -and -not $presentMon -and
                                     $tail -match '\[LIVE_COMBAT_BENCH\].*measure-begin') {
@@ -330,6 +433,18 @@ try {
                         }
                         Copy-LogIfPresent $shimLog (Join-Path $runRoot "openshim.log")
                         Copy-LogIfPresent $profileCsv (Join-Path $runRoot "profile.csv")
+                        if ($SampleCpu) {
+                            $sampleFiles = @(Get-ChildItem -LiteralPath $gameLogRoot `
+                                -Filter "openshim_cpu_samples_*.bin" `
+                                -ErrorAction SilentlyContinue)
+                            foreach ($sampleFile in $sampleFiles) {
+                                Move-Item -LiteralPath $sampleFile.FullName `
+                                    -Destination (Join-Path $runRoot "cpu_samples.bin") -Force
+                            }
+                            if ($sampleFiles.Count -eq 0) {
+                                Write-Warning "$runId requested CPU sampling but produced no sample file"
+                            }
+                        }
 
                         $metadata = [ordered]@{
                             run_id = $runId
@@ -341,6 +456,10 @@ try {
                             orientation = $viewOrientation
                             profiler_enabled = -not $ProfilerDisabled
                             external_presentmon = [bool]$ExternalPresentMon
+                            isolate = $Isolate
+                            cpu_sampler_enabled = [bool]$SampleCpu
+                            cpu_sampler_hz = $(if ($SampleCpu) { $SampleHz } else { 0 })
+                            cpu_sampler_depth = $(if ($SampleCpu) { $SampleDepth } else { 0 })
                             warmup_seconds = $WarmupSeconds
                             measure_seconds = $MeasureSeconds
                             cluster_count = $ClusterCount
@@ -378,6 +497,12 @@ try {
     }
     [Environment]::SetEnvironmentVariable(
         "OPENSHIM_PROFILE_OGRE_ANIMATION", $priorProfileEnv, "Process")
+    [Environment]::SetEnvironmentVariable(
+        "OPENSHIM_PROFILE_ISOLATE", $priorIsolateEnv, "Process")
+    foreach ($samplerEnvName in $samplerEnvNames) {
+        [Environment]::SetEnvironmentVariable(
+            $samplerEnvName, $priorSamplerEnv[$samplerEnvName], "Process")
+    }
 }
 
 Write-Host "Benchmark session complete: $sessionRoot"

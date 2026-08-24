@@ -136,6 +136,7 @@
     <ClCompile Include="src\patches\redux_compatibility.cpp" />
     <ClCompile Include="src\patches\trn_codec.cpp" />
     <ClCompile Include="src\patches\game_state.cpp" />
+    <ClCompile Include="src\patches\native_cpu_sampler.cpp" />
     <ClCompile Include="src\patches\net_optimizer.cpp" />
     <ClCompile Include="src\patches\openshim_ini.cpp" />
     <ClCompile Include="src\patches\openshim_env_config.cpp" />
@@ -182,12 +183,14 @@
     <ClInclude Include="include\terrain_semantic.h" />
     <ClInclude Include="include\ogre_runtime.h" />
     <ClInclude Include="include\game_state.h" />
+    <ClInclude Include="include\native_cpu_sampler.h" />
     <ClInclude Include="include\net_optimizer.h" />
     <ClInclude Include="include\shim_log.h" />
     <ClInclude Include="include\winmm_proxy.h" />
     <ClInclude Include="include\patches.h" />
     <ClInclude Include="include\patcher.h" />
     <ClInclude Include="include\hook_engine.h" />
+    <ClInclude Include="include\iat_patch.h" />
     <ClInclude Include="include\BZROpenShim.h" />
     <ClInclude Include="include\openshim_sdk_v2.h" />
     <ClInclude Include="include\native_ui.h" />

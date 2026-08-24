@@ -11,6 +11,9 @@
 #include "native_ui.h"
 #include "ogre_animation_profiler.h"
 #include "ogre_profiler_algorithms.h"
+#include "weapon_convergence.h"
+#include "headlight_falloff.h"
+#include "chunk_batch_invalidation.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -19,6 +22,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <intrin.h>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -915,6 +919,20 @@ namespace BZROpenShim
         //       groundPos = 0
         // So gPos is stale whenever the crosshair is sitting on something, and
         // reading it unconditionally aims at wherever the ground last was.
+        //
+        // Reticle::FindGroundPos (0x005BCCA0) only writes gPos when its ray
+        // actually hits terrain:
+        //
+        //   if (TerrainRaycast(...) != 0) {
+        //       this->gPos = origin + t * direction;   ; +0xCC..+0xD4
+        //   }
+        //   return hit;                                ; stored to this->+0xA8
+        //
+        // So +0xA8 is the per-frame "the crosshair is on the ground" flag, and
+        // gPos keeps the last hit forever once the crosshair leaves the
+        // terrain. Convergence has to consult the flag, not just gPos, or
+        // aiming at the sky keeps firing at wherever the ground last was.
+        constexpr uintptr_t kSmartReticleGroundHitAddr = 0x025CE778;     // +0xA8
         constexpr uintptr_t kSmartReticleSelectObjectAddr = 0x025CE77C;  // +0xAC
         constexpr uintptr_t kSmartReticlePositionAddr = 0x025CE79C;      // +0xCC gPos
         // 0x00886B20 is NOT a reticle range variable: it is a pooled read-only
@@ -961,8 +979,38 @@ namespace BZROpenShim
         // The weapon's _OBJ76 carries its MAT_3D at kObj76TransformOffset, not
         // at the object head. Stock pushes obj+0x20 into RefreshWeaponTransform
         // at 0x005F0A38.
+        //
+        // That MAT_3D is NOT a world transform. Weapon::Control (Redux
+        // 0x00611610) recomputes, every frame:
+        //
+        //   this->M = MountWorldMatrix(this)            ; weapon+0x28
+        //   this->I = Matrix_Inverse(this->M)           ; weapon+0x68
+        //
+        // where MountWorldMatrix (0x006116A0) is
+        // obj_rel_parent_matrix(this->hard /*weapon+0x14*/, nullptr) with its
+        // position replaced by the muzzle offset at weapon+0x1C pushed through
+        // that matrix. So M is the muzzle frame in world space.
+        //
+        // Every firing site in the exe then spawns ordnance from
+        //
+        //   fireMatrix = Matrix_Multiply(weapon->obj->mat /*obj+0x20*/, M)
+        //
+        // (0x005B1E10, 0x005B2010, 0x005B8FF0, 0x005D6330, 0x005DFCB0,
+        // 0x005E1EA0, 0x004F2210, 0x00582190, ... all share the shape
+        // `FUN_0081fe60(out, *(weapon+0x10)+0x20, weapon+0x28)`), and
+        // Matrix_Multiply (0x0081FE60) is row-vector `inner * outer`.
+        //
+        // The consequence for convergence: obj+0x20 is the weapon's transform
+        // *in the mount frame*, so a world-space basis written there is wrong
+        // by the whole mount transform, and its position field is a mount-local
+        // offset that stock deliberately preserves (Hovercraft::UpdateWeaponAim
+        // saves it at 0x005F0930 and restores it after RefreshWeaponTransform).
+        constexpr size_t kWeaponMountWorldMatrixOffset = 0x28;
+        constexpr size_t kWeaponMountInverseMatrixOffset = 0x68;
         constexpr int kConvergenceWeaponSlotCount = 5;
-        constexpr float kConvergenceDirectionEpsilon = 0.001f;
+        // The convergence tuning constants (minimum target distance, maximum
+        // deviation from the stock aim) live alongside the math in
+        // include/weapon_convergence.h.
 
         // Scrap/pilot text positions used by the stock HUD draw path. The
         // legacy layout keeps their relative spacing but moves the combined
@@ -1224,6 +1272,9 @@ namespace BZROpenShim
         static bool g_WingmanWeaponAimWrapperActive = false;
         static bool g_PlayerReticleHovercraftPatchActive = false;
         static bool g_PlayerReticleConvergenceLayoutFaultLogged = false;
+        static bool g_PlayerReticleConvergenceMountFaultLogged = false;
+        static bool g_PlayerReticleConvergenceSkyStandDownLogged = false;
+        static bool g_PlayerReticleConvergenceLayoutCheckLogged = false;
         static constexpr int kPlayerReticleConvergenceLogLimit = 6;
         static constexpr ULONGLONG kPlayerReticleConvergenceLogIntervalMs = 10000;
         static int g_PlayerReticleConvergenceLogCount = 0;
@@ -1541,6 +1592,7 @@ namespace BZROpenShim
         };
 
 #include "chunk_proxy_generic_meshes.inl"
+#include "ogre_entity_frustum_cull.inl"
 
         struct ChunkProxySlot
         {
@@ -2124,10 +2176,34 @@ namespace BZROpenShim
         // of render-queue submissions per frame must be counted, not assumed.
         static bool g_GenericChunkBatchRateDiagnostics = false;
         static uint64_t g_GenericChunkBatchSubmitCalls = 0;
+        // Counts successful *submissions*, not geometry rebuilds. Since
+        // state-version reuse landed those are different numbers: the rebuild
+        // count lives in g_GenericChunkBatchTelemetry.
         static uint64_t g_GenericChunkBatchRebuilds = 0;
         static DWORD g_GenericChunkBatchRateLogTick = 0;
         static uint64_t g_GenericChunkBatchSubmitCallsAtLastLog = 0;
         static uint64_t g_GenericChunkBatchRebuildsAtLastLog = 0;
+        // State-version reuse. The batch is re-submitted to every camera/scheme
+        // traversal, but the geometry is only re-emitted when the slot state it
+        // is built from actually differs. See include/chunk_batch_invalidation.h
+        // for why the version is derived from the source rather than declared by
+        // its mutators.
+        static bool g_GenericChunkBatchReuseEnabled = true;
+        // Observer mode: take the decision and count it, then rebuild anyway.
+        // This is how the pre-optimization baseline and the dedup opportunity
+        // are measured from the same binary, without changing what is drawn.
+        static bool g_GenericChunkBatchReuseObserveOnly = false;
+        static uint64_t g_GenericChunkBatchBuiltVersion =
+            ChunkBatchInvalidation::kUnbuiltVersion;
+        static std::string g_GenericChunkBatchBuiltMaterial = {};
+        static ChunkBatchInvalidation::Telemetry g_GenericChunkBatchTelemetry = {};
+        static ChunkBatchInvalidation::Telemetry g_GenericChunkBatchTelemetryAtLastLog = {};
+        static int64_t g_GenericChunkBatchQpcFrequency = 0;
+        // Last visibility written to the batch object, so setVisible is only
+        // called on a transition. Without this the empty path would push
+        // setVisible(false) three times per frame for as long as there is no
+        // debris, which is most of a normal mission.
+        static bool g_GenericChunkBatchVisible = false;
         static const std::string g_GenericChunkBatchMaterialName = "scarpmat2";
         static const std::string g_GenericChunkBatchMaterialGroup = "General";
         // TEST/DIAGNOSTIC seam only. Set by the environment gate below and
@@ -2176,6 +2252,11 @@ namespace BZROpenShim
         using FnOgreGetLightFloat = float(__thiscall*)(void*);
         using FnOgreGetLightVisible = bool(__thiscall*)(void*);
         using FnOgreSetSpotlightRange = void(__thiscall*)(void*, const float*, const float*, float);
+        using FnOgreSetAttenuation = void(__thiscall*)(void*, float, float, float, float);
+        using FnOgreGetLightType = int(__thiscall*)(void*);
+        using FnOgreGetLightVector3 = const OgreVector3*(__thiscall*)(void*);
+        using FnOgreGetLightDerivedPosition = const OgreVector3*(__thiscall*)(void*, bool);
+        using FnOgreGetCastShadows = bool(__thiscall*)(void*);
         using FnOgreGetRenderQueue = void*(__thiscall*)(void*);
         using FnOgreGetCurrentViewport = void*(__thiscall*)(void*);
         using FnOgreViewportGetCamera = void*(__thiscall*)(void*);
@@ -2258,19 +2339,59 @@ namespace BZROpenShim
         constexpr ULONGLONG kMultiplayerFlagSubmitStaleMs = 2000;
         constexpr ULONGLONG kMultiplayerFlagApplyRetryMs = 500;
 
-        template<typename T>
-        static T ResolveOgreProc(const char* name)
+        // Resolves one decorated export from the shipped OgreMain.dll, caching
+        // both outcomes.
+        //
+        // Caching the *failure* is the point. A caller written as
+        // `if (!fn) fn = ResolveOgreProc<T>("...")` retries forever when the
+        // name is wrong, because the field it guards on can never be filled.
+        // That is not hypothetical: one mis-decorated name in
+        // GetHeadlightOgreApi -- `Q` where Ogre::MovableObject::getCastShadows
+        // is virtual, so `U` -- turned into a GetProcAddress per emission light
+        // per frame and measured 45% of the main thread's CPU in an 80-craft
+        // battle. The call sites have been repaired, but the resolver is the
+        // place where a *future* typo stops being able to recreate that.
+        //
+        // A miss is only cached once OgreMain is actually loaded; a lookup made
+        // before the module exists is a timing answer, not an answer about the
+        // name, and must not be recorded as one.
+        static void* ResolveOgreProcRaw(const char* name)
         {
             if (!name || !*name)
                 return nullptr;
 
-            static HMODULE ogreMain = nullptr;
-            if (!ogreMain)
-                ogreMain = GetModuleHandleA("OgreMain.dll");
+            static std::mutex cacheMutex;
+            static std::unordered_map<std::string, void*> cache;
+
+            const HMODULE ogreMain = GetModuleHandleA("OgreMain.dll");
             if (!ogreMain)
                 return nullptr;
 
-            return reinterpret_cast<T>(GetProcAddress(ogreMain, name));
+            std::lock_guard<std::mutex> lock(cacheMutex);
+            const auto existing = cache.find(name);
+            if (existing != cache.end())
+                return existing->second;
+
+            void* const resolved =
+                reinterpret_cast<void*>(GetProcAddress(ogreMain, name));
+            cache.emplace(name, resolved);
+            if (!resolved)
+            {
+                // One warning per distinct name, for the lifetime of the
+                // process. A null Ogre entry point degrades a feature silently,
+                // which is exactly how the getCastShadows typo survived.
+                Log(L"[OGRE-EXPORTS] WARNING: OgreMain.dll has no export '%hs'. "
+                    L"The feature using it will be degraded; the lookup will not "
+                    L"be retried.\n",
+                    name);
+            }
+            return resolved;
+        }
+
+        template<typename T>
+        static T ResolveOgreProc(const char* name)
+        {
+            return reinterpret_cast<T>(ResolveOgreProcRaw(name));
         }
 
         // The render-bridge offsets do not hold a bridge on every object that
@@ -5471,7 +5592,13 @@ namespace BZROpenShim
             }
             g_ChunkProxyBillboardSet = nullptr;
             g_GenericChunkBatchManualObject = nullptr;
+            // The recorded visibility described the object just dropped.
+            g_GenericChunkBatchVisible = false;
             g_GenericChunkBatchSceneNode = nullptr;
+            // A destroyed scene invalidates the cached geometry too.
+            g_GenericChunkBatchBuiltVersion =
+                ChunkBatchInvalidation::kUnbuiltVersion;
+            g_GenericChunkBatchBuiltMaterial.clear();
             g_GenericChunkBatchSceneManager = nullptr;
             g_GenericChunkBatchSectionCreated = false;
 
@@ -6718,6 +6845,197 @@ namespace BZROpenShim
                 g_GenericChunkBatchRuntimeAvailable ? 1u : 0u);
         }
 
+        // High-resolution rebuild cost. Sampled unconditionally because the
+        // rebuild path is already thousands of virtual Ogre calls, so two QPC
+        // reads are noise -- and a cost figure that only exists when
+        // diagnostics are on cannot be used to justify the optimization.
+        static int64_t ReadChunkBatchQpc()
+        {
+            LARGE_INTEGER counter = {};
+            QueryPerformanceCounter(&counter);
+            return counter.QuadPart;
+        }
+
+        static void NoteChunkBatchRebuildCost(int64_t startTicks)
+        {
+            if (g_GenericChunkBatchQpcFrequency == 0)
+            {
+                LARGE_INTEGER frequency = {};
+                QueryPerformanceFrequency(&frequency);
+                g_GenericChunkBatchQpcFrequency = frequency.QuadPart;
+            }
+            if (g_GenericChunkBatchQpcFrequency <= 0)
+                return;
+            const int64_t elapsed = ReadChunkBatchQpc() - startTicks;
+            if (elapsed <= 0)
+                return;
+            const uint64_t nanoseconds = static_cast<uint64_t>(
+                (elapsed * 1000000000ll) / g_GenericChunkBatchQpcFrequency);
+            g_GenericChunkBatchTelemetry.rebuildNanoseconds += nanoseconds;
+            if (nanoseconds > g_GenericChunkBatchTelemetry.maxRebuildNanoseconds)
+                g_GenericChunkBatchTelemetry.maxRebuildNanoseconds = nanoseconds;
+        }
+
+        // Which pass is asking. Ogre drives the world _updateRenderQueue
+        // override once per camera traversal per active material scheme, so the
+        // viewport's scheme is what distinguishes the repeats from each other.
+        // Measured on lcbench: exactly three per rendered frame, named
+        // "high-pssm", "glow" and "ShaderGeneratorDefaultScheme". They are one
+        // world camera path visited once per scheme -- not three PSSM shadow
+        // cameras, which was the standing assumption before this instrument.
+        //
+        // Declared as a pointer return rather than a reference: a reference
+        // binding makes MSVC treat the frame as requiring object unwinding,
+        // which __try forbids. The ABI is identical.
+        using FnOgreGetCurrentViewport = void*(__thiscall*)(void*);
+        using FnOgreGetViewportMaterialScheme = const std::string*(__thiscall*)(void*);
+
+        // SEH-only leaf: no statics, no objects, so the frame needs no
+        // unwinding. The returned pointer is into Ogre's own string and is only
+        // ever read by the immediate caller.
+        static const char* TryReadViewportSchemeName(
+            void* sceneManager,
+            FnOgreGetCurrentViewport getCurrentViewport,
+            FnOgreGetViewportMaterialScheme getMaterialScheme)
+        {
+            __try
+            {
+                void* const viewport = getCurrentViewport(sceneManager);
+                if (!viewport)
+                    return "<no-viewport>";
+                const std::string* const scheme = getMaterialScheme(viewport);
+                if (!scheme || scheme->empty())
+                    return "<empty>";
+                return scheme->c_str();
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return "<faulted>";
+            }
+        }
+
+        static const char* GetCurrentOgreMaterialSchemeName(void* sceneManager)
+        {
+            static FnOgreGetCurrentViewport getCurrentViewport =
+                ResolveOgreProc<FnOgreGetCurrentViewport>(
+                    "?getCurrentViewport@SceneManager@Ogre@@QBEPAVViewport@2@XZ");
+            static FnOgreGetViewportMaterialScheme getMaterialScheme =
+                ResolveOgreProc<FnOgreGetViewportMaterialScheme>(
+                    "?getMaterialScheme@Viewport@Ogre@@QBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
+            if (!sceneManager || !getCurrentViewport || !getMaterialScheme)
+                return "<unavailable>";
+            return TryReadViewportSchemeName(
+                sceneManager, getCurrentViewport, getMaterialScheme);
+        }
+
+        // Interval telemetry for the state-version reuse. Everything here is
+        // a delta over the reporting window, so the numbers can be divided by
+        // the frame count of the same window to get per-frame rates without
+        // needing a frame hook of our own.
+        static void LogGenericChunkBatchTelemetry(DWORD windowMs)
+        {
+            using namespace ChunkBatchInvalidation;
+            const Telemetry& now = g_GenericChunkBatchTelemetry;
+            const Telemetry& then = g_GenericChunkBatchTelemetryAtLastLog;
+            const unsigned long long requests = now.requests - then.requests;
+            const unsigned long long rebuilds = now.rebuilds - then.rebuilds;
+            const unsigned long long reused = now.reused - then.reused;
+            const unsigned long long emptySkips = now.emptySkips - then.emptySkips;
+            const unsigned long long vertices = now.verticesRebuilt - then.verticesRebuilt;
+            const unsigned long long indices = now.indicesRebuilt - then.indicesRebuilt;
+            const unsigned long long nanos =
+                now.rebuildNanoseconds - then.rebuildNanoseconds;
+
+            LogChunkDiagnostic(
+                "chunkbatch",
+                L"[CHUNKBATCH] reuse windowMs=%lu requests=%llu rebuilds=%llu reused=%llu "
+                L"emptySkips=%llu dedupPct=%.1f verts=%llu indices=%llu rebuildMs=%.3f maxRebuildMs=%.3f"
+                L" mode=%hs\n",
+                static_cast<unsigned long>(windowMs),
+                requests, rebuilds, reused, emptySkips,
+                requests ? (100.0 * static_cast<double>(reused) /
+                            static_cast<double>(requests)) : 0.0,
+                vertices, indices,
+                static_cast<double>(nanos) / 1000000.0,
+                static_cast<double>(now.maxRebuildNanoseconds) / 1000000.0,
+                g_GenericChunkBatchReuseObserveOnly
+                    ? "observe"
+                    : (g_GenericChunkBatchReuseEnabled ? "reuse" : "always-rebuild"));
+
+            for (int index = 0; index < 8; ++index)
+            {
+                const unsigned long long count =
+                    now.reasonCounts[index] - then.reasonCounts[index];
+                if (count == 0)
+                    continue;
+                LogChunkDiagnostic(
+                    "chunkbatch",
+                    L"[CHUNKBATCH] reuse   reason=%hs count=%llu\n",
+                    ReasonName(static_cast<Reason>(index)),
+                    count);
+            }
+            for (size_t index = 0; index < now.schemeCount; ++index)
+            {
+                const SchemeCounters& scheme = now.schemes[index];
+                const SchemeCounters& previous =
+                    index < then.schemeCount ? then.schemes[index] : SchemeCounters{};
+                const unsigned long long schemeRequests =
+                    scheme.requests - previous.requests;
+                if (schemeRequests == 0)
+                    continue;
+                LogChunkDiagnostic(
+                    "chunkbatch",
+                    L"[CHUNKBATCH] reuse   scheme=%hs requests=%llu rebuilds=%llu\n",
+                    scheme.name,
+                    schemeRequests,
+                    static_cast<unsigned long long>(scheme.rebuilds - previous.rebuilds));
+            }
+            g_GenericChunkBatchTelemetryAtLastLog = now;
+        }
+
+        // Takes the batch out of the scene without destroying it, so the next
+        // explosion reuses the same ManualObject and section rather than
+        // paying for a fresh one. The built version is deliberately left
+        // alone: the geometry in the object is still valid, it is simply not
+        // wanted right now, and clearing it would force a needless rebuild
+        // the moment the same debris set comes back.
+        static void HideGenericChunkBatchIfBuilt()
+        {
+            static FnOgreSetVisible setVisible =
+                ResolveOgreProc<FnOgreSetVisible>(
+                    "?setVisible@MovableObject@Ogre@@UAEX_N@Z");
+            if (!g_GenericChunkBatchManualObject || !setVisible)
+                return;
+            if (!g_GenericChunkBatchVisible)
+                return;
+            try
+            {
+                setVisible(g_GenericChunkBatchManualObject, false);
+                g_GenericChunkBatchVisible = false;
+            }
+            catch (...)
+            {
+                // Deliberately does NOT clear g_GenericChunkBatchRuntimeAvailable,
+                // unlike the emit and submit failures below. Those happen while
+                // slots are classified batch-ready and their per-Entity proxies
+                // are already hidden, so the batch has promised to draw geometry
+                // it can no longer produce and standing down permanently is the
+                // safe answer. This path only runs when there is nothing to draw
+                // at all, so dropping the object and letting the next explosion
+                // recreate it is a recovery, not a risk.
+                LogChunkDiagnostic(
+                    "chunkbatch",
+                    L"[CHUNKBATCH] hide threw; dropping cached batch\n");
+                g_GenericChunkBatchManualObject = nullptr;
+                // The recorded visibility described the object just dropped.
+                g_GenericChunkBatchVisible = false;
+                g_GenericChunkBatchSceneNode = nullptr;
+                g_GenericChunkBatchSectionCreated = false;
+                g_GenericChunkBatchBuiltVersion =
+                    ChunkBatchInvalidation::kUnbuiltVersion;
+            }
+        }
+
         static bool RebuildAndSubmitGenericChunkBatch(void* renderQueue)
         {
             size_t chunkCount = 0;
@@ -6727,6 +7045,11 @@ namespace BZROpenShim
             // half-extent is under a metre, so slot origins are a fair proxy.
             float tightMin[3] = { FLT_MAX, FLT_MAX, FLT_MAX };
             float tightMax[3] = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+            // The state version is accumulated inside this existing scan, so
+            // the reuse check costs no extra pass over the slots -- only a few
+            // integer mixes per eligible chunk.
+            ChunkBatchInvalidation::SourceVersion sourceVersion;
+            uint32_t ordinal = 0;
             for (const ChunkProxySlot& slot : g_ChunkProxySlots)
             {
                 if (!slot.active || !slot.genericBatchTransformReady)
@@ -6734,10 +7057,24 @@ namespace BZROpenShim
                 ++chunkCount;
                 vertexCount += slot.genericBatchKind == 1
                     ? std::size(kChunk1Vertices) : std::size(kChunk2Vertices);
+                const ChunkProxyTransform& batchTransform = slot.genericBatchTransform;
+                ChunkBatchInvalidation::SlotState slotState = {};
+                slotState.kind = slot.genericBatchKind;
+                slotState.x = batchTransform.x;
+                slotState.y = batchTransform.y;
+                slotState.z = batchTransform.z;
+                slotState.qw = batchTransform.orientation.w;
+                slotState.qx = batchTransform.orientation.x;
+                slotState.qy = batchTransform.orientation.y;
+                slotState.qz = batchTransform.orientation.z;
+                slotState.sx = batchTransform.scale.x;
+                slotState.sy = batchTransform.scale.y;
+                slotState.sz = batchTransform.scale.z;
+                ChunkBatchInvalidation::MixSlot(sourceVersion, ordinal++, slotState);
                 const float slotOrigin[3] = {
-                    slot.genericBatchTransform.x,
-                    slot.genericBatchTransform.y,
-                    slot.genericBatchTransform.z };
+                    batchTransform.x,
+                    batchTransform.y,
+                    batchTransform.z };
                 for (int axis = 0; axis < 3; ++axis)
                 {
                     if (slotOrigin[axis] < tightMin[axis])
@@ -6747,7 +7084,20 @@ namespace BZROpenShim
                 }
             }
             if (chunkCount == 0)
+            {
+                // Nothing eligible. Not submitting is necessary but not
+                // sufficient: the ManualObject still holds the last geometry
+                // and is attached to a node under the root, so it would remain
+                // eligible for Ogre's own traversal. Hide it as well, so the
+                // frame the last chunk expires is the frame it stops drawing --
+                // with or without reuse, and whether or not Ogre traverses it
+                // independently of this hook.
+                HideGenericChunkBatchIfBuilt();
+                ++g_GenericChunkBatchTelemetry.emptySkips;
                 return false;
+            }
+            ChunkBatchInvalidation::MixCount(
+                sourceVersion, static_cast<uint32_t>(chunkCount));
 
             // TEST/DIAGNOSTIC ONLY. Placed deliberately *after* the eligible
             // slots have been counted, so the injected failure lands in the
@@ -6839,13 +7189,102 @@ namespace BZROpenShim
             void* const sceneManager = GetOgreSceneManagerRuntime();
             if (!sceneManager)
                 return false;
-            if (g_GenericChunkBatchSceneManager != sceneManager)
+            const bool sceneManagerChanged =
+                g_GenericChunkBatchSceneManager != sceneManager;
+            if (sceneManagerChanged)
             {
+                // A new SceneManager means the previous ManualObject belongs to
+                // a destroyed scene. Drop the cached version with it, or reuse
+                // would submit a dangling object across a mission boundary.
                 g_GenericChunkBatchManualObject = nullptr;
+                // The recorded visibility described the object just dropped.
+                g_GenericChunkBatchVisible = false;
                 g_GenericChunkBatchSceneNode = nullptr;
                 g_GenericChunkBatchSceneManager = sceneManager;
                 g_GenericChunkBatchSectionCreated = false;
+                g_GenericChunkBatchBuiltVersion =
+                    ChunkBatchInvalidation::kUnbuiltVersion;
             }
+
+            // ---- reuse decision -------------------------------------------
+            // Everything below this point that can invalidate the built
+            // geometry has already been resolved: the ManualObject exists or
+            // does not, the SceneManager has been compared, and the source
+            // version is computed. Anything uncertain resolves toward
+            // rebuilding inside DecideRebuild().
+            ChunkBatchInvalidation::BuiltState builtState = {};
+            builtState.version = g_GenericChunkBatchBuiltVersion;
+            builtState.objectAlive = g_GenericChunkBatchManualObject != nullptr;
+            builtState.sectionCreated = g_GenericChunkBatchSectionCreated;
+            // Redundant with objectAlive today, because the SceneManager check
+            // above already nulls the object. Fed anyway so the policy states
+            // the requirement itself rather than relying on a side effect
+            // several lines up.
+            builtState.objectIdentityStable = !sceneManagerChanged;
+            builtState.materialStable =
+                g_GenericChunkBatchBuiltMaterial == g_GenericChunkBatchMaterialName;
+
+            const ChunkBatchInvalidation::Reason reason =
+                ChunkBatchInvalidation::DecideRebuild(
+                    builtState,
+                    sourceVersion.Value(),
+                    !g_GenericChunkBatchReuseEnabled);
+            const bool wantRebuild = ChunkBatchInvalidation::ShouldRebuild(reason);
+
+            ++g_GenericChunkBatchTelemetry.requests;
+            g_GenericChunkBatchTelemetry.NoteReason(reason);
+            // Pass attribution costs two virtual Ogre calls plus a short string
+            // walk on every traversal, which is real work on a path that runs
+            // three times a frame. The counters above are a handful of
+            // increments and stay unconditional; this part is opt-in.
+            if (g_GenericChunkBatchRateDiagnostics)
+            {
+                g_GenericChunkBatchTelemetry.NoteScheme(
+                    GetCurrentOgreMaterialSchemeName(sceneManager), wantRebuild);
+            }
+
+            if (!wantRebuild && !g_GenericChunkBatchReuseObserveOnly)
+            {
+                // The geometry already in the ManualObject is byte-identical to
+                // what a rebuild would produce, so this traversal only needs the
+                // submission. This is the whole optimization: one emit per
+                // source-state change instead of one per camera/scheme pass.
+                ++g_GenericChunkBatchTelemetry.reused;
+                try
+                {
+                    if (!g_GenericChunkBatchVisible)
+                    {
+                        setVisible(g_GenericChunkBatchManualObject, true);
+                        g_GenericChunkBatchVisible = true;
+                    }
+                    updateRenderQueue(g_GenericChunkBatchManualObject, renderQueue);
+                }
+                catch (...)
+                {
+                    LogChunkDiagnostic(
+                        "chunkbatch",
+                        L"[CHUNKBATCH] reuse submit threw; dropping cached batch\n");
+                    g_GenericChunkBatchRuntimeAvailable = false;
+                    g_GenericChunkBatchManualObject = nullptr;
+                    // The recorded visibility described the object just dropped.
+                    g_GenericChunkBatchVisible = false;
+                    g_GenericChunkBatchSceneNode = nullptr;
+                    g_GenericChunkBatchSectionCreated = false;
+                    g_GenericChunkBatchBuiltVersion =
+                        ChunkBatchInvalidation::kUnbuiltVersion;
+                    return false;
+                }
+                return true;
+            }
+
+            // Observer mode still rebuilds, but the counters above already
+            // recorded what reuse would have skipped.
+            if (!wantRebuild)
+                ++g_GenericChunkBatchTelemetry.reused;
+            ++g_GenericChunkBatchTelemetry.rebuilds;
+            g_GenericChunkBatchTelemetry.verticesRebuilt += vertexCount;
+            g_GenericChunkBatchTelemetry.indicesRebuilt += vertexCount;
+            const int64_t rebuildStartTicks = ReadChunkBatchQpc();
 
             bool updateStarted = false;
             try
@@ -6931,7 +7370,18 @@ namespace BZROpenShim
                 end(g_GenericChunkBatchManualObject);
                 updateStarted = false;
                 g_GenericChunkBatchSectionCreated = true;
-                setVisible(g_GenericChunkBatchManualObject, true);
+                // Only stamp the version once the emit has actually completed.
+                // A throw between begin and end leaves the object half-built,
+                // and the catch below clears the stamp so the next call cannot
+                // mistake that wreckage for valid cached geometry.
+                g_GenericChunkBatchBuiltVersion = sourceVersion.Value();
+                g_GenericChunkBatchBuiltMaterial = g_GenericChunkBatchMaterialName;
+                NoteChunkBatchRebuildCost(rebuildStartTicks);
+                if (!g_GenericChunkBatchVisible)
+                {
+                    setVisible(g_GenericChunkBatchManualObject, true);
+                    g_GenericChunkBatchVisible = true;
+                }
                 updateRenderQueue(g_GenericChunkBatchManualObject, renderQueue);
             }
             catch (...)
@@ -6942,8 +7392,12 @@ namespace BZROpenShim
                     updateStarted ? 1u : 0u);
                 g_GenericChunkBatchRuntimeAvailable = false;
                 g_GenericChunkBatchManualObject = nullptr;
+                // The recorded visibility described the object just dropped.
+                g_GenericChunkBatchVisible = false;
                 g_GenericChunkBatchSceneNode = nullptr;
                 g_GenericChunkBatchSectionCreated = false;
+                g_GenericChunkBatchBuiltVersion =
+                    ChunkBatchInvalidation::kUnbuiltVersion;
                 return false;
             }
 
@@ -7040,7 +7494,7 @@ namespace BZROpenShim
                         rateNow - g_GenericChunkBatchRateLogTick);
                     LogChunkDiagnostic(
                         "chunkbatch",
-                        L"[CHUNKBATCH] rate windowMs=%lu submitCalls=%llu rebuilds=%llu\n",
+                        L"[CHUNKBATCH] rate windowMs=%lu submitCalls=%llu submissions=%llu\n",
                         static_cast<unsigned long>(windowMs),
                         static_cast<unsigned long long>(
                             g_GenericChunkBatchSubmitCalls -
@@ -7048,6 +7502,7 @@ namespace BZROpenShim
                         static_cast<unsigned long long>(
                             g_GenericChunkBatchRebuilds -
                             g_GenericChunkBatchRebuildsAtLastLog));
+                    LogGenericChunkBatchTelemetry(windowMs);
                     g_GenericChunkBatchRateLogTick = rateNow;
                     g_GenericChunkBatchSubmitCallsAtLastLog =
                         g_GenericChunkBatchSubmitCalls;
@@ -11237,80 +11692,96 @@ namespace BZROpenShim
             return true;
         }
 
-        struct ConvergenceVec3
-        {
-            float x = 0.0f;
-            float y = 0.0f;
-            float z = 0.0f;
-        };
+        // The coordinate-space math lives in include/weapon_convergence.h so it
+        // can be exercised on the host by tests/weapon_convergence_tests.cpp
+        // without dragging in Windows or the live game layout.
+        using ConvergenceVec3 = WeaponConvergence::Vec3;
+        using ConvergenceMatrix = WeaponConvergence::Matrix;
 
-        struct ConvergenceMatrix
+        // One breadcrumb per session the first time the crosshair leaves the
+        // terrain, proving the stale-gPos guard is live rather than silently
+        // never taken.
+        static void LogPlayerConvergenceSkyStandDownOnce()
         {
-            float rightX, rightY, rightZ;
-            float upX, upY, upZ;
-            float frontX, frontY, frontZ;
-            uint8_t padding[4];
-            double positionX, positionY, positionZ;
-        };
-
-        static_assert(sizeof(ConvergenceMatrix) == 64, "Unexpected weapon transform size");
-
-        static ConvergenceVec3 CrossConvergenceVectors(
-            const ConvergenceVec3& lhs,
-            const ConvergenceVec3& rhs)
-        {
-            return {
-                lhs.y * rhs.z - lhs.z * rhs.y,
-                lhs.z * rhs.x - lhs.x * rhs.z,
-                lhs.x * rhs.y - lhs.y * rhs.x,
-            };
+            if (g_PlayerReticleConvergenceSkyStandDownLogged)
+                return;
+            g_PlayerReticleConvergenceSkyStandDownLogged = true;
+            Log(L"[CONVERGE] player reticle convergence stood down: no object and no ground hit "
+                L"(Reticle+0xA8 == 0), so gPos is stale; stock aim retained\n");
         }
 
-        static bool NormalizeConvergenceVector(ConvergenceVec3& value)
+        // One breadcrumb per session if the mount frame at weapon+0x28 does not
+        // look like the orthonormal MAT_3D Weapon::Control writes there. That is
+        // the single assumption the whole convergence solution rests on, so it
+        // gets its own diagnostic rather than being folded into the generic
+        // layout fault below.
+        static void LogPlayerConvergenceMountFault(
+            void* weapon,
+            int slot,
+            const ConvergenceMatrix& mountWorld)
         {
-            const float lengthSquared = value.x * value.x + value.y * value.y + value.z * value.z;
-            if (!std::isfinite(lengthSquared) ||
-                lengthSquared <= kConvergenceDirectionEpsilon * kConvergenceDirectionEpsilon)
-            {
-                return false;
-            }
-
-            const float inverseLength = 1.0f / std::sqrt(lengthSquared);
-            value.x *= inverseLength;
-            value.y *= inverseLength;
-            value.z *= inverseLength;
-            return true;
+            if (g_PlayerReticleConvergenceMountFaultLogged)
+                return;
+            g_PlayerReticleConvergenceMountFaultLogged = true;
+            Log(L"[CONVERGE] player reticle convergence rejected weapon=0x%p slot=%d: mount frame at +0x%X is not an orthonormal MAT_3D "
+                L"(right=(%.3f, %.3f, %.3f) up=(%.3f, %.3f, %.3f) front=(%.3f, %.3f, %.3f) pos=(%.1f, %.1f, %.1f))\n",
+                weapon,
+                slot,
+                static_cast<uint32_t>(kWeaponMountWorldMatrixOffset),
+                static_cast<double>(mountWorld.rightX),
+                static_cast<double>(mountWorld.rightY),
+                static_cast<double>(mountWorld.rightZ),
+                static_cast<double>(mountWorld.upX),
+                static_cast<double>(mountWorld.upY),
+                static_cast<double>(mountWorld.upZ),
+                static_cast<double>(mountWorld.frontX),
+                static_cast<double>(mountWorld.frontY),
+                static_cast<double>(mountWorld.frontZ),
+                mountWorld.positionX,
+                mountWorld.positionY,
+                mountWorld.positionZ);
         }
 
-        static bool BuildConvergenceMatrix(
-            const ConvergenceVec3& origin,
-            ConvergenceVec3 direction,
-            ConvergenceMatrix& outMatrix)
+        // Weapon::Control caches Matrix_Inverse(M) at weapon+0x68 right after it
+        // writes M at weapon+0x28. Comparing our own inverse against that cached
+        // one, once per session, is a direct assertion that both offsets really
+        // are the fields the decompile says they are -- if the layout ever
+        // shifts, this prints a mismatch instead of the feature silently aiming
+        // through a garbage frame.
+        static void LogPlayerConvergenceLayoutCrossCheck(
+            void* weapon,
+            const ConvergenceMatrix& computedInverse)
         {
-            if (!NormalizeConvergenceVector(direction))
-                return false;
+            if (g_PlayerReticleConvergenceLayoutCheckLogged)
+                return;
+            g_PlayerReticleConvergenceLayoutCheckLogged = true;
 
-            ConvergenceVec3 right = {};
-            if (direction.x * direction.x + direction.z * direction.z >= 0.02f)
-            {
-                right = CrossConvergenceVectors({ 0.0f, 1.0f, 0.0f }, direction);
-                if (!NormalizeConvergenceVector(right))
-                    return false;
-            }
-            else
-            {
-                right = { 1.0f, 0.0f, 0.0f };
-            }
+            const ConvergenceMatrix cached = *reinterpret_cast<const ConvergenceMatrix*>(
+                reinterpret_cast<const uint8_t*>(weapon) + kWeaponMountInverseMatrixOffset);
 
-            const ConvergenceVec3 up = CrossConvergenceVectors(direction, right);
-            outMatrix = {
-                right.x, right.y, right.z,
-                up.x, up.y, up.z,
-                direction.x, direction.y, direction.z,
-                {},
-                origin.x, origin.y, origin.z,
-            };
-            return true;
+            float worstRotation = 0.0f;
+            const float* lhs = &computedInverse.rightX;
+            const float* rhs = &cached.rightX;
+            for (int i = 0; i < 9; ++i)
+            {
+                const float delta = std::fabs(lhs[i] - rhs[i]);
+                if (delta > worstRotation)
+                    worstRotation = delta;
+            }
+            const double worstPosition = (std::max)(
+                (std::max)(std::fabs(computedInverse.positionX - cached.positionX),
+                           std::fabs(computedInverse.positionY - cached.positionY)),
+                std::fabs(computedInverse.positionZ - cached.positionZ));
+
+            Log(L"[CONVERGE] weapon layout cross-check weapon=0x%p M@+0x%X I@+0x%X worstRotationDelta=%.6f worstPositionDelta=%.4f (%hs)\n",
+                weapon,
+                static_cast<uint32_t>(kWeaponMountWorldMatrixOffset),
+                static_cast<uint32_t>(kWeaponMountInverseMatrixOffset),
+                static_cast<double>(worstRotation),
+                worstPosition,
+                (worstRotation <= 0.01f && worstPosition <= 0.5)
+                    ? "layout confirmed"
+                    : "LAYOUT MISMATCH -- convergence offsets need re-deriving");
         }
 
         static void ApplyLocalPlayerReticleConvergence(void* craft)
@@ -11351,6 +11822,16 @@ namespace BZROpenShim
                 }
                 else
                 {
+                    // No object under the crosshair and no ground hit this
+                    // frame means there is no reticle point at all -- the
+                    // player is aiming at the sky. Stand down and leave the
+                    // stock aim, which already points straight down the sight,
+                    // instead of converging on a stale gPos.
+                    if (*reinterpret_cast<const int*>(kSmartReticleGroundHitAddr) == 0)
+                    {
+                        LogPlayerConvergenceSkyStandDownOnce();
+                        return;
+                    }
                     target = *reinterpret_cast<const ConvergenceVec3*>(kSmartReticlePositionAddr);
                 }
 
@@ -11358,7 +11839,9 @@ namespace BZROpenShim
                     return;
 
                 int retargeted = 0;
-                ConvergenceVec3 lastOrigin = {};
+                int clamped = 0;
+                ConvergenceVec3 lastMuzzle = {};
+                float lastResidualDegrees = 0.0f;
                 for (int slot = 0; slot < kConvergenceWeaponSlotCount; ++slot)
                 {
                     void* weapon = carrierGetWeapon(carrier, slot);
@@ -11370,25 +11853,44 @@ namespace BZROpenShim
                     if (!weaponObject)
                         continue;
 
-                    auto* transform = reinterpret_cast<ConvergenceMatrix*>(
-                        reinterpret_cast<uint8_t*>(weaponObject) + kObj76TransformOffset);
-                    const ConvergenceVec3 origin = {
-                        static_cast<float>(transform->positionX),
-                        static_cast<float>(transform->positionY),
-                        static_cast<float>(transform->positionZ),
-                    };
-                    ConvergenceMatrix converged = {};
-                    if (!BuildConvergenceMatrix(
-                            origin,
-                            { target.x - origin.x, target.y - origin.y, target.z - origin.z },
-                            converged))
+                    // The mount frame the engine itself fires through. Reading
+                    // it (rather than composing the _OBJ76 parent chain here)
+                    // guarantees convergence solves the same equation the
+                    // ordnance spawn evaluates, even if Weapon::Control has not
+                    // refreshed M yet this frame.
+                    const ConvergenceMatrix mountWorld =
+                        *reinterpret_cast<const ConvergenceMatrix*>(
+                            reinterpret_cast<const uint8_t*>(weapon) +
+                            kWeaponMountWorldMatrixOffset);
+                    if (!WeaponConvergence::IsFinite(mountWorld) ||
+                        !WeaponConvergence::IsRotationOrthonormal(mountWorld))
                     {
+                        LogPlayerConvergenceMountFault(weapon, slot, mountWorld);
                         continue;
                     }
 
-                    *transform = converged;
+                    LogPlayerConvergenceLayoutCrossCheck(
+                        weapon, WeaponConvergence::Invert(mountWorld));
+
+                    auto* transform = reinterpret_cast<ConvergenceMatrix*>(
+                        reinterpret_cast<uint8_t*>(weaponObject) + kObj76TransformOffset);
+
+                    WeaponConvergence::Solution solution = {};
+                    const WeaponConvergence::SolveResult result =
+                        WeaponConvergence::Solve(*transform, mountWorld, target, solution);
+                    if (result == WeaponConvergence::SolveResult::ExceedsDeviationLimit)
+                    {
+                        ++clamped;
+                        continue;
+                    }
+                    if (result != WeaponConvergence::SolveResult::Converged)
+                        continue;
+
+                    *transform = solution.mountLocal;
                     refreshWeaponTransform(weaponObject, transform);
-                    lastOrigin = origin;
+                    lastResidualDegrees = solution.residualDegrees;
+
+                    lastMuzzle = solution.muzzle;
                     ++retargeted;
                 }
 
@@ -11408,19 +11910,21 @@ namespace BZROpenShim
                     {
                         g_PlayerReticleConvergenceLastLogTick = now;
                         ++g_PlayerReticleConvergenceLogCount;
-                        const float dx = target.x - lastOrigin.x;
-                        const float dy = target.y - lastOrigin.y;
-                        const float dz = target.z - lastOrigin.z;
-                        Log(L"[CONVERGE] player reticle convergence applied to %d hardpoint(s) source=%hs muzzle=(%.1f, %.1f, %.1f) target=(%.1f, %.1f, %.1f) distance=%.1f\n",
+                        const float dx = target.x - lastMuzzle.x;
+                        const float dy = target.y - lastMuzzle.y;
+                        const float dz = target.z - lastMuzzle.z;
+                        Log(L"[CONVERGE] player reticle convergence applied to %d hardpoint(s) (clamped=%d) source=%hs muzzle=(%.1f, %.1f, %.1f) target=(%.1f, %.1f, %.1f) distance=%.1f residualError=%.3fdeg\n",
                             retargeted,
+                            clamped,
                             targetSource,
-                            static_cast<double>(lastOrigin.x),
-                            static_cast<double>(lastOrigin.y),
-                            static_cast<double>(lastOrigin.z),
+                            static_cast<double>(lastMuzzle.x),
+                            static_cast<double>(lastMuzzle.y),
+                            static_cast<double>(lastMuzzle.z),
                             static_cast<double>(target.x),
                             static_cast<double>(target.y),
                             static_cast<double>(target.z),
-                            static_cast<double>(std::sqrt(dx * dx + dy * dy + dz * dz)));
+                            static_cast<double>(std::sqrt(dx * dx + dy * dy + dz * dz)),
+                            static_cast<double>(lastResidualDegrees));
                     }
                 }
             }
@@ -13969,6 +14473,19 @@ namespace BZROpenShim
             FnOgreSetSpotlightRange setRange = nullptr;
             FnOgreGetLightVisible getVisible = nullptr;
             FnOgreSetVisible setVisible = nullptr;
+            // Attenuation half of the light. Stock BZR sets this once at
+            // headlight creation (0x0067F599: setAttenuation(600, 1, 0.007,
+            // 0.0002)) and never revisits it, so the shim owns any change.
+            FnOgreSetAttenuation setAttenuation = nullptr;
+            FnOgreGetLightFloat getAttenuationRange = nullptr;
+            FnOgreGetLightFloat getAttenuationConstant = nullptr;
+            FnOgreGetLightFloat getAttenuationLinear = nullptr;
+            FnOgreGetLightFloat getAttenuationQuadratic = nullptr;
+            FnOgreGetLightFloat getPowerScale = nullptr;
+            FnOgreGetLightType getType = nullptr;
+            FnOgreGetLightDerivedPosition getDerivedPosition = nullptr;
+            FnOgreGetLightVector3 getDerivedDirection = nullptr;
+            FnOgreGetCastShadows getCastShadows = nullptr;
         };
 
         struct HeadlightOriginalState
@@ -13976,15 +14493,20 @@ namespace BZROpenShim
             bool hasColour = false;
             bool hasBeam = false;
             bool hasVisible = false;
+            bool hasAttenuation = false;
             OgreColourValue diffuse = {};
             OgreColourValue specular = {};
             float innerAngle = 0.0f;
             float outerAngle = 0.0f;
             float falloff = 1.0f;
             bool visible = true;
+            HeadlightFalloff::Attenuation attenuation = {};
         };
 
         static constexpr DWORD kHeadlightRefreshMs = 200;
+        // The exponent the shim shipped before the falloff repair. Kept only
+        // so the A/B switch can reproduce the hard cone terminator on demand.
+        static constexpr float kHeadlightPreRepairSpotFalloff = 0.35f;
         static constexpr size_t kHeadlightObjectSlotCount = 4096;
         static_assert(kGameObjectArenaSlotCapacity == kHeadlightObjectSlotCount,
                       "arena capacity forward constant out of sync");
@@ -14013,6 +14535,14 @@ namespace BZROpenShim
         static float g_HeadlightColourG = 5.0f;
         static float g_HeadlightColourB = 5.0f;
         static bool g_HeadlightRuntimeActive = false;
+        static bool g_HeadlightLightTraceEnabled = false;
+        // A/B switch for validation: restores the pre-repair constants
+        // (cone falloff 0.35, stock attenuation untouched) so a capture run
+        // can show the hard terminator and its repair from one binary.
+        static bool g_HeadlightFalloffRepairEnabled = true;
+        static std::unordered_set<void*> g_HeadlightFalloffPlanLogged;
+        static int g_HeadlightLightTraceCount = 0;
+        static constexpr int kHeadlightLightTraceLimit = 40;
         static DWORD g_HeadlightLastRefreshTick = 0;
         static std::unordered_map<void*, HeadlightOriginalState> g_HeadlightOriginalStates;
         static InlineDetour32 g_EmissionLightStateDetour = {};
@@ -14022,9 +14552,24 @@ namespace BZROpenShim
         static bool g_EmissionLightFixInstalled = false;
         static bool g_EmissionLightFixMismatchLogged = false;
 
+        // Resolves the Ogre Light/MovableObject entry points the headlight and
+        // emission-light work needs. This runs exactly once.
+        //
+        // It used to retry every still-null field on every call, which looks
+        // harmless until one of the names cannot resolve: that field stays null
+        // forever and its GetProcAddress runs again on the next call. One of the
+        // twenty names below was mis-mangled -- getCastShadows is virtual on
+        // MovableObject, so it is `U`, not `Q` -- and HandleEmissionLightState
+        // runs per emission light per frame. Sampling an 80-craft four-team
+        // battle put that single failing lookup, plus the loader's error
+        // reporting for it, at 43% of the main thread's CPU.
         static HeadlightOgreApi& GetHeadlightOgreApi()
         {
             static HeadlightOgreApi api;
+            static bool resolved = false;
+            if (resolved)
+                return api;
+
             if (!api.getDiffuse)
                 api.getDiffuse = ResolveOgreProc<FnOgreGetLightColour>(
                     "?getDiffuseColour@Light@Ogre@@QBEABVColourValue@2@XZ");
@@ -14055,7 +14600,228 @@ namespace BZROpenShim
             if (!api.setVisible)
                 api.setVisible = ResolveOgreProc<FnOgreSetVisible>(
                     "?setVisible@Light@Ogre@@UAEX_N@Z");
+            if (!api.setAttenuation)
+                api.setAttenuation = ResolveOgreProc<FnOgreSetAttenuation>(
+                    "?setAttenuation@Light@Ogre@@QAEXMMMM@Z");
+            if (!api.getAttenuationRange)
+                api.getAttenuationRange = ResolveOgreProc<FnOgreGetLightFloat>(
+                    "?getAttenuationRange@Light@Ogre@@QBEMXZ");
+            if (!api.getAttenuationConstant)
+                api.getAttenuationConstant = ResolveOgreProc<FnOgreGetLightFloat>(
+                    "?getAttenuationConstant@Light@Ogre@@QBEMXZ");
+            if (!api.getAttenuationLinear)
+                api.getAttenuationLinear = ResolveOgreProc<FnOgreGetLightFloat>(
+                    "?getAttenuationLinear@Light@Ogre@@QBEMXZ");
+            if (!api.getAttenuationQuadratic)
+                api.getAttenuationQuadratic = ResolveOgreProc<FnOgreGetLightFloat>(
+                    "?getAttenuationQuadric@Light@Ogre@@QBEMXZ");
+            if (!api.getPowerScale)
+                api.getPowerScale = ResolveOgreProc<FnOgreGetLightFloat>(
+                    "?getPowerScale@Light@Ogre@@QBEMXZ");
+            if (!api.getType)
+                api.getType = ResolveOgreProc<FnOgreGetLightType>(
+                    "?getType@Light@Ogre@@QBE?AW4LightTypes@12@XZ");
+            if (!api.getDerivedPosition)
+                api.getDerivedPosition = ResolveOgreProc<FnOgreGetLightDerivedPosition>(
+                    "?getDerivedPosition@Light@Ogre@@QBEABVVector3@2@_N@Z");
+            if (!api.getDerivedDirection)
+                api.getDerivedDirection = ResolveOgreProc<FnOgreGetLightVector3>(
+                    "?getDerivedDirection@Light@Ogre@@QBEABVVector3@2@XZ");
+            if (!api.getCastShadows)
+                api.getCastShadows = ResolveOgreProc<FnOgreGetCastShadows>(
+                    "?getCastShadows@MovableObject@Ogre@@UBE_NXZ");
+
+            resolved = true;
+
+            // Name anything that did not resolve, once. A null entry point here
+            // degrades a headlight behaviour silently; the mis-mangled name
+            // above survived because nothing ever said it had failed.
+            const struct { const wchar_t* field; const void* value; } audit[] = {
+                { L"getDiffuseColour", reinterpret_cast<const void*>(api.getDiffuse) },
+                { L"setDiffuseColour", reinterpret_cast<const void*>(api.setDiffuse) },
+                { L"getSpecularColour", reinterpret_cast<const void*>(api.getSpecular) },
+                { L"setSpecularColour", reinterpret_cast<const void*>(api.setSpecular) },
+                { L"getSpotlightInnerAngle", reinterpret_cast<const void*>(api.getInnerAngle) },
+                { L"getSpotlightOuterAngle", reinterpret_cast<const void*>(api.getOuterAngle) },
+                { L"getSpotlightFalloff", reinterpret_cast<const void*>(api.getFalloff) },
+                { L"setSpotlightRange", reinterpret_cast<const void*>(api.setRange) },
+                { L"getVisible", reinterpret_cast<const void*>(api.getVisible) },
+                { L"setVisible", reinterpret_cast<const void*>(api.setVisible) },
+                { L"setAttenuation", reinterpret_cast<const void*>(api.setAttenuation) },
+                { L"getAttenuationRange", reinterpret_cast<const void*>(api.getAttenuationRange) },
+                { L"getAttenuationConstant", reinterpret_cast<const void*>(api.getAttenuationConstant) },
+                { L"getAttenuationLinear", reinterpret_cast<const void*>(api.getAttenuationLinear) },
+                { L"getAttenuationQuadric", reinterpret_cast<const void*>(api.getAttenuationQuadratic) },
+                { L"getPowerScale", reinterpret_cast<const void*>(api.getPowerScale) },
+                { L"getType", reinterpret_cast<const void*>(api.getType) },
+                { L"getDerivedPosition", reinterpret_cast<const void*>(api.getDerivedPosition) },
+                { L"getDerivedDirection", reinterpret_cast<const void*>(api.getDerivedDirection) },
+                { L"getCastShadows", reinterpret_cast<const void*>(api.getCastShadows) },
+            };
+            int unresolved = 0;
+            for (const auto& entry : audit)
+            {
+                if (!entry.value)
+                {
+                    ++unresolved;
+                    Log(L"[HEADLIGHT] Ogre entry point %ls did not resolve\n", entry.field);
+                }
+            }
+            Log(L"[HEADLIGHT] Ogre entry points resolved once: %d of %d\n",
+                static_cast<int>(_countof(audit)) - unresolved,
+                static_cast<int>(_countof(audit)));
             return api;
+        }
+
+        // Startup sweep over the Ogre exports the shim depends on in hot paths.
+        //
+        // ResolveOgreProcRaw already warns once per bad name, but only when
+        // something asks for it -- so a typo in a feature that has not run yet
+        // stays invisible until it does, and then it is a runtime warning
+        // rather than a startup one. This forces the load-bearing names to
+        // resolve as soon as OgreMain is present, so a bad decoration is a
+        // single clear line in the log before any frame is drawn.
+        //
+        // The list is deliberately short: hot-path entry points, plus the
+        // headlight/light API by way of GetHeadlightOgreApi's own audit. It can
+        // drift from the full set of names the shim uses; when it does, the
+        // consequence is only that those names are reported later, by the
+        // resolver, rather than here.
+        static void VerifyExpectedOgreExportsIfPossible()
+        {
+            static bool verified = false;
+            if (verified || !GetModuleHandleA("OgreMain.dll"))
+                return;
+            verified = true;
+
+            static const char* const kHotPathExports[] = {
+                "?getRenderQueue@SceneManager@Ogre@@UAEPAVRenderQueue@2@XZ",
+                "?getCurrentViewport@SceneManager@Ogre@@QBEPAVViewport@2@XZ",
+                "?getCamera@Viewport@Ogre@@QBEPAVCamera@2@XZ",
+                "?getNumSubEntities@Entity@Ogre@@QBEIXZ",
+                "?getSubEntity@Entity@Ogre@@QBEPAVSubEntity@2@I@Z",
+                "?_notifyCurrentCamera@Entity@Ogre@@UAEXPAVCamera@2@@Z",
+                "?_updateRenderQueue@Entity@Ogre@@UAEXPAVRenderQueue@2@@Z",
+                "?setVisible@MovableObject@Ogre@@UAEX_N@Z",
+                "?setPosition@Node@Ogre@@UAEXMMM@Z",
+                "?setOrientation@Node@Ogre@@UAEXMMMM@Z",
+                "?getRootSceneNode@SceneManager@Ogre@@UAEPAVSceneNode@2@XZ",
+                "?attachObject@SceneNode@Ogre@@UAEXPAVMovableObject@2@@Z",
+                "?getDerivedPosition@Camera@Ogre@@QBEABVVector3@2@XZ",
+            };
+
+            int missing = 0;
+            for (const char* const name : kHotPathExports)
+            {
+                if (!ResolveOgreProcRaw(name))
+                {
+                    ++missing;
+                }
+            }
+
+            // Forces the twenty light entry points to resolve and audit now
+            // rather than on the first emission light of the first battle.
+            GetHeadlightOgreApi();
+
+            if (missing == 0)
+            {
+                Log(L"[OGRE-EXPORTS] Startup verification: %d of %d hot-path exports resolved\n",
+                    static_cast<int>(_countof(kHotPathExports)),
+                    static_cast<int>(_countof(kHotPathExports)));
+            }
+            else
+            {
+                Log(L"[OGRE-EXPORTS] WARNING: startup verification found %d of %d "
+                    L"hot-path exports missing; see the per-name warnings above\n",
+                    missing, static_cast<int>(_countof(kHotPathExports)));
+            }
+        }
+
+        // Full parameter dump for one Ogre Light. This is the instrument that
+        // decides between the four candidate causes of a hard terrain
+        // terminator -- outer-cone cutoff, attenuation range cutoff,
+        // attenuation curve, or a backend difference -- because every one of
+        // them is visible in these numbers.
+        //
+        // Enable with [Diagnostics] HeadlightLightTrace = 1 (or
+        // OPENSHIM_TRACE_HEADLIGHT_LIGHT=1).
+        static void LogHeadlightLightParameters(void* light, bool isPlayer, const wchar_t* phase)
+        {
+            if (!light)
+                return;
+
+            auto& api = GetHeadlightOgreApi();
+            __try
+            {
+                const int type = api.getType ? api.getType(light) : -1;
+                const OgreVector3* position =
+                    api.getDerivedPosition ? api.getDerivedPosition(light, false) : nullptr;
+                const OgreVector3* direction =
+                    api.getDerivedDirection ? api.getDerivedDirection(light) : nullptr;
+                const OgreColourValue* diffuse = api.getDiffuse ? api.getDiffuse(light) : nullptr;
+                const OgreColourValue* specular = api.getSpecular ? api.getSpecular(light) : nullptr;
+                const float* inner = api.getInnerAngle ? api.getInnerAngle(light) : nullptr;
+                const float* outer = api.getOuterAngle ? api.getOuterAngle(light) : nullptr;
+                const float range = api.getAttenuationRange ? api.getAttenuationRange(light) : -1.0f;
+                const float constant =
+                    api.getAttenuationConstant ? api.getAttenuationConstant(light) : -1.0f;
+                const float linear =
+                    api.getAttenuationLinear ? api.getAttenuationLinear(light) : -1.0f;
+                const float quadratic =
+                    api.getAttenuationQuadratic ? api.getAttenuationQuadratic(light) : -1.0f;
+
+                // The number that actually decides whether the cutoff is
+                // visible: how much light still reaches the terrain at the
+                // instant the range clamp zeroes it. Anything above roughly
+                // 1/255 of a diffuse unit is a step a player can see.
+                const float peakDiffuse = diffuse
+                    ? (std::max)((std::max)(diffuse->r, diffuse->g), diffuse->b)
+                    : 0.0f;
+                const float denominatorAtRange =
+                    constant + range * (linear + range * quadratic);
+                const float edgeIntensity = (denominatorAtRange > 0.0f && range > 0.0f)
+                    ? peakDiffuse / denominatorAtRange
+                    : -1.0f;
+
+                Log(L"[HEADLIGHT-PROBE] %ls light=0x%p owner=%hs type=%d pos=(%.2f, %.2f, %.2f) dir=(%.3f, %.3f, %.3f) "
+                    L"diffuse=(%.3f, %.3f, %.3f) specular=(%.3f, %.3f, %.3f) power=%.3f "
+                    L"range=%.1f attenuation=(c=%.4f l=%.5f q=%.6f) inner=%.2fdeg outer=%.2fdeg falloff=%.3f "
+                    L"visible=%hs castShadows=%hs edgeIntensityAtRange=%.5f (%hs)\n",
+                    phase,
+                    light,
+                    isPlayer ? "player" : "other",
+                    type,
+                    position ? static_cast<double>(position->x) : 0.0,
+                    position ? static_cast<double>(position->y) : 0.0,
+                    position ? static_cast<double>(position->z) : 0.0,
+                    direction ? static_cast<double>(direction->x) : 0.0,
+                    direction ? static_cast<double>(direction->y) : 0.0,
+                    direction ? static_cast<double>(direction->z) : 0.0,
+                    diffuse ? static_cast<double>(diffuse->r) : 0.0,
+                    diffuse ? static_cast<double>(diffuse->g) : 0.0,
+                    diffuse ? static_cast<double>(diffuse->b) : 0.0,
+                    specular ? static_cast<double>(specular->r) : 0.0,
+                    specular ? static_cast<double>(specular->g) : 0.0,
+                    specular ? static_cast<double>(specular->b) : 0.0,
+                    api.getPowerScale ? static_cast<double>(api.getPowerScale(light)) : -1.0,
+                    static_cast<double>(range),
+                    static_cast<double>(constant),
+                    static_cast<double>(linear),
+                    static_cast<double>(quadratic),
+                    inner ? static_cast<double>(*inner) * (180.0 / 3.14159265358979) : -1.0,
+                    outer ? static_cast<double>(*outer) * (180.0 / 3.14159265358979) : -1.0,
+                    api.getFalloff ? static_cast<double>(api.getFalloff(light)) : -1.0,
+                    (api.getVisible && api.getVisible(light)) ? "yes" : "no",
+                    (api.getCastShadows && api.getCastShadows(light)) ? "yes" : "no",
+                    static_cast<double>(edgeIntensity),
+                    (edgeIntensity > (1.0f / 255.0f))
+                        ? "VISIBLE STEP AT RANGE"
+                        : "below 8-bit floor");
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[HEADLIGHT-PROBE] faulted reading light=0x%p\n", light);
+            }
         }
 
         static void HandleEmissionLightState(void* renderer, void* renderClass)
@@ -14230,6 +14996,15 @@ namespace BZROpenShim
                     float outer = state.outerAngle;
                     api.setRange(light, &inner, &outer, state.falloff);
                 }
+                if (state.hasAttenuation && api.setAttenuation)
+                {
+                    api.setAttenuation(
+                        light,
+                        state.attenuation.range,
+                        state.attenuation.constant,
+                        state.attenuation.linear,
+                        state.attenuation.quadratic);
+                }
                 if (state.hasVisible && api.setVisible)
                     api.setVisible(light, state.visible);
             }
@@ -14252,6 +15027,7 @@ namespace BZROpenShim
             void* light,
             bool needColour,
             bool needBeam,
+            bool needAttenuation,
             bool needVisible)
         {
             if (!light)
@@ -14288,6 +15064,22 @@ namespace BZROpenShim
                     state.falloff = api.getFalloff(light);
                     state.hasBeam = true;
                 }
+                if (needAttenuation && !state.hasAttenuation)
+                {
+                    if (!api.setAttenuation || !api.getAttenuationRange ||
+                        !api.getAttenuationConstant || !api.getAttenuationLinear ||
+                        !api.getAttenuationQuadratic)
+                    {
+                        return false;
+                    }
+                    state.attenuation.range = api.getAttenuationRange(light);
+                    state.attenuation.constant = api.getAttenuationConstant(light);
+                    state.attenuation.linear = api.getAttenuationLinear(light);
+                    state.attenuation.quadratic = api.getAttenuationQuadratic(light);
+                    if (!HeadlightFalloff::IsUsable(state.attenuation))
+                        return false;
+                    state.hasAttenuation = true;
+                }
                 if (needVisible && !state.hasVisible)
                 {
                     if (!api.getVisible || !api.setVisible)
@@ -14304,6 +15096,79 @@ namespace BZROpenShim
             }
         }
 
+        // One line per light per session recording what the falloff repair
+        // actually changed, so a regression shows up as a number in the log
+        // rather than as "the boundary is back".
+        static void LogHeadlightFalloffPlanOnce(
+            void* light,
+            float peakDiffuse,
+            const HeadlightFalloff::Plan& plan)
+        {
+            if (!g_HeadlightFalloffPlanLogged.insert(light).second)
+                return;
+            Log(L"[HEADLIGHT] falloff repair light=0x%p peak=%.2f range %.1f -> %.1f "
+                L"edgeIntensity %.5f -> %.5f (floor %.5f) coneFalloff ramp %.4f -> %.4f of penumbra (%hs)\n",
+                light,
+                static_cast<double>(peakDiffuse),
+                static_cast<double>(plan.rangeBefore),
+                static_cast<double>(plan.attenuation.range),
+                static_cast<double>(plan.edgeIntensityBefore),
+                static_cast<double>(plan.edgeIntensityAfter),
+                static_cast<double>(HeadlightFalloff::kDisplayFloor),
+                static_cast<double>(plan.rampFractionBefore),
+                static_cast<double>(plan.rampFractionAfter),
+                (plan.edgeIntensityAfter <= HeadlightFalloff::kDisplayFloor &&
+                 plan.rampFractionAfter >= HeadlightFalloff::kMinAcceptableRampFraction)
+                    ? "both terminators below the visible threshold"
+                    : "TERMINATOR STILL VISIBLE");
+        }
+
+        // Recomputes the truncation radius and the cone exponent for whatever
+        // brightness is about to be written, so neither terminator lands where
+        // a player can see it. Returns false if the light's own attenuation
+        // cannot be read, in which case the caller leaves attenuation alone.
+        static bool BuildHeadlightFalloffPlan(
+            void* light,
+            float peakDiffuse,
+            HeadlightFalloff::Plan& outPlan)
+        {
+            auto& api = GetHeadlightOgreApi();
+            if (!api.setAttenuation || !api.getAttenuationRange ||
+                !api.getAttenuationConstant || !api.getAttenuationLinear ||
+                !api.getAttenuationQuadratic || !api.getFalloff)
+            {
+                return false;
+            }
+
+            HeadlightFalloff::Attenuation stock = {};
+            float previousFalloff = 1.0f;
+            __try
+            {
+                stock.range = api.getAttenuationRange(light);
+                stock.constant = api.getAttenuationConstant(light);
+                stock.linear = api.getAttenuationLinear(light);
+                stock.quadratic = api.getAttenuationQuadratic(light);
+                previousFalloff = api.getFalloff(light);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+
+            if (!HeadlightFalloff::IsUsable(stock))
+                return false;
+
+            // The captured baseline is the engine's own curve, not whatever a
+            // previous refresh already widened it to, so the solve stays
+            // idempotent across the 200 ms refresh tick.
+            const auto existing = g_HeadlightOriginalStates.find(light);
+            if (existing != g_HeadlightOriginalStates.end() && existing->second.hasAttenuation)
+                stock = existing->second.attenuation;
+
+            outPlan = HeadlightFalloff::BuildPlan(stock, peakDiffuse, previousFalloff);
+            return true;
+        }
+
         static bool ApplyHeadlightState(
             void* light,
             bool setColour,
@@ -14313,11 +15178,23 @@ namespace BZROpenShim
             bool setBeam,
             float inner,
             float outer,
-            float falloff,
             bool setVisible,
             bool visible)
         {
-            if (!CaptureHeadlightState(light, setColour, setBeam, setVisible))
+            // Only a shim-owned brightness or beam change can push a terminator
+            // into view, so a run that is merely toggling visibility leaves the
+            // engine's own falloff untouched and stays stock-identical.
+            const bool setFalloff =
+                g_HeadlightFalloffRepairEnabled && (setColour || setBeam);
+            const float peakDiffuse = setColour
+                ? (std::max)((std::max)(r, g), b)
+                : 1.0f;
+
+            HeadlightFalloff::Plan plan = {};
+            const bool haveFalloffPlan =
+                setFalloff && BuildHeadlightFalloffPlan(light, peakDiffuse, plan);
+
+            if (!CaptureHeadlightState(light, setColour, setBeam, haveFalloffPlan, setVisible))
                 return false;
             auto& api = GetHeadlightOgreApi();
             __try
@@ -14327,11 +15204,43 @@ namespace BZROpenShim
                     api.setDiffuse(light, r, g, b);
                     api.setSpecular(light, r, g, b);
                 }
-                if (setBeam)
+                if (setBeam || haveFalloffPlan)
                 {
+                    // setSpotlightRange carries the falloff exponent, so a
+                    // beam-less colour override still has to go through it to
+                    // soften the cone; reuse the light's current angles in that
+                    // case rather than inventing new ones.
                     float innerCopy = inner;
                     float outerCopy = outer;
-                    api.setRange(light, &innerCopy, &outerCopy, falloff);
+                    if (!setBeam)
+                    {
+                        const float* currentInner =
+                            api.getInnerAngle ? api.getInnerAngle(light) : nullptr;
+                        const float* currentOuter =
+                            api.getOuterAngle ? api.getOuterAngle(light) : nullptr;
+                        if (!currentInner || !currentOuter)
+                            return false;
+                        innerCopy = *currentInner;
+                        outerCopy = *currentOuter;
+                    }
+                    api.setRange(
+                        light,
+                        &innerCopy,
+                        &outerCopy,
+                        g_HeadlightFalloffRepairEnabled
+                            ? (haveFalloffPlan ? plan.falloff
+                                               : HeadlightFalloff::kSmoothSpotFalloff)
+                            : kHeadlightPreRepairSpotFalloff);
+                }
+                if (haveFalloffPlan)
+                {
+                    api.setAttenuation(
+                        light,
+                        plan.attenuation.range,
+                        plan.attenuation.constant,
+                        plan.attenuation.linear,
+                        plan.attenuation.quadratic);
+                    LogHeadlightFalloffPlanOnce(light, peakDiffuse, plan);
                 }
                 if (setVisible)
                     api.setVisible(light, visible);
@@ -14495,9 +15404,12 @@ namespace BZROpenShim
                 HueToHeadlightRgb(hue, colourR, colourG, colourB);
             }
 
+            // Beam shape only. The cone exponent and the attenuation cutoff are
+            // no longer hard-coded here: ApplyHeadlightState solves both from
+            // the brightness actually being written, because a fixed exponent
+            // that looks smooth at peak 1.0 is a hard edge at peak 10.
             float inner = 0.0f;
             float outer = 0.0f;
-            float falloff = 0.35f;
             float colourMultiplier = 1.0f;
             if (g_HeadlightBeamMode == HeadlightBeamMode::Focused)
             {
@@ -14534,11 +15446,20 @@ namespace BZROpenShim
                 if (!setVisible && !setColour && !setBeam)
                     return;
                 const bool visible = isPlayer ? g_HeadlightPlayerVisible : g_HeadlightOtherVisible;
+                const bool trace = g_HeadlightLightTraceEnabled && isPlayer &&
+                                   g_HeadlightLightTraceCount < kHeadlightLightTraceLimit;
+                if (trace)
+                    LogHeadlightLightParameters(light, isPlayer, L"before");
                 if (ApplyHeadlightState(light, setColour, colourR, colourG, colourB,
-                                        setBeam, inner, outer, falloff,
+                                        setBeam, inner, outer,
                                         setVisible, visible))
                 {
                     touched.insert(light);
+                }
+                if (trace)
+                {
+                    ++g_HeadlightLightTraceCount;
+                    LogHeadlightLightParameters(light, isPlayer, L"after ");
                 }
             };
 
@@ -14591,6 +15512,17 @@ namespace BZROpenShim
             g_HeadlightConfigInitialized = true;
 
             bool boolValue = false;
+            if (TryGetUserConfigBool("Diagnostics", "HeadlightLightTrace", boolValue))
+                g_HeadlightLightTraceEnabled = boolValue;
+            if (EnvFlagEnabled("OPENSHIM_TRACE_HEADLIGHT_LIGHT"))
+                g_HeadlightLightTraceEnabled = true;
+            if (TryGetUserConfigBool(
+                    kUserConfigSinglePlayerSection, "HeadlightFalloffRepair", boolValue))
+            {
+                g_HeadlightFalloffRepairEnabled = boolValue;
+            }
+            if (EnvFlagEnabled("OPENSHIM_DISABLE_HEADLIGHT_FALLOFF_REPAIR"))
+                g_HeadlightFalloffRepairEnabled = false;
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "Headlights", boolValue))
             {
                 g_HeadlightPlayerVisibleConfigured = true;
@@ -26050,6 +26982,7 @@ namespace BZROpenShim
         InstallParticleTemplateDedupeHookIfPossible();
         InstallUiManualObjectDedupeHookIfPossible();
         InstallSceneTeardownForgetHooksIfPossible();
+        InstallEntityFrustumCullingIfEnabled();
         InstallMissionTransitionSeamIfPossible();
         PinDirect3DModulesForShutdown();
         InstallMultiplayerFlagRenderHookIfPossible();
@@ -26120,6 +27053,33 @@ namespace BZROpenShim
             g_EnableChunkMeshProxy &&
             !(EnvFlagEnabled("OPENSHIM_DISABLE_GENERIC_CHUNK_BATCH") ||
               EnvFlagEnabled("BZR_DISABLE_GENERIC_CHUNK_BATCH"));
+        // Restores the per-object frustum test that Redux's DefaultSceneManager
+        // never performs. Measured: 20 tanks 50 m behind the camera cost exactly
+        // as many main-view submissions as 20 tanks in front of it.
+        g_EntityFrustumCullEnabled =
+            !(EnvFlagEnabled("OPENSHIM_DISABLE_ENTITY_FRUSTUM_CULLING") ||
+              EnvFlagEnabled("BZR_DISABLE_ENTITY_FRUSTUM_CULLING"));
+        g_FrustumCullCensusEnabled =
+            EnvFlagEnabled("OPENSHIM_FRUSTUM_CULL_CENSUS") ||
+            EnvFlagEnabled("BZR_FRUSTUM_CULL_CENSUS");
+
+        // Second, independent repair experiment: restore finite Ogre bounds on
+        // the shared craft meshes instead of emulating the frustum test
+        // privately. Opt-in, and it stands the private cull down by default so
+        // the two mechanisms are never measured on top of each other. Set
+        // OPENSHIM_FRUSTUM_CULL_WITH_RESTORE=1 to run both deliberately.
+        g_RestoreCraftBoundsEnabled =
+            EnvFlagEnabled("OPENSHIM_RESTORE_CRAFT_BOUNDS") ||
+            EnvFlagEnabled("BZR_RESTORE_CRAFT_BOUNDS");
+        g_BoundsTraceEnabled =
+            EnvFlagEnabled("OPENSHIM_BOUNDS_TRACE") ||
+            EnvFlagEnabled("BZR_BOUNDS_TRACE");
+        if (g_RestoreCraftBoundsEnabled &&
+            !(EnvFlagEnabled("OPENSHIM_FRUSTUM_CULL_WITH_RESTORE") ||
+              EnvFlagEnabled("BZR_FRUSTUM_CULL_WITH_RESTORE")))
+        {
+            g_EntityFrustumCullEnabled = false;
+        }
         // Diagnostic/regression seam, not a gameplay policy. It exists so the
         // batch-failure fallback can be proven at runtime rather than argued
         // from the source; see RehydrateGenericChunkBatchSlotsToEntities().
@@ -26145,6 +27105,28 @@ namespace BZROpenShim
                 "chunkbatch",
                 L"[CHUNKBATCH] DIAGNOSTIC: batch submit-rate counters are ENABLED\n");
         }
+        // Reuse is on by default; the opt-out restores the pre-optimization
+        // behaviour of re-emitting the geometry on every traversal, and observe
+        // mode takes the decision without acting on it so the baseline and the
+        // dedup opportunity can be measured from one binary.
+        g_GenericChunkBatchReuseEnabled =
+            !(EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_BATCH_REUSE") ||
+              EnvFlagEnabled("BZR_DISABLE_CHUNK_BATCH_REUSE"));
+        g_GenericChunkBatchReuseObserveOnly =
+            EnvFlagEnabled("OPENSHIM_CHUNK_BATCH_REUSE_OBSERVE") ||
+            EnvFlagEnabled("BZR_CHUNK_BATCH_REUSE_OBSERVE");
+        {
+            bool configured = false;
+            if (TryGetUserConfigBool("Diagnostics", "ChunkBatchReuse", configured))
+                g_GenericChunkBatchReuseEnabled = configured;
+            if (TryGetUserConfigBool("Diagnostics", "ChunkBatchReuseObserve", configured))
+                g_GenericChunkBatchReuseObserveOnly = configured;
+        }
+        LogChunkDiagnostic(
+            "chunkbatch",
+            L"[CHUNKBATCH] generic batch state-version reuse=%hs observeOnly=%hs\n",
+            g_GenericChunkBatchReuseEnabled ? "on" : "off",
+            g_GenericChunkBatchReuseObserveOnly ? "yes" : "no");
         g_ForceGenericChunkNonUnitScale =
             EnvFlagEnabled("OPENSHIM_FORCE_GENERIC_CHUNK_NON_UNIT_SCALE") ||
             EnvFlagEnabled("BZR_FORCE_GENERIC_CHUNK_NON_UNIT_SCALE");
@@ -26439,9 +27421,15 @@ namespace BZROpenShim
         g_ChunkProxyBillboardSet = nullptr;
         g_ChunkProxySlots.clear();
         g_GenericChunkBatchManualObject = nullptr;
+        // The recorded visibility described the object just dropped.
+        g_GenericChunkBatchVisible = false;
         g_GenericChunkBatchSceneNode = nullptr;
         g_GenericChunkBatchSceneManager = nullptr;
         g_GenericChunkBatchSectionCreated = false;
+        // Process/scene shutdown drops the cached geometry with the object it
+        // lived in, so reuse can never straddle a lifetime boundary.
+        g_GenericChunkBatchBuiltVersion = ChunkBatchInvalidation::kUnbuiltVersion;
+        g_GenericChunkBatchBuiltMaterial.clear();
         g_GenericChunkBatchRuntimeAvailable = true;
         g_GenericChunkBatchEligibility[0] = -1;
         g_GenericChunkBatchEligibility[1] = -1;
@@ -26578,6 +27566,7 @@ namespace BZROpenShim
         InitializeGlobalTurboConfig();
         InitializeHeadlightConfig();
         InstallEmissionLightFixIfPossible();
+        VerifyExpectedOgreExportsIfPossible();
         InitializeJetFlamesConfig();
         InitializeUnitVoConfig();
         // Must run before the game reaches BZRNet init: the requested UDP port
@@ -26616,7 +27605,9 @@ namespace BZROpenShim
         InstallParticleTemplateDedupeHookIfPossible();
         InstallUiManualObjectDedupeHookIfPossible();
         InstallEmissionLightFixIfPossible();
+        VerifyExpectedOgreExportsIfPossible();
         InstallSceneTeardownForgetHooksIfPossible();
+        InstallEntityFrustumCullingIfEnabled();
         InstallMissionTransitionSeamIfPossible();
         PinDirect3DModulesForShutdown();
         InstallMultiplayerFlagRenderHookIfPossible();
