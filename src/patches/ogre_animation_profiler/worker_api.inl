@@ -3,6 +3,16 @@
             QueryPerformanceFrequency(&g_QpcFrequency);
             const bool collectProfilerData =
                 g_Enabled.load(std::memory_order_acquire);
+            // The isolation arms suppress renderables inside
+            // SceneManager::renderSingleObject, and the shadow arm needs
+            // SceneManager::_renderScene to keep the re-entrancy depth. Both
+            // detours are otherwise installed only when the profiler collects,
+            // so an isolation capture with collection disabled would suppress
+            // nothing and report a false null result. Every hook body still
+            // early-returns on !g_Enabled, so installing them here adds
+            // forwarding thunks and nothing else.
+            const bool isolationActive =
+                g_IsolationMask.load(std::memory_order_acquire) != 0;
             LogShimA(
                 LogLevel::Info,
                 kComponent,
@@ -50,7 +60,8 @@
                     ogreAttempts < 50)
                 {
                     ++ogreAttempts;
-                    const bool installed = InstallOgreObservers(collectProfilerData);
+                    const bool installed = InstallOgreObservers(
+                        collectProfilerData || isolationActive);
                     ogreInstallFinished = installed || !g_EntryInstallRetryRequested;
                     g_OgreInstallAttempted.store(true, std::memory_order_release);
                     if (collectProfilerData)
@@ -64,6 +75,21 @@
                     if (renderer)
                     {
                         dx11CreationAttempted = true;
+                        // GetModuleHandleA answers while the loader may still
+                        // be finishing this module, and patching in that window
+                        // is what crashed the DX11 colorspace observer twice on
+                        // 2026-08-22. Take a real reference first so this waits
+                        // on the loader lock. See include/iat_patch.h.
+                        DWORD loaderWaitError = 0;
+                        if (!BZROpenShim::IatPatch::WaitForModuleLoadToFinish(
+                                renderer, &loaderWaitError))
+                        {
+                            LogShimA(
+                                LogLevel::Warn,
+                                kComponent,
+                                "[OgreProfile] could not take a loader reference on RenderSystem_Direct3D11.dll (err=%lu); patching without a loader wait",
+                                loaderWaitError);
+                        }
                         g_Dx11ImportsPatched.store(
                             InstallDx11CreationObservers(renderer),
                             std::memory_order_release);
@@ -151,8 +177,27 @@
             dx11SkinSourceShadowPolicyEnabled,
             std::memory_order_release);
 
+        // Isolation is a capture-time A/B arm, not a shipped behavior. It is
+        // deliberately independent of whether the profiler itself is collecting,
+        // so a frame-time arm can be captured with the profiler disabled and
+        // PresentMon attached -- which is the only frame-time evidence this
+        // work treats as decisive. Announce it loudly whenever it is on so no
+        // measurement is ever read as stock rendering.
+        const unsigned isolationMask = ResolveIsolationMask();
+        g_IsolationMask.store(isolationMask, std::memory_order_release);
+        if (isolationMask != 0)
+        {
+            LogShimA(
+                LogLevel::Warn,
+                kComponent,
+                "[OgreProfile][Isolation] ACTIVE mask=0x%X glow=%s shadow=%s -- rendering is deliberately incomplete for measurement",
+                isolationMask,
+                (isolationMask & kIsolateGlow) ? "suppressed" : "normal",
+                (isolationMask & kIsolateShadow) ? "suppressed" : "normal");
+        }
+
         if (!profilerRequested && !chunkShadowPolicyEnabled &&
-            !dx11SkinSourceShadowPolicyEnabled)
+            !dx11SkinSourceShadowPolicyEnabled && isolationMask == 0)
         {
             LogShimA(
                 LogLevel::Info,

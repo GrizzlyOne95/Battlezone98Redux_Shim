@@ -1,4 +1,5 @@
 #include "dx11_colorspace_diagnostic.h"
+#include "iat_patch.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -40,6 +41,11 @@ namespace BZROpenShim
         constexpr char kTerrainDumpJsonIniKey[] = "TerrainRenderProbeDumpJson";
         constexpr unsigned kDiscoveryAttempts = 1200; // 30 seconds at 25 ms.
         constexpr DWORD kDiscoverySleepMs = 25;
+        // Retries exist for the case where the loader wait could not be taken
+        // and a patch still lands mid-load. Bounded, because giving up costs
+        // only the optional diagnostics.
+        constexpr unsigned kPatchRetryAttempts = 8;
+        constexpr DWORD kPatchRetrySleepMs = 50;
 
         // The released renderer builds one 16x16-cell cluster from 289 tile
         // samples. Interior tiles contribute 6x6 vertices, while the outside
@@ -2048,123 +2054,87 @@ namespace BZROpenShim
             return hr;
         }
 
-        bool PatchIatFunction(
-            HMODULE module,
-            const char* importedDll,
-            const char* functionName,
-            void* replacement,
-            void** original)
+        // The IAT walk for RenderSystem_Direct3D11.dll lives in
+        // include/iat_patch.h: the Ogre profiler worker thread patches the same
+        // module the same way at the same moment, so the hardening is shared
+        // rather than duplicated. That header records the crash it came from.
+        using IatPatchResult = IatPatch::Result;
+
+
+        // Returns false only when a patch attempt faulted and is worth retrying.
+        bool PatchRendererImports(HMODULE renderer)
         {
-            if (!module || !importedDll || !functionName || !replacement || !original)
-                return false;
-
-            auto* base = reinterpret_cast<unsigned char*>(module);
-            auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
-            if (dos->e_magic != IMAGE_DOS_SIGNATURE)
-                return false;
-
-            auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
-            if (nt->Signature != IMAGE_NT_SIGNATURE)
-                return false;
-
-            const IMAGE_DATA_DIRECTORY& imports =
-                nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-            if (!imports.VirtualAddress || !imports.Size)
-                return false;
-
-            FARPROC targetProc = nullptr;
-            HMODULE importedModule = GetModuleHandleA(importedDll);
-            if (importedModule)
-                targetProc = GetProcAddress(importedModule, functionName);
-
-            auto* descriptor = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(
-                base + imports.VirtualAddress);
-
-            for (; descriptor->Name; ++descriptor)
+            struct ImportPatch
             {
-                const char* dllName = reinterpret_cast<const char*>(base + descriptor->Name);
-                if (_stricmp(dllName, importedDll) != 0)
-                    continue;
+                const char* functionName;
+                void* replacement;
+                void** original;
+            };
+            const ImportPatch patches[] =
+            {
+                { "D3D11CreateDevice",
+                  reinterpret_cast<void*>(&HookD3D11CreateDevice),
+                  reinterpret_cast<void**>(&g_RealD3D11CreateDevice) },
+                { "D3D11CreateDeviceAndSwapChain",
+                  reinterpret_cast<void*>(&HookD3D11CreateDeviceAndSwapChain),
+                  reinterpret_cast<void**>(&g_RealD3D11CreateDeviceAndSwapChain) },
+            };
 
-                auto* firstThunk = reinterpret_cast<IMAGE_THUNK_DATA*>(
-                    base + descriptor->FirstThunk);
-
-                IMAGE_THUNK_DATA* nameThunk = descriptor->OriginalFirstThunk
-                    ? reinterpret_cast<IMAGE_THUNK_DATA*>(base + descriptor->OriginalFirstThunk)
-                    : nullptr;
-
-                for (; firstThunk->u1.Function; ++firstThunk)
+            unsigned installed = 0;
+            unsigned faulted = 0;
+            for (const ImportPatch& patch : patches)
+            {
+                switch (IatPatch::PatchImport(
+                    renderer, "d3d11.dll", patch.functionName,
+                    patch.replacement, patch.original))
                 {
-                    bool matches = false;
-
-                    if (nameThunk)
-                    {
-                        if (!IMAGE_SNAP_BY_ORDINAL(nameThunk->u1.Ordinal))
-                        {
-                            auto* byName = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(
-                                base + nameThunk->u1.AddressOfData);
-                            matches = std::strcmp(
-                                reinterpret_cast<const char*>(byName->Name),
-                                functionName) == 0;
-                        }
-                        ++nameThunk;
-                    }
-                    else if (targetProc)
-                    {
-                        matches = reinterpret_cast<void*>(firstThunk->u1.Function) ==
-                            reinterpret_cast<void*>(targetProc);
-                    }
-
-                    if (!matches)
-                        continue;
-
-                    auto** entry = reinterpret_cast<void**>(&firstThunk->u1.Function);
-                    if (*entry == replacement)
-                        return true;
-
-                    DWORD oldProtect = 0;
-                    if (!VirtualProtect(entry, sizeof(void*), PAGE_READWRITE, &oldProtect))
-                        return false;
-
-                    if (!*original)
-                        *original = *entry;
-
-                    *entry = replacement;
-
-                    DWORD ignored = 0;
-                    VirtualProtect(entry, sizeof(void*), oldProtect, &ignored);
-                    FlushInstructionCache(GetCurrentProcess(), entry, sizeof(void*));
-                    return true;
+                case IatPatchResult::Patched:
+                    ++installed;
+                    break;
+                case IatPatchResult::Faulted:
+                    ++faulted;
+                    break;
+                case IatPatchResult::NotFound:
+                    // The released renderer imports D3D11CreateDevice but
+                    // creates its swap chain through the DXGI factory, so a
+                    // NotFound here is the expected answer, not a failure.
+                    break;
                 }
             }
 
-            return false;
-        }
-
-        void PatchRendererImports(HMODULE renderer)
-        {
-            unsigned installed = 0;
-
-            installed += PatchIatFunction(
-                renderer,
-                "d3d11.dll",
-                "D3D11CreateDevice",
-                reinterpret_cast<void*>(&HookD3D11CreateDevice),
-                reinterpret_cast<void**>(&g_RealD3D11CreateDevice)) ? 1u : 0u;
-
-            installed += PatchIatFunction(
-                renderer,
-                "d3d11.dll",
-                "D3D11CreateDeviceAndSwapChain",
-                reinterpret_cast<void*>(&HookD3D11CreateDeviceAndSwapChain),
-                reinterpret_cast<void**>(&g_RealD3D11CreateDeviceAndSwapChain)) ? 1u : 0u;
+            if (faulted)
+            {
+                LogShimA(
+                    LogLevel::Warn,
+                    kComponent,
+                    "[DX11 Observer] %u import patch(es) faulted (module still loading?); installed=%u so far, will retry",
+                    faulted,
+                    installed);
+                return false;
+            }
 
             LogShimA(
                 installed ? LogLevel::Info : LogLevel::Warn,
                 kComponent,
                 "[DX11 Observer] RenderSystem_Direct3D11.dll D3D11 creation observers installed=%u; no rendering state was changed",
                 installed);
+            return true;
         }
+
+        bool WaitForLoaderToFinish(HMODULE renderer)
+        {
+            DWORD lastError = 0;
+            if (IatPatch::WaitForModuleLoadToFinish(renderer, &lastError))
+                return true;
+
+            LogShimA(
+                LogLevel::Warn,
+                kComponent,
+                "[DX11 Observer] could not take a loader reference on the renderer (err=%lu); patching without a loader wait",
+                lastError);
+            return false;
+        }
+
 
         unsigned __stdcall DiscoveryThreadProc(void*)
         {
@@ -2206,7 +2176,27 @@ namespace BZROpenShim
                         "[DX11 Observer] found RenderSystem_Direct3D11.dll module=0x%p",
                         renderer);
 
-                    PatchRendererImports(renderer);
+                    // GetModuleHandleW answers while the loader may still be
+                    // finishing this module. Wait for it before touching the
+                    // IAT, then retry a bounded number of times if a patch
+                    // still faults -- either way this thread must not take the
+                    // process down.
+                    const bool waited = WaitForLoaderToFinish(renderer);
+                    for (unsigned retry = 0; retry < kPatchRetryAttempts; ++retry)
+                    {
+                        if (g_ShutdownRequested.load(std::memory_order_acquire))
+                            return 0;
+                        if (PatchRendererImports(renderer))
+                            return 0;
+                        Sleep(kPatchRetrySleepMs);
+                    }
+
+                    LogShimA(
+                        LogLevel::Warn,
+                        kComponent,
+                        "[DX11 Observer] gave up patching renderer imports after %u attempts (loaderWait=%s); no D3D11 hooks installed, rendering is unaffected",
+                        kPatchRetryAttempts,
+                        waited ? "ok" : "skipped");
                     return 0;
                 }
 
