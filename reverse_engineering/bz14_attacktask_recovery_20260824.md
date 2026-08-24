@@ -444,10 +444,15 @@ Files: `include/bz14_attack_policy.h` (pure decision core),
   generic machine runs (fighter/scout proven) and leaves tank families on
   Redux, which must never present as a normal "legacy attack behavior"
   feature.
-- Arbitration (corrected this pass): AIKITE claims the shared
-  AttackTask::DoState detour site FIRST; the legacy layer defers unless
-  `OPENSHIM_LEGACY14_EXCLUSIVE=1`. An instrumentation mode can no longer
-  silently disable another feature.
+- Arbitration (corrected this pass, live-proven): AIKITE claims the shared
+  AttackTask::DoState detour site FIRST and the legacy layer ALWAYS defers
+  to an installed owner — runtime displacement cannot work (the owner's
+  patch has already replaced the entry bytes this layer would validate and
+  copy). A developer gives the legacy layer the site exclusively with
+  `OPENSHIM_LEGACY14_EXCLUSIVE=1`: AIKITE then skips its install for that
+  session (logged loudly) and nothing displaces anything at runtime. Shadow
+  mode defers in every case; an instrumentation mode can never silently or
+  loudly disable another feature.
 - Telemetry distinguishes all four validation claims separately:
   byte-valid / hook-installed / hook-executing (first-entry log) /
   behavior-affecting (override counter). One-shot session summaries at
@@ -459,9 +464,12 @@ Files: `include/bz14_attack_policy.h` (pure decision core),
   outcomes, engaged-set differences, ring boundaries (no invented
   smoothing), quad math replication of get_weapon_quad.
 - Runtime status on current build: **live and behavior-affecting for
-  fighter/scout engagements under ATTACK/HUNT** (seam proven by census);
-  inert for tank/rocket/walker/howitzer families (their tasks never call
-  the hooked function).
+  fighter/scout engagements under ATTACK/HUNT** (seam proven by census;
+  end-to-end apply-mode proof: hook-executing log during combat plus a
+  sustained strafe-duel distance signature, mean |Δdist|/tick 5.7 vs stock
+  11.5, with none of Redux's blast-hold retreat cycles); inert for
+  tank/rocket/walker/howitzer families (their tasks never call the hooked
+  function).
 
 ## 9. Performance, multiplayer, safety notes (design-level)
 
