@@ -45,16 +45,19 @@ static unsigned __stdcall PatchThreadProc(void*)
     BZROpenShim::InitializeOgreAnimationProfiler();
     BZROpenShim::InitializeDx11ColorSpaceDiagnostic();
     BZROpenShim::InitializeDx11EnhancedFxaa();
-    // Renderer-profile ownership (backend observation, scheme-policy takeover,
-    // capability reporting) starts with the other renderer observers so it can
-    // see the render-system modules load and be ready before first mission.
-    BZROpenShim::RenderProfiles::InitializeOgreRenderProfiles();
     BZROpenShim::InstallCrashLogger();
     BZROpenShim::InitializeNetworkOptimizer();
     // Install BZRNet observation after the optimizer so it can chain through
     // the optimizer's existing IAT targets without changing network behavior.
     BZROpenShim::InitializeBzrNetInstrumentation();
     BZROpenShim::RunPatcher(SHIM_VERSION);
+
+    // Renderer-profile ownership (backend observation, scheme-policy takeover,
+    // capability reporting) initializes after the compatibility gate so the
+    // takeover's address-dependent install sees the final gate verdict; its
+    // backend-observation thread still watches the render-system modules load
+    // well before the first mission.
+    BZROpenShim::RenderProfiles::InitializeOgreRenderProfiles();
 
     // Phase 2 is safe to ask to initialize on every build: it is dormant by
     // default and independently verifies exact executable/Ogre hashes before
