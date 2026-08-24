@@ -233,6 +233,16 @@
                     0, std::memory_order_acq_rel);
                 sample.pixelShaderSets = slot.pixelShaderSets.exchange(
                     0, std::memory_order_acq_rel);
+                sample.noDrawSubmissions = slot.noDrawSubmissions.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.emptyVertexSubmissions =
+                    slot.emptyVertexSubmissions.exchange(
+                        0, std::memory_order_acq_rel);
+                sample.zeroPrimSubmissions = slot.zeroPrimSubmissions.exchange(
+                    0, std::memory_order_acq_rel);
+                sample.unobservedSubmissions =
+                    slot.unobservedSubmissions.exchange(
+                        0, std::memory_order_acq_rel);
                 sample.metadataReady = slot.metadataState.load(
                     std::memory_order_acquire) == 2;
                 if (sample.metadataReady)
@@ -262,7 +272,7 @@
             LogShimA(
                 LogLevel::Info,
                 kComponent,
-                "[OgreProfile][RenderContributorSummary] installed=%s groups=%u renderCalls=%.1f/f OgreSubmit=%.1f/f coverage=%.1f%% Draw=%.1f/f DrawIndexed=%.1f/f drops=%llu",
+                "[OgreProfile][RenderContributorSummary] installed=%s groups=%u renderCalls=%.1f/f OgreSubmit=%.1f/f coverage=%.1f%% Draw=%.1f/f DrawIndexed=%.1f/f drops=%llu noDraw=%.1f/f emptyVerts=%.1f/f zeroPrim=%.1f/f multiDraw=%.1f/f unobserved=%.1f/f",
                 g_RenderSingleObjectHookInstalled.load(
                     std::memory_order_acquire) ? "yes" : "no",
                 static_cast<unsigned>(samples.size()),
@@ -274,7 +284,17 @@
                     : 0.0,
                 static_cast<double>(attributedDraws) / frameDivisor,
                 static_cast<double>(attributedIndexedDraws) / frameDivisor,
-                static_cast<unsigned long long>(drops));
+                static_cast<unsigned long long>(drops),
+                static_cast<double>(g_NoDrawSubmissions.exchange(
+                    0, std::memory_order_acq_rel)) / frameDivisor,
+                static_cast<double>(g_EmptyVertexSubmissions.exchange(
+                    0, std::memory_order_acq_rel)) / frameDivisor,
+                static_cast<double>(g_ZeroPrimSubmissions.exchange(
+                    0, std::memory_order_acq_rel)) / frameDivisor,
+                static_cast<double>(g_MultiDrawSubmissions.exchange(
+                    0, std::memory_order_acq_rel)) / frameDivisor,
+                static_cast<double>(g_UnobservedSubmissions.exchange(
+                    0, std::memory_order_acq_rel)) / frameDivisor);
 
             std::sort(
                 samples.begin(), samples.end(),
@@ -296,7 +316,7 @@
                 LogShimA(
                     LogLevel::Info,
                     kComponent,
-                    "[OgreProfile][RenderContributorTop] rank=%u type=%s ownerSample=%s mesh=%s material=%s technique=%s scheme=%s lod=%u pass=%u/%s camera=%s main=%.1f/f shadow=%.1f/f renderCalls=%.1f/f OgreSubmit=%.1f/f opVerts=%.0f/f opIndices=%.0f/f Draw=%.1f/f DrawIndexed=%.1f/f drawnVerts=%.0f/f drawnIndices=%.0f/f cpu=%.3fms/f d3d9[state=%.1f blend=%.1f texture=%.1f stage=%.1f sampler=%.1f vs=%.1f ps=%.1f]/f",
+                    "[OgreProfile][RenderContributorTop] rank=%u type=%s ownerSample=%s mesh=%s material=%s technique=%s scheme=%s lod=%u pass=%u/%s camera=%s main=%.1f/f shadow=%.1f/f renderCalls=%.1f/f OgreSubmit=%.1f/f opVerts=%.0f/f opIndices=%.0f/f Draw=%.1f/f DrawIndexed=%.1f/f drawnVerts=%.0f/f drawnIndices=%.0f/f noDraw=%.1f/f emptyVerts=%.1f/f zeroPrim=%.1f/f unobserved=%.1f/f cpu=%.3fms/f d3d9[state=%.1f blend=%.1f texture=%.1f stage=%.1f sampler=%.1f vs=%.1f ps=%.1f]/f",
                     static_cast<unsigned>(i + 1),
                     sample.metadataReady && sample.typeName[0]
                         ? sample.typeName.data() : "<unknown>",
@@ -326,6 +346,10 @@
                     static_cast<double>(sample.indexedDraws) / frameDivisor,
                     static_cast<double>(sample.drawnVertices) / frameDivisor,
                     static_cast<double>(sample.drawnIndices) / frameDivisor,
+                    static_cast<double>(sample.noDrawSubmissions) / frameDivisor,
+                    static_cast<double>(sample.emptyVertexSubmissions) / frameDivisor,
+                    static_cast<double>(sample.zeroPrimSubmissions) / frameDivisor,
+                    static_cast<double>(sample.unobservedSubmissions) / frameDivisor,
                     TicksToMs(sample.ticks) / frameDivisor,
                     static_cast<double>(sample.renderStates) / frameDivisor,
                     static_cast<double>(sample.blendStates) / frameDivisor,
