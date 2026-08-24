@@ -58,10 +58,14 @@ content intent. Campaign Reimagined owns content and art direction.**
 - `Auto` (default): use whatever the game selects this session. Observation
   watches which render system module loads (`RenderSystem_Direct3D11.dll` vs
   `RenderSystem_Direct3D9.dll`).
-- `DX9` / `DX11`: a player/system preference recorded in openshim.ini and
-  applied at next launch. OpenShim deliberately does NOT attempt a live Ogre
-  RenderSystem switch; divergence between requested and effective backend is
-  reported ("restart required") rather than hidden or acted on unsafely.
+- `DX9` / `DX11`: a recorded preference in openshim.ini that OpenShim parses
+  and REPORTS on today — it does NOT yet steer which render system the game
+  starts on. Divergence between requested and effective backend is logged
+  ("restart required") rather than hidden or acted on unsafely. Because the
+  key cannot yet control startup, it is deliberately NOT exposed in the
+  OpenShim settings UI; hand-edited ini values remain parsed for diagnostics.
+  Startup renderer selection needs further RE and is tracked in "Known
+  limitations / future work".
 - EXU/content cannot force a backend; the bridge exposes read-only queries.
 
 ## 3. RenderProfile semantics
@@ -175,10 +179,18 @@ validation so the retrofit path can fail closed cleanly.
 - `Deploy-OpenShim.ps1` deploys winmm.dll + patches.json + renderer resources
   together, extending the existing "DLL and patch definitions move as one
   unit" rule.
-- At startup the DLL validates `resources.version` against its compiled
-  expectation. Mismatch ⇒ `[RENDER] Enhanced unavailable: resource version
-  mismatch` ⇒ effective profile falls back to Redux. A stale pairing can
-  never silently run.
+- At startup the DLL validates the deployment in two tiers before granting
+  `CapIblResources`:
+  1. `resources.version` must match the DLL's compiled expectation. Mismatch ⇒
+     `[RENDER] Enhanced unavailable: resource version mismatch` ⇒ effective
+     profile falls back to Redux. A stale pairing can never silently run.
+  2. Every mandatory file — both `.program` scripts, all GLSL/HLSL vertex,
+     fragment, and SM3/SM4 delegates for base/terrain/glow families, and the
+     three neutral IBL DDS textures — must exist and be non-empty. A missing
+     or empty payload (even with a correct version marker) fails validation
+     with the offending filename logged.
+  This is a file-level contract; actual Ogre resource resolution (the
+  strongest tier) remains future work until retrofit lands.
 
 ## 9. Diagnostics
 
@@ -249,9 +261,13 @@ transition matrix, restart persistence through the actual UI.
 3. **Retro glow drift**: glow suppression asserted on explicit reapplies;
    engine viewport rebuilds can transiently re-enable bloom until the next
    reassert (~1 Hz) — acceptable for experimental status.
-4. **Renderer forcing**: `Renderer=DX9/DX11` records preference and reports
-   divergence; actually steering the game's render-system selection needs
-   further RE and stays out of scope until safe.
+4. **Renderer forcing**: `Renderer=DX9/DX11` is parsed and divergence is
+   reported, but OpenShim does not yet steer the game's render-system
+   selection (needs further RE). The settings UI therefore deliberately hides
+   the backend selector until the preference actually controls startup;
+   profile changes are applied via a pending flag drained by the scheme hook
+   on the game thread, so viewport feedback lands within one ~1 Hz reassert
+   pass rather than from an unsafe off-thread apply.
 5. **CR duplicate removal** (Phase 14) happens in the CR repo only after
    parity validation above; both implementations coexist harmlessly meanwhile
    (disjoint program namespaces).

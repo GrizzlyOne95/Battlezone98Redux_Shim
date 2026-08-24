@@ -72,6 +72,11 @@ namespace BZROpenShim::RenderProfiles
             static_cast<uint8_t>(Profile::Redux) };
         std::atomic<bool> s_schemeTakeoverInstalled { false };
 
+        // Set by non-game-thread requesters that need viewport state applied;
+        // drained ONLY by the scheme hook running on the game/render thread
+        // (Ogre state mutation must stay on the engine's thread).
+        std::atomic<bool> s_reapplyPending { false };
+
         const char* BackendName(ActiveBackend backend)
         {
             return backend == ActiveBackend::DX11 ? "DX11" : "DX9";
@@ -161,6 +166,31 @@ namespace BZROpenShim::RenderProfiles
 
         // ---- deployed Enhanced renderer-resource validation -----------------
 
+        // Mandatory files of the deployed Enhanced set. The version marker
+        // alone cannot prove a deployment is usable (a correct marker can sit
+        // next to deleted/empty payloads), so every program, shader source,
+        // and neutral IBL texture below must exist non-empty before the
+        // CapIblResources capability may be reported.
+        constexpr const char* kRequiredEnhancedResources[] = {
+            "openshim_enhanced_base.program",
+            "openshim_enhanced_base-vertex.glsl",
+            "openshim_enhanced_base-fragment.glsl",
+            "openshim_enhanced_base-sm3.hlsl",
+            "openshim_enhanced_base-sm4.hlsl",
+            "openshim_enhanced_terrain.program",
+            "openshim_enhanced_terrain-vertex.glsl",
+            "openshim_enhanced_terrain-fragment.glsl",
+            "openshim_enhanced_terrain-sm3.hlsl",
+            "openshim_enhanced_terrain-sm4.hlsl",
+            "openshim_enhanced_terrain_glow-vertex.glsl",
+            "openshim_enhanced_terrain_glow-fragment.glsl",
+            "openshim_enhanced_terrain_glow-sm3.hlsl",
+            "openshim_enhanced_terrain_glow-sm4.hlsl",
+            "openshim_ibl_brdf_lut.dds",
+            "openshim_ibl_neutral_irradiance.dds",
+            "openshim_ibl_neutral_prefilter.dds",
+        };
+
         bool ValidateDeployedResourceSet()
         {
             const std::filesystem::path gameDir = GetMainModuleDirectory();
@@ -200,9 +230,24 @@ namespace BZROpenShim::RenderProfiles
                 return false;
             }
 
+            for (const char* name : kRequiredEnhancedResources)
+            {
+                std::error_code ec;
+                const std::filesystem::path path = dir / name;
+                if (!std::filesystem::is_regular_file(path, ec) ||
+                    std::filesystem::file_size(path, ec) == 0 || ec)
+                {
+                    LogShimA(LogLevel::Warn, kLogTag,
+                             "Enhanced unavailable: mandatory resource missing/empty: %s\\%s",
+                             kEnhancedResourceDirRel, name);
+                    return false;
+                }
+            }
+
             LogShimA(LogLevel::Info, kLogTag,
-                     "resource-version=%s resources compatible=yes",
-                     kEnhancedResourcesVersion);
+                     "resource-version=%s resources compatible=yes (%zu files verified)",
+                     kEnhancedResourcesVersion,
+                     sizeof(kRequiredEnhancedResources) / sizeof(kRequiredEnhancedResources[0]));
             return true;
         }
 
@@ -521,7 +566,10 @@ namespace BZROpenShim::RenderProfiles
             s_backendDetected = true;
             ResolveAndPublishLocked("backend observed");
             ReleaseSRWLockExclusive(&s_stateLock);
-            ReapplyEffectiveProfileToViewports("backend observed");
+            // This is a worker thread: never touch Ogre viewports from here.
+            // Publish the pending flag; the scheme hook drains it on the
+            // engine's own thread at the next setMaterialScheme call (~1 Hz).
+            s_reapplyPending.store(true, std::memory_order_release);
             return 0;
         }
 
@@ -634,13 +682,12 @@ namespace BZROpenShim::RenderProfiles
                 {
                     // Rate-limited visibility: one line per distinct final
                     // scheme, not per call (~1 Hz reassert loop otherwise).
-                    static char s_lastLogged[48] = {};
-                    if (!std::equal(s_lastLogged,
-                                    s_lastLogged + sizeof(s_lastLogged),
-                                    finalScheme.c_str()))
+                    // Held as std::string so the comparison can never read
+                    // past the logical end of either side.
+                    static std::string s_lastLogged;
+                    if (s_lastLogged != finalScheme)
                     {
-                        strncpy_s(s_lastLogged, sizeof(s_lastLogged),
-                                  finalScheme.c_str(), _TRUNCATE);
+                        s_lastLogged = finalScheme;
                         LogShimA(LogLevel::Info, kLogTag,
                                  "scheme rewrite incoming=%hs final=%hs",
                                  incomingRaw,
@@ -656,6 +703,18 @@ namespace BZROpenShim::RenderProfiles
                 {
                     original(viewport, std::string());
                 }
+            }
+
+            // Deferred-profile drain. Ogre state must only be mutated from the
+            // game/render thread, so off-thread requesters (backend observation,
+            // companion bridge) publish s_reapplyPending and THIS hook — which
+            // the engine invokes on its own thread via the ~1 Hz settings-
+            // reassert loop and viewport creation — performs the actual
+            // viewport/compositor application here. The reapply path calls
+            // Ogre exports directly (not this IAT site), so no recursion.
+            if (s_reapplyPending.exchange(false, std::memory_order_acq_rel))
+            {
+                ReapplyEffectiveProfileToViewports("deferred apply");
             }
         }
 
@@ -706,28 +765,66 @@ namespace BZROpenShim::RenderProfiles
             const void* operandValue =
                 reinterpret_cast<const void*>(&s_hookTrampolinePtr);
 
-            for (const SchemeCallSite& site : kSchemeCallSites)
+            constexpr size_t kSchemeCallSiteCount =
+                sizeof(kSchemeCallSites) / sizeof(kSchemeCallSites[0]);
+
+            // Phase 1: make EVERY site writable before touching ANY bytes. A
+            // protection failure past the first site must not leave earlier
+            // sites redirected while later ones still call the import table
+            // (the partial-ownership state this function exists to prevent).
+            DWORD oldProtect[kSchemeCallSiteCount] = {};
+            size_t protectedCount = 0;
+            for (; protectedCount < kSchemeCallSiteCount; ++protectedCount)
             {
-                DWORD oldProtect = 0;
+                const SchemeCallSite& site = kSchemeCallSites[protectedCount];
                 uint8_t* target = reinterpret_cast<uint8_t*>(site.address);
-                if (!VirtualProtect(target, 6, PAGE_EXECUTE_READWRITE, &oldProtect))
+                if (!VirtualProtect(target, 6, PAGE_EXECUTE_READWRITE,
+                                    &oldProtect[protectedCount]))
                 {
                     LogShimA(LogLevel::Warn, kLogTag,
                              "scheme takeover skipped: VirtualProtect failed at 0x%08X err=%lu",
                              static_cast<uint32_t>(site.address),
                              static_cast<unsigned long>(GetLastError()));
-                    return false;
+                    break;
                 }
-                // Keep FF 15; replace only the displacement so the instruction
-                // calls through our pointer cell instead of the import table.
-                // The IAT entry stays pristine and remains how we invoke the
-                // real function from inside the hook.
+            }
+            if (protectedCount < kSchemeCallSiteCount)
+            {
+                // Nothing was written yet; undo the protections already taken.
+                for (size_t i = 0; i < protectedCount; ++i)
+                {
+                    DWORD ignored = 0;
+                    VirtualProtect(reinterpret_cast<uint8_t*>(
+                                       kSchemeCallSites[i].address),
+                                   6, oldProtect[i], &ignored);
+                }
+                return false;
+            }
+
+            // Phase 2: every target page is writable, so these writes cannot
+            // fail on protection; no partial-write rollback is possible.
+            // Keep FF 15; replace only the displacement so the instruction
+            // calls through our pointer cell instead of the import table.
+            // The IAT entry stays pristine and remains how we invoke the
+            // real function from inside the hook.
+            for (const SchemeCallSite& site : kSchemeCallSites)
+            {
+                uint8_t* target = reinterpret_cast<uint8_t*>(site.address);
                 std::memcpy(target + 2, &operandValue, sizeof(operandValue));
-                DWORD ignored = 0;
-                VirtualProtect(target, 6, oldProtect, &ignored);
+                FlushInstructionCache(GetCurrentProcess(), target + 2,
+                                      sizeof(operandValue));
                 LogShimA(LogLevel::Info, kLogTag,
                          "scheme takeover installed at 0x%08X (%s)",
                          static_cast<uint32_t>(site.address), site.identity);
+            }
+
+            // Phase 3: restore the original page protections.
+            for (size_t i = 0; i < kSchemeCallSiteCount; ++i)
+            {
+                DWORD ignored = 0;
+                VirtualProtect(reinterpret_cast<uint8_t*>(
+                                   kSchemeCallSites[i].address),
+                               6, oldProtect[i], &ignored);
             }
 
             s_schemeTakeoverInstalled.store(true, std::memory_order_release);
@@ -986,7 +1083,9 @@ namespace BZROpenShim::RenderProfiles
             ResolveAndPublishLocked(context);
             ReleaseSRWLockExclusive(&s_stateLock);
         }
-        ReapplyEffectiveProfileToViewports(context);
+        // The companion bridge can be called from any thread; defer the Ogre
+        // mutation to the game/render-thread scheme hook.
+        s_reapplyPending.store(true, std::memory_order_release);
     }
 
     void ClearContentRenderProfileOverride(const char* context)
@@ -1002,20 +1101,17 @@ namespace BZROpenShim::RenderProfiles
         }
         if (hadOverride)
         {
-            ReapplyEffectiveProfileToViewports(
-                context != nullptr ? context : "override cleared");
+            s_reapplyPending.store(true, std::memory_order_release);
         }
     }
 
     void ReloadRenderProfileConfig()
     {
-        {
-            AcquireSRWLockExclusive(&s_stateLock);
-            LoadConfigLocked();
-            ResolveAndPublishLocked("ini reload");
-            ReleaseSRWLockExclusive(&s_stateLock);
-        }
-        ReapplyEffectiveProfileToViewports("ini reload");
+        AcquireSRWLockExclusive(&s_stateLock);
+        LoadConfigLocked();
+        ResolveAndPublishLocked("ini reload");
+        ReleaseSRWLockExclusive(&s_stateLock);
+        s_reapplyPending.store(true, std::memory_order_release);
     }
 
     void InitializeOgreRenderProfiles()
