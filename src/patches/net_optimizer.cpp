@@ -4758,11 +4758,6 @@ namespace
                 static_cast<long>(finalObserved),
                 g_Config.govStart);
         }
-        if (g_WakeSender != INVALID_SOCKET && g_RealCloseSocket)
-        {
-            g_RealCloseSocket(g_WakeSender);
-            g_WakeSender = INVALID_SOCKET;
-        }
         // Join before freeing anything the workers touch. Closing a thread
         // handle without waiting leaves its final iteration free to run
         // against state torn down below (the ring buffer, capture maps and
@@ -4787,6 +4782,16 @@ namespace
         const bool autoKickStopped = stopWorkerThread(reinterpret_cast<void**>(&g_AutoKickThread));
         const bool allStopped = wakeStopped && dupStopped && govScanStopped &&
                                 govPatchStopped && autoKickStopped;
+        // The wake sender is owned by ReorderWakeThread, which reads and
+        // recreates g_WakeSender without a lock. Closing it before that worker
+        // is joined let its final iteration send through a closed (and
+        // potentially recycled) SOCKET value, or leak a sender it had just
+        // created. Close it only after the owning thread has been joined.
+        if (wakeStopped && g_WakeSender != INVALID_SOCKET && g_RealCloseSocket)
+        {
+            g_RealCloseSocket(g_WakeSender);
+            g_WakeSender = INVALID_SOCKET;
+        }
         if (!allStopped)
         {
             Logf("[OpenShimNet] shutdown: workers exceeded join window "

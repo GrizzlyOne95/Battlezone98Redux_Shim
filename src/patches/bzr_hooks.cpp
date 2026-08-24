@@ -454,7 +454,7 @@ namespace BZROpenShim
         constexpr char kEngineFlagResourceDirectoryName[] = "OpenShimFlags";
         constexpr char kEngineFlagResourcePath[] = "OpenShimFlags/openshim_selected_flag.bmp";
         // Lobby flag preview PNGs are written into the mod-adjacent generated
-        // flags dir (flags/_generated), NOT the core BZ_ASSETS_CORE tree — the
+        // flags dir (flags/_generated), NOT the core BZ_ASSETS_CORE tree ΓÇö the
         // feature ships via the flags mod, so generated art must stay out of
         // core game folders that the mod does not own. That directory is
         // registered as an Ogre resource location so the UI texture loader can
@@ -597,11 +597,11 @@ namespace BZROpenShim
         constexpr uintptr_t kGogProximityMineSimulateAddr = 0x005B0E40;
         constexpr uintptr_t kGogMineSimulateAddr = 0x00511460;
         constexpr uintptr_t kGogShieldTowerPowerUpdateAddr = 0x005D0CC0;
-        // GameObject::FriendP/EnemyP(GameObject*) — bool __thiscall(this, other).
+        // GameObject::FriendP/EnemyP(GameObject*) ΓÇö bool __thiscall(this, other).
         // Verified on live GOG exe by disassembly (int3-padded prologue; null-checks
         // other, calls other vtable[1]=GetTeamNum, then the int-overload FriendP/EnemyP
-        // at 0x4DB560/0x4DB600 → Team::FriendP/EnemyP at 0x5E1310/0x5E1350). Matches the
-        // 1.5 decomp bodies exactly. Previous values (0x0046BF40/0x0046BFD0) were WRONG —
+        // at 0x4DB560/0x4DB600 ΓåÆ Team::FriendP/EnemyP at 0x5E1310/0x5E1350). Matches the
+        // 1.5 decomp bodies exactly. Previous values (0x0046BF40/0x0046BFD0) were WRONG ΓÇö
         // they land mid-instruction, same failure class as the fixed GetObjByHandle.
         constexpr uintptr_t kGogGameObjectFriendPAddr = 0x004DB510;
         // GameObject::SetDamageFlags, and the obj76 -> GameObject accessor it
@@ -797,7 +797,7 @@ namespace BZROpenShim
         // builder (advisory-PDB drift); relocated by content (SNIP sig compare
         // + anim FSM). Prologue: 55 8B EC 6A FF 68 D6 C1 84 00.
         constexpr uintptr_t kGogPersonSimulateEntryAddr = 0x0059D340;
-        // GetPlayerHandle() — int __cdecl(). Verified on live GOG exe: reads
+        // GetPlayerHandle() ΓÇö int __cdecl(). Verified on live GOG exe: reads
         // GameObject::userObject (via 0x417C70) + playerHandle global (0x02CC2BDC),
         // round-trips through GameObjectHandle::GetObj (0x462630) / GameObject::GetHandle
         // (0x477590). This is the inner void-overload the Lua wrapper (0x4FFCD0) calls on
@@ -3558,13 +3558,48 @@ namespace BZROpenShim
                 return true;
 
             bool anySucceeded = false;
+            std::vector<uintptr_t> staleRestoreAddresses;
             for (const auto& entry : g_HudSpriteOriginalEntriesByAddress)
             {
                 if (g_HudSpriteHiddenAddresses.find(entry.first) == g_HudSpriteHiddenAddresses.end())
                     continue;
 
+                // The hide path re-reads each cached address and requires the
+                // stock panel UV block before it writes, because the engine can
+                // free and rebuild the HUD rect heap (mission restart,
+                // resolution change). The restore path must apply the same
+                // evidence: after such a rebuild the cached address is freed or
+                // reused, and VirtualProtect+write would then corrupt whatever
+                // owns the memory now.
+                HudSpriteRectRecord live = {};
+                if (!TryReadHudSpriteRectRecord(
+                        reinterpret_cast<const HudSpriteRectRecord*>(entry.first), live) ||
+                    !HudSpriteRecordMatchesStockScrapOrPilotUv(live))
+                {
+                    staleRestoreAddresses.push_back(entry.first);
+                    continue;
+                }
+
                 if (WriteHudSpriteRectRecordAtAddress(entry.first, entry.second))
                     anySucceeded = true;
+            }
+
+            if (!staleRestoreAddresses.empty())
+            {
+                for (uintptr_t address : staleRestoreAddresses)
+                {
+                    g_HudSpriteOriginalEntriesByAddress.erase(address);
+                    g_HudSpriteHiddenAddresses.erase(address);
+                }
+                // Drop the cache so the next request rediscovers the rebuilt
+                // records instead of writing into freed memory.
+                g_HudSpriteCachedPanelAddresses.clear();
+                g_HudSpriteFallbackDiscoveryAttempted = false;
+                LogShimA(
+                    LogLevel::Warn,
+                    "hudfallback",
+                    "restore dropped %zu stale panel record address(es); rediscovery scheduled",
+                    staleRestoreAddresses.size());
             }
 
             if (anySucceeded)
@@ -7465,7 +7500,7 @@ namespace BZROpenShim
         // override (0x00679570), the only exe-side path that feeds Ogre's
         // RenderQueue. Adding our sub-entities to the queue passed here puts
         // chunk proxies in exactly the same queue, frame, and coordinate space
-        // as the game's world geometry — no camera/viewport guesswork.
+        // as the game's world geometry ΓÇö no camera/viewport guesswork.
         static void SubmitChunkProxiesToRenderQueue(void* renderQueue)
         {
             if (!renderQueue || !g_EnableChunkMeshProxy)
@@ -10311,7 +10346,7 @@ namespace BZROpenShim
 
             UnderAttackAlertMode mode = UnderAttackAlertMode::Normal;
 
-            // Global user baseline (openshim.ini [Display]) — lowest-priority
+            // Global user baseline (openshim.ini [Display]) ΓÇö lowest-priority
             // source above the built-in default. The legacy per-mod cfg and the
             // env overrides below intentionally take precedence over it.
             std::string userConfigValue;
@@ -10521,7 +10556,7 @@ namespace BZROpenShim
 
             TargetReticlePopupMode mode = TargetReticlePopupMode::Default;
 
-            // Global user baseline (openshim.ini [Display]) — lowest-priority
+            // Global user baseline (openshim.ini [Display]) ΓÇö lowest-priority
             // source above the built-in default; legacy cfg and env override it.
             std::string userConfigValue;
             if ((TryGetUserConfigString(kUserConfigDisplaySection, "TargetPolicy", userConfigValue) ||
@@ -11410,7 +11445,7 @@ namespace BZROpenShim
                 {
                     if (EnvFlagEnabled("OPENSHIM_TRACE_SATELLITE_VISIBILITY_FIX"))
                     {
-                        Log(L"[SATVISFIX] world torn down — dropped %zu tracked objects\n",
+                        Log(L"[SATVISFIX] world torn down ΓÇö dropped %zu tracked objects\n",
                             g_SatelliteVisibilityState.size());
                     }
                     g_SatelliteVisibilityState.clear();
@@ -11483,7 +11518,7 @@ namespace BZROpenShim
 
                 if (EnvFlagEnabled("OPENSHIM_TRACE_SATELLITE_VISIBILITY_FIX"))
                 {
-                    Log(L"[SATVISFIX] satellite exited — restored %zu objects (%zu deferred to other owners)\n",
+                    Log(L"[SATVISFIX] satellite exited ΓÇö restored %zu objects (%zu deferred to other owners)\n",
                         restored, deferred);
                 }
                 return;
@@ -11608,7 +11643,7 @@ namespace BZROpenShim
 
             if (entering && EnvFlagEnabled("OPENSHIM_TRACE_SATELLITE_VISIBILITY_FIX"))
             {
-                Log(L"[SATVISFIX] satellite entered — synced %zu objects (%zu hidden)\n",
+                Log(L"[SATVISFIX] satellite entered ΓÇö synced %zu objects (%zu hidden)\n",
                     synced, hidden);
             }
         }
@@ -13949,7 +13984,7 @@ namespace BZROpenShim
         static constexpr bool kGlobalTurboEnabledDefault = false;
 
         // The comiss operand is redirected to this constant (EXU uses 0.9f). Must
-        // live for the process lifetime — its absolute address is written into the
+        // live for the process lifetime ΓÇö its absolute address is written into the
         // instruction, so a namespace-scope static is required.
         static float g_GlobalTurboTolerance = 0.9f;
         static bool g_GlobalTurboConfigInitialized = false;
@@ -16739,7 +16774,7 @@ namespace BZROpenShim
         // only centralizes the two cross-cutting lifecycle actions so new features
         // are a single appended row instead of another open-coded call at every
         // reset/tick site:
-        //   revertToBaseline  restore the post-mission resting state — the user's
+        //   revertToBaseline  restore the post-mission resting state ΓÇö the user's
         //                     openshim.ini baseline for Display features, the build
         //                     default for gameplay features. Called on mission end.
         //   refreshMpGate     reconcile a SinglePlayer-tier feature against the
@@ -18130,7 +18165,7 @@ namespace BZROpenShim
 
             // Per-unit weaponRangeMin floors *closeRange, the engine's
             // "too close" threshold (UnitTask::closeSq): inside it units hold
-            // fire, back away in DoStand, and AttackTask flees — a native
+            // fire, back away in DoStand, and AttackTask flees ΓÇö a native
             // standoff/kiting band. Clamped under the final fire range so a
             // firing window always exists.
             float finalCloseFloor = 0.0f;
@@ -21438,7 +21473,7 @@ namespace BZROpenShim
             AppendUniqueChunkPayloadCandidate(geomCandidates, NormalizeChunkPayloadComponentName(probe.geomName));
             // The VDF candidate list names OTHER pieces of the source craft.
             // Substituting one of those is only acceptable when the chunk's
-            // own geo name could not be read at all — otherwise a resolve
+            // own geo name could not be read at all ΓÇö otherwise a resolve
             // miss (or a stale craft binding) turns into a visibly wrong
             // piece instead of an invisible chunk.
             if (geomCandidates.empty())
@@ -21648,7 +21683,7 @@ namespace BZROpenShim
 
         // Buildings ship as .sdf instead of .vdf: same BWD2 container, but the
         // geo table is an SGEO block (120-byte records vs VGEO's 100) whose
-        // count field is authoritative — the block is padded with "NULL"
+        // count field is authoritative ΓÇö the block is padded with "NULL"
         // records to a fixed capacity.
         static bool TryLoadChunkSdfAssetInfo(
             const std::filesystem::path& sdfPath,
@@ -23508,7 +23543,7 @@ namespace BZROpenShim
             g_ChunkObjectIdentityLastRefreshTick = now;
 
             // NOTE: until 2026-07-18 this walked the stale advisory-PDB
-            // object-list global, whose sanity checks always failed — so the
+            // object-list global, whose sanity checks always failed ΓÇö so the
             // identity cache had silently stayed empty since it was written.
             // The arena walk makes it populate for the first time.
             static void* s_identityObjects[kGameObjectArenaSlotCapacity];
@@ -24390,7 +24425,7 @@ namespace BZROpenShim
         {
             outUserObject = nullptr;
             outLocalTeam = 0;
-            // GameObject::userObject global 0x00917AFC — the exact value the
+            // GameObject::userObject global 0x00917AFC ΓÇö the exact value the
             // accessor 0x417C70 returns, which FlagDisplay::Submit itself
             // uses for its skip-own-craft compare. The previous userObject /
             // userTeamNumber globals (removed) were advisory-PDB drift into
@@ -27290,7 +27325,7 @@ namespace BZROpenShim
             }
         }
         // FUN_00679570: _updateRenderQueue override of the game's world
-        // renderable container — the only exe-side caller of
+        // renderable container ΓÇö the only exe-side caller of
         // Ogre::RenderQueue::addRenderable. Vtable slot 0x00892728.
         g_BzrFn_LegacyWorldUpdateRenderQueue = reinterpret_cast<FnLegacyWorldUpdateRenderQueue>(0x00679570);
         g_BzrFn_AIBuildConstructionEnd =
@@ -30881,7 +30916,7 @@ namespace BZROpenShim
     // object tree, so it stopped drawing on the model the same frame its debris
     // appeared. Redux bakes the whole craft into a single skinned Ogre mesh that
     // cannot unparent anything, so the piece stays welded to the body until
-    // FullFragmentObject hides the entire mesh — a tank flies its blown-off wing
+    // FullFragmentObject hides the entire mesh ΓÇö a tank flies its blown-off wing
     // away while a second copy rides along on the hull.
     //
     // Every stock craft mesh skins each geo rigidly to one identically-named bone
@@ -31014,7 +31049,7 @@ namespace BZROpenShim
             boundObjectBytes = reinterpret_cast<const uint8_t*>(objectPtr);
 
         // The object pool recycles pointers, so any binding left at either
-        // address belongs to a previous chunk. Evict before storing — a
+        // address belongs to a previous chunk. Evict before storing ΓÇö a
         // failed source capture must not leave the old craft's identity
         // behind for this chunk to inherit.
         EraseChunkResolvedBinding(reinterpret_cast<const uint8_t*>(objectPtr));
@@ -31585,7 +31620,7 @@ namespace BZROpenShim
         // Keep proxy lifecycle (expiry, transform mirroring) ticking from the
         // simulate hook so it survives even when the render hooks are not
         // running, but never manual-submit from sim time: the render queue is
-        // rebuilt each frame, so submissions here would be discarded — or worse,
+        // rebuilt each frame, so submissions here would be discarded ΓÇö or worse,
         // outlive a released slot. Render-time submission happens in
         // LegacyWorldUpdateRenderQueueHook, invoked by Ogre with the live
         // render queue every rendered frame.
@@ -32505,7 +32540,7 @@ namespace BZROpenShim
 
             // 1.5-style preview tile showing the selected flag, placed just
             // above the arrow pair. It reuses the forward callback, so clicking
-            // the preview advances like the right arrow, and — critically —
+            // the preview advances like the right arrow, and ΓÇö critically ΓÇö
             // both +0x150/+0x154 callback slots stay non-null (a null slot on
             // an active dialog child crashes when the lobby walks its children;
             // see the AutoSave button note).
