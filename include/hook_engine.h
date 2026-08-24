@@ -30,6 +30,7 @@ namespace HookEngine
         uint32_t offset;
         uint32_t expected_size;
         uint32_t fallback_addr;
+        bool require_unique = false;
     };
 
     // Core Memory Utilities

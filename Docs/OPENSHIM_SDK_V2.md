@@ -30,6 +30,22 @@ if (!api || api->apiVersion != BZROpenShim::SDK_API_V2 ||
 
 `OpenShimGetApi(0)` asks for the newest table supported by the loaded shim. An explicit unsupported version returns `nullptr` rather than a partially compatible table.
 
+SDK v2 is append-only. Check `structSize` against the end of the specific field
+you intend to use, not against `sizeof(OpenShimApiV2)`: a consumer compiled
+against a newer header is otherwise refused by an older but perfectly
+compatible v2 provider.
+
+```cpp
+const size_t fieldEnd =
+    offsetof(BZROpenShim::OpenShimApiV2, getDeveloperSnapshot) +
+    sizeof(api->getDeveloperSnapshot);
+
+if (api->structSize >= fieldEnd && api->getDeveloperSnapshot)
+{
+    // This provider implements the appended field.
+}
+```
+
 ## Capabilities
 
 The v2 table publishes a bit mask so consumers can probe features instead of inferring them from the shim version.
@@ -153,3 +169,22 @@ Live Redux validation should confirm:
 4. A snapshot in a mission reports a plausible player position.
 5. An unsupported build can still query SDK status while version-specific player inspection stands down.
 6. Repeated polling/snapshot calls do not alter gameplay or renderer state.
+
+## Storefront-gated patches
+
+`scripts/patches.json` entries may carry a `platforms` array:
+
+```json
+{ "name": "Map List Rewrite for Hop-Fix 1/3", "platforms": ["steam"], "...": "..." }
+```
+
+An entry without `platforms` applies to every qualified distribution. An entry
+with `platforms` applies only when the patcher has qualified the running
+executable as one of the listed storefronts (`gog` or `steam`); an unqualified
+`Unknown` distribution matches nothing and the patch is dropped. Filtered
+patches are removed before pattern scanning, so a Steam-only signature is never
+searched for in a GOG executable.
+
+Distribution itself is published through `OpenShimGetBzrDistribution()` and
+`BZROpenShim::GetBzrDistribution()`, and is only set to `GOG`/`Steam` after the
+supported BZR version gate succeeds.
