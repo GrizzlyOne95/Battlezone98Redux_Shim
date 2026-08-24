@@ -30,6 +30,10 @@ add_executable(enhanced_light_selection_bench
     ../src/engine/enhanced_light_selection.cpp
 )
 
+add_executable(sun_flash_tests
+    sun_flash_tests.cpp
+)
+
 target_include_directories(shim_log_tests PRIVATE ../include)
 target_compile_features(shim_log_tests PRIVATE cxx_std_20)
 target_compile_features(native_ui_validation_tests PRIVATE cxx_std_20)
@@ -37,6 +41,8 @@ target_include_directories(enhanced_light_selection_tests PRIVATE ../include)
 target_include_directories(enhanced_light_selection_bench PRIVATE ../include)
 target_compile_features(enhanced_light_selection_tests PRIVATE cxx_std_20)
 target_compile_features(enhanced_light_selection_bench PRIVATE cxx_std_20)
+target_include_directories(sun_flash_tests PRIVATE ../include)
+target_compile_features(sun_flash_tests PRIVATE cxx_std_20)
 
 if(MSVC)
     target_compile_options(bzrnet_protocol_tests PRIVATE /W4 /WX)
@@ -44,15 +50,18 @@ if(MSVC)
     target_compile_options(native_ui_validation_tests PRIVATE /W4 /WX)
     target_compile_options(enhanced_light_selection_tests PRIVATE /W4 /WX)
     target_compile_options(enhanced_light_selection_bench PRIVATE /W4 /WX)
+    target_compile_options(sun_flash_tests PRIVATE /W4 /WX)
 else()
     target_compile_options(bzrnet_protocol_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(shim_log_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(native_ui_validation_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(enhanced_light_selection_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(enhanced_light_selection_bench PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(sun_flash_tests PRIVATE -Wall -Wextra -Werror)
 endif()
 
 add_test(NAME bzrnet_protocol_tests COMMAND bzrnet_protocol_tests)
 add_test(NAME shim_log_tests COMMAND shim_log_tests)
 add_test(NAME native_ui_validation_tests COMMAND native_ui_validation_tests)
 add_test(NAME enhanced_light_selection_tests COMMAND enhanced_light_selection_tests)
+add_test(NAME sun_flash_tests COMMAND sun_flash_tests)
