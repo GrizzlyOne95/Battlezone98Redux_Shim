@@ -19407,6 +19407,64 @@ namespace BZROpenShim
                                                  : EXCEPTION_CONTINUE_SEARCH;
         }
 
+        // Best-effort removal of the half-created clone an aborted stock
+        // attempt leaves registered under the real thumbnail/material name:
+        // the stock body registers the cloned material before Material::load
+        // throws, so after a swallow the manager map still owns an unloaded
+        // material whose texture unit names the undecodable image.
+        //
+        // Leaving it registered makes every later selection take the stock
+        // exists-branch, which hands back that half-loaded material without
+        // loading it - consumers see an untextured entry instead of the UI
+        // substitute, and any unrelated future load() of that material would
+        // rethrow the same decode failure outside this guard. Removing the
+        // entry forces later selections back through the fully guarded build
+        // path, which deterministically substitutes "UI" again.
+        //
+        // Uses the same exported ResourceManager::remove(MaterialManager
+        // singleton) pair proven live by the material collision listener in
+        // trampolines.cpp. Ogre's remove(const String&) is a no-op for absent
+        // names and merely detaches the manager reference, so live SharedPtrs
+        // stay valid. Failures here are non-fatal by construction; non-C++
+        // faults are deliberately not caught (corruption stays loud).
+        static void RemoveHalfCreatedThumbnailMaterial(const char* name)
+        {
+            using FnMaterialManagerGetSingletonPtr = void* (__cdecl*)();
+            using FnResourceManagerRemoveByName =
+                void (__thiscall*)(void*, const std::string&);
+
+            // Never touch the substitute target itself: if the base "UI"
+            // material were ever removed the fallback would lose its source.
+            if (!name || !*name ||
+                std::strcmp(name, kUiMaterialSubstituteName) == 0)
+            {
+                return;
+            }
+
+            const auto getMaterialManager =
+                ResolveOgreProc<FnMaterialManagerGetSingletonPtr>(
+                    "?getSingletonPtr@MaterialManager@Ogre@@SAPAV12@XZ");
+            const auto removeByName =
+                ResolveOgreProc<FnResourceManagerRemoveByName>(
+                    "?remove@ResourceManager@Ogre@@UAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            if (!getMaterialManager || !removeByName)
+                return;
+
+            void* manager = getMaterialManager();
+            if (!manager)
+                return;
+
+            try
+            {
+                removeByName(manager, std::string(name));
+            }
+            catch (...)
+            {
+                // A failed cleanup only costs one extra guarded decode on the
+                // next selection; it must not turn recovery into a crash.
+            }
+        }
+
         // Fill the caller's SharedPtr<Material> slot with the stock "UI"
         // material by re-running the guarded body under the substitute name.
         // Some callers - notably the campaign preview builder FUN_007D2B70 -
@@ -19474,6 +19532,15 @@ namespace BZROpenShim
                     slot[0] = nullptr; // SharedPtr representation
                     slot[1] = nullptr; // use-count pointer
                 }
+
+                // Drop the half-created clone the aborted stock attempt left
+                // registered under the real name so repeat selections re-run
+                // the guarded path (and get the same UI substitution) instead
+                // of silently receiving the half-loaded leftover from the
+                // stock exists-branch. See
+                // RemoveHalfCreatedThumbnailMaterial for the full rationale.
+                RemoveHalfCreatedThumbnailMaterial(
+                    static_cast<const char*>(nameArg));
 
                 const long remaining = InterlockedDecrement(&g_ThumbnailBmpGuardLogBudget);
                 if (remaining >= 0)

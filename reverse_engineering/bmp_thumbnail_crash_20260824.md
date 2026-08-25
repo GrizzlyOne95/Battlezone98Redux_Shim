@@ -130,8 +130,10 @@ swallow path now re-runs the guarded stock body under the substitute name
   contract;
 - the slot therefore holds exactly the reference semantics the caller expects;
   visually the entry shows the plain UI look instead of a thumbnail;
-- if the retry itself ever faults, the guard degrades to the original
-  cleared-slot behaviour and logs it.
+- if the retry itself ever throws the same C++ exception class, the guard
+  degrades to the original cleared-slot behaviour and logs it; a hardware
+  fault inside the retry is deliberately not converted - it propagates and
+  crashes loudly (see the narrow-scope invariant above).
 
 An intermediate attempt bound the exported
 `Ogre::MaterialManager::getByName` directly; live testing showed it falling
@@ -143,8 +145,38 @@ exported getByName received an invalid String reference. The retry approach
 avoids cross-ABI string construction entirely.
 
 The half-created clone left registered under the real name by the aborted
-attempt also makes repeat selections stable: subsequent calls take FUN_007D3FF0's
-exists-branch, which returns the material without touching textures or loading.
+attempt is removed again on the swallow path (exported
+`ResourceManager::remove` on the `MaterialManager` singleton, same mechanism
+proven live by the material collision listener in `src/patches/trampolines.cpp`;
+no-op for absent names, and "UI" itself is never removed). Earlier reasoning
+treated that leftover as a stability feature - repeat selections take
+FUN_007D3FF0's exists-branch and return it without loading. Review of that
+contract found it unsound: the exists-branch hands consumers an *unloaded*
+material whose texture unit still names the undecodable image (untextured
+rendering instead of the UI substitute), and any unrelated future load() of
+that material would rethrow the decode failure outside this guard. Removing
+the entry makes every repeat selection re-run the fully guarded build path and
+deterministically receive the UI substitute again.
+
+### Repeat-selection contract (guard invariant)
+
+After any swallowed decode failure, for every subsequent selection of the same
+entry:
+
+1. no crash and no terminate (the only handled exception class stays
+   `0xE06D7363`; AVs/corruption remain loud);
+2. the caller receives either the loaded stock "UI" material or a cleared
+   slot - never the half-loaded leftover;
+3. other thumbnails are unaffected (the removal targets exactly one manager
+   entry by name).
+
+Manual validation recipe driving all six required transitions: place the
+malformed BMP as `<map/campaign folder>\<name>.bmp`, then (1) open the map or
+campaign list, (2) select the malformed entry, (3) navigate away, (4) reselect
+it, (5) close and reopen the list, (6) reselect it again. Expected at every
+step: `[BMPFIX] Rejected undecodable thumbnail image; substituted stock UI
+material ...` (bounded to 8 lines/session) and the plain UI look; no second
+decode attempt may ever escape the guard.
 
 ## Validation
 
