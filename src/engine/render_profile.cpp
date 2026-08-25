@@ -217,12 +217,22 @@ namespace BZROpenShim::RenderProfiles
         }
 
         // Capability validation applies regardless of who asked: a mission
-        // cannot resurrect a capability the session lacks.
-        if (winning == Profile::Enhanced &&
-            !HasCapability(input.capabilityMask, CapSchemeRewrite))
+        // cannot resurrect a capability the session lacks. Enhanced carries a
+        // second hard requirement beyond the scheme layer: the deployed
+        // mandatory resource set (programs/shaders/textures) must have
+        // verified on disk. Missing mandatory resources degrade cleanly to
+        // Redux; the OPTIONAL IBL set only affects the CapIblResources bit
+        // and can never gate the profile by itself.
+        if (winning == Profile::Enhanced && !HasCapability(input.capabilityMask, CapSchemeRewrite))
         {
             result.fellBack = true;
             SetReason(result, "Enhanced unavailable: scheme policy layer inactive");
+            winning = Profile::Redux;
+        }
+        if (winning == Profile::Enhanced && !HasCapability(input.capabilityMask, CapEnhancedResources))
+        {
+            result.fellBack = true;
+            SetReason(result, "Enhanced unavailable: mandatory renderer resource set missing/invalid");
             winning = Profile::Redux;
         }
 
