@@ -9,6 +9,25 @@
 
 namespace BZROpenShim::RenderProfiles
 {
+    // Captures the process command line into an internal fixed buffer. MUST be
+    // called from DllMain (DLL_PROCESS_ATTACH), i.e. before game main can run:
+    // stock's command-line parser strtok()s the GetCommandLineA() buffer in
+    // place, destroying tokens after the first argument for any later reader.
+    // The backend-selection seam reads this snapshot instead of the live PEB.
+    void CaptureCommandLineSnapshot();
+
+    // Snapshot taken by CaptureCommandLineSnapshot(); nullptr when capture has
+    // not happened yet (callers may fall back to GetCommandLineA).
+    const char* GetCapturedCommandLine();
+
+    // Seam A entry point. Applies the persistent/CLI backend request to the
+    // Ogre.cfg transport line. Runs from DllMain (loader-lock safe: bounded
+    // local-disk file I/O only, no LoadLibrary): on fast machines the game
+    // reads Ogre.cfg within ~1 s of process start, so the old patch-thread
+    // timing lost that race on the Steam build. Idempotent; later callers are
+    // no-ops.
+    void RunStartupBackendSelectionEarly();
+
     // Loads [Graphics] Renderer/RenderProfile from openshim.ini, starts backend
     // observation, evaluates the resolver, installs the viewport scheme-policy
     // takeover when the supported build is present, and validates the deployed

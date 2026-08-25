@@ -17,6 +17,7 @@
 // Enhanced/Retro report themselves unavailable rather than half-working.
 
 #include "render_profile_runtime.h"
+#include "backend_selection.h"
 #include "BZROpenShim.h"
 #include "bzr_options_ui.h"
 #include "render_profile.h"
@@ -36,6 +37,33 @@
 
 namespace BZROpenShim::RenderProfiles
 {
+    // Command-line snapshot. Stock's parser (FUN_007D5120) strtok()s the
+    // GetCommandLineA() buffer in place, so tokens after the first NUL it
+    // inserts vanish for any later reader; DllMain captures the pristine
+    // string before game main can run.
+    char s_commandLineSnapshot[1200] = {};
+
+    void CaptureCommandLineSnapshot()
+    {
+        if (const char* raw = GetCommandLineA())
+        {
+            strncpy_s(s_commandLineSnapshot, raw, _TRUNCATE);
+        }
+    }
+
+    const char* GetCapturedCommandLine()
+    {
+        return s_commandLineSnapshot[0] != '\0' ? s_commandLineSnapshot : nullptr;
+    }
+
+    const char* RequestedBackendName(RendererBackend backend)
+    {
+        return backend == RendererBackend::DX11 ? "DX11"
+               : backend == RendererBackend::DX9 ? "DX9"
+                                                 : "Auto";
+    }
+
+
     namespace
     {
         constexpr const char* kLogTag = "RENDER";
@@ -60,6 +88,17 @@ namespace BZROpenShim::RenderProfiles
         RendererBackend s_requestedBackend = RendererBackend::Auto;
         ActiveBackend s_detectedBackend = ActiveBackend::DX9;
         bool s_backendDetected = false;
+
+        // ---- backend-selection boot state (Seam A) --------------------------
+        //
+        // Persistent requested renderer lives in openshim.ini ([Graphics]
+        // Renderer) and is NEVER derived from Ogre.cfg: stock saveConfig()
+        // rewrites that file on clean exit, after in-game renderer changes,
+        // and even on failed boots, so it is effective-transport only. See
+        // reverse_engineering/renderer_startup_backend_selection_20260825.md.
+        BackendSelection::BootRequest s_bootRequest {};
+        bool s_backendTransportEnabled = true;
+        bool s_transportWrittenThisBoot = false;
         Profile s_userProfile = Profile::Redux;
         ContentRequest s_contentRequest = ContentRequest::Inherit;
         bool s_contentOverridePresent = false;
@@ -161,6 +200,389 @@ namespace BZROpenShim::RenderProfiles
                 {
                     s_userProfile = parsed;
                 }
+            }
+            // Hard kill-switch for the startup transport seam. Default is ON:
+            // the seam only acts when [Graphics] Renderer is explicitly not
+            // Auto, so Auto users see byte-identical stock behavior either way.
+            s_backendTransportEnabled = true;
+            if (TryGetUserConfigString("Startup", "BackendTransport", value))
+            {
+                const std::string trimmed = TrimAsciiCopy(value);
+                if (EqualsNoCase(trimmed.c_str(), "0") ||
+                    EqualsNoCase(trimmed.c_str(), "false") ||
+                    EqualsNoCase(trimmed.c_str(), "no") ||
+                    EqualsNoCase(trimmed.c_str(), "off"))
+                {
+                    s_backendTransportEnabled = false;
+                }
+            }
+        }
+
+        // ---- backend-selection startup seam ---------------------------------
+        //
+        // Evidence base: reverse_engineering/
+        // renderer_startup_backend_selection_20260825.md. Redux resolves its
+        // backend from a global desired-name string seeded from /renderer:...
+        // or Ogre.cfg's "Render System=" line ~5-6 s after process start;
+        // OpenShim's winmm.dll initializes seconds earlier, so rewriting that
+        // single line pre-read is the narrowest safe seam. Nothing downstream
+        // of the game's selection ladder is intercepted.
+
+        bool FileExistsNonEmpty(const std::filesystem::path& path)
+        {
+            std::error_code ec;
+            return std::filesystem::is_regular_file(path, ec) &&
+                   std::filesystem::file_size(path, ec) > 0 && !ec;
+        }
+
+        // Marker recording this boot's transport request. Its presence at the
+        // NEXT launch proves the previous boot ended without an identified
+        // renderer - the only observable signature of the device-init-failure
+        // abort path (exit code -1 within seconds of Ogre initialisation).
+        std::filesystem::path PendingMarkerPath()
+        {
+            const std::filesystem::path dir = GetMainModuleDirectory();
+            return dir.empty() ? dir : dir / "logs" / "openshim_backend_pending.txt";
+        }
+
+        void WritePendingMarker(const char* subsystemName)
+        {
+            const auto markerDir = PendingMarkerPath().parent_path();
+            if (markerDir.empty())
+            {
+                return;
+            }
+            std::error_code ec;
+            std::filesystem::create_directories(markerDir, ec);
+            FILE* file = nullptr;
+            if (_wfopen_s(&file, PendingMarkerPath().c_str(), L"wb") != 0 ||
+                file == nullptr)
+            {
+                return;
+            }
+            fwrite(subsystemName, 1, strlen(subsystemName), file);
+            fputc('\n', file);
+            fclose(file);
+        }
+
+        bool ReadPendingMarker(std::string& outSubsystem)
+        {
+            FILE* file = nullptr;
+            if (_wfopen_s(&file, PendingMarkerPath().c_str(), L"rb") != 0 ||
+                file == nullptr)
+            {
+                return false;
+            }
+            char buffer[64] = {};
+            const size_t read = fread(buffer, 1, sizeof(buffer) - 1, file);
+            fclose(file);
+            outSubsystem.assign(buffer, read);
+            while (!outSubsystem.empty() &&
+                   (outSubsystem.back() == '\n' || outSubsystem.back() == '\r'))
+            {
+                outSubsystem.pop_back();
+            }
+            return !outSubsystem.empty();
+        }
+
+        void ClearPendingMarker()
+        {
+            std::error_code ec;
+            std::filesystem::remove(PendingMarkerPath(), ec);
+        }
+
+        // Rewrites ONLY the value of the "Render System=" line of
+        // <game>\Ogre.cfg via temp-file + MoveFileEx replace; every other byte
+        // of the stock file is preserved. Any failure leaves the stock file
+        // untouched (fail open to stock selection).
+        bool WriteOgreConfigTransport(const char* subsystemName,
+                                      std::string& outPreviousValue)
+        {
+            const std::filesystem::path dir = GetMainModuleDirectory();
+            if (dir.empty())
+            {
+                return false;
+            }
+            const std::filesystem::path cfgPath = dir / "Ogre.cfg";
+
+            std::string text;
+            FILE* file = nullptr;
+            if (_wfopen_s(&file, cfgPath.c_str(), L"rb") != 0 || file == nullptr)
+            {
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "backend transport: Ogre.cfg unreadable; stock selection preserved");
+                return false;
+            }
+            char buffer[4096];
+            size_t got = 0;
+            while ((got = fread(buffer, 1, sizeof(buffer), file)) > 0)
+            {
+                text.append(buffer, got);
+            }
+            fclose(file);
+
+            outPreviousValue.assign(
+                BackendSelection::ExtractStockRenderSystemValue(text));
+
+            std::string updated = text;
+            if (!BackendSelection::ApplyTransportToConfigImage(updated, subsystemName))
+            {
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "backend transport: Ogre.cfg refused (%zu bytes, non-ASCII/empty); "
+                         "stock selection preserved",
+                         text.size());
+                return false;
+            }
+            if (updated == text)
+            {
+                return true; // already correct; nothing to write
+            }
+
+            const auto tmpPath = cfgPath.native() + L".openshim-tmp";
+            if (_wfopen_s(&file, tmpPath.c_str(), L"wb") != 0 || file == nullptr)
+            {
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "backend transport: temp write failed err=%lu",
+                         static_cast<unsigned long>(GetLastError()));
+                return false;
+            }
+            const size_t written = fwrite(updated.data(), 1, updated.size(), file);
+            fclose(file);
+            if (written != updated.size())
+            {
+                LogShimA(LogLevel::Warn, kLogTag, "backend transport: short write");
+                std::error_code ec;
+                std::filesystem::remove(tmpPath, ec);
+                return false;
+            }
+            if (!MoveFileExW(tmpPath.c_str(), cfgPath.c_str(),
+                             MOVEFILE_REPLACE_EXISTING))
+            {
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "backend transport: replace failed err=%lu",
+                         static_cast<unsigned long>(GetLastError()));
+                std::error_code ec;
+                std::filesystem::remove(tmpPath, ec);
+                return false;
+            }
+            return true;
+        }
+
+        // Resolves this boot's backend request and applies the Ogre.cfg
+        // transport when an explicit, capability-validated request exists.
+        //
+        // Caller MUST hold s_stateLock exclusively: this runs inside
+        // InitializeOgreRenderProfiles' startup critical section, before the
+        // observation thread exists. SRW locks are not recursive, which is why
+        // no locking happens in here despite all the s_* state mutation.
+        void RunStartupBackendSelection()
+        {
+            // Previous-boot outcome evidence first: a surviving marker means
+            // the last boot ended before any renderer was established (the
+            // device-init abort exits the process before observation can
+            // report anything).
+            std::string pendingSubsystem;
+            if (ReadPendingMarker(pendingSubsystem))
+            {
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "previous boot ended before renderer establishment "
+                         "(requested=%.*s); possible device-init failure",
+                         static_cast<int>(pendingSubsystem.size()),
+                         pendingSubsystem.c_str());
+            }
+
+            // Launch-scoped CLI override (/renderer:...). Stock parses this
+            // itself later; we read the DllMain-captured snapshot because the
+            // stock parser strtok()s the PEB command-line buffer in place and
+            // would otherwise already have destroyed these tokens for any
+            // later reader. We only observe the token here to attribute source
+            // and to keep it launch-scoped instead of letting saveConfig
+            // absorb it into the persistent preference.
+            const char* cmdline = GetCapturedCommandLine();
+            if (cmdline == nullptr)
+            {
+                cmdline = GetCommandLineA(); // DllMain capture missed; best effort
+            }
+            LogShimA(LogLevel::Info, kLogTag, "cmdline snapshot: %s",
+                     cmdline != nullptr ? cmdline : "");
+            const auto cliToken =
+                BackendSelection::FindCommandLineRendererOverride(cmdline);
+
+            s_bootRequest = BackendSelection::ResolveBootRequest(
+                s_requestedBackend, cliToken);
+
+            if (cliToken == BackendSelection::RendererToken::Gl)
+            {
+                LogShimA(LogLevel::Info, kLogTag,
+                         "CLI renderer override gl/opengl recognized but unsupported "
+                         "by OpenShim; stock selection preserved");
+            }
+
+            const char* subsystemName =
+                BackendSelection::SubsystemNameFor(s_bootRequest.backend);
+
+            // Auto request (or explicit GL override): exact stock behavior.
+            // Touch nothing; clear stale marker evidence.
+            if (s_bootRequest.backend == RendererBackend::Auto)
+            {
+                s_transportWrittenThisBoot = false;
+                LogShimA(LogLevel::Info, kLogTag,
+                         "backend.boot: requested=Auto source=stock transport=untouched");
+                ClearPendingMarker();
+                return;
+            }
+
+            // Capability validation BEFORE touching the transport: requesting
+            // a backend whose plugin is absent would otherwise let stock's
+            // ladder fall back and PERSIST DX9 over our request on this very
+            // boot (RE matrix case dx11-plugin-absent). Skipping the write
+            // keeps openshim.ini as sole carrier of the user's intent.
+            const auto moduleDir = GetMainModuleDirectory();
+            const bool dx9Present =
+                !moduleDir.empty() &&
+                FileExistsNonEmpty(moduleDir / "RenderSystem_Direct3D9.dll");
+            const bool dx11Present =
+                !moduleDir.empty() &&
+                FileExistsNonEmpty(moduleDir / "RenderSystem_Direct3D11.dll");
+            LogShimA(LogLevel::Info, kLogTag,
+                     "plugins: dx9=%s dx11=%s",
+                     dx9Present ? "1" : "0", dx11Present ? "1" : "0");
+
+            const bool pluginPresent =
+                s_bootRequest.backend == RendererBackend::DX11 ? dx11Present : dx9Present;
+            const char* sourceText =
+                s_bootRequest.source == BackendSelection::RequestSource::CliOverride
+                    ? "cli-override" : "persistent";
+
+            if (!pluginPresent)
+            {
+                s_transportWrittenThisBoot = false;
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "backend.boot: requested=%s source=%s transport=plugin-missing "
+                         "(stock fallback expected; persistent preference retained)",
+                         RequestedBackendName(s_bootRequest.backend), sourceText);
+                return;
+            }
+
+            if (!s_backendTransportEnabled)
+            {
+                s_transportWrittenThisBoot = false;
+                LogShimA(LogLevel::Info, kLogTag,
+                         "backend.boot: requested=%s source=%s transport=disabled "
+                         "([Startup] BackendTransport=0)",
+                         RequestedBackendName(s_bootRequest.backend), sourceText);
+                ClearPendingMarker();
+                return;
+            }
+
+            std::string previousValue;
+            if (!WriteOgreConfigTransport(subsystemName, previousValue))
+            {
+                s_transportWrittenThisBoot = false;
+                LogShimA(LogLevel::Info, kLogTag,
+                         "backend.boot: requested=%s source=%s transport=failed "
+                         "(stock selection preserved)",
+                         RequestedBackendName(s_bootRequest.backend), sourceText);
+                return;
+            }
+
+            s_transportWrittenThisBoot = true;
+            LogShimA(LogLevel::Info, kLogTag,
+                     "transport: Ogre.cfg 'Render System=' '%.*s' -> '%s'",
+                     static_cast<int>(previousValue.size()), previousValue.c_str(),
+                     subsystemName);
+            LogShimA(LogLevel::Info, kLogTag,
+                     "backend.boot: requested=%s source=%s transport=written",
+                     RequestedBackendName(s_bootRequest.backend), sourceText);
+            WritePendingMarker(subsystemName);
+        }
+
+        // Post-establishment classification. Runs on the observation worker
+        // after the active render system was identified (or after the window
+        // closed without identification). Pure reporting: never mutates Ogre.
+        // Takes the state lock only briefly to snapshot boot request state;
+        // all file reads happen outside it.
+        void ReportSelectionOutcome(bool identified, bool effectiveIsDx11)
+        {
+            AcquireSRWLockExclusive(&s_stateLock);
+            const BackendSelection::BootRequest boot = s_bootRequest;
+            const bool transportWritten = s_transportWrittenThisBoot;
+            ReleaseSRWLockExclusive(&s_stateLock);
+
+            if (boot.backend == RendererBackend::Auto)
+            {
+                if (identified)
+                {
+                    LogShimA(LogLevel::Info, kLogTag,
+                             "backend.selection=stock requested=Auto effective=%s "
+                             "reason=stock",
+                             effectiveIsDx11 ? "DX11" : "DX9");
+                    ClearPendingMarker();
+                }
+                return;
+            }
+
+            BackendSelection::OutcomeInput input;
+            input.haveRequest = true;
+            input.requested = boot.backend;
+            input.source = boot.source;
+            input.backendIdentified = identified;
+            input.effective =
+                effectiveIsDx11 ? ActiveBackend::DX11 : ActiveBackend::DX9;
+
+            if (identified)
+            {
+                // Post-boot stock line is the signal distinguishing a ladder
+                // fallback that rewrote the transport (backend-unavailable)
+                // from other mismatches. Read OUTSIDE any lock.
+                const auto dir = GetMainModuleDirectory();
+                std::string cfgText;
+                if (!dir.empty())
+                {
+                    FILE* file = nullptr;
+                    const auto cfgPath = dir / "Ogre.cfg";
+                    if (_wfopen_s(&file, cfgPath.c_str(), L"rb") == 0 && file != nullptr)
+                    {
+                        char buffer[2048] = {};
+                        const size_t got = fread(buffer, 1, sizeof(buffer) - 1, file);
+                        fclose(file);
+                        cfgText.assign(buffer, got);
+                    }
+                }
+                input.stockLineAfterBoot =
+                    BackendSelection::ExtractStockRenderSystemValue(cfgText);
+            }
+
+            const auto reason = BackendSelection::ClassifyOutcome(input);
+            const char* requestedText = RequestedBackendName(boot.backend);
+            const char* effectiveText =
+                identified ? (effectiveIsDx11 ? "DX11" : "DX9") : "none";
+
+            LogShimA(reason == BackendSelection::SelectionReason::None ||
+                             reason == BackendSelection::SelectionReason::CliOverride ||
+                             reason == BackendSelection::SelectionReason::Stock
+                         ? LogLevel::Info
+                         : LogLevel::Warn,
+                     kLogTag,
+                     "backend.selection=%s requested=%s effective=%s reason=%s%s",
+                     boot.source == BackendSelection::RequestSource::None ? "stock"
+                                                                          : "override",
+                     requestedText, effectiveText, BackendSelection::ReasonName(reason),
+                     transportWritten ? " transport=written" : "");
+            if (reason == BackendSelection::SelectionReason::BackendUnavailable)
+            {
+                LogShimA(LogLevel::Info, kLogTag,
+                         "preserving requested backend=%s (openshim.ini unchanged; "
+                         "stock rewrote Ogre.cfg only)",
+                         requestedText);
+            }
+
+            // Establishment happened: this boot consumed its marker. On
+            // non-identification the marker survives so an abnormal exit is
+            // still attributed on the next launch.
+            if (identified)
+            {
+                ClearPendingMarker();
             }
         }
 
@@ -301,10 +723,14 @@ namespace BZROpenShim::RenderProfiles
             s_lastMask = s_capabilityMask;
             s_haveLast = true;
 
+            // Report THIS BOOT's effective request (CLI override included),
+            // not just the persistent preference: requested/effective must
+            // stay attributable to what was actually asked of stock selection
+            // this launch.
             const char* requestedName =
-                s_requestedBackend == RendererBackend::DX11 ? "DX11"
-                : s_requestedBackend == RendererBackend::DX9 ? "DX9"
-                                                             : "Auto";
+                s_bootRequest.backend == RendererBackend::DX11 ? "DX11"
+                : s_bootRequest.backend == RendererBackend::DX9 ? "DX9"
+                                                                : "Auto";
 
             LogShimA(LogLevel::Info, kLogTag,
                      "backend.requested=%s backend.effective=%s",
@@ -540,6 +966,7 @@ namespace BZROpenShim::RenderProfiles
                     LogShimA(LogLevel::Warn, kLogTag,
                              "backend observation: active render system is OpenGL; "
                              "conservative DX9 assumptions stay active");
+                    ReportSelectionOutcome(false, false);
                     return 0;
                 }
                 if (identified == 4)
@@ -547,6 +974,7 @@ namespace BZROpenShim::RenderProfiles
                     LogShimA(LogLevel::Warn, kLogTag,
                              "backend observation: active render system unrecognized; "
                              "conservative DX9 assumptions stay active");
+                    ReportSelectionOutcome(false, false);
                     return 0;
                 }
                 Sleep(pollMs);
@@ -558,6 +986,10 @@ namespace BZROpenShim::RenderProfiles
                 LogShimA(LogLevel::Warn, kLogTag,
                          "backend detection timed out after %lu ms; conservative DX9 assumptions stay active",
                          static_cast<unsigned long>(timeoutMs));
+                // No establishment observed; the pending marker deliberately
+                // survives so an abnormal exit after this point is still
+                // attributed on the next launch.
+                ReportSelectionOutcome(false, false);
                 return 0;
             }
 
@@ -566,6 +998,8 @@ namespace BZROpenShim::RenderProfiles
             s_backendDetected = true;
             ResolveAndPublishLocked("backend observed");
             ReleaseSRWLockExclusive(&s_stateLock);
+            // Seam A outcome reporting: pure logging + marker bookkeeping.
+            ReportSelectionOutcome(true, dx11);
             // This is a worker thread: never touch Ogre viewports from here.
             // Publish the pending flag; the scheme hook drains it on the
             // engine's own thread at the next setMaterialScheme call (~1 Hz).
@@ -1114,6 +1548,24 @@ namespace BZROpenShim::RenderProfiles
         s_reapplyPending.store(true, std::memory_order_release);
     }
 
+    // Public Seam A entry point (see header). Takes the state lock itself;
+    // safe to call once from DllMain. Later calls are ignored so the settings
+    // reload path can never re-write the transport mid-session.
+    void RunStartupBackendSelectionEarly()
+    {
+        static bool s_ran = false;
+        if (s_ran)
+        {
+            return;
+        }
+        s_ran = true;
+
+        AcquireSRWLockExclusive(&s_stateLock);
+        LoadConfigLocked();
+        RunStartupBackendSelection();
+        ReleaseSRWLockExclusive(&s_stateLock);
+    }
+
     void InitializeOgreRenderProfiles()
     {
         static bool s_initialized = false;
@@ -1126,6 +1578,11 @@ namespace BZROpenShim::RenderProfiles
         AcquireSRWLockExclusive(&s_stateLock);
         LoadConfigLocked();
         s_resourcesValid = ValidateDeployedResourceSet();
+
+        // Seam A already ran from DllMain (RunStartupBackendSelectionEarly):
+        // on fast machines the game reads Ogre.cfg within ~1 s of process
+        // start, before this patch thread ever gets scheduled. Nothing to do
+        // here besides keeping the boot request state that early call stored.
 
         // Address-dependent work is gated on the supported build; anywhere else
         // the takeover stays off and Enhanced reports itself unavailable
