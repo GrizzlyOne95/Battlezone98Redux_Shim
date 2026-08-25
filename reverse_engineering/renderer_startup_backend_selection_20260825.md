@@ -6,6 +6,10 @@
 > Implementation proceeds on an isolated branch; see §7 for the recommended
 > shape and the validation matrix derived from §5. No further renderer-selection
 > archaeology planned.
+>
+> **2026-08-25 hardening pass:** implementation complete and requalified; the
+> transport's execution moved off DllMain onto a configuration-load
+> interception seam — see §11 (the RE findings in §§1–10 are unchanged).
 
 Target: Battlezone 98 Redux **2.2.301**, GOG `battlezone98redux.exe`
 SHA-256 `8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413`.
@@ -437,3 +441,164 @@ Direct exe launches exit with code 53 (steam_api init failure). For headless
 test runs, write a temporary `steam_appid.txt` containing `301650` next to
 `battlezone98redux.exe` (Steam client running) and delete it afterwards; this
 is the standard steam_api dev bypass and was used for the matrix above.
+
+---
+
+## 11. Implementation/hardening addendum — startup execution rework (2026-08-25)
+
+> **STATUS: HARDENING COMPLETE.** Same Seam A data transport, new execution
+> seam. This section documents why the two earlier execution placements were
+> rejected and pins the final architecture. Sections 1–10 above are unchanged
+> RE findings.
+
+### 11.1 Execution-placement history
+
+* **v1 — patch thread (rejected).** The transport ran from OpenShim's patch
+  thread shortly after `DLL_PROCESS_ATTACH`. On the Steam build the engine can
+  reach graphics init in ~1 s, and the patch thread (queued behind several
+  other initializers) lost that race: the game read Ogre.cfg before OpenShim
+  wrote it, observed as spurious `backend-unavailable` on bs-persist-dx11.
+* **v2 — direct DllMain execution (rejected).** `RunStartupBackendSelectionEarly()`
+  was invoked directly under `DLL_PROCESS_ATTACH`, which did eliminate the
+  race but performed substantial work while the loader lock was held: INI
+  parsing, `std::string`/`std::filesystem` operations, SRW-lock acquisition,
+  multiple file reads/writes, temp-file creation, `MoveFileExW`, directory
+  manipulation, logging, and pending-marker handling. Too much for DllMain;
+  any fault or loader-service dependency there risks deadlock or a dead process.
+
+### 11.2 Final architecture — configuration-load interception seam
+
+```
+DllMain(DLL_PROCESS_ATTACH)
+    ├─ CaptureCommandLineSnapshot()      bounded copy only (unchanged)
+    ├─ InstallStartupBackendSeam()       identity checks + one IAT pointer swap
+    └─ return from DllMain               no backend transport here
+         ↓
+Redux reaches its graphics bootstrap (FUN_00663ED0)
+         ↓
+game thread calls Ogre::ConfigFile::load(<root>\Ogre.cfg) through IAT 0x00869D08
+         ↓
+shim hook: validate retaddr/call-site bytes/filename argument
+         ↓ (exactly once)
+OpenShim runs the full backend transport ON THE GAME THREAD
+(ini parse, plugin pre-validation, temp+MoveFileEx write, pending marker)
+         ↓
+original ConfigFile::load continues unchanged; stock ladder reads our line
+```
+
+The trigger is the game's own configuration read, so the Steam ~1 s startup
+cannot outrun it by construction — the race is structurally gone, not merely
+narrowed.
+
+### 11.3 Binary facts used by the seam (all verified this pass)
+
+| Fact | Value |
+|---|---|
+| Import | `Ogre::ConfigFile::load(const String&, const String&, bool)` |
+| Mangled name | `?load@ConfigFile@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@0_N@Z` |
+| IAT slot | VA `0x00869D08` / RVA `0x00469D08` (OgreMain.dll import table, slot 377) |
+| Startup call site | `0x006640E4` = `FF 15 08 9D 86 00` inside FUN_00663ED0 (return address `0x006640EA`) |
+| Other callers | one more at `0x0066471E` inside FUN_00664110 — excluded by the return-address gate |
+| `.rdata` identity marker | `"Ogre.cfg\0"` at VA `0x00892030` (identical both storefronts, plaintext even under SteamStub) |
+| SizeOfImage | GOG `0x290F000`; Steam `0x292F000` (extra `.bind` section) |
+
+Full `.text` scan of `FF 15 <0x00869D08>` found exactly those two call sites;
+every other address in §2.1's IAT table was cross-checked the same way
+(`restoreConfig@0x6648BD`, `setRenderSystem@0x664BC6`, `initialise@0x6651AB`,
+options-UI `setRenderSystem@0x7AF237`, etc.), matching §2.2.
+
+### 11.4 Hook validation (fail closed at install, fail open per boot)
+
+Install-time (DllMain, loader-lock-bounded, **no `.text` access**, so
+SteamStub-at-rest bytes are never consulted):
+
+1. main module filename is `battlezone98redux.exe`;
+2. PE `SizeOfImage` ∈ {GOG `0x290F000`, Steam `0x292F000`};
+3. plaintext `.rdata` marker `"Ogre.cfg"` present at the qualified VA;
+4. `OgreMain.dll` loaded (static import) and exports exactly the mangled name;
+5. IAT slot `0x469D08` currently bound to that export.
+
+Any miss ⇒ no hook installed; the feature is inert and selection is pure stock.
+
+Call-time (game thread; `.text` settled by definition because the CPU is
+executing it): return address == `0x006640EA` AND the six call-site bytes still
+read `FF 15 08 9D 86 00` AND the first string argument names `Ogre.cfg`
+(bare name or any path ending in `\Ogre.cfg`). Only then does the one-shot
+atomic latch open and the heavy transport run; everything sits behind an SEH
+boundary so a fault degrades to stock behavior for that boot. Unrelated
+`ConfigFile::load` traffic passes through untouched.
+
+Ordering note proven by runtime evidence: on warm-cache Steam boots the hook
+can fire BEFORE the patch thread finishes renderer-profile initialization, so
+the hook-time transport parses `openshim.ini` itself instead of assuming the
+initializer already did (caught as `requested=Auto` in an early steam2-pre
+matrix run, then fixed and re-proven).
+
+### 11.5 Missing-Ogre.cfg bootstrap (closes the old one-boot limitation)
+
+When `[Graphics] Renderer` is DX9/DX11, the requested plugin exists, and
+`Ogre.cfg` does not exist (or is zero bytes), the transport writes a minimal
+single-line image:
+
+```
+Render System=<requested subsystem>\r\n
+```
+
+Stock's own default-seeding path completes every remaining option on the same
+boot (§5 case `cfg-missing` proved the game fully recreates the file even from
+nothing; the minimal image is strictly better-formed than absence). Runtime
+proof: bs-missing-cfg boots DX11 on the FIRST boot on GOG and Steam, with
+`transport.bootstrap:` + `'Render System=' '' -> 'Direct3D11…'` diagnostics.
+The writer remains fail-open: unreadable-but-present files still abort the
+transport (stock selection preserved), matching the refuse-to-touch policy.
+
+### 11.6 Process-unique transport temporary files
+
+Temp name is now `Ogre.cfg.openshim-<pid>.tmp` (pure helper
+`MakeTransportTempFileName`, unit-pinned), so two concurrent game processes
+never share a temp path and cleanup deletes only the exact file this process
+created. All known failure paths (temp open, short write, move failure) remove
+the temp file; successful moves consume it atomically via `MOVEFILE_REPLACE_EXISTING`.
+Concurrent smoke test (two isolated install copies, opposite requests, same
+moment): both configs landed on their own requested backends, zero stale temps.
+
+### 11.7 Kill switch and GL precedence (new pinned cases)
+
+* **Case A (`bs-killswitch`)**: `[Graphics] Renderer=DX11` +
+  `[Startup] BackendTransport=0` + stock cfg line DX9 ⇒ no Ogre.cfg write,
+  stock DX9 boots, ini keeps DX11, log states
+  `transport=disabled ([Startup] BackendTransport=0)`. Passes GOG + Steam.
+* **Case B (`bs-gl-cli`)**: `/renderer:gl` over persistent DX11 ⇒ OpenShim
+  recognizes GL as explicit-but-unsupported, leaves the stock GL request in
+  place (at-launch cfg still reads OpenGL when the game boots), performs no
+  transport write, and the persistent DX11 preference survives for the next
+  normal boot (resolver statelessness unit-pinned). Runtime observation
+  confirmed stock selected OpenGL.
+
+### 11.8 Qualification status
+
+Final matrices: GOG 11/11 and Steam 7/7 (+ a 3-case Steam stress rerun),
+documented in `Docs/BACKEND_SELECTION_RUNTIME_QUALIFICATION_20260825.md`;
+snapshots under `reverse_engineering/snapshots/backend_selection_matrix/
+{gog,gog2,steam,steam2,steam3,concurrent}/`. Regression suites
+(`run_backend_selection_tests.ps1`, `run_render_profile_tests.ps1`) and the
+full Release|Win32 build pass on the final code.
+
+### 11.9 Loader-lock audit (what remains in DllMain)
+
+Backend-selection path reachable from `DllMain(DLL_PROCESS_ATTACH)`:
+
+1. `CaptureCommandLineSnapshot()` — one bounded `strncpy_s` into a fixed
+   static buffer (pre-existing; retained deliberately: the stock parser
+   destroys `/renderer:` tokens before any later reader could see them).
+2. `InstallStartupBackendSeam()` — module-name check, PE header reads,
+   `GetProcAddress`, one guarded 4-byte slot read, one `VirtualProtect`
+   round-trip, one guarded 4-byte store, `FlushInstructionCache`. No CRT
+   containers, no filesystem, no logging beyond the shim logger's existing
+   DllMain usage, no waits, no `.text` reads, no process-wide mutations
+   beyond the single reversed pointer.
+
+Everything else (INI parse, resolver, plugin stat, config read/write, temp
+file, marker, logging) executes on the game thread inside the intercepted
+`ConfigFile::load`. Nothing unsafe was relocated INTO DllMain to make this
+work — DllMain does strictly less than the rejected v2 design.
