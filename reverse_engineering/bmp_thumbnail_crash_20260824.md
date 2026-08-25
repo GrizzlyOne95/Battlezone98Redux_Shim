@@ -96,37 +96,73 @@ OpenShim entry detour on `0x007D3FF0` (`src/patches/bzr_hooks.cpp`):
   `0xE06D7363` and only while the guard is enabled; every other fault
   (notably access violations) keeps default behaviour so memory corruption
   stays loud.
-- On a swallowed decode failure the helper clears the caller's out slot to a
-  null `SharedPtr` representation `{NULL, NULL}` and returns the slot pointer,
-  exactly mirroring the stock return contract. Downstream
-  `SharedPtr<Material>::operator=` (`0x00449910`) handles a null source
-  without dereferencing, leaving the entry with no thumbnail material - the
-  same visible outcome as a missing image.
+- On a swallowed decode failure the helper fills the caller's out slot with
+  the stock `"UI"` base material and returns the slot pointer, exactly
+  mirroring the stock return contract.
 - Bounded `[BMPFIX]` logging identifies which guard fired (budget 8 lines per
   session); opt-out `OPENSHIM_DISABLE_BMP_GUARD` / `BZR_DISABLE_BMP_GUARD`.
 
 Why this behaviour is correct: stock has two outcomes today - "file missing"
 (blank entry, no crash) and "file present but undecodable" (process exit).
-The guard moves the second case onto the first case's path without
+The guard moves the second case onto a safe blank-thumbnail outcome without
 reinterpreting or resaving any image data.
+
+### Field revision (plan B): substitute the "UI" material, do not clear
+
+First live validation (user clicked Rise of the Black Dogs under
+Single Player > Custom Campaign; dump `battlezone98redux.exe.28692.dmp`)
+proved the initial null-clear fallback insufficient for one caller:
+
+- `[BMPFIX] Rejected undecodable thumbnail image ...` fired as designed, then
+- unhandled AV at `0x007D2CA6` inside `FUN_007D2B70` (`read=0x00000000`,
+  ecx=0): that consumer fetches the raw material pointer from the slot via
+  `0x00416400` and dereferences its vtable without a null check while
+  building the preview ManualObject.
+
+So at least one consumer requires a *valid* material, not a cleared slot. The
+swallow path now substitutes the stock `"UI"` base material - the exact
+object FUN_007D3FF0 clones from on every successful thumbnail:
+
+- `Ogre::MaterialManager::getSingleton` and
+  `Ogre::MaterialManager::getByName(const String&, const String&)` are real
+  OgreMain exports (mangled names bound via GetProcAddress at install;
+  startup log reports `uiFallback=ready|unavailable`);
+- the name argument is the game's own std::string object at `0x0087908C`
+  ("UI") - the identical object stock passes to getByName - so no
+  cross-CRT string construction is attempted;
+- the group argument is Ogre's own `DEFAULT_RESOURCE_GROUP_NAME` /
+  `AUTODETECT_RESOURCE_GROUP_NAME` data exports;
+- getByName returns a fresh owning reference, which is precisely the
+  reference semantics the caller expects the slot to hold (caller copies,
+  then releases the temporary);
+- if the exports are unavailable or lookup fails, the guard degrades to the
+  original cleared-slot behaviour and logs it.
+
+The half-created clone left registered under the real name by the aborted
+attempt also makes repeat selections stable: subsequent calls take FUN_007D3FF0's
+exists-branch, which returns the material without touching textures or loading.
 
 ## Validation
 
 - Release|Win32 build clean (only pre-existing C4505 warnings).
 - Live install verified: `[BMPFIX] Installed thumbnail decode guard
-  site=0x007D3FF0 trampoline=...` in `openshim.log`; multiple gameplay and
+  site=0x007D3FF0 trampoline=... uiFallback=ready` in `openshim.log`; multiple gameplay and
   mission-load sessions since deployment show zero `[BMPFIX]` rejection lines
-  (guard silent on valid content).
-- Deterministic fault-path exercise inside a live menu still requires
-  clicking a map/mod whose folder contains a V5-header BMP; recipe below.
+  on valid content (guard silent during ordinary play).
+- Real-world fault path exercised twice by the user against a V5-header BMP
+  campaign thumbnail: first run proved the exception interception (clean
+  `[BMPFIX]` swallow, no terminate), exposed the null-material consumer gap,
+  and drove the plan B revision above; retest with `uiFallback=ready`
+  deployed is pending user confirmation.
+- Deterministic fault-path recipe: place a 24-bit BI_RGB BMP saved with
+  BITMAPV5HEADER as `<map/campaign folder>\<name>.bmp` thumbnail, open the
+  campaign/map list that shows it. Expected pre-patch: process exit with
+  `unhandled E06D7363`; post-patch: `[BMPFIX] Rejected undecodable thumbnail
+  image; substituted stock UI material ...` and the entry renders with the
+  plain UI material.
 
 Remaining uncertainty / follow-up experiments:
 
-1. Full-menu repro recipe: place a 24-bit BI_RGB BMP saved with
-   BITMAPV5HEADER as `<map folder>\<mapname>.bmp` thumbnail, open the
-   multiplayer create screen, select the map. Expected pre-patch: process
-   exit with `unhandled E06D7363` in `openshim_crash.log`; post-patch:
-   `[BMPFIX] Rejected undecodable thumbnail image ...` and the entry renders
-   blank.
-2. If a future report shows a non-C++ fault escaping through
-   `0x007D3FF0`, revisit the filter scope.
+1. Confirm the campaign-screen click survives with the substitution active.
+2. If any consumer rejects the substituted "UI" material in a new way, the
+   `[BMPFIX]` log line plus the dump will identify it directly.
