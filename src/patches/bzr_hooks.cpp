@@ -670,11 +670,10 @@ namespace BZROpenShim
         // See reverse_engineering/bmp_thumbnail_crash_20260824.md.
         constexpr uintptr_t kGogThumbnailMaterialApplySiteAddr = 0x007D3FF0;
         constexpr size_t kThumbnailMaterialApplyDetourLen = 5;
-        // Stock "UI" material name object. This is a live game-side std::string
-        // (the same one FUN_007D3FF0 passes to MaterialManager::getByName on
-        // its clone path); passing its address to the exported getByName keeps
-        // every ABI detail on the game's side of the fence.
-        constexpr uintptr_t kUiMaterialNameStringAddr = 0x0087908C;
+        // Safe substitute name for the swallow path below: passing "UI" makes
+        // the stock body take its material-already-exists branch, which hands
+        // back the loaded base material without touching any texture.
+        static const char kUiMaterialSubstituteName[] = "UI";
         // Splinter (spraybomb) undead bug (#46). SprayBuilding::Simulate keeps
         // spinning its payload fire loop after the deployed splinter is damaged
         // below zero because it overrides Building::Simulate without preserving
@@ -1922,17 +1921,6 @@ namespace BZROpenShim
         static bool g_ThumbnailBmpGuardInstalled = false;
         static bool g_ThumbnailBmpGuardMismatchLogged = false;
         static volatile long g_ThumbnailBmpGuardLogBudget = 8;
-        // OgreMain exports used to hand callers a valid blank material when a
-        // thumbnail decode fails (see ThumbnailMaterialGuardCall below).
-        using FnMaterialMgrSingleton = void* (__cdecl*)();
-        using FnMaterialGetByName = void* (__fastcall*)(void* self, void* edx,
-                                                        void* sret,
-                                                        const void* nameStr,
-                                                        const void* groupStr);
-        static FnMaterialMgrSingleton g_BzrFn_MaterialMgrSingleton = nullptr;
-        static FnMaterialGetByName g_BzrFn_MaterialGetByName = nullptr;
-        static const void* g_Bzr_DefaultResourceGroupName = nullptr;
-        static const void* g_Bzr_AutodetectResourceGroupName = nullptr;
         static bool g_QuakeReplayFadeInstalled = false;
         static bool g_QuakeReplayFadeEnabled = true;
         static long g_QuakeReplayFadeSeconds = kQuakeReplayFadeSecondsDefault;
@@ -19420,60 +19408,29 @@ namespace BZROpenShim
         }
 
         // Fill the caller's SharedPtr<Material> slot with the stock "UI"
-        // material (the same base FUN_007D3FF0 clones from). Some callers -
-        // notably the campaign preview builder FUN_007D2B70 - dereference the
-        // material without a null check, so a cleared slot is not survivable
-        // everywhere; a valid untextured material is. getByName returns a
-        // fresh owning reference, which is exactly what the stock contract
-        // hands back in the slot.
-        static bool ThumbnailGuardTryFillWithUiMaterial(void* outMaterialSlot)
+        // material by re-running the guarded body under the substitute name.
+        // Some callers - notably the campaign preview builder FUN_007D2B70 -
+        // dereference the material without a null check, so a cleared slot is
+        // not survivable everywhere; the stock exists-branch returns the
+        // loaded base material without touching any texture and cannot throw.
+        static bool ThumbnailGuardRetryWithUiMaterial(void* self,
+                                                      void* outMaterialSlot)
         {
-            if (!outMaterialSlot || !g_BzrFn_MaterialMgrSingleton ||
-                !g_BzrFn_MaterialGetByName)
-            {
+            if (!outMaterialSlot || !g_BzrFn_ThumbnailMaterialApplyOriginal)
                 return false;
-            }
 
-            void* manager = nullptr;
+            bool recovered = false;
             __try
             {
-                manager = g_BzrFn_MaterialMgrSingleton();
+                g_BzrFn_ThumbnailMaterialApplyOriginal(
+                    self, outMaterialSlot, kUiMaterialSubstituteName);
+                recovered = true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                return false;
+                recovered = false;
             }
-            if (!manager)
-                return false;
-
-            const void* groups[2] = {g_Bzr_DefaultResourceGroupName,
-                                     g_Bzr_AutodetectResourceGroupName};
-            for (int i = 0; i < 2; ++i)
-            {
-                if (!groups[i])
-                    continue;
-                void* found[2] = {nullptr, nullptr};
-                bool faulted = false;
-                __try
-                {
-                    g_BzrFn_MaterialGetByName(manager, nullptr, &found,
-                                              reinterpret_cast<const void*>(
-                                                  kUiMaterialNameStringAddr),
-                                              groups[i]);
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    faulted = true;
-                }
-                if (!faulted && found[0] && found[1])
-                {
-                    void** slot = reinterpret_cast<void**>(outMaterialSlot);
-                    slot[0] = found[0];
-                    slot[1] = found[1];
-                    return true;
-                }
-            }
-            return false;
+            return recovered;
         }
 
         static void* __cdecl ThumbnailMaterialGuardCall(void* self,
@@ -19492,13 +19449,12 @@ namespace BZROpenShim
             __except (ThumbnailBmpGuardFilter(GetExceptionCode()))
             {
                 // The stock body threw while decoding/loading the thumbnail
-                // image. Hand back the stock "UI" base material so every
-                // consumer - including ones that never null-check, like the
-                // campaign preview builder - receives a valid loaded
-                // material; visually the entry shows the plain UI look
-                // instead of a thumbnail.
+                // image. Re-run it under "UI" so every consumer - including
+                // ones that never null-check, like the campaign preview
+                // builder - receives a valid loaded material; visually the
+                // entry shows the plain UI look instead of a thumbnail.
                 const bool substituted =
-                    ThumbnailGuardTryFillWithUiMaterial(outMaterialSlot);
+                    ThumbnailGuardRetryWithUiMaterial(self, outMaterialSlot);
                 if (!substituted)
                 {
                     __try
@@ -19578,39 +19534,10 @@ namespace BZROpenShim
             g_BzrFn_ThumbnailMaterialApplyOriginal =
                 reinterpret_cast<FnThumbnailMaterialApply>(g_ThumbnailBmpGuardDetour.trampoline);
 
-            // Lazy-bind the OgreMain exports used by the substitution path.
-            if (HMODULE ogre = GetModuleHandleW(L"OgreMain.dll"))
-            {
-                g_BzrFn_MaterialMgrSingleton =
-                    reinterpret_cast<FnMaterialMgrSingleton>(reinterpret_cast<void*>(
-                        GetProcAddress(ogre,
-                                       "?getSingleton@MaterialManager@Ogre@@SAAAV12@XZ")));
-                g_BzrFn_MaterialGetByName = reinterpret_cast<FnMaterialGetByName>(
-                    reinterpret_cast<void*>(
-                        GetProcAddress(ogre,
-                                       "?getByName@MaterialManager@Ogre@@QAE?AV?$SharedPtr@"
-                                       "VMaterial@Ogre@@@2@ABV?$basic_string@DU?$char_traits@D@"
-                                       "std@@V?$allocator@D@2@@std@@0@Z")));
-                g_Bzr_DefaultResourceGroupName = reinterpret_cast<const void*>(
-                    GetProcAddress(ogre,
-                                   "?DEFAULT_RESOURCE_GROUP_NAME@ResourceGroupManager@Ogre@@"
-                                   "2V?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@"
-                                   "std@@A"));
-                g_Bzr_AutodetectResourceGroupName =
-                    reinterpret_cast<const void*>(GetProcAddress(
-                        ogre,
-                        "?AUTODETECT_RESOURCE_GROUP_NAME@ResourceGroupManager@Ogre@@"
-                        "2V?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@A"));
-            }
-
             g_ThumbnailBmpGuardInstalled = true;
-            Log(L"[BMPFIX] Installed thumbnail decode guard site=0x%08X trampoline=0x%08X uiFallback=%hs\n",
+            Log(L"[BMPFIX] Installed thumbnail decode guard site=0x%08X trampoline=0x%08X\n",
                 static_cast<uint32_t>(kGogThumbnailMaterialApplySiteAddr),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_ThumbnailBmpGuardDetour.trampoline)),
-                (g_BzrFn_MaterialMgrSingleton && g_BzrFn_MaterialGetByName &&
-                 g_Bzr_DefaultResourceGroupName)
-                    ? "ready"
-                    : "unavailable");
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_ThumbnailBmpGuardDetour.trampoline)));
 #endif
         }
 

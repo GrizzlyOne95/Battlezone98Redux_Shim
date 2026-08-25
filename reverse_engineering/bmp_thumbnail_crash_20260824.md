@@ -120,23 +120,27 @@ proved the initial null-clear fallback insufficient for one caller:
   building the preview ManualObject.
 
 So at least one consumer requires a *valid* material, not a cleared slot. The
-swallow path now substitutes the stock `"UI"` base material - the exact
-object FUN_007D3FF0 clones from on every successful thumbnail:
+swallow path now re-runs the guarded stock body under the substitute name
+`"UI"`:
 
-- `Ogre::MaterialManager::getSingleton` and
-  `Ogre::MaterialManager::getByName(const String&, const String&)` are real
-  OgreMain exports (mangled names bound via GetProcAddress at install;
-  startup log reports `uiFallback=ready|unavailable`);
-- the name argument is the game's own std::string object at `0x0087908C`
-  ("UI") - the identical object stock passes to getByName - so no
-  cross-CRT string construction is attempted;
-- the group argument is Ogre's own `DEFAULT_RESOURCE_GROUP_NAME` /
-  `AUTODETECT_RESOURCE_GROUP_NAME` data exports;
-- getByName returns a fresh owning reference, which is precisely the
-  reference semantics the caller expects the slot to hold (caller copies,
-  then releases the temporary);
-- if the exports are unavailable or lookup fails, the guard degrades to the
-  original cleared-slot behaviour and logs it.
+- with `name = "UI"` the stock exists-check finds the parsed base material and
+  takes FUN_007D3FF0's own already-exists branch, which returns that loaded
+  material without applying any texture and without any decode step - it
+  cannot throw, so every consumer receives a valid pointer through the normal
+  contract;
+- the slot therefore holds exactly the reference semantics the caller expects;
+  visually the entry shows the plain UI look instead of a thumbnail;
+- if the retry itself ever faults, the guard degrades to the original
+  cleared-slot behaviour and logs it.
+
+An intermediate attempt bound the exported
+`Ogre::MaterialManager::getByName` directly; live testing showed it falling
+back (`material cleared to blank`). Root cause of that failure: the name
+parameter of FUN_007D3FF0 is a `const char*` (its string ctor helper at
+`0x00416EF0` is the char* overload), and the "UI" constant at `0x0087908C`
+is raw character data in a C-string pool - not a std::string object - so the
+exported getByName received an invalid String reference. The retry approach
+avoids cross-ABI string construction entirely.
 
 The half-created clone left registered under the real name by the aborted
 attempt also makes repeat selections stable: subsequent calls take FUN_007D3FF0's
@@ -152,8 +156,10 @@ exists-branch, which returns the material without touching textures or loading.
 - Real-world fault path exercised twice by the user against a V5-header BMP
   campaign thumbnail: first run proved the exception interception (clean
   `[BMPFIX]` swallow, no terminate), exposed the null-material consumer gap,
-  and drove the plan B revision above; retest with `uiFallback=ready`
-  deployed is pending user confirmation.
+  and drove the plan B revision; the second run exposed the invalid-String
+  pitfall in the first substitution attempt (log line
+  `material cleared to blank`) and drove the current retry-based mechanism.
+  Retest with the retry deployed is pending user confirmation.
 - Deterministic fault-path recipe: place a 24-bit BI_RGB BMP saved with
   BITMAPV5HEADER as `<map/campaign folder>\<name>.bmp` thumbnail, open the
   campaign/map list that shows it. Expected pre-patch: process exit with
@@ -163,6 +169,7 @@ exists-branch, which returns the material without touching textures or loading.
 
 Remaining uncertainty / follow-up experiments:
 
-1. Confirm the campaign-screen click survives with the substitution active.
+1. Confirm the campaign-screen click survives with the retry substitution
+   active.
 2. If any consumer rejects the substituted "UI" material in a new way, the
    `[BMPFIX]` log line plus the dump will identify it directly.
