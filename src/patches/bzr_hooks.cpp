@@ -19413,6 +19413,14 @@ namespace BZROpenShim
         // dereference the material without a null check, so a cleared slot is
         // not survivable everywhere; the stock exists-branch returns the
         // loaded base material without touching any texture and cannot throw.
+        //
+        // The handler is deliberately the same narrow C++-exception-only
+        // filter as the outer guard: with name="UI" the stock body takes its
+        // exists-branch, so any exception here means something genuinely
+        // unexpected. An access violation or other hardware fault inside the
+        // retry propagates out of this function (and out of the enclosing
+        // __except handler, which cannot re-catch it) and crashes loudly
+        // instead of being silently converted into the UI fallback.
         static bool ThumbnailGuardRetryWithUiMaterial(void* self,
                                                       void* outMaterialSlot)
         {
@@ -19426,7 +19434,7 @@ namespace BZROpenShim
                     self, outMaterialSlot, kUiMaterialSubstituteName);
                 recovered = true;
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (ThumbnailBmpGuardFilter(GetExceptionCode()))
             {
                 recovered = false;
             }
@@ -19457,15 +19465,14 @@ namespace BZROpenShim
                     ThumbnailGuardRetryWithUiMaterial(self, outMaterialSlot);
                 if (!substituted)
                 {
-                    __try
-                    {
-                        void** slot = reinterpret_cast<void**>(outMaterialSlot);
-                        slot[0] = nullptr; // SharedPtr representation
-                        slot[1] = nullptr; // use-count pointer
-                    }
-                    __except (EXCEPTION_EXECUTE_HANDLER)
-                    {
-                    }
+                    // Deliberately unguarded: the slot was already validated
+                    // non-null above and is caller-provided storage, so these
+                    // two plain stores cannot fault on their own. If one ever
+                    // did, that is real memory corruption and must crash
+                    // loudly rather than be swallowed here.
+                    void** slot = reinterpret_cast<void**>(outMaterialSlot);
+                    slot[0] = nullptr; // SharedPtr representation
+                    slot[1] = nullptr; // use-count pointer
                 }
 
                 const long remaining = InterlockedDecrement(&g_ThumbnailBmpGuardLogBudget);
