@@ -88,6 +88,13 @@ namespace bz14
     }
 
     // Fact snapshot collected by the engine hook for one AttackTask tick.
+    //
+    // Validity flags are part of the fail-closed contract: a `false` flag
+    // means the evidence was UNAVAILABLE (unreadable memory, unbound game
+    // helper, SEH fault), never a synthesized value. Every recovered rule
+    // below requires its inputs to be *known* before it may override stock;
+    // unknown evidence defers to Redux. Apply mode therefore can only act on
+    // provable 1.4 divergences backed by readable runtime state.
     struct AttackFacts
     {
         int curState = 0;         // task+0x08
@@ -99,6 +106,13 @@ namespace bz14
         bool sidewaysAndClose = false;  // engine SidewaysAndClose(him, me)
         bool slideArrived = false;      // VecLen(task+0x4C..54) < 5.0
         int enemyTaskState = -1;        // slot12(him)+0x84; <0 = unavailable
+
+        // Evidence availability (see contract above).
+        bool ableToHitValid = false;
+        bool freshHitValid = false;       // damage/entry times both readable
+        bool sidewaysAndCloseValid = false;
+        bool slideArrivedValid = false;   // force vector fully readable
+        bool enemyTaskStateValid = false;
     };
 
     // Decision produced for one tick.
@@ -146,6 +160,16 @@ namespace bz14
                 // Range-exceed, stuck and abort paths are identical.
                 return {Bz14Decision::DeferToStock, 0};
             }
+            if (!f.enemyTaskStateValid || !f.sidewaysAndCloseValid)
+            {
+                // Fail-closed: the recovered machine READS the enemy
+                // activity field and SidewaysAndClose before choosing.
+                // Evidence we could not read is not evidence of "not
+                // engaged"/"not abeam" - overriding on synthesized values
+                // would mutate the simulation from guesses. Stock wins;
+                // shadow mode may still log the tick as unknown.
+                return {Bz14Decision::DeferToStock, 0};
+            }
             if (EnemyEngaged14(f.enemyTaskState))
             {
                 // Legacy predicate is a strict subset of Redux's; when it
@@ -155,7 +179,9 @@ namespace bz14
             if (f.sidewaysAndClose)
             {
                 // 1.4 checks SaC regardless of the firing solution (D2c);
-                // Redux gates it on ableToHit.
+                // Redux gates it on ableToHit. This arm REQUIRES reaching
+                // us with stockNext == NONE (Redux keep-sliding) - the live
+                // hook must not short-circuit that combination (D2c reach).
                 return f.stockNextState == StateStand
                            ? Bz14Decision{Bz14Decision::DeferToStock, 0}
                            : Bz14Decision{Bz14Decision::TransitionTo,
@@ -165,7 +191,10 @@ namespace bz14
             {
                 // Premature blast-hold: enemy only "engaged" via Redux's
                 // extra {10} arm, or aTH-without-SaC short-circuit. 1.4
-                // keeps dueling unless the slide force collapsed (< 5).
+                // keeps dueling unless the slide force collapsed (< 5). A
+                // force vector we failed to read cannot prove collapse.
+                if (!f.slideArrivedValid)
+                    return {Bz14Decision::DeferToStock, 0};
                 if (f.slideArrived)
                     return {Bz14Decision::DeferToStock, 0};
                 return {Bz14Decision::StayButRunSlide, 0};
@@ -177,8 +206,10 @@ namespace bz14
         {
             // D4: stand-window expiry (>8s) rotates back to SLIDE in 1.4;
             // 1.5/Redux flee from the target instead. Fresh-hit flees are
-            // identical in both builds and defer.
-            if (f.stockNextState == StateFlee && !f.freshHit)
+            // identical in both builds and defer. Unknown freshness cannot
+            // prove the expiry divergence.
+            if (f.stockNextState == StateFlee && f.freshHitValid &&
+                !f.freshHit)
                 return {Bz14Decision::TransitionTo, StateSlide};
             return {Bz14Decision::DeferToStock, 0};
         }
@@ -186,8 +217,10 @@ namespace bz14
         {
             // D5: lost firing solution. 1.4 always returns to SLIDE; Redux
             // re-approaches (2) when its extended predicate says engaged.
-            if (f.stockNextState == StateApproach && !f.freshHit &&
-                !f.ableToHit)
+            // Requires BOTH the freshness and the aTH latch to be known:
+            // either unknown leaves the divergence unproven.
+            if (f.stockNextState == StateApproach && f.freshHitValid &&
+                !f.freshHit && f.ableToHitValid && !f.ableToHit)
                 return {Bz14Decision::TransitionTo, StateSlide};
             return {Bz14Decision::DeferToStock, 0};
         }
@@ -235,4 +268,34 @@ namespace bz14
 
     // One-shot session summary via [BZ14] log line (call at shutdown).
     void ReportPolicyStats();
+
+    // ---- post-stock tick pipeline (bz14_attack_hookpath.cpp) --------------
+
+    struct Bz14HookPathStats
+    {
+        unsigned long evaluations = 0;      // ticks reaching fact collection
+        unsigned long skipsNone = 0;        // identical-outcome early-outs
+        unsigned long overrideAttempts = 0; // policy diverged from stock
+        unsigned long transitionWrites = 0; // SehWriteNextState succeeded
+        unsigned long doSlideCalls = 0;     // DoSlide primitive invoked
+        unsigned long divergences = 0;      // logged divergence events
+    };
+
+    // Pushes trace/tick logging budgets parsed by LoadConfig.
+    void ConfigureBz14Tracing(long traceBudget, long tickBudget);
+
+    // Budgeted per-tick hook-entry telemetry ([BZ14h] line). Safe to call
+    // unconditionally; it no-ops once the budget is exhausted.
+    void Bz14TickEntryLog(int sp, int haveHead, int curState, int nextState);
+
+    // Snapshot of the pipeline counters for ReportPolicyStats.
+    void CollectBz14HookPathStats(Bz14HookPathStats& out);
+
+    // The exact post-trampoline path the live DoState hook runs: task-head
+    // read, identical-outcome early-outs, fact collection, pure policy,
+    // verdict application. Exposed so regression tests can drive the SAME
+    // code the hook executes against synthetic task memory (with game
+    // helpers bound to deterministic stubs) - not a parallel reimplementation.
+    // Returns true when a recorded transition was successfully rewritten.
+    bool EvaluateHookTick(uint8_t* task);
 } // namespace bz14

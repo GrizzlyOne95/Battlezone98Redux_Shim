@@ -121,6 +121,7 @@
     <ClCompile Include="src\patches\autosave.cpp" />
     <ClCompile Include="src\patches\bz14_attack_policy.cpp" />
     <ClCompile Include="src\patches\bz14_attack_redux.cpp" />
+    <ClCompile Include="src\patches\bz14_attack_hookpath.cpp" />
     <ClCompile Include="src\patches\bzr_hooks.cpp" />
     <ClCompile Include="src\patches\bzrnet_protocol.cpp" />
     <ClCompile Include="src\patches\bzrnet_trace.cpp" />

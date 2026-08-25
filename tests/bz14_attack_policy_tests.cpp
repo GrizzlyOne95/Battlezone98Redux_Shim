@@ -50,6 +50,13 @@ namespace
         f.sidewaysAndClose = false;
         f.slideArrived = false;
         f.enemyTaskState = StateUnstuck; // non-engaged by both predicates
+        // Healthy evidence by default: the fail-closed contract tests below
+        // explicitly strip individual flags.
+        f.ableToHitValid = true;
+        f.freshHitValid = true;
+        f.sidewaysAndCloseValid = true;
+        f.slideArrivedValid = true;
+        f.enemyTaskStateValid = true;
         return f;
     }
 
@@ -157,6 +164,13 @@ namespace
             f.freshHit = true;
             Check(Bz14Defer(Decide(f)), "fresh-hit flee defers");
         }
+        // Unknown freshness (times unreadable): the expiry divergence is
+        // unproven, stock wins (fail-closed).
+        {
+            AttackFacts f = Base(StateStand, StateFlee);
+            f.freshHitValid = false;
+            Check(Bz14Defer(Decide(f)), "unknown freshness defers (D4)");
+        }
     }
 
     void TestBlastHoldLostShot()
@@ -195,6 +209,13 @@ namespace
             f.ableToHit = true;
             Check(Bz14Defer(Decide(f)), "blast-hold firing defers");
         }
+        // Unknown aTH latch: the "lost shot" premise is unproven even with
+        // freshness known-false; stock wins (fail-closed D5).
+        {
+            AttackFacts f = Base(StateBlastHold, StateApproach);
+            f.ableToHitValid = false;
+            Check(Bz14Defer(Decide(f)), "unknown aTH defers (D5)");
+        }
     }
 
     void TestSlidePredicateOrder()
@@ -221,20 +242,40 @@ namespace
                       d.targetState == StateStand,
                   "non-engaged + SaC stands (D2c)");
         }
-        // Enemy state unavailable (-1) reads as non-engaged: premature
-        // blast-hold without arrival stays suppressed.
+        // Enemy state UNAVAILABLE is not "non-engaged" (PR #57 review C2,
+        // fail-closed): the recovered machine reads the field before
+        // choosing, so an unreadable field leaves the divergence unproven
+        // and stock must win.
         {
             AttackFacts f = Base(StateSlide, StateBlastHold);
             f.enemyTaskState = -1;
-            const Bz14Decision d = Decide(f);
-            Check(d.kind == Bz14Decision::StayButRunSlide,
-                  "unavailable enemy state keeps the duel alive");
+            f.enemyTaskStateValid = false;
+            Check(Bz14Defer(Decide(f)),
+                  "unavailable enemy state defers (fail-closed)");
+        }
+        // SidewaysAndClose unavailable: D2c and the keep-dueling arm both
+        // depend on it; without evidence stock wins even with the enemy
+        // state readable.
+        {
+            AttackFacts f = Base(StateSlide, StateNone);
+            f.sidewaysAndClose = false;
+            f.sidewaysAndCloseValid = false;
+            Check(Bz14Defer(Decide(f)),
+                  "unavailable SaC defers on keep-sliding record");
+        }
+        {
+            AttackFacts f = Base(StateSlide, StateBlastHold);
+            f.ableToHit = true;
+            f.slideArrivedValid = false; // force vector unreadable
+            Check(Bz14Defer(Decide(f)),
+                  "unreadable force vector cannot prove collapse");
         }
         // Genuine slide arrival agrees with stock's BLAST-HOLD even when no
-        // enemy activity was observable.
+        // enemy activity was observable... provided the OTHER inputs were
+        // readable; here enemy state is valid-but-unengaged and SaC false.
         {
             AttackFacts f = Base(StateSlide, StateBlastHold);
-            f.enemyTaskState = -1;
+            f.enemyTaskState = StateWait;
             f.slideArrived = true;
             Check(Bz14Defer(Decide(f)),
                   "arrival honors stock blast-hold");

@@ -162,7 +162,10 @@ namespace bz14
         }
     }
 
-    bool TrySidewaysAndClose(uint8_t* craft, uint8_t* him)
+    // Success and value are deliberately distinct: every failure path
+    // returns false WITHOUT touching `value`, so callers can tell a genuine
+    // false predicate from missing evidence (fail-closed requirement).
+    bool TrySidewaysAndCloseValue(uint8_t* craft, uint8_t* him, bool& value)
     {
         if (!g_SaC)
             return false;
@@ -174,7 +177,8 @@ namespace bz14
         {
             // Stock pushes the him-result first, craft-result second
             // (cdecl right-to-left), i.e. SaC(craftSelf, himSelf).
-            return g_SaC(craftSelf, himSelf);
+            value = g_SaC(craftSelf, himSelf);
+            return true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {

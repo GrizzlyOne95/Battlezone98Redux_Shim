@@ -73,6 +73,19 @@ add_executable(bz14_attack_policy_tests
 target_include_directories(bz14_attack_policy_tests PRIVATE ../include)
 target_compile_features(bz14_attack_policy_tests PRIVATE cxx_std_20)
 
+# Hook-path integration coverage: drives the EXACT post-stock function the
+# live DoState hook calls (bz14_attack_hookpath.cpp) over synthetic task
+# memory with game helpers bound to stubs. This suite deliberately links the
+# engine-dependent TUs; the pure suite above stays clean of them.
+add_executable(bz14_hook_integration_tests
+    bz14_attack_integration_tests.cpp
+    ../src/patches/bz14_attack_redux.cpp
+    ../src/patches/bz14_attack_hookpath.cpp
+    ../src/engine/shim_log.cpp
+)
+target_include_directories(bz14_hook_integration_tests PRIVATE ../include)
+target_compile_features(bz14_hook_integration_tests PRIVATE cxx_std_20)
+
 target_include_directories(shim_log_tests PRIVATE ../include)
 target_compile_features(shim_log_tests PRIVATE cxx_std_20)
 target_compile_features(native_ui_validation_tests PRIVATE cxx_std_20)
@@ -128,3 +141,11 @@ add_test(NAME headlight_falloff_tests COMMAND headlight_falloff_tests)
 add_test(NAME chunk_batch_invalidation_tests COMMAND chunk_batch_invalidation_tests)
 add_test(NAME sun_flash_tests COMMAND sun_flash_tests)
 add_test(NAME bz14_attack_policy_tests COMMAND bz14_attack_policy_tests)
+
+if(MSVC)
+    target_compile_options(bz14_hook_integration_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(bz14_hook_integration_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+
+add_test(NAME bz14_hook_integration_tests COMMAND bz14_hook_integration_tests)

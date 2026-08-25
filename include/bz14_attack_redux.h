@@ -45,6 +45,13 @@ namespace bz14
                           float& distSq);
     bool TryEnemyActivityState(uint8_t* him, int& state);
 
+    // Reads the game's SidewaysAndClose with success and value kept
+    // DISTINCT: returns false when the evidence is unavailable (helpers
+    // unbound, interface slot unreadable, SEH fault) and only then leaves
+    // `value` untouched. Callers must gate any override on the return
+    // value - a false predicate is evidence, a failed read is not.
+    bool TrySidewaysAndCloseValue(uint8_t* craft, uint8_t* him, bool& value);
+
     // Game-address-backed operations; bound by the .cpp at install time.
     using FnDoSlide = void(__thiscall*)(void* task);
     using FnSaC = bool(__cdecl*)(void* craftSelf, void* himSelf);

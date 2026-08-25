@@ -10,14 +10,14 @@
 // divergent site stock performs the current state's behavior and only
 // RECORDS nextState (+0x0C); UnitProcess::Execute applies any nonzero value
 // afterwards (CleanState -> curState = nextState -> InitState, then clears).
-// This hook evaluates the recovered 1.4 conditions after stock ran and, only
-// where they differ, rewrites the recorded transition (0 = stay). Where
-// stock's gating skipped its own DoSlide while 1.4 would keep sliding, the
-// game's DoSlide primitive runs so a suppressed transition cannot stall the
-// duel cycle. State-entry timestamps (+0x100) are temporarily freshened
-// around the trampoline in states 7/9 so stock's 10 s / 3 s timer bounds
-// never fire and never skip movement primitives; originals are restored
-// before returning.
+// The post-stock pipeline in bz14_attack_hookpath.cpp evaluates the
+// recovered 1.4 conditions and, only where they differ, rewrites the
+// recorded transition (0 = stay). Where stock's gating skipped its own
+// DoSlide while 1.4 would keep sliding, the game's DoSlide primitive runs so
+// a suppressed transition cannot stall the duel cycle. State-entry
+// timestamps (+0x100) are temporarily freshened around the trampoline in
+// states 7/9 so stock's 10 s / 3 s timer bounds never fire and never skip
+// movement primitives; originals are restored before returning.
 //
 // QUARANTINED EXPERIMENT (2026-08-24 audit): live census proved the generic
 // AttackTask::DoState @0x00478A50 executes for fighter/scout engagements
@@ -83,9 +83,6 @@ namespace bz14
         constexpr float kStockSlideWindow = 10.0f; // 1.5+ hard slide cap
         constexpr float kStockFleeWindow = 3.0f;   // 1.5+ flee re-evaluation
 
-        // 1.4 slide-arrival force length (DoState case 7, _DAT_005E6E9C).
-        constexpr float kSlideArriveLen = 5.0f;
-
         // Local player net id (0 = single-player). Like every other
         // simulation-affecting shim setting, the legacy attack behavior is
         // inert in network games regardless of configuration.
@@ -114,18 +111,8 @@ namespace bz14
         bool g_siteDeferralLogged = false;
         bool g_firstExecutionLogged = false;
 
-        long g_traceBudget = 0;
-        long g_tickBudget = 0;
         unsigned long g_hookCalls = 0;
-        unsigned long g_evaluations = 0;
-        unsigned long g_skipsNone = 0;
-        // Attempted vs successful mutation are tracked separately: the
-        // audit's core lesson is that these claims are not interchangeable.
-        unsigned long g_overrideAttempts = 0;   // policy diverged from stock
-        unsigned long g_transitionWrites = 0;   // SehWriteNextState succeeded
-        unsigned long g_doSlideCalls = 0;       // DoSlide primitive invoked
         unsigned long g_timerFreshens = 0;      // entry-time freshened
-        unsigned long g_divergences = 0;
 
         InlineDetour32 g_doStateDetour;
 
@@ -145,208 +132,20 @@ namespace bz14
             g_policyActive = enabled;
 
             char env[64] = {};
+            long traceBudget = 0;
             if (GetEnvironmentVariableA("OPENSHIM_TRACE_AI_BZ14", env,
                                         sizeof(env)) > 0)
             {
-                const long budget = static_cast<long>(atol(env));
-                g_traceBudget = budget > 0 ? budget : 0;
+                traceBudget = static_cast<long>(atol(env));
             }
             char tickEnv[64] = {};
+            long tickBudget = 0;
             if (GetEnvironmentVariableA("OPENSHIM_TRACE_AI_BZ14_TICKS",
                                         tickEnv, sizeof(tickEnv)) > 0)
             {
-                const long budget = static_cast<long>(atol(tickEnv));
-                g_tickBudget = budget > 0 ? budget : 0;
+                tickBudget = static_cast<long>(atol(tickEnv));
             }
-        }
-
-        const wchar_t* StateName(int s)
-        {
-            switch (s)
-            {
-            case StateNone: return L"none";
-            case StateApproach: return L"approach";
-            case StateUnstuck: return L"unstuck";
-            case StateFollow: return L"follow";
-            case StateBlast: return L"blast";
-            case StateWait: return L"wait";
-            case StateSlide: return L"slide";
-            case StateStand: return L"stand";
-            case StateFlee: return L"flee";
-            case StateBlastHold: return L"blasthold";
-            case StateTravel: return L"travel";
-            case StateFollowTravel: return L"followtravel";
-            case StateDone: return L"done";
-            default: return L"?";
-            }
-        }
-
-        void LogDivergence(const uint8_t* task, const AttackFacts& facts,
-                           const Bz14Decision& decision)
-        {
-            ++g_divergences;
-            if (g_traceBudget <= 0)
-                return;
-            const long remaining = InterlockedDecrement(&g_traceBudget);
-            if (remaining < 0)
-                return;
-            Log(L"[BZ14] task=0x%08X st=%s stock=%s policy=%s "
-                L"d2=%.0f rng2=%.0f aTH=%s enemy=%d sac=%s arr=%s\n",
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(task)),
-                StateName(facts.curState),
-                StateName(facts.stockNextState),
-                decision.kind == Bz14Decision::Stay ||
-                        decision.kind == Bz14Decision::StayButRunSlide
-                    ? L"stay"
-                    : StateName(decision.targetState),
-                static_cast<double>(facts.distSq),
-                static_cast<double>(facts.rangeSq),
-                facts.ableToHit ? L"y" : L"n",
-                facts.enemyTaskState,
-                facts.sidewaysAndClose ? L"y" : L"n",
-                facts.slideArrived ? L"y" : L"n");
-        }
-
-        // Applies the verdict for non-slide states. Returns true when a
-        // recorded transition was successfully rewritten.
-        bool ApplySimple(uint8_t* task, const AttackFacts& f)
-        {
-            const Bz14Decision d = DecideAttackTick(f);
-            if (Bz14Defer(d))
-                return false;
-            LogDivergence(task, f, d);
-            if (!g_policyActive)
-                return false;
-            ++g_overrideAttempts;
-            if (SehWriteNextState(task, d.targetState))
-            {
-                ++g_transitionWrites;
-                return true;
-            }
-            return false;
-        }
-
-        // Slide-state evaluation: needs SaC / enemy activity / arrival.
-        bool ApplySlide(uint8_t* task, AttackFacts f, uint8_t* craft,
-                        uint8_t* him)
-        {
-            if (!TryEnemyActivityState(him, f.enemyTaskState))
-                f.enemyTaskState = -1;
-            // Unavailable activity state reads as non-engaged: 1.4 kept
-            // sliding unless SaC fired; genuine arrivals are still honored
-            // via the force-length test below.
-            f.sidewaysAndClose = TrySidewaysAndClose(craft, him);
-
-            float fx = 0.0f, fy = 0.0f, fz = 0.0f;
-            if (SehReadFloat(task, kTaskForceVec, fx) &&
-                SehReadFloat(task, kTaskForceVec + 4, fy) &&
-                SehReadFloat(task, kTaskForceVec + 8, fz))
-            {
-                f.slideArrived =
-                    std::sqrt(fx * fx + fy * fy + fz * fz) < kSlideArriveLen;
-            }
-
-            const Bz14Decision d = DecideAttackTick(f);
-            if (Bz14Defer(d))
-                return false;
-            LogDivergence(task, f, d);
-            if (!g_policyActive)
-                return false;
-
-            ++g_overrideAttempts;
-            if (d.kind == Bz14Decision::StayButRunSlide)
-            {
-                // Stock skipped its DoSlide this tick; run the identical
-                // primitive now and honor the 1.4 arrival rule (< 5 -> 10).
-                if (TryRunDoSlide(task))
-                    ++g_doSlideCalls;
-                float ax = 0.0f, ay = 0.0f, az = 0.0f;
-                bool arrived = false;
-                if (SehReadFloat(task, kTaskForceVec, ax) &&
-                    SehReadFloat(task, kTaskForceVec + 4, ay) &&
-                    SehReadFloat(task, kTaskForceVec + 8, az))
-                {
-                    arrived = std::sqrt(ax * ax + ay * ay + az * az) <
-                              kSlideArriveLen;
-                }
-                const int recorded =
-                    arrived ? StateBlastHold : StateNone;
-                if (SehWriteNextState(task, recorded))
-                {
-                    ++g_transitionWrites;
-                    return true;
-                }
-                return false;
-            }
-            const int recorded =
-                d.kind == Bz14Decision::Stay ? StateNone : d.targetState;
-            if (SehWriteNextState(task, recorded))
-            {
-                ++g_transitionWrites;
-                return true;
-            }
-            return false;
-        }
-
-        // Returns true when a recorded-transition override was applied.
-        bool EvaluateAndApply(uint8_t* task)
-        {
-            int cur = 0, stockNext = 0;
-            uint8_t* craft = nullptr;
-            uint8_t* him = nullptr;
-            if (!SehReadTaskHead(task, cur, stockNext, craft, him))
-                return false;
-
-            if (stockNext == StateNone || stockNext == StateDone ||
-                stockNext == cur || stockNext == StateUnstuck)
-            {
-                ++g_skipsNone;
-                return false; // stays, aborts, stuck and re-entry requests:
-                              // identical in 1.4, nothing to compare.
-            }
-
-            ++g_evaluations;
-            if (g_tickBudget > 0)
-            {
-                const long remaining = InterlockedDecrement(&g_tickBudget);
-                if (remaining >= 0)
-                {
-                    AttackFacts dbg;
-                    dbg.curState = cur;
-                    dbg.stockNextState = stockNext;
-                    SehReadAbleToHit(task, dbg.ableToHit);
-                    TryDistSqObjects(craft, him, dbg.distSq);
-                    SehReadFloat(task, kTaskRangeSq, dbg.rangeSq);
-                    Log(L"[BZ14t] eval st=%s stock=%s aTH=%d d2=%.0f rng2=%.0f\n",
-                        StateName(cur), StateName(stockNext),
-                        dbg.ableToHit ? 1 : 0,
-                        static_cast<double>(dbg.distSq),
-                        static_cast<double>(dbg.rangeSq));
-                }
-            }
-
-            if (cur != StateApproach && cur != StateSlide &&
-                cur != StateStand && cur != StateBlastHold)
-                return false; // only these four states diverge.
-
-            AttackFacts f;
-            f.curState = cur;
-            f.stockNextState = stockNext;
-            SehReadAbleToHit(task, f.ableToHit);
-            if (!TryDistSqObjects(craft, him, f.distSq))
-                return false;
-            if (!SehReadFloat(task, kTaskRangeSq, f.rangeSq))
-                return false;
-
-            float damageTime = 0.0f, entryTime = 0.0f;
-            const bool haveTimes =
-                SehReadFloat(craft, kCraftLastDamageTime, damageTime) &&
-                SehReadFloat(task, kTaskStateEntry, entryTime);
-            f.freshHit = haveTimes && damageTime > entryTime;
-
-            if (cur == StateSlide)
-                return ApplySlide(task, f, craft, him);
-            return ApplySimple(task, f);
+            ConfigureBz14Tracing(traceBudget, tickBudget);
         }
 
         void __fastcall AttackTaskDoStateLegacy14Hook(void* task,
@@ -377,13 +176,13 @@ namespace bz14
             const bool haveHead =
                 evaluate &&
                 SehReadTaskHead(taskBytes, cur, next0, craft, him);
-            if (g_tickBudget > 0)
+            Bz14TickEntryLog(sp ? 1 : 0, haveHead ? 1 : 0,
+                             haveHead ? cur : -1, haveHead ? next0 : -1);
+            if (!haveHead)
             {
-                const long remaining = InterlockedDecrement(&g_tickBudget);
-                if (remaining >= 0)
-                    Log(L"[BZ14h] enter sp=%d head=%d st=%d nxt=%d\n",
-                        sp ? 1 : 0, haveHead ? 1 : 0,
-                        haveHead ? cur : -1, haveHead ? next0 : -1);
+                using FnDoState = void(__thiscall*)(void*);
+                reinterpret_cast<FnDoState>(g_doStateDetour.trampoline)(task);
+                return;
             }
 
             // Neutralize stock's 10 s slide / 3 s flee window for this tick
@@ -392,9 +191,16 @@ namespace bz14
             // behavior. Restoring the value after the trampoline does not
             // make this passive - stock would already have executed with
             // the synthetic timestamp - so measurement never writes here.
+            //
+            // Recovered-evidence note (PR #57 review C3): freshening here is
+            // NOT a behavioral invention. It suppresses the 1.5+/Redux timer
+            // caps for states where recovered evidence says 1.4 had none:
+            // state 9 FLEE has no 3-second re-evaluation timeout in 1.4
+            // (Redux added it), and state 7 SLIDE has no hard cap at all.
+            // Removing either freshen would silently reintroduce a 1.5 rule.
             float savedEntry = 0.0f;
             bool entryFreshened = false;
-            if (g_policyActive && haveHead &&
+            if (g_policyActive &&
                 (cur == StateSlide || cur == StateFlee))
             {
                 float entry = 0.0f;
@@ -423,12 +229,12 @@ namespace bz14
             if (entryFreshened)
                 SehWriteFloat(taskBytes, kTaskStateEntry, savedEntry);
 
-            if (!haveHead)
-                return;
-
+            // Shared post-stock path with the integration tests: early-outs,
+            // fact collection, pure policy, verdict application. SEH-wrapped
+            // so a faulting game structure degrades to stock for this tick.
             __try
             {
-                EvaluateAndApply(taskBytes);
+                EvaluateHookTick(taskBytes);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -538,8 +344,10 @@ namespace bz14
         // One-shot session summary making all four validation claims
         // separately visible, with behavior-affecting derived from SUCCESSFUL
         // mutations only (attempted != applied).
+        Bz14HookPathStats stats;
+        CollectBz14HookPathStats(stats);
         const unsigned long successful =
-            g_transitionWrites + g_doSlideCalls;
+            stats.transitionWrites + stats.doSlideCalls;
         Log(L"[BZ14] byte-valid=%s hook-installed=%s hook-calls=%lu "
             L"affecting=%s attempts=%lu writes=%lu doslide=%lu "
             L"freshens=%lu divergences=%lu mode=%s\n",
@@ -547,11 +355,11 @@ namespace bz14
             g_hookInstalled ? L"yes" : L"no",
             g_hookCalls,
             successful > 0 ? L"yes" : L"no",
-            g_overrideAttempts,
-            g_transitionWrites,
-            g_doSlideCalls,
+            stats.overrideAttempts,
+            stats.transitionWrites,
+            stats.doSlideCalls,
             g_timerFreshens,
-            g_divergences,
+            stats.divergences,
             g_policyActive ? L"apply"
                            : (g_shadowMode ? L"shadow" : L"off"));
     }
