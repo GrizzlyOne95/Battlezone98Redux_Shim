@@ -13,6 +13,8 @@
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <initializer_list> // MSVC: braced-init-list range-for needs this
+                            // declared explicitly on newer toolchains
 
 using namespace bz14;
 
