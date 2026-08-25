@@ -20,13 +20,18 @@ namespace BZROpenShim::RenderProfiles
     // not happened yet (callers may fall back to GetCommandLineA).
     const char* GetCapturedCommandLine();
 
-    // Seam A entry point. Applies the persistent/CLI backend request to the
-    // Ogre.cfg transport line. Runs from DllMain (loader-lock safe: bounded
-    // local-disk file I/O only, no LoadLibrary): on fast machines the game
-    // reads Ogre.cfg within ~1 s of process start, so the old patch-thread
-    // timing lost that race on the Steam build. Idempotent; later callers are
-    // no-ops.
-    void RunStartupBackendSelectionEarly();
+    // Seam A arming entry point. MUST be called from DllMain
+    // (DLL_PROCESS_ATTACH) — process init is single-threaded then, which makes
+    // the IAT swap race-free. Loader-lock-bounded by contract: executable
+    // identity checks plus one protected pointer swap; no filesystem, no CRT
+    // containers, no waits, no .text reads (SteamStub-safe). The backend
+    // transport itself is executed later, on the game thread, from inside the
+    // intercepted startup Ogre::ConfigFile::load — strictly before stock reads
+    // "Render System=", exactly once per process. Idempotent.
+    //
+    // Returns true when the seam was armed. Any validation miss fails closed:
+    // nothing is hooked and backend selection is pure stock behavior.
+    bool InstallStartupBackendSeam();
 
     // Loads [Graphics] Renderer/RenderProfile from openshim.ini, starts backend
     // observation, evaluates the resolver, installs the viewport scheme-policy

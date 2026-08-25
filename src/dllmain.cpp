@@ -246,10 +246,17 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
         // attach, before the normal patch thread can reliably run.
         BZROpenShim::ApplyEarlyGameLogHooks();
 
-        // Seam A: apply the requested-backend transport while still inside
-        // DllMain - fast machines read Ogre.cfg within ~1 s of process start,
-        // which beat the old patch-thread timing on the Steam build.
-        BZROpenShim::RenderProfiles::RunStartupBackendSelectionEarly();
+        // Seam A: arm ONLY the startup interception here (loader-lock-bounded
+        // identity checks + one IAT pointer swap). The backend transport runs
+        // later, on the game thread, inside the intercepted startup
+        // Ogre::ConfigFile::load — deterministic even when Steam reaches
+        // graphics initialization in ~1 s. Heavy work (INI parsing,
+        // filesystem, logging) must never run under the loader lock.
+        if (!BZROpenShim::RenderProfiles::InstallStartupBackendSeam())
+        {
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain",
+                                  "backend-selection seam not armed; stock renderer selection stays authoritative");
+        }
 
         // Both patch sites are global constructors that run from the CRT's
         // _initterm before main, so this cannot wait for the patch thread.

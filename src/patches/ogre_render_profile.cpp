@@ -28,6 +28,7 @@
 #endif
 #include <Windows.h>
 
+#include <intrin.h>
 #include <process.h>
 
 #include <atomic>
@@ -207,26 +208,28 @@ namespace BZROpenShim::RenderProfiles
             s_backendTransportEnabled = true;
             if (TryGetUserConfigString("Startup", "BackendTransport", value))
             {
-                const std::string trimmed = TrimAsciiCopy(value);
-                if (EqualsNoCase(trimmed.c_str(), "0") ||
-                    EqualsNoCase(trimmed.c_str(), "false") ||
-                    EqualsNoCase(trimmed.c_str(), "no") ||
-                    EqualsNoCase(trimmed.c_str(), "off"))
-                {
-                    s_backendTransportEnabled = false;
-                }
+                s_backendTransportEnabled =
+                    BackendSelection::ParseTransportEnabled(
+                        TrimAsciiCopy(value));
             }
         }
 
         // ---- backend-selection startup seam ---------------------------------
         //
         // Evidence base: reverse_engineering/
-        // renderer_startup_backend_selection_20260825.md. Redux resolves its
-        // backend from a global desired-name string seeded from /renderer:...
-        // or Ogre.cfg's "Render System=" line ~5-6 s after process start;
-        // OpenShim's winmm.dll initializes seconds earlier, so rewriting that
-        // single line pre-read is the narrowest safe seam. Nothing downstream
-        // of the game's selection ladder is intercepted.
+        // renderer_startup_backend_selection_20260825.md (hardening addendum).
+        // Redux resolves its backend from a global desired-name string seeded
+        // from /renderer:... or Ogre.cfg's "Render System=" line; OpenShim
+        // never intercepts anything downstream of that ladder.
+        //
+        // Execution model: the heavy transport does NOT run from DllMain
+        // (loader lock) and does NOT run from a racing patch thread either.
+        // DllMain only installs a narrow IAT interception of the exact Ogre
+        // import through which the game's graphics bootstrap reads Ogre.cfg;
+        // the transport then executes synchronously on the game thread inside
+        // that load call, strictly before stock parses "Render System=", and
+        // exactly once per process. Steam's ~1 s startup cannot outrun this:
+        // the trigger IS the game's own configuration read.
 
         bool FileExistsNonEmpty(const std::filesystem::path& path)
         {
@@ -291,10 +294,22 @@ namespace BZROpenShim::RenderProfiles
             std::filesystem::remove(PendingMarkerPath(), ec);
         }
 
-        // Rewrites ONLY the value of the "Render System=" line of
-        // <game>\Ogre.cfg via temp-file + MoveFileEx replace; every other byte
-        // of the stock file is preserved. Any failure leaves the stock file
-        // untouched (fail open to stock selection).
+        // Applies the transport request to the "Render System=" line of
+        // <game root>\Ogre.cfg via process-unique temp file + MoveFileEx
+        // replace; every other byte of the stock file is preserved.
+        //
+        // Missing-file bootstrap: when Ogre.cfg does not exist at all, the
+        // transport previously failed open and the explicit request was lost
+        // for one boot (stock recreated the file with DX9). Instead, write a
+        // minimal single-line config image ("Render System=<name>"): stock's
+        // own restore/default-seeding path completes every remaining section
+        // on this same boot (RE matrix case cfg-missing proved the game fully
+        // recreates the file even from nothing).
+        //
+        // Any failure leaves the stock file untouched (fail open to stock
+        // selection) and cleans up this process's temp file; the temp name is
+        // PID-unique so two concurrent game processes can never collide or
+        // delete each other's files.
         bool WriteOgreConfigTransport(const char* subsystemName,
                                       std::string& outPreviousValue)
         {
@@ -305,40 +320,75 @@ namespace BZROpenShim::RenderProfiles
             }
             const std::filesystem::path cfgPath = dir / "Ogre.cfg";
 
+            std::error_code ec;
+            const bool fileExists =
+                std::filesystem::is_regular_file(cfgPath, ec) && !ec;
+
             std::string text;
-            FILE* file = nullptr;
-            if (_wfopen_s(&file, cfgPath.c_str(), L"rb") != 0 || file == nullptr)
+            bool haveExistingImage = false;
+            if (fileExists)
             {
-                LogShimA(LogLevel::Warn, kLogTag,
-                         "backend transport: Ogre.cfg unreadable; stock selection preserved");
-                return false;
+                FILE* file = nullptr;
+                if (_wfopen_s(&file, cfgPath.c_str(), L"rb") != 0 ||
+                    file == nullptr)
+                {
+                    LogShimA(LogLevel::Warn, kLogTag,
+                             "backend transport: Ogre.cfg unreadable; stock "
+                             "selection preserved");
+                    return false;
+                }
+                char buffer[4096];
+                size_t got = 0;
+                while ((got = fread(buffer, 1, sizeof(buffer), file)) > 0)
+                {
+                    text.append(buffer, got);
+                }
+                fclose(file);
+                haveExistingImage = !text.empty();
             }
-            char buffer[4096];
-            size_t got = 0;
-            while ((got = fread(buffer, 1, sizeof(buffer), file)) > 0)
-            {
-                text.append(buffer, got);
-            }
-            fclose(file);
 
-            outPreviousValue.assign(
-                BackendSelection::ExtractStockRenderSystemValue(text));
-
-            std::string updated = text;
-            if (!BackendSelection::ApplyTransportToConfigImage(updated, subsystemName))
+            if (haveExistingImage)
             {
-                LogShimA(LogLevel::Warn, kLogTag,
-                         "backend transport: Ogre.cfg refused (%zu bytes, non-ASCII/empty); "
-                         "stock selection preserved",
-                         text.size());
-                return false;
+                outPreviousValue.assign(
+                    BackendSelection::ExtractStockRenderSystemValue(text));
             }
-            if (updated == text)
+
+            std::string updated;
+            if (haveExistingImage)
+            {
+                updated = text;
+                if (!BackendSelection::ApplyTransportToConfigImage(
+                        updated, subsystemName))
+                {
+                    LogShimA(LogLevel::Warn, kLogTag,
+                             "backend transport: Ogre.cfg refused (%zu bytes, "
+                             "non-ASCII/empty); stock selection preserved",
+                             text.size());
+                    return false;
+                }
+            }
+            else
+            {
+                updated.assign(BackendSelection::BuildMinimalConfigImage(
+                    subsystemName));
+                if (updated.empty())
+                {
+                    return false;
+                }
+            }
+            if (haveExistingImage && updated == text)
             {
                 return true; // already correct; nothing to write
             }
 
-            const auto tmpPath = cfgPath.native() + L".openshim-tmp";
+            // The helper returns ASCII by design (pure/testable); widen it
+            // here for the Win32 calls below.
+            const std::string tmpName = BackendSelection::MakeTransportTempFileName(
+                GetCurrentProcessId());
+            const std::filesystem::path tmpPath =
+                dir / std::filesystem::path(tmpName.begin(), tmpName.end());
+            bool wroteTemp = false;
+            FILE* file = nullptr;
             if (_wfopen_s(&file, tmpPath.c_str(), L"wb") != 0 || file == nullptr)
             {
                 LogShimA(LogLevel::Warn, kLogTag,
@@ -348,22 +398,30 @@ namespace BZROpenShim::RenderProfiles
             }
             const size_t written = fwrite(updated.data(), 1, updated.size(), file);
             fclose(file);
-            if (written != updated.size())
+            wroteTemp = written == updated.size();
+            if (!wroteTemp)
             {
                 LogShimA(LogLevel::Warn, kLogTag, "backend transport: short write");
-                std::error_code ec;
                 std::filesystem::remove(tmpPath, ec);
                 return false;
             }
+
             if (!MoveFileExW(tmpPath.c_str(), cfgPath.c_str(),
                              MOVEFILE_REPLACE_EXISTING))
             {
                 LogShimA(LogLevel::Warn, kLogTag,
                          "backend transport: replace failed err=%lu",
                          static_cast<unsigned long>(GetLastError()));
-                std::error_code ec;
                 std::filesystem::remove(tmpPath, ec);
                 return false;
+            }
+
+            if (!haveExistingImage)
+            {
+                LogShimA(LogLevel::Info, kLogTag,
+                         "transport.bootstrap: Ogre.cfg absent; created minimal "
+                         "%zu-byte config image",
+                         updated.size());
             }
             return true;
         }
@@ -495,6 +553,401 @@ namespace BZROpenShim::RenderProfiles
                      "backend.boot: requested=%s source=%s transport=written",
                      RequestedBackendName(s_bootRequest.backend), sourceText);
             WritePendingMarker(subsystemName);
+        }
+
+        // ---- startup configuration-load interception (the Seam A trigger) --
+        //
+        // Binary facts (GOG 2.2.301, image base 0x00400000; verified against
+        // the import table and a full .text scan of FF 15 <IAT disp>; Steam
+        // shares every .rdata/.idata fact and settles to identical .text):
+        //
+        //   Ogre::ConfigFile::load(const String&, const String&, bool)
+        //     mangled: ?load@ConfigFile@Ogre@@QAEXABV?$basic_string@DU?$char_
+        //              traits@D@std@@V?$allocator@D@2@@std@@0_N@Z
+        //     IAT slot VA 0x00869D08 (RVA 0x00469D08), OgreMain.dll import.
+        //
+        //   Startup call chain: FUN_00663ED0 (graphics bootstrap) loads
+        //   <game root>\Ogre.cfg through this import with its only call at
+        //   0x006640E4 = `FF 15 08 9D 86 00` (return address 0x006640EA),
+        //   then tail-continues into FUN_00664110 which reads getSetting(
+        //   "Render System") — the exact seam ordering we need: our transport
+        //   runs inside load(), before that read.
+        //
+        //   A second unrelated caller exists at 0x0066471E inside
+        //   FUN_00664110; it is excluded by the return-address gate below.
+        //
+        // Install-time validation (DllMain, loader-lock-bounded, no .text
+        // access so SteamStub-at-rest bytes are never consulted):
+        //   1. main module name is battlezone98redux.exe;
+        //   2. SizeOfImage matches a known qualified build
+        //      (GOG 0x290F000 / Steam 0x292F000 incl. .bind);
+        //   3. plaintext .rdata identity marker "Ogre.cfg\0" sits at the
+        //      qualified VA 0x00892030 (identical both storefronts);
+        //   4. OgreMain.dll is loaded and exports exactly the mangled import;
+        //   5. IAT slot 0x469D08 is bound to that export right now.
+        // Any miss fails closed: no hook, feature inert, pure stock behavior.
+        //
+        // Call-time validation (game thread, .text settled by definition since
+        // the CPU is executing it): return address == 0x006640EA AND the six
+        // call-site bytes still equal FF 15 08 9D 86 00 AND the first string
+        // argument names Ogre.cfg. Only then does the one-shot transport run.
+
+        constexpr uintptr_t kImageBaseAssumption = 0x00400000u;
+        constexpr uintptr_t kConfigFileLoadIatVa = 0x00869D08u;
+        constexpr uintptr_t kStartupCfgLoadCallSiteVa = 0x006640E4u;
+        constexpr uintptr_t kStartupCfgLoadRetVa =
+            kStartupCfgLoadCallSiteVa + 6;
+        constexpr uintptr_t kOgreCfgMarkerVa = 0x00892030u;
+        constexpr size_t kExpectedMainImageSizeGog = 0x290F000u;
+        constexpr size_t kExpectedMainImageSizeSteam = 0x292F000u;
+        constexpr char kConfigFileLoadImportName[] =
+            "?load@ConfigFile@Ogre@@QAEXABV?$basic_string@"
+            "DU?$char_traits@D@std@@V?$allocator@D@2@@std@@0_N@Z";
+        constexpr char kMainModuleName[] = "battlezone98redux.exe";
+
+        using FnConfigFileLoad = void (__fastcall*)(
+            void* self, void* edx, const std::string* arg0,
+            const std::string* arg1, bool trimWhitespace);
+
+        void __fastcall ConfigFileLoadHookForward(void* self, void* edx,
+                                                  const std::string* arg0,
+                                                  const std::string* arg1,
+                                                  bool trimWhitespace);
+
+        // The patched slot becomes `call [this cell]`; namespace scope so the
+        // cell and the function it names outlive the process.
+        void* s_hookTrampolineForConfigFileLoad =
+            reinterpret_cast<void*>(&ConfigFileLoadHookForward);
+
+        FnConfigFileLoad g_originalConfigFileLoad = nullptr;
+
+        // One-shot latch for the transport attempt. Set immediately before
+        // RunStartupBackendSelection executes so even a fault inside the heavy
+        // work can never cause a second attempt; validation misses leave it
+        // clear because the game reaches the validated call site exactly once.
+        std::atomic<bool> s_transportAttempted { false };
+
+        std::atomic<bool> s_seamInstalled { false };
+
+        __declspec(noinline) static bool GuardedReadSlotValue(
+            const void* slot, void** out)
+        {
+            __try
+            {
+                *out = *static_cast<void* const*>(slot);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        __declspec(noinline) static bool GuardedWriteSlotValue(
+            void* slot, void* value)
+        {
+            __try
+            {
+                *static_cast<void**>(slot) = value;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        __declspec(noinline) static bool GuardedMarkerEquals(
+            const void* address, const char* expected, size_t len)
+        {
+            __try
+            {
+                return memcmp(address, expected, len) == 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        bool EndsWithNoCaseAscii(const wchar_t* text, size_t textLen,
+                                 const char* suffix)
+        {
+            const size_t suffixLen = strlen(suffix);
+            if (textLen < suffixLen)
+            {
+                return false;
+            }
+            const wchar_t* tail = text + (textLen - suffixLen);
+            for (size_t i = 0; i < suffixLen; ++i)
+            {
+                wchar_t c = tail[i];
+                if (c >= L'A' && c <= L'Z')
+                {
+                    c = static_cast<wchar_t>(c - L'A' + L'a');
+                }
+                const char lc = (suffix[i] >= 'A' && suffix[i] <= 'Z')
+                    ? static_cast<char>(suffix[i] - 'A' + 'a')
+                    : suffix[i];
+                if (c != static_cast<wchar_t>(lc))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // Loader-lock-bounded install: header/name/export/slot checks plus one
+        // protected pointer swap. No CRT containers, no filesystem, no waits,
+        // no .text reads (Steam-safe at attach time).
+        bool InstallStartupBackendSeamImpl()
+        {
+            HMODULE mainModule = GetModuleHandleW(nullptr);
+            if (mainModule == nullptr)
+            {
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "backend seam not installed: no main module");
+                return false;
+            }
+
+            wchar_t modulePath[MAX_PATH] = {};
+            const DWORD pathLen = GetModuleFileNameW(
+                mainModule, modulePath, MAX_PATH);
+            if (pathLen == 0 || pathLen >= MAX_PATH ||
+                !EndsWithNoCaseAscii(modulePath, pathLen, kMainModuleName))
+            {
+                LogShimA(LogLevel::Info, kLogTag,
+                         "backend seam not installed: unsupported executable "
+                         "(fail-closed)");
+                return false;
+            }
+
+            const auto* dosHeader =
+                reinterpret_cast<const IMAGE_DOS_HEADER*>(mainModule);
+            if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+            {
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "backend seam not installed: bad DOS signature");
+                return false;
+            }
+            const auto* ntHeaders =
+                reinterpret_cast<const IMAGE_NT_HEADERS*>(
+                    reinterpret_cast<const uint8_t*>(mainModule) +
+                    dosHeader->e_lfanew);
+            if (ntHeaders->Signature != IMAGE_NT_SIGNATURE)
+            {
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "backend seam not installed: bad NT signature");
+                return false;
+            }
+            const size_t imageOfImage = ntHeaders->OptionalHeader.SizeOfImage;
+            if (imageOfImage != kExpectedMainImageSizeGog &&
+                imageOfImage != kExpectedMainImageSizeSteam)
+            {
+                LogShimA(LogLevel::Info, kLogTag,
+                         "backend seam not installed: SizeOfImage 0x%zX is not "
+                         "a qualified build (fail-closed)",
+                         imageOfImage);
+                return false;
+            }
+            const uintptr_t imageBase =
+                reinterpret_cast<uintptr_t>(mainModule);
+
+            // Plaintext .rdata anchor: proves the data-section layout matches
+            // the qualified build regardless of SteamStub state.
+            if (!GuardedMarkerEquals(
+                    reinterpret_cast<const void*>(imageBase +
+                        (kOgreCfgMarkerVa - kImageBaseAssumption)),
+                    "Ogre.cfg", sizeof("Ogre.cfg")))
+            {
+                LogShimA(LogLevel::Info, kLogTag,
+                         "backend seam not installed: .rdata marker mismatch at "
+                         "0x%08X (fail-closed)",
+                         static_cast<uint32_t>(kOgreCfgMarkerVa));
+                return false;
+            }
+
+            HMODULE ogreMain = GetModuleHandleA("OgreMain.dll");
+            if (ogreMain == nullptr)
+            {
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "backend seam not installed: OgreMain.dll absent");
+                return false;
+            }
+            const FARPROC expectedTarget =
+                GetProcAddress(ogreMain, kConfigFileLoadImportName);
+            if (expectedTarget == nullptr)
+            {
+                LogShimA(LogLevel::Info, kLogTag,
+                         "backend seam not installed: OgreMain lacks expected "
+                         "ConfigFile::load export (unsupported Ogre)");
+                return false;
+            }
+
+            void* slotAddress = reinterpret_cast<void*>(
+                imageBase + (kConfigFileLoadIatVa - kImageBaseAssumption));
+            void* currentBinding = nullptr;
+            if (!GuardedReadSlotValue(slotAddress, &currentBinding) ||
+                currentBinding != reinterpret_cast<void*>(expectedTarget))
+            {
+                LogShimA(LogLevel::Info, kLogTag,
+                         "backend seam not installed: IAT 0x%08X not bound to "
+                         "expected ConfigFile::load (fail-closed)",
+                         static_cast<uint32_t>(kConfigFileLoadIatVa));
+                return false;
+            }
+
+            g_originalConfigFileLoad =
+                reinterpret_cast<FnConfigFileLoad>(expectedTarget);
+
+            DWORD oldProtect = 0;
+            if (!VirtualProtect(slotAddress, sizeof(void*), PAGE_READWRITE,
+                                &oldProtect))
+            {
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "backend seam not installed: VirtualProtect failed "
+                         "err=%lu",
+                         static_cast<unsigned long>(GetLastError()));
+                g_originalConfigFileLoad = nullptr;
+                return false;
+            }
+            const bool wrote = GuardedWriteSlotValue(
+                slotAddress, s_hookTrampolineForConfigFileLoad);
+            DWORD ignored = 0;
+            VirtualProtect(slotAddress, sizeof(void*), oldProtect, &ignored);
+            FlushInstructionCache(GetCurrentProcess(), slotAddress,
+                                  sizeof(void*));
+            if (!wrote)
+            {
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "backend seam not installed: slot write faulted");
+                g_originalConfigFileLoad = nullptr;
+                return false;
+            }
+
+            s_seamInstalled.store(true, std::memory_order_release);
+            LogShimA(LogLevel::Info, kLogTag,
+                     "backend seam armed: ConfigFile::load IAT 0x%08X -> shim; "
+                     "startup site 0x%08X gated",
+                     static_cast<uint32_t>(kConfigFileLoadIatVa),
+                     static_cast<uint32_t>(kStartupCfgLoadRetVa));
+            return true;
+        }
+
+        // Post-settle call-site proof: the six bytes at the known startup call
+        // instruction must still be `call dword ptr [0x00869D08]`. Runs on the
+        // game thread, so SteamStub has long since decrypted .text.
+        bool ValidateStartupCallSite()
+        {
+            uint8_t bytes[6] = {};
+            SIZE_T read = 0;
+            if (!ReadProcessMemory(GetCurrentProcess(),
+                                   reinterpret_cast<const void*>(
+                                       kStartupCfgLoadCallSiteVa),
+                                   bytes, sizeof(bytes), &read) ||
+                read != sizeof(bytes))
+            {
+                return false;
+            }
+            return bytes[0] == 0xFF && bytes[1] == 0x15 &&
+                   bytes[2] == 0x08 && bytes[3] == 0x9D &&
+                   bytes[4] == 0x86 && bytes[5] == 0x00;
+        }
+
+        void TransportGateImpl(uintptr_t returnAddress, const void* arg0)
+        {
+            if (returnAddress != kStartupCfgLoadRetVa)
+            {
+                return; // not the proven startup call site: pass through
+            }
+            static bool s_loggedSite = false;
+            if (!ValidateStartupCallSite())
+            {
+                if (!s_loggedSite)
+                {
+                    s_loggedSite = true;
+                    LogShimA(LogLevel::Warn, kLogTag,
+                             "backend seam: startup call-site bytes mismatched "
+                             "(unexpected build); stock selection preserved");
+                }
+                return;
+            }
+            // Secondary confirmation on the resolved argument: the bootstrap
+            // loads Ogre.cfg through its path table, so accept the bare name
+            // or any explicit path ending in it.
+            const auto* filename = static_cast<const std::string*>(arg0);
+            const bool looksLikeStartupCfg =
+                filename != nullptr &&
+                BackendSelection::IsStartupConfigFilename(*filename);
+            if (!looksLikeStartupCfg)
+            {
+                if (!s_loggedSite)
+                {
+                    s_loggedSite = true;
+                    LogShimA(LogLevel::Warn, kLogTag,
+                             "backend seam: startup site reached without an "
+                             "Ogre.cfg argument; stock selection preserved");
+                }
+                return;
+            }
+
+            // Consumes the one-shot before any heavy work runs.
+            if (s_transportAttempted.exchange(true, std::memory_order_acq_rel))
+            {
+                return;
+            }
+
+            LogShimA(LogLevel::Info, kLogTag,
+                     "backend seam triggered at ConfigFile::load('%.*s') ret=0x%08X",
+                     static_cast<int>(filename->size()), filename->c_str(),
+                     static_cast<uint32_t>(returnAddress));
+
+            AcquireSRWLockExclusive(&s_stateLock);
+            // Self-sufficient request resolution: on a fast boot (warm-cache
+            // Steam start reaches this load in ~1 s) the hook can fire BEFORE
+            // the patch thread reaches InitializeOgreRenderProfiles, so the
+            // transport must not assume that initializer already parsed
+            // openshim.ini. Loading here is idempotent and cheap.
+            LoadConfigLocked();
+            RunStartupBackendSelection();
+            ReleaseSRWLockExclusive(&s_stateLock);
+        }
+
+        // SEH boundary: the forwarder itself holds no unwinding objects, so a
+        // fault anywhere in the gate/transport degrades to stock behavior.
+        __declspec(noinline) static void GuardedTransportGate(
+            uintptr_t returnAddress, const void* arg0)
+        {
+            __try
+            {
+                TransportGateImpl(returnAddress, arg0);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                s_transportAttempted.store(true, std::memory_order_release);
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "backend seam: transport faulted; stock selection "
+                         "preserved");
+            }
+        }
+
+        void __fastcall ConfigFileLoadHookForward(void* self, void* edx,
+                                                  const std::string* arg0,
+                                                  const std::string* arg1,
+                                                  bool trimWhitespace)
+        {
+            if (!s_transportAttempted.load(std::memory_order_acquire))
+            {
+                const void* retSlot = _AddressOfReturnAddress();
+                const uintptr_t returnAddress =
+                    *static_cast<const uintptr_t*>(retSlot);
+                GuardedTransportGate(returnAddress, arg0);
+            }
+            const FnConfigFileLoad original = g_originalConfigFileLoad;
+            if (original != nullptr)
+            {
+                original(self, edx, arg0, arg1, trimWhitespace);
+            }
         }
 
         // Post-establishment classification. Runs on the observation worker
@@ -708,12 +1161,15 @@ namespace BZROpenShim::RenderProfiles
         {
             static ResolverResult s_lastReported {};
             static uint32_t s_lastMask = 0;
+            static BackendSelection::BootRequest s_lastBootReported {};
             static bool s_haveLast = false;
 
             if (s_haveLast &&
                 s_lastReported.effectiveProfile == s_effective.effectiveProfile &&
                 s_lastReported.fellBack == s_effective.fellBack &&
                 s_lastMask == s_capabilityMask &&
+                s_lastBootReported.backend == s_bootRequest.backend &&
+                s_lastBootReported.source == s_bootRequest.source &&
                 strcmp(s_lastReported.reason, s_effective.reason) == 0)
             {
                 return;
@@ -721,6 +1177,7 @@ namespace BZROpenShim::RenderProfiles
 
             s_lastReported = s_effective;
             s_lastMask = s_capabilityMask;
+            s_lastBootReported = s_bootRequest;
             s_haveLast = true;
 
             // Report THIS BOOT's effective request (CLI override included),
@@ -1548,22 +2005,20 @@ namespace BZROpenShim::RenderProfiles
         s_reapplyPending.store(true, std::memory_order_release);
     }
 
-    // Public Seam A entry point (see header). Takes the state lock itself;
-    // safe to call once from DllMain. Later calls are ignored so the settings
-    // reload path can never re-write the transport mid-session.
-    void RunStartupBackendSelectionEarly()
+    // Public Seam A entry point (see header). Called ONCE from DllMain
+    // (DLL_PROCESS_ATTACH); performs only loader-lock-bounded work: identity
+    // checks plus a single protected IAT pointer swap. The backend transport
+    // itself runs later, on the game thread, from inside the intercepted
+    // startup Ogre::ConfigFile::load. Idempotent.
+    bool InstallStartupBackendSeam()
     {
-        static bool s_ran = false;
-        if (s_ran)
+        static bool s_attempted = false;
+        if (s_attempted)
         {
-            return;
+            return s_seamInstalled.load(std::memory_order_acquire);
         }
-        s_ran = true;
-
-        AcquireSRWLockExclusive(&s_stateLock);
-        LoadConfigLocked();
-        RunStartupBackendSelection();
-        ReleaseSRWLockExclusive(&s_stateLock);
+        s_attempted = true;
+        return InstallStartupBackendSeamImpl();
     }
 
     void InitializeOgreRenderProfiles()
@@ -1579,10 +2034,11 @@ namespace BZROpenShim::RenderProfiles
         LoadConfigLocked();
         s_resourcesValid = ValidateDeployedResourceSet();
 
-        // Seam A already ran from DllMain (RunStartupBackendSelectionEarly):
-        // on fast machines the game reads Ogre.cfg within ~1 s of process
-        // start, before this patch thread ever gets scheduled. Nothing to do
-        // here besides keeping the boot request state that early call stored.
+        // The backend transport does NOT run here: it is triggered
+        // synchronously by the intercepted startup ConfigFile::load (armed in
+        // DllMain via InstallStartupBackendSeam), which is deterministic even
+        // when Steam reaches graphics init in ~1 s. This initializer only
+        // prepares profile state and starts the observation worker.
 
         // Address-dependent work is gated on the supported build; anywhere else
         // the takeover stays off and Enhanced reports itself unavailable

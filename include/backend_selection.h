@@ -22,6 +22,7 @@
 // scripts/run_backend_selection_tests.ps1), mirroring render_profile.h/cpp.
 
 #include <cstdint>
+#include <string>
 #include <string_view>
 
 #include "render_profile.h"
@@ -97,6 +98,30 @@ namespace BZROpenShim::BackendSelection
     // policy that keeps unexpected encodings on the stock path.
     bool ApplyTransportToConfigImage(std::string& cfgText,
                                      std::string_view subsystemName);
+
+    // Minimal Ogre.cfg image used when the file does not exist yet: a single
+    // keyed line in stock's own CRLF style. Stock's restore/default-seeding
+    // path completes every remaining section on this boot (the game recreates
+    // the full file even from nothing, per RE matrix case cfg-missing).
+    // Returns an empty string for an empty subsystem name (refuse-to-write).
+    std::string BuildMinimalConfigImage(std::string_view subsystemName);
+
+    // Process-unique transport temporary filename:
+    //   "Ogre.cfg.openshim-<pid>.tmp"
+    // Two concurrent game processes therefore never write the same temp file,
+    // and cleanup paths only ever delete the exact name this process made.
+    std::string MakeTransportTempFileName(uint32_t processId);
+
+    // True unless the kill-switch value disables the transport. Accepts the
+    // canonical "0" plus false/no/off aliases, case-insensitive, surrounding
+    // whitespace tolerated. Any other text (including empty) means enabled.
+    bool ParseTransportEnabled(std::string_view value);
+
+    // Whether a ConfigFile::load filename argument names the startup config:
+    // exactly "Ogre.cfg" or a path ending in "\Ogre.cfg" / "/Ogre.cfg",
+    // case-insensitive. Anything else is some other configuration load and
+    // must pass through untouched.
+    bool IsStartupConfigFilename(std::string_view filename);
 
     // Post-boot classification for diagnostics. See
     // renderer_startup_backend_selection_20260825.md §"diagnostics".

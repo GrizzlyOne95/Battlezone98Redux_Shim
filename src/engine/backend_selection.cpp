@@ -310,6 +310,83 @@ namespace BZROpenShim::BackendSelection
         return true;
     }
 
+    std::string BuildMinimalConfigImage(std::string_view subsystemName)
+    {
+        if (subsystemName.empty())
+        {
+            return {};
+        }
+        std::string image;
+        image.reserve(kRenderSystemKey.size() + subsystemName.size() + 2);
+        image.append(kRenderSystemKey);
+        image.append(subsystemName);
+        image.push_back('\r');
+        image.push_back('\n');
+        return image;
+    }
+
+    std::string MakeTransportTempFileName(uint32_t processId)
+    {
+        // Fixed prefix/suffix keep the file recognizable and scoped next to
+        // Ogre.cfg; the decimal PID makes concurrent game processes disjoint.
+        std::string name;
+        name.reserve(32);
+        name.append("Ogre.cfg.openshim-");
+        char digits[16] = {};
+        size_t count = 0;
+        do
+        {
+            digits[count++] = static_cast<char>('0' + processId % 10);
+            processId /= 10;
+        } while (processId != 0);
+        while (count != 0)
+        {
+            name.push_back(digits[--count]);
+        }
+        name.append(".tmp");
+        return name;
+    }
+
+    bool ParseTransportEnabled(std::string_view value)
+    {
+        while (!value.empty() &&
+               (value.front() == ' ' || value.front() == '\t'))
+        {
+            value.remove_prefix(1);
+        }
+        while (!value.empty() &&
+               (value.back() == ' ' || value.back() == '\t'))
+        {
+            value.remove_suffix(1);
+        }
+        if (EqualsNoCaseAscii(value, "0") || EqualsNoCaseAscii(value, "false") ||
+            EqualsNoCaseAscii(value, "no") || EqualsNoCaseAscii(value, "off"))
+        {
+            return false;
+        }
+        return true;
+    }
+
+    bool IsStartupConfigFilename(std::string_view filename)
+    {
+        constexpr std::string_view kName = "Ogre.cfg";
+        if (EqualsNoCaseAscii(filename, kName))
+        {
+            return true;
+        }
+        if (filename.size() <= kName.size())
+        {
+            return false;
+        }
+        const char separator = filename[filename.size() - kName.size() - 1];
+        if (separator != '\\' && separator != '/')
+        {
+            return false;
+        }
+        return EqualsNoCaseAscii(filename.substr(filename.size() - kName.size()),
+                                 kName);
+    }
+
     const char* ReasonName(SelectionReason reason)
     {
         switch (reason)
