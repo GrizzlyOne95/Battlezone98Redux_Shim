@@ -113,6 +113,12 @@ local function readConfig()
     local clusterRadius = GetODFFloat(
         config, "Benchmark", "clusterRadius", 300.0)
     local spinSeconds = GetODFFloat(config, "Benchmark", "spinSeconds", 0.0)
+    -- Shadowline-only: explicit comma-separated station distances. When set,
+    -- stations spawn at exactly these ranges instead of the uniform grid, so
+    -- captures can bracket known cutoff candidates (the 128 m shadow-far clip
+    -- and the 250/256 m material-LOD switch) precisely.
+    local stationDistancesRaw = GetODFString(
+        config, "Benchmark", "stationDistances", "")
 
     -- Clamp malformed manual edits before they can create an accidental load
     -- spike or a modulo-by-zero firing pair in the deterministic mission.
@@ -145,8 +151,23 @@ local function readConfig()
     if scenario == "dispersed" and count < 2 * clusterCount then
         count = 2 * clusterCount
     end
+    -- Parse the explicit station list last so the shadowline scenario can
+    -- override both the grid spacing and the unit count (3 craft/station).
+    local stationDistances = {}
+    if scenario == "shadowline" and stationDistancesRaw ~= "" then
+        for token in string.gmatch(stationDistancesRaw, "([^,]+)") do
+            local value = tonumber(token)
+            if value and value >= 10.0 and value <= 2000.0 then
+                stationDistances[#stationDistances + 1] = value
+            end
+        end
+        table.sort(stationDistances)
+        if #stationDistances > 0 then
+            count = #stationDistances * 3
+        end
+    end
     return scenario, unitOdf, count, distance, orientation, warmup, measure,
-        clusterCount, clusterRadius, spinSeconds
+        clusterCount, clusterRadius, spinSeconds, stationDistances
 end
 
 local SAT_DEFAULT_TEAMS = {
@@ -192,9 +213,17 @@ local BENCH_SPIN_SECONDS = 0.0
 -- against exact station ranges rather than estimated from the image.
 local SHADOWLINE_SPACING = 25.0
 local SHADOWLINE_LATERAL = { -10.0, 0.0, 10.0 }
+-- Explicit station ranges from lcbcfg.odf (Benchmark stationDistances). Empty
+-- means the uniform BENCH_DISTANCE + n * SHADOWLINE_SPACING grid.
+local SHADOWLINE_STATIONS = {}
+
+local function shadowLineForward(station)
+    return SHADOWLINE_STATIONS[station + 1]
+        or (BENCH_DISTANCE + station * SHADOWLINE_SPACING)
+end
 
 local function shadowLinePosition(playerPos, transform, station, slot)
-    local forward = BENCH_DISTANCE + station * SHADOWLINE_SPACING
+    local forward = shadowLineForward(station)
     local lateral = SHADOWLINE_LATERAL[slot]
     local frontX = transform.front_x or 0.0
     local frontZ = transform.front_z or 1.0
@@ -219,6 +248,16 @@ local function faceFlattestShadowlineHeading(player, playerPos)
 
     local originHeight = GetTerrainHeightAndNormal(
         SetVector(playerPos.x, playerPos.y, playerPos.z))
+    -- Probe the exact station ranges the run will spawn at: with an explicit
+    -- stationDistances list the interesting ranges may not fall on the grid.
+    local sampleDistances = {}
+    if #SHADOWLINE_STATIONS > 0 then
+        sampleDistances = SHADOWLINE_STATIONS
+    else
+        for step = 1, 28 do
+            sampleDistances[step] = step * SHADOWLINE_SPACING
+        end
+    end
     local bestOrdinal, bestScore
     for ordinal = 0, 7 do
         local dx, dz = headingVector(ordinal)
@@ -226,9 +265,9 @@ local function faceFlattestShadowlineHeading(player, playerPos)
         -- over a ridge hides every station behind it, while a gentle constant
         -- slope is harmless. Flat-biased scoring keeps the whole line visible.
         local score = 0.0
-        for step = 1, 28 do
-            local sampleX = playerPos.x + dx * (step * SHADOWLINE_SPACING)
-            local sampleZ = playerPos.z + dz * (step * SHADOWLINE_SPACING)
+        for _, sampleDistance in ipairs(sampleDistances) do
+            local sampleX = playerPos.x + dx * sampleDistance
+            local sampleZ = playerPos.z + dz * sampleDistance
             local height = GetTerrainHeightAndNormal(SetVector(sampleX, playerPos.y, sampleZ))
             local rise = height - originHeight
             if rise > 0.0 then
@@ -628,9 +667,13 @@ local function spawnUnits(player)
     if shadowLine then
         -- Document the exact station ranges so frame captures can be scored
         -- against known distances without estimating from the image.
-        for station = 0, math.max(0, math.ceil(BENCH_COUNT / 3) - 1) do
+        local stationCount = math.max(0, math.ceil(BENCH_COUNT / 3) - 1)
+        if #SHADOWLINE_STATIONS > 0 then
+            stationCount = #SHADOWLINE_STATIONS - 1
+        end
+        for station = 0, stationCount do
             trace(string.format("shadowline-station=%d distance=%.1f",
-                station, BENCH_DISTANCE + station * SHADOWLINE_SPACING))
+                station, shadowLineForward(station)))
         end
     end
 
@@ -858,7 +901,7 @@ function Start()
     BENCH_SCENARIO, BENCH_UNIT_ODF, BENCH_COUNT, BENCH_DISTANCE,
         BENCH_ORIENTATION, BENCH_WARMUP_SECONDS,
         BENCH_MEASURE_SECONDS, BENCH_CLUSTER_COUNT, BENCH_CLUSTER_RADIUS,
-        BENCH_SPIN_SECONDS = readConfig()
+        BENCH_SPIN_SECONDS, SHADOWLINE_STATIONS = readConfig()
     trace("start")
     local player = GetPlayerHandle()
     if not IsValid(player) then

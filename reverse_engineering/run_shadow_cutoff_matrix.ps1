@@ -20,8 +20,21 @@ param(
     # Comma-separated headlight arms: "off,on" (default), or a single state.
     [ValidateSet("off", "on", "off,on")]
     [string]$Headlights = "off,on",
-    # shadowline geometry: first station distance and station count
-    # (25 m spacing, 3 craft per station).
+    # Comma-separated shadow-far arms for the quarantined shim override
+    # (OPENSHIM_SHADOW_FAR_DISTANCE): "stock" runs with the env var unset.
+    # Example: "stock,256,384,512".
+    [string]$ShadowFarDistances = "stock",
+    # Shadow quality byte persisted into BZPLYR.DEF for the duration of the
+    # run (3 = PSSM/2048, high detail). The original file bytes are restored
+    # in finally. The workstation's stored value is -1 (shadows disabled),
+    # which would measure the wrong pipeline entirely.
+    [ValidateRange(-1, 4)]
+    [int]$ShadowQuality = 3,
+    # Exact shadowline station distances (comma-separated metres). Default
+    # brackets both cutoff candidates: 128 m clip and 250/256 m LOD switch.
+    [string]$StationDistances = "25,50,75,100,125,130,180,240,255,260,300",
+    # shadowline geometry when StationDistances is empty: first station
+    # distance and station count (25 m spacing, 3 craft per station).
     [int]$Stations = 28,
     [double]$FirstStation = 25.0,
     [double]$WarmupSeconds = 8.0,
@@ -35,14 +48,9 @@ param(
     # the shadow cutoff is hidden by the fixture's night atmosphere
     # (stock lcbench ships Time=0300, Fog 175-250, VisibilityRange=250).
     [switch]$DayLight,
-    # Apply the game's own shadow settings (quality=3 PSSM/2048, detail=high)
-    # at runtime via Frida, replicating what the graphics options UI writes.
-    # Without this the install's stored settings apply (this workstation's
-    # GOG copy currently has vehicle shadows disabled, scheme high-noshadow).
-    [switch]$ForceShadowsOn,
-    # Alternative Frida script (relative to reverse_engineering/) that also
-    # applies the shadow settings, e.g. trace_light_lists.js.
-    [string]$FridaScript = "set_shadow_quality.js",
+    # Alternative Frida script (relative to reverse_engineering/) for ad-hoc
+    # runtime probes; not needed when -ShadowQuality is used.
+    [string]$FridaScript = "",
     [string]$OutputRoot = ""
 )
 
@@ -94,31 +102,81 @@ $originalMissionConfig = if (Test-Path -LiteralPath $missionConfig) {
 
 $renderers = if ($Renderer -eq "both") { @("DX11", "DX9") } else { @($Renderer) }
 $states = $Headlights -split ","
+$fars = $ShadowFarDistances -split ","
+
+# BZPLYR.DEF layout (FUN_008205e0): 'PLYR' magic + version dword, then 0x50
+# settings-struct bytes read straight into DAT_0094672c. The shadow-quality
+# sbyte (struct +0x25) therefore lives at FILE OFFSET 0x2D. The workstation's
+# stored value is 0xFF (-1 = vehicle shadows disabled). Save/restore the whole
+# file around the run.
+$playerDef = Join-Path $GameRoot "BZPLYR.DEF"
+$originalPlayerDef = if (Test-Path -LiteralPath $playerDef) {
+    [System.IO.File]::ReadAllBytes($playerDef)
+} else { $null }
+
+function Set-ShadowQualityByte {
+    param([int]$Quality)
+    if ($null -eq $originalPlayerDef -or $originalPlayerDef.Length -le 0x2D) {
+        throw "BZPLYR.DEF missing or too short to carry the shadow-quality byte"
+    }
+    $bytes = [System.IO.File]::ReadAllBytes($playerDef)
+    $bytes[0x2D] = [byte]($Quality -band 0xFF)
+    [System.IO.File]::WriteAllBytes($playerDef, $bytes)
+}
 
 function Invoke-Arm {
-    param([string]$RendererName, [string]$HeadlightState)
+    param([string]$RendererName, [string]$HeadlightState, [string]$ShadowFar)
 
-    $armLabel = "{0}_headlight-{1}" -f $RendererName.ToLowerInvariant(), $HeadlightState
+    # Instances launched from THIS GameRoot only. Name-matching the process
+    # also catches instances other harness runs/worktrees started from a
+    # different install, which is how a parallel agent's session gets taken
+    # out as a bystander (Stop-BZRGame's own docs prefer -Id for this reason).
+    function Get-OwnBZRProcess {
+        Get-Process -Name "battlezone98redux" -ErrorAction SilentlyContinue |
+            Where-Object {
+                try { $_.Path -and
+                    ($_.Path -ieq $gameExe) } catch { $false }
+            }
+    }
+
+    $farLabel = if ($ShadowFar -eq "stock") { "far-stock" } else { "far-$ShadowFar" }
+    $armLabel = "{0}_{1}_headlight-{2}" -f $RendererName.ToLowerInvariant(), $farLabel, $HeadlightState
     $runRoot = Join-Path $OutputRoot $armLabel
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
     Write-Host "=== ARM $armLabel ==="
 
-    Stop-BZRGame
+    $preExisting = @(Get-OwnBZRProcess)
+    if ($preExisting.Count -gt 0) {
+        Stop-BZRGame -Id @($preExisting.Id)
+    }
     # A force-killed instance leaves the display stack busy; launching into it
-    # is the documented hard-lock/crash window. Wait until EVERY instance is
-    # gone (a half-teardown instance from a previous arm counts too) and give
-    # the driver a settle margin before the next mode-set.
+    # is the documented hard-lock/crash window. Wait until every instance from
+    # this GameRoot is gone (a half-teardown instance from a previous arm
+    # counts too) and give the driver a settle margin before the next
+    # mode-set. Instances from other installs are another run's property and
+    # are left alone.
     $drainDeadline = (Get-Date).AddSeconds(60)
     while ((Get-Date) -lt $drainDeadline) {
-        $remaining = Get-Process -Name "battlezone98redux" -ErrorAction SilentlyContinue
-        if (-not $remaining) { break }
-        Stop-BZRGame
+        $remaining = @(Get-OwnBZRProcess)
+        if ($remaining.Count -eq 0) { break }
+        Stop-BZRGame -Id @($remaining.Id)
         Start-Sleep -Seconds 3
     }
-    if (Get-Process -Name "battlezone98redux" -ErrorAction SilentlyContinue) {
+    if (Get-OwnBZRProcess) {
         throw "battlezone98redux instances still alive after drain ($armLabel)"
     }
     Start-Sleep -Seconds 8
+
+    # Shadow-quality byte: set before launch so the mission-load apply runs
+    # the PSSM branch exactly once, with the stock scheme from the start.
+    Set-ShadowQualityByte -Quality $ShadowQuality
+
+    # Quarantined shim override: environment-variable-only. "stock" unsets it.
+    if ($ShadowFar -eq "stock") {
+        Remove-Item Env:OPENSHIM_SHADOW_FAR_DISTANCE -ErrorAction SilentlyContinue
+    } else {
+        $env:OPENSHIM_SHADOW_FAR_DISTANCE = $ShadowFar
+    }
 
     # Renderer/window config (same constraints as capture_headlight_falloff).
     $renderSystem = if ($RendererName -eq "DX9") {
@@ -166,13 +224,21 @@ $(if ($WithProfiler) { "ProfileOgreAnimation = 1" } else { "" })
         [System.IO.File]::WriteAllText($trnPath, $trn)
     }
 
-    # Deterministic shadowline mission config.
+    # Deterministic shadowline mission config. With explicit station
+    # distances the Lua derives the unit count from the list (3 per station).
     $invariant = [Globalization.CultureInfo]::InvariantCulture
+    $stationLine = ""
+    $countLine = "count = $($Stations * 3)"
+    if ($StationDistances -ne "") {
+        $stationLine = 'stationDistances = "' + $StationDistances + '"'
+        $stationCount = ($StationDistances -split ",").Count
+        $countLine = "count = $($stationCount * 3)"
+    }
     [System.IO.File]::WriteAllText($missionConfig, @"
 [Benchmark]
 scenario = "shadowline"
 unitOdf = "avtank"
-count = $($Stations * 3)
+$countLine
 distance = $($FirstStation.ToString("0.0###", $invariant))
 orientation = "facing"
 warmupSeconds = $($WarmupSeconds.ToString("0.0###", $invariant))
@@ -180,6 +246,7 @@ measureSeconds = 60.0
 clusterCount = 4
 clusterRadius = 300.0
 spinSeconds = 0.0
+$stationLine
 "@)
 
     if (Test-Path -LiteralPath $shimLog) {
@@ -204,20 +271,15 @@ spinSeconds = 0.0
     # mid-capture; the window is parked at (0,0) so the region is predictable.
     Start-Sleep -Seconds ([int][math]::Ceiling($WarmupSeconds + 10))
 
-    if ($ForceShadowsOn) {
-        # Attach Frida in a background job so trace scripts stay attached
-        # across the whole capture window; the job pipes "exit" to the Frida
-        # REPL only after the capture window closes. The game's own apply
-        # function rebuilds shadow textures and re-schemes viewports, so a
-        # short settle is enough before frames are taken.
+    if ($FridaScript -ne "") {
+        # Optional ad-hoc Frida probe. Runs in a background job so trace
+        # scripts stay attached across the whole capture window; the job
+        # pipes "exit" to the Frida REPL only after the capture closes.
         $fridaLog = Join-Path $runRoot "shadowset_frida.txt"
         $fridaScriptPath = Join-Path $PSScriptRoot $FridaScript
         $fridaPid = $process.Id
         $fridaJob = Start-Job -ScriptBlock {
             param($targetPid, $scriptPath, $logPath, $sessionSeconds)
-            # The delayed "exit" keeps the Frida REPL's stdin open for the
-            # whole capture window; writing it immediately would detach the
-            # hooks after the first few intercepted calls.
             & { Start-Sleep -Seconds $sessionSeconds; "exit" } |
                 & bzr-frida -p $targetPid -l $scriptPath -q 2>&1 |
                 Out-File -FilePath $logPath -Encoding utf8
@@ -279,15 +341,17 @@ spinSeconds = 0.0
 
     $process.Refresh()
     if (-not $process.HasExited) {
-        $process.WaitForExit(25000) | Out-Null
+        Stop-BZRGame -Id $process.Id
     }
-    Stop-BZRGame
     # Confirm the process is really gone before the next arm re-modes the
     # display; the launch lock serializes scripts, not in-flight teardowns.
+    # Scoped to this GameRoot: a concurrent run's instance is not ours to wait
+    # on, and waiting on it here would deadlock two serialized harness runs.
     $drainDeadline = (Get-Date).AddSeconds(30)
     while ((Get-Date) -lt $drainDeadline) {
-        if (-not (Get-Process -Name "battlezone98redux" -ErrorAction SilentlyContinue)) { break }
-        Stop-BZRGame
+        $remaining = @(Get-OwnBZRProcess)
+        if ($remaining.Count -eq 0) { break }
+        Stop-BZRGame -Id @($remaining.Id)
         Start-Sleep -Seconds 3
     }
     Start-Sleep -Seconds 4
@@ -307,7 +371,11 @@ spinSeconds = 0.0
 try {
     foreach ($rendererName in $renderers) {
         foreach ($state in $states) {
-            Invoke-Arm -RendererName $rendererName -HeadlightState $state.Trim()
+            foreach ($far in $fars) {
+                Invoke-Arm -RendererName $rendererName `
+                    -HeadlightState $state.Trim() `
+                    -ShadowFar $far.Trim()
+            }
         }
     }
 }
@@ -319,9 +387,20 @@ finally {
     if ($null -ne $originalMissionConfig) {
         [System.IO.File]::WriteAllText($missionConfig, $originalMissionConfig)
     }
-    Stop-BZRGame
+    if ($null -ne $originalPlayerDef) {
+        [System.IO.File]::WriteAllBytes($playerDef, $originalPlayerDef)
+    }
+    Remove-Item Env:OPENSHIM_SHADOW_FAR_DISTANCE -ErrorAction SilentlyContinue
+    # Own instances only (same rule as Invoke-Arm): never a bystander session.
+    $own = Get-Process -Name "battlezone98redux" -ErrorAction SilentlyContinue |
+        Where-Object { try { $_.Path -and ($_.Path -ieq $gameExe) } catch { $false } }
+    if ($own) {
+        Stop-BZRGame -Id @($own.Id)
+    }
 }
 
 $OutputRoot
+
+
 
 
