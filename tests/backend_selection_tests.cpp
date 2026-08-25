@@ -142,7 +142,21 @@ void TestBootRequestResolution()
     const BootRequest glOverPersistent =
         ResolveBootRequest(RendererBackend::DX9, RendererToken::Gl);
     ExpectTrue(glOverPersistent.backend == RendererBackend::Auto,
-               "gl cli over persistent still yields stock this boot");
+                "gl cli over persistent still yields stock this boot");
+
+    // Case B contract: a /renderer:gl boot must not consume or alter the
+    // persistent preference — this boot collapses to stock selection and the
+    // next normal boot re-asserts the stored request.
+    const BootRequest glOverDx11 =
+        ResolveBootRequest(RendererBackend::DX11, RendererToken::Gl);
+    ExpectTrue(glOverDx11.backend == RendererBackend::Auto &&
+                   glOverDx11.source == RequestSource::None,
+               "gl cli over persistent dx11: stock this boot");
+    const BootRequest bootAfterGl =
+        ResolveBootRequest(RendererBackend::DX11, RendererToken::None);
+    ExpectTrue(bootAfterGl.backend == RendererBackend::DX11 &&
+                   bootAfterGl.source == RequestSource::Persistent,
+               "persistent dx11 reasserted on the boot after gl");
 }
 
 void TestSubsystemNames()
@@ -270,6 +284,81 @@ void TestReasonNames()
     ExpectStr(ReasonName(SelectionReason::Stock), "stock", "stock name");
 }
 
+void TestMinimalConfigImage()
+{
+    std::printf("TestMinimalConfigImage\n");
+    const std::string dx11 = BuildMinimalConfigImage(
+        "Direct3D11 Rendering Subsystem");
+    ExpectStr(dx11, "Render System=Direct3D11 Rendering Subsystem\r\n",
+              "minimal dx11 image");
+
+    // Stock's own parser accepts this image: the key extracts cleanly.
+    ExpectStr(ExtractStockRenderSystemValue(dx11),
+              "Direct3D11 Rendering Subsystem", "minimal image round-trips");
+
+    // And a second transport pass on the image is idempotent.
+    std::string again = dx11;
+    ExpectTrue(ApplyTransportToConfigImage(again,
+                                           "Direct3D9 Rendering Subsystem"),
+               "minimal image is rewritable");
+    ExpectStr(again, "Render System=Direct3D9 Rendering Subsystem\r\n",
+              "rewritten minimal image");
+
+    ExpectStr(BuildMinimalConfigImage(""), "", "empty subsystem refused");
+}
+
+void TestTransportTempFileName()
+{
+    std::printf("TestTransportTempFileName\n");
+    const std::string a = MakeTransportTempFileName(1234u);
+    ExpectStr(a, "Ogre.cfg.openshim-1234.tmp", "pid 1234 format");
+    ExpectTrue(MakeTransportTempFileName(0u) == "Ogre.cfg.openshim-0.tmp",
+               "pid 0 format");
+    ExpectTrue(MakeTransportTempFileName(4294967295u) ==
+                   "Ogre.cfg.openshim-4294967295.tmp",
+               "max pid format");
+    // Distinct processes must never share a temp file.
+    ExpectTrue(MakeTransportTempFileName(1u) != MakeTransportTempFileName(2u),
+               "distinct pids disjoint");
+    ExpectTrue(a.find("Ogre.cfg") == 0, "name anchored to Ogre.cfg prefix");
+    ExpectTrue(a.ends_with(".tmp"), "tmp suffix present");
+}
+
+void TestParseTransportEnabled()
+{
+    std::printf("TestParseTransportEnabled\n");
+    ExpectTrue(ParseTransportEnabled(""), "empty enables");
+    ExpectTrue(ParseTransportEnabled("1"), "1 enables");
+    ExpectTrue(ParseTransportEnabled("yes"), "yes enables");
+    ExpectTrue(ParseTransportEnabled("true"), "true enables");
+    ExpectTrue(ParseTransportEnabled("on"), "on enables");
+    ExpectTrue(ParseTransportEnabled("garbage"), "garbage enables (fail-open)");
+    ExpectTrue(ParseTransportEnabled(" ENABLED "), "whitespace + unknown word enables");
+    ExpectTrue(!ParseTransportEnabled(" FALSE "), "whitespace + case-insensitive false disables");
+    ExpectTrue(!ParseTransportEnabled("0"), "0 disables");
+    ExpectTrue(!ParseTransportEnabled("false"), "false disables");
+    ExpectTrue(!ParseTransportEnabled("No"), "No disables");
+    ExpectTrue(!ParseTransportEnabled("OFF"), "OFF disables");
+    ExpectTrue(!ParseTransportEnabled("\toff\t"), "surrounding tabs tolerated");
+}
+
+void TestStartupFilenameRecognition()
+{
+    std::printf("TestStartupFilenameRecognition\n");
+    ExpectTrue(IsStartupConfigFilename("Ogre.cfg"), "bare name");
+    ExpectTrue(IsStartupConfigFilename("ogre.cfg"), "case-insensitive bare");
+    ExpectTrue(IsStartupConfigFilename(R"(C:\Games\BZR\Ogre.cfg)"),
+               "windows absolute path");
+    ExpectTrue(IsStartupConfigFilename("/game/root/ogre.CFG"),
+               "slash path, mixed case");
+    ExpectTrue(!IsStartupConfigFilename("bz_resources.cfg"),
+               "other config rejected");
+    ExpectTrue(!IsStartupConfigFilename(""), "empty rejected");
+    ExpectTrue(!IsStartupConfigFilename("Ogre.cfg.bak"), "suffix trap");
+    ExpectTrue(!IsStartupConfigFilename("myOgre.cfg"), "prefix trap");
+    ExpectTrue(!IsStartupConfigFilename("Ogre.cf"), "truncated rejected");
+}
+
 int main()
 {
     std::printf("backend_selection_tests\n");
@@ -280,6 +369,10 @@ int main()
     TestTransportImage();
     TestOutcomeClassification();
     TestReasonNames();
+    TestMinimalConfigImage();
+    TestTransportTempFileName();
+    TestParseTransportEnabled();
+    TestStartupFilenameRecognition();
     if (g_failures != 0)
     {
         std::printf("FAILED: %d assertion(s)\n", g_failures);
