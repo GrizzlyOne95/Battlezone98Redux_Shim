@@ -99,8 +99,9 @@ semantics and none were folded into Enhanced.
 
 ## 4. Profile precedence
 
-1. Hard compatibility/safety constraints (scheme layer unavailable → Enhanced
-   reports itself unsupported rather than half-working).
+1. Hard compatibility/safety constraints (scheme layer unavailable, or the
+   mandatory Enhanced resource set failed validation → Enhanced reports itself
+   unsupported rather than half-working).
 2. Content override via EXU (mission/session scoped).
 3. User preference from openshim.ini.
 
@@ -112,10 +113,18 @@ Examples:
 | DX11 | Redux | Enhanced | Enhanced |
 | DX11 | Enhanced | Redux | Redux |
 | DX9 | Enhanced | Inherit | **Enhanced (legacy capability set)** |
-| any | Enhanced | – | Redux only if scheme layer inactive, reason logged |
+| any | Enhanced | – | Redux if scheme layer inactive OR mandatory resource set invalid, reason logged |
+
+Mandatory vs optional resources: `ValidateDeployedResourceSetAt` verifies the
+MANDATORY program/shader/texture set (granting `CapEnhancedResources`), which
+gates Enhanced itself on both backends; the IBL textures additionally grant
+`CapIblResources`, an OPTIONAL feature bit that can never gate the profile.
+`ResolveRenderProfile` and `SupportsRenderProfile(Enhanced)` share
+`ProfileRequirementsMet` so they can never disagree.
 
 The resolver lives in `src/engine/render_profile.cpp` (pure, unit-tested via
-`scripts/run_render_profile_tests.ps1`).
+`scripts/run_render_profile_tests.ps1`; resource-set validation is
+unit-tested in `render_profile_resources_tests`).
 
 ## 5. EXU API
 
@@ -123,7 +132,16 @@ Native winmm exports (stable integer ABI, mirrored in EXU's
 `src/RenderProfileBridge.h`; requests: 0=Inherit, 1=Retro, 2=Redux, 3=Enhanced):
 
 - `OpenShimGetRenderApiVersion()`
-- `OpenShimRequestRenderProfile(req)` → applied-live / stored-deferred / rejected
+- `OpenShimRequestRenderProfile(req)` → truthful application status:
+  - `0` applied-live: the engine-thread deferred-apply drain covering this
+    request completed and reached viewports (tracked by request epochs in
+    `render_profile_request_tracker.h`, never inferred from viewport
+    existence — viewports existing says nothing about whether the deferred
+    apply ran);
+  - `1` stored-deferred: accepted and stored, engine-thread apply pending;
+  - `2` rejected-value: unknown request value;
+  - `3` unsupported-build: stored for coherence, but Enhanced/Retro can never
+    drive rendering because the scheme-policy layer is inactive.
 - `OpenShimGetUserRenderProfile()`, `OpenShimGetRequestedContentRenderProfile()`,
   `OpenShimGetEffectiveRenderProfile()`
 - `OpenShimGetActiveRendererBackend()`

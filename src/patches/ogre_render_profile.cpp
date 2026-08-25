@@ -17,6 +17,8 @@
 // Enhanced/Retro report themselves unavailable rather than half-working.
 
 #include "render_profile_runtime.h"
+#include "render_profile_resources.h"
+#include "render_profile_request_tracker.h"
 #include "BZROpenShim.h"
 #include "bzr_options_ui.h"
 #include "render_profile.h"
@@ -39,16 +41,6 @@ namespace BZROpenShim::RenderProfiles
     namespace
     {
         constexpr const char* kLogTag = "RENDER";
-
-        // Compiled expectation for the deployed renderer-resource set. Bump
-        // whenever resources/renderer/** changes in a way that must not pair
-        // with an older DLL. Deploy-OpenShim.ps1 writes the matching file;
-        // a mismatch degrades Enhanced cleanly to Redux instead of letting a
-        // new DLL run against stale shaders (the winmm.dll+patches.json rule,
-        // extended to renderer resources).
-        constexpr char kEnhancedResourcesVersion[] = "1";
-        constexpr const char* kEnhancedResourceDirRel = "openshim\\renderer\\enhanced";
-        constexpr const char* kEnhancedResourceVersionFile = "resources.version";
 
         void __fastcall ViewportSetMaterialSchemeHookForward(void* viewport,
                                                              void* edx,
@@ -74,12 +66,24 @@ namespace BZROpenShim::RenderProfiles
 
         // Set by non-game-thread requesters that need viewport state applied;
         // drained ONLY by the scheme hook running on the game/render thread
-        // (Ogre state mutation must stay on the engine's thread).
+        // (Ogre state mutation must stay on the engine's thread). The epoch
+        // tracker is what makes OpenShimRequestRenderProfile's result
+        // truthful: a request reports AppliedLive only after a drain whose
+        // snapshot covered that publish actually reached viewports.
         std::atomic<bool> s_reapplyPending { false };
+        RequestApplyTracker s_applyTracker;
 
         const char* BackendName(ActiveBackend backend)
         {
             return backend == ActiveBackend::DX11 ? "DX11" : "DX9";
+        }
+
+        // Every deferred-apply publisher goes through here so each request
+        // gets a distinct epoch (see RequestApplyTracker for the contract).
+        void PublishReapplyPending()
+        {
+            s_applyTracker.Publish();
+            s_reapplyPending.store(true, std::memory_order_release);
         }
 
         const char* ProfileName(Profile profile)
@@ -166,88 +170,34 @@ namespace BZROpenShim::RenderProfiles
 
         // ---- deployed Enhanced renderer-resource validation -----------------
 
-        // Mandatory files of the deployed Enhanced set. The version marker
-        // alone cannot prove a deployment is usable (a correct marker can sit
-        // next to deleted/empty payloads), so every program, shader source,
-        // and neutral IBL texture below must exist non-empty before the
-        // CapIblResources capability may be reported.
-        constexpr const char* kRequiredEnhancedResources[] = {
-            "openshim_enhanced_base.program",
-            "openshim_enhanced_base-vertex.glsl",
-            "openshim_enhanced_base-fragment.glsl",
-            "openshim_enhanced_base-sm3.hlsl",
-            "openshim_enhanced_base-sm4.hlsl",
-            "openshim_enhanced_terrain.program",
-            "openshim_enhanced_terrain-vertex.glsl",
-            "openshim_enhanced_terrain-fragment.glsl",
-            "openshim_enhanced_terrain-sm3.hlsl",
-            "openshim_enhanced_terrain-sm4.hlsl",
-            "openshim_enhanced_terrain_glow-vertex.glsl",
-            "openshim_enhanced_terrain_glow-fragment.glsl",
-            "openshim_enhanced_terrain_glow-sm3.hlsl",
-            "openshim_enhanced_terrain_glow-sm4.hlsl",
-            "openshim_ibl_brdf_lut.dds",
-            "openshim_ibl_neutral_irradiance.dds",
-            "openshim_ibl_neutral_prefilter.dds",
-        };
-
+        // Thin runtime wrapper: the actual file-set contract lives in
+        // src/engine/render_profile_resources.cpp (unit-tested against real
+        // directory trees); this layer adds the game-directory join and the
+        // log formatting.
         bool ValidateDeployedResourceSet()
         {
             const std::filesystem::path gameDir = GetMainModuleDirectory();
             if (gameDir.empty())
             {
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "Enhanced resource set unverifiable: main module directory unknown");
                 return false;
             }
 
-            const std::filesystem::path dir = gameDir / kEnhancedResourceDirRel;
-            if (!std::filesystem::is_directory(dir))
-            {
-                LogShimA(LogLevel::Info, kLogTag,
-                         "Enhanced resource set absent (%s); standalone retrofit path disabled",
-                         kEnhancedResourceDirRel);
-                return false;
-            }
-
-            FILE* file = nullptr;
-            const std::filesystem::path versionFile = dir / kEnhancedResourceVersionFile;
-            if (_wfopen_s(&file, versionFile.c_str(), L"rb") != 0 || file == nullptr)
+            std::string problem;
+            if (!ValidateDeployedResourceSetAt(
+                    gameDir / kEnhancedResourceDirRel, problem))
             {
                 LogShimA(LogLevel::Warn, kLogTag,
-                         "Enhanced resource set missing %s marker", kEnhancedResourceVersionFile);
+                         "Enhanced unavailable: %s (%s)",
+                         problem.c_str(), kEnhancedResourceDirRel);
                 return false;
-            }
-
-            char actual[32] = {};
-            const size_t read = fread(actual, 1, sizeof(actual) - 1, file);
-            fclose(file);
-
-            if (read == 0 || strncmp(actual, kEnhancedResourcesVersion, read) != 0)
-            {
-                LogShimA(LogLevel::Warn, kLogTag,
-                         "Enhanced unavailable: resource version mismatch "
-                         "(expected=%s got=%.31s); redeploy winmm.dll + openshim\\renderer together",
-                         kEnhancedResourcesVersion, actual);
-                return false;
-            }
-
-            for (const char* name : kRequiredEnhancedResources)
-            {
-                std::error_code ec;
-                const std::filesystem::path path = dir / name;
-                if (!std::filesystem::is_regular_file(path, ec) ||
-                    std::filesystem::file_size(path, ec) == 0 || ec)
-                {
-                    LogShimA(LogLevel::Warn, kLogTag,
-                             "Enhanced unavailable: mandatory resource missing/empty: %s\\%s",
-                             kEnhancedResourceDirRel, name);
-                    return false;
-                }
             }
 
             LogShimA(LogLevel::Info, kLogTag,
                      "resource-version=%s resources compatible=yes (%zu files verified)",
                      kEnhancedResourcesVersion,
-                     sizeof(kRequiredEnhancedResources) / sizeof(kRequiredEnhancedResources[0]));
+                     RequiredEnhancedResourceCount());
             return true;
         }
 
@@ -260,13 +210,19 @@ namespace BZROpenShim::RenderProfiles
             {
                 mask &= ~static_cast<uint32_t>(CapSchemeRewrite);
             }
+            // Resource findings only ever REMOVE base bits, then add the two
+            // resource-derived bits. CapEnhancedResources is the MANDATORY
+            // set (gates Enhanced itself in the resolver); CapIblResources is
+            // the OPTIONAL IBL extras (never gates the profile).
             if (s_resourcesValid)
             {
-                mask |= static_cast<uint32_t>(CapIblResources);
+                mask |= static_cast<uint32_t>(CapIblResources) |
+                        static_cast<uint32_t>(CapEnhancedResources);
             }
             else
             {
-                mask &= ~static_cast<uint32_t>(CapIblResources);
+                mask &= ~(static_cast<uint32_t>(CapIblResources) |
+                          static_cast<uint32_t>(CapEnhancedResources));
             }
             return mask;
         }
@@ -318,7 +274,7 @@ namespace BZROpenShim::RenderProfiles
                          ? "EXU" : "user");
             LogShimA(LogLevel::Info, kLogTag,
                      "enhanced.supported=%s resources.compatible=%s capabilities=0x%08X",
-                     HasCapability(s_capabilityMask, CapSchemeRewrite) ? "yes" : "no",
+                     ProfileRequirementsMet(Profile::Enhanced, s_capabilityMask) ? "yes" : "no",
                      s_resourcesValid ? "yes" : "no",
                      s_capabilityMask);
             LogShimA(LogLevel::Info, kLogTag,
@@ -569,7 +525,7 @@ namespace BZROpenShim::RenderProfiles
             // This is a worker thread: never touch Ogre viewports from here.
             // Publish the pending flag; the scheme hook drains it on the
             // engine's own thread at the next setMaterialScheme call (~1 Hz).
-            s_reapplyPending.store(true, std::memory_order_release);
+            PublishReapplyPending();
             return 0;
         }
 
@@ -712,9 +668,18 @@ namespace BZROpenShim::RenderProfiles
             // reassert loop and viewport creation — performs the actual
             // viewport/compositor application here. The reapply path calls
             // Ogre exports directly (not this IAT site), so no recursion.
+            //
+            // Snapshot BEFORE consuming: everything published up to now is
+            // covered by this pass. A publish racing in after the snapshot is
+            // simply drained by the next call instead (under-report, never
+            // over-report).
             if (s_reapplyPending.exchange(false, std::memory_order_acq_rel))
             {
-                ReapplyEffectiveProfileToViewports("deferred apply");
+                const uint64_t coveredEpoch = s_applyTracker.SnapshotPublished();
+                if (ReapplyEffectiveProfileToViewports("deferred apply"))
+                {
+                    s_applyTracker.MarkApplied(coveredEpoch);
+                }
             }
         }
 
@@ -1025,13 +990,16 @@ namespace BZROpenShim::RenderProfiles
         }
     } // anonymous namespace
 
-    void ReapplyEffectiveProfileToViewports(const char* context)
+    // Returns true when at least one active viewport was found and processed;
+    // false means "nothing to apply to" (the request stays deferred from the
+    // ABI's point of view).
+    bool ReapplyEffectiveProfileToViewports(const char* context)
     {
         void* viewports[4] = {};
         const size_t count = CollectActiveViewports(viewports, 4);
         if (count == 0)
         {
-            return;
+            return false;
         }
 
         const Profile effective = static_cast<Profile>(
@@ -1072,6 +1040,7 @@ namespace BZROpenShim::RenderProfiles
                  ProfileName(effective),
                  changedAny ? 1 : 0,
                  glowTarget ? "on" : "off");
+        return true;
     }
 
     void RequestContentRenderProfile(ContentRequest request, const char* context)
@@ -1085,7 +1054,7 @@ namespace BZROpenShim::RenderProfiles
         }
         // The companion bridge can be called from any thread; defer the Ogre
         // mutation to the game/render-thread scheme hook.
-        s_reapplyPending.store(true, std::memory_order_release);
+        PublishReapplyPending();
     }
 
     void ClearContentRenderProfileOverride(const char* context)
@@ -1101,7 +1070,7 @@ namespace BZROpenShim::RenderProfiles
         }
         if (hadOverride)
         {
-            s_reapplyPending.store(true, std::memory_order_release);
+            PublishReapplyPending();
         }
     }
 
@@ -1111,7 +1080,7 @@ namespace BZROpenShim::RenderProfiles
         LoadConfigLocked();
         ResolveAndPublishLocked("ini reload");
         ReleaseSRWLockExclusive(&s_stateLock);
-        s_reapplyPending.store(true, std::memory_order_release);
+        PublishReapplyPending();
     }
 
     void InitializeOgreRenderProfiles()
@@ -1172,12 +1141,40 @@ namespace BZROpenShim::RenderProfiles
                 return Abi::kRequestStatusRejectedValue;
             }
 
-            RequestContentRenderProfile(request, "EXU request");
+            // Truthful unsupported-build reporting: without the scheme-policy
+            // layer an Enhanced/Retro request can never drive rendering (the
+            // resolver clamps it to Redux). The request is still stored so
+            // GetRequestedContentRenderProfile stays coherent; the status
+            // tells the companion why it will not apply. Redux/Inherit have
+            // no such dependency and always proceed.
+            bool schemeLayerActive = false;
+            {
+                AcquireSRWLockShared(&s_stateLock);
+                schemeLayerActive =
+                    s_schemeTakeoverInstalled.load(std::memory_order_acquire);
+                ReleaseSRWLockShared(&s_stateLock);
+            }
+            const Profile requestedAsProfile =
+                (request == ContentRequest::Enhanced) ? Profile::Enhanced
+                : (request == ContentRequest::Retro) ? Profile::Retro
+                                                     : Profile::Redux;
+            if (!schemeLayerActive && requestedAsProfile != Profile::Redux)
+            {
+                RequestContentRenderProfile(request, "EXU request");
+                return Abi::kRequestStatusUnsupportedBuild;
+            }
 
-            void* probe[1] = {};
-            const size_t seen = CollectActiveViewports(probe, 1);
-            return seen > 0 ? Abi::kRequestStatusAppliedLive
-                            : Abi::kRequestStatusStoredDeferred;
+            // The actual Ogre mutation happens later on the engine thread, so
+            // the honest answer right now is StoredDeferred unless a drain
+            // covering this publish already completed. Viewport existence is
+            // deliberately NOT consulted: it says nothing about whether the
+            // deferred apply ran.
+            RequestContentRenderProfile(request, "EXU request");
+            const uint64_t publishedEpoch =
+                s_applyTracker.SnapshotPublished();
+            return s_applyTracker.AppliedSince(publishedEpoch)
+                ? Abi::kRequestStatusAppliedLive
+                : Abi::kRequestStatusStoredDeferred;
         }
 
         uint32_t GetUserRenderProfile()
@@ -1235,15 +1232,11 @@ namespace BZROpenShim::RenderProfiles
             const uint32_t mask = s_capabilityMask;
             ReleaseSRWLockShared(&s_stateLock);
 
-            switch (profile)
-            {
-            case Profile::Enhanced:
-            case Profile::Retro:
-                return HasCapability(mask, CapSchemeRewrite) ? TRUE : FALSE;
-            case Profile::Redux:
-            default:
-                return TRUE; // Redux is the always-available baseline
-            }
+            // Same gate the resolver enforces: Enhanced additionally requires
+            // the mandatory resource set, so a deployment with verified
+            // scheme hooks but broken/missing renderer files no longer
+            // claims Enhanced is usable. Redux stays always-available.
+            return ProfileRequirementsMet(profile, mask) ? TRUE : FALSE;
         }
     }
 } // namespace BZROpenShim::RenderProfiles

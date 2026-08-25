@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -145,6 +145,7 @@
     <ClCompile Include="src\patches\ogre_enhanced_light_selection.cpp" />
     <ClCompile Include="src\patches\ogre_render_profile.cpp" />
     <ClCompile Include="src\engine\render_profile.cpp" />
+    <ClCompile Include="src\engine\render_profile_resources.cpp" />
     <ClCompile Include="src\patches\sun_flash.cpp" />
     <ClCompile Include="src\patches\terrain_proxy.cpp" />
     <ClCompile Include="src\patches\terrain_semantic.cpp" />
@@ -166,6 +167,8 @@
     <ClInclude Include="include\bzr_options_ui.h" />
     <ClInclude Include="include\render_profile.h" />
     <ClInclude Include="include\render_profile_runtime.h" />
+    <ClInclude Include="include\render_profile_resources.h" />
+    <ClInclude Include="include\render_profile_request_tracker.h" />
     <ClInclude Include="include\bzrnet_protocol.h" />
     <ClInclude Include="include\bzrnet_trace.h" />
     <ClInclude Include="include\bzrnet_instrumentation.h" />
