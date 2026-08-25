@@ -295,6 +295,29 @@ reason the symptom reads as "headlight makes the cutoff worse" on DX11.
 
 ## 8. Recommended intervention seam
 
+**A — implemented (experimental, quarantined): `OPENSHIM_SHADOW_FAR_DISTANCE`.**
+
+The shim detours `FUN_00680fe0` and re-issues the game's own
+`setShadowFarDistance` (vtable slot +0x394) with the requested value after
+every stock apply. Contract:
+
+- Dormant unless the environment variable is set; stock-exact when unset.
+- Value must parse as a finite distance in `[16, 4096]` other than 128
+  (128 = stock is rejected as a no-op request).
+- Installs only on validated module identities (exe timestamp/size,
+  OgreMain timestamp/size) and a byte-exact apply-routine prologue;
+  everything else fails closed.
+- Applies only when settings say PSSM and the stock value was observed
+  (`action=applied` vs `action=skipped reason=...` in the log).
+- Telemetry per apply: `requested / stock / override / applied / effective`
+  distances, renderer, quality byte, pssm flag.
+- Touches no material LOD, shader, split distance, or headlight state.
+
+Matrix runner support: `run_shadow_cutoff_matrix.ps1 -ShadowFarDistances
+stock,256[,384,512]` arms the variable per run and restores it; station
+distances are bracketable via `-StationDistances` so captures land exactly
+around both cutoff candidates.
+
 **A — preferred: raise the shadow far distance to match the outer split
 (`setShadowFarDistance` 128 → ≥ 256).**
 
