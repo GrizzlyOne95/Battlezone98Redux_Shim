@@ -212,10 +212,15 @@ namespace bz14
     bool OwnsAttackTaskDetour();
 
     // True when developer environment controls request either mode. Read
-    // BEFORE the AIKITE kite installer runs so an exclusive reservation can
-    // leave the shared AttackTask::DoState site free for this layer instead
-    // of trying to displace an already-installed detour.
+    // BEFORE the AIKITE kite installer runs.
     bool PolicyHookRequested();
+
+    // True when the APPLY (sim-affecting) mode specifically is requested.
+    // Exclusive site reservation is apply-mode-only: passive shadow
+    // measurement must never prevent or displace the established owner of
+    // the shared AttackTask::DoState detour site, even when the operator
+    // also sets OPENSHIM_LEGACY14_EXCLUSIVE=1.
+    bool PolicyApplyModeRequested();
 
     // Attempts installation. attackTaskSiteTaken must be true when another
     // OpenShim feature already detours AttackTask::DoState (AIKITE kite

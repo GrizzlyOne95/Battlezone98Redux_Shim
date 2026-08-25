@@ -64,8 +64,12 @@ add_executable(sun_flash_tests
 
 add_executable(bz14_attack_policy_tests
     bz14_attack_policy_tests.cpp
-    ../src/patches/bz14_attack_redux.cpp
 )
+# Pure decision-core coverage only: include/bz14_attack_policy.h is
+# engine-independent by design. Do NOT link src/patches/bz14_attack_redux.cpp
+# here - it drags Windows.h/SEH into the standalone suite and broke the
+# BZRNet instrumentation validation workflow's newer CI toolchain under
+# /W4 /WX while adding nothing these tests execute.
 target_include_directories(bz14_attack_policy_tests PRIVATE ../include)
 target_compile_features(bz14_attack_policy_tests PRIVATE cxx_std_20)
 

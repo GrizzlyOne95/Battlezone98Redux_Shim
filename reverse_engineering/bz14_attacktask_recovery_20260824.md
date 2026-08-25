@@ -439,7 +439,8 @@ Files: `include/bz14_attack_policy.h` (pure decision core),
 
 - QUARANTINED, developer-only: activation is environment-only
   (`OPENSHIM_LEGACY14_ATTACK`, `OPENSHIM_LEGACY14_ATTACK_SHADOW`,
-  optional `OPENSHIM_LEGACY14_EXCLUSIVE`). There are deliberately NO
+  optional `OPENSHIM_LEGACY14_EXCLUSIVE`, which is honored for apply mode
+  only). There are deliberately NO
   openshim.ini keys: enabling today restores 1.4 behavior only where the
   generic machine runs (fighter/scout proven) and leaves tank families on
   Redux, which must never present as a normal "legacy attack behavior"
@@ -455,9 +456,15 @@ Files: `include/bz14_attack_policy.h` (pure decision core),
   loudly disable another feature.
 - Telemetry distinguishes all four validation claims separately:
   byte-valid / hook-installed / hook-executing (first-entry log) /
-  behavior-affecting (override counter). One-shot session summaries at
-  shutdown: `[AIKITE] hook-installed=... hook-calls=... applied=...
-  units-seen=...` and `[BZ14] byte-valid=... hook-calls=... affecting=...`.
+  behavior-affecting — derived from SUCCESSFUL mutations only (transition
+  writes + DoSlide invocations), never from attempted decisions. One-shot
+  session summaries at shutdown: `[AIKITE] hook-installed=... hook-calls=...
+  applied=... units-seen=...` and `[BZ14] byte-valid=... hook-calls=...
+  affecting=yes|no attempts=... writes=... doslide=... freshens=...`.
+- Shadow mode is strictly passive: stock DoState runs untouched (the
+  entry-time freshening that supports apply mode is gated behind apply
+  mode), and the hypothetical 1.4 decision is evaluated/logged without any
+  write or sim-affecting call.
 - Single-player gate unchanged (net id 0); SEH guards on all game-memory
   access; fail-closed on any validation failure.
 - Decision core unit-tested (suite green, expanded): D1/D2/D2c/D3/D4/D5

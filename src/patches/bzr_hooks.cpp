@@ -19976,12 +19976,12 @@ namespace BZROpenShim
             // AIKITE normally claims the shared AttackTask::DoState detour
             // site first. The quarantined legacy-1.4 policy layer (env-
             // gated, experimental) never displaces an installed detour at
-            // runtime; the only way it gets the site is an explicit
-            // developer reservation (OPENSHIM_LEGACY14_EXCLUSIVE=1), which
-            // skips AIKITE's install for that session - loudly, and only
-            // when the legacy layer was actually requested.
+            // runtime, and passive shadow measurement never reserves the
+            // site either: the only reservation path is explicit APPLY-mode
+            // request + OPENSHIM_LEGACY14_EXCLUSIVE=1, which skips AIKITE's
+            // install for that session - loudly.
             const bool bz14Exclusive =
-                bz14::PolicyHookRequested() &&
+                bz14::PolicyApplyModeRequested() &&
                 EnvFlagEnabled("OPENSHIM_LEGACY14_EXCLUSIVE");
             if (bz14Exclusive)
             {

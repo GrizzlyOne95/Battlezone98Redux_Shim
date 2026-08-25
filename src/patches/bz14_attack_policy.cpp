@@ -19,23 +19,33 @@
 // never fire and never skip movement primitives; originals are restored
 // before returning.
 //
-// QUARANTINED EXPERIMENT (2026-08-24 audit): runtime probing proved generic
-// AttackTask::DoState @0x00478A50 execution-dead during live GOG 2.2.301
-// combat engagements (recovery report §6), so this layer cannot affect live
-// behavior on that build. It is developer-only research instrumentation:
+// QUARANTINED EXPERIMENT (2026-08-24 audit): live census proved the generic
+// AttackTask::DoState @0x00478A50 executes for fighter/scout engagements
+// (full 1.4 duel machine observed) but is never reached by the tested
+// tank-family combat, which runs reduced family-specific task skeletons
+// instead (recovery report §6.4). Enabling this layer therefore restores 1.4
+// behavior for some unit families while others stay on Redux. It is
+// developer-only research instrumentation:
 //
 //   OPENSHIM_LEGACY14_ATTACK=1        apply-mode (sim-affecting, SP only)
-//   OPENSHIM_LEGACY14_ATTACK_SHADOW=1 measure-only mode
-//   OPENSHIM_LEGACY14_EXCLUSIVE=1     explicitly displace an existing owner
-//                                     of the DoState detour site (AIKITE);
-//                                     never set this casually
+//   OPENSHIM_LEGACY14_ATTACK_SHADOW=1 measure-only mode; runs untouched
+//                                     stock behavior, evaluates/logs the
+//                                     hypothetical 1.4 decision, performs
+//                                     no writes or sim-affecting calls
+//   OPENSHIM_LEGACY14_EXCLUSIVE=1     with APPLY mode requested, reserves
+//                                     the DoState site BEFORE AIKITE
+//                                     installs (AIKITE skips its install
+//                                     that session); nothing displaces an
+//                                     installed detour at runtime
 //   OPENSHIM_TRACE_AI_BZ14=<budget>   divergence logging budget
 //   OPENSHIM_TRACE_AI_BZ14_TICKS=<n>  per-tick entry/eval logging budget
 //
 // There are deliberately NO openshim.ini keys for this feature: it must not
-// look like a working user-facing restoration while it is proven inert.
-// Telemetry distinguishes all four validation claims separately:
-// byte-valid, hook-installed, hook-executing, behavior-affecting.
+// look like a working user-facing restoration while it covers only some
+// unit families. Telemetry distinguishes all four validation claims
+// separately - byte-valid, hook-installed, hook-executing, and
+// behavior-affecting derived from SUCCESSFUL mutations (transition writes,
+// DoSlide invocations), never from attempts.
 // ============================================================================
 
 #include "bz14_attack_policy.h"
@@ -109,7 +119,12 @@ namespace bz14
         unsigned long g_hookCalls = 0;
         unsigned long g_evaluations = 0;
         unsigned long g_skipsNone = 0;
-        unsigned long g_overrides = 0;
+        // Attempted vs successful mutation are tracked separately: the
+        // audit's core lesson is that these claims are not interchangeable.
+        unsigned long g_overrideAttempts = 0;   // policy diverged from stock
+        unsigned long g_transitionWrites = 0;   // SehWriteNextState succeeded
+        unsigned long g_doSlideCalls = 0;       // DoSlide primitive invoked
+        unsigned long g_timerFreshens = 0;      // entry-time freshened
         unsigned long g_divergences = 0;
 
         InlineDetour32 g_doStateDetour;
@@ -193,7 +208,7 @@ namespace bz14
         }
 
         // Applies the verdict for non-slide states. Returns true when a
-        // recorded transition was rewritten.
+        // recorded transition was successfully rewritten.
         bool ApplySimple(uint8_t* task, const AttackFacts& f)
         {
             const Bz14Decision d = DecideAttackTick(f);
@@ -202,8 +217,13 @@ namespace bz14
             LogDivergence(task, f, d);
             if (!g_policyActive)
                 return false;
-            ++g_overrides;
-            return SehWriteNextState(task, d.targetState);
+            ++g_overrideAttempts;
+            if (SehWriteNextState(task, d.targetState))
+            {
+                ++g_transitionWrites;
+                return true;
+            }
+            return false;
         }
 
         // Slide-state evaluation: needs SaC / enemy activity / arrival.
@@ -233,12 +253,13 @@ namespace bz14
             if (!g_policyActive)
                 return false;
 
-            ++g_overrides;
+            ++g_overrideAttempts;
             if (d.kind == Bz14Decision::StayButRunSlide)
             {
                 // Stock skipped its DoSlide this tick; run the identical
                 // primitive now and honor the 1.4 arrival rule (< 5 -> 10).
-                TryRunDoSlide(task);
+                if (TryRunDoSlide(task))
+                    ++g_doSlideCalls;
                 float ax = 0.0f, ay = 0.0f, az = 0.0f;
                 bool arrived = false;
                 if (SehReadFloat(task, kTaskForceVec, ax) &&
@@ -248,12 +269,23 @@ namespace bz14
                     arrived = std::sqrt(ax * ax + ay * ay + az * az) <
                               kSlideArriveLen;
                 }
-                return SehWriteNextState(
-                    task, arrived ? StateBlastHold : StateNone);
+                const int recorded =
+                    arrived ? StateBlastHold : StateNone;
+                if (SehWriteNextState(task, recorded))
+                {
+                    ++g_transitionWrites;
+                    return true;
+                }
+                return false;
             }
-            return SehWriteNextState(
-                task,
-                d.kind == Bz14Decision::Stay ? StateNone : d.targetState);
+            const int recorded =
+                d.kind == Bz14Decision::Stay ? StateNone : d.targetState;
+            if (SehWriteNextState(task, recorded))
+            {
+                ++g_transitionWrites;
+                return true;
+            }
+            return false;
         }
 
         // Returns true when a recorded-transition override was applied.
@@ -356,9 +388,14 @@ namespace bz14
 
             // Neutralize stock's 10 s slide / 3 s flee window for this tick
             // so the bounded branches cannot skip movement primitives.
+            // APPLY MODE ONLY: shadow mode must observe untouched stock
+            // behavior. Restoring the value after the trampoline does not
+            // make this passive - stock would already have executed with
+            // the synthetic timestamp - so measurement never writes here.
             float savedEntry = 0.0f;
             bool entryFreshened = false;
-            if (haveHead && (cur == StateSlide || cur == StateFlee))
+            if (g_policyActive && haveHead &&
+                (cur == StateSlide || cur == StateFlee))
             {
                 float entry = 0.0f;
                 if (SehReadFloat(taskBytes, kTaskStateEntry, entry))
@@ -374,6 +411,7 @@ namespace bz14
                         {
                             savedEntry = entry;
                             entryFreshened = true;
+                            ++g_timerFreshens;
                         }
                     }
                 }
@@ -408,6 +446,12 @@ namespace bz14
     {
         LoadConfig();
         return g_policyActive || g_shadowMode;
+    }
+
+    bool PolicyApplyModeRequested()
+    {
+        LoadConfig();
+        return g_policyActive;
     }
 
     bool InstallPolicyHookIfPossible(bool attackTaskSiteTaken)
@@ -473,7 +517,8 @@ namespace bz14
         g_ownsDetour = true;
         // Byte-valid and hook-installed are recorded here. Hook-executing is
         // proven by the first-entry log in the hook body; behavior-affecting
-        // by g_overrides > 0 at shutdown.
+        // is derived from successful mutations (writes + DoSlide calls) at
+        // shutdown.
         Log(L"[BZ14] byte-valid=YES hook-installed=%s at DoState=0x%08X "
             L"trampoline=0x%08X mode=%s (experimental: reaches live combat "
             L"only where generic AttackTask runs - fighter/scout proven; "
@@ -491,14 +536,21 @@ namespace bz14
         if (!g_configLoaded)
             LoadConfig();
         // One-shot session summary making all four validation claims
-        // separately visible (Phase 10 of the 2026-08-24 audit).
+        // separately visible, with behavior-affecting derived from SUCCESSFUL
+        // mutations only (attempted != applied).
+        const unsigned long successful =
+            g_transitionWrites + g_doSlideCalls;
         Log(L"[BZ14] byte-valid=%s hook-installed=%s hook-calls=%lu "
-            L"affecting=%lu overrides=%lu divergences=%lu mode=%s\n",
+            L"affecting=%s attempts=%lu writes=%lu doslide=%lu "
+            L"freshens=%lu divergences=%lu mode=%s\n",
             g_bytesValidated ? L"yes" : L"no",
             g_hookInstalled ? L"yes" : L"no",
             g_hookCalls,
-            g_overrides,
-            g_overrides,
+            successful > 0 ? L"yes" : L"no",
+            g_overrideAttempts,
+            g_transitionWrites,
+            g_doSlideCalls,
+            g_timerFreshens,
             g_divergences,
             g_policyActive ? L"apply"
                            : (g_shadowMode ? L"shadow" : L"off"));
