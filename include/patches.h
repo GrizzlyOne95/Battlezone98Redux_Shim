@@ -173,8 +173,11 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::JMP5, {}, "TurretTank Aim Pitch Multiplier", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Under Attack Alert Hook 1/2", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Under Attack Alert Hook 2/2", false, {} },
-            { 0, HookEngine::PatchType::JMP5, {}, "Offensive Attack Reveal Hook", false, {} },
-            { 0, HookEngine::PatchType::JMP5, {}, "TurretTank Attack Reveal Hook", false, {} },
+            // Attack-reveal trampolines remain compiled for future requalification,
+            // but the curated patches.json intentionally omits their call sites
+            // because the previous definitions were known to crash the GOG build.
+            // Keep them out of the active registry so a deliberately absent unsafe
+            // patch is not misreported as stale deployment configuration.
             // Confirmed Redux 2.2.301 compatibility defects. These three sites
             // are hash-gated, must resolve uniquely, and are applied by
             // redux_compatibility.cpp rather than the generic patch loop.
