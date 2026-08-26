@@ -50,11 +50,12 @@ namespace BZROpenShim::RenderProfiles
     void ClearContentRenderProfileOverride(const char* context);
 
     // Applies the effective profile to currently active viewports (scheme
-    // rewrite + Glow compositor assertion). THREADING CONTRACT: mutates Ogre
-    // state, so it must only run on the game/render thread. Off-thread
+    // rewrite + Glow compositor assertion). Returns true when at least one
+    // active viewport was found and processed. THREADING CONTRACT: mutates
+    // Ogre state, so it must only run on the game/render thread. Off-thread
     // requesters set s_reapplyPending instead; the viewport scheme hook drains
     // it here on the engine's thread at its next setMaterialScheme call.
-    void ReapplyEffectiveProfileToViewports(const char* context);
+    bool ReapplyEffectiveProfileToViewports(const char* context);
 
     namespace Exports
     {

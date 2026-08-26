@@ -28058,9 +28058,325 @@ namespace BZROpenShim
         }
     }
 
+    // --- Experimental shadow-far-distance override -------------------------
+    // (OPENSHIM_SHADOW_FAR_DISTANCE, environment-variable-only experiment)
+    //
+    // Root cause (reverse_engineering/shadow_cutoff_root_cause_20260825.md):
+    // FUN_00680fe0 writes SceneManager::setShadowFarDistance(128.0) for every
+    // shadow quality, while the PSSM receiver shaders trust cascade 3 out to
+    // the 256 m outer split. Ogre's Focused/LiSPSM fit clips the cascade
+    // intersection body at the shadow far distance, so cascade 3's fitted
+    // coverage ends at ~128 m; receivers between 128-256 m sample outside the
+    // shadow map (white border = fully lit). That is the reported hard shadow
+    // terminator.
+    //
+    // This experiment detours the game's own shadow-apply routine and, after
+    // every stock apply, re-issues the game's own virtual setter with the
+    // requested distance. It is deliberately narrow:
+    //   - dormant unless OPENSHIM_SHADOW_FAR_DISTANCE is set (stock-exact);
+    //   - applies only when the settings say PSSM and the stock value was
+    //     observed (fail closed otherwise);
+    //   - touches no material LOD, shader, split distance, or headlight state.
+    namespace ShadowFarOverride
+    {
+        // FUN_00680fe0: shadow-texture/PSSM/viewport-scheme apply.
+        constexpr uintptr_t kShadowApplyFnRva = 0x00280FE0;
+        // DAT_0094672c -> settings struct; +0x25 shadow quality (sbyte).
+        constexpr uintptr_t kShadowSettingsPtrRva = 0x0054672C;
+        // 0x008ED0BC: per-quality mode bytes (0 = single map, 1 = PSSM).
+        constexpr uintptr_t kShadowModeTableRva = 0x004ED0BC;
+        // Validated GOG 2.2.301 module identities (exe SHA-256
+        // 8D71F56C...; OgreMain SHA-256 E5E69396... — PE timestamp/size here,
+        // full-hash checks exist in the features that write memory elsewhere).
+        constexpr DWORD kExpectedExeTimestamp = 0x58D9D6CC;
+        constexpr DWORD kExpectedExeImageSize = 0x0290F000;
+        constexpr DWORD kExpectedOgreTimestamp = 0x5866BF6A;
+        constexpr DWORD kExpectedOgreImageSize = 0x00A65000;
+        // SceneManager vtable slots, confirmed two ways: FUN_00680fe0 calls
+        // slot +0x394 with 128.0 between the shadow-texture and per-type-count
+        // writes, and shipped Light::getShadowFarDistance (RVA 0x21F430)
+        // forwards to slot +0x398 when the light has no own distance.
+        constexpr SIZE_T kVtableSetSlot = 0x394 / sizeof(void*);
+        constexpr SIZE_T kVtableGetSlot = 0x398 / sizeof(void*);
+        constexpr float kStockFarDistance = 128.0f;
+        constexpr int kMaxTelemetryLines = 16;
+
+        using FnGetFarDistance = float(__thiscall*)(void*);
+        using FnSetFarDistance = void(__thiscall*)(void*, float);
+
+        InlineDetour32 g_ApplyDetour = {};
+        float g_OverrideDistance = 0.0f;
+        bool g_InstallAttempted = false;
+        int g_TelemetryLines = 0;
+
+        float ReadOverrideDistance()
+        {
+            char buffer[32] = {};
+            const DWORD length = GetEnvironmentVariableA(
+                "OPENSHIM_SHADOW_FAR_DISTANCE", buffer, sizeof(buffer));
+            if (length == 0 || length >= sizeof(buffer))
+                return 0.0f;
+            char* end = nullptr;
+            const float value = std::strtof(buffer, &end);
+            if (end == buffer || !std::isfinite(value))
+                return 0.0f;
+            // 128 is the stock value; anything outside 16-4096 cannot be a
+            // meaningful shadow distance for this engine's scale.
+            if (value < 16.0f || value > 4096.0f || value == kStockFarDistance)
+            {
+                LogShimA(LogLevel::Warn, "SHADOWFAR",
+                    "rejected OPENSHIM_SHADOW_FAR_DISTANCE=%hs (must be a "
+                    "finite distance in [16, 4096] other than 128)",
+                    buffer);
+                return 0.0f;
+            }
+            return value;
+        }
+
+        bool ModuleIdentityMatches(HMODULE module,
+                                   DWORD expectedTimestamp,
+                                   DWORD expectedImageSize)
+        {
+            if (!module)
+                return false;
+            __try
+            {
+                const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+                if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+                    return false;
+                const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+                    reinterpret_cast<const uint8_t*>(module) + dos->e_lfanew);
+                return nt->Signature == IMAGE_NT_SIGNATURE
+                    && nt->FileHeader.TimeDateStamp == expectedTimestamp
+                    && nt->OptionalHeader.SizeOfImage == expectedImageSize;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // Telemetry field: which render system the game actually selected.
+        // Both render-system DLLs are loaded at startup regardless of choice,
+        // so module presence is meaningless here — parse Ogre.cfg instead,
+        // exactly the signal the profiler's ReadConfiguredRenderer uses.
+        const char* ActiveRendererName()
+        {
+            static char name[16] = "";
+            static bool resolved = false;
+            if (!resolved)
+            {
+                resolved = true;
+                char path[MAX_PATH] = {};
+                const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+                char* slash = length ? std::strrchr(path, '\\') : nullptr;
+                if (slash)
+                {
+                    strcpy_s(slash + 1,
+                             MAX_PATH - static_cast<size_t>(slash + 1 - path),
+                             "Ogre.cfg");
+                    std::ifstream file(path);
+                    std::string line;
+                    while (std::getline(file, line))
+                    {
+                        if (line.compare(0, 14, "Render System=") == 0)
+                        {
+                            if (line.find("Direct3D11") != std::string::npos)
+                                strcpy_s(name, "Direct3D11");
+                            else if (line.find("Direct3D9") != std::string::npos)
+                                strcpy_s(name, "Direct3D9");
+                            break;
+                        }
+                    }
+                }
+            }
+            return name[0] ? name : "unknown";
+        }
+
+        void ApplyAfterStock()
+        {
+            if (g_OverrideDistance <= 0.0f ||
+                g_TelemetryLines >= kMaxTelemetryLines)
+            {
+                return;
+            }
+
+            __try
+            {
+                const HMODULE exe = GetModuleHandleA(nullptr);
+                auto* settingsPtr = *reinterpret_cast<uint8_t**>(
+                    reinterpret_cast<uintptr_t>(exe) + kShadowSettingsPtrRva);
+                int quality = -1;
+                bool pssm = false;
+                if (settingsPtr)
+                {
+                    quality = *reinterpret_cast<int8_t*>(settingsPtr + 0x25);
+                    if (quality >= 0 && quality <= 4)
+                    {
+                        pssm = *reinterpret_cast<const int8_t*>(
+                            reinterpret_cast<uintptr_t>(exe)
+                            + kShadowModeTableRva + quality) != 0;
+                    }
+                }
+
+                void* sceneManager = GetOgreSceneManagerRuntime();
+                if (!sceneManager)
+                {
+                    LogShimA(LogLevel::Warn, "SHADOWFAR",
+                        "no SceneManager runtime pointer; override not applied");
+                    ++g_TelemetryLines;
+                    return;
+                }
+
+                auto** vtable = *reinterpret_cast<FnGetFarDistance***>(sceneManager);
+                const void* getFar = reinterpret_cast<const void*>(
+                    vtable[kVtableGetSlot]);
+                void* setFar = reinterpret_cast<void*>(vtable[kVtableSetSlot]);
+                const HMODULE ogre = GetModuleHandleA("OgreMain.dll");
+                const uintptr_t ogreBegin = reinterpret_cast<uintptr_t>(ogre);
+                const uintptr_t ogreEnd = ogreBegin + kExpectedOgreImageSize;
+                if (reinterpret_cast<uintptr_t>(getFar) < ogreBegin
+                    || reinterpret_cast<uintptr_t>(getFar) >= ogreEnd
+                    || reinterpret_cast<uintptr_t>(setFar) < ogreBegin
+                    || reinterpret_cast<uintptr_t>(setFar) >= ogreEnd)
+                {
+                    LogShimA(LogLevel::Warn, "SHADOWFAR",
+                        "vtable slots outside OgreMain; override not applied");
+                    ++g_TelemetryLines;
+                    return;
+                }
+
+                const float stock = reinterpret_cast<FnGetFarDistance>(
+                    const_cast<void*>(getFar))(sceneManager);
+                if (!pssm)
+                {
+                    // Command-line mission launches skip pilot-profile
+                    // loading, so the settings struct legitimately still says
+                    // -1 during early applies. Log the first two, then stay
+                    // quiet so later applies (after a runtime quality change)
+                    // keep telemetry budget.
+                    ++g_TelemetryLines;
+                    if (g_TelemetryLines <= 2)
+                    {
+                        LogShimA(LogLevel::Info, "SHADOWFAR",
+                            "requested=%.2f stock=%.2f override=%.2f "
+                            "applied=0 effective=%.2f renderer=%hs "
+                            "quality=%d pssm=%hs action=skipped "
+                            "reason=pssm-disabled",
+                            static_cast<double>(stock),
+                            static_cast<double>(stock),
+                            static_cast<double>(g_OverrideDistance),
+                            static_cast<double>(stock),
+                            ActiveRendererName(), quality,
+                            pssm ? "yes" : "no");
+                    }
+                    return;
+                }
+                if (stock != kStockFarDistance)
+                {
+                    LogShimA(LogLevel::Warn, "SHADOWFAR",
+                        "requested=%.2f stock=%.2f override=%.2f applied=0 "
+                        "effective=%.2f renderer=%hs quality=%d pssm=%hs "
+                        "action=skipped reason=unexpected-stock-value",
+                        static_cast<double>(stock),
+                        static_cast<double>(stock),
+                        static_cast<double>(g_OverrideDistance),
+                        static_cast<double>(stock),
+                        ActiveRendererName(), quality,
+                        pssm ? "yes" : "no");
+                    ++g_TelemetryLines;
+                    return;
+                }
+
+                reinterpret_cast<FnSetFarDistance>(setFar)(
+                    sceneManager, g_OverrideDistance);
+                const float effective = reinterpret_cast<FnGetFarDistance>(
+                    const_cast<void*>(getFar))(sceneManager);
+                LogShimA(LogLevel::Info, "SHADOWFAR",
+                    "requested=%.2f stock=%.2f override=%.2f applied=%.2f "
+                    "effective=%.2f renderer=%hs quality=%d pssm=%hs "
+                    "action=applied",
+                    static_cast<double>(stock),
+                    static_cast<double>(stock),
+                    static_cast<double>(g_OverrideDistance),
+                    static_cast<double>(g_OverrideDistance),
+                    static_cast<double>(effective),
+                    ActiveRendererName(), quality, pssm ? "yes" : "no");
+                ++g_TelemetryLines;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                LogShimA(LogLevel::Warn, "SHADOWFAR",
+                    "exception while applying override; stock state retained");
+                ++g_TelemetryLines;
+            }
+        }
+
+        void __cdecl ApplyHook()
+        {
+            // Stock behaviour first, exactly as the game wrote it.
+            reinterpret_cast<void(__cdecl*)()>(g_ApplyDetour.trampoline)();
+            ApplyAfterStock();
+        }
+    }
+
+    void InstallShadowFarOverrideIfPossible()
+    {
+        using namespace ShadowFarOverride;
+        if (g_InstallAttempted)
+            return;
+
+        // Environment-variable-only experiment: with the variable unset this
+        // stays completely dormant and the game runs stock-exact.
+        g_OverrideDistance = ReadOverrideDistance();
+        g_InstallAttempted = true;
+        if (g_OverrideDistance <= 0.0f)
+            return;
+
+        // The apply routine lives in the exe; OgreMain must be present for the
+        // runtime vtable resolution, so retry until it loads.
+        const HMODULE exe = GetModuleHandleA(nullptr);
+        const HMODULE ogre = GetModuleHandleA("OgreMain.dll");
+        if (!exe || !ogre)
+        {
+            g_InstallAttempted = false;
+            return;
+        }
+
+        if (!ModuleIdentityMatches(exe, kExpectedExeTimestamp, kExpectedExeImageSize)
+            || !ModuleIdentityMatches(ogre, kExpectedOgreTimestamp, kExpectedOgreImageSize))
+        {
+            LogShimA(LogLevel::Warn, "SHADOWFAR",
+                "unsupported exe/OgreMain build; shadow-far override not installed");
+            return;
+        }
+
+        // Prologue: push ebp; mov ebp,esp; sub esp,0x94 — three complete
+        // instructions, so the verbatim-copy trampoline is instruction-safe.
+        static const uint8_t expected[] =
+            { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x94, 0x00, 0x00, 0x00 };
+        const uintptr_t target = reinterpret_cast<uintptr_t>(exe) + kShadowApplyFnRva;
+        if (!InstallInlineDetour32(g_ApplyDetour, target,
+                reinterpret_cast<void*>(&ApplyHook), sizeof(expected),
+                expected, sizeof(expected)))
+        {
+            LogShimA(LogLevel::Warn, "SHADOWFAR",
+                "apply-routine prologue mismatch; override failed closed");
+            return;
+        }
+
+        LogShimA(LogLevel::Info, "SHADOWFAR",
+            "installed override=%.2f applyRva=0x%08lX (stock %.2f reissued "
+            "after each stock apply; stock-exact when the env var is unset)",
+            static_cast<double>(g_OverrideDistance),
+            static_cast<unsigned long>(kShadowApplyFnRva),
+            static_cast<double>(kStockFarDistance));
+    }
+
     void RetryDeferredRuntimeHooks()
     {
         InstallEnhancedLightSelectionIfPossible();
+        InstallShadowFarOverrideIfPossible();
         InstallJumpSnipingProbeIfRequested();
         InstallUnitTurboHooksIfPossible();
         InstallCareerStatsMpHookIfPossible();

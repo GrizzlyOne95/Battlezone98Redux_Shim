@@ -13,11 +13,20 @@ $vsroot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Compon
 if (-not $vsroot) { throw "Visual Studio with C++ tools not found" }
 
 $vcvars = Join-Path $vsroot "VC\Auxiliary\Build\vcvars32.bat"
-$exe = Join-Path $out "render_profile_tests.exe"
 
-cmd /c "`"$vcvars`" >nul && cl /nologo /std:c++20 /EHsc /W4 /WX /I `"$repo\include`" `"$repo\tests\render_profile_tests.cpp`" `"$repo\src\engine\render_profile.cpp`" /Fe:`"$exe`" /Fo:`"$out\\`""
-if ($LASTEXITCODE -ne 0) { throw "test build failed" }
+$testSuites = @(
+    @{ Exe = "render_profile_tests.exe"; Sources = @("$repo\tests\render_profile_tests.cpp", "$repo\src\engine\render_profile.cpp") },
+    @{ Exe = "request_apply_tracker_tests.exe"; Sources = @("$repo\tests\request_apply_tracker_tests.cpp") },
+    @{ Exe = "render_profile_resources_tests.exe"; Sources = @("$repo\tests\render_profile_resources_tests.cpp", "$repo\src\engine\render_profile_resources.cpp") }
+)
 
-& $exe
-if ($LASTEXITCODE -ne 0) { throw "render profile tests FAILED" }
+foreach ($suite in $testSuites) {
+    $exe = Join-Path $out $suite.Exe
+    $sources = ($suite.Sources | ForEach-Object { "`"$_`"" }) -join " "
+    cmd /c "`"$vcvars`" >nul && cl /nologo /std:c++20 /EHsc /W4 /WX /I `"$repo\include`" $sources /Fe:`"$exe`" /Fo:`"$out\\`""
+    if ($LASTEXITCODE -ne 0) { throw "test build failed: $($suite.Exe)" }
+
+    & $exe
+    if ($LASTEXITCODE -ne 0) { throw "$($suite.Exe) FAILED" }
+}
 Write-Host "render profile tests passed" -ForegroundColor Green

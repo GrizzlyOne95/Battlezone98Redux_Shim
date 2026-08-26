@@ -18,6 +18,8 @@
 
 #include "render_profile_runtime.h"
 #include "backend_selection.h"
+#include "render_profile_resources.h"
+#include "render_profile_request_tracker.h"
 #include "BZROpenShim.h"
 #include "bzr_options_ui.h"
 #include "render_profile.h"
@@ -69,16 +71,6 @@ namespace BZROpenShim::RenderProfiles
     {
         constexpr const char* kLogTag = "RENDER";
 
-        // Compiled expectation for the deployed renderer-resource set. Bump
-        // whenever resources/renderer/** changes in a way that must not pair
-        // with an older DLL. Deploy-OpenShim.ps1 writes the matching file;
-        // a mismatch degrades Enhanced cleanly to Redux instead of letting a
-        // new DLL run against stale shaders (the winmm.dll+patches.json rule,
-        // extended to renderer resources).
-        constexpr char kEnhancedResourcesVersion[] = "1";
-        constexpr const char* kEnhancedResourceDirRel = "openshim\\renderer\\enhanced";
-        constexpr const char* kEnhancedResourceVersionFile = "resources.version";
-
         void __fastcall ViewportSetMaterialSchemeHookForward(void* viewport,
                                                              void* edx,
                                                              const std::string* scheme);
@@ -114,12 +106,24 @@ namespace BZROpenShim::RenderProfiles
 
         // Set by non-game-thread requesters that need viewport state applied;
         // drained ONLY by the scheme hook running on the game/render thread
-        // (Ogre state mutation must stay on the engine's thread).
+        // (Ogre state mutation must stay on the engine's thread). The epoch
+        // tracker is what makes OpenShimRequestRenderProfile's result
+        // truthful: a request reports AppliedLive only after a drain whose
+        // snapshot covered that publish actually reached viewports.
         std::atomic<bool> s_reapplyPending { false };
+        RequestApplyTracker s_applyTracker;
 
         const char* BackendName(ActiveBackend backend)
         {
             return backend == ActiveBackend::DX11 ? "DX11" : "DX9";
+        }
+
+        // Every deferred-apply publisher goes through here so each request
+        // gets a distinct epoch (see RequestApplyTracker for the contract).
+        void PublishReapplyPending()
+        {
+            s_applyTracker.Publish();
+            s_reapplyPending.store(true, std::memory_order_release);
         }
 
         const char* ProfileName(Profile profile)
@@ -629,6 +633,33 @@ namespace BZROpenShim::RenderProfiles
 
         std::atomic<bool> s_seamInstalled { false };
 
+        enum class BackendSeamArmStatus : uint8_t
+        {
+            NotAttempted,
+            Armed,
+            NoMainModule,
+            UnsupportedExecutable,
+            BadDosSignature,
+            BadNtSignature,
+            UnsupportedImageSize,
+            MarkerMismatch,
+            OgreMainAbsent,
+            ExportAbsent,
+            BindingMismatch,
+            ProtectFailed,
+            SlotWriteFaulted,
+        };
+
+        std::atomic<BackendSeamArmStatus> s_seamArmStatus {
+            BackendSeamArmStatus::NotAttempted
+        };
+
+        bool FailStartupBackendSeamArm(BackendSeamArmStatus status)
+        {
+            s_seamArmStatus.store(status, std::memory_order_release);
+            return false;
+        }
+
         __declspec(noinline) static bool GuardedReadSlotValue(
             const void* slot, void** out)
         {
@@ -699,15 +730,16 @@ namespace BZROpenShim::RenderProfiles
 
         // Loader-lock-bounded install: header/name/export/slot checks plus one
         // protected pointer swap. No CRT containers, no filesystem, no waits,
-        // no .text reads (Steam-safe at attach time).
+        // no .text reads and no normal logger calls (Steam-safe at attach
+        // time). Failures publish only a fixed enum; the patch thread reports
+        // that result later, after DllMain has released the loader lock.
         bool InstallStartupBackendSeamImpl()
         {
             HMODULE mainModule = GetModuleHandleW(nullptr);
             if (mainModule == nullptr)
             {
-                LogShimA(LogLevel::Warn, kLogTag,
-                         "backend seam not installed: no main module");
-                return false;
+                return FailStartupBackendSeamArm(
+                    BackendSeamArmStatus::NoMainModule);
             }
 
             wchar_t modulePath[MAX_PATH] = {};
@@ -716,19 +748,16 @@ namespace BZROpenShim::RenderProfiles
             if (pathLen == 0 || pathLen >= MAX_PATH ||
                 !EndsWithNoCaseAscii(modulePath, pathLen, kMainModuleName))
             {
-                LogShimA(LogLevel::Info, kLogTag,
-                         "backend seam not installed: unsupported executable "
-                         "(fail-closed)");
-                return false;
+                return FailStartupBackendSeamArm(
+                    BackendSeamArmStatus::UnsupportedExecutable);
             }
 
             const auto* dosHeader =
                 reinterpret_cast<const IMAGE_DOS_HEADER*>(mainModule);
             if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE)
             {
-                LogShimA(LogLevel::Warn, kLogTag,
-                         "backend seam not installed: bad DOS signature");
-                return false;
+                return FailStartupBackendSeamArm(
+                    BackendSeamArmStatus::BadDosSignature);
             }
             const auto* ntHeaders =
                 reinterpret_cast<const IMAGE_NT_HEADERS*>(
@@ -736,19 +765,15 @@ namespace BZROpenShim::RenderProfiles
                     dosHeader->e_lfanew);
             if (ntHeaders->Signature != IMAGE_NT_SIGNATURE)
             {
-                LogShimA(LogLevel::Warn, kLogTag,
-                         "backend seam not installed: bad NT signature");
-                return false;
+                return FailStartupBackendSeamArm(
+                    BackendSeamArmStatus::BadNtSignature);
             }
             const size_t imageOfImage = ntHeaders->OptionalHeader.SizeOfImage;
             if (imageOfImage != kExpectedMainImageSizeGog &&
                 imageOfImage != kExpectedMainImageSizeSteam)
             {
-                LogShimA(LogLevel::Info, kLogTag,
-                         "backend seam not installed: SizeOfImage 0x%zX is not "
-                         "a qualified build (fail-closed)",
-                         imageOfImage);
-                return false;
+                return FailStartupBackendSeamArm(
+                    BackendSeamArmStatus::UnsupportedImageSize);
             }
             const uintptr_t imageBase =
                 reinterpret_cast<uintptr_t>(mainModule);
@@ -760,28 +785,22 @@ namespace BZROpenShim::RenderProfiles
                         (kOgreCfgMarkerVa - kImageBaseAssumption)),
                     "Ogre.cfg", sizeof("Ogre.cfg")))
             {
-                LogShimA(LogLevel::Info, kLogTag,
-                         "backend seam not installed: .rdata marker mismatch at "
-                         "0x%08X (fail-closed)",
-                         static_cast<uint32_t>(kOgreCfgMarkerVa));
-                return false;
+                return FailStartupBackendSeamArm(
+                    BackendSeamArmStatus::MarkerMismatch);
             }
 
             HMODULE ogreMain = GetModuleHandleA("OgreMain.dll");
             if (ogreMain == nullptr)
             {
-                LogShimA(LogLevel::Warn, kLogTag,
-                         "backend seam not installed: OgreMain.dll absent");
-                return false;
+                return FailStartupBackendSeamArm(
+                    BackendSeamArmStatus::OgreMainAbsent);
             }
             const FARPROC expectedTarget =
                 GetProcAddress(ogreMain, kConfigFileLoadImportName);
             if (expectedTarget == nullptr)
             {
-                LogShimA(LogLevel::Info, kLogTag,
-                         "backend seam not installed: OgreMain lacks expected "
-                         "ConfigFile::load export (unsupported Ogre)");
-                return false;
+                return FailStartupBackendSeamArm(
+                    BackendSeamArmStatus::ExportAbsent);
             }
 
             void* slotAddress = reinterpret_cast<void*>(
@@ -790,11 +809,8 @@ namespace BZROpenShim::RenderProfiles
             if (!GuardedReadSlotValue(slotAddress, &currentBinding) ||
                 currentBinding != reinterpret_cast<void*>(expectedTarget))
             {
-                LogShimA(LogLevel::Info, kLogTag,
-                         "backend seam not installed: IAT 0x%08X not bound to "
-                         "expected ConfigFile::load (fail-closed)",
-                         static_cast<uint32_t>(kConfigFileLoadIatVa));
-                return false;
+                return FailStartupBackendSeamArm(
+                    BackendSeamArmStatus::BindingMismatch);
             }
 
             g_originalConfigFileLoad =
@@ -804,12 +820,9 @@ namespace BZROpenShim::RenderProfiles
             if (!VirtualProtect(slotAddress, sizeof(void*), PAGE_READWRITE,
                                 &oldProtect))
             {
-                LogShimA(LogLevel::Warn, kLogTag,
-                         "backend seam not installed: VirtualProtect failed "
-                         "err=%lu",
-                         static_cast<unsigned long>(GetLastError()));
                 g_originalConfigFileLoad = nullptr;
-                return false;
+                return FailStartupBackendSeamArm(
+                    BackendSeamArmStatus::ProtectFailed);
             }
             const bool wrote = GuardedWriteSlotValue(
                 slotAddress, s_hookTrampolineForConfigFileLoad);
@@ -819,19 +832,36 @@ namespace BZROpenShim::RenderProfiles
                                   sizeof(void*));
             if (!wrote)
             {
-                LogShimA(LogLevel::Warn, kLogTag,
-                         "backend seam not installed: slot write faulted");
                 g_originalConfigFileLoad = nullptr;
-                return false;
+                return FailStartupBackendSeamArm(
+                    BackendSeamArmStatus::SlotWriteFaulted);
             }
 
             s_seamInstalled.store(true, std::memory_order_release);
-            LogShimA(LogLevel::Info, kLogTag,
-                     "backend seam armed: ConfigFile::load IAT 0x%08X -> shim; "
-                     "startup site 0x%08X gated",
-                     static_cast<uint32_t>(kConfigFileLoadIatVa),
-                     static_cast<uint32_t>(kStartupCfgLoadRetVa));
+            s_seamArmStatus.store(
+                BackendSeamArmStatus::Armed, std::memory_order_release);
             return true;
+        }
+
+        const char* BackendSeamArmStatusText(BackendSeamArmStatus status)
+        {
+            switch (status)
+            {
+            case BackendSeamArmStatus::NotAttempted: return "not-attempted";
+            case BackendSeamArmStatus::Armed: return "armed";
+            case BackendSeamArmStatus::NoMainModule: return "no-main-module";
+            case BackendSeamArmStatus::UnsupportedExecutable: return "unsupported-executable";
+            case BackendSeamArmStatus::BadDosSignature: return "bad-dos-signature";
+            case BackendSeamArmStatus::BadNtSignature: return "bad-nt-signature";
+            case BackendSeamArmStatus::UnsupportedImageSize: return "unsupported-image-size";
+            case BackendSeamArmStatus::MarkerMismatch: return "marker-mismatch";
+            case BackendSeamArmStatus::OgreMainAbsent: return "ogremain-absent";
+            case BackendSeamArmStatus::ExportAbsent: return "config-load-export-absent";
+            case BackendSeamArmStatus::BindingMismatch: return "iat-binding-mismatch";
+            case BackendSeamArmStatus::ProtectFailed: return "iat-protect-failed";
+            case BackendSeamArmStatus::SlotWriteFaulted: return "iat-write-faulted";
+            }
+            return "unknown";
         }
 
         // Post-settle call-site proof: the six bytes at the known startup call
@@ -1041,88 +1071,34 @@ namespace BZROpenShim::RenderProfiles
 
         // ---- deployed Enhanced renderer-resource validation -----------------
 
-        // Mandatory files of the deployed Enhanced set. The version marker
-        // alone cannot prove a deployment is usable (a correct marker can sit
-        // next to deleted/empty payloads), so every program, shader source,
-        // and neutral IBL texture below must exist non-empty before the
-        // CapIblResources capability may be reported.
-        constexpr const char* kRequiredEnhancedResources[] = {
-            "openshim_enhanced_base.program",
-            "openshim_enhanced_base-vertex.glsl",
-            "openshim_enhanced_base-fragment.glsl",
-            "openshim_enhanced_base-sm3.hlsl",
-            "openshim_enhanced_base-sm4.hlsl",
-            "openshim_enhanced_terrain.program",
-            "openshim_enhanced_terrain-vertex.glsl",
-            "openshim_enhanced_terrain-fragment.glsl",
-            "openshim_enhanced_terrain-sm3.hlsl",
-            "openshim_enhanced_terrain-sm4.hlsl",
-            "openshim_enhanced_terrain_glow-vertex.glsl",
-            "openshim_enhanced_terrain_glow-fragment.glsl",
-            "openshim_enhanced_terrain_glow-sm3.hlsl",
-            "openshim_enhanced_terrain_glow-sm4.hlsl",
-            "openshim_ibl_brdf_lut.dds",
-            "openshim_ibl_neutral_irradiance.dds",
-            "openshim_ibl_neutral_prefilter.dds",
-        };
-
+        // Thin runtime wrapper: the actual file-set contract lives in
+        // src/engine/render_profile_resources.cpp (unit-tested against real
+        // directory trees); this layer adds the game-directory join and the
+        // log formatting.
         bool ValidateDeployedResourceSet()
         {
             const std::filesystem::path gameDir = GetMainModuleDirectory();
             if (gameDir.empty())
             {
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "Enhanced resource set unverifiable: main module directory unknown");
                 return false;
             }
 
-            const std::filesystem::path dir = gameDir / kEnhancedResourceDirRel;
-            if (!std::filesystem::is_directory(dir))
-            {
-                LogShimA(LogLevel::Info, kLogTag,
-                         "Enhanced resource set absent (%s); standalone retrofit path disabled",
-                         kEnhancedResourceDirRel);
-                return false;
-            }
-
-            FILE* file = nullptr;
-            const std::filesystem::path versionFile = dir / kEnhancedResourceVersionFile;
-            if (_wfopen_s(&file, versionFile.c_str(), L"rb") != 0 || file == nullptr)
+            std::string problem;
+            if (!ValidateDeployedResourceSetAt(
+                    gameDir / kEnhancedResourceDirRel, problem))
             {
                 LogShimA(LogLevel::Warn, kLogTag,
-                         "Enhanced resource set missing %s marker", kEnhancedResourceVersionFile);
+                         "Enhanced unavailable: %s (%s)",
+                         problem.c_str(), kEnhancedResourceDirRel);
                 return false;
-            }
-
-            char actual[32] = {};
-            const size_t read = fread(actual, 1, sizeof(actual) - 1, file);
-            fclose(file);
-
-            if (read == 0 || strncmp(actual, kEnhancedResourcesVersion, read) != 0)
-            {
-                LogShimA(LogLevel::Warn, kLogTag,
-                         "Enhanced unavailable: resource version mismatch "
-                         "(expected=%s got=%.31s); redeploy winmm.dll + openshim\\renderer together",
-                         kEnhancedResourcesVersion, actual);
-                return false;
-            }
-
-            for (const char* name : kRequiredEnhancedResources)
-            {
-                std::error_code ec;
-                const std::filesystem::path path = dir / name;
-                if (!std::filesystem::is_regular_file(path, ec) ||
-                    std::filesystem::file_size(path, ec) == 0 || ec)
-                {
-                    LogShimA(LogLevel::Warn, kLogTag,
-                             "Enhanced unavailable: mandatory resource missing/empty: %s\\%s",
-                             kEnhancedResourceDirRel, name);
-                    return false;
-                }
             }
 
             LogShimA(LogLevel::Info, kLogTag,
                      "resource-version=%s resources compatible=yes (%zu files verified)",
                      kEnhancedResourcesVersion,
-                     sizeof(kRequiredEnhancedResources) / sizeof(kRequiredEnhancedResources[0]));
+                     RequiredEnhancedResourceCount());
             return true;
         }
 
@@ -1135,13 +1111,19 @@ namespace BZROpenShim::RenderProfiles
             {
                 mask &= ~static_cast<uint32_t>(CapSchemeRewrite);
             }
+            // Resource findings only ever REMOVE base bits, then add the two
+            // resource-derived bits. CapEnhancedResources is the MANDATORY
+            // set (gates Enhanced itself in the resolver); CapIblResources is
+            // the OPTIONAL IBL extras (never gates the profile).
             if (s_resourcesValid)
             {
-                mask |= static_cast<uint32_t>(CapIblResources);
+                mask |= static_cast<uint32_t>(CapIblResources) |
+                        static_cast<uint32_t>(CapEnhancedResources);
             }
             else
             {
-                mask &= ~static_cast<uint32_t>(CapIblResources);
+                mask &= ~(static_cast<uint32_t>(CapIblResources) |
+                          static_cast<uint32_t>(CapEnhancedResources));
             }
             return mask;
         }
@@ -1201,7 +1183,7 @@ namespace BZROpenShim::RenderProfiles
                          ? "EXU" : "user");
             LogShimA(LogLevel::Info, kLogTag,
                      "enhanced.supported=%s resources.compatible=%s capabilities=0x%08X",
-                     HasCapability(s_capabilityMask, CapSchemeRewrite) ? "yes" : "no",
+                     ProfileRequirementsMet(Profile::Enhanced, s_capabilityMask) ? "yes" : "no",
                      s_resourcesValid ? "yes" : "no",
                      s_capabilityMask);
             LogShimA(LogLevel::Info, kLogTag,
@@ -1460,7 +1442,7 @@ namespace BZROpenShim::RenderProfiles
             // This is a worker thread: never touch Ogre viewports from here.
             // Publish the pending flag; the scheme hook drains it on the
             // engine's own thread at the next setMaterialScheme call (~1 Hz).
-            s_reapplyPending.store(true, std::memory_order_release);
+            PublishReapplyPending();
             return 0;
         }
 
@@ -1603,9 +1585,18 @@ namespace BZROpenShim::RenderProfiles
             // reassert loop and viewport creation — performs the actual
             // viewport/compositor application here. The reapply path calls
             // Ogre exports directly (not this IAT site), so no recursion.
+            //
+            // Snapshot BEFORE consuming: everything published up to now is
+            // covered by this pass. A publish racing in after the snapshot is
+            // simply drained by the next call instead (under-report, never
+            // over-report).
             if (s_reapplyPending.exchange(false, std::memory_order_acq_rel))
             {
-                ReapplyEffectiveProfileToViewports("deferred apply");
+                const uint64_t coveredEpoch = s_applyTracker.SnapshotPublished();
+                if (ReapplyEffectiveProfileToViewports("deferred apply"))
+                {
+                    s_applyTracker.MarkApplied(coveredEpoch);
+                }
             }
         }
 
@@ -1916,13 +1907,16 @@ namespace BZROpenShim::RenderProfiles
         }
     } // anonymous namespace
 
-    void ReapplyEffectiveProfileToViewports(const char* context)
+    // Returns true when at least one active viewport was found and processed;
+    // false means "nothing to apply to" (the request stays deferred from the
+    // ABI's point of view).
+    bool ReapplyEffectiveProfileToViewports(const char* context)
     {
         void* viewports[4] = {};
         const size_t count = CollectActiveViewports(viewports, 4);
         if (count == 0)
         {
-            return;
+            return false;
         }
 
         const Profile effective = static_cast<Profile>(
@@ -1963,6 +1957,7 @@ namespace BZROpenShim::RenderProfiles
                  ProfileName(effective),
                  changedAny ? 1 : 0,
                  glowTarget ? "on" : "off");
+        return true;
     }
 
     void RequestContentRenderProfile(ContentRequest request, const char* context)
@@ -1976,7 +1971,7 @@ namespace BZROpenShim::RenderProfiles
         }
         // The companion bridge can be called from any thread; defer the Ogre
         // mutation to the game/render-thread scheme hook.
-        s_reapplyPending.store(true, std::memory_order_release);
+        PublishReapplyPending();
     }
 
     void ClearContentRenderProfileOverride(const char* context)
@@ -1992,7 +1987,7 @@ namespace BZROpenShim::RenderProfiles
         }
         if (hadOverride)
         {
-            s_reapplyPending.store(true, std::memory_order_release);
+            PublishReapplyPending();
         }
     }
 
@@ -2002,7 +1997,7 @@ namespace BZROpenShim::RenderProfiles
         LoadConfigLocked();
         ResolveAndPublishLocked("ini reload");
         ReleaseSRWLockExclusive(&s_stateLock);
-        s_reapplyPending.store(true, std::memory_order_release);
+        PublishReapplyPending();
     }
 
     // Public Seam A entry point (see header). Called ONCE from DllMain
@@ -2029,6 +2024,22 @@ namespace BZROpenShim::RenderProfiles
             return;
         }
         s_initialized = true;
+
+        // The arm attempt ran under the loader lock and deliberately emitted
+        // no normal logger traffic there. Report its fixed status now from the
+        // patch thread, where logger locks/CRT work are safe.
+        const BackendSeamArmStatus seamStatus =
+            s_seamArmStatus.load(std::memory_order_acquire);
+        LogShimA(
+            seamStatus == BackendSeamArmStatus::Armed
+                ? LogLevel::Info
+                : LogLevel::Warn,
+            kLogTag,
+            "backend seam arm status=%s; %s",
+            BackendSeamArmStatusText(seamStatus),
+            seamStatus == BackendSeamArmStatus::Armed
+                ? "startup ConfigFile::load interception active"
+                : "stock renderer selection remains authoritative");
 
         AcquireSRWLockExclusive(&s_stateLock);
         LoadConfigLocked();
@@ -2085,12 +2096,40 @@ namespace BZROpenShim::RenderProfiles
                 return Abi::kRequestStatusRejectedValue;
             }
 
-            RequestContentRenderProfile(request, "EXU request");
+            // Truthful unsupported-build reporting: without the scheme-policy
+            // layer an Enhanced/Retro request can never drive rendering (the
+            // resolver clamps it to Redux). The request is still stored so
+            // GetRequestedContentRenderProfile stays coherent; the status
+            // tells the companion why it will not apply. Redux/Inherit have
+            // no such dependency and always proceed.
+            bool schemeLayerActive = false;
+            {
+                AcquireSRWLockShared(&s_stateLock);
+                schemeLayerActive =
+                    s_schemeTakeoverInstalled.load(std::memory_order_acquire);
+                ReleaseSRWLockShared(&s_stateLock);
+            }
+            const Profile requestedAsProfile =
+                (request == ContentRequest::Enhanced) ? Profile::Enhanced
+                : (request == ContentRequest::Retro) ? Profile::Retro
+                                                     : Profile::Redux;
+            if (!schemeLayerActive && requestedAsProfile != Profile::Redux)
+            {
+                RequestContentRenderProfile(request, "EXU request");
+                return Abi::kRequestStatusUnsupportedBuild;
+            }
 
-            void* probe[1] = {};
-            const size_t seen = CollectActiveViewports(probe, 1);
-            return seen > 0 ? Abi::kRequestStatusAppliedLive
-                            : Abi::kRequestStatusStoredDeferred;
+            // The actual Ogre mutation happens later on the engine thread, so
+            // the honest answer right now is StoredDeferred unless a drain
+            // covering this publish already completed. Viewport existence is
+            // deliberately NOT consulted: it says nothing about whether the
+            // deferred apply ran.
+            RequestContentRenderProfile(request, "EXU request");
+            const uint64_t publishedEpoch =
+                s_applyTracker.SnapshotPublished();
+            return s_applyTracker.AppliedSince(publishedEpoch)
+                ? Abi::kRequestStatusAppliedLive
+                : Abi::kRequestStatusStoredDeferred;
         }
 
         uint32_t GetUserRenderProfile()
@@ -2148,15 +2187,11 @@ namespace BZROpenShim::RenderProfiles
             const uint32_t mask = s_capabilityMask;
             ReleaseSRWLockShared(&s_stateLock);
 
-            switch (profile)
-            {
-            case Profile::Enhanced:
-            case Profile::Retro:
-                return HasCapability(mask, CapSchemeRewrite) ? TRUE : FALSE;
-            case Profile::Redux:
-            default:
-                return TRUE; // Redux is the always-available baseline
-            }
+            // Same gate the resolver enforces: Enhanced additionally requires
+            // the mandatory resource set, so a deployment with verified
+            // scheme hooks but broken/missing renderer files no longer
+            // claims Enhanced is usable. Redux stays always-available.
+            return ProfileRequirementsMet(profile, mask) ? TRUE : FALSE;
         }
     }
 } // namespace BZROpenShim::RenderProfiles
