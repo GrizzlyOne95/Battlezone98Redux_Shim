@@ -206,6 +206,44 @@ D3DStartupHooks = 0
 AllowStartupAutoLoad = 0
 
 
+[Graphics]
+
+; Renderer backend preference.
+; Canonical values:
+;   Auto = use whatever renderer the game selects this session
+;   DX9  = prefer the Direct3D 9 render system
+;   DX11 = prefer the Direct3D 11 render system
+; Accepted aliases: d3d9/directx9, d3d11/directx11 (case-insensitive).
+; NOTE: OpenShim does not yet steer which render system the game starts on.
+; Today this key is parsed and reported only: requested-vs-effective
+; divergence appears in the [RENDER] diagnostics, and OpenShim never attempts
+; a live Ogre RenderSystem switch. Because the preference cannot yet control
+; startup, it is deliberately NOT exposed in the OpenShim settings UI.
+; Default: Auto.
+Renderer = Auto
+
+; Visual rendering policy layered over the selected backend.
+; Canonical values:
+;   Redux    = stock Battlezone 98 Redux rendering behavior as closely as
+;              practical on the selected backend. Compatibility baseline.
+;   Enhanced = OpenShim's canonical graphics upgrade. Supported on BOTH
+;              backends and capability-dependent rather than all-or-nothing:
+;              DX11 carries the full modern feature set (linear lighting,
+;              enhanced terrain/object shader paths, modern PSSM behavior,
+;              contribution-ranked light selection); DX9 retains its proven
+;              legacy enhancements (normal-map sharpening and the SM3
+;              enhanced delegates) on a feature-frozen maintenance basis --
+;              correctness/crash fixes only, no new DX9 visual work planned.
+;   Retro    = deliberately classic-style presentation via the og-* material
+;              scheme family. Experimental; see
+;              Docs/OPENSHIM_RENDER_PROFILE_ARCHITECTURE.md for status.
+; Accepted aliases: default/modern -> Redux, en -> Enhanced,
+; og/classic -> Retro (case-insensitive). Default: Redux.
+; EXU/content may override this per mission via the render-profile bridge;
+; overrides are cleared automatically at mission end.
+RenderProfile = Redux
+
+
 [Terrain]
 
 ; NOTE: terrain booleans below are integer flags; use 0/1.
