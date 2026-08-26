@@ -2401,9 +2401,21 @@ namespace BZROpenShim
         static const char* const kShimSettingsReticleConvAltKeys[] = { "SmartReticleConvergence" };
         static const char* const kShimSettingsScavengerAltKeys[] = { "ScavengerPathing" };
         static const char* const kShimSettingsBindsUiAltKeys[] = { "CustomBindingUi" };
+        static const char* const kShimSettingsRenderProfileValues[] = { "Retro", "Redux", "Enhanced" };
 
         static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
         {
+            // Deliberately NO Renderer (DX9/DX11) row: the runtime only parses
+            // the [Graphics] Renderer preference and reports requested-vs-
+            // effective divergence; it does not yet steer which render system
+            // the game starts on. Exposing it as a restart-required selector
+            // would promise a control that cannot deliver, so the row stays
+            // hidden until startup renderer selection is actually implemented
+            // (hand-edited openshim.ini values remain parsed and reported).
+            { "Render Profile", "Graphics", "RenderProfile", nullptr, 0,
+              kShimSettingsRenderProfileValues, kShimSettingsRenderProfileValues, 3, 1,
+              ShimSettingApplyGroup::RenderProfile,
+              "Visual rendering policy: Redux (stock baseline), Enhanced, or Retro. Applies live." },
             { "Attack Alert", "Display", "UnderAttackAlert", nullptr, 0,
               kShimSettingsUnderAttackValues, kShimSettingsUnderAttackValues, 3, 0,
               ShimSettingApplyGroup::UnderAttackAlert,

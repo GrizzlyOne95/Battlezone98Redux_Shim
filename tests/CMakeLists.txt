@@ -67,6 +67,20 @@ add_executable(resolve_table_tests
     ../src/engine/resolve_table.cpp
 )
 
+add_executable(render_profile_tests
+    render_profile_tests.cpp
+    ../src/engine/render_profile.cpp
+)
+
+add_executable(request_apply_tracker_tests
+    request_apply_tracker_tests.cpp
+)
+
+add_executable(render_profile_resources_tests
+    render_profile_resources_tests.cpp
+    ../src/engine/render_profile_resources.cpp
+)
+
 target_include_directories(shim_log_tests PRIVATE ../include)
 target_compile_features(shim_log_tests PRIVATE cxx_std_20)
 target_compile_features(native_ui_validation_tests PRIVATE cxx_std_20)
@@ -129,3 +143,24 @@ add_test(NAME headlight_falloff_tests COMMAND headlight_falloff_tests)
 add_test(NAME chunk_batch_invalidation_tests COMMAND chunk_batch_invalidation_tests)
 add_test(NAME sun_flash_tests COMMAND sun_flash_tests)
 add_test(NAME resolve_table_tests COMMAND resolve_table_tests)
+
+target_include_directories(render_profile_tests PRIVATE ../include)
+target_compile_features(render_profile_tests PRIVATE cxx_std_20)
+target_include_directories(request_apply_tracker_tests PRIVATE ../include)
+target_compile_features(request_apply_tracker_tests PRIVATE cxx_std_20)
+target_include_directories(render_profile_resources_tests PRIVATE ../include)
+target_compile_features(render_profile_resources_tests PRIVATE cxx_std_20)
+
+if(MSVC)
+    target_compile_options(render_profile_tests PRIVATE /W4 /WX)
+    target_compile_options(request_apply_tracker_tests PRIVATE /W4 /WX)
+    target_compile_options(render_profile_resources_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(render_profile_tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(request_apply_tracker_tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(render_profile_resources_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+
+add_test(NAME render_profile_tests COMMAND render_profile_tests)
+add_test(NAME request_apply_tracker_tests COMMAND request_apply_tracker_tests)
+add_test(NAME render_profile_resources_tests COMMAND render_profile_resources_tests)
