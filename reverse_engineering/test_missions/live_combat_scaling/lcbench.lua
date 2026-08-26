@@ -39,6 +39,14 @@ local VALID_SCENARIOS = {
     -- behaviour can be observed on non-craft classes, which the craft
     -- scenarios can never spawn.
     props = true,
+    -- Shadow-cutoff reproduction fixture (2026-08-25). Spawns one trio of
+    -- idle craft per station along the player's sight line, starting at the
+    -- configured distance and stepping 25 m per station, so a single capture
+    -- shows where sun shadows terminate relative to known object distances.
+    -- `distance` selects the first station, `count` the number of stations.
+    -- All units share the player's team and are held inert; nothing fires or
+    -- moves, so the only variable across captures is renderer/headlight state.
+    shadowline = true,
 }
 
 local VALID_UNIT_ODFS = {
@@ -105,6 +113,12 @@ local function readConfig()
     local clusterRadius = GetODFFloat(
         config, "Benchmark", "clusterRadius", 300.0)
     local spinSeconds = GetODFFloat(config, "Benchmark", "spinSeconds", 0.0)
+    -- Shadowline-only: explicit comma-separated station distances. When set,
+    -- stations spawn at exactly these ranges instead of the uniform grid, so
+    -- captures can bracket known cutoff candidates (the 128 m shadow-far clip
+    -- and the 250/256 m material-LOD switch) precisely.
+    local stationDistancesRaw = GetODFString(
+        config, "Benchmark", "stationDistances", "")
 
     -- Clamp malformed manual edits before they can create an accidental load
     -- spike or a modulo-by-zero firing pair in the deterministic mission.
@@ -137,28 +151,25 @@ local function readConfig()
     if scenario == "dispersed" and count < 2 * clusterCount then
         count = 2 * clusterCount
     end
+    -- Parse the explicit station list last so the shadowline scenario can
+    -- override both the grid spacing and the unit count (3 craft/station).
+    local stationDistances = {}
+    if scenario == "shadowline" and stationDistancesRaw ~= "" then
+        for token in string.gmatch(stationDistancesRaw, "([^,]+)") do
+            local value = tonumber(token)
+            if value and value >= 10.0 and value <= 2000.0 then
+                stationDistances[#stationDistances + 1] = value
+            end
+        end
+        table.sort(stationDistances)
+        if #stationDistances > 0 then
+            count = #stationDistances * 3
+        end
+    end
     return scenario, unitOdf, count, distance, orientation, warmup, measure,
-        clusterCount, clusterRadius, spinSeconds
+        clusterCount, clusterRadius, spinSeconds, stationDistances
 end
 
--- Satellite (view 3) visibility fixture. Separate from the benchmark
--- scenarios: it spawns one group per case the OpenShim satellite visibility
--- fix has to get right, keeps every group on its own team so the shim's
--- [SATVISCHK] capture can score them apart, and drives the whole timeline off
--- one clock so the PowerShell runner can trigger view changes from log cues
--- rather than guessing at wall time.
---
---   friendly    team 1, near   -> illuminated, visible in satellite
---   detected    team 6, near   -> illuminated, visible in satellite
---   undetected  team 7, far    -> not illuminated, hidden in satellite
---   preHide     team 8, near   -> illuminated but its Ogre entity was hidden
---                                 before satellite; must stay hidden
---   reveal      team 9, far    -> starts hidden, teleported next to the player
---                                 mid-view so it must turn visible without
---                                 leaving view 3
---
--- Two further lifecycle cases are driven inside the view: one unit is created
--- while satellite is open and one is destroyed while it is open.
 local SAT_DEFAULT_TEAMS = {
     friendly = 1,
     detected = 6,
@@ -194,6 +205,105 @@ local BENCH_CLUSTER_COUNT = 4
 local BENCH_CLUSTER_RADIUS = 300.0
 local BENCH_SPIN_SECONDS = 0.0
 
+
+-- Shadowline geometry: one station every SHADOWLINE_SPACING metres along the
+-- player's front axis, three craft per station spread laterally so each
+-- station casts a readable ground shadow even when a single hull would be too
+-- small at range. Distances are traced at spawn so captures can be scored
+-- against exact station ranges rather than estimated from the image.
+local SHADOWLINE_SPACING = 25.0
+local SHADOWLINE_LATERAL = { -10.0, 0.0, 10.0 }
+-- Explicit station ranges from lcbcfg.odf (Benchmark stationDistances). Empty
+-- means the uniform BENCH_DISTANCE + n * SHADOWLINE_SPACING grid.
+local SHADOWLINE_STATIONS = {}
+
+local function shadowLineForward(station)
+    return SHADOWLINE_STATIONS[station + 1]
+        or (BENCH_DISTANCE + station * SHADOWLINE_SPACING)
+end
+
+local function shadowLinePosition(playerPos, transform, station, slot)
+    local forward = shadowLineForward(station)
+    local lateral = SHADOWLINE_LATERAL[slot]
+    local frontX = transform.front_x or 0.0
+    local frontZ = transform.front_z or 1.0
+    local rightX = transform.right_x or 1.0
+    local rightZ = transform.right_z or 0.0
+    return SetVector(
+        playerPos.x + frontX * forward + rightX * lateral,
+        playerPos.y,
+        playerPos.z + frontZ * forward + rightZ * lateral)
+end
+
+-- The moon fixture has a ridge beside the default spawn, so the first heading
+-- that points at rock would hide every far station behind it. Sample the
+-- height field along all eight cardinal/diagonal headings and re-face the
+-- player down the one with the least total rise, which also turns the chase
+-- camera. Returns the chosen heading and its score for the trace.
+local function faceFlattestShadowlineHeading(player, playerPos)
+    local function headingVector(ordinal)
+        local angle = ordinal * math.pi / 4.0
+        return math.sin(angle), math.cos(angle)
+    end
+
+    local originHeight = GetTerrainHeightAndNormal(
+        SetVector(playerPos.x, playerPos.y, playerPos.z))
+    -- Probe the exact station ranges the run will spawn at: with an explicit
+    -- stationDistances list the interesting ranges may not fall on the grid.
+    local sampleDistances = {}
+    if #SHADOWLINE_STATIONS > 0 then
+        sampleDistances = SHADOWLINE_STATIONS
+    else
+        for step = 1, 28 do
+            sampleDistances[step] = step * SHADOWLINE_SPACING
+        end
+    end
+    local bestOrdinal, bestScore
+    for ordinal = 0, 7 do
+        local dx, dz = headingVector(ordinal)
+        -- Quadratic penalty on ground ABOVE the spawn height: a sight line
+        -- over a ridge hides every station behind it, while a gentle constant
+        -- slope is harmless. Flat-biased scoring keeps the whole line visible.
+        local score = 0.0
+        for _, sampleDistance in ipairs(sampleDistances) do
+            local sampleX = playerPos.x + dx * sampleDistance
+            local sampleZ = playerPos.z + dz * sampleDistance
+            local height = GetTerrainHeightAndNormal(SetVector(sampleX, playerPos.y, sampleZ))
+            local rise = height - originHeight
+            if rise > 0.0 then
+                score = score + rise * rise
+            end
+        end
+        if not bestScore or score < bestScore then
+            bestScore = score
+            bestOrdinal = ordinal
+        end
+    end
+
+    local dx, dz = headingVector(bestOrdinal)
+    local matrix = BuildDirectionalMatrix(playerPos, SetVector(dx, 0.0, dz))
+    SetTransform(player, matrix)
+    return bestOrdinal, bestScore
+end
+
+-- Satellite (view 3) visibility fixture. Separate from the benchmark
+-- scenarios: it spawns one group per case the OpenShim satellite visibility
+-- fix has to get right, keeps every group on its own team so the shim's
+-- [SATVISCHK] capture can score them apart, and drives the whole timeline off
+-- one clock so the PowerShell runner can trigger view changes from log cues
+-- rather than guessing at wall time.
+--
+--   friendly    team 1, near   -> illuminated, visible in satellite
+--   detected    team 6, near   -> illuminated, visible in satellite
+--   undetected  team 7, far    -> not illuminated, hidden in satellite
+--   preHide     team 8, near   -> illuminated but its Ogre entity was hidden
+--                                 before satellite; must stay hidden
+--   reveal      team 9, far    -> starts hidden, teleported next to the player
+--                                 mid-view so it must turn visible without
+--                                 leaving view 3
+--
+-- Two further lifecycle cases are driven inside the view: one unit is created
+-- while satellite is open and one is destroyed while it is open.
 local SAT_TEAMS = {}
 local SAT_GROUP_COUNT = 3
 local SAT_NEAR_DISTANCE = 60.0
@@ -449,6 +559,9 @@ local function spawnUnits(player)
         BENCH_SCENARIO == "fourteam_fire" or
         BENCH_SCENARIO == "fourteam_ai" or
         BENCH_SCENARIO == "fourteam_move"
+    -- Shadowline craft share the player's team so no station can ever be
+    -- engaged; every unit is scenery whose shadow presence is the signal.
+    local shadowLine = BENCH_SCENARIO == "shadowline"
     -- Ranks are shared by every line so the four blocks stay the same shape
     -- whatever the population is.
     local fourTeamRanks = math.max(1, math.ceil(BENCH_COUNT / 4))
@@ -458,7 +571,7 @@ local function spawnUnits(player)
         local side = 0
         -- The AI-idle phase shares the player's team so it exercises native AI
         -- scheduling without accidentally turning the player into an enemy.
-        local team = BENCH_SCENARIO == "ai_idle" and 1 or 2
+        local team = (BENCH_SCENARIO == "ai_idle" or shadowLine) and 1 or 2
         if splitTeams then
             side = index % 2 == 0 and -1 or 1
             team = side < 0 and 2 or 3
@@ -474,6 +587,10 @@ local function spawnUnits(player)
                 playerPos, transform, index, fourTeamRanks)
         elseif BENCH_SCENARIO == "dispersed" then
             position = dispersedPosition(playerPos, transform, index)
+        elseif shadowLine then
+            position = shadowLinePosition(
+                playerPos, transform, math.floor(index / 3),
+                (index % 3) + 1)
         else
             position = formationPosition(playerPos, transform, index, side)
         end
@@ -544,6 +661,19 @@ local function spawnUnits(player)
         end
         for index, handle in ipairs(team3) do
             opponents[handle] = team2[((index - 1) % #team2) + 1]
+        end
+    end
+
+    if shadowLine then
+        -- Document the exact station ranges so frame captures can be scored
+        -- against known distances without estimating from the image.
+        local stationCount = math.max(0, math.ceil(BENCH_COUNT / 3) - 1)
+        if #SHADOWLINE_STATIONS > 0 then
+            stationCount = #SHADOWLINE_STATIONS - 1
+        end
+        for station = 0, stationCount do
+            trace(string.format("shadowline-station=%d distance=%.1f",
+                station, shadowLineForward(station)))
         end
     end
 
@@ -771,7 +901,7 @@ function Start()
     BENCH_SCENARIO, BENCH_UNIT_ODF, BENCH_COUNT, BENCH_DISTANCE,
         BENCH_ORIENTATION, BENCH_WARMUP_SECONDS,
         BENCH_MEASURE_SECONDS, BENCH_CLUSTER_COUNT, BENCH_CLUSTER_RADIUS,
-        BENCH_SPIN_SECONDS = readConfig()
+        BENCH_SPIN_SECONDS, SHADOWLINE_STATIONS = readConfig()
     trace("start")
     local player = GetPlayerHandle()
     if not IsValid(player) then
@@ -799,6 +929,16 @@ function Start()
         satSpawnFixture()
         satTrace("fixture-ready")
         return
+    end
+
+    if BENCH_SCENARIO == "shadowline" then
+        local heading, score = faceFlattestShadowlineHeading(player, playerOrigin)
+        trace(string.format(
+            "shadowline-heading ordinal=%d riseScore=%.1f",
+            heading, score))
+        -- The re-face invalidates the captured basis; re-read it so stations
+        -- spawn along the heading the camera now looks down.
+        playerBasis = GetTransform(player)
     end
 
     spawnUnits(player)
