@@ -22,6 +22,7 @@
 #include "native_cpu_sampler.h"
 #include "pilot_fp_animation_trace.h"
 #include "openshim_sdk_v2.h"
+#include "render_profile_runtime.h"
 #include "BZROpenShim.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -50,6 +51,13 @@ static unsigned __stdcall PatchThreadProc(void*)
     // the optimizer's existing IAT targets without changing network behavior.
     BZROpenShim::InitializeBzrNetInstrumentation();
     BZROpenShim::RunPatcher(SHIM_VERSION);
+
+    // Renderer-profile ownership (backend observation, scheme-policy takeover,
+    // capability reporting) initializes after the compatibility gate so the
+    // takeover's address-dependent install sees the final gate verdict; its
+    // backend-observation thread still watches the render-system modules load
+    // well before the first mission.
+    BZROpenShim::RenderProfiles::InitializeOgreRenderProfiles();
 
     // Phase 2 is safe to ask to initialize on every build: it is dormant by
     // default and independently verifies exact executable/Ogre hashes before
