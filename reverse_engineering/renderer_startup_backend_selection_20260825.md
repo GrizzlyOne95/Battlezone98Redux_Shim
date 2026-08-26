@@ -594,9 +594,10 @@ Backend-selection path reachable from `DllMain(DLL_PROCESS_ATTACH)`:
 2. `InstallStartupBackendSeam()` — module-name check, PE header reads,
    `GetProcAddress`, one guarded 4-byte slot read, one `VirtualProtect`
    round-trip, one guarded 4-byte store, `FlushInstructionCache`. No CRT
-   containers, no filesystem, no logging beyond the shim logger's existing
-   DllMain usage, no waits, no `.text` reads, no process-wide mutations
-   beyond the single reversed pointer.
+   containers, no filesystem, no normal logger calls, no waits, no `.text`
+   reads, no process-wide mutations beyond the single reversed pointer. The
+   result is stored as a fixed enum and logged later by the patch thread after
+   the loader lock has been released.
 
 Everything else (INI parse, resolver, plugin stat, config read/write, temp
 file, marker, logging) executes on the game thread inside the intercepted

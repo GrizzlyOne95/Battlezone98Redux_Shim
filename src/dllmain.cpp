@@ -252,11 +252,10 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
         // Ogre::ConfigFile::load — deterministic even when Steam reaches
         // graphics initialization in ~1 s. Heavy work (INI parsing,
         // filesystem, logging) must never run under the loader lock.
-        if (!BZROpenShim::RenderProfiles::InstallStartupBackendSeam())
-        {
-            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain",
-                                  "backend-selection seam not armed; stock renderer selection stays authoritative");
-        }
+        // Do not route the arm result through LogShimA here: its locks/CRT
+        // formatting are not safe under the loader lock. The seam records a
+        // fixed status enum and the patch thread reports it after attach.
+        BZROpenShim::RenderProfiles::InstallStartupBackendSeam();
 
         // Both patch sites are global constructors that run from the CRT's
         // _initterm before main, so this cannot wait for the patch thread.

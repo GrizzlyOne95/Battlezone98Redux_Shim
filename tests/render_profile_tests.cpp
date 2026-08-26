@@ -48,7 +48,8 @@ namespace
         input.userProfile = Profile::Redux;
         input.contentOverridePresent = false;
         input.capabilityMask = CapabilitiesForBackend(ActiveBackend::DX11) |
-                               static_cast<uint32_t>(CapIblResources);
+                               static_cast<uint32_t>(CapIblResources) |
+                               static_cast<uint32_t>(CapEnhancedResources);
         return input;
     }
 }
@@ -105,7 +106,13 @@ void TestDx9EnhancedIsCapabilityDependentNotFallback()
     dx9.requestedBackend = RendererBackend::Auto;
     dx9.detectedBackend = ActiveBackend::DX9;
     dx9.userProfile = Profile::Enhanced;
-    dx9.capabilityMask = CapabilitiesForBackend(ActiveBackend::DX9);
+    // Mandatory resource set verified: DX9 Enhanced is supported-but-limited.
+    // It must remain effective rather than silently degrading to Redux. The
+    // capability report is where the reduced feature set is visible
+    // (sharpening yes, modern pssm no). The broken-deployment counterpart is
+    // covered by TestDx9EnhancedAlsoRequiresMandatoryResources.
+    dx9.capabilityMask = CapabilitiesForBackend(ActiveBackend::DX9) |
+                         static_cast<uint32_t>(CapEnhancedResources);
 
     const ResolverResult legacy = ResolveRenderProfile(dx9);
     // DX9 Enhanced is supported-but-limited: it must remain effective rather
@@ -205,6 +212,82 @@ void TestSchemePolicyMapping()
     ExpectTrue(NormalizeModernMaterialScheme("weird") == DefaultModernMaterialScheme(), "unknown -> default");
 }
 
+void TestMandatoryResourceLossFallsBackToRedux()
+{
+    std::printf("TestMandatoryResourceLossFallsBackToRedux\n");
+    // A deployment whose mandatory Enhanced resource set failed validation
+    // (any one program/shader/texture missing or empty) must degrade
+    // Enhanced to Redux even though the scheme layer itself is healthy.
+    ResolverInput input = Baseline();
+    input.userProfile = Profile::Enhanced;
+    input.capabilityMask &= ~static_cast<uint32_t>(CapEnhancedResources);
+    const ResolverResult result = ResolveRenderProfile(input);
+    ExpectEq(static_cast<uint32_t>(result.effectiveProfile),
+             static_cast<uint32_t>(Profile::Redux), "falls back to redux");
+    ExpectTrue(result.fellBack, "fallback reported");
+    ExpectReason(result, "resource");
+
+    // Same contract for a mission override: content cannot resurrect the
+    // missing files.
+    input.contentOverridePresent = true;
+    input.contentOverride = ContentRequest::Enhanced;
+    const ResolverResult overrideResult = ResolveRenderProfile(input);
+    ExpectEq(static_cast<uint32_t>(overrideResult.effectiveProfile),
+             static_cast<uint32_t>(Profile::Redux), "override cannot bypass resource gate");
+}
+
+void TestDx9EnhancedAlsoRequiresMandatoryResources()
+{
+    std::printf("TestDx9EnhancedAlsoRequiresMandatoryResources\n");
+    // The mandatory set covers the SM3 delegates too, so the gate is
+    // backend-independent: DX9 Enhanced falls back exactly like DX11 when
+    // the deployment is broken.
+    ResolverInput dx9 = Baseline();
+    dx9.detectedBackend = ActiveBackend::DX9;
+    dx9.userProfile = Profile::Enhanced;
+    dx9.capabilityMask = CapabilitiesForBackend(ActiveBackend::DX9) |
+                         static_cast<uint32_t>(CapEnhancedResources);
+    ExpectEq(static_cast<uint32_t>(ResolveRenderProfile(dx9).effectiveProfile),
+             static_cast<uint32_t>(Profile::Enhanced), "dx9 enhanced with valid resources stays");
+
+    dx9.capabilityMask &= ~static_cast<uint32_t>(CapEnhancedResources);
+    const ResolverResult broken = ResolveRenderProfile(dx9);
+    ExpectEq(static_cast<uint32_t>(broken.effectiveProfile),
+             static_cast<uint32_t>(Profile::Redux), "dx9 enhanced falls back without resources");
+}
+
+void TestOptionalIblIsIndependentOfEnhancedGate()
+{
+    std::printf("TestOptionalIblIsIndependentOfEnhancedGate\n");
+    // IBL is an OPTIONAL extra: its absence removes only the CapIblResources
+    // bit and must NOT gate the profile.
+    ResolverInput input = Baseline();
+    input.userProfile = Profile::Enhanced;
+    input.capabilityMask &= ~static_cast<uint32_t>(CapIblResources);
+    const ResolverResult result = ResolveRenderProfile(input);
+    ExpectEq(static_cast<uint32_t>(result.effectiveProfile),
+             static_cast<uint32_t>(Profile::Enhanced), "enhanced survives ibl loss");
+    ExpectTrue(!result.fellBack, "ibl loss is not a fallback");
+}
+
+void TestProfileRequirementsMetSharedGate()
+{
+    std::printf("TestProfileRequirementsMetSharedGate\n");
+    const uint32_t full = static_cast<uint32_t>(CapSchemeRewrite) |
+                          static_cast<uint32_t>(CapEnhancedResources);
+    const uint32_t noResources = static_cast<uint32_t>(CapSchemeRewrite);
+    const uint32_t noScheme = static_cast<uint32_t>(CapEnhancedResources);
+
+    // The shared gate used by BOTH ResolveRenderProfile and the runtime's
+    // SupportsRenderProfile must keep the two in exact agreement.
+    ExpectTrue(ProfileRequirementsMet(Profile::Enhanced, full), "enhanced needs both");
+    ExpectTrue(!ProfileRequirementsMet(Profile::Enhanced, noResources), "enhanced rejects missing resources");
+    ExpectTrue(!ProfileRequirementsMet(Profile::Enhanced, noScheme), "enhanced rejects missing scheme layer");
+    ExpectTrue(ProfileRequirementsMet(Profile::Retro, noResources), "retro needs only scheme layer");
+    ExpectTrue(!ProfileRequirementsMet(Profile::Retro, noScheme), "retro rejects missing scheme layer");
+    ExpectTrue(ProfileRequirementsMet(Profile::Redux, 0u), "redux always available");
+}
+
 void TestStableAbiRoundTrip()
 {
     std::printf("TestStableAbiRoundTrip\n");
@@ -223,6 +306,14 @@ void TestStableAbiRoundTrip()
     ContentRequest request = ContentRequest::Inherit;
     ExpectTrue(!Abi::RequestFromAbi(999u, request), "reject unknown request");
     ExpectTrue(Abi::RequestFromAbi(3u, request) && request == ContentRequest::Enhanced, "parse request enhanced");
+
+    // Request-status values are frozen ABI: AppliedLive=0 keeps the
+    // "success" reading older companions may assume; the others must not
+    // collide with it.
+    ExpectEq(Abi::kRequestStatusAppliedLive, 0u, "applied-live frozen");
+    ExpectEq(Abi::kRequestStatusStoredDeferred, 1u, "stored-deferred frozen");
+    ExpectEq(Abi::kRequestStatusRejectedValue, 2u, "rejected-value frozen");
+    ExpectEq(Abi::kRequestStatusUnsupportedBuild, 3u, "unsupported-build frozen");
 }
 
 int main()
@@ -232,6 +323,10 @@ int main()
     TestInheritFollowsUserPreference();
     TestDx9EnhancedIsCapabilityDependentNotFallback();
     TestSchemeLayerLossFallsBackWithReason();
+    TestMandatoryResourceLossFallsBackToRedux();
+    TestDx9EnhancedAlsoRequiresMandatoryResources();
+    TestOptionalIblIsIndependentOfEnhancedGate();
+    TestProfileRequirementsMetSharedGate();
     TestRequestedBackendMismatchIsReportedNotApplied();
     TestOverrideClearReturnsToUser();
     TestInvalidInputsResolveDeterministically();

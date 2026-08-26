@@ -78,7 +78,8 @@ namespace BZROpenShim::RenderProfiles
         Enhanced = 3,
     };
 
-    // Per-feature Enhanced capability bits (stable ABI order).
+    // Per-feature Enhanced capability bits (stable ABI order). Append-only:
+    // never renumber or remove an existing bit once companions ship.
     enum EnhancedCapability : uint32_t
     {
         CapNone = 0u,
@@ -90,6 +91,14 @@ namespace BZROpenShim::RenderProfiles
         CapModernPssm = 1u << 5,       // cascade blending/comparison PCF/bias strategy
         CapLightSelection = 1u << 6,   // contribution-ranked enhanced light ordering
         CapIblResources = 1u << 7,     // neutral IBL/BRDF-LUT resource set resolvable
+
+        // MANDATORY Enhanced renderer-resource set verified on disk (programs,
+        // shader sources, textures under openshim\renderer\enhanced). This is
+        // the hard gate: without it Enhanced cannot render as designed and
+        // must fall back to Redux regardless of backend. Distinct from
+        // CapIblResources, which reflects the OPTIONAL image-based lighting
+        // extras whose absence only disables IBL-specific visuals.
+        CapEnhancedResources = 1u << 8,
     };
 
     struct ResolverInput
@@ -141,6 +150,25 @@ namespace BZROpenShim::RenderProfiles
         return (mask & static_cast<uint32_t>(cap)) != 0u;
     }
 
+    // Enhanced is only honorable when BOTH hard requirements hold: the scheme
+    // policy layer must be installed AND the mandatory resource set verified.
+    // Retro requires only the scheme layer. Shared by the resolver and the
+    // runtime's SupportsRenderProfile so both can never disagree.
+    inline bool ProfileRequirementsMet(Profile profile, uint32_t mask) noexcept
+    {
+        switch (profile)
+        {
+        case Profile::Enhanced:
+            return HasCapability(mask, CapSchemeRewrite) &&
+                   HasCapability(mask, CapEnhancedResources);
+        case Profile::Retro:
+            return HasCapability(mask, CapSchemeRewrite);
+        case Profile::Redux:
+        default:
+            return true;
+        }
+    }
+
     // --- material-scheme policy (shared by the runtime hook and tests) -----
 
     // The engine's native quality schemes. Everything else is either prefixed
@@ -190,9 +218,22 @@ namespace BZROpenShim::RenderProfiles
         constexpr uint32_t kProfileRedux = 2u;
         constexpr uint32_t kProfileEnhanced = 3u;
 
-        // OpenShimRequestRenderProfile results.
+        // OpenShimRequestRenderProfile results. Semantics are TRUTHFUL
+        // application states, never viewport-existence guesses:
+        //   AppliedLive      - the engine-thread deferred-apply drain has run
+        //                      WITH this request's publish epoch included and
+        //                      found viewports to apply to.
+        //   StoredDeferred   - request accepted and stored; the engine-thread
+        //                      hook has not yet performed the apply pass (no
+        //                      drain ran yet, or none found a viewport).
+        //   RejectedValue    - the ABI value is not a known ContentRequest.
+        //   UnsupportedBuild - stored for coherence, but this profile can
+        //                      never drive rendering on the current build
+        //                      (scheme-policy layer inactive); Enhanced/Retro
+        //                      requests on unsupported builds receive this.
+        // Callers must treat any unknown nonzero value as not-applied.
         constexpr uint32_t kRequestStatusAppliedLive = 0u;
-        constexpr uint32_t kRequestStatusStoredDeferred = 1u; // no viewport seen yet
+        constexpr uint32_t kRequestStatusStoredDeferred = 1u; // awaiting engine-thread apply
         constexpr uint32_t kRequestStatusRejectedValue = 2u;
         constexpr uint32_t kRequestStatusUnsupportedBuild = 3u;
 
