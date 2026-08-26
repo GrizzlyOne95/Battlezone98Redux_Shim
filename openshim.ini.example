@@ -831,6 +831,38 @@ JumpSnipeCrouch = 1
 ; Accepted: boolean. Default: OFF.
 AiWeaponMaskSelection = 0
 
+; Honour the ODF-authored AI tuning keys.
+;
+; Master switch for the AI fields OpenShim reads out of unit ODFs:
+;   engageRangeAI              minimum engagement range
+;   weaponRangeMinAI           minimum weapon range
+;   retargetPeriodAI           seconds between target reconsiderations
+;   scrapPathingAI             per-unit override of SmartScavengerPathing
+;   scrapPathLengthWeightAI    scrap scoring weights
+;   scrapStraightDistanceWeightAI
+;   scrapPathFailPenaltyAI
+;   scrapHardToGetCooldownAI
+;   scrapSearchRadiusAI
+;   scrapRetargetPeriodAI
+;   scrapRetargetMinImprovementAI
+;
+; Every path this gates ALSO requires the ODF to declare the matching key, so
+; content that does not author them -- the stock campaign included -- behaves
+; identically whether this is on or off. That is why it defaults ON: it is a
+; capability switch for authored content, not a behaviour change.
+;
+; Turn it off to make OpenShim ignore those keys entirely and run every unit on
+; stock/global values, which is the fastest way to tell whether a mod's AI
+; tuning is responsible for something you are seeing.
+;
+; Was previously reachable only through the EXU bridge
+; (exu.SetAiOdfGameplayTuningEnabled) from Campaign Reimagined's settings.
+; A mission script may still override it for the duration of that mission;
+; the value here is what it reverts to when the mission ends.
+;
+; Accepted: boolean. Default: ON.
+AiOdfGameplayTuning = 1
+
 ; Make turbo available globally on drivable units.
 ; Accepted: boolean. Default: OFF.
 Turbo = 0
