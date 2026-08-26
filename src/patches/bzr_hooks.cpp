@@ -28152,13 +28152,41 @@ namespace BZROpenShim
             }
         }
 
+        // Telemetry field: which render system the game actually selected.
+        // Both render-system DLLs are loaded at startup regardless of choice,
+        // so module presence is meaningless here — parse Ogre.cfg instead,
+        // exactly the signal the profiler's ReadConfiguredRenderer uses.
         const char* ActiveRendererName()
         {
-            if (GetModuleHandleA("RenderSystem_Direct3D11.dll"))
-                return "Direct3D11";
-            if (GetModuleHandleA("RenderSystem_Direct3D9.dll"))
-                return "Direct3D9";
-            return "unknown";
+            static char name[16] = "";
+            static bool resolved = false;
+            if (!resolved)
+            {
+                resolved = true;
+                char path[MAX_PATH] = {};
+                const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+                const char* slash = length ? std::strrchr(path, '\\') : nullptr;
+                if (slash)
+                {
+                    strcpy_s(slash + 1,
+                             MAX_PATH - static_cast<size_t>(slash + 1 - path),
+                             "Ogre.cfg");
+                    std::ifstream file(path);
+                    std::string line;
+                    while (std::getline(file, line))
+                    {
+                        if (line.compare(0, 14, "Render System=") == 0)
+                        {
+                            if (line.find("Direct3D11") != std::string::npos)
+                                strcpy_s(name, "Direct3D11");
+                            else if (line.find("Direct3D9") != std::string::npos)
+                                strcpy_s(name, "Direct3D9");
+                            break;
+                        }
+                    }
+                }
+            }
+            return name[0] ? name : "unknown";
         }
 
         void ApplyAfterStock()
@@ -28231,7 +28259,7 @@ namespace BZROpenShim
                             "applied=0 effective=%.2f renderer=%hs "
                             "quality=%d pssm=%hs action=skipped "
                             "reason=pssm-disabled",
-                            static_cast<double>(g_OverrideDistance),
+                            static_cast<double>(stock),
                             static_cast<double>(stock),
                             static_cast<double>(g_OverrideDistance),
                             static_cast<double>(stock),
@@ -28246,7 +28274,7 @@ namespace BZROpenShim
                         "requested=%.2f stock=%.2f override=%.2f applied=0 "
                         "effective=%.2f renderer=%hs quality=%d pssm=%hs "
                         "action=skipped reason=unexpected-stock-value",
-                        static_cast<double>(g_OverrideDistance),
+                        static_cast<double>(stock),
                         static_cast<double>(stock),
                         static_cast<double>(g_OverrideDistance),
                         static_cast<double>(stock),
@@ -28264,7 +28292,7 @@ namespace BZROpenShim
                     "requested=%.2f stock=%.2f override=%.2f applied=%.2f "
                     "effective=%.2f renderer=%hs quality=%d pssm=%hs "
                     "action=applied",
-                    static_cast<double>(g_OverrideDistance),
+                    static_cast<double>(stock),
                     static_cast<double>(stock),
                     static_cast<double>(g_OverrideDistance),
                     static_cast<double>(g_OverrideDistance),

@@ -213,8 +213,11 @@ $(if ($WithProfiler) { "ProfileOgreAnimation = 1" } else { "" })
 
     if ($DayLight) {
         # Same-length in-place edits on the deployed copy only. The fixture's
-        # night atmosphere would otherwise mask everything past 175-250 m,
-        # which is exactly the region the shadow-cutoff question is about.
+        # night TIME would otherwise mask everything past 175-250 m, which is
+        # exactly the region the shadow-cutoff question is about. Note the
+        # black starry sky in captures is correct: this is the moon map, the
+        # [Color] palette (MOON.ACT) is its brightest available palette, and
+        # noon sun on grey regolith gives the strongest shadow contrast.
         $trnPath = Join-Path $missionRoot "lcbench.trn"
         $trn = [System.IO.File]::ReadAllText($trnPath)
         $trn = $trn -replace 'Time=0300', 'Time=1200'
