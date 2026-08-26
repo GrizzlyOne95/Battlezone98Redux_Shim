@@ -26,6 +26,23 @@ Reference/tooling repos commonly available under `%USERPROFILE%\Documents\GIT` (
 - `src/engine/`: generic hook engine, memory I/O, pattern scanning.
 - `src/patches/`: Battlezone-specific hooks/trampolines.
 - `scripts/patches.json`: external patterns/offsets; prefer it over hardcoding patch addresses in feature code.
+  - `"patches"` / `"globals"`: sites the shim **overwrites**.
+  - `"resolves"`: addresses the shim only **calls or reads**, resolved via
+    `HookEngine::ResolveNamedAddress("Name")`. Use this instead of adding a new
+    `uint8_t` pattern/mask array pair to feature code. Fields: `pattern`
+    (IDA-style, `??` wildcards), `offset` (signed, match to anchor), `mode`
+    (`address` | `rel32_target`), `fallback` (known-good constant), `prefer`
+    (`scan` | `fallback`, default `scan`), `require_unique`, and a mandatory
+    `identity` note. Parsing lives in `src/engine/resolve_table.cpp` and is
+    covered by `tests/resolve_table_tests.cpp`, which checks the shipped file.
+- Signature discipline: a unique byte string is not proof of identity — it can
+  belong to a function you did not mean, and an anchor that misses by a couple
+  of bytes resolves to a plausible neighbour. Every `resolves` entry therefore
+  carries an `identity` note recording independent evidence (call site, xref,
+  decompile), and every resolution emits one `[RESOLVE]` log line with the
+  match count, scanned address, fallback, which source won, and whether the two
+  agree. Read that line before trusting a new signature; a signature generated
+  by a sigmaker such as Sigga is robust, not correct.
 - System DLLs such as `ws2_32.dll` and `gdiplus.dll` are delay-loaded for robustness.
 
 ## Git Workflow
@@ -36,6 +53,13 @@ Reference/tooling repos commonly available under `%USERPROFILE%\Documents\GIT` (
 - Do not rewrite shared history or force-push unless explicitly requested.
 - PR merges, releases/tags, Workshop publication, and other external release/deployment actions require explicit user instruction.
 - Do not commit secrets, machine credentials, transient build/runtime output, crash dumps, or scratch RE artifacts the repo does not intentionally track.
+
+## Running the Game Harness
+- **Never `Stop-Process -Force` on `battlezone98redux`.** Force-killing it while it owns an exclusive-fullscreen D3D device deadlocks the kernel display stack and hard-locks the workstation with no BSOD, no dump, and no WHEA entry. This happened three times between 2026-08-22 and 2026-08-24.
+- Any script that launches the game must dot-source `reverse_engineering/BZRHarness.ps1` and shut down via `Stop-BZRGame` (prefer `-Id` over name matching). Dot-sourcing also serializes launches machine-wide, so concurrent agents cannot collide mid-mode-set.
+- Set `$env:BZR_FORCE_WINDOWED = '1'` for stability or correctness runs; it removes the fullscreen mode-set entirely. Leave it unset for anything that reports timing — windowed and fullscreen FPS are not comparable.
+- If the machine hard-locks again, the absence of a crash dump is itself the finding. Capture what the harness was doing rather than power-cycling and retrying.
+- Full write-up: `docs/HARNESS_SAFETY.md`.
 
 ## Task-Specific Guidance
 - **RE, binary analysis, Ghidra, debugger, PDB, signatures, or native-hook investigation:** read `AGENT_TOOLING.md` before that work. It is not required for ordinary docs/API/build tasks. Prefer stable `bzr-*` wrappers from `<USER_HOME>\bin`; the persistent Ghidra MCP model is documented there.

@@ -152,6 +152,7 @@
     <ClCompile Include="src\engine\winmm_proxy.cpp" />
     <ClCompile Include="src\engine\patcher.cpp" />
     <ClCompile Include="src\engine\hook_engine.cpp" />
+    <ClCompile Include="src\engine\resolve_table.cpp" />
     <ClCompile Include="src\engine\ogre_runtime.cpp" />
     <ClCompile Include="src\engine\openshim_sdk_v2.cpp" />
     <ClCompile Include="src\engine\native_ui.cpp" />
