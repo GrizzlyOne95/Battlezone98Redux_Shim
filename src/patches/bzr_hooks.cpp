@@ -8,6 +8,7 @@
 #include "shim_log.h"
 #include "ogre_shader_cache.h"
 #include "ogre_enhanced_light_selection.h"
+#include "render_profile_runtime.h"
 #include "native_ui.h"
 #include "ogre_animation_profiler.h"
 #include "ogre_profiler_algorithms.h"
@@ -26950,6 +26951,9 @@ namespace BZROpenShim
             // the port it actually bound.
             InitializeBzrNetConfig();
             break;
+        case ShimSettingApplyGroup::RenderProfile:
+            RenderProfiles::ReloadRenderProfileConfig();
+            break;
         case ShimSettingApplyGroup::RestartRequired:
             break;
         }
@@ -28513,6 +28517,10 @@ namespace BZROpenShim
     {
         RetryDeferredRuntimeHooks();
         g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
+        // Content render-profile requests are mission/session scoped: the
+        // authoritative lifecycle seam clears them so an EXU override from one
+        // mission can never leak into the shell or unrelated content.
+        RenderProfiles::ClearContentRenderProfileOverride("mission reset");
         g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
         g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
         g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
