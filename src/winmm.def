@@ -10,6 +10,14 @@ EXPORTS
     OpenShimGetBzrDistribution
     OpenShimCaptureDeveloperSnapshot
     OpenShimLogDeveloperSnapshot
+    OpenShimGetRenderApiVersion
+    OpenShimRequestRenderProfile
+    OpenShimGetUserRenderProfile
+    OpenShimGetRequestedContentRenderProfile
+    OpenShimGetEffectiveRenderProfile
+    OpenShimGetActiveRendererBackend
+    OpenShimGetRenderCapabilities
+    OpenShimSupportsRenderProfile
     OpenShimSetUnderAttackAlertMode
     OpenShimSetBZRNetNickname
     OpenShimSetTargetReticlePopupMode

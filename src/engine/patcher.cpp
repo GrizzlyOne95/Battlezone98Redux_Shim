@@ -37,17 +37,13 @@ namespace BZROpenShim
     struct PatcherConfig {
         nlohmann::json data;
         bool Load() {
+            // One search order for the whole shim: HookEngine::ResolveNamedAddress
+            // has to find the same file this does, or a "resolves" entry and the
+            // patch that depends on it could come from different installs.
             try {
-                std::ifstream f("scripts/patches.json");
-                if (f.is_open()) { data = nlohmann::json::parse(f); return true; }
-            } catch (...) {}
-            try {
-                // The game may be launched with a working directory other than
-                // the install root; fall back to the exe's own directory.
-                char path[MAX_PATH] = {}; GetModuleFileNameA(nullptr, path, MAX_PATH);
-                char* slash = strrchr(path, '\\'); if (slash) *slash = '\0';
-                std::string exeRelative = std::string(path) + "\\scripts\\patches.json";
-                std::ifstream f(exeRelative);
+                const std::string path = HookEngine::FindPatchesJsonPath();
+                if (path.empty()) return false;
+                std::ifstream f(path);
                 if (f.is_open()) { data = nlohmann::json::parse(f); return true; }
             } catch (...) {}
             return false;
@@ -407,6 +403,9 @@ namespace BZROpenShim
     static bool ScanForSoundChannelOverrideTargets(SoundChannelOverrideTargets& outTargets) {
         outTargets = {}; if (!g_Config.data.contains("audio_gas_pattern")) return false;
         auto pVec = HookEngine::ParseIdaPattern(g_Config.data["audio_gas_pattern"]["pattern"]);
+        // An unparseable pattern yields an empty vector, which would otherwise
+        // "match" at the first byte of the first region.
+        if (pVec.empty()) return false;
         HMODULE hMain = GetModuleHandleA(nullptr); uint8_t* mainBase = reinterpret_cast<uint8_t*>(hMain);
         size_t mainSize = 0; if (hMain) {
             auto dos = reinterpret_cast<IMAGE_DOS_HEADER*>(hMain);
@@ -680,7 +679,7 @@ namespace BZROpenShim
 
     static void FillJmp5Payloads(std::vector<HookEngine::PatchDef>& patches) {
         struct M { const char* n; void* f; } m[] = {
-            {"Map Sorting", (void*)Trampoline_Probe_MapSorting}, {"Map List Rewrite for Hop-Fix 1/3", (void*)Trampoline_HopFix1}, {"Map List Rewrite for Hop-Fix 2/3", (void*)Trampoline_HopFix2}, {"Map List Rewrite for Hop-Fix 3/3", (void*)Trampoline_HopFix3}, {"Map List Fix Support 1/3", (void*)Trampoline_MapListFixSupport1}, {"Probe Refresh Path MapFilter1", (void*)Trampoline_Probe_MapFilter1}, {"Probe MapListFix1", (void*)Trampoline_Probe_MapListFix1}, {"Probe MapListFix2", (void*)Trampoline_Probe_MapListFix2}, {"Map Filters 1/8", (void*)Trampoline_MapFilters1}, {"Map Filters 2/8", (void*)Trampoline_MapFilters2}, {"Map Filters 3/8", (void*)Trampoline_MapFilters3}, {"Map Filters 4/8", (void*)Trampoline_MapFilters4}, {"Map Filters 5/8", (void*)Trampoline_MapFilters5}, {"Map Filters 7/8", (void*)Trampoline_MapFilters7}, {"Map Filters 8/8", (void*)Trampoline_MapFilters8}, {"Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)", (void*)Trampoline_VehicleListModFix1}, {"Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)", (void*)Trampoline_VehicleListModFix4}, {"Lobby BZRNET Integration HOST", (void*)Trampoline_BzrnetHost}, {"Lobby BZRNET Integration CLIENT", (void*)Trampoline_BzrnetClient}, {"Custom Command /help Handler", (void*)Trampoline_CommandHelp}, {"Joiner Event Hook", (void*)Trampoline_JoinerEventHook}, {"Ban Button Hook 1/2", (void*)Trampoline_BanButtonHook1}, {"Ban Button Hook 2/2", (void*)Trampoline_BanButtonHook2}, {"AutoSave Load Button Hook", (void*)Trampoline_AutoSaveLoadButtonHook}, {"Restart Mission Hook Pause", (void*)Trampoline_RestartMissionPauseHook}, {"Restart Mission Hook Failure", (void*)Trampoline_RestartMissionFailureHook}, {"TurretCraft Aim Pitch Multiplier", (void*)Trampoline_TurretCraftAimPitchMultiplier}, {"TurretTank Aim Pitch Multiplier", (void*)Trampoline_TurretTankAimPitchMultiplier}, {"Under Attack Alert Hook 1/2", (void*)Trampoline_UnderAttackAlertHook1}, {"Under Attack Alert Hook 2/2", (void*)Trampoline_UnderAttackAlertHook2}, {"Offensive Attack Reveal Hook", (void*)Trampoline_OffensiveAttackRevealHook}, {"TurretTank Attack Reveal Hook", (void*)Trampoline_TurretTankAttackRevealHook}, {"Decoded Weapon Mask Carrier Bias Hook", (void*)Trampoline_DecodedWeaponMaskBias}, {"Raw Weapon Mask Carrier Bias Hook", (void*)Trampoline_RawWeaponMaskBias}
+            {"Map Sorting", (void*)Trampoline_Probe_MapSorting}, {"GameObject Handle Stale Slot Guard", (void*)GameObjectHandleGetObjHardened}, {"Map List Rewrite for Hop-Fix 1/3", (void*)Trampoline_HopFix1}, {"Map List Rewrite for Hop-Fix 2/3", (void*)Trampoline_HopFix2}, {"Map List Rewrite for Hop-Fix 3/3", (void*)Trampoline_HopFix3}, {"Map List Fix Support 1/3", (void*)Trampoline_MapListFixSupport1}, {"Probe Refresh Path MapFilter1", (void*)Trampoline_Probe_MapFilter1}, {"Probe MapListFix1", (void*)Trampoline_Probe_MapListFix1}, {"Probe MapListFix2", (void*)Trampoline_Probe_MapListFix2}, {"Map Filters 1/8", (void*)Trampoline_MapFilters1}, {"Map Filters 2/8", (void*)Trampoline_MapFilters2}, {"Map Filters 3/8", (void*)Trampoline_MapFilters3}, {"Map Filters 4/8", (void*)Trampoline_MapFilters4}, {"Map Filters 5/8", (void*)Trampoline_MapFilters5}, {"Map Filters 7/8", (void*)Trampoline_MapFilters7}, {"Map Filters 8/8", (void*)Trampoline_MapFilters8}, {"Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)", (void*)Trampoline_VehicleListModFix1}, {"Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)", (void*)Trampoline_VehicleListModFix4}, {"Lobby BZRNET Integration HOST", (void*)Trampoline_BzrnetHost}, {"Lobby BZRNET Integration CLIENT", (void*)Trampoline_BzrnetClient}, {"Custom Command /help Handler", (void*)Trampoline_CommandHelp}, {"Joiner Event Hook", (void*)Trampoline_JoinerEventHook}, {"Ban Button Hook 1/2", (void*)Trampoline_BanButtonHook1}, {"Ban Button Hook 2/2", (void*)Trampoline_BanButtonHook2}, {"AutoSave Load Button Hook", (void*)Trampoline_AutoSaveLoadButtonHook}, {"Restart Mission Hook Pause", (void*)Trampoline_RestartMissionPauseHook}, {"Restart Mission Hook Failure", (void*)Trampoline_RestartMissionFailureHook}, {"TurretCraft Aim Pitch Multiplier", (void*)Trampoline_TurretCraftAimPitchMultiplier}, {"TurretTank Aim Pitch Multiplier", (void*)Trampoline_TurretTankAimPitchMultiplier}, {"Under Attack Alert Hook 1/2", (void*)Trampoline_UnderAttackAlertHook1}, {"Under Attack Alert Hook 2/2", (void*)Trampoline_UnderAttackAlertHook2}, {"Offensive Attack Reveal Hook", (void*)Trampoline_OffensiveAttackRevealHook}, {"TurretTank Attack Reveal Hook", (void*)Trampoline_TurretTankAttackRevealHook}, {"Decoded Weapon Mask Carrier Bias Hook", (void*)Trampoline_DecodedWeaponMaskBias}, {"Raw Weapon Mask Carrier Bias Hook", (void*)Trampoline_RawWeaponMaskBias}
         };
         for (auto& p : patches) {
             if (p.type != HookEngine::PatchType::JMP5 || !p.verified) continue;
