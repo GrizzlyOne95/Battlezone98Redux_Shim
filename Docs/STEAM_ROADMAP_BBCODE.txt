@@ -546,6 +546,14 @@ A lot of things that used to be on this roadmap have already moved into working 
 [*] perceivedTeam / owned-attacker reveal behavior repair
 [*] Steam multiplayer map-list auto-refresh/jump fix
 [*] Protected Lua file I/O / persistent settings support through bzfile
+[*] Stale attack-reveal hook registry cleanup — quarantined hooks no longer registered, no stale warnings (OpenShim 3f36ba12 #63)
+[*] Startup backend-selection transport seam — Renderer preference (Auto/DX9/DX11) applied via Ogre.cfg rewrite before the game reads it, with per-launch command-line override (OpenShim 3f36ba12 #59)
+[*] Declarative resolver infrastructure — scripts/patches.json [resolves] + HookEngine::ResolveNamedAddress() replaces hard-coded pattern arrays, with identity notes and [RESOLVE] logging (OpenShim 3f36ba12 #62)
+[*] AI ODF gameplay-tuning master switch — engageRangeAI / weaponRangeMinAI / retargetPeriodAI / scrapPathingAI and related keys, opt-in per ODF and stock-exact when absent (OpenShim 3f36ba12 #62)
+[*] Wingman / attack engagement-range ODF policy — authored range floors via CalcRange(Craft) and Follow/Attack gates (OpenShim 3f36ba12 #64)
+[*] Save/load lifecycle hardening — stale GameObject handle guard (empty zero-generation slot rejected) and unscripted autosave restoration, plus Inst4XMission and destruction-chunk proxy fixes above (OpenShim 3f36ba12 #65)
+[*] OpenShim render-profile ownership — Enhanced/Redux/Retro profiles owned at runtime, capability-dependent on DX11/DX9, consumed via EXU bridge (Campaign ac99e63c + OpenShim #56)
+[*] Campaign Reimagined settings ownership split — campaignReimagined_settings.cfg remains campaign-only (Campaign ac99e63c)
 [/list]
 
 Several of the newer compatibility fixes are implemented and statically verified but still deserve focused gameplay regression testing before I consider every edge case permanently closed. They are no longer merely speculative backlog entries, though.
