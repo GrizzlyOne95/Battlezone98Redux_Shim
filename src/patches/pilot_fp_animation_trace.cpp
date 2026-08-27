@@ -38,6 +38,7 @@ namespace BZROpenShim
         constexpr char kIniKey[] = "TracePilotFPAnimations";
         constexpr char kEnvironmentSwitch[] = "OPENSHIM_TRACE_PILOT_FP_ANIMATIONS";
         constexpr char kManipEnvironmentSwitch[] = "OPENSHIM_PILOT_FP_MANIP";
+        constexpr char kManipScopeEnvironmentSwitch[] = "OPENSHIM_PILOT_FP_MANIP_SCOPE";
         constexpr char kManipIniKey[] = "PilotFPAnimManip";
         constexpr char kManipAnimIniKey[] = "PilotFPAnimManipAnim";
         constexpr char kManipModeIniKey[] = "PilotFPAnimManipMode";
@@ -120,6 +121,7 @@ namespace BZROpenShim
         std::atomic<bool> g_ManipEnabled{ false };
         char g_ManipTargetAnim[64] = "stand2Kneel";
         enum class ManipMode { Freeze, ForceWeight, Disabled } g_ManipMode = ManipMode::Freeze;
+        enum class ManipScope { Both, World, Fp } g_ManipScope = ManipScope::Both;
         uintptr_t g_WorkerThread = 0;
 
         TargetState g_World;
@@ -135,12 +137,13 @@ namespace BZROpenShim
 
         using FnEntityHasSkeleton = bool(__thiscall*)(void*);
         using FnEntityHasAnimationState = bool(__thiscall*)(void*, const std::string&);
+        using FnEntityGetMesh = const Ogre::MeshPtr&(__thiscall*)(void*);
         using FnMovableObjectGetName = const std::string&(__thiscall*)(void*);
         FnEntityHasSkeleton g_FnEntityHasSkeleton = nullptr;
         FnEntityHasAnimationState g_FnEntityHasAnimationState = nullptr;
+        FnEntityGetMesh g_FnEntityGetMesh = nullptr;
         FnMovableObjectGetName g_FnMovableObjectGetName = nullptr;
 
-        void* g_EntityGetMeshExport = nullptr;
         void* g_EntityHasSkeletonExport = nullptr;
 
         DWORD g_LastFpEnumerateTick = 0;
@@ -217,6 +220,25 @@ namespace BZROpenShim
                 g_ManipMode = ManipMode::Disabled;
             if (!g_ManipEnabled.load(std::memory_order_acquire))
                 g_ManipMode = ManipMode::Disabled;
+
+            char scopeName[32] = {};
+            const DWORD scopeLength = GetEnvironmentVariableA(
+                kManipScopeEnvironmentSwitch, scopeName, static_cast<DWORD>(sizeof(scopeName)));
+            std::string scopeLower(scopeLength > 0 && scopeLength < sizeof(scopeName) ? scopeName : "both");
+            for (char& ch : scopeLower) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            if (scopeLower == "world")
+                g_ManipScope = ManipScope::World;
+            else if (scopeLower == "fp")
+                g_ManipScope = ManipScope::Fp;
+            else
+                g_ManipScope = ManipScope::Both;
+        }
+
+        bool Manipulates(TargetKind kind)
+        {
+            return g_ManipScope == ManipScope::Both ||
+                (g_ManipScope == ManipScope::World && kind == TargetKind::World) ||
+                (g_ManipScope == ManipScope::Fp && kind == TargetKind::Fp);
         }
 
         void CopyText(char* destination, size_t destinationSize, const char* source)
@@ -487,7 +509,8 @@ namespace BZROpenShim
 
         // Generalized binding helpers
 
-        void RegisterBindingForTarget(TargetState& target, TargetKind kind, void* state, void* entity, const std::string& animation)
+        void RegisterBindingForTarget(TargetState& target, TargetKind kind, void* state, void* entity,
+            const std::string& animation, void* caller)
         {
             if (!state || !entity)
                 return;
@@ -525,13 +548,37 @@ namespace BZROpenShim
             }
             if (logBinding)
             {
-                void* retAddr = _ReturnAddress();
                 bool inMain = false;
-                uintptr_t rva = CallerRva(retAddr, inMain);
+                uintptr_t rva = CallerRva(caller, inMain);
                 LogShimA(LogLevel::Info, kComponent, "[FPAnim]%s entity=0x%p anim=%s state=0x%p bound=1 caller=0x%p rva=0x%08X inMain=%u gen=%llu",
-                    TargetKindPrefix(kind), entity, animation.c_str(), state, retAddr, static_cast<unsigned>(rva), inMain ? 1u : 0u,
+                    TargetKindPrefix(kind), entity, animation.c_str(), state, caller, static_cast<unsigned>(rva), inMain ? 1u : 0u,
                     static_cast<unsigned long long>(target.generation.load(std::memory_order_acquire)));
             }
+        }
+
+        std::string SafeEntityMeshName(Ogre::Entity* entity)
+        {
+            if (!entity)
+                return "unknown";
+            try
+            {
+                if (!g_FnEntityGetMesh)
+                    return "unknown";
+                const Ogre::MeshPtr& mesh = g_FnEntityGetMesh(entity);
+                if (!mesh.isNull())
+                    return mesh->getName();
+            }
+            catch (...)
+            {
+            }
+            return "unknown";
+        }
+
+        std::string SafeEntitySkeletonName(Ogre::Entity* entity)
+        {
+            if (!entity)
+                return "none";
+            return SafeEntityHasSkeleton(entity) ? "present" : "none";
         }
 
         bool FindBindingForTarget(TargetState& target, void* state, void*& entity, char* animation, size_t animationSize)
@@ -679,11 +726,11 @@ namespace BZROpenShim
                     // Broad candidate: any skeleton with idle (catches all animated Entities, but we log and then filter)
                     // For pilot FP discovery, broad is hasSkel, strict is pilot anim set
                     broadCandidates.push_back(ent);
-                    // Use hasIdle as broad mesh name placeholder; strict requires pilot anims
-                    std::string meshName = hasIdle ? "hasIdle" : "unknown";
-                    std::string skeletonName = hasStand2Kneel ? "hasStand2Kneel" : "unknown";
+                    std::string meshName = SafeEntityMeshName(ent);
+                    std::string skeletonName = SafeEntitySkeletonName(ent);
                     broadMeshNames.push_back(meshName);
-                    if (hasStand2Kneel && hasIdle)
+                    const bool isWorldEntity = ent == worldEntity;
+                    if (hasStand2Kneel && hasIdle && !isWorldEntity)
                     {
                         strictCandidates.push_back(ent);
                         strictMeshNames.push_back(meshName);
@@ -695,12 +742,12 @@ namespace BZROpenShim
                     void* retAddr = _ReturnAddress();
                     bool inMain = false;
                     uintptr_t rva = CallerRva(retAddr, inMain);
-                    bool isStrict = hasStand2Kneel && hasIdle;
+                    bool isStrict = hasStand2Kneel && hasIdle && !isWorldEntity;
                     LogShimA(LogLevel::Info, kComponent,
                         "[FPAnim][FP] candidate entity=0x%p mesh=%s skeleton=%s hasSkeleton=%u name=%s caller=0x%p rva=0x%08X inMain=%u strict=%u worldPilot=%u",
                         ent, meshName.c_str(), skeletonName.c_str(), hasSkel ? 1u : 0u, entName.c_str(),
                         retAddr, static_cast<unsigned>(rva), inMain ? 1u : 0u,
-                        isStrict ? 1u : 0u, worldIsPilot ? 1u : 0u);
+                        isStrict ? 1u : 0u, isWorldEntity ? 1u : 0u);
                 }
             }
             catch (...)
@@ -728,7 +775,7 @@ namespace BZROpenShim
                 {
                     Ogre::Entity* chosen = strictCandidates[0];
                     std::string chosenMesh = strictMeshNames[0];
-                    std::string chosenSkel = "unknown";
+                    std::string chosenSkel = SafeEntitySkeletonName(chosen);
                     std::string chosenEntName;
                     const std::string* namePtr2 = SafeMovableObjectGetNamePtr(chosen);
                     if (namePtr2) chosenEntName = *namePtr2;
@@ -750,7 +797,7 @@ namespace BZROpenShim
                         "[FPAnim][FP] target acquired entity=0x%p mesh=%s skeleton=%s name=%s gen=%llu caller=0x%p rva=0x%08X inMain=%u strict=%u worldPilot=%u",
                         chosen, chosenMesh.c_str(), chosenSkel.c_str(), chosenEntName.c_str(),
                         static_cast<unsigned long long>(g_Fp.generation.load()),
-                        retAddr, static_cast<unsigned>(rva), inMain ? 1u : 0u, 1u, worldIsPilot ? 1u : 0u);
+                        retAddr, static_cast<unsigned>(rva), inMain ? 1u : 0u, 1u, chosen == worldEntity ? 1u : 0u);
                 }
                 else if (!broadCandidates.empty())
                 {
@@ -789,7 +836,7 @@ namespace BZROpenShim
                     {
                         Ogre::Entity* chosen = strictCandidates[0];
                         std::string chosenMesh = strictMeshNames[0];
-                        std::string chosenSkel = "unknown";
+                        std::string chosenSkel = SafeEntitySkeletonName(chosen);
                         std::string chosenEntName;
                         const std::string* namePtr2 = SafeMovableObjectGetNamePtr(chosen);
                         if (namePtr2) chosenEntName = *namePtr2;
@@ -1017,7 +1064,8 @@ namespace BZROpenShim
                 PatchIatEntriesByTarget(executable, target, replacement, label);
         }
 
-        void LogBoundBoolForTarget(TargetState& target, TargetKind kind, void* state, const char* field, bool value)
+        void LogBoundBoolForTarget(TargetState& target, TargetKind kind, void* state, const char* field,
+            bool value, void* caller)
         {
             void* entity = nullptr;
             char animation[64] = {};
@@ -1057,17 +1105,17 @@ namespace BZROpenShim
             }
             if (!shouldLog)
                 return;
-            void* retAddr = _ReturnAddress();
             bool inMain = false;
-            uintptr_t rva = CallerRva(retAddr, inMain);
+            uintptr_t rva = CallerRva(caller, inMain);
             LogShimA(LogLevel::Info, kComponent,
                 "[FPAnim]%s entity=0x%p anim=%s state=0x%p %s=%u caller=0x%p rva=0x%08X inMain=%u gen=%llu",
                 TargetKindPrefix(kind), entity, animation, state, field, value ? 1u : 0u,
-                retAddr, static_cast<unsigned>(rva), inMain ? 1u : 0u,
+                caller, static_cast<unsigned>(rva), inMain ? 1u : 0u,
                 static_cast<unsigned long long>(target.generation.load()));
         }
 
-        void LogBoundFloatForTarget(TargetState& target, TargetKind kind, void* state, const char* field, float value)
+        void LogBoundFloatForTarget(TargetState& target, TargetKind kind, void* state, const char* field,
+            float value, void* caller)
         {
             void* entity = nullptr;
             char animation[64] = {};
@@ -1127,13 +1175,12 @@ namespace BZROpenShim
                         TargetKindPrefix(kind), entity, animation, state, suppressed,
                         static_cast<unsigned long long>(target.generation.load()));
             }
-            void* retAddr = _ReturnAddress();
             bool inMain = false;
-            uintptr_t rva = CallerRva(retAddr, inMain);
+            uintptr_t rva = CallerRva(caller, inMain);
             LogShimA(LogLevel::Info, kComponent,
                 "[FPAnim]%s entity=0x%p anim=%s state=0x%p %s=%.6f caller=0x%p rva=0x%08X inMain=%u gen=%llu",
                 TargetKindPrefix(kind), entity, animation, state, field, static_cast<double>(value),
-                retAddr, static_cast<unsigned>(rva), inMain ? 1u : 0u,
+                caller, static_cast<unsigned>(rva), inMain ? 1u : 0u,
                 static_cast<unsigned long long>(target.generation.load()));
         }
 
@@ -1197,6 +1244,7 @@ namespace BZROpenShim
 
         void* __fastcall HookEntityGetAnimationState(void* self, void*, const std::string& animationName)
         {
+            void* caller = _ReturnAddress();
             if (!g_RealEntityGetAnimationState)
                 return nullptr;
             void* state = g_RealEntityGetAnimationState(self, animationName);
@@ -1204,15 +1252,16 @@ namespace BZROpenShim
                 return state;
             void* worldTarget = g_World.entity.load(std::memory_order_acquire);
             if (worldTarget && self == worldTarget)
-                RegisterBindingForTarget(g_World, TargetKind::World, state, self, animationName);
+                RegisterBindingForTarget(g_World, TargetKind::World, state, self, animationName, caller);
             void* fpTarget = g_Fp.entity.load(std::memory_order_acquire);
             if (fpTarget && self == fpTarget)
-                RegisterBindingForTarget(g_Fp, TargetKind::Fp, state, self, animationName);
+                RegisterBindingForTarget(g_Fp, TargetKind::Fp, state, self, animationName, caller);
             return state;
         }
 
         void __fastcall HookAnimationSetEnabled(void* self, void*, bool enabled)
         {
+            void* caller = _ReturnAddress();
             if (!g_RealAnimationSetEnabled)
                 return;
             g_RealAnimationSetEnabled(self, enabled);
@@ -1221,13 +1270,14 @@ namespace BZROpenShim
             void* entity = nullptr;
             char anim[64] = {};
             if (FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)))
-                LogBoundBoolForTarget(g_World, TargetKind::World, self, "enabled", enabled);
+                LogBoundBoolForTarget(g_World, TargetKind::World, self, "enabled", enabled, caller);
             if (FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)))
-                LogBoundBoolForTarget(g_Fp, TargetKind::Fp, self, "enabled", enabled);
+                LogBoundBoolForTarget(g_Fp, TargetKind::Fp, self, "enabled", enabled, caller);
         }
 
         void __fastcall HookAnimationSetLoop(void* self, void*, bool loop)
         {
+            void* caller = _ReturnAddress();
             if (!g_RealAnimationSetLoop)
                 return;
             g_RealAnimationSetLoop(self, loop);
@@ -1236,13 +1286,14 @@ namespace BZROpenShim
             void* entity = nullptr;
             char anim[64] = {};
             if (FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)))
-                LogBoundBoolForTarget(g_World, TargetKind::World, self, "loop", loop);
+                LogBoundBoolForTarget(g_World, TargetKind::World, self, "loop", loop, caller);
             if (FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)))
-                LogBoundBoolForTarget(g_Fp, TargetKind::Fp, self, "loop", loop);
+                LogBoundBoolForTarget(g_Fp, TargetKind::Fp, self, "loop", loop, caller);
         }
 
         void __fastcall HookAnimationSetTimePosition(void* self, void*, float timePosition)
         {
+            void* caller = _ReturnAddress();
             if (!g_RealAnimationSetTimePosition)
                 return;
             bool worldManip = false;
@@ -1251,14 +1302,14 @@ namespace BZROpenShim
             {
                 void* entity = nullptr;
                 char anim[64] = {};
-                if (FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)) &&
+                if (Manipulates(TargetKind::World) && FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)) &&
                     std::strcmp(anim, g_ManipTargetAnim) == 0 && g_ManipMode == ManipMode::Freeze)
                 {
                     worldManip = true;
                     LogShimA(LogLevel::Info, kComponent, "[FPAnim][MANIP][WORLD] setTimePosition target=%s state=0x%p time=%.3f gen=%llu",
                         anim, self, timePosition, static_cast<unsigned long long>(g_World.generation.load()));
                 }
-                if (FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)) &&
+                if (Manipulates(TargetKind::Fp) && FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)) &&
                     std::strcmp(anim, g_ManipTargetAnim) == 0 && g_ManipMode == ManipMode::Freeze)
                 {
                     fpManip = true;
@@ -1272,13 +1323,14 @@ namespace BZROpenShim
             void* entity = nullptr;
             char anim[64] = {};
             if (FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)))
-                LogBoundFloatForTarget(g_World, TargetKind::World, self, "time", timePosition);
+                LogBoundFloatForTarget(g_World, TargetKind::World, self, "time", timePosition, caller);
             if (FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)))
-                LogBoundFloatForTarget(g_Fp, TargetKind::Fp, self, "time", timePosition);
+                LogBoundFloatForTarget(g_Fp, TargetKind::Fp, self, "time", timePosition, caller);
         }
 
         void __fastcall HookAnimationSetWeight(void* self, void*, float weight)
         {
+            void* caller = _ReturnAddress();
             if (!g_RealAnimationSetWeight)
                 return;
             float effectiveWeight = weight;
@@ -1288,7 +1340,7 @@ namespace BZROpenShim
             {
                 void* entity = nullptr;
                 char anim[64] = {};
-                if (FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)) &&
+                if (Manipulates(TargetKind::World) && FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)) &&
                     std::strcmp(anim, g_ManipTargetAnim) == 0 && g_ManipMode == ManipMode::ForceWeight)
                 {
                     effectiveWeight = 1.0f;
@@ -1296,7 +1348,7 @@ namespace BZROpenShim
                     LogShimA(LogLevel::Info, kComponent, "[FPAnim][MANIP][WORLD] ForceWeight anim=%s state=0x%p requested=%.3f forced=%.3f gen=%llu",
                         anim, self, weight, effectiveWeight, static_cast<unsigned long long>(g_World.generation.load()));
                 }
-                if (FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)) &&
+                if (Manipulates(TargetKind::Fp) && FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)) &&
                     std::strcmp(anim, g_ManipTargetAnim) == 0 && g_ManipMode == ManipMode::ForceWeight)
                 {
                     effectiveWeight = 1.0f;
@@ -1311,13 +1363,14 @@ namespace BZROpenShim
             void* entity = nullptr;
             char anim[64] = {};
             if (FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)))
-                LogBoundFloatForTarget(g_World, TargetKind::World, self, "weight", (worldForced ? effectiveWeight : weight));
+                LogBoundFloatForTarget(g_World, TargetKind::World, self, "weight", (worldForced ? effectiveWeight : weight), caller);
             if (FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)))
-                LogBoundFloatForTarget(g_Fp, TargetKind::Fp, self, "weight", (fpForced ? effectiveWeight : weight));
+                LogBoundFloatForTarget(g_Fp, TargetKind::Fp, self, "weight", (fpForced ? effectiveWeight : weight), caller);
         }
 
         void __fastcall HookAnimationAddTime(void* self, void*, float offset)
         {
+            void* caller = _ReturnAddress();
             if (!g_RealAnimationAddTime)
                 return;
             bool worldSuppress = false;
@@ -1326,14 +1379,14 @@ namespace BZROpenShim
             {
                 void* entity = nullptr;
                 char anim[64] = {};
-                if (FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)) &&
+                if (Manipulates(TargetKind::World) && FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)) &&
                     std::strcmp(anim, g_ManipTargetAnim) == 0 && g_ManipMode == ManipMode::Freeze)
                 {
                     worldSuppress = true;
                     LogShimA(LogLevel::Info, kComponent, "[FPAnim][MANIP][WORLD] Freeze addTime suppressed anim=%s state=0x%p dt=%.6f gen=%llu",
                         anim, self, offset, static_cast<unsigned long long>(g_World.generation.load()));
                 }
-                if (FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)) &&
+                if (Manipulates(TargetKind::Fp) && FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)) &&
                     std::strcmp(anim, g_ManipTargetAnim) == 0 && g_ManipMode == ManipMode::Freeze)
                 {
                     fpSuppress = true;
@@ -1351,9 +1404,9 @@ namespace BZROpenShim
             void* entity = nullptr;
             char anim[64] = {};
             if (FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)))
-                LogBoundFloatForTarget(g_World, TargetKind::World, self, "dt", offset);
+                LogBoundFloatForTarget(g_World, TargetKind::World, self, "dt", offset, caller);
             if (FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)))
-                LogBoundFloatForTarget(g_Fp, TargetKind::Fp, self, "dt", offset);
+                LogBoundFloatForTarget(g_Fp, TargetKind::Fp, self, "dt", offset, caller);
         }
 
         bool InstallObservers()
@@ -1379,7 +1432,8 @@ namespace BZROpenShim
             g_RealAnimationAddTime = reinterpret_cast<FnAnimationAddTime>(addTime);
             g_RealEntityGetAllAnimationStates = reinterpret_cast<FnEntityGetAllAnimationStates>(
                 FindOptionalExport("getAllAnimationStates@Entity@Ogre@@", "Entity::getAllAnimationStates"));
-            g_EntityGetMeshExport = FindOptionalExport("getMesh@Entity@Ogre@@", "Entity::getMesh");
+            g_FnEntityGetMesh = reinterpret_cast<FnEntityGetMesh>(
+                FindOptionalExport("getMesh@Entity@Ogre@@", "Entity::getMesh"));
             g_EntityHasSkeletonExport = FindOptionalExport("hasSkeleton@Entity@Ogre@@", "Entity::hasSkeleton");
             g_FnEntityHasSkeleton = reinterpret_cast<FnEntityHasSkeleton>(
                 FindOptionalExport("hasSkeleton@Entity@Ogre@@", "Entity::hasSkeleton"));
@@ -1402,8 +1456,8 @@ namespace BZROpenShim
             }
             RefreshManipConfig();
             if (g_ManipEnabled.load(std::memory_order_acquire))
-                LogShimA(LogLevel::Info, kComponent, "[FPAnim] manipulation gate ACTIVE mode=%u targetAnim=%s (world+FP isolated lcbench-only)",
-                    static_cast<unsigned>(g_ManipMode), g_ManipTargetAnim);
+                LogShimA(LogLevel::Info, kComponent, "[FPAnim] manipulation gate ACTIVE mode=%u scope=%u targetAnim=%s (isolated lcbench-only)",
+                    static_cast<unsigned>(g_ManipMode), static_cast<unsigned>(g_ManipScope), g_ManipTargetAnim);
             const size_t getStateHooks = InstallExeObserver(getAnimationState, reinterpret_cast<void*>(&HookEntityGetAnimationState), "Entity::getAnimationState");
             const size_t enabledHooks = InstallExeObserver(setEnabled, reinterpret_cast<void*>(&HookAnimationSetEnabled), "AnimationState::setEnabled");
             const size_t loopHooks = InstallExeObserver(setLoop, reinterpret_cast<void*>(&HookAnimationSetLoop), "AnimationState::setLoop");

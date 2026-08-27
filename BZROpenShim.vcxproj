@@ -131,7 +131,6 @@
     </ClCompile>
     <ClCompile Include="src\patches\pilot_fp_animation_trace.cpp">
       <LanguageStandard>stdcpp14</LanguageStandard>
-      <PreprocessorDefinitions>register=;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="src\patches\editor_view_order.cpp" />
     <ClCompile Include="src\patches\file_io_hooks.cpp" />

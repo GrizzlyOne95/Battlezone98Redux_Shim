@@ -64,7 +64,7 @@ local function ReadPitConfig()
     t.moveAt        = 15.0
     t.jumpAt        = 18.0
     t.finalIdleAt   = 22.0
-    t.reenterAt     = 26.0
+    t.lifetimeAt    = 32.0
     t.completeAt    = 32.0
     t.sniperWeapon  = "gsnipe"
     t.normalWeapon  = "handgun"
@@ -78,7 +78,7 @@ local function ReadPitConfig()
         v, found = GetODFFloat(cfg, "Timeline", "moveAt", t.moveAt); if found then t.moveAt = v end
         v, found = GetODFFloat(cfg, "Timeline", "jumpAt", t.jumpAt); if found then t.jumpAt = v end
         v, found = GetODFFloat(cfg, "Timeline", "finalIdleAt", t.finalIdleAt); if found then t.finalIdleAt = v end
-        v, found = GetODFFloat(cfg, "Timeline", "reenterAt", t.reenterAt); if found then t.reenterAt = v end
+        v, found = GetODFFloat(cfg, "Timeline", "lifetimeAt", t.lifetimeAt); if found then t.lifetimeAt = v end
         v, found = GetODFFloat(cfg, "Timeline", "completeAt", t.completeAt); if found then t.completeAt = v end
         local s
         s, found = GetODFString(cfg, "Timeline", "sniperWeapon", t.sniperWeapon); if found and s ~= "" then t.sniperWeapon = TrimNullPad(s) end
@@ -99,7 +99,6 @@ local hopOutIssuedAt = nil
 local didHopOut = false
 local fireUntil = nil
 local moveUntil = nil
-local reenterTarget = nil
 local manualStepPending = nil
 local exuAvailable = false
 local exuAnimChecked = false
@@ -309,34 +308,16 @@ local function TryJump()
     end
 end
 
-local function TryReenter()
+local function TryDestroyPilot()
     local h = GetPlayerHandle()
     if not IsValid(h) or not IsPerson(h) then
-        print(string.format("[PILOTTEST] T+%.3f REENTER skip not Person h=%s isPerson=%s", elapsed, tostring(h), tostring(IsPerson(h))))
+        print(string.format("[PILOTTEST] T+%.3f LIFETIME_DESTROY skip not Person h=%s isPerson=%s", elapsed, tostring(h), tostring(IsPerson(h))))
         return
     end
-    -- Find nearest vehicle (excluding self) to enter
-    local veh = GetNearestVehicle(h)
-    if veh == nil or not IsValid(veh) or veh == h then
-        -- Spawn a fresh vehicle nearby for reentry test
-        local pos = GetPosition(h)
-        if pos ~= nil then
-            local spawnPos = SetVector(pos.x + 8.0, pos.y, pos.z)
-            local veh2 = BuildObject("avtank", GetTeamNum(h), spawnPos)
-            if IsValid(veh2) then
-                veh = veh2
-                print(string.format("[PILOTTEST] T+%.3f REENTER spawned vehicle %s at (%.1f,%.1f,%.1f)", elapsed, tostring(veh), spawnPos.x, spawnPos.y, spawnPos.z))
-            end
-        end
-    end
-    reenterTarget = veh
-    if veh ~= nil and IsValid(veh) then
-        local ok, err = pcall(GetIn, h, veh, 1)
-        print(string.format("[PILOTTEST] T+%.3f REENTER GetIn pilot=%s veh=%s ok=%s err=%s", elapsed, tostring(h), tostring(veh), tostring(ok), tostring(err)))
-        LogMarker("REENTER_WINDOW")
-    else
-        print(string.format("[PILOTTEST] T+%.3f REENTER no vehicle found; MANUAL ACTION: walk to vehicle and press USE", elapsed))
-    end
+    print(string.format("[PILOTTEST] T+%.3f LIFETIME_DESTROY DeleteObject pilot=%s", elapsed, tostring(h)))
+    DeleteObject(h)
+    print(string.format("[PILOTTEST] T+%.3f LIFETIME_MISSION_END FailMission scheduled", elapsed))
+    FailMission(GetTime() + 1.0)
 end
 
 local function PollPilotState()
@@ -351,8 +332,8 @@ end
 
 function Start()
     cfg = ReadPitConfig()
-    print(string.format("[PILOTTEST] T+%.3f START mission lcbench pilot animation harness cfg hopOut=%.1f idleEnd=%.1f sniper=%.1f crouch=%.1f fire=%.1f move=%.1f jump=%.1f finalIdle=%.1f reenter=%.1f complete=%.1f sniperW=%s normalW=%s",
-        0.0, cfg.hopOutAt, cfg.idleEnd, cfg.sniperAt, cfg.crouchAt, cfg.fireAt, cfg.moveAt, cfg.jumpAt, cfg.finalIdleAt, cfg.reenterAt, cfg.completeAt, cfg.sniperWeapon, cfg.normalWeapon))
+    print(string.format("[PILOTTEST] T+%.3f START mission lcbench pilot animation harness cfg hopOut=%.1f idleEnd=%.1f sniper=%.1f crouch=%.1f fire=%.1f move=%.1f jump=%.1f finalIdle=%.1f lifetime=%.1f complete=%.1f sniperW=%s normalW=%s",
+        0.0, cfg.hopOutAt, cfg.idleEnd, cfg.sniperAt, cfg.crouchAt, cfg.fireAt, cfg.moveAt, cfg.jumpAt, cfg.finalIdleAt, cfg.lifetimeAt, cfg.completeAt, cfg.sniperWeapon, cfg.normalWeapon))
     local p = GetPlayerHandle()
     print(string.format("[PILOTTEST] T+0.000 INIT player=%s valid=%s odf=%s isPerson=%s team=%s pos=%s",
         tostring(p), tostring(IsValid(p)), SafeOdf(p), tostring(IsPerson(p)), tostring(IsValid(p) and GetTeamNum(p) or "?"), tostring(IsValid(p) and GetPosition(p) or "nil")))
@@ -548,11 +529,11 @@ function Update(dt)
     end
 
     if stage == 11 then
-        if elapsed >= cfg.reenterAt then
-            print(string.format("[PILOTTEST] T+%.3f REENTER_WINDOW begin", elapsed))
-            LogMarker("REENTER_WINDOW")
-            DumpPlayerInfo("PRE_REENTER")
-            TryReenter()
+        if elapsed >= cfg.lifetimeAt then
+            print(string.format("[PILOTTEST] T+%.3f LIFETIME_DESTROY begin", elapsed))
+            LogMarker("LIFETIME_DESTROY")
+            DumpPlayerInfo("PRE_LIFETIME_DESTROY")
+            TryDestroyPilot()
             stage = 12
         end
         return
@@ -560,19 +541,18 @@ function Update(dt)
 
     if stage == 12 then
         if elapsed >= cfg.completeAt then
-            print(string.format("[PILOTTEST] T+%.3f TEST_COMPLETE player=%s pilot=%s veh=%s", elapsed, tostring(GetPlayerHandle()), tostring(playerPilot), tostring(reenterTarget)))
+            print(string.format("[PILOTTEST] T+%.3f TEST_COMPLETE player=%s pilot=%s", elapsed, tostring(GetPlayerHandle()), tostring(playerPilot)))
             LogMarker("TEST_COMPLETE")
             DumpPlayerInfo("FINAL")
             -- Summary for automation
-            print(string.format("[PILOTTEST] SUMMARY hopOut=%s pilotDetected=%s pilotHandle=%s reenterTarget=%s",
-                tostring(didHopOut), tostring(playerPilot ~= nil), tostring(playerPilot), tostring(reenterTarget)))
+            print(string.format("[PILOTTEST] SUMMARY hopOut=%s pilotDetected=%s pilotHandle=%s",
+                tostring(didHopOut), tostring(playerPilot ~= nil), tostring(playerPilot)))
             stage = 13
         end
         return
     end
 
     if stage == 13 then
-        -- Remain idle post-complete
         return
     end
 end
@@ -587,9 +567,6 @@ function DeleteObject(h)
     end
     if h == playerVehicle then
         print(string.format("[PILOTTEST] T+%.3f DeleteObject vehicle=%s", elapsed, tostring(h)))
-    end
-    if h == reenterTarget then
-        print(string.format("[PILOTTEST] T+%.3f DeleteObject reenterTarget=%s", elapsed, tostring(h)))
     end
 end
 function CreatePlayer(id, name, team) print(string.format("[PILOTTEST] T+%.3f CreatePlayer id=%d name=%s team=%d", elapsed, id, name, team)) end

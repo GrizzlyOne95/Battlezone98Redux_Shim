@@ -20,8 +20,7 @@ Timeline:
 | 16.0 | move/strafe | `[PILOTTEST] MOVE_WINDOW` | `Goto` + `exu.animation.Play("runForward")` vs manual WASD |
 | 19.5 | jump | `[PILOTTEST] JUMP_WINDOW` | manual Space + `exu.animation.Play("jump")` feasibility probe |
 | 24.0 | final idle | `[PILOTTEST] FINAL_IDLE` | weapon back to `handgun`, expect `kneel2stand` → `idle` |
-| 27.0 | re-enter | `[PILOTTEST] REENTER_WINDOW` | `GetIn(pilot, vehicle)` |
-| 32.0 | complete | `[PILOTTEST] TEST_COMPLETE` | |
+| 32.0 | complete/lifetime transition | `[PILOTTEST] LIFETIME_DESTROY` then `[PILOTTEST] TEST_COMPLETE` | Attempts `DeleteObject(GetPlayerHandle())`, then schedules `FailMission`; validates release through a supported mission transition without relying on unsupported player `GetIn` |
 
 ## Deployment
 
@@ -101,7 +100,7 @@ Or `OPENSHIM_PILOT_FP_MANIP=1`.
 | Firing | SEMI (needs enemy or anim) | tries `exu.animation.Play` + `FireAt(nearestEnemy)`, else manual fire hold |
 | Walking/strafe | SEMI (`Goto` + `exu.animation.Play`) | manual WASD |
 | Jumping | MANUAL (no stable Lua Jump API) | prints tap-Space instruction + plays `jump` via EXU for feasibility only |
-| Re-enter vehicle | YES (`GetIn` or spawn `avtank`) | manual walk-to-vehicle + USE |
+| Pilot lifetime release | YES (`DeleteObject`) | a fresh harness launch validates subsequent acquisition |
 
 If a manual step is required, the harness prints:
 
