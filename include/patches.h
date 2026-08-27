@@ -114,6 +114,7 @@ namespace BZROpenShim
         std::vector<HookEngine::PatchDef> patches =
         {
             { 0, HookEngine::PatchType::JMP5, {}, "Map Sorting", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "GameObject Handle Stale Slot Guard", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Map List Rewrite for Hop-Fix 1/3", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Map List Rewrite for Hop-Fix 2/3", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Map List Rewrite for Hop-Fix 3/3", false, {} },

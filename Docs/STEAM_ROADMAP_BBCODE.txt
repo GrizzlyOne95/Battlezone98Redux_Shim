@@ -352,7 +352,6 @@ The original community bug tracker contains more engine/runtime defects than the
 [*] [b]Pilot hardpoint ODF ordering crash[/b] - 1.5 warns instead of crashing, so this appears to be a Redux-specific parser/state regression. The exact Redux crash consumer still needs to be pinned down with a controlled repro/minidump.
 [*] [b]weaponMask=00000 Follow crash[/b] - the encoded mask and several consumers are known, but the exact Follow-path fault still needs to be captured. The fix should preserve intentionally weaponless units rather than rewriting the mask.
 [*] [b]Custom Campaign BMP thumbnail crash[/b] - unsupported BMP metadata/bit depths can hard-crash the Custom Campaign browser. The goal is to make the decoder reject unsupported images safely instead.
-[*] [b]Inst4XMission save/load crashes[/b] - older Inst4XMission missions can crash fairly often when loading saves. This needs a real native root-cause investigation rather than requiring every mission to be converted to LuaMission.
 [*] [b]Shift-F9 editor task-mode crash[/b] - selecting a unit whose classLabel and AI process do not match can crash the editor. This is especially relevant to legacy/custom mission units.
 [*] [b]Second-session editor corruption/crash[/b] - entering the editor works normally the first time, but after returning to menu and loading another mission in the same process the minimap can be empty and changing a terrain tile reliably crashes. This is a strong mission-lifetime/state-reset candidate.
 [*] [b]DX11 / renderer lifetime instability[/b] - several distinct DX11/Ogre lifetime problems have already been found and patched, but DX11-specific crashes, texture failures, Alt+Tab/Alt+Enter, fullscreen transitions, and shutdown behavior should continue to be tracked by individual crash signatures rather than as one generic "random crash."
@@ -536,6 +535,8 @@ A lot of things that used to be on this roadmap have already moved into working 
 [*] Tug cargo PostLoad/start-state recovery
 [*] Satellite/F9 stale target-camera teardown fix
 [*] Earthquake/dayquake save-load replay/fade fix
+[*] GOG Inst4XMission save-load crash fix: Redux can reconstruct PathSpawn with stale cached powerup handles, and its stock handle resolver accepted an empty zero-generation object-pool slot as valid. OpenShim now rejects stale/incomplete slots so PathSpawn follows its existing missing-object recovery path; the originally crashing save was loaded repeatedly without a new crash or dump.
+[*] Destruction-chunk proxy mission-transition lifetime fix: OpenShim now hides and releases shim-owned Ogre proxy entities before Redux unloads the outgoing Modable resource group, preventing loading-screen traversal of an attached entity whose mesh/submesh data has already been destroyed.
 [*] Cinematic camera FOV/zoom recovery when entering from satellite view
 [*] Howitzer undeployed sniper-retaliation guard
 [*] Constructor remote-build-after-death cleanup/refund/unassignment fix
