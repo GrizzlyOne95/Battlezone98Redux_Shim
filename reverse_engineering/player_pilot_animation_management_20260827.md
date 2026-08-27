@@ -3,8 +3,9 @@
 **Branch:** `agent/pilot-animation-management` (worktree: `BZR-OpenShim`)  
 **Scope:** Determine how Battlezone 98 Redux manages the local player's pilot animation state on foot, prove observability/controllability via OpenShim/EXU, and recommend an architecture for custom first-person animations.  
 **Test lab:** `lcbench` + purpose-specific harness `reverse_engineering/test_missions/pilot_anim_capture/`  
-**Instrumentation:** `src/patches/pilot_fp_animation_trace.cpp` (v2), `include/pilot_fp_animation_trace.h`, `reverse_engineering/PILOT_FP_ANIMATION_TRACE.md`  
+**Instrumentation:** `src/patches/pilot_fp_animation_trace.cpp` (v3 dual-target), `include/pilot_fp_animation_trace.h`, `reverse_engineering/PILOT_FP_ANIMATION_TRACE.md`
 **Build:** GOG Redux 2.2.301, `battlezone98redux.exe` VA 0x401000, Ogre 1.10 `OgreMain.dll` SHA-256 `E5E6939…`
+**Runtime Capture:** **NOT YET EXECUTED** — harness and hooks are built and validated (`Release|Win32` + `run_ogre_profiler_tests.ps1`/`run_ini_tests.ps1` pass), but no `openshim.log` with `[PILOTTEST]`/`[FPAnim]` correlation has been collected. All `PROVEN-RUNTIME` below is from prior probes/art assets, not from the 32 s `pilot` run. Example correlations in §7/§19 are *intended repro*, not captured evidence.
 
 ---
 
@@ -23,8 +24,9 @@
 
 **What this investigation delivered**  
 - Enhanced the existing read-only trace to v2: caller RVA via `_ReturnAddress()`, transition filtering, `dt` throttling (≤2 Hz), 1.5 s inventory poll (`boundStates` + `hasAnimSet` existence), and a fail-closed manipulation gate (`freeze`/`forceWeight` behind `OPENSHIM_PILOT_FP_MANIP`). Code never alters stock behavior unless explicitly opted-in for isolated `lcbench` testing.
-- Built a deterministic Lua harness `pilot_anim_capture/pilot_test.lua` (32 s, 12 stages) emitting `[PILOTTEST] T+…` markers that timestamp-correlate with `[FPAnim]` logs for idle/walk/strafe/turn/crouch/sniper/fire/jump/land/vehicle-enter/weapon-change.
-- Audited EXU's high-level `exu.animation` API (`ExtraUtilities/src/Game/AnimationApi.h`) and confirmed it already exposes sufficient primitives for GameObject-targeted control; `localFirstPerson` target remains intentionally fail-closed pending FP ownership validation.
+- **FP qualification pass (v3, this commit):** generalized the binding machinery to `TargetState` (`WORLD`/`FP`) sharing the same transition/throttling code (per §3 of the follow-up spec, no duplicated `RegisterBinding`/`LogBound*`). Added FP discovery via **verified enumeration seam** `SceneManager::getMovableObjectIterator("Entity")` (`OgreSceneManager.h:3316`, `OgreMain.dll` export `?getMovableObjectIterator@SceneManager@Ogre@@...` 5296) with `SceneManager` retrieval via global `0x00920EA0+0x08` (`bzr_hooks.cpp:2042`). `SceneManager::createEntity` is **not** used because the exe does not import any `createEntity`/`destroyEntity` overload (`dumpbin /imports` verified). Strict promotion requires `hasSkeleton` + `hasAnimationState("idle")` + `hasAnimationState("stand2Kneel")` (pilot vocabulary) + `worldIsPilot`, with `generation`-based lifetime and explicit `target acquired / released / reacquired` logging. Broad: `hasSkeleton`; strict: pilot anim set. Logs split `[FPAnim]` (WORLD, compat) vs `[FPAnim][FP]` + `[MANIP][WORLD]`/`[MANIP][FP]`.
+- Built a deterministic Lua harness `pilot_anim_capture/pilot_test.lua` (32 s, 12 stages) emitting `[PILOTTEST] T+…` markers that timestamp-correlate with `[FPAnim]` logs for idle/walk/strafe/turn/crouch/sniper/fire/jump/land/vehicle-enter/weapon-change. The harness is unchanged for the FP run — the same 32 s sequence now drives both WORLD and FP inventories.
+- Audited EXU's high-level `exu.animation` API (`ExtraUtilities/src/Game/AnimationApi.h`) and confirmed it already exposes sufficient primitives for GameObject-targeted control; `localFirstPerson` target remains intentionally fail-closed pending FP ownership validation (now gated on `g_Fp.entity` promotion).
 - Provides a concrete reproduction procedure and a feasibility matrix (Options A–D) with a recommendation for a split OpenShim (low-level ownership) + EXU (Lua-facing) architecture behind a validated `aspilo_fp` resolver.
 
 **Confidence key used below:** `PROVEN-RUNTIME`, `PROVEN-NATIVE` (disassembly/symbols), `STRONGLY SUPPORTED` (multiple independent static sources), `INFERRED`, `UNKNOWN`.

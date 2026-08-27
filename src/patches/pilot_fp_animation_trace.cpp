@@ -19,6 +19,15 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <algorithm>
+
+// Ogre 1.10 headers for FP enumeration. This TU is compiled as C++14 per
+// BZROpenShim.vcxproj (see ogre_animation_profiler.cpp) because the pinned
+// Ogre 1.10 headers depend on std surfaces removed in C++20.
+#include "OgreEntity.h"
+#include "OgreSceneManager.h"
+#include "OgreMesh.h"
+#include "OgreResource.h"
 
 namespace BZROpenShim
 {
@@ -34,6 +43,7 @@ namespace BZROpenShim
         constexpr char kManipModeIniKey[] = "PilotFPAnimManipMode";
         constexpr DWORD kPollSleepMs = 25;
         constexpr DWORD kInventoryPollIntervalMs = 1500;
+        constexpr DWORD kFpEnumerateIntervalMs = 1500;
         constexpr size_t kMaxBindings = 64;
 
         // Verified current Redux layout already used by OpenShim's local-player,
@@ -44,6 +54,12 @@ namespace BZROpenShim
         constexpr uintptr_t kUserObjectRva = 0x00517AFC;
         constexpr size_t kPersonRenderBridgeOffset = 0x0F0;
         constexpr size_t kRenderBridgeOgreEntityOffset = 0x094;
+
+        // SceneManager global structure verified in bzr_hooks.cpp:2042 (same build)
+        //   0x00920EA0 -> structure, +0x08 -> SceneManager*
+        // Used to obtain SceneManager* without relying on SceneManager::createEntity import.
+        constexpr uintptr_t kOgreSceneManagerStructureAddr = 0x00920EA0;
+        constexpr uintptr_t kOgreSceneManagerOffset = 0x08;
 
         using FnEntityGetAnimationState = void* (__thiscall*)(void*, const std::string&);
         using FnEntityGetAllAnimationStates = void* (__thiscall*)(void*);
@@ -64,7 +80,6 @@ namespace BZROpenShim
             void* state = nullptr;
             void* entity = nullptr;
             char animation[64] = {};
-            // Last logged values for transition filtering
             bool hasLastEnabled = false;
             bool lastEnabled = false;
             bool hasLastLoop = false;
@@ -75,17 +90,40 @@ namespace BZROpenShim
             uint32_t dtSuppressedCount = 0;
         };
 
+        enum class TargetKind { World, Fp };
+
+        struct TargetState
+        {
+            std::atomic<void*> entity{ nullptr };
+            std::atomic<uint64_t> generation{ 0 };
+            std::array<TraceBinding, kMaxBindings> bindings{};
+            std::mutex mutex;
+            DWORD lastInventoryTick{ 0 };
+            void* lastInventoryEntity{ nullptr };
+            char meshName[64]{};
+            char skeletonName[64]{};
+            char entityName[64]{};
+        };
+
+        const char* TargetKindPrefix(TargetKind kind)
+        {
+            return kind == TargetKind::World ? "" : "[FP]";
+        }
+
+        const char* TargetKindName(TargetKind kind)
+        {
+            return kind == TargetKind::World ? "WORLD" : "FP";
+        }
+
         std::atomic<bool> g_Enabled{ false };
         std::atomic<bool> g_ShutdownRequested{ false };
-        std::atomic<void*> g_TargetEntity{ nullptr };
-        // Manipulation experiment gate: fail-closed, dormant unless explicitly enabled.
         std::atomic<bool> g_ManipEnabled{ false };
         char g_ManipTargetAnim[64] = "stand2Kneel";
         enum class ManipMode { Freeze, ForceWeight, Disabled } g_ManipMode = ManipMode::Freeze;
         uintptr_t g_WorkerThread = 0;
 
-        std::mutex g_BindingMutex;
-        std::array<TraceBinding, kMaxBindings> g_Bindings{};
+        TargetState g_World;
+        TargetState g_Fp;
 
         FnEntityGetAnimationState g_RealEntityGetAnimationState = nullptr;
         FnEntityGetAllAnimationStates g_RealEntityGetAllAnimationStates = nullptr;
@@ -95,12 +133,23 @@ namespace BZROpenShim
         FnAnimationSetWeight g_RealAnimationSetWeight = nullptr;
         FnAnimationAddTime g_RealAnimationAddTime = nullptr;
 
-        // Optional Ogre introspection (best-effort, never required for trace)
+        using FnEntityHasSkeleton = bool(__thiscall*)(void*);
+        using FnEntityHasAnimationState = bool(__thiscall*)(void*, const std::string&);
+        using FnMovableObjectGetName = const std::string&(__thiscall*)(void*);
+        FnEntityHasSkeleton g_FnEntityHasSkeleton = nullptr;
+        FnEntityHasAnimationState g_FnEntityHasAnimationState = nullptr;
+        FnMovableObjectGetName g_FnMovableObjectGetName = nullptr;
+
         void* g_EntityGetMeshExport = nullptr;
         void* g_EntityHasSkeletonExport = nullptr;
 
-        DWORD g_LastInventoryTick = 0;
-        void* g_LastInventoryEntity = nullptr;
+        DWORD g_LastFpEnumerateTick = 0;
+
+        // Strict pilot FP mesh bases (exact normalized base without extension). From
+        // craft_bounds_architecture_20260822.md:122 table (15-entry) pilot entries.
+        const char* kStrictPilotFpBases[] = {
+            "aspilo_fp", "bspilo_fp", "sspilo_fp", "cspilo_fp", "bsheav_fp"
+        };
 
         bool StringIsTruthy(const char* value)
         {
@@ -155,9 +204,7 @@ namespace BZROpenShim
             char animName[64] = {};
             GetPrivateProfileStringA(kIniSection, kManipAnimIniKey, "stand2Kneel", animName, sizeof(animName), iniPath.c_str());
             if (animName[0])
-            {
                 strncpy_s(g_ManipTargetAnim, sizeof(g_ManipTargetAnim), animName, _TRUNCATE);
-            }
             char modeName[32] = {};
             GetPrivateProfileStringA(kIniSection, kManipModeIniKey, "freeze", modeName, sizeof(modeName), iniPath.c_str());
             std::string modeLower(modeName);
@@ -246,16 +293,12 @@ namespace BZROpenShim
                     reinterpret_cast<const uint8_t*>(vtable[-1]);
                 if (!MainModuleContains(completeObjectLocator) ||
                     !MainModuleContains(completeObjectLocator + 15))
-                {
                     return false;
-                }
                 const auto* typeDescriptor =
                     *reinterpret_cast<const uint8_t* const*>(completeObjectLocator + 12);
                 if (!MainModuleContains(typeDescriptor) ||
                     !MainModuleContains(typeDescriptor + 8))
-                {
                     return false;
-                }
                 const char* decoratedName =
                     reinterpret_cast<const char*>(typeDescriptor + 8);
                 size_t length = 0;
@@ -322,83 +365,154 @@ namespace BZROpenShim
             }
         }
 
-        void ClearBindingsLocked()
+        // No-unwind helper for SceneManager global. Must not have C++ objects before __try.
+        Ogre::SceneManager* SafeGetSceneManagerViaGlobal()
         {
-            for (TraceBinding& binding : g_Bindings)
-                binding = {};
+            void* sm = nullptr;
+            __try
+            {
+                auto* structure = *reinterpret_cast<uint8_t**>(kOgreSceneManagerStructureAddr);
+                if (!structure)
+                    return nullptr;
+                sm = *reinterpret_cast<void**>(structure + kOgreSceneManagerOffset);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+            return static_cast<Ogre::SceneManager*>(sm);
         }
 
-        void RefreshTargetEntity()
+        bool SafeEntityHasSkeleton(void* ent)
         {
-            void* person = nullptr;
-            char className[96] = {};
-            void* entity = ResolveCurrentLocalPersonOgreEntity(
-                person, className, sizeof(className));
-            void* previous = g_TargetEntity.load(std::memory_order_acquire);
-            if (previous == entity)
-                return;
+            if (!g_FnEntityHasSkeleton || !ent)
+                return false;
+            bool result = false;
+            __try
             {
-                std::lock_guard<std::mutex> lock(g_BindingMutex);
-                ClearBindingsLocked();
-                g_TargetEntity.store(entity, std::memory_order_release);
+                result = g_FnEntityHasSkeleton(ent);
             }
-            if (entity)
+            __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                LogShimA(
-                    LogLevel::Info,
-                    kComponent,
-                    "[FPAnim] target person=0x%p class=%s entity=0x%p renderBridge=Person+0x%03X/Ogre+0x%03X",
-                    person,
-                    className[0] ? className : "?",
-                    entity,
-                    static_cast<unsigned>(kPersonRenderBridgeOffset),
-                    static_cast<unsigned>(kRenderBridgeOgreEntityOffset));
-                // Force inventory poll on next loop iteration for new target
-                g_LastInventoryTick = 0;
-                g_LastInventoryEntity = nullptr;
+                return false;
             }
-            else if (previous)
+            return result;
+        }
+
+        bool CallHasAnimNoUnwind(void* ent, const std::string& str)
+        {
+            bool result = false;
+            __try
             {
-                LogShimA(
-                    LogLevel::Info,
-                    kComponent,
-                    "[FPAnim] local userObject is no longer a Person; target cleared");
+                result = g_FnEntityHasAnimationState(ent, str);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+            return result;
+        }
+
+        bool SafeEntityHasAnimationState(void* ent, const char* name)
+        {
+            if (!g_FnEntityHasAnimationState || !ent || !name)
+                return false;
+            try
+            {
+                std::string tmp(name);
+                return CallHasAnimNoUnwind(ent, tmp);
+            }
+            catch (...)
+            {
+                return false;
             }
         }
 
-        void RegisterBinding(void* state, void* entity, const std::string& animation)
+        const std::string* SafeMovableObjectGetNamePtr(void* mo)
+        {
+            if (!g_FnMovableObjectGetName || !mo)
+                return nullptr;
+            const std::string* ptr = nullptr;
+            __try
+            {
+                const std::string& ref = g_FnMovableObjectGetName(mo);
+                ptr = &ref;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+            return ptr;
+        }
+
+        std::string NormalizeMeshBase(const std::string& meshName)
+        {
+            std::string base = meshName;
+            // Strip path
+            size_t slash = base.find_last_of("/\\");
+            if (slash != std::string::npos)
+                base = base.substr(slash + 1);
+            // Strip extension
+            size_t dot = base.find_last_of('.');
+            if (dot != std::string::npos)
+                base = base.substr(0, dot);
+            // Lowercase
+            for (char& c : base) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return base;
+        }
+
+        bool IsBroadFpMesh(const std::string& meshName)
+        {
+            std::string lower = meshName;
+            for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return lower.find("_fp") != std::string::npos;
+        }
+
+        bool IsStrictFpPilotMesh(const std::string& meshName)
+        {
+            std::string base = NormalizeMeshBase(meshName);
+            for (const char* known : kStrictPilotFpBases)
+            {
+                if (base == known)
+                    return true;
+            }
+            return false;
+        }
+
+        void ClearBindingsLocked(TargetState& target)
+        {
+            for (TraceBinding& b : target.bindings)
+                b = {};
+        }
+
+        // Generalized binding helpers
+
+        void RegisterBindingForTarget(TargetState& target, TargetKind kind, void* state, void* entity, const std::string& animation)
         {
             if (!state || !entity)
                 return;
             bool logBinding = false;
             {
-                std::lock_guard<std::mutex> lock(g_BindingMutex);
+                std::lock_guard<std::mutex> lock(target.mutex);
                 TraceBinding* freeSlot = nullptr;
-                for (TraceBinding& binding : g_Bindings)
+                for (TraceBinding& b : target.bindings)
                 {
-                    if (binding.state == state)
+                    if (b.state == state)
                     {
-                        const bool changed =
-                            binding.entity != entity ||
-                            std::strcmp(binding.animation, animation.c_str()) != 0;
-                        binding.entity = entity;
-                        CopyText(binding.animation, sizeof(binding.animation), animation.c_str());
+                        const bool changed = b.entity != entity || std::strcmp(b.animation, animation.c_str()) != 0;
+                        b.entity = entity;
+                        CopyText(b.animation, sizeof(b.animation), animation.c_str());
                         logBinding = changed;
-                        freeSlot = &binding;
+                        freeSlot = &b;
                         break;
                     }
-                    if (!freeSlot && binding.state == nullptr)
-                        freeSlot = &binding;
+                    if (!freeSlot && b.state == nullptr)
+                        freeSlot = &b;
                 }
                 if (!freeSlot)
                 {
-                    LogShimA(
-                        LogLevel::Warn,
-                        kComponent,
-                        "[FPAnim] binding table full; state=0x%p entity=0x%p anim=%s",
-                        state,
-                        entity,
-                        animation.c_str());
+                    LogShimA(LogLevel::Warn, kComponent, "[FPAnim]%s binding table full; state=0x%p entity=0x%p anim=%s",
+                        TargetKindPrefix(kind), state, entity, animation.c_str());
                     return;
                 }
                 if (freeSlot->state == nullptr)
@@ -414,44 +528,297 @@ namespace BZROpenShim
                 void* retAddr = _ReturnAddress();
                 bool inMain = false;
                 uintptr_t rva = CallerRva(retAddr, inMain);
-                LogShimA(
-                    LogLevel::Info,
-                    kComponent,
-                    "[FPAnim] entity=0x%p anim=%s state=0x%p bound=1 caller=0x%p rva=0x%08X inMain=%u",
-                    entity,
-                    animation.c_str(),
-                    state,
-                    retAddr,
-                    static_cast<unsigned>(rva),
-                    inMain ? 1u : 0u);
+                LogShimA(LogLevel::Info, kComponent, "[FPAnim]%s entity=0x%p anim=%s state=0x%p bound=1 caller=0x%p rva=0x%08X inMain=%u gen=%llu",
+                    TargetKindPrefix(kind), entity, animation.c_str(), state, retAddr, static_cast<unsigned>(rva), inMain ? 1u : 0u,
+                    static_cast<unsigned long long>(target.generation.load(std::memory_order_acquire)));
             }
         }
 
-        bool FindBinding(void* state, void*& entity, char* animation, size_t animationSize)
+        bool FindBindingForTarget(TargetState& target, void* state, void*& entity, char* animation, size_t animationSize)
         {
             if (!state)
                 return false;
-            std::lock_guard<std::mutex> lock(g_BindingMutex);
-            for (const TraceBinding& binding : g_Bindings)
+            std::lock_guard<std::mutex> lock(target.mutex);
+            for (const TraceBinding& b : target.bindings)
             {
-                if (binding.state != state)
+                if (b.state != state)
                     continue;
-                entity = binding.entity;
-                CopyText(animation, animationSize, binding.animation);
+                entity = b.entity;
+                CopyText(animation, animationSize, b.animation);
                 return true;
             }
             return false;
         }
 
-        TraceBinding* FindBindingMutable(void* state)
+        TraceBinding* FindBindingMutableForTarget(TargetState& target, void* state)
         {
-            // Caller must hold g_BindingMutex
-            for (TraceBinding& binding : g_Bindings)
-            {
-                if (binding.state == state)
-                    return &binding;
-            }
+            for (TraceBinding& b : target.bindings)
+                if (b.state == state)
+                    return &b;
             return nullptr;
+        }
+
+        // Safe helper for getAllAnimationStates without unwind before __try
+        void* SafeGetAllAnimationStates(void* entity)
+        {
+            if (!g_RealEntityGetAllAnimationStates || !entity)
+                return nullptr;
+            void* result = nullptr;
+            __try
+            {
+                result = g_RealEntityGetAllAnimationStates(entity);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return reinterpret_cast<void*>(0x1);
+            }
+            return result;
+        }
+
+        void RefreshWorldTarget()
+        {
+            void* person = nullptr;
+            char className[96] = {};
+            void* entity = ResolveCurrentLocalPersonOgreEntity(person, className, sizeof(className));
+            void* previous = g_World.entity.load(std::memory_order_acquire);
+            if (previous == entity)
+                return;
+            {
+                std::lock_guard<std::mutex> lock(g_World.mutex);
+                ClearBindingsLocked(g_World);
+                g_World.entity.store(entity, std::memory_order_release);
+                if (entity)
+                    g_World.generation.fetch_add(1, std::memory_order_acq_rel);
+                else
+                    g_World.generation.fetch_add(1, std::memory_order_acq_rel);
+                g_World.lastInventoryTick = 0;
+                g_World.lastInventoryEntity = nullptr;
+            }
+            if (entity)
+            {
+                LogShimA(LogLevel::Info, kComponent, "[FPAnim] target person=0x%p class=%s entity=0x%p renderBridge=Person+0x%03X/Ogre+0x%03X gen=%llu",
+                    person, className[0] ? className : "?", entity,
+                    static_cast<unsigned>(kPersonRenderBridgeOffset),
+                    static_cast<unsigned>(kRenderBridgeOgreEntityOffset),
+                    static_cast<unsigned long long>(g_World.generation.load()));
+            }
+            else if (previous)
+            {
+                LogShimA(LogLevel::Info, kComponent, "[FPAnim] local userObject is no longer a Person; target cleared gen=%llu",
+                    static_cast<unsigned long long>(g_World.generation.load()));
+                // Also clear FP target when world pilot disappears — FP presentation should not outlive pilot.
+                void* fpPrev = g_Fp.entity.load(std::memory_order_acquire);
+                if (fpPrev)
+                {
+                    std::lock_guard<std::mutex> lock(g_Fp.mutex);
+                    ClearBindingsLocked(g_Fp);
+                    g_Fp.entity.store(nullptr, std::memory_order_release);
+                    g_Fp.generation.fetch_add(1, std::memory_order_acq_rel);
+                    g_Fp.meshName[0] = '\0';
+                    g_Fp.skeletonName[0] = '\0';
+                    g_Fp.entityName[0] = '\0';
+                    g_Fp.lastInventoryTick = 0;
+                    g_Fp.lastInventoryEntity = nullptr;
+                    LogShimA(LogLevel::Info, kComponent, "[FPAnim][FP] target released reason=world-pilot-cleared prevEntity=0x%p gen=%llu",
+                        fpPrev, static_cast<unsigned long long>(g_Fp.generation.load()));
+                }
+            }
+        }
+
+        // FP enumeration via Ogre SceneManager::getMovableObjectIterator("Entity")
+        // Verified OgreMain.dll export: ?getMovableObjectIterator@SceneManager@Ogre@@UAE?AV?$MapIterator@...
+        // Verified header: OgreSceneManager.h:3316 MovableObjectIterator getMovableObjectIterator(const String&)
+        // This seam is the documented fallback when creation interception via import is not
+        // available (exe does not import SceneManager::createEntity — verified via dumpbin /imports).
+        void RefreshFpTargetViaEnumeration()
+        {
+            DWORD now = GetTickCount();
+            if (now - g_LastFpEnumerateTick < kFpEnumerateIntervalMs)
+                return;
+            g_LastFpEnumerateTick = now;
+
+            // Only enumerate when local player is a Person — temporal creation near HopOut
+            void* worldPerson = nullptr;
+            char className[96] = {};
+            void* worldEntity = ResolveCurrentLocalPersonOgreEntity(worldPerson, className, sizeof(className));
+            bool worldIsPilot = (worldEntity != nullptr);
+
+            Ogre::SceneManager* sm = SafeGetSceneManagerViaGlobal();
+            if (!sm)
+            {
+                // No SceneManager yet (early startup) — nothing to do, fail closed.
+                return;
+            }
+
+            // Collect broad candidates and strict pilot candidates
+            std::vector<Ogre::Entity*> broadCandidates;
+            std::vector<Ogre::Entity*> strictCandidates;
+            std::vector<std::string> broadMeshNames;
+            std::vector<std::string> strictMeshNames;
+
+            try
+            {
+                Ogre::SceneManager::MovableObjectIterator it = sm->getMovableObjectIterator("Entity");
+                while (it.hasMoreElements())
+                {
+                    Ogre::MovableObject* mo = nullptr;
+                    try { mo = it.getNext(); } catch (...) { continue; }
+                    if (!mo)
+                        continue;
+                    Ogre::Entity* ent = nullptr;
+                    try { ent = static_cast<Ogre::Entity*>(mo); } catch (...) { continue; }
+                    if (!ent)
+                        continue;
+                    // Strict qualification via animation vocabulary (pilot-specific) rather than mesh name alone.
+                    // Broad: hasSkeleton. Strict: hasSkeleton + hasAnimationState("stand2Kneel") + hasAnimationState("idle")
+                    bool hasSkel = SafeEntityHasSkeleton(ent);
+                    if (!hasSkel)
+                        continue;
+                    bool hasIdle = SafeEntityHasAnimationState(ent, "idle");
+                    bool hasStand2Kneel = SafeEntityHasAnimationState(ent, "stand2Kneel");
+                    // Broad candidate: any skeleton with idle (catches all animated Entities, but we log and then filter)
+                    // For pilot FP discovery, broad is hasSkel, strict is pilot anim set
+                    broadCandidates.push_back(ent);
+                    // Use hasIdle as broad mesh name placeholder; strict requires pilot anims
+                    std::string meshName = hasIdle ? "hasIdle" : "unknown";
+                    std::string skeletonName = hasStand2Kneel ? "hasStand2Kneel" : "unknown";
+                    broadMeshNames.push_back(meshName);
+                    if (hasStand2Kneel && hasIdle)
+                    {
+                        strictCandidates.push_back(ent);
+                        strictMeshNames.push_back(meshName);
+                    }
+                    // Log broad candidate (even if not strict) for discovery
+                    std::string entName;
+                    const std::string* namePtr = SafeMovableObjectGetNamePtr(mo);
+                    if (namePtr) entName = *namePtr;
+                    void* retAddr = _ReturnAddress();
+                    bool inMain = false;
+                    uintptr_t rva = CallerRva(retAddr, inMain);
+                    bool isStrict = hasStand2Kneel && hasIdle;
+                    LogShimA(LogLevel::Info, kComponent,
+                        "[FPAnim][FP] candidate entity=0x%p mesh=%s skeleton=%s hasSkeleton=%u name=%s caller=0x%p rva=0x%08X inMain=%u strict=%u worldPilot=%u",
+                        ent, meshName.c_str(), skeletonName.c_str(), hasSkel ? 1u : 0u, entName.c_str(),
+                        retAddr, static_cast<unsigned>(rva), inMain ? 1u : 0u,
+                        isStrict ? 1u : 0u, worldIsPilot ? 1u : 0u);
+                }
+            }
+            catch (...)
+            {
+                LogShimA(LogLevel::Warn, kComponent, "[FPAnim][FP] enumeration exception SceneManager=0x%p", sm);
+                return;
+            }
+
+            // Promotion logic: require strict pilot mesh + worldIsPilot
+            void* currentFp = g_Fp.entity.load(std::memory_order_acquire);
+            bool currentStillAlive = false;
+            for (Ogre::Entity* c : broadCandidates)
+            {
+                if (c == currentFp)
+                {
+                    currentStillAlive = true;
+                    break;
+                }
+            }
+
+            if (!currentFp)
+            {
+                // No current target — promote if we have strict candidate and worldIsPilot
+                if (!strictCandidates.empty() && worldIsPilot)
+                {
+                    Ogre::Entity* chosen = strictCandidates[0];
+                    std::string chosenMesh = strictMeshNames[0];
+                    std::string chosenSkel = "unknown";
+                    std::string chosenEntName;
+                    const std::string* namePtr2 = SafeMovableObjectGetNamePtr(chosen);
+                    if (namePtr2) chosenEntName = *namePtr2;
+                    {
+                        std::lock_guard<std::mutex> lock(g_Fp.mutex);
+                        ClearBindingsLocked(g_Fp);
+                        g_Fp.entity.store(chosen, std::memory_order_release);
+                        g_Fp.generation.fetch_add(1, std::memory_order_acq_rel);
+                        CopyText(g_Fp.meshName, sizeof(g_Fp.meshName), chosenMesh.c_str());
+                        CopyText(g_Fp.skeletonName, sizeof(g_Fp.skeletonName), chosenSkel.c_str());
+                        CopyText(g_Fp.entityName, sizeof(g_Fp.entityName), chosenEntName.c_str());
+                        g_Fp.lastInventoryTick = 0;
+                        g_Fp.lastInventoryEntity = nullptr;
+                    }
+                    void* retAddr = _ReturnAddress();
+                    bool inMain = false;
+                    uintptr_t rva = CallerRva(retAddr, inMain);
+                    LogShimA(LogLevel::Info, kComponent,
+                        "[FPAnim][FP] target acquired entity=0x%p mesh=%s skeleton=%s name=%s gen=%llu caller=0x%p rva=0x%08X inMain=%u strict=%u worldPilot=%u",
+                        chosen, chosenMesh.c_str(), chosenSkel.c_str(), chosenEntName.c_str(),
+                        static_cast<unsigned long long>(g_Fp.generation.load()),
+                        retAddr, static_cast<unsigned>(rva), inMain ? 1u : 0u, 1u, worldIsPilot ? 1u : 0u);
+                }
+                else if (!broadCandidates.empty())
+                {
+                    // Log that broad candidates exist but no strict promotion — useful for asset discovery
+                    LogShimA(LogLevel::Info, kComponent,
+                        "[FPAnim][FP] no strict promotion: broad=%u strict=%u worldPilot=%u",
+                        static_cast<unsigned>(broadCandidates.size()),
+                        static_cast<unsigned>(strictCandidates.size()),
+                        worldIsPilot ? 1u : 0u);
+                }
+            }
+            else
+            {
+                // Have current target — check if still alive
+                if (!currentStillAlive)
+                {
+                    // Released — could be destroyEntity, clearScene, or SceneManager rebuild
+                    {
+                        std::lock_guard<std::mutex> lock(g_Fp.mutex);
+                        ClearBindingsLocked(g_Fp);
+                        g_Fp.entity.store(nullptr, std::memory_order_release);
+                        g_Fp.generation.fetch_add(1, std::memory_order_acq_rel);
+                        g_Fp.meshName[0] = '\0';
+                        g_Fp.skeletonName[0] = '\0';
+                        g_Fp.entityName[0] = '\0';
+                        g_Fp.lastInventoryTick = 0;
+                        g_Fp.lastInventoryEntity = nullptr;
+                    }
+                    LogShimA(LogLevel::Info, kComponent,
+                        "[FPAnim][FP] target released entity=0x%p reason=not-in-enumeration gen=%llu broad=%u strict=%u",
+                        currentFp, static_cast<unsigned long long>(g_Fp.generation.load()),
+                        static_cast<unsigned>(broadCandidates.size()),
+                        static_cast<unsigned>(strictCandidates.size()));
+                    // Attempt reacquire if new strict candidate exists
+                    if (!strictCandidates.empty() && worldIsPilot)
+                    {
+                        Ogre::Entity* chosen = strictCandidates[0];
+                        std::string chosenMesh = strictMeshNames[0];
+                        std::string chosenSkel = "unknown";
+                        std::string chosenEntName;
+                        const std::string* namePtr2 = SafeMovableObjectGetNamePtr(chosen);
+                        if (namePtr2) chosenEntName = *namePtr2;
+                        {
+                            std::lock_guard<std::mutex> lock(g_Fp.mutex);
+                            ClearBindingsLocked(g_Fp);
+                            g_Fp.entity.store(chosen, std::memory_order_release);
+                            g_Fp.generation.fetch_add(1, std::memory_order_acq_rel);
+                            CopyText(g_Fp.meshName, sizeof(g_Fp.meshName), chosenMesh.c_str());
+                            CopyText(g_Fp.skeletonName, sizeof(g_Fp.skeletonName), chosenSkel.c_str());
+                            CopyText(g_Fp.entityName, sizeof(g_Fp.entityName), chosenEntName.c_str());
+                            g_Fp.lastInventoryTick = 0;
+                            g_Fp.lastInventoryEntity = nullptr;
+                        }
+                        void* retAddr = _ReturnAddress();
+                        bool inMain = false;
+                        uintptr_t rva = CallerRva(retAddr, inMain);
+                        LogShimA(LogLevel::Info, kComponent,
+                            "[FPAnim][FP] target reacquired entity=0x%p mesh=%s skeleton=%s name=%s gen=%llu caller=0x%p rva=0x%08X inMain=%u",
+                            chosen, chosenMesh.c_str(), chosenSkel.c_str(), chosenEntName.c_str(),
+                            static_cast<unsigned long long>(g_Fp.generation.load()),
+                            retAddr, static_cast<unsigned>(rva), inMain ? 1u : 0u);
+                    }
+                }
+                else
+                {
+                    // Still alive — optionally update meshName if changed (should not)
+                }
+            }
         }
 
         std::vector<ExportMatch> FindExportsContaining(const char* token)
@@ -488,9 +855,7 @@ namespace BZROpenShim
                 const DWORD functionRva = functions[ordinal];
                 if (functionRva >= directory.VirtualAddress &&
                     functionRva < directory.VirtualAddress + directory.Size)
-                {
                     continue;
-                }
                 void* address = base + functionRva;
                 if (OgreRuntime::ContainsAddress(address))
                     matches.push_back({ name, address });
@@ -503,22 +868,12 @@ namespace BZROpenShim
             const auto matches = FindExportsContaining(token);
             if (matches.size() != 1)
             {
-                LogShimA(
-                    LogLevel::Warn,
-                    kComponent,
-                    "[FPAnim] %s export match count=%u token=%s; observer unavailable",
-                    label,
-                    static_cast<unsigned>(matches.size()),
-                    token);
+                LogShimA(LogLevel::Warn, kComponent, "[FPAnim] %s export match count=%u token=%s; observer unavailable",
+                    label, static_cast<unsigned>(matches.size()), token);
                 return nullptr;
             }
-            LogShimA(
-                LogLevel::Info,
-                kComponent,
-                "[FPAnim] resolved %s export=%s address=0x%p",
-                label,
-                matches[0].name.c_str(),
-                matches[0].address);
+            LogShimA(LogLevel::Info, kComponent, "[FPAnim] resolved %s export=%s address=0x%p",
+                label, matches[0].name.c_str(), matches[0].address);
             return matches[0].address;
         }
 
@@ -604,13 +959,10 @@ namespace BZROpenShim
                     uint8_t* destination = code + i + 5 + relative;
                     if (destination != target)
                         continue;
-                    const intptr_t delta =
-                        reinterpret_cast<uint8_t*>(replacement) - (code + i + 5);
+                    const intptr_t delta = reinterpret_cast<uint8_t*>(replacement) - (code + i + 5);
                     if (delta < (std::numeric_limits<int32_t>::min)() ||
                         delta > (std::numeric_limits<int32_t>::max)())
-                    {
                         continue;
-                    }
                     const int32_t newRelative = static_cast<int32_t>(delta);
                     if (!WriteRel32(code + i + 1, newRelative))
                         continue;
@@ -619,14 +971,7 @@ namespace BZROpenShim
                 }
             }
             if (patched)
-            {
-                LogShimA(
-                    LogLevel::Info,
-                    kComponent,
-                    "[FPAnim] %s direct-call observers installed=%u",
-                    label,
-                    static_cast<unsigned>(patched));
-            }
+                LogShimA(LogLevel::Info, kComponent, "[FPAnim] %s direct-call observers installed=%u", label, static_cast<unsigned>(patched));
             return patched;
         }
 
@@ -661,14 +1006,7 @@ namespace BZROpenShim
                 }
             }
             if (patched)
-            {
-                LogShimA(
-                    LogLevel::Info,
-                    kComponent,
-                    "[FPAnim] %s IAT observers installed=%u",
-                    label,
-                    static_cast<unsigned>(patched));
-            }
+                LogShimA(LogLevel::Info, kComponent, "[FPAnim] %s IAT observers installed=%u", label, static_cast<unsigned>(patched));
             return patched;
         }
 
@@ -679,36 +1017,28 @@ namespace BZROpenShim
                 PatchIatEntriesByTarget(executable, target, replacement, label);
         }
 
-        bool SnapshotBinding(void* state, void*& entity, char* animation, size_t animationSize)
-        {
-            return FindBinding(state, entity, animation, animationSize);
-        }
-
-        void LogBoundBool(void* state, const char* field, bool value)
+        void LogBoundBoolForTarget(TargetState& target, TargetKind kind, void* state, const char* field, bool value)
         {
             void* entity = nullptr;
             char animation[64] = {};
-            TraceBinding* mutableBinding = nullptr;
             {
-                std::lock_guard<std::mutex> lock(g_BindingMutex);
-                for (TraceBinding& b : g_Bindings)
+                std::lock_guard<std::mutex> lock(target.mutex);
+                for (TraceBinding& b : target.bindings)
                 {
                     if (b.state == state)
                     {
-                        mutableBinding = &b;
                         entity = b.entity;
                         CopyText(animation, sizeof(animation), b.animation);
                         break;
                     }
                 }
             }
-            if (!mutableBinding)
+            if (!entity)
                 return;
-
             bool shouldLog = true;
             {
-                std::lock_guard<std::mutex> lock(g_BindingMutex);
-                TraceBinding* b = FindBindingMutable(state);
+                std::lock_guard<std::mutex> lock(target.mutex);
+                TraceBinding* b = FindBindingMutableForTarget(target, state);
                 if (!b) return;
                 if (std::strcmp(field, "enabled") == 0)
                 {
@@ -727,31 +1057,23 @@ namespace BZROpenShim
             }
             if (!shouldLog)
                 return;
-
             void* retAddr = _ReturnAddress();
             bool inMain = false;
             uintptr_t rva = CallerRva(retAddr, inMain);
-            LogShimA(
-                LogLevel::Info,
-                kComponent,
-                "[FPAnim] entity=0x%p anim=%s state=0x%p %s=%u caller=0x%p rva=0x%08X inMain=%u",
-                entity,
-                animation,
-                state,
-                field,
-                value ? 1u : 0u,
-                retAddr,
-                static_cast<unsigned>(rva),
-                inMain ? 1u : 0u);
+            LogShimA(LogLevel::Info, kComponent,
+                "[FPAnim]%s entity=0x%p anim=%s state=0x%p %s=%u caller=0x%p rva=0x%08X inMain=%u gen=%llu",
+                TargetKindPrefix(kind), entity, animation, state, field, value ? 1u : 0u,
+                retAddr, static_cast<unsigned>(rva), inMain ? 1u : 0u,
+                static_cast<unsigned long long>(target.generation.load()));
         }
 
-        void LogBoundFloat(void* state, const char* field, float value)
+        void LogBoundFloatForTarget(TargetState& target, TargetKind kind, void* state, const char* field, float value)
         {
             void* entity = nullptr;
             char animation[64] = {};
             {
-                std::lock_guard<std::mutex> lock(g_BindingMutex);
-                for (const TraceBinding& b : g_Bindings)
+                std::lock_guard<std::mutex> lock(target.mutex);
+                for (const TraceBinding& b : target.bindings)
                 {
                     if (b.state == state)
                     {
@@ -763,14 +1085,12 @@ namespace BZROpenShim
             }
             if (!entity)
                 return;
-
-            // Throttle weight noise: only log when changed > epsilon
             if (std::strcmp(field, "weight") == 0)
             {
                 bool changed = true;
                 {
-                    std::lock_guard<std::mutex> lock(g_BindingMutex);
-                    TraceBinding* b = FindBindingMutable(state);
+                    std::lock_guard<std::mutex> lock(target.mutex);
+                    TraceBinding* b = FindBindingMutableForTarget(target, state);
                     if (b)
                     {
                         if (b->hasLastWeight && fabs(b->lastWeight - value) < 0.001f)
@@ -784,20 +1104,17 @@ namespace BZROpenShim
             }
             else if (std::strcmp(field, "dt") == 0)
             {
-                // Throttle per-frame dt: summarize suppressed frames
                 DWORD now = GetTickCount();
-                bool shouldLog = false;
                 uint32_t suppressed = 0;
                 {
-                    std::lock_guard<std::mutex> lock(g_BindingMutex);
-                    TraceBinding* b = FindBindingMutable(state);
+                    std::lock_guard<std::mutex> lock(target.mutex);
+                    TraceBinding* b = FindBindingMutableForTarget(target, state);
                     if (!b) return;
                     if (now - b->lastDtLogTick >= 500)
                     {
                         suppressed = b->dtSuppressedCount;
                         b->dtSuppressedCount = 0;
                         b->lastDtLogTick = now;
-                        shouldLog = true;
                     }
                     else
                     {
@@ -806,102 +1123,76 @@ namespace BZROpenShim
                     }
                 }
                 if (suppressed > 0)
-                {
-                    LogShimA(LogLevel::Info, kComponent, "[FPAnim] entity=0x%p anim=%s state=0x%p dt suppressed=%u since last", entity, animation, state, suppressed);
-                }
-                // fall through to log this dt
+                    LogShimA(LogLevel::Info, kComponent, "[FPAnim]%s entity=0x%p anim=%s state=0x%p dt suppressed=%u since last gen=%llu",
+                        TargetKindPrefix(kind), entity, animation, state, suppressed,
+                        static_cast<unsigned long long>(target.generation.load()));
             }
-
             void* retAddr = _ReturnAddress();
             bool inMain = false;
             uintptr_t rva = CallerRva(retAddr, inMain);
-            LogShimA(
-                LogLevel::Info,
-                kComponent,
-                "[FPAnim] entity=0x%p anim=%s state=0x%p %s=%.6f caller=0x%p rva=0x%08X inMain=%u",
-                entity,
-                animation,
-                state,
-                field,
-                static_cast<double>(value),
-                retAddr,
-                static_cast<unsigned>(rva),
-                inMain ? 1u : 0u);
+            LogShimA(LogLevel::Info, kComponent,
+                "[FPAnim]%s entity=0x%p anim=%s state=0x%p %s=%.6f caller=0x%p rva=0x%08X inMain=%u gen=%llu",
+                TargetKindPrefix(kind), entity, animation, state, field, static_cast<double>(value),
+                retAddr, static_cast<unsigned>(rva), inMain ? 1u : 0u,
+                static_cast<unsigned long long>(target.generation.load()));
         }
 
-        static void* SafeGetAllAnimationStates(void* entity)
+        void TryLogInventoryForTarget(TargetState& target, TargetKind kind)
         {
-            if (!g_RealEntityGetAllAnimationStates || !entity)
-                return nullptr;
-            void* result = nullptr;
-            __try
-            {
-                result = g_RealEntityGetAllAnimationStates(entity);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return reinterpret_cast<void*>(0x1);
-            }
-            return result;
-        }
-
-        // Best-effort inventory: enumerate AnimationStateSet via g_RealEntityGetAllAnimationStates if available.
-        // Ogre's AnimationStateSet layout is opaque without headers, so we use exported
-        // iteration helpers if we can resolve them; otherwise we report binding table inventory.
-        void TryLogInventory(void* entity)
-        {
+            void* entity = target.entity.load(std::memory_order_acquire);
             if (!entity)
                 return;
             DWORD now = GetTickCount();
-            if (g_LastInventoryEntity == entity && (now - g_LastInventoryTick) < kInventoryPollIntervalMs)
+            if (target.lastInventoryEntity == entity && (now - target.lastInventoryTick) < kInventoryPollIntervalMs)
                 return;
-            g_LastInventoryTick = now;
-            g_LastInventoryEntity = entity;
-
-            // Always log binding table snapshot
+            target.lastInventoryTick = now;
+            target.lastInventoryEntity = entity;
             size_t boundCount = 0;
             {
-                std::lock_guard<std::mutex> lock(g_BindingMutex);
-                for (const auto& b : g_Bindings)
+                std::lock_guard<std::mutex> lock(target.mutex);
+                for (const auto& b : target.bindings)
                     if (b.state && b.entity == entity)
                         ++boundCount;
             }
-            LogShimA(LogLevel::Info, kComponent, "[FPAnim] inventory entity=0x%p boundStates=%u", entity, static_cast<unsigned>(boundCount));
+            LogShimA(LogLevel::Info, kComponent, "[FPAnim]%s inventory entity=0x%p boundStates=%u gen=%llu mesh=%s",
+                TargetKindPrefix(kind), entity, static_cast<unsigned>(boundCount),
+                static_cast<unsigned long long>(target.generation.load()),
+                target.meshName[0] ? target.meshName : "?");
             {
-                std::lock_guard<std::mutex> lock(g_BindingMutex);
-                for (const auto& b : g_Bindings)
+                std::lock_guard<std::mutex> lock(target.mutex);
+                for (const auto& b : target.bindings)
                 {
                     if (!b.state || b.entity != entity)
                         continue;
-                    LogShimA(LogLevel::Info, kComponent, "[FPAnim] inv-bound anim=%s state=0x%p enabled=%u loop=%u weight=%.3f",
-                        b.animation, b.state,
+                    LogShimA(LogLevel::Info, kComponent, "[FPAnim]%s inv-bound anim=%s state=0x%p enabled=%u loop=%u weight=%.3f gen=%llu",
+                        TargetKindPrefix(kind), b.animation, b.state,
                         b.hasLastEnabled ? (b.lastEnabled ? 1u : 0u) : 99u,
                         b.hasLastLoop ? (b.lastLoop ? 1u : 0u) : 99u,
-                        b.hasLastWeight ? b.lastWeight : -1.0f);
+                        b.hasLastWeight ? b.lastWeight : -1.0f,
+                        static_cast<unsigned long long>(target.generation.load()));
                 }
             }
-
-            // Attempt Ogre-level enumeration if resolver succeeded
             if (!g_RealEntityGetAllAnimationStates)
             {
-                LogShimA(LogLevel::Info, kComponent, "[FPAnim] inventory Ogre enumeration unavailable (getAllAnimationStates not resolved)");
+                LogShimA(LogLevel::Info, kComponent, "[FPAnim]%s inventory Ogre enumeration unavailable (getAllAnimationStates not resolved) gen=%llu",
+                    TargetKindPrefix(kind), static_cast<unsigned long long>(target.generation.load()));
                 return;
             }
             void* animSet = SafeGetAllAnimationStates(entity);
             if (animSet == reinterpret_cast<void*>(0x1))
             {
-                LogShimA(LogLevel::Warn, kComponent, "[FPAnim] inventory getAllAnimationStates SEH exception entity=0x%p", entity);
+                LogShimA(LogLevel::Warn, kComponent, "[FPAnim]%s inventory getAllAnimationStates SEH exception entity=0x%p gen=%llu",
+                    TargetKindPrefix(kind), entity, static_cast<unsigned long long>(target.generation.load()));
                 return;
             }
             if (!animSet)
             {
-                LogShimA(LogLevel::Info, kComponent, "[FPAnim] inventory entity=0x%p animSet=null (no animated mesh?)", entity);
+                LogShimA(LogLevel::Info, kComponent, "[FPAnim]%s inventory entity=0x%p animSet=null (no animated mesh?) gen=%llu",
+                    TargetKindPrefix(kind), entity, static_cast<unsigned long long>(target.generation.load()));
                 return;
             }
-            LogShimA(LogLevel::Info, kComponent, "[FPAnim] inventory entity=0x%p animSet=0x%p HAS_ANIM_SET", entity, animSet);
-            // We intentionally do not iterate the set without a stable iterator export.
-            // Existence of a non-null set already proves the pilot mesh is skeleton-animated.
-            // A follow-up run can hook AnimationStateSet::getAnimationStateIterator if needed.
+            LogShimA(LogLevel::Info, kComponent, "[FPAnim]%s inventory entity=0x%p animSet=0x%p HAS_ANIM_SET gen=%llu",
+                TargetKindPrefix(kind), entity, animSet, static_cast<unsigned long long>(target.generation.load()));
         }
 
         void* __fastcall HookEntityGetAnimationState(void* self, void*, const std::string& animationName)
@@ -911,9 +1202,12 @@ namespace BZROpenShim
             void* state = g_RealEntityGetAnimationState(self, animationName);
             if (!g_Enabled.load(std::memory_order_relaxed) || !state)
                 return state;
-            void* target = g_TargetEntity.load(std::memory_order_acquire);
-            if (target && self == target)
-                RegisterBinding(state, self, animationName);
+            void* worldTarget = g_World.entity.load(std::memory_order_acquire);
+            if (worldTarget && self == worldTarget)
+                RegisterBindingForTarget(g_World, TargetKind::World, state, self, animationName);
+            void* fpTarget = g_Fp.entity.load(std::memory_order_acquire);
+            if (fpTarget && self == fpTarget)
+                RegisterBindingForTarget(g_Fp, TargetKind::Fp, state, self, animationName);
             return state;
         }
 
@@ -922,8 +1216,14 @@ namespace BZROpenShim
             if (!g_RealAnimationSetEnabled)
                 return;
             g_RealAnimationSetEnabled(self, enabled);
-            if (g_Enabled.load(std::memory_order_relaxed))
-                LogBoundBool(self, "enabled", enabled);
+            if (!g_Enabled.load(std::memory_order_relaxed))
+                return;
+            void* entity = nullptr;
+            char anim[64] = {};
+            if (FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)))
+                LogBoundBoolForTarget(g_World, TargetKind::World, self, "enabled", enabled);
+            if (FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)))
+                LogBoundBoolForTarget(g_Fp, TargetKind::Fp, self, "enabled", enabled);
         }
 
         void __fastcall HookAnimationSetLoop(void* self, void*, bool loop)
@@ -931,33 +1231,50 @@ namespace BZROpenShim
             if (!g_RealAnimationSetLoop)
                 return;
             g_RealAnimationSetLoop(self, loop);
-            if (g_Enabled.load(std::memory_order_relaxed))
-                LogBoundBool(self, "loop", loop);
+            if (!g_Enabled.load(std::memory_order_relaxed))
+                return;
+            void* entity = nullptr;
+            char anim[64] = {};
+            if (FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)))
+                LogBoundBoolForTarget(g_World, TargetKind::World, self, "loop", loop);
+            if (FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)))
+                LogBoundBoolForTarget(g_Fp, TargetKind::Fp, self, "loop", loop);
         }
 
         void __fastcall HookAnimationSetTimePosition(void* self, void*, float timePosition)
         {
             if (!g_RealAnimationSetTimePosition)
                 return;
-            // Manipulation gate: if enabled and anim matches target, optionally suppress or override
-            bool suppress = false;
+            bool worldManip = false;
+            bool fpManip = false;
+            if (g_ManipEnabled.load(std::memory_order_acquire))
             {
                 void* entity = nullptr;
                 char anim[64] = {};
-                if (g_ManipEnabled.load(std::memory_order_acquire) && FindBinding(self, entity, anim, sizeof(anim)))
+                if (FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)) &&
+                    std::strcmp(anim, g_ManipTargetAnim) == 0 && g_ManipMode == ManipMode::Freeze)
                 {
-                    if (std::strcmp(anim, g_ManipTargetAnim) == 0 && g_ManipMode == ManipMode::Freeze)
-                    {
-                        // For freeze test, we still allow setTime but log manipulation
-                        LogShimA(LogLevel::Info, kComponent, "[FPAnim][MANIP] setTimePosition suppressed target=%s state=0x%p time=%.3f", anim, self, timePosition);
-                        // Do not suppress setTimePosition; freezing is done via addTime.
-                    }
+                    worldManip = true;
+                    LogShimA(LogLevel::Info, kComponent, "[FPAnim][MANIP][WORLD] setTimePosition target=%s state=0x%p time=%.3f gen=%llu",
+                        anim, self, timePosition, static_cast<unsigned long long>(g_World.generation.load()));
+                }
+                if (FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)) &&
+                    std::strcmp(anim, g_ManipTargetAnim) == 0 && g_ManipMode == ManipMode::Freeze)
+                {
+                    fpManip = true;
+                    LogShimA(LogLevel::Info, kComponent, "[FPAnim][MANIP][FP] setTimePosition target=%s state=0x%p time=%.3f gen=%llu",
+                        anim, self, timePosition, static_cast<unsigned long long>(g_Fp.generation.load()));
                 }
             }
-            if (!suppress)
-                g_RealAnimationSetTimePosition(self, timePosition);
-            if (g_Enabled.load(std::memory_order_relaxed))
-                LogBoundFloat(self, "time", timePosition);
+            g_RealAnimationSetTimePosition(self, timePosition);
+            if (!g_Enabled.load(std::memory_order_relaxed))
+                return;
+            void* entity = nullptr;
+            char anim[64] = {};
+            if (FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)))
+                LogBoundFloatForTarget(g_World, TargetKind::World, self, "time", timePosition);
+            if (FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)))
+                LogBoundFloatForTarget(g_Fp, TargetKind::Fp, self, "time", timePosition);
         }
 
         void __fastcall HookAnimationSetWeight(void* self, void*, float weight)
@@ -965,83 +1282,93 @@ namespace BZROpenShim
             if (!g_RealAnimationSetWeight)
                 return;
             float effectiveWeight = weight;
-            bool manipulated = false;
+            bool worldForced = false;
+            bool fpForced = false;
             if (g_ManipEnabled.load(std::memory_order_acquire))
             {
                 void* entity = nullptr;
                 char anim[64] = {};
-                if (FindBinding(self, entity, anim, sizeof(anim)))
+                if (FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)) &&
+                    std::strcmp(anim, g_ManipTargetAnim) == 0 && g_ManipMode == ManipMode::ForceWeight)
                 {
-                    if (std::strcmp(anim, g_ManipTargetAnim) == 0 && g_ManipMode == ManipMode::ForceWeight)
-                    {
-                        effectiveWeight = 1.0f;
-                        manipulated = true;
-                        LogShimA(LogLevel::Info, kComponent, "[FPAnim][MANIP] ForceWeight anim=%s state=0x%p requested=%.3f forced=%.3f", anim, self, weight, effectiveWeight);
-                    }
+                    effectiveWeight = 1.0f;
+                    worldForced = true;
+                    LogShimA(LogLevel::Info, kComponent, "[FPAnim][MANIP][WORLD] ForceWeight anim=%s state=0x%p requested=%.3f forced=%.3f gen=%llu",
+                        anim, self, weight, effectiveWeight, static_cast<unsigned long long>(g_World.generation.load()));
+                }
+                if (FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)) &&
+                    std::strcmp(anim, g_ManipTargetAnim) == 0 && g_ManipMode == ManipMode::ForceWeight)
+                {
+                    effectiveWeight = 1.0f;
+                    fpForced = true;
+                    LogShimA(LogLevel::Info, kComponent, "[FPAnim][MANIP][FP] ForceWeight anim=%s state=0x%p requested=%.3f forced=%.3f gen=%llu",
+                        anim, self, weight, effectiveWeight, static_cast<unsigned long long>(g_Fp.generation.load()));
                 }
             }
-            g_RealAnimationSetWeight(self, manipulated ? effectiveWeight : weight);
-            if (g_Enabled.load(std::memory_order_relaxed))
-                LogBoundFloat(self, "weight", manipulated ? effectiveWeight : weight);
+            g_RealAnimationSetWeight(self, (worldForced || fpForced) ? effectiveWeight : weight);
+            if (!g_Enabled.load(std::memory_order_relaxed))
+                return;
+            void* entity = nullptr;
+            char anim[64] = {};
+            if (FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)))
+                LogBoundFloatForTarget(g_World, TargetKind::World, self, "weight", (worldForced ? effectiveWeight : weight));
+            if (FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)))
+                LogBoundFloatForTarget(g_Fp, TargetKind::Fp, self, "weight", (fpForced ? effectiveWeight : weight));
         }
 
         void __fastcall HookAnimationAddTime(void* self, void*, float offset)
         {
             if (!g_RealAnimationAddTime)
                 return;
-            bool suppress = false;
+            bool worldSuppress = false;
+            bool fpSuppress = false;
             if (g_ManipEnabled.load(std::memory_order_acquire))
             {
                 void* entity = nullptr;
                 char anim[64] = {};
-                if (FindBinding(self, entity, anim, sizeof(anim)))
+                if (FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)) &&
+                    std::strcmp(anim, g_ManipTargetAnim) == 0 && g_ManipMode == ManipMode::Freeze)
                 {
-                    if (std::strcmp(anim, g_ManipTargetAnim) == 0 && g_ManipMode == ManipMode::Freeze)
-                    {
-                        suppress = true;
-                        LogShimA(LogLevel::Info, kComponent, "[FPAnim][MANIP] Freeze addTime suppressed anim=%s state=0x%p dt=%.6f", anim, self, offset);
-                    }
+                    worldSuppress = true;
+                    LogShimA(LogLevel::Info, kComponent, "[FPAnim][MANIP][WORLD] Freeze addTime suppressed anim=%s state=0x%p dt=%.6f gen=%llu",
+                        anim, self, offset, static_cast<unsigned long long>(g_World.generation.load()));
+                }
+                if (FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)) &&
+                    std::strcmp(anim, g_ManipTargetAnim) == 0 && g_ManipMode == ManipMode::Freeze)
+                {
+                    fpSuppress = true;
+                    LogShimA(LogLevel::Info, kComponent, "[FPAnim][MANIP][FP] Freeze addTime suppressed anim=%s state=0x%p dt=%.6f gen=%llu",
+                        anim, self, offset, static_cast<unsigned long long>(g_Fp.generation.load()));
                 }
             }
+            bool suppress = worldSuppress || fpSuppress;
             if (!suppress)
                 g_RealAnimationAddTime(self, offset);
-            if (g_Enabled.load(std::memory_order_relaxed))
-            {
-                // Only log dt if not suppressed; suppressed case already logged
-                if (!suppress)
-                    LogBoundFloat(self, "dt", offset);
-            }
+            if (!g_Enabled.load(std::memory_order_relaxed))
+                return;
+            if (suppress)
+                return;
+            void* entity = nullptr;
+            char anim[64] = {};
+            if (FindBindingForTarget(g_World, self, entity, anim, sizeof(anim)))
+                LogBoundFloatForTarget(g_World, TargetKind::World, self, "dt", offset);
+            if (FindBindingForTarget(g_Fp, self, entity, anim, sizeof(anim)))
+                LogBoundFloatForTarget(g_Fp, TargetKind::Fp, self, "dt", offset);
         }
 
         bool InstallObservers()
         {
             if (!OgreRuntime::IsLoaded())
                 return false;
-            void* getAnimationState = FindUniqueFunctionExport(
-                "getAnimationState@Entity@Ogre@@",
-                "Entity::getAnimationState");
-            void* setEnabled = FindUniqueFunctionExport(
-                "setEnabled@AnimationState@Ogre@@",
-                "AnimationState::setEnabled");
-            void* setLoop = FindUniqueFunctionExport(
-                "setLoop@AnimationState@Ogre@@",
-                "AnimationState::setLoop");
-            void* setTimePosition = FindUniqueFunctionExport(
-                "setTimePosition@AnimationState@Ogre@@",
-                "AnimationState::setTimePosition");
-            void* setWeight = FindUniqueFunctionExport(
-                "setWeight@AnimationState@Ogre@@",
-                "AnimationState::setWeight");
-            void* addTime = FindUniqueFunctionExport(
-                "addTime@AnimationState@Ogre@@",
-                "AnimationState::addTime");
-            if (!getAnimationState || !setEnabled || !setLoop ||
-                !setTimePosition || !setWeight || !addTime)
+            void* getAnimationState = FindUniqueFunctionExport("getAnimationState@Entity@Ogre@@", "Entity::getAnimationState");
+            void* setEnabled = FindUniqueFunctionExport("setEnabled@AnimationState@Ogre@@", "AnimationState::setEnabled");
+            void* setLoop = FindUniqueFunctionExport("setLoop@AnimationState@Ogre@@", "AnimationState::setLoop");
+            void* setTimePosition = FindUniqueFunctionExport("setTimePosition@AnimationState@Ogre@@", "AnimationState::setTimePosition");
+            void* setWeight = FindUniqueFunctionExport("setWeight@AnimationState@Ogre@@", "AnimationState::setWeight");
+            void* addTime = FindUniqueFunctionExport("addTime@AnimationState@Ogre@@", "AnimationState::addTime");
+            if (!getAnimationState || !setEnabled || !setLoop || !setTimePosition || !setWeight || !addTime)
             {
-                LogShimA(
-                    LogLevel::Warn,
-                    kComponent,
-                    "[FPAnim] one or more required retail Ogre exports were unavailable; trace remains fail-closed");
+                LogShimA(LogLevel::Warn, kComponent, "[FPAnim] one or more required retail Ogre exports were unavailable; trace remains fail-closed");
                 return false;
             }
             g_RealEntityGetAnimationState = reinterpret_cast<FnEntityGetAnimationState>(getAnimationState);
@@ -1050,86 +1377,63 @@ namespace BZROpenShim
             g_RealAnimationSetTimePosition = reinterpret_cast<FnAnimationSetTimePosition>(setTimePosition);
             g_RealAnimationSetWeight = reinterpret_cast<FnAnimationSetWeight>(setWeight);
             g_RealAnimationAddTime = reinterpret_cast<FnAnimationAddTime>(addTime);
-
-            // Optional enumeration helper
             g_RealEntityGetAllAnimationStates = reinterpret_cast<FnEntityGetAllAnimationStates>(
                 FindOptionalExport("getAllAnimationStates@Entity@Ogre@@", "Entity::getAllAnimationStates"));
             g_EntityGetMeshExport = FindOptionalExport("getMesh@Entity@Ogre@@", "Entity::getMesh");
             g_EntityHasSkeletonExport = FindOptionalExport("hasSkeleton@Entity@Ogre@@", "Entity::hasSkeleton");
-
-            // Refresh manipulation config after Ogre is ready
+            g_FnEntityHasSkeleton = reinterpret_cast<FnEntityHasSkeleton>(
+                FindOptionalExport("hasSkeleton@Entity@Ogre@@", "Entity::hasSkeleton"));
+            g_FnEntityHasAnimationState = reinterpret_cast<FnEntityHasAnimationState>(
+                FindOptionalExport("hasAnimationState@Entity@Ogre@@", "Entity::hasAnimationState"));
+            g_FnMovableObjectGetName = reinterpret_cast<FnMovableObjectGetName>(
+                FindOptionalExport("getName@MovableObject@Ogre@@", "MovableObject::getName"));
+            // Log verified Ogre creation/enumeration seams
+            {
+                void* smIter = FindOptionalExport("getMovableObjectIterator@SceneManager@Ogre@@", "SceneManager::getMovableObjectIterator");
+                if (smIter)
+                    LogShimA(LogLevel::Info, kComponent, "[FPAnim] verified enumeration seam: SceneManager::getMovableObjectIterator export=%p", smIter);
+                else
+                    LogShimA(LogLevel::Warn, kComponent, "[FPAnim] enumeration seam NOT found — FP discovery via enumeration will fail closed");
+                // Verify exe does NOT import createEntity (expected per dumpbin /imports)
+                LogShimA(LogLevel::Info, kComponent, "[FPAnim] verified: exe does NOT import SceneManager::createEntity (dumpbin /imports) — creation hook not used; enumeration is primary resolver");
+                // Document SceneManager global structure used for retrieval
+                LogShimA(LogLevel::Info, kComponent, "[FPAnim] SceneManager retrieval: global structure 0x%08X +0x%X (same as bzr_hooks.cpp:2042)",
+                    static_cast<unsigned>(kOgreSceneManagerStructureAddr), static_cast<unsigned>(kOgreSceneManagerOffset));
+            }
             RefreshManipConfig();
             if (g_ManipEnabled.load(std::memory_order_acquire))
-            {
-                LogShimA(LogLevel::Info, kComponent, "[FPAnim] manipulation gate ACTIVE mode=%u targetAnim=%s (isolated lcbench-only experiment)",
+                LogShimA(LogLevel::Info, kComponent, "[FPAnim] manipulation gate ACTIVE mode=%u targetAnim=%s (world+FP isolated lcbench-only)",
                     static_cast<unsigned>(g_ManipMode), g_ManipTargetAnim);
-            }
-
-            const size_t getStateHooks = InstallExeObserver(
-                getAnimationState,
-                reinterpret_cast<void*>(&HookEntityGetAnimationState),
-                "Entity::getAnimationState");
-            const size_t enabledHooks = InstallExeObserver(
-                setEnabled,
-                reinterpret_cast<void*>(&HookAnimationSetEnabled),
-                "AnimationState::setEnabled");
-            const size_t loopHooks = InstallExeObserver(
-                setLoop,
-                reinterpret_cast<void*>(&HookAnimationSetLoop),
-                "AnimationState::setLoop");
-            const size_t timeHooks = InstallExeObserver(
-                setTimePosition,
-                reinterpret_cast<void*>(&HookAnimationSetTimePosition),
-                "AnimationState::setTimePosition");
-            const size_t weightHooks = InstallExeObserver(
-                setWeight,
-                reinterpret_cast<void*>(&HookAnimationSetWeight),
-                "AnimationState::setWeight");
-            const size_t addTimeHooks = InstallExeObserver(
-                addTime,
-                reinterpret_cast<void*>(&HookAnimationAddTime),
-                "AnimationState::addTime");
+            const size_t getStateHooks = InstallExeObserver(getAnimationState, reinterpret_cast<void*>(&HookEntityGetAnimationState), "Entity::getAnimationState");
+            const size_t enabledHooks = InstallExeObserver(setEnabled, reinterpret_cast<void*>(&HookAnimationSetEnabled), "AnimationState::setEnabled");
+            const size_t loopHooks = InstallExeObserver(setLoop, reinterpret_cast<void*>(&HookAnimationSetLoop), "AnimationState::setLoop");
+            const size_t timeHooks = InstallExeObserver(setTimePosition, reinterpret_cast<void*>(&HookAnimationSetTimePosition), "AnimationState::setTimePosition");
+            const size_t weightHooks = InstallExeObserver(setWeight, reinterpret_cast<void*>(&HookAnimationSetWeight), "AnimationState::setWeight");
+            const size_t addTimeHooks = InstallExeObserver(addTime, reinterpret_cast<void*>(&HookAnimationAddTime), "AnimationState::addTime");
             if (getStateHooks == 0)
             {
-                LogShimA(
-                    LogLevel::Warn,
-                    kComponent,
-                    "[FPAnim] Entity::getAnimationState has no exact executable call/IAT site; state ownership cannot be tracked safely");
+                LogShimA(LogLevel::Warn, kComponent, "[FPAnim] Entity::getAnimationState has no exact executable call/IAT site; state ownership cannot be tracked safely");
                 return false;
             }
-            const size_t mutationHooks =
-                enabledHooks + loopHooks + timeHooks + weightHooks + addTimeHooks;
+            const size_t mutationHooks = enabledHooks + loopHooks + timeHooks + weightHooks + addTimeHooks;
             if (mutationHooks == 0)
             {
-                LogShimA(
-                    LogLevel::Warn,
-                    kComponent,
-                    "[FPAnim] no AnimationState mutation call/IAT sites were found; trace remains fail-closed");
+                LogShimA(LogLevel::Warn, kComponent, "[FPAnim] no AnimationState mutation call/IAT sites were found; trace remains fail-closed");
                 return false;
             }
-            LogShimA(
-                LogLevel::Info,
-                kComponent,
-                "[FPAnim] observers active getState=%u enabled=%u loop=%u time=%u weight=%u addTime=%u; ownership=local Person Ogre entity",
-                static_cast<unsigned>(getStateHooks),
-                static_cast<unsigned>(enabledHooks),
-                static_cast<unsigned>(loopHooks),
-                static_cast<unsigned>(timeHooks),
-                static_cast<unsigned>(weightHooks),
-                static_cast<unsigned>(addTimeHooks));
             LogShimA(LogLevel::Info, kComponent,
-                "[FPAnim] enhanced trace v2: caller RVA, transition filtering, dt throttling (500ms), inventory poll %ums, manip=%u",
-                static_cast<unsigned>(kInventoryPollIntervalMs),
-                g_ManipEnabled.load() ? 1u : 0u);
+                "[FPAnim] observers active getState=%u enabled=%u loop=%u time=%u weight=%u addTime=%u; ownership=world Person + FP via enumeration",
+                static_cast<unsigned>(getStateHooks), static_cast<unsigned>(enabledHooks), static_cast<unsigned>(loopHooks),
+                static_cast<unsigned>(timeHooks), static_cast<unsigned>(weightHooks), static_cast<unsigned>(addTimeHooks));
+            LogShimA(LogLevel::Info, kComponent,
+                "[FPAnim] enhanced trace v3: world+FP dual targets, caller RVA, transition filtering, dt throttling (500ms), inventory poll %ums, fpEnumerate %ums, manip=%u",
+                static_cast<unsigned>(kInventoryPollIntervalMs), static_cast<unsigned>(kFpEnumerateIntervalMs), g_ManipEnabled.load() ? 1u : 0u);
             return true;
         }
 
         unsigned __stdcall TraceThreadProc(void*)
         {
-            LogShimA(
-                LogLevel::Info,
-                kComponent,
-                "[FPAnim] enabled; read-only trace v2 waiting for OgreMain.dll and local Person entity");
+            LogShimA(LogLevel::Info, kComponent, "[FPAnim] enabled; dual-target trace v3 waiting for OgreMain.dll and local Person entity");
             bool ogreAttempted = false;
             while (!g_ShutdownRequested.load(std::memory_order_acquire))
             {
@@ -1138,16 +1442,13 @@ namespace BZROpenShim
                     ogreAttempted = true;
                     InstallObservers();
                 }
-                RefreshTargetEntity();
-                void* target = g_TargetEntity.load(std::memory_order_acquire);
-                if (target)
-                    TryLogInventory(target);
+                RefreshWorldTarget();
+                RefreshFpTargetViaEnumeration();
+                TryLogInventoryForTarget(g_World, TargetKind::World);
+                TryLogInventoryForTarget(g_Fp, TargetKind::Fp);
                 Sleep(kPollSleepMs);
             }
-            LogShimA(
-                LogLevel::Info,
-                kComponent,
-                "[FPAnim] reporter stopped (installed hooks now pass-through until process exit)");
+            LogShimA(LogLevel::Info, kComponent, "[FPAnim] reporter stopped (installed hooks now pass-through until process exit)");
             return 0;
         }
     }
@@ -1166,21 +1467,11 @@ namespace BZROpenShim
         g_ShutdownRequested.store(false, std::memory_order_release);
         g_Enabled.store(true, std::memory_order_release);
         RefreshManipConfig();
-        g_WorkerThread = _beginthreadex(
-            nullptr,
-            0,
-            TraceThreadProc,
-            nullptr,
-            0,
-            nullptr);
+        g_WorkerThread = _beginthreadex(nullptr, 0, TraceThreadProc, nullptr, 0, nullptr);
         if (!g_WorkerThread)
         {
             g_Enabled.store(false, std::memory_order_release);
-            LogShimA(
-                LogLevel::Warn,
-                kComponent,
-                "[FPAnim] failed to start trace worker (err=%lu)",
-                GetLastError());
+            LogShimA(LogLevel::Warn, kComponent, "[FPAnim] failed to start trace worker (err=%lu)", GetLastError());
         }
     }
 
@@ -1188,14 +1479,21 @@ namespace BZROpenShim
     {
         g_Enabled.store(false, std::memory_order_release);
         g_ShutdownRequested.store(true, std::memory_order_release);
-        g_TargetEntity.store(nullptr, std::memory_order_release);
+        g_World.entity.store(nullptr, std::memory_order_release);
+        g_Fp.entity.store(nullptr, std::memory_order_release);
         if (g_WorkerThread)
         {
             WaitForSingleObject(reinterpret_cast<HANDLE>(g_WorkerThread), 2000);
             CloseHandle(reinterpret_cast<HANDLE>(g_WorkerThread));
             g_WorkerThread = 0;
         }
-        std::lock_guard<std::mutex> lock(g_BindingMutex);
-        ClearBindingsLocked();
+        {
+            std::lock_guard<std::mutex> lock(g_World.mutex);
+            ClearBindingsLocked(g_World);
+        }
+        {
+            std::lock_guard<std::mutex> lock(g_Fp.mutex);
+            ClearBindingsLocked(g_Fp);
+        }
     }
 }
