@@ -321,6 +321,25 @@ namespace
             Check(actual->fallback_addr == expected.fallback_addr, "shipped fallback must match");
             Check(!actual->identity.empty(), "every shipped entry must carry an identity note");
         }
+
+        const ResolveTarget* calcRange = Find(shipped, "CalcRange(Craft)");
+        Check(calcRange != nullptr, "the shipped table must resolve CalcRange(Craft)");
+        if (calcRange)
+        {
+            Check(calcRange->ida_pattern ==
+                      "55 8B EC 83 EC 1C 8B 45 0C F3 0F 10 05 ?? ?? ?? ?? F3 0F 11 00 8B 4D 10 F3 0F 10 05 ?? ?? ?? ?? F3 0F 11 01 8B 55 14",
+                  "CalcRange(Craft) must retain its validated entry signature");
+            Check(calcRange->offset == 0 && calcRange->mode == ResolveMode::Address,
+                  "CalcRange(Craft) must resolve to the function entry");
+            Check(calcRange->preference == ResolvePreference::Scan,
+                  "CalcRange(Craft) must prefer the live unique scan");
+            Check(calcRange->fallback_addr == 0x00466BE0u,
+                  "CalcRange(Craft) must retain the exact GOG fallback");
+            Check(calcRange->require_unique,
+                  "CalcRange(Craft) must fail closed on an ambiguous signature");
+            Check(calcRange->identity.find("UnitTask::Execute") != std::string::npos,
+                  "CalcRange(Craft) identity must cite its independent UnitTask call site");
+        }
 #endif
     }
 
