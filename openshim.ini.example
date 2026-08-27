@@ -891,8 +891,8 @@ AiWeaponMaskSelection = 0
 ; Honour the ODF-authored AI tuning keys.
 ;
 ; Master switch for the AI fields OpenShim reads out of unit ODFs:
-;   engageRangeAI              minimum engagement range
-;   weaponRangeMinAI           minimum weapon range
+;   engageRangeAI              floor for the stock weapon-aware outer range
+;   weaponRangeMinAI           floor for the native too-close/standoff range
 ;   retargetPeriodAI           seconds between target reconsiderations
 ;   scrapPathingAI             per-unit override of SmartScavengerPathing
 ;   scrapPathLengthWeightAI    scrap scoring weights
@@ -918,6 +918,8 @@ AiWeaponMaskSelection = 0
 ; the value here is what it reverts to when the mission ends.
 ;
 ; Accepted: boolean. Default: ON.
+; These fields do not change CraftClass.rangeScan or periodScan, do not affect
+; player-fired weapon range, and never bypass the stock offensive state gates.
 AiOdfGameplayTuning = 1
 
 ; Make turbo available globally on drivable units.

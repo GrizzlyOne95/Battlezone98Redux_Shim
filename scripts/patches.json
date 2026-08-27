@@ -107,6 +107,15 @@
       "offset": 24,
       "mode": "address",
       "identity": "Recycle -> QueueCB call site, priority argument 6A 03. Same runtime identity proof as UnitVo::SayQueueCallSite: the two call sites must resolve to one QueueCB, which must then pass the queue-list layout probe."
+    },
+    {
+      "name": "CalcRange(Craft)",
+      "pattern": "55 8B EC 83 EC 1C 8B 45 0C F3 0F 10 05 ?? ?? ?? ?? F3 0F 11 00 8B 4D 10 F3 0F 10 05 ?? ?? ?? ?? F3 0F 11 01 8B 55 14",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00466BE0",
+      "require_unique": true,
+      "identity": "CalcRange(Craft*, &close, &range, &time, &weapon) at 0x00466BE0 on the exact GOG 2.2.301 baseline. UnitTask::Execute 0x006002A0 supplies its craft and five output addresses; the decompile initializes close/range/time/weapon, scans the craft's selected weapon slots through CalcRange(Weapon) 0x00466890, selects the largest usable weapon range, and subtracts 1.0. Cross-checked in reverse_engineering/backlog_address_audit_20260708.md; the signature is the function entry and matched once in SHA-256 8d71f56c1314e69a8ad38f4eeaf20a8ff825965a84cf196e5f77ea4cc3377413."
     }
   ],
   "globals": [
