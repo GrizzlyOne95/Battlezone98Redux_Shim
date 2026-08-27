@@ -205,6 +205,63 @@ D3DStartupHooks = 0
 ; Legacy env alias: OPENSHIM_ALLOW_STARTUP_AUTOLOAD
 AllowStartupAutoLoad = 0
 
+; Startup backend-selection transport seam (Seam A).
+; Accepted: boolean. Default: ON.
+;   When [Graphics] Renderer is DX9 or DX11, OpenShim rewrites ONLY the
+;   "Render System=" line of the game's Ogre.cfg before the game reads it
+;   (seconds after process start), making the preference authoritative for
+;   this boot. The requested renderer itself lives HERE, in openshim.ini;
+;   Redux's own saveConfig() may rewrite Ogre.cfg freely without redefining
+;   that preference. Auto users are unaffected either way: with Renderer=Auto
+;   this seam never touches any file. A /renderer:... command-line token on
+;   this launch takes precedence over Renderer for that one boot only.
+;   Diagnostics appear under the [RENDER] tag:
+;     backend.boot/plugins/transport lines at startup,
+;     backend.selection=... requested=... effective=... reason=... afterwards.
+;   Hard kill-switch: set 0 to disable all Ogre.cfg writes even when an
+;   explicit Renderer is configured.
+BackendTransport = 1
+
+
+[Graphics]
+
+; Renderer backend preference (persistent user intent).
+; Canonical values:
+;   Auto = use whatever renderer the game selects this session
+;   DX9  = prefer the Direct3D 9 render system
+;   DX11 = prefer the Direct3D 11 render system
+; Accepted aliases: d3d9/directx9, d3d11/directx11 (case-insensitive).
+; With [Startup] BackendTransport enabled (default), a non-Auto value is
+; applied at next game start via the startup transport seam: OpenShim writes
+; Ogre.cfg's "Render System=" line pre-read, then observes which renderer
+; actually came up and reports requested/effective/reason under [RENDER].
+; Requested state lives only here -- stock saveConfig() rewrites of Ogre.cfg
+; never redefine this preference. A launch-scoped /renderer:... command-line
+; token overrides this key for that single boot.
+; Default: Auto.
+Renderer = Auto
+
+; Visual rendering policy layered over the selected backend.
+; Canonical values:
+;   Redux    = stock Battlezone 98 Redux rendering behavior as closely as
+;              practical on the selected backend. Compatibility baseline.
+;   Enhanced = OpenShim's canonical graphics upgrade. Supported on BOTH
+;              backends and capability-dependent rather than all-or-nothing:
+;              DX11 carries the full modern feature set (linear lighting,
+;              enhanced terrain/object shader paths, modern PSSM behavior,
+;              contribution-ranked light selection); DX9 retains its proven
+;              legacy enhancements (normal-map sharpening and the SM3
+;              enhanced delegates) on a feature-frozen maintenance basis --
+;              correctness/crash fixes only, no new DX9 visual work planned.
+;   Retro    = deliberately classic-style presentation via the og-* material
+;              scheme family. Experimental; see
+;              Docs/OPENSHIM_RENDER_PROFILE_ARCHITECTURE.md for status.
+; Accepted aliases: default/modern -> Redux, en -> Enhanced,
+; og/classic -> Retro (case-insensitive). Default: Redux.
+; EXU/content may override this per mission via the render-profile bridge;
+; overrides are cleared automatically at mission end.
+RenderProfile = Redux
+
 
 [Terrain]
 
@@ -830,6 +887,40 @@ JumpSnipeCrouch = 1
 ;
 ; Accepted: boolean. Default: OFF.
 AiWeaponMaskSelection = 0
+
+; Honour the ODF-authored AI tuning keys.
+;
+; Master switch for the AI fields OpenShim reads out of unit ODFs:
+;   engageRangeAI              floor for the stock weapon-aware outer range
+;   weaponRangeMinAI           floor for the native too-close/standoff range
+;   retargetPeriodAI           seconds between target reconsiderations
+;   scrapPathingAI             per-unit override of SmartScavengerPathing
+;   scrapPathLengthWeightAI    scrap scoring weights
+;   scrapStraightDistanceWeightAI
+;   scrapPathFailPenaltyAI
+;   scrapHardToGetCooldownAI
+;   scrapSearchRadiusAI
+;   scrapRetargetPeriodAI
+;   scrapRetargetMinImprovementAI
+;
+; Every path this gates ALSO requires the ODF to declare the matching key, so
+; content that does not author them -- the stock campaign included -- behaves
+; identically whether this is on or off. That is why it defaults ON: it is a
+; capability switch for authored content, not a behaviour change.
+;
+; Turn it off to make OpenShim ignore those keys entirely and run every unit on
+; stock/global values, which is the fastest way to tell whether a mod's AI
+; tuning is responsible for something you are seeing.
+;
+; Was previously reachable only through the EXU bridge
+; (exu.SetAiOdfGameplayTuningEnabled) from Campaign Reimagined's settings.
+; A mission script may still override it for the duration of that mission;
+; the value here is what it reverts to when the mission ends.
+;
+; Accepted: boolean. Default: ON.
+; These fields do not change CraftClass.rangeScan or periodScan, do not affect
+; player-fired weapon range, and never bypass the stock offensive state gates.
+AiOdfGameplayTuning = 1
 
 ; Make turbo available globally on drivable units.
 ; Accepted: boolean. Default: OFF.

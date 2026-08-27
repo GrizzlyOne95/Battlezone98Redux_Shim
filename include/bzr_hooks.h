@@ -5,6 +5,10 @@
 
 namespace BZROpenShim
 {
+    // Stock GameObjectHandle::GetObj replacement. Rejects empty/stale pool
+    // slots before the stock wrapper dereferences their null object state.
+    void* __cdecl GameObjectHandleGetObjHardened(int handle);
+
     // Stable status returned by the optional OpenShimSetBZRNetNickname bridge.
     // Keep numeric values stable because companion DLLs resolve the C export
     // dynamically and intentionally do not link against OpenShim internals.

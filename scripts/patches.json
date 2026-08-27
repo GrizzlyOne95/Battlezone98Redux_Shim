@@ -4,6 +4,15 @@
   },
   "patches": [
     {
+      "name": "GameObject Handle Stale Slot Guard",
+      "platforms": ["gog"],
+      "pattern": "55 8B EC 51 8B 45 08 50 E8 ?? ?? ?? ?? 83 C4 04 89 45 FC 83 7D FC 00 75 04 33 C0 EB 16 8B 4D FC E8 ?? ?? ?? ?? 25 00 02 00 00 74 04 33 C0 EB 03 8B 45 FC 8B E5 5D C3",
+      "offset": 0,
+      "expected_size": 5,
+      "fallback": "0x00462630",
+      "require_unique": true
+    },
+    {
       "name": "Map List Rewrite for Hop-Fix 1/3",
       "platforms": ["steam"],
       "pattern": "8B 45 FC 8B 88 38 01 00 00 E8 F3 89 E3 FF",
@@ -64,6 +73,58 @@
       "expected_size": 6,
       "fallback": "0x00786E9A",
       "require_unique": true
+    }
+  ],
+  "resolves": [
+    {
+      "name": "EngineFlame::AddFlame",
+      "pattern": "0F 11 04 24 8D 85 ?? ?? ?? ?? 50 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 3D ?? ?? ?? ?? 00 0F 84",
+      "offset": 16,
+      "mode": "rel32_target",
+      "prefer": "fallback",
+      "fallback": "0x004C8800",
+      "identity": "First HoverCraft::Simulate (0x004EA300) exhaust emit site; the CALL at 0x004EAD77 targets EngineFlame::AddFlame 0x004C8800, cross-checked against the EngineFlame vtable at 0x0087918C in reverse_engineering/engine_flame_color_notes.md. The anchor is the E8 opcode, not its rel32 operand."
+    },
+    {
+      "name": "GetTeamNum",
+      "pattern": "8B 45 08 50 E8 ?? ?? ?? ?? 83 C4 04 89 45 FC 83 7D FC 00 75 04 33 C0 EB 11 8B 4D FC 83 C1 18 8B 55 FC 8B 42 18 8B 50 04 FF D2",
+      "offset": -4,
+      "mode": "address",
+      "prefer": "fallback",
+      "fallback": "0x005C8800",
+      "identity": "Live GetTeamNum helper 0x005C8800, named in reverse_engineering/engine_flame_color_notes.md as the team source for exhaust routing. The pattern starts at the body (mov eax,[ebp+8]); the negative offset steps back over the 55 8B EC 51 prologue, which is too generic to carry inside the signature."
+    },
+    {
+      "name": "EngineFlame::ResolveTexture",
+      "pattern": "55 8B EC 51 83 7D 08 00 75 04 33 C0 EB 44 A1 ?? ?? ?? ?? 83 E8 01 89 45 FC EB 09 8B 4D FC 83 E9 01 89 4D FC 83 7D FC 00 7E 26 6A 20 8B 55 08 52 8B 45 FC C1 E0 05 05 ?? ?? ?? ?? 50 FF 15 ?? ?? ?? ?? 83 C4 0C 85 C0 75 05",
+      "offset": 0,
+      "mode": "address",
+      "prefer": "fallback",
+      "fallback": "0x0068BED0",
+      "identity": "Shared sprite/texture-name lookup 0x0068BED0, used both as EngineFlame::ResolveTexture and as the HUD sprite lookup. The body walks a descending table index and calls through an import at FF 15; the match is the function entry itself."
+    },
+    {
+      "name": "UnitVo::SayQueueCallSite",
+      "pattern": "6A 00 8B 4D FC 83 C1 18 8B 55 FC 8B 42 18 8B 50 30 FF D2 50 8B 45 F8 50 E8 ?? ?? ?? ?? 83 C4 0C 8B 4D 0C 89 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? D9 1D ?? ?? ?? ??",
+      "offset": 24,
+      "mode": "address",
+      "identity": "Say -> QueueCB call site, priority argument 6A 00. Identity is settled at runtime rather than by the signature alone: its rel32 target must equal the target of UnitVo::RecycleQueueCallSite, and that shared target must pass the queue-list layout probe before any hook is written."
+    },
+    {
+      "name": "UnitVo::RecycleQueueCallSite",
+      "pattern": "6A 03 8B 4D FC 83 C1 18 8B 45 FC 8B 50 18 8B 42 30 FF D0 50 8B 4D 08 51 E8 ?? ?? ?? ?? 83 C4 0C 5E 8B E5",
+      "offset": 24,
+      "mode": "address",
+      "identity": "Recycle -> QueueCB call site, priority argument 6A 03. Same runtime identity proof as UnitVo::SayQueueCallSite: the two call sites must resolve to one QueueCB, which must then pass the queue-list layout probe."
+    },
+    {
+      "name": "CalcRange(Craft)",
+      "pattern": "55 8B EC 83 EC 1C 8B 45 0C F3 0F 10 05 ?? ?? ?? ?? F3 0F 11 00 8B 4D 10 F3 0F 10 05 ?? ?? ?? ?? F3 0F 11 01 8B 55 14",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00466BE0",
+      "require_unique": true,
+      "identity": "CalcRange(Craft*, &close, &range, &time, &weapon) at 0x00466BE0 on the exact GOG 2.2.301 baseline. UnitTask::Execute 0x006002A0 supplies its craft and five output addresses; the decompile initializes close/range/time/weapon, scans the craft's selected weapon slots through CalcRange(Weapon) 0x00466890, selects the largest usable weapon range, and subtracts 1.0. Cross-checked in reverse_engineering/backlog_address_audit_20260708.md; the signature is the function entry and matched once in SHA-256 8d71f56c1314e69a8ad38f4eeaf20a8ff825965a84cf196e5f77ea4cc3377413."
     }
   ],
   "globals": [

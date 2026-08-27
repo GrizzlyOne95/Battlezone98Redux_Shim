@@ -9,12 +9,15 @@
 #include "shim_log.h"
 #include "ogre_shader_cache.h"
 #include "ogre_enhanced_light_selection.h"
+#include "render_profile_runtime.h"
 #include "native_ui.h"
 #include "ogre_animation_profiler.h"
 #include "ogre_profiler_algorithms.h"
 #include "weapon_convergence.h"
 #include "headlight_falloff.h"
 #include "chunk_batch_invalidation.h"
+#include "ai_range_policy.h"
+#include "hook_engine.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -315,6 +318,7 @@ namespace BZROpenShim
     static FnLegacyWorldUpdateRenderQueue g_BzrFn_LegacyWorldUpdateRenderQueue = nullptr;
     static FnGetPlayerHandle g_BzrFn_GetPlayerHandle = nullptr;
     static FnGameObjectGetObjByHandle g_BzrFn_GameObjectGetObjByHandle = nullptr;
+    static volatile long g_StaleGameObjectHandleLogBudget = 16;
 
     // Correct GOG handle->object conversion. The engine's GameObject pool is a
     // fixed 0x1000-slot table based at 0x0260DB20 with a 0x400-byte stride; a
@@ -343,6 +347,64 @@ namespace BZROpenShim
         {
         }
         return nullptr;
+    }
+
+    void* __cdecl GameObjectHandleGetObjHardened(int handle)
+    {
+        // GameObject::GetObj validates the low 20-bit generation against the
+        // selected pool slot, but generation zero is also the empty-slot value.
+        // A stale handle whose generation bits are zero therefore passes the
+        // stock check and returns a completely empty GameObject slot. The stock
+        // GameObjectHandle::GetObj wrapper immediately dereferences +0xF4 on
+        // that slot to test the dead bit and crashes.
+        //
+        // battlezone98redux.exe.16444.dmp captured this in PathSpawn::Execute
+        // owned by Inst4XMission. Redux reconstructs PathSpawn through a load
+        // constructor that initializes only its AiProcess base, allowing cached
+        // derived-state handles to be stale. Handle 0xBF800000 selected slot
+        // 0xBF8, whose generation and object pointer were both zero.
+        // Round-tripping through GetHandle rejects that slot because an empty
+        // object returns handle 0.
+        void* object = GameObjectFromHandleGog(handle);
+        if (!object)
+        {
+            if (handle != 0 &&
+                InterlockedDecrement(&g_StaleGameObjectHandleLogBudget) >= 0)
+            {
+                Log(L"[SAVELOAD] Rejected stale GameObject handle=0x%08X before object-state access\n",
+                    static_cast<uint32_t>(handle));
+            }
+            return nullptr;
+        }
+
+        void* objectState = nullptr;
+        uint32_t flags = 0;
+        __try
+        {
+            objectState = *reinterpret_cast<void**>(
+                reinterpret_cast<uint8_t*>(object) + 0xF4u);
+            if (objectState)
+            {
+                flags = *reinterpret_cast<uint32_t*>(
+                    reinterpret_cast<uint8_t*>(objectState) + 0x14u);
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            objectState = nullptr;
+        }
+
+        if (!objectState)
+        {
+            if (InterlockedDecrement(&g_StaleGameObjectHandleLogBudget) >= 0)
+            {
+                Log(L"[SAVELOAD] Rejected incomplete GameObject handle=0x%08X object=%p\n",
+                    static_cast<uint32_t>(handle), object);
+            }
+            return nullptr;
+        }
+
+        return (flags & 0x200u) == 0 ? object : nullptr;
     }
 
     static FnPersonSimulate g_BzrFn_PersonSimulate = nullptr;
@@ -868,7 +930,6 @@ namespace BZROpenShim
         {
             0x66, 0x8B, 0x85, 0xAE, 0xFC, 0xFF, 0xFF, 0x38, 0xE0, 0x76, 0x26
         };
-        constexpr uintptr_t kGogCalcRangeCraftEntryAddr = 0x00466BE0;
         constexpr size_t kCalcRangeCraftDetourLen = 9;
         // RecycleTask::InitLookingForScrap computes a stock squared-distance
         // score at this one call site after all team/material/region filters.
@@ -2058,7 +2119,12 @@ namespace BZROpenShim
         // enhancement, not a restoration -- BZ 1.5 ignores the mask on both
         // paths exactly as stock Redux does -- so it defaults OFF.
         static constexpr bool kAiWeaponMaskSelectionEnabledDefault = false;
-        static constexpr bool kAiOdfGameplayTuningEnabledDefault = false;
+        // Master switch for the ODF-authored AI tuning keys (engageRangeAI,
+        // weaponRangeMinAI, retargetPeriodAI, scrapPathingAI and friends).
+        // Defaults ON: every path it gates additionally requires the ODF to
+        // declare one of those keys, so content that does not author them --
+        // the stock campaign included -- is completely unaffected.
+        static constexpr bool kAiOdfGameplayTuningEnabledDefault = true;
         static constexpr bool kTurretAimPitchEnabledDefault = true;
         static constexpr bool kAttackRevealEnabledDefault = true;
         static constexpr long kAttackRevealTraceBudgetDefault = 64;
@@ -2075,7 +2141,9 @@ namespace BZROpenShim
         // redirects stay installed either way; when this is false they pass
         // straight through to the stock engine routines.
         static bool g_AiWeaponMaskSelectionActive = false;
+        static bool g_AiOdfGameplayTuningBaselineEnabled = kAiOdfGameplayTuningEnabledDefault;
         static bool g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
+        static bool g_AiOdfGameplayTuningActive = false;
         static bool g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
         static bool g_AttackRevealEnabled = kAttackRevealEnabledDefault;
 
@@ -7082,6 +7150,63 @@ namespace BZROpenShim
             }
         }
 
+        // The mission run-state seam fires while the outgoing Ogre objects are
+        // still valid, before Redux unloads the Modable resource group. Hide
+        // every shim-owned renderable in that window, then retire its slot.
+        // Merely forgetting the pointers is unsafe: the Entity remains attached
+        // to the scene graph and Ogre can traverse it after its Mesh/SubMesh has
+        // been unloaded. Dump battlezone98redux.exe.16476.dmp captured exactly
+        // that path for Ogre/MO656 (avfigh/ara11nrr.mesh): SubMesh::indexData
+        // was null when the loading-screen frame called _getRenderOperation.
+        static void DeactivateAllChunkProxySceneResources(const wchar_t* reason)
+        {
+            // Dump battlezone98redux.exe.38660.dmp ended in OgreMain!operator delete
+            // with a corrupted stack after mission quit (write to 001b835c, esp in
+            // free memory). The seam runs on the main thread with Ogre still valid
+            // but about to unload Modable. An Ogre call that faults must not unwind
+            // through every slot and leave attached entities. Faults are caught
+            // per-slot and demoted to a pointer forget, which is the same recovery
+            // the periodic "expired" tick uses when touching the entity faults.
+            size_t deactivated = 0;
+            size_t faulted = 0;
+            for (ChunkProxySlot& slot : g_ChunkProxySlots)
+            {
+                if (slot.active || slot.billboardAssigned || slot.meshAssigned)
+                    ++deactivated;
+                __try
+                {
+                    ReleaseChunkProxySlot(slot);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    ForgetChunkProxySlotOgreRefs(slot);
+                    ++faulted;
+                }
+            }
+            __try
+            {
+                HideGenericChunkBatchIfBuilt();
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                g_GenericChunkBatchManualObject = nullptr;
+                g_GenericChunkBatchSceneNode = nullptr;
+                g_GenericChunkBatchVisible = false;
+                g_GenericChunkBatchSectionCreated = false;
+                ++faulted;
+            }
+
+            if (deactivated > 0 || faulted > 0)
+            {
+                LogChunkDiagnostic(
+                    "chunkproxy",
+                    L"[CHUNKPROXY] mission transition (%ls): deactivated %zu slot(s) faulted=%zu before resource unload\n",
+                    reason ? reason : L"<none>",
+                    deactivated,
+                    faulted);
+            }
+        }
+
         static bool RebuildAndSubmitGenericChunkBatch(void* renderQueue)
         {
             size_t chunkCount = 0;
@@ -11791,63 +11916,6 @@ namespace BZROpenShim
             return g_EngineFlameSecondaryManager;
         }
 
-        static bool FindPatternInMainText(
-            const uint8_t* pattern,
-            const uint8_t* mask,
-            size_t size,
-            uint8_t*& outMatch)
-        {
-            outMatch = nullptr;
-            if (!pattern || !mask || size == 0)
-                return false;
-
-            HMODULE module = GetModuleHandleA(nullptr);
-            if (!module)
-                return false;
-
-            auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(module);
-            if (dos->e_magic != IMAGE_DOS_SIGNATURE)
-                return false;
-
-            auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(
-                reinterpret_cast<uint8_t*>(module) + dos->e_lfanew);
-            if (nt->Signature != IMAGE_NT_SIGNATURE)
-                return false;
-
-            auto* section = IMAGE_FIRST_SECTION(nt);
-            for (unsigned i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++section)
-            {
-                if ((section->Characteristics & IMAGE_SCN_MEM_EXECUTE) == 0)
-                    continue;
-
-                auto* start = reinterpret_cast<uint8_t*>(module) + section->VirtualAddress;
-                const size_t sectionSize =
-                    (section->Misc.VirtualSize != 0) ? section->Misc.VirtualSize : section->SizeOfRawData;
-                if (sectionSize < size)
-                    continue;
-
-                for (size_t offset = 0; offset <= sectionSize - size; ++offset)
-                {
-                    bool match = true;
-                    for (size_t j = 0; j < size; ++j)
-                    {
-                        if (mask[j] != 0 && start[offset + j] != pattern[j])
-                        {
-                            match = false;
-                            break;
-                        }
-                    }
-
-                    if (match)
-                    {
-                        outMatch = start + offset;
-                        return true;
-                    }
-                }
-            }
-
-            return false;
-        }
 
         static uint32_t ResolveRel32Target(uint8_t* callInstr)
         {
@@ -11880,103 +11948,54 @@ namespace BZROpenShim
                 return;
             }
 
-            static const uint8_t kEmit1Pattern[] =
-            {
-                0x0F, 0x11, 0x04, 0x24, 0x8D, 0x85, 0x00, 0x00, 0x00, 0x00,
-                0x50, 0xB9, 0x00, 0x00, 0x00, 0x00, 0xE8, 0x00, 0x00, 0x00,
-                0x00, 0x83, 0x3D, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0F, 0x84,
-            };
-            static const uint8_t kEmit1Mask[] =
-            {
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
-                0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00,
-                0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF,
-            };
-            static const uint8_t kGetTeamNumPattern[] =
-            {
-                0x8B, 0x45, 0x08, 0x50, 0xE8, 0x00, 0x00, 0x00, 0x00, 0x83,
-                0xC4, 0x04, 0x89, 0x45, 0xFC, 0x83, 0x7D, 0xFC, 0x00, 0x75,
-                0x04, 0x33, 0xC0, 0xEB, 0x11, 0x8B, 0x4D, 0xFC, 0x83, 0xC1,
-                0x18, 0x8B, 0x55, 0xFC, 0x8B, 0x42, 0x18, 0x8B, 0x50, 0x04,
-                0xFF, 0xD2,
-            };
-            static const uint8_t kGetTeamNumMask[] =
-            {
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF,
-            };
-            static const uint8_t kResolveTexturePattern[] =
-            {
-                0x55, 0x8B, 0xEC, 0x51, 0x83, 0x7D, 0x08, 0x00, 0x75, 0x04,
-                0x33, 0xC0, 0xEB, 0x44, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x83,
-                0xE8, 0x01, 0x89, 0x45, 0xFC, 0xEB, 0x09, 0x8B, 0x4D, 0xFC,
-                0x83, 0xE9, 0x01, 0x89, 0x4D, 0xFC, 0x83, 0x7D, 0xFC, 0x00,
-                0x7E, 0x26, 0x6A, 0x20, 0x8B, 0x55, 0x08, 0x52, 0x8B, 0x45,
-                0xFC, 0xC1, 0xE0, 0x05, 0x05, 0x00, 0x00, 0x00, 0x00, 0x50,
-                0xFF, 0x15, 0x00, 0x00, 0x00, 0x00, 0x83, 0xC4, 0x0C, 0x85,
-                0xC0, 0x75, 0x05,
-            };
-            static const uint8_t kResolveTextureMask[] =
-            {
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF,
-                0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF,
-                0xFF, 0xFF, 0xFF,
-            };
-
-            uint8_t* match = nullptr;
+            // Signatures, anchors and known-good constants for these three
+            // live in the "resolves" array of scripts/patches.json. Each
+            // resolution logs its match count and whether the scanned address
+            // agrees with the constant, so an ambiguous or drifted signature
+            // shows up in the log before it shows up as a missing effect.
             if (!g_BzrFn_EngineFlameAddFlame)
             {
-                if (FindPatternInMainText(kEmit1Pattern, kEmit1Mask, sizeof(kEmit1Pattern), match))
+                if (const uint32_t addFlame =
+                        HookEngine::ResolveNamedAddress("EngineFlame::AddFlame"))
                 {
-                    const uint32_t target = ResolveRel32Target(match + 16);
-                    if (target != 0)
-                    {
-                        g_BzrFn_EngineFlameAddFlame =
-                            reinterpret_cast<FnEngineFlameAddFlame>(target);
-                    }
+                    g_BzrFn_EngineFlameAddFlame =
+                        reinterpret_cast<FnEngineFlameAddFlame>(addFlame);
                 }
-
-                if (!g_BzrFn_EngineFlameAddFlame)
+                else
+                {
                     LogEngineFlameTargetFailure(L"EngineFlame::AddFlame");
+                }
             }
 
             if (!g_BzrFn_GetTeamNum)
             {
-                if (FindPatternInMainText(kGetTeamNumPattern, kGetTeamNumMask, sizeof(kGetTeamNumPattern), match))
+                if (const uint32_t getTeamNum =
+                        HookEngine::ResolveNamedAddress("GetTeamNum"))
                 {
-                    g_BzrFn_GetTeamNum =
-                        reinterpret_cast<FnGetTeamNum>(
-                            reinterpret_cast<uintptr_t>(match) - 4);
+                    g_BzrFn_GetTeamNum = reinterpret_cast<FnGetTeamNum>(getTeamNum);
                 }
-
-                if (!g_BzrFn_GetTeamNum)
+                else
+                {
                     LogEngineFlameTargetFailure(L"GetTeamNum");
+                }
             }
 
             if (!g_BzrFn_EngineFlameResolveTexture)
             {
-                if (FindPatternInMainText(
-                        kResolveTexturePattern,
-                        kResolveTextureMask,
-                        sizeof(kResolveTexturePattern),
-                        match))
+                // One function in two roles: the engine flame texture lookup
+                // and the HUD sprite lookup are the same code.
+                if (const uint32_t resolveTexture =
+                        HookEngine::ResolveNamedAddress("EngineFlame::ResolveTexture"))
                 {
                     g_BzrFn_EngineFlameResolveTexture =
-                        reinterpret_cast<FnEngineFlameResolveTexture>(match);
+                        reinterpret_cast<FnEngineFlameResolveTexture>(resolveTexture);
                     g_BzrFn_HudSpriteLookup =
-                        reinterpret_cast<FnHudSpriteLookup>(match);
+                        reinterpret_cast<FnHudSpriteLookup>(resolveTexture);
                 }
-
-                if (!g_BzrFn_EngineFlameResolveTexture)
+                else
+                {
                     LogEngineFlameTargetFailure(L"ResolveTexture");
+                }
             }
         }
 
@@ -12642,6 +12661,18 @@ namespace BZROpenShim
             g_AiWeaponMaskSelectionActive = false;
         }
 
+        static void RefreshAiOdfGameplayTuningState()
+        {
+            g_AiOdfGameplayTuningActive =
+                g_AiOdfGameplayTuningEnabled && ReadLocalPlayerNetIdValue() == 0;
+        }
+
+        static void RevertAiOdfGameplayTuningToBaseline()
+        {
+            g_AiOdfGameplayTuningEnabled = g_AiOdfGameplayTuningBaselineEnabled;
+            RefreshAiOdfGameplayTuningState();
+        }
+
         static const char* BoolText(bool value);
         static void RefreshJumpSnipeCrouchPatchState();
 
@@ -12731,6 +12762,11 @@ namespace BZROpenShim
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "AiWeaponMaskSelection", value))
                 g_AiWeaponMaskSelectionEnabled = value;
 
+            g_AiOdfGameplayTuningBaselineEnabled = kAiOdfGameplayTuningEnabledDefault;
+            if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "AiOdfGameplayTuning", value))
+                g_AiOdfGameplayTuningBaselineEnabled = value;
+            g_AiOdfGameplayTuningEnabled = g_AiOdfGameplayTuningBaselineEnabled;
+
             float configuredMultiplier = 0.95f;
             std::string multiplierText;
             if (TryGetUserConfigString(
@@ -12759,12 +12795,13 @@ namespace BZROpenShim
             g_ScrapPilotHudLastRefreshTick = 0;
             RefreshTurretAimPitchState();
             RefreshAiWeaponMaskSelectionState();
+            RefreshAiOdfGameplayTuningState();
             RefreshJumpSnipeCrouchPatchState();
             RefreshShotConvergencePatchState();
             RefreshSmartReticleRangeState();
             RefreshScrapPilotHudLayout();
 
-            Log(L"[GLOBAL] scrapPilotHud=%hs weaponConvergence=%hs playerReticleConvergence=%hs smartReticleRange=%.3f smartScavengerPathing=%hs jumpSnipeCrouch=%hs turretAim=%hs multiplier=%.3f (gameplay features SP-only)\n",
+            Log(L"[GLOBAL] scrapPilotHud=%hs weaponConvergence=%hs playerReticleConvergence=%hs smartReticleRange=%.3f smartScavengerPathing=%hs jumpSnipeCrouch=%hs turretAim=%hs multiplier=%.3f aiOdfTuning=%hs (gameplay features SP-only)\n",
                 g_ScrapPilotHudLegacyLayoutEnabled ? "legacy" : "stock",
                 BoolText(g_ShotConvergenceBaselineEnabled),
                 BoolText(g_PlayerReticleShotConvergenceBaselineEnabled),
@@ -12772,7 +12809,8 @@ namespace BZROpenShim
                 BoolText(g_SmartScavengerPathingEnabled),
                 BoolText(g_JumpSnipeCrouchBaselineEnabled),
                 BoolText(g_TurretAimPitchBaselineEnabled),
-                static_cast<double>(g_TurretAimPitchMultiplierEnhanced));
+                static_cast<double>(g_TurretAimPitchMultiplierEnhanced),
+                BoolText(g_AiOdfGameplayTuningBaselineEnabled));
         }
 
         static bool VtableTypeNameMatches(uintptr_t vtableAddress, const char* expectedName)
@@ -13683,19 +13721,16 @@ namespace BZROpenShim
                     BzrRunStateName(previous), previous,
                     BzrRunStateName(current), current,
                     g_MissionTransitionCount);
-                // Deliberately NOT forgetting chunk proxy or multiplayer flag
-                // scene resources here. Both forget paths hang off the
-                // clearScene / destroyAllMovableObjects hooks, which never fire
-                // in this build, so neither had ever executed in a live process
-                // -- and they are written for a scene that is already gone. At
-                // this seam the scene is still alive, so forgetting makes the
-                // owning subsystem lazily recreate resources whose Ogre objects
-                // still exist. Driving the flag path from here aborted the
-                // process inside RenderMultiplayerFlags
-                // (C:\BZDumps\battlezone98redux.exe.35108.dmp), and the chunk
-                // path carries the same hazard. Stale chunk slots are handled
-                // where the damage actually occurs, by the fail-fast checks in
-                // SubmitChunkProxiesToRenderQueue.
+                // clearScene / destroyAllMovableObjects never fire for this
+                // in-process transition. Deactivate chunk proxies now, while
+                // setVisible and node updates are still safe; otherwise Ogre's
+                // own scene traversal can reach an attached proxy after Modable
+                // unloads its SubMesh, before the manual-submit stale checks get
+                // a chance to run. Do not apply the old pointer-forget path to
+                // multiplayer flags here: that path previously recreated over
+                // still-live Ogre objects and aborted in RenderMultiplayerFlags
+                // (battlezone98redux.exe.35108.dmp).
+                DeactivateAllChunkProxySceneResources(L"left simulation");
                 HeadlightNotifyMissionRunStateChanged(false);
             }
             else if (previous != kBzrRunStateStarted && current == kBzrRunStateStarted)
@@ -14104,32 +14139,6 @@ namespace BZROpenShim
         static FnUnitVoQueue g_BzrFn_UnitVoQueue = nullptr;
         static FnUnitVoKillQueue g_BzrFn_UnitVoKillQueue = nullptr;
 
-        static const uint8_t kUnitVoSayQueuePattern[] = {
-            0x6A, 0x00, 0x8B, 0x4D, 0xFC, 0x83, 0xC1, 0x18, 0x8B, 0x55,
-            0xFC, 0x8B, 0x42, 0x18, 0x8B, 0x50, 0x30, 0xFF, 0xD2, 0x50,
-            0x8B, 0x45, 0xF8, 0x50, 0xE8, 0, 0, 0, 0, 0x83, 0xC4, 0x0C,
-            0x8B, 0x4D, 0x0C, 0x89, 0x0D, 0, 0, 0, 0, 0xE8, 0, 0, 0, 0,
-            0xD9, 0x1D, 0, 0, 0, 0
-        };
-        static const uint8_t kUnitVoSayQueueMask[] = {
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1,
-            1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0,
-            1, 1, 0, 0, 0, 0
-        };
-        static const uint8_t kUnitVoRecycleQueuePattern[] = {
-            0x6A, 0x03, 0x8B, 0x4D, 0xFC, 0x83, 0xC1, 0x18, 0x8B, 0x45,
-            0xFC, 0x8B, 0x50, 0x18, 0x8B, 0x42, 0x30, 0xFF, 0xD0, 0x50,
-            0x8B, 0x4D, 0x08, 0x51, 0xE8, 0, 0, 0, 0, 0x83, 0xC4, 0x0C,
-            0x5E, 0x8B, 0xE5
-        };
-        static const uint8_t kUnitVoRecycleQueueMask[] = {
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1,
-            1, 1, 1
-        };
 
         static bool UnitVoEndsWith(std::string_view value, std::string_view suffix)
         {
@@ -14343,18 +14352,16 @@ namespace BZROpenShim
             if (g_UnitVoHooksInstalled)
                 return;
 
-            uint8_t* sayMatch = nullptr;
-            uint8_t* recycleMatch = nullptr;
-            if (!FindPatternInMainText(
-                    kUnitVoSayQueuePattern,
-                    kUnitVoSayQueueMask,
-                    std::size(kUnitVoSayQueuePattern),
-                    sayMatch) ||
-                !FindPatternInMainText(
-                    kUnitVoRecycleQueuePattern,
-                    kUnitVoRecycleQueueMask,
-                    std::size(kUnitVoRecycleQueuePattern),
-                    recycleMatch))
+            // Both call sites come from the "resolves" array in
+            // scripts/patches.json, which anchors each entry on the CALL
+            // itself. The signature only nominates them; identity is settled
+            // below, where the two must resolve to one QueueCB that then
+            // passes the queue-list layout probe.
+            const uint32_t sayCallSite =
+                HookEngine::ResolveNamedAddress("UnitVo::SayQueueCallSite");
+            const uint32_t recycleCallSite =
+                HookEngine::ResolveNamedAddress("UnitVo::RecycleQueueCallSite");
+            if (sayCallSite == 0 || recycleCallSite == 0)
             {
                 if (!g_UnitVoHookFailureLogged)
                 {
@@ -14364,8 +14371,8 @@ namespace BZROpenShim
                 return;
             }
 
-            g_UnitVoSayQueueCallSite = reinterpret_cast<uintptr_t>(sayMatch + 24);
-            g_UnitVoRecycleQueueCallSite = reinterpret_cast<uintptr_t>(recycleMatch + 24);
+            g_UnitVoSayQueueCallSite = static_cast<uintptr_t>(sayCallSite);
+            g_UnitVoRecycleQueueCallSite = static_cast<uintptr_t>(recycleCallSite);
             const uintptr_t sayTarget = ResolveRel32Target(
                 reinterpret_cast<uint8_t*>(g_UnitVoSayQueueCallSite));
             const uintptr_t recycleTarget = ResolveRel32Target(
@@ -16893,6 +16900,8 @@ namespace BZROpenShim
               &RevertHeadlightsToBaseline, &RefreshHeadlightState },
             { "AiWeaponMaskSelection", FeatureTier::SinglePlayer,
               &RevertAiWeaponMaskSelectionToBaseline, &RefreshAiWeaponMaskSelectionState },
+            { "AiOdfGameplayTuning", FeatureTier::SinglePlayer,
+              &RevertAiOdfGameplayTuningToBaseline, &RefreshAiOdfGameplayTuningState },
         };
 
         // Restore every registered feature to its resting state (mission end).
@@ -17789,9 +17798,10 @@ namespace BZROpenShim
                 return straightSquared;
 
             AiTuningConfig tuning = {};
-            const bool hasTuning = TryGetAiTuningForObject(craft, tuning);
+            const bool hasTuning =
+                g_AiOdfGameplayTuningActive && TryGetAiTuningForObject(craft, tuning);
             bool pathingEnabled = g_SmartScavengerPathingEnabled;
-            if (g_AiOdfGameplayTuningEnabled && hasTuning && tuning.hasScrapPathingAI)
+            if (g_AiOdfGameplayTuningActive && hasTuning && tuning.hasScrapPathingAI)
                 pathingEnabled = tuning.scrapPathingAI;
             if (!pathingEnabled)
             {
@@ -18047,9 +18057,11 @@ namespace BZROpenShim
 
             const uintptr_t taskKey = reinterpret_cast<uintptr_t>(recycleTask);
             AiTuningConfig tuning = {};
-            const bool hasTuning = craft && TryGetAiTuningForObject(craft, tuning);
+            const bool hasTuning =
+                craft && g_AiOdfGameplayTuningActive &&
+                TryGetAiTuningForObject(craft, tuning);
             bool pathingEnabled = g_SmartScavengerPathingEnabled;
-            if (g_AiOdfGameplayTuningEnabled && hasTuning && tuning.hasScrapPathingAI)
+            if (g_AiOdfGameplayTuningActive && hasTuning && tuning.hasScrapPathingAI)
                 pathingEnabled = tuning.scrapPathingAI;
             if (!craft || !pathingEnabled)
             {
@@ -18229,6 +18241,29 @@ namespace BZROpenShim
                 return;
 
             const float originalRange = *range;
+            const float originalCloseRange = closeRange ? *closeRange : -1.0f;
+
+            if (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+            {
+                static volatile long s_CalcRangeProbeBudget = 24;
+                const long remaining = InterlockedDecrement(&s_CalcRangeProbeBudget);
+                if (remaining >= 0)
+                {
+                    char odfToken[kProducerBuildMenuTokenLen + 1] = {};
+                    const bool haveOdf = TryGetObjectOdfToken(craft, odfToken);
+                    Log(L"[AIODF] CalcRange probe craft=0x%08X odf=%hs active=%hs close=%.2f range=%.2f time=%.2f weapon=0x%08X remaining=%ld\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
+                        haveOdf ? odfToken : "-",
+                        BoolText(g_AiOdfGameplayTuningActive),
+                        closeRange ? *closeRange : -1.0f,
+                        *range,
+                        time ? *time : -1.0f,
+                        weapon && *weapon
+                            ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(*weapon))
+                            : 0u,
+                        remaining);
+                }
+            }
 
             const AiUnitTuningOverride* unitTuning = nullptr;
             if (!g_AiUnitTuningOverridesByObject.empty())
@@ -18244,58 +18279,115 @@ namespace BZROpenShim
             if (!hasOdfTuning && !unitTuning)
                 return;
 
-            const bool applyRangeOverride =
-                hasOdfTuning &&
-                (g_AiOdfGameplayTuningEnabled ||
-                 (tuning.bomberAiRole && g_BomberAiRangeEnabled));
-            float minRange = 0.0f;
-            bool hasMinRange = false;
-            if (applyRangeOverride && tuning.hasEngageRangeAI)
+            AiRangePolicy::Inputs policy = {};
+            policy.closeRange = closeRange ? *closeRange : 0.0f;
+            policy.range = *range;
+            policy.time = time ? *time : 0.0f;
+
+            bool hasOdfOuterRangeFloor = false;
+            bool hasOdfCloseRangeFloor = false;
+            bool hasUnitOuterRangeFloor = false;
+            bool hasUnitCloseRangeFloor = false;
+            if (hasOdfTuning &&
+                g_AiOdfGameplayTuningActive &&
+                tuning.hasEngageRangeAI)
             {
-                minRange = (std::max)(minRange, tuning.engageRangeAI);
-                hasMinRange = true;
+                hasOdfOuterRangeFloor =
+                    AiRangePolicy::AccumulatePositiveFloor(
+                        policy.hasOuterRangeFloor,
+                        policy.outerRangeFloor,
+                        tuning.engageRangeAI) || hasOdfOuterRangeFloor;
             }
-            if (applyRangeOverride && tuning.hasWeaponRangeMinAI)
+            const bool useAuthoredWeaponRange =
+                g_AiOdfGameplayTuningActive &&
+                tuning.hasWeaponRangeMinAI &&
+                !tuning.derivedBomberWeaponRangeAI;
+            const bool useDerivedBomberRange =
+                g_BomberAiRangeEnabled &&
+                tuning.bomberAiRole &&
+                tuning.hasWeaponRangeMinAI &&
+                tuning.derivedBomberWeaponRangeAI;
+            if (hasOdfTuning && useAuthoredWeaponRange)
             {
-                minRange = (std::max)(minRange, tuning.weaponRangeMinAI);
-                hasMinRange = true;
+                hasOdfCloseRangeFloor =
+                    AiRangePolicy::AccumulatePositiveFloor(
+                        policy.hasCloseRangeFloor,
+                        policy.closeRangeFloor,
+                        tuning.weaponRangeMinAI) || hasOdfCloseRangeFloor;
+            }
+            if (hasOdfTuning && useDerivedBomberRange)
+            {
+                // Preserve the inherited bomber fallback as an outer weapon
+                // range floor. It is not an authored wingman standoff ring.
+                hasOdfOuterRangeFloor =
+                    AiRangePolicy::AccumulatePositiveFloor(
+                        policy.hasOuterRangeFloor,
+                        policy.outerRangeFloor,
+                        tuning.weaponRangeMinAI) || hasOdfOuterRangeFloor;
             }
 
             // Per-unit overrides win over ODF tuning and ignore the master toggle.
             if (unitTuning && unitTuning->hasEngageRange)
             {
-                minRange = (std::max)(minRange, unitTuning->engageRange);
-                hasMinRange = true;
+                hasUnitOuterRangeFloor =
+                    AiRangePolicy::AccumulatePositiveFloor(
+                        policy.hasOuterRangeFloor,
+                        policy.outerRangeFloor,
+                        unitTuning->engageRange) || hasUnitOuterRangeFloor;
             }
-
-            if (hasMinRange && std::isfinite(*range) && *range < minRange)
-                *range = minRange;
-
-            // Per-unit weaponRangeMin floors *closeRange, the engine's
-            // "too close" threshold (UnitTask::closeSq): inside it units hold
-            // fire, back away in DoStand, and AttackTask flees — a native
-            // standoff/kiting band. Clamped under the final fire range so a
-            // firing window always exists.
-            float finalCloseFloor = 0.0f;
             if (unitTuning && unitTuning->hasWeaponRangeMin && closeRange)
             {
-                float closeFloor = unitTuning->weaponRangeMin;
-                if (std::isfinite(*range) && *range > 0.0f)
-                    closeFloor = (std::min)(closeFloor, *range * 0.9f);
-                if (!std::isfinite(*closeRange) || *closeRange < closeFloor)
-                    *closeRange = closeFloor;
-                finalCloseFloor = closeFloor;
+                hasUnitCloseRangeFloor =
+                    AiRangePolicy::AccumulatePositiveFloor(
+                        policy.hasCloseRangeFloor,
+                        policy.closeRangeFloor,
+                        unitTuning->weaponRangeMin) || hasUnitCloseRangeFloor;
             }
 
-            if ((applyRangeOverride || unitTuning) &&
-                time &&
-                (!std::isfinite(*time) || *time <= 0.0f))
+            // CalcRange is the stock weapon-aware source for both the outer
+            // firing range and UnitTask's closeSq/"too close" threshold.
+            // Authored engageRangeAI floors only the former; authored
+            // weaponRangeMinAI floors only the latter and is capped just under
+            // the final outer range so a firing window remains.
+            const AiRangePolicy::Result policyResult = AiRangePolicy::Apply(policy);
+            *range = policyResult.range;
+            if (closeRange)
+                *closeRange = policyResult.closeRange;
+            if (time)
+                *time = policyResult.time;
+
+            const bool hasOdfRangePolicy =
+                hasOdfOuterRangeFloor || hasOdfCloseRangeFloor;
+            const bool hasUnitRangePolicy =
+                hasUnitOuterRangeFloor || hasUnitCloseRangeFloor;
+
+            if (hasOdfTuning && hasOdfRangePolicy &&
+                EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
             {
-                *time = 1.0f;
+                static volatile long s_OdfRangeTraceBudget = 24;
+                const long remaining = InterlockedDecrement(&s_OdfRangeTraceBudget);
+                if (remaining >= 0)
+                {
+                    char odfToken[kProducerBuildMenuTokenLen + 1] = {};
+                    TryGetObjectOdfToken(craft, odfToken);
+                    Log(L"[AIODF] Range policy craft=0x%08X odf=%hs range=%.2f->%.2f outerFloor=%hs%.2f close=%.2f->%.2f closeFloor=%hs%.2f remaining=%ld\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
+                        odfToken[0] ? odfToken : "-",
+                        originalRange,
+                        *range,
+                        hasOdfOuterRangeFloor ? "" : "-",
+                        policyResult.appliedOuterRangeFloor,
+                        originalCloseRange,
+                        closeRange ? *closeRange : -1.0f,
+                        hasOdfCloseRangeFloor ? "" : "-",
+                        policyResult.appliedCloseRangeFloor,
+                        remaining);
+                }
             }
 
             if (unitTuning &&
-                ((hasMinRange && originalRange < minRange) || finalCloseFloor > 0.0f) &&
+                hasUnitRangePolicy &&
+                (policyResult.rangeChanged || policyResult.closeRangeChanged) &&
                 (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE") ||
                  EnvFlagEnabled("OPENSHIM_TRACE_AI_UNIT_TUNING")))
             {
@@ -18327,18 +18419,19 @@ namespace BZROpenShim
                 {
                     char odfToken[kProducerBuildMenuTokenLen + 1] = {};
                     TryGetObjectOdfToken(craft, odfToken);
-                    Log(L"[BOMBERRANGE] craft=0x%08X odf=%hs original=%.2f final=%.2f min=%.2f engage=%hs%.2f weaponMin=%hs%.2f derived=%hs close=%.2f time=%.2f weapon=0x%08X remaining=%ld\n",
+                    Log(L"[BOMBERRANGE] craft=0x%08X odf=%hs original=%.2f final=%.2f outerFloor=%.2f engage=%hs%.2f weaponMin=%hs%.2f derived=%hs close=%.2f closeFloor=%.2f time=%.2f weapon=0x%08X remaining=%ld\n",
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
                         odfToken[0] ? odfToken : "-",
                         originalRange,
                         *range,
-                        minRange,
+                        policyResult.appliedOuterRangeFloor,
                         tuning.hasEngageRangeAI ? "" : "-",
                         tuning.engageRangeAI,
                         tuning.hasWeaponRangeMinAI ? "" : "-",
                         tuning.weaponRangeMinAI,
                         tuning.derivedBomberWeaponRangeAI ? "true" : "false",
                         closeRange ? *closeRange : -1.0f,
+                        policyResult.appliedCloseRangeFloor,
                         time ? *time : -1.0f,
                         weapon && *weapon ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(*weapon)) : 0u,
                         remaining);
@@ -18355,6 +18448,23 @@ namespace BZROpenShim
             void* objectPtr = *reinterpret_cast<void**>(processBytes + kUnitProcessObjectOffset);
             if (!objectPtr)
                 return;
+
+            if (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+            {
+                static volatile long s_RetargetProbeBudget = 24;
+                const long remaining = InterlockedDecrement(&s_RetargetProbeBudget);
+                if (remaining >= 0)
+                {
+                    char odfToken[kProducerBuildMenuTokenLen + 1] = {};
+                    const bool haveOdf = TryGetObjectOdfToken(objectPtr, odfToken);
+                    Log(L"[AIODF] Retarget probe process=0x%08X object=0x%08X odf=%hs active=%hs remaining=%ld\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(processPtr)),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectPtr)),
+                        haveOdf ? odfToken : "-",
+                        BoolText(g_AiOdfGameplayTuningActive),
+                        remaining);
+                }
+            }
 
             // Global upgrade applies to every covered combat process. Per-unit
             // tuning wins, followed by an enabled ODF override. An explicit
@@ -18373,7 +18483,7 @@ namespace BZROpenShim
                 }
             }
 
-            if (!hasUnitRetargetPeriod && g_AiOdfGameplayTuningEnabled)
+            if (!hasUnitRetargetPeriod && g_AiOdfGameplayTuningActive)
             {
                 AiTuningConfig tuning = {};
                 if (TryGetAiTuningForObject(objectPtr, tuning) && tuning.hasRetargetPeriodAI)
@@ -20015,23 +20125,30 @@ namespace BZROpenShim
                 {
                     0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x1C, 0x8B, 0x45, 0x0C
                 };
+                const uintptr_t calcRangeCraftEntryAddr =
+                    static_cast<uintptr_t>(
+                        HookEngine::ResolveNamedAddress("CalcRange(Craft)"));
 
-                if (!ExpectedBytesMatchAt(kGogCalcRangeCraftEntryAddr,
+                if (calcRangeCraftEntryAddr == 0)
+                {
+                    Log(L"[AIODF] CalcRange(Craft) resolver failed; AI ODF range tuning disabled\n");
+                }
+                else if (!ExpectedBytesMatchAt(calcRangeCraftEntryAddr,
                                           kExpectedCalcRangeCraftBytes,
                                           sizeof(kExpectedCalcRangeCraftBytes)))
                 {
                     Log(L"[AIODF] CalcRange(Craft) entry bytes mismatch at 0x%08X; AI ODF range tuning disabled\n",
-                        static_cast<uint32_t>(kGogCalcRangeCraftEntryAddr));
+                        static_cast<uint32_t>(calcRangeCraftEntryAddr));
                 }
                 else if (!InstallInlineDetour32(g_CalcRangeCraftDetour,
-                                                kGogCalcRangeCraftEntryAddr,
+                                                calcRangeCraftEntryAddr,
                                                 reinterpret_cast<void*>(CalcRangeCraftHook),
                                                 kCalcRangeCraftDetourLen,
                                                 kExpectedCalcRangeCraftBytes,
                                                 sizeof(kExpectedCalcRangeCraftBytes)))
                 {
                     Log(L"[AIODF] Failed installing CalcRange(Craft) hook at 0x%08X\n",
-                        static_cast<uint32_t>(kGogCalcRangeCraftEntryAddr));
+                        static_cast<uint32_t>(calcRangeCraftEntryAddr));
                 }
                 else
                 {
@@ -20041,7 +20158,7 @@ namespace BZROpenShim
                     if (g_CalcRangeCraftHookInstalled)
                     {
                         Log(L"[AIODF] Installed CalcRange(Craft) hook entry=0x%08X trampoline=0x%08X\n",
-                            static_cast<uint32_t>(kGogCalcRangeCraftEntryAddr),
+                            static_cast<uint32_t>(calcRangeCraftEntryAddr),
                             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CalcRangeCraftDetour.trampoline)));
                     }
                 }
@@ -22866,30 +22983,20 @@ namespace BZROpenShim
             if (!objectPtr)
                 return false;
 
-            __try
-            {
-                void* objectClass = ReadValueAtOffset<void*>(objectPtr, kGameObjectClassOffset);
-                if (!objectClass)
-                    return false;
-
-                char rawOdf[kObjectClassOdfLen + 1] = {};
-                std::memcpy(rawOdf,
-                            reinterpret_cast<const uint8_t*>(objectClass) + kObjectClassOdfOffset,
-                            kObjectClassOdfLen);
-                rawOdf[kObjectClassOdfLen] = '\0';
-
-                const ProducerBuildMenuEntry entry = NormalizeProducerBuildMenuToken(rawOdf);
-                if (!entry.hasValue)
-                    return false;
-
-                strncpy_s(outToken, entry.token, _TRUNCATE);
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                outToken[0] = '\0';
+            // Use the same GameObject -> class virtual lookup as the validated
+            // engine-flame ODF path. The tempting raw object+0xF8/class+0x20
+            // chain identifies a different class record for Craft instances
+            // and produces plausible-looking garbage instead of the ODF name.
+            char rawOdf[kGameObjectClassOdfNameMax + 1] = {};
+            if (!TryGetCraftOdfName(objectPtr, rawOdf, sizeof(rawOdf)))
                 return false;
-            }
+
+            const ProducerBuildMenuEntry entry = NormalizeProducerBuildMenuToken(rawOdf);
+            if (!entry.hasValue)
+                return false;
+
+            strncpy_s(outToken, entry.token, _TRUNCATE);
+            return true;
         }
 
         static bool TryNormalizeQuotedStringValue(const char* value,
@@ -27016,6 +27123,9 @@ namespace BZROpenShim
             // the port it actually bound.
             InitializeBzrNetConfig();
             break;
+        case ShimSettingApplyGroup::RenderProfile:
+            RenderProfiles::ReloadRenderProfileConfig();
+            break;
         case ShimSettingApplyGroup::RestartRequired:
             break;
         }
@@ -27209,7 +27319,6 @@ namespace BZROpenShim
             !(EnvFlagEnabled("OPENSHIM_DISABLE_HOWITZER_DEPLOY_FIX") ||
               EnvFlagEnabled("BZR_DISABLE_HOWITZER_DEPLOY_FIX"));
         g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
-        g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
         g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
         g_AttackRevealEnabled = kAttackRevealEnabledDefault;
         // Registered features revert to their resting state (jump-snipe enable
@@ -27313,12 +27422,27 @@ namespace BZROpenShim
 
         // Steam's wrapped executable still maps these helpers at the same live
         // runtime addresses as GOG on the current 2.2.301 build.
-        g_BzrFn_EngineFlameAddFlame = reinterpret_cast<FnEngineFlameAddFlame>(0x004C8800);
+        //
+        // AddFlame, ResolveTexture and GetTeamNum come from the "resolves"
+        // array in scripts/patches.json, which carries those same addresses as
+        // `fallback`. Resolving here instead of seeding a literal is what makes
+        // their signatures run at all: seeding first left
+        // ResolveEngineFlameRuntimeTargets() returning early in every process,
+        // so the scan below it had never once executed. "prefer": "fallback"
+        // keeps the address identical to the constant until a live [RESOLVE]
+        // line reports agree=yes.
+        g_BzrFn_EngineFlameAddFlame = reinterpret_cast<FnEngineFlameAddFlame>(
+            HookEngine::ResolveNamedAddress("EngineFlame::AddFlame"));
         g_BzrFn_EngineFlameControl = reinterpret_cast<FnEngineFlameControl>(0x004C88A0);
         g_BzrFn_EngineFlameSubmit = reinterpret_cast<FnEngineFlameSubmit>(0x004C88C0);
-        g_BzrFn_EngineFlameResolveTexture = reinterpret_cast<FnEngineFlameResolveTexture>(0x0068BED0);
-        g_BzrFn_HudSpriteLookup = reinterpret_cast<FnHudSpriteLookup>(0x0068BED0);
-        g_BzrFn_GetTeamNum = reinterpret_cast<FnGetTeamNum>(0x005C8800);
+        // One function in two roles; resolve once and share it.
+        const uint32_t resolveTexture =
+            HookEngine::ResolveNamedAddress("EngineFlame::ResolveTexture");
+        g_BzrFn_EngineFlameResolveTexture =
+            reinterpret_cast<FnEngineFlameResolveTexture>(resolveTexture);
+        g_BzrFn_HudSpriteLookup = reinterpret_cast<FnHudSpriteLookup>(resolveTexture);
+        g_BzrFn_GetTeamNum = reinterpret_cast<FnGetTeamNum>(
+            HookEngine::ResolveNamedAddress("GetTeamNum"));
         g_BzrFn_ChunkEffectSimulate = reinterpret_cast<FnChunkEffectSimulate>(0x004917F0);
         g_DynamicAlphaDepthBatchingEnabled =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_DYNAMIC_ALPHA_BATCHING") ||
@@ -27530,10 +27654,11 @@ namespace BZROpenShim
 		InstallTargetCamSatelliteFixIfPossible();
 		InstallCinematicSatelliteZoomFixIfPossible();
 
-        if (g_IsSteamExe)
-        {
-            ResolveEngineFlameRuntimeTargets();
-        }
+        // Retry for whichever of the three resolved to 0 above. This used to
+        // be gated on g_IsSteamExe, from when the scan was Steam's path and
+        // GOG relied on the literals; both storefronts now take the same
+        // route, and on GOG this was the only init-time caller.
+        ResolveEngineFlameRuntimeTargets();
 
         g_EnableChunkRenderFallback =
             EnvFlagEnabled("BZR_CHUNK_FORCE_FIRST_GEO") ||
@@ -28120,9 +28245,325 @@ namespace BZROpenShim
         }
     }
 
+    // --- Experimental shadow-far-distance override -------------------------
+    // (OPENSHIM_SHADOW_FAR_DISTANCE, environment-variable-only experiment)
+    //
+    // Root cause (reverse_engineering/shadow_cutoff_root_cause_20260825.md):
+    // FUN_00680fe0 writes SceneManager::setShadowFarDistance(128.0) for every
+    // shadow quality, while the PSSM receiver shaders trust cascade 3 out to
+    // the 256 m outer split. Ogre's Focused/LiSPSM fit clips the cascade
+    // intersection body at the shadow far distance, so cascade 3's fitted
+    // coverage ends at ~128 m; receivers between 128-256 m sample outside the
+    // shadow map (white border = fully lit). That is the reported hard shadow
+    // terminator.
+    //
+    // This experiment detours the game's own shadow-apply routine and, after
+    // every stock apply, re-issues the game's own virtual setter with the
+    // requested distance. It is deliberately narrow:
+    //   - dormant unless OPENSHIM_SHADOW_FAR_DISTANCE is set (stock-exact);
+    //   - applies only when the settings say PSSM and the stock value was
+    //     observed (fail closed otherwise);
+    //   - touches no material LOD, shader, split distance, or headlight state.
+    namespace ShadowFarOverride
+    {
+        // FUN_00680fe0: shadow-texture/PSSM/viewport-scheme apply.
+        constexpr uintptr_t kShadowApplyFnRva = 0x00280FE0;
+        // DAT_0094672c -> settings struct; +0x25 shadow quality (sbyte).
+        constexpr uintptr_t kShadowSettingsPtrRva = 0x0054672C;
+        // 0x008ED0BC: per-quality mode bytes (0 = single map, 1 = PSSM).
+        constexpr uintptr_t kShadowModeTableRva = 0x004ED0BC;
+        // Validated GOG 2.2.301 module identities (exe SHA-256
+        // 8D71F56C...; OgreMain SHA-256 E5E69396... — PE timestamp/size here,
+        // full-hash checks exist in the features that write memory elsewhere).
+        constexpr DWORD kExpectedExeTimestamp = 0x58D9D6CC;
+        constexpr DWORD kExpectedExeImageSize = 0x0290F000;
+        constexpr DWORD kExpectedOgreTimestamp = 0x5866BF6A;
+        constexpr DWORD kExpectedOgreImageSize = 0x00A65000;
+        // SceneManager vtable slots, confirmed two ways: FUN_00680fe0 calls
+        // slot +0x394 with 128.0 between the shadow-texture and per-type-count
+        // writes, and shipped Light::getShadowFarDistance (RVA 0x21F430)
+        // forwards to slot +0x398 when the light has no own distance.
+        constexpr SIZE_T kVtableSetSlot = 0x394 / sizeof(void*);
+        constexpr SIZE_T kVtableGetSlot = 0x398 / sizeof(void*);
+        constexpr float kStockFarDistance = 128.0f;
+        constexpr int kMaxTelemetryLines = 16;
+
+        using FnGetFarDistance = float(__thiscall*)(void*);
+        using FnSetFarDistance = void(__thiscall*)(void*, float);
+
+        InlineDetour32 g_ApplyDetour = {};
+        float g_OverrideDistance = 0.0f;
+        bool g_InstallAttempted = false;
+        int g_TelemetryLines = 0;
+
+        float ReadOverrideDistance()
+        {
+            char buffer[32] = {};
+            const DWORD length = GetEnvironmentVariableA(
+                "OPENSHIM_SHADOW_FAR_DISTANCE", buffer, sizeof(buffer));
+            if (length == 0 || length >= sizeof(buffer))
+                return 0.0f;
+            char* end = nullptr;
+            const float value = std::strtof(buffer, &end);
+            if (end == buffer || !std::isfinite(value))
+                return 0.0f;
+            // 128 is the stock value; anything outside 16-4096 cannot be a
+            // meaningful shadow distance for this engine's scale.
+            if (value < 16.0f || value > 4096.0f || value == kStockFarDistance)
+            {
+                LogShimA(LogLevel::Warn, "SHADOWFAR",
+                    "rejected OPENSHIM_SHADOW_FAR_DISTANCE=%hs (must be a "
+                    "finite distance in [16, 4096] other than 128)",
+                    buffer);
+                return 0.0f;
+            }
+            return value;
+        }
+
+        bool ModuleIdentityMatches(HMODULE module,
+                                   DWORD expectedTimestamp,
+                                   DWORD expectedImageSize)
+        {
+            if (!module)
+                return false;
+            __try
+            {
+                const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+                if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+                    return false;
+                const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+                    reinterpret_cast<const uint8_t*>(module) + dos->e_lfanew);
+                return nt->Signature == IMAGE_NT_SIGNATURE
+                    && nt->FileHeader.TimeDateStamp == expectedTimestamp
+                    && nt->OptionalHeader.SizeOfImage == expectedImageSize;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // Telemetry field: which render system the game actually selected.
+        // Both render-system DLLs are loaded at startup regardless of choice,
+        // so module presence is meaningless here — parse Ogre.cfg instead,
+        // exactly the signal the profiler's ReadConfiguredRenderer uses.
+        const char* ActiveRendererName()
+        {
+            static char name[16] = "";
+            static bool resolved = false;
+            if (!resolved)
+            {
+                resolved = true;
+                char path[MAX_PATH] = {};
+                const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+                char* slash = length ? std::strrchr(path, '\\') : nullptr;
+                if (slash)
+                {
+                    strcpy_s(slash + 1,
+                             MAX_PATH - static_cast<size_t>(slash + 1 - path),
+                             "Ogre.cfg");
+                    std::ifstream file(path);
+                    std::string line;
+                    while (std::getline(file, line))
+                    {
+                        if (line.compare(0, 14, "Render System=") == 0)
+                        {
+                            if (line.find("Direct3D11") != std::string::npos)
+                                strcpy_s(name, "Direct3D11");
+                            else if (line.find("Direct3D9") != std::string::npos)
+                                strcpy_s(name, "Direct3D9");
+                            break;
+                        }
+                    }
+                }
+            }
+            return name[0] ? name : "unknown";
+        }
+
+        void ApplyAfterStock()
+        {
+            if (g_OverrideDistance <= 0.0f ||
+                g_TelemetryLines >= kMaxTelemetryLines)
+            {
+                return;
+            }
+
+            __try
+            {
+                const HMODULE exe = GetModuleHandleA(nullptr);
+                auto* settingsPtr = *reinterpret_cast<uint8_t**>(
+                    reinterpret_cast<uintptr_t>(exe) + kShadowSettingsPtrRva);
+                int quality = -1;
+                bool pssm = false;
+                if (settingsPtr)
+                {
+                    quality = *reinterpret_cast<int8_t*>(settingsPtr + 0x25);
+                    if (quality >= 0 && quality <= 4)
+                    {
+                        pssm = *reinterpret_cast<const int8_t*>(
+                            reinterpret_cast<uintptr_t>(exe)
+                            + kShadowModeTableRva + quality) != 0;
+                    }
+                }
+
+                void* sceneManager = GetOgreSceneManagerRuntime();
+                if (!sceneManager)
+                {
+                    LogShimA(LogLevel::Warn, "SHADOWFAR",
+                        "no SceneManager runtime pointer; override not applied");
+                    ++g_TelemetryLines;
+                    return;
+                }
+
+                auto** vtable = *reinterpret_cast<FnGetFarDistance***>(sceneManager);
+                const void* getFar = reinterpret_cast<const void*>(
+                    vtable[kVtableGetSlot]);
+                void* setFar = reinterpret_cast<void*>(vtable[kVtableSetSlot]);
+                const HMODULE ogre = GetModuleHandleA("OgreMain.dll");
+                const uintptr_t ogreBegin = reinterpret_cast<uintptr_t>(ogre);
+                const uintptr_t ogreEnd = ogreBegin + kExpectedOgreImageSize;
+                if (reinterpret_cast<uintptr_t>(getFar) < ogreBegin
+                    || reinterpret_cast<uintptr_t>(getFar) >= ogreEnd
+                    || reinterpret_cast<uintptr_t>(setFar) < ogreBegin
+                    || reinterpret_cast<uintptr_t>(setFar) >= ogreEnd)
+                {
+                    LogShimA(LogLevel::Warn, "SHADOWFAR",
+                        "vtable slots outside OgreMain; override not applied");
+                    ++g_TelemetryLines;
+                    return;
+                }
+
+                const float stock = reinterpret_cast<FnGetFarDistance>(
+                    const_cast<void*>(getFar))(sceneManager);
+                if (!pssm)
+                {
+                    // Command-line mission launches skip pilot-profile
+                    // loading, so the settings struct legitimately still says
+                    // -1 during early applies. Log the first two, then stay
+                    // quiet so later applies (after a runtime quality change)
+                    // keep telemetry budget.
+                    ++g_TelemetryLines;
+                    if (g_TelemetryLines <= 2)
+                    {
+                        LogShimA(LogLevel::Info, "SHADOWFAR",
+                            "requested=%.2f stock=%.2f override=%.2f "
+                            "applied=0 effective=%.2f renderer=%hs "
+                            "quality=%d pssm=%hs action=skipped "
+                            "reason=pssm-disabled",
+                            static_cast<double>(stock),
+                            static_cast<double>(stock),
+                            static_cast<double>(g_OverrideDistance),
+                            static_cast<double>(stock),
+                            ActiveRendererName(), quality,
+                            pssm ? "yes" : "no");
+                    }
+                    return;
+                }
+                if (stock != kStockFarDistance)
+                {
+                    LogShimA(LogLevel::Warn, "SHADOWFAR",
+                        "requested=%.2f stock=%.2f override=%.2f applied=0 "
+                        "effective=%.2f renderer=%hs quality=%d pssm=%hs "
+                        "action=skipped reason=unexpected-stock-value",
+                        static_cast<double>(stock),
+                        static_cast<double>(stock),
+                        static_cast<double>(g_OverrideDistance),
+                        static_cast<double>(stock),
+                        ActiveRendererName(), quality,
+                        pssm ? "yes" : "no");
+                    ++g_TelemetryLines;
+                    return;
+                }
+
+                reinterpret_cast<FnSetFarDistance>(setFar)(
+                    sceneManager, g_OverrideDistance);
+                const float effective = reinterpret_cast<FnGetFarDistance>(
+                    const_cast<void*>(getFar))(sceneManager);
+                LogShimA(LogLevel::Info, "SHADOWFAR",
+                    "requested=%.2f stock=%.2f override=%.2f applied=%.2f "
+                    "effective=%.2f renderer=%hs quality=%d pssm=%hs "
+                    "action=applied",
+                    static_cast<double>(stock),
+                    static_cast<double>(stock),
+                    static_cast<double>(g_OverrideDistance),
+                    static_cast<double>(g_OverrideDistance),
+                    static_cast<double>(effective),
+                    ActiveRendererName(), quality, pssm ? "yes" : "no");
+                ++g_TelemetryLines;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                LogShimA(LogLevel::Warn, "SHADOWFAR",
+                    "exception while applying override; stock state retained");
+                ++g_TelemetryLines;
+            }
+        }
+
+        void __cdecl ApplyHook()
+        {
+            // Stock behaviour first, exactly as the game wrote it.
+            reinterpret_cast<void(__cdecl*)()>(g_ApplyDetour.trampoline)();
+            ApplyAfterStock();
+        }
+    }
+
+    void InstallShadowFarOverrideIfPossible()
+    {
+        using namespace ShadowFarOverride;
+        if (g_InstallAttempted)
+            return;
+
+        // Environment-variable-only experiment: with the variable unset this
+        // stays completely dormant and the game runs stock-exact.
+        g_OverrideDistance = ReadOverrideDistance();
+        g_InstallAttempted = true;
+        if (g_OverrideDistance <= 0.0f)
+            return;
+
+        // The apply routine lives in the exe; OgreMain must be present for the
+        // runtime vtable resolution, so retry until it loads.
+        const HMODULE exe = GetModuleHandleA(nullptr);
+        const HMODULE ogre = GetModuleHandleA("OgreMain.dll");
+        if (!exe || !ogre)
+        {
+            g_InstallAttempted = false;
+            return;
+        }
+
+        if (!ModuleIdentityMatches(exe, kExpectedExeTimestamp, kExpectedExeImageSize)
+            || !ModuleIdentityMatches(ogre, kExpectedOgreTimestamp, kExpectedOgreImageSize))
+        {
+            LogShimA(LogLevel::Warn, "SHADOWFAR",
+                "unsupported exe/OgreMain build; shadow-far override not installed");
+            return;
+        }
+
+        // Prologue: push ebp; mov ebp,esp; sub esp,0x94 — three complete
+        // instructions, so the verbatim-copy trampoline is instruction-safe.
+        static const uint8_t expected[] =
+            { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x94, 0x00, 0x00, 0x00 };
+        const uintptr_t target = reinterpret_cast<uintptr_t>(exe) + kShadowApplyFnRva;
+        if (!InstallInlineDetour32(g_ApplyDetour, target,
+                reinterpret_cast<void*>(&ApplyHook), sizeof(expected),
+                expected, sizeof(expected)))
+        {
+            LogShimA(LogLevel::Warn, "SHADOWFAR",
+                "apply-routine prologue mismatch; override failed closed");
+            return;
+        }
+
+        LogShimA(LogLevel::Info, "SHADOWFAR",
+            "installed override=%.2f applyRva=0x%08lX (stock %.2f reissued "
+            "after each stock apply; stock-exact when the env var is unset)",
+            static_cast<double>(g_OverrideDistance),
+            static_cast<unsigned long>(kShadowApplyFnRva),
+            static_cast<double>(kStockFarDistance));
+    }
+
     void RetryDeferredRuntimeHooks()
     {
         InstallEnhancedLightSelectionIfPossible();
+        InstallShadowFarOverrideIfPossible();
         InstallJumpSnipingProbeIfRequested();
         InstallUnitTurboHooksIfPossible();
         InstallCareerStatsMpHookIfPossible();
@@ -28286,6 +28727,7 @@ namespace BZROpenShim
     {
         RetryDeferredRuntimeHooks();
         g_AiOdfGameplayTuningEnabled = enabled;
+        RefreshAiOdfGameplayTuningState();
         if (!enabled)
         {
             g_ScrapPathFailuresByObject.clear();
@@ -28584,9 +29026,12 @@ namespace BZROpenShim
     {
         RetryDeferredRuntimeHooks();
         g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
+        // Content render-profile requests are mission/session scoped: the
+        // authoritative lifecycle seam clears them so an EXU override from one
+        // mission can never leak into the shell or unrelated content.
+        RenderProfiles::ClearContentRenderProfileOverride("mission reset");
         g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
         g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
-        g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
         g_AttackRevealEnabled = kAttackRevealEnabledDefault;
         g_AttackRevealTraceBudget = kAttackRevealTraceBudgetDefault;
         g_AiUnitTuningOverridesByObject.clear();
