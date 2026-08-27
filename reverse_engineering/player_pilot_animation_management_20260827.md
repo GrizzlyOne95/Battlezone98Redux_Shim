@@ -5,7 +5,163 @@
 **Test lab:** `lcbench` + purpose-specific harness `reverse_engineering/test_missions/pilot_anim_capture/`  
 **Instrumentation:** `src/patches/pilot_fp_animation_trace.cpp` (v3 dual-target), `include/pilot_fp_animation_trace.h`, `reverse_engineering/PILOT_FP_ANIMATION_TRACE.md`
 **Build:** GOG Redux 2.2.301, `battlezone98redux.exe` VA 0x401000, Ogre 1.10 `OgreMain.dll` SHA-256 `E5E6939…`
-**Runtime Capture:** **NOT YET EXECUTED** — harness and hooks are built and validated (`Release|Win32` + `run_ogre_profiler_tests.ps1`/`run_ini_tests.ps1` pass), but no `openshim.log` with `[PILOTTEST]`/`[FPAnim]` correlation has been collected. All `PROVEN-RUNTIME` below is from prior probes/art assets, not from the 32 s `pilot` run. Example correlations in §7/§19 are *intended repro*, not captured evidence.
+**Runtime Capture:** **EXECUTED — PARTIAL QUALIFICATION**. The 32 s observational capture and independent FP-only/WORLD-only manipulation captures completed on 2026-08-27. A distinct live `aspilo_fp.mesh` entity, its stock animation traffic, and its shared `Person::Simulate` controller are proven. The manipulation gate independently altered the FP and WORLD `AnimationState` objects, but Windows denied the attempted game-window capture, so a visible first-person presentation change remains **UNKNOWN**. Do not add `TargetLocalFirstPerson` yet.
+
+## 0. Runtime Qualification Result (2026-08-27)
+
+This section is the authoritative captured result. Later sections retain pre-run design and static-analysis context; examples there are not evidence unless repeated here.
+
+### 0.1 Environment and captures
+
+- Branch: `agent/pilot-animation-management`, base commit `8d695d3e38d276f8717df8369b01bc1fe1a9b4db`, with the narrow instrumentation corrections described in §0.10 applied in the worktree. `main` was not merged.
+- Game: GOG Battlezone 98 Redux 2.2.301, `battlezone98redux.exe` SHA-256 `8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413`.
+- OpenShim: `Release|Win32`, `winmm.dll` SHA-256 `9456D64DCBE8ED49C0EA0DB5F30892DDE7B46393D8CEB0C34CEA0AB7EFD2A7F2`; build and deployed copies matched.
+- Mission: the documented `addon/lcbench/lcbench.lua` overwrite, because the bundled standalone `pilot.bzn` still identifies `lcbench` internally and did not enter simulation. Engine-visible names (`lcbench`, `pitcfg`) remain at most eight characters.
+- Windowing/shutdown: `BZR_FORCE_WINDOWED=1`; every launch dot-sourced `BZRHarness.ps1` and stopped via `Stop-BZRGame -Id`.
+- Observational evidence: `tmp/pilot_anim_qualification_20260827/run1_observational/{openshim.log,BZLogger.txt,BZOgreLogfile.log}`.
+- Manipulation evidence: `tmp/pilot_anim_qualification_20260827/run2_manip_fp/` and `tmp/pilot_anim_qualification_20260827/run2_manip_world/`.
+- Lifetime evidence: the manipulation captures used the corrected full 32 s Lua timeline, then `FailMission(GetTime()+1)`; the earlier unsupported local-player `GetIn` step was removed.
+
+Configuration:
+
+| Capture | `TracePilotFPAnimations` | `PilotFPAnimManip` | Scope | Target/mode |
+|---------|--------------------------|--------------------|-------|-------------|
+| Observational | 1 | 0 | n/a | n/a |
+| FP manipulation | 1 | 1 | `fp` | `stand2Kneel` / `freeze` |
+| WORLD manipulation | 1 | 1 | `world` | `stand2Kneel` / `freeze` |
+
+### 0.2 World acquisition — PROVEN-RUNTIME
+
+At `2026-08-27T17:17:22.860Z`, immediately after Lua `HOP_OUT` at `17:17:22.843Z`, the trace acquired:
+
+```text
+[FPAnim] target person=0x02A0D320 class=.?AVPerson@@
+         entity=0x2D7A83E0 renderBridge=Person+0x0F0/Ogre+0x094 gen=1
+```
+
+Scene enumeration identified that entity as `name=Ogre/MO7`, `mesh=aspilo.mesh`, `skeleton=present`, `worldPilot=1`. Its observed bound inventory was `idle`, `idleParachute`, `landParachute`, `runForward`, `stand2Kneel`, `fireRecoilSniper`, and `kneel2stand`.
+
+### 0.3 FP discovery and promotion — PROVEN-RUNTIME
+
+Every plausible skeletal candidate in the first post-HopOut enumeration was recorded:
+
+| Entity | Name | Mesh | Skeleton | Strict | `worldPilot` | Result |
+|--------|------|------|----------|--------|--------------|--------|
+| `0x27B7CE90` | `Ogre/MO1` | `avtank.mesh` | present | 0 | 0 | rejected |
+| `0x27B6EEC8` | `Ogre/MO3` | `avtank.mesh` | present | 0 | 0 | rejected |
+| `0x2D7A83E0` | `Ogre/MO7` | `aspilo.mesh` | present | 0 | 1 | excluded as known WORLD target |
+| `0x2D7A9E58` | `Ogre/MO8` | `aspilo_fp.mesh` | present | 1 | 0 | promoted |
+
+Promotion occurred at `17:17:22.912Z`:
+
+```text
+[FPAnim][FP] target acquired entity=0x2D7A9E58 mesh=aspilo_fp.mesh
+  skeleton=present name=Ogre/MO8 gen=1 caller=0x69EF33E5
+  rva=0x00000000 inMain=0 strict=1 worldPilot=0
+```
+
+The promotion caller is in the Ogre enumeration path rather than `battlezone98redux.exe`, so a main-module RVA is intentionally zero. Candidate discovery alone was not used as proof; the promoted target and its subsequent bound state traffic are the proof.
+
+### 0.4 FP animation inventory — PROVEN-RUNTIME
+
+The promoted FP entity exposed the same observed bound set as WORLD, with distinct `AnimationState*` values:
+
+| Requested state | WORLD | FP | Result |
+|-----------------|-------|----|--------|
+| `idle` | observed | observed | same name, distinct states |
+| `stand2Kneel` | observed | observed | same name, distinct states |
+| `kneel2stand` | observed | observed | same name, distinct states |
+| `fireRecoilSniper` | observed | observed | same name, distinct states |
+| `jump` | not exercised | not exercised | **UNKNOWN**, not evidence of absence |
+| `run*` | `runForward` observed | `runForward` observed | other directions not exercised |
+| `landParachute` | observed | observed | same name, distinct states |
+
+`idleParachute` was also observed on both. The Lua-only run had no supported jump action; `Goto` did not drive the local player during the scripted movement phase. Expected but unexercised states are not reported as captured.
+
+### 0.5 Script correlation — PROVEN-RUNTIME
+
+Log timestamps below are UTC and are actual captured transitions. The caller column records the state-selection/bind RVA; disabling uses the corresponding `...6F3/...7F3` site.
+
+| Script event | Time | World animation | World caller RVA | FP animation | FP caller RVA |
+|--------------|------|-----------------|------------------|--------------|---------------|
+| `HOP_OUT` | `17:17:22.843` | `idleParachute` bound at `.861` | `0x0019DA40` | `idleParachute` bound at `.913` | `0x0019DC08` |
+| `IDLE_WINDOW` | `17:17:23.844` | `landParachute` at `24.199`, `runForward` at `24.822`, `idle` at `24.941` | `0x0028070C` | same sequence at identical transition times | `0x0028080C` |
+| `SET_SNIPER` | `17:17:28.844` | `idle` off; `stand2Kneel` on | `0x0028070C` | `idle` off; `stand2Kneel` on | `0x0028080C` |
+| crouch/sniper phase | marker `17:17:30.845`; transition `30.778` | `stand2Kneel` off; `fireRecoilSniper` on | `0x0028070C` | same transition | `0x0028080C` |
+| firing phase | `17:17:33.843` | no new transition observed | — | no new transition observed | — |
+| movement phase | `17:17:36.844` | no new transition observed | — | no new transition observed | — |
+| jump phase | `17:17:40.344` | no `jump` transition observed | — | no `jump` transition observed | — |
+| `FINAL_IDLE` | `17:17:44.843` | `fireRecoilSniper` off; `kneel2stand` on | `0x0028070C` | same transition | `0x0028080C` |
+| `TEST_COMPLETE` | `17:17:52.844` | `idle` active; no new transition | — | `idle` active; no new transition | — |
+
+The fire/move/jump rows are negative observations about this Lua execution, not claims that those paths or clips do not exist.
+
+### 0.6 Shared-controller classification — PROVEN-NATIVE + PROVEN-RUNTIME
+
+Equivalent WORLD and FP transitions do **not** have equal immediate helper RVAs:
+
+| Operation | WORLD RVA | FP RVA | Delta |
+|-----------|-----------|--------|-------|
+| disable prior state | `0x002806F3` | `0x002807F3` | `+0x100` |
+| get/bind new state | `0x0028070C` | `0x0028080C` | `+0x100` |
+| enable | `0x00280722` | `0x00280822` | `+0x100` |
+| loop | `0x00280740` | `0x00280840` | `+0x100` |
+| time position | `0x0028075D` | `0x0028085D` | `+0x100` |
+
+This is evidence of separate per-entity apply helpers, not independent gameplay controllers. Bounded Rizin analysis found two 251-byte structural clones, `fcn.00680670` and `fcn.00680770`. Their only controller call sites are `0x0059E1CB -> 0x00680670` and `0x0059E245 -> 0x00680770`, sequentially in the established `Person::Simulate` function (`0x0059D340`), WORLD first and FP second. Runtime transitions occur WORLD then FP on the same timestamp.
+
+**Classification:** one native `Person::Simulate` FSM drives two distinct Ogre entities through parallel WORLD and FP animation-application helpers. This is stronger and more precise than an `X == Y` call-site result.
+
+### 0.7 Targeted manipulation — runtime state control proven; visible effect UNKNOWN
+
+The scope correction allowed attribution without adding a public API:
+
+- FP-only run: `21,590` `[MANIP][FP]` records and `0` `[MANIP][WORLD]` records. `stand2Kneel` was sought to time `0` and its FP `addTime` was suppressed from `17:36:50.962Z` until mission transition at `17:37:15.962Z`.
+- WORLD-only run: `1,704` `[MANIP][WORLD]` records and `0` `[MANIP][FP]` records. The separately addressed WORLD state was suppressed; the fresh run also reacquired `aspilo.mesh` and `aspilo_fp.mesh` with new process-local pointers.
+- No second manipulation target was frozen, so attribution is specific to `stand2Kneel`.
+- The FP-only state remained selected much longer than in the WORLD-only/control progression, proving that the FP `AnimationState` is live and participates in the animation-control path.
+
+An automated screenshot attempt identified the correct `Battlezone 98 Redux (2.2.301) DX11` window, but Windows Graphics Capture failed with access denied. No human observation was supplied. Therefore:
+
+- first-person visual effect: **UNKNOWN**;
+- third-person/world visual effect: **UNKNOWN**;
+- `FP Ogre AnimationState controls visible local first-person presentation`: **not yet PROVEN-RUNTIME**.
+
+This result does not fit outcome D (“no visible effect”), because no valid visual observation was obtained.
+
+### 0.8 Lifetime — partial PROVEN-RUNTIME
+
+The unsupported local-player `GetIn` path was removed. At T+32 the Lua harness attempted `DeleteObject` and immediately scheduled `FailMission(GetTime()+1)`. Captured behavior:
+
+1. Lua `DeleteObject` callback fired and cleared its script binding, but `GetPlayerHandle()` remained the same valid `Person`; deleting the local player this way does not remove the native/render object.
+2. At `17:37:15.962Z`, the engine logged `Mission left simulation: ... RUN_WAS_FAILURE`.
+3. No manipulation entries occurred after that mission transition.
+4. On graceful teardown at `17:37:22.438Z`, WORLD cleared `gen=2` and FP logged `target released reason=world-pilot-cleared ... gen=2`.
+5. The next fresh scripted launch acquired distinct WORLD and `aspilo_fp` pointers at `17:39:18.291Z` and resumed clean manipulation with no stale pointer.
+
+Binding clear/release and fresh-launch reacquisition are **PROVEN-RUNTIME**. Same-process mission restart/reacquisition is **UNKNOWN** because Lua exposes mission completion but no direct local-player `GetIn` or restart primitive; no manual menu driving was substituted.
+
+### 0.9 Final architecture and decision gate
+
+- **PROVEN-RUNTIME:** a distinct live `aspilo_fp.mesh` Ogre entity exists while the local player is on foot.
+- **PROVEN-RUNTIME:** WORLD and FP own distinct `Entity*` and distinct `AnimationState*` objects with matching observed stock animation names.
+- **PROVEN-RUNTIME:** their transitions correlate frame-for-frame with the scripted player FSM timeline.
+- **PROVEN-NATIVE:** one `Person::Simulate` controller invokes WORLD then FP through separate structural-clone helpers.
+- **PROVEN-RUNTIME:** the manipulation gate can independently alter the FP or WORLD state stream.
+- **UNKNOWN:** whether that FP state stream is the final visible first-person presentation driver.
+
+The decision gate is therefore **not open** for `TargetLocalFirstPerson`. Do not implement EXU targeting or custom clip loading yet. The minimum remaining qualification is one valid visual capture/observer of FP-only versus WORLD-only `stand2Kneel` manipulation. If FP-only visibly changes the view, the next API remains the proposed safe OpenShim FP resolver plus EXU `TargetLocalFirstPerson` using existing `Play`/`Stop`/`Seek`.
+
+### 0.10 Minimal corrections required for valid evidence
+
+- Excluded the already-known WORLD entity from FP strict promotion; the original branch build incorrectly promoted `aspilo.mesh` before reaching `aspilo_fp.mesh`.
+- Resolved/logged actual mesh names and skeleton presence.
+- Propagated `_ReturnAddress()` from the hook wrapper so caller RVAs identify the game call site rather than the shim helper.
+- Added test-only `OPENSHIM_PILOT_FP_MANIP_SCOPE=world|fp|both`, defaulting to `both`.
+- Removed the project-local `register` preprocessor macro that prevented the branch from compiling with current MSVC STL headers.
+- Replaced the invalid Lua local-player `GetIn` lifetime step with the full-timeline `DeleteObject` observation followed by supported `FailMission` transition.
+
+No feature API, custom clip, or ExtraUtilities change was made.
 
 ---
 
@@ -18,14 +174,14 @@
 - Stock pilot skeletons contain the clips this FSM names: `stand2Kneel` (0), `kneel2stand` (1), standing `idle` (2), `fireRecoilSniper`/crouch idle (3), `runForward/Backward/Left/Right`, `jump` (11), `landParachute` (10), `idleParachute`, etc. verified by string hits in `aspilo.skeleton`, `bspilo.skeleton`, `sspilo.skeleton`, `cspilo.skeleton`.
 - The Ogre presentation side is an `Ogre::Entity` reachable via the verified chain `main+0x00517AFC (userObject)` → RTTI `Person` → `Person+0x0F0` render bridge → `bridge+0x094` → Ogre `Entity` (`src/patches/pilot_fp_animation_trace.cpp:41-43`). This chain is shared with headlight/satellite/jump-snipe diagnostics and EXU's `GetRenderableEntity`.
 
-**INFERRED / UNKNOWN (requires runtime capture)**  
-- Whether the *visible first-person* arm/weapon presentation reuses that same world `Person` entity or uses the separate art assets `aspilo_fp.mesh/.skeleton` (`bspilo_fp`, `sspilo_fp`) discovered in `BZ_ASSETS/common/models/` (146 kB `_fp.mesh`, ~2 MB `_fp.skeleton` alongside the 883 kB world mesh). Existence of dedicated `_fp` meshes strongly suggests a distinct FP entity, but runtime ownership proof is still needed — precisely the negative-result test the v2 trace now enables (if FP animation occurs with no `[FPAnim]` on the world entity, a separate FP entity must be traced).
-- The exact Ogre `AnimationState` names/weights/loop flags per gameplay event and the call site above Ogre (expected `Person::Simulate` → `AnimObj_Start` or direct `AnimationState::setEnabled`).
+**PROVEN-RUNTIME / PROVEN-NATIVE by §0 capture**
+- A distinct live `aspilo_fp.mesh` entity (`Ogre/MO8`) exists beside the world `aspilo.mesh` entity (`Ogre/MO7`), with separate `AnimationState*` objects and matching observed stock state names.
+- `Person::Simulate` drives WORLD and FP sequentially through separate helper functions. The remaining unknown is visual presentation control, not entity ownership or animation traffic.
 
 **What this investigation delivered**  
 - Enhanced the existing read-only trace to v2: caller RVA via `_ReturnAddress()`, transition filtering, `dt` throttling (≤2 Hz), 1.5 s inventory poll (`boundStates` + `hasAnimSet` existence), and a fail-closed manipulation gate (`freeze`/`forceWeight` behind `OPENSHIM_PILOT_FP_MANIP`). Code never alters stock behavior unless explicitly opted-in for isolated `lcbench` testing.
 - **FP qualification pass (v3, this commit):** generalized the binding machinery to `TargetState` (`WORLD`/`FP`) sharing the same transition/throttling code (per §3 of the follow-up spec, no duplicated `RegisterBinding`/`LogBound*`). Added FP discovery via **verified enumeration seam** `SceneManager::getMovableObjectIterator("Entity")` (`OgreSceneManager.h:3316`, `OgreMain.dll` export `?getMovableObjectIterator@SceneManager@Ogre@@...` 5296) with `SceneManager` retrieval via global `0x00920EA0+0x08` (`bzr_hooks.cpp:2042`). `SceneManager::createEntity` is **not** used because the exe does not import any `createEntity`/`destroyEntity` overload (`dumpbin /imports` verified). Strict promotion requires `hasSkeleton` + `hasAnimationState("idle")` + `hasAnimationState("stand2Kneel")` (pilot vocabulary) + `worldIsPilot`, with `generation`-based lifetime and explicit `target acquired / released / reacquired` logging. Broad: `hasSkeleton`; strict: pilot anim set. Logs split `[FPAnim]` (WORLD, compat) vs `[FPAnim][FP]` + `[MANIP][WORLD]`/`[MANIP][FP]`.
-- Built a deterministic Lua harness `pilot_anim_capture/pilot_test.lua` (32 s, 12 stages) emitting `[PILOTTEST] T+…` markers that timestamp-correlate with `[FPAnim]` logs for idle/walk/strafe/turn/crouch/sniper/fire/jump/land/vehicle-enter/weapon-change. The harness is unchanged for the FP run — the same 32 s sequence now drives both WORLD and FP inventories.
+- Built a deterministic Lua harness `pilot_anim_capture/pilot_test.lua` (32 s, 12 stages) emitting `[PILOTTEST] T+…` markers. The runtime correction removes unsupported local-player `GetIn`; after the complete marker it attempts deletion, then uses `FailMission` for the lifetime transition.
 - Audited EXU's high-level `exu.animation` API (`ExtraUtilities/src/Game/AnimationApi.h`) and confirmed it already exposes sufficient primitives for GameObject-targeted control; `localFirstPerson` target remains intentionally fail-closed pending FP ownership validation (now gated on `g_Fp.entity` promotion).
 - Provides a concrete reproduction procedure and a feasibility matrix (Options A–D) with a recommendation for a split OpenShim (low-level ownership) + EXU (Lua-facing) architecture behind a validated `aspilo_fp` resolver.
 
@@ -75,7 +231,7 @@
 
 - `scripts/patches.json` + `src/engine/resolve_table.cpp` carry `identity` notes for each signature; `src/engine/native_ui.cpp` validates OptionsParent overlay. Pattern adopted for any new pilot-related signature.
 
-**Conclusion:** Earlier instrumentation established the *world* Person entity as a safe tracing target and demonstrated reliable Ogre hook installation, but did not yet prove FP ownership, enumerate the skeleton, or attribute the call site. v2 closes those gaps without duplicating infrastructure.
+**Conclusion:** Earlier instrumentation established the world target. The §0 runtime captures now prove FP ownership, observed inventory, and native caller attribution; only visible first-person effect remains unqualified.
 
 ---
 
@@ -112,8 +268,7 @@ Implemented as an integer `stage` (0..13) advanced by `elapsed` vs `cfg.*At` plu
 |16.0|6→7| move/strafe | `MOVE_WINDOW`, `Goto(dest)` + `Play("runForward")` | `runForward` vs manual WASD |
 |19.5|8→9| jump | `JUMP_WINDOW`, manual Space + `Play("jump")` feasibility | `jump` (11), grounded flag clear, `landParachute` on touch |
 |24.0|10→11| final idle, re-equip `handgun` | `FINAL_IDLE` | `kneel2stand` (1) → `idle` (2) |
-|27.0|12| `GetIn(pilot, veh)` | `REENTER_WINDOW` | target cleared, `local userObject is no longer a Person` |
-|32.0|12→13| `TEST_COMPLETE` | `SUMMARY hopOut=… pilotDetected=…` | end-of-run inventory |
+|32.0|11→12| complete/lifetime transition | `LIFETIME_DESTROY`, `TEST_COMPLETE` | attempts `DeleteObject`, then schedules `FailMission` |
 
 Each stage transition calls `DumpPlayerInfo()` which, when `exu.animation` is present, probes the anim list:
 
@@ -134,7 +289,7 @@ end
 | Firing | `FireAt` needs enemy; `exu.animation.Play` `PROVEN` | SEMI | `Play("fireRecoilSniper")` + `FireAt(nearestEnemy)` else manual hold fire |
 | Strafe/run | `Goto` + `Play("runForward")` `INFERRED` | SEMI | manual WASD |
 | Jump | no stable `Jump` API `UNKNOWN` | MANUAL | `MANUAL ACTION: TAP JUMP (Space)` + `Play("jump")` for feasibility only |
-| Re-enter | `GetIn(pilot, veh)` `PROVEN` | YES | spawns `avtank` at +8 m if none nearby, else manual `USE` |
+| Lifetime transition | `DeleteObject` observation + `FailMission` | YES | documents that local-player deletion is retained, then exits the mission through supported Lua |
 
 All stages are **reproducible**: re-running the mission with the same `pitcfg.odf` yields markers at the same wall times (±1 tick), so `[FPAnim]` logs can be diffed run-to-run.
 
@@ -155,14 +310,14 @@ If `exu.animation` is absent, harness degrades gracefully (logs `EXU NOT present
 - **While in vehicle:** `GameObject::userObject` (`main+0x00517AFC`) → some `Craft`/`Vehicle` (RTTI ≠ `Person`). `PilotFP trace` reports no target. `GetPlayerHandle()` returns the craft handle. `HopOut` creates a new `Person` GameObject on foot (often `aspilo` family) adjacent to the craft. Pre-destruction vehicle properties must be cached before `DeleteObject` — after flagging destroyed only handle/objective name remains per `BZR_LUA_AGENT_REFERENCE.md`.
 - **After HopOut:** `userObject` becomes a `Person` (validated via `vtable[-1] → TypeDescriptor+8` contains `"Person"` `src/patches/pilot_fp_animation_trace.cpp:181-230`). `Person+0x0F0` dereferences to a render bridge; `bridge+0x094` to an `Ogre::Entity*` whose vtable lies inside `OgreMain.dll` (verified via `OgreRuntime::ContainsAddress` + `ReadPointer` SEH). This is the **world pilot entity**.
 - **Handle change:** `GetPlayerHandle()` now returns the new `Person` handle (different integer). The vehicle handle remains valid until recycled. The harness tracks `lastPilotHandle` vs `GetPlayerHandle()` and logs `PLAYER_HANDLE_CHANGED`.
-- **Re-entry:** `GetIn(pilot, veh)` or manual `USE` sets `userObject` back to the vehicle; trace logs `local userObject is no longer a Person; target cleared`, bindings cleared under `g_BindingMutex`.
+- **Mission end:** Lua `FailMission` moves the mission out of simulation. The result screen retained the `Person`; graceful teardown then cleared WORLD and released FP at generation 2.
 
 **What the trace now proves about lifecycle:**
 
-- Pointer identity (`person=0x… entity=0x…` line) is logged on every target change, so lifetime can be followed across HopOut/re-entry. `g_LastInventoryEntity` resets on target change so inventory for the new entity is re-polled.
+- Pointer identity (`person=0x… entity=0x…` line) is logged on every target change. `g_LastInventoryEntity` resets on target change so inventory for the new entity is re-polled.
 - The `Person` object's `Carrier` subset (`Person+0x1A0` per GOG correction) is *not* dereferenced by the pilot trace — that belongs to `ExtraUtilities/src/Game/GameObject.cpp` weapon-selection logic and `bzr_hooks.cpp` jump-snipe probe — but the harness's `GiveWeapon`/`GetWeaponClass` probes indirectly confirm the Carrier's `selectedMask` via visible ODF changes.
 
-**Remaining UNKNOWN:** The `_fp` entity lifecycle — whether `aspilo_fp` entities are created lazily on first-person view entry, pooled, or share the world skeleton. v2 trace intentionally does **not** guess; if FP animation occurs with no world-entity `[FPAnim]` activity, that negative result mandates a second resolver (see §11).
+**Runtime result:** FP release on teardown and fresh-launch acquisition are proven. Whether the engine pools the FP entity across a same-process mission restart remains **UNKNOWN**.
 
 ---
 
@@ -410,7 +565,7 @@ Absence of the target line while on foot would indicate the `Person+RTTI` gate f
 
 ## 14. Successful / Failed Manipulation Experiments
 
-**Status: design + gated implementation complete; runtime proof awaits a single `lcbench`-only run.**
+**Status: runtime state-manipulation captures complete; visual presentation proof remains unavailable.**
 
 ### 14.1 What the gate does
 
@@ -433,15 +588,15 @@ The diversion is checked only for already-bound states, logs with `[FPAnim][MANI
 
 Experiment 1 is implemented as `freeze` on `stand2Kneel` (default `PilotFPAnimManipAnim`). It is the narrowest proof: “OpenShim can control the local player's relevant animation state.” If that freeze affects **first-person visual** (arms/weapon frozen) it is `PROVEN-RUNTIME` for FP controllability; if it affects only third-person world view, it proves world-entity control and implies FP needs the separate `_fp` resolver; if it affects *neither*, either the wrong entity is being frozen or the clip is driven elsewhere.
 
-### 14.3 Why not yet run
+### 14.3 Captured result
 
-This report is produced from the static branch state; the live `lcbench` run is the designated reproduction step (§19). The gate is deliberately shipped disabled so no tester accidentally ships a frozen pilot.
+FP-only and WORLD-only `stand2Kneel` freeze runs completed; see §0.7. They prove independently addressable live state streams. Windows denied the attempted frame capture, so the expected visible effect was not observed and is not claimed.
 
 ### 14.4 Restoration & safety
 
 - The gate is checked with `std::memory_order_acquire` and is only read inside the hook — no extra thread or timer.
-- No per-frame logging storm: `addTime` suppression logs once per throttled interval.
-- Lifecycle: target change clears bindings, so a frozen state's suppression disappears after HopOut/re-enter.
+- Manipulation suppression currently logs each diverted `addTime`; this intentionally produced large test-only logs and remains dormant outside the opt-in gate.
+- Lifecycle: target change clears bindings, so a frozen state's suppression disappears on target release.
 
 ---
 
@@ -520,17 +675,17 @@ exu.animation.Seek(target, name, timePosition)
 - Compatibility: Skeleton compatibility is bone-count/parent/hierarchy dependent. A `_fp` skeleton that differs from the world skeleton cannot be swapped without re-creating the entity.
 - Safe insertion: Must occur while the target `Entity` is valid (between `target person=…` and `target cleared`), under SEH, without caching `AnimationState*` between calls — exactly the pattern `ExtraUtilities/GameObject.cpp` already follows.
 
-### 16.4 Recommendation (pending runtime proof)
+### 16.4 Recommendation (pending visual proof)
 
-**Provisional recommendation (STRONGLY SUPPORTED, not yet PROVEN-RUNTIME):**
+**Provisional recommendation:**
 
-1. **Short term (immediate):** Treat **Option A via `exu.animation` on the world `Person` entity** as the baseline — it requires no new native code and is already sufficient for *world* custom anims. Prove FP controllability with the gated `freeze` experiment (§14) on `stand2Kneel`.
+1. **Short term:** Obtain one valid visual comparison of the already-captured FP-only and WORLD-only `stand2Kneel` experiment. Do not add an API meanwhile.
 
-2. **Medium term:** If that experiment shows FP is **separate** (the expected outcome given `_fp.mesh`), implement **Option C + D**: add an OpenShim resolver `ResolveLocalFpEntity()` (analogous to craft `0x0067E5A0`) that finds the `aspilo_fp` entity via the FP renderer/scene node, expose it as `exu.animation.TargetLocalFirstPerson()`, and keep the playback API unchanged. This yields the `dedicated viewmodel` freedom without duplicating the animation API.
+2. **Medium term:** If FP-only manipulation visibly changes first-person presentation, add a safe OpenShim resolver for the now-proven `aspilo_fp` entity, expose it as `exu.animation.TargetLocalFirstPerson()`, and keep the existing playback verbs unchanged.
 
 3. **Long term:** If new clips are needed beyond the 11 stock names, pursue **Option B** on the FP skeleton specifically — load additional `.skeleton` clips into the `_fp` skeleton via the resource-group path that the FP entity already uses, keeping TP untouched.
 
-Do **not** speculatively implement any of these APIs until the §7 negative-result / §14 manipulation run establishes FP ownership in one capture. The dormant gate is the minimal intervention for that decision.
+Do **not** implement these APIs until visible FP control is proven. Entity ownership and independent state manipulation are no longer speculative; final presentation ownership still is.
 
 ---
 
@@ -580,18 +735,18 @@ No second clock, no parallel API, no asset duplication until a run proves the FP
 
 | # | Unknown | Why it matters | How to resolve (one run) |
 |---|---------|----------------|---------------------------|
-| U1 | FP entity pointer / SceneNode / creation site (`0x00xxxxxx` like craft `0x0067E5A0`) | Determines whether A or C is appropriate | Run `pilot` harness; if world-entity `[FPAnim]` is silent during visible FP crouch, attach a second trace to `EntityFactory::createEntity` filtered by `fp` mesh name or to the FP renderer's scene node |
+| U1 | FP SceneNode / creation site (entity itself is now proven as `aspilo_fp.mesh`) | Needed only for a production-safe resolver | Trace creation/lifetime only after visible control opens the decision gate |
 | U2 | Full clip list + per-clip `length` / `loop` default / blend mode | Custom anim must know naming and timing | Add `AnimationStateSet::getAnimationStateIterator` hook or call `getLength` per bound state; log via inventory |
 | U3 | Weight vs enabled vs layering for locomotion (`idle` + `runForward` simultaneous?) | Movement blending | `Has` probe already enumerates simultaneous enabled states; `caller` RVA shows who sets weight |
 | U4 | Turning anim-driven vs root-motion yaw | Determines whether custom strafe needs new clip | `MOVE_WINDOW` manual WASD + `runLeft`/`runRight` weight delta |
-| U5 | Sniper/zoom posture is skeleton anim vs camera-position change | Separate anim vs `Camera::setPosition` | `CROUCH_EXPECTED` with sniper: if `stand2Kneel` → `fireRecoilSniper` occurs, it's anim; if only camera moves, no `[FPAnim]` weight change |
+| U5 | Whether the proven FP skeleton transition is the final visible sniper/zoom presentation driver | Separates animation control from camera-only presentation | Visually compare FP-only and WORLD-only freeze at the scripted crouch marker |
 | U6 | Firing while moving: layering or hard switch | Reload anim layering design | `FIRE_WINDOW` while `runForward` enabled — log simultaneous `enabled` set |
 | U7 | Jumping Lua automation (any `SetPosition`/`SetVelocity` that triggers `jump` clip) | Full automation vs one manual tap | Try `SetVelocity(y=+)` after `Play("jump")`; if no `Person::Simulate` jump path, document as manual-only |
-| U8 | Entering/exiting vehicle Ogre transition (does FP entity get destroyed or pooled?) | Lifecycle for custom entity | `REENTER_WINDOW` `GetIn` → `target cleared` timing; check if new pilot handle differs after re-HopOut |
+| U8 | Same-process restart/return lifecycle (destroyed vs pooled FP entity) | Lifetime for a production resolver | Observe a real restart or player return; Lua `GetIn` is not a valid local-player transition |
 | U9 | Weapon-change animation (is `GiveWeapon` sufficient to retrigger FSV or does `SetWeaponMask` needed?) | Reliable sniper toggle | Harness already tries both `GiveWeapon(...,0)` and `GiveWeapon(...)` without slot; log which triggers `stand2Kneel` |
 | U10 | Can `Ogre::SkeletonManager::load` inject a new clip (`fpsTest`) at runtime without restart? | Option B viability | After `HAS_ANIM_SET` proof, attempt `Entity::getAnimationState("fpsTest")` — if null, try `SkeletonManager::getByName("aspilo_fp.skeleton")` load path |
 
-All of U1–U10 are answerable with the harness + v2 trace in ≤1 capture; none require new RE tooling.
+U1/U5/U8 require one valid visual/restart observation. They are intentionally not inferred from the completed state-traffic captures.
 
 ---
 
@@ -628,7 +783,7 @@ Copy-Item reverse_engineering/test_missions/pilot_anim_capture/pilot_test.lua   
 Copy-Item reverse_engineering/test_missions/pilot_anim_capture/pitcfg.odf       "C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux\addon\pilot\pitcfg.odf" -Force
 ```
 
-Both options reuse the same `earthgood` flat terrain; only the Lua basename must match the BZN (`lcbench.lua` vs `pilot.lua`).
+The completed qualification used Option A. The bundled standalone `pilot.bzn` retained internal `lcbench` mission metadata and did not enter simulation, so Option B is not currently a valid runtime route without rebuilding that BZN.
 
 ### 19.3 Configure OpenShim
 
@@ -655,11 +810,8 @@ $env:OPENSHIM_TRACE_PILOT_FP_ANIMATIONS=1
 1. Launch the game (Instant Action → `lcbench` or `pilot`). Use windowed for stability (`$env:BZR_FORCE_WINDOWED=1`) unless timing is being measured.
 2. If the harness is on `lcbench`, the map title still reads “OpenShim Live Combat Benchmark” (the BZN name) — the Lua is `pilot_test.lua`.
 3. Observe the on-screen log? No — markers go to the game log via `print()` and appear in `openshim.log` (and potentially `exu.log`).
-4. Follow at most one manual instruction per phase (printed as `[PILOTTEST] MANUAL ACTION:`). Minimal is:
-   - If `HopOut` fails (rare): press `E` when `MANUAL ACTION: press HopOut` appears.
-   - `19.5 s`: tap `Space` when `TAP JUMP` appears.
-   - Optionally hold `WASD` during `MOVE_WINDOW` if `Goto` does not visibly move the pilot.
-5. Remain in the mission for 32 s until `[PILOTTEST] TEST_COMPLETE`.
+4. For the Lua-only qualification, do not supply manual movement, fire, or jump input. Unexercised phases remain explicit negative observations.
+5. Remain in the mission for 32 s until `[PILOTTEST] TEST_COMPLETE`; the lifetime build then schedules mission failure one second later.
 
 ### 19.5 Collect evidence
 
@@ -678,7 +830,7 @@ $env:OPENSHIM_TRACE_PILOT_FP_ANIMATIONS=1
 
 ### 19.6 Manipulation run (only after baseline capture)
 
-1. Set `PilotFPAnimManip=1` + `PilotFPAnimManipAnim=stand2Kneel` + `PilotFPAnimManipMode=freeze` (or `OPENSHIM_PILOT_FP_MANIP=1`).
+1. Set `PilotFPAnimManip=1` + `PilotFPAnimManipAnim=stand2Kneel` + `PilotFPAnimManipMode=freeze` (or `OPENSHIM_PILOT_FP_MANIP=1`). Use `OPENSHIM_PILOT_FP_MANIP_SCOPE=fp` and `world` in separate runs.
 2. Repeat §19.4. During `CROUCH_EXPECTED`, the crouch blend should visibly freeze mid-transition and `openshim.log` should contain `[MANIP] Freeze addTime suppressed …`.
 3. Observe whether the freeze appears in **first-person** (arms/weapon frozen) vs **third-person** (external cam) vs both/neither — that outcome determines FP vs TP §11.
 4. Restore `PilotFPAnimManip=0` before any non-lcbench play.
@@ -701,18 +853,17 @@ git diff --check
 
 | Path | Action | Why |
 |------|--------|-----|
-| `src/patches/pilot_fp_animation_trace.cpp` | MODIFY (v2, +~400 lines) | Caller RVA, transition filtering, `dt` throttling, 1.5 s inventory poll, optional `getAllAnimationStates`/`getMesh`/`hasSkeleton` resolution, dormant `PilotFPAnimManip` gate |
+| `src/patches/pilot_fp_animation_trace.cpp` | MODIFY | Correct FP promotion, mesh/skeleton identity, caller attribution, and independent test-only WORLD/FP manipulation scopes |
+| `BZROpenShim.vcxproj` | MODIFY | Remove the project-local `register` macro that breaks current MSVC STL compilation |
 | `include/pilot_fp_animation_trace.h` | MODIFY | Document v2 extensions, manipulation gate |
 | `reverse_engineering/PILOT_FP_ANIMATION_TRACE.md` | MODIFY (v2 doc) | Caller RVA, filtering, inventory, manipulation gate, harness correlation |
-| `reverse_engineering/test_missions/pilot_anim_capture/pilot_test.lua` | CREATE | Purpose-specific 32 s harness (HopOut → idle → sniper → crouch → fire → move → jump → final idle → re-enter) with `[PILOTTEST]` markers, `TrimNullPad`, EXU probing, manual-action fallbacks |
-| `reverse_engineering/test_missions/pilot_anim_capture/pitcfg.odf` | CREATE (6 chars) | Timeline tuning (`hopOutAt … completeAt`, `sniperWeapon=gsnipe`) |
+| `reverse_engineering/test_missions/pilot_anim_capture/pilot_test.lua` | MODIFY | Purpose-specific 32 s harness; corrected unsupported local-player `GetIn` to deletion observation + mission-failure lifetime transition |
+| `reverse_engineering/test_missions/pilot_anim_capture/pitcfg.odf` | MODIFY (6 chars) | Move lifetime transition to the completed 32 s boundary |
 | `reverse_engineering/test_missions/pilot_anim_capture/pilot.bzn/.hg2/.lgt/.mat/.trn/.ini` | CREATE (copies of lcbench baseline) | Flat `earthgood` lab for standalone Instant Action `pilot`; `pilot.ini` retitled |
-| `reverse_engineering/test_missions/pilot_anim_capture/README.md` | CREATE | Deployment (lcbench overwrite vs standalone), correlation guide, noise/safety notes |
-| `reverse_engineering/player_pilot_animation_management_20260827.md` | CREATE | This report (20 §§, confidence labels, reproduction) |
+| `reverse_engineering/test_missions/pilot_anim_capture/README.md` | MODIFY | Correct lifetime behavior and remove unsupported local-player re-entry claim |
+| `reverse_engineering/player_pilot_animation_management_20260827.md` | MODIFY | Add the captured runtime result, evidence tables, limitations, and decision gate |
 
 **Not changed (intentionally):**
-
-- `BZROpenShim.vcxproj` — no new TU; `pilot_fp_animation_trace.cpp` was already in the project.
 - `src/patches/ogre_animation_profiler.cpp` — left untouched; pilot trace is independent of `ProfileOgreAnimation`.
 - `ExtraUtilities/src/Game/AnimationApi.h` — not modified; audit (§15) shows it is already sufficient pending the FP resolver.
 - `reverse_engineering/test_missions/live_combat_scaling/lcbench.lua` — left untouched to preserve the benchmark; pilot harness is provided as a drop-in copy rather than a forced merge.
@@ -734,7 +885,8 @@ git diff --check
 | Stock clips `stand2Kneel`/`kneel2stand`/`idle`/`fireRecoilSniper`/`jump` exist | PROVEN-RUNTIME (asset strings) | `aspilo.skeleton` hits |
 | World pilot entity via `userObject@0x00517AFC → Person+0x0F0→+0x094 → Ogre::Entity` | PROVEN-RUNTIME (shared with other probes) | `pilot_fp_animation_trace.cpp:41-43`, `bzr_hooks.cpp` jump-snipe probe |
 | Dedicated FP meshes `*_fp.mesh/.skeleton` exist | PROVEN-RUNTIME (art) | `BZ_ASSETS/common/models/` dir listing |
-| Ogre `AnimationState` mutations for sniper crouch are `stand2Kneel`/`fireRecoilSniper` with caller inside `Person::Simulate` | STRONGLY SUPPORTED (static) → `PROVEN-RUNTIME` after one capture | Needs `[FPAnim] caller rva=0x59D…` correlation |
+| Distinct live `aspilo_fp.mesh` entity and matching stock state traffic | PROVEN-RUNTIME | §0 observational capture |
+| Ogre `AnimationState` mutations for sniper crouch are `stand2Kneel`/`fireRecoilSniper`, driven by WORLD/FP helpers called sequentially from `Person::Simulate` | PROVEN-RUNTIME + PROVEN-NATIVE | §0.5–0.6 capture and bounded Rizin analysis |
 | `exu.animation` sufficient for GameObject pilot control | STRONGLY SUPPORTED | `GameObject.cpp` SEH resolver + `AnimationApi.h` `IsTargetSupported` |
 | Custom FPS architecture should be split OpenShim (resolver) + EXU (Lua verbs) with dormant manipulation gate | STRONGLY SUPPORTED | Ownership already split; no parallel API needed |
 
@@ -751,4 +903,4 @@ git diff --check
 - `include/BZROpenShim.h` / `src/engine/openshim_sdk_v2.cpp` — SDK v2 event queue, `OpenShimGetApi`.
 
 ---
-*End of report. Next step is the single `pilot` run per §19 to fill the `PROVEN-RUNTIME` gaps (caller RVA, `addTime` rate, FP vs TP visual correlation, manipulation freeze).*
+*End of report. Next step is a valid visual comparison of the already-proven FP-only and WORLD-only manipulation paths; do not implement EXU targeting until that evidence exists.*
