@@ -28169,7 +28169,7 @@ namespace BZROpenShim
                 resolved = true;
                 char path[MAX_PATH] = {};
                 const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
-                const char* slash = length ? std::strrchr(path, '\\') : nullptr;
+                char* slash = length ? std::strrchr(path, '\\') : nullptr;
                 if (slash)
                 {
                     strcpy_s(slash + 1,
