@@ -135,6 +135,51 @@ The gate is checked only for already-bound states, is re-read after Ogre resolve
 
 Stock behavior is never altered when the gate is `0`.
 
+## v3 enhancements (2026-08-27) — dual-target FP qualification
+
+v3 retains v2's semantics and generalizes the binding machinery so WORLD (`Person+0x0F0` world pilot) and FP (`aspilo_fp` family) share the same transition/throttling code. No duplicated `RegisterBinding`/`LogBound*` implementations — both targets go through `TargetState` + `TargetKind`.
+
+### FP target
+
+FP discovery uses the **verified enumeration seam** `SceneManager::getMovableObjectIterator("Entity")` (`OgreSceneManager.h:3316`, `OgreMain.dll` export `?getMovableObjectIterator@SceneManager@Ogre@@...`, 5296). Creation interception via `SceneManager::createEntity` is **not** used because the executable does not import any `createEntity` overload (`dumpbin /imports` shows zero `createEntity`/`destroyEntity`/`getMovableObject` imports; only `getAnimationState` etc. are imported). Enumeration is therefore the primary resolver per the spec's preferred order A→C.
+
+SceneManager retrieval uses the **verified global structure** `0x00920EA0 +0x08` (`bzr_hooks.cpp:2042` `kOgreSceneManagerStructureAddr`/`kOgreSceneManagerOffset`), the same seam used by `terrain_proxy.cpp` and `ogre_entity_frustum_cull.inl`. Both addresses are build-constant for GOG 2.2.301 and are checked with SEH.
+
+**Candidate discovery is broad, promotion is strict** (`src/patches/pilot_fp_animation_trace.cpp:402-411`):
+
+- Broad: `hasSkeleton` true (resolves `hasSkeleton@Entity@Ogre@@` `0x1D5E8` via export, SEH-guarded via `SafeEntityHasSkeleton`). Every animated `Entity` (≈20–40 per scene) appears as `[FPAnim][FP] candidate ... hasSkeleton=1`.
+- Strict (pilot FP): `hasSkeleton` + `hasAnimationState("idle")` + `hasAnimationState("stand2Kneel")` (resolves `hasAnimationState@Entity@Ogre@@` `0x3B2F5` via `SafeEntityHasAnimationState`). Only pilot skeletons (`aspilo_fp`, `bspilo_fp`, `sspilo_fp`, `cspilo_fp`, `bsheav_fp` per `craft_bounds_architecture_20260822.md:122` table) carry that vocabulary; world `avtank` does not. The strict set is therefore typically 0–1 entities.
+
+Promotion requires **strict + `worldIsPilot`** (`ResolveCurrentLocalPersonOgreEntity` true, i.e., local `Person` exists). Creation time is recorded but not required — the log records `caller` RVA and `worldPilot` flag as qualification evidence, per the spec's "record caller RVA/module" rather than hard-require `inMain`.
+
+### FP lifetime
+
+`g_Fp` has its own `generation` (`atomic<uint64_t>`), `bindings[64]`, `mutex`, `meshName`/`skeletonName`/`entityName`, and `lastInventoryTick`. It is **not** a raw `g_TargetFpEntity = entity` assignment.
+
+- `RefreshWorldTarget: RefreshWorldTarget()` clears `g_Fp` (logs `[FPAnim][FP] target released reason=world-pilot-cleared`) when the world pilot disappears — FP presentation should not outlive the pilot.
+- `RefreshFpTargetViaEnumeration:564` polls every `kFpEnumerateIntervalMs = 1500` via `SafeGetSceneManagerViaGlobal` + `getMovableObjectIterator("Entity")`; it builds `broadCandidates`/`strictCandidates` under SEH/`try/catch` and logs each `[FPAnim][FP] candidate ... strict=... worldPilot=...` with `caller` RVA.
+- If `currentFp` is not in `broadCandidates`, it is **released** (`[FPAnim][FP] target released reason=not-in-enumeration`) and `generation` is bumped; if a new strict candidate exists it is **reacquired** (`[FPAnim][FP] target reacquired ...`). Bindings are cleared on both transitions and `lastInventoryTick` reset.
+- SEH alone is not trusted for lifetime — pointer reuse is handled by generation + enumeration-membership check.
+
+The FP path therefore never dereferences a stale `Entity*` blindly, manipulation is disabled when `g_Fp.entity==nullptr`, and the capture shows `target acquired / released / reacquired` lifecycle explicitly.
+
+### Generalized binding
+
+`RegisterBindingForTarget`, `FindBindingForTarget`, `LogBoundBoolForTarget`, `LogBoundFloatForTarget`, `TryLogInventoryForTarget` all take `TargetState&` + `TargetKind`. World behavior is byte-for-byte preserved; FP reuses the same transition filtering (`enabled`/`loop` only on change, `weight` ε=0.001, `dt` throttled 500 ms with `suppressed` count) and inventory poll (1.5 s, `boundStates` + `HAS_ANIM_SET` via `SafeGetAllAnimationStates`).
+
+Logging distinguishes ` [FPAnim]` (WORLD, backward compatible) vs ` [FPAnim][FP]` (FP). Manipulation logs split `[MANIP][WORLD]` vs `[MANIP][FP]` so attribution is unambiguous.
+
+### Verified seams documented at install
+
+`InstallObservers:1317` now logs:
+
+- `verified enumeration seam: SceneManager::getMovableObjectIterator export=...`
+- `verified: exe does NOT import SceneManager::createEntity (dumpbin /imports) — creation hook not used; enumeration is primary resolver`
+- `SceneManager retrieval: global structure 0x00920EA0 +0x08 (same as bzr_hooks.cpp:2042)`
+- `verified enumeration seam ...` vs `enumeration seam NOT found — FP discovery via enumeration will fail closed`
+
+If enumeration cannot be established, FP discovery fails closed and the world trace remains functional.
+
 ## Log format
 
 Lines are emitted through the normal OpenShim logger with an `[FPAnim]` prefix. Typical v2 output:
