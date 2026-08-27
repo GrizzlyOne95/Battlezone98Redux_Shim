@@ -22,6 +22,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -340,14 +342,35 @@ namespace BZROpenShim
             return isNetGame == 0 && userObject != nullptr;
         }
 
-        bool IsUnsafeUiState() noexcept
+        bool IsTerrainEditActive() noexcept
         {
-            if (IsPauseMenuOpen())
-                return true;
-
             uint8_t editMode = 0;
             if (SafeReadByte(kEditModeAddr, editMode) && editMode != 0)
                 return true;
+            return false;
+        }
+
+        // Returns true and fills reason if the autosave deadline should be deferred.
+        // The previous implementation treated TerrainEdit (0x009454B8) as a permanent
+        // no-save condition. Unscripted single-player / Instant Action missions can
+        // carry that flag while still allowing a manual SaveGame to succeed, so the
+        // gate was demoted: terrain edit is now only diagnostic. The remaining
+        // gates are the actual pause/save/load/options UI and the generic
+        // cursor-driven shell screen. Dump battlezone98redux.exe.38660.dmp was taken
+        // with editMode=1, wrapperActive=1, screenType=1, userObject=0 (post-mission)
+        // and showed the old gate would have permanently suppressed the timer
+        // that had been armed at 09:38:20.698 with initialDelay=10000ms.
+        bool IsUnsafeUiStateWithReason(char* reason, size_t reasonLen) noexcept
+        {
+            if (reason && reasonLen > 0)
+                reason[0] = '\0';
+
+            if (IsPauseMenuOpen())
+            {
+                if (reason)
+                    (void)snprintf(reason, reasonLen, "pause menu");
+                return true;
+            }
 
             uint32_t wrapperActive = 0;
             uint32_t screenType = 0;
@@ -356,6 +379,8 @@ namespace BZROpenShim
                 !SafeReadDword(kUiCurrentScreenTypeAddr, screenType) ||
                 !SafeReadPointer(kUiCurrentScreenAddr, currentScreen))
             {
+                if (reason)
+                    (void)snprintf(reason, reasonLen, "ui state unreadable");
                 return true;
             }
 
@@ -364,9 +389,25 @@ namespace BZROpenShim
                 CURSORINFO info{};
                 info.cbSize = sizeof(info);
                 if (GetCursorInfo(&info) && (info.flags & CURSOR_SHOWING) != 0)
+                {
+                    if (reason)
+                        (void)snprintf(
+                            reason, reasonLen, "shell screen type=%u", static_cast<unsigned>(screenType));
                     return true;
+                }
             }
+
+            // TerrainEdit at 0x009454B8 is intentionally NOT a hard gate here.
+            // It is still observed for diagnostics because it explains why the
+            // previous build appeared to silently never save in unscripted
+            // missions, but a manual SaveGame succeeds with the same flag set.
             return false;
+        }
+
+        bool IsUnsafeUiState() noexcept
+        {
+            char dummy[64] = {};
+            return IsUnsafeUiStateWithReason(dummy, sizeof(dummy));
         }
 
         void ResetMissionState()
@@ -821,8 +862,27 @@ namespace BZROpenShim
 
         // Keep the deadline expired while paused/in shell UI. The first normal
         // gameplay update after the unsafe state clears performs the save.
-        if (IsUnsafeUiState())
+        char unsafeReason[64] = {};
+        if (IsUnsafeUiStateWithReason(unsafeReason, sizeof(unsafeReason)))
+        {
+            static ULONGLONG s_lastUnsafeLogTick = 0;
+            static char s_lastUnsafeReason[64] = {};
+            const bool reasonChanged = strncmp(s_lastUnsafeReason, unsafeReason, sizeof(s_lastUnsafeReason)) != 0;
+            const bool intervalElapsed = now - s_lastUnsafeLogTick >= 5000ULL;
+            if (reasonChanged || intervalElapsed)
+            {
+                const bool editing = IsTerrainEditActive();
+                LogShimA(
+                    LogLevel::Debug,
+                    "autosave",
+                    "Deferring autosave: %s (terrainEdit=%u wrapperActive readout pending)",
+                    unsafeReason[0] ? unsafeReason : "unknown",
+                    editing ? 1u : 0u);
+                s_lastUnsafeLogTick = now;
+                (void)strncpy_s(s_lastUnsafeReason, sizeof(s_lastUnsafeReason), unsafeReason, _TRUNCATE);
+            }
             return;
+        }
 
         const ULONGLONG base = GetTickCount64();
         g_nextSaveTick = base + (PerformAutoSave() ? g_config.intervalMs : g_config.retryMs);
