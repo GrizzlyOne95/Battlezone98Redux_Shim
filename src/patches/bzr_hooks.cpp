@@ -15,6 +15,7 @@
 #include "weapon_convergence.h"
 #include "headlight_falloff.h"
 #include "chunk_batch_invalidation.h"
+#include "ai_range_policy.h"
 #include "hook_engine.h"
 
 #include <Windows.h>
@@ -869,7 +870,6 @@ namespace BZROpenShim
         {
             0x66, 0x8B, 0x85, 0xAE, 0xFC, 0xFF, 0xFF, 0x38, 0xE0, 0x76, 0x26
         };
-        constexpr uintptr_t kGogCalcRangeCraftEntryAddr = 0x00466BE0;
         constexpr size_t kCalcRangeCraftDetourLen = 9;
         // RecycleTask::InitLookingForScrap computes a stock squared-distance
         // score at this one call site after all team/material/region filters.
@@ -18082,6 +18082,7 @@ namespace BZROpenShim
                 return;
 
             const float originalRange = *range;
+            const float originalCloseRange = closeRange ? *closeRange : -1.0f;
 
             if (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
             {
@@ -18091,10 +18092,16 @@ namespace BZROpenShim
                 {
                     char odfToken[kProducerBuildMenuTokenLen + 1] = {};
                     const bool haveOdf = TryGetObjectOdfToken(craft, odfToken);
-                    Log(L"[AIODF] CalcRange probe craft=0x%08X odf=%hs active=%hs remaining=%ld\n",
+                    Log(L"[AIODF] CalcRange probe craft=0x%08X odf=%hs active=%hs close=%.2f range=%.2f time=%.2f weapon=0x%08X remaining=%ld\n",
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
                         haveOdf ? odfToken : "-",
                         BoolText(g_AiOdfGameplayTuningActive),
+                        closeRange ? *closeRange : -1.0f,
+                        *range,
+                        time ? *time : -1.0f,
+                        weapon && *weapon
+                            ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(*weapon))
+                            : 0u,
                         remaining);
                 }
             }
@@ -18113,14 +18120,24 @@ namespace BZROpenShim
             if (!hasOdfTuning && !unitTuning)
                 return;
 
-            float minRange = 0.0f;
-            bool hasMinRange = false;
+            AiRangePolicy::Inputs policy = {};
+            policy.closeRange = closeRange ? *closeRange : 0.0f;
+            policy.range = *range;
+            policy.time = time ? *time : 0.0f;
+
+            bool hasOdfOuterRangeFloor = false;
+            bool hasOdfCloseRangeFloor = false;
+            bool hasUnitOuterRangeFloor = false;
+            bool hasUnitCloseRangeFloor = false;
             if (hasOdfTuning &&
                 g_AiOdfGameplayTuningActive &&
                 tuning.hasEngageRangeAI)
             {
-                minRange = (std::max)(minRange, tuning.engageRangeAI);
-                hasMinRange = true;
+                hasOdfOuterRangeFloor =
+                    AiRangePolicy::AccumulatePositiveFloor(
+                        policy.hasOuterRangeFloor,
+                        policy.outerRangeFloor,
+                        tuning.engageRangeAI) || hasOdfOuterRangeFloor;
             }
             const bool useAuthoredWeaponRange =
                 g_AiOdfGameplayTuningActive &&
@@ -18131,46 +18148,62 @@ namespace BZROpenShim
                 tuning.bomberAiRole &&
                 tuning.hasWeaponRangeMinAI &&
                 tuning.derivedBomberWeaponRangeAI;
-            if (hasOdfTuning && (useAuthoredWeaponRange || useDerivedBomberRange))
+            if (hasOdfTuning && useAuthoredWeaponRange)
             {
-                minRange = (std::max)(minRange, tuning.weaponRangeMinAI);
-                hasMinRange = true;
+                hasOdfCloseRangeFloor =
+                    AiRangePolicy::AccumulatePositiveFloor(
+                        policy.hasCloseRangeFloor,
+                        policy.closeRangeFloor,
+                        tuning.weaponRangeMinAI) || hasOdfCloseRangeFloor;
+            }
+            if (hasOdfTuning && useDerivedBomberRange)
+            {
+                // Preserve the inherited bomber fallback as an outer weapon
+                // range floor. It is not an authored wingman standoff ring.
+                hasOdfOuterRangeFloor =
+                    AiRangePolicy::AccumulatePositiveFloor(
+                        policy.hasOuterRangeFloor,
+                        policy.outerRangeFloor,
+                        tuning.weaponRangeMinAI) || hasOdfOuterRangeFloor;
             }
 
             // Per-unit overrides win over ODF tuning and ignore the master toggle.
             if (unitTuning && unitTuning->hasEngageRange)
             {
-                minRange = (std::max)(minRange, unitTuning->engageRange);
-                hasMinRange = true;
+                hasUnitOuterRangeFloor =
+                    AiRangePolicy::AccumulatePositiveFloor(
+                        policy.hasOuterRangeFloor,
+                        policy.outerRangeFloor,
+                        unitTuning->engageRange) || hasUnitOuterRangeFloor;
             }
-
-            if (hasMinRange && std::isfinite(*range) && *range < minRange)
-                *range = minRange;
-
-            // Per-unit weaponRangeMin floors *closeRange, the engine's
-            // "too close" threshold (UnitTask::closeSq): inside it units hold
-            // fire, back away in DoStand, and AttackTask flees — a native
-            // standoff/kiting band. Clamped under the final fire range so a
-            // firing window always exists.
-            float finalCloseFloor = 0.0f;
             if (unitTuning && unitTuning->hasWeaponRangeMin && closeRange)
             {
-                float closeFloor = unitTuning->weaponRangeMin;
-                if (std::isfinite(*range) && *range > 0.0f)
-                    closeFloor = (std::min)(closeFloor, *range * 0.9f);
-                if (!std::isfinite(*closeRange) || *closeRange < closeFloor)
-                    *closeRange = closeFloor;
-                finalCloseFloor = closeFloor;
+                hasUnitCloseRangeFloor =
+                    AiRangePolicy::AccumulatePositiveFloor(
+                        policy.hasCloseRangeFloor,
+                        policy.closeRangeFloor,
+                        unitTuning->weaponRangeMin) || hasUnitCloseRangeFloor;
             }
 
-            if ((hasMinRange || unitTuning) &&
-                time &&
-                (!std::isfinite(*time) || *time <= 0.0f))
-            {
-                *time = 1.0f;
-            }
+            // CalcRange is the stock weapon-aware source for both the outer
+            // firing range and UnitTask's closeSq/"too close" threshold.
+            // Authored engageRangeAI floors only the former; authored
+            // weaponRangeMinAI floors only the latter and is capped just under
+            // the final outer range so a firing window remains.
+            const AiRangePolicy::Result policyResult = AiRangePolicy::Apply(policy);
+            *range = policyResult.range;
+            if (closeRange)
+                *closeRange = policyResult.closeRange;
+            if (time)
+                *time = policyResult.time;
 
-            if (hasOdfTuning && hasMinRange && EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+            const bool hasOdfRangePolicy =
+                hasOdfOuterRangeFloor || hasOdfCloseRangeFloor;
+            const bool hasUnitRangePolicy =
+                hasUnitOuterRangeFloor || hasUnitCloseRangeFloor;
+
+            if (hasOdfTuning && hasOdfRangePolicy &&
+                EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
             {
                 static volatile long s_OdfRangeTraceBudget = 24;
                 const long remaining = InterlockedDecrement(&s_OdfRangeTraceBudget);
@@ -18178,18 +18211,24 @@ namespace BZROpenShim
                 {
                     char odfToken[kProducerBuildMenuTokenLen + 1] = {};
                     TryGetObjectOdfToken(craft, odfToken);
-                    Log(L"[AIODF] Range override craft=0x%08X odf=%hs range=%.2f->%.2f floor=%.2f remaining=%ld\n",
+                    Log(L"[AIODF] Range policy craft=0x%08X odf=%hs range=%.2f->%.2f outerFloor=%hs%.2f close=%.2f->%.2f closeFloor=%hs%.2f remaining=%ld\n",
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
                         odfToken[0] ? odfToken : "-",
                         originalRange,
                         *range,
-                        minRange,
+                        hasOdfOuterRangeFloor ? "" : "-",
+                        policyResult.appliedOuterRangeFloor,
+                        originalCloseRange,
+                        closeRange ? *closeRange : -1.0f,
+                        hasOdfCloseRangeFloor ? "" : "-",
+                        policyResult.appliedCloseRangeFloor,
                         remaining);
                 }
             }
 
             if (unitTuning &&
-                ((hasMinRange && originalRange < minRange) || finalCloseFloor > 0.0f) &&
+                hasUnitRangePolicy &&
+                (policyResult.rangeChanged || policyResult.closeRangeChanged) &&
                 (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE") ||
                  EnvFlagEnabled("OPENSHIM_TRACE_AI_UNIT_TUNING")))
             {
@@ -18221,18 +18260,19 @@ namespace BZROpenShim
                 {
                     char odfToken[kProducerBuildMenuTokenLen + 1] = {};
                     TryGetObjectOdfToken(craft, odfToken);
-                    Log(L"[BOMBERRANGE] craft=0x%08X odf=%hs original=%.2f final=%.2f min=%.2f engage=%hs%.2f weaponMin=%hs%.2f derived=%hs close=%.2f time=%.2f weapon=0x%08X remaining=%ld\n",
+                    Log(L"[BOMBERRANGE] craft=0x%08X odf=%hs original=%.2f final=%.2f outerFloor=%.2f engage=%hs%.2f weaponMin=%hs%.2f derived=%hs close=%.2f closeFloor=%.2f time=%.2f weapon=0x%08X remaining=%ld\n",
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
                         odfToken[0] ? odfToken : "-",
                         originalRange,
                         *range,
-                        minRange,
+                        policyResult.appliedOuterRangeFloor,
                         tuning.hasEngageRangeAI ? "" : "-",
                         tuning.engageRangeAI,
                         tuning.hasWeaponRangeMinAI ? "" : "-",
                         tuning.weaponRangeMinAI,
                         tuning.derivedBomberWeaponRangeAI ? "true" : "false",
                         closeRange ? *closeRange : -1.0f,
+                        policyResult.appliedCloseRangeFloor,
                         time ? *time : -1.0f,
                         weapon && *weapon ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(*weapon)) : 0u,
                         remaining);
@@ -19906,23 +19946,30 @@ namespace BZROpenShim
                 {
                     0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x1C, 0x8B, 0x45, 0x0C
                 };
+                const uintptr_t calcRangeCraftEntryAddr =
+                    static_cast<uintptr_t>(
+                        HookEngine::ResolveNamedAddress("CalcRange(Craft)"));
 
-                if (!ExpectedBytesMatchAt(kGogCalcRangeCraftEntryAddr,
+                if (calcRangeCraftEntryAddr == 0)
+                {
+                    Log(L"[AIODF] CalcRange(Craft) resolver failed; AI ODF range tuning disabled\n");
+                }
+                else if (!ExpectedBytesMatchAt(calcRangeCraftEntryAddr,
                                           kExpectedCalcRangeCraftBytes,
                                           sizeof(kExpectedCalcRangeCraftBytes)))
                 {
                     Log(L"[AIODF] CalcRange(Craft) entry bytes mismatch at 0x%08X; AI ODF range tuning disabled\n",
-                        static_cast<uint32_t>(kGogCalcRangeCraftEntryAddr));
+                        static_cast<uint32_t>(calcRangeCraftEntryAddr));
                 }
                 else if (!InstallInlineDetour32(g_CalcRangeCraftDetour,
-                                                kGogCalcRangeCraftEntryAddr,
+                                                calcRangeCraftEntryAddr,
                                                 reinterpret_cast<void*>(CalcRangeCraftHook),
                                                 kCalcRangeCraftDetourLen,
                                                 kExpectedCalcRangeCraftBytes,
                                                 sizeof(kExpectedCalcRangeCraftBytes)))
                 {
                     Log(L"[AIODF] Failed installing CalcRange(Craft) hook at 0x%08X\n",
-                        static_cast<uint32_t>(kGogCalcRangeCraftEntryAddr));
+                        static_cast<uint32_t>(calcRangeCraftEntryAddr));
                 }
                 else
                 {
@@ -19932,7 +19979,7 @@ namespace BZROpenShim
                     if (g_CalcRangeCraftHookInstalled)
                     {
                         Log(L"[AIODF] Installed CalcRange(Craft) hook entry=0x%08X trampoline=0x%08X\n",
-                            static_cast<uint32_t>(kGogCalcRangeCraftEntryAddr),
+                            static_cast<uint32_t>(calcRangeCraftEntryAddr),
                             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CalcRangeCraftDetour.trampoline)));
                     }
                 }
