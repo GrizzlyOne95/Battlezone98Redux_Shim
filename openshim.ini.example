@@ -205,20 +205,39 @@ D3DStartupHooks = 0
 ; Legacy env alias: OPENSHIM_ALLOW_STARTUP_AUTOLOAD
 AllowStartupAutoLoad = 0
 
+; Startup backend-selection transport seam (Seam A).
+; Accepted: boolean. Default: ON.
+;   When [Graphics] Renderer is DX9 or DX11, OpenShim rewrites ONLY the
+;   "Render System=" line of the game's Ogre.cfg before the game reads it
+;   (seconds after process start), making the preference authoritative for
+;   this boot. The requested renderer itself lives HERE, in openshim.ini;
+;   Redux's own saveConfig() may rewrite Ogre.cfg freely without redefining
+;   that preference. Auto users are unaffected either way: with Renderer=Auto
+;   this seam never touches any file. A /renderer:... command-line token on
+;   this launch takes precedence over Renderer for that one boot only.
+;   Diagnostics appear under the [RENDER] tag:
+;     backend.boot/plugins/transport lines at startup,
+;     backend.selection=... requested=... effective=... reason=... afterwards.
+;   Hard kill-switch: set 0 to disable all Ogre.cfg writes even when an
+;   explicit Renderer is configured.
+BackendTransport = 1
+
 
 [Graphics]
 
-; Renderer backend preference.
+; Renderer backend preference (persistent user intent).
 ; Canonical values:
 ;   Auto = use whatever renderer the game selects this session
 ;   DX9  = prefer the Direct3D 9 render system
 ;   DX11 = prefer the Direct3D 11 render system
 ; Accepted aliases: d3d9/directx9, d3d11/directx11 (case-insensitive).
-; NOTE: OpenShim does not yet steer which render system the game starts on.
-; Today this key is parsed and reported only: requested-vs-effective
-; divergence appears in the [RENDER] diagnostics, and OpenShim never attempts
-; a live Ogre RenderSystem switch. Because the preference cannot yet control
-; startup, it is deliberately NOT exposed in the OpenShim settings UI.
+; With [Startup] BackendTransport enabled (default), a non-Auto value is
+; applied at next game start via the startup transport seam: OpenShim writes
+; Ogre.cfg's "Render System=" line pre-read, then observes which renderer
+; actually came up and reports requested/effective/reason under [RENDER].
+; Requested state lives only here -- stock saveConfig() rewrites of Ogre.cfg
+; never redefine this preference. A launch-scoped /renderer:... command-line
+; token overrides this key for that single boot.
 ; Default: Auto.
 Renderer = Auto
 

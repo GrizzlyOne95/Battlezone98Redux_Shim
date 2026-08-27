@@ -58,14 +58,22 @@ content intent. Campaign Reimagined owns content and art direction.**
 - `Auto` (default): use whatever the game selects this session. Observation
   watches which render system module loads (`RenderSystem_Direct3D11.dll` vs
   `RenderSystem_Direct3D9.dll`).
-- `DX9` / `DX11`: a recorded preference in openshim.ini that OpenShim parses
-  and REPORTS on today — it does NOT yet steer which render system the game
-  starts on. Divergence between requested and effective backend is logged
-  ("restart required") rather than hidden or acted on unsafely. Because the
-  key cannot yet control startup, it is deliberately NOT exposed in the
-  OpenShim settings UI; hand-edited ini values remain parsed for diagnostics.
-  Startup renderer selection needs further RE and is tracked in "Known
-  limitations / future work".
+- `DX9` / `DX11`: a persistent user preference in openshim.ini, applied at
+  next process start via the backend-selection transport seam (Seam A):
+  OpenShim rewrites ONLY the `Render System=` line of the game's Ogre.cfg
+  before the game reads it (from DllMain, so it wins even on fast machines),
+  after validating the requested renderer plugin is present. The preference
+  itself lives only here - stock `saveConfig()` may rewrite Ogre.cfg freely
+  without redefining it. Requested vs effective remain distinct: the
+  observation layer classifies every boot as
+  `requested/effective/reason` (`none`, `cli-override`,
+  `backend-unavailable`, `no-establishment`, `stock`) under `[RENDER]`.
+  A `/renderer:...` command-line token overrides this key for its launch
+  only; a GL token is recognized but unsupported and falls through to stock.
+  Because startup control is new and not yet UI-proven, the settings-UI
+  backend row remains hidden; hand-edited ini values drive the seam.
+  Evidence and validation matrix:
+  `reverse_engineering/renderer_startup_backend_selection_20260825.md`.
 - EXU/content cannot force a backend; the bridge exposes read-only queries.
 
 ## 3. RenderProfile semantics
@@ -279,13 +287,16 @@ transition matrix, restart persistence through the actual UI.
 3. **Retro glow drift**: glow suppression asserted on explicit reapplies;
    engine viewport rebuilds can transiently re-enable bloom until the next
    reassert (~1 Hz) — acceptable for experimental status.
-4. **Renderer forcing**: `Renderer=DX9/DX11` is parsed and divergence is
-   reported, but OpenShim does not yet steer the game's render-system
-   selection (needs further RE). The settings UI therefore deliberately hides
-   the backend selector until the preference actually controls startup;
-   profile changes are applied via a pending flag drained by the scheme hook
-   on the game thread, so viewport feedback lands within one ~1 Hz reassert
-   pass rather than from an unsafe off-thread apply.
+4. **Renderer forcing**: implemented as of the backend-selection seam
+   (Seam A): `Renderer=DX9/DX11` steers startup via the pre-read Ogre.cfg
+   transport, with requested/effective/reason diagnostics and a hard opt-out
+   (`[Startup] BackendTransport=0`). The settings-UI backend row stays hidden
+   until the runtime matrix has soaked across releases; see §2 and
+   `reverse_engineering/renderer_startup_backend_selection_20260825.md` for
+   the ownership contract and validation evidence. Profile changes are applied
+   via a pending flag drained by the scheme hook on the game thread, so
+   viewport feedback lands within one ~1 Hz reassert pass rather than from an
+   unsafe off-thread apply.
 5. **CR duplicate removal** (Phase 14) happens in the CR repo only after
    parity validation above; both implementations coexist harmlessly meanwhile
    (disjoint program namespaces).
