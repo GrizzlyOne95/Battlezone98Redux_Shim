@@ -43,6 +43,20 @@ namespace HookEngine
     std::vector<uint8_t> ParseHexPattern(const std::string& hex);
     std::vector<uint16_t> ParseIdaPattern(const std::string& hex);
 
+    // Declarative address resolution ("resolves" in scripts/patches.json).
+    //
+    // Returns the address the name stands for, or 0 when neither the signature
+    // nor a fallback constant produced one. Successful resolutions are cached,
+    // so a caller that runs before the target module is mapped can simply ask
+    // again later; each attempt emits one [RESOLVE] log line naming the match
+    // count, the scanned address, the fallback, and the entry's identity note.
+    uint32_t ResolveNamedAddress(const char* name);
+
+    // Locates scripts/patches.json: working directory first, then the exe's
+    // own directory, since the game is routinely launched from elsewhere.
+    // Empty when neither exists.
+    std::string FindPatchesJsonPath();
+
     // Helpers
     void* ResolveRelCallTarget(uint32_t instrAddr);
     void* ResolveRelCallTargetWithRetry(uint32_t instrAddr, int maxAttempts, uint32_t delayMs);

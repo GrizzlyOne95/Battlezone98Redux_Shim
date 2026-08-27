@@ -161,6 +161,7 @@ namespace BZROpenShim
         Headlights,         // InitializeHeadlightConfig re-reads the ini (no latch)
         AutoSave,           // ReloadAutoSaveConfig re-reads the ini and applies immediately
         BzrNetRoute,        // the engine re-reads the relay flag per connection attempt
+        RenderProfile,      // RenderProfiles::ReloadRenderProfileConfig re-reads + reapplies live
         RestartRequired,    // no live path; takes effect next launch
     };
     void ApplyShimSettingLive(ShimSettingApplyGroup group);
