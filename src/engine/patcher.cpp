@@ -37,17 +37,13 @@ namespace BZROpenShim
     struct PatcherConfig {
         nlohmann::json data;
         bool Load() {
+            // One search order for the whole shim: HookEngine::ResolveNamedAddress
+            // has to find the same file this does, or a "resolves" entry and the
+            // patch that depends on it could come from different installs.
             try {
-                std::ifstream f("scripts/patches.json");
-                if (f.is_open()) { data = nlohmann::json::parse(f); return true; }
-            } catch (...) {}
-            try {
-                // The game may be launched with a working directory other than
-                // the install root; fall back to the exe's own directory.
-                char path[MAX_PATH] = {}; GetModuleFileNameA(nullptr, path, MAX_PATH);
-                char* slash = strrchr(path, '\\'); if (slash) *slash = '\0';
-                std::string exeRelative = std::string(path) + "\\scripts\\patches.json";
-                std::ifstream f(exeRelative);
+                const std::string path = HookEngine::FindPatchesJsonPath();
+                if (path.empty()) return false;
+                std::ifstream f(path);
                 if (f.is_open()) { data = nlohmann::json::parse(f); return true; }
             } catch (...) {}
             return false;
@@ -407,6 +403,9 @@ namespace BZROpenShim
     static bool ScanForSoundChannelOverrideTargets(SoundChannelOverrideTargets& outTargets) {
         outTargets = {}; if (!g_Config.data.contains("audio_gas_pattern")) return false;
         auto pVec = HookEngine::ParseIdaPattern(g_Config.data["audio_gas_pattern"]["pattern"]);
+        // An unparseable pattern yields an empty vector, which would otherwise
+        // "match" at the first byte of the first region.
+        if (pVec.empty()) return false;
         HMODULE hMain = GetModuleHandleA(nullptr); uint8_t* mainBase = reinterpret_cast<uint8_t*>(hMain);
         size_t mainSize = 0; if (hMain) {
             auto dos = reinterpret_cast<IMAGE_DOS_HEADER*>(hMain);
