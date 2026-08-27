@@ -316,6 +316,7 @@ namespace BZROpenShim
     static FnLegacyWorldUpdateRenderQueue g_BzrFn_LegacyWorldUpdateRenderQueue = nullptr;
     static FnGetPlayerHandle g_BzrFn_GetPlayerHandle = nullptr;
     static FnGameObjectGetObjByHandle g_BzrFn_GameObjectGetObjByHandle = nullptr;
+    static volatile long g_StaleGameObjectHandleLogBudget = 16;
 
     // Correct GOG handle->object conversion. The engine's GameObject pool is a
     // fixed 0x1000-slot table based at 0x0260DB20 with a 0x400-byte stride; a
@@ -344,6 +345,64 @@ namespace BZROpenShim
         {
         }
         return nullptr;
+    }
+
+    void* __cdecl GameObjectHandleGetObjHardened(int handle)
+    {
+        // GameObject::GetObj validates the low 20-bit generation against the
+        // selected pool slot, but generation zero is also the empty-slot value.
+        // A stale handle whose generation bits are zero therefore passes the
+        // stock check and returns a completely empty GameObject slot. The stock
+        // GameObjectHandle::GetObj wrapper immediately dereferences +0xF4 on
+        // that slot to test the dead bit and crashes.
+        //
+        // battlezone98redux.exe.16444.dmp captured this in PathSpawn::Execute
+        // owned by Inst4XMission. Redux reconstructs PathSpawn through a load
+        // constructor that initializes only its AiProcess base, allowing cached
+        // derived-state handles to be stale. Handle 0xBF800000 selected slot
+        // 0xBF8, whose generation and object pointer were both zero.
+        // Round-tripping through GetHandle rejects that slot because an empty
+        // object returns handle 0.
+        void* object = GameObjectFromHandleGog(handle);
+        if (!object)
+        {
+            if (handle != 0 &&
+                InterlockedDecrement(&g_StaleGameObjectHandleLogBudget) >= 0)
+            {
+                Log(L"[SAVELOAD] Rejected stale GameObject handle=0x%08X before object-state access\n",
+                    static_cast<uint32_t>(handle));
+            }
+            return nullptr;
+        }
+
+        void* objectState = nullptr;
+        uint32_t flags = 0;
+        __try
+        {
+            objectState = *reinterpret_cast<void**>(
+                reinterpret_cast<uint8_t*>(object) + 0xF4u);
+            if (objectState)
+            {
+                flags = *reinterpret_cast<uint32_t*>(
+                    reinterpret_cast<uint8_t*>(objectState) + 0x14u);
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            objectState = nullptr;
+        }
+
+        if (!objectState)
+        {
+            if (InterlockedDecrement(&g_StaleGameObjectHandleLogBudget) >= 0)
+            {
+                Log(L"[SAVELOAD] Rejected incomplete GameObject handle=0x%08X object=%p\n",
+                    static_cast<uint32_t>(handle), object);
+            }
+            return nullptr;
+        }
+
+        return (flags & 0x200u) == 0 ? object : nullptr;
     }
 
     static FnPersonSimulate g_BzrFn_PersonSimulate = nullptr;
@@ -7080,6 +7139,35 @@ namespace BZROpenShim
             }
         }
 
+        // The mission run-state seam fires while the outgoing Ogre objects are
+        // still valid, before Redux unloads the Modable resource group. Hide
+        // every shim-owned renderable in that window, then retire its slot.
+        // Merely forgetting the pointers is unsafe: the Entity remains attached
+        // to the scene graph and Ogre can traverse it after its Mesh/SubMesh has
+        // been unloaded. Dump battlezone98redux.exe.16476.dmp captured exactly
+        // that path for Ogre/MO656 (avfigh/ara11nrr.mesh): SubMesh::indexData
+        // was null when the loading-screen frame called _getRenderOperation.
+        static void DeactivateAllChunkProxySceneResources(const wchar_t* reason)
+        {
+            size_t deactivated = 0;
+            for (ChunkProxySlot& slot : g_ChunkProxySlots)
+            {
+                if (slot.active || slot.billboardAssigned || slot.meshAssigned)
+                    ++deactivated;
+                ReleaseChunkProxySlot(slot);
+            }
+            HideGenericChunkBatchIfBuilt();
+
+            if (deactivated > 0)
+            {
+                LogChunkDiagnostic(
+                    "chunkproxy",
+                    L"[CHUNKPROXY] mission transition (%ls): deactivated %zu slot(s) before resource unload\n",
+                    reason ? reason : L"<none>",
+                    deactivated);
+            }
+        }
+
         static bool RebuildAndSubmitGenericChunkBatch(void* renderQueue)
         {
             size_t chunkCount = 0;
@@ -13594,19 +13682,16 @@ namespace BZROpenShim
                     BzrRunStateName(previous), previous,
                     BzrRunStateName(current), current,
                     g_MissionTransitionCount);
-                // Deliberately NOT forgetting chunk proxy or multiplayer flag
-                // scene resources here. Both forget paths hang off the
-                // clearScene / destroyAllMovableObjects hooks, which never fire
-                // in this build, so neither had ever executed in a live process
-                // -- and they are written for a scene that is already gone. At
-                // this seam the scene is still alive, so forgetting makes the
-                // owning subsystem lazily recreate resources whose Ogre objects
-                // still exist. Driving the flag path from here aborted the
-                // process inside RenderMultiplayerFlags
-                // (C:\BZDumps\battlezone98redux.exe.35108.dmp), and the chunk
-                // path carries the same hazard. Stale chunk slots are handled
-                // where the damage actually occurs, by the fail-fast checks in
-                // SubmitChunkProxiesToRenderQueue.
+                // clearScene / destroyAllMovableObjects never fire for this
+                // in-process transition. Deactivate chunk proxies now, while
+                // setVisible and node updates are still safe; otherwise Ogre's
+                // own scene traversal can reach an attached proxy after Modable
+                // unloads its SubMesh, before the manual-submit stale checks get
+                // a chance to run. Do not apply the old pointer-forget path to
+                // multiplayer flags here: that path previously recreated over
+                // still-live Ogre objects and aborted in RenderMultiplayerFlags
+                // (battlezone98redux.exe.35108.dmp).
+                DeactivateAllChunkProxySceneResources(L"left simulation");
                 HeadlightNotifyMissionRunStateChanged(false);
             }
             else if (previous != kBzrRunStateStarted && current == kBzrRunStateStarted)
