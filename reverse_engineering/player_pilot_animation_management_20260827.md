@@ -5,7 +5,7 @@
 **Test lab:** `lcbench` + purpose-specific harness `reverse_engineering/test_missions/pilot_anim_capture/`  
 **Instrumentation:** `src/patches/pilot_fp_animation_trace.cpp` (v3 dual-target), `include/pilot_fp_animation_trace.h`, `reverse_engineering/PILOT_FP_ANIMATION_TRACE.md`
 **Build:** GOG Redux 2.2.301, `battlezone98redux.exe` VA 0x401000, Ogre 1.10 `OgreMain.dll` SHA-256 `E5E6939…`
-**Runtime Capture:** **EXECUTED — PARTIAL QUALIFICATION**. The 32 s observational capture and independent FP-only/WORLD-only manipulation captures completed on 2026-08-27. A distinct live `aspilo_fp.mesh` entity, its stock animation traffic, and its shared `Person::Simulate` controller are proven. The manipulation gate independently altered the FP and WORLD `AnimationState` objects, but Windows denied the attempted game-window capture, so a visible first-person presentation change remains **UNKNOWN**. Do not add `TargetLocalFirstPerson` yet.
+**Runtime Capture:** **EXECUTED — QUALIFIED**. The 32 s observational capture, independent FP-only/WORLD-only manipulation captures, and marker-synchronized visual capture completed on 2026-08-27. A distinct live `aspilo_fp.mesh` entity, its stock animation traffic, its shared `Person::Simulate` controller, and independent control of the visible first-person presentation are **PROVEN-RUNTIME**. The API decision gate is open for stock-animation targeting; custom clip loading remains out of scope.
 
 ## 0. Runtime Qualification Result (2026-08-27)
 
@@ -20,6 +20,7 @@ This section is the authoritative captured result. Later sections retain pre-run
 - Windowing/shutdown: `BZR_FORCE_WINDOWED=1`; every launch dot-sourced `BZRHarness.ps1` and stopped via `Stop-BZRGame -Id`.
 - Observational evidence: `tmp/pilot_anim_qualification_20260827/run1_observational/{openshim.log,BZLogger.txt,BZOgreLogfile.log}`.
 - Manipulation evidence: `tmp/pilot_anim_qualification_20260827/run2_manip_fp/` and `tmp/pilot_anim_qualification_20260827/run2_manip_world/`.
+- Visual evidence: screenshots captured in the qualification task, correlated with logs in `run3_visual_fp_thirdperson/` and `run3_visual_world/`; operator observation confirmed the external pilot kneeling while the FP-only-frozen view remained standing.
 - Lifetime evidence: the manipulation captures used the corrected full 32 s Lua timeline, then `FailMission(GetTime()+1)`; the earlier unsupported local-player `GetIn` step was removed.
 
 Configuration:
@@ -112,7 +113,7 @@ This is evidence of separate per-entity apply helpers, not independent gameplay 
 
 **Classification:** one native `Person::Simulate` FSM drives two distinct Ogre entities through parallel WORLD and FP animation-application helpers. This is stronger and more precise than an `X == Y` call-site result.
 
-### 0.7 Targeted manipulation — runtime state control proven; visible effect UNKNOWN
+### 0.7 Targeted manipulation and visual result — PROVEN-RUNTIME
 
 The scope correction allowed attribution without adding a public API:
 
@@ -121,13 +122,13 @@ The scope correction allowed attribution without adding a public API:
 - No second manipulation target was frozen, so attribution is specific to `stand2Kneel`.
 - The FP-only state remained selected much longer than in the WORLD-only/control progression, proving that the FP `AnimationState` is live and participates in the animation-control path.
 
-An automated screenshot attempt identified the correct `Battlezone 98 Redux (2.2.301) DX11` window, but Windows Graphics Capture failed with access denied. No human observation was supplied. Therefore:
+After the workstation was unlocked, the visual comparison was repeated. The FP-only capture was synchronized to the actual Lua `CROUCH_EXPECTED stage=3` marker at `2026-08-27T13:04:45.962-05:00`, not estimated from process launch time.
 
-- first-person visual effect: **UNKNOWN**;
-- third-person/world visual effect: **UNKNOWN**;
-- `FP Ogre AnimationState controls visible local first-person presentation`: **not yet PROVEN-RUNTIME**.
+- FP-only freeze, first-person camera: the weapon/pilot presentation remained in the default standing/low pose even though Lua had selected `gsnipe` and the WORLD state was free to advance.
+- Same FP-only run, third-person observation using Shift+F3: the world pilot was kneeling while first-person remained at the default standing pose.
+- WORLD-only control: the first-person sniper viewmodel raised normally while only `[MANIP][WORLD]` was active.
 
-This result does not fit outcome D (“no visible effect”), because no valid visual observation was obtained.
+This is outcome **B**: WORLD affects the external pilot while FP affects first person independently. The distinct FP `AnimationState` is the visible local first-person presentation driver.
 
 ### 0.8 Lifetime — partial PROVEN-RUNTIME
 
@@ -148,9 +149,9 @@ Binding clear/release and fresh-launch reacquisition are **PROVEN-RUNTIME**. Sam
 - **PROVEN-RUNTIME:** their transitions correlate frame-for-frame with the scripted player FSM timeline.
 - **PROVEN-NATIVE:** one `Person::Simulate` controller invokes WORLD then FP through separate structural-clone helpers.
 - **PROVEN-RUNTIME:** the manipulation gate can independently alter the FP or WORLD state stream.
-- **UNKNOWN:** whether that FP state stream is the final visible first-person presentation driver.
+- **PROVEN-RUNTIME:** FP-only manipulation changes the visible first-person pose independently of the WORLD pilot; WORLD-only manipulation does not block the first-person sniper pose.
 
-The decision gate is therefore **not open** for `TargetLocalFirstPerson`. Do not implement EXU targeting or custom clip loading yet. The minimum remaining qualification is one valid visual capture/observer of FP-only versus WORLD-only `stand2Kneel` manipulation. If FP-only visibly changes the view, the next API remains the proposed safe OpenShim FP resolver plus EXU `TargetLocalFirstPerson` using existing `Play`/`Stop`/`Seek`.
+The decision gate is **open** for the minimum stock-animation API: OpenShim should safely qualify/track the local FP entity, and EXU may add `TargetLocalFirstPerson` while reusing existing `Play`/`Stop`/`Seek`. Do not load custom clips yet; first prove stock animations through that public API.
 
 ### 0.10 Minimal corrections required for valid evidence
 
@@ -231,7 +232,7 @@ No feature API, custom clip, or ExtraUtilities change was made.
 
 - `scripts/patches.json` + `src/engine/resolve_table.cpp` carry `identity` notes for each signature; `src/engine/native_ui.cpp` validates OptionsParent overlay. Pattern adopted for any new pilot-related signature.
 
-**Conclusion:** Earlier instrumentation established the world target. The §0 runtime captures now prove FP ownership, observed inventory, and native caller attribution; only visible first-person effect remains unqualified.
+**Conclusion:** Earlier instrumentation established the world target. The §0 runtime captures now prove FP ownership, observed inventory, native caller attribution, and independent visible first-person control.
 
 ---
 
@@ -505,7 +506,7 @@ The `weaponMask` / hardpoint system (`SetWeaponMask`, `GiveWeapon` mask bits 1,2
 - The inventory poll's `hasAnimSet` and binding logs are *exclusively* for the world entity. A capture where the tester visibly fires `gsnipe` in FP yet no `[FPAnim] enabled=1` appears for `fireRecoilSniper` on the world entity would **disprove** the shared-entity hypothesis and mandate a second resolver that finds the FP entity via the FP renderer (analogous to `craft_bounds_architecture`'s `0x0067E5A0`).
 - Conversely, if manipulating the world entity's `stand2Kneel` weight via `exu.animation.SetWeight` visibly moves the FP arms, that is `PROVEN-RUNTIME` for shared presentation.
 
-**Status:** `STRONGLY SUPPORTED: dedicated _fp meshes exist; UNKNOWN: whether they are instantiated as a separate Entity at runtime and whether Redux drives them from `Person::Simulate` or from a `SniperInterface`-like overlay.`** The harness + v2 trace makes this question answerable in one run, which is the primary deliverable.
+**Status:** **PROVEN-RUNTIME:** a separate `aspilo_fp.mesh` entity is instantiated and drives visible first-person presentation. **PROVEN-NATIVE:** `Person::Simulate` drives it after the WORLD entity through the parallel FP helper.
 
 ---
 
@@ -590,7 +591,7 @@ Experiment 1 is implemented as `freeze` on `stand2Kneel` (default `PilotFPAnimMa
 
 ### 14.3 Captured result
 
-FP-only and WORLD-only `stand2Kneel` freeze runs completed; see §0.7. They prove independently addressable live state streams. Windows denied the attempted frame capture, so the expected visible effect was not observed and is not claimed.
+FP-only and WORLD-only `stand2Kneel` freeze runs completed; see §0.7. The marker-synchronized first-person capture and Shift+F3 third-person observation prove independently visible state streams.
 
 ### 14.4 Restoration & safety
 
@@ -675,17 +676,17 @@ exu.animation.Seek(target, name, timePosition)
 - Compatibility: Skeleton compatibility is bone-count/parent/hierarchy dependent. A `_fp` skeleton that differs from the world skeleton cannot be swapped without re-creating the entity.
 - Safe insertion: Must occur while the target `Entity` is valid (between `target person=…` and `target cleared`), under SEH, without caching `AnimationState*` between calls — exactly the pattern `ExtraUtilities/GameObject.cpp` already follows.
 
-### 16.4 Recommendation (pending visual proof)
+### 16.4 Recommendation after runtime qualification
 
 **Provisional recommendation:**
 
-1. **Short term:** Obtain one valid visual comparison of the already-captured FP-only and WORLD-only `stand2Kneel` experiment. Do not add an API meanwhile.
+1. **Short term:** Add only the safe OpenShim FP target qualification/tracking needed for a production resolver, then expose EXU `TargetLocalFirstPerson` using the existing `Play`/`Stop`/`Seek` verbs. Prove stock animations through that surface.
 
 2. **Medium term:** If FP-only manipulation visibly changes first-person presentation, add a safe OpenShim resolver for the now-proven `aspilo_fp` entity, expose it as `exu.animation.TargetLocalFirstPerson()`, and keep the existing playback verbs unchanged.
 
 3. **Long term:** If new clips are needed beyond the 11 stock names, pursue **Option B** on the FP skeleton specifically — load additional `.skeleton` clips into the `_fp` skeleton via the resource-group path that the FP entity already uses, keeping TP untouched.
 
-Do **not** implement these APIs until visible FP control is proven. Entity ownership and independent state manipulation are no longer speculative; final presentation ownership still is.
+Visible FP control is now proven, so the minimum stock-animation targeting API is justified. Do **not** load or import custom clips until stock control succeeds through the intended public surface.
 
 ---
 
@@ -735,18 +736,18 @@ No second clock, no parallel API, no asset duplication until a run proves the FP
 
 | # | Unknown | Why it matters | How to resolve (one run) |
 |---|---------|----------------|---------------------------|
-| U1 | FP SceneNode / creation site (entity itself is now proven as `aspilo_fp.mesh`) | Needed only for a production-safe resolver | Trace creation/lifetime only after visible control opens the decision gate |
+| U1 | FP SceneNode / creation site (entity itself is now proven as `aspilo_fp.mesh`) | Needed for a production-safe resolver | Implement only the minimum qualification/tracking required by `TargetLocalFirstPerson` |
 | U2 | Full clip list + per-clip `length` / `loop` default / blend mode | Custom anim must know naming and timing | Add `AnimationStateSet::getAnimationStateIterator` hook or call `getLength` per bound state; log via inventory |
 | U3 | Weight vs enabled vs layering for locomotion (`idle` + `runForward` simultaneous?) | Movement blending | `Has` probe already enumerates simultaneous enabled states; `caller` RVA shows who sets weight |
 | U4 | Turning anim-driven vs root-motion yaw | Determines whether custom strafe needs new clip | `MOVE_WINDOW` manual WASD + `runLeft`/`runRight` weight delta |
-| U5 | Whether the proven FP skeleton transition is the final visible sniper/zoom presentation driver | Separates animation control from camera-only presentation | Visually compare FP-only and WORLD-only freeze at the scripted crouch marker |
+| U5 | **RESOLVED:** FP skeleton transition controls visible first-person pose independently | Opens stock-animation target API | Marker-synchronized FP-only capture + Shift+F3 external observation |
 | U6 | Firing while moving: layering or hard switch | Reload anim layering design | `FIRE_WINDOW` while `runForward` enabled — log simultaneous `enabled` set |
 | U7 | Jumping Lua automation (any `SetPosition`/`SetVelocity` that triggers `jump` clip) | Full automation vs one manual tap | Try `SetVelocity(y=+)` after `Play("jump")`; if no `Person::Simulate` jump path, document as manual-only |
 | U8 | Same-process restart/return lifecycle (destroyed vs pooled FP entity) | Lifetime for a production resolver | Observe a real restart or player return; Lua `GetIn` is not a valid local-player transition |
 | U9 | Weapon-change animation (is `GiveWeapon` sufficient to retrigger FSV or does `SetWeaponMask` needed?) | Reliable sniper toggle | Harness already tries both `GiveWeapon(...,0)` and `GiveWeapon(...)` without slot; log which triggers `stand2Kneel` |
 | U10 | Can `Ogre::SkeletonManager::load` inject a new clip (`fpsTest`) at runtime without restart? | Option B viability | After `HAS_ANIM_SET` proof, attempt `Entity::getAnimationState("fpsTest")` — if null, try `SkeletonManager::getByName("aspilo_fp.skeleton")` load path |
 
-U1/U5/U8 require one valid visual/restart observation. They are intentionally not inferred from the completed state-traffic captures.
+U5 is resolved. U1 remains production-resolver work; U8 remains a same-process lifetime hardening case and does not invalidate the observed FP target/control result.
 
 ---
 
@@ -903,4 +904,4 @@ git diff --check
 - `include/BZROpenShim.h` / `src/engine/openshim_sdk_v2.cpp` — SDK v2 event queue, `OpenShimGetApi`.
 
 ---
-*End of report. Next step is a valid visual comparison of the already-proven FP-only and WORLD-only manipulation paths; do not implement EXU targeting until that evidence exists.*
+*End of report. Runtime qualification is complete. Next step: minimum safe OpenShim FP tracking plus EXU `TargetLocalFirstPerson`, proving stock animation control before any custom clip work.*
