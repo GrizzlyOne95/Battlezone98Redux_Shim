@@ -47,6 +47,12 @@ local VALID_SCENARIOS = {
     -- All units share the player's team and are held inert; nothing fires or
     -- moves, so the only variable across captures is renderer/headlight state.
     shadowline = true,
+    -- Controlled native wingman range fixture. A friendly wingman takes one
+    -- real enemy hit, then faces the same enemy at the configured distance.
+    -- It can exercise either the native Attack task's firing thresholds or the
+    -- Follow state-machine gates; periodic rows capture target, ammo, health,
+    -- and distance without scripting weapon fire.
+    wingman_range = true,
 }
 
 local VALID_UNIT_ODFS = {
@@ -95,6 +101,10 @@ local VALID_UNIT_ODFS = {
     sbsilo = true,
     abbarr = true,
     sbtowe = true,
+    wrbase = true,
+    wreng = true,
+    wrmin = true,
+    wrturr = true,
 }
 
 local function readConfig()
@@ -326,6 +336,18 @@ local satGroups = {}
 local satNextCue = 1
 local satPlayer = nil
 
+local wingmanRange = {
+    wingman = nil,
+    enemy = nil,
+    activated = false,
+    nextSampleAt = 0.0,
+    startAmmo = 0.0,
+    startEnemyHealth = 0.0,
+    firstFireLogged = false,
+    triggerDamage = true,
+    forceAttack = false,
+}
+
 local function readSatelliteConfig()
     local config = OpenODF("lcbcfg")
 
@@ -375,6 +397,152 @@ local function trace(message)
         BENCH_DISTANCE,
         BENCH_ORIENTATION,
         message))
+end
+
+local function wingmanRangePosition(origin, transform, forward, lateral)
+    local frontX = transform.front_x or 0.0
+    local frontZ = transform.front_z or 1.0
+    local rightX = transform.right_x or 1.0
+    local rightZ = transform.right_z or 0.0
+    return SetVector(
+        origin.x + frontX * forward + rightX * (lateral or 0.0),
+        origin.y,
+        origin.z + frontZ * forward + rightZ * (lateral or 0.0))
+end
+
+local function spawnWingmanRangeFixture(player)
+    local config = OpenODF("lcbcfg")
+    wingmanRange.triggerDamage = GetODFBool(
+        config, "WingmanRange", "triggerDamage", true)
+    wingmanRange.forceAttack = GetODFBool(
+        config, "WingmanRange", "forceAttack", false)
+    local transform = GetTransform(player)
+    local origin = GetPosition(player)
+    local wingman = BuildObject(
+        BENCH_UNIT_ODF, 1, wingmanRangePosition(origin, transform, 30.0, 0.0))
+    local enemy = BuildObject(
+        "svtank", 2, wingmanRangePosition(origin, transform, 80.0, 0.0))
+    if not IsValid(wingman) or not IsValid(enemy) then
+        trace("WINGRANGE ERROR fixture-build-failed")
+        benchmarkEnded = true
+        return
+    end
+
+    wingmanRange.wingman = wingman
+    wingmanRange.enemy = enemy
+    local wingmanPos = GetPosition(wingman)
+    local enemyPos = GetPosition(enemy)
+    SetTransform(enemy, BuildDirectionalMatrix(enemyPos, SetVector(
+        wingmanPos.x - enemyPos.x, 0.0, wingmanPos.z - enemyPos.z)))
+    SetIndependence(wingman, 0)
+    SetIndependence(enemy, 0)
+    Stop(wingman, 1)
+    Stop(enemy, 1)
+    if wingmanRange.triggerDamage then
+        -- Command only the hostile trigger craft. The friendly wingman remains
+        -- stopped until a real hit is observed, then receives Follow below so
+        -- its target acquisition and offensive transition stay native.
+        SetIndependence(enemy, 1)
+        Attack(enemy, wingman, 1)
+    else
+        local wingmanPos = GetPosition(wingman)
+        SetPosition(playerHandle, wingmanRangePosition(
+            wingmanPos, playerBasis, 0.0, -12.0))
+        Stop(playerHandle, 1)
+        SetPosition(enemy, wingmanRangePosition(
+            wingmanPos, playerBasis, BENCH_DISTANCE, 0.0))
+        Stop(enemy, 1)
+        local enemyPos = GetPosition(enemy)
+        SetTransform(wingman, BuildDirectionalMatrix(wingmanPos, SetVector(
+            enemyPos.x - wingmanPos.x, 0.0, enemyPos.z - wingmanPos.z)))
+        Stop(wingman, 1)
+        SetIndependence(wingman, 1)
+        if wingmanRange.forceAttack then
+            Attack(wingman, enemy, 0)
+        else
+            Follow(wingman, playerHandle, 0)
+        end
+        wingmanRange.activated = true
+        wingmanRange.startAmmo = GetCurAmmo(wingman)
+        wingmanRange.startEnemyHealth = GetCurHealth(enemy)
+        wingmanRange.nextSampleAt = elapsed
+    end
+    trace(string.format(
+        "WINGRANGE fixture-ready wingman=%s enemy=%s hitDistance=%.2f testDistance=%.2f triggerDamage=%s forceAttack=%s",
+        tostring(wingman), tostring(enemy), GetDistance(wingman, enemy),
+        BENCH_DISTANCE, tostring(wingmanRange.triggerDamage),
+        tostring(wingmanRange.forceAttack)))
+end
+
+local function updateWingmanRangeFixture()
+    local wingman = wingmanRange.wingman
+    local enemy = wingmanRange.enemy
+    if not IsValid(wingman) or not IsValid(enemy) then
+        trace("WINGRANGE ERROR fixture-object-lost")
+        benchmarkEnded = true
+        return
+    end
+
+    if not wingmanRange.activated then
+        if GetCurHealth(wingman) < GetMaxHealth(wingman) then
+            local wingmanPos = GetPosition(wingman)
+            SetPosition(playerHandle, wingmanRangePosition(
+                wingmanPos, playerBasis, 0.0, -12.0))
+            Stop(playerHandle, 1)
+            SetPosition(enemy, wingmanRangePosition(
+                wingmanPos, playerBasis, BENCH_DISTANCE, 0.0))
+            Stop(enemy, 1)
+            SetIndependence(enemy, 0)
+            SetCurHealth(wingman, GetMaxHealth(wingman))
+            local enemyPos = GetPosition(enemy)
+            SetTransform(wingman, BuildDirectionalMatrix(wingmanPos, SetVector(
+                enemyPos.x - wingmanPos.x, 0.0, enemyPos.z - wingmanPos.z)))
+            Stop(wingman, 1)
+            SetIndependence(wingman, 1)
+            if wingmanRange.forceAttack then
+                Attack(wingman, enemy, 0)
+            else
+                Follow(wingman, playerHandle, 0)
+            end
+            wingmanRange.activated = true
+            wingmanRange.startAmmo = GetCurAmmo(wingman)
+            wingmanRange.startEnemyHealth = GetCurHealth(enemy)
+            wingmanRange.nextSampleAt = elapsed
+            trace(string.format(
+                "WINGRANGE recent-enemy-hit command-issued=%s distance=%.2f lastEnemyShot=%.3f ammo=%.1f enemyHealth=%.1f",
+                wingmanRange.forceAttack and "attack" or "follow",
+                GetDistance(wingman, enemy), GetLastEnemyShot(wingman),
+                wingmanRange.startAmmo, wingmanRange.startEnemyHealth))
+        end
+        if not wingmanRange.activated and elapsed >= 8.0 then
+            trace("WINGRANGE ERROR recent-enemy-hit-timeout benchmark-end")
+            benchmarkEnded = true
+        end
+        return
+    end
+
+    SetCurHealth(wingman, GetMaxHealth(wingman))
+    if elapsed < wingmanRange.nextSampleAt then
+        return
+    end
+    wingmanRange.nextSampleAt = elapsed + 0.5
+
+    local ammo = GetCurAmmo(wingman)
+    local enemyHealth = GetCurHealth(enemy)
+    local currentWho = GetCurrentWho(wingman)
+    local fired = ammo < wingmanRange.startAmmo or
+        enemyHealth < wingmanRange.startEnemyHealth
+    if fired and not wingmanRange.firstFireLogged then
+        wingmanRange.firstFireLogged = true
+        trace(string.format(
+            "WINGRANGE first-engagement distance=%.2f ammo=%.1f enemyHealth=%.1f",
+            GetDistance(wingman, enemy), ammo, enemyHealth))
+    end
+    trace(string.format(
+        "WINGRANGE sample distance=%.2f command=%s targetEnemy=%s ammo=%.1f enemyHealth=%.1f lastEnemyShot=%.3f fired=%s",
+        GetDistance(wingman, enemy), tostring(GetCurrentCommand(wingman)),
+        tostring(currentWho == enemy), ammo, enemyHealth,
+        GetLastEnemyShot(wingman), tostring(fired)))
 end
 
 local function removeUnexpectedCraft(player)
@@ -931,6 +1099,12 @@ function Start()
         return
     end
 
+    if BENCH_SCENARIO == "wingman_range" then
+        spawnWingmanRangeFixture(player)
+        trace("warmup-begin")
+        return
+    end
+
     if BENCH_SCENARIO == "shadowline" then
         local heading, score = faceFlattestShadowlineHeading(player, playerOrigin)
         trace(string.format(
@@ -964,6 +1138,11 @@ function Update(dt)
             satUpdate()
         end
         return
+    end
+
+
+    if BENCH_SCENARIO == "wingman_range" and not benchmarkEnded then
+        updateWingmanRangeFixture()
     end
 
     if BENCH_SCENARIO == "firing" or BENCH_SCENARIO == "flight" or
