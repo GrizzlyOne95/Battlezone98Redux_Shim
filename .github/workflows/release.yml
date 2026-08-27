@@ -27,6 +27,11 @@ jobs:
         mkdir release_assets
         cp bin/Release/winmm.dll release_assets/
         cp scripts/patches.json release_assets/
+        # Ship the player-oriented preset and keep the exhaustive reference
+        # alongside it so users can tweak settings without starting from the
+        # developer configuration.
+        cp openshim.ini release_assets/
+        cp openshim.ini.example release_assets/
       shell: bash
 
     - name: Create Release
@@ -36,6 +41,8 @@ jobs:
         files: |
           release_assets/winmm.dll
           release_assets/patches.json
+          release_assets/openshim.ini
+          release_assets/openshim.ini.example
         draft: false
         prerelease: false
       env:
