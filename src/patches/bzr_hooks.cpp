@@ -7149,22 +7149,50 @@ namespace BZROpenShim
         // was null when the loading-screen frame called _getRenderOperation.
         static void DeactivateAllChunkProxySceneResources(const wchar_t* reason)
         {
+            // Dump battlezone98redux.exe.38660.dmp ended in OgreMain!operator delete
+            // with a corrupted stack after mission quit (write to 001b835c, esp in
+            // free memory). The seam runs on the main thread with Ogre still valid
+            // but about to unload Modable. An Ogre call that faults must not unwind
+            // through every slot and leave attached entities. Faults are caught
+            // per-slot and demoted to a pointer forget, which is the same recovery
+            // the periodic "expired" tick uses when touching the entity faults.
             size_t deactivated = 0;
+            size_t faulted = 0;
             for (ChunkProxySlot& slot : g_ChunkProxySlots)
             {
                 if (slot.active || slot.billboardAssigned || slot.meshAssigned)
                     ++deactivated;
-                ReleaseChunkProxySlot(slot);
+                __try
+                {
+                    ReleaseChunkProxySlot(slot);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    ForgetChunkProxySlotOgreRefs(slot);
+                    ++faulted;
+                }
             }
-            HideGenericChunkBatchIfBuilt();
+            __try
+            {
+                HideGenericChunkBatchIfBuilt();
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                g_GenericChunkBatchManualObject = nullptr;
+                g_GenericChunkBatchSceneNode = nullptr;
+                g_GenericChunkBatchVisible = false;
+                g_GenericChunkBatchSectionCreated = false;
+                ++faulted;
+            }
 
-            if (deactivated > 0)
+            if (deactivated > 0 || faulted > 0)
             {
                 LogChunkDiagnostic(
                     "chunkproxy",
-                    L"[CHUNKPROXY] mission transition (%ls): deactivated %zu slot(s) before resource unload\n",
+                    L"[CHUNKPROXY] mission transition (%ls): deactivated %zu slot(s) faulted=%zu before resource unload\n",
                     reason ? reason : L"<none>",
-                    deactivated);
+                    deactivated,
+                    faulted);
             }
         }
 
