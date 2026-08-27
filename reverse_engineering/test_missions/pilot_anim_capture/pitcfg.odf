@@ -1,0 +1,13 @@
+[Timeline]
+hopOutAt = 2.0
+idleEnd = 6.0
+sniperAt = 8.0
+crouchAt = 10.0
+fireAt = 13.0
+moveAt = 16.0
+jumpAt = 19.5
+finalIdleAt = 24.0
+reenterAt = 27.0
+completeAt = 32.0
+sniperWeapon = "gsnipe"
+normalWeapon = "handgun"
