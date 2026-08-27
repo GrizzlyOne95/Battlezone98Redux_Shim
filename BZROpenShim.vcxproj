@@ -145,6 +145,7 @@
     <ClCompile Include="src\patches\ogre_enhanced_light_selection.cpp" />
     <ClCompile Include="src\patches\ogre_render_profile.cpp" />
     <ClCompile Include="src\engine\render_profile.cpp" />
+    <ClCompile Include="src\engine\backend_selection.cpp" />
     <ClCompile Include="src\engine\render_profile_resources.cpp" />
     <ClCompile Include="src\patches\sun_flash.cpp" />
     <ClCompile Include="src\patches\terrain_proxy.cpp" />
@@ -166,6 +167,7 @@
     <ClInclude Include="include\bzr_hooks.h" />
     <ClInclude Include="include\bzr_options_ui.h" />
     <ClInclude Include="include\render_profile.h" />
+    <ClInclude Include="include\backend_selection.h" />
     <ClInclude Include="include\render_profile_runtime.h" />
     <ClInclude Include="include\render_profile_resources.h" />
     <ClInclude Include="include\render_profile_request_tracker.h" />

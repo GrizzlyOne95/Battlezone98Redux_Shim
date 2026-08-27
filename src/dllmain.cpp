@@ -6,6 +6,7 @@
 
 #include "winmm_proxy.h"
 #include "bzr_hooks.h"
+#include "render_profile_runtime.h"
 #include "crash_logger.h"
 #include "net_optimizer.h"
 #include "bzrnet_instrumentation.h"
@@ -223,6 +224,12 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
     switch (reason)
     {
     case DLL_PROCESS_ATTACH:
+        // Capture the pristine command line BEFORE anything can run: stock's
+        // parser strtok()s the GetCommandLineA() buffer in place once main()
+        // starts, and the backend-selection seam must still see /renderer:...
+        // tokens no matter which thread wins the startup race. Pure bounded
+        // string copy - loader-lock safe.
+        BZROpenShim::RenderProfiles::CaptureCommandLineSnapshot();
         BZROpenShim::Initialize();
         BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "DLL_PROCESS_ATTACH hModule=0x%p reserved=0x%p shimVersion=%u", hModule, reserved, SHIM_VERSION);
         DisableThreadLibraryCalls(hModule);
@@ -238,6 +245,17 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
         // The game creates BZLogger/Ogre logs immediately after process
         // attach, before the normal patch thread can reliably run.
         BZROpenShim::ApplyEarlyGameLogHooks();
+
+        // Seam A: arm ONLY the startup interception here (loader-lock-bounded
+        // identity checks + one IAT pointer swap). The backend transport runs
+        // later, on the game thread, inside the intercepted startup
+        // Ogre::ConfigFile::load — deterministic even when Steam reaches
+        // graphics initialization in ~1 s. Heavy work (INI parsing,
+        // filesystem, logging) must never run under the loader lock.
+        // Do not route the arm result through LogShimA here: its locks/CRT
+        // formatting are not safe under the loader lock. The seam records a
+        // fixed status enum and the patch thread reports it after attach.
+        BZROpenShim::RenderProfiles::InstallStartupBackendSeam();
 
         // Both patch sites are global constructors that run from the CRT's
         // _initterm before main, so this cannot wait for the patch thread.
