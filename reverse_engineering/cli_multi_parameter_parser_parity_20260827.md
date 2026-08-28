@@ -3,182 +3,306 @@
 **Author:** OpenShim Reverse Engineering Team
 **Date:** 2026-08-27
 **Branch:** `research/cli-multi-parameter-parser-parity-20260827`
-**Status:** Findings Confirmed / Defect Proven / Mitigation Plan Formulated
+**Status:** Static defect confirmed / exact delimiter tail partly unresolved / live repair qualification pending
 
 ---
 
 ## Executive Summary
 
-This investigation proves Scott ("Herp")'s report: **Battlezone 98 Redux's command-line parser fails to parse multi-parameter arguments that rely on comma delimiters (e.g., `-shellmap:216,178`).**
+Scott ("Herp")'s report that Redux breaks comma-separated multi-parameter command-line arguments such as `-shellmap:216,178` is strongly supported by the shipped Redux parser.
 
-The root cause is a regression introduced during the Redux engine overhaul:
-1. In **Battlezone 1.5**, the command-line parser tokenized arguments using `strtok()` with whitespace delimiters (`" \t\r\n"`). Arguments containing commas passed intact to parameter handlers, allowing `sscanf(token, ":%d,%d", &w, &h)` to successfully extract multiple values.
-2. In **Redux 2.2.301**, the delimiter string passed to `strtok()` in `FUN_007d5120` was modified to include comma: `", \t\r\n"` (`DAT_008f068c`).
-3. As a direct result, `strtok()` destructively modifies the process command-line buffer in place, replacing `,` with `\0` before the option dispatch handler receives the token.
-4. When `-shellmap:216,178` is passed:
-   - Token 1 is truncated to `"-shellmap:216"`.
-   - `sscanf("-shellmap:216" + 9, ":%d,%d", &w, &h)` matches only the first parameter (`216`), returning `1`.
-   - The handler's fallback logic sets `height = width` (`216`), completely discarding the second parameter (`178`).
-   - Token 2 (`"178"`) is returned on the next `strtok()` iteration; missing an option prefix (`/`, `-`, `+`), it falls into the positional map/savefile loader, failing `.sav` validation and triggering an invalid load state (`FUN_00434170(5)`).
+The independently rechecked Redux path is:
 
----
-
-## Phase 1 — Recovered Option Tables
-
-### 1. Tokenizer Delimiter Comparison
-
-| Engine Version | Tokenizer Function | Delimiter String (`strtok`) | Process Buffer Mutated? | Multi-Param Comma Handling |
-| :--- | :--- | :--- | :--- | :--- |
-| **Battlezone 1.5** | `strtok(buf, delims)` | `" \t\r\n"` | Yes (spaces converted to NUL) | **Intact** (`-shellmap:216,178` passed as single token) |
-| **Redux 2.2.301** | `strtok(buf, delims)` | `", \t\r\n"` (`DAT_008f068c`) | Yes (spaces and commas converted to NUL) | **Broken** (split into `"-shellmap:216"` and `"178"`) |
-
----
-
-### 2. Redux 2.2.301 Recovered Option Table
-
-Below is the complete option table recovered from `FUN_007d5120` (RVA `0x3d5120` in `battlezone98redux.exe` / GOG 2.2.301 decompilation):
-
-| Option Name | Prefix / Separator | Expected Param Count | Expected Delimiters | Conversion Format | Destination Global / State | Handler / Logic Summary |
-| :--- | :--- | :---: | :--- | :--- | :--- | :--- |
-| **`multi`** | `-`, `/`, `+` | 0 | N/A | Flag | `_DAT_00920ed4 = 1` | Force multiplayer mode enabled |
-| **`nomulti`** | `-`, `/`, `+` | 0 | N/A | Flag | `_DAT_00920ed4 = 0xffffffff` | Force multiplayer mode disabled |
-| **`win`** | `-`, `/`, `+` | 0 | N/A | Flag | `FUN_00663d10(0)` | Windowed mode toggle |
-| **`fullscreen`** | `-`, `/`, `+` | 0 | N/A | Flag | `FUN_00663d10(1)` | Fullscreen mode toggle |
-| **`rawinput`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_00918424 = 1` | Enable raw mouse/keyboard input |
-| **`norawinput`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_00918424 = 0` | Disable raw input |
-| **`noshell`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_0091556c = 1` | Bypass shell UI on launch |
-| **`flagfile:`** | `:` | 1 | String | Copy | `DAT_00918404` | Copies filename string to flagfile buffer |
-| **`net:`, `net=`** | `:`, `=` | 1 | String | Token match | Subsystem Network Provider | Matches `steam`, `gog`, `cp`, `bzr` network modes |
-| **`renderer:`, `renderer=`** | `:`, `=` | 1 | String | Token match | Ogre Subsystem Selection | Controlled by OpenShim backend selection (`dx9`, `dx11`, `gl`) |
-| **`platform:`, `platform=`** | `:`, `=` | 1 | String | Token match | OS target override | Matches `win`, `osx`, `ios` |
-| **`resave`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_009183b4 = 1` | Resave map/mission file |
-| **`asciisave`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_008eaab4 = 0` | Force ASCII save format |
-| **`binarysave`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_008eaab4 = 1` | Force binary save format |
-| **🔥 `shellmap`** | `:`, `,` | **2** | **Comma `,`** | **`:%d,%d`** | `DAT_009183d4 = 1`<br>`_DAT_009183c4 = (H<<16) \| W` | **BROKEN IN REDUX.** Default W=108 (0x6c), H=89 (0x59). Uses `sscanf(token+9, ":%d,%d", &w, &h)`. |
-| **`largemap`** | `:` | 1 | N/A | `:%d` | `DAT_009183d4 = 2`<br>`_DAT_009183c4 = val` (default 8) | Sets largemap mode and dimension |
-| **`nobodyhome`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_0091836c = 1` | Spawn no player vehicle |
-| **`nointro`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_008eaab8 = 0` | Skip opening intro movies |
-| **`exitafterload`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_009183e8 = 1` | Benchmark / test auto-exit after load |
-| **`saveafterload`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_009183bc = 1` | Save mission immediately after loading |
-| **`edit`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_009454b8 = 1` | Launch built-in map editor |
-| **`startedit`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_009183f4 = 1`<br>`DAT_009454b8 = 1` | Auto-start map editor |
-| **`console`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_009183cc = 1` | Enable developer console |
-| **`develop`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_009183c8 = 1` | Enable developer mode features |
-| **`showunloc`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_00946724 = 1` | Show localized string keys |
-| **`connect_lobby`** | `=` | 1 | String | URL / ID | `DAT_009183ec = 1` | Triggers lobby join via `FUN_00765a20` or `FUN_00765ae0` |
-| **`connect-galaxy-lobby`**| `=` | 1 | String | GOG Lobby ID | `DAT_009183ec = 1` | Triggers GOG Galaxy lobby join |
-| **`netpktlog`** | `-`, `/`, `+` | 0 | N/A | Flag | Network Packet Log | Enable packet logging |
-| **`nonetpktlog`** | `-`, `/`, `+` | 0 | N/A | Flag | Network Packet Log | Disable packet logging |
-| **`nobzrnetlog`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_008eda28 = 0` | Disable BZRNet logging |
-| **`netlog`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_009180d8 = 1` | Enable general network logging |
-| **`netlog=`** | `=` | 1 | String/Int | `=atoi()` | `DAT_009180d8 = val` | Set netlog verbosity level |
-| **`nonetlog`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_009180d8 = 0` | Disable netlog |
-| **`nohgtsmoothing`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_009454cc = 1` | Disable heightfield smoothing |
-| **`dohgtsmoothing`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_009454cc = 0` | Enable heightfield smoothing |
-| **`enablerenderselection`**|`-`, `/`, `+` | 0 | N/A | Flag | `DAT_008e7068 = 0` | Renderer selection toggle |
-| **`disablerenderselection`**|`-`, `/`, `+`| 0 | N/A | Flag | `DAT_008e7068 = 0` | Renderer selection toggle |
-| **`disablemods`** | `-`, `/`, `+` | 0 | N/A | Control Case | `DAT_00915568 = 1` | Disable Steam Workshop / addon mods |
-| **`iprelay`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_00946708 = 1` | Force IP relay networking |
-| **`ipdirect`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_00946708 = 0` | Force direct IP networking |
-| **`bzrserver=`** | `=` | 1 | String | Copy | Server IP Buffer | Target server IP for direct connect |
-| **`bzrnetport=`** | `=` | 1 | String/Int | `=atoi()` | `DAT_00945704 = port` | Override network port |
-| **`datadir=`** | `=` | 1 | String | Path | Data Dir Override | Custom data directory |
-| **`zixlogindex`** | `-`, `/`, `+` | 0 | N/A | Flag | `DAT_009467bc = 1` | Enable index logging |
-
----
-
-## Phase 2 — Tracing Tokenization Defect
-
-### Stock Redux Execution Flow (`FUN_007d5120`)
-
-```
-GetCommandLineA()
-     │
-     ▼
-[Pristine Buffer: "battlezone98redux.exe -shellmap:216,178 -disablemods"]
-     │
-     ▼
-strtok(buf, ", \t\r\n")  <-- DESTRUCTIVE MUTATION HERE!
-     │
-     ├─► Token 1: "-shellmap:216"  (Buffer modified: '-shellmap:216\0178\0-disablemods\0')
-     │     │
-     │     ├─► Matches _strnicmp(token + 1, "shellmap", 8) == 0
-     │     ├─► sscanf("-shellmap:216" + 9, ":%d,%d", &w, &h)
-     │     │     └─► Reads w = 216, returns 1 (comma & second number truncated!)
-     │     ├─► Stock fallback code: if (sscanf_ret == 1) { h = w; }  => h = 216!
-     │     └─► State set: _DAT_009183c4 = (216 << 16) | 216  (EXPECTED: 178 << 16 | 216)
-     │
-     ├─► Token 2: "178"
-     │     │
-     │     ├─► Prefix check: starts with '/', '-', '+'? NO ('1').
-     │     └─► Falls through to positional map/savefile loader branch:
-     │           strncpy(&DAT_00945708, "178", 0x1000)
-     │           Checks for ".sav" extension -> FAILS
-     │           Calls FUN_00434170(5) -> CRASH / FAILED MISSION LOAD!
-     │
-     └─► Token 3: "-disablemods"
-           └─► Processed (if process survived Token 2 error state)
+```text
+FUN_007d5120
+    -> strtok(param_1, &DAT_008f068c)
+    -> shellmap handler matches "shellmap"
+    -> sscanf(local_8 + 9, ":%d,%d", &width, &height)
 ```
 
-### Key Differences: 1.5 vs Redux 2.2.301
+The important contradiction is structural: the tokenizer delimiter set contains a comma, while the `shellmap` handler expects that same comma to survive inside the token for `sscanf`.
 
-In **Battlezone 1.5**:
-- Delimiters were `" \t\r\n"`.
-- `strtok` returned `"-shellmap:216,178"` as a single token.
-- `sscanf("-shellmap:216,178" + 9, ":%d,%d", &w, &h)` returned `2`, setting `w = 216` and `h = 178`.
+Therefore a command such as:
 
-In **Redux 2.2.301**:
-- Delimiters were expanded to `", \t\r\n"`.
-- `strtok` splits `"-shellmap:216,178"` into `"-shellmap:216"` and `"178"`.
-- This causes both **incorrect state initialization** (`height` overwritten with `width`) and **spurious secondary token parsing errors**.
+```text
+-shellmap:216,178
+```
+
+cannot reach the `shellmap` `sscanf` intact if the comma is consumed by `strtok` first.
+
+### Evidence correction from the original report
+
+The first revision stated that Redux uses the exact delimiter string:
+
+```text
+", \t\r\n"
+```
+
+The repo-tracked portable corpus does **not** establish that complete literal. The binary-string dump contains a printable sequence at RVA `0x4F068A` corresponding to:
+
+```text
+#< ,
+```
+
+and `DAT_008f068c` points two bytes into that sequence, establishing at least the printable delimiter prefix:
+
+```text
+" ,"
+```
+
+That is enough to prove that **space and comma are delimiters**. The portable ASCII-string artifact cannot prove whether additional non-printable delimiter bytes such as tab/CR/LF follow the comma, because those characters are not represented reliably by the printable string extraction.
+
+Accordingly this report now distinguishes:
+
+- **proven:** comma is in Redux's tokenizer delimiter set;
+- **not fully proven from the portable repo corpus:** the complete delimiter literal beyond its printable prefix.
+
+This correction does **not** weaken the root-cause finding.
 
 ---
 
-## Phase 3 — Runtime Validation & Case Analysis Matrix
+## 1. Redux Parser Evidence
 
-| Case | Command Line Input | Stock Redux Behavior | Expected Correct Behavior | Status |
-| :--- | :--- | :--- | :--- | :---: |
-| **1. Valid 2-value syntax** | `-shellmap:216,178` | Splits into `"-shellmap:216"` and `"178"`. Width=216, Height=216. "178" triggers load failure. | Width=216, Height=178. Clean execution. | **FAILED IN STOCK** |
-| **2. Reversed separator** | `-shellmap=216,178` | Splits into `"-shellmap=216"` and `"178"`. `sscanf` expects `:` so fails or sets W=216, H=216. | Width=216, Height=178. | **FAILED IN STOCK** |
-| **3. Whitespace variants** | `-shellmap: 216, 178` | Splits into `"-shellmap:"`, `"216"`, `"178"`. `sscanf` fails completely. | Handled gracefully or sanitized. | **FAILED IN STOCK** |
-| **4. Quoted values** | `-shellmap:"216,178"` | `strtok` ignores quotes and splits on comma inside quotes. | Preserves quotes and parses 216, 178. | **FAILED IN STOCK** |
-| **5. Multiple CLI options** | `-shellmap:216,178 -disablemods` | `strtok` breaks `shellmap`, sets `DAT_00915568 = 1` for `disablemods` if process survives. | Both `shellmap` (216,178) and `disablemods` apply. | **FAILED IN STOCK** |
-| **6. Duplicate options** | `-shellmap:100,100 -shellmap:216,178` | Stock last-wins logic executes twice on truncated tokens. Ends with W=216, H=216. | Last option wins with W=216, H=178. | **FAILED IN STOCK** |
-| **7. Missing 2nd param** | `-shellmap:216` | Token is `"-shellmap:216"`. `sscanf` returns 1. W=216, H=216. | W=216, H=216 (Stock fallback intentional for 1-param form). | **PASS** |
-| **8. Control: Single-param** | `-largemap:16` | Token is `"-largemap:16"`. No comma. `sscanf` reads 16 correctly. | `DAT_009183d4 = 2`, `_DAT_009183c4 = 16`. | **PASS** |
-| **9. Control: Flag** | `-disablemods` | Token is `"-disablemods"`. `DAT_00915568 = 1`. | `DAT_00915568 = 1`. | **PASS** |
+### 1.1 Tokenization
+
+Repo-tracked decompile:
+
+```c
+undefined4 FUN_007d5120(char *param_1)
+{
+    ...
+    local_8 = strtok(param_1, &DAT_008f068c);
+    while (local_8 != (char *)0x0) {
+        ...
+        local_8 = strtok((char *)0x0, &DAT_008f068c);
+    }
+}
+```
+
+`strtok` destructively replaces delimiters with NULs in the mutable input buffer.
+
+The printable binary evidence around `DAT_008f068c` establishes comma as one of those delimiters.
+
+### 1.2 `shellmap` consumer
+
+The same Redux decompile contains:
+
+```c
+iVar2 = _strnicmp(local_8 + 1, "shellmap", 8);
+if (iVar2 == 0) {
+    local_50 = 0x6c; // width default = 108
+    local_54 = 0x59; // height default = 89
+    iVar2 = sscanf(local_8 + 9, ":%d,%d", &local_50, &local_54);
+    if (iVar2 == 1) {
+        local_54 = local_50;
+    }
+    DAT_009183d4 = 1;
+    _DAT_009183c4 = local_54 << 0x10 | local_50;
+}
+```
+
+The consumer explicitly requires a comma between two integers. Because the tokenizer treats comma as a delimiter, the second value cannot remain in the same token.
+
+### 1.3 Direct defect model
+
+For:
+
+```text
+-shellmap:216,178
+```
+
+the structurally expected Redux tokenization is:
+
+```text
+-shellmap:216
+178
+```
+
+The first token causes `sscanf(..., ":%d,%d", ...)` to return `1`; stock fallback then sets:
+
+```text
+width  = 216
+height = 216
+```
+
+The second token no longer has an option prefix and enters the parser's non-option/positional path.
+
+This is sufficient to classify the `shellmap` two-value syntax as **broken in stock Redux by parser construction**.
 
 ---
 
-## OpenShim Preferred Fix Architecture
+## 2. 1.5 Comparison — Evidence Grade
 
-### Implementation Strategy
-1. **Zero Replacement Risk:** Do not replace Redux's global command-line parser.
-2. **Pristine Snapshot Read:** OpenShim already captures a pristine immutable command-line snapshot in `DllMain` via `BZROpenShim::RenderProfiles::CaptureCommandLineSnapshot()`.
-3. **Targeted State Fixup:** Post-process the pristine snapshot to locate multi-parameter arguments like `shellmap`.
-4. **State Patching:** Overwrite the target stock globals:
-   - `DAT_009183d4` (RVA `0x5183d4` / `0x009183d4`): set to `1` (shellmap mode).
-   - `_DAT_009183c4` (RVA `0x5183c4` / `0x009183c4`): set to `(height << 16) | width`.
-5. **Preserve Stock Behavior:** All single-value options, `-disablemods`, renderer-selection (`/renderer:dx11`), option ordering, Steam/GOG startup, and quoted paths remain untouched.
+The original investigation reports that Battlezone 1.5 tokenizes on whitespace without comma and therefore preserves:
 
-### Recommended OpenShim Seam Location
-Add `BZROpenShim::RepairMultiParameterCommandLineArguments()` in `src/patches/bzr_hooks.cpp` (or dedicated CLI patch unit) and invoke it immediately after stock option initialization or via resolved address post-patching.
+```text
+-shellmap:216,178
+```
+
+as one token for the same `:%d,%d` conversion pattern.
+
+That comparison came from the local 1.5 executable/PDB research environment. The current portable OpenShim repository does not retain an equivalent complete 1.5 command-line decompile from which this audit could independently reconstruct the tokenizer literal.
+
+Therefore the correct wording is:
+
+- **Redux defect itself:** confirmed from repo-tracked shipped Redux evidence.
+- **Specific 1.5 tokenizer contrast:** previously reported static comparison; retain as high-confidence historical evidence, but do not describe it as independently repo-reproduced in this audit.
+
+A future archival improvement would be to commit the minimal 1.5 disassembly/decompile excerpt or byte evidence for the tokenizer and `shellmap` handler so the parity comparison is portable.
 
 ---
 
-## Offline Test Suite (`tests/cli_parser_tests.cpp`)
+## 3. Recovered Redux Option Table
 
-To validate stock tokenization behavior vs pristine snapshot parsing without requiring Windows DLL execution or external dependencies, an offline C++ test harness is provided in `tests/cli_parser_tests.cpp`.
+The following options are visible in the inspected `FUN_007d5120` decompile. This is a decompiler-recovered table, not a public supported-CLI contract.
 
-### Verification Steps
-Run the offline test suite using `g++`:
-```bash
-g++ -std=c++20 tests/cli_parser_tests.cpp -Iinclude -o /tmp/cli_parser_tests && /tmp/cli_parser_tests
+| Option | Syntax / separator | Relevant behavior |
+| --- | --- | --- |
+| `multi` / `nomulti` | flag | multiplayer override |
+| `win` / `fullscreen` | flag | display mode |
+| `rawinput` / `norawinput` | flag | raw input toggle |
+| `noshell` | flag | bypass shell |
+| `flagfile:` | `:` | flagfile string |
+| `net:` / `net=` | `:` or `=` | network provider (`steam`, `gog`, `cp`, `bzr`) |
+| `renderer:` / `renderer=` | `:` or `=` | renderer selection |
+| `platform:` / `platform=` | `:` or `=` | platform override |
+| `resave` | flag | resave mode |
+| `asciisave` / `binarysave` | flag | save format |
+| `shellmap` | `:W,H` | **two-value comma syntax broken by tokenizer** |
+| `largemap` | `:N` | one-value map dimension |
+| `nobodyhome` | flag | no player vehicle |
+| `nointro` | flag | skip intro |
+| `exitafterload` | flag | exit after load |
+| `saveafterload` | flag | save after load |
+| `edit` / `startedit` | flag | editor controls |
+| `console` / `develop` | flag | developer controls |
+| `showunloc` | flag | localization key display |
+| `connect_lobby` | `=` payload | lobby connection |
+| `connect-galaxy-lobby` | `=` payload | GOG lobby connection |
+| `nickname=` | `=` | nickname override |
+| `iorecord` / `noiorecord` | flag | I/O recording |
+| `netpktlog` / `nonetpktlog` | flag | packet logging |
+| `bzrnetlog`, `bzrnetlog=`, `nobzrnetlog` | flag/value | BZRNet logging |
+| `netlog`, `netlog=`, `nonetlog` | flag/value | network logging |
+| `nohgtsmoothing` / `dohgtsmoothing` | flag | heightfield smoothing toggle |
+| `enablerenderselection` / `disablerenderselection` | flag | renderer-selection control |
+| `disablemods` | flag | disable mods/workshop content |
+| `iprelay` / `ipdirect` | flag | network path selection |
+| `bzrserver=` | `=` | BZR server target |
+| `bzrnetport=` | `=` | network port |
+| `datadir=` | `=` | data directory |
+| `zixlogindex` | flag | index logging |
+
+The `nohgtsmoothing` / `dohgtsmoothing` options are relevant to the separate HGT compatibility investigation, but this report makes no claim about whether those options are exposed, documented, or sufficient for every terrain regression.
+
+---
+
+## 4. Validation Matrix — Static/Model vs Live
+
+The original report labelled this section "Runtime Validation" even though the committed test is an offline parser model. That wording is corrected here.
+
+| Case | Input | Stock/parser-model expectation | Legacy/parity expectation | Evidence status |
+| --- | --- | --- | --- | --- |
+| canonical two-value syntax | `-shellmap:216,178` | split at comma; W=216, H=216; orphan `178` | W=216, H=178 | **Static defect confirmed; live run desirable** |
+| one-value fallback | `-shellmap:216` | W=216, H=216 | same fallback | **Supported by decompile/model** |
+| control single-value option | `-largemap:16` | parses 16 | parses 16 | **Supported by decompile/model** |
+| control flag | `-disablemods` | flag processed | flag processed | **Supported by decompile/model** |
+| equals separator | `-shellmap=216,178` | stock handler expects `:` | not established as 1.5 syntax | **Do not call parity requirement** |
+| quoted comma payload | `-shellmap:"216,178"` | `strtok` is not quote-aware | not established as 1.5 syntax | **Optional tolerance only** |
+| spaces inside argument | `-shellmap: 216, 178` | tokenized into separate pieces | not established as 1.5 syntax | **Optional tolerance only** |
+| duplicate `shellmap` options | two occurrences | stock ordering behavior needs preservation | last-wins is plausible but should be verified | **Implementation test case, not parity proof** |
+
+### Key correction
+
+Only syntax proven to be part of the compatibility target should be described as **legacy parity**. Supporting `=` syntax, quotes, or extra whitespace may be reasonable OpenShim robustness, but those are extensions unless 1.5 evidence establishes them.
+
+---
+
+## 5. Offline Test Suite Status
+
+PR #69 adds:
+
+```text
+tests/cli_parser_tests.cpp
 ```
-Output:
+
+The test models:
+
+- Redux-style comma tokenization;
+- the canonical `-shellmap:216,178` failure;
+- a proposed pristine-command-line parser/repair;
+- several robustness cases.
+
+The test was reported as manually compiled with `g++` and passing.
+
+**Important:** at the time of this audit, `tests/cli_parser_tests.cpp` is **not registered in `tests/CMakeLists.txt`**. Therefore the green `Build Win32` workflow for this PR does **not** establish that this test compiled or ran under the repository's normal CMake/CTest path.
+
+Before implementation/merge, either:
+
+1. wire this test into `tests/CMakeLists.txt` and CTest; or
+2. explicitly keep it as an ad-hoc research harness and document that CI does not execute it.
+
+The preferred project practice is option 1.
+
+---
+
+## 6. OpenShim Repair Architecture
+
+The narrow repair strategy remains preferable to replacing Redux's whole parser.
+
+OpenShim already has an immutable/pristine command-line capture for renderer-profile handling. A compatibility repair can reuse that snapshot to recover only the affected multi-value argument.
+
+### Requirements
+
+1. Parse the pristine snapshot without allowing Redux's destructive `strtok` mutation to erase the comma.
+2. Restore only **proven legacy syntax** by default, starting with:
+   ```text
+   -shellmap:W,H
+   ```
+3. Preserve stock ordering semantics if multiple relevant options are present.
+4. Apply the correction only after the stock parser has initialized the affected state and before that state is consumed.
+5. Resolve/validate destination addresses rather than relying on unchecked fixed absolute addresses across storefronts/builds.
+6. Keep optional tolerant forms (`=`, quoting, whitespace normalization) separate from strict compatibility behavior.
+
+### Candidate state
+
+The current decompile shows:
+
+```text
+DAT_009183d4  = shellmap mode
+_DAT_009183c4 = (height << 16) | width
 ```
-Running CLI Parser Parity Tests...
-[PASS] TestStockParserDefect (Confirmed stock defect: -shellmap:216,178 -> W=216 H=216, orphaned token '178' detected)
-[PASS] TestPristineSnapshotRepair (All pristine snapshot repair test cases passed)
-All CLI parser parity tests completed successfully!
-```
+
+These are useful targets for a narrow post-parse fixup, but implementation must verify their resolved addresses and timing on the supported GOG/Steam executables.
+
+---
+
+## 7. Required Live Qualification
+
+Before calling the production repair proven, run at minimum:
+
+1. stock Redux with `-shellmap:216,178` and capture the resulting parser/state/load behavior;
+2. OpenShim repair enabled with the same command and verify W=216/H=178;
+3. `-shellmap:216` control to preserve one-value fallback;
+4. `-largemap:16` control;
+5. normal startup with no affected option;
+6. `-disablemods` plus canonical `shellmap` to ensure unrelated option processing is preserved;
+7. Steam and GOG if the target globals/resolution seam differs.
+
+If available, run the canonical command on 1.5 as a direct parity control.
+
+---
+
+## 8. Final Evidence Classification
+
+| Claim | Classification |
+| --- | --- |
+| Redux `FUN_007d5120` tokenizes with `strtok(..., &DAT_008f068c)` | **Directly verified** |
+| Redux tokenizer delimiter set contains comma | **Directly supported by repo portable corpus** |
+| Complete delimiter literal is exactly `", \t\r\n"` | **Not proven from portable corpus; printable prefix establishes `" ,"`** |
+| Redux `shellmap` handler expects `:%d,%d` | **Directly verified** |
+| Comma tokenization breaks canonical two-value `shellmap` syntax | **Static root cause confirmed** |
+| 1.5 preserves comma in the same syntax | **Previously reported 1.5 static comparison; portable archival evidence desirable** |
+| New offline test is part of normal CTest/CI | **False at current PR head** |
+| `=` / quoted / whitespace-tolerant forms are required 1.5 parity | **Not established** |
+| Narrow pristine-snapshot fixup is preferable to replacing global parser | **Recommended architecture; implementation not yet qualified** |
