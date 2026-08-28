@@ -61,6 +61,14 @@ function Get-OpenShimIniSettingIds {
             continue
         }
 
+        # Preset revision marker is metadata, not a first-class runtime setting.
+        # It is carried as a machine-readable comment (e.g. "; OpenShimPresetRevision = 2")
+        # near the top of the player preset so migration tooling can identify the
+        # revision without teaching the runtime to parse it as a configurable key.
+        if ($key -ieq 'OpenShimPresetRevision') {
+            continue
+        }
+
         if (-not $section) {
             continue
         }
@@ -112,3 +120,12 @@ if ($LASTEXITCODE -ne 0) { throw "test build failed" }
 & $exe
 if ($LASTEXITCODE -ne 0) { throw "ini writer tests FAILED" }
 Write-Host "ini writer tests passed" -ForegroundColor Green
+
+# --- Preset migration tests (covers revision/migration framework) ---
+$exe2 = Join-Path $out "openshim_preset_migration_tests.exe"
+cmd /c "`"$vcvars`" >nul && cl /nologo /std:c++17 /EHsc /W4 /WX /I `"$repo\include`" `"$repo\tests\openshim_preset_migration_tests.cpp`" `"$repo\src\patches\openshim_ini.cpp`" `"$repo\src\patches\openshim_preset_migration.cpp`" bcrypt.lib /Fe:`"$exe2`" /Fo:`"$out\\`""
+if ($LASTEXITCODE -ne 0) { throw "preset migration test build failed" }
+
+& $exe2
+if ($LASTEXITCODE -ne 0) { throw "preset migration tests FAILED" }
+Write-Host "preset migration tests passed" -ForegroundColor Green
