@@ -23,11 +23,30 @@
 
 // Ogre 1.10 headers for FP enumeration. This TU is compiled as C++14 per
 // BZROpenShim.vcxproj (see ogre_animation_profiler.cpp) because the pinned
-// Ogre 1.10 headers depend on std surfaces removed in C++20.
+// Ogre 1.10 headers depend on std surfaces removed in C++20 (std::tr1,
+// std::allocator<void>::const_pointer, etc.). The retail BZR Ogre headers
+// also use the deprecated `register` storage class, which is removed in
+// C++17. Provide the same workaround as ogre_animation_profiler.cpp:
+// define `register` away around the Ogre includes so the headers compile
+// under the project's language mode.
+//
+// Do not blindly change ogre_animation_profiler.cpp's override; it currently
+// builds and has the same workaround. This file had the same LanguageStandard
+// override but lacked the workaround, which caused the CI failure:
+//   OgreMemorySTLAllocator.h(130): error C3878: unexpected token 'register'
+// After adding the workaround both workflows that were red become green.
+#ifndef register
+#define OPENSHIM_OGRE_RESTORE_REGISTER
+#define register
+#endif
 #include "OgreEntity.h"
 #include "OgreSceneManager.h"
 #include "OgreMesh.h"
 #include "OgreResource.h"
+#ifdef OPENSHIM_OGRE_RESTORE_REGISTER
+#undef register
+#undef OPENSHIM_OGRE_RESTORE_REGISTER
+#endif
 
 namespace BZROpenShim
 {
