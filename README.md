@@ -149,35 +149,29 @@ When EXU and OpenShim expose the same feature, OpenShim can provide the native i
 
 ## Configuration
 
-Most user-facing options are configured through:
+Normal player defaults are shipped in:
 
 ```text
 openshim.ini
 ```
 
-Copy:
+That file contains every first-class OpenShim setting with player-oriented values: proven fixes and normal quality-of-life features enabled, OpenShim Enhanced rendering selected, autosave enabled, and diagnostics / reverse-engineering / terrain-development features disabled. Users can edit it directly or use the native OpenShim Settings page where supported.
+
+The exhaustive technical reference remains:
 
 ```text
 openshim.ini.example
 ```
 
-to:
+Use the example when you need accepted values, aliases, ranges, restart/live-apply behavior, implementation notes, or legacy `OPENSHIM_*` / `BZR_*` compatibility variables. It is a reference, not the recommended player preset.
 
-```text
-openshim.ini
-```
-
-beside the game executable.
-
-Networking-specific settings are available through:
+Networking-specific low-level settings are available through:
 
 ```text
 net.ini
 ```
 
-Environment variables are also available for development, diagnostics, compatibility testing, and experimental features.
-
-See the example configuration files and `Docs/` / `reverse_engineering/` documentation for detailed options and validation notes.
+See the configuration files and `Docs/` / `reverse_engineering/` documentation for detailed options and validation notes.
 
 ## Safety & Compatibility
 
@@ -227,6 +221,12 @@ Copy the compiled:
 winmm.dll
 ```
 
+and the shipped player configuration:
+
+```text
+openshim.ini
+```
+
 into the Battlezone 98 Redux installation directory beside:
 
 ```text
@@ -239,7 +239,7 @@ or:
 battlezone98redux.exe
 ```
 
-Launch the game normally.
+Launch the game normally. `openshim.ini.example` may be kept alongside it as an offline reference, but OpenShim reads `openshim.ini` for normal configuration.
 
 OpenShim writes runtime information and diagnostics to its log files in the game directory.
 
