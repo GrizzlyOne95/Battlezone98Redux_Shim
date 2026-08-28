@@ -258,4 +258,13 @@ namespace BZROpenShim
     extern "C" BZRO_API int32_t __cdecl OpenShimCaptureDeveloperSnapshot(
         OpenShimDeveloperSnapshot* outSnapshot);
     extern "C" BZRO_API int32_t __cdecl OpenShimLogDeveloperSnapshot();
+
+    /**
+     * Resolves the currently qualified local first-person pilot Ogre Entity.
+     * The pointer is a one-operation snapshot and must not be cached. The
+     * generation changes whenever the tracked entity is released or replaced.
+     * Returns 1 when a live target is available, otherwise 0 and a null entity.
+     */
+    extern "C" BZRO_API int32_t __cdecl OpenShimResolveLocalFirstPersonEntity(
+        void** outEntity, uint64_t* outGeneration);
 }
