@@ -207,6 +207,41 @@ namespace BZROpenShim::UiPerfHooks
             return false;
         }
 
+        using FnOgreGroupOp = void(__thiscall*)(void*, const std::string&);
+        FnOgreGroupOp g_RealOgreClear = nullptr;
+        FnOgreGroupOp g_RealOgreInitialise = nullptr;
+        void** g_OgreClearIat = nullptr;
+        void** g_OgreInitialiseIat = nullptr;
+
+        void __fastcall Hooked_OgreClear(void* self, void* /*edx*/,
+                                         const std::string& group)
+        {
+            OnOgreClearResourceGroup_Begin(group.c_str());
+            if (g_RealOgreClear) g_RealOgreClear(self, group);
+            OnOgreClearResourceGroup_End(group.c_str());
+        }
+
+        void __fastcall Hooked_OgreInitialise(void* self, void* /*edx*/,
+                                              const std::string& group)
+        {
+            OnOgreInitialiseResourceGroup_Begin(group.c_str());
+            if (g_RealOgreInitialise) g_RealOgreInitialise(self, group);
+            OnOgreInitialiseResourceGroup_End(group.c_str());
+        }
+
+        static void RestoreImportSlot(void** slot, void* hook, void* original) noexcept
+        {
+            if (!slot || !hook || !original) return;
+            DWORD oldProtect = 0;
+            if (!VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &oldProtect))
+                return;
+            InterlockedCompareExchangePointer(
+                reinterpret_cast<PVOID volatile*>(slot), original, hook);
+            DWORD ignored = 0;
+            VirtualProtect(slot, sizeof(void*), oldProtect, &ignored);
+            FlushInstructionCache(GetCurrentProcess(), slot, sizeof(void*));
+        }
+
         static bool BuildTriggerFilePath(char (&path)[MAX_PATH])
         {
             char gamePath[MAX_PATH] = {};
@@ -1153,6 +1188,21 @@ namespace BZROpenShim::UiPerfHooks
         // performs all file consumption, overlay traversal, and OnClick work.
         StartTriggerDelivery();
 
+        const bool clearHooked = PatchImportIAT(
+            GetModuleHandleW(nullptr),
+            "?clearResourceGroup@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z",
+            reinterpret_cast<void*>(&Hooked_OgreClear),
+            reinterpret_cast<void**>(&g_RealOgreClear), &g_OgreClearIat);
+        const bool initialiseHooked = PatchImportIAT(
+            GetModuleHandleW(nullptr),
+            "?initialiseResourceGroup@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z",
+            reinterpret_cast<void*>(&Hooked_OgreInitialise),
+            reinterpret_cast<void**>(&g_RealOgreInitialise), &g_OgreInitialiseIat);
+        LogShimA(LogLevel::Info, "uiperf-hooks",
+            "Ogre ResourceGroup IAT timing clear=%s initialise=%s",
+            clearHooked ? "active" : "missing",
+            initialiseHooked ? "active" : "missing");
+
         if (g_AutoMatrixEnabled.load() && !g_AutoMatrixRunning.exchange(true))
         {
             uintptr_t th = _beginthreadex(nullptr, 0, &AutoMatrixThread, nullptr, 0, nullptr);
@@ -1185,6 +1235,15 @@ namespace BZROpenShim::UiPerfHooks
     void Shutdown() noexcept
     {
         StopTriggerDelivery();
+        RestoreImportSlot(g_OgreClearIat, reinterpret_cast<void*>(&Hooked_OgreClear),
+                          reinterpret_cast<void*>(g_RealOgreClear));
+        RestoreImportSlot(g_OgreInitialiseIat,
+                          reinterpret_cast<void*>(&Hooked_OgreInitialise),
+                          reinterpret_cast<void*>(g_RealOgreInitialise));
+        g_OgreClearIat = nullptr;
+        g_OgreInitialiseIat = nullptr;
+        g_RealOgreClear = nullptr;
+        g_RealOgreInitialise = nullptr;
     }
 
 } // namespace BZROpenShim::UiPerfHooks
