@@ -3,307 +3,409 @@
 **Date:** 2026-08-27
 **Repository:** `GrizzlyOne95/Battlezone98Redux_Shim`
 **Branch:** `research/mp-ordnance-duplication-popgun`
-**Status:** Complete Analysis & Comparative Investigation
+**Status:** Popper authority pattern verified / Splinter high-confidence candidate / Day Wrecker root cause reopened
 
 ---
 
 ## Executive Summary
 
-This research document investigates the multiplayer ordnance duplication bug in Battlezone 98 Redux, focusing on the historical **Popgun (Popper)** multiplayer duplication fix (introduced in Redux 2.0.131) as the primary reverse-engineering lead to solve the open issues:
-1. **Armory / Day Wrecker duplicate/source-site detonation bug**
-2. **Splinter payload duplication bug (`SprayBuilding` / `SprayBomb`)**
+This document investigates multiplayer secondary-ordnance duplication using the final Redux Popper/Popgun authority pattern as a structural lead.
 
-By analyzing current executables (GOG 2.2.301 / `battlezone98redux.exe-6777ca`), advisory PDBs, and historical 2016 launch executables, we have decoded the native network authority/locality rules governing secondary object and payload creation.
+The original revision overgraded several conclusions as **PROVEN**. An independent repo audit on 2026-08-27 found two material problems:
 
-### Primary Findings
-* **Popgun Authority Gate (Proven):** In `Popper::Control` (VA `0x005A6460`), secondary popper-bomb creation is gated by `IsNetGame()` and team locality (`team == LocalTeam()`). The host/owner creates the secondary projectile and broadcasts it via `_Ordnance_SendNew` (`0x00586FF0`), while setting the local popper's self-destruct flag (`0x200`).
-* **Splinter Duplication Root Cause (Proven):** In `SprayBuilding::Simulate` (VA `0x005DA6E0`), deployed splinter spraybuildings execute an un-gated payload firing loop on **all** clients and host simultaneously. Both Host and Client locally construct payload ordnance via `_Ordnance_SendNew` while Host simultaneously transmits packet messages to Client, resulting in double/duplicate payload projectiles on client machines.
-* **Day Wrecker Source-Site Detonation Root Cause (Proven):** Armory-launched Day Wrecker projectiles and source-site detonation triggers rely on `ArmoryProcess` state transitions and `DayWrecker::Explode` / `DayWrecker::Simulate`. When Launched by an Armory, if the Armory object is remote/client-simulated, secondary payload/explosion objects are spawned locally at the Armory launch origin on the client while simultaneously receiving host-replicated detonation objects, causing origin-site duplication and premature detonation.
+1. the report transferred the advisory PDB name `_Ordnance_SendNew` directly onto current-binary `FUN_00586ff0` without sufficient mapping evidence; and
+2. it identified `FUN_004b0420` as `DayWrecker::Simulate` / explosion logic, but the retained decompile shows that function is a **DayWrecker constructor/initializer**, not simulation or explosion code.
 
----
+The corrected evidence grades are:
 
-## Phase 1 — Binary & Version Provenance
+- **Popper authority pattern — VERIFIED IN FINAL REDUX:** `FUN_005a6460` contains `!IsNetGame() || objectTeam == LocalTeam()` immediately around its secondary creation path.
+- **Historical claim that this exact gate was introduced in 2.0.131 — NOT YET PROVEN:** the repository does not contain a 2.0.131 executable for a direct pre/post binary comparison.
+- **Splinter missing caller-side gate — VERIFIED STATIC FACT:** `FUN_005da6e0` calls `FUN_00586ff0` from its payload loop with no adjacent Popper-style net/team gate.
+- **Splinter 2x multiplayer duplication mechanism — HIGH-CONFIDENCE HYPOTHESIS, NOT YET RUNTIME PROVEN:** peer execution, authority, replication, and duplicate object identity must be observed on two PCs.
+- **Day Wrecker source-site mechanism — REOPENED / UNPROVEN:** the function identity used as key proof was wrong. The true simulate/collision/explode and Armory launch-create paths must be mapped before proposing a patch.
 
-| Build / Artifact Name | Version / Date | File Size | Hash (MD5 / SHA256) | Provenance / Repository Path |
-| :--- | :--- | :--- | :--- | :--- |
-| `20160418_launch.exe` | Redux 1.0 Launch (2016-04-18) | 4,341,696 bytes | MD5: `f4b36780ecc9816b743a9448322f39fd`<br>SHA256: `453f5e93ed370b50aeae9798eb0bbf32beddd59d74007f0209ace84f9411e130` | `reverse_engineering/prerelease_2016/exes/20160418_launch.exe` |
-| `20160419a_link1451.exe` | Redux 1.0 Patch (2016-04-19a) | 4,341,696 bytes | MD5: `bd5c1a61341a31b9156fb7f213702371`<br>SHA256: `71e6fe0b4dde592c937ea746fa14a74088b410ecbfb9fab2c49a770f4f2ad101` | `reverse_engineering/prerelease_2016/exes/20160419a_link1451.exe` |
-| `20160419b_link0809.exe` | Redux 1.0 Patch (2016-04-19b) | 4,351,424 bytes | MD5: `71e42c6e7e60899bedcc2229c6c3a27e`<br>SHA256: `b9a9ce049e3b7e978f719dd0657db4c65cd2b6c52171b74b20a46cbea124cc5a` | `reverse_engineering/prerelease_2016/exes/20160419b_link0809.exe` |
-| **Redux 2.0.131** | Redux 2.0.131 (Historical Fix) | N/A | *Not present in repository binaries* | *Missing binary artifact — documented below* |
-| `battlezone98redux.exe` | Redux 2.2.301 / GOG Final | Mapped Image | Ghidra Corpus: `battlezone98redux.exe-6777ca`<br>Advisory PDB: `battlezone98redux.pdb` | `reverse_engineering/repo_corpora/bzr_gog_best_effort/` |
-
-### Missing Binary Artifact Documentation
-Redux 2.0.131 binary executables are not present in the local Git repository corpora. Analysis of 2.0.131 was performed by analyzing the structural difference between early 2016 launch executables, the current GOG 2.2.301 binary (`battlezone98redux.exe-6777ca`), advisory PDB symbol maps, and clean PDB decompilation corpora.
+No production patch should be implemented from this report until the two-PC authority trace closes the relevant decision gates.
 
 ---
 
-## Phase 2 — Popgun (Popper) Implementation & Historical Fix Analysis
+## 1. Binary and Symbol Provenance
 
-### 1. Popgun Class Hierarchy & Function Signatures
+### Repo-tracked artifacts
 
-```
-GameObject
- └── Ordnance
-      └── Popper (ClassLabel = "popper")
-           └── Fired by PopperGun (ClassLabel = "poppergun")
-```
+| Artifact | Role |
+| --- | --- |
+| `reverse_engineering/repo_corpora/bzr_gog_best_effort/` | portable GOG 2.2.301 best-effort decompile corpus |
+| `.../ghidrecomp/results/bins/battlezone98redux.exe-6777ca/decomps/` | current-binary decomp functions |
+| `.../pdb_reference/public_functions.csv` | advisory PDB function export |
+| `reverse_engineering/prerelease_2016/exes/` | early Redux executables |
 
-#### Key Functions and Addresses (GOG 2.2.301 / `battlezone98redux.exe-6777ca`)
-* **`Popper::Control(float dt)`**
-  * Ghidra Decomp: `FUN_005a6460` @ VA `0x005A6460` (RVA `0x001A6460`)
-  * Role: Main AI/guidance update loop for active Popper mines/projectiles. Searches for targets, calculates intercept vectors, spawns secondary popgun payload, and self-destructs.
-* **`PopperClass::Build(OBJ76 *obj)`**
-  * Ghidra Decomp: `FUN_005a6b00` @ VA `0x005A6B00` (RVA `0x001A6B00`)
-  * Role: Factory constructor for `Popper` instance.
-* **`PopperGun::Simulate(float dt)`**
-  * Ghidra Decomp: `FUN_005a72e0` @ VA `0x005A72E0` (RVA `0x001A72E0`)
-  * Role: Weapon update logic for Popper weapon mounted on craft.
-* **`Ordnance_SendNew` / Secondary Spawn Entry**
-  * Ghidra Decomp: `FUN_00586ff0` @ VA `0x00586FF0` (RVA `0x00186FF0`)
-  * Role: Constructs new `Ordnance` instance and, if in multiplayer (`IsNetGame()`), packages and transmits a network packet (`_Ordnance_SendNew`) to all remote clients.
+### Missing evidence
+
+A Redux **2.0.131 executable is not present** in the tracked corpus. Therefore the documented 2.0.131 Popgun patch-note entry can be used as a historical clue, but the repository cannot presently prove that a specific conditional in final Redux was the exact code change made in that release.
+
+This distinction matters: final-state structure can be proven; exact historical diff attribution cannot.
 
 ---
 
-### 2. Control Flow & Authority Gate in `Popper::Control`
+## 2. Popper Final-State Authority Pattern — Directly Verified
 
-In `Popper::Control` (`0x005A6460`), when a Popper mine detects an enemy vehicle in radius:
+Current GOG corpus function:
 
-```
-[ Popper::Control(float dt) ]
-          │
-          ▼
-┌─────────────────────────────────────────┐
-│ Target Search & Distance Check          │
-│ Finds closest enemy target in range     │
-└─────────────────────────────────────────┘
-          │
-          ▼
-┌─────────────────────────────────────────┐
-│ Calculate Intercept Matrix & Trajectory │
-└─────────────────────────────────────────┘
-          │
-          ▼
-┌──────────────────────────────────────────────────────────────┐
-│ AUTHORITY & LOCALITY GATE                                    │
-│ iVar9 = IsNetGame();                                         │
-│ sVar1 = Popper.team;                                         │
-│ sVar3 = GetLocalPlayerTeam();                                │
-│                                                              │
-│ IF (!IsNetGame() || sVar1 == sVar3)                          │
-└──────────────────────────────────────────────────────────────┘
-          │                                  │
-      (TRUE: Authoritative Owner)        (FALSE: Remote Client)
-          │                                  │
-          ▼                                  ▼
-┌──────────────────────────────────┐  ┌──────────────────────────────┐
-│ 1. Spawn secondary Ordnance via  │  │ Skip local secondary spawn! │
-│    FUN_00586ff0 (Ordnance_SendNew│  │ Remote client waits for      │
-│ 2. Set payload params            │  │ host's network packet.       │
-│ 3. Mark Popper flags |= 0x200    │  └──────────────────────────────┘
-│    (flagged for removal)         │
-└──────────────────────────────────┘
+```text
+FUN_005a6460 @ VA 0x005A6460
 ```
 
-#### Code Snippet from Decompiled `Popper::Control` (`FUN_005a6460`):
+The relevant block is visible directly in the retained decompile:
+
 ```c
-iVar9 = IsNetGame(); // FUN_00572a70()
-if ((iVar9 == 0) || (sVar1 = *(short *)(local_d4 + 0x7c), sVar3 = GetLocalPlayerTeam(), sVar1 == sVar3)) {
-    // AUTHORITATIVE CREATION SITE
-    local_d8 = Ordnance_SendNew(local_90, *(undefined4 *)(local_d4 + 0xd8));
-    *(ushort *)(local_d8 + 0x68) = ... ; // Copy team/owner flags
-    *(undefined4 *)(local_d8 + 0x80) = 1;
-}
-// Mark original popper mine for cleanup
-*(uint *)(*(int *)(local_d4 + 0x14) + 0x14) = *(uint *)(*(int *)(local_d4 + 0x14) + 0x14) | 0x200;
-```
-
-#### Why the Historical Popgun Fix Worked:
-Before 2.0.131, `Popper::Control` lacked the `(iVar9 == 0 || sVar1 == sVar3)` authority check. As a result, when a Popper popped on a client machine, **both** the client and host executed `Ordnance_SendNew` locally. The host also sent an `_Ordnance_SendNew` network packet to the client, leading to **two** popper ordnance shells spawning in client space for every single mine detonation. Adding the host/locality gate ensured that **only** the authoritative simulator spawned the secondary projectile and broadcast it via network message.
-
----
-
-## Phase 3 — Comparison with Day Wrecker & Splinter
-
-### 1. Splinter (`SprayBomb` / `SprayBuilding`) Mechanics
-
-```
-GameObject
- └── Ordnance
-      └── SprayBomb (ClassLabel = "spraybomb") ──[Hit()]──> Spawns SprayBuilding
-                                                               │
-                                                               ▼
-                                                  SprayBuilding (ClassLabel = "spraybuilding")
-                                                  Runs payload firing loop in Simulate()
-```
-
-#### Key Functions and Addresses
-* **`SprayBomb::Hit(GameObject *target, VECTOR_3D &pos)`**
-  * Ghidra Decomp: `FUN_005db000` / `FUN_005dad90` @ VA `0x005DB000`
-  * Role: Upon impact with ground/target, `SprayBomb` replaces itself by creating a `SprayBuilding` stationary firing entity.
-* **`SprayBuilding::Simulate(float dt)`**
-  * Ghidra Decomp: `FUN_005da6e0` @ VA `0x005DA6E0` (RVA `0x001DA6E0`)
-  * Role: Main simulation loop of deployed Splinter structure. Rotates, counts down payload timer, and fires individual splinter payload ordnance shells.
-
-#### Control Flow in `SprayBuilding::Simulate` (`FUN_005da6e0`):
-```c
-void __thiscall SprayBuilding::Simulate(int *this, float dt) {
+iVar9 = FUN_00572a70();
+if ((iVar9 == 0) ||
+   (sVar1 = *(short *)(local_d4 + 0x7c),
+    sVar3 = FUN_00572d90(),
+    sVar1 == sVar3)) {
+    local_d8 = FUN_00586ff0(local_90, *(undefined4 *)(local_d4 + 0xd8));
     ...
-    this[0x90] = (int)((float)this[0x90] + dt);
-    do {
-        if ((float)this[0x90] < 0.0) return;
-        if (local_1dc == 0) { // No ammo remaining -> self destruct
-            *(uint *)(this[0x3d] + 0x14) |= 0x200; // Mark remove flag
-            (**(code **)(this[6] + 0x14))();       // Explode virtual
-            return;
-        }
-        ...
-        // UN-GATED PAYLOAD CREATION!
-        local_1d8 = Ordnance_SendNew(local_48, this[0x3d]); // FUN_00586ff0
+}
 
-        *(float *)(local_1d8 + 0x10) = (float)this[0x90] - dt;
-        this[0x90] = (int)((float)this[0x90] - *(float *)(this[0x3e] + 0x178));
-    } while (true);
+*(uint *)(*(int *)(local_d4 + 0x14) + 0x14) |= 0x200;
+```
+
+The project has previously identified:
+
+- `FUN_00572a70` as the net-game predicate;
+- `FUN_00572d90` as local-team retrieval;
+- object team at `+0x7C` for this subobject layout.
+
+### What this proves
+
+In the shipped final Redux Popper path, the call to `FUN_00586ff0` occurs only when:
+
+```text
+not multiplayer
+OR
+Popper team == local team
+```
+
+This is a concrete native precedent for **caller-side authority/locality gating of a secondary creation path**.
+
+### What this does not prove
+
+It does not, by itself, prove:
+
+- that pre-2.0.131 Popper lacked this exact condition;
+- that this exact condition was the 2.0.131 fix;
+- that `team == LocalTeam()` is the universal correct authority test for every class;
+- that all other secondary-ordnance producers should copy the condition verbatim.
+
+Given known Redux multiplayer locality behavior, authority must be established per object/class rather than generalized from one weapon.
+
+---
+
+## 3. `FUN_00586ff0` — Corrected Identity and Semantics
+
+The original report labelled:
+
+```text
+FUN_00586ff0 @ VA 0x00586FF0
+```
+
+as `_Ordnance_SendNew` and stated that it directly creates an ordnance object and, in multiplayer, packages/transmits the network packet.
+
+The retained decompile supports only part of that statement.
+
+### Directly visible behavior
+
+`FUN_00586ff0`:
+
+- allocates/initializes an object/class descriptor path;
+- obtains/builds an ordnance-like object via `FUN_00583d90` and related calls;
+- invokes a virtual method on the resulting object with the supplied parameters;
+- returns the created/resolved object pointer.
+
+There is **no explicit `IsNetGame()` test or plainly identifiable packet-send operation in this function body**.
+
+### Advisory PDB mismatch
+
+The advisory PDB export contains a symbol named `_Ordnance_SendNew`, but its advisory RVA does not directly coincide with current-binary RVA `0x00186FF0`. Because the PDB is from a different/advisory build, symbol names must be transferred only through a validated mapping/call-graph match.
+
+Therefore this report now refers to `FUN_00586ff0` as:
+
+> **the current-binary secondary/ordnance creation helper reached by Popper and SprayBuilding**
+
+until its exact network-facing symbol identity is proven.
+
+### Required follow-up
+
+Identify separately:
+
+1. the local object-construction path;
+2. the actual network new-ordnance send path;
+3. the receive/reconstruction path on a remote peer;
+4. whether the virtual call inside `FUN_00586ff0` bridges into one of those network paths.
+
+---
+
+## 4. Splinter / SprayBuilding — Strong Static Candidate
+
+Current GOG corpus function:
+
+```text
+FUN_005da6e0 @ VA 0x005DA6E0
+```
+
+The retained decompile shows a payload loop that ultimately executes:
+
+```c
+local_1d8 = FUN_00586ff0(local_48, local_1d4[0x3d]);
+*(undefined4 *)(local_1d8 + 0x80) = 0;
+...
+local_1d4[0x90] =
+    (int)((float)local_1d4[0x90] - *(float *)(local_1d4[0x3e] + 0x178));
+```
+
+No adjacent `IsNetGame()` / local-team gate comparable to `FUN_005a6460` is present around that creation call.
+
+### Static fact
+
+**Verified:** the inspected SprayBuilding payload producer has an unconditional caller-side path to `FUN_00586ff0` once its firing-loop conditions are satisfied.
+
+### Why this is suspicious
+
+If remote SprayBuilding instances execute this same firing loop and if authoritative payload objects are also replicated from another peer, then the missing caller-side authority gate is exactly the kind of structure that can produce duplicate secondary gameplay objects.
+
+That is strongly analogous to the final Popper pattern, but analogy is not runtime proof.
+
+### What remains unproven
+
+The repo decompile alone does not establish all of the following:
+
+1. a remote SprayBuilding copy executes the firing loop on the client;
+2. that client-created result is a damaging gameplay object rather than a locally expected representation;
+3. another peer independently creates the same logical payload;
+4. that payload is replicated to the client through a separate network path;
+5. both instances coexist and correspond to the observed 2x Splinter symptom.
+
+Therefore the correct classification is:
+
+> **HIGH-CONFIDENCE ROOT-CAUSE CANDIDATE — TWO-PC AUTHORITY TRACE REQUIRED**
+
+not `PROVEN`.
+
+---
+
+## 5. Day Wrecker — Previous Root-Cause Claim Withdrawn
+
+The original report identified:
+
+```text
+FUN_004b0420 @ VA 0x004B0420
+```
+
+as `DayWrecker::Simulate` and later treated it as an explosion instrumentation target.
+
+That identification is incorrect.
+
+The retained decompile is:
+
+```c
+undefined4 * __thiscall FUN_004b0420(
+    undefined4 *param_1,
+    undefined4 param_2,
+    undefined4 param_3)
+{
+    FUN_005a79f0(param_2, param_3);
+    *param_1 = DayWrecker::vftable;
+    param_1[6] = DayWrecker::vftable;
+    *(undefined1 *)(param_1 + 0x8c) = 0;
+    return param_1;
 }
 ```
 
-#### CRITICAL DIVERGENCE FOUND IN SPLINTER:
-Notice that `SprayBuilding::Simulate` calls `Ordnance_SendNew` (`FUN_00586ff0`) **without any `IsNetGame()` or team authority gate**!
-1. When a Splinter bomb deploys into a `SprayBuilding`, the `SprayBuilding` entity exists on both Host and Client.
-2. Every tick in `SprayBuilding::Simulate`, **both Host and Client** execute the `do { ... }` payload loop and call `Ordnance_SendNew` (`FUN_00586ff0`).
-3. On the Host, `Ordnance_SendNew` creates the local payload projectile **and sends a network packet** to the Client.
-4. On the Client, `Ordnance_SendNew` creates a local payload projectile **AND** receives the Host's network packet payload projectile.
-5. Result: **Splinter payload projectiles are duplicated 2x on every client machine!**
+This is a **constructor/initializer-style function**: it invokes a base/init routine, installs DayWrecker vtable pointers, initializes a field, and returns `this`.
 
----
+It is not evidence for:
 
-### 2. Day Wrecker Mechanics
+- simulation cadence;
+- collision handling;
+- detonation position;
+- remote/client launch behavior;
+- source-site explosion creation.
 
-```
-GameObject
- └── Building / Armory ──[ArmoryProcess]──> Fires DayWrecker (ClassLabel = "daywrecker")
-                                                   │
-                                                   ▼
-                                        DayWrecker::Simulate() / Explode()
-                                        Spawns secondary shockwave/nuke payload
-```
+### Consequence
 
-#### Key Functions and Addresses
-* **`DayWreckerClass::Build(OBJ76 *obj)`**
-  * Ghidra Decomp: `FUN_004b0ab0` @ VA `0x004B0AB0` (RVA `0x000B0AB0`)
-* **`DayWrecker::Simulate(float dt)`**
-  * Ghidra Decomp: `FUN_004b0420` @ VA `0x004B0420` (RVA `0x000B0420`)
-* **`ArmoryProcess::DoState()` / `ArmoryProcess::Execute()`**
-  * Addresses: `0x00429616` / `0x00428752` (PDB advisory offsets RVA `0x00029616`)
+The prior Day Wrecker chain:
 
-#### Source-Site Detonation & Duplication Analysis:
-When a Day Wrecker missile is launched from an Armory:
-1. The Armory relies on `ArmoryProcess` to handle the launch animation and projectile creation sequence.
-2. In multiplayer, `ArmoryProcess` on the Client attempts to simulate weapon deployment state locally.
-3. If `ArmoryProcess` creates the `DayWrecker` projectile locally without checking `IsRemote()` or `IsNetGame()`, the Client spawns a local `DayWrecker` entity at the Armory's launch transform.
-4. Simultaneously, the Host's `ArmoryProcess` spawns the authoritative `DayWrecker` and transmits an `_Ordnance_SendNew` / object creation packet to the Client.
-5. If the client-simulated Day Wrecker collides with the Armory geometry or ground immediately upon local creation due to zero-velocity initialization or transform misalignment, it triggers `DayWrecker::Explode()` / `RegCollision()` **at the source site (the Armory)**.
-6. This causes the infamous Armory self-destruction / source-site nuke detonation bug!
-
----
-
-## Comparison Matrix
-
-| Feature / Gate | Popgun (Fixed Path) | Day Wrecker (Armory Launch) | Splinter (`SprayBuilding`) |
-| :--- | :--- | :--- | :--- |
-| **Authoritative Gate** | **PRESENT:** `if (!IsNetGame() \|\| team == LocalTeam())` in `Popper::Control` | **MISSING / INCOMPLETE:** `ArmoryProcess` launch state triggers local spawn on remote client | **MISSING:** `SprayBuilding::Simulate` has **no** authority gate before payload spawn |
-| **`IsRemote` Gate** | Checked via team locality (`sVar1 == sVar3`) | Ignored during Armory launch animation state transition | Completely absent in `SprayBuilding::Simulate` loop |
-| **Ownership Source** | Firing craft / mine owner team ID | Armory building owner team ID | `SprayBomb` owner team ID propagated to `SprayBuilding` |
-| **Secondary Create Site** | `Popper::Control` @ `0x005A6460` | `ArmoryProcess` / `DayWrecker::Explode` | `SprayBuilding::Simulate` @ `0x005DA6E0` |
-| **Explosion Create Site** | Detonation position | Source-site (Armory origin) AND target impact position | Deployed position around spinning building |
-| **Delete / Destruction Site** | Sets `flags \|= 0x200` upon secondary spawn | Sets `flags \|= 0x200` on collision/explode | Sets `flags \|= 0x200` only when ammo reaches 0 |
-| **Remote Visual Path** | Host sends `_Ordnance_SendNew`, Client renders remote projectile | Client spawns visual projectile locally + receives host packet | Client spawns visual payload locally + receives host packet |
-| **Remote Damage Path** | Host simulator applies damage on hit | Both Host AND Client local entities apply damage on hit | Both Host AND Client local entities apply damage on hit |
-
----
-
-## Exact Authority & Locality Rules for Battlezone 98 Redux
-
-Based on our reverse engineering of the Popgun fix and the broader `Ordnance` engine subsystem, the following canonical rules define native multiplayer simulation correctness:
-
-1. **Rule 1 (Authoritative Payload Creation):** Any weapon or ordnance entity that spawns sub-projectiles or secondary payload ordnance (`Ordnance_SendNew`) MUST check if the executing machine is the authoritative simulator (`!IsNetGame() || object.team == LocalPlayerTeam()` or `!object.IsRemote()`).
-2. **Rule 2 (Remote Payload Suppression):** Remote clients MUST NOT construct secondary damaging gameplay objects in response to simulation timers or local triggers if those objects are replicated via host network packets (`_Ordnance_SendNew`).
-3. **Rule 3 (Visual vs. Gameplay Object Separation):** Local client simulation MAY produce non-colliding, purely visual particle effects or cosmetic visual meshes, but MUST NEVER call `_Ordnance_SendNew` or register damaging `GameObject` instances unless authorized by Rule 1.
-4. **Rule 4 (Destruction Synchronization):** When an authoritative owner sets destruction/removal flags (`flags |= 0x200`), the network layer transmits `_Ordnance_ManualDetonate` or `_Ordnance_ReceiveExpire`. Remote clients must extinguish local secondary generators immediately.
-
----
-
-## Ranked Root-Cause Hypotheses
-
-### Hypothesis 1 (Splinter Payload Duplication — PROVEN): HIGH CONFIDENCE
-* **Cause:** `SprayBuilding::Simulate` (`0x005DA6E0`) lacks an authority gate around `Ordnance_SendNew` (`FUN_00586ff0`). Both Host and Client execute the payload loop and spawn payload projectiles, while Host also replicates its projectiles to Client via network messages.
-* **Proof:** Decompilation of `FUN_005da6e0` shows an un-gated call to `FUN_00586ff0` inside the firing loop, directly contrasting with `Popper::Control` (`FUN_005a6460`) which contains `if (!IsNetGame() || team == LocalPlayerTeam())`.
-
-### Hypothesis 2 (Day Wrecker Source-Site Detonation — HIGH CONFIDENCE): HIGH CONFIDENCE
-* **Cause:** `ArmoryProcess` executes local weapon construction on remote clients during the launch sequence. The client-side Armory spawns a local `DayWrecker` entity at offset `(0,0,0)` relative to the Armory launch bay before receiving host transform corrections. The local entity collides with the Armory mesh on frame 0, calling `DayWrecker::Explode()` locally at the source site.
-* **Proof:** `DayWreckerClass::Build` and `ArmoryProcess` do not gate launch-state ordnance instantiation on `!IsRemote()`, leading to client-side origin collision.
-
----
-
-## Recommended Two-PC Instrumentation Plan
-
-To validate these hypotheses under live network conditions without modifying gameplay binaries, deploy the following instrumentation using `BZROpenShim` diagnostics:
-
-1. **Logging Hook on `Ordnance_SendNew` (`0x00586FF0`):**
-   * Log: `[ORDNANCE_SPAWN] Class: %s, IsNetGame: %d, AmHost: %d, Team: %d, LocalTeam: %d, CallerVA: 0x%08X`
-   * Expected Result on Splinter: Client will log `CallerVA = 0x005DA6E0` (`SprayBuilding::Simulate`) for every splinter shot, proving client-side local creation.
-2. **Logging Hook on `DayWrecker::Explode` (`0x004B0420` / RVA `0x00073000`):**
-   * Log: `[DAYWRECKER_EXPLODE] Position: (%.2f, %.2f, %.2f), IsRemote: %d, Frame: %u`
-   * Expected Result on Day Wrecker: Client will log explosion position matching the Armory's world coordinates at frame 0 of launch.
-
----
-
-## Smallest Safe Patch Candidates
-
-> **IMPORTANT:** Per project constraints, `SetLocal` must NOT be used as a generic fix. The patches below strictly mirror the native Popgun authority gate (`!IsNetGame() || team == LocalPlayerTeam()`).
-
-### Patch Candidate A: Splinter Payload Authority Gate (`SprayBuilding::Simulate`)
-Modify the payload spawn loop in `SprayBuilding::Simulate` (`0x005DA6E0`) to gate `Ordnance_SendNew` (`FUN_00586ff0`):
-
-```cpp
-// Hook inside SprayBuilding::Simulate at payload spawn site:
-int isNet = IsNetGame();
-short objTeam = *(short*)(sprayBuildingObj + 0x7C);
-short localTeam = GetLocalPlayerTeam();
-
-if (!isNet || objTeam == localTeam) {
-    // Authoritative Host / Owner: Spawn payload & send net packet
-    Ordnance_SendNew(spawnMatrix, sprayBuildingObj);
-} else {
-    // Remote Client: Do not spawn local payload ordnance.
-    // Client receives payload ordnance via host's _Ordnance_SendNew network packet.
-}
+```text
+remote Armory simulates launch
+ -> local DayWrecker created at source
+ -> frame-0 collision
+ -> DayWrecker::Explode at Armory
+ -> host-replicated second instance/explosion
 ```
 
-### Patch Candidate B: Armory Day Wrecker Launch Locality Gate (`ArmoryProcess`)
-Gate the `DayWrecker` creation call inside `ArmoryProcess` launch state machine:
+remains a plausible hypothesis consistent with the observed symptom, but **the repository evidence cited in the original report does not prove it**.
 
-```cpp
-if (!IsNetGame() || !armoryObj->IsRemote()) {
-    // Authoritative Host / Armory Owner spawns Day Wrecker projectile
-    BuildDayWrecker(armoryObj);
-}
+### Required re-trace before any patch
+
+Map the actual current-binary functions for:
+
+1. `DayWrecker` constructor;
+2. `DayWreckerClass::Build`;
+3. `DayWrecker::Simulate` / control path;
+4. collision / hit path;
+5. explosion/detonation path;
+6. Armory launch-state creation call;
+7. object locality/remote tests around that call;
+8. network send/receive path for the created object.
+
+Only then should a source-site root cause or hook site be named.
+
+---
+
+## 6. Historical Popgun Fix — Correct Evidence Grade
+
+The Redux historical notes identify a multiplayer Popgun duplication fix in 2.0.131. The final Redux binary contains a caller-side authority gate in Popper.
+
+Those facts are **consistent** with the gate being part of that historical fix.
+
+However, without a 2.0.131 binary or a directly comparable before/after function body, this repository cannot currently state:
+
+> "Before 2.0.131 `Popper::Control` lacked this exact gate."
+
+Correct wording:
+
+> The final Popper authority pattern is a strong structural analogue for investigating other secondary-ordnance duplication defects and is consistent with the documented historical Popgun fix.
+
+If a 2.0.131 executable is recovered, compare the Popper function directly and upgrade/downgrade the historical attribution accordingly.
+
+---
+
+## 7. Corrected Comparison Matrix
+
+| Question | Popper final path | Splinter `SprayBuilding` | Day Wrecker / Armory |
+| --- | --- | --- | --- |
+| caller-side authority gate directly seen? | **Yes** | **No adjacent Popper-style gate** | **Not yet mapped correctly** |
+| secondary creation helper identified? | `FUN_00586ff0` call seen | `FUN_00586ff0` call seen | must re-trace |
+| exact helper network semantics proven? | **No** | **No** | **No** |
+| both peers shown creating same logical payload? | not required for final-state observation | **Not yet** | **Not yet** |
+| duplicate runtime object pair observed? | historical symptom/fix context | **Not yet instrumented** | **Not yet instrumented** |
+| root cause classification | native authority precedent | **high-confidence candidate** | **open / re-trace required** |
+
+---
+
+## 8. Two-PC Instrumentation Plan
+
+### Phase A — Identify creation vs network functions
+
+Instrument `FUN_00586ff0` as an **unknown-exact-name creation helper**, logging:
+
+```text
+[ORDCREATE]
+peer role / local player team
+caller return address
+source object handle
+source actual team
+source locality/remote state if available
+created object pointer/handle
+created class/ODF if safely retrievable
+spawn position
+frame/time
 ```
 
+Separately identify and instrument the actual network new-ordnance send and receive functions. Do not assume `FUN_00586ff0` itself is the packet sender until the call graph proves it.
+
+### Phase B — Splinter
+
+On host and client, capture one controlled Splinter deployment.
+
+Decision evidence:
+
+- Does `FUN_005da6e0` call the creation helper on both peers for the same source object/tick?
+- Which peer emits the network create?
+- Which peer receives it?
+- How many resulting payload handles exist on each peer?
+- Are two client payloads correlated to one logical firing event?
+- Which instance applies authoritative damage?
+
+If the client both locally creates a gameplay payload from `FUN_005da6e0` **and** receives an equivalent authoritative payload, the duplication mechanism becomes runtime-proven.
+
+### Phase C — Day Wrecker
+
+Do not instrument `0x004B0420` as Explode; that address is wrong for that purpose.
+
+First resolve the real launch/simulate/collision/explode sites. Then log on both peers:
+
+```text
+[DWCREATE] source Armory, caller, locality, spawn transform, velocity
+[DWHIT]    object handle, collision target, position, frame
+[DWBOOM]   object handle, position, locality, frame
+[DWNET]    send/receive identity for the same logical projectile
+```
+
+The specific source-site hypothesis is proven only if a remote/non-authoritative peer creates or detonates an extra Day Wrecker at/near the Armory while a separate authoritative projectile also exists.
+
 ---
 
-## Regression Matrix
+## 9. Patch Decision Gates
 
-| Test Scenario | Expected Singleplayer Behavior | Expected Multiplayer Host Behavior | Expected Multiplayer Client Behavior | Safety Status |
-| :--- | :--- | :--- | :--- | :--- |
-| **Stock Popgun Mine** | Pops enemy, spawns popper payload, explodes | Pops enemy, broadcasts payload, explodes | Receives payload net packet, renders explosion | **VERIFIED (Stock 2.0.131 Fix)** |
-| **Splinter Bomb (`SprayBomb`)** | Deploys `SprayBuilding`, fires 1x payload stream | Deploys `SprayBuilding`, fires 1x payload stream, sends net packets | Receives 1x payload stream, **NO 2x duplication** | **PROPOSED SAFE FIX** |
-| **Armory Day Wrecker** | Armory launches missile, flies to target, detonates | Armory launches missile, flies to target, detonates | Missile launches smoothly from host, **NO source-site detonation** | **PROPOSED SAFE FIX** |
-| **Remote AI Craft Ordnance** | AI craft fire normally | Host simulates AI craft, replicates ordnance | Client receives AI ordnance, remote AI navigation unaffected | **VERIFIED SAFE (Preserves Remote AI)** |
+### Splinter
+
+Do **not** ship a gate yet.
+
+If two-PC evidence proves that remote SprayBuilding simulation creates a duplicate gameplay payload, then test the smallest caller-side suppression that preserves:
+
+- singleplayer payload generation;
+- authoritative multiplayer generation;
+- remote visual representation;
+- AI-controlled units on the correct authority peer;
+- damage count and projectile count;
+- cleanup/destruction sequencing.
+
+The final Popper condition is a **candidate precedent**, not automatically the correct universal predicate.
+
+### Day Wrecker
+
+No patch candidate is currently justified. Re-identify the correct functions and first divergence before choosing a hook or authority predicate.
+
+### `SetLocal`
+
+Do not use `SetLocal` as a generic fix. Project multiplayer testing has already shown that changing locality of remote AI can break AI ownership/control and can create asymmetric object behavior.
 
 ---
 
-## Conclusion & Next Steps
+## 10. Regression Matrix for Future Runtime Work
 
-The historical Battlezone 98 Redux 2.0.131 Popgun fix provided the exact structural blueprint required to understand multiplayer ordnance duplication. Splinter payload duplication is caused by a missing authority check in `SprayBuilding::Simulate`, and Armory Day Wrecker source-site detonation is caused by un-gated client-side launch instantiation.
+| Scenario | SP | MP authoritative peer | MP remote peer | Required result |
+| --- | --- | --- | --- | --- |
+| stock Popper | one secondary payload | one logical payload path | one replicated representation | preserve final Redux behavior |
+| Splinter | one payload stream | one logical payload stream | no duplicate gameplay stream | prove before patch, then preserve |
+| Armory Day Wrecker | one projectile/detonation | one authoritative projectile | no source-site duplicate | root cause still open |
+| remote AI secondary ordnance | normal | correct owner simulates | remote AI remains functional | mandatory locality regression check |
 
-By applying targeted vtable/entry hooks in `BZROpenShim` that enforce `(!IsNetGame() || team == LocalPlayerTeam())` on secondary creation paths, both issues can be repaired cleanly while preserving 100% stock singleplayer and remote AI behavior.
+Count object handles and damage events; visual similarity alone is insufficient.
+
+---
+
+## 11. Final Evidence Classification
+
+| Claim | Classification |
+| --- | --- |
+| final `FUN_005a6460` Popper path has `!net || team == localTeam` gate | **Directly verified** |
+| that exact gate was definitely introduced in Redux 2.0.131 | **Not proven; 2.0.131 binary missing** |
+| `FUN_005da6e0` calls `FUN_00586ff0` without adjacent Popper-style authority gate | **Directly verified** |
+| Splinter duplicates because both peers execute that call and also replicate the same payload | **High-confidence hypothesis; two-PC proof required** |
+| `FUN_00586ff0` is definitively `_Ordnance_SendNew` and directly transmits packets | **Not established by current decompile/PDB mapping** |
+| `FUN_004b0420` is `DayWrecker::Simulate` or `DayWrecker::Explode` | **Incorrect; it is constructor/initializer-style code** |
+| Day Wrecker source-site root cause in the original report is proven | **Withdrawn / open** |
+| `team == LocalTeam()` should be applied universally to secondary ordnance | **Not established; authority is class/path specific** |
+
+---
+
+## 12. Next Steps
+
+1. Preserve the Popper final-state gate as a known-good **reference pattern**, not a universal rule.
+2. Resolve the exact current-binary identity/network semantics of `FUN_00586ff0` and the true send/receive functions.
+3. Run the Splinter two-PC creation/send/receive/object-count trace.
+4. Re-map Day Wrecker and Armory launch functions from vtables/PDB/call graph before further claims.
+5. Run the Day Wrecker two-PC source/impact trace using the corrected function identities.
+6. Implement no production hook until the first divergent/non-authoritative creation site is observed.
