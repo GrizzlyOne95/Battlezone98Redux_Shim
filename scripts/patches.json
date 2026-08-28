@@ -125,6 +125,16 @@
       "fallback": "0x00466BE0",
       "require_unique": true,
       "identity": "CalcRange(Craft*, &close, &range, &time, &weapon) at 0x00466BE0 on the exact GOG 2.2.301 baseline. UnitTask::Execute 0x006002A0 supplies its craft and five output addresses; the decompile initializes close/range/time/weapon, scans the craft's selected weapon slots through CalcRange(Weapon) 0x00466890, selects the largest usable weapon range, and subtracts 1.0. Cross-checked in reverse_engineering/backlog_address_audit_20260708.md; the signature is the function entry and matched once in SHA-256 8d71f56c1314e69a8ad38f4eeaf20a8ff825965a84cf196e5f77ea4cc3377413."
+    },
+    {
+      "name": "Workshop::GetManager",
+      "pattern": "55 8B EC 51 89 4D FC E8 ?? ?? ?? ?? 8B C8 E8 ?? ?? ?? ?? 8B E5 5D C3",
+      "offset": 7,
+      "mode": "rel32_target",
+      "fallback": "0x00764790",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The unique anchor is cUI_Mods::RefreshWorkshop at 0x00795B80, called by the New Game Mods RefreshButton path 0x00794710 -> 0x00795BA0. Ghidra decompilation shows its first CALL at 0x00795B87 targets 0x00764790, which returns DAT_00945478, the active cWorkshopSteam/cWorkshopGoG singleton; mov ecx,eax then passes that same object to the Workshop resource refresh at 0x0076C0F0. The Steam vtable at 0x0089D054 independently identifies slot 1 as 0x00773D80 (GetItemState/DownloadItem) and slot 3 as 0x00773C40 (not ready while NeedsUpdate/Downloading/DownloadPending). Settled native runtime capture on Steam SHA-256 D298782FC9A13EDB0665DB934110440C45461031DB5F7FE1A76C8784B61CC90D, PID 10928 on 2026-08-28, read identical bytes at 0x00764790 and the full anchor at 0x00795B80; the pattern matched once in the GOG static image SHA-256 8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413."
     }
   ],
   "globals": [

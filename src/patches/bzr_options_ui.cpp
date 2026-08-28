@@ -8,6 +8,7 @@
 #include "autosave.h"
 #include "bzr_hooks.h"
 #include "openshim_ini.h"
+#include "openshim_updater.h"
 #include "patcher.h"
 #include "shim_log.h"
 
@@ -405,6 +406,7 @@ namespace BZROpenShim
         static void* g_ShimSettingsUiStatusLabel = nullptr;
         static void* g_ShimSettingsUiFooterLabel = nullptr;
         static void* g_ShimSettingsUiBackButton = nullptr;
+        static void* g_ShimSettingsUiUpdateButton = nullptr;
         static std::array<void*, kShimSettingsUiVisibleRowCount> g_ShimSettingsUiRowLabels = {};
         static std::array<void*, kShimSettingsUiVisibleRowCount> g_ShimSettingsUiRowButtons = {};
         static void* g_ShimSettingsUiPageLabel = nullptr;
@@ -412,11 +414,15 @@ namespace BZROpenShim
         static void* g_ShimSettingsUiNextPageButton = nullptr;
         static size_t g_ShimSettingsUiPageStart = 0;
         static std::string g_ShimSettingsUiStatusText = {};
+        static UINT_PTR g_ShimSettingsUiUpdateTimer = 0;
+        static uint64_t g_ShimSettingsUiUpdateGeneration = 0;
         static void OnShimSettingsMenuClicked();
         static void OnShimSettingsBackClicked();
+        static void OnShimSettingsUpdateClicked();
         static void OnShimSettingsRowClicked(size_t rowIndex);
         static void OnShimSettingsRowHovered(size_t rowIndex);
         static void OnShimSettingsPageStepClicked(int direction);
+        static bool EnsureShimSettingsUpdateTimer();
         static void ResetShimSettingsUiVisuals();
         static void EnsureInputBindingUiControls(void* screen);
         static void RefreshInputBindingUiControls();
@@ -436,6 +442,11 @@ namespace BZROpenShim
         static void __cdecl ShimSettingsBackClick()
         {
             OnShimSettingsBackClicked();
+        }
+
+        static void __cdecl ShimSettingsUpdateClick()
+        {
+            OnShimSettingsUpdateClicked();
         }
 
         static void __cdecl ShimSettingsPrevPageClick()
@@ -2590,6 +2601,7 @@ namespace BZROpenShim
             g_ShimSettingsUiStatusLabel = nullptr;
             g_ShimSettingsUiFooterLabel = nullptr;
             g_ShimSettingsUiBackButton = nullptr;
+            g_ShimSettingsUiUpdateButton = nullptr;
             g_ShimSettingsUiPageLabel = nullptr;
             g_ShimSettingsUiPrevPageButton = nullptr;
             g_ShimSettingsUiNextPageButton = nullptr;
@@ -2610,6 +2622,7 @@ namespace BZROpenShim
             SetInputBindingUiViewActive(g_ShimSettingsUiStatusLabel, visible);
             SetInputBindingUiViewActive(g_ShimSettingsUiFooterLabel, visible);
             SetInputBindingUiViewActive(g_ShimSettingsUiBackButton, visible);
+            SetInputBindingUiViewActive(g_ShimSettingsUiUpdateButton, visible);
             SetInputBindingUiViewActive(g_ShimSettingsUiPageLabel, visible);
             SetInputBindingUiViewActive(g_ShimSettingsUiPrevPageButton, visible);
             SetInputBindingUiViewActive(g_ShimSettingsUiNextPageButton, visible);
@@ -2651,6 +2664,10 @@ namespace BZROpenShim
             SetInputBindingUiLabelTextFitted(g_ShimSettingsUiHeaderLabel, "OpenShim Settings", 800.0f);
             SetInputBindingUiLabelTextFitted(g_ShimSettingsUiStatusLabel,
                                              g_ShimSettingsUiStatusText.c_str(), 800.0f);
+            const OpenShimUpdateSnapshot update = GetOpenShimUpdateSnapshot();
+            SetInputBindingUiButtonTextFitted(
+                g_ShimSettingsUiUpdateButton,
+                update.busy ? "Checking..." : "Check for Updates", 180.0f);
             // Short enough to stay inside the header plate (ends at x=1135).
             SetInputBindingUiLabelTextFitted(
                 g_ShimSettingsUiFooterLabel,
@@ -2802,6 +2819,10 @@ namespace BZROpenShim
             CreateInputBindingUiButton(g_ShimSettingsUiBackButton, controlParent, controlName, "Back",
                                        195.0f, kToolbarY, kToolbarW, kToolbarH,
                                        reinterpret_cast<void*>(ShimSettingsBackClick));
+            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsUpdate_%08X", screenTag);
+            CreateInputBindingUiButton(g_ShimSettingsUiUpdateButton, controlParent, controlName,
+                                       "Check for Updates", 365.0f, kToolbarY, 180.0f, kToolbarH,
+                                       reinterpret_cast<void*>(ShimSettingsUpdateClick));
             // Prev/Next mirror the input page toolbar (905/1015, w100); refresh
             // hides all three while the registry still fits on one page.
             std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsPage_%08X", screenTag);
@@ -2852,6 +2873,12 @@ namespace BZROpenShim
             }
 
             g_ShimSettingsPageActive = true;
+            const OpenShimUpdateSnapshot update = GetOpenShimUpdateSnapshot();
+            g_ShimSettingsUiUpdateGeneration = update.generation;
+            if (!update.message.empty())
+                g_ShimSettingsUiStatusText = update.message;
+            if (update.busy)
+                EnsureShimSettingsUpdateTimer();
             SetInputBindingUiControlsVisible(false);
             SuppressStockOptionsInputWidgets(screen);
             SetStockOptionsInputAccessoryVisibility(screen, false);
@@ -2984,6 +3011,61 @@ namespace BZROpenShim
             }
 
             g_ShimSettingsUiPageStart = ClampShimSettingsUiPageStart(g_ShimSettingsUiPageStart);
+            RefreshShimSettingsUiControls();
+        }
+
+        static void StopShimSettingsUpdateTimer()
+        {
+            if (g_ShimSettingsUiUpdateTimer == 0)
+                return;
+            KillTimer(nullptr, g_ShimSettingsUiUpdateTimer);
+            g_ShimSettingsUiUpdateTimer = 0;
+        }
+
+        // SetTimer was created by the button click on Battlezone's UI thread,
+        // so SteamUGC polling stays on the same thread as the stock New Game
+        // RefreshButton path. The hashing/staging phase remains on the updater
+        // worker and only publishes an atomic snapshot back here.
+        static void CALLBACK ShimSettingsUpdateTimerProc(HWND, UINT, UINT_PTR, DWORD)
+        {
+            PollOpenShimUpdateCheck();
+            const OpenShimUpdateSnapshot update = GetOpenShimUpdateSnapshot();
+            if (update.generation != g_ShimSettingsUiUpdateGeneration)
+            {
+                g_ShimSettingsUiUpdateGeneration = update.generation;
+                if (!update.message.empty())
+                    g_ShimSettingsUiStatusText = update.message;
+                if (g_ShimSettingsPageActive && g_ShimSettingsUiStatusLabel)
+                    RefreshShimSettingsUiControls();
+            }
+            if (!update.busy)
+                StopShimSettingsUpdateTimer();
+        }
+
+        static bool EnsureShimSettingsUpdateTimer()
+        {
+            if (g_ShimSettingsUiUpdateTimer != 0)
+                return true;
+            g_ShimSettingsUiUpdateTimer = SetTimer(
+                nullptr, 0, 250, ShimSettingsUpdateTimerProc);
+            return g_ShimSettingsUiUpdateTimer != 0;
+        }
+
+        static void OnShimSettingsUpdateClicked()
+        {
+            if (!g_ShimSettingsPageActive)
+                return;
+
+            BeginOpenShimUpdateCheck();
+            OpenShimUpdateSnapshot update = GetOpenShimUpdateSnapshot();
+            if (update.busy && !EnsureShimSettingsUpdateTimer())
+            {
+                CancelOpenShimUpdateCheck(
+                    "Update check failed: Battlezone could not schedule Workshop status checks.");
+                update = GetOpenShimUpdateSnapshot();
+            }
+            g_ShimSettingsUiUpdateGeneration = update.generation;
+            g_ShimSettingsUiStatusText = update.message;
             RefreshShimSettingsUiControls();
         }
 
