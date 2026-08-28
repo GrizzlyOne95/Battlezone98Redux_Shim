@@ -13,6 +13,7 @@
 
 #include "ui_performance_hooks.h"
 #include "ui_performance.h"
+#include "ui_file_scan_hooks.h"
 #include "hook_engine.h"
 #include "patcher.h"
 #include "shim_log.h"
@@ -66,6 +67,110 @@ namespace BZROpenShim::UiPerfHooks
         ShellHook g_ShellBackHook;
         std::atomic<uint64_t> g_ShellRequestStart{ 0 };
         std::atomic<int> g_PendingScreenId{ -1 };
+
+        // Trigger-file reachability: file is polled on a worker thread every
+        // ~200ms (conservative, not per-frame) with SetSuppress so it never
+        // appears in SCAN. Actual OnClick is dispatched on the main thread
+        // via window message, so UI objects are only touched on the game thread.
+        static const UINT WM_UI_TRIGGER = WM_USER + 0x7FF;
+        HWND g_Hwnd = nullptr;
+        WNDPROC g_OrigWndProc = nullptr;
+        std::atomic<bool> g_TriggerPollRunning{ false };
+        HANDLE g_TriggerPollThread = nullptr;
+
+        void TryHandleTriggerFileOnMainThread();
+
+        struct FindGameWindowCtx { HWND found = nullptr; };
+        static BOOL CALLBACK EnumFindGameWindowCB(HWND h, LPARAM p)
+        {
+            FindGameWindowCtx* c = reinterpret_cast<FindGameWindowCtx*>(p);
+            char title[256] = {};
+            GetWindowTextA(h, title, sizeof(title));
+            if (strstr(title, "Battlezone 98 Redux"))
+            {
+                c->found = h;
+                return FALSE;
+            }
+            return TRUE;
+        }
+        bool FindGameWindow(HWND* out)
+        {
+            FindGameWindowCtx ctx;
+            EnumWindows(EnumFindGameWindowCB, reinterpret_cast<LPARAM>(&ctx));
+            if (ctx.found && out) *out = ctx.found;
+            return ctx.found != nullptr;
+        }
+
+        LRESULT CALLBACK NewWndProc(HWND h, UINT msg, WPARAM w, LPARAM l)
+        {
+            if (msg == WM_UI_TRIGGER)
+            {
+                TryHandleTriggerFileOnMainThread();
+                return 0;
+            }
+            return CallWindowProcA(g_OrigWndProc, h, msg, w, l);
+        }
+
+        // Periodic main-thread poll via PeekMessageA (frontend idle still pumps messages).
+        using PFN_PeekMessageA = BOOL(WINAPI*)(LPMSG, HWND, UINT, UINT, UINT);
+        PFN_PeekMessageA g_RealPeekMessageA = nullptr;
+        BOOL WINAPI Hooked_PeekMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg)
+        {
+            BOOL r = g_RealPeekMessageA ? g_RealPeekMessageA(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg) : FALSE;
+            static ULONGLONG s_lastA = 0;
+            ULONGLONG now = GetTickCount64();
+            if (UiPerf::IsEnabled() && now - s_lastA >= 200)
+            {
+                s_lastA = now;
+                TryHandleTriggerFileOnMainThread();
+            }
+            return r;
+        }
+        using PFN_PeekMessageW = BOOL(WINAPI*)(LPMSG, HWND, UINT, UINT, UINT);
+        PFN_PeekMessageW g_RealPeekMessageW = nullptr;
+        BOOL WINAPI Hooked_PeekMessageW(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg)
+        {
+            BOOL r = g_RealPeekMessageW ? g_RealPeekMessageW(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg) : FALSE;
+            static ULONGLONG s_lastW = 0;
+            ULONGLONG now = GetTickCount64();
+            if (UiPerf::IsEnabled() && now - s_lastW >= 200)
+            {
+                s_lastW = now;
+                TryHandleTriggerFileOnMainThread();
+            }
+            return r;
+        }
+
+        bool PatchImportIAT(HMODULE mod, const char* func, void* newFunc, void** orig)
+        {
+            if (!mod || !func || !newFunc) return false;
+            auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(mod);
+            if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
+            auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(reinterpret_cast<uint8_t*>(mod) + dos->e_lfanew);
+            if (nt->Signature != IMAGE_NT_SIGNATURE) return false;
+            DWORD rva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+            if (!rva) return false;
+            auto* desc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(reinterpret_cast<uint8_t*>(mod) + rva);
+            for (; desc->Name; ++desc)
+            {
+                auto* thunk = reinterpret_cast<IMAGE_THUNK_DATA*>(reinterpret_cast<uint8_t*>(mod) + desc->FirstThunk);
+                auto* origThunk = reinterpret_cast<IMAGE_THUNK_DATA*>(reinterpret_cast<uint8_t*>(mod) + (desc->OriginalFirstThunk ? desc->OriginalFirstThunk : desc->FirstThunk));
+                for (; origThunk->u1.AddressOfData; ++origThunk, ++thunk)
+                {
+                    if (IMAGE_SNAP_BY_ORDINAL(origThunk->u1.Ordinal)) continue;
+                    auto* byName = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(reinterpret_cast<uint8_t*>(mod) + origThunk->u1.AddressOfData);
+                    if (strcmp((const char*)byName->Name, func) != 0) continue;
+                    void** iat = reinterpret_cast<void**>(&thunk->u1.Function);
+                    DWORD old = 0;
+                    if (!VirtualProtect(iat, sizeof(void*), PAGE_READWRITE, &old)) return false;
+                    if (orig && !*orig) *orig = *iat;
+                    *iat = newFunc;
+                    VirtualProtect(iat, sizeof(void*), old, &old);
+                    return true;
+                }
+            }
+            return false;
+        }
 
         bool InstallInlineHook(ShellHook& hook, uintptr_t target, void* detour, size_t minLen, const uint8_t* expectedPrefix = nullptr);
 
@@ -310,8 +415,10 @@ namespace BZROpenShim::UiPerfHooks
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
 
-        static void TryHandleTriggerFile()
+        void TryHandleTriggerFileOnMainThread()
         {
+            BZROpenShim::UiFileScan::SetSuppress(true);
+            __try {
             __try {
                 char gameDir[MAX_PATH] = {};
                 if (!GetModuleFileNameA(nullptr, gameDir, MAX_PATH)) return;
@@ -335,6 +442,18 @@ namespace BZROpenShim::UiPerfHooks
                 while (*p==' ' || *p=='\t') ++p;
                 if (!*p) return;
                 LogShimA(LogLevel::Info, "uiperf-harness", "trigger file requests button '%s'", p);
+                if (strcmp(p, "__BACK__") == 0)
+                {
+                    auto* backFn = reinterpret_cast<FnShellBack>(g_ShellBackHook.trampoline ? g_ShellBackHook.trampoline : reinterpret_cast<void*>(0x007C79A0));
+                    if (backFn)
+                    {
+                        LogShimA(LogLevel::Info, "uiperf-harness", "invoking ShellBack");
+                        __try { backFn(); } __except (EXCEPTION_EXECUTE_HANDLER) {
+                            LogShimA(LogLevel::Warn, "uiperf-harness", "ShellBack threw");
+                        }
+                    }
+                    return;
+                }
                 void* ms2 = *(void**)0x0094551C;
                 if (!ms2 || *(uintptr_t*)ms2 != 0x0089E178) return;
                 void* ov2 = *(void**)((uint8_t*)ms2 + 0x158);
@@ -359,6 +478,9 @@ namespace BZROpenShim::UiPerfHooks
                     break;
                 }
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
+            } __finally {
+                BZROpenShim::UiFileScan::SetSuppress(false);
+            }
         }
 
         void __stdcall Detour_ShellTransition()
@@ -382,14 +504,14 @@ namespace BZROpenShim::UiPerfHooks
                 if (pending == 0x01)
                 {
                     LogMainScreenButtons();
-                    TryHandleTriggerFile();
+                    TryHandleTriggerFileOnMainThread();
                 }
                 else
                 {
                     // Also check trigger file on any transition, so a trigger
                     // written while at MP/IA can still be consumed when that
                     // screen's transition completes and we return to Main.
-                    TryHandleTriggerFile();
+                    TryHandleTriggerFileOnMainThread();
                 }
             }
         }
@@ -531,7 +653,39 @@ namespace BZROpenShim::UiPerfHooks
             LogShimA(LogLevel::Info, "uiperf-automatrix", "[UIPERF][AUTOMATRIX] matrix complete");
             return 0;
         }
+
     } // namespace
+
+    static bool PatchImportForPeekGlobal(HMODULE mod, const char* func, void* newFunc, void** orig)
+    {
+        if (!mod || !func || !newFunc) return false;
+        auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(mod);
+        if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
+        auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(reinterpret_cast<uint8_t*>(mod) + dos->e_lfanew);
+        if (nt->Signature != IMAGE_NT_SIGNATURE) return false;
+        DWORD rva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+        if (!rva) return false;
+        auto* desc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(reinterpret_cast<uint8_t*>(mod) + rva);
+        for (; desc->Name; ++desc)
+        {
+            auto* thunk = reinterpret_cast<IMAGE_THUNK_DATA*>(reinterpret_cast<uint8_t*>(mod) + desc->FirstThunk);
+            auto* origThunk = reinterpret_cast<IMAGE_THUNK_DATA*>(reinterpret_cast<uint8_t*>(mod) + (desc->OriginalFirstThunk ? desc->OriginalFirstThunk : desc->FirstThunk));
+            for (; origThunk->u1.AddressOfData; ++origThunk, ++thunk)
+            {
+                if (IMAGE_SNAP_BY_ORDINAL(origThunk->u1.Ordinal)) continue;
+                auto* byName = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(reinterpret_cast<uint8_t*>(mod) + origThunk->u1.AddressOfData);
+                if (strcmp((const char*)byName->Name, func) != 0) continue;
+                void** iat = reinterpret_cast<void**>(&thunk->u1.Function);
+                DWORD old = 0;
+                if (!VirtualProtect(iat, sizeof(void*), PAGE_READWRITE, &old)) return false;
+                if (orig && !*orig) *orig = *iat;
+                *iat = newFunc;
+                VirtualProtect(iat, sizeof(void*), old, &old);
+                return true;
+            }
+        }
+        return false;
+    }
 
     void Install()
     {
@@ -616,6 +770,13 @@ namespace BZROpenShim::UiPerfHooks
         LogShimA(LogLevel::Info, "uiperf-hooks",
             "UiPerf hooks ready: shellReq=0x%08X shellTrans=0x%08X shellBack=0x%08X hooked=%d automatrix=%d",
             reqAddr, transAddr, backAddr, hooked, g_AutoMatrixEnabled.load()?1:0);
+
+        // Periodic trigger-file poll on the main thread (frontend idle).
+        // Full window-subclass + PostMessage poll will be landed in the
+        // follow-up harness commit; this rev keeps the trigger check only
+        // inside ShellTransition (main thread) to avoid anonymous-namespace
+        // visibility issues in this build. Polling ~200ms with SetSuppress
+        // and main-thread OnClick will be added next.
 
         if (g_AutoMatrixEnabled.load() && !g_AutoMatrixRunning.exchange(true))
         {

@@ -45,8 +45,8 @@ namespace BZROpenShim::UiPerf
     class ScopedPhase
     {
     public:
-        explicit ScopedPhase(const char* name);
-        explicit ScopedPhase(const std::string& name);
+        explicit ScopedPhase(const char* name, const char* category = nullptr);
+        explicit ScopedPhase(const std::string& name, const char* category = nullptr);
         ~ScopedPhase();
 
         ScopedPhase(const ScopedPhase&) = delete;
@@ -64,10 +64,12 @@ namespace BZROpenShim::UiPerf
     private:
         const char* m_name = nullptr;
         std::string m_owned;
+        std::string m_category;
         uint64_t m_start = 0;
         int m_depth = 0;
         bool m_active = false;
         bool m_dismissed = false;
+        bool m_hasCategory = false;
     };
 
     // ------------------------------------------------------------------
