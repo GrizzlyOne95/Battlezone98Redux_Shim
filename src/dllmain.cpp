@@ -25,6 +25,9 @@
 #include "openshim_sdk_v2.h"
 #include "openshim_updater.h"
 #include "render_profile_runtime.h"
+#include "ui_performance.h"
+#include "ui_performance_hooks.h"
+#include "ui_file_scan_hooks.h"
 #include "BZROpenShim.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -39,7 +42,10 @@ static uintptr_t g_PatchThread = 0;
 
 static unsigned __stdcall PatchThreadProc(void*)
 {
+    BZROpenShim::UiPerf::Initialize();
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread started");
+    BZROpenShim::UiPerfHooks::Install();
+    BZROpenShim::UiFileScan::Install();
     // Start renderer diagnostics/features immediately so their workers can
     // observe Ogre/D3D11 module creation before the renderer creates devices,
     // swapchains, entities, or begins normal animation submission.

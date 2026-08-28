@@ -17,6 +17,7 @@
 #include "chunk_batch_invalidation.h"
 #include "ai_range_policy.h"
 #include "hook_engine.h"
+#include "ui_performance.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -26340,6 +26341,8 @@ namespace BZROpenShim
                 return;
             }
 
+            if (BZROpenShim::UiPerf::IsEnabled())
+                BZROpenShim::UiPerf::NotifyShellRequest(0x17);
             *reinterpret_cast<uint8_t*>(kLoadScreenSelectionFlagAddr) = 1;
             g_BzrFn_UiDialogSetEnabled(dialog, 0);
             g_BzrFn_LoadScreenPrep();
@@ -32111,6 +32114,8 @@ namespace BZROpenShim
         // engine is not dispatching the hooked FlagDisplay::Submit slot.
         MaybeDriveMultiplayerFlagRenderFallback();
         OgreShaderCacheTick();
+        if (BZROpenShim::UiPerf::IsEnabled())
+            BZROpenShim::UiPerf::Heartbeat("SimTick");
         if (!g_CareerStatsMpHookInstalled)
             InstallCareerStatsMpHookIfPossible();
         if (!g_ChunkEffectCreateHooksInstalled)

@@ -8,6 +8,7 @@
 #include "patcher.h"
 #include "shim_log.h"
 #include "ogre_shader_cache.h"
+#include "ui_performance.h"
 #include "trn_codec.h"
 
 #include <Windows.h>
@@ -528,7 +529,11 @@ namespace BZROpenShim
             // the microcode cache on this exact thread so a prior session's
             // compiled shaders are available before compilation begins.
             if (handle != INVALID_HANDLE_VALUE && PathEndsWithProgramW(fileName))
+            {
                 OgreShaderCacheOnProgramScriptOpen();
+                if (UiPerf::IsEnabled())
+                    UiPerf::RecordShaderCache(0, 0, 0.0); // marker: program open triggered cache
+            }
 
             return handle;
         }
@@ -559,7 +564,11 @@ namespace BZROpenShim
                 MaybeTrackOpenedTrnHandle(handle, ResolveAbsolutePathFromAnsi(fileName), desiredAccess, creationDisposition);
 
             if (handle != INVALID_HANDLE_VALUE && PathEndsWithProgramA(fileName))
+            {
                 OgreShaderCacheOnProgramScriptOpen();
+                if (UiPerf::IsEnabled())
+                    UiPerf::RecordShaderCache(0, 0, 0.0);
+            }
 
             return handle;
         }
