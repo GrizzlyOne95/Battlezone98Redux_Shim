@@ -229,20 +229,19 @@ tests/cli_parser_tests.cpp
 The test models:
 
 - Redux-style comma tokenization;
-- the canonical `-shellmap:216,178` failure;
+- the canonical `-shellmap:216,178` failure (proven parity);
 - a proposed pristine-command-line parser/repair;
-- several robustness cases.
+- optional tolerance cases (`-shellmap=...`, quoted, whitespace) explicitly marked as extensions, not parity.
 
 The test was reported as manually compiled with `g++` and passing.
 
-**Important:** at the time of this audit, `tests/cli_parser_tests.cpp` is **not registered in `tests/CMakeLists.txt`**. Therefore the green `Build Win32` workflow for this PR does **not** establish that this test compiled or ran under the repository's normal CMake/CTest path.
-
-Before implementation/merge, either:
-
-1. wire this test into `tests/CMakeLists.txt` and CTest; or
-2. explicitly keep it as an ad-hoc research harness and document that CI does not execute it.
-
-The preferred project practice is option 1.
+**Update 2026-08-28:** `tests/cli_parser_tests.cpp` is now registered in
+`tests/CMakeLists.txt` (`cli_parser_tests` executable, `add_test` via CTest).
+A standalone CMake `configure` + `build` + `ctest` proves the model compiles
+and runs, and the normal MSVC `Build Win32` workflow now includes it. See the
+local verification notes in this PR for the `ctest -R cli_parser` output.
+This is still an **offline model test**, not a live Battlezone runtime
+validation – see §7.
 
 ---
 
