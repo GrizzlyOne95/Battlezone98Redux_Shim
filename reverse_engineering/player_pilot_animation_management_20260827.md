@@ -1,11 +1,12 @@
 # Player Pilot Animation Management — Controlled Investigation (2026-08-27)
 
 **Branch:** `agent/pilot-animation-management` (worktree: `BZR-OpenShim`)  
+**Stock-control follow-up:** `agent/pilot-fp-stock-control` (isolated worktrees: `BZR-OpenShim-fpcontrol` and `ExtraUtilities-fpcontrol`)
 **Scope:** Determine how Battlezone 98 Redux manages the local player's pilot animation state on foot, prove observability/controllability via OpenShim/EXU, and recommend an architecture for custom first-person animations.  
 **Test lab:** `lcbench` + purpose-specific harness `reverse_engineering/test_missions/pilot_anim_capture/`  
 **Instrumentation:** `src/patches/pilot_fp_animation_trace.cpp` (v3 dual-target), `include/pilot_fp_animation_trace.h`, `reverse_engineering/PILOT_FP_ANIMATION_TRACE.md`
 **Build:** GOG Redux 2.2.301, `battlezone98redux.exe` VA 0x401000, Ogre 1.10 `OgreMain.dll` SHA-256 `E5E6939…`
-**Runtime Capture:** **EXECUTED — QUALIFIED**. The 32 s observational capture, independent FP-only/WORLD-only manipulation captures, and marker-synchronized visual capture completed on 2026-08-27. A distinct live `aspilo_fp.mesh` entity, its stock animation traffic, its shared `Person::Simulate` controller, and independent control of the visible first-person presentation are **PROVEN-RUNTIME**. The API decision gate is open for stock-animation targeting; custom clip loading remains out of scope.
+**Runtime Capture:** **EXECUTED — QUALIFIED**. The 32 s observational capture, independent FP-only/WORLD-only manipulation captures, and marker-synchronized visual capture completed on 2026-08-27. A distinct live `aspilo_fp.mesh` entity, its stock animation traffic, its shared `Person::Simulate` controller, and independent control of the visible first-person presentation are **PROVEN-RUNTIME**. The public stock-animation API follow-up completed on 2026-08-28: safe FP tracking plus EXU `TargetLocalFirstPerson` and stock `Play`/`Stop`/`Seek` are **PROVEN-RUNTIME**. Custom clip loading remains out of scope.
 
 ## 0. Runtime Qualification Result (2026-08-27)
 
@@ -162,7 +163,75 @@ The decision gate is **open** for the minimum stock-animation API: OpenShim shou
 - Removed the project-local `register` preprocessor macro that prevented the branch from compiling with current MSVC STL headers.
 - Replaced the invalid Lua local-player `GetIn` lifetime step with the full-timeline `DeleteObject` observation followed by supported `FailMission` transition.
 
-No feature API, custom clip, or ExtraUtilities change was made.
+No feature API, custom clip, or ExtraUtilities change was made in the 2026-08-27 qualification work; the separately authorized stock-control follow-up is documented next.
+
+### 0.11 Public stock-animation control follow-up (2026-08-28)
+
+This is the implementation and runtime qualification authorized by the §0.9 decision gate. It does not add custom clips, resource loading, a managed animation clock, or a parallel animation system.
+
+#### Environment, build, and configuration
+
+- OpenShim branch/base: `agent/pilot-fp-stock-control` from `87feae84`; `main` was not merged. Release Win32 `winmm.dll` SHA-256 `00B6D8AE7CDBE735DD99B8C7A20D0292568C38B0267E5074EE9ED764055CF6BF`.
+- EXU branch/base: `agent/pilot-fp-stock-control` from `6d8cfd3`; runtime-qualified Release x86 `exu.dll` SHA-256 `36615786680C96423C3001673A481958340BB171CE9ACF2266D08562D968AE0D`. The final rebuild after changing only the capability-status text is `4E4E0A6B642A994CB90E20665B27BE054D6322AE4775CF1993F1C89AD103EE4A`.
+- Deployed DLL hashes matched the isolated build outputs before launch.
+- Game/process: GOG Redux 2.2.301, PID `43672`, windowed through `BZRHarness.ps1`; shutdown used `Stop-BZRGame -Id 43672`.
+- Configuration: `TracePilotFPAnimations=1`, `PilotFPAnimManip=0`. All state changes below came from the public EXU API, not the OpenShim test manipulation gate.
+- Lua: `reverse_engineering/test_missions/pilot_anim_capture/fpstock.lua`, deployed through the documented `lcbench.lua` overwrite. The engine-visible name remains `lcbench` (seven characters).
+- Preserved evidence: `tmp/fp_stock_control_20260828/run1_public_api/` and `tmp/fp_stock_control_20260828/run2_lifetime_visual/`.
+
+OpenShim now owns strict, process-lifetime FP qualification and exposes a narrow snapshot resolver. The resolver rechecks the current local world `Person`, SceneManager membership, the `_fp` pilot mesh allowlist, skeleton, `idle`, and `stand2Kneel`. EXU resolves this export afresh for each operation and never caches the returned Ogre pointer.
+
+#### Public API matrix — PROVEN-RUNTIME
+
+The first run began at local log time `07:19:45.371`. While the player was still in the vehicle, the target failed closed: `Has=false`, `Play=false`, and `GetInfo=nil`. `HopOut` occurred at T+2.001, the local pilot appeared at T+2.019, and OpenShim promoted `entity=0x2DCB6390`, `mesh=aspilo_fp.mesh`, `name=Ogre/MO8`, `gen=1`, `strict=1`, `worldPilot=0`.
+
+At T+4.002, both WORLD and FP reported stock states `idle`, `stand2Kneel`, `kneel2stand`, `fireRecoilSniper`, `jump`, `runForward`, and `landParachute`. This is a direct public `Has` inventory and expands the earlier traffic-only inventory: `jump` is present even though gameplay did not select it in the original observational timeline.
+
+| API event | Time | WORLD state | FP state | Result |
+|-----------|------|-------------|----------|--------|
+| FP `Play` + `Seek(0.5)` | T+5.004 | `stand2Kneel`: disabled, t=0.000 | enabled, t=0.500 | both calls `true`; FP changed only |
+| FP hold | T+12.002 | disabled, t=0.000 | enabled, t=0.500 | WORLD remained untouched |
+| FP `Stop(reset=true)` | T+12.002 | disabled, t=0.000 | disabled, t=0.000 | `true`; FP reset only |
+| WORLD `Play` + `Seek(0.5)` | T+13.004 | enabled, t=0.500 | disabled, t=0.000 | both calls `true`; WORLD changed only |
+| WORLD hold | T+17.000 | enabled, t=0.500 | disabled, t=0.000 | FP remained untouched |
+| WORLD `Stop(reset=true)` | T+17.000 | disabled, t=0.000 | disabled, t=0.000 | `true`; WORLD reset only |
+| FP recoil `Play` + `Seek(0.5)` | T+18.002 | disabled, t=0.000, len=0.033 | enabled, t=0.033, len=0.067 | `true`; FP clip selected independently |
+| FP recoil `Stop(reset=true)` | T+19.000 | unchanged | disabled, t=0.000 | `true` |
+| gameplay regain | T+21.002 | `idle` enabled, t=0.967, len=1.500 | `idle` enabled, t=0.967, len=1.000 | stock controller reclaimed both; no persistent override |
+
+`Play`, `Stop`, and `Seek` are therefore **PROVEN-RUNTIME** for the qualified FP stock target. The half-time hold intentionally does not claim autonomous advancement; `nativeAdvancement` remains `unvalidated` and `managedClock=false`.
+
+#### Visual independence — PROVEN-RUNTIME
+
+The public API FP-only half-kneel was captured in first person during the `FP_VISIBLE_WINDOW_BEGIN` interval. In a separate replay of the same script, Shift+F3 was pressed during the identical FP-only hold: the external WORLD pilot remained visibly standing while the FP entity was held at normalized time 0.5. Together with the logged state snapshots, this repeats outcome **B** through the public API rather than the old instrumentation gate:
+
+- FP targeting changes the visible first-person presentation without changing WORLD.
+- WORLD targeting changes its own `AnimationState` without changing FP.
+- The two target descriptors address dedicated render entities with independent states.
+
+#### Same-process lifetime — PROVEN-RUNTIME
+
+The replay button was exercised without ending PID `43672`, closing the previously unknown same-process case:
+
+```text
+gen=1 target acquired entity=0x2DCB6390 name=Ogre/MO8
+gen=2 target released reason=world-pilot-cleared prevEntity=0x2DCB6390
+gen=3 target acquired entity=0x312628E8 name=Ogre/MO16
+gen=4 target released reason=world-pilot-cleared prevEntity=0x312628E8
+gen=5 target acquired entity=0x27391608 name=Ogre/MO24
+```
+
+Each replay created a distinct FP pointer and advanced the generation. The Lua pre-HopOut checks continued to return safe false/nil results, subsequent operations resolved the new entity, and four complete runs ended without a stale-pointer manipulation or crash. Bindings were cleared on release and stock gameplay regained control before each mission transition.
+
+#### Final classification and next boundary
+
+- **PROVEN-RUNTIME:** strict local FP entity tracking survives destruction/recreation and same-process mission replay.
+- **PROVEN-RUNTIME:** EXU `TargetLocalFirstPerson` resolves to the dedicated FP entity and fails closed when it does not exist.
+- **PROVEN-RUNTIME:** stock `Play`, `Stop`, and `Seek` independently control FP without perturbing WORLD; WORLD behavior remains compatible.
+- **PROVEN-NATIVE:** the underlying gameplay controller remains the shared `Person::Simulate` path documented in §0.6; the new API does not replace it.
+- **UNKNOWN:** autonomous native advancement of an externally selected state without repeated `Seek` or gameplay ownership.
+
+The stock-control implementation gate is complete. Custom clip/resource registration remains a separate future problem and is not authorized by this result.
 
 ---
 

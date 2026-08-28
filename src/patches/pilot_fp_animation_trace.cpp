@@ -123,6 +123,8 @@ namespace BZROpenShim
         enum class ManipMode { Freeze, ForceWeight, Disabled } g_ManipMode = ManipMode::Freeze;
         enum class ManipScope { Both, World, Fp } g_ManipScope = ManipScope::Both;
         uintptr_t g_WorkerThread = 0;
+        std::mutex g_TrackerMutex;
+        std::atomic<bool> g_TrackerExportsReady{ false };
 
         TargetState g_World;
         TargetState g_Fp;
@@ -677,10 +679,10 @@ namespace BZROpenShim
         // Verified header: OgreSceneManager.h:3316 MovableObjectIterator getMovableObjectIterator(const String&)
         // This seam is the documented fallback when creation interception via import is not
         // available (exe does not import SceneManager::createEntity — verified via dumpbin /imports).
-        void RefreshFpTargetViaEnumeration()
+        void RefreshFpTargetViaEnumeration(bool force = false)
         {
             DWORD now = GetTickCount();
-            if (now - g_LastFpEnumerateTick < kFpEnumerateIntervalMs)
+            if (!force && now - g_LastFpEnumerateTick < kFpEnumerateIntervalMs)
                 return;
             g_LastFpEnumerateTick = now;
 
@@ -730,7 +732,8 @@ namespace BZROpenShim
                     std::string skeletonName = SafeEntitySkeletonName(ent);
                     broadMeshNames.push_back(meshName);
                     const bool isWorldEntity = ent == worldEntity;
-                    if (hasStand2Kneel && hasIdle && !isWorldEntity)
+                    const bool isPilotFpMesh = IsStrictFpPilotMesh(meshName);
+                    if (hasStand2Kneel && hasIdle && isPilotFpMesh && !isWorldEntity)
                     {
                         strictCandidates.push_back(ent);
                         strictMeshNames.push_back(meshName);
@@ -742,12 +745,15 @@ namespace BZROpenShim
                     void* retAddr = _ReturnAddress();
                     bool inMain = false;
                     uintptr_t rva = CallerRva(retAddr, inMain);
-                    bool isStrict = hasStand2Kneel && hasIdle && !isWorldEntity;
-                    LogShimA(LogLevel::Info, kComponent,
-                        "[FPAnim][FP] candidate entity=0x%p mesh=%s skeleton=%s hasSkeleton=%u name=%s caller=0x%p rva=0x%08X inMain=%u strict=%u worldPilot=%u",
-                        ent, meshName.c_str(), skeletonName.c_str(), hasSkel ? 1u : 0u, entName.c_str(),
-                        retAddr, static_cast<unsigned>(rva), inMain ? 1u : 0u,
-                        isStrict ? 1u : 0u, isWorldEntity ? 1u : 0u);
+                    bool isStrict = hasStand2Kneel && hasIdle && isPilotFpMesh && !isWorldEntity;
+                    if (g_Enabled.load(std::memory_order_relaxed))
+                    {
+                        LogShimA(LogLevel::Info, kComponent,
+                            "[FPAnim][FP] candidate entity=0x%p mesh=%s skeleton=%s hasSkeleton=%u name=%s caller=0x%p rva=0x%08X inMain=%u strict=%u worldPilot=%u",
+                            ent, meshName.c_str(), skeletonName.c_str(), hasSkel ? 1u : 0u, entName.c_str(),
+                            retAddr, static_cast<unsigned>(rva), inMain ? 1u : 0u,
+                            isStrict ? 1u : 0u, isWorldEntity ? 1u : 0u);
+                    }
                 }
             }
             catch (...)
@@ -939,6 +945,41 @@ namespace BZROpenShim
             }
             LogShimA(LogLevel::Info, kComponent, "[FPAnim] resolved optional %s export=%s address=0x%p", label, matches[0].name.c_str(), matches[0].address);
             return matches[0].address;
+        }
+
+        bool ResolveTrackerExports()
+        {
+            if (g_TrackerExportsReady.load(std::memory_order_acquire))
+                return true;
+            if (!OgreRuntime::IsLoaded())
+                return false;
+
+            g_FnEntityGetMesh = reinterpret_cast<FnEntityGetMesh>(
+                FindOptionalExport("getMesh@Entity@Ogre@@", "Entity::getMesh"));
+            g_EntityHasSkeletonExport = FindOptionalExport(
+                "hasSkeleton@Entity@Ogre@@", "Entity::hasSkeleton");
+            g_FnEntityHasSkeleton = reinterpret_cast<FnEntityHasSkeleton>(g_EntityHasSkeletonExport);
+            g_FnEntityHasAnimationState = reinterpret_cast<FnEntityHasAnimationState>(
+                FindOptionalExport("hasAnimationState@Entity@Ogre@@", "Entity::hasAnimationState"));
+            g_FnMovableObjectGetName = reinterpret_cast<FnMovableObjectGetName>(
+                FindOptionalExport("getName@MovableObject@Ogre@@", "MovableObject::getName"));
+            void* smIter = FindOptionalExport(
+                "getMovableObjectIterator@SceneManager@Ogre@@",
+                "SceneManager::getMovableObjectIterator");
+
+            const bool ready = g_FnEntityGetMesh && g_FnEntityHasSkeleton &&
+                g_FnEntityHasAnimationState && smIter;
+            g_TrackerExportsReady.store(ready, std::memory_order_release);
+            if (!ready)
+            {
+                LogShimA(LogLevel::Warn, kComponent,
+                    "[PilotFP] required Ogre tracking exports unavailable; public target resolver remains fail-closed");
+                return false;
+            }
+
+            LogShimA(LogLevel::Info, kComponent,
+                "[PilotFP] production tracker ready; strict meshes=aspilo_fp/bspilo_fp/sspilo_fp/cspilo_fp/bsheav_fp");
+            return true;
         }
 
         bool WriteRel32(uint8_t* operand, int32_t value)
@@ -1413,6 +1454,8 @@ namespace BZROpenShim
         {
             if (!OgreRuntime::IsLoaded())
                 return false;
+            if (!ResolveTrackerExports())
+                return false;
             void* getAnimationState = FindUniqueFunctionExport("getAnimationState@Entity@Ogre@@", "Entity::getAnimationState");
             void* setEnabled = FindUniqueFunctionExport("setEnabled@AnimationState@Ogre@@", "AnimationState::setEnabled");
             void* setLoop = FindUniqueFunctionExport("setLoop@AnimationState@Ogre@@", "AnimationState::setLoop");
@@ -1432,22 +1475,9 @@ namespace BZROpenShim
             g_RealAnimationAddTime = reinterpret_cast<FnAnimationAddTime>(addTime);
             g_RealEntityGetAllAnimationStates = reinterpret_cast<FnEntityGetAllAnimationStates>(
                 FindOptionalExport("getAllAnimationStates@Entity@Ogre@@", "Entity::getAllAnimationStates"));
-            g_FnEntityGetMesh = reinterpret_cast<FnEntityGetMesh>(
-                FindOptionalExport("getMesh@Entity@Ogre@@", "Entity::getMesh"));
-            g_EntityHasSkeletonExport = FindOptionalExport("hasSkeleton@Entity@Ogre@@", "Entity::hasSkeleton");
-            g_FnEntityHasSkeleton = reinterpret_cast<FnEntityHasSkeleton>(
-                FindOptionalExport("hasSkeleton@Entity@Ogre@@", "Entity::hasSkeleton"));
-            g_FnEntityHasAnimationState = reinterpret_cast<FnEntityHasAnimationState>(
-                FindOptionalExport("hasAnimationState@Entity@Ogre@@", "Entity::hasAnimationState"));
-            g_FnMovableObjectGetName = reinterpret_cast<FnMovableObjectGetName>(
-                FindOptionalExport("getName@MovableObject@Ogre@@", "MovableObject::getName"));
             // Log verified Ogre creation/enumeration seams
             {
-                void* smIter = FindOptionalExport("getMovableObjectIterator@SceneManager@Ogre@@", "SceneManager::getMovableObjectIterator");
-                if (smIter)
-                    LogShimA(LogLevel::Info, kComponent, "[FPAnim] verified enumeration seam: SceneManager::getMovableObjectIterator export=%p", smIter);
-                else
-                    LogShimA(LogLevel::Warn, kComponent, "[FPAnim] enumeration seam NOT found — FP discovery via enumeration will fail closed");
+                LogShimA(LogLevel::Info, kComponent, "[FPAnim] verified enumeration seam: SceneManager::getMovableObjectIterator");
                 // Verify exe does NOT import createEntity (expected per dumpbin /imports)
                 LogShimA(LogLevel::Info, kComponent, "[FPAnim] verified: exe does NOT import SceneManager::createEntity (dumpbin /imports) — creation hook not used; enumeration is primary resolver");
                 // Document SceneManager global structure used for retrieval
@@ -1487,22 +1517,33 @@ namespace BZROpenShim
 
         unsigned __stdcall TraceThreadProc(void*)
         {
-            LogShimA(LogLevel::Info, kComponent, "[FPAnim] enabled; dual-target trace v3 waiting for OgreMain.dll and local Person entity");
+            LogShimA(LogLevel::Info, kComponent, "[PilotFP] tracker waiting for OgreMain.dll and local Person entity; trace=%u",
+                g_Enabled.load(std::memory_order_acquire) ? 1u : 0u);
             bool ogreAttempted = false;
             while (!g_ShutdownRequested.load(std::memory_order_acquire))
             {
                 if (!ogreAttempted && OgreRuntime::IsLoaded())
                 {
                     ogreAttempted = true;
-                    InstallObservers();
+                    std::lock_guard<std::mutex> trackerLock(g_TrackerMutex);
+                    ResolveTrackerExports();
+                    if (g_Enabled.load(std::memory_order_acquire))
+                        InstallObservers();
                 }
-                RefreshWorldTarget();
-                RefreshFpTargetViaEnumeration();
-                TryLogInventoryForTarget(g_World, TargetKind::World);
-                TryLogInventoryForTarget(g_Fp, TargetKind::Fp);
+                if (g_TrackerExportsReady.load(std::memory_order_acquire))
+                {
+                    std::lock_guard<std::mutex> trackerLock(g_TrackerMutex);
+                    RefreshWorldTarget();
+                    RefreshFpTargetViaEnumeration();
+                    if (g_Enabled.load(std::memory_order_acquire))
+                    {
+                        TryLogInventoryForTarget(g_World, TargetKind::World);
+                        TryLogInventoryForTarget(g_Fp, TargetKind::Fp);
+                    }
+                }
                 Sleep(kPollSleepMs);
             }
-            LogShimA(LogLevel::Info, kComponent, "[FPAnim] reporter stopped (installed hooks now pass-through until process exit)");
+            LogShimA(LogLevel::Info, kComponent, "[PilotFP] tracker stopped (installed trace hooks now pass-through until process exit)");
             return 0;
         }
     }
@@ -1514,19 +1555,37 @@ namespace BZROpenShim
 
     void InitializePilotFpAnimationTrace()
     {
-        if (!TraceRequested())
-            return;
         if (g_WorkerThread)
             return;
         g_ShutdownRequested.store(false, std::memory_order_release);
-        g_Enabled.store(true, std::memory_order_release);
-        RefreshManipConfig();
+        g_Enabled.store(TraceRequested(), std::memory_order_release);
+        if (g_Enabled.load(std::memory_order_acquire))
+            RefreshManipConfig();
         g_WorkerThread = _beginthreadex(nullptr, 0, TraceThreadProc, nullptr, 0, nullptr);
         if (!g_WorkerThread)
         {
             g_Enabled.store(false, std::memory_order_release);
             LogShimA(LogLevel::Warn, kComponent, "[FPAnim] failed to start trace worker (err=%lu)", GetLastError());
         }
+    }
+
+    bool ResolveLocalFirstPersonEntity(void*& outEntity, uint64_t& outGeneration)
+    {
+        outEntity = nullptr;
+        outGeneration = g_Fp.generation.load(std::memory_order_acquire);
+        if (g_ShutdownRequested.load(std::memory_order_acquire) ||
+            !IsPatchingComplete() || !IsCompatibleGameVersion() ||
+            !OgreRuntime::IsLoaded())
+            return false;
+
+        std::lock_guard<std::mutex> trackerLock(g_TrackerMutex);
+        if (!ResolveTrackerExports())
+            return false;
+        RefreshWorldTarget();
+        RefreshFpTargetViaEnumeration(true);
+        outEntity = g_Fp.entity.load(std::memory_order_acquire);
+        outGeneration = g_Fp.generation.load(std::memory_order_acquire);
+        return outEntity != nullptr;
     }
 
     void ShutdownPilotFpAnimationTrace()
@@ -1549,5 +1608,18 @@ namespace BZROpenShim
             std::lock_guard<std::mutex> lock(g_Fp.mutex);
             ClearBindingsLocked(g_Fp);
         }
+    }
+
+    extern "C" BZRO_API int32_t __cdecl OpenShimResolveLocalFirstPersonEntity(
+        void** outEntity, uint64_t* outGeneration)
+    {
+        if (!outEntity || !outGeneration)
+            return 0;
+        void* entity = nullptr;
+        uint64_t generation = 0;
+        const bool available = ResolveLocalFirstPersonEntity(entity, generation);
+        *outEntity = entity;
+        *outGeneration = generation;
+        return available ? 1 : 0;
     }
 }
