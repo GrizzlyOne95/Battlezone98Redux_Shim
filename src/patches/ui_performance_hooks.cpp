@@ -286,6 +286,81 @@ namespace BZROpenShim::UiPerfHooks
             if (orig) orig(ecx, screenId);
         }
 
+        // Helper: log MainScreen buttons (POD, SEH-safe). Called only when pending==0x01.
+        static void LogMainScreenButtons()
+        {
+            __try {
+                void* ms = *(void**)0x0094551C;
+                if (!ms || *(uintptr_t*)ms != 0x0089E178) return;
+                void* ov = *(void**)((uint8_t*)ms + 0x158);
+                if (!ov || *(uintptr_t*)ov != 0x008A0B94) return;
+                void** beg = *(void***)((uint8_t*)ov + 0x12C);
+                void** en = *(void***)((uint8_t*)ov + 0x130);
+                if (!beg || !en || beg >= en || (en - beg) >= 64) return;
+                for (void** it = beg; it != en; ++it)
+                {
+                    void* ch = *it;
+                    if (!ch) continue;
+                    const char* nm = (const char*)((uint8_t*)ch + 0x20);
+                    if (!nm || !nm[0] || strlen(nm) > 64) continue;
+                    uintptr_t vt = *(uintptr_t*)ch;
+                    void* oc = (vt == 0x008A0470) ? *(void**)((uint8_t*)ch + 0x154) : nullptr;
+                    LogShimA(LogLevel::Info, "uiperf-harness", "button name='%s' vt=0x%08X this=0x%p onClick=0x%p", nm, (unsigned)vt, ch, oc);
+                }
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+
+        static void TryHandleTriggerFile()
+        {
+            __try {
+                char gameDir[MAX_PATH] = {};
+                if (!GetModuleFileNameA(nullptr, gameDir, MAX_PATH)) return;
+                char* sl = strrchr(gameDir, '\\');
+                if (!sl) return;
+                *(sl+1) = '\0';
+                char trigPath[MAX_PATH] = {};
+                _snprintf_s(trigPath, MAX_PATH, _TRUNCATE, "%suiperf_trigger.txt", gameDir);
+                DWORD attr = GetFileAttributesA(trigPath);
+                if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY)) return;
+                char want[128] = {};
+                FILE* f = nullptr;
+                if (fopen_s(&f, trigPath, "r") != 0 || !f) return;
+                if (!fgets(want, sizeof(want), f)) { fclose(f); DeleteFileA(trigPath); return; }
+                fclose(f);
+                DeleteFileA(trigPath);
+                // trim
+                size_t n = strlen(want);
+                while (n && (want[n-1]=='\r' || want[n-1]=='\n' || want[n-1]==' ' || want[n-1]=='\t')) want[--n]='\0';
+                char* p = want;
+                while (*p==' ' || *p=='\t') ++p;
+                if (!*p) return;
+                LogShimA(LogLevel::Info, "uiperf-harness", "trigger file requests button '%s'", p);
+                void* ms2 = *(void**)0x0094551C;
+                if (!ms2 || *(uintptr_t*)ms2 != 0x0089E178) return;
+                void* ov2 = *(void**)((uint8_t*)ms2 + 0x158);
+                if (!ov2 || *(uintptr_t*)ov2 != 0x008A0B94) return;
+                void** b = *(void***)((uint8_t*)ov2 + 0x12C);
+                void** e = *(void***)((uint8_t*)ov2 + 0x130);
+                if (!b || !e || b >= e || (e - b) >= 64) return;
+                for (void** it = b; it != e; ++it)
+                {
+                    void* ch2 = *it;
+                    if (!ch2) continue;
+                    const char* nm2 = (const char*)((uint8_t*)ch2 + 0x20);
+                    if (!nm2 || strcmp(nm2, p) != 0) continue;
+                    if (*(uintptr_t*)ch2 != 0x008A0470) return;
+                    void* oc2 = *(void**)((uint8_t*)ch2 + 0x154);
+                    if (!oc2) return;
+                    LogShimA(LogLevel::Info, "uiperf-harness", "invoking OnClick for '%s' at 0x%p this=0x%p", p, oc2, ch2);
+                    auto* fn = reinterpret_cast<void(__thiscall*)(void*)>(oc2);
+                    __try { fn(ch2); } __except (EXCEPTION_EXECUTE_HANDLER) {
+                        LogShimA(LogLevel::Warn, "uiperf-harness", "OnClick threw for '%s'", p);
+                    }
+                    break;
+                }
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+
         void __stdcall Detour_ShellTransition()
         {
             uint64_t t0 = 0;
@@ -304,34 +379,17 @@ namespace BZROpenShim::UiPerfHooks
                 UiPerf::NotifyShellTransitionComplete();
                 UiPerf::Heartbeat("ShellTransitionEnd");
                 g_PendingScreenId.store(-1, std::memory_order_relaxed);
-                // Harness equivalence aid: log MainScreen buttons when we return to MainMenu.
                 if (pending == 0x01)
                 {
-                    __try {
-                        void* ms = *(void**)0x0094551C;
-                        if (ms && *(uintptr_t*)ms == 0x0089E178)
-                        {
-                            void* ov = *(void**)((uint8_t*)ms + 0x158);
-                            if (ov && *(uintptr_t*)ov == 0x008A0B94)
-                            {
-                                void** beg = *(void***)((uint8_t*)ov + 0x12C);
-                                void** en = *(void***)((uint8_t*)ov + 0x130);
-                                if (beg && en && beg < en && (en - beg) < 64)
-                                {
-                                    for (void** it = beg; it != en; ++it)
-                                    {
-                                        void* ch = *it;
-                                        if (!ch) continue;
-                                        const char* nm = (const char*)((uint8_t*)ch + 0x20);
-                                        if (!nm || !nm[0] || strlen(nm) > 64) continue;
-                                        uintptr_t vt = *(uintptr_t*)ch;
-                                        void* oc = (vt == 0x008A0470) ? *(void**)((uint8_t*)ch + 0x154) : nullptr;
-                                        LogShimA(LogLevel::Info, "uiperf-harness", "button name='%s' vt=0x%08X this=0x%p onClick=0x%p", nm, (unsigned)vt, ch, oc);
-                                    }
-                                }
-                            }
-                        }
-                    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                    LogMainScreenButtons();
+                    TryHandleTriggerFile();
+                }
+                else
+                {
+                    // Also check trigger file on any transition, so a trigger
+                    // written while at MP/IA can still be consumed when that
+                    // screen's transition completes and we return to Main.
+                    TryHandleTriggerFile();
                 }
             }
         }
