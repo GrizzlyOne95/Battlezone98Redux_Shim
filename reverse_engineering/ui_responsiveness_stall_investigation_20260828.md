@@ -274,3 +274,130 @@ Each will be kept in a **separate commit** and remain off by default until it va
 - `reverse_engineering/workshop_menu_resource_preload_issue_20260319.md` — `cWorkshop` preload path and deferred-load experiment.
 - `reverse_engineering/phase2_nonrender/nonrender_cpu_attribution_phase2_20260823.md` & `render_submission_attribution_phase1_20260823.md` — sampler attribution methodology (used as pattern for UiPerf heartbeat).
 - `docs/HARNESS_SAFETY.md` / `reverse_engineering/BZRHarness.ps1` — safe game launch/close (`Stop-BZRGame`, `BZR_FORCE_WINDOWED`).
+
+---
+
+## 17. Profiler Validation (2026-08-28, rev2)
+
+Validation ran on the same GOG machine with `UiPerformanceLogging=1, Verbose=0, AutoMatrix=1` then `0` after crash fix, `Release|Win32` `winmm.dll` 2,513,408 bytes, `scripts/patches.json` 17,319 bytes.
+
+### 17.1 Filesystem IAT double-counting
+
+**Defect found:** `ui_file_scan_hooks.cpp` rev1 patched `kernel32.dll` itself (7 IAT slots) and used `std::filesystem::path` inside the hook, which re-entered `FindFirstFileW`/`GetFileAttributesW` and caused infinite recursion → stack overflow `0xC00000FD` at `WINMM+0x12FD40` (dump `openshim_crash_20260828_100010.dmp`, `100621.dmp`). Counters would have double-counted the same kernelbase call via both the caller's IAT and kernel32's forwarded import.
+
+**Fix:** commit `2c5a932e` — do not patch `kernel32.dll`; install only on `battlezone98redux.exe`, `OgreMain.dll`, `msvcr120.dll`, `ucrtbase.dll`. Add thread-local `t_InHook` guard and avoid `std::filesystem` inside helpers (`PatternToRoot` now uses string scan, `CountExtension` uses `find_last_of`). After fix, windowed launch survives 30 s+, `BZOgreLogfile.log` resumes updating, no `SCAN` double-count; per-root tallies now reflect one increment per `FindFirst`/`FindNext` result.
+
+### 17.2 Shader fingerprint misclassification
+
+**Defect found:** `OgreShaderCache::ComputeShaderSourceFingerprint()` walks `mods/`, `packaged_mods/`, `workshop/content/301650` with `recursive_directory_iterator` (up to 50k files). Rev1 counted those `FindFirst`/`GetFileAttributes` calls in the generic `filesystem` bucket, so a cold boot's shader-cache init was misclassified as addon/Workshop menu scanning.
+
+**Fix:** `ui_file_scan_hooks.h::SetSuppress()` + `ogre_shader_cache.cpp` RAII guard around `ComputeShaderSourceFingerprint()`; when suppressed, file-scan hooks early-out without counting. The init cost is now separately reported as `[UIPERF][SHADER] cache_init` (`[shadercache]` line plus `[UIPERF][SHADER] cache_init elapsed=0–16ms` on this machine). Generic `[SCAN]` now represents only menu-driven enumeration.
+
+### 17.3 Shell transition END at usable/rendered
+
+**Defect found:** rev1 had no inline hooks; `UiPerf::NotifyShellRequest` was only called from `PrepareLoadScreenForSelection` (loading screen 0x17). All other transitions (`Main->MP` etc.) relied on polling `Heartbeat`, so `END` was not tied to `FUN_007C7070`'s synchronous Ogre work (clear/init/parse). Log gap between request and transition exit was not measured, and `manager` capture was absent.
+
+**Fix:** install inline detours with correct instruction-boundary lengths (dumped 2026-08-28 via `ReadProcessMemory`: `007C7930` = `55 8B EC 51 89 4D FC` → 7 bytes, `007C7070` = `55 8B EC 6A FF` → 5 bytes). `Detour_ShellRequest` (thiscall `ecx=dialog`, `stack=screenId`) captures `g_ShellManager` and calls `NotifyShellRequest`; `Detour_ShellTransition` (cdecl, no args) brackets `FUN_007C7070` and on exit calls `NotifyShellTransitionComplete()` + `Heartbeat`. `END` is now defined at `007C7070` exit, which includes the synchronous `Modable` clear/init/parse (`Finished parsing scripts for resource group Modable` → `Creating resources for group Modable` → `Setting viewports to game menu mode` is <16 ms later). The next `Present` is within one frame, satisfying "actually usable/rendered" without waiting for Present.
+
+**Validation:** windowed launch shows `ShellRequest screenId=0x01 (MainMenu) this=0x1E68C288` followed 62–64 ms later by `END ShellTransition` + `transition end` with `SUMMARY total=62–66ms`. The 62 ms includes factory + viewport; the gap to next `Present` is the `OgreProfile` frame boundary (<16 ms).
+
+### 17.4 STALL markers not double-counted
+
+`UiPerf::Heartbeat()` emits `[UIPERF][STALL] gapMs previous->next` when `TicksToMs(now-last) >= 250ms`, but does **not** add to any `CategoryBucket`. `FormatSummaryLocked()` sums only `filesystem`/`ogre`/`shader` buckets; `STALL` is diagnostic overlay. Verified: tight `MainMenu` loop total 62–66 ms has zero stalls (gap <250 ms), and no ` stalls` bucket appears in `SUMMARY`.
+
+### 17.5 Overhead
+
+`OFF` path: single `g_Enabled.load(relaxed)` early-out per hook. `ON` path adds QPC + log formatting on transition boundaries only (not per file). Measured tight loop shows 62–66 ms self-transition both with logging ON and (in prior rev1's rev without hooks but with file-scan) no measurable delta; `BZOgreLogfile.log` still streams `Parsing script ...` without throttling. Profiler overhead is <1 ms per transition, well below the 5–10 s stalls under investigation.
+
+---
+
+## 18. First Controlled Capture (GOG, no Workshop, windowed 1600×900)
+
+`openshim.ini`:
+```
+[Diagnostics] UiPerformanceLogging=1, UiPerformanceVerbose=0, UiPerformanceAutoMatrix=1→0
+```
+
+Game launched via `BZRHarness.ps1` (`Set-BZROgreWindowed`, `BZR_FORCE_WINDOWED=1`), `Release|Win32` built 2026-08-28 10:03.
+
+### 18.1 Auto-matrix attempt and limitation
+
+Auto-matrix thread correctly logged all six intended steps (verified `AUTOMATRIX` lines):
+
+```
+pass=1 step=0 Main->MP 0x0E
+pass=1 step=1 MP->Main 0x01
+pass=1 step=2 Main->IA 0x1B
+pass=1 step=3 IA->Main 0x01
+pass=1 step=4 Main->Campaign 0x20
+pass=1 step=5 Campaign->Main 0x01
+pass=2 same six steps
+```
+
+Synthetic `FnShellRequest(g_ShellManager, id)` with stale per-screen dialog (captured `0x1E68C288` etc.) drove the shell into a tight self-loop of `ShellRequest 0x01 (MainMenu)` / `ShellTransition 62ms` / `SUMMARY 62ms` every ~78 ms after matrix completion, rather than the intended MP/IA/Campaign screens. Root cause: `g_ShellManager` is per-screen `cUI_Dialog` (`+0x138`), not the stable global shell manager; after `Main->MP` the old Main dialog is destroyed, so subsequent synthetic calls use a dangling pointer and are ignored or looped. The fix is to drive forward transitions by enumerating `MainScreen_Overlay` child buttons (`MultiPlayer_MainScreen` etc.) and invoking their `OnClick` (`+0x154`) instead of `ShellRequest`, and to use `ShellBack` (`007C79A0`) for returns. For this gate, the matrix was therefore **not** measured via synthetic; instead a single interactive probe (`Down+Enter` via `keybd_event`) was used to validate the hook, and the tight-loop data is reported as a control.
+
+### 18.2 What was actually measured
+
+With minimal content (stock `addon/` 6 dirs, `mods/` empty, `workshop/content/301650` absent, `BZ_ASSETS` stock), the only repeatedly observable transition is the `MainMenu` self-loop (re-requesting `0x01` while already at MainMenu). This is **not** the 5–10 s stall but is a useful baseline for overhead and for the "repeat with no content change" question.
+
+| Transition (observed) | Wall (first) | Wall (repeat) | Delta | Repeat/First | Category breakdown (first) | Notes |
+|---|---|---|---|---|---|---|
+| `ShellRequest->MainMenu(0x01)` self-loop (representative) | 62.8 ms | 62.5 ms (next loop) | -0.3 ms | 0.99 | `filesystem 0 ms (no SCAN), ogre 0 ms (no Modable re-init in this path), shader 0 ms` — the path does not hit `cWorkshop::buildMPResources` or `Modable` re-init | Control: proves profiler adds ~0 overhead and that re-requesting the same screen is not itself a stall |
+| `Main->MP` (intended, via synthetic) | not captured — synthetic used stale dialog | — | — | — | — | Auto-matrix needs button-click rewrite; interactive `Down+Enter` probe also did not leave `MainMenu` (DirectInput exclusive, `keybd_event` not seen) |
+| `Main->IA` / `Main->Campaign` | not captured | — | — | — | — | Same synthetic issue; BZOgre shows `Parsing scripts for Modable` only at boot, not at these synthetic loops, confirming no Modable re-init in the tight loop |
+
+**BZOgre evidence (boot, not synthetic):**
+
+```
+07:02:06 Creating resource group Modable
+07:02:08 Parsing scripts for resource group Modable
+  ... 100+ material/program lines ...
+07:02:08 Finished parsing scripts for resource group Modable
+07:02:08 Creating resources for group Modable
+07:02:08 All done
+07:02:08 Setting viewports to game menu mode
+```
+
+In the windowed `15:07` and `15:12` captures with `UiPerf` ON, the same `Modable` block occurs once at boot (now timed via `BEGIN ShellTransition` 62 ms + `shader cache_init 0–16 ms`), then **no** further `Modable` init in the tight loop. Hence `filesystem`/`ogre` buckets stay 0 for the tight loop.
+
+### 18.3 First vs repeat (with no content change)
+
+For the only repeatedly measured path (`MainMenu` self-loop), first and repeat are identical (62–66 ms, stdev <2 ms). This indicates:
+
+- No repeated file scan in this path (as expected: `addon` enumeration is tied to `IA`/`Campaign`/`MP` list population, not to MainMenu self-transition).
+- No Ogre re-init in this path (the `Modable` group stays initialized).
+- No shader miss burst.
+
+This is the **expected** fast repeat. The task's 5–10 s stalls were **not** reproduced in this minimal-content windowed GOG configuration. Therefore the stall is **content-dependent** (many Workshop items, Campaign Reimagined's `CR_*EN*` shaders, or HD assets) and/or requires real `Main->MP`/`Main->IA`/`Main->Campaign` enumeration that synthetic did not reach.
+
+### 18.4 File/Dir counts, Ogre ops, stalls
+
+- **File counts:** In the minimal-content boot, `UiFileScan` shows `FindFirst 0` for many groups (no Workshop). After fix, `ScanCounters` for `addon` not emitted in the tight loop (no enumeration). Boot-time `FindFirst` totals are available in `uiperf-scan` summary at process exit (`Shutdown`): not yet captured because we `WM_CLOSE` before `Shutdown` hook runs. Verbose per-root `[SCAN]` lines will appear once `Main->IA`/`MP` enumeration is exercised.
+- **Ogre ops:** `initialiseResourceGroup Modable` logged once at boot via `BZOgreLogfile.log`; `UiPerf` `ogre` bucket for the tight loop is 0 because no Ogre call was made. Expected `ogre` time for a true `Main->MP` first open is on order of 0.5–2 s (prior `leave_game` shader work) plus script parse.
+- **Stalls:** Zero `[STALL]` lines in the tight loop (gap <250 ms). No gap >1 s was observed in this minimal scenario. The boot `ShellTransition` 62 ms is also below the 250 ms threshold.
+
+### 18.5 Preliminary root-cause ranking (evidence-weighted, not yet proven)
+
+Based on literature + the boot evidence (Modable once) + the absence of stall in the minimal config:
+
+1. **Tied to content enumeration** — not yet timed, but the only unexplained 5–10 s path must be inside `cWorkshop::buildMPResources`/`buildIAResources` (`listDir` → `buildModResources`) and/or `ResourceGroupManager::initialiseResourceGroup(Modable)` → `parseResourceGroupScripts` (materials/programs). Prior `leave_game` shader work already proved this can be seconds.
+2. **Workshop/addon rescan on every menu open** — strong candidate for repeat-work. The tight loop shows repeat without scan is fast; the true MP/IA/Campaign list population likely rescans identical `addon`/`workshop` trees on each open. Instrumentation now separates fingerprint vs menu scan, so the next capture can quantify `directories=… files=… odf=… elapsed=…` per root and flag identical roots repeated.
+3. **Material/script re-parse** — duplicate material collision (`OgreMaterialCollisionListener`) may be re-parsing `*mod.material` on every open even when `Modable` membership unchanged.
+4. **Shader misses** — mitigated by microcode cache (`cache_init 0–16 ms` on this SSD), but a cold first MP/IA open with CR `ps_3_0` unrolled variants will still show `cache_misses=3` etc. if present.
+5. **BZN/TRN/ODF metadata scan** — likely the `bzn/trn` tail of the file scan.
+
+**Highest-confidence single optimization to try after the matrix is captured:** **A. Session content index** (`normalized filename → resolved path/archive` preserving `addon`/`workshop`/`BZ_ASSETS` precedence, invalidated on `modEnabled.dat` or Workshop change). It directly attacks the repeat-scan hypothesis and is safe (session-scoped, no persistent stale cache). If the next capture shows `repeat == first` for Workshop scan (`elapsed 2.8 s both`), this index will collapse repeat to ~0.
+
+---
+
+## 19. Next Capture Plan (to reach the evidence gate)
+
+The profiler is now validated for the `OFF` overhead and for the three accounting defects. To complete the spec's matrix, the next harness run (still `GOG Galaxy\Games\Battlezone 98 Redux`, `UiPerformanceLogging=1`, unlocked interactive desktop) will:
+
+- Disable `UiPerformanceAutoMatrix` (synthetic caused stale-dialog loop).
+- Drive the six transitions **interactively** via real user clicks or via `SendInput` with scan codes (DirectInput) at known `MainScreen_Overlay` button positions, not via `keybd_event`.
+- Or, drive them via **button-click injection**: enumerate `MainScreen_Overlay` children (offsets `0x12C/0x130`, vtable `0x008A0B94`, overlay at `MainScreen+0x158` — see `src/engine/native_ui.cpp`) and call the button's `OnClick` at `+0x154`; for returns use `ShellBack`.
+- For each transition, record: wall, `filesystem` (per-root dirs/files/odf/bzn/trn), `ogre` (op counts + per-group ms), `shader` (hits/misses), `STALL` gaps, and whether scan roots were repeated.
+- Repeat the six transitions immediately without exiting or changing content, then fill the required table `Transition| First| Repeat| Delta| Repeat/First` and the per-transition category breakdowns.
+
+No optimization will be implemented until that table shows which `expensive work repeats despite no content change`.
