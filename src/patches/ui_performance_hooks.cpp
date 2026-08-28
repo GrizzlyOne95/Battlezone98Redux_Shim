@@ -20,7 +20,9 @@
 
 #include <Windows.h>
 #include <process.h>
+#include <intrin.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -65,83 +67,114 @@ namespace BZROpenShim::UiPerfHooks
         ShellHook g_ShellRequestHook;
         ShellHook g_ShellTransitionHook;
         ShellHook g_ShellBackHook;
+        ShellHook g_BuildIaResourcesHook;
+        ShellHook g_InstantActionCtorHook;
         std::atomic<uint64_t> g_ShellRequestStart{ 0 };
         std::atomic<int> g_PendingScreenId{ -1 };
+        std::atomic<bool> g_ShellTransitionInFlight{ false };
+        std::atomic<uintptr_t> g_TransitionSourceScreen{ 0 };
 
         // Trigger-file reachability: file is polled on a worker thread every
         // ~200ms (conservative, not per-frame) with SetSuppress so it never
         // appears in SCAN. Actual OnClick is dispatched on the main thread
         // via window message, so UI objects are only touched on the game thread.
-        static const UINT WM_UI_TRIGGER = WM_USER + 0x7FF;
-        HWND g_Hwnd = nullptr;
-        WNDPROC g_OrigWndProc = nullptr;
+        static const UINT WM_UI_TRIGGER = WM_APP + 0x42B;
+        std::atomic<HWND> g_Hwnd{ nullptr };
+        std::atomic<WNDPROC> g_OrigWndProc{ nullptr };
         std::atomic<bool> g_TriggerPollRunning{ false };
+        std::atomic<bool> g_TriggerMessagePending{ false };
         HANDLE g_TriggerPollThread = nullptr;
+        HANDLE g_TriggerStopEvent = nullptr;
 
         void TryHandleTriggerFileOnMainThread();
+        static void StopTriggerDelivery() noexcept;
 
-        struct FindGameWindowCtx { HWND found = nullptr; };
-        static BOOL CALLBACK EnumFindGameWindowCB(HWND h, LPARAM p)
+        struct FindGameWindowCtx
         {
-            FindGameWindowCtx* c = reinterpret_cast<FindGameWindowCtx*>(p);
+            HWND found = nullptr;
+        };
+
+        static BOOL CALLBACK EnumFindGameWindowCB(HWND h, LPARAM context)
+        {
+            auto* c = reinterpret_cast<FindGameWindowCtx*>(context);
             char title[256] = {};
             GetWindowTextA(h, title, sizeof(title));
-            if (strstr(title, "Battlezone 98 Redux"))
+            if (std::strstr(title, "Battlezone 98 Redux"))
             {
                 c->found = h;
                 return FALSE;
             }
             return TRUE;
         }
-        bool FindGameWindow(HWND* out)
+
+        static HWND FindGameWindowOnCurrentThread()
         {
-            FindGameWindowCtx ctx;
-            EnumWindows(EnumFindGameWindowCB, reinterpret_cast<LPARAM>(&ctx));
-            if (ctx.found && out) *out = ctx.found;
-            return ctx.found != nullptr;
+            FindGameWindowCtx context;
+            EnumThreadWindows(GetCurrentThreadId(), EnumFindGameWindowCB,
+                              reinterpret_cast<LPARAM>(&context));
+            return context.found;
         }
 
         LRESULT CALLBACK NewWndProc(HWND h, UINT msg, WPARAM w, LPARAM l)
         {
             if (msg == WM_UI_TRIGGER)
             {
+                g_TriggerMessagePending.store(false, std::memory_order_release);
+                LogShimA(LogLevel::Info, "uiperf-harness",
+                    "[UIPERF][HARNESS] custom main-thread event delivered hwnd=0x%p tid=%lu",
+                    h, static_cast<unsigned long>(GetCurrentThreadId()));
                 TryHandleTriggerFileOnMainThread();
                 return 0;
             }
-            return CallWindowProcA(g_OrigWndProc, h, msg, w, l);
+            const WNDPROC original = g_OrigWndProc.load(std::memory_order_acquire);
+            return original ? CallWindowProcA(original, h, msg, w, l)
+                            : DefWindowProcA(h, msg, w, l);
         }
 
-        // Periodic main-thread poll via PeekMessageA (frontend idle still pumps messages).
+        static void EnsureGameWindowSubclassOnMainThread()
+        {
+            if (g_Hwnd.load(std::memory_order_acquire))
+                return;
+
+            const HWND window = FindGameWindowOnCurrentThread();
+            if (!window)
+                return;
+
+            SetLastError(ERROR_SUCCESS);
+            const auto previous = reinterpret_cast<WNDPROC>(
+                SetWindowLongPtrA(window, GWLP_WNDPROC,
+                                  reinterpret_cast<LONG_PTR>(&NewWndProc)));
+            if (!previous && GetLastError() != ERROR_SUCCESS)
+            {
+                LogShimA(LogLevel::Warn, "uiperf-harness",
+                    "[UIPERF][HARNESS] failed to subclass game window error=%lu",
+                    static_cast<unsigned long>(GetLastError()));
+                return;
+            }
+
+            g_OrigWndProc.store(previous, std::memory_order_release);
+            g_Hwnd.store(window, std::memory_order_release);
+            LogShimA(LogLevel::Info, "uiperf-harness",
+                "[UIPERF][HARNESS] game window subclassed hwnd=0x%p tid=%lu original=0x%p",
+                window, static_cast<unsigned long>(GetCurrentThreadId()), previous);
+        }
+
+        // PeekMessageA is imported by Redux and runs on the frontend/UI thread.
+        // It is used only to install our subclass from the owning thread. Trigger
+        // file polling remains on the low-frequency helper below.
         using PFN_PeekMessageA = BOOL(WINAPI*)(LPMSG, HWND, UINT, UINT, UINT);
         PFN_PeekMessageA g_RealPeekMessageA = nullptr;
+        void** g_PeekMessageAIat = nullptr;
         BOOL WINAPI Hooked_PeekMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg)
         {
-            BOOL r = g_RealPeekMessageA ? g_RealPeekMessageA(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg) : FALSE;
-            static ULONGLONG s_lastA = 0;
-            ULONGLONG now = GetTickCount64();
-            if (UiPerf::IsEnabled() && now - s_lastA >= 200)
-            {
-                s_lastA = now;
-                TryHandleTriggerFileOnMainThread();
-            }
-            return r;
-        }
-        using PFN_PeekMessageW = BOOL(WINAPI*)(LPMSG, HWND, UINT, UINT, UINT);
-        PFN_PeekMessageW g_RealPeekMessageW = nullptr;
-        BOOL WINAPI Hooked_PeekMessageW(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg)
-        {
-            BOOL r = g_RealPeekMessageW ? g_RealPeekMessageW(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg) : FALSE;
-            static ULONGLONG s_lastW = 0;
-            ULONGLONG now = GetTickCount64();
-            if (UiPerf::IsEnabled() && now - s_lastW >= 200)
-            {
-                s_lastW = now;
-                TryHandleTriggerFileOnMainThread();
-            }
-            return r;
+            EnsureGameWindowSubclassOnMainThread();
+            return g_RealPeekMessageA
+                ? g_RealPeekMessageA(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg)
+                : FALSE;
         }
 
-        bool PatchImportIAT(HMODULE mod, const char* func, void* newFunc, void** orig)
+        bool PatchImportIAT(HMODULE mod, const char* func, void* newFunc,
+                            void** orig, void*** patchedSlot)
         {
             if (!mod || !func || !newFunc) return false;
             auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(mod);
@@ -166,10 +199,190 @@ namespace BZROpenShim::UiPerfHooks
                     if (orig && !*orig) *orig = *iat;
                     *iat = newFunc;
                     VirtualProtect(iat, sizeof(void*), old, &old);
+                    FlushInstructionCache(GetCurrentProcess(), iat, sizeof(void*));
+                    if (patchedSlot) *patchedSlot = iat;
                     return true;
                 }
             }
             return false;
+        }
+
+        static bool BuildTriggerFilePath(char (&path)[MAX_PATH])
+        {
+            char gamePath[MAX_PATH] = {};
+            if (!GetModuleFileNameA(nullptr, gamePath, MAX_PATH))
+                return false;
+            char* slash = std::strrchr(gamePath, '\\');
+            if (!slash)
+                return false;
+            *(slash + 1) = '\0';
+            return _snprintf_s(path, MAX_PATH, _TRUNCATE,
+                               "%suiperf_trigger.txt", gamePath) >= 0;
+        }
+
+        static bool TriggerFileExistsSuppressed()
+        {
+            char triggerPath[MAX_PATH] = {};
+            if (!BuildTriggerFilePath(triggerPath))
+                return false;
+            UiFileScan::SetSuppress(true);
+            const DWORD attributes = GetFileAttributesA(triggerPath);
+            UiFileScan::SetSuppress(false);
+            return attributes != INVALID_FILE_ATTRIBUTES &&
+                   (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+        }
+
+        static unsigned __stdcall TriggerPollThreadProc(void*)
+        {
+            uint64_t samples = 0;
+            double activeMs = 0.0;
+            double maximumUs = 0.0;
+            uint64_t posts = 0;
+
+            while (g_TriggerPollRunning.load(std::memory_order_acquire))
+            {
+                if (WaitForSingleObject(g_TriggerStopEvent, 200) == WAIT_OBJECT_0)
+                    break;
+                if (!g_TriggerPollRunning.load(std::memory_order_acquire))
+                    break;
+
+                const uint64_t start = UiPerf::NowTicks();
+                const bool exists = TriggerFileExistsSuppressed();
+                const double elapsedMs = UiPerf::TicksToMs(UiPerf::NowTicks() - start);
+                ++samples;
+                activeMs += elapsedMs;
+                maximumUs = (std::max)(maximumUs, elapsedMs * 1000.0);
+
+                if (exists)
+                {
+                    const HWND window = g_Hwnd.load(std::memory_order_acquire);
+                    if (window && !g_TriggerMessagePending.exchange(
+                                      true, std::memory_order_acq_rel))
+                    {
+                        if (PostMessageA(window, WM_UI_TRIGGER, 0, 0))
+                        {
+                            ++posts;
+                            LogShimA(LogLevel::Info, "uiperf-harness",
+                                "[UIPERF][HARNESS] trigger file detected; posted main-thread event hwnd=0x%p",
+                                window);
+                        }
+                        else
+                        {
+                            g_TriggerMessagePending.store(false, std::memory_order_release);
+                        }
+                    }
+                }
+
+                if (samples == 25 || (samples > 25 && (samples % 50) == 0))
+                {
+                    LogShimA(LogLevel::Info, "uiperf-harness",
+                        "[UIPERF][HARNESS] poll samples=%llu active=%.3fms avg=%.3fus max=%.3fus posts=%llu",
+                        static_cast<unsigned long long>(samples), activeMs,
+                        samples ? activeMs * 1000.0 / static_cast<double>(samples) : 0.0,
+                        maximumUs, static_cast<unsigned long long>(posts));
+                }
+            }
+            return 0;
+        }
+
+        static bool StartTriggerDelivery()
+        {
+            HMODULE mainModule = GetModuleHandleW(nullptr);
+            if (!PatchImportIAT(mainModule, "PeekMessageA",
+                                reinterpret_cast<void*>(&Hooked_PeekMessageA),
+                                reinterpret_cast<void**>(&g_RealPeekMessageA),
+                                &g_PeekMessageAIat))
+            {
+                LogShimA(LogLevel::Warn, "uiperf-harness",
+                    "[UIPERF][HARNESS] PeekMessageA UI-thread seam was not installed");
+                return false;
+            }
+
+            g_TriggerStopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            if (!g_TriggerStopEvent)
+            {
+                LogShimA(LogLevel::Warn, "uiperf-harness",
+                    "[UIPERF][HARNESS] trigger stop event creation failed error=%lu",
+                    static_cast<unsigned long>(GetLastError()));
+                StopTriggerDelivery();
+                return false;
+            }
+
+            g_TriggerPollRunning.store(true, std::memory_order_release);
+            const uintptr_t thread = _beginthreadex(
+                nullptr, 0, TriggerPollThreadProc, nullptr, 0, nullptr);
+            if (!thread)
+            {
+                g_TriggerPollRunning.store(false, std::memory_order_release);
+                LogShimA(LogLevel::Warn, "uiperf-harness",
+                    "[UIPERF][HARNESS] trigger polling helper could not start");
+                StopTriggerDelivery();
+                return false;
+            }
+            g_TriggerPollThread = reinterpret_cast<HANDLE>(thread);
+            LogShimA(LogLevel::Info, "uiperf-harness",
+                "[UIPERF][HARNESS] idle trigger delivery armed poll_interval=200ms");
+            return true;
+        }
+
+        static void StopTriggerDelivery() noexcept
+        {
+            g_TriggerPollRunning.store(false, std::memory_order_release);
+            if (g_TriggerStopEvent)
+                SetEvent(g_TriggerStopEvent);
+            if (g_TriggerPollThread)
+            {
+                WaitForSingleObject(g_TriggerPollThread, INFINITE);
+                CloseHandle(g_TriggerPollThread);
+                g_TriggerPollThread = nullptr;
+            }
+
+            const HWND window = g_Hwnd.exchange(nullptr, std::memory_order_acq_rel);
+            const WNDPROC original = g_OrigWndProc.exchange(
+                nullptr, std::memory_order_acq_rel);
+            if (window && original && IsWindow(window))
+            {
+                const auto current = reinterpret_cast<WNDPROC>(
+                    GetWindowLongPtrA(window, GWLP_WNDPROC));
+                if (current == &NewWndProc)
+                {
+                    SetWindowLongPtrA(window, GWLP_WNDPROC,
+                                      reinterpret_cast<LONG_PTR>(original));
+                }
+                else if (current)
+                {
+                    LogShimA(LogLevel::Warn, "uiperf-harness",
+                        "[UIPERF][HARNESS] window procedure changed after install; preserving newer owner current=0x%p",
+                        current);
+                }
+            }
+
+            if (g_PeekMessageAIat && g_RealPeekMessageA)
+            {
+                DWORD oldProtect = 0;
+                if (VirtualProtect(g_PeekMessageAIat, sizeof(void*),
+                                   PAGE_READWRITE, &oldProtect))
+                {
+                    InterlockedCompareExchangePointer(
+                        reinterpret_cast<PVOID volatile*>(g_PeekMessageAIat),
+                        reinterpret_cast<void*>(g_RealPeekMessageA),
+                        reinterpret_cast<void*>(&Hooked_PeekMessageA));
+                    DWORD ignored = 0;
+                    VirtualProtect(g_PeekMessageAIat, sizeof(void*),
+                                   oldProtect, &ignored);
+                    FlushInstructionCache(GetCurrentProcess(),
+                                          g_PeekMessageAIat, sizeof(void*));
+                }
+            }
+            g_PeekMessageAIat = nullptr;
+            g_RealPeekMessageA = nullptr;
+            g_TriggerMessagePending.store(false, std::memory_order_release);
+
+            if (g_TriggerStopEvent)
+            {
+                CloseHandle(g_TriggerStopEvent);
+                g_TriggerStopEvent = nullptr;
+            }
         }
 
         bool InstallInlineHook(ShellHook& hook, uintptr_t target, void* detour, size_t minLen, const uint8_t* expectedPrefix = nullptr);
@@ -372,20 +585,62 @@ namespace BZROpenShim::UiPerfHooks
         // tail-call the original via trampoline.
         // ------------------------------------------------------------------
         using FnShellRequest = void(__thiscall*)(void*, int);
-        using FnShellTransition = void(__cdecl*)(); // actually no args, uses global manager
-        using FnShellBack = void(__cdecl*)();
+        // FUN_007C7070 is cdecl: (dialog, promoted bool mode) -> bool/int.
+        // Its callers clean eight stack bytes after the call. Preserving both
+        // arguments and EAX is essential; treating it as void() reconstructs a
+        // bogus dialog from stack garbage and prevents the frontend settling.
+        using FnShellTransition = int(__cdecl*)(int*, int);
+        using FnShellBack = void(__thiscall*)(void*);
+        using FnBuildIaResources = void(__thiscall*)(void*);
+        using FnInstantActionCtor = void*(__thiscall*)(void*);
+
+        void __fastcall Detour_BuildIaResources(void* ecx, void* /*edx*/)
+        {
+            const uint64_t start = UiPerf::NowTicks();
+            auto* orig = reinterpret_cast<FnBuildIaResources>(g_BuildIaResourcesHook.trampoline);
+            if (orig) orig(ecx);
+            LogShimA(LogLevel::Info, "uiperf-hooks",
+                "[UIPERF][DRILL] buildIAResources %.2fms this=0x%p",
+                UiPerf::TicksToMs(UiPerf::NowTicks() - start), ecx);
+        }
+
+        void* __fastcall Detour_InstantActionCtor(void* ecx, void* /*edx*/)
+        {
+            const uint64_t start = UiPerf::NowTicks();
+            auto* orig = reinterpret_cast<FnInstantActionCtor>(g_InstantActionCtorHook.trampoline);
+            void* result = orig ? orig(ecx) : nullptr;
+            LogShimA(LogLevel::Info, "uiperf-hooks",
+                "[UIPERF][DRILL] InstantActionCtor %.2fms this=0x%p result=0x%p",
+                UiPerf::TicksToMs(UiPerf::NowTicks() - start), ecx, result);
+            return result;
+        }
 
         void __fastcall Detour_ShellRequest(void* ecx, void* /*edx*/, int screenId)
         {
             if (UiPerf::IsEnabled())
             {
                 if (!g_ShellManager) g_ShellManager = ecx; // capture valid dialog/manager
+                __try
+                {
+                    g_TransitionSourceScreen.store(
+                        reinterpret_cast<uintptr_t>(*reinterpret_cast<void**>(
+                            reinterpret_cast<uint8_t*>(ecx) + 0x14)),
+                        std::memory_order_relaxed);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    g_TransitionSourceScreen.store(0, std::memory_order_relaxed);
+                }
                 g_PendingScreenId.store(screenId, std::memory_order_relaxed);
                 g_ShellRequestStart.store(UiPerf::NowTicks(), std::memory_order_relaxed);
                 UiPerf::NotifyShellRequest(screenId);
                 LogShimA(LogLevel::Info, "uiperf-hooks",
-                    "[UIPERF] ShellRequest screenId=0x%02X (%s) this=0x%p",
-                    screenId, UiPerf::ShellScreenName(screenId) ? UiPerf::ShellScreenName(screenId) : "unknown", ecx);
+                    "[UIPERF] ShellRequest screenId=0x%02X (%s) this=0x%p caller=0x%p",
+                    screenId,
+                    UiPerf::ShellScreenName(screenId)
+                        ? UiPerf::ShellScreenName(screenId)
+                        : "unknown",
+                    ecx, _ReturnAddress());
             }
             auto* orig = reinterpret_cast<FnShellRequest>(g_ShellRequestHook.trampoline);
             if (orig) orig(ecx, screenId);
@@ -415,18 +670,78 @@ namespace BZROpenShim::UiPerfHooks
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
 
+        static void LogUiTree(void* node, int depth)
+        {
+            if (!node || depth > 5) return;
+            __try
+            {
+                const char* name = reinterpret_cast<const char*>(
+                    reinterpret_cast<uint8_t*>(node) + 0x20);
+                const size_t nameLength = strnlen_s(name, 65);
+                const uintptr_t vtable = *reinterpret_cast<uintptr_t*>(node);
+                void* onClick = vtable == 0x008A0470
+                    ? *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(node) + 0x154)
+                    : nullptr;
+                LogShimA(LogLevel::Info, "uiperf-harness",
+                    "[UIPERF][HARNESS] ui depth=%d name=%s ptr=0x%p vt=0x%08X onclick=0x%p",
+                    depth, (nameLength > 0 && nameLength <= 64) ? name : "<unnamed>",
+                    node, static_cast<unsigned>(vtable), onClick);
+
+                void** begin = *reinterpret_cast<void***>(
+                    reinterpret_cast<uint8_t*>(node) + 0x12C);
+                void** end = *reinterpret_cast<void***>(
+                    reinterpret_cast<uint8_t*>(node) + 0x130);
+                if (!begin || !end || begin >= end || (end - begin) > 256)
+                    return;
+                for (void** child = begin; child != end; ++child)
+                    LogUiTree(*child, depth + 1);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+
+        static void* FindNamedButton(void* node, const char* wanted, int depth)
+        {
+            if (!node || !wanted || depth > 5) return nullptr;
+            __try
+            {
+                const char* name = reinterpret_cast<const char*>(
+                    reinterpret_cast<uint8_t*>(node) + 0x20);
+                if (strnlen_s(name, 65) <= 64 && std::strcmp(name, wanted) == 0 &&
+                    *reinterpret_cast<uintptr_t*>(node) == 0x008A0470)
+                    return node;
+
+                void** begin = *reinterpret_cast<void***>(
+                    reinterpret_cast<uint8_t*>(node) + 0x12C);
+                void** end = *reinterpret_cast<void***>(
+                    reinterpret_cast<uint8_t*>(node) + 0x130);
+                if (!begin || !end || begin >= end || (end - begin) > 256)
+                    return nullptr;
+                for (void** child = begin; child != end; ++child)
+                    if (void* found = FindNamedButton(*child, wanted, depth + 1))
+                        return found;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+            return nullptr;
+        }
+
+        static void* GetActiveScreen() noexcept
+        {
+            __try
+            {
+                void* wrapper = *reinterpret_cast<void**>(0x00918320);
+                return wrapper ? *reinterpret_cast<void**>(
+                    reinterpret_cast<uint8_t*>(wrapper) + 0x14) : nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
+        }
+
         void TryHandleTriggerFileOnMainThread()
         {
             BZROpenShim::UiFileScan::SetSuppress(true);
             __try {
             __try {
-                char gameDir[MAX_PATH] = {};
-                if (!GetModuleFileNameA(nullptr, gameDir, MAX_PATH)) return;
-                char* sl = strrchr(gameDir, '\\');
-                if (!sl) return;
-                *(sl+1) = '\0';
                 char trigPath[MAX_PATH] = {};
-                _snprintf_s(trigPath, MAX_PATH, _TRUNCATE, "%suiperf_trigger.txt", gameDir);
+                if (!BuildTriggerFilePath(trigPath)) return;
                 DWORD attr = GetFileAttributesA(trigPath);
                 if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY)) return;
                 char want[128] = {};
@@ -441,26 +756,73 @@ namespace BZROpenShim::UiPerfHooks
                 char* p = want;
                 while (*p==' ' || *p=='\t') ++p;
                 if (!*p) return;
-                LogShimA(LogLevel::Info, "uiperf-harness", "trigger file requests button '%s'", p);
+                LogShimA(LogLevel::Info, "uiperf-harness",
+                    "[UIPERF][HARNESS] trigger=%s detected", p);
                 if (strcmp(p, "__BACK__") == 0)
                 {
                     auto* backFn = reinterpret_cast<FnShellBack>(g_ShellBackHook.trampoline ? g_ShellBackHook.trampoline : reinterpret_cast<void*>(0x007C79A0));
-                    if (backFn)
+                    void* wrapper = *reinterpret_cast<void**>(0x00918320);
+                    if (backFn && wrapper)
                     {
-                        LogShimA(LogLevel::Info, "uiperf-harness", "invoking ShellBack");
-                        __try { backFn(); } __except (EXCEPTION_EXECUTE_HANDLER) {
+                        LogShimA(LogLevel::Info, "uiperf-harness",
+                            "[UIPERF][HARNESS] invoking ShellBack on main thread tid=%lu",
+                            static_cast<unsigned long>(GetCurrentThreadId()));
+                        __try { backFn(wrapper); } __except (EXCEPTION_EXECUTE_HANDLER) {
                             LogShimA(LogLevel::Warn, "uiperf-harness", "ShellBack threw");
                         }
                     }
                     return;
                 }
+                if (strcmp(p, "__ENUMERATE__") == 0)
+                {
+                    void* activeScreen = GetActiveScreen();
+                    LogShimA(LogLevel::Info, "uiperf-harness",
+                        "[UIPERF][HARNESS] enumerating active screen ptr=0x%p", activeScreen);
+                    LogUiTree(activeScreen, 0);
+                    return;
+                }
                 void* ms2 = *(void**)0x0094551C;
-                if (!ms2 || *(uintptr_t*)ms2 != 0x0089E178) return;
+                if (!ms2 || *(uintptr_t*)ms2 != 0x0089E178)
+                {
+                    void* activeScreen = GetActiveScreen();
+                    void* genericButton = FindNamedButton(activeScreen, p, 0);
+                    if (!genericButton)
+                    {
+                        LogShimA(LogLevel::Warn, "uiperf-harness",
+                            "[UIPERF][HARNESS] MainScreen not located and button=%s not found in active screen ptr=0x%p",
+                            p, activeScreen);
+                        return;
+                    }
+                    void* genericOnClick = *reinterpret_cast<void**>(
+                        reinterpret_cast<uint8_t*>(genericButton) + 0x154);
+                    LogShimA(LogLevel::Info, "uiperf-harness",
+                        "[UIPERF][HARNESS] button=%s ptr=0x%p vt=0x%08X onclick=0x%p",
+                        p, genericButton,
+                        static_cast<unsigned>(*reinterpret_cast<uintptr_t*>(genericButton)),
+                        genericOnClick);
+                    LogShimA(LogLevel::Info, "uiperf-harness",
+                        "[UIPERF][HARNESS] invoking OnClick on main thread tid=%lu",
+                        static_cast<unsigned long>(GetCurrentThreadId()));
+                    reinterpret_cast<void(__cdecl*)()>(genericOnClick)();
+                    return;
+                }
+                LogShimA(LogLevel::Info, "uiperf-harness",
+                    "[UIPERF][HARNESS] MainScreen ptr=0x%p vt=0x%08X",
+                    ms2, static_cast<unsigned>(*(uintptr_t*)ms2));
                 void* ov2 = *(void**)((uint8_t*)ms2 + 0x158);
-                if (!ov2 || *(uintptr_t*)ov2 != 0x008A0B94) return;
+                if (!ov2 || *(uintptr_t*)ov2 != 0x008A0B94)
+                {
+                    LogShimA(LogLevel::Warn, "uiperf-harness",
+                        "[UIPERF][HARNESS] MainScreen_Overlay not located ptr=0x%p", ov2);
+                    return;
+                }
+                LogShimA(LogLevel::Info, "uiperf-harness",
+                    "[UIPERF][HARNESS] MainScreen_Overlay ptr=0x%p vt=0x%08X",
+                    ov2, static_cast<unsigned>(*(uintptr_t*)ov2));
                 void** b = *(void***)((uint8_t*)ov2 + 0x12C);
                 void** e = *(void***)((uint8_t*)ov2 + 0x130);
                 if (!b || !e || b >= e || (e - b) >= 64) return;
+                bool found = false;
                 for (void** it = b; it != e; ++it)
                 {
                     void* ch2 = *it;
@@ -470,12 +832,23 @@ namespace BZROpenShim::UiPerfHooks
                     if (*(uintptr_t*)ch2 != 0x008A0470) return;
                     void* oc2 = *(void**)((uint8_t*)ch2 + 0x154);
                     if (!oc2) return;
-                    LogShimA(LogLevel::Info, "uiperf-harness", "invoking OnClick for '%s' at 0x%p this=0x%p", p, oc2, ch2);
-                    auto* fn = reinterpret_cast<void(__thiscall*)(void*)>(oc2);
-                    __try { fn(ch2); } __except (EXCEPTION_EXECUTE_HANDLER) {
+                    found = true;
+                    LogShimA(LogLevel::Info, "uiperf-harness",
+                        "[UIPERF][HARNESS] button=%s ptr=0x%p vt=0x%08X onclick=0x%p",
+                        p, ch2, static_cast<unsigned>(*(uintptr_t*)ch2), oc2);
+                    LogShimA(LogLevel::Info, "uiperf-harness",
+                        "[UIPERF][HARNESS] invoking OnClick on main thread tid=%lu",
+                        static_cast<unsigned long>(GetCurrentThreadId()));
+                    auto* fn = reinterpret_cast<void(__cdecl*)()>(oc2);
+                    __try { fn(); } __except (EXCEPTION_EXECUTE_HANDLER) {
                         LogShimA(LogLevel::Warn, "uiperf-harness", "OnClick threw for '%s'", p);
                     }
                     break;
+                }
+                if (!found)
+                {
+                    LogShimA(LogLevel::Warn, "uiperf-harness",
+                        "[UIPERF][HARNESS] button=%s not found", p);
                 }
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
             } __finally {
@@ -483,50 +856,72 @@ namespace BZROpenShim::UiPerfHooks
             }
         }
 
-        void __stdcall Detour_ShellTransition()
+        int __cdecl Detour_ShellTransition(int* dialog, int mode)
         {
-            uint64_t t0 = 0;
-            if (UiPerf::IsEnabled())
+            const int pendingBefore = g_PendingScreenId.load(std::memory_order_relaxed);
+            uint64_t callStart = 0;
+            if (UiPerf::IsEnabled() && pendingBefore >= 0)
             {
-                t0 = UiPerf::NowTicks();
-                UiPerf::Log("[UIPERF] BEGIN ShellTransition");
+                callStart = UiPerf::NowTicks();
+                if (!g_ShellTransitionInFlight.exchange(true, std::memory_order_acq_rel))
+                    UiPerf::Log("[UIPERF] BEGIN ShellTransition pending=0x%02X", pendingBefore);
             }
             auto* orig = reinterpret_cast<FnShellTransition>(g_ShellTransitionHook.trampoline);
-            if (orig) orig();
-            if (UiPerf::IsEnabled() && t0)
+            const int result = orig ? orig(dialog, mode) : 0;
+            if (UiPerf::IsEnabled() && callStart)
             {
-                const double ms = UiPerf::TicksToMs(UiPerf::NowTicks() - t0);
                 const int pending = g_PendingScreenId.load(std::memory_order_relaxed);
-                UiPerf::Log("[UIPERF] END ShellTransition %.2fms pending=0x%02X", ms, pending);
-                UiPerf::NotifyShellTransitionComplete();
-                UiPerf::Heartbeat("ShellTransitionEnd");
-                g_PendingScreenId.store(-1, std::memory_order_relaxed);
-                if (pending == 0x01)
+                bool requestStillPending = true;
+                void* activeScreen = nullptr;
+                __try
                 {
-                    LogMainScreenButtons();
-                    TryHandleTriggerFileOnMainThread();
+                    requestStillPending = !dialog ||
+                        *(reinterpret_cast<uint8_t*>(dialog) + 0x27) != 0;
+                    activeScreen = dialog ? reinterpret_cast<void*>(dialog[5]) : nullptr;
                 }
-                else
+                __except (EXCEPTION_EXECUTE_HANDLER) {}
+                const uintptr_t sourceScreen = g_TransitionSourceScreen.load(
+                    std::memory_order_relaxed);
+                if (pending >= 0 && !requestStillPending && activeScreen &&
+                    reinterpret_cast<uintptr_t>(activeScreen) != sourceScreen)
                 {
-                    // Also check trigger file on any transition, so a trigger
-                    // written while at MP/IA can still be consumed when that
-                    // screen's transition completes and we return to Main.
-                    TryHandleTriggerFileOnMainThread();
+                    const double ms = UiPerf::TicksToMs(UiPerf::NowTicks() - callStart);
+                    UiPerf::Log("[UIPERF] END ShellTransition final_call=%.2fms pending=0x%02X active=0x%p vt=0x%08X",
+                        ms, pending, activeScreen,
+                        static_cast<unsigned>(*reinterpret_cast<uintptr_t*>(activeScreen)));
+                    UiPerf::NotifyShellTransitionComplete();
+                    UiPerf::Heartbeat("ShellTransitionEnd");
+                    g_PendingScreenId.store(-1, std::memory_order_relaxed);
+                    g_ShellTransitionInFlight.store(false, std::memory_order_release);
+                    if (pending == 0x01)
+                        LogMainScreenButtons();
                 }
             }
+            return result;
         }
 
-        void __stdcall Detour_ShellBack()
+        void __fastcall Detour_ShellBack(void* ecx, void* /*edx*/)
         {
             if (UiPerf::IsEnabled())
             {
+                g_PendingScreenId.store(0x100, std::memory_order_relaxed);
+                g_ShellRequestStart.store(UiPerf::NowTicks(), std::memory_order_relaxed);
+                __try
+                {
+                    g_TransitionSourceScreen.store(
+                        reinterpret_cast<uintptr_t>(*reinterpret_cast<void**>(
+                            reinterpret_cast<uint8_t*>(ecx) + 0x14)),
+                        std::memory_order_relaxed);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    g_TransitionSourceScreen.store(0, std::memory_order_relaxed);
+                }
                 UiPerf::NotifyShellRequest(0x100);
                 LogShimA(LogLevel::Info, "uiperf-hooks", "[UIPERF] ShellBack");
             }
             auto* orig = reinterpret_cast<FnShellBack>(g_ShellBackHook.trampoline);
-            if (orig) orig();
-            if (UiPerf::IsEnabled())
-                UiPerf::Heartbeat("ShellBackEnd");
+            if (orig) orig(ecx);
         }
 
         bool InstallInlineHook(ShellHook& hook, uintptr_t target, void* detour, size_t minLen, const uint8_t* expectedPrefix)
@@ -656,37 +1051,6 @@ namespace BZROpenShim::UiPerfHooks
 
     } // namespace
 
-    static bool PatchImportForPeekGlobal(HMODULE mod, const char* func, void* newFunc, void** orig)
-    {
-        if (!mod || !func || !newFunc) return false;
-        auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(mod);
-        if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
-        auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(reinterpret_cast<uint8_t*>(mod) + dos->e_lfanew);
-        if (nt->Signature != IMAGE_NT_SIGNATURE) return false;
-        DWORD rva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
-        if (!rva) return false;
-        auto* desc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(reinterpret_cast<uint8_t*>(mod) + rva);
-        for (; desc->Name; ++desc)
-        {
-            auto* thunk = reinterpret_cast<IMAGE_THUNK_DATA*>(reinterpret_cast<uint8_t*>(mod) + desc->FirstThunk);
-            auto* origThunk = reinterpret_cast<IMAGE_THUNK_DATA*>(reinterpret_cast<uint8_t*>(mod) + (desc->OriginalFirstThunk ? desc->OriginalFirstThunk : desc->FirstThunk));
-            for (; origThunk->u1.AddressOfData; ++origThunk, ++thunk)
-            {
-                if (IMAGE_SNAP_BY_ORDINAL(origThunk->u1.Ordinal)) continue;
-                auto* byName = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(reinterpret_cast<uint8_t*>(mod) + origThunk->u1.AddressOfData);
-                if (strcmp((const char*)byName->Name, func) != 0) continue;
-                void** iat = reinterpret_cast<void**>(&thunk->u1.Function);
-                DWORD old = 0;
-                if (!VirtualProtect(iat, sizeof(void*), PAGE_READWRITE, &old)) return false;
-                if (orig && !*orig) *orig = *iat;
-                *iat = newFunc;
-                VirtualProtect(iat, sizeof(void*), old, &old);
-                return true;
-            }
-        }
-        return false;
-    }
-
     void Install()
     {
         if (g_Installed.exchange(true))
@@ -763,6 +1127,16 @@ namespace BZROpenShim::UiPerfHooks
         }
         else LogShimA(LogLevel::Info, "uiperf-hooks", "ShellBack hook skipped at 0x%08X", backAddr);
 
+        // Narrow GOG-build drilldown for the >1s IA unattributed interval.
+        // Both functions have the validated 55 8B EC 6A FF prologue and are
+        // timed only while UI performance logging is explicitly enabled.
+        if (InstallInlineHook(g_BuildIaResourcesHook, 0x0076A430,
+                              reinterpret_cast<void*>(&Detour_BuildIaResources), 5, nullptr))
+            LogShimA(LogLevel::Info, "uiperf-hooks", "buildIAResources drilldown installed");
+        if (InstallInlineHook(g_InstantActionCtorHook, 0x00789C20,
+                              reinterpret_cast<void*>(&Detour_InstantActionCtor), 5, nullptr))
+            LogShimA(LogLevel::Info, "uiperf-hooks", "InstantActionCtor drilldown installed");
+
         g_ShellRequestAddr = reqAddr;
         g_ShellTransitionAddr = transAddr;
         g_ShellBackAddr = backAddr;
@@ -771,12 +1145,13 @@ namespace BZROpenShim::UiPerfHooks
             "UiPerf hooks ready: shellReq=0x%08X shellTrans=0x%08X shellBack=0x%08X hooked=%d automatrix=%d",
             reqAddr, transAddr, backAddr, hooked, g_AutoMatrixEnabled.load()?1:0);
 
-        // Periodic trigger-file poll on the main thread (frontend idle).
-        // Full window-subclass + PostMessage poll will be landed in the
-        // follow-up harness commit; this rev keeps the trigger check only
-        // inside ShellTransition (main thread) to avoid anonymous-namespace
-        // visibility issues in this build. Polling ~200ms with SetSuppress
-        // and main-thread OnClick will be added next.
+        // Hooked PeekMessageA installs the window subclass from Redux's owning
+        // UI thread. The worker started here never dereferences Battlezone UI
+        // objects: cross-thread UI traversal is forbidden because menu objects
+        // are rebuilt during shell transitions and are not thread-safe. It only
+        // tests trigger-file presence and posts WM_UI_TRIGGER; the subclass
+        // performs all file consumption, overlay traversal, and OnClick work.
+        StartTriggerDelivery();
 
         if (g_AutoMatrixEnabled.load() && !g_AutoMatrixRunning.exchange(true))
         {
@@ -805,6 +1180,11 @@ namespace BZROpenShim::UiPerfHooks
         {
             LogShimA(LogLevel::Info, "uiperf-hooks", "OgreMain.dll not yet loaded; Ogre timing will attach on first initialiseResourceGroup");
         }
+    }
+
+    void Shutdown() noexcept
+    {
+        StopTriggerDelivery();
     }
 
 } // namespace BZROpenShim::UiPerfHooks
