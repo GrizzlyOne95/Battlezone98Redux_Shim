@@ -1,6 +1,7 @@
 #include "bzr_hooks.h"
 #include "game_state.h"
 #include "openshim_ini.h"
+#include "openshim_preset_migration.h"
 #include "terrain_proxy.h"
 #include "bzr_options_ui.h"
 #include "patches.h"
@@ -2115,7 +2116,13 @@ namespace BZROpenShim
         // the stock campaign included -- is completely unaffected.
         static constexpr bool kAiOdfGameplayTuningEnabledDefault = true;
         static constexpr bool kTurretAimPitchEnabledDefault = true;
-        static constexpr bool kAttackRevealEnabledDefault = true;
+        // Fail-closed safe default: the perceived-team reveal tail is an
+        // enhancement, not proven legacy parity, and its hook sites are
+        // quarantined from normal registration on main. Shipping a default
+        // of false ensures a failed or missing migration cannot leave the
+        // experimental behavior enabled for this boot; a user who explicitly
+        // wants it can still set AttackRevealPerceivedTeam=1.
+        static constexpr bool kAttackRevealEnabledDefault = false;
         static constexpr long kAttackRevealTraceBudgetDefault = 64;
         // Global single-player improvement. The exact-byte and live-net-id
         // guards still keep it off unsupported builds and multiplayer.
@@ -27899,9 +27906,24 @@ namespace BZROpenShim
         // perceivedTeam it needs a kill switch that is not the exported bridge
         // API, because this is the first build in which turning it off can
         // actually change anything.
+        //
+        // Migration ordering / fail-closed: preset migration must happen
+        // before this read (or the loader must reload the migrated file).
+        // TryMigratePlayerPresetOnStartup is invoked early from the patcher
+        // thread before any Initialize* runs, so a corrected file is already
+        // on disk for this boot where practical. If the game directory cannot
+        // be written, migration logs the failure but runtime must still fail
+        // closed for the quarantined hook; MigrationRequiresSafeFallback…()
+        // forces the safe default for this boot even though the file still
+        // holds the old 1.
         {
             bool attackRevealConfig = false;
-            if (TryGetUserConfigBool("SinglePlayer", "AttackRevealPerceivedTeam",
+            if (MigrationRequiresSafeFallbackForAttackReveal())
+            {
+                g_AttackRevealEnabled = false;
+                Log(L"[CONFIG] preset migration requires safe AttackReveal fallback; forcing disabled for this boot\n");
+            }
+            else if (TryGetUserConfigBool("SinglePlayer", "AttackRevealPerceivedTeam",
                                      attackRevealConfig))
             {
                 g_AttackRevealEnabled = attackRevealConfig;
