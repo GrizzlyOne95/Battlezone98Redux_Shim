@@ -61,11 +61,24 @@ namespace BZROpenShim::UiPerf
         };
         thread_local ThreadState t_state;
 
+        // Category stack for exclusive vs inclusive accounting.
+        // Ogre parseScripts synchronously performs filesystem work, so inclusive
+        // Ogre and inclusive filesystem overlap. We keep exclusive buckets for
+        // percentages and inclusive diagnostics separate.
+        struct CatStackEntry
+        {
+            std::string category;
+            uint64_t startTicks = 0;
+            double childMs = 0.0;
+        };
+        thread_local std::vector<CatStackEntry> t_catStack;
+
         // Transition-level aggregation (protected by mutex because shell
         // notifications may come from a different path than ScopedTransition).
         struct CategoryBucket
         {
-            double totalMs = 0.0;
+            double totalMs = 0.0; // exclusive for percentages
+            double inclusiveMs = 0.0; // diagnostic inclusive
             uint32_t calls = 0;
         };
         std::mutex g_Mutex;
@@ -74,6 +87,45 @@ namespace BZROpenShim::UiPerf
         uint64_t g_ActiveTransitionStart = 0;
         std::vector<std::string> g_ActiveNotes;
         bool g_TransitionActive = false;
+
+        static void AddLeafCategoryTimeLocked(const char* category, double ms) noexcept
+        {
+            if (!category || ms <= 0.0) return;
+            // If we are inside a parent category, record overlap so parent's
+            // exclusive is reduced.
+            if (!t_catStack.empty())
+            {
+                t_catStack.back().childMs += ms;
+            }
+            // Caller holds g_Mutex.
+            auto& b = g_CategoryBuckets[category];
+            b.totalMs += ms;
+            b.inclusiveMs += ms;
+            b.calls += 1;
+        }
+
+        static void PushCategoryLocked(const std::string& cat, uint64_t start) noexcept
+        {
+            t_catStack.push_back(CatStackEntry{cat, start, 0.0});
+        }
+
+        static void PopCategoryLocked(const std::string& cat, uint64_t end) noexcept
+        {
+            if (t_catStack.empty()) return;
+            CatStackEntry entry = t_catStack.back();
+            t_catStack.pop_back();
+            // Defensive: allow mismatched pop due to early outs, just use entry's category.
+            const double inclusive = TicksToMs(end - entry.startTicks);
+            const double exclusive = inclusive > entry.childMs ? inclusive - entry.childMs : 0.0;
+            auto& b = g_CategoryBuckets[entry.category];
+            b.totalMs += exclusive;
+            b.inclusiveMs += inclusive;
+            b.calls += 1;
+            if (!t_catStack.empty())
+                t_catStack.back().childMs += inclusive;
+            // If caller supplied different cat than stack top, also ensure that cat gets inclusive? No, trust stack.
+            (void)cat;
+        }
 
         void LogLocked(LogLevel level, const char* fmt, va_list args) noexcept
         {
@@ -119,6 +171,7 @@ namespace BZROpenShim::UiPerf
         {
             g_CategoryBuckets.clear();
             g_ActiveNotes.clear();
+            t_catStack.clear();
         }
 
         std::string FormatSummaryLocked(const char* label, double totalMs) noexcept
@@ -138,12 +191,34 @@ namespace BZROpenShim::UiPerf
                     g_CategoryBuckets.begin(), g_CategoryBuckets.end());
                 std::sort(sorted.begin(), sorted.end(),
                     [](const auto& a, const auto& b){ return a.first < b.first; });
+                double exclusiveSum = 0.0;
+                for (const auto& kv : sorted)
+                    exclusiveSum += kv.second.totalMs;
+                const double unattributed = totalMs > exclusiveSum ? totalMs - exclusiveSum : 0.0;
                 for (const auto& kv : sorted)
                 {
-                    char line[256] = {};
+                    char line[320] = {};
+                    // Report exclusive for percentages; include inclusive in parentheses when it differs.
+                    if (kv.second.inclusiveMs > kv.second.totalMs + 0.01)
+                    {
+                        _snprintf_s(line, _countof(line), _TRUNCATE,
+                            "  %s=%.2fms (inclusive %.2fms) calls=%u",
+                            kv.first.c_str(), kv.second.totalMs, kv.second.inclusiveMs, kv.second.calls);
+                    }
+                    else
+                    {
+                        _snprintf_s(line, _countof(line), _TRUNCATE,
+                            "  %s=%.2fms calls=%u",
+                            kv.first.c_str(), kv.second.totalMs, kv.second.calls);
+                    }
+                    out += "\n";
+                    out += line;
+                }
+                // Always report unattributed exclusive remainder.
+                {
+                    char line[128] = {};
                     _snprintf_s(line, _countof(line), _TRUNCATE,
-                        "  %s=%.2fms calls=%u",
-                        kv.first.c_str(), kv.second.totalMs, kv.second.calls);
+                        "  unattributed=%.2fms", unattributed);
                     out += "\n";
                     out += line;
                 }
@@ -305,13 +380,20 @@ namespace BZROpenShim::UiPerf
     // ------------------------------------------------------------------
     // ScopedPhase
     // ------------------------------------------------------------------
-    ScopedPhase::ScopedPhase(const char* name)
+    ScopedPhase::ScopedPhase(const char* name, const char* category)
         : m_name(name)
+        , m_category(category ? category : "")
         , m_start(NowTicks())
         , m_depth(t_state.depth)
         , m_active(IsEnabled())
+        , m_hasCategory(category && category[0])
     {
         if (!m_active) return;
+        if (m_hasCategory)
+        {
+            // Push category stack for exclusive accounting.
+            t_catStack.push_back(CatStackEntry{m_category, m_start, 0.0});
+        }
         // Emit BEGIN line.
         const std::string indent = IndentForDepth(m_depth);
         char line[512] = {};
@@ -327,14 +409,20 @@ namespace BZROpenShim::UiPerf
         }
     }
 
-    ScopedPhase::ScopedPhase(const std::string& name)
+    ScopedPhase::ScopedPhase(const std::string& name, const char* category)
         : m_owned(name)
+        , m_category(category ? category : "")
         , m_start(NowTicks())
         , m_depth(t_state.depth)
         , m_active(IsEnabled())
+        , m_hasCategory(category && category[0])
     {
         m_name = m_owned.c_str();
         if (!m_active) return;
+        if (m_hasCategory)
+        {
+            t_catStack.push_back(CatStackEntry{m_category, m_start, 0.0});
+        }
         const std::string indent = IndentForDepth(m_depth);
         char line[512] = {};
         _snprintf_s(line, _countof(line), _TRUNCATE,
@@ -353,6 +441,11 @@ namespace BZROpenShim::UiPerf
         if (!m_active || m_dismissed) return;
         const uint64_t end = NowTicks();
         const double ms = TicksToMs(end - m_start);
+        if (m_hasCategory)
+        {
+            std::lock_guard<std::mutex> lock(g_Mutex);
+            PopCategoryLocked(m_category, end);
+        }
         // Depth was incremented in ctor; END is at the original depth.
         if (t_state.depth > 0) --t_state.depth;
         const std::string indent = IndentForDepth(m_depth);
@@ -531,15 +624,10 @@ namespace BZROpenShim::UiPerf
             c.duplicatePaths, c.workshopItems,
             c.elapsedMs);
         EmitLocked(line);
-        if (IsEnabled())
+        if (g_TransitionActive)
         {
             std::lock_guard<std::mutex> lock(g_Mutex);
-            if (g_TransitionActive)
-            {
-                auto& b = g_CategoryBuckets["filesystem"];
-                b.totalMs += c.elapsedMs;
-                b.calls += 1;
-            }
+            AddLeafCategoryTimeLocked("filesystem", c.elapsedMs);
         }
     }
 
@@ -560,9 +648,10 @@ namespace BZROpenShim::UiPerf
         if (g_TransitionActive)
         {
             std::lock_guard<std::mutex> lock(g_Mutex);
-            auto& b = g_CategoryBuckets["ogre"];
-            b.totalMs += elapsedMs;
-            b.calls += 1;
+            // Ogre ops may nest inside each other (e.g. initialise contains parse),
+            // but we treat each as leaf for now; the category stack will handle
+            // parent subtraction if caller used ScopedPhase with category "ogre".
+            AddLeafCategoryTimeLocked("ogre", elapsedMs);
         }
     }
 
@@ -592,9 +681,7 @@ namespace BZROpenShim::UiPerf
         if (g_TransitionActive)
         {
             std::lock_guard<std::mutex> lock(g_Mutex);
-            auto& b = g_CategoryBuckets["shader"];
-            b.totalMs += elapsedMs;
-            b.calls += 1;
+            AddLeafCategoryTimeLocked("shader", elapsedMs);
         }
     }
 
