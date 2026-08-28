@@ -74,7 +74,11 @@ namespace BZROpenShim::UiFileScan
         std::atomic<uint32_t> g_TotalFindNext{ 0 };
         std::atomic<uint32_t> g_TotalGetAttributes{ 0 };
         std::atomic<bool> g_ScanActive{ false };
-        std::atomic<bool> g_Suppress{ false };
+        // Suppression can overlap across the shader fingerprint worker, the
+        // trigger helper, and the UI thread consuming a trigger. A depth count
+        // prevents one caller from re-enabling scan accounting while another
+        // caller still owns a suppression scope.
+        std::atomic<uint32_t> g_SuppressDepth{ 0 };
 
         std::string NarrowLower(std::string s)
         {
@@ -167,15 +171,13 @@ namespace BZROpenShim::UiFileScan
             bool active() const { return entered; }
         };
 
-        void SetSuppressImpl(bool s) noexcept { g_Suppress.store(s, std::memory_order_relaxed); }
-
         // Hook implementations ------------------------------------------------
         HANDLE WINAPI Hooked_FindFirstFileW(LPCWSTR pattern, LPWIN32_FIND_DATAW data)
         {
             if (!g_RealFindFirstFileW)
                 return INVALID_HANDLE_VALUE;
             const HANDLE h = g_RealFindFirstFileW(pattern, data);
-            if (!UiPerf::IsEnabled() || g_Suppress.load(std::memory_order_relaxed)) return h;
+            if (!UiPerf::IsEnabled() || g_SuppressDepth.load(std::memory_order_relaxed) != 0) return h;
             if (t_InHook) return h;
             ReentryGuard guard;
             if (!guard.active()) return h;
@@ -211,7 +213,7 @@ namespace BZROpenShim::UiFileScan
             if (!g_RealFindFirstFileA)
                 return INVALID_HANDLE_VALUE;
             const HANDLE h = g_RealFindFirstFileA(pattern, data);
-            if (!UiPerf::IsEnabled() || g_Suppress.load(std::memory_order_relaxed)) return h;
+            if (!UiPerf::IsEnabled() || g_SuppressDepth.load(std::memory_order_relaxed) != 0) return h;
             if (t_InHook) return h;
             ReentryGuard guard;
             if (!guard.active()) return h;
@@ -247,7 +249,7 @@ namespace BZROpenShim::UiFileScan
         {
             if (!g_RealFindNextFileW) return FALSE;
             const BOOL ok = g_RealFindNextFileW(h, data);
-            if (!UiPerf::IsEnabled() || g_Suppress.load(std::memory_order_relaxed) || !ok || !data) return ok;
+            if (!UiPerf::IsEnabled() || g_SuppressDepth.load(std::memory_order_relaxed) != 0 || !ok || !data) return ok;
             if (t_InHook) return ok;
             ReentryGuard guard;
             if (!guard.active()) return ok;
@@ -271,7 +273,7 @@ namespace BZROpenShim::UiFileScan
         {
             if (!g_RealFindNextFileA) return FALSE;
             const BOOL ok = g_RealFindNextFileA(h, data);
-            if (!UiPerf::IsEnabled() || g_Suppress.load(std::memory_order_relaxed) || !ok || !data) return ok;
+            if (!UiPerf::IsEnabled() || g_SuppressDepth.load(std::memory_order_relaxed) != 0 || !ok || !data) return ok;
             if (t_InHook) return ok;
             ReentryGuard guard;
             if (!guard.active()) return ok;
@@ -305,7 +307,7 @@ namespace BZROpenShim::UiFileScan
         {
             if (!g_RealGetFileAttributesW) return INVALID_FILE_ATTRIBUTES;
             const DWORD r = g_RealGetFileAttributesW(path);
-            if (!UiPerf::IsEnabled() || g_Suppress.load(std::memory_order_relaxed) || t_InHook) return r;
+            if (!UiPerf::IsEnabled() || g_SuppressDepth.load(std::memory_order_relaxed) != 0 || t_InHook) return r;
             g_TotalGetAttributes.fetch_add(1, std::memory_order_relaxed);
             return r;
         }
@@ -314,7 +316,7 @@ namespace BZROpenShim::UiFileScan
         {
             if (!g_RealGetFileAttributesA) return INVALID_FILE_ATTRIBUTES;
             const DWORD r = g_RealGetFileAttributesA(path);
-            if (!UiPerf::IsEnabled() || g_Suppress.load(std::memory_order_relaxed) || t_InHook) return r;
+            if (!UiPerf::IsEnabled() || g_SuppressDepth.load(std::memory_order_relaxed) != 0 || t_InHook) return r;
             g_TotalGetAttributes.fetch_add(1, std::memory_order_relaxed);
             return r;
         }
@@ -399,6 +401,20 @@ namespace BZROpenShim::UiFileScan
             g_RootAgg.size(), elapsed);
     }
 
-    void SetSuppress(bool suppress) noexcept { g_Suppress.store(suppress, std::memory_order_relaxed); }
+    void SetSuppress(bool suppress) noexcept
+    {
+        if (suppress)
+        {
+            g_SuppressDepth.fetch_add(1, std::memory_order_acq_rel);
+            return;
+        }
+
+        uint32_t depth = g_SuppressDepth.load(std::memory_order_acquire);
+        while (depth != 0 && !g_SuppressDepth.compare_exchange_weak(
+            depth, depth - 1, std::memory_order_acq_rel,
+            std::memory_order_acquire))
+        {
+        }
+    }
 
 } // namespace BZROpenShim::UiFileScan
