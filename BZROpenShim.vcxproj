@@ -166,6 +166,9 @@
     <ClCompile Include="src\engine\native_ui.cpp" />
     <ClCompile Include="src\patches\trampolines.cpp" />
     <ClCompile Include="src\patches\netcode_hooks.cpp" />
+    <ClCompile Include="src\patches\ui_performance.cpp" />
+    <ClCompile Include="src\patches\ui_performance_hooks.cpp" />
+    <ClCompile Include="src\patches\ui_file_scan_hooks.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
@@ -219,6 +222,9 @@
     <ClInclude Include="include\openshim_env_config.h" />
     <ClInclude Include="include\openshim_update_manifest.h" />
     <ClInclude Include="include\openshim_updater.h" />
+    <ClInclude Include="include\ui_performance.h" />
+    <ClInclude Include="include\ui_performance_hooks.h" />
+    <ClInclude Include="include\ui_file_scan_hooks.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="src\engine\version.rc" />

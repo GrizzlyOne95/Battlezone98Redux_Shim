@@ -572,7 +572,15 @@ namespace BZROpenShim
             return;
         if (!g_InitDone.load(std::memory_order_relaxed))
         {
+            const uint64_t t0 = GetTickCount64();
             TryInitLocked();
+            // UiPerf: record cache init cost (includes file fingerprint scan).
+            if (g_InitDone.load(std::memory_order_relaxed))
+            {
+                const double ms = static_cast<double>(GetTickCount64() - t0);
+                LogShimA(LogLevel::Info, "shadercache",
+                    "[UIPERF][SHADER] cache_init elapsed=%.2fms", ms);
+            }
             return;
         }
         // Covers shell-only sessions where the sim tick never runs: the

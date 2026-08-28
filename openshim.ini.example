@@ -735,6 +735,17 @@ RelayLoggingAllUdp = 0
 ; Legacy env aliases: OPENSHIM_BZRNET_TRACE_QUEUE, BZ_BZRNET_TRACE_QUEUE
 RelayLoggingQueueRecords = 4096
 
+; UI responsiveness / stall profiling (hierarchical [UIPERF] logging).
+; When enabled, Redux shell transitions (Main Menu <-> Multiplayer, etc.)
+; emit hierarchical BEGIN/END lines with per-phase elapsed and a [SUMMARY]
+; with filesystem/ogre/shader breakdowns, plus stall markers for long
+; main-thread gaps.  Verbose adds per-directory / per-resource detail.
+; Default: OFF (zero overhead path is a single relaxed atomic check).
+; Legacy env aliases: OPENSHIM_UI_PERFORMANCE_LOGGING,
+;                     OPENSHIM_UI_PERFORMANCE_VERBOSE
+UiPerformanceLogging = 0
+UiPerformanceVerbose = 0
+
 
 
 ; Read-only probe: log what GameObject::SetDamageFlags actually reveals.
