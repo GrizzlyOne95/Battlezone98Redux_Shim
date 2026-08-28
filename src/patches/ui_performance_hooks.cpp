@@ -72,7 +72,6 @@ namespace BZROpenShim::UiPerfHooks
         std::atomic<uint64_t> g_ShellRequestStart{ 0 };
         std::atomic<int> g_PendingScreenId{ -1 };
         std::atomic<bool> g_ShellTransitionInFlight{ false };
-        std::atomic<uintptr_t> g_TransitionSourceScreen{ 0 };
 
         // Trigger-file reachability: file is polled on a worker thread every
         // ~200ms (conservative, not per-frame) with SetSuppress so it never
@@ -655,17 +654,6 @@ namespace BZROpenShim::UiPerfHooks
             if (UiPerf::IsEnabled())
             {
                 if (!g_ShellManager) g_ShellManager = ecx; // capture valid dialog/manager
-                __try
-                {
-                    g_TransitionSourceScreen.store(
-                        reinterpret_cast<uintptr_t>(*reinterpret_cast<void**>(
-                            reinterpret_cast<uint8_t*>(ecx) + 0x14)),
-                        std::memory_order_relaxed);
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    g_TransitionSourceScreen.store(0, std::memory_order_relaxed);
-                }
                 g_PendingScreenId.store(screenId, std::memory_order_relaxed);
                 g_ShellRequestStart.store(UiPerf::NowTicks(), std::memory_order_relaxed);
                 UiPerf::NotifyShellRequest(screenId);
@@ -838,7 +826,11 @@ namespace BZROpenShim::UiPerfHooks
                     LogShimA(LogLevel::Info, "uiperf-harness",
                         "[UIPERF][HARNESS] invoking OnClick on main thread tid=%lu",
                         static_cast<unsigned long>(GetCurrentThreadId()));
-                    reinterpret_cast<void(__cdecl*)()>(genericOnClick)();
+                    // Redux stores member thunks in the OnClick slot. Back
+                    // callbacks read owner+0x138 to find the shell manager, so
+                    // invoking without the live screen in ECX is not equivalent
+                    // to the engine's normal UI dispatch.
+                    reinterpret_cast<void(__thiscall*)(void*)>(genericOnClick)(activeScreen);
                     return;
                 }
                 LogShimA(LogLevel::Info, "uiperf-harness",
@@ -874,8 +866,8 @@ namespace BZROpenShim::UiPerfHooks
                     LogShimA(LogLevel::Info, "uiperf-harness",
                         "[UIPERF][HARNESS] invoking OnClick on main thread tid=%lu",
                         static_cast<unsigned long>(GetCurrentThreadId()));
-                    auto* fn = reinterpret_cast<void(__cdecl*)()>(oc2);
-                    __try { fn(); } __except (EXCEPTION_EXECUTE_HANDLER) {
+                    auto* fn = reinterpret_cast<void(__thiscall*)(void*)>(oc2);
+                    __try { fn(ms2); } __except (EXCEPTION_EXECUTE_HANDLER) {
                         LogShimA(LogLevel::Warn, "uiperf-harness", "OnClick threw for '%s'", p);
                     }
                     break;
@@ -915,10 +907,11 @@ namespace BZROpenShim::UiPerfHooks
                     activeScreen = dialog ? reinterpret_cast<void*>(dialog[5]) : nullptr;
                 }
                 __except (EXCEPTION_EXECUTE_HANDLER) {}
-                const uintptr_t sourceScreen = g_TransitionSourceScreen.load(
-                    std::memory_order_relaxed);
-                if (pending >= 0 && !requestStillPending && activeScreen &&
-                    reinterpret_cast<uintptr_t>(activeScreen) != sourceScreen)
+                // Screen factories may reuse the allocation that held the
+                // previous screen. Redux clears the request byte only after
+                // destruction and destination construction complete, making
+                // that byte the reliable completion signal.
+                if (pending >= 0 && !requestStillPending && activeScreen)
                 {
                     const double ms = UiPerf::TicksToMs(UiPerf::NowTicks() - callStart);
                     UiPerf::Log("[UIPERF] END ShellTransition final_call=%.2fms pending=0x%02X active=0x%p vt=0x%08X",
@@ -941,17 +934,6 @@ namespace BZROpenShim::UiPerfHooks
             {
                 g_PendingScreenId.store(0x100, std::memory_order_relaxed);
                 g_ShellRequestStart.store(UiPerf::NowTicks(), std::memory_order_relaxed);
-                __try
-                {
-                    g_TransitionSourceScreen.store(
-                        reinterpret_cast<uintptr_t>(*reinterpret_cast<void**>(
-                            reinterpret_cast<uint8_t*>(ecx) + 0x14)),
-                        std::memory_order_relaxed);
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    g_TransitionSourceScreen.store(0, std::memory_order_relaxed);
-                }
                 UiPerf::NotifyShellRequest(0x100);
                 LogShimA(LogLevel::Info, "uiperf-hooks", "[UIPERF] ShellBack");
             }
@@ -1140,7 +1122,8 @@ namespace BZROpenShim::UiPerfHooks
         // (dumped 2026-08-28 via ReadProcessMemory):
         //   007C7930: 55 8B EC 51 89 4D FC ... => 7 bytes to reach 89 4D FC
         //   007C7070: 55 8B EC 6A FF ... => 5 bytes is boundary (push -1)
-        // Back uses 5 as fallback.
+        //   007C79A0: 55 8B EC 51 89 4D FC ... => 7 bytes; five would split
+        //             the mov [ebp-4],ecx instruction and corrupt the trampoline.
         if (InstallInlineHook(g_ShellRequestHook, reqAddr, reinterpret_cast<void*>(&Detour_ShellRequest), 7, nullptr))
         {
             ++hooked;
@@ -1155,10 +1138,10 @@ namespace BZROpenShim::UiPerfHooks
         }
         else LogShimA(LogLevel::Warn, "uiperf-hooks", "ShellTransition hook FAILED at 0x%08X", transAddr);
 
-        if (InstallInlineHook(g_ShellBackHook, backAddr, reinterpret_cast<void*>(&Detour_ShellBack), 5, nullptr))
+        if (InstallInlineHook(g_ShellBackHook, backAddr, reinterpret_cast<void*>(&Detour_ShellBack), 7, nullptr))
         {
             ++hooked;
-            LogShimA(LogLevel::Info, "uiperf-hooks", "ShellBack hook installed at 0x%08X tramp=0x%p", backAddr, g_ShellBackHook.trampoline);
+            LogShimA(LogLevel::Info, "uiperf-hooks", "ShellBack hook installed at 0x%08X len=7 tramp=0x%p", backAddr, g_ShellBackHook.trampoline);
         }
         else LogShimA(LogLevel::Info, "uiperf-hooks", "ShellBack hook skipped at 0x%08X", backAddr);
 
