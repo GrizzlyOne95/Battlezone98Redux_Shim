@@ -23,6 +23,7 @@
 #include "native_cpu_sampler.h"
 #include "pilot_fp_animation_trace.h"
 #include "openshim_sdk_v2.h"
+#include "openshim_updater.h"
 #include "render_profile_runtime.h"
 #include "BZROpenShim.h"
 
@@ -200,6 +201,7 @@ namespace BZROpenShim
             g_PatchThread = 0;
         }
         BZROpenShim::ShutdownNativeCpuSampler();
+        BZROpenShim::ShutdownOpenShimUpdater();
         BZROpenShim::ShutdownOpenShimSdkV2();
         BZROpenShim::ShutdownPilotFpAnimationTrace();
         BZROpenShim::ShutdownOgreAnimationProfiler();

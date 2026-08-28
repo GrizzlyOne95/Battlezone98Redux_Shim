@@ -67,6 +67,11 @@ add_executable(resolve_table_tests
     ../src/engine/resolve_table.cpp
 )
 
+add_executable(openshim_update_manifest_tests
+    openshim_update_manifest_tests.cpp
+    ../src/patches/openshim_update_manifest.cpp
+)
+
 add_executable(ai_range_policy_tests
     ai_range_policy_tests.cpp
 )
@@ -102,6 +107,8 @@ target_include_directories(sun_flash_tests PRIVATE ../include)
 target_compile_features(sun_flash_tests PRIVATE cxx_std_20)
 target_include_directories(resolve_table_tests PRIVATE ../include ../third_party)
 target_compile_features(resolve_table_tests PRIVATE cxx_std_20)
+target_include_directories(openshim_update_manifest_tests PRIVATE ../include)
+target_compile_features(openshim_update_manifest_tests PRIVATE cxx_std_20)
 target_include_directories(ai_range_policy_tests PRIVATE ../include)
 target_compile_features(ai_range_policy_tests PRIVATE cxx_std_20)
 # Point the test at the patches.json the game will actually load, so the
@@ -123,6 +130,7 @@ if(MSVC)
     target_compile_options(chunk_batch_invalidation_tests PRIVATE /W4 /WX)
     target_compile_options(sun_flash_tests PRIVATE /W4 /WX)
     target_compile_options(resolve_table_tests PRIVATE /W4 /WX)
+    target_compile_options(openshim_update_manifest_tests PRIVATE /W4 /WX)
     target_compile_options(ai_range_policy_tests PRIVATE /W4 /WX)
 else()
     target_compile_options(bzrnet_protocol_tests PRIVATE -Wall -Wextra -Werror)
@@ -137,6 +145,7 @@ else()
     target_compile_options(chunk_batch_invalidation_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(sun_flash_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(resolve_table_tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(openshim_update_manifest_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(ai_range_policy_tests PRIVATE -Wall -Wextra -Werror)
 endif()
 
@@ -151,6 +160,7 @@ add_test(NAME headlight_falloff_tests COMMAND headlight_falloff_tests)
 add_test(NAME chunk_batch_invalidation_tests COMMAND chunk_batch_invalidation_tests)
 add_test(NAME sun_flash_tests COMMAND sun_flash_tests)
 add_test(NAME resolve_table_tests COMMAND resolve_table_tests)
+add_test(NAME openshim_update_manifest_tests COMMAND openshim_update_manifest_tests)
 add_test(NAME ai_range_policy_tests COMMAND ai_range_policy_tests)
 
 target_include_directories(render_profile_tests PRIVATE ../include)

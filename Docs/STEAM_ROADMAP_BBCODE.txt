@@ -527,6 +527,7 @@ A lot of things that used to be on this roadmap have already moved into working 
 [*] Mission briefing scrolling fixes
 [*] AI engagement-range improvements
 [*] Native OpenShim options UI
+[*] One-click Steam Workshop OpenShim suite update checking and staging from the native options UI
 [*] Crash logging with first-chance diagnostics and minidumps
 [*] SprayBuilding/splinter firing-after-destruction fix
 [*] MagnetClass zero/invalid-range divide-by-zero guard

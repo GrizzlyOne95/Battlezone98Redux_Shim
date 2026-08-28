@@ -142,6 +142,8 @@
     <ClCompile Include="src\patches\net_optimizer.cpp" />
     <ClCompile Include="src\patches\openshim_ini.cpp" />
     <ClCompile Include="src\patches\openshim_env_config.cpp" />
+    <ClCompile Include="src\patches\openshim_update_manifest.cpp" />
+    <ClCompile Include="src\patches\openshim_updater.cpp" />
     <ClCompile Include="src\patches\bzr_options_ui.cpp" />
     <ClCompile Include="src\patches\ogre_shader_cache.cpp" />
     <ClCompile Include="src\patches\ogre_enhanced_light_selection.cpp" />
@@ -215,6 +217,8 @@
     <ClInclude Include="include\netcode_hooks.h" />
     <ClInclude Include="include\openshim_ini.h" />
     <ClInclude Include="include\openshim_env_config.h" />
+    <ClInclude Include="include\openshim_update_manifest.h" />
+    <ClInclude Include="include\openshim_updater.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="src\engine\version.rc" />
