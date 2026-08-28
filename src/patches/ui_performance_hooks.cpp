@@ -304,6 +304,35 @@ namespace BZROpenShim::UiPerfHooks
                 UiPerf::NotifyShellTransitionComplete();
                 UiPerf::Heartbeat("ShellTransitionEnd");
                 g_PendingScreenId.store(-1, std::memory_order_relaxed);
+                // Harness equivalence aid: log MainScreen buttons when we return to MainMenu.
+                if (pending == 0x01)
+                {
+                    __try {
+                        void* ms = *(void**)0x0094551C;
+                        if (ms && *(uintptr_t*)ms == 0x0089E178)
+                        {
+                            void* ov = *(void**)((uint8_t*)ms + 0x158);
+                            if (ov && *(uintptr_t*)ov == 0x008A0B94)
+                            {
+                                void** beg = *(void***)((uint8_t*)ov + 0x12C);
+                                void** en = *(void***)((uint8_t*)ov + 0x130);
+                                if (beg && en && beg < en && (en - beg) < 64)
+                                {
+                                    for (void** it = beg; it != en; ++it)
+                                    {
+                                        void* ch = *it;
+                                        if (!ch) continue;
+                                        const char* nm = (const char*)((uint8_t*)ch + 0x20);
+                                        if (!nm || !nm[0] || strlen(nm) > 64) continue;
+                                        uintptr_t vt = *(uintptr_t*)ch;
+                                        void* oc = (vt == 0x008A0470) ? *(void**)((uint8_t*)ch + 0x154) : nullptr;
+                                        LogShimA(LogLevel::Info, "uiperf-harness", "button name='%s' vt=0x%08X this=0x%p onClick=0x%p", nm, (unsigned)vt, ch, oc);
+                                    }
+                                }
+                            }
+                        }
+                    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                }
             }
         }
 

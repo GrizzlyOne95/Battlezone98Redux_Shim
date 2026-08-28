@@ -401,3 +401,28 @@ The profiler is now validated for the `OFF` overhead and for the three accountin
 - Repeat the six transitions immediately without exiting or changing content, then fill the required table `Transition| First| Repeat| Delta| Repeat/First` and the per-transition category breakdowns.
 
 No optimization will be implemented until that table shows which `expensive work repeats despite no content change`.
+
+---
+
+## 20. Harness correction for real frontend path (2026-08-28 rev3)
+
+**Interpretation correction accepted:** The tight `MainMenu` loop does **not** prove stalls are content-dependent; it only proves dialog reconstruction itself is not the stall. The intended `Main->MP`/`IA`/`Campaign` transitions were not executed because synthetic `ShellRequest` reused a stale per-screen `cUI_Dialog` (`MainScreen+0x138` heap `0x1E68Cxxx`).
+
+**Minimum harness to reproduce real UI work:** `MainScreen_Overlay` child button enumeration → actual child `OnClick` at `+0x154`.
+
+- `MainScreen` singleton `DAT_0094551C` (`0x0094551C`, vtable `0x0089E178`) → overlay `+0x158` (vtable `0x008A0B94`).
+- Child collection `+0x12C/0x130` (`std::vector<void*>`), name at `+0x20`, button vtable `0x008A0470`, `OnClick` at `+0x154` (existing `src/engine/native_ui.cpp: kUiButtonOnClickOffset`).
+- Use `ShellBack` (`007C79A0`) for returns where appropriate, but forward steps must go via button to preserve `listDir`/`buildMPResources`/`buildIAResources` and `Modable` init.
+
+**Implementation in this rev:** `ui_performance_hooks.cpp:Detour_ShellTransition` now logs `uiperf-harness` button table when `pending==0x01` (return to MainMenu), e.g.:
+
+```
+[uiperf-harness] button name='SinglePlayer_MainScreen' vt=0x008A0470 this=0x... onClick=0x...
+[uiperf-harness] button name='MultiPlayer_MainScreen' vt=0x008A0470 ...
+```
+
+Next harness will post `WM_USER+0x100` to the game's window (`Battlezone 98 Redux (2.2.301) DX11`) and the subclassed `WndProc` (installed after `FindWindow`) will, on the main thread, locate the named button and call `((void(__thiscall*)(void*))onClick)(button)`. This executes **exactly** the same `FUN_0078c550->FUN_0078c6c0` / `listDir` / `ResourceGroup` path as a physical click, so resource/content prep is not bypassed. A direct `ShellRequest` with forced ID is rejected unless it can be proven to do the same work.
+
+**Validation plan for harness equivalence** (per forward transition): 1) log button pointer/OnClick, 2) invoke handler, 3) confirm `ShellRequest` ID (hook), 4) confirm destination screen (factory `007C7AD0` ID), 5) confirm `BZOgreLogfile.log` shows `Parsing scripts for Modable` / `Creating resources` when expected, 6) compare one automated vs one manually clicked transition for wall/`SCAN`/`OGRE` parity. If automated skips work manual does, reject harness.
+
+**Status:** button-table logging deployed (`winmm.dll` 2,513,408 b, `Button` helper in `ui_performance_hooks.cpp`). Full six-transition first/repeat capture and `minimal vs content-heavy` (base `addon` 6 dirs vs normal Workshop/CR) comparison remain to be run on unlocked interactive desktop before any optimization is selected. No merge to `main`.
