@@ -138,7 +138,8 @@
     <ClCompile Include="src\patches\game_state.cpp" />
     <ClCompile Include="src\patches\native_cpu_sampler.cpp" />
     <ClCompile Include="src\patches\net_optimizer.cpp" />
-    <ClCompile Include="src\patches\openshim_ini.cpp" />
+     <ClCompile Include="src\patches\openshim_ini.cpp" />
+    <ClCompile Include="src\patches\openshim_preset_migration.cpp" />
     <ClCompile Include="src\patches\openshim_env_config.cpp" />
     <ClCompile Include="src\patches\bzr_options_ui.cpp" />
     <ClCompile Include="src\patches\ogre_shader_cache.cpp" />
@@ -212,6 +213,7 @@
     <ClInclude Include="include\scroll_helper.h" />
     <ClInclude Include="include\netcode_hooks.h" />
     <ClInclude Include="include\openshim_ini.h" />
+    <ClInclude Include="include\openshim_preset_migration.h" />
     <ClInclude Include="include\openshim_env_config.h" />
   </ItemGroup>
   <ItemGroup>
