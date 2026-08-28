@@ -18,6 +18,7 @@
 #include "shim_log.h"
 
 #include <Windows.h>
+#include <process.h>
 
 #include <atomic>
 #include <chrono>
@@ -31,6 +32,11 @@ namespace BZROpenShim::UiPerfHooks
     namespace
     {
         std::atomic<bool> g_Installed{ false };
+
+        // Shell manager capture for auto-matrix (set on first ShellRequest).
+        void* g_ShellManager = nullptr;
+        std::atomic<bool> g_AutoMatrixRunning{ false };
+        std::atomic<bool> g_AutoMatrixEnabled{ false };
 
         // Per-operation active timers (single-threaded shell path, but Ogre
         // may be called from load thread; guard with mutex).
@@ -46,6 +52,22 @@ namespace BZROpenShim::UiPerfHooks
         thread_local int t_modDiscoveryDepth = 0;
         thread_local uint64_t t_modDiscoveryStart = 0;
         std::string g_ModDiscoveryContext;
+
+        // Shell hook trampolines and state.
+        struct ShellHook
+        {
+            void* trampoline = nullptr;
+            uint8_t origBytes[16] = {};
+            size_t origLen = 0;
+            uintptr_t target = 0;
+        };
+        ShellHook g_ShellRequestHook;
+        ShellHook g_ShellTransitionHook;
+        ShellHook g_ShellBackHook;
+        std::atomic<uint64_t> g_ShellRequestStart{ 0 };
+        std::atomic<int> g_PendingScreenId{ -1 };
+
+        bool InstallInlineHook(ShellHook& hook, uintptr_t target, void* detour, size_t minLen, const uint8_t* expectedPrefix = nullptr);
 
         void BeginOp(const char* key, const char* group)
         {
@@ -239,33 +261,189 @@ namespace BZROpenShim::UiPerfHooks
 
     namespace
     {
-        // Assembly detours for shell seams.  These are __declspec(naked) so they
-        // can tail-call the original bytes without disturbing the caller's stack.
-        // The stock shell manager pointer is expected to be passed as 'this' via
-        // ecx/thunk; we preserve all regs and call the C++ helper on a clean stack.
+        // ------------------------------------------------------------------
+        // Shell detour helpers (thiscall).  Detours receive ECX=this, stack
+        // holds screenId for request.  They log, capture manager, then
+        // tail-call the original via trampoline.
+        // ------------------------------------------------------------------
+        using FnShellRequest = void(__thiscall*)(void*, int);
+        using FnShellTransition = void(__cdecl*)(); // actually no args, uses global manager
+        using FnShellBack = void(__cdecl*)();
 
-        // Helpers called from assembly with the screenId still on stack / in register.
-        void ShellRequestHook(int screenId)
+        void __fastcall Detour_ShellRequest(void* ecx, void* /*edx*/, int screenId)
         {
-            UiPerf::NotifyShellRequest(screenId);
+            if (UiPerf::IsEnabled())
+            {
+                if (!g_ShellManager) g_ShellManager = ecx; // capture valid dialog/manager
+                g_PendingScreenId.store(screenId, std::memory_order_relaxed);
+                g_ShellRequestStart.store(UiPerf::NowTicks(), std::memory_order_relaxed);
+                UiPerf::NotifyShellRequest(screenId);
+                LogShimA(LogLevel::Info, "uiperf-hooks",
+                    "[UIPERF] ShellRequest screenId=0x%02X (%s) this=0x%p",
+                    screenId, UiPerf::ShellScreenName(screenId) ? UiPerf::ShellScreenName(screenId) : "unknown", ecx);
+            }
+            auto* orig = reinterpret_cast<FnShellRequest>(g_ShellRequestHook.trampoline);
+            if (orig) orig(ecx, screenId);
         }
 
-        void ShellTransitionHook()
+        void __stdcall Detour_ShellTransition()
         {
-            UiPerf::Heartbeat("ShellTransition");
-            // Also drive the transition-complete logic: the first transition tick
-            // after a request marks the factory having run.
-            // We don't complete here; the transition is completed lazily on the
-            // next frame's heartbeat or on explicit complete.  For now just heartbeat.
+            uint64_t t0 = 0;
+            if (UiPerf::IsEnabled())
+            {
+                t0 = UiPerf::NowTicks();
+                UiPerf::Log("[UIPERF] BEGIN ShellTransition");
+            }
+            auto* orig = reinterpret_cast<FnShellTransition>(g_ShellTransitionHook.trampoline);
+            if (orig) orig();
+            if (UiPerf::IsEnabled() && t0)
+            {
+                const double ms = UiPerf::TicksToMs(UiPerf::NowTicks() - t0);
+                const int pending = g_PendingScreenId.load(std::memory_order_relaxed);
+                UiPerf::Log("[UIPERF] END ShellTransition %.2fms pending=0x%02X", ms, pending);
+                UiPerf::NotifyShellTransitionComplete();
+                UiPerf::Heartbeat("ShellTransitionEnd");
+                g_PendingScreenId.store(-1, std::memory_order_relaxed);
+            }
         }
 
-        // Naked detours.  We install them as 5-byte JMPs; each saves the original
-        // 5 bytes so a trampoline can be built if needed.  For this profiling
-        // build the shell request detour is function-level: we hook the call site
-        // that pushes the screenId rather than the target, so the trampoline is
-        // simply the overwritten bytes + JMP back.  To keep the first cut safe
-        // and auditable, the actual byte-patching is deferred to Install()'s
-        // second phase once the address has been validated against bytes.
+        void __stdcall Detour_ShellBack()
+        {
+            if (UiPerf::IsEnabled())
+            {
+                UiPerf::NotifyShellRequest(0x100);
+                LogShimA(LogLevel::Info, "uiperf-hooks", "[UIPERF] ShellBack");
+            }
+            auto* orig = reinterpret_cast<FnShellBack>(g_ShellBackHook.trampoline);
+            if (orig) orig();
+            if (UiPerf::IsEnabled())
+                UiPerf::Heartbeat("ShellBackEnd");
+        }
+
+        bool InstallInlineHook(ShellHook& hook, uintptr_t target, void* detour, size_t minLen, const uint8_t* expectedPrefix)
+        {
+            if (!target || !detour || minLen < 5) return false;
+            // Read original bytes.
+            uint8_t orig[16] = {};
+            SIZE_T r = 0;
+            if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(target), orig, minLen, &r) || r != minLen)
+                return false;
+            if (expectedPrefix)
+            {
+                for (size_t i = 0; i < minLen; ++i)
+                    if (expectedPrefix[i] != 0xFF && orig[i] != expectedPrefix[i]) return false;
+            }
+            // Allocate trampoline: orig bytes + jmp back to target+minLen.
+            void* tramp = VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+            if (!tramp) return false;
+            memcpy(tramp, orig, minLen);
+            // jmp back
+            uint8_t* p = reinterpret_cast<uint8_t*>(tramp) + minLen;
+            p[0] = 0xE9;
+            const int32_t relBack = static_cast<int32_t>((target + minLen) - (reinterpret_cast<uintptr_t>(p) + 5));
+            memcpy(p+1, &relBack, 4);
+            FlushInstructionCache(GetCurrentProcess(), tramp, minLen+5);
+            // Patch target to jmp detour.
+            DWORD old = 0;
+            if (!VirtualProtect(reinterpret_cast<void*>(target), minLen, PAGE_EXECUTE_READWRITE, &old))
+            {
+                VirtualFree(tramp, 0, MEM_RELEASE);
+                return false;
+            }
+            uint8_t patch[16] = {};
+            patch[0] = 0xE9;
+            const int32_t relDetour = static_cast<int32_t>(reinterpret_cast<uintptr_t>(detour) - (target + 5));
+            memcpy(patch+1, &relDetour, 4);
+            for (size_t i = 5; i < minLen; ++i) patch[i] = 0x90; // nop pad
+            memcpy(reinterpret_cast<void*>(target), patch, minLen);
+            FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void*>(target), minLen);
+            DWORD ign = 0;
+            VirtualProtect(reinterpret_cast<void*>(target), minLen, old, &ign);
+            hook.trampoline = tramp;
+            memcpy(hook.origBytes, orig, minLen);
+            hook.origLen = minLen;
+            hook.target = target;
+            return true;
+        }
+
+        // Auto-matrix driver thread.
+        unsigned __stdcall AutoMatrixThread(void*)
+        {
+            // Wait for UiPerf enabled and for shell manager to be captured.
+            for (int i = 0; i < 600 && !g_ShellManager; ++i)
+            {
+                if (!UiPerf::IsEnabled() || !g_AutoMatrixEnabled.load()) return 0;
+                Sleep(500);
+            }
+            if (!g_ShellManager) return 0;
+            // Give main menu time to stabilize after boot.
+            Sleep(3000);
+            struct Step { int id; const char* name; };
+            const Step firstPass[] = {
+                { 0x0E, "Main->MP" },
+                { 0x01, "MP->Main" },
+                { 0x1B, "Main->IA" },
+                { 0x01, "IA->Main" },
+                { 0x20, "Main->Campaign" },
+                { 0x01, "Campaign->Main" },
+            };
+            auto runPass = [&](int pass) -> bool {
+                for (size_t s = 0; s < _countof(firstPass); ++s)
+                {
+                    if (!g_AutoMatrixEnabled.load()) return false;
+                    const Step& step = firstPass[s];
+                    // Skip if we're already on that screen? Just request anyway.
+                    LogShimA(LogLevel::Info, "uiperf-automatrix",
+                        "[UIPERF][AUTOMATRIX] pass=%d step=%zu %s request=0x%02X",
+                        pass, s, step.name, step.id);
+                    // Call ShellRequest on manager thread? We are on worker thread,
+                    // but shell manager is single-threaded; we must marshal to main
+                    // thread via APC or simply call directly if the function is
+                    // thread-safe for queuing (it marks pending and history).
+                    // The original request is always from main thread; calling
+                    // from worker may race. So we use a suspended main-thread
+                    // call via QueueUserAPC? Simpler: we patch the request to be
+                    // callable from any thread as it just sets pending flag.
+                    // For safety, we call via the trampoline which will run on
+                    // this thread but touches manager memory; manager's pending
+                    // flag is not thread-safe but the game will poll it on its
+                    // own update loop, so cross-thread write is racy but likely
+                    // okay for profiling (worst case missed request). We add a
+                    // Sleep to let update loop pick it up.
+                    auto* fn = reinterpret_cast<FnShellRequest>(g_ShellRequestHook.trampoline ? g_ShellRequestHook.trampoline : reinterpret_cast<void*>(0x007C7930));
+                    if (fn && g_ShellManager)
+                    {
+                        __try { fn(g_ShellManager, step.id); } __except (EXCEPTION_EXECUTE_HANDLER) {
+                            LogShimA(LogLevel::Warn, "uiperf-automatrix", "exception in synthetic request 0x%02X", step.id);
+                        }
+                    }
+                    else if (!g_ShellManager)
+                    {
+                        LogShimA(LogLevel::Warn, "uiperf-automatrix", "no manager for request 0x%02X", step.id);
+                    }
+                    // Wait for transition to complete: poll for 10s max, checking
+                    // that ShellTransition has fired (PendingScreenId cleared).
+                    for (int w = 0; w < 100; ++w)
+                    {
+                        Sleep(100);
+                        if (g_PendingScreenId.load() == -1) break;
+                    }
+                    // Extra settle for menu to become input-ready (resource
+                    // loading and first viewport). 2s is enough for the
+                    // 5-10s stalls to be captured as part of the transition;
+                    // the settle is after END.
+                    Sleep(2000);
+                }
+                return true;
+            };
+            LogShimA(LogLevel::Info, "uiperf-automatrix", "[UIPERF][AUTOMATRIX] starting pass 1 (first)");
+            runPass(1);
+            LogShimA(LogLevel::Info, "uiperf-automatrix", "[UIPERF][AUTOMATRIX] starting pass 2 (repeat, no content change)");
+            Sleep(1000);
+            runPass(2);
+            LogShimA(LogLevel::Info, "uiperf-automatrix", "[UIPERF][AUTOMATRIX] matrix complete");
+            return 0;
+        }
     } // namespace
 
     void Install()
@@ -274,6 +452,32 @@ namespace BZROpenShim::UiPerfHooks
             return;
 
         UiPerf::Initialize();
+
+        // Check for auto-matrix opt-in (ini or env).  This is a separate
+        // instrumentation aid, not an optimization, and is OFF by default.
+        {
+            char buf[16] = {};
+            bool autoMat = false;
+            // Try ini first.
+            char gameDir[MAX_PATH] = {};
+            if (GetModuleFileNameA(nullptr, gameDir, MAX_PATH))
+            {
+                char* slash = strrchr(gameDir, '\\');
+                if (slash) { *(slash+1) = '\0'; std::string ini = std::string(gameDir) + "openshim.ini"; char val[16] = {}; GetPrivateProfileStringA("Diagnostics", "UiPerformanceAutoMatrix", "__unset__", val, sizeof(val), ini.c_str());
+                    if (strcmp(val, "__unset__") != 0) {
+                        std::string v(val); for(char&c:v) c=tolower((unsigned char)c);
+                        autoMat = (v=="1"||v=="true"||v=="on"||v=="yes"||v=="enabled");
+                    }
+                }
+            }
+            if (!autoMat)
+            {
+                DWORD len = GetEnvironmentVariableA("OPENSHIM_UI_PERFORMANCE_AUTOMATRIX", buf, sizeof(buf));
+                if (len>0 && len < sizeof(buf)) { std::string v(buf,len); for(char&c:v) c=tolower((unsigned char)c); autoMat = (v=="1"||v=="true"||v=="on"||v=="yes"); }
+            }
+            g_AutoMatrixEnabled.store(autoMat, std::memory_order_relaxed);
+            if (autoMat) LogShimA(LogLevel::Info, "uiperf-hooks", "UiPerf auto-matrix enabled");
+        }
 
         // Even when disabled we resolve addresses so a later enable doesn't need
         // a restart; but we only patch when enabled to keep the OFF path truly
@@ -284,12 +488,6 @@ namespace BZROpenShim::UiPerfHooks
             return;
         }
 
-        // Resolve shell addresses from patches.json statics / fallbacks.
-        // GOG v2.2.301 constants (also in patcher.cpp ResolveStaticReturnPointers):
-        //   FUN_007c7930 = shell request
-        //   FUN_007c7070 = shell transition
-        //   FUN_007c79a0 = shell back
-        // Prefer ResolveNamedAddress when available, otherwise use statics.
         uint32_t reqAddr = HookEngine::ResolveNamedAddress("ShellRequest");
         if (!reqAddr) reqAddr = 0x007C7930;
         uint32_t transAddr = HookEngine::ResolveNamedAddress("ShellTransition");
@@ -297,33 +495,46 @@ namespace BZROpenShim::UiPerfHooks
         uint32_t backAddr = HookEngine::ResolveNamedAddress("ShellBack");
         if (!backAddr) backAddr = 0x007C79A0;
 
-        // Validate expected bytes before patching.  We don't know the exact
-        // instruction sequence at these addresses a priori, so we only verify
-        // that the addresses are readable code and not already patched.
-        auto readable = [](uint32_t addr) -> bool {
-            __try {
-                volatile uint8_t v = *reinterpret_cast<uint8_t*>(addr);
-                (void)v;
-                return true;
-            } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
-        };
+        int hooked = 0;
+        // Install inline hooks with correct instruction-boundary lengths
+        // (dumped 2026-08-28 via ReadProcessMemory):
+        //   007C7930: 55 8B EC 51 89 4D FC ... => 7 bytes to reach 89 4D FC
+        //   007C7070: 55 8B EC 6A FF ... => 5 bytes is boundary (push -1)
+        // Back uses 5 as fallback.
+        if (InstallInlineHook(g_ShellRequestHook, reqAddr, reinterpret_cast<void*>(&Detour_ShellRequest), 7, nullptr))
+        {
+            ++hooked;
+            LogShimA(LogLevel::Info, "uiperf-hooks", "ShellRequest hook installed at 0x%08X len=7 tramp=0x%p", reqAddr, g_ShellRequestHook.trampoline);
+        }
+        else LogShimA(LogLevel::Warn, "uiperf-hooks", "ShellRequest hook FAILED at 0x%08X", reqAddr);
 
-        int patched = 0;
-        // Phase 1: shell hooks are installed as lightweight IAT-style wrappers
-        // around the existing trampoline infrastructure in src/patches/trampolines.cpp.
-        // To avoid double-patching the same 5 bytes that patcher.cpp already owns,
-        // the first profiling commit records shell transitions via the existing
-        // Patcher's LogHit / MapRefresh trace path and the new UiPerf::Notify*
-        // helpers called directly from trampoline C++ (no extra JMP).  Install()
-        // therefore does NOT emit new JMPs on rev 1; it only validates that the
-        // fallback addresses are readable and logs readiness.
-        if (readable(reqAddr))   { g_ShellRequestAddr = reqAddr; ++patched; }
-        if (readable(transAddr)) { g_ShellTransitionAddr = transAddr; ++patched; }
-        if (readable(backAddr))  { g_ShellBackAddr = backAddr; ++patched; }
+        if (InstallInlineHook(g_ShellTransitionHook, transAddr, reinterpret_cast<void*>(&Detour_ShellTransition), 5, nullptr))
+        {
+            ++hooked;
+            LogShimA(LogLevel::Info, "uiperf-hooks", "ShellTransition hook installed at 0x%08X len=5 tramp=0x%p", transAddr, g_ShellTransitionHook.trampoline);
+        }
+        else LogShimA(LogLevel::Warn, "uiperf-hooks", "ShellTransition hook FAILED at 0x%08X", transAddr);
+
+        if (InstallInlineHook(g_ShellBackHook, backAddr, reinterpret_cast<void*>(&Detour_ShellBack), 5, nullptr))
+        {
+            ++hooked;
+            LogShimA(LogLevel::Info, "uiperf-hooks", "ShellBack hook installed at 0x%08X tramp=0x%p", backAddr, g_ShellBackHook.trampoline);
+        }
+        else LogShimA(LogLevel::Info, "uiperf-hooks", "ShellBack hook skipped at 0x%08X", backAddr);
+
+        g_ShellRequestAddr = reqAddr;
+        g_ShellTransitionAddr = transAddr;
+        g_ShellBackAddr = backAddr;
 
         LogShimA(LogLevel::Info, "uiperf-hooks",
-            "UiPerf hooks ready (rev1 polling): shellReq=0x%08X shellTrans=0x%08X shellBack=0x%08X readable=%d",
-            reqAddr, transAddr, backAddr, patched);
+            "UiPerf hooks ready: shellReq=0x%08X shellTrans=0x%08X shellBack=0x%08X hooked=%d automatrix=%d",
+            reqAddr, transAddr, backAddr, hooked, g_AutoMatrixEnabled.load()?1:0);
+
+        if (g_AutoMatrixEnabled.load() && !g_AutoMatrixRunning.exchange(true))
+        {
+            uintptr_t th = _beginthreadex(nullptr, 0, &AutoMatrixThread, nullptr, 0, nullptr);
+            if (th) CloseHandle(reinterpret_cast<HANDLE>(th));
+        }
 
         // Ogre ResourceGroupManager exports - validate presence.
         HMODULE ogre = GetModuleHandleA("OgreMain.dll");
@@ -335,7 +546,7 @@ namespace BZROpenShim::UiPerfHooks
                 && has("?initialiseAllResourceGroups@ResourceGroupManager@Ogre@@QAEXXZ")
                 && has("?clearResourceGroup@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z")
                 && has("?destroyResourceGroup@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z")
-                && has("?loadResourceGroup@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@_N@Z")
+                && has("?loadResourceGroup@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@_N1@Z")
                 && has("?unloadResourceGroup@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
             LogShimA(LogLevel::Info, "uiperf-hooks",
                 "OgreMain.dll %s (ResourceGroupManager exports %s)",

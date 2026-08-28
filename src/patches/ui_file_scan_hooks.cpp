@@ -74,6 +74,7 @@ namespace BZROpenShim::UiFileScan
         std::atomic<uint32_t> g_TotalFindNext{ 0 };
         std::atomic<uint32_t> g_TotalGetAttributes{ 0 };
         std::atomic<bool> g_ScanActive{ false };
+        std::atomic<bool> g_Suppress{ false };
 
         std::string NarrowLower(std::string s)
         {
@@ -84,7 +85,6 @@ namespace BZROpenShim::UiFileScan
         std::string PatternToRoot(const std::wstring& pat)
         {
             if (pat.empty()) return "unknown";
-            // Convert to narrow; pattern is typically like "C:\...\addon\*\*.odf"
             char buf[MAX_PATH * 2] = {};
             WideCharToMultiByte(CP_UTF8, 0, pat.c_str(), -1, buf, sizeof(buf), nullptr, nullptr);
             std::string s(buf);
@@ -99,25 +99,29 @@ namespace BZROpenShim::UiFileScan
                 return "packaged_mods";
             if (lower.find("bz_assets") != std::string::npos)
                 return "BZ_ASSETS";
-            // Fall back to parent directory of pattern.
-            try {
-                auto p = std::filesystem::path(s);
-                if (p.has_parent_path()) return p.parent_path().string();
-            } catch (...) {}
+            // Fall back to parent directory via string scan (no filesystem call to avoid re-entrancy).
+            size_t sep = s.find_last_of("\\/");
+            if (sep != std::string::npos && sep > 0)
+            {
+                size_t prev = s.find_last_of("\\/", sep - 1);
+                if (prev != std::string::npos) return s.substr(0, sep);
+                return s.substr(0, sep);
+            }
             return s.substr(0, 64);
         }
 
         void CountExtension(RootAggregate& agg, const std::wstring& name)
         {
-            try {
-                auto ext = std::filesystem::path(name).extension().wstring();
-                for (auto& c : ext) c = static_cast<wchar_t>(::towlower(c));
-                if (ext == L".odf") ++agg.odf;
-                else if (ext == L".bzn") ++agg.bzn;
-                else if (ext == L".trn") ++agg.trn;
-                else if (ext == L".des") ++agg.des;
-                else if (ext == L".ini") ++agg.ini;
-            } catch (...) {}
+            if (name.empty()) return;
+            size_t dot = name.find_last_of(L'.');
+            if (dot == std::wstring::npos || dot + 1 >= name.size()) return;
+            std::wstring ext = name.substr(dot);
+            for (auto& c : ext) c = static_cast<wchar_t>(::towlower(c));
+            if (ext == L".odf") ++agg.odf;
+            else if (ext == L".bzn") ++agg.bzn;
+            else if (ext == L".trn") ++agg.trn;
+            else if (ext == L".des") ++agg.des;
+            else if (ext == L".ini") ++agg.ini;
         }
 
         // IAT patch helper (same as file_io_hooks.cpp, trimmed).
@@ -152,13 +156,29 @@ namespace BZROpenShim::UiFileScan
             return false;
         }
 
+        // Re-entrancy guard: hooks must not re-enter themselves via helper
+        // string/filesystem calls that may themselves call FindFirst/GetAttributes.
+        thread_local bool t_InHook = false;
+        struct ReentryGuard
+        {
+            bool entered = false;
+            ReentryGuard() { if (!t_InHook) { t_InHook = true; entered = true; } }
+            ~ReentryGuard() { if (entered) t_InHook = false; }
+            bool active() const { return entered; }
+        };
+
+        void SetSuppressImpl(bool s) noexcept { g_Suppress.store(s, std::memory_order_relaxed); }
+
         // Hook implementations ------------------------------------------------
         HANDLE WINAPI Hooked_FindFirstFileW(LPCWSTR pattern, LPWIN32_FIND_DATAW data)
         {
             if (!g_RealFindFirstFileW)
                 return INVALID_HANDLE_VALUE;
             const HANDLE h = g_RealFindFirstFileW(pattern, data);
-            if (!UiPerf::IsEnabled()) return h;
+            if (!UiPerf::IsEnabled() || g_Suppress.load(std::memory_order_relaxed)) return h;
+            if (t_InHook) return h;
+            ReentryGuard guard;
+            if (!guard.active()) return h;
             g_TotalFindFirst.fetch_add(1, std::memory_order_relaxed);
             if (h != INVALID_HANDLE_VALUE)
             {
@@ -191,7 +211,10 @@ namespace BZROpenShim::UiFileScan
             if (!g_RealFindFirstFileA)
                 return INVALID_HANDLE_VALUE;
             const HANDLE h = g_RealFindFirstFileA(pattern, data);
-            if (!UiPerf::IsEnabled()) return h;
+            if (!UiPerf::IsEnabled() || g_Suppress.load(std::memory_order_relaxed)) return h;
+            if (t_InHook) return h;
+            ReentryGuard guard;
+            if (!guard.active()) return h;
             g_TotalFindFirst.fetch_add(1, std::memory_order_relaxed);
             if (h != INVALID_HANDLE_VALUE && pattern && data)
             {
@@ -224,7 +247,10 @@ namespace BZROpenShim::UiFileScan
         {
             if (!g_RealFindNextFileW) return FALSE;
             const BOOL ok = g_RealFindNextFileW(h, data);
-            if (!UiPerf::IsEnabled() || !ok || !data) return ok;
+            if (!UiPerf::IsEnabled() || g_Suppress.load(std::memory_order_relaxed) || !ok || !data) return ok;
+            if (t_InHook) return ok;
+            ReentryGuard guard;
+            if (!guard.active()) return ok;
             g_TotalFindNext.fetch_add(1, std::memory_order_relaxed);
             auto it = t_liveEnums.find(h);
             const std::wstring pat = (it != t_liveEnums.end()) ? it->second.pattern : L"";
@@ -245,7 +271,10 @@ namespace BZROpenShim::UiFileScan
         {
             if (!g_RealFindNextFileA) return FALSE;
             const BOOL ok = g_RealFindNextFileA(h, data);
-            if (!UiPerf::IsEnabled() || !ok || !data) return ok;
+            if (!UiPerf::IsEnabled() || g_Suppress.load(std::memory_order_relaxed) || !ok || !data) return ok;
+            if (t_InHook) return ok;
+            ReentryGuard guard;
+            if (!guard.active()) return ok;
             g_TotalFindNext.fetch_add(1, std::memory_order_relaxed);
             auto it = t_liveEnums.find(h);
             const std::wstring pat = (it != t_liveEnums.end()) ? it->second.pattern : L"";
@@ -267,7 +296,7 @@ namespace BZROpenShim::UiFileScan
         BOOL WINAPI Hooked_FindClose(HANDLE h)
         {
             if (!g_RealFindClose) return FALSE;
-            if (UiPerf::IsEnabled())
+            if (UiPerf::IsEnabled() && !t_InHook)
                 t_liveEnums.erase(h);
             return g_RealFindClose(h);
         }
@@ -276,8 +305,8 @@ namespace BZROpenShim::UiFileScan
         {
             if (!g_RealGetFileAttributesW) return INVALID_FILE_ATTRIBUTES;
             const DWORD r = g_RealGetFileAttributesW(path);
-            if (UiPerf::IsEnabled())
-                g_TotalGetAttributes.fetch_add(1, std::memory_order_relaxed);
+            if (!UiPerf::IsEnabled() || g_Suppress.load(std::memory_order_relaxed) || t_InHook) return r;
+            g_TotalGetAttributes.fetch_add(1, std::memory_order_relaxed);
             return r;
         }
 
@@ -285,8 +314,8 @@ namespace BZROpenShim::UiFileScan
         {
             if (!g_RealGetFileAttributesA) return INVALID_FILE_ATTRIBUTES;
             const DWORD r = g_RealGetFileAttributesA(path);
-            if (UiPerf::IsEnabled())
-                g_TotalGetAttributes.fetch_add(1, std::memory_order_relaxed);
+            if (!UiPerf::IsEnabled() || g_Suppress.load(std::memory_order_relaxed) || t_InHook) return r;
+            g_TotalGetAttributes.fetch_add(1, std::memory_order_relaxed);
             return r;
         }
 
@@ -330,7 +359,9 @@ namespace BZROpenShim::UiFileScan
         }
 
         // Also patch the CRTs so std::filesystem enumeration is captured.
-        for (const wchar_t* dll : { L"msvcr120.dll", L"ucrtbase.dll", L"kernel32.dll" })
+        // Do NOT patch kernel32.dll: its forwarded exports re-enter via kernelbase
+        // and cause infinite recursion through the hook's own helpers.
+        for (const wchar_t* dll : { L"msvcr120.dll", L"ucrtbase.dll" })
         {
             if (HMODULE m = GetModuleHandleW(dll))
                 PatchModule(m, dll);
@@ -367,5 +398,7 @@ namespace BZROpenShim::UiFileScan
             g_TotalFindFirst.load(), g_TotalFindNext.load(), g_TotalGetAttributes.load(),
             g_RootAgg.size(), elapsed);
     }
+
+    void SetSuppress(bool suppress) noexcept { g_Suppress.store(suppress, std::memory_order_relaxed); }
 
 } // namespace BZROpenShim::UiFileScan

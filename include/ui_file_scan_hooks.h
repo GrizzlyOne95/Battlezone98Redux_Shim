@@ -15,4 +15,8 @@ namespace BZROpenShim::UiFileScan
 {
     void Install() noexcept;
     void Shutdown() noexcept;
+    // Suppress counting while the shader fingerprint scans mod sources; that
+    // scan is not part of menu Workshop/addon enumeration and must not be
+    // misclassified as generic scanning.
+    void SetSuppress(bool suppress) noexcept;
 } // namespace BZROpenShim::UiFileScan
