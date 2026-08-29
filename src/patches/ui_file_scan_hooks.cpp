@@ -5,8 +5,8 @@
 // via IAT patching on the game executable + OgreMain + MSVCR120 so every
 // enumeration path is counted regardless of which CRT it comes through.  The
 // counters are kept thread-local and aggregated per scan root by watching the
-// FindFirstFile pattern argument.  At ModDiscovery scope end a single
-// RecordScan() call is emitted.
+// FindFirstFile pattern argument. At shell-transition completion, one
+// RecordScan() call is emitted for each observed root.
 //
 // When UiPerformanceLogging==false this file still compiles but Install() is
 // a no-op.
@@ -25,6 +25,7 @@
 #include <string>
 #include <unordered_map>
 #include <filesystem>
+#include <vector>
 
 namespace BZROpenShim::UiFileScan
 {
@@ -53,6 +54,8 @@ namespace BZROpenShim::UiFileScan
         struct EnumRecord
         {
             std::wstring pattern;
+            uint64_t startTicks = 0;
+            uint32_t generation = 0;
         };
         thread_local std::unordered_map<HANDLE, EnumRecord> t_liveEnums;
 
@@ -66,6 +69,8 @@ namespace BZROpenShim::UiFileScan
             uint32_t trn = 0;
             uint32_t des = 0;
             uint32_t ini = 0;
+            double inclusiveMs = 0.0;
+            double selfMs = 0.0;
         };
         std::mutex g_AggMutex;
         std::unordered_map<std::string, RootAggregate> g_RootAgg;
@@ -74,6 +79,7 @@ namespace BZROpenShim::UiFileScan
         std::atomic<uint32_t> g_TotalFindNext{ 0 };
         std::atomic<uint32_t> g_TotalGetAttributes{ 0 };
         std::atomic<bool> g_ScanActive{ false };
+        std::atomic<uint32_t> g_ScanGeneration{ 0 };
         // Suppression can overlap across the shader fingerprint worker, the
         // trigger helper, and the UI thread consuming a trigger. A depth count
         // prevents one caller from re-enabling scan accounting while another
@@ -176,21 +182,29 @@ namespace BZROpenShim::UiFileScan
         {
             if (!g_RealFindFirstFileW)
                 return INVALID_HANDLE_VALUE;
+            const bool track = UiPerf::IsEnabled() &&
+                g_ScanActive.load(std::memory_order_acquire) &&
+                g_SuppressDepth.load(std::memory_order_relaxed) == 0 && !t_InHook;
+            const uint64_t callStart = track ? UiPerf::NowTicks() : 0;
             const HANDLE h = g_RealFindFirstFileW(pattern, data);
-            if (!UiPerf::IsEnabled() || g_SuppressDepth.load(std::memory_order_relaxed) != 0) return h;
-            if (t_InHook) return h;
+            if (!track) return h;
             ReentryGuard guard;
             if (!guard.active()) return h;
             g_TotalFindFirst.fetch_add(1, std::memory_order_relaxed);
+            const std::wstring scanPattern = pattern ? pattern : L"";
+            const std::string root = PatternToRoot(scanPattern);
+            const double selfMs = UiPerf::TicksToMs(UiPerf::NowTicks() - callStart);
             if (h != INVALID_HANDLE_VALUE)
             {
-                t_liveEnums[h] = EnumRecord{ pattern ? pattern : L"" };
+                t_liveEnums[h] = EnumRecord{
+                    scanPattern, callStart,
+                    g_ScanGeneration.load(std::memory_order_acquire) };
                 // Also count the first result's extension.
                 if (data)
                 {
-                    const std::string root = PatternToRoot(pattern ? pattern : L"");
                     std::lock_guard<std::mutex> lock(g_AggMutex);
                     RootAggregate& agg = g_RootAgg[root];
+                    agg.selfMs += selfMs;
                     if (data->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
                         ++agg.directories;
                     else
@@ -200,10 +214,10 @@ namespace BZROpenShim::UiFileScan
                     }
                 }
             }
-            if (!g_ScanActive.load(std::memory_order_relaxed) && pattern)
+            else
             {
-                g_ScanActive.store(true, std::memory_order_relaxed);
-                g_ScanStartTicks.store(UiPerf::NowTicks(), std::memory_order_relaxed);
+                std::lock_guard<std::mutex> lock(g_AggMutex);
+                g_RootAgg[root].selfMs += selfMs;
             }
             return h;
         }
@@ -212,35 +226,44 @@ namespace BZROpenShim::UiFileScan
         {
             if (!g_RealFindFirstFileA)
                 return INVALID_HANDLE_VALUE;
+            const bool track = UiPerf::IsEnabled() &&
+                g_ScanActive.load(std::memory_order_acquire) &&
+                g_SuppressDepth.load(std::memory_order_relaxed) == 0 && !t_InHook;
+            const uint64_t callStart = track ? UiPerf::NowTicks() : 0;
             const HANDLE h = g_RealFindFirstFileA(pattern, data);
-            if (!UiPerf::IsEnabled() || g_SuppressDepth.load(std::memory_order_relaxed) != 0) return h;
-            if (t_InHook) return h;
+            if (!track) return h;
             ReentryGuard guard;
             if (!guard.active()) return h;
             g_TotalFindFirst.fetch_add(1, std::memory_order_relaxed);
-            if (h != INVALID_HANDLE_VALUE && pattern && data)
+            wchar_t wpat[MAX_PATH * 2] = {};
+            if (pattern)
+                MultiByteToWideChar(CP_ACP, 0, pattern, -1, wpat, _countof(wpat));
+            const std::string root = PatternToRoot(wpat);
+            const double selfMs = UiPerf::TicksToMs(UiPerf::NowTicks() - callStart);
+            if (h != INVALID_HANDLE_VALUE)
             {
                 // Convert to wide for unified handling.
-                wchar_t wpat[MAX_PATH * 2] = {};
-                MultiByteToWideChar(CP_ACP, 0, pattern, -1, wpat, _countof(wpat));
                 wchar_t wname[MAX_PATH] = {};
-                MultiByteToWideChar(CP_ACP, 0, data->cFileName, -1, wname, _countof(wname));
-                t_liveEnums[h] = EnumRecord{ wpat };
-                const std::string root = PatternToRoot(wpat);
+                if (data)
+                    MultiByteToWideChar(CP_ACP, 0, data->cFileName, -1, wname, _countof(wname));
+                t_liveEnums[h] = EnumRecord{
+                    wpat, callStart,
+                    g_ScanGeneration.load(std::memory_order_acquire) };
                 std::lock_guard<std::mutex> lock(g_AggMutex);
                 RootAggregate& agg = g_RootAgg[root];
-                if (data->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                agg.selfMs += selfMs;
+                if (data && (data->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
                     ++agg.directories;
-                else
+                else if (data)
                 {
                     ++agg.files;
                     CountExtension(agg, wname);
                 }
             }
-            if (!g_ScanActive.load(std::memory_order_relaxed) && pattern)
+            else
             {
-                g_ScanActive.store(true, std::memory_order_relaxed);
-                g_ScanStartTicks.store(UiPerf::NowTicks(), std::memory_order_relaxed);
+                std::lock_guard<std::mutex> lock(g_AggMutex);
+                g_RootAgg[root].selfMs += selfMs;
             }
             return h;
         }
@@ -248,17 +271,28 @@ namespace BZROpenShim::UiFileScan
         BOOL WINAPI Hooked_FindNextFileW(HANDLE h, LPWIN32_FIND_DATAW data)
         {
             if (!g_RealFindNextFileW) return FALSE;
+            auto it = t_liveEnums.find(h);
+            const uint32_t generation = g_ScanGeneration.load(std::memory_order_acquire);
+            const bool track = UiPerf::IsEnabled() &&
+                g_ScanActive.load(std::memory_order_acquire) &&
+                g_SuppressDepth.load(std::memory_order_relaxed) == 0 && !t_InHook &&
+                it != t_liveEnums.end() && it->second.generation == generation;
+            const uint64_t callStart = track ? UiPerf::NowTicks() : 0;
             const BOOL ok = g_RealFindNextFileW(h, data);
-            if (!UiPerf::IsEnabled() || g_SuppressDepth.load(std::memory_order_relaxed) != 0 || !ok || !data) return ok;
-            if (t_InHook) return ok;
+            if (!track) return ok;
             ReentryGuard guard;
             if (!guard.active()) return ok;
             g_TotalFindNext.fetch_add(1, std::memory_order_relaxed);
-            auto it = t_liveEnums.find(h);
-            const std::wstring pat = (it != t_liveEnums.end()) ? it->second.pattern : L"";
+            const std::wstring pat = it->second.pattern;
             const std::string root = PatternToRoot(pat);
             std::lock_guard<std::mutex> lock(g_AggMutex);
+            if (!g_ScanActive.load(std::memory_order_acquire) ||
+                g_ScanGeneration.load(std::memory_order_acquire) != generation)
+                return ok;
             RootAggregate& agg = g_RootAgg[root];
+            agg.selfMs += UiPerf::TicksToMs(UiPerf::NowTicks() - callStart);
+            if (!ok || !data)
+                return ok;
             if (data->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
                 ++agg.directories;
             else
@@ -272,19 +306,30 @@ namespace BZROpenShim::UiFileScan
         BOOL WINAPI Hooked_FindNextFileA(HANDLE h, LPWIN32_FIND_DATAA data)
         {
             if (!g_RealFindNextFileA) return FALSE;
+            auto it = t_liveEnums.find(h);
+            const uint32_t generation = g_ScanGeneration.load(std::memory_order_acquire);
+            const bool track = UiPerf::IsEnabled() &&
+                g_ScanActive.load(std::memory_order_acquire) &&
+                g_SuppressDepth.load(std::memory_order_relaxed) == 0 && !t_InHook &&
+                it != t_liveEnums.end() && it->second.generation == generation;
+            const uint64_t callStart = track ? UiPerf::NowTicks() : 0;
             const BOOL ok = g_RealFindNextFileA(h, data);
-            if (!UiPerf::IsEnabled() || g_SuppressDepth.load(std::memory_order_relaxed) != 0 || !ok || !data) return ok;
-            if (t_InHook) return ok;
+            if (!track) return ok;
             ReentryGuard guard;
             if (!guard.active()) return ok;
             g_TotalFindNext.fetch_add(1, std::memory_order_relaxed);
-            auto it = t_liveEnums.find(h);
-            const std::wstring pat = (it != t_liveEnums.end()) ? it->second.pattern : L"";
+            const std::wstring pat = it->second.pattern;
             const std::string root = PatternToRoot(pat);
+            std::lock_guard<std::mutex> lock(g_AggMutex);
+            if (!g_ScanActive.load(std::memory_order_acquire) ||
+                g_ScanGeneration.load(std::memory_order_acquire) != generation)
+                return ok;
+            RootAggregate& agg = g_RootAgg[root];
+            agg.selfMs += UiPerf::TicksToMs(UiPerf::NowTicks() - callStart);
+            if (!ok || !data)
+                return ok;
             wchar_t wname[MAX_PATH] = {};
             MultiByteToWideChar(CP_ACP, 0, data->cFileName, -1, wname, _countof(wname));
-            std::lock_guard<std::mutex> lock(g_AggMutex);
-            RootAggregate& agg = g_RootAgg[root];
             if (data->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
                 ++agg.directories;
             else
@@ -298,26 +343,79 @@ namespace BZROpenShim::UiFileScan
         BOOL WINAPI Hooked_FindClose(HANDLE h)
         {
             if (!g_RealFindClose) return FALSE;
-            if (UiPerf::IsEnabled() && !t_InHook)
+            auto it = t_liveEnums.find(h);
+            EnumRecord record;
+            const bool known = it != t_liveEnums.end();
+            if (known)
+                record = it->second;
+            const uint32_t generation = g_ScanGeneration.load(std::memory_order_acquire);
+            const bool track = known && UiPerf::IsEnabled() &&
+                g_ScanActive.load(std::memory_order_acquire) &&
+                g_SuppressDepth.load(std::memory_order_relaxed) == 0 && !t_InHook &&
+                record.generation == generation;
+            const uint64_t callStart = track ? UiPerf::NowTicks() : 0;
+            const BOOL result = g_RealFindClose(h);
+            if (known)
                 t_liveEnums.erase(h);
-            return g_RealFindClose(h);
+            if (track)
+            {
+                ReentryGuard guard;
+                if (!guard.active()) return result;
+                const uint64_t end = UiPerf::NowTicks();
+                const std::string root = PatternToRoot(record.pattern);
+                std::lock_guard<std::mutex> lock(g_AggMutex);
+                if (!g_ScanActive.load(std::memory_order_acquire) ||
+                    g_ScanGeneration.load(std::memory_order_acquire) != generation)
+                    return result;
+                RootAggregate& agg = g_RootAgg[root];
+                agg.inclusiveMs += UiPerf::TicksToMs(callStart - record.startTicks);
+                agg.selfMs += UiPerf::TicksToMs(end - callStart);
+            }
+            return result;
         }
 
         DWORD WINAPI Hooked_GetFileAttributesW(LPCWSTR path)
         {
             if (!g_RealGetFileAttributesW) return INVALID_FILE_ATTRIBUTES;
+            const uint32_t generation = g_ScanGeneration.load(std::memory_order_acquire);
+            const bool track = UiPerf::IsEnabled() &&
+                g_ScanActive.load(std::memory_order_acquire) &&
+                g_SuppressDepth.load(std::memory_order_relaxed) == 0 && !t_InHook;
+            const uint64_t callStart = track ? UiPerf::NowTicks() : 0;
             const DWORD r = g_RealGetFileAttributesW(path);
-            if (!UiPerf::IsEnabled() || g_SuppressDepth.load(std::memory_order_relaxed) != 0 || t_InHook) return r;
+            if (!track) return r;
+            ReentryGuard guard;
+            if (!guard.active()) return r;
             g_TotalGetAttributes.fetch_add(1, std::memory_order_relaxed);
+            const std::string root = PatternToRoot(path ? path : L"");
+            std::lock_guard<std::mutex> lock(g_AggMutex);
+            if (g_ScanActive.load(std::memory_order_acquire) &&
+                g_ScanGeneration.load(std::memory_order_acquire) == generation)
+                g_RootAgg[root].selfMs += UiPerf::TicksToMs(UiPerf::NowTicks() - callStart);
             return r;
         }
 
         DWORD WINAPI Hooked_GetFileAttributesA(LPCSTR path)
         {
             if (!g_RealGetFileAttributesA) return INVALID_FILE_ATTRIBUTES;
+            const uint32_t generation = g_ScanGeneration.load(std::memory_order_acquire);
+            const bool track = UiPerf::IsEnabled() &&
+                g_ScanActive.load(std::memory_order_acquire) &&
+                g_SuppressDepth.load(std::memory_order_relaxed) == 0 && !t_InHook;
+            const uint64_t callStart = track ? UiPerf::NowTicks() : 0;
             const DWORD r = g_RealGetFileAttributesA(path);
-            if (!UiPerf::IsEnabled() || g_SuppressDepth.load(std::memory_order_relaxed) != 0 || t_InHook) return r;
+            if (!track) return r;
+            ReentryGuard guard;
+            if (!guard.active()) return r;
             g_TotalGetAttributes.fetch_add(1, std::memory_order_relaxed);
+            wchar_t wpath[MAX_PATH * 2] = {};
+            if (path)
+                MultiByteToWideChar(CP_ACP, 0, path, -1, wpath, _countof(wpath));
+            const std::string root = PatternToRoot(wpath);
+            std::lock_guard<std::mutex> lock(g_AggMutex);
+            if (g_ScanActive.load(std::memory_order_acquire) &&
+                g_ScanGeneration.load(std::memory_order_acquire) == generation)
+                g_RootAgg[root].selfMs += UiPerf::TicksToMs(UiPerf::NowTicks() - callStart);
             return r;
         }
 
@@ -377,28 +475,74 @@ namespace BZROpenShim::UiFileScan
     {
         if (!g_Installed.load()) return;
         if (!UiPerf::IsEnabled()) return;
-        const uint64_t start = g_ScanStartTicks.load();
-        const double elapsed = start ? UiPerf::TicksToMs(UiPerf::NowTicks() - start) : 0.0;
-        std::lock_guard<std::mutex> lock(g_AggMutex);
-        for (auto& kv : g_RootAgg)
+        EndTransition();
+    }
+
+    void BeginTransition() noexcept
+    {
+        if (!g_Installed.load(std::memory_order_acquire) || !UiPerf::IsEnabled())
+            return;
+
+        // Publish inactive before resetting the generation. Hooks that began
+        // under the previous transition validate both values while holding the
+        // aggregate mutex, so they cannot leak into the new snapshot.
+        g_ScanActive.store(false, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lock(g_AggMutex);
+            g_RootAgg.clear();
+            g_ScanGeneration.fetch_add(1, std::memory_order_acq_rel);
+            g_TotalFindFirst.store(0, std::memory_order_relaxed);
+            g_TotalFindNext.store(0, std::memory_order_relaxed);
+            g_TotalGetAttributes.store(0, std::memory_order_relaxed);
+            g_ScanStartTicks.store(UiPerf::NowTicks(), std::memory_order_relaxed);
+        }
+        g_ScanActive.store(true, std::memory_order_release);
+    }
+
+    void EndTransition() noexcept
+    {
+        if (!g_ScanActive.exchange(false, std::memory_order_acq_rel))
+            return;
+
+        const uint64_t start = g_ScanStartTicks.exchange(0, std::memory_order_relaxed);
+        const double windowMs = start
+            ? UiPerf::TicksToMs(UiPerf::NowTicks() - start) : 0.0;
+        const uint32_t generation = g_ScanGeneration.load(std::memory_order_acquire);
+        std::vector<std::pair<std::string, RootAggregate>> roots;
+        {
+            std::lock_guard<std::mutex> lock(g_AggMutex);
+            roots.reserve(g_RootAgg.size());
+            for (const auto& kv : g_RootAgg)
+                roots.push_back(kv);
+            g_RootAgg.clear();
+        }
+
+        double inclusiveMs = 0.0;
+        double selfMs = 0.0;
+        for (const auto& kv : roots)
         {
             UiPerf::ScanCounters sc;
             sc.root = kv.first.c_str();
             sc.directories = kv.second.directories;
             sc.files = kv.second.files;
-            sc.filesOpened = kv.second.files; // best-effort: files == opened for enumeration path
+            sc.filesOpened = kv.second.files;
             sc.odf = kv.second.odf;
             sc.bzn = kv.second.bzn;
             sc.trn = kv.second.trn;
             sc.des = kv.second.des;
             sc.ini = kv.second.ini;
-            sc.elapsedMs = elapsed;
+            sc.elapsedMs = kv.second.inclusiveMs;
+            sc.exclusiveMs = kv.second.selfMs;
+            inclusiveMs += sc.elapsedMs;
+            selfMs += sc.exclusiveMs;
             UiPerf::RecordScan(sc);
         }
         LogShimA(LogLevel::Info, "uiperf-scan",
-            "scan summary: FindFirst=%u FindNext=%u GetFileAttributes=%u roots=%zu elapsed=%.2fms",
-            g_TotalFindFirst.load(), g_TotalFindNext.load(), g_TotalGetAttributes.load(),
-            g_RootAgg.size(), elapsed);
+            "transition scan summary: generation=%u FindFirst=%u FindNext=%u GetFileAttributes=%u roots=%zu window=%.2fms inclusive=%.2fms exclusive=%.2fms",
+            generation, g_TotalFindFirst.load(std::memory_order_relaxed),
+            g_TotalFindNext.load(std::memory_order_relaxed),
+            g_TotalGetAttributes.load(std::memory_order_relaxed), roots.size(),
+            windowMs, inclusiveMs, selfMs);
     }
 
     void SetSuppress(bool suppress) noexcept

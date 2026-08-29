@@ -117,7 +117,8 @@ namespace BZROpenShim::UiPerf
         uint32_t ini = 0;
         uint32_t duplicatePaths = 0;
         uint32_t workshopItems = 0;
-        double elapsedMs = 0.0;
+        double elapsedMs = 0.0;       // inclusive enumeration lifetime
+        double exclusiveMs = 0.0;     // time inside hooked filesystem APIs
     };
     void RecordScan(const ScanCounters& c) noexcept;
 

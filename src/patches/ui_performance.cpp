@@ -616,18 +616,18 @@ namespace BZROpenShim::UiPerf
         const std::string indent = IndentForDepth(depth);
         char line[768] = {};
         _snprintf_s(line, _countof(line), _TRUNCATE,
-            "[UIPERF][SCAN] %sroot=%s directories=%u files=%u opened=%u odf=%u bzn=%u trn=%u des=%u ini=%u dup=%u workshopItems=%u elapsed=%.2fms",
+            "[UIPERF][SCAN] %sroot=%s directories=%u files=%u opened=%u odf=%u bzn=%u trn=%u des=%u ini=%u dup=%u workshopItems=%u elapsed=%.2fms exclusive=%.2fms",
             indent.c_str(),
             c.root ? c.root : "<unknown>",
             c.directories, c.files, c.filesOpened,
             c.odf, c.bzn, c.trn, c.des, c.ini,
             c.duplicatePaths, c.workshopItems,
-            c.elapsedMs);
+            c.elapsedMs, c.exclusiveMs);
         EmitLocked(line);
         if (g_TransitionActive)
         {
             std::lock_guard<std::mutex> lock(g_Mutex);
-            AddLeafCategoryTimeLocked("filesystem", c.elapsedMs);
+            AddLeafCategoryTimeLocked("filesystem", c.exclusiveMs);
         }
     }
 
