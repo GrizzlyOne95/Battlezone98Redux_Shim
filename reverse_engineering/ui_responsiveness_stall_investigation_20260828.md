@@ -853,3 +853,168 @@ Three such dumps were produced in 5 minutes on 2026-08-29
   windowed mode, and shut down through `Stop-BZRGame -Id`; the user's original
   Steam `winmm.dll`, `scripts/patches.json` and `openshim.ini` were restored
   after each capture and verified identical by hash.
+
+## 23. Abort is content-dependent, and every slow route is one Ogre phase (2026-08-29)
+
+§22.5 measured Abort at 60–62 ms and flagged addon content as the untested
+case. Manual qualification then confirmed the missing case: aborting a custom
+campaign mission takes ~3–4 s, opening Custom Campaigns ~4 s, and returning
+from it ~3 s. This section reproduces all three with the same instrumentation,
+identifies the dominant cost, and profiles inside it.
+
+### 23.1 The custom-content route
+
+`Custom Campaigns` is the stock Campaign screen (`0x20`, vtable `0x0089D8D8`),
+reached from `CampaignLaunch` (`0x007BEE80`) on the Single Player screen. Its
+children are `Back` `0x00788030`, `Launch` `0x00788050`, `Options` `0x00788020`
+and a `Mission_List` whose rows are internal to the list widget.
+
+The install under test has two custom campaigns — `Battlezone: A Chronology`
+(Campaign Reimagined, Workshop item `3686673790`) and
+`Battlezone: ISDF Chronicles` (`addon\ISDF Chronicles`). Selecting a campaign
+needs a real click on its row; `Launch` then opens that campaign's own mission
+screen (`Screen0x25`), and `Launch` there starts the mission. So the full route
+is:
+
+`MainScreen -> SinglePlayer -> CampaignLaunch -> [click campaign row] -> Launch
+-> Screen0x25 -> Launch -> Loading -> mission -> Escape -> pause -> Abort`.
+
+### 23.2 Measurements
+
+Capture: `%TEMP%\BZR-OpenShim-uiperf-steam-spabort-20260829-101138\openshim-run.log`
+(abort route) and `...-100444\openshim-run.log` (open/leave cycle). Steam,
+windowed, `/nointro`, real scan-code Escape, live `Abort` OnClick.
+
+| Transition | First | Repeat | `initialise Modable` | `clear Modable` | filesystem self |
+|---|---:|---:|---:|---:|---:|
+| `SinglePlayer` (`0x02`) | 267–278 ms | — | none | none | 0–0.10 ms |
+| **Custom Campaigns (`0x20`) open** | **4226–4673 ms** | **4086 ms** | 3234–3670 ms | 72–78 ms | 24–27 ms |
+| **Custom Campaigns `Back` -> SP** | **2549 ms** | **2539 ms** | 1998 ms | 174 ms | 18 ms |
+| Campaign missions (`0x25`) | 2497 ms | — | 1910 ms | 167 ms | 21 ms |
+| `Loading` (`0x17`) | 159 ms | — | none | none | 0 |
+| `Escape` -> pause (`0x0B`) | 183 ms | — | none | none | 0 |
+| **Abort -> MainMenu, custom mission** | **2484 ms wall** | — | 1832 ms | 82 ms | 0 |
+| Abort -> MainMenu, stock mission (§22.5) | 60–62 ms | 60 ms | none | none | 0 |
+| `Back_SinglePlayer` -> Main | 56 ms | — | none | none | 0 |
+
+The Abort breakdown is the clearest statement of the whole investigation:
+
+| Component | Stock Red Brigade mission | Campaign Reimagined mission |
+|---|---:|---:|
+| `buildMainResources` before the transition | 0.09 ms | **2205.24 ms** |
+| ├─ `clear Modable` | — | 82.20 ms |
+| └─ `initialise Modable` | — | 1831.93 ms |
+| `ShellRequest->MainMenu(0x01)` transition | 61.50 ms | 87.07 ms |
+| `MainScreenCtor` | 3.04 ms | 2.45 ms |
+| filesystem roots scanned | 0 | 0 |
+| wall, `Abort` OnClick to MainScreen live | ~150 ms | **~2484 ms** |
+
+Same code path, same `buildMainResources`, same shell transition. The only
+difference is whether the `Modable` resource group has to be rebuilt. Abort is
+therefore content-dependent exactly as reported, and it is **the same
+`Ogre::initialiseResourceGroup("Modable")` path already measured for
+Multiplayer** — not a separate problem.
+
+### 23.3 Inside `initialiseResourceGroup`
+
+New instrumentation hooks the two stock phases and the script loaders. Both
+phases and both loaders are exported by `OgreMain.dll`, but each export address
+is an incremental-link thunk (`E9 rel32`), so the thunk is followed to the real
+body before hooking — a relative jump cannot be relocated into a trampoline.
+Each body is refused unless its first five bytes are exactly the MSVC SEH
+prologue `55 8B EC 6A FF`, which is also where the fifth byte lands on an
+instruction boundary, so a different OgreMain build fails closed.
+
+Capture: `%TEMP%\BZR-OpenShim-uiperf-steam-spabort-20260829-101753\openshim-run.log`.
+
+| Route | `initialise` | `parseResourceGroupScripts` | scripts | script parse | slowest one | residual | `createDeclaredResources` |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| startup (base set) | 2188.70 ms | 2188.58 ms | 275 | 2125.70 ms | 40.86 ms | 62.88 ms | 0.00 ms |
+| Campaign open, first | 3620.97 ms | 3620.84 ms | 1114 | 3415.44 ms | 30.01 ms | 205.40 ms | 0.00 ms |
+| Campaign open, repeat | 3540.37 ms | 3540.24 ms | 1114 | 3349.92 ms | 22.98 ms | 190.32 ms | 0.00 ms |
+| `Back` -> SP, first | 2662.67 ms | 2662.56 ms | 275 | 2580.64 ms | 43.04 ms | 81.92 ms | 0.00 ms |
+| `Back` -> SP, repeat | 2366.96 ms | 2366.87 ms | 275 | 2300.53 ms | 38.97 ms | 66.34 ms | 0.00 ms |
+
+So, of `initialiseResourceGroup`:
+
+- `parseResourceGroupScripts` is **100.0%** of it;
+- handing script bytes to a `ScriptLoader` is **94–97%** of that;
+- the residual — matching patterns against every archive, building the file
+  list, opening each stream — is 63–205 ms, i.e. **2–6%**;
+- `createDeclaredResources` is **0.00 ms** every time.
+
+Per-script-type attribution (composition from
+`...-102142\openshim-run.log`; that run's absolute times are inflated by a
+concurrent workload and are not quoted here):
+
+| Group set | `.material` | `.program` | `.particle` | total |
+|---|---|---|---|---|
+| base / Main / Single Player | 259 scripts, 93–97% of parse time | 15 scripts, 64–137 ms | 1 script, 3–6 ms | 275 |
+| custom content mounted (Campaign) | 1114 scripts, 100% of parse time | 0 | 0 | 1114 |
+
+`MaterialSerializer::parseScript` never fires: everything goes through
+`ScriptCompilerManager`, as expected for this Ogre version. The Ogre log agrees
+on the sets — six `Parsing scripts for resource group Modable` blocks in one
+session, of 244 / 275 / 1114 / 275 / 1114 / 275 scripts, over 1137 distinct
+`.material` files.
+
+No single script dominates: the slowest is 23–71 ms
+(`cr_pda_overlay.material`, `ibcmmd_port.material`, `CR_terrain.program`,
+`pc/materials/BZ2Render.material`) against totals of 2.3–5.3 s. The cost is the
+aggregate of ~1114 material scripts at ~3 ms each, so nothing can be fixed by
+special-casing a few files.
+
+The counts are identical between first and repeat visits: **the same 275 or
+1114 scripts are recompiled from source on every menu transition**, with no
+content change in between.
+
+### 23.4 The pivot: which site decides to rebuild
+
+`initialiseResourceGroup` now logs its return address. Two stock call sites
+drive every rebuild seen on these routes:
+
+| Caller | Set | Where it fires |
+|---|---|---|
+| `0x0076A1C8` | 275 scripts (base) | startup, and nested inside `buildMainResources` — so on Multiplayer leave, Custom Campaigns `Back`, and Abort out of a custom mission |
+| `0x0076AE17` | 1114 scripts (custom content mounted) | entering the Custom Campaigns screen (`0x20`) and its mission screen (`0x25`) |
+
+Both are unconditional in every observation so far: each is preceded by a
+`clearResourceGroup("Modable")`, which discards the group's script state and
+forces the full re-parse. Neither appears to consult any notion of whether the
+mounted content actually changed.
+
+The open question for the next step is therefore narrow and static: read
+`0x0076A1C8` and `0x0076AE17` and their enclosing functions, and establish
+whether the engine has any existing dirty/generation signal that could gate the
+clear+initialise pair, or whether one would have to be introduced.
+
+### 23.5 Gates still open
+
+- **No optimisation is selected or authorised.** The measurement says a cache
+  or bypass would have to cover an entire script set, keyed on something that
+  genuinely captures mounted-content identity, and it would have to be correct
+  across mod switching, Workshop updates and in-place edits.
+- **Physical-click equivalence for the pause screen** is still unverified
+  (§22.5); Abort is invoked through the button's own OnClick.
+- **Minimal-versus-content-heavy scaling** is still unmeasured, though §23.3
+  now attributes the difference between the 275- and 1114-script sets directly
+  to mounted content rather than to entry counts.
+- **Measurements are load-sensitive.** Two runs in this section were taken
+  while a second agent session was building and are visibly inflated
+  (`buildMainResources` 5453 ms, parse residual 5629 ms). Only the quiet
+  captures are quoted for absolute time; the contaminated ones are used for
+  composition only.
+
+### 23.6 Validation at this checkpoint
+
+- `Release|Win32`: passed (existing warnings only).
+- Host tests: 16/16 passed.
+- `git diff --check`: passed.
+- Safe runtime lifecycle: every launch dot-sourced `BZRHarness.ps1`, forced
+  windowed mode, and shut down through `Stop-BZRGame -Id`. One run was killed
+  by its host before its restore step; the Steam install was restored manually
+  and verified by hash, and the harness now emits a heartbeat during long waits
+  so an idle-output kill cannot recur.
+- Measurements are taken only with the game window verifiably foreground. An
+  inactive Redux window throttles its main loop; one `SinglePlayer` transition
+  measured 66 s that way against a true 272 ms.
