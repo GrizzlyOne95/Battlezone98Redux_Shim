@@ -10,7 +10,7 @@
 
 ## 1. Summary
 
-This commit delivers **Phase 1 — Establish Reproducible Baselines + Phase 2 — Hierarchical Instrumentation** for the UI responsiveness investigation described in the task. It does **not** yet claim a measured bottleneck or ship an optimization; instead it provides the evidence infrastructure the rest of the work depends on.
+This report began as the **Phase 1 — Establish Reproducible Baselines + Phase 2 — Hierarchical Instrumentation** handoff. Sections 1–20 preserve that chronology; **§21 is the current evidence checkpoint** and supersedes earlier statements that the real frontend routes had not yet been reached. No optimization has been implemented or selected.
 
 The shim now emits structured `[UIPERF]` log lines that decompose every major shell/UI transition into nested sub-phases (ModDiscovery, Workshop scan, Ogre ResourceGroup ops, Shader cache) with wall-clock durations, per-root file counts, and stall markers. All instrumentation is **opt-in** (`[Diagnostics] UiPerformanceLogging=false` by default) and the OFF path is a single relaxed atomic check.
 
@@ -239,7 +239,7 @@ Each will be kept in a **separate commit** and remain off by default until it va
 
 ## 13. Safety & Compatibility
 
-- All instrumentation is read-only; it never skips or replaces game logic, never introduces threads, never changes addon precedence, never touches Lua/network/D3D backends.
+- All instrumentation is read-only; it never skips or replaces game logic, changes addon precedence, or touches Lua/network/D3D backends. Rev4 adds one opt-in, low-frequency trigger-detection helper thread; it never accesses Battlezone UI objects and only posts a private window message to the main thread (see §21.1).
 - The `OFF` hot path is a single `IsEnabled()` relaxed load; `IsVerbose()` is only checked after the first test passes. No allocation, no `QueryPerformanceCounter`, no log formatting.
 - Shell hooks run on the game thread; file-scan counters use thread-local live-enum maps plus a single aggregated `std::mutex` at scan completion — no suspend-window work.
 - Invalidation for any future cache will be at minimum session-scoped and will re-validate on mod switch; no "run once forever" scan skip.
@@ -297,7 +297,7 @@ Validation ran on the same GOG machine with `UiPerformanceLogging=1, Verbose=0, 
 
 **Defect found:** rev1 had no inline hooks; `UiPerf::NotifyShellRequest` was only called from `PrepareLoadScreenForSelection` (loading screen 0x17). All other transitions (`Main->MP` etc.) relied on polling `Heartbeat`, so `END` was not tied to `FUN_007C7070`'s synchronous Ogre work (clear/init/parse). Log gap between request and transition exit was not measured, and `manager` capture was absent.
 
-**Fix:** install inline detours with correct instruction-boundary lengths (dumped 2026-08-28 via `ReadProcessMemory`: `007C7930` = `55 8B EC 51 89 4D FC` → 7 bytes, `007C7070` = `55 8B EC 6A FF` → 5 bytes). `Detour_ShellRequest` (thiscall `ecx=dialog`, `stack=screenId`) captures `g_ShellManager` and calls `NotifyShellRequest`; `Detour_ShellTransition` (cdecl, no args) brackets `FUN_007C7070` and on exit calls `NotifyShellTransitionComplete()` + `Heartbeat`. `END` is now defined at `007C7070` exit, which includes the synchronous `Modable` clear/init/parse (`Finished parsing scripts for resource group Modable` → `Creating resources for group Modable` → `Setting viewports to game menu mode` is <16 ms later). The next `Present` is within one frame, satisfying "actually usable/rendered" without waiting for Present.
+**Fix:** install inline detours with correct instruction-boundary lengths (dumped 2026-08-28 via `ReadProcessMemory`: `007C7930` = `55 8B EC 51 89 4D FC` → 7 bytes, `007C7070` = `55 8B EC 6A FF` → 5 bytes). `Detour_ShellRequest` (thiscall `ecx=dialog`, `stack=screenId`) captures `g_ShellManager` and calls `NotifyShellRequest`; `Detour_ShellTransition` brackets `FUN_007C7070` and on exit calls `NotifyShellTransitionComplete()` + `Heartbeat`. Later static/runtime qualification corrected the transition ABI to `int __cdecl(int* dialog, int mode)`; callers clean eight stack bytes and EAX must be preserved. `END` is now defined at `007C7070` exit, which includes the synchronous `Modable` clear/init/parse (`Finished parsing scripts for resource group Modable` → `Creating resources for group Modable` → `Setting viewports to game menu mode` is <16 ms later). The next `Present` is within one frame, satisfying "actually usable/rendered" without waiting for Present.
 
 **Validation:** windowed launch shows `ShellRequest screenId=0x01 (MainMenu) this=0x1E68C288` followed 62–64 ms later by `END ShellTransition` + `transition end` with `SUMMARY total=62–66ms`. The 62 ms includes factory + viewport; the gap to next `Present` is the `OgreProfile` frame boundary (<16 ms).
 
@@ -421,8 +421,142 @@ No optimization will be implemented until that table shows which `expensive work
 [uiperf-harness] button name='MultiPlayer_MainScreen' vt=0x008A0470 ...
 ```
 
-Next harness will post `WM_USER+0x100` to the game's window (`Battlezone 98 Redux (2.2.301) DX11`) and the subclassed `WndProc` (installed after `FindWindow`) will, on the main thread, locate the named button and call `((void(__thiscall*)(void*))onClick)(button)`. This executes **exactly** the same `FUN_0078c550->FUN_0078c6c0` / `listDir` / `ResourceGroup` path as a physical click, so resource/content prep is not bypassed. A direct `ShellRequest` with forced ID is rejected unless it can be proven to do the same work.
+The implemented harness posts a private window message to the game's window (`Battlezone 98 Redux (2.2.301) DX11`). The subclassed `WndProc`, on the game/main thread, locates the named button and invokes its stored callback. Runtime RE corrected the callback receiver: the `OnClick` slot contains a member thunk that expects the **live owning screen** in ECX, not the button. Back callbacks read `owner+0x138` to reach the shell manager. Passing the button is therefore not behaviorally equivalent and is rejected. A direct `ShellRequest` with a forced ID remains rejected for forward routes because it can bypass screen-specific content/resource preparation.
 
 **Validation plan for harness equivalence** (per forward transition): 1) log button pointer/OnClick, 2) invoke handler, 3) confirm `ShellRequest` ID (hook), 4) confirm destination screen (factory `007C7AD0` ID), 5) confirm `BZOgreLogfile.log` shows `Parsing scripts for Modable` / `Creating resources` when expected, 6) compare one automated vs one manually clicked transition for wall/`SCAN`/`OGRE` parity. If automated skips work manual does, reject harness.
 
 **Status:** button-table logging deployed (`winmm.dll` 2,513,408 b, `Button` helper in `ui_performance_hooks.cpp`). Full six-transition first/repeat capture and `minimal vs content-heavy` (base `addon` 6 dirs vs normal Workshop/CR) comparison remain to be run on unlocked interactive desktop before any optimization is selected. No merge to `main`.
+
+---
+
+## 21. Harness completion and real-route evidence checkpoint (2026-08-28 rev4)
+
+This section records the current state through commit `f89182d4`. It supersedes the provisional harness and timing conclusions above. The code is pushed on `agent/ui-responsiveness-stall-profiling`; it has not been merged to `main`, and no menu-performance optimization has been implemented.
+
+### 21.1 Idle trigger delivery: implemented and runtime-qualified
+
+When `UiPerformanceLogging=1`, a low-frequency helper checks `uiperf_trigger.txt` approximately every 200 ms. The helper only checks for presence and posts a private window message; it never dereferences Battlezone UI objects. The existing OpenShim game-window subclass receives the message on the main/UI thread and performs file read/delete, UI traversal, and callback invocation there. Both helper and main-thread trigger-file operations are wrapped in `UiFileScan::SetSuppress`, so they do not appear in `[UIPERF][SCAN]` and do not contribute to a transition category.
+
+An idle GOG MainScreen run, with no keyboard/mouse input or pre-existing transition, produced the required sequence:
+
+```
+[UIPERF][HARNESS] trigger file detected; posted main-thread event
+[UIPERF][HARNESS] custom main-thread event delivered ... tid=<UI thread>
+[UIPERF][HARNESS] trigger=SinglePlayer_MainScreen detected
+[UIPERF][HARNESS] MainScreen ... vt=0x0089E178
+[UIPERF][HARNESS] MainScreen_Overlay ... vt=0x008A0B94
+[UIPERF][HARNESS] button=SinglePlayer_MainScreen ... vt=0x008A0470 onclick=0x0078C520
+[UIPERF][HARNESS] invoking OnClick on main thread
+[UIPERF] ShellRequest screenId=0x02 (SinglePlayer)
+[UIPERF] transition end ShellRequest->SinglePlayer(0x02)
+```
+
+The transition completed at the real Single Player destination. Over 150 poll samples, helper active time averaged 108.5 microseconds per 200 ms sample (approximately 0.054% duty), with a 231.7 microsecond maximum. Earlier qualifying runs measured 100–120 microseconds average and at most 342 microseconds. Polling does not occur every rendered frame.
+
+### 21.2 Reusable frontend RE findings
+
+All addresses below are for the settled GOG 2.2.301 executable used by this investigation. Steam/GOG static parity remains subject to the normal settled-byte verification policy.
+
+#### Shell state and hook boundaries
+
+| Function/state | Address/offset | Qualified behavior |
+|---|---:|---|
+| Shell request | `0x007C7930` | `void __thiscall(manager, int screenId)`; prologue `55 8B EC 51 89 4D FC`, therefore a 7-byte trampoline boundary. Sets manager request byte and appends the destination to history. |
+| Shell transition | `0x007C7070` | `int __cdecl(int* dialog, int mode)`; 5-byte prologue boundary. Destroys/reconstructs the active screen and clears the request byte only after destination construction. Callers clean eight stack bytes; preserve EAX. |
+| Shell Back | `0x007C79A0` | `void __thiscall(manager)`; prologue `55 8B EC 51 89 4D FC`, therefore 7 bytes, not 5. Pops `manager+0x2C` history when nonempty and sets request byte `manager+0x27`. |
+| Screen-to-manager Back thunk | `0x00788060` | Reads `this+0x138`, then calls Shell Back. This proves screen context is the receiver expected by stored Back callbacks. |
+| Global active-screen wrapper | `0x00918320` | Wrapper pointer; active screen is wrapper `+0x14`. |
+| Shell request byte | manager `+0x27` | Reliable completion signal. Pointer inequality is unreliable because the allocator can reuse the old screen address with a new vtable. |
+| Shell history | manager `+0x2C` | History vector used by Shell Back. |
+
+The earlier 5-byte Shell Back trampoline split `89 4D FC` and was repaired. The earlier pointer-change completion test was also removed: destination construction can reuse the same allocation, whereas request-byte clear reliably denotes completion.
+
+#### Live UI object layout and routes
+
+Common UI fields: object name at `+0x20`; child vector at `+0x12C/+0x130`; button callback at `+0x154`. Generic buttons use vtable `0x008A0470`, overlays use `0x008A0B94`.
+
+| Screen | Screen vtable | Live hierarchy / callback |
+|---|---:|---|
+| Main | `0x0089E178` | `MainScreen_Overlay` contains `SinglePlayer_MainScreen` (`OnClick 0x0078C520`, requests `0x02`) and `MultiPlayer_MainScreen`. |
+| Single Player | `0x008A0350` | `Middle_Overlay` contains `Instant` (`0x007BEE10`, requests `0x1B`), `CampaignLaunch` (`0x007BEE80`, requests `0x20`), `Back_SinglePlayer` (`0x007BED10`), plus stock mission buttons. |
+| Instant Action | `0x0089DA3C` | `Middle_Overlay` contains `Back` (`0x007898E0`), `Launch` (`0x00789900`), and `Mission_List`. |
+| Campaign | `0x0089D8D8` | `Middle_Overlay` contains `Back` (`0x00788030`), `Launch` (`0x00788050`), `Options` (`0x00788020`), and `Mission_List`. |
+
+`Instant` and `CampaignLaunch` are the actual nested Single Player button names; no forced shell IDs or assumed names are needed. Raw Back callback decompilation corroborates the owner rule: IA `0x007898E0` loads global screen `0x009454F4`, while Single Player `0x007BED10` loads `0x009455E0`; both reach `0x00788060`. Harness callbacks are therefore invoked as `__thiscall` with the live active screen in ECX.
+
+### 21.3 Filesystem accounting repair
+
+The first real-route capture had no `[SCAN]` lines because scan aggregation flushed only from exported `Shutdown()`. Normal game termination does not call that export, and process detach intentionally does no cleanup/log flushing. Commit `f89182d4` now starts a scan generation at ShellRequest/ShellBack and flushes it before `NotifyShellTransitionComplete()`.
+
+Two times are deliberately separate:
+
+- `elapsed`: inclusive FindFirst-to-FindClose enumeration lifetime, for diagnostic comparison only;
+- `exclusive`: QPC time spent inside hooked `FindFirst`/`FindNext`/`FindClose`/`GetFileAttributes` APIs, which alone contributes to the exclusive `filesystem` category.
+
+This prevents enumeration lifetime from double-counting Ogre work nested between FindFirst and FindClose. Transition accounting now satisfies `filesystem_exclusive + ogre_self + shader_self + unattributed = wall` within printed-timer rounding.
+
+### 21.4 Same-process first-versus-repeat matrix (GOG content-heavy state)
+
+Capture: `%TEMP%\BZR-OpenShim-uiperf-matrix-20260828-231654\openshim-run.log`. It used a fresh, windowed GOG process and the normal local content state, with `UiPerformanceLogging=1`, `UiPerformanceVerbose=0`. Each logical Main route includes the fast Main-to-Single-Player or Single-Player-to-Main navigation around the measured nested destination.
+
+| Transition | First | Repeat | Delta | Repeat/First |
+|---|---:|---:|---:|---:|
+| Main -> Multiplayer | not measured (GOG lobby path is not runtime-qualified) | — | — | — |
+| Multiplayer -> Main | not measured | — | — | — |
+| Main -> Instant Action | 1183.28 ms | 1126.27 ms | -57.01 ms | 0.952 |
+| Instant Action -> Main | 2119.07 ms | 2130.78 ms | +11.71 ms | 1.006 |
+| Main -> Campaign | 1209.02 ms | 1114.10 ms | -94.92 ms | 0.921 |
+| Campaign -> Main | 2156.74 ms | 2150.98 ms | -5.76 ms | 0.997 |
+
+Exclusive breakdown (milliseconds):
+
+| Logical transition | Pass | filesystem | ogre_self | shader_self | unattributed | wall |
+|---|---|---:|---:|---:|---:|---:|
+| Main -> IA | first | 4.36 | 864.62 | 0.00 | 314.30 | 1183.28 |
+| Main -> IA | repeat | 4.47 | 868.37 | 0.00 | 253.43 | 1126.27 |
+| IA -> Main | first | 17.50 | 1815.95 | 0.00 | 285.63 | 2119.07 |
+| IA -> Main | repeat | 17.36 | 1827.53 | 0.00 | 285.88 | 2130.78 |
+| Main -> Campaign | first | 3.87 | 949.46 | 0.00 | 255.68 | 1209.02 |
+| Main -> Campaign | repeat | 3.59 | 871.52 | 0.00 | 238.99 | 1114.10 |
+| Campaign -> Main | first | 17.46 | 1850.36 | 0.00 | 288.93 | 2156.74 |
+| Campaign -> Main | repeat | 18.21 | 1834.96 | 0.00 | 297.81 | 2150.98 |
+
+The largest atomic-transition unattributed aggregate in this matrix was 235.31 ms, below the 250 ms drilldown threshold. All continuous >=250 ms stall markers were already bounded by `OgreInitialise_Begin -> OgreInitialise_End`; the largest route marker was 1820.25 ms. Startup also contained a 2006.26 ms Modable initialise marker, outside the measured navigation routes. No continuous unattributed interval >=1 second remains hidden in this capture.
+
+### 21.5 Repeated content and Ogre work
+
+The forward repeat scans are identical in root and count:
+
+| Route/pass | Primary root | dirs | files | ODF | BZN | TRN | inclusive | filesystem self |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| IA first | `addon` | 41 | 3661 | 420 | 90 | 90 | 60.11 ms | 3.98 ms for root; 4.36 ms all roots |
+| IA repeat | `addon` | 41 | 3661 | 420 | 90 | 90 | 63.48 ms | 4.11 ms for root; 4.47 ms all roots |
+| Campaign first | `addon` | 13 | 3487 | 368 | 78 | 78 | 58.38 ms | 3.39 ms for root; 3.87 ms all roots |
+| Campaign repeat | `addon` | 13 | 3487 | 368 | 78 | 78 | 57.72 ms | 3.23 ms for root; 3.59 ms all roots |
+
+Every destination-to-Single-Player return also repeats the same heavy tree: `mods` = 739 directories, 5136 files, 932 ODF, 8 BZN, 2 TRN; `addon` = 9 directories and 5 files. Inclusive enumeration lifetime is 108.62–113.27 ms and filesystem API self is 17.36–18.21 ms. The same metadata inventory is therefore rediscovered on repeat even though content did not change, but raw filesystem API self is a small fraction of wall time.
+
+Ogre repeats the same `Modable` clear/init operations:
+
+| Route operation | First | Repeat |
+|---|---:|---:|
+| IA: clear / initialise `Modable` | 72.46 / 792.16 ms | 71.27 / 797.11 ms |
+| Campaign: clear / initialise `Modable` | 70.19 / 879.27 ms | 68.39 / 803.13 ms |
+| IA return: clear / initialise `Modable` | 30.44 / 1785.50 ms | 29.52 / 1798.01 ms |
+| Campaign return: clear / initialise `Modable` | 30.12 / 1820.24 ms | 29.23 / 1805.73 ms |
+
+No load/unload/destroy or separately exported `parseResourceGroupScripts` operation appeared in this run. Material/script parsing occurs inclusively under `initialiseResourceGroup`; this capture does not yet provide a separate `*mod.material` parse count/time, so material-level conclusions must wait for narrower instrumentation or Ogre-log correlation. Shader markers were already warm: startup `cache_init=16 ms`; navigation markers report zero hits, zero misses, and zero elapsed. These are lookups/markers, not evidence of compilation.
+
+### 21.6 Gates still open — do not overclaim
+
+- **Manual-versus-harness equivalence is not proven.** The harness uses the correct discovered OnClick entry path and produces the expected ShellRequest/destination/Ogre/scan work, but no comparable physical-click capture has yet passed the required side-by-side table. Automated timing is therefore promising evidence, not yet a certified substitute for manual navigation.
+- **Multiplayer is not measured.** The GOG process does not provide a qualified live Steam lobby/Workshop context. Run the MP pair on Steam and verify the `MultiPlayer_MainScreen` callback, ShellRequest path, scan roots, and destination.
+- **Minimal-versus-content-heavy scaling is not measured.** This section is the representative local content-heavy side only. A known minimal configuration must be captured with identical code before attributing scaling to entry count, metadata count, materials, or resource rebuilding.
+- **No first optimization is selected.** Measured `Modable` initialise time is currently the dominant recoverable-looking repeat work (approximately 0.8 seconds forward and 1.8 seconds on returns), while raw filesystem API self is only 3.6–18.2 ms. That observation is not authorization to retain/cache resources: the physical-click and scaling gates, material-level attribution, invalidation design, and compatibility review remain outstanding.
+
+### 21.7 Validation at this checkpoint
+
+- `Release|Win32`: passed (existing warnings only).
+- Host tests: 16/16 passed.
+- `git diff --check`: passed.
+- Safe runtime lifecycle: all launches dot-sourced `BZRHarness.ps1`, forced windowed mode for correctness, and closed through `Stop-BZRGame -Id`; original GOG `winmm.dll`, `scripts/patches.json`, and Ogre configuration were restored after each capture.
