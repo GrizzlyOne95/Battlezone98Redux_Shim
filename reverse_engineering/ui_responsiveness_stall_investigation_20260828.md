@@ -582,3 +582,274 @@ A fresh manual capture used real mouse clicks on the rendered `Single Player` an
 | exclusive categories | filesystem 4.42; Ogre 868.32; unattributed 227.12 ms | filesystem 4.36; Ogre 864.62; unattributed 222.81 ms |
 
 The engine work is structurally equivalent and no operation appears only on the physical-click route. Timing variation is small and expected. This passes the requested equivalence gate for a representative expensive transition and validates the harness's live-screen receiver convention.
+
+## 22. Steam runtime qualification and the user-priority routes (2026-08-29)
+
+The GOG matrix in §21 measured Instant Action and Campaign because those were
+reachable. The user then identified the actually painful routes: **Multiplayer
+open, Multiplayer leave, and Abort Mission from a single-player level**. Those
+live on the Steam install, so the Steam process had to be made profilable
+first. This section records that work, the resulting measurements, and the
+correction it forces on the §21.6 ranking.
+
+### 22.1 Steam startup was dying inside partially decrypted shell code
+
+Profiler-enabled Steam launches died about five seconds into startup, before
+MainScreen. Seven full dumps were captured in `C:\BZDumps` between 23:27 and
+23:41 on 2026-08-28 (`battlezone98redux.exe.{32040,7904,30608,2776,39740,41644,17604}.dmp`).
+
+All seven agree: the process dies inside the body of `ShellRequest`
+(`0x007C7930`), in the range `0x007C7947`–`0x007C7976`. The exception code
+varies between runs (`0xC000001D` illegal instruction, `0xC0000005` access
+violation) only because different ciphertext bytes decode as different invalid
+operations. In the dump, `ShellRequest` begins with correct plaintext for its
+first 14 bytes and is SteamStub ciphertext immediately after.
+
+Root cause: the profiler installed its three shell detours during `DllMain`
+-time initialisation, before SteamStub had finished decrypting and settling
+that code page. The inline write landed on a page that was subsequently
+rewritten, so stock execution fell through into encrypted bytes. GOG is
+unaffected because its executable is not packed.
+
+Fixes, all already committed:
+
+| Commit | Change |
+|---|---|
+| `fb7450ce` | Steam never publishes the GOG-only scroll-state getter `0x007D3360`, so every scroll-state caller fails closed instead of touching a UI context. |
+| `3568da29` | The GOG map-frame probe is bypassed on Steam. |
+| `58f503a4` | On Steam the three shell detours are deferred: they install on the UI thread only once a **live MainScreen exists** and full-function byte sentinels match. Startup keeps only read-only/IAT instrumentation. |
+
+`AreSteamShellFunctionsSettled()` deliberately checks bytes **beyond** each
+overwritten prologue (`ShellRequest+0x0E` and `+0x1D`, `ShellTransition+0x05`,
+`ShellBack+0x07`). The dumps showed SteamStub exposing a correct 7-byte entry
+while the rest of the function was still ciphertext, so a prologue match alone
+is not authority to install a detour. The two Instant-Action drilldown hooks
+remain GOG-only.
+
+After this change, every Steam run reached a live MainScreen, installed all
+three detours on the UI thread, and produced no new dump.
+
+The first-chance `GetScrollState` access violation seen in earlier logs was
+caught and handled; it was never the process-ending failure.
+
+### 22.2 Driving real input into Redux from the harness
+
+Two harness defects had previously been mistaken for engine behaviour, and the
+conclusion "automated SendInput cannot reliably drive this UI" was wrong. Both
+are host-side:
+
+1. **`INPUT` must be the full 40-byte x64 layout.** A C# union declaring only
+   `KEYBDINPUT` measures 32, and `SendInput` rejects the whole call with
+   `ERROR_INVALID_PARAMETER`, returning 0. Declare `MOUSEINPUT` in the union
+   too, and check the return value.
+2. **Redux reads the keyboard through OIS/DirectInput, which works in scan
+   codes.** A virtual-key-only send is accepted by Windows and never reaches
+   the game. Use `KEYEVENTF_SCANCODE` with `wVk = 0` and
+   `wScan = MapVirtualKey(vk, MAPVK_VK_TO_VSC)`, held ~90 ms so it spans
+   several frames.
+
+Two more were found during this session:
+
+3. **`SetForegroundWindow` is refused outright** for a process that does not
+   already own the foreground. Attach to the *current foreground* window's
+   thread input queue — not just the target's — for the duration of the call,
+   then **verify** `GetForegroundWindow() == hwnd` before sending anything.
+   `Process.MainWindowHandle` is unreliable; enumerate the process's visible
+   `OgreD3D*` window instead.
+4. **The harness host must call `SetProcessDPIAware()`.** The display is
+   scaled, so a DPI-virtualised host reads a 1600x900 client area as 1066x600
+   and its window rect, desktop capture and absolute mouse coordinates all
+   disagree with the game's real pixels.
+
+With those four corrected, a real scan-code `Escape` opens the stock pause
+screen from inside a running mission, and real absolute-coordinate mouse clicks
+select rows in a mission list. The earlier `__PAUSE__` trigger, which marshalled
+`ShellRequest(0x0B)` directly, was removed: it never opened the pause screen
+(the request byte is not what the in-mission Escape path drives), and it is
+unnecessary now that real input works.
+
+### 22.3 Single-player routes go through the full main menu
+
+Launching a `.bzn` on the command line is not the route to measure. It also
+never visits MainScreen, so on Steam the deferred shell detours never install.
+Every single-player measurement below therefore uses the stock navigation:
+
+`MainScreen -> SinglePlayer_MainScreen -> <campaign or Instant Action> -> Launch
+-> mission -> Escape -> pause screen -> Abort`.
+
+Live pause screen (`Top Screen`, vtable `0x0089D9FC`), enumerated from a
+running mission:
+
+| Button | OnClick |
+|---|---|
+| `Back` | `0x00788EA0` |
+| `Options_EscScreen` | `0x00788EB0` |
+| `Load` | `0x00788EC0` |
+| `Save` | `0x00788ED0` |
+| `Abort` | `0x00788EE0` |
+| `Restart` | `0x00788EF0` |
+
+Red Brigade campaign screen (`Screen0x22`, vtable `0x0089E2A8`), reached from
+`CHMission_SinglePlayer` (`0x007BEDC0`): `Back` `0x0078ED70`, `Options`
+`0x0078ED80`, `Launch` `0x0078ED90`, `Archive` `0x0078EDA0`, `MainMenu`
+`0x0078EDB0`, and a `Mission` list with `MissionpageUp` `0x0078ED20` /
+`MissionpageDn` `0x0078ED30`. Mission 1 is preselected, so this screen needs no
+list selection and is the deterministic way to reach a stock mission.
+
+Instant Action is not deterministic for a harness: `Mission_List` exposes only
+`Mission_ListpageUp`/`pageDn` as UI children — the rows are internal to the list
+widget — so `Launch` is inert until a row is selected by a real click, and on
+this install every listed map is Workshop content requiring EXU, which is not
+installed in the Steam copy. Those launches stop on a modal
+`no file '...\exu.dll' / NO ASSET 'exu.lua'` dialog on the loading screen.
+
+### 22.4 Measurements — Multiplayer
+
+Capture: `%TEMP%\BZR-OpenShim-uiperf-steam-mp-20260829-054953\openshim-run.log`,
+Steam, windowed, `/nointro`, normal local content, first and repeat in one
+unchanged process.
+
+| Transition | First | Repeat |
+|---|---:|---:|
+| Main -> Multiplayer lobby (`0x0E`) | 8158.07 ms | 3503.47 ms |
+| Multiplayer lobby -> Main (`Back`) | 2188.19 ms | 2210.49 ms |
+
+Where the time goes:
+
+| Phase | MP open first | MP open repeat | MP leave first | MP leave repeat |
+|---|---:|---:|---:|---:|
+| `buildMPResources` | 7709.70 ms | 3426.89 ms | — | — |
+| `buildMainResources` | — | — | 2105.64 ms | 2127.29 ms |
+| nested `clear Modable` | 71.58 ms | 71.85 ms | 156.11 ms | 165.17 ms |
+| nested `initialise Modable` | 6988.57 ms | 2872.16 ms | 1763.04 ms | 1763–1800 ms |
+| destination ctor | 371.04 ms | 3.14 ms | 3.04–3.37 ms (MainScreenCtor) | same |
+| old-screen dtor | <1 ms | <1 ms | 0.89 ms | 0.93 ms |
+| filesystem API self | 23.64 ms | 22.62 ms | 18.18 ms | ~18 ms |
+
+Scan roots are re-enumerated in full on every visit, with identical counts:
+
+| Route | Primary root | dirs | files | ODF | BZN | TRN | inclusive | filesystem self |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| MP open first | `addon` | 8 | 24682 | 3355 | 62 | 62 | 551.61 ms | 23.21 ms |
+| MP open repeat | `addon` | 8 | 24683 | 3355 | 62 | 62 | 398.55 ms | 22.17 ms |
+| MP leave | `workshop/content/301650` | 743 | 5236 | 932 | 8 | 2 | 114.61 ms | 17.59 ms |
+
+So both Multiplayer routes are dominated by stock `Ogre::initialiseResourceGroup`
+on the `Modable` group, nested inside `buildMPResources` / `buildMainResources`.
+Lobby construction and screen destruction are negligible after the first visit,
+and raw filesystem API self time is 18–24 ms against 2.2–8.2 s of wall time.
+The first-visit outlier (6989 ms vs 2872 ms) is cold OS cache, not extra work.
+
+### 22.5 Measurement — Abort Mission is *not* a slow transition
+
+Captures:
+`%TEMP%\BZR-OpenShim-uiperf-steam-spabort-20260829-094242\openshim-run.log` and
+`...-094434\openshim-run.log`. Both used the full menu route, the Red Brigade
+campaign mission 1, a real scan-code `Escape` to open the pause screen, and the
+live `Abort` button's own OnClick with the live screen in ECX. The second run
+stayed in the mission for 150 s before aborting, to test whether teardown cost
+scales with simulation build-up.
+
+| Transition | Run A (8 s in mission) | Run B (150 s in mission) |
+|---|---:|---:|
+| `SinglePlayer` (`0x02`) | 272.04 ms | 272.39 ms |
+| Red Brigade screen (`0x22`) | 195.94 ms | 191.91 ms |
+| `Launch` -> `Loading` (`0x17`) | 195.57 ms | 198.67 ms |
+| mission load (`BuildMainResources_End -> SimTick`) | 3054.15 ms | 1780.18 ms |
+| `Escape` -> pause (`0x0B`) | 190.43 ms | 190.35 ms |
+| **`Abort` -> `MainMenu` (`0x01`)** | **61.50 ms** | **60.22 ms** |
+
+Abort breakdown (both runs):
+
+| Component | Run A | Run B |
+|---|---:|---:|
+| `buildMainResources` | 0.09 ms | 0.07 ms |
+| `MainScreenCtor` | 3.04 ms | 3.37 ms |
+| filesystem: roots / FindFirst / FindNext / GetFileAttributes | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 |
+| Ogre `clear`/`initialise Modable` | none | none |
+| wall clock, `Abort` OnClick to MainScreen buttons live | ~150 ms | ~270 ms |
+
+This is a real result and it contradicts the working assumption. Aborting a
+stock single-player mission does **not** rebuild the `Modable` resource group
+and does **not** re-enumerate any content root; `buildMainResources` returns in
+under a tenth of a millisecond because the group is still valid. Dwelling
+150 s in the mission changed nothing, so mission teardown does not scale with
+simulation build-up either.
+
+Two caveats, stated rather than papered over:
+
+- The mission was stock Red Brigade content on an install whose addon tree is
+  large but whose *mission* was not addon-backed. An abort out of a
+  Workshop/Campaign Reimagined mission — which may leave the resource group
+  dirty the way Multiplayer does — has not been measured, and is the obvious
+  candidate for the slowness the user reports.
+- `Abort` was invoked through the button's own OnClick, not a physical click on
+  the pause screen. §21.8 established manual/harness equivalence for a
+  representative expensive transition on MainScreen; that equivalence has not
+  been re-verified for the pause screen.
+
+### 22.6 Revised ranking
+
+Measured on Steam with the user's normal content:
+
+| Route | Wall | Dominant cost |
+|---|---:|---|
+| Main -> Multiplayer lobby (first) | 8158 ms | `initialise Modable` 6989 ms |
+| Main -> Instant Action (first) | 3964–8450 ms | `initialise Modable` ~3.1 s + 24.7k-file `addon` scan |
+| Main -> Multiplayer lobby (repeat) | 3503 ms | `initialise Modable` 2872 ms |
+| Multiplayer -> Main | 2188–2210 ms | `initialise Modable` ~1763 ms |
+| mission load | 1780–3054 ms | stock mission load |
+| Single Player screen | ~272 ms | — |
+| campaign screen, pause, Loading | ~190–199 ms | — |
+| **Abort -> MainMenu** | **60–62 ms** | **nothing recoverable** |
+
+The one recoverable-looking behaviour remains repeated
+`Ogre::initialiseResourceGroup` on `Modable` for content that has not changed.
+It is worth 1.8–7.0 s per affected transition. Abort Mission should be dropped
+from the optimisation list unless a content configuration is found where it is
+actually slow.
+
+### 22.7 Gates still open
+
+- **Abort under addon content is unmeasured.** Repeat §22.5 with a
+  Workshop/Campaign Reimagined mission before concluding Abort is fast in
+  general.
+- **Physical-click equivalence for the pause screen** is unverified.
+- **Minimal-versus-content-heavy scaling** is still unmeasured (§21.6), so
+  `initialise Modable` cost has not been attributed to entry count, metadata
+  count, or material parsing.
+- **Material-level attribution inside `initialiseResourceGroup`** still
+  requires narrower instrumentation; no separate `*mod.material` parse
+  count/time exists yet.
+- **No optimisation is selected or authorised.** Retaining or caching the
+  `Modable` group needs an invalidation design and a compatibility review.
+
+### 22.8 Incidental finding — autosave faults when a mission fails to load
+
+Not part of this investigation, recorded because it produced evidence during
+it. When a launch stops on the modal `exu.dll` missing dialog on the loading
+screen, OpenShim's autosave still fires on its interval and calls the native
+`SaveGame`, which raises `0xC0000005` every time:
+
+```
+[ERROR] [autosave] Native SaveGame raised exception 0xC0000005 for ...\Save\auto.sav
+```
+
+Each fault is caught by the crash logger, which writes a ~500 MB full dump.
+Three such dumps were produced in 5 minutes on 2026-08-29
+(`battlezone98redux.exe.{23992,1604,34420}.dmp`). Autosave should not attempt
+`SaveGame` when no mission is actually running. `C:\BZDumps` is currently
+~6 GB.
+
+### 22.9 Validation at this checkpoint
+
+- `Release|Win32`: passed (existing warnings only).
+- Host tests: 16/16 passed.
+- `git diff --check`: passed.
+- Working tree matches `HEAD` for `src/`; the `__PAUSE__` trigger and the
+  pause-menu variant of the deferred-install gate were removed rather than
+  committed, because neither was ever observed to work.
+- Safe runtime lifecycle: every launch dot-sourced `BZRHarness.ps1`, forced
+  windowed mode, and shut down through `Stop-BZRGame -Id`; the user's original
+  Steam `winmm.dll`, `scripts/patches.json` and `openshim.ini` were restored
+  after each capture and verified identical by hash.
