@@ -600,7 +600,20 @@ namespace BZROpenShim
         if (ua2) g_RetAddr_UnderAttackAlertHook2 = reinterpret_cast<void*>(ua2 + g_Config.GetStaticPointer("RetAddr_UnderAttack1_Offset", 0x34));
         if (oa) g_RetAddr_OffensiveAttackRevealHook = reinterpret_cast<void*>(oa + g_Config.GetStaticPointer("RetAddr_OffensiveAttack_Offset", 0x0C));
         if (tta) g_RetAddr_TurretTankAttackRevealHook = reinterpret_cast<void*>(tta + g_Config.GetStaticPointer("RetAddr_OffensiveAttack_Offset", 0x0C));
-        g_BZRFn_GetScrollState = reinterpret_cast<uint32_t(*)()>(g_Config.GetStaticPointer("GetScrollState", 0x007D3360));
+        // 0x007D3360 is a validated GOG cUI helper, but the same address in the
+        // settled Steam image has different context requirements.  Publishing
+        // it on Steam lets the GOG-specific Map Sorting frame probe reach the
+        // function with a plausible-but-invalid UI object and raise an access
+        // violation during frontend startup.  All consumers already treat a
+        // null getter as "scroll state unavailable" and retain the validated
+        // HopFix3 frame delta, so fail closed until a Steam identity and ABI are
+        // recovered independently.
+        g_EnableScrollRestore = !isSteam;
+        g_BZRFn_GetScrollState = isSteam
+            ? nullptr
+            : reinterpret_cast<uint32_t(*)()>(g_Config.GetStaticPointer("GetScrollState", 0x007D3360));
+        if (isSteam)
+            Log(L"[REFRESH] Steam scroll-state capture disabled; using HopFix3 frame delta\n");
         g_BZRFn_ScrollUp = reinterpret_cast<void(*)()>(g_Config.GetStaticPointer("ScrollUp", 0x007CB500));
         g_BZRFn_ScrollDown = reinterpret_cast<void(*)()>(g_Config.GetStaticPointer("ScrollDown", 0x007CB540));
     }
