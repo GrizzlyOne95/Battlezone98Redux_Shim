@@ -17,6 +17,7 @@
 #include "hook_engine.h"
 #include "patcher.h"
 #include "shim_log.h"
+#include "BZROpenShim.h"
 
 #include <Windows.h>
 #include <process.h>
@@ -69,6 +70,7 @@ namespace BZROpenShim::UiPerfHooks
         ShellHook g_ShellBackHook;
         ShellHook g_BuildIaResourcesHook;
         ShellHook g_InstantActionCtorHook;
+        std::atomic<int> g_ShellHookInstallState{ 0 }; // 0=waiting, 1=installing, 2=finished
         std::atomic<uint64_t> g_ShellRequestStart{ 0 };
         std::atomic<int> g_PendingScreenId{ -1 };
         std::atomic<bool> g_ShellTransitionInFlight{ false };
@@ -86,6 +88,7 @@ namespace BZROpenShim::UiPerfHooks
         HANDLE g_TriggerStopEvent = nullptr;
 
         void TryHandleTriggerFileOnMainThread();
+        void TryInstallDeferredSteamShellHooksOnMainThread();
         static void StopTriggerDelivery() noexcept;
 
         struct FindGameWindowCtx
@@ -167,6 +170,7 @@ namespace BZROpenShim::UiPerfHooks
         BOOL WINAPI Hooked_PeekMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg)
         {
             EnsureGameWindowSubclassOnMainThread();
+            TryInstallDeferredSteamShellHooksOnMainThread();
             return g_RealPeekMessageA
                 ? g_RealPeekMessageA(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg)
                 : FALSE;
@@ -272,6 +276,10 @@ namespace BZROpenShim::UiPerfHooks
             double activeMs = 0.0;
             double maximumUs = 0.0;
             uint64_t posts = 0;
+            LogShimA(LogLevel::Info, "uiperf-harness",
+                "[UIPERF][HARNESS] trigger polling helper entered tid=%lu running=%d",
+                static_cast<unsigned long>(GetCurrentThreadId()),
+                g_TriggerPollRunning.load(std::memory_order_acquire) ? 1 : 0);
 
             while (g_TriggerPollRunning.load(std::memory_order_acquire))
             {
@@ -316,6 +324,12 @@ namespace BZROpenShim::UiPerfHooks
                         maximumUs, static_cast<unsigned long long>(posts));
                 }
             }
+            LogShimA(LogLevel::Info, "uiperf-harness",
+                "[UIPERF][HARNESS] trigger polling helper exited tid=%lu samples=%llu posts=%llu running=%d",
+                static_cast<unsigned long>(GetCurrentThreadId()),
+                static_cast<unsigned long long>(samples),
+                static_cast<unsigned long long>(posts),
+                g_TriggerPollRunning.load(std::memory_order_acquire) ? 1 : 0);
             return 0;
         }
 
@@ -994,6 +1008,137 @@ namespace BZROpenShim::UiPerfHooks
             return true;
         }
 
+        bool MemoryMatches(uintptr_t address, const uint8_t* expected, size_t length)
+        {
+            if (!address || !expected || !length)
+                return false;
+            uint8_t actual[16] = {};
+            if (length > sizeof(actual))
+                return false;
+            SIZE_T read = 0;
+            return ReadProcessMemory(GetCurrentProcess(),
+                                     reinterpret_cast<const void*>(address),
+                                     actual, length, &read) &&
+                   read == length && std::memcmp(actual, expected, length) == 0;
+        }
+
+        bool IsLiveMainScreenReady()
+        {
+            __try
+            {
+                void* mainScreen = *reinterpret_cast<void**>(0x0094551C);
+                return mainScreen &&
+                       *reinterpret_cast<uintptr_t*>(mainScreen) == 0x0089E178;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        bool AreSteamShellFunctionsSettled()
+        {
+            // Validate bytes beyond each overwritten prologue. The 2026-08-28
+            // full dumps showed SteamStub could expose a correct 7-byte entry
+            // while the rest of ShellRequest was still ciphertext. Checking
+            // only the trampoline prefix therefore cannot establish readiness.
+            static constexpr uint8_t kRequestBody[] = {
+                0x8D, 0x4D, 0x08, 0x51, 0x8B, 0x4D, 0xFC, 0x83, 0xC1, 0x2C, 0xE8
+            };
+            static constexpr uint8_t kRequestTail[] = {
+                0x8B, 0xE5, 0x5D, 0xC2, 0x04, 0x00
+            };
+            static constexpr uint8_t kTransitionBody[] = {
+                0x68, 0xE0, 0x20, 0x86, 0x00, 0x64, 0xA1, 0x00, 0x00, 0x00, 0x00
+            };
+            static constexpr uint8_t kBackBody[] = {
+                0x8B, 0x4D, 0xFC, 0x83, 0xC1, 0x2C, 0xE8
+            };
+            return MemoryMatches(g_ShellRequestAddr + 0x0E,
+                                 kRequestBody, sizeof(kRequestBody)) &&
+                   MemoryMatches(g_ShellRequestAddr + 0x1D,
+                                 kRequestTail, sizeof(kRequestTail)) &&
+                   MemoryMatches(g_ShellTransitionAddr + 0x05,
+                                 kTransitionBody, sizeof(kTransitionBody)) &&
+                   MemoryMatches(g_ShellBackAddr + 0x07,
+                                 kBackBody, sizeof(kBackBody));
+        }
+
+        void InstallResolvedShellHooks(bool installGogDrilldown)
+        {
+            int expectedState = 0;
+            if (!g_ShellHookInstallState.compare_exchange_strong(
+                    expectedState, 1, std::memory_order_acq_rel))
+                return;
+
+            static constexpr uint8_t kThiscallPrefix[] = {
+                0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC
+            };
+            static constexpr uint8_t kTransitionPrefix[] = {
+                0x55, 0x8B, 0xEC, 0x6A, 0xFF
+            };
+            int hooked = 0;
+            if (InstallInlineHook(g_ShellRequestHook, g_ShellRequestAddr,
+                                  reinterpret_cast<void*>(&Detour_ShellRequest),
+                                  7, kThiscallPrefix))
+            {
+                ++hooked;
+                LogShimA(LogLevel::Info, "uiperf-hooks",
+                    "ShellRequest hook installed at 0x%08X len=7 tramp=0x%p",
+                    g_ShellRequestAddr, g_ShellRequestHook.trampoline);
+            }
+            if (InstallInlineHook(g_ShellTransitionHook, g_ShellTransitionAddr,
+                                  reinterpret_cast<void*>(&Detour_ShellTransition),
+                                  5, kTransitionPrefix))
+            {
+                ++hooked;
+                LogShimA(LogLevel::Info, "uiperf-hooks",
+                    "ShellTransition hook installed at 0x%08X len=5 tramp=0x%p",
+                    g_ShellTransitionAddr, g_ShellTransitionHook.trampoline);
+            }
+            if (InstallInlineHook(g_ShellBackHook, g_ShellBackAddr,
+                                  reinterpret_cast<void*>(&Detour_ShellBack),
+                                  7, kThiscallPrefix))
+            {
+                ++hooked;
+                LogShimA(LogLevel::Info, "uiperf-hooks",
+                    "ShellBack hook installed at 0x%08X len=7 tramp=0x%p",
+                    g_ShellBackAddr, g_ShellBackHook.trampoline);
+            }
+
+            // These addresses and prologues are GOG-only drilldown evidence;
+            // they must not be written into SteamStub-managed code pages.
+            if (installGogDrilldown)
+            {
+                if (InstallInlineHook(g_BuildIaResourcesHook, 0x0076A430,
+                                      reinterpret_cast<void*>(&Detour_BuildIaResources),
+                                      5, kTransitionPrefix))
+                    LogShimA(LogLevel::Info, "uiperf-hooks", "buildIAResources drilldown installed");
+                if (InstallInlineHook(g_InstantActionCtorHook, 0x00789C20,
+                                      reinterpret_cast<void*>(&Detour_InstantActionCtor),
+                                      5, kTransitionPrefix))
+                    LogShimA(LogLevel::Info, "uiperf-hooks", "InstantActionCtor drilldown installed");
+            }
+
+            g_ShellHookInstallState.store(2, std::memory_order_release);
+            LogShimA(hooked == 3 ? LogLevel::Info : LogLevel::Warn,
+                "uiperf-hooks",
+                "UiPerf shell hooks finished: request=0x%08X transition=0x%08X back=0x%08X hooked=%d",
+                g_ShellRequestAddr, g_ShellTransitionAddr, g_ShellBackAddr, hooked);
+        }
+
+        void TryInstallDeferredSteamShellHooksOnMainThread()
+        {
+            if (GetBzrDistribution() != BzrDistribution::Steam ||
+                g_ShellHookInstallState.load(std::memory_order_acquire) != 0 ||
+                !IsLiveMainScreenReady() || !AreSteamShellFunctionsSettled())
+                return;
+
+            LogShimA(LogLevel::Info, "uiperf-hooks",
+                "Steam shell code settled at live MainScreen; installing profiler detours on UI thread");
+            InstallResolvedShellHooks(false);
+        }
+
         // Auto-matrix driver thread.
         unsigned __stdcall AutoMatrixThread(void*)
         {
@@ -1124,51 +1269,26 @@ namespace BZROpenShim::UiPerfHooks
         uint32_t backAddr = HookEngine::ResolveNamedAddress("ShellBack");
         if (!backAddr) backAddr = 0x007C79A0;
 
-        int hooked = 0;
-        // Install inline hooks with correct instruction-boundary lengths
-        // (dumped 2026-08-28 via ReadProcessMemory):
-        //   007C7930: 55 8B EC 51 89 4D FC ... => 7 bytes to reach 89 4D FC
-        //   007C7070: 55 8B EC 6A FF ... => 5 bytes is boundary (push -1)
-        //   007C79A0: 55 8B EC 51 89 4D FC ... => 7 bytes; five would split
-        //             the mov [ebp-4],ecx instruction and corrupt the trampoline.
-        if (InstallInlineHook(g_ShellRequestHook, reqAddr, reinterpret_cast<void*>(&Detour_ShellRequest), 7, nullptr))
-        {
-            ++hooked;
-            LogShimA(LogLevel::Info, "uiperf-hooks", "ShellRequest hook installed at 0x%08X len=7 tramp=0x%p", reqAddr, g_ShellRequestHook.trampoline);
-        }
-        else LogShimA(LogLevel::Warn, "uiperf-hooks", "ShellRequest hook FAILED at 0x%08X", reqAddr);
-
-        if (InstallInlineHook(g_ShellTransitionHook, transAddr, reinterpret_cast<void*>(&Detour_ShellTransition), 5, nullptr))
-        {
-            ++hooked;
-            LogShimA(LogLevel::Info, "uiperf-hooks", "ShellTransition hook installed at 0x%08X len=5 tramp=0x%p", transAddr, g_ShellTransitionHook.trampoline);
-        }
-        else LogShimA(LogLevel::Warn, "uiperf-hooks", "ShellTransition hook FAILED at 0x%08X", transAddr);
-
-        if (InstallInlineHook(g_ShellBackHook, backAddr, reinterpret_cast<void*>(&Detour_ShellBack), 7, nullptr))
-        {
-            ++hooked;
-            LogShimA(LogLevel::Info, "uiperf-hooks", "ShellBack hook installed at 0x%08X len=7 tramp=0x%p", backAddr, g_ShellBackHook.trampoline);
-        }
-        else LogShimA(LogLevel::Info, "uiperf-hooks", "ShellBack hook skipped at 0x%08X", backAddr);
-
-        // Narrow GOG-build drilldown for the >1s IA unattributed interval.
-        // Both functions have the validated 55 8B EC 6A FF prologue and are
-        // timed only while UI performance logging is explicitly enabled.
-        if (InstallInlineHook(g_BuildIaResourcesHook, 0x0076A430,
-                              reinterpret_cast<void*>(&Detour_BuildIaResources), 5, nullptr))
-            LogShimA(LogLevel::Info, "uiperf-hooks", "buildIAResources drilldown installed");
-        if (InstallInlineHook(g_InstantActionCtorHook, 0x00789C20,
-                              reinterpret_cast<void*>(&Detour_InstantActionCtor), 5, nullptr))
-            LogShimA(LogLevel::Info, "uiperf-hooks", "InstantActionCtor drilldown installed");
-
         g_ShellRequestAddr = reqAddr;
         g_ShellTransitionAddr = transAddr;
         g_ShellBackAddr = backAddr;
 
-        LogShimA(LogLevel::Info, "uiperf-hooks",
-            "UiPerf hooks ready: shellReq=0x%08X shellTrans=0x%08X shellBack=0x%08X hooked=%d automatrix=%d",
-            reqAddr, transAddr, backAddr, hooked, g_AutoMatrixEnabled.load()?1:0);
+        const BzrDistribution distribution = GetBzrDistribution();
+        if (distribution == BzrDistribution::Steam)
+        {
+            LogShimA(LogLevel::Info, "uiperf-hooks",
+                "Steam shell hooks deferred until settled live MainScreen; request=0x%08X transition=0x%08X back=0x%08X",
+                reqAddr, transAddr, backAddr);
+        }
+        else if (distribution == BzrDistribution::GOG)
+        {
+            InstallResolvedShellHooks(true);
+        }
+        else
+        {
+            LogShimA(LogLevel::Warn, "uiperf-hooks",
+                "Shell hooks not installed because Redux distribution is unknown");
+        }
 
         // Hooked PeekMessageA installs the window subclass from Redux's owning
         // UI thread. The worker started here never dereferences Battlezone UI
