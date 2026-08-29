@@ -549,7 +549,7 @@ No load/unload/destroy or separately exported `parseResourceGroupScripts` operat
 
 ### 21.6 Gates still open — do not overclaim
 
-- **Manual-versus-harness equivalence is not proven.** The harness uses the correct discovered OnClick entry path and produces the expected ShellRequest/destination/Ogre/scan work, but no comparable physical-click capture has yet passed the required side-by-side table. Automated timing is therefore promising evidence, not yet a certified substitute for manual navigation.
+- **Manual-versus-harness equivalence passed for Main -> Instant Action** after this section's initial checkpoint; see §21.8. The remaining automated IA/Campaign timings may be treated as representative of normal UI navigation for the qualified GOG routes.
 - **Multiplayer is not measured.** The GOG process does not provide a qualified live Steam lobby/Workshop context. Run the MP pair on Steam and verify the `MultiPlayer_MainScreen` callback, ShellRequest path, scan roots, and destination.
 - **Minimal-versus-content-heavy scaling is not measured.** This section is the representative local content-heavy side only. A known minimal configuration must be captured with identical code before attributing scaling to entry count, metadata count, materials, or resource rebuilding.
 - **No first optimization is selected.** Measured `Modable` initialise time is currently the dominant recoverable-looking repeat work (approximately 0.8 seconds forward and 1.8 seconds on returns), while raw filesystem API self is only 3.6–18.2 ms. That observation is not authorization to retain/cache resources: the physical-click and scaling gates, material-level attribution, invalidation design, and compatibility review remain outstanding.
@@ -560,3 +560,25 @@ No load/unload/destroy or separately exported `parseResourceGroupScripts` operat
 - Host tests: 16/16 passed.
 - `git diff --check`: passed.
 - Safe runtime lifecycle: all launches dot-sourced `BZRHarness.ps1`, forced windowed mode for correctness, and closed through `Stop-BZRGame -Id`; original GOG `winmm.dll`, `scripts/patches.json`, and Ogre configuration were restored after each capture.
+
+### 21.8 Manual-versus-harness equivalence result
+
+A fresh manual capture used real mouse clicks on the rendered `Single Player` and `Instant Action` controls. Capture: `%TEMP%\BZR-OpenShim-uiperf-manual-20260828-232237\openshim-run.log`. It was compared with the first harness IA route from §21.4 in a comparable fresh-process/content state.
+
+| Property | Manual physical click | Harness OnClick |
+|---|---|---|
+| Main -> Single Player | `0x02`, 94.69 ms | `0x02`, 91.49 ms |
+| ShellRequest ID/path | `0x1B`, caller `0x007BEFC7` | `0x1B`, caller `0x007BEFC7` |
+| Destination | `InstantAction(0x1B)` | `InstantAction(0x1B)` |
+| Primary scan root | `addon` | `addon` |
+| dirs/files/ODF/BZN/TRN | 41 / 3661 / 420 / 90 / 90 | 41 / 3661 / 420 / 90 / 90 |
+| All-root FindFirst/FindNext/GetAttributes | 23 / 3730 / 17 | 23 / 3730 / 17 |
+| clear `Modable` | 68.65 ms | 72.46 ms |
+| initialise `Modable` | 799.67 ms | 792.16 ms |
+| `buildIAResources` | 1005.08 ms | 984.73 ms |
+| `InstantActionCtor` | 16.98 ms | 18.24 ms |
+| shader markers | 0 hits / 0 misses / 0 ms | 0 hits / 0 misses / 0 ms |
+| total SP -> IA | 1099.86 ms | 1091.79 ms |
+| exclusive categories | filesystem 4.42; Ogre 868.32; unattributed 227.12 ms | filesystem 4.36; Ogre 864.62; unattributed 222.81 ms |
+
+The engine work is structurally equivalent and no operation appears only on the physical-click route. Timing variation is small and expected. This passes the requested equivalence gate for a representative expensive transition and validates the harness's live-screen receiver convention.
