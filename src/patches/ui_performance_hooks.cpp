@@ -657,21 +657,36 @@ namespace BZROpenShim::UiPerfHooks
         using FnFrontendCtor = void*(__thiscall*)(void*);
         using FnFrontendDeletingDtor = void*(__thiscall*)(void*, unsigned int);
 
+        // These three "build*Resources" functions are the stock Modable
+        // mount-mode setters; see the mount-mode section below. Reporting the
+        // mode field they guard on costs nothing and makes every skip visible.
+        void ReportModableModeTransition(const char* label, int targetMode,
+                                         void* self, int modeBefore);
+        int ReadModableMode(void* self) noexcept;
+
         void __fastcall Detour_BuildMainResources(void* ecx, void* /*edx*/)
         {
             UiPerf::Heartbeat("BuildMainResources_Begin");
-            UiPerf::ScopedPhase phase("buildMainResources");
-            auto* orig = reinterpret_cast<FnBuildFrontendResources>(g_BuildMainResourcesHook.trampoline);
-            if (orig) orig(ecx);
+            const int before = ReadModableMode(ecx);
+            {
+                UiPerf::ScopedPhase phase("buildMainResources");
+                auto* orig = reinterpret_cast<FnBuildFrontendResources>(g_BuildMainResourcesHook.trampoline);
+                if (orig) orig(ecx);
+            }
+            ReportModableModeTransition("buildMainResources", 4, ecx, before);
             UiPerf::Heartbeat("BuildMainResources_End");
         }
 
         void __fastcall Detour_BuildMpResources(void* ecx, void* /*edx*/)
         {
             UiPerf::Heartbeat("BuildMpResources_Begin");
-            UiPerf::ScopedPhase phase("buildMPResources");
-            auto* orig = reinterpret_cast<FnBuildFrontendResources>(g_BuildMpResourcesHook.trampoline);
-            if (orig) orig(ecx);
+            const int before = ReadModableMode(ecx);
+            {
+                UiPerf::ScopedPhase phase("buildMPResources");
+                auto* orig = reinterpret_cast<FnBuildFrontendResources>(g_BuildMpResourcesHook.trampoline);
+                if (orig) orig(ecx);
+            }
+            ReportModableModeTransition("buildMPResources", 2, ecx, before);
             UiPerf::Heartbeat("BuildMpResources_End");
         }
 
@@ -718,11 +733,13 @@ namespace BZROpenShim::UiPerfHooks
         void __fastcall Detour_BuildIaResources(void* ecx, void* /*edx*/)
         {
             const uint64_t start = UiPerf::NowTicks();
+            const int before = ReadModableMode(ecx);
             auto* orig = reinterpret_cast<FnBuildIaResources>(g_BuildIaResourcesHook.trampoline);
             if (orig) orig(ecx);
             LogShimA(LogLevel::Info, "uiperf-hooks",
                 "[UIPERF][DRILL] buildIAResources %.2fms this=0x%p",
                 UiPerf::TicksToMs(UiPerf::NowTicks() - start), ecx);
+            ReportModableModeTransition("buildIAResources", 1, ecx, before);
         }
 
         void* __fastcall Detour_InstantActionCtor(void* ecx, void* /*edx*/)
@@ -1239,22 +1256,23 @@ namespace BZROpenShim::UiPerfHooks
         // than a bad pointer dereference.
         std::atomic<bool> g_OgreScriptNamesUsable{ true };
 
-        bool TryReadOgreDataStreamName(void* sharedPtr, char* out, size_t outSize) noexcept
+        // MSVC std::string is {union{char buf[16]; char* ptr;}, size, capacity}.
+        // Every field is validated and the read is guarded, so a build with a
+        // different layout yields no string rather than a bad dereference.
+        bool TryReadStdString(const void* strObj, char* out, size_t outSize) noexcept
         {
-            if (!sharedPtr || !out || outSize < 2) return false;
-            if (!g_OgreScriptNamesUsable.load(std::memory_order_relaxed)) return false;
+            if (!strObj || !out || outSize < 2) return false;
             __try
             {
-                auto* stream = *reinterpret_cast<uint8_t**>(sharedPtr);
-                if (!stream) return false;
-                auto* str = stream + 4;
-                const uint32_t size = *reinterpret_cast<uint32_t*>(str + 16);
-                const uint32_t capacity = *reinterpret_cast<uint32_t*>(str + 20);
-                if (capacity < 15 || capacity > 4096 || size > capacity || size == 0 || size >= outSize)
+                auto* str = reinterpret_cast<const uint8_t*>(strObj);
+                const uint32_t size = *reinterpret_cast<const uint32_t*>(str + 16);
+                const uint32_t capacity = *reinterpret_cast<const uint32_t*>(str + 20);
+                if (capacity < 15 || capacity > 65536 || size > capacity ||
+                    size == 0 || size >= outSize)
                     return false;
                 const char* data = (capacity >= 16)
-                    ? *reinterpret_cast<char**>(str)
-                    : reinterpret_cast<char*>(str);
+                    ? *reinterpret_cast<char* const*>(str)
+                    : reinterpret_cast<const char*>(str);
                 if (!data) return false;
                 for (uint32_t i = 0; i < size; ++i)
                 {
@@ -1263,13 +1281,26 @@ namespace BZROpenShim::UiPerfHooks
                 }
                 memcpy(out, data, size);
                 out[size] = '\0';
-                return strchr(out, '.') != nullptr;
+                return true;
             }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        }
+
+        // Ogre::DataStream keeps its name as the first member after the vptr.
+        bool TryReadOgreDataStreamName(void* sharedPtr, char* out, size_t outSize) noexcept
+        {
+            if (!sharedPtr || !g_OgreScriptNamesUsable.load(std::memory_order_relaxed))
+                return false;
+            uint8_t* stream = nullptr;
+            __try { stream = *reinterpret_cast<uint8_t**>(sharedPtr); }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 g_OgreScriptNamesUsable.store(false, std::memory_order_relaxed);
                 return false;
             }
+            if (!stream) return false;
+            if (!TryReadStdString(stream + 4, out, outSize)) return false;
+            return strchr(out, '.') != nullptr;
         }
 
         // Per-extension attribution for the parse phase.
@@ -1519,6 +1550,252 @@ namespace BZROpenShim::UiPerfHooks
                 "Ogre initialiseResourceGroup phase drilldown installed=%d/4", installed);
         }
 
+        // --- Modable mount-mode instrumentation ------------------------------
+        //
+        // PROVEN STATIC (GOG battlezone98redux.exe, 2.2.301): the resource
+        // manager object carries a mount-mode field at +0x8C, and five stock
+        // setters drive it. Each one has the same shape:
+        //
+        //     if (g_ModableSubsystemEnabled == 0) return;   // 0x00915568
+        //     if (this->mode == <target>) return;           // already there
+        //     this->mode = <target>;
+        //     ... mutate resource locations ...
+        //     ResourceGroupManager::clearResourceGroup("Modable");
+        //     ResourceGroupManager::initialiseResourceGroup("Modable");
+        //
+        // So a "desired state == active state" guard already exists in stock
+        // code and demonstrably fires (Abort out of a stock mission returns
+        // from buildMainResources in 0.09 ms). What is not guarded is the
+        // alternation between two genuinely different mount sets, which is why
+        // these hooks record the transitions themselves and the individual
+        // resource locations each one mounts: that location list, not the
+        // coarse mode, is the only candidate for an authoritative content
+        // identity.
+        struct ModableSetterSite
+        {
+            uintptr_t addr;
+            int targetMode;
+            const char* label;
+            ShellHook hook;
+        };
+
+        // 0x0076A030 (mode 4), 0x0076A240 (mode 2) and 0x0076A430 (mode 1) are
+        // the functions this file already hooks as buildMainResources,
+        // buildMPResources and buildIAResources, so they are reported from
+        // those detours instead of being hooked twice.
+        ModableSetterSite g_ModableSetters[] = {
+            { 0x0076A600, 0, "setModableNone", {} },
+            { 0x0076AB20, 3, "setModableCustomCampaignList", {} },
+            { 0x0076AE60, 0, "setModableCampaign", {} },
+            { 0x0076B350, 0, "setModableContentB", {} },
+        };
+
+        ShellHook g_OgreAddLocationHook;
+        ShellHook g_OgreRemoveLocationHook;
+        std::atomic<bool> g_ModableHooksInstalled{ false };
+        std::atomic<int> g_ModableSetterDepth{ 0 };
+        std::atomic<uint32_t> g_ModableAdds{ 0 };
+        std::atomic<uint32_t> g_ModableRemoves{ 0 };
+
+        int ReadModableMode(void* self) noexcept
+        {
+            __try
+            {
+                if (!self) return -1;
+                return *reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(self) + 0x8C);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return -1; }
+        }
+
+        // The manager's remembered content identity: a std::string at +0x90 that
+        // setModableCampaign compares against the selected content object's own
+        // string at +0x7C. Together with the mode at +0x8C this is the stock
+        // "has the mounted content actually changed" test.
+        void ReadModableIdentity(void* self, char* out, size_t outSize) noexcept
+        {
+            out[0] = '\0';
+            if (!self) return;
+            TryReadStdString(reinterpret_cast<uint8_t*>(self) + 0x90, out, outSize);
+        }
+
+        void ReportModableModeTransition(const char* label, int targetMode,
+                                         void* self, int modeBefore)
+        {
+            if (!UiPerf::IsEnabled()) return;
+            const int after = ReadModableMode(self);
+            char identity[260] = {};
+            ReadModableIdentity(self, identity, sizeof(identity));
+            UiPerf::Log("[UIPERF][MODABLE] setter=%s target=%d this=0x%p modeBefore=%d "
+                        "modeAfter=%d skipped=%d identity=%s",
+                        label, targetMode, self, modeBefore, after,
+                        (modeBefore == after && modeBefore == targetMode) ? 1 : 0,
+                        identity[0] ? identity : "<none>");
+        }
+
+        // Argument counts are taken from each function's own epilogue: 0x0076AB20
+        // ends in `ret`, the other three in `ret 4`. Getting this wrong
+        // unbalances the stack, so the two shapes are kept strictly separate.
+        struct ModableSetterCall
+        {
+            void* self;
+            void* content;
+            bool hasContent;
+        };
+
+        void RunModableSetterOriginal(ModableSetterSite& site, const ModableSetterCall& call)
+        {
+            if (call.hasContent)
+            {
+                auto* orig = reinterpret_cast<void(__fastcall*)(void*, void*, void*)>(site.hook.trampoline);
+                orig(call.self, nullptr, call.content);
+            }
+            else
+            {
+                auto* orig = reinterpret_cast<void(__fastcall*)(void*, void*)>(site.hook.trampoline);
+                orig(call.self, nullptr);
+            }
+        }
+
+        void InvokeModableSetterImpl(size_t index, void* self, void* content, bool hasContent)
+        {
+            ModableSetterSite& site = g_ModableSetters[index];
+            if (!site.hook.trampoline) return;
+            const ModableSetterCall call{ self, content, hasContent };
+            if (!UiPerf::IsEnabled())
+            {
+                RunModableSetterOriginal(site, call);
+                return;
+            }
+            const int before = ReadModableMode(self);
+            char identityBefore[260] = {};
+            ReadModableIdentity(self, identityBefore, sizeof(identityBefore));
+            char requested[260] = {};
+            if (content)
+                TryReadStdString(reinterpret_cast<uint8_t*>(content) + 0x7C, requested, sizeof(requested));
+            g_ModableAdds.store(0, std::memory_order_relaxed);
+            g_ModableRemoves.store(0, std::memory_order_relaxed);
+            g_ModableSetterDepth.fetch_add(1, std::memory_order_acq_rel);
+            const uint64_t start = UiPerf::NowTicks();
+            RunModableSetterOriginal(site, call);
+            const double ms = UiPerf::TicksToMs(UiPerf::NowTicks() - start);
+            g_ModableSetterDepth.fetch_sub(1, std::memory_order_acq_rel);
+            const int after = ReadModableMode(self);
+            char identityAfter[260] = {};
+            ReadModableIdentity(self, identityAfter, sizeof(identityAfter));
+            UiPerf::Log("[UIPERF][MODABLE] setter=%s target=%d this=0x%p modeBefore=%d "
+                        "modeAfter=%d requested=%s identityBefore=%s identityAfter=%s "
+                        "added=%u removed=%u elapsed=%.2fms",
+                        site.label, site.targetMode, self, before, after,
+                        requested[0] ? requested : "<none>",
+                        identityBefore[0] ? identityBefore : "<none>",
+                        identityAfter[0] ? identityAfter : "<none>",
+                        g_ModableAdds.load(std::memory_order_relaxed),
+                        g_ModableRemoves.load(std::memory_order_relaxed), ms);
+        }
+
+        // 0x0076AB20 takes no argument; the other three take the selected
+        // content object, whose identity string lives at +0x7C and which the
+        // manager remembers at +0x90.
+        void __fastcall Detour_ModableSetter0(void* ecx, void*, void* content) { InvokeModableSetterImpl(0, ecx, content, true); }
+        void __fastcall Detour_ModableSetter1(void* ecx, void*) { InvokeModableSetterImpl(1, ecx, nullptr, false); }
+        void __fastcall Detour_ModableSetter2(void* ecx, void*, void* content) { InvokeModableSetterImpl(2, ecx, content, true); }
+        void __fastcall Detour_ModableSetter3(void* ecx, void*, void* content) { InvokeModableSetterImpl(3, ecx, content, true); }
+
+        using FnAddResourceLocation =
+            void(__fastcall*)(void*, void*, void*, void*, void*, bool, bool);
+        using FnRemoveResourceLocation = void(__fastcall*)(void*, void*, void*, void*);
+
+        void __fastcall Detour_OgreAddResourceLocation(void* ecx, void* /*edx*/,
+                                                      void* name, void* locType,
+                                                      void* group, bool recursive,
+                                                      bool readOnly)
+        {
+            auto* orig = reinterpret_cast<FnAddResourceLocation>(g_OgreAddLocationHook.trampoline);
+            if (!orig) return;
+            if (UiPerf::IsEnabled())
+            {
+                char n[260] = {}, t[64] = {}, g[64] = {};
+                const bool haveName = TryReadStdString(name, n, sizeof(n));
+                TryReadStdString(locType, t, sizeof(t));
+                TryReadStdString(group, g, sizeof(g));
+                g_ModableAdds.fetch_add(1, std::memory_order_relaxed);
+                UiPerf::Log("[UIPERF][MODABLE]   +location group=%s type=%s recursive=%d name=%s",
+                            g[0] ? g : "?", t[0] ? t : "?", recursive ? 1 : 0,
+                            haveName ? n : "?");
+            }
+            orig(ecx, nullptr, name, locType, group, recursive, readOnly);
+        }
+
+        void __fastcall Detour_OgreRemoveResourceLocation(void* ecx, void* /*edx*/,
+                                                         void* name, void* group)
+        {
+            auto* orig = reinterpret_cast<FnRemoveResourceLocation>(g_OgreRemoveLocationHook.trampoline);
+            if (!orig) return;
+            if (UiPerf::IsEnabled())
+            {
+                char n[260] = {}, g[64] = {};
+                const bool haveName = TryReadStdString(name, n, sizeof(n));
+                TryReadStdString(group, g, sizeof(g));
+                g_ModableRemoves.fetch_add(1, std::memory_order_relaxed);
+                UiPerf::Log("[UIPERF][MODABLE]   -location group=%s name=%s",
+                            g[0] ? g : "?", haveName ? n : "?");
+            }
+            orig(ecx, nullptr, name, group);
+        }
+
+        void InstallModableModeHooks()
+        {
+            if (!UiPerf::IsEnabled()) return;
+            if (g_ModableHooksInstalled.exchange(true)) return;
+
+            // Every one of these bodies begins with the same MSVC SEH prologue,
+            // whose fifth byte is an instruction boundary. A build whose bytes
+            // differ - or a Steam image that has not settled - fails the prefix
+            // check and is left alone.
+            static constexpr uint8_t kSehPrologue[] = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF };
+            void* detours[] = {
+                reinterpret_cast<void*>(&Detour_ModableSetter0),
+                reinterpret_cast<void*>(&Detour_ModableSetter1),
+                reinterpret_cast<void*>(&Detour_ModableSetter2),
+                reinterpret_cast<void*>(&Detour_ModableSetter3),
+            };
+            int installed = 0;
+            for (size_t i = 0; i < std::size(g_ModableSetters); ++i)
+            {
+                ModableSetterSite& site = g_ModableSetters[i];
+                if (InstallInlineHook(site.hook, site.addr, detours[i], 5, kSehPrologue))
+                {
+                    ++installed;
+                    LogShimA(LogLevel::Info, "uiperf-hooks",
+                        "Modable setter hook %s installed at 0x%08X tramp=0x%p",
+                        site.label, static_cast<unsigned>(site.addr), site.hook.trampoline);
+                }
+                else
+                {
+                    LogShimA(LogLevel::Warn, "uiperf-hooks",
+                        "Modable setter hook %s refused at 0x%08X (prologue mismatch)",
+                        site.label, static_cast<unsigned>(site.addr));
+                }
+            }
+
+            HMODULE ogre = GetModuleHandleA("OgreMain.dll");
+            if (ogre)
+            {
+                const uintptr_t addAddr = ResolveOgreExportBody(ogre,
+                    "?addResourceLocation@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@00_N1@Z");
+                const uintptr_t removeAddr = ResolveOgreExportBody(ogre,
+                    "?removeResourceLocation@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@0@Z");
+                if (addAddr && InstallInlineHook(g_OgreAddLocationHook, addAddr,
+                        reinterpret_cast<void*>(&Detour_OgreAddResourceLocation), 5, kSehPrologue))
+                    ++installed;
+                if (removeAddr && InstallInlineHook(g_OgreRemoveLocationHook, removeAddr,
+                        reinterpret_cast<void*>(&Detour_OgreRemoveResourceLocation), 5, kSehPrologue))
+                    ++installed;
+            }
+            LogShimA(LogLevel::Info, "uiperf-hooks",
+                "Modable mount instrumentation installed=%d/6", installed);
+        }
+
         void InstallResolvedShellHooks(bool installGogDrilldown)
         {
             int expectedState = 0;
@@ -1580,6 +1857,10 @@ namespace BZROpenShim::UiPerfHooks
             // installed after full-function body validation; they do not alter
             // resource or menu behavior.
             InstallFrontendDrilldownHooks();
+
+            // Mount-mode instrumentation shares the same settle gate: on Steam
+            // these bodies are only trustworthy once the image has settled.
+            InstallModableModeHooks();
 
             g_ShellHookInstallState.store(2, std::memory_order_release);
             LogShimA(hooked == 3 ? LogLevel::Info : LogLevel::Warn,
