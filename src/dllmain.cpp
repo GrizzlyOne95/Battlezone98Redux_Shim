@@ -44,8 +44,6 @@ static unsigned __stdcall PatchThreadProc(void*)
 {
     BZROpenShim::UiPerf::Initialize();
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread started");
-    BZROpenShim::UiPerfHooks::Install();
-    BZROpenShim::UiFileScan::Install();
     // Start renderer diagnostics/features immediately so their workers can
     // observe Ogre/D3D11 module creation before the renderer creates devices,
     // swapchains, entities, or begins normal animation submission.
@@ -59,6 +57,14 @@ static unsigned __stdcall PatchThreadProc(void*)
     // the optimizer's existing IAT targets without changing network behavior.
     BZROpenShim::InitializeBzrNetInstrumentation();
     BZROpenShim::RunPatcher(SHIM_VERSION);
+
+    // Shell profiler detours must not touch SteamStub-managed executable pages
+    // before platform detection and code settlement. UiPerfHooks installs them
+    // immediately on GOG and defers Steam's writes until a live MainScreen is
+    // observed on the UI thread. File-scan hooks follow so trigger-file access
+    // is suppressed without classifying startup work as a menu transition.
+    BZROpenShim::UiPerfHooks::Install();
+    BZROpenShim::UiFileScan::Install();
 
     // Renderer-profile ownership (backend observation, scheme-policy takeover,
     // capability reporting) initializes after the compatibility gate so the
