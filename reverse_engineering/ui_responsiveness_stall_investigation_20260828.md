@@ -1018,3 +1018,263 @@ clear+initialise pair, or whether one would have to be introduced.
 - Measurements are taken only with the game window verifiably foreground. An
   inactive Redux window throttles its main loop; one `SinglePlayer` transition
   measured 66 s that way against a true 272 ms.
+
+## 24. Modable mount lifecycle: the redundancy guard already exists (2026-08-29)
+
+§23 established that every slow route is dominated by
+`Ogre::initialiseResourceGroup("Modable")` and pinned two callers,
+`0x0076A1C8` and `0x0076AE17`. The task then was to recover the surrounding
+resource lifecycle, find the smallest reliable "Modable content changed"
+signal, and suppress redundant rebuilds if the evidence supported it.
+
+**Headline result: the engine already implements that guard, and it already
+fires. No redundant whole-set rebuild was found to suppress on any measured
+route.** What remains is genuine state change, so the multi-second cost cannot
+be removed by "not clearing unchanged state".
+
+### 24.1 The mount-mode state machine — PROVEN STATIC
+
+Static analysis of the unencrypted GOG `battlezone98redux.exe` (2.2.301,
+image base `0x00400000`; addresses verified identical to the settled Steam
+image by successful prologue-guarded hook installation at runtime).
+
+The resource manager object carries two fields:
+
+| Field | Type | Purpose | Confidence |
+|---|---|---|---|
+| `+0x8C` | `int` | Mount mode | PROVEN STATIC + PROVEN RUNTIME |
+| `+0x90` | `std::string` | Identity of the currently mounted content | PROVEN STATIC + PROVEN RUNTIME |
+| `+0x38`, `+0x40`, `+0x54` | containers | Per-mode location/content lists | INFERRED (read by the setters) |
+| `+0x5C` | ptr | Written by the mount wrapper | UNKNOWN |
+
+`0x00915568` is a global enable flag; every setter returns immediately when it
+is zero.
+
+Seven stock setters drive the field. Five share one shape:
+
+```
+void __thiscall SetModable<Mode>(this)          // 0x0076A600 takes an argument
+{
+    if (g_ModableEnabled /*0x00915568*/ == 0) return;
+    if (this->mode /*+0x8C*/ == <target>) return;      // <-- the stock guard
+    this->mode = <target>;
+    ...  mutate the mounted location set via 0x006679C0 ...
+    ResourceGroupManager::getSingleton().clearResourceGroup("Modable");
+    ResourceGroupManager::getSingleton().initialiseResourceGroup("Modable");
+}
+```
+
+and two carry a *second* identity term:
+
+```
+void __thiscall SetModableCampaign(this, content)      // 0x0076AE60, 0x0076B350
+{
+    if (g_ModableEnabled == 0) return;
+    if (this->mode == 0 && StringEquals(this->identity /*+0x90*/,
+                                        content->identity /*+0x7C*/))
+        return;                                        // <-- same content, no rebuild
+    this->mode = 0;
+    this->identity = content->identity;
+    ...  mount, clear, initialise  ...
+}
+```
+
+The setter catalogue:
+
+| Address | Mode | Also known as | Guard | Epilogue |
+|---|---:|---|---|---|
+| `0x0076A030` | 4 | `buildMainResources` (already hooked here) | mode only | `ret` |
+| `0x0076A240` | 2 | `buildMPResources` (already hooked here) | mode only | `ret` |
+| `0x0076A430` | 1 | `buildIAResources` (already hooked here) | mode only | `ret` |
+| `0x0076A600` | 0 | content setter | mode only | `ret 4` |
+| `0x0076AB20` | 3 | custom-campaign list mount | mode only | `ret` |
+| `0x0076AE60` | 0 | campaign/mod mount | **mode + identity** | `ret 4` |
+| `0x0076B350` | 0 | second content mount | **mode + identity** | `ret 4` |
+
+Argument counts are taken from each epilogue, not assumed: `0x0076AB20` ends in
+`ret`, the other content setters in `ret 4`. Getting this wrong unbalances the
+stack — an early revision of this instrumentation passed a stack argument to
+the zero-argument setter and crashed the process (see §24.6).
+
+So the previously-named `build*Resources` functions are not resource builders
+with incidental mode bookkeeping; they *are* the mount-mode setters. That
+resolves the two call sites from §23.4: `0x0076A1C8` is the
+`initialiseResourceGroup` return address inside the mode-4 setter, and
+`0x0076AE17` the one inside the mode-3 setter.
+
+Mounting does **not** go through Ogre's exported `addResourceLocation` /
+`removeResourceLocation`. Redux registers its own `Ogre::Archive` subclass
+through the wrapper at `0x006679C0` (it allocates a 16-byte object via
+`Ogre::StdAllocPolicy::allocateBytes` and installs it directly). Hooks on both
+exported functions were installed and fired exactly once across a full session,
+for `group=General type=FileSystem name=...\flags\_generated` — never for
+`Modable`. PROVEN RUNTIME.
+
+### 24.2 The guard fires in practice — PROVEN RUNTIME
+
+Capture: `%TEMP%\BZR-OpenShim-uiperf-steam-spabort-20260829-104231\openshim-run.log`
+(Multiplayer and Custom Campaigns cycles) and `...-104357\openshim-run.log`
+(custom-campaign launch and Abort). Every mount-mode transition in both:
+
+| Setter | mode before -> after | Identity before -> after | Skipped | Elapsed |
+|---|---|---|---:|---:|
+| `buildMPResources` | 4 -> 2 | — | no | (see §22.4) |
+| `buildMainResources` | 2 -> 4 | — | no | |
+| `buildMPResources` | 4 -> 2 | — | no | |
+| `buildMainResources` | 2 -> 4 | — | no | |
+| **`buildMainResources`** | **4 -> 4** | — | **yes** | **~0.01 ms** |
+| `setModableCustomCampaignList` | 4 -> 3 | — | no | 3736.84 ms |
+| `buildMainResources` | 3 -> 4 | — | no | |
+| `setModableCustomCampaignList` | 4 -> 3 | — | no | 3755.35 ms |
+| `buildMainResources` | 3 -> 4 | — | no | |
+| **`buildMainResources`** | **4 -> 4** | — | **yes** | **~0.01 ms** |
+| `setModableCustomCampaignList` | 4 -> 3 | `<none>` | no | 3974.45 ms |
+| `setModableCampaign` | 3 -> 0 | `<none>` -> `...\packaged_mods\819834262` | no | 2319.62 ms |
+| **`setModableCampaign`** | **0 -> 0** | **same path -> same path** | **yes** | **0.00 ms** |
+| `buildMainResources` | 0 -> 4 | (identity retained) | no | 2200.72 ms |
+| **`buildMainResources`** | **4 -> 4** | — | **yes** | **~0.01 ms** |
+
+Four skips in two sessions, including the exact case the task singled out:
+selecting the same campaign twice in a row (`Campaign A -> Campaign A`) returns
+in **0.00 ms** because both the mode and the identity string match. The
+identity is a real filesystem path — for Campaign Reimagined,
+`C:\...\Battlezone 98 Redux\packaged_mods\819834262`.
+
+Every other transition changed `(mode, identity)` for real. There is no
+observed case of "desired state == active state" that still rebuilds.
+
+### 24.3 What this means for the proposed optimization
+
+The task's critical hypothesis was:
+
+> desired Modable state = BASE, active Modable state = BASE, resource locations
+> unchanged -> recompiling 275 scripts appears redundant.
+
+That case exists and is **already free**: `buildMainResources` returns in
+0.01 ms whenever the mode is already 4. It is exactly why Abort out of a stock
+Red Brigade mission costs 60 ms (§22.5) while Abort out of a custom campaign
+costs 2484 ms — in the stock case the mode never left 4.
+
+Implementing an OpenShim-side `desiredState == activeState` suppression would
+therefore be dead code: the condition it tests is already short-circuited
+inside the stock function, before our detour's inner call returns. It was not
+implemented, and adding it is not recommended.
+
+Correspondingly, the invalidation cases the task listed are already correct in
+stock code:
+
+| Case | Stock behaviour | Correct? |
+|---|---|---|
+| Base -> Base | skipped | yes |
+| Campaign A -> Campaign A | skipped (mode 0 + identity match) | yes |
+| Campaign A -> Campaign B | rebuild (identity differs) | yes |
+| Base -> Multiplayer / Campaign list | rebuild (mode differs) | yes |
+| Any mode change | rebuild | yes |
+| **Loose-file edit inside the same mod** | **not detected** | **no — see §24.5** |
+| **Workshop update of the same item** | **not detected** | **no — see §24.5** |
+
+### 24.4 What is actually left, and what it would cost
+
+Every remaining multi-second stall is a genuine `(mode, identity)` change:
+
+| Route | Transition | initialise Modable |
+|---|---|---:|
+| Main -> Multiplayer | 4 -> 2 | 2872–6989 ms |
+| Multiplayer -> Main | 2 -> 4 | ~1763 ms |
+| Main/SP -> Custom Campaigns | 4 -> 3 | 3233–3670 ms |
+| Custom Campaigns -> Back | 3 -> 4 | ~1998 ms |
+| Custom Campaigns -> campaign screen | 3 -> 0 | ~1858 ms |
+| Abort out of a custom mission | 0 -> 4 | ~1820 ms |
+
+Each of those genuinely swaps the mounted content, and §23.3 showed the cost is
+~95% `ScriptCompilerManager` recompiling 275 or 1114 `.material`/`.program`
+scripts from source. Removing it means not re-parsing scripts across a *real*
+state change, which is the parsed-script cache the task wanted to avoid unless
+necessary — or reducing what each screen mounts, which changes stock content
+behaviour.
+
+Two observations that matter if a cache is ever pursued:
+
+- The state space is small and the identities are stable: modes 1–4 have no
+  identity, mode 0 is keyed by a mod path. A cache would be keyed on
+  `(mode, identity)` and would need at most a handful of entries.
+- The sets alternate rather than accumulate. A session that goes
+  `Main -> Custom Campaigns -> campaign -> mission -> Abort -> Main` performs
+  three full rebuilds (~7 s of script compilation) over three distinct states,
+  each of which is re-entered later in the same session unchanged.
+
+### 24.5 Invalidation gap in the stock identity — PROVEN STATIC
+
+The stock identity is a path string only. It carries no timestamp, size, hash
+or generation counter, and the comparison at `0x00427310` is a plain string
+equality. Consequently:
+
+- editing a `.material` in place inside the currently mounted mod, or
+- a Workshop update that replaces files under the same item id,
+
+does **not** invalidate the identity. Today this is harmless because any change
+of screen also changes the mode and forces a rebuild anyway. It would stop
+being harmless the moment anything reused parsed state across a mode change:
+such a cache could not rely on the stock identity alone and would need its own
+content signature (mtime/size sweep of the mounted roots at minimum). This is
+recorded as a hard prerequisite, not a detail.
+
+UNKNOWN: whether any other engine subsystem maintains a content generation
+counter that could serve this purpose. Nothing of the sort was found around
+these call sites.
+
+### 24.6 Instrumentation added
+
+All of it is diagnostic-only and gated on `UiPerformanceLogging`:
+
+- The three existing `build*Resources` detours now report
+  `modeBefore`/`modeAfter`/`skipped` plus the identity string, at no extra cost
+  and without hooking those functions twice.
+- New prologue-guarded hooks on `0x0076A600`, `0x0076AB20`, `0x0076AE60` and
+  `0x0076B350` report the same, plus the requested content identity.
+- Ogre's `addResourceLocation` / `removeResourceLocation` are hooked to log
+  every location mutation with group, type and path.
+- A shared, fully validated `TryReadStdString` probe replaced the ad-hoc
+  DataStream-name reader, so both the identity fields and script names use one
+  guarded reader that fails closed on an unexpected layout.
+
+Every hook validates the exact five-byte MSVC SEH prologue before patching and
+fails closed otherwise, and all of them install behind the existing Steam
+settle gate.
+
+One correctness incident during development, recorded because it produced a
+dump: an early revision called the zero-argument setter at `0x0076AB20` through
+a signature with one stack argument. The stack imbalance corrupted the process
+and it exited mid-sequence (`battlezone98redux.exe.8772.dmp`, 2026-08-29
+10:41). The fix was to take each setter's argument count from its own epilogue
+(`ret` versus `ret 4`) and keep the two shapes strictly separate. No user data
+was affected and the Steam install was restored and hash-verified afterwards.
+
+### 24.7 Recommendation
+
+1. **Do not implement desired-vs-active suppression.** It is already in stock
+   code, it demonstrably fires, and a shim-side copy would be unreachable.
+2. **Treat the remaining cost as a script-compilation problem, not a lifecycle
+   problem.** The next honest option is reuse of parsed state across a genuine
+   `(mode, identity)` change, with its own content signature for invalidation —
+   explicitly the higher-risk path the task deferred.
+3. **Before any such work, decide whether the mounted set itself is
+   justified.** The Custom Campaigns list screen mounts a 24,697-file addon
+   tree and compiles 1,114 material scripts to show a two-row list with a map
+   preview. That is where the biggest single win would be, and it is a content
+   /UI design question rather than a caching one.
+
+### 24.8 Validation at this checkpoint
+
+- `Release|Win32`: passed (existing warnings only).
+- Host tests: 16/16 passed.
+- `git diff --check`: passed.
+- Runtime: Multiplayer open/leave x2, Custom Campaigns open/leave x2,
+  Single Player -> Custom Campaigns -> Campaign Reimagined -> real mission ->
+  Escape -> Abort -> Main, all through the real main-menu route with a real
+  scan-code Escape and the game window verifiably foreground.
+- No behaviour change was made to any engine path; only logging was added, so
+  no A/B enable/disable comparison was required.
+- Steam install restored and hash-verified after every cycle: `winmm.dll` and
+  `scripts/patches.json` match the pre-run copies, no `openshim.ini` or trigger
+  file left behind, no orphan process, `Ogre.cfg` recovered.
