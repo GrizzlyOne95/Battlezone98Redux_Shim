@@ -70,6 +70,12 @@ namespace BZROpenShim::UiPerfHooks
         ShellHook g_ShellBackHook;
         ShellHook g_BuildIaResourcesHook;
         ShellHook g_InstantActionCtorHook;
+        ShellHook g_BuildMainResourcesHook;
+        ShellHook g_BuildMpResourcesHook;
+        ShellHook g_MainScreenCtorHook;
+        ShellHook g_MainScreenDtorHook;
+        ShellHook g_MultiplayerLobbyCtorHook;
+        ShellHook g_MultiplayerLobbyDtorHook;
         std::atomic<int> g_ShellHookInstallState{ 0 }; // 0=waiting, 1=installing, 2=finished
         std::atomic<uint64_t> g_ShellRequestStart{ 0 };
         std::atomic<int> g_PendingScreenId{ -1 };
@@ -641,6 +647,67 @@ namespace BZROpenShim::UiPerfHooks
         using FnShellBack = void(__thiscall*)(void*);
         using FnBuildIaResources = void(__thiscall*)(void*);
         using FnInstantActionCtor = void*(__thiscall*)(void*);
+        using FnBuildFrontendResources = void(__thiscall*)(void*);
+        using FnFrontendCtor = void*(__thiscall*)(void*);
+        using FnFrontendDeletingDtor = void*(__thiscall*)(void*, unsigned int);
+
+        void __fastcall Detour_BuildMainResources(void* ecx, void* /*edx*/)
+        {
+            UiPerf::Heartbeat("BuildMainResources_Begin");
+            UiPerf::ScopedPhase phase("buildMainResources");
+            auto* orig = reinterpret_cast<FnBuildFrontendResources>(g_BuildMainResourcesHook.trampoline);
+            if (orig) orig(ecx);
+            UiPerf::Heartbeat("BuildMainResources_End");
+        }
+
+        void __fastcall Detour_BuildMpResources(void* ecx, void* /*edx*/)
+        {
+            UiPerf::Heartbeat("BuildMpResources_Begin");
+            UiPerf::ScopedPhase phase("buildMPResources");
+            auto* orig = reinterpret_cast<FnBuildFrontendResources>(g_BuildMpResourcesHook.trampoline);
+            if (orig) orig(ecx);
+            UiPerf::Heartbeat("BuildMpResources_End");
+        }
+
+        void* __fastcall Detour_MainScreenCtor(void* ecx, void* /*edx*/)
+        {
+            UiPerf::Heartbeat("MainScreenCtor_Begin");
+            UiPerf::ScopedPhase phase("MainScreenCtor");
+            auto* orig = reinterpret_cast<FnFrontendCtor>(g_MainScreenCtorHook.trampoline);
+            void* result = orig ? orig(ecx) : nullptr;
+            UiPerf::Heartbeat("MainScreenCtor_End");
+            return result;
+        }
+
+        void* __fastcall Detour_MainScreenDtor(void* ecx, void* /*edx*/, unsigned int flags)
+        {
+            UiPerf::Heartbeat("MainScreenDtor_Begin");
+            UiPerf::ScopedPhase phase("MainScreenDeletingDtor");
+            auto* orig = reinterpret_cast<FnFrontendDeletingDtor>(g_MainScreenDtorHook.trampoline);
+            void* result = orig ? orig(ecx, flags) : ecx;
+            UiPerf::Heartbeat("MainScreenDtor_End");
+            return result;
+        }
+
+        void* __fastcall Detour_MultiplayerLobbyCtor(void* ecx, void* /*edx*/)
+        {
+            UiPerf::Heartbeat("MultiplayerLobbyCtor_Begin");
+            UiPerf::ScopedPhase phase("MultiplayerLobbyCtor");
+            auto* orig = reinterpret_cast<FnFrontendCtor>(g_MultiplayerLobbyCtorHook.trampoline);
+            void* result = orig ? orig(ecx) : nullptr;
+            UiPerf::Heartbeat("MultiplayerLobbyCtor_End");
+            return result;
+        }
+
+        void* __fastcall Detour_MultiplayerLobbyDtor(void* ecx, void* /*edx*/, unsigned int flags)
+        {
+            UiPerf::Heartbeat("MultiplayerLobbyDtor_Begin");
+            UiPerf::ScopedPhase phase("MultiplayerLobbyDeletingDtor");
+            auto* orig = reinterpret_cast<FnFrontendDeletingDtor>(g_MultiplayerLobbyDtorHook.trampoline);
+            void* result = orig ? orig(ecx, flags) : ecx;
+            UiPerf::Heartbeat("MultiplayerLobbyDtor_End");
+            return result;
+        }
 
         void __fastcall Detour_BuildIaResources(void* ecx, void* /*edx*/)
         {
@@ -1064,6 +1131,72 @@ namespace BZROpenShim::UiPerfHooks
                                  kBackBody, sizeof(kBackBody));
         }
 
+        bool AreFrontendDrilldownFunctionsSettled()
+        {
+            // These body sentinels are intentionally outside the overwritten
+            // prologues. SteamStub previously exposed valid entry bytes while
+            // the remainder of a function was still ciphertext, so a prologue
+            // match alone is not sufficient authority to install a detour.
+            static constexpr uint8_t kBuildMainBody[] = {
+                0x68, 0x50, 0xD5, 0x85, 0x00, 0x64, 0xA1
+            };
+            static constexpr uint8_t kBuildMpBody[] = {
+                0x68, 0xA0, 0xD5, 0x85, 0x00, 0x64, 0xA1
+            };
+            static constexpr uint8_t kMainCtorBody[] = {
+                0x68, 0x54, 0xEC, 0x85, 0x00, 0x64, 0xA1
+            };
+            static constexpr uint8_t kMpCtorBody[] = {
+                0x68, 0x50, 0xFF, 0x85, 0x00, 0x64, 0xA1
+            };
+            static constexpr uint8_t kMainDtorBody[] = {
+                0x8B, 0x4D, 0xFC, 0xE8, 0xD1, 0x03, 0x00, 0x00
+            };
+            static constexpr uint8_t kMpDtorBody[] = {
+                0x8B, 0x4D, 0xFC, 0xE8, 0x21, 0x00, 0x00, 0x00
+            };
+            return MemoryMatches(0x0076A030 + 5, kBuildMainBody, sizeof(kBuildMainBody)) &&
+                   MemoryMatches(0x0076A240 + 5, kBuildMpBody, sizeof(kBuildMpBody)) &&
+                   MemoryMatches(0x0078E670 + 5, kMainCtorBody, sizeof(kMainCtorBody)) &&
+                   MemoryMatches(0x0079EA90 + 5, kMpCtorBody, sizeof(kMpCtorBody)) &&
+                   MemoryMatches(0x0078E8C0 + 7, kMainDtorBody, sizeof(kMainDtorBody)) &&
+                   MemoryMatches(0x007A0F80 + 7, kMpDtorBody, sizeof(kMpDtorBody));
+        }
+
+        void InstallFrontendDrilldownHooks()
+        {
+            if (!AreFrontendDrilldownFunctionsSettled())
+            {
+                LogShimA(LogLevel::Warn, "uiperf-hooks",
+                    "Frontend drilldown hooks skipped because full-function sentinels are not settled");
+                return;
+            }
+
+            static constexpr uint8_t kSehPrefix[] = {
+                0x55, 0x8B, 0xEC, 0x6A, 0xFF
+            };
+            static constexpr uint8_t kDeletingDtorPrefix[] = {
+                0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC
+            };
+            int hooked = 0;
+            hooked += InstallInlineHook(g_BuildMainResourcesHook, 0x0076A030,
+                reinterpret_cast<void*>(&Detour_BuildMainResources), 5, kSehPrefix) ? 1 : 0;
+            hooked += InstallInlineHook(g_BuildMpResourcesHook, 0x0076A240,
+                reinterpret_cast<void*>(&Detour_BuildMpResources), 5, kSehPrefix) ? 1 : 0;
+            hooked += InstallInlineHook(g_MainScreenCtorHook, 0x0078E670,
+                reinterpret_cast<void*>(&Detour_MainScreenCtor), 5, kSehPrefix) ? 1 : 0;
+            hooked += InstallInlineHook(g_MainScreenDtorHook, 0x0078E8C0,
+                reinterpret_cast<void*>(&Detour_MainScreenDtor), 7, kDeletingDtorPrefix) ? 1 : 0;
+            hooked += InstallInlineHook(g_MultiplayerLobbyCtorHook, 0x0079EA90,
+                reinterpret_cast<void*>(&Detour_MultiplayerLobbyCtor), 5, kSehPrefix) ? 1 : 0;
+            hooked += InstallInlineHook(g_MultiplayerLobbyDtorHook, 0x007A0F80,
+                reinterpret_cast<void*>(&Detour_MultiplayerLobbyDtor), 7, kDeletingDtorPrefix) ? 1 : 0;
+            LogShimA(hooked == 6 ? LogLevel::Info : LogLevel::Warn,
+                "uiperf-hooks",
+                "Frontend transition drilldown hooks installed=%d/6 (Main/Multiplayer build, ctor, dtor)",
+                hooked);
+        }
+
         void InstallResolvedShellHooks(bool installGogDrilldown)
         {
             int expectedState = 0;
@@ -1119,6 +1252,12 @@ namespace BZROpenShim::UiPerfHooks
                                       5, kTransitionPrefix))
                     LogShimA(LogLevel::Info, "uiperf-hooks", "InstantActionCtor drilldown installed");
             }
+
+            // These markers identify the native call chain around the two
+            // transitions users report as laggiest. They only measure and are
+            // installed after full-function body validation; they do not alter
+            // resource or menu behavior.
+            InstallFrontendDrilldownHooks();
 
             g_ShellHookInstallState.store(2, std::memory_order_release);
             LogShimA(hooked == 3 ? LogLevel::Info : LogLevel::Warn,
