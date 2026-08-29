@@ -656,6 +656,7 @@ namespace BZROpenShim::UiPerfHooks
                 if (!g_ShellManager) g_ShellManager = ecx; // capture valid dialog/manager
                 g_PendingScreenId.store(screenId, std::memory_order_relaxed);
                 g_ShellRequestStart.store(UiPerf::NowTicks(), std::memory_order_relaxed);
+                UiFileScan::BeginTransition();
                 UiPerf::NotifyShellRequest(screenId);
                 LogShimA(LogLevel::Info, "uiperf-hooks",
                     "[UIPERF] ShellRequest screenId=0x%02X (%s) this=0x%p caller=0x%p",
@@ -917,6 +918,11 @@ namespace BZROpenShim::UiPerfHooks
                     UiPerf::Log("[UIPERF] END ShellTransition final_call=%.2fms pending=0x%02X active=0x%p vt=0x%08X",
                         ms, pending, activeScreen,
                         static_cast<unsigned>(*reinterpret_cast<uintptr_t*>(activeScreen)));
+                    // Emit filesystem diagnostics before closing the UiPerf
+                    // transition so filesystem API self time participates in
+                    // exclusive accounting without double-counting its
+                    // inclusive enumeration lifetimes.
+                    UiFileScan::EndTransition();
                     UiPerf::NotifyShellTransitionComplete();
                     UiPerf::Heartbeat("ShellTransitionEnd");
                     g_PendingScreenId.store(-1, std::memory_order_relaxed);
@@ -934,6 +940,7 @@ namespace BZROpenShim::UiPerfHooks
             {
                 g_PendingScreenId.store(0x100, std::memory_order_relaxed);
                 g_ShellRequestStart.store(UiPerf::NowTicks(), std::memory_order_relaxed);
+                UiFileScan::BeginTransition();
                 UiPerf::NotifyShellRequest(0x100);
                 LogShimA(LogLevel::Info, "uiperf-hooks", "[UIPERF] ShellBack");
             }
