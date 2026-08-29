@@ -233,6 +233,12 @@ namespace BZROpenShim::UiPerfHooks
         void __fastcall Hooked_OgreInitialise(void* self, void* /*edx*/,
                                               const std::string& group)
         {
+            // The caller is the open question: which stock site decides the
+            // group must be rebuilt. Record it so each route's rebuild can be
+            // attributed to a call site rather than inferred from nesting.
+            if (UiPerf::IsEnabled())
+                UiPerf::Log("[UIPERF][OGRE] initialiseResourceGroup group=%s caller=0x%p",
+                            group.c_str(), _ReturnAddress());
             OnOgreInitialiseResourceGroup_Begin(group.c_str());
             if (g_RealOgreInitialise) g_RealOgreInitialise(self, group);
             OnOgreInitialiseResourceGroup_End(group.c_str());
@@ -1197,6 +1203,322 @@ namespace BZROpenShim::UiPerfHooks
                 hooked);
         }
 
+        // --- Ogre initialiseResourceGroup phase drilldown --------------------
+        //
+        // initialiseResourceGroup() is stock Ogre and splits into exactly two
+        // phases: parseResourceGroupScripts(), which locates every script the
+        // group's archives match and hands each one to a ScriptLoader, and
+        // createDeclaredResources(). Both, plus the two script loaders Redux
+        // actually uses, are exported by OgreMain.dll.
+        //
+        // The export address is an incremental-link thunk (`E9 rel32`), so the
+        // thunk is followed to the real body before hooking: a relative jump
+        // cannot be relocated into a trampoline. Every candidate is refused
+        // unless its first five bytes are exactly the MSVC SEH prologue
+        // `55 8B EC 6A FF`, which is also where the fifth byte lands on an
+        // instruction boundary. A different OgreMain build therefore fails
+        // closed instead of being patched mid-instruction.
+        ShellHook g_OgreParseScriptsHook;
+        ShellHook g_OgreCreateDeclaredHook;
+        ShellHook g_OgreCompilerParseHook;
+        ShellHook g_OgreMaterialParseHook;
+        std::atomic<bool> g_OgrePhaseHooksInstalled{ false };
+
+        // Only accumulated while inside parseResourceGroupScripts, so script
+        // parsing driven by anything else is not folded into the phase report.
+        std::atomic<int> g_OgreInParsePhase{ 0 };
+        std::atomic<uint32_t> g_OgreCompilerParseCount{ 0 };
+        std::atomic<uint32_t> g_OgreMaterialParseCount{ 0 };
+        std::atomic<uint64_t> g_OgreScriptParseTicks{ 0 };
+        std::atomic<uint64_t> g_OgreScriptParseMaxTicks{ 0 };
+
+        // Ogre::DataStream keeps its name as the first member after the vptr,
+        // and MSVC's std::string is {union{char buf[16]; char* ptr;}, size,
+        // capacity}. Both are read-only probes and every field is validated,
+        // so an OgreMain whose layout differs simply yields no name rather
+        // than a bad pointer dereference.
+        std::atomic<bool> g_OgreScriptNamesUsable{ true };
+
+        bool TryReadOgreDataStreamName(void* sharedPtr, char* out, size_t outSize) noexcept
+        {
+            if (!sharedPtr || !out || outSize < 2) return false;
+            if (!g_OgreScriptNamesUsable.load(std::memory_order_relaxed)) return false;
+            __try
+            {
+                auto* stream = *reinterpret_cast<uint8_t**>(sharedPtr);
+                if (!stream) return false;
+                auto* str = stream + 4;
+                const uint32_t size = *reinterpret_cast<uint32_t*>(str + 16);
+                const uint32_t capacity = *reinterpret_cast<uint32_t*>(str + 20);
+                if (capacity < 15 || capacity > 4096 || size > capacity || size == 0 || size >= outSize)
+                    return false;
+                const char* data = (capacity >= 16)
+                    ? *reinterpret_cast<char**>(str)
+                    : reinterpret_cast<char*>(str);
+                if (!data) return false;
+                for (uint32_t i = 0; i < size; ++i)
+                {
+                    const unsigned char c = static_cast<unsigned char>(data[i]);
+                    if (c < 0x20 || c > 0x7E) return false;
+                }
+                memcpy(out, data, size);
+                out[size] = '\0';
+                return strchr(out, '.') != nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                g_OgreScriptNamesUsable.store(false, std::memory_order_relaxed);
+                return false;
+            }
+        }
+
+        // Per-extension attribution for the parse phase.
+        struct ScriptExtBucket { uint32_t count = 0; uint64_t ticks = 0; };
+        std::mutex g_OgreScriptStatMutex;
+        std::unordered_map<std::string, ScriptExtBucket> g_OgreScriptByExt;
+        struct SlowScript { char name[128] = {}; uint64_t ticks = 0; };
+        SlowScript g_OgreSlowScripts[3];
+
+        void RecordScriptParseSample(const char* name, uint64_t ticks)
+        {
+            std::lock_guard<std::mutex> lock(g_OgreScriptStatMutex);
+            const char* dot = name ? strrchr(name, '.') : nullptr;
+            ScriptExtBucket& b = g_OgreScriptByExt[dot ? dot + 1 : "<unnamed>"];
+            ++b.count;
+            b.ticks += ticks;
+            for (SlowScript& slot : g_OgreSlowScripts)
+            {
+                if (ticks > slot.ticks)
+                {
+                    for (size_t i = std::size(g_OgreSlowScripts) - 1; i > 0; --i)
+                        g_OgreSlowScripts[i] = g_OgreSlowScripts[i - 1];
+                    slot.ticks = ticks;
+                    if (name)
+                    {
+                        strncpy_s(slot.name, name, _TRUNCATE);
+                    }
+                    else
+                    {
+                        slot.name[0] = '\0';
+                    }
+                    break;
+                }
+            }
+        }
+
+        void ResetScriptParseSamples()
+        {
+            std::lock_guard<std::mutex> lock(g_OgreScriptStatMutex);
+            g_OgreScriptByExt.clear();
+            for (SlowScript& slot : g_OgreSlowScripts) { slot.name[0] = '\0'; slot.ticks = 0; }
+        }
+
+        void LogScriptParseSamples()
+        {
+            std::lock_guard<std::mutex> lock(g_OgreScriptStatMutex);
+            for (const auto& kv : g_OgreScriptByExt)
+            {
+                UiPerf::Log("[UIPERF][OGRE]     scriptParse ext=%s count=%u elapsed=%.2fms",
+                            kv.first.c_str(), kv.second.count,
+                            UiPerf::TicksToMs(kv.second.ticks));
+            }
+            for (const SlowScript& slot : g_OgreSlowScripts)
+            {
+                if (!slot.ticks) continue;
+                UiPerf::Log("[UIPERF][OGRE]     scriptParse slowest=%s elapsed=%.2fms",
+                            slot.name[0] ? slot.name : "<unnamed>",
+                            UiPerf::TicksToMs(slot.ticks));
+            }
+        }
+
+        using FnOgreGroupPhase = void(__fastcall*)(void*, void*, void*);
+        using FnOgreParseScript = void(__fastcall*)(void*, void*, void*, void*);
+
+        void AccumulateScriptParse(uint64_t ticks) noexcept
+        {
+            g_OgreScriptParseTicks.fetch_add(ticks, std::memory_order_relaxed);
+            uint64_t prev = g_OgreScriptParseMaxTicks.load(std::memory_order_relaxed);
+            while (ticks > prev &&
+                   !g_OgreScriptParseMaxTicks.compare_exchange_weak(prev, ticks,
+                       std::memory_order_relaxed, std::memory_order_relaxed))
+            {
+            }
+        }
+
+        void __fastcall Detour_OgreParseResourceGroupScripts(void* ecx, void* /*edx*/, void* grp)
+        {
+            auto* orig = reinterpret_cast<FnOgreGroupPhase>(g_OgreParseScriptsHook.trampoline);
+            if (!orig) return;
+            if (!UiPerf::IsEnabled())
+            {
+                orig(ecx, nullptr, grp);
+                return;
+            }
+            g_OgreCompilerParseCount.store(0, std::memory_order_relaxed);
+            g_OgreMaterialParseCount.store(0, std::memory_order_relaxed);
+            g_OgreScriptParseTicks.store(0, std::memory_order_relaxed);
+            g_OgreScriptParseMaxTicks.store(0, std::memory_order_relaxed);
+            ResetScriptParseSamples();
+            g_OgreInParsePhase.fetch_add(1, std::memory_order_acq_rel);
+            const uint64_t start = UiPerf::NowTicks();
+            orig(ecx, nullptr, grp);
+            const double ms = UiPerf::TicksToMs(UiPerf::NowTicks() - start);
+            g_OgreInParsePhase.fetch_sub(1, std::memory_order_acq_rel);
+
+            const uint32_t compiled = g_OgreCompilerParseCount.load(std::memory_order_relaxed);
+            const uint32_t materials = g_OgreMaterialParseCount.load(std::memory_order_relaxed);
+            const double parseMs = UiPerf::TicksToMs(g_OgreScriptParseTicks.load(std::memory_order_relaxed));
+            const double maxMs = UiPerf::TicksToMs(g_OgreScriptParseMaxTicks.load(std::memory_order_relaxed));
+            // Residual is everything the phase did other than handing bytes to
+            // a script loader: matching patterns against every archive,
+            // building the file list, and opening each stream.
+            UiPerf::Log("[UIPERF][OGRE]   parseResourceGroupScripts elapsed=%.2fms "
+                        "scripts=%u materialSerializer=%u scriptParse=%.2fms "
+                        "maxScript=%.2fms residual=%.2fms",
+                        ms, compiled, materials, parseMs, maxMs, ms - parseMs);
+            LogScriptParseSamples();
+            UiPerf::RecordOgreScriptStats({ compiled, materials, 0, parseMs });
+        }
+
+        void __fastcall Detour_OgreCreateDeclaredResources(void* ecx, void* /*edx*/, void* grp)
+        {
+            auto* orig = reinterpret_cast<FnOgreGroupPhase>(g_OgreCreateDeclaredHook.trampoline);
+            if (!orig) return;
+            if (!UiPerf::IsEnabled())
+            {
+                orig(ecx, nullptr, grp);
+                return;
+            }
+            const uint64_t start = UiPerf::NowTicks();
+            orig(ecx, nullptr, grp);
+            UiPerf::Log("[UIPERF][OGRE]   createDeclaredResources elapsed=%.2fms",
+                        UiPerf::TicksToMs(UiPerf::NowTicks() - start));
+        }
+
+        void __fastcall Detour_OgreCompilerParseScript(void* ecx, void* /*edx*/,
+                                                      void* stream, void* group)
+        {
+            auto* orig = reinterpret_cast<FnOgreParseScript>(g_OgreCompilerParseHook.trampoline);
+            if (!orig) return;
+            if (!UiPerf::IsEnabled() || g_OgreInParsePhase.load(std::memory_order_acquire) <= 0)
+            {
+                orig(ecx, nullptr, stream, group);
+                return;
+            }
+            char name[128] = {};
+            const bool haveName = TryReadOgreDataStreamName(stream, name, sizeof(name));
+            const uint64_t start = UiPerf::NowTicks();
+            orig(ecx, nullptr, stream, group);
+            const uint64_t ticks = UiPerf::NowTicks() - start;
+            AccumulateScriptParse(ticks);
+            RecordScriptParseSample(haveName ? name : nullptr, ticks);
+            g_OgreCompilerParseCount.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        void __fastcall Detour_OgreMaterialParseScript(void* ecx, void* /*edx*/,
+                                                      void* stream, void* group)
+        {
+            auto* orig = reinterpret_cast<FnOgreParseScript>(g_OgreMaterialParseHook.trampoline);
+            if (!orig) return;
+            if (!UiPerf::IsEnabled() || g_OgreInParsePhase.load(std::memory_order_acquire) <= 0)
+            {
+                orig(ecx, nullptr, stream, group);
+                return;
+            }
+            char name[128] = {};
+            const bool haveName = TryReadOgreDataStreamName(stream, name, sizeof(name));
+            const uint64_t start = UiPerf::NowTicks();
+            orig(ecx, nullptr, stream, group);
+            const uint64_t ticks = UiPerf::NowTicks() - start;
+            AccumulateScriptParse(ticks);
+            RecordScriptParseSample(haveName ? name : nullptr, ticks);
+            g_OgreMaterialParseCount.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        // Exported name -> real body, following the incremental-link thunk.
+        uintptr_t ResolveOgreExportBody(HMODULE ogre, const char* mangled)
+        {
+            auto* entry = reinterpret_cast<uint8_t*>(
+                reinterpret_cast<void*>(GetProcAddress(ogre, mangled)));
+            if (!entry) return 0;
+            if (entry[0] == 0xE9)
+            {
+                int32_t rel = 0;
+                memcpy(&rel, entry + 1, sizeof(rel));
+                return reinterpret_cast<uintptr_t>(entry + 5 + rel);
+            }
+            return reinterpret_cast<uintptr_t>(entry);
+        }
+
+        void InstallOgrePhaseHooks()
+        {
+            if (!UiPerf::IsEnabled()) return;
+            if (g_OgrePhaseHooksInstalled.exchange(true)) return;
+
+            HMODULE ogre = GetModuleHandleA("OgreMain.dll");
+            if (!ogre)
+            {
+                LogShimA(LogLevel::Info, "uiperf-hooks",
+                    "Ogre phase drilldown skipped: OgreMain.dll not loaded");
+                g_OgrePhaseHooksInstalled.store(false);
+                return;
+            }
+
+            static constexpr uint8_t kOgreSehPrologue[] = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF };
+            struct PhaseHook
+            {
+                const char* label;
+                const char* mangled;
+                ShellHook* hook;
+                void* detour;
+            };
+            const PhaseHook hooks[] = {
+                { "parseResourceGroupScripts",
+                  "?parseResourceGroupScripts@ResourceGroupManager@Ogre@@IAEXPAUResourceGroup@12@@Z",
+                  &g_OgreParseScriptsHook,
+                  reinterpret_cast<void*>(&Detour_OgreParseResourceGroupScripts) },
+                { "createDeclaredResources",
+                  "?createDeclaredResources@ResourceGroupManager@Ogre@@IAEXPAUResourceGroup@12@@Z",
+                  &g_OgreCreateDeclaredHook,
+                  reinterpret_cast<void*>(&Detour_OgreCreateDeclaredResources) },
+                { "ScriptCompilerManager::parseScript",
+                  "?parseScript@ScriptCompilerManager@Ogre@@UAEXAAV?$SharedPtr@VDataStream@Ogre@@@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z",
+                  &g_OgreCompilerParseHook,
+                  reinterpret_cast<void*>(&Detour_OgreCompilerParseScript) },
+                { "MaterialSerializer::parseScript",
+                  "?parseScript@MaterialSerializer@Ogre@@QAEXAAV?$SharedPtr@VDataStream@Ogre@@@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z",
+                  &g_OgreMaterialParseHook,
+                  reinterpret_cast<void*>(&Detour_OgreMaterialParseScript) },
+            };
+
+            int installed = 0;
+            for (const PhaseHook& h : hooks)
+            {
+                const uintptr_t body = ResolveOgreExportBody(ogre, h.mangled);
+                if (!body)
+                {
+                    LogShimA(LogLevel::Warn, "uiperf-hooks",
+                        "Ogre phase hook %s: export not found", h.label);
+                    continue;
+                }
+                if (InstallInlineHook(*h.hook, body, h.detour, 5, kOgreSehPrologue))
+                {
+                    ++installed;
+                    LogShimA(LogLevel::Info, "uiperf-hooks",
+                        "Ogre phase hook %s installed at 0x%p tramp=0x%p",
+                        h.label, reinterpret_cast<void*>(body), h.hook->trampoline);
+                }
+                else
+                {
+                    LogShimA(LogLevel::Warn, "uiperf-hooks",
+                        "Ogre phase hook %s refused at 0x%p (prologue mismatch)",
+                        h.label, reinterpret_cast<void*>(body));
+                }
+            }
+            LogShimA(LogLevel::Info, "uiperf-hooks",
+                "Ogre initialiseResourceGroup phase drilldown installed=%d/4", installed);
+        }
+
         void InstallResolvedShellHooks(bool installGogDrilldown)
         {
             int expectedState = 0;
@@ -1451,6 +1773,8 @@ namespace BZROpenShim::UiPerfHooks
             "Ogre ResourceGroup IAT timing clear=%s initialise=%s",
             clearHooked ? "active" : "missing",
             initialiseHooked ? "active" : "missing");
+
+        InstallOgrePhaseHooks();
 
         if (g_AutoMatrixEnabled.load() && !g_AutoMatrixRunning.exchange(true))
         {
