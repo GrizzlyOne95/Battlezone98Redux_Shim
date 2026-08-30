@@ -45,6 +45,7 @@ reverse_engineering/asset_audit/
 reverse_engineering/decompilation_from_1.5_exe-pdb/1.5_decompile.zip
 # Local Battlezone 1.5 decompiler corpus; retain for private analysis only.
 reverse_engineering/decompilation_from_1.5_exe-pdb/1.5/
+reverse_engineering/decompilation_from_1.5_exe-pdb/Redux/
 reverse_engineering/corpus_artifacts/legacy_15227_clean_pdb_c.zip
 __pycache__/
 
