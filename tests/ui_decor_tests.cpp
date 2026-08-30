@@ -7,6 +7,10 @@ using namespace BZROpenShim;
 
 namespace
 {
+    constexpr float kLogicalWidth = 1440.0f;
+    constexpr float kLogicalHeight = 1080.0f;
+    constexpr float kPageCenterX = kLogicalWidth * 0.5f;
+
     float Right(const UiDecorRect& rect)
     {
         return rect.x + rect.width;
@@ -17,38 +21,60 @@ namespace
         return rect.y + rect.height;
     }
 
+    float CenterX(const UiDecorRect& rect)
+    {
+        return rect.x + rect.width * 0.5f;
+    }
+
     bool Contains(const UiDecorRect& outer, const UiDecorRect& inner)
     {
         return inner.x >= outer.x && inner.y >= outer.y &&
                Right(inner) <= Right(outer) && Bottom(inner) <= Bottom(outer);
     }
 
-    // Every OpenShim page is one panel column, so the three panels share an
-    // edge and nothing text-bearing may sit outside its own panel.
+    // The three bands stack without touching and share one centre line. The
+    // header is allowed to be narrower -- the stock frame's corner brackets
+    // pinch that band -- but it may never be wider than the body column.
     void VerifyPanelStack(const UiOptionsPageLayout& layout)
     {
-        assert(layout.headerPanel.x == layout.toolbarPanel.x);
-        assert(layout.headerPanel.x == layout.contentPanel.x);
-        assert(layout.headerPanel.width == layout.toolbarPanel.width);
-        assert(layout.headerPanel.width == layout.contentPanel.width);
+        assert(CenterX(layout.headerPanel) == kPageCenterX);
+        assert(CenterX(layout.toolbarPanel) == kPageCenterX);
+        assert(CenterX(layout.contentPanel) == kPageCenterX);
+
+        assert(layout.toolbarPanel.x == layout.contentPanel.x);
+        assert(layout.toolbarPanel.width == layout.contentPanel.width);
+        assert(layout.headerPanel.width <= layout.toolbarPanel.width);
 
         assert(Bottom(layout.headerPanel) < layout.toolbarPanel.y);
         assert(Bottom(layout.toolbarPanel) < layout.contentPanel.y);
 
+        // Header text stays inside the narrow column, which is what keeps it
+        // clear of the stock brackets on both sides.
         assert(Contains(layout.headerPanel, layout.title));
         assert(Contains(layout.headerPanel, layout.statusLine1));
         assert(Contains(layout.headerPanel, layout.statusLine2));
-        assert(Contains(layout.headerPanel, layout.contextLine));
+        assert(Contains(layout.headerPanel, layout.contextLine1));
+        assert(Contains(layout.headerPanel, layout.contextLine2));
 
-        // Header lines run in order and never overlap: the stock face renders
-        // taller than the old 22 px line box, which is what clipped the third
-        // line into the panel border.
+        // Five lines run in order and never overlap. Both wrapped pairs get a
+        // full-height second line, so a wrapped string cannot land on top of
+        // the pair below it.
         assert(Bottom(layout.title) <= layout.statusLine1.y);
         assert(Bottom(layout.statusLine1) <= layout.statusLine2.y);
-        assert(Bottom(layout.statusLine2) <= layout.contextLine.y);
-        assert(layout.statusLine1.height >= 26.0f);
-        assert(layout.contextLine.height >= 26.0f);
-        assert(layout.headerTextWidth <= layout.title.width);
+        assert(Bottom(layout.statusLine2) <= layout.contextLine1.y);
+        assert(Bottom(layout.contextLine1) <= layout.contextLine2.y);
+        assert(layout.statusLine1.height == layout.statusLine2.height);
+        assert(layout.contextLine1.height == layout.contextLine2.height);
+        assert(layout.statusLine2.height >= 26.0f);
+        assert(layout.contextLine2.height >= 26.0f);
+
+        // Every header line shares the wrap width, or the two halves of a
+        // wrapped string would break against different budgets.
+        assert(layout.headerTextWidth == layout.title.width);
+        assert(layout.headerTextWidth == layout.statusLine1.width);
+        assert(layout.headerTextWidth == layout.statusLine2.width);
+        assert(layout.headerTextWidth == layout.contextLine1.width);
+        assert(layout.headerTextWidth == layout.contextLine2.width);
 
         // The masks have to cover every panel or a lit strip of the stock page
         // shows through at a panel edge.
@@ -59,15 +85,14 @@ namespace
 
     void VerifyRowGrid(const UiOptionsPageLayout& layout, size_t rowsPerColumn)
     {
-        // The first and last rows stay clear of the native 72 px top-right and
-        // 36 px bottom-left ornaments.
-        assert(layout.rowStartY >= layout.contentPanel.y + kUiDecorTechTopRightHeight);
+        // Rows sit inside the content panel's padding, clear of the border bars.
+        assert(layout.rowStartY == layout.contentPanel.y + kUiDecorPanelPadding);
+        assert(kUiDecorPanelPadding > kUiDecorBorderThickness);
         const float lastRowBottom = rowsPerColumn == 0
             ? layout.rowStartY
             : layout.rowStartY + static_cast<float>(rowsPerColumn - 1) * layout.rowPitch +
                   layout.rowHeight;
-        assert(lastRowBottom <=
-               Bottom(layout.contentPanel) - kUiDecorTechBottomLeftHeight);
+        assert(lastRowBottom <= Bottom(layout.contentPanel) - kUiDecorPanelPadding);
         assert(layout.rowPitch > layout.rowHeight); // rows never touch
 
         const float plateWidth =
@@ -83,6 +108,7 @@ namespace
         const float leftMargin = leftPlateX - layout.contentPanel.x;
         const float rightMargin = Right(layout.contentPanel) - (rightPlateX + plateWidth);
         assert(leftMargin == rightMargin);
+        assert(leftMargin > kUiDecorBorderThickness);
 
         // A label and its value button share a row without overlapping, and the
         // fitted text widths stop short of both boxes.
@@ -91,6 +117,10 @@ namespace
         assert(layout.rowValueTextWidth < layout.rowValueWidth);
         assert(layout.rowLabelYInset > 0.0f);
         assert(layout.rowLabelYInset < layout.rowHeight);
+
+        // The label field is the half that was truncating actions such as
+        // "Flip Tile Horizontally", so it must stay the wider of the two.
+        assert(layout.rowLabelTextWidth > layout.rowValueTextWidth);
     }
 
     void VerifyToolbar(const UiOptionsPageLayout& layout,
@@ -109,9 +139,10 @@ namespace
             assert(rects[index].y == layout.toolbarY);
             assert(rects[index].x >= layout.toolbarLeftX);
             assert(Right(rects[index]) <= layout.toolbarRightX);
-            // Buttons live inside the toolbar panel, with air above and below.
-            assert(rects[index].y > layout.toolbarPanel.y);
-            assert(Bottom(rects[index]) < Bottom(layout.toolbarPanel));
+            // Buttons live inside the toolbar panel, clear of its border bars.
+            assert(rects[index].y > layout.toolbarPanel.y + kUiDecorBorderThickness);
+            assert(Bottom(rects[index]) <
+                   Bottom(layout.toolbarPanel) - kUiDecorBorderThickness);
             if (index > 0)
                 assert(rects[index].x >= Right(rects[index - 1]) + layout.toolbarGap);
         }
@@ -120,6 +151,49 @@ namespace
         // right group ends at the right one.
         assert(rects[0].x == layout.toolbarLeftX);
         assert(Right(rects[count - 1]) == layout.toolbarRightX);
+    }
+
+    // Every framed panel is an outline of four bars that meet at the corners
+    // and leave the interior untouched, so no decoration is laid under a
+    // control that has to be clicked.
+    void VerifyPanelOutline(const UiDecorPanelDesc& panel)
+    {
+        UiDecorPiece pieces[kUiDecorMaxPanelPieces] = {};
+        assert(BuildUiDecorPanel(panel, pieces, kUiDecorMaxPanelPieces) ==
+               kUiDecorMaxPanelPieces);
+
+        const float t = kUiDecorBorderThickness;
+        float coveredArea = 0.0f;
+        for (const UiDecorPiece& piece : pieces)
+        {
+            assert(piece.texture != nullptr);
+            assert(std::strcmp(piece.texture, "uiline.png") == 0);
+            assert(piece.rect.width > 0.0f && piece.rect.height > 0.0f);
+            assert(Contains(panel.rect, piece.rect));
+            // Each bar is thin in exactly one axis: nothing fills the panel.
+            assert(piece.rect.width == t || piece.rect.height == t);
+            coveredArea += piece.rect.width * piece.rect.height;
+        }
+
+        // Four bars, no double-covered corner: the outline costs exactly its
+        // own perimeter, never the panel's area.
+        const float perimeterArea =
+            2.0f * panel.rect.width * t + 2.0f * (panel.rect.height - 2.0f * t) * t;
+        assert(coveredArea == perimeterArea);
+        assert(coveredArea < panel.rect.width * panel.rect.height);
+
+        // The interior clears the border on every side.
+        const UiDecorRect interior = {
+            panel.rect.x + t, panel.rect.y + t,
+            panel.rect.width - 2.0f * t, panel.rect.height - 2.0f * t
+        };
+        for (const UiDecorPiece& piece : pieces)
+        {
+            const bool overlaps =
+                piece.rect.x < Right(interior) && Right(piece.rect) > interior.x &&
+                piece.rect.y < Bottom(interior) && Bottom(piece.rect) > interior.y;
+            assert(!overlaps);
+        }
     }
 
     void VerifyLayout(size_t rowsPerColumn,
@@ -131,31 +205,40 @@ namespace
         VerifyPanelStack(layout);
         VerifyRowGrid(layout, rowsPerColumn);
         VerifyToolbar(layout, toolbarWidths, toolbarCount, rightAlignedFrom);
+
+        UiDecorPanelDesc panels[kUiDecorPanelsPerOptionsPage] = {};
+        assert(BuildUiOptionsPagePanels(layout, panels, kUiDecorPanelsPerOptionsPage) ==
+               kUiDecorPanelsPerOptionsPage);
+        // Only the toolbar and row grid are framed; framing the header would
+        // draw across the stock corner brackets.
+        assert(panels[0].rect.y == layout.toolbarPanel.y);
+        assert(panels[1].rect.y == layout.contentPanel.y);
+        for (const UiDecorPanelDesc& panel : panels)
+        {
+            assert(panel.rect.y >= Bottom(layout.headerPanel));
+            VerifyPanelOutline(panel);
+        }
     }
 }
 
 int main()
 {
-    UiDecorPiece pieces[kUiDecorMaxPanelPieces] = {};
-    UiDecorPanelDesc content = {};
-    content.rect = { 0.0f, 0.0f, 1030.0f, 530.0f };
-    content.flags = UI_DECOR_DEFAULT;
-    assert(BuildUiDecorPanel(content, pieces, kUiDecorMaxPanelPieces) == 11);
-    assert(std::strcmp(pieces[0].texture, "uibg.png") == 0);
-    assert(std::strcmp(pieces[9].texture, "uitrch.png") == 0);
-    assert(std::strcmp(pieces[10].texture, "uiblch.png") == 0);
-
-    UiDecorPiece headerPieces[kUiDecorMaxPanelPieces] = {};
-    assert(BuildUiDecorHeader({ 0.0f, 0.0f, 1000.0f, 120.0f },
-                              headerPieces,
-                              kUiDecorMaxPanelPieces) == 9);
-
-    // A panel too small for its own corner tiles emits nothing rather than
-    // overlapping art.
+    // A panel too small to hold two borders emits nothing rather than
+    // overlapping bars, and an undersized buffer is refused outright.
+    UiDecorPiece scratch[kUiDecorMaxPanelPieces] = {};
     UiDecorPanelDesc tiny = {};
-    tiny.rect = { 0.0f, 0.0f, 40.0f, 40.0f };
-    assert(BuildUiDecorPanel(tiny, headerPieces, kUiDecorMaxPanelPieces) == 0);
-    assert(BuildUiDecorPanel(content, headerPieces, 4) == 0);
+    tiny.rect = { 0.0f, 0.0f, 8.0f, 8.0f };
+    assert(BuildUiDecorPanel(tiny, scratch, kUiDecorMaxPanelPieces) == 0);
+
+    UiDecorPanelDesc ordinary = {};
+    ordinary.rect = { 0.0f, 0.0f, 1140.0f, 446.0f };
+    assert(BuildUiDecorPanel(ordinary, scratch, kUiDecorMaxPanelPieces - 1) == 0);
+    assert(BuildUiDecorPanel(ordinary, nullptr, kUiDecorMaxPanelPieces) == 0);
+
+    UiDecorPanelDesc panelScratch[kUiDecorPanelsPerOptionsPage] = {};
+    const UiOptionsPageLayout probe = BuildUiOptionsPageLayout(8);
+    assert(BuildUiOptionsPagePanels(probe, panelScratch,
+                                    kUiDecorPanelsPerOptionsPage - 1) == 0);
 
     // Settings page: Back, Check for Updates | page caption, Prev, Next.
     static const float kSettingsToolbar[] = { 140.0f, 210.0f, 130.0f, 110.0f, 110.0f };
@@ -166,11 +249,16 @@ int main()
         { 120.0f, 190.0f, 150.0f, 160.0f, 90.0f, 90.0f, 120.0f };
     VerifyLayout(10, kInputToolbar, 7, 4);
 
-    // The taller page must not push its content off the 1080 px logical screen.
+    // The taller page must not push its content off the logical screen, and
+    // must stay inside the band the stock frame leaves clear (x 71..1368,
+    // y up to ~940, measured from keyOptions_center.png).
     const UiOptionsPageLayout tallest = BuildUiOptionsPageLayout(10);
-    assert(Bottom(tallest.contentMask) <= 1080.0f);
-    assert(tallest.topMask.x >= 0.0f);
-    assert(Right(tallest.contentMask) <= 1440.0f);
+    assert(tallest.topMask.x >= 71.0f);
+    assert(Right(tallest.contentMask) <= 1368.0f);
+    assert(Bottom(tallest.contentMask) <= 940.0f);
+    assert(tallest.topMask.y >= 0.0f);
+    assert(Right(tallest.contentMask) <= kLogicalWidth);
+    assert(Bottom(tallest.contentMask) <= kLogicalHeight);
 
     return 0;
 }
