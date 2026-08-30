@@ -596,6 +596,12 @@ TraceSunFlash = 0
 ; Legacy env alias: OPENSHIM_TRACE_DX11_COLORSPACE
 TraceDX11ColorSpace = 0
 
+; Trace the effective Ogre fog/ambient state used by DX11 Enhanced shaders.
+; Accepted: boolean. Default: OFF. Logs [DX11FOG] only when values or the
+; active material scheme change.
+; Legacy env alias: OPENSHIM_TRACE_DX11_ENHANCED_LIGHTING
+TraceDX11EnhancedLighting = 0
+
 ; Trace the multiplayer map-list refresh, filter and scroll path.
 ; Accepted: boolean. Default: OFF.
 ; Logs [MAPTRACE] lines for list rebuilds, selection restore, and each
