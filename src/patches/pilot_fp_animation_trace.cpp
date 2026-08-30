@@ -24,10 +24,18 @@
 // Ogre 1.10 headers for FP enumeration. This TU is compiled as C++14 per
 // BZROpenShim.vcxproj (see ogre_animation_profiler.cpp) because the pinned
 // Ogre 1.10 headers depend on std surfaces removed in C++20.
+#ifndef register
+#define OPENSHIM_OGRE_RESTORE_REGISTER
+#define register
+#endif
 #include "OgreEntity.h"
 #include "OgreSceneManager.h"
 #include "OgreMesh.h"
 #include "OgreResource.h"
+#ifdef OPENSHIM_OGRE_RESTORE_REGISTER
+#undef register
+#undef OPENSHIM_OGRE_RESTORE_REGISTER
+#endif
 
 namespace BZROpenShim
 {
