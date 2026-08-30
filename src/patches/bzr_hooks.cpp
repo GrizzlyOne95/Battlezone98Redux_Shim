@@ -719,6 +719,26 @@ namespace BZROpenShim
         constexpr uintptr_t kGogMultiRenderCountClampResumeAddr = 0x0044D863;
         constexpr size_t kMultiRenderCountClampDetourLen = 11;
         constexpr int32_t kMultiRenderCountMax = 256;
+        // Undecodable menu/mod thumbnail BMP crash. FUN_007D3FF0 is the shared
+        // "build thumbnail material" helper used by every map/mod list screen:
+        // it clones the stock "UI" material, applies the requested texture name
+        // and synchronously loads it (virtual Material::load call at
+        // 0x007D429C). FreeImage inside the shipped OgreMain.dll cannot decode
+        // some user-supplied BMPs (observed live: BITMAPV5HEADER ->
+        // "unknown bmp subtype with id 124") and Ogre::FreeImageCodec::decode
+        // then throws InternalErrorException. No caller has a handler, so one
+        // bad thumbnail terminates the whole process from a menu click.
+        // Entry-detour 0x007D3FF0 (5 bytes over push ebp/mov ebp,esp/push -1)
+        // and run the stock body under an SEH filter that converts only C++
+        // exceptions (0xE06D7363) into the same outcome as a missing thumbnail:
+        // a cleared out SharedPtr slot. AVs and other faults still crash loudly.
+        // See reverse_engineering/bmp_thumbnail_crash_20260824.md.
+        constexpr uintptr_t kGogThumbnailMaterialApplySiteAddr = 0x007D3FF0;
+        constexpr size_t kThumbnailMaterialApplyDetourLen = 5;
+        // Safe substitute name for the swallow path below: passing "UI" makes
+        // the stock body take its material-already-exists branch, which hands
+        // back the loaded base material without touching any texture.
+        static const char kUiMaterialSubstituteName[] = "UI";
         // Splinter (spraybomb) undead bug (#46). SprayBuilding::Simulate keeps
         // spinning its payload fire loop after the deployed splinter is damaged
         // below zero because it overrides Building::Simulate without preserving
@@ -2155,6 +2175,10 @@ namespace BZROpenShim
         static volatile long g_MultiRenderCountClampLogBudget = 8;
         static bool g_MagnetZeroRangeGuardEnabled = true;
         static volatile long g_MagnetZeroRangeLogBudget = 8;
+        static bool g_ThumbnailBmpGuardEnabled = true;
+        static bool g_ThumbnailBmpGuardInstalled = false;
+        static bool g_ThumbnailBmpGuardMismatchLogged = false;
+        static volatile long g_ThumbnailBmpGuardLogBudget = 8;
         static bool g_QuakeReplayFadeInstalled = false;
         static bool g_QuakeReplayFadeEnabled = true;
         static long g_QuakeReplayFadeSeconds = kQuakeReplayFadeSecondsDefault;
@@ -20322,6 +20346,236 @@ namespace BZROpenShim
 #endif
         }
 
+        // Undecodable thumbnail guard helpers. The stock helper receives a
+        // caller-provided 8-byte SharedPtr<Material> slot as its first stack
+        // argument and returns that same pointer (mov eax, [ebp+8] in the
+        // epilogue). On a swallowed decode failure we clear the slot to a null
+        // SharedPtr - the exact value Ogre's SharedPtr::operator= treats as
+        // "no material" without dereferencing - and hand the slot back.
+        using FnThumbnailMaterialApply =
+            void* (__thiscall*)(void* self, void* outMaterialSlot, const void* nameArg);
+
+        static FnThumbnailMaterialApply g_BzrFn_ThumbnailMaterialApplyOriginal = nullptr;
+
+        // Only Microsoft C++ exceptions are converted. Access violations and
+        // every other fault keep their default behaviour so real memory
+        // corruption stays visible.
+        static long ThumbnailBmpGuardFilter(unsigned long exceptionCode)
+        {
+            if (!g_ThumbnailBmpGuardEnabled)
+                return EXCEPTION_CONTINUE_SEARCH;
+            return exceptionCode == 0xE06D7363UL ? EXCEPTION_EXECUTE_HANDLER
+                                                 : EXCEPTION_CONTINUE_SEARCH;
+        }
+
+        // Best-effort removal of the half-created clone an aborted stock
+        // attempt leaves registered under the real thumbnail/material name:
+        // the stock body registers the cloned material before Material::load
+        // throws, so after a swallow the manager map still owns an unloaded
+        // material whose texture unit names the undecodable image.
+        //
+        // Leaving it registered makes every later selection take the stock
+        // exists-branch, which hands back that half-loaded material without
+        // loading it - consumers see an untextured entry instead of the UI
+        // substitute, and any unrelated future load() of that material would
+        // rethrow the same decode failure outside this guard. Removing the
+        // entry forces later selections back through the fully guarded build
+        // path, which deterministically substitutes "UI" again.
+        //
+        // Uses the same exported ResourceManager::remove(MaterialManager
+        // singleton) pair proven live by the material collision listener in
+        // trampolines.cpp. Ogre's remove(const String&) is a no-op for absent
+        // names and merely detaches the manager reference, so live SharedPtrs
+        // stay valid. Failures here are non-fatal by construction; non-C++
+        // faults are deliberately not caught (corruption stays loud).
+        static void RemoveHalfCreatedThumbnailMaterial(const char* name)
+        {
+            using FnMaterialManagerGetSingletonPtr = void* (__cdecl*)();
+            using FnResourceManagerRemoveByName =
+                void (__thiscall*)(void*, const std::string&);
+
+            // Never touch the substitute target itself: if the base "UI"
+            // material were ever removed the fallback would lose its source.
+            if (!name || !*name ||
+                std::strcmp(name, kUiMaterialSubstituteName) == 0)
+            {
+                return;
+            }
+
+            const auto getMaterialManager =
+                ResolveOgreProc<FnMaterialManagerGetSingletonPtr>(
+                    "?getSingletonPtr@MaterialManager@Ogre@@SAPAV12@XZ");
+            const auto removeByName =
+                ResolveOgreProc<FnResourceManagerRemoveByName>(
+                    "?remove@ResourceManager@Ogre@@UAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            if (!getMaterialManager || !removeByName)
+                return;
+
+            void* manager = getMaterialManager();
+            if (!manager)
+                return;
+
+            try
+            {
+                removeByName(manager, std::string(name));
+            }
+            catch (...)
+            {
+                // A failed cleanup only costs one extra guarded decode on the
+                // next selection; it must not turn recovery into a crash.
+            }
+        }
+
+        // Fill the caller's SharedPtr<Material> slot with the stock "UI"
+        // material by re-running the guarded body under the substitute name.
+        // Some callers - notably the campaign preview builder FUN_007D2B70 -
+        // dereference the material without a null check, so a cleared slot is
+        // not survivable everywhere; the stock exists-branch returns the
+        // loaded base material without touching any texture and cannot throw.
+        //
+        // The handler is deliberately the same narrow C++-exception-only
+        // filter as the outer guard: with name="UI" the stock body takes its
+        // exists-branch, so any exception here means something genuinely
+        // unexpected. An access violation or other hardware fault inside the
+        // retry propagates out of this function (and out of the enclosing
+        // __except handler, which cannot re-catch it) and crashes loudly
+        // instead of being silently converted into the UI fallback.
+        static bool ThumbnailGuardRetryWithUiMaterial(void* self,
+                                                      void* outMaterialSlot)
+        {
+            if (!outMaterialSlot || !g_BzrFn_ThumbnailMaterialApplyOriginal)
+                return false;
+
+            bool recovered = false;
+            __try
+            {
+                g_BzrFn_ThumbnailMaterialApplyOriginal(
+                    self, outMaterialSlot, kUiMaterialSubstituteName);
+                recovered = true;
+            }
+            __except (ThumbnailBmpGuardFilter(GetExceptionCode()))
+            {
+                recovered = false;
+            }
+            return recovered;
+        }
+
+        static void* __cdecl ThumbnailMaterialGuardCall(void* self,
+                                                        void* outMaterialSlot,
+                                                        const void* nameArg)
+        {
+            if (!g_BzrFn_ThumbnailMaterialApplyOriginal || !outMaterialSlot)
+                return outMaterialSlot;
+
+            void* result = nullptr;
+            __try
+            {
+                result = g_BzrFn_ThumbnailMaterialApplyOriginal(
+                    self, outMaterialSlot, nameArg);
+            }
+            __except (ThumbnailBmpGuardFilter(GetExceptionCode()))
+            {
+                // The stock body threw while decoding/loading the thumbnail
+                // image. Re-run it under "UI" so every consumer - including
+                // ones that never null-check, like the campaign preview
+                // builder - receives a valid loaded material; visually the
+                // entry shows the plain UI look instead of a thumbnail.
+                const bool substituted =
+                    ThumbnailGuardRetryWithUiMaterial(self, outMaterialSlot);
+                if (!substituted)
+                {
+                    // Deliberately unguarded: the slot was already validated
+                    // non-null above and is caller-provided storage, so these
+                    // two plain stores cannot fault on their own. If one ever
+                    // did, that is real memory corruption and must crash
+                    // loudly rather than be swallowed here.
+                    void** slot = reinterpret_cast<void**>(outMaterialSlot);
+                    slot[0] = nullptr; // SharedPtr representation
+                    slot[1] = nullptr; // use-count pointer
+                }
+
+                // Drop the half-created clone the aborted stock attempt left
+                // registered under the real name so repeat selections re-run
+                // the guarded path (and get the same UI substitution) instead
+                // of silently receiving the half-loaded leftover from the
+                // stock exists-branch. See
+                // RemoveHalfCreatedThumbnailMaterial for the full rationale.
+                RemoveHalfCreatedThumbnailMaterial(
+                    static_cast<const char*>(nameArg));
+
+                const long remaining = InterlockedDecrement(&g_ThumbnailBmpGuardLogBudget);
+                if (remaining >= 0)
+                {
+                    Log(L"[BMPFIX] Rejected undecodable thumbnail image; %hs (self=0x%08X name-arg=0x%08X remaining=%ld)\n",
+                        substituted ? "substituted stock UI material"
+                                    : "material cleared to blank",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(self)),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(nameArg)),
+                        remaining);
+                }
+                result = outMaterialSlot;
+            }
+            return result;
+        }
+
+#if defined(_M_IX86)
+        static void __declspec(naked) ThumbnailMaterialGuardEntry()
+        {
+            __asm
+            {
+                // Stock prologue at 0x007D3FF0 is __thiscall with two stack
+                // arguments: [esp+4] = caller SharedPtr<Material> slot,
+                // [esp+8] = texture/material name argument. ecx = this.
+                push dword ptr [esp + 8]   // nameArg
+                push dword ptr [esp + 8]   // outMaterialSlot
+                push ecx                   // this
+                call ThumbnailMaterialGuardCall
+                add esp, 12
+                retn 8           // stock callee pops both stack arguments
+            }
+        }
+#endif
+
+        static void InstallThumbnailBmpGuardIfPossible()
+        {
+            if (!g_ThumbnailBmpGuardEnabled || g_ThumbnailBmpGuardInstalled)
+                return;
+
+#if !defined(_M_IX86)
+            return;
+#else
+            static const uint8_t kExpectedThumbApplyBytes[kThumbnailMaterialApplyDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x6A, 0xFF // push ebp; mov ebp,esp; push -1
+            };
+
+            static InlineDetour32 g_ThumbnailBmpGuardDetour = {};
+            if (!InstallInlineDetour32(g_ThumbnailBmpGuardDetour,
+                                       kGogThumbnailMaterialApplySiteAddr,
+                                       &ThumbnailMaterialGuardEntry,
+                                       kThumbnailMaterialApplyDetourLen,
+                                       kExpectedThumbApplyBytes,
+                                       sizeof(kExpectedThumbApplyBytes)))
+            {
+                if (!g_ThumbnailBmpGuardMismatchLogged)
+                {
+                    g_ThumbnailBmpGuardMismatchLogged = true;
+                    Log(L"[BMPFIX] Thumbnail guard not installed: byte validation failed at 0x%08X\n",
+                        static_cast<uint32_t>(kGogThumbnailMaterialApplySiteAddr));
+                }
+                return;
+            }
+
+            g_BzrFn_ThumbnailMaterialApplyOriginal =
+                reinterpret_cast<FnThumbnailMaterialApply>(g_ThumbnailBmpGuardDetour.trampoline);
+
+            g_ThumbnailBmpGuardInstalled = true;
+            Log(L"[BMPFIX] Installed thumbnail decode guard site=0x%08X trampoline=0x%08X\n",
+                static_cast<uint32_t>(kGogThumbnailMaterialApplySiteAddr),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_ThumbnailBmpGuardDetour.trampoline)));
+#endif
+        }
+
         // Post-load quake replay fade (#57) helpers. All calls run on the game
         // thread: the arm hook replaces PostLoadScriptUtils' StartQuake call
         // and the fade tick runs from the EarthQuake::Simulate entry detour.
@@ -28405,6 +28659,9 @@ namespace BZROpenShim
 		g_MultiRenderCountClampEnabled =
 			!(EnvFlagEnabled("OPENSHIM_DISABLE_RENDERCOUNT_CLAMP") ||
 			  EnvFlagEnabled("BZR_DISABLE_RENDERCOUNT_CLAMP"));
+		g_ThumbnailBmpGuardEnabled =
+			!(EnvFlagEnabled("OPENSHIM_DISABLE_BMP_GUARD") ||
+			  EnvFlagEnabled("BZR_DISABLE_BMP_GUARD"));
 		g_TugCargoPostLoadFixEnabled =
 			!(EnvFlagEnabled("OPENSHIM_DISABLE_TUG_CARGO_FIX") ||
 			  EnvFlagEnabled("BZR_DISABLE_TUG_CARGO_FIX"));
@@ -28434,6 +28691,7 @@ namespace BZROpenShim
 		InstallProducerScriptPredicateHooksIfPossible();
 		InstallBriefingScrollFixIfPossible();
 		InstallMultiRenderCountClampIfPossible();
+		InstallThumbnailBmpGuardIfPossible();
 		InstallSplinterUndeadFixIfPossible();
 		InstallTugCargoPostLoadFixIfPossible();
 		InstallApcAlliedTargetDeployFixIfPossible();
@@ -28991,6 +29249,9 @@ namespace BZROpenShim
             g_MultiRenderCountClampEnabled ? "enabled" : "disabled",
             g_MultiRenderCountClampInstalled ? "installed" : "pending",
             kMultiRenderCountMax);
+        Log(L"[BMPFIX] Undecodable thumbnail guard: %hs hook=%hs optOut=OPENSHIM_DISABLE_BMP_GUARD\n",
+            g_ThumbnailBmpGuardEnabled ? "enabled" : "disabled",
+            g_ThumbnailBmpGuardInstalled ? "installed" : "pending");
         Log(L"[QUAKEFADE] Post-load quake replay fade: %hs hook=%hs fadeSeconds=%ld\n",
             g_QuakeReplayFadeEnabled ? "enabled" : "disabled",
             g_QuakeReplayFadeInstalled ? "installed" : "pending",
@@ -29385,6 +29646,7 @@ namespace BZROpenShim
         InstallMineTeamFilterHooksIfPossible();
         InstallProducerScriptPredicateHooksIfPossible();
 		InstallBriefingScrollFixIfPossible();
+		InstallThumbnailBmpGuardIfPossible();
 		InstallSplinterUndeadFixIfPossible();
 		InstallTugCargoPostLoadFixIfPossible();
 		InstallApcAlliedTargetDeployFixIfPossible();
