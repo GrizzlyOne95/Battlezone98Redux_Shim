@@ -3,6 +3,7 @@
 #include "openshim_ini.h"
 #include "openshim_preset_migration.h"
 #include "terrain_proxy.h"
+#include "terrain_tile_blend.h"
 #include "bzr_options_ui.h"
 #include "patches.h"
 #include "patcher.h"
@@ -18,6 +19,7 @@
 #include "chunk_batch_invalidation.h"
 #include "ai_range_policy.h"
 #include "hook_engine.h"
+#include "ui_performance.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -717,6 +719,26 @@ namespace BZROpenShim
         constexpr uintptr_t kGogMultiRenderCountClampResumeAddr = 0x0044D863;
         constexpr size_t kMultiRenderCountClampDetourLen = 11;
         constexpr int32_t kMultiRenderCountMax = 256;
+        // Undecodable menu/mod thumbnail BMP crash. FUN_007D3FF0 is the shared
+        // "build thumbnail material" helper used by every map/mod list screen:
+        // it clones the stock "UI" material, applies the requested texture name
+        // and synchronously loads it (virtual Material::load call at
+        // 0x007D429C). FreeImage inside the shipped OgreMain.dll cannot decode
+        // some user-supplied BMPs (observed live: BITMAPV5HEADER ->
+        // "unknown bmp subtype with id 124") and Ogre::FreeImageCodec::decode
+        // then throws InternalErrorException. No caller has a handler, so one
+        // bad thumbnail terminates the whole process from a menu click.
+        // Entry-detour 0x007D3FF0 (5 bytes over push ebp/mov ebp,esp/push -1)
+        // and run the stock body under an SEH filter that converts only C++
+        // exceptions (0xE06D7363) into the same outcome as a missing thumbnail:
+        // a cleared out SharedPtr slot. AVs and other faults still crash loudly.
+        // See reverse_engineering/bmp_thumbnail_crash_20260824.md.
+        constexpr uintptr_t kGogThumbnailMaterialApplySiteAddr = 0x007D3FF0;
+        constexpr size_t kThumbnailMaterialApplyDetourLen = 5;
+        // Safe substitute name for the swallow path below: passing "UI" makes
+        // the stock body take its material-already-exists branch, which hands
+        // back the loaded base material without touching any texture.
+        static const char kUiMaterialSubstituteName[] = "UI";
         // Splinter (spraybomb) undead bug (#46). SprayBuilding::Simulate keeps
         // spinning its payload fire loop after the deployed splinter is damaged
         // below zero because it overrides Building::Simulate without preserving
@@ -1074,19 +1096,197 @@ namespace BZROpenShim
         // deviation from the stock aim) live alongside the math in
         // include/weapon_convergence.h.
 
-        // Scrap/pilot text positions used by the stock HUD draw path. The
-        // legacy layout keeps their relative spacing but moves the combined
-        // block to the familiar top-center anchor and hides the two backing
-        // panels through the existing HUD sprite bridge.
-        constexpr uintptr_t kScrapPilotHudTextPointAddresses[4][2] = {
-            { 0x0091829C, 0x009182A0 },
-            { 0x0091826C, 0x00918270 },
-            { 0x00918280, 0x00918284 },
-            { 0x00918278, 0x0091827C },
+        // Scrap/pilot HUD geometry. The stock layout builder at 0x005C6CF0
+        // recomputes every one of these whenever the viewport or the UI-scale
+        // setting changes; the gauge draw at 0x005C6F70 then consumes them.
+        // With (sx, sy) the live UI scale pair and W the viewport width:
+        //   scrapPanel = (W/2 - 88*sx, 5*sy)   pilotPanel = (W/2, 5*sy)
+        //   scrapTitle = scrapPanel + (50*sx,  5*sy)
+        //   scrapValue = scrapPanel + (50*sx, 14*sy)
+        //   pilotTitle = pilotPanel + (40*sx,  5*sy)
+        //   pilotValue = pilotPanel + (40*sx, 14*sy)
+        // The four text points come first so the existing group helpers and the
+        // mod bridge keep addressing scrap as group 0/1 and pilot as group 2/3;
+        // the two backplate sprite anchors follow.
+        constexpr uintptr_t kScrapPilotHudLayoutPointAddresses[6][2] = {
+            { 0x0091829C, 0x009182A0 },  // scrap title text
+            { 0x0091826C, 0x00918270 },  // scrap value text
+            { 0x00918280, 0x00918284 },  // pilot title text
+            { 0x00918278, 0x0091827C },  // pilot value text
+            { 0x00918260, 0x00918264 },  // scrap backplate sprite
+            { 0x0091828C, 0x00918290 },  // pilot backplate sprite
         };
-        constexpr int kLegacyScrapPilotHudLeft = 500;
-        constexpr int kLegacyScrapPilotHudTop = 22;
-        constexpr ULONGLONG kScrapPilotHudRefreshMs = 1000;
+        constexpr size_t kScrapPilotHudPointCount = 6;
+        constexpr size_t kScrapPilotHudValueCount = kScrapPilotHudPointCount * 2;
+        constexpr size_t kScrapPilotHudScrapPanelPoint = 4;
+        constexpr size_t kScrapPilotHudPilotPanelPoint = 5;
+
+        // The legacy layout is BZ 1.5's, reproduced in UI design space, where
+        // one unit is one pixel at scale 1. The two games share that space: the
+        // command menu occupies design x 10..156 in Redux (built at 0x0049F9E0
+        // from left 10 and width 23 + 4 + 120 = 147) and in BZ 1.5, so one BZ
+        // 1.5 pixel is one Redux design unit and the whole 1.5 gauge transfers
+        // unchanged. It therefore holds the same relationship to the command
+        // menu at every resolution and UI scale.
+        //
+        // From the shipped 1.5 build, with the plate origin at 166, 0:
+        //   SCRAP_PANEL_POS (166,  0)   SCRAP_TITLE_POS (171, 11)
+        //   SCRAP_GAUGE_POS (171, 21)   PILOT_PANEL_POS (166, 34)
+        //   PILOT_TITLE_POS (171, 38)   PILOT_GAUGE_POS (171, 48)
+        // The y values are static data in bzone.exe and each x comes from that
+        // global's dynamic initializer. SCRAP_PANEL_POS.y is 0: PILOT_PANEL_POS
+        // sits at 34, which is exactly the scrap plate's height, so the two
+        // plates stack flush from the top of the screen.
+        constexpr double kLegacyScrapPilotHudDesignGap = 9.0;   // 166 - 157
+        constexpr double kLegacyScrapPilotHudDesignLeft = 166.0;
+        constexpr int kLegacyScrapPlateY = 0;
+        constexpr int kLegacyPilotPlateY = 34;
+        constexpr int kLegacyTextInsetX = 5;                    // 171 - 166
+        constexpr int kLegacyScrapTitleY = 11;
+        constexpr int kLegacyScrapValueY = 21;
+        constexpr int kLegacyPilotTitleY = 38;
+        constexpr int kLegacyPilotValueY = 48;
+        constexpr int kLegacyScrapPilotHudBlockWidth = 58;
+        constexpr int kLegacyScrapPilotHudBlockHeight = 60;     // 34 + 26
+        // Live command menu row rects, 13 x {left, top, right, bottom}, rebuilt
+        // by 0x0049F9E0 on every viewport/UI-scale change. Anchoring to row 0's
+        // right edge keeps the gauge clamped to the menu even if a mod or a
+        // later patch moves it; the design constant above is the fallback for
+        // when the rects have not been built yet.
+        constexpr uintptr_t kCommandMenuRowRectsAddr = 0x009173E8;
+        // The row rects are the menu's content box; the frame drawn behind it
+        // is a separate sprite and is wider. CommandUI::Render at 0x004A08E0
+        // submits that frame as
+        //   x = bounds.left - (int)(sx * 18)
+        //   w = (int)(((spriteWidth + 110) * sx) / 2)
+        // where bounds.left (0x0260D748, cached by 0x0049F9E0) is the title
+        // row's left, design 10. So the frame starts 8 design units off the
+        // left edge of the screen, and because the +110 bias is not the
+        // matching 8 units on the right, it also runs past the 157-unit row
+        // right edge. BZ 1.5's gauge sat 9 units right of its menu with no
+        // frame to clear, so measuring that same 9 from whichever edge is
+        // further right keeps the stock spacing where the frame is narrow and
+        // stops the block landing on the frame where it is not.
+        //
+        // The frame is only submitted for viewports wider than 400 and only in
+        // the normal menu layout (0x00915567 == 0). The alt layout draws no
+        // frame, and its wider 156-unit rows already come through the live row
+        // rect.
+        constexpr uintptr_t kCommandUiBoundsLeftAddr = 0x0260D748;
+        constexpr uintptr_t kCommandUiUnderlaySpriteIdAddr = 0x009173E4;
+        constexpr uintptr_t kCommandMenuAltLayoutFlagAddr = 0x00915567;
+        constexpr double kCommandUiUnderlayLeftInset = 18.0;
+        constexpr int kCommandUiUnderlayWidthBias = 110;
+        constexpr int kCommandUiUnderlayMinViewportWidth = 400;
+        // Stock layout literals from 0x005C6CF0, used to recover the live UI
+        // scale from a freshly built stock layout. The engine's own scale
+        // globals at 0x02BF041C are transient render state that only holds the
+        // HUD scale inside the HUD draw, so they cannot be sampled from a tick.
+        constexpr double kScrapPilotHudStockHalfBlock = 88.0;   // pilotPanelX - scrapPanelX
+        constexpr double kScrapPilotHudStockValueDrop = 14.0;   // scrapValueY - scrapPanelY
+        constexpr uintptr_t kScrapPilotHudViewportWidthAddr = 0x02CECEE0;
+        constexpr uintptr_t kScrapPilotHudViewportHeightAddr = 0x02CECEE4;
+
+        // BZ 1.5's plates, taken from the shipped 1.5 asset: spritea.stb in
+        // bzone152.zfs places scrap_panel at (0,94) 58x34 and pilot_panel at
+        // (70,102) 58x26 inside scrncut.map. Every pixel in both regions is one
+        // of exactly two ARGB4444 values -- 0xF000 opaque black or 0x0000
+        // transparent -- so the art carries no texture detail at all and these
+        // run tables reproduce the silhouettes pixel for pixel (1534 and 1299
+        // solid pixels respectively).
+        struct ScrapPilotHudPlateRun
+        {
+            uint8_t y0;
+            uint8_t y1;
+            uint8_t x0;
+            uint8_t x1;
+        };
+        constexpr ScrapPilotHudPlateRun kScrapPlateRuns[] = {
+            {  0,  9,  0, 29 }, {  9, 10,  0, 35 }, { 10, 11,  0, 41 },
+            { 11, 12,  0, 46 }, { 12, 13,  0, 49 }, { 13, 14,  0, 52 },
+            { 14, 15,  0, 54 }, { 15, 16,  0, 56 }, { 16, 17,  0, 57 },
+            { 17, 25,  0, 58 }, { 25, 26,  0, 57 }, { 26, 27,  0, 56 },
+            { 27, 28,  0, 54 }, { 28, 29,  0, 52 }, { 29, 30,  0, 49 },
+            { 30, 31,  0, 46 }, { 31, 32,  0, 41 }, { 32, 33,  0, 35 },
+            { 33, 34,  0, 29 },
+        };
+        constexpr ScrapPilotHudPlateRun kPilotPlateRuns[] = {
+            {  0,  2,  0, 29 }, {  2,  3,  0, 35 }, {  3,  4,  0, 41 },
+            {  4,  5,  0, 46 }, {  5,  6,  0, 49 }, {  6,  7,  0, 52 },
+            {  7,  8,  0, 54 }, {  8,  9,  0, 56 }, {  9, 10,  0, 57 },
+            { 10, 18,  0, 58 }, { 18, 19,  0, 57 }, { 19, 20,  0, 56 },
+            { 20, 21,  0, 54 }, { 21, 22,  0, 52 }, { 22, 23,  0, 49 },
+            { 23, 24,  0, 46 }, { 24, 25,  1, 41 }, { 25, 26,  2, 35 },
+        };
+        struct ScrapPilotHudPlate
+        {
+            const ScrapPilotHudPlateRun* runs;
+            size_t runCount;
+        };
+        constexpr ScrapPilotHudPlate kScrapPlate = {
+            kScrapPlateRuns, sizeof(kScrapPlateRuns) / sizeof(kScrapPlateRuns[0])
+        };
+        constexpr ScrapPilotHudPlate kPilotPlate = {
+            kPilotPlateRuns, sizeof(kPilotPlateRuns) / sizeof(kPilotPlateRuns[0])
+        };
+
+        // Legacy mode hides Redux's blue-tinted backplate art and draws the 1.5
+        // plates in its place. The stock atlas has no opaque black region to
+        // repoint the sprite UVs at, so each run is a filled quad through the
+        // engine's own 2D rect helper.
+        //
+        // Both backplates are submitted by
+        //   FUN_0068CA30(buffer, material, spriteId, x, y, w, h, 1, 0)
+        // where MSVC reuses the seven arguments already pushed for the
+        // preceding FUN_004D9B40 call and cleans all nine with one `add esp,
+        // 0x24`. Detouring the two submit sites lands the plate at exactly the
+        // stock backplate's z, one step behind the strings, with no separate
+        // z bookkeeping. The submitted sprite is zero-sized by then (the rect
+        // bridge hid it), so forwarding to the original draws nothing.
+        constexpr uintptr_t kHudFillRectAddr = 0x0068AFB0;
+        constexpr uintptr_t kHudSpriteSubmitAddr = 0x0068CA30;
+        constexpr uintptr_t kScrapPanelSubmitCallAddr = 0x005C710E;
+        constexpr uintptr_t kPilotPanelSubmitCallAddr = 0x005C72D4;
+        constexpr uint8_t kScrapPanelSubmitCallExpected[5] = { 0xE8, 0x1D, 0x59, 0x0C, 0x00 };
+        constexpr uint8_t kPilotPanelSubmitCallExpected[5] = { 0xE8, 0x57, 0x57, 0x0C, 0x00 };
+        // FUN_0068AC50 only rescales alpha for modes 2/3/5, so mode 0 passes the
+        // colour through untouched.
+        constexpr uint32_t kLegacyScrapPilotHudPlateColor = 0xFF000000u;
+        constexpr int kHudFillPassthroughMode = 0;
+        // Redux passes DisplayInterface::colorWhite for all four scrap/pilot
+        // strings; BZ 1.5's ScrapGauge::Render used colorBlue for scrap and
+        // colorGreen for pilots. The palette globals are written by the Redux
+        // port of LoadInterfaceColors at 0x004B6720.
+        constexpr uintptr_t kHudColorWhiteAddr = 0x0091755C;
+        constexpr uintptr_t kHudColorBlueAddr = 0x00917578;   // 0xFF007FFF
+        constexpr uintptr_t kHudColorGreenAddr = 0x009175B0;  // 0xFF00FF00
+        // Each of the four gauge strings is drawn by one FUN_004C0100 call whose
+        // colour arrives as `mov reg, [colorWhite]` and whose horizontal
+        // alignment arrives as a `push 1` immediate (centre on x). Legacy mode
+        // rewrites the colour operand and flips the alignment to 0, which makes
+        // x the string's left edge -- BZ 1.5 drew these left-aligned at
+        // plate + 5. Guard on whole instructions, not bare operands.
+        struct ScrapPilotHudTextSite
+        {
+            uintptr_t colorInstructionAddr;
+            uint8_t colorOpcode[2];
+            size_t colorOpcodeLen;
+            uintptr_t legacyColorAddr;
+            uintptr_t alignXPushAddr;
+        };
+        constexpr ScrapPilotHudTextSite kScrapPilotHudTextSites[] = {
+            { 0x005C712B, { 0xA1, 0x00 }, 1, kHudColorBlueAddr,  0x005C7125 },  // scrap title
+            { 0x005C719B, { 0x8B, 0x15 }, 2, kHudColorBlueAddr,  0x005C7195 },  // scrap value
+            { 0x005C72F1, { 0x8B, 0x15 }, 2, kHudColorGreenAddr, 0x005C72EB },  // pilot title
+            { 0x005C7361, { 0x8B, 0x0D }, 2, kHudColorGreenAddr, 0x005C735B },  // pilot value
+        };
+        constexpr uint8_t kScrapPilotHudTextCentreAlign[2] = { 0x6A, 0x01 };
+        constexpr uint8_t kScrapPilotHudTextLeftAlign[2] = { 0x6A, 0x00 };
+        // Fast enough that a mission load or a resolution/UI-scale change does
+        // not leave the stock top-centre layout on screen long enough to read
+        // as a pop. The steady-state tick is a 12-int read and a compare; it
+        // only writes when the engine has rebuilt the layout underneath us.
+        constexpr ULONGLONG kScrapPilotHudRefreshMs = 200;
         constexpr uintptr_t kGogAttackTaskDoStateEntryAddr = 0x00478A50;
         constexpr size_t kAttackTaskDoStateDetourLen = 9;
         constexpr uintptr_t kGogTerrainGetIntersectionAddr = 0x00784620;
@@ -1357,12 +1557,28 @@ namespace BZROpenShim
         static bool g_TurretAimPitchBaselineEnabled = true;
         static bool g_ScrapPilotHudLegacyLayoutEnabled = true;
         static bool g_ScrapPilotHudBaselineCaptured = false;
-        static std::array<int, 8> g_ScrapPilotHudBaseline = {};
+        static std::array<int, kScrapPilotHudValueCount> g_ScrapPilotHudBaseline = {};
         static bool g_ScrapPilotHudMissionOverrideActive = false;
-        static std::array<int, 8> g_ScrapPilotHudMissionOverride = {};
+        static std::array<int, kScrapPilotHudValueCount> g_ScrapPilotHudMissionOverride = {};
+        // What we last wrote into the engine globals. Anything else showing up
+        // there means the engine rebuilt the layout, which is the only reliable
+        // signal that the viewport or the UI scale changed.
+        static bool g_ScrapPilotHudLastWrittenValid = false;
+        static std::array<int, kScrapPilotHudValueCount> g_ScrapPilotHudLastWritten = {};
         static bool g_ScrapPilotHudPanelOverrideActive = false;
         static bool g_ScrapPilotHudPanelOverrideVisible = true;
+        static int g_ScrapPilotHudPanelsVisibleApplied = -1;  // -1 = not applied yet
+        static bool g_ScrapPilotHudLegacyColorsActive = false;
+        static bool g_ScrapPilotHudColorGuardMismatchLogged = false;
+        static bool g_ScrapPilotHudPlateHookActive = false;
+        static bool g_ScrapPilotHudPlateGuardMismatchLogged = false;
+        // UI scale the current layout was built at. The engine's own w/h reach
+        // the submit hook as zero because the sprite is hidden, and its scale
+        // globals are transient, so the layout pass publishes what it used.
+        static double g_ScrapPilotHudPlateScaleX = 0.0;
+        static double g_ScrapPilotHudPlateScaleY = 0.0;
         static ULONGLONG g_ScrapPilotHudLastRefreshTick = 0;
+        static int g_ScrapPilotHudLoggedAnchorLeft = -1;
         static HudSpriteRectRecord* g_HudSpriteRectTableBase = nullptr;
         static bool g_HudSpriteRectTableDiscoveryAttempted = false;
         static ULONGLONG g_HudSpriteRectTableDiscoveryLastTick = 0;
@@ -1959,6 +2175,10 @@ namespace BZROpenShim
         static volatile long g_MultiRenderCountClampLogBudget = 8;
         static bool g_MagnetZeroRangeGuardEnabled = true;
         static volatile long g_MagnetZeroRangeLogBudget = 8;
+        static bool g_ThumbnailBmpGuardEnabled = true;
+        static bool g_ThumbnailBmpGuardInstalled = false;
+        static bool g_ThumbnailBmpGuardMismatchLogged = false;
+        static volatile long g_ThumbnailBmpGuardLogBudget = 8;
         static bool g_QuakeReplayFadeInstalled = false;
         static bool g_QuakeReplayFadeEnabled = true;
         static long g_QuakeReplayFadeSeconds = kQuakeReplayFadeSecondsDefault;
@@ -2127,6 +2347,7 @@ namespace BZROpenShim
         // Global single-player improvement. The exact-byte and live-net-id
         // guards still keep it off unsupported builds and multiplayer.
         static constexpr bool kJumpSnipeCrouchEnabledDefault = true;
+        static bool g_BomberAiRangeBaselineEnabled = kBomberAiRangeEnabledDefault;
         static bool g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
         static bool g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
         static bool g_HowitzerUndeployedRetaliationFixEnabled =
@@ -12529,65 +12750,293 @@ namespace BZROpenShim
                 desired == kSmartReticleRangeStock ? "stock/network" : "single-player");
         }
 
-        static bool TryCaptureScrapPilotHudBaseline()
+        static bool TryReadScrapPilotHudLayout(std::array<int, kScrapPilotHudValueCount>& out)
         {
-            std::array<int, 8> captured = {};
-            bool anyNonZero = false;
             __try
             {
                 size_t index = 0;
-                for (const auto& point : kScrapPilotHudTextPointAddresses)
+                for (const auto& point : kScrapPilotHudLayoutPointAddresses)
                 {
                     const int x = *reinterpret_cast<const int*>(point[0]);
                     const int y = *reinterpret_cast<const int*>(point[1]);
                     if (x < -4096 || x > 16384 || y < -4096 || y > 16384)
                         return false;
-                    captured[index++] = x;
-                    captured[index++] = y;
-                    anyNonZero = anyNonZero || x != 0 || y != 0;
+                    out[index++] = x;
+                    out[index++] = y;
                 }
+                return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 return false;
             }
+        }
 
+        // Re-reads the engine layout and adopts it as the stock baseline unless
+        // it is byte-for-byte what we last wrote. The engine silently rebuilds
+        // everything from 0x005C6CF0 on a viewport or UI-scale change, so this
+        // is what lets the legacy anchor re-derive itself instead of translating
+        // stale numbers forever.
+        static bool TryCaptureScrapPilotHudBaseline(
+            std::array<int, kScrapPilotHudValueCount>& outLive)
+        {
+            if (!TryReadScrapPilotHudLayout(outLive))
+                return false;
+
+            bool anyNonZero = false;
+            for (const int value : outLive)
+                anyNonZero = anyNonZero || value != 0;
             if (!anyNonZero)
                 return false;
-            g_ScrapPilotHudBaseline = captured;
+
+            if (g_ScrapPilotHudLastWrittenValid && outLive == g_ScrapPilotHudLastWritten)
+                return g_ScrapPilotHudBaselineCaptured;
+
+            g_ScrapPilotHudBaseline = outLive;
             g_ScrapPilotHudBaselineCaptured = true;
             return true;
         }
 
-        static std::array<int, 8> BuildScrapPilotHudIniLayout()
+        static bool TryCaptureScrapPilotHudBaseline()
         {
-            std::array<int, 8> desired = g_ScrapPilotHudBaseline;
+            std::array<int, kScrapPilotHudValueCount> live = {};
+            return TryCaptureScrapPilotHudBaseline(live);
+        }
+
+        // Recovers the live UI scale from a stock layout by inverting the two
+        // literals the stock builder used. The horizontal term is exact; the
+        // vertical one sums two truncated engine terms, so it can read low by
+        // up to ~0.15. The HUD scale is set as a uniform pair at 0x0049F9E0, so
+        // snap the vertical term back onto the exact horizontal one whenever
+        // they agree to within that truncation window.
+        static bool TryGetScrapPilotHudUiScale(
+            const std::array<int, kScrapPilotHudValueCount>& stockLayout,
+            double& outScaleX,
+            double& outScaleY)
+        {
+            const int scrapPanelX = stockLayout[kScrapPilotHudScrapPanelPoint * 2];
+            const int scrapPanelY = stockLayout[kScrapPilotHudScrapPanelPoint * 2 + 1];
+            const int pilotPanelX = stockLayout[kScrapPilotHudPilotPanelPoint * 2];
+            const int scrapValueY = stockLayout[3];
+            outScaleX = (pilotPanelX - scrapPanelX) / kScrapPilotHudStockHalfBlock;
+            outScaleY = (scrapValueY - scrapPanelY) / kScrapPilotHudStockValueDrop;
+            if (std::fabs(outScaleY - outScaleX) <= 0.5)
+                outScaleY = outScaleX;
+            return outScaleX > 0.05 && outScaleY > 0.05;
+        }
+
+        static bool TryReadScrapPilotHudViewport(int& outWidth, int& outHeight)
+        {
+            __try
+            {
+                const int width = *reinterpret_cast<const int*>(kScrapPilotHudViewportWidthAddr);
+                const int height = *reinterpret_cast<const int*>(kScrapPilotHudViewportHeightAddr);
+                if (width <= 0 || height <= 0 || width > 16384 || height > 16384)
+                    return false;
+                outWidth = width;
+                outHeight = height;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // Right edge of the command menu's first row, in screen pixels.
+        static bool TryGetCommandMenuRightEdge(int viewportWidth, int& outRight)
+        {
+            __try
+            {
+                const int* rect = reinterpret_cast<const int*>(kCommandMenuRowRectsAddr);
+                const int left = rect[0];
+                const int right = rect[2];
+                if (left < 0 || right <= left || right >= viewportWidth)
+                    return false;
+                outRight = right;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // Read together so the SEH frame stays in a function that needs no
+        // unwinding.
+        static bool TryReadCommandUiUnderlayGlobals(int& outSpriteId, int& outBoundsLeft)
+        {
+            __try
+            {
+                if (*reinterpret_cast<const char*>(kCommandMenuAltLayoutFlagAddr) != '\0')
+                    return false;
+                outSpriteId = *reinterpret_cast<const int*>(kCommandUiUnderlaySpriteIdAddr);
+                outBoundsLeft = *reinterpret_cast<const int*>(kCommandUiBoundsLeftAddr);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // Right edge of the command menu's frame sprite, in screen pixels,
+        // rebuilt exactly as 0x004A08E0 submits it. The sprite rect table this
+        // reads is the same one FUN_0068F090 indexes, so the width is the one
+        // the engine will use.
+        static bool TryGetCommandUiUnderlayRightEdge(int viewportWidth, double scale, int& outRight)
+        {
+            if (viewportWidth <= kCommandUiUnderlayMinViewportWidth)
+                return false;
+
+            int spriteId = 0;
+            int boundsLeft = 0;
+            if (!TryReadCommandUiUnderlayGlobals(spriteId, boundsLeft))
+                return false;
+            // Zero until CommandUI::Render has picked an underlay for the
+            // current state.
+            if (spriteId <= 0)
+                return false;
+
+            HudSpriteRectRecord record = {};
+            if (!TryGetHudSpriteCurrentRecord(spriteId, record) || record.w <= 0)
+                return false;
+
+            const int left =
+                boundsLeft - static_cast<int>(scale * kCommandUiUnderlayLeftInset);
+            const int width = static_cast<int>(
+                ((record.w + kCommandUiUnderlayWidthBias) * scale) / 2.0);
+            if (width <= 0)
+                return false;
+
+            const int right = left + width;
+            if (right >= viewportWidth)
+                return false;
+
+            outRight = right;
+            return true;
+        }
+
+        static int GetLegacyScrapPilotHudLeft(double scale)
+        {
+            int viewportWidth = 0;
+            int viewportHeight = 0;
+            int rowRight = 0;
+            if (TryReadScrapPilotHudViewport(viewportWidth, viewportHeight) &&
+                TryGetCommandMenuRightEdge(viewportWidth, rowRight))
+            {
+                int underlayRight = 0;
+                const bool haveUnderlay =
+                    TryGetCommandUiUnderlayRightEdge(viewportWidth, scale, underlayRight);
+                const int menuRight =
+                    (haveUnderlay && underlayRight > rowRight) ? underlayRight : rowRight;
+                const int left = menuRight + 1 +
+                    static_cast<int>(std::lround(kLegacyScrapPilotHudDesignGap * scale));
+
+                // Only on a real move: the layout tick runs five times a second.
+                if (g_ScrapPilotHudLoggedAnchorLeft != left)
+                {
+                    g_ScrapPilotHudLoggedAnchorLeft = left;
+                    Log(L"[HUD] Scrap/pilot anchor left=%d scale=%.3f rows-right=%d frame-right=%d\n",
+                        left,
+                        scale,
+                        rowRight,
+                        haveUnderlay ? underlayRight : -1);
+                }
+                return left;
+            }
+            return static_cast<int>(std::lround(kLegacyScrapPilotHudDesignLeft * scale));
+        }
+
+        static void ClampScrapPilotHudLayoutToViewport(
+            std::array<int, kScrapPilotHudValueCount>& layout,
+            int blockLeft,
+            int blockTop,
+            int blockRight,
+            int blockBottom)
+        {
+            int viewportWidth = 0;
+            int viewportHeight = 0;
+            if (!TryReadScrapPilotHudViewport(viewportWidth, viewportHeight))
+                return;
+
+            int shiftX = 0;
+            int shiftY = 0;
+            if (blockRight > viewportWidth)
+                shiftX = viewportWidth - blockRight;
+            if (blockLeft + shiftX < 0)
+                shiftX = -blockLeft;
+            if (blockBottom > viewportHeight)
+                shiftY = viewportHeight - blockBottom;
+            if (blockTop + shiftY < 0)
+                shiftY = -blockTop;
+            if (shiftX == 0 && shiftY == 0)
+                return;
+
+            for (size_t index = 0; index + 1 < layout.size(); index += 2)
+            {
+                layout[index] += shiftX;
+                layout[index + 1] += shiftY;
+            }
+        }
+
+        // Rebuilds BZ 1.5's gauge in design units at the live UI scale, anchored
+        // to the command menu. The stock intra-group offsets are not reused:
+        // 1.5's plates are a different size and its strings sit at different
+        // insets, so every point is placed from the 1.5 constants.
+        static std::array<int, kScrapPilotHudValueCount> BuildScrapPilotHudIniLayout()
+        {
+            std::array<int, kScrapPilotHudValueCount> desired = g_ScrapPilotHudBaseline;
             if (!g_ScrapPilotHudLegacyLayoutEnabled)
                 return desired;
 
-            int left = desired[0];
-            int top = desired[1];
-            for (size_t index = 2; index + 1 < desired.size(); index += 2)
+            double scaleX = 0.0;
+            double scaleY = 0.0;
+            if (!TryGetScrapPilotHudUiScale(desired, scaleX, scaleY))
+                return desired;
+            g_ScrapPilotHudPlateScaleX = scaleX;
+            g_ScrapPilotHudPlateScaleY = scaleY;
+
+            const int left = GetLegacyScrapPilotHudLeft(scaleX);
+            const int top = 0;
+            const auto atX = [&](int units)
             {
-                left = (std::min)(left, desired[index]);
-                top = (std::min)(top, desired[index + 1]);
-            }
-            const int offsetX = kLegacyScrapPilotHudLeft - left;
-            const int offsetY = kLegacyScrapPilotHudTop - top;
-            for (size_t index = 0; index + 1 < desired.size(); index += 2)
+                return left + static_cast<int>(std::lround(units * scaleX));
+            };
+            const auto atY = [&](int units)
             {
-                desired[index] += offsetX;
-                desired[index + 1] += offsetY;
-            }
+                return top + static_cast<int>(std::lround(units * scaleY));
+            };
+
+            desired[0] = atX(kLegacyTextInsetX);
+            desired[1] = atY(kLegacyScrapTitleY);
+            desired[2] = atX(kLegacyTextInsetX);
+            desired[3] = atY(kLegacyScrapValueY);
+            desired[4] = atX(kLegacyTextInsetX);
+            desired[5] = atY(kLegacyPilotTitleY);
+            desired[6] = atX(kLegacyTextInsetX);
+            desired[7] = atY(kLegacyPilotValueY);
+            desired[kScrapPilotHudScrapPanelPoint * 2] = atX(0);
+            desired[kScrapPilotHudScrapPanelPoint * 2 + 1] = atY(kLegacyScrapPlateY);
+            desired[kScrapPilotHudPilotPanelPoint * 2] = atX(0);
+            desired[kScrapPilotHudPilotPanelPoint * 2 + 1] = atY(kLegacyPilotPlateY);
+
+            ClampScrapPilotHudLayoutToViewport(
+                desired,
+                atX(0),
+                atY(0),
+                atX(kLegacyScrapPilotHudBlockWidth),
+                atY(kLegacyScrapPilotHudBlockHeight));
             return desired;
         }
 
-        static bool TryWriteScrapPilotHudLayout(const std::array<int, 8>& desired)
+        static bool TryWriteScrapPilotHudLayout(
+            const std::array<int, kScrapPilotHudValueCount>& desired)
         {
             __try
             {
                 size_t index = 0;
-                for (const auto& point : kScrapPilotHudTextPointAddresses)
+                for (const auto& point : kScrapPilotHudLayoutPointAddresses)
                 {
                     *reinterpret_cast<int*>(point[0]) = desired[index++];
                     *reinterpret_cast<int*>(point[1]) = desired[index++];
@@ -12601,7 +13050,7 @@ namespace BZROpenShim
         }
 
         static void GetScrapPilotHudGroupTopLeft(
-            const std::array<int, 8>& layout,
+            const std::array<int, kScrapPilotHudValueCount>& layout,
             size_t firstPoint,
             int& outLeft,
             int& outTop)
@@ -12614,6 +13063,206 @@ namespace BZROpenShim
             outTop = (std::min)(outTop, layout[second + 1]);
         }
 
+        using FnHudFillRect = void(__cdecl*)(
+            void* buffer, int x1, int y1, int x2, int y2, uint32_t color, int mode);
+        using FnHudSpriteSubmit = void(__cdecl*)(
+            void* buffer, void* material, int spriteId,
+            int x, int y, int w, int h, int a, int b);
+
+        // Draws one BZ 1.5 plate, run by run, at the live UI scale. Runs abut
+        // exactly because each edge is rounded the same way, and the fill is
+        // inclusive of x2/y2. This runs at the stock backplate's submit point,
+        // so the ambient sprite z is already the one-step-behind value the
+        // strings are drawn in front of.
+        static void DrawScrapPilotHudPlate(
+            void* buffer, size_t panelPoint, const ScrapPilotHudPlate& plate)
+        {
+            if (!g_ScrapPilotHudLegacyLayoutEnabled || !buffer)
+                return;
+            const double scaleX = g_ScrapPilotHudPlateScaleX;
+            const double scaleY = g_ScrapPilotHudPlateScaleY;
+            if (scaleX <= 0.05 || scaleY <= 0.05)
+                return;
+
+            __try
+            {
+                const auto& point = kScrapPilotHudLayoutPointAddresses[panelPoint];
+                const int originX = *reinterpret_cast<const int*>(point[0]);
+                const int originY = *reinterpret_cast<const int*>(point[1]);
+                const auto fill = reinterpret_cast<FnHudFillRect>(kHudFillRectAddr);
+                for (size_t index = 0; index < plate.runCount; ++index)
+                {
+                    const ScrapPilotHudPlateRun& run = plate.runs[index];
+                    const int x1 = originX + static_cast<int>(std::lround(run.x0 * scaleX));
+                    const int x2 = originX + static_cast<int>(std::lround(run.x1 * scaleX)) - 1;
+                    const int y1 = originY + static_cast<int>(std::lround(run.y0 * scaleY));
+                    const int y2 = originY + static_cast<int>(std::lround(run.y1 * scaleY)) - 1;
+                    if (x2 < x1 || y2 < y1)
+                        continue;
+                    fill(buffer, x1, y1, x2, y2,
+                         kLegacyScrapPilotHudPlateColor, kHudFillPassthroughMode);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
+        static void __cdecl ScrapPanelSubmitHook(
+            void* buffer, void* material, int spriteId,
+            int x, int y, int w, int h, int a, int b)
+        {
+            DrawScrapPilotHudPlate(buffer, kScrapPilotHudScrapPanelPoint, kScrapPlate);
+            reinterpret_cast<FnHudSpriteSubmit>(kHudSpriteSubmitAddr)(
+                buffer, material, spriteId, x, y, w, h, a, b);
+        }
+
+        static void __cdecl PilotPanelSubmitHook(
+            void* buffer, void* material, int spriteId,
+            int x, int y, int w, int h, int a, int b)
+        {
+            DrawScrapPilotHudPlate(buffer, kScrapPilotHudPilotPanelPoint, kPilotPlate);
+            reinterpret_cast<FnHudSpriteSubmit>(kHudSpriteSubmitAddr)(
+                buffer, material, spriteId, x, y, w, h, a, b);
+        }
+
+        static bool WriteScrapPilotHudSubmitCall(uintptr_t callAddr, const void* target)
+        {
+            uint8_t patch[5] = { 0xE8 };
+            const int32_t relative =
+                static_cast<int32_t>(reinterpret_cast<uintptr_t>(target)) -
+                static_cast<int32_t>(callAddr + sizeof(patch));
+            std::memcpy(patch + 1, &relative, sizeof(relative));
+            return WritePatchBytes(callAddr, patch, sizeof(patch));
+        }
+
+        // Retargets the two backplate submit calls at the stock sprite draw so
+        // legacy mode can put the BZ 1.5 plate down in their place.
+        static void SetScrapPilotHudPlateHookActive(bool active)
+        {
+            if (active == g_ScrapPilotHudPlateHookActive)
+                return;
+
+            if (active)
+            {
+                if (!ExpectedBytesMatchAt(
+                        kScrapPanelSubmitCallAddr,
+                        kScrapPanelSubmitCallExpected,
+                        sizeof(kScrapPanelSubmitCallExpected)) ||
+                    !ExpectedBytesMatchAt(
+                        kPilotPanelSubmitCallAddr,
+                        kPilotPanelSubmitCallExpected,
+                        sizeof(kPilotPanelSubmitCallExpected)))
+                {
+                    if (!g_ScrapPilotHudPlateGuardMismatchLogged)
+                    {
+                        g_ScrapPilotHudPlateGuardMismatchLogged = true;
+                        Log(L"[HUD] Scrap/pilot plate submit sites do not match; "
+                            L"legacy layout runs without a backing plate\n");
+                    }
+                    return;
+                }
+
+                if (!WriteScrapPilotHudSubmitCall(
+                        kScrapPanelSubmitCallAddr,
+                        reinterpret_cast<const void*>(&ScrapPanelSubmitHook)))
+                {
+                    return;
+                }
+                if (!WriteScrapPilotHudSubmitCall(
+                        kPilotPanelSubmitCallAddr,
+                        reinterpret_cast<const void*>(&PilotPanelSubmitHook)))
+                {
+                    WritePatchBytes(
+                        kScrapPanelSubmitCallAddr,
+                        kScrapPanelSubmitCallExpected,
+                        sizeof(kScrapPanelSubmitCallExpected));
+                    return;
+                }
+            }
+            else
+            {
+                if (!WritePatchBytes(
+                        kScrapPanelSubmitCallAddr,
+                        kScrapPanelSubmitCallExpected,
+                        sizeof(kScrapPanelSubmitCallExpected)) ||
+                    !WritePatchBytes(
+                        kPilotPanelSubmitCallAddr,
+                        kPilotPanelSubmitCallExpected,
+                        sizeof(kPilotPanelSubmitCallExpected)))
+                {
+                    return;
+                }
+            }
+
+            g_ScrapPilotHudPlateHookActive = active;
+            g_ScrapPilotHudPlateGuardMismatchLogged = false;
+            Log(L"[HUD] Scrap/pilot legacy plate %hs\n",
+                active ? "installed" : "removed");
+        }
+
+        // Restores BZ 1.5's text treatment for the four gauge strings: the
+        // scrap-blue / pilot-green split Redux dropped in favour of colorWhite,
+        // and left alignment so the layout's x is the string's left edge the
+        // way 1.5's Font_Print_String took it. Reverting writes both back.
+        static void SetScrapPilotHudLegacyColorsActive(bool active)
+        {
+            if (active == g_ScrapPilotHudLegacyColorsActive)
+                return;
+
+            const uint8_t* expectedAlign =
+                active ? kScrapPilotHudTextCentreAlign : kScrapPilotHudTextLeftAlign;
+            const uint8_t* desiredAlign =
+                active ? kScrapPilotHudTextLeftAlign : kScrapPilotHudTextCentreAlign;
+
+            for (const auto& site : kScrapPilotHudTextSites)
+            {
+                uint8_t expected[6] = {};
+                size_t expectedLen = 0;
+                for (size_t index = 0; index < site.colorOpcodeLen; ++index)
+                    expected[expectedLen++] = site.colorOpcode[index];
+                const uint32_t currentOperand = static_cast<uint32_t>(
+                    active ? kHudColorWhiteAddr : site.legacyColorAddr);
+                std::memcpy(expected + expectedLen, &currentOperand, sizeof(currentOperand));
+                expectedLen += sizeof(currentOperand);
+
+                if (!ExpectedBytesMatchAt(site.colorInstructionAddr, expected, expectedLen) ||
+                    !ExpectedBytesMatchAt(site.alignXPushAddr, expectedAlign, 2))
+                {
+                    if (!g_ScrapPilotHudColorGuardMismatchLogged)
+                    {
+                        g_ScrapPilotHudColorGuardMismatchLogged = true;
+                        Log(L"[HUD] Scrap/pilot text site 0x%08X does not match; leaving stock\n",
+                            static_cast<uint32_t>(site.colorInstructionAddr));
+                    }
+                    return;
+                }
+            }
+
+            for (const auto& site : kScrapPilotHudTextSites)
+            {
+                const uint32_t operand = static_cast<uint32_t>(
+                    active ? site.legacyColorAddr : kHudColorWhiteAddr);
+                uint8_t operandBytes[sizeof(operand)] = {};
+                std::memcpy(operandBytes, &operand, sizeof(operand));
+                if (!WritePatchBytes(
+                        site.colorInstructionAddr + site.colorOpcodeLen,
+                        operandBytes,
+                        sizeof(operandBytes)))
+                {
+                    return;
+                }
+                if (!WritePatchBytes(site.alignXPushAddr, desiredAlign, 2))
+                    return;
+            }
+
+            g_ScrapPilotHudLegacyColorsActive = active;
+            g_ScrapPilotHudColorGuardMismatchLogged = false;
+            Log(L"[HUD] Scrap/pilot text %hs\n",
+                active ? "legacy (scrap blue / pilot green, left aligned)"
+                       : "stock (white, centred)");
+        }
+
         static void RefreshScrapPilotHudLayout()
         {
             const ULONGLONG now = GetTickCount64();
@@ -12624,19 +13273,235 @@ namespace BZROpenShim
             }
             g_ScrapPilotHudLastRefreshTick = now;
 
-            if (!g_ScrapPilotHudBaselineCaptured && !TryCaptureScrapPilotHudBaseline())
+            std::array<int, kScrapPilotHudValueCount> live = {};
+            if (!TryCaptureScrapPilotHudBaseline(live) && !g_ScrapPilotHudBaselineCaptured)
                 return;
 
-            const std::array<int, 8> desired = g_ScrapPilotHudMissionOverrideActive
-                ? g_ScrapPilotHudMissionOverride
-                : BuildScrapPilotHudIniLayout();
-            if (!TryWriteScrapPilotHudLayout(desired))
-                return;
+            const std::array<int, kScrapPilotHudValueCount> desired =
+                g_ScrapPilotHudMissionOverrideActive
+                    ? g_ScrapPilotHudMissionOverride
+                    : BuildScrapPilotHudIniLayout();
+            if (live != desired)
+            {
+                if (!TryWriteScrapPilotHudLayout(desired))
+                    return;
+                g_ScrapPilotHudLastWritten = desired;
+                g_ScrapPilotHudLastWrittenValid = true;
+            }
 
+            // Legacy mode hides Redux's own blue backplate art; the submit hook
+            // draws BZ 1.5's plain black plate in its place. Reassert a hide on
+            // every tick (the engine can rebuild the rect records) but a show
+            // only on a change, since the show path logs per sprite.
             const bool panelsVisible = g_ScrapPilotHudPanelOverrideActive
                 ? g_ScrapPilotHudPanelOverrideVisible
                 : !g_ScrapPilotHudLegacyLayoutEnabled;
-            SetStockScrapPilotPanelsVisible(panelsVisible);
+            const int panelsVisibleState = panelsVisible ? 1 : 0;
+            // The engine's own rect table starts visible, so "not applied yet"
+            // is already the visible state and needs no reassert.
+            const int appliedState = g_ScrapPilotHudPanelsVisibleApplied < 0
+                ? 1
+                : g_ScrapPilotHudPanelsVisibleApplied;
+            if (appliedState != panelsVisibleState || !panelsVisible)
+            {
+                SetStockScrapPilotPanelsVisible(panelsVisible);
+                g_ScrapPilotHudPanelsVisibleApplied = panelsVisibleState;
+            }
+
+            SetScrapPilotHudLegacyColorsActive(g_ScrapPilotHudLegacyLayoutEnabled);
+            SetScrapPilotHudPlateHookActive(g_ScrapPilotHudLegacyLayoutEnabled);
+        }
+
+        // --- Radar layout (Display tier) ---------------------------------------
+        // Redux keeps the radar in two independent coordinate systems, both
+        // written by the layout builder at 0x00492EC0 (EXU calls it
+        // BZR::Radar::RefreshLayout), with (sx, sy) the live UI scale:
+        //
+        //   projRadius  0x009173C0 = (int)(0x008E7754 * sx / 2)                  base 245
+        //   projCentreX 0x008E7924 = (W*0x009173C4)/2 + (int)(0x008E7918*sx/2)   base 275
+        //   projCentreY 0x008E7928 = screenHeight     - (int)(0x008E77B4*sy/2)   base 170
+        //   backdropX   0x008E77A8 = (W*0x009173C4)/2 + (int)(0x009782A0*sx/2)   base 10
+        //   backdropY   0x008E77AC = viewportH        - (int)(0x008E77B0*325*sy/2)
+        //
+        // Everything drawn on the radar -- the wireframe grid, blips, markers --
+        // is projected through FUN_00493330, which reads only projRadius and
+        // projCentre. The backdrop sprite (FUN_00493D40) reads only backdropX/Y
+        // and the size scale at 0x008E77B0. Nothing ties the two together.
+        //
+        // Stock never needs a tie because 0x00492DC0 only ever installs two
+        // hand-tuned, internally consistent presets: the normal one above, and a
+        // 2/3-size variant flagged by 0x009173C4. There is no general scale path.
+        // So any other scale desynchronises them -- the backdrop honours
+        // 0x008E77B0 in both size and bottom anchoring while the projection
+        // keeps the stock 275/170 bases. At 190% on a 2160p screen at UI scale 2
+        // that leaves the grid 239 px left and 153 px below the backdrop centre.
+        //
+        // The builder has two call sites: 0x0049325F on mission load and
+        // 0x0049405B inside CockpitRadar::Render, which runs every frame. A
+        // correction applied at the load site alone is overwritten by the very
+        // next frame, so this detours the builder itself and covers both.
+        constexpr uintptr_t kRadarLayoutBuilderAddr = 0x00492EC0;
+        constexpr size_t kRadarLayoutDetourLen = 6;
+        constexpr uint8_t kRadarLayoutExpectedBytes[kRadarLayoutDetourLen] = {
+            0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x10
+        };
+        constexpr uintptr_t kRadarProjRadiusAddr = 0x009173C0;
+        constexpr uintptr_t kRadarProjCentreXAddr = 0x008E7924;
+        constexpr uintptr_t kRadarProjCentreYAddr = 0x008E7928;
+        constexpr uintptr_t kRadarBackdropXAddr = 0x008E77A8;
+        constexpr uintptr_t kRadarBackdropYAddr = 0x008E77AC;
+        constexpr uintptr_t kRadarSizeScaleAddr = 0x008E77B0;
+        constexpr uintptr_t kRadarCompactModeAddr = 0x009173C4;
+        constexpr uintptr_t kRadarUiScaleXAddr = 0x02BF041C;
+        constexpr uintptr_t kRadarUiScaleYAddr = 0x02BF0420;
+        // Stock normal-preset bases, from the `param_1 != 2` branch of
+        // 0x00492DC0. Read as constants rather than from the live globals
+        // because a scale provider may already have scaled 0x008E7754 in place;
+        // deriving from the stock bases keeps this idempotent.
+        constexpr double kRadarStockProjRadiusBase = 245.0;
+        constexpr double kRadarStockProjCentreXBase = 275.0;
+        constexpr double kRadarStockProjCentreYBase = 170.0;
+        constexpr double kRadarStockBackdropXBase = 10.0;
+        constexpr double kRadarStockBackdropYBase = 325.0;
+        constexpr float kRadarScaleMin = 0.05f;
+        constexpr float kRadarScaleMax = 16.0f;
+
+        using FnRadarRefreshLayout = void(__cdecl*)(int screenHeight);
+        static FnRadarRefreshLayout g_BzrFn_RadarRefreshLayoutOriginal = nullptr;
+        static InlineDetour32 g_RadarLayoutDetour = {};
+        static bool g_RadarLayoutHookInstalled = false;
+        static bool g_RadarLayoutMismatchLogged = false;
+        static float g_RadarLayoutLoggedScale = 0.0f;
+
+        // Re-anchors the projection to the backdrop the builder just laid out.
+        // The backdrop already honours the scale in both size and bottom
+        // anchoring, and the centre-to-anchor vector scales linearly whether the
+        // sprite's anchor is its top-left or its middle, so this holds without
+        // depending on which.
+        static void ApplyRadarScaleGeometry(int screenHeight)
+        {
+            __try
+            {
+                // The compact preset ships its own consistent base set.
+                if (*reinterpret_cast<const int*>(kRadarCompactModeAddr) != 0)
+                    return;
+
+                const float scale = *reinterpret_cast<const float*>(kRadarSizeScaleAddr);
+                if (!(scale > kRadarScaleMin) || !(scale < kRadarScaleMax))
+                    return;
+                // The stock preset is already internally consistent.
+                if (std::fabs(scale - 1.0f) < 1.0e-4f)
+                    return;
+
+                const double uiScaleX = *reinterpret_cast<const float*>(kRadarUiScaleXAddr);
+                const double uiScaleY = *reinterpret_cast<const float*>(kRadarUiScaleYAddr);
+                if (!(uiScaleX > 0.05) || !(uiScaleY > 0.05))
+                    return;
+
+                const int viewportHeight =
+                    *reinterpret_cast<const int*>(kScrapPilotHudViewportHeightAddr);
+                if (viewportHeight <= 0)
+                    return;
+
+                // The scale-1 reference layout, rebuilt exactly as the stock
+                // builder would. Normal mode means 0x009173C4 is 0, so the
+                // viewport term in the two x expressions drops out.
+                const int radiusRef =
+                    static_cast<int>(kRadarStockProjRadiusBase * uiScaleX / 2.0);
+                const int centreXRef =
+                    static_cast<int>(kRadarStockProjCentreXBase * uiScaleX / 2.0);
+                const int centreYRef = screenHeight -
+                    static_cast<int>(kRadarStockProjCentreYBase * uiScaleY / 2.0);
+                const int backdropXRef =
+                    static_cast<int>(kRadarStockBackdropXBase * uiScaleX / 2.0);
+                const int backdropYRef = viewportHeight -
+                    static_cast<int>(kRadarStockBackdropYBase * uiScaleY / 2.0);
+
+                const int backdropX = *reinterpret_cast<const int*>(kRadarBackdropXAddr);
+                const int backdropY = *reinterpret_cast<const int*>(kRadarBackdropYAddr);
+
+                const int radius =
+                    static_cast<int>(std::lround(scale * radiusRef));
+                const int centreX = backdropX +
+                    static_cast<int>(std::lround(scale * (centreXRef - backdropXRef)));
+                const int centreY = backdropY +
+                    static_cast<int>(std::lround(scale * (centreYRef - backdropYRef)));
+
+                *reinterpret_cast<int*>(kRadarProjRadiusAddr) = radius;
+                *reinterpret_cast<int*>(kRadarProjCentreXAddr) = centreX;
+                *reinterpret_cast<int*>(kRadarProjCentreYAddr) = centreY;
+
+                // Once per scale change: the builder runs every frame.
+                if (g_RadarLayoutLoggedScale != scale)
+                {
+                    g_RadarLayoutLoggedScale = scale;
+                    Log(L"[RADAR] scale=%.4f ui=%.2f/%.2f backdrop=(%d,%d) "
+                        L"centre=(%d,%d) radius=%d (stock centre would be (%d,%d) r=%d)\n",
+                        static_cast<double>(scale),
+                        uiScaleX,
+                        uiScaleY,
+                        backdropX,
+                        backdropY,
+                        centreX,
+                        centreY,
+                        radius,
+                        centreXRef,
+                        centreYRef,
+                        radiusRef);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
+        static void __cdecl RadarRefreshLayoutHook(int screenHeight)
+        {
+            if (g_BzrFn_RadarRefreshLayoutOriginal)
+                g_BzrFn_RadarRefreshLayoutOriginal(screenHeight);
+            ApplyRadarScaleGeometry(screenHeight);
+        }
+
+        static void InstallRadarLayoutHookIfPossible()
+        {
+            if (g_RadarLayoutHookInstalled)
+                return;
+
+            if (!ExpectedBytesMatchAt(kRadarLayoutBuilderAddr,
+                                      kRadarLayoutExpectedBytes,
+                                      sizeof(kRadarLayoutExpectedBytes)))
+            {
+                if (!g_RadarLayoutMismatchLogged)
+                {
+                    g_RadarLayoutMismatchLogged = true;
+                    Log(L"[RADAR] Layout builder entry at 0x%08X does not match; "
+                        L"radar scale correction stands down\n",
+                        static_cast<uint32_t>(kRadarLayoutBuilderAddr));
+                }
+                return;
+            }
+
+            if (!InstallInlineDetour32(g_RadarLayoutDetour,
+                                       kRadarLayoutBuilderAddr,
+                                       reinterpret_cast<void*>(RadarRefreshLayoutHook),
+                                       kRadarLayoutDetourLen,
+                                       kRadarLayoutExpectedBytes,
+                                       sizeof(kRadarLayoutExpectedBytes)))
+            {
+                if (!g_RadarLayoutMismatchLogged)
+                {
+                    g_RadarLayoutMismatchLogged = true;
+                    Log(L"[RADAR] Failed installing the radar layout hook\n");
+                }
+                return;
+            }
+
+            g_BzrFn_RadarRefreshLayoutOriginal =
+                reinterpret_cast<FnRadarRefreshLayout>(g_RadarLayoutDetour.trampoline);
+            g_RadarLayoutHookInstalled = true;
+            Log(L"[RADAR] Layout hook installed at 0x%08X; projection now tracks "
+                L"the backdrop at any radar scale\n",
+                static_cast<uint32_t>(kRadarLayoutBuilderAddr));
         }
 
         static void RefreshTurretAimPitchState()
@@ -12667,6 +13532,14 @@ namespace BZROpenShim
         {
             g_AiOdfGameplayTuningEnabled = g_AiOdfGameplayTuningBaselineEnabled;
             RefreshAiOdfGameplayTuningState();
+        }
+
+        // No refresh partner: unlike AiOdfGameplayTuning this feature is read
+        // straight off g_BomberAiRangeEnabled at its one use site, with no
+        // derived Active flag to reconcile against the net id.
+        static void RevertBomberAiRangeToBaseline()
+        {
+            g_BomberAiRangeEnabled = g_BomberAiRangeBaselineEnabled;
         }
 
         static const char* BoolText(bool value);
@@ -12757,6 +13630,11 @@ namespace BZROpenShim
             g_AiWeaponMaskSelectionEnabled = kAiWeaponMaskSelectionEnabledDefault;
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "AiWeaponMaskSelection", value))
                 g_AiWeaponMaskSelectionEnabled = value;
+
+            g_BomberAiRangeBaselineEnabled = kBomberAiRangeEnabledDefault;
+            if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "BomberAiRange", value))
+                g_BomberAiRangeBaselineEnabled = value;
+            g_BomberAiRangeEnabled = g_BomberAiRangeBaselineEnabled;
 
             g_AiOdfGameplayTuningBaselineEnabled = kAiOdfGameplayTuningEnabledDefault;
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "AiOdfGameplayTuning", value))
@@ -13732,6 +14610,7 @@ namespace BZROpenShim
             else if (previous != kBzrRunStateStarted && current == kBzrRunStateStarted)
             {
                 HeadlightNotifyMissionRunStateChanged(true);
+                ApplyTerrainTileBlendForCurrentMission();
             }
             TerrainProxyMissionRunStateChanged(previous, current);
         }
@@ -13997,6 +14876,9 @@ namespace BZROpenShim
         {
             g_ScrapPilotHudMissionOverrideActive = false;
             g_ScrapPilotHudPanelOverrideActive = false;
+            // Leave the applied panel-visibility state alone: a mission that hid
+            // the backplates must still be seen as a hidden->visible transition
+            // so the restore actually runs.
             g_ScrapPilotHudLastRefreshTick = 0;
             RefreshScrapPilotHudLayout();
         }
@@ -16898,6 +17780,8 @@ namespace BZROpenShim
               &RevertAiWeaponMaskSelectionToBaseline, &RefreshAiWeaponMaskSelectionState },
             { "AiOdfGameplayTuning", FeatureTier::SinglePlayer,
               &RevertAiOdfGameplayTuningToBaseline, &RefreshAiOdfGameplayTuningState },
+            { "BomberAiRange", FeatureTier::SinglePlayer,
+              &RevertBomberAiRangeToBaseline, nullptr },
         };
 
         // Restore every registered feature to its resting state (mission end).
@@ -19475,6 +20359,236 @@ namespace BZROpenShim
                 static_cast<uint32_t>(kGogMultiRenderCountClampSiteAddr),
                 static_cast<uint32_t>(kGogMultiRenderCountClampResumeAddr),
                 kMultiRenderCountMax);
+#endif
+        }
+
+        // Undecodable thumbnail guard helpers. The stock helper receives a
+        // caller-provided 8-byte SharedPtr<Material> slot as its first stack
+        // argument and returns that same pointer (mov eax, [ebp+8] in the
+        // epilogue). On a swallowed decode failure we clear the slot to a null
+        // SharedPtr - the exact value Ogre's SharedPtr::operator= treats as
+        // "no material" without dereferencing - and hand the slot back.
+        using FnThumbnailMaterialApply =
+            void* (__thiscall*)(void* self, void* outMaterialSlot, const void* nameArg);
+
+        static FnThumbnailMaterialApply g_BzrFn_ThumbnailMaterialApplyOriginal = nullptr;
+
+        // Only Microsoft C++ exceptions are converted. Access violations and
+        // every other fault keep their default behaviour so real memory
+        // corruption stays visible.
+        static long ThumbnailBmpGuardFilter(unsigned long exceptionCode)
+        {
+            if (!g_ThumbnailBmpGuardEnabled)
+                return EXCEPTION_CONTINUE_SEARCH;
+            return exceptionCode == 0xE06D7363UL ? EXCEPTION_EXECUTE_HANDLER
+                                                 : EXCEPTION_CONTINUE_SEARCH;
+        }
+
+        // Best-effort removal of the half-created clone an aborted stock
+        // attempt leaves registered under the real thumbnail/material name:
+        // the stock body registers the cloned material before Material::load
+        // throws, so after a swallow the manager map still owns an unloaded
+        // material whose texture unit names the undecodable image.
+        //
+        // Leaving it registered makes every later selection take the stock
+        // exists-branch, which hands back that half-loaded material without
+        // loading it - consumers see an untextured entry instead of the UI
+        // substitute, and any unrelated future load() of that material would
+        // rethrow the same decode failure outside this guard. Removing the
+        // entry forces later selections back through the fully guarded build
+        // path, which deterministically substitutes "UI" again.
+        //
+        // Uses the same exported ResourceManager::remove(MaterialManager
+        // singleton) pair proven live by the material collision listener in
+        // trampolines.cpp. Ogre's remove(const String&) is a no-op for absent
+        // names and merely detaches the manager reference, so live SharedPtrs
+        // stay valid. Failures here are non-fatal by construction; non-C++
+        // faults are deliberately not caught (corruption stays loud).
+        static void RemoveHalfCreatedThumbnailMaterial(const char* name)
+        {
+            using FnMaterialManagerGetSingletonPtr = void* (__cdecl*)();
+            using FnResourceManagerRemoveByName =
+                void (__thiscall*)(void*, const std::string&);
+
+            // Never touch the substitute target itself: if the base "UI"
+            // material were ever removed the fallback would lose its source.
+            if (!name || !*name ||
+                std::strcmp(name, kUiMaterialSubstituteName) == 0)
+            {
+                return;
+            }
+
+            const auto getMaterialManager =
+                ResolveOgreProc<FnMaterialManagerGetSingletonPtr>(
+                    "?getSingletonPtr@MaterialManager@Ogre@@SAPAV12@XZ");
+            const auto removeByName =
+                ResolveOgreProc<FnResourceManagerRemoveByName>(
+                    "?remove@ResourceManager@Ogre@@UAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            if (!getMaterialManager || !removeByName)
+                return;
+
+            void* manager = getMaterialManager();
+            if (!manager)
+                return;
+
+            try
+            {
+                removeByName(manager, std::string(name));
+            }
+            catch (...)
+            {
+                // A failed cleanup only costs one extra guarded decode on the
+                // next selection; it must not turn recovery into a crash.
+            }
+        }
+
+        // Fill the caller's SharedPtr<Material> slot with the stock "UI"
+        // material by re-running the guarded body under the substitute name.
+        // Some callers - notably the campaign preview builder FUN_007D2B70 -
+        // dereference the material without a null check, so a cleared slot is
+        // not survivable everywhere; the stock exists-branch returns the
+        // loaded base material without touching any texture and cannot throw.
+        //
+        // The handler is deliberately the same narrow C++-exception-only
+        // filter as the outer guard: with name="UI" the stock body takes its
+        // exists-branch, so any exception here means something genuinely
+        // unexpected. An access violation or other hardware fault inside the
+        // retry propagates out of this function (and out of the enclosing
+        // __except handler, which cannot re-catch it) and crashes loudly
+        // instead of being silently converted into the UI fallback.
+        static bool ThumbnailGuardRetryWithUiMaterial(void* self,
+                                                      void* outMaterialSlot)
+        {
+            if (!outMaterialSlot || !g_BzrFn_ThumbnailMaterialApplyOriginal)
+                return false;
+
+            bool recovered = false;
+            __try
+            {
+                g_BzrFn_ThumbnailMaterialApplyOriginal(
+                    self, outMaterialSlot, kUiMaterialSubstituteName);
+                recovered = true;
+            }
+            __except (ThumbnailBmpGuardFilter(GetExceptionCode()))
+            {
+                recovered = false;
+            }
+            return recovered;
+        }
+
+        static void* __cdecl ThumbnailMaterialGuardCall(void* self,
+                                                        void* outMaterialSlot,
+                                                        const void* nameArg)
+        {
+            if (!g_BzrFn_ThumbnailMaterialApplyOriginal || !outMaterialSlot)
+                return outMaterialSlot;
+
+            void* result = nullptr;
+            __try
+            {
+                result = g_BzrFn_ThumbnailMaterialApplyOriginal(
+                    self, outMaterialSlot, nameArg);
+            }
+            __except (ThumbnailBmpGuardFilter(GetExceptionCode()))
+            {
+                // The stock body threw while decoding/loading the thumbnail
+                // image. Re-run it under "UI" so every consumer - including
+                // ones that never null-check, like the campaign preview
+                // builder - receives a valid loaded material; visually the
+                // entry shows the plain UI look instead of a thumbnail.
+                const bool substituted =
+                    ThumbnailGuardRetryWithUiMaterial(self, outMaterialSlot);
+                if (!substituted)
+                {
+                    // Deliberately unguarded: the slot was already validated
+                    // non-null above and is caller-provided storage, so these
+                    // two plain stores cannot fault on their own. If one ever
+                    // did, that is real memory corruption and must crash
+                    // loudly rather than be swallowed here.
+                    void** slot = reinterpret_cast<void**>(outMaterialSlot);
+                    slot[0] = nullptr; // SharedPtr representation
+                    slot[1] = nullptr; // use-count pointer
+                }
+
+                // Drop the half-created clone the aborted stock attempt left
+                // registered under the real name so repeat selections re-run
+                // the guarded path (and get the same UI substitution) instead
+                // of silently receiving the half-loaded leftover from the
+                // stock exists-branch. See
+                // RemoveHalfCreatedThumbnailMaterial for the full rationale.
+                RemoveHalfCreatedThumbnailMaterial(
+                    static_cast<const char*>(nameArg));
+
+                const long remaining = InterlockedDecrement(&g_ThumbnailBmpGuardLogBudget);
+                if (remaining >= 0)
+                {
+                    Log(L"[BMPFIX] Rejected undecodable thumbnail image; %hs (self=0x%08X name-arg=0x%08X remaining=%ld)\n",
+                        substituted ? "substituted stock UI material"
+                                    : "material cleared to blank",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(self)),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(nameArg)),
+                        remaining);
+                }
+                result = outMaterialSlot;
+            }
+            return result;
+        }
+
+#if defined(_M_IX86)
+        static void __declspec(naked) ThumbnailMaterialGuardEntry()
+        {
+            __asm
+            {
+                // Stock prologue at 0x007D3FF0 is __thiscall with two stack
+                // arguments: [esp+4] = caller SharedPtr<Material> slot,
+                // [esp+8] = texture/material name argument. ecx = this.
+                push dword ptr [esp + 8]   // nameArg
+                push dword ptr [esp + 8]   // outMaterialSlot
+                push ecx                   // this
+                call ThumbnailMaterialGuardCall
+                add esp, 12
+                retn 8           // stock callee pops both stack arguments
+            }
+        }
+#endif
+
+        static void InstallThumbnailBmpGuardIfPossible()
+        {
+            if (!g_ThumbnailBmpGuardEnabled || g_ThumbnailBmpGuardInstalled)
+                return;
+
+#if !defined(_M_IX86)
+            return;
+#else
+            static const uint8_t kExpectedThumbApplyBytes[kThumbnailMaterialApplyDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x6A, 0xFF // push ebp; mov ebp,esp; push -1
+            };
+
+            static InlineDetour32 g_ThumbnailBmpGuardDetour = {};
+            if (!InstallInlineDetour32(g_ThumbnailBmpGuardDetour,
+                                       kGogThumbnailMaterialApplySiteAddr,
+                                       &ThumbnailMaterialGuardEntry,
+                                       kThumbnailMaterialApplyDetourLen,
+                                       kExpectedThumbApplyBytes,
+                                       sizeof(kExpectedThumbApplyBytes)))
+            {
+                if (!g_ThumbnailBmpGuardMismatchLogged)
+                {
+                    g_ThumbnailBmpGuardMismatchLogged = true;
+                    Log(L"[BMPFIX] Thumbnail guard not installed: byte validation failed at 0x%08X\n",
+                        static_cast<uint32_t>(kGogThumbnailMaterialApplySiteAddr));
+                }
+                return;
+            }
+
+            g_BzrFn_ThumbnailMaterialApplyOriginal =
+                reinterpret_cast<FnThumbnailMaterialApply>(g_ThumbnailBmpGuardDetour.trampoline);
+
+            g_ThumbnailBmpGuardInstalled = true;
+            Log(L"[BMPFIX] Installed thumbnail decode guard site=0x%08X trampoline=0x%08X\n",
+                static_cast<uint32_t>(kGogThumbnailMaterialApplySiteAddr),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_ThumbnailBmpGuardDetour.trampoline)));
 #endif
         }
 
@@ -26347,6 +27461,8 @@ namespace BZROpenShim
                 return;
             }
 
+            if (BZROpenShim::UiPerf::IsEnabled())
+                BZROpenShim::UiPerf::NotifyShellRequest(0x17);
             *reinterpret_cast<uint8_t*>(kLoadScreenSelectionFlagAddr) = 1;
             g_BzrFn_UiDialogSetEnabled(dialog, 0);
             g_BzrFn_LoadScreenPrep();
@@ -27559,6 +28675,9 @@ namespace BZROpenShim
 		g_MultiRenderCountClampEnabled =
 			!(EnvFlagEnabled("OPENSHIM_DISABLE_RENDERCOUNT_CLAMP") ||
 			  EnvFlagEnabled("BZR_DISABLE_RENDERCOUNT_CLAMP"));
+		g_ThumbnailBmpGuardEnabled =
+			!(EnvFlagEnabled("OPENSHIM_DISABLE_BMP_GUARD") ||
+			  EnvFlagEnabled("BZR_DISABLE_BMP_GUARD"));
 		g_TugCargoPostLoadFixEnabled =
 			!(EnvFlagEnabled("OPENSHIM_DISABLE_TUG_CARGO_FIX") ||
 			  EnvFlagEnabled("BZR_DISABLE_TUG_CARGO_FIX"));
@@ -27588,6 +28707,7 @@ namespace BZROpenShim
 		InstallProducerScriptPredicateHooksIfPossible();
 		InstallBriefingScrollFixIfPossible();
 		InstallMultiRenderCountClampIfPossible();
+		InstallThumbnailBmpGuardIfPossible();
 		InstallSplinterUndeadFixIfPossible();
 		InstallTugCargoPostLoadFixIfPossible();
 		InstallApcAlliedTargetDeployFixIfPossible();
@@ -28145,6 +29265,9 @@ namespace BZROpenShim
             g_MultiRenderCountClampEnabled ? "enabled" : "disabled",
             g_MultiRenderCountClampInstalled ? "installed" : "pending",
             kMultiRenderCountMax);
+        Log(L"[BMPFIX] Undecodable thumbnail guard: %hs hook=%hs optOut=OPENSHIM_DISABLE_BMP_GUARD\n",
+            g_ThumbnailBmpGuardEnabled ? "enabled" : "disabled",
+            g_ThumbnailBmpGuardInstalled ? "installed" : "pending");
         Log(L"[QUAKEFADE] Post-load quake replay fade: %hs hook=%hs fadeSeconds=%ld\n",
             g_QuakeReplayFadeEnabled ? "enabled" : "disabled",
             g_QuakeReplayFadeInstalled ? "installed" : "pending",
@@ -28539,6 +29662,7 @@ namespace BZROpenShim
         InstallMineTeamFilterHooksIfPossible();
         InstallProducerScriptPredicateHooksIfPossible();
 		InstallBriefingScrollFixIfPossible();
+		InstallThumbnailBmpGuardIfPossible();
 		InstallSplinterUndeadFixIfPossible();
 		InstallTugCargoPostLoadFixIfPossible();
 		InstallApcAlliedTargetDeployFixIfPossible();
@@ -28976,7 +30100,7 @@ namespace BZROpenShim
     bool ResetMissionHookOverridesFromBridge()
     {
         RetryDeferredRuntimeHooks();
-        g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
+        g_BomberAiRangeEnabled = g_BomberAiRangeBaselineEnabled;
         // Content render-profile requests are mission/session scoped: the
         // authoritative lifecycle seam clears them so an EXU override from one
         // mission can never leak into the shell or unrelated content.
@@ -29192,9 +30316,10 @@ namespace BZROpenShim
         if (!g_ScrapPilotHudBaselineCaptured && !TryCaptureScrapPilotHudBaseline())
             return false;
 
-        const std::array<int, 8> layout = g_ScrapPilotHudMissionOverrideActive
-            ? g_ScrapPilotHudMissionOverride
-            : BuildScrapPilotHudIniLayout();
+        const std::array<int, kScrapPilotHudValueCount> layout =
+            g_ScrapPilotHudMissionOverrideActive
+                ? g_ScrapPilotHudMissionOverride
+                : BuildScrapPilotHudIniLayout();
         GetScrapPilotHudGroupTopLeft(layout, 0, *scrapLeft, *scrapTop);
         GetScrapPilotHudGroupTopLeft(layout, 2, *pilotLeft, *pilotTop);
         return true;
@@ -29217,9 +30342,10 @@ namespace BZROpenShim
         if (!g_ScrapPilotHudBaselineCaptured && !TryCaptureScrapPilotHudBaseline())
             return false;
 
-        std::array<int, 8> desired = g_ScrapPilotHudMissionOverrideActive
-            ? g_ScrapPilotHudMissionOverride
-            : BuildScrapPilotHudIniLayout();
+        std::array<int, kScrapPilotHudValueCount> desired =
+            g_ScrapPilotHudMissionOverrideActive
+                ? g_ScrapPilotHudMissionOverride
+                : BuildScrapPilotHudIniLayout();
         int currentScrapLeft = 0;
         int currentScrapTop = 0;
         int currentPilotLeft = 0;
@@ -29240,12 +30366,16 @@ namespace BZROpenShim
         const int scrapOffsetY = scrapTop - currentScrapTop;
         const int pilotOffsetX = pilotLeft - currentPilotLeft;
         const int pilotOffsetY = pilotTop - currentPilotTop;
-        for (size_t point = 0; point < 2; ++point)
+        // The backplate sprite anchors travel with the strings they sit behind,
+        // so a mod that repositions the gauge keeps its background.
+        const size_t scrapPoints[] = { 0, 1, kScrapPilotHudScrapPanelPoint };
+        const size_t pilotPoints[] = { 2, 3, kScrapPilotHudPilotPanelPoint };
+        for (const size_t point : scrapPoints)
         {
             desired[point * 2] += scrapOffsetX;
             desired[point * 2 + 1] += scrapOffsetY;
         }
-        for (size_t point = 2; point < 4; ++point)
+        for (const size_t point : pilotPoints)
         {
             desired[point * 2] += pilotOffsetX;
             desired[point * 2 + 1] += pilotOffsetY;
@@ -32133,8 +33263,12 @@ namespace BZROpenShim
         // engine is not dispatching the hooked FlagDisplay::Submit slot.
         MaybeDriveMultiplayerFlagRenderFallback();
         OgreShaderCacheTick();
+        if (BZROpenShim::UiPerf::IsEnabled())
+            BZROpenShim::UiPerf::Heartbeat("SimTick");
         if (!g_CareerStatsMpHookInstalled)
             InstallCareerStatsMpHookIfPossible();
+        if (!g_RadarLayoutHookInstalled)
+            InstallRadarLayoutHookIfPossible();
         if (!g_ChunkEffectCreateHooksInstalled)
             InstallChunkEffectCreateHooksIfRequested();
         if (!g_ChunkEffectFragmentHooksInstalled)

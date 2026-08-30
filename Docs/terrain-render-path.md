@@ -177,6 +177,31 @@ That condition is proven; its intended artistic semantic is not. It resembles a
 seam/overlap mask, but Phase 1 does **not** classify it as terrain material blend
 weights. The probe records the real bytes and reports the observed alpha range.
 
+### Per-map seam alpha control
+
+OpenShim can remap that proven seam alpha mask per map without replacing the
+terrain material or any shader. Add this optional section to the map's TRN:
+
+```ini
+[OpenShim]
+TerrainTileBlend=0.0
+```
+
+`TerrainTileBlend` is clamped to `0.0..1.0`. The default `1.0` preserves Redux's
+stock seam alpha (`0` at the first row/column and `255` elsewhere); `0.0` makes
+those seam vertices fully opaque for hard-edged synthetic tiles. Intermediate
+values weaken the fade by setting seam alpha to
+`round((1 - TerrainTileBlend) * 255)`. Because the existing COLOR0 stream is
+shared by the stock and enhanced terrain shaders, no per-shader permutation is
+required.
+
+This setting controls only the geometric seam fade. Terrain-type transitions
+inside an atlas tile are precomposited artwork selected by the 16-bit terrain
+word, so this value cannot sharpen or remove those baked transitions. The
+initial runtime path uses the already-validated fixed-base GOG mission-lifecycle
+seam; other builds retain stock behavior until an equivalent lifecycle seam is
+validated.
+
 ## Logical tile to atlas mapping
 
 Let `w` be the authoritative 16-bit terrain word for a cell. The released code
