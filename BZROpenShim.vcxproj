@@ -169,6 +169,7 @@
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
     <ClInclude Include="include\autosave.h" />
+    <ClInclude Include="include\autosave_gate.h" />
     <ClInclude Include="include\bzr_hooks.h" />
     <ClInclude Include="include\bzr_options_ui.h" />
     <ClInclude Include="include\render_profile.h" />
