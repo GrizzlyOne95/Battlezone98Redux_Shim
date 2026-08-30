@@ -135,6 +135,26 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "The unique anchor is cUI_Mods::RefreshWorkshop at 0x00795B80, called by the New Game Mods RefreshButton path 0x00794710 -> 0x00795BA0. Ghidra decompilation shows its first CALL at 0x00795B87 targets 0x00764790, which returns DAT_00945478, the active cWorkshopSteam/cWorkshopGoG singleton; mov ecx,eax then passes that same object to the Workshop resource refresh at 0x0076C0F0. The Steam vtable at 0x0089D054 independently identifies slot 1 as 0x00773D80 (GetItemState/DownloadItem) and slot 3 as 0x00773C40 (not ready while NeedsUpdate/Downloading/DownloadPending). Settled native runtime capture on Steam SHA-256 D298782FC9A13EDB0665DB934110440C45461031DB5F7FE1A76C8784B61CC90D, PID 10928 on 2026-08-28, read identical bytes at 0x00764790 and the full anchor at 0x00795B80; the pattern matched once in the GOG static image SHA-256 8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413."
+    },
+    {
+      "name": "Terrain::GetManager",
+      "pattern": "55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00 50 83 EC 0C A1 ?? ?? ?? ?? 33 C5 50 8D 45 F4 64 A3 00 00 00 00 83 3D ?? ?? ?? ?? 00 75 ?? 68 88 00 00 00",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0077C670",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Released cRenderableTileClusterManager singleton getter at 0x0077C670. The body tests DAT_0094549C, allocates exactly 0x88 bytes when absent, calls the independently decompiled manager constructor FUN_0077A650, stores the result back to DAT_0094549C, and returns that singleton. Terrain mesh creation/population functions FUN_007778B0, FUN_007789A0, and FUN_00779C20 all call it; the pattern anchors the function entry through the singleton-null test and distinctive 0x88 allocation."
+    },
+    {
+      "name": "Terrain::GetFloat",
+      "pattern": "55 8B EC 83 EC 18 A1 ?? ?? ?? ?? 33 C5 89 45 FC F3 0F 10 45 10 F3 0F 11 45 E8 B8 01 00 00 00 6B C8 00 8B 55 14 0F BE 04 0A 85 C0",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00787B60",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Released TRN/INI float getter at 0x00787B60. FUN_00780160 and the terrain lighting/height readers pass section, key, float fallback, and current TRN filename; the body copies the fallback, rejects empty strings, normalizes/loads the named file through FUN_00787370, retrieves a 16-byte value through FUN_00787660, parses it with the unique percent-f sscanf path, and returns the float in ST0. The signature anchors the entry and its four-argument validation prelude."
     }
   ],
   "globals": [
