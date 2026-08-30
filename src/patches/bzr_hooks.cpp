@@ -2347,6 +2347,7 @@ namespace BZROpenShim
         // Global single-player improvement. The exact-byte and live-net-id
         // guards still keep it off unsupported builds and multiplayer.
         static constexpr bool kJumpSnipeCrouchEnabledDefault = true;
+        static bool g_BomberAiRangeBaselineEnabled = kBomberAiRangeEnabledDefault;
         static bool g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
         static bool g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
         static bool g_HowitzerUndeployedRetaliationFixEnabled =
@@ -13533,6 +13534,14 @@ namespace BZROpenShim
             RefreshAiOdfGameplayTuningState();
         }
 
+        // No refresh partner: unlike AiOdfGameplayTuning this feature is read
+        // straight off g_BomberAiRangeEnabled at its one use site, with no
+        // derived Active flag to reconcile against the net id.
+        static void RevertBomberAiRangeToBaseline()
+        {
+            g_BomberAiRangeEnabled = g_BomberAiRangeBaselineEnabled;
+        }
+
         static const char* BoolText(bool value);
         static void RefreshJumpSnipeCrouchPatchState();
 
@@ -13621,6 +13630,11 @@ namespace BZROpenShim
             g_AiWeaponMaskSelectionEnabled = kAiWeaponMaskSelectionEnabledDefault;
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "AiWeaponMaskSelection", value))
                 g_AiWeaponMaskSelectionEnabled = value;
+
+            g_BomberAiRangeBaselineEnabled = kBomberAiRangeEnabledDefault;
+            if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "BomberAiRange", value))
+                g_BomberAiRangeBaselineEnabled = value;
+            g_BomberAiRangeEnabled = g_BomberAiRangeBaselineEnabled;
 
             g_AiOdfGameplayTuningBaselineEnabled = kAiOdfGameplayTuningEnabledDefault;
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "AiOdfGameplayTuning", value))
@@ -17766,6 +17780,8 @@ namespace BZROpenShim
               &RevertAiWeaponMaskSelectionToBaseline, &RefreshAiWeaponMaskSelectionState },
             { "AiOdfGameplayTuning", FeatureTier::SinglePlayer,
               &RevertAiOdfGameplayTuningToBaseline, &RefreshAiOdfGameplayTuningState },
+            { "BomberAiRange", FeatureTier::SinglePlayer,
+              &RevertBomberAiRangeToBaseline, nullptr },
         };
 
         // Restore every registered feature to its resting state (mission end).
@@ -30084,7 +30100,7 @@ namespace BZROpenShim
     bool ResetMissionHookOverridesFromBridge()
     {
         RetryDeferredRuntimeHooks();
-        g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
+        g_BomberAiRangeEnabled = g_BomberAiRangeBaselineEnabled;
         // Content render-profile requests are mission/session scoped: the
         // authoritative lifecycle seam clears them so an EXU override from one
         // mission can never leak into the shell or unrelated content.
