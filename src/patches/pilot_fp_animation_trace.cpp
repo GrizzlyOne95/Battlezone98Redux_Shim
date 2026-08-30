@@ -65,6 +65,10 @@ namespace BZROpenShim
         constexpr DWORD kInventoryPollIntervalMs = 1500;
         constexpr DWORD kFpEnumerateIntervalMs = 1500;
         constexpr size_t kMaxBindings = 64;
+        // Upper bound on one enumeration pass. The walk copies raw pointers into
+        // a fixed buffer so it can run under SEH, and a scene larger than this
+        // is truncated rather than growing an allocation inside __try.
+        constexpr size_t kMaxEnumeratedSceneObjects = 4096;
 
         // Verified current Redux layout already used by OpenShim's local-player,
         // headlight, satellite-visibility and jump-snipe diagnostics:
@@ -207,7 +211,9 @@ namespace BZROpenShim
             if (envLength > 0 && envLength < sizeof(envValue))
                 return StringIsTruthy(envValue);
             const std::string iniPath = GetOpenShimIniPath();
-            return GetPrivateProfileIntA(kIniSection, kIniKey, 1, iniPath.c_str()) != 0;
+            // Ships off. This is a capture tool for animation investigation, and
+            // every document that uses it says to set the key to 1 first.
+            return GetPrivateProfileIntA(kIniSection, kIniKey, 0, iniPath.c_str()) != 0;
         }
 
         bool ManipRequested()
@@ -424,6 +430,82 @@ namespace BZROpenShim
                 return nullptr;
             }
             return static_cast<Ogre::SceneManager*>(sm);
+        }
+
+
+        // The game's global keeps pointing at a SceneManager the engine has
+        // already destroyed, so a non-null pointer is not a live one. Verified
+        // against the 2026-08-30 crash dump: the freed manager's vptr read
+        // 0x0E94ED58, which is heap and in no loaded module, and its vtable slot
+        // for getMovableObjectIterator was zero -- so the virtual call went to
+        // address 0 and killed the process. A live manager's vptr is always in
+        // OgreMain.dll, which is cheap to confirm and rules that case out.
+        bool SceneManagerLooksLive(void* sm)
+        {
+            if (!sm)
+                return false;
+
+            void* vptr = nullptr;
+            __try
+            {
+                vptr = *reinterpret_cast<void**>(sm);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+            if (!vptr)
+                return false;
+
+            HMODULE owner = nullptr;
+            if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                        GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                    reinterpret_cast<LPCSTR>(vptr),
+                                    &owner))
+            {
+                return false; // heap or freed memory: not a vtable at all
+            }
+            return owner != nullptr && owner == GetModuleHandleA("OgreMain.dll");
+        }
+
+        // Walks the scene under SEH and copies out raw pointers. This has to be
+        // its own function with none but POD locals: a function that needs
+        // unwinding cannot host __try (C2712), and the caller builds vectors and
+        // strings. The type name is built by the caller for the same reason.
+        //
+        // A C++ `try`/`catch (...)` around this call would not do: the project
+        // builds /EHsc (<ExceptionHandling>Sync</ExceptionHandling>), where
+        // catch (...) does not catch an access violation. That is why the
+        // previous guard here never fired.
+        bool SafeCollectSceneEntities(Ogre::SceneManager* sm,
+                                      const std::string& typeName,
+                                      void** out,
+                                      size_t capacity,
+                                      size_t& outCount)
+        {
+            outCount = 0;
+            if (!sm || !out || capacity == 0)
+                return false;
+
+            size_t count = 0;
+            __try
+            {
+                Ogre::SceneManager::MovableObjectIterator it =
+                    sm->getMovableObjectIterator(typeName);
+                while (it.hasMoreElements() && count < capacity)
+                {
+                    Ogre::MovableObject* mo = it.getNext();
+                    if (mo)
+                        out[count++] = mo;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+
+            outCount = count;
+            return true;
         }
 
         bool SafeEntityHasSkeleton(void* ent)
@@ -712,9 +794,12 @@ namespace BZROpenShim
             bool worldIsPilot = (worldEntity != nullptr);
 
             Ogre::SceneManager* sm = SafeGetSceneManagerViaGlobal();
-            if (!sm)
+            if (!SceneManagerLooksLive(sm))
             {
-                // No SceneManager yet (early startup) — nothing to do, fail closed.
+                // Either there is no SceneManager yet (early startup) or the
+                // global still points at one the engine has destroyed, which is
+                // what a mission change and a quit both leave behind. Fail
+                // closed either way.
                 return;
             }
 
@@ -724,17 +809,37 @@ namespace BZROpenShim
             std::vector<std::string> broadMeshNames;
             std::vector<std::string> strictMeshNames;
 
-            try
+            // The liveness check above is a filter, not a guarantee: the engine
+            // can free the SceneManager between that check and this walk, so the
+            // walk runs under SEH as well.
+            static const std::string kEntityTypeName("Entity");
+            std::vector<void*> sceneObjects(kMaxEnumeratedSceneObjects, nullptr);
+            size_t sceneObjectCount = 0;
+            if (!SafeCollectSceneEntities(sm,
+                                          kEntityTypeName,
+                                          sceneObjects.data(),
+                                          sceneObjects.size(),
+                                          sceneObjectCount))
             {
-                Ogre::SceneManager::MovableObjectIterator it = sm->getMovableObjectIterator("Entity");
-                while (it.hasMoreElements())
+                LogShimA(LogLevel::Warn, kComponent,
+                    "[FPAnim][FP] enumeration faulted; treating SceneManager=0x%p as gone", sm);
+                return;
+            }
+            if (sceneObjectCount == sceneObjects.size())
+            {
+                LogShimA(LogLevel::Warn, kComponent,
+                    "[FPAnim][FP] enumeration truncated at %u objects",
+                    static_cast<unsigned>(sceneObjectCount));
+            }
+
+            {
+                for (size_t objectIndex = 0; objectIndex < sceneObjectCount; ++objectIndex)
                 {
-                    Ogre::MovableObject* mo = nullptr;
-                    try { mo = it.getNext(); } catch (...) { continue; }
+                    Ogre::MovableObject* mo =
+                        static_cast<Ogre::MovableObject*>(sceneObjects[objectIndex]);
                     if (!mo)
                         continue;
-                    Ogre::Entity* ent = nullptr;
-                    try { ent = static_cast<Ogre::Entity*>(mo); } catch (...) { continue; }
+                    Ogre::Entity* ent = static_cast<Ogre::Entity*>(mo);
                     if (!ent)
                         continue;
                     // Strict qualification via animation vocabulary (pilot-specific) rather than mesh name alone.
@@ -774,11 +879,6 @@ namespace BZROpenShim
                             isStrict ? 1u : 0u, isWorldEntity ? 1u : 0u);
                     }
                 }
-            }
-            catch (...)
-            {
-                LogShimA(LogLevel::Warn, kComponent, "[FPAnim][FP] enumeration exception SceneManager=0x%p", sm);
-                return;
             }
 
             // Promotion logic: require strict pilot mesh + worldIsPilot
@@ -1549,16 +1649,20 @@ namespace BZROpenShim
                     if (g_Enabled.load(std::memory_order_acquire))
                         InstallObservers();
                 }
-                if (g_TrackerExportsReady.load(std::memory_order_acquire))
+                // The whole poll is diagnostic, but only the logging used to be
+                // gated: the scene-graph walk ran on every player's machine every
+                // 1.5 s with the trace off, which is how a tracer's use-after-free
+                // became everyone's crash. Nothing outside this file needs the
+                // polled state -- the exported ResolveLocalFirstPersonEntity
+                // resolves on demand and is unaffected by this gate.
+                if (g_TrackerExportsReady.load(std::memory_order_acquire) &&
+                    g_Enabled.load(std::memory_order_acquire))
                 {
                     std::lock_guard<std::mutex> trackerLock(g_TrackerMutex);
                     RefreshWorldTarget();
                     RefreshFpTargetViaEnumeration();
-                    if (g_Enabled.load(std::memory_order_acquire))
-                    {
-                        TryLogInventoryForTarget(g_World, TargetKind::World);
-                        TryLogInventoryForTarget(g_Fp, TargetKind::Fp);
-                    }
+                    TryLogInventoryForTarget(g_World, TargetKind::World);
+                    TryLogInventoryForTarget(g_Fp, TargetKind::Fp);
                 }
                 Sleep(kPollSleepMs);
             }
