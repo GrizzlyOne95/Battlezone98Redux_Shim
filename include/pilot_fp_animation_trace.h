@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 namespace BZROpenShim
 {
     // Returns true when the first-person pilot Ogre animation trace is enabled.
@@ -7,7 +9,7 @@ namespace BZROpenShim
     // be disabled with either the INI key or OPENSHIM_TRACE_PILOT_FP_ANIMATIONS=0.
     bool IsPilotFpAnimationTraceRequested();
 
-    // Starts the local-Person animation observer. The worker waits for
+    // Starts the local-Person / first-person entity tracker. The worker waits for
     // OgreMain.dll, resolves the retail Ogre exports by semantic name, and binds
     // AnimationState traffic for two targets:
     //   - WORLD: local userObject's Person render entity (Person+0x0F0 -> Ogre::Entity)
@@ -29,7 +31,16 @@ namespace BZROpenShim
     // via hasSkeleton + hasAnimationState("stand2Kneel"/"idle"), generation-based
     // lifetime with acquired/released/reacquired logging, and split
     // [FPAnim] vs [FPAnim][FP] + [MANIP][WORLD]/[MANIP][FP] attribution.
+    // Tracking is always active because companion APIs depend on its lifetime
+    // checks. Animation call-site hooks and verbose inventory/candidate logging
+    // remain controlled by TracePilotFPAnimations.
     void InitializePilotFpAnimationTrace();
+
+    // Resolves a fresh snapshot of the local player's dedicated first-person
+    // pilot Ogre Entity. The tracker revalidates SceneManager membership and the
+    // local world Person before returning. Callers must not cache the pointer
+    // beyond one immediate operation; generation changes on release/reacquire.
+    bool ResolveLocalFirstPersonEntity(void*& outEntity, uint64_t& outGeneration);
 
     // Stops trace collection. Installed process-lifetime observers become
     // pass-through hooks after shutdown, matching the existing Ogre profiler.

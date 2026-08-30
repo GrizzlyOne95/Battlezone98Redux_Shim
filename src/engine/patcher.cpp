@@ -8,6 +8,7 @@
 #include "d3d_startup_hooks.h"
 #include "file_io_hooks.h"
 #include "bzr_hooks.h"
+#include "openshim_preset_migration.h"
 #include "shim_log.h"
 #include "sun_flash.h"
 #include "openshim_sdk_v2.h"
@@ -772,6 +773,22 @@ namespace BZROpenShim
 
     void RunPatcher(uint32_t shimVersion) {
         g_Config.Load();
+        // Preset migration must happen before normal player configuration is
+        // fully applied, or the loader must explicitly reload the migrated
+        // file before using its values. Run it here – early enough that the
+        // corrected file is used for this boot where practical – and before
+        // any TryGetUserConfigBool / GetSoundChannelOverrideConfig reads.
+        // Documented in openshim_preset_migration.h.
+        {
+            auto mr = TryMigratePlayerPresetOnStartup();
+            (void)mr;
+            // If migration migrated or failed, subsequent config reads will
+            // either see the new file or (for quarantined settings) the
+            // fail-closed in-memory fallback. No further reload is needed
+            // because all config readers are lazy GetPrivateProfileStringA
+            // consumers that re-read the file on the next query if this
+            // completed before their first Initialize*.
+        }
         SetBzrDistribution(BzrDistribution::Unknown);
         const bool isSteam = IsSteamExe(); g_EnableScrollRestore = true;
         if (ShouldEnableD3DStartupHooks()) ApplyD3DStartupHooks();
