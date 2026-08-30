@@ -23,7 +23,11 @@
 #include "native_cpu_sampler.h"
 #include "pilot_fp_animation_trace.h"
 #include "openshim_sdk_v2.h"
+#include "openshim_updater.h"
 #include "render_profile_runtime.h"
+#include "ui_performance.h"
+#include "ui_performance_hooks.h"
+#include "ui_file_scan_hooks.h"
 #include "BZROpenShim.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -38,6 +42,7 @@ static uintptr_t g_PatchThread = 0;
 
 static unsigned __stdcall PatchThreadProc(void*)
 {
+    BZROpenShim::UiPerf::Initialize();
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread started");
     // Start renderer diagnostics/features immediately so their workers can
     // observe Ogre/D3D11 module creation before the renderer creates devices,
@@ -52,6 +57,14 @@ static unsigned __stdcall PatchThreadProc(void*)
     // the optimizer's existing IAT targets without changing network behavior.
     BZROpenShim::InitializeBzrNetInstrumentation();
     BZROpenShim::RunPatcher(SHIM_VERSION);
+
+    // Shell profiler detours must not touch SteamStub-managed executable pages
+    // before platform detection and code settlement. UiPerfHooks installs them
+    // immediately on GOG and defers Steam's writes until a live MainScreen is
+    // observed on the UI thread. File-scan hooks follow so trigger-file access
+    // is suppressed without classifying startup work as a menu transition.
+    BZROpenShim::UiPerfHooks::Install();
+    BZROpenShim::UiFileScan::Install();
 
     // Renderer-profile ownership (backend observation, scheme-policy takeover,
     // capability reporting) initializes after the compatibility gate so the
@@ -199,7 +212,10 @@ namespace BZROpenShim
             CloseHandle(reinterpret_cast<HANDLE>(g_PatchThread));
             g_PatchThread = 0;
         }
+        BZROpenShim::UiPerfHooks::Shutdown();
+        BZROpenShim::UiFileScan::Shutdown();
         BZROpenShim::ShutdownNativeCpuSampler();
+        BZROpenShim::ShutdownOpenShimUpdater();
         BZROpenShim::ShutdownOpenShimSdkV2();
         BZROpenShim::ShutdownPilotFpAnimationTrace();
         BZROpenShim::ShutdownOgreAnimationProfiler();

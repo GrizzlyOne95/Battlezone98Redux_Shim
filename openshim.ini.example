@@ -469,8 +469,12 @@ MultiplayerFlagShowOwnCraft = 0
 
 ; Scrap/pilot readout layout.
 ; Canonical:
-;   Legacy = compact legacy top-center layout; hide stock backing panels
-;   Stock  = Redux positions/panels
+;   Legacy = BZ 1.5's gauge, rebuilt: the two readouts stacked at the top left
+;            and clamped just clear of the command menu at every resolution and
+;            UI scale, Redux's backing panels hidden in favour of BZ 1.5's own
+;            black plates, and BZ 1.5's scrap-blue / pilot-green left-aligned
+;            text
+;   Stock  = Redux positions/panels (top center, white centered text)
 ; Accepted aliases:
 ;   Legacy : Compact, 1, On, True
 ;   Stock  : Default, 0, Off, False
@@ -734,6 +738,17 @@ RelayLoggingAllUdp = 0
 ; Raise this if the log reports dropped records under load.
 ; Legacy env aliases: OPENSHIM_BZRNET_TRACE_QUEUE, BZ_BZRNET_TRACE_QUEUE
 RelayLoggingQueueRecords = 4096
+
+; UI responsiveness / stall profiling (hierarchical [UIPERF] logging).
+; When enabled, Redux shell transitions (Main Menu <-> Multiplayer, etc.)
+; emit hierarchical BEGIN/END lines with per-phase elapsed and a [SUMMARY]
+; with filesystem/ogre/shader breakdowns, plus stall markers for long
+; main-thread gaps.  Verbose adds per-directory / per-resource detail.
+; Default: OFF (zero overhead path is a single relaxed atomic check).
+; Legacy env aliases: OPENSHIM_UI_PERFORMANCE_LOGGING,
+;                     OPENSHIM_UI_PERFORMANCE_VERBOSE
+UiPerformanceLogging = 0
+UiPerformanceVerbose = 0
 
 
 

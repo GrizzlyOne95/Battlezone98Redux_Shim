@@ -273,6 +273,10 @@ namespace
             return TryReadIniValue(mainIni, "Diagnostics", "ProfileOgreAnimation", out);
         if (Equals(name, "OPENSHIM_TERRAIN_RENDER_PROBE"))
             return TryReadIniValue(mainIni, "Diagnostics", "TerrainRenderProbe", out);
+        if (Equals(name, "OPENSHIM_UI_PERFORMANCE_LOGGING"))
+            return TryReadIniValue(mainIni, "Diagnostics", "UiPerformanceLogging", out);
+        if (Equals(name, "OPENSHIM_UI_PERFORMANCE_VERBOSE"))
+            return TryReadIniValue(mainIni, "Diagnostics", "UiPerformanceVerbose", out);
 
         if (Equals(name, "OPENSHIM_DISABLE_LIVE_NICKNAME"))
             return TryReadMappedBool(mainIni, "Network", "LiveNicknameKeys", true, out);
