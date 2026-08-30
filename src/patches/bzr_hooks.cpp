@@ -7202,6 +7202,211 @@ namespace BZROpenShim
                 sceneManager, getCurrentViewport, getMaterialScheme);
         }
 
+        struct OgreColourValueSnapshot
+        {
+            float r;
+            float g;
+            float b;
+            float a;
+        };
+
+        struct Dx11EnhancedLightingSnapshot
+        {
+            OgreColourValueSnapshot fog;
+            OgreColourValueSnapshot ambient;
+            float fogDensity;
+            float fogStart;
+            float fogEnd;
+        };
+
+        using FnOgreGetSceneColour = const OgreColourValueSnapshot*(__thiscall*)(void*);
+        using FnOgreGetSceneFloat = float(__thiscall*)(void*);
+
+        // SEH-only leaf. Ogre's colour getters return const ColourValue&, which
+        // is an EAX pointer in this 32-bit ABI; copy it while the call is live.
+        static bool TryReadDx11EnhancedLightingSnapshot(
+            void* sceneManager,
+            FnOgreGetSceneColour getFogColour,
+            FnOgreGetSceneColour getAmbientLight,
+            FnOgreGetSceneFloat getFogDensity,
+            FnOgreGetSceneFloat getFogStart,
+            FnOgreGetSceneFloat getFogEnd,
+            Dx11EnhancedLightingSnapshot* outSnapshot)
+        {
+            __try
+            {
+                const OgreColourValueSnapshot* const fog = getFogColour(sceneManager);
+                const OgreColourValueSnapshot* const ambient = getAmbientLight(sceneManager);
+                if (!fog || !ambient || !outSnapshot)
+                    return false;
+                outSnapshot->fog = *fog;
+                outSnapshot->ambient = *ambient;
+                outSnapshot->fogDensity = getFogDensity(sceneManager);
+                outSnapshot->fogStart = getFogStart(sceneManager);
+                outSnapshot->fogEnd = getFogEnd(sceneManager);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static float SrgbToLinearDiagnostic(float value)
+        {
+            value = std::clamp(value, 0.0f, 1.0f);
+            return value <= 0.04045f
+                ? value / 12.92f
+                : std::pow((value + 0.055f) / 1.055f, 2.4f);
+        }
+
+        static float LinearToSrgbDiagnostic(float value)
+        {
+            value = std::clamp(value, 0.0f, 1.0f);
+            return value <= 0.0031308f
+                ? value * 12.92f
+                : 1.055f * std::pow(value, 1.0f / 2.4f) - 0.055f;
+        }
+
+        static bool Dx11EnhancedLightingSnapshotChanged(
+            const Dx11EnhancedLightingSnapshot& lhs,
+            const Dx11EnhancedLightingSnapshot& rhs)
+        {
+            constexpr float epsilon = 0.0001f;
+            const auto changed = [epsilon](float a, float b)
+            {
+                return !std::isfinite(a) || !std::isfinite(b) || std::fabs(a - b) > epsilon;
+            };
+            return changed(lhs.fog.r, rhs.fog.r) ||
+                   changed(lhs.fog.g, rhs.fog.g) ||
+                   changed(lhs.fog.b, rhs.fog.b) ||
+                   changed(lhs.ambient.r, rhs.ambient.r) ||
+                   changed(lhs.ambient.g, rhs.ambient.g) ||
+                   changed(lhs.ambient.b, rhs.ambient.b) ||
+                   changed(lhs.fogDensity, rhs.fogDensity) ||
+                   changed(lhs.fogStart, rhs.fogStart) ||
+                   changed(lhs.fogEnd, rhs.fogEnd);
+        }
+
+        static void MaybeLogDx11EnhancedLightingState()
+        {
+            static int enabled = -1;
+            static DWORD lastPollTick = 0;
+            static bool haveLast = false;
+            static Dx11EnhancedLightingSnapshot lastSnapshot = {};
+            static std::string lastScheme;
+
+            if (enabled < 0)
+            {
+                bool iniEnabled = false;
+                const bool haveIniValue = TryGetUserConfigBool(
+                    "Diagnostics", "TraceDX11EnhancedLighting", iniEnabled);
+                enabled = (EnvFlagEnabled("OPENSHIM_TRACE_DX11_ENHANCED_LIGHTING") ||
+                           (haveIniValue && iniEnabled)) ? 1 : 0;
+                if (enabled != 0)
+                    LogShimA(LogLevel::Info, "dx11fog", "[DX11FOG] diagnostic enabled\n");
+            }
+            if (enabled == 0)
+                return;
+
+            const DWORD now = GetTickCount();
+            if (lastPollTick != 0 && (now - lastPollTick) < 250)
+                return;
+            lastPollTick = now;
+
+            static FnOgreGetSceneColour getFogColour =
+                ResolveOgreProc<FnOgreGetSceneColour>(
+                    "?getFogColour@SceneManager@Ogre@@UBEABVColourValue@2@XZ");
+            static FnOgreGetSceneColour getAmbientLight =
+                ResolveOgreProc<FnOgreGetSceneColour>(
+                    "?getAmbientLight@SceneManager@Ogre@@QBEABVColourValue@2@XZ");
+            static FnOgreGetSceneFloat getFogDensity =
+                ResolveOgreProc<FnOgreGetSceneFloat>(
+                    "?getFogDensity@SceneManager@Ogre@@UBEMXZ");
+            static FnOgreGetSceneFloat getFogStart =
+                ResolveOgreProc<FnOgreGetSceneFloat>(
+                    "?getFogStart@SceneManager@Ogre@@UBEMXZ");
+            static FnOgreGetSceneFloat getFogEnd =
+                ResolveOgreProc<FnOgreGetSceneFloat>(
+                    "?getFogEnd@SceneManager@Ogre@@UBEMXZ");
+            if (!getFogColour || !getAmbientLight || !getFogDensity ||
+                !getFogStart || !getFogEnd)
+                return;
+
+            void* const sceneManager = GetOgreSceneManagerRuntime();
+            if (!sceneManager)
+                return;
+
+            const char* const schemeName = GetCurrentOgreMaterialSchemeName(sceneManager);
+            const std::string scheme = schemeName ? schemeName : "<null>";
+            const bool enhancedScheme = scheme.size() >= 3 &&
+                _strnicmp(scheme.c_str(), "en-", 3) == 0;
+
+            Dx11EnhancedLightingSnapshot snapshot = {};
+            if (!TryReadDx11EnhancedLightingSnapshot(
+                    sceneManager, getFogColour, getAmbientLight, getFogDensity,
+                    getFogStart, getFogEnd, &snapshot))
+                return;
+
+            const bool schemeChanged = scheme != lastScheme;
+            if (haveLast && !schemeChanged &&
+                !Dx11EnhancedLightingSnapshotChanged(snapshot, lastSnapshot))
+                return;
+
+            lastScheme = scheme;
+            lastSnapshot = snapshot;
+            haveLast = true;
+
+            if (!enhancedScheme)
+            {
+                LogShimA(LogLevel::Info, "dx11fog",
+                    "[DX11FOG] state scheme=%s enhanced=0\n", scheme.c_str());
+                return;
+            }
+
+            const float fogLinearR = SrgbToLinearDiagnostic(snapshot.fog.r);
+            const float fogLinearG = SrgbToLinearDiagnostic(snapshot.fog.g);
+            const float fogLinearB = SrgbToLinearDiagnostic(snapshot.fog.b);
+            constexpr float ambientTintStrength = 0.16f;
+            constexpr float ambientInputStrength = 0.35f;
+            const float ambientTargetR = std::clamp(
+                fogLinearR + snapshot.ambient.r * ambientInputStrength, 0.0f, 1.0f);
+            const float ambientTargetG = std::clamp(
+                fogLinearG + snapshot.ambient.g * ambientInputStrength, 0.0f, 1.0f);
+            const float ambientTargetB = std::clamp(
+                fogLinearB + snapshot.ambient.b * ambientInputStrength, 0.0f, 1.0f);
+            const float ambientAddR = (ambientTargetR - fogLinearR) * ambientTintStrength;
+            const float ambientAddG = (ambientTargetG - fogLinearG) * ambientTintStrength;
+            const float ambientAddB = (ambientTargetB - fogLinearB) * ambientTintStrength;
+            const float baseLinearR = fogLinearR + ambientAddR;
+            const float baseLinearG = fogLinearG + ambientAddG;
+            const float baseLinearB = fogLinearB + ambientAddB;
+            const float fogRange = snapshot.fogEnd - snapshot.fogStart;
+            const float inverseFogRange = fogRange > 0.001f ? 1.0f / fogRange : 0.0f;
+            const float atmosphereSupport = std::clamp(inverseFogRange * 160.0f, 0.0f, 1.0f);
+            const float terrainIblScale = 0.15f + 0.85f * atmosphereSupport;
+
+            LogShimA(LogLevel::Info, "dx11fog",
+                "[DX11FOG] state scheme=%s enhanced=1 authored_srgb=(%.6f,%.6f,%.6f) "
+                "shader_linear=(%.6f,%.6f,%.6f) ambient=(%.6f,%.6f,%.6f) "
+                "ambient_add=(%.6f,%.6f,%.6f) base_final_srgb=(%.6f,%.6f,%.6f) "
+                "untreated_final_srgb=(%.6f,%.6f,%.6f) fogDensity=%.6f fogStart=%.3f "
+                "fogEnd=%.3f invRange=%.8f terrainDiffuseIblScale=%.6f\n",
+                scheme.c_str(),
+                snapshot.fog.r, snapshot.fog.g, snapshot.fog.b,
+                fogLinearR, fogLinearG, fogLinearB,
+                snapshot.ambient.r, snapshot.ambient.g, snapshot.ambient.b,
+                ambientAddR, ambientAddG, ambientAddB,
+                LinearToSrgbDiagnostic(baseLinearR),
+                LinearToSrgbDiagnostic(baseLinearG),
+                LinearToSrgbDiagnostic(baseLinearB),
+                LinearToSrgbDiagnostic(snapshot.fog.r),
+                LinearToSrgbDiagnostic(snapshot.fog.g),
+                LinearToSrgbDiagnostic(snapshot.fog.b),
+                snapshot.fogDensity, snapshot.fogStart, snapshot.fogEnd,
+                inverseFogRange, terrainIblScale);
+        }
+
         // Interval telemetry for the state-version reuse. Everything here is
         // a delta over the reporting window, so the numbers can be divided by
         // the frame count of the same window to get per-frame rates without
@@ -32674,6 +32879,7 @@ namespace BZROpenShim
         // engine is not dispatching the hooked FlagDisplay::Submit slot.
         MaybeDriveMultiplayerFlagRenderFallback();
         OgreShaderCacheTick();
+        MaybeLogDx11EnhancedLightingState();
         if (BZROpenShim::UiPerf::IsEnabled())
             BZROpenShim::UiPerf::Heartbeat("SimTick");
         if (!g_CareerStatsMpHookInstalled)
