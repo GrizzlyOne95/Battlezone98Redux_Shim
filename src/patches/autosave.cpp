@@ -9,6 +9,7 @@
 // reverse-engineering/testing. OpenShim does not link or require EXU/Lua.
 
 #include "autosave.h"
+#include "autosave_gate.h"
 #include "BZROpenShim.h"
 #include "game_state.h"
 #include "shim_log.h"
@@ -38,9 +39,6 @@ namespace BZROpenShim
         constexpr uintptr_t kIsNetGameAddr = 0x00917F7B;
         constexpr uintptr_t kUserObjectAddr = 0x00917AFC;
         constexpr uintptr_t kEditModeAddr = 0x009454B8;
-        constexpr uintptr_t kUiCurrentScreenAddr = 0x00918320;
-        constexpr uintptr_t kUiWrapperActiveAddr = 0x00918324;
-        constexpr uintptr_t kUiCurrentScreenTypeAddr = 0x00918328;
         constexpr uintptr_t kQueuedLoadNameBufferAddr = 0x00915540;
         constexpr size_t kQueuedLoadNameBufferLen = 16;
 
@@ -52,6 +50,14 @@ namespace BZROpenShim
         constexpr DWORD kDefaultIntervalSeconds = 120;
         constexpr DWORD kDefaultInitialDelaySeconds = 10;
         constexpr DWORD kDefaultRetrySeconds = 15;
+
+        // A SaveGame fault means the engine walked a half-built mission, so the
+        // gate that let the call through was wrong for that state. One fault
+        // stands the feature down for the rest of the mission; this many across
+        // the process stands it down until restart. Without the second cap a
+        // wrong gate writes a fault - and, with WER LocalDumps configured, a
+        // full-process dump - on every interval for as long as the game runs.
+        constexpr LONG kMaxSaveFaultsPerProcess = 3;
 
         // Native bool __cdecl SaveGame(char* filename, int saveType).
         // -1 represents a wildcard byte.
@@ -77,6 +83,9 @@ namespace BZROpenShim
         WorldUpdateRenderQueueFn g_previousWorldUpdateRenderQueue = nullptr;
         bool g_hookInstalled = false;
         bool g_missionActive = false;
+        bool g_missionSaveFaulted = false;
+        bool g_saveDisabledForProcess = false;
+        LONG g_saveFaultCount = 0;
         ULONGLONG g_nextSaveTick = 0;
         volatile LONG g_saveInProgress = 0;
 
@@ -134,20 +143,6 @@ namespace BZROpenShim
             }
         }
 
-        bool SafeReadDword(uintptr_t address, uint32_t& value) noexcept
-        {
-            __try
-            {
-                value = *reinterpret_cast<const volatile uint32_t*>(address);
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                value = 0;
-                return false;
-            }
-        }
-
         bool SafeReadPointer(uintptr_t address, void*& value) noexcept
         {
             __try
@@ -196,6 +191,57 @@ namespace BZROpenShim
                    protect == PAGE_EXECUTE_READ ||
                    protect == PAGE_EXECUTE_READWRITE ||
                    protect == PAGE_EXECUTE_WRITECOPY;
+        }
+
+        bool IsReadableAddress(const void* address, size_t length) noexcept
+        {
+            if (!address || length == 0)
+                return false;
+
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (VirtualQuery(address, &mbi, sizeof(mbi)) != sizeof(mbi) || mbi.State != MEM_COMMIT)
+                return false;
+
+            if ((mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0)
+                return false;
+
+            const DWORD protect = mbi.Protect & 0xFF;
+            const bool readable =
+                protect == PAGE_READONLY ||
+                protect == PAGE_READWRITE ||
+                protect == PAGE_WRITECOPY ||
+                protect == PAGE_EXECUTE_READ ||
+                protect == PAGE_EXECUTE_READWRITE ||
+                protect == PAGE_EXECUTE_WRITECOPY;
+            if (!readable)
+                return false;
+
+            const auto regionEnd =
+                reinterpret_cast<uintptr_t>(mbi.BaseAddress) + static_cast<uintptr_t>(mbi.RegionSize);
+            return reinterpret_cast<uintptr_t>(address) + length <= regionEnd;
+        }
+
+        // A non-null global is not proof that the object behind it was ever
+        // constructed. SaveGame walks the mission through virtual calls, so the
+        // cheapest honest check is that the pointer looks like a live C++
+        // object: readable storage, a readable vtable, and code at slot 0.
+        bool IsPlausiblePolymorphicObject(void* object) noexcept
+        {
+            if (!IsReadableAddress(object, sizeof(void*)))
+                return false;
+
+            void* vtable = nullptr;
+            if (!SafeReadPointer(reinterpret_cast<uintptr_t>(object), vtable) ||
+                !IsReadableAddress(vtable, sizeof(void*)))
+            {
+                return false;
+            }
+
+            void* firstVirtual = nullptr;
+            if (!SafeReadPointer(reinterpret_cast<uintptr_t>(vtable), firstVirtual))
+                return false;
+
+            return IsExecutableAddress(firstVirtual);
         }
 
         std::filesystem::path GetGameDirectory()
@@ -330,18 +376,6 @@ namespace BZROpenShim
             return reinterpret_cast<NativeSaveGameFn>(const_cast<uint8_t*>(resolved));
         }
 
-        bool IsSinglePlayerMissionActive() noexcept
-        {
-            uint8_t isNetGame = 0;
-            void* userObject = nullptr;
-            if (!SafeReadByte(kIsNetGameAddr, isNetGame) ||
-                !SafeReadPointer(kUserObjectAddr, userObject))
-            {
-                return false;
-            }
-            return isNetGame == 0 && userObject != nullptr;
-        }
-
         bool IsTerrainEditActive() noexcept
         {
             uint8_t editMode = 0;
@@ -350,64 +384,75 @@ namespace BZROpenShim
             return false;
         }
 
-        // Returns true and fills reason if the autosave deadline should be deferred.
-        // The previous implementation treated TerrainEdit (0x009454B8) as a permanent
-        // no-save condition. Unscripted single-player / Instant Action missions can
-        // carry that flag while still allowing a manual SaveGame to succeed, so the
-        // gate was demoted: terrain edit is now only diagnostic. The remaining
-        // gates are the actual pause/save/load/options UI and the generic
-        // cursor-driven shell screen. Dump battlezone98redux.exe.38660.dmp was taken
-        // with editMode=1, wrapperActive=1, screenType=1, userObject=0 (post-mission)
-        // and showed the old gate would have permanently suppressed the timer
-        // that had been armed at 09:38:20.698 with initialDelay=10000ms.
-        bool IsUnsafeUiStateWithReason(char* reason, size_t reasonLen) noexcept
+        // Reads everything the gate needs in one pass so a log line describes a
+        // single consistent moment rather than a mix of re-probed values.
+        //
+        // TerrainEdit (0x009454B8) is deliberately absent: unscripted
+        // single-player / Instant Action missions carry that flag while a manual
+        // SaveGame still succeeds, so it stays diagnostic only. Dump
+        // battlezone98redux.exe.38660.dmp was taken with editMode=1,
+        // wrapperActive=1, screenType=1, userObject=0 (post-mission) and showed
+        // that treating it as a gate would have permanently suppressed the timer
+        // armed at 09:38:20.698 with initialDelay=10000ms.
+        AutoSaveGate::ObservedState ObserveState() noexcept
         {
-            if (reason && reasonLen > 0)
-                reason[0] = '\0';
+            AutoSaveGate::ObservedState state;
+            state.missionSaveFaulted = g_missionSaveFaulted;
+            state.saveDisabledForProcess = g_saveDisabledForProcess;
 
-            if (IsPauseMenuOpen())
+            uint8_t isNetGame = 0;
+            void* userObject = nullptr;
+            const ShellUiState ui = ReadShellUiState();
+            if (!SafeReadByte(kIsNetGameAddr, isNetGame) ||
+                !SafeReadPointer(kUserObjectAddr, userObject) ||
+                !ui.readable)
             {
-                if (reason)
-                    (void)snprintf(reason, reasonLen, "pause menu");
-                return true;
+                return state;
             }
 
-            uint32_t wrapperActive = 0;
-            uint32_t screenType = 0;
-            void* currentScreen = nullptr;
-            if (!SafeReadDword(kUiWrapperActiveAddr, wrapperActive) ||
-                !SafeReadDword(kUiCurrentScreenTypeAddr, screenType) ||
-                !SafeReadPointer(kUiCurrentScreenAddr, currentScreen))
-            {
-                if (reason)
-                    (void)snprintf(reason, reasonLen, "ui state unreadable");
-                return true;
-            }
+            state.stateReadable = true;
+            state.netGame = isNetGame != 0;
+            state.userObjectPresent = userObject != nullptr;
+            state.userObjectPlausible = IsPlausiblePolymorphicObject(userObject);
+            state.pauseMenuOpen = IsPauseMenuOpen();
+            state.uiWrapperActive = ui.wrapperActive;
+            state.uiScreenPresent = ui.screenPresent;
+            state.uiScreenType = ui.screenType;
 
-            if (wrapperActive != 0 && currentScreen != nullptr && screenType != 0)
-            {
-                CURSORINFO info{};
-                info.cbSize = sizeof(info);
-                if (GetCursorInfo(&info) && (info.flags & CURSOR_SHOWING) != 0)
-                {
-                    if (reason)
-                        (void)snprintf(
-                            reason, reasonLen, "shell screen type=%u", static_cast<unsigned>(screenType));
-                    return true;
-                }
-            }
-
-            // TerrainEdit at 0x009454B8 is intentionally NOT a hard gate here.
-            // It is still observed for diagnostics because it explains why the
-            // previous build appeared to silently never save in unscripted
-            // missions, but a manual SaveGame succeeds with the same flag set.
-            return false;
+            CURSORINFO info{};
+            info.cbSize = sizeof(info);
+            state.cursorVisible = GetCursorInfo(&info) && (info.flags & CURSOR_SHOWING) != 0;
+            return state;
         }
 
-        bool IsUnsafeUiState() noexcept
+        // A mission is "live" when the gate's non-UI preconditions hold: this is
+        // what arms and disarms the timer, independently of whether a shell
+        // screen is transiently in the way.
+        bool IsSinglePlayerMissionActive(const AutoSaveGate::ObservedState& state) noexcept
         {
-            char dummy[64] = {};
-            return IsUnsafeUiStateWithReason(dummy, sizeof(dummy));
+            return state.stateReadable && !state.netGame &&
+                   state.userObjectPresent && state.userObjectPlausible;
+        }
+
+        void LogGateSnapshot(LogLevel level, const char* prefix, const AutoSaveGate::ObservedState& state)
+        {
+            LogShimA(
+                level,
+                "autosave",
+                "%s readable=%u netGame=%u userObject=%u/%u pause=%u wrapper=%u screen=%u "
+                "type=0x%02X(%s) cursor=%u terrainEdit=%u",
+                prefix,
+                state.stateReadable ? 1u : 0u,
+                state.netGame ? 1u : 0u,
+                state.userObjectPresent ? 1u : 0u,
+                state.userObjectPlausible ? 1u : 0u,
+                state.pauseMenuOpen ? 1u : 0u,
+                state.uiWrapperActive ? 1u : 0u,
+                state.uiScreenPresent ? 1u : 0u,
+                static_cast<unsigned>(state.uiScreenType),
+                DescribeScreenType(state.uiScreenType),
+                state.cursorVisible ? 1u : 0u,
+                IsTerrainEditActive() ? 1u : 0u);
         }
 
         void ResetMissionState()
@@ -415,6 +460,9 @@ namespace BZROpenShim
             g_missionActive = false;
             g_nextSaveTick = 0;
             g_haveObservedAutoSaveWriteTime = false;
+            // A new mission gets a fresh attempt; the per-process budget in
+            // g_saveFaultCount is what stops an endlessly wrong gate.
+            g_missionSaveFaulted = false;
         }
 
         void CaptureAutoSaveWriteTime()
@@ -540,7 +588,7 @@ namespace BZROpenShim
                     g_autoSaveLabelPath.string().c_str());
         }
 
-        bool PerformAutoSave()
+        bool PerformAutoSave(const AutoSaveGate::ObservedState& gateState)
         {
             if (!g_nativeSaveGame || InterlockedCompareExchange(&g_saveInProgress, 1, 0) != 0)
                 return false;
@@ -571,12 +619,45 @@ namespace BZROpenShim
 
                     if (exceptionCode != 0)
                     {
+                        // The call already touched the file, so its timestamp
+                        // moved; re-observe it here or ObserveExternalAutoSave
+                        // reports our own half-written file as somebody else's
+                        // autosave and silently pushes the deadline out.
+                        CaptureAutoSaveWriteTime();
+
+                        g_missionSaveFaulted = true;
+                        ++g_saveFaultCount;
                         LogShimA(
                             LogLevel::Error,
                             "autosave",
-                            "Native SaveGame raised exception 0x%08lX for %s",
+                            "Native SaveGame raised exception 0x%08lX for %s "
+                            "(fault %ld of %ld); %s may be truncated",
                             exceptionCode,
-                            filename.c_str());
+                            filename.c_str(),
+                            g_saveFaultCount,
+                            kMaxSaveFaultsPerProcess,
+                            g_autoSavePath.filename().string().c_str());
+                        // The gate said this state was safe and it was not, so
+                        // record what it saw: that snapshot is the only way to
+                        // learn which global actually discriminates.
+                        LogGateSnapshot(LogLevel::Error, "Gate state at fault:", gateState);
+
+                        if (g_saveFaultCount >= kMaxSaveFaultsPerProcess)
+                        {
+                            g_saveDisabledForProcess = true;
+                            LogShimA(
+                                LogLevel::Error,
+                                "autosave",
+                                "Disabling autosave for this process after %ld SaveGame faults",
+                                g_saveFaultCount);
+                        }
+                        else
+                        {
+                            LogShimA(
+                                LogLevel::Warn,
+                                "autosave",
+                                "Standing down autosave until the next mission starts");
+                        }
                     }
                     else if (!saved)
                     {
@@ -586,6 +667,7 @@ namespace BZROpenShim
                     {
                         WriteAutoSaveLabel();
                         success = true;
+                        g_saveFaultCount = 0;
                         LogShimA(LogLevel::Info, "autosave", "Saved %s", filename.c_str());
                     }
                 }
@@ -803,8 +885,20 @@ namespace BZROpenShim
 
         if (!wasEnabled)
         {
-            // Re-enter through normal mission detection so the initial grace
-            // period still applies when AutoSave is enabled mid-mission.
+            // Turning the feature back on by hand is an explicit request to try
+            // again, so it clears a fault stand-down as well as re-entering
+            // normal mission detection - the initial grace period still applies
+            // when AutoSave is enabled mid-mission.
+            if (g_saveDisabledForProcess || g_saveFaultCount != 0)
+            {
+                LogShimA(
+                    LogLevel::Info,
+                    "autosave",
+                    "Clearing SaveGame fault stand-down (%ld prior faults) on explicit re-enable",
+                    g_saveFaultCount);
+            }
+            g_saveDisabledForProcess = false;
+            g_saveFaultCount = 0;
             ResetMissionState();
         }
         else if (g_missionActive && previousIntervalMs != g_config.intervalMs)
@@ -832,10 +926,11 @@ namespace BZROpenShim
 
     void AutoSaveTick()
     {
-        if (!g_config.enabled || !g_nativeSaveGame)
+        if (!g_config.enabled || !g_nativeSaveGame || g_saveDisabledForProcess)
             return;
 
-        if (!IsSinglePlayerMissionActive())
+        const AutoSaveGate::ObservedState gateState = ObserveState();
+        if (!IsSinglePlayerMissionActive(gateState))
         {
             if (g_missionActive)
                 LogShimA(LogLevel::Debug, "autosave", "Single-player mission ended; timer reset");
@@ -854,49 +949,62 @@ namespace BZROpenShim
                 "autosave",
                 "Single-player mission detected; first autosave eligible in %llu ms",
                 g_config.initialDelayMs);
+            // Pair every "mission detected" with what convinced it, so a log
+            // from a repro says which globals the gate believed.
+            LogGateSnapshot(LogLevel::Debug, "Gate state at mission detect:", gateState);
             return;
         }
 
         if (ObserveExternalAutoSave(now) || now < g_nextSaveTick)
             return;
 
-        // Keep the deadline expired while paused/in shell UI. The first normal
-        // gameplay update after the unsafe state clears performs the save.
-        char unsafeReason[64] = {};
-        if (IsUnsafeUiStateWithReason(unsafeReason, sizeof(unsafeReason)))
+        // Keep the deadline expired while paused/in shell UI or after a fault.
+        // The first normal gameplay update once the gate clears saves.
+        const AutoSaveGate::GateResult gate = AutoSaveGate::Evaluate(gateState);
+        if (!gate.MaySave())
         {
-            static ULONGLONG s_lastUnsafeLogTick = 0;
-            static char s_lastUnsafeReason[64] = {};
-            const bool reasonChanged = strncmp(s_lastUnsafeReason, unsafeReason, sizeof(s_lastUnsafeReason)) != 0;
-            const bool intervalElapsed = now - s_lastUnsafeLogTick >= 5000ULL;
+            static ULONGLONG s_lastDeferLogTick = 0;
+            static const char* s_lastDeferReason = nullptr;
+            const bool reasonChanged = s_lastDeferReason != gate.reason;
+            const bool intervalElapsed = now - s_lastDeferLogTick >= 5000ULL;
             if (reasonChanged || intervalElapsed)
             {
-                const bool editing = IsTerrainEditActive();
                 LogShimA(
                     LogLevel::Debug,
                     "autosave",
-                    "Deferring autosave: %s (terrainEdit=%u wrapperActive readout pending)",
-                    unsafeReason[0] ? unsafeReason : "unknown",
-                    editing ? 1u : 0u);
-                s_lastUnsafeLogTick = now;
-                (void)strncpy_s(s_lastUnsafeReason, sizeof(s_lastUnsafeReason), unsafeReason, _TRUNCATE);
+                    "Deferring autosave (%s): %s (terrainEdit=%u)",
+                    AutoSaveGate::DescribeDecision(gate.decision),
+                    gate.reason,
+                    IsTerrainEditActive() ? 1u : 0u);
+                s_lastDeferLogTick = now;
+                s_lastDeferReason = gate.reason;
             }
             return;
         }
 
         const ULONGLONG base = GetTickCount64();
-        g_nextSaveTick = base + (PerformAutoSave() ? g_config.intervalMs : g_config.retryMs);
+        g_nextSaveTick = base + (PerformAutoSave(gateState) ? g_config.intervalMs : g_config.retryMs);
     }
 
     bool TriggerAutoSaveNow()
     {
-        if (!g_config.enabled || !g_nativeSaveGame ||
-            !IsSinglePlayerMissionActive() || IsUnsafeUiState())
+        if (!g_config.enabled || !g_nativeSaveGame)
+            return false;
+
+        const AutoSaveGate::ObservedState gateState = ObserveState();
+        const AutoSaveGate::GateResult gate = AutoSaveGate::Evaluate(gateState);
+        if (!gate.MaySave())
         {
+            LogShimA(
+                LogLevel::Info,
+                "autosave",
+                "Manual autosave request refused (%s): %s",
+                AutoSaveGate::DescribeDecision(gate.decision),
+                gate.reason);
             return false;
         }
 
-        const bool saved = PerformAutoSave();
+        const bool saved = PerformAutoSave(gateState);
         const ULONGLONG now = GetTickCount64();
         g_nextSaveTick = now + (saved ? g_config.intervalMs : g_config.retryMs);
         return saved;
