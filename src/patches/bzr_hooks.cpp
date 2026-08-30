@@ -1133,6 +1133,30 @@ namespace BZROpenShim
         // later patch moves it; the design constant above is the fallback for
         // when the rects have not been built yet.
         constexpr uintptr_t kCommandMenuRowRectsAddr = 0x009173E8;
+        // The row rects are the menu's content box; the frame drawn behind it
+        // is a separate sprite and is wider. CommandUI::Render at 0x004A08E0
+        // submits that frame as
+        //   x = bounds.left - (int)(sx * 18)
+        //   w = (int)(((spriteWidth + 110) * sx) / 2)
+        // where bounds.left (0x0260D748, cached by 0x0049F9E0) is the title
+        // row's left, design 10. So the frame starts 8 design units off the
+        // left edge of the screen, and because the +110 bias is not the
+        // matching 8 units on the right, it also runs past the 157-unit row
+        // right edge. BZ 1.5's gauge sat 9 units right of its menu with no
+        // frame to clear, so measuring that same 9 from whichever edge is
+        // further right keeps the stock spacing where the frame is narrow and
+        // stops the block landing on the frame where it is not.
+        //
+        // The frame is only submitted for viewports wider than 400 and only in
+        // the normal menu layout (0x00915567 == 0). The alt layout draws no
+        // frame, and its wider 156-unit rows already come through the live row
+        // rect.
+        constexpr uintptr_t kCommandUiBoundsLeftAddr = 0x0260D748;
+        constexpr uintptr_t kCommandUiUnderlaySpriteIdAddr = 0x009173E4;
+        constexpr uintptr_t kCommandMenuAltLayoutFlagAddr = 0x00915567;
+        constexpr double kCommandUiUnderlayLeftInset = 18.0;
+        constexpr int kCommandUiUnderlayWidthBias = 110;
+        constexpr int kCommandUiUnderlayMinViewportWidth = 400;
         // Stock layout literals from 0x005C6CF0, used to recover the live UI
         // scale from a freshly built stock layout. The engine's own scale
         // globals at 0x02BF041C are transient render state that only holds the
@@ -1533,6 +1557,7 @@ namespace BZROpenShim
         static double g_ScrapPilotHudPlateScaleX = 0.0;
         static double g_ScrapPilotHudPlateScaleY = 0.0;
         static ULONGLONG g_ScrapPilotHudLastRefreshTick = 0;
+        static int g_ScrapPilotHudLoggedAnchorLeft = -1;
         static HudSpriteRectRecord* g_HudSpriteRectTableBase = nullptr;
         static bool g_HudSpriteRectTableDiscoveryAttempted = false;
         static ULONGLONG g_HudSpriteRectTableDiscoveryLastTick = 0;
@@ -12805,16 +12830,88 @@ namespace BZROpenShim
             }
         }
 
+        // Read together so the SEH frame stays in a function that needs no
+        // unwinding.
+        static bool TryReadCommandUiUnderlayGlobals(int& outSpriteId, int& outBoundsLeft)
+        {
+            __try
+            {
+                if (*reinterpret_cast<const char*>(kCommandMenuAltLayoutFlagAddr) != '\0')
+                    return false;
+                outSpriteId = *reinterpret_cast<const int*>(kCommandUiUnderlaySpriteIdAddr);
+                outBoundsLeft = *reinterpret_cast<const int*>(kCommandUiBoundsLeftAddr);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // Right edge of the command menu's frame sprite, in screen pixels,
+        // rebuilt exactly as 0x004A08E0 submits it. The sprite rect table this
+        // reads is the same one FUN_0068F090 indexes, so the width is the one
+        // the engine will use.
+        static bool TryGetCommandUiUnderlayRightEdge(int viewportWidth, double scale, int& outRight)
+        {
+            if (viewportWidth <= kCommandUiUnderlayMinViewportWidth)
+                return false;
+
+            int spriteId = 0;
+            int boundsLeft = 0;
+            if (!TryReadCommandUiUnderlayGlobals(spriteId, boundsLeft))
+                return false;
+            // Zero until CommandUI::Render has picked an underlay for the
+            // current state.
+            if (spriteId <= 0)
+                return false;
+
+            HudSpriteRectRecord record = {};
+            if (!TryGetHudSpriteCurrentRecord(spriteId, record) || record.w <= 0)
+                return false;
+
+            const int left =
+                boundsLeft - static_cast<int>(scale * kCommandUiUnderlayLeftInset);
+            const int width = static_cast<int>(
+                ((record.w + kCommandUiUnderlayWidthBias) * scale) / 2.0);
+            if (width <= 0)
+                return false;
+
+            const int right = left + width;
+            if (right >= viewportWidth)
+                return false;
+
+            outRight = right;
+            return true;
+        }
+
         static int GetLegacyScrapPilotHudLeft(double scale)
         {
             int viewportWidth = 0;
             int viewportHeight = 0;
-            int commandMenuRight = 0;
+            int rowRight = 0;
             if (TryReadScrapPilotHudViewport(viewportWidth, viewportHeight) &&
-                TryGetCommandMenuRightEdge(viewportWidth, commandMenuRight))
+                TryGetCommandMenuRightEdge(viewportWidth, rowRight))
             {
-                return commandMenuRight + 1 +
-                       static_cast<int>(std::lround(kLegacyScrapPilotHudDesignGap * scale));
+                int underlayRight = 0;
+                const bool haveUnderlay =
+                    TryGetCommandUiUnderlayRightEdge(viewportWidth, scale, underlayRight);
+                const int menuRight =
+                    (haveUnderlay && underlayRight > rowRight) ? underlayRight : rowRight;
+                const int left = menuRight + 1 +
+                    static_cast<int>(std::lround(kLegacyScrapPilotHudDesignGap * scale));
+
+                // Only on a real move: the layout tick runs five times a second.
+                if (g_ScrapPilotHudLoggedAnchorLeft != left)
+                {
+                    g_ScrapPilotHudLoggedAnchorLeft = left;
+                    Log(L"[HUD] Scrap/pilot anchor left=%d scale=%.3f rows-right=%d frame-right=%d\n",
+                        left,
+                        scale,
+                        rowRight,
+                        haveUnderlay ? underlayRight : -1);
+                }
+                return left;
             }
             return static_cast<int>(std::lround(kLegacyScrapPilotHudDesignLeft * scale));
         }
