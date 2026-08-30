@@ -192,3 +192,20 @@ endif()
 add_test(NAME render_profile_tests COMMAND render_profile_tests)
 add_test(NAME request_apply_tracker_tests COMMAND request_apply_tracker_tests)
 add_test(NAME render_profile_resources_tests COMMAND render_profile_resources_tests)
+
+# CLI parser parity defect model (PR #69). This test is engine-independent:
+# it models Redux's strtok comma defect and the pristine-snapshot repair
+# without linking any engine patch implementation. Its primary compatibility
+# target is the canonical "-shellmap:216,178" form; equals/quoted/whitespace
+# tolerant forms are exercised as optional OpenShim extensions, not as proven
+# 1.5 parity, per the RE report's evidence grading.
+add_executable(cli_parser_tests
+    cli_parser_tests.cpp
+)
+target_compile_features(cli_parser_tests PRIVATE cxx_std_20)
+if(MSVC)
+    target_compile_options(cli_parser_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(cli_parser_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME cli_parser_tests COMMAND cli_parser_tests)

@@ -10,6 +10,7 @@ EXPORTS
     OpenShimGetBzrDistribution
     OpenShimCaptureDeveloperSnapshot
     OpenShimLogDeveloperSnapshot
+    OpenShimResolveLocalFirstPersonEntity
     OpenShimGetRenderApiVersion
     OpenShimRequestRenderProfile
     OpenShimGetUserRenderProfile
