@@ -648,6 +648,13 @@ void __declspec(naked) __cdecl Trampoline_MapListFixSupport1()
 // Safe helper called from asm Ã¢â‚¬â€ SEH-protected so we never crash
 static void __cdecl SafeCapture_MapSorting(void* frame_ebp)
 {
+    // The frame walk below is validated only for GOG.  Steam publishes
+    // g_EnableScrollRestore=false during pointer resolution; return before
+    // dereferencing any GOG stack-frame candidates so even a handled
+    // first-chance access violation cannot perturb frontend startup.
+    if (!g_EnableScrollRestore)
+        return;
+
     __try
     {
         auto base = reinterpret_cast<uint8_t*>(frame_ebp);
