@@ -1,0 +1,152 @@
+{
+  "purpose": "OpenShim runtime-constructible decorative UI tile kit",
+  "policy": "Visible pixels are crops from supplied stock Redux UI assets; no generated line art, recoloring, smoothing, or invented UI style.",
+  "game_facing_name_rule": "Every supplied PNG stem is <= 8 characters.",
+  "sources": {
+    "blackui.png": {
+      "sha256": "2c30ed94c674763db167824579d771eba9ce91997bd67b0c00468c2c6f38ec38",
+      "size": [
+        4,
+        4
+      ]
+    },
+    "newon.png": {
+      "sha256": "fa1dd34f8789a1c6f1e25e6f829012fcc97d2414cb7b28bfdbc29902cf3bea64",
+      "size": [
+        185,
+        59
+      ]
+    },
+    "mp1on.png": {
+      "sha256": "43bd7be2f2ad5fca84f7010fce815676aa1026d19b6c7cfcbf60d0992993dabe",
+      "size": [
+        185,
+        72
+      ]
+    }
+  },
+  "assets": {
+    "uibg.png": {
+      "source": "blackui.png",
+      "crop": [
+        0,
+        0,
+        4,
+        4
+      ],
+      "flat_fill_made_transparent": false
+    },
+    "uitl.png": {
+      "source": "newon.png",
+      "crop": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "flat_fill_made_transparent": true
+    },
+    "uitr.png": {
+      "source": "newon.png",
+      "crop": [
+        153,
+        0,
+        185,
+        32
+      ],
+      "flat_fill_made_transparent": true
+    },
+    "uibl.png": {
+      "source": "newon.png",
+      "crop": [
+        0,
+        27,
+        32,
+        59
+      ],
+      "flat_fill_made_transparent": true
+    },
+    "uibr.png": {
+      "source": "newon.png",
+      "crop": [
+        153,
+        27,
+        185,
+        59
+      ],
+      "flat_fill_made_transparent": true
+    },
+    "uitop.png": {
+      "source": "newon.png",
+      "crop": [
+        32,
+        0,
+        153,
+        8
+      ],
+      "flat_fill_made_transparent": true
+    },
+    "uibot.png": {
+      "source": "newon.png",
+      "crop": [
+        32,
+        51,
+        153,
+        59
+      ],
+      "flat_fill_made_transparent": true
+    },
+    "uileft.png": {
+      "source": "newon.png",
+      "crop": [
+        0,
+        16,
+        8,
+        43
+      ],
+      "flat_fill_made_transparent": true
+    },
+    "uiright.png": {
+      "source": "newon.png",
+      "crop": [
+        177,
+        32,
+        185,
+        43
+      ],
+      "flat_fill_made_transparent": true
+    },
+    "uitrch.png": {
+      "source": "mp1on.png",
+      "crop": [
+        108,
+        0,
+        185,
+        72
+      ],
+      "flat_fill_made_transparent": true
+    },
+    "uiblch.png": {
+      "source": "mp1on.png",
+      "crop": [
+        0,
+        36,
+        77,
+        72
+      ],
+      "flat_fill_made_transparent": true
+    }
+  },
+  "panel_geometry": {
+    "corner_px": 32,
+    "edge_px": 8,
+    "tech_top_right_native": [
+      77,
+      72
+    ],
+    "tech_bottom_left_native": [
+      77,
+      36
+    ]
+  }
+}
