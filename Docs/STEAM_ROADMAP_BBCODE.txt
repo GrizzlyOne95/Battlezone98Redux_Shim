@@ -434,7 +434,7 @@ The original community tracker also contains a number of feature requests that a
 [h3]Terrain / Rendering[/h3]
 
 [list]
-[*] [b]TRN tile-blending toggle[/b] - make legacy/experimental tile blending explicitly data-driven instead of shader-build-specific.
+[*] [b]TRN tile-blending toggle[/b] - an initial OpenShim implementation now exposes [OpenShim] TerrainTileBlend=0..1 per TRN by remapping Redux's shared terrain seam-alpha mask (1 is stock, 0 is hard-edged). Mapping/resolver tests and the new module compile pass; live visual acceptance and an equivalent Steam mission-lifecycle seam remain before release. Baked atlas transition artwork is a separate renderer concern and is intentionally unchanged.
 [*] [b]Center-based terrain tile scaling[/b] - optional TRN behavior that scales a tile around its center rather than its southwest corner.
 [*] [b]Restore animated terrain waves / Ctrl+Shift waves[/b] - recreate the legacy animated-tile/wave behavior through the Redux terrain/Ogre path.
 [*] [b]Restore additional legacy TRN lighting parameters[/b] - investigate parameters that no longer influence Redux rendering, including vehicle/car shadow-related settings.
