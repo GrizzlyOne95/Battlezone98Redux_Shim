@@ -19,43 +19,39 @@ namespace BZROpenShim
         UiDecorRect rect = {};
     };
 
-    enum UiDecorPanelFlags : uint32_t
-    {
-        UI_DECOR_FILL = 1u << 0,
-        UI_DECOR_TECH = 1u << 1,
-        UI_DECOR_DEFAULT = UI_DECOR_FILL | UI_DECOR_TECH,
-    };
-
     struct UiDecorPanelDesc
     {
         UiDecorRect rect = {};
-        uint32_t flags = UI_DECOR_DEFAULT;
     };
 
-    // Fill + four corners + four edges + two asymmetric stock ornaments.
-    constexpr size_t kUiDecorMaxPanelPieces = 11;
-    constexpr size_t kUiDecorPanelsPerOptionsPage = 3;
+    // A panel is an outline: four border bars, no fill. The bars carry a flat
+    // single-colour texture, so nothing in the art can be distorted by the
+    // stretch to the bar rect, and no hit-testable surface is laid underneath
+    // the row buttons.
+    constexpr size_t kUiDecorMaxPanelPieces = 4;
+    // Only the toolbar and the row grid are framed. The header sits in the
+    // band where the stock screen's corner brackets intrude (measured: the
+    // clear span at y=160 is x 236..1203), so a frame drawn around it would
+    // cross the stock art.
+    constexpr size_t kUiDecorPanelsPerOptionsPage = 2;
     constexpr size_t kUiDecorMaxOptionsPagePieces =
         kUiDecorMaxPanelPieces * kUiDecorPanelsPerOptionsPage;
 
-    // Native size of the two stock ornaments the content panel carries. Rows
-    // must clear these bands or the diagonal art crosses the row text.
-    constexpr float kUiDecorTechTopRightHeight = 72.0f;
-    constexpr float kUiDecorTechBottomLeftHeight = 36.0f;
+    // Thickness of a panel's border bar, and the air between that border and
+    // the first/last row inside it.
+    constexpr float kUiDecorBorderThickness = 3.0f;
+    constexpr float kUiDecorPanelPadding = 16.0f;
 
     size_t BuildUiDecorPanel(const UiDecorPanelDesc& desc,
                              UiDecorPiece* outPieces,
                              size_t outCapacity);
 
-    size_t BuildUiDecorHeader(const UiDecorRect& rect,
-                              UiDecorPiece* outPieces,
-                              size_t outCapacity);
-
     // Shared 1440x1080 logical-space layout for the native Settings and
-    // Keybind pages. Both pages are one 1030 px wide column of three stacked
-    // panels: header (title + two wrapped status lines + one context line),
-    // toolbar, and the row grid. Rows begin below the 72 px upper ornament and
-    // finish above the 36 px lower ornament so decoration never crosses text.
+    // Keybind pages. Both pages are a centred stack of three bands: a header
+    // (title, two wrapped status lines, two wrapped context lines), a toolbar,
+    // and the row grid. The header is the narrower of the two column widths
+    // because the stock frame pinches that band; the toolbar and row grid use
+    // the full clear width below it. All three share the 720 px centre line.
     struct UiOptionsPageLayout
     {
         UiDecorRect topMask = {};
@@ -66,9 +62,10 @@ namespace BZROpenShim
         UiDecorRect title = {};
         UiDecorRect statusLine1 = {};
         UiDecorRect statusLine2 = {};
-        UiDecorRect contextLine = {};
-        // Widest text a header line may render before it has to wrap or
-        // ellipsize; the labels themselves are the full interior width.
+        UiDecorRect contextLine1 = {};
+        UiDecorRect contextLine2 = {};
+        // Widest text a header line may render before it has to wrap; every
+        // header line is this wide, so both wrapped pairs break identically.
         float headerTextWidth = 0.0f;
         float toolbarY = 0.0f;
         float toolbarHeight = 0.0f;
@@ -90,6 +87,12 @@ namespace BZROpenShim
     };
 
     UiOptionsPageLayout BuildUiOptionsPageLayout(size_t rowsPerColumn);
+
+    // Fills outPanels with the panels that carry a drawn frame, in the order
+    // they should be created. Returns the number written.
+    size_t BuildUiOptionsPagePanels(const UiOptionsPageLayout& layout,
+                                    UiDecorPanelDesc* outPanels,
+                                    size_t outCapacity);
 
     // Places a toolbar row so no page has to carry hand-tuned x coordinates.
     // The first `rightAlignedFrom` entries pack left to right from the toolbar's

@@ -4,49 +4,53 @@ namespace BZROpenShim
 {
     namespace
     {
-        constexpr float kCorner = 32.0f;
-        constexpr float kEdge = 8.0f;
-        constexpr float kTechRightWidth = 77.0f;
-        constexpr float kTechRightHeight = kUiDecorTechTopRightHeight;
-        constexpr float kTechLeftWidth = 77.0f;
-        constexpr float kTechLeftHeight = kUiDecorTechBottomLeftHeight;
+        // Flat single-colour tiles; see resources/ui/custom_widgets/mkui.py.
+        constexpr const char* kLineTexture = "uiline.png";
 
-        // One 1030 px column shared by both pages, so the header, toolbar and
-        // row grid line up as a single panel stack instead of three unrelated
-        // rectangles.
-        constexpr float kPanelX = 205.0f;
-        constexpr float kPanelWidth = 1030.0f;
-        // Text sits a corner tile in from the panel edge; the row plates, which
-        // carry their own border art, only need to clear the 8 px edge run.
-        constexpr float kTextInset = kCorner;
+        // Both pages are centred on the 1440 px logical screen.
+        constexpr float kPageCenterX = 720.0f;
+
+        // Two column widths, both centred. The header band overlaps the stock
+        // frame's corner brackets -- measured from keyOptions_center.png, the
+        // clear span is only x 236..1203 at y=160 -- so header text is held to
+        // the narrow column. Below y=280 the frame opens up to x 71..1368, so
+        // the toolbar and row grid use the wide column.
+        constexpr float kHeaderWidth = 1030.0f;
+        constexpr float kBodyWidth = 1140.0f;
+        constexpr float kHeaderX = kPageCenterX - kHeaderWidth * 0.5f;
+        constexpr float kBodyX = kPageCenterX - kBodyWidth * 0.5f;
+
+        // Header text is inset far enough to clear the brackets on both sides.
+        constexpr float kHeaderTextInset = 32.0f;
         constexpr float kPlateInset = 15.0f;
         constexpr float kColumnGap = 20.0f;
 
         constexpr float kHeaderY = 132.0f;
-        constexpr float kHeaderHeight = 152.0f;
-        constexpr float kToolbarPanelY = 296.0f;
+        constexpr float kHeaderHeight = 184.0f;
+        constexpr float kToolbarPanelY = 328.0f;
         constexpr float kToolbarPanelHeight = 64.0f;
-        constexpr float kContentTop = 372.0f;
+        constexpr float kContentTop = 404.0f;
 
-        // Header lines are sized for the stock UI face, which renders about
-        // 26 logical px tall: a 22 px line box crowds the glyphs against the
-        // next line and against the panel border.
+        // The stock face renders about 26 logical px tall; a 22 px line box
+        // crowds the glyphs against the next line.
         constexpr float kHeaderLineHeight = 28.0f;
-        constexpr float kTitleHeight = 30.0f;
+        constexpr float kTitleHeight = 32.0f;
+        // Offsets from kHeaderY. Title, then the hover-description pair, then
+        // the static help pair, with a gap between the two pairs.
+        constexpr float kTitleOffset = 12.0f;
+        constexpr float kStatusOffset = 48.0f;
+        constexpr float kContextOffset = 110.0f;
 
         constexpr float kRowPitch = 42.0f;
         constexpr float kRowHeight = 36.0f;
-        constexpr float kRowLabelWidth = 270.0f;
-        constexpr float kRowValueOffsetX = 280.0f;
-        constexpr float kRowValueWidth = 200.0f;
+        // The widest keybind action ("Toggle Map Elevation") and the widest
+        // binding ("Tab + Ctrl | EditMode") both have to render un-truncated,
+        // which is what the wide column buys.
+        constexpr float kRowLabelWidth = 320.0f;
+        constexpr float kRowValueOffsetX = 325.0f;
+        constexpr float kRowValueWidth = 210.0f;
         constexpr float kRowPlateInsetX = 10.0f;
         constexpr float kRowPlateWidth = kRowValueOffsetX + kRowValueWidth + kRowPlateInsetX;
-
-        // Clearance reserved inside the content panel for the two stock
-        // ornaments, plus a little air so the first row is not welded to the
-        // diagonal art.
-        constexpr float kTopOrnamentClearance = kUiDecorTechTopRightHeight + 4.0f;
-        constexpr float kBottomOrnamentClearance = kUiDecorTechBottomLeftHeight + 12.0f;
 
         bool Push(UiDecorPiece*& cursor,
                   size_t& remaining,
@@ -71,83 +75,57 @@ namespace BZROpenShim
                              UiDecorPiece* outPieces,
                              size_t outCapacity)
     {
-        if (!outPieces || desc.rect.width < kCorner * 2.0f ||
-            desc.rect.height < kCorner * 2.0f)
+        const float thickness = kUiDecorBorderThickness;
+        if (!outPieces || outCapacity < kUiDecorMaxPanelPieces ||
+            desc.rect.width < thickness * 4.0f || desc.rect.height < thickness * 4.0f)
         {
             return 0;
         }
-
-        const size_t required = 8u +
-            ((desc.flags & UI_DECOR_FILL) ? 1u : 0u) +
-            ((desc.flags & UI_DECOR_TECH) ? 2u : 0u);
-        if (outCapacity < required)
-            return 0;
 
         UiDecorPiece* cursor = outPieces;
         size_t remaining = outCapacity;
         const float x = desc.rect.x;
         const float y = desc.rect.y;
-        const float width = desc.rect.width;
-        const float height = desc.rect.height;
+        const float w = desc.rect.width;
+        const float h = desc.rect.height;
 
-        if (desc.flags & UI_DECOR_FILL)
-            Push(cursor, remaining, "uibg.png", x, y, width, height);
+        // Top and bottom run the full width; the side bars sit between them so
+        // the four bars meet at the corners without overlapping.
+        Push(cursor, remaining, kLineTexture, x, y, w, thickness);
+        Push(cursor, remaining, kLineTexture, x, y + h - thickness, w, thickness);
+        Push(cursor, remaining, kLineTexture, x, y + thickness,
+             thickness, h - 2.0f * thickness);
+        Push(cursor, remaining, kLineTexture, x + w - thickness, y + thickness,
+             thickness, h - 2.0f * thickness);
 
-        Push(cursor, remaining, "uitl.png", x, y, kCorner, kCorner);
-        Push(cursor, remaining, "uitr.png", x + width - kCorner, y, kCorner, kCorner);
-        Push(cursor, remaining, "uibl.png", x, y + height - kCorner, kCorner, kCorner);
-        Push(cursor, remaining, "uibr.png", x + width - kCorner, y + height - kCorner, kCorner, kCorner);
-        Push(cursor, remaining, "uitop.png", x + kCorner, y, width - 2.0f * kCorner, kEdge);
-        Push(cursor, remaining, "uibot.png", x + kCorner, y + height - kEdge,
-             width - 2.0f * kCorner, kEdge);
-        Push(cursor, remaining, "uileft.png", x, y + kCorner, kEdge,
-             height - 2.0f * kCorner);
-        Push(cursor, remaining, "uiright.png", x + width - kEdge, y + kCorner,
-             kEdge, height - 2.0f * kCorner);
-
-        if (desc.flags & UI_DECOR_TECH)
-        {
-            Push(cursor, remaining, "uitrch.png", x + width - kTechRightWidth, y,
-                 kTechRightWidth, kTechRightHeight);
-            Push(cursor, remaining, "uiblch.png", x, y + height - kTechLeftHeight,
-                 kTechLeftWidth, kTechLeftHeight);
-        }
-
-        return required;
-    }
-
-    size_t BuildUiDecorHeader(const UiDecorRect& rect,
-                              UiDecorPiece* outPieces,
-                              size_t outCapacity)
-    {
-        UiDecorPanelDesc desc = {};
-        desc.rect = rect;
-        desc.flags = UI_DECOR_FILL;
-        return BuildUiDecorPanel(desc, outPieces, outCapacity);
+        return kUiDecorMaxPanelPieces;
     }
 
     UiOptionsPageLayout BuildUiOptionsPageLayout(size_t rowsPerColumn)
     {
         UiOptionsPageLayout layout = {};
 
-        layout.headerPanel = { kPanelX, kHeaderY, kPanelWidth, kHeaderHeight };
-        layout.toolbarPanel = { kPanelX, kToolbarPanelY, kPanelWidth, kToolbarPanelHeight };
+        layout.headerPanel = { kHeaderX, kHeaderY, kHeaderWidth, kHeaderHeight };
+        layout.toolbarPanel = { kBodyX, kToolbarPanelY, kBodyWidth, kToolbarPanelHeight };
 
-        const float textX = kPanelX + kTextInset;
-        const float textWidth = kPanelWidth - 2.0f * kTextInset;
+        const float textX = kHeaderX + kHeaderTextInset;
+        const float textWidth = kHeaderWidth - 2.0f * kHeaderTextInset;
         layout.headerTextWidth = textWidth;
-        layout.title = { textX, kHeaderY + 12.0f, textWidth, kTitleHeight };
-        layout.statusLine1 = { textX, kHeaderY + 52.0f, textWidth, kHeaderLineHeight };
-        layout.statusLine2 = { textX, kHeaderY + 84.0f, textWidth, kHeaderLineHeight };
-        layout.contextLine = { textX, kHeaderY + 116.0f, textWidth, kHeaderLineHeight };
+        layout.title = { textX, kHeaderY + kTitleOffset, textWidth, kTitleHeight };
+        layout.statusLine1 = { textX, kHeaderY + kStatusOffset, textWidth, kHeaderLineHeight };
+        layout.statusLine2 = { textX, kHeaderY + kStatusOffset + kHeaderLineHeight,
+                               textWidth, kHeaderLineHeight };
+        layout.contextLine1 = { textX, kHeaderY + kContextOffset, textWidth, kHeaderLineHeight };
+        layout.contextLine2 = { textX, kHeaderY + kContextOffset + kHeaderLineHeight,
+                                textWidth, kHeaderLineHeight };
 
         layout.toolbarHeight = 42.0f;
         layout.toolbarY = kToolbarPanelY + (kToolbarPanelHeight - layout.toolbarHeight) * 0.5f;
-        layout.toolbarLeftX = kPanelX + 25.0f;
-        layout.toolbarRightX = kPanelX + kPanelWidth - 25.0f;
+        layout.toolbarLeftX = kBodyX + 25.0f;
+        layout.toolbarRightX = kBodyX + kBodyWidth - 25.0f;
         layout.toolbarGap = 10.0f;
 
-        layout.rowLeftX = kPanelX + kPlateInset + kRowPlateInsetX;
+        layout.rowLeftX = kBodyX + kPlateInset + kRowPlateInsetX;
         layout.rowRightX = layout.rowLeftX + kRowPlateWidth + kColumnGap;
         layout.rowPitch = kRowPitch;
         layout.rowHeight = kRowHeight;
@@ -162,30 +140,45 @@ namespace BZROpenShim
         const float rowBlockHeight = rowsPerColumn == 0
             ? 0.0f
             : static_cast<float>(rowsPerColumn - 1) * layout.rowPitch + layout.rowHeight;
-        layout.rowStartY = kContentTop + kTopOrnamentClearance;
+        layout.rowStartY = kContentTop + kUiDecorPanelPadding;
         layout.contentPanel = {
-            kPanelX,
+            kBodyX,
             kContentTop,
-            kPanelWidth,
-            kTopOrnamentClearance + rowBlockHeight + kBottomOrnamentClearance
+            kBodyWidth,
+            kUiDecorPanelPadding + rowBlockHeight + kUiDecorPanelPadding
         };
 
-        // The masks blank the stock page underneath; they run a little wider and
-        // taller than the panels so no unmasked seam shows at a panel edge.
+        // The masks blank the stock page underneath. They span the wider of the
+        // two columns and run a little past every panel edge so no lit strip of
+        // the stock screen shows through at a seam.
         constexpr float kMaskBleed = 16.0f;
+        const float maskX = kBodyX - kMaskBleed;
+        const float maskWidth = kBodyWidth + 2.0f * kMaskBleed;
         layout.topMask = {
-            kPanelX - kMaskBleed,
+            maskX,
             kHeaderY - kMaskBleed,
-            kPanelWidth + 2.0f * kMaskBleed,
+            maskWidth,
             kToolbarPanelY + kToolbarPanelHeight + kMaskBleed - (kHeaderY - kMaskBleed)
         };
         layout.contentMask = {
-            kPanelX - kMaskBleed,
+            maskX,
             kContentTop - kMaskBleed,
-            kPanelWidth + 2.0f * kMaskBleed,
+            maskWidth,
             layout.contentPanel.height + 2.0f * kMaskBleed
         };
         return layout;
+    }
+
+    size_t BuildUiOptionsPagePanels(const UiOptionsPageLayout& layout,
+                                    UiDecorPanelDesc* outPanels,
+                                    size_t outCapacity)
+    {
+        if (!outPanels || outCapacity < kUiDecorPanelsPerOptionsPage)
+            return 0;
+
+        outPanels[0].rect = layout.toolbarPanel;
+        outPanels[1].rect = layout.contentPanel;
+        return kUiDecorPanelsPerOptionsPage;
     }
 
     size_t LayoutUiToolbarRow(const UiOptionsPageLayout& layout,
