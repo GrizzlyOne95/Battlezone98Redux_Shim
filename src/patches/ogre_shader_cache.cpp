@@ -36,6 +36,7 @@
 
 #include "ogre_shader_cache.h"
 #include "shim_log.h"
+#include "ui_file_scan_hooks.h"
 
 #include <Windows.h>
 
@@ -136,8 +137,13 @@ namespace BZROpenShim
         // game's archives and never change between sessions; mod shaders are
         // the ones users edit, and stale microcode after an edit would be
         // silently wrong, so their fingerprint keys the cache file.
+        // This scan is suppressed from the generic UiPerf file-scan counters:
+        // it is reported separately as [UIPERF][SHADER] cache_init and must not
+        // be misclassified as addon/Workshop menu scanning.
         static uint64_t ComputeShaderSourceFingerprint()
         {
+            BZROpenShim::UiFileScan::SetSuppress(true);
+            struct SuppressReset { ~SuppressReset() { BZROpenShim::UiFileScan::SetSuppress(false); } } _reset;
             uint64_t hash = 1469598103934665603ull;
             const auto mix = [&hash](const void* data, size_t size)
             {
@@ -572,7 +578,15 @@ namespace BZROpenShim
             return;
         if (!g_InitDone.load(std::memory_order_relaxed))
         {
+            const uint64_t t0 = GetTickCount64();
             TryInitLocked();
+            // UiPerf: record cache init cost (includes file fingerprint scan).
+            if (g_InitDone.load(std::memory_order_relaxed))
+            {
+                const double ms = static_cast<double>(GetTickCount64() - t0);
+                LogShimA(LogLevel::Info, "shadercache",
+                    "[UIPERF][SHADER] cache_init elapsed=%.2fms", ms);
+            }
             return;
         }
         // Covers shell-only sessions where the sim tick never runs: the

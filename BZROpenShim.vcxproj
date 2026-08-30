@@ -143,6 +143,8 @@
      <ClCompile Include="src\patches\openshim_ini.cpp" />
     <ClCompile Include="src\patches\openshim_preset_migration.cpp" />
     <ClCompile Include="src\patches\openshim_env_config.cpp" />
+    <ClCompile Include="src\patches\openshim_update_manifest.cpp" />
+    <ClCompile Include="src\patches\openshim_updater.cpp" />
     <ClCompile Include="src\patches\bzr_options_ui.cpp" />
     <ClCompile Include="src\patches\ogre_shader_cache.cpp" />
     <ClCompile Include="src\patches\ogre_enhanced_light_selection.cpp" />
@@ -153,6 +155,7 @@
     <ClCompile Include="src\patches\sun_flash.cpp" />
     <ClCompile Include="src\patches\terrain_proxy.cpp" />
     <ClCompile Include="src\patches\terrain_semantic.cpp" />
+    <ClCompile Include="src\patches\terrain_tile_blend.cpp" />
     <ClCompile Include="src\engine\crash_logger.cpp" />
     <ClCompile Include="src\engine\shim_log.cpp" />
     <ClCompile Include="src\engine\enhanced_light_selection.cpp" />
@@ -165,6 +168,9 @@
     <ClCompile Include="src\engine\native_ui.cpp" />
     <ClCompile Include="src\patches\trampolines.cpp" />
     <ClCompile Include="src\patches\netcode_hooks.cpp" />
+    <ClCompile Include="src\patches\ui_performance.cpp" />
+    <ClCompile Include="src\patches\ui_performance_hooks.cpp" />
+    <ClCompile Include="src\patches\ui_file_scan_hooks.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
@@ -172,6 +178,7 @@
     <ClInclude Include="include\autosave_gate.h" />
     <ClInclude Include="include\bzr_hooks.h" />
     <ClInclude Include="include\bzr_options_ui.h" />
+    <ClInclude Include="include\terrain_tile_blend.h" />
     <ClInclude Include="include\render_profile.h" />
     <ClInclude Include="include\backend_selection.h" />
     <ClInclude Include="include\render_profile_runtime.h" />
@@ -218,6 +225,11 @@
     <ClInclude Include="include\openshim_ini.h" />
     <ClInclude Include="include\openshim_preset_migration.h" />
     <ClInclude Include="include\openshim_env_config.h" />
+    <ClInclude Include="include\openshim_update_manifest.h" />
+    <ClInclude Include="include\openshim_updater.h" />
+    <ClInclude Include="include\ui_performance.h" />
+    <ClInclude Include="include\ui_performance_hooks.h" />
+    <ClInclude Include="include\ui_file_scan_hooks.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="src\engine\version.rc" />
