@@ -91,6 +91,7 @@ scripts/*
 !scripts/run_ogre_profiler_tests.ps1
 !scripts/run_ini_tests.ps1
 !scripts/run_render_profile_tests.ps1
+!scripts/run_ui_decor_tests.ps1
 !scripts/Invoke-SunFlashTrace.ps1
 !scripts/render_profile_matrix.ps1
 !scripts/Deploy-OpenShim.ps1
