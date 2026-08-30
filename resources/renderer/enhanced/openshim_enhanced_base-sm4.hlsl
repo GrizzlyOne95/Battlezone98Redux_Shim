@@ -449,6 +449,13 @@ void compute_enhanced_atmosphere(
     sunScatter *= fogFactor;
 
     float3 authoredFog = saturate(fogColour);
+#if OSE_LINEAR_LIGHT_ACTIVE
+    // Ogre supplies the mission-authored fog colour in display-referred RGB.
+    // Enhanced lighting composites in linear space and encodes once at output,
+    // so decode the constant here just like colour textures. Without this, the
+    // final encode brightens Mars' rust fog into a pale cream.
+    authoredFog = srgb_to_linear(authoredFog);
+#endif
     float3 ambientTarget = saturate(authoredFog + sceneAmbient * 0.35);
     atmosphereColour = lerp(authoredFog, ambientTarget, OSE_ATMOS_AMBIENT_TINT_STRENGTH);
     float sunBlend = saturate(sunScatter * OSE_ATMOS_SUN_SCATTER_STRENGTH);
