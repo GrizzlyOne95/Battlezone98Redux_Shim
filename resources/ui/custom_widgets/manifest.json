@@ -1,0 +1,51 @@
+{
+  "name": "OpenShim options-page tile kit",
+  "generator": "mkui.py",
+  "consumer": "src/patches/bzr_options_ui.cpp",
+  "deploy": {
+    "script": "scripts/Deploy-OpenShim.ps1",
+    "target": "BZ_ASSETS_CORE/common/ui/CustomWidgets",
+    "verified": "sha256"
+  },
+  "palette_source": {
+    "note": "Colours sampled from shipped Redux art; no stock pixels are copied.",
+    "files": [
+      "common/ui/newon.png",
+      "common/ui/mp1on.png",
+      "common/ui/mpcron.png",
+      "common/ui/mpcrclk.png",
+      "common/ui/Options/keyOptions_center.png"
+    ]
+  },
+  "constraint": "Flat single-colour fills only. The engine stretches a widget texture to the widget rect, so any baked-in border or motif is distorted by the stretch.",
+  "tiles": [
+    {
+      "file": "uiline.png",
+      "size": [8, 8],
+      "rgb": [0, 127, 0],
+      "role": "panel border bar",
+      "drawn_by": "BuildUiDecorPanel"
+    },
+    {
+      "file": "uiplate.png",
+      "size": [8, 8],
+      "rgb": [0, 43, 0],
+      "role": "row label field",
+      "drawn_by": "CreateInputBindingUiPlate"
+    },
+    {
+      "file": "uibtn.png",
+      "size": [8, 8],
+      "rgb": [0, 84, 0],
+      "role": "value and toolbar button, idle",
+      "drawn_by": "CreateInputBindingUiButton"
+    },
+    {
+      "file": "uibtnhv.png",
+      "size": [8, 8],
+      "rgb": [0, 127, 0],
+      "role": "value and toolbar button, hover and pressed",
+      "drawn_by": "CreateInputBindingUiButton"
+    }
+  ]
+}

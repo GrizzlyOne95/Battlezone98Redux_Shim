@@ -44,6 +44,8 @@ $pairs = @(
 # DLL paired with stale Enhanced shaders must fail loudly, not silently.
 $renderSourceDir = Join-Path $repoRoot 'resources\renderer\enhanced'
 $renderTargetDir = Join-Path $GameDir 'openshim\renderer\enhanced'
+$uiSourceDir = Join-Path $repoRoot 'resources\ui\custom_widgets'
+$uiTargetDir = Join-Path $GameDir 'BZ_ASSETS_CORE\common\ui\CustomWidgets'
 
 foreach ($pair in $pairs) {
     if (-not (Test-Path -LiteralPath $pair.Source)) {
@@ -90,6 +92,28 @@ Copy-Item -Path (Join-Path $renderSourceDir '*') -Destination $renderTargetDir -
 $deployedVersion = Get-Content -Raw -LiteralPath (Join-Path $renderTargetDir 'resources.version')
 Write-Host ("renderer resources deployed: {0} files, resources.version={1}" -f
     @((Get-ChildItem -LiteralPath $renderTargetDir).Count, $deployedVersion.Trim()))
+
+# The native Settings/Keybind pages assemble these passive tiles at runtime:
+# one flat fill per surface, in colours sampled from the stock UI art. Keep
+# them with the DLL so a clean install cannot silently fall back to
+# missing-texture panels.
+$uiFiles = @(
+    'uiline.png', 'uiplate.png', 'uibtn.png', 'uibtnhv.png'
+)
+New-Item -ItemType Directory -Force -Path $uiTargetDir | Out-Null
+foreach ($name in $uiFiles) {
+    $source = Join-Path $uiSourceDir $name
+    $target = Join-Path $uiTargetDir $name
+    if (-not (Test-Path -LiteralPath $source)) {
+        throw "Missing OpenShim UI resource: $source"
+    }
+    Copy-Item -LiteralPath $source -Destination $target -Force
+    if ((Get-FileHash -Algorithm SHA256 -LiteralPath $source).Hash -ne
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $target).Hash) {
+        throw "UI resource verification failed: $name"
+    }
+}
+Write-Host ("UI resources deployed: {0} flat tiles" -f $uiFiles.Count)
 
 Write-Host ""
 Write-Host "patches.json verified: all $(@($repoJson.patches).Count + @($repoJson.globals).Count + @($repoJson.static_pointers).Count) declared names present."

@@ -152,6 +152,7 @@
     <ClCompile Include="src\engine\render_profile.cpp" />
     <ClCompile Include="src\engine\backend_selection.cpp" />
     <ClCompile Include="src\engine\render_profile_resources.cpp" />
+    <ClCompile Include="src\engine\ui_decor.cpp" />
     <ClCompile Include="src\patches\sun_flash.cpp" />
     <ClCompile Include="src\patches\terrain_proxy.cpp" />
     <ClCompile Include="src\patches\terrain_semantic.cpp" />
@@ -230,6 +231,7 @@
     <ClInclude Include="include\ui_performance.h" />
     <ClInclude Include="include\ui_performance_hooks.h" />
     <ClInclude Include="include\ui_file_scan_hooks.h" />
+    <ClInclude Include="include\ui_decor.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="src\engine\version.rc" />

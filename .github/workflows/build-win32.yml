@@ -123,3 +123,11 @@ jobs:
             openshim.ini
             openshim.ini.example
             build-summary.txt
+
+      - name: Upload standalone DLL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BZROpenShim-winmm-only
+          if-no-files-found: error
+          retention-days: 14
+          path: bin/Release/winmm.dll
