@@ -96,6 +96,51 @@ namespace
         return true;
     }
 
+    // [Network] GovernorTuning is a named choice rather than a boolean, because
+    // "1" would read as "turn something on" when what it actually selects is
+    // which of two measured tuning sets the bandwidth governor runs. The plain
+    // booleans stay accepted so an existing script setting 0/1 keeps working.
+    bool TryReadMappedGovernorTuning(const std::filesystem::path& configPath,
+                                     const char* section,
+                                     const char* key,
+                                     std::string& out)
+    {
+        std::string value;
+        if (!TryReadIniValue(configPath, section, key, value))
+            return false;
+
+        std::string token = value;
+        token.erase(token.begin(), std::find_if(token.begin(), token.end(), [](unsigned char ch)
+        {
+            return !std::isspace(ch);
+        }));
+        token.erase(std::find_if(token.rbegin(), token.rend(), [](unsigned char ch)
+        {
+            return !std::isspace(ch);
+        }).base(), token.end());
+        std::transform(token.begin(), token.end(), token.begin(), [](unsigned char ch)
+        {
+            return static_cast<char>(std::tolower(ch));
+        });
+
+        if (token == "openshim" || token == "tuned")
+        {
+            out = "1";
+            return true;
+        }
+        if (token == "stock" || token == "default")
+        {
+            out = "0";
+            return true;
+        }
+
+        bool enabled = false;
+        if (!ParseBool(value, enabled))
+            return false;
+        out = enabled ? "1" : "0";
+        return true;
+    }
+
     bool Equals(const char* left, const char* right)
     {
         return left && right && _stricmp(left, right) == 0;
@@ -240,6 +285,17 @@ namespace
             Equals(name, "BZR_DISABLE_LOBBY_BZRNET_INTEGRATION"))
         {
             return TryReadMappedBool(mainIni, "Network", "LobbyBzrnetIntegration", true, out);
+        }
+
+        // Selects which tuning the bandwidth governor and auto-kick run. This is
+        // the only openshim.ini key the network layer reads: net_optimizer takes
+        // it as the DEFAULT for net.ini's NetTune and AutoKickRelax, so an
+        // explicit key in net.ini still wins and the granular per-value keys are
+        // unaffected either way.
+        if (Equals(name, "OPENSHIM_GOVERNOR_TUNING") ||
+            Equals(name, "BZ_GOVERNOR_TUNING"))
+        {
+            return TryReadMappedGovernorTuning(mainIni, "Network", "GovernorTuning", out);
         }
 
         // Existing user-facing INI settings. These mappings make the old env
