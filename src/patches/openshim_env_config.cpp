@@ -287,6 +287,18 @@ namespace
             return TryReadMappedBool(mainIni, "Network", "LobbyBzrnetIntegration", true, out);
         }
 
+        // Wholesale opt-out for OpenShim's socket layer. net_optimizer takes this
+        // as the DEFAULT for net.ini's EnableSocketOptimizer, so an explicit key
+        // in net.ini still wins. Off means the socket optimizer installs nothing
+        // at all -- no winsock hooks, no governor, no auto-kick relax, no
+        // reorder/dup mitigation, no DSCP -- which is the "give me stock
+        // networking" answer when a player is diagnosing a connection problem.
+        if (Equals(name, "OPENSHIM_NET_IMPROVEMENTS") ||
+            Equals(name, "BZ_NET_IMPROVEMENTS"))
+        {
+            return TryReadMappedBool(mainIni, "Network", "NetImprovements", false, out);
+        }
+
         // Selects which tuning the bandwidth governor and auto-kick run. This is
         // the only openshim.ini key the network layer reads: net_optimizer takes
         // it as the DEFAULT for net.ini's NetTune and AutoKickRelax, so an

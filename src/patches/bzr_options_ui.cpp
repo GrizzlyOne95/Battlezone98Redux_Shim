@@ -2685,6 +2685,7 @@ namespace BZROpenShim
         };
         static const char* const kShimSettingsHeadlightBeamValues[] = { "Stock", "Focused", "Wide" };
         static const char* const kShimSettingsNetRouteValues[] = { "Stock", "Direct", "Relay" };
+        static const char* const kShimSettingsGovernorTuningValues[] = { "OpenShim", "Stock" };
         static const char* const kShimSettingsNetRouteLabels[] = { "Stock", "Prefer Direct", "Force Relay" };
         static const char* const kShimSettingsTargetPolicyAltKeys[] = { "TargetReticle" };
         static const char* const kShimSettingsReticleConvAltKeys[] = { "SmartReticleConvergence" };
@@ -2790,6 +2791,16 @@ namespace BZROpenShim
               ShimSettingApplyGroup::BzrNetRoute,
               "Preferred peer path: try LAN then direct WAN, or force the BZRNet relay. "
               "Does not add LAN or direct-IP hosting." },
+            { "Net Improvements", "Network", "NetImprovements", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "OpenShim's socket layer as a whole. Off gives stock networking; "
+              "turn it off to rule the shim out of a connection problem." },
+            { "Net Tuning", "Network", "GovernorTuning", nullptr, 0,
+              kShimSettingsGovernorTuningValues, kShimSettingsGovernorTuningValues, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Bandwidth governor and host auto-kick. Stock matches players who "
+              "are not running OpenShim; net.ini still overrides per value." },
         };
         // The page count adapts to the registry (see the paging controls in
         // RefreshShimSettingsUiControls), so the registry may exceed the
