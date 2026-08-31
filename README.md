@@ -155,7 +155,12 @@ Normal player defaults are shipped in:
 openshim.ini
 ```
 
-That file contains every first-class OpenShim setting with player-oriented values: proven fixes and normal quality-of-life features enabled, OpenShim Enhanced rendering selected, autosave enabled, and diagnostics / reverse-engineering / terrain-development features disabled. Users can edit it directly or use the native OpenShim Settings page where supported.
+That file contains every first-class OpenShim setting with conservative,
+stock-preserving values. OpenShim fixes, enhancements, UI replacements,
+autosave, and diagnostics are opt-in. To disable the legacy mouse path's
+smoothing/Windows acceleration, set `[General] RawMouseInput = 1` and restart
+the game. Users can edit the file directly or enable the native OpenShim
+Settings page where supported.
 
 The exhaustive technical reference remains:
 

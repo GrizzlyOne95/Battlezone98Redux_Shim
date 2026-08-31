@@ -107,6 +107,77 @@ if ($missing.Count -gt 0 -or $extra.Count -gt 0) {
 
 Write-Host "player openshim.ini completeness passed ($($referenceIds.Count) settings)" -ForegroundColor Green
 
+# The shipped player preset is deliberately opt-in. Catch accidental regressions
+# where a feature-like boolean/enum is re-enabled while still allowing the two
+# numerically-ON values that preserve stock behavior and one numeric count.
+$allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::OrdinalIgnoreCase)
+@(
+    "Startup/AllowStartupAutoLoad",
+    "Graphics/Renderer",
+    "Display/SunFlashbang",
+    "Diagnostics/TerrainRenderProbeMaxClusters"
+) | ForEach-Object { [void]$allowedEnabledLookingValues.Add($_) }
+
+$enabledLookingTokens = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::OrdinalIgnoreCase)
+@("1", "true", "on", "yes", "enabled", "enhanced", "auto") |
+    ForEach-Object { [void]$enabledLookingTokens.Add($_) }
+
+$playerValues = @{}
+$unexpectedEnabledValues = @()
+$section = ""
+foreach ($line in Get-Content -LiteralPath $playerIni) {
+    if ($line -match '^\s*\[([^\]]+)\]\s*$') {
+        $section = $Matches[1].Trim()
+        continue
+    }
+    if ($line -notmatch '^\s*([A-Za-z][A-Za-z0-9]*)\s*=\s*([^;]*?)\s*$') {
+        continue
+    }
+    $key = $Matches[1]
+    $value = $Matches[2].Trim()
+    $id = "$section/$key"
+    $playerValues[$id] = $value
+    if ($enabledLookingTokens.Contains($value) -and
+        -not $allowedEnabledLookingValues.Contains($id)) {
+        $unexpectedEnabledValues += "$id = $value"
+    }
+}
+
+if ($unexpectedEnabledValues.Count -gt 0) {
+    Write-Host "Unexpected enabled-looking values in conservative openshim.ini:" -ForegroundColor Red
+    $unexpectedEnabledValues | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+    throw "openshim.ini opt-in default policy failed"
+}
+
+$stockValueChecks = @{
+    "General/SoundChannels" = "0"
+    "General/RawMouseInput" = "0"
+    "Graphics/RenderProfile" = "Redux"
+    "Display/UnderAttackAlert" = "Normal"
+    "Display/TargetPolicy" = "Default"
+    "Display/ScrapPilotHud" = "Stock"
+    "Display/UnitVoFeedback" = "Normal"
+    "Network/RoutePreference" = "Stock"
+    "Network/LobbyBzrnetIntegration" = "0"
+    "SinglePlayer/HeadlightColor" = "Stock"
+    "SinglePlayer/HeadlightBeam" = "Stock"
+}
+foreach ($entry in $stockValueChecks.GetEnumerator()) {
+    if (-not $playerValues.ContainsKey($entry.Key) -or
+        $playerValues[$entry.Key] -cne $entry.Value) {
+        $actual = if ($playerValues.ContainsKey($entry.Key)) {
+            $playerValues[$entry.Key]
+        } else {
+            "<missing>"
+        }
+        throw "openshim.ini stock baseline mismatch: $($entry.Key) expected '$($entry.Value)', got '$actual'"
+    }
+}
+
+Write-Host "player openshim.ini conservative defaults passed" -ForegroundColor Green
+
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 $vsroot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $vsroot) { throw "Visual Studio with C++ tools not found" }

@@ -16,9 +16,11 @@
 //              publicly-shipped artifact hash. If a future problematic preset
 //              ships, its hash should be added here with provenance notes.
 //
-//   Revision 2: corrected preset shipped starting with this branch:
+//   Revision 2: corrected, conservative opt-in preset prepared on this branch:
 //                 AttackRevealPerceivedTeam = 0
 //                 ScrapPilotHud = Stock
+//                 feature/diagnostic switches OFF by default
+//                 RawMouseInput remains available as an explicit opt-in
 //                 "; OpenShimPresetRevision = 2" marker near top
 //
 // Migration policy is implemented here so it works for:
