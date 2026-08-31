@@ -868,11 +868,57 @@ TraceDamageReveal = 0
 
 [Network]
 
-; Netcode tuning -- the send-rate governor, bandwidth floor/ceiling, ramp rates
-; and auto-kick envelope -- lives in net.ini under [OpenShimSocket], because it
-; is applied by the socket layer. It is on by default and needs no
-; configuration here; see net.ini for what each value does and why. Relay and
-; control-plane logging is under [Diagnostics] above.
+; Granular netcode tuning -- the send-rate governor, bandwidth floor/ceiling,
+; ramp rates and auto-kick envelope -- lives in net.ini under [OpenShimSocket],
+; because it is applied by the socket layer. See net.ini for what each value
+; does and why. Relay and control-plane logging is under [Diagnostics] above.
+; The single master switch for all of it is here:
+
+; Which tuning the bandwidth governor and host auto-kick run.
+;
+; This is the shim's largest multiplayer-visible default, and until this key
+; existed it was reachable only from net.ini -- a file most players never
+; create -- so a lot of people were running the tuned values without knowing.
+; The key does not change what OpenShim does by default; it makes the choice
+; visible and reversible.
+;
+; What each side actually affects:
+;   client / governor  MinBandwidth, MaxBandwidth, UpCount, DownCount, MaxPing.
+;                      Changes how much this machine sends and how fast the
+;                      governor climbs or collapses. A tuned client is a
+;                      heavier sender than a stock peer on the same link.
+;   host / auto-kick   AutoKickStart, AutoKickPing, AutoKickLoss, AutoKickTime.
+;                      Only does anything when this machine hosts. Tuned values
+;                      are far more forgiving; net.ini notes AutoKickLoss=200 is
+;                      very likely unreachable, so a genuinely dead peer may sit
+;                      in the session rather than being ejected.
+;
+; Canonical:
+;   OpenShim = OpenShim's measured tuning (default; the long-standing behavior)
+;   Stock    = leave every governor and auto-kick value at the game's own
+; Accepted aliases:
+;   OpenShim : Tuned, and the booleans 1/true/on/yes/enabled
+;   Stock    : Default, and the booleans 0/false/off/no/disabled
+;
+; Choose Stock for strict parity in a lobby that mixes OpenShim and stock
+; clients, or when you are trying to reproduce a stock networking problem.
+;
+; Deliberately one switch and not ten. The individual values are measured and
+; interlocking -- net.ini records that a "safe"-looking MaxBandwidth of 64000
+; sat below real observed traffic and left the governor throttling for whole
+; matches -- so a half-changed set is worse than either coherent one. If you do
+; want to move an individual value, do it in net.ini, which still overrides
+; this key.
+;
+; Precedence, loosest to tightest:
+;   this key -> net.ini NetTune / AutoKickRelax -> net.ini per-value keys
+;   -> OPENSHIM_* / BZ_* environment variables
+;
+; The resolved result is reported at startup on the openshim.log line beginning
+; "[OpenShimNet] governor tuning:", with the client and host halves separate.
+;
+; Legacy env aliases: OPENSHIM_GOVERNOR_TUNING, BZ_GOVERNOR_TUNING
+GovernorTuning = OpenShim
 
 ; Preferred gameplay peer route. This changes route preference only; it does
 ; not add LAN browsing or direct-IP matchmaking.

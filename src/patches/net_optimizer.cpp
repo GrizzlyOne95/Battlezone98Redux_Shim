@@ -804,6 +804,35 @@ namespace
         if (FileExists(netIni))
             g_NetIniPath = netIni;
 
+        // openshim.ini [Network] GovernorTuning. The bandwidth governor and the
+        // auto-kick trio are the shim's largest multiplayer-visible defaults --
+        // a tuned client is a heavier sender than a stock peer on the same link,
+        // and a tuned host almost never ejects anyone -- yet until now they were
+        // reachable only from net.ini, a file most players never create. This
+        // surfaces the choice in the file they do have.
+        //
+        // Deliberately ONE switch rather than ten. The individual values are
+        // measured and interlocking (see the NetTune block below: a "safe"
+        // MaxBandwidth of 64000 sat below real traffic and made the governor
+        // throttle all match), so mirroring them into openshim.ini would invite
+        // a plausible-looking number that is worse than either coherent set.
+        //
+        // Precedence, loosest to tightest: this key -> net.ini NetTune /
+        // AutoKickRelax -> net.ini per-value keys -> environment. It only
+        // supplies the DEFAULT for the two master switches, so net.ini remains
+        // the granular override exactly as before.
+        bool governorTuning = true;
+        const char* governorTuningSource = "default";
+        {
+            char envValue[32] = {};
+            if (TryReadEnvValue("OPENSHIM_GOVERNOR_TUNING", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+                TryReadEnvValue("BZ_GOVERNOR_TUNING", envValue, static_cast<DWORD>(sizeof(envValue))))
+            {
+                governorTuning = EnvValueEnabled(envValue);
+                governorTuningSource = "openshim.ini/env";
+            }
+        }
+
         g_Config.enabled = ReadIniBool("OpenShimSocket", "EnableSocketOptimizer", true);
         g_Config.logging = ReadIniBool("OpenShimSocket", "EnableLogging", true);
         g_Config.tcpNoDelay = ReadIniBool("OpenShimSocket", "EnableTcpNoDelay", true);
@@ -842,7 +871,7 @@ namespace
         g_Config.dupMaxPps = ClampUint(ReadIniUint("OpenShimSocket", "DupMaxPps", kDefaultDupMaxPps), 0, 2000);
         g_Config.govStart = ClampUint(ReadIniUint("OpenShimSocket", "GovernorStart", 0), 0, kGovStartMax);
         g_Config.govScan = ReadIniBool("OpenShimSocket", "GovernorScan", false);
-        const bool autoKickRelax = ReadIniBool("OpenShimSocket", "AutoKickRelax", true);
+        const bool autoKickRelax = ReadIniBool("OpenShimSocket", "AutoKickRelax", governorTuning);
         g_Config.autoKickStart = ClampUint(ReadIniUint("OpenShimSocket", "AutoKickStart", autoKickRelax ? 60000 : 0), 0, kAutokickMsMax);
         g_Config.autoKickPing = ClampUint(ReadIniUint("OpenShimSocket", "AutoKickPing", autoKickRelax ? 2000 : 0), 0, kAutokickPingMax);
         g_Config.autoKickLoss = ClampUint(ReadIniUint("OpenShimSocket", "AutoKickLoss", autoKickRelax ? 200 : 0), 0, kAutokickLossMax);
@@ -878,13 +907,35 @@ namespace
         // updates into more warping, and the cut itself keeps ping high.
         //
         // MaxPingsLost is left alone by default: no evidence a change helps.
-        const bool netTune = ReadIniBool("OpenShimSocket", "NetTune", true);
+        const bool netTune = ReadIniBool("OpenShimSocket", "NetTune", governorTuning);
         g_Config.netMinBandwidth = ReadIniUint("OpenShimSocket", "NetMinBandwidth", netTune ? 16000 : 0);
         g_Config.netMaxBandwidth = ReadIniUint("OpenShimSocket", "NetMaxBandwidth", netTune ? 320000 : 0);
         g_Config.netUpCount = ReadIniUint("OpenShimSocket", "NetUpCount", netTune ? 100 : 0);
         g_Config.netDownCount = ReadIniUint("OpenShimSocket", "NetDownCount", netTune ? 50 : 0);
         g_Config.netMaxPing = ReadIniUint("OpenShimSocket", "NetMaxPing", netTune ? 450 : 0);
         g_Config.netMaxPingsLost = ReadIniUint("OpenShimSocket", "NetMaxPingsLost", 0);
+
+        // Report the two halves separately, because they affect different
+        // people: the governor half changes how much this client sends, and is
+        // what a stock peer on the other end of the link notices; the auto-kick
+        // half only does anything when this machine is the host. A parity
+        // question is nearly always about one or the other, not both.
+        Logf("[OpenShimNet] governor tuning: %s (source=%s) | client/governor=%s "
+             "(MinBandwidth=%u MaxBandwidth=%u UpCount=%u DownCount=%u MaxPing=%u) | "
+             "host/autokick=%s (Start=%u Ping=%u Loss=%u Time=%u) | 0 = leave the game's own value alone",
+            governorTuning ? "OpenShim" : "Stock",
+            governorTuningSource,
+            netTune ? "OpenShim" : "stock",
+            g_Config.netMinBandwidth,
+            g_Config.netMaxBandwidth,
+            g_Config.netUpCount,
+            g_Config.netDownCount,
+            g_Config.netMaxPing,
+            autoKickRelax ? "relaxed" : "stock",
+            g_Config.autoKickStart,
+            g_Config.autoKickPing,
+            g_Config.autoKickLoss,
+            g_Config.autoKickTime);
 
         g_Config.enableBufferLog = ReadIniBool("OpenShimSocket", "EnableBufferLog", false);
         g_Config.enableRelayCapture = ReadIniBool("OpenShimSocket", "EnableRelayCapture", false);
