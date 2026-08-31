@@ -213,6 +213,17 @@ namespace BZROpenShim
         cache = 1; return true;
     }
 
+    // [Fixes] VehicleListModScoping. Forces mod-scoped asset resolution for the
+    // multiplayer vehicle list. Default on, but it is the one always-on fix that
+    // changes which assets a client resolves, so a modded lobby mixing shim and
+    // stock clients needs to be able to turn it off and compare.
+    static bool ShouldEnableVehicleListModScoping() {
+        static int s_cached = -1;
+        if (s_cached >= 0) return s_cached != 0;
+        if (EnvFlagEnabledByName("OPENSHIM_DISABLE_VEHICLE_LIST_MOD_SCOPING") || EnvFlagEnabledByName("BZR_DISABLE_VEHICLE_LIST_MOD_SCOPING")) { s_cached = 0; return false; }
+        s_cached = 1; return true;
+    }
+
     static bool IsMapRefreshPatchName(const char* name) {
         if (!name) return false;
         return strcmp(name, "Map Sorting") == 0 || strcmp(name, "Map List Rewrite for Hop-Fix 1/3") == 0 || strcmp(name, "Map List Rewrite for Hop-Fix 2/3") == 0 || strcmp(name, "Map List Rewrite for Hop-Fix 3/3") == 0 || strcmp(name, "Map List Fix Support 1/3") == 0;
@@ -321,6 +332,9 @@ namespace BZROpenShim
         }
         if (!ShouldEnableMapRefreshFixes(isSteam)) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsMapRefreshPatchName(p.name.c_str()); }), patches.end());
+        }
+        if (!ShouldEnableVehicleListModScoping()) {
+            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsVehicleListModFixPatchName(p.name.c_str()); }), patches.end());
         }
         if (!ShouldEnableChunkExperiments()) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsChunkExperimentPatchName(p.name.c_str()); }), patches.end());
