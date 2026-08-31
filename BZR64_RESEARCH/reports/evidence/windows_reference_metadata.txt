@@ -1,0 +1,31 @@
+Primary unwrapped Windows reference:
+  path: C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux\Battlezone98Redux.exe
+  copied as: BZR64_RESEARCH\windows_x86\Battlezone98Redux_GOG.exe
+  size: 5425152
+  SHA-256: 8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413
+  FileVersion/ProductVersion: 2.2.301
+  OriginalFilename: bzone.exe
+  format: PE32 / COFF-i386
+  PE timestamp: 2017-03-28 03:21:48 UTC (0x58D9D6CC)
+  linker: 12.0 (MSVC/VS2013 generation)
+  entry RVA: 0x43EE5E
+  ImageBase: 0x00400000
+  SizeOfImage: 43053056
+  characteristics: RELOCS_STRIPPED, EXECUTABLE_IMAGE, LARGE_ADDRESS_AWARE, 32BIT_MACHINE
+  DLL characteristics: TERMINAL_SERVER_AWARE; no relocations/ASLR
+  COFF symbols: none
+  CodeView path: D:\code\BattleZoneTest\build\bin\Release\battlezone\battlezone98redux.pdb
+  exports: AmdPowerXpressRequestHighPerformance, NvOptimusEnablement
+
+Imports:
+  ADVAPI32.dll, DSOUND.dll, Galaxy.dll, IPHLPAPI.DLL, KERNEL32.dll,
+  libtheoraplayer.dll, libvorbisfile.dll, MSVCP120.dll, MSVCR120.dll,
+  OgreMain.dll, Plugin_TheoraVideoSystem.dll, steam_api.dll, USER32.dll,
+  WINMM.dll, WS2_32.dll
+
+Secondary installed Steam reference:
+  path: C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux\Battlezone98Redux.exe
+  copied as: BZR64_RESEARCH\windows_x86\Battlezone98Redux_Steam.exe
+  size: 5554832
+  SHA-256: D298782FC9A13EDB0665DB934110440C45461031DB5F7FE1A76C8784B61CC90D
+  FileVersion/ProductVersion: 2.2.301
