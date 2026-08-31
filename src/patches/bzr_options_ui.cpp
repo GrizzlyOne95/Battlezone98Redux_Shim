@@ -11,6 +11,7 @@
 #include "openshim_updater.h"
 #include "patcher.h"
 #include "shim_log.h"
+#include "ui_decor.h"
 
 #include <Windows.h>
 #include <algorithm>
@@ -24,6 +25,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace BZROpenShim
@@ -166,10 +168,25 @@ namespace BZROpenShim
             size_t matchingBlockCount = 0;
         };
 
+        // Toolbar captions stop this far short of their button so the caption
+        // never touches the button's own border art.
+        constexpr float kUiToolbarCaptionPadding = 16.0f;
+
         constexpr size_t kInputBindingUiColumnCount = 2;
         constexpr size_t kInputBindingUiRowsPerColumn = 10;
         constexpr size_t kInputBindingUiVisibleRowCount =
             kInputBindingUiColumnCount * kInputBindingUiRowsPerColumn;
+
+        // Toolbar: Back, Reset Controls, Controls, RTS Actions | Prev, Next,
+        // Refresh. Widths are the caption's own width plus padding; the four
+        // leading entries pack from the left inset and the three paging entries
+        // pack flush to the right inset (LayoutUiToolbarRow).
+        constexpr size_t kInputBindingUiToolbarSlotCount = 7;
+        constexpr size_t kInputBindingUiToolbarRightGroup = 4;
+        constexpr float kInputBindingUiToolbarWidths[kInputBindingUiToolbarSlotCount] =
+        {
+            120.0f, 190.0f, 150.0f, 160.0f, 90.0f, 90.0f, 120.0f
+        };
 
         static InlineDetour32 g_OptionsInputPopulateUiDetour = {};
         static InlineDetour32 g_OptionsInputKeyReleasedDetour = {};
@@ -240,10 +257,11 @@ namespace BZROpenShim
         static void* g_InputBindingUiFrame = nullptr;
         static void* g_InputBindingUiTopMask = nullptr;
         static void* g_InputBindingUiContentMask = nullptr;
-        static void* g_InputBindingUiHeaderBackdrop = nullptr;
+        static std::array<void*, kUiDecorMaxOptionsPagePieces> g_InputBindingUiDecor = {};
         static std::array<void*, kInputBindingUiVisibleRowCount> g_InputBindingUiRowBackdrops = {};
         static void* g_InputBindingUiHeaderLabel = nullptr;
         static void* g_InputBindingUiStatusLabel = nullptr;
+        static void* g_InputBindingUiStatusDetailLabel = nullptr;
         static void* g_InputBindingUiPageLabel = nullptr;
         static void* g_InputBindingUiBackButton = nullptr;
         static void* g_InputBindingUiDefaultsButton = nullptr;
@@ -366,6 +384,16 @@ namespace BZROpenShim
         constexpr size_t kShimSettingsUiVisibleRowCount =
             kShimSettingsUiColumnCount * kShimSettingsUiRowsPerColumn;
 
+        // Toolbar: Back, Check for Updates | page caption, Prev, Next. Slot 2 is
+        // a label rather than a button, so it reserves toolbar width the same
+        // way and is centred inside its slot when it is created.
+        constexpr size_t kShimSettingsUiToolbarSlotCount = 5;
+        constexpr size_t kShimSettingsUiToolbarRightGroup = 2;
+        constexpr float kShimSettingsUiToolbarWidths[kShimSettingsUiToolbarSlotCount] =
+        {
+            140.0f, 210.0f, 130.0f, 110.0f, 110.0f
+        };
+
         static InlineDetour32 g_OptionsParentCtorDetour = {};
         static FnOptionsInputCtor g_BzrFn_OptionsParentCtor = nullptr;
         static bool g_OptionsParentHookInstalled = false;
@@ -400,11 +428,13 @@ namespace BZROpenShim
         static void* g_ShimSettingsUiFrame = nullptr;
         static void* g_ShimSettingsUiTopMask = nullptr;
         static void* g_ShimSettingsUiContentMask = nullptr;
-        static void* g_ShimSettingsUiHeaderBackdrop = nullptr;
+        static std::array<void*, kUiDecorMaxOptionsPagePieces> g_ShimSettingsUiDecor = {};
         static std::array<void*, kShimSettingsUiVisibleRowCount> g_ShimSettingsUiRowBackdrops = {};
         static void* g_ShimSettingsUiHeaderLabel = nullptr;
         static void* g_ShimSettingsUiStatusLabel = nullptr;
+        static void* g_ShimSettingsUiStatusDetailLabel = nullptr;
         static void* g_ShimSettingsUiFooterLabel = nullptr;
+        static void* g_ShimSettingsUiFooterDetailLabel = nullptr;
         static void* g_ShimSettingsUiBackButton = nullptr;
         static void* g_ShimSettingsUiUpdateButton = nullptr;
         static std::array<void*, kShimSettingsUiVisibleRowCount> g_ShimSettingsUiRowLabels = {};
@@ -1393,10 +1423,11 @@ namespace BZROpenShim
             g_InputBindingUiFrame = nullptr;
             g_InputBindingUiTopMask = nullptr;
             g_InputBindingUiContentMask = nullptr;
-            g_InputBindingUiHeaderBackdrop = nullptr;
+            g_InputBindingUiDecor.fill(nullptr);
             g_InputBindingUiRowBackdrops.fill(nullptr);
             g_InputBindingUiHeaderLabel = nullptr;
             g_InputBindingUiStatusLabel = nullptr;
+            g_InputBindingUiStatusDetailLabel = nullptr;
             g_InputBindingUiPageLabel = nullptr;
             g_InputBindingUiBackButton = nullptr;
             g_InputBindingUiDefaultsButton = nullptr;
@@ -1686,9 +1717,9 @@ namespace BZROpenShim
                 if (!slot)
                     return false;
 
-                if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(slot, "mpcron.png");
-                if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(slot, "mpcrclk.png");
-                if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(slot, "mpcrclk.png");
+                if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(slot, "uibtn.png");
+                if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(slot, "uibtnhv.png");
+                if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(slot, "uibtnhv.png");
                 g_BzrFn_AddChild(parent, slot, 0);
             }
 
@@ -1708,6 +1739,12 @@ namespace BZROpenShim
         // Decorative surface that follows the same parent-relative geometry as
         // the stock buttons. Overlay objects use a different coordinate path on
         // this screen and drift right when parented to the middle panel.
+        //
+        // The tile is a flat fill. The engine stretches a widget texture to the
+        // widget rect, so the stock plate art ("mpcron.png") had its diagonal
+        // highlight squashed underneath the value text; a flat fill cannot
+        // distort. The label field is darker than the value button beside it,
+        // which is what separates the two now that neither carries a border.
         static bool CreateInputBindingUiPlate(void*& slot,
                                               void* parent,
                                               const char* objectName,
@@ -1719,10 +1756,164 @@ namespace BZROpenShim
             if (!CreateInputBindingUiButton(slot, parent, objectName, "", x, y, w, h, nullptr))
                 return false;
 
-            if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(slot, "mpcron.png");
-            if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(slot, "mpcron.png");
-            if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(slot, "mpcron.png");
+            if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(slot, "uiplate.png");
+            if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(slot, "uiplate.png");
+            if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(slot, "uiplate.png");
             return true;
+        }
+
+        // A panel border bar. Same construction as a row plate -- a button with
+        // no click handler -- but with one flat texture in every state, so
+        // hovering the frame does not light it up.
+        static bool CreateInputBindingUiDecorPiece(void*& slot,
+                                                   void* parent,
+                                                   const char* objectName,
+                                                   const char* textureName,
+                                                   float x,
+                                                   float y,
+                                                   float w,
+                                                   float h)
+        {
+            if (!CreateInputBindingUiButton(slot, parent, objectName, "", x, y, w, h, nullptr))
+                return false;
+
+            const char* texture = (textureName && *textureName) ? textureName : "uiline.png";
+            if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(slot, texture);
+            if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(slot, texture);
+            if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(slot, texture);
+            return true;
+        }
+
+        // Panel frames are plates on the control parent, not overlay views.
+        // Overlays take a different coordinate path on this screen: a 2026-08-30
+        // capture had all eleven frame textures load and then rasterize nothing
+        // at the panel edges (sampled pure black), while plates land exactly on
+        // their layout rect. Frames are created before every label and button on
+        // the page, so they sit behind the controls, and they are outlines only,
+        // so no decoration is laid across a rect that has to take a click.
+        static void CreateInputBindingUiPageDecor(
+            std::array<void*, kUiDecorMaxOptionsPagePieces>& slots,
+            void* controlParent,
+            const char* namePrefix,
+            unsigned screenTag,
+            const UiOptionsPageLayout& layout)
+        {
+            if (!controlParent || !namePrefix)
+                return;
+
+            UiDecorPanelDesc panels[kUiDecorPanelsPerOptionsPage] = {};
+            const size_t panelCount =
+                BuildUiOptionsPagePanels(layout, panels, kUiDecorPanelsPerOptionsPage);
+
+            size_t requested = 0;
+            size_t created = 0;
+            for (size_t group = 0; group < panelCount; ++group)
+            {
+                UiDecorPiece pieces[kUiDecorMaxPanelPieces] = {};
+                const size_t count =
+                    BuildUiDecorPanel(panels[group], pieces, kUiDecorMaxPanelPieces);
+                const size_t slotOffset = group * kUiDecorMaxPanelPieces;
+
+                for (size_t index = 0; index < count; ++index)
+                {
+                    char controlName[96] = {};
+                    std::snprintf(controlName,
+                                  sizeof(controlName),
+                                  "%s_%08X_%u_%02u",
+                                  namePrefix,
+                                  screenTag,
+                                  static_cast<unsigned>(group),
+                                  static_cast<unsigned>(index));
+                    const UiDecorPiece& piece = pieces[index];
+                    ++requested;
+                    if (CreateInputBindingUiDecorPiece(slots[slotOffset + index],
+                                                       controlParent,
+                                                       controlName,
+                                                       piece.texture,
+                                                       piece.rect.x,
+                                                       piece.rect.y,
+                                                       piece.rect.width,
+                                                       piece.rect.height))
+                    {
+                        ++created;
+                    }
+                }
+
+                for (size_t index = count; index < kUiDecorMaxPanelPieces; ++index)
+                    SetInputBindingUiViewActive(slots[slotOffset + index], false);
+            }
+
+            // An invisible frame is indistinguishable from one that was never
+            // built, so record which of the two happened.
+            Log(L"[INPUTUI] %hs decor panels=%u pieces=%u/%u\n",
+                namePrefix,
+                static_cast<unsigned>(panelCount),
+                static_cast<unsigned>(created),
+                static_cast<unsigned>(requested));
+        }
+
+        // Every OpenShim page draws the same stack, bottom to top: a full-bleed
+        // blackout that hides the stock screen, the stock frame art, and two
+        // masks that blank the page column the frame leaves lit. Those four are
+        // full-width overlays on the screen itself; the panel frames go on the
+        // control parent with the rest of the page. Both pages share this so
+        // their backgrounds cannot drift apart.
+        struct UiOptionsPageBackgroundSlots
+        {
+            void** backdrop = nullptr;
+            void** frame = nullptr;
+            void** topMask = nullptr;
+            void** contentMask = nullptr;
+        };
+
+        static void CreateInputBindingUiPageBackground(
+            const UiOptionsPageBackgroundSlots& slots,
+            std::array<void*, kUiDecorMaxOptionsPagePieces>& decor,
+            void* visualParent,
+            void* controlParent,
+            const char* namePrefix,
+            unsigned screenTag,
+            const UiOptionsPageLayout& layout)
+        {
+            if (!visualParent || !namePrefix)
+                return;
+
+            struct BackgroundLayer
+            {
+                void** slot;
+                const char* suffix;
+                const char* texture;
+                UiDecorRect rect;
+            };
+
+            const BackgroundLayer layers[] =
+            {
+                { slots.backdrop, "Backdrop", "blackui.png", { 0.0f, 0.0f, 1440.0f, 1080.0f } },
+                { slots.frame, "Frame", "keyOptions_center.png", { 0.0f, 0.0f, 1440.0f, 1080.0f } },
+                { slots.topMask, "TopMask", "blackui.png", layout.topMask },
+                { slots.contentMask, "ContentMask", "blackui.png", layout.contentMask },
+            };
+
+            char controlName[96] = {};
+            for (const BackgroundLayer& layer : layers)
+            {
+                if (!layer.slot)
+                    continue;
+                std::snprintf(controlName, sizeof(controlName), "%s%s_%08X",
+                              namePrefix, layer.suffix, screenTag);
+                CreateInputBindingUiOverlay(*layer.slot,
+                                            visualParent,
+                                            controlName,
+                                            layer.texture,
+                                            layer.rect.x,
+                                            layer.rect.y,
+                                            layer.rect.width,
+                                            layer.rect.height,
+                                            0x60);
+            }
+
+            std::snprintf(controlName, sizeof(controlName), "%sDecor", namePrefix);
+            CreateInputBindingUiPageDecor(decor, controlParent, controlName, screenTag, layout);
         }
 
         static bool SetInputBindingUiButtonText(void* button, const char* text)
@@ -1870,6 +2061,84 @@ namespace BZROpenShim
                     return candidate;
             }
             return value + "...";
+        }
+
+        static bool UiTextFitsWidth(const std::string& text,
+                                    float widthPx,
+                                    float scale,
+                                    float estimateCharWidth)
+        {
+            float measuredWidth = 0.0f;
+            if (TryMeasureUiTextWidth(text.c_str(), scale, &measuredWidth))
+                return measuredWidth <= widthPx;
+            return estimateCharWidth * scale * static_cast<float>(text.size()) <= widthPx;
+        }
+
+        static std::pair<std::string, std::string> WrapUiTextToTwoLines(const char* text,
+                                                                        float widthPx)
+        {
+            std::string value = TrimAsciiCopy(text ? text : "");
+            if (value.empty() || UiTextFitsWidth(value,
+                                                widthPx,
+                                                1.0f,
+                                                kInputBindingUiLabelCharWidth))
+            {
+                return { value, {} };
+            }
+
+            size_t bestBreak = std::string::npos;
+            for (size_t index = 0; index < value.size(); ++index)
+            {
+                if (value[index] != ' ' && value[index] != '\t')
+                    continue;
+                const std::string candidate = value.substr(0, index);
+                if (!UiTextFitsWidth(candidate,
+                                     widthPx,
+                                     1.0f,
+                                     kInputBindingUiLabelCharWidth))
+                {
+                    break;
+                }
+                bestBreak = index;
+            }
+
+            if (bestBreak == std::string::npos)
+            {
+                bestBreak = 1;
+                while (bestBreak < value.size() &&
+                       UiTextFitsWidth(value.substr(0, bestBreak + 1),
+                                       widthPx,
+                                       1.0f,
+                                       kInputBindingUiLabelCharWidth))
+                {
+                    ++bestBreak;
+                }
+            }
+
+            std::string first = TrimAsciiCopy(value.substr(0, bestBreak));
+            std::string second = TrimAsciiCopy(value.substr(bestBreak));
+            if (!UiTextFitsWidth(second,
+                                 widthPx,
+                                 1.0f,
+                                 kInputBindingUiLabelCharWidth))
+            {
+                second = FitUiTextToWidth(second.c_str(),
+                                          widthPx,
+                                          1.0f,
+                                          kInputBindingUiLabelCharWidth);
+            }
+            return { std::move(first), std::move(second) };
+        }
+
+        static bool SetInputBindingUiWrappedLabelText(void* firstLabel,
+                                                      void* secondLabel,
+                                                      const char* text,
+                                                      float widthPx)
+        {
+            const auto lines = WrapUiTextToTwoLines(text, widthPx);
+            const bool firstUpdated = SetInputBindingUiLabelText(firstLabel, lines.first.c_str());
+            const bool secondUpdated = SetInputBindingUiLabelText(secondLabel, lines.second.c_str());
+            return firstUpdated && secondUpdated;
         }
 
         static bool SetInputBindingUiLabelTextFitted(void* label, const char* text, float widthPx)
@@ -2198,20 +2467,26 @@ namespace BZROpenShim
                     ? "RTS & Game Actions"
                     : "Movement & Vehicle Controls";
 
-            SetInputBindingUiLabelTextFitted(g_InputBindingUiHeaderLabel, headerText, 800.0f);
-            SetInputBindingUiLabelTextFitted(g_InputBindingUiStatusLabel,
-                                             g_InputBindingUiStatusText.c_str(), 800.0f);
+            const UiOptionsPageLayout layout =
+                BuildUiOptionsPageLayout(kInputBindingUiRowsPerColumn);
+
+            SetInputBindingUiLabelTextFitted(g_InputBindingUiHeaderLabel, headerText,
+                                             layout.headerTextWidth);
+            SetInputBindingUiWrappedLabelText(g_InputBindingUiStatusLabel,
+                                              g_InputBindingUiStatusDetailLabel,
+                                              g_InputBindingUiStatusText.c_str(),
+                                              layout.headerTextWidth);
             SuppressStockOptionsInputWidgets(decoratedScreen);
             SetStockOptionsInputAccessoryVisibility(decoratedScreen, true);
 
             SetInputBindingUiButtonTextFitted(
                 g_InputBindingUiInputFamilyButton,
                 g_InputBindingUiActiveFamily == InputBindingMapFamily::Input ? "> Controls <" : "Controls",
-                150.0f);
+                kInputBindingUiToolbarWidths[2] - kUiToolbarCaptionPadding);
             SetInputBindingUiButtonTextFitted(
                 g_InputBindingUiGameKeyFamilyButton,
                 g_InputBindingUiActiveFamily == InputBindingMapFamily::GameKey ? "> RTS Actions <" : "RTS Actions",
-                150.0f);
+                kInputBindingUiToolbarWidths[3] - kUiToolbarCaptionPadding);
 
             g_InputBindingUiVisibleRowIndices.fill(-1);
             size_t matchingIndex = 0;
@@ -2282,7 +2557,8 @@ namespace BZROpenShim
                               static_cast<unsigned>(pageCount),
                               static_cast<unsigned>(totalRows));
             }
-            SetInputBindingUiLabelTextFitted(g_InputBindingUiPageLabel, pageText, 800.0f);
+            SetInputBindingUiLabelTextFitted(g_InputBindingUiPageLabel, pageText,
+                                             layout.headerTextWidth);
 
             for (size_t slot = 0; slot < kInputBindingUiVisibleRowCount; ++slot)
             {
@@ -2300,8 +2576,10 @@ namespace BZROpenShim
                 const InputBindingUiRow& row = g_InputBindingUiRows[static_cast<size_t>(rowIndex)];
                 const std::string labelText = GetInputBindingUiRowLabelText(row);
                 const std::string buttonText = GetInputBindingUiRowValueText(row);
-                SetInputBindingUiLabelTextFitted(g_InputBindingUiRowLabels[slot], labelText.c_str(), 275.0f);
-                SetInputBindingUiButtonTextFitted(g_InputBindingUiRowButtons[slot], buttonText.c_str(), 165.0f);
+                SetInputBindingUiLabelTextFitted(g_InputBindingUiRowLabels[slot], labelText.c_str(),
+                                                 layout.rowLabelTextWidth);
+                SetInputBindingUiButtonTextFitted(g_InputBindingUiRowButtons[slot], buttonText.c_str(),
+                                                  layout.rowValueTextWidth);
                 SetInputBindingUiViewActive(g_InputBindingUiRowLabels[slot], true);
                 SetInputBindingUiViewActive(g_InputBindingUiRowButtons[slot], true);
                 SetInputBindingUiViewActive(g_InputBindingUiRowBackdrops[slot], true);
@@ -2453,6 +2731,10 @@ namespace BZROpenShim
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::RestartRequired,
               "Key-binding editor on the Input options page. Restart required." },
+            { "Raw Mouse Input", "General", "RawMouseInput", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::RestartRequired,
+              "Bypasses the legacy smoothed/accelerated mouse path. Restart required." },
             { "AutoSave", "AutoSave", "Enabled", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::AutoSave,
@@ -2595,11 +2877,13 @@ namespace BZROpenShim
             g_ShimSettingsUiFrame = nullptr;
             g_ShimSettingsUiTopMask = nullptr;
             g_ShimSettingsUiContentMask = nullptr;
-            g_ShimSettingsUiHeaderBackdrop = nullptr;
+            g_ShimSettingsUiDecor.fill(nullptr);
             g_ShimSettingsUiRowBackdrops.fill(nullptr);
             g_ShimSettingsUiHeaderLabel = nullptr;
             g_ShimSettingsUiStatusLabel = nullptr;
+            g_ShimSettingsUiStatusDetailLabel = nullptr;
             g_ShimSettingsUiFooterLabel = nullptr;
+            g_ShimSettingsUiFooterDetailLabel = nullptr;
             g_ShimSettingsUiBackButton = nullptr;
             g_ShimSettingsUiUpdateButton = nullptr;
             g_ShimSettingsUiPageLabel = nullptr;
@@ -2615,12 +2899,15 @@ namespace BZROpenShim
             SetInputBindingUiViewActive(g_ShimSettingsUiFrame, visible);
             SetInputBindingUiViewActive(g_ShimSettingsUiTopMask, visible);
             SetInputBindingUiViewActive(g_ShimSettingsUiContentMask, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiHeaderBackdrop, visible);
+            for (void* decor : g_ShimSettingsUiDecor)
+                SetInputBindingUiViewActive(decor, visible);
             for (void* backdrop : g_ShimSettingsUiRowBackdrops)
                 SetInputBindingUiViewActive(backdrop, visible);
             SetInputBindingUiViewActive(g_ShimSettingsUiHeaderLabel, visible);
             SetInputBindingUiViewActive(g_ShimSettingsUiStatusLabel, visible);
+            SetInputBindingUiViewActive(g_ShimSettingsUiStatusDetailLabel, visible);
             SetInputBindingUiViewActive(g_ShimSettingsUiFooterLabel, visible);
+            SetInputBindingUiViewActive(g_ShimSettingsUiFooterDetailLabel, visible);
             SetInputBindingUiViewActive(g_ShimSettingsUiBackButton, visible);
             SetInputBindingUiViewActive(g_ShimSettingsUiUpdateButton, visible);
             SetInputBindingUiViewActive(g_ShimSettingsUiPageLabel, visible);
@@ -2638,11 +2925,13 @@ namespace BZROpenShim
             SetInputBindingUiViewActive(g_InputBindingUiFrame, visible);
             SetInputBindingUiViewActive(g_InputBindingUiTopMask, visible);
             SetInputBindingUiViewActive(g_InputBindingUiContentMask, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiHeaderBackdrop, visible);
+            for (void* decor : g_InputBindingUiDecor)
+                SetInputBindingUiViewActive(decor, visible);
             for (void* backdrop : g_InputBindingUiRowBackdrops)
                 SetInputBindingUiViewActive(backdrop, visible);
             SetInputBindingUiViewActive(g_InputBindingUiHeaderLabel, visible);
             SetInputBindingUiViewActive(g_InputBindingUiStatusLabel, visible);
+            SetInputBindingUiViewActive(g_InputBindingUiStatusDetailLabel, visible);
             SetInputBindingUiViewActive(g_InputBindingUiPageLabel, visible);
             SetInputBindingUiViewActive(g_InputBindingUiBackButton, visible);
             SetInputBindingUiViewActive(g_InputBindingUiDefaultsButton, visible);
@@ -2661,18 +2950,25 @@ namespace BZROpenShim
         {
             g_ShimSettingsUiPageStart = ClampShimSettingsUiPageStart(g_ShimSettingsUiPageStart);
 
-            SetInputBindingUiLabelTextFitted(g_ShimSettingsUiHeaderLabel, "OpenShim Settings", 800.0f);
-            SetInputBindingUiLabelTextFitted(g_ShimSettingsUiStatusLabel,
-                                             g_ShimSettingsUiStatusText.c_str(), 800.0f);
+            const UiOptionsPageLayout layout =
+                BuildUiOptionsPageLayout(kShimSettingsUiRowsPerColumn);
+
+            SetInputBindingUiLabelTextFitted(g_ShimSettingsUiHeaderLabel, "OpenShim Settings",
+                                             layout.headerTextWidth);
+            SetInputBindingUiWrappedLabelText(g_ShimSettingsUiStatusLabel,
+                                              g_ShimSettingsUiStatusDetailLabel,
+                                              g_ShimSettingsUiStatusText.c_str(),
+                                              layout.headerTextWidth);
             const OpenShimUpdateSnapshot update = GetOpenShimUpdateSnapshot();
             SetInputBindingUiButtonTextFitted(
                 g_ShimSettingsUiUpdateButton,
-                update.busy ? "Checking..." : "Check for Updates", 180.0f);
-            // Short enough to stay inside the header plate (ends at x=1135).
-            SetInputBindingUiLabelTextFitted(
+                update.busy ? "Checking..." : "Check for Updates",
+                kShimSettingsUiToolbarWidths[1] - kUiToolbarCaptionPadding);
+            SetInputBindingUiWrappedLabelText(
                 g_ShimSettingsUiFooterLabel,
-                "Click a value to cycle it. Never applies in MP. * = after restart.",
-                900.0f);
+                g_ShimSettingsUiFooterDetailLabel,
+                "Click a value to cycle it. Changes never apply in multiplayer. * = after restart.",
+                layout.headerTextWidth);
 
             // Paging controls only appear once the registry outgrows one page;
             // blank the captions too, an inactive caption keeps drawing.
@@ -2687,7 +2983,8 @@ namespace BZROpenShim
                               static_cast<unsigned>(g_ShimSettingsUiPageStart /
                                                         kShimSettingsUiVisibleRowCount + 1),
                               static_cast<unsigned>(pageCount));
-                SetInputBindingUiLabelTextFitted(g_ShimSettingsUiPageLabel, pageText, 105.0f);
+                SetInputBindingUiLabelTextFitted(g_ShimSettingsUiPageLabel, pageText,
+                                                 kShimSettingsUiToolbarWidths[2]);
                 SetInputBindingUiButtonText(g_ShimSettingsUiPrevPageButton, "Prev");
                 SetInputBindingUiButtonText(g_ShimSettingsUiNextPageButton, "Next");
             }
@@ -2719,9 +3016,10 @@ namespace BZROpenShim
                 std::string valueText = setting.valueLabels[valueIndex];
                 if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
                     valueText += " *";
-                SetInputBindingUiLabelTextFitted(g_ShimSettingsUiRowLabels[slot], setting.label, 275.0f);
+                SetInputBindingUiLabelTextFitted(g_ShimSettingsUiRowLabels[slot], setting.label,
+                                                 layout.rowLabelTextWidth);
                 SetInputBindingUiButtonTextFitted(g_ShimSettingsUiRowButtons[slot],
-                                                  valueText.c_str(), 165.0f);
+                                                  valueText.c_str(), layout.rowValueTextWidth);
                 SetInputBindingUiViewActive(g_ShimSettingsUiRowLabels[slot], true);
                 SetInputBindingUiViewActive(g_ShimSettingsUiRowButtons[slot], true);
                 SetInputBindingUiViewActive(g_ShimSettingsUiRowBackdrops[slot], true);
@@ -2738,124 +3036,101 @@ namespace BZROpenShim
             if (!controlParent)
                 controlParent = screen;
 
-            static constexpr float kBackdropX = 0.0f;
-            static constexpr float kBackdropY = 0.0f;
-            static constexpr float kBackdropW = 1440.0f;
-            static constexpr float kBackdropH = 1080.0f;
-            static constexpr float kHeaderX = 320.0f;
-            static constexpr float kHeaderY = 176.0f;
-            static constexpr float kHeaderW = 800.0f;
-            static constexpr float kHeaderH = 28.0f;
-            static constexpr float kStatusX = 320.0f;
-            static constexpr float kStatusY = 204.0f;
-            static constexpr float kStatusW = 800.0f;
-            static constexpr float kStatusH = 24.0f;
-            static constexpr float kFooterX = 320.0f;
-            static constexpr float kFooterY = 230.0f;
-            static constexpr float kFooterW = 900.0f;
-            static constexpr float kFooterH = 22.0f;
-            static constexpr float kToolbarY = 256.0f;
-            static constexpr float kToolbarW = 150.0f;
-            static constexpr float kToolbarH = 34.0f;
-            static constexpr float kTopMaskX = 220.0f;
-            static constexpr float kTopMaskY = 122.0f;
-            static constexpr float kTopMaskW = 1000.0f;
-            // Runs down to the content mask seam so the Back button row is not
-            // drawn over an unmasked strip of the stock page (122+174 > 292).
-            static constexpr float kTopMaskH = 174.0f;
-            // Same x/width as the top mask so the two stack into one flush
-            // panel column instead of a stepped pair of rectangles.
-            static constexpr float kContentMaskX = 220.0f;
-            static constexpr float kContentMaskY = 292.0f;
-            static constexpr float kContentMaskW = 1000.0f;
-            static constexpr float kContentMaskH = 456.0f;
-            // Labels get the wider share of each column: at the UI font size the
-            // old 200px label box truncated even short names ("Jet Fl...").
-            // Values are compact enums that shrink their own text scale, so they
-            // read fine in a narrower box.
-            static constexpr float kRowLeftBaseX = 258.0f;
-            static constexpr float kRowRightBaseX = 740.0f;
-            static constexpr float kRowY = 308.0f;
-            static constexpr float kRowLabelW = 285.0f;
-            static constexpr float kRowButtonH = 30.0f;
-            // Matches the input page's row step so both pages read as one family.
-            static constexpr float kRowStep = 38.0f;
-            static constexpr float kRowButtonOffsetX = 292.0f;
-            static constexpr float kRowButtonW = 175.0f;
-            static constexpr float kPageLabelX = 790.0f;
-            static constexpr float kPageLabelY = 262.0f;
-            static constexpr float kPageLabelW = 105.0f;
-            static constexpr float kPageLabelH = 22.0f;
+            const UiOptionsPageLayout layout =
+                BuildUiOptionsPageLayout(kShimSettingsUiRowsPerColumn);
 
             const unsigned screenTag = static_cast<unsigned>(reinterpret_cast<uintptr_t>(screen));
             char controlName[64] = {};
 
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsBackdrop_%08X", screenTag);
-            CreateInputBindingUiOverlay(g_ShimSettingsUiBackdrop, visualParent, controlName,
-                                        "blackui.png", kBackdropX, kBackdropY, kBackdropW, kBackdropH, 0x60);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsFrame_%08X", screenTag);
-            CreateInputBindingUiOverlay(g_ShimSettingsUiFrame, visualParent, controlName,
-                                        "keyOptions_center.png", kBackdropX, kBackdropY, kBackdropW, kBackdropH, 0x60);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsTopMask_%08X", screenTag);
-            CreateInputBindingUiOverlay(g_ShimSettingsUiTopMask, visualParent, controlName,
-                                        "blackui.png", kTopMaskX, kTopMaskY, kTopMaskW, kTopMaskH, 0x60);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsContentMask_%08X", screenTag);
-            CreateInputBindingUiOverlay(g_ShimSettingsUiContentMask, visualParent, controlName,
-                                        "blackui.png", kContentMaskX, kContentMaskY, kContentMaskW, kContentMaskH, 0x60);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsHeaderPlate_%08X", screenTag);
-            CreateInputBindingUiPlate(g_ShimSettingsUiHeaderBackdrop, controlParent, controlName,
-                                      305.0f, 168.0f, 830.0f, 84.0f);
+            UiOptionsPageBackgroundSlots background = {};
+            background.backdrop = &g_ShimSettingsUiBackdrop;
+            background.frame = &g_ShimSettingsUiFrame;
+            background.topMask = &g_ShimSettingsUiTopMask;
+            background.contentMask = &g_ShimSettingsUiContentMask;
+            CreateInputBindingUiPageBackground(background,
+                                               g_ShimSettingsUiDecor,
+                                               visualParent,
+                                               controlParent,
+                                               "OpenShimSettings",
+                                               screenTag,
+                                               layout);
 
             std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsHeader_%08X", screenTag);
             CreateInputBindingUiLabel(g_ShimSettingsUiHeaderLabel, controlParent, controlName, "",
-                                      kHeaderX, kHeaderY, kHeaderW, kHeaderH);
+                                      layout.title.x, layout.title.y,
+                                      layout.title.width, layout.title.height);
             std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsStatus_%08X", screenTag);
             CreateInputBindingUiLabel(g_ShimSettingsUiStatusLabel, controlParent, controlName, "",
-                                      kStatusX, kStatusY, kStatusW, kStatusH);
+                                      layout.statusLine1.x, layout.statusLine1.y,
+                                      layout.statusLine1.width, layout.statusLine1.height);
+            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsStatus2_%08X", screenTag);
+            CreateInputBindingUiLabel(g_ShimSettingsUiStatusDetailLabel, controlParent, controlName, "",
+                                      layout.statusLine2.x, layout.statusLine2.y,
+                                      layout.statusLine2.width, layout.statusLine2.height);
             std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsFooter_%08X", screenTag);
             CreateInputBindingUiLabel(g_ShimSettingsUiFooterLabel, controlParent, controlName, "",
-                                      kFooterX, kFooterY, kFooterW, kFooterH);
+                                      layout.contextLine1.x, layout.contextLine1.y,
+                                      layout.contextLine1.width, layout.contextLine1.height);
+            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsFooter2_%08X", screenTag);
+            CreateInputBindingUiLabel(g_ShimSettingsUiFooterDetailLabel, controlParent, controlName, "",
+                                      layout.contextLine2.x, layout.contextLine2.y,
+                                      layout.contextLine2.width, layout.contextLine2.height);
+            UiDecorRect toolbar[kShimSettingsUiToolbarSlotCount] = {};
+            LayoutUiToolbarRow(layout,
+                               kShimSettingsUiToolbarWidths,
+                               kShimSettingsUiToolbarSlotCount,
+                               kShimSettingsUiToolbarRightGroup,
+                               toolbar,
+                               kShimSettingsUiToolbarSlotCount);
+
             std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsBack_%08X", screenTag);
             CreateInputBindingUiButton(g_ShimSettingsUiBackButton, controlParent, controlName, "Back",
-                                       195.0f, kToolbarY, kToolbarW, kToolbarH,
+                                       toolbar[0].x, toolbar[0].y, toolbar[0].width, toolbar[0].height,
                                        reinterpret_cast<void*>(ShimSettingsBackClick));
             std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsUpdate_%08X", screenTag);
             CreateInputBindingUiButton(g_ShimSettingsUiUpdateButton, controlParent, controlName,
-                                       "Check for Updates", 365.0f, kToolbarY, 180.0f, kToolbarH,
+                                       "Check for Updates",
+                                       toolbar[1].x, toolbar[1].y, toolbar[1].width, toolbar[1].height,
                                        reinterpret_cast<void*>(ShimSettingsUpdateClick));
-            // Prev/Next mirror the input page toolbar (905/1015, w100); refresh
-            // hides all three while the registry still fits on one page.
             std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsPage_%08X", screenTag);
             CreateInputBindingUiLabel(g_ShimSettingsUiPageLabel, controlParent, controlName, "",
-                                      kPageLabelX, kPageLabelY, kPageLabelW, kPageLabelH);
+                                      toolbar[2].x,
+                                      toolbar[2].y + (toolbar[2].height - 28.0f) * 0.5f,
+                                      toolbar[2].width,
+                                      28.0f);
             std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsPrev_%08X", screenTag);
             CreateInputBindingUiButton(g_ShimSettingsUiPrevPageButton, controlParent, controlName, "Prev",
-                                       905.0f, kToolbarY, 100.0f, kToolbarH,
+                                       toolbar[3].x, toolbar[3].y, toolbar[3].width, toolbar[3].height,
                                        reinterpret_cast<void*>(ShimSettingsPrevPageClick));
             std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsNext_%08X", screenTag);
             CreateInputBindingUiButton(g_ShimSettingsUiNextPageButton, controlParent, controlName, "Next",
-                                       1015.0f, kToolbarY, 100.0f, kToolbarH,
+                                       toolbar[4].x, toolbar[4].y, toolbar[4].width, toolbar[4].height,
                                        reinterpret_cast<void*>(ShimSettingsNextPageClick));
 
             for (size_t slot = 0; slot < kShimSettingsUiVisibleRowCount; ++slot)
             {
                 const size_t column = slot / kShimSettingsUiRowsPerColumn;
                 const size_t row = slot % kShimSettingsUiRowsPerColumn;
-                const float baseX = (column == 0) ? kRowLeftBaseX : kRowRightBaseX;
-                const float y = kRowY + (static_cast<float>(row) * kRowStep);
+                const float baseX = (column == 0) ? layout.rowLeftX : layout.rowRightX;
+                const float y = layout.rowStartY + (static_cast<float>(row) * layout.rowPitch);
                 std::snprintf(controlName, sizeof(controlName),
                               "OpenShimSettingsRowPlate_%08X_%02u", screenTag, static_cast<unsigned>(slot));
                 CreateInputBindingUiPlate(g_ShimSettingsUiRowBackdrops[slot], controlParent, controlName,
-                                          baseX - 8.0f, y, kRowButtonOffsetX + 8.0f,
-                                          kRowButtonH);
+                                          baseX - layout.rowPlateInsetX,
+                                          y,
+                                          layout.rowPlateWidth,
+                                          layout.rowHeight);
                 std::snprintf(controlName, sizeof(controlName),
                               "OpenShimSettingsRowLabel_%08X_%02u", screenTag, static_cast<unsigned>(slot));
                 CreateInputBindingUiLabel(g_ShimSettingsUiRowLabels[slot], controlParent, controlName, "",
-                                          baseX, y + 2.0f, kRowLabelW, kRowButtonH);
+                                          baseX, y + layout.rowLabelYInset,
+                                          layout.rowLabelWidth,
+                                          layout.rowHeight - layout.rowLabelYInset);
                 std::snprintf(controlName, sizeof(controlName),
                               "OpenShimSettingsRowButton_%08X_%02u", screenTag, static_cast<unsigned>(slot));
                 CreateInputBindingUiButton(g_ShimSettingsUiRowButtons[slot], controlParent, controlName, "",
-                                           baseX + kRowButtonOffsetX, y, kRowButtonW, kRowButtonH,
+                                           baseX + layout.rowValueOffsetX, y,
+                                           layout.rowValueWidth, layout.rowHeight,
                                            kShimSettingsRowClickCallbacks[slot],
                                            kShimSettingsRowHoverCallbacks[slot]);
             }
@@ -2991,7 +3266,17 @@ namespace BZROpenShim
 
             const char* description = g_ShimSettingsRegistry[settingIndex].description;
             if (description && *description)
-                SetInputBindingUiLabelTextFitted(g_ShimSettingsUiStatusLabel, description, 800.0f);
+            {
+                // Not a hand-picked width: the hover path used to fit to a flat
+                // 800 px on one line, which cut every description that the
+                // header has room to wrap across two.
+                const UiOptionsPageLayout layout =
+                    BuildUiOptionsPageLayout(kShimSettingsUiRowsPerColumn);
+                SetInputBindingUiWrappedLabelText(g_ShimSettingsUiStatusLabel,
+                                                  g_ShimSettingsUiStatusDetailLabel,
+                                                  description,
+                                                  layout.headerTextWidth);
+            }
         }
 
         static void OnShimSettingsPageStepClicked(int direction)
@@ -3144,138 +3429,105 @@ namespace BZROpenShim
             void* const controlParent =
                 g_InputBindingUiMiddleOverlay ? g_InputBindingUiMiddleOverlay : screen;
 
-            static constexpr float kBackdropX = 0.0f;
-            static constexpr float kBackdropY = 0.0f;
-            static constexpr float kBackdropW = 1440.0f;
-            static constexpr float kBackdropH = 1080.0f;
-            static constexpr float kHeaderX = 320.0f;
-            static constexpr float kHeaderY = 176.0f;
-            static constexpr float kHeaderW = 800.0f;
-            static constexpr float kHeaderH = 28.0f;
-            static constexpr float kStatusX = 320.0f;
-            static constexpr float kStatusY = 204.0f;
-            static constexpr float kStatusW = 800.0f;
-            static constexpr float kStatusH = 24.0f;
-            static constexpr float kPageX = 320.0f;
-            static constexpr float kPageY = 230.0f;
-            static constexpr float kPageW = 800.0f;
-            static constexpr float kPageH = 22.0f;
-            static constexpr float kToolbarY = 256.0f;
-            static constexpr float kToolbarW = 150.0f;
-            static constexpr float kToolbarH = 34.0f;
-            static constexpr float kTopMaskX = 220.0f;
-            static constexpr float kTopMaskY = 122.0f;
-            static constexpr float kTopMaskW = 1000.0f;
-            // Runs down to the content mask seam so the toolbar row is not
-            // drawn over an unmasked strip of the stock page (122+174 > 292).
-            static constexpr float kTopMaskH = 174.0f;
-            // Same x/width as the top mask so the two stack into one flush
-            // panel column instead of a stepped pair of rectangles.
-            static constexpr float kContentMaskX = 220.0f;
-            static constexpr float kContentMaskY = 292.0f;
-            static constexpr float kContentMaskW = 1000.0f;
-            static constexpr float kContentMaskH = 456.0f;
-            // Same label/value split as the settings page: labels get the wide
-            // box (the old 205px truncated "Throttle Forward"-length names),
-            // value buttons shrink their own text scale in the narrow one.
-            static constexpr float kRowLeftBaseX = 258.0f;
-            static constexpr float kRowRightBaseX = 740.0f;
-            static constexpr float kRowY = 308.0f;
-            static constexpr float kRowLabelW = 285.0f;
-            static constexpr float kRowButtonH = 30.0f;
-            static constexpr float kRowStep = 38.0f;
-            static constexpr float kRowButtonOffsetX = 292.0f;
-            static constexpr float kRowCompactButtonW = 175.0f;
+            const UiOptionsPageLayout layout =
+                BuildUiOptionsPageLayout(kInputBindingUiRowsPerColumn);
 
             const unsigned screenTag = static_cast<unsigned>(reinterpret_cast<uintptr_t>(screen));
             char controlName[64] = {};
 
-            std::snprintf(controlName, sizeof(controlName), "OpenShimInputBackdrop_%08X", screenTag);
-            CreateInputBindingUiOverlay(g_InputBindingUiBackdrop,
-                                        visualParent,
-                                        controlName,
-                                        "blackui.png",
-                                        kBackdropX,
-                                        kBackdropY,
-                                        kBackdropW,
-                                        kBackdropH,
-                                        0x60);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimInputFrame_%08X", screenTag);
-            CreateInputBindingUiOverlay(g_InputBindingUiFrame,
-                                        visualParent,
-                                        controlName,
-                                        "keyOptions_center.png",
-                                        kBackdropX,
-                                        kBackdropY,
-                                        kBackdropW,
-                                        kBackdropH,
-                                        0x60);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimInputTopMask_%08X", screenTag);
-            CreateInputBindingUiOverlay(g_InputBindingUiTopMask,
-                                        visualParent,
-                                        controlName,
-                                        "blackui.png",
-                                        kTopMaskX,
-                                        kTopMaskY,
-                                        kTopMaskW,
-                                        kTopMaskH,
-                                        0x60);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimInputContentMask_%08X", screenTag);
-            CreateInputBindingUiOverlay(g_InputBindingUiContentMask,
-                                        visualParent,
-                                        controlName,
-                                        "blackui.png",
-                                        kContentMaskX,
-                                        kContentMaskY,
-                                        kContentMaskW,
-                                        kContentMaskH,
-                                        0x60);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimInputHeaderPlate_%08X", screenTag);
-            CreateInputBindingUiPlate(g_InputBindingUiHeaderBackdrop,
-                                      controlParent,
-                                      controlName,
-                                      305.0f,
-                                      168.0f,
-                                      830.0f,
-                                      84.0f);
+            UiOptionsPageBackgroundSlots background = {};
+            background.backdrop = &g_InputBindingUiBackdrop;
+            background.frame = &g_InputBindingUiFrame;
+            background.topMask = &g_InputBindingUiTopMask;
+            background.contentMask = &g_InputBindingUiContentMask;
+            CreateInputBindingUiPageBackground(background,
+                                               g_InputBindingUiDecor,
+                                               visualParent,
+                                               controlParent,
+                                               "OpenShimInput",
+                                               screenTag,
+                                               layout);
 
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputHeader_%08X", screenTag);
-            CreateInputBindingUiLabel(g_InputBindingUiHeaderLabel, controlParent, controlName, "", kHeaderX, kHeaderY, kHeaderW, kHeaderH);
+            CreateInputBindingUiLabel(g_InputBindingUiHeaderLabel, controlParent, controlName, "",
+                                      layout.title.x, layout.title.y,
+                                      layout.title.width, layout.title.height);
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputStatus_%08X", screenTag);
-            CreateInputBindingUiLabel(g_InputBindingUiStatusLabel, controlParent, controlName, "", kStatusX, kStatusY, kStatusW, kStatusH);
+            CreateInputBindingUiLabel(g_InputBindingUiStatusLabel, controlParent, controlName, "",
+                                      layout.statusLine1.x, layout.statusLine1.y,
+                                      layout.statusLine1.width, layout.statusLine1.height);
+            std::snprintf(controlName, sizeof(controlName), "OpenShimInputStatus2_%08X", screenTag);
+            CreateInputBindingUiLabel(g_InputBindingUiStatusDetailLabel, controlParent, controlName, "",
+                                      layout.statusLine2.x, layout.statusLine2.y,
+                                      layout.statusLine2.width, layout.statusLine2.height);
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputPage_%08X", screenTag);
-            CreateInputBindingUiLabel(g_InputBindingUiPageLabel, controlParent, controlName, "", kPageX, kPageY, kPageW, kPageH);
+            CreateInputBindingUiLabel(g_InputBindingUiPageLabel, controlParent, controlName, "",
+                                      layout.contextLine1.x, layout.contextLine1.y,
+                                      layout.contextLine1.width, layout.contextLine1.height);
+            UiDecorRect toolbar[kInputBindingUiToolbarSlotCount] = {};
+            LayoutUiToolbarRow(layout,
+                               kInputBindingUiToolbarWidths,
+                               kInputBindingUiToolbarSlotCount,
+                               kInputBindingUiToolbarRightGroup,
+                               toolbar,
+                               kInputBindingUiToolbarSlotCount);
+
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputBack_%08X", screenTag);
-            CreateInputBindingUiButton(g_InputBindingUiBackButton, controlParent, controlName, "Back", 195.0f, kToolbarY, kToolbarW, kToolbarH, reinterpret_cast<void*>(InputBindingBackClick));
+            CreateInputBindingUiButton(g_InputBindingUiBackButton, controlParent, controlName, "Back",
+                                       toolbar[0].x, toolbar[0].y, toolbar[0].width, toolbar[0].height,
+                                       reinterpret_cast<void*>(InputBindingBackClick));
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputDefaults_%08X", screenTag);
-            CreateInputBindingUiButton(g_InputBindingUiDefaultsButton, controlParent, controlName, "Reset Controls", 355.0f, kToolbarY, 210.0f, kToolbarH, reinterpret_cast<void*>(InputBindingDefaultsClick));
+            CreateInputBindingUiButton(g_InputBindingUiDefaultsButton, controlParent, controlName,
+                                       "Reset Controls",
+                                       toolbar[1].x, toolbar[1].y, toolbar[1].width, toolbar[1].height,
+                                       reinterpret_cast<void*>(InputBindingDefaultsClick));
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputFamily_%08X", screenTag);
-            CreateInputBindingUiButton(g_InputBindingUiInputFamilyButton, controlParent, controlName, "Controls", 585.0f, kToolbarY, kToolbarW, kToolbarH, reinterpret_cast<void*>(InputBindingFamilyInputClick));
+            CreateInputBindingUiButton(g_InputBindingUiInputFamilyButton, controlParent, controlName,
+                                       "Controls",
+                                       toolbar[2].x, toolbar[2].y, toolbar[2].width, toolbar[2].height,
+                                       reinterpret_cast<void*>(InputBindingFamilyInputClick));
             std::snprintf(controlName, sizeof(controlName), "OpenShimGameKeyFamily_%08X", screenTag);
-            CreateInputBindingUiButton(g_InputBindingUiGameKeyFamilyButton, controlParent, controlName, "RTS Actions", 745.0f, kToolbarY, kToolbarW, kToolbarH, reinterpret_cast<void*>(InputBindingFamilyGameKeyClick));
-            // Prev/Next/Refresh stay inside the masked frame (right edge 1220);
-            // the old 1155+90 Refresh spilled past it onto the stock page.
+            CreateInputBindingUiButton(g_InputBindingUiGameKeyFamilyButton, controlParent, controlName,
+                                       "RTS Actions",
+                                       toolbar[3].x, toolbar[3].y, toolbar[3].width, toolbar[3].height,
+                                       reinterpret_cast<void*>(InputBindingFamilyGameKeyClick));
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputPrev_%08X", screenTag);
-            CreateInputBindingUiButton(g_InputBindingUiPrevPageButton, controlParent, controlName, "Prev", 905.0f, kToolbarY, 100.0f, kToolbarH, reinterpret_cast<void*>(InputBindingPrevPageClick));
+            CreateInputBindingUiButton(g_InputBindingUiPrevPageButton, controlParent, controlName,
+                                       "Prev",
+                                       toolbar[4].x, toolbar[4].y, toolbar[4].width, toolbar[4].height,
+                                       reinterpret_cast<void*>(InputBindingPrevPageClick));
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputNext_%08X", screenTag);
-            CreateInputBindingUiButton(g_InputBindingUiNextPageButton, controlParent, controlName, "Next", 1015.0f, kToolbarY, 100.0f, kToolbarH, reinterpret_cast<void*>(InputBindingNextPageClick));
+            CreateInputBindingUiButton(g_InputBindingUiNextPageButton, controlParent, controlName,
+                                       "Next",
+                                       toolbar[5].x, toolbar[5].y, toolbar[5].width, toolbar[5].height,
+                                       reinterpret_cast<void*>(InputBindingNextPageClick));
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputReload_%08X", screenTag);
-            CreateInputBindingUiButton(g_InputBindingUiRefreshButton, controlParent, controlName, "Refresh", 1125.0f, kToolbarY, 90.0f, kToolbarH, reinterpret_cast<void*>(InputBindingRefreshClick));
+            CreateInputBindingUiButton(g_InputBindingUiRefreshButton, controlParent, controlName,
+                                       "Refresh",
+                                       toolbar[6].x, toolbar[6].y, toolbar[6].width, toolbar[6].height,
+                                       reinterpret_cast<void*>(InputBindingRefreshClick));
 
             for (size_t slot = 0; slot < kInputBindingUiVisibleRowCount; ++slot)
             {
                 const size_t column = slot / kInputBindingUiRowsPerColumn;
                 const size_t row = slot % kInputBindingUiRowsPerColumn;
-                const float baseX = (column == 0) ? kRowLeftBaseX : kRowRightBaseX;
-                const float y = kRowY + (static_cast<float>(row) * kRowStep);
+                const float baseX = (column == 0) ? layout.rowLeftX : layout.rowRightX;
+                const float y = layout.rowStartY + (static_cast<float>(row) * layout.rowPitch);
                 std::snprintf(controlName, sizeof(controlName), "OpenShimInputRowPlate_%08X_%02u", screenTag, static_cast<unsigned>(slot));
                 CreateInputBindingUiPlate(g_InputBindingUiRowBackdrops[slot], controlParent, controlName,
-                                          baseX - 8.0f, y,
-                                          kRowButtonOffsetX + 8.0f, kRowButtonH);
+                                          baseX - layout.rowPlateInsetX, y,
+                                          layout.rowPlateWidth,
+                                          layout.rowHeight);
                 std::snprintf(controlName, sizeof(controlName), "OpenShimInputRowLabel_%08X_%02u", screenTag, static_cast<unsigned>(slot));
-                CreateInputBindingUiLabel(g_InputBindingUiRowLabels[slot], controlParent, controlName, "", baseX, y + 2.0f, kRowLabelW, kRowButtonH);
+                CreateInputBindingUiLabel(g_InputBindingUiRowLabels[slot], controlParent, controlName, "",
+                                          baseX, y + layout.rowLabelYInset,
+                                          layout.rowLabelWidth,
+                                          layout.rowHeight - layout.rowLabelYInset);
                 std::snprintf(controlName, sizeof(controlName), "OpenShimInputRowButton_%08X_%02u", screenTag, static_cast<unsigned>(slot));
-                CreateInputBindingUiButton(g_InputBindingUiRowButtons[slot], controlParent, controlName, "", baseX + kRowButtonOffsetX, y, kRowCompactButtonW, kRowButtonH, kInputBindingRowClickCallbacks[slot]);
+                CreateInputBindingUiButton(g_InputBindingUiRowButtons[slot], controlParent, controlName, "",
+                                           baseX + layout.rowValueOffsetX, y,
+                                           layout.rowValueWidth, layout.rowHeight,
+                                           kInputBindingRowClickCallbacks[slot]);
             }
         }
 
@@ -4208,8 +4460,7 @@ namespace BZROpenShim
             if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(button, "optionhv.png");
             if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(button, "optionck.png");
             if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(button, "optionck.png");
-            if (g_BzrFn_SetButtonLabel) g_BzrFn_SetButtonLabel(button, "OpenShim Options");
-            if (g_BzrFn_SetButtonTextScale) g_BzrFn_SetButtonTextScale(button, 0.85f);
+            SetInputBindingUiButtonTextFitted(button, "OpenShim Options", 390.0f);
             if (g_BzrFn_SetOnClick)
                 g_BzrFn_SetOnClick(button, reinterpret_cast<void*>(ShimSettingsMenuClick));
             if (g_BzrFn_SetOnHover)

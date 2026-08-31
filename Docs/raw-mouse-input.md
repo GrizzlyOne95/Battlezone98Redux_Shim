@@ -148,8 +148,9 @@ only by the three mouse sites listed above.
 
 ## Configuration
 
-`[General] RawMouseInput` in `openshim.ini`, boolean, default ON, restart
-required.
+`[General] RawMouseInput` in `openshim.ini`, boolean, default OFF, restart
+required. Set it to `1` to bypass the legacy smoothed/Windows-accelerated
+mouse-message path; set it to `0` to retain stock mouse input.
 
 Precedence, most specific first:
 
@@ -157,15 +158,16 @@ Precedence, most specific first:
    tested first, since `norawinput` contains `rawinput`)
 2. `OPENSHIM_DISABLE_RAW_MOUSE_INPUT` / `BZR_DISABLE_RAW_MOUSE_INPUT`
 3. `[General] RawMouseInput`
-4. default ON
+4. default OFF
 
 Live toggling is available through the existing exported bridge
 (`OpenShimGetRawMouseInputEnabled` / `OpenShimSetRawMouseInputEnabled`), which
 registers or removes the device and flips the flag. The INI value itself is read
 once at startup.
 
-Not yet exposed in the OpenShim Settings UI page — that is a deliberate
-follow-up.
+Exposed as **Raw Mouse Input** in the OpenShim Settings UI page. The change
+is written losslessly to `[General] RawMouseInput` and takes effect after a
+restart. It is also available directly in `openshim.ini` for manual editing.
 
 ## Diagnostics
 
