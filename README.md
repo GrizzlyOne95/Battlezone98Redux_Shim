@@ -159,8 +159,8 @@ That file contains every first-class OpenShim setting with conservative,
 stock-preserving values. OpenShim fixes, enhancements, UI replacements,
 autosave, and diagnostics are opt-in. To disable the legacy mouse path's
 smoothing/Windows acceleration, set `[General] RawMouseInput = 1` and restart
-the game. Users can edit the file directly or enable the native OpenShim
-Settings page where supported.
+the game, or use **Raw Mouse Input** on the native OpenShim Settings page and
+restart.
 
 The exhaustive technical reference remains:
 

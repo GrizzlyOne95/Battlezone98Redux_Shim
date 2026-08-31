@@ -84,6 +84,10 @@ namespace BZROpenShim
         float rowValueWidth = 0.0f;
         float rowValueTextWidth = 0.0f;
         float rowPlateInsetX = 0.0f;
+        // Width of the decorative label plate only. It must stop before the
+        // value button so the engine's reverse child hit-test cannot let the
+        // plate consume value/key-binding clicks.
+        float rowPlateWidth = 0.0f;
     };
 
     UiOptionsPageLayout BuildUiOptionsPageLayout(size_t rowsPerColumn);

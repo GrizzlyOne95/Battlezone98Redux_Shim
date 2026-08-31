@@ -119,14 +119,12 @@ For permanent community matchmaking, a dedicated public service would still be p
 
 This turned out to be much further along than I originally realized. Redux already contains a real native Windows Raw Input path, including the stock rawinput/norawinput launch options and WM_INPUT handling.
 
-OpenShim now exposes that native path as an explicit opt-in through [code][General] RawMouseInput = 1[/code] while still respecting the stock rawinput/norawinput launch options. The shipped player preset and the no-INI fallback leave it off, so installing the DLL alone does not change mouse behavior. The remaining work is mostly validation and presentation rather than building a second mouse-input system from scratch.
+OpenShim now exposes that native path as an explicit opt-in through [code][General] RawMouseInput = 1[/code] while still respecting the stock rawinput/norawinput launch options. The native OpenShim Settings page also exposes it as [b]Raw Mouse Input[/b], marked restart-required. The shipped player preset and the no-INI fallback leave it off, so installing the DLL alone does not change mouse behavior. The remaining work is validation rather than building a second mouse-input system from scratch.
 
-I'd like the OpenShim Input page to expose something simple such as:
+The current UI presents the choice as:
 
 [code]
-Mouse Input:
-Legacy
-Raw Input
+Raw Mouse Input: Off / On
 [/code]
 
 The validation work still needs to cover:

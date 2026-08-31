@@ -95,22 +95,31 @@ namespace
         assert(lastRowBottom <= Bottom(layout.contentPanel) - kUiDecorPanelPadding);
         assert(layout.rowPitch > layout.rowHeight); // rows never touch
 
-        const float plateWidth =
-            layout.rowValueOffsetX + layout.rowValueWidth + layout.rowPlateInsetX;
+        const float plateWidth = layout.rowPlateWidth;
         const float leftPlateX = layout.rowLeftX - layout.rowPlateInsetX;
         const float rightPlateX = layout.rowRightX - layout.rowPlateInsetX;
+        const float leftValueX = layout.rowLeftX + layout.rowValueOffsetX;
+        const float rightValueX = layout.rowRightX + layout.rowValueOffsetX;
+        const float leftFootprintRight = leftValueX + layout.rowValueWidth;
+        const float rightFootprintRight = rightValueX + layout.rowValueWidth;
 
-        // Both plates sit inside the content panel with equal side margins, and
-        // the columns do not touch.
+        // Both complete rows sit inside the content panel with equal side
+        // margins, and the columns do not touch.
         assert(leftPlateX > layout.contentPanel.x);
-        assert(rightPlateX > leftPlateX + plateWidth);
-        assert(rightPlateX + plateWidth < Right(layout.contentPanel));
+        assert(rightPlateX > leftFootprintRight);
+        assert(rightFootprintRight < Right(layout.contentPanel));
         const float leftMargin = leftPlateX - layout.contentPanel.x;
-        const float rightMargin = Right(layout.contentPanel) - (rightPlateX + plateWidth);
+        const float rightMargin = Right(layout.contentPanel) - rightFootprintRight;
         assert(leftMargin == rightMargin);
         assert(leftMargin > kUiDecorBorderThickness);
 
-        // A label and its value button share a row without overlapping, and the
+        // The decorative button-backed plate must not overlap the interactive
+        // value button. Redux tests children in reverse draw order; overlap here
+        // makes the plate paint over and consume clicks meant for the value.
+        assert(leftPlateX + plateWidth <= leftValueX);
+        assert(rightPlateX + plateWidth <= rightValueX);
+
+        // A label and its value button share a row without overlapping, and
         // fitted text widths stop short of both boxes.
         assert(layout.rowLabelWidth <= layout.rowValueOffsetX);
         assert(layout.rowLabelTextWidth < layout.rowLabelWidth);
