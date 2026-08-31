@@ -15,12 +15,6 @@ namespace BZROpenShim
         constexpr uintptr_t kUiWrapperActiveAddr = 0x00918324;
         constexpr uintptr_t kUiCurrentScreenTypeAddr = 0x00918328;
 
-        constexpr uint32_t kPauseScreenType = 0x0B;
-        constexpr uint32_t kOptionsScreenType = 0x03;
-        constexpr uint32_t kSaveGameScreenType = 0x11;
-        constexpr uint32_t kLoadGameScreenType = 0x12;
-        constexpr uint32_t kRestartScreenType = 0x17;
-
         bool IsCursorVisible() noexcept
         {
             CURSORINFO info{};
@@ -62,17 +56,7 @@ namespace BZROpenShim
                 return true;
             }
 
-            switch (*uiCurrentScreenType)
-            {
-            case kPauseScreenType:
-            case kOptionsScreenType:
-            case kSaveGameScreenType:
-            case kLoadGameScreenType:
-            case kRestartScreenType:
-                return true;
-            default:
-                return false;
-            }
+            return IsNonGameplayScreenType(*uiCurrentScreenType);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
@@ -83,5 +67,27 @@ namespace BZROpenShim
     bool IsPauseMenuOpen() noexcept
     {
         return IsMultiplayerPauseMenuOpen() || IsSingleplayerPauseMenuOpen();
+    }
+
+    ShellUiState ReadShellUiState() noexcept
+    {
+        ShellUiState state{};
+        __try
+        {
+            const auto* uiWrapperActive = reinterpret_cast<const volatile uint32_t*>(kUiWrapperActiveAddr);
+            const auto* uiCurrentScreen = reinterpret_cast<void* const volatile*>(kUiCurrentScreenAddr);
+            const auto* uiCurrentScreenType =
+                reinterpret_cast<const volatile uint32_t*>(kUiCurrentScreenTypeAddr);
+
+            state.wrapperActive = *uiWrapperActive != 0;
+            state.screenPresent = *uiCurrentScreen != nullptr;
+            state.screenType = *uiCurrentScreenType;
+            state.readable = true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            state = {};
+        }
+        return state;
     }
 }

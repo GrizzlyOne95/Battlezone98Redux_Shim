@@ -323,6 +323,11 @@ static const float OSE_IBL_SPECULAR_INTENSITY = 0.82;
 static const float OSE_IBL_LEGACY_AMBIENT_RETAIN = 0.20;
 static const float OSE_IBL_SCENE_TINT_STRENGTH = 0.18;
 static const float OSE_IBL_MAX_SPECULAR_MIP = 7.0;
+// A 160-unit fog transition is the reference for a fully atmosphere-supported
+// terrain diffuse floor. Airless/long-range environments retain a small floor
+// for legibility without filling every lunar valley with neutral light.
+static const float OSE_TERRAIN_IBL_REFERENCE_FOG_RANGE = 160.0;
+static const float OSE_TERRAIN_IBL_AIRLESS_FLOOR = 0.15;
 
 // -----------------------------------------------------------------------------
 // DX11 Enhanced Atmospheric Calibration
@@ -502,6 +507,11 @@ void compute_enhanced_atmosphere(
     sunScatter *= fogFactor;
 
     float3 authoredFog = saturate(fogColour);
+#if OSE_LINEAR_LIGHT_ACTIVE
+    // Ogre supplies the mission-authored fog colour in display-referred RGB.
+    // Enhanced lighting composites in linear space and encodes once at output.
+    authoredFog = srgb_to_linear(authoredFog);
+#endif
     float3 ambientTarget = saturate(authoredFog + sceneAmbient * 0.35);
     atmosphereColour = lerp(authoredFog, ambientTarget, OSE_ATMOS_AMBIENT_TINT_STRENGTH);
     float sunBlend = saturate(sunScatter * OSE_ATMOS_SUN_SCATTER_STRENGTH);
@@ -603,6 +613,13 @@ float3 ibl_scene_tint(float3 sceneAmbient, float3 fogColour)
 {
     float3 sceneTint = saturate(sceneAmbient + fogColour * 0.35);
     return lerp(float3(1.0, 1.0, 1.0), sceneTint, OSE_IBL_SCENE_TINT_STRENGTH);
+}
+
+float terrain_ibl_diffuse_strength(float4 fogParams)
+{
+    float validFogRange = (fogParams.z > fogParams.y && abs(fogParams.w) > 1e-8) ? 1.0 : 0.0;
+    float atmosphereSupport = saturate(abs(fogParams.w) * OSE_TERRAIN_IBL_REFERENCE_FOG_RANGE) * validFogRange;
+    return lerp(OSE_TERRAIN_IBL_AIRLESS_FLOOR, 1.0, atmosphereSupport);
 }
 
 void evaluate_legacy_pbr(
@@ -1182,7 +1199,8 @@ void terrain_fragment(
 
     float3 environmentTint = ibl_scene_tint(sceneAmbient.xyz, fogColour.xyz);
     float3 irradiance = irradianceMap.Sample(irradianceSam, worldNormal).xyz * environmentTint;
-    lightResult.xyz += irradiance * diffuseEnergy * OSE_IBL_DIFFUSE_INTENSITY;
+    float terrainDiffuseIblStrength = terrain_ibl_diffuse_strength(fogParams);
+    lightResult.xyz += irradiance * diffuseEnergy * OSE_IBL_DIFFUSE_INTENSITY * terrainDiffuseIblStrength;
 
     float specularMip = saturate(surfaceRoughness) * OSE_IBL_MAX_SPECULAR_MIP;
     float3 prefilteredEnvironment = prefilteredEnvMap.SampleLevel(
