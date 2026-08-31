@@ -1,0 +1,5 @@
+/windows_x86/*.exe
+/macos_x64/*.manifest
+/macos_x64/depot_*/
+/ghidra/
+**/__pycache__/

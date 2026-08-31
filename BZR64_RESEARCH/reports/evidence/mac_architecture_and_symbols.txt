@@ -1,0 +1,55 @@
+Primary executable:
+  Battlezone 98 Redux (Steam).app\Contents\MacOS\Battlezone 98 Redux (Steam)
+  size: 10064980
+  SHA-256: DAE80722CE6B253F1C7F1FD4807BDB379822EFC3735E7DB799D40E2470BA2C00
+  Info.plist version: 2.2.301 (bundle version 301)
+
+Mach-O proof:
+  thin Mach-O 64-bit x86-64
+  magic: 0xFEEDFACF (Magic64)
+  CPU type: 0x01000007 / X86_64
+  CPU subtype: 3 / ALL
+  flags: 0x218085 (NOUNDEFS, DYLDLINK, TWOLEVEL, WEAK_DEFINES, BINDS_TO_WEAK, PIE)
+  preferred unslid __TEXT VM address: 0x100000000
+  UUID: A31437EC-6EC1-3F44-9045-0CD95C8245B0
+  minimum macOS: 10.9
+  SDK: 10.12 (Info.plist DTSDKBuild 16C58)
+  LC_MAIN entry file offset: 0x1AB20
+  LC_FUNCTION_STARTS: file offset 4911280, size 22288
+  no LC_CODE_SIGNATURE
+  no LC_ENCRYPTION_INFO / LC_ENCRYPTION_INFO_64
+
+Segments:
+  __PAGEZERO vmaddr 0x0, vmsize 0x100000000
+  __TEXT vmaddr 0x100000000, vmsize 0x44C000, filesize 4505600
+  __DATA vmaddr 0x10044C000, vmsize 0x2AE3000, filesize 299008
+  __LINKEDIT vmaddr 0x102F2F000, vmsize 0x505000, filesize 5260372
+
+Symbol/unwind qualification:
+  Mach symbol table entries: 101824
+  local symbols reported by dysymtab: 99316
+  external definitions: 1729
+  undefined symbols: 779
+  llvm-nm printable symbols: 26610
+  vtable symbols: 815
+  typeinfo symbols: 996
+  typeinfo-name symbols: 977
+  translation-unit initializers with .cpp/.mm names: 383
+  __unwind_info size: 0x11974
+  __eh_frame size: 0x76F8
+  __gcc_except_tab size: 0x38614
+
+Representative retained identities:
+  GameObject, Craft, HoverCraft, Walker, Weapon, Building, Factory, Recycler,
+  Armory, Howitzer, DistributedObject, AttackTask, PatrolTask, LuaMission,
+  Net, TerrainExpose.
+
+Representative source artifact:
+  /Users/brianlloyd/code/Battlezone98/source/OgreRender/Ogre76Archive.cpp
+
+Final-build compiler-artifact baseline:
+  unique absolute /Users source/code paths: 1184
+  unique ../../source relative paths: 858
+  unique strings containing "assert": 21
+  Windows final comparable source paths: 0 (excluding the one CodeView PDB path)
+  Windows final strings containing "assert": 9
