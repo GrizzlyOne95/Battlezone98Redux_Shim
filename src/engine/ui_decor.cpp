@@ -50,7 +50,8 @@ namespace BZROpenShim
         constexpr float kRowValueOffsetX = 325.0f;
         constexpr float kRowValueWidth = 210.0f;
         constexpr float kRowPlateInsetX = 10.0f;
-        constexpr float kRowPlateWidth = kRowValueOffsetX + kRowValueWidth + kRowPlateInsetX;
+        constexpr float kRowFootprintWidth =
+            kRowValueOffsetX + kRowValueWidth + kRowPlateInsetX;
 
         bool Push(UiDecorPiece*& cursor,
                   size_t& remaining,
@@ -126,7 +127,7 @@ namespace BZROpenShim
         layout.toolbarGap = 10.0f;
 
         layout.rowLeftX = kBodyX + kPlateInset + kRowPlateInsetX;
-        layout.rowRightX = layout.rowLeftX + kRowPlateWidth + kColumnGap;
+        layout.rowRightX = layout.rowLeftX + kRowFootprintWidth + kColumnGap;
         layout.rowPitch = kRowPitch;
         layout.rowHeight = kRowHeight;
         layout.rowLabelYInset = 4.0f;
@@ -136,6 +137,10 @@ namespace BZROpenShim
         layout.rowValueWidth = kRowValueWidth;
         layout.rowValueTextWidth = kRowValueWidth - 16.0f;
         layout.rowPlateInsetX = kRowPlateInsetX;
+        // The plate starts one inset before rowLeftX and ends one inset before
+        // the value button. Leaving the two button-backed views disjoint is
+        // required for both visible button art and reliable click dispatch.
+        layout.rowPlateWidth = kRowValueOffsetX;
 
         const float rowBlockHeight = rowsPerColumn == 0
             ? 0.0f

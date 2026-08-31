@@ -2731,6 +2731,10 @@ namespace BZROpenShim
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::RestartRequired,
               "Key-binding editor on the Input options page. Restart required." },
+            { "Raw Mouse Input", "General", "RawMouseInput", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::RestartRequired,
+              "Bypasses the legacy smoothed/accelerated mouse path. Restart required." },
             { "AutoSave", "AutoSave", "Enabled", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::AutoSave,
@@ -3114,8 +3118,7 @@ namespace BZROpenShim
                 CreateInputBindingUiPlate(g_ShimSettingsUiRowBackdrops[slot], controlParent, controlName,
                                           baseX - layout.rowPlateInsetX,
                                           y,
-                                          layout.rowValueOffsetX + layout.rowValueWidth +
-                                              layout.rowPlateInsetX,
+                                          layout.rowPlateWidth,
                                           layout.rowHeight);
                 std::snprintf(controlName, sizeof(controlName),
                               "OpenShimSettingsRowLabel_%08X_%02u", screenTag, static_cast<unsigned>(slot));
@@ -3513,8 +3516,7 @@ namespace BZROpenShim
                 std::snprintf(controlName, sizeof(controlName), "OpenShimInputRowPlate_%08X_%02u", screenTag, static_cast<unsigned>(slot));
                 CreateInputBindingUiPlate(g_InputBindingUiRowBackdrops[slot], controlParent, controlName,
                                           baseX - layout.rowPlateInsetX, y,
-                                          layout.rowValueOffsetX + layout.rowValueWidth +
-                                              layout.rowPlateInsetX,
+                                          layout.rowPlateWidth,
                                           layout.rowHeight);
                 std::snprintf(controlName, sizeof(controlName), "OpenShimInputRowLabel_%08X_%02u", screenTag, static_cast<unsigned>(slot));
                 CreateInputBindingUiLabel(g_InputBindingUiRowLabels[slot], controlParent, controlName, "",
