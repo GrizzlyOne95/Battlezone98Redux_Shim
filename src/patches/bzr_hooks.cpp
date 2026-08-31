@@ -28145,7 +28145,7 @@ namespace BZROpenShim
                 return false;
             }
 
-            bool configured = true;
+            bool configured = false;
             if (TryGetUserConfigBool("General", "RawMouseInput", configured))
             {
                 outSource = "openshim.ini";
@@ -28153,7 +28153,7 @@ namespace BZROpenShim
             }
 
             outSource = "default";
-            return true;
+            return false;
         }
     }
 
