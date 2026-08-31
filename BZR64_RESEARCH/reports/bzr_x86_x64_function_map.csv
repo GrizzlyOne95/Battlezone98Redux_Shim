@@ -1,0 +1,7 @@
+Subsystem,WindowsAddress,MacAddress,WindowsName,MacName,Confidence,Evidence,Notes
+Resource/Modable,0x0076A030,0x00000001000A9FC8,cWorkshop::buildMainResources,cWorkshop::buildModResources(),PROVEN,"mode=4 guard; ClearResourcePaths; Ogre76Archive::removeAllModPaths; clearResourceGroup(""Modable""); initialiseResourceGroup(""Modable""); RuntimeBuildResourceSystem","Windows repository name is buildMainResources; Mac retained symbol is buildModResources"
+Resource/Modable,0x0076A240,0x00000001000A9D7C,cWorkshop::buildMPResources,cWorkshop::buildMPResources(),PROVEN,"mode=2 guard and identical resource/Ogre call sequence","Direct disassembly on both binaries"
+Resource/Modable,0x0076A430,0x00000001000A9B48,cWorkshop::buildIAResources,cWorkshop::buildIAResources(),PROVEN,"mode=1 guard and identical resource/Ogre call sequence","Direct disassembly on both binaries"
+Serialization,,0x000000010001EE4A,GameObject::Save,GameObject::Save(__sFILE*),HIGH,"same ordered field labels and typed out(file,address,size,label) serialization","Windows shipped implementation is identified by exact field xrefs; function entry is not asserted in this pass"
+Lua/objects,,0x00000001001C8E80,,BuildObject(lua_State*),PROVEN,"retained symbol plus direct calls to BuildObject overloads returning int and PushHandle(lua_State*,int)","No Windows address asserted in this pass"
+Lua/handles,,0x00000001001C7FEA,,"PushHandle(lua_State*,int)",PROVEN,"sign-extends a 32-bit int then calls lua_pushlightuserdata; zero becomes nil","No Windows address asserted in this pass"

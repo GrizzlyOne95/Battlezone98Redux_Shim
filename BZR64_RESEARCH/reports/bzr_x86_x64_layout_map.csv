@@ -1,0 +1,8 @@
+Class,Field,WindowsOffset,MacOffset,WindowsSize,MacSize,Confidence,Evidence
+cWorkshop,mode,0x8C,0x148,4,4,PROVEN,"Windows mode guards/stores in three known functions; Mac named functions use the same mode values"
+cWorkshop,contentIdentity,0x90,0x150,,24,PROVEN,"Windows existing static RE identifies std::string; Mac constructor zero-initializes a 24-byte libc++ string and assigns **INVALID**"
+GameObject,illumination,0xDC,0x110,4,4,PROVEN,"Windows shipped-binary literal xref documented in satellite FOW RE; Mac named GameObject::Save serializes label illumination from this+0x110 with size 4"
+GameObject,perceivedTeam,0x174,0x1C8,4,4,PROVEN,"Windows shipped-binary literal xref; Mac named GameObject::Save label perceivedTeam from this+0x1C8 with size 4"
+GameObject,isVisible,0x180,0x1DC,4,4,PROVEN,"Windows shipped-binary literal xref; Mac named GameObject::Save label isVisible from this+0x1DC with size 4"
+GameObject,seen,0x184,0x1E0,4,4,PROVEN,"Windows shipped-binary literal xref; Mac named GameObject::Save label seen from this+0x1E0 with size 4"
+GameObject,handleGeneration,,0x1A0,,4,PROVEN,"Mac GameObject::Save label seqNo and GameObject::GetObj(int) compare this+0x1A0 against the low 20 handle bits; Windows offset not asserted"

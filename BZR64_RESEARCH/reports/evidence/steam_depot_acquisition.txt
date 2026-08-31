@@ -1,0 +1,29 @@
+Battlezone 98 Redux app: 301650
+Mac depot: 301651
+Windows depot: 301652
+
+Successful exact final Mac request:
+  C:\steamcmd\steamcmd.exe +login iankf1 +download_depot 301650 301651 730966170255625169 +quit
+
+SteamCMD retrieved the requested manifest and all 20,837 regular files, then returned exit 1 because Windows could not create nine macOS framework symlinks (Win32 result 1314). The manifest contains 20,939 entries: 20,837 regular files, 93 directories, and 9 symlinks. All symlink targets point at already-present versioned Ogre framework content. The regular-file depot is therefore preserved without replacing or modifying any depot file.
+
+Final Mac manifest:
+  301651 / 730966170255625169
+  manifest SHA-256: 187735A9893ACE0BFF3EA5A5066B893A15B52CC04A1DD1D6D9165F41492C2183
+  content bytes: 2280957958
+  regular files materialized: 20837
+
+Synchronized beta fixture requested by the user (SteamDB timestamp supplied by user: 2017-03-20 09:38:35 UTC):
+  Mac     301651 / 8544972427174986303
+  Windows 301652 / 1071688624677329472
+
+Exact commands attempted:
+  C:\steamcmd\steamcmd.exe +login iankf1 +download_depot 301650 301651 8544972427174986303 +quit
+  C:\steamcmd\steamcmd.exe +@sSteamCmdForcePlatformType macos +login iankf1 +download_depot 301650 301651 8544972427174986303 +quit
+  C:\steamcmd\steamcmd.exe +login iankf1 +download_depot 301650 301652 1071688624677329472 +quit
+
+All three requests failed before download. SteamCMD's user-facing error was "Failed downloading 1 manifests (No connection)". The authoritative local content log recorded:
+  CDepotDownloadMgr::BYldRequestDepotManifest(App: 301650, Depot: 301651, Manifest: 8544972427174986303, branch: ): Failed to get manifest request code, 'Access Denied'
+  CDepotDownloadMgr::BYldRequestDepotManifest(App: 301650, Depot: 301652, Manifest: 1071688624677329472, branch: ): Failed to get manifest request code, 'Access Denied'
+
+No local cached copy of either historical manifest was found. No alternate manifest was substituted. The already acquired final Mac manifest remains preserved in the analysis workspace.
