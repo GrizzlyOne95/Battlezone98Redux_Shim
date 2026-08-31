@@ -95,9 +95,8 @@ jobs:
           /p:GenerateFullPaths=true `
           /verbosity:minimal
 
-    # Verify the exact DLL that will be published and retain its digest in the
-    # release payload so Workshop/standalone packages can be matched to the tag.
-    - name: Verify and hash release output
+    # Verify the exact DLL that will be published before any release packaging.
+    - name: Verify release output
       shell: pwsh
       run: |
         $dll = Join-Path $PWD "bin/Release/winmm.dll"
@@ -105,21 +104,66 @@ jobs:
           throw "Expected release output was not produced: $dll"
         }
         $hash = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash.ToLowerInvariant()
-        "winmm.dll  $hash" | Set-Content -LiteralPath SHA256SUMS.txt -Encoding ascii
-        Get-Content -LiteralPath SHA256SUMS.txt
+        Write-Host "winmm.dll SHA-256: $hash"
 
-    - name: Prepare Release Artifacts
-      shell: bash
+    - name: Prepare standalone and immutable suite artifacts
+      shell: pwsh
       run: |
-        mkdir release_assets
-        cp bin/Release/winmm.dll release_assets/
-        cp scripts/patches.json release_assets/
-        # Ship the player-oriented preset and keep the exhaustive reference
-        # alongside it so users can tweak settings without starting from the
-        # developer configuration.
-        cp openshim.ini release_assets/
-        cp openshim.ini.example release_assets/
-        cp SHA256SUMS.txt release_assets/
+        $releaseAssets = Join-Path $PWD "release_assets"
+        $suiteRoot = Join-Path $env:RUNNER_TEMP "OpenShim-Suite"
+        Remove-Item -LiteralPath $releaseAssets -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $suiteRoot -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Path $releaseAssets -Force | Out-Null
+        New-Item -ItemType Directory -Path $suiteRoot -Force | Out-Null
+
+        # Keep standalone assets convenient for manual installs while also
+        # publishing one immutable suite archive for Campaign Reimagined. The
+        # archive mirrors the repository paths consumed by its existing packager.
+        Copy-Item -LiteralPath "bin\Release\winmm.dll" -Destination $releaseAssets -Force
+        Copy-Item -LiteralPath "scripts\patches.json" -Destination $releaseAssets -Force
+        Copy-Item -LiteralPath "openshim.ini" -Destination $releaseAssets -Force
+        Copy-Item -LiteralPath "openshim.ini.example" -Destination $releaseAssets -Force
+        Copy-Item -LiteralPath "net.ini" -Destination $releaseAssets -Force
+
+        New-Item -ItemType Directory -Path (Join-Path $suiteRoot "bin\Release") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $suiteRoot "scripts") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $suiteRoot "resources\renderer") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $suiteRoot "resources\ui") -Force | Out-Null
+        Copy-Item -LiteralPath "bin\Release\winmm.dll" -Destination (Join-Path $suiteRoot "bin\Release\winmm.dll") -Force
+        Copy-Item -LiteralPath "scripts\patches.json" -Destination (Join-Path $suiteRoot "scripts\patches.json") -Force
+        Copy-Item -LiteralPath "openshim.ini" -Destination (Join-Path $suiteRoot "openshim.ini") -Force
+        Copy-Item -LiteralPath "openshim.ini.example" -Destination (Join-Path $suiteRoot "openshim.ini.example") -Force
+        Copy-Item -LiteralPath "net.ini" -Destination (Join-Path $suiteRoot "net.ini") -Force
+        Copy-Item -LiteralPath "resources\renderer\enhanced" -Destination (Join-Path $suiteRoot "resources\renderer\enhanced") -Recurse -Force
+        Copy-Item -LiteralPath "resources\ui\custom_widgets" -Destination (Join-Path $suiteRoot "resources\ui\custom_widgets") -Recurse -Force
+
+        # Record the exact source identity inside the archive so downstream
+        # packagers can prove which qualified OpenShim commit they consumed.
+        [ordered]@{
+          FormatVersion = 1
+          Tag = "${{ github.ref_name }}"
+          Commit = "${{ github.sha }}"
+          Architecture = "x86"
+          BuiltAtUtc = [DateTime]::UtcNow.ToString("o")
+        } | ConvertTo-Json -Depth 4 |
+          Set-Content -LiteralPath (Join-Path $suiteRoot "release_metadata.json") -Encoding UTF8
+
+        $checksumEntries = @()
+        foreach ($relativePath in @("winmm.dll", "patches.json", "openshim.ini", "openshim.ini.example", "net.ini")) {
+          $filePath = Join-Path $releaseAssets $relativePath
+          $hash = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $checksumEntries += "$hash  $relativePath"
+        }
+        $checksumEntries | Set-Content -LiteralPath (Join-Path $releaseAssets "SHA256SUMS.txt") -Encoding ascii
+        Copy-Item -LiteralPath (Join-Path $releaseAssets "SHA256SUMS.txt") -Destination (Join-Path $suiteRoot "SHA256SUMS.txt") -Force
+
+        $suiteZip = Join-Path $releaseAssets "OpenShim-Suite.zip"
+        Compress-Archive -Path (Join-Path $suiteRoot "*") -DestinationPath $suiteZip -CompressionLevel Optimal -Force
+        $suiteHash = (Get-FileHash -LiteralPath $suiteZip -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$suiteHash  OpenShim-Suite.zip" | Set-Content -LiteralPath (Join-Path $releaseAssets "OpenShim-Suite.zip.sha256") -Encoding ascii
+
+        Get-Content -LiteralPath (Join-Path $releaseAssets "SHA256SUMS.txt")
+        Get-Content -LiteralPath (Join-Path $releaseAssets "OpenShim-Suite.zip.sha256")
 
     - name: Create Release
       id: create_release
@@ -130,7 +174,10 @@ jobs:
           release_assets/patches.json
           release_assets/openshim.ini
           release_assets/openshim.ini.example
+          release_assets/net.ini
           release_assets/SHA256SUMS.txt
+          release_assets/OpenShim-Suite.zip
+          release_assets/OpenShim-Suite.zip.sha256
         draft: false
         prerelease: false
         # Auto-generated notes prevent successful tagged releases from landing
