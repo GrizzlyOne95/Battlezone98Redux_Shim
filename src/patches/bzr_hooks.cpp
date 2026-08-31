@@ -900,6 +900,12 @@ namespace BZROpenShim
         constexpr uintptr_t kGogRecordDeathEntryAddr = 0x00577290;
         constexpr uintptr_t kSteam64GlobalAddr = 0x0260B1D0;
         constexpr uintptr_t kLocalPlayerNetIdAddr = 0x009180D4;
+        // Returned when the net id cannot be read at all. Every SinglePlayer-tier
+        // gate is written as "net id == 0", so a sentinel that is not 0 makes an
+        // unreadable net id stand the feature down instead of enabling it. This
+        // matches AutoSave, whose gate already treats an unreadable state as "not
+        // a live single-player mission" (autosave.cpp IsSinglePlayerMissionActive).
+        constexpr uint16_t kLocalPlayerNetIdUnreadable = 0xFFFFu;
         constexpr uintptr_t kUiWrapperActiveAddr = 0x00918324;
         constexpr uintptr_t kGogArtilleryDoAttackEntryAddr = 0x0042AF10;
         constexpr size_t kArtilleryDoAttackDetourLen = 10;
@@ -2168,6 +2174,11 @@ namespace BZROpenShim
         static FnScriptProducerPredicate g_BzrFn_ScriptCanBuildOriginal = nullptr;
         static FnScriptProducerPredicate g_BzrFn_ScriptIsBusyOriginal = nullptr;
         static bool g_ProducerScriptPredicateHooksInstalled = false;
+        // [Fixes] ProducerScriptPredicates. Extends the script-facing CanBuild /
+        // IsBusy predicates to base producers. Default on; switchable because it
+        // changes what mission Lua observes, in single-player and multiplayer
+        // alike, and it had no opt-out at all before.
+        static bool g_ProducerScriptPredicateHooksEnabled = true;
         static bool g_BriefingScrollFixInstalled = false;
         static bool g_BriefingScrollFixEnabled = true;
         static bool g_MultiRenderCountClampInstalled = false;
@@ -2349,6 +2360,11 @@ namespace BZROpenShim
         static constexpr bool kJumpSnipeCrouchEnabledDefault = true;
         static bool g_BomberAiRangeBaselineEnabled = kBomberAiRangeEnabledDefault;
         static bool g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
+        // Configured value AND'd with the single-player gate, same contract as
+        // g_AiOdfGameplayTuningActive below. This feature changes stock content
+        // (it raises bomber engagement range from the craft's own weapon ODFs),
+        // so it must never reach a network game.
+        static bool g_BomberAiRangeActive = false;
         static bool g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
         static bool g_HowitzerUndeployedRetaliationFixEnabled =
             kHowitzerUndeployedRetaliationFixEnabledDefault;
@@ -2363,6 +2379,11 @@ namespace BZROpenShim
         static bool g_AiOdfGameplayTuningActive = false;
         static bool g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
         static bool g_AttackRevealEnabled = kAttackRevealEnabledDefault;
+        // Configured value AND'd with the single-player gate. perceivedTeam is
+        // simulation state -- it drives AI target selection, radar and the
+        // satellite view -- so the reveal must never run in a network game, no
+        // matter which source (INI, env, or the EXU bridge) turned it on.
+        static bool g_AttackRevealActive = false;
 
         static constexpr size_t kGameObjectPlayerShotOffset = 0x1D8;
         static constexpr size_t kGameObjectEnemyShotOffset = 0x1E8;
@@ -9132,6 +9153,10 @@ namespace BZROpenShim
             return outValue != 0;
         }
 
+        // Non-zero in a network game (the host has an id too). Fails CLOSED:
+        // see kLocalPlayerNetIdUnreadable. Callers that only want to know
+        // "am I in a network session" should read this as `!= 0`, which is
+        // correct for the sentinel as well.
         static uint16_t ReadLocalPlayerNetIdValue()
         {
             __try
@@ -9140,8 +9165,16 @@ namespace BZROpenShim
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                return 0;
+                return kLocalPlayerNetIdUnreadable;
             }
+        }
+
+        // The one predicate every SinglePlayer-tier feature gate is written
+        // against. Named so a new feature does not have to rediscover that
+        // "net id 0" means "safe to touch the simulation".
+        static bool IsSinglePlayerSession()
+        {
+            return ReadLocalPlayerNetIdValue() == 0;
         }
 
         static uint32_t ReadUiWrapperActiveValue()
@@ -11371,6 +11404,19 @@ namespace BZROpenShim
         };
 
         static bool g_SatelliteVisibilityFixEnabled = true;
+        // Configured value AND'd with the single-player gate. This one is
+        // client-side only -- it cannot desync anything -- but it is a
+        // competitive asymmetry in the shim user's DISfavour: it hides enemies
+        // the team has never illuminated, so a shim player would see less on
+        // the satellite than a stock peer in the same match. Standing it down
+        // in a network game restores parity with stock Redux.
+        static bool g_SatelliteVisibilityFixActive = false;
+
+        static void RefreshSatelliteVisibilityFixState()
+        {
+            g_SatelliteVisibilityFixActive =
+                g_SatelliteVisibilityFixEnabled && IsSinglePlayerSession();
+        }
         static bool g_SatVisWasActive = false;
         static uint32_t g_SatVisSweepTick = 0;
         static std::unordered_map<void*, SatelliteEntityVisibility> g_SatelliteVisibilityState;
@@ -11983,8 +12029,17 @@ namespace BZROpenShim
 
         static void SyncSatelliteVisibility()
         {
-            if (!g_SatelliteVisibilityFixEnabled)
+            // Deliberately not an early-out on "inactive". Going inactive while
+            // the satellite view is open -- the feature switched off, or a
+            // network game starting -- must still reach the exit transition
+            // below so every entity this pass hid gets its visibility put back.
+            // Only skip when there is genuinely nothing to do or undo.
+            if (!g_SatelliteVisibilityFixActive &&
+                !g_SatVisWasActive &&
+                g_SatelliteVisibilityState.empty())
+            {
                 return;
+            }
 
             static FnOgreSetVisible setVisible =
                 ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
@@ -12013,7 +12068,10 @@ namespace BZROpenShim
                 return;
             }
 
-            const bool currentSatellite = IsSatelliteOverviewActive();
+            // An inactive feature reads as "not in satellite view", which is
+            // what drives the restore transition below.
+            const bool currentSatellite =
+                g_SatelliteVisibilityFixActive && IsSatelliteOverviewActive();
 
             // --- Transition: leaving satellite ---
             // Restore original visibility for every tracked entity that is
@@ -13739,12 +13797,28 @@ namespace BZROpenShim
             RefreshAiOdfGameplayTuningState();
         }
 
-        // No refresh partner: unlike AiOdfGameplayTuning this feature is read
-        // straight off g_BomberAiRangeEnabled at its one use site, with no
-        // derived Active flag to reconcile against the net id.
+        static void RefreshBomberAiRangeState()
+        {
+            g_BomberAiRangeActive =
+                g_BomberAiRangeEnabled && IsSinglePlayerSession();
+        }
+
         static void RevertBomberAiRangeToBaseline()
         {
             g_BomberAiRangeEnabled = g_BomberAiRangeBaselineEnabled;
+            RefreshBomberAiRangeState();
+        }
+
+        static void RefreshAttackRevealState()
+        {
+            g_AttackRevealActive =
+                g_AttackRevealEnabled && IsSinglePlayerSession();
+        }
+
+        static void RevertAttackRevealToBaseline()
+        {
+            g_AttackRevealEnabled = kAttackRevealEnabledDefault;
+            RefreshAttackRevealState();
         }
 
         static const char* BoolText(bool value);
@@ -13840,6 +13914,7 @@ namespace BZROpenShim
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "BomberAiRange", value))
                 g_BomberAiRangeBaselineEnabled = value;
             g_BomberAiRangeEnabled = g_BomberAiRangeBaselineEnabled;
+            RefreshBomberAiRangeState();
 
             g_AiOdfGameplayTuningBaselineEnabled = kAiOdfGameplayTuningEnabledDefault;
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "AiOdfGameplayTuning", value))
@@ -17986,7 +18061,14 @@ namespace BZROpenShim
             { "AiOdfGameplayTuning", FeatureTier::SinglePlayer,
               &RevertAiOdfGameplayTuningToBaseline, &RefreshAiOdfGameplayTuningState },
             { "BomberAiRange", FeatureTier::SinglePlayer,
-              &RevertBomberAiRangeToBaseline, nullptr },
+              &RevertBomberAiRangeToBaseline, &RefreshBomberAiRangeState },
+            { "AttackRevealPerceivedTeam", FeatureTier::SinglePlayer,
+              &RevertAttackRevealToBaseline, &RefreshAttackRevealState },
+            // Client-side only, so it cannot desync -- but it is documented
+            // under [SinglePlayer], and standing it down online is what keeps
+            // a shim player's satellite view equivalent to a stock peer's.
+            { "SatelliteVisibilityFix", FeatureTier::SinglePlayer,
+              nullptr, &RefreshSatelliteVisibilityFixState },
         };
 
         // Restore every registered feature to its resting state (mission end).
@@ -18007,6 +18089,58 @@ namespace BZROpenShim
                 if (feature.refreshMpGate)
                     feature.refreshMpGate();
             }
+        }
+
+        // Slow re-assert cadence for the gate. A net id change reconciles
+        // immediately regardless; this only bounds how long a patch site the
+        // engine rewrote underneath us can stay out of sync.
+        constexpr ULONGLONG kMpGateReassertMs = 250;
+
+        // The gate's driver. Until now the only caller of
+        // RefreshRegisteredMpGatedFeatures was ChunkEffectSimulateHook, which
+        // runs only while debris is simulating -- so a byte-patched
+        // SinglePlayer feature armed before a network game started stayed armed
+        // until that match's first explosion. This is called from the Ogre
+        // world-queue update as well, which runs every rendered frame whether or
+        // not anything has blown up, and reconciles the instant the net id moves.
+        static void TickMpGateReconcile()
+        {
+            static uint16_t s_LastNetId = 0;
+            static ULONGLONG s_LastReconcileTick = 0;
+
+            // Only reconcile while a mission world exists. Some registry
+            // entries write executable bytes (the crouch branch, the turbo
+            // hooks), and this must not pull those writes earlier than the
+            // chunk-effect driver already did: on Steam a .text write before
+            // the runtime has settled trips SteamStub's integrity check. The
+            // net id is deliberately NOT sampled into s_LastNetId here, so a
+            // change that happened in the shell still reconciles on the first
+            // frame of the mission that follows.
+            if (!SatelliteWorldIsLive())
+                return;
+
+            const uint16_t netId = ReadLocalPlayerNetIdValue();
+            const ULONGLONG now = GetTickCount64();
+            const bool netIdChanged = netId != s_LastNetId;
+
+            if (!netIdChanged &&
+                s_LastReconcileTick != 0 &&
+                now - s_LastReconcileTick < kMpGateReassertMs)
+            {
+                return;
+            }
+
+            if (netIdChanged)
+            {
+                Log(L"[MPGATE] net id %u -> %u; reconciling SinglePlayer-tier features (%hs)\n",
+                    static_cast<unsigned>(s_LastNetId),
+                    static_cast<unsigned>(netId),
+                    netId == 0 ? "single-player" : "network game");
+            }
+
+            s_LastNetId = netId;
+            s_LastReconcileTick = now;
+            RefreshRegisteredMpGatedFeatures();
         }
 
         static void InstallChunkEffectCreateHooksIfRequested()
@@ -19353,7 +19487,7 @@ namespace BZROpenShim
                 tuning.hasWeaponRangeMinAI &&
                 !tuning.derivedBomberWeaponRangeAI;
             const bool useDerivedBomberRange =
-                g_BomberAiRangeEnabled &&
+                g_BomberAiRangeActive &&
                 tuning.bomberAiRole &&
                 tuning.hasWeaponRangeMinAI &&
                 tuning.derivedBomberWeaponRangeAI;
@@ -19607,12 +19741,16 @@ namespace BZROpenShim
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectPtr)),
                 perceivedTeam,
                 actualTeam,
-                BoolText(g_AttackRevealEnabled));
+                BoolText(g_AttackRevealActive));
         }
 
         static void RevealProcessOwnerPerceivedTeam(void* processPtr, const char* sourceTag)
         {
-            if (!g_AttackRevealEnabled || !processPtr)
+            // g_AttackRevealActive, not g_AttackRevealEnabled: the reveal writes
+            // perceivedTeam, which is simulation state, so it is hard-gated on
+            // the net id like every other [SinglePlayer] feature. The three
+            // DoSubTask detours that call this stay installed either way.
+            if (!g_AttackRevealActive || !processPtr)
                 return;
 
             __try
@@ -20145,6 +20283,9 @@ namespace BZROpenShim
 
         static void InstallProducerScriptPredicateHooksIfPossible()
         {
+            if (!g_ProducerScriptPredicateHooksEnabled)
+                return;
+
             if (g_ProducerScriptPredicateHooksInstalled)
                 return;
 
@@ -28883,6 +29024,9 @@ namespace BZROpenShim
 		g_ThumbnailBmpGuardEnabled =
 			!(EnvFlagEnabled("OPENSHIM_DISABLE_BMP_GUARD") ||
 			  EnvFlagEnabled("BZR_DISABLE_BMP_GUARD"));
+		g_ProducerScriptPredicateHooksEnabled =
+			!(EnvFlagEnabled("OPENSHIM_DISABLE_PRODUCER_SCRIPT_PREDICATES") ||
+			  EnvFlagEnabled("BZR_DISABLE_PRODUCER_SCRIPT_PREDICATES"));
 		g_TugCargoPostLoadFixEnabled =
 			!(EnvFlagEnabled("OPENSHIM_DISABLE_TUG_CARGO_FIX") ||
 			  EnvFlagEnabled("BZR_DISABLE_TUG_CARGO_FIX"));
@@ -29188,6 +29332,7 @@ namespace BZROpenShim
             {
                 g_SatelliteVisibilityFixEnabled = true;
             }
+            RefreshSatelliteVisibilityFixState();
             g_SatVisWasActive = false;
             g_SatVisSweepTick = 0;
             g_SatelliteVisibilityState.clear();
@@ -29262,6 +29407,7 @@ namespace BZROpenShim
             {
                 g_AttackRevealEnabled = kAttackRevealEnabledDefault;
             }
+            RefreshAttackRevealState();
         }
         g_ConstructorRemoteBuildFixEnabled =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX") ||
@@ -29984,7 +30130,10 @@ namespace BZROpenShim
     {
         RetryDeferredRuntimeHooks();
         g_BomberAiRangeEnabled = enabled;
-        Log(L"[MISSIONHOOK] bomber AI range override %hs\n", enabled ? "enabled" : "disabled");
+        RefreshBomberAiRangeState();
+        Log(L"[MISSIONHOOK] bomber AI range override %hs (active=%hs)\n",
+            enabled ? "enabled" : "disabled",
+            BoolText(g_BomberAiRangeActive));
         return true;
     }
 
@@ -30235,7 +30384,10 @@ namespace BZROpenShim
     {
         RetryDeferredRuntimeHooks();
         g_AttackRevealEnabled = enabled;
-        Log(L"[MISSIONHOOK] attack reveal %hs\n", enabled ? "enabled" : "disabled");
+        RefreshAttackRevealState();
+        Log(L"[MISSIONHOOK] attack reveal %hs (active=%hs)\n",
+            enabled ? "enabled" : "disabled",
+            BoolText(g_AttackRevealActive));
         return true;
     }
 
@@ -32536,6 +32688,11 @@ namespace BZROpenShim
         // 200 ms and also owns the live SP/MP + EXU authority gate.
         RefreshHeadlightState();
 
+        // For the same reason, this is the primary driver of the multiplayer
+        // gate: every SinglePlayer-tier feature is reconciled here rather than
+        // waiting on the first chunk effect of the match. Internally throttled.
+        TickMpGateReconcile();
+
         // Sample after the stock world queue update, when Ogre has evaluated
         // the entity materials and its hardware-animation decision is current.
         RefreshVehicleSkinningDiagnosticsIfNeeded();
@@ -33460,10 +33617,11 @@ namespace BZROpenShim
 
         if (!g_JumpSnipeProbeInstalled)
             InstallJumpSnipingProbeIfRequested();
-        // Continuous multiplayer guard: reverts any SinglePlayer-tier feature
-        // (e.g. the crouch patch) if a network game becomes active while it was
-        // enabled by scripted content.
-        RefreshRegisteredMpGatedFeatures();
+        // Secondary driver for the multiplayer guard, kept so the gate still
+        // reconciles if the Ogre world-queue hook (the primary driver, see
+        // LegacyWorldUpdateRenderQueueHook) failed to install. Shares
+        // TickMpGateReconcile's throttle, so this is not duplicate work.
+        TickMpGateReconcile();
         // Multiplayer vehicle flags: render from the sim tick whenever the
         // engine is not dispatching the hooked FlagDisplay::Submit slot.
         MaybeDriveMultiplayerFlagRenderFallback();

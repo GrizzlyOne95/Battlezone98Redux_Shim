@@ -110,6 +110,16 @@ Write-Host "player openshim.ini completeness passed ($($referenceIds.Count) sett
 # The shipped player preset is deliberately opt-in. Catch accidental regressions
 # where a feature-like boolean/enum is re-enabled while still allowing the two
 # numerically-ON values that preserve stock behavior and one numeric count.
+#
+# [Fixes] is exempt as a section: those keys are confirmed Redux engine defects,
+# not enhancements, so the opt-in policy does not apply to them -- they ship ON
+# and exist only so an individual fix can be switched off for multiplayer parity
+# or to bisect a suspected regression. A new key added there must still be
+# documented in openshim.ini.example, which the completeness check above covers.
+$allowedEnabledLookingSections = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::OrdinalIgnoreCase)
+[void]$allowedEnabledLookingSections.Add("Fixes")
+
 $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new(
     [System.StringComparer]::OrdinalIgnoreCase)
 @(
@@ -140,6 +150,7 @@ foreach ($line in Get-Content -LiteralPath $playerIni) {
     $id = "$section/$key"
     $playerValues[$id] = $value
     if ($enabledLookingTokens.Contains($value) -and
+        -not $allowedEnabledLookingSections.Contains($section) -and
         -not $allowedEnabledLookingValues.Contains($id)) {
         $unexpectedEnabledValues += "$id = $value"
     }
