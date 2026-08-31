@@ -19,6 +19,15 @@ jobs:
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v2
 
+    # The Ogre reference headers are an untracked sparse checkout, so a fresh
+    # CI checkout has no OgreEntity.h and the build fails in the two Ogre
+    # translation units. build-win32.yml has always done this; release.yml did
+    # not, which is why every tagged release build since those files landed has
+    # failed at the Build Shim step. Idempotent and pinned to one commit.
+    - name: Fetch pinned Ogre reference headers
+      shell: pwsh
+      run: ./setup-dev.ps1
+
     - name: Build Shim
       run: msbuild BZROpenShim.sln /p:Configuration=Release /p:Platform=Win32 /m
 
