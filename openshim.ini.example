@@ -192,6 +192,87 @@ EditorOverheadPlacementOrder = 0
 ; Accepted: boolean. Default: ON.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_HOP_OUT_ATTACK_ALERT_FIX
 SuppressHopOutAttackAlert = 1
+
+[Fixes]
+
+; ---------------------------------------------------------------------------
+; Confirmed Redux engine defects
+; ---------------------------------------------------------------------------
+; Everything in this section defaults to ON. These are bug fixes, not
+; enhancements, and normal play wants them on.
+;
+; They are exposed as switches for two reasons. First, unlike [SinglePlayer],
+; NONE of them is gated on the net id -- they apply identically in single-player
+; and in a network game -- and several of them change simulation behaviour, so
+; in a lobby that mixes OpenShim and stock Redux clients the two machines run
+; different code for the same object. That is not a desync in itself (no packet
+; layout changes, and the engine's own authority rules still apply) but it is a
+; behavioural difference, and a host running a strict-parity match may want it
+; gone. Second, a switchable fix is a bisectable fix: when something looks wrong
+; and you are not sure whether OpenShim is responsible, turning one of these off
+; is the fastest way to find out.
+;
+; Every key in this section is read once during startup patching, so restart the
+; game after changing any of them. Each also has a legacy environment alias,
+; listed with it.
+
+; Let APC AI accept allied targets when choosing a deploy target.
+; Rewrites two branch displacements in the APC target-reject path.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_APC_DEPLOY_FIX
+ApcAlliedTargetDeploy = 1
+
+; Stop a destroyed splinter (spraybomb) from continuing to spawn payload
+; ordnance. SprayBuilding::Simulate overrides Building::Simulate without
+; preserving the base destroyed/marked-for-remove gate; this restores it.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_SPLINTER_UNDEAD_FIX
+SplinterUndead = 1
+
+; Suppress a howitzer's recent-hit target override while it is undeployed, so
+; an undeployed howitzer does not counter-snipe.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_HOWITZER_DEPLOY_FIX
+HowitzerUndeployedRetaliation = 1
+
+; Arm the stock deploy transition after a tug finishes loading cargo.
+; Craft::Deploy only arms control.deploy while UNDEPLOYED, so a tug that
+; picked up cargo never transitioned.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_TUG_CARGO_FIX
+TugCargoPostLoad = 1
+
+; Clear a dead constructor's remote build state from AI_UnitRemove, so the
+; build it was told to place does not outlive it.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX
+ConstructorRemoteBuild = 1
+
+; Skip magnet-mine attraction when the ODF declares a non-finite or
+; non-positive range, which otherwise faults. Base Mine::Simulate still runs,
+; so mine lifetime and removal are unchanged. Only content with a broken range
+; behaves differently.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX
+MagnetZeroRangeGuard = 1
+
+; Extend the script-facing CanBuild / IsBusy producer predicates to base
+; producers, so mission Lua sees the same answer for a base producer that it
+; already gets for the derived ones.
+; NOTE: this changes what mission scripts observe. If a script behaves
+; differently for one player in a lobby, check this first.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_PRODUCER_SCRIPT_PREDICATES
+ProducerScriptPredicates = 1
+
+; Force mod-scoped asset resolution for the multiplayer vehicle list.
+; NOTE: this is the fix most likely to matter in a modded lobby, because it
+; changes which assets a client resolves for multiplayer vehicles. If a modded
+; match shows different craft to different players, test with this off.
+; Accepted: boolean. Default: ON. Restart required after changing.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_VEHICLE_LIST_MOD_SCOPING
+VehicleListModScoping = 1
+
 [Startup]
 
 ; Early D3D startup-hook path used for renderer/startup development.
@@ -845,8 +926,21 @@ LobbyBzrnetIntegration = Auto
 
 [SinglePlayer]
 
-; All simulation-affecting settings in this section are hard-disabled in
-; network games regardless of their configured values.
+; Every setting in this section is hard-disabled in network games regardless of
+; its configured value. The gate is the local player's net id: non-zero means a
+; network session (the host has an id too), and it fails closed, so a net id
+; that cannot be read stands the feature down rather than enabling it.
+;
+; The gate is reconciled from the Ogre world-queue update every rendered frame
+; and immediately whenever the net id changes, so a feature a mission script or
+; the EXU bridge turned on during single-player cannot survive into a network
+; game. That applies to the byte-patched features (jump-snipe crouch, global
+; turbo, the convergence dispatchers, the smart-reticle range cell) as well as
+; the flag-checked ones.
+;
+; SatelliteVisibilityFix is included in the gate even though it is client-side
+; rendering only and cannot desync anything: see its own note at the end of
+; this section for why standing it down online is the parity-correct choice.
 
 ; Make hovercraft-derived AI craft converge fixed-weapon fire on the aim point.
 ; Accepted: boolean. Default: ON.
@@ -959,6 +1053,10 @@ AiOdfGameplayTuning = 1
 ; (exu.SetBomberAiRangeEnabled) from Campaign Reimagined's settings, which
 ; enabled it. Set this to 1 to keep that behaviour outside CR.
 ;
+; Because it changes stock content it honours the section gate and never runs
+; in a network game, including when Campaign Reimagined or another mod enables
+; it through the EXU bridge.
+;
 ; Accepted: boolean. Default: OFF.
 ; Trace: OPENSHIM_TRACE_BOMBER_RANGE=1 or OPENSHIM_TRACE_AI_RANGE=1
 ;        (logs [BOMBERRANGE] original/final range per engagement)
@@ -1018,6 +1116,11 @@ HeadlightBeam = Wide
 ; change in enemy visibility after updating, this is the most likely cause --
 ; set it to 0 to get the previous (inert) behaviour back.
 ;
+; perceivedTeam is simulation state -- it drives AI target selection as well as
+; radar and the satellite view -- so this now honours the section gate and never
+; runs in a network game, including when a mission script enables it through
+; exu.SetAttackRevealEnabled.
+;
 ; Accepted: boolean. Default: ON.
 ; Trace: OPENSHIM_TRACE_ATTACK_REVEAL=1  (logs skip/noop/write per event)
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_ATTACK_REVEAL
@@ -1038,6 +1141,13 @@ AttackRevealPerceivedTeam = 1
 ; view 3 is touched -- a zero-illumination object is still correctly visible in
 ; first person -- and an entity that was already hidden for some other reason
 ; stays hidden.
+;
+; This is client-side rendering only and cannot desync anything, but it stands
+; down in a network game anyway, because online it works against you: a shim
+; player would see fewer enemies on the satellite than a stock peer looking at
+; the same match. Standing it down restores parity. If it goes inactive while
+; the satellite view is open, every entity it hid has its visibility restored
+; on the next tick rather than being stranded.
 ;
 ; Accepted: boolean. Default: ON.
 ; Trace: OPENSHIM_TRACE_SATELLITE_VISIBILITY_FIX=1 (logs [SATVISFIX] entry,

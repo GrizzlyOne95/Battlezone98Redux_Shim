@@ -147,6 +147,55 @@ namespace
         }
         if (Equals(name, "OPENSHIM_DISABLE_MUSIC_GLOBAL_FOCUS"))
             return TryReadMappedBool(mainIni, "General", "MusicGlobalFocus", true, out);
+
+        // [Fixes]: confirmed Redux engine defects OpenShim corrects. These are
+        // ON by default and stay on for normal play -- they are bug fixes, not
+        // enhancements -- but each one is now individually switchable, because
+        // they apply in single-player and multiplayer alike and several of them
+        // touch the simulation. A player in a lobby with stock clients, or
+        // anyone bisecting a suspected regression, needs to be able to turn an
+        // individual fix off without editing the process environment.
+        if (Equals(name, "OPENSHIM_DISABLE_APC_DEPLOY_FIX") ||
+            Equals(name, "BZR_DISABLE_APC_DEPLOY_FIX"))
+        {
+            return TryReadMappedBool(mainIni, "Fixes", "ApcAlliedTargetDeploy", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_SPLINTER_UNDEAD_FIX") ||
+            Equals(name, "BZR_DISABLE_SPLINTER_UNDEAD_FIX"))
+        {
+            return TryReadMappedBool(mainIni, "Fixes", "SplinterUndead", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_HOWITZER_DEPLOY_FIX") ||
+            Equals(name, "BZR_DISABLE_HOWITZER_DEPLOY_FIX"))
+        {
+            return TryReadMappedBool(mainIni, "Fixes", "HowitzerUndeployedRetaliation", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_TUG_CARGO_FIX") ||
+            Equals(name, "BZR_DISABLE_TUG_CARGO_FIX"))
+        {
+            return TryReadMappedBool(mainIni, "Fixes", "TugCargoPostLoad", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX") ||
+            Equals(name, "BZR_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX"))
+        {
+            return TryReadMappedBool(mainIni, "Fixes", "ConstructorRemoteBuild", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX") ||
+            Equals(name, "BZR_DISABLE_MAGNET_ZERO_RANGE_FIX"))
+        {
+            return TryReadMappedBool(mainIni, "Fixes", "MagnetZeroRangeGuard", true, out);
+        }
+        // New switches: these two had no opt-out of any kind before.
+        if (Equals(name, "OPENSHIM_DISABLE_PRODUCER_SCRIPT_PREDICATES") ||
+            Equals(name, "BZR_DISABLE_PRODUCER_SCRIPT_PREDICATES"))
+        {
+            return TryReadMappedBool(mainIni, "Fixes", "ProducerScriptPredicates", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_VEHICLE_LIST_MOD_SCOPING") ||
+            Equals(name, "BZR_DISABLE_VEHICLE_LIST_MOD_SCOPING"))
+        {
+            return TryReadMappedBool(mainIni, "Fixes", "VehicleListModScoping", true, out);
+        }
         if (Equals(name, "OPENSHIM_ENABLE_OGRE_MATERIAL_COLLISION_GUARD") ||
             Equals(name, "BZR_ENABLE_OGRE_MATERIAL_COLLISION_GUARD"))
         {
