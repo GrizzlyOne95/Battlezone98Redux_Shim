@@ -42,6 +42,15 @@ jobs:
         shell: pwsh
         run: ./scripts/run_ini_tests.ps1
 
+      # Run the complete engine-independent regression suite on every main/PR
+      # build so feature-specific tests cannot silently drift while MSBuild stays green.
+      - name: Run full CTest regression suite
+        shell: pwsh
+        run: |
+          cmake -S tests -B build/tests -A Win32
+          cmake --build build/tests --config Release
+          ctest --test-dir build/tests -C Release --output-on-failure
+
       - name: Validate DX11 Enhanced FXAA shader
         shell: pwsh
         run: |
