@@ -285,9 +285,95 @@ incomplete rather than as 5832-of-5832.
 
 ---
 
-## 7. Next
+## 7. The engine names its own classes — exact 1.5↔1.4 pairing
 
-Repeat §4.2 across all 36 task vtables to get a verified 1.5→1.4 name map for every virtual method,
-then walk §2.1 top-down. The non-virtual state handlers (`DoFlee`, `DoStand`, `DoStuck`, `DoBlast`,
-`UpdateWeapon`) are not in the vtables and need one more hop — they are called from the aligned
-`DoState`/`Execute` bodies, so call-site position identifies them once the virtual anchors are fixed.
+§4.2 anchored one class by hand. That generalises, because **the engine has its own runtime type
+system and it stores class names as plain string literals in both builds.**
+
+Every concrete class has a dynamic initializer of the form
+
+```c
+RtimeClass::RtimeClass(&AttackTask::classAttackTask, "AttackTask", AttackTask::CreateObject);
+```
+
+which gives a chain that needs no similarity threshold and no ordering heuristic:
+
+```
+"ClassName" string  ->  push site in the initializer  ->  CreateObject  ->  vtable
+```
+
+The initializer's code shape is byte-identical in both builds:
+
+```
+site-5 : push <CreateObject>     68 xx xx xx xx
+site   : push <"ClassName">      68 yy yy yy yy
+site+5 : mov  ecx, <RtimeClass>  B9 zz zz zz zz
+site+10: call RtimeClass::RtimeClass
+```
+
+and `CreateObject` ends with `mov dword ptr [reg], <vtable>`. For `AttackTask` in 1.4 that is
+`0x0040C460` → `mov dword ptr [esi], 0x5e6e58`, and slot 4 (`GetRtimeClass`) is
+`mov eax, 0x63cfc8; ret` returning the same `RtimeClass` object the initializer built —
+self-consistent from three directions.
+
+### 7.1 Results
+
+`BZ1_Source/diff_14_15/build_vtable_map.py` →
+`out/class_vtable_map.tsv`, `out/virtual_method_map.tsv`.
+
+| | |
+|---|---|
+| classes registered in 1.5 (have a `RtimeClass` initializer) | 149 |
+| name string present in **both** images | 123 |
+| 1.4 initializer located | 118 |
+| vtable resolved on **both** sides | 40 |
+| identical slot count after bounding | 29 |
+| **verified virtual-method pairs** | **803** |
+
+Self-check passes: `AttackTask` → 1.5 `0x005CF8F8`, 1.4 `0x005E6E58`, slot 11 = `0x0040CDE0`.
+
+Two implementation notes that cost time and would cost it again:
+
+* **Do not linear-sweep `.text` to find the push sites.** A capstone sweep over 1.8 MB
+  desynchronises on interleaved data and silently loses them — the first version found **0 of 123**
+  classes for exactly that reason. Match the `68 <imm32>` bytes directly.
+* **Bound each vtable by the next known vtable start.** Walking "while the entry looks like a code
+  pointer" runs straight into the following vtable, which would pair one class's tail against an
+  unrelated class's head.
+
+### 7.2 Why the pairing is trustworthy
+
+The paired 1.5 names land only inside the class or its genuine bases, and the real inheritance
+chains fall out of the data:
+
+| Class | 1.5 namespaces appearing in its slots |
+|---|---|
+| `AttackTask` | `AttackTask`, `UnitTask` |
+| `BuildGoto` | `BuildGoto`, `GotoTask`, `UnitTask` |
+| `GoGet` | `GoGet`, `GoNear`, `GotoTask`, `UnitTask` |
+| `BomberEnemy` | `BomberEnemy`, `WingmanProcess`, `OffensiveProcess`, `UnitProcess` |
+
+Nothing unrelated appears. A misalignment would show up immediately as a foreign class name.
+
+### 7.3 Coverage limit
+
+40 of 123 is the honest figure, and the gap is in the extraction, not the method: classes whose
+`CreateObject` does not match the simple `mov [reg], imm` shape (multiple inheritance, inlined
+constructors) drop out. Those are recoverable with a slightly smarter factory reader — the naming
+chain itself is exact for all 118 located initializers.
+
+---
+
+## 8. Next
+
+The virtual methods are now paired; `out/virtual_method_map.tsv` is directly usable for side-by-side
+reads like §5 across 803 method pairs.
+
+The non-virtual state handlers that dominate §2.1 — `DoFlee`, `DoStand`, `DoStuck`, `DoBlast`,
+`UpdateWeapon` — are **not** in any vtable and still need one hop: they are called from the now-paired
+`DoState`/`Execute` bodies, so call-site position within an aligned pair identifies them. That is the
+remaining step to turn every entry in §2.1 into a concrete delta.
+
+Before leaning on the 1.4 corpus for that, fix §6 — seed functions at all 803 mapped 1.4 addresses
+and re-decompile. `0x0040CDE0` alone is proof the current 5832 has holes exactly where the vtables
+point.
