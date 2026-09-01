@@ -8,7 +8,8 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022
+    timeout-minutes: 25
 
     # softprops/action-gh-release creates the release through the REST API with
     # GITHUB_TOKEN. This repository's default workflow token is read-only, so
@@ -23,32 +24,146 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Add MSBuild to PATH
-      uses: microsoft/setup-msbuild@v2
+    # A tagged release is authoritative user-facing output, so it must pass the
+    # same safety/config/regression gates as normal main and pull-request builds.
+    - name: Validate network safety baseline
+      shell: pwsh
+      run: ./tools/validate-network-baseline.ps1
 
     # The Ogre reference headers are an untracked sparse checkout, so a fresh
-    # CI checkout has no OgreEntity.h and the build fails in the two Ogre
-    # translation units. build-win32.yml has always done this; release.yml did
-    # not, which is why every tagged release build since those files landed has
-    # failed at the Build Shim step. Idempotent and pinned to one commit.
+    # CI checkout has no OgreEntity.h. This step is idempotent and commit-pinned.
     - name: Fetch pinned Ogre reference headers
       shell: pwsh
       run: ./setup-dev.ps1
 
-    - name: Build Shim
-      run: msbuild BZROpenShim.sln /p:Configuration=Release /p:Platform=Win32 /m
+    - name: Run Ogre profiler algorithm tests
+      shell: pwsh
+      run: ./scripts/run_ogre_profiler_tests.ps1
 
-    - name: Prepare Release Artifacts
+    - name: Run INI/config tests
+      shell: pwsh
+      run: ./scripts/run_ini_tests.ps1
+
+    - name: Run full CTest regression suite
+      shell: pwsh
       run: |
-        mkdir release_assets
-        cp bin/Release/winmm.dll release_assets/
-        cp scripts/patches.json release_assets/
-        # Ship the player-oriented preset and keep the exhaustive reference
-        # alongside it so users can tweak settings without starting from the
-        # developer configuration.
-        cp openshim.ini release_assets/
-        cp openshim.ini.example release_assets/
-      shell: bash
+        cmake -S tests -B build/tests -A Win32
+        cmake --build build/tests --config Release
+        ctest --test-dir build/tests -C Release --output-on-failure
+
+    - name: Validate DX11 Enhanced FXAA shader
+      shell: pwsh
+      run: |
+        $kitsBin = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+        $fxc = Get-ChildItem -LiteralPath $kitsBin -Filter fxc.exe -File -Recurse |
+          Where-Object { $_.FullName -match '\\x86\\fxc\.exe$' } |
+          Sort-Object FullName -Descending |
+          Select-Object -First 1
+
+        if (-not $fxc) {
+          throw "Windows SDK fxc.exe was not found under $kitsBin"
+        }
+
+        $shader = Join-Path $PWD "shaders\dx11_enhanced_fxaa.hlsl"
+        $includeDir = Join-Path $PWD "reverse_engineering\prerelease_2016\removed_files"
+        $vsOut = Join-Path $env:RUNNER_TEMP "dx11_enhanced_fxaa_vs.cso"
+        $psOut = Join-Path $env:RUNNER_TEMP "dx11_enhanced_fxaa_ps.cso"
+
+        & $fxc.FullName /nologo /Ges /O3 /I $includeDir /T vs_5_0 /E VSMain /Fo $vsOut $shader
+        if ($LASTEXITCODE -ne 0) {
+          throw "DX11 Enhanced FXAA VSMain / vs_5_0 compilation failed"
+        }
+
+        & $fxc.FullName /nologo /Ges /O3 /I $includeDir /T ps_5_0 /E PSMain /Fo $psOut $shader
+        if ($LASTEXITCODE -ne 0) {
+          throw "DX11 Enhanced FXAA PSMain / ps_5_0 compilation failed"
+        }
+
+        "FXAA 3.11 HLSL5 validation passed using $($fxc.FullName)"
+
+    - name: Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Build Shim
+      shell: pwsh
+      run: |
+        msbuild BZROpenShim.sln `
+          /m `
+          /t:Build `
+          /p:Configuration=Release `
+          /p:Platform=Win32 `
+          /p:GenerateFullPaths=true `
+          /verbosity:minimal
+
+    # Verify the exact DLL that will be published before any release packaging.
+    - name: Verify release output
+      shell: pwsh
+      run: |
+        $dll = Join-Path $PWD "bin/Release/winmm.dll"
+        if (-not (Test-Path -LiteralPath $dll -PathType Leaf)) {
+          throw "Expected release output was not produced: $dll"
+        }
+        $hash = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash.ToLowerInvariant()
+        Write-Host "winmm.dll SHA-256: $hash"
+
+    - name: Prepare standalone and immutable suite artifacts
+      shell: pwsh
+      run: |
+        $releaseAssets = Join-Path $PWD "release_assets"
+        $suiteRoot = Join-Path $env:RUNNER_TEMP "OpenShim-Suite"
+        Remove-Item -LiteralPath $releaseAssets -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $suiteRoot -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Path $releaseAssets -Force | Out-Null
+        New-Item -ItemType Directory -Path $suiteRoot -Force | Out-Null
+
+        # Keep standalone assets convenient for manual installs while also
+        # publishing one immutable suite archive for Campaign Reimagined. The
+        # archive mirrors the repository paths consumed by its existing packager.
+        Copy-Item -LiteralPath "bin\Release\winmm.dll" -Destination $releaseAssets -Force
+        Copy-Item -LiteralPath "scripts\patches.json" -Destination $releaseAssets -Force
+        Copy-Item -LiteralPath "openshim.ini" -Destination $releaseAssets -Force
+        Copy-Item -LiteralPath "openshim.ini.example" -Destination $releaseAssets -Force
+        Copy-Item -LiteralPath "net.ini" -Destination $releaseAssets -Force
+
+        New-Item -ItemType Directory -Path (Join-Path $suiteRoot "bin\Release") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $suiteRoot "scripts") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $suiteRoot "resources\renderer") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $suiteRoot "resources\ui") -Force | Out-Null
+        Copy-Item -LiteralPath "bin\Release\winmm.dll" -Destination (Join-Path $suiteRoot "bin\Release\winmm.dll") -Force
+        Copy-Item -LiteralPath "scripts\patches.json" -Destination (Join-Path $suiteRoot "scripts\patches.json") -Force
+        Copy-Item -LiteralPath "openshim.ini" -Destination (Join-Path $suiteRoot "openshim.ini") -Force
+        Copy-Item -LiteralPath "openshim.ini.example" -Destination (Join-Path $suiteRoot "openshim.ini.example") -Force
+        Copy-Item -LiteralPath "net.ini" -Destination (Join-Path $suiteRoot "net.ini") -Force
+        Copy-Item -LiteralPath "resources\renderer\enhanced" -Destination (Join-Path $suiteRoot "resources\renderer\enhanced") -Recurse -Force
+        Copy-Item -LiteralPath "resources\ui\custom_widgets" -Destination (Join-Path $suiteRoot "resources\ui\custom_widgets") -Recurse -Force
+
+        # Record the exact source identity inside the archive so downstream
+        # packagers can prove which qualified OpenShim commit they consumed.
+        [ordered]@{
+          FormatVersion = 1
+          Tag = "${{ github.ref_name }}"
+          Commit = "${{ github.sha }}"
+          Architecture = "x86"
+          BuiltAtUtc = [DateTime]::UtcNow.ToString("o")
+        } | ConvertTo-Json -Depth 4 |
+          Set-Content -LiteralPath (Join-Path $suiteRoot "release_metadata.json") -Encoding UTF8
+
+        $checksumEntries = @()
+        foreach ($relativePath in @("winmm.dll", "patches.json", "openshim.ini", "openshim.ini.example", "net.ini")) {
+          $filePath = Join-Path $releaseAssets $relativePath
+          $hash = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $checksumEntries += "$hash  $relativePath"
+        }
+        $checksumEntries | Set-Content -LiteralPath (Join-Path $releaseAssets "SHA256SUMS.txt") -Encoding ascii
+        Copy-Item -LiteralPath (Join-Path $releaseAssets "SHA256SUMS.txt") -Destination (Join-Path $suiteRoot "SHA256SUMS.txt") -Force
+
+        $suiteZip = Join-Path $releaseAssets "OpenShim-Suite.zip"
+        Compress-Archive -Path (Join-Path $suiteRoot "*") -DestinationPath $suiteZip -CompressionLevel Optimal -Force
+        $suiteHash = (Get-FileHash -LiteralPath $suiteZip -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$suiteHash  OpenShim-Suite.zip" | Set-Content -LiteralPath (Join-Path $releaseAssets "OpenShim-Suite.zip.sha256") -Encoding ascii
+
+        Get-Content -LiteralPath (Join-Path $releaseAssets "SHA256SUMS.txt")
+        Get-Content -LiteralPath (Join-Path $releaseAssets "OpenShim-Suite.zip.sha256")
 
     - name: Create Release
       id: create_release
@@ -59,7 +174,14 @@ jobs:
           release_assets/patches.json
           release_assets/openshim.ini
           release_assets/openshim.ini.example
+          release_assets/net.ini
+          release_assets/SHA256SUMS.txt
+          release_assets/OpenShim-Suite.zip
+          release_assets/OpenShim-Suite.zip.sha256
         draft: false
         prerelease: false
+        # Auto-generated notes prevent successful tagged releases from landing
+        # with an empty body while keeping the release process deterministic.
+        generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

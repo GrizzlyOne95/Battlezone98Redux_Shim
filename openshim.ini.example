@@ -868,6 +868,19 @@ TraceDamageReveal = 0
 
 [Network]
 
+; OpenShim's socket layer as a whole. Off installs none of it: no winsock
+; hooks, no bandwidth governor, no auto-kick relaxation, no packet
+; reorder/duplicate mitigation, no DSCP marking.
+; Accepted: boolean. Default: ON. Restart required after changing.
+; This only supplies the DEFAULT for net.ini's [OpenShimSocket]
+; EnableSocketOptimizer, so an explicit key there still wins and every granular
+; net.ini value is unaffected either way.
+; Turn it off for a stock networking stack when diagnosing a connection
+; problem; GovernorTuning below is the narrower control if you only want the
+; governor and auto-kick back at the game's own values.
+; Legacy env aliases: OPENSHIM_NET_IMPROVEMENTS, BZ_NET_IMPROVEMENTS
+NetImprovements = 1
+
 ; Granular netcode tuning -- the send-rate governor, bandwidth floor/ceiling,
 ; ramp rates and auto-kick envelope -- lives in net.ini under [OpenShimSocket],
 ; because it is applied by the socket layer. See net.ini for what each value
