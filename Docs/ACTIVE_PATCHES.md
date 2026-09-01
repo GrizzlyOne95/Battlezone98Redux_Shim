@@ -8,7 +8,7 @@ An item belongs here only when the failure mechanism is understood well enough t
 
 | Patch | Classification | Phase | Next gate |
 | --- | --- | --- | --- |
-| CLI multi-parameter / `-shellmap:<W>,<H>` parser repair | **Legacy 1.5 defect / OpenShim compatibility enhancement** | **Implemented, awaiting runtime qualification** | Qualify GOG + Steam runtime behavior, then promote out of Active. |
+| CLI multi-parameter / `-shellmap:<W>,<H>` parser repair | **Legacy 1.5 defect / OpenShim compatibility enhancement** | **Implemented, GOG qualified** | Qualify Steam runtime behavior, then promote out of Active. |
 
 ### CLI multi-parameter parser repair
 
@@ -72,7 +72,8 @@ Move the item out of **Active** only after:
 - ~~production repair is enabled~~ (done);
 - ~~malformed-input tests pass~~ (done);
 - ~~unrelated CLI switches remain unaffected~~ (done, offline);
-- GOG 2.2.301 runtime qualification passes;
+- ~~GOG 2.2.301 runtime qualification passes~~ (done 2026-09-01: control arm
+  0x00D800D8 with map name "178", test arm 0x00B200D8 with the orphan gone);
 - Steam runtime qualification passes;
 - diagnostics prove the repair is applied only when intended.
 

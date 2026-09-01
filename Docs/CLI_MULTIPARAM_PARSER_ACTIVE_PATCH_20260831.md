@@ -1,7 +1,7 @@
 # CLI Multi-Parameter Parser Compatibility Patch
 
 **Date:** 2026-08-31  
-**Status:** **IMPLEMENTED — AWAITING RUNTIME QUALIFICATION**  
+**Status:** **IMPLEMENTED — GOG QUALIFIED, STEAM OUTSTANDING**  
 **Scope:** Battlezone 98 Redux 2.2.301 / OpenShim  
 **Patch class:** Legacy 1.5 parser defect compatibility repair, not a Redux-only regression
 
@@ -387,50 +387,51 @@ Interaction and non-regression coverage:
 All checks pass under `-Wall -Wextra -Werror`.
 ## Runtime acceptance
 
-Still outstanding. Static verification against the shipped GOG binary is
-complete (every address, guard byte and section attribute in this document
-was read back from the installed executable), and the offline suite passes,
-but no real-process launch has been performed for this patch.
+GOG 2.2.301 qualified 2026-09-01 by a two-arm live run against the installed
+executable, reading the native globals out of the running process rather than
+inferring them from behaviour. Steam remains outstanding.
 
-### Positive case
+Both arms launched with `-shellmap:216,178`, differing only in
+`[Fixes] CliMultiParameterOptions`.
 
-Launch with:
-
-```text
--shellmap:216,178
-```
-
-Expect in the shim log:
+### Control arm (fix off) — reproduces the defect
 
 ```text
-[cliparse] CLI multi-parameter options repaired: strtok delimiters " ,\t" -> " \t"
-           at 0x008F068C (text identity strtok1=ok strtok2=ok shellmapFormat=ok)
+0x008F068C  20 2C 09 00   " ,\t"        (patch correctly stood down)
+0x009183D4  1                          (mode selector, not a dimension)
+0x009183C4  0x00D800D8                 width 216, height 216   <- height lost
+0x00915540  "178"                      <- orphan token overwrote the map name
 ```
 
-and, at `FUN_00617110`:
+No `[cliparse]` log line, confirming the opt-out disables the patch silently.
+
+### Test arm (fix on) — repaired
 
 ```text
-DAT_009183D4  = 1
-_DAT_009183C4 = 0x00B200D8   ; height 178, width 216
-DAT_00915540  = ""           ; NOT "178"
+0x008F068C  20 09 00 00   " \t"         (patch applied)
+0x009183D4  1                          (unchanged)
+0x009183C4  0x00B200D8                 width 216, height 178   <- correct
+0x00915540  "misn03.bzn"               <- game default, no orphan collateral
 ```
 
-rather than the stock `_DAT_009183C4 = 0x00D800D8` with `DAT_00915540 = "178"`.
+```text
+[INFO] [cliparse] CLI multi-parameter options repaired: strtok delimiters
+" ,\t" -> " \t" at 0x008F068C
+(text identity strtok1=ok strtok2=ok shellmapFormat=ok)
+```
 
-### Negative/control cases
+The control arm is also the direct live confirmation of both corrections in
+this document: `0x009183D4` reads `1`, not `216`, and the orphaned `178` is
+observably sitting in the map-name buffer the shellmap consumer reads.
 
-Prove that:
+### Still outstanding
 
-- with no `shellmap` option, native state stays entirely under stock control;
-- malformed `shellmap` values are not "helpfully" rewritten into new semantics;
-- single-value CLI options remain byte-for-byte behaviorally unaffected;
-- command ordering does not change the result;
-- a genuine mission argument still loads;
-- `[Fixes] CliMultiParameterOptions = 0` restores stock behaviour exactly;
-- Steam and GOG produce equivalent repaired behavior. On Steam the log line
-  is expected to read `strtok1=unverified strtok2=unverified` because `.text`
-  is still SteamStub ciphertext at `DLL_PROCESS_ATTACH`; the repair must
-  still apply and still work.
+- Steam runtime qualification. The log line is expected to read
+  `strtok1=unverified strtok2=unverified` there, because `.text` is still
+  SteamStub ciphertext at `DLL_PROCESS_ATTACH`; the repair must still apply
+  and still produce `0x00B200D8`.
+- Broader confirmation that renderer/backend and other CLI controls are
+  unaffected across a longer session.
 ## Binary qualification
 
 Hashes recorded by the root-cause report:
@@ -479,7 +480,7 @@ Steam-vs-GOG Redux parser parity for the investigated path is proven in the RE r
 - [x] Add the `[Fixes] CliMultiParameterOptions` opt-out.
 - [x] Run malformed-input regression suite.
 - [x] Verify every guard byte against the shipped GOG executable.
-- [ ] Validate supported GOG executable at runtime.
+- [x] Validate supported GOG executable at runtime (2026-09-01, two-arm live run).
 - [ ] Validate supported Steam executable at runtime.
 - [ ] Confirm no side effects on renderer/backend and other CLI controls.
 - [ ] Promote to fixed only after runtime acceptance passes.
