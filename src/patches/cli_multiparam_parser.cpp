@@ -157,6 +157,9 @@ namespace BZROpenShim
         // any other shim thread exists.
         uint8_t s_versionBuffer[0x10000];
 
+        // Written once at attach, read once on the patch thread.
+        bool s_applied = false;
+
         bool BytesMatch(uintptr_t address, const uint8_t* expected, size_t length)
         {
             __try
@@ -298,6 +301,8 @@ namespace BZROpenShim
             return;
         }
 
+        s_applied = true;
+
         LogShimA(LogLevel::Info, kLogTag,
                  "CLI multi-parameter options repaired: strtok delimiters \" ,\\t\" -> \" \\t\" "
                  "at 0x%08X (text identity strtok1=%s strtok2=%s shellmapFormat=%s)",
@@ -305,5 +310,58 @@ namespace BZROpenShim
                  firstSiteOk ? "ok" : "unverified",
                  nextSiteOk ? "ok" : "unverified",
                  formatSiteOk ? "ok" : "unverified");
+    }
+
+    void VerifyCliMultiParameterOptionFix()
+    {
+        if (!s_applied)
+            return;
+
+        // .text is readable by now on both stores, so the corroboration that
+        // had to be skipped at attach can finally be settled. This is the only
+        // place a Steam run proves the delimiter belongs to ProcessCommandLine.
+        const bool firstSiteOk = BytesMatch(kFirstTokenSiteAddr, kFirstTokenSiteExpected,
+                                            sizeof(kFirstTokenSiteExpected));
+        const bool nextSiteOk = BytesMatch(kNextTokenSiteAddr, kNextTokenSiteExpected,
+                                           sizeof(kNextTokenSiteExpected));
+        const bool formatSiteOk = BytesMatch(kShellmapFormatSiteAddr, kShellmapFormatSiteExpected,
+                                             sizeof(kShellmapFormatSiteExpected)) &&
+                                  BytesMatch(kShellmapFormatAddr, kShellmapFormatExpected,
+                                             sizeof(kShellmapFormatExpected));
+
+        if (BytesMatch(kDelimiterAddr, kDelimiterRepaired, sizeof(kDelimiterRepaired)))
+        {
+            LogShimA(LogLevel::Info, kLogTag,
+                     "CLI multi-parameter repair held after image settle "
+                     "(text identity strtok1=%s strtok2=%s shellmapFormat=%s)",
+                     firstSiteOk ? "ok" : "MISMATCH",
+                     nextSiteOk ? "ok" : "MISMATCH",
+                     formatSiteOk ? "ok" : "MISMATCH");
+            return;
+        }
+
+        // Reverted. Nothing observed does this, but if a packer ever restores
+        // .data over the write it must not fail silently: the command line has
+        // almost certainly already been parsed by now, so re-applying only
+        // helps a later re-parse. The log line is the real deliverable.
+        if (BytesMatch(kDelimiterAddr, kDelimiterStock, sizeof(kDelimiterStock)))
+        {
+            const bool rewritten = WriteDelimiters(kDelimiterRepaired);
+            LogShimA(LogLevel::Error, kLogTag,
+                     "CLI multi-parameter repair was REVERTED at 0x%08X after attach; "
+                     "the command line was likely already parsed with stock delimiters. "
+                     "Re-applied=%s (text identity strtok1=%s strtok2=%s shellmapFormat=%s)",
+                     static_cast<unsigned>(kDelimiterAddr),
+                     rewritten ? "yes" : "no",
+                     firstSiteOk ? "ok" : "MISMATCH",
+                     nextSiteOk ? "ok" : "MISMATCH",
+                     formatSiteOk ? "ok" : "MISMATCH");
+            return;
+        }
+
+        LogShimA(LogLevel::Warn, kLogTag,
+                 "CLI multi-parameter delimiters at 0x%08X are neither stock nor repaired "
+                 "after image settle; leaving them alone",
+                 static_cast<unsigned>(kDelimiterAddr));
     }
 }

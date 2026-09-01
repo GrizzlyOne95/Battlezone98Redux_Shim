@@ -1,7 +1,7 @@
 # CLI Multi-Parameter Parser Compatibility Patch
 
 **Date:** 2026-08-31  
-**Status:** **IMPLEMENTED — GOG QUALIFIED, STEAM OUTSTANDING**  
+**Status:** **IMPLEMENTED — GOG QUALIFIED, STEAM PARTIAL**  
 **Scope:** Battlezone 98 Redux 2.2.301 / OpenShim  
 **Patch class:** Legacy 1.5 parser defect compatibility repair, not a Redux-only regression
 
@@ -424,12 +424,65 @@ The control arm is also the direct live confirmation of both corrections in
 this document: `0x009183D4` reads `1`, not `216`, and the orphaned `178` is
 observably sitting in the map-name buffer the shellmap consumer reads.
 
+### Steam 2.2.301 — partially qualified
+
+What is proven:
+
+- `.data` is **not** SteamStub-encrypted. `0x008F068C` reads `20 2C 09 00`
+  in the at-rest Steam file, byte-identical to GOG, so the stub holds no
+  ciphertext to restore over the write.
+- `.text` **is** encrypted at rest: `0x007D5156` reads `2B 19 B1 5A 90...`
+  instead of `68 8C 06 8F 00...`, and `0x00618D0E` reads `ED DB 46 C6 0B`
+  instead of `E8 0D C4 1B 00`. Requiring the `.text` guards at attach would
+  have made this fix silently GOG-only, exactly as the design assumed.
+- The file version resource reads 301 on Steam, so the identity check passes.
+  (It arrives as `HIWORD(dwFileVersionLS)`, which is why the accessor keeps
+  the same fallback `patcher.cpp` uses.)
+- The repair **applies** on Steam. A live process was sampled with
+  `0x008F068C` reading `20 09 00 00` while `0x007D5156` was still
+  ciphertext, and the log line reported
+  `strtok1=unverified strtok2=unverified shellmapFormat=unverified`.
+- **No regression.** With the stock shim DLL the Steam process behaves
+  identically: the shim log ends at the same line, and the game exits the
+  same way. The only difference between the two runs is the one added
+  `[cliparse]` line.
+
+What is not proven:
+
+- End-to-end parsing on Steam (`0x009183C4 == 0x00B200D8`). The Steam copy
+  in the test environment does not reach engine init at all: launched
+  directly, SteamStub attaches the shim, exits, and never completes its
+  relaunch; `steam://run/301650//-shellmap:216,178` does not start it
+  either. It never writes `BZLogger.txt`. This happens **with the stock
+  shim DLL too**, so it is environmental and not caused by this patch, but
+  it means the parser never ran and the packed value could not be read.
+
+To close this gate, run the two-arm procedure above on a machine where the
+Steam build starts normally and confirm `0x009183C4 == 0x00B200D8`.
+
+### Post-settle self-check
+
+Because the attach-time `.text` corroboration has to be skipped on Steam,
+`VerifyCliMultiParameterOptionFix()` runs from the patch thread after
+`WaitForSignature`, which is the first moment `.text` is decrypted. It:
+
+- settles the `.text` identity that could not be checked at attach, so a
+  Steam run proves the delimiter belongs to `ProcessCommandLine`;
+- reports at ERROR if the delimiter has been restored to `20 2C 09 00`,
+  turning a hypothetical packer restore over `.data` from a silent failure
+  into a log line (it re-applies, though by then the command line has
+  almost certainly already been parsed).
+
+Observed on GOG:
+
+```text
+[INFO] [cliparse] CLI multi-parameter options repaired: ... strtok1=ok strtok2=ok shellmapFormat=ok
+[INFO] [cliparse] CLI multi-parameter repair held after image settle (text identity strtok1=ok strtok2=ok shellmapFormat=ok)
+```
+
 ### Still outstanding
 
-- Steam runtime qualification. The log line is expected to read
-  `strtok1=unverified strtok2=unverified` there, because `.text` is still
-  SteamStub ciphertext at `DLL_PROCESS_ATTACH`; the repair must still apply
-  and still produce `0x00B200D8`.
+- Steam end-to-end parse, per above.
 - Broader confirmation that renderer/backend and other CLI controls are
   unaffected across a longer session.
 ## Binary qualification
@@ -481,7 +534,9 @@ Steam-vs-GOG Redux parser parity for the investigated path is proven in the RE r
 - [x] Run malformed-input regression suite.
 - [x] Verify every guard byte against the shipped GOG executable.
 - [x] Validate supported GOG executable at runtime (2026-09-01, two-arm live run).
-- [ ] Validate supported Steam executable at runtime.
+- [~] Validate supported Steam executable at runtime (applies + no regression
+      proven 2026-09-01; end-to-end parse blocked by an environmental
+      launch failure present with the stock shim DLL too).
 - [ ] Confirm no side effects on renderer/backend and other CLI controls.
 - [ ] Promote to fixed only after runtime acceptance passes.
 ## Documentation invariant
