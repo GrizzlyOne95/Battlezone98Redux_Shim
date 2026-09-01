@@ -36,3 +36,16 @@ The default evidence directory is outside `addon`, under
 contains a manifest, `BZLogger.txt`, `openshim.log`, `openshim_crash.log` when
 present, and any new `openshim_crash_*.dmp`.
 
+## Neutral Attack command matrix
+
+`rmneut.lua` creates a player-team wingman, team-0 neutral fighter, and an
+ordinary enemy control at separate `GetPositionNear` locations. It exercises
+four directed Lua `Attack` arms (`n2p`, `a2n`, `a2e`, `a2f`) and records command,
+target, health, ammo, and `GetWhoShotMe` state every half-second.
+
+```powershell
+pwsh -File reverse_engineering/run_lcroad_neutral.ps1
+```
+
+This qualifies the Lua/native AI command route. A human-issued UI Attack order
+is intentionally documented as a separate manual evidence gate.
