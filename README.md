@@ -155,12 +155,11 @@ Normal player defaults are shipped in:
 openshim.ini
 ```
 
-That file contains every first-class OpenShim setting with conservative,
-stock-preserving values. OpenShim fixes, enhancements, UI replacements,
-autosave, and diagnostics are opt-in. To disable the legacy mouse path's
-smoothing/Windows acceleration, set `[General] RawMouseInput = 1` and restart
-the game, or use **Raw Mouse Input** on the native OpenShim Settings page and
-restart.
+That file contains every first-class OpenShim setting with conservative player-oriented values. Confirmed Redux engine defects under `[Fixes]` are enabled by default and can be individually disabled for strict parity or regression isolation. Optional enhancements, UI replacements, autosave, diagnostics, and single-player behavior changes remain opt-in.
+
+`[Network] GovernorTuning = OpenShim` is an intentional compatibility exception to the otherwise stock-oriented preset: it preserves OpenShim's already-shipped measured bandwidth-governor and host auto-kick tuning. Set it to `Stock` for strict mixed-client parity; `net.ini` remains the granular authority for low-level network values.
+
+To disable the legacy mouse path's smoothing/Windows acceleration, set `[General] RawMouseInput = 1` and restart the game, or use **Raw Mouse Input** on the native OpenShim Settings page and restart.
 
 The exhaustive technical reference remains:
 
@@ -286,6 +285,12 @@ bin\Release\winmm.dll
 ```
 
 Redux is a 32-bit application, so OpenShim must also be built as **32-bit**.
+
+## Release Qualification
+
+Normal PR/main CI runs the network safety baseline, Ogre profiler tests, INI/config tests, the complete engine-independent CTest suite, DX11 Enhanced FXAA shader compilation, and the Release | Win32 build.
+
+Public releases must additionally qualify the exact frozen artifacts on both supported storefronts and through the multiplayer/lifecycle smoke matrix in [`Docs/RELEASE_QUALIFICATION.md`](Docs/RELEASE_QUALIFICATION.md). Do not combine a DLL, patch table, or configuration from different commits/tags in a Workshop or standalone package.
 
 ## Project Scope
 
