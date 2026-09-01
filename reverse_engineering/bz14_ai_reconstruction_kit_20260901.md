@@ -139,13 +139,45 @@ if (Get_Time() <= startTime + 10.0) {          /* 10s cap, absent in 1.4 */
 `SidewaysAndClose`, `AbleToHit`) survive and are reusable — the 20260823 doc establishes that the
 missile FourCC fire gate was relocated into `UnitTask::UpdateWeapon` rather than deleted.
 
-## 6. The remaining hop
+## 6. The remaining hop — attempted, and it does not work automatically
 
 The functions dominating the census's most-changed list — `DoFlee`, `DoStand`, `DoStuck`, `DoBlast`,
-`UpdateWeapon`, `DoFollow` — are **non-virtual** and therefore in no vtable, so §2's map does not
-reach them. They are called from the now-paired `DoState`/`Execute` bodies, so call-site position
-inside an aligned pair identifies them. That is the one piece of tooling still missing, and it is
-the natural next step.
+`UpdateWeapon`, `DoFollow` — are **non-virtual**, appear in no vtable, and so §2's map does not reach
+them. `pair_nonvirtual.py` attempts them by **callee-set voting**: the 1.4 counterpart of a 1.5
+callee X should be called by the 1.4 side of the same aligned pairs whose 1.5 side calls X, and be
+rare elsewhere. That argument is indifferent to how much the bodies were rewritten, which is why it
+looked promising.
+
+**It fails, and the failure is measured, not suspected.**
+
+* **Self-test.** Run the identical procedure against the *virtual* methods with the answer hidden:
+  only 7 have enough evidence to be testable, and it scores **4 correct, 3 wrong — 57%**. That is
+  barely better than a coin flip on a sample too small to trust either way.
+* **A proof, not just a weakness.** Three target pairs have **identical caller sets** across the 303
+  aligned pairs:
+
+  | | callers |
+  |---|---|
+  | `DoFlee` ≡ `DoSlide` | 1 each |
+  | `DoStuck` ≡ `IsStuck` | 13 each |
+  | `UpdateWeapon` ≡ `AbleToHit` | 11 each |
+
+  No set-based method can separate members of such a pair, however the scoring is tuned.
+
+* **Call shape helps, but not enough.** On the 1.5 side the ties do break — `IsStuck` is consumed as
+  a value at 100% of its call sites and `DoStuck` at 0%; `UpdateWeapon` passes 2 arguments and
+  `AbleToHit` 1. Adding that filter resolved exactly **one** further case (`SidewaysAndClose`) and
+  left the self-test unchanged at 57%, because the 1.4-side candidates share their shape too.
+* **Result:** 10 of 12 targets come back `ambiguous`, several with the runner-up tied to two decimal
+  places, and three distinct 1.5 functions still resolve to the same 1.4 address.
+
+`out/nonvirtual_pairs.tsv` is written for the record. **Do not use it as a mapping** — the ambiguous
+rows are not answers.
+
+**Recommendation:** read these six functions by hand. The 1.4 corpus is complete now (§1), the
+parents are already paired (§2), and the 20260823 investigation demonstrates that hand-reading this
+exact code works. Six functions is a bounded job; a matcher that clears the 57% bar is not obviously
+cheaper, and would still be a matcher whose output needed checking.
 
 ## 7. Redux
 
