@@ -18,6 +18,7 @@
 #include "headlight_falloff.h"
 #include "chunk_batch_invalidation.h"
 #include "ai_range_policy.h"
+#include "lcbench_safety_policy.h"
 #include "hook_engine.h"
 #include "ui_performance.h"
 
@@ -158,6 +159,8 @@ namespace BZROpenShim
     using FnExuGetTeamEngineFlameColor = int(__cdecl*)(int team);
     using FnGameObjectGetTeam = int(__thiscall*)(void* thisPtr);
     using FnGameObjectRelation = bool(__thiscall*)(void* thisPtr, void* other);
+    using FnCarrierGetSelectedMask = uint32_t(__thiscall*)(void* carrier);
+    using FnTeamEnemyPInt = bool(__thiscall*)(void* team, int targetTeam);
     using FnChunkEffectSimulate = void(__thiscall*)(void* self, float dt);
     using FnDynamicGeometryPrepare = void(__thiscall*)(void* self);
     using FnDynamicGeometrySetSquaredViewDepth =
@@ -410,6 +413,10 @@ namespace BZROpenShim
     }
 
     static FnPersonSimulate g_BzrFn_PersonSimulate = nullptr;
+    static FnCarrierGetSelectedMask g_BzrFn_CarrierGetSelectedMask = nullptr;
+    static FnTeamEnemyPInt g_BzrFn_ControlPanelEnemyP = nullptr;
+    static std::unordered_set<uintptr_t> g_PilotCarrierNullLoggedObjects = {};
+    static volatile long g_NeutralAttackOrderLogBudget = 16;
     static FnShieldTowerSimulate g_BzrFn_ShieldTowerSimulateOriginal = nullptr;
     static FnShieldTowerSimulate g_BzrFn_BuildingSimulate = nullptr;
     static FnMagnetMineSimulate g_BzrFn_MagnetMineSimulateOriginal = nullptr;
@@ -2358,6 +2365,8 @@ namespace BZROpenShim
         // Global single-player improvement. The exact-byte and live-net-id
         // guards still keep it off unsupported builds and multiplayer.
         static constexpr bool kJumpSnipeCrouchEnabledDefault = true;
+        static constexpr bool kAllowNeutralAttackOrdersDefault = false;
+        static bool g_AllowNeutralAttackOrders = kAllowNeutralAttackOrdersDefault;
         static bool g_BomberAiRangeBaselineEnabled = kBomberAiRangeEnabledDefault;
         static bool g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
         // Configured value AND'd with the single-player gate, same contract as
@@ -9103,6 +9112,7 @@ namespace BZROpenShim
         // mission ends (ResetMissionHookOverrides).
         static constexpr char kUserConfigDisplaySection[] = "Display";
         static constexpr char kUserConfigSinglePlayerSection[] = "SinglePlayer";
+        static constexpr char kUserConfigGameplaySection[] = "Gameplay";
 
 
 
@@ -13901,6 +13911,15 @@ namespace BZROpenShim
                 g_JumpSnipeCrouchBaselineEnabled = value;
             g_JumpSnipeCrouchEnabled = g_JumpSnipeCrouchBaselineEnabled;
 
+            g_AllowNeutralAttackOrders = kAllowNeutralAttackOrdersDefault;
+            if (TryGetUserConfigBool(
+                    kUserConfigGameplaySection,
+                    "AllowNeutralAttackOrders",
+                    value))
+            {
+                g_AllowNeutralAttackOrders = value;
+            }
+
             g_TurretAimPitchBaselineEnabled = kTurretAimPitchEnabledDefault;
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "TurretAimPitch", value))
                 g_TurretAimPitchBaselineEnabled = value;
@@ -13955,13 +13974,14 @@ namespace BZROpenShim
             RefreshSmartReticleRangeState();
             RefreshScrapPilotHudLayout();
 
-            Log(L"[GLOBAL] scrapPilotHud=%hs weaponConvergence=%hs playerReticleConvergence=%hs smartReticleRange=%.3f smartScavengerPathing=%hs jumpSnipeCrouch=%hs turretAim=%hs multiplier=%.3f aiOdfTuning=%hs (gameplay features SP-only)\n",
+            Log(L"[GLOBAL] scrapPilotHud=%hs weaponConvergence=%hs playerReticleConvergence=%hs smartReticleRange=%.3f smartScavengerPathing=%hs jumpSnipeCrouch=%hs neutralAttackOrders=%hs turretAim=%hs multiplier=%.3f aiOdfTuning=%hs (SinglePlayer features remain SP-only)\n",
                 g_ScrapPilotHudLegacyLayoutEnabled ? "legacy" : "stock",
                 BoolText(g_ShotConvergenceBaselineEnabled),
                 BoolText(g_PlayerReticleShotConvergenceBaselineEnabled),
                 static_cast<double>(g_SmartReticleRangeBaseline),
                 BoolText(g_SmartScavengerPathingEnabled),
                 BoolText(g_JumpSnipeCrouchBaselineEnabled),
+                BoolText(g_AllowNeutralAttackOrders),
                 BoolText(g_TurretAimPitchBaselineEnabled),
                 static_cast<double>(g_TurretAimPitchMultiplierEnhanced),
                 BoolText(g_AiOdfGameplayTuningBaselineEnabled));
@@ -28373,6 +28393,58 @@ namespace BZROpenShim
         return false;
     }
 
+    void SetPersonCarrierGetSelectedOriginal(void* target)
+    {
+        g_BzrFn_CarrierGetSelectedMask =
+            reinterpret_cast<FnCarrierGetSelectedMask>(target);
+    }
+
+    void SetControlPanelEnemyPOriginal(void* target)
+    {
+        g_BzrFn_ControlPanelEnemyP = reinterpret_cast<FnTeamEnemyPInt>(target);
+    }
+
+    uint32_t __fastcall PersonCarrierGetSelectedGuard(void* carrier, void* person)
+    {
+        if (carrier && g_BzrFn_CarrierGetSelectedMask)
+            return g_BzrFn_CarrierGetSelectedMask(carrier);
+
+        if (!carrier)
+        {
+            const uintptr_t objectKey = reinterpret_cast<uintptr_t>(person);
+            if (g_PilotCarrierNullLoggedObjects.insert(objectKey).second)
+            {
+                Log(L"[PILOTSAFE] Person=%p has null carrier at +0x%X; "
+                    L"using selectedMask=0 and continuing Person::Simulate\n",
+                    person,
+                    static_cast<unsigned>(kPersonCarrierOffset));
+            }
+        }
+
+        return LcbenchSafetyPolicy::SelectedMaskForMissingCarrier();
+    }
+
+    bool __fastcall ControlPanelEnemyPAttackOrderHook(
+        void* team, void* /*edx*/, int targetTeam)
+    {
+        const bool stockEnemy =
+            g_BzrFn_ControlPanelEnemyP &&
+            g_BzrFn_ControlPanelEnemyP(team, targetTeam);
+        const bool allowed = LcbenchSafetyPolicy::AllowExplicitAttackTarget(
+            stockEnemy,
+            targetTeam,
+            g_AllowNeutralAttackOrders);
+
+        if (allowed && !stockEnemy && targetTeam == 0 &&
+            InterlockedDecrement(&g_NeutralAttackOrderLogBudget) >= 0)
+        {
+            Log(L"[NEUTORDER] ControlPanel admitted team-0 explicit attack target "
+                L"(team=%p option=enabled)\n",
+                team);
+        }
+        return allowed;
+    }
+
     bool InstallInlineDetour32(InlineDetour32& detour,
                                       uintptr_t target,
                                       void* hook,
@@ -28703,6 +28775,8 @@ namespace BZROpenShim
 		g_TugCargoPostLoadLogBudget = 16;
 		g_ApcAlliedTargetDeployFixInstalled = false;
         g_AttackRevealTraceBudget = kAttackRevealTraceBudgetDefault;
+        g_PilotCarrierNullLoggedObjects.clear();
+        g_NeutralAttackOrderLogBudget = 16;
         g_LastKnownQueuedMissionName[0] = '\0';
         g_HudSpriteRectTableBase = nullptr;
         g_HudSpriteRectTableDiscoveryAttempted = false;
@@ -30466,6 +30540,8 @@ namespace BZROpenShim
         g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
         g_AttackRevealEnabled = kAttackRevealEnabledDefault;
         g_AttackRevealTraceBudget = kAttackRevealTraceBudgetDefault;
+        g_PilotCarrierNullLoggedObjects.clear();
+        g_NeutralAttackOrderLogBudget = 16;
         g_AiUnitTuningOverridesByObject.clear();
         g_CombatKiteStateByObject.clear();
         g_ScrapPathFailuresByObject.clear();
