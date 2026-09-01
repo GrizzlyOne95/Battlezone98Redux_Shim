@@ -253,8 +253,6 @@ namespace BZROpenShim
 
         static ScreenBinding g_InputScreenBinding = {};
         static void* g_InputBindingUiMiddleOverlay = nullptr;
-        static void* g_InputBindingUiBackdrop = nullptr;
-        static void* g_InputBindingUiFrame = nullptr;
         static void* g_InputBindingUiTopMask = nullptr;
         static void* g_InputBindingUiContentMask = nullptr;
         static std::array<void*, kUiDecorMaxOptionsPagePieces> g_InputBindingUiDecor = {};
@@ -424,8 +422,6 @@ namespace BZROpenShim
         constexpr ULONGLONG kShimSettingsNavigationDebounceMs = 350;
         // True while the settings page owns the hooked input screen's visuals.
         static bool g_ShimSettingsPageActive = false;
-        static void* g_ShimSettingsUiBackdrop = nullptr;
-        static void* g_ShimSettingsUiFrame = nullptr;
         static void* g_ShimSettingsUiTopMask = nullptr;
         static void* g_ShimSettingsUiContentMask = nullptr;
         static std::array<void*, kUiDecorMaxOptionsPagePieces> g_ShimSettingsUiDecor = {};
@@ -1419,8 +1415,6 @@ namespace BZROpenShim
             ResetShimSettingsUiVisuals();
             g_InputScreenBinding.BindDecorated(nullptr);
             g_InputBindingUiMiddleOverlay = nullptr;
-            g_InputBindingUiBackdrop = nullptr;
-            g_InputBindingUiFrame = nullptr;
             g_InputBindingUiTopMask = nullptr;
             g_InputBindingUiContentMask = nullptr;
             g_InputBindingUiDecor.fill(nullptr);
@@ -1852,16 +1846,19 @@ namespace BZROpenShim
                 static_cast<unsigned>(requested));
         }
 
-        // Every OpenShim page draws the same stack, bottom to top: a full-bleed
-        // blackout that hides the stock screen, the stock frame art, and two
-        // masks that blank the page column the frame leaves lit. Those four are
-        // full-width overlays on the screen itself; the panel frames go on the
-        // control parent with the rest of the page. Both pages share this so
-        // their backgrounds cannot drift apart.
+        // Every OpenShim page draws the same stack: two masks that blank only
+        // the bands the page actually writes into -- the header/toolbar band
+        // and the row grid. Nothing full-bleed goes underneath them. The page
+        // is parented to Middle_Overlay, which is the 4:3 centre of the screen
+        // (measured 480,0,2880,2160 at 3840x2160), so a full-bleed blackout
+        // here paints a black pillar over the middle three quarters of the
+        // screen's own background art -- stock or a mod's custom background --
+        // and leaves only the pillarboxes showing. Both masks are full-width
+        // overlays on the screen itself; the panel frames go on the control
+        // parent with the rest of the page. Both pages share this so their
+        // backgrounds cannot drift apart.
         struct UiOptionsPageBackgroundSlots
         {
-            void** backdrop = nullptr;
-            void** frame = nullptr;
             void** topMask = nullptr;
             void** contentMask = nullptr;
         };
@@ -1888,8 +1885,6 @@ namespace BZROpenShim
 
             const BackgroundLayer layers[] =
             {
-                { slots.backdrop, "Backdrop", "blackui.png", { 0.0f, 0.0f, 1440.0f, 1080.0f } },
-                { slots.frame, "Frame", "keyOptions_center.png", { 0.0f, 0.0f, 1440.0f, 1080.0f } },
                 { slots.topMask, "TopMask", "blackui.png", layout.topMask },
                 { slots.contentMask, "ContentMask", "blackui.png", layout.contentMask },
             };
@@ -2884,8 +2879,6 @@ namespace BZROpenShim
 
         static void ResetShimSettingsUiVisuals()
         {
-            g_ShimSettingsUiBackdrop = nullptr;
-            g_ShimSettingsUiFrame = nullptr;
             g_ShimSettingsUiTopMask = nullptr;
             g_ShimSettingsUiContentMask = nullptr;
             g_ShimSettingsUiDecor.fill(nullptr);
@@ -2906,8 +2899,6 @@ namespace BZROpenShim
 
         static void SetShimSettingsUiControlsVisible(bool visible)
         {
-            SetInputBindingUiViewActive(g_ShimSettingsUiBackdrop, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiFrame, visible);
             SetInputBindingUiViewActive(g_ShimSettingsUiTopMask, visible);
             SetInputBindingUiViewActive(g_ShimSettingsUiContentMask, visible);
             for (void* decor : g_ShimSettingsUiDecor)
@@ -2932,8 +2923,6 @@ namespace BZROpenShim
 
         static void SetInputBindingUiControlsVisible(bool visible)
         {
-            SetInputBindingUiViewActive(g_InputBindingUiBackdrop, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiFrame, visible);
             SetInputBindingUiViewActive(g_InputBindingUiTopMask, visible);
             SetInputBindingUiViewActive(g_InputBindingUiContentMask, visible);
             for (void* decor : g_InputBindingUiDecor)
@@ -3054,8 +3043,6 @@ namespace BZROpenShim
             char controlName[64] = {};
 
             UiOptionsPageBackgroundSlots background = {};
-            background.backdrop = &g_ShimSettingsUiBackdrop;
-            background.frame = &g_ShimSettingsUiFrame;
             background.topMask = &g_ShimSettingsUiTopMask;
             background.contentMask = &g_ShimSettingsUiContentMask;
             CreateInputBindingUiPageBackground(background,
@@ -3464,8 +3451,6 @@ namespace BZROpenShim
             char controlName[64] = {};
 
             UiOptionsPageBackgroundSlots background = {};
-            background.backdrop = &g_InputBindingUiBackdrop;
-            background.frame = &g_InputBindingUiFrame;
             background.topMask = &g_InputBindingUiTopMask;
             background.contentMask = &g_InputBindingUiContentMask;
             CreateInputBindingUiPageBackground(background,
