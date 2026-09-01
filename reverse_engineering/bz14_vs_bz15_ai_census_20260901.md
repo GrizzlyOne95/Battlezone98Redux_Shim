@@ -161,9 +161,133 @@ mission-level `AiMission::Update`, and pathfinding all changed at the same time.
 * **The 6167 raw NOMATCH count is not a finding.** Most of it is 1.5-only code that never existed in
   1.4 — Lua, the netcode rewrite, the shell. Only the named, size-filtered subset in §2 is evidence.
 
-## 4. Next
+## 4. Pairing the functions — BSim cannot, vtables can
 
-The obvious follow-up is cheap now: take the top ~20 functions in §2.1 and diff the two
-decompilations side by side. 1.5's side is named; 1.4's side can be named by transferring symbols
-across the high-confidence BSim matches. That turns "`UnitTask::DoFlee` changed a lot" into the
-specific behavioural deltas, the way the 20260823 doc did by hand for `AttackTask::DoState`.
+To read a rewritten function side by side you first need to know *which* 1.4 function it is. The
+obvious approach — take BSim's nearest match even when it is below threshold — **does not work, and
+the failure is measurable.**
+
+### 4.1 BSim's pairings for rewritten functions are noise
+
+Best-match run over the 24 most-changed functions (`out/top_changed_bestmatch.csv`):
+
+* 1.4 target `0x0046BBA0` came back as the best match for **three** different 1.5 functions
+  (`RecycleTask::DoStuck`, `UnitTask::DoBlast`, `UnitTask::UpdateWeapon`); `0x0046E6B0` for two more.
+* Three matches had **negative significance** — explicitly less likely than chance:
+  `ShortPath::Search` −8.16, `UnitTask::DoStuck` −4.73, `UserProcess::Execute` −35.46.
+* Sizes are wildly inconsistent: `UnitTask::UpdateWeapon` is 2035 bytes in 1.5, its "best match" 150.
+
+Scored against ground truth (§4.2), **BSim got 1 of 3 right**:
+
+| Function | vtable truth | BSim best | |
+|---|---|---|---|
+| `AttackTask::DoState` | `0x0040CDE0` | `0x00452E80` | **wrong** |
+| `UnitTask::Execute` | `0x0046C980` | `0x004141D0` | **wrong** |
+| `UnitTask::GoTowards` | `0x0046D580` | `0x0046D580` | correct |
+
+This is self-consistent: a function rewritten hard enough to score 0.2 has nothing left to match on.
+**Do not use BSim to pair the very functions the census flags as changed.**
+
+### 4.2 Vtable slot alignment does work
+
+A class's vtable lists virtual methods in a fixed slot order that rewriting the method *bodies*
+does not disturb, so slot N in 1.4 is the counterpart of slot N in 1.5 however much the body changed.
+
+The task hierarchy uses a **13-slot vtable**:
+
+```
+[0] scalar_deleting_destructor   [5] Init*        [10] CleanState
+[1] Load                         [6] Done*        [11] DoState
+[2] PostLoad                     [7] Execute*     [12] GoTowards*
+[3] Save                         [8] DrawStateA*
+[4] GetRtimeClass                [9] InitState          (* = inherited from UnitTask)
+```
+
+`AttackTask`, located in 1.5 at **`0x005CF8F8`** and in 1.4 at **`0x005E6E58`**:
+
+| Slot | Method | 1.5 | 1.4 |
+|---|---|---|---|
+| 0 | `~AttackTask` | `0040EE7C` | `0040C4C0` |
+| 1 | `Load` | `0040EC41` | `0040C6D0` |
+| 2 | `PostLoad` | `0040ECA2` | `0040C740` |
+| 3 | `Save` | `0040ECD7` | `0040C770` |
+| 4 | `GetRtimeClass` | `0040EB9D` | `0040C500` |
+| 5 | `UnitTask::Init` | `0046D785` | `0046C150` |
+| 6 | `UnitTask::Done` | `0040BB57` | `00409360` |
+| 7 | `UnitTask::Execute` | `0046D84D` | `0046C980` |
+| 8 | `UnitTask::DrawStateA` | `0046B45E` | `0046CAF0` |
+| 9 | `InitState` | `0040F193` | `0040CC40` |
+| 10 | `CleanState` | `0040EDBA` | `0040CD50` |
+| 11 | **`DoState`** | `0040F25B` | **`0040CDE0`** |
+| 12 | `UnitTask::GoTowards` | `0046F4DB` | `0046D580` |
+
+**Cross-validation:** slot 11 lands on `0x0040CDE0`, exactly the 1.4 `AttackTask::DoState` address the
+20260823 investigation derived by hand from a completely different direction.
+
+Anchoring generalises: once 1.4's inherited `UnitTask` slots are known, every task vtable can be
+found by searching for them. **1.5 has 41 such vtables, 1.4 has 36** — five task classes added.
+
+---
+
+## 5. Worked example — `AttackTask::DoState` case 7
+
+Both builds handle the identical state set (2,3,4,5,6,7,8,9,10,0xB,0xC), so the state machine was
+**not** restructured; the rewrite is inside the handlers. 1.4's body is 399 decompiled lines against
+1.5's 289 — 1.5 removed logic.
+
+Case 7 is where the 20260823 doc located its F1 delta, and the two now read side by side.
+
+**1.4** — slide-exit keyed on the *enemy's own task state*, no time cap:
+
+```c
+iVar8 = (**(code **)(*(int *)(*(int *)(param_1 + 0x1c) + 0x18) + 0x30))();
+iVar8 = *(int *)(iVar8 + 0xac);            /* the ENEMY's task state */
+if ((iVar8 != 2) && (iVar8 != 5)) {
+    if (iVar8 == 7) { *(undefined4 *)(param_1 + 0x10) = 10; }   /* -> slide */
+    else { ... FUN_00414340 (SidewaysAndClose) ... }
+}
+```
+
+**1.5** — enemy-state predicate gone, replaced by a target-type test and a **10-second cap**:
+
+```c
+iVar7 = IsBuilding(p_Var6);
+if (iVar7 != 0) goto LAB_0040f59d;
+fVar15 = Get_Time();
+if (fVar15 <= (float)this->_padding_ + 10.0) {      /* <-- time cap, absent in 1.4 */
+    bVar3 = UnitTask::IsStuck((UnitTask *)this);
+    if (!bVar3) {
+        UnitTask::DoSlide((UnitTask *)this);
+        ...
+        iVar7 = SidewaysAndClose(p_Var8, p_Var6);
+    }
+}
+```
+
+So 1.5 swapped a predicate reading the *opponent's* state machine (`{2,5,7}` at object `+0xAC`) for
+a self-contained one: is the target a building, has 10 seconds elapsed, am I stuck. That is the
+20260823 doc's F1 in both directions, with 1.5's PDB names attached to the surviving helpers
+(`IsStuck`, `DoSlide`, `SidewaysAndClose`, `AbleToHit`).
+
+---
+
+## 6. A gap in the 1.4 corpus
+
+`0x0040CDE0` is a vtable target and therefore certainly a function, but the Ghidra run in
+`BZ1_Source/1.4/ghidra` **did not create a function there** — its decompilation is missing from the
+5832. The older partial corpus `BZ1_Source/decomp1.4` does have it (`all/0040cde0.c`), which is what
+made §5 possible.
+
+Cause: nothing seeds functions from vtable slots, and 1.4 has no RTTI to help. **Fix before relying
+on the 1.4 corpus for coverage:** walk the 36 task vtables (and the process vtables) and force a
+function at every slot target, then re-decompile. Until then, treat 1.4 function coverage as
+incomplete rather than as 5832-of-5832.
+
+---
+
+## 7. Next
+
+Repeat §4.2 across all 36 task vtables to get a verified 1.5→1.4 name map for every virtual method,
+then walk §2.1 top-down. The non-virtual state handlers (`DoFlee`, `DoStand`, `DoStuck`, `DoBlast`,
+`UpdateWeapon`) are not in the vtables and need one more hop — they are called from the aligned
+`DoState`/`Execute` bodies, so call-site position identifies them once the virtual anchors are fixed.
