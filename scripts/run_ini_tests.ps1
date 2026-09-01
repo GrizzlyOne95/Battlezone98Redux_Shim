@@ -1,4 +1,4 @@
-# Builds and runs the openshim.ini writer unit tests with the VS 2022 x86
+﻿# Builds and runs the openshim.ini writer unit tests with the VS 2022 x86
 # toolchain. No engine or game install required.
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\run_ini_tests.ps1
@@ -107,9 +107,23 @@ if ($missing.Count -gt 0 -or $extra.Count -gt 0) {
 
 Write-Host "player openshim.ini completeness passed ($($referenceIds.Count) settings)" -ForegroundColor Green
 
-# The shipped player preset is deliberately opt-in. Catch accidental regressions
-# where a feature-like boolean/enum is re-enabled while still allowing the two
-# numerically-ON values that preserve stock behavior and one numeric count.
+# The shipped player preset is opt-in for anything that changes how the game
+# plays or looks. Catch accidental regressions where such a key is re-enabled,
+# while allowing the values that preserve stock behavior, one numeric count, and
+# the four buckets that ship ON by policy:
+#
+#   UI          the settings page and the keybind page, because they are how a
+#               player reaches every other switch without editing this file --
+#               which the installer overwrites on each update anyway;
+#   Netcode     the socket layer and the lobby/nickname readouts;
+#   Bug fixes   defects with no gameplay intent (map-list refresh, the alt-tab
+#               music dropout, the duplicate-material crash guard);
+#   [Fixes]     see below.
+#
+# Everything else -- gameplay behavior, visual/audio enhancements, autosave,
+# diagnostics, terrain development -- must stay OFF here and be opted into from
+# the settings page. Adding a key to the allowlist below is a policy decision,
+# not a way to make this test pass.
 #
 # [Fixes] is exempt as a section: those keys are confirmed Redux engine defects,
 # not enhancements, so the opt-in policy does not apply to them -- they ship ON
@@ -123,10 +137,26 @@ $allowedEnabledLookingSections = [System.Collections.Generic.HashSet[string]]::n
 $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new(
     [System.StringComparer]::OrdinalIgnoreCase)
 @(
+    # Stock-preserving values that merely read as ON.
     "Startup/AllowStartupAutoLoad",
     "Graphics/Renderer",
     "Display/SunFlashbang",
-    "Diagnostics/TerrainRenderProbeMaxClusters"
+    "Diagnostics/TerrainRenderProbeMaxClusters",
+
+    # UI: the doors to every other setting.
+    "General/SettingsUi",
+    "General/CustomBindsUi",
+
+    # Straight bug fixes with no gameplay intent.
+    "General/MapRefreshFixes",
+    "General/MusicGlobalFocus",
+    "General/OgreMaterialCollisionGuard",
+
+    # Netcode improvements. NetImprovements is the wholesale opt-out, so it has
+    # to ship ON for the others under it to mean anything.
+    "Network/NetImprovements",
+    "Network/LiveNicknameKeys",
+    "Network/LobbyReadouts"
 ) | ForEach-Object { [void]$allowedEnabledLookingValues.Add($_) }
 
 $enabledLookingTokens = [System.Collections.Generic.HashSet[string]]::new(
