@@ -1,8 +1,8 @@
 #include <windows.h>
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,0,11
- PRODUCTVERSION 1,0,0,11
+ FILEVERSION 1,0,0,12
+ PRODUCTVERSION 1,0,0,12
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -19,12 +19,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "BZR Open Shim Contributors"
             VALUE "FileDescription", "BZR Open Shim - Native Patch Extension"
-            VALUE "FileVersion", "1.0.0.11"
+            VALUE "FileVersion", "1.0.0.12"
             VALUE "InternalName", "winmm.dll"
             VALUE "LegalCopyright", "Copyright (C) 2025"
             VALUE "OriginalFilename", "winmm.dll"
             VALUE "ProductName", "BZR Open Shim"
-            VALUE "ProductVersion", "1.0.0.11"
+            VALUE "ProductVersion", "1.0.0.12"
         END
     END
     BLOCK "VarFileInfo"
