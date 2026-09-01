@@ -174,10 +174,60 @@ looked promising.
 `out/nonvirtual_pairs.tsv` is written for the record. **Do not use it as a mapping** — the ambiguous
 rows are not answers.
 
-**Recommendation:** read these six functions by hand. The 1.4 corpus is complete now (§1), the
-parents are already paired (§2), and the 20260823 investigation demonstrates that hand-reading this
-exact code works. Six functions is a bounded job; a matcher that clears the 57% bar is not obviously
-cheaper, and would still be a matcher whose output needed checking.
+### 6.1 ghidriff / Ghidra Version Tracking — the proper tool, also measured
+
+`ghidriff` 1.0.0 is installed locally and is the right tool for this: its default
+`VersionTrackingDiff` engine runs Ghidra's full correlator suite, including the call-graph
+propagation that §6 hand-rolls. It was run 1.4 → 1.5 (`run_ghidriff.sh`, ~31 min), producing
+2976 matched 1.4 addresses and a 1.4 MB report.
+
+Scored against the same vtable ground truth:
+
+| | |
+|---|---|
+| correct (truth among its candidates) | 48 |
+| wrong | 77 |
+| produced no candidate at all | 176 |
+| **accuracy on decided cases** | **38.4%** |
+
+Worse than the hand-rolled 57%. The correlator responsible for the bulk of its matches,
+`StructuralGraphHash` (6617 raw matches), contributed **35 wrong top matches and 0 correct ones** —
+the same false-confidence-at-scale seen in the BSim census.
+
+**But the tool is not at fault, and the control proves it.** Scored instead against code the BSim
+census says is essentially *unchanged* (similarity ≥ 0.99, ≥ 256 bytes):
+
+| | |
+|---|---|
+| correct | 20 |
+| wrong | 3 |
+| unmatched | 5 |
+| **accuracy on decided cases** | **87.0%** |
+
+So Version Tracking works well on code that did not change and fails on code that did — and
+rewritten code is exactly what a 1.4-AI reconstruction needs paired. The limitation is intrinsic to
+similarity-based matching, not a defect in ghidriff.
+
+### 6.2 Every automated route, measured
+
+| Method | Accuracy pairing *rewritten* AI functions |
+|---|---|
+| BSim best-match (§4.1 of the census doc) | 1 of 3 |
+| Callee-set voting + call shape (`pair_nonvirtual.py`) | 57% (7 testable) |
+| ghidriff / Ghidra Version Tracking | 38.4% (125 decided) |
+| **RtimeClass vtable chain (§2)** | **exact, self-validating** |
+
+Three independent similarity-based methods, all measured, all unusable for this specific job. The
+only thing that works is the one that does not use similarity at all — the engine's own class
+registry.
+
+**Recommendation, now well-supported:** read these six functions by hand. The 1.4 corpus is complete
+(§1), the parents are already paired (§2), and the 20260823 investigation demonstrates hand-reading
+this exact code works. Six functions is a bounded job, and no available matcher clears a bar that
+would make its output safe to use unchecked.
+
+ghidriff's report is still worth keeping for the *unchanged* majority of the binary, where it is 87%
+accurate: `ghidriff/bzone14_unpacked.exe-bzone15.exe.ghidriff.md`.
 
 ## 7. Redux
 
