@@ -1,0 +1,22 @@
+[GameObjectClass]
+baseName = "aspilo"
+classLabel = "person"
+scrapCost = 0
+scrapValue = 0
+pilotCost = 1
+maxHealth = 100
+maxAmmo = 3
+unitName = "Pilot Craft Section"
+aiName = "PersonFriend"
+aiName2 = "PersonEnemy"
+heatSignature = 0.2
+imageSignature = 0.2
+radarSignature = 0.1
+
+[CraftClass]
+weaponHard1 = "GC1"
+weaponName1 = "handgun"
+
+[PersonClass]
+animRate = 5.0
+
