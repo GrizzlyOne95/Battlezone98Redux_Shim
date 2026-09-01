@@ -983,6 +983,17 @@ LobbyReadouts = 1
 LobbyBzrnetIntegration = Auto
 
 
+[Gameplay]
+
+; Allow the normal player command target list to include team-0 neutral
+; objects for explicit Attack orders. This changes only local order authoring:
+; Team::EnemyP, AI diplomacy, autonomous acquisition, weapon damage, and the
+; network order format remain stock.
+;
+; Accepted: boolean. Default: OFF (exact legacy behavior).
+AllowNeutralAttackOrders = 0
+
+
 [SinglePlayer]
 
 ; Every setting in this section is hard-disabled in network games regardless of
