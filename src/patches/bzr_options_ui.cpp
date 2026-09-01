@@ -3236,22 +3236,39 @@ namespace BZROpenShim
             const float logicalX = (static_cast<float>(cursor.x) - offsetX) / scale;
             const float logicalY = static_cast<float>(cursor.y) / scale;
 
-            // Full row footprint (plate through value button) per column.
-            constexpr float kRowSpanW = 292.0f + 175.0f + 8.0f;
+            // Geometry MUST come from the same builder that places the rows.
+            // This function used to hardcode its own copy, and the copy went
+            // stale: it described an older grid (left column 258 vs 175, first
+            // row 308 vs 420, pitch 38 vs 42, row height 30 vs 36). Reversing
+            // the transform against those numbers mapped the cursor two rows
+            // low, so every hover printed another row's description. Derive
+            // from the layout and the two cannot drift apart again.
+            const UiOptionsPageLayout layout =
+                BuildUiOptionsPageLayout(kShimSettingsUiRowsPerColumn);
+
+            // Full row footprint: the plate starts one inset before the label
+            // and the value button ends the row.
+            const float spanW =
+                layout.rowPlateInsetX + layout.rowValueOffsetX + layout.rowValueWidth;
+            const float leftX = layout.rowLeftX - layout.rowPlateInsetX;
+            const float rightX = layout.rowRightX - layout.rowPlateInsetX;
+
             size_t column = 0;
-            if (logicalX >= 258.0f - 8.0f && logicalX <= 258.0f + kRowSpanW - 8.0f)
+            if (logicalX >= leftX && logicalX <= leftX + spanW)
                 column = 0;
-            else if (logicalX >= 740.0f - 8.0f && logicalX <= 740.0f + kRowSpanW - 8.0f)
+            else if (logicalX >= rightX && logicalX <= rightX + spanW)
                 column = 1;
             else
                 return false;
 
-            const float rowOffset = logicalY - 308.0f;
-            if (rowOffset < 0.0f)
+            const float rowOffset = logicalY - layout.rowStartY;
+            if (rowOffset < 0.0f || layout.rowPitch <= 0.0f)
                 return false;
-            const size_t row = static_cast<size_t>(rowOffset / 38.0f);
+            const size_t row = static_cast<size_t>(rowOffset / layout.rowPitch);
+            // Reject the inter-row gap so a cursor between two rows does not
+            // claim the row above it.
             if (row >= kShimSettingsUiRowsPerColumn ||
-                (rowOffset - static_cast<float>(row) * 38.0f) > 30.0f)
+                (rowOffset - static_cast<float>(row) * layout.rowPitch) > layout.rowHeight)
                 return false;
 
             *outSlot = column * kShimSettingsUiRowsPerColumn + row;
