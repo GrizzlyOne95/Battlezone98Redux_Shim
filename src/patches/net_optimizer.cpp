@@ -833,7 +833,22 @@ namespace
             }
         }
 
-        g_Config.enabled = ReadIniBool("OpenShimSocket", "EnableSocketOptimizer", true);
+        // openshim.ini [Network] NetImprovements. Same precedence contract as
+        // GovernorTuning above: it only supplies the DEFAULT, so an explicit
+        // net.ini EnableSocketOptimizer still wins and every granular key is
+        // untouched. Off makes InitializeNetworkOptimizerOnce return before it
+        // installs anything, which is the wholesale "stock networking" switch.
+        bool netImprovements = true;
+        {
+            char envValue[32] = {};
+            if (TryReadEnvValue("OPENSHIM_NET_IMPROVEMENTS", envValue, static_cast<DWORD>(sizeof(envValue))) ||
+                TryReadEnvValue("BZ_NET_IMPROVEMENTS", envValue, static_cast<DWORD>(sizeof(envValue))))
+            {
+                netImprovements = EnvValueEnabled(envValue);
+            }
+        }
+
+        g_Config.enabled = ReadIniBool("OpenShimSocket", "EnableSocketOptimizer", netImprovements);
         g_Config.logging = ReadIniBool("OpenShimSocket", "EnableLogging", true);
         g_Config.tcpNoDelay = ReadIniBool("OpenShimSocket", "EnableTcpNoDelay", true);
         g_Config.keepAlive = ReadIniBool("OpenShimSocket", "EnableKeepAlive", true);
