@@ -292,11 +292,17 @@ The companion 1.5 document rests part of its `Cloak Disabled` negative on "0 occ
 not be re-used as-is.
 
 `BZ1_Source/1.5/Battlezone_Install/bzone.exe` contains essentially **no ODF property-name literals
-in plain ASCII**. Of a 21-key probe (`classLabel`, `geometryName`, `scrapValue`, `aiName`,
-`heatSignature`, `engineSound`, `hoverSpeed`, `collisionRadius`, `explosionName`, …) only
-`maxHealth` and `hardpoint` appear, and those are plausibly substring coincidences. The region
-between `camerapod` (`0x1DC2A8`) and `commtower` (`0x1DC380`) — which in TRO holds
-`periodScan`/`rangeScan`/`omegaSpin` — is a table of `.text` function pointers in 1.5.
+in plain ASCII**. The probe was re-run against 46 keys **observed in the TRO image** rather than
+guessed (an earlier pass included `hoverSpeed`, which turns out not to be a BZ1 key at all and is
+absent from TRO too — that pass should be disregarded). Result: **10 of 46 present in 1.5**.
+
+Absent from 1.5 include `classLabel`, `aiName`, `unitName`, `scrapValue`, `scrapCost`, `buildTime`,
+`baseName`, `weaponMask`, `collisionRadius`, `heatSignature`, `radarSignature`, `imageSignature`,
+`buildItem0` — all of which are unquestionably real BZ1 ODF keys present in every shipped `.odf`.
+Present are `nation`, `american`, `soviet`, `alien`, `dropClass`, `dropMat`, `commtower`,
+`camerapod`, `abandoned`, `timeDeploy`. The region between `camerapod` (`0x1DC2A8`) and `commtower`
+(`0x1DC380`) — which in TRO holds `periodScan`/`rangeScan`/`omegaSpin` — is a table of `.text`
+function pointers in 1.5.
 
 So "no cloak strings in the 1.5 exe" is consistent with 1.5 simply not emitting *any* ODF key
 literals, and carries little signal either way. The 1.5 conclusion still stands on its **PDB symbol
