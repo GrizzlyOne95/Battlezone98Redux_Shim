@@ -62,6 +62,18 @@ index-0 case, which is a useful runtime tripwire.
 So the nation mechanism is **stock BZ 1.4**, and **TRO extended the table from four values to six**
 by appending `chinese` (4) and `blackdog` (5). Neither string exists anywhere in the 1.4 image.
 
+The 1.4 decompilation makes this structural rather than circumstantial. `FUN_0049D7A0` is the same
+class ODF reader as TRO's `0x00465CD0` — same class field `param_1[0x2b]` (`+0xAC`), same
+default-from-first-letter switch, same `GetLabel("nation", …)` override, same linear search back
+through the name table. The **only** difference is the not-found sentinel:
+
+```
+1.4  FUN_0049D7A0:   if (iVar13   == 4) iVar13   = 0;   // table 0x00607110, 4 entries
+TRO  0x00465CD0:     if (local_14 == 6) local_14 = 0;   // table 0x005E1CD0, 6 entries
+```
+
+TRO did not add a nation system; it appended two values to a stock one.
+
 **1.5 cannot be read off strings — do not try.** `american`, `alien`, `chinese` and `blackdog` do
 not appear as null-terminated strings in the 1.5 exe at all, and its single `soviet` occurrence
 (file `0x1ECF38`) sits inside a command-line/console token list
