@@ -8,7 +8,7 @@ An item belongs here only when the failure mechanism is understood well enough t
 
 | Patch | Classification | Phase | Next gate |
 | --- | --- | --- | --- |
-| CLI multi-parameter / `-shellmap:<W>,<H>` parser repair | **Legacy 1.5 defect / OpenShim compatibility enhancement** | **Implemented, GOG qualified** | Qualify Steam runtime behavior, then promote out of Active. |
+| CLI multi-parameter / `-shellmap:<W>,<H>` parser repair | **Legacy 1.5 defect / OpenShim compatibility enhancement** | **Implemented, GOG qualified, Steam partial** | Confirm the Steam end-to-end parse on a machine where the Steam build starts, then promote out of Active. |
 
 ### CLI multi-parameter parser repair
 
@@ -74,7 +74,10 @@ Move the item out of **Active** only after:
 - ~~unrelated CLI switches remain unaffected~~ (done, offline);
 - ~~GOG 2.2.301 runtime qualification passes~~ (done 2026-09-01: control arm
   0x00D800D8 with map name "178", test arm 0x00B200D8 with the orphan gone);
-- Steam runtime qualification passes;
+- Steam runtime qualification passes (2026-09-01: applies correctly and causes
+  no regression, but the Steam build does not reach engine init in the test
+  environment even with the stock shim DLL, so the end-to-end parse is
+  unconfirmed);
 - diagnostics prove the repair is applied only when intended.
 
 Once those gates are satisfied, preserve the case as a permanent regression test rather than deleting the documentation.
