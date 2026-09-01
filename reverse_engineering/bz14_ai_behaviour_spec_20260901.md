@@ -12,7 +12,48 @@ needs a per-state spec**. `AbleToHit`/`UpdateWeapon` outstanding.
 
 ---
 
-## 0. How the 1.4 functions were identified
+## 0. SCOPE — this is the Tank/Scout AI family, not "the 1.4 AI"
+
+**Everything in this document reconstructs the 1.4 `TankFriend`/`TankEnemy` behavioural family.
+It must not be applied to combat units generally.** The engine's own class registry settles which
+units are in scope, and it does so precisely.
+
+All six relevant AI classes are 59-slot `AiProcess` vtables over a shared base. Diffing their slots
+against `TankEnemy` (1.4 vtables; names taken from the 1.5 `TankEnemy` vtable at `0x005DB810`):
+
+| Class | 1.4 vtable | Slots differing from `TankEnemy` | What differs |
+|---|---|---|---|
+| `TankEnemy` | `0x005EA708` | — | (reference) |
+| `TankFriend` | `0x005EA618` | 0, 4 | **identity only** — destructor and `GetRtimeClass` |
+| `ScoutFriend` | `0x005EA7F8` | 0, 4, **57** | identity + `ChooseAttackTarget` |
+| `ScoutEnemy` | `0x005EA8E8` | 0, 4, **57** | identity + `ChooseAttackTarget` |
+| `RocketTankFriend` | `0x005EABF0` | 0, 4, **24, 25, 48** | identity + `InitAttack`, `CleanAttack`, `InitSubAttack` |
+| `RocketTankEnemy` | `0x005EACE0` | 0, 4, **24, 25, 48** | identity + `InitAttack`, `CleanAttack`, `InitSubAttack` |
+
+Three consequences, all load-bearing:
+
+1. **Scout is in scope, and inherits rather than aliases.** `ScoutFriend`/`ScoutEnemy` override
+   *only* `OffensiveProcess::ChooseAttackTarget` (both to the same 1.4 address `0x004714C0`). Every
+   movement and combat slot is `TankEnemy`'s. So Scouts flank exactly like Tanks because they are a
+   subclass that changes only *who* to attack — not because their ODF points at `TankFriend`. The
+   legacy reconstruction covers them automatically; no `ScoutLegacy*` implementation is needed.
+2. **RocketTank is out of scope, and now we know why.** It overrides `InitAttack`, `CleanAttack`
+   and `InitSubAttack` — the attack construction/teardown path — while keeping Tank's movement
+   slots. That is the mechanism behind its more direct combat style: it builds a different attack
+   task, so it does not enter the flank/flee cycle the same way. **Do not enable the legacy state
+   machine for `rockettank`**, nor for `howitzer`, `walker`, `turret` or any other family, on the
+   grounds that they are ground combat units.
+3. **Friend and Enemy share all behaviour.** `TankFriend` differs from `TankEnemy` in slots 0 and 4
+   only — pure identity. Whatever distinguishes friendly from enemy conduct is not in the vtable, so
+   `TankLegacyFriend` and `TankLegacyEnemy` will share one implementation and differ only in
+   registration.
+
+Accordingly the opt-in surface should be family-specific — `aiName = "TankLegacyFriend"` /
+`aiName2 = "TankLegacyEnemy"` — and never a global `if (legacyAI)`.
+
+---
+
+## 0.1 How the 1.4 functions were identified
 
 Not by any matcher — all three failed (see the kit, §6.2). By callee evidence against the
 vtable-anchored `AttackTask::DoState` pair (1.5 `0x0040F25B` ↔ 1.4 `0x0040CDE0`):
@@ -202,9 +243,74 @@ So the pattern that held for `DoSlide`, `DoFlee` and `IsStuck` — same machiner
 predicates — **does not hold here.** Reconstructing 1.4's stuck recovery means implementing its
 7-state machine, not toggling a gate.
 
-**Outstanding:** each of the 7 states needs documenting (entry condition, steering action, exit
-transition) before this can be specified to the standard of §2. That is the largest single piece of
-remaining work in the queue and should be scheduled as such.
+### 4.1 The state graph — recovered
+
+**It is both selection and escalation, not one or the other.** States 1–4 are four *directional
+recovery manoeuvres* chosen by obstacle probing; 0 → (1–4 | 5) → 5 → 6 is a *temporal escalation*
+with a fixed window per phase.
+
+Field map (established from `DoSlide`/`DoFlee`/`IsStuck` plus this function):
+
+| Field | Meaning |
+|---|---|
+| `this+0x10` | owning task state (writing 1 hands control back) |
+| `this+0x14` / `+0x1C` | `me` / `him` |
+| `this+0x74` | recovery-window deadline (shares the `nextStuck` slot) |
+| `this+0x84` | **stuck substate, 0–6** |
+| `vhcl+0xC4` | throttle |
+| `vhcl+0xC8` | pitch |
+| `vhcl+0xCC` | steer |
+| `vhcl+0xD0` | braccel |
+| `vhcl+0xD4` | boolean flag (also written by `DoFlee`) |
+
+Constants: window `= Get_Time() + 2.0` (`_DAT_005EA348 = -2.0`, stored as a subtraction);
+obstacle-distance threshold `10.0` (`_DAT_005EA310`); speed test `> 0.7` (`_DAT_005EA328`).
+
+| State | Purpose | Movement | Transition |
+|---|---|---|---|
+| **0** | detect and select | `braccel = -0.1`, throttle 0 | not blocked → **6**; else probe 4 directions (`0x00407000` on `renderObj+0x20`, i = 0..3) for the nearest obstacle. If one found **and** (speed > 0.7 or nearest ≤ 10.0) → **best+1** (1–4); else → **5** |
+| **1** | recover: drive out | `braccel = +1.0`, steer 0, flag 1 | unblocked → exit; window expired → **5** |
+| **2** | recover: turn right | `steer = +1.0`, braccel 0 | unblocked → exit; window expired → **5** |
+| **3** | recover: reverse | `braccel = -1.0`, steer 0 | unblocked → exit; window expired → **5** |
+| **4** | recover: turn left | `steer = -1.0`, braccel 0 | unblocked → exit; window expired → **5** |
+| **5** | fallback push | if \|throttle\| ≥ `_DAT_005EA350` → coast, else `braccel = +1.0` | window expired **or** unblocked → exit; speed > 0.7 → **6** |
+| **6** | reverse out | `braccel = -1.0`, throttle 0, steer 0 | window expired → exit |
+
+"exit" means `this+0x10 = 1` — control returns to the owning task's state 1.
+
+```
+                    ┌──────────────┐
+                    │      0       │ detect + probe
+                    └──┬────┬───┬──┘
+        not blocked    │    │   │  probe hit
+              ┌────────┘    │   └──────────────┐
+              v             │ no probe          v
+         ┌────────┐         v            ┌─────────────┐
+         │   6    │    ┌────────┐        │ 1 · 2 · 3 · 4│ fwd/right/rev/left
+         │reverse │<───│   5    │        └──────┬──────┘
+         └───┬────┘ spd│ push   │<──────timeout─┘
+             │ >0.7    └───┬────┘
+   timeout   │             │ timeout / unblocked
+             └─────────────┴───────────> exit (task state := 1)
+```
+
+Every state re-tests `OnBlocked` (`0x00406FC0`) — the same predicate `IsStuck` uses — so recovery
+ends the moment the craft is free, not when a timer says so.
+
+### 4.2 What this means for the legacy layer
+
+The seven states reduce to a compact, implementable machine: **one detection state, four directional
+manoeuvres selected by a 4-way obstacle probe, and two escalating fallbacks**, all on a 2-second
+per-phase window, driving only `throttle`/`steer`/`braccel`.
+
+That is small enough to reimplement directly against Redux-native controls, and it needs no 1.4
+helper beyond the obstacle probe (`0x00407000`) and `OnBlocked` — both of which have Redux
+equivalents to be sited. So `DoStuck` is a genuine subsystem restoration, but a **bounded** one: a
+7-case switch over three control outputs, not a port of 1011 bytes of arithmetic.
+
+**Still outstanding for `DoStuck`:** the exact semantics of the 4-way probe (`0x00407000`, what the
+four indices mean geometrically), `_DAT_005EA350`, and the `me` vtable call at `+0x84` used in state
+5. None of those block writing the state machine; all three affect fidelity.
 
 ## 5. Remaining queue
 
