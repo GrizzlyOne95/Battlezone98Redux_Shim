@@ -157,11 +157,90 @@ All 17 camelCase identifiers TRO adds, and nothing else:
 * **Team alliances are stock 1.4**, not TRO — retracted before it reached a conclusion, but worth
   recording since it is directly multiplayer-relevant and easy to re-misattribute.
 
-## 5. Open
+## 5. Layer 3 — BSim p-code census, and why it is still not a census
+
+Run to close Layer 2's blind spot. Tooling in `BZ1_Source/diff_14_tro/bsim/`
+(`BSimCensus.java`, adapted from the repo's `BSimCompareExport.java`, which only queries *named*
+source functions and would have selected nothing here since neither build has symbols).
+
+### 5.1 Results
+
+| Direction | MATCH | NOMATCH | UNSCORABLE | total |
+|---|---|---|---|---|
+| TRO → 1.4 | 4069 (65.6 %) | 1006 (16.2 %) | 1128 (18.2 %) | 6203 |
+| 1.4 → TRO | 3508 | 137 | 2076 | 5722 |
+
+`UNSCORABLE` = self-significance ≤ 15, i.e. too small or generic for its p-code signature to carry
+information. Reported separately so "no counterpart" is never confused with "too trivial to
+fingerprint".
+
+### 5.2 The controls hold
+
+The two builds were compiled with different flags (1.4 omits frame pointers), so the first question
+is whether that alone wrecks similarity. It does not:
+
+| Function | Verdict | Similarity |
+|---|---|---|
+| `ObjectFromHandle` `0x00461690` | MATCH | **1.0000** |
+| `ProducerClass::ctor` `0x004773E0` | MATCH | 0.9318 |
+| `GameObjectClass` ODF reader `0x00465CD0` | MATCH | 0.8804 |
+| `WinMainCRTStartup` `0x005BE5D0` | MATCH | 0.6313 |
+
+### 5.3 The acid test passes
+
+The cloak state machine references no string literals, so Layer 2 was structurally blind to it.
+BSim sees it:
+
+| Function | Verdict | Best similarity |
+|---|---|---|
+| `Craft::Cloak` `0x0045B520` | **NOMATCH** | 0.3380 |
+| `Craft::Decloak` `0x0045B5A0` | **NOMATCH** | 0.3380 |
+| `Craft::ToggleCloak` `0x0045B620` | **NOMATCH** | 0.2433 |
+| `Craft::UpdateCloak` `0x0045B790` | **NOMATCH** | 0.2187 |
+| `Craft::ForceCloakNow` `0x0045B740` | **NOMATCH** | 0.3212 |
+
+### 5.4 …and it fails the other way: small functions match anything
+
+**This is the finding that matters.** BSim over-matches boilerplate:
+
+| TRO function (TRO-only) | "Matched" 1.4 target | Similarity |
+|---|---|---|
+| `Portal::Save` `0x005BD910` | `0x004675D0` | **1.0000** |
+| `api Cloak` `0x0042B1B0` | `0x0045ECF0` | 0.9568 |
+| `api Decloak` `0x0042B1F0` | `0x0045ECF0` — **same target, same score** | 0.9568 |
+| `api IsCloaked` `0x0042B230` | `0x00460AF0` | 0.8181 |
+| `api IsPortalOpen` `0x0042C5B0` | `0x00460AF0` — **same target** | 0.8904 |
+
+Every one of these is TRO-only and every one reports a confident match. The reason is structural:
+a save record is *"call serializer, test result, chain"* and a script wrapper is *"resolve handle,
+test flag, call one method"* regardless of which field or method is involved — and `medium_nosize`
+deliberately ignores constants, which is what makes it robust to compiler differences in the first
+place. Two distinct functions collapsing onto one target with an identical score is the tell.
+
+`Portal::Save` scoring **1.0000** against an unrelated 1.4 save function is the cleanest example: it
+is p-code-identical, and only the field-name string arguments — which BSim discards — differ.
+
+### 5.5 Honest verdict
+
+* **`NOMATCH` does not mean "new".** It means "no structurally similar counterpart", which covers
+  heavily modified functions too. The largest NOMATCH entries sit at `0x553000`–`0x596000` (the
+  shell/menu region) at similarity 0.27–0.41 — that is TRO's rebranded shell, i.e. *modified*, not
+  new. So 1006 is an upper bound on TRO-only code, not a count of it.
+* **`MATCH` does not mean "unchanged"** for small functions, per §5.4.
+
+**Neither method alone is a census.** Layer 1/2 miss structure-only changes (cloak). Layer 3 misses
+semantics-only changes (portal save). The `§0` headline stands because it rests on the *union*: the
+ODF-key diff found both features, and BSim independently confirmed the cloak machine has no 1.4
+counterpart.
+
+### 5.6 Concrete improvement, not yet made
+
+Add a `MATCH_AMBIGUOUS` verdict: when the best target's similarity is not meaningfully above the
+runner-up's, the match is shape-driven and should not be trusted. That single change would have
+caught every false positive in §5.4 — they all show near-identical top scores across many targets.
+
+## 6. Open
 
 * `Schedule_Ai.cpp` and `RecycleTask::curState` are the only two non-portal literals that survive
   verification as TRO-only and are *not* obviously content or branding. Both are probably path- or
   build-string differences rather than features; neither has been chased.
-* Layer 2 cannot see string-free code. A structural diff (BSim — the repo already carries scripts
-  under `reverse_engineering/bsim/`) would close that gap and is the natural next step if a complete
-  census is ever needed.
