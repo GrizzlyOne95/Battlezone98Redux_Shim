@@ -8,7 +8,7 @@ An item belongs here only when the failure mechanism is understood well enough t
 
 | Patch | Classification | Phase | Next gate |
 | --- | --- | --- | --- |
-| CLI multi-parameter / `shellmap:<W>,<H>` parser repair | **Legacy 1.5 defect / OpenShim compatibility enhancement** | **Implementation ready** | Implement the post-parser repair from the pristine command-line snapshot, then qualify Steam + GOG runtime behavior. |
+| CLI multi-parameter / `-shellmap:<W>,<H>` parser repair | **Legacy 1.5 defect / OpenShim compatibility enhancement** | **Implemented, awaiting runtime qualification** | Qualify GOG + Steam runtime behavior, then promote out of Active. |
 
 ### CLI multi-parameter parser repair
 
@@ -18,7 +18,7 @@ Technical plan:
 
 Primary RE deliverable:
 
-`reverse_engineering/redux_cli_multiparam_parser_root_cause_20260831.md`
+`reverse_engineering/cli_multi_parameter_parser_parity_20260827.md`
 
 Proven invariant:
 
@@ -30,28 +30,48 @@ option-specific shellmap grammar: ":%d,%d"
 
 The comma conflict exists in both 1.5 and Redux. Redux's added tab delimiter is a real parser difference but is not the cause of the reproduced multi-value failure.
 
+Implementation:
+
+`src/patches/cli_multiparam_parser.cpp`
+
 Selected production strategy:
 
 ```text
-process attach
-  -> preserve pristine GetCommandLineA()
-  -> let stock Redux parser run unchanged
-  -> after FUN_007D5120 returns, re-read only shellmap:<W>,<H>
-     from the pristine snapshot using whitespace-only token boundaries
-  -> validate both dimensions
-  -> repair 0x009183D4 / 0x009183C4
-  -> continue before the first known consumer at 0x00618D2C
+DllMain (before the parser runs from WinMain)
+  -> require exe file version 301
+  -> require the stock bytes 20 2C 09 00 at 0x008F068C
+  -> write 20 09 00 00  (" ,\t" -> " \t")
+  -> stock parses everything, unsplit, with its own grammar
 ```
 
-Do not replace the complete stock parser for this patch.
+The delimiter string is referenced by exactly two instructions in the image,
+both inside `FUN_007D5120` (`0x007D5156`, `0x007D5FD1`), so no other
+tokenizer is reachable from this change. It lives in `.data`, which
+SteamStub does not encrypt, so the write is valid on both stores at
+`DLL_PROCESS_ATTACH`.
+
+The originally proposed post-parser repair of `0x009183D4` / `0x009183C4`
+was rejected on two findings:
+
+- `0x009183D4` is a mode selector (1 = shellmap, 2 = largemap), not a width;
+  writing a dimension there disables the feature at `FUN_00617110`;
+- the orphaned token is consumed by the positional branch, which overwrites
+  `DAT_00915540` -- the map-name buffer the shellmap consumer itself reads --
+  along with the mission path and run state, so repairing the dimension
+  globals alone would not have made the feature work.
+
+Opt-out: `[Fixes] CliMultiParameterOptions = 0`.
+
+The complete stock parser is not replaced, and OpenShim parses no
+command-line values of its own.
 
 ### Promotion rule
 
 Move the item out of **Active** only after:
 
-- production repair is enabled;
-- malformed-input tests pass;
-- unrelated CLI switches remain unaffected;
+- ~~production repair is enabled~~ (done);
+- ~~malformed-input tests pass~~ (done);
+- ~~unrelated CLI switches remain unaffected~~ (done, offline);
 - GOG 2.2.301 runtime qualification passes;
 - Steam runtime qualification passes;
 - diagnostics prove the repair is applied only when intended.

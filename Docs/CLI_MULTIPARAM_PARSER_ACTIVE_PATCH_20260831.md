@@ -1,7 +1,7 @@
 # CLI Multi-Parameter Parser Compatibility Patch
 
 **Date:** 2026-08-31  
-**Status:** **ACTIVE PATCH — IMPLEMENTATION READY**  
+**Status:** **IMPLEMENTED — AWAITING RUNTIME QUALIFICATION**  
 **Scope:** Battlezone 98 Redux 2.2.301 / OpenShim  
 **Patch class:** Legacy 1.5 parser defect compatibility repair, not a Redux-only regression
 
@@ -12,13 +12,13 @@ Battlezone command-line options whose value syntax contains a comma can be corru
 The canonical reproduced case is:
 
 ```text
-shellmap:216,178
+-shellmap:216,178
 ```
 
 The stock top-level tokenizer treats comma as a delimiter. It therefore transforms the intended single token into two tokens:
 
 ```text
-shellmap:216
+-shellmap:216
 178
 ```
 
@@ -39,7 +39,7 @@ OpenShim will repair the affected value from its already-preserved pristine proc
 Primary report:
 
 ```text
-reverse_engineering/redux_cli_multiparam_parser_root_cause_20260831.md
+reverse_engineering/cli_multi_parameter_parser_parity_20260827.md
 ```
 
 The report records the full binary trace, file/RVA evidence, corpus references, hashes, Steam/GOG comparison, offline parser model, and candidate patch strategies.
@@ -126,7 +126,7 @@ The handler calls `sscanf` with:
 For the original input:
 
 ```text
-shellmap:216,178
+-shellmap:216,178
 ```
 
 the top-level `strtok` has already inserted a NUL at the comma. The handler therefore receives effectively:
@@ -144,8 +144,8 @@ res = 1
 and the resulting stock state becomes:
 
 ```text
-DAT_009183D4 = 216
-_DAT_009183C4 = 216
+DAT_009183D4  = 1          ; mode selector, NOT a dimension
+_DAT_009183C4 = 0x00D800D8 ; (height << 16) | width, both 216
 ```
 
 rather than:
@@ -215,145 +215,222 @@ It must not be described as a Redux-only parser regression.
 
 ## Active patch strategy
 
-### Selected strategy: post-parser narrow repair
+### Selected strategy: narrow the parser's own delimiter set
 
-Use the existing pristine `s_commandLineSnapshot`, parse only the affected multi-value option with whitespace-only token boundaries, and repair the native state after the stock parser returns but before the first known consumer.
+Implemented in `src/patches/cli_multiparam_parser.cpp`. The four delimiter
+bytes at `0x008F068C` are rewritten in place:
 
-Relevant Redux control-flow points from the RE report:
+```text
+0x008F068C   20 2C 09 00   " ,\t"   ->   20 09 00 00   " \t"
+```
+
+The string is referenced by exactly two instructions in the whole image,
+both inside `FUN_007D5120`:
+
+```text
+0x007D5156  68 8C 06 8F 00  push offset 0x008F068C   ; strtok(cmdline, delims)
+0x007D5FD1  68 8C 06 8F 00  push offset 0x008F068C   ; strtok(NULL, delims)
+```
+
+so the change cannot reach any other tokenizer. With the comma gone the
+token is never split, `sscanf` returns 2, and no other native state is
+touched at all.
+
+Applied synchronously from `DllMain`, because the parser runs from WinMain
+via the call at `0x00618D0E` long before `RunPatcher` reaches it.
+
+`0x008F068C` is in `.data` (characteristics `0xC0000040`, writable,
+non-executable), which SteamStub does not encrypt, so the write itself is
+valid on both stores. The two `.text` push sites and the `":%d,%d"` format
+site are checked as corroboration and logged, but are not required, because
+at `DLL_PROCESS_ATTACH` a Steam image is still decrypting `.text` in stages
+and requiring them would make the fix silently GOG-only. Identity therefore
+rests on the exe file version (301) plus the exact bytes at a fixed, never
+scanned address.
+
+### Why the originally proposed post-parser repair was rejected
+
+The first draft of this document proposed leaving the stock parser alone and
+rewriting the parsed dimensions afterwards, from the pristine
+`s_commandLineSnapshot`, at:
 
 ```text
 FUN_007D5120 return: 0x007D5FE9
 caller:              0x00618D0E
-first known consume: before 0x00618D2C
 ```
 
-For `shellmap`, the compatibility repair writes only:
+Two findings from reading the decompile through to the positional branch
+rule that out.
+
+**`0x009183D4` is a mode selector, not a width.** The consumer is
+`FUN_00617110`, not anything near `0x00618D2C`:
 
 ```text
-0x009183D4
-0x009183C4
+if (DAT_009183D4 == 1)
+    FUN_0050F920(&DAT_00915540, _DAT_009183C4 & 0xFFFF, _DAT_009183C4 >> 16 & 0xFFFF);
+else if (DAT_009183D4 == 2)
+    FUN_0050FE80(&DAT_00915540, _DAT_009183C4);
 ```
 
-with the fully parsed dimensions recovered from the pristine snapshot.
+Writing a dimension into `0x009183D4`, as the draft specified, would have
+sent the dispatch down neither branch and disabled shellmap outright. Only
+`_DAT_009183C4` carries dimensions, packed as `(height << 16) | width`.
+
+**The orphaned token is consumed, not merely stranded.** `178` re-enters the
+loop and takes the non-switch path, which writes:
+
+```text
+strncpy(&DAT_00945708, "178", 0x1000);   ; mission/save path
+strncpy(&DAT_00915540, "178", 0x10);     ; map name
+FUN_00434170(5);                         ; SetRunning(5)
+DAT_0091556C = 1;
+```
+
+`DAT_00915540` is the same buffer the shellmap consumer above passes as the
+map name. A post-parser repair of the dimension globals alone would hand the
+consumer correct dimensions together with a map name of `"178"` and a changed
+run state, so the feature would still not work. Reverting that collateral
+means re-deriving the positional token as well, which is the parser
+reimplementation the narrow strategy set out to avoid. Not splitting the
+token in the first place avoids all of it.
+
+### Accepted trade-off
+
+A comma no longer separates arguments, so a command line that wrote
+`-win,-nointro` where it meant `-win -nointro` now yields one unmatched
+token. Space is the universal separator and every comma-bearing value is
+broken today, so this is judged negligible. `[Fixes]
+CliMultiParameterOptions = 0` restores stock tokenising.
 
 ### Why this strategy is preferred
 
-This approach intentionally leaves the stock parser in control of all unrelated behavior.
+It removes the contradiction instead of compensating for its output:
 
-Benefits:
+- the token is never split, so no orphan token is created and none of the
+  positional-branch collateral above ever happens;
+- stock keeps ownership of every value: OpenShim parses nothing, so there is
+  no second grammar to drift out of step with the handler;
+- it repairs every option in this parser whose value grammar contains a
+  comma, not `shellmap` alone;
+- four bytes in `.data`, no detour, no trampoline, no `.text` write, and
+  nothing that can trip SteamStub's code-integrity check;
+- idempotent and trivially revertible, with no ordering assumption between
+  the parser and its consumers.
 
-- preserves stock positional argument handling;
-- preserves all unrelated option aliases and side effects;
-- avoids reimplementing the entire historical command-line grammar;
-- avoids depending on the already-mutated CRT command-line buffer;
-- uses an immutable command-line copy OpenShim already owns;
-- repairs only state known to be corrupted by the top-level comma tokenizer;
-- minimizes compatibility risk for unknown/custom launch arguments.
+A wholesale replacement of `FUN_007D5120` remains unjustified.
 
-A wholesale replacement of `FUN_007D5120` is not justified by the current evidence.
+## Production scope
 
-## Initial production scope
-
-The first production patch should be deliberately narrow.
-
-Recognize the canonical form:
-
-```text
-shellmap:<width>,<height>
-```
-
-from `s_commandLineSnapshot` using **whitespace-only option boundaries**.
-
-Requirements:
-
-1. Parse both dimensions successfully.
-2. Reject partial parses.
-3. Reject additional unexpected comma components for the initial patch.
-4. Apply reasonable integer/range validation consistent with the stock consumer.
-5. Do not reinterpret unrelated comma-bearing arguments.
-6. Do not modify stock parser token storage.
-7. Write only the native width/height globals after stock parsing and before their first known consumption.
-8. Emit diagnostic logging when a repair is applied.
-
-The repair should be idempotent: if the stock result already matches the valid pristine pair, no state change is needed.
-
-## Required tests
-
-An offline model already exists in:
+Note the switch prefix. `FUN_007D5120` only reaches the option chain for
+tokens beginning `/`, `-` or `+`; a bare `shellmap:...` goes to the
+positional branch and is treated as a mission name. The canonical form is:
 
 ```text
-tests/cli_parser_tests.cpp
+-shellmap:<width>,<height>
 ```
 
-It reproduces the destructive delimiter behavior. No production parser replacement is currently enabled.
+What the patch does:
 
-The production patch must add/retain coverage for at least:
+1. Read `[Fixes] CliMultiParameterOptions` from `openshim.ini` beside the
+   executable (default ON), self-contained so it does not need the shim's
+   config plumbing under the loader lock.
+2. Require exe file version 301.
+3. Return silently if the delimiters are already repaired (idempotence).
+4. Require the exact stock bytes `20 2C 09 00` at `0x008F068C`.
+5. Check the two `.text` push sites and the `":%d,%d"` format site as
+   corroboration, and log the result without requiring it.
+6. Write `20 09 00 00` under `VirtualProtect`, and log the applied repair.
+
+What the patch deliberately does not do: it adds no value-level tolerance of
+its own. `=` instead of `:`, quoted values and embedded spaces are all left
+exactly as stock handles them, because the stock handler still does all the
+value parsing.
+
+## Tests
+
+The offline model in `tests/cli_parser_tests.cpp` models `FUN_007D5120` once
+and runs it twice, with the stock delimiters and with the repaired ones, so
+the "fixed" arm is the stock parser fed the bytes that actually ship rather
+than a separate reimplementation. It models the positional branch
+(`DAT_00915540`, `DAT_00945708`, `SetRunning`, `DAT_0091556C`) so the orphan
+collateral is asserted, not just described.
+
+Value matrix, all through the repaired delimiters:
 
 ```text
-shellmap:216,178
-shellmap:1920,1080
-shellmap:216,216
-
-shellmap:216
-shellmap:abc,178
-shellmap:216,abc
-shellmap:,178
-shellmap:216,
-shellmap:216,178,999
+-shellmap:216,178      -> 216 x 178
+-shellmap:1920,1080    -> 1920 x 1080
+-shellmap:216,216      -> 216 x 216
+-shellmap:216          -> 216 x 216   (stock square fallback, res == 1)
+-shellmap:216,         -> 216 x 216   (stock square fallback, res == 1)
+-shellmap:216,abc      -> 216 x 216   (stock square fallback, res == 1)
+-shellmap:abc,178      -> 108 x 89    (handler defaults, res == 0)
+-shellmap:,178         -> 108 x 89    (handler defaults, res == 0)
+-shellmap              -> 108 x 89    (handler defaults, res == EOF)
+-shellmap:216,178,999  -> 216 x 178   (extra component ignored by ":%d,%d")
 ```
 
-Also test interaction with surrounding arguments:
+Interaction and non-regression coverage:
 
-```text
-<other-option> shellmap:216,178 <other-option>
-<other-option>\tshellmap:216,178\t<other-option>
-```
+- space- and tab-separated surrounding switches;
+- `-largemap:16` and `-disablemods` proven byte-for-byte identical between
+  the stock and repaired delimiter runs;
+- a genuine positional mission argument still reaches the positional branch,
+  in either argument order;
+- an unrelated comma-bearing option is not rewritten and its tail is not
+  orphaned;
+- quoted paths containing spaces behave exactly as stock (strtok has no
+  quote awareness in either arm; documented, not claimed fixed);
+- the accepted comma-as-separator behaviour change is asserted explicitly so
+  it cannot regress silently.
 
-and verify that:
-
-- unrelated switches remain unchanged;
-- renderer/backend launch options remain functional;
-- `-disablemods` remains a valid single-value/no-value parser baseline where applicable;
-- executable paths and quoted arguments containing spaces remain unaffected;
-- an unrelated argument containing commas is not silently rewritten;
-- the orphan positional token created by the stock parser does not influence repaired `shellmap` state.
-
+All checks pass under `-Wall -Wextra -Werror`.
 ## Runtime acceptance
 
-Patch acceptance requires a real-process qualification pass on supported Redux binaries.
+Still outstanding. Static verification against the shipped GOG binary is
+complete (every address, guard byte and section attribute in this document
+was read back from the installed executable), and the offline suite passes,
+but no real-process launch has been performed for this patch.
 
 ### Positive case
 
 Launch with:
 
 ```text
-shellmap:216,178
+-shellmap:216,178
 ```
 
-and prove before the first consumer that native state contains:
+Expect in the shim log:
 
 ```text
-width  = 216
-height = 178
+[cliparse] CLI multi-parameter options repaired: strtok delimiters " ,\t" -> " \t"
+           at 0x008F068C (text identity strtok1=ok strtok2=ok shellmapFormat=ok)
 ```
 
-rather than stock:
+and, at `FUN_00617110`:
 
 ```text
-width  = 216
-height = 216
+DAT_009183D4  = 1
+_DAT_009183C4 = 0x00B200D8   ; height 178, width 216
+DAT_00915540  = ""           ; NOT "178"
 ```
+
+rather than the stock `_DAT_009183C4 = 0x00D800D8` with `DAT_00915540 = "178"`.
 
 ### Negative/control cases
 
 Prove that:
 
-- no `shellmap` option leaves native state entirely under stock control;
+- with no `shellmap` option, native state stays entirely under stock control;
 - malformed `shellmap` values are not "helpfully" rewritten into new semantics;
 - single-value CLI options remain byte-for-byte behaviorally unaffected;
 - command ordering does not change the result;
-- Steam and GOG produce equivalent repaired behavior.
-
+- a genuine mission argument still loads;
+- `[Fixes] CliMultiParameterOptions = 0` restores stock behaviour exactly;
+- Steam and GOG produce equivalent repaired behavior. On Steam the log line
+  is expected to read `strtok1=unverified strtok2=unverified` because `.text`
+  is still SteamStub ciphertext at `DLL_PROCESS_ATTACH`; the repair must
+  still apply and still work.
 ## Binary qualification
 
 Hashes recorded by the root-cause report:
@@ -392,19 +469,24 @@ Steam-vs-GOG Redux parser parity for the investigated path is proven in the RE r
 - [x] Reproduce defect in offline parser model.
 - [x] Compare against Battlezone 1.5.
 - [x] Classify as inherited 1.5 defect rather than Redux-only regression.
-- [x] Select narrow repair point and native state targets.
-- [ ] Implement production post-parser repair.
-- [ ] Add production-facing diagnostics.
-- [ ] Run malformed-input regression suite.
+- [x] Correct `0x009183D4` from "width" to mode selector, and identify the
+      real consumer as `FUN_00617110`.
+- [x] Identify the orphan-token collateral that rules out a post-parser
+      dimension-only repair.
+- [x] Select narrow repair point and native state target.
+- [x] Implement production repair (`src/patches/cli_multiparam_parser.cpp`).
+- [x] Add production-facing diagnostics.
+- [x] Add the `[Fixes] CliMultiParameterOptions` opt-out.
+- [x] Run malformed-input regression suite.
+- [x] Verify every guard byte against the shipped GOG executable.
 - [ ] Validate supported GOG executable at runtime.
 - [ ] Validate supported Steam executable at runtime.
 - [ ] Confirm no side effects on renderer/backend and other CLI controls.
 - [ ] Promote to fixed only after runtime acceptance passes.
-
 ## Documentation invariant
 
 Do not regress this item back to "RE needed." The parser root cause and 1.5 parity question are closed.
 
-The remaining work is **implementation and runtime validation** of the narrow OpenShim repair.
+The remaining work is **runtime validation** of the shipped repair.
 
-Future research may inventory other stock options whose internal grammar also uses delimiters consumed by the top-level tokenizer, but that is not a prerequisite for shipping the scoped `shellmap` compatibility patch.
+Removing the comma from the delimiter set repairs every option in this parser whose internal grammar uses it, so the inventory of other affected options is no longer a prerequisite for anything. It remains worth compiling as documentation of what the fix unblocks.
