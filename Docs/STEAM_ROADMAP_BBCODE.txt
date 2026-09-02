@@ -369,7 +369,7 @@ This remains below stability, multiplayer preservation, and core modding infrast
 [h3]Crash / Stability Bugs[/h3]
 
 [list]
-[*] [b]Pilot hardpoint ODF ordering crash[/b] - 1.5 warns instead of crashing, so this still appears to be a Redux-specific parser/state regression. The exact Redux crash consumer needs a controlled repro/minidump.
+[*] [b]Pilot hardpoint ODF ordering crash[/b] - a controlled Redux 2.2.301 matrix now reproduces the closest failing placement 3/3 and maps the immediate fault: Person::Simulate unconditionally calls through a null carrier after BuildObject succeeds. Exact 1.5 source has the same unguarded carrier assumption, so Redux-regression status is not yet proven; run the same matrix in 1.5 and distinguish misplaced keys from the separate missing-model-hardpoint warning path before adding a safety guard.
 [*] [b]weaponMask=00000 Follow crash[/b] - the encoded mask and several consumers are known, but the exact Follow-path fault still needs to be captured. The fix must preserve intentionally weaponless units rather than rewriting the mask.
 [*] [b]Shift-F9 editor task-mode crash[/b] - selecting a unit whose classLabel and AI process do not match can crash the editor. This is especially relevant to legacy/custom mission units.
 [*] [b]Second-session editor corruption/crash[/b] - entering the editor works normally the first time, but after returning to menu and loading another mission in the same process the minimap can be empty and changing a terrain tile reliably crashes. This remains a strong mission-lifetime/state-reset candidate.
@@ -391,7 +391,7 @@ reproduction
 [list]
 [*] [b]AIP mixed stock/custom producer bug[/b] - when custom and stock units are mixed in a custom producer, AI may only build the custom units even when stock units are present in the AIP. The stock-vs-custom selection logic still needs to be compared against legacy behavior.
 [*] [b]Captured/disguised AI victim retaliation parity[/b] - capture/disguise writers, actual-team hostility, and hostile-hit state have strong 1.5/Redux static parity evidence. Do not close the historical report yet: captured craft, turrettank, static turret/gun-tower, and sniper-specific victim response still need a controlled runtime 1.5-versus-Redux matrix.
-[*] [b]Neutral-unit attack/order asymmetry[/b] - neutral units can attack the player while the player cannot issue equivalent attack orders against them. Revalidate first, then compare against 1.5 team/order rules.
+[*] [b]Neutral-unit attack/order asymmetry[/b] - [b]legacy UI rule, not a broken Attack path[/b]. Redux runtime proves Lua/native Attack works and deals damage in both neutral-to-player and player-team-to-neutral directions. BZ 1.5's normal command target list intentionally excludes team 0 through Team::EnemyP. Any UI change should be treated as an optional gameplay enhancement, with one manual Redux UI confirmation still useful.
 [*] [b]Rare sniper/reticle misalignment after eject[/b] - occasionally the pilot sniper aim no longer agrees with the reticle after ejecting. Needs a reliable reproduction before patching.
 [*] [b]Walker cockpit jitter[/b] - parent-transform inheritance remains implicated, but a safe fix must preserve cockpit animation, aiming, and first-person offsets.
 [/list]
@@ -407,7 +407,7 @@ reproduction
 [*] [b]Password-lobby friend invites[/b] - the invite path does not include the password, making password-protected friend invites fail. This belongs with the broader multiplayer service/client work.
 [*] [b]MPI host-leaving bug[/b] - host departure behavior still needs a proper reproduction and state/ownership trace.
 [*] [b]Multiplayer freecam exploit[/b] - the camera path and authoritative network-game gate still need to be joined cleanly without breaking legitimate SP/editor/spectator use.
-[*] [b]All Nations multiplayer option[/b] - this is a real stock 1.5 host rule. The reconstructed contract is Net::bNations, serialized in the existing game-info blob and consumed by nation-sensitive vehicle/class/mission paths. Redux retains the variable and consumers but the shell presentation is dormant. Restoration should reuse the existing rule byte and add the missing settings-row/UI path rather than inventing a new protocol.
+[*] [b]All Nations multiplayer option[/b] - this is a real stock 1.5 host rule, but exact Redux 2.2.301 validation currently proves only a hidden, no-op AnyNationButton shell artifact. The current settings loader, launch assembly/log, and recovered vehicle-list paths omit the rule, and the executable has no netveh1.odf literal. Do not rely on same-RVA private-PDB mappings or invent a new protocol field: locate the exact current wire byte and downstream consumers first, or scope restoration as a larger compatibility port rather than a settings-row patch.
 [/list]
 
 [b]Important Cloak distinction:[/b] the historical "Cloak Disabled" idea is [b]not[/b] currently supported as a recovered Battlezone 1.5 host contract. The 1.5 executable/symbol/string audits did not establish a bCloak-style rule or shell option. If OpenShim eventually adds a lobby cloak rule, it should be documented as a [b]new OpenShim multiplayer feature[/b], not a legacy-option restoration.
