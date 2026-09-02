@@ -234,11 +234,14 @@ resolve:
 [AIPRES] account item='mxturr' -> id=0  MISS (entry discarded)
 ```
 
-`mxturr` still misses, and that is a second, independent defect:
-`AddObjectClass` recurses **nine** build-item slots, and `mxturr` is
-`buildItem10` in the producer's menu. **A producer's tenth build item is
-invisible to the strategic AI** even though the player can build it from the
-menu normally.
+`mxturr` still misses, and that turned out to be a fixture authoring error, not
+an engine defect. `ProducerClass`'s ODF parser at `0x005B03C0` reads exactly
+**nine** build items — `buildItem1`..`buildItem9`, into
+`GameObjectClass + 0x608 + i*4` — and every consumer (`AddObjectClass`, the
+build menu at `0x005AE660`, the menu-flag scan at `0x004A0160`) iterates the
+same nine. Menu position 10 is the reserved back/exit button. So
+`buildItem10 = "mxturr"` in `mxrecy.odf` was never parsed, never displayed and
+never buildable by anyone; there is no tenth slot to lose.
 
 ## Result: 2026-09-02, the reported bug reproduced
 
@@ -271,18 +274,61 @@ maker.
 
 1. **Never enumerated.** A custom ODF that no load-time build tree reaches is
    absent from the prereq table; `PREREQ_WhatIs` returns 0 and
-   `AIP_Load_Account` discards the node. Fix at
-   `InitObjectClasses`/`AddObjectClass`. Modders can work around it today with a
-   mission-named `[Builder]` ODF or a producer placed in the BZN.
-2. **Single maker slot.** Even once enumerated, a unit type carries one maker,
-   so a unit reachable from two producers is buildable by only one of them.
-   This is what makes a mixed custom/stock producer menu unusable to the AI.
-   Fix at `SetMaker` / the `makers[]` array, which already has four slots.
+   `AIP_Load_Account` discards the node. **Not patched.** Modders have a clean
+   workaround already: a mission-named `[Builder]` ODF, or a producer placed in
+   the BZN.
+2. **Single maker slot.** Even once enumerated, a class carries one maker.
+   **Patched** — see below.
 
-Both are Dark Reign-derived stock BZ1 code, present identically in 1.5, and the
-reporter's own assessment is that this is unlikely to be fixed upstream. A
-`makers[]` fix in particular changes AI behavior in stock content and must not
-ship ungated.
+Both are Dark Reign-derived stock BZ1 code, present identically in 1.5.
+
+## The fix: `[Fixes] AiMultiProducerMakers`
+
+The naive fix — make `SetMaker` append instead of overwrite — does nothing on
+its own, because `SetMaker` is never called with the second producer.
+`FindObjectClass` at `0x006A2150` keys the class list on the **built class
+alone**: a second `AddObjectClass(svfigh, mxrecy)` finds the existing
+`(svfigh, svrecy)` entry, sees its build class already set, and returns. The
+pair never reaches `Units_Init`, so nothing ever asks `SetMaker` for it.
+
+So the fix has two halves, both exact-call-site `REL32` hooks:
+
+- **`AI Multi Producer Maker Collect`** wraps the `FindObjectClass` call at
+  `0x006A220F`, inside `AddObjectClass`'s prologue. A true return with a
+  non-null build class is precisely the pair stock drops; record it.
+- **`AI Multi Producer Maker Apply`** wraps the `Units_Init` call at
+  `0x006A1AE4` — the last call in `0x006A1AC0`, and `PREREQ_Init` does not run
+  until `0x006A1AF0`. Run stock `Units_Init` first so `makers[0]` is filled
+  exactly as before, then append each recorded pair's `GetPrereq(buildClass)`
+  into the first free slot.
+
+`makers[]` is four wide in both type structs (unit `+0x66`, building `+0x16`),
+`PREREQ_Init` copies all four behind a zero terminator, and
+`PREREQ_CanThisMakeThat` walks to that terminator — so slots 1..3 were already
+consumed by stock code. Nothing but `SetMaker`'s single write was stopping them
+from being populated. Slot 0 still goes to the first registrant, so
+`PREREQ_Init`'s `canmake` flag is computed exactly as before.
+
+Six named resolves back it (`AI FindObjectClass`, `AI Units_Init`,
+`AI IsBuilding`, `AI Class2UnitType`, `AI Class2BuildingType`, `AI GetPrereq`);
+if any one fails to verify, both sites stand down and stock registration runs.
+
+### Measured effect
+
+All arms seeded, custom producer, identical config, one repeat each:
+
+| Arm | fix OFF | fix ON |
+| --- | --- | --- |
+| `cps` stock only | 0 | **4 stock** |
+| `cpms` mixed, stock first | 0 | **4 stock + 1 custom** |
+| `cpmc` mixed, custom first | 4 custom, 0 stock | **4 custom + 1 stock** |
+| `ccak` shipped `ccatank.aip` | 0 | 2 stock + 6 `svscav` + 1 `svcnst` |
+
+13 extra makers registered in each. Unseeded — the closest thing here to stock
+content — the fix registers 5 extra makers, `sps` is identical either way, and
+`ccak` produced one extra `svfigh` inside the 90-second window (1 event vs 2).
+That is a single repeat against an unmeasured noise floor, so treat it as "small
+but not nil" rather than as a quantified regression.
 
 Also still open, reported separately and not yet investigated: **the AIP stops
 running after roughly an hour regardless of available resources, and calling

@@ -145,6 +145,11 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::REL32, {}, "AIP Prereq Name Resolve Probe", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "AIP Prereq Name Resolve Probe Force Matching", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "AIP Prereq Name Resolve Probe Building Matching", false, {} },
+            // AddObjectClass's duplicate test, and the Units_Init call that
+            // finishes class registration. Together they let a built class
+            // carry every producer that can make it instead of only the first.
+            { 0, HookEngine::PatchType::REL32, {}, "AI Multi Producer Maker Collect", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "AI Multi Producer Maker Apply", false, {} },
             // Redirect the sun's one contribution to the global ScreenFlash so
             // the fullscreen white quad can be dropped without touching the sun
             // disc, the six lens-flare sprites, or the two explosion callers of
