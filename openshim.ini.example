@@ -1026,6 +1026,7 @@ LobbyBzrnetIntegration = Auto
 ; network order format remain stock.
 ;
 ; Accepted: boolean. Default: OFF (exact legacy behavior).
+; Exposed on the OpenShim Settings page as "Neutral Attack Orders".
 AllowNeutralAttackOrders = 0
 
 
