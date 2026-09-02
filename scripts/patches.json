@@ -440,6 +440,26 @@
       "name": "LayMines Weapon Mask Trigger Hook",
       "fallback": "0x00512922",
       "expected_original": "5A 6F FC FF"
+    },
+    {
+      "name": "Artillery Volley Trigger Hook 1/4",
+      "fallback": "0x00476AB5",
+      "expected_original": "8B 42 08 FF D0"
+    },
+    {
+      "name": "Artillery Volley Trigger Hook 2/4",
+      "fallback": "0x00476DAC",
+      "expected_original": "8B 50 08 FF D2"
+    },
+    {
+      "name": "Artillery Volley Trigger Hook 3/4",
+      "fallback": "0x00476F0B",
+      "expected_original": "8B 42 08 FF D0"
+    },
+    {
+      "name": "Artillery Volley Trigger Hook 4/4",
+      "fallback": "0x00476F74",
+      "expected_original": "8B 42 08 FF D0"
     }
   ],
   "static_pointers": [

@@ -1609,4 +1609,37 @@ void __declspec(naked) __cdecl Trampoline_LayMinesSetSelected()
     }
 }
 
+
+// ArtilleryProcess::DoAttack synchronized volley.
+//
+// Unlike the three hooks above, this one does not replace a `call rel32` to a
+// __thiscall routine. It replaces the five bytes of an indirect virtual call:
+//
+//     8B 42 08    mov  eax, [edx + 8]     ; Weapon::Trigger from the vtable
+//     FF D0       call eax
+//
+// The four sites (0x00476AB5, 0x00476DAC, 0x00476F0B, 0x00476F74) all have that
+// exact 5-byte shape with the weapon already loaded into ecx by the preceding
+// instruction, so a CALL rel32 fits the window exactly and nothing straddles.
+// Two of them spell it `8B 50 08 / FF D2` instead; the byte guards in
+// scripts/patches.json pin each site's own encoding.
+//
+// eax, ecx and edx are all dead after the original sequence -- the site
+// discards Trigger's return value -- so this clobbers nothing the caller reads.
+// ebp still belongs to DoAttack's frame, which is how the ArtilleryProcess is
+// recovered; the C helper refuses to extend the shot unless the weapon it was
+// handed is actually found in that process's own carrier.
+void __declspec(naked) __cdecl Trampoline_ArtilleryTriggerVolley()
+{
+    __asm
+    {
+        mov  eax, [ebp - 0x250]     // ArtilleryProcess*
+        push eax                    // arg2: process
+        push ecx                    // arg1: weapon
+        call OpenShimArtilleryTriggerVolley
+        add  esp, 8
+        ret
+    }
+}
+
 } // namespace BZROpenShim
