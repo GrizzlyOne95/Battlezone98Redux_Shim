@@ -234,6 +234,26 @@ SuppressHopOutAttackAlert = 0
 ; game after changing any of them. The first five are also on the OpenShim
 ; Settings page. Each has a legacy environment alias, listed with it.
 
+; Give a buildable class every producer that can make it, not just the first
+; one the engine happened to enumerate at mission load.
+;
+; InitObjectClasses walks the build tree of every load-time root, but its
+; duplicate test keys on the built class alone, so a unit reachable from two
+; producers keeps only the first, and SetMaker writes that single producer into
+; makers[0]. The visible effect is that a team whose only producer is a custom
+; one cannot build the stock units listed in that producer's own menu: the AIP
+; entry resolves fine and is then never selected. This collects the pairs the
+; duplicate test rejects and appends them into the makers[] slots stock code
+; already reads to the zero terminator.
+;
+; Measured: with a custom producer and a mixed AIP, 0 stock units built before
+; and 4 after. In stock-shaped content the effect is small but not nil -- five
+; extra makers are registered, and one arm produced one extra unit inside a
+; 90-second window.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_AI_MULTI_PRODUCER_MAKERS
+AiMultiProducerMakers = 1
+
 ; Let APC AI accept allied targets when choosing a deploy target.
 ; Rewrites two branch displacements in the APC target-reject path.
 ; Accepted: boolean. Default: ON. Stands down in a network game.
@@ -290,6 +310,20 @@ ProducerScriptPredicates = 1
 ; Accepted: boolean. Default: ON. Restart required after changing.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_VEHICLE_LIST_MOD_SCOPING
 VehicleListModScoping = 1
+
+; Repair command-line options whose own value grammar contains a comma,
+; the canonical case being -shellmap:<W>,<H>. Stock tokenises the command
+; line with " ,\t", so the comma ends the token before the shellmap
+; handler's ":%d,%d" ever sees it: the height is lost, the width is copied
+; over it, and the stranded second value is taken as a mission name, which
+; also overwrites the map-name buffer the shellmap call itself reads. This
+; removes the comma from that one parser's delimiter set (" \t"), which is
+; an inherited Battlezone 1.5 defect rather than a Redux regression.
+; NOTE: with this ON a comma no longer separates arguments, so a command
+; line that wrote "-win,-nointro" instead of "-win -nointro" must use
+; spaces. Set to 0 for stock tokenising.
+; Accepted: boolean. Default: ON. Restart required after changing.
+CliMultiParameterOptions = 1
 
 [Startup]
 
@@ -1026,6 +1060,7 @@ LobbyBzrnetIntegration = Auto
 ; network order format remain stock.
 ;
 ; Accepted: boolean. Default: OFF (exact legacy behavior).
+; Exposed on the OpenShim Settings page as "Neutral Attack Orders".
 AllowNeutralAttackOrders = 0
 
 

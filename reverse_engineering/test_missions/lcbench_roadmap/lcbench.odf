@@ -1,0 +1,20 @@
+// Mission-named builder seeder for lcbench.bzn.
+//
+// InitObjectClasses seeds the strategic AI's entire name universe from four
+// roots: the two stock recyclers in builders[], every VEHICLE/HELICOPTER craft
+// already present in Craft::craftList at mission load, the default class
+// apcamr, and two mission-named ODFs -- "b_" + the first six characters of the
+// mission filename, and the first eight characters of it. This file is the
+// second of those for lcbench.bzn.
+//
+// RecurseBuildItem reads [GameObjectClass] classLabel first: present means the
+// file names a real object and is added as a leaf, absent means it is a list
+// and its [Builder] buildItemN entries are recursed instead. So this file must
+// carry NO classLabel.
+//
+// mxrecy is the custom recycler whose build menu carries the two custom clones.
+// Rooting it here registers mxfigh and mxturr into vehicleClassList with mxrecy
+// as their build class, which is what PREREQ_Init then turns into prereq ids.
+
+[Builder]
+buildItem1 = "mxrecy"
