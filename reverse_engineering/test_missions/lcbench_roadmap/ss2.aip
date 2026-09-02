@@ -1,5 +1,5 @@
 /*****************************************************************************
-  lcbench AIP mixed stock/custom producer matrix -- arm "cps"
+  lcbench AIP mixed stock/custom producer matrix -- arm "ss2"
 
   Structure and every scheduler value are taken from the shipped, known-working
   ccatank.aip, which the "ccak" control arm proves drives real AI production on
@@ -87,6 +87,7 @@ ACCOUNT Offense[MAX_ACCOUNT_LENGTH];
 
 #DATA
 	14,	"svfigh",	NUMBER_TO_HAVE,		4;
+	13,	"svturr",	NUMBER_TO_HAVE,		4;
 #END_DATA
 
 FORCE_MATCHING My_Matchings[MAX_FORCE_MATCHING];

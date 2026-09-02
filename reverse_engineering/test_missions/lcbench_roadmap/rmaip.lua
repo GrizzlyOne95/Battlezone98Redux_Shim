@@ -28,6 +28,8 @@ local ARMS = {
     cpms = { producers = {"mxrecy"},          label = "custom producer / mixed, stock first" },
     cpmc = { producers = {"mxrecy"},          label = "custom producer / mixed, custom first" },
     mp2  = { producers = {"svrecy", "mxrecy"}, label = "two producers / mixed, stock first" },
+    ss2  = { producers = {"svrecy"},          label = "CONTROL: two STOCK units in one account" },
+    cc2  = { producers = {"svrecy"},          label = "CONTROL: two CUSTOM units in one account" },
     ccak = { producers = {"svrecy"},           label = "CONTROL: shipped ccatank.aip verbatim" },
 }
 
@@ -66,22 +68,41 @@ end
 -- Count only AI-team units of the two units under test. Anything else the
 -- scheduler decides to build is reported separately as "other" rather than
 -- being silently folded into either bucket.
+-- Counted by IsOdf rather than by comparing GetOdf strings: GetOdf can return
+-- hidden trailing null bytes, which silently breaks equality tests.
+local TRACKED_ODFS = { "svfigh", "mxfigh", "svturr", "mxturr", "svscav", "svcnst" }
+
 local function Census()
-    local stock, custom, other = 0, 0, 0
-    local i
+    local counts = { other = 0 }
+    local i, j
+    for i = 1, #TRACKED_ODFS do
+        counts[TRACKED_ODFS[i]] = 0
+    end
     for i = 1, #tracked do
         local h = tracked[i]
         if h ~= nil and IsValid(h) and GetTeamNum(h) == AI_TEAM then
-            if IsOdf(h, "svfigh") then
-                stock = stock + 1
-            elseif IsOdf(h, "mxfigh") then
-                custom = custom + 1
-            else
-                other = other + 1
+            local matched = false
+            for j = 1, #TRACKED_ODFS do
+                if IsOdf(h, TRACKED_ODFS[j]) then
+                    counts[TRACKED_ODFS[j]] = counts[TRACKED_ODFS[j]] + 1
+                    matched = true
+                    break
+                end
+            end
+            if not matched then
+                counts.other = counts.other + 1
             end
         end
     end
-    return stock, custom, other
+    return counts
+end
+
+-- stock=/custom= stay pinned to svfigh/mxfigh so existing parsing keeps
+-- working; the same-origin pair arms are read from svturr=/mxturr=.
+local function CountsText(c)
+    return string.format(
+        "stock=%d custom=%d svturr=%d mxturr=%d svscav=%d svcnst=%d other=%d",
+        c.svfigh, c.mxfigh, c.svturr, c.mxturr, c.svscav, c.svcnst, c.other)
 end
 
 -- Hold the AI's budget open. Both caps must be raised first: SetScrap and
@@ -126,7 +147,7 @@ local function EnsureDeployed()
 end
 
 local function Snapshot(label)
-    local stock, custom, other = Census()
+    local counts = Census()
     local factory = GetFactoryHandle(AI_TEAM)
     local prodDep = "none"
     if #producers >= 1 then
@@ -136,10 +157,10 @@ local function Snapshot(label)
         end
     end
     print(string.format(
-        "[LCROAD][AIP] T+%.3f %s case=%s stock=%d custom=%d other=%d " ..
+        "[LCROAD][AIP] T+%.3f %s case=%s %s " ..
         "events=%d scrap=%d pilots=%d recycler=%s factory=%s recyDep=%s prodDep=%s",
         elapsed, label, tostring(selectedCase),
-        stock, custom, other, buildEvents,
+        CountsText(counts), buildEvents,
         GetScrap(AI_TEAM), GetPilot(AI_TEAM),
         ValidText(recycler), ValidText(factory),
         DeployedText(recycler), prodDep))
@@ -238,11 +259,11 @@ function Update(dt)
     end
 
     if stage == 1 and elapsed >= 90.0 then
-        local stock, custom, other = Census()
+        local counts = Census()
         Snapshot("RESULT")
         print(string.format(
-            "[LCROAD][AIP] T+%.3f COMPLETE case=%s stock=%d custom=%d other=%d events=%d",
-            elapsed, tostring(selectedCase), stock, custom, other, buildEvents))
+            "[LCROAD][AIP] T+%.3f COMPLETE case=%s %s events=%d",
+            elapsed, tostring(selectedCase), CountsText(counts), buildEvents))
         FailMission(GetTime() + 1.0)
         stage = 2
     end
@@ -262,7 +283,8 @@ local function Observe(h, source)
     end
     seen[h] = true
     table.insert(tracked, h)
-    if GetTeamNum(h) == AI_TEAM and (IsOdf(h, "svfigh") or IsOdf(h, "mxfigh")) then
+    if GetTeamNum(h) == AI_TEAM and (IsOdf(h, "svfigh") or IsOdf(h, "mxfigh") or
+                              IsOdf(h, "svturr") or IsOdf(h, "mxturr")) then
         buildEvents = buildEvents + 1
         print(string.format(
             "[LCROAD][AIP] BUILT T+%.3f n=%d odf=%s class=%s team=%d src=%s",
