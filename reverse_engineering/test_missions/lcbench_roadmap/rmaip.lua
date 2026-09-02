@@ -135,7 +135,8 @@ end
 -- well clear of the deploy time.
 local nextDeployAttempt = 0.0
 local nextSupply = 0.0
-local directBuildIssued = false
+local directBuildIssued = 0
+local nextDirectBuild = 20.0
 
 local function EnsureDeployed()
     if elapsed < nextDeployAttempt then
@@ -179,7 +180,8 @@ function Start()
     tracked = {}
     seen = {}
     buildEvents = 0
-    directBuildIssued = false
+    directBuildIssued = 0
+    nextDirectBuild = 20.0
 
     local config = OpenODF("rmacfg")
     selectedCase = GetODFString(config, "Roadmap", "case", "cpms")
@@ -280,14 +282,19 @@ function Update(dt)
     -- AIP construction program entirely. If the producer builds the custom unit
     -- on command while no AIP account ever does, the defect is in the AIP
     -- scheduler's selection, not in the ODF or the producer's build list.
-    if arm ~= nil and arm.directBuild ~= nil and not directBuildIssued
-       and elapsed >= 20.0 then
-        directBuildIssued = true
+    -- Issued repeatedly (throttled well clear of buildTime) so that a single
+    -- order being consumed cannot be mistaken for a refusal. The Offense
+    -- account for these arms requests 0 units, so anything that appears is
+    -- attributable to this command and not to the AIP.
+    if arm ~= nil and arm.directBuild ~= nil and directBuildIssued < 4
+       and elapsed >= nextDirectBuild then
+        nextDirectBuild = elapsed + 18.0
+        directBuildIssued = directBuildIssued + 1
         local p = producers[1]
         if p ~= nil and IsValid(p) then
             print(string.format(
-                "[LCROAD][AIP] DIRECTBUILD T+%.3f odf=%s canBuild=%s busy=%s",
-                elapsed, tostring(arm.directBuild),
+                "[LCROAD][AIP] DIRECTBUILD T+%.3f n=%d odf=%s canBuild=%s busy=%s",
+                elapsed, directBuildIssued, tostring(arm.directBuild),
                 tostring(CanBuild(p)), tostring(IsBusy(p))))
             Build(p, arm.directBuild)
         end
