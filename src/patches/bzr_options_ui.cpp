@@ -2826,7 +2826,7 @@ namespace BZROpenShim
               ShimSettingApplyGroup::GlobalImprovement,
               "Classic crouch while sniping mid-jump. Single player only." },
             { "Neutral Attack Orders", "Gameplay", "AllowNeutralAttackOrders", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
               ShimSettingApplyGroup::GlobalImprovement,
               "Allow explicit player attack orders against team-0 neutral objects. "
               "Diplomacy and autonomous targeting remain stock." },
