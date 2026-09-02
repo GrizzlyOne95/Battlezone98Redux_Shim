@@ -838,6 +838,24 @@ namespace BZROpenShim
         }
     }
 
+    // The four artillery volley sites replace a whole 5-byte instruction pair
+    // (`mov r32,[vtbl+8]` + `call r32`) rather than a rel32 operand, so the
+    // payload is built here as an explicit CALL rel32 instead of going through
+    // the REL32 or JMP5 fillers. A site whose address never resolved keeps an
+    // empty payload and ApplyPatch leaves the stock indirect call alone.
+    static void FillArtilleryVolleyPayloads(std::vector<HookEngine::PatchDef>& patches) {
+        const uint32_t target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_ArtilleryTriggerVolley));
+        for (auto& p : patches) {
+            if (p.type != HookEngine::PatchType::BYTES || !p.verified) continue;
+            if (p.name.find("Artillery Volley Trigger Hook") == std::string::npos) continue;
+            if (p.address == 0) continue;
+            const int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(p.address + 5);
+            p.payload.resize(5);
+            p.payload[0] = 0xE8;
+            memcpy(p.payload.data() + 1, &rel, 4);
+        }
+    }
+
     static void FillVersionNoticePayloads(std::vector<HookEngine::PatchDef>& patches) {
         const uint32_t tag = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(kOpenShimVersionTag));
         const uint32_t flameC = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(EngineFlameControlHook));
@@ -940,7 +958,7 @@ namespace BZROpenShim
         ResolvePointers(findAddr("Map Sorting"), findAddr("Map List Rewrite for Hop-Fix 1/3"), findAddr("Map List Rewrite for Hop-Fix 2/3"), findAddr("Map List Rewrite for Hop-Fix 3/3"), findAddr("Probe Refresh Path MapFilter1"), findAddr("Map List Fix Support 1/3"), findAddr("Probe MapListFix2"), findAddr("TurretCraft Aim Pitch Multiplier"), findAddr("TurretTank Aim Pitch Multiplier"), findAddr("Under Attack Alert Hook 1/2"), findAddr("Under Attack Alert Hook 2/2"), findAddr("Offensive Attack Reveal Hook"), findAddr("TurretTank Attack Reveal Hook"), isSteam);
         ResolveStaticReturnPointers();
         ResolveBzrHooks(isSteam); InitBzrHookStrings(); SuppressStartupShellAutoLoad();
-        FillJmp5Payloads(patches); FillVersionNoticePayloads(patches); FillRel32Payloads(patches, isSteam); WaitForExpectedBytes(patches, isSteam);
+        FillJmp5Payloads(patches); FillVersionNoticePayloads(patches); FillRel32Payloads(patches, isSteam); FillArtilleryVolleyPayloads(patches); WaitForExpectedBytes(patches, isSteam);
         // Apply critical patches (JMP5 hooks, version notice, etc.) BEFORE the
         // deferred-hook retry loop. The retry loop can take ~25 seconds for
         // Steam input binding UI hooks, and the game may crash during that

@@ -1,0 +1,14 @@
+[GameObjectClass]
+baseName = "avmine"
+classLabel = "minelayer"
+scrapCost = 4
+scrapValue = 2
+buildTime = 7.0
+maxHealth = 3000
+maxAmmo = 9000
+weaponMask = 00001
+unitName = "MNM1 single"
+aiName = "MineLayerFriend"
+aiName2 = "MineLayerEnemy"
+weaponHard1 = "GS1"
+weaponName1 = "gproxmin"

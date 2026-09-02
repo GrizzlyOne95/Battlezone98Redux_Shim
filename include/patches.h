@@ -57,6 +57,7 @@ namespace BZROpenShim
         void __cdecl Trampoline_ArtilleryWeaponSelect();
         void __cdecl Trampoline_LayMinesWeaponSelect();
         void __cdecl Trampoline_LayMinesSetSelected();
+        void __cdecl Trampoline_ArtilleryTriggerVolley();
     }
 
     // -----------------------------------------------------------------------
@@ -173,6 +174,16 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::REL32, {}, "Artillery Weapon Mask Select Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "LayMines Weapon Mask Select Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "LayMines Weapon Mask Trigger Hook", false, {} },
+            // Synchronized multi-hardpoint artillery volley. Each of these
+            // replaces the five bytes of one indirect `Weapon::Trigger` virtual
+            // call inside ArtilleryProcess::DoAttack with a CALL rel32, so the
+            // guard covers the whole original instruction pair rather than an
+            // operand. A build whose encoding moved fails the guard and the
+            // stock indirect call stays in place.
+            { 0, HookEngine::PatchType::BYTES, {}, "Artillery Volley Trigger Hook 1/4", false, {} },
+            { 0, HookEngine::PatchType::BYTES, {}, "Artillery Volley Trigger Hook 2/4", false, {} },
+            { 0, HookEngine::PatchType::BYTES, {}, "Artillery Volley Trigger Hook 3/4", false, {} },
+            { 0, HookEngine::PatchType::BYTES, {}, "Artillery Volley Trigger Hook 4/4", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Engine Flame Control VTable Hook", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Engine Flame Submit VTable Hook", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Chunk Effect Simulate VTable Hook", false, {} },
