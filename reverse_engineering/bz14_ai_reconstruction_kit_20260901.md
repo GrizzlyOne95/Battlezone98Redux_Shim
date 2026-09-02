@@ -1,0 +1,249 @@
+# BZ 1.4 AI — reconstruction kit
+
+**Date:** 2026-09-01
+**Purpose:** everything needed to reimplement 1.4-era AI behaviour as an alternative mode in Redux
+**Artifacts:** `BZ1_Source/diff_14_15/`
+**Companions:** `bz14_vs_bz15_ai_census_20260901.md` (which behaviours changed),
+`bz14_evasive_ai_investigation_20260823.md` (the evasive system, read by hand)
+
+---
+
+## 0. What this is, and what it is not
+
+**It is the substrate.** Four things that did not exist before and that any 1.4-AI restoration needs:
+
+1. A **complete, readable 1.4 corpus** for the AI class hierarchy — the previous corpus was missing
+   half of it.
+2. A **validated 1.5↔1.4 method map**, exact rather than heuristic, so any 1.5 function named in the
+   PDB can be read against its 1.4 original.
+3. A **comparison harness** that puts both sides on the same footing and refuses to compare things
+   it cannot compare fairly.
+4. One **fully worked delta** (`AttackTask::DoState` case 7) as the template.
+
+**It is not a finished behavioural specification for every AI behaviour.** Turning the map into
+implementable pseudocode is still a per-function reading job. This kit makes each of those readings
+cheap and reliable; it does not do them. The census's top-20 list is the queue.
+
+---
+
+## 1. The 1.4 corpus gap is closed
+
+Ghidra does not create functions from vtable slot targets, and 1.4 has no RTTI to help it. Measured
+against the RtimeClass-derived vtable map: **156 of the 314 virtual-method addresses had no function
+in the 1.4 corpus at all** — including `AttackTask::DoState` (`0x0040CDE0`), the most-studied AI
+function in the build.
+
+`bsim/ghidra_scripts/SeedAndDecompile.java` forces a function at each mapped address and decompiles
+it. Result: **created 156, already present 158, failed 0; 314 of 314 decompiled, 0 failures**, into
+`out/bz14_seeded/`.
+
+Anyone using `BZ1_Source/1.4/ghidra/decomps` for coverage claims should use the seeded set alongside
+it. The raw corpus has holes exactly where the class hierarchy points.
+
+## 2. The method map, and how it is validated
+
+Built by `build_vtable_map.py` from the engine's own `RtimeClass` registry — see §7 of the census
+doc for the chain. **803 virtual-method pairs across 40 classes.**
+
+Two independent checks, both of which caught real errors:
+
+* **Self-check:** `AttackTask` → 1.5 `0x005CF8F8`, 1.4 `0x005E6E58`, slot 11 = `0x0040CDE0`, matching
+  the address the 20260823 investigation derived by hand.
+* **Inherited-method consistency:** an inherited 1.5 method must resolve to the *same* 1.4 address
+  from every class that inherits it. 85 methods appear in more than one class; **39 were
+  inconsistent, and all 39 traced to a single class, `SoldierRetreat`** — its vtable alignment is
+  wrong. 39 of 40 classes are clean. `SoldierRetreat` is dropped, and the gate is permanent in
+  `compare_pairs.py`.
+
+Without that gate, `SoldierRetreat`'s bad pairs produced "deltas" comparing a 244-line function
+against an 8-line one.
+
+## 3. Two comparison traps, both measured
+
+**Thunks.** Some vtable slots point at a jump trampoline, not the body — `SitTask::DoState` in 1.4 is
+`thunk_FUN_0046dba0`. Unfollowed, that compares 9 lines of trampoline against a 94-line function.
+The harness follows them.
+
+**Decompiler-configuration bias — this one nearly produced a bogus headline.** 1.5's corpus was
+decompiled with `bzint.pdb` types applied, so float constants print as literals; the seeded 1.4
+functions were decompiled without type info, leaving them as `_DAT_` references. A naive comparison
+reported **100 "1.5-only" constants against 1**, and 37 pairs differing only on the 1.5 side against
+**zero** differing only on the 1.4 side. That is not a property of the code — it is an artifact.
+
+Resolving each `_DAT_` address to its stored float from the image puts both sides on the same
+footing. Corrected: **17 pairs vs 11, and 61 constants vs 43** — a plausible balance.
+
+**Consequence for reconstruction:** with the bias removed, the two builds turn out to **share almost
+all their numeric tunables.** The surviving constant deltas are mostly sign variants of the same
+value. So a 1.4-AI restoration is **not** a matter of restoring different numbers — the divergence is
+in control flow. Do not go looking for a table of changed constants; there isn't one.
+
+## 4. Where the behaviour actually differs
+
+### 4.1 Methods whose state set itself differs (14)
+
+Structural change, not just a rewritten handler:
+
+`DefendTask::InitState` · `SAVAttackVehicleTask::InitState` · `SAVAttackVehicleTask::DoState` ·
+`FollowTask::DoState` · `FollowTask::InitState` · `RescueTask::DoState` · `AttackTask::InitState` ·
+`AttackTask::CleanState` · `WingmanProcess::ChangeState` · `UnitProcess::ChangeState` ·
+`PersonProcess::ShouldAttack` · `SAVAttackPersonTask::InitState` · `ScavengerProcess::Execute` ·
+`TugProcess::Execute`
+
+### 4.2 Methods where 1.4 carries substantially more code
+
+1.5 removed logic in these; the removed logic is what a restoration puts back:
+
+| Method | 1.5 lines | 1.4 lines |
+|---|---|---|
+| `ScavengerProcess::Execute` | 36 | **81** |
+| `TugProcess::Execute` | 31 | **56** |
+| `WingmanProcess::ChangeState` | 20 | **51** |
+| `SitSpinTask::DoState` | 20 | **45** |
+| `AttackTask::DoState` | 289 | **399** |
+| `SAVAttackVehicleTask::DoState` | 155 | **200** |
+| `OffensiveProcess::DoSubTask` | 155 | **188** |
+
+Full table: `out/ai_pair_deltas.tsv`.
+
+## 5. The worked delta — the template for the rest
+
+`AttackTask::DoState` case 7. Both builds handle the identical state set (2–0xC), so the machine was
+not restructured; the rewrite is inside the handler.
+
+**1.4** — slide-exit keyed on the *enemy's own task state*, no time cap:
+
+```c
+iVar8 = (**(code **)(*(int *)(*(int *)(param_1 + 0x1c) + 0x18) + 0x30))();
+iVar8 = *(int *)(iVar8 + 0xac);            /* the ENEMY's task state */
+if ((iVar8 != 2) && (iVar8 != 5)) {
+    if (iVar8 == 7) { *(undefined4 *)(param_1 + 0x10) = 10; }   /* -> slide */
+    else { ... SidewaysAndClose ... }
+}
+```
+
+**1.5 / Redux** — that predicate is gone, replaced by a self-contained one:
+
+```c
+if (IsBuilding(target)) goto done;
+if (Get_Time() <= startTime + 10.0) {          /* 10s cap, absent in 1.4 */
+    if (!UnitTask::IsStuck(this)) {
+        UnitTask::DoSlide(this);
+        ... SidewaysAndClose(...)
+    }
+}
+```
+
+**To restore 1.4 behaviour** the change is: read the target's task state (object `+0xAC`), branch on
+`{2, 5, 7}`, and drop the elapsed-time cap. The helpers 1.5 introduced (`IsStuck`, `DoSlide`,
+`SidewaysAndClose`, `AbleToHit`) survive and are reusable — the 20260823 doc establishes that the
+missile FourCC fire gate was relocated into `UnitTask::UpdateWeapon` rather than deleted.
+
+## 6. The remaining hop — attempted, and it does not work automatically
+
+The functions dominating the census's most-changed list — `DoFlee`, `DoStand`, `DoStuck`, `DoBlast`,
+`UpdateWeapon`, `DoFollow` — are **non-virtual**, appear in no vtable, and so §2's map does not reach
+them. `pair_nonvirtual.py` attempts them by **callee-set voting**: the 1.4 counterpart of a 1.5
+callee X should be called by the 1.4 side of the same aligned pairs whose 1.5 side calls X, and be
+rare elsewhere. That argument is indifferent to how much the bodies were rewritten, which is why it
+looked promising.
+
+**It fails, and the failure is measured, not suspected.**
+
+* **Self-test.** Run the identical procedure against the *virtual* methods with the answer hidden:
+  only 7 have enough evidence to be testable, and it scores **4 correct, 3 wrong — 57%**. That is
+  barely better than a coin flip on a sample too small to trust either way.
+* **A proof, not just a weakness.** Three target pairs have **identical caller sets** across the 303
+  aligned pairs:
+
+  | | callers |
+  |---|---|
+  | `DoFlee` ≡ `DoSlide` | 1 each |
+  | `DoStuck` ≡ `IsStuck` | 13 each |
+  | `UpdateWeapon` ≡ `AbleToHit` | 11 each |
+
+  No set-based method can separate members of such a pair, however the scoring is tuned.
+
+* **Call shape helps, but not enough.** On the 1.5 side the ties do break — `IsStuck` is consumed as
+  a value at 100% of its call sites and `DoStuck` at 0%; `UpdateWeapon` passes 2 arguments and
+  `AbleToHit` 1. Adding that filter resolved exactly **one** further case (`SidewaysAndClose`) and
+  left the self-test unchanged at 57%, because the 1.4-side candidates share their shape too.
+* **Result:** 10 of 12 targets come back `ambiguous`, several with the runner-up tied to two decimal
+  places, and three distinct 1.5 functions still resolve to the same 1.4 address.
+
+`out/nonvirtual_pairs.tsv` is written for the record. **Do not use it as a mapping** — the ambiguous
+rows are not answers.
+
+### 6.1 ghidriff / Ghidra Version Tracking — the proper tool, also measured
+
+`ghidriff` 1.0.0 is installed locally and is the right tool for this: its default
+`VersionTrackingDiff` engine runs Ghidra's full correlator suite, including the call-graph
+propagation that §6 hand-rolls. It was run 1.4 → 1.5 (`run_ghidriff.sh`, ~31 min), producing
+2976 matched 1.4 addresses and a 1.4 MB report.
+
+Scored against the same vtable ground truth:
+
+| | |
+|---|---|
+| correct (truth among its candidates) | 48 |
+| wrong | 77 |
+| produced no candidate at all | 176 |
+| **accuracy on decided cases** | **38.4%** |
+
+Worse than the hand-rolled 57%. The correlator responsible for the bulk of its matches,
+`StructuralGraphHash` (6617 raw matches), contributed **35 wrong top matches and 0 correct ones** —
+the same false-confidence-at-scale seen in the BSim census.
+
+**But the tool is not at fault, and the control proves it.** Scored instead against code the BSim
+census says is essentially *unchanged* (similarity ≥ 0.99, ≥ 256 bytes):
+
+| | |
+|---|---|
+| correct | 20 |
+| wrong | 3 |
+| unmatched | 5 |
+| **accuracy on decided cases** | **87.0%** |
+
+So Version Tracking works well on code that did not change and fails on code that did — and
+rewritten code is exactly what a 1.4-AI reconstruction needs paired. The limitation is intrinsic to
+similarity-based matching, not a defect in ghidriff.
+
+### 6.2 Every automated route, measured
+
+| Method | Accuracy pairing *rewritten* AI functions |
+|---|---|
+| BSim best-match (§4.1 of the census doc) | 1 of 3 |
+| Callee-set voting + call shape (`pair_nonvirtual.py`) | 57% (7 testable) |
+| ghidriff / Ghidra Version Tracking | 38.4% (125 decided) |
+| **RtimeClass vtable chain (§2)** | **exact, self-validating** |
+
+Three independent similarity-based methods, all measured, all unusable for this specific job. The
+only thing that works is the one that does not use similarity at all — the engine's own class
+registry.
+
+**Recommendation, now well-supported:** read these six functions by hand. The 1.4 corpus is complete
+(§1), the parents are already paired (§2), and the 20260823 investigation demonstrates hand-reading
+this exact code works. Six functions is a bounded job, and no available matcher clears a bar that
+would make its output safe to use unchecked.
+
+ghidriff's report is still worth keeping for the *unchanged* majority of the binary, where it is 87%
+accurate: `ghidriff/bzone14_unpacked.exe-bzone15.exe.ghidriff.md`.
+
+## 7. Redux
+
+The 20260823 investigation established that **Redux carries the 1.5 rewrite structurally unchanged**,
+so every 1.4→1.5 delta in this kit is also a 1.4→Redux delta. A restoration targets the Redux
+equivalents of the 1.5 addresses here; that doc already maps several (e.g. Redux `0x00478A50`).
+Mapping the rest of the 1.5→Redux side is a separate pass and has not been done here.
+
+## 8. Files
+
+| Path | What |
+|---|---|
+| `out/virtual_method_map.tsv` | 803 verified 1.5↔1.4 virtual-method pairs |
+| `out/class_vtable_map.tsv` | 40 classes with both vtables and object sizes |
+| `out/bz14_seeded/` | 314 decompiled 1.4 methods, including the 156 the corpus lacked |
+| `out/ai_pair_deltas.tsv` | per-pair line counts, state-set differences, constant deltas |
+| `build_vtable_map.py` | the RtimeClass chain |
+| `compare_pairs.py` | comparison harness with the consistency gate, thunk following, and bias correction |
+| `bsim/ghidra_scripts/SeedAndDecompile.java` | fills the corpus holes |
