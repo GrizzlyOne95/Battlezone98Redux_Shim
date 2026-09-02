@@ -5,6 +5,7 @@
 
 #include "bzr_hooks.h"
 #include "native_ui.h"
+#include "openshim_events.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -218,14 +219,11 @@ namespace BZROpenShim
         g_SdkInitialized.store(false);
     }
 
-    void PublishOpenShimEvent(OpenShimEventType type,
+    bool PublishOpenShimEvent(OpenShimEventType type,
                               uint64_t arg0,
                               uint64_t arg1,
                               const char* text)
     {
-        if (!g_SdkInitialized.load())
-            return;
-
         OpenShimEvent event = {};
         event.structSize = sizeof(OpenShimEvent);
         event.apiVersion = SDK_API_V2;
@@ -244,20 +242,36 @@ namespace BZROpenShim
             strncpy_s(event.text, sizeof(event.text), text, _TRUNCATE);
         }
 
-        AcquireSRWLockExclusive(&g_EventQueueLock);
-        event.sequence = g_NextEventSequence++;
-
-        if (g_EventQueueCount == kEventQueueCapacity)
+        // The companion polling queue is part of the public SDK surface and
+        // stays gated on SDK initialization. In-process dispatch is not: shim
+        // subsystems subscribe during patching, before or independently of SDK
+        // init, and a career statistic must not be lost because the public API
+        // was not up yet.
+        if (g_SdkInitialized.load())
         {
-            g_EventQueueHead = (g_EventQueueHead + 1) % kEventQueueCapacity;
-            --g_EventQueueCount;
-            ++g_DroppedEventCount;
+            AcquireSRWLockExclusive(&g_EventQueueLock);
+            event.sequence = g_NextEventSequence++;
+
+            if (g_EventQueueCount == kEventQueueCapacity)
+            {
+                g_EventQueueHead = (g_EventQueueHead + 1) % kEventQueueCapacity;
+                --g_EventQueueCount;
+                ++g_DroppedEventCount;
+            }
+
+            const size_t tail = (g_EventQueueHead + g_EventQueueCount) % kEventQueueCapacity;
+            g_EventQueue[tail] = event;
+            ++g_EventQueueCount;
+            ReleaseSRWLockExclusive(&g_EventQueueLock);
         }
 
-        const size_t tail = (g_EventQueueHead + g_EventQueueCount) % kEventQueueCapacity;
-        g_EventQueue[tail] = event;
-        ++g_EventQueueCount;
-        ReleaseSRWLockExclusive(&g_EventQueueLock);
+        // Fan out to in-process sinks as well. The queue above stays exactly as
+        // it was -- companion DLLs still poll it and still see every event --
+        // but OpenShim's own subsystems can now be told about one instead of
+        // having to poll their own state. Deliberately outside the queue lock:
+        // the dispatch ring has its own, and holding both would order two locks
+        // that are otherwise independent.
+        return EnqueueEventForInProcessDispatch(event);
     }
 
     bool CaptureDeveloperSnapshot(OpenShimDeveloperSnapshot& outSnapshot)
