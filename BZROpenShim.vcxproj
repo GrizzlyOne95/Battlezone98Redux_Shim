@@ -132,6 +132,7 @@
     <ClCompile Include="src\patches\pilot_fp_animation_trace.cpp">
       <LanguageStandard>stdcpp14</LanguageStandard>
     </ClCompile>
+    <ClCompile Include="src\patches\cli_multiparam_parser.cpp" />
     <ClCompile Include="src\patches\editor_view_order.cpp" />
     <ClCompile Include="src\patches\file_io_hooks.cpp" />
     <ClCompile Include="src\patches\numeric_locale_compat.cpp" />
@@ -179,6 +180,7 @@
     <ClInclude Include="include\autosave_gate.h" />
     <ClInclude Include="include\bzr_hooks.h" />
     <ClInclude Include="include\bzr_options_ui.h" />
+    <ClInclude Include="include\cli_multiparam_parser.h" />
     <ClInclude Include="include\terrain_tile_blend.h" />
     <ClInclude Include="include\render_profile.h" />
     <ClInclude Include="include\backend_selection.h" />
