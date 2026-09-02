@@ -73,9 +73,45 @@
       "expected_size": 6,
       "fallback": "0x00786E9A",
       "require_unique": true
+    },
+    {
+      "name": "Pilot Carrier Null Guard",
+      "pattern": "8B 95 C0 FC FF FF 8B 8A A0 01 00 00 E8 ?? ?? ?? ?? 89 85 00 FB FF FF C7 85 70 FC FF FF 00 00 00 00",
+      "offset": 13,
+      "expected_size": 4,
+      "fallback": "0x0059D76D",
+      "require_unique": true
+    },
+    {
+      "name": "Neutral Attack Order Target Hook",
+      "pattern": "8B 8D 8C FD FF FF 83 C1 18 8B 85 8C FD FF FF 8B 50 18 8B 42 04 FF D0 50 8B 8D 80 FD FF FF E8 ?? ?? ?? ?? 0F B6 C8 85 C9 75 05 E9 ?? ?? ?? ??",
+      "offset": 31,
+      "expected_size": 4,
+      "fallback": "0x004A3FD7",
+      "require_unique": true
     }
   ],
   "resolves": [
+    {
+      "name": "Carrier::GetSelected",
+      "pattern": "55 8B EC 51 89 4D FC 8B 45 FC 8B 40 30 8B E5 5D C3 CC CC CC CC",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00417F90",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Carrier selected-mask getter called by Person::Simulate at 0x0059D76C in exact GOG Redux 2.2.301. The function is the complete 17-byte thiscall leaf that returns [this+0x30]. Five lcbench pilot-ordering dumps fault at its mov eax,[eax+0x30] when Person+0x1A0 is null; the caller independently identifies the selected-mask use before the five-slot SNIP scan."
+    },
+    {
+      "name": "Team::EnemyP(int)",
+      "pattern": "55 8B EC 83 EC 08 89 4D F8 83 7D 08 00 7E 1E B8 01 00 00 00 8B 4D 08 D3 E0 8B 4D F8 23 81 7C 01 00 00 75 09 C7 45 FC 01 00 00 00 EB 07 C7 45 FC 00 00 00 00 8A 45 FC 8B E5 5D C2 04 00",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x005E1350",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Team::EnemyP(int targetTeam) on exact GOG Redux 2.2.301. The complete thiscall body rejects targetTeam<=0, otherwise tests 1<<targetTeam against this+0x17C and returns with ret 4. GameObject::EnemyP at 0x004DB600 calls it, and the independently reconstructed ControlPanel::Render target-list call at 0x004A3FD6 supplies each candidate object's virtual GetTeamNum result before inserting at most ten attack targets."
+    },
     {
       "name": "EngineFlame::AddFlame",
       "pattern": "0F 11 04 24 8D 85 ?? ?? ?? ?? 50 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 3D ?? ?? ?? ?? 00 0F 84",
