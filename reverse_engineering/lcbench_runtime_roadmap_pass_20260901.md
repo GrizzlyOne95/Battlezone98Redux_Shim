@@ -166,16 +166,16 @@ guidance, but no longer blocks the defensive guard. Remaining gates:
 
 | Evidence field | Finding |
 |---|---|
-| Status | **Reproduced and localized to AIP selection**; responsible routine not yet identified |
-| Reproduction | `run_lcroad_aip.ps1`; fifteen-arm matrix in `test_missions/lcbench_roadmap` |
+| Status | **Reproduced, localized and root-caused**; responsible routine identified and instrumented |
+| Reproduction | `run_lcroad_aip.ps1`; seventeen-arm matrix in `test_missions/lcbench_roadmap` |
 | Runtime evidence | Custom ODF never built by any AIP, including a file naming no stock unit at all; the same producer builds it on a direct `Build()` command |
-| Static/RE evidence | Shipped AIP examples and producer grammar checked; no responsible filter/scorer identified |
-| 1.5 comparison | Not yet reconstructed at the responsible stage |
-| Root cause | AIP construction program cannot resolve or select a custom ODF name; the ODF loader, producer build list, and construction path are all excluded |
-| Patch | None; the responsible routine still has to be found before anything is changed |
+| Static/RE evidence | `PREREQ_WhatIs` at `0x006A04B0`; `AIP_Load_Account` at `0x00693520` discards any node it returns 0 for. See `aip_construction_program_resolution_20260902.md` |
+| 1.5 comparison | Same code: 1.5 `PREREQ_WhatIs` at `0x00515466` matches instruction for instruction, so this is stock BZ1 behavior, not a Redux regression |
+| Root cause | The strategic AI's name universe is a fixed 53-entry enumeration of stock unit/building types built by `PREREQ_Init`. A custom ODF name resolves to id 0, and `AIP_Load_Account` discards the node at load time |
+| Patch | None yet. Instrumentation only (`[Diagnostics] AipResolveTrace`); a fix must widen the enumeration before `PREREQ_Init` freezes the table |
 | Qualification | Known-good control arm (`ccak`) required alongside any negative, since every failure mode here is a silent zero |
 | Remaining risk | Reported direction is contradicted (see below); the original report's setup may differ materially |
-| Roadmap recommendation | Keep active; instrument AIP account-to-ODF resolution specifically |
+| Roadmap recommendation | Keep active; re-confirm the reported direction, then design the fix at `AddObjectClass`/`Units_Init`/`PREREQ_Init` |
 
 A controlled matrix now reproduces the defect and bounds it. `svfigh` is the
 stock unit and `mxfigh` a value-identical clone differing only in ODF identity,
@@ -200,8 +200,33 @@ Slush account. Stock entries crowding out custom ones is therefore excluded, as
 are priority order, build-slot position and producer identity.
 
 The unit is constructible and the producer will construct it; the AI simply
-never asks for it. Instrumentation should target AIP account-to-ODF resolution
-rather than the producer, the ODF loader, or the build list.
+never asks for it.
+
+**Root cause, confirmed by native instrumentation on 2026-09-02.** OpenShim now
+wraps all three `PREREQ_WhatIs` call sites (`[Diagnostics] AipResolveTrace`, or
+`run_lcroad_aip.ps1 -AipResolveTrace`). `PREREQ_WhatIs` is the AI's only
+ODF-name-to-type lookup, and `AIP_Load_Account` discards any construction-program
+node it returns 0 for, logging an engine `tlog` message that the shipped build
+never surfaces. Re-running the matched pair:
+
+```
+alls  account 'svturr' -> id=21   account 'svfigh' -> id=22   -> 6 units built
+allc  account 'mxturr' -> id=0    account 'mxfigh' -> id=0    -> 0 units built
+```
+
+The probe's one-shot census of the whole prereq table is identical in both arms
+and holds exactly 53 names: the two stock races plus `player`. It does not vary
+with the mission's ODFs, the producer's build list, or the AIP loaded. The
+custom clones are absent from it even though the producer in that very arm
+offers them and `ODFPROBE` instantiates them successfully.
+
+So the AI's name universe is a fixed enumeration built by `PREREQ_Init` from
+`Units_Init`'s `vehicleClassList`/`buildingClassList`. A custom ODF name can
+never resolve, and every account node, force-matching entry and
+building-matching entry naming one is dropped at AIP load time. Scoring,
+ordering, eligibility, producer classification and list iteration are all
+exonerated. Full address map and method in
+`aip_construction_program_resolution_20260902.md`.
 
 **The reported direction is contradicted.** The roadmap records the AI building
 *only the custom* units; what reproduces is the AI building *never the custom*
@@ -226,9 +251,12 @@ byte-for-byte custom clone unit:
 7. custom producer / mixed list with order reversed between repeats.
 
 Each arm must log AIP request identity, producer candidate, build eligibility
-and rejection reason, and final ODF selection. Repeat against 1.5 before
-assigning regression status. Until that trace exists, producer classification,
-ODF namespace resolution, and AIP list iteration remain competing hypotheses.
+and rejection reason, and final ODF selection. That gate is now satisfied at the
+only stage that turned out to matter: the `[AIPRES]` probe records the request
+identity and the rejection reason for every construction-program item, and the
+matched `allc`/`alls` pair settles the question before eligibility or selection
+is ever reached. The remaining arms are retained as regression coverage rather
+than as competing hypotheses.
 
 ## 3. Neutral unit attack/order asymmetry
 

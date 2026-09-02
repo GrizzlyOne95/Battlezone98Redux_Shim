@@ -763,6 +763,28 @@ namespace BZROpenShim
                 target = static_cast<uint32_t>(
                     reinterpret_cast<uintptr_t>(ControlPanelEnemyPAttackOrderHook));
             }
+            else if (p.name.rfind("AIP Prereq Name Resolve Probe", 0) == 0) {
+                void* original = isSteam
+                    ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
+                    : HookEngine::ResolveRelCallTarget(p.address - 1);
+                const uint32_t expected =
+                    HookEngine::ResolveNamedAddress("PREREQ_WhatIs");
+                if (!original || expected == 0 ||
+                    reinterpret_cast<uintptr_t>(original) != expected) {
+                    Log(L"[AIPRES] call identity failed site=0x%08X original=%p expected=0x%08X; leaving stock call\n",
+                        p.address - 1, original, expected);
+                    continue;
+                }
+                SetAipPrereqWhatIsOriginal(original);
+                // Three call sites, one shared original: the account loader
+                // (construction program items) and the two matching tables.
+                if (p.name.find("Force Matching") != std::string::npos)
+                    target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(AipPrereqWhatIsProbeForceMatching));
+                else if (p.name.find("Building Matching") != std::string::npos)
+                    target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(AipPrereqWhatIsProbeBuildingMatching));
+                else
+                    target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(AipPrereqWhatIsProbe));
+            }
             else if (p.name == "Sun Screen Flash Contribution Hook") {
                 // Verify the instruction, not just the operand: the byte in
                 // front has to be a CALL rel32 and it has to resolve to

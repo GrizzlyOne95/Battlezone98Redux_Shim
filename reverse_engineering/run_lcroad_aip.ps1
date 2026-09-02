@@ -9,7 +9,10 @@ param(
     [ValidateRange(30, 240)]
     [int]$RunSeconds = 110,
     [string]$OutputRoot = "",
-    [string]$WerDumpRoot = "C:\BZDumps"
+    [string]$WerDumpRoot = "C:\BZDumps",
+    # Turns on the shim's [AIPRES] probe around PREREQ_WhatIs for the duration
+    # of the run. openshim.ini is backed up and restored with the fixtures.
+    [switch]$AipResolveTrace
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,9 +57,42 @@ foreach ($name in $deployNames) {
     }
 }
 
+$shimIni = Join-Path $GameRoot "openshim.ini"
+$shimIniBackup = Join-Path $backupRoot "openshim.ini"
+$shimIniPresent = Test-Path -LiteralPath $shimIni
+if ($shimIniPresent) {
+    Copy-Item -LiteralPath $shimIni -Destination $shimIniBackup -Force
+}
+if ($AipResolveTrace) {
+    if (-not $shimIniPresent) { throw "openshim.ini is not installed at $shimIni" }
+    Add-Type -Namespace Win -Name Ini -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Ansi)]
+public static extern bool WritePrivateProfileString(string section, string key, string val, string file);
+'@
+    [void][Win.Ini]::WritePrivateProfileString("Diagnostics", "AipResolveTrace", "1", $shimIni)
+}
+
 $exeInfo = Get-Item -LiteralPath $gameExe
 $exeHash = (Get-FileHash -LiteralPath $gameExe -Algorithm SHA256).Hash
 $shimHash = (Get-FileHash -LiteralPath $shimDll -Algorithm SHA256).Hash
+
+# The shim reads its patch table from the GAME's scripts\patches.json, not the
+# repo's. A stale deployed copy silently drops every patch the working tree
+# added -- the shim only says so in one [STALE-CONFIG] line deep in its log --
+# so surface the mismatch here instead.
+$livePatchesJson = Join-Path $GameRoot "scripts\patches.json"
+$repoPatchesJson = Join-Path (Split-Path $PSScriptRoot -Parent) "scripts\patches.json"
+$patchesHash = $null
+$patchesMatchRepo = $null
+if ((Test-Path -LiteralPath $livePatchesJson) -and (Test-Path -LiteralPath $repoPatchesJson)) {
+    $patchesHash = (Get-FileHash -LiteralPath $livePatchesJson -Algorithm SHA256).Hash
+    $repoPatchesHash = (Get-FileHash -LiteralPath $repoPatchesJson -Algorithm SHA256).Hash
+    $patchesMatchRepo = ($patchesHash -eq $repoPatchesHash)
+    if (-not $patchesMatchRepo) {
+        Write-Warning ("Deployed scripts\patches.json does not match the repo copy. " +
+            "Patches added in the working tree will NOT be installed for this run.")
+    }
+}
 $runs = @()
 
 try {
@@ -103,6 +139,14 @@ commit = "$commit"
                     -ErrorAction SilentlyContinue | ForEach-Object {
                         $beforeWer[$_.FullName] = $_.LastWriteTimeUtc
                     }
+            }
+
+            # openshim.log is appended to across runs, so remember where this
+            # arm starts and slice from there rather than re-reading earlier arms.
+            $shimLogPath = Join-Path $logRoot "openshim.log"
+            $shimLogStart = 0
+            if (Test-Path -LiteralPath $shimLogPath) {
+                $shimLogStart = (Get-Item -LiteralPath $shimLogPath).Length
             }
 
             $started = Get-Date
@@ -152,6 +196,30 @@ commit = "$commit"
             }
             $markerText = $markers -join "`n"
 
+            # [AIPRES] is the shim's PREREQ_WhatIs probe: one line per AIP
+            # construction-program item name plus a one-shot census of every
+            # name the strategic AI can resolve at all.
+            $aipResolve = @()
+            if (Test-Path -LiteralPath $shimLogPath) {
+                $stream = [System.IO.File]::Open($shimLogPath, 'Open', 'Read', 'ReadWrite')
+                try {
+                    # The shim truncates openshim.log on startup, so a start
+                    # offset past the current end means the file rotated and
+                    # the whole of it belongs to this arm.
+                    if ($shimLogStart -gt $stream.Length) { $shimLogStart = 0 }
+                    if ($shimLogStart -lt $stream.Length) {
+                        [void]$stream.Seek($shimLogStart, 'Begin')
+                        $reader = New-Object System.IO.StreamReader($stream)
+                        $slice = $reader.ReadToEnd()
+                        $aipResolve = @($slice -split "`r?`n" | Where-Object { $_ -match "\[AIPRES\]" })
+                    }
+                } finally { $stream.Dispose() }
+                if ($aipResolve.Count -gt 0) {
+                    Set-Content -LiteralPath (Join-Path $runRoot "aipres.txt") `
+                        -Value $aipResolve -Encoding UTF8
+                }
+            }
+
             $stockBuilt = $null
             $customBuilt = $null
             $completeLine = $markers | Where-Object { $_ -match "COMPLETE" } | Select-Object -Last 1
@@ -173,6 +241,8 @@ commit = "$commit"
                 reduxVersion = $exeInfo.VersionInfo.FileVersion
                 executableSha256 = $exeHash
                 deployedWinmmSha256 = $shimHash
+                deployedPatchesJsonSha256 = $patchesHash
+                deployedPatchesJsonMatchesRepo = $patchesMatchRepo
                 openShimCommit = $commit
                 launchMode = "GOG lcbench.bzn; forced windowed; SetAIP team 2"
                 started = $started.ToString("o")
@@ -183,6 +253,9 @@ commit = "$commit"
                 sawResult = $markerText.Contains(" RESULT ")
                 stockBuilt = $stockBuilt
                 customBuilt = $customBuilt
+                aipResolveTrace = [bool]$AipResolveTrace
+                aipResolveMisses = @($aipResolve | Where-Object { $_ -match "\[AIPRES\] MISS" }).Count
+                aipResolveLines = $aipResolve.Count
                 shimCrashDumps = $newDumps
                 werCrashDumps = $newWerDumps
                 markers = $markers
@@ -208,6 +281,9 @@ commit = "$commit"
         } elseif (Test-Path -LiteralPath $live) {
             Remove-Item -LiteralPath $live -Force
         }
+    }
+    if ($shimIniPresent) {
+        Copy-Item -LiteralPath $shimIniBackup -Destination $shimIni -Force
     }
 }
 
