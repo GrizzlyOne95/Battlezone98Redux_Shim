@@ -233,6 +233,34 @@ The census is identical in both arms: 53 names, the two stock races plus
 never enter the account. Addresses, method and the full census are in
 `../../aip_construction_program_resolution_20260902.md`.
 
+### The fixture was measuring the wrong configuration: `-SeedBuilder`
+
+`InitObjectClasses` seeds the AI's whole name universe at mission load, from the
+two stock recyclers, every vehicle already in `Craft::craftList`, `apcamr`, and
+two mission-named ODFs. A producer this Lua spawns in `Start()` arrives too
+late. That is what the original report means by "the AIP expects a recycler at
+mission load".
+
+`-SeedBuilder` deploys `lcbench.odf`, a mission-named `[Builder]` list naming
+`mxrecy`, which roots the custom producer's build tree at load without touching
+the BZN. With it on, the census grows 54 -> 56 and `mxfigh` resolves to id 35.
+
+Two further results follow, both with every name resolving:
+
+| Arm | Custom producer, AIP Offense account | Built |
+|---|---|---|
+| `cpc` | custom only | 4 custom |
+| `cps` | stock only | 0 |
+| `cpms` | mixed, stock first | 0 -- the account stalls |
+| `cpmc` | mixed, custom first | **4 custom, 0 stock** |
+
+`cpmc` reproduces the reported bug verbatim. `mxturr` still misses even seeded,
+because it is `buildItem10` and `AddObjectClass` recurses only nine slots.
+
+**Always run seeded and unseeded as a pair.** An unseeded arm is measuring
+enumeration; a seeded one is measuring makers. They fail for different reasons
+and both look like the same silent zero.
+
 **Deployment gotcha.** The shim reads its patch table from the *game's*
 `scripts\patches.json`, not the repo's. A stale deployed copy drops every patch
 the working tree added and says so only in one `[STALE-CONFIG]` line -- the
