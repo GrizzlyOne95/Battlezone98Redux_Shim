@@ -166,6 +166,11 @@ namespace BZROpenShim
                             // visibility, sun flashbang) that re-read with no
                             // patch site or hook install behind them
         RestartRequired,    // no live path; takes effect next launch
+        // Action rows. These have no ini key: clicking runs something instead
+        // of cycling a value, and the row's two "values" are the unarmed and
+        // armed states of a confirmation, not settings. See
+        // IsShimSettingActionRow in bzr_options_ui.cpp.
+        CareerStatsReset,
     };
     void ApplyShimSettingLive(ShimSettingApplyGroup group);
 
