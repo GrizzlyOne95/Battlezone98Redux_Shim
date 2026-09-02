@@ -176,6 +176,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
+    <ClInclude Include="include\lcbench_safety_policy.h" />
     <ClInclude Include="include\autosave.h" />
     <ClInclude Include="include\autosave_gate.h" />
     <ClInclude Include="include\bzr_hooks.h" />
