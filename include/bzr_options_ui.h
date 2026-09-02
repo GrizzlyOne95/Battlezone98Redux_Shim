@@ -162,6 +162,9 @@ namespace BZROpenShim
         AutoSave,           // ReloadAutoSaveConfig re-reads the ini and applies immediately
         BzrNetRoute,        // the engine re-reads the relay flag per connection attempt
         RenderProfile,      // RenderProfiles::ReloadRenderProfileConfig re-reads + reapplies live
+        LiveEngineToggle,   // plain runtime flags (hop-out alert, satellite
+                            // visibility, sun flashbang) that re-read with no
+                            // patch site or hook install behind them
         RestartRequired,    // no live path; takes effect next launch
     };
     void ApplyShimSettingLive(ShimSettingApplyGroup group);
