@@ -36,6 +36,24 @@ namespace BZROpenShim
     uint32_t __fastcall PersonCarrierGetSelectedGuard(void* carrier, void* person);
     bool __fastcall ControlPanelEnemyPAttackOrderHook(
         void* team, void* edx, int targetTeam);
+    // AIP construction-program instrumentation. The probe is a pass-through
+    // around PREREQ_WhatIs, so installing it never changes what the AI builds;
+    // [Diagnostics] AipResolveTrace only decides whether it logs.
+    void SetAipPrereqWhatIsOriginal(void* target);
+    uint16_t __cdecl AipPrereqWhatIsProbe(const char* itemName);
+    uint16_t __cdecl AipPrereqWhatIsProbeForceMatching(const char* itemName);
+    uint16_t __cdecl AipPrereqWhatIsProbeBuildingMatching(const char* itemName);
+
+    // Multi-producer maker registration. Stock keeps one producer per built
+    // class, so a team whose only producer is not that one cannot build the
+    // item at all. [Fixes] AiMultiProducerMakers (on by default) appends the
+    // other producers into the makers[] slots stock already reads.
+    void SetAiFindObjectClassOriginal(void* target);
+    void SetAiUnitsInitOriginal(void* target);
+    void SetAiMakerHelperOriginals(void* isBuilding, void* class2Unit,
+                                   void* class2Building, void* getPrereq);
+    uint32_t __cdecl AiFindObjectClassCollectHook(void* objClass, void* buildClass);
+    void __cdecl AiUnitsInitMultiMakerHook();
     void FlushChunkFragmentEventsForShutdown();
 
     // Wire up the GOG-build player-handle lookup. Only call this once the exact
