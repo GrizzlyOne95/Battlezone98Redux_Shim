@@ -161,6 +161,9 @@ namespace BZROpenShim::SunFlash
     // Reads [Display] SunFlashbang / DisableSunFlashbang and
     // [Diagnostics] TraceSunFlash. Latched; safe to call more than once.
     void LoadConfig();
+    // Drops the latch and re-reads. g_SunFlashSuppress is sampled by the thunk
+    // on every flash, so a settings-page write takes effect on the next frame.
+    void ReloadConfig();
     bool IsSuppressionEnabled();
     bool IsTraceEnabled();
 

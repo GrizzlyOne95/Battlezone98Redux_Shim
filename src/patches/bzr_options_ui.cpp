@@ -2687,6 +2687,14 @@ namespace BZROpenShim
         static const char* const kShimSettingsScavengerAltKeys[] = { "ScavengerPathing" };
         static const char* const kShimSettingsBindsUiAltKeys[] = { "CustomBindingUi" };
         static const char* const kShimSettingsRenderProfileValues[] = { "Retro", "Redux", "Enhanced" };
+        // 0 disables the override and leaves the stock engine limit alone; the
+        // runtime clamps anything above 256, so 256 is the top of the ladder.
+        static const char* const kShimSettingsSoundChannelValues[] = { "0", "64", "128", "192", "256" };
+        static const char* const kShimSettingsSoundChannelLabels[] = { "Stock", "64", "128", "192", "256" };
+        // Redux ships 200. The runtime accepts any finite value in 1..10000
+        // from a hand-edited ini; these are the presets the page cycles.
+        static const char* const kShimSettingsReticleRangeValues[] = { "200", "300", "400", "500" };
+        static const char* const kShimSettingsReticleRangeLabels[] = { "Stock", "300", "400", "500" };
 
         static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
         {
@@ -2701,10 +2709,30 @@ namespace BZROpenShim
               kShimSettingsRenderProfileValues, kShimSettingsRenderProfileValues, 3, 1,
               ShimSettingApplyGroup::RenderProfile,
               "Visual rendering policy: Redux (stock baseline), Enhanced, or Retro. Applies live." },
+            // [DX11Enhanced] is the experimental DX11 pipeline. Both rows fail
+            // closed when the key is absent, which is what keeps an install
+            // that never opted into this ini on the stock path; the shipped
+            // openshim.ini opts in explicitly.
+            { "DX11 FXAA", "DX11Enhanced", "FXAA", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::RestartRequired,
+              "FXAA 3.11 anti-aliasing pass on the DX11 Enhanced pipeline. DX11 only. Restart required." },
+            { "DX11 Local Lights", "DX11Enhanced", "EnhancedLightSelectionV2", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Contribution-ranked per-object local-light ordering. DX11 only. Restart required." },
+            { "Sun Flashbang", "Display", "SunFlashbang", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::LiveEngineToggle,
+              "On is stock: looking near the sun paints a fullscreen white flash. Off suppresses only that flash." },
             { "Attack Alert", "Display", "UnderAttackAlert", nullptr, 0,
               kShimSettingsUnderAttackValues, kShimSettingsUnderAttackValues, 3, 0,
               ShimSettingApplyGroup::UnderAttackAlert,
               "Under-attack warning style: Normal, Minimal (quieter), or None." },
+            { "Hop-Out Alert Fix", "General", "SuppressHopOutAttackAlert", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::LiveEngineToggle,
+              "Suppress the stale under-attack growl that fires the instant you hop out. Audio only." },
             { "Target Popup", "Display", "TargetPolicy",
               kShimSettingsTargetPolicyAltKeys, 1,
               kShimSettingsTargetPolicyValues, kShimSettingsTargetPolicyLabels, 3, 0,
@@ -2722,6 +2750,26 @@ namespace BZROpenShim
               kShimSettingsUnitVoValues, kShimSettingsUnitVoValues, 3, 0,
               ShimSettingApplyGroup::UnitVo,
               "Unit voice feedback: Normal, Reduced chatter, or None." },
+            { "MP Vehicle Flags", "Display", "MultiplayerFlags", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Multiplayer vehicle flags: the selection screen and the in-match renderer. Restart required." },
+            { "Show Own MP Flag", "Display", "MultiplayerFlagShowOwnCraft", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::RestartRequired,
+              "Also draw your own flag over your own craft; stock draws only other players'. Restart required." },
+            { "Death Chunk Meshes", "General", "ChunkMeshes", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Restored legacy chunkMeshes debris on unit death. Restart required." },
+            { "Sound Channels", "General", "SoundChannels", nullptr, 0,
+              kShimSettingsSoundChannelValues, kShimSettingsSoundChannelLabels, 5, 4,
+              ShimSettingApplyGroup::RestartRequired,
+              "Simultaneous sound objects. Stock leaves the engine limit alone; 256 is the ceiling. Restart required." },
+            { "Background Music", "General", "MusicGlobalFocus", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Keep the soundtrack playing and fed while the game is not the foreground window. Restart required." },
             { "Custom Keybinds", "General", "CustomBindsUi",
               kShimSettingsBindsUiAltKeys, 1,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
@@ -2731,6 +2779,18 @@ namespace BZROpenShim
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
               ShimSettingApplyGroup::RestartRequired,
               "Bypasses the legacy smoothed/accelerated mouse path. Restart required." },
+            { "Material Guard", "General", "OgreMaterialCollisionGuard", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Survive duplicate Ogre material declarations that otherwise terminate the game. Restart required." },
+            { "Map List Fixes", "General", "MapRefreshFixes", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Multiplayer map-list refresh and selection-preservation fixes. Restart required." },
+            { "Editor Placement", "General", "EditorOverheadPlacementOrder", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "BZ 1.5 view order so object placement works in the running overhead view. Needs /edit. Restart required." },
             { "AutoSave", "AutoSave", "Enabled", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::AutoSave,
@@ -2748,6 +2808,10 @@ namespace BZROpenShim
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::GlobalImprovement,
               "Player reticle tracks the weapon convergence point. Single player only." },
+            { "Reticle Range", "SinglePlayer", "SmartReticleRange", nullptr, 0,
+              kShimSettingsReticleRangeValues, kShimSettingsReticleRangeLabels, 4, 3,
+              ShimSettingApplyGroup::GlobalImprovement,
+              "Smart-reticle targeting distance; Stock is Redux's 200. Single player only." },
             { "Smart Scavengers", "SinglePlayer", "SmartScavengerPathing",
               kShimSettingsScavengerAltKeys, 1,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
@@ -2762,7 +2826,7 @@ namespace BZROpenShim
               ShimSettingApplyGroup::GlobalImprovement,
               "Classic crouch while sniping mid-jump. Single player only." },
             { "Neutral Attack Orders", "Gameplay", "AllowNeutralAttackOrders", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
               ShimSettingApplyGroup::GlobalImprovement,
               "Allow explicit player attack orders against team-0 neutral objects. "
               "Diplomacy and autonomous targeting remain stock." },
@@ -2770,6 +2834,10 @@ namespace BZROpenShim
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
               ShimSettingApplyGroup::GlobalTurbo,
               "Turbo available on all drivable units. Single player only." },
+            { "Satellite Fog Of War", "SinglePlayer", "SatelliteVisibilityFix", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::LiveEngineToggle,
+              "Restore the BZ 1.5 satellite gate so unilluminated enemies stay hidden. Single player only." },
             { "Player Headlight", "SinglePlayer", "Headlights", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::Headlights,
@@ -2786,6 +2854,32 @@ namespace BZROpenShim
               kShimSettingsHeadlightBeamValues, kShimSettingsHeadlightBeamValues, 3, 0,
               ShimSettingApplyGroup::Headlights,
               "Headlight beam shape: Stock, Focused (narrow), or Wide." },
+            // [Fixes]: confirmed Redux engine defects. All five default ON and
+            // normal single-player play wants them on -- they are switches so a
+            // suspected regression is bisectable. Each one changes simulation
+            // behaviour and none is negotiated with peers, so all five stand
+            // down for the duration of a network game and a mixed OpenShim /
+            // stock lobby stays behaviourally identical.
+            { "APC Allied Deploy", "Fixes", "ApcAlliedTargetDeploy", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Let APC AI accept allied deploy targets. Single player only. Restart required." },
+            { "Splinter Undead Fix", "Fixes", "SplinterUndead", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Stop a destroyed splinter from spawning payload ordnance. Single player only. Restart required." },
+            { "Howitzer Deploy Fix", "Fixes", "HowitzerUndeployedRetaliation", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Stop an undeployed howitzer counter-sniping its attacker. Single player only. Restart required." },
+            { "Tug Cargo Deploy", "Fixes", "TugCargoPostLoad", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Arm the stock deploy transition after a tug loads cargo. Single player only. Restart required." },
+            { "Constructor Cleanup", "Fixes", "ConstructorRemoteBuild", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Clear a dead constructor's remote build state. Single player only. Restart required." },
             { "Net Route", "Network", "RoutePreference", nullptr, 0,
               kShimSettingsNetRouteValues, kShimSettingsNetRouteLabels, 3, 0,
               ShimSettingApplyGroup::BzrNetRoute,

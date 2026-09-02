@@ -82,7 +82,7 @@ namespace BZROpenShim
         };
         constexpr uint8_t kControlPanelLegacyPriority = 0x01;
 
-        constexpr bool kEditorPlacementOrderEnabledDefault = false;
+        constexpr bool kEditorPlacementOrderEnabledDefault = true;
 
         bool GuardMatches(uintptr_t address, const uint8_t* expected)
         {

@@ -156,7 +156,24 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # to ship ON for the others under it to mean anything.
     "Network/NetImprovements",
     "Network/LiveNicknameKeys",
-    "Network/LobbyReadouts"
+    "Network/LobbyReadouts",
+
+    # Restores the BZ 1.5 overhead-view / control-panel display order. Only
+    # reachable in a session launched with /edit, so it changes nothing for a
+    # player who is not using the editor.
+    "General/EditorOverheadPlacementOrder",
+
+    # Master switch for OpenShim multiplayer vehicle flags. ON is the shipped
+    # feature; OFF removes OpenShim flag work entirely, so it is the opt-out
+    # rather than the opt-in.
+    "Display/MultiplayerFlags",
+
+    # [DX11Enhanced] is gated behind Graphics/RenderProfile, which this same
+    # script pins to Redux below. Both keys are inert until a player opts into
+    # the Enhanced profile on DX11; pre-arming them means that opt-in gets the
+    # whole Enhanced feature set rather than a half-configured one.
+    "DX11Enhanced/FXAA",
+    "DX11Enhanced/EnhancedLightSelectionV2"
 ) | ForEach-Object { [void]$allowedEnabledLookingValues.Add($_) }
 
 $enabledLookingTokens = [System.Collections.Generic.HashSet[string]]::new(
