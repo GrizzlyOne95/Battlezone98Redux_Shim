@@ -14,6 +14,7 @@
 #include "hook_engine.h"
 #include "shim_log.h"
 #include "file_io_hooks.h"
+#include "cli_multiparam_parser.h"
 #include "editor_view_order.h"
 #include "autosave.h"
 #include "dx11_colorspace_diagnostic.h"
@@ -276,6 +277,11 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
         // Both patch sites are global constructors that run from the CRT's
         // _initterm before main, so this cannot wait for the patch thread.
         BZROpenShim::ApplyEditorOverheadPlacementOrderFix();
+
+        // Stock's command-line parser runs from WinMain immediately after CRT
+        // startup, so the delimiter it tokenises with has to be corrected here
+        // rather than on the patch thread. Writes 4 bytes in .data only.
+        BZROpenShim::ApplyCliMultiParameterOptionFix();
 
         OutputDebugStringA("BZR-OpenShim: DLL_PROCESS_ATTACH\n");
 
