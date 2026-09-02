@@ -214,6 +214,31 @@ nothing else listening" collapses to a single interlocked read on the damage
 path — and a future subscriber gets the events without being wired into a
 career-specific predicate.
 
+### 5.1 Reset Career Stats
+
+A second Settings row, **Reset Career Stats**, clears the record. It is the
+first *action row* on that page: `ShimSettingApplyGroup::CareerStatsReset` with
+a null section and key, so nothing in the ini read or lossless-write path
+treats it as a setting, and clicking runs something instead of cycling a value.
+
+It takes **two clicks**. The first arms the row and repaints its value cell to
+`Confirm?`; the second commits. Clicking any other row, stepping pages, or
+leaving the page disarms it. A destructive action must not happen on a single
+click of a row the player was only trying to read.
+
+The previous contents are copied to `career_stats.cfg.openshim.bak` before the
+file is rewritten, so one accidental wipe of a long campaign record is
+recoverable. A backup that cannot be written is reported to the log but does
+not abort the reset — the reset is still what was asked for.
+
+The reset deliberately does **not** touch the tracking toggle. "Reset my stats"
+is not "stop recording", and a reset that also disabled tracking would silently
+stop counting from that point on.
+
+The bridge entry point is `ResetCareerStatsFromBridge()`, returning
+`Cleared` / `AlreadyEmpty` / `Failed`. A file holding only `meta.version` counts
+as already empty — that is what a previous reset leaves behind.
+
 ## 6. What is not done yet
 
 * **Runtime validation.** Nothing here has been exercised in game. The
@@ -249,3 +274,9 @@ career-specific predicate.
    no `[CAREER]` writes, and that `career_stats.cfg` stops changing.
 8. Confirm a companion DLL polling the v2 queue still receives the lifecycle
    events, and now also receives `SimSessionStarted` / `SimKill`.
+9. Click **Reset Career Stats** once and confirm the cell reads `Confirm?` and
+   nothing is written; click a different row and confirm it disarms. Then click
+   it twice: `career_stats.cfg` should hold only `meta.version`, a
+   `career_stats.cfg.openshim.bak` should appear beside it, and the **Career
+   Stats** toggle should be unchanged. Clicking it twice again should report
+   "already empty" rather than overwriting the backup with an empty file.
