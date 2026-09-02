@@ -138,6 +138,18 @@ namespace BZROpenShim
             // ControlPanel target-list EnemyP call: an opt-in local order
             // authoring relaxation. The global EnemyP implementation stays stock.
             { 0, HookEngine::PatchType::REL32, {}, "Neutral Attack Order Target Hook", false, {} },
+            // AIP_Load_Account's one PREREQ_WhatIs call, wrapped by a
+            // pass-through probe. It exists to log what the AI's construction
+            // program resolves each item_name to; the stock result is always
+            // returned unchanged, so no build decision moves.
+            { 0, HookEngine::PatchType::REL32, {}, "AIP Prereq Name Resolve Probe", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "AIP Prereq Name Resolve Probe Force Matching", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "AIP Prereq Name Resolve Probe Building Matching", false, {} },
+            // AddObjectClass's duplicate test, and the Units_Init call that
+            // finishes class registration. Together they let a built class
+            // carry every producer that can make it instead of only the first.
+            { 0, HookEngine::PatchType::REL32, {}, "AI Multi Producer Maker Collect", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "AI Multi Producer Maker Apply", false, {} },
             // Redirect the sun's one contribution to the global ScreenFlash so
             // the fullscreen white quad can be dropped without touching the sun
             // disc, the six lens-flare sprites, or the two explosion callers of
