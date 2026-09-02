@@ -28,6 +28,7 @@ local ARMS = {
     cpms = { producers = {"mxrecy"},          label = "custom producer / mixed, stock first" },
     cpmc = { producers = {"mxrecy"},          label = "custom producer / mixed, custom first" },
     mp2  = { producers = {"svrecy", "mxrecy"}, label = "two producers / mixed, stock first" },
+    posc = { producers = {"svrecy"},          label = "custom unit only, customs FIRST in producer menu" },
     ss2  = { producers = {"svrecy"},          label = "CONTROL: two STOCK units in one account" },
     cc2  = { producers = {"svrecy"},          label = "CONTROL: two CUSTOM units in one account" },
     ccak = { producers = {"svrecy"},           label = "CONTROL: shipped ccatank.aip verbatim" },
@@ -187,6 +188,22 @@ function Start()
         "[LCROAD][AIP] START build=2.2.301 case=%s commit=%s arm=%s player=%s",
         tostring(selectedCase), tostring(fixtureCommit),
         tostring(arm.label), tostring(player)))
+
+    -- Rule out the most basic explanation for a custom unit never being built:
+    -- that its ODF does not load at all. Spawned on team 0 so the census (which
+    -- filters on the AI team) cannot see it, then removed immediately.
+    local probe
+    for probe = 1, 2 do
+        local probeOdf = (probe == 1) and "mxfigh" or "mxturr"
+        local ph = BuildObject(probeOdf, 0, Place(120.0, 60.0 + probe * 10.0))
+        print(string.format(
+            "[LCROAD][AIP] ODFPROBE odf=%s valid=%s class=%s",
+            probeOdf, ValidText(ph),
+            tostring(ph ~= nil and IsValid(ph) and GetClassLabel(ph))))
+        if ph ~= nil and IsValid(ph) then
+            RemoveObject(ph)
+        end
+    end
 
     -- The producer under test IS the team recycler. Both the recycler and the
     -- munitions factory refuse to deploy anywhere except on a geyser, and an

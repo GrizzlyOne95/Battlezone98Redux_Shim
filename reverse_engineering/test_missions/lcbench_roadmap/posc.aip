@@ -1,5 +1,5 @@
 /*****************************************************************************
-  lcbench AIP mixed stock/custom producer matrix -- arm "cpc"
+  lcbench AIP mixed stock/custom producer matrix -- arm "posc"
 
   Structure and every scheduler value are taken from the shipped, known-working
   ccatank.aip, which the "ccak" control arm proves drives real AI production on
