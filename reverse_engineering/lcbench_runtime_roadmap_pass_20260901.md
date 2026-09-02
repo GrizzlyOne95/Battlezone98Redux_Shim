@@ -249,9 +249,18 @@ team holding only the custom producer has nothing that can make it. That is also
 why the reporter's workaround — cloning the stock ODFs so they are "custom" —
 works: the clones are new classes registered under the custom producer.
 
-A third, independent defect fell out of the same trace: `AddObjectClass`
-recurses only nine `buildItem` slots, so **a producer's tenth build item is
-invisible to the strategic AI** while remaining buildable from the player menu.
+`mxturr` never resolving even when seeded is a fixture bug, not an engine one:
+`ProducerClass`'s parser at `0x005B03C0` reads `buildItem1`..`buildItem9` and
+nothing else, menu slot 10 being the back button, so the fixture's
+`buildItem10 = "mxturr"` was never parsed by anything.
+
+**The maker half is now fixed** — `[Fixes] AiMultiProducerMakers`, on by
+default. `FindObjectClass` keys the class list on the built class alone, so the
+second producer's pair never reaches `Units_Init` and appending inside
+`SetMaker` alone would be inert; the fix instead collects the rejected pairs at
+`AddObjectClass`'s duplicate test and appends them after stock `Units_Init` has
+run. `cps`/`cpms`/`cpmc` go from 0 stock units to 4. Detail, addresses and the
+A/B in `aip_construction_program_resolution_20260902.md`.
 
 Two harness facts were required to get any signal at all, and both produce
 silent zeros: `SetAIControl` must run at Lua chunk scope, and `Build()` issued

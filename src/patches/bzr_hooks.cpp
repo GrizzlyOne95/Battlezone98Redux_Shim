@@ -423,6 +423,28 @@ namespace BZROpenShim
     static FnPrereqWhatIs g_BzrFn_PrereqWhatIs = nullptr;
     static volatile long g_AipResolveTraceBudget = 512;
     static volatile long g_AipPrereqCensusEmitted = 0;
+
+    // Multi-producer maker registration. InitObjectClasses walks the build
+    // trees of every load-time root; FindObjectClass keys the resulting list on
+    // the built class alone, so a class reachable from two producers keeps only
+    // the first producer it was seen under, and SetMaker writes that one into
+    // makers[0]. Collect the pairs FindObjectClass rejects, and append them
+    // after Units_Init has filled makers[0] for every accepted pair.
+    using FnAiFindObjectClass = uint32_t(__cdecl*)(void* objClass, void* buildClass);
+    using FnAiUnitsInit = void(__cdecl*)();
+    using FnAiIsBuilding = uint8_t(__cdecl*)(void* objClass);
+    using FnAiClass2UnitType = void*(__cdecl*)(void* objClass);
+    using FnAiClass2BuildingType = void*(__cdecl*)(void* objClass, int zero);
+    using FnAiGetPrereq = uint16_t(__cdecl*)(void* objClass);
+    static FnAiFindObjectClass g_BzrFn_AiFindObjectClass = nullptr;
+    static FnAiUnitsInit g_BzrFn_AiUnitsInit = nullptr;
+    static FnAiIsBuilding g_BzrFn_AiIsBuilding = nullptr;
+    static FnAiClass2UnitType g_BzrFn_AiClass2UnitType = nullptr;
+    static FnAiClass2BuildingType g_BzrFn_AiClass2BuildingType = nullptr;
+    static FnAiGetPrereq g_BzrFn_AiGetPrereq = nullptr;
+    struct AiExtraMakerPair { void* objClass; void* buildClass; };
+    static std::vector<AiExtraMakerPair> g_AiExtraMakerPairs = {};
+    static volatile long g_AiMultiProducerMakerLogBudget = 64;
     static FnShieldTowerSimulate g_BzrFn_ShieldTowerSimulateOriginal = nullptr;
     static FnShieldTowerSimulate g_BzrFn_BuildingSimulate = nullptr;
     static FnMagnetMineSimulate g_BzrFn_MagnetMineSimulateOriginal = nullptr;
@@ -2378,6 +2400,10 @@ namespace BZROpenShim
         // the whole prereq universe; nothing about the game changes either way.
         static constexpr bool kAipResolveTraceDefault = false;
         static bool g_AipResolveTraceEnabled = kAipResolveTraceDefault;
+        // Always-on fix: give a built class every producer that can make it,
+        // instead of only the first one InitObjectClasses happened to reach.
+        static constexpr bool kAiMultiProducerMakersDefault = true;
+        static bool g_AiMultiProducerMakersEnabled = kAiMultiProducerMakersDefault;
         static bool g_BomberAiRangeBaselineEnabled = kBomberAiRangeEnabledDefault;
         static bool g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
         // Configured value AND'd with the single-player gate, same contract as
@@ -9125,6 +9151,7 @@ namespace BZROpenShim
         static constexpr char kUserConfigSinglePlayerSection[] = "SinglePlayer";
         static constexpr char kUserConfigGameplaySection[] = "Gameplay";
         static constexpr char kUserConfigDiagnosticsSection[] = "Diagnostics";
+        static constexpr char kUserConfigFixesSection[] = "Fixes";
 
 
 
@@ -13940,6 +13967,17 @@ namespace BZROpenShim
             {
                 g_AipResolveTraceEnabled = value;
             }
+
+            g_AiMultiProducerMakersEnabled = kAiMultiProducerMakersDefault;
+            if (TryGetUserConfigBool(
+                    kUserConfigFixesSection,
+                    "AiMultiProducerMakers",
+                    value))
+            {
+                g_AiMultiProducerMakersEnabled = value;
+            }
+            if (EnvFlagEnabled("OPENSHIM_DISABLE_AI_MULTI_PRODUCER_MAKERS"))
+                g_AiMultiProducerMakersEnabled = false;
 
             g_TurretAimPitchBaselineEnabled = kTurretAimPitchEnabledDefault;
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "TurretAimPitch", value))
@@ -28586,6 +28624,154 @@ namespace BZROpenShim
         return AipPrereqWhatIsCore(itemName, L"building_matching");
     }
 
+    void SetAiFindObjectClassOriginal(void* t)
+    { g_BzrFn_AiFindObjectClass = reinterpret_cast<FnAiFindObjectClass>(t); }
+    void SetAiUnitsInitOriginal(void* t)
+    { g_BzrFn_AiUnitsInit = reinterpret_cast<FnAiUnitsInit>(t); }
+    void SetAiMakerHelperOriginals(void* isBuilding, void* class2Unit,
+                                   void* class2Building, void* getPrereq)
+    {
+        g_BzrFn_AiIsBuilding = reinterpret_cast<FnAiIsBuilding>(isBuilding);
+        g_BzrFn_AiClass2UnitType = reinterpret_cast<FnAiClass2UnitType>(class2Unit);
+        g_BzrFn_AiClass2BuildingType = reinterpret_cast<FnAiClass2BuildingType>(class2Building);
+        g_BzrFn_AiGetPrereq = reinterpret_cast<FnAiGetPrereq>(getPrereq);
+    }
+
+    namespace
+    {
+        // makers[] is four ushorts wide in both type structs, and PREREQ_Init
+        // copies all four into the prereq table behind a zero terminator that
+        // PREREQ_CanThisMakeThat walks. So slots 1..3 are already consumed by
+        // stock code; nothing but SetMaker's single write was stopping them
+        // from being populated.
+        constexpr size_t kAiMakersCount = 4;
+        constexpr size_t kAiUnitTypeMakersOffset = 0x66;
+        constexpr size_t kAiBuildingTypeMakersOffset = 0x16;
+
+        uint16_t* AiMakersArrayFor(void* objClass)
+        {
+            if (!objClass || !g_BzrFn_AiIsBuilding ||
+                !g_BzrFn_AiClass2UnitType || !g_BzrFn_AiClass2BuildingType)
+                return nullptr;
+
+            uint8_t* base = nullptr;
+            size_t offset = 0;
+            __try
+            {
+                if (g_BzrFn_AiIsBuilding(objClass) != 0)
+                {
+                    base = static_cast<uint8_t*>(g_BzrFn_AiClass2BuildingType(objClass, 0));
+                    offset = kAiBuildingTypeMakersOffset;
+                }
+                else
+                {
+                    base = static_cast<uint8_t*>(g_BzrFn_AiClass2UnitType(objClass));
+                    offset = kAiUnitTypeMakersOffset;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+            return base ? reinterpret_cast<uint16_t*>(base + offset) : nullptr;
+        }
+
+        // Appends one maker, keeping stock's first-writer-wins ordering in
+        // slot 0 so PREREQ_Init's canmake flag is computed exactly as before.
+        bool AiAppendMaker(void* objClass, uint16_t makerId)
+        {
+            uint16_t* makers = AiMakersArrayFor(objClass);
+            if (!makers || makerId == 0)
+                return false;
+
+            __try
+            {
+                for (size_t i = 0; i < kAiMakersCount; ++i)
+                {
+                    if (makers[i] == makerId)
+                        return false;       // already known, nothing to do
+                    if (makers[i] == 0)
+                    {
+                        makers[i] = makerId;
+                        return true;
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+            return false;                    // all four slots taken; leave stock
+        }
+
+        void AiApplyExtraMakers()
+        {
+            if (!g_BzrFn_AiGetPrereq)
+                return;
+
+            size_t applied = 0;
+            for (const AiExtraMakerPair& pair : g_AiExtraMakerPairs)
+            {
+                uint16_t makerId = 0;
+                __try
+                {
+                    makerId = g_BzrFn_AiGetPrereq(pair.buildClass);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    continue;
+                }
+                if (AiAppendMaker(pair.objClass, makerId))
+                {
+                    ++applied;
+                    if (InterlockedDecrement(&g_AiMultiProducerMakerLogBudget) >= 0)
+                    {
+                        Log(L"[AIMAKER] objClass=%p gained maker prereq=%u from buildClass=%p\n",
+                            pair.objClass, static_cast<unsigned>(makerId), pair.buildClass);
+                    }
+                }
+            }
+            Log(L"[AIMAKER] %zu extra producer/item pair(s) seen, %zu maker(s) added\n",
+                g_AiExtraMakerPairs.size(), applied);
+        }
+    }
+
+    // AddObjectClass's duplicate test. It matches on the built class alone, so
+    // a true return with a non-null buildClass is exactly the case stock drops:
+    // this producer can make this item, but the item is already spoken for.
+    uint32_t __cdecl AiFindObjectClassCollectHook(void* objClass, void* buildClass)
+    {
+        if (!g_BzrFn_AiFindObjectClass)
+            return 0;
+
+        const uint32_t found = g_BzrFn_AiFindObjectClass(objClass, buildClass);
+        if (g_AiMultiProducerMakersEnabled && (found & 0xFFu) != 0 &&
+            objClass && buildClass && objClass != buildClass &&
+            g_AiExtraMakerPairs.size() < 4096)
+        {
+            const bool known = std::any_of(
+                g_AiExtraMakerPairs.begin(), g_AiExtraMakerPairs.end(),
+                [objClass, buildClass](const AiExtraMakerPair& p) {
+                    return p.objClass == objClass && p.buildClass == buildClass;
+                });
+            if (!known)
+                g_AiExtraMakerPairs.push_back({ objClass, buildClass });
+        }
+        return found;
+    }
+
+    // Runs immediately after stock Units_Init has written makers[0] for every
+    // pair the class list did accept, and before PREREQ_Init copies makers[]
+    // into the prereq table.
+    void __cdecl AiUnitsInitMultiMakerHook()
+    {
+        if (g_BzrFn_AiUnitsInit)
+            g_BzrFn_AiUnitsInit();
+        if (g_AiMultiProducerMakersEnabled && !g_AiExtraMakerPairs.empty())
+            AiApplyExtraMakers();
+        g_AiExtraMakerPairs.clear();
+    }
+
     uint32_t __fastcall PersonCarrierGetSelectedGuard(void* carrier, void* person)
     {
         if (carrier && g_BzrFn_CarrierGetSelectedMask)
@@ -28961,6 +29147,8 @@ namespace BZROpenShim
         g_NeutralAttackOrderLogBudget = 16;
         g_AipResolveTraceBudget = 512;
         g_AipPrereqCensusEmitted = 0;
+        g_AiExtraMakerPairs.clear();
+        g_AiMultiProducerMakerLogBudget = 64;
         g_LastKnownQueuedMissionName[0] = '\0';
         g_HudSpriteRectTableBase = nullptr;
         g_HudSpriteRectTableDiscoveryAttempted = false;
@@ -30728,6 +30916,8 @@ namespace BZROpenShim
         g_NeutralAttackOrderLogBudget = 16;
         g_AipResolveTraceBudget = 512;
         g_AipPrereqCensusEmitted = 0;
+        g_AiExtraMakerPairs.clear();
+        g_AiMultiProducerMakerLogBudget = 64;
         g_AiUnitTuningOverridesByObject.clear();
         g_CombatKiteStateByObject.clear();
         g_ScrapPathFailuresByObject.clear();

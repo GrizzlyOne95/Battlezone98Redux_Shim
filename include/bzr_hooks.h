@@ -43,6 +43,17 @@ namespace BZROpenShim
     uint16_t __cdecl AipPrereqWhatIsProbe(const char* itemName);
     uint16_t __cdecl AipPrereqWhatIsProbeForceMatching(const char* itemName);
     uint16_t __cdecl AipPrereqWhatIsProbeBuildingMatching(const char* itemName);
+
+    // Multi-producer maker registration. Stock keeps one producer per built
+    // class, so a team whose only producer is not that one cannot build the
+    // item at all. [Fixes] AiMultiProducerMakers (on by default) appends the
+    // other producers into the makers[] slots stock already reads.
+    void SetAiFindObjectClassOriginal(void* target);
+    void SetAiUnitsInitOriginal(void* target);
+    void SetAiMakerHelperOriginals(void* isBuilding, void* class2Unit,
+                                   void* class2Building, void* getPrereq);
+    uint32_t __cdecl AiFindObjectClassCollectHook(void* objClass, void* buildClass);
+    void __cdecl AiUnitsInitMultiMakerHook();
     void FlushChunkFragmentEventsForShutdown();
 
     // Wire up the GOG-build player-handle lookup. Only call this once the exact

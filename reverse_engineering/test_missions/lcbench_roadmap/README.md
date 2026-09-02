@@ -254,8 +254,10 @@ Two further results follow, both with every name resolving:
 | `cpms` | mixed, stock first | 0 -- the account stalls |
 | `cpmc` | mixed, custom first | **4 custom, 0 stock** |
 
-`cpmc` reproduces the reported bug verbatim. `mxturr` still misses even seeded,
-because it is `buildItem10` and `AddObjectClass` recurses only nine slots.
+`cpmc` reproduces the reported bug verbatim, and `[Fixes] AiMultiProducerMakers`
+now fixes it (0 stock units -> 4). `mxturr` still misses even seeded,
+because ProducerClass only ever parses buildItem1..9 -- a fixture bug, not an
+engine one.
 
 **Always run seeded and unseeded as a pair.** An unseeded arm is measuring
 enumeration; a seeded one is measuring makers. They fail for different reasons
