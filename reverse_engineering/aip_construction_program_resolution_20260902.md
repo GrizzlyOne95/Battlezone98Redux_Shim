@@ -96,11 +96,42 @@ The table is filled once by `PREREQ_Init`, which enumerates
 `Units_UnitTypeCount()` / `Units_GetTypePtr(i)` and `buildingtypes[]`. Those in
 turn come from `Units_Init`, which walks `vehicleClassList` and
 `buildingClassList` — two `std::vector<ObjectClassInfo*>` populated by
-`AddObjectClass`, which recurses a producer's nine `buildItem` slots. **The AI's
-name universe is therefore whatever the build tree reached at init time, not
-"every ODF on disk".** That is the standing hypothesis for why a custom clone
-loads on demand and builds on an explicit `Build()` order yet is never selected
-by an AIP: it was never enumerated, so `PREREQ_WhatIs` cannot name it.
+`AddObjectClass`. **The AI's name universe is therefore whatever the build tree
+reached at init time, not "every ODF on disk".**
+
+## Where the universe comes from: `InitObjectClasses`
+
+`InitObjectClasses` (1.5 `0x0051A19B`) seeds it from exactly four roots:
+
+1. `builders[]` — two 8-character names, the two stock recyclers, each passed to
+   `RecurseBuildItem`.
+2. **Every craft already in `Craft::craftList` at mission load** whose
+   `class_id` is `CLASS_ID_VEHICLE` or `CLASS_ID_HELICOPTER`, added with
+   `buildClass = nullptr`. This is what "the AIP expects a recycler at mission
+   load" means in code: an object the mission *starts* with is enumerated, and
+   one a Lua script spawns later is not.
+3. `defaultObjClass` = `apcamr`.
+4. Two mission-named ODFs: `"b_" + <first 6 chars of the mission filename>` and
+   `<first 8 chars of the mission filename>`. For `lcbench.bzn` those are
+   `b_lcbenc.odf` and `lcbench.odf`.
+
+`RecurseBuildItem(name)` opens `<name>.odf` and branches on one key:
+
+- **`[GameObjectClass] classLabel` present** → the file names a real object.
+  `AddObjectClass(Find(name), nullptr)` and stop.
+- **absent** → the file is a list. Read `[Builder] buildItem1..N` and recurse
+  each.
+
+Those four `ParameterDB` hashes are FNV-1a/32 (lowercased, basis `0x811C9DC5`,
+prime `0x01000193`) and were confirmed by computation, not guessed:
+`GameObjectClass` = `0xD3DD9CEC`, `classLabel` = `0x92D04727`,
+`Builder` = `0xE4350540`, `buildItem` = `0xF1915444` (the digit is appended to
+the seeded hash).
+
+`AddObjectClass(objClass, buildClass)` then registers the pair and, when
+`objClass` is a `CNST` or a building-vehicle, recurses **`buildItem` slots 0..8
+only — nine of them**. `Units_Init` later calls `SetMaker` for every entry whose
+`buildClass` is non-null, and `SetMaker` writes a *single* `makers[0]` slot.
 
 ## The OpenShim probe
 
@@ -182,18 +213,77 @@ with the mission's ODFs, with the producer's build list, or with which AIP is
 loaded — `mxfigh`, `mxturr` and `mxrecy` are absent from both arms even though
 `allc`'s own producer offers them and `ODFPROBE` instantiates them successfully.
 
-**Conclusion.** The strategic AI's name universe is a fixed enumeration of stock
-unit and building types. A custom ODF name can never be resolved by an AIP,
-so every construction-program node, force-matching entry and building-matching
-entry naming one is discarded at load time. This is not a scoring, ordering,
-eligibility, producer or mixing problem — the AI is never told the unit exists.
+That is the whole universe reachable when **no producer exists at mission
+load** — the fixture spawns its producer from Lua, which is after
+`InitObjectClasses` has already run.
 
-This closes the localization in `lcbench_runtime_roadmap_pass_20260901.md`
-section 2. Any fix has to widen the enumeration before `PREREQ_Init` freezes the
-table; patching `AIP_Load_Account` alone would produce an id that nothing else
-in `AIBuild_*` can map back to a buildable class.
+## Result: 2026-09-02, load-time seeding
 
-The standing caveat still applies: the roadmap reports the AI building *only*
-custom units, and what reproduces here is the AI building *never* the custom
-units. The direction needs re-confirming against the original reporter's setup
-before any fix is designed.
+The original reporter's note that "the AIP expects a recycler at mission load —
+if you just put a useless rec somewhere on a geyser offmap you'll see that it
+works" names root 2 above. The fixture reaches the same seeding through root 4
+instead, without editing the BZN: `lcbench.odf` is a `[Builder]` list naming
+`mxrecy`, deployed by `run_lcroad_aip.ps1 -SeedBuilder`.
+
+With the seeder present the census grows from 54 to 56, gaining exactly
+`mxfigh` (id 35, unit) and `mxrecy` (id 56, building), and `allc`'s items now
+resolve:
+
+```
+[AIPRES] account item='mxfigh' -> id=35
+[AIPRES] account item='mxturr' -> id=0  MISS (entry discarded)
+```
+
+`mxturr` still misses, and that is a second, independent defect:
+`AddObjectClass` recurses **nine** build-item slots, and `mxturr` is
+`buildItem10` in the producer's menu. **A producer's tenth build item is
+invisible to the strategic AI** even though the player can build it from the
+menu normally.
+
+## Result: 2026-09-02, the reported bug reproduced
+
+With the custom producer (`mxrecy`) deployed for the AI team and the seeder on,
+all four arms resolve every name they use. What differs is what gets built:
+
+| Arm | AIP Offense account | Resolution | Built |
+| --- | --- | --- | --- |
+| `cpc` | custom only | `mxfigh` -> 35 | **4 custom** |
+| `cps` | stock only | `svfigh` -> 22 | **0** |
+| `cpms` | mixed, stock first | both resolve | **0** — the account stalls |
+| `cpmc` | mixed, custom first | both resolve | **4 custom, 0 stock** |
+
+`cpmc` is the reported defect verbatim: *"When you mix custom and stock units in
+a custom producer, the AI will only build the custom units, even when stock
+units are defined in the AIP."* `cpms` shows it is worse than reported — put the
+stock entry first and the account produces nothing at all.
+
+**Mechanism.** `SetMaker` writes a *single* `makers[0]` slot per unit type, from
+the `buildClass` recorded when `AddObjectClass` registered the pair. The stock
+unit is registered under the stock recycler by `builders[]`, so its one maker is
+the stock recycler — a team holding only the custom producer can never build it,
+and `AIBuild_BuildListWhatToMakeWith` finds nothing to make with. The custom unit
+is registered under the custom producer and builds normally. That is also
+exactly why the reporter's workaround works: cloning the stock ODFs makes them
+new classes, registered under the custom producer, so they inherit it as their
+maker.
+
+## Two defects, not one
+
+1. **Never enumerated.** A custom ODF that no load-time build tree reaches is
+   absent from the prereq table; `PREREQ_WhatIs` returns 0 and
+   `AIP_Load_Account` discards the node. Fix at
+   `InitObjectClasses`/`AddObjectClass`. Modders can work around it today with a
+   mission-named `[Builder]` ODF or a producer placed in the BZN.
+2. **Single maker slot.** Even once enumerated, a unit type carries one maker,
+   so a unit reachable from two producers is buildable by only one of them.
+   This is what makes a mixed custom/stock producer menu unusable to the AI.
+   Fix at `SetMaker` / the `makers[]` array, which already has four slots.
+
+Both are Dark Reign-derived stock BZ1 code, present identically in 1.5, and the
+reporter's own assessment is that this is unlikely to be fixed upstream. A
+`makers[]` fix in particular changes AI behavior in stock content and must not
+ship ungated.
+
+Also still open, reported separately and not yet investigated: **the AIP stops
+running after roughly an hour regardless of available resources, and calling
+`SetAIP` again restarts it.**

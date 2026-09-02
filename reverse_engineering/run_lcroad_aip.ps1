@@ -12,7 +12,12 @@ param(
     [string]$WerDumpRoot = "C:\BZDumps",
     # Turns on the shim's [AIPRES] probe around PREREQ_WhatIs for the duration
     # of the run. openshim.ini is backed up and restored with the fixtures.
-    [switch]$AipResolveTrace
+    [switch]$AipResolveTrace,
+    # Deploys lcbench.odf, the mission-named [Builder] list InitObjectClasses
+    # recurses at load, rooting the custom recycler so its build menu is
+    # enumerated into the AI's name universe before PREREQ_Init freezes it.
+    # This is what "the AIP expects a recycler at mission load" means in code.
+    [switch]$SeedBuilder
 )
 
 $ErrorActionPreference = "Stop"
@@ -44,7 +49,7 @@ $overrideArms = @("sps", "spc", "spms", "spmc", "mp2", "ss2", "cc2", "bldc", "bl
 # posc deploys the customs-FIRST menu instead, to test whether build-slot
 # position rather than ODF origin is what gates the custom unit.
 $menuFirstArms = @("posc")
-$deployNames = @("lcbench.lua", "rmacfg.odf", "mxfigh.odf", "mxturr.odf", "mxrecy.odf", "svrecy.odf", "svrecyf.odf") + $aipNames
+$deployNames = @("lcbench.lua", "rmacfg.odf", "mxfigh.odf", "mxturr.odf", "mxrecy.odf", "svrecy.odf", "svrecyf.odf", "lcbench.odf") + $aipNames
 
 $backupRoot = Join-Path $OutputRoot "pre_live"
 New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
@@ -101,6 +106,14 @@ try {
     foreach ($name in @("mxfigh.odf", "mxturr.odf", "mxrecy.odf") + $aipNames) {
         Copy-Item -LiteralPath (Join-Path $fixtureRoot $name) `
             -Destination (Join-Path $missionRoot $name) -Force
+    }
+
+    $liveSeeder = Join-Path $missionRoot "lcbench.odf"
+    if ($SeedBuilder) {
+        Copy-Item -LiteralPath (Join-Path $fixtureRoot "lcbench.odf") `
+            -Destination $liveSeeder -Force
+    } elseif (Test-Path -LiteralPath $liveSeeder) {
+        Remove-Item -LiteralPath $liveSeeder -Force
     }
 
     foreach ($caseName in $Cases) {
@@ -254,6 +267,7 @@ commit = "$commit"
                 stockBuilt = $stockBuilt
                 customBuilt = $customBuilt
                 aipResolveTrace = [bool]$AipResolveTrace
+                seedBuilder = [bool]$SeedBuilder
                 aipResolveMisses = @($aipResolve | Where-Object { $_ -match "\[AIPRES\] MISS" }).Count
                 aipResolveLines = $aipResolve.Count
                 shimCrashDumps = $newDumps
