@@ -1690,6 +1690,7 @@ namespace BZROpenShim
         {
             bool parsed = false;
             bool bomberAiRole = false;
+            bool legacyAiRole = false;
             bool hasEngageRangeAI = false;
             float engageRangeAI = 0.0f;
             bool hasWeaponRangeMinAI = false;
@@ -1733,6 +1734,8 @@ namespace BZROpenShim
         // because each entry is an explicit script request for that unit.
         struct AiUnitTuningOverride
         {
+            bool hasLegacyAi = false;
+            bool legacyAi = false;
             bool hasEngageRange = false;
             float engageRange = 0.0f;
             bool hasWeaponRangeMin = false;
@@ -18747,6 +18750,42 @@ namespace BZROpenShim
             }
         }
 
+        // Legacy14 helper: determine if this craft should use 1.4 semantics.
+        // Checks per-unit override first, then per-ODF aiName legacy flag.
+        static bool IsLegacyAiCraft(void* craft)
+        {
+            if (!craft) return false;
+            const auto unitIt = g_AiUnitTuningOverridesByObject.find(reinterpret_cast<uintptr_t>(craft));
+            if (unitIt != g_AiUnitTuningOverridesByObject.end() && unitIt->second.hasLegacyAi && unitIt->second.legacyAi)
+                return true;
+            AiTuningConfig odfCfg = {};
+            if (TryGetAiTuningForObject(craft, odfCfg) && odfCfg.legacyAiRole)
+                return true;
+            // Also check ODF-driven legacy via direct aiName string fallback (if map not yet populated)
+            // The TryGetAiTuningForObject path already reads aiName, so above is sufficient.
+            return false;
+        }
+
+        static bool TryGetTaskState(uint8_t* taskBytes, int& outState, int& outNextState, float& outStartTime)
+        {
+            if (!taskBytes) return false;
+            __try
+            {
+                outState = *reinterpret_cast<int*>(taskBytes + kAttackTaskCurStateOffset);
+                outNextState = *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset);
+                // startTime is at +0x100 in Redux (was +0xD4 in 1.4)
+                outStartTime = *reinterpret_cast<float*>(taskBytes + 0x100);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // Forward decl for legacy helpers
+        static bool IsBuildingStub(void* target) { (void)target; return false; } // TODO: sited IsBuilding(0x??) if needed for non-legacy path
+
         void __fastcall AttackTaskDoStateTuningHook(void* taskPtr, void* /*edx*/)
         {
             if (!g_BzrFn_AttackTaskDoState || !taskPtr)
@@ -18761,12 +18800,94 @@ namespace BZROpenShim
                 return;
             }
 
+            // Legacy14 check is per-craft, not per-target. We need it even when no per-unit kite tuning exists.
+            const bool isLegacyCraft = IsLegacyAiCraft(craft);
+
+            // Preserve legacy path even when kite tuning absent.
+            // Kite path still requires per-unit tuning; legacy does not.
             const auto tuningIt = g_AiUnitTuningOverridesByObject.find(
                 reinterpret_cast<uintptr_t>(craft));
-            if (!craft || !target || tuningIt == g_AiUnitTuningOverridesByObject.end())
+            const bool hasKiteTuning = tuningIt != g_AiUnitTuningOverridesByObject.end() && tuningIt->second.hasKiteRanges;
+
+            // If neither legacy nor kite, run stock and exit early (preserve original early-out)
+            if (!isLegacyCraft && (!craft || !target || tuningIt == g_AiUnitTuningOverridesByObject.end()))
             {
                 g_CombatKiteStateByObject.erase(reinterpret_cast<uintptr_t>(craft));
                 g_BzrFn_AttackTaskDoState(taskPtr);
+                return;
+            }
+
+            // Legacy-only fast path (no kite tuning, but legacy flag set)
+            if (isLegacyCraft && !hasKiteTuning)
+            {
+                int curBefore = 0, nextBefore = 0;
+                float startBefore = 0.0f;
+                TryGetTaskState(taskBytes, curBefore, nextBefore, startBefore);
+                g_BzrFn_AttackTaskDoState(taskPtr);
+                int curAfter = 0, nextAfter = 0;
+                float startAfter = 0.0f;
+                TryGetTaskState(taskBytes, curAfter, nextAfter, startAfter);
+                // Apply legacy D1, D3, D4 post-hoc. D2 requires enemy state read.
+                // D1: case 2 AbleToHit -> slide (7) not blast (10)
+                if (curBefore == 2 && nextAfter == 10)
+                {
+                    // Stock 1.5/Redux goes to blast; 1.4 goes to slide
+                    *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = 7;
+                    if (EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI") || EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+                    {
+                        Log(L"[LEGACY] D1 override craft=0x%08X cur=2 next 10->7\n", static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
+                    }
+                }
+                // D4: case 8 stand expiry (>8s) -> slide (7) not flee (9)
+                // Detect 8->9 transition; distinguish hit vs timeout via damage time vs start
+                if (curBefore == 8 && nextAfter == 9)
+                {
+                    // Check if this was timeout (not fresh hit). Fresh hit would also be 8->9 but we want to keep hit as 9.
+                    // Use craft damage time vs task start: if lastDamageTime > startAfter (fresh), keep 9.
+                    bool isFreshHit = false;
+                    __try
+                    {
+                        // craft damage fields: +0x1E0 time, task start at +0x100 (Redux)
+                        float* craftDamageTime = reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(craft) + 0x1E0);
+                        float* taskStart = reinterpret_cast<float*>(taskBytes + 0x100);
+                        if (craftDamageTime && taskStart && *craftDamageTime > *taskStart)
+                            isFreshHit = true;
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER) {}
+                    if (!isFreshHit)
+                    {
+                        *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = 7;
+                        if (EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI"))
+                            Log(L"[LEGACY] D4 override craft=0x%08X 8->9 => 8->7 (timeout)\n", static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
+                    }
+                }
+                // D3: case 9 flee bounded 3s -> uncapped. Suppress time->10
+                if (curBefore == 9 && nextAfter == 10)
+                {
+                    bool suppress = false;
+                    __try
+                    {
+                        float now = 0.0f;
+                        // Use GetTickCount as fallback for Get_Time if not available; for now use task start + 3.0 check
+                        float* taskStart = reinterpret_cast<float*>(taskBytes + 0x100);
+                        // Heuristic: if next was 10 due to timeout, it will be 3s after start. Check that start+3 < now (approx)
+                        // We approximate by checking that distance to target is still <5625 and not stuck, so the only remaining exit is timeout.
+                        // For now, suppress if not stuck and still within 75u (5625) - simplistic
+                        // Read stuck via TryRead? Use placeholder: suppress always for legacy 9->10 unless stuck
+                        suppress = true;
+                        // TODO: refine with actual distance/IsStuck check
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER) {}
+                    if (suppress)
+                    {
+                        *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = 9; // stay in flee
+                        if (EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI"))
+                            Log(L"[LEGACY] D3 suppress craft=0x%08X 9->10 blocked, stay 9\n", static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
+                    }
+                }
+                // D2: case 7 slide-exit enemy state {2,5,7} uncapped vs IsBuilding+10s
+                // TODO: implement enemy task state read: handle at +0x14 -> object -> +0x30 -> state at +0x08
+                // For now, log that D2 would apply if enemy state were 7
                 return;
             }
 
@@ -24986,6 +25107,32 @@ namespace BZROpenShim
                         {
                             bomberAiRole = true;
                             outConfig.bomberAiRole = true;
+                        }
+                        if (strcmp(normalizedAiName, "tanklegacyfriend") == 0 ||
+                            strcmp(normalizedAiName, "tanklegacyenemy") == 0 ||
+                            strcmp(normalizedAiName, "tanklegacy") == 0)
+                        {
+                            outConfig.legacyAiRole = true;
+                            foundAny = true;
+                        }
+                    }
+                }
+                else if (_stricmp(key, "legacyAI") == 0 || _stricmp(key, "legacyAi") == 0 ||
+                         _stricmp(key, "legacy14") == 0 || _stricmp(key, "legacy14AI") == 0)
+                {
+                    bool parsedLegacy = false;
+                    if (TryParseBoolValue(value, parsedLegacy) && parsedLegacy)
+                    {
+                        outConfig.legacyAiRole = true;
+                        foundAny = true;
+                    }
+                    else
+                    {
+                        float parsedFloatLegacy = 0.0f;
+                        if (TryParseFloatValue(value, parsedFloatLegacy) && parsedFloatLegacy != 0.0f)
+                        {
+                            outConfig.legacyAiRole = true;
+                            foundAny = true;
                         }
                     }
                 }
