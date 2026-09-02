@@ -149,3 +149,42 @@ and the whole framing changes.
 Note the AI already builds `svscav`, `svcnst`, `svturr` and `svfigh` together in
 a single run, so it plainly does mix unit *types*. `Defense` was moved off
 `svturr` onto `sprepa` so it cannot contaminate the `ss2` count.
+
+## Result: the defect is confined to AIP selection
+
+Three independent facts localize it:
+
+1. **The custom ODF is valid.** `ODFPROBE` spawns each clone directly every run:
+   `mxfigh valid=true class=wingman`, `mxturr valid=true class=turrettank`.
+2. **The producer builds it on command.** With the Offense account neutered to
+   `NUMBER_TO_HAVE 0`, so nothing is attributable to the AIP:
+
+   | Arm | Command | Built |
+   |---|---|---|
+   | `blds` | `Build(producer, "svfigh")` | 3, at T+50/68/86 |
+   | `bldc` | `Build(producer, "mxfigh")` | 3, at T+50/68/86 |
+
+   Symmetric to the frame. The producer has no objection to the custom ODF.
+3. **No AIP account ever builds it.** Zero custom units when requested alone
+   (`spc`, `cpc`), paired with another custom (`cc2`), mixed with stock in either
+   priority order (`spms`, `spmc`, `cpms`, `cpmc`), from either producer
+   identity, and at either end of the producer's build menu (`posc`).
+
+So the unit is constructible, the producer will construct it, and the AI will
+not ask for it. **Instrument the AIP account-to-ODF resolution step**, not the
+producer, the ODF loader, or the build list.
+
+### `Build()` is dropped while the producer is busy
+
+Every arm's first command at T+20 lands with `busy=true` and produces nothing;
+every later command lands with `busy=false` and produces a unit 12s later. This
+is why the first direct-build pass — which issued the command only once, at
+T+20 — wrongly appeared to show the custom unit being refused. Check `IsBusy`
+and re-issue, and never conclude a refusal from a single dropped order.
+
+### Correction to the reported bug
+
+The roadmap records this as the AI building *only the custom* units. What
+reproduces here is the exact opposite: the AI builds *never the custom* units.
+The direction should be re-confirmed against the original report's setup before
+any selection routine is patched.

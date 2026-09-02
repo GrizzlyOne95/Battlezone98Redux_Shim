@@ -16,7 +16,7 @@ Redux rule contract.
 | Target | Result | Patch disposition | Confidence |
 |---|---|---|---|
 | Pilot hardpoint ODF ordering crash | Reproduced 3/3 in the closest failing arm; immediate null dereference mapped | **ACTIVE PATCH** — narrow null-carrier guard; legacy parity no longer blocks implementation | High for immediate cause and guard identity; unproven as Redux regression |
-| AIP mixed stock/custom producer bug | Fixture design and evidence gate defined; no runtime matrix completed | No speculative selection patch | Speculative/open |
+| AIP mixed stock/custom producer bug | **Reproduced and localized**: custom ODF never built by any AIP account, yet the same producer builds it on direct command | Instrument AIP account-to-ODF resolution; no patch until the routine is identified | High for localization; reported direction contradicted |
 | Neutral unit attack/order asymmetry | Lua/native `Attack` works in both directions; 1.5 UI intentionally excludes team 0 | Opt-in `[Gameplay] AllowNeutralAttackOrders=0`; alter only explicit order-target eligibility | Very high, except MP host/client UI qualification remains |
 | Walker cockpit jitter | World/cockpit asset topology compared; old imported function label rejected | No transform patch until the live cockpit update path is traced | Proven asset delta; speculative cause |
 | Multiplayer freecam exploit | Prior imported free-eye label rejected; multiplayer gate remains unmapped | No patch until real state/gate and two-client behavior are captured | Speculative/open |
@@ -166,21 +166,45 @@ guidance, but no longer blocks the defensive guard. Remaining gates:
 
 | Evidence field | Finding |
 |---|---|
-| Status | Still open |
-| Reproduction | Seven-arm stock/custom producer/unit matrix specified below but not yet implemented or run |
-| Runtime evidence | None from this pass |
+| Status | **Reproduced and localized to AIP selection**; responsible routine not yet identified |
+| Reproduction | `run_lcroad_aip.ps1`; fifteen-arm matrix in `test_missions/lcbench_roadmap` |
+| Runtime evidence | Custom ODF never built by any AIP account; the same producer builds it on a direct `Build()` command |
 | Static/RE evidence | Shipped AIP examples and producer grammar checked; no responsible filter/scorer identified |
 | 1.5 comparison | Not yet reconstructed at the responsible stage |
-| Root cause | Unknown; parsing, identity resolution, eligibility, ordering, and scoring remain candidates |
-| Patch | None |
-| Qualification | Requires decision-level instrumentation and repeated build outcomes, not visual observation alone |
-| Remaining risk | A weak fixture could confuse random priority, prerequisites, or resources with ODF-origin filtering |
-| Roadmap recommendation | Leave active with the exact matrix/instrumentation gate |
+| Root cause | Narrowed to AIP account-to-ODF resolution; the ODF loader, producer build list, and construction path are all excluded |
+| Patch | None; the responsible routine still has to be found before anything is changed |
+| Qualification | Known-good control arm (`ccak`) required alongside any negative, since every failure mode here is a silent zero |
+| Remaining risk | Reported direction is contradicted (see below); the original report's setup may differ materially |
+| Roadmap recommendation | Keep active; instrument AIP account-to-ODF resolution specifically |
 
-No runtime result was manufactured for this target. Stock mission AIP examples
-and grammar were checked, including producer definitions using `avmuf` and
-`svmuf`, but the report is not specific enough to patch a selection routine
-without observing the requested, eligible, and finally selected unit.
+A controlled matrix now reproduces the defect and bounds it. `svfigh` is the
+stock unit and `mxfigh` a value-identical clone differing only in ODF identity,
+so cost, build time, health and role are excluded by construction.
+
+Three facts localize the defect:
+
+1. The custom ODF is valid. Spawned directly every run, it reports
+   `valid=true class=wingman`.
+2. The producer builds it on command. With the Offense account neutered to
+   `NUMBER_TO_HAVE 0`, `Build(producer, "mxfigh")` and
+   `Build(producer, "svfigh")` each produced three units at identical times.
+3. No AIP account ever builds it: zero when requested alone, paired with another
+   custom, mixed with stock in either priority order, from either producer
+   identity, and at either end of the producer's build menu.
+
+The unit is constructible and the producer will construct it; the AI simply
+never asks for it. Instrumentation should target AIP account-to-ODF resolution
+rather than the producer, the ODF loader, or the build list.
+
+**The reported direction is contradicted.** The roadmap records the AI building
+*only the custom* units; what reproduces is the AI building *never the custom*
+units. This should be re-confirmed against the original reporter's setup before
+any selection routine is patched.
+
+Two harness facts were required to get any signal at all, and both produce
+silent zeros: `SetAIControl` must run at Lua chunk scope, and `Build()` issued
+while the producer reports `IsBusy` is dropped without error. The full list is
+in `test_missions/lcbench_roadmap/README.md`.
 
 The implementation-ready evidence gate is a seven-arm matrix using one stock
 producer, one byte-for-byte custom clone producer, one stock unit, and one
