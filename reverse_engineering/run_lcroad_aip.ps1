@@ -2,8 +2,8 @@
 
 param(
     [string]$GameRoot = "C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux",
-    [ValidateSet("sps", "spc", "spms", "spmc", "cps", "cpc", "cpms", "cpmc", "mp2", "ss2", "cc2", "ccak")]
-    [string[]]$Cases = @("sps", "spc", "spms", "spmc", "cps", "cpc", "cpms", "cpmc", "mp2", "ss2", "cc2", "ccak"),
+    [ValidateSet("sps", "spc", "spms", "spmc", "cps", "cpc", "cpms", "cpmc", "mp2", "ss2", "cc2", "posc", "ccak")]
+    [string[]]$Cases = @("sps", "spc", "spms", "spmc", "cps", "cpc", "cpms", "cpmc", "mp2", "ss2", "cc2", "posc", "ccak"),
     [ValidateRange(1, 20)]
     [int]$Repeats = 1,
     [ValidateRange(30, 240)]
@@ -32,13 +32,16 @@ if (-not (Test-Path -LiteralPath (Join-Path $missionRoot "lcbench.bzn"))) {
 
 $aipNames = @("sps.aip", "spc.aip", "spms.aip", "spmc.aip",
               "cps.aip", "cpc.aip", "cpms.aip", "cpmc.aip", "mp2.aip",
-              "ss2.aip", "cc2.aip", "ccak.aip")
+              "ss2.aip", "cc2.aip", "posc.aip", "ccak.aip")
 # svrecy.odf is an OVERRIDE of the stock recycler that widens its build list to
 # the same two-item menu the custom producer offers. It is installed only for
 # the arms that need the stock-named producer to be able to offer the custom
 # unit at all; "sps" is deliberately left on the untouched stock factory.
 $overrideArms = @("sps", "spc", "spms", "spmc", "mp2", "ss2", "cc2")
-$deployNames = @("lcbench.lua", "rmacfg.odf", "mxfigh.odf", "mxturr.odf", "mxrecy.odf", "svrecy.odf") + $aipNames
+# posc deploys the customs-FIRST menu instead, to test whether build-slot
+# position rather than ODF origin is what gates the custom unit.
+$menuFirstArms = @("posc")
+$deployNames = @("lcbench.lua", "rmacfg.odf", "mxfigh.odf", "mxturr.odf", "mxrecy.odf", "svrecy.odf", "svrecyf.odf") + $aipNames
 
 $backupRoot = Join-Path $OutputRoot "pre_live"
 New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
@@ -74,9 +77,10 @@ try {
             New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 
             $liveOverride = Join-Path $missionRoot "svrecy.odf"
-            $usesOverride = $overrideArms -contains $caseName
+            $usesOverride = ($overrideArms -contains $caseName) -or ($menuFirstArms -contains $caseName)
             if ($usesOverride) {
-                Copy-Item -LiteralPath (Join-Path $fixtureRoot "svrecy.odf") `
+                $srcMenu = if ($menuFirstArms -contains $caseName) { "svrecyf.odf" } else { "svrecy.odf" }
+                Copy-Item -LiteralPath (Join-Path $fixtureRoot $srcMenu) `
                     -Destination $liveOverride -Force
             } elseif (Test-Path -LiteralPath $liveOverride) {
                 Remove-Item -LiteralPath $liveOverride -Force

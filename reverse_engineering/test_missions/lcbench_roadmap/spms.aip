@@ -71,7 +71,7 @@ UNIT_CONSTRUCTION_PROGRAM unit_construction_program[MAX_UCP_LENGTH];
 ACCOUNT Slush[MAX_ACCOUNT_LENGTH];
 
 #DATA
-	21,	"svscav",	NUMBER_TO_HAVE,		4;
+	21,	"svscav",	NUMBER_TO_HAVE,		1;
 	20,	"svcnst",	NUMBER_TO_HAVE,		1;
 #END_DATA
 
