@@ -1,0 +1,116 @@
+# Mac x86_64 -> Windows x86 2.2.301 function correlations (DistributedObject pass)
+# Date: 2026-08-31
+#
+# Mac reference : depot 301651 / manifest 730966170255625169
+#                 Contents/MacOS/Battlezone 98 Redux (Steam)
+#                 SHA-256 DAE80722CE6B253F1C7F1FD4807BDB379822EFC3735E7DB799D40E2470BA2C00
+#                 Unslid VAs, __TEXT based at 0x100000000.
+# Win reference : GOG Battlezone98Redux.exe, 5,425,152 bytes
+#                 SHA-256 8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413
+#                 Image base 0x00400000.
+#
+# Method: string literals referenced from the Mac DistributedObject.cpp code range
+# were located in the Windows image; absolute-dword cross-references to each string
+# were collected from .text; each xref was walked back to the nearest prologue
+# preceded by int3 padding. A correlation is only recorded where the Windows
+# function start is reached by more than one independent string, or where the
+# field-offset behaviour of the Windows function independently reproduces the Mac
+# packet layout. Conceptual similarity alone was NOT used.
+#
+# CONFIDENCE: Proven | High | Probable | Speculative
+
+## ---------------------------------------------------------------------------
+## Translation-unit anchor
+## ---------------------------------------------------------------------------
+# All 11 recovered DistributedObject.cpp string literals resolve into ONE
+# contiguous Windows code region: 0x004B76FA .. 0x004BA9AA.
+# This bounds the Windows DistributedObject translation unit.
+# CONFIDENCE: Proven (11 independent literals, single contiguous range)
+
+## ---------------------------------------------------------------------------
+## Function correlations
+## ---------------------------------------------------------------------------
+
+MAC   0x10009EAA8  DistributedObject::ReceiveTempState(unsigned short, char*, unsigned long, float)
+WIN   0x004B8460
+EVID  4 independent string xrefs converge on this function start:
+        0x004B85E5 "Zero-size temp state\n"
+        0x004B8ADB "OOP D=%.2f P=%.2f DELETED ID %08x\n"
+        0x004B8C2A "OOP D=%.2f P=%.2f Last Received %.2f ID %08x\n"
+        0x004B8F20 "Possible Large Warp: Distributed Object Updated Position By (%f,%f,%f) with TS %f\n"
+      All four literals are owned by the same single Mac function.
+CONF  High
+
+MAC   0x1000A0174  DistributedObject::Create(unsigned short, void*, unsigned long)
+WIN   0x004B9350
+EVID  3 independent string xrefs converge on this function start:
+        0x004B93AF "Not enough data to create object"
+        0x004B9543 "Reviving id %08x\n"
+        0x004B95F0 "Unknown game object class \"%8s\""
+      PLUS independent structural corroboration - the Windows function decodes the
+      identical packet layout that the Mac writer produces (see wire-format block):
+        0x004B9395 movzx eax,[edx+0x14]; and eax,0x80   -> compact-class-code flag
+        0x004B93A9 cmp edx,0x15                         -> min length, compact form
+        0x004B93C6 add eax,6; read +0,+4,+8 dwords and +0xC word  -> 14-byte matrix at +0x06
+        0x004B93F4 mov ecx,[eax+2]                      -> u32 object ID at +0x02
+        0x004B9403 mov al,[edx+1]                       -> u8 flags at +0x01
+        0x004B9417 cmp edx,0x1c                         -> min length, non-compact form
+CONF  Proven (string identity + independent field-offset reproduction)
+
+MAC   0x1000A08CA  DistributedObject::TempStateSendAll(_ToBeSent const*, int)
+WIN   0x004B9C80
+EVID  3 independent string xrefs converge on this function start:
+        0x004BA010 "TempStateSendAll: t:%d, sia %d, Bps %5.0f, dwB %d, now-nppst %d\n"
+        0x004BA0E6 "TempStateSendAll: t:%d, Net::NextPositionPacketInterval %d\n"
+        0x004BA9AA "TempStateSendAll Prev Bytes: "
+CONF  High
+
+MAC   0x1000A0174  DistributedObject::Create  -- OR --
+      0x1000A1578  DistributedObject_GetGameObject(unsigned short)
+WIN   0x004B76C0
+EVID  1 string xref only: 0x004B76FA "Invalid compact object id %d\n".
+      In the Mac image this literal is referenced from Create. The Windows xref
+      sits ~0x1D00 bytes BELOW the Windows Create candidate, so it is a distinct
+      Windows function. Two readings fit: (a) MSVC outlined the compact-id
+      validation, (b) the Windows build shares the literal with its
+      DistributedObject_GetGameObject equivalent. NOT resolved by this pass.
+CONF  Probable (that it is in the DistributedObject TU); Speculative as to which
+      Mac function it corresponds to.
+
+## ---------------------------------------------------------------------------
+## Negative findings (recorded deliberately)
+## ---------------------------------------------------------------------------
+# - Byte pattern `C1 E0 02 83 E0 3C` (shl eax,2 ; and eax,0x3C - the Mac perm-state
+#   flag-byte build) does NOT occur in the Windows image. MSVC x86 allocated
+#   different registers. Instruction-byte matching across the two toolchains is
+#   not a usable correlation technique here.
+# - The composite pattern (shl reg,0x10) + (add reg,[abs]) + (inc [abs]) used by
+#   Mac SetLocal to compose the network ID does NOT occur. Only 17 distinct
+#   `inc dword ptr [abs32]` sites exist in the whole Windows .text; MSVC emitted
+#   load/increment/store instead. Not a usable anchor.
+# - DistributedObject::codes[] lives in __bss on Mac (0x100A95EC0) and is built at
+#   runtime, so it is NOT available as a static byte-array anchor on either side.
+# - No Windows correlation was attempted for SetLocal/SetRemote/UpdatePermState in
+#   this pass: they reference no string literals, and no other evidence class was
+#   strong enough. Recorded as open work rather than guessed.
+
+## ---------------------------------------------------------------------------
+## Wire format - proven identical across ABIs
+## ---------------------------------------------------------------------------
+# Mac x86_64 writer  : DistributedObject::UpdatePermState @ 0x10009FCF0
+#                      writes into DistributedObject::packet_buffer @ 0x102DF3650
+# Win x86 reader     : DistributedObject::Create @ 0x004B9350
+#
+#   offset  width  field                          Mac evidence        Win evidence
+#   +0x00   u8     packet length                  (length checks)     cmp 0x15 / 0x1C
+#   +0x01   u8     flags: bit7 = is-local-user    mov [pb+1],al       mov al,[edx+1]
+#                         bits2..5 = class<<2
+#   +0x02   u32    object network ID              mov [pb+2],eax      mov ecx,[eax+2]
+#   +0x06   14B    reduced transform matrix       NetUtil_ReduceMatrix read +0,+4,+8,+0xC
+#   +0x14   u8     compact class code | 0x80      mov [pb+0x14],bl    movzx [edx+0x14]
+#
+# Compact form total 0x15 (21) bytes; non-compact form substitutes the 8-byte ODF
+# class name for the 1-byte code, giving the 0x1C (28) minimum the Windows reader
+# enforces. 0x15 - 1 + 8 = 0x1C, self-consistent.
+# No field is pointer-width. No field changed between the 32-bit and 64-bit build.
+# CONFIDENCE: Proven
