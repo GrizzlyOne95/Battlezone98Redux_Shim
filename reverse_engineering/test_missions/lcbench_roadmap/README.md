@@ -188,3 +188,25 @@ The roadmap records this as the AI building *only the custom* units. What
 reproduces here is the exact opposite: the AI builds *never the custom* units.
 The direction should be re-confirmed against the original report's setup before
 any selection routine is patched.
+
+### Whole-file test: `allc` vs `alls`
+
+The arms above are custom in the Offense account only; their files still name
+stock units in Slush, Defense, `FORCE_MATCHING` and `BUILDING_MATCHING`. `allc`
+and `alls` are shape-identical files -- same scheduler values, account count,
+item counts and priorities -- differing in nothing but the unit family:
+
+| Arm | File contains | Built |
+|---|---|---|
+| `alls` | only stock names | **6**: 2 svturr (T+12, T+19), 4 svfigh (T+31…T+67) |
+| `allc` | only custom names | **0**, including the Slush account |
+
+`allc` names no stock ODF anywhere, so stock entries crowding out custom ones is
+excluded. A file consisting purely of custom units builds nothing at all -- not
+even its Slush account, which in `alls` is the first thing produced, at T+12.
+
+This rules out the remaining account-scoped and ordering explanations. Combined
+with the direct-`Build()` result, the defect is that **the AIP construction
+program cannot resolve or select a custom ODF name at all**. It is not about
+mixing origins, priority order, build-slot position, producer identity, or the
+presence of stock entries elsewhere in the file.

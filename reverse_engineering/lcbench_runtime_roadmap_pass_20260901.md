@@ -168,10 +168,10 @@ guidance, but no longer blocks the defensive guard. Remaining gates:
 |---|---|
 | Status | **Reproduced and localized to AIP selection**; responsible routine not yet identified |
 | Reproduction | `run_lcroad_aip.ps1`; fifteen-arm matrix in `test_missions/lcbench_roadmap` |
-| Runtime evidence | Custom ODF never built by any AIP account; the same producer builds it on a direct `Build()` command |
+| Runtime evidence | Custom ODF never built by any AIP, including a file naming no stock unit at all; the same producer builds it on a direct `Build()` command |
 | Static/RE evidence | Shipped AIP examples and producer grammar checked; no responsible filter/scorer identified |
 | 1.5 comparison | Not yet reconstructed at the responsible stage |
-| Root cause | Narrowed to AIP account-to-ODF resolution; the ODF loader, producer build list, and construction path are all excluded |
+| Root cause | AIP construction program cannot resolve or select a custom ODF name; the ODF loader, producer build list, and construction path are all excluded |
 | Patch | None; the responsible routine still has to be found before anything is changed |
 | Qualification | Known-good control arm (`ccak`) required alongside any negative, since every failure mode here is a silent zero |
 | Remaining risk | Reported direction is contradicted (see below); the original report's setup may differ materially |
@@ -191,6 +191,13 @@ Three facts localize the defect:
 3. No AIP account ever builds it: zero when requested alone, paired with another
    custom, mixed with stock in either priority order, from either producer
    identity, and at either end of the producer's build menu.
+
+A whole-file test closes the remaining account-scoped explanations. `allc` and
+`alls` are shape-identical AIPs differing only in unit family. `alls` built six
+units: 2 `svturr` from Slush at T+12 and T+19, then 4 `svfigh`. `allc`, which
+names no stock ODF anywhere in the file, built nothing at all -- not even its
+Slush account. Stock entries crowding out custom ones is therefore excluded, as
+are priority order, build-slot position and producer identity.
 
 The unit is constructible and the producer will construct it; the AI simply
 never asks for it. Instrumentation should target AIP account-to-ODF resolution
