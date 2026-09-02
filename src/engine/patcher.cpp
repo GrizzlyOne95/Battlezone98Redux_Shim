@@ -12,6 +12,7 @@
 #include "shim_log.h"
 #include "sun_flash.h"
 #include "openshim_sdk_v2.h"
+#include "cli_multiparam_parser.h"
 #include "redux_compatibility.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -855,6 +856,11 @@ namespace BZROpenShim
         // initialized on any build.
         SetCompatibleVersion(true);
         std::vector<uint8_t> sig; if (ReadExeSignature(sig)) WaitForSignature(sig);
+        // .text is decrypted by now, so the CLI delimiter repair applied at
+        // attach can finally have its .text corroboration settled, and a
+        // SteamStub restore over the .data write would be reported rather than
+        // failing silently.
+        BZROpenShim::VerifyCliMultiParameterOptionFix();
         const ReduxCompatibilityGate compatibilityGate = PrepareReduxCompatibilityGate(isSteam);
         StartSoundChannelOverride(isSteam);
         g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForDistribution(patches, distribution); FilterPatchesForRuntime(patches, distribution); ScanForPatchAddresses(patches, isSteam);
