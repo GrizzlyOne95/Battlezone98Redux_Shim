@@ -131,6 +131,13 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::REL32, {}, "Chunk Render Resolve Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Producer Build Menu Root Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Target Reticle Popup Recent-Hit Getter Hook", false, {} },
+            // Person::Simulate selected-mask call: substitute only the carrier
+            // getter so a malformed pilot with no carrier gets mask 0 and the
+            // remainder of the stock simulation continues.
+            { 0, HookEngine::PatchType::REL32, {}, "Pilot Carrier Null Guard", false, {} },
+            // ControlPanel target-list EnemyP call: an opt-in local order
+            // authoring relaxation. The global EnemyP implementation stays stock.
+            { 0, HookEngine::PatchType::REL32, {}, "Neutral Attack Order Target Hook", false, {} },
             // Redirect the sun's one contribution to the global ScreenFlash so
             // the fullscreen white quad can be dropped without touching the sun
             // disc, the six lens-flare sprites, or the two explosion callers of
