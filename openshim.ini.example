@@ -273,6 +273,20 @@ ProducerScriptPredicates = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_VEHICLE_LIST_MOD_SCOPING
 VehicleListModScoping = 1
 
+; Repair command-line options whose own value grammar contains a comma,
+; the canonical case being -shellmap:<W>,<H>. Stock tokenises the command
+; line with " ,\t", so the comma ends the token before the shellmap
+; handler's ":%d,%d" ever sees it: the height is lost, the width is copied
+; over it, and the stranded second value is taken as a mission name, which
+; also overwrites the map-name buffer the shellmap call itself reads. This
+; removes the comma from that one parser's delimiter set (" \t"), which is
+; an inherited Battlezone 1.5 defect rather than a Redux regression.
+; NOTE: with this ON a comma no longer separates arguments, so a command
+; line that wrote "-win,-nointro" instead of "-win -nointro" must use
+; spaces. Set to 0 for stock tokenising.
+; Accepted: boolean. Default: ON. Restart required after changing.
+CliMultiParameterOptions = 1
+
 [Startup]
 
 ; Early D3D startup-hook path used for renderer/startup development.
