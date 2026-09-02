@@ -2362,10 +2362,21 @@ namespace BZROpenShim
         static constexpr bool kHowitzerVolleyEnabledDefault = false;
         static constexpr bool kHowitzerUndeployedRetaliationFixEnabledDefault = true;
         static constexpr bool kWeaponMaskCarrierBiasEnabledDefault = false;
-        // Makes artillery and lay-mines AI honour weaponMask. This is an
-        // enhancement, not a restoration -- BZ 1.5 ignores the mask on both
-        // paths exactly as stock Redux does -- so it defaults OFF.
-        static constexpr bool kAiWeaponMaskSelectionEnabledDefault = false;
+        // Makes artillery / lay-mines AI honour weaponMask, firing every
+        // fitted hardpoint the mask names as one synchronized volley.
+        //
+        // These are enhancements, not restorations -- BZ 1.5 ignores the mask
+        // on both paths exactly as stock Redux does -- and under the volley
+        // policy they are not no-ops even for content that authors no mask:
+        // the stock default 11111 means "every fitted hardpoint", so a stock
+        // howitzer with four mortar hardpoints fires four rounds instead of
+        // one. Both therefore default OFF, and both are gated to single
+        // player because they change simulation outcomes.
+        //
+        // Split per craft type so the artillery volley can be enabled without
+        // the lay-mines one and vice versa.
+        static constexpr bool kAiWeaponMaskArtilleryEnabledDefault = false;
+        static constexpr bool kAiWeaponMaskMinelayerEnabledDefault = false;
         // Master switch for the ODF-authored AI tuning keys (engageRangeAI,
         // weaponRangeMinAI, retargetPeriodAI, scrapPathingAI and friends).
         // Defaults ON: every path it gates additionally requires the ODF to
@@ -2400,11 +2411,14 @@ namespace BZROpenShim
         static bool g_HowitzerUndeployedRetaliationFixActive =
             kHowitzerUndeployedRetaliationFixEnabledDefault;
         static bool g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
-        static bool g_AiWeaponMaskSelectionEnabled = kAiWeaponMaskSelectionEnabledDefault;
-        // Configured value AND'd with the single-player gate. The three call
-        // redirects stay installed either way; when this is false they pass
-        // straight through to the stock engine routines.
-        static bool g_AiWeaponMaskSelectionActive = false;
+        static bool g_AiWeaponMaskArtilleryEnabled = kAiWeaponMaskArtilleryEnabledDefault;
+        static bool g_AiWeaponMaskMinelayerEnabled = kAiWeaponMaskMinelayerEnabledDefault;
+        // Configured value AND'd with the single-player gate. Every call
+        // redirect stays installed either way; when the matching flag is false
+        // each one passes straight through to the stock engine routine, so the
+        // observable behaviour is byte-for-byte stock.
+        static bool g_AiWeaponMaskArtilleryActive = false;
+        static bool g_AiWeaponMaskMinelayerActive = false;
         static bool g_AiOdfGameplayTuningBaselineEnabled = kAiOdfGameplayTuningEnabledDefault;
         static bool g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
         static bool g_AiOdfGameplayTuningActive = false;
@@ -13887,16 +13901,28 @@ namespace BZROpenShim
             g_TurretAimPitchMultiplier = active ? g_TurretAimPitchMultiplierEnhanced : 0.5f;
         }
 
-        static void RefreshAiWeaponMaskSelectionState()
+        static void RefreshAiWeaponMaskArtilleryState()
         {
-            g_AiWeaponMaskSelectionActive =
-                g_AiWeaponMaskSelectionEnabled && ReadLocalPlayerNetIdValue() == 0;
+            g_AiWeaponMaskArtilleryActive =
+                g_AiWeaponMaskArtilleryEnabled && ReadLocalPlayerNetIdValue() == 0;
         }
 
-        static void RevertAiWeaponMaskSelectionToBaseline()
+        static void RevertAiWeaponMaskArtilleryToBaseline()
         {
-            g_AiWeaponMaskSelectionEnabled = kAiWeaponMaskSelectionEnabledDefault;
-            g_AiWeaponMaskSelectionActive = false;
+            g_AiWeaponMaskArtilleryEnabled = kAiWeaponMaskArtilleryEnabledDefault;
+            g_AiWeaponMaskArtilleryActive = false;
+        }
+
+        static void RefreshAiWeaponMaskMinelayerState()
+        {
+            g_AiWeaponMaskMinelayerActive =
+                g_AiWeaponMaskMinelayerEnabled && ReadLocalPlayerNetIdValue() == 0;
+        }
+
+        static void RevertAiWeaponMaskMinelayerToBaseline()
+        {
+            g_AiWeaponMaskMinelayerEnabled = kAiWeaponMaskMinelayerEnabledDefault;
+            g_AiWeaponMaskMinelayerActive = false;
         }
 
         static void RefreshAiOdfGameplayTuningState()
@@ -14060,9 +14086,20 @@ namespace BZROpenShim
                 g_TurretAimPitchBaselineEnabled = value;
             g_TurretAimPitchEnabled = g_TurretAimPitchBaselineEnabled;
 
-            g_AiWeaponMaskSelectionEnabled = kAiWeaponMaskSelectionEnabledDefault;
+            // AiWeaponMaskSelection is the retired single key. It is still
+            // honoured as the starting value for both halves so an existing
+            // config keeps working, and either specific key then overrides it.
+            g_AiWeaponMaskArtilleryEnabled = kAiWeaponMaskArtilleryEnabledDefault;
+            g_AiWeaponMaskMinelayerEnabled = kAiWeaponMaskMinelayerEnabledDefault;
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "AiWeaponMaskSelection", value))
-                g_AiWeaponMaskSelectionEnabled = value;
+            {
+                g_AiWeaponMaskArtilleryEnabled = value;
+                g_AiWeaponMaskMinelayerEnabled = value;
+            }
+            if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "AiWeaponMaskArtillery", value))
+                g_AiWeaponMaskArtilleryEnabled = value;
+            if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "AiWeaponMaskMinelayer", value))
+                g_AiWeaponMaskMinelayerEnabled = value;
 
             g_BomberAiRangeBaselineEnabled = kBomberAiRangeEnabledDefault;
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "BomberAiRange", value))
@@ -14102,7 +14139,8 @@ namespace BZROpenShim
 
             g_ScrapPilotHudLastRefreshTick = 0;
             RefreshTurretAimPitchState();
-            RefreshAiWeaponMaskSelectionState();
+            RefreshAiWeaponMaskArtilleryState();
+            RefreshAiWeaponMaskMinelayerState();
             RefreshAiOdfGameplayTuningState();
             RefreshJumpSnipeCrouchPatchState();
             RefreshShotConvergencePatchState();
@@ -18211,8 +18249,10 @@ namespace BZROpenShim
               &RevertGlobalTurboToBaseline, &RefreshGlobalTurboPatchState },
             { "Headlights", FeatureTier::SinglePlayer,
               &RevertHeadlightsToBaseline, &RefreshHeadlightState },
-            { "AiWeaponMaskSelection", FeatureTier::SinglePlayer,
-              &RevertAiWeaponMaskSelectionToBaseline, &RefreshAiWeaponMaskSelectionState },
+            { "AiWeaponMaskArtillery", FeatureTier::SinglePlayer,
+              &RevertAiWeaponMaskArtilleryToBaseline, &RefreshAiWeaponMaskArtilleryState },
+            { "AiWeaponMaskMinelayer", FeatureTier::SinglePlayer,
+              &RevertAiWeaponMaskMinelayerToBaseline, &RefreshAiWeaponMaskMinelayerState },
             { "AiOdfGameplayTuning", FeatureTier::SinglePlayer,
               &RevertAiOdfGameplayTuningToBaseline, &RefreshAiOdfGameplayTuningState },
             { "BomberAiRange", FeatureTier::SinglePlayer,
@@ -31595,6 +31635,14 @@ namespace BZROpenShim
         constexpr size_t kReduxGameObjectCarrierOffset = 0x1A0;
         constexpr size_t kReduxGameObjectWeaponMaskOffset = 0x218;
         constexpr size_t kReduxCarrierExistantOffset = 0x2C;
+        // Proved from Carrier::GetWeapon (0x00417F60): `1 << slot` is tested
+        // against +0x2C and the weapon is read from +0x18 + slot*4. The
+        // selected/enabled pair at +0x30/+0x34 is proved from
+        // Carrier::SetSelected (0x004D9880) and Carrier::TriggerSelected
+        // (0x00511FC0), which fires every bit of `selected & enabled`.
+        constexpr size_t kReduxCarrierWeaponArrayOffset = 0x18;
+        constexpr size_t kReduxCarrierSelectedOffset = 0x30;
+        constexpr size_t kReduxCarrierEnabledOffset = 0x34;
         constexpr size_t kReduxUnitProcessMeOffset = 0x34;
         constexpr size_t kReduxLayMinesTaskMeOffset = 0x10;
 
@@ -31606,6 +31654,9 @@ namespace BZROpenShim
         using FnCarrierGetWeaponThiscall = void* (__fastcall*)(void*, void*, int);
         using FnCarrierSetSelectedThiscall = void (__fastcall*)(void*, void*, uint32_t);
 
+        static volatile long g_WMaskArtilleryLogBudget = 200;
+        static volatile long g_WMaskLayMinesLogBudget = 200;
+
         // Returns the hardpoint the AI should prefer, or -1 to leave stock
         // behaviour completely untouched.
         //
@@ -31613,9 +31664,11 @@ namespace BZROpenShim
         // ODF mask 11111 (0x1F) that is precisely the first existant slot --
         // exactly what stock picks -- so this is a bit-exact no-op for every
         // unit that does not carry an explicit non-default mask.
+        // The per-craft-type gate now lives at each call site, so both
+        // resolvers answer purely from memory and never decide policy.
         int ResolveAiPreferredHardpoint(void* carrier, void* craft)
         {
-            if (!g_AiWeaponMaskSelectionActive || !carrier || !craft)
+            if (!carrier || !craft)
                 return -1;
 
             __try
@@ -31665,6 +31718,113 @@ namespace BZROpenShim
                 return nullptr;
             }
         }
+
+        // The full set of hardpoints weaponMask names and the craft actually
+        // carries: `weaponMask & existant`. Zero means "leave stock alone",
+        // which covers a missing craft, a carrier that does not round-trip, a
+        // mask that selects nothing fitted, and every read that faults.
+        //
+        // `enabled` is deliberately *not* folded in here. The artillery path
+        // never consults it in stock, and Carrier::TriggerSelected applies it
+        // itself on the lay-mines path, so ANDing it in twice would let a
+        // transiently cleared bit silently shrink the volley.
+        uint32_t ResolveAiVolleyMask(void* carrier, void* craft)
+        {
+            if (!carrier || !craft)
+                return 0;
+
+            __try
+            {
+                const auto* craftBytes = reinterpret_cast<const uint8_t*>(craft);
+                if (*reinterpret_cast<void* const*>(craftBytes + kReduxGameObjectCarrierOffset) != carrier)
+                    return 0;
+
+                const uint32_t mask =
+                    *reinterpret_cast<const uint32_t*>(craftBytes + kReduxGameObjectWeaponMaskOffset);
+                const uint32_t existant = *reinterpret_cast<const uint32_t*>(
+                    reinterpret_cast<const uint8_t*>(carrier) + kReduxCarrierExistantOffset);
+
+                return mask & existant & 0x1Fu;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+
+            return 0;
+        }
+
+        // Weapon::Trigger is vtable slot 2 (+8) -- the same slot
+        // Carrier::TriggerSelected calls at 0x00512014 and the same slot the
+        // four artillery sites call. It is a __thiscall taking no stack
+        // argument, so __fastcall with an ignored edx is the identical ABI.
+        bool TriggerWeaponObject(void* weapon)
+        {
+            if (!weapon)
+                return false;
+
+            __try
+            {
+                auto* vtbl = *reinterpret_cast<void***>(weapon);
+                auto trigger = reinterpret_cast<void(__fastcall*)(void*, void*)>(vtbl[2]);
+                trigger(weapon, nullptr);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+
+            return false;
+        }
+
+        int FindCarrierSlotForWeapon(void* carrier, void* weapon)
+        {
+            if (!carrier || !weapon)
+                return -1;
+
+            __try
+            {
+                auto* slots = reinterpret_cast<void**>(
+                    reinterpret_cast<uint8_t*>(carrier) + kReduxCarrierWeaponArrayOffset);
+                for (int slot = 0; slot < 5; ++slot)
+                {
+                    if (slots[slot] == weapon)
+                        return slot;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+
+            return -1;
+        }
+
+        void* ReadCarrierWeaponSlot(void* carrier, int slot)
+        {
+            if (!carrier || slot < 0 || slot >= 5)
+                return nullptr;
+
+            __try
+            {
+                return reinterpret_cast<void**>(
+                    reinterpret_cast<uint8_t*>(carrier) + kReduxCarrierWeaponArrayOffset)[slot];
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+
+            return nullptr;
+        }
+
+        static volatile long g_WMaskVolleyLogBudget = 200;
+
+        int PopCount5(uint32_t mask)
+        {
+            int count = 0;
+            for (int bit = 0; bit < 5; ++bit)
+                if (mask & (1u << bit))
+                    ++count;
+            return count;
+        }
     }
 
     // Replaces the single `call Carrier::GetWeapon` inside the artillery slot
@@ -31672,48 +31832,225 @@ namespace BZROpenShim
     // result; we answer the very first probe with the mask-preferred weapon so
     // the loop converges there immediately, and pass every other probe through
     // untouched.
+    //
+    // Instrumented to prove single-trigger semantics: for weaponMask=00010 the
+    // preferred hardpoint is 1, but the loop must still invoke GetWeapon only
+    // once with a non-null result (at slot 0 returning weapon 1) and terminate.
+    // Returning the preferred weapon on every iteration (slot 1..4) would cause
+    // the stock loop to trigger the same weapon 5 times or to advance past the
+    // selected slot. The `slot != 0` guard ensures exactly one non-null return.
     void* __cdecl OpenShimArtillerySelectWeapon(void* carrier, int slot, void* process)
     {
         auto getWeapon = reinterpret_cast<FnCarrierGetWeaponThiscall>(kReduxCarrierGetWeaponAddr);
 
-        if (slot != 0)
+        if (!g_AiWeaponMaskArtilleryActive)
             return getWeapon(carrier, nullptr, slot);
 
-        const int preferred =
-            ResolveAiPreferredHardpoint(carrier, ReadAiOwnerCraft(process, kReduxUnitProcessMeOffset));
+        // Fast-path for non-zero loop indices: stock behavior, no mask logic.
+        // This is the critical guard that prevents duplicate triggers: we only
+        // substitute on the very first loop iteration (slot 0). Every later
+        // iteration (1..4) is never reached when the first returns non-null,
+        // but if it were (e.g. preferred was -1 and slot 0 was empty), the
+        // stock scan must continue normally.
+        if (slot != 0) {
+            void* ret = getWeapon(carrier, nullptr, slot);
+            if (InterlockedDecrement(&g_WMaskArtilleryLogBudget) >= 0) {
+                Log(L"[WMASK][ARTY] slot=%d passthrough ret=%p craft=%p\n", slot, ret, ReadAiOwnerCraft(process, kReduxUnitProcessMeOffset));
+            }
+            return ret;
+        }
 
-        // `preferred` is only ever a slot that is set in `existant`, so
-        // GetWeapon cannot return null for it and the loop still terminates.
-        return getWeapon(carrier, nullptr, preferred >= 0 ? preferred : 0);
+        void* craft = ReadAiOwnerCraft(process, kReduxUnitProcessMeOffset);
+        const int preferred = ResolveAiPreferredHardpoint(carrier, craft);
+        const int selectedSlot = preferred >= 0 ? preferred : 0;
+        void* ret = getWeapon(carrier, nullptr, selectedSlot);
+
+        if (InterlockedDecrement(&g_WMaskArtilleryLogBudget) >= 0) {
+            uint32_t mask = 0, existant = 0;
+            __try {
+                if (craft) mask = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(craft) + kReduxGameObjectWeaponMaskOffset);
+                if (carrier) existant = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(carrier) + kReduxCarrierExistantOffset);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+            Log(L"[WMASK][ARTY] loop0 slot=%d pref=%d sel=%d mask=0x%02X exist=0x%02X ret=%p craft=%p carrier=%p\n",
+                slot, preferred, selectedSlot, mask, existant, ret, craft, carrier);
+        }
+        return ret;
     }
 
     // Replaces the `call Carrier::GetWeapon` at 0x005128F6, whose slot argument
-    // is the literal 0 pushed at 0x005128F1.
+    // is the literal 0 pushed at 0x005128F1. Stock always passes 0; we
+    // substitute the preferred slot when the mask selects one. Because stock
+    // only ever calls this once per lay-mine arrival, returning preferred here
+    // is a single substitution, not a per-iteration loop.
     void* __cdecl OpenShimLayMinesGetWeapon(void* carrier, int slot, void* task)
     {
         auto getWeapon = reinterpret_cast<FnCarrierGetWeaponThiscall>(kReduxCarrierGetWeaponAddr);
 
-        const int preferred =
-            ResolveAiPreferredHardpoint(carrier, ReadAiOwnerCraft(task, kReduxLayMinesTaskMeOffset));
+        if (!g_AiWeaponMaskMinelayerActive)
+            return getWeapon(carrier, nullptr, slot);
 
-        return getWeapon(carrier, nullptr, preferred >= 0 ? preferred : slot);
+        void* craft = ReadAiOwnerCraft(task, kReduxLayMinesTaskMeOffset);
+        const int preferred = ResolveAiPreferredHardpoint(carrier, craft);
+        const int sel = preferred >= 0 ? preferred : slot;
+        void* ret = getWeapon(carrier, nullptr, sel);
+
+        if (InterlockedDecrement(&g_WMaskLayMinesLogBudget) >= 0) {
+            uint32_t mask = 0, existant = 0;
+            __try {
+                if (craft) mask = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(craft) + kReduxGameObjectWeaponMaskOffset);
+                if (carrier) existant = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(carrier) + kReduxCarrierExistantOffset);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+            Log(L"[WMASK][MINE-GET] slot=%d pref=%d sel=%d mask=0x%02X exist=0x%02X ret=%p craft=%p\n",
+                slot, preferred, sel, mask, existant, ret, craft);
+        }
+        return ret;
     }
 
     // Replaces the `call Carrier::SetSelected` at 0x00512921, whose mask
     // argument is the literal 1 pushed at 0x0051291C.
     //
-    // A single bit is selected rather than the whole `weaponMask & existant`
-    // set: stock never lays more than one mine per arrival, and handing
-    // SetSelected a multi-bit mask would make TriggerSelected fire several
-    // hardpoints at once, which has no legacy precedent.
+    // SetSelected takes a MASK, not a hardpoint index. Proved from the routine
+    // itself at 0x004D9880: its first act is `and ecx, [eax+0x2C]` -- the
+    // argument is ANDed with the `existant` bitfield and the result stored to
+    // `selected` (+0x30). An index would never be ANDed with a bitfield.
+    //
+    // Carrier::TriggerSelected (0x00511FC0), which DoArrived calls immediately
+    // afterwards at 0x00512929, then loops slots 0..4 and triggers *every* bit
+    // of `selected & enabled`. So the engine already supports a synchronized
+    // multi-hardpoint drop natively: handing it the whole `weaponMask &
+    // existant` set is all that is required, and every mine leaves in the same
+    // frame from its own hardpoint.
+    //
+    // Stock pushes the literal 1 (== 1<<0), which is why stock lays exactly one
+    // mine from hardpoint 0 regardless of the mask.
     void __cdecl OpenShimLayMinesSetSelected(void* carrier, uint32_t mask, void* task)
     {
         auto setSelected = reinterpret_cast<FnCarrierSetSelectedThiscall>(kReduxCarrierSetSelectedAddr);
 
-        const int preferred =
-            ResolveAiPreferredHardpoint(carrier, ReadAiOwnerCraft(task, kReduxLayMinesTaskMeOffset));
+        if (!g_AiWeaponMaskMinelayerActive)
+        {
+            setSelected(carrier, nullptr, mask);
+            return;
+        }
 
-        setSelected(carrier, nullptr, preferred >= 0 ? (1u << preferred) : mask);
+        void* craft = ReadAiOwnerCraft(task, kReduxLayMinesTaskMeOffset);
+        const int preferred = ResolveAiPreferredHardpoint(carrier, craft);
+        const uint32_t volleyMask = ResolveAiVolleyMask(carrier, craft);
+        const uint32_t outMask = volleyMask != 0 ? volleyMask : mask;
+        setSelected(carrier, nullptr, outMask);
+
+        if (InterlockedDecrement(&g_WMaskLayMinesLogBudget) >= 0) {
+            uint32_t inMask = mask, existant = 0, wMask = 0, selected = 0, enabled = 0;
+            __try {
+                if (craft) wMask = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(craft) + kReduxGameObjectWeaponMaskOffset);
+                if (carrier) {
+                    existant = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(carrier) + kReduxCarrierExistantOffset);
+                    selected = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(carrier) + 0x30);
+                    enabled = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(carrier) + 0x34);
+                }
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+            Log(L"[WMASK][MINE-SEL] inMask=0x%X outMask=0x%X volley=0x%02X bits=%d wMask=0x%02X exist=0x%02X sel=0x%X en=0x%X pref=%d craft=%p\n",
+                inMask, outMask, volleyMask, PopCount5(outMask), wMask, existant, selected, enabled, preferred, craft);
+        }
+    }
+
+    // Synchronized multi-hardpoint artillery volley.
+    //
+    // Replaces the four `mov r32,[weaponVtbl+8]; call r32` Trigger sites inside
+    // ArtilleryProcess::DoAttack (0x00476AB5, 0x00476DAC, 0x00476F0B,
+    // 0x00476F74). Each is exactly five bytes with the weapon already in ecx,
+    // so a CALL rel32 fits the window with no instruction straddling.
+    //
+    // Why a second hook is needed at all: unlike the lay-mines path, DoAttack
+    // does not go through Carrier::TriggerSelected. Its slot loop at 0x00475DAA
+    // stops at the first non-null Carrier::GetWeapon result, stores that single
+    // weapon at [ebp-0x254], and every downstream branch triggers that one
+    // object directly. Choosing a different slot at the GetWeapon call site can
+    // therefore only ever move which single mortar fires -- it can never fire
+    // more than one. This hook adds the remaining masked hardpoints in the same
+    // frame, using the aim solution DoAttack already computed.
+    //
+    // The four sites are mutually exclusive branches, so exactly one of them
+    // runs per DoAttack and this executes at most once per firing cycle.
+    //
+    // Ordering: the weapon the loop selected always fires first and always
+    // fires exactly once, so with the feature off, a mask that resolves to a
+    // single bit, or any failed pointer round trip, the observable behaviour is
+    // byte-for-byte stock.
+    void __cdecl OpenShimArtilleryTriggerVolley(void* weapon, void* process)
+    {
+        if (!weapon)
+            return;
+
+        void* craft = nullptr;
+        void* carrier = nullptr;
+        uint32_t volleyMask = 0;
+        int primarySlot = -1;
+
+        if (g_AiWeaponMaskArtilleryActive)
+        {
+            craft = ReadAiOwnerCraft(process, kReduxUnitProcessMeOffset);
+            carrier = ReadAiOwnerCraft(craft, kReduxGameObjectCarrierOffset);
+            volleyMask = ResolveAiVolleyMask(carrier, craft);
+            primarySlot = FindCarrierSlotForWeapon(carrier, weapon);
+        }
+
+        // Only extend the shot when the volley set is a clean superset of the
+        // weapon DoAttack already picked. If the primary is not itself in the
+        // mask the two hooks disagree about this craft, and the safe reading of
+        // that is stock: fire the one weapon and nothing else.
+        const bool volley =
+            volleyMask != 0 &&
+            primarySlot >= 0 &&
+            (volleyMask & (1u << primarySlot)) != 0 &&
+            PopCount5(volleyMask) > 1;
+
+        const bool primaryFired = TriggerWeaponObject(weapon);
+
+        int fired = primaryFired ? 1 : 0;
+        if (volley)
+        {
+            for (int slot = 0; slot < 5; ++slot)
+            {
+                if (slot == primarySlot)
+                    continue;
+                if (!(volleyMask & (1u << slot)))
+                    continue;
+
+                void* extra = ReadCarrierWeaponSlot(carrier, slot);
+                if (!extra || extra == weapon)
+                    continue;
+
+                if (TriggerWeaponObject(extra))
+                    ++fired;
+            }
+        }
+
+        if (InterlockedDecrement(&g_WMaskVolleyLogBudget) >= 0)
+        {
+            uint32_t wMask = 0, existant = 0, enabled = 0, selected = 0;
+            __try
+            {
+                if (craft)
+                    wMask = *reinterpret_cast<uint32_t*>(
+                        reinterpret_cast<uint8_t*>(craft) + kReduxGameObjectWeaponMaskOffset);
+                if (carrier)
+                {
+                    auto* carrierBytes = reinterpret_cast<uint8_t*>(carrier);
+                    existant = *reinterpret_cast<uint32_t*>(carrierBytes + kReduxCarrierExistantOffset);
+                    selected = *reinterpret_cast<uint32_t*>(carrierBytes + kReduxCarrierSelectedOffset);
+                    enabled = *reinterpret_cast<uint32_t*>(carrierBytes + kReduxCarrierEnabledOffset);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+
+            Log(L"[WMASK][ARTY-VOLLEY] volley=%hs mask=0x%02X exist=0x%02X en=0x%02X sel=0x%02X "
+                L"volleyMask=0x%02X primarySlot=%d triggers=%d weapon=%p carrier=%p craft=%p\n",
+                volley ? "yes" : "no", wMask, existant, enabled, selected,
+                volleyMask, primarySlot, fired, weapon, carrier, craft);
+        }
     }
 
     void __cdecl TraceArtilleryMaskFromProcess(void* process)
