@@ -29,6 +29,10 @@ local ARMS = {
     cpmc = { producers = {"mxrecy"},          label = "custom producer / mixed, custom first" },
     mp2  = { producers = {"svrecy", "mxrecy"}, label = "two producers / mixed, stock first" },
     posc = { producers = {"svrecy"},          label = "custom unit only, customs FIRST in producer menu" },
+    bldc = { producers = {"svrecy"}, directBuild = "mxfigh",
+             label = "direct Build() command for the CUSTOM unit" },
+    blds = { producers = {"svrecy"}, directBuild = "svfigh",
+             label = "CONTROL: direct Build() command for the STOCK unit" },
     ss2  = { producers = {"svrecy"},          label = "CONTROL: two STOCK units in one account" },
     cc2  = { producers = {"svrecy"},          label = "CONTROL: two CUSTOM units in one account" },
     ccak = { producers = {"svrecy"},           label = "CONTROL: shipped ccatank.aip verbatim" },
@@ -131,6 +135,7 @@ end
 -- well clear of the deploy time.
 local nextDeployAttempt = 0.0
 local nextSupply = 0.0
+local directBuildIssued = false
 
 local function EnsureDeployed()
     if elapsed < nextDeployAttempt then
@@ -174,6 +179,7 @@ function Start()
     tracked = {}
     seen = {}
     buildEvents = 0
+    directBuildIssued = false
 
     local config = OpenODF("rmacfg")
     selectedCase = GetODFString(config, "Roadmap", "case", "cpms")
@@ -268,6 +274,23 @@ function Update(dt)
         Snapshot("ARMED")
         nextPoll = elapsed + 2.0
         stage = 1
+    end
+
+    -- Localization probe. Build() commands the producer directly, bypassing the
+    -- AIP construction program entirely. If the producer builds the custom unit
+    -- on command while no AIP account ever does, the defect is in the AIP
+    -- scheduler's selection, not in the ODF or the producer's build list.
+    if arm ~= nil and arm.directBuild ~= nil and not directBuildIssued
+       and elapsed >= 20.0 then
+        directBuildIssued = true
+        local p = producers[1]
+        if p ~= nil and IsValid(p) then
+            print(string.format(
+                "[LCROAD][AIP] DIRECTBUILD T+%.3f odf=%s canBuild=%s busy=%s",
+                elapsed, tostring(arm.directBuild),
+                tostring(CanBuild(p)), tostring(IsBusy(p))))
+            Build(p, arm.directBuild)
+        end
     end
 
     if stage == 1 and elapsed >= nextPoll then
