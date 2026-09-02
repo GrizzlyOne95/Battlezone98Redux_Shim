@@ -222,6 +222,12 @@ namespace BZROpenShim::SunFlash
             g_SunFlashTrace = 1u;
     }
 
+    void ReloadConfig()
+    {
+        g_ConfigLoaded = false;
+        LoadConfig();
+    }
+
     bool IsSuppressionEnabled()
     {
         return g_SunFlashSuppress != 0u;

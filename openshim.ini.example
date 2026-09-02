@@ -45,6 +45,8 @@
 ;
 ; Section scope:
 ;   [General]      engine/UI behavior
+;   [Fixes]        confirmed Redux engine defects; the five simulation-
+;                  affecting ones are forced off in MP
 ;   [Startup]      startup-only hooks/behavior
 ;   [Terrain]      terrain replacement/proxy development controls
 ;   [DX11Enhanced] experimental modern DX11 Enhanced presentation controls
@@ -63,6 +65,9 @@
 ;   1..256  = requested channel count
 ;   >256    = accepted but clamped to 256
 ; Use a non-negative whole decimal number. Default: 256.
+; The OpenShim Settings page cycles Stock (0) / 64 / 128 / 192 / 256; any other
+; value set by hand here is honoured but is not one of the page's stops, so
+; clicking that row replaces it.
 ; Legacy env aliases: OPENSHIM_MAX_SOUND_CHANNELS, BZR_MAX_SOUND_CHANNELS
 SoundChannels = 256
 
@@ -87,12 +92,14 @@ SettingsUi = 1
 ; Restored legacy death-chunk rendering / chunkMeshes support.
 ; Accepted: boolean. Default: ON.
 ; Set OFF only as a compatibility/emergency opt-out.
+; Exposed on the OpenShim Settings page as "Death Chunk Meshes".
 ; Legacy env aliases: OPENSHIM_DISABLE_CHUNK_EXPERIMENTS,
 ;                     BZR_DISABLE_CHUNK_EXPERIMENTS
 ChunkMeshes = 1
 
 ; Redux multiplayer map-list refresh/selection preservation fixes.
 ; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Map List Fixes".
 ; Legacy env aliases: OPENSHIM_DISABLE_MAP_REFRESH_FIXES,
 ;                     BZR_DISABLE_MAP_REFRESH_FIXES
 MapRefreshFixes = 1
@@ -106,6 +113,7 @@ MapRefreshFixes = 1
 ; streaming thread catches up. Alt-tab is the obvious trigger; overlays and
 ; notification popups do the same thing more briefly.
 ; Set OFF to restore stock behavior (music mutes while alt-tabbed).
+; Exposed on the OpenShim Settings page as "Background Music".
 ; Legacy env alias: OPENSHIM_DISABLE_MUSIC_GLOBAL_FOCUS
 MusicGlobalFocus = 1
 
@@ -142,6 +150,7 @@ RawMouseInput = 0
 ;           BZR_ENABLE_OGRE_MATERIAL_COLLISION_GUARD
 ;   disable OPENSHIM_DISABLE_OGRE_MATERIAL_COLLISION_GUARD
 ;           BZR_DISABLE_OGRE_MATERIAL_COLLISION_GUARD
+; Exposed on the OpenShim Settings page as "Material Guard".
 OgreMaterialCollisionGuard = 1
 
 
@@ -167,10 +176,11 @@ OgreMaterialCollisionGuard = 1
 ; by the time the normal patch thread starts -- and no network state exists that
 ; early. The change restores stock 1.5 ordering rather than inventing new
 ; behavior, but it does move where the control panel emits its commands within
-; the frame, so leave it off unless you are using the editor.
+; the frame. Set it off if you want the exact Redux ordering back.
 ;
-; Accepted: boolean. Default: OFF. Restart required after changing.
-EditorOverheadPlacementOrder = 0
+; Accepted: boolean. Default: ON. Restart required after changing.
+; Exposed on the OpenShim Settings page as "Editor Placement".
+EditorOverheadPlacementOrder = 1
 
 ; Suppress the stale "under attack" growl that fires the instant you hop out.
 ;
@@ -187,11 +197,13 @@ EditorOverheadPlacementOrder = 0
 ;
 ; NOTE: this is a deliberate deviation from stock. Battlezone 1.5's
 ; CockpitRadar::Render has the same three conditions, so the beep is original
-; behaviour, not a Redux regression. Audio only -- no simulation effect.
+; behaviour, not a Redux regression -- which is why it defaults OFF. Audio only
+; -- no simulation effect.
 ;
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Hop-Out Alert Fix"; applies live.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_HOP_OUT_ATTACK_ALERT_FIX
-SuppressHopOutAttackAlert = 1
+SuppressHopOutAttackAlert = 0
 
 [Fixes]
 
@@ -201,50 +213,56 @@ SuppressHopOutAttackAlert = 1
 ; Everything in this section defaults to ON. These are bug fixes, not
 ; enhancements, and normal play wants them on.
 ;
-; They are exposed as switches for two reasons. First, unlike [SinglePlayer],
-; NONE of them is gated on the net id -- they apply identically in single-player
-; and in a network game -- and several of them change simulation behaviour, so
-; in a lobby that mixes OpenShim and stock Redux clients the two machines run
-; different code for the same object. That is not a desync in itself (no packet
-; layout changes, and the engine's own authority rules still apply) but it is a
-; behavioural difference, and a host running a strict-parity match may want it
-; gone. Second, a switchable fix is a bisectable fix: when something looks wrong
-; and you are not sure whether OpenShim is responsible, turning one of these off
-; is the fastest way to find out.
+; The first five -- ApcAlliedTargetDeploy, SplinterUndead,
+; HowitzerUndeployedRetaliation, TugCargoPostLoad and ConstructorRemoteBuild --
+; change simulation behaviour, and none of them is negotiated with peers, so
+; they are gated on the net id exactly the way [SinglePlayer] features are:
+; they stand down for the duration of a network game and a lobby that mixes
+; OpenShim and stock Redux clients stays behaviourally identical. The gate is
+; reconciled from the Ogre world-queue update every rendered frame and
+; immediately whenever the net id changes, so a fix armed in single-player
+; cannot survive into a network game. MagnetZeroRangeGuard,
+; ProducerScriptPredicates and VehicleListModScoping are not gated: they only
+; change behaviour for content that is already broken, or for script-facing
+; queries, and have no simulation effect to diverge on.
+;
+; They are exposed as switches because a switchable fix is a bisectable fix:
+; when something looks wrong and you are not sure whether OpenShim is
+; responsible, turning one of these off is the fastest way to find out.
 ;
 ; Every key in this section is read once during startup patching, so restart the
-; game after changing any of them. Each also has a legacy environment alias,
-; listed with it.
+; game after changing any of them. The first five are also on the OpenShim
+; Settings page. Each has a legacy environment alias, listed with it.
 
 ; Let APC AI accept allied targets when choosing a deploy target.
 ; Rewrites two branch displacements in the APC target-reject path.
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: ON. Stands down in a network game.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_APC_DEPLOY_FIX
 ApcAlliedTargetDeploy = 1
 
 ; Stop a destroyed splinter (spraybomb) from continuing to spawn payload
 ; ordnance. SprayBuilding::Simulate overrides Building::Simulate without
 ; preserving the base destroyed/marked-for-remove gate; this restores it.
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: ON. Stands down in a network game.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_SPLINTER_UNDEAD_FIX
 SplinterUndead = 1
 
 ; Suppress a howitzer's recent-hit target override while it is undeployed, so
 ; an undeployed howitzer does not counter-snipe.
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: ON. Stands down in a network game.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_HOWITZER_DEPLOY_FIX
 HowitzerUndeployedRetaliation = 1
 
 ; Arm the stock deploy transition after a tug finishes loading cargo.
 ; Craft::Deploy only arms control.deploy while UNDEPLOYED, so a tug that
 ; picked up cargo never transitioned.
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: ON. Stands down in a network game.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_TUG_CARGO_FIX
 TugCargoPostLoad = 1
 
 ; Clear a dead constructor's remote build state from AI_UnitRemove, so the
 ; build it was told to place does not outlive it.
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: ON. Stands down in a network game.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX
 ConstructorRemoteBuild = 1
 
@@ -501,6 +519,7 @@ TerrainHdManifest = terrain_hd_tiles.json
 ; Applies only when RenderSystem_Direct3D11.dll is active. DX9 is untouched.
 ; The runtime still fails closed if this key/section is absent, preserving
 ; existing stock/default DX11 installations that have not opted into this INI.
+; Exposed on the OpenShim Settings page as "DX11 FXAA".
 ; Legacy environment override: OPENSHIM_DX11_ENHANCED_FXAA
 FXAA = 1
 
@@ -510,6 +529,7 @@ FXAA = 1
 ; not displaced. Set 0 and restart for the exact stock distance-order A/B path.
 ; Default: ON.
 ; DX11 and exact supported OgreMain builds only; DX9/Classic are untouched.
+; Exposed on the OpenShim Settings page as "DX11 Local Lights".
 ; Environment overrides:
 ;   OPENSHIM_ENABLE_ENHANCED_LIGHT_SELECTION_V2
 ;   OPENSHIM_DISABLE_ENHANCED_LIGHT_SELECTION_V2
@@ -543,9 +563,23 @@ UnderAttackAlert = Normal
 ; Legacy INI alias: TargetReticle
 TargetPolicy = Default
 
+; Master switch for the multiplayer vehicle-flag feature as a whole: the flag
+; selection screen, the payload upload, and the Ogre renderer that draws flags
+; over other players' craft in a match.
+; Accepted: boolean. Default: ON. Restart required.
+; Latched at startup, because the renderer is a vtable write that is only
+; attempted while the feature is on. Setting this OFF leaves stock Redux flag
+; behaviour untouched -- it removes OpenShim's flag work, not Redux's.
+; Legacy env aliases to force it off: OPENSHIM_DISABLE_MP_FLAGS,
+;                                     OPENSHIM_DISABLE_MP_FLAG_UI,
+;                                     OPENSHIM_DISABLE_MULTIPLAYER_FLAG_UI,
+;                                     BZR_DISABLE_MP_FLAG_UI
+MultiplayerFlags = 1
+
 ; Also draw your own multiplayer vehicle flag over your own craft.
-; Accepted: boolean. Default: OFF.
+; Accepted: boolean. Default: OFF. Restart required.
 ; OFF = only other players' flags render; ON = render your own flag too.
+; Ignored when MultiplayerFlags above is OFF.
 ; Legacy env aliases: OPENSHIM_MP_FLAG_SHOW_OWN, BZR_MP_FLAG_SHOW_OWN
 MultiplayerFlagShowOwnCraft = 0
 
@@ -582,6 +616,7 @@ JetFlames = 0
 ;   0 = suppress only that contribution
 ; Inverted spelling DisableSunFlashbang = 1 does the same thing and wins if
 ; both keys are present. Legacy env alias: OPENSHIM_DISABLE_SUN_FLASHBANG.
+; Exposed on the OpenShim Settings page as "Sun Flashbang"; applies live.
 ;
 ; This is NOT bloom, the Glow compositor, the sun sprite material, or
 ; atmospheric scattering. LensFlare::Render multiplies
@@ -1024,6 +1059,9 @@ PlayerReticleConvergence = 1
 ; Smart-reticle targeting distance.
 ; Accepted: finite decimal; clamped to 1..10000.
 ; Default: 500. Redux stock value: 200.
+; The OpenShim Settings page cycles Stock (200) / 300 / 400 / 500 and applies
+; live; any other value set by hand here is honoured but clicking that row
+; replaces it.
 ; Legacy INI alias: ReticleRange
 SmartReticleRange = 500
 
@@ -1220,6 +1258,7 @@ AttackRevealPerceivedTeam = 1
 ; on the next tick rather than being stranded.
 ;
 ; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Satellite Fog Of War"; applies live.
 ; Trace: OPENSHIM_TRACE_SATELLITE_VISIBILITY_FIX=1 (logs [SATVISFIX] entry,
 ;        exit and teardown transitions with per-transition counts)
 ; Legacy env aliases to force it off: OPENSHIM_DISABLE_SATELLITE_VISIBILITY_FIX,
