@@ -1123,29 +1123,48 @@ TurretAimPitchMultiplier = 0.95
 ; Accepted: boolean. Default: ON.
 JumpSnipeCrouch = 1
 
-; Make artillery and lay-mines AI honour the unit's weaponMask when choosing a
-; hardpoint.
+; Make artillery AI honour the unit's weaponMask, firing every hardpoint the
+; mask names as one synchronized volley.
 ;
 ; This is NOT a bug fix. Battlezone 1.5 behaves exactly as stock Redux does:
-; artillery AI takes the first fitted weapon in hardpoint order and the lay-mines
-; task hard-codes hardpoint 0, and neither one reads weaponMask in either build.
-; Turning this on is a deliberate departure from original Battlezone behaviour,
-; which is why it defaults OFF.
+; ArtilleryProcess::DoAttack takes the first fitted weapon in hardpoint order
+; and never reads weaponMask, in either build. Turning this on is a deliberate
+; departure from original Battlezone behaviour, which is why it defaults OFF.
 ;
-; The rule is "lowest set bit of (weaponMask AND fitted hardpoints)", falling
-; back to stock whenever the mask selects nothing that is actually fitted. With
-; the default ODF mask 11111 that resolves to the first fitted hardpoint -- the
-; same weapon stock would have picked -- so units without an explicit,
-; non-default mask are completely unaffected.
+; The rule is "every fitted hardpoint in (weaponMask AND fitted hardpoints)",
+; falling back to stock whenever the mask selects nothing that is fitted.
+;
+; This is NOT a no-op for stock content. The default ODF mask 11111 means every
+; fitted hardpoint, and a stock howitzer carries four mortar hardpoints, so an
+; enabled stock howitzer fires four rounds per cycle and consumes four times the
+; ammunition. Measured on the shipped build: one trigger per cycle with this off,
+; four with it on, and exactly 4.0x the ammunition drain.
 ;
 ; ODF masks are read as decimal digits with the rightmost digit as hardpoint 0:
-;   00001 -> hardpoint 0    00010 -> hardpoint 1    00100 -> hardpoint 2
+;   00001 -> hardpoint 0    00010 -> hardpoint 1    01111 -> hardpoints 0-3
 ;
 ; Simulation-affecting, so like everything in this section it is hard-disabled in
 ; network games regardless of the value set here.
 ;
 ; Accepted: boolean. Default: OFF.
-AiWeaponMaskSelection = 0
+AiWeaponMaskArtillery = 0
+
+; Make the lay-mines AI honour the unit's weaponMask, laying every mine the mask
+; names in the same frame.
+;
+; The independent half of AiWeaponMaskArtillery, with the same rule and the same
+; rationale. LayMinesTask::DoArrived hard-codes hardpoint 0 and selected-mask 1
+; in both Battlezone 1.5 and stock Redux, so a minelayer carrying two different
+; mine types only ever lays the first one.
+;
+; The stock minelayer has a single mine hardpoint, so it is unaffected either
+; way; this matters for content that authors more than one.
+;
+; Simulation-affecting, so like everything in this section it is hard-disabled in
+; network games regardless of the value set here.
+;
+; Accepted: boolean. Default: OFF.
+AiWeaponMaskMinelayer = 0
 
 ; Honour the ODF-authored AI tuning keys.
 ;
