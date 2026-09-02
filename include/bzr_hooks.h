@@ -184,6 +184,11 @@ namespace BZROpenShim
     void* __cdecl OpenShimArtillerySelectWeapon(void* carrier, int slot, void* process);
     void* __cdecl OpenShimLayMinesGetWeapon(void* carrier, int slot, void* task);
     void __cdecl OpenShimLayMinesSetSelected(void* carrier, uint32_t mask, void* task);
+    // Synchronized multi-hardpoint volley. Replaces the four
+    // `mov r32,[weaponVtbl+8]; call r32` Trigger sites inside
+    // ArtilleryProcess::DoAttack so every hardpoint selected by weaponMask
+    // fires in the same frame instead of only the one the slot loop picked.
+    void __cdecl OpenShimArtilleryTriggerVolley(void* weapon, void* process);
     // Shared state for trampolines.
     extern void* g_VehicleListContext;
     extern void* g_VehicleListParam;

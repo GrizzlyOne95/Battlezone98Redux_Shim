@@ -1,0 +1,18 @@
+[GameObjectClass]
+baseName = "avartl"
+classLabel = "howitzer"
+scrapCost = 8
+scrapValue = 6
+buildTime = 10.0
+maxHealth = 2000
+maxAmmo = 2000
+weaponMask = 00111
+unitName = "HWH8 3 same"
+aiName = "ArtilleryFriend"
+aiName2 = "ArtilleryEnemy"
+weaponHard1 = "GM1"
+weaponName1 = "ghartill"
+weaponHard2 = "GM2"
+weaponName2 = "ghartila"
+weaponHard3 = "GM3"
+weaponName3 = "ghartmp"
