@@ -33,6 +33,8 @@ local ARMS = {
              label = "direct Build() command for the CUSTOM unit" },
     blds = { producers = {"svrecy"}, directBuild = "svfigh",
              label = "CONTROL: direct Build() command for the STOCK unit" },
+    allc = { producers = {"svrecy"},          label = "AIP referencing ONLY custom units, whole file" },
+    alls = { producers = {"svrecy"},          label = "CONTROL: same shape, ONLY stock units" },
     ss2  = { producers = {"svrecy"},          label = "CONTROL: two STOCK units in one account" },
     cc2  = { producers = {"svrecy"},          label = "CONTROL: two CUSTOM units in one account" },
     ccak = { producers = {"svrecy"},           label = "CONTROL: shipped ccatank.aip verbatim" },
