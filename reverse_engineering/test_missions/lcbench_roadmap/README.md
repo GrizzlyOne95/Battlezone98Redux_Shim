@@ -122,3 +122,30 @@ process keeps rendering — so re-run that arm rather than recording its zero.
 harness timeout kill, so a dump there is **not** evidence of a crash. The real
 signals are `looksLikeCrash` in the manifest: a shim dump in the game's `logs\`
 folder, or an early exit with no `RESULT` marker.
+
+### Same-origin pair controls (`ss2`, `cc2`)
+
+The working hypothesis is that the AI will not build a **mix of stock and
+custom** units, rather than that it prefers custom units specifically. The first
+completed arm supports this: `spmc` listed the custom unit at the *higher*
+priority and the AI still built 3 stock and 0 custom.
+
+The mixed arms alone cannot distinguish "will not mix two origins" from "will
+not build two units out of one account". These controls close that gap by
+pairing units of the *same* origin, on the same producer as the `sp*` arms:
+
+| Arm | Offense account | Asks |
+|---|---|---|
+| `ss2` | `svfigh` + `svturr` | do two **stock** units both build? |
+| `cc2` | `mxfigh` + `mxturr` | do two **custom** units both build? |
+
+`mxturr` is a value-identical clone of `svturr`, matching `mxfigh`/`svfigh`.
+
+Read it as: if both same-origin pairs build out, but every stock+custom pair
+yields one origin and a zero, the defect is precisely the **origin boundary**.
+If `ss2` also builds only one, the defect is about accounts rather than origin
+and the whole framing changes.
+
+Note the AI already builds `svscav`, `svcnst`, `svturr` and `svfigh` together in
+a single run, so it plainly does mix unit *types*. `Defense` was moved off
+`svturr` onto `sprepa` so it cannot contaminate the `ss2` count.
