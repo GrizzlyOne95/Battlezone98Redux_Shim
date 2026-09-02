@@ -30,6 +30,12 @@ namespace BZROpenShim
     bool AreRequiredDeferredRuntimeHooksInstalled();
     void InitBzrHookStrings();
     void SetProducerBuildMenuOriginal(void* target);
+    // Exact-call-site guards installed by the generic patch registry.
+    void SetPersonCarrierGetSelectedOriginal(void* target);
+    void SetControlPanelEnemyPOriginal(void* target);
+    uint32_t __fastcall PersonCarrierGetSelectedGuard(void* carrier, void* person);
+    bool __fastcall ControlPanelEnemyPAttackOrderHook(
+        void* team, void* edx, int targetTeam);
     void FlushChunkFragmentEventsForShutdown();
 
     // Wire up the GOG-build player-handle lookup. Only call this once the exact

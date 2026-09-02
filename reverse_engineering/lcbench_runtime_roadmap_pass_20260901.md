@@ -3,19 +3,21 @@
 ## Outcome
 
 This pass produced two durable Redux 2.2.301 runtime matrices and tightened the
-evidence gates for all six roadmap targets. It did **not** add a production
-patch. The pilot crash is deterministic and its immediate fault is mapped, but
-the exact 1.5 source has the same unguarded carrier assumption, so the current
-evidence does not justify calling it a Redux regression. The neutral behavior
-is a legacy UI targeting rule rather than a broken Lua/native `Attack` path.
-The current binary also disproves the prior claim that All Nations is merely a
-dormant settings row with an otherwise intact Redux rule contract.
+evidence gates for all six roadmap targets. Follow-up implementation now adds a
+narrow pilot null-safety guard and an opt-in neutral attack-order UI policy.
+Whether the pilot crash is a Redux regression or inherited legacy behavior no
+longer blocks the defensive fix: the guard skips only the carrier-dependent
+selected-mask read and continues normal `Person::Simulate` processing. The
+neutral behavior remains a legacy UI targeting rule rather than a broken
+Lua/native `Attack` path. The current binary also disproves the prior claim
+that All Nations is merely a dormant settings row with an otherwise intact
+Redux rule contract.
 
 | Target | Result | Patch disposition | Confidence |
 |---|---|---|---|
-| Pilot hardpoint ODF ordering crash | Reproduced 3/3 in the closest failing arm; immediate null dereference mapped | No patch until 1.5 runtime parity and valid/invalid ODF contract are established | High for immediate cause; unproven as Redux regression |
-| AIP mixed stock/custom producer bug | Fixture design and evidence gate defined; no runtime matrix completed | No speculative selection patch | Speculative/open |
-| Neutral unit attack/order asymmetry | Lua/native `Attack` works in both directions; 1.5 UI intentionally excludes team 0 | Reclassify as legacy UI rule; any change is an opt-in enhancement | Very high, except a manual Redux UI confirmation remains |
+| Pilot hardpoint ODF ordering crash | Reproduced 3/3 in the closest failing arm; immediate null dereference mapped | **ACTIVE PATCH** — narrow null-carrier guard; legacy parity no longer blocks implementation | High for immediate cause and guard identity; unproven as Redux regression |
+| AIP mixed stock/custom producer bug | **Reproduced and localized**: custom ODF never built by any AIP account, yet the same producer builds it on direct command | Instrument AIP account-to-ODF resolution; no patch until the routine is identified | High for localization; reported direction contradicted |
+| Neutral unit attack/order asymmetry | Lua/native `Attack` works in both directions; 1.5 UI intentionally excludes team 0 | Opt-in `[Gameplay] AllowNeutralAttackOrders=0`; alter only explicit order-target eligibility | Very high, except MP host/client UI qualification remains |
 | Walker cockpit jitter | World/cockpit asset topology compared; old imported function label rejected | No transform patch until the live cockpit update path is traced | Proven asset delta; speculative cause |
 | Multiplayer freecam exploit | Prior imported free-eye label rejected; multiplayer gate remains unmapped | No patch until real state/gate and two-client behavior are captured | Speculative/open |
 | All Nations multiplayer option | Hidden/no-op row exists, but current loader/launch/list flow has no recovered rule contract | Do not invent a rule byte; revalidate wire and consumers or treat as a larger compatibility port | High for current shell/data-flow findings |
@@ -58,16 +60,16 @@ and are stopped by the harness.
 
 | Evidence field | Finding |
 |---|---|
-| Status | Deterministic Redux crash proven; Redux-regression classification still open |
+| Status | **ACTIVE PATCH** — deterministic crash proven; Redux-regression classification still open |
 | Reproduction | `run_lcroad_pilot.ps1`; `pctl`, `pcrft`, `paftr`, `prevs`, and `ppart` |
 | Runtime evidence | Three valid controls survive; the closest malformed arm crashes 3/3 with new dumps |
 | Static/RE evidence | Exact current call at `0x0059D76C` passes null carrier; callee faults at RVA `0x17F9A` reading `+0x30` |
 | 1.5 comparison | Static source contains the same unguarded carrier use; no 1.5 runtime matrix yet |
 | Root cause | Pilot is created without a carrier, then `Person::Simulate` consumes it unconditionally |
-| Patch | None; a generic null guard is not yet justified as legacy-compatible behavior |
+| Patch | Redirect only the selected-mask call through a null guard; return mask 0 for a missing carrier, log once per `Person`, and continue stock simulation |
 | Qualification | Redux matrix and repeat control/failure run completed |
-| Remaining risk | The tested misplaced-key semantic may be invalid in both engines; legacy runtime boundary is unknown |
-| Roadmap recommendation | Keep active, replace the unsupported Redux-specific claim with the exact crash and parity gate |
+| Remaining risk | The tested misplaced-key semantic may be invalid in both engines; legacy runtime boundary remains relevant to classification, not safety |
+| Roadmap recommendation | Keep as an active safety patch; retain the fixture and qualify the guarded runtime path |
 
 ### Reproduction
 
@@ -141,36 +143,75 @@ only when `weaponHard` is nonempty. The legacy warning path covers a hardpoint
 name that exists in the expected class data but is missing from the model; it
 does not prove tolerance for moving the keys outside `GameObjectClass`.
 
-No null guard was shipped. Such a guard could improve safety, but without the
-ODF contract and 1.5 runtime behavior it could also preserve a malformed pilot
-in an invalid state and conceal later faults. Required next gate:
+The safety patch does not return early from `Person::Simulate` and does not
+allocate or synthesize a carrier. It redirects only the exact call to
+`Carrier::GetSelected`; a non-null carrier follows the original function, and
+a null carrier yields selected mask 0. The first trip for each `Person` emits a
+`[PILOTSAFE]` diagnostic. Both the call site and callee identity are resolved
+from unique exact-current signatures and must agree before the patch applies.
+
+Legacy runtime work remains useful for classification and ODF-authoring
+guidance, but no longer blocks the defensive guard. Remaining gates:
 
 1. Run the same five-arm matrix against an authentic 1.5 runtime.
 2. Add one arm with a valid `GameObjectClass` hardpoint name that is absent
    from the pilot model to exercise the actual warning path.
-3. If 1.5 survives the section-placement arms, trace where its carrier is
-   allocated differently. If it also crashes, reclassify this as inherited
-   malformed-ODF behavior before considering an opt-in safety guard.
+3. Re-run `pctl` and `pcrft` against the patched Redux build. Both must reach
+   `RESULT`; only `pcrft` should emit the once-per-object guard diagnostic.
+4. If 1.5 survives the section-placement arms, trace where its carrier is
+   allocated differently. If it also crashes, classify the patch as an
+   inherited legacy safety fix rather than a Redux-regression repair.
 
 ## 2. AIP mixed stock/custom producer bug
 
 | Evidence field | Finding |
 |---|---|
-| Status | Still open |
-| Reproduction | Seven-arm stock/custom producer/unit matrix specified below but not yet implemented or run |
-| Runtime evidence | None from this pass |
+| Status | **Reproduced and localized to AIP selection**; responsible routine not yet identified |
+| Reproduction | `run_lcroad_aip.ps1`; fifteen-arm matrix in `test_missions/lcbench_roadmap` |
+| Runtime evidence | Custom ODF never built by any AIP, including a file naming no stock unit at all; the same producer builds it on a direct `Build()` command |
 | Static/RE evidence | Shipped AIP examples and producer grammar checked; no responsible filter/scorer identified |
 | 1.5 comparison | Not yet reconstructed at the responsible stage |
-| Root cause | Unknown; parsing, identity resolution, eligibility, ordering, and scoring remain candidates |
-| Patch | None |
-| Qualification | Requires decision-level instrumentation and repeated build outcomes, not visual observation alone |
-| Remaining risk | A weak fixture could confuse random priority, prerequisites, or resources with ODF-origin filtering |
-| Roadmap recommendation | Leave active with the exact matrix/instrumentation gate |
+| Root cause | AIP construction program cannot resolve or select a custom ODF name; the ODF loader, producer build list, and construction path are all excluded |
+| Patch | None; the responsible routine still has to be found before anything is changed |
+| Qualification | Known-good control arm (`ccak`) required alongside any negative, since every failure mode here is a silent zero |
+| Remaining risk | Reported direction is contradicted (see below); the original report's setup may differ materially |
+| Roadmap recommendation | Keep active; instrument AIP account-to-ODF resolution specifically |
 
-No runtime result was manufactured for this target. Stock mission AIP examples
-and grammar were checked, including producer definitions using `avmuf` and
-`svmuf`, but the report is not specific enough to patch a selection routine
-without observing the requested, eligible, and finally selected unit.
+A controlled matrix now reproduces the defect and bounds it. `svfigh` is the
+stock unit and `mxfigh` a value-identical clone differing only in ODF identity,
+so cost, build time, health and role are excluded by construction.
+
+Three facts localize the defect:
+
+1. The custom ODF is valid. Spawned directly every run, it reports
+   `valid=true class=wingman`.
+2. The producer builds it on command. With the Offense account neutered to
+   `NUMBER_TO_HAVE 0`, `Build(producer, "mxfigh")` and
+   `Build(producer, "svfigh")` each produced three units at identical times.
+3. No AIP account ever builds it: zero when requested alone, paired with another
+   custom, mixed with stock in either priority order, from either producer
+   identity, and at either end of the producer's build menu.
+
+A whole-file test closes the remaining account-scoped explanations. `allc` and
+`alls` are shape-identical AIPs differing only in unit family. `alls` built six
+units: 2 `svturr` from Slush at T+12 and T+19, then 4 `svfigh`. `allc`, which
+names no stock ODF anywhere in the file, built nothing at all -- not even its
+Slush account. Stock entries crowding out custom ones is therefore excluded, as
+are priority order, build-slot position and producer identity.
+
+The unit is constructible and the producer will construct it; the AI simply
+never asks for it. Instrumentation should target AIP account-to-ODF resolution
+rather than the producer, the ODF loader, or the build list.
+
+**The reported direction is contradicted.** The roadmap records the AI building
+*only the custom* units; what reproduces is the AI building *never the custom*
+units. This should be re-confirmed against the original reporter's setup before
+any selection routine is patched.
+
+Two harness facts were required to get any signal at all, and both produce
+silent zeros: `SetAIControl` must run at Lua chunk scope, and `Build()` issued
+while the producer reports `IsBusy` is dropped without error. The full list is
+in `test_missions/lcbench_roadmap/README.md`.
 
 The implementation-ready evidence gate is a seven-arm matrix using one stock
 producer, one byte-for-byte custom clone producer, one stock unit, and one
@@ -193,16 +234,16 @@ ODF namespace resolution, and AIP list iteration remain competing hypotheses.
 
 | Evidence field | Finding |
 |---|---|
-| Status | Disproven as a broken Attack path; reclassified as legacy UI behavior |
+| Status | Legacy UI behavior with an opt-in explicit-order enhancement |
 | Reproduction | `run_lcroad_neutral.ps1`; `n2p`, `a2n`, `a2e`, and `a2f` |
 | Runtime evidence | Redux accepts and executes both neutral-to-player and ally-to-neutral Lua/native attacks |
 | Static/RE evidence | 1.5 `ControlPanel::Render` uses `Team::EnemyP`; that predicate excludes team 0 |
 | 1.5 comparison | Static source establishes the same normal command-UI restriction |
 | Root cause | The target-list/UI predicate omits neutral objects; the AI task itself does not |
-| Patch | None; a behavior change belongs behind an optional gameplay policy |
+| Patch | `[Gameplay] AllowNeutralAttackOrders=0`; hook only the current `ControlPanel` target-list `Team::EnemyP` call |
 | Qualification | Four directed arms completed with enemy and friendly controls |
-| Remaining risk | A manual current-Redux UI-issued order run remains to anchor the modern UI owner |
-| Roadmap recommendation | Mark as legacy UI rule, not a Redux regression |
+| Remaining risk | MP host/client UI-issued order qualification remains; no packet or authority change is introduced |
+| Roadmap recommendation | Ship disabled by default as a narrow gameplay toggle, not as a regression fix |
 
 ### Runtime matrix
 
@@ -231,11 +272,16 @@ numbers below 1, excluding neutral team 0. Clicking a listed target then emits
 `CMD_ATTACK`. Thus a direct/internal attack can target neutral while the normal
 player target-list UI intentionally cannot offer that target.
 
-No compatibility patch is justified. The roadmap item should be reclassified
-as a legacy UI rule. A user-visible change could be designed separately as an
-opt-in gameplay enhancement. One manual Redux UI run should still confirm the
-reported front-end behavior and identify the exact current target-list owner;
-it is not needed to establish that the Lua/native order path works.
+The exact Redux owner is now identified at the sole `Team::EnemyP(int)` call in
+the current `ControlPanel::Render` attack-target candidate scan. The opt-in
+hook preserves every stock-accepted target and additionally accepts only team
+0 when `AllowNeutralAttackOrders=1`. It does not change `Team::EnemyP`, global
+team relations, autonomous target acquisition, AI diplomacy, command IDs, or
+network serialization. Default 0 exactly preserves the legacy UI rule.
+
+Qualification still requires a player-authored order in MP host and client
+roles. The existing four-arm matrix already proves that the downstream attack
+task and damage path can execute against team 0.
 
 ## 4. Walker cockpit jitter
 
@@ -367,14 +413,15 @@ The committed runners are:
 - `reverse_engineering/test_missions/lcbench_roadmap/`
 
 They provide repeatable qualification for the two strongest targets while
-leaving exact evidence gates for the other four. No address, hook, or signature
-was added to `patches.json`, and no production behavior changed in this pass.
+leaving exact evidence gates for the other four. Follow-up implementation adds
+two fail-closed exact-call-site patches to `patches.json`: the pilot carrier
+guard and the neutral target-list policy hook.
 
 Final repository and live-state checks:
 
 - Release Win32 solution build: passed; `bin/Release/winmm.dll` produced.
-- Engine-independent CTest suite: 18/18 passed from
-  `build/consolidation-tests` in Release configuration.
+- Engine-independent CTest suite: 20/20 passed, including the narrow safety and
+  target-policy unit cases.
 - INI/config tests: 23/23 writer checks and 41/41 preset-migration checks
   passed; conservative/default completeness checks passed.
 - `luac -p`: both `rmpilot.lua` and `rmneut.lua` passed.
