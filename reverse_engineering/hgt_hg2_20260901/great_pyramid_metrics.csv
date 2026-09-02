@@ -1,0 +1,5 @@
+terrain,levels,min,max,median_slope_deg,p95_slope_deg,max_slope_deg,max_first_difference,flat_neighbour_pct
+legacy 1.5,153,0,1202,0.0,26.565,54.462,140,92.286
+ours (raw),364,0,1202,0.0,26.565,54.846,71,92.862
+redux shipped,363,0,1202,0.0,26.565,54.846,71,92.862
+redux smoothed,936,0,1202,0.0,23.749,43.229,47,87.583
