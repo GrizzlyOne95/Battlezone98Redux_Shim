@@ -16,6 +16,7 @@
 #include "ogre_profiler_algorithms.h"
 #include "weapon_convergence.h"
 #include "headlight_falloff.h"
+#include "sun_flash.h"
 #include "chunk_batch_invalidation.h"
 #include "ai_range_policy.h"
 #include "lcbench_safety_policy.h"
@@ -2249,6 +2250,21 @@ namespace BZROpenShim
         static volatile long g_SplinterUndeadTraceBudget = kSplinterUndeadTraceBudgetDefault;
         static bool g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
         static volatile long g_ConstructorRemoteBuildTraceBudget = kConstructorRemoteBuildTraceBudgetDefault;
+
+        // [Fixes] multiplayer gate. Each of these five corrects a confirmed
+        // Redux defect, but all five change simulation behaviour, and none of
+        // them is negotiated with peers -- so in a lobby that mixes OpenShim and
+        // stock clients the two machines would run different code for the same
+        // object. The `Enabled` flag above stays the user's openshim.ini answer
+        // and still decides whether the hook/patch is installed at all; the
+        // `Active` flag below is that answer reconciled against the live net id
+        // by the feature registry, and it is what each hook body tests. Install
+        // is deliberately NOT gated on Active: the hook has to already be in
+        // place when a mission goes from single-player to a network game.
+        static bool g_TugCargoPostLoadFixActive = true;
+        static bool g_ApcAlliedTargetDeployPatchActive = false;
+        static bool g_SplinterUndeadFixActive = kSplinterUndeadFixEnabledDefault;
+        static bool g_ConstructorRemoteBuildFixActive = kConstructorRemoteBuildFixEnabledDefault;
         static std::unordered_map<uintptr_t, RetargetPeriodState> g_RetargetPeriodStateByProcess = {};
         static std::unordered_map<uintptr_t, ScrapPathFailureState> g_ScrapPathFailuresByObject = {};
         static std::unordered_map<uintptr_t, ScrapRetargetState> g_ScrapRetargetStateByTask = {};
@@ -2414,6 +2430,9 @@ namespace BZROpenShim
         static bool g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
         static bool g_HowitzerUndeployedRetaliationFixEnabled =
             kHowitzerUndeployedRetaliationFixEnabledDefault;
+        // See the [Fixes] multiplayer gate note above.
+        static bool g_HowitzerUndeployedRetaliationFixActive =
+            kHowitzerUndeployedRetaliationFixEnabledDefault;
         static bool g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
         static bool g_AiWeaponMaskSelectionEnabled = kAiWeaponMaskSelectionEnabledDefault;
         // Configured value AND'd with the single-player gate. The three call
@@ -2437,7 +2456,7 @@ namespace BZROpenShim
         // float the growl alert compares enemyShot against
         // (comiss xmm0, [0x009173D0] at 0x00494D35).
         static constexpr uintptr_t kRadarAttackAlertNextBeepRva = 0x005173D0;
-        static constexpr bool kHopOutAttackAlertFixEnabledDefault = true;
+        static constexpr bool kHopOutAttackAlertFixEnabledDefault = false;
         static bool g_HopOutAttackAlertFixEnabled = kHopOutAttackAlertFixEnabledDefault;
         static void* g_HopOutAlertLastUserObject = nullptr;
         static bool g_HopOutAlertPrimed = false;
@@ -2857,16 +2876,33 @@ namespace BZROpenShim
         }
 
 
+        // Master switch for the whole multiplayer vehicle-flag feature: the
+        // flag-selection UI, the payload upload and the Ogre renderer hook.
+        // [Display] MultiplayerFlags in openshim.ini, defaulting ON; the legacy
+        // disable variables remain an override for installs with no INI key.
+        // Latched, because the renderer hook is a vtable write that is only
+        // attempted while the feature is on.
         static bool ShouldEnableMultiplayerFlagUi()
         {
             static int s_cached = -1;
             if (s_cached < 0)
             {
-                s_cached =
-                    (EnvFlagEnabled("OPENSHIM_DISABLE_MP_FLAG_UI") ||
-                     EnvFlagEnabled("OPENSHIM_DISABLE_MULTIPLAYER_FLAG_UI") ||
-                     EnvFlagEnabled("OPENSHIM_DISABLE_MP_FLAGS") ||
-                     EnvFlagEnabled("BZR_DISABLE_MP_FLAG_UI")) ? 0 : 1;
+                bool enabled = true;
+                bool iniValue = false;
+                if (TryGetUserConfigBool("Display", "MultiplayerFlags", iniValue))
+                {
+                    enabled = iniValue;
+                }
+                else if (EnvFlagEnabled("OPENSHIM_DISABLE_MP_FLAG_UI") ||
+                         EnvFlagEnabled("OPENSHIM_DISABLE_MULTIPLAYER_FLAG_UI") ||
+                         EnvFlagEnabled("OPENSHIM_DISABLE_MP_FLAGS") ||
+                         EnvFlagEnabled("BZR_DISABLE_MP_FLAG_UI"))
+                {
+                    enabled = false;
+                }
+                s_cached = enabled ? 1 : 0;
+                Log(L"[FLAG] multiplayer vehicle flags: %hs\n",
+                    enabled ? "enabled" : "disabled");
             }
             return s_cached != 0;
         }
@@ -11461,14 +11497,79 @@ namespace BZROpenShim
         // in a network game restores parity with stock Redux.
         static bool g_SatelliteVisibilityFixActive = false;
 
+        // Re-readable config for the two engine toggles the settings page can
+        // change without a restart. Both are plain flag reads -- no patch site,
+        // no hook install -- so re-running them mid-session is safe, and both
+        // are called once from ResolveBzrHooks and again from
+        // ApplyShimSettingLive's LiveEngineToggle group.
+        static void InitializeHopOutAttackAlertConfig()
+        {
+            bool hopOutAlertConfig = false;
+            // [General], not [SinglePlayer]: this is audio-only and has no
+            // simulation effect, so it does not need that section's
+            // hard-disable-in-network-games contract.
+            if (TryGetUserConfigBool("General", "SuppressHopOutAttackAlert",
+                                     hopOutAlertConfig))
+            {
+                g_HopOutAttackAlertFixEnabled = hopOutAlertConfig;
+            }
+            else if (EnvFlagEnabled("OPENSHIM_DISABLE_HOP_OUT_ATTACK_ALERT_FIX") ||
+                     EnvFlagEnabled("BZR_DISABLE_HOP_OUT_ATTACK_ALERT_FIX"))
+            {
+                g_HopOutAttackAlertFixEnabled = false;
+            }
+            else
+            {
+                g_HopOutAttackAlertFixEnabled = kHopOutAttackAlertFixEnabledDefault;
+            }
+            g_HopOutAlertLastUserObject = nullptr;
+            g_HopOutAlertPrimed = false;
+        }
+
         static void RefreshSatelliteVisibilityFixState()
         {
             g_SatelliteVisibilityFixActive =
                 g_SatelliteVisibilityFixEnabled && IsSinglePlayerSession();
         }
+
         static bool g_SatVisWasActive = false;
         static uint32_t g_SatVisSweepTick = 0;
         static std::unordered_map<void*, SatelliteEntityVisibility> g_SatelliteVisibilityState;
+
+        // Satellite visibility fix. Gates Ogre entity visibility through
+        // illumination > 0 when satellite overview (view 3) is active, matching
+        // BZ 1.5's Submit_Overview_Entities gate that Redux removed.
+        // resetTracking clears what the fix believes it has hidden. That is
+        // right at startup and wrong on a live re-read: SyncSatelliteVisibility
+        // deliberately keeps running for an inactive feature so that the exit
+        // transition puts every entity it hid back, and it recognises that work
+        // by the tracking map and the wasActive flag. Dropping them mid-session
+        // would strand any entity that is hidden right now.
+        static void InitializeSatelliteVisibilityFixConfig(bool resetTracking)
+        {
+            bool satVisFixConfig = false;
+            if (TryGetUserConfigBool("SinglePlayer", "SatelliteVisibilityFix",
+                                     satVisFixConfig))
+            {
+                g_SatelliteVisibilityFixEnabled = satVisFixConfig;
+            }
+            else if (EnvFlagEnabled("OPENSHIM_DISABLE_SATELLITE_VISIBILITY_FIX") ||
+                     EnvFlagEnabled("BZR_DISABLE_SATELLITE_VISIBILITY_FIX"))
+            {
+                g_SatelliteVisibilityFixEnabled = false;
+            }
+            else
+            {
+                g_SatelliteVisibilityFixEnabled = true;
+            }
+            RefreshSatelliteVisibilityFixState();
+            if (resetTracking)
+            {
+                g_SatVisWasActive = false;
+                g_SatVisSweepTick = 0;
+                g_SatelliteVisibilityState.clear();
+            }
+        }
 
         // Validation-only pre-hide hook. Battlezone Lua cannot reach Ogre, so
         // lcbench has no way to construct the "entity was already hidden
@@ -13870,8 +13971,39 @@ namespace BZROpenShim
             RefreshAttackRevealState();
         }
 
+        // --- [Fixes] multiplayer gate reconcilers ------------------------------
+        // Four of the five are plain flag tests inside an already-installed
+        // hook, so reconciling them is just the net-id AND. The APC fix rewrites
+        // two branch displacements and needs its bytes put back, so it gets its
+        // own reconciler next to the writer (declared below, defined with the
+        // installer).
+        static void RefreshSplinterUndeadFixState()
+        {
+            g_SplinterUndeadFixActive =
+                g_SplinterUndeadFixEnabled && IsSinglePlayerSession();
+        }
+
+        static void RefreshTugCargoPostLoadFixState()
+        {
+            g_TugCargoPostLoadFixActive =
+                g_TugCargoPostLoadFixEnabled && IsSinglePlayerSession();
+        }
+
+        static void RefreshHowitzerUndeployedRetaliationFixState()
+        {
+            g_HowitzerUndeployedRetaliationFixActive =
+                g_HowitzerUndeployedRetaliationFixEnabled && IsSinglePlayerSession();
+        }
+
+        static void RefreshConstructorRemoteBuildFixState()
+        {
+            g_ConstructorRemoteBuildFixActive =
+                g_ConstructorRemoteBuildFixEnabled && IsSinglePlayerSession();
+        }
+
         static const char* BoolText(bool value);
         static void RefreshJumpSnipeCrouchPatchState();
+        static void RefreshApcAlliedTargetDeployFixState();
 
         static void InitializeGlobalImprovementConfig()
         {
@@ -18148,6 +18280,23 @@ namespace BZROpenShim
             // a shim player's satellite view equivalent to a stock peer's.
             { "SatelliteVisibilityFix", FeatureTier::SinglePlayer,
               nullptr, &RefreshSatelliteVisibilityFixState },
+            // [Fixes] engine-defect corrections. They are bug fixes rather than
+            // enhancements and stay on for normal single-player play, but every
+            // one of them changes simulation behaviour and none is negotiated
+            // with peers, so they stand down for the duration of a network game
+            // and a mixed OpenShim/stock lobby stays behaviourally identical.
+            // There is no baseline to revert: the openshim.ini answer is read
+            // once at startup and never scripted, so the gate is all they need.
+            { "ApcAlliedTargetDeploy", FeatureTier::SinglePlayer,
+              nullptr, &RefreshApcAlliedTargetDeployFixState },
+            { "SplinterUndead", FeatureTier::SinglePlayer,
+              nullptr, &RefreshSplinterUndeadFixState },
+            { "HowitzerUndeployedRetaliation", FeatureTier::SinglePlayer,
+              nullptr, &RefreshHowitzerUndeployedRetaliationFixState },
+            { "TugCargoPostLoad", FeatureTier::SinglePlayer,
+              nullptr, &RefreshTugCargoPostLoadFixState },
+            { "ConstructorRemoteBuild", FeatureTier::SinglePlayer,
+              nullptr, &RefreshConstructorRemoteBuildFixState },
         };
 
         // Restore every registered feature to its resting state (mission end).
@@ -19892,7 +20041,7 @@ namespace BZROpenShim
 				*outCraft = nullptr;
 			if (outDamageOrdnance)
 				*outDamageOrdnance = nullptr;
-			if (!g_HowitzerUndeployedRetaliationFixEnabled || !processPtr ||
+			if (!g_HowitzerUndeployedRetaliationFixActive || !processPtr ||
 				!outCraft || !outDamageOrdnance)
 				return false;
 
@@ -21348,7 +21497,7 @@ namespace BZROpenShim
             }
 
             bool routeToBase = false;
-            if (g_SplinterUndeadFixEnabled && g_BzrFn_BuildingSimulate)
+            if (g_SplinterUndeadFixActive && g_BzrFn_BuildingSimulate)
             {
                 __try
                 {
@@ -21448,7 +21597,7 @@ namespace BZROpenShim
 				? g_BzrFn_TugPostLoadOriginal(thisPtr)
 				: false;
 
-			if (!loaded || !g_TugCargoPostLoadFixEnabled || !thisPtr)
+			if (!loaded || !g_TugCargoPostLoadFixActive || !thisPtr)
 				return loaded;
 
 			bool armedDeploy = false;
@@ -21530,6 +21679,53 @@ namespace BZROpenShim
 			}
 		}
 
+		// Writes both APC relation branches together. A half-applied pair leaves
+		// one relation test rewritten and the other stock, which is neither the
+		// fixed behaviour nor the stock one, so both writes are reported as one.
+		static bool WriteApcAlliedTargetDeployBranches(bool patched)
+		{
+			const bool firstOk = WritePatchBytes(
+				kGogApcTargetActualTeamRejectBranchAddr,
+				patched ? kGogApcTargetActualTeamRejectPatched
+				        : kGogApcTargetActualTeamRejectOriginal,
+				sizeof(kGogApcTargetActualTeamRejectPatched));
+			const bool secondOk = WritePatchBytes(
+				kGogApcTargetPerceivedTeamRejectBranchAddr,
+				patched ? kGogApcTargetPerceivedTeamRejectPatched
+				        : kGogApcTargetPerceivedTeamRejectOriginal,
+				sizeof(kGogApcTargetPerceivedTeamRejectPatched));
+
+			if (firstOk && secondOk)
+				return true;
+
+			Log(L"[APCDEPLOY] Failed writing allied-target deployment branches patched=%hs first=%hs second=%hs\n",
+				BoolText(patched), BoolText(firstOk), BoolText(secondOk));
+			return false;
+		}
+
+		// Multiplayer gate. Unlike the other four [Fixes] entries this one is two
+		// rewritten branch displacements rather than a flag inside a hook, so the
+		// stock bytes have to go back for the duration of a network game. Only
+		// touches .text when the wanted state actually differs.
+		static void RefreshApcAlliedTargetDeployFixState()
+		{
+			if (!g_ApcAlliedTargetDeployFixInstalled)
+				return;
+
+			const bool wantActive =
+				g_ApcAlliedTargetDeployFixEnabled && IsSinglePlayerSession();
+			if (wantActive == g_ApcAlliedTargetDeployPatchActive)
+				return;
+
+			if (!WriteApcAlliedTargetDeployBranches(wantActive))
+				return;
+
+			g_ApcAlliedTargetDeployPatchActive = wantActive;
+			Log(L"[APCDEPLOY] Allied-target deployment branches %hs (%hs)\n",
+				wantActive ? "applied" : "reverted to stock",
+				wantActive ? "single-player" : "network game");
+		}
+
 		static void InstallApcAlliedTargetDeployFixIfPossible()
 		{
 			if (!g_ApcAlliedTargetDeployFixEnabled || g_ApcAlliedTargetDeployFixInstalled)
@@ -21560,24 +21756,16 @@ namespace BZROpenShim
 				return;
 			}
 
-			const bool firstOk = firstPatched || WritePatchBytes(
-				kGogApcTargetActualTeamRejectBranchAddr,
-				kGogApcTargetActualTeamRejectPatched,
-				sizeof(kGogApcTargetActualTeamRejectPatched));
-			const bool secondOk = secondPatched || WritePatchBytes(
-				kGogApcTargetPerceivedTeamRejectBranchAddr,
-				kGogApcTargetPerceivedTeamRejectPatched,
-				sizeof(kGogApcTargetPerceivedTeamRejectPatched));
-
-			g_ApcAlliedTargetDeployFixInstalled = firstOk && secondOk;
-			if (g_ApcAlliedTargetDeployFixInstalled)
+			// Both guards passed, so the site is ours to drive. Seed the active
+			// flag from what the bytes already say before handing the write to the
+			// gate: a re-resolve with the patch already in place must not read as
+			// "not applied yet" and then skip the revert a network game needs.
+			g_ApcAlliedTargetDeployPatchActive = firstPatched && secondPatched;
+			g_ApcAlliedTargetDeployFixInstalled = true;
+			RefreshApcAlliedTargetDeployFixState();
+			if (g_ApcAlliedTargetDeployPatchActive)
 			{
-				Log(L"[APCDEPLOY] Allied targets now fall through to stock nearby-enemy deployment scan\n");
-			}
-			else
-			{
-				Log(L"[APCDEPLOY] Failed writing allied-target deployment branches first=%hs second=%hs\n",
-					BoolText(firstOk), BoolText(secondOk));
+				Log(L"[APCDEPLOY] Allied targets now fall through to stock nearby-enemy deployment scan (SP-only)\n");
 			}
 		}
 
@@ -21908,7 +22096,7 @@ namespace BZROpenShim
             if (outReason)
                 *outReason = "unknown";
 
-            if (!g_ConstructorRemoteBuildFixEnabled ||
+            if (!g_ConstructorRemoteBuildFixActive ||
                 !g_BzrFn_AIBuildConstructionEnd ||
                 !g_BzrFn_AIBuildReservedAreaRemove ||
                 !g_BzrFn_AISpentCreditRefund ||
@@ -21916,8 +22104,8 @@ namespace BZROpenShim
                 !unitPtr)
             {
                 if (outReason)
-                    *outReason = !g_ConstructorRemoteBuildFixEnabled
-                        ? "fix_disabled"
+                    *outReason = !g_ConstructorRemoteBuildFixActive
+                        ? (g_ConstructorRemoteBuildFixEnabled ? "network_game" : "fix_disabled")
                         : (!unitPtr ? "null_unit" : "helpers_missing");
                 return false;
             }
@@ -28969,6 +29157,11 @@ namespace BZROpenShim
         case ShimSettingApplyGroup::RenderProfile:
             RenderProfiles::ReloadRenderProfileConfig();
             break;
+        case ShimSettingApplyGroup::LiveEngineToggle:
+            InitializeHopOutAttackAlertConfig();
+            InitializeSatelliteVisibilityFixConfig(false);
+            SunFlash::ReloadConfig();
+            break;
         case ShimSettingApplyGroup::RestartRequired:
             break;
         }
@@ -29167,6 +29360,7 @@ namespace BZROpenShim
         g_HowitzerUndeployedRetaliationFixEnabled =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_HOWITZER_DEPLOY_FIX") ||
               EnvFlagEnabled("BZR_DISABLE_HOWITZER_DEPLOY_FIX"));
+        RefreshHowitzerUndeployedRetaliationFixState();
         g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
         g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
         g_AttackRevealEnabled = kAttackRevealEnabledDefault;
@@ -29174,7 +29368,9 @@ namespace BZROpenShim
         // -> default + MP-gated re-apply; Display prefs -> openshim.ini baseline).
         RevertRegisteredFeaturesToBaseline();
         g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
+        RefreshConstructorRemoteBuildFixState();
         g_SplinterUndeadFixEnabled = kSplinterUndeadFixEnabledDefault;
+        RefreshSplinterUndeadFixState();
         g_SplinterUndeadTraceBudget = kSplinterUndeadTraceBudgetDefault;
         g_TurretAimPitchMultiplier = 0.5f;
         g_TurretAimPitchMultiplierEnhanced = 0.95f;
@@ -29476,9 +29672,11 @@ namespace BZROpenShim
 		g_TugCargoPostLoadFixEnabled =
 			!(EnvFlagEnabled("OPENSHIM_DISABLE_TUG_CARGO_FIX") ||
 			  EnvFlagEnabled("BZR_DISABLE_TUG_CARGO_FIX"));
+		RefreshTugCargoPostLoadFixState();
 		g_ApcAlliedTargetDeployFixEnabled =
 			!(EnvFlagEnabled("OPENSHIM_DISABLE_APC_DEPLOY_FIX") ||
 			  EnvFlagEnabled("BZR_DISABLE_APC_DEPLOY_FIX"));
+		RefreshApcAlliedTargetDeployFixState();
 		g_QuakeReplayFadeEnabled =
 			!(EnvFlagEnabled("OPENSHIM_DISABLE_QUAKE_FADE") ||
 			  EnvFlagEnabled("BZR_DISABLE_QUAKE_FADE"));
@@ -29736,53 +29934,10 @@ namespace BZROpenShim
             g_DamageRevealTraceBudget = kDamageRevealTraceBudgetDefault;
         }
 
-        {
-            bool hopOutAlertConfig = false;
-            // [General], not [SinglePlayer]: this is audio-only and has no
-            // simulation effect, so it does not need that section's
-            // hard-disable-in-network-games contract.
-            if (TryGetUserConfigBool("General", "SuppressHopOutAttackAlert",
-                                     hopOutAlertConfig))
-            {
-                g_HopOutAttackAlertFixEnabled = hopOutAlertConfig;
-            }
-            else if (EnvFlagEnabled("OPENSHIM_DISABLE_HOP_OUT_ATTACK_ALERT_FIX") ||
-                     EnvFlagEnabled("BZR_DISABLE_HOP_OUT_ATTACK_ALERT_FIX"))
-            {
-                g_HopOutAttackAlertFixEnabled = false;
-            }
-            else
-            {
-                g_HopOutAttackAlertFixEnabled = kHopOutAttackAlertFixEnabledDefault;
-            }
-            g_HopOutAlertLastUserObject = nullptr;
-            g_HopOutAlertPrimed = false;
-        }
+        InitializeHopOutAttackAlertConfig();
 
-        // Satellite visibility fix. Gates Ogre entity visibility through
-        // illumination > 0 when satellite overview (view 3) is active, matching
-        // BZ 1.5's Submit_Overview_Entities gate that Redux removed.
+        InitializeSatelliteVisibilityFixConfig(true);
         {
-            bool satVisFixConfig = false;
-            if (TryGetUserConfigBool("SinglePlayer", "SatelliteVisibilityFix",
-                                     satVisFixConfig))
-            {
-                g_SatelliteVisibilityFixEnabled = satVisFixConfig;
-            }
-            else if (EnvFlagEnabled("OPENSHIM_DISABLE_SATELLITE_VISIBILITY_FIX") ||
-                     EnvFlagEnabled("BZR_DISABLE_SATELLITE_VISIBILITY_FIX"))
-            {
-                g_SatelliteVisibilityFixEnabled = false;
-            }
-            else
-            {
-                g_SatelliteVisibilityFixEnabled = true;
-            }
-            RefreshSatelliteVisibilityFixState();
-            g_SatVisWasActive = false;
-            g_SatVisSweepTick = 0;
-            g_SatelliteVisibilityState.clear();
-
             // Validation fixture (see g_SatVisTestPreHideEnabled). Environment
             // only -- deliberately absent from openshim.ini so it cannot be
             // switched on by a user config.
@@ -29858,6 +30013,7 @@ namespace BZROpenShim
         g_ConstructorRemoteBuildFixEnabled =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX") ||
               EnvFlagEnabled("BZR_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX"));
+        RefreshConstructorRemoteBuildFixState();
         long constructorCleanupTraceBudget = kConstructorRemoteBuildTraceBudgetDefault;
         if (TryGetEnvLong("OPENSHIM_TRACE_CONSTRUCTOR_REMOTE_BUILD_BUDGET", constructorCleanupTraceBudget) ||
             TryGetEnvLong("BZR_TRACE_CONSTRUCTOR_REMOTE_BUILD_BUDGET", constructorCleanupTraceBudget))
@@ -29869,6 +30025,7 @@ namespace BZROpenShim
         g_SplinterUndeadFixEnabled =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_SPLINTER_UNDEAD_FIX") ||
               EnvFlagEnabled("BZR_DISABLE_SPLINTER_UNDEAD_FIX"));
+        RefreshSplinterUndeadFixState();
         long splinterUndeadTraceBudget = kSplinterUndeadTraceBudgetDefault;
         if (TryGetEnvLong("OPENSHIM_TRACE_SPLINTER_UNDEAD_BUDGET", splinterUndeadTraceBudget) ||
             TryGetEnvLong("BZR_TRACE_SPLINTER_UNDEAD_BUDGET", splinterUndeadTraceBudget))
