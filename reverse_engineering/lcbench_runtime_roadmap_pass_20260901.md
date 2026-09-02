@@ -166,16 +166,16 @@ guidance, but no longer blocks the defensive guard. Remaining gates:
 
 | Evidence field | Finding |
 |---|---|
-| Status | **Reproduced and localized to AIP selection**; responsible routine not yet identified |
-| Reproduction | `run_lcroad_aip.ps1`; fifteen-arm matrix in `test_missions/lcbench_roadmap` |
+| Status | **Reproduced, localized and root-caused**; responsible routine identified and instrumented |
+| Reproduction | `run_lcroad_aip.ps1`; seventeen-arm matrix in `test_missions/lcbench_roadmap` |
 | Runtime evidence | Custom ODF never built by any AIP, including a file naming no stock unit at all; the same producer builds it on a direct `Build()` command |
-| Static/RE evidence | Shipped AIP examples and producer grammar checked; no responsible filter/scorer identified |
-| 1.5 comparison | Not yet reconstructed at the responsible stage |
-| Root cause | AIP construction program cannot resolve or select a custom ODF name; the ODF loader, producer build list, and construction path are all excluded |
-| Patch | None; the responsible routine still has to be found before anything is changed |
+| Static/RE evidence | `PREREQ_WhatIs` at `0x006A04B0`; `AIP_Load_Account` at `0x00693520` discards any node it returns 0 for. See `aip_construction_program_resolution_20260902.md` |
+| 1.5 comparison | Same code: 1.5 `PREREQ_WhatIs` at `0x00515466` matches instruction for instruction, so this is stock BZ1 behavior, not a Redux regression |
+| Root cause | Two stacked defects. (a) The AI's name universe is seeded only at mission load by `InitObjectClasses`, so a custom ODF no load-time build tree reaches resolves to id 0 and `AIP_Load_Account` discards the node. (b) `SetMaker` writes a single `makers[0]` slot, so a stock unit's only maker is the stock recycler and a team holding a custom producer can never build it |
+| Patch | None yet. Instrumentation only (`[Diagnostics] AipResolveTrace`) |
 | Qualification | Known-good control arm (`ccak`) required alongside any negative, since every failure mode here is a silent zero |
-| Remaining risk | Reported direction is contradicted (see below); the original report's setup may differ materially |
-| Roadmap recommendation | Keep active; instrument AIP account-to-ODF resolution specifically |
+| Remaining risk | Both defects are Dark Reign-derived stock BZ1 code; a `makers[]` fix changes stock AI behavior and must not ship ungated |
+| Roadmap recommendation | Keep active. Reported direction now **confirmed and reproduced** (`cpmc`); design the fix at `InitObjectClasses`/`AddObjectClass` and `SetMaker` |
 
 A controlled matrix now reproduces the defect and bounds it. `svfigh` is the
 stock unit and `mxfigh` a value-identical clone differing only in ODF identity,
@@ -200,13 +200,67 @@ Slush account. Stock entries crowding out custom ones is therefore excluded, as
 are priority order, build-slot position and producer identity.
 
 The unit is constructible and the producer will construct it; the AI simply
-never asks for it. Instrumentation should target AIP account-to-ODF resolution
-rather than the producer, the ODF loader, or the build list.
+never asks for it.
 
-**The reported direction is contradicted.** The roadmap records the AI building
-*only the custom* units; what reproduces is the AI building *never the custom*
-units. This should be re-confirmed against the original reporter's setup before
-any selection routine is patched.
+**Root cause, confirmed by native instrumentation on 2026-09-02.** OpenShim now
+wraps all three `PREREQ_WhatIs` call sites (`[Diagnostics] AipResolveTrace`, or
+`run_lcroad_aip.ps1 -AipResolveTrace`). `PREREQ_WhatIs` is the AI's only
+ODF-name-to-type lookup, and `AIP_Load_Account` discards any construction-program
+node it returns 0 for, logging an engine `tlog` message that the shipped build
+never surfaces. Re-running the matched pair:
+
+```
+alls  account 'svturr' -> id=21   account 'svfigh' -> id=22   -> 6 units built
+allc  account 'mxturr' -> id=0    account 'mxfigh' -> id=0    -> 0 units built
+```
+
+The probe's one-shot census of the whole prereq table is identical in both arms
+and holds exactly 53 names: the two stock races plus `player`. It does not vary
+with the mission's ODFs, the producer's build list, or the AIP loaded. The
+custom clones are absent from it even though the producer in that very arm
+offers them and `ODFPROBE` instantiates them successfully.
+
+So the AI's name universe is a fixed enumeration built by `PREREQ_Init` from
+`Units_Init`'s `vehicleClassList`/`buildingClassList`. A custom ODF name can
+never resolve, and every account node, force-matching entry and
+building-matching entry naming one is dropped at AIP load time. Scoring,
+ordering, eligibility, producer classification and list iteration are all
+exonerated. Full address map and method in
+`aip_construction_program_resolution_20260902.md`.
+
+**The reported direction is confirmed, once the fixture is configured the way
+the reporter's was.** The original report notes that the AIP "expects a recycler
+at mission load"; the fixture had been spawning its producer from Lua, which is
+after `InitObjectClasses` has already frozen the AI's name universe. Seeding a
+producer at load time (`-SeedBuilder`, a mission-named `[Builder]` ODF) makes
+the custom names resolve, and then:
+
+| Arm | Custom producer, AIP Offense account | Built |
+|---|---|---|
+| `cpc` | custom only | 4 custom |
+| `cps` | stock only | 0 |
+| `cpms` | mixed, stock first | 0 — the account stalls |
+| `cpmc` | mixed, custom first | **4 custom, 0 stock** |
+
+`cpmc` is the reported defect verbatim. Every name in all four arms resolves, so
+this second failure is downstream of resolution: `SetMaker` writes one
+`makers[0]` slot per unit type, the stock unit's is the stock recycler, and a
+team holding only the custom producer has nothing that can make it. That is also
+why the reporter's workaround — cloning the stock ODFs so they are "custom" —
+works: the clones are new classes registered under the custom producer.
+
+`mxturr` never resolving even when seeded is a fixture bug, not an engine one:
+`ProducerClass`'s parser at `0x005B03C0` reads `buildItem1`..`buildItem9` and
+nothing else, menu slot 10 being the back button, so the fixture's
+`buildItem10 = "mxturr"` was never parsed by anything.
+
+**The maker half is now fixed** — `[Fixes] AiMultiProducerMakers`, on by
+default. `FindObjectClass` keys the class list on the built class alone, so the
+second producer's pair never reaches `Units_Init` and appending inside
+`SetMaker` alone would be inert; the fix instead collects the rejected pairs at
+`AddObjectClass`'s duplicate test and appends them after stock `Units_Init` has
+run. `cps`/`cpms`/`cpmc` go from 0 stock units to 4. Detail, addresses and the
+A/B in `aip_construction_program_resolution_20260902.md`.
 
 Two harness facts were required to get any signal at all, and both produce
 silent zeros: `SetAIControl` must run at Lua chunk scope, and `Build()` issued
@@ -226,9 +280,28 @@ byte-for-byte custom clone unit:
 7. custom producer / mixed list with order reversed between repeats.
 
 Each arm must log AIP request identity, producer candidate, build eligibility
-and rejection reason, and final ODF selection. Repeat against 1.5 before
-assigning regression status. Until that trace exists, producer classification,
-ODF namespace resolution, and AIP list iteration remain competing hypotheses.
+and rejection reason, and final ODF selection. That gate is now satisfied at the
+only stage that turned out to matter: the `[AIPRES]` probe records the request
+identity and the rejection reason for every construction-program item, and the
+matched `allc`/`alls` pair settles the question before eligibility or selection
+is ever reached. The remaining arms are retained as regression coverage rather
+than as competing hypotheses.
+
+## 2b. AIP stops running after about an hour
+
+| Evidence field | Finding |
+|---|---|
+| Status | **Reported, not yet reproduced** |
+| Reproduction | None yet; needs a long-running arm well past the 110s the current matrix uses |
+| Runtime evidence | Reporter: the AIP stops after roughly an hour regardless of how much scrap the team has; calling `SetAIP` again restarts it |
+| Static/RE evidence | None yet. `AIBuild_TeamProcess` and the AIP scheduler ints are the obvious first look |
+| Root cause | Unknown |
+| Patch | None |
+| Roadmap recommendation | New item. A `SetAIP` re-call restoring it points at per-AIP scheduler state rather than team or economy state |
+
+Reported alongside the mixed-producer defect and unrelated to it. Worth a
+dedicated long-run arm rather than folding into the existing matrix, since an
+hour per repeat makes it a different kind of experiment.
 
 ## 3. Neutral unit attack/order asymmetry
 

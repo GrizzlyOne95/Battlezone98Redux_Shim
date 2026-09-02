@@ -89,6 +89,46 @@
       "expected_size": 4,
       "fallback": "0x004A3FD7",
       "require_unique": true
+    },
+    {
+      "name": "AIP Prereq Name Resolve Probe",
+      "pattern": "8D 55 AC 52 68 70 3E 89 00 E8 ?? ?? ?? ?? 83 C4 14 8D 45 AC 50 E8 ?? ?? ?? ?? 83 C4 04 0F B7 C8",
+      "offset": 22,
+      "expected_size": 4,
+      "fallback": "0x00693873",
+      "require_unique": true
+    },
+    {
+      "name": "AIP Prereq Name Resolve Probe Force Matching",
+      "pattern": "8B 45 08 50 E8 ?? ?? ?? ?? 83 C4 0C D9 9D 98 FE FF FF 8D 4D AC 51 E8 ?? ?? ?? ?? 83 C4 04 66 89 85 A4 FE FF FF",
+      "offset": 23,
+      "expected_size": 4,
+      "fallback": "0x00693C5A",
+      "require_unique": true
+    },
+    {
+      "name": "AIP Prereq Name Resolve Probe Building Matching",
+      "pattern": "8B 4D 08 51 E8 ?? ?? ?? ?? 83 C4 0C 89 85 90 FE FF FF 8D 55 AC 52 E8 ?? ?? ?? ?? 83 C4 04 0F B7 C0",
+      "offset": 23,
+      "expected_size": 4,
+      "fallback": "0x00693EDA",
+      "require_unique": true
+    },
+    {
+      "name": "AI Multi Producer Maker Collect",
+      "pattern": "55 8B EC 83 EC 20 8B 45 0C 50 8B 4D 08 51 E8 ?? ?? ?? ?? 83 C4 08 0F",
+      "offset": 15,
+      "expected_size": 4,
+      "fallback": "0x006A220F",
+      "require_unique": true
+    },
+    {
+      "name": "AI Multi Producer Maker Apply",
+      "pattern": "E8 97 E7 FE FF E8 52 FF FF FF E8 AD 25 00 00 E8 ?? ?? ?? ?? 5D C3",
+      "offset": 16,
+      "expected_size": 4,
+      "fallback": "0x006A1AE4",
+      "require_unique": true
     }
   ],
   "resolves": [
@@ -111,6 +151,76 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "Team::EnemyP(int targetTeam) on exact GOG Redux 2.2.301. The complete thiscall body rejects targetTeam<=0, otherwise tests 1<<targetTeam against this+0x17C and returns with ret 4. GameObject::EnemyP at 0x004DB600 calls it, and the independently reconstructed ControlPanel::Render target-list call at 0x004A3FD6 supplies each candidate object's virtual GetTeamNum result before inserting at most ten attack targets."
+    },
+    {
+      "name": "PREREQ_WhatIs",
+      "pattern": "55 8B EC 83 EC 0C C7 45 FC 01 00 00 00 EB 09 8B 45 FC 83 C0 01 89 45 FC 8B 4D FC 3B 0D ?? ?? ?? ?? 0F 8D 80 00 00 00 69 55 FC 9C 00 00 00 A1 ?? ?? ?? ?? 8A 0C 10 88 4D F8 80 7D F8 00 74 08 80 7D F8 01 74 2A EB 4F",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x006A04B0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "PREREQ_WhatIs(const char* name) on exact GOG Redux 2.2.301, the AI's only ODF-name-to-prereq-id lookup. The body linearly walks PREREQ_table (0x9C-byte entries; kind byte at +0, type pointer at +4) up to PREREQ_maxassigned, strncmp'ing the argument against the type's name at +0x14 for a unit or +0x40 for a building, and returns 0 on no match. AIP_Load_Account at 0x00693520 calls it once per construction-program item at 0x00693872 and discards the node when it returns 0, logging 'UNKOWN UNIT OR BUILDING TYPE' (string 0x00893EB4) - the one xref that independently identifies the call site. Matches 1.5's PREREQ_WhatIs at 0x00515466 instruction for instruction."
+    },
+    {
+      "name": "AI FindObjectClass",
+      "pattern": "55 8B EC 83 EC 1C 8B 45 08 50 E8 ?? ?? ?? ?? 83 C4 04 0F B6 C8 85 C9 74 09 C7 45 F4 D0 AF 60 02 EB 07 C7 45 F4 90 AF 60 02",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x006A2150",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "FindObjectClass(objClass, buildClass) on exact GOG Redux 2.2.301. Selects buildingClassList 0x0260AFD0 or vehicleClassList 0x0260AF90 by IsBuilding, then walks it comparing ONLY the built class, filling in the entry's build class when it is still null. AddObjectClass at 0x006A2200 calls it once at its own prologue as the duplicate guard, which is the sole call site."
+    },
+    {
+      "name": "AI Units_Init",
+      "pattern": "55 8B EC 83 EC 40 C7 45 F4 90 AF 60 02 C7 45 F0 D0 AF 60 02 8B 4D F4 E8 ?? ?? ?? ?? A3 BC 0A C0 02",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x006A3E20",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Units_Init on exact GOG Redux 2.2.301. Seeds both class-list pointers, stores vehicleClassList's size into NRUNITTYPES 0x02C00ABC, assigns each unittypeid, then iterates both lists calling GetPrereq 0x006A3D50 and SetMaker 0x006A3DB0 for every entry with a non-null build class. Called last from 0x006A1AC0, before PREREQ_Init 0x0069F030 runs from 0x006A1AF0."
+    },
+    {
+      "name": "AI IsBuilding",
+      "pattern": "55 8B EC 51 8B 45 08 83 78 1C 02 75 21 8B 4D 08 83 B9 3C 01 00 00 00 7C 09 C7 45 FC 01 00 00 00 EB 07 C7 45 FC 00 00 00 00 8A 45 FC EB 1F",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x006A0810",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "IsBuilding(GameObjectClass*) on exact GOG Redux 2.2.301, cdecl with the class in the single stack argument. Returns true for class_id 2 with a non-negative +0x13C, for the 'TURR' signature, and otherwise defers to BuildingVehicle 0x006A07E0. Both GetPrereq and SetMaker open with this same call to choose between the unit and building type structs."
+    },
+    {
+      "name": "AI Class2UnitType",
+      "pattern": "55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00 50 83 EC 10 A1 ?? ?? ?? ?? 33 C5 50 8D 45 F4 64 A3 00 00 00 00 A1 C0 0E C0 02 50",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x006A0A20",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Class2UnitType(GameObjectClass*) on exact GOG Redux 2.2.301. Fetches the per-class UnitTypeAttachment through the attachment slot 0x02C00EC0, constructing it on first use, and returns base+4. SetMaker 0x006A3DB0 writes makers[0] at +0x66 of this return, and PREREQ_Init reads side at +0x58, prereqtype at +0x5A, prereqs at +0x5E and makers at +0x66 from the same pointer."
+    },
+    {
+      "name": "AI Class2BuildingType",
+      "pattern": "55 8B EC 83 EC 2C A1 C0 0E C0 02 50 8B 4D 08 83 C1 04 E8 ?? ?? ?? ?? 8B 08 89 4D F8 83 7D F8 00 74 0B 8B 55 F8 8B 42 04",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x006A12B0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Class2BuildingType(GameObjectClass*, 0) on exact GOG Redux 2.2.301, the building counterpart of Class2UnitType through the same attachment slot 0x02C00EC0. SetMaker writes makers[0] at +0x16 of its return, and PREREQ_Init's building branch reads prereqtype at +0x00, equivalence at +0x0C, prereqs at +0x0E and makers at +0x16 of the same 0x80-byte struct."
+    },
+    {
+      "name": "AI GetPrereq",
+      "pattern": "55 8B EC 83 EC 0C 8B 45 08 50 E8 ?? ?? ?? ?? 83 C4 04 0F B6 C8 85 C9 74 1C 6A 00 8B 55 08 52 E8 ?? ?? ?? ?? 83 C4 08 89 45 F8 8B 45 F8 0F B7 08 89 4D FC EB 19",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x006A3D50",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GetPrereq(GameObjectClass*) on exact GOG Redux 2.2.301. Branches on IsBuilding 0x006A0810 and returns the prereqtype ushort, at +0x00 of the building type or +0x5A of the unit type. Units_Init 0x006A3E20 pairs it with SetMaker 0x006A3DB0; distinguished from SetMaker, whose prologue differs only in its 0x08 frame and 74 27 branch, by the 0x0C frame and 74 1C here."
     },
     {
       "name": "EngineFlame::AddFlame",

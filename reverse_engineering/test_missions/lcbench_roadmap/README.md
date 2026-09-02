@@ -210,3 +210,62 @@ with the direct-`Build()` result, the defect is that **the AIP construction
 program cannot resolve or select a custom ODF name at all**. It is not about
 mixing origins, priority order, build-slot position, producer identity, or the
 presence of stock entries elsewhere in the file.
+
+### Root cause, confirmed by the `[AIPRES]` probe (2026-09-02)
+
+Run any arm with `-AipResolveTrace` (or set `[Diagnostics] AipResolveTrace=1`
+in `openshim.ini`). The shim wraps all three `PREREQ_WhatIs` call sites and
+logs, per AIP item name, the prereq id the AI resolved it to -- plus a one-shot
+census of every name the AI can resolve at all:
+
+```
+alls  [AIPRES] account item='svturr' -> id=21
+      [AIPRES] account item='svfigh' -> id=22
+      [AIPRES] building_matching item='svrecy' -> id=45
+allc  [AIPRES] account item='mxturr' -> id=0  MISS (entry discarded)
+      [AIPRES] account item='mxfigh' -> id=0  MISS (entry discarded)
+      [AIPRES] building_matching item='mxrecy' -> id=0  MISS (entry discarded)
+```
+
+The census is identical in both arms: 53 names, the two stock races plus
+`player`, unaffected by the mission's ODFs or the producer's build list.
+`AIP_Load_Account` drops any node whose name resolves to 0, so the custom units
+never enter the account. Addresses, method and the full census are in
+`../../aip_construction_program_resolution_20260902.md`.
+
+### The fixture was measuring the wrong configuration: `-SeedBuilder`
+
+`InitObjectClasses` seeds the AI's whole name universe at mission load, from the
+two stock recyclers, every vehicle already in `Craft::craftList`, `apcamr`, and
+two mission-named ODFs. A producer this Lua spawns in `Start()` arrives too
+late. That is what the original report means by "the AIP expects a recycler at
+mission load".
+
+`-SeedBuilder` deploys `lcbench.odf`, a mission-named `[Builder]` list naming
+`mxrecy`, which roots the custom producer's build tree at load without touching
+the BZN. With it on, the census grows 54 -> 56 and `mxfigh` resolves to id 35.
+
+Two further results follow, both with every name resolving:
+
+| Arm | Custom producer, AIP Offense account | Built |
+|---|---|---|
+| `cpc` | custom only | 4 custom |
+| `cps` | stock only | 0 |
+| `cpms` | mixed, stock first | 0 -- the account stalls |
+| `cpmc` | mixed, custom first | **4 custom, 0 stock** |
+
+`cpmc` reproduces the reported bug verbatim, and `[Fixes] AiMultiProducerMakers`
+now fixes it (0 stock units -> 4). `mxturr` still misses even seeded,
+because ProducerClass only ever parses buildItem1..9 -- a fixture bug, not an
+engine one.
+
+**Always run seeded and unseeded as a pair.** An unseeded arm is measuring
+enumeration; a seeded one is measuring makers. They fail for different reasons
+and both look like the same silent zero.
+
+**Deployment gotcha.** The shim reads its patch table from the *game's*
+`scripts\patches.json`, not the repo's. A stale deployed copy drops every patch
+the working tree added and says so only in one `[STALE-CONFIG]` line -- the
+first run of this probe produced a clean, entirely meaningless zero for exactly
+that reason. The runner now hashes both copies and warns; `manifest.json`
+records `deployedPatchesJsonMatchesRepo`.

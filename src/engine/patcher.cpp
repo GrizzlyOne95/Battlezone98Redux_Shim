@@ -12,6 +12,7 @@
 #include "shim_log.h"
 #include "sun_flash.h"
 #include "openshim_sdk_v2.h"
+#include "cli_multiparam_parser.h"
 #include "redux_compatibility.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -763,6 +764,62 @@ namespace BZROpenShim
                 target = static_cast<uint32_t>(
                     reinterpret_cast<uintptr_t>(ControlPanelEnemyPAttackOrderHook));
             }
+            else if (p.name.rfind("AIP Prereq Name Resolve Probe", 0) == 0) {
+                void* original = isSteam
+                    ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
+                    : HookEngine::ResolveRelCallTarget(p.address - 1);
+                const uint32_t expected =
+                    HookEngine::ResolveNamedAddress("PREREQ_WhatIs");
+                if (!original || expected == 0 ||
+                    reinterpret_cast<uintptr_t>(original) != expected) {
+                    Log(L"[AIPRES] call identity failed site=0x%08X original=%p expected=0x%08X; leaving stock call\n",
+                        p.address - 1, original, expected);
+                    continue;
+                }
+                SetAipPrereqWhatIsOriginal(original);
+                // Three call sites, one shared original: the account loader
+                // (construction program items) and the two matching tables.
+                if (p.name.find("Force Matching") != std::string::npos)
+                    target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(AipPrereqWhatIsProbeForceMatching));
+                else if (p.name.find("Building Matching") != std::string::npos)
+                    target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(AipPrereqWhatIsProbeBuildingMatching));
+                else
+                    target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(AipPrereqWhatIsProbe));
+            }
+            else if (p.name.rfind("AI Multi Producer Maker", 0) == 0) {
+                // Both sites need the same four helpers, so resolve them once
+                // and stand the whole feature down unless every one of them,
+                // plus this site's own callee, verifies.
+                const bool collect = p.name.find("Collect") != std::string::npos;
+                void* original = isSteam
+                    ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
+                    : HookEngine::ResolveRelCallTarget(p.address - 1);
+                const uint32_t expected = HookEngine::ResolveNamedAddress(
+                    collect ? "AI FindObjectClass" : "AI Units_Init");
+                const uint32_t isBuilding = HookEngine::ResolveNamedAddress("AI IsBuilding");
+                const uint32_t class2Unit = HookEngine::ResolveNamedAddress("AI Class2UnitType");
+                const uint32_t class2Building = HookEngine::ResolveNamedAddress("AI Class2BuildingType");
+                const uint32_t getPrereq = HookEngine::ResolveNamedAddress("AI GetPrereq");
+                if (!original || expected == 0 ||
+                    reinterpret_cast<uintptr_t>(original) != expected ||
+                    isBuilding == 0 || class2Unit == 0 || class2Building == 0 || getPrereq == 0) {
+                    Log(L"[AIMAKER] identity failed site=0x%08X original=%p expected=0x%08X helpers=%08X/%08X/%08X/%08X; leaving stock registration\n",
+                        p.address - 1, original, expected,
+                        isBuilding, class2Unit, class2Building, getPrereq);
+                    continue;
+                }
+                SetAiMakerHelperOriginals(reinterpret_cast<void*>(isBuilding),
+                                          reinterpret_cast<void*>(class2Unit),
+                                          reinterpret_cast<void*>(class2Building),
+                                          reinterpret_cast<void*>(getPrereq));
+                if (collect) {
+                    SetAiFindObjectClassOriginal(original);
+                    target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(AiFindObjectClassCollectHook));
+                } else {
+                    SetAiUnitsInitOriginal(original);
+                    target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(AiUnitsInitMultiMakerHook));
+                }
+            }
             else if (p.name == "Sun Screen Flash Contribution Hook") {
                 // Verify the instruction, not just the operand: the byte in
                 // front has to be a CALL rel32 and it has to resolve to
@@ -873,6 +930,11 @@ namespace BZROpenShim
         // initialized on any build.
         SetCompatibleVersion(true);
         std::vector<uint8_t> sig; if (ReadExeSignature(sig)) WaitForSignature(sig);
+        // .text is decrypted by now, so the CLI delimiter repair applied at
+        // attach can finally have its .text corroboration settled, and a
+        // SteamStub restore over the .data write would be reported rather than
+        // failing silently.
+        BZROpenShim::VerifyCliMultiParameterOptionFix();
         const ReduxCompatibilityGate compatibilityGate = PrepareReduxCompatibilityGate(isSteam);
         StartSoundChannelOverride(isSteam);
         g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForDistribution(patches, distribution); FilterPatchesForRuntime(patches, distribution); ScanForPatchAddresses(patches, isSteam);
