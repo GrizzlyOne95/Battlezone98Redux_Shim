@@ -210,3 +210,32 @@ with the direct-`Build()` result, the defect is that **the AIP construction
 program cannot resolve or select a custom ODF name at all**. It is not about
 mixing origins, priority order, build-slot position, producer identity, or the
 presence of stock entries elsewhere in the file.
+
+### Root cause, confirmed by the `[AIPRES]` probe (2026-09-02)
+
+Run any arm with `-AipResolveTrace` (or set `[Diagnostics] AipResolveTrace=1`
+in `openshim.ini`). The shim wraps all three `PREREQ_WhatIs` call sites and
+logs, per AIP item name, the prereq id the AI resolved it to -- plus a one-shot
+census of every name the AI can resolve at all:
+
+```
+alls  [AIPRES] account item='svturr' -> id=21
+      [AIPRES] account item='svfigh' -> id=22
+      [AIPRES] building_matching item='svrecy' -> id=45
+allc  [AIPRES] account item='mxturr' -> id=0  MISS (entry discarded)
+      [AIPRES] account item='mxfigh' -> id=0  MISS (entry discarded)
+      [AIPRES] building_matching item='mxrecy' -> id=0  MISS (entry discarded)
+```
+
+The census is identical in both arms: 53 names, the two stock races plus
+`player`, unaffected by the mission's ODFs or the producer's build list.
+`AIP_Load_Account` drops any node whose name resolves to 0, so the custom units
+never enter the account. Addresses, method and the full census are in
+`../../aip_construction_program_resolution_20260902.md`.
+
+**Deployment gotcha.** The shim reads its patch table from the *game's*
+`scripts\patches.json`, not the repo's. A stale deployed copy drops every patch
+the working tree added and says so only in one `[STALE-CONFIG]` line -- the
+first run of this probe produced a clean, entirely meaningless zero for exactly
+that reason. The runner now hashes both copies and warns; `manifest.json`
+records `deployedPatchesJsonMatchesRepo`.

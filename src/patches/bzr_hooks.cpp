@@ -417,6 +417,12 @@ namespace BZROpenShim
     static FnTeamEnemyPInt g_BzrFn_ControlPanelEnemyP = nullptr;
     static std::unordered_set<uintptr_t> g_PilotCarrierNullLoggedObjects = {};
     static volatile long g_NeutralAttackOrderLogBudget = 16;
+    // PREREQ_WhatIs(itemName) -> prereq id, 0 when the name is not in the
+    // strategic AI's enumerated unit/building universe.
+    using FnPrereqWhatIs = uint16_t(__cdecl*)(const char*);
+    static FnPrereqWhatIs g_BzrFn_PrereqWhatIs = nullptr;
+    static volatile long g_AipResolveTraceBudget = 512;
+    static volatile long g_AipPrereqCensusEmitted = 0;
     static FnShieldTowerSimulate g_BzrFn_ShieldTowerSimulateOriginal = nullptr;
     static FnShieldTowerSimulate g_BzrFn_BuildingSimulate = nullptr;
     static FnMagnetMineSimulate g_BzrFn_MagnetMineSimulateOriginal = nullptr;
@@ -2367,6 +2373,11 @@ namespace BZROpenShim
         static constexpr bool kJumpSnipeCrouchEnabledDefault = true;
         static constexpr bool kAllowNeutralAttackOrdersDefault = false;
         static bool g_AllowNeutralAttackOrders = kAllowNeutralAttackOrdersDefault;
+        // Pure instrumentation for the AIP construction program. Off by default
+        // because it prints one line per AIP item name plus a one-shot dump of
+        // the whole prereq universe; nothing about the game changes either way.
+        static constexpr bool kAipResolveTraceDefault = false;
+        static bool g_AipResolveTraceEnabled = kAipResolveTraceDefault;
         static bool g_BomberAiRangeBaselineEnabled = kBomberAiRangeEnabledDefault;
         static bool g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
         // Configured value AND'd with the single-player gate, same contract as
@@ -9113,6 +9124,7 @@ namespace BZROpenShim
         static constexpr char kUserConfigDisplaySection[] = "Display";
         static constexpr char kUserConfigSinglePlayerSection[] = "SinglePlayer";
         static constexpr char kUserConfigGameplaySection[] = "Gameplay";
+        static constexpr char kUserConfigDiagnosticsSection[] = "Diagnostics";
 
 
 
@@ -13918,6 +13930,15 @@ namespace BZROpenShim
                     value))
             {
                 g_AllowNeutralAttackOrders = value;
+            }
+
+            g_AipResolveTraceEnabled = kAipResolveTraceDefault;
+            if (TryGetUserConfigBool(
+                    kUserConfigDiagnosticsSection,
+                    "AipResolveTrace",
+                    value))
+            {
+                g_AipResolveTraceEnabled = value;
             }
 
             g_TurretAimPitchBaselineEnabled = kTurretAimPitchEnabledDefault;
@@ -28404,6 +28425,167 @@ namespace BZROpenShim
         g_BzrFn_ControlPanelEnemyP = reinterpret_cast<FnTeamEnemyPInt>(target);
     }
 
+    void SetAipPrereqWhatIsOriginal(void* target)
+    {
+        g_BzrFn_PrereqWhatIs = reinterpret_cast<FnPrereqWhatIs>(target);
+    }
+
+    namespace
+    {
+        // PREREQ_WhatIs walks a flat table of 0x9C-byte entries. Each entry
+        // carries a kind byte at +0x00 and a pointer to the underlying
+        // unit/building type at +0x04; the type's ODF name sits at +0x14 for a
+        // unit and +0x40 for a building. Rather than hard-code the two globals
+        // that hold the table pointer and its length, read them back out of the
+        // resolved function body, so a build whose data layout moved simply
+        // fails the byte guard and skips the census.
+        constexpr size_t kPrereqEntryStride = 0x9C;
+        constexpr size_t kPrereqUnitNameOffset = 0x14;
+        constexpr size_t kPrereqBuildingNameOffset = 0x40;
+        constexpr int kPrereqCensusMaxEntries = 4096;
+
+        bool TryReadPrereqTableGlobals(const uint8_t* fn,
+                                       const int32_t*& outMaxAssigned,
+                                       const uint8_t* const*& outTable)
+        {
+            outMaxAssigned = nullptr;
+            outTable = nullptr;
+            if (!fn)
+                return false;
+
+            // cmp ecx, ds:[PREREQ_maxassigned]  ->  3B 0D <disp32> at +27
+            // mov eax, ds:[PREREQ_table]        ->  A1    <disp32> at +46
+            if (fn[27] != 0x3B || fn[28] != 0x0D || fn[46] != 0xA1)
+                return false;
+
+            uint32_t maxAssignedAddr = 0;
+            uint32_t tableAddr = 0;
+            memcpy(&maxAssignedAddr, fn + 29, sizeof(maxAssignedAddr));
+            memcpy(&tableAddr, fn + 47, sizeof(tableAddr));
+            if (!maxAssignedAddr || !tableAddr)
+                return false;
+
+            outMaxAssigned = reinterpret_cast<const int32_t*>(maxAssignedAddr);
+            outTable = reinterpret_cast<const uint8_t* const*>(tableAddr);
+            return true;
+        }
+
+        // Dumps every name the strategic AI can resolve. This is the whole
+        // point of the probe: an AIP item name that is absent here can never be
+        // selected, because AIP_Load_Account discards the node at load time.
+        void EmitPrereqUniverseCensus()
+        {
+            const int32_t* maxAssigned = nullptr;
+            const uint8_t* const* table = nullptr;
+            if (!TryReadPrereqTableGlobals(
+                    reinterpret_cast<const uint8_t*>(g_BzrFn_PrereqWhatIs),
+                    maxAssigned,
+                    table))
+            {
+                Log(L"[AIPRES] prereq table globals not recognised in this build; "
+                    L"census skipped\n");
+                return;
+            }
+
+            int count = 0;
+            const uint8_t* base = nullptr;
+            __try
+            {
+                count = *maxAssigned;
+                base = *table;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[AIPRES] prereq table unreadable; census skipped\n");
+                return;
+            }
+
+            if (!base || count <= 1 || count > kPrereqCensusMaxEntries)
+            {
+                Log(L"[AIPRES] prereq universe not populated (count=%d table=%p)\n",
+                    count, base);
+                return;
+            }
+
+            Log(L"[AIPRES] prereq universe: count=%d\n", count - 1);
+            for (int i = 1; i < count; ++i)
+            {
+                const uint8_t* entry = base + static_cast<size_t>(i) * kPrereqEntryStride;
+                unsigned kind = 0xFFu;
+                const char* name = nullptr;
+                __try
+                {
+                    kind = entry[0];
+                    const uint8_t* data = *reinterpret_cast<const uint8_t* const*>(entry + 4);
+                    if (data)
+                    {
+                        if (kind == 0u)
+                            name = reinterpret_cast<const char*>(data + kPrereqUnitNameOffset);
+                        else if (kind == 1u)
+                            name = reinterpret_cast<const char*>(data + kPrereqBuildingNameOffset);
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    name = nullptr;
+                }
+
+                Log(L"[AIPRES]   id=%d kind=%hs name='%hs'\n",
+                    i,
+                    kind == 0u ? "unit" : (kind == 1u ? "building" : "?"),
+                    name ? name : "<unreadable>");
+            }
+        }
+    }
+
+    namespace
+    {
+        // Pure pass-through: the stock return value is handed back untouched
+        // whether or not the trace is enabled, so no build decision moves.
+        // `site` names which AIP loader asked, because a miss is discarded
+        // differently in each (a construction-program node is dropped, a
+        // matching entry is simply never matched).
+        uint16_t AipPrereqWhatIsCore(const char* itemName, const wchar_t* site)
+        {
+            if (!g_BzrFn_PrereqWhatIs)
+                return 0;
+
+            const uint16_t resolved = g_BzrFn_PrereqWhatIs(itemName);
+            if (!g_AipResolveTraceEnabled)
+                return resolved;
+
+            if (InterlockedCompareExchange(&g_AipPrereqCensusEmitted, 1, 0) == 0)
+                EmitPrereqUniverseCensus();
+
+            if (InterlockedDecrement(&g_AipResolveTraceBudget) >= 0)
+            {
+                Log(L"[AIPRES] %s item='%hs' -> id=%u%s\n",
+                    site,
+                    itemName ? itemName : "<null>",
+                    static_cast<unsigned>(resolved),
+                    resolved == 0 ? L"  MISS (entry discarded)" : L"");
+            }
+            return resolved;
+        }
+    }
+
+    // AIP_Load_Account: one call per unit_construction_program item. A zero
+    // here means the node never reaches the account at all.
+    uint16_t __cdecl AipPrereqWhatIsProbe(const char* itemName)
+    {
+        return AipPrereqWhatIsCore(itemName, L"account");
+    }
+
+    uint16_t __cdecl AipPrereqWhatIsProbeForceMatching(const char* itemName)
+    {
+        return AipPrereqWhatIsCore(itemName, L"force_matching");
+    }
+
+    uint16_t __cdecl AipPrereqWhatIsProbeBuildingMatching(const char* itemName)
+    {
+        return AipPrereqWhatIsCore(itemName, L"building_matching");
+    }
+
     uint32_t __fastcall PersonCarrierGetSelectedGuard(void* carrier, void* person)
     {
         if (carrier && g_BzrFn_CarrierGetSelectedMask)
@@ -28777,6 +28959,8 @@ namespace BZROpenShim
         g_AttackRevealTraceBudget = kAttackRevealTraceBudgetDefault;
         g_PilotCarrierNullLoggedObjects.clear();
         g_NeutralAttackOrderLogBudget = 16;
+        g_AipResolveTraceBudget = 512;
+        g_AipPrereqCensusEmitted = 0;
         g_LastKnownQueuedMissionName[0] = '\0';
         g_HudSpriteRectTableBase = nullptr;
         g_HudSpriteRectTableDiscoveryAttempted = false;
@@ -30542,6 +30726,8 @@ namespace BZROpenShim
         g_AttackRevealTraceBudget = kAttackRevealTraceBudgetDefault;
         g_PilotCarrierNullLoggedObjects.clear();
         g_NeutralAttackOrderLogBudget = 16;
+        g_AipResolveTraceBudget = 512;
+        g_AipPrereqCensusEmitted = 0;
         g_AiUnitTuningOverridesByObject.clear();
         g_CombatKiteStateByObject.clear();
         g_ScrapPathFailuresByObject.clear();

@@ -36,6 +36,13 @@ namespace BZROpenShim
     uint32_t __fastcall PersonCarrierGetSelectedGuard(void* carrier, void* person);
     bool __fastcall ControlPanelEnemyPAttackOrderHook(
         void* team, void* edx, int targetTeam);
+    // AIP construction-program instrumentation. The probe is a pass-through
+    // around PREREQ_WhatIs, so installing it never changes what the AI builds;
+    // [Diagnostics] AipResolveTrace only decides whether it logs.
+    void SetAipPrereqWhatIsOriginal(void* target);
+    uint16_t __cdecl AipPrereqWhatIsProbe(const char* itemName);
+    uint16_t __cdecl AipPrereqWhatIsProbeForceMatching(const char* itemName);
+    uint16_t __cdecl AipPrereqWhatIsProbeBuildingMatching(const char* itemName);
     void FlushChunkFragmentEventsForShutdown();
 
     // Wire up the GOG-build player-handle lookup. Only call this once the exact
