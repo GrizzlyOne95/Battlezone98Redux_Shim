@@ -126,6 +126,17 @@ namespace BZROpenShim
     bool ClearAllAiUnitTuningFromBridge();
     bool SetTurretAimPitchEnabledFromBridge(bool enabled);
     bool SetAttackRevealEnabledFromBridge(bool enabled);
+
+    // Outcome of a Reset Career Stats request. Destructive and deliberate: the
+    // caller is expected to have confirmed with the user first.
+    enum class CareerStatsResetResult : uint32_t
+    {
+        Cleared = 0,       // stats file rewritten empty; a .bak was left behind
+        AlreadyEmpty = 1,  // nothing was recorded, so nothing changed
+        Failed = 2,        // the file could not be rewritten; old data survives
+    };
+
+    CareerStatsResetResult ResetCareerStatsFromBridge();
     bool GetRawMouseInputEnabledFromBridge();
     bool SetRawMouseInputEnabledFromBridge(bool enabled);
     bool SetJumpSnipeCrouchEnabledFromBridge(bool enabled);
