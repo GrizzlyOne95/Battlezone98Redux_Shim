@@ -9,7 +9,7 @@ Supported executables:
 - **GOG:** `BZR.exe`
 - **Steam:** `battlezone98redux.exe`
 
-<img width="1377" height="758" alt="Battlezone 98 Redux OpenShim" src="https://github.com/user-attachments/assets/b1f12ee2-5e57-46df-b467-1d5c69c6426e" />
+[<img width="1377" height="758" alt="Battlezone 98 Redux OpenShim" src="https://github.com/user-attachments/assets/b1f12ee2-5e57-46df-b467-1d5c69c6426e" />](https://images.steamusercontent.com/ugc/16933640577209196288/F91D1AEC284B96DA3C0DD6D1035F56C48903460C/?imw=5000&imh=5000&ima=fit&impolicy=Letterbox&imcolor=%23000000&letterbox=false)
 
 ## What is OpenShim?
 
