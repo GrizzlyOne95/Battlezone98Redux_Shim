@@ -75,7 +75,79 @@ namespace BZROpenShim
     };
     static PatcherConfig g_Config;
 
-    static const char kOpenShimVersionTag[] = "2.2.301 + BZR Open Shim";
+    // Main-menu version notice. The three "Version Notice"/"Main Menu"
+    // globals in patches.json point the game's version string pointer at
+    // this buffer, so whatever it holds is what the shell prints.
+    //
+    // It carries the shim's own build version so a player can read back
+    // which DLL is actually loaded. That matters because winmm.dll and
+    // scripts/patches.json are deployed by hand and can drift apart, and
+    // because a stale DLL left in the game directory is otherwise
+    // indistinguishable from a current one at runtime.
+    //
+    // The version is read from this module's own VERSIONINFO resource
+    // rather than a second hard-coded constant, so it cannot disagree with
+    // src/engine/version.rc -- which is the value the updater compares
+    // against the manifest (see ReadFileVersion in openshim_updater.cpp).
+    static const char kOpenShimVersionTagFallback[] = "2.2.301 + BZR Open Shim";
+    static char g_OpenShimVersionTag[96] = {};
+
+    // Returns "2.2.301 + BZR Open Shim <a.b.c.d>", or the plain fallback
+    // when the resource cannot be read. Never fails, never allocates after
+    // the first call; the buffer has process lifetime because the patched
+    // pointer outlives this function.
+    static const char* GetOpenShimVersionTag()
+    {
+        if (g_OpenShimVersionTag[0])
+            return g_OpenShimVersionTag;
+
+        // Default to the historical text so a failure here is invisible
+        // rather than blank.
+        strcpy_s(g_OpenShimVersionTag, kOpenShimVersionTagFallback);
+
+        HMODULE self = nullptr;
+        if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                    GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                reinterpret_cast<LPCSTR>(&g_OpenShimVersionTag),
+                                &self) ||
+            !self)
+        {
+            return g_OpenShimVersionTag;
+        }
+
+        char modulePath[MAX_PATH] = {};
+        if (GetModuleFileNameA(self, modulePath, MAX_PATH) == 0)
+            return g_OpenShimVersionTag;
+
+        DWORD ignored = 0;
+        const DWORD infoSize = GetFileVersionInfoSizeA(modulePath, &ignored);
+        if (infoSize == 0)
+            return g_OpenShimVersionTag;
+
+        std::vector<uint8_t> info(infoSize);
+        if (!GetFileVersionInfoA(modulePath, 0, infoSize, info.data()))
+            return g_OpenShimVersionTag;
+
+        VS_FIXEDFILEINFO* fixed = nullptr;
+        UINT fixedLen = 0;
+        if (!VerQueryValueA(info.data(), "\\",
+                            reinterpret_cast<LPVOID*>(&fixed), &fixedLen) ||
+            !fixed || fixedLen < sizeof(VS_FIXEDFILEINFO))
+        {
+            return g_OpenShimVersionTag;
+        }
+
+        char composed[sizeof(g_OpenShimVersionTag)] = {};
+        const int written = _snprintf_s(
+            composed, _TRUNCATE, "%s %u.%u.%u.%u",
+            kOpenShimVersionTagFallback,
+            HIWORD(fixed->dwFileVersionMS), LOWORD(fixed->dwFileVersionMS),
+            HIWORD(fixed->dwFileVersionLS), LOWORD(fixed->dwFileVersionLS));
+        if (written > 0)
+            strcpy_s(g_OpenShimVersionTag, composed);
+
+        return g_OpenShimVersionTag;
+    }
     static constexpr uint32_t kDefaultMaxSoundChannels = 256;
     static constexpr uint32_t kMaxSupportedSoundChannels = 256;
     static constexpr uint32_t kGASMasterMaxObjectsOffset = 0x10;
@@ -857,7 +929,7 @@ namespace BZROpenShim
     }
 
     static void FillVersionNoticePayloads(std::vector<HookEngine::PatchDef>& patches) {
-        const uint32_t tag = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(kOpenShimVersionTag));
+        const uint32_t tag = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(GetOpenShimVersionTag()));
         const uint32_t flameC = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(EngineFlameControlHook));
         const uint32_t flameS = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(EngineFlameSubmitHook));
         const uint32_t chunkE = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ChunkEffectSimulateHook));
