@@ -718,6 +718,14 @@ EnhancedLightSelectionTrace = 0
 ; Legacy env alias: OPENSHIM_TRACE_HITS
 TraceHookHits = 0
 
+; Identify the first-person pilot Entity by walking the Ogre scene graph every
+; 1.5 s, and log its AnimationState traffic. Capture tool for pilot animation
+; investigation; see reverse_engineering/PILOT_FP_ANIMATION_TRACE.md.
+; Accepted: boolean. Default: OFF. Development-only, noisy, and it polls the
+; scene graph on a worker thread -- leave it off for normal play.
+; Legacy env alias: OPENSHIM_TRACE_PILOT_FP_ANIMATIONS
+TracePilotFPAnimations = 0
+
 ; Enable artillery/weapon-mask tracing for RE/validation.
 ; Accepted: boolean. Default: OFF. Development-only.
 ; Legacy env aliases: OPENSHIM_TRACE_ARTILLERY_MASK,
