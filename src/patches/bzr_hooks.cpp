@@ -29147,6 +29147,26 @@ namespace BZROpenShim
         g_AiExtraMakerPairs.clear();
     }
 
+    // Production patch: Pilot hardpoint ODF ordering crash — null-carrier guard.
+    // What malformed state is possible: a pilot ODF that places weaponHard1/
+    // weaponName1 outside [GameObjectClass] (e.g. inside a late CraftClass
+    // section before PersonClass, after PersonClass, or reversed) is parsed
+    // but does NOT allocate the Person's Carrier object. GameObject::GameObject
+    // only allocates the carrier when weaponHard is non-empty in the
+    // GameObjectClass data; misplaced keys are ignored, leaving Person+0x1A0
+    // null. Stock 1.5 and Redux both then read it unconditionally.
+    // Why the guard is required: Person::Simulate at 0x0059D340 calls
+    // Carrier::GetSelected (0x00417F90, returns [this+0x30]) with that null
+    // carrier. The call was observed 3/3 in lcbench pilot-ordering
+    // (pcrft/paftr/prevs) as EIP 0x00417F9A reading [EAX+0x30] with EAX=0,
+    // caller return 0x0059D771. The process dies on its first simulation
+    // frame even though BuildObject succeeded.
+    // Why mask=0 is preferable: the selected mask is only used to classify
+    // the on-foot animation (which weapon is selected). A missing carrier is
+    // semantically "no weapon selected" — mask 0. Returning 0 and continuing
+    // Simulate preserves the real animation/state machine and avoids crashing
+    // on trivial authoring errors. This is safer than early-returning from
+    // Simulate or synthesising a carrier.
     uint32_t __fastcall PersonCarrierGetSelectedGuard(void* carrier, void* person)
     {
         if (carrier && g_BzrFn_CarrierGetSelectedMask)
@@ -29167,6 +29187,20 @@ namespace BZROpenShim
         return LcbenchSafetyPolicy::SelectedMaskForMissingCarrier();
     }
 
+    // Compatibility toggle: neutral-unit attack/order asymmetry.
+    // Stock 1.5 and Redux both exclude team 0 from the UI attack-target list.
+    // ControlPanel::Render enumerates candidates and keeps only those where
+    // Team::EnemyP(targetTeam) is true. Team::EnemyP(@0x005E1350) explicitly
+    // returns false for targetTeam <= 0, so neutral objects are never inserted
+    // into the at-most-10 attack list and a click never emits CMD_ATTACK. The
+    // underlying Attack() AI task itself DOES damage neutral (a2n and n2p both
+    // show ammo/health deltas via Lua). This hook preserves the stock result
+    // everywhere except the single patched ControlPanel call: when
+    // [Gameplay] AllowNeutralAttackOrders=1 it additionally allows team 0 as an
+    // explicit player-ordered target. It does not change Team::EnemyP globally,
+    // diplomacy, autonomous acquisition, or network serialization. Default 0
+    // keeps legacy/Redux compatibility; enabled gives symmetric
+    // player↔neutral orders where appropriate.
     bool __fastcall ControlPanelEnemyPAttackOrderHook(
         void* team, void* /*edx*/, int targetTeam)
     {
