@@ -827,6 +827,21 @@ ProfileOgreAnimation = 0
 ; Legacy env alias: OPENSHIM_TERRAIN_RENDER_PROBE
 TerrainRenderProbe = 0
 
+; Walker first-person cockpit jitter instrument. Answers one question:
+; walking the chain vehicle world node -> cockpit ("_c") node -> POV bone
+; -> camera, which link FIRST contains the discontinuity visible as cockpit
+; jitter. Samples frame-synchronously from inside SceneManager::_renderScene
+; so every link is read at the same point of the same frame.
+;
+; This is investigation tooling, not a fix, and it is not something a player
+; ever needs. With the key absent or 0 the module installs nothing at all:
+; no thread, no render hook, no Ogre resolves. Turning it on hooks the
+; render path and writes a [WALKID] record per frame, which is far too
+; chatty for normal play.
+;
+; Accepted: boolean. Default: OFF. Development-only.
+WalkerCockpitTrace = 0
+
 ; Number of distinct terrain clusters to capture.
 ; Accepted: integer; clamped to 1..16. Default: 1.
 TerrainRenderProbeMaxClusters = 1
