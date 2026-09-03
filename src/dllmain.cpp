@@ -23,6 +23,7 @@
 #include "ogre_animation_profiler.h"
 #include "native_cpu_sampler.h"
 #include "pilot_fp_animation_trace.h"
+#include "walker_cockpit_trace.h"
 #include "openshim_sdk_v2.h"
 #include "openshim_updater.h"
 #include "render_profile_runtime.h"
@@ -50,6 +51,7 @@ static unsigned __stdcall PatchThreadProc(void*)
     // observe Ogre/D3D11 module creation before the renderer creates devices,
     // swapchains, entities, or begins normal animation submission.
     BZROpenShim::InitializePilotFpAnimationTrace();
+    BZROpenShim::InitializeWalkerCockpitTrace();
     BZROpenShim::InitializeOgreAnimationProfiler();
     BZROpenShim::InitializeDx11ColorSpaceDiagnostic();
     BZROpenShim::InitializeDx11EnhancedFxaa();
@@ -225,6 +227,7 @@ namespace BZROpenShim
         BZROpenShim::ShutdownNativeCpuSampler();
         BZROpenShim::ShutdownOpenShimUpdater();
         BZROpenShim::ShutdownOpenShimSdkV2();
+        BZROpenShim::ShutdownWalkerCockpitTrace();
         BZROpenShim::ShutdownPilotFpAnimationTrace();
         BZROpenShim::ShutdownOgreAnimationProfiler();
         // Stop the mutating presentation experiment before the read-only DX11

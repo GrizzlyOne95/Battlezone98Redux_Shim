@@ -128,3 +128,6 @@ reverse_engineering/repo_corpora/bzr_gog_best_effort/pipeline_manifest.json
 .vscode/settings.json
 nul
 tmp/dx11-hardening-fxc/
+!reverse_engineering/analyze_walker_jitter.py
+!reverse_engineering/analyze_walker_cadence.py
+!reverse_engineering/analyze_walker_matrix.py
