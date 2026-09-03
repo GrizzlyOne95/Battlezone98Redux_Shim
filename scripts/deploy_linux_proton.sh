@@ -140,6 +140,11 @@ deploy_one_game() {
     fi
 
     echo "Deploying OpenShim to: $game_dir"
+    if [[ -f "$game_dir/winmm.dll" ]] && ! grep -a -q "OpenShim" "$game_dir/winmm.dll"; then
+        echo "error: refusing to overwrite non-OpenShim winmm.dll in $game_dir" >&2
+        echo "Remove or rename that proxy first if you intend to replace it." >&2
+        return 1
+    fi
     deploy_file "$DLL" "$game_dir/winmm.dll"
     deploy_file "$PATCHES" "$game_dir/scripts/patches.json"
     deploy_file "$OPENSHIM_INI" "$game_dir/openshim.ini"

@@ -4,6 +4,7 @@
 
 #include "render_profile_resources.h"
 
+#include <cstddef>
 #include <cstring>
 #include <fstream>
 
@@ -77,8 +78,14 @@ namespace BZROpenShim::RenderProfiles
         char actual[32] = {};
         const std::streamsize read =
             in.read(actual, sizeof(actual) - 1).gcount();
+        if (read <= 0)
+        {
+            outProblem = "resources.version mismatch";
+            return false;
+        }
 
-        if (read == 0 || strncmp(actual, kEnhancedResourcesVersion, read) != 0)
+        const size_t readSize = static_cast<size_t>(read);
+        if (strncmp(actual, kEnhancedResourcesVersion, readSize) != 0)
         {
             outProblem = "resources.version mismatch";
             return false;

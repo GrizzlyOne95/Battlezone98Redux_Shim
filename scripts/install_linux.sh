@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 #
 # One-line Linux / Proton installer. Paste from the README:
-#   curl -fsSL https://raw.githubusercontent.com/PiercingXX/Battlezone98Redux_Shim/main/scripts/install_linux.sh | bash -s -- --native
-#   curl -fsSL https://raw.githubusercontent.com/PiercingXX/Battlezone98Redux_Shim/main/scripts/install_linux.sh | bash -s -- --snap
+#   curl -fsSL https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_linux.sh | bash -s -- --native
+#   curl -fsSL https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_linux.sh | bash -s -- --snap
 #
-# This script downloads the matching git ref, finds a Win32 winmm.dll
-# (explicit path, Workshop OpenShim, or GitHub release), and deploys it.
+# The default path downloads one GitHub release artifact set (DLL + patches.json
+# + INIs from the same release). --dll is an advanced override and only
+# proceeds when matching companions sit beside that DLL.
 #
 set -euo pipefail
 
-# Baked: this file's home. Override with OPENSHIM_REPO / OPENSHIM_REF.
-REPO_SLUG="${OPENSHIM_REPO:-PiercingXX/Battlezone98Redux_Shim}"
+# Canonical install source is the upstream repo. Override with OPENSHIM_REPO.
+REPO_SLUG="${OPENSHIM_REPO:-GrizzlyOne95/Battlezone98Redux_Shim}"
 REF="${OPENSHIM_REF:-main}"
-RELEASE_REPO="${OPENSHIM_RELEASE_REPO:-GrizzlyOne95/Battlezone98Redux_Shim}"
 WORKSHOP_ITEM="${OPENSHIM_WORKSHOP_ID:-3686673790}"
 APPID=301650
 FLAVOR="all"
@@ -27,12 +27,12 @@ Usage:
     --native      Native Steam and Flatpak installs only
     --snap        Snap Steam installs only
     --game-path   One game directory (overrides flavour filter)
-    --dll         Win32 winmm.dll to deploy
-    --ref         Git ref to fetch (default: $REF)
+    --dll         Advanced: Win32 winmm.dll. Requires patches.json, openshim.ini,
+                  and net.ini in the same directory (or scripts/patches.json).
+    --ref         Git ref used only to fetch steam_game_paths.sh (default: $REF)
 
 Environment:
-  OPENSHIM_REPO / OPENSHIM_REF / OPENSHIM_DLL / OPENSHIM_RELEASE_REPO
-  BZR_GAME_PATH
+  OPENSHIM_REPO / OPENSHIM_REF / OPENSHIM_DLL / BZR_GAME_PATH
 EOF
 }
 
@@ -84,54 +84,72 @@ filter_flavor() {
     fi
 }
 
-find_workshop_dll() {
-    local roots=(
-        "$HOME/.local/share/Steam"
-        "$HOME/.steam/steam"
-        "$HOME/.steam/root"
-        "$HOME/snap/steam/common/.local/share/Steam"
-        "$HOME/snap/steam/current/.local/share/Steam"
-        "$HOME/.var/app/com.valvesoftware.Steam/data/Steam"
-        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam"
-    )
-    [[ -n "${STEAM_ROOT:-}" ]] && roots+=("$STEAM_ROOT")
-    local root dll vdf line lib
-    for root in "${roots[@]}"; do
-        dll="$root/steamapps/workshop/content/$APPID/$WORKSHOP_ITEM/winmm.dll"
-        if [[ -f "$dll" ]]; then
-            printf '%s\n' "$dll"
+is_openshim_dll() {
+    local dll="$1"
+    [[ -f "$dll" ]] && grep -a -q "OpenShim" "$dll"
+}
+
+find_companions() {
+    local dir="$1"
+    PATCHES=""
+    OPENSHIM_INI=""
+    NET_INI=""
+    if [[ -f "$dir/scripts/patches.json" ]]; then
+        PATCHES="$dir/scripts/patches.json"
+    elif [[ -f "$dir/patches.json" ]]; then
+        PATCHES="$dir/patches.json"
+    fi
+    [[ -f "$dir/openshim.ini" ]] && OPENSHIM_INI="$dir/openshim.ini"
+    [[ -f "$dir/net.ini" ]] && NET_INI="$dir/net.ini"
+    [[ -n "$PATCHES" && -n "$OPENSHIM_INI" && -n "$NET_INI" ]]
+}
+
+download_matched_release() {
+    local dest="$1"
+    local repo base
+    mkdir -p "$dest"
+    for repo in "$REPO_SLUG"; do
+        base="https://github.com/${repo}/releases/latest/download"
+        echo "Downloading matched release set from $repo ..."
+        if download_to "$base/winmm.dll" "$dest/winmm.dll" \
+            && download_to "$base/patches.json" "$dest/patches.json" \
+            && download_to "$base/openshim.ini" "$dest/openshim.ini" \
+            && download_to "$base/net.ini" "$dest/net.ini" \
+            && [[ -s "$dest/winmm.dll" && -s "$dest/patches.json" ]]; then
+            echo "Using GitHub release artifacts from $repo"
             return 0
         fi
-        for vdf in "$root/steamapps/libraryfolders.vdf" "$root/config/libraryfolders.vdf"; do
-            [[ -f "$vdf" ]] || continue
-            while IFS= read -r line || [[ -n "$line" ]]; do
-                if [[ "$line" =~ \"path\"[[:space:]]+\"(.*)\" ]]; then
-                    lib="${BASH_REMATCH[1]//\\\\//}"
-                    dll="$lib/steamapps/workshop/content/$APPID/$WORKSHOP_ITEM/winmm.dll"
-                    if [[ -f "$dll" ]]; then
-                        printf '%s\n' "$dll"
-                        return 0
-                    fi
-                fi
-            done < "$vdf"
-        done
+        rm -f "$dest/winmm.dll" "$dest/patches.json" "$dest/openshim.ini" "$dest/net.ini"
     done
     return 1
 }
 
-download_release_dll() {
-    local dest="$1"
-    local repo
-    for repo in "$REPO_SLUG" "$RELEASE_REPO"; do
-        if download_to "https://github.com/${repo}/releases/latest/download/winmm.dll" "$dest" 2>/dev/null; then
-            if [[ -s "$dest" ]]; then
-                echo "Using GitHub release winmm.dll from $repo" >&2
-                return 0
-            fi
+deploy_matched() {
+    local game_dir="$1" dll="$2" patches="$3" ini="$4" net="$5"
+    if [[ -f "$game_dir/winmm.dll" ]] && ! is_openshim_dll "$game_dir/winmm.dll"; then
+        echo "error: refusing to overwrite non-OpenShim winmm.dll in $game_dir" >&2
+        echo "Remove or rename that proxy first if you intend to replace it." >&2
+        return 1
+    fi
+    echo "Installing OpenShim to: $game_dir"
+    mkdir -p "$game_dir/scripts"
+    local stamp
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    local src dst
+    for src in "$dll" "$patches" "$ini" "$net"; do
+        case "$(basename "$src")" in
+            winmm.dll) dst="$game_dir/winmm.dll" ;;
+            patches.json) dst="$game_dir/scripts/patches.json" ;;
+            openshim.ini) dst="$game_dir/openshim.ini" ;;
+            net.ini) dst="$game_dir/net.ini" ;;
+            *) continue ;;
+        esac
+        if [[ -f "$dst" ]]; then
+            cp -f "$dst" "$dst.bak-$stamp"
         fi
-        rm -f "$dest"
+        cp -f "$src" "$dst"
+        echo "  deployed $(basename "$dst") ($(stat -c %s "$dst") bytes)"
     done
-    return 1
 }
 
 while [[ $# -gt 0 ]]; do
@@ -167,37 +185,24 @@ done
 
 validate_ref "$REF"
 
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
 src=""
 script_dir=""
 if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
 fi
-if [[ -n "$script_dir" && -f "$script_dir/steam_game_paths.sh" && -f "$script_dir/deploy_linux_proton.sh" ]]; then
-    src="$(cd "$script_dir/.." && pwd)"
-    echo "Using local repo: $src"
+if [[ -n "$script_dir" && -f "$script_dir/steam_game_paths.sh" ]]; then
+    src="$script_dir"
 else
-    if [[ "$REF" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
-        ARCHIVE_URL="https://github.com/${REPO_SLUG}/archive/${REF}.tar.gz"
-    else
-        ARCHIVE_URL="https://github.com/${REPO_SLUG}/archive/refs/heads/${REF}.tar.gz"
-    fi
-
-    work="$(mktemp -d)"
-    trap 'rm -rf "$work"' EXIT
-
-    echo "Downloading $REPO_SLUG @$REF ..."
-    download_to "$ARCHIVE_URL" "$work/src.tar.gz"
-    if ! tar -tzf "$work/src.tar.gz" >/dev/null 2>&1; then
-        echo "Downloaded archive is not a readable tarball." >&2
-        exit 1
-    fi
-    mkdir -p "$work/src"
-    tar -xzf "$work/src.tar.gz" -C "$work/src" --strip-components=1
-    src="$work/src"
+    download_to "https://raw.githubusercontent.com/${REPO_SLUG}/${REF}/scripts/steam_game_paths.sh" \
+        "$work/steam_game_paths.sh"
+    src="$work"
 fi
 
 # shellcheck source=scripts/steam_game_paths.sh
-source "$src/scripts/steam_game_paths.sh"
+source "$src/steam_game_paths.sh"
 
 if [[ -n "$GAME_PATH" ]]; then
     BZR_GAME_PATH="$GAME_PATH"
@@ -216,35 +221,45 @@ if [[ ${#BZR_GAME_PATHS[@]} -eq 0 ]]; then
     exit 1
 fi
 
-if [[ -z "${work:-}" ]]; then
-    work="$(mktemp -d)"
-    trap 'rm -rf "$work"' EXIT
-fi
-
 dll=""
+PATCHES=""
+OPENSHIM_INI=""
+NET_INI=""
+
 if [[ -n "$DLL_PATH" ]]; then
     dll="$DLL_PATH"
-elif dll="$(find_workshop_dll)"; then
-    echo "Using Workshop OpenShim DLL: $dll"
-elif download_release_dll "$work/winmm.dll"; then
-    dll="$work/winmm.dll"
-fi
-
-if [[ -z "$dll" || ! -f "$dll" ]]; then
-    echo "error: no winmm.dll found." >&2
-    echo "Subscribe to OpenShim on Workshop, pass --dll, or copy a Release | Win32 build." >&2
+    if ! find_companions "$(dirname "$dll")"; then
+        echo "error: --dll requires a matched set: patches.json, openshim.ini, and net.ini" >&2
+        echo "beside the DLL (or scripts/patches.json). Refusing to mix versions." >&2
+        exit 1
+    fi
+    echo "Using explicit DLL with matched companions: $dll"
+elif [[ -n "$script_dir" && -f "$script_dir/../bin/Release/winmm.dll" ]] \
+    && find_companions "$(cd "$script_dir/.." && pwd)"; then
+    dll="$(cd "$script_dir/.." && pwd)/bin/Release/winmm.dll"
+    echo "Using local Release build with matched companions: $dll"
+elif download_matched_release "$work/release"; then
+    dll="$work/release/winmm.dll"
+    PATCHES="$work/release/patches.json"
+    OPENSHIM_INI="$work/release/openshim.ini"
+    NET_INI="$work/release/net.ini"
+else
+    echo "error: could not download a matched OpenShim release set from $REPO_SLUG." >&2
+    echo "Pass --dll with matching companions, or set OPENSHIM_REPO to a repo that publishes releases." >&2
     exit 1
 fi
 
-deploy="$src/scripts/deploy_linux_proton.sh"
-chmod +x "$deploy" "$src/scripts/steam_game_paths.sh"
+if [[ -z "$dll" || ! -f "$dll" || -z "$PATCHES" || -z "$OPENSHIM_INI" || -z "$NET_INI" ]]; then
+    echo "error: matched OpenShim artifact set is incomplete." >&2
+    exit 1
+fi
 
 echo "Installing to:"
 printf '  %s\n' "${BZR_GAME_PATHS[@]}"
 
-export OPENSHIM_INSTALLER=1
 for game_dir in "${BZR_GAME_PATHS[@]}"; do
-    BZR_GAME_PATH="$game_dir" "$deploy" "$game_dir" "$dll"
+    deploy_matched "$game_dir" "$dll" "$PATCHES" "$OPENSHIM_INI" "$NET_INI"
+    echo
 done
 
 cat <<'EOF'

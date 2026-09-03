@@ -82,8 +82,10 @@ int main()
     CheckEq(SanitizeLogFilename("CoM1.log"), "openshim.log", "mixed case COM1 device name");
 
     // GetGameLogPath on non-Windows builds returns the sanitized leaf directly.
+#ifndef _WIN32
     CheckEq(BZROpenShim::GetGameLogPath("logs/custom.log"), "custom.log", "linux game log path strips to leaf");
     CheckEq(BZROpenShim::GetGameLogPath(".."), "openshim.log", "linux game log path rejects traversal");
+#endif
 
     std::printf("%d checks, %d failures\n", g_Checks, g_Failures);
     return g_Failures == 0 ? 0 : 1;
