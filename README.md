@@ -64,6 +64,57 @@ If you have both Steam flavours, paste both install commands and set the launch 
 
 Uninstall: remove `winmm.dll` from the game folder and clear the launch options.
 
+### Standalone (DLL-only) Operation
+
+OpenShim is intentionally supported as a **standalone DLL-only install** on top of a stock Battlezone 98 Redux 2.2.301 installation. The Campaign Reimagined / OpenShim asset pack (Steam Workshop item) is **not required** for native and networking fixes.
+
+```text
+OpenShim DLL only
+    │
+    ├── native engine fixes
+    ├── gameplay fixes
+    ├── multiplayer / network fixes
+    ├── native UI / configuration
+    ├── diagnostics
+    └── asset-backed features → safely unavailable
+
+OpenShim DLL + compatible assets
+    │
+    └── full supported feature set
+```
+
+* The DLL itself has no hard dependency on Workshop content. Placing only `winmm.dll` (and `openshim.ini`) into a stock install is a deliberately supported degraded configuration.
+* Asset-dependent features — such as `Death Chunk Meshes` (`chunkMeshes`), Enhanced renderer resources (`openshim/renderer/enhanced`), and other visual payloads — require the separate asset package. When those resources are absent, OpenShim suppresses the dependent feature, emits a single concise diagnostic, and continues running. No crash, no invalid Ogre/resource access, and no repeated per-frame load attempts occur.
+* A copied `openshim.ini` that enables an asset-backed feature (for example `ChunkMeshes=1`) cannot bypass this protection: the feature also requires verified asset availability and remains unavailable until compatible assets are detected.
+* The native **OpenShim Settings** page reports asset-pack status directly:
+
+```text
+OpenShim Status
+
+Runtime:       Active
+Version:      5
+Game:         Steam/GOG 2.2.301
+
+Asset Pack:    Detected
+```
+
+```text
+Asset Pack:    NOT DETECTED
+               Asset-dependent features are unavailable.
+```
+
+```text
+Asset Pack:    VERSION MISMATCH
+               Installed: 999
+               Expected:  1
+```
+
+Where practical, asset-dependent rows (for example `Death Chunk Meshes`, `DX11 FXAA`, `DX11 Local Lights`) remain visible but show `Unavailable — OpenShim asset pack not detected` (or a version-mismatch / partial-payload variant) and cannot be toggled while their resources are absent. The footer of the settings page always reflects the current asset-pack state so a DLL-only install is immediately recognizable.
+
+Partial or stale packs (for example a stale `resources.version` or a manifest that claims `ChunkMeshes=1` while the mesh files are missing) degrade the affected capability only; unrelated native fixes and netcode continue to operate.
+
+See `resources/openshim/OpenShimAssets.ini` (shipped with the asset pack) and `include/openshim_assets.h` for the capability / manifest design. The detection itself validates the deployed filesystem via the same resource-resolution mechanism the runtime uses (including `addon`, `mods`, `packaged_mods`, and `steamapps/workshop/content/301650` probing), not Workshop subscription state, so it remains compatible with Steam, GOG, Proton, and manual installs.
+
 ## What is OpenShim?
 
 OpenShim is a standalone `winmm.dll` proxy loaded automatically when Battlezone 98 Redux starts.

@@ -2,6 +2,7 @@
 #include "game_state.h"
 #include "openshim_ini.h"
 #include "openshim_preset_migration.h"
+#include "openshim_assets.h"
 #include "terrain_proxy.h"
 #include "terrain_tile_blend.h"
 #include "bzr_options_ui.h"
@@ -5739,6 +5740,26 @@ namespace BZROpenShim
         {
             if (!g_EnableChunkMeshProxy)
                 return false;
+            // Second gate: even if config said enabled at boot, re-check
+            // centralized asset capability on every creation attempt. This
+            // covers partial packages where the sentinel says "detected" but
+            // the specific mesh file for this slot is absent, and ensures we
+            // never create an Ogre Entity with a missing mesh name.
+            if (!Assets::IsAssetFeatureAvailable(Assets::AssetFeature::DestructionChunks))
+                return false;
+            // Per-mesh verification: even when the global capability is true
+            // (some payloads exist), the particular requested mesh may be absent
+            // in a partial pack. The resolver (TryResolveChunkPayloadMeshResource)
+            // already verified before filling proofMeshName, so an empty
+            // proofMeshName means "no file for this mesh" and must not allocate.
+            // Trace for partial-pack proof (see tests/openshim_assets_tests):
+            //   partial pack → capability true → requested mesh absent → resolver false →
+            //   proofMeshName empty → NO SceneNode → NO Entity → NO createEntity("") → no retry storm
+            {
+                const char* meshName = GetChunkPayloadMeshName(slot);
+                if (!meshName || !*meshName)
+                    return false;
+            }
 
             if (slot.sceneNode && slot.entity)
                 return true;
@@ -30606,9 +30627,36 @@ namespace BZROpenShim
         g_EnableChunkProxyDebug =
             EnvFlagEnabled("OPENSHIM_CHUNK_PROXY_DEBUG") ||
             EnvFlagEnabled("OPENSHIM_CHUNK_PLACEHOLDER_PROXY");
-        g_EnableChunkMeshProxy =
+        // Centralized asset-pack detection. Refresh early so chunk-mesh and
+        // other asset-backed features can be gated on filesystem-validated
+        // capabilities rather than config alone. This is the single authority
+        // for "do the destruction chunk payloads exist?" — individual call
+        // sites query IsAssetFeatureAvailable() instead of probing the
+        // filesystem themselves.
+        Assets::RefreshAssetCapabilities();
+        const bool chunkAssetsAvailable =
+            Assets::IsAssetFeatureAvailable(Assets::AssetFeature::DestructionChunks);
+        const bool configWantsChunkMeshProxy =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_MESH_PROXY") ||
               EnvFlagEnabled("BZR_DISABLE_CHUNK_MESH_PROXY"));
+        // Gate on both user config AND verified resource availability.
+        // This prevents a copied openshim.ini with ChunkMeshes=1 from
+        // entering unsafe Ogre Entity creation paths when the asset pack
+        // is absent, stale, or partial.
+        g_EnableChunkMeshProxy = configWantsChunkMeshProxy && chunkAssetsAvailable;
+        if (configWantsChunkMeshProxy && !chunkAssetsAvailable)
+        {
+            static bool s_logged = false;
+            if (!s_logged)
+            {
+                s_logged = true;
+                const auto& caps = Assets::GetAssetCapabilities();
+                Log(L"[CHUNKMESH] Chunk mesh proxy requested but asset capability unavailable; suppressing feature state=%hs installed=%hs problem=%hs\n",
+                    Assets::AssetPackStateName(caps.state),
+                    caps.installedVersion.c_str(),
+                    caps.problem.c_str());
+            }
+        }
         g_EnableGenericChunkBatch =
             g_EnableChunkMeshProxy &&
             !(EnvFlagEnabled("OPENSHIM_DISABLE_GENERIC_CHUNK_BATCH") ||
@@ -31048,6 +31096,16 @@ namespace BZROpenShim
             GetChunkPayloadStockResourceDirectory().string().c_str(),
             kChunkPayloadModRelativeDirName,
             kChunkPayloadModRelativeDirNameAlt);
+        // Terrain HD: explicit AssetFeature::TerrainHd now exists for UI/diagnostics.
+        // LoadTerrainHdManifest() remains the complete filesystem gate (soft-fails to stock atlas),
+        // so no live behavior change is required; this log proves the centralized probe agrees.
+        {
+            const auto& caps = Assets::GetAssetCapabilities();
+            Log(L"[TERRAIN] HD terrain capability terrainHd=%d scanMs=%llu problem=%hs\n",
+                caps.terrainHd ? 1 : 0,
+                (unsigned long long)caps.lastScanDurationMs,
+                caps.problem.c_str());
+        }
         Log(L"[SKINNING] Vehicle diagnostics: %hs interval=%lums detailBudget=%ld optOut=OPENSHIM_DISABLE_VEHICLE_SKINNING_DIAGNOSTICS\n",
             g_VehicleSkinningTraceEnabled ? "enabled" : "disabled",
             static_cast<unsigned long>(g_VehicleSkinningTraceIntervalMs),

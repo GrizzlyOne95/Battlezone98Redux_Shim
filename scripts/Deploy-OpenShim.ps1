@@ -93,6 +93,19 @@ $deployedVersion = Get-Content -Raw -LiteralPath (Join-Path $renderTargetDir 're
 Write-Host ("renderer resources deployed: {0} files, resources.version={1}" -f
     @((Get-ChildItem -LiteralPath $renderTargetDir).Count, $deployedVersion.Trim()))
 
+# Asset-pack identity manifest — ships with the full suite (resources/openshim)
+# and lands at <Game>/openshim/OpenShimAssets.ini where the runtime expects it.
+# Standalone DLL-only installs intentionally do not receive this file.
+$assetManifestSource = Join-Path $repoRoot 'resources\openshim\OpenShimAssets.ini'
+$assetManifestTarget = Join-Path $GameDir 'openshim\OpenShimAssets.ini'
+if (Test-Path -LiteralPath $assetManifestSource) {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $assetManifestTarget) | Out-Null
+    Copy-Item -LiteralPath $assetManifestSource -Destination $assetManifestTarget -Force
+    Write-Host ("asset manifest deployed: {0}" -f $assetManifestTarget)
+} else {
+    Write-Host "asset manifest not found at $assetManifestSource — skipping (DLL-only deploy)"
+}
+
 # The native Settings/Keybind pages assemble these passive tiles at runtime:
 # one flat fill per surface, in colours sampled from the stock UI art. Keep
 # them with the DLL so a clean install cannot silently fall back to
