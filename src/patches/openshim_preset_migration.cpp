@@ -305,6 +305,37 @@ namespace BZROpenShim
             { "Display", "ScrapPilotHud", "Legacy", "Stock" },
         };
 
+        // Revision 2 -> 3. Both keys are the interface through which every
+        // other setting is reached, not features in their own right, and both
+        // were switched off by the blanket opt-in pass described in the header.
+        // Only a file whose value still matches the bad shipped default is
+        // touched; a player who set something else keeps it.
+        const SurgicalEntry kRevision2SurgicalTable[] = {
+            { "General", "SettingsUi", "0", "1" },
+            { "General", "CustomBindsUi", "0", "1" },
+        };
+
+        // Which narrow fixups apply when migrating away from `fromRevision`.
+        // Returns nullptr for a revision with no known fixups, in which case
+        // the file only has its marker restamped.
+        const SurgicalEntry* SurgicalTableForRevision(int fromRevision,
+                                                      size_t& outCount)
+        {
+            outCount = 0;
+            if (fromRevision == kLegacyBadPresetRevision)
+            {
+                outCount = sizeof(kSurgicalTable) / sizeof(kSurgicalTable[0]);
+                return kSurgicalTable;
+            }
+            if (fromRevision == 2)
+            {
+                outCount = sizeof(kRevision2SurgicalTable) /
+                           sizeof(kRevision2SurgicalTable[0]);
+                return kRevision2SurgicalTable;
+            }
+            return nullptr;
+        }
+
         bool ValueMatchesOld(const std::string& current,
                              const char* oldCanonical)
         {
@@ -819,15 +850,20 @@ namespace BZROpenShim
         //
         // If marker is absent, we cannot reliably know it's an old preset vs.
         // a truly custom file, so we must NOT do narrow fixup. That is Case C.
-        if (hasRev && existingRev == kLegacyBadPresetRevision)
+        size_t surgicalCount = 0;
+        const SurgicalEntry* surgicalTable =
+            hasRev ? SurgicalTableForRevision(existingRev, surgicalCount) : nullptr;
+
+        if (surgicalTable != nullptr)
         {
             // Surgical migration: for each changed default, if current value
             // == old shipped default, replace with corrected new default; else
             // preserve user's value. Comments/unknown keys/ordering preserved
             // via the lossless writer.
             bool anyChanged = false;
-            for (const auto& entry : kSurgicalTable)
+            for (size_t entryIndex = 0; entryIndex < surgicalCount; ++entryIndex)
             {
+                const SurgicalEntry& entry = surgicalTable[entryIndex];
                 std::string curVal;
                 // Search existingLines for the live key.
                 bool found = false;
@@ -918,7 +954,9 @@ namespace BZROpenShim
             {
                 result.action = MigrationAction::Failed;
                 result.logMessage =
-                    "[CONFIG] detected modified player preset revision=1 but temp write failed; continuing with safe runtime defaults";
+                    "[CONFIG] detected modified player preset revision=" +
+                    std::to_string(existingRev) +
+                    " but temp write failed; continuing with safe runtime defaults";
                 LogShimA(LogLevel::Error, "config", "%s", result.logMessage.c_str());
                 g_MigrationRequiresSafeAttackReveal = true;
                 std::error_code ec;
@@ -963,7 +1001,9 @@ namespace BZROpenShim
             {
                 result.action = MigrationAction::Failed;
                 result.logMessage =
-                    "[CONFIG] detected modified player preset revision=1 but atomic replace failed; original preserved";
+                    "[CONFIG] detected modified player preset revision=" +
+                    std::to_string(existingRev) +
+                    " but atomic replace failed; original preserved";
                 LogShimA(LogLevel::Error, "config", "%s", result.logMessage.c_str());
                 g_MigrationRequiresSafeAttackReveal = true;
                 std::error_code ec;
@@ -972,7 +1012,8 @@ namespace BZROpenShim
             }
 
             LogShimA(LogLevel::Info, "config",
-                     "[CONFIG] migrated modified player preset revision 1 -> %d (%s)",
+                     "[CONFIG] migrated modified player preset revision %d -> %d (%s)",
+                     existingRev,
                      kCurrentPresetRevision,
                      anyChanged ? "fixed stale defaults" : "updated marker");
             result.action = MigrationAction::SurgicalFixed;

@@ -96,11 +96,19 @@ namespace
     // Minimal current-revision canonical for tests: must contain the two
     // corrected defaults and the revision marker so the framework can
     // distinguish revisions.
+    // Marker line for whatever revision this build ships, so the fixtures
+    // track kCurrentPresetRevision instead of a literal.
+    std::string CurrentRevisionMarker()
+    {
+        return "OpenShimPresetRevision = " +
+               std::to_string(kCurrentPresetRevision);
+    }
+
     std::vector<std::string> MakeCanonicalLines()
     {
         return {
             "; OpenShim Player Configuration - test canonical",
-            "; OpenShimPresetRevision = 2",
+            "; " + CurrentRevisionMarker(),
             "",
             "[Display]",
             "ScrapPilotHud = Stock",
@@ -250,8 +258,8 @@ int main()
                   "3: ScrapPilotHud fixed to Stock");
         CheckTrue(FileContains(bad, "AttackRevealPerceivedTeam = 0"),
                   "3: AttackReveal fixed to 0");
-        CheckTrue(FileContains(bad, "OpenShimPresetRevision = 2"),
-                  "3: revision bumped to 2");
+        CheckTrue(FileContains(bad, CurrentRevisionMarker()),
+                  "3: revision bumped to current");
     }
 
     // 4. exact bad preset receives backup
@@ -332,8 +340,73 @@ int main()
                   "6: user 0 preserved");
         CheckTrue(FileContains(mod, "CustomUserValue = 12345"),
                   "6: custom unknown key preserved");
-        CheckTrue(FileContains(mod, "OpenShimPresetRevision = 2"),
+        CheckTrue(FileContains(mod, CurrentRevisionMarker()),
                   "6: marker still bumped even when values already correct");
+    }
+
+    // 6b. revision 2 -> 3: the settings doors are reopened.
+    //
+    // A file stamped revision 2 with SettingsUi = 0 is the state left behind by
+    // 97aa4799, and before revision 3 existed migration returned early on it,
+    // so the OpenShim Settings page stayed permanently unreachable. Both keys
+    // must come back on, and unrelated values must survive untouched.
+    {
+        fs::path r2 = tmpRoot / "rev2_settings_off.ini";
+        fs::path canonical = tmpRoot / "canonical6b.ini";
+        WriteLines(canonical, MakeCanonicalLines());
+        WriteLines(r2, {
+            "; OpenShim Player Configuration",
+            "; OpenShimPresetRevision = 2",
+            "",
+            "[General]",
+            "SettingsUi = 0",
+            "CustomBindsUi = 0",
+            "SoundChannels = 256",
+            "",
+            "[Display]",
+            "ScrapPilotHud = Stock",
+            "",
+            "[SinglePlayer]",
+            "AttackRevealPerceivedTeam = 0",
+        });
+        auto r = MigratePresetFileIfNeeded(r2, canonical);
+        CheckTrue(r.action == MigrationAction::SurgicalFixed,
+                  "6b: revision 2 file is migrated, not skipped");
+        CheckTrue(r.fromRevision == 2,
+                  "6b: reports migrating from revision 2");
+        CheckTrue(FileContains(r2, "SettingsUi = 1"),
+                  "6b: SettingsUi reopened");
+        CheckTrue(FileContains(r2, "CustomBindsUi = 1"),
+                  "6b: CustomBindsUi reopened");
+        CheckTrue(FileContains(r2, "SoundChannels = 256"),
+                  "6b: unrelated key preserved");
+        CheckTrue(FileContains(r2, CurrentRevisionMarker()),
+                  "6b: revision bumped to current");
+    }
+
+    // 6c. revision 2 -> 3 does not override a value the player chose.
+    //
+    // The surgical rule only fires when the current value still matches the
+    // bad shipped default. A file that already has the page on must come out
+    // unchanged apart from the marker.
+    {
+        fs::path r2 = tmpRoot / "rev2_settings_on.ini";
+        fs::path canonical = tmpRoot / "canonical6c.ini";
+        WriteLines(canonical, MakeCanonicalLines());
+        WriteLines(r2, {
+            "; OpenShimPresetRevision = 2",
+            "",
+            "[General]",
+            "SettingsUi = 1",
+            "CustomBindsUi = 0",
+        });
+        MigratePresetFileIfNeeded(r2, canonical);
+        CheckTrue(FileContains(r2, "SettingsUi = 1"),
+                  "6c: already-on SettingsUi left alone");
+        CheckTrue(FileContains(r2, "CustomBindsUi = 1"),
+                  "6c: off CustomBindsUi still reopened");
+        CheckTrue(FileContains(r2, CurrentRevisionMarker()),
+                  "6c: revision bumped to current");
     }
 
     // 7. unknown/custom file -> untouched
