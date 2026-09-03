@@ -718,6 +718,14 @@ EnhancedLightSelectionTrace = 0
 ; Legacy env alias: OPENSHIM_TRACE_HITS
 TraceHookHits = 0
 
+; Identify the first-person pilot Entity by walking the Ogre scene graph every
+; 1.5 s, and log its AnimationState traffic. Capture tool for pilot animation
+; investigation; see reverse_engineering/PILOT_FP_ANIMATION_TRACE.md.
+; Accepted: boolean. Default: OFF. Development-only, noisy, and it polls the
+; scene graph on a worker thread -- leave it off for normal play.
+; Legacy env alias: OPENSHIM_TRACE_PILOT_FP_ANIMATIONS
+TracePilotFPAnimations = 0
+
 ; Enable artillery/weapon-mask tracing for RE/validation.
 ; Accepted: boolean. Default: OFF. Development-only.
 ; Legacy env aliases: OPENSHIM_TRACE_ARTILLERY_MASK,
@@ -826,6 +834,21 @@ ProfileOgreAnimation = 0
 ; Accepted: boolean/integer flag; use 0/1. Default: 0.
 ; Legacy env alias: OPENSHIM_TERRAIN_RENDER_PROBE
 TerrainRenderProbe = 0
+
+; Walker first-person cockpit jitter instrument. Answers one question:
+; walking the chain vehicle world node -> cockpit ("_c") node -> POV bone
+; -> camera, which link FIRST contains the discontinuity visible as cockpit
+; jitter. Samples frame-synchronously from inside SceneManager::_renderScene
+; so every link is read at the same point of the same frame.
+;
+; This is investigation tooling, not a fix, and it is not something a player
+; ever needs. With the key absent or 0 the module installs nothing at all:
+; no thread, no render hook, no Ogre resolves. Turning it on hooks the
+; render path and writes a [WALKID] record per frame, which is far too
+; chatty for normal play.
+;
+; Accepted: boolean. Default: OFF. Development-only.
+WalkerCockpitTrace = 0
 
 ; Number of distinct terrain clusters to capture.
 ; Accepted: integer; clamped to 1..16. Default: 1.
@@ -1050,6 +1073,47 @@ LobbyReadouts = 1
 ;   OFF/false/0 = explicitly disable
 ; Default: Auto. Auto is recommended until the Steam hook path is revalidated.
 LobbyBzrnetIntegration = Auto
+
+; Restrict the multiplayer starting-vehicle list to the stock balanced
+; factions. This restores the useful half of the Battlezone 1.5 "Any Nation"
+; host rule, which Redux dropped.
+;
+; Background: 1.5 shipped two pool files and the host toggle chose between
+; them -- netveh.odf (Any Nation OFF, 27 craft, no CRA) and netveh1.odf
+; (Any Nation ON, 43 craft, adds the CRA faction). Redux merged the two into a
+; single 43-entry netveh.odf and removed the toggle, so every faction in the
+; pool is always selectable and a host has no way back to the restricted pool
+; short of shipping a custom .vxt with every map.
+;
+; With this ON, factions outside StockFactionSet are pruned from the list after
+; it is built, and the existing Faction arrows skip them because they skip
+; empty factions already.
+;
+; What it does NOT do:
+;   - It never adds a craft. The map's <mission>.vxt (or netveh.odf) remains
+;     the authoritative pool; this can only subtract from it.
+;   - If the pool contains nothing from the allowed set, nothing is pruned.
+;   - It does not change team ownership, nation assignment, ODF resolution,
+;     producer/build menus, AI production, or physics.
+;   - It is NOT synchronized. Each client builds this list locally, so this
+;     restricts the machine it runs on. A stock client, or an OpenShim client
+;     with this off, still sees the full pool. Treat it as a matched-mod
+;     convenience and a reference implementation, not as enforcement.
+;
+; Accepted: boolean. Default: OFF (exact current Redux behaviour).
+; Legacy env alias: OPENSHIM_STOCK_FACTIONS_ONLY
+StockFactionsOnly = 0
+
+; Which factions survive when StockFactionsOnly is ON, given as the set of ODF
+; first characters the engine itself classifies by:
+;   a = NSDF   s = CCA   b = Black Dog   c = CRA   o = other/custom
+; Examples:
+;   as   NSDF + CCA only (default -- the balanced stock pair)
+;   asb  NSDF + CCA + Black Dog, i.e. exactly the 1.5 netveh.odf pool
+; Unrecognised or empty input falls back to "as".
+; Ignored entirely when StockFactionsOnly = 0.
+; Legacy env alias: OPENSHIM_STOCK_FACTION_SET
+StockFactionSet = as
 
 
 [Gameplay]

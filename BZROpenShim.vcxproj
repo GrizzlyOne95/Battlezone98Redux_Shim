@@ -133,6 +133,9 @@
       <LanguageStandard>stdcpp14</LanguageStandard>
     </ClCompile>
     <ClCompile Include="src\patches\cli_multiparam_parser.cpp" />
+    <ClCompile Include="src\patches\walker_cockpit_trace.cpp">
+      <LanguageStandard>stdcpp14</LanguageStandard>
+    </ClCompile>
     <ClCompile Include="src\patches\editor_view_order.cpp" />
     <ClCompile Include="src\patches\file_io_hooks.cpp" />
     <ClCompile Include="src\patches\numeric_locale_compat.cpp" />
@@ -140,6 +143,7 @@
     <ClCompile Include="src\patches\trn_codec.cpp" />
     <ClCompile Include="src\patches\game_state.cpp" />
     <ClCompile Include="src\patches\native_cpu_sampler.cpp" />
+    <ClCompile Include="src\patches\mp_faction_restrict.cpp" />
     <ClCompile Include="src\patches\net_optimizer.cpp" />
      <ClCompile Include="src\patches\openshim_ini.cpp" />
     <ClCompile Include="src\patches\openshim_preset_migration.cpp" />
@@ -200,6 +204,7 @@
     <ClInclude Include="include\dx11_enhanced_fxaa_resources.h" />
     <ClInclude Include="include\ogre_animation_profiler.h" />
     <ClInclude Include="include\pilot_fp_animation_trace.h" />
+    <ClInclude Include="include\walker_cockpit_trace.h" />
     <ClInclude Include="include\file_io_hooks.h" />
     <ClInclude Include="include\numeric_locale_compat.h" />
     <ClInclude Include="include\redux_compatibility.h" />
@@ -220,6 +225,7 @@
     <ClInclude Include="include\patcher.h" />
     <ClInclude Include="include\hook_engine.h" />
     <ClInclude Include="include\iat_patch.h" />
+    <ClInclude Include="include\mp_faction_restrict.h" />
     <ClInclude Include="include\BZROpenShim.h" />
     <ClInclude Include="include\openshim_events.h" />
     <ClInclude Include="include\openshim_sdk_v2.h" />
