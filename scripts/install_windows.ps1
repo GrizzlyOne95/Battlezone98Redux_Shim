@@ -171,6 +171,10 @@ function Get-ArtifactSet {
     if (-not (Test-Path -LiteralPath $ui)) {
         $ui = $null
     }
+    $manifest = Join-Path $Root "resources\openshim\OpenShimAssets.ini"
+    if (-not (Test-Path -LiteralPath $manifest)) {
+        $manifest = $null
+    }
 
     return @{
         Dll = $dllPath
@@ -179,6 +183,7 @@ function Get-ArtifactSet {
         Net = $net
         RenderSource = $render
         UiSource = $ui
+        ManifestSource = $manifest
     }
 }
 
@@ -385,6 +390,16 @@ try {
             Copy-ResourceDirectory -Source $artifacts.RenderSource `
                 -Destination (Join-Path $gameDir "openshim\renderer\enhanced")
             Write-Host "  deployed Enhanced renderer resources"
+        }
+
+        if ($artifacts.ManifestSource) {
+            $manifestTarget = Join-Path $gameDir "openshim\OpenShimAssets.ini"
+            $manifestTargetDir = Split-Path -Parent $manifestTarget
+            if (-not (Test-Path -LiteralPath $manifestTargetDir)) {
+                New-Item -ItemType Directory -Force -Path $manifestTargetDir | Out-Null
+            }
+            Copy-Item -LiteralPath $artifacts.ManifestSource -Destination $manifestTarget -Force
+            Write-Host "  deployed asset manifest"
         }
 
         if ($artifacts.UiSource) {
