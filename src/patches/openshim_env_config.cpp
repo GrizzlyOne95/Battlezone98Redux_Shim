@@ -401,6 +401,12 @@ namespace
             return TryReadMappedBool(mainIni, "Network", "ReauthOnNicknameChange", true, out);
         if (Equals(name, "OPENSHIM_DISABLE_LOBBY_READOUTS"))
             return TryReadMappedBool(mainIni, "Network", "LobbyReadouts", true, out);
+        // Multiplayer starting-vehicle list: restore the 1.5 "Any Nation = OFF"
+        // restricted pool. Positive key, default OFF, so absence is stock.
+        if (Equals(name, "OPENSHIM_STOCK_FACTIONS_ONLY"))
+            return TryReadMappedBool(mainIni, "Network", "StockFactionsOnly", false, out);
+        if (Equals(name, "OPENSHIM_STOCK_FACTION_SET"))
+            return TryReadIniValue(mainIni, "Network", "StockFactionSet", out);
 
         if (Equals(name, "OPENSHIM_TURRET_AIM_PITCH_MULTIPLIER") ||
             Equals(name, "OPENSHIM_TURRET_PITCH_MULTIPLIER"))
