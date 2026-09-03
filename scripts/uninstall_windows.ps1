@@ -1,5 +1,5 @@
 # One-line Windows uninstaller. Paste into PowerShell:
-#   irm https://raw.githubusercontent.com/PiercingXX/Battlezone98Redux_Shim/main/scripts/uninstall_windows.ps1 | iex
+#   irm https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/uninstall_windows.ps1 | iex
 #
 # Removes OpenShim's winmm.dll (and the co-deployed patches.json) from every
 # detected Steam/GOG install. Leaves openshim.ini, net.ini, and logs alone.

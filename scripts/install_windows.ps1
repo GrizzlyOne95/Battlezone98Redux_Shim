@@ -1,23 +1,15 @@
 # One-line Windows installer. Paste from the README into PowerShell:
-#   irm https://raw.githubusercontent.com/PiercingXX/Battlezone98Redux_Shim/main/scripts/install_windows.ps1 | iex
+#   irm https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_windows.ps1 | iex
 #
-# Downloads a matched winmm.dll + patches.json + openshim.ini + net.ini set
-# (GitHub release, Workshop, or a local Release|Win32 build) and copies them
-# next to the game. No Steam launch options are required on Windows.
+# Downloads one matched GitHub-release set: winmm.dll + patches.json +
+# openshim.ini + net.ini. No Steam launch options are required on Windows.
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$repoSlug = if ($env:OPENSHIM_REPO) { $env:OPENSHIM_REPO } else { "PiercingXX/Battlezone98Redux_Shim" }
-$ref = if ($env:OPENSHIM_REF) { $env:OPENSHIM_REF } else { "main" }
-$releaseRepo = if ($env:OPENSHIM_RELEASE_REPO) { $env:OPENSHIM_RELEASE_REPO } else { "GrizzlyOne95/Battlezone98Redux_Shim" }
-$workshopItem = if ($env:OPENSHIM_WORKSHOP_ID) { $env:OPENSHIM_WORKSHOP_ID } else { "3686673790" }
+$repoSlug = if ($env:OPENSHIM_REPO) { $env:OPENSHIM_REPO } else { "GrizzlyOne95/Battlezone98Redux_Shim" }
 $steamAppId = "301650"
 $defaultInstallDir = "Battlezone 98 Redux"
-
-if ($ref -notmatch '^[A-Za-z0-9._/-]+$' -or $ref -match '^-|\.\.|//|/$') {
-    throw "Refusing malformed git ref '$ref'."
-}
 
 $requestedGamePath = if ($env:OPENSHIM_GAME_PATH) { $env:OPENSHIM_GAME_PATH } else { "" }
 
@@ -120,14 +112,25 @@ function Get-GamePaths {
     return $paths
 }
 
-function Get-WorkshopDll {
-    foreach ($steamRoot in Get-SteamRoots) {
-        foreach ($libraryRoot in Get-SteamLibraryRoots -SteamRoot $steamRoot) {
-            $dll = Join-Path $libraryRoot "steamapps\workshop\content\$steamAppId\$workshopItem\winmm.dll"
-            if (Test-Path -LiteralPath $dll) { return $dll }
-        }
+function Test-OpenShimDll {
+    param([string]$DllPath)
+    if (-not (Test-Path -LiteralPath $DllPath)) { return $false }
+    $raw = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($DllPath))
+    return $raw.Contains("OpenShim")
+}
+
+function Get-MatchedCompanions {
+    param([string]$Root)
+    $patches = Join-Path $Root "scripts\patches.json"
+    if (-not (Test-Path -LiteralPath $patches)) {
+        $patches = Join-Path $Root "patches.json"
     }
-    return ""
+    $ini = Join-Path $Root "openshim.ini"
+    $net = Join-Path $Root "net.ini"
+    if ((Test-Path -LiteralPath $patches) -and (Test-Path -LiteralPath $ini) -and (Test-Path -LiteralPath $net)) {
+        return @{ Patches = $patches; Ini = $ini; Net = $net }
+    }
+    return $null
 }
 
 function Get-FileFromUri {
@@ -209,68 +212,55 @@ try {
 
     if ($env:OPENSHIM_DLL -and (Test-Path -LiteralPath $env:OPENSHIM_DLL)) {
         $dll = $env:OPENSHIM_DLL
-        Write-Host "Using OPENSHIM_DLL: $dll"
+        $companions = Get-MatchedCompanions -Root (Split-Path -Parent $dll)
+        if (-not $companions) {
+            throw "OPENSHIM_DLL requires patches.json, openshim.ini, and net.ini beside the DLL (or scripts\patches.json). Refusing to mix versions."
+        }
+        $patches = $companions.Patches
+        $openshimIni = $companions.Ini
+        $netIni = $companions.Net
+        Write-Host "Using OPENSHIM_DLL with matched companions: $dll"
     } elseif ($localRoot) {
-        $dll = Join-Path $localRoot "bin\Release\winmm.dll"
-        $patches = Join-Path $localRoot "scripts\patches.json"
-        $openshimIni = Join-Path $localRoot "openshim.ini"
-        $netIni = Join-Path $localRoot "net.ini"
-        Write-Host "Using local Release build: $dll"
+        $companions = Get-MatchedCompanions -Root $localRoot
+        if ($companions -and (Test-Path -LiteralPath (Join-Path $localRoot "bin\Release\winmm.dll"))) {
+            $dll = Join-Path $localRoot "bin\Release\winmm.dll"
+            $patches = $companions.Patches
+            $openshimIni = $companions.Ini
+            $netIni = $companions.Net
+            Write-Host "Using local Release build with matched companions: $dll"
+        }
     }
 
     if (-not $dll) {
-        $gotRelease = $false
-        foreach ($repo in @($repoSlug, $releaseRepo) | Select-Object -Unique) {
-            $base = "https://github.com/$repo/releases/latest/download"
+        $base = "https://github.com/$repoSlug/releases/latest/download"
+        try {
+            Write-Host "Downloading matched GitHub release set from $repoSlug ..."
+            Get-FileFromUri -Uri "$base/winmm.dll" -OutFile (Join-Path $tempRoot "winmm.dll")
+            Get-FileFromUri -Uri "$base/patches.json" -OutFile (Join-Path $tempRoot "patches.json")
+            Get-FileFromUri -Uri "$base/openshim.ini" -OutFile (Join-Path $tempRoot "openshim.ini")
+            Get-FileFromUri -Uri "$base/net.ini" -OutFile (Join-Path $tempRoot "net.ini")
             try {
-                Write-Host "Trying GitHub release assets from $repo ..."
-                Get-FileFromUri -Uri "$base/winmm.dll" -OutFile (Join-Path $tempRoot "winmm.dll")
-                Get-FileFromUri -Uri "$base/patches.json" -OutFile (Join-Path $tempRoot "patches.json")
-                Get-FileFromUri -Uri "$base/openshim.ini" -OutFile (Join-Path $tempRoot "openshim.ini")
-                Get-FileFromUri -Uri "$base/net.ini" -OutFile (Join-Path $tempRoot "net.ini")
-                try {
-                    $shaText = (Invoke-WebRequest -Uri "$base/SHA256SUMS.txt" -UseBasicParsing).Content
-                    if ($shaText -is [byte[]]) {
-                        $shaText = [System.Text.Encoding]::ASCII.GetString($shaText)
-                    }
-                    $hashes = Get-ShaMap -Text $shaText
-                } catch { }
-                $dll = Join-Path $tempRoot "winmm.dll"
-                $patches = Join-Path $tempRoot "patches.json"
-                $openshimIni = Join-Path $tempRoot "openshim.ini"
-                $netIni = Join-Path $tempRoot "net.ini"
-                $gotRelease = $true
-                Write-Host "Using GitHub release from $repo"
-                break
-            } catch {
-                if ("$_" -match 'virus|potentially unwanted|malicious') {
-                    Write-DefenderHelp -DllPath (Join-Path $gamePaths[0] "winmm.dll")
-                    throw
+                $shaText = (Invoke-WebRequest -Uri "$base/SHA256SUMS.txt" -UseBasicParsing).Content
+                if ($shaText -is [byte[]]) {
+                    $shaText = [System.Text.Encoding]::ASCII.GetString($shaText)
                 }
+                $hashes = Get-ShaMap -Text $shaText
+            } catch { }
+            $dll = Join-Path $tempRoot "winmm.dll"
+            $patches = Join-Path $tempRoot "patches.json"
+            $openshimIni = Join-Path $tempRoot "openshim.ini"
+            $netIni = Join-Path $tempRoot "net.ini"
+            Write-Host "Using GitHub release artifacts from $repoSlug"
+        } catch {
+            if ("$_" -match 'virus|potentially unwanted|malicious') {
+                Write-DefenderHelp -DllPath (Join-Path $gamePaths[0] "winmm.dll")
             }
-        }
-
-        if (-not $gotRelease) {
-            $workshopDll = Get-WorkshopDll
-            if ($workshopDll) {
-                $dll = $workshopDll
-                Write-Host "Using Workshop OpenShim DLL: $dll"
-            }
+            throw
         }
     }
 
-    if (-not $patches) {
-        $raw = "https://raw.githubusercontent.com/$repoSlug/$ref"
-        Get-FileFromUri -Uri "$raw/scripts/patches.json" -OutFile (Join-Path $tempRoot "patches.json")
-        Get-FileFromUri -Uri "$raw/openshim.ini" -OutFile (Join-Path $tempRoot "openshim.ini")
-        Get-FileFromUri -Uri "$raw/net.ini" -OutFile (Join-Path $tempRoot "net.ini")
-        $patches = Join-Path $tempRoot "patches.json"
-        $openshimIni = Join-Path $tempRoot "openshim.ini"
-        $netIni = Join-Path $tempRoot "net.ini"
-    }
-
-    if (-not $dll -or -not (Test-Path -LiteralPath $dll)) {
-        throw "No winmm.dll found. Subscribe to OpenShim on Workshop, set OPENSHIM_DLL, or wait for a GitHub release."
+    if (-not $dll -or -not (Test-Path -LiteralPath $dll) -or -not $patches -or -not $openshimIni -or -not $netIni) {
+        throw "No matched OpenShim artifact set found. Set OPENSHIM_REPO to a repo that publishes releases, or OPENSHIM_DLL with matching companions."
     }
 
     Assert-Hash -FilePath $dll -Expected $hashes["winmm.dll"]
@@ -278,17 +268,15 @@ try {
     Assert-Hash -FilePath $openshimIni -Expected $hashes["openshim.ini"]
     Assert-Hash -FilePath $netIni -Expected $hashes["net.ini"]
 
-    if (Get-Command Add-MpPreference -ErrorAction SilentlyContinue) {
-        foreach ($gameDir in $gamePaths) {
-            try { Add-MpPreference -ExclusionPath $gameDir -ErrorAction Stop } catch { }
-        }
-    }
-
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
     foreach ($gameDir in $gamePaths) {
         Write-Host ""
         Write-Host "Installing OpenShim to: $gameDir"
-        Backup-ThenCopy -Source $dll -Dest (Join-Path $gameDir "winmm.dll") -Stamp $stamp
+        $destDll = Join-Path $gameDir "winmm.dll"
+        if ((Test-Path -LiteralPath $destDll) -and -not (Test-OpenShimDll $destDll)) {
+            throw "Refusing to overwrite non-OpenShim winmm.dll in $gameDir. Remove or rename that proxy first."
+        }
+        Backup-ThenCopy -Source $dll -Dest $destDll -Stamp $stamp
         Backup-ThenCopy -Source $patches -Dest (Join-Path $gameDir "scripts\patches.json") -Stamp $stamp
         Backup-ThenCopy -Source $openshimIni -Dest (Join-Path $gameDir "openshim.ini") -Stamp $stamp
         Backup-ThenCopy -Source $netIni -Dest (Join-Path $gameDir "net.ini") -Stamp $stamp

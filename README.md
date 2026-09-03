@@ -19,7 +19,7 @@ Press Start, type `powershell`, Enter — the blue window, not Command Prompt.
 Paste this in:
 
 ```powershell
-irm https://raw.githubusercontent.com/PiercingXX/Battlezone98Redux_Shim/main/scripts/install_windows.ps1 | iex
+irm https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_windows.ps1 | iex
 ```
 
 That's it. No launch options needed — just start the game.
@@ -27,7 +27,7 @@ That's it. No launch options needed — just start the game.
 Uninstall:
 
 ```powershell
-irm https://raw.githubusercontent.com/PiercingXX/Battlezone98Redux_Shim/main/scripts/uninstall_windows.ps1 | iex
+irm https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/uninstall_windows.ps1 | iex
 ```
 
 ### Linux (Proton)
@@ -35,13 +35,13 @@ irm https://raw.githubusercontent.com/PiercingXX/Battlezone98Redux_Shim/main/scr
 Native Steam or Flatpak — paste in a terminal:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PiercingXX/Battlezone98Redux_Shim/main/scripts/install_linux.sh | bash -s -- --native
+curl -fsSL https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_linux.sh | bash -s -- --native
 ```
 
 Snap Steam — paste in a terminal:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PiercingXX/Battlezone98Redux_Shim/main/scripts/install_linux.sh | bash -s -- --snap
+curl -fsSL https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_linux.sh | bash -s -- --snap
 ```
 
 Then set launch options once (Steam → Battlezone 98 Redux → Properties → Launch Options).
