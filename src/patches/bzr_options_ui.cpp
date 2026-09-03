@@ -447,6 +447,9 @@ namespace BZROpenShim
         static void OnShimSettingsUpdateClicked();
         static void OnShimSettingsRowClicked(size_t rowIndex);
         static void OnShimSettingsRowHovered(size_t rowIndex);
+        struct ShimSettingDescriptor;
+        static void OnShimSettingsActionRowClicked(size_t settingIndex,
+                                                   const ShimSettingDescriptor& setting);
         static void OnShimSettingsPageStepClicked(int direction);
         static bool EnsureShimSettingsUpdateTimer();
         static void ResetShimSettingsUiVisuals();
@@ -2665,6 +2668,9 @@ namespace BZROpenShim
         };
 
         static const char* const kShimSettingsOnOffValues[] = { "1", "0" };
+        // Action-row "values" are confirmation states, not settings. Index 0 is
+        // the resting cell, index 1 is what an armed row shows.
+        static const char* const kShimSettingsActionValues[] = { "Reset", "Confirm?" };
         static const char* const kShimSettingsOnOffLabels[] = { "On", "Off" };
         static const char* const kShimSettingsAutoSaveIntervalValues[] = { "60", "120", "180", "300", "600" };
         static const char* const kShimSettingsAutoSaveIntervalLabels[] = { "1 min", "2 min", "3 min", "5 min", "10 min" };
@@ -2895,12 +2901,48 @@ namespace BZROpenShim
               ShimSettingApplyGroup::RestartRequired,
               "Bandwidth governor and host auto-kick. Stock matches players who "
               "are not running OpenShim; net.ini still overrides per value." },
+            // defaultIndex 0 selects "1", which is what an absent key does: the
+            // native tracker has always run, and turning the row off must be a
+            // deliberate choice rather than the effect of a missing ini key.
+            { "Career Stats", "Career", "StatsTracking", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Record kills, deaths and missions played to career_stats.cfg across "
+              "single player and multiplayer. Local file only; nothing is uploaded, "
+              "and no mission script is required." },
+            // Action row: no ini key, no cycling. Section/key stay null so the
+            // settings reader and the lossless ini writer never touch it.
+            { "Reset Career Stats", nullptr, nullptr, nullptr, 0,
+              kShimSettingsActionValues, kShimSettingsActionValues, 2, 0,
+              ShimSettingApplyGroup::CareerStatsReset,
+              "Clear every recorded kill, death and mission play. Takes two clicks, "
+              "and keeps the previous record as career_stats.cfg.openshim.bak. "
+              "Does not turn tracking off." },
         };
         // The page count adapts to the registry (see the paging controls in
         // RefreshShimSettingsUiControls), so the registry may exceed the
         // per-page row slots.
         constexpr size_t kShimSettingsRegistryCount =
             sizeof(g_ShimSettingsRegistry) / sizeof(g_ShimSettingsRegistry[0]);
+
+        // An action row runs something on click instead of cycling an ini
+        // value. It has no section/key, so nothing in the read/write path may
+        // treat it as a setting.
+        static bool IsShimSettingActionRow(const ShimSettingDescriptor& setting)
+        {
+            return setting.applyGroup == ShimSettingApplyGroup::CareerStatsReset;
+        }
+
+        // Which action row, if any, is one click away from firing. Registry
+        // index, or kShimSettingsRegistryCount for "none". A destructive action
+        // must never happen on a single click of a row the player was only
+        // trying to read, so the first click arms and the second commits.
+        static size_t g_ShimSettingsArmedActionIndex = kShimSettingsRegistryCount;
+
+        static void DisarmShimSettingsAction()
+        {
+            g_ShimSettingsArmedActionIndex = kShimSettingsRegistryCount;
+        }
 
         static size_t ClampShimSettingsUiPageStart(size_t pageStart)
         {
@@ -2921,6 +2963,14 @@ namespace BZROpenShim
         // in openshim.ini (or the setting's default when absent/unrecognized).
         static size_t GetShimSettingCurrentIndex(const ShimSettingDescriptor& setting)
         {
+            if (IsShimSettingActionRow(setting))
+            {
+                // Index 0 is the resting label, index 1 the armed one.
+                const size_t index =
+                    static_cast<size_t>(&setting - &g_ShimSettingsRegistry[0]);
+                return (g_ShimSettingsArmedActionIndex == index) ? 1u : 0u;
+            }
+
             std::string value;
             bool found = TryGetUserConfigString(setting.section, setting.key, value);
             for (size_t alt = 0; !found && alt < setting.altKeyCount; ++alt)
@@ -2994,6 +3044,7 @@ namespace BZROpenShim
             g_ShimSettingsUiNextPageButton = nullptr;
             g_ShimSettingsUiRowLabels.fill(nullptr);
             g_ShimSettingsUiRowButtons.fill(nullptr);
+            DisarmShimSettingsAction();
         }
 
         static void SetShimSettingsUiControlsVisible(bool visible)
@@ -3268,6 +3319,17 @@ namespace BZROpenShim
                 return;
 
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[settingIndex];
+
+            if (IsShimSettingActionRow(setting))
+            {
+                OnShimSettingsActionRowClicked(settingIndex, setting);
+                return;
+            }
+
+            // Clicking anything else abandons a pending confirmation rather
+            // than leaving it armed behind the player's back.
+            DisarmShimSettingsAction();
+
             const size_t nextIndex = (GetShimSettingCurrentIndex(setting) + 1) % setting.valueCount;
             const char* const newValue = setting.values[nextIndex];
 
@@ -3296,6 +3358,54 @@ namespace BZROpenShim
                 g_ShimSettingsUiStatusText += "  (saved; runtime apply failed - see openshim.log)";
             else
                 g_ShimSettingsUiStatusText += "  (applied)";
+            RefreshShimSettingsUiControls();
+        }
+
+        // Two-click confirmation for a destructive row. The first click arms
+        // it and repaints the value cell; the second runs it. Clicking any
+        // other row, stepping pages, or leaving the page disarms.
+        static void OnShimSettingsActionRowClicked(size_t settingIndex,
+                                                   const ShimSettingDescriptor& setting)
+        {
+            if (g_ShimSettingsArmedActionIndex != settingIndex)
+            {
+                g_ShimSettingsArmedActionIndex = settingIndex;
+                g_ShimSettingsUiStatusText =
+                    std::string(setting.label) + ": click again to confirm. This cannot be undone.";
+                RefreshShimSettingsUiControls();
+                return;
+            }
+
+            DisarmShimSettingsAction();
+
+            switch (setting.applyGroup)
+            {
+            case ShimSettingApplyGroup::CareerStatsReset:
+            {
+                switch (ResetCareerStatsFromBridge())
+                {
+                case CareerStatsResetResult::Cleared:
+                    g_ShimSettingsUiStatusText =
+                        "Career statistics cleared. The previous record was kept as "
+                        "career_stats.cfg.openshim.bak";
+                    break;
+                case CareerStatsResetResult::AlreadyEmpty:
+                    g_ShimSettingsUiStatusText =
+                        "Career statistics were already empty; nothing changed.";
+                    break;
+                case CareerStatsResetResult::Failed:
+                    g_ShimSettingsUiStatusText =
+                        "Career reset failed; existing statistics were kept - see openshim.log";
+                    break;
+                }
+                break;
+            }
+            default:
+                g_ShimSettingsUiStatusText =
+                    std::string(setting.label) + ": no action is wired up for this row.";
+                break;
+            }
+
             RefreshShimSettingsUiControls();
         }
 
@@ -3410,6 +3520,9 @@ namespace BZROpenShim
             }
 
             g_ShimSettingsUiPageStart = ClampShimSettingsUiPageStart(g_ShimSettingsUiPageStart);
+            // A confirmation armed on the page being left must not survive to
+            // fire against a click on whatever lands in that slot next.
+            DisarmShimSettingsAction();
             RefreshShimSettingsUiControls();
         }
 
