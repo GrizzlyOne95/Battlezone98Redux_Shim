@@ -301,6 +301,26 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "Released TRN/INI float getter at 0x00787B60. FUN_00780160 and the terrain lighting/height readers pass section, key, float fallback, and current TRN filename; the body copies the fallback, rejects empty strings, normalizes/loads the named file through FUN_00787370, retrieves a 16-byte value through FUN_00787660, parses it with the unique percent-f sscanf path, and returns the float in ST0. The signature anchors the entry and its four-argument validation prelude."
+    },
+    {
+      "name": "MPVehicleList::LoadCallSiteNetveh",
+      "pattern": "C6 45 FC 22 8D 4D 90 51 E8 ?? ?? ?? ?? 8B C8 E8 ?? ?? ?? ??",
+      "offset": 15,
+      "mode": "address",
+      "fallback": "0x00798BE1",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The `call FUN_00766900` that loads the default multiplayer starting-vehicle pool \"netveh.odf\", inside cUI_Multiplayer_Create (FUN_00796880) on exact GOG Redux 2.2.301. Anchored on the CALL, not its operand. The pattern covers the exception-state store `mov byte [ebp-4],0x22`, the `lea ecx,[ebp-0x70] / push ecx` that passes the pool-name std::string, and the `call FUN_00764780 / mov ecx,eax` that fetches the list singleton DAT_0094548C immediately before. Identity is settled at install time by requiring this site and MPVehicleList::LoadCallSiteMission to resolve to one and the same loader; FUN_00766900 has exactly these two callers in the image."
+    },
+    {
+      "name": "MPVehicleList::LoadCallSiteMission",
+      "pattern": "8D 4D D8 51 E8 ?? ?? ?? ?? 8B C8 E8 ?? ?? ?? ?? 8B 55 D4 C7 42 38 FF FF FF FF",
+      "offset": 11,
+      "mode": "address",
+      "fallback": "0x007A3EDF",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The `call FUN_00766900` that loads the map-supplied starting-vehicle pool `<mission>.vxt`, inside FUN_007A3E60 on exact GOG Redux 2.2.301. FUN_007A3E60 rewrites the mission filename's last four characters to \".vxt\" and loads it; FUN_00766900 falls back to \"netveh.odf\" when that file is absent, so this call site is where host/map pool authority enters. Anchored on the CALL; the trailing `mov edx,[ebp-0x2C] / mov dword [edx+0x38],-1` selection reset distinguishes it from the netveh site."
     }
   ],
   "globals": [

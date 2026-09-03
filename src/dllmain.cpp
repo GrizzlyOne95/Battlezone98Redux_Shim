@@ -23,12 +23,14 @@
 #include "ogre_animation_profiler.h"
 #include "native_cpu_sampler.h"
 #include "pilot_fp_animation_trace.h"
+#include "walker_cockpit_trace.h"
 #include "openshim_sdk_v2.h"
 #include "openshim_updater.h"
 #include "render_profile_runtime.h"
 #include "ui_performance.h"
 #include "ui_performance_hooks.h"
 #include "ui_file_scan_hooks.h"
+#include "mp_faction_restrict.h"
 #include "BZROpenShim.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -49,6 +51,7 @@ static unsigned __stdcall PatchThreadProc(void*)
     // observe Ogre/D3D11 module creation before the renderer creates devices,
     // swapchains, entities, or begins normal animation submission.
     BZROpenShim::InitializePilotFpAnimationTrace();
+    BZROpenShim::InitializeWalkerCockpitTrace();
     BZROpenShim::InitializeOgreAnimationProfiler();
     BZROpenShim::InitializeDx11ColorSpaceDiagnostic();
     BZROpenShim::InitializeDx11EnhancedFxaa();
@@ -58,6 +61,12 @@ static unsigned __stdcall PatchThreadProc(void*)
     // the optimizer's existing IAT targets without changing network behavior.
     BZROpenShim::InitializeBzrNetInstrumentation();
     BZROpenShim::RunPatcher(SHIM_VERSION);
+
+    // Multiplayer starting-vehicle list faction policy. Installs after the
+    // patcher so scripts/patches.json resolves are loaded; the hook itself is
+    // inert until [Network] StockFactionsOnly is turned on, and the loader it
+    // intercepts only runs when a multiplayer screen builds its vehicle list.
+    BZROpenShim::MpFactionRestrict::InstallMpFactionRestrictIfPossible();
 
     // Shell profiler detours must not touch SteamStub-managed executable pages
     // before platform detection and code settlement. UiPerfHooks installs them
@@ -218,6 +227,7 @@ namespace BZROpenShim
         BZROpenShim::ShutdownNativeCpuSampler();
         BZROpenShim::ShutdownOpenShimUpdater();
         BZROpenShim::ShutdownOpenShimSdkV2();
+        BZROpenShim::ShutdownWalkerCockpitTrace();
         BZROpenShim::ShutdownPilotFpAnimationTrace();
         BZROpenShim::ShutdownOgreAnimationProfiler();
         // Stop the mutating presentation experiment before the read-only DX11
