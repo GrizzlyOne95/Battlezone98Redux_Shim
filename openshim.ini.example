@@ -1120,6 +1120,30 @@ StockFactionSet = as
 AllowNeutralAttackOrders = 0
 
 
+[Career]
+
+; Career statistics tracking. Records kills, deaths and missions played to
+; career_stats.cfg next to the game executable, keyed by profile and mission.
+;
+; This is engine-level and content-independent: it needs no mission script, no
+; Extra Utilities, and no per-mission tracking code. Single player attributes
+; kills and deaths per object, from the four damage handlers the shim already
+; hooks; network games use the engine's own NetPlayer::RecordDeath scoring path
+; instead, because a client's local damage simulation is not authority and
+; counting both would inflate every match.
+;
+; Everything stays on this machine -- career_stats.cfg is a local text file and
+; nothing is uploaded or sent to any peer.
+;
+; Campaign Reimagined ships a Lua CareerStats.lua that writes the same file for
+; single-player campaign missions. Both use the same key layout, so the totals
+; add up rather than conflict, but if you run that content and want exactly one
+; writer, turn this off or let the script go.
+;
+; Accepted: boolean. Default: ON (this is what an absent key does).
+StatsTracking = 1
+
+
 [SinglePlayer]
 
 ; Every setting in this section is hard-disabled in network games regardless of

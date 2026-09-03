@@ -109,6 +109,7 @@ docs/*
 !docs/SATELLITE_VISIBILITY_FIX_PLAN.md
 !docs/OPENSHIM_RENDER_PROFILE_ARCHITECTURE.md
 !docs/RENDER_PROFILE_RUNTIME_QUALIFICATION_20260824.md
+!docs/NATIVE_EVENT_LAYER.md
 
 # Local third-party source/reference checkouts
 third_party/ogre-1.10.0-bzr/_work/

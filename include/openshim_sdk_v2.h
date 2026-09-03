@@ -18,7 +18,11 @@ namespace BZROpenShim
     // publish compact copied values only; consumers drain them later from a
     // thread/context they control. This keeps arbitrary companion/Lua callbacks
     // out of engine detours.
-    void PublishOpenShimEvent(OpenShimEventType type,
+    // Returns true when the event was queued for in-process dispatch, i.e.
+    // when a subscribed sink will actually see it. The return value says
+    // nothing about the companion polling queue, which drops its oldest entry
+    // rather than refusing a new one.
+    bool PublishOpenShimEvent(OpenShimEventType type,
                               uint64_t arg0 = 0,
                               uint64_t arg1 = 0,
                               const char* text = nullptr);
