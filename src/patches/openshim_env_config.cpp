@@ -185,6 +185,16 @@ namespace
         {
             return TryReadMappedBool(mainIni, "General", "ChunkMeshes", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_CHUNK_MESH_PROXY") ||
+            Equals(name, "BZR_DISABLE_CHUNK_MESH_PROXY"))
+        {
+            return TryReadMappedBool(mainIni, "General", "ChunkMeshes", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_GENERIC_CHUNK_BATCH") ||
+            Equals(name, "BZR_DISABLE_GENERIC_CHUNK_BATCH"))
+        {
+            return TryReadMappedBool(mainIni, "General", "ChunkMeshes", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_MAP_REFRESH_FIXES") ||
             Equals(name, "BZR_DISABLE_MAP_REFRESH_FIXES"))
         {

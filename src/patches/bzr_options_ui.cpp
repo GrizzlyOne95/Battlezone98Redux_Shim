@@ -7,11 +7,13 @@
 
 #include "autosave.h"
 #include "bzr_hooks.h"
+#include "openshim_assets.h"
 #include "openshim_ini.h"
 #include "openshim_updater.h"
 #include "patcher.h"
 #include "shim_log.h"
 #include "ui_decor.h"
+#include "BZROpenShim.h"
 
 #include <Windows.h>
 #include <algorithm>
@@ -43,6 +45,75 @@ namespace BZROpenShim
 
     namespace
     {
+        // UI texture availability probe for DLL-only bootstrap.
+        // The Settings page that reports missing assets itself uses OpenShim-owned
+        // CustomWidgets tiles (uiline.png, uiplate.png, uibtn.png, uibtnhv.png).
+        // Stock BZR + winmm.dll + configs + NO assets must still produce a readable
+        // Settings page. This probe checks the filesystem for the expected tile
+        // at its deployed locations and, if absent, skips the custom texture so
+        // the page falls back to stock widget appearance / text-only.
+        static bool IsUiTextureFileAvailable(const char* textureName)
+        {
+            if (!textureName || !*textureName)
+                return false;
+            char modPath[MAX_PATH] = {};
+            DWORD len = GetModuleFileNameA(nullptr, modPath, MAX_PATH);
+            if (len == 0 || len >= MAX_PATH)
+                return false;
+            std::filesystem::path gameDir = std::filesystem::path(modPath).parent_path();
+            std::filesystem::path candidates[] = {
+                gameDir / "BZ_ASSETS_CORE" / "common" / "ui" / "CustomWidgets" / textureName,
+                gameDir / "BZ_ASSETS" / "common" / "ui" / textureName,
+                gameDir / "resources" / "ui" / "custom_widgets" / textureName,
+                gameDir / textureName,
+            };
+            std::error_code ec;
+            for (auto &cand : candidates)
+            {
+                if (std::filesystem::exists(cand, ec) && !ec)
+                    return true;
+            }
+            // Also consider blackui.png and other stock textures that may live in
+            // the game's data archives, not on loose filesystem. If we cannot
+            // prove it exists on disk, we still try to set it once and rely on
+            // Ogre's missing-resource handling (which is non-crashing). This
+            // keeps stock installs working even when loose files are packed in
+            // archives. For CustomWidgets tiles, the loose file *is* the
+            // deployment, so missing loose file means missing tile.
+            // Treat CustomWidgets tiles as unavailable when loose file missing;
+            // other textures (blackui, mpcron) are assumed available via stock
+            // archives and we return true to attempt the set.
+            std::string lower = textureName;
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c){ return (char)std::tolower(c); });
+            if (lower == "uiline.png" || lower == "uiplate.png" || lower == "uibtn.png" || lower == "uibtnhv.png")
+                return false;
+            return true;
+        }
+
+        static bool TrySetUiTexture(void* widget, const char* textureName, FnUiSetStr setter)
+        {
+            if (!widget || !setter || !textureName || !*textureName)
+                return false;
+            if (!IsUiTextureFileAvailable(textureName))
+            {
+                static bool s_logged = false;
+                if (!s_logged)
+                {
+                    s_logged = true;
+                    Log(L"[SETTINGSUI] Custom UI tile not found, using fallback for %hs\n", textureName);
+                }
+                // For CustomWidgets tiles, skip the custom texture and keep the
+                // widget's default (stock) appearance so the page remains readable.
+                // For stock textures we still attempt the set above (handled in IsUiTextureFileAvailable).
+                std::string lower = textureName;
+                std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c){ return (char)std::tolower(c); });
+                if (lower == "uiline.png" || lower == "uiplate.png" || lower == "uibtn.png" || lower == "uibtnhv.png")
+                    return false;
+            }
+            setter(widget, textureName);
+            return true;
+        }
+
         // The shipped GOG PDB public-symbol addresses for cUI_OptionsInput methods
         // are not reliable function-entry hooks against the current Redux binary.
         // The stock input screen constructor was recovered from string xrefs instead.
@@ -1741,9 +1812,15 @@ namespace BZROpenShim
                 if (!slot)
                     return false;
 
+                if (IsUiTextureFileAvailable("uibtn.png")) {
                 if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(slot, "uibtn.png");
                 if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(slot, "uibtnhv.png");
                 if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(slot, "uibtnhv.png");
+            } else {
+                // Fallback: use stock button texture if available, otherwise keep default
+                if (g_BzrFn_SetTextureOff && IsUiTextureFileAvailable("mpcron.png"))
+                    g_BzrFn_SetTextureOff(slot, "mpcron.png");
+            }
                 g_BzrFn_AddChild(parent, slot, 0);
             }
 
@@ -1780,9 +1857,12 @@ namespace BZROpenShim
             if (!CreateInputBindingUiButton(slot, parent, objectName, "", x, y, w, h, nullptr))
                 return false;
 
-            if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(slot, "uiplate.png");
-            if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(slot, "uiplate.png");
-            if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(slot, "uiplate.png");
+            if (IsUiTextureFileAvailable("uiplate.png")) {
+                if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(slot, "uiplate.png");
+                if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(slot, "uiplate.png");
+                if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(slot, "uiplate.png");
+            } // else keep default plate appearance
+
             return true;
         }
 
@@ -1802,9 +1882,11 @@ namespace BZROpenShim
                 return false;
 
             const char* texture = (textureName && *textureName) ? textureName : "uiline.png";
-            if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(slot, texture);
-            if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(slot, texture);
-            if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(slot, texture);
+            if (IsUiTextureFileAvailable(texture)) {
+                if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(slot, texture);
+                if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(slot, texture);
+                if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(slot, texture);
+            } // else keep default decor appearance for DLL-only
             return true;
         }
 
@@ -1918,6 +2000,8 @@ namespace BZROpenShim
                 { slots.topMask, "TopMask", "blackui.png", layout.topMask },
                 { slots.contentMask, "ContentMask", "blackui.png", layout.contentMask },
             };
+            // blackui.png is stock; if CustomWidgets tiles are missing we still want the
+            // Settings page to be readable. The TrySetUiTexture helper will handle fallback.
 
             char controlName[96] = {};
             for (const BackgroundLayer& layer : layers)
@@ -3140,22 +3224,85 @@ namespace BZROpenShim
             const UiOptionsPageLayout layout =
                 BuildUiOptionsPageLayout(kShimSettingsUiRowsPerColumn);
 
+            // Header shows static title; asset-pack status lives in the footer
+            // so it is always visible, even when a row hover overwrites the
+            // status lines. The status lines keep showing the last click result
+            // or hover description exactly as before.
             SetInputBindingUiLabelTextFitted(g_ShimSettingsUiHeaderLabel, "OpenShim Settings",
                                              layout.headerTextWidth);
-            SetInputBindingUiWrappedLabelText(g_ShimSettingsUiStatusLabel,
-                                              g_ShimSettingsUiStatusDetailLabel,
-                                              g_ShimSettingsUiStatusText.c_str(),
-                                              layout.headerTextWidth);
+            if (g_ShimSettingsUiStatusText.empty())
+            {
+                const auto& caps = Assets::GetAssetCapabilities();
+                std::string runtimeStatus;
+                // Build concise runtime line: version + distribution + asset status
+                const uint32_t shimVer = GetShimVersion();
+                const BZROpenShim::BzrDistribution dist = BZROpenShim::GetBzrDistribution();
+                const char* distName = (dist == BZROpenShim::BzrDistribution::Steam) ? "Steam"
+                                     : (dist == BZROpenShim::BzrDistribution::GOG) ? "GOG"
+                                                                                    : "Unknown";
+                runtimeStatus = "Runtime: Active  Version: " + std::to_string(shimVer) +
+                                "  Game: " + distName + " 2.2.301  " +
+                                Assets::FormatAssetStatusForUi(caps);
+                SetInputBindingUiWrappedLabelText(g_ShimSettingsUiStatusLabel,
+                                                  g_ShimSettingsUiStatusDetailLabel,
+                                                  runtimeStatus.c_str(),
+                                                  layout.headerTextWidth);
+            }
+            else
+            {
+                SetInputBindingUiWrappedLabelText(g_ShimSettingsUiStatusLabel,
+                                                  g_ShimSettingsUiStatusDetailLabel,
+                                                  g_ShimSettingsUiStatusText.c_str(),
+                                                  layout.headerTextWidth);
+            }
             const OpenShimUpdateSnapshot update = GetOpenShimUpdateSnapshot();
             SetInputBindingUiButtonTextFitted(
                 g_ShimSettingsUiUpdateButton,
                 update.busy ? "Checking..." : "Check for Updates",
                 kShimSettingsUiToolbarWidths[1] - kUiToolbarCaptionPadding);
-            SetInputBindingUiWrappedLabelText(
-                g_ShimSettingsUiFooterLabel,
-                g_ShimSettingsUiFooterDetailLabel,
-                "Click a value to cycle it. Changes never apply in multiplayer. * = after restart.",
-                layout.headerTextWidth);
+            // Footer always shows asset-pack status detail plus the hint, so
+            // DLL-only users immediately see why asset features are suppressed.
+            // Cached capabilities (startup probe) are used; no synchronous
+            // Workshop tree scan occurs here. Scan duration is instrumented in
+            // Assets::EvaluateAssetCapabilitiesAt and logged once.
+            {
+                const auto& caps = Assets::GetAssetCapabilities();
+                std::string footerLine1 = Assets::FormatAssetStatusForUi(caps);
+                std::string footerLine2;
+                if (caps.state == Assets::AssetPackState::NotDetected)
+                {
+                    // Truthful separation: pack not detected vs compatible resources available (unrelated mod).
+                    if (caps.destructionChunks || caps.enhancedResources || caps.terrainHd)
+                        footerLine2 = Assets::FormatAssetCapabilitiesDetail(caps);
+                    else
+                        footerLine2 = "Asset-dependent features are unavailable.";
+                }
+                else if (caps.state == Assets::AssetPackState::Incompatible)
+                {
+                    std::string v = !caps.installedCompatibilityVersion.empty() ? caps.installedCompatibilityVersion : caps.installedVersion;
+                    std::string exp = caps.expectedCompatibilityVersion;
+                    footerLine2 = "Installed: " + v + " Expected: " + exp + " — update the asset pack.";
+                    if (!caps.problem.empty() && caps.problem.find(v) == std::string::npos)
+                        footerLine2 += " " + caps.problem;
+                }
+                else if (!caps.destructionChunks || !caps.enhancedResources || caps.terrainHd)
+                {
+                    std::string detail = Assets::FormatAssetCapabilitiesDetail(caps);
+                    if (!detail.empty() && detail != "Asset-dependent features are unavailable.")
+                        footerLine2 = detail;
+                    else
+                        footerLine2 = "Click a value to cycle it. * = after restart. (Some asset groups unavailable)";
+                }
+                else
+                    footerLine2 = "Click a value to cycle it. Changes never apply in multiplayer. * = after restart.";
+                // Use the two footer labels as two physical lines.
+                SetInputBindingUiLabelTextFitted(g_ShimSettingsUiFooterLabel,
+                                                 footerLine1.c_str(),
+                                                 layout.headerTextWidth);
+                SetInputBindingUiLabelTextFitted(g_ShimSettingsUiFooterDetailLabel,
+                                                 footerLine2.c_str(),
+                                                 layout.headerTextWidth);
+            }
 
             // Paging controls only appear once the registry outgrows one page;
             // blank the captions too, an inactive caption keeps drawing.
@@ -3198,10 +3345,40 @@ namespace BZROpenShim
                 }
 
                 const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[index];
-                const size_t valueIndex = GetShimSettingCurrentIndex(setting);
-                std::string valueText = setting.valueLabels[valueIndex];
-                if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
-                    valueText += " *";
+                // Will be defined after ShimSettingDescriptor; use a lambda-style check here via
+                // a forward-declared helper is not possible at this point, so we inline the
+                // asset-availability probe using string compare and the central service.
+                bool assetAvailable = true;
+                {
+                    const auto& caps = Assets::GetAssetCapabilities();
+                    if (caps.state != Assets::AssetPackState::Unknown)
+                    {
+                        if (setting.section && setting.key)
+                        {
+                            if (std::strcmp(setting.section, "General") == 0 &&
+                                std::strcmp(setting.key, "ChunkMeshes") == 0)
+                                assetAvailable = Assets::IsAssetFeatureAvailable(Assets::AssetFeature::DestructionChunks);
+                            else if (std::strcmp(setting.section, "DX11Enhanced") == 0 &&
+                                     (std::strcmp(setting.key, "FXAA") == 0 ||
+                                      std::strcmp(setting.key, "EnhancedLightSelectionV2") == 0))
+                                assetAvailable = Assets::IsAssetFeatureAvailable(Assets::AssetFeature::EnhancedRenderer);
+                        }
+                    }
+                }
+                std::string valueText;
+                if (!assetAvailable)
+                {
+                    // Visible but clearly unavailable, rather than hidden.
+                    // Keep the label so the user sees what it would control.
+                    valueText = "Unavailable";
+                }
+                else
+                {
+                    const size_t valueIndex = GetShimSettingCurrentIndex(setting);
+                    valueText = setting.valueLabels[valueIndex];
+                    if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
+                        valueText += " *";
+                }
                 SetInputBindingUiLabelTextFitted(g_ShimSettingsUiRowLabels[slot], setting.label,
                                                  layout.rowLabelTextWidth);
                 SetInputBindingUiButtonTextFitted(g_ShimSettingsUiRowButtons[slot],
@@ -3355,6 +3532,46 @@ namespace BZROpenShim
                 return;
 
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[settingIndex];
+
+            // Block toggling asset-backed features when their resources are absent.
+            // This protects users who copied an old openshim.ini with
+            // ChunkMeshes=1 into a stock install. DX11 rows are gated on the
+            // parent renderer resource, not the pack, for accuracy.
+            {
+                const auto& caps = Assets::GetAssetCapabilities();
+                bool avail = true;
+                bool isDx11Row = false;
+                if (caps.state != Assets::AssetPackState::Unknown && setting.section && setting.key)
+                {
+                    if (std::strcmp(setting.section, "General") == 0 &&
+                        std::strcmp(setting.key, "ChunkMeshes") == 0)
+                        avail = Assets::IsAssetFeatureAvailable(Assets::AssetFeature::DestructionChunks);
+                    else if (std::strcmp(setting.section, "DX11Enhanced") == 0 &&
+                             (std::strcmp(setting.key, "FXAA") == 0 ||
+                              std::strcmp(setting.key, "EnhancedLightSelectionV2") == 0))
+                    {
+                        isDx11Row = true;
+                        avail = Assets::IsAssetFeatureAvailable(Assets::AssetFeature::EnhancedRenderer);
+                    }
+                }
+                if (!avail)
+                {
+                    const char* reason = nullptr;
+                    if (isDx11Row)
+                        reason = "Unavailable — Enhanced renderer resources not detected";
+                    else if (caps.state == Assets::AssetPackState::NotDetected)
+                        reason = "Unavailable — OpenShim asset pack not detected";
+                    else if (caps.state == Assets::AssetPackState::Incompatible)
+                        reason = "Unavailable — asset pack version mismatch";
+                    else
+                        reason = "Unavailable — required assets missing";
+                    g_ShimSettingsUiStatusText = reason;
+                    Log(L"[SETTINGSUI] Asset-backed setting blocked %hs: %hs\n",
+                        setting.key, reason);
+                    RefreshShimSettingsUiControls();
+                    return;
+                }
+            }
 
             if (IsShimSettingActionRow(setting))
             {
@@ -3524,7 +3741,51 @@ namespace BZROpenShim
             if (settingIndex >= kShimSettingsRegistryCount)
                 return;
 
-            const char* description = g_ShimSettingsRegistry[settingIndex].description;
+            const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[settingIndex];
+            // If this asset-backed row is currently unavailable, show that
+            // reason instead of the normal description so the user understands
+            // why it cannot be toggled. DX11 rows report the parent renderer
+            // resource, not the pack, for diagnostic accuracy.
+            {
+                const auto& caps = Assets::GetAssetCapabilities();
+                bool avail = true;
+                bool isDx11Row = false;
+                if (caps.state != Assets::AssetPackState::Unknown && setting.section && setting.key)
+                {
+                    if (std::strcmp(setting.section, "General") == 0 &&
+                        std::strcmp(setting.key, "ChunkMeshes") == 0)
+                        avail = Assets::IsAssetFeatureAvailable(Assets::AssetFeature::DestructionChunks);
+                    else if (std::strcmp(setting.section, "DX11Enhanced") == 0 &&
+                             (std::strcmp(setting.key, "FXAA") == 0 ||
+                              std::strcmp(setting.key, "EnhancedLightSelectionV2") == 0))
+                    {
+                        isDx11Row = true;
+                        avail = Assets::IsAssetFeatureAvailable(Assets::AssetFeature::EnhancedRenderer);
+                    }
+                }
+                if (!avail)
+                {
+                    const char* reason = nullptr;
+                    if (isDx11Row)
+                        reason = "Unavailable — Enhanced renderer resources not detected";
+                    else if (caps.state == Assets::AssetPackState::NotDetected)
+                        reason = "Unavailable — OpenShim asset pack not detected";
+                    else if (caps.state == Assets::AssetPackState::Incompatible)
+                        reason = "Unavailable — asset pack version mismatch";
+                    else if (std::strcmp(setting.section, "General") == 0 &&
+                             std::strcmp(setting.key, "ChunkMeshes") == 0)
+                        reason = "Unavailable — chunk payloads missing";
+                    else
+                        reason = "Unavailable — required assets missing";
+                    const UiOptionsPageLayout layout = BuildUiOptionsPageLayout(kShimSettingsUiRowsPerColumn);
+                    SetInputBindingUiWrappedLabelText(g_ShimSettingsUiStatusLabel,
+                                                      g_ShimSettingsUiStatusDetailLabel,
+                                                      reason,
+                                                      layout.headerTextWidth);
+                    return;
+                }
+            }
+            const char* description = setting.description;
             if (description && *description)
             {
                 // Not a hand-picked width: the hover path used to fit to a flat
