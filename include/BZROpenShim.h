@@ -51,6 +51,41 @@ namespace BZROpenShim
         ShutdownStarted            = 4,
         DeveloperSnapshotCaptured  = 5,
         NativeUiAction             = 6,
+
+        // Simulation events. Unlike the lifecycle values above these come from
+        // the game world, so they exist in single player and network games
+        // alike and carry engine handles rather than shim state.
+        //
+        // Their four int32 payload slots are packed into arg0/arg1 by
+        // BZROpenShim::PublishSimEvent and unpacked by SimEventArg (see
+        // openshim_events.h):
+        //     arg0 = (uint32)slot0 | ((uint64)(uint32)slot1 << 32)
+        //     arg1 = (uint32)slot2 | ((uint64)(uint32)slot3 << 32)
+        //
+        //   SimSessionStarted  slot0 = 1 for a network game, 0 single player
+        //   SimSessionEnded    slot0 = 1 for a network game, 0 single player
+        //   SimDamage          slot0 = victim handle, slot1 = damager handle,
+        //                      slot2 = 1 when the victim was the local player's
+        //                      object, slot3 = 1 when the damager was
+        //   SimKill            same four slots as SimDamage
+        //   SimTeamDeath       slot0 = killed team,   slot1 = killer team
+        //
+        // Handles are GameObject handles; resolve them through the engine, and
+        // treat a handle that no longer resolves as an object that is gone.
+        //
+        // The two local-player flags are sampled when the DAMAGE lands, not
+        // when the kill is derived, because the player handle moves at the
+        // moment of death: a destroyed craft ejects a pilot, and GetPlayerHandle
+        // then names the pilot. Comparing handles after the fact would miss
+        // every one of the player's own deaths.
+        // SimDamage is high-frequency and is delivered to in-process sinks
+        // only -- it is deliberately kept out of this polling queue so a busy
+        // battle cannot evict the lifecycle events companions rely on.
+        SimSessionStarted          = 7,
+        SimSessionEnded            = 8,
+        SimDamage                  = 9,
+        SimKill                    = 10,
+        SimTeamDeath               = 11,
     };
 
     // ABI-stable copied event record. No pointers into Battlezone/Ogre memory

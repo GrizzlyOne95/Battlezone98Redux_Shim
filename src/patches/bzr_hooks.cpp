@@ -22,6 +22,7 @@
 #include "lcbench_safety_policy.h"
 #include "hook_engine.h"
 #include "ui_performance.h"
+#include "openshim_events.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -12154,6 +12155,651 @@ namespace BZROpenShim
             return player != nullptr && IsLiveHeadlightObjectSlot(player);
         }
 
+        // ====================================================================
+        // CAREER STATISTICS ON THE NATIVE EVENT LAYER
+        // ====================================================================
+        //
+        // WHY THIS EXISTS
+        //
+        // Career statistics used to be two disconnected things. Campaign
+        // Reimagined tracked single-player kills in Lua (Scripts/CareerStats.lua)
+        // on top of EXU's BulletHit patch, so only content that shipped that
+        // script counted anything. OpenShim tracked multiplayer kills natively,
+        // but only through NetPlayer::RecordDeath, which reports TEAMS, not
+        // objects, and never runs outside a network game.
+        //
+        // The network-only part is structural, not incidental. RecordDeath
+        // (0x00577290) has exactly one caller, the score-notify helper
+        // 0x004B9BA0, and every one of that helper's four call sites is guarded
+        // by 0x00572A70 -> 0x00571C40, whose entire body is
+        // `return DAT_00917F7B` -- the isNetGame global. So no amount of work
+        // on that path can ever produce a single-player statistic.
+        //
+        // WHAT REPLACES IT
+        //
+        // The four damage handlers ARE shared between single player and network
+        // games, and OpenShim already rides all four of them: the "Damage
+        // Reveal Probe 1..4/4" call-site patches replace the four rel32 calls to
+        // GameObject::SetDamageFlags at 0x0047EFA0, 0x004AA678, 0x005A0CE2 and
+        // 0x005AA372. That hook sees (victim, DAMAGE{damager, source}) on every
+        // damage application in all content, which is exactly the attribution
+        // the Lua version had to reconstruct by polling GetWhoShotMe.
+        //
+        // SetDamageFlags runs BEFORE the damage is applied, so it cannot report
+        // a kill by itself. Each of those four handlers then applies damage and
+        // tests, in the decompiled form:
+        //
+        //     if (healthRatio <= 0.0 && healthRatio != 0.0 &&
+        //         (objectState->flags & 0x200) == 0) {
+        //         objectState->flags |= 0x200;      // <- unconditional
+        //         if (isNetGame() && GetTeam() != 0) {
+        //             RecordDeath(...); NotifyScore(...);   // <- net only
+        //         }
+        //     }
+        //
+        // The latch write is outside the network gate. So the death signal is
+        // available everywhere; only the scoring built on it was gated. This
+        // code therefore records the damage association at SetDamageFlags time
+        // and resolves the death on the next safe tick, which is the same
+        // pending-victim design CareerStats.lua already validated in Lua
+        // (PendingVictims / PendingTimeout), lifted into the engine layer so
+        // every mission gets it without shipping a script.
+        //
+        // FIELD EVIDENCE
+        //
+        //   healthRatio  complete+0x200  float
+        //       GameObject::Save (0x004DE110) emits
+        //       ::out(file, this + 0x200, 4, "healthRatio"), and the four
+        //       damage handlers test that same float. Note the engine's test is
+        //       `<= 0.0 && != 0.0`, i.e. strictly less than zero; exactly 0.0 is
+        //       NOT death. This mirrors that rather than "fixing" it.
+        //   objectState  complete+0xF4   pointer
+        //       Already used by GameObjectHandleGetObjHardened above, which
+        //       reads the same +0xF4 -> +0x14 flags word.
+        //   death latch  objectState+0x14 bit 0x200
+        //       Set exactly once per object, by the block quoted above.
+        //
+        // SCOPE, AND WHY THE TWO SOURCES DO NOT DOUBLE-COUNT
+        //
+        // Single player uses the damage-derived path: per-object attribution
+        // against the local player's own handle. Network games keep using
+        // RecordDeath, which is the engine's own authoritative scoring path --
+        // a client's local damage simulation is not authority, and counting
+        // both would inflate every multiplayer session. The split is enforced
+        // in CareerRecordDerivedKill / the TeamDeath sink case below.
+
+        static constexpr bool kCareerStatsEnabledDefault = true;
+        static bool g_CareerStatsEnabled = kCareerStatsEnabledDefault;
+        static bool g_CareerStatsSinkRegistered = false;
+
+        // GameObject::GetHandle. Already relied on by GameObjectFromHandleGog
+        // above, which round-trips through it to reject stale pool slots.
+        static constexpr uintptr_t kGogGameObjectGetHandleAddr = 0x00462380;
+        static constexpr size_t kGameObjectHealthRatioOffset = 0x200;
+        // complete+0xF4 is the object-state pointer; see
+        // GameObjectHandleGetObjHardened above, which reads the same field.
+        static constexpr size_t kGameObjectStateOffset = 0xF4;
+        static constexpr size_t kGameObjectStateFlagsOffset = 0x14;
+        static constexpr uint32_t kGameObjectStateDeathRecordedFlag = 0x200u;
+
+        // Bounded on purpose: this is a fixed table walked once per frame, not
+        // a map that grows with the battle. Anything that outlives the timeout
+        // without dying is not a kill anyone is waiting on.
+        static constexpr size_t kCareerPendingVictimCapacity = 64;
+        static constexpr uint64_t kCareerPendingVictimTimeoutMs = 2000;
+
+        struct CareerPendingVictim
+        {
+            bool inUse = false;
+            int victimHandle = 0;
+            int damagerHandle = 0;
+            // Sampled at damage time and sticky thereafter. See the note on
+            // SimKill in BZROpenShim.h: GetPlayerHandle moves the instant the
+            // player's craft dies, so this cannot be re-derived at kill time.
+            bool victimWasLocalPlayer = false;
+            bool damagerWasLocalPlayer = false;
+            uint64_t firstSeenMs = 0;
+            uint64_t lastDamageMs = 0;
+        };
+
+        // Touched only from the event drain, which runs on the game's main
+        // thread from LegacyWorldUpdateRenderQueueHook. Producers never reach
+        // it; they only publish.
+        static CareerPendingVictim g_CareerPendingVictims[kCareerPendingVictimCapacity] = {};
+
+        static bool TryGetGameObjectHandleValue(void* objectPtr, int& outHandle)
+        {
+            outHandle = 0;
+            if (!objectPtr)
+                return false;
+
+            using GetHandleThiscallFn = uint32_t(__thiscall*)(void*);
+            __try
+            {
+                outHandle = static_cast<int>(
+                    reinterpret_cast<GetHandleThiscallFn>(kGogGameObjectGetHandleAddr)(objectPtr));
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outHandle = 0;
+            }
+            return outHandle != 0;
+        }
+
+        // Mirrors the engine's own death test. Both signals are read because
+        // either one alone has a hole: healthRatio is reset by the load path,
+        // and the latch is only set by the four handlers this rides on.
+        //
+        // No TryGetGameObjectFieldBase here on purpose. This runs once per
+        // pending victim per frame, and that helper costs two VirtualQuery
+        // calls; the caller has already round-tripped the handle through
+        // GameObject::GetHandle, which is what proves the slot is a live
+        // GameObject, and the pool arena is always mapped. The __try stays as
+        // the backstop.
+        static bool TryReadGameObjectDeathState(void* objectPtr, bool& outDead)
+        {
+            outDead = false;
+            if (!objectPtr)
+                return false;
+
+            auto* base = reinterpret_cast<const uint8_t*>(objectPtr);
+            __try
+            {
+                const float healthRatio =
+                    *reinterpret_cast<const float*>(base + kGameObjectHealthRatioOffset);
+                bool dead = (healthRatio < 0.0f);
+
+                void* objectState =
+                    *reinterpret_cast<void* const*>(base + kGameObjectStateOffset);
+                if (objectState)
+                {
+                    const uint32_t flags = *reinterpret_cast<const uint32_t*>(
+                        reinterpret_cast<const uint8_t*>(objectState) +
+                        kGameObjectStateFlagsOffset);
+                    if ((flags & kGameObjectStateDeathRecordedFlag) != 0)
+                        dead = true;
+                }
+
+                outDead = dead;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void ClearCareerPendingVictims()
+        {
+            for (auto& entry : g_CareerPendingVictims)
+                entry = CareerPendingVictim{};
+        }
+
+        // Producer side. Called from DamageRevealProbeHook, so it must stay
+        // cheap: read two DAMAGE fields, resolve them with the engine's own
+        // accessor, take two guarded GetHandle calls, copy into the queue.
+        // No VirtualQuery and no field validation on this path -- everything
+        // that can afford to be careful happens on the drain instead.
+        //
+        // DAMAGE layout: [0] damager obj76, [1] dmg_source obj76. Those are the
+        // only two fields SetDamageFlags itself reads, and the obj76 ->
+        // GameObject step uses the engine accessor at 0x00479F30 that
+        // SetDamageFlags uses, so no offset is assumed here either.
+        // Gated on subscribers alone, not on g_CareerStatsEnabled: the career
+        // sink unsubscribes when the feature is turned off, so "career stats
+        // off and nothing else listening" already collapses to zero cost here,
+        // and a future subscriber gets these events without having to be
+        // wired into a career-specific predicate.
+        static void PublishDamageForCareerStatsFromProbe(void* victim, void* damage)
+        {
+            if (!HasEventSubscribers())
+                return;
+
+            int victimHandle = 0;
+            if (!TryGetGameObjectHandleValue(victim, victimHandle))
+                return;
+
+            void* damagerObj76 = nullptr;
+            void* sourceObj76 = nullptr;
+            __try
+            {
+                auto* fields = reinterpret_cast<void* const*>(damage);
+                damagerObj76 = fields[0];
+                sourceObj76 = fields[1];
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                damagerObj76 = nullptr;
+                sourceObj76 = nullptr;
+            }
+
+            // Prefer the damager; a collision reports the same obj76 in both
+            // fields, and the source is the fallback when the damager is gone.
+            void* attackerObj76 = damagerObj76 ? damagerObj76 : sourceObj76;
+
+            void* damagerGameObj = nullptr;
+            if (attackerObj76 && g_BzrFn_ResolveObj76GameObject)
+            {
+                __try
+                {
+                    damagerGameObj = g_BzrFn_ResolveObj76GameObject(attackerObj76);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    damagerGameObj = nullptr;
+                }
+            }
+
+            int damagerHandle = 0;
+            TryGetGameObjectHandleValue(damagerGameObj, damagerHandle);
+
+            // Resolved here, while the handles still mean what they say.
+            int playerHandle = 0;
+            if (g_BzrFn_GetPlayerHandle)
+                playerHandle = g_BzrFn_GetPlayerHandle();
+
+            PublishSimEvent(OpenShimEventType::SimDamage,
+                            victimHandle,
+                            damagerHandle,
+                            (playerHandle != 0 && victimHandle == playerHandle) ? 1 : 0,
+                            (playerHandle != 0 && damagerHandle == playerHandle) ? 1 : 0);
+        }
+
+        // Drain side: remember who last damaged this victim.
+        static void CareerNoteDamageEvent(const OpenShimEvent& event)
+        {
+            const int victimHandle = SimEventArg(event, 0);
+            if (victimHandle == 0)
+                return;
+
+            CareerPendingVictim* slot = nullptr;
+            CareerPendingVictim* oldest = nullptr;
+
+            for (auto& entry : g_CareerPendingVictims)
+            {
+                if (entry.inUse && entry.victimHandle == victimHandle)
+                {
+                    slot = &entry;
+                    break;
+                }
+                if (!entry.inUse && !slot)
+                    slot = &entry;
+                if (entry.inUse && (!oldest || entry.firstSeenMs < oldest->firstSeenMs))
+                    oldest = &entry;
+            }
+
+            // Full table: evict the oldest rather than drop the newest. A stale
+            // entry is by definition the one least likely to still resolve.
+            if (!slot)
+                slot = oldest;
+            if (!slot)
+                return;
+
+            if (!slot->inUse || slot->victimHandle != victimHandle)
+            {
+                *slot = CareerPendingVictim{};
+                slot->inUse = true;
+                slot->victimHandle = victimHandle;
+                slot->firstSeenMs = event.tickMs;
+            }
+
+            slot->lastDamageMs = event.tickMs;
+            // Last damager wins, which is what "who got the kill" means.
+            const int damagerHandle = SimEventArg(event, 1);
+            if (damagerHandle != 0)
+                slot->damagerHandle = damagerHandle;
+            // Sticky: the player who put the first shot in still counts even if
+            // something else lands the last one, and the victim being the
+            // player is not something a later hit can undo.
+            if (SimEventArg(event, 2) != 0)
+                slot->victimWasLocalPlayer = true;
+            if (SimEventArg(event, 3) != 0)
+                slot->damagerWasLocalPlayer = true;
+        }
+
+        // Drain side, once per frame: turn pending damage into Kill events.
+        static void TickCareerPendingVictims()
+        {
+            if (!HasEventSubscribers())
+                return;
+
+            const uint64_t now = GetTickCount64();
+
+            for (auto& entry : g_CareerPendingVictims)
+            {
+                if (!entry.inUse)
+                    continue;
+
+                // Re-resolve by handle, never by the stored pointer. The object
+                // arena is a fixed slot table, so a freed slot is reused at the
+                // same address by the next object; the handle's generation bits
+                // are the only thing that distinguishes them.
+                void* object = GameObjectFromHandleGog(entry.victimHandle);
+
+                bool died = false;
+                if (!object)
+                {
+                    // Handle no longer resolves: the object left the pool. It
+                    // was being damaged moments ago, so treat that as a death.
+                    died = true;
+                }
+                else
+                {
+                    bool dead = false;
+                    if (TryReadGameObjectDeathState(object, dead) && dead)
+                        died = true;
+                }
+
+                if (died)
+                {
+                    PublishSimEvent(OpenShimEventType::SimKill,
+                                    entry.victimHandle,
+                                    entry.damagerHandle,
+                                    entry.victimWasLocalPlayer ? 1 : 0,
+                                    entry.damagerWasLocalPlayer ? 1 : 0);
+                    entry = CareerPendingVictim{};
+                    continue;
+                }
+
+                if (now - entry.lastDamageMs >= kCareerPendingVictimTimeoutMs)
+                    entry = CareerPendingVictim{};
+            }
+        }
+
+        // Career persistence for one derived kill. Single player only -- see
+        // the double-counting note in this block's header.
+        static void CareerRecordDerivedKill(const OpenShimEvent& event)
+        {
+            if (!g_CareerStatsEnabled || !IsSinglePlayerSession())
+                return;
+
+            const bool localDeath = SimEventArg(event, 2) != 0;
+            const bool localKill = (SimEventArg(event, 3) != 0) && !localDeath;
+            if (!localDeath && !localKill)
+                return;
+
+            AcquireSRWLockExclusive(&g_CareerStatsLock);
+
+            std::unordered_map<std::string, std::string> data;
+            LoadCareerStatsFile(data);
+            data["meta.version"] = "1";
+
+            const std::string profileKey = ResolveCareerStatsProfileKey();
+            const std::string missionKey = ResolveCareerStatsMissionKey();
+            const std::string profilePrefix = "profile." + profileKey;
+
+            if (localKill)
+            {
+                IncrementCareerStatsInteger(data, profilePrefix + ".career.totalKills", 1);
+                IncrementCareerStatsInteger(data, profilePrefix + ".career.spKills", 1);
+                if (!missionKey.empty())
+                    IncrementCareerStatsInteger(data, profilePrefix + ".mission." + missionKey + ".kills", 1);
+            }
+            if (localDeath)
+            {
+                IncrementCareerStatsInteger(data, profilePrefix + ".career.totalDeaths", 1);
+                IncrementCareerStatsInteger(data, profilePrefix + ".career.spDeaths", 1);
+                if (!missionKey.empty())
+                    IncrementCareerStatsInteger(data, profilePrefix + ".mission." + missionKey + ".deaths", 1);
+            }
+
+            if (!SaveCareerStatsFile(data))
+            {
+                const std::string path = GetCareerStatsPath().string();
+                Log(L"[CAREER] Failed writing single-player career stats file: %hs\n", path.c_str());
+            }
+
+            ReleaseSRWLockExclusive(&g_CareerStatsLock);
+        }
+
+        // One mission play per single-player session. The multiplayer
+        // equivalent is already owned by CareerStatsMpSessionThreadProc, which
+        // needs its own poll because a network match can start without this
+        // driver having seen a world transition.
+        static void CareerRecordSinglePlayerSessionStart()
+        {
+            if (!g_CareerStatsEnabled)
+                return;
+
+            AcquireSRWLockExclusive(&g_CareerStatsLock);
+
+            const std::string profileKey = ResolveCareerStatsProfileKey();
+            const std::string missionKey = ResolveCareerStatsMissionKey();
+            if (!profileKey.empty() && !missionKey.empty())
+            {
+                std::unordered_map<std::string, std::string> data;
+                LoadCareerStatsFile(data);
+                data["meta.version"] = "1";
+
+                const std::string profilePrefix = "profile." + profileKey;
+                IncrementCareerStatsInteger(data, profilePrefix + ".career.missionsPlayed", 1);
+                IncrementCareerStatsInteger(data, profilePrefix + ".career.spMissionsPlayed", 1);
+                IncrementCareerStatsInteger(
+                    data, profilePrefix + ".mission." + missionKey + ".plays", 1);
+
+                if (SaveCareerStatsFile(data))
+                {
+                    Log(L"[CAREER] Recorded single-player mission start profile=%hs mission=%hs\n",
+                        profileKey.c_str(), missionKey.c_str());
+                }
+                else
+                {
+                    const std::string path = GetCareerStatsPath().string();
+                    Log(L"[CAREER] Failed writing single-player mission start file: %hs\n", path.c_str());
+                }
+            }
+
+            ReleaseSRWLockExclusive(&g_CareerStatsLock);
+        }
+
+        static void CareerStatsEventSink(const OpenShimEvent& event, void* /*user*/)
+        {
+            if (!g_CareerStatsEnabled)
+                return;
+
+            switch (static_cast<OpenShimEventType>(event.type))
+            {
+            case OpenShimEventType::SimDamage:
+                CareerNoteDamageEvent(event);
+                break;
+            case OpenShimEventType::SimKill:
+                CareerRecordDerivedKill(event);
+                break;
+            case OpenShimEventType::SimTeamDeath:
+                // Network authority path. RecordMultiplayerCareerStats already
+                // filters to the local team and does its own file work; it is
+                // called here rather than from the detour so no engine hook
+                // holds a lock across a disk write.
+                RecordMultiplayerCareerStats(SimEventArg(event, 0),
+                                             SimEventArg(event, 1));
+                break;
+            case OpenShimEventType::SimSessionStarted:
+                ClearCareerPendingVictims();
+                if (SimEventArg(event, 0) == 0)
+                    CareerRecordSinglePlayerSessionStart();
+                break;
+            case OpenShimEventType::SimSessionEnded:
+                ClearCareerPendingVictims();
+                break;
+            default:
+                break;
+            }
+        }
+
+        static void RefreshCareerStatsSubscription()
+        {
+            if (g_CareerStatsEnabled && !g_CareerStatsSinkRegistered)
+            {
+                g_CareerStatsSinkRegistered =
+                    SubscribeEvents(&CareerStatsEventSink, nullptr);
+                if (g_CareerStatsSinkRegistered)
+                    Log(L"[CAREER] Statistics tracking enabled (native event layer)\n");
+            }
+            else if (!g_CareerStatsEnabled && g_CareerStatsSinkRegistered)
+            {
+                UnsubscribeEvents(&CareerStatsEventSink, nullptr);
+                g_CareerStatsSinkRegistered = false;
+                ClearCareerPendingVictims();
+                Log(L"[CAREER] Statistics tracking disabled\n");
+            }
+        }
+
+        static void InitializeCareerStatsConfig()
+        {
+            bool configured = false;
+            if (TryGetUserConfigBool("Career", "StatsTracking", configured))
+                g_CareerStatsEnabled = configured;
+            else if (EnvFlagEnabled("OPENSHIM_DISABLE_CAREER_STATS"))
+                g_CareerStatsEnabled = false;
+            else
+                g_CareerStatsEnabled = kCareerStatsEnabledDefault;
+
+            RefreshCareerStatsSubscription();
+        }
+
+        // Display-tier baseline is the openshim.ini value, not the compile-time
+        // default: reverting a preference means "what the user configured",
+        // which for this feature is the same thing as re-reading the key.
+        static void RevertCareerStatsToBaseline()
+        {
+            InitializeCareerStatsConfig();
+        }
+
+        // Publishes SessionStarted/SessionEnded from the same world-liveness
+        // predicate the satellite fix uses, so single player and network games
+        // produce one session model. Note the ordering consequence: this driver
+        // stops running when the world goes away, so a SessionEnded queued on
+        // the last frame is delivered on the FIRST frame of the next world,
+        // immediately before that world's SessionStarted. Consumers see the
+        // right order, just late; nothing here depends on the dead world.
+        static void TickCareerSessionState()
+        {
+            static bool s_WorldWasLive = false;
+
+            // No subscriber check here on purpose. This is a two-state
+            // machine, and skipping the update while nothing is listening would
+            // leave s_WorldWasLive stale: a subscriber that arrived mid-session
+            // would then miss the NEXT world's SessionStarted entirely. The
+            // predicate is two guarded pointer reads, and a transition is rare.
+            const bool live = SatelliteWorldIsLive();
+            if (live == s_WorldWasLive)
+                return;
+
+            s_WorldWasLive = live;
+
+            if (live)
+            {
+                PublishSimEvent(OpenShimEventType::SimSessionStarted,
+                                IsSinglePlayerSession() ? 0 : 1);
+            }
+            else
+            {
+                // Clear synchronously as well as through the event: the pending
+                // table holds handles into a world that no longer exists.
+                ClearCareerPendingVictims();
+                PublishSimEvent(OpenShimEventType::SimSessionEnded,
+                                IsSinglePlayerSession() ? 0 : 1);
+            }
+        }
+
+        // Wipes the career record. The previous contents are copied to
+        // career_stats.cfg.openshim.bak first: this is reachable from a two
+        // click confirmation on the settings page, and a player who wipes a
+        // long campaign record by accident should have exactly one way back.
+        //
+        // Only the file and the in-memory session latches are touched. The
+        // toggle is deliberately left alone -- "reset my stats" is not "stop
+        // recording", and a reset that also disabled tracking would silently
+        // stop counting from that point on.
+        static CareerStatsResetResult ResetCareerStatsData()
+        {
+            AcquireSRWLockExclusive(&g_CareerStatsLock);
+
+            const std::filesystem::path path = GetCareerStatsPath();
+
+            std::unordered_map<std::string, std::string> existing;
+            LoadCareerStatsFile(existing);
+
+            // "meta.version" alone is not data: a file holding only that is
+            // what a previous reset leaves behind.
+            size_t recordedKeys = 0;
+            for (const auto& entry : existing)
+            {
+                if (entry.first != "meta.version")
+                    ++recordedKeys;
+            }
+
+            std::error_code existsError;
+            const bool fileExists = std::filesystem::exists(path, existsError);
+
+            if (recordedKeys == 0)
+            {
+                ReleaseSRWLockExclusive(&g_CareerStatsLock);
+                ClearCareerPendingVictims();
+                Log(L"[CAREER] Reset requested but nothing was recorded (%hs)\n",
+                    path.string().c_str());
+                return CareerStatsResetResult::AlreadyEmpty;
+            }
+
+            if (fileExists)
+            {
+                const std::filesystem::path backupPath =
+                    std::filesystem::path(path.wstring() + L".openshim.bak");
+                std::error_code copyError;
+                std::filesystem::copy_file(
+                    path, backupPath,
+                    std::filesystem::copy_options::overwrite_existing,
+                    copyError);
+                if (copyError)
+                {
+                    // Not fatal: the reset is still what was asked for. Say so
+                    // rather than pretending a recoverable copy exists.
+                    Log(L"[CAREER] Could not back up %hs before reset (%hs)\n",
+                        path.string().c_str(), copyError.message().c_str());
+                }
+            }
+
+            std::unordered_map<std::string, std::string> cleared;
+            cleared["meta.version"] = "1";
+            const bool saved = SaveCareerStatsFile(cleared);
+
+            if (saved)
+            {
+                g_CareerStatsMpMatchRecorded = false;
+                g_CareerStatsMpMatchProfileKey.clear();
+                g_CareerStatsMpMatchMissionKey.clear();
+                g_CareerStatsMpLastActiveTick = 0;
+            }
+
+            ReleaseSRWLockExclusive(&g_CareerStatsLock);
+
+            // Outside the lock: the pending table belongs to the drain, not to
+            // the stats file, and taking both is an ordering nobody else needs.
+            ClearCareerPendingVictims();
+
+            if (!saved)
+            {
+                Log(L"[CAREER] Reset failed writing %hs; existing stats kept\n",
+                    path.string().c_str());
+                return CareerStatsResetResult::Failed;
+            }
+
+            Log(L"[CAREER] Reset career statistics (%zu key(s) cleared) in %hs\n",
+                recordedKeys, path.string().c_str());
+            return CareerStatsResetResult::Cleared;
+        }
+
+        // The event layer's per-frame driver. Order matters: session
+        // transitions and derived kills are published first so they land in the
+        // same drain as everything the engine published during this frame.
+        static void TickOpenShimEventLayer()
+        {
+            TickCareerSessionState();
+            TickCareerPendingVictims();
+            DispatchPendingEvents();
+        }
+
+
         // Validation fixture; see g_SatVisTestPreHideEnabled. Runs only outside
         // satellite and only touches an entity once, so the satellite path sees
         // a genuinely pre-hidden entity rather than one this hook keeps forcing.
@@ -14454,7 +15100,20 @@ namespace BZROpenShim
             if (g_BzrFn_RecordDeath)
                 g_BzrFn_RecordDeath(killedTeam, killerTeam);
 
-            RecordMultiplayerCareerStats(killedTeam, killerTeam);
+            // Publish instead of persisting here. This runs inside the engine's
+            // score-notify path; the previous version loaded and rewrote
+            // career_stats.cfg synchronously on every death, holding an SRW
+            // lock across a disk write from inside a detour. The career sink
+            // does the same work on the next safe drain instead.
+            if (!PublishSimEvent(OpenShimEventType::SimTeamDeath, killedTeam, killerTeam))
+            {
+                // Dropped (no subscriber, layer off, or queue full). With no
+                // subscriber there is nothing to record; otherwise fall back to
+                // the direct write so a queue overflow cannot silently lose a
+                // multiplayer death.
+                if (HasEventSubscribers())
+                    RecordMultiplayerCareerStats(killedTeam, killerTeam);
+            }
         }
 
         void __fastcall PersonSimulateJumpSnipeProbeHook(void* thisPtr, void* /*edx*/, float dt)
@@ -18318,6 +18977,10 @@ namespace BZROpenShim
               &RevertBomberAiRangeToBaseline, &RefreshBomberAiRangeState },
             { "AttackRevealPerceivedTeam", FeatureTier::SinglePlayer,
               &RevertAttackRevealToBaseline, &RefreshAttackRevealState },
+            // Display tier: purely observational, writes only its own config
+            // file, and must keep running in network games.
+            { "CareerStats", FeatureTier::Display,
+              &RevertCareerStatsToBaseline, nullptr },
             // Client-side only, so it cannot desync -- but it is documented
             // under [SinglePlayer], and standing it down online is what keeps
             // a shim player's satellite view equivalent to a stock peer's.
@@ -29551,6 +30214,8 @@ namespace BZROpenShim
         g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
         g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
         g_AttackRevealEnabled = kAttackRevealEnabledDefault;
+        ClearCareerPendingVictims();
+        ResetInProcessEventQueue();
         // Registered features revert to their resting state (jump-snipe enable
         // -> default + MP-gated re-apply; Display prefs -> openshim.ini baseline).
         RevertRegisteredFeaturesToBaseline();
@@ -30120,6 +30785,8 @@ namespace BZROpenShim
                                       EnvFlagEnabled("BZR_TRACE_DAMAGE_REVEAL");
             g_DamageRevealTraceBudget = kDamageRevealTraceBudgetDefault;
         }
+
+        InitializeCareerStatsConfig();
 
         InitializeHopOutAttackAlertConfig();
 
@@ -31181,6 +31848,11 @@ namespace BZROpenShim
         return true;
     }
 
+    CareerStatsResetResult ResetCareerStatsFromBridge()
+    {
+        return ResetCareerStatsData();
+    }
+
     bool GetRawMouseInputEnabledFromBridge()
     {
         // Set by the stock `rawinput` / `norawinput` command-line parser and
@@ -31702,6 +32374,13 @@ namespace BZROpenShim
     {
         using FnSetDamageFlags = void(__fastcall*)(void*, void*, void*);
         auto stock = reinterpret_cast<FnSetDamageFlags>(kGogSetDamageFlagsAddr);
+
+        // These four call sites are the engine's four damage handlers, shared
+        // by single player and network games, so this is where the native event
+        // layer gets its universal damage/kill attribution. Publishing is a
+        // couple of guarded GetHandle calls plus a queue copy, and it
+        // short-circuits entirely when nothing is subscribed.
+        PublishDamageForCareerStatsFromProbe(victim, damage);
 
         if (!g_TraceDamageReveal || InterlockedDecrement(&g_DamageRevealTraceBudget) < 0)
         {
@@ -33785,6 +34464,11 @@ namespace BZROpenShim
         // gate: every SinglePlayer-tier feature is reconciled here rather than
         // waiting on the first chunk effect of the match. Internally throttled.
         TickMpGateReconcile();
+
+        // The native event layer's known-safe dispatch point. Producers queue
+        // from arbitrary engine hook contexts; this is the only place sinks
+        // ever run. See include/openshim_events.h.
+        TickOpenShimEventLayer();
 
         // Sample after the stock world queue update, when Ogre has evaluated
         // the entity materials and its hardware-animation decision is current.
