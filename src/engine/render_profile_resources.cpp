@@ -4,8 +4,8 @@
 
 #include "render_profile_resources.h"
 
-#include <cstdio>
 #include <cstring>
+#include <fstream>
 
 namespace BZROpenShim::RenderProfiles
 {
@@ -63,18 +63,20 @@ namespace BZROpenShim::RenderProfiles
             return false;
         }
 
-        FILE* file = nullptr;
+        // Portable open: std::ifstream accepts the filesystem path on both
+        // Windows (wide) and Linux (narrow), unlike _wfopen_s which is MSVC-only.
         const std::filesystem::path versionFile =
             resourceDir / kEnhancedResourceVersionFile;
-        if (_wfopen_s(&file, versionFile.c_str(), L"rb") != 0 || file == nullptr)
+        std::ifstream in(versionFile, std::ios::binary);
+        if (!in)
         {
             outProblem = "missing resources.version marker";
             return false;
         }
 
         char actual[32] = {};
-        const size_t read = fread(actual, 1, sizeof(actual) - 1, file);
-        fclose(file);
+        const std::streamsize read =
+            in.read(actual, sizeof(actual) - 1).gcount();
 
         if (read == 0 || strncmp(actual, kEnhancedResourcesVersion, read) != 0)
         {
