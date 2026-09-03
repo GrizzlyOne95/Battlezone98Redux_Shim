@@ -33,6 +33,7 @@ namespace BZROpenShim
     void* __fastcall OptionsInputPopulateUiHook(void* thisPtr, void* /*edx*/);
     bool __fastcall OptionsInputKeyReleasedHook(void* thisPtr, void* /*edx*/, uint32_t key, uint32_t keyCode);
     void* __fastcall OptionsParentCtorHook(void* thisPtr, void* /*edx*/);
+    void __fastcall MainScreenCtorHook(void* thisPtr, void* /*edx*/, char phase);
     void __fastcall OptionsInputDtorHook(void* thisPtr, void* /*edx*/);
     void __fastcall OptionsParentDtorHook(void* thisPtr, void* /*edx*/);
 
@@ -67,6 +68,25 @@ namespace BZROpenShim
         // byte-verified against the installed exe (SEH prologue
         // 55 8B EC 6A FF 68 60 13 86 00). Singleton stored at 0x009455C4.
         constexpr uintptr_t kOptionsParentCtorAddr = 0x007B61A0;
+        // cUI_MainScreen menu setup, void __thiscall(this, char).
+        //
+        // NOT the constructor. Hooking the constructor (0x0078E670) was tried
+        // first and is too early: at its return the screen is still the splash
+        // phase -- measured live as name "Top Screen", +0x158 null, single
+        // child "Splash_Overlay1" -- because the title menu is built by a later
+        // call to this routine. This is the function that creates
+        // SinglePlayer_MainScreen and friends with *(this + 0x158) as parent,
+        // so at its return the overlay exists.
+        //
+        // It is called for more than one phase, and the char argument selects
+        // between them. Rather than depend on the meaning of that argument, the
+        // resolver simply fails on any pass where MainScreen_Overlay is not
+        // present and succeeds on the one where it is.
+        //
+        // Prologue read from the shipped GOG 2.2.301 image:
+        //   55 8B EC 6A FF 68 12 EC 85 00
+        constexpr uintptr_t kMainScreenCtorAddr = 0x0078D000;
+        constexpr size_t kMainScreenCtorDetourLen = 10;
         constexpr size_t kOptionsParentCtorDetourLen = 10;
         constexpr uintptr_t kOptionsParentSingletonAddr = 0x009455C4;
         // Stock cUI_OptionsParent "Input" click thunk: loads the parent
@@ -4752,6 +4772,636 @@ namespace BZROpenShim
 
 
 
+
+        // ====================================================================
+        // MAIN-MENU CAREER PAGE
+        // ====================================================================
+        //
+        // A CAREER button on the title screen, and a page behind it that shows
+        // what career_stats.cfg has recorded.
+        //
+        // WHY IT IS BUILT THIS WAY
+        //
+        // Redux's screen factory is a compiled switch, not a registration
+        // table, so there is no safe way to invent a CAREER screen id and hand
+        // it to the stock factory. The documented direction
+        // (docs/NATIVE_UI_FRAMEWORK.md) is instead to mount both the button and
+        // the page under the existing cUI_MainScreen, hide the stock title
+        // controls while the page is up, and restore them on Back. Redux does
+        // the same thing itself: Credits and Replay Intro do not create a new
+        // screen, they present a child overlay under the live MainScreen.
+        //
+        // TRIGGER. Injection runs from a detour on the cUI_MainScreen
+        // constructor, which is the moment the stock title menu exists. A timer
+        // poll was tried first and rejected: SetTimer callbacks only arrive on
+        // a thread that pumps messages, and the patcher thread does not, so the
+        // tick would simply never fire.
+        //
+        // The detour is the same shape the settings page already uses on the
+        // cUI_OptionsParent constructor: a 10-byte SEH prologue
+        // (55 8B EC 6A FF 68 <handler>), guarded by an exact byte match before
+        // anything is written. The handler pointer differs per function, so the
+        // guard identifies this constructor specifically. If the bytes do not
+        // match, nothing is patched and the Career button simply does not
+        // appear -- shell construction is never put at risk to add a button.
+        //
+        // GEOMETRY IS TAKEN FROM THE STOCK BUTTONS, NOT GUESSED. The stock
+        // title menu builds its own controls through this very constructor
+        // (0x007C2480) with literal coordinates:
+        //
+        //     ExitGame_MainScreen        (0,   0,   342, 77)
+        //     SinglePlayer_MainScreen    (163, 151, 446, 189)
+        //     MultiPlayer_MainScreen     (831, 151, 446, 189)
+        //
+        // Single Player starts at x=163 and Multi Player ends at 831+446=1277,
+        // so the content is centred on x=720 in a 1440-wide design space. The
+        // CAREER button is centred on that same 720 and sits in the empty band
+        // between the top bar (height 77) and the button rows (y=151), which is
+        // the gap visible on the title screen.
+        //
+        // The stock parent is MainScreen_Overlay, passed to the constructor as
+        // argument 7. It is resolved by exact child name rather than through
+        // the +0x158 field, matching the established rule that name discovery
+        // is the contract and the offset is not.
+
+        // Binary-confirmed cUI_MainScreen singleton for this GOG build; the
+        // constructor stores it and the destructor clears it, so a null read
+        // means "no title screen right now" rather than "not resolved yet".
+        constexpr uintptr_t kMainScreenSingletonAddr = 0x0094551C;
+
+        // Matches the stock top-corner controls exactly: same 342x77 frame,
+        // same art, clamped to the top edge. ExitGame_MainScreen and
+        // openAchievements are both built as (x, 0, 342, 77) with the
+        // topcorner texture set, so the Career button reads as one of the same
+        // family rather than as a floating panel. Centred on x=720, which is
+        // the middle of the 1440-wide content space the stock buttons use.
+        constexpr float kCareerButtonX = 549.0f;   // 720 - 342/2
+        constexpr float kCareerButtonY = 0.0f;     // clamped to the top edge
+        constexpr float kCareerButtonW = 342.0f;
+        constexpr float kCareerButtonH = 77.0f;
+
+        // The page itself. Full content width, starting under the top bar.
+        constexpr float kCareerPageX = 163.0f;
+        constexpr float kCareerPageY = 151.0f;
+        constexpr float kCareerPageW = 1114.0f;    // 1277 - 163
+        constexpr float kCareerPageH = 700.0f;
+        constexpr float kCareerLineH = 34.0f;
+        constexpr size_t kCareerLineCount = 14;
+
+        static void* g_CareerUiMainScreen = nullptr;
+        static void* g_CareerUiOverlay = nullptr;
+        static void* g_CareerUiButton = nullptr;
+        static void* g_CareerUiPlate = nullptr;
+        static void* g_CareerUiTitleLabel = nullptr;
+        static void* g_CareerUiLines[kCareerLineCount] = {};
+        static void* g_CareerUiBackButton = nullptr;
+        static bool g_CareerUiPageActive = false;
+
+        // Stock title controls hidden while the page is up, so Back can put
+        // back exactly what it took away rather than guessing the stock set.
+        static void* g_CareerUiHiddenStock[32] = {};
+        static size_t g_CareerUiHiddenStockCount = 0;
+
+        static InlineDetour32 g_MainScreenCtorDetour = {};
+        using FnMainScreenSetup = void(__thiscall*)(void* thisPtr, char phase);
+        static FnMainScreenSetup g_BzrFn_MainScreenCtorOriginal = nullptr;
+        static bool g_MainScreenCtorHookInstalled = false;
+        static bool g_MainScreenCtorHookAttempted = false;
+        static bool g_MainScreenCtorMismatchLogged = false;
+
+        static void* ReadMainScreenSingleton()
+        {
+            __try
+            {
+                return *reinterpret_cast<void* const*>(kMainScreenSingletonAddr);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
+
+        // Field the stock setup routine passes as the parent when it builds
+        // the title buttons: FUN_0078d000 creates every one of them with
+        // *(mainScreen + 0x158) in the constructor's parent argument. The RE
+        // map is explicit that this offset is build knowledge and not a
+        // contract, so it is used as a candidate and then confirmed by name.
+        constexpr size_t kMainScreenOverlayFieldOffset = 0x158;
+
+        static bool MainScreenViewNameMatches(void* view, const char* expected)
+        {
+            if (!view)
+                return false;
+            __try
+            {
+                return std::strncmp(
+                    reinterpret_cast<const char*>(
+                        reinterpret_cast<uint8_t*>(view) + kUiViewNameOffset),
+                    expected, std::strlen(expected)) == 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // Bounded dump of what the title screen actually looks like at hook
+        // time. The first attempt resolved nothing, and guessing a second
+        // structure without looking is how injected UI work goes wrong. Capped
+        // rather than one-shot because this routine runs for more than one
+        // phase and the interesting pass is not the first one.
+        static void LogMainScreenShape(void* mainScreen)
+        {
+            static int s_logged = 0;
+            if (s_logged >= 3 || !mainScreen)
+                return;
+            ++s_logged;
+
+            __try
+            {
+                auto* const bytes = reinterpret_cast<uint8_t*>(mainScreen);
+                void* const field158 =
+                    *reinterpret_cast<void* const*>(bytes + kMainScreenOverlayFieldOffset);
+                // One name per Log call on purpose. ReadUiViewName returns a
+                // single shared static buffer, so two calls in one format list
+                // both print whichever ran last -- which is exactly how the
+                // first live capture reported the overlay as "Top Screen".
+                Log(L"[CAREERUI] screen=0x%08X name=%hs\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mainScreen)),
+                    ReadUiViewName(mainScreen));
+                Log(L"[CAREERUI] +0x158=0x%08X name=%hs\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(field158)),
+                    field158 ? ReadUiViewName(field158) : "<null>");
+
+                void** const begin =
+                    *reinterpret_cast<void***>(bytes + kUiViewChildBeginOffset);
+                void** const end =
+                    *reinterpret_cast<void***>(bytes + kUiViewChildEndOffset);
+                Log(L"[CAREERUI] child vector begin=0x%08X end=0x%08X count=%d\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(begin)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(end)),
+                    (begin && end && end >= begin) ? static_cast<int>(end - begin) : -1);
+                if (begin && end && begin < end && (end - begin) < 64)
+                {
+                    int index = 0;
+                    for (void** slot = begin; slot != end; ++slot, ++index)
+                        Log(L"[CAREERUI]   child[%d]=0x%08X name=%hs\n",
+                            index,
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(*slot)),
+                            ReadUiViewName(*slot));
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[CAREERUI] shape dump faulted\n");
+            }
+        }
+
+        // Prefer the field the stock code itself uses, confirmed by name; fall
+        // back to a bounded child scan by name. Both paths must agree on the
+        // name, so neither can silently adopt the wrong container.
+        static void* ResolveMainScreenOverlay(void* mainScreen)
+        {
+            if (!mainScreen)
+                return nullptr;
+
+            LogMainScreenShape(mainScreen);
+
+            __try
+            {
+                auto* const screenBytes = reinterpret_cast<uint8_t*>(mainScreen);
+
+                void* const candidate =
+                    *reinterpret_cast<void* const*>(screenBytes + kMainScreenOverlayFieldOffset);
+                if (MainScreenViewNameMatches(candidate, "MainScreen_Overlay"))
+                    return candidate;
+
+                void** const begin =
+                    *reinterpret_cast<void***>(screenBytes + kUiViewChildBeginOffset);
+                void** const end =
+                    *reinterpret_cast<void***>(screenBytes + kUiViewChildEndOffset);
+                if (!begin || !end || begin >= end || (end - begin) >= 64)
+                    return nullptr;
+
+                for (void** slot = begin; slot != end; ++slot)
+                {
+                    if (MainScreenViewNameMatches(*slot, "MainScreen_Overlay"))
+                        return *slot;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+
+            return nullptr;
+        }
+
+        // ------------------------------------------------------------------
+        // career_stats.cfg reader
+        // ------------------------------------------------------------------
+        //
+        // The file is the flat "key=value" document bzr_hooks.cpp writes. Keys
+        // are namespaced per profile (profile.<key>.career.totalKills and so
+        // on). Values are summed across profiles: an install normally has one,
+        // and summing is the honest answer when it has more rather than
+        // silently picking whichever came first.
+
+        struct CareerUiTotals
+        {
+            bool fileFound = false;
+            int profiles = 0;
+            long long totalKills = 0;
+            long long totalDeaths = 0;
+            long long spKills = 0;
+            long long spDeaths = 0;
+            long long mpKills = 0;
+            long long mpDeaths = 0;
+            long long missionsPlayed = 0;
+            long long spMissions = 0;
+            long long mpMatches = 0;
+            int missionsRecorded = 0;
+        };
+
+        static std::filesystem::path GetCareerUiStatsPath()
+        {
+            return GetUserConfigPath().parent_path() / "career_stats.cfg";
+        }
+
+        static void ReadCareerUiTotals(CareerUiTotals& out)
+        {
+            out = CareerUiTotals{};
+
+            std::ifstream input(GetCareerUiStatsPath());
+            if (!input.is_open())
+                return;
+            out.fileFound = true;
+
+            std::unordered_set<std::string> profileKeys;
+            std::unordered_set<std::string> missionKeys;
+
+            std::string line;
+            while (std::getline(input, line))
+            {
+                const size_t split = line.find('=');
+                if (split == std::string::npos || split == 0)
+                    continue;
+                std::string key = line.substr(0, split);
+                const long long value = std::atoll(line.c_str() + split + 1);
+
+                if (key.rfind("profile.", 0) != 0)
+                    continue;
+
+                const size_t profileEnd = key.find('.', sizeof("profile.") - 1);
+                if (profileEnd == std::string::npos)
+                    continue;
+                profileKeys.insert(key.substr(0, profileEnd));
+
+                const std::string tail = key.substr(profileEnd + 1);
+                if (tail == "career.totalKills")            out.totalKills += value;
+                else if (tail == "career.totalDeaths")      out.totalDeaths += value;
+                else if (tail == "career.spKills")          out.spKills += value;
+                else if (tail == "career.spDeaths")         out.spDeaths += value;
+                else if (tail == "career.mpKills")          out.mpKills += value;
+                else if (tail == "career.mpDeaths")         out.mpDeaths += value;
+                else if (tail == "career.missionsPlayed")   out.missionsPlayed += value;
+                else if (tail == "career.spMissionsPlayed") out.spMissions += value;
+                else if (tail == "career.mpMatchesPlayed")  out.mpMatches += value;
+                else if (tail.rfind("mission.", 0) == 0)
+                {
+                    const size_t nameEnd = tail.find('.', sizeof("mission.") - 1);
+                    if (nameEnd != std::string::npos)
+                        missionKeys.insert(tail.substr(0, nameEnd));
+                }
+            }
+
+            out.profiles = static_cast<int>(profileKeys.size());
+            out.missionsRecorded = static_cast<int>(missionKeys.size());
+        }
+
+        static std::string FormatCareerUiRatio(long long kills, long long deaths)
+        {
+            if (deaths <= 0)
+                return kills > 0 ? "perfect" : "-";
+            char buffer[32] = {};
+            _snprintf_s(buffer, _TRUNCATE, "%.2f",
+                        static_cast<double>(kills) / static_cast<double>(deaths));
+            return buffer;
+        }
+
+        // Two columns of plain text: a caption and its value, so the page reads
+        // as a record rather than a form.
+        static void BuildCareerUiLines(std::string (&outLines)[kCareerLineCount])
+        {
+            CareerUiTotals t;
+            ReadCareerUiTotals(t);
+
+            const auto row = [](const char* caption, const std::string& value)
+            {
+                std::string s = caption;
+                s += "   ";
+                s += value;
+                return s;
+            };
+            const auto num = [](long long v) { return std::to_string(v); };
+
+            size_t i = 0;
+            if (!t.fileFound)
+            {
+                outLines[i++] = "No career record yet.";
+                outLines[i++] = "";
+                outLines[i++] = "Kills, deaths and missions played are recorded automatically";
+                outLines[i++] = "in single player and multiplayer once you start playing.";
+                outLines[i++] = "";
+                outLines[i++] = "Tracking can be switched off under OpenShim Settings.";
+                while (i < kCareerLineCount)
+                    outLines[i++].clear();
+                return;
+            }
+
+            outLines[i++] = row("Kills", num(t.totalKills));
+            outLines[i++] = row("Deaths", num(t.totalDeaths));
+            outLines[i++] = row("Kill / death", FormatCareerUiRatio(t.totalKills, t.totalDeaths));
+            outLines[i++] = "";
+            outLines[i++] = row("Single player kills", num(t.spKills));
+            outLines[i++] = row("Single player deaths", num(t.spDeaths));
+            outLines[i++] = row("Missions played", num(t.spMissions));
+            outLines[i++] = "";
+            outLines[i++] = row("Multiplayer kills", num(t.mpKills));
+            outLines[i++] = row("Multiplayer deaths", num(t.mpDeaths));
+            outLines[i++] = row("Matches played", num(t.mpMatches));
+            outLines[i++] = "";
+            outLines[i++] = row("Distinct missions recorded", num(t.missionsRecorded));
+            if (t.profiles > 1)
+                outLines[i++] = row("Profiles combined", num(t.profiles));
+
+            while (i < kCareerLineCount)
+                outLines[i++].clear();
+        }
+
+        // ------------------------------------------------------------------
+        // Page show / hide
+        // ------------------------------------------------------------------
+
+        // Hide every stock child of MainScreen_Overlay, remembering exactly
+        // what was hidden. Our own widgets are skipped by pointer identity, not
+        // by name, so a stock control that happens to share a name prefix can
+        // never be confused for one of ours.
+        static bool IsCareerUiOwnedWidget(void* view)
+        {
+            if (!view)
+                return false;
+            if (view == g_CareerUiButton || view == g_CareerUiPlate ||
+                view == g_CareerUiTitleLabel || view == g_CareerUiBackButton)
+            {
+                return true;
+            }
+            for (void* line : g_CareerUiLines)
+                if (line && view == line)
+                    return true;
+            return false;
+        }
+
+        static void HideStockMainScreenControls()
+        {
+            g_CareerUiHiddenStockCount = 0;
+            if (!g_CareerUiOverlay)
+                return;
+
+            void* children[64] = {};
+            size_t count = 0;
+            __try
+            {
+                auto* const bytes = reinterpret_cast<uint8_t*>(g_CareerUiOverlay);
+                void** const begin =
+                    *reinterpret_cast<void***>(bytes + kUiViewChildBeginOffset);
+                void** const end =
+                    *reinterpret_cast<void***>(bytes + kUiViewChildEndOffset);
+                if (!begin || !end || begin >= end || (end - begin) >= 64)
+                    return;
+                for (void** slot = begin; slot != end && count < 64; ++slot)
+                    if (*slot)
+                        children[count++] = *slot;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return;
+            }
+
+            for (size_t i = 0; i < count; ++i)
+            {
+                void* const child = children[i];
+                if (IsCareerUiOwnedWidget(child))
+                    continue;
+                if (g_CareerUiHiddenStockCount >=
+                    sizeof(g_CareerUiHiddenStock) / sizeof(g_CareerUiHiddenStock[0]))
+                {
+                    break;
+                }
+                SetInputBindingUiViewActive(child, false);
+                g_CareerUiHiddenStock[g_CareerUiHiddenStockCount++] = child;
+            }
+        }
+
+        static void RestoreStockMainScreenControls()
+        {
+            for (size_t i = 0; i < g_CareerUiHiddenStockCount; ++i)
+                SetInputBindingUiViewActive(g_CareerUiHiddenStock[i], true);
+            g_CareerUiHiddenStockCount = 0;
+        }
+
+        static void SetCareerUiPageVisible(bool visible)
+        {
+            SetInputBindingUiViewActive(g_CareerUiPlate, visible);
+            SetInputBindingUiViewActive(g_CareerUiTitleLabel, visible);
+            SetInputBindingUiViewActive(g_CareerUiBackButton, visible);
+            for (void* line : g_CareerUiLines)
+                SetInputBindingUiViewActive(line, visible);
+        }
+
+        static void OnCareerUiBackClicked();
+
+        static bool EnsureCareerUiPageWidgets()
+        {
+            if (!g_CareerUiOverlay)
+                return false;
+
+            char controlName[64] = {};
+
+            if (!g_CareerUiPlate)
+            {
+                _snprintf_s(controlName, _TRUNCATE, "OpenShimCareerPlate");
+                CreateInputBindingUiPlate(g_CareerUiPlate, g_CareerUiOverlay, controlName,
+                                          kCareerPageX, kCareerPageY,
+                                          kCareerPageW, kCareerPageH);
+            }
+
+            _snprintf_s(controlName, _TRUNCATE, "OpenShimCareerTitle");
+            CreateInputBindingUiLabel(g_CareerUiTitleLabel, g_CareerUiOverlay, controlName,
+                                      "CAREER",
+                                      kCareerPageX + 24.0f, kCareerPageY + 18.0f,
+                                      kCareerPageW - 48.0f, 40.0f);
+
+            std::string lines[kCareerLineCount];
+            BuildCareerUiLines(lines);
+            for (size_t i = 0; i < kCareerLineCount; ++i)
+            {
+                _snprintf_s(controlName, _TRUNCATE, "OpenShimCareerLine%zu", i);
+                CreateInputBindingUiLabel(g_CareerUiLines[i], g_CareerUiOverlay, controlName,
+                                          lines[i].c_str(),
+                                          kCareerPageX + 48.0f,
+                                          kCareerPageY + 78.0f + kCareerLineH * static_cast<float>(i),
+                                          kCareerPageW - 96.0f, kCareerLineH);
+            }
+
+            _snprintf_s(controlName, _TRUNCATE, "OpenShimCareerBack");
+            CreateInputBindingUiButton(g_CareerUiBackButton, g_CareerUiOverlay, controlName,
+                                       "Back",
+                                       kCareerPageX + kCareerPageW * 0.5f - 110.0f,
+                                       kCareerPageY + kCareerPageH - 72.0f,
+                                       220.0f, 56.0f,
+                                       reinterpret_cast<void*>(OnCareerUiBackClicked));
+
+            return g_CareerUiTitleLabel != nullptr && g_CareerUiBackButton != nullptr;
+        }
+
+        static void RefreshCareerUiPageText()
+        {
+            std::string lines[kCareerLineCount];
+            BuildCareerUiLines(lines);
+            for (size_t i = 0; i < kCareerLineCount; ++i)
+                SetInputBindingUiLabelText(g_CareerUiLines[i], lines[i].c_str());
+        }
+
+        static void OpenCareerUiPage()
+        {
+            if (g_CareerUiPageActive)
+                return;
+            if (!EnsureCareerUiPageWidgets())
+            {
+                Log(L"[CAREERUI] page widgets unavailable; leaving the title screen alone\n");
+                return;
+            }
+
+            RefreshCareerUiPageText();
+            HideStockMainScreenControls();
+            // The Career button is a stock-overlay child too, so it was just
+            // hidden along with the rest; that is deliberate.
+            SetCareerUiPageVisible(true);
+            g_CareerUiPageActive = true;
+            Log(L"[CAREERUI] opened (hid %zu stock control(s))\n", g_CareerUiHiddenStockCount);
+        }
+
+        static void CloseCareerUiPage()
+        {
+            if (!g_CareerUiPageActive)
+                return;
+            SetCareerUiPageVisible(false);
+            RestoreStockMainScreenControls();
+            g_CareerUiPageActive = false;
+            Log(L"[CAREERUI] closed\n");
+        }
+
+        static void __cdecl CareerUiButtonClick()
+        {
+            OpenCareerUiPage();
+        }
+
+        static void OnCareerUiBackClicked()
+        {
+            CloseCareerUiPage();
+        }
+
+        // Drop every cached pointer. Called when the singleton changes or goes
+        // away: MainScreen children do not survive a screen transition, and a
+        // retained pointer into a destroyed tree is the documented way to turn
+        // this kind of injection into a crash.
+        static void ResetCareerUiState()
+        {
+            g_CareerUiMainScreen = nullptr;
+            g_CareerUiOverlay = nullptr;
+            g_CareerUiButton = nullptr;
+            g_CareerUiPlate = nullptr;
+            g_CareerUiTitleLabel = nullptr;
+            g_CareerUiBackButton = nullptr;
+            for (void*& line : g_CareerUiLines)
+                line = nullptr;
+            g_CareerUiHiddenStockCount = 0;
+            g_CareerUiPageActive = false;
+        }
+
+        static void EnsureCareerUiButton()
+        {
+            if (!g_CareerUiOverlay || g_CareerUiButton)
+                return;
+
+            if (!CreateInputBindingUiButton(g_CareerUiButton, g_CareerUiOverlay,
+                                            "OpenShimCareer_MainScreen", "CAREER",
+                                            kCareerButtonX, kCareerButtonY,
+                                            kCareerButtonW, kCareerButtonH,
+                                            reinterpret_cast<void*>(CareerUiButtonClick)))
+            {
+                Log(L"[CAREERUI] button creation failed\n");
+                return;
+            }
+
+            // Caption size to match the stock corner controls. The shared
+            // creator uses 0.85 for the settings page, which reads visibly
+            // smaller than "Exit Game" sitting beside it.
+            if (g_BzrFn_SetButtonTextScale)
+                g_BzrFn_SetButtonTextScale(g_CareerUiButton, 1.0f);
+
+            // The stock top-corner frame, not the settings-page skin: the
+            // three states the corner controls use (base / hover / click).
+            if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(g_CareerUiButton, "topcorner.png");
+            if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(g_CareerUiButton, "topcrnhv.png");
+            if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(g_CareerUiButton, "topcrnck.png");
+
+            Log(L"[CAREERUI] button injected overlay=0x%08X button=0x%08X\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CareerUiOverlay)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CareerUiButton)));
+        }
+
+        // Poll tick. Cheap by design: one guarded pointer read in the common
+        // case, and real work only when the title screen appears or changes.
+        static void TickCareerUi()
+        {
+            void* const mainScreen = ReadMainScreenSingleton();
+
+            if (!mainScreen)
+            {
+                if (g_CareerUiMainScreen)
+                {
+                    Log(L"[CAREERUI] title screen gone; dropping cached widgets\n");
+                    ResetCareerUiState();
+                }
+                return;
+            }
+
+            if (mainScreen != g_CareerUiMainScreen)
+            {
+                ResetCareerUiState();
+                void* const overlay = ResolveMainScreenOverlay(mainScreen);
+                if (!overlay)
+                {
+                    // Expected on the splash pass. Deliberately does NOT cache
+                    // the screen pointer: the same screen object builds its
+                    // title menu on a later call, and caching here would make
+                    // the change test skip that pass and never inject.
+                    static int s_missingOverlayLogs = 0;
+                    if (s_missingOverlayLogs < 3)
+                    {
+                        ++s_missingOverlayLogs;
+                        Log(L"[CAREERUI] MainScreen_Overlay not present on this pass; waiting\n");
+                    }
+                    return;
+                }
+                g_CareerUiMainScreen = mainScreen;
+                g_CareerUiOverlay = overlay;
+            }
+
+            EnsureCareerUiButton();
+        }
     }
 
     void EnsureInputBindingPopulateHookScaffold()
@@ -4880,10 +5530,62 @@ namespace BZROpenShim
         return false;
     }
 
+    // Career button injection. Gated on the same switch as the settings page:
+    // both are OpenShim shell UI, and a player who turned that off should not
+    // get a new title-screen button either.
+    void EnsureMainScreenCtorHookScaffold()
+    {
+        if (!ShouldEnableShimSettingsUi())
+            return;
+        if (g_MainScreenCtorHookInstalled || g_MainScreenCtorHookAttempted)
+            return;
+        g_MainScreenCtorHookAttempted = true;
+
+        const uint8_t kExpectedMainScreenCtorBytes[kMainScreenCtorDetourLen] =
+        {
+            0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x12, 0xEC, 0x85, 0x00
+        };
+
+        if (!ExpectedBytesMatchAt(kMainScreenCtorAddr,
+                                  kExpectedMainScreenCtorBytes,
+                                  sizeof(kExpectedMainScreenCtorBytes)))
+        {
+            if (!g_MainScreenCtorMismatchLogged)
+            {
+                g_MainScreenCtorMismatchLogged = true;
+                Log(L"[CAREERUI] MainScreen ctor bytes mismatch at 0x%08X; Career button disabled\n",
+                    static_cast<uint32_t>(kMainScreenCtorAddr));
+            }
+            return;
+        }
+
+        if (!InstallInlineDetour32(g_MainScreenCtorDetour,
+                                   kMainScreenCtorAddr,
+                                   reinterpret_cast<void*>(MainScreenCtorHook),
+                                   kMainScreenCtorDetourLen,
+                                   kExpectedMainScreenCtorBytes,
+                                   sizeof(kExpectedMainScreenCtorBytes)))
+        {
+            Log(L"[CAREERUI] Failed installing MainScreen ctor hook at 0x%08X\n",
+                static_cast<uint32_t>(kMainScreenCtorAddr));
+            return;
+        }
+
+        g_BzrFn_MainScreenCtorOriginal =
+            reinterpret_cast<FnMainScreenSetup>(g_MainScreenCtorDetour.trampoline);
+        g_MainScreenCtorHookInstalled = (g_BzrFn_MainScreenCtorOriginal != nullptr);
+
+        Log(L"[CAREERUI] MainScreen setup hook installed entry=0x%08X trampoline=0x%08X\n",
+            static_cast<uint32_t>(kMainScreenCtorAddr),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_MainScreenCtorDetour.trampoline)));
+    }
+
     void EnsureOptionsParentCtorHookScaffold()
     {
         if (!ShouldEnableShimSettingsUi())
             return;
+
+        EnsureMainScreenCtorHookScaffold();
 
         EnsureOptionsScreenDtorHook(kOptionsParentDtorAddr,
                                     g_OptionsParentDtorDetour,
@@ -4977,6 +5679,28 @@ namespace BZROpenShim
 
         OnOptionsParentCtorScaffold(screen);
         return screen;
+    }
+
+    // Runs once per title-screen construction. The stock constructor builds
+    // the whole menu (including MainScreen_Overlay and the singleton the
+    // resolver reads), so injection has to happen after it returns, not before.
+    void __fastcall MainScreenCtorHook(void* thisPtr, void* /*edx*/, char phase)
+    {
+        if (g_BzrFn_MainScreenCtorOriginal)
+            g_BzrFn_MainScreenCtorOriginal(thisPtr, phase);
+
+        // Never let a failure in an injected button take the title screen with
+        // it: the shell is already constructed and usable at this point.
+        __try
+        {
+            TickCareerUi();
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            Log(L"[CAREERUI] injection faulted (0x%08X); title screen left stock\n",
+                static_cast<uint32_t>(GetExceptionCode()));
+            ResetCareerUiState();
+        }
     }
 
     void __fastcall OptionsInputDtorHook(void* thisPtr, void* /*edx*/)
