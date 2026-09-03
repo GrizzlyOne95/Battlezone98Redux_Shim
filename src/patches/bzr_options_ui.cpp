@@ -413,7 +413,10 @@ namespace BZROpenShim
         constexpr size_t kShimSettingsUiToolbarRightGroup = 2;
         constexpr float kShimSettingsUiToolbarWidths[kShimSettingsUiToolbarSlotCount] =
         {
-            140.0f, 210.0f, 130.0f, 110.0f, 110.0f
+            // Slot 2 is the "Page N of M" caption. 130px ellipsized "Page 2 of 3"
+            // to "Page 2 of..." (12 glyphs at ~11px). Keep this slot wide enough
+            // for two-digit page counts without Fitted truncation.
+            140.0f, 180.0f, 170.0f, 105.0f, 105.0f
         };
 
         static InlineDetour32 g_OptionsParentCtorDetour = {};
@@ -3167,8 +3170,7 @@ namespace BZROpenShim
                               static_cast<unsigned>(g_ShimSettingsUiPageStart /
                                                         kShimSettingsUiVisibleRowCount + 1),
                               static_cast<unsigned>(pageCount));
-                SetInputBindingUiLabelTextFitted(g_ShimSettingsUiPageLabel, pageText,
-                                                 kShimSettingsUiToolbarWidths[2]);
+                SetInputBindingUiLabelText(g_ShimSettingsUiPageLabel, pageText);
                 SetInputBindingUiButtonText(g_ShimSettingsUiPrevPageButton, "Prev");
                 SetInputBindingUiButtonText(g_ShimSettingsUiNextPageButton, "Next");
             }

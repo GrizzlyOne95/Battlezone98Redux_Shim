@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 project(BzrNetProtocolTests LANGUAGES CXX)
 
+# Linux CMake/CTest harness for the engine-independent unit tests. Every
+# target here is a self-contained executable (no game engine linkage) so the
+# suite can be configured, built, and run with plain CMake + CTest:
+#   cmake -S tests -B tests/build && cmake --build tests/build -j && ctest --test-dir tests/build --output-on-failure
 enable_testing()
 
 add_executable(bzrnet_protocol_tests

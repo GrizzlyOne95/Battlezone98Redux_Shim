@@ -60,6 +60,33 @@ int main()
     const auto udp = DecodeBzrUdpControl(pp, sizeof(pp));
     Check(udp.recognized && udp.marker == "PP" && udp.fieldCount == 5 && udp.field4 == 5, "PP decoder");
 
+    // PR (peer_ping_response) marker decodes a three-field payload.
+    const uint8_t pr[] = {'P','R',10,0,0,0,20,0,0,0,30,0,0,0};
+    const auto prUdp = DecodeBzrUdpControl(pr, sizeof(pr));
+    Check(prUdp.recognized && prUdp.marker == "PR" && prUdp.fieldCount == 3 && prUdp.field0 == 10 && prUdp.field2 == 30, "PR decoder");
+
+    // Unknown markers are reported as unrecognized rather than mis-decoded.
+    const uint8_t xx[] = {'X','X',1,0,0,0};
+    const auto xxUdp = DecodeBzrUdpControl(xx, sizeof(xx));
+    Check(!xxUdp.recognized && xxUdp.marker == "XX", "unknown marker unrecognized");
+
+    // Evidence/direction name helpers.
+    Check(std::string(BzrNetEvidenceName(BzrNetEvidence::BinaryConfirmed)) == "binary_confirmed", "evidence name binary");
+    Check(std::string(BzrNetEvidenceName(BzrNetEvidence::ReplacementOnly)) == "replacement_only", "evidence name replacement");
+    Check(std::string(BzrNetEvidenceName(static_cast<BzrNetEvidence>(99))) == "unknown", "evidence name fallback");
+    Check(std::string(BzrNetDirectionName(BzrNetMessageDirection::ServerToClient)) == "inbound", "direction name inbound");
+    Check(std::string(BzrNetDirectionName(static_cast<BzrNetMessageDirection>(99))) == "unknown", "direction name fallback");
+
+    // Unknown message types resolve to nullptr rather than a bogus entry.
+    Check(LookupBzrNetMessage("NoSuchMessage") == nullptr, "unknown message returns null");
+
+    // Standalone endpoint/identity sanitizers alias in shareable mode and are stable.
+    ResetBzrNetSanitizationAliases();
+    Check(SanitizeBzrNetIdentity("Alice", false) == "player_1", "identity alias assigned");
+    Check(SanitizeBzrNetIdentity("Alice", false) == "player_1", "identity alias stable");
+    Check(SanitizeBzrNetEndpoint("1.2.3.4", false) == "endpoint_1", "endpoint alias assigned");
+    Check(SanitizeBzrNetEndpoint("1.2.3.4", true) == "1.2.3.4", "forensic endpoint passthrough");
+
     std::printf("%d checks, %d failures\n", g_Checks, g_Failures);
     return g_Failures ? 1 : 0;
 }

@@ -14,7 +14,8 @@ if the upstream repository ever disappears.
 ## What OpenShim already had
 
 - Governor cold-start poke (`GovernorStart`), signature-gated on the same
-  unique 15-byte `.text` pattern.
+  unique 15-byte `.text` pattern. Shipped preset now matches V5.3
+  (`GovernorStart=40000` / `BZ_GOV_START=40000`) when `GovernorTuning = OpenShim`.
 - The four auto-kick globals, already on the V4.9/V5.2 relaxed preset
   (`60000 / 2000 / 200 / 60000`) — the values upstream converged back to after
   V5.0's tightening ejected a live tester twice in one evening.

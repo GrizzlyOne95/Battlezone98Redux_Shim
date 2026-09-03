@@ -11,6 +11,59 @@ Supported executables:
 
 [<img width="1377" height="758" alt="Battlezone 98 Redux OpenShim" src="https://github.com/user-attachments/assets/b1f12ee2-5e57-46df-b467-1d5c69c6426e" />](https://images.steamusercontent.com/ugc/16933640577209196288/F91D1AEC284B96DA3C0DD6D1035F56C48903460C/?imw=5000&imh=5000&ima=fit&impolicy=Letterbox&imcolor=%23000000&letterbox=false)
 
+## Installation
+
+### Windows
+
+Press Start, type `powershell`, Enter — the blue window, not Command Prompt.
+Paste this in:
+
+```powershell
+irm https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_windows.ps1 | iex
+```
+
+That's it. No launch options needed — just start the game.
+
+Uninstall:
+
+```powershell
+irm https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/uninstall_windows.ps1 | iex
+```
+
+### Linux (Proton)
+
+Native Steam or Flatpak — paste in a terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_linux.sh | bash -s -- --native
+```
+
+Snap Steam — paste in a terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_linux.sh | bash -s -- --snap
+```
+
+Then set launch options once (Steam → Battlezone 98 Redux → Properties → Launch Options).
+
+Native Steam or Flatpak:
+
+```text
+WINEDLLOVERRIDES="winmm=n,b;dsound=n,b" %command%
+```
+
+Snap Steam:
+
+```text
+WINEDLLOVERRIDES="winmm=n,b;dsound=n,b" %command%
+```
+
+Quotes are required; a bare `;` splits the command. Drop `dsound=n,b` if you are not also using the dsound netcode proxy.
+
+If you have both Steam flavours, paste both install commands and set the launch options in each Steam you actually launch from.
+
+Uninstall: remove `winmm.dll` from the game folder and clear the launch options.
+
 ## What is OpenShim?
 
 OpenShim is a standalone `winmm.dll` proxy loaded automatically when Battlezone 98 Redux starts.
@@ -217,38 +270,6 @@ reverse_engineering/
 
 rather than being treated as the public feature list.
 
-## Installation
-
-Copy the compiled:
-
-```text
-winmm.dll
-```
-
-and the shipped player configuration:
-
-```text
-openshim.ini
-```
-
-into the Battlezone 98 Redux installation directory beside:
-
-```text
-BZR.exe
-```
-
-or:
-
-```text
-battlezone98redux.exe
-```
-
-Launch the game normally. `openshim.ini.example` may be kept alongside it as an offline reference, but OpenShim reads `openshim.ini` for normal configuration.
-
-OpenShim writes runtime information and diagnostics to its log files in the game directory.
-
-To uninstall OpenShim, remove `winmm.dll` and any optional OpenShim configuration files.
-
 ## Building
 
 Requirements:
@@ -264,7 +285,22 @@ Fetch the pinned Ogre 1.10.0 reference headers once after cloning:
 .\setup-dev.ps1
 ```
 
-The current renderer diagnostics compile against these reference declarations. OpenShim does **not** build or link a replacement `OgreMain.dll`; runtime integration continues to target the game's already-loaded Ogre module. The shipped BZR Ogre binary has known ABI differences from pristine upstream 1.10.0, so runtime-facing hooks must still validate the actual BZR DLL.
+On Linux, the same pinned headers are fetched with:
+
+```bash
+./setup-dev.sh
+```
+
+**Linux hosts build and test the engine-independent suite only.** The full
+`winmm.dll` proxy must be built as **Release | Win32** on Windows (MSVC). There
+is no supported MinGW cross-compile of the complete shim yet. Proton install
+steps are under [Installation](#linux--proton).
+
+```bash
+cmake -S tests -B tests/build
+cmake --build tests/build -j
+ctest --test-dir tests/build --output-on-failure
+```
 
 Open:
 
@@ -285,6 +321,8 @@ bin\Release\winmm.dll
 ```
 
 Redux is a 32-bit application, so OpenShim must also be built as **32-bit**.
+
+The current renderer diagnostics compile against these reference declarations. OpenShim does **not** build or link a replacement `OgreMain.dll`; runtime integration continues to target the game's already-loaded Ogre module. The shipped BZR Ogre binary has known ABI differences from pristine upstream 1.10.0, so runtime-facing hooks must still validate the actual BZR DLL.
 
 ## Release Qualification
 
@@ -315,6 +353,7 @@ MIT — see [LICENSE](LICENSE).
 
 - **GrizzlyOne95** — primary implementation, reverse engineering, and maintenance
 - **Piercing** — multiplayer testing, network investigation, and technical collaboration
+- **Skippy-Agent** — Linux/Proton install path, CTest CI, and pasteable installers
 - **VTrider** — technical assistance and collaboration
 - **Business Lawyer** — technical assistance and collaboration
 - **Janne** — early work investigating DLL shimming and hooking in Battlezone 98 Redux

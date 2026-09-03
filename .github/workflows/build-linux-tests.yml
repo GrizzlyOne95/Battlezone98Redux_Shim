@@ -1,0 +1,36 @@
+name: Build Linux Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-linux-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-ctest:
+    name: Linux CTest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure engine-independent tests
+        run: cmake -S tests -B build/tests
+
+      - name: Build tests
+        run: cmake --build build/tests -j
+
+      - name: Run CTest suite
+        run: ctest --test-dir build/tests --output-on-failure
