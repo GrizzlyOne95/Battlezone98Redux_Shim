@@ -2895,6 +2895,16 @@ namespace BZROpenShim
               ShimSettingApplyGroup::RestartRequired,
               "Bandwidth governor and host auto-kick. Stock matches players who "
               "are not running OpenShim; net.ini still overrides per value." },
+            // defaultIndex 1 selects "0", which is what an absent key does.
+            // RestartRequired here means "no live apply step": the hook re-reads
+            // the ini every time the multiplayer vehicle list is built, so the
+            // change lands on the next list load without a relaunch.
+            { "Stock Factions", "Network", "StockFactionsOnly", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::RestartRequired,
+              "Restrict multiplayer starting vehicles to NSDF and CCA, as 1.5 did with "
+              "Any Nation off. Local only, and it never adds craft the map withheld. "
+              "Applies next time a vehicle list loads." },
         };
         // The page count adapts to the registry (see the paging controls in
         // RefreshShimSettingsUiControls), so the registry may exceed the

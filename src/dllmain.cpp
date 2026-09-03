@@ -29,6 +29,7 @@
 #include "ui_performance.h"
 #include "ui_performance_hooks.h"
 #include "ui_file_scan_hooks.h"
+#include "mp_faction_restrict.h"
 #include "BZROpenShim.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -58,6 +59,12 @@ static unsigned __stdcall PatchThreadProc(void*)
     // the optimizer's existing IAT targets without changing network behavior.
     BZROpenShim::InitializeBzrNetInstrumentation();
     BZROpenShim::RunPatcher(SHIM_VERSION);
+
+    // Multiplayer starting-vehicle list faction policy. Installs after the
+    // patcher so scripts/patches.json resolves are loaded; the hook itself is
+    // inert until [Network] StockFactionsOnly is turned on, and the loader it
+    // intercepts only runs when a multiplayer screen builds its vehicle list.
+    BZROpenShim::MpFactionRestrict::InstallMpFactionRestrictIfPossible();
 
     // Shell profiler detours must not touch SteamStub-managed executable pages
     // before platform detection and code settlement. UiPerfHooks installs them

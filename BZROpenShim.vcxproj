@@ -140,6 +140,7 @@
     <ClCompile Include="src\patches\trn_codec.cpp" />
     <ClCompile Include="src\patches\game_state.cpp" />
     <ClCompile Include="src\patches\native_cpu_sampler.cpp" />
+    <ClCompile Include="src\patches\mp_faction_restrict.cpp" />
     <ClCompile Include="src\patches\net_optimizer.cpp" />
      <ClCompile Include="src\patches\openshim_ini.cpp" />
     <ClCompile Include="src\patches\openshim_preset_migration.cpp" />
@@ -219,6 +220,7 @@
     <ClInclude Include="include\patcher.h" />
     <ClInclude Include="include\hook_engine.h" />
     <ClInclude Include="include\iat_patch.h" />
+    <ClInclude Include="include\mp_faction_restrict.h" />
     <ClInclude Include="include\BZROpenShim.h" />
     <ClInclude Include="include\openshim_sdk_v2.h" />
     <ClInclude Include="include\native_ui.h" />
