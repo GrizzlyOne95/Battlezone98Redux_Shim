@@ -6,14 +6,18 @@ The trace deliberately does **not** identify the target by mesh/resource name. R
 
 ## Configuration
 
-The trace is enabled by default while this path is being characterised:
+The trace ships **disabled**. It was enabled by default while this path was
+being characterised; that default was reverted on 2026-08-30, after the
+scene-graph walk it drives was found to kill the process on scene teardown
+by calling through a destroyed `Ogre::SceneManager`. The walk is now guarded,
+and it no longer runs at all unless this key is set.
 
 ```ini
 [Diagnostics]
 TracePilotFPAnimations = 1
 ```
 
-Set the key to `0` to disable it. The process-environment compatibility override is:
+Set the key to `1` to enable it. The process-environment compatibility override is:
 
 ```text
 OPENSHIM_TRACE_PILOT_FP_ANIMATIONS=0|1
