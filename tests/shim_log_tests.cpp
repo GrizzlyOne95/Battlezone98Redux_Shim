@@ -69,6 +69,24 @@ int main()
     CheckEq(SanitizeLogFilename("COM1.log"), "openshim.log", "COM1 device name");
     CheckEq(SanitizeLogFilename("LPT9.txt"), "openshim.log", "LPT9 device name");
 
+    // COM10/LPT0 are NOT reserved device names (only COM1-COM9 / LPT1-LPT9).
+    CheckEq(SanitizeLogFilename("COM10.log"), "COM10.log", "COM10 is not reserved");
+    CheckEq(SanitizeLogFilename("LPT0.log"), "LPT0.log", "LPT0 is not reserved");
+
+    // Upper bound of the reserved COM/LPT ranges (COM9, LPT9) still sanitize.
+    CheckEq(SanitizeLogFilename("COM9.txt"), "openshim.log", "COM9 device name");
+    CheckEq(SanitizeLogFilename("LPT9.log"), "openshim.log", "LPT9 device name");
+
+    // Reserved device names are matched case-insensitively.
+    CheckEq(SanitizeLogFilename("nul"), "openshim.log", "lowercase nul device name");
+    CheckEq(SanitizeLogFilename("CoM1.log"), "openshim.log", "mixed case COM1 device name");
+
+    // GetGameLogPath on non-Windows builds returns the sanitized leaf directly.
+#ifndef _WIN32
+    CheckEq(BZROpenShim::GetGameLogPath("logs/custom.log"), "custom.log", "linux game log path strips to leaf");
+    CheckEq(BZROpenShim::GetGameLogPath(".."), "openshim.log", "linux game log path rejects traversal");
+#endif
+
     std::printf("%d checks, %d failures\n", g_Checks, g_Failures);
     return g_Failures == 0 ? 0 : 1;
 }
