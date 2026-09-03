@@ -23,6 +23,31 @@
 //                 RawMouseInput remains available as an explicit opt-in
 //                 "; OpenShimPresetRevision = 2" marker near top
 //
+//   Revision 3: reopens the doors to the settings.
+//                 General/SettingsUi     = 1  (was 0)
+//                 General/CustomBindsUi  = 1  (was 0)
+//
+//              Why this needs its own revision. 97aa4799 ("make OpenShim
+//              features opt-in by default", 2026-08-30) applied the opt-in
+//              policy to EVERY key, including the two that are not features
+//              but the interface through which every other feature is
+//              reached. With SettingsUi = 0 the OpenShim Settings page does
+//              not exist in Redux Options, so a player cannot turn anything
+//              on -- including SettingsUi itself -- without hand-editing
+//              openshim.ini, which is exactly what the page exists to avoid.
+//
+//              7c4e2b4d and 96c54075 (2026-08-31) restored both keys to 1 in
+//              the shipped preset, but kCurrentPresetRevision stayed at 2 the
+//              whole time. Migration returns early when the file already
+//              carries the current revision, so every install stamped
+//              revision 2 during that window kept SettingsUi = 0 permanently
+//              and no later release could correct it. Bumping to 3 is what
+//              lets those installs be repaired.
+//
+//              The absent-key default was always ON (see the SettingsUi read
+//              in bzr_options_ui.cpp and the env-config mapping), so this
+//              only ever affects files carrying an explicit 0.
+//
 // Migration policy is implemented here so it works for:
 //   - Campaign Reimagined Workshop users
 //   - standalone OpenShim releases
@@ -37,7 +62,7 @@
 namespace BZROpenShim
 {
 
-    constexpr int kCurrentPresetRevision = 2;
+    constexpr int kCurrentPresetRevision = 3;
     constexpr int kLegacyBadPresetRevision = 1;
 
     // SHA-256 of the exact e81d8b0a player preset (151 lines, LF, no BOM).
