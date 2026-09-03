@@ -168,6 +168,14 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # rather than the opt-in.
     "Display/MultiplayerFlags",
 
+    # Career statistics. Native multiplayer kill/death recording previously ran
+    # unconditionally, with no key at all, so this key is the opt-OUT for
+    # behavior every existing install already has -- shipping it 0 would be a
+    # silent regression rather than a conservative default. Same shape as
+    # NetImprovements and MultiplayerFlags above. It is observational: one
+    # local text file, no gameplay, visual, audio or network effect.
+    "Career/StatsTracking",
+
     # [DX11Enhanced] is gated behind Graphics/RenderProfile, which this same
     # script pins to Redux below. Both keys are inert until a player opts into
     # the Enhanced profile on DX11; pre-arming them means that opt-in gets the
