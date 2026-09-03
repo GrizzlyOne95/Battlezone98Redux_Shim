@@ -884,7 +884,11 @@ namespace
         g_Config.sendDup = ReadIniBool("OpenShimSocket", "SendDup", false);
         g_Config.dupDelayMs = ClampUint(ReadIniUint("OpenShimSocket", "DupDelayMs", kDefaultDupDelayMs), 0, 500);
         g_Config.dupMaxPps = ClampUint(ReadIniUint("OpenShimSocket", "DupMaxPps", kDefaultDupMaxPps), 0, 2000);
-        g_Config.govStart = ClampUint(ReadIniUint("OpenShimSocket", "GovernorStart", 0), 0, kGovStartMax);
+        // V5.3 netcode patch defaults BZ_GOV_START to 40000 when tuning is on.
+        g_Config.govStart = ClampUint(
+            ReadIniUint("OpenShimSocket", "GovernorStart", governorTuning ? 40000 : 0),
+            0,
+            kGovStartMax);
         g_Config.govScan = ReadIniBool("OpenShimSocket", "GovernorScan", false);
         const bool autoKickRelax = ReadIniBool("OpenShimSocket", "AutoKickRelax", governorTuning);
         g_Config.autoKickStart = ClampUint(ReadIniUint("OpenShimSocket", "AutoKickStart", autoKickRelax ? 60000 : 0), 0, kAutokickMsMax);
