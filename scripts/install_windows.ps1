@@ -16,6 +16,10 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $repoSlug = if ($env:OPENSHIM_REPO) { $env:OPENSHIM_REPO } else { "GrizzlyOne95/Battlezone98Redux_Shim" }
+$ref = if ($env:OPENSHIM_REF) { $env:OPENSHIM_REF } else { "main" }
+if ($ref -notmatch '^[A-Za-z0-9._/-]+$' -or $ref -match '^-|\.\.|//|/$') {
+    throw "Refusing malformed OPENSHIM_REF '$ref'."
+}
 $steamAppId = "301650"
 $defaultInstallDir = "Battlezone 98 Redux"
 
@@ -256,6 +260,46 @@ function Assert-Hash {
     }
 }
 
+function Get-WrapperVersion {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return "none" }
+    $m = Select-String -Path $Path -Pattern '^\$WrapperVersion\s*=\s*"(.+)"' -ErrorAction SilentlyContinue |
+         Select-Object -First 1
+    if ($m) { return $m.Matches[0].Groups[1].Value }
+    return "unversioned"
+}
+
+# Copy or download openshim_wrap.* into $WrapDir. Prefer a sibling checkout so
+# a fork install does not wait on a GitHub raw URL that is not on main yet.
+function Update-WrapperFiles {
+    param([string]$WrapDir)
+    $dest = Join-Path $WrapDir "openshim_wrap.ps1"
+    $old = Get-WrapperVersion -Path $dest
+    $localUpload = $null
+    if ($PSScriptRoot) {
+        $candidate = Join-Path (Split-Path -Parent $PSScriptRoot) "upload"
+        if (Test-Path -LiteralPath (Join-Path $candidate "openshim_wrap.ps1")) {
+            $localUpload = $candidate
+        }
+    }
+    foreach ($wf in @("openshim_wrap.ps1", "openshim_wrap.bat")) {
+        $wfDest = Join-Path $WrapDir $wf
+        Remove-Item -Force -ErrorAction SilentlyContinue $wfDest
+        if ($localUpload) {
+            Copy-Item -LiteralPath (Join-Path $localUpload $wf) -Destination $wfDest -Force
+        } else {
+            $wu = "https://raw.githubusercontent.com/$repoSlug/$ref/upload/$wf"
+            Invoke-WebRequest -Uri $wu -UseBasicParsing -OutFile $wfDest
+        }
+    }
+    $new = Get-WrapperVersion -Path $dest
+    if ($old -eq $new) {
+        Write-Host "Uploader wrapper: $new (already current)."
+    } else {
+        Write-Host "Uploader wrapper: $old -> $new."
+    }
+}
+
 function Write-DefenderHelp {
     param([string]$DllPath)
     Write-Host ""
@@ -265,6 +309,27 @@ function Write-DefenderHelp {
     Write-Warning "  2. Allow the block, or from admin PowerShell:"
     Write-Warning "       Add-MpPreference -ExclusionPath `"$DllPath`""
     Write-Warning "  3. Re-run the install command."
+}
+
+function Get-ThirdPartyAV {
+    try {
+        $avs = Get-CimInstance -Namespace 'root\SecurityCenter2' -ClassName AntiVirusProduct -ErrorAction Stop
+        foreach ($av in $avs) {
+            if ($av.displayName -and $av.displayName -notmatch 'Windows Defender|Microsoft Defender') {
+                return $av.displayName
+            }
+        }
+    } catch { }
+    return $null
+}
+
+function Add-DefenderExclusions {
+    param([string[]]$Paths)
+    if (-not (Get-Command Add-MpPreference -ErrorAction SilentlyContinue)) { return }
+    foreach ($p in $Paths) {
+        try { Add-MpPreference -ExclusionPath $p -ErrorAction Stop }
+        catch { }
+    }
 }
 
 function Backup-ThenCopy {
@@ -432,9 +497,129 @@ try {
         }
     }
 
+    # Zero prompts by design: the tester's whole job is to run one command and
+    # paste one launch line. The webhook rides in on OPENSHIM_WEBHOOK, which is
+    # baked into the install command pinned in the private channel - so the
+    # credential lives in that channel, never in this public repo. No
+    # OPENSHIM_WEBHOOK (i.e. a normal player) means no uploader and no questions.
+    $wrapperReady = $false
+    $wrapperFailed = $false
+    $wrapDir = Join-Path $env:LOCALAPPDATA "openshim"
+    if ($env:OPENSHIM_WEBHOOK -or (Test-Path -LiteralPath (Join-Path $wrapDir "openshim_wrap.ps1"))) {
+        Add-DefenderExclusions -Paths @($wrapDir)
+        $thirdPartyAv = Get-ThirdPartyAV
+        if ($thirdPartyAv) {
+            Write-Host ""
+            Write-Host "Heads up: $thirdPartyAv is your antivirus, not Windows Defender." -ForegroundColor Yellow
+            Write-Host "If this install fails or uploads never arrive, add this folder to"
+            Write-Host "$thirdPartyAv's own exceptions (Add-MpPreference only configures Defender):"
+            Write-Host "    $wrapDir"
+            if ($thirdPartyAv -match 'Bitdefender') {
+                Write-Host "  Bitdefender: Protection > Antivirus > Settings > Manage Exceptions."
+            }
+            Write-Host ""
+        }
+    }
+    if ($env:OPENSHIM_WEBHOOK) {
+        if ($env:OPENSHIM_WEBHOOK -notmatch '^https://discord(app)?\.com/api/webhooks/') {
+            Write-Warning "OPENSHIM_WEBHOOK is not a Discord webhook URL; skipping upload setup."
+        } else {
+            try {
+                New-Item -ItemType Directory -Force -Path $wrapDir | Out-Null
+                Update-WrapperFiles -WrapDir $wrapDir
+                $confDir = Join-Path $env:APPDATA "openshim"
+                New-Item -ItemType Directory -Force -Path $confDir | Out-Null
+                $player = if ($env:OPENSHIM_PLAYER) { $env:OPENSHIM_PLAYER } else { "" }
+                @(
+                    "# Written by install_windows.ps1. Do not commit this file."
+                    "OPENSHIM_WEBHOOK='$($env:OPENSHIM_WEBHOOK)'"
+                    "OPENSHIM_PLAYER='$player'"
+                    "OPENSHIM_INCLUDE_PROTON=0"
+                ) | Out-File -FilePath (Join-Path $confDir "upload.conf") -Encoding utf8
+                $shown = if ($player) { $player } else { "your in-game name (read at upload time)" }
+                Write-Host "Automatic log upload configured for '$shown'."
+                $wrapperReady = $true
+            } catch {
+                Write-Warning "Upload wrapper setup failed: $_"
+                $wrapperFailed = $true
+            }
+        }
+    } elseif (Test-Path -LiteralPath (Join-Path $wrapDir "openshim_wrap.ps1")) {
+        try {
+            Update-WrapperFiles -WrapDir $wrapDir
+            $wrapperReady = $true
+        } catch {
+            Write-Warning "Could not refresh the existing upload wrapper: $_"
+        }
+    }
+
+    if ($wrapperFailed) {
+        Write-Host ""
+        Write-Host "THE LOG UPLOADER DID NOT INSTALL." -ForegroundColor Red
+        Write-Host "'Access denied' writing into $env:LOCALAPPDATA\openshim almost always"
+        Write-Host "means the antivirus is blocking the wrapper script. Fix, keeping AV on:"
+        Write-Host "  1. Windows Security > Virus & threat protection > Protection history"
+        Write-Host "     > find the openshim_wrap block > Actions > Allow"
+        Write-Host "  2. Or exclude the wrapper folder (admin PowerShell):"
+        Write-Host "       Add-MpPreference -ExclusionPath `"$env:LOCALAPPDATA\openshim`""
+        Write-Host "  3. Then: Remove-Item -Recurse -Force `"$env:LOCALAPPDATA\openshim`""
+        Write-Host "     and re-run this install command."
+        Write-Host "  NOTE: Add-MpPreference only configures Windows Defender. Running"
+        Write-Host "  Bitdefender or another third-party AV? Add the same folder in THAT"
+        Write-Host "  product's own exceptions UI instead (for Bitdefender: Protection >"
+        Write-Host "  Antivirus > Settings > Manage Exceptions), and restore anything it"
+        Write-Host "  quarantined."
+        Write-Host ""
+        Write-Host "Until that is fixed, leave the Steam launch options EMPTY - pointing"
+        Write-Host "them at a wrapper that is not there stops the game from starting."
+    }
+
+    if (-not $env:OPENSHIM_WEBHOOK) {
+        Write-Host ""
+        if ($wrapperReady) {
+            Write-Host "No OPENSHIM_WEBHOOK in this shell. The existing log uploader was updated in" -ForegroundColor Yellow
+            Write-Host "place and its saved webhook was left alone. Test crew: if uploads stop"
+            Write-Host "arriving, re-run the pinned command from the private channel."
+        } else {
+            Write-Host "No OPENSHIM_WEBHOOK in this shell, so the log uploader was NOT installed." -ForegroundColor Yellow
+            Write-Host "Normal players: that is correct, ignore this. Test crew: paste the pinned"
+            Write-Host "command from the private channel into a PowerShell window and run it again."
+        }
+    }
+
+    if ($wrapperReady) {
+        foreach ($wf in @("openshim_wrap.ps1", "openshim_wrap.bat")) {
+            if (-not (Test-Path -LiteralPath (Join-Path $wrapDir $wf))) {
+                Write-DefenderHelp -DllPath (Join-Path $wrapDir $wf)
+                throw "$wf vanished right after install - quarantined. Follow the steps above, then re-run."
+            }
+        }
+    }
+
     Write-Host ""
     Write-Host "Install complete." -ForegroundColor Green
-    Write-Host "No Steam launch option changes are needed on Windows. Just start the game."
+    if ($wrapperReady) {
+        Write-Host "OpenShim DLL: OK    Log uploader: OK" -ForegroundColor Green
+    } elseif ($wrapperFailed) {
+        Write-Host "OpenShim DLL: OK    LOG UPLOADER: DID NOT INSTALL (blocked - scroll up for the fix)" -ForegroundColor Red
+    } elseif ($env:OPENSHIM_WEBHOOK) {
+        Write-Host "OpenShim DLL: OK    Log uploader: skipped (OPENSHIM_WEBHOOK is not a Discord webhook URL)" -ForegroundColor Yellow
+    } else {
+        Write-Host "OpenShim DLL: OK    Log uploader: not requested (no OPENSHIM_WEBHOOK - correct for normal players)" -ForegroundColor Yellow
+    }
+    if ($wrapperReady) {
+        Write-Host ""
+        Write-Host "One step left - set the Steam launch options (Steam > Battlezone 98 Redux"
+        Write-Host "> Properties > Launch Options) to:"
+        Write-Host ""
+        Write-Host '  cmd /c ""%LOCALAPPDATA%\openshim\openshim_wrap.bat" %command%"' -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "A console window stays open while the game runs - that is the wrapper"
+        Write-Host "waiting to bundle your logs on exit. Closing it kills the upload, not the game."
+        Write-Host "Without that line, nothing is ever uploaded."
+    } else {
+        Write-Host "No Steam launch option changes are needed on Windows. Just start the game."
+    }
 }
 finally {
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tempRoot

@@ -29,6 +29,30 @@ irm https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/s
 
 That's it. No launch options needed — just start the game.
 
+<details>
+<summary>If the command fails with an "empty string" error</summary>
+
+`Cannot bind argument to parameter 'Command'` means `irm` downloaded nothing —
+something on your machine emptied the response (an ad-blocker or corporate
+DNS blackholing `raw.githubusercontent.com`, or antivirus HTTPS inspection).
+Download to a file first to see the real failure:
+
+```powershell
+$dst = "$env:TEMP\openshim_install.ps1"
+Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_windows.ps1' -OutFile $dst
+(Get-Item $dst).Length   # expect a few thousand bytes, not 0
+powershell -NoProfile -ExecutionPolicy Bypass -File $dst
+```
+</details>
+
+<details>
+<summary>If Defender flags <code>winmm.dll</code></summary>
+
+A known false positive — unsigned DLL proxies that hook the game are exactly
+the shape AV heuristics flag. Restore it from Protection History and add an
+exception for that one file. Don't disable AV globally.
+</details>
+
 Uninstall:
 
 ```powershell
@@ -51,13 +75,7 @@ curl -fsSL https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim
 
 Then set launch options once (Steam → Battlezone 98 Redux → Properties → Launch Options).
 
-Native Steam or Flatpak:
-
-```text
-WINEDLLOVERRIDES="winmm=n,b;dsound=n,b" %command%
-```
-
-Snap Steam:
+Native Steam, Flatpak, or Snap:
 
 ```text
 WINEDLLOVERRIDES="winmm=n,b;dsound=n,b" %command%
@@ -68,6 +86,64 @@ Quotes are required; a bare `;` splits the command. Drop `dsound=n,b` if you are
 If you have both Steam flavours, paste both install commands and set the launch options in each Steam you actually launch from.
 
 Uninstall: remove `winmm.dll` from the game folder and clear the launch options.
+
+## Test crew: session logging (opt-in)
+
+Logging is off unless you opt in. Members of the test crew can have each
+session's logs bundled and uploaded automatically to the private channel:
+
+1. Install with the pinned command from the private Discord channel (it's
+   the normal install command with the webhook included).
+2. Use the wrapper launch option instead of the plain one.
+
+Windows:
+
+```text
+cmd /c ""%LOCALAPPDATA%\openshim\openshim_wrap.bat" %command%"
+```
+
+Linux — native or Flatpak Steam:
+
+```text
+WINEDLLOVERRIDES="winmm=n,b;dsound=n,b" "${XDG_DATA_HOME:-$HOME/.local/share}/openshim/openshim_wrap.sh" %command%
+```
+
+Linux — Snap Steam:
+
+```text
+WINEDLLOVERRIDES="winmm=n,b;dsound=n,b" "$SNAP_USER_COMMON/.local/share/openshim/openshim_wrap.sh" %command%
+```
+
+The installer prints the right one for your machine on its last lines — copy
+that. Don't guess between them: the wrapper is the launch target, so a path
+that doesn't resolve inside the sandbox kills the launch instead of starting
+the game.
+
+A Windows console window stays open while the game runs. That is the wrapper
+waiting to bundle on exit. Closing it kills the upload, not the game.
+
+No wrapper in the launch options = nothing ever uploads. Bundles contain
+every peer's public IP, which is why the destination is a private channel.
+Details: [`upload/README.md`](upload/README.md).
+
+### Snap Steam
+
+Snap needs its own line because snapd remaps `HOME` into
+`~/snap/steam/common/` and its home interface hides the host's
+dot-directories, so the `XDG_DATA_HOME` path above can never exist inside
+the sandbox. `$SNAP_USER_COMMON` is guaranteed by snapd and points at the
+mirrored copy the installer places there.
+
+The Steam snap's runtime also ships neither `curl` nor `python3`, so nothing
+inside the sandbox can send a bundle. Sessions are parked in an outbox and a
+host-side systemd user unit drains them — the installer enables
+`openshim-retry.path` (fires within seconds of the game exiting) plus a
+10-minute timer as a backstop. Nothing to do; a parked bundle is not a lost
+one. If the installer says it couldn't enable those units, send by hand:
+
+```bash
+"$HOME/snap/steam/common/.local/share/openshim/openshim_wrap.sh" --retry
+```
 
 ### Standalone (DLL-only) Operation
 
