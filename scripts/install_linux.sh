@@ -50,6 +50,7 @@ Usage:
 
 Environment:
   OPENSHIM_REPO / OPENSHIM_REF / OPENSHIM_DLL / BZR_GAME_PATH
+  OPENSHIM_WEBHOOK / OPENSHIM_PLAYER   test-crew log upload (never committed)
 EOF
 }
 
@@ -458,18 +459,193 @@ for game_dir in "${BZR_GAME_PATHS[@]}"; do
     echo
 done
 
-cat <<'EOF'
+# ── Automatic log upload (test crew) ─────────────────────────────────────────
+# Zero prompts: the webhook rides in on OPENSHIM_WEBHOOK, pinned in the
+# private Discord channel, never in this public repo. No OPENSHIM_WEBHOOK
+# means no uploader and no questions. Consent is the Steam launch option.
+wrapper_ready=0
+wrapper_dir="${XDG_DATA_HOME:-$HOME/.local/share}/openshim"
+conf_dir="${XDG_CONFIG_HOME:-$HOME/.config}/openshim"
+wrapper_src=""
+if [[ -n "$repo_root" && -f "$repo_root/upload/openshim_wrap.sh" ]]; then
+    wrapper_src="$repo_root/upload/openshim_wrap.sh"
+elif [[ -n "${OPENSHIM_WEBHOOK:-}" || -f "$wrapper_dir/openshim_wrap.sh" ]]; then
+    if download_to "https://raw.githubusercontent.com/${REPO_SLUG}/${REF}/upload/openshim_wrap.sh" \
+            "$work/openshim_wrap.sh" && [[ -s "$work/openshim_wrap.sh" ]]; then
+        wrapper_src="$work/openshim_wrap.sh"
+    else
+        echo "Warning: could not fetch upload/openshim_wrap.sh from $REPO_SLUG@$REF." >&2
+    fi
+fi
+wrapper_ver_of() {
+    [[ -f "$1" ]] || { echo "none"; return; }
+    sed -n 's/^WRAPPER_VERSION="\(.*\)"$/\1/p' "$1" | head -1 \
+        | grep . || echo "unversioned"
+}
+install_wrapper_copy() {
+    local dest_dir="$1"
+    mkdir -p "$dest_dir"
+    command cp -f "$wrapper_src" "$dest_dir/openshim_wrap.sh"
+    chmod +x "$dest_dir/openshim_wrap.sh"
+}
+
+if [[ -n "${OPENSHIM_WEBHOOK:-}" && -n "$wrapper_src" ]]; then
+    if [[ "$OPENSHIM_WEBHOOK" != https://discord.com/api/webhooks/* \
+       && "$OPENSHIM_WEBHOOK" != https://discordapp.com/api/webhooks/* ]]; then
+        echo "Warning: OPENSHIM_WEBHOOK is not a Discord webhook URL; skipping upload setup." >&2
+    else
+        mkdir -p "$wrapper_dir" "$conf_dir"
+        old_wrapper_ver="$(wrapper_ver_of "$wrapper_dir/openshim_wrap.sh")"
+        new_wrapper_ver="$(wrapper_ver_of "$wrapper_src")"
+        install_wrapper_copy "$wrapper_dir"
+        if [[ "$old_wrapper_ver" == "$new_wrapper_ver" ]]; then
+            echo "Uploader wrapper: $new_wrapper_ver (already current)."
+        else
+            echo "Uploader wrapper: $old_wrapper_ver -> $new_wrapper_ver."
+        fi
+        (
+            umask 077
+            cat >"$conf_dir/upload.conf" <<EOF
+# Written by install_linux.sh. Do not commit this file.
+OPENSHIM_WEBHOOK='$OPENSHIM_WEBHOOK'
+OPENSHIM_PLAYER='${OPENSHIM_PLAYER:-}'
+OPENSHIM_INCLUDE_PROTON=0
+EOF
+        )
+        chmod 600 "$conf_dir/upload.conf"
+
+        for sandbox_dir in \
+            "$HOME/snap/steam/common/.local/share/openshim" \
+            "$HOME/.var/app/com.valvesoftware.Steam/data/openshim"; do
+            [[ -d "${sandbox_dir%/openshim}/Steam" ]] || continue
+            install_wrapper_copy "$sandbox_dir"
+            command cp -f "$conf_dir/upload.conf" "$sandbox_dir/upload.conf"
+            chmod 600 "$sandbox_dir/upload.conf"
+            echo "Mirrored the uploader into $sandbox_dir (sandboxed Steam)."
+
+            if [[ "$sandbox_dir" == "$HOME/snap/steam/"* ]] \
+               && command -v systemctl >/dev/null 2>&1; then
+                unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+                mkdir -p "$unit_dir" "$sandbox_dir/outbox"
+                cat >"$unit_dir/openshim-retry.service" <<UNIT
+[Unit]
+Description=Send parked OpenShim session bundles
+
+[Service]
+Type=oneshot
+ExecStart="$sandbox_dir/openshim_wrap.sh" --retry
+UNIT
+                cat >"$unit_dir/openshim-retry.path" <<UNIT
+[Unit]
+Description=Watch the OpenShim outbox the snap sandbox cannot send from
+
+[Path]
+PathChanged=$sandbox_dir/outbox
+Unit=openshim-retry.service
+
+[Install]
+WantedBy=paths.target
+UNIT
+                cat >"$unit_dir/openshim-retry.timer" <<UNIT
+[Unit]
+Description=Backstop drain for the OpenShim outbox
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target
+UNIT
+                systemctl --user daemon-reload 2>/dev/null || true
+                drain_ok=0
+                systemctl --user enable --now openshim-retry.path 2>/dev/null && drain_ok=1
+                systemctl --user enable --now openshim-retry.timer 2>/dev/null || true
+                if [[ "$drain_ok" == "1" ]]; then
+                    echo "Enabled openshim-retry.path: Snap-parked bundles are sent within seconds."
+                else
+                    echo "Could not enable the drain units; send parked bundles by hand with:"
+                    echo "  \"$sandbox_dir/openshim_wrap.sh\" --retry"
+                fi
+            fi
+        done
+
+        echo "Automatic log upload configured for '${OPENSHIM_PLAYER:-your in-game name (read at upload time)}'."
+        wrapper_ready=1
+    fi
+elif [[ -f "$wrapper_dir/openshim_wrap.sh" && -n "$wrapper_src" ]]; then
+    old_wrapper_ver="$(wrapper_ver_of "$wrapper_dir/openshim_wrap.sh")"
+    new_wrapper_ver="$(wrapper_ver_of "$wrapper_src")"
+    install_wrapper_copy "$wrapper_dir"
+    for sandbox_dir in \
+        "$HOME/snap/steam/common/.local/share/openshim" \
+        "$HOME/.var/app/com.valvesoftware.Steam/data/openshim"; do
+        [[ -f "$sandbox_dir/openshim_wrap.sh" ]] || continue
+        install_wrapper_copy "$sandbox_dir"
+        echo "Refreshed the sandboxed uploader in $sandbox_dir."
+    done
+    if [[ "$old_wrapper_ver" == "$new_wrapper_ver" ]]; then
+        echo "Uploader wrapper: $new_wrapper_ver (already current; saved webhook untouched)."
+    else
+        echo "Uploader wrapper: $old_wrapper_ver -> $new_wrapper_ver (saved webhook untouched)."
+    fi
+    wrapper_ready=1
+fi
+
+have_snap_install=0
+have_native_install=0
+for gp in "${BZR_GAME_PATHS[@]}"; do
+    if [[ "$gp" == "$HOME/snap/steam/"* ]]; then
+        have_snap_install=1
+    else
+        have_native_install=1
+    fi
+done
+
+play_line='WINEDLLOVERRIDES="winmm=n,b;dsound=n,b" %command%'
+upload_native='WINEDLLOVERRIDES="winmm=n,b;dsound=n,b" "${XDG_DATA_HOME:-$HOME/.local/share}/openshim/openshim_wrap.sh" %command%'
+upload_snap='WINEDLLOVERRIDES="winmm=n,b;dsound=n,b" "$SNAP_USER_COMMON/.local/share/openshim/openshim_wrap.sh" %command%'
+
+if [[ "$wrapper_ready" == "1" ]]; then
+    uploader_status="Log uploader: OK"
+elif [[ -n "${OPENSHIM_WEBHOOK:-}" ]]; then
+    uploader_status="LOG UPLOADER: NOT INSTALLED - scroll up for the reason"
+else
+    uploader_status="Log uploader: not requested (no OPENSHIM_WEBHOOK - correct for normal players)"
+fi
+
+cat <<EOF
 
 Install complete.
+OpenShim DLL: OK    $uploader_status
 
 Steam launch options still need to be set once
 (Steam → Battlezone 98 Redux → Properties → Launch Options).
-
-Native Steam or Flatpak:
-  WINEDLLOVERRIDES="winmm=n,b;dsound=n,b" %command%
-
-Snap Steam:
-  WINEDLLOVERRIDES="winmm=n,b;dsound=n,b" %command%
-
-Quotes are required. Drop dsound=n,b if you are not using the dsound netcode proxy.
+Copy the line for the Steam you actually launch from. Don't guess:
+a wrapper path that does not exist inside the sandbox kills the launch.
 EOF
+
+if [[ "$wrapper_ready" == "1" ]]; then
+    if [[ "$have_native_install" == "1" ]]; then
+        echo
+        echo "Native Steam or Flatpak:"
+        echo "  $upload_native"
+    fi
+    if [[ "$have_snap_install" == "1" ]]; then
+        echo
+        echo "Snap Steam:"
+        echo "  $upload_snap"
+    fi
+    if [[ "$have_native_install" != "1" && "$have_snap_install" != "1" ]]; then
+        echo
+        echo "  $upload_native"
+    fi
+    echo
+    echo "Without the wrapper on that line, nothing is ever uploaded."
+else
+    echo
+    echo "  $play_line"
+fi
+
+echo
+echo "Quotes are required. Drop dsound=n,b if you are not using the dsound netcode proxy."
