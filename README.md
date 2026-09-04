@@ -11,6 +11,10 @@ Supported executables:
 - **GOG:** `battlezone98redux.exe`
 - **Steam:** `battlezone98redux.exe`
 
+Windows/GOG, Windows/Steam, Linux/Steam via Proton, and Linux/GOG through a
+compatible Wine/Proton prefix are maintained together. See the shared
+[`BZR platform and distribution compatibility policy`](Docs/BZR_PLATFORM_COMPATIBILITY.md).
+
 
 ## Installation
 
