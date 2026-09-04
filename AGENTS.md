@@ -19,6 +19,11 @@ Cross-repo reading is encouraged to avoid duplicate APIs or repeated RE. Do not 
 ## Shared BZR Lua Reference
 Before writing, reviewing, or changing BZR Lua behavior—or adding Lua-facing native APIs—read `Docs/BZR_LUA_AGENT_REFERENCE.md`. This document is mirrored across the four core BZR repos and should remain byte-identical. Repo-specific `AGENTS.md`/architecture docs still govern implementation ownership. When the shared reference changes, mirror the same content to OpenShim, EXU, Campaign Reimagined, and bzfile in the same workstream.
 
+## Platform and Distribution Compatibility
+- Treat Windows/GOG, Windows/Steam, Linux/Steam via Proton, and Linux/GOG via a compatible Wine/Proton prefix as the supported runtime matrix. Read `Docs/BZR_PLATFORM_COMPATIBILITY.md` before changing native loading, paths, filesystem behavior, process launch, module/resource discovery, installers, deployment, packaging, or update behavior.
+- Compatibility is a standing review requirement. Do not infer Steam behavior from GOG alone or Proton/Wine behavior from native Windows alone; run the affected validation lanes, or explicitly record a lane as unverified and obtain tester validation before release.
+- `Docs/BZR_PLATFORM_COMPATIBILITY.md` is mirrored across OpenShim, EXU, Campaign Reimagined, and bzfile and should remain byte-identical. Update all four copies in the same workstream.
+
 Reference/tooling repos commonly available under `%USERPROFILE%\Documents\GIT` (reference, not default edit targets): `BZ98RBlenderToolKit`, `Battlezone98Redux_DedicatedServer`, `BZ1-GameWatcher`, `BZ1_Source`, `BZ2_Source`, `Battlezone_LobbyMonitor`, `BZNTools`, `Battlezone98Redux_AudioTool`, `Battlezone98Redux_WorldBuilder`, `Battlezone98Redux_ZFSSpecialist`. Rendering work may also consult local `ogre-1.10.0`.
 
 ## Architecture
