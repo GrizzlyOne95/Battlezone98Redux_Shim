@@ -211,7 +211,9 @@ try {
     $hashes = @{}
 
     if ($env:OPENSHIM_DLL -and (Test-Path -LiteralPath $env:OPENSHIM_DLL)) {
-        $dll = $env:OPENSHIM_DLL
+        # Resolve first. A bare "winmm.dll" has no parent, and Join-Path
+        # refuses an empty root when Get-MatchedCompanions looks beside it.
+        $dll = (Resolve-Path -LiteralPath $env:OPENSHIM_DLL).ProviderPath
         $companions = Get-MatchedCompanions -Root (Split-Path -Parent $dll)
         if (-not $companions) {
             throw "OPENSHIM_DLL requires patches.json, openshim.ini, and net.ini beside the DLL (or scripts\patches.json). Refusing to mix versions."
@@ -268,14 +270,21 @@ try {
     Assert-Hash -FilePath $openshimIni -Expected $hashes["openshim.ini"]
     Assert-Hash -FilePath $netIni -Expected $hashes["net.ini"]
 
+    # Refuse the whole run before touching anything: with several installs
+    # detected, throwing inside the copy loop would leave earlier game
+    # directories rewritten and later ones untouched.
+    foreach ($gameDir in $gamePaths) {
+        $existingDll = Join-Path $gameDir "winmm.dll"
+        if ((Test-Path -LiteralPath $existingDll) -and -not (Test-OpenShimDll $existingDll)) {
+            throw "Refusing to overwrite non-OpenShim winmm.dll in $gameDir. Remove or rename that proxy first. Nothing was installed."
+        }
+    }
+
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
     foreach ($gameDir in $gamePaths) {
         Write-Host ""
         Write-Host "Installing OpenShim to: $gameDir"
         $destDll = Join-Path $gameDir "winmm.dll"
-        if ((Test-Path -LiteralPath $destDll) -and -not (Test-OpenShimDll $destDll)) {
-            throw "Refusing to overwrite non-OpenShim winmm.dll in $gameDir. Remove or rename that proxy first."
-        }
         Backup-ThenCopy -Source $dll -Dest $destDll -Stamp $stamp
         Backup-ThenCopy -Source $patches -Dest (Join-Path $gameDir "scripts\patches.json") -Stamp $stamp
         Backup-ThenCopy -Source $openshimIni -Dest (Join-Path $gameDir "openshim.ini") -Stamp $stamp
@@ -287,7 +296,10 @@ try {
         $destDll = Join-Path $gameDir "winmm.dll"
         if (-not (Test-Path -LiteralPath $destDll)) {
             Write-DefenderHelp -DllPath $destDll
-            throw "winmm.dll vanished right after install in $gameDir — quarantined. Follow the steps above, then re-run."
+            # Keep this file pure ASCII: Windows PowerShell 5.1 reads a BOM-less
+            # UTF-8 script as ANSI, and one non-ASCII character here breaks the
+            # whole script for anyone who saves it and runs powershell -File.
+            throw "winmm.dll vanished right after install in $gameDir - quarantined. Follow the steps above, then re-run."
         }
         if ($hashes["winmm.dll"]) {
             Assert-Hash -FilePath $destDll -Expected $hashes["winmm.dll"]
