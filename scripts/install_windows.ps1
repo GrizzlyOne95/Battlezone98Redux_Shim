@@ -1,8 +1,16 @@
 # One-line Windows installer. Paste from the README into PowerShell:
 #   irm https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_windows.ps1 | iex
 #
-# Downloads one matched GitHub-release set: winmm.dll + patches.json +
-# openshim.ini + net.ini. No Steam launch options are required on Windows.
+# Downloads ONE versioned release bundle, OpenShim-Suite.zip, verifies it
+# against the published SHA-256, and deploys the whole compatibility set:
+# winmm.dll, scripts\patches.json, openshim.ini, net.ini, the mandatory Enhanced
+# renderer resources, and the custom UI widget tiles. Downloading the loose
+# per-file assets instead would silently drop the resource trees, and the
+# Enhanced renderer refuses to enable without its validated resource set.
+#
+# OPENSHIM_DLL is an advanced override and only proceeds when a matching
+# artifact set sits beside that DLL. No Steam launch options are required on
+# Windows.
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -10,6 +18,9 @@ Set-StrictMode -Version Latest
 $repoSlug = if ($env:OPENSHIM_REPO) { $env:OPENSHIM_REPO } else { "GrizzlyOne95/Battlezone98Redux_Shim" }
 $steamAppId = "301650"
 $defaultInstallDir = "Battlezone 98 Redux"
+
+# UI tiles the game actually loads out of the custom-widget resource tree.
+$uiTiles = @("uiline.png", "uiplate.png", "uibtn.png", "uibtnhv.png")
 
 $requestedGamePath = if ($env:OPENSHIM_GAME_PATH) { $env:OPENSHIM_GAME_PATH } else { "" }
 
@@ -119,18 +130,101 @@ function Test-OpenShimDll {
     return $raw.Contains("OpenShim")
 }
 
-function Get-MatchedCompanions {
-    param([string]$Root)
+# Resolve one artifact set out of a tree. OpenShim-Suite.zip mirrors the
+# repository layout on purpose, so the extracted bundle, a local checkout, and
+# a flat directory beside an explicit OPENSHIM_DLL all resolve here. Returns
+# $null unless the four core files are all present. This is the PowerShell twin
+# of find_artifact_set in install_linux.sh; keep the two in step.
+function Get-ArtifactSet {
+    param([string]$Root, [string]$DllOverride)
+
+    $dllPath = $null
+    if ($DllOverride) {
+        $dllPath = $DllOverride
+    } elseif (Test-Path -LiteralPath (Join-Path $Root "bin\Release\winmm.dll")) {
+        $dllPath = Join-Path $Root "bin\Release\winmm.dll"
+    } elseif (Test-Path -LiteralPath (Join-Path $Root "winmm.dll")) {
+        $dllPath = Join-Path $Root "winmm.dll"
+    }
+
     $patches = Join-Path $Root "scripts\patches.json"
     if (-not (Test-Path -LiteralPath $patches)) {
         $patches = Join-Path $Root "patches.json"
     }
     $ini = Join-Path $Root "openshim.ini"
     $net = Join-Path $Root "net.ini"
-    if ((Test-Path -LiteralPath $patches) -and (Test-Path -LiteralPath $ini) -and (Test-Path -LiteralPath $net)) {
-        return @{ Patches = $patches; Ini = $ini; Net = $net }
+
+    if (-not $dllPath -or -not (Test-Path -LiteralPath $dllPath) -or
+        -not (Test-Path -LiteralPath $patches) -or
+        -not (Test-Path -LiteralPath $ini) -or
+        -not (Test-Path -LiteralPath $net)) {
+        return $null
     }
-    return $null
+
+    # The version marker gates the runtime validator, so a tree without it is
+    # not a deployable resource set even if some payloads are there.
+    $render = Join-Path $Root "resources\renderer\enhanced"
+    if (-not (Test-Path -LiteralPath (Join-Path $render "resources.version"))) {
+        $render = $null
+    }
+    $ui = Join-Path $Root "resources\ui\custom_widgets"
+    if (-not (Test-Path -LiteralPath $ui)) {
+        $ui = $null
+    }
+    $manifest = Join-Path $Root "resources\openshim\OpenShimAssets.ini"
+    if (-not (Test-Path -LiteralPath $manifest)) {
+        $manifest = $null
+    }
+
+    return @{
+        Dll = $dllPath
+        Patches = $patches
+        Ini = $ini
+        Net = $net
+        RenderSource = $render
+        UiSource = $ui
+        ManifestSource = $manifest
+    }
+}
+
+function Get-SuiteBundle {
+    param([string]$Base, [string]$TempRoot)
+
+    $zip = Join-Path $TempRoot "OpenShim-Suite.zip"
+    $sidecar = Join-Path $TempRoot "OpenShim-Suite.zip.sha256"
+
+    Write-Host "Downloading matched release bundle from $repoSlug ..."
+    Get-FileFromUri -Uri "$Base/OpenShim-Suite.zip" -OutFile $zip
+    Get-FileFromUri -Uri "$Base/OpenShim-Suite.zip.sha256" -OutFile $sidecar
+
+    $first = Get-Content -LiteralPath $sidecar -TotalCount 1
+    $expected = (($first -split '\s+') | Where-Object { $_ })[0]
+    if ($expected -notmatch '^[0-9a-fA-F]{64}$') {
+        throw "That release publishes no usable OpenShim-Suite.zip.sha256, so the bundle cannot be verified. Refusing to deploy it."
+    }
+    Assert-Hash -FilePath $zip -Expected $expected.ToLowerInvariant()
+    Write-Host "  verified OpenShim-Suite.zip sha256=$($expected.ToLowerInvariant())"
+
+    $suite = Join-Path $TempRoot "suite"
+    Expand-Archive -LiteralPath $zip -DestinationPath $suite -Force
+
+    $metadata = Join-Path $suite "release_metadata.json"
+    if (Test-Path -LiteralPath $metadata) {
+        $tag = [regex]::Match((Get-Content -LiteralPath $metadata -Raw), '"Tag"\s*:\s*"([^"]*)"')
+        if ($tag.Success) {
+            Write-Host "  bundle release: $($tag.Groups[1].Value)"
+        }
+    }
+
+    return $suite
+}
+
+function Copy-ResourceDirectory {
+    param([string]$Source, [string]$Destination)
+    if (-not (Test-Path -LiteralPath $Destination)) {
+        New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    }
+    Copy-Item -Path (Join-Path $Source "*") -Destination $Destination -Recurse -Force
 }
 
 function Get-FileFromUri {
@@ -204,55 +298,52 @@ if ($PSScriptRoot) {
 }
 
 try {
-    $dll = $null
-    $patches = $null
-    $openshimIni = $null
-    $netIni = $null
+    $artifacts = $null
     $hashes = @{}
 
     if ($env:OPENSHIM_DLL -and (Test-Path -LiteralPath $env:OPENSHIM_DLL)) {
         # Resolve first. A bare "winmm.dll" has no parent, and Join-Path
-        # refuses an empty root when Get-MatchedCompanions looks beside it.
-        $dll = (Resolve-Path -LiteralPath $env:OPENSHIM_DLL).ProviderPath
-        $companions = Get-MatchedCompanions -Root (Split-Path -Parent $dll)
-        if (-not $companions) {
+        # refuses an empty root when Get-ArtifactSet looks beside it.
+        $resolvedDll = (Resolve-Path -LiteralPath $env:OPENSHIM_DLL).ProviderPath
+        $artifacts = Get-ArtifactSet -Root (Split-Path -Parent $resolvedDll) -DllOverride $resolvedDll
+        if (-not $artifacts) {
             throw "OPENSHIM_DLL requires patches.json, openshim.ini, and net.ini beside the DLL (or scripts\patches.json). Refusing to mix versions."
         }
-        $patches = $companions.Patches
-        $openshimIni = $companions.Ini
-        $netIni = $companions.Net
-        Write-Host "Using OPENSHIM_DLL with matched companions: $dll"
+        Write-Host "Using OPENSHIM_DLL with matched companions: $($artifacts.Dll)"
     } elseif ($localRoot) {
-        $companions = Get-MatchedCompanions -Root $localRoot
-        if ($companions -and (Test-Path -LiteralPath (Join-Path $localRoot "bin\Release\winmm.dll"))) {
-            $dll = Join-Path $localRoot "bin\Release\winmm.dll"
-            $patches = $companions.Patches
-            $openshimIni = $companions.Ini
-            $netIni = $companions.Net
-            Write-Host "Using local Release build with matched companions: $dll"
+        $artifacts = Get-ArtifactSet -Root $localRoot
+        if ($artifacts) {
+            Write-Host "Using local Release build with matched companions: $($artifacts.Dll)"
         }
     }
 
-    if (-not $dll) {
+    # A DLL-only set stays supported as a deliberate manual override, but it is
+    # a degraded install: the Enhanced renderer validates its deployed resource
+    # set and refuses to enable without one. Say so rather than shipping a
+    # silently half-featured game.
+    if ($artifacts -and -not $artifacts.RenderSource) {
+        Write-Warning "No resources\renderer\enhanced beside that DLL."
+        Write-Warning "The Enhanced renderer will stay unavailable in this install."
+    }
+
+    if (-not $artifacts) {
         $base = "https://github.com/$repoSlug/releases/latest/download"
         try {
-            Write-Host "Downloading matched GitHub release set from $repoSlug ..."
-            Get-FileFromUri -Uri "$base/winmm.dll" -OutFile (Join-Path $tempRoot "winmm.dll")
-            Get-FileFromUri -Uri "$base/patches.json" -OutFile (Join-Path $tempRoot "patches.json")
-            Get-FileFromUri -Uri "$base/openshim.ini" -OutFile (Join-Path $tempRoot "openshim.ini")
-            Get-FileFromUri -Uri "$base/net.ini" -OutFile (Join-Path $tempRoot "net.ini")
-            try {
-                $shaText = (Invoke-WebRequest -Uri "$base/SHA256SUMS.txt" -UseBasicParsing).Content
-                if ($shaText -is [byte[]]) {
-                    $shaText = [System.Text.Encoding]::ASCII.GetString($shaText)
-                }
-                $hashes = Get-ShaMap -Text $shaText
-            } catch { }
-            $dll = Join-Path $tempRoot "winmm.dll"
-            $patches = Join-Path $tempRoot "patches.json"
-            $openshimIni = Join-Path $tempRoot "openshim.ini"
-            $netIni = Join-Path $tempRoot "net.ini"
-            Write-Host "Using GitHub release artifacts from $repoSlug"
+            $suiteRoot = Get-SuiteBundle -Base $base -TempRoot $tempRoot
+            $artifacts = Get-ArtifactSet -Root $suiteRoot
+            if (-not $artifacts) {
+                throw "The release bundle is missing one of winmm.dll, patches.json, openshim.ini, or net.ini."
+            }
+            if (-not $artifacts.RenderSource) {
+                throw "The release bundle carries no Enhanced renderer resource set. Refusing to deploy a bundle that would leave Enhanced unavailable."
+            }
+            # The bundle hash already covers these; the per-file map is what the
+            # post-install quarantine re-check compares winmm.dll against.
+            $sums = Join-Path $suiteRoot "SHA256SUMS.txt"
+            if (Test-Path -LiteralPath $sums) {
+                $hashes = Get-ShaMap -Text (Get-Content -LiteralPath $sums -Raw)
+            }
+            Write-Host "Using verified release bundle: $($artifacts.Dll)"
         } catch {
             if ("$_" -match 'virus|potentially unwanted|malicious') {
                 Write-DefenderHelp -DllPath (Join-Path $gamePaths[0] "winmm.dll")
@@ -261,9 +352,14 @@ try {
         }
     }
 
-    if (-not $dll -or -not (Test-Path -LiteralPath $dll) -or -not $patches -or -not $openshimIni -or -not $netIni) {
-        throw "No matched OpenShim artifact set found. Set OPENSHIM_REPO to a repo that publishes releases, or OPENSHIM_DLL with matching companions."
+    if (-not $artifacts) {
+        throw "No matched OpenShim artifact set found. Set OPENSHIM_REPO to a repo that publishes OpenShim-Suite.zip releases, or OPENSHIM_DLL with matching companions."
     }
+
+    $dll = $artifacts.Dll
+    $patches = $artifacts.Patches
+    $openshimIni = $artifacts.Ini
+    $netIni = $artifacts.Net
 
     Assert-Hash -FilePath $dll -Expected $hashes["winmm.dll"]
     Assert-Hash -FilePath $patches -Expected $hashes["patches.json"]
@@ -289,6 +385,36 @@ try {
         Backup-ThenCopy -Source $patches -Dest (Join-Path $gameDir "scripts\patches.json") -Stamp $stamp
         Backup-ThenCopy -Source $openshimIni -Dest (Join-Path $gameDir "openshim.ini") -Stamp $stamp
         Backup-ThenCopy -Source $netIni -Dest (Join-Path $gameDir "net.ini") -Stamp $stamp
+
+        if ($artifacts.RenderSource) {
+            Copy-ResourceDirectory -Source $artifacts.RenderSource `
+                -Destination (Join-Path $gameDir "openshim\renderer\enhanced")
+            Write-Host "  deployed Enhanced renderer resources"
+        }
+
+        if ($artifacts.ManifestSource) {
+            $manifestTarget = Join-Path $gameDir "openshim\OpenShimAssets.ini"
+            $manifestTargetDir = Split-Path -Parent $manifestTarget
+            if (-not (Test-Path -LiteralPath $manifestTargetDir)) {
+                New-Item -ItemType Directory -Force -Path $manifestTargetDir | Out-Null
+            }
+            Copy-Item -LiteralPath $artifacts.ManifestSource -Destination $manifestTarget -Force
+            Write-Host "  deployed asset manifest"
+        }
+
+        if ($artifacts.UiSource) {
+            $uiTarget = Join-Path $gameDir "BZ_ASSETS_CORE\common\ui\CustomWidgets"
+            if (-not (Test-Path -LiteralPath $uiTarget)) {
+                New-Item -ItemType Directory -Force -Path $uiTarget | Out-Null
+            }
+            foreach ($tile in $uiTiles) {
+                $tileSource = Join-Path $artifacts.UiSource $tile
+                if (Test-Path -LiteralPath $tileSource) {
+                    Copy-Item -LiteralPath $tileSource -Destination $uiTarget -Force
+                }
+            }
+            Write-Host "  deployed UI widget tiles"
+        }
     }
 
     Start-Sleep -Seconds 3
