@@ -30,6 +30,7 @@ OPENSHIM_INI=""
 NET_INI=""
 RENDER_SRC=""
 UI_SRC=""
+MANIFEST_SRC=""
 
 # UI tiles the game actually loads out of the custom-widget resource tree.
 UI_TILES=(uiline.png uiplate.png uibtn.png uibtnhv.png)
@@ -207,6 +208,11 @@ find_artifact_set() {
     if [[ -d "$root/resources/ui/custom_widgets" ]]; then
         UI_SRC="$root/resources/ui/custom_widgets"
     fi
+    if [[ -f "$root/resources/openshim/OpenShimAssets.ini" ]]; then
+        MANIFEST_SRC="$root/resources/openshim/OpenShimAssets.ini"
+    else
+        MANIFEST_SRC=""
+    fi
 
     [[ -n "$DLL" && -f "$DLL" && -n "$PATCHES" && -n "$OPENSHIM_INI" && -n "$NET_INI" ]]
 }
@@ -296,6 +302,13 @@ deploy_matched() {
         mkdir -p "$render_target"
         cp -f "$RENDER_SRC"/* "$render_target/"
         echo "  deployed Enhanced renderer resources"
+    fi
+
+    if [[ -n "$MANIFEST_SRC" ]]; then
+        local manifest_target="$game_dir/openshim/OpenShimAssets.ini"
+        mkdir -p "$(dirname "$manifest_target")"
+        cp -f "$MANIFEST_SRC" "$manifest_target"
+        echo "  deployed asset manifest"
     fi
 
     if [[ -n "$UI_SRC" ]]; then
