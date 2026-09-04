@@ -149,3 +149,6 @@ tmp/dx11-hardening-fxc/
 .nagatha/
 # Bilby mill scratch — never tracked
 .bilby/
+# Discord webhook lives only in a local upload.conf, never in the repo
+upload.conf
+**/upload.conf
