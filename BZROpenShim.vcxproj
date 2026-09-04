@@ -158,6 +158,8 @@
     <ClCompile Include="src\engine\render_profile.cpp" />
     <ClCompile Include="src\engine\backend_selection.cpp" />
     <ClCompile Include="src\engine\render_profile_resources.cpp" />
+    <ClCompile Include="src\engine\openshim_assets.cpp" />
+    <ClCompile Include="src\engine\openshim_assets_platform.cpp" />
     <ClCompile Include="src\engine\ui_decor.cpp" />
     <ClCompile Include="src\patches\sun_flash.cpp" />
     <ClCompile Include="src\patches\terrain_proxy.cpp" />
@@ -193,6 +195,7 @@
     <ClInclude Include="include\render_profile_runtime.h" />
     <ClInclude Include="include\render_profile_resources.h" />
     <ClInclude Include="include\render_profile_request_tracker.h" />
+    <ClInclude Include="include\openshim_assets.h" />
     <ClInclude Include="include\bzrnet_protocol.h" />
     <ClInclude Include="include\bzrnet_trace.h" />
     <ClInclude Include="include\bzrnet_instrumentation.h" />
