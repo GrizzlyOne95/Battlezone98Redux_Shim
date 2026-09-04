@@ -53,7 +53,7 @@ async function createSession(request, env) {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
   const sessionToken = randomHex(32);
-  const tokenHash = await sha256Hex(sessionToken);
+  const tokenHash = await sha256HexString(sessionToken);
 
   let supportId = null;
   for (let attempt = 0; attempt < 5; ++attempt) {
@@ -112,7 +112,7 @@ async function authorizeSession(request, env, supportId) {
   }
 
   const token = auth.slice("Bearer ".length).trim();
-  const providedHash = await sha256Hex(token);
+  const providedHash = await sha256HexString(token);
   if (!timingSafeEqual(providedHash, session.token_sha256)) {
     return { ok: false, response: json({ error: "invalid_token" }, 401) };
   }
@@ -121,6 +121,7 @@ async function authorizeSession(request, env, supportId) {
 }
 
 async function ingestLogs(request, env, supportId) {
+  requireBinding(env, "SUPPORT_BUCKET");
   requireBinding(env, "BETTERSTACK_INGEST_HOST");
   requireBinding(env, "BETTERSTACK_SOURCE_TOKEN");
 
@@ -131,6 +132,16 @@ async function ingestLogs(request, env, supportId) {
   const events = body.value.events;
   if (!Number.isInteger(sequence) || sequence < 0 || !Array.isArray(events) || events.length === 0) {
     return json({ error: "invalid_log_batch" }, 400);
+  }
+
+  // The client writes each batch to disk before sending it. If Better Stack
+  // accepted a batch but the HTTP success response was lost, the client will
+  // retry the same sequence. Persist an acknowledgement in R2 so ordinary
+  // retries do not duplicate the whole batch in the live log store.
+  const ackKey = logAckKey(supportId, sequence);
+  const existingAck = await env.SUPPORT_BUCKET.head(ackKey);
+  if (existingAck) {
+    return json({ ok: true, sequence, duplicate: true });
   }
 
   const normalized = events.slice(0, 5000).map((event) => {
@@ -158,6 +169,12 @@ async function ingestLogs(request, env, supportId) {
     return json({ error: "log_sink_unavailable", upstream_status: response.status }, 502);
   }
 
+  await env.SUPPORT_BUCKET.put(
+    ackKey,
+    JSON.stringify({ support_id: supportId, sequence, accepted_at: new Date().toISOString() }),
+    { httpMetadata: { contentType: "application/json" } },
+  );
+
   return json({ ok: true, sequence });
 }
 
@@ -176,7 +193,15 @@ async function uploadArtifact(request, env, supportId) {
     return json({ error: "artifact_too_large", max_bytes: MAX_ARTIFACT_BYTES }, 413);
   }
 
-  const key = `sessions/${supportId}/artifacts/${Date.now()}-${fileName}`;
+  // Content-address artifacts. A retry after a lost success response resolves
+  // to the same R2 key and therefore does not create timestamped duplicates.
+  const contentSha256 = await sha256HexBytes(bytes);
+  const key = artifactKey(supportId, contentSha256, fileName);
+  const existing = await env.SUPPORT_BUCKET.head(key);
+  if (existing) {
+    return json({ ok: true, key, bytes: bytes.byteLength, sha256: contentSha256, duplicate: true });
+  }
+
   await env.SUPPORT_BUCKET.put(key, bytes, {
     httpMetadata: {
       contentType: request.headers.get("Content-Type") || "application/octet-stream",
@@ -184,14 +209,22 @@ async function uploadArtifact(request, env, supportId) {
     customMetadata: {
       support_id: supportId,
       original_name: fileName,
+      sha256: contentSha256,
     },
   });
 
-  return json({ ok: true, key, bytes: bytes.byteLength }, 201);
+  return json({ ok: true, key, bytes: bytes.byteLength, sha256: contentSha256 }, 201);
 }
 
 async function finishSession(request, env, supportId) {
   requireBinding(env, "SUPPORT_BUCKET");
+
+  const finishKey = `sessions/${supportId}/finish.json`;
+  const existingFinish = await env.SUPPORT_BUCKET.head(finishKey);
+  if (existingFinish) {
+    // A retried finish should not generate repeated Discord notifications.
+    return json({ ok: true, duplicate: true });
+  }
 
   const body = await readJsonLimited(request, 64 * 1024);
   if (!body.ok) return body.response;
@@ -209,7 +242,7 @@ async function finishSession(request, env, supportId) {
   };
 
   await env.SUPPORT_BUCKET.put(
-    `sessions/${supportId}/finish.json`,
+    finishKey,
     JSON.stringify(finish, null, 2),
     { httpMetadata: { contentType: "application/json" } },
   );
@@ -275,6 +308,14 @@ function sessionKey(supportId) {
   return `sessions/${supportId}/session.json`;
 }
 
+function logAckKey(supportId, sequence) {
+  return `sessions/${supportId}/acks/logs/${String(sequence).padStart(12, "0")}.json`;
+}
+
+function artifactKey(supportId, sha256, fileName) {
+  return `sessions/${supportId}/artifacts/${sha256}-${fileName}`;
+}
+
 function sanitizeFileName(value) {
   const base = String(value).split(/[\\/]/).pop() || "artifact.bin";
   const safe = base.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "");
@@ -295,9 +336,12 @@ function randomHex(byteCount) {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function sha256Hex(value) {
-  const bytes = new TextEncoder().encode(value);
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+async function sha256HexString(value) {
+  return sha256HexBytes(new TextEncoder().encode(value));
+}
+
+async function sha256HexBytes(value) {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", value));
   return [...digest].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
