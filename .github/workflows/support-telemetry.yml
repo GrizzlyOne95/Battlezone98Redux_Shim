@@ -76,6 +76,45 @@ jobs:
           if ($bat -notmatch 'openshim_support_wrap\.ps1') { throw 'Batch launcher does not target the support wrapper.' }
           if ($bat -notmatch '%~dp0') { throw 'Batch launcher is not relative to its own directory.' }
 
+      - name: Smoke-test no-telemetry game launch from Launcher directory
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'openshim support launch smoke'
+          $game = Join-Path $root 'Battlezone 98 Redux'
+          $launcher = Join-Path $game 'Launcher'
+          New-Item -ItemType Directory -Force -Path $launcher | Out-Null
+
+          # Resolve-GameRoot only needs the marker to identify the parent game
+          # directory; the probe executable itself is a copy of cmd.exe.
+          New-Item -ItemType File -Force -Path (Join-Path $game 'battlezone98redux.exe') | Out-Null
+          $probe = Join-Path $launcher 'probe.exe'
+          Copy-Item -LiteralPath "$env:SystemRoot\System32\cmd.exe" -Destination $probe
+          $cwdFile = Join-Path $root 'cwd.txt'
+
+          $oldAppData = $env:APPDATA
+          $oldLocalAppData = $env:LOCALAPPDATA
+          try {
+            $env:APPDATA = Join-Path $root 'appdata'
+            $env:LOCALAPPDATA = Join-Path $root 'localappdata'
+            New-Item -ItemType Directory -Force -Path $env:APPDATA, $env:LOCALAPPDATA | Out-Null
+
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass `
+              -File .\upload\openshim_support_wrap.ps1 `
+              $probe /c "cd > `"$cwdFile`""
+            if ($LASTEXITCODE -ne 0) { throw "Support wrapper pass-through returned $LASTEXITCODE" }
+          } finally {
+            $env:APPDATA = $oldAppData
+            $env:LOCALAPPDATA = $oldLocalAppData
+          }
+
+          if (-not (Test-Path -LiteralPath $cwdFile)) { throw 'Probe process did not run.' }
+          $actual = (Get-Content -LiteralPath $cwdFile -Raw).Trim()
+          $expected = (Resolve-Path $game).Path
+          if (-not $actual.Equals($expected, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Wrong working directory. Expected '$expected', got '$actual'."
+          }
+
       - name: Verify support installer is opt-in
         shell: powershell
         run: |
