@@ -7,12 +7,14 @@ on:
     paths:
       - 'upload/openshim_support_*.ps1'
       - 'upload/openshim_support_*.bat'
+      - 'scripts/install_support_windows.ps1'
       - 'support-worker/**'
       - '.github/workflows/support-telemetry.yml'
   pull_request:
     paths:
       - 'upload/openshim_support_*.ps1'
       - 'upload/openshim_support_*.bat'
+      - 'scripts/install_support_windows.ps1'
       - 'support-worker/**'
       - '.github/workflows/support-telemetry.yml'
 
@@ -30,7 +32,8 @@ jobs:
           $failed = $false
           foreach ($path in @(
             'upload/openshim_support_transport.ps1',
-            'upload/openshim_support_wrap.ps1'
+            'upload/openshim_support_wrap.ps1',
+            'scripts/install_support_windows.ps1'
           )) {
             $tokens = $null
             $errors = $null
@@ -72,6 +75,15 @@ jobs:
           $bat = Get-Content .\upload\openshim_support_wrap.bat -Raw
           if ($bat -notmatch 'openshim_support_wrap\.ps1') { throw 'Batch launcher does not target the support wrapper.' }
           if ($bat -notmatch '%~dp0') { throw 'Batch launcher is not relative to its own directory.' }
+
+      - name: Verify support installer is opt-in
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Get-Content .\scripts\install_support_windows.ps1 -Raw
+          if ($installer -notmatch 'OPENSHIM_SUPPORT_ENDPOINT') { throw 'Installer lost endpoint gating.' }
+          if ($installer -notmatch 'Nothing uploads until you opt in') { throw 'Installer lost explicit launch-option consent text.' }
+          if ($installer -notmatch 'OPENSHIM_SUPPORT_INCLUDE_DUMPS') { throw 'Installer lost separate dump opt-in.' }
 
   worker-tests:
     name: Worker protocol and retry tests
