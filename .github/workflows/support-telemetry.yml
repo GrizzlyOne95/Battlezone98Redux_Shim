@@ -1,0 +1,87 @@
+name: Support telemetry validation
+
+on:
+  push:
+    branches:
+      - agent/openshim-support-telemetry
+    paths:
+      - 'upload/openshim_support_*.ps1'
+      - 'upload/openshim_support_*.bat'
+      - 'support-worker/**'
+      - '.github/workflows/support-telemetry.yml'
+  pull_request:
+    paths:
+      - 'upload/openshim_support_*.ps1'
+      - 'upload/openshim_support_*.bat'
+      - 'support-worker/**'
+      - '.github/workflows/support-telemetry.yml'
+
+jobs:
+  windows-powershell:
+    name: Windows PowerShell 5.1
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse support PowerShell scripts
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $failed = $false
+          foreach ($path in @(
+            'upload/openshim_support_transport.ps1',
+            'upload/openshim_support_wrap.ps1'
+          )) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $path),
+              [ref]$tokens,
+              [ref]$errors)
+            if ($errors.Count -gt 0) {
+              Write-Host "Parser errors in $path"
+              $errors | ForEach-Object { Write-Host $_.Message }
+              $failed = $true
+            }
+          }
+          if ($failed) { throw 'Support PowerShell parser validation failed.' }
+
+      - name: Smoke-test transport helpers
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . .\upload\openshim_support_transport.ps1
+
+          $input = 'peer=203.0.113.44 path=C:\Users\Test Person\AppData hook=https://discord.com/api/webhooks/123/abcDEF'
+          $safe = Protect-OpenShimSupportText $input
+          if ($safe -match '203\.0\.113\.44') { throw 'IPv4 redaction failed.' }
+          if ($safe -match 'C:\\Users\\Test Person') { throw 'Windows profile redaction failed.' }
+          if ($safe -match 'discord\.com/api/webhooks') { throw 'Discord webhook redaction failed.' }
+
+          $event = Convert-OpenShimSupportLogLine '[2026-09-04T20:04:31.118Z] [pid:123 tid:456] [WARN] [hooks] hello'
+          if ($event.dt -ne '2026-09-04T20:04:31.118Z') { throw 'Timestamp parse failed.' }
+          if ($event.pid -ne 123 -or $event.tid -ne 456) { throw 'PID/TID parse failed.' }
+          if ($event.level -ne 'WARN' -or $event.component -ne 'hooks' -or $event.message -ne 'hello') {
+            throw 'Structured log parse failed.'
+          }
+
+      - name: Validate batch launcher target
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bat = Get-Content .\upload\openshim_support_wrap.bat -Raw
+          if ($bat -notmatch 'openshim_support_wrap\.ps1') { throw 'Batch launcher does not target the support wrapper.' }
+          if ($bat -notmatch '%~dp0') { throw 'Batch launcher is not relative to its own directory.' }
+
+  worker-syntax:
+    name: Worker JavaScript syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax-check Worker as an ES module
+        run: |
+          cp support-worker/src/index.js /tmp/openshim-support-worker.mjs
+          node --check /tmp/openshim-support-worker.mjs
