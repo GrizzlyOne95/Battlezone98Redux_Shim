@@ -4,12 +4,13 @@ An open-source runtime patch and compatibility layer for **Battlezone 98 Redux v
 
 OpenShim provides engine-level bug fixes, quality-of-life improvements, restored legacy behavior, multiplayer fixes, modding extensions, and opt-in native features that cannot be implemented through normal Redux modding alone.
 
+<img width="2172" height="724" alt="1cfef10a-e840-44f1-9a8e-fb67ca4ae9da" src="https://github.com/user-attachments/assets/7da1eab5-50d1-417a-9d76-4004dcd11300" />
+
 Supported executables:
 
-- **GOG:** `BZR.exe`
+- **GOG:** `battlezone98redux.exe`
 - **Steam:** `battlezone98redux.exe`
 
-[<img width="1377" height="758" alt="Battlezone 98 Redux OpenShim" src="https://github.com/user-attachments/assets/b1f12ee2-5e57-46df-b467-1d5c69c6426e" />](https://images.steamusercontent.com/ugc/16933640577209196288/F91D1AEC284B96DA3C0DD6D1035F56C48903460C/?imw=5000&imh=5000&ima=fit&impolicy=Letterbox&imcolor=%23000000&letterbox=false)
 
 ## Installation
 
