@@ -24,6 +24,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Parse support PowerShell scripts
         shell: powershell
@@ -131,6 +134,142 @@ jobs:
           $expected = (Resolve-Path $game).Path
           if (-not $actual.Equals($expected, [System.StringComparison]::OrdinalIgnoreCase)) {
             throw "Wrong working directory. Expected '$expected', got '$actual'."
+          }
+
+      - name: Exercise live support pipeline against local mock backend
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'openshim-support-e2e'
+          $game = Join-Path $root 'Battlezone 98 Redux'
+          $launcher = Join-Path $game 'Launcher'
+          $mockOut = Join-Path $root 'mock-output'
+          New-Item -ItemType Directory -Force -Path $launcher, $mockOut | Out-Null
+          New-Item -ItemType File -Force -Path (Join-Path $game 'battlezone98redux.exe') | Out-Null
+
+          $listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, 0)
+          $listener.Start()
+          $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+          $listener.Stop()
+
+          $server = Start-Process -FilePath python -ArgumentList @(
+            'support-worker/test/mock_support_server.py',
+            '--port', "$port",
+            '--output', $mockOut
+          ) -PassThru -WindowStyle Hidden
+
+          try {
+            for ($i = 0; $i -lt 100 -and -not (Test-Path -LiteralPath (Join-Path $mockOut 'ready')); ++$i) {
+              Start-Sleep -Milliseconds 50
+            }
+            if (-not (Test-Path -LiteralPath (Join-Path $mockOut 'ready'))) {
+              throw 'Mock support server did not become ready.'
+            }
+
+            $probe = Join-Path $launcher 'supportprobe.exe'
+            $probeSource = @'
+            using System;
+            using System.IO;
+            using System.Text;
+            using System.Threading;
+
+            public static class SupportProbe
+            {
+                public static int Main()
+                {
+                    var launcher = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+                    var game = Directory.GetParent(launcher).FullName;
+                    var logs = Path.Combine(game, "logs");
+                    Directory.CreateDirectory(logs);
+
+                    using (var writer = new StreamWriter(
+                        Path.Combine(logs, "openshim.log"),
+                        false,
+                        new UTF8Encoding(false)))
+                    {
+                        writer.WriteLine(@"[2026-09-04T20:04:31.118Z] [pid:123 tid:456] [INFO] [test] begin peer=203.0.113.44 path=C:\Users\TestUser\AppData hook=https://discord.com/api/webhooks/123/abc");
+                        writer.Flush();
+                        Thread.Sleep(250);
+                        writer.WriteLine("[2026-09-04T20:04:31.368Z] [pid:123 tid:456] [WARN] [test] second");
+                        writer.Flush();
+                        Thread.Sleep(1200);
+                        writer.WriteLine("[2026-09-04T20:04:32.568Z] [pid:123 tid:456] [INFO] [test] end");
+                        writer.Flush();
+                    }
+
+                    File.WriteAllText(
+                        Path.Combine(game, "BZLogger.txt"),
+                        "Exiting Game With Return Code 0\r\n",
+                        new UTF8Encoding(false));
+                    Thread.Sleep(200);
+                    return 0;
+                }
+            }
+            '@
+            Add-Type -TypeDefinition $probeSource -Language CSharp -OutputAssembly $probe -OutputType ConsoleApplication
+
+            $oldAppData = $env:APPDATA
+            $oldLocalAppData = $env:LOCALAPPDATA
+            $oldEndpoint = $env:OPENSHIM_SUPPORT_ENDPOINT
+            try {
+              $env:APPDATA = Join-Path $root 'appdata'
+              $env:LOCALAPPDATA = Join-Path $root 'localappdata'
+              $env:OPENSHIM_SUPPORT_ENDPOINT = $null
+              $confDir = Join-Path $env:APPDATA 'openshim'
+              New-Item -ItemType Directory -Force -Path $confDir, $env:LOCALAPPDATA | Out-Null
+              "OPENSHIM_SUPPORT_ENDPOINT='http://127.0.0.1:$port'" |
+                Out-File -LiteralPath (Join-Path $confDir 'upload.conf') -Encoding UTF8
+
+              & powershell.exe -NoProfile -ExecutionPolicy Bypass `
+                -File .\upload\openshim_support_wrap.ps1 `
+                $probe
+              if ($LASTEXITCODE -ne 0) { throw "Live support wrapper returned $LASTEXITCODE" }
+
+              $latestId = Join-Path (Join-Path $env:LOCALAPPDATA 'openshim') 'latest-support-id.txt'
+              if (-not (Test-Path -LiteralPath $latestId)) { throw 'Support ID file was not created.' }
+              if ((Get-Content -LiteralPath $latestId -Raw).Trim() -ne 'OCP-TEST0001') {
+                throw 'Unexpected support ID persisted by wrapper.'
+              }
+
+              if (-not (Test-Path -LiteralPath (Join-Path $mockOut 'session-request.json'))) {
+                throw 'Session creation request never reached mock backend.'
+              }
+              $logFiles = @(Get-ChildItem -LiteralPath (Join-Path $mockOut 'logs') -Filter '*.json' -File -ErrorAction SilentlyContinue)
+              if ($logFiles.Count -lt 1) { throw 'No live log batch reached mock backend.' }
+              $liveText = ($logFiles | Sort-Object Name | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join "`n"
+              if ($liveText -notmatch 'second' -or $liveText -notmatch 'end') { throw 'Expected live log messages were not uploaded.' }
+              if ($liveText -match '203\.0\.113\.44') { throw 'Live telemetry leaked IPv4 address.' }
+              if ($liveText -match 'discord\.com/api/webhooks') { throw 'Live telemetry leaked Discord webhook URL.' }
+              if ($liveText -match 'TestUser') { throw 'Live telemetry leaked Windows profile name.' }
+
+              $artifactDir = Join-Path $mockOut 'artifacts'
+              $shimArtifact = Join-Path $artifactDir 'openshim.log'
+              $bzArtifact = Join-Path $artifactDir 'BZLogger.tail.txt'
+              if (-not (Test-Path -LiteralPath $shimArtifact)) { throw 'Final openshim.log artifact was not uploaded.' }
+              if (-not (Test-Path -LiteralPath $bzArtifact)) { throw 'BZLogger tail artifact was not uploaded.' }
+              $artifactText = Get-Content -LiteralPath $shimArtifact -Raw
+              if ($artifactText -match '203\.0\.113\.44') { throw 'Final artifact leaked IPv4 address.' }
+              if ($artifactText -match 'discord\.com/api/webhooks') { throw 'Final artifact leaked Discord webhook URL.' }
+              if ($artifactText -match 'TestUser') { throw 'Final artifact leaked Windows profile name.' }
+
+              $finishPath = Join-Path $mockOut 'finish.json'
+              if (-not (Test-Path -LiteralPath $finishPath)) { throw 'Finish request never reached mock backend.' }
+              $finish = Get-Content -LiteralPath $finishPath -Raw | ConvertFrom-Json
+              if ($finish.exit_code -ne 0 -or -not $finish.clean_exit -or $finish.crashed) {
+                throw "Unexpected finish state: $(Get-Content -LiteralPath $finishPath -Raw)"
+              }
+
+              $sessionSpool = Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA 'openshim') 'support-spool') 'OCP-TEST0001'
+              if (Test-Path -LiteralPath $sessionSpool) {
+                throw 'Fully acknowledged support session was not removed from local spool.'
+              }
+            } finally {
+              $env:APPDATA = $oldAppData
+              $env:LOCALAPPDATA = $oldLocalAppData
+              $env:OPENSHIM_SUPPORT_ENDPOINT = $oldEndpoint
+            }
+          } finally {
+            if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
           }
 
       - name: Verify support installer is opt-in
