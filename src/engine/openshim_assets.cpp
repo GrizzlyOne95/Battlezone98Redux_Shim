@@ -544,17 +544,55 @@ bool ProbeDestructionChunksAt(const std::filesystem::path& gameDir,
 }
 
 bool ProbeEnhancedResourcesAt(const std::filesystem::path& gameDir,
-                              std::string& outProblem)
+                              std::string& outProblem,
+                              std::filesystem::path* outResourceDir)
 {
     outProblem.clear();
+    if (outResourceDir != nullptr)
+        outResourceDir->clear();
     if (gameDir.empty())
     {
         outProblem = "game directory unavailable";
         return false;
     }
-    const std::filesystem::path resDir =
-        gameDir / RenderProfiles::kEnhancedResourceDirRel;
-    return RenderProfiles::ValidateDeployedResourceSetAt(resDir, outProblem);
+
+    // OpenShim's standalone installer deploys beside the executable, while
+    // addon/Workshop distributions keep the same relative tree below their
+    // mod root. Prefer the standalone deployment, then mirror the content-root
+    // discovery already used by the destruction-chunk probe.
+    std::vector<std::filesystem::path> roots;
+    AppendUniquePath(roots, gameDir);
+    for (const auto& candidate : GetCampaignContentRootCandidates(gameDir))
+        AppendUniquePath(roots, candidate);
+
+    std::string firstSpecificProblem;
+    for (const auto& root : roots)
+    {
+        const std::filesystem::path resDir =
+            root / RenderProfiles::kEnhancedResourceDirRel;
+        std::string problem;
+        if (RenderProfiles::ValidateDeployedResourceSetAt(resDir, problem))
+        {
+            if (outResourceDir != nullptr)
+                *outResourceDir = resDir;
+            return true;
+        }
+
+        // Preserve a useful corrupt/stale-payload diagnostic over the generic
+        // absence reported by the many candidate roots that do not carry this
+        // optional resource tree.
+        std::error_code ec;
+        if (firstSpecificProblem.empty() &&
+            std::filesystem::is_directory(resDir, ec) && !ec)
+        {
+            firstSpecificProblem = problem;
+        }
+    }
+
+    outProblem = firstSpecificProblem.empty()
+                     ? "resource directory absent from game and mod roots"
+                     : firstSpecificProblem;
+    return false;
 }
 
 std::filesystem::path ResolveTerrainHdManifestPathAt(

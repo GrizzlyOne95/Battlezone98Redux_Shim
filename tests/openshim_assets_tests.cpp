@@ -223,9 +223,77 @@ void TestProbeEnhancedPresent()
     std::printf("TestProbeEnhancedPresent\n");
     auto dir = MakeScratchDir("enh_present");
     PopulateValidEnhancedSet(dir);
+    PopulateValidEnhancedSet(dir / "mods" / "3686673790");
     std::string prob;
-    ExpectTrue(ProbeEnhancedResourcesAt(dir, prob), "present -> true");
+    std::filesystem::path resolved;
+    ExpectTrue(ProbeEnhancedResourcesAt(dir, prob, &resolved), "present -> true");
     ExpectTrue(prob.empty(), "no problem");
+    ExpectEqStr(resolved.lexically_normal().string(),
+                (dir / kEnhancedResourceDirRel).lexically_normal().string(),
+                "game-root deployment is preferred over a mod copy");
+    std::filesystem::remove_all(dir, g_ec);
+}
+
+void TestProbeEnhancedPresentInLocalModRoots()
+{
+    std::printf("TestProbeEnhancedPresentInLocalModRoots\n");
+    for (const char* parent : {"addon", "mods", "packaged_mods"})
+    {
+        auto dir = MakeScratchDir(parent);
+        const auto modRoot = dir / parent / "3686673790";
+        PopulateValidEnhancedSet(modRoot);
+
+        std::string prob;
+        std::filesystem::path resolved;
+        ExpectTrue(ProbeEnhancedResourcesAt(dir, prob, &resolved),
+                   "mod-root Enhanced set -> true");
+        ExpectTrue(prob.empty(), "mod-root probe has no problem");
+        ExpectEqStr(resolved.lexically_normal().string(),
+                    (modRoot / kEnhancedResourceDirRel).lexically_normal().string(),
+                    "mod-root probe returns the compatible directory");
+        std::filesystem::remove_all(dir, g_ec);
+    }
+}
+
+void TestProbeEnhancedPresentInSteamWorkshop()
+{
+    std::printf("TestProbeEnhancedPresentInSteamWorkshop\n");
+    auto dir = MakeScratchDir("enh_workshop");
+    const auto gameDir = dir / "steamapps" / "common" / "Battlezone 98 Redux";
+    const auto modRoot = dir / "steamapps" / "workshop" / "content" /
+                         "301650" / "3686673790";
+    std::filesystem::create_directories(gameDir, g_ec);
+    PopulateValidEnhancedSet(modRoot);
+
+    std::string prob;
+    std::filesystem::path resolved;
+    ExpectTrue(ProbeEnhancedResourcesAt(gameDir, prob, &resolved),
+               "Workshop Enhanced set -> true");
+    ExpectTrue(prob.empty(), "Workshop probe has no problem");
+    ExpectEqStr(resolved.lexically_normal().string(),
+                (modRoot / kEnhancedResourceDirRel).lexically_normal().string(),
+                "Workshop probe returns the compatible directory");
+    std::filesystem::remove_all(dir, g_ec);
+}
+
+void TestProbeEnhancedFallsBackFromInvalidGameRootToMod()
+{
+    std::printf("TestProbeEnhancedFallsBackFromInvalidGameRootToMod\n");
+    auto dir = MakeScratchDir("enh_mod_fallback");
+    PopulateValidEnhancedSet(dir);
+    const auto rootResourceDir = dir / kEnhancedResourceDirRel;
+    std::filesystem::remove(rootResourceDir / RequiredEnhancedResourceAt(0), g_ec);
+
+    const auto modRoot = dir / "mods" / "3686673790";
+    PopulateValidEnhancedSet(modRoot);
+
+    std::string prob;
+    std::filesystem::path resolved;
+    ExpectTrue(ProbeEnhancedResourcesAt(dir, prob, &resolved),
+               "valid mod set wins after invalid game-root set");
+    ExpectEqStr(resolved.lexically_normal().string(),
+                (modRoot / kEnhancedResourceDirRel).lexically_normal().string(),
+                "fallback reports mod resource directory");
     std::filesystem::remove_all(dir, g_ec);
 }
 
@@ -685,6 +753,9 @@ int main()
     TestProbeDestructionChunksPresent();
     TestProbeEnhancedNone();
     TestProbeEnhancedPresent();
+    TestProbeEnhancedPresentInLocalModRoots();
+    TestProbeEnhancedPresentInSteamWorkshop();
+    TestProbeEnhancedFallsBackFromInvalidGameRootToMod();
     TestProbeEnhancedEmptyFileFails();
     TestEvaluateNoManifestNone();
     TestEvaluateNoManifestFull();
