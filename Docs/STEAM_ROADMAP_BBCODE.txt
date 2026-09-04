@@ -629,6 +629,7 @@ A lot of things that used to be on this roadmap have already moved into working 
 [*] AI engagement-range improvements
 [*] Native OpenShim Settings UI
 [*] Renderer backend and Redux/Enhanced/Retro render-profile selection in the Settings UI
+[*] Enhanced renderer-resource validation across standalone game-root installs and mounted addon/mod/Steam Workshop content roots
 [*] One-click Steam Workshop OpenShim suite update checking and staging from the native options UI
 [*] Crash logging with first-chance diagnostics and minidumps
 [*] Custom Campaign / map thumbnail decode hardening path implemented
