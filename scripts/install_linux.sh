@@ -4,20 +4,36 @@
 #   curl -fsSL https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_linux.sh | bash -s -- --native
 #   curl -fsSL https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_linux.sh | bash -s -- --snap
 #
-# The default path downloads one GitHub release artifact set (DLL + patches.json
-# + INIs from the same release). --dll is an advanced override and only
-# proceeds when matching companions sit beside that DLL.
+# The default path downloads ONE versioned release bundle, OpenShim-Suite.zip,
+# verifies it against the published SHA-256, and deploys the whole compatibility
+# set: winmm.dll, scripts/patches.json, openshim.ini, net.ini, the mandatory
+# Enhanced renderer resources, and the custom UI widget tiles. Downloading the
+# loose per-file assets instead would silently drop the resource trees, and the
+# Enhanced renderer refuses to enable without its validated resource set.
+#
+# --dll is an advanced override and only proceeds when a matching artifact set
+# sits beside that DLL.
 #
 set -euo pipefail
 
 # Canonical install source is the upstream repo. Override with OPENSHIM_REPO.
 REPO_SLUG="${OPENSHIM_REPO:-GrizzlyOne95/Battlezone98Redux_Shim}"
 REF="${OPENSHIM_REF:-main}"
-WORKSHOP_ITEM="${OPENSHIM_WORKSHOP_ID:-3686673790}"
-APPID=301650
 FLAVOR="all"
 GAME_PATH="${BZR_GAME_PATH:-}"
 DLL_PATH="${OPENSHIM_DLL:-}"
+
+# One matched artifact set, resolved once and deployed to every game directory.
+DLL=""
+PATCHES=""
+OPENSHIM_INI=""
+NET_INI=""
+RENDER_SRC=""
+UI_SRC=""
+MANIFEST_SRC=""
+
+# UI tiles the game actually loads out of the custom-widget resource tree.
+UI_TILES=(uiline.png uiplate.png uibtn.png uibtnhv.png)
 
 usage() {
     cat <<EOF
@@ -28,7 +44,8 @@ Usage:
     --snap        Snap Steam installs only
     --game-path   One game directory (overrides flavour filter)
     --dll         Advanced: Win32 winmm.dll. Requires patches.json, openshim.ini,
-                  and net.ini in the same directory (or scripts/patches.json).
+                  and net.ini in the same directory (or scripts/patches.json),
+                  and resources/renderer/enhanced for the Enhanced renderer.
     --ref         Git ref used only to fetch steam_game_paths.sh (default: $REF)
 
 Environment:
@@ -62,6 +79,66 @@ download_to() {
     exit 2
 }
 
+file_size() {
+    # wc -c is portable; stat's size flag is not (GNU -c %s vs BSD -f %z).
+    wc -c < "$1" | tr -d '[:space:]'
+}
+
+sha256_of() {
+    local file="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file" | awk '{print $1}'
+        return
+    fi
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$file" | awk '{print $1}'
+        return
+    fi
+    if command -v openssl >/dev/null 2>&1; then
+        openssl dgst -sha256 "$file" | awk '{print $NF}'
+        return
+    fi
+    return 1
+}
+
+verify_sha256() {
+    local file="$1" expected="$2" actual=""
+    if [[ ! "$expected" =~ ^[0-9a-fA-F]{64}$ ]]; then
+        echo "error: published checksum for $(basename "$file") is not a SHA-256 digest." >&2
+        return 1
+    fi
+    if ! actual="$(sha256_of "$file")"; then
+        echo "error: need sha256sum, shasum, or openssl to verify $(basename "$file")." >&2
+        return 1
+    fi
+    if [[ "${actual,,}" != "${expected,,}" ]]; then
+        echo "error: SHA-256 mismatch for $(basename "$file")." >&2
+        echo "  expected ${expected,,}" >&2
+        echo "  actual   ${actual,,}" >&2
+        return 1
+    fi
+    echo "  verified $(basename "$file") sha256=${actual,,}"
+}
+
+extract_zip() {
+    local zip="$1" dest="$2"
+    mkdir -p "$dest"
+    if command -v unzip >/dev/null 2>&1; then
+        unzip -q -o "$zip" -d "$dest"
+        return
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -m zipfile -e "$zip" "$dest"
+        return
+    fi
+    if command -v bsdtar >/dev/null 2>&1; then
+        bsdtar -xf "$zip" -C "$dest"
+        return
+    fi
+    echo "error: need unzip, python3, or bsdtar to unpack OpenShim-Suite.zip." >&2
+    return 1
+}
+
 is_snap_game() {
     [[ "$1" == "$HOME/snap/steam/"* ]]
 }
@@ -89,67 +166,165 @@ is_openshim_dll() {
     [[ -f "$dll" ]] && grep -a -q "OpenShim" "$dll"
 }
 
-find_companions() {
-    local dir="$1"
+# Resolve one artifact set out of a tree. OpenShim-Suite.zip deliberately
+# mirrors the repository layout, so the extracted bundle and a local checkout
+# resolve through exactly this one path. A flat directory beside an explicit
+# --dll is accepted too. Succeeds only when the core four are all present.
+find_artifact_set() {
+    local root="$1" dll_override="${2:-}"
+    DLL=""
     PATCHES=""
     OPENSHIM_INI=""
     NET_INI=""
-    if [[ -f "$dir/scripts/patches.json" ]]; then
-        PATCHES="$dir/scripts/patches.json"
-    elif [[ -f "$dir/patches.json" ]]; then
-        PATCHES="$dir/patches.json"
+    RENDER_SRC=""
+    UI_SRC=""
+
+    if [[ -n "$dll_override" ]]; then
+        DLL="$dll_override"
+    elif [[ -f "$root/bin/Release/winmm.dll" ]]; then
+        DLL="$root/bin/Release/winmm.dll"
+    elif [[ -f "$root/winmm.dll" ]]; then
+        DLL="$root/winmm.dll"
     fi
-    [[ -f "$dir/openshim.ini" ]] && OPENSHIM_INI="$dir/openshim.ini"
-    [[ -f "$dir/net.ini" ]] && NET_INI="$dir/net.ini"
-    [[ -n "$PATCHES" && -n "$OPENSHIM_INI" && -n "$NET_INI" ]]
+
+    if [[ -f "$root/scripts/patches.json" ]]; then
+        PATCHES="$root/scripts/patches.json"
+    elif [[ -f "$root/patches.json" ]]; then
+        PATCHES="$root/patches.json"
+    fi
+
+    if [[ -f "$root/openshim.ini" ]]; then
+        OPENSHIM_INI="$root/openshim.ini"
+    fi
+    if [[ -f "$root/net.ini" ]]; then
+        NET_INI="$root/net.ini"
+    fi
+
+    # The version marker gates the runtime validator, so a tree without it is
+    # not a deployable resource set even if some payloads are there.
+    if [[ -f "$root/resources/renderer/enhanced/resources.version" ]]; then
+        RENDER_SRC="$root/resources/renderer/enhanced"
+    fi
+    if [[ -d "$root/resources/ui/custom_widgets" ]]; then
+        UI_SRC="$root/resources/ui/custom_widgets"
+    fi
+    if [[ -f "$root/resources/openshim/OpenShimAssets.ini" ]]; then
+        MANIFEST_SRC="$root/resources/openshim/OpenShimAssets.ini"
+    else
+        MANIFEST_SRC=""
+    fi
+
+    [[ -n "$DLL" && -f "$DLL" && -n "$PATCHES" && -n "$OPENSHIM_INI" && -n "$NET_INI" ]]
 }
 
-download_matched_release() {
+download_suite() {
     local dest="$1"
-    local repo base
+    local base="https://github.com/${REPO_SLUG}/releases/latest/download"
+    local zip="$dest/OpenShim-Suite.zip"
+    local sums="$dest/OpenShim-Suite.zip.sha256"
+    local expected=""
+
     mkdir -p "$dest"
-    for repo in "$REPO_SLUG"; do
-        base="https://github.com/${repo}/releases/latest/download"
-        echo "Downloading matched release set from $repo ..."
-        if download_to "$base/winmm.dll" "$dest/winmm.dll" \
-            && download_to "$base/patches.json" "$dest/patches.json" \
-            && download_to "$base/openshim.ini" "$dest/openshim.ini" \
-            && download_to "$base/net.ini" "$dest/net.ini" \
-            && [[ -s "$dest/winmm.dll" && -s "$dest/patches.json" ]]; then
-            echo "Using GitHub release artifacts from $repo"
-            return 0
-        fi
-        rm -f "$dest/winmm.dll" "$dest/patches.json" "$dest/openshim.ini" "$dest/net.ini"
-    done
-    return 1
+    echo "Downloading matched release bundle from $REPO_SLUG ..."
+    if ! download_to "$base/OpenShim-Suite.zip" "$zip" || [[ ! -s "$zip" ]]; then
+        echo "error: could not download OpenShim-Suite.zip from $REPO_SLUG." >&2
+        return 1
+    fi
+    if ! download_to "$base/OpenShim-Suite.zip.sha256" "$sums" || [[ ! -s "$sums" ]]; then
+        echo "error: that release publishes no OpenShim-Suite.zip.sha256, so the" >&2
+        echo "bundle cannot be verified. Refusing to deploy it." >&2
+        return 1
+    fi
+
+    expected="$(awk 'NR==1{print $1}' "$sums")"
+    verify_sha256 "$zip" "$expected" || return 1
+    extract_zip "$zip" "$dest/suite" || return 1
+
+    if [[ -f "$dest/suite/release_metadata.json" ]]; then
+        local tag
+        tag="$(sed -n 's/.*"Tag"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+            "$dest/suite/release_metadata.json" | head -n 1)"
+        [[ -n "$tag" ]] && echo "  bundle release: $tag"
+    fi
+}
+
+verify_patches_json() {
+    local repo_json="$1" game_json="$2"
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "  warning: python3 not found; skipped patches.json verification" >&2
+        return 0
+    fi
+    python3 - "$repo_json" "$game_json" <<'PY'
+import json
+import sys
+
+repo_path, game_path = sys.argv[1:3]
+with open(repo_path, encoding="utf-8") as fh:
+    repo = json.load(fh)
+with open(game_path, encoding="utf-8") as fh:
+    game = json.load(fh)
+
+missing = []
+for group in ("patches", "globals", "static_pointers"):
+    repo_names = {entry["name"] for entry in repo.get(group, [])}
+    game_names = {entry["name"] for entry in game.get(group, [])}
+    missing.extend(sorted(repo_names - game_names))
+
+if missing:
+    print("missing patch names:", ", ".join(missing), file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
+deploy_file() {
+    local src="$1" dst="$2" stamp="$3"
+    mkdir -p "$(dirname "$dst")"
+    if [[ -f "$dst" ]]; then
+        cp -f "$dst" "$dst.bak-$stamp"
+    fi
+    cp -f "$src" "$dst"
+    echo "  deployed $(basename "$dst") ($(file_size "$dst") bytes)"
 }
 
 deploy_matched() {
-    local game_dir="$1" dll="$2" patches="$3" ini="$4" net="$5"
-    if [[ -f "$game_dir/winmm.dll" ]] && ! is_openshim_dll "$game_dir/winmm.dll"; then
-        echo "error: refusing to overwrite non-OpenShim winmm.dll in $game_dir" >&2
-        echo "Remove or rename that proxy first if you intend to replace it." >&2
-        return 1
-    fi
-    echo "Installing OpenShim to: $game_dir"
-    mkdir -p "$game_dir/scripts"
+    local game_dir="$1"
     local stamp
     stamp="$(date +%Y%m%d-%H%M%S)"
-    local src dst
-    for src in "$dll" "$patches" "$ini" "$net"; do
-        case "$(basename "$src")" in
-            winmm.dll) dst="$game_dir/winmm.dll" ;;
-            patches.json) dst="$game_dir/scripts/patches.json" ;;
-            openshim.ini) dst="$game_dir/openshim.ini" ;;
-            net.ini) dst="$game_dir/net.ini" ;;
-            *) continue ;;
-        esac
-        if [[ -f "$dst" ]]; then
-            cp -f "$dst" "$dst.bak-$stamp"
-        fi
-        cp -f "$src" "$dst"
-        echo "  deployed $(basename "$dst") ($(stat -c %s "$dst") bytes)"
-    done
+
+    echo "Installing OpenShim to: $game_dir"
+    deploy_file "$DLL" "$game_dir/winmm.dll" "$stamp"
+    deploy_file "$PATCHES" "$game_dir/scripts/patches.json" "$stamp"
+    deploy_file "$OPENSHIM_INI" "$game_dir/openshim.ini" "$stamp"
+    deploy_file "$NET_INI" "$game_dir/net.ini" "$stamp"
+
+    if [[ -n "$RENDER_SRC" ]]; then
+        local render_target="$game_dir/openshim/renderer/enhanced"
+        mkdir -p "$render_target"
+        cp -f "$RENDER_SRC"/* "$render_target/"
+        echo "  deployed Enhanced renderer resources"
+    fi
+
+    if [[ -n "$MANIFEST_SRC" ]]; then
+        local manifest_target="$game_dir/openshim/OpenShimAssets.ini"
+        mkdir -p "$(dirname "$manifest_target")"
+        cp -f "$MANIFEST_SRC" "$manifest_target"
+        echo "  deployed asset manifest"
+    fi
+
+    if [[ -n "$UI_SRC" ]]; then
+        local ui_target="$game_dir/BZ_ASSETS_CORE/common/ui/CustomWidgets"
+        mkdir -p "$ui_target"
+        local ui_file
+        for ui_file in "${UI_TILES[@]}"; do
+            if [[ -f "$UI_SRC/$ui_file" ]]; then
+                cp -f "$UI_SRC/$ui_file" "$ui_target/"
+            fi
+        done
+        echo "  deployed UI widget tiles"
+    fi
+
+    verify_patches_json "$PATCHES" "$game_dir/scripts/patches.json"
+    echo "  patches.json verified"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -221,44 +396,65 @@ if [[ ${#BZR_GAME_PATHS[@]} -eq 0 ]]; then
     exit 1
 fi
 
-dll=""
-PATCHES=""
-OPENSHIM_INI=""
-NET_INI=""
+# Only a checkout that supplied its own steam_game_paths.sh counts as a local
+# repo; a piped run resolves script_dir to the caller's cwd, which is not one.
+repo_root=""
+if [[ -n "$script_dir" && "$src" == "$script_dir" ]]; then
+    repo_root="$(cd "$script_dir/.." 2>/dev/null && pwd || true)"
+fi
 
 if [[ -n "$DLL_PATH" ]]; then
-    dll="$DLL_PATH"
-    if ! find_companions "$(dirname "$dll")"; then
+    dll_dir="$(cd "$(dirname "$DLL_PATH")" 2>/dev/null && pwd || true)"
+    if [[ -z "$dll_dir" ]]; then
+        echo "error: --dll path does not exist: $DLL_PATH" >&2
+        exit 1
+    fi
+    if ! find_artifact_set "$dll_dir" "$dll_dir/$(basename "$DLL_PATH")"; then
         echo "error: --dll requires a matched set: patches.json, openshim.ini, and net.ini" >&2
         echo "beside the DLL (or scripts/patches.json). Refusing to mix versions." >&2
         exit 1
     fi
-    echo "Using explicit DLL with matched companions: $dll"
-elif [[ -n "$script_dir" && -f "$script_dir/../bin/Release/winmm.dll" ]] \
-    && find_companions "$(cd "$script_dir/.." && pwd)"; then
-    dll="$(cd "$script_dir/.." && pwd)/bin/Release/winmm.dll"
-    echo "Using local Release build with matched companions: $dll"
-elif download_matched_release "$work/release"; then
-    dll="$work/release/winmm.dll"
-    PATCHES="$work/release/patches.json"
-    OPENSHIM_INI="$work/release/openshim.ini"
-    NET_INI="$work/release/net.ini"
+    echo "Using explicit DLL with matched companions: $DLL"
+    if [[ -z "$RENDER_SRC" ]]; then
+        echo "warning: no resources/renderer/enhanced beside the DLL." >&2
+        echo "The Enhanced renderer will stay unavailable in this install." >&2
+    fi
+elif [[ -n "$repo_root" ]] && find_artifact_set "$repo_root"; then
+    echo "Using local Release build with matched companions: $DLL"
+    if [[ -z "$RENDER_SRC" ]]; then
+        echo "warning: no resources/renderer/enhanced in $repo_root." >&2
+        echo "The Enhanced renderer will stay unavailable in this install." >&2
+    fi
+elif download_suite "$work/bundle" && find_artifact_set "$work/bundle/suite"; then
+    echo "Using verified release bundle: $DLL"
+    if [[ -z "$RENDER_SRC" ]]; then
+        echo "error: the release bundle carries no Enhanced renderer resource set." >&2
+        echo "Refusing to deploy a bundle that would leave Enhanced unavailable." >&2
+        exit 1
+    fi
 else
-    echo "error: could not download a matched OpenShim release set from $REPO_SLUG." >&2
-    echo "Pass --dll with matching companions, or set OPENSHIM_REPO to a repo that publishes releases." >&2
+    echo "error: could not obtain a matched OpenShim release bundle from $REPO_SLUG." >&2
+    echo "Pass --dll with a matching artifact set, or set OPENSHIM_REPO to a repo" >&2
+    echo "that publishes OpenShim-Suite.zip releases." >&2
     exit 1
 fi
 
-if [[ -z "$dll" || ! -f "$dll" || -z "$PATCHES" || -z "$OPENSHIM_INI" || -z "$NET_INI" ]]; then
-    echo "error: matched OpenShim artifact set is incomplete." >&2
-    exit 1
-fi
+# Refuse the whole run before touching anything: with several installs detected,
+# aborting mid-loop would leave earlier directories rewritten and later ones not.
+for game_dir in "${BZR_GAME_PATHS[@]}"; do
+    if [[ -f "$game_dir/winmm.dll" ]] && ! is_openshim_dll "$game_dir/winmm.dll"; then
+        echo "error: refusing to overwrite non-OpenShim winmm.dll in $game_dir" >&2
+        echo "Remove or rename that proxy first if you intend to replace it." >&2
+        echo "Nothing was installed." >&2
+        exit 1
+    fi
+done
 
 echo "Installing to:"
 printf '  %s\n' "${BZR_GAME_PATHS[@]}"
 
 for game_dir in "${BZR_GAME_PATHS[@]}"; do
-    deploy_matched "$game_dir" "$dll" "$PATCHES" "$OPENSHIM_INI" "$NET_INI"
+    deploy_matched "$game_dir"
     echo
 done
 
