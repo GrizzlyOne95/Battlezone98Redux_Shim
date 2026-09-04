@@ -85,27 +85,45 @@ jobs:
           $launcher = Join-Path $game 'Launcher'
           New-Item -ItemType Directory -Force -Path $launcher | Out-Null
 
-          # Resolve-GameRoot only needs the marker to identify the parent game
-          # directory; the probe executable itself is a copy of cmd.exe.
+          # Resolve-GameRoot only needs this marker to identify the parent game
+          # directory. The actual probe is a tiny managed executable so this
+          # test does not depend on cmd.exe redirection or quoting behavior.
           New-Item -ItemType File -Force -Path (Join-Path $game 'battlezone98redux.exe') | Out-Null
           $probe = Join-Path $launcher 'probe.exe'
-          Copy-Item -LiteralPath "$env:SystemRoot\System32\cmd.exe" -Destination $probe
+          $probeSource = @'
+          using System;
+          using System.IO;
+          public static class Probe
+          {
+              public static int Main()
+              {
+                  var output = Environment.GetEnvironmentVariable("OPENSHIM_PROBE_OUT");
+                  if (String.IsNullOrEmpty(output)) return 2;
+                  File.WriteAllText(output, Environment.CurrentDirectory);
+                  return 0;
+              }
+          }
+          '@
+          Add-Type -TypeDefinition $probeSource -Language CSharp -OutputAssembly $probe -OutputType ConsoleApplication
           $cwdFile = Join-Path $root 'cwd.txt'
 
           $oldAppData = $env:APPDATA
           $oldLocalAppData = $env:LOCALAPPDATA
+          $oldProbeOut = $env:OPENSHIM_PROBE_OUT
           try {
             $env:APPDATA = Join-Path $root 'appdata'
             $env:LOCALAPPDATA = Join-Path $root 'localappdata'
+            $env:OPENSHIM_PROBE_OUT = $cwdFile
             New-Item -ItemType Directory -Force -Path $env:APPDATA, $env:LOCALAPPDATA | Out-Null
 
             & powershell.exe -NoProfile -ExecutionPolicy Bypass `
               -File .\upload\openshim_support_wrap.ps1 `
-              $probe /c "cd > `"$cwdFile`""
+              $probe
             if ($LASTEXITCODE -ne 0) { throw "Support wrapper pass-through returned $LASTEXITCODE" }
           } finally {
             $env:APPDATA = $oldAppData
             $env:LOCALAPPDATA = $oldLocalAppData
+            $env:OPENSHIM_PROBE_OUT = $oldProbeOut
           }
 
           if (-not (Test-Path -LiteralPath $cwdFile)) { throw 'Probe process did not run.' }
