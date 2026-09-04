@@ -30650,7 +30650,7 @@ namespace BZROpenShim
             if (!s_logged)
             {
                 s_logged = true;
-                const auto& caps = Assets::GetAssetCapabilities();
+                const auto caps = Assets::GetAssetCapabilities();
                 Log(L"[CHUNKMESH] Chunk mesh proxy requested but asset capability unavailable; suppressing feature state=%hs installed=%hs problem=%hs\n",
                     Assets::AssetPackStateName(caps.state),
                     caps.installedVersion.c_str(),
@@ -31100,7 +31100,7 @@ namespace BZROpenShim
         // LoadTerrainHdManifest() remains the complete filesystem gate (soft-fails to stock atlas),
         // so no live behavior change is required; this log proves the centralized probe agrees.
         {
-            const auto& caps = Assets::GetAssetCapabilities();
+            const auto caps = Assets::GetAssetCapabilities();
             Log(L"[TERRAIN] HD terrain capability terrainHd=%d scanMs=%llu problem=%hs\n",
                 caps.terrainHd ? 1 : 0,
                 (unsigned long long)caps.lastScanDurationMs,
