@@ -2,34 +2,35 @@
 #include "render_profile_resources.h"
 #include "shim_log.h"
 
+// Engine- and OS-independent. This translation unit is compiled by the Linux
+// CTest workflow as well as by the Win32 DLL, so it must not include
+// <Windows.h> or call any Win32 API. Process and openshim.ini lookups live in
+// src/engine/openshim_assets_platform.cpp behind ResolveAssetRuntimeEnvironment().
+
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <fstream>
 #include <mutex>
+#include <shared_mutex>
 #include <sstream>
-
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <Windows.h>
+#include <vector>
 
 namespace BZROpenShim::Assets
 {
 
 namespace
 {
-SRWLOCK g_lock = SRWLOCK_INIT;
+std::shared_mutex g_lock;
 AssetCapabilities g_caps = {};
 bool g_initialized = false;
 bool g_loggedOnce = false;
 
-std::filesystem::path GetGameDirectory()
+uint64_t MonotonicMilliseconds()
 {
-    char path[MAX_PATH] = {};
-    const DWORD len = GetModuleFileNameA(nullptr, path, MAX_PATH);
-    if (len == 0 || len >= MAX_PATH)
-        return {};
-    return std::filesystem::path(path).parent_path();
+    using namespace std::chrono;
+    return static_cast<uint64_t>(
+        duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
 }
 
 void AppendUniquePath(std::vector<std::filesystem::path>& out,
@@ -48,10 +49,16 @@ std::filesystem::path TryGetWorkshopContentDirectory(
     if (gameDir.empty())
         return {};
     const auto normalized = gameDir.lexically_normal().string();
+    // Match on a separator-agnostic lowercase copy so the same marker works
+    // for Windows paths and for the POSIX-style paths the unit tests build.
     std::string lower = normalized;
     std::transform(lower.begin(), lower.end(), lower.begin(),
-                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    constexpr const char* kMarker = "\\steamapps\\common\\";
+                   [](unsigned char ch) {
+                       if (ch == '\\')
+                           return '/';
+                       return static_cast<char>(std::tolower(ch));
+                   });
+    constexpr const char* kMarker = "/steamapps/common/";
     const size_t pos = lower.find(kMarker);
     if (pos == std::string::npos)
         return {};
@@ -550,33 +557,47 @@ bool ProbeEnhancedResourcesAt(const std::filesystem::path& gameDir,
     return RenderProfiles::ValidateDeployedResourceSetAt(resDir, outProblem);
 }
 
+std::filesystem::path ResolveTerrainHdManifestPathAt(
+    const std::filesystem::path& gameDir,
+    const std::string& configuredManifest)
+{
+    // Mirrors terrain_proxy.cpp ResolveHdManifestPath(): absolute wins, relative
+    // is resolved against the game directory, empty means "no manifest".
+    const std::string configured = TrimAssetString(configuredManifest);
+    if (configured.empty())
+        return {};
+    std::filesystem::path path(configured);
+    if (path.is_absolute())
+        return path.lexically_normal();
+    if (gameDir.empty())
+        return {};
+    return (gameDir / path).lexically_normal();
+}
+
 bool ProbeTerrainHdAt(const std::filesystem::path& gameDir,
+                      const std::string& configuredManifest,
                       std::string& outProblem)
 {
     outProblem.clear();
-    if (gameDir.empty())
+    const std::filesystem::path manifest =
+        ResolveTerrainHdManifestPathAt(gameDir, configuredManifest);
+    if (manifest.empty())
     {
-        outProblem = "game directory unavailable";
+        outProblem = TrimAssetString(configuredManifest).empty()
+                         ? "terrain HD manifest not configured"
+                         : "game directory unavailable";
         return false;
     }
-    // Default manifest path is gameDir/terrain_hd_tiles.json (see openshim.ini TerrainHdManifest)
-    // Also check alternative path gameDir/addon/*/terrain_hd_tiles.json, workshop etc is not needed
-    // because terrain HD is game-root manifest driven. Probe default location.
-    const std::filesystem::path defaultManifest = gameDir / "terrain_hd_tiles.json";
-    if (FileExistsNonEmpty(defaultManifest))
+    if (FileExistsNonEmpty(manifest))
         return true;
-    // Also probe for any manifest at configured path? For testability, also accept
-    // gameDir/openshim/terrain_hd_tiles.json
-    const std::filesystem::path alt = gameDir / "openshim" / "terrain_hd_tiles.json";
-    if (FileExistsNonEmpty(alt))
-        return true;
-    outProblem = "terrain HD manifest not found";
+    outProblem = "terrain HD manifest not found at " + manifest.string();
     return false;
 }
 
 AssetCapabilities EvaluateAssetCapabilitiesAtWithManifest(
     const std::filesystem::path& gameDir,
-    const std::string& manifestText)
+    const std::string& manifestText,
+    const std::string& configuredTerrainHdManifest)
 {
     AssetCapabilities caps;
     caps.expectedVersion = kAssetPackExpectedVersion;
@@ -614,7 +635,7 @@ AssetCapabilities EvaluateAssetCapabilitiesAtWithManifest(
             std::string chunkP, enhP, terrainP;
             ProbeDestructionChunksAt(gameDir, chunkP);
             ProbeEnhancedResourcesAt(gameDir, enhP);
-            ProbeTerrainHdAt(gameDir, terrainP);
+            ProbeTerrainHdAt(gameDir, configuredTerrainHdManifest, terrainP);
             caps.destructionChunks = false;
             caps.enhancedResources = false;
             caps.customUiAssets = false;
@@ -652,12 +673,13 @@ AssetCapabilities EvaluateAssetCapabilitiesAtWithManifest(
     }
 
     // Instrumented filesystem probes - measure wall time
-    uint64_t t0 = GetTickCount64();
+    uint64_t t0 = MonotonicMilliseconds();
     std::string chunkProblem, enhProblem, terrainProblem;
     const bool haveChunks = ProbeDestructionChunksAt(gameDir, chunkProblem);
     const bool haveEnhanced = ProbeEnhancedResourcesAt(gameDir, enhProblem);
-    const bool haveTerrain = ProbeTerrainHdAt(gameDir, terrainProblem);
-    uint64_t t1 = GetTickCount64();
+    const bool haveTerrain =
+        ProbeTerrainHdAt(gameDir, configuredTerrainHdManifest, terrainProblem);
+    uint64_t t1 = MonotonicMilliseconds();
     caps.lastScanDurationMs = (t1 >= t0) ? (t1 - t0) : 0;
 
     if (manifestPresent && manifestValid)
@@ -724,9 +746,11 @@ AssetCapabilities EvaluateAssetCapabilitiesAtWithManifest(
     return caps;
 }
 
-AssetCapabilities EvaluateAssetCapabilitiesAt(const std::filesystem::path& gameDir)
+AssetCapabilities EvaluateAssetCapabilitiesAt(
+    const std::filesystem::path& gameDir,
+    const std::string& configuredTerrainHdManifest)
 {
-    uint64_t t0 = GetTickCount64();
+    uint64_t t0 = MonotonicMilliseconds();
     std::string manifestText;
     bool manifestFound = false;
     for (const char* rel : {kAssetManifestRelPath, kAssetManifestAltRelPath,
@@ -741,10 +765,12 @@ AssetCapabilities EvaluateAssetCapabilitiesAt(const std::filesystem::path& gameD
     }
     AssetCapabilities caps;
     if (manifestFound)
-        caps = EvaluateAssetCapabilitiesAtWithManifest(gameDir, manifestText);
+        caps = EvaluateAssetCapabilitiesAtWithManifest(gameDir, manifestText,
+                                                       configuredTerrainHdManifest);
     else
-        caps = EvaluateAssetCapabilitiesAtWithManifest(gameDir, std::string());
-    uint64_t t1 = GetTickCount64();
+        caps = EvaluateAssetCapabilitiesAtWithManifest(gameDir, std::string(),
+                                                       configuredTerrainHdManifest);
+    uint64_t t1 = MonotonicMilliseconds();
     // Ensure duration recorded even when manifest path taken
     if (caps.lastScanDurationMs == 0 && t1 >= t0)
         caps.lastScanDurationMs = t1 - t0;
@@ -759,81 +785,86 @@ AssetCapabilities EvaluateAssetCapabilitiesAt(const std::filesystem::path& gameD
     return caps;
 }
 
-const AssetCapabilities& GetAssetCapabilities()
+AssetCapabilities GetAssetCapabilities()
 {
-    AcquireSRWLockShared(&g_lock);
-    if (g_initialized)
     {
-        const AssetCapabilities& caps = g_caps;
-        ReleaseSRWLockShared(&g_lock);
-        return caps;
+        std::shared_lock<std::shared_mutex> reader(g_lock);
+        if (g_initialized)
+            return g_caps; // snapshot: a reference would dangle across a refresh
     }
-    ReleaseSRWLockShared(&g_lock);
 
-    AcquireSRWLockExclusive(&g_lock);
-    if (!g_initialized)
+    AssetCapabilities snapshot;
+    bool logThis = false;
     {
-        const auto gameDir = GetGameDirectory();
-        g_caps = EvaluateAssetCapabilitiesAt(gameDir);
-        g_initialized = true;
-        if (!g_loggedOnce)
+        std::unique_lock<std::shared_mutex> writer(g_lock);
+        if (!g_initialized)
         {
-            g_loggedOnce = true;
-            const char* stateName = AssetPackStateName(g_caps.state);
-            LogShimA(LogLevel::Info, "assets",
-                     "Asset pack state=%s manifestDetected=%d packDetected=%d formatCompat=%d compatCompat=%d installedFmt=%s installedCompat=%s expectedFmt=%s expectedCompat=%s destructionChunks=%d enhancedResources=%d terrainHd=%d problem=%s scanMs=%llu",
-                     stateName,
-                     g_caps.manifestDetected ? 1 : 0,
-                     g_caps.packDetected ? 1 : 0,
-                     g_caps.formatCompatible ? 1 : 0,
-                     g_caps.compatibilityCompatible ? 1 : 0,
-                     g_caps.installedFormatVersion.c_str(),
-                     g_caps.installedCompatibilityVersion.c_str(),
-                     g_caps.expectedFormatVersion.c_str(),
-                     g_caps.expectedCompatibilityVersion.c_str(),
-                     g_caps.destructionChunks ? 1 : 0,
-                     g_caps.enhancedResources ? 1 : 0,
-                     g_caps.terrainHd ? 1 : 0,
-                     g_caps.problem.c_str(),
-                     (unsigned long long)g_caps.lastScanDurationMs);
+            const AssetRuntimeEnvironment env = ResolveAssetRuntimeEnvironment();
+            g_caps = EvaluateAssetCapabilitiesAt(env.gameDir, env.terrainHdManifest);
+            g_initialized = true;
+            if (!g_loggedOnce)
+            {
+                g_loggedOnce = true;
+                logThis = true;
+            }
         }
+        snapshot = g_caps;
     }
-    ReleaseSRWLockExclusive(&g_lock);
-    AcquireSRWLockShared(&g_lock);
-    const AssetCapabilities& caps = g_caps;
-    ReleaseSRWLockShared(&g_lock);
-    return caps;
+
+    if (logThis)
+    {
+        LogShimA(LogLevel::Info, "assets",
+                 "Asset pack state=%s manifestDetected=%d packDetected=%d formatCompat=%d compatCompat=%d installedFmt=%s installedCompat=%s expectedFmt=%s expectedCompat=%s destructionChunks=%d enhancedResources=%d terrainHd=%d problem=%s scanMs=%llu",
+                 AssetPackStateName(snapshot.state),
+                 snapshot.manifestDetected ? 1 : 0,
+                 snapshot.packDetected ? 1 : 0,
+                 snapshot.formatCompatible ? 1 : 0,
+                 snapshot.compatibilityCompatible ? 1 : 0,
+                 snapshot.installedFormatVersion.c_str(),
+                 snapshot.installedCompatibilityVersion.c_str(),
+                 snapshot.expectedFormatVersion.c_str(),
+                 snapshot.expectedCompatibilityVersion.c_str(),
+                 snapshot.destructionChunks ? 1 : 0,
+                 snapshot.enhancedResources ? 1 : 0,
+                 snapshot.terrainHd ? 1 : 0,
+                 snapshot.problem.c_str(),
+                 (unsigned long long)snapshot.lastScanDurationMs);
+    }
+    return snapshot;
 }
 
 void RefreshAssetCapabilities()
 {
-    const auto gameDir = GetGameDirectory();
-    RefreshAssetCapabilitiesAt(gameDir);
+    const AssetRuntimeEnvironment env = ResolveAssetRuntimeEnvironment();
+    RefreshAssetCapabilitiesAt(env.gameDir, env.terrainHdManifest);
 }
 
-void RefreshAssetCapabilitiesAt(const std::filesystem::path& gameDir)
+void RefreshAssetCapabilitiesAt(const std::filesystem::path& gameDir,
+                                const std::string& configuredTerrainHdManifest)
 {
-    AssetCapabilities fresh = EvaluateAssetCapabilitiesAt(gameDir);
-    AcquireSRWLockExclusive(&g_lock);
-    const bool changed = !g_initialized ||
-                         fresh.state != g_caps.state ||
-                         fresh.manifestDetected != g_caps.manifestDetected ||
-                         fresh.packDetected != g_caps.packDetected ||
-                         fresh.formatCompatible != g_caps.formatCompatible ||
-                         fresh.compatibilityCompatible != g_caps.compatibilityCompatible ||
-                         fresh.destructionChunks != g_caps.destructionChunks ||
-                         fresh.enhancedResources != g_caps.enhancedResources ||
-                         fresh.terrainHd != g_caps.terrainHd ||
-                         fresh.installedCompatibilityVersion != g_caps.installedCompatibilityVersion;
-    g_caps = fresh;
-    g_initialized = true;
-    ReleaseSRWLockExclusive(&g_lock);
+    AssetCapabilities fresh =
+        EvaluateAssetCapabilitiesAt(gameDir, configuredTerrainHdManifest);
+    bool changed = false;
+    {
+        std::unique_lock<std::shared_mutex> writer(g_lock);
+        changed = !g_initialized ||
+                  fresh.state != g_caps.state ||
+                  fresh.manifestDetected != g_caps.manifestDetected ||
+                  fresh.packDetected != g_caps.packDetected ||
+                  fresh.formatCompatible != g_caps.formatCompatible ||
+                  fresh.compatibilityCompatible != g_caps.compatibilityCompatible ||
+                  fresh.destructionChunks != g_caps.destructionChunks ||
+                  fresh.enhancedResources != g_caps.enhancedResources ||
+                  fresh.terrainHd != g_caps.terrainHd ||
+                  fresh.installedCompatibilityVersion != g_caps.installedCompatibilityVersion;
+        g_caps = fresh;
+        g_initialized = true;
+    }
     if (changed)
     {
-        const char* stateName = AssetPackStateName(fresh.state);
         LogShimA(LogLevel::Info, "assets",
                  "Asset capabilities refreshed state=%s manifestDetected=%d packDetected=%d formatCompat=%d compatCompat=%d installedFmt=%s installedCompat=%s destructionChunks=%d enhancedResources=%d terrainHd=%d problem=%s scanMs=%llu",
-                 stateName,
+                 AssetPackStateName(fresh.state),
                  fresh.manifestDetected ? 1 : 0,
                  fresh.packDetected ? 1 : 0,
                  fresh.formatCompatible ? 1 : 0,
@@ -850,25 +881,23 @@ void RefreshAssetCapabilitiesAt(const std::filesystem::path& gameDir)
 
 void ResetAssetCapabilitiesForTesting()
 {
-    AcquireSRWLockExclusive(&g_lock);
+    std::unique_lock<std::shared_mutex> writer(g_lock);
     g_caps = {};
     g_caps.state = AssetPackState::Unknown;
     g_initialized = false;
     g_loggedOnce = false;
-    ReleaseSRWLockExclusive(&g_lock);
 }
 
 void SetAssetCapabilitiesForTesting(const AssetCapabilities& caps)
 {
-    AcquireSRWLockExclusive(&g_lock);
+    std::unique_lock<std::shared_mutex> writer(g_lock);
     g_caps = caps;
     g_initialized = true;
-    ReleaseSRWLockExclusive(&g_lock);
 }
 
 bool IsAssetFeatureAvailable(AssetFeature feature)
 {
-    const AssetCapabilities& caps = GetAssetCapabilities();
+    const AssetCapabilities caps = GetAssetCapabilities();
     if (caps.state == AssetPackState::Unknown)
         return false;
     // If manifest present, require both format and compatibility to be compatible.

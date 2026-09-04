@@ -6,9 +6,13 @@
 // present, its version compatibility, and which resource groups are usable.
 // All filesystem probes are pure functions taking a game directory so the core
 // is unit-testable without the game (see tests/openshim_assets_tests.cpp).
+// src/engine/openshim_assets.cpp contains no OS-specific code and is built by
+// the Linux CTest workflow; the Win32 pieces live in
+// src/engine/openshim_assets_platform.cpp behind ResolveAssetRuntimeEnvironment().
 // Runtime state is Unknown until the first successful filesystem observation;
 // Unknown never masquerades as NotDetected.
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 
@@ -23,6 +27,10 @@ constexpr const char* kAssetPackExpectedVersionAlt = "1.0";
 // Both expected to be "1" initially; Version= remains accepted as alias for CompatibilityVersion.
 constexpr const char* kAssetManifestExpectedFormatVersion = "1";
 constexpr const char* kAssetManifestExpectedCompatibilityVersion = "1";
+// Default value of openshim.ini [Terrain] TerrainHdManifest. Kept in sync with
+// terrain_proxy.cpp's ReadConfig() default so the capability probe and the
+// loader resolve the same file.
+constexpr const char* kDefaultTerrainHdManifest = "terrain_hd_tiles.json";
 
 enum class AssetPackState : uint8_t
 {
@@ -113,26 +121,64 @@ bool ProbeDestructionChunksAt(const std::filesystem::path& gameDir,
 bool ProbeEnhancedResourcesAt(const std::filesystem::path& gameDir,
                               std::string& outProblem);
 
-// HD terrain payload probe. Succeeds when the configured manifest file
-// (default terrain_hd_tiles.json, or [Terrain] TerrainHdManifest) exists
-// as a non-empty regular file. No Ogre interaction.
+// Resolves the HD terrain manifest exactly as terrain_proxy.cpp's
+// ResolveHdManifestPath() does, so the capability probe and the loader always
+// agree on which file is authoritative: an absolute configuredManifest is used
+// verbatim, a relative one is taken against gameDir, and an empty one yields an
+// empty path (HD terrain has no manifest to load).
+std::filesystem::path ResolveTerrainHdManifestPathAt(
+    const std::filesystem::path& gameDir,
+    const std::string& configuredManifest);
+
+// HD terrain payload probe. Succeeds when the manifest named by
+// configuredManifest ([Terrain] TerrainHdManifest, default
+// kDefaultTerrainHdManifest) resolves to a non-empty regular file. This is the
+// same path LoadTerrainHdManifest() opens, so a custom manifest location is
+// reported accurately. No Ogre interaction and no JSON schema validation --
+// LoadTerrainHdManifest() remains the complete gate.
 bool ProbeTerrainHdAt(const std::filesystem::path& gameDir,
+                      const std::string& configuredManifest,
                       std::string& outProblem);
 
 // Full evaluation at gameDir (manifest + per-group probes). Pure.
-AssetCapabilities EvaluateAssetCapabilitiesAt(const std::filesystem::path& gameDir);
+// configuredTerrainHdManifest carries the runtime's [Terrain] TerrainHdManifest
+// value; callers without config access pass the default.
+AssetCapabilities EvaluateAssetCapabilitiesAt(
+    const std::filesystem::path& gameDir,
+    const std::string& configuredTerrainHdManifest = kDefaultTerrainHdManifest);
 
 // Helper for tests: evaluate at gameDir with an already-read manifest text.
 // Pass empty manifestText to skip manifest step and use filesystem probes only.
 AssetCapabilities EvaluateAssetCapabilitiesAtWithManifest(
     const std::filesystem::path& gameDir,
-    const std::string& manifestText);
+    const std::string& manifestText,
+    const std::string& configuredTerrainHdManifest = kDefaultTerrainHdManifest);
+
+// --- Platform adapter ------------------------------------------------------
+
+// Everything above is engine- and OS-independent and is compiled into the
+// Linux CTest suite. The two facts the core cannot discover on its own -- where
+// the game is installed and what openshim.ini configured -- are supplied by the
+// platform adapter (src/engine/openshim_assets_platform.cpp on Win32; the test
+// harness links its own trivial implementation).
+struct AssetRuntimeEnvironment
+{
+    std::filesystem::path gameDir;
+    std::string terrainHdManifest = kDefaultTerrainHdManifest;
+};
+
+AssetRuntimeEnvironment ResolveAssetRuntimeEnvironment();
 
 // --- Runtime singleton (thread-safe, Unknown-aware) ------------------------
 
-const AssetCapabilities& GetAssetCapabilities();
+// Returns a snapshot by value. Refresh may replace the cached capabilities
+// (including their std::string storage) from another thread at any time, so a
+// reference into the cache would dangle; callers get their own consistent copy.
+AssetCapabilities GetAssetCapabilities();
 void RefreshAssetCapabilities();
-void RefreshAssetCapabilitiesAt(const std::filesystem::path& gameDir);
+void RefreshAssetCapabilitiesAt(
+    const std::filesystem::path& gameDir,
+    const std::string& configuredTerrainHdManifest = kDefaultTerrainHdManifest);
 
 // Test seam only.
 void ResetAssetCapabilitiesForTesting();

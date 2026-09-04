@@ -3232,7 +3232,7 @@ namespace BZROpenShim
                                              layout.headerTextWidth);
             if (g_ShimSettingsUiStatusText.empty())
             {
-                const auto& caps = Assets::GetAssetCapabilities();
+                const auto caps = Assets::GetAssetCapabilities();
                 std::string runtimeStatus;
                 // Build concise runtime line: version + distribution + asset status
                 const uint32_t shimVer = GetShimVersion();
@@ -3262,11 +3262,12 @@ namespace BZROpenShim
                 kShimSettingsUiToolbarWidths[1] - kUiToolbarCaptionPadding);
             // Footer always shows asset-pack status detail plus the hint, so
             // DLL-only users immediately see why asset features are suppressed.
-            // Cached capabilities (startup probe) are used; no synchronous
-            // Workshop tree scan occurs here. Scan duration is instrumented in
-            // Assets::EvaluateAssetCapabilitiesAt and logged once.
+            // Cached capabilities are used here; the filesystem scan happened
+            // once in ActivateShimSettingsPage's RefreshAssetCapabilities(), so
+            // no synchronous Workshop tree scan occurs per redraw. Scan duration
+            // is instrumented in Assets::EvaluateAssetCapabilitiesAt and logged.
             {
-                const auto& caps = Assets::GetAssetCapabilities();
+                const auto caps = Assets::GetAssetCapabilities();
                 std::string footerLine1 = Assets::FormatAssetStatusForUi(caps);
                 std::string footerLine2;
                 if (caps.state == Assets::AssetPackState::NotDetected)
@@ -3350,7 +3351,7 @@ namespace BZROpenShim
                 // asset-availability probe using string compare and the central service.
                 bool assetAvailable = true;
                 {
-                    const auto& caps = Assets::GetAssetCapabilities();
+                    const auto caps = Assets::GetAssetCapabilities();
                     if (caps.state != Assets::AssetPackState::Unknown)
                     {
                         if (setting.section && setting.key)
@@ -3509,6 +3510,11 @@ namespace BZROpenShim
             }
 
             g_ShimSettingsPageActive = true;
+            // Re-probe before the page is built so a pack installed, removed, or
+            // updated since startup is reflected in the footer and in the
+            // asset-gated rows. This is the explicit refresh point documented in
+            // Docs/DLL_ONLY_QUALIFICATION.md; every other UI read uses the cache.
+            Assets::RefreshAssetCapabilities();
             const OpenShimUpdateSnapshot update = GetOpenShimUpdateSnapshot();
             g_ShimSettingsUiUpdateGeneration = update.generation;
             if (!update.message.empty())
@@ -3538,7 +3544,7 @@ namespace BZROpenShim
             // ChunkMeshes=1 into a stock install. DX11 rows are gated on the
             // parent renderer resource, not the pack, for accuracy.
             {
-                const auto& caps = Assets::GetAssetCapabilities();
+                const auto caps = Assets::GetAssetCapabilities();
                 bool avail = true;
                 bool isDx11Row = false;
                 if (caps.state != Assets::AssetPackState::Unknown && setting.section && setting.key)
@@ -3747,7 +3753,7 @@ namespace BZROpenShim
             // why it cannot be toggled. DX11 rows report the parent renderer
             // resource, not the pack, for diagnostic accuracy.
             {
-                const auto& caps = Assets::GetAssetCapabilities();
+                const auto caps = Assets::GetAssetCapabilities();
                 bool avail = true;
                 bool isDx11Row = false;
                 if (caps.state != Assets::AssetPackState::Unknown && setting.section && setting.key)

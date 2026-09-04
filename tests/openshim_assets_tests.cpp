@@ -9,6 +9,19 @@
 using namespace BZROpenShim::Assets;
 using namespace BZROpenShim::RenderProfiles;
 
+// The core is OS-independent and gets the game directory and the configured
+// terrain manifest from a platform adapter (src/engine/openshim_assets_platform.cpp
+// in the DLL). There is no game process here, so the harness supplies its own:
+// an empty game directory makes the lazy singleton evaluate to NotDetected
+// rather than reaching into whatever happens to be on the build machine.
+namespace BZROpenShim::Assets
+{
+AssetRuntimeEnvironment ResolveAssetRuntimeEnvironment()
+{
+    return AssetRuntimeEnvironment{};
+}
+} // namespace BZROpenShim::Assets
+
 namespace
 {
 int g_failures = 0;
@@ -457,13 +470,13 @@ void TestTerrainHdCapability()
     auto dir = MakeScratchDir("terrain_hd");
     // No manifest, no terrain file -> not available
     std::string prob;
-    ExpectFalse(ProbeTerrainHdAt(dir, prob), "no terrain initially");
+    ExpectFalse(ProbeTerrainHdAt(dir, kDefaultTerrainHdManifest, prob), "no terrain initially");
     // Create terrain_hd_tiles.json
     {
         std::ofstream f(dir / "terrain_hd_tiles.json", std::ios::binary);
         f << "{\"tiles\":[]}";
     }
-    ExpectTrue(ProbeTerrainHdAt(dir, prob), "terrain now available");
+    ExpectTrue(ProbeTerrainHdAt(dir, kDefaultTerrainHdManifest, prob), "terrain now available");
 
     // Manifest claiming TerrainHd=1 but file missing -> capability false
     const std::string manifest = "[OpenShimAssets]\nFormatVersion=1\nCompatibilityVersion=1\nTerrainHd=1\n";
@@ -491,6 +504,102 @@ void TestTerrainHdCapability()
     good.terrainHd = false;
     SetAssetCapabilitiesForTesting(good);
     ExpectFalse(IsAssetFeatureAvailable(AssetFeature::TerrainHd), "terrain not");
+    ResetAssetCapabilitiesForTesting();
+    std::filesystem::remove_all(dir, g_ec);
+}
+
+void TestTerrainHdConfiguredManifestPath()
+{
+    std::printf("TestTerrainHdConfiguredManifestPath\n");
+    auto dir = MakeScratchDir("terrain_hd_configured");
+    std::string prob;
+
+    // A custom relative manifest is resolved against the game directory, the
+    // same way terrain_proxy's ResolveHdManifestPath() does. The probe must not
+    // report it unavailable just because it is not the default name.
+    std::filesystem::create_directories(dir / "openshim", g_ec);
+    {
+        std::ofstream f(dir / "openshim" / "custom_hd.json", std::ios::binary);
+        f << "{\"schema\":\"bzr-openshim-terrain-hd-v1\"}";
+    }
+    ExpectFalse(ProbeTerrainHdAt(dir, kDefaultTerrainHdManifest, prob),
+                "default name absent");
+    ExpectTrue(ProbeTerrainHdAt(dir, "openshim/custom_hd.json", prob),
+               "configured relative manifest honored");
+
+    // An absolute configured manifest is used verbatim, outside the game dir.
+    auto other = MakeScratchDir("terrain_hd_absolute");
+    const auto absolute = other / "elsewhere_hd.json";
+    {
+        std::ofstream f(absolute, std::ios::binary);
+        f << "{}";
+    }
+    ExpectTrue(ProbeTerrainHdAt(dir, absolute.string(), prob),
+               "configured absolute manifest honored");
+    ExpectEqStr(ResolveTerrainHdManifestPathAt(dir, absolute.string()).string(),
+                absolute.lexically_normal().string(),
+                "absolute path resolves verbatim");
+    ExpectEqStr(ResolveTerrainHdManifestPathAt(dir, kDefaultTerrainHdManifest).string(),
+                (dir / kDefaultTerrainHdManifest).lexically_normal().string(),
+                "relative path resolves against game dir");
+
+    // An empty configured value means HD terrain has no manifest at all, which
+    // is a distinct problem from "the file is missing".
+    ExpectTrue(ResolveTerrainHdManifestPathAt(dir, "").empty(), "empty configured -> empty path");
+    ExpectFalse(ProbeTerrainHdAt(dir, "", prob), "empty configured not available");
+    ExpectContains(prob, "not configured", "empty configured problem is specific");
+
+    // A zero-byte manifest is not a usable payload.
+    {
+        std::ofstream f(dir / "empty_hd.json", std::ios::binary);
+    }
+    ExpectFalse(ProbeTerrainHdAt(dir, "empty_hd.json", prob), "empty file not available");
+
+    // Full evaluation threads the configured value through to the probe.
+    const std::string manifest =
+        "[OpenShimAssets]\nFormatVersion=1\nCompatibilityVersion=1\nTerrainHd=1\n";
+    auto caps = EvaluateAssetCapabilitiesAtWithManifest(dir, manifest, "openshim/custom_hd.json");
+    ExpectTrue(caps.terrainHd, "evaluate honors configured manifest");
+    caps = EvaluateAssetCapabilitiesAtWithManifest(dir, manifest, kDefaultTerrainHdManifest);
+    ExpectFalse(caps.terrainHd, "evaluate reports missing default manifest");
+
+    std::filesystem::remove_all(dir, g_ec);
+    std::filesystem::remove_all(other, g_ec);
+}
+
+void TestCapabilitySnapshotSurvivesRefresh()
+{
+    std::printf("TestCapabilitySnapshotSurvivesRefresh\n");
+    auto dir = MakeScratchDir("caps_snapshot");
+
+    AssetCapabilities seeded;
+    seeded.state = AssetPackState::Detected;
+    seeded.manifestDetected = true;
+    seeded.packDetected = true;
+    seeded.formatCompatible = true;
+    seeded.compatibilityCompatible = true;
+    seeded.versionCompatible = true;
+    seeded.destructionChunks = true;
+    seeded.installedCompatibilityVersion = "1";
+    seeded.problem = "a problem string long enough to own a heap allocation";
+    SetAssetCapabilitiesForTesting(seeded);
+
+    // GetAssetCapabilities returns a snapshot by value. A refresh replaces the
+    // cached object (and its std::string storage) underneath; the caller's copy
+    // must still be readable and unchanged.
+    const AssetCapabilities snapshot = GetAssetCapabilities();
+    RefreshAssetCapabilitiesAt(dir, kDefaultTerrainHdManifest);
+    ExpectTrue(snapshot.state == AssetPackState::Detected, "snapshot keeps its state");
+    ExpectTrue(snapshot.destructionChunks, "snapshot keeps its capability bits");
+    ExpectEqStr(snapshot.problem,
+                "a problem string long enough to own a heap allocation",
+                "snapshot keeps its string storage");
+
+    // The cache itself moved on: the empty scratch dir has no pack.
+    const AssetCapabilities refreshed = GetAssetCapabilities();
+    ExpectTrue(refreshed.state == AssetPackState::NotDetected, "refresh replaced the cache");
+    ExpectFalse(refreshed.destructionChunks, "refreshed has no chunks");
+
     ResetAssetCapabilitiesForTesting();
     std::filesystem::remove_all(dir, g_ec);
 }
@@ -589,6 +698,8 @@ int main()
     TestFormatVersionVsCompatibility();
     TestPackageVsCapabilitySeparation();
     TestTerrainHdCapability();
+    TestTerrainHdConfiguredManifestPath();
+    TestCapabilitySnapshotSurvivesRefresh();
     TestPerMeshPartialSafety();
     TestSemanticCleanupFxaa();
     TestUiFormatting();

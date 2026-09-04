@@ -23,9 +23,30 @@ decisions are exercised.
   probing (absent vs present vs empty file), `EvaluateAssetCapabilitiesAt`
   for `NotDetected` / `Detected` / `Incompatible` / partial states, feature
   gating (`config true + asset unavailable → false`, `config false → false`,
-  `Unknown → fail-closed`), UI formatting.
+  `Unknown → fail-closed`), HD terrain manifest resolution (default name,
+  custom relative path, absolute path, unconfigured, zero-byte file),
+  snapshot semantics across a concurrent refresh, UI formatting.
+* `Build Linux Tests` (Ubuntu CTest) — `src/engine/openshim_assets.cpp` is
+  engine- **and** OS-independent and is compiled by this workflow. The Win32
+  pieces (module path, `openshim.ini` lookup) live in
+  `src/engine/openshim_assets_platform.cpp` behind
+  `ResolveAssetRuntimeEnvironment()`, which the test harness stubs.
 * `BZROpenShim.sln Release|Win32` — still builds after the asset-capability
   layer and settings-UI status integration.
+
+## Capability-service contracts
+
+* **HD terrain is probed at the configured path.** `ProbeTerrainHdAt()` takes
+  the `[Terrain] TerrainHdManifest` value and resolves it exactly as
+  `terrain_proxy.cpp`'s `ResolveHdManifestPath()` does (absolute verbatim,
+  relative against the game directory). A custom manifest location is therefore
+  reported accurately instead of being called unavailable.
+  `LoadTerrainHdManifest()` remains the complete gate — it additionally
+  validates the JSON schema and soft-fails to the stock atlas.
+* **Readers get snapshots.** `GetAssetCapabilities()` returns
+  `AssetCapabilities` by value. A refresh may replace the cached object, and its
+  `std::string` storage, from another thread, so a reference into the cache
+  would dangle. All UI and runtime call sites hold their own copy.
 
 ## Manual matrix — stock BZR + OpenShim DLL only
 
@@ -129,8 +150,11 @@ valid chunk payloads, valid `openshim/renderer/enhanced` set). Set
 
 ## Logging expectations
 
-* `[assets] Asset pack state=...` appears once at startup and on every
-  explicit `RefreshAssetCapabilities()` (settings page activation).
+* `[assets] Asset pack state=...` appears once at startup. Every explicit
+  `RefreshAssetCapabilities()` — startup, and `ActivateShimSettingsPage()` on
+  each settings-page entry — logs `[assets] Asset capabilities refreshed ...`,
+  but only when the observed state actually changed, so repeatedly opening the
+  settings page on an unchanged install does not spam the log.
 * `[CHUNKMESH] Chunk mesh proxy requested but asset capability unavailable`
   appears at most once per process when a config requests chunks without
   assets.
