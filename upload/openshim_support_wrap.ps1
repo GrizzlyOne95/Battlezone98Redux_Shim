@@ -18,7 +18,8 @@ Set-StrictMode -Version 2
 
 $ScriptDir = Split-Path -Parent $PSCommandPath
 $Transport = Join-Path $ScriptDir 'openshim_support_transport.ps1'
-if (-not (Test-Path -LiteralPath $Transport -PathType Leaf)) {
+$TransportAvailable = Test-Path -LiteralPath $Transport -PathType Leaf
+if (-not $TransportAvailable) {
     Write-Host '[OpenShim Support] transport helper is missing; launching game without telemetry.'
 }
 else {
@@ -30,7 +31,8 @@ $ConfFile = Join-Path $ConfDir 'upload.conf'
 $DataDir = Join-Path $env:LOCALAPPDATA 'openshim'
 $SupportRoot = Join-Path $DataDir 'support-spool'
 $SupportLog = Join-Path $DataDir 'openshim_support.log'
-$WrapperVersion = 'OpenShim-support-20260904a'
+$LatestSupportIdFile = Join-Path $DataDir 'latest-support-id.txt'
+$WrapperVersion = 'OpenShim-support-20260904b'
 $BatchMaxEvents = 128
 $BatchMaxChars = 32768
 $BatchMaxAgeMs = 1000
@@ -105,53 +107,23 @@ function Get-GameDirFromCommand {
     return ''
 }
 
-# Windows CreateProcess command-line quoting rules.
-function Quote-WindowsArgument {
-    param([AllowEmptyString()][string]$Value)
-    if ($Value -notmatch '[\s"]' -and $Value.Length -gt 0) { return $Value }
-    if ($Value.Length -eq 0) { return '""' }
-
-    $sb = New-Object System.Text.StringBuilder
-    [void]$sb.Append('"')
-    $slashes = 0
-    foreach ($ch in $Value.ToCharArray()) {
-        if ($ch -eq '\') {
-            ++$slashes
-            continue
-        }
-        if ($ch -eq '"') {
-            if ($slashes -gt 0) { [void]$sb.Append(('\' * ($slashes * 2))) }
-            [void]$sb.Append('\"')
-            $slashes = 0
-            continue
-        }
-        if ($slashes -gt 0) {
-            [void]$sb.Append(('\' * $slashes))
-            $slashes = 0
-        }
-        [void]$sb.Append($ch)
-    }
-    if ($slashes -gt 0) { [void]$sb.Append(('\' * ($slashes * 2))) }
-    [void]$sb.Append('"')
-    return $sb.ToString()
-}
-
+# Match the proven launch behavior from PR #116: Steam commonly supplies
+# Launcher\BZLauncher.exe, but that executable must run with the game root as
+# its working directory so winmm.dll and the rest of the game-local state are
+# resolved correctly.
 function Start-GameProcess {
-    param([string[]]$ResolvedCommand)
+    param([string[]]$ResolvedCommand, [string]$GameDir)
     if (-not $ResolvedCommand -or $ResolvedCommand.Count -eq 0) { return $null }
 
     $exe = $ResolvedCommand[0]
-    $args = @()
-    if ($ResolvedCommand.Count -gt 1) { $args = @($ResolvedCommand[1..($ResolvedCommand.Count - 1)]) }
+    $workDir = $GameDir
+    if (-not $workDir) { $workDir = Resolve-GameRoot (Split-Path -Parent $exe) }
+    if ($workDir -and -not (Test-Path -LiteralPath $workDir)) { $workDir = '' }
 
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $exe
-    $psi.UseShellExecute = $false
-    $psi.WorkingDirectory = Split-Path -Parent $exe
-    if ($args.Count -gt 0) {
-        $psi.Arguments = (($args | ForEach-Object { Quote-WindowsArgument ([string]$_) }) -join ' ')
-    }
-    return [System.Diagnostics.Process]::Start($psi)
+    $spArgs = @{ FilePath = $exe; PassThru = $true }
+    if ($ResolvedCommand.Count -gt 1) { $spArgs.ArgumentList = $ResolvedCommand[1..($ResolvedCommand.Count - 1)] }
+    if ($workDir) { $spArgs.WorkingDirectory = $workDir }
+    return (Start-Process @spArgs)
 }
 
 function Resolve-HarvestedPath {
@@ -246,7 +218,8 @@ function Copy-SanitizedTextArtifact {
     param([string]$Source, [string]$Destination)
     if (-not $Source -or -not (Test-Path -LiteralPath $Source -PathType Leaf)) { return $false }
     try {
-        $writer = New-Object System.IO.StreamWriter($Destination, $false, (New-Object System.Text.UTF8Encoding($false)))
+        $encoding = New-Object System.Text.UTF8Encoding($false)
+        $writer = New-Object System.IO.StreamWriter($Destination, $false, $encoding)
         try {
             foreach ($line in (Get-Content -LiteralPath $Source -ErrorAction Stop)) {
                 $writer.WriteLine((Protect-OpenShimSupportText ([string]$line)))
@@ -442,7 +415,7 @@ function Run-LiveTail {
             $ageMs = ([DateTime]::UtcNow - $lastFlush).TotalMilliseconds
             if ($events.Count -gt 0 -and ($events.Count -ge $BatchMaxEvents -or $chars -ge $BatchMaxChars -or $ageMs -ge $BatchMaxAgeMs -or $Process.HasExited)) {
                 $batch = @($events.ToArray())
-                $path = New-SpoolBatch -SessionDir $SessionDir -Sequence $sequence -Events $batch
+                [void](New-SpoolBatch -SessionDir $SessionDir -Sequence $sequence -Events $batch)
                 ++$sequence
                 $events.Clear()
                 $chars = 0
@@ -477,13 +450,15 @@ if (-not $resolved -or $resolved.Count -eq 0 -or -not (Test-Path -LiteralPath $r
 
 $gameDir = Get-GameDirFromCommand $resolved
 $endpoint = ''
-if (Test-Path -LiteralPath $Transport -PathType Leaf) {
+if ($TransportAvailable) {
     $endpoint = Get-OpenShimSupportEndpoint -ConfFile $ConfFile
 }
 
 # Always try old pending support sessions before creating a new one. This is
 # what makes a transient outage or an abrupt wrapper close survivable.
-Retry-PriorSessions -CurrentSessionDir ''
+if ($TransportAvailable) {
+    Retry-PriorSessions -CurrentSessionDir ''
+}
 
 $sessionStartUtc = [DateTime]::UtcNow
 $session = $null
@@ -507,6 +482,7 @@ if ($endpoint) {
             started_at = $sessionStartUtc.ToString('o')
         }
         Save-SessionState -SessionDir $sessionDir -State $state
+        try { $session.SupportId | Out-File -LiteralPath $LatestSupportIdFile -Encoding ASCII } catch { }
         Write-SupportLog "remote support enabled - Support ID: $($session.SupportId)"
         Write-Host ''
         Write-Host '============================================================'
@@ -524,7 +500,7 @@ if ($endpoint) {
 
 $process = $null
 try {
-    $process = Start-GameProcess -ResolvedCommand $resolved
+    $process = Start-GameProcess -ResolvedCommand $resolved -GameDir $gameDir
 } catch {
     Write-SupportLog "game launch failed: $($_.Exception.Message)"
     exit 3
