@@ -116,10 +116,14 @@ bool ParseAssetManifestContent(const std::string& text,
 bool ProbeDestructionChunksAt(const std::filesystem::path& gameDir,
                               std::string& outProblem);
 
-// Reuses RenderProfiles::ValidateDeployedResourceSetAt on
-// gameDir/openshim/renderer/enhanced .
+// Reuses RenderProfiles::ValidateDeployedResourceSetAt. The game-root
+// deployment is preferred, then addon/mods/packaged_mods and Steam Workshop
+// content roots are checked so resources mounted by an active mod validate in
+// the same layout the game uses. When supplied, outResourceDir receives the
+// compatible openshim/renderer/enhanced directory.
 bool ProbeEnhancedResourcesAt(const std::filesystem::path& gameDir,
-                              std::string& outProblem);
+                              std::string& outProblem,
+                              std::filesystem::path* outResourceDir = nullptr);
 
 // Resolves the HD terrain manifest exactly as terrain_proxy.cpp's
 // ResolveHdManifestPath() does, so the capability probe and the loader always
