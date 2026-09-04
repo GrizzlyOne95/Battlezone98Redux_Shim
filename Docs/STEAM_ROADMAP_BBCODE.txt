@@ -1,8 +1,10 @@
 [h1]Roadmap[/h1]
 
-This is a rough roadmap for where I'd like to take the Battlezone 98 Redux community patch / OpenShim / Extra Utilities work next.
+This is the authoritative roadmap and backlog for the Battlezone 98 Redux community patch / OpenShim / Extra Utilities work.
 
-[b]Last major audit: 2026-09-02.[/b]
+[b]Last major audit: 2026-09-04.[/b]
+
+This file now supersedes the old ExtraUtilities [code]FeaturesToLookInto.txt[/code] tracker as the source of truth. Older tracker items have either been folded in here, marked completed/reclassified, or retained below as lower-priority research ideas.
 
 This is [b]not a promise that features will arrive in this exact order[/b]. A lot of this work depends on reverse engineering, testing, and whether a feature can be implemented safely without introducing worse problems than it solves.
 
@@ -10,82 +12,46 @@ The general priority remains:
 
 [b]Fix crashes and broken stock behavior first, then improve compatibility and multiplayer longevity, then expand the modding API and visual features.[/b]
 
-The roadmap now separates five states that used to get mixed together:
+[h2]Status Legend[/h2]
 
 [list]
-[*] [b]Active / Open[/b] - the defect or feature is still genuinely unresolved.
+[*] [b]Active / Open[/b] - the defect or feature is genuinely unresolved.
 [*] [b]Implemented - Qualification Pending[/b] - code exists, but live, multiplayer, visual, or lifecycle acceptance still has a meaningful open gate.
-[*] [b]Completed / Restored[/b] - the work is sufficiently understood, implemented, and qualified to leave the active backlog.
-[*] [b]Inherited / Legacy Defect[/b] - the behavior is confirmed to exist in stock 1.5 or an earlier engine, but is still considered erroneous or undesirable and may merit an OpenShim compatibility fix or optional behavior change.
-[*] [b]Disproven / Reclassified[/b] - reverse engineering showed that the proposed root cause was wrong, the historical report is not currently reproducible, or the work belongs to an enhancement/content-policy track rather than an engine defect.
+[*] [b]Completed / Restored[/b] - sufficiently understood, implemented, and qualified to leave the active backlog.
+[*] [b]Inherited / Legacy Defect[/b] - confirmed to exist in stock 1.5 or an earlier engine, but still considered erroneous or undesirable.
+[*] [b]Disproven / Reclassified[/b] - the old root cause was wrong, the report is not reproducible, or the work belongs to another track.
 [/list]
 
 [h2]High Priority[/h2]
 
 [h3]GOG Workshop Compatibility[/h3]
 
-Steam users already automatically download Workshop content required by multiplayer games. GOG users do not have that integration, which makes joining Steam-hosted modded games considerably more awkward.
+Steam users automatically download Workshop content required by multiplayer games. GOG users do not.
 
-The idea is to add an [b]optional GOG Workshop bridge[/b].
+The goal is an [b]optional GOG Workshop bridge[/b] that can identify a required Workshop item, offer to download it through a small external helper, validate/stage it into a GOG-visible mod location, refresh content, and retry joining.
 
-When a GOG player attempts to join a game using a Steam Workshop map/mod, OpenShim could identify the required Workshop item and offer to download and stage it automatically.
-
-The likely implementation would use a small external helper rather than performing network/download work inside Battlezone itself.
-
-This would be explicitly opt-in so OpenShim is not unexpectedly launching helper processes in the background.
-
-Potential flow:
-
-[code]
-Join multiplayer game
-        |
-Required Workshop item missing
-        |
-"Download required content?"
-        |
-Steam/community download helper
-        |
-Validate + stage mod for GOG
-        |
-Refresh content
-        |
-Join game
-[/code]
-
-If anonymous Steam Workshop downloads work reliably for Battlezone's Workshop, this could close one of the biggest remaining Steam/GOG multiplayer compatibility gaps.
+Network/download work should remain outside the game process and explicitly opt-in.
 
 [h3]Mod Dependency Support[/h3]
 
-Steam Workshop supports required/dependent Workshop items, but Battlezone itself does not understand those relationships.
+Battlezone does not understand Workshop dependency relationships even when Steam has downloaded the required items.
 
-For example:
-
-[code]
-Mod A
- |- requires Mod B
- |- requires Mod C
-[/code]
-
-Steam may download all three, but Battlezone still effectively treats them as unrelated addons.
-
-I'd like OpenShim to understand a real dependency graph so it can:
+OpenShim should eventually understand a real dependency graph so it can:
 
 [list]
 [*] Detect missing dependencies
-[*] Detect dependencies that are installed but unavailable to the current mod
+[*] Detect installed-but-unavailable dependencies
 [*] Recursively resolve dependency chains
-[*] Show useful dependency errors instead of mysterious missing assets
-[*] Integrate dependency downloading with the GOG Workshop bridge
-[*] Potentially support minimum OpenShim / EXU versions later
+[*] Present useful errors instead of mysterious missing assets
+[*] Integrate dependency staging with the GOG Workshop bridge
+[*] Support optional minimum OpenShim / EXU versions and resource/load requirements later
 [/list]
-
-This could eventually become the basis of a much cleaner mod-loading system.
 
 [h3]Community Multiplayer / Matchmaking Preservation[/h3]
 
-A replacement BZRNet matchmaking service is already under active development.
+A replacement BZRNet-compatible matchmaking service is under active development.
 
-The current prototype includes:
+The current work includes:
 
 [list]
 [*] WebSocket lobby support
@@ -96,12 +62,10 @@ The current prototype includes:
 [*] Server persistence
 [*] Health/admin tooling
 [*] Native OpenShim control-plane and datagram instrumentation
-[*] Live nickname re-authorization support
+[*] Live nickname mutation support in OpenShim, with two-client propagation qualification still open
 [/list]
 
-The long-term goal is to make multiplayer survive even if Rebellion's official service eventually disappears.
-
-I'd like OpenShim to eventually expose something similar to:
+The long-term goal is to expose something like:
 
 [code]
 MULTIPLAYER SERVICE
@@ -114,107 +78,81 @@ Automatic Failover
 [ Host Server ]
 [/code]
 
-[b]Automatic Failover[/b] could attempt the official service first and use the community service if it is unavailable.
-
-I'm also interested in an integrated [b]Host Server / Host Game[/b] option.
-
-Rather than forcing users to manually configure a separate server, hosts file, launch arguments, etc., OpenShim could launch a bundled matchmaking/server helper and automatically point the local Battlezone client at it.
-
-For permanent community matchmaking, a dedicated public service would still be preferable, but local hosting could be extremely useful for LAN games, private groups, development/testing, and emergency multiplayer fallback.
+Automatic Failover could prefer the official service and use the community service when necessary. An integrated Host Server / Host Game action could launch a bundled out-of-process helper for LAN/private/development sessions while a permanent public service remains independently hosted.
 
 [h3]Netcode Reliability Qualification[/h3]
 
-The networking work is much further along than the old roadmap implied. OpenShim now owns all ten relevant live [Net] tunables instead of relying on a net.ini file Redux may never apply, and the current tuning is aligned with the final V5.3 behavior from the community netcode-patch work.
+OpenShim now owns the verified live networking tunables instead of relying on a net.ini path Redux may never apply.
 
 Implemented work includes:
 
 [list]
 [*] MinBandwidth / MaxBandwidth / UpCount / DownCount / MaxPing / MaxPingsLost handling
 [*] Relaxed host auto-kick envelope
-[*] Per-global sanity gating so moved addresses fail closed
+[*] Per-global sanity gating
 [*] Governor cold-start versus floor-collapse classification
 [*] Outbound packets/sec and bytes/sec burst telemetry
 [*] Receive-side packet reordering experiments and extensive BZRNet tracing
-[*] [Network] GovernorTuning = OpenShim / Stock so strict-parity lobbies can restore stock tuning without reconstructing net.ini
-[*] [Network] NetImprovements as a single master gate over the whole OpenShim socket layer, so a strict-parity lobby can run stock networking end to end instead of toggling individual tunables
+[*] [code][Network] GovernorTuning = OpenShim / Stock[/code]
+[*] [code][Network] NetImprovements[/code] as a master gate over the OpenShim socket layer
 [/list]
 
-The remaining work is no longer "find some better bandwidth numbers." It is controlled network qualification:
+Remaining work:
 
 [list]
 [*] Reproduce packet-loss / burst cascades under controlled impairment
-[*] Verify the BZR packet header/ACK layout before adding per-peer RTT sampling
+[*] Verify the BZR packet header/ACK layout before per-peer RTT sampling
 [*] Determine the real AutoKickLoss units and dead-peer behavior
-[*] Decide whether packet reordering materially improves bad links without hiding a deeper failure
-[*] Keep retransmit suppression and send pacing disabled unless evidence proves they are safe; V5.3 backed the retransmit damper out for good reason
+[*] Decide whether packet reordering materially improves bad links
+[*] Keep retransmit suppression/send pacing disabled unless evidence proves them safe
 [/list]
 
 [h3]32-bit Mission Resource / Address-Space Lifecycle[/h3]
 
-Windows Redux 2.2.301 is already [b]Large Address Aware[/b]. There is no missing PE-header switch that can give the 32-bit executable more useful address space on 64-bit Windows.
+Windows Redux 2.2.301 is already Large Address Aware. The practical x86 problem is resource retention and/or virtual-address fragmentation across large custom campaigns.
 
-The practical x86 memory problem is therefore resource retention and/or virtual-address fragmentation, especially across large custom campaigns with high-resolution textures and high-poly meshes.
-
-Redux already contains internal cWorkshop resource-rebuild paths that clear and reinitialize the Ogre [code]Modable[/code] resource group. The open question is whether ordinary mission-to-mission transitions inside one campaign bypass that cleanup and retain mission-specific resources.
-
-The current plan is:
+Plan:
 
 [list]
 [*] Add committed/private/working-set and virtual-address telemetry
-[*] Track total free VA and, critically, the largest contiguous free VA region
+[*] Track total free VA and the largest contiguous free region
 [*] Count Ogre textures, meshes, skeletons, materials, and Modable resources around mission transitions
 [*] Use a deterministic multi-mission heavy-asset fixture to prove or disprove cumulative retention
-[*] Only after retention is proven, identify the exact safe teardown window and test the least destructive resource unload first
+[*] Only after retention is proven, identify the safest teardown/unload window
 [/list]
-
-This is an x86 mitigation track, not a substitute for a true Win64 build.
 
 [h3]Windows x64 Reconstruction Research[/h3]
 
-A major new research opportunity appeared in August 2026: the shipped macOS Battlezone 98 Redux 2.2.301 executable is a real [b]x86-64 peer build[/b], not a 32-bit binary in a wrapper.
+The shipped macOS 2.2.301 executable is a true x86-64 peer build and preserves C++ names, RTTI, vtables, function starts, unwind metadata, translation-unit names, and direct 64-bit object layouts.
 
-The Mac executable preserves C++ names, RTTI, vtables, function starts, unwind metadata, translation-unit names, and direct 64-bit object layouts. It also provides strong evidence that important game-facing formats are already architecture-independent: Lua/game handles remain 32-bit opaque identifiers and GameObject save/load uses typed fields with explicit byte counts instead of dumping native structs.
+DistributedObject and GameObject have already been reconstructed against the Windows reader. The current evidence says the game architecture itself is effectively 64-bit clean: network IDs are fixed-width, the wire format agrees across Mac x64 and Windows x86, registries are keyed by IDs rather than addresses, and Lua handles are 32-bit opaque identifiers.
 
-The immediate research target is DistributedObject / GameObject networking and serialization, with Mac-to-Windows correlation used to answer:
+The obstacle to a native Windows x64 build is not pointer width; it is reconstructing a very large source-less codebase and replacing Windows-specific middleware/ABI assumptions.
 
-[list]
-[*] Which engine/game systems are inherently 64-bit clean
-[*] Which fields are true pointers versus intentional fixed-width handles/IDs
-[*] Whether network/save formats are pointer-size independent
-[*] Which Windows-only middleware or ABI assumptions would block a source-equivalent Win64 reconstruction
-[*] How much of the anonymous Windows executable can be named defensibly from the symbol-rich Mac peer
-[/list]
+This remains research, not a promise to replace Redux.
 
-[b]That first correlation pass is now complete.[/b] DistributedObject and GameObject were reconstructed from the Mac build and checked field-by-field against the Windows reader, and the result splits the question cleanly:
+[h2]Implemented - Qualification Pending[/h2]
+
+These items have working code but still have a meaningful acceptance gate.
 
 [list]
-[*] [b]Is the game architecture 64-bit clean?[/b] Effectively yes, and not by inference - a shipping LP64 build of the same 2.2.301 game code exists. Network object IDs are deliberately fixed-width, the replication wire format agrees between the Mac x86-64 writer and the Windows x86 reader on every perm-state field offset and width, distributed-object registries are keyed by ID rather than by address, and Lua handles are 32-bit opaque slot/generation identifiers rather than pointers.
-[*] [b]Is a native Windows x64 build a realistic engineering target?[/b] Only as a large reconstruction project. The binding constraint was never the architecture. It is that there is no source, and roughly 383 translation units of game code would have to be rebuilt. The Mac peer supplies names, hierarchy and 64-bit-correct layouts. It does not supply code.
+[*] [b]Live lobby nickname propagation[/b] - the current authoritative OpenShim path persists [code][Network] Nickname[/code], updates the connection-time nickname buffer, resolves the live BZRNetLobby, obtains the local opaque BZRNet identity through slot 14, and calls the stock slot-7 [code]SetPlayerData("name", value)[/code] path on Apply/Enter or [code]/nickname[/code]. The old two-key [code]name/playerName[/code] assumption was superseded. Re-authorization remains a separate experimental fallback and is off by default. Source/build qualification proves the ABI and send path, but the important acceptance test is still a real second client confirming that the displayed name changes immediately without reconnecting, followed by lobby recreation/reconnect/restart persistence checks.
+[*] [b]Stock Factions multiplayer pool[/b] - [code][Network] StockFactionsOnly[/code], default off, restores the restrictive 1.5 starting-vehicle pool by pruning unwanted factions after the list is built. Remaining gate: two-client qualification with the rule on and off.
+[*] [b]TRN tile-blending control[/b] - [code][OpenShim] TerrainTileBlend=0..1[/code] remaps Redux's proven seam-alpha mask. Mapping/resolver tests pass; live visual acceptance and Steam lifecycle coverage remain.
+[*] [b]Finite craft-bounds restoration / frustum culling[/b] - restores a finite containment-safe bound after Redux cockpit code can write an infinite world-craft bound. Submission reductions are measured; final visual/camera/save-load qualification remains.
+[*] [b]DX11 Enhanced dynamic-light ranking[/b] - the Enhanced shader supports 24 lights and contribution-ranked candidate selection exists experimentally; final human visual/performance acceptance remains.
+[*] [b]Enhanced lighting art-direction corrections[/b] - double-encoded fog and the neutral terrain IBL floor are corrected and automated checks pass; locked-camera art-direction recapture remains the release gate.
+[*] [b]PSSM shadow-far-distance override[/b] - the 128m receiver cutoff root cause is mapped and a narrow override exists. Final policy still needs visual/quality qualification.
+[*] [b]Legacy scrap/pilot HUD reconstruction[/b] - BZ 1.5 layout, black backplates, colors, and command-menu-relative placement are reconstructed. Continue normal gameplay/resolution acceptance.
 [/list]
-
-This is [b]research, not a promise to replace Redux with a new engine[/b]. It materially improves the long-term feasibility picture and should remain visible alongside the x86 lifecycle mitigation work.
-
-[h3]Raw Mouse Input - Finish Qualification[/h3]
-
-Redux already contains a real native Windows Raw Input path, including the stock rawinput/norawinput launch options and WM_INPUT handling.
-
-OpenShim now exposes that native path as an explicit opt-in through [code][General] RawMouseInput = 1[/code] and the native Settings page. The shipped player preset leaves it off, so installing the DLL alone does not change mouse behavior.
-
-The implementation also handles absolute-mode pointing devices so remote-desktop, VM/KVM, and tablet-style input does not feed absolute 0..65535 coordinates into a relative look accumulator.
-
-Remaining qualification includes sensitivity, focus/Alt-Tab transitions, high polling-rate mice, frame-rate independence, and broad hardware/remote-input compatibility.
 
 [h2]Extra Utilities / Modding API[/h2]
 
 [h3]Native Event / Callback System[/h3]
 
-[b]The OpenShim half of this now ships.[/b] SDK v2 already published shim lifecycle events into a queue that companion DLLs poll; it now also fans every event out to in-process subscribers, and it carries simulation events for the first time: session start/end, damage, kills, and multiplayer team deaths. Producers copy a small record and return; subscribers run later on a known-safe per-frame point, which is the design constraint this item was always written around.
+[b]The OpenShim half ships.[/b] SDK v2 publishes lifecycle events and simulation events including session start/end, damage, kills, and multiplayer team deaths through a queued safe delivery path.
 
-The first consumer is the new engine-level career statistics, so the layer is exercised in real play rather than only existing on paper.
-
-EXU already exposes a huge amount of game state, but many scripts still have to constantly poll for changes. Two pieces of this item remain open: the rest of the event list below, and the EXU-side Lua surface. Companion DLLs can already poll the new simulation events through the existing SDK function table, but EXU does not yet expose them to Lua, and EXU's own BulletHit patch still calls Lua from inside an engine hook rather than queueing.
-
-The events still to expose:
+Still open:
 
 [code]
 OnDamage
@@ -229,62 +167,23 @@ OnPlayerJoined
 OnPlayerLeft
 [/code]
 
-The safe design is still for native hooks to queue events and deliver them to Lua during a known-safe update point rather than executing arbitrary Lua from deep inside engine functions.
+Companion DLLs can consume current events now; EXU still needs the clean Lua-side callback surface. EXU's older direct BulletHit->Lua path should eventually move onto the same queued safe-delivery model.
 
 [h3]Custom Unit Commands[/h3]
 
-EXU can currently replace the selected unit's stock Hunt command with Lua-controlled behavior.
-
-The larger goal remains:
-
-[b]Allow Lua scripts to add/remove/replace unit command buttons directly.[/b]
-
-For example:
-
-[code]
-SALVO
-CLOAK
-DEPLOY
-REPAIR
-FORMATION
-SPECIAL
-[/code]
-
-with custom labels, availability conditions, and Lua callbacks.
+EXU can replace the selected unit's stock Hunt command today. The larger goal is to add/remove/replace command buttons with custom labels, enabled state, selected-unit context, and Lua callbacks without overloading one stock slot.
 
 [h3]Custom Producer / Build Menus[/h3]
 
-Related to unit commands is expanding Recycler, Factory, Armory, Constructor, and generic Producer menus.
-
-The eventual goal is nested menus such as:
-
-[code]
-FACTORY
-
-Combat Units >
-    Tank
-    Bomber
-    Scout
-
-Support Units >
-    Tug
-    APC
-    Scavenger
-[/code]
-
-Battlezone already has similar menu behavior internally for editor/build systems, so this appears feasible, but still requires significant native integration.
+Generalize Recycler, Factory, Armory, Constructor, and generic Producer menus into scriptable categories/submenus with labels, enabled state, callbacks, and build targets.
 
 [h3]Higher-Level Multiplayer Lua Replication[/h3]
 
-This is less one "multiplayer sync bug" and more a limitation of how Battlezone's multiplayer systems are divided. Object existence, distributed-object ownership, mission variables, UI/objectives, names, cameras, and weapon state do not all use one automatic replication layer.
-
-EXU already exposes synchronized/asynchronous object creation and network identity helpers. Working co-op frameworks also prove that host-authoritative mission logic plus explicit Send/Receive-style synchronization can be reliable.
-
-The remaining goal is a coherent high-level API for common operations such as:
+Build a coherent host-authoritative / explicitly synchronized API for:
 
 [list]
 [*] Spawn/remove
-[*] Shared mission/state variables
+[*] Shared state variables
 [*] SetName()
 [*] Objective text/markers
 [*] Weapon/loadout changes
@@ -292,22 +191,30 @@ The remaining goal is a coherent high-level API for common operations such as:
 [*] Ownership-sensitive operations
 [/list]
 
-This should be built on individually understood engine behavior rather than hiding unknown ownership rules behind a generic SyncEverything() abstraction.
+Do this only after the underlying ownership and replication cases are understood individually.
+
+[h3]Lua Control of Native OGG Soundtrack[/h3]
+
+Expose Redux's real soundtrack manager rather than forcing compressed music through WAV-oriented mission audio:
+
+[code]
+Play
+Stop
+Pause
+Resume
+Change track
+Fade/change music state
+[/code]
+
+[h3]Higher-Level Environment Presets[/h3]
+
+EXU already exposes terrain materials/textures, fog, ambient/sun light, time of day, sky, gravity, shadows, and visibility. A later preset layer could apply complete environment states such as [code]MarsNight[/code], [code]EuropaStorm[/code], etc.
 
 [h2]OpenShim Interface Improvements[/h2]
 
-OpenShim already has its own Settings page and rewritten key-binding interface.
+The Settings page, rewritten key-binding screen, renderer backend selector, and Redux/Enhanced/Retro render-profile selector are already implemented.
 
-The renderer/profile selector is also [b]already implemented[/b]:
-
-[list]
-[*] Renderer: Auto / DirectX 9 / DirectX 11 - restart required
-[*] Render Profile: Retro / Redux / Enhanced - applies live
-[/list]
-
-The shipped/default policy is deliberately conservative: Auto renderer and the Redux compatibility profile rather than assuming the newest renderer/profile is automatically best.
-
-The remaining UI direction is organization and discoverability rather than basic renderer selection. Longer term I'd like proper submenus such as:
+The next UI work is organization and discoverability rather than basic capability. Split the growing settings surface into logical pages such as:
 
 [code]
 OPENSHIM
@@ -320,291 +227,204 @@ Mods
 Diagnostics
 [/code]
 
-Recent Settings/Keybind work also moved both pages onto a shared measured layout with stock-derived framing, wrapped help text, and clickable value controls, and fixed the plates that were blacking out the screen background behind both pages. Future UI work should preserve that common layout rather than adding more hand-positioned widgets.
-
-The page has also grown well past the renderer controls. It now pages through roughly forty settings, including destruction chunk meshes, sound-channel capacity, background music focus behavior, the Ogre material-conflict guard, multiplayer map-list refresh, editor placement, multiplayer vehicle flags, satellite fog of war, the sun flash suppression, smart-reticle range presets, the DX11 Enhanced graphical options, and the switchable [Fixes] entries. That scale is exactly why the submenu grouping above is the next real UI task rather than a cosmetic one.
-
-[h2]Audio / Soundtrack Control[/h2]
-
-Redux contains a native OGG soundtrack system separate from normal Lua WAV playback.
-
-EXU currently exposes things such as music-volume settings, but it does not yet provide full control over the native soundtrack manager.
-
-I'd like to expose functions for:
-
-[code]
-Play track
-Stop
-Pause
-Resume
-Change track
-Potentially fade/change music state
-[/code]
-
-That would allow campaign mods to use proper compressed dynamic music without converting entire soundtracks to WAV files.
-
-[h2]Environment / Terrain Runtime Control[/h2]
-
-EXU can already manipulate a surprising amount of the live environment:
-
-[list]
-[*] Terrain materials/textures
-[*] Fog
-[*] Ambient lighting
-[*] Sun lighting/direction
-[*] Time of day
-[*] Sky systems
-[*] Gravity
-[*] Shadows
-[*] Visibility
-[/list]
-
-The renderer work is also more mature than the old roadmap text suggested:
-
-[list]
-[*] Enhanced PSSM has a BZCC-informed comparison-PCF / cascade-blending path under controlled qualification.
-[*] The abrupt PSSM shadow cutoff was traced to Redux applying shadowFarDistance=128 while the cascade contract extends to roughly 256; an OpenShim far-distance override exists as a quarantined experiment.
-[*] Enhanced linear-light art direction was corrected for double-encoded mission fog and an overly strong neutral terrain diffuse-IBL floor on airless/distant terrain.
-[*] DX11 Enhanced can reach the 24-light shader capacity; contribution-ranked light selection exists experimentally and still needs final visual/performance acceptance.
-[*] The fullscreen "sun flashbang" was isolated to a dedicated ScreenFlash call and can now be suppressed independently without disabling the sun, lens flare, shadows, or explosion flashes.
-[/list]
-
-Eventually I'd still like to wrap the existing environment controls into higher-level presets, for example:
-
-[code]
-LoadEnvironment("MarsNight")
-LoadEnvironment("EuropaStorm")
-LoadEnvironment("LunaDay")
-[/code]
-
-This remains below stability, multiplayer preservation, and core modding infrastructure in priority.
+Keep the newer shared measured layout, stock-derived framing, wrapped help text, clickable value controls, and non-blackout background behavior.
 
 [h2]Active / Open Engine and Gameplay Work[/h2]
 
 [h3]Crash / Stability Bugs[/h3]
 
 [list]
-[*] [b]Shift-F9 editor task-mode crash[/b] - selecting a unit whose classLabel and AI process do not match can crash the editor. This is especially relevant to legacy/custom mission units.
-[*] [b]Second-session editor corruption/crash[/b] - entering the editor works normally the first time, but after returning to menu and loading another mission in the same process the minimap can be empty and changing a terrain tile reliably crashes. This remains a strong mission-lifetime/state-reset candidate.
-[*] [b]DX11 / renderer lifetime instability[/b] - several distinct DX11/Ogre lifetime problems have already been found and patched. Remaining crashes, texture failures, fullscreen transitions, Alt+Tab/Alt+Enter, and shutdown failures should continue to be tracked by individual crash signatures instead of one generic "random DX11 crash."
+[*] [b]Shift-F9 editor task-mode crash[/b] - selecting a unit whose classLabel and AI process do not match can crash the editor.
+[*] [b]Second-session editor corruption/crash[/b] - after returning to menu and loading another mission in the same process, the minimap can be empty and changing terrain can crash. Strong mission-lifetime/state-reset candidate.
+[*] [b]DX11 / renderer lifetime instability[/b] - continue tracking remaining texture/fullscreen/Alt+Tab/Alt+Enter/shutdown crashes by individual signature instead of one generic random-DX11 bucket.
 [/list]
 
-OpenShim now has first-chance/unhandled crash logging and minidump capture, so deterministic crashes should increasingly be handled as:
-
-[code]
-reproduction
- -> crash signature / module + RVA
- -> native root cause
- -> narrowly scoped guarded patch
-[/code]
+OpenShim now has first-chance/unhandled crash logging and minidump capture, so deterministic crashes should increasingly be handled as reproduction -> module/RVA -> native root cause -> narrow guarded patch.
 
 [h3]Gameplay / AI Bugs and Decision Gates[/h3]
 
 [list]
-[*] [b]AIP long-session cessation / Recycler-at-start dependency[/b] - historical testing reports two potentially separate AIP lifecycle defects: an AIP can stop producing after roughly an hour even with sufficient resources and resumes when the same AIP is applied again through SetAIP; separately, some AIP setups appear to require a Recycler to exist at mission load and begin working if an otherwise useless Recycler is placed off-map on a geyser. Treat these as open empirical questions, not as the already-fixed multi-producer maker bug. Build an lcbench endurance/initialization matrix that compares Recycler-present/absent-at-start cases, producer creation/destruction, resource starvation/recovery, and the exact native state reset performed by SetAIP.
-[*] [b]Captured/disguised AI victim retaliation parity[/b] - the static case is now much stronger and points away from a regression. SetDamageFlags hostile classification, enemyShot / who_shot_JR storage, and the GetClosestEnemyWithin double-EnemyP predicate all resolve the [b]actual[/b] team, not perceivedTeam, identically in 1.5 and Redux, and the sniper-specific immediate-retaliation override exists in both builds - which on its own explains the reported "sniper retaliates, cannon does not" difference without any Redux defect. The decision gate stays open deliberately: no production patch until a deterministic 1.5-versus-Redux runtime matrix shows a real victim-side divergence for captured craft, turrettank, and static turret/gun-tower cases.
-[*] [b]APC deployment with perceived-friendly targets[/b] - the allied-target fallback is fixed and qualified, but the separate historical case where the selected target has a friendly [code]PerceivedTeam[/code] still needs an explicit fixture. Verify whether the existing APC fallback already covers perceived-team friendliness or whether a second ControlPanel/deploy eligibility predicate remains.
-[*] [b]Constructor double-recycle stale deployed state[/b] - when two Constructors are ordered to recycle the same building, the Constructor that loses the race has historically been reported to remain deployed until manually told to Pack Up. Reproduce and identify whether task cancellation, deployment state, or recycle-target teardown is failing to unwind.
-[*] [b]Allied-building repair order eligibility[/b] - historical report that players cannot issue Repair to an allied building. Revalidate the ControlPanel/order filter independently of autonomous repair behavior and determine whether this is an inherited UI restriction or a broken order path.
-[*] [b]Neutral-building Constructor recycle eligibility[/b] - historical report that a Constructor cannot be ordered to recycle a team-0 building. This is separate from the now-completed Neutral Attack Orders toggle and should be traced through the recycle-order target filter before deciding whether it is a legacy defect or intended rule.
-[*] [b]Owned-object PerceivedTeam reveal behavior[/b] - historical report that owned/deployed objects such as Comets, Splinters, and Soldiers do not cause the owning craft to lose a disguise/[code]PerceivedTeam[/code]. This is distinct from the disproven WeaponMine hop-out theory and needs its own owner/attack/reveal matrix.
-[*] [b]Rare sniper/reticle misalignment after eject[/b] - occasionally the pilot sniper aim no longer agrees with the reticle after ejecting. Needs a reliable reproduction before patching.
-[*] [b]Walker cockpit jitter[/b] - a frame-synchronous instrument now ships (off by default, [code][Diagnostics] WalkerCockpitTrace[/code]) and has closed most of this. Sampling happens inside the scene render so every link in the chain is read at the same point of the same frame; the previous approach sampled from a worker thread while the render thread was mutating the scene graph, which fabricates discontinuities and invalidated the earlier readings. Result: the walker-root to cockpit link is [b]definitively excluded[/b] - the cockpit node carries a bit-identical transform to the walker node on every frame, in all four walkers, moving or not - the real cockpit hierarchy is pinned for all four, and the sole camera-position writer is attributed. One narrow blocker remains: it is not yet proven that the residual camera-versus-cockpit cadence difference is the jitter players actually see, because the symptom was never visually confirmed during those runs. Still do not smooth the symptom before that is settled.
+[*] [b]AIP long-session cessation / Recycler-at-start dependency[/b] - build an endurance/initialization matrix around SetAIP, Recycler-present/absent-at-start, producer lifecycle, and starvation/recovery.
+[*] [b]Captured/disguised AI victim retaliation parity[/b] - current static evidence points away from a Redux regression; do not patch until a deterministic 1.5-versus-Redux runtime matrix proves a divergence.
+[*] [b]APC deployment with perceived-friendly targets[/b] - allied-target fallback is fixed; explicitly test the separate friendly-PerceivedTeam case.
+[*] [b]Constructor double-recycle stale deployed state[/b] - reproduce the losing Constructor remaining deployed after two Constructors target the same building.
+[*] [b]Allied-building repair order eligibility[/b] - determine whether the missing explicit Repair order is inherited UI policy or a broken command path.
+[*] [b]Neutral-building Constructor recycle eligibility[/b] - trace the recycle target filter separately from Neutral Attack Orders.
+[*] [b]Owned-object PerceivedTeam reveal behavior[/b] - test whether Comets, Splinters, Soldiers, etc. should cause their owning craft to lose disguise.
+[*] [b]Rare sniper/reticle misalignment after eject[/b] - needs reliable reproduction.
+[*] [b]Walker cockpit jitter[/b] - the walker-root/cockpit transform link is excluded; visually confirm whether the remaining camera-vs-cockpit cadence difference is the actual symptom before smoothing anything.
+[*] [b]AI retarget/stuck/scavenger runtime completion[/b] - engagement-range infrastructure and the gameplay-tuning master switch exist, but explicitly verify the remaining [code]retargetPeriodAI[/code], stuck/recovery, and scavenger scrap-path scoring consumers before considering the old tracker items completely closed.
 [/list]
+
+[h3]Deeper Craft / AI Control API[/h3]
+
+EXU has typed AI process/task inspection and selected task-state writes. Still worth researching verified direct controls for jump and broader craft-side control/input state so scripts can drive behavior without blind structure-offset writes.
 
 [h3]Lua / Script API Bugs[/h3]
 
 [list]
-[*] [b]GetAIControl Lua binding[/b] - historical report that [code]GetAIControl[/code] exists in the documented/legacy Lua surface but is not actually implemented or callable in Redux. Verify the exported registration table and native target first, compare against the 1.5 API intent, and either restore the missing binding or document that no implementation exists.
+[*] [b]GetAIControl Lua binding[/b] - verify whether the documented/legacy binding exists in Redux's registration table and restore or document it accurately.
 [/list]
 
-[h3]Legacy Battlezone 1.4 AI Behavior - Research and Experimental Restoration[/h3]
+[h3]Reactive HUD / Hit Feedback[/h3]
 
-A recurring community observation is that pre-1.5 units simply fought differently. That has now been measured rather than argued about, using an unpacked BZ 1.4 executable against the symbolized 1.5 build.
+The event layer plus existing Ogre overlay APIs should enable clean reactive reticles, hit markers, damage flashes, critical warnings, and other contextual HUD reactions without polling. Keep these as user-facing features rather than treating the event infrastructure itself as the end goal.
 
-[list]
-[*] [b]UnitTask, the shared unit state machine, was rewritten wholesale between 1.4 and 1.5[/b], not merely tuned. It is the most-changed behavior class in the game, and ten of its state handlers sit in the thirty most-changed AI functions.
-[*] [b]Pathfinding was replaced, not edited.[/b] ShortPath::Search is the single most-changed AI function in the image.
-[*] Automated binary similarity matching was tried and [b]closed as unreliable[/b] for this problem - a large share of its matches were shape collisions between unrelated boilerplate. The working method is pairing classes exactly through the engine's own RtimeClass registry and then by vtable slot.
-[/list]
+[h3]Legacy Battlezone 1.4 AI Behavior[/h3]
 
-The intended direction is [b]not[/b] to change stock AI. It is an opt-in, per-ODF selection so a mission or mod can request legacy behavior for specific unit classes through an aiName alias, leaving every other unit on stock Redux behavior. An experimental per-ODF gate for several of the divergent attack-state transitions exists; it is not shipped, and correctness, save/load and multiplayer determinism all remain open.
+UnitTask and pathfinding changed substantially between 1.4 and 1.5. The intended direction is an opt-in per-ODF [code]aiName[/code]/profile for selected legacy behavior, never a silent replacement of stock Redux AI. Correctness, save/load, and multiplayer determinism remain open.
 
-Related, and useful for the same reason: The Red Odyssey 1.3 has been statically unpacked and diffed against 1.4, which establishes that TRO added exactly two gameplay subsystems to that engine - Cloak and Portal - plus a widened nation enum. Everything else that looks like an addition is content or branding. 1.4 to TRO is a small content-driven delta; 1.4 to 1.5 is the community rewrite, and the two should not be reasoned about interchangeably.
+The Red Odyssey 1.3 comparison establishes Cloak and Portal plus a widened nation enum as its major engine additions; TRO and 1.5 should not be treated as interchangeable reference points.
 
 [h3]Multiplayer Bugs[/h3]
 
 [list]
-[*] [b]Packet-loss / traffic-storm recovery[/b] - baseline tuning and telemetry are now substantially improved; the remaining defect is the broader loss/recovery cascade under real impairment and how Redux's resend/governor behavior interacts with it.
-[*] [b]Armory / Daywrecker duplicate detonation in multiplayer[/b] - one launched Daywrecker can produce multiple effective detonations/explosions, especially for non-host clients. Likely authority/replication work, but still needs proof.
-[*] [b]Daywrecker multiplayer terrain-spire corruption[/b] - multiplayer Daywrecker terrain deformation can produce the known terrain-spire artifact. Keep this separate from duplicate detonation.
-[*] [b]Splinter multiplayer payload duplication[/b] - likely ownership/authority related, but the correct peer-authority gate needs to be proven before changing replication behavior.
-[*] [b]Splinter deployed collision response[/b] - deployed SprayBuildingClass objects can produce violent collision/reaction behavior; the collision impulse owner has not yet been isolated.
-[*] [b]Password-lobby friend invites[/b] - the invite path does not include the password, making password-protected friend invites fail. This belongs with the broader multiplayer service/client work.
-[*] [b]MPI host-leaving bug[/b] - host departure behavior still needs a proper reproduction and state/ownership trace.
-[*] [b]SucceedMission / FailMission multiplayer transport failure[/b] - historical report that calling the stock mission-end Lua functions in multiplayer can drive the client to 100% packet loss / timeout and leave subsequent multiplayer attempts failing with Transport Error until the process/session is reset. Reproduce host/client behavior, trace the mission-end/network teardown sequence, and determine whether the script API is invoking a single-player lifecycle path that conflicts with the active network session.
-[*] [b]Host sniper kills missing from scoreboard[/b] - historical report that sniper kills performed by the host are not credited/displayed on the multiplayer scoreboard. Build a minimal host/client kill-attribution fixture comparing host sniper, client sniper, and ordinary weapon kills, then trace the scoring/replication path only if the asymmetry reproduces.
-[*] [b]Multiplayer freecam exploit[/b] - perform a dedicated local RE pass on the freecam entry path, camera mode/state representation, and multiplayer/spectator predicates. The desired fix is a narrow transition gate that rejects unrestricted freecam for a normal participating network player while preserving legitimate SP, editor, cinematic, death/respawn, and spectator camera states; avoid a per-frame forced-camera workaround.
-[*] [b]All Nations multiplayer option[/b] - [b]resolved, and both halves of the original framing were wrong.[/b] Redux 2.2.301 already ships a superset of the [i]permissive[/i] side of the 1.5 rule, permanently enabled, as the per-player Faction selector on the multiplayer vehicle-select screen - so "restore cross-faction selection" needed no patch at all. What Redux actually lost is the [i]restrictive[/i] side: 1.5 shipped two pool files and the host toggle chose between them, [code]netveh.odf[/code] (Any Nation off, 27 craft, no CRA) and [code]netveh1.odf[/code] (Any Nation on, 43 craft, adds CRA). Redux merged them into a single 43-entry pool and removed the ability to ask for the restricted one, which is the half a host running a stock deathmatch map actually wants. It was also not true that Any Nation meant "NSDF and CCA only" - that was measured against the shipped 1.5 data files and is incorrect. The restrictive half now ships as [code][Network] StockFactionsOnly[/code] (see below); the analysis was read directly from the shipped executable rather than from a decompile corpus.
+[*] [b]Packet-loss / traffic-storm recovery[/b]
+[*] [b]Armory / Daywrecker duplicate detonation[/b]
+[*] [b]Daywrecker terrain-spire corruption[/b]
+[*] [b]Splinter multiplayer payload duplication[/b]
+[*] [b]Splinter deployed collision response[/b]
+[*] [b]Password-lobby friend invites[/b] - invite path omits the password.
+[*] [b]MPI host-leaving bug[/b]
+[*] [b]SucceedMission / FailMission multiplayer transport failure[/b]
+[*] [b]Host sniper kills missing from scoreboard[/b]
+[*] [b]Multiplayer freecam exploit[/b] - block unrestricted freecam for a normal participating network player while preserving legitimate SP/editor/cinematic/death/spectator states.
 [/list]
-
-[b]Important Cloak distinction - now much better evidenced:[/b] the historical "Cloak Disabled" idea is [b]still not[/b] a recovered Battlezone 1.5 host contract, and the 1.5 audits did not establish a bCloak-style rule or shell option. The Red Odyssey 1.3 has since been statically unpacked, and it sharpens the picture rather than overturning it:
-
-[list]
-[*] Cloak in TRO is a real first-class engine feature - ODF properties, a four-state transition machine, a render flag, a command-menu entry, a keybind and a script API - unlike 1.5, where only latent Craft:: symbols exist.
-[*] There [i]is[/i] a global cloak enable flag, but it is [b]script API, not a host rule[/b]. Its only writer is EnableCloaking(bool), and its only two callers are the built-in Chinese campaign missions ch01 and ch02, both passing false. TRO's host-rule set is the stock eight: sniper, lives, kill, time, players, barracks, sync, comm-sat.
-[*] TRO carries a latent bug worth knowing about: that flag is statically initialized to enabled and is never restored anywhere in the image, so playing ch01 or ch02 and then hosting or joining multiplayer in the same process leaves cloak dead for that player until the executable restarts.
-[*] The session description carries an unused pair of boolean slots that is fully compiled and never called - a natural carrier for a synchronized rule if one is ever added.
-[/list]
-
-So the conclusion is unchanged in substance: if OpenShim eventually adds a lobby cloak rule, it should be documented as a [b]new OpenShim multiplayer feature[/b], not a legacy-option restoration.
 
 [h3]Editor / Campaign / UI Bugs[/h3]
 
 [list]
-[*] [b]Campaign mission-end screens[/b] - stock/custom paths share result IDs 0x13/0x14; custom divergence is later metadata/progression and generic screen-0x25 reconstruction. Capture the failing custom-final transition before patching.
-[*] [b]Custom-campaign end screen focus/minimize bug[/b] - Redux explicitly calls SW_MINIMIZE on fullscreen WM_ACTIVATEAPP deactivation. The prepared trace should identify the activation-loss producer before minimize policy is changed.
+[*] [b]Campaign mission-end screens[/b] - capture the failing custom-final transition before patching the later metadata/progression divergence.
+[*] [b]Custom-campaign end-screen focus/minimize bug[/b] - trace the WM_ACTIVATEAPP producer before changing fullscreen minimize policy.
+[*] [b]Invalid BMP thumbnail placeholder[/b] - the unsupported-BMP crash is fixed, but the current fail-safe substitutes a stock UI material that can appear as a corner-button texture in the thumbnail area. Replace that visual fallback with a dedicated neutral thumbnail such as "Invalid image format" / "Preview unavailable" while retaining the narrow exception guard.
 [/list]
 
 [h3]Rendering / Animation Bugs[/h3]
 
 [list]
-[*] [b]Terrain type-0/orientation deformation[/b] - the terrain pipeline is now deeply mapped, including the 9409-vertex / 38400-index cluster layout and logical tile/orientation chain, but a systematic transition/rotation validation matrix is still needed before calling the visual issue solved.
-[*] [b]Skeletal animation rate handling[/b] - person/skeletal animation can ignore VDF/ODF speed values such as animRate and instead run at hard-coded rates.
-[*] [b]Skeletal animation looping[/b] - some skeletal animations authored to loop play only once. The native animation-state policy needs to be identified and exposed or corrected.
+[*] [b]Terrain type-0/orientation deformation[/b] - systematic transition/rotation validation still needed.
+[*] [b]Skeletal animation rate handling[/b] - person/skeletal animation can ignore animRate-like values and use hard-coded rates.
+[*] [b]Skeletal animation looping[/b] - some authored looping animations play only once.
 [/list]
 
 [h3]Resource Loading / Mod Isolation[/h3]
 
 [list]
-[*] [b]Unrelated mod resources loading when a menu/category opens[/b] - the Ogre material-name conflict guard prevents many duplicate-material hard crashes, but Redux can still initialize resources from unrelated subscribed mods before selected content is actually launched.
-[*] Long-term goal: metadata-first enumeration plus selected-mod/dependency resource loading so one mod cannot accidentally poison another mod's resource namespace.
-[/list]
-
-[h2]Implemented - Qualification Pending[/h2]
-
-These items are no longer speculative backlog entries, but each still has a meaningful acceptance gate.
-
-[list]
-[*] [b]Engine-level career statistics[/b] - kills, deaths and missions played are now recorded across single player and multiplayer with no mission script, no Extra Utilities, and no per-mission tracking code, controlled by one switch ([code][Career] StatsTracking[/code], on by default) with a two-click Reset row beside it. This closes a gap that was structural rather than incidental: the engine's own scoring path is gated on the "is network game" global, so the previous native tracking could never have produced a single-player statistic no matter how much work went into it. Single player instead derives kills from the four damage handlers OpenShim already rides, and network games keep using the engine's authoritative scoring so the two cannot double-count. Everything stays in a local text file; nothing is uploaded. Acceptance gate is normal play across campaign, Instant Action and multiplayer.
-[*] [b]Stock Factions multiplayer pool[/b] - [code][Network] StockFactionsOnly[/code], default off, restores the restricted 1.5 starting-vehicle pool described above by pruning unwanted factions after the list is built; the existing Faction arrows skip empty buckets on their own. The host-supplied pool stays authoritative - this only ever subtracts, can never add a craft or reach content the pool withheld, and a map that publishes extra factions through its own [code].vxt[/code] still wins. Local only. Remaining gate is two-client multiplayer qualification with the rule on and off.
-[*] [b]Battlezone 1.5 satellite fog-of-war restoration[/b] - the 1.5 satellite submission rule was reconstructed as an illumination gate and restored for single-player. Lifecycle cases such as pre-hidden entities, objects created/destroyed while satellite is open, and mission teardown were hardened and runtime-tested. The feature deliberately stands down in network games for parity because otherwise an OpenShim client would see fewer enemies than a stock peer.
-[*] [b]Custom-campaign/map BMP thumbnail crash guard[/b] - the root cause is proven: bundled FreeImage rejects unsupported BMP variants such as BITMAPV5HEADER, Ogre converts that to an uncaught C++ exception, and the process terminates. OpenShim catches only the expected decode exception and substitutes the stock UI material. Remaining work is repeat-selection/consumer qualification, not root-cause discovery.
-[*] [b]TRN tile-blending control[/b] - [OpenShim] TerrainTileBlend=0..1 remaps Redux's proven seam-alpha mask. Mapping/resolver tests pass; live visual acceptance and equivalent Steam lifecycle coverage remain.
-[*] [b]Finite craft-bounds restoration / frustum culling[/b] - Redux's cockpit path can write an infinite bound onto shared world craft meshes, defeating Ogre culling and PSSM cascade assignment. OpenShim can restore a finite containment-safe bound and has measured large submission reductions. Keep final visual/camera/save-load qualification visible.
-[*] [b]DX11 Enhanced dynamic-light ranking[/b] - the Enhanced shader already supports 24 lights and experimental contribution-ranked candidate selection exists; final human visual/performance acceptance remains.
-[*] [b]Enhanced lighting art-direction corrections[/b] - double-encoded fog and the neutral terrain IBL floor are corrected and automated shader/runtime checks pass; locked-camera art-direction recapture remains the release gate.
-[*] [b]PSSM shadow-far-distance override[/b] - the 128m receiver cutoff root cause is mapped and a narrow override experiment exists. Final policy still needs visual/quality qualification rather than blindly changing a global distance.
-[*] [b]Legacy scrap/pilot HUD reconstruction[/b] - BZ 1.5 layout, black backplates, colors, and command-menu-relative placement have been reconstructed in UI design space. Continue normal gameplay/resolution acceptance before treating every layout edge case as permanently closed.
+[*] [b]Unrelated mod resources loading when a menu/category opens[/b] - the material-conflict guard prevents many crashes, but unrelated subscribed mods can still initialize resources before selected content launches.
+[*] [b]Selected-map vehicle-description/resource scoping[/b] - make sure multiplayer vehicle descriptions and related resources come only from the selected map/content/dependency set, not arbitrary installed mods.
+[*] Long-term goal: metadata-first enumeration plus selected-mod/dependency resource loading.
 [/list]
 
 [h2]Inherited / Legacy Defects[/h2]
 
-These are real defects or undesirable hard-coded behaviors that predate Redux. Confirming that 1.5 also did something is important for provenance, but it does not automatically make the behavior correct. Where changing simulation behavior could affect parity, OpenShim should prefer an explicit compatibility/opt-in gate rather than pretending the defect never existed.
-
 [list]
-[*] [b]Howitzer Artillery weaponMask[/b] - BZ 1.5 also selects the first fitted weapon and does not read [code]weaponMask[/code] in ArtilleryProcess::DoAttack. That makes this an [b]inherited 1.5 defect, not a Redux regression[/b]. OpenShim already has a weaponMask-aware optional single-player selector, default off; retain the compatibility distinction while treating the authored-mask behavior as a legitimate fix.
-[*] [b]Minelayer Lay Mines weaponMask[/b] - BZ 1.5 hard-codes hardpoint 0 and selected mask 1 in LayMinesTask::DoArrived. This is likewise an [b]inherited 1.5 defect[/b]. OpenShim's alternate selection remains an optional compatibility fix rather than a claim that Redux introduced the problem.
+[*] [b]Howitzer Artillery weaponMask[/b] - BZ 1.5 also selects the first fitted weapon and ignores authored weaponMask in ArtilleryProcess::DoAttack. Keep OpenShim's authored-mask behavior as an optional compatibility fix.
+[*] [b]Minelayer Lay Mines weaponMask[/b] - BZ 1.5 hard-codes hardpoint 0 / mask 1. Likewise treat alternate authored-mask selection as an optional compatibility fix.
 [/list]
 
 [h2]Disproven / Reclassified Historical Reports[/h2]
 
-These entries are kept here so old tracker discussions do not silently re-enter the bug backlog later.
-
 [list]
-[*] [b]weaponMask=00000 Follow crash[/b] - [b]not currently reproducible[/b]. The historical report could not be reproduced in the current qualification pass and may have depended on unrelated custom content present during the original test. Do not pursue or patch it without a deterministic mission/ODF fixture that reproduces the fault.
-[*] [b]WeaponMine hop-out / perceivedTeam ownership theory[/b] - [b]disproven[/b]. WeaponMine hostility resolves the candidate's actual team in both builds; AbandonPilot's perceivedTeam write cannot cause the proposed allied-mine hostility. The one-time hop-out attack growl is a separate CockpitRadar stale enemyShot alert and has its own narrow suppression option.
-[*] [b]Reveal-on-engagement as a compatibility repair[/b] - [b]reclassified as an enhancement[/b]. Stock 1.5 reveals an attacker when hostile damage lands; it does not generally reveal the process owner just because AI begins engaging. The old OpenShim attack-reveal hooks are quarantined and must not be described as a 1.5 restoration.
-[*] [b]Cloak Disabled as a legacy host option[/b] - [b]not established[/b]. No 1.5 host-rule contract has been reconstructed. Treat any future lobby cloak control as a new OpenShim rule unless new evidence proves otherwise.
-[*] [b]Enable Large Address Aware as a memory fix[/b] - [b]not applicable[/b]. Windows Redux 2.2.301 is already LAA; focus x86 memory work on retention/fragmentation instead.
-[*] [b]Legacy heightmap smoothing as an engine defect[/b] - [b]reclassified as a content conversion policy[/b]. Redux prefers a mission's HG2 over its legacy HGT and only cooks the HGT when no valid HG2 exists, and it already ships a [code]-nohgtsmoothing[/code] switch. The cook itself is a faithful piecewise-planar 2x upsample - which reproduces the surface the 1998 engine actually rendered - followed by one 3x3 box blur. The blur is the entire problem. Performing the engine's own upsample offline and dropping the resulting HG2 next to the HGT produces output byte-for-byte identical to what Redux itself writes with the switch, verified across 72 of 73 stock 1.5 maps. Great Pyramid needs no work at all: the file Redux 2.2.301 ships is already an unsmoothed conversion. No runtime hook is warranted.
+[*] [b]weaponMask=00000 Follow crash[/b] - not currently reproducible; do not patch without a deterministic fixture.
+[*] [b]WeaponMine hop-out / perceivedTeam ownership theory[/b] - disproven. The one-time hop-out growl is a separate stale CockpitRadar enemyShot alert.
+[*] [b]Reveal-on-engagement as a compatibility repair[/b] - reclassified as an enhancement; stock 1.5 reveals on hostile damage, not merely AI engagement.
+[*] [b]Cloak Disabled as a legacy host option[/b] - not established. Any future lobby cloak rule is a new OpenShim rule unless stronger evidence appears.
+[*] [b]Enable Large Address Aware as a memory fix[/b] - not applicable; Windows Redux 2.2.301 is already LAA.
+[*] [b]Legacy heightmap smoothing as an engine defect[/b] - reclassified as a content conversion policy. Redux's legacy HGT cook is a faithful 2x piecewise-planar upsample followed by one 3x3 blur; offline unsmoothed HG2 conversion is the preferred solution rather than a runtime hook.
 [/list]
 
 [h2]Possible Additions / Ideas[/h2]
 
-The original community tracker also contains feature requests that are still worth keeping around. Some overlap work already underway; others are deliberately lower priority than stability, multiplayer preservation, and core modding infrastructure.
-
 [h3]Terrain / Rendering[/h3]
 
 [list]
-[*] [b]Center-based terrain tile scaling[/b] - optional TRN behavior that scales a tile around its center rather than its southwest corner.
-[*] [b]Restore animated terrain waves / Ctrl+Shift waves[/b] - recreate the legacy animated-tile/wave behavior through the Redux terrain/Ogre path.
-[*] [b]Restore additional legacy TRN lighting parameters[/b] - investigate parameters that no longer influence Redux rendering, including vehicle/car shadow-related settings.
-[*] [b]Multiple terrain atlases / per-tile material selection[/b] - allow terrain tiles to reference different materials/atlases rather than requiring one monolithic CSV/atlas arrangement.
-[*] [b]Ogre headlight controls[/b] - expose brightness, color, range and related headlight properties to EXU/ODF where practical.
-[*] [b]Backport draw_geom or equivalent geometry render effect[/b] - only if it provides capabilities not already covered cleanly by EXU/Ogre entity APIs and the restored destruction-chunk path.
+[*] Center-based terrain tile scaling
+[*] Restore animated terrain waves / Ctrl+Shift waves
+[*] Restore additional legacy TRN lighting parameters
+[*] Multiple terrain atlases / per-tile material selection
+[*] Ogre headlight brightness/color/range controls
+[*] Backport [code]draw_geom[/code] or an equivalent geometry effect only if EXU/Ogre entity APIs do not already cover the need
 [/list]
 
 [h3]Gameplay / AI / Unit Definition[/h3]
 
 [list]
-[*] [b]Data-driven turret aiming range/pitch[/b] - replace hard-coded aiming limits with an ODF-configurable angle/radian value where the native path can support it safely.
-[*] [b]AI-passable building / bridge class behavior[/b] - investigate a building/object type that AI pathing can intentionally ignore or drive through, useful for bridge/cave-style geometry.
-[*] [b]Team filters for shield towers, magnets, mines and similar systems[/b] - shield filtering already exists; extend the same concept selectively where class semantics make sense.
-[*] [b]Selectable skeletal vs VDF animation mode[/b] - allow an object/class to choose which animation system drives it instead of hard-wiring pilots/person objects to skeletal behavior and most others to VDF.
-[*] [b]Walker quake/thump resistance ODF control[/b] - expose a per-walker ODF scalar or override controlling how strongly QuakeClass/thumper-style impulses affect it.
-[*] [b]Pilotable sniper-immune units[/b] - current ODF techniques can make a craft effectively unsnipable only by removing the pilot/entry behavior as well. Investigate a narrow ODF/OpenShim flag that preserves the pilot and normal enter/pilot mechanics while suppressing only the sniper pilot-kill path.
-[*] [b]Deployable utility / MRU vehicle class[/b] - historically inspired by the unshipped Battlezone 64 mobile repair/reload concept and the cut Red Odyssey Nightingale MRU, but explicitly a new OpenShim feature rather than restoration. Explore a utility-category vehicle built by a producer that drives normally, deploys like a turret, and activates support capabilities only while deployed.
-[*] [b]Composable deployable facility capabilities[/b] - if the native class assumptions permit it, generalize the MRU idea so a deployed utility platform can selectively provide existing Service Bay repair/reload, Armory, Comm Tower, and potentially Producer behavior. Determine whether these services can be safely reused independently before designing a generic capability layer.
-[*] [b]Threat-aware scavenger AI[/b] - optional cautious scavenger behavior inspired by the BZ64 design discussion, not a stock behavior replacement. Investigate an aiName/profile that can evaluate nearby hostile threat, abandon or defer dangerous scrap collection, and retreat/repath toward safer territory without treating a lone passing soldier the same as a defended gun-tower position.
-[*] [b]True 3D Airstriker / aircraft AI[/b] - Airstrikers were considered for The Red Odyssey and Battlezone 64 but abandoned because the engine/AI handles horizontal relationships much better than vertical ones. High-altitude craft can already be faked with low drag and high setAltitude values, but they are not true air units. Research the exact planar assumptions in distance, navigation, target selection, aiming, terrain clearance, and attack-state code, then assess a custom aiName-based 3D movement/combat profile with real altitude maintenance and attack passes. Keep this distinct from Battlezone bombers, which are ground-based units.
-[*] [b]Flak / chaff / anti-air countermeasure framework[/b] - concept-only; the proposed BZ64 flak/chaff system did not ship. If pursued, treat it as a generalized OpenShim area/proximity anti-air and projectile-countermeasure capability rather than historical restoration, ideally reusable for interception, fragmentation, EMP, and similar modded weapons.
+[*] Data-driven turret aiming range/pitch
+[*] AI-passable building / bridge behavior
+[*] Team filters for shield towers, magnets, mines and similar systems
+[*] Selectable skeletal vs VDF animation mode
+[*] Walker quake/thump resistance ODF control
+[*] Pilotable sniper-immune units
+[*] Deployable utility / MRU vehicle class
+[*] Composable deployable facility capabilities
+[*] Threat-aware scavenger AI profile
+[*] True 3D Airstriker / aircraft AI
+[*] Flak / chaff / anti-air countermeasure framework
 [/list]
 
 [h3]Multiplayer Options / Shell[/h3]
 
 [list]
-[*] [b]Custom multiplayer factions/categories[/b] - allow mods to define proper faction names instead of placing every custom faction under Other.
-[*] [b]Customizable pre-game/lobby options UI[/b] - expose more map/game-rule settings and eventually allow map/mod-defined option controls where safe.
-[*] [b]Optional OpenShim cloak host rule[/b] - only as a clearly labeled new rule unless a genuine legacy Cloak Disabled contract is later proven.
-[*] [b]Whitelist additional safe visual file types such as .tga[/b] - only after validating the actual multiplayer whitelist/integrity path.
+[*] Custom multiplayer factions/categories
+[*] Customizable pre-game/lobby options UI
+[*] Optional OpenShim cloak host rule, clearly labeled as new behavior
+[*] Whitelist additional safe visual file types such as .tga after validating the integrity path
+[*] [b]Legacy TCP/IP / LAN UI research[/b] - determine which Redux transport paths still function underneath the modern shell and whether useful direct-IP/LAN hosting/joining controls can be safely exposed without conflicting with BZRNet/community matchmaking.
+[*] [b]Content fingerprint/hash handshake[/b] - deferred until Workshop dependency/staging work exists; useful only for detecting stale/modified/mismatched content where both peers nominally have the same item IDs.
 [/list]
 
 [h3]Mod Packaging / Resource Management[/h3]
 
 [list]
-[*] [b]Asset-pack/dependency mods[/b] - let one mod provide shared resources used by other mods without duplicating those assets. This overlaps the planned dependency resolver.
-[*] [b]Addon/workshop subfolder support[/b] - allow organized directory structures instead of forcing thousands of files into one root directory.
-[*] [b]Safe shell/UI/cursor/loading-screen replacement[/b] - allow selected mods to replace non-mission resources without globally contaminating unrelated content.
-[*] [b]Mod dependency resolver[/b] - model relationships such as Mod A requiring B and C, validate installed versions, and integrate with the GOG Workshop bridge.
-[*] [b]GOG Workshop download/staging bridge[/b] - opt-in helper to acquire and stage required Workshop content for GOG users.
+[*] Asset-pack/dependency mods
+[*] Addon/Workshop subfolder support
+[*] Safe shell/UI/cursor/loading-screen replacement scoped to selected content
+[*] Mod dependency resolver
+[*] GOG Workshop download/staging bridge
 [/list]
 
 [h3]Lua / EXU / Scripting[/h3]
 
 [list]
-[*] [b]Generalized unit command buttons[/b] - add/remove/replace commands with labels, enabled state and Lua callbacks instead of overloading the Hunt slot.
-[*] [b]Nested producer/build menus[/b] - scriptable categories/submenus for Recycler/Factory/Armory/Constructor/Producer interfaces.
-[*] [b]Lua control of native OGG soundtrack playback[/b] - play/stop/pause/resume/change/fade tracks through Redux's real soundtrack manager.
-[*] [b]Higher-level multiplayer replication API[/b] - host-authoritative helpers for synchronized spawn/remove/state/name/objective/loadout/custom-event operations.
+[*] Generalized unit command buttons
+[*] Nested producer/build menus
+[*] Lua control of native OGG soundtrack playback
+[*] Higher-level multiplayer replication API
+[*] Deeper direct craft control API for jump/input/control state
+[*] Reactive reticles, hit markers, damage flashes and contextual HUD widgets driven by native events
 [/list]
 
 [h3]Large / Experimental Ideas[/h3]
 
 [list]
-[*] Remove or relax the legacy 8-character filename assumptions where this can be done without breaking fixed buffers, save formats, networking or parsers.
-[*] Larger Ogre/shader architecture rewrites and GPU skinning experiments after renderer correctness/stability is substantially settled.
-[*] Higher-level environment/planet preset system built on the environment controls EXU already exposes.
-[*] [b]Carrier / hangar vessel class[/b] - explore a large mostly stationary or slow-moving carrier/recycler-style object with walkable interior collision, BZ2-style attachment points for defensive gun turrets, and the ability to build/spawn empty craft inside a hangar for pilots to board and launch into battle.
-[*] [b]Dropship / aircraft class backport[/b] - investigate backporting BZ2-style aircraft/dropship behavior, including flying AI and support for zero/low-gravity environments.
+[*] Remove or relax legacy 8-character filename assumptions where fixed buffers/save/network/parser contracts permit it
+[*] Larger Ogre/shader architecture rewrites and GPU skinning experiments only after renderer correctness/stability settles
+[*] Higher-level environment/planet preset system
+[*] Carrier / hangar vessel class with interior collision, attached defenses and internal craft spawn/launch
+[*] Dropship / aircraft class backport, including zero/low-gravity support
+[*] [b]Shim + EXU showcase/demo mission[/b] - create a visible living demo and regression mission that exercises supported overlays, material swaps, dynamic environment controls, AI tuning, destruction chunks, team filters, radio controls, radar/HUD changes, command hooks, autosave/options, and multiplayer-safe features where practical.
 [/list]
 
 [h2]Completed / Restored[/h2]
 
-A lot of things that used to be on this roadmap have already moved into working code or sufficiently proven compatibility fixes, including:
+The following have moved out of the speculative backlog into working/qualified code or a sufficiently proven compatibility result:
 
 [list]
-[*] [b]OpenShim Settings page reachability[/b] - a blanket "make everything opt-in" pass had switched off the two keys that are not features but the interface through which every other feature is reached, so an affected install could not turn anything on - including the settings page itself - without hand-editing the configuration file. The shipped preset was corrected the following day, but the preset revision was never advanced, and migration skips a file that already claims the current revision, so affected installs could never be repaired by any later release. Preset revision 3 now reopens both doors on those installs, without overriding a value a player deliberately chose. Verified end to end on a real affected install.
-[*] [b]First-person pilot tracer teardown crash[/b] - quitting a mission could kill the process. The scene manager global keeps pointing at a destroyed manager, and the guard around the walk was a C++ catch-all, which under this project's exception model never fires for an access violation - so it had never once caught anything. The manager is now confirmed live before use and the walk is guarded by the structured handler used everywhere else in that file.
-[*] [b]Build version in the main-menu notice[/b] - the menu version line now carries the OpenShim build version, read from the DLL's own resource so it cannot disagree with the shipped file. This exists because the shim's two halves are deployed by hand and can drift apart, and a stale DLL is otherwise indistinguishable from a current one at runtime.
-[*] [b]Pilot hardpoint null-carrier guard[/b] - Redux 2.2.301 fault reproduced and traced to Person::Simulate reading carrier-dependent selected-mask state through a null carrier after successful creation; the narrow OpenShim guard has now passed gameplay qualification.
-[*] [b]AI multi-producer maker registration[/b] - the mixed stock/custom AIP producer defect was traced to the single-maker registration path and fixed by appending rejected duplicate-producer pairs into the existing makers[] slots; the fix has now passed the required regression qualification.
-[*] [b]Neutral Attack Orders[/b] - the opt-in ControlPanel target-filter relaxation for explicit orders against team 0 has passed host/client UI qualification while leaving global hostility, diplomacy, autonomous acquisition, command IDs, and network serialization stock.
-[*] [b]Editor Shift-F10 object placement[/b] - the transposed DisplayInterface::AddView priority constants were restored to the stock 1.5 ordering and the editor placement repair has now passed editor-session qualification.
-[*] [b]Multi-parameter command-line parsing[/b] - the narrow tokenizer delimiter repair for comma-bearing options such as [code]-shellmap:<W>,<H>[/code] has now passed both GOG and Steam end-to-end qualification.
+[*] [b]Engine-level career statistics[/b] - kills, deaths, and missions played are tracked across single player and multiplayer without mission script support, controlled by [code][Career] StatsTracking[/code], stored locally, and resettable from the Settings page.
+[*] [b]Battlezone 1.5 satellite fog-of-war restoration[/b] - the legacy illumination rule works in single-player, including lifecycle handling; it deliberately stands down in network games for parity.
+[*] [b]Native Redux Raw Input support[/b] - Redux's real WM_INPUT path is exposed through OpenShim with an explicit INI/UI control and absolute-mode device handling.
+[*] [b]Unsupported BMP thumbnail crash guard[/b] - expected FreeImage decode failures are caught narrowly so unsupported custom campaign/map thumbnails no longer terminate the process. The remaining placeholder-art issue is cosmetic and tracked above.
+[*] [b]OpenShim Settings page reachability[/b] - preset migration repairs installs that accidentally disabled the UI entry points without overriding intentional user choices.
+[*] [b]First-person pilot tracer teardown crash[/b]
+[*] [b]Build version in the main-menu notice[/b]
+[*] [b]Pilot hardpoint null-carrier guard[/b]
+[*] [b]AI multi-producer maker registration[/b]
+[*] [b]Neutral Attack Orders[/b]
+[*] [b]Editor Shift-F10 object placement[/b]
+[*] [b]Multi-parameter command-line parsing[/b]
 [*] Restored physical destruction chunks
 [*] Stock GOG DX9/DX11 destruction/live-fire submission reduction
-[*] Generic destruction-chunk batch rebuild deduplication by actual state change rather than once per material scheme
+[*] Generic destruction-chunk batch rebuild deduplication by actual state change
 [*] GOG DX11 animated-mesh readback fix for software-skinned position/normal sources
 [*] Lua-driven Ogre UI/overlay support
 [*] Runtime material swapping
@@ -616,10 +436,9 @@ A lot of things that used to be on this roadmap have already moved into working 
 [*] Battlezone 1.5 jump-snipe crouch behavior
 [*] Multiplayer team flags
 [*] Multiplayer browser fixes
-[*] Lobby nickname controls and live BZRNet nickname re-authorization
+[*] Lobby nickname UI/commands and persisted connection-time nickname control; immediate live propagation remains separately qualified above
 [*] Persistent bans/host controls
 [*] Rewritten key-binding screen
-[*] Native Redux Raw Input path bridged through OpenShim with an opt-in INI/UI control
 [*] Empty-craft running-light control
 [*] Pulsing emissives
 [*] Twinkling stars
@@ -628,57 +447,53 @@ A lot of things that used to be on this roadmap have already moved into working 
 [*] Mission briefing scrolling fixes
 [*] AI engagement-range improvements
 [*] Native OpenShim Settings UI
-[*] Renderer backend and Redux/Enhanced/Retro render-profile selection in the Settings UI
-[*] Enhanced renderer-resource validation across standalone game-root installs and mounted addon/mod/Steam Workshop content roots
-[*] One-click Steam Workshop OpenShim suite update checking and staging from the native options UI
+[*] Renderer backend and Redux/Enhanced/Retro render-profile selection
+[*] Enhanced renderer-resource validation across standalone and mounted addon/mod/Workshop roots
+[*] One-click Steam Workshop OpenShim suite update checking/staging from the native UI
 [*] Crash logging with first-chance diagnostics and minidumps
-[*] Custom Campaign / map thumbnail decode hardening path implemented
 [*] SprayBuilding/splinter firing-after-destruction fix
 [*] MagnetClass zero/invalid-range divide-by-zero guard
 [*] MultiRender renderCount allocation clamp
 [*] APC deployment fallback when an allied target is selected
 [*] Tug cargo PostLoad/start-state recovery
 [*] Satellite/F9 stale target-camera teardown fix
-[*] Battlezone 1.5 satellite illumination/FOW rule restored for single-player
 [*] Earthquake/dayquake save-load replay/fade fix
 [*] GOG Inst4XMission stale-handle save-load crash fix
 [*] Destruction-chunk proxy mission-transition lifetime fix
 [*] Cinematic camera FOV/zoom recovery when entering from satellite view
 [*] Howitzer undeployed sniper-retaliation guard
 [*] Constructor remote-build-after-death cleanup/refund/unassignment fix
-[*] ScriptUtils CanBuild/IsBusy support for base classLabel=producer / PROD
+[*] ScriptUtils CanBuild/IsBusy support for base [code]classLabel=producer[/code] / PROD
 [*] EXU sanitization of stock Lua string-return functions such as GetWeaponClass/GetOdf/GetClassSig
 [*] EXU ObjectiveObjects() iterator repair
 [*] Steam multiplayer map-list auto-refresh/jump fix
 [*] Protected Lua file I/O / persistent settings support through bzfile
-[*] TRN newline/encoding corruption fix for exact GOG/Steam 2.2.301, with deterministic CP1252 CRLF output and UTF-16 preservation
+[*] TRN newline/encoding corruption fix for exact GOG/Steam 2.2.301 with deterministic CP1252 CRLF output and UTF-16 preservation
 [*] Non-English numeric-locale fix: preserve presentation language while forcing only LC_NUMERIC=C through Redux's own MSVCR120
 [*] Sun fullscreen-flash suppression option isolated from the rest of the lens-flare/sun pipeline
-[*] Declarative resolver infrastructure through scripts/patches.json [resolves] and HookEngine::ResolveNamedAddress()
+[*] Declarative resolver infrastructure through [code]scripts/patches.json [resolves][/code] and HookEngine::ResolveNamedAddress()
 [*] AI ODF gameplay-tuning master switch for engageRangeAI / weaponRangeMinAI / retargetPeriodAI / scrapPathingAI and related keys
 [*] Wingman / attack engagement-range authored range policy
 [*] Save/load lifecycle hardening and stale GameObject handle rejection
 [*] OpenShim render-profile ownership with EXU bridge and mission-lifecycle override clearing
 [*] Campaign Reimagined settings ownership split so campaignReimagined_settings.cfg remains campaign-only
 [*] Multiplayer parity gating for all [SinglePlayer] features, including SatelliteVisibilityFix, BomberAiRange, and attack-reveal enhancement state
-[*] Switchable [Fixes] controls for confirmed engine fixes so strict-parity lobbies and regression bisection can restore stock behavior selectively
+[*] Switchable [Fixes] controls for confirmed engine fixes so strict-parity lobbies/regression bisection can restore stock behavior selectively
 [*] Visible [Network] GovernorTuning = OpenShim / Stock master control
 [*] Full CI/release qualification gates and immutable release-suite artifact work
-[*] Roughly forty OpenShim settings exposed as native Settings-page rows, including chunk meshes, sound channels, music focus, material guard, map-list refresh, editor placement, multiplayer flags, satellite fog of war, sun flash, reticle range presets, and the DX11 Enhanced options
-[*] Multiplayer parity gating extended to the five simulation-affecting [Fixes] entries, so they stand down for the duration of a network game and re-arm afterwards
+[*] Roughly forty OpenShim settings exposed as native Settings-page rows
+[*] Multiplayer parity gating extended to simulation-affecting [Fixes] entries
 [*] [Network] NetImprovements master gate over the OpenShim socket layer
-[*] Options and keybind pages no longer black out the screen background behind them
-[*] Legacy HGT heightmap compatibility resolved as an offline conversion policy rather than an engine patch
-[*] The Red Odyssey 1.3 statically unpacked, with its cloak feature, nation model, script API and multiplayer host-rule set reconstructed
-[*] Battlezone 1.4 unpacked and its AI behavior differences against 1.5 censused function by function
-[*] macOS x86-64 DistributedObject/GameObject reconstruction and a concrete 64-bit cleanliness assessment
+[*] Options and keybind pages no longer black out the screen background
+[*] Legacy HGT heightmap compatibility resolved as an offline conversion policy
+[*] The Red Odyssey 1.3 statically unpacked and its cloak/nation/script/multiplayer host-rule model reconstructed
+[*] Battlezone 1.4 unpacked and its AI differences against 1.5 censused function-by-function
+[*] macOS x86-64 DistributedObject/GameObject reconstruction and concrete 64-bit cleanliness assessment
 [/list]
-
-Several newer compatibility fixes are implemented and statically verified but still deserve focused gameplay regression testing before every edge case is permanently closed. Those are listed under [b]Implemented - Qualification Pending[/b] rather than being left in the speculative backlog.
 
 [h2]Long-Term Goal[/h2]
 
-The long-term goal is still not to throw away Battlezone 98 Redux and casually replace it with a new engine.
+The goal is not to casually throw away Battlezone 98 Redux and replace it with a new engine.
 
 The near- and medium-term goal is to make the existing game:
 
@@ -688,18 +503,16 @@ The near- and medium-term goal is to make the existing game:
 [*] Better behaved on modern systems
 [*] More consistent between Steam and GOG
 [*] Less dependent on external services remaining online forever
-[*] More memory-resilient within the limits of the existing 32-bit Windows executable
+[*] More memory-resilient within the limits of the 32-bit Windows executable
 [*] Capable of supporting more ambitious community content than the stock scripting/API surface allows
 [/list]
 
-OpenShim handles the things that require native engine access.
+OpenShim handles the pieces that require native engine access.
 
 Extra Utilities exposes more of that functionality cleanly to Lua.
 
-Campaign Reimagined provides a real-world environment where those systems can actually be tested rather than existing only as experimental hooks.
+Campaign Reimagined provides a real-world environment where these systems can be exercised rather than existing only as isolated hooks.
 
-The matchmaking/server work is intended to keep multiplayer usable long-term.
+The matchmaking/server work is intended to preserve multiplayer long-term.
 
-And the new symbol-rich macOS x64 peer build gives us a serious research path for understanding what a true Windows x64 reconstruction would require if the community eventually decides that the 32-bit executable itself has become the limiting factor.
-
-There is still a lot to reverse engineer, validate, and clean up, but the project has reached the point where some ideas that would have been unrealistic a year ago are now genuinely feasible.
+The symbol-rich macOS x64 peer build gives the project a serious research path for understanding what a true Windows x64 reconstruction would require if the 32-bit executable eventually becomes the limiting factor.
