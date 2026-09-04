@@ -73,15 +73,17 @@ jobs:
           if ($bat -notmatch 'openshim_support_wrap\.ps1') { throw 'Batch launcher does not target the support wrapper.' }
           if ($bat -notmatch '%~dp0') { throw 'Batch launcher is not relative to its own directory.' }
 
-  worker-syntax:
-    name: Worker JavaScript syntax
+  worker-tests:
+    name: Worker protocol and retry tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Syntax-check Worker as an ES module
-        run: |
-          cp support-worker/src/index.js /tmp/openshim-support-worker.mjs
-          node --check /tmp/openshim-support-worker.mjs
+      - name: Syntax-check Worker
+        working-directory: support-worker
+        run: node --check src/index.js
+      - name: Run Worker tests
+        working-directory: support-worker
+        run: npm test
