@@ -253,7 +253,7 @@ OpenShim now has first-chance/unhandled crash logging and minidump capture, so d
 [*] [b]Owned-object PerceivedTeam reveal behavior[/b] - test whether Comets, Splinters, Soldiers, etc. should cause their owning craft to lose disguise.
 [*] [b]Rare sniper/reticle misalignment after eject[/b] - needs reliable reproduction.
 [*] [b]Walker cockpit jitter[/b] - the walker-root/cockpit transform link is excluded; visually confirm whether the remaining camera-vs-cockpit cadence difference is the actual symptom before smoothing anything.
-[*] [b]AI retarget/stuck/scavenger runtime completion[/b] - engagement-range infrastructure and the gameplay-tuning master switch exist, but explicitly verify the remaining [code]retargetPeriodAI[/code], stuck/recovery, and scavenger scrap-path scoring consumers before considering the old tracker items completely closed.
+[*] [b]AI stuck/recovery behavior[/b] - [code]retargetPeriodAI[/code] already has a live post-task application path, and smart scavenger path scoring/en-route retargeting already ships. The remaining old-tracker thread is explicit stuck/recovery behavior or tuning; keep that separate from the experimental Battlezone 1.4 seven-state legacy recovery research below.
 [/list]
 
 [h3]Deeper Craft / AI Control API[/h3]
@@ -311,8 +311,7 @@ The Red Odyssey 1.3 comparison establishes Cloak and Portal plus a widened natio
 
 [list]
 [*] [b]Unrelated mod resources loading when a menu/category opens[/b] - the material-conflict guard prevents many crashes, but unrelated subscribed mods can still initialize resources before selected content launches.
-[*] [b]Selected-map vehicle-description/resource scoping[/b] - make sure multiplayer vehicle descriptions and related resources come only from the selected map/content/dependency set, not arbitrary installed mods.
-[*] Long-term goal: metadata-first enumeration plus selected-mod/dependency resource loading.
+[*] Long-term goal: metadata-first enumeration plus selected-mod/dependency resource loading. The narrower multiplayer vehicle-list asset-scoping defect is already fixed separately.
 [/list]
 
 [h2]Inherited / Legacy Defects[/h2]
@@ -342,16 +341,15 @@ The Red Odyssey 1.3 comparison establishes Cloak and Portal plus a widened natio
 [*] Restore animated terrain waves / Ctrl+Shift waves
 [*] Restore additional legacy TRN lighting parameters
 [*] Multiple terrain atlases / per-tile material selection
-[*] Ogre headlight brightness/color/range controls
 [*] Backport [code]draw_geom[/code] or an equivalent geometry effect only if EXU/Ogre entity APIs do not already cover the need
 [/list]
 
 [h3]Gameplay / AI / Unit Definition[/h3]
 
 [list]
-[*] Data-driven turret aiming range/pitch
+[*] Per-ODF/generalized turret aim-limit controls beyond the existing global [code]TurretAimPitch[/code] / [code]TurretAimPitchMultiplier[/code] behavior
 [*] AI-passable building / bridge behavior
-[*] Team filters for shield towers, magnets, mines and similar systems
+[*] Extend the existing generic ODF team-filter framework beyond ShieldTower, MagnetMine, and ProximityMine where another class has a clear use case
 [*] Selectable skeletal vs VDF animation mode
 [*] Walker quake/thump resistance ODF control
 [*] Pilotable sniper-immune units
@@ -413,6 +411,10 @@ The following have moved out of the speculative backlog into working/qualified c
 [*] [b]Engine-level career statistics[/b] - kills, deaths, and missions played are tracked across single player and multiplayer without mission script support, controlled by [code][Career] StatsTracking[/code], stored locally, and resettable from the Settings page.
 [*] [b]Battlezone 1.5 satellite fog-of-war restoration[/b] - the legacy illumination rule works in single-player, including lifecycle handling; it deliberately stands down in network games for parity.
 [*] [b]Native Redux Raw Input support[/b] - Redux's real WM_INPUT path is exposed through OpenShim with an explicit INI/UI control and absolute-mode device handling.
+[*] [b]Player/AI headlight controls and falloff/range repair[/b] - OpenShim exposes player and AI headlights, named/custom RGB color/intensity, focused/wide beam shaping, and repaired spotlight falloff/attenuation-range behavior instead of the old hard terminator.
+[*] [b]Defensive turret pitch control[/b] - [code]TurretAimPitch[/code] and [code]TurretAimPitchMultiplier[/code] already provide the global OpenShim pitch-authority control. Per-ODF/generalized aim limits remain a separate possible extension above.
+[*] [b]ODF team filters for ShieldTower, MagnetMine, and ProximityMine[/b] - the shared team-filter system supports [code]teamFilter[/code], [code]affectAllies[/code], and [code]affectEnemies[/code] for these classes.
+[*] [b]Multiplayer vehicle-list mod asset scoping[/b] - [code]VehicleListModScoping[/code] forces the multiplayer vehicle-list/description resource path back onto the selected mod instead of arbitrary installed content. Broader resource-group isolation remains open.
 [*] [b]Unsupported BMP thumbnail crash guard[/b] - expected FreeImage decode failures are caught narrowly so unsupported custom campaign/map thumbnails no longer terminate the process. The remaining placeholder-art issue is cosmetic and tracked above.
 [*] [b]OpenShim Settings page reachability[/b] - preset migration repairs installs that accidentally disabled the UI entry points without overriding intentional user choices.
 [*] [b]First-person pilot tracer teardown crash[/b]
@@ -472,7 +474,7 @@ The following have moved out of the speculative backlog into working/qualified c
 [*] Non-English numeric-locale fix: preserve presentation language while forcing only LC_NUMERIC=C through Redux's own MSVCR120
 [*] Sun fullscreen-flash suppression option isolated from the rest of the lens-flare/sun pipeline
 [*] Declarative resolver infrastructure through [code]scripts/patches.json [resolves][/code] and HookEngine::ResolveNamedAddress()
-[*] AI ODF gameplay-tuning master switch for engageRangeAI / weaponRangeMinAI / retargetPeriodAI / scrapPathingAI and related keys
+[*] AI ODF gameplay tuning for [code]engageRangeAI[/code], [code]weaponRangeMinAI[/code], [code]retargetPeriodAI[/code], [code]scrapPathingAI[/code], smart scavenger path scoring, failure cooldowns, search radius, and en-route scrap retarget controls
 [*] Wingman / attack engagement-range authored range policy
 [*] Save/load lifecycle hardening and stale GameObject handle rejection
 [*] OpenShim render-profile ownership with EXU bridge and mission-lifecycle override clearing
