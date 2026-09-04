@@ -36,6 +36,34 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def read_body(self) -> bytes:
+        # HttpClient StreamContent may use HTTP/1.1 chunked transfer encoding
+        # instead of publishing Content-Length. Support both so the mock server
+        # exercises the transport the same way a real Worker endpoint will.
+        transfer_encoding = self.headers.get("Transfer-Encoding", "").lower()
+        if "chunked" in transfer_encoding:
+            chunks: list[bytes] = []
+            while True:
+                size_line = self.rfile.readline()
+                if not size_line:
+                    raise ConnectionError("unexpected EOF in chunk header")
+                size_text = size_line.strip().split(b";", 1)[0]
+                if not size_text:
+                    continue
+                size = int(size_text, 16)
+                if size == 0:
+                    # Consume optional trailer headers and their terminating
+                    # blank line.
+                    while True:
+                        trailer = self.rfile.readline()
+                        if not trailer or trailer in (b"\r\n", b"\n"):
+                            break
+                    break
+                chunks.append(self.rfile.read(size))
+                terminator = self.rfile.read(2)
+                if terminator != b"\r\n":
+                    raise ConnectionError("invalid chunk terminator")
+            return b"".join(chunks)
+
         length = int(self.headers.get("Content-Length", "0"))
         return self.rfile.read(length)
 
