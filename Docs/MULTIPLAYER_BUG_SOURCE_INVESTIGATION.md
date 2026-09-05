@@ -1,5 +1,22 @@
 # Multiplayer Bug Source Investigation — Battlezone 98 / Redux
 
+> **2026-09-04 correction — Splinter and Daywrecker:** The qualification in
+> [MP_EXPLOSIVE_AUTHORITY_QUALIFICATION.md](MP_EXPLOSIVE_AUTHORITY_QUALIFICATION.md)
+> supersedes this report's explosive-authority conclusions, confidence grades,
+> proposed guards, and before/after diagrams (including executive-summary rows 2–5).
+> Splinter payload `Build` immediately sets `bSend = 0` in both the 1.5 reference
+> and Redux: the claimed owner-payload send plus receiver-payload duplication is
+> contradicted. `SprayBomb` is ordnance; its deployed producer is reconstructed
+> per peer. An owner-only payload/deployment guard is not justified.
+> One crater call on each of two peers does not mutate either peer's buffer twice.
+> `DayWrecker::Explode` has no direct `MakeCrater` call; `Destroy` sends state,
+> and `RemoteDelete`'s final virtual call is class-conditional, not an unconditional
+> Daywrecker explosion. Repeated same-peer terrain mutation and the claimed spire
+> mechanism remain unproven. `GetNormalPtr` byte shifts alone do not establish a
+> height-buffer mutation. Do not implement the remote crater suppression or whole
+> `Simulate` returns proposed below. The historical body is retained for provenance;
+> unrelated investigations are unchanged.
+
 **Date:** 2026-09-04  
 **Scope:** Source-archaeology + network-authority investigation across BZ1 source variants, Redux decompilation, and OpenShim / community patches.  
 **Goal:** Evidence-backed root-cause mapping for ten longstanding multiplayer bugs; not a broad implementation PR.  
