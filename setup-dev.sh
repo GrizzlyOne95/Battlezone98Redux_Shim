@@ -65,7 +65,9 @@ git -C "$ogre_dir" checkout "$ogre_commit"
 repo_root="$(cd "$(dirname "$0")" && pwd)"
 hook_source="$repo_root/scripts/pre-commit-secret-guard.sh"
 if [ -f "$hook_source" ] && [ -d "$repo_root/.git/hooks" ]; then
-    cp "$hook_source" "$repo_root/.git/hooks/pre-commit"
+    # Strip CR: a CRLF hook exits 0 after printing its refusal (see
+    # .gitattributes) and would let the rejected commit through.
+    tr -d "\r" < "$hook_source" > "$repo_root/.git/hooks/pre-commit"
     chmod +x "$repo_root/.git/hooks/pre-commit"
     echo "Installed pre-commit secret guard."
 fi

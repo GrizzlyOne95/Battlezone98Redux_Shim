@@ -1,1 +1,6 @@
 reverse_engineering/corpus_artifacts/*.zip filter=lfs diff=lfs merge=lfs -text
+# Shell scripts must keep LF in the working tree. Git for Windows will run a
+# CRLF hook, but `exit 1` arrives as `exit 1\r`, which is not a valid numeric
+# argument -- the pre-commit secret guard printed its refusal and then exited
+# 0, allowing the very commit it had just rejected. Verified 2026-09-05.
+*.sh text eol=lf
