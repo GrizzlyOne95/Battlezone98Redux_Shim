@@ -58,5 +58,19 @@ git -C "$ogre_dir" sparse-checkout set OgreMain/include Components/Overlay/inclu
 git -C "$ogre_dir" fetch --filter=blob:none --depth 1 origin "$ogre_commit"
 git -C "$ogre_dir" checkout "$ogre_commit"
 
+# Install the secret guard. The test-crew log uploader takes its Discord
+# webhook from OPENSHIM_WEBHOOK at install time and the URL is never committed:
+# GitHub secret scanning revokes a webhook it finds in a push, which breaks log
+# collection for everyone until it is reissued. This hook refuses such a commit.
+repo_root="$(cd "$(dirname "$0")" && pwd)"
+hook_source="$repo_root/scripts/pre-commit-secret-guard.sh"
+if [ -f "$hook_source" ] && [ -d "$repo_root/.git/hooks" ]; then
+    # Strip CR: a CRLF hook exits 0 after printing its refusal (see
+    # .gitattributes) and would let the rejected commit through.
+    tr -d "\r" < "$hook_source" > "$repo_root/.git/hooks/pre-commit"
+    chmod +x "$repo_root/.git/hooks/pre-commit"
+    echo "Installed pre-commit secret guard."
+fi
+
 echo ""
 echo "Done. Ogre reference headers are ready at: $ogre_dir"
