@@ -13,6 +13,7 @@
 #include "ogre_enhanced_light_selection.h"
 #include "render_profile_runtime.h"
 #include "native_ui.h"
+#include "../engine/native_ui_validation.h"
 #include "ogre_animation_profiler.h"
 #include "ogre_profiler_algorithms.h"
 #include "weapon_convergence.h"
@@ -37793,13 +37794,35 @@ namespace BZROpenShim
             g_BzrFn_SetTooltip(entry, text);
         }
 
-        static void UpdateNetRouteLabel(void* readout)
+        // Refresh callers reach this from the chat command and the external
+        // bridge as well as from live UI events, so the owning lobby screen may
+        // already be gone. Both in-match /nickname attempts on 2026-09-04 faulted
+        // at 0x007C2967 -- inside SetButtonLabel, dereferencing the stale
+        // button's +0x144 render object -- because a null check was the only
+        // gate. Require containment in the cached owner, the same evidence
+        // SyncOneNicknameEntry already demands.
+        static void UpdateNetRouteLabel(void* owner, void* readout)
         {
-            if (!readout || !g_BzrFn_SetButtonLabel)
+            if (!g_BzrFn_SetButtonLabel)
                 return;
+            if (!NativeUiValidation::CachedChildAccessAllowed(
+                    owner != nullptr,
+                    readout != nullptr,
+                    IsWidgetLiveChildOfParent(owner, readout)))
+            {
+                return;
+            }
             char summary[256] = {};
             FormatBzrNetRouteSummary(summary, sizeof(summary));
-            g_BzrFn_SetButtonLabel(readout, summary);
+            __try
+            {
+                g_BzrFn_SetButtonLabel(readout, summary);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[BZRNET] Route label refresh faulted code=0x%08X\n",
+                    static_cast<uint32_t>(GetExceptionCode()));
+            }
         }
 
 
@@ -37955,12 +37978,13 @@ namespace BZROpenShim
 
         static void CompleteNicknameEdit(
             void* entry,
+            void* owner,
             void* routeLabel,
             const char* source)
         {
             const bool applied = ApplyNicknameFromEntry(entry, source);
             EndNicknameEdit(entry);
-            UpdateNetRouteLabel(routeLabel);
+            UpdateNetRouteLabel(owner, routeLabel);
             if (!applied)
                 return;
 
@@ -38144,7 +38168,7 @@ namespace BZROpenShim
                         if (g_BzrFn_SetOnClick && onRefresh) g_BzrFn_SetOnClick(*outRouteLabel, onRefresh);
                         if (g_BzrFn_SetOnHover && onHover) g_BzrFn_SetOnHover(*outRouteLabel, onHover);
                         g_BzrFn_AddChild(parent, *outRouteLabel, 0);
-                        UpdateNetRouteLabel(*outRouteLabel);
+                        UpdateNetRouteLabel(parent, *outRouteLabel);
                     }
                 }
             }
@@ -38286,18 +38310,19 @@ namespace BZROpenShim
 
     void __cdecl NetRouteRefreshHost()
     {
-        UpdateNetRouteLabel(g_NetRouteLabelHost);
+        UpdateNetRouteLabel(g_HostUiParent, g_NetRouteLabelHost);
     }
 
     void __cdecl NetRouteRefreshClient()
     {
-        UpdateNetRouteLabel(g_NetRouteLabelClient);
+        UpdateNetRouteLabel(g_ClientUiParent, g_NetRouteLabelClient);
     }
 
     void __cdecl NicknameEntryOnEnterHost()
     {
         CompleteNicknameEdit(
             g_NicknameEntryHost,
+            g_HostUiParent,
             g_NetRouteLabelHost,
             "host_lobby");
     }
@@ -38306,6 +38331,7 @@ namespace BZROpenShim
     {
         CompleteNicknameEdit(
             g_NicknameEntryClient,
+            g_ClientUiParent,
             g_NetRouteLabelClient,
             "client_lobby");
     }
@@ -38328,7 +38354,7 @@ namespace BZROpenShim
         if (g_BzrFn_LabelState && g_FlagLabelHost)
             g_BzrFn_LabelState(g_FlagLabelHost, param);
         UpdateFlagSelectionUiLabel(g_FlagLabelHost);
-        UpdateNetRouteLabel(g_NetRouteLabelHost);
+        UpdateNetRouteLabel(g_HostUiParent, g_NetRouteLabelHost);
     }
 
     void __cdecl FlagButtonOnHoverClient(void* param)
@@ -38336,7 +38362,7 @@ namespace BZROpenShim
         if (g_BzrFn_LabelState && g_FlagLabelClient)
             g_BzrFn_LabelState(g_FlagLabelClient, param);
         UpdateFlagSelectionUiLabel(g_FlagLabelClient);
-        UpdateNetRouteLabel(g_NetRouteLabelClient);
+        UpdateNetRouteLabel(g_ClientUiParent, g_NetRouteLabelClient);
     }
 
     // The native load screen sets BOTH callback slots on every load-slot button:
@@ -38595,7 +38621,7 @@ namespace BZROpenShim
             // Re-assert it: SetActive on a surviving panel would restore the
             // byte and put the click-swallowing rectangle back over the row.
             MakeViewInputTransparent(g_NicknamePanelHost);
-            UpdateNetRouteLabel(g_NetRouteLabelHost);
+            UpdateNetRouteLabel(parent, g_NetRouteLabelHost);
         }
 
         if (ShouldRunUiWidgetProbe())
@@ -38703,7 +38729,7 @@ namespace BZROpenShim
             // Re-assert it: SetActive on a surviving panel would restore the
             // byte and put the click-swallowing rectangle back over the row.
             MakeViewInputTransparent(g_NicknamePanelClient);
-            UpdateNetRouteLabel(g_NetRouteLabelClient);
+            UpdateNetRouteLabel(parent, g_NetRouteLabelClient);
         }
     }
 
