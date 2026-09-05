@@ -2971,6 +2971,23 @@ namespace BZROpenShim
               kShimSettingsHeadlightBeamValues, kShimSettingsHeadlightBeamValues, 3, 0,
               ShimSettingApplyGroup::Headlights,
               "Headlight beam shape: Stock, Focused (narrow), or Wide." },
+            // Pilot flashlight. Not a stock light: no pilot skeleton has an
+            // hlgt bone, so OpenShim creates this one on the pilot's own scene
+            // node and destroys it when the player boards or the world ends.
+            // Default off, so the default index is "Off" (1), matching what an
+            // absent key does.
+            { "Pilot Flashlight", "SinglePlayer", "PilotFlashlight", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::PilotFlashlight,
+              "Flashlight on your pilot while on foot. Single player only." },
+            { "Pilot Light Color", "SinglePlayer", "PilotFlashlightColor", nullptr, 0,
+              kShimSettingsHeadlightColorValues, kShimSettingsHeadlightColorValues, 12, 0,
+              ShimSettingApplyGroup::PilotFlashlight,
+              "Pilot flashlight color; Rainbow cycles through colors." },
+            { "Pilot Light Beam", "SinglePlayer", "PilotFlashlightBeam", nullptr, 0,
+              kShimSettingsHeadlightBeamValues, kShimSettingsHeadlightBeamValues, 3, 0,
+              ShimSettingApplyGroup::PilotFlashlight,
+              "Pilot flashlight beam shape: Stock, Focused (narrow), or Wide." },
             // [Fixes]: confirmed Redux engine defects. All five default ON and
             // normal single-player play wants them on -- they are switches so a
             // suspected regression is bisectable. Each one changes simulation

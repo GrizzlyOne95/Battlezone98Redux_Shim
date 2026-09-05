@@ -314,9 +314,36 @@ namespace BZROpenShim
                strcmp(name, "Map List Rewrite for Hop-Fix 3/3") == 0;
     }
 
+    // Only "Chunk Render Resolve Hook" is a chunk experiment. Its hook body
+    // early-returns unless a chunk flag is set, and it drives nothing else.
+    //
+    // The other two vtable hooks used to be listed here, and that was wrong.
+    // Both grew into general per-tick drivers for work that has nothing to do
+    // with chunks:
+    //
+    //   LegacyWorldUpdateRenderQueueHook (per rendered frame)
+    //     RefreshHeadlightState, RefreshPilotFlashlightState,
+    //     TickMpGateReconcile, TickOpenShimEventLayer,
+    //     RefreshVehicleSkinningDiagnosticsIfNeeded
+    //
+    //   ChunkEffectSimulateHook (per sim tick)
+    //     TickMpGateReconcile (secondary), MaybeDriveMultiplayerFlagRenderFallback,
+    //     OgreShaderCacheTick, SyncSatelliteVisibility,
+    //     MaybeSuppressStaleHopOutAttackAlert, the UiPerf heartbeat, and the
+    //     deferred installs for mpauth, radar layout, career-stats MP and the
+    //     jump-snipe probe
+    //
+    // The shipped default is [General] ChunkMeshes = 0, which this gate maps to
+    // OPENSHIM_DISABLE_CHUNK_EXPERIMENTS, so on a default install every one of
+    // those was dead -- silently, because a filtered patch produces no [SKIP]
+    // line. Neither hook needs the chunk features: their chunk-side calls
+    // (TickChunkProxyDebug, TrackChunkEffectActiveEntries,
+    // LogChunkEffectRuntimeSample, the batching branch) all early-return on the
+    // same flags, so with chunks off each hook costs one call-through plus a few
+    // boolean tests.
     static bool IsChunkExperimentPatchName(const char* name) {
         if (!name) return false;
-        return strcmp(name, "Chunk Render Resolve Hook") == 0 || strcmp(name, "Chunk Effect Simulate VTable Hook") == 0 || strcmp(name, "Legacy World Update RenderQueue VTable Hook") == 0;
+        return strcmp(name, "Chunk Render Resolve Hook") == 0;
     }
 
     static bool IsProducerBuildMenuExperimentPatchName(const char* name) { return name && strcmp(name, "Producer Build Menu Root Hook") == 0; }

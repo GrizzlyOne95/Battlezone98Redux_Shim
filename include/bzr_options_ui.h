@@ -159,6 +159,7 @@ namespace BZROpenShim
         UnitVo,
         GlobalTurbo,
         Headlights,         // InitializeHeadlightConfig re-reads the ini (no latch)
+        PilotFlashlight,    // latched initializer; the latch is cleared and re-run
         AutoSave,           // ReloadAutoSaveConfig re-reads the ini and applies immediately
         BzrNetRoute,        // the engine re-reads the relay flag per connection attempt
         RenderProfile,      // RenderProfiles::ReloadRenderProfileConfig re-reads + reapplies live
