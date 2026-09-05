@@ -68,6 +68,15 @@ int main()
     Require(!EffectiveVisibility(false, true, true),
             "released surface stays inactive");
 
+    Require(CachedChildAccessAllowed(true, true, true),
+            "cached child is usable only while its owner still contains it");
+    Require(!CachedChildAccessAllowed(false, true, true),
+            "destroyed owner invalidates a cached child");
+    Require(!CachedChildAccessAllowed(true, false, true),
+            "missing child cache fails closed");
+    Require(!CachedChildAccessAllowed(true, true, false),
+            "removed child invalidates a non-null stale pointer");
+
     std::cout << "native_ui_validation_tests passed\n";
     return 0;
 }

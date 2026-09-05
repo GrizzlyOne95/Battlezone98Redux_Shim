@@ -14,12 +14,16 @@ namespace BZROpenShim
     // dynamically and intentionally do not link against OpenShim internals.
     enum class BzrNetNicknameResult : uint32_t
     {
-        AppliedLive = 0,
+        // Reserved for a native send that has genuinely completed. The
+        // qualified 2.2.301 path does not return this for nickname changes:
+        // SetPlayerData("name") is generic lobby metadata, not a rename.
+        NativeSendCompleted = 0,
         StoredForNextConnection = 1,
         InvalidNickname = 2,
         UnsupportedBuild = 3,
         NativeStateInvalid = 4,
         PersistenceFailed = 5,
+        LiveSendUnavailable = 6,
     };
 
     BzrNetNicknameResult SetBzrNetNicknameFromBridge(const char* nickname);

@@ -405,10 +405,6 @@ namespace
         if (Equals(name, "OPENSHIM_UI_PERFORMANCE_VERBOSE"))
             return TryReadIniValue(mainIni, "Diagnostics", "UiPerformanceVerbose", out);
 
-        if (Equals(name, "OPENSHIM_DISABLE_LIVE_NICKNAME"))
-            return TryReadMappedBool(mainIni, "Network", "LiveNicknameKeys", true, out);
-        if (Equals(name, "OPENSHIM_DISABLE_BZRNET_REAUTH"))
-            return TryReadMappedBool(mainIni, "Network", "ReauthOnNicknameChange", true, out);
         if (Equals(name, "OPENSHIM_DISABLE_LOBBY_READOUTS"))
             return TryReadMappedBool(mainIni, "Network", "LobbyReadouts", true, out);
         // Multiplayer starting-vehicle list: restore the 1.5 "Any Nation = OFF"

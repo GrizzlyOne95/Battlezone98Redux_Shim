@@ -1050,16 +1050,6 @@ UdpPort = 0
 ; Blank/absent = use the Steam/GOG account name.
 ; Nickname =
 
-; Publish nickname edits to the open BZRNet connection via live player-data keys.
-; Accepted: boolean. Default: ON.
-; Legacy env alias: OPENSHIM_DISABLE_LIVE_NICKNAME
-LiveNicknameKeys = 1
-
-; Re-authorise BZRNet after a nickname edit.
-; Accepted: boolean. Default: OFF. Experimental; use only for testing.
-; Legacy env alias: OPENSHIM_DISABLE_BZRNET_REAUTH
-ReauthOnNicknameChange = 0
-
 ; Inject the native nickname and negotiated-route readouts into the MP lobby.
 ; Accepted: boolean. Default: ON.
 ; Legacy env alias: OPENSHIM_DISABLE_LOBBY_READOUTS
