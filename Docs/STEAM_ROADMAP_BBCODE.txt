@@ -2,7 +2,7 @@
 
 This is the authoritative roadmap and backlog for the Battlezone 98 Redux community patch / OpenShim / Extra Utilities work.
 
-[b]Last major audit: 2026-09-04.[/b]
+[b]Last major audit: 2026-09-05.[/b]
 
 This file now supersedes the old ExtraUtilities [code]FeaturesToLookInto.txt[/code] tracker as the source of truth. Older tracker items have either been folded in here, marked completed/reclassified, or retained below as lower-priority research ideas.
 
@@ -414,6 +414,9 @@ The following have moved out of the speculative backlog into working/qualified c
 [*] [b]Battlezone 1.5 satellite fog-of-war restoration[/b] - the legacy illumination rule works in single-player, including lifecycle handling; it deliberately stands down in network games for parity.
 [*] [b]Native Redux Raw Input support[/b] - Redux's real WM_INPUT path is exposed through OpenShim with an explicit INI/UI control and absolute-mode device handling.
 [*] [b]Player/AI headlight controls and falloff/range repair[/b] - OpenShim exposes player and AI headlights, named/custom RGB color/intensity, focused/wide beam shaping, and repaired spotlight falloff/attenuation-range behavior instead of the old hard terminator.
+[*] [b]Pilot flashlight[/b] - the player's pilot now carries its own spotlight on foot, off by default under [code][SinglePlayer] PilotFlashlight[/code] with color, beam shape, source bone, offset, and pitch controls, plus Settings-page rows for the first three. Stock only builds a light for a mesh whose skeleton has an [code]hlgt[/code] bone and no pilot skeleton has one, so this is a new light built the same way the engine builds a vehicle headlight and attached to the pilot's own scene node. Live measurement showed the first-person gun bone sits at the skeleton origin and carries no aim at all; the aim is on the node, which is why the beam follows where you look. Single player only.
+[*] [b]Per-tick feature drivers no longer gated behind chunk rendering[/b] - both of the shim's per-tick drivers were filtered out whenever [code][General] ChunkMeshes[/code] was 0, which is the shipped default. On a default install that silently disabled the stock headlight controls, the radar layout fix, the multiplayer-gate reconcile tick, the multiplayer flag render fallback, the satellite visibility sync, and several deferred hook installs. Only the genuine chunk-render experiment stays behind that flag now.
+[*] [b]First-person gun bone aim mapping[/b] - reclassified. A gun-mounted pilot light cannot be driven from the first-person weapon bone: it is static at the skeleton origin and the aim lives in the pilot's scene node. Recorded so the idea is not re-attempted from the old assumption.
 [*] [b]Defensive turret pitch control[/b] - [code]TurretAimPitch[/code] and [code]TurretAimPitchMultiplier[/code] already provide the global OpenShim pitch-authority control. Per-ODF/generalized aim limits remain a separate possible extension above.
 [*] [b]ODF team filters for ShieldTower, MagnetMine, and ProximityMine[/b] - the shared team-filter system supports [code]teamFilter[/code], [code]affectAllies[/code], and [code]affectEnemies[/code] for these classes.
 [*] [b]Multiplayer vehicle-list mod asset scoping[/b] - [code]VehicleListModScoping[/code] forces the multiplayer vehicle-list/description resource path back onto the selected mod instead of arbitrary installed content. Broader resource-group isolation remains open.
