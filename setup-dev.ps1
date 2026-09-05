@@ -69,6 +69,22 @@ if ($LASTEXITCODE -ne 0) { throw "git fetch failed" }
 git -C $ogreDir checkout $ogreCommit
 if ($LASTEXITCODE -ne 0) { throw "git checkout failed" }
 
+# Install the secret guard. The test-crew log uploader takes its Discord
+# webhook from OPENSHIM_WEBHOOK at install time and the URL is never committed:
+# GitHub secret scanning revokes a webhook it finds in a push, which breaks log
+# collection for everyone until it is reissued. This hook refuses such a commit.
+$hookSource = Join-Path $PSScriptRoot "scripts\pre-commit-secret-guard.sh"
+$hookTarget = Join-Path $PSScriptRoot ".git\hooks\pre-commit"
+if (Test-Path -LiteralPath $hookSource) {
+    $hookDir = Split-Path -Parent $hookTarget
+    if (Test-Path -LiteralPath $hookDir) {
+        Copy-Item -LiteralPath $hookSource -Destination $hookTarget -Force
+        Write-Host "Installed pre-commit secret guard."
+    } else {
+        Write-Warning "No .git\hooks directory; skipped the pre-commit secret guard."
+    }
+}
+
 Write-Host ""
 Write-Host "Done. Ogre reference headers are ready at: $ogreDir"
 Write-Host "Open BZROpenShim.sln and build Release | Win32."
