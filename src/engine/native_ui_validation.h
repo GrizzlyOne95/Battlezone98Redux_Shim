@@ -59,4 +59,14 @@ namespace BZROpenShim::NativeUiValidation
     {
         return surfaceLive && surfaceVisible && widgetRequestedVisible;
     }
+
+    // Cached widget pointers are valid only while the owning parent still
+    // contains that exact child. Pointer non-nullness alone is not lifetime
+    // evidence because Redux may destroy the lobby and reuse its heap memory.
+    constexpr bool CachedChildAccessAllowed(bool ownerCached,
+                                            bool childCached,
+                                            bool ownerContainsChild)
+    {
+        return ownerCached && childCached && ownerContainsChild;
+    }
 }

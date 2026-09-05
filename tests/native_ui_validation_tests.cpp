@@ -68,6 +68,18 @@ int main()
     Require(!EffectiveVisibility(false, true, true),
             "released surface stays inactive");
 
+    // The lobby route label crashed at 0x007C2967 because a cached button
+    // pointer was only null-checked before SetButtonLabel dereferenced its
+    // +0x144 render object. Containment in the live parent is the evidence.
+    Require(CachedChildAccessAllowed(true, true, true),
+            "live child of the cached owner is safe to touch");
+    Require(!CachedChildAccessAllowed(true, true, false),
+            "non-null child the owner no longer contains is refused");
+    Require(!CachedChildAccessAllowed(false, true, true),
+            "child without a cached owner is refused");
+    Require(!CachedChildAccessAllowed(true, false, true),
+            "absent child is refused");
+
     std::cout << "native_ui_validation_tests passed\n";
     return 0;
 }
