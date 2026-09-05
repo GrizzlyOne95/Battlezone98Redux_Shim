@@ -18,7 +18,10 @@ param(
     [string]$Beam = "Focused",
     [switch]$SkipDeploy,
     [string]$OutDir = "",
-    [string]$Fixture = "pilot_flashlight_fixture.lua"
+    [string]$Fixture = "pilot_flashlight_fixture.lua",
+    [string]$Offset = "",
+    [string]$Pitch = "",
+    [string]$Bone = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -137,6 +140,9 @@ try {
     $lines = Set-IniKey $lines "SinglePlayer" "PilotFlashlight" "1"
     $lines = Set-IniKey $lines "SinglePlayer" "PilotFlashlightColor" $Color
     $lines = Set-IniKey $lines "SinglePlayer" "PilotFlashlightBeam" $Beam
+    if ($Offset) { $lines = Set-IniKey $lines "SinglePlayer" "PilotFlashlightOffset" $Offset }
+    if ($Pitch)  { $lines = Set-IniKey $lines "SinglePlayer" "PilotFlashlightPitch" $Pitch }
+    if ($Bone)   { $lines = Set-IniKey $lines "SinglePlayer" "PilotFlashlightBone" $Bone }
     Set-Content -Path $installedIni -Value $lines -Encoding ASCII
     Write-Host "[val] openshim.ini: PilotFlashlight=1 Color=$Color Beam=$Beam"
 
