@@ -958,6 +958,28 @@ UiPerformanceVerbose = 0
 ; Legacy env aliases: OPENSHIM_TRACE_DAMAGE_REVEAL, BZR_TRACE_DAMAGE_REVEAL
 TraceDamageReveal = 0
 
+; Multiplayer player-kill research trace.
+;
+; Redux records a multiplayer death against a team, not against the object
+; that fired, so "a player killed a player" and "a player killed somebody's
+; AI wingman" are indistinguishable to the scoreboard. This trace writes one
+; compact record per authoritative death carrying the candidate ownership
+; fields for both victim and killer, plus how confidently the death could be
+; correlated back to the last damage event.
+;
+; Read-only research instrumentation: it changes no scoring, no career
+; statistics and no simulation. The hooks are not installed at all unless
+; this is on. Budgeted (256 records) and OFF by default.
+;
+; The classification it prints is a hypothesis under test, not a verdict --
+; in particular an object is never called human merely because its team has
+; a network player, since AI wingmen share their owner's team.
+;
+; Accepted: boolean. Default: OFF.
+; Budget override: OPENSHIM_TRACE_PLAYER_KILLS_BUDGET (max 4096)
+; Legacy env aliases: OPENSHIM_TRACE_PLAYER_KILLS, BZR_TRACE_PLAYER_KILLS
+TracePlayerKills = 0
+
 [Network]
 
 ; OpenShim's socket layer as a whole. Off installs none of it: no winsock

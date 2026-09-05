@@ -280,14 +280,15 @@ The Red Odyssey 1.3 comparison establishes Cloak and Portal plus a widened natio
 
 [list]
 [*] [b]Packet-loss / traffic-storm recovery[/b]
-[*] [b]Armory / Daywrecker duplicate detonation[/b]
-[*] [b]Daywrecker terrain-spire corruption[/b]
-[*] [b]Splinter multiplayer payload duplication[/b]
+[*] [b]Armory / Daywrecker duplicate detonation[/b] - no owner-only source boundary has been established. Both detonation bodies share a consumed byte, and the two explosion paths cannot be assumed cosmetic, so a guess at an authority guard risks removing real damage. Blocked on a two-peer capture rather than on more static analysis.
+[*] [b]Daywrecker terrain-spire corruption[/b] - the crater routine is non-idempotent if it runs twice over the same buffer, but one call on the host plus one on the client is not two calls on either buffer, so that alone does not explain the reported spires. Same two-peer gate as above.
+[*] [b]Splinter multiplayer payload duplication[/b] - still open, but the long-assumed cause is now contradicted. The deployed producer zeroes its payload's send flag immediately after building it, and the send path only processes a nonzero flag, so the payload is not transmitted and the other peer is not receiving a duplicate copy of it. Whatever is being observed, it is not this chain; an owner-build/send/remote-receive gate would not fix it.
 [*] [b]Splinter deployed collision response[/b]
 [*] [b]Password-lobby friend invites[/b] - invite path omits the password.
 [*] [b]MPI host-leaving bug[/b]
 [*] [b]SucceedMission / FailMission multiplayer transport failure[/b]
 [*] [b]Host sniper kills missing from scoreboard[/b]
+[*] [b]Player kills and AI kills are indistinguishable[/b] - Redux records a multiplayer death against a team rather than against the object that fired, so killing a human and killing that human's AI wingman look the same to the scoreboard. An opt-in research trace ([code][Diagnostics] TracePlayerKills[/code], off by default) now logs the candidate ownership fields for both victim and killer plus how confidently the death correlates back to the last damage event. The rule it prints is a hypothesis under test, not a fix; live two-peer captures are the next step.
 [*] [b]Multiplayer freecam exploit[/b] - block unrestricted freecam for a normal participating network player while preserving legitimate SP/editor/cinematic/death/spectator states.
 [/list]
 
