@@ -321,7 +321,7 @@ Settings: `[SinglePlayer] PilotFlashlight`, `PilotFlashlightColor`,
 row re-applies live). Diagnostics: `[Diagnostics] PilotFlashlightTrace` /
 `OPENSHIM_TRACE_PILOT_FLASHLIGHT`.
 
-### Blocker found on the way: the shim's per-frame world driver was gated off
+### Blocker found on the way: both of the shim's per-tick drivers were gated off
 
 The first three validation runs created no light and logged nothing, because
 `RefreshPilotFlashlightState` never ran. Neither did `RefreshHeadlightState`.
@@ -348,77 +348,35 @@ There is no `[SKIP]` line for a filtered patch, which is why this was invisible:
 the entry is erased from the vector before the apply loop, so the log simply
 never mentions it.
 
-Fixed by removing that one patch from `IsChunkExperimentPatchName`. The other
-two chunk entries stay gated. The hook body is safe with chunk features off —
-only its chunk-batching branch is experimental, and every other path calls the
-original through.
+Fixed by removing that patch from `IsChunkExperimentPatchName` -- and then, on
+a follow-up question, the second one too. `ChunkEffectSimulateHook` is the
+per-sim-tick counterpart and was gated the same way, driving an even longer
+list of unrelated work:
 
-### Lifetime fixture, and two bugs it found
+- `TickMpGateReconcile` (the secondary driver, kept for exactly the case where
+  the render-queue hook fails to install -- both were off together)
+- `MaybeDriveMultiplayerFlagRenderFallback`
+- `OgreShaderCacheTick`
+- `SyncSatelliteVisibility`
+- `MaybeSuppressStaleHopOutAttackAlert`
+- the UiPerf heartbeat
+- the deferred installs for mpauth, radar layout, career-stats multiplayer and
+  the jump-snipe probe
 
-`reverse_engineering/test_missions/pilot_anim_capture/pilot_flashlight_lifetime.lua`
-HopOuts at T+3, removes the pilot object at T+15, and fails the mission at
-T+22. The middle step is the only route that reaches
-`SceneManager::destroyLight`; a mission exit only reaches the forget path, so
-without this fixture the destroy branch would have shipped unexecuted. It found
-two real defects.
+Only `Chunk Render Resolve Hook` stays gated. It is the one genuine experiment:
+its body early-returns unless a chunk flag is set and it drives nothing else.
 
-**A Lua-API trap worth recording separately.** `DeleteObject` is a *mission
-callback* name, not a removal API. Defining `function DeleteObject(h)` at the
-bottom of a mission script — which every harness in this folder does — assigns a
-global that replaces whatever `DeleteObject` was, and the chunk executes top to
-bottom, so by the time `Update` runs the name refers to the script's own no-op.
-`pilot_test.lua` calls `DeleteObject(h)` in `TryDestroyPilot` after defining
-that callback, so its `LIFETIME_DESTROY` step has always called itself. The
-removal API is `RemoveObject`. This fixture captures both globals at the top of
-the chunk and prefers `RemoveObject`; with `DeleteObject` it logged
-`DELETE_PILOT ok=false`, with `RemoveObject` the pilot is actually removed.
+Neither ungated hook needs the chunk features. Every chunk-side call they make
+-- `TickChunkProxyDebug`, `TrackChunkEffectActiveEntries`,
+`LogChunkEffectRuntimeSample`, the batching branch -- early-returns on the same
+flags, so with `ChunkMeshes = 0` each hook costs one call-through plus a few
+boolean tests.
 
-**Bug 1 — the light was rebuilt into a world already being torn down.**
-Leaving `RUN_STARTED` does not clear the scene immediately: the local player
-object and its scene node stay readable for several seconds until `clearScene`
-runs. The first lifetime run logged
-
-```text
-21:54:40.528  forgot  light=0x1EEF1C40 ... (left simulation)
-21:54:40.757  created light=0x1EEF1E08 ... total=2
-21:54:47.132  forgot  light=0x1EEF1E08 ... (clearScene)
-```
-
-— a second light built 229 ms after the world stopped running. Fixed with
-`g_PilotFlashlightWorldRunning`, driven by
-`PilotFlashlightNotifyMissionRunStateChanged` on both edges of the mission seam;
-the refresh now forgets and returns while the world is not running. It defaults
-to true so an install where the seam could not be hooked behaves as before.
-
-**Bug 2 — `destroy FAILED`.** With the pilot object removed, destroying the
-light threw. The usual reason this path runs is that the pilot GameObject went
-away (boarding, death, a script removing it), and the engine destroys that
-object's scene node with it — so the recorded node pointer is already freed. Two
-corrections:
-
-- The explicit `SceneNode::detachObject` before `destroyLight` was removed. It
-  is unnecessary — `~SceneNode` calls `detachAllObjects`, which clears the
-  light's parent pointer before the node dies, and `~MovableObject` detaches
-  from the parent if there still is one — and it is the one call that
-  dereferences a node the shim does not own.
-- `PilotFlashlightLightLooksLive` now gates the destroy: a freed allocation
-  stays readable for a while, so a null check proves nothing, but a live
-  `Ogre::Light`'s vptr points inside `OgreMain.dll`'s image and a freed or
-  recycled one's does not. If it fails the reference is dropped instead.
-
-Removing the detach alone did **not** fix it; the failure stopped once the
-liveness guard was added as well, and which of the two was decisive was not
-isolated. Both are correct on their own merits, so the pair was kept. The
-destroy now succeeds, reproducibly across two runs:
-
-```text
-[PILOTLIGHT] created   light=0x1D97ECF8 node=0x1D98E918 bone=asp11POV
-             local=(-0.185,1.685,-0.060) dir=(0.000,0.000,-1.000) total=1
-[PILOTLIGHT] destroyed light=0x1D97ECF8 (player is not on foot)
-```
-
-The `destroy FAILED` line now carries the SEH exception code, so a future
-recurrence names the fault rather than just reporting failure.
+Measured effect, comparing the log tags of two otherwise identical runs:
+`[RADAR] Layout hook installed at 0x00492EC0` and `[FLAG] FlagDisplay::Submit
+not dispatching; driving Ogre flag renderer from sim tick` appear only once the
+sim-tick hook is installed. Before that the radar layout fix had never once run
+on a default install.
 
 ### Validation
 
