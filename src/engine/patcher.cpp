@@ -314,9 +314,18 @@ namespace BZROpenShim
                strcmp(name, "Map List Rewrite for Hop-Fix 3/3") == 0;
     }
 
+    // "Legacy World Update RenderQueue VTable Hook" is deliberately NOT in this
+    // list. It started as a chunk experiment, but LegacyWorldUpdateRenderQueueHook
+    // is now the shim's only per-frame world driver: it calls RefreshHeadlightState,
+    // RefreshPilotFlashlightState, TickMpGateReconcile and TickOpenShimEventLayer,
+    // and only its chunk-batching branch is experimental (the rest of the body just
+    // calls the original through). While it was gated here, the shipped default
+    // [General] ChunkMeshes = 0 silently switched off the stock headlight feature
+    // and the entire SinglePlayer multiplayer-gate reconcile tick along with it.
     static bool IsChunkExperimentPatchName(const char* name) {
         if (!name) return false;
-        return strcmp(name, "Chunk Render Resolve Hook") == 0 || strcmp(name, "Chunk Effect Simulate VTable Hook") == 0 || strcmp(name, "Legacy World Update RenderQueue VTable Hook") == 0;
+        return strcmp(name, "Chunk Render Resolve Hook") == 0 ||
+               strcmp(name, "Chunk Effect Simulate VTable Hook") == 0;
     }
 
     static bool IsProducerBuildMenuExperimentPatchName(const char* name) { return name && strcmp(name, "Producer Build Menu Root Hook") == 0; }
