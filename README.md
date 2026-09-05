@@ -89,11 +89,22 @@ Uninstall: remove `winmm.dll` from the game folder and clear the launch options.
 
 ## Test crew: session logging (opt-in)
 
+**Before anything else:** playing Battlezone 98 multiplayer at all means
+**anyone in the game can see your public IP address.** That is how the
+engine's peer-to-peer networking works, it is true with or without OpenShim,
+and nothing here changes it. Session logging does not create that exposure —
+but it does write those addresses down, which is why bundles only ever go to
+a private channel.
+
 Logging is off unless you opt in. Members of the test crew can have each
 session's logs bundled and uploaded automatically to the private channel:
 
 1. Install with the pinned command from the private Discord channel (it's
-   the normal install command with the webhook included).
+   the normal install command with the webhook included). That command is
+   deliberately not in this repository and never will be: GitHub's secret
+   scanning revokes Discord webhooks on push, so committing it would break
+   logging for the whole test crew. If you are not opting in to logging,
+   use the plain install commands above instead.
 2. Use the wrapper launch option instead of the plain one.
 
 Windows:
