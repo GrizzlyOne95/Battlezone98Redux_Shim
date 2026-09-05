@@ -18564,6 +18564,41 @@ namespace BZROpenShim
             RefreshHeadlightState();
         }
 
+        // Live re-apply for the settings page (ShimSettingApplyGroup::Headlights).
+        // RevertHeadlightsToBaseline is the mission-end contract and is the wrong
+        // entry point here on two counts:
+        //
+        //   1. It reaches the ini only through InitializeHeadlightConfig, which
+        //      is latched, so after the first pass it re-applies the values the
+        //      process started with. Clearing the latch is what makes the four
+        //      headlight rows take effect without a restart. The initializer is
+        //      re-run whole, so its precedence chain is reproduced exactly:
+        //      the ini writes the baseline and the environment overrides
+        //      (OPENSHIM_TRACE_HEADLIGHT_LIGHT,
+        //      OPENSHIM_DISABLE_HEADLIGHT_FALLOFF_REPAIR) still win over it.
+        //
+        //   2. RefreshHeadlightState only ever writes the properties the feature
+        //      is *currently* overriding, and it restores a light only when that
+        //      light goes untouched entirely. Narrowing a setting -- HeadlightColor
+        //      back to Stock while Headlights stays on, say -- would therefore
+        //      leave the shim's last colour on a light that is still touched for
+        //      its visibility. Putting every captured baseline back first makes
+        //      the re-apply start from the engine's own values, so a property
+        //      that is no longer overridden really does return to stock, and the
+        //      recapture that follows records genuine stock values rather than
+        //      the shim's own output.
+        //
+        // The EXU rule is the same one RefreshHeadlightState applies: with EXU
+        // loaded the campaign owns these lights, so drop the baselines without
+        // writing them back.
+        static void ReapplyHeadlightConfigFromUserConfig()
+        {
+            RestoreAllHeadlightStates(!IsExuModuleLoaded());
+            g_HeadlightConfigInitialized = false;
+            g_HeadlightLastRefreshTick = 0;
+            InitializeHeadlightConfig();
+        }
+
         // --- Player pilot flashlight (SinglePlayer tier) -----------------------
         //
         // Stock BZR gives every craft whose skeleton carries an `hlgt*` bone a
@@ -32153,7 +32188,7 @@ namespace BZROpenShim
             InitializeGlobalTurboConfig();
             break;
         case ShimSettingApplyGroup::Headlights:
-            RevertHeadlightsToBaseline();
+            ReapplyHeadlightConfigFromUserConfig();
             break;
         case ShimSettingApplyGroup::PilotFlashlight:
             g_PilotFlashlightConfigInitialized = false;
