@@ -24,6 +24,7 @@
 #include "hook_engine.h"
 #include "ui_performance.h"
 #include "openshim_events.h"
+#include "player_kill_trace.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -664,7 +665,6 @@ namespace BZROpenShim
         constexpr size_t kObjectClassOdfLen = 16;
         constexpr size_t kObj76TransformOffset = 0x20;
         constexpr size_t kObj76GameObjectOffset = 0x8C;
-        constexpr size_t kOrdnanceObjOffset = 0x14;
         constexpr size_t kOrdnanceSpeedOffset = 0x20;
         constexpr size_t kOrdnanceInvSpeedOffset = 0x24;
         constexpr size_t kOrdnanceVelocityOffset = 0x30;
@@ -785,6 +785,41 @@ namespace BZROpenShim
         // SprayBuilding vtable is 0x008881EC and Simulate is slot 15.
         constexpr uintptr_t kGogSprayBuildingSimulateAddr = 0x005DA6E0;
 		constexpr uintptr_t kSprayBuildingSimulateVtableSlotAddr = 0x00888228;
+        // MPAUTH instrumentation (Redux 2.2.301) — diagnostic only, no authority patch.
+        // Daywrecker: shared consumed byte at +0x230 (complete) / +0x218 (adjusted).
+        // Splinter: payload bSend at +0x80, source at +0x7C, ordid at +0x7E.
+        constexpr uintptr_t kGogDayWreckerSimulateAddr = 0x004B0460;
+        constexpr uintptr_t kGogDayWreckerExplodeAddr = 0x004B07D0;
+        constexpr uintptr_t kGogDayWreckerCtorAddr = 0x004B0420;
+        constexpr uintptr_t kGogDayWreckerVtableAddr = 0x00878508;
+        constexpr uintptr_t kGogDayWreckerDistributedVtableAddr = 0x00878574;
+        constexpr uintptr_t kDayWreckerSimulateVtableSlotAddr = 0x00878544;
+        constexpr uintptr_t kDayWreckerExplodeVtableSlotAddr = 0x00878588;
+        constexpr size_t kDayWreckerConsumedByteOffset = 0x230;
+        constexpr size_t kDayWreckerDistributedConsumedOffset = 0x218;
+        constexpr size_t kDayWreckerDistributedOffset = 0x18;
+        constexpr uintptr_t kGogGameObjectRemoveAddr = 0x004DAE70;
+        constexpr uintptr_t kGogDayWreckerRemoveBookkeepingAddr = 0x004B7AB0;
+        constexpr uintptr_t kGogDayWreckerDeletedIdAddr = 0x004B7BD0;
+        constexpr uintptr_t kGogDistributedDtorAddr = 0x004B79F0;
+        constexpr uintptr_t kGogOrdinaryStateReaderAddr = 0x004B8590;
+        constexpr uintptr_t kGogPermanentStateReaderAddr = 0x004B8FA0;
+        constexpr uintptr_t kGogDistributedCreateAddr = 0x004B9350;
+        constexpr uintptr_t kGogDayWreckerSetRemoteAddr = 0x004B7F20;
+        constexpr uintptr_t kGogOrdnanceReceiverAddr = 0x00584620;
+        constexpr uintptr_t kGogOrdnanceBundledDispatchAddr = 0x00570500;
+        constexpr uintptr_t kGogOrdnanceRemoveCheckAddr = 0x00583DC0;
+        constexpr uintptr_t kGogSprayBombHitAddr = 0x005DB080;
+        constexpr uintptr_t kGogSprayBombSimulateAddr = 0x004E7D30;
+        constexpr size_t kMpauthOrdnanceSourceOffset = 0x7C;
+        constexpr size_t kMpauthOrdnanceOrdIdOffset = 0x7E;
+        constexpr size_t kMpauthOrdnanceBSendOffset = 0x80;
+        constexpr size_t kOrdnanceObjOffset = 0x14;
+        constexpr size_t kMpauthOrdnanceDtOffset = 0x10;
+        // Budgets for MPAUTH traces (opt-in).
+        constexpr long kMpauthDwTraceBudgetDefault = 256;
+        constexpr long kMpauthSplTraceBudgetDefault = 256;
+        constexpr long kMpauthTraceBudgetMax = 4096;
 		// Tug::PostLoad restores the cargo relationship but does not reconcile a
 		// newly created/loaded tug's deployment state.  With cargo attached and
 		// state==UNDEPLOYED, a later Deploy command starts the *load* transition
@@ -907,6 +942,10 @@ namespace BZROpenShim
         constexpr uintptr_t kNetPlayerGetDataAddr = 0x00575510;
         constexpr uintptr_t kGameObjectGetSphereAddr = 0x00462400;
         constexpr size_t kNetPlayerFlagBufferOffset = 0x1C;
+        // NetPlayer id, read as uint16. This is the same field the
+        // multiplayer flag diagnostic below has always read; do not
+        // introduce a second, guessed offset for it.
+        constexpr size_t kNetPlayerIdOffset = 0x28;
         constexpr size_t kObjectClassTypeOffset = 0x1C;
         constexpr size_t kObjStateFlagsOffset = 0x14;
         constexpr uint32_t kFlagObjectExcludedStateMask = 0x600;
@@ -936,6 +975,16 @@ namespace BZROpenShim
         // Steam exe is the identical build wrapped in SteamStub (.bind), whose
         // .text decrypts in place at runtime.
         constexpr uintptr_t kGogRecordDeathEntryAddr = 0x00577290;
+        // DistributedObject::RecordDeath(int) candidate (BSim 0x48a281 -> 0x6796D0).
+        // Advisory until qualified via ExpectedBytesMatchAt on GOG and Steam.
+        constexpr uintptr_t kGogDistributedRecordDeathIntAddr = 0x006796D0;
+        // Same VA on Steam after SteamStub .bind decrypts .text in place (see kGogRecordDeathEntryAddr note).
+        // Separate constant kept for distribution-specific override if validation diverges.
+        constexpr uintptr_t kSteamDistributedRecordDeathIntAddr = 0x006796D0;
+        constexpr uintptr_t kGogSetAsUserAddr = 0x00495468;
+        constexpr uintptr_t kGogSetAsNotUserAddr = 0x004954D7;
+        constexpr uintptr_t kSteamSetAsUserAddr = 0x00495468;
+        constexpr uintptr_t kSteamSetAsNotUserAddr = 0x004954D7;
         constexpr uintptr_t kSteam64GlobalAddr = 0x0260B1D0;
         constexpr uintptr_t kLocalPlayerNetIdAddr = 0x009180D4;
         // Returned when the net id cannot be read at all. Every SinglePlayer-tier
@@ -2128,6 +2177,23 @@ namespace BZROpenShim
         static bool g_EngineFlameVariantsInitAttempted = false;
         static bool g_EngineFlameVtableHooksInstalled = false;
         static InlineDetour32 g_RecordDeathDetour = {};
+        static InlineDetour32 g_DistributedRecordDeathIntDetour = {};
+        static bool g_DistributedRecordDeathIntHookInstalled = false;
+        static bool g_DistributedRecordDeathIntHookAttempted = false;
+        static uint64_t g_DistributedRecordDeathIntFirstTick = 0;
+        static uint64_t g_DistributedRecordDeathIntLastTick = 0;
+        static bool g_DistributedRecordDeathIntMismatchLogged = false;
+        static constexpr size_t kDistributedRecordDeathIntDetourLen = 6;
+        static constexpr uint64_t kDistributedHookRetryMs = 500;
+        static constexpr uint64_t kDistributedHookRetryWindowMs = 30000;
+        static InlineDetour32 g_SetAsUserDetour = {};
+        static InlineDetour32 g_SetAsNotUserDetour = {};
+        static bool g_SetAsUserHookInstalled = false;
+        static bool g_SetAsNotUserHookInstalled = false;
+        using FnSetAsUser = void(__thiscall*)(void* thisPtr);
+        using FnSetAsNotUser = void(__thiscall*)(void* thisPtr);
+        static FnSetAsUser g_BzrFn_SetAsUserOrig = nullptr;
+        static FnSetAsNotUser g_BzrFn_SetAsNotUserOrig = nullptr;
         static InlineDetour32 g_ParticleCreateTemplateDetour = {};
         static bool g_ParticleTemplateDedupeHookInstalled = false;
         static bool g_ParticleTemplateDedupeFailureLogged = false;
@@ -2255,6 +2321,27 @@ namespace BZROpenShim
         static volatile long g_SplinterUndeadTraceBudget = kSplinterUndeadTraceBudgetDefault;
         static bool g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
         static volatile long g_ConstructorRemoteBuildTraceBudget = kConstructorRemoteBuildTraceBudgetDefault;
+
+        // MPAUTH diagnostic traces (Redux receiver replay). Opt-in, cheap, no gameplay change.
+        static bool g_MpauthEnabled = false;
+        static bool g_MpauthDwEnabled = false;
+        static bool g_MpauthSplEnabled = false;
+        static volatile long g_MpauthDwTraceBudget = kMpauthDwTraceBudgetDefault;
+        static volatile long g_MpauthSplTraceBudget = kMpauthSplTraceBudgetDefault;
+        static InlineDetour32 g_DayWreckerSimulateDetour = {};
+        static InlineDetour32 g_DayWreckerExplodeDetour = {};
+        static InlineDetour32 g_GameObjectRemoveDetour = {};
+        static InlineDetour32 g_DistributedCreateDetour = {};
+        static InlineDetour32 g_OrdnanceReceiverDetour = {};
+        static InlineDetour32 g_SprayBombHitDetour = {};
+        static InlineDetour32 g_SprayBombSimulateDetour = {};
+        static InlineDetour32 g_OrdinaryStateReaderDetour = {};
+        static InlineDetour32 g_PermanentStateReaderDetour = {};
+        static bool g_MpauthHooksInstalled = false;
+        static volatile long g_MpauthInstallRetryBudget = 8;
+        static thread_local bool g_MpauthInOrdnanceReceive = false;
+        static std::unordered_map<uint32_t, int> g_MpauthSplHitCounts = {};
+        static volatile long g_MpauthSplHitMapLogBudget = 8;
 
         // [Fixes] multiplayer gate. Each of these five corrects a confirmed
         // Redux defect, but all five change simulation behaviour, and none of
@@ -11510,6 +11597,15 @@ namespace BZROpenShim
         static volatile long g_DamageRevealTraceBudget = 0;
         static constexpr long kDamageRevealTraceBudgetDefault = 400;
 
+        // Player-kill research trace (PR 107 phase 2-3). Opt-in only.
+        // Default OFF. When enabled, each authoritative multiplayer death
+        // emits one compact diagnostic record with candidate controller fields
+        // for victim and damager. No career-stats behavior is changed.
+        static bool g_TracePlayerKills = false;
+        static volatile long g_PlayerKillTraceBudget = 0;
+        static constexpr long kPlayerKillTraceBudgetDefault = 256;
+        static constexpr long kPlayerKillTraceBudgetMax = 4096;
+
         // Satellite visibility fix. Redux left every Ogre entity permanently
         // visible; satellite view (view 3) never applies the BZ 1.5
         // illumination > 0 gate. This struct tracks each entity's pre-satellite
@@ -12281,6 +12377,17 @@ namespace BZROpenShim
             bool damagerWasLocalPlayer = false;
             uint64_t firstSeenMs = 0;
             uint64_t lastDamageMs = 0;
+            // Research extension for player-kill correlation: retain teams,
+            // and enough attacker history to tell a clean last-hit from a
+            // genuine multi-attacker window.
+            int victimTeam = 0;
+            int damagerTeam = 0;
+            uint32_t damageSequence = 0;
+            // There is one slot per victim, so a second attacker overwrites
+            // the first. Count the changeovers instead of trying to recover
+            // them from the table afterwards, which cannot work.
+            int distinctDamagers = 0;
+            uint64_t lastDistinctDamagerMs = 0;
         };
 
         // Touched only from the event drain, which runs on the game's main
@@ -12426,6 +12533,8 @@ namespace BZROpenShim
                             (playerHandle != 0 && damagerHandle == playerHandle) ? 1 : 0);
         }
 
+        static bool ShouldTracePlayerKills();
+
         // Drain side: remember who last damaged this victim.
         static void CareerNoteDamageEvent(const OpenShimEvent& event)
         {
@@ -12468,7 +12577,34 @@ namespace BZROpenShim
             // Last damager wins, which is what "who got the kill" means.
             const int damagerHandle = SimEventArg(event, 1);
             if (damagerHandle != 0)
+            {
+                if (slot->damagerHandle != 0 && slot->damagerHandle != damagerHandle)
+                {
+                    ++slot->distinctDamagers;
+                    slot->lastDistinctDamagerMs = event.tickMs;
+                }
+                else if (slot->distinctDamagers == 0)
+                {
+                    slot->distinctDamagers = 1;
+                }
                 slot->damagerHandle = damagerHandle;
+            }
+            // Resolve teams on the drain (safe, not a probe) so correlation can
+            // compare the authoritative killerTeam against the last damager's.
+            // The trace is its own consumer here: gating this on event
+            // subscribers alone left the trace correlating on teams that were
+            // never filled in.
+            if (HasEventSubscribers() || ShouldTracePlayerKills())
+            {
+                void* victimObj = GameObjectFromHandleGog(victimHandle);
+                void* damagerObj = GameObjectFromHandleGog(damagerHandle);
+                int vTeam = GetGameObjectActualTeam(victimObj);
+                int dTeam = GetGameObjectActualTeam(damagerObj);
+                if (vTeam != INT_MIN) slot->victimTeam = vTeam;
+                if (dTeam != INT_MIN) slot->damagerTeam = dTeam;
+                static uint32_t s_damageSeq = 0;
+                slot->damageSequence = ++s_damageSeq;
+            }
             // Sticky: the player who put the first shot in still counts even if
             // something else lands the last one, and the victim being the
             // player is not something a later hit can undo.
@@ -12525,6 +12661,364 @@ namespace BZROpenShim
                 if (now - entry.lastDamageMs >= kCareerPendingVictimTimeoutMs)
                     entry = CareerPendingVictim{};
             }
+        }
+
+        // -----------------------------------------------------------------
+        // Player-kill research instrumentation (PR 107 phase 2-3)
+        // -----------------------------------------------------------------
+        // Opt-in via OPENSHIM_TRACE_PLAYER_KILLS=1. Logs one compact record
+        // per authoritative multiplayer death with candidate controller fields.
+        // No career-stats or scoring change. Fails closed if validation fails.
+        struct DistributedTraceInfo
+        {
+            int handle = 0;
+            int team = INT_MIN;
+            uint8_t object_type = 0xFF;
+            bool net_user = false;
+            uint16_t activnet_id = 0xFFFF;
+            uint32_t dwLocalID = 0;
+            void* aiProcess = nullptr;
+            uint32_t aiVtable = 0;
+            bool isLocalHandle = false;
+            bool teamHasNetPlayer = false;
+            uint16_t netPlayerId = 0xFFFF;
+            bool hasInfo = false;
+        };
+
+        static bool ShouldTracePlayerKills()
+        {
+            return g_TracePlayerKills && g_PlayerKillTraceBudget > 0;
+        }
+
+        // A team having a NetPlayer says a human occupies that team slot. It
+        // says nothing about whether any particular object on that team is the
+        // one that human is driving -- wingmen share the team.
+        static bool IsTeamHumanByNetPlayer(int team)
+        {
+            if (team <= 0 || team > 15) return false;
+            auto** byTeam = reinterpret_cast<void**>(kNetPlayerByTeamAddr);
+            __try { return byTeam[team] != nullptr; } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+        }
+
+        static uint16_t GetNetPlayerIdForTeam(int team)
+        {
+            if (team <= 0 || team > 15) return PlayerKillTrace::kNetPlayerIdUnread;
+            auto** byTeam = reinterpret_cast<void**>(kNetPlayerByTeamAddr);
+            __try {
+                void* np = byTeam[team];
+                if (!np) return PlayerKillTrace::kNetPlayerIdUnread;
+                return *reinterpret_cast<uint16_t*>(
+                    reinterpret_cast<uint8_t*>(np) + kNetPlayerIdOffset);
+            } __except(EXCEPTION_EXECUTE_HANDLER) { return PlayerKillTrace::kNetPlayerIdUnread; }
+        }
+
+        static bool TryReadDistributedTraceInfoForHandle(int handle, DistributedTraceInfo& out)
+        {
+            out = DistributedTraceInfo{};
+            out.handle = handle;
+            if (handle == 0) return false;
+            void* obj = GameObjectFromHandleGog(handle);
+            if (!obj) return false;
+            out.hasInfo = true;
+            out.team = GetGameObjectActualTeam(obj);
+            out.teamHasNetPlayer = IsTeamHumanByNetPlayer(out.team);
+            if (out.teamHasNetPlayer) out.netPlayerId = GetNetPlayerIdForTeam(out.team);
+            int playerHandle = 0;
+            if (g_BzrFn_GetPlayerHandle) __try { playerHandle = g_BzrFn_GetPlayerHandle(); } __except(EXCEPTION_EXECUTE_HANDLER) { playerHandle = 0; }
+            out.isLocalHandle = (handle != 0 && handle == playerHandle);
+            // DistributedObject fields: try reading at object base. For Craft/Person this is same as GameObject base.
+            // For Building, DistributedObject may be offset; attempt both base and derived handle.
+            __try {
+                auto* base = reinterpret_cast<uint8_t*>(obj);
+                // Offsets from 1.5 DistributedObject: net_user +0x60 bool, activnet_id +0x62 ushort, dwLocalID +0x64, object_type +0x68
+                // Try direct read; if garbage, it will be logged as observed value.
+                out.net_user = *(reinterpret_cast<bool*>(base + 0x60));
+                out.activnet_id = *(reinterpret_cast<uint16_t*>(base + 0x62));
+                out.dwLocalID = *(reinterpret_cast<uint32_t*>(base + 0x64));
+                out.object_type = *(reinterpret_cast<uint8_t*>(base + 0x68));
+                // aiProcess at GameObject +0xF0 per core_object_model.md
+                out.aiProcess = *(reinterpret_cast<void**>(base + 0xF0));
+                if (out.aiProcess) {
+                    __try { out.aiVtable = *reinterpret_cast<uint32_t*>(out.aiProcess); } __except(EXCEPTION_EXECUTE_HANDLER) { out.aiVtable = 0; }
+                }
+            } __except(EXCEPTION_EXECUTE_HANDLER) {}
+            // Also try reading via DistributedObject this delta if available: compute delta from victim hook context is not available here.
+            return true;
+        }
+
+        static bool TryReadDistributedTraceInfoForObject(void* obj, DistributedTraceInfo& out)
+        {
+            out = DistributedTraceInfo{};
+            if (!obj) return false;
+            int handle = 0;
+            TryGetGameObjectHandleValue(obj, handle);
+            out.handle = handle;
+            out.team = GetGameObjectActualTeam(obj);
+            out.teamHasNetPlayer = IsTeamHumanByNetPlayer(out.team);
+            if (out.teamHasNetPlayer) out.netPlayerId = GetNetPlayerIdForTeam(out.team);
+            int playerHandle = 0;
+            if (g_BzrFn_GetPlayerHandle) __try { playerHandle = g_BzrFn_GetPlayerHandle(); } __except(EXCEPTION_EXECUTE_HANDLER) { playerHandle = 0; }
+            out.isLocalHandle = (handle != 0 && handle == playerHandle);
+            __try {
+                auto* base = reinterpret_cast<uint8_t*>(obj);
+                out.net_user = *(reinterpret_cast<bool*>(base + 0x60));
+                out.activnet_id = *(reinterpret_cast<uint16_t*>(base + 0x62));
+                out.dwLocalID = *(reinterpret_cast<uint32_t*>(base + 0x64));
+                out.object_type = *(reinterpret_cast<uint8_t*>(base + 0x68));
+                out.aiProcess = *(reinterpret_cast<void**>(base + 0xF0));
+                if (out.aiProcess) {
+                    __try { out.aiVtable = *reinterpret_cast<uint32_t*>(out.aiProcess); } __except(EXCEPTION_EXECUTE_HANDLER) { out.aiVtable = 0; }
+                }
+                out.hasInfo = true;
+            } __except(EXCEPTION_EXECUTE_HANDLER) {}
+            return out.hasInfo;
+        }
+
+        // Not a production predicate: it reports what was observed. The rule
+        // itself lives in include/player_kill_trace.h so the tests exercise
+        // this code rather than a second copy of it.
+        static PlayerKillTrace::ControllerFields ControllerFieldsOf(const DistributedTraceInfo& info)
+        {
+            PlayerKillTrace::ControllerFields f;
+            f.team = (info.team == INT_MIN) ? 0 : info.team;
+            f.activnet_id = info.activnet_id;
+            f.netPlayerId = info.netPlayerId;
+            f.teamHasNetPlayer = info.teamHasNetPlayer;
+            f.isLocalHandle = info.isLocalHandle;
+            return f;
+        }
+
+        static const char* ClassifyObjectController(const DistributedTraceInfo& info)
+        {
+            return PlayerKillTrace::DescribeController(
+                PlayerKillTrace::ClassifyController(ControllerFieldsOf(info)));
+        }
+
+        static void LogAuthoritativeDeathResearch(
+            uint32_t seq,
+            const char* path,
+            int victimHandle,
+            int killerHandle,
+            int victimTeam,
+            int killerTeam,
+            const DistributedTraceInfo& victimInfo,
+            const DistributedTraceInfo& killerInfo,
+            const char* correlation,
+            uint64_t ageMs,
+            uint32_t damageSeq)
+        {
+            if (!ShouldTracePlayerKills()) return;
+            if (InterlockedDecrement(&g_PlayerKillTraceBudget) < 0) return;
+            Log(L"[PKTRACE] seq=%u path=%hs victimH=%d(killerH=%d) vTeam=%d kTeam=%d "
+                L"victim{type=%u netUser=%u act=0x%04X dwLocal=0x%08X team=%d hasNP=%u npId=0x%04X isLocal=%u aiProc=0x%08X vt=0x%08X => %hs} "
+                L"killer{type=%u netUser=%u act=0x%04X dwLocal=0x%08X team=%d hasNP=%u npId=0x%04X isLocal=%u aiProc=0x%08X vt=0x%08X => %hs} "
+                L"corr=%hs age=%llu dmgSeq=%u\n",
+                seq, path, victimHandle, killerHandle, victimTeam, killerTeam,
+                (unsigned)victimInfo.object_type, victimInfo.net_user?1u:0u, (unsigned)victimInfo.activnet_id, (unsigned)victimInfo.dwLocalID, victimInfo.team, victimInfo.teamHasNetPlayer?1u:0u, (unsigned)victimInfo.netPlayerId, victimInfo.isLocalHandle?1u:0u, (uint32_t)(uintptr_t)victimInfo.aiProcess, victimInfo.aiVtable, ClassifyObjectController(victimInfo),
+                (unsigned)killerInfo.object_type, killerInfo.net_user?1u:0u, (unsigned)killerInfo.activnet_id, (unsigned)killerInfo.dwLocalID, killerInfo.team, killerInfo.teamHasNetPlayer?1u:0u, (unsigned)killerInfo.netPlayerId, killerInfo.isLocalHandle?1u:0u, (uint32_t)(uintptr_t)killerInfo.aiProcess, killerInfo.aiVtable, ClassifyObjectController(killerInfo),
+                correlation, (unsigned long long)ageMs, damageSeq);
+        }
+
+        static uint32_t g_PlayerKillSequence = 0;
+
+        using FnDistributedRecordDeathInt = void(__thiscall*)(void* thisPtr, int killerTeam);
+        static FnDistributedRecordDeathInt g_BzrFn_DistributedRecordDeathInt = nullptr;
+
+        void __fastcall DistributedRecordDeathIntHook(void* thisPtr, void* /*edx*/, int killerTeam)
+        {
+            // Preserve victim team before original mutates anything (though it should not).
+            int victimTeam = INT_MIN;
+            int victimHandle = 0;
+            __try { victimHandle = 0; TryGetGameObjectHandleValue(thisPtr, victimHandle); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+            __try { victimTeam = GetGameObjectActualTeam(thisPtr); } __except(EXCEPTION_EXECUTE_HANDLER) { victimTeam = INT_MIN; }
+            if (g_BzrFn_DistributedRecordDeathInt)
+                g_BzrFn_DistributedRecordDeathInt(thisPtr, killerTeam);
+            // Research-only logging: only when trace enabled and in net game and victim team valid.
+            if (!ShouldTracePlayerKills()) return;
+            if (IsSinglePlayerSession()) return;
+            if (victimTeam == INT_MIN || victimTeam == 0) return;
+            // Find pending damager for correlation
+            int killerHandle = 0;
+            const char* correlation = "absent";
+            uint64_t ageMs = 0;
+            int pendingDamagerTeam = INT_MIN;
+            uint32_t pendingSeq = 0;
+            __try {
+                uint64_t now = GetTickCount64();
+                CareerPendingVictim* best = nullptr;
+                for (auto& e : g_CareerPendingVictims) {
+                    if (e.inUse && e.victimHandle == victimHandle) { best = &e; break; }
+                }
+                // Fallback: if victimHandle not resolved, try by victimTeam most recent
+                if (!best) {
+                    uint64_t newest = 0;
+                    for (auto& e : g_CareerPendingVictims) if (e.inUse && e.victimTeam == victimTeam && e.lastDamageMs > newest) { newest = e.lastDamageMs; best = &e; }
+                }
+                if (best) {
+                    killerHandle = best->damagerHandle;
+                    pendingDamagerTeam = best->damagerTeam;
+                    pendingSeq = best->damageSequence;
+                    ageMs = now > best->lastDamageMs ? (now - best->lastDamageMs) : 0;
+
+                    // Multi-attacker ambiguity is a property of THIS victim's
+                    // own damager history. The earlier version counted other
+                    // entries sharing the victim's team, i.e. other victims,
+                    // which made every busy fight report ambiguous-multi.
+                    int otherAttackers = 0;
+                    if (best->distinctDamagers > 1 &&
+                        now >= best->lastDistinctDamagerMs &&
+                        (now - best->lastDistinctDamagerMs) < PlayerKillTrace::kCorrelationLikelyMs)
+                    {
+                        otherAttackers = best->distinctDamagers - 1;
+                    }
+
+                    PlayerKillTrace::CorrelationInput in;
+                    in.havePending = true;
+                    in.damagerKnown = (killerHandle != 0);
+                    in.damagerTeamKnown = (pendingDamagerTeam != INT_MIN);
+                    in.damagerTeamMatchesKiller = (pendingDamagerTeam == killerTeam);
+                    in.ageMs = ageMs;
+                    in.otherAttackersOnVictim = otherAttackers;
+                    correlation = PlayerKillTrace::DescribeCorrelation(
+                        PlayerKillTrace::ClassifyCorrelation(in));
+                }
+            } __except(EXCEPTION_EXECUTE_HANDLER) { correlation = "except"; }
+            // Gather trace infos
+            DistributedTraceInfo victimInfo{}; DistributedTraceInfo killerInfo{};
+            TryReadDistributedTraceInfoForObject(thisPtr, victimInfo);
+            if (victimHandle != 0) TryReadDistributedTraceInfoForHandle(victimHandle, victimInfo);
+            if (killerHandle != 0) TryReadDistributedTraceInfoForHandle(killerHandle, killerInfo); else {
+                killerInfo.team = killerTeam;
+                killerInfo.teamHasNetPlayer = IsTeamHumanByNetPlayer(killerTeam);
+                if (killerInfo.teamHasNetPlayer) killerInfo.netPlayerId = GetNetPlayerIdForTeam(killerTeam);
+            }
+            uint32_t seq = InterlockedIncrement((LONG*)&g_PlayerKillSequence);
+            LogAuthoritativeDeathResearch(seq, "DistributedInt", victimHandle, killerHandle, victimTeam, killerTeam, victimInfo, killerInfo, correlation, ageMs, pendingSeq);
+        }
+
+        // Also instrument NetPlayer::RecordDeath to capture sniper/gameObject* path if ever used
+        static void TraceNetPlayerRecordDeath(int killedTeam, int killerTeam)
+        {
+            if (!ShouldTracePlayerKills()) return;
+            if (IsSinglePlayerSession()) return;
+            // The budget is charged once, by LogAuthoritativeDeathResearch.
+            // Charging it here as well drained it at twice the rate on this path.
+            // Try to correlate via most recent pending with matching killedTeam
+            int victimHandle = 0; int killerHandle = 0; const char* corr = "absent"; uint64_t age=0;
+            uint32_t dmgSeq = 0;
+            __try {
+                uint64_t now = GetTickCount64();
+                CareerPendingVictim* best = nullptr; uint64_t newest=0;
+                for (auto& e: g_CareerPendingVictims) if (e.inUse && e.victimTeam==killedTeam && e.lastDamageMs>newest) { newest=e.lastDamageMs; best=&e; }
+                if (best) {
+                    victimHandle = best->victimHandle;
+                    killerHandle = best->damagerHandle;
+                    age = now > newest ? (now - newest) : 0;
+                    dmgSeq = best->damageSequence;
+                    PlayerKillTrace::CorrelationInput in;
+                    in.havePending = true;
+                    in.damagerKnown = (killerHandle != 0);
+                    in.damagerTeamKnown = (best->damagerTeam != INT_MIN);
+                    in.damagerTeamMatchesKiller = (best->damagerTeam == killerTeam);
+                    in.ageMs = age;
+                    in.otherAttackersOnVictim =
+                        (best->distinctDamagers > 1) ? (best->distinctDamagers - 1) : 0;
+                    corr = PlayerKillTrace::DescribeCorrelation(
+                        PlayerKillTrace::ClassifyCorrelation(in));
+                }
+            } __except(EXCEPTION_EXECUTE_HANDLER) {}
+            DistributedTraceInfo vInfo{}; DistributedTraceInfo kInfo{};
+            if (victimHandle) TryReadDistributedTraceInfoForHandle(victimHandle, vInfo); else { vInfo.team=killedTeam; vInfo.teamHasNetPlayer=IsTeamHumanByNetPlayer(killedTeam); }
+            if (killerHandle) TryReadDistributedTraceInfoForHandle(killerHandle, kInfo); else { kInfo.team=killerTeam; kInfo.teamHasNetPlayer=IsTeamHumanByNetPlayer(killerTeam); }
+            uint32_t seq = InterlockedIncrement((LONG*)&g_PlayerKillSequence);
+            LogAuthoritativeDeathResearch(seq, "NetPlayer", victimHandle, killerHandle, killedTeam, killerTeam, vInfo, kInfo, corr, age, dmgSeq);
+        }
+
+        static void InstallDistributedRecordDeathIntHookIfPossible()
+        {
+            if (g_DistributedRecordDeathIntHookInstalled || !ShouldTracePlayerKills()) return;
+            if (g_DistributedRecordDeathIntDetour.trampoline && g_BzrFn_DistributedRecordDeathInt) { g_DistributedRecordDeathIntHookInstalled = true; return; }
+            const uint64_t now = GetTickCount64();
+            if (g_DistributedRecordDeathIntFirstTick==0) g_DistributedRecordDeathIntFirstTick = now;
+            if (g_DistributedRecordDeathIntLastTick!=0 && (now - g_DistributedRecordDeathIntLastTick) < kDistributedHookRetryMs) return;
+            g_DistributedRecordDeathIntLastTick = now;
+            g_DistributedRecordDeathIntHookAttempted = true;
+            uintptr_t target = 0;
+            if (g_IsSteamExe) target = kSteamDistributedRecordDeathIntAddr; else target = kGogDistributedRecordDeathIntAddr;
+            // Re-derive validation: check at least that target is executable and has plausible prolog.
+            // From 1.5: RecordDeath(int) is small thiscall: 55 8B EC 83 EC ?? . For Redux candidate 0x6796D0 we expect similar.
+            static const uint8_t kExpectedProlog[] = { 0x55, 0x8B, 0xEC };
+            if (!ExpectedBytesMatchAt(target, kExpectedProlog, sizeof(kExpectedProlog))) {
+                if (!g_DistributedRecordDeathIntMismatchLogged) {
+                    Log(L"[PKTRACE] DistributedRecordDeathInt bytes not matched at 0x%08X; will retry %llums\n", (uint32_t)target, (unsigned long long)kDistributedHookRetryWindowMs);
+                    g_DistributedRecordDeathIntMismatchLogged = true;
+                    // Dump 16 bytes for RE diagnostics (not as identity, just for qualification)
+                    __try {
+                        uint8_t bytes[16]={}; memcpy(bytes, reinterpret_cast<void*>(target), 16);
+                        Log(L"[PKTRACE] bytes at 0x%08X: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\n",
+                            (uint32_t)target, bytes[0],bytes[1],bytes[2],bytes[3],bytes[4],bytes[5],bytes[6],bytes[7],bytes[8],bytes[9],bytes[10],bytes[11],bytes[12],bytes[13],bytes[14],bytes[15]);
+                    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+                } else if ((now - g_DistributedRecordDeathIntFirstTick) >= kDistributedHookRetryWindowMs) {
+                    Log(L"[PKTRACE] Distributed hook still mismatched after %llums at 0x%08X - failing closed\n", (unsigned long long)(now-g_DistributedRecordDeathIntFirstTick), (uint32_t)target);
+                }
+                return;
+            }
+            // Further body check: should contain call to NetPlayer::RecordDeath (indirect). Validate that target calls 0x00577290 region.
+            // For now install with trampoline len 6 (push ebp; mov ebp,esp plus one). Detailed delta check omitted; research hook fails closed if install fails.
+            if (!InstallInlineDetour32(g_DistributedRecordDeathIntDetour, target, reinterpret_cast<void*>(DistributedRecordDeathIntHook), kDistributedRecordDeathIntDetourLen, kExpectedProlog, sizeof(kExpectedProlog))) {
+                Log(L"[PKTRACE] Failed installing DistributedRecordDeathInt hook at 0x%08X\n", (uint32_t)target);
+                return;
+            }
+            g_BzrFn_DistributedRecordDeathInt = reinterpret_cast<FnDistributedRecordDeathInt>(g_DistributedRecordDeathIntDetour.trampoline);
+            g_DistributedRecordDeathIntHookInstalled = (g_BzrFn_DistributedRecordDeathInt != nullptr);
+            if (g_DistributedRecordDeathIntHookInstalled) {
+                g_DistributedRecordDeathIntMismatchLogged = false;
+                Log(L"[PKTRACE] Installed DistributedObject::RecordDeath(int) hook at 0x%08X trampoline=0x%08X\n", (uint32_t)target, (uint32_t)(uintptr_t)g_DistributedRecordDeathIntDetour.trampoline);
+            }
+        }
+
+        void __fastcall SetAsUserTraceHook(void* thisPtr, void* /*edx*/)
+        {
+            if (g_BzrFn_SetAsUserOrig) g_BzrFn_SetAsUserOrig(thisPtr);
+            if (!ShouldTracePlayerKills()) return;
+            if (InterlockedDecrement(&g_PlayerKillTraceBudget) < 0) return;
+            int handle = 0; TryGetGameObjectHandleValue(thisPtr, handle);
+            int team = GetGameObjectActualTeam(thisPtr);
+            DistributedTraceInfo info{}; TryReadDistributedTraceInfoForObject(thisPtr, info);
+            int playerHandle = 0; if (g_BzrFn_GetPlayerHandle) __try { playerHandle = g_BzrFn_GetPlayerHandle(); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+            Log(L"[PKTRACE] SetAsUser handle=%d team=%d playerHandle=%d type=%u act=0x%04X vt=0x%08X classify=%hs\n", handle, team, playerHandle, (unsigned)info.object_type, (unsigned)info.activnet_id, info.aiVtable, ClassifyObjectController(info));
+        }
+        void __fastcall SetAsNotUserTraceHook(void* thisPtr, void* /*edx*/)
+        {
+            if (g_BzrFn_SetAsNotUserOrig) g_BzrFn_SetAsNotUserOrig(thisPtr);
+            if (!ShouldTracePlayerKills()) return;
+            if (InterlockedDecrement(&g_PlayerKillTraceBudget) < 0) return;
+            int handle = 0; TryGetGameObjectHandleValue(thisPtr, handle);
+            int team = GetGameObjectActualTeam(thisPtr);
+            DistributedTraceInfo info{}; TryReadDistributedTraceInfoForObject(thisPtr, info);
+            Log(L"[PKTRACE] SetAsNotUser handle=%d team=%d type=%u act=0x%04X vt=0x%08X classify=%hs\n", handle, team, (unsigned)info.object_type, (unsigned)info.activnet_id, info.aiVtable, ClassifyObjectController(info));
+        }
+        static void InstallSetAsUserHooksIfPossible()
+        {
+            if (!ShouldTracePlayerKills()) return;
+            auto tryInstallUser = [](InlineDetour32& det, uintptr_t addr, void* hook, const char* name, bool& installed, FnSetAsUser& orig) {
+                if (installed) return;
+                static const uint8_t kProlog[] = {0x55, 0x8B, 0xEC};
+                if (!ExpectedBytesMatchAt(addr, kProlog, sizeof(kProlog))) {
+                    __try { uint8_t b[6]={}; memcpy(b, reinterpret_cast<void*>(addr), 6); Log(L"[PKTRACE] %hs prolog mismatch at 0x%08X: %02X %02X %02X\n", name, (uint32_t)addr, b[0],b[1],b[2]); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+                    return;
+                }
+                if (!InstallInlineDetour32(det, addr, hook, 6, kProlog, sizeof(kProlog))) { Log(L"[PKTRACE] Failed hook %hs at 0x%08X\n", name, (uint32_t)addr); return; }
+                orig = reinterpret_cast<FnSetAsUser>(det.trampoline);
+                installed = (orig != nullptr);
+                if (installed) Log(L"[PKTRACE] Installed %hs at 0x%08X trampoline=0x%08X\n", name, (uint32_t)addr, (uint32_t)(uintptr_t)det.trampoline);
+            };
+            uintptr_t a1 = g_IsSteamExe ? kSteamSetAsUserAddr : kGogSetAsUserAddr;
+            uintptr_t a2 = g_IsSteamExe ? kSteamSetAsNotUserAddr : kGogSetAsNotUserAddr;
+            tryInstallUser(g_SetAsUserDetour, a1, reinterpret_cast<void*>(SetAsUserTraceHook), "SetAsUser", g_SetAsUserHookInstalled, g_BzrFn_SetAsUserOrig);
+            { InlineDetour32& det = g_SetAsNotUserDetour; uintptr_t addr = g_IsSteamExe ? kSteamSetAsNotUserAddr : kGogSetAsNotUserAddr; void* hook = reinterpret_cast<void*>(SetAsNotUserTraceHook); const char* name = "SetAsNotUser"; bool& installed = g_SetAsNotUserHookInstalled; FnSetAsNotUser& orig = g_BzrFn_SetAsNotUserOrig; if (!installed) { static const uint8_t kProlog[] = {0x55, 0x8B, 0xEC}; if (!ExpectedBytesMatchAt(addr, kProlog, sizeof(kProlog))) { __try { uint8_t b[6]={}; memcpy(b, reinterpret_cast<void*>(addr), 6); Log(L"[PKTRACE] %hs prolog mismatch at 0x%08X: %02X %02X %02X\n", name, (uint32_t)addr, b[0],b[1],b[2]); } __except(EXCEPTION_EXECUTE_HANDLER) {} } else if (!InstallInlineDetour32(det, addr, hook, 6, kProlog, sizeof(kProlog))) { Log(L"[PKTRACE] Failed hook %hs at 0x%08X\n", name, (uint32_t)addr); } else { orig = reinterpret_cast<FnSetAsNotUser>(det.trampoline); installed = (orig != nullptr); if (installed) Log(L"[PKTRACE] Installed %hs at 0x%08X trampoline=0x%08X\n", name, (uint32_t)addr, (uint32_t)(uintptr_t)det.trampoline); } } }
+            // dummy to keep original tryInstall line from being duplicated
+            if (false) tryInstallUser(g_SetAsUserDetour, a2, reinterpret_cast<void*>(SetAsNotUserTraceHook), "SetAsNotUser", g_SetAsNotUserHookInstalled, g_BzrFn_SetAsNotUserOrig);
         }
 
         // Career persistence for one derived kill. Single player only -- see
@@ -15120,6 +15614,8 @@ namespace BZROpenShim
         {
             if (g_BzrFn_RecordDeath)
                 g_BzrFn_RecordDeath(killedTeam, killerTeam);
+            // Research trace for sniper/GameObject* path coverage (NetPlayer layer)
+            TraceNetPlayerRecordDeath(killedTeam, killerTeam);
 
             // Publish instead of persisting here. This runs inside the engine's
             // score-notify path; the previous version loaded and rewrote
@@ -22435,6 +22931,676 @@ namespace BZROpenShim
                     BoolText(ShouldTraceSplinterUndeadFix()));
             }
 		}
+
+        // =====================================================================
+        // MPAUTH receiver replay instrumentation (Redux 2.2.301) — diagnostic only.
+        // No gameplay/authority change. Opt-in via TraceMpauth / OPENSHIM_TRACE_MPAUTH.
+        // Emits BZRHarness-friendly MPAUTH_* lines for Daywrecker and Splinter.
+        // =====================================================================
+        static bool ShouldTraceMpauthDw()
+        {
+            return g_MpauthDwEnabled && g_MpauthDwTraceBudget > 0;
+        }
+        static bool ShouldTraceMpauthSpl()
+        {
+            return g_MpauthSplEnabled && g_MpauthSplTraceBudget > 0;
+        }
+
+        static const char* MpauthPeerRole()
+        {
+            __try
+            {
+                if (g_BzrFn_IsHost && g_BzrFn_IsHost())
+                    return "host";
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+            return "client";
+        }
+        static uint16_t MpauthLocalNetId()
+        {
+            return ReadLocalPlayerNetIdValue();
+        }
+        // DW helpers
+        static uint8_t MpauthReadDwConsumedComplete(void* completePtr)
+        {
+            __try { return *(uint8_t*)((uint8_t*)completePtr + kDayWreckerConsumedByteOffset); }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return 0xFF; }
+        }
+        static uint8_t MpauthReadDwConsumedDistributed(void* distPtr)
+        {
+            __try { return *(uint8_t*)((uint8_t*)distPtr + kDayWreckerDistributedConsumedOffset); }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return 0xFF; }
+        }
+        static bool MpauthIsDayWreckerObject(void* ptr)
+        {
+            __try
+            {
+                void* vt0 = *(void**)ptr;
+                if (vt0 == reinterpret_cast<void*>(kGogDayWreckerVtableAddr))
+                    return true;
+                void* vt1 = *(void**)((uint8_t*)ptr + kDayWreckerDistributedOffset);
+                if (vt1 == reinterpret_cast<void*>(kGogDayWreckerDistributedVtableAddr))
+                    return true;
+                if (vt0 == reinterpret_cast<void*>(kGogDayWreckerDistributedVtableAddr))
+                    return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+            return false;
+        }
+        static bool MpauthReadDwIdentity(void* completeOrDist, uint32_t& outId, uint8_t& outType, uint16_t& outAct)
+        {
+            __try
+            {
+                uint8_t* dist = (uint8_t*)completeOrDist + kDayWreckerDistributedOffset;
+                outId = *(uint32_t*)(dist + 0x64);
+                outType = *(uint8_t*)(dist + 0x68);
+                outAct = *(uint16_t*)(dist + 0x62);
+                if (outType <= 2 || outId != 0)
+                    return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+            __try
+            {
+                uint8_t* dist = (uint8_t*)completeOrDist;
+                outId = *(uint32_t*)(dist + 0x64);
+                outType = *(uint8_t*)(dist + 0x68);
+                outAct = *(uint16_t*)(dist + 0x62);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+            return false;
+        }
+        static std::unordered_set<uint32_t> g_MpauthRecentDwRemovedIds = {};
+        static std::unordered_map<uint32_t, uint64_t> g_MpauthDwRemoveTick = {};
+        static std::unordered_map<uint32_t, int> g_MpauthDwDeletedRecord = {};
+        // Ordnance helpers
+        static bool MpauthReadOrdnanceFields(void* ordPtr, uint16_t& outSrc, uint16_t& outOrdId, int32_t& outBSend, uint32_t& outFlags, float& outDt)
+        {
+            __try
+            {
+                uint8_t* p = (uint8_t*)ordPtr;
+                outSrc = *(uint16_t*)(p + kMpauthOrdnanceSourceOffset);
+                outOrdId = *(uint16_t*)(p + kMpauthOrdnanceOrdIdOffset);
+                outBSend = *(int32_t*)(p + kMpauthOrdnanceBSendOffset);
+                void* obj = *(void**)(p + kOrdnanceObjOffset);
+                if (obj)
+                    outFlags = *(uint32_t*)((uint8_t*)obj + kObjStateFlagsOffset);
+                else
+                    outFlags = 0;
+                outDt = *(float*)(p + kMpauthOrdnanceDtOffset);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        }
+
+        using FnMpauthDwSim = void(__thiscall*)(void* thisPtr, float dt);
+        using FnMpauthDwExplode = void(__thiscall*)(void* thisPtr);
+        using FnMpauthGoRemove = void(__thiscall*)(void* thisPtr);
+        using FnMpauthSetRemote = void(__thiscall*)(void* thisPtr);
+        using FnMpauthOrdnReceive = void(__cdecl*)(char* a, uint32_t b, uint16_t c);
+        using FnMpauthSprayHit = void(__thiscall*)(void* thisPtr, void* a, void* b);
+        using FnMpauthSpraySim = void(__thiscall*)(void* thisPtr, float dt);
+        static FnMpauthDwSim g_MpauthDwSimOrig = nullptr;
+        static FnMpauthDwExplode g_MpauthDwExplodeOrig = nullptr;
+        static FnMpauthGoRemove g_MpauthGoRemoveOrig = nullptr;
+        static FnMpauthSetRemote g_MpauthSetRemoteOrig = nullptr;
+        static FnMpauthOrdnReceive g_MpauthOrdnReceiveOrig = nullptr;
+        static FnMpauthSprayHit g_MpauthSprayHitOrig = nullptr;
+        static FnMpauthSpraySim g_MpauthSpraySimOrig = nullptr;
+        using FnMpauthOrdinaryReader = void(__cdecl*)(uint16_t, uint8_t*, uint32_t, float);
+        using FnMpauthPermanentReader = void(__cdecl*)(int16_t, uint32_t, uint16_t, int32_t);
+        static FnMpauthOrdinaryReader g_MpauthOrdinaryReaderOrig = nullptr;
+        static FnMpauthPermanentReader g_MpauthPermanentReaderOrig = nullptr;
+
+        void __fastcall MpauthDwSimulateHook(void* thisPtr, void* /*edx*/, float dt)
+        {
+            uint8_t consumedBefore = MpauthReadDwConsumedComplete(thisPtr);
+            uint32_t dwId = 0; uint8_t objType = 0xFF; uint16_t act = 0xFFFF;
+            MpauthReadDwIdentity(thisPtr, dwId, objType, act);
+            if (ShouldTraceMpauthDw())
+            {
+                if (InterlockedDecrement(&g_MpauthDwTraceBudget) >= 0)
+                {
+                    uint16_t netId = MpauthLocalNetId();
+                    const char* role = MpauthPeerRole();
+                    Log(L"[MPAUTH_DW_DETONATE] sim peer=%hs netId=0x%04X id=0x%08X ptr=0x%08X consumed_before=%u type=%u act=0x%04X dt=%f\n",
+                        role, netId, dwId, (uint32_t)(uintptr_t)thisPtr, (unsigned)consumedBefore, (unsigned)objType, (unsigned)act, dt);
+                    Log(L"MPAUTH_DW_DETONATE peer=%hs id=0x%08X ptr=0x%08X consumed_before=%u\n",
+                        role, dwId, (uint32_t)(uintptr_t)thisPtr, (unsigned)consumedBefore);
+                }
+                else
+                {
+                    InterlockedIncrement(&g_MpauthDwTraceBudget);
+                }
+            }
+            if (g_MpauthDwSimOrig)
+                g_MpauthDwSimOrig(thisPtr, dt);
+            else if (g_DayWreckerSimulateDetour.trampoline)
+                reinterpret_cast<FnMpauthDwSim>(g_DayWreckerSimulateDetour.trampoline)(thisPtr, dt);
+        }
+        void __fastcall MpauthDwExplodeHook(void* thisPtr, void* /*edx*/)
+        {
+            uint8_t consumedBefore = MpauthReadDwConsumedDistributed(thisPtr);
+            void* complete = (uint8_t*)thisPtr - kDayWreckerDistributedOffset;
+            uint32_t dwId = 0; uint8_t objType = 0xFF; uint16_t act = 0xFFFF;
+            bool has = MpauthReadDwIdentity(complete, dwId, objType, act);
+            if (!has) MpauthReadDwIdentity(thisPtr, dwId, objType, act);
+            if (ShouldTraceMpauthDw())
+            {
+                if (InterlockedDecrement(&g_MpauthDwTraceBudget) >= 0)
+                {
+                    uint16_t netId = MpauthLocalNetId();
+                    const char* role = MpauthPeerRole();
+                    Log(L"[MPAUTH_DW_DETONATE] explode peer=%hs netId=0x%04X id=0x%08X ptr=0x%08X consumed_before=%u type=%u act=0x%04X\n",
+                        role, netId, dwId, (uint32_t)(uintptr_t)complete, (unsigned)consumedBefore, (unsigned)objType, (unsigned)act);
+                    Log(L"MPAUTH_DW_DETONATE peer=%hs id=0x%08X ptr=0x%08X consumed_before=%u\n",
+                        role, dwId, (uint32_t)(uintptr_t)complete, (unsigned)consumedBefore);
+                }
+                else
+                {
+                    InterlockedIncrement(&g_MpauthDwTraceBudget);
+                }
+            }
+            if (g_MpauthDwExplodeOrig)
+                g_MpauthDwExplodeOrig(thisPtr);
+            else if (g_DayWreckerExplodeDetour.trampoline)
+                reinterpret_cast<FnMpauthDwExplode>(g_DayWreckerExplodeDetour.trampoline)(thisPtr);
+        }
+        void __fastcall MpauthGoRemoveHook(void* thisPtr, void* /*edx*/)
+        {
+            bool isDw = MpauthIsDayWreckerObject(thisPtr);
+            uint32_t dwId = 0; uint8_t objType = 0xFF; uint16_t act = 0xFFFF;
+            MpauthReadDwIdentity(thisPtr, dwId, objType, act);
+            int deletedRecord = 0;
+            if (objType == 1) deletedRecord = 1;
+            else if (objType == 2 && dwId < 0x10000) deletedRecord = 1;
+            else deletedRecord = 0;
+            if (isDw && ShouldTraceMpauthDw())
+            {
+                if (InterlockedDecrement(&g_MpauthDwTraceBudget) >= 0)
+                {
+                    uint16_t netId = MpauthLocalNetId();
+                    const char* role = MpauthPeerRole();
+                    Log(L"[MPAUTH_DW_REMOVE] peer=%hs netId=0x%04X id=0x%08X ptr=0x%08X type=%u act=0x%04X deleted_record=%d\n",
+                        role, netId, dwId, (uint32_t)(uintptr_t)thisPtr, (unsigned)objType, (unsigned)act, deletedRecord);
+                    Log(L"MPAUTH_DW_REMOVE peer=%hs id=0x%08X ptr=0x%08X deleted_record=%d\n",
+                        role, dwId, (uint32_t)(uintptr_t)thisPtr, deletedRecord);
+                    g_MpauthRecentDwRemovedIds.insert(dwId);
+                    g_MpauthDwRemoveTick[dwId] = GetTickCount64();
+                    g_MpauthDwDeletedRecord[dwId] = deletedRecord;
+                }
+                else
+                {
+                    InterlockedIncrement(&g_MpauthDwTraceBudget);
+                }
+            }
+            if (g_MpauthGoRemoveOrig)
+                g_MpauthGoRemoveOrig(thisPtr);
+            else if (g_GameObjectRemoveDetour.trampoline)
+                reinterpret_cast<FnMpauthGoRemove>(g_GameObjectRemoveDetour.trampoline)(thisPtr);
+        }
+        void __fastcall MpauthSetRemoteHook(void* thisPtr, void* /*edx*/)
+        {
+            uint32_t dwId = 0; uint8_t objType = 0xFF; uint16_t act = 0xFFFF;
+            bool preHas = MpauthReadDwIdentity((uint8_t*)thisPtr - kDayWreckerDistributedOffset, dwId, objType, act);
+            if (!preHas) MpauthReadDwIdentity(thisPtr, dwId, objType, act);
+            if (g_MpauthSetRemoteOrig)
+                g_MpauthSetRemoteOrig(thisPtr);
+            else if (g_DistributedCreateDetour.trampoline)
+                reinterpret_cast<FnMpauthSetRemote>(g_DistributedCreateDetour.trampoline)(thisPtr);
+            uint32_t postId = dwId; uint8_t postType = objType;
+            MpauthReadDwIdentity(thisPtr, postId, postType, act);
+            void* complete = (uint8_t*)thisPtr - kDayWreckerDistributedOffset;
+            bool isDw = MpauthIsDayWreckerObject(complete) || MpauthIsDayWreckerObject(thisPtr);
+            if (isDw && ShouldTraceMpauthDw())
+            {
+                int revived = 0;
+                uint32_t logId = postId != 0 ? postId : dwId;
+                auto it = g_MpauthRecentDwRemovedIds.find(logId);
+                if (it != g_MpauthRecentDwRemovedIds.end())
+                    revived = 1;
+                if (InterlockedDecrement(&g_MpauthDwTraceBudget) >= 0)
+                {
+                    uint16_t netId = MpauthLocalNetId();
+                    const char* role = MpauthPeerRole();
+                    Log(L"[MPAUTH_DW_CREATE] peer=%hs netId=0x%04X id=0x%08X ptr=0x%08X type=%u->%u revived=%d\n",
+                        role, netId, logId, (uint32_t)(uintptr_t)complete, (unsigned)objType, (unsigned)postType, revived);
+                    Log(L"MPAUTH_DW_CREATE peer=%hs id=0x%08X ptr=0x%08X revived=%d\n",
+                        role, logId, (uint32_t)(uintptr_t)complete, revived);
+                }
+                else
+                {
+                    InterlockedIncrement(&g_MpauthDwTraceBudget);
+                }
+            }
+        }
+        void __cdecl MpauthOrdnanceReceiverHook(char* a, uint32_t b, uint16_t c)
+        {
+            g_MpauthInOrdnanceReceive = true;
+            // Heuristic for existing vs new: if we've already seen a Hit from this sender, the receiver likely found an existing object
+            int rxFound = -1;
+            __try
+            {
+                bool hasSender = false;
+                for (auto &kv : g_MpauthSplHitCounts)
+                {
+                    if ((kv.first >> 16) == (uint32_t)c)
+                    {
+                        hasSender = true;
+                        break;
+                    }
+                }
+                rxFound = hasSender ? 1 : 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { rxFound = -1; }
+            if (ShouldTraceMpauthSpl())
+            {
+                if (InterlockedDecrement(&g_MpauthSplTraceBudget) >= 0)
+                {
+                    uint16_t netId = MpauthLocalNetId();
+                    const char* role = MpauthPeerRole();
+                    const char* foundStr = (rxFound == 1 ? "existing" : (rxFound == 0 ? "new" : "unknown"));
+                    Log(L"[MPAUTH_SPL_RX] peer=%hs netId=0x%04X sender=0x%04X packet=0x%08X len=%u inRecv=1 found=%hs\n",
+                        role, netId, (unsigned)c, (uint32_t)(uintptr_t)a, (unsigned)b, foundStr);
+                    Log(L"MPAUTH_SPL_RX peer=%hs source=0x%04X ordid=0xFFFF ptr=0x%08X flags=0x%X dt=0.0 found=%hs\n",
+                        role, (unsigned)c, (uint32_t)(uintptr_t)a, foundStr);
+                }
+                else
+                {
+                    InterlockedIncrement(&g_MpauthSplTraceBudget);
+                }
+            }
+            if (g_MpauthOrdnReceiveOrig)
+                g_MpauthOrdnReceiveOrig(a,b,c);
+            else if (g_OrdnanceReceiverDetour.trampoline)
+                reinterpret_cast<FnMpauthOrdnReceive>(g_OrdnanceReceiverDetour.trampoline)(a,b,c);
+            g_MpauthInOrdnanceReceive = false;
+        }
+        void __fastcall MpauthSprayBombHitHook(void* thisPtr, void* /*edx*/, void* a, void* b)
+        {
+            uint16_t src = 0xFFFF, ord = 0xFFFF; int32_t bSend = -1; uint32_t flags = 0; float dt = 0.0f;
+            MpauthReadOrdnanceFields(thisPtr, src, ord, bSend, flags, dt);
+            uint32_t key = ((uint32_t)src << 16) | ord;
+            int count = 1;
+            auto it = g_MpauthSplHitCounts.find(key);
+            if (it != g_MpauthSplHitCounts.end())
+            {
+                it->second += 1;
+                count = it->second;
+            }
+            else
+            {
+                g_MpauthSplHitCounts[key] = 1;
+            }
+            // Periodic bounding: avoid unbounded growth over very long sessions where (source,ordid) may reuse
+            if (g_MpauthSplHitCounts.size() > 1024)
+            {
+                if (InterlockedDecrement(&g_MpauthSplHitMapLogBudget) >= 0)
+                    Log(L"[MPAUTH] Hit map size %zu, clearing to bound reuse confusion\n", g_MpauthSplHitCounts.size());
+                g_MpauthSplHitCounts.clear();
+                g_MpauthSplHitCounts[key] = count;
+            }
+            if (ShouldTraceMpauthSpl())
+            {
+                if (InterlockedDecrement(&g_MpauthSplTraceBudget) >= 0)
+                {
+                    uint16_t netId = MpauthLocalNetId();
+                    const char* role = MpauthPeerRole();
+                    Log(L"[MPAUTH_SPL_HIT] peer=%hs netId=0x%04X source=0x%04X ordid=0x%04X ptr=0x%08X flags=0x%08X bSend=%d dt=%f build_count=%d inRecv=%u\n",
+                        role, netId, (unsigned)src, (unsigned)ord, (uint32_t)(uintptr_t)thisPtr, flags, bSend, dt, count, g_MpauthInOrdnanceReceive?1u:0u);
+                    Log(L"MPAUTH_SPL_HIT peer=%hs source=0x%04X ordid=0x%04X ptr=0x%08X build_count=%d\n",
+                        role, (unsigned)src, (unsigned)ord, (uint32_t)(uintptr_t)thisPtr, count);
+                }
+                else
+                {
+                    InterlockedIncrement(&g_MpauthSplTraceBudget);
+                }
+            }
+            if (g_MpauthSprayHitOrig)
+                g_MpauthSprayHitOrig(thisPtr, a, b);
+            else if (g_SprayBombHitDetour.trampoline)
+                reinterpret_cast<FnMpauthSprayHit>(g_SprayBombHitDetour.trampoline)(thisPtr, a, b);
+        }
+        void __fastcall MpauthSprayBombSimulateHook(void* thisPtr, void* /*edx*/, float dt)
+        {
+            if (g_MpauthInOrdnanceReceive && ShouldTraceMpauthSpl())
+            {
+                uint16_t src = 0xFFFF, ord = 0xFFFF; int32_t bSend = -1; uint32_t flags = 0; float curDt = 0.0f;
+                MpauthReadOrdnanceFields(thisPtr, src, ord, bSend, flags, curDt);
+                if (InterlockedDecrement(&g_MpauthSplTraceBudget) >= 0)
+                {
+                    uint16_t netId = MpauthLocalNetId();
+                    const char* role = MpauthPeerRole();
+                    Log(L"[MPAUTH_SPL_SIM] peer=%hs netId=0x%04X source=0x%04X ordid=0x%04X ptr=0x%08X flags_before=0x%08X dt=%f bSend=%d\n",
+                        role, netId, (unsigned)src, (unsigned)ord, (uint32_t)(uintptr_t)thisPtr, flags, dt, bSend);
+                    Log(L"MPAUTH_SPL_SIM peer=%hs source=0x%04X ordid=0x%04X ptr=0x%08X flags_before=0x%08X\n",
+                        role, (unsigned)src, (unsigned)ord, (uint32_t)(uintptr_t)thisPtr, flags);
+                }
+                else
+                {
+                    InterlockedIncrement(&g_MpauthSplTraceBudget);
+                }
+            }
+            if (g_MpauthSpraySimOrig)
+                g_MpauthSpraySimOrig(thisPtr, dt);
+            else if (g_SprayBombSimulateDetour.trampoline)
+                reinterpret_cast<FnMpauthSpraySim>(g_SprayBombSimulateDetour.trampoline)(thisPtr, dt);
+        }
+        void __cdecl MpauthOrdinaryStateReaderHook(uint16_t p1, uint8_t* p2, uint32_t p3, float p4)
+        {
+            // Extract ID from packet: p2+2 is dwLocalID (uint32_t)
+            uint32_t dwId = 0;
+            uint8_t route = 0xFF;
+            __try
+            {
+                if (p2)
+                {
+                    dwId = *(uint32_t*)(p2 + 2);
+                    route = p2[1] & 3;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+            bool isCandidate = false;
+            int deletedRec = 0;
+            __try
+            {
+                auto it = g_MpauthRecentDwRemovedIds.find(dwId);
+                if (it != g_MpauthRecentDwRemovedIds.end())
+                    isCandidate = true;
+                auto it2 = g_MpauthDwDeletedRecord.find(dwId);
+                if (it2 != g_MpauthDwDeletedRecord.end())
+                    deletedRec = it2->second;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+            // Only log when this ID was recently removed as Daywrecker to avoid spam, or when tracing is enabled and budget allows
+            if (isCandidate && ShouldTraceMpauthDw())
+            {
+                if (InterlockedDecrement(&g_MpauthDwTraceBudget) >= 0)
+                {
+                    uint16_t netId = MpauthLocalNetId();
+                    const char* role = MpauthPeerRole();
+                    Log(L"[MPAUTH_DW_RX] peer=%hs netId=0x%04X id=0x%08X ptr=0x%08X lookup=MISS deleted_record=%d route=ordinary p1=0x%04X p3=%u\n",
+                        role, netId, dwId, (uint32_t)(uintptr_t)p2, deletedRec, (unsigned)p1, (unsigned)p3);
+                    Log(L"MPAUTH_DW_RX peer=%hs id=0x%08X lookup=MISS deleted_record=%d route=ordinary\n",
+                        role, dwId, deletedRec);
+                }
+                else
+                {
+                    InterlockedIncrement(&g_MpauthDwTraceBudget);
+                }
+            }
+            else if (ShouldTraceMpauthDw() && g_MpauthDwTraceBudget > 0)
+            {
+                // Optionally log all ordinary receives at very low volume for debugging, but only if isCandidate to keep noise low
+            }
+            if (g_MpauthOrdinaryReaderOrig)
+                g_MpauthOrdinaryReaderOrig(p1, p2, p3, p4);
+            else if (g_OrdinaryStateReaderDetour.trampoline)
+                reinterpret_cast<FnMpauthOrdinaryReader>(g_OrdinaryStateReaderDetour.trampoline)(p1, p2, p3, p4);
+        }
+        void __cdecl MpauthPermanentStateReaderHook(int16_t p1, uint32_t p2, uint16_t p3, int32_t p4)
+        {
+            // This reader is called with different packet layout; try to extract dwId from p4 (packet buffer) if possible
+            uint32_t dwId = 0;
+            __try
+            {
+                // p4 is packet buffer address (int), try reading at +2 as in ordinary path
+                uint8_t* pkt = reinterpret_cast<uint8_t*>(p4);
+                if (pkt)
+                {
+                    // Heuristic: packet at p4, id at +2 (similar to ordinary)
+                    dwId = *(uint32_t*)(pkt + 2);
+                    // Fallback: if pkt looks not like packet, try p2
+                    if (dwId == 0 || dwId == 0xFFFFFFFF)
+                    {
+                        uint8_t* alt = reinterpret_cast<uint8_t*>(p2);
+                        if (alt) dwId = *(uint32_t*)(alt + 2);
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+            bool isCandidate = false;
+            int deletedRec = 0;
+            __try
+            {
+                auto it = g_MpauthRecentDwRemovedIds.find(dwId);
+                if (it != g_MpauthRecentDwRemovedIds.end())
+                    isCandidate = true;
+                auto it2 = g_MpauthDwDeletedRecord.find(dwId);
+                if (it2 != g_MpauthDwDeletedRecord.end())
+                    deletedRec = it2->second;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+            if (isCandidate && ShouldTraceMpauthDw())
+            {
+                if (InterlockedDecrement(&g_MpauthDwTraceBudget) >= 0)
+                {
+                    uint16_t netId = MpauthLocalNetId();
+                    const char* role = MpauthPeerRole();
+                    Log(L"[MPAUTH_DW_RX] peer=%hs netId=0x%04X id=0x%08X ptr=0x%08X lookup=MISS deleted_record=%d route=permanent p1=%d p3=0x%04X\n",
+                        role, netId, dwId, (uint32_t)(uintptr_t)p4, deletedRec, (int)p1, (unsigned)p3);
+                    Log(L"MPAUTH_DW_RX peer=%hs id=0x%08X lookup=MISS deleted_record=%d route=permanent\n",
+                        role, dwId, deletedRec);
+                }
+                else
+                {
+                    InterlockedIncrement(&g_MpauthDwTraceBudget);
+                }
+            }
+            if (g_MpauthPermanentReaderOrig)
+                g_MpauthPermanentReaderOrig(p1, p2, p3, p4);
+            else if (g_PermanentStateReaderDetour.trampoline)
+                reinterpret_cast<FnMpauthPermanentReader>(g_PermanentStateReaderDetour.trampoline)(p1, p2, p3, p4);
+        }
+
+        static void InitializeMpauthConfig()
+        {
+            bool enabled = false;
+            bool dwEnabled = false;
+            bool splEnabled = false;
+            bool iniAll = false, iniDw = false, iniSpl = false;
+            if (TryGetUserConfigBool("Diagnostics", "TraceMpauth", iniAll))
+                enabled = iniAll;
+            if (TryGetUserConfigBool("Diagnostics", "TraceMpauthDw", iniDw))
+                dwEnabled = iniDw;
+            if (TryGetUserConfigBool("Diagnostics", "TraceMpauthSpl", iniSpl))
+                splEnabled = iniSpl;
+            if (EnvFlagEnabled("OPENSHIM_TRACE_MPAUTH") || EnvFlagEnabled("BZR_TRACE_MPAUTH"))
+                enabled = true;
+            if (EnvFlagEnabled("OPENSHIM_TRACE_MPAUTH_DW") || EnvFlagEnabled("BZR_TRACE_MPAUTH_DW"))
+                dwEnabled = true;
+            if (EnvFlagEnabled("OPENSHIM_TRACE_MPAUTH_SPL") || EnvFlagEnabled("BZR_TRACE_MPAUTH_SPL"))
+                splEnabled = true;
+            if (enabled && !dwEnabled && !splEnabled)
+            {
+                dwEnabled = true;
+                splEnabled = true;
+            }
+            if ((dwEnabled || splEnabled) && !enabled)
+                enabled = true;
+            g_MpauthEnabled = enabled;
+            g_MpauthDwEnabled = enabled && dwEnabled;
+            g_MpauthSplEnabled = enabled && splEnabled;
+            long budgetDw = kMpauthDwTraceBudgetDefault;
+            long budgetSpl = kMpauthSplTraceBudgetDefault;
+            long tmp = 0;
+            if (TryGetEnvLong("OPENSHIM_TRACE_MPAUTH_DW_BUDGET", tmp) || TryGetEnvLong("BZR_TRACE_MPAUTH_DW_BUDGET", tmp))
+                budgetDw = tmp;
+            else if (TryGetEnvLong("OPENSHIM_TRACE_MPAUTH_BUDGET", tmp) || TryGetEnvLong("BZR_TRACE_MPAUTH_BUDGET", tmp))
+                budgetDw = tmp;
+            if (TryGetEnvLong("OPENSHIM_TRACE_MPAUTH_SPL_BUDGET", tmp) || TryGetEnvLong("BZR_TRACE_MPAUTH_SPL_BUDGET", tmp))
+                budgetSpl = tmp;
+            else if (TryGetEnvLong("OPENSHIM_TRACE_MPAUTH_BUDGET", tmp) || TryGetEnvLong("BZR_TRACE_MPAUTH_BUDGET", tmp))
+                budgetSpl = tmp;
+            if (budgetDw < 0) budgetDw = 0;
+            if (budgetDw > kMpauthTraceBudgetMax) budgetDw = kMpauthTraceBudgetMax;
+            if (budgetSpl < 0) budgetSpl = 0;
+            if (budgetSpl > kMpauthTraceBudgetMax) budgetSpl = kMpauthTraceBudgetMax;
+            g_MpauthDwTraceBudget = budgetDw;
+            g_MpauthSplTraceBudget = budgetSpl;
+            if (g_MpauthEnabled)
+                Log(L"[MPAUTH] Trace enabled dw=%hs spl=%hs dwBudget=%ld splBudget=%ld\n",
+                    BoolText(g_MpauthDwEnabled), BoolText(g_MpauthSplEnabled), budgetDw, budgetSpl);
+        }
+
+        static void InstallMpauthHooksIfPossible()
+        {
+            if (!g_MpauthEnabled)
+                return;
+            if (g_MpauthHooksInstalled)
+                return;
+            {
+                static const uint8_t kExpectedDwSim[3] = { 0x55, 0x8B, 0xEC };
+                if (ExpectedBytesMatchAt(kGogDayWreckerSimulateAddr, kExpectedDwSim, sizeof(kExpectedDwSim)))
+                {
+                    if (InstallInlineDetour32(g_DayWreckerSimulateDetour, kGogDayWreckerSimulateAddr,
+                        reinterpret_cast<void*>(MpauthDwSimulateHook), 5, kExpectedDwSim, sizeof(kExpectedDwSim)))
+                    {
+                        g_MpauthDwSimOrig = reinterpret_cast<FnMpauthDwSim>(g_DayWreckerSimulateDetour.trampoline);
+                        Log(L"[MPAUTH] Installed DayWrecker::Simulate hook at 0x%08X tramp=0x%08X\n",
+                            (uint32_t)kGogDayWreckerSimulateAddr, (uint32_t)(uintptr_t)g_DayWreckerSimulateDetour.trampoline);
+                    }
+                    else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
+                        Log(L"[MPAUTH] Failed installing DayWrecker::Simulate hook at 0x%08X\n", (uint32_t)kGogDayWreckerSimulateAddr);
+                }
+                else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
+                {
+                    Log(L"[MPAUTH] DayWrecker::Simulate bytes mismatch at 0x%08X\n", (uint32_t)kGogDayWreckerSimulateAddr);
+                    __try { uint8_t b[6]={}; memcpy(b, reinterpret_cast<void*>(kGogDayWreckerSimulateAddr), 6);
+                        Log(L"[MPAUTH] bytes: %02X %02X %02X %02X %02X %02X\n", b[0],b[1],b[2],b[3],b[4],b[5]); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+                }
+            }
+            {
+                static const uint8_t kExpectedDwExplode[3] = { 0x55, 0x8B, 0xEC };
+                if (ExpectedBytesMatchAt(kGogDayWreckerExplodeAddr, kExpectedDwExplode, sizeof(kExpectedDwExplode)))
+                {
+                    if (InstallInlineDetour32(g_DayWreckerExplodeDetour, kGogDayWreckerExplodeAddr,
+                        reinterpret_cast<void*>(MpauthDwExplodeHook), 5, kExpectedDwExplode, sizeof(kExpectedDwExplode)))
+                    {
+                        g_MpauthDwExplodeOrig = reinterpret_cast<FnMpauthDwExplode>(g_DayWreckerExplodeDetour.trampoline);
+                        Log(L"[MPAUTH] Installed DayWrecker::Explode hook at 0x%08X tramp=0x%08X\n",
+                            (uint32_t)kGogDayWreckerExplodeAddr, (uint32_t)(uintptr_t)g_DayWreckerExplodeDetour.trampoline);
+                    }
+                }
+                else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
+                    Log(L"[MPAUTH] DayWrecker::Explode bytes mismatch at 0x%08X\n", (uint32_t)kGogDayWreckerExplodeAddr);
+            }
+            {
+                static const uint8_t kExpectedGoRemove[3] = { 0x55, 0x8B, 0xEC };
+                if (ExpectedBytesMatchAt(kGogGameObjectRemoveAddr, kExpectedGoRemove, sizeof(kExpectedGoRemove)))
+                {
+                    if (InstallInlineDetour32(g_GameObjectRemoveDetour, kGogGameObjectRemoveAddr,
+                        reinterpret_cast<void*>(MpauthGoRemoveHook), 5, kExpectedGoRemove, sizeof(kExpectedGoRemove)))
+                    {
+                        g_MpauthGoRemoveOrig = reinterpret_cast<FnMpauthGoRemove>(g_GameObjectRemoveDetour.trampoline);
+                        Log(L"[MPAUTH] Installed GameObject::Remove hook at 0x%08X\n", (uint32_t)kGogGameObjectRemoveAddr);
+                    }
+                }
+                else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
+                    Log(L"[MPAUTH] GameObject::Remove bytes mismatch at 0x%08X\n", (uint32_t)kGogGameObjectRemoveAddr);
+            }
+            {
+                static const uint8_t kExpectedSetRemote[3] = { 0x55, 0x8B, 0xEC };
+                if (ExpectedBytesMatchAt(kGogDayWreckerSetRemoteAddr, kExpectedSetRemote, sizeof(kExpectedSetRemote)))
+                {
+                    if (InstallInlineDetour32(g_DistributedCreateDetour, kGogDayWreckerSetRemoteAddr,
+                        reinterpret_cast<void*>(MpauthSetRemoteHook), 5, kExpectedSetRemote, sizeof(kExpectedSetRemote)))
+                    {
+                        g_MpauthSetRemoteOrig = reinterpret_cast<FnMpauthSetRemote>(g_DistributedCreateDetour.trampoline);
+                        Log(L"[MPAUTH] Installed SetRemote hook at 0x%08X\n", (uint32_t)kGogDayWreckerSetRemoteAddr);
+                    }
+                }
+                else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
+                    Log(L"[MPAUTH] SetRemote bytes mismatch at 0x%08X\n", (uint32_t)kGogDayWreckerSetRemoteAddr);
+            }
+            {
+                static const uint8_t kExpectedOrdnRecv[4] = { 0x55, 0x8B, 0xEC, 0x83 };
+                if (ExpectedBytesMatchAt(kGogOrdnanceReceiverAddr, kExpectedOrdnRecv, sizeof(kExpectedOrdnRecv)))
+                {
+                    if (InstallInlineDetour32(g_OrdnanceReceiverDetour, kGogOrdnanceReceiverAddr,
+                        reinterpret_cast<void*>(MpauthOrdnanceReceiverHook), 6, kExpectedOrdnRecv, sizeof(kExpectedOrdnRecv)))
+                    {
+                        g_MpauthOrdnReceiveOrig = reinterpret_cast<FnMpauthOrdnReceive>(g_OrdnanceReceiverDetour.trampoline);
+                        Log(L"[MPAUTH] Installed Ordnance_Receive hook at 0x%08X\n", (uint32_t)kGogOrdnanceReceiverAddr);
+                    }
+                }
+                else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
+                {
+                    Log(L"[MPAUTH] Ordnance_Receive bytes mismatch at 0x%08X\n", (uint32_t)kGogOrdnanceReceiverAddr);
+                    __try { uint8_t b[6]={}; memcpy(b, reinterpret_cast<void*>(kGogOrdnanceReceiverAddr), 6);
+                        Log(L"[MPAUTH] ordn recv bytes: %02X %02X %02X %02X %02X %02X\n", b[0],b[1],b[2],b[3],b[4],b[5]); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+                }
+            }
+            {
+                static const uint8_t kExpectedHit[3] = { 0x55, 0x8B, 0xEC };
+                if (ExpectedBytesMatchAt(kGogSprayBombHitAddr, kExpectedHit, sizeof(kExpectedHit)))
+                {
+                    if (InstallInlineDetour32(g_SprayBombHitDetour, kGogSprayBombHitAddr,
+                        reinterpret_cast<void*>(MpauthSprayBombHitHook), 5, kExpectedHit, sizeof(kExpectedHit)))
+                    {
+                        g_MpauthSprayHitOrig = reinterpret_cast<FnMpauthSprayHit>(g_SprayBombHitDetour.trampoline);
+                        Log(L"[MPAUTH] Installed SprayBomb::Hit hook at 0x%08X\n", (uint32_t)kGogSprayBombHitAddr);
+                    }
+                }
+                else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
+                    Log(L"[MPAUTH] SprayBomb::Hit bytes mismatch at 0x%08X\n", (uint32_t)kGogSprayBombHitAddr);
+            }
+            {
+                static const uint8_t kExpectedSim[3] = { 0x55, 0x8B, 0xEC };
+                if (ExpectedBytesMatchAt(kGogSprayBombSimulateAddr, kExpectedSim, sizeof(kExpectedSim)))
+                {
+                    if (InstallInlineDetour32(g_SprayBombSimulateDetour, kGogSprayBombSimulateAddr,
+                        reinterpret_cast<void*>(MpauthSprayBombSimulateHook), 5, kExpectedSim, sizeof(kExpectedSim)))
+                    {
+                        g_MpauthSpraySimOrig = reinterpret_cast<FnMpauthSpraySim>(g_SprayBombSimulateDetour.trampoline);
+                        Log(L"[MPAUTH] Installed SprayBomb::Simulate hook at 0x%08X\n", (uint32_t)kGogSprayBombSimulateAddr);
+                    }
+                }
+                else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
+                    Log(L"[MPAUTH] SprayBomb::Simulate bytes mismatch at 0x%08X\n", (uint32_t)kGogSprayBombSimulateAddr);
+            }
+            // Ordinary state reader (004B8590) — daywrecker revive path, GOG 2.2.301 only
+            {
+                static const uint8_t kExpectedOrdinary[4] = { 0x55, 0x8B, 0xEC, 0x83 };
+                // First bytes are push ebp; mov ebp,esp; sub esp, ? — check at least 55 8B EC
+                if (ExpectedBytesMatchAt(kGogOrdinaryStateReaderAddr, kExpectedOrdinary, 3))
+                {
+                    if (InstallInlineDetour32(g_OrdinaryStateReaderDetour, kGogOrdinaryStateReaderAddr,
+                        reinterpret_cast<void*>(MpauthOrdinaryStateReaderHook), 5, kExpectedOrdinary, 3))
+                    {
+                        g_MpauthOrdinaryReaderOrig = reinterpret_cast<FnMpauthOrdinaryReader>(g_OrdinaryStateReaderDetour.trampoline);
+                        Log(L"[MPAUTH] Installed ordinary state reader hook at 0x%08X\n", (uint32_t)kGogOrdinaryStateReaderAddr);
+                    }
+                }
+                else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
+                    Log(L"[MPAUTH] Ordinary reader bytes mismatch at 0x%08X\n", (uint32_t)kGogOrdinaryStateReaderAddr);
+            }
+            // Permanent state reader (004B8FA0)
+            {
+                static const uint8_t kExpectedPermanent[3] = { 0x55, 0x8B, 0xEC };
+                if (ExpectedBytesMatchAt(kGogPermanentStateReaderAddr, kExpectedPermanent, sizeof(kExpectedPermanent)))
+                {
+                    if (InstallInlineDetour32(g_PermanentStateReaderDetour, kGogPermanentStateReaderAddr,
+                        reinterpret_cast<void*>(MpauthPermanentStateReaderHook), 5, kExpectedPermanent, sizeof(kExpectedPermanent)))
+                    {
+                        g_MpauthPermanentReaderOrig = reinterpret_cast<FnMpauthPermanentReader>(g_PermanentStateReaderDetour.trampoline);
+                        Log(L"[MPAUTH] Installed permanent state reader hook at 0x%08X\n", (uint32_t)kGogPermanentStateReaderAddr);
+                    }
+                }
+                else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
+                    Log(L"[MPAUTH] Permanent reader bytes mismatch at 0x%08X\n", (uint32_t)kGogPermanentStateReaderAddr);
+            }
+            g_MpauthHooksInstalled = g_MpauthDwSimOrig || g_MpauthDwExplodeOrig || g_MpauthGoRemoveOrig || g_MpauthSetRemoteOrig || g_MpauthOrdnReceiveOrig || g_MpauthSprayHitOrig;
+            if (g_MpauthHooksInstalled)
+                Log(L"[MPAUTH] Hooks installed dwSim=%hs explode=%hs remove=%hs setRemote=%hs ordRecv=%hs hit=%hs sim=%hs\n",
+                    BoolText(g_MpauthDwSimOrig!=nullptr), BoolText(g_MpauthDwExplodeOrig!=nullptr), BoolText(g_MpauthGoRemoveOrig!=nullptr),
+                    BoolText(g_MpauthSetRemoteOrig!=nullptr), BoolText(g_MpauthOrdnReceiveOrig!=nullptr), BoolText(g_MpauthSprayHitOrig!=nullptr), BoolText(g_MpauthSpraySimOrig!=nullptr));
+        }
+
+
+
+
+
 
 		bool __fastcall TugPostLoadCargoDeployFixHook(void* thisPtr, void* /*edx*/)
 		{
@@ -30279,6 +31445,18 @@ namespace BZROpenShim
         g_SplinterUndeadFixEnabled = kSplinterUndeadFixEnabledDefault;
         RefreshSplinterUndeadFixState();
         g_SplinterUndeadTraceBudget = kSplinterUndeadTraceBudgetDefault;
+        InitializeMpauthConfig();
+        g_MpauthHooksInstalled = false;
+        g_MpauthInstallRetryBudget = 8;
+        g_MpauthInOrdnanceReceive = false;
+        g_MpauthSplHitCounts.clear();
+        // Recent DW removed ids are cleared per map; keep tick map bounded
+        g_MpauthRecentDwRemovedIds.clear();
+        g_MpauthDwRemoveTick.clear();
+        g_MpauthDwDeletedRecord.clear();
+        // Bounded cleanup for hit counts: clear on map reset to avoid (source,ordid) reuse confusion over long sessions
+        g_MpauthSplHitCounts.clear();
+        // Keep budgets as configured by InitializeMpauthConfig
         g_TurretAimPitchMultiplier = 0.5f;
         g_TurretAimPitchMultiplierEnhanced = 0.95f;
         g_RetargetPeriodStateByProcess.clear();
@@ -30609,6 +31787,7 @@ namespace BZROpenShim
 		InstallMultiRenderCountClampIfPossible();
 		InstallThumbnailBmpGuardIfPossible();
 		InstallSplinterUndeadFixIfPossible();
+		InstallMpauthHooksIfPossible();
 		InstallTugCargoPostLoadFixIfPossible();
 		InstallApcAlliedTargetDeployFixIfPossible();
 		InstallQuakeReplayFadeIfPossible();
@@ -30866,6 +32045,28 @@ namespace BZROpenShim
                 g_TraceDamageReveal = EnvFlagEnabled("OPENSHIM_TRACE_DAMAGE_REVEAL") ||
                                       EnvFlagEnabled("BZR_TRACE_DAMAGE_REVEAL");
             g_DamageRevealTraceBudget = kDamageRevealTraceBudgetDefault;
+        }
+
+        // Player-kill research trace init (opt-in). Mirrors damage-reveal
+        // pattern: ini key [Diagnostics] TracePlayerKills, env
+        // OPENSHIM_TRACE_PLAYER_KILLS / BZR_TRACE_PLAYER_KILLS.
+        {
+            bool playerKillConfig = false;
+            if (TryGetUserConfigBool("Diagnostics", "TracePlayerKills", playerKillConfig))
+                g_TracePlayerKills = playerKillConfig;
+            else
+                g_TracePlayerKills = EnvFlagEnabled("OPENSHIM_TRACE_PLAYER_KILLS") ||
+                                     EnvFlagEnabled("BZR_TRACE_PLAYER_KILLS");
+            long budget = kPlayerKillTraceBudgetDefault;
+            if (TryGetEnvLong("OPENSHIM_TRACE_PLAYER_KILLS_BUDGET", budget) ||
+                TryGetEnvLong("BZR_TRACE_PLAYER_KILLS_BUDGET", budget))
+            {
+                if (budget < 0) budget = 0;
+                if (budget > kPlayerKillTraceBudgetMax) budget = kPlayerKillTraceBudgetMax;
+            }
+            g_PlayerKillTraceBudget = budget;
+            if (g_TracePlayerKills)
+                Log(L"[PKTRACE] Player-kill trace enabled budget=%ld\n", budget);
         }
 
         InitializeCareerStatsConfig();
@@ -35500,6 +36701,12 @@ namespace BZROpenShim
             BZROpenShim::UiPerf::Heartbeat("SimTick");
         if (!g_CareerStatsMpHookInstalled)
             InstallCareerStatsMpHookIfPossible();
+        if (ShouldTracePlayerKills() && !g_DistributedRecordDeathIntHookInstalled)
+            InstallDistributedRecordDeathIntHookIfPossible();
+        if (ShouldTracePlayerKills() && (!g_SetAsUserHookInstalled || !g_SetAsNotUserHookInstalled))
+            InstallSetAsUserHooksIfPossible();
+        if (g_MpauthEnabled && !g_MpauthHooksInstalled)
+            InstallMpauthHooksIfPossible();
         if (!g_RadarLayoutHookInstalled)
             InstallRadarLayoutHookIfPossible();
         if (!g_ChunkEffectCreateHooksInstalled)
