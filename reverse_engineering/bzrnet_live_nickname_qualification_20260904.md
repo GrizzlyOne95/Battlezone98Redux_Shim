@@ -61,3 +61,22 @@ The narrow next patch should:
 5. Repair the lobby nickname controls' visibility before claiming the native UI path; the hooks and generated artwork alone do not satisfy the UI acceptance case.
 
 No broad networking redesign is justified by this run.
+
+## Status update — 2026-09-05
+
+Recommendations 1 and 2 are addressed; the rest stand.
+
+| # | Recommendation | Status |
+|---|---|---|
+| 1 | Stop touching cached route-label widgets unless still a live child | **Done.** `UpdateNetRouteLabel` now requires containment in the cached owner and wraps the native call in SEH. A failed check also clears the cached pointers rather than leaving them to be re-walked. |
+| 2 | Make the local outcome wording truthful | **Done.** `AppliedLive` is gone. The result enum now distinguishes `NativeSendCompleted`, `LiveSendUnavailable` and `ReauthQueued`, and no path claims a live apply that no observer confirmed. |
+| 3 | Diagnostic at the native send/queue boundary | **Open.** The `SetPlayerData` ABI is retained for exactly this. |
+| 4 | Investigate the opt-in reauthorization fallback | **Shipped opt-in, default off.** See [`bzrnet_nickname_reauth_design_20260905.md`](bzrnet_nickname_reauth_design_20260905.md). The constraint recorded here -- do not enable by default without measuring disconnect, duplication and lobby-state effects -- is respected. |
+| 5 | Repair the lobby nickname controls' visibility | **Open.** Untouched. |
+
+The crash in recommendation 1 was the more urgent finding than the nickname
+result itself: `HandleCommandHelpBan` refreshes the route labels after *any*
+accepted nickname, outside the feature gate, so it was reachable in shipped
+builds by typing `/nickname` in a match. It is fixed by construction and unit
+test; **reproducing the original crash needs a two-peer session and has not
+been re-run.**
