@@ -78,7 +78,13 @@ $hookTarget = Join-Path $PSScriptRoot ".git\hooks\pre-commit"
 if (Test-Path -LiteralPath $hookSource) {
     $hookDir = Split-Path -Parent $hookTarget
     if (Test-Path -LiteralPath $hookDir) {
-        Copy-Item -LiteralPath $hookSource -Destination $hookTarget -Force
+        # Normalise to LF. A CRLF hook still runs under Git for Windows but
+        # its `exit 1` becomes `exit 1`r`, which is not a valid numeric
+        # argument, so the guard prints its refusal and then exits 0 --
+        # allowing the commit it just rejected.
+        $hookText = [System.IO.File]::ReadAllText($hookSource) -replace "`r`n", "`n"
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($hookTarget, $hookText, $utf8NoBom)
         Write-Host "Installed pre-commit secret guard."
     } else {
         Write-Warning "No .git\hooks directory; skipped the pre-commit secret guard."
