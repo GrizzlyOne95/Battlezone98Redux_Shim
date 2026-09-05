@@ -243,3 +243,15 @@ else()
     target_compile_options(cli_parser_tests PRIVATE -Wall -Wextra -Werror)
 endif()
 add_test(NAME cli_parser_tests COMMAND cli_parser_tests)
+
+add_executable(player_kill_trace_tests
+    player_kill_trace_tests.cpp
+)
+target_compile_features(player_kill_trace_tests PRIVATE cxx_std_20)
+target_include_directories(player_kill_trace_tests PRIVATE ../include)
+if(MSVC)
+    target_compile_options(player_kill_trace_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(player_kill_trace_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME player_kill_trace_tests COMMAND player_kill_trace_tests)
