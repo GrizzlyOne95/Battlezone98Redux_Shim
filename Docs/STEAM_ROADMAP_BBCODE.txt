@@ -62,7 +62,7 @@ The current work includes:
 [*] Server persistence
 [*] Health/admin tooling
 [*] Native OpenShim control-plane and datagram instrumentation
-[*] Live nickname mutation support in OpenShim, with two-client propagation qualification still open
+[*] Live nickname mutation support in OpenShim, now via opt-in lounge re-authorization, with two-client propagation qualification still open
 [/list]
 
 The long-term goal is to expose something like:
@@ -136,7 +136,7 @@ This remains research, not a promise to replace Redux.
 These items have working code but still have a meaningful acceptance gate.
 
 [list]
-[*] [b]Live lobby nickname propagation[/b] - the current authoritative OpenShim path persists [code][Network] Nickname[/code], updates the connection-time nickname buffer, resolves the live BZRNetLobby, obtains the local opaque BZRNet identity through slot 14, and calls the stock slot-7 [code]SetPlayerData("name", value)[/code] path on Apply/Enter or [code]/nickname[/code]. The old two-key [code]name/playerName[/code] assumption was superseded. Re-authorization remains a separate experimental fallback and is off by default. Source/build qualification proves the ABI and send path, but the important acceptance test is still a real second client confirming that the displayed name changes immediately without reconnecting, followed by lobby recreation/reconnect/restart persistence checks.
+[*] [b]Live lobby nickname propagation[/b] - reworked on 2026-09-05 after live qualification failed. The connection-time nickname buffer is read at exactly one point, while the Authorization body is built, so writing it mid-session cannot by itself change what peers see - which is why a rename only ever appeared after a restart. The [code]SetPlayerData("name", value)[/code] path is no longer used: no observer saw a rename from it. Instead, with [code][Network] ReauthOnNicknameChange = 1[/code] (default off) a rename made in a lounge or lobby queues a second Authorization on the existing connection, and the same stable Steam/GOG identity re-appears with the new name without restarting. In a match, or with no lobby, the rename is saved for the next connection and says so - it no longer claims to have applied live when it has not. Remaining gate: a real second client confirming the rename is visible, then re-auth stability across Steam, GOG and Galaxy. The 2026-09-04 run never reached a positive GOG control because Galaxy's communication service failed.
 [*] [b]Stock Factions multiplayer pool[/b] - [code][Network] StockFactionsOnly[/code], default off, restores the restrictive 1.5 starting-vehicle pool by pruning unwanted factions after the list is built. Remaining gate: two-client qualification with the rule on and off.
 [*] [b]TRN tile-blending control[/b] - [code][OpenShim] TerrainTileBlend=0..1[/code] remaps Redux's proven seam-alpha mask. Mapping/resolver tests pass; live visual acceptance and Steam lifecycle coverage remain.
 [*] [b]Finite craft-bounds restoration / frustum culling[/b] - restores a finite containment-safe bound after Redux cockpit code can write an infinite world-craft bound. Submission reductions are measured; final visual/camera/save-load qualification remains.
@@ -409,6 +409,7 @@ The Red Odyssey 1.3 comparison establishes Cloak and Portal plus a widened natio
 The following have moved out of the speculative backlog into working/qualified code or a sufficiently proven compatibility result:
 
 [list]
+[*] [b]Multiplayer nickname crash fix[/b] - typing [code]/nickname[/code] during a match could terminate the game. The lobby route-display widgets are destroyed when the match starts, but the refresh that runs after every accepted rename only checked that its cached pointer was non-null before handing it to the engine. It now requires the widget to still be a live child of its owning screen, and clears the stale pointers when it is not. This ran outside the live-nickname setting, so turning that off did not avoid it.
 [*] [b]Engine-level career statistics[/b] - kills, deaths, and missions played are tracked across single player and multiplayer without mission script support, controlled by [code][Career] StatsTracking[/code], stored locally, and resettable from the Settings page.
 [*] [b]Battlezone 1.5 satellite fog-of-war restoration[/b] - the legacy illumination rule works in single-player, including lifecycle handling; it deliberately stands down in network games for parity.
 [*] [b]Native Redux Raw Input support[/b] - Redux's real WM_INPUT path is exposed through OpenShim with an explicit INI/UI control and absolute-mode device handling.
