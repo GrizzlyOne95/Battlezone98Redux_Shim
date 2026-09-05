@@ -467,3 +467,48 @@ career statistics and scoring are untouched.
 `activnet_id == NetPlayer id` hypothesis remains untested against real
 multiplayer traffic. That is what the instrument is for, and it is the next
 step -- not something this pass claims to have settled.
+
+### Defect 8: the SetAsUser / SetAsNotUser probe could never install
+
+Found by validating the byte guards against the shipped GOG executable
+instead of trusting them, after the primary hook was confirmed good.
+
+| Address | Bytes in the shipped exe | Verdict |
+| --- | --- | --- |
+| `0x006796D0` `DistributedObject::RecordDeath(int)` | `55 8B EC 51 89 4D FC 8B` | **matches** the expected `55 8B EC` prologue; this hook installs |
+| `0x00495468` `SetAsUser` | `FD FF FF C7 85 7C FE FF` | not a function entry |
+| `0x004954D7` `SetAsNotUser` | `FE FF FF 01 00 00 00 EB` | not a function entry |
+
+Both SetAsUser addresses land mid-instruction. `FD FF FF` is the tail of a
+negative displacement, and what follows at `0x00495468` decodes as
+`mov dword ptr [ebp-0x184], 0` -- a local-variable store deep inside some
+larger routine. Scanning backwards from each address finds no `55 8B EC`
+preceded by padding or a return within `0x800` bytes, so neither is near a
+function entry at all. They have the shape of a `.text` reference scan that
+landed on an operand rather than on the instruction that owns it.
+
+The prologue guard did its job and refused to detour, so nothing crashed.
+But the caller re-invoked the installer from the sim tick on every frame for
+as long as the trace was on, because the retry had no latch: each frame paid
+two `ExpectedBytesMatchAt` calls, two guarded `memcpy`s and two log lines,
+forever. That is the same shape as the lazy-resolve-in-a-per-frame-loop
+defect that previously cost a large slice of the main thread.
+
+The probe was removed rather than latched. Latching would have left a
+permanently inert code path that reads as working, and the addresses cannot
+be repaired by inspection -- recovering the real entry points is genuine RE
+work, not an off-by-a-few-bytes correction. The intent (observe the moment an
+object becomes, or stops being, the local user) is worth reviving once the
+functions are actually identified; identify them from the function body, not
+from a byte signature, since a unique prologue is not proof of identity.
+
+What remains is the part that was verified against the real binary: the
+`RecordDeath(int)` death trace and the controller/correlation classification.
+
+### Live smoke test (GOG, 2026-09-05)
+
+1.0.0.15 deployed to the GOG install and launched three times.
+
+- Default (trace absent): loads to the main menu, OpenShim initialises, renderer resources verify, **zero** `ERROR`/`WARN`, **zero** `PKTRACE` lines -- confirming no hook is written when the feature is off.
+- With `OPENSHIM_TRACE_PLAYER_KILLS=1`: arms and reports `[PKTRACE] Player-kill trace enabled budget=256`. The death hooks install from the sim tick, so a main-menu run cannot exercise them; the byte-guard table above is what stands in for that until a mission run is captured.
+- The first run surfaced two `RESOLVE` warnings for `MPVehicleList::LoadCallSite*`. That was a stale `scripts/patches.json` in the game root (19 KB, dated 2026-08-31) rather than a code defect -- the repository and the shipped payload both carry the current 30 KB file. Refreshing the test install cleared it, and the final run is clean.

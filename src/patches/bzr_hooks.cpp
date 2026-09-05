@@ -981,10 +981,15 @@ namespace BZROpenShim
         // Same VA on Steam after SteamStub .bind decrypts .text in place (see kGogRecordDeathEntryAddr note).
         // Separate constant kept for distribution-specific override if validation diverges.
         constexpr uintptr_t kSteamDistributedRecordDeathIntAddr = 0x006796D0;
-        constexpr uintptr_t kGogSetAsUserAddr = 0x00495468;
-        constexpr uintptr_t kGogSetAsNotUserAddr = 0x004954D7;
-        constexpr uintptr_t kSteamSetAsUserAddr = 0x00495468;
-        constexpr uintptr_t kSteamSetAsNotUserAddr = 0x004954D7;
+        // SetAsUser / SetAsNotUser had a probe here. Its addresses
+        // (0x00495468 / 0x004954D7) are not function entries: both land
+        // mid-instruction inside a local-variable store, and there is no
+        // 55 8B EC prologue within 0x800 bytes behind either one. They read
+        // like the tail of a displacement from a .text reference scan. The
+        // prologue guard rejected them every time, so the probe never
+        // installed and only cost a re-probe and two log lines per sim
+        // tick. Removed rather than left failing; see
+        // Docs/MP_EXPLOSIVE_AUTHORITY_QUALIFICATION.md before reviving it.
         constexpr uintptr_t kSteam64GlobalAddr = 0x0260B1D0;
         constexpr uintptr_t kLocalPlayerNetIdAddr = 0x009180D4;
         // Returned when the net id cannot be read at all. Every SinglePlayer-tier
@@ -2186,14 +2191,6 @@ namespace BZROpenShim
         static constexpr size_t kDistributedRecordDeathIntDetourLen = 6;
         static constexpr uint64_t kDistributedHookRetryMs = 500;
         static constexpr uint64_t kDistributedHookRetryWindowMs = 30000;
-        static InlineDetour32 g_SetAsUserDetour = {};
-        static InlineDetour32 g_SetAsNotUserDetour = {};
-        static bool g_SetAsUserHookInstalled = false;
-        static bool g_SetAsNotUserHookInstalled = false;
-        using FnSetAsUser = void(__thiscall*)(void* thisPtr);
-        using FnSetAsNotUser = void(__thiscall*)(void* thisPtr);
-        static FnSetAsUser g_BzrFn_SetAsUserOrig = nullptr;
-        static FnSetAsNotUser g_BzrFn_SetAsNotUserOrig = nullptr;
         static InlineDetour32 g_ParticleCreateTemplateDetour = {};
         static bool g_ParticleTemplateDedupeHookInstalled = false;
         static bool g_ParticleTemplateDedupeFailureLogged = false;
@@ -12975,50 +12972,6 @@ namespace BZROpenShim
                 g_DistributedRecordDeathIntMismatchLogged = false;
                 Log(L"[PKTRACE] Installed DistributedObject::RecordDeath(int) hook at 0x%08X trampoline=0x%08X\n", (uint32_t)target, (uint32_t)(uintptr_t)g_DistributedRecordDeathIntDetour.trampoline);
             }
-        }
-
-        void __fastcall SetAsUserTraceHook(void* thisPtr, void* /*edx*/)
-        {
-            if (g_BzrFn_SetAsUserOrig) g_BzrFn_SetAsUserOrig(thisPtr);
-            if (!ShouldTracePlayerKills()) return;
-            if (InterlockedDecrement(&g_PlayerKillTraceBudget) < 0) return;
-            int handle = 0; TryGetGameObjectHandleValue(thisPtr, handle);
-            int team = GetGameObjectActualTeam(thisPtr);
-            DistributedTraceInfo info{}; TryReadDistributedTraceInfoForObject(thisPtr, info);
-            int playerHandle = 0; if (g_BzrFn_GetPlayerHandle) __try { playerHandle = g_BzrFn_GetPlayerHandle(); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-            Log(L"[PKTRACE] SetAsUser handle=%d team=%d playerHandle=%d type=%u act=0x%04X vt=0x%08X classify=%hs\n", handle, team, playerHandle, (unsigned)info.object_type, (unsigned)info.activnet_id, info.aiVtable, ClassifyObjectController(info));
-        }
-        void __fastcall SetAsNotUserTraceHook(void* thisPtr, void* /*edx*/)
-        {
-            if (g_BzrFn_SetAsNotUserOrig) g_BzrFn_SetAsNotUserOrig(thisPtr);
-            if (!ShouldTracePlayerKills()) return;
-            if (InterlockedDecrement(&g_PlayerKillTraceBudget) < 0) return;
-            int handle = 0; TryGetGameObjectHandleValue(thisPtr, handle);
-            int team = GetGameObjectActualTeam(thisPtr);
-            DistributedTraceInfo info{}; TryReadDistributedTraceInfoForObject(thisPtr, info);
-            Log(L"[PKTRACE] SetAsNotUser handle=%d team=%d type=%u act=0x%04X vt=0x%08X classify=%hs\n", handle, team, (unsigned)info.object_type, (unsigned)info.activnet_id, info.aiVtable, ClassifyObjectController(info));
-        }
-        static void InstallSetAsUserHooksIfPossible()
-        {
-            if (!ShouldTracePlayerKills()) return;
-            auto tryInstallUser = [](InlineDetour32& det, uintptr_t addr, void* hook, const char* name, bool& installed, FnSetAsUser& orig) {
-                if (installed) return;
-                static const uint8_t kProlog[] = {0x55, 0x8B, 0xEC};
-                if (!ExpectedBytesMatchAt(addr, kProlog, sizeof(kProlog))) {
-                    __try { uint8_t b[6]={}; memcpy(b, reinterpret_cast<void*>(addr), 6); Log(L"[PKTRACE] %hs prolog mismatch at 0x%08X: %02X %02X %02X\n", name, (uint32_t)addr, b[0],b[1],b[2]); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-                    return;
-                }
-                if (!InstallInlineDetour32(det, addr, hook, 6, kProlog, sizeof(kProlog))) { Log(L"[PKTRACE] Failed hook %hs at 0x%08X\n", name, (uint32_t)addr); return; }
-                orig = reinterpret_cast<FnSetAsUser>(det.trampoline);
-                installed = (orig != nullptr);
-                if (installed) Log(L"[PKTRACE] Installed %hs at 0x%08X trampoline=0x%08X\n", name, (uint32_t)addr, (uint32_t)(uintptr_t)det.trampoline);
-            };
-            uintptr_t a1 = g_IsSteamExe ? kSteamSetAsUserAddr : kGogSetAsUserAddr;
-            uintptr_t a2 = g_IsSteamExe ? kSteamSetAsNotUserAddr : kGogSetAsNotUserAddr;
-            tryInstallUser(g_SetAsUserDetour, a1, reinterpret_cast<void*>(SetAsUserTraceHook), "SetAsUser", g_SetAsUserHookInstalled, g_BzrFn_SetAsUserOrig);
-            { InlineDetour32& det = g_SetAsNotUserDetour; uintptr_t addr = g_IsSteamExe ? kSteamSetAsNotUserAddr : kGogSetAsNotUserAddr; void* hook = reinterpret_cast<void*>(SetAsNotUserTraceHook); const char* name = "SetAsNotUser"; bool& installed = g_SetAsNotUserHookInstalled; FnSetAsNotUser& orig = g_BzrFn_SetAsNotUserOrig; if (!installed) { static const uint8_t kProlog[] = {0x55, 0x8B, 0xEC}; if (!ExpectedBytesMatchAt(addr, kProlog, sizeof(kProlog))) { __try { uint8_t b[6]={}; memcpy(b, reinterpret_cast<void*>(addr), 6); Log(L"[PKTRACE] %hs prolog mismatch at 0x%08X: %02X %02X %02X\n", name, (uint32_t)addr, b[0],b[1],b[2]); } __except(EXCEPTION_EXECUTE_HANDLER) {} } else if (!InstallInlineDetour32(det, addr, hook, 6, kProlog, sizeof(kProlog))) { Log(L"[PKTRACE] Failed hook %hs at 0x%08X\n", name, (uint32_t)addr); } else { orig = reinterpret_cast<FnSetAsNotUser>(det.trampoline); installed = (orig != nullptr); if (installed) Log(L"[PKTRACE] Installed %hs at 0x%08X trampoline=0x%08X\n", name, (uint32_t)addr, (uint32_t)(uintptr_t)det.trampoline); } } }
-            // dummy to keep original tryInstall line from being duplicated
-            if (false) tryInstallUser(g_SetAsUserDetour, a2, reinterpret_cast<void*>(SetAsNotUserTraceHook), "SetAsNotUser", g_SetAsNotUserHookInstalled, g_BzrFn_SetAsNotUserOrig);
         }
 
         // Career persistence for one derived kill. Single player only -- see
@@ -36703,8 +36656,6 @@ namespace BZROpenShim
             InstallCareerStatsMpHookIfPossible();
         if (ShouldTracePlayerKills() && !g_DistributedRecordDeathIntHookInstalled)
             InstallDistributedRecordDeathIntHookIfPossible();
-        if (ShouldTracePlayerKills() && (!g_SetAsUserHookInstalled || !g_SetAsNotUserHookInstalled))
-            InstallSetAsUserHooksIfPossible();
         if (g_MpauthEnabled && !g_MpauthHooksInstalled)
             InstallMpauthHooksIfPossible();
         if (!g_RadarLayoutHookInstalled)
