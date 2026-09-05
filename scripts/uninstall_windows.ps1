@@ -127,4 +127,5 @@ foreach ($gameDir in $gamePaths) {
 
 Write-Host ""
 Write-Host "Uninstall complete. openshim.ini, net.ini, and logs were left in place."
-Write-Host "Clear any leftover Steam launch options by hand if you set them."
+Write-Host "Clear any leftover Steam launch options by hand if you set them"
+Write-Host "(including the optional openshim_wrap.bat upload wrapper)."
