@@ -155,7 +155,7 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Netcode improvements. NetImprovements is the wholesale opt-out, so it has
     # to ship ON for the others under it to mean anything.
     "Network/NetImprovements",
-    "Network/LiveNicknameKeys",
+    "Network/ReauthOnNicknameChange",
     "Network/LobbyReadouts",
 
     # Restores the BZ 1.5 overhead-view / control-panel display order. Only
