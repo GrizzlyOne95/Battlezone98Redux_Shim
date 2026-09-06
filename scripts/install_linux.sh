@@ -11,6 +11,10 @@
 # loose per-file assets instead would silently drop the resource trees, and the
 # Enhanced renderer refuses to enable without its validated resource set.
 #
+# Existing openshim.ini files are preserved by default. The installer refreshes
+# openshim.ini.canonical every run for the runtime preset-migration path. Pass
+# --reset-ini (or OPENSHIM_RESET_INI=1) for an explicit backup-and-reset.
+#
 # --dll is an advanced override and only proceeds when a matching artifact set
 # sits beside that DLL.
 #
@@ -22,6 +26,17 @@ REF="${OPENSHIM_REF:-main}"
 FLAVOR="all"
 GAME_PATH="${BZR_GAME_PATH:-}"
 DLL_PATH="${OPENSHIM_DLL:-}"
+RESET_INI_RAW="${OPENSHIM_RESET_INI:-0}"
+RESET_INI=0
+
+case "$RESET_INI_RAW" in
+    1|true|TRUE|True|yes|YES|Yes|on|ON|On) RESET_INI=1 ;;
+    0|false|FALSE|False|no|NO|No|off|OFF|Off|'') RESET_INI=0 ;;
+    *)
+        echo "error: OPENSHIM_RESET_INI must be 1/0, true/false, yes/no, or on/off." >&2
+        exit 1
+        ;;
+esac
 
 # One matched artifact set, resolved once and deployed to every game directory.
 DLL=""
@@ -38,7 +53,7 @@ UI_TILES=(uiline.png uiplate.png uibtn.png uibtnhv.png)
 usage() {
     cat <<EOF
 Usage:
-  install_linux.sh [--native | --snap] [--game-path DIR] [--dll FILE] [--ref git-ref]
+  install_linux.sh [--native | --snap] [--game-path DIR] [--dll FILE] [--ref git-ref] [--reset-ini]
 
     --native      Native Steam and Flatpak installs only
     --snap        Snap Steam installs only
@@ -47,9 +62,13 @@ Usage:
                   and net.ini in the same directory (or scripts/patches.json),
                   and resources/renderer/enhanced for the Enhanced renderer.
     --ref         Git ref used only to fetch steam_game_paths.sh (default: $REF)
+    --reset-ini   Back up the current openshim.ini and replace it with the
+                  shipped preset. Without this flag, existing player settings
+                  are preserved.
 
 Environment:
   OPENSHIM_REPO / OPENSHIM_REF / OPENSHIM_DLL / BZR_GAME_PATH
+  OPENSHIM_RESET_INI             same behavior as --reset-ini when truthy
   OPENSHIM_WEBHOOK / OPENSHIM_PLAYER   test-crew log upload (never committed)
 EOF
 }
@@ -287,6 +306,34 @@ deploy_file() {
     echo "  deployed $(basename "$dst") ($(file_size "$dst") bytes)"
 }
 
+deploy_player_ini() {
+    local src="$1" game_dir="$2" stamp="$3"
+    local live="$game_dir/openshim.ini"
+    local canonical="$game_dir/openshim.ini.canonical"
+    local backup=""
+
+    # Canonical is installer-owned and is the first source the runtime migration
+    # path checks when a recognized bad preset needs full replacement.
+    cp -f "$src" "$canonical"
+    echo "  refreshed openshim.ini.canonical"
+
+    if [[ ! -f "$live" ]]; then
+        cp -f "$src" "$live"
+        echo "  created openshim.ini from shipped defaults"
+        return
+    fi
+
+    if [[ "$RESET_INI" != "1" ]]; then
+        echo "  preserved existing openshim.ini"
+        return
+    fi
+
+    backup="$live.pre-reset-$stamp.bak"
+    cp -f "$live" "$backup"
+    cp -f "$src" "$live"
+    echo "  reset openshim.ini (backup: $(basename "$backup"))"
+}
+
 deploy_matched() {
     local game_dir="$1"
     local stamp
@@ -295,7 +342,7 @@ deploy_matched() {
     echo "Installing OpenShim to: $game_dir"
     deploy_file "$DLL" "$game_dir/winmm.dll" "$stamp"
     deploy_file "$PATCHES" "$game_dir/scripts/patches.json" "$stamp"
-    deploy_file "$OPENSHIM_INI" "$game_dir/openshim.ini" "$stamp"
+    deploy_player_ini "$OPENSHIM_INI" "$game_dir" "$stamp"
     deploy_file "$NET_INI" "$game_dir/net.ini" "$stamp"
 
     if [[ -n "$RENDER_SRC" ]]; then
@@ -332,6 +379,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --native) FLAVOR="native"; shift ;;
         --snap) FLAVOR="snap"; shift ;;
+        --reset-ini) RESET_INI=1; shift ;;
         --game-path)
             [[ $# -ge 2 ]] || { echo "Missing value for --game-path" >&2; exit 1; }
             GAME_PATH="$2"
@@ -459,7 +507,7 @@ for game_dir in "${BZR_GAME_PATHS[@]}"; do
     echo
 done
 
-# ── Automatic log upload (test crew) ─────────────────────────────────────────
+# -- Automatic log upload (test crew) -----------------------------------------
 # Zero prompts: the webhook rides in on OPENSHIM_WEBHOOK, pinned in the
 # private Discord channel, never in this public repo. No OPENSHIM_WEBHOOK
 # means no uploader and no questions. Consent is the Steam launch option.
@@ -620,7 +668,7 @@ Install complete.
 OpenShim DLL: OK    $uploader_status
 
 Steam launch options still need to be set once
-(Steam → Battlezone 98 Redux → Properties → Launch Options).
+(Steam -> Battlezone 98 Redux -> Properties -> Launch Options).
 Copy the line for the Steam you actually launch from. Don't guess:
 a wrapper path that does not exist inside the sandbox kills the launch.
 EOF
