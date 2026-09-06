@@ -107,81 +107,63 @@ if ($missing.Count -gt 0 -or $extra.Count -gt 0) {
 
 Write-Host "player openshim.ini completeness passed ($($referenceIds.Count) settings)" -ForegroundColor Green
 
-# The shipped player preset is opt-in for anything that changes how the game
-# plays or looks. Catch accidental regressions where such a key is re-enabled,
-# while allowing the values that preserve stock behavior, one numeric count, and
-# the four buckets that ship ON by policy:
+# Shipping-default policy:
 #
-#   UI          the settings page and the keybind page, because they are how a
-#               player reaches every other switch without editing this file --
-#               which the installer overwrites on each update anyway;
-#   Netcode     the socket layer and the lobby/nickname readouts;
-#   Bug fixes   defects with no gameplay intent (map-list refresh, the alt-tab
-#               music dropout, the duplicate-material crash guard);
-#   [Fixes]     see below.
+#   ON by default:
+#     - crash prevention, stability fixes, and qualified Redux bug fixes unless
+#       they can materially change mixed-client multiplayer behavior;
+#     - qualified netcode fixes;
+#     - the native keybind UI and OpenShim Settings UI.
 #
-# Everything else -- gameplay behavior, visual/audio enhancements, autosave,
-# diagnostics, terrain development -- must stay OFF here and be opted into from
-# the settings page. Adding a key to the allowlist below is a policy decision,
+#   OFF by default:
+#     - every other enhancement, gameplay/presentation change, autosave,
+#       diagnostic, experiment, convenience feature, or fix with unresolved /
+#       material stock-vs-OpenShim multiplayer impact.
+#
+# Stock-preserving values may numerically look enabled (AllowStartupAutoLoad,
+# SunFlashbang, Renderer=Auto), and numeric tuning values for disabled masters
+# remain populated. The allowlist below is intentionally per-setting: there is
+# no blanket [Fixes] exemption. Adding an entry is a shipping-policy decision,
 # not a way to make this test pass.
-#
-# [Fixes] is exempt as a section: those keys are confirmed Redux engine defects,
-# not enhancements, so the opt-in policy does not apply to them -- they ship ON
-# and exist only so an individual fix can be switched off for multiplayer parity
-# or to bisect a suspected regression. A new key added there must still be
-# documented in openshim.ini.example, which the completeness check above covers.
-$allowedEnabledLookingSections = [System.Collections.Generic.HashSet[string]]::new(
-    [System.StringComparer]::OrdinalIgnoreCase)
-[void]$allowedEnabledLookingSections.Add("Fixes")
-
 $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new(
     [System.StringComparer]::OrdinalIgnoreCase)
 @(
-    # Stock-preserving values that merely read as ON.
+    # Stock-preserving values that merely read as ON/enabled-looking.
     "Startup/AllowStartupAutoLoad",
     "Graphics/Renderer",
     "Display/SunFlashbang",
     "Diagnostics/TerrainRenderProbeMaxClusters",
 
-    # UI: the doors to every other setting.
+    # UI: the supported doors to every other setting.
     "General/SettingsUi",
     "General/CustomBindsUi",
 
-    # Straight bug fixes with no gameplay intent.
+    # Straight bug/stability fixes with no material mixed-client divergence.
+    # MapRefreshFixes includes the multiplayer map-list refresh/jump and
+    # selection-preservation repair and is deliberately part of the ON baseline.
     "General/MapRefreshFixes",
     "General/MusicGlobalFocus",
     "General/OgreMaterialCollisionGuard",
-
-    # Netcode improvements. NetImprovements is the wholesale opt-out, so it has
-    # to ship ON for the others under it to mean anything.
-    "Network/NetImprovements",
-    "Network/ReauthOnNicknameChange",
-    "Network/LobbyReadouts",
-
-    # Restores the BZ 1.5 overhead-view / control-panel display order. Only
-    # reachable in a session launched with /edit, so it changes nothing for a
-    # player who is not using the editor.
     "General/EditorOverheadPlacementOrder",
 
-    # Master switch for OpenShim multiplayer vehicle flags. ON is the shipped
-    # feature; OFF removes OpenShim flag work entirely, so it is the opt-out
-    # rather than the opt-in.
-    "Display/MultiplayerFlags",
+    # Qualified [Fixes] entries. The five simulation fixes below stand down in
+    # network games; MagnetZeroRangeGuard is defensive; VehicleListModScoping
+    # repairs asset lookup only; the CLI parser repair has no gameplay effect.
+    "Fixes/ApcAlliedTargetDeploy",
+    "Fixes/SplinterUndead",
+    "Fixes/HowitzerUndeployedRetaliation",
+    "Fixes/TugCargoPostLoad",
+    "Fixes/ConstructorRemoteBuild",
+    "Fixes/MagnetZeroRangeGuard",
+    "Fixes/VehicleListModScoping",
+    "Fixes/CliMultiParameterOptions",
 
-    # Career statistics. Native multiplayer kill/death recording previously ran
-    # unconditionally, with no key at all, so this key is the opt-OUT for
-    # behavior every existing install already has -- shipping it 0 would be a
-    # silent regression rather than a conservative default. Same shape as
-    # NetImprovements and MultiplayerFlags above. It is observational: one
-    # local text file, no gameplay, visual, audio or network effect.
-    "Career/StatsTracking",
+    # Qualified socket/netcode baseline.
+    "Network/NetImprovements",
 
-    # [DX11Enhanced] is gated behind Graphics/RenderProfile, which this same
-    # script pins to Redux below. Both keys are inert until a player opts into
-    # the Enhanced profile on DX11; pre-arming them means that opt-in gets the
-    # whole Enhanced feature set rather than a half-configured one.
-    "DX11Enhanced/FXAA",
-    "DX11Enhanced/EnhancedLightSelectionV2"
+    # Proven Redux regressions that are hard-disabled in network games.
+    "SinglePlayer/JumpSnipeCrouch",
+    "SinglePlayer/SatelliteVisibilityFix"
 ) | ForEach-Object { [void]$allowedEnabledLookingValues.Add($_) }
 
 $enabledLookingTokens = [System.Collections.Generic.HashSet[string]]::new(
@@ -205,7 +187,6 @@ foreach ($line in Get-Content -LiteralPath $playerIni) {
     $id = "$section/$key"
     $playerValues[$id] = $value
     if ($enabledLookingTokens.Contains($value) -and
-        -not $allowedEnabledLookingSections.Contains($section) -and
         -not $allowedEnabledLookingValues.Contains($id)) {
         $unexpectedEnabledValues += "$id = $value"
     }
@@ -217,6 +198,8 @@ if ($unexpectedEnabledValues.Count -gt 0) {
     throw "openshim.ini opt-in default policy failed"
 }
 
+# Exact stock-preserving baselines. These are not OpenShim features even when
+# their values are non-zero/textual.
 $stockValueChecks = @{
     "General/SoundChannels" = "0"
     "General/RawMouseInput" = "0"
@@ -242,7 +225,54 @@ foreach ($entry in $stockValueChecks.GetEnumerator()) {
     }
 }
 
-Write-Host "player openshim.ini conservative defaults passed" -ForegroundColor Green
+# Lock the deliberate policy choices in both directions. This catches someone
+# disabling a qualified fix as well as someone re-enabling an enhancement or a
+# multiplayer-risk fix. Generic enabled-looking detection above remains the
+# catch-all for newly added settings.
+$shippingPolicyChecks = @{
+    "General/CustomBindsUi" = "1"
+    "General/SettingsUi" = "1"
+    "General/MapRefreshFixes" = "1"
+    "General/MusicGlobalFocus" = "1"
+    "General/OgreMaterialCollisionGuard" = "1"
+    "General/EditorOverheadPlacementOrder" = "1"
+
+    "Fixes/AiMultiProducerMakers" = "0"
+    "Fixes/ApcAlliedTargetDeploy" = "1"
+    "Fixes/SplinterUndead" = "1"
+    "Fixes/HowitzerUndeployedRetaliation" = "1"
+    "Fixes/TugCargoPostLoad" = "1"
+    "Fixes/ConstructorRemoteBuild" = "1"
+    "Fixes/MagnetZeroRangeGuard" = "1"
+    "Fixes/ProducerScriptPredicates" = "0"
+    "Fixes/VehicleListModScoping" = "1"
+    "Fixes/CliMultiParameterOptions" = "1"
+
+    "DX11Enhanced/FXAA" = "0"
+    "DX11Enhanced/EnhancedLightSelectionV2" = "0"
+    "Display/MultiplayerFlags" = "0"
+    "Network/NetImprovements" = "1"
+    "Network/GovernorTuning" = "OpenShim"
+    "Network/ReauthOnNicknameChange" = "0"
+    "Network/LobbyReadouts" = "0"
+    "Career/StatsTracking" = "0"
+    "SinglePlayer/JumpSnipeCrouch" = "1"
+    "SinglePlayer/AttackRevealPerceivedTeam" = "0"
+    "SinglePlayer/SatelliteVisibilityFix" = "1"
+}
+foreach ($entry in $shippingPolicyChecks.GetEnumerator()) {
+    if (-not $playerValues.ContainsKey($entry.Key) -or
+        $playerValues[$entry.Key] -cne $entry.Value) {
+        $actual = if ($playerValues.ContainsKey($entry.Key)) {
+            $playerValues[$entry.Key]
+        } else {
+            "<missing>"
+        }
+        throw "openshim.ini shipping-policy mismatch: $($entry.Key) expected '$($entry.Value)', got '$actual'"
+    }
+}
+
+Write-Host "player openshim.ini conservative shipping policy passed" -ForegroundColor Green
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 $vsroot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath

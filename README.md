@@ -500,3 +500,12 @@ MIT — see [LICENSE](LICENSE).
 - **VTrider** — technical assistance and collaboration
 - **Business Lawyer** — technical assistance and collaboration
 - **Janne** — early work investigating DLL shimming and hooking in Battlezone 98 Redux
+
+  ### AI-Assisted Development
+
+OpenShim is developed with the assistance of AI coding tools for tasks such as code drafting, analysis, documentation, test construction, and navigating large reverse-engineering workloads.
+
+AI output is treated as an implementation aid, not as authoritative reverse-engineering evidence. Native behavior, addresses, ABI assumptions, patch sites, and compatibility claims are verified against the actual game binaries, runtime traces, tests, or other reproducible evidence before being treated as established.
+
+All changes remain maintainer-directed and are reviewed, tested, and integrated through the same validation process regardless of how the initial code or analysis was produced.
+
