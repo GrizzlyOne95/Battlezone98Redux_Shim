@@ -32901,7 +32901,14 @@ namespace BZROpenShim
         g_EnablePartialFragmentBoneCollapse =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_PARTIAL_FRAGMENT_BONE_COLLAPSE") ||
               EnvFlagEnabled("BZR_DISABLE_PARTIAL_FRAGMENT_BONE_COLLAPSE"));
+        // This walks every live Ogre entity and invokes best-effort metadata
+        // probes. It was accidentally left on for every production session;
+        // invalid/stale candidates are SEH-guarded, but still generate costly
+        // first-chance AVs (especially under Wine/Proton). Diagnostics are
+        // opt-in like the other runtime research traces.
         g_VehicleSkinningTraceEnabled =
+            (EnvFlagEnabled("OPENSHIM_TRACE_VEHICLE_SKINNING") ||
+             EnvFlagEnabled("BZR_TRACE_VEHICLE_SKINNING")) &&
             !(EnvFlagEnabled("OPENSHIM_DISABLE_VEHICLE_SKINNING_DIAGNOSTICS") ||
               EnvFlagEnabled("OPENSHIM_DISABLE_SKINNING_DIAGNOSTICS") ||
               EnvFlagEnabled("OPENSHIM_DISABLE_VEHICLE_SKINNING_TRACE") ||
@@ -32956,8 +32963,7 @@ namespace BZROpenShim
             EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_TRACE");
         g_TraceChunkRender =
             !disableChunkTrace &&
-            (true ||
-             g_EnableChunkRenderFallback ||
+            (g_EnableChunkRenderFallback ||
              g_EnableChunkProxyDebug ||
              g_EnableChunkMeshProxy ||
              EnvFlagEnabled("BZR_CHUNK_TRACE") ||
@@ -33282,7 +33288,7 @@ namespace BZROpenShim
                 (unsigned long long)caps.lastScanDurationMs,
                 caps.problem.c_str());
         }
-        Log(L"[SKINNING] Vehicle diagnostics: %hs interval=%lums detailBudget=%ld optOut=OPENSHIM_DISABLE_VEHICLE_SKINNING_DIAGNOSTICS\n",
+        Log(L"[SKINNING] Vehicle diagnostics: %hs interval=%lums detailBudget=%ld optIn=OPENSHIM_TRACE_VEHICLE_SKINNING\n",
             g_VehicleSkinningTraceEnabled ? "enabled" : "disabled",
             static_cast<unsigned long>(g_VehicleSkinningTraceIntervalMs),
             static_cast<long>(g_VehicleSkinningTraceBudget));
