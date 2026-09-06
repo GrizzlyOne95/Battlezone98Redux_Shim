@@ -8,6 +8,10 @@
 # per-file assets instead would silently drop the resource trees, and the
 # Enhanced renderer refuses to enable without its validated resource set.
 #
+# An existing player openshim.ini is preserved by default. The installer always
+# refreshes openshim.ini.canonical so startup migration has the current shipped
+# preset available. Set OPENSHIM_RESET_INI=1 for an explicit backup-and-reset.
+#
 # OPENSHIM_DLL is an advanced override and only proceeds when a matching
 # artifact set sits beside that DLL. No Steam launch options are required on
 # Windows.
@@ -27,6 +31,23 @@ $defaultInstallDir = "Battlezone 98 Redux"
 $uiTiles = @("uiline.png", "uiplate.png", "uibtn.png", "uibtnhv.png")
 
 $requestedGamePath = if ($env:OPENSHIM_GAME_PATH) { $env:OPENSHIM_GAME_PATH } else { "" }
+
+function Get-ResetIniRequested {
+    if (-not $env:OPENSHIM_RESET_INI) { return $false }
+    switch ($env:OPENSHIM_RESET_INI.Trim().ToLowerInvariant()) {
+        "1" { return $true }
+        "true" { return $true }
+        "yes" { return $true }
+        "on" { return $true }
+        "0" { return $false }
+        "false" { return $false }
+        "no" { return $false }
+        "off" { return $false }
+        default { throw "OPENSHIM_RESET_INI must be 1/0, true/false, yes/no, or on/off." }
+    }
+}
+
+$resetIni = Get-ResetIniRequested
 
 function Test-BzrGameDir {
     param([string]$Dir)
@@ -346,6 +367,39 @@ function Backup-ThenCopy {
     Write-Host ("  deployed {0,-14} {1,9:N0} bytes" -f $info.Name, $info.Length)
 }
 
+function Deploy-PlayerIni {
+    param(
+        [string]$Source,
+        [string]$GameDir,
+        [string]$Stamp,
+        [bool]$Reset
+    )
+
+    $live = Join-Path $GameDir "openshim.ini"
+    $canonical = Join-Path $GameDir "openshim.ini.canonical"
+
+    # Canonical is installer-owned. Runtime preset migration already checks this
+    # filename first when it needs the current shipped bytes for a full repair.
+    Copy-Item -LiteralPath $Source -Destination $canonical -Force
+    Write-Host "  refreshed openshim.ini.canonical"
+
+    if (-not (Test-Path -LiteralPath $live)) {
+        Copy-Item -LiteralPath $Source -Destination $live -Force
+        Write-Host "  created openshim.ini from shipped defaults"
+        return
+    }
+
+    if (-not $Reset) {
+        Write-Host "  preserved existing openshim.ini"
+        return
+    }
+
+    $backup = "$live.pre-reset-$Stamp.bak"
+    Copy-Item -LiteralPath $live -Destination $backup -Force
+    Copy-Item -LiteralPath $Source -Destination $live -Force
+    Write-Host "  reset openshim.ini (backup: $(Split-Path -Leaf $backup))"
+}
+
 $gamePaths = @(Get-GamePaths)
 if ($gamePaths.Count -eq 0) {
     throw "Could not find Battlezone 98 Redux. Set OPENSHIM_GAME_PATH to the game folder and run again."
@@ -448,7 +502,7 @@ try {
         $destDll = Join-Path $gameDir "winmm.dll"
         Backup-ThenCopy -Source $dll -Dest $destDll -Stamp $stamp
         Backup-ThenCopy -Source $patches -Dest (Join-Path $gameDir "scripts\patches.json") -Stamp $stamp
-        Backup-ThenCopy -Source $openshimIni -Dest (Join-Path $gameDir "openshim.ini") -Stamp $stamp
+        Deploy-PlayerIni -Source $openshimIni -GameDir $gameDir -Stamp $stamp -Reset $resetIni
         Backup-ThenCopy -Source $netIni -Dest (Join-Path $gameDir "net.ini") -Stamp $stamp
 
         if ($artifacts.RenderSource) {
