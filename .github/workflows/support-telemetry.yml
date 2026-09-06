@@ -1,0 +1,297 @@
+name: Support telemetry validation
+
+on:
+  push:
+    branches:
+      - agent/openshim-support-telemetry
+    paths:
+      - 'upload/openshim_support_*.ps1'
+      - 'upload/openshim_support_*.bat'
+      - 'scripts/install_support_windows.ps1'
+      - 'support-worker/**'
+      - '.github/workflows/support-telemetry.yml'
+  pull_request:
+    paths:
+      - 'upload/openshim_support_*.ps1'
+      - 'upload/openshim_support_*.bat'
+      - 'scripts/install_support_windows.ps1'
+      - 'support-worker/**'
+      - '.github/workflows/support-telemetry.yml'
+
+jobs:
+  windows-powershell:
+    name: Windows PowerShell 5.1
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Parse support PowerShell scripts
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $failed = $false
+          foreach ($path in @(
+            'upload/openshim_support_transport.ps1',
+            'upload/openshim_support_wrap.ps1',
+            'scripts/install_support_windows.ps1'
+          )) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $path),
+              [ref]$tokens,
+              [ref]$errors)
+            if ($errors.Count -gt 0) {
+              Write-Host "Parser errors in $path"
+              $errors | ForEach-Object { Write-Host $_.Message }
+              $failed = $true
+            }
+          }
+          if ($failed) { throw 'Support PowerShell parser validation failed.' }
+
+      - name: Smoke-test transport helpers
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . .\upload\openshim_support_transport.ps1
+
+          $input = 'peer=203.0.113.44 path=C:\Users\Test Person\AppData hook=https://discord.com/api/webhooks/123/abcDEF'
+          $safe = Protect-OpenShimSupportText $input
+          if ($safe -match '203\.0\.113\.44') { throw 'IPv4 redaction failed.' }
+          if ($safe -match 'C:\\Users\\Test Person') { throw 'Windows profile redaction failed.' }
+          if ($safe -match 'discord\.com/api/webhooks') { throw 'Discord webhook redaction failed.' }
+
+          $event = Convert-OpenShimSupportLogLine '[2026-09-04T20:04:31.118Z] [pid:123 tid:456] [WARN] [hooks] hello'
+          if ($event.dt -ne '2026-09-04T20:04:31.118Z') { throw 'Timestamp parse failed.' }
+          if ($event.pid -ne 123 -or $event.tid -ne 456) { throw 'PID/TID parse failed.' }
+          if ($event.level -ne 'WARN' -or $event.component -ne 'hooks' -or $event.message -ne 'hello') {
+            throw 'Structured log parse failed.'
+          }
+
+      - name: Validate batch launcher target
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bat = Get-Content .\upload\openshim_support_wrap.bat -Raw
+          if ($bat -notmatch 'openshim_support_wrap\.ps1') { throw 'Batch launcher does not target the support wrapper.' }
+          if ($bat -notmatch '%~dp0') { throw 'Batch launcher is not relative to its own directory.' }
+
+      - name: Smoke-test no-telemetry game launch from Launcher directory
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'openshim support launch smoke'
+          $game = Join-Path $root 'Battlezone 98 Redux'
+          $launcher = Join-Path $game 'Launcher'
+          New-Item -ItemType Directory -Force -Path $launcher | Out-Null
+
+          # Resolve-GameRoot only needs this marker to identify the parent game
+          # directory. The actual probe is a tiny managed executable so this
+          # test does not depend on cmd.exe redirection or quoting behavior.
+          New-Item -ItemType File -Force -Path (Join-Path $game 'battlezone98redux.exe') | Out-Null
+          $probe = Join-Path $launcher 'probe.exe'
+          $probeSource = @'
+          using System;
+          using System.IO;
+          public static class Probe
+          {
+              public static int Main()
+              {
+                  var output = Environment.GetEnvironmentVariable("OPENSHIM_PROBE_OUT");
+                  if (String.IsNullOrEmpty(output)) return 2;
+                  File.WriteAllText(output, Environment.CurrentDirectory);
+                  return 0;
+              }
+          }
+          '@
+          Add-Type -TypeDefinition $probeSource -Language CSharp -OutputAssembly $probe -OutputType ConsoleApplication
+          $cwdFile = Join-Path $root 'cwd.txt'
+
+          $oldAppData = $env:APPDATA
+          $oldLocalAppData = $env:LOCALAPPDATA
+          $oldProbeOut = $env:OPENSHIM_PROBE_OUT
+          try {
+            $env:APPDATA = Join-Path $root 'appdata'
+            $env:LOCALAPPDATA = Join-Path $root 'localappdata'
+            $env:OPENSHIM_PROBE_OUT = $cwdFile
+            New-Item -ItemType Directory -Force -Path $env:APPDATA, $env:LOCALAPPDATA | Out-Null
+
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass `
+              -File .\upload\openshim_support_wrap.ps1 `
+              $probe
+            if ($LASTEXITCODE -ne 0) { throw "Support wrapper pass-through returned $LASTEXITCODE" }
+          } finally {
+            $env:APPDATA = $oldAppData
+            $env:LOCALAPPDATA = $oldLocalAppData
+            $env:OPENSHIM_PROBE_OUT = $oldProbeOut
+          }
+
+          if (-not (Test-Path -LiteralPath $cwdFile)) { throw 'Probe process did not run.' }
+          $actual = (Get-Content -LiteralPath $cwdFile -Raw).Trim()
+          $expected = (Resolve-Path $game).Path
+          if (-not $actual.Equals($expected, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Wrong working directory. Expected '$expected', got '$actual'."
+          }
+
+      - name: Exercise live support pipeline against local mock backend
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'openshim-support-e2e'
+          $game = Join-Path $root 'Battlezone 98 Redux'
+          $launcher = Join-Path $game 'Launcher'
+          $mockOut = Join-Path $root 'mock-output'
+          New-Item -ItemType Directory -Force -Path $launcher, $mockOut | Out-Null
+          New-Item -ItemType File -Force -Path (Join-Path $game 'battlezone98redux.exe') | Out-Null
+
+          $listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, 0)
+          $listener.Start()
+          $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+          $listener.Stop()
+
+          $server = Start-Process -FilePath python -ArgumentList @(
+            'support-worker/test/mock_support_server.py',
+            '--port', "$port",
+            '--output', $mockOut
+          ) -PassThru -WindowStyle Hidden
+
+          try {
+            for ($i = 0; $i -lt 100 -and -not (Test-Path -LiteralPath (Join-Path $mockOut 'ready')); ++$i) {
+              Start-Sleep -Milliseconds 50
+            }
+            if (-not (Test-Path -LiteralPath (Join-Path $mockOut 'ready'))) {
+              throw 'Mock support server did not become ready.'
+            }
+
+            $probe = Join-Path $launcher 'supportprobe.exe'
+            $probeSource = @'
+            using System;
+            using System.IO;
+            using System.Text;
+            using System.Threading;
+
+            public static class SupportProbe
+            {
+                public static int Main()
+                {
+                    var launcher = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+                    var game = Directory.GetParent(launcher).FullName;
+                    var logs = Path.Combine(game, "logs");
+                    Directory.CreateDirectory(logs);
+
+                    using (var writer = new StreamWriter(
+                        Path.Combine(logs, "openshim.log"),
+                        false,
+                        new UTF8Encoding(false)))
+                    {
+                        writer.WriteLine(@"[2026-09-04T20:04:31.118Z] [pid:123 tid:456] [INFO] [test] begin peer=203.0.113.44 path=C:\Users\TestUser\AppData hook=https://discord.com/api/webhooks/123/abc");
+                        writer.Flush();
+                        Thread.Sleep(250);
+                        writer.WriteLine("[2026-09-04T20:04:31.368Z] [pid:123 tid:456] [WARN] [test] second");
+                        writer.Flush();
+                        Thread.Sleep(1200);
+                        writer.WriteLine("[2026-09-04T20:04:32.568Z] [pid:123 tid:456] [INFO] [test] end");
+                        writer.Flush();
+                    }
+
+                    File.WriteAllText(
+                        Path.Combine(game, "BZLogger.txt"),
+                        "Exiting Game With Return Code 0\r\n",
+                        new UTF8Encoding(false));
+                    Thread.Sleep(200);
+                    return 0;
+                }
+            }
+            '@
+            Add-Type -TypeDefinition $probeSource -Language CSharp -OutputAssembly $probe -OutputType ConsoleApplication
+
+            $oldAppData = $env:APPDATA
+            $oldLocalAppData = $env:LOCALAPPDATA
+            $oldEndpoint = $env:OPENSHIM_SUPPORT_ENDPOINT
+            try {
+              $env:APPDATA = Join-Path $root 'appdata'
+              $env:LOCALAPPDATA = Join-Path $root 'localappdata'
+              $env:OPENSHIM_SUPPORT_ENDPOINT = $null
+              $confDir = Join-Path $env:APPDATA 'openshim'
+              New-Item -ItemType Directory -Force -Path $confDir, $env:LOCALAPPDATA | Out-Null
+              "OPENSHIM_SUPPORT_ENDPOINT='http://127.0.0.1:$port'" |
+                Out-File -LiteralPath (Join-Path $confDir 'upload.conf') -Encoding UTF8
+
+              & powershell.exe -NoProfile -ExecutionPolicy Bypass `
+                -File .\upload\openshim_support_wrap.ps1 `
+                $probe
+              if ($LASTEXITCODE -ne 0) { throw "Live support wrapper returned $LASTEXITCODE" }
+
+              $latestId = Join-Path (Join-Path $env:LOCALAPPDATA 'openshim') 'latest-support-id.txt'
+              if (-not (Test-Path -LiteralPath $latestId)) { throw 'Support ID file was not created.' }
+              if ((Get-Content -LiteralPath $latestId -Raw).Trim() -ne 'OCP-TEST0001') {
+                throw 'Unexpected support ID persisted by wrapper.'
+              }
+
+              if (-not (Test-Path -LiteralPath (Join-Path $mockOut 'session-request.json'))) {
+                throw 'Session creation request never reached mock backend.'
+              }
+              $logFiles = @(Get-ChildItem -LiteralPath (Join-Path $mockOut 'logs') -Filter '*.json' -File -ErrorAction SilentlyContinue)
+              if ($logFiles.Count -lt 1) { throw 'No live log batch reached mock backend.' }
+              $liveText = ($logFiles | Sort-Object Name | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join "`n"
+              if ($liveText -notmatch 'second' -or $liveText -notmatch 'end') { throw 'Expected live log messages were not uploaded.' }
+              if ($liveText -match '203\.0\.113\.44') { throw 'Live telemetry leaked IPv4 address.' }
+              if ($liveText -match 'discord\.com/api/webhooks') { throw 'Live telemetry leaked Discord webhook URL.' }
+              if ($liveText -match 'TestUser') { throw 'Live telemetry leaked Windows profile name.' }
+
+              $artifactDir = Join-Path $mockOut 'artifacts'
+              $shimArtifact = Join-Path $artifactDir 'openshim.log'
+              $bzArtifact = Join-Path $artifactDir 'BZLogger.tail.txt'
+              if (-not (Test-Path -LiteralPath $shimArtifact)) { throw 'Final openshim.log artifact was not uploaded.' }
+              if (-not (Test-Path -LiteralPath $bzArtifact)) { throw 'BZLogger tail artifact was not uploaded.' }
+              $artifactText = Get-Content -LiteralPath $shimArtifact -Raw
+              if ($artifactText -match '203\.0\.113\.44') { throw 'Final artifact leaked IPv4 address.' }
+              if ($artifactText -match 'discord\.com/api/webhooks') { throw 'Final artifact leaked Discord webhook URL.' }
+              if ($artifactText -match 'TestUser') { throw 'Final artifact leaked Windows profile name.' }
+
+              $finishPath = Join-Path $mockOut 'finish.json'
+              if (-not (Test-Path -LiteralPath $finishPath)) { throw 'Finish request never reached mock backend.' }
+              $finish = Get-Content -LiteralPath $finishPath -Raw | ConvertFrom-Json
+              if ($finish.exit_code -ne 0 -or -not $finish.clean_exit -or $finish.crashed) {
+                throw "Unexpected finish state: $(Get-Content -LiteralPath $finishPath -Raw)"
+              }
+
+              $sessionSpool = Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA 'openshim') 'support-spool') 'OCP-TEST0001'
+              if (Test-Path -LiteralPath $sessionSpool) {
+                throw 'Fully acknowledged support session was not removed from local spool.'
+              }
+            } finally {
+              $env:APPDATA = $oldAppData
+              $env:LOCALAPPDATA = $oldLocalAppData
+              $env:OPENSHIM_SUPPORT_ENDPOINT = $oldEndpoint
+            }
+          } finally {
+            if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
+          }
+
+      - name: Verify support installer is opt-in
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Get-Content .\scripts\install_support_windows.ps1 -Raw
+          if ($installer -notmatch 'OPENSHIM_SUPPORT_ENDPOINT') { throw 'Installer lost endpoint gating.' }
+          if ($installer -notmatch 'Nothing uploads until you opt in') { throw 'Installer lost explicit launch-option consent text.' }
+          if ($installer -notmatch 'OPENSHIM_SUPPORT_INCLUDE_DUMPS') { throw 'Installer lost separate dump opt-in.' }
+
+  worker-tests:
+    name: Worker protocol and retry tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax-check Worker
+        working-directory: support-worker
+        run: node --check src/index.js
+      - name: Run Worker tests
+        working-directory: support-worker
+        run: npm test
