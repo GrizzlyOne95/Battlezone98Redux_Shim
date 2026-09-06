@@ -145,14 +145,15 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "General/EditorOverheadPlacementOrder",
 
     # Qualified [Fixes] entries. The five simulation fixes below stand down in
-    # network games; MagnetZeroRangeGuard is defensive; the CLI parser repair
-    # has no gameplay/network effect.
+    # network games; MagnetZeroRangeGuard is defensive; VehicleListModScoping
+    # repairs asset lookup only; the CLI parser repair has no gameplay effect.
     "Fixes/ApcAlliedTargetDeploy",
     "Fixes/SplinterUndead",
     "Fixes/HowitzerUndeployedRetaliation",
     "Fixes/TugCargoPostLoad",
     "Fixes/ConstructorRemoteBuild",
     "Fixes/MagnetZeroRangeGuard",
+    "Fixes/VehicleListModScoping",
     "Fixes/CliMultiParameterOptions",
 
     # Qualified socket/netcode baseline.
@@ -242,7 +243,7 @@ $shippingPolicyChecks = @{
     "Fixes/ConstructorRemoteBuild" = "1"
     "Fixes/MagnetZeroRangeGuard" = "1"
     "Fixes/ProducerScriptPredicates" = "0"
-    "Fixes/VehicleListModScoping" = "0"
+    "Fixes/VehicleListModScoping" = "1"
     "Fixes/CliMultiParameterOptions" = "1"
 
     "DX11Enhanced/FXAA" = "0"
