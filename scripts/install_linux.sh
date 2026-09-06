@@ -507,7 +507,7 @@ for game_dir in "${BZR_GAME_PATHS[@]}"; do
     echo
 done
 
-# -- Automatic log upload (test crew) -----------------------------------------
+# ── Automatic log upload (test crew) ─────────────────────────────────────────
 # Zero prompts: the webhook rides in on OPENSHIM_WEBHOOK, pinned in the
 # private Discord channel, never in this public repo. No OPENSHIM_WEBHOOK
 # means no uploader and no questions. Consent is the Steam launch option.
@@ -668,7 +668,7 @@ Install complete.
 OpenShim DLL: OK    $uploader_status
 
 Steam launch options still need to be set once
-(Steam -> Battlezone 98 Redux -> Properties -> Launch Options).
+(Steam → Battlezone 98 Redux → Properties → Launch Options).
 Copy the line for the Steam you actually launch from. Don't guess:
 a wrapper path that does not exist inside the sandbox kills the launch.
 EOF
