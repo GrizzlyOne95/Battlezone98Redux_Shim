@@ -139,6 +139,8 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "General/CustomBindsUi",
 
     # Straight bug/stability fixes with no material mixed-client divergence.
+    # MapRefreshFixes includes the multiplayer map-list refresh/jump and
+    # selection-preservation repair and is deliberately part of the ON baseline.
     "General/MapRefreshFixes",
     "General/MusicGlobalFocus",
     "General/OgreMaterialCollisionGuard",
