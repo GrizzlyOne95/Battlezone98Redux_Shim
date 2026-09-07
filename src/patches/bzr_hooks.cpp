@@ -628,7 +628,11 @@ namespace BZROpenShim
         constexpr int kEngineFlameColorBlue = 1;
         constexpr int kEngineFlameColorRed = 2;
         constexpr int kEngineFlameColorGreen = 3;
-        constexpr int kEngineFlameColorPurple = 4;
+        // Faction-only colors. EXU's public per-team color ABI intentionally
+        // remains the stock 0..3 range above; these values are selected only by
+        // the local ODF-faction fallback when JetFlames is enabled.
+        constexpr int kEngineFlameColorOrange = 4;
+        constexpr int kEngineFlameColorBlackDog = 5;
         // GameObject -> ODF name chain, verified on the live GOG exe from GetOdf
         // (0x004FFFD0): the class accessor is a virtual on the sub-object at
         // GameObject+0x18 (vtable[0] returns GameObjectClass*), and the ODF name
@@ -1052,6 +1056,119 @@ namespace BZROpenShim
         {
             0x66, 0x8B, 0x85, 0xAE, 0xFC, 0xFF, 0xFF, 0x38, 0xE0, 0x76, 0x26
         };
+
+        // --- Ordnance velocity inheritance -----------------------------------
+        //
+        // Stock Redux gives every projectile exactly the muzzle velocity its
+        // ordnance class declares and nothing else. A shot fired from a craft
+        // doing 40 m/s leaves the barrel at the same world velocity as one
+        // fired from a standstill, so ordnance appears to fall behind a moving
+        // shooter, and the cannon's own lead solution is computed against a
+        // target velocity that never accounts for the shooter's motion.
+        //
+        // Traced statically against the shipped GOG v2.2.301 executable
+        // (battlezone98redux.exe, ImageBase 0x00400000). Three sites:
+        //
+        //   Ordnance::Init (0x00480340, __thiscall, this stored to [ebp-0x20]
+        //   by the prologue at 0x00480350):
+        //     0x004803BD  the spawn velocity vec3 is built into the frame
+        //                 locals [ebp-0x10] / [ebp-0x0C] / [ebp-0x08]
+        //     0x004803CE  eax := this + 0x30  (kOrdnanceVelocityOffset)
+        //     0x004803D4  mov ecx,[ebp-0x10]        <-- 8-byte detour site
+        //                 mov [eax],ecx
+        //                 mov edx,[ebp-0x0C]
+        //     0x004803DC  ...the rest of the vec3 store
+        //     0x004803E8  nominal speed [+0x20] is then taken from the ordnance
+        //                 CLASS field [class+0x54] -- NOT from the vector we
+        //                 just changed -- and [+0x24] is its reciprocal. Both
+        //                 must therefore be left alone here, unlike the magnet
+        //                 mine and shield tower paths further down this file,
+        //                 which recompute them because they change velocity
+        //                 after the object is fully built.
+        //
+        //   Cannon lead/TLI solve (0x0048F5E0, __thiscall, this at [ebp-0x20]):
+        //     0x0048F62D  movss xmm0,[ebp-0x44]         target speed
+        //     0x0048F632  comiss xmm0,[0x008A2538]      the constant is 0.1f
+        //     0x0048F639  jbe <bail>                <-- 6-byte NOP site
+        //     0x0048F642  call ...                      returns target velocity
+        //     0x0048F647  ...copied into [ebp-0x1C] / [ebp-0x18] / [ebp-0x14]
+        //     0x0048F658  mov eax,[ebp-0x20]        <-- 6-byte detour site
+        //                 mov ecx,[eax+0x0C]
+        //
+        // The shooter chain used by the spawn site was read out of the ordnance
+        // neighbourhood itself (0x0047F000..0x00482000), where [ordnance+0xD8]
+        // is dereferenced thirteen times -- at 0x00480720 and 0x004808CC it is
+        // pushed as the owner pointer alongside the ordnance transform, which
+        // is the shape of an obj76 being handed to the effect and damage calls
+        // -- and [ordnance+0xCC] is never touched at all:
+        //
+        //     Ordnance*  + 0xD8   -> shooter obj76
+        //     obj76      + 0x8C   -> GameObject* shooter (kObj76GameObjectOffset)
+        //     GameObject + 0x12C  -> shooter world velocity vec3
+        //
+        // The lead-tolerance NOP matters because the stock gate skips the whole
+        // lead solve for a target moving slower than 0.1 m/s. Once the
+        // shooter's own velocity is subtracted from the target velocity a
+        // stationary target still needs a lead solution, so the gate has to
+        // come out for the compensation to be observable at all. It is only
+        // ever applied while the compensation is actually running: on its own
+        // it would make a moving shooter's aim worse, not better.
+        constexpr uintptr_t kOrdnanceSpawnVelocityAddr = 0x004803D4;
+        constexpr size_t kOrdnanceSpawnVelocityPatchLen = 8;
+        // mov ecx,[ebp-0x10] ; mov [eax],ecx ; mov edx,[ebp-0x0C]
+        constexpr uint8_t kOrdnanceSpawnVelocityExpected[kOrdnanceSpawnVelocityPatchLen] =
+        {
+            0x8B, 0x4D, 0xF0, 0x89, 0x08, 0x8B, 0x55, 0xF4
+        };
+
+        constexpr uintptr_t kCannonLeadVelocityAddr = 0x0048F658;
+        constexpr size_t kCannonLeadVelocityPatchLen = 6;
+        // mov eax,[ebp-0x20] ; mov ecx,[eax+0x0C]
+        constexpr uint8_t kCannonLeadVelocityExpected[kCannonLeadVelocityPatchLen] =
+        {
+            0x8B, 0x45, 0xE0, 0x8B, 0x48, 0x0C
+        };
+
+        constexpr uintptr_t kCannonLeadToleranceAddr = 0x0048F639;
+        constexpr size_t kCannonLeadTolerancePatchLen = 6;
+        // jbe 0x0048F82F -- the "target is barely moving, skip the lead solve"
+        // branch guarded by the 0.1f at 0x008A2538.
+        constexpr uint8_t kCannonLeadToleranceExpected[kCannonLeadTolerancePatchLen] =
+        {
+            0x0F, 0x86, 0xF0, 0x01, 0x00, 0x00
+        };
+        constexpr uint8_t kCannonLeadTolerancePatched[kCannonLeadTolerancePatchLen] =
+        {
+            0x90, 0x90, 0x90, 0x90, 0x90, 0x90
+        };
+
+        // Host frame offsets. Both sites are entered by a JMP written over
+        // whole instructions, so EBP still addresses the host frame.
+        constexpr long kOrdnanceSpawnThisFrameOffset = -0x20;
+        constexpr long kOrdnanceSpawnVelocityFrameOffset = -0x10;
+        constexpr long kCannonLeadThisFrameOffset = -0x20;
+        constexpr long kCannonLeadVelocityFrameOffset = -0x1C;
+
+        // Distinct from kOrdnanceOwnerObjOffset (0xCC) above: that one is what
+        // TryGetOrdnanceOwner has always read, this one is the field the
+        // ordnance code itself walks. See the neighbourhood scan noted above.
+        constexpr size_t kOrdnanceShooterObjOffset = 0xD8;
+        // Unlike the ordnance chain, this offset could NOT be corroborated
+        // statically -- the only +0x18 dereferences in the lead function are on
+        // an argument ([ebp+0x0C]), and every +0x8C access in
+        // 0x0048E000..0x00492000 is a float rather than a pointer hop. It is
+        // therefore proven at runtime by ValidateCannonOwnerChain below instead
+        // of being trusted.
+        constexpr size_t kCannonOwnerObjOffset = 0x18;
+        constexpr size_t kGameObjectVelocityOffset = 0x12C;
+
+        // Runtime verdict on kCannonOwnerObjOffset.
+        constexpr long kCannonOwnerChainUnprobed = -1;
+        constexpr long kCannonOwnerChainRejected = 0;
+        constexpr long kCannonOwnerChainAccepted = 1;
+        // The reconcile tick retries installation; Steam decrypts .text in
+        // stages, so an early attempt can legitimately match nothing.
+        constexpr int kOrdnanceVelocityDetourMaxAttempts = 200;
         constexpr size_t kCalcRangeCraftDetourLen = 9;
         // RecycleTask::InitLookingForScrap computes a stock squared-distance
         // score at this one call site after all team/material/region filters.
@@ -1083,9 +1200,17 @@ namespace BZROpenShim
         // directly through the base Hovercraft implementation.
         constexpr uintptr_t kWingmanWeaponAimVtableSlotAddr = 0x0088A4FC;
         constexpr uintptr_t kHovercraftWeaponAimVtableSlotAddr = 0x00889418;
+        // TurretTank::UpdateWeaponAim appears in both released TurretTank
+        // primary vtables. Data xrefs in the shipped GOG image independently
+        // identify these slots as the two consumers of 0x005F27B0.
+        constexpr uintptr_t kTurretTankWeaponAimVtableSlotAddrs[] = {
+            0x0087AE08,
+            0x00889530,
+        };
         constexpr uintptr_t kWingmanWeaponAimStockAddr = 0x004EB590;
         constexpr uintptr_t kWalkerUpdateWeaponAimAddr = 0x0060F320;
         constexpr uintptr_t kHovercraftUpdateWeaponAimAddr = 0x005F0930;
+        constexpr uintptr_t kTurretTankUpdateWeaponAimAddr = 0x005F27B0;
         constexpr uintptr_t kCarrierGetWeaponAddr = 0x00417F60;
         constexpr uintptr_t kRefreshWeaponTransformAddr = 0x00681A00;
         constexpr uintptr_t kLocalUserObjectPtrAddr = 0x00917AFC;
@@ -1623,6 +1748,34 @@ namespace BZROpenShim
         static bool g_JumpSnipeCrouchBaselineEnabled = true;
         // Whether the byte patch is currently live in the exe image.
         static bool g_JumpSnipeCrouchPatchActive = false;
+        // Ordnance velocity inheritance. Desired state starts from the INI
+        // baseline; the refresh gate keeps it out of multiplayer.
+        static bool g_OrdnanceVelocityInheritanceEnabled = false;
+        static bool g_OrdnanceVelocityInheritanceBaselineEnabled = false;
+        // Sampled by the two naked thunks on every shot. The detours stay
+        // installed for the process lifetime and simply do nothing while this
+        // is 0, so the multiplayer gate never has to rewrite .text on a hot
+        // path -- only the lead-tolerance NOP is written and reverted.
+        static volatile long g_OrdnanceVelocityInheritanceActive = 0;
+        static InlineDetour32 g_OrdnanceSpawnVelocityDetour = {};
+        static InlineDetour32 g_CannonLeadVelocityDetour = {};
+        // Resume targets read by the thunks. Held separately from the detour
+        // records so the tail JMP is one indirect load that clobbers nothing.
+        static void* g_OrdnanceSpawnVelocityResume = nullptr;
+        static void* g_CannonLeadVelocityResume = nullptr;
+        static bool g_OrdnanceSpawnVelocityDetourInstalled = false;
+        static bool g_CannonLeadVelocityDetourInstalled = false;
+        static bool g_OrdnanceVelocityDetourFailureLogged = false;
+        static int g_OrdnanceVelocityDetourAttempts = 0;
+        static bool g_CannonLeadTolerancePatchActive = false;
+        static volatile long g_CannonOwnerChainState = kCannonOwnerChainUnprobed;
+        // Set by the sim thread when the chain fails validation, consumed by
+        // the next reconcile tick. The thunk must not touch page protection.
+        static volatile long g_CannonOwnerChainRejectPending = 0;
+        // What each arm actually did. A zero here after a session spent
+        // shooting means the arm never engaged, not that it made no difference.
+        static volatile long g_OrdnanceSpawnVelocityAppliedCount = 0;
+        static volatile long g_CannonLeadVelocityAppliedCount = 0;
         static bool g_ShotConvergenceEnabled = true;
         static bool g_ShotConvergenceBaselineEnabled = true;
         static bool g_PlayerReticleShotConvergenceEnabled = true;
@@ -1633,6 +1786,7 @@ namespace BZROpenShim
         // WeaponConvergence report itself as active.
         static bool g_WingmanWeaponAimWrapperActive = false;
         static bool g_PlayerReticleHovercraftPatchActive = false;
+        static bool g_TurretTankWeaponAimWrapperActive[2] = { false, false };
         static bool g_PlayerReticleConvergenceLayoutFaultLogged = false;
         static bool g_PlayerReticleConvergenceMountFaultLogged = false;
         static bool g_PlayerReticleConvergenceSkyStandDownLogged = false;
@@ -2363,16 +2517,22 @@ namespace BZROpenShim
         static ChunkBridgeSnapshot CaptureChunkBridgeSnapshot(const uint8_t* objectBytes);
 
         static int g_EngineFlamePrimaryRedTexture = 0;
+        static int g_EngineFlamePrimaryBlueTexture = 0;
         static int g_EngineFlamePrimaryGreenTexture = 0;
-        static int g_EngineFlamePrimaryPurpleTexture = 0;
+        static int g_EngineFlamePrimaryOrangeTexture = 0;
+        static int g_EngineFlamePrimaryBlackDogTexture = 0;
         static void* g_EngineFlamePrimaryManager = nullptr;
         static void* g_EngineFlameSecondaryManager = nullptr;
         alignas(16) static unsigned char g_EngineFlamePrimaryRed[kEngineFlameObjectSize] = {};
+        alignas(16) static unsigned char g_EngineFlamePrimaryBlue[kEngineFlameObjectSize] = {};
         alignas(16) static unsigned char g_EngineFlamePrimaryGreen[kEngineFlameObjectSize] = {};
-        alignas(16) static unsigned char g_EngineFlamePrimaryPurple[kEngineFlameObjectSize] = {};
+        alignas(16) static unsigned char g_EngineFlamePrimaryOrange[kEngineFlameObjectSize] = {};
+        alignas(16) static unsigned char g_EngineFlamePrimaryBlackDog[kEngineFlameObjectSize] = {};
         alignas(16) static unsigned char g_EngineFlameSecondaryRed[kEngineFlameObjectSize] = {};
+        alignas(16) static unsigned char g_EngineFlameSecondaryBlue[kEngineFlameObjectSize] = {};
         alignas(16) static unsigned char g_EngineFlameSecondaryGreen[kEngineFlameObjectSize] = {};
-        alignas(16) static unsigned char g_EngineFlameSecondaryPurple[kEngineFlameObjectSize] = {};
+        alignas(16) static unsigned char g_EngineFlameSecondaryOrange[kEngineFlameObjectSize] = {};
+        alignas(16) static unsigned char g_EngineFlameSecondaryBlackDog[kEngineFlameObjectSize] = {};
 
         // Faction jet flames (openshim.ini [Display] JetFlames). A global cosmetic
         // preference: when on, a unit's engine flame is tinted by its faction
@@ -2507,6 +2667,10 @@ namespace BZROpenShim
         // Global single-player improvement. The exact-byte and live-net-id
         // guards still keep it off unsupported builds and multiplayer.
         static constexpr bool kJumpSnipeCrouchEnabledDefault = true;
+        // Enhancement rather than a defect fix, and it changes projectile
+        // physics for every shot in the world, so it ships OFF under the
+        // [SinglePlayer] policy and is hard-disabled in network games.
+        static constexpr bool kOrdnanceVelocityInheritanceDefault = false;
         static constexpr bool kAllowNeutralAttackOrdersDefault = false;
         static bool g_AllowNeutralAttackOrders = kAllowNeutralAttackOrdersDefault;
         // Pure instrumentation for the AIP construction program. Off by default
@@ -14079,6 +14243,22 @@ namespace BZROpenShim
                 ApplyLocalPlayerReticleConvergence(craft);
         }
 
+        static void __fastcall TurretTankUpdateWeaponAimWithConvergence(
+            void* craft,
+            void* /*edx*/,
+            float dt)
+        {
+            const bool singlePlayer = ReadLocalPlayerNetIdValue() == 0;
+            const uintptr_t target =
+                (g_ShotConvergenceEnabled && singlePlayer)
+                    ? kWalkerUpdateWeaponAimAddr
+                    : kTurretTankUpdateWeaponAimAddr;
+            reinterpret_cast<FnUpdateWeaponAim>(target)(craft, dt);
+
+            if (g_PlayerReticleShotConvergenceEnabled && singlePlayer)
+                ApplyLocalPlayerReticleConvergence(craft);
+        }
+
         static bool TryReadPointerValue(uintptr_t address, void*& outValue)
         {
             outValue = nullptr;
@@ -14166,6 +14346,20 @@ namespace BZROpenShim
                 g_PlayerReticleShotConvergenceEnabled && singlePlayer,
                 g_PlayerReticleHovercraftPatchActive,
                 L"player smart-reticle convergence (hovercraft fallback)");
+            for (size_t index = 0;
+                 index < std::size(kTurretTankWeaponAimVtableSlotAddrs);
+                 ++index)
+            {
+                RefreshConvergenceVtableSlot(
+                    kTurretTankWeaponAimVtableSlotAddrs[index],
+                    kTurretTankUpdateWeaponAimAddr,
+                    reinterpret_cast<void*>(TurretTankUpdateWeaponAimWithConvergence),
+                    wantWingmanWrapper,
+                    g_TurretTankWeaponAimWrapperActive[index],
+                    index == 0
+                        ? L"turrettank convergence dispatcher A"
+                        : L"turrettank convergence dispatcher B");
+            }
 
             // Feature state is reported independently even though the Wingman
             // dispatcher is shared. For normal player craft, the Wingman slot
@@ -15051,6 +15245,216 @@ namespace BZROpenShim
                 static_cast<uint32_t>(kRadarLayoutBuilderAddr));
         }
 
+        // --- Radar size scale: the player-facing setting ------------------------
+        //
+        // The geometry correction above already exists and is the hard half: it
+        // re-anchors the projection to the backdrop at any scale, deriving its
+        // reference layout from the stock bases rather than from the live
+        // globals, which is what keeps it idempotent across repeated applies and
+        // mission loads. What was missing is anything that actually SETS the
+        // scale: nothing in the shim ever wrote 0x008E77B0, so the correction
+        // only did something when an external provider (EXU) scaled the radar.
+        // This is that provider, so the feature stands on its own.
+        //
+        // Local HUD geometry only, so it is not multiplayer-gated -- it reveals
+        // nothing a stock peer cannot see.
+        static float g_RadarSizeScale = 1.0f;
+        static float g_RadarSizeScaleBaseline = 1.0f;
+        static bool g_RadarSizeScaleWriteFailureLogged = false;
+
+        static float ClampRadarSizeScaleSetting(float scale)
+        {
+            if (!std::isfinite(scale) || scale <= 0.0f)
+                return 1.0f;
+            // Stay inside the window ApplyRadarScaleGeometry is willing to act
+            // on; a value it rejects would scale the backdrop while leaving the
+            // projection stock, which looks like a broken radar.
+            return (std::clamp)(scale, 0.25f, 4.0f);
+        }
+
+        static void RefreshRadarSizeScaleState()
+        {
+            const float desired = ClampRadarSizeScaleSetting(g_RadarSizeScale);
+            g_RadarSizeScale = desired;
+
+            // At stock, write nothing at all. The shim is not the only writer of
+            // this global -- a mission script can scale the radar through the EXU
+            // bridge -- so publishing our own 1.0 here would silently stomp a
+            // scripted value with "stock" merely because the ini key is absent.
+            // Absent key means "leave the radar alone", not "force it to 1.0".
+            if (std::fabs(desired - 1.0f) < 0.001f)
+                return;
+
+            // The correction hook has to be live before the scale is visible,
+            // otherwise the backdrop scales and the projection does not.
+            InstallRadarLayoutHookIfPossible();
+
+            __try
+            {
+                *reinterpret_cast<float*>(kRadarSizeScaleAddr) = desired;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                if (!g_RadarSizeScaleWriteFailureLogged)
+                {
+                    g_RadarSizeScaleWriteFailureLogged = true;
+                    Log(L"[RADAR] Could not write the size scale at 0x%08X\n",
+                        static_cast<uint32_t>(kRadarSizeScaleAddr));
+                }
+            }
+        }
+
+        static void RevertRadarSizeScaleToBaseline()
+        {
+            g_RadarSizeScale = g_RadarSizeScaleBaseline;
+            RefreshRadarSizeScaleState();
+        }
+
+        // --- Satellite view limits ---------------------------------------------
+        //
+        // Traced statically against the shipped GOG v2.2.301 executable. The two
+        // zoom bounds are identified by the comparisons that enforce them:
+        //   0x00587E68  comiss [sat+0x40],[0x008723F4] ; jbe -> clamp down,
+        //               so 0x008723F4 is the MAXIMUM zoom
+        //   0x00587EBA  comiss [0x00872400],[sat+0x40] ; jbe -> clamp up,
+        //               so 0x00872400 is the MINIMUM zoom
+        // Both sit in .rdata (0x00869000 + 0x7D218), so their pages are mapped
+        // read-only and every write needs VirtualProtect. Pan speed at
+        // 0x009C91D0 is ordinary .data and needs no such dance.
+        //
+        // Expressed as multipliers of whatever the build ships rather than as
+        // absolute distances, so the setting keeps its meaning if a future patch
+        // retunes the stock values.
+        //
+        // Gated to single player: a shim player who can pull further out than a
+        // stock peer sees more of the map, which is the same reasoning that
+        // keeps SatelliteVisibilityFix single-player only.
+        constexpr uintptr_t kSatelliteMaxZoomAddr = 0x008723F4;
+        constexpr uintptr_t kSatelliteMinZoomAddr = 0x00872400;
+        constexpr uintptr_t kSatellitePanSpeedAddr = 0x009C91D0;
+        constexpr float kSatelliteMultiplierMin = 0.25f;
+        constexpr float kSatelliteMultiplierMax = 8.0f;
+
+        static float g_SatelliteZoomOutMultiplier = 1.0f;
+        static float g_SatelliteZoomOutMultiplierBaseline = 1.0f;
+        static float g_SatellitePanSpeedMultiplier = 1.0f;
+        static float g_SatellitePanSpeedMultiplierBaseline = 1.0f;
+        static float g_SatelliteStockMaxZoom = 0.0f;
+        static float g_SatelliteStockPanSpeed = 0.0f;
+        static bool g_SatelliteStockCaptured = false;
+        static bool g_SatelliteApplied = false;
+        static bool g_SatelliteWriteFailureLogged = false;
+
+        static float ClampSatelliteMultiplier(float value)
+        {
+            if (!std::isfinite(value) || value <= 0.0f)
+                return 1.0f;
+            return (std::clamp)(value, kSatelliteMultiplierMin, kSatelliteMultiplierMax);
+        }
+
+        // Writes a float into a page the loader mapped read-only (.rdata).
+        static bool WriteReadOnlyFloat(uintptr_t address, float value)
+        {
+            auto* target = reinterpret_cast<uint8_t*>(address);
+            DWORD oldProtect = 0;
+            if (!VirtualProtect(target, sizeof(float), PAGE_READWRITE, &oldProtect))
+                return false;
+            bool ok = true;
+            __try
+            {
+                *reinterpret_cast<float*>(target) = value;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                ok = false;
+            }
+            DWORD restoreProtect = 0;
+            VirtualProtect(target, sizeof(float), oldProtect, &restoreProtect);
+            return ok;
+        }
+
+        // Snapshot the shipped values before anything writes over them, so the
+        // multipliers always compose against stock rather than against whatever
+        // was applied last.
+        static bool TryCaptureSatelliteStockValues()
+        {
+            if (g_SatelliteStockCaptured)
+                return true;
+
+            __try
+            {
+                const float maxZoom = *reinterpret_cast<const float*>(kSatelliteMaxZoomAddr);
+                const float panSpeed = *reinterpret_cast<const float*>(kSatellitePanSpeedAddr);
+                if (!std::isfinite(maxZoom) || maxZoom <= 0.0f ||
+                    !std::isfinite(panSpeed) || panSpeed <= 0.0f)
+                {
+                    return false;
+                }
+                g_SatelliteStockMaxZoom = maxZoom;
+                g_SatelliteStockPanSpeed = panSpeed;
+                g_SatelliteStockCaptured = true;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void RefreshSatelliteViewState()
+        {
+            const bool singlePlayer = IsSinglePlayerSession();
+            const float zoomOut =
+                singlePlayer ? ClampSatelliteMultiplier(g_SatelliteZoomOutMultiplier) : 1.0f;
+            const float panSpeed =
+                singlePlayer ? ClampSatelliteMultiplier(g_SatellitePanSpeedMultiplier) : 1.0f;
+
+            const bool wantStock =
+                std::fabs(zoomOut - 1.0f) < 0.001f && std::fabs(panSpeed - 1.0f) < 0.001f;
+
+            // Never touch the globals just to write their own stock values back:
+            // until something has actually been applied there is nothing to undo.
+            if (wantStock && !g_SatelliteApplied)
+                return;
+            if (!TryCaptureSatelliteStockValues())
+                return;
+
+            // Only the maximum moves. Raising it lets the player pull further
+            // out; the minimum stays stock so the closest zoom is unchanged.
+            bool ok = WriteReadOnlyFloat(kSatelliteMaxZoomAddr,
+                                         g_SatelliteStockMaxZoom * zoomOut);
+            __try
+            {
+                *reinterpret_cast<float*>(kSatellitePanSpeedAddr) =
+                    g_SatelliteStockPanSpeed * panSpeed;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                ok = false;
+            }
+
+            if (!ok)
+            {
+                if (!g_SatelliteWriteFailureLogged)
+                {
+                    g_SatelliteWriteFailureLogged = true;
+                    Log(L"[SATELLITE] Could not write view limits at 0x%08X / 0x%08X\n",
+                        static_cast<uint32_t>(kSatelliteMaxZoomAddr),
+                        static_cast<uint32_t>(kSatellitePanSpeedAddr));
+                }
+                return;
+            }
+
+            g_SatelliteApplied = !wantStock;
+        }
+
+        static void RevertSatelliteViewToBaseline()
+        {
+            g_SatelliteZoomOutMultiplier = g_SatelliteZoomOutMultiplierBaseline;
+            g_SatellitePanSpeedMultiplier = g_SatellitePanSpeedMultiplierBaseline;
+            RefreshSatelliteViewState();
+        }
+
         static void RefreshTurretAimPitchState()
         {
             const bool active = g_TurretAimPitchEnabled && ReadLocalPlayerNetIdValue() == 0;
@@ -15149,6 +15553,7 @@ namespace BZROpenShim
 
         static const char* BoolText(bool value);
         static void RefreshJumpSnipeCrouchPatchState();
+        static void RefreshOrdnanceVelocityInheritanceState();
         static void RefreshApcAlliedTargetDeployFixState();
 
         static void InitializeGlobalImprovementConfig()
@@ -15227,6 +15632,69 @@ namespace BZROpenShim
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "JumpSnipeCrouch", value))
                 g_JumpSnipeCrouchBaselineEnabled = value;
             g_JumpSnipeCrouchEnabled = g_JumpSnipeCrouchBaselineEnabled;
+
+            g_OrdnanceVelocityInheritanceBaselineEnabled =
+                kOrdnanceVelocityInheritanceDefault;
+            if (TryGetUserConfigBool(kUserConfigSinglePlayerSection,
+                                     "OrdnanceVelocityInheritance",
+                                     value) ||
+                TryGetUserConfigBool(kUserConfigSinglePlayerSection,
+                                     "OrdnanceVelocInheritance",
+                                     value))
+            {
+                g_OrdnanceVelocityInheritanceBaselineEnabled = value;
+            }
+            if (EnvFlagEnabled("OPENSHIM_DISABLE_ORDNANCE_VELOCITY_INHERITANCE"))
+                g_OrdnanceVelocityInheritanceBaselineEnabled = false;
+            g_OrdnanceVelocityInheritanceEnabled =
+                g_OrdnanceVelocityInheritanceBaselineEnabled;
+
+            g_RadarSizeScaleBaseline = 1.0f;
+            std::string radarScaleText;
+            if (TryGetUserConfigString(kUserConfigDisplaySection,
+                                       "RadarSizeScale",
+                                       radarScaleText))
+            {
+                char* end = nullptr;
+                const float parsed = std::strtof(radarScaleText.c_str(), &end);
+                if (end != radarScaleText.c_str() && *end == '\0' && std::isfinite(parsed))
+                    g_RadarSizeScaleBaseline = ClampRadarSizeScaleSetting(parsed);
+                else
+                    Log(L"[RADAR] Ignoring invalid RadarSizeScale=%hs\n",
+                        radarScaleText.c_str());
+            }
+            g_RadarSizeScale = g_RadarSizeScaleBaseline;
+
+            g_SatelliteZoomOutMultiplierBaseline = 1.0f;
+            std::string satelliteText;
+            if (TryGetUserConfigString(kUserConfigSinglePlayerSection,
+                                       "SatelliteZoomOut",
+                                       satelliteText))
+            {
+                char* end = nullptr;
+                const float parsed = std::strtof(satelliteText.c_str(), &end);
+                if (end != satelliteText.c_str() && *end == '\0' && std::isfinite(parsed))
+                    g_SatelliteZoomOutMultiplierBaseline = ClampSatelliteMultiplier(parsed);
+                else
+                    Log(L"[SATELLITE] Ignoring invalid SatelliteZoomOut=%hs\n",
+                        satelliteText.c_str());
+            }
+            g_SatelliteZoomOutMultiplier = g_SatelliteZoomOutMultiplierBaseline;
+
+            g_SatellitePanSpeedMultiplierBaseline = 1.0f;
+            if (TryGetUserConfigString(kUserConfigSinglePlayerSection,
+                                       "SatellitePanSpeed",
+                                       satelliteText))
+            {
+                char* end = nullptr;
+                const float parsed = std::strtof(satelliteText.c_str(), &end);
+                if (end != satelliteText.c_str() && *end == '\0' && std::isfinite(parsed))
+                    g_SatellitePanSpeedMultiplierBaseline = ClampSatelliteMultiplier(parsed);
+                else
+                    Log(L"[SATELLITE] Ignoring invalid SatellitePanSpeed=%hs\n",
+                        satelliteText.c_str());
+            }
+            g_SatellitePanSpeedMultiplier = g_SatellitePanSpeedMultiplierBaseline;
 
             g_AllowNeutralAttackOrders = kAllowNeutralAttackOrdersDefault;
             if (TryGetUserConfigBool(
@@ -15319,6 +15787,9 @@ namespace BZROpenShim
             RefreshAiWeaponMaskMinelayerState();
             RefreshAiOdfGameplayTuningState();
             RefreshJumpSnipeCrouchPatchState();
+            RefreshOrdnanceVelocityInheritanceState();
+            RefreshRadarSizeScaleState();
+            RefreshSatelliteViewState();
             RefreshShotConvergencePatchState();
             RefreshSmartReticleRangeState();
             RefreshScrapPilotHudLayout();
@@ -16242,6 +16713,30 @@ namespace BZROpenShim
             }
         }
 
+        static void NotifyExuMissionSimulationState(bool active)
+        {
+            using FnNotifyMissionSimulationState = void(__cdecl*)(int);
+            const HMODULE exu = GetModuleHandleW(L"exu.dll");
+            if (!exu)
+                return;
+
+            const auto notify = reinterpret_cast<FnNotifyMissionSimulationState>(
+                GetProcAddress(exu, "ExuNotifyMissionSimulationState"));
+            if (!notify)
+                return;
+
+            __try
+            {
+                notify(active ? 1 : 0);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[MISSION] EXU overlay lifecycle notification faulted active=%d code=0x%08X\n",
+                    active ? 1 : 0,
+                    static_cast<uint32_t>(GetExceptionCode()));
+            }
+        }
+
         static void __cdecl BzrSetRunningHook(int state)
         {
             int previous = kBzrRunStateUnknown;
@@ -16273,12 +16768,14 @@ namespace BZROpenShim
                 DeactivateAllChunkProxySceneResources(L"left simulation");
                 HeadlightNotifyMissionRunStateChanged(false);
                 PilotFlashlightNotifyMissionRunStateChanged(false);
+                NotifyExuMissionSimulationState(false);
             }
             else if (previous != kBzrRunStateStarted && current == kBzrRunStateStarted)
             {
                 HeadlightNotifyMissionRunStateChanged(true);
                 PilotFlashlightNotifyMissionRunStateChanged(true);
                 ApplyTerrainTileBlendForCurrentMission();
+                NotifyExuMissionSimulationState(true);
             }
             TerrainProxyMissionRunStateChanged(previous, current);
         }
@@ -16333,6 +16830,8 @@ namespace BZROpenShim
             g_MissionSeamInstalled = true;
             int initial = kBzrRunStateUnknown;
             TryReadBzrRunState(initial);
+            if (initial != kBzrRunStateUnknown)
+                NotifyExuMissionSimulationState(initial == kBzrRunStateStarted);
             Log(L"[MISSION] Installed mission transition seam SetRunning=0x%08X initialState=%hs(%d)\n",
                 static_cast<uint32_t>(kBzrSetRunningAddr),
                 BzrRunStateName(initial), initial);
@@ -16524,6 +17023,377 @@ namespace BZROpenShim
         {
             g_JumpSnipeCrouchEnabled = g_JumpSnipeCrouchBaselineEnabled;
             RefreshJumpSnipeCrouchPatchState();
+        }
+
+        // --- Ordnance velocity inheritance ------------------------------------
+        // See the site trace next to kOrdnanceSpawnVelocityAddr above.
+
+        // Defined further down this file; both thunk helpers need it.
+        static bool TryGetGameObjectFromObj76(void* obj76, void*& outGameObject);
+
+        static bool WriteCannonLeadToleranceBytes(const uint8_t* bytes)
+        {
+            auto* target = reinterpret_cast<uint8_t*>(kCannonLeadToleranceAddr);
+            DWORD oldProtect = 0;
+            if (!VirtualProtect(target,
+                                kCannonLeadTolerancePatchLen,
+                                PAGE_EXECUTE_READWRITE,
+                                &oldProtect))
+            {
+                Log(L"[ORDVEL] Lead-tolerance VirtualProtect failed at 0x%08X\n",
+                    static_cast<uint32_t>(kCannonLeadToleranceAddr));
+                return false;
+            }
+
+            memcpy(target, bytes, kCannonLeadTolerancePatchLen);
+            FlushInstructionCache(GetCurrentProcess(), target, kCannonLeadTolerancePatchLen);
+
+            DWORD restoreProtect = 0;
+            VirtualProtect(target, kCannonLeadTolerancePatchLen, oldProtect, &restoreProtect);
+            return true;
+        }
+
+        // Reconciles the lead-tolerance NOP with the desired state. Guarded by
+        // the exact expected/patched bytes so it no-ops on any build that does
+        // not match (for example Steam, which relocates these functions).
+        static void ApplyCannonLeadTolerancePatch(bool wantActive)
+        {
+            if (wantActive == g_CannonLeadTolerancePatchActive)
+                return;
+
+            if (wantActive)
+            {
+                if (!ExpectedBytesMatchAt(kCannonLeadToleranceAddr,
+                                          kCannonLeadToleranceExpected,
+                                          sizeof(kCannonLeadToleranceExpected)))
+                {
+                    return;
+                }
+                if (WriteCannonLeadToleranceBytes(kCannonLeadTolerancePatched))
+                {
+                    g_CannonLeadTolerancePatchActive = true;
+                    Log(L"[ORDVEL] Applied lead-tolerance bypass at 0x%08X (SP-only)\n",
+                        static_cast<uint32_t>(kCannonLeadToleranceAddr));
+                }
+            }
+            else
+            {
+                if (ExpectedBytesMatchAt(kCannonLeadToleranceAddr,
+                                         kCannonLeadTolerancePatched,
+                                         sizeof(kCannonLeadTolerancePatched)))
+                {
+                    if (WriteCannonLeadToleranceBytes(kCannonLeadToleranceExpected))
+                    {
+                        g_CannonLeadTolerancePatchActive = false;
+                        Log(L"[ORDVEL] Reverted lead-tolerance bypass at 0x%08X\n",
+                            static_cast<uint32_t>(kCannonLeadToleranceAddr));
+                    }
+                }
+                else
+                {
+                    // Bytes are not ours; treat as inactive without writing.
+                    g_CannonLeadTolerancePatchActive = false;
+                }
+            }
+        }
+
+        // Called from the sim thread the first time the cannon chain does not
+        // hold up. Only records the verdict -- pulling the NOP needs page
+        // protection changes, which the reconcile tick does instead.
+        static void RejectCannonOwnerChain()
+        {
+            if (InterlockedExchange(&g_CannonOwnerChainState, kCannonOwnerChainRejected) ==
+                kCannonOwnerChainRejected)
+            {
+                return;
+            }
+            InterlockedExchange(&g_CannonOwnerChainRejectPending, 1);
+        }
+
+        // Walks Cannon+0x18 -> obj76+0x8C and requires the endpoint to pass
+        // TryGetGameObjectFieldBase, which proves identity by checking the
+        // object's vtable slot really resolves to GameObject::GetTeam rather
+        // than merely pointing at committed memory. Run once; the offset is
+        // either right for this build or it is not.
+        static bool ValidateCannonOwnerChain(void* cannon, uint8_t*& outShooterBase)
+        {
+            outShooterBase = nullptr;
+            if (!cannon)
+                return false;
+
+            void* ownerObj76 = nullptr;
+            __try
+            {
+                ownerObj76 = *reinterpret_cast<void* const*>(
+                    reinterpret_cast<const uint8_t*>(cannon) + kCannonOwnerObjOffset);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+
+            void* owner = nullptr;
+            if (!TryGetGameObjectFromObj76(ownerObj76, owner))
+                return false;
+
+            return TryGetGameObjectFieldBase(owner, outShooterBase);
+        }
+
+        // Spawn site helper. The ordnance -> obj76 -> GameObject chain here is
+        // the one the engine itself walks throughout this neighbourhood, so
+        // SEH around the loads is the same guard TryGetOrdnanceOwner relies on;
+        // no per-shot VirtualQuery is warranted.
+        static void __cdecl ApplyOrdnanceSpawnVelocity(uint8_t* frame)
+        {
+            if (!frame || g_OrdnanceVelocityInheritanceActive == 0)
+                return;
+
+            __try
+            {
+                void* ordnance = *reinterpret_cast<void* const*>(
+                    frame + kOrdnanceSpawnThisFrameOffset);
+                if (!ordnance)
+                    return;
+
+                void* shooterObj76 = *reinterpret_cast<void* const*>(
+                    reinterpret_cast<const uint8_t*>(ordnance) + kOrdnanceShooterObjOffset);
+                void* shooter = nullptr;
+                if (!TryGetGameObjectFromObj76(shooterObj76, shooter))
+                    return;
+
+                const auto* shooterVelocity = reinterpret_cast<const float*>(
+                    reinterpret_cast<const uint8_t*>(shooter) + kGameObjectVelocityOffset);
+                auto* spawnVelocity = reinterpret_cast<float*>(
+                    frame + kOrdnanceSpawnVelocityFrameOffset);
+
+                // Compute all three before storing any, so a non-finite
+                // component cannot leave the vector half-updated.
+                float inherited[3];
+                for (int i = 0; i < 3; ++i)
+                {
+                    inherited[i] = spawnVelocity[i] + shooterVelocity[i];
+                    if (!std::isfinite(inherited[i]))
+                        return;
+                }
+
+                // Nominal speed [+0x20] and its reciprocal [+0x24] are written
+                // from the ordnance class at 0x004803E8, two instructions after
+                // this store, and are deliberately not touched here.
+                memcpy(spawnVelocity, inherited, sizeof(inherited));
+                InterlockedIncrement(&g_OrdnanceSpawnVelocityAppliedCount);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
+        // Cannon lead helper. Subtracts the shooter's own velocity from the
+        // target velocity the solver is about to use, which is what keeps a
+        // moving shooter's lead correct now that its shots carry that velocity.
+        static void __cdecl ApplyCannonLeadVelocity(uint8_t* frame)
+        {
+            if (!frame || g_OrdnanceVelocityInheritanceActive == 0)
+                return;
+            if (g_CannonOwnerChainState == kCannonOwnerChainRejected)
+                return;
+
+            __try
+            {
+                void* cannon = *reinterpret_cast<void* const*>(
+                    frame + kCannonLeadThisFrameOffset);
+                if (!cannon)
+                    return;
+
+                uint8_t* shooterBase = nullptr;
+                if (g_CannonOwnerChainState == kCannonOwnerChainUnprobed)
+                {
+                    if (!ValidateCannonOwnerChain(cannon, shooterBase))
+                    {
+                        RejectCannonOwnerChain();
+                        return;
+                    }
+                    InterlockedExchange(&g_CannonOwnerChainState, kCannonOwnerChainAccepted);
+                }
+                else
+                {
+                    // Layout already proven for this build; take the cheap path.
+                    void* ownerObj76 = *reinterpret_cast<void* const*>(
+                        reinterpret_cast<const uint8_t*>(cannon) + kCannonOwnerObjOffset);
+                    void* owner = nullptr;
+                    if (!TryGetGameObjectFromObj76(ownerObj76, owner))
+                        return;
+                    shooterBase = reinterpret_cast<uint8_t*>(owner);
+                }
+
+                const auto* shooterVelocity = reinterpret_cast<const float*>(
+                    shooterBase + kGameObjectVelocityOffset);
+                auto* targetVelocity = reinterpret_cast<float*>(
+                    frame + kCannonLeadVelocityFrameOffset);
+
+                float relative[3];
+                for (int i = 0; i < 3; ++i)
+                {
+                    relative[i] = targetVelocity[i] - shooterVelocity[i];
+                    if (!std::isfinite(relative[i]))
+                        return;
+                }
+
+                memcpy(targetVelocity, relative, sizeof(relative));
+                InterlockedIncrement(&g_CannonLeadVelocityAppliedCount);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                RejectCannonOwnerChain();
+            }
+        }
+
+        // Both detour sites are entered by a 5-byte JMP written over whole
+        // instructions, so no prologue of ours has run: EBP still addresses the
+        // host frame and every value the helper needs hangs off it.
+        //
+        // PUSHAD/PUSHFD covers the integer set and flags. XMM0-7 need no saving
+        // here: the x86 cdecl ABI already makes them caller-saved, and at both
+        // sites the nearest preceding instruction that could have set one is a
+        // CALL (0x004803B5 and 0x0048F642 respectively) followed by nothing but
+        // integer moves, so the host cannot have live XMM state across us. The
+        // x87 stack is untouched because the helpers are ordinary C++.
+        static __declspec(naked) void OrdnanceSpawnVelocityThunk()
+        {
+            __asm
+            {
+                pushad
+                pushfd
+                push ebp
+                call ApplyOrdnanceSpawnVelocity
+                add  esp, 4
+                popfd
+                popad
+                jmp  dword ptr [g_OrdnanceSpawnVelocityResume]
+            }
+        }
+
+        static __declspec(naked) void CannonLeadVelocityThunk()
+        {
+            __asm
+            {
+                pushad
+                pushfd
+                push ebp
+                call ApplyCannonLeadVelocity
+                add  esp, 4
+                popfd
+                popad
+                jmp  dword ptr [g_CannonLeadVelocityResume]
+            }
+        }
+
+        // Installs the two inline detours. Retried by the reconcile tick until
+        // it succeeds: on Steam the .text bytes are decrypted in stages, so a
+        // first attempt during startup can legitimately find nothing to match.
+        static void EnsureOrdnanceVelocityDetours()
+        {
+            if (g_OrdnanceSpawnVelocityDetourInstalled && g_CannonLeadVelocityDetourInstalled)
+                return;
+            if (g_OrdnanceVelocityDetourAttempts >= kOrdnanceVelocityDetourMaxAttempts)
+                return;
+            ++g_OrdnanceVelocityDetourAttempts;
+
+            if (!g_OrdnanceSpawnVelocityDetourInstalled &&
+                InstallInlineDetour32(g_OrdnanceSpawnVelocityDetour,
+                                      kOrdnanceSpawnVelocityAddr,
+                                      reinterpret_cast<void*>(&OrdnanceSpawnVelocityThunk),
+                                      kOrdnanceSpawnVelocityPatchLen,
+                                      kOrdnanceSpawnVelocityExpected,
+                                      sizeof(kOrdnanceSpawnVelocityExpected)))
+            {
+                g_OrdnanceSpawnVelocityResume = g_OrdnanceSpawnVelocityDetour.trampoline;
+                g_OrdnanceSpawnVelocityDetourInstalled = true;
+                Log(L"[ORDVEL] Installed spawn-velocity detour at 0x%08X trampoline=0x%08X\n",
+                    static_cast<uint32_t>(kOrdnanceSpawnVelocityAddr),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OrdnanceSpawnVelocityResume)));
+            }
+
+            if (!g_CannonLeadVelocityDetourInstalled &&
+                InstallInlineDetour32(g_CannonLeadVelocityDetour,
+                                      kCannonLeadVelocityAddr,
+                                      reinterpret_cast<void*>(&CannonLeadVelocityThunk),
+                                      kCannonLeadVelocityPatchLen,
+                                      kCannonLeadVelocityExpected,
+                                      sizeof(kCannonLeadVelocityExpected)))
+            {
+                g_CannonLeadVelocityResume = g_CannonLeadVelocityDetour.trampoline;
+                g_CannonLeadVelocityDetourInstalled = true;
+                Log(L"[ORDVEL] Installed cannon-lead detour at 0x%08X trampoline=0x%08X\n",
+                    static_cast<uint32_t>(kCannonLeadVelocityAddr),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CannonLeadVelocityResume)));
+            }
+
+            // Say which arm gave up. A half-installed feature that stays quiet
+            // reads as "the setting does nothing" rather than as a build
+            // mismatch, so name the site that never matched.
+            if (g_OrdnanceVelocityDetourAttempts >= kOrdnanceVelocityDetourMaxAttempts &&
+                !g_OrdnanceVelocityDetourFailureLogged &&
+                !(g_OrdnanceSpawnVelocityDetourInstalled && g_CannonLeadVelocityDetourInstalled))
+            {
+                g_OrdnanceVelocityDetourFailureLogged = true;
+                if (!g_OrdnanceSpawnVelocityDetourInstalled)
+                {
+                    Log(L"[ORDVEL] Spawn-velocity site at 0x%08X never matched after %d "
+                        L"attempts; ordnance velocity inheritance unavailable on this build\n",
+                        static_cast<uint32_t>(kOrdnanceSpawnVelocityAddr),
+                        g_OrdnanceVelocityDetourAttempts);
+                }
+                else
+                {
+                    Log(L"[ORDVEL] Cannon-lead site at 0x%08X never matched after %d "
+                        L"attempts; spawn inheritance is active but lead compensation "
+                        L"and its tolerance bypass stay off\n",
+                        static_cast<uint32_t>(kCannonLeadVelocityAddr),
+                        g_OrdnanceVelocityDetourAttempts);
+                }
+            }
+        }
+
+        // Reconciles the live state. The feature is applied only when the user
+        // enabled it AND we are not in a network game (net id 0). Inheritance
+        // rides on the spawn detour; the cannon compensation and its tolerance
+        // bypass additionally require the cannon owner chain to have survived
+        // validation, so a build whose Cannon layout differs degrades to
+        // spawn-velocity inheritance instead of feeding the weapon solver a
+        // pointer it cannot trust.
+        static void RefreshOrdnanceVelocityInheritanceState()
+        {
+            const bool wantActive =
+                g_OrdnanceVelocityInheritanceEnabled && IsSinglePlayerSession();
+
+            if (wantActive)
+                EnsureOrdnanceVelocityDetours();
+
+            const bool active = wantActive && g_OrdnanceSpawnVelocityDetourInstalled;
+            InterlockedExchange(&g_OrdnanceVelocityInheritanceActive, active ? 1 : 0);
+
+            if (InterlockedExchange(&g_CannonOwnerChainRejectPending, 0) != 0)
+            {
+                Log(L"[ORDVEL] Cannon owner chain at +0x%02X failed validation; "
+                    L"lead compensation stood down. Spawn inheritance still active "
+                    L"(applied=%ld).\n",
+                    static_cast<unsigned>(kCannonOwnerObjOffset),
+                    g_OrdnanceSpawnVelocityAppliedCount);
+            }
+
+            const bool wantTolerance =
+                active &&
+                g_CannonLeadVelocityDetourInstalled &&
+                g_CannonOwnerChainState != kCannonOwnerChainRejected;
+            ApplyCannonLeadTolerancePatch(wantTolerance);
+        }
+
+        // Mission-end resting state: drop any scripted enable back to the INI
+        // baseline, then reconcile (which also re-applies the multiplayer gate).
+        static void RevertOrdnanceVelocityInheritanceToBaseline()
+        {
+            g_OrdnanceVelocityInheritanceEnabled = g_OrdnanceVelocityInheritanceBaselineEnabled;
+            RefreshOrdnanceVelocityInheritanceState();
         }
 
         static void RevertShotConvergenceToBaseline()
@@ -18596,7 +19466,6 @@ namespace BZROpenShim
         // and the ownership the engine itself uses. The bone is still used the
         // way stock uses it: purely as the source of the node-local offset.
         using FnOgreCreateUnnamedLight = void*(__thiscall*)(void*);
-        using FnOgreDestroyLightPtr = void(__thiscall*)(void*, void*);
         using FnOgreSetLightType = void(__thiscall*)(void*, int);
         using FnOgreEntityGetSkeleton = void*(__thiscall*)(void*);
         using FnOgreSkeletonGetNumBones = uint16_t(__thiscall*)(void*);
@@ -18614,7 +19483,6 @@ namespace BZROpenShim
         struct PilotFlashlightOgreApi
         {
             FnOgreCreateUnnamedLight createLight = nullptr;
-            FnOgreDestroyLightPtr destroyLight = nullptr;
             FnOgreAttachObject attachObject = nullptr;
             FnOgreSetLightType setType = nullptr;
             FnOgreSetLightColour setLightPosition = nullptr;
@@ -18672,11 +19540,10 @@ namespace BZROpenShim
         // that resolves across factions without a hard-coded handle.
         static std::string g_PilotFlashlightBoneSuffix = "11pov";
 
-        // Live ownership. The scene manager is recorded so the light is only
-        // ever destroyed through the manager that created it; a mission change
-        // frees every Ogre object without a teardown callback, and the global
-        // survives that, so pointer equality against the live manager is the
-        // only safe destroy precondition.
+        // Live ownership. Pilot lights are retired (hidden and forgotten), not
+        // destroyed during simulation: Ogre may retain a light pointer in the
+        // current frame's cached light list after SceneManager::destroyLight.
+        // Scene teardown remains the sole owner of the final destruction.
         static void* g_PilotFlashlightLight = nullptr;
         static void* g_PilotFlashlightNode = nullptr;
         static void* g_PilotFlashlightSceneManager = nullptr;
@@ -18730,8 +19597,6 @@ namespace BZROpenShim
 
             api.createLight = ResolveOgreProc<FnOgreCreateUnnamedLight>(
                 "?createLight@SceneManager@Ogre@@UAEPAVLight@2@XZ");
-            api.destroyLight = ResolveOgreProc<FnOgreDestroyLightPtr>(
-                "?destroyLight@SceneManager@Ogre@@UAEXPAVLight@2@@Z");
             api.attachObject = ResolveOgreProc<FnOgreAttachObject>(
                 "?attachObject@SceneNode@Ogre@@UAEXPAVMovableObject@2@@Z");
             api.setType = ResolveOgreProc<FnOgreSetLightType>(
@@ -18755,10 +19620,10 @@ namespace BZROpenShim
                 "?_getDerivedPosition@Node@Ogre@@UBEABVVector3@2@XZ");
 
             // Bone lookup is optional -- without it the light still sits at the
-            // fallback eye height. Everything else is required, because a null
-            // there would mean creating a light we could neither aim nor free.
+            // fallback eye height. Everything else is required to create and
+            // aim the light. Scene teardown owns destruction.
             api.usable =
-                api.createLight && api.destroyLight && api.attachObject &&
+                api.createLight && api.attachObject &&
                 api.setType && api.setLightPosition && api.setLightDirection &&
                 api.setCastShadows;
             return api;
@@ -18983,7 +19848,7 @@ namespace BZROpenShim
                 ForgetPilotFlashlight(L"left simulation");
         }
 
-        static void DestroyPilotFlashlight(const wchar_t* reason)
+        static void RetirePilotFlashlight(const wchar_t* reason)
         {
             if (!g_PilotFlashlightLight)
             {
@@ -19007,39 +19872,37 @@ namespace BZROpenShim
                 return;
             }
 
-            auto& api = GetPilotFlashlightOgreApi();
-            bool destroyed = false;
+            auto& hl = GetHeadlightOgreApi();
+            bool hidden = false;
             DWORD exceptionCode = 0;
             __try
             {
-                // Deliberately no explicit SceneNode::detachObject here. The
-                // usual reason this runs is that the pilot GameObject went away
-                // -- boarding, death, a script removing it -- and the engine
-                // destroys that object's scene node with it, so the node pointer
-                // we recorded is already freed. Calling detachObject on it
-                // faulted every time (observed: "destroy FAILED ... player is
-                // not on foot", which then leaked the light until clearScene).
-                // ~SceneNode calls detachAllObjects, which clears the light's
-                // parent pointer before the node dies, and ~MovableObject
-                // detaches from the parent if there still is one -- so
-                // destroyLight alone is both sufficient and safe.
-                api.destroyLight(liveManager, g_PilotFlashlightLight);
-                destroyed = true;
+                // Do not detach through the recorded node: boarding or script
+                // removal may already have freed it. More importantly, do not
+                // destroy the light here. The renderer can retain it in the
+                // current frame's light list; destroying it produced a proven
+                // PopulateLightList use-after-free. Hiding is safe, and Ogre's
+                // normal scene teardown reclaims the retired object.
+                if (hl.setVisible)
+                {
+                    hl.setVisible(g_PilotFlashlightLight, false);
+                    hidden = true;
+                }
             }
             __except (exceptionCode = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER)
             {
-                destroyed = false;
+                hidden = false;
             }
 
-            if (destroyed)
+            if (hidden)
             {
-                Log(L"[PILOTLIGHT] destroyed light=0x%08X (%ls)\n",
+                Log(L"[PILOTLIGHT] retired light=0x%08X (%ls)\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_PilotFlashlightLight)),
                     reason ? reason : L"unspecified");
             }
             else
             {
-                Log(L"[PILOTLIGHT] destroy FAILED light=0x%08X code=0x%08X (%ls)\n",
+                Log(L"[PILOTLIGHT] retire hide FAILED light=0x%08X code=0x%08X (%ls)\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_PilotFlashlightLight)),
                     static_cast<unsigned>(exceptionCode),
                     reason ? reason : L"unspecified");
@@ -19184,7 +20047,7 @@ namespace BZROpenShim
             {
                 if (g_PilotFlashlightRuntimeActive || g_PilotFlashlightLight)
                 {
-                    DestroyPilotFlashlight(L"feature inactive");
+                    RetirePilotFlashlight(L"feature inactive");
                     Log(L"[PILOTLIGHT] Stood down (%hs)\n",
                         g_PilotFlashlightEnabled ? "multiplayer" : "disabled");
                 }
@@ -19222,7 +20085,7 @@ namespace BZROpenShim
             if (!player || !IsLiveHeadlightObjectSlot(player) || !IsPilotOnFoot(player))
             {
                 TracePilotFlashlight(L"not-on-foot", player, nullptr);
-                DestroyPilotFlashlight(L"player is not on foot");
+                RetirePilotFlashlight(L"player is not on foot");
                 return;
             }
 
@@ -19230,7 +20093,7 @@ namespace BZROpenShim
             if (!TryReadPilotBridgeField(player, kRenderBridgeWorldNodeOffset, node) || !node)
             {
                 TracePilotFlashlight(L"no-scene-node", player, node);
-                DestroyPilotFlashlight(L"pilot has no scene node");
+                RetirePilotFlashlight(L"pilot has no scene node");
                 return;
             }
 
@@ -19242,7 +20105,7 @@ namespace BZROpenShim
             if (stockHeadlight)
             {
                 TracePilotFlashlight(L"stock-headlight-present", player, node);
-                DestroyPilotFlashlight(L"pilot already has a stock headlight");
+                RetirePilotFlashlight(L"pilot already has a stock headlight");
                 return;
             }
 
@@ -19251,7 +20114,7 @@ namespace BZROpenShim
             {
                 // Same world, different pilot object or node -- the previous
                 // light belongs to an object that is gone.
-                DestroyPilotFlashlight(L"pilot object or node changed");
+                RetirePilotFlashlight(L"pilot object or node changed");
             }
 
             TracePilotFlashlight(
@@ -20414,6 +21277,14 @@ namespace BZROpenShim
               &RevertTurretAimPitchToBaseline, &RefreshTurretAimPitchState },
             { "JumpSnipeCrouch", FeatureTier::SinglePlayer,
               &RevertJumpSnipeCrouchToBaseline, &RefreshJumpSnipeCrouchPatchState },
+            { "OrdnanceVelocityInheritance", FeatureTier::SinglePlayer,
+              &RevertOrdnanceVelocityInheritanceToBaseline,
+              &RefreshOrdnanceVelocityInheritanceState },
+            // Local HUD geometry; applied everywhere, including MP.
+            { "RadarSizeScale", FeatureTier::Display,
+              &RevertRadarSizeScaleToBaseline, nullptr },
+            { "SatelliteView", FeatureTier::SinglePlayer,
+              &RevertSatelliteViewToBaseline, &RefreshSatelliteViewState },
             { "GlobalTurbo", FeatureTier::SinglePlayer,
               &RevertGlobalTurboToBaseline, &RefreshGlobalTurboPatchState },
             { "Headlights", FeatureTier::SinglePlayer,
@@ -25396,33 +26267,63 @@ namespace BZROpenShim
 
             g_EngineFlameVariantsInitAttempted = true;
 
+            // Blue is a real stock asset: bzone.zfs carries "exhaust_b",
+            // WITHOUT the ".0" suffix that "exhaust_r.0" has. Blue used to be
+            // aliased to "leave the stock manager alone", which is why NSDF
+            // craft kept the orange stock flame instead of a faction colour.
+            static const char* const kBlueTextureCandidates[] =
+            {
+                "exhaust_b.0",
+                "exhaust_b",
+                "bflame.0",
+                "bflame",
+            };
             static const char* const kRedTextureCandidates[] =
             {
                 "exhaust_r.0",
+                "exhaust_r",
                 "rflame.0",
                 "rflame",
             };
             static const char* const kGreenTextureCandidates[] =
             {
                 "exhaust_g.0",
+                "exhaust_g",
                 "gflame.0",
                 "gflame",
             };
-            // Purple (Black Dog) has no stock asset; these resolve only if an
-            // add-on supplies a purple flame texture/alias. Absent -> stays stock.
-            static const char* const kPurpleTextureCandidates[] =
+            // Campaign Reimagined supplies two palette-separated variants:
+            // burnt orange keeps CCA distinct from Black Dog's blood red. The
+            // generic aliases remain as fallbacks for compatible add-ons.
+            static const char* const kOrangeTextureCandidates[] =
             {
-                "exhaust_p.0",
-                "pflame.0",
-                "pflame",
+                "cr_exhaust_cca.0",
+                "cr_exhaust_cca",
+                "exhaust_o.0",
+                "exhaust_o",
+                "oflame.0",
+                "oflame",
+            };
+            static const char* const kBlackDogTextureCandidates[] =
+            {
+                "cr_exhaust_blackdog.0",
+                "cr_exhaust_blackdog",
+                "exhaust_bd.0",
+                "exhaust_bd",
+                "bdflame.0",
+                "bdflame",
             };
 
+            g_EngineFlamePrimaryBlueTexture =
+                ResolveEngineFlameTextureHandle(kBlueTextureCandidates, _countof(kBlueTextureCandidates), L"blue");
             g_EngineFlamePrimaryRedTexture =
                 ResolveEngineFlameTextureHandle(kRedTextureCandidates, _countof(kRedTextureCandidates), L"red");
             g_EngineFlamePrimaryGreenTexture =
                 ResolveEngineFlameTextureHandle(kGreenTextureCandidates, _countof(kGreenTextureCandidates), L"green");
-            g_EngineFlamePrimaryPurpleTexture =
-                ResolveEngineFlameTextureHandle(kPurpleTextureCandidates, _countof(kPurpleTextureCandidates), L"purple");
+            g_EngineFlamePrimaryOrangeTexture =
+                ResolveEngineFlameTextureHandle(kOrangeTextureCandidates, _countof(kOrangeTextureCandidates), L"orange");
+            g_EngineFlamePrimaryBlackDogTexture =
+                ResolveEngineFlameTextureHandle(kBlackDogTextureCandidates, _countof(kBlackDogTextureCandidates), L"Black Dog blood-red");
 
             void* primary = GetEngineFlamePrimary();
             void* secondary = GetEngineFlameSecondary();
@@ -25432,23 +26333,37 @@ namespace BZROpenShim
                 CloneEngineFlameManager(g_EngineFlameSecondaryRed, secondary, g_EngineFlamePrimaryRedTexture);
             }
 
+            if (g_EngineFlamePrimaryBlueTexture != 0)
+            {
+                CloneEngineFlameManager(g_EngineFlamePrimaryBlue, primary, g_EngineFlamePrimaryBlueTexture);
+                CloneEngineFlameManager(g_EngineFlameSecondaryBlue, secondary, g_EngineFlamePrimaryBlueTexture);
+            }
+
             if (g_EngineFlamePrimaryGreenTexture != 0)
             {
                 CloneEngineFlameManager(g_EngineFlamePrimaryGreen, primary, g_EngineFlamePrimaryGreenTexture);
                 CloneEngineFlameManager(g_EngineFlameSecondaryGreen, secondary, g_EngineFlamePrimaryGreenTexture);
             }
 
-            if (g_EngineFlamePrimaryPurpleTexture != 0)
+            if (g_EngineFlamePrimaryOrangeTexture != 0)
             {
-                CloneEngineFlameManager(g_EngineFlamePrimaryPurple, primary, g_EngineFlamePrimaryPurpleTexture);
-                CloneEngineFlameManager(g_EngineFlameSecondaryPurple, secondary, g_EngineFlamePrimaryPurpleTexture);
+                CloneEngineFlameManager(g_EngineFlamePrimaryOrange, primary, g_EngineFlamePrimaryOrangeTexture);
+                CloneEngineFlameManager(g_EngineFlameSecondaryOrange, secondary, g_EngineFlamePrimaryOrangeTexture);
+            }
+
+            if (g_EngineFlamePrimaryBlackDogTexture != 0)
+            {
+                CloneEngineFlameManager(g_EngineFlamePrimaryBlackDog, primary, g_EngineFlamePrimaryBlackDogTexture);
+                CloneEngineFlameManager(g_EngineFlameSecondaryBlackDog, secondary, g_EngineFlamePrimaryBlackDogTexture);
             }
 
             g_EngineFlameVariantsInitialized = true;
-            Log(L"[FLAME] Engine flame variants initialized red=%hs green=%hs purple=%hs\n",
+            Log(L"[FLAME] Engine flame variants initialized blue=%hs red=%hs green=%hs orange=%hs blackdog=%hs\n",
+                g_EngineFlamePrimaryBlueTexture != 0 ? "yes" : "no",
                 g_EngineFlamePrimaryRedTexture != 0 ? "yes" : "no",
                 g_EngineFlamePrimaryGreenTexture != 0 ? "yes" : "no",
-                g_EngineFlamePrimaryPurpleTexture != 0 ? "yes" : "no");
+                g_EngineFlamePrimaryOrangeTexture != 0 ? "yes" : "no",
+                g_EngineFlamePrimaryBlackDogTexture != 0 ? "yes" : "no");
         }
 
         // Walks GameObject -> GameObjectClass -> ODF label and returns the
@@ -25510,8 +26425,8 @@ namespace BZROpenShim
         }
 
         // Faction -> flame color fallback used when JetFlames is enabled and no
-        // EXU per-team color applies. a=NSDF blue, s=CCA red, c=CRA green,
-        // b=Black Dog purple; anything else keeps stock (default).
+        // EXU per-team color applies. a=NSDF blue, s=CCA orange, c=CRA green,
+        // b=Black Dog blood red; anything else keeps stock (default).
         static int ResolveFactionEngineFlameColor(void* craftPtr)
         {
             char faction = 0;
@@ -25521,9 +26436,9 @@ namespace BZROpenShim
             switch (faction)
             {
             case 'a': return kEngineFlameColorBlue;
-            case 's': return kEngineFlameColorRed;
+            case 's': return kEngineFlameColorOrange;
             case 'c': return kEngineFlameColorGreen;
-            case 'b': return kEngineFlameColorPurple;
+            case 'b': return kEngineFlameColorBlackDog;
             default:  return kEngineFlameColorDefault;
             }
         }
@@ -25547,7 +26462,7 @@ namespace BZROpenShim
                 enabled = false;
 
             g_JetFlamesEnabled = enabled;
-            Log(L"[FLAME] Faction jet flames %hs (a=blue s=red c=green b=purple; EXU per-team colors win)\n",
+            Log(L"[FLAME] Faction jet flames %hs (a=blue s=orange c=green b=blood-red; EXU per-team colors win)\n",
                 enabled ? "enabled" : "disabled");
         }
 
@@ -25563,23 +26478,54 @@ namespace BZROpenShim
             return s_cached != 0;
         }
 
+        // Every early return below leaves the craft on the stock manager, which
+        // is indistinguishable from a working feature that picked the default
+        // color. Name the reason so a "still blue" report costs one log line
+        // instead of a round of guessing.
+        static void TraceJetFlameBail(const wchar_t* reason, void* craftPtr)
+        {
+            if (!ShouldTraceJetFlames())
+                return;
+            static int s_bailBudget = 12;
+            if (s_bailBudget <= 0)
+                return;
+            --s_bailBudget;
+            char odf[16] = {};
+            TryGetCraftOdfName(craftPtr, odf, sizeof(odf));
+            Log(L"[FLAME] route bail reason=%ls craft=0x%p odf='%hs' getTeamNumFn=0x%p\n",
+                reason, craftPtr, odf[0] ? odf : "<none>",
+                reinterpret_cast<void*>(g_BzrFn_GetTeamNum));
+        }
+
         static void* SelectEngineFlameManager(void* originalManager, void* craftPtr)
         {
             if (!originalManager || !craftPtr)
+            {
+                TraceJetFlameBail(L"null-manager-or-craft", craftPtr);
                 return originalManager;
+            }
 
             if (originalManager != GetEngineFlamePrimary() && originalManager != GetEngineFlameSecondary())
+            {
+                TraceJetFlameBail(L"manager-not-primary-or-secondary", craftPtr);
                 return originalManager;
+            }
 
             if (g_IsSteamExe)
                 ResolveEngineFlameRuntimeTargets();
 
             if (!g_BzrFn_GetTeamNum)
+            {
+                TraceJetFlameBail(L"getteamnum-unresolved", craftPtr);
                 return originalManager;
+            }
 
             const uint32_t handle = ResolveCraftHandle(craftPtr);
             if (handle == 0)
+            {
+                TraceJetFlameBail(L"craft-handle-zero", craftPtr);
                 return originalManager;
+            }
 
             const int team = g_BzrFn_GetTeamNum(static_cast<int>(handle));
             // EXU per-team color wins; when it has no opinion (default) and the
@@ -25596,26 +26542,58 @@ namespace BZROpenShim
             // ODF name -> faction -> color -> texture resolved.
             if (ShouldTraceJetFlames())
             {
-                static int s_traceBudget = 24;
-                if (s_traceBudget > 0)
+                // Diagnostics only, so none of this runs in normal play. Pull
+                // the variants up first: the texture handles are the whole
+                // point of the line below, and reading them before they are
+                // initialised printed five zeroes that read as a texture bug.
+                EnsureEngineFlameVariantsInitialized();
+
+                char odf[16] = {};
+                TryGetCraftOdfName(craftPtr, odf, sizeof(odf));
+
+                // One line per distinct craft type. Budgeting by call count
+                // instead spent all 24 entries on a single craft inside one
+                // frame, and said nothing about the units under test.
+                static char s_seenOdf[24][16] = {};
+                static int s_seenCount = 0;
+                bool alreadySeen = false;
+                for (int i = 0; i < s_seenCount; ++i)
                 {
-                    --s_traceBudget;
-                    char odf[16] = {};
-                    TryGetCraftOdfName(craftPtr, odf, sizeof(odf));
-                    Log(L"[FLAME] route craft=0x%p handle=0x%08X team=%d odf='%hs' faction='%c' exuColor=%d final=%d tex(r=0x%08X g=0x%08X)\n",
+                    if (strcmp(s_seenOdf[i], odf) == 0)
+                    {
+                        alreadySeen = true;
+                        break;
+                    }
+                }
+
+                if (!alreadySeen && s_seenCount < 24)
+                {
+                    strncpy_s(s_seenOdf[s_seenCount], odf, _TRUNCATE);
+                    ++s_seenCount;
+                    Log(L"[FLAME] route craft=0x%p handle=0x%08X team=%d odf='%hs' faction='%c' exuColor=%d final=%d tex(b=0x%08X r=0x%08X g=0x%08X o=0x%08X bd=0x%08X)\n",
                         craftPtr, handle, team,
                         odf[0] ? odf : "<none>",
                         haveFaction && faction ? faction : '?',
                         exuColor, color,
+                        static_cast<uint32_t>(g_EngineFlamePrimaryBlueTexture),
                         static_cast<uint32_t>(g_EngineFlamePrimaryRedTexture),
-                        static_cast<uint32_t>(g_EngineFlamePrimaryGreenTexture));
+                        static_cast<uint32_t>(g_EngineFlamePrimaryGreenTexture),
+                        static_cast<uint32_t>(g_EngineFlamePrimaryOrangeTexture),
+                        static_cast<uint32_t>(g_EngineFlamePrimaryBlackDogTexture));
                 }
             }
 
-            if (color == kEngineFlameColorDefault || color == kEngineFlameColorBlue)
+            if (color == kEngineFlameColorDefault)
                 return originalManager;
 
             EnsureEngineFlameVariantsInitialized();
+
+            if (color == kEngineFlameColorBlue && g_EngineFlamePrimaryBlueTexture != 0)
+            {
+                return (originalManager == GetEngineFlamePrimary())
+                    ? static_cast<void*>(g_EngineFlamePrimaryBlue)
+                    : static_cast<void*>(g_EngineFlameSecondaryBlue);
+            }
 
             if (color == kEngineFlameColorRed && g_EngineFlamePrimaryRedTexture != 0)
             {
@@ -25631,11 +26609,18 @@ namespace BZROpenShim
                     : static_cast<void*>(g_EngineFlameSecondaryGreen);
             }
 
-            if (color == kEngineFlameColorPurple && g_EngineFlamePrimaryPurpleTexture != 0)
+            if (color == kEngineFlameColorOrange && g_EngineFlamePrimaryOrangeTexture != 0)
             {
                 return (originalManager == GetEngineFlamePrimary())
-                    ? static_cast<void*>(g_EngineFlamePrimaryPurple)
-                    : static_cast<void*>(g_EngineFlameSecondaryPurple);
+                    ? static_cast<void*>(g_EngineFlamePrimaryOrange)
+                    : static_cast<void*>(g_EngineFlameSecondaryOrange);
+            }
+
+            if (color == kEngineFlameColorBlackDog && g_EngineFlamePrimaryBlackDogTexture != 0)
+            {
+                return (originalManager == GetEngineFlamePrimary())
+                    ? static_cast<void*>(g_EngineFlamePrimaryBlackDog)
+                    : static_cast<void*>(g_EngineFlameSecondaryBlackDog);
             }
 
             return originalManager;
@@ -32242,9 +33227,11 @@ namespace BZROpenShim
         g_MultiplayerFlagRenderSets.clear();
         g_EngineFlameVariantsInitialized = false;
         g_EngineFlameVariantsInitAttempted = false;
+        g_EngineFlamePrimaryBlueTexture = 0;
         g_EngineFlamePrimaryRedTexture = 0;
         g_EngineFlamePrimaryGreenTexture = 0;
-        g_EngineFlamePrimaryPurpleTexture = 0;
+        g_EngineFlamePrimaryOrangeTexture = 0;
+        g_EngineFlamePrimaryBlackDogTexture = 0;
         g_LoggedEngineFlameTargetFailure = false;
         g_LoggedEngineFlameVtableHook = false;
         g_BzrFn_ProducerModeCallOriginal = nullptr;
@@ -34035,6 +35022,42 @@ namespace BZROpenShim
             TryReadSmartReticleRange(effective) && effective == clamped;
     }
 
+    float GetRadarSizeScaleFromBridge()
+    {
+        __try
+        {
+            const float current = *reinterpret_cast<const float*>(kRadarSizeScaleAddr);
+            return std::isfinite(current) && current > 0.0f
+                ? current
+                : g_RadarSizeScale;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return g_RadarSizeScale;
+        }
+    }
+
+    bool SetRadarSizeScaleFromBridge(float scale)
+    {
+        if (!std::isfinite(scale) || scale <= 0.0f)
+            return false;
+
+        const float clamped = ClampRadarSizeScaleSetting(scale);
+        g_RadarSizeScale = clamped;
+        InstallRadarLayoutHookIfPossible();
+        __try
+        {
+            *reinterpret_cast<float*>(kRadarSizeScaleAddr) = clamped;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+        Log(L"[MISSIONHOOK] radar size requested=%.3f applied=%.3f\n",
+            static_cast<double>(scale), static_cast<double>(clamped));
+        return true;
+    }
+
     bool GetGlobalTurboFromBridge()
     {
         InitializeGlobalTurboConfig();
@@ -34189,6 +35212,12 @@ namespace BZROpenShim
         RevertRegisteredFeaturesToBaseline();
         Log(L"[MISSIONHOOK] restored mission hook overrides to defaults\n");
         return true;
+    }
+
+    bool IsMissionSimulationActiveFromBridge()
+    {
+        int state = kBzrRunStateUnknown;
+        return TryReadBzrRunState(state) && state == kBzrRunStateStarted;
     }
 
     static bool SetHudSpriteRectByTable(const char* name, int x, int y, int w, int h)
@@ -36602,23 +37631,31 @@ namespace BZROpenShim
 
         if (thisPtr == GetEngineFlamePrimary())
         {
+            if (g_EngineFlamePrimaryBlueTexture != 0)
+                g_BzrFn_EngineFlameControl(g_EngineFlamePrimaryBlue);
             if (g_EngineFlamePrimaryRedTexture != 0)
                 g_BzrFn_EngineFlameControl(g_EngineFlamePrimaryRed);
             if (g_EngineFlamePrimaryGreenTexture != 0)
                 g_BzrFn_EngineFlameControl(g_EngineFlamePrimaryGreen);
-            if (g_EngineFlamePrimaryPurpleTexture != 0)
-                g_BzrFn_EngineFlameControl(g_EngineFlamePrimaryPurple);
+            if (g_EngineFlamePrimaryOrangeTexture != 0)
+                g_BzrFn_EngineFlameControl(g_EngineFlamePrimaryOrange);
+            if (g_EngineFlamePrimaryBlackDogTexture != 0)
+                g_BzrFn_EngineFlameControl(g_EngineFlamePrimaryBlackDog);
             return;
         }
 
         if (thisPtr == GetEngineFlameSecondary())
         {
+            if (g_EngineFlamePrimaryBlueTexture != 0)
+                g_BzrFn_EngineFlameControl(g_EngineFlameSecondaryBlue);
             if (g_EngineFlamePrimaryRedTexture != 0)
                 g_BzrFn_EngineFlameControl(g_EngineFlameSecondaryRed);
             if (g_EngineFlamePrimaryGreenTexture != 0)
                 g_BzrFn_EngineFlameControl(g_EngineFlameSecondaryGreen);
-            if (g_EngineFlamePrimaryPurpleTexture != 0)
-                g_BzrFn_EngineFlameControl(g_EngineFlameSecondaryPurple);
+            if (g_EngineFlamePrimaryOrangeTexture != 0)
+                g_BzrFn_EngineFlameControl(g_EngineFlameSecondaryOrange);
+            if (g_EngineFlamePrimaryBlackDogTexture != 0)
+                g_BzrFn_EngineFlameControl(g_EngineFlameSecondaryBlackDog);
         }
     }
 
@@ -36633,23 +37670,31 @@ namespace BZROpenShim
 
         if (thisPtr == GetEngineFlamePrimary())
         {
+            if (g_EngineFlamePrimaryBlueTexture != 0)
+                g_BzrFn_EngineFlameSubmit(g_EngineFlamePrimaryBlue, camera);
             if (g_EngineFlamePrimaryRedTexture != 0)
                 g_BzrFn_EngineFlameSubmit(g_EngineFlamePrimaryRed, camera);
             if (g_EngineFlamePrimaryGreenTexture != 0)
                 g_BzrFn_EngineFlameSubmit(g_EngineFlamePrimaryGreen, camera);
-            if (g_EngineFlamePrimaryPurpleTexture != 0)
-                g_BzrFn_EngineFlameSubmit(g_EngineFlamePrimaryPurple, camera);
+            if (g_EngineFlamePrimaryOrangeTexture != 0)
+                g_BzrFn_EngineFlameSubmit(g_EngineFlamePrimaryOrange, camera);
+            if (g_EngineFlamePrimaryBlackDogTexture != 0)
+                g_BzrFn_EngineFlameSubmit(g_EngineFlamePrimaryBlackDog, camera);
             return;
         }
 
         if (thisPtr == GetEngineFlameSecondary())
         {
+            if (g_EngineFlamePrimaryBlueTexture != 0)
+                g_BzrFn_EngineFlameSubmit(g_EngineFlameSecondaryBlue, camera);
             if (g_EngineFlamePrimaryRedTexture != 0)
                 g_BzrFn_EngineFlameSubmit(g_EngineFlameSecondaryRed, camera);
             if (g_EngineFlamePrimaryGreenTexture != 0)
                 g_BzrFn_EngineFlameSubmit(g_EngineFlameSecondaryGreen, camera);
-            if (g_EngineFlamePrimaryPurpleTexture != 0)
-                g_BzrFn_EngineFlameSubmit(g_EngineFlameSecondaryPurple, camera);
+            if (g_EngineFlamePrimaryOrangeTexture != 0)
+                g_BzrFn_EngineFlameSubmit(g_EngineFlameSecondaryOrange, camera);
+            if (g_EngineFlamePrimaryBlackDogTexture != 0)
+                g_BzrFn_EngineFlameSubmit(g_EngineFlameSecondaryBlackDog, camera);
         }
     }
 

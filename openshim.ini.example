@@ -631,6 +631,24 @@ MultiplayerFlagShowOwnCraft = 0
 ; Default: Legacy.
 ScrapPilotHud = Legacy
 
+; RadarSizeScale: cockpit radar size as a multiple of stock (0.25 - 4.0).
+; The projection is re-anchored to the backdrop at any scale so the radar mesh
+; and its underlay stay concentric. Local HUD geometry, so it applies in
+; network games too. 1.0 leaves the engine layout completely untouched.
+RadarSizeScale = 1.0
+
+; Keep emissive/running-light channels active on unpiloted craft.
+; Accepted: boolean. Default: OFF.
+EmptyCraftLights = 0
+
+; Animate occupied-craft emissive brightness with asynchronous, organic pulses.
+; Accepted: boolean. Default: OFF.
+EmissivePulse = 0
+
+; Animate stars in compatible sky materials.
+; Accepted: boolean. Default: OFF.
+StarTwinkle = 0
+
 ; Faction-colored jet/thruster flames.
 ; Accepted: boolean. Default: OFF.
 ;   a / NSDF      = stock blue
@@ -730,6 +748,12 @@ TracePilotFPAnimations = 0
 ; Accepted: boolean. Default: OFF. Development-only.
 ; Legacy env aliases: OPENSHIM_TRACE_ARTILLERY_MASK,
 ;                     OPENSHIM_TRACE_WEAPON_MASK
+; Log how each craft's exhaust routes: ODF name -> faction -> color ->
+; texture handle, plus the reason when routing bails out and the craft
+; stays on the stock flame. Budgeted to a couple dozen lines per run.
+; Accepted: boolean. Default: OFF.
+; Legacy env alias: OPENSHIM_TRACE_JET_FLAMES
+TraceJetFlames = 0
 TraceArtilleryMask = 0
 
 ; Trace the sun's contribution to the engine's fullscreen ScreenFlash.
@@ -1232,6 +1256,22 @@ TurretAimPitchMultiplier = 0.95
 ; Restore legacy crouch-on-landing while jump-sniping.
 ; Accepted: boolean. Default: ON.
 JumpSnipeCrouch = 1
+; Projectiles inherit the velocity of whatever fired them, and the cannon lead
+; solver subtracts the shooter's own velocity so a moving shooter still leads
+; correctly. Changes projectile physics for every shot in the world, so it is
+; an enhancement rather than a fix and ships OFF; hard-disabled in network
+; games. If the cannon owner chain fails its runtime validation on a given
+; build, the lead compensation stands itself down and only the spawn-velocity
+; half stays active.
+OrdnanceVelocityInheritance = 0
+
+; SatelliteZoomOut / SatellitePanSpeed: satellite view limits as multiples of
+; the stock values (0.25 - 8.0). ZoomOut raises only the maximum zoom, so the
+; closest zoom stays stock. Both are hard-disabled in network games, because
+; pulling further out than a stock peer would reveal more of the map than that
+; peer can see -- the same reasoning that gates SatelliteVisibilityFix.
+SatelliteZoomOut = 1.0
+SatellitePanSpeed = 1.0
 
 ; Make artillery AI honour the unit's weaponMask, firing every hardpoint the
 ; mask names as one synchronized volley.

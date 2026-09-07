@@ -363,6 +363,15 @@ namespace
         {
             return TryReadMappedBool(mainIni, "Display", "JetFlames", true, out);
         }
+        // Route tracing for the flames above. Env-only diagnostics are a trap
+        // here: the game is launched by a storefront that inherited its
+        // environment long before anyone typed setx, so the flag silently never
+        // arrives. Reading it from the INI is the only lever a tester has.
+        if (Equals(name, "OPENSHIM_TRACE_JET_FLAMES") ||
+            Equals(name, "BZR_TRACE_JET_FLAMES"))
+        {
+            return TryReadMappedBool(mainIni, "Diagnostics", "TraceJetFlames", false, out);
+        }
 
         // One master switch for the whole BZRNet/relay control-plane capture, so
         // a tester is told one key rather than four. It reaches the relay-control

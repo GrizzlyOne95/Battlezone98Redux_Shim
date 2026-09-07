@@ -195,14 +195,55 @@ namespace BZROpenShim
         return s_cached != 0;
     }
 
+    // Reads [AutoSave] Enabled out of the openshim.ini next to the exe.
+    // Deliberately defaults to "off" rather than mirroring autosave.cpp's own
+    // default of 1: this is only used to make the autoload MORE conservative,
+    // and an unreadable ini must not silently change the stock startup path.
+    static bool AutoSaveEnabledForStartup() {
+        char exePath[MAX_PATH] = {};
+        const DWORD len = GetModuleFileNameA(nullptr, exePath, static_cast<DWORD>(sizeof(exePath)));
+        if (len == 0 || len >= sizeof(exePath)) return false;
+        char* const slash = strrchr(exePath, '\\');
+        if (!slash) return false;
+        slash[1] = '\0';
+        std::string ini(exePath);
+        ini += "openshim.ini";
+        return GetPrivateProfileIntA("AutoSave", "Enabled", 0, ini.c_str()) != 0;
+    }
+
+    // The stock startup shell will happily resume the most recent save, and
+    // OpenShim's AutoSave writes a rolling recovery slot that qualifies. The
+    // two together mean launching the bare exe drops the player straight back
+    // into the last autosaved mission instead of the main menu -- which is not
+    // what a recovery slot is for. Manual saves are the checkpoints.
+    //
+    // So AllowStartupAutoLoad=1 asks for the stock path, but AutoSave being on
+    // overrides it and keeps the autoload suppressed. A user who genuinely
+    // wants the bare exe to resume an autosave can still say so explicitly with
+    // OPENSHIM_FORCE_STARTUP_AUTOLOAD=1, which beats both.
     static bool ShouldSuppressStartupAutoLoad() {
         static int s_cached = -1;
-        if (s_cached < 0) {
-            char value[8] = {};
-            const DWORD allowLen = GetEnvironmentVariableA("OPENSHIM_ALLOW_STARTUP_AUTOLOAD", value, static_cast<DWORD>(sizeof(value)));
-            if (allowLen > 0 && allowLen < sizeof(value) && value[0] != '0') s_cached = 0;
-            else s_cached = 1;
+        if (s_cached >= 0) return s_cached != 0;
+
+        char value[8] = {};
+        const DWORD forceLen = GetEnvironmentVariableA("OPENSHIM_FORCE_STARTUP_AUTOLOAD", value, static_cast<DWORD>(sizeof(value)));
+        if (forceLen > 0 && forceLen < sizeof(value) && value[0] != '0') {
+            s_cached = 0;
+            return false;
         }
+
+        ZeroMemory(value, sizeof(value));
+        const DWORD allowLen = GetEnvironmentVariableA("OPENSHIM_ALLOW_STARTUP_AUTOLOAD", value, static_cast<DWORD>(sizeof(value)));
+        const bool allow = (allowLen > 0 && allowLen < sizeof(value) && value[0] != '0');
+        if (allow && AutoSaveEnabledForStartup()) {
+            Log(L"[STARTUP] AllowStartupAutoLoad is on but AutoSave is enabled; "
+                L"suppressing the shell autoload so the bare exe does not resume "
+                L"the rolling recovery save. Set OPENSHIM_FORCE_STARTUP_AUTOLOAD=1 to override.\n");
+            s_cached = 1;
+            return true;
+        }
+
+        s_cached = allow ? 0 : 1;
         return s_cached != 0;
     }
 
