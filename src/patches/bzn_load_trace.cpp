@@ -40,6 +40,12 @@ namespace BZROpenShim
         bool g_Verbose = false;
         int g_ReportsEmitted = 0;
 
+        // Separate budget from the reports themselves: an open that gets
+        // filtered out still costs a line, and "the hook never ran" and "a
+        // filter dropped it" have to be distinguishable in the log.
+        constexpr int kMaxSeenLogs = 32;
+        int g_SeenLogged = 0;
+
         // Reading the file re-enters the CreateFile hook that called us.
         // Per-thread so a background open cannot mask a real one on the main
         // thread.
@@ -252,14 +258,27 @@ namespace BZROpenShim
             return;
         if (!absolutePath || !absolutePath[0])
             return;
-        if ((desiredAccess & GENERIC_WRITE) != 0)
-            return;  // the editor save path owns writes
         if (!PathEndsWithBzn(absolutePath))
-            return;
-        if (g_ReportsEmitted >= kMaxReportsPerProcess)
             return;
 
         LoadConfig();
+
+        // Record the open before any filter can drop it, so a missing report is
+        // never ambiguous between "the hook did not run" and "the hook ran and
+        // skipped it".
+        if (g_SeenLogged < kMaxSeenLogs)
+        {
+            g_SeenLogged++;
+            Log(L"[BZNLOAD] open %s access=0x%08X%hs\n",
+                BaseName(absolutePath),
+                desiredAccess,
+                (desiredAccess & GENERIC_WRITE) ? " (write; not analysed)" : "");
+        }
+
+        if ((desiredAccess & GENERIC_WRITE) != 0)
+            return;  // the editor save path owns writes
+        if (g_ReportsEmitted >= kMaxReportsPerProcess)
+            return;
 
         // A C++ catch would not see an access violation under /EHsc, and this
         // parses a file that is by definition suspect. Guard it with SEH so a

@@ -136,6 +136,10 @@ namespace BZROpenShim
             // getter so a malformed pilot with no carrier gets mask 0 and the
             // remainder of the stock simulation continues.
             { 0, HookEngine::PatchType::REL32, {}, "Pilot Carrier Null Guard", false, {} },
+            // The same null carrier reached through a second accessor: a
+            // five-slot loop calls Carrier::GetWeapon without checking
+            // Person+0x1A0, so guarding GetSelected alone left this live.
+            { 0, HookEngine::PatchType::REL32, {}, "Pilot Carrier Weapon Null Guard", false, {} },
             // ControlPanel target-list EnemyP call: an opt-in local order
             // authoring relaxation. The global EnemyP implementation stays stock.
             { 0, HookEngine::PatchType::REL32, {}, "Neutral Attack Order Target Hook", false, {} },
