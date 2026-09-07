@@ -176,6 +176,8 @@ namespace
         }
         if (Equals(name, "OPENSHIM_TRACE_SUN_FLASH"))
             return TryReadMappedBool(mainIni, "Diagnostics", "TraceSunFlash", false, out);
+        if (Equals(name, "OPENSHIM_TRACE_BZN_LOAD"))
+            return TryReadMappedBool(mainIni, "Diagnostics", "TraceBznLoad", false, out);
 
         // Working runtime features use positive INI keys; legacy DISABLE_*
         // environment names are inverted here so old call-site semantics remain
