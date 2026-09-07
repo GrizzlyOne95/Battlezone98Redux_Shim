@@ -154,6 +154,8 @@ namespace BZROpenShim
     bool SetPlayerReticleShotConvergenceFromBridge(bool enabled);
     float GetSmartReticleRangeFromBridge();
     bool SetSmartReticleRangeFromBridge(float range);
+    float GetRadarSizeScaleFromBridge();
+    bool SetRadarSizeScaleFromBridge(float scale);
     bool GetScrapPilotHudTopLeftsFromBridge(
         int* scrapLeft, int* scrapTop, int* pilotLeft, int* pilotTop);
     bool SetScrapPilotHudTopLeftsFromBridge(
@@ -165,6 +167,7 @@ namespace BZROpenShim
     bool GetUnitTurboFromBridge(uint32_t handle);
     bool SetUnitTurboFromBridge(uint32_t handle, bool enabled);
     bool ResetMissionHookOverridesFromBridge();
+    bool IsMissionSimulationActiveFromBridge();
     float __fastcall TargetReticlePopupRecentHitGetterHook(void* objectPtr, void* edx);
     void __cdecl RevealProcessOwnerPerceivedTeamOnAttackStateEntry(void* processPtr);
     void PrimeTargetReticlePopupConfig();
