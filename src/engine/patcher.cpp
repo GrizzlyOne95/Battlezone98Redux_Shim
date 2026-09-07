@@ -831,6 +831,22 @@ namespace BZROpenShim
                 void* orig = isSteam ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10) : HookEngine::ResolveRelCallTarget(p.address - 1);
                 if (!orig) continue; SetProducerBuildMenuOriginal(orig); target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ProducerBuildMenuCallHook));
             } else if (p.name == "Target Reticle Popup Recent-Hit Getter Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(TargetReticlePopupRecentHitGetterHook));
+            else if (p.name == "Pilot Carrier Weapon Null Guard") {
+                void* original = isSteam
+                    ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
+                    : HookEngine::ResolveRelCallTarget(p.address - 1);
+                const uint32_t expected =
+                    HookEngine::ResolveNamedAddress("Carrier::GetWeapon");
+                if (!original || expected == 0 ||
+                    reinterpret_cast<uintptr_t>(original) != expected) {
+                    Log(L"[PILOTSAFE] weapon-slot call identity failed site=0x%08X original=%p expected=0x%08X; leaving stock call\n",
+                        p.address - 1, original, expected);
+                    continue;
+                }
+                SetPersonCarrierGetWeaponOriginal(original);
+                target = static_cast<uint32_t>(
+                    reinterpret_cast<uintptr_t>(PersonCarrierGetWeaponGuard));
+            }
             else if (p.name == "Pilot Carrier Null Guard") {
                 void* original = isSteam
                     ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
