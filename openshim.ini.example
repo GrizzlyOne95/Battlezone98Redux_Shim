@@ -750,6 +750,22 @@ TraceArtilleryMask = 0
 ; Legacy env alias: OPENSHIM_TRACE_SUN_FLASH
 TraceSunFlash = 0
 
+; List every object in a mission .bzn as it is opened: index, ODF, label, team
+; and sequence number. The engine only logs an object's CLASS ("(Scrap) is
+; loading (obj #113)"), so when a mission dies with "failed to load game files"
+; there is otherwise no way to tell what the object it stopped on actually was.
+;
+; Structural checks on the file run whether or not this is on, and report under
+; the same [BZNLOAD] tag: mixed line endings (naming the GameObject the first
+; bare LF falls inside, which is the index the load will stop at), count fields
+; that disagree with the blocks they count, duplicate labels or sequence
+; numbers, and pointer ids that resolve to nothing. This key only adds the
+; per-object table, which is the large part of the output.
+;
+; Accepted: boolean. Default: OFF. A few hundred lines per mission load.
+; Legacy env alias: OPENSHIM_TRACE_BZN_LOAD
+TraceBznLoad = 0
+
 ; Trace DX11 texture/SRV/backbuffer/color-space activity.
 ; Accepted: integer flag 0/1. Default: 0. Very noisy diagnostic.
 ; Legacy env alias: OPENSHIM_TRACE_DX11_COLORSPACE
