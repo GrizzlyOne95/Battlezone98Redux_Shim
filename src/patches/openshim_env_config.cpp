@@ -180,6 +180,8 @@ namespace
             return TryReadMappedBool(mainIni, "Diagnostics", "TraceBznLoad", false, out);
         if (Equals(name, "OPENSHIM_INTERACTIVE_FOG_WAKES"))
             return TryReadMappedBool(mainIni, "Experimental", "InteractiveFogWakes", false, out);
+        if (Equals(name, "OPENSHIM_TRACE_RENDER_QUEUES"))
+            return TryReadMappedBool(mainIni, "Diagnostics", "TraceRenderQueues", false, out);
 
         // Working runtime features use positive INI keys; legacy DISABLE_*
         // environment names are inverted here so old call-site semantics remain

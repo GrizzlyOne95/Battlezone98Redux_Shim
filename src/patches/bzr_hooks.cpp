@@ -9,6 +9,7 @@
 #include "patches.h"
 #include "patcher.h"
 #include "fog_wake_feature.h"
+#include "render_queue_trace.h"
 #include "shim_log.h"
 #include "ogre_shader_cache.h"
 #include "ogre_enhanced_light_selection.h"
@@ -16281,6 +16282,7 @@ namespace BZROpenShim
                 HeadlightNotifyMissionRunStateChanged(false);
                 PilotFlashlightNotifyMissionRunStateChanged(false);
                 FogWakeNotifyMissionRunStateChanged(false);
+                RenderQueueTraceShutdown();
             }
             else if (previous != kBzrRunStateStarted && current == kBzrRunStateStarted)
             {
@@ -36825,6 +36827,11 @@ namespace BZROpenShim
         // Sample after the stock world queue update, when Ogre has evaluated
         // the entity materials and its hardware-animation decision is current.
         RefreshVehicleSkinningDiagnosticsIfNeeded();
+
+        // Opt-in render queue structure trace. Attaches once, on the first
+        // frame a world is rendered, and is inert unless
+        // [Diagnostics] TraceRenderQueues is set.
+        RenderQueueTraceTick(GetOgreSceneManagerRuntime());
 
         static volatile long s_FiredLogBudget = 4;
         if (InterlockedDecrement(&s_FiredLogBudget) >= 0)

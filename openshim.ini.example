@@ -766,6 +766,15 @@ TraceSunFlash = 0
 ; Legacy env alias: OPENSHIM_TRACE_BZN_LOAD
 TraceBznLoad = 0
 
+; Logs the render queue groups Ogre processes per frame, for a handful of
+; frames, then goes quiet. Used to find a compositor insertion point after
+; the opaque world and before the cockpit and HUD.
+TraceRenderQueues = 0
+
+; Suppresses one render queue group in the visible (non-shadow) pass, so
+; that what disappears identifies what the group draws. -1 disables.
+SkipRenderQueueGroup = -1
+
 ; Trace DX11 texture/SRV/backbuffer/color-space activity.
 ; Accepted: integer flag 0/1. Default: 0. Very noisy diagnostic.
 ; Legacy env alias: OPENSHIM_TRACE_DX11_COLORSPACE
