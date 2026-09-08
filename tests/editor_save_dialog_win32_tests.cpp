@@ -126,7 +126,20 @@ int main()
     using namespace BZROpenShim;
     wchar_t temp[MAX_PATH] = {};
     GetTempPathW(MAX_PATH, temp);
-    g_fixture = std::filesystem::path(temp) /
+    // The production hook records a source path via GetFinalPathNameByHandleW,
+    // which reports the volume's canonical form: 8.3 components are expanded
+    // and symlinks resolved. Build the fixture from the canonical temp
+    // directory so the paths this test constructs are the same spelling the
+    // hook will hand back. Without this the expectations below fail anywhere
+    // TEMP holds a short name -- GitHub's Windows runners use
+    // C:\Users\RUNNER~1\AppData\Local\Temp -- while passing on a developer
+    // box, which says nothing about the routing under test.
+    std::error_code canonicalError;
+    const std::filesystem::path tempRoot =
+        std::filesystem::canonical(std::filesystem::path(temp), canonicalError);
+    if (canonicalError)
+        return EXIT_FAILURE;
+    g_fixture = tempRoot /
         (L"bzr-editor-save-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
     if (std::filesystem::exists(g_fixture))
         return EXIT_FAILURE;
@@ -183,7 +196,7 @@ int main()
         Check(Select(addon / L"pilot.trn", chosen), "repeated thiscall saves preserve stack");
 
     // The only recursive cleanup target is this run's own temporary fixture.
-    if (std::filesystem::canonical(g_fixture).parent_path() != std::filesystem::canonical(temp) ||
+    if (std::filesystem::canonical(g_fixture).parent_path() != tempRoot ||
         g_fixture.filename().wstring().find(L"bzr-editor-save-") != 0)
         return EXIT_FAILURE;
     std::filesystem::remove_all(g_fixture);
