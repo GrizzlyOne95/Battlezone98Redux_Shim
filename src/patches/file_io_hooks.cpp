@@ -7,7 +7,9 @@
 #include "file_io_hooks.h"
 
 #include "bzn_load_trace.h"
+#include "bzn_save_path.h"
 #include "patcher.h"
+#include "hook_engine.h"
 #include "shim_log.h"
 #include "ogre_shader_cache.h"
 #include "ui_performance.h"
@@ -50,6 +52,10 @@ namespace BZROpenShim
 
         static std::mutex g_TrnWriteMutex;
         static std::unordered_map<uintptr_t, TrnWriteRecord> g_TrnWriteHandles;
+        static std::mutex g_BznSourceMutex;
+        static BznSourceRegistry g_BznSources;
+        using EditorSaveDialog = bool(__thiscall*)(void*, char*, bool);
+        static EditorSaveDialog g_OriginalEditorSaveDialog = nullptr;
         static thread_local bool g_InTrnNormalization = false;
         static std::wstring ToLowerWide(std::wstring value);
 
@@ -297,6 +303,22 @@ namespace BZROpenShim
             return ResolveAbsolutePath(wide.data());
         }
 
+        static std::wstring AnsiPathToWide(const char* path)
+        {
+            if (!path || !*path)
+                return {};
+
+            const int wideChars = MultiByteToWideChar(CP_ACP, 0, path, -1, nullptr, 0);
+            if (wideChars <= 1)
+                return {};
+
+            std::vector<wchar_t> wide(static_cast<size_t>(wideChars), L'\0');
+            if (MultiByteToWideChar(CP_ACP, 0, path, -1, wide.data(), wideChars) == 0)
+                return {};
+            wide.pop_back();
+            return std::wstring(wide.begin(), wide.end());
+        }
+
         static bool IsTrnPath(const std::wstring& path)
         {
             if (path.empty())
@@ -323,6 +345,211 @@ namespace BZROpenShim
             case TRUNCATE_EXISTING:
                 return true;
             default:
+                return false;
+            }
+        }
+
+        static std::filesystem::path GetRootAddonPath()
+        {
+            static const std::filesystem::path rootAddon = []
+            {
+                std::vector<wchar_t> modulePath(32768, L'\0');
+                const DWORD written = GetModuleFileNameW(
+                    nullptr, modulePath.data(), static_cast<DWORD>(modulePath.size()));
+                if (written == 0 || written >= modulePath.size())
+                    return std::filesystem::path{};
+                return std::filesystem::path(
+                    std::wstring(modulePath.data(), modulePath.data() + written)).parent_path() / L"addon";
+            }();
+            return rootAddon;
+        }
+
+        static bool BznSourceSaveEnabled()
+        {
+            // Opt-in while the supported editor/runtime matrix is qualified.
+            // Routing itself is confined to the native editor filename dialog.
+            static const bool enabled = []
+            {
+                char value[8] = {};
+                return GetEnvironmentVariableA("BZR_BZN_SAVE_SOURCE", value,
+                    static_cast<DWORD>(sizeof(value))) == 1 && value[0] == '1';
+            }();
+            return enabled;
+        }
+
+        static std::wstring GetOpenedFilePath(HANDLE handle)
+        {
+            if (!handle || handle == INVALID_HANDLE_VALUE)
+                return {};
+
+            std::vector<wchar_t> buffer(1024, L'\0');
+            DWORD written = GetFinalPathNameByHandleW(
+                handle, buffer.data(), static_cast<DWORD>(buffer.size()),
+                FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+            if (written == 0)
+                return {};
+            if (written >= buffer.size())
+            {
+                buffer.resize(static_cast<size_t>(written) + 1, L'\0');
+                written = GetFinalPathNameByHandleW(
+                    handle, buffer.data(), static_cast<DWORD>(buffer.size()),
+                    FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+                if (written == 0 || written >= buffer.size())
+                    return {};
+            }
+
+            std::wstring path(buffer.data(), buffer.data() + written);
+            if (_wcsnicmp(path.c_str(), L"\\\\?\\UNC\\", 8) == 0)
+                path = L"\\\\" + path.substr(8);
+            else if (_wcsnicmp(path.c_str(), L"\\\\?\\", 4) == 0)
+                path.erase(0, 4);
+            return path;
+        }
+
+        static void RememberOpenedBznSource(
+            HANDLE handle, DWORD desiredAccess, DWORD creationDisposition)
+        {
+            if (!BznSourceSaveEnabled() ||
+                ShouldTrackTrnWrite(desiredAccess, creationDisposition) ||
+                (desiredAccess & (GENERIC_READ | GENERIC_EXECUTE | GENERIC_ALL)) == 0)
+            {
+                return;
+            }
+
+            const std::filesystem::path openedPath = GetOpenedFilePath(handle);
+            if (!IsEditorSourcePath(openedPath))
+                return;
+
+            const std::wstring value = openedPath.wstring();
+            bool changed = false;
+            bool ambiguous = false;
+            {
+                std::lock_guard<std::mutex> lock(g_BznSourceMutex);
+                const auto previous = g_BznSources.Lookup(openedPath);
+                g_BznSources.Remember(openedPath);
+                changed = previous != g_BznSources.Lookup(openedPath);
+                ambiguous = g_BznSources.Lookup(openedPath).empty();
+            }
+            if (changed)
+                Log(L"[BZN] Loose map source path=%ls ambiguous=%d\n",
+                    value.c_str(), ambiguous ? 1 : 0);
+        }
+
+        static std::filesystem::path LookupRememberedBznSource(
+            const std::filesystem::path& requested)
+        {
+            std::lock_guard<std::mutex> lock(g_BznSourceMutex);
+            return g_BznSources.LookupForSave(requested);
+        }
+
+        static std::string WidePathToAnsi(
+            const std::wstring& path, const std::string& fallback)
+        {
+            if (path.empty())
+                return fallback;
+            const int byteCount = WideCharToMultiByte(
+                CP_ACP, WC_NO_BEST_FIT_CHARS, path.c_str(), -1,
+                nullptr, 0, nullptr, nullptr);
+            if (byteCount <= 1)
+                return fallback;
+
+            std::string converted(static_cast<size_t>(byteCount), '\0');
+            BOOL usedDefault = FALSE;
+            if (WideCharToMultiByte(
+                    CP_ACP, WC_NO_BEST_FIT_CHARS, path.c_str(), -1,
+                    converted.data(), byteCount, nullptr, &usedDefault) == 0 || usedDefault)
+            {
+                return fallback;
+            }
+            converted.pop_back();
+            return converted;
+        }
+
+        static EditorSaveFileState InspectEditorSaveFile(const std::filesystem::path& path)
+        {
+            const DWORD attributes = GetFileAttributesW(path.c_str());
+            if (attributes == INVALID_FILE_ATTRIBUTES)
+            {
+                const DWORD error = GetLastError();
+                return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND
+                    ? EditorSaveFileState::Missing : EditorSaveFileState::Blocked;
+            }
+            return (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_READONLY)) != 0
+                ? EditorSaveFileState::Blocked : EditorSaveFileState::Writable;
+        }
+
+        static HWND EditorDialogOwner()
+        {
+            // Never attach our modal prompt to another application's window.
+            const HWND window = GetForegroundWindow();
+            DWORD process = 0;
+            GetWindowThreadProcessId(window, &process);
+            return process == GetCurrentProcessId() ? window : GetActiveWindow();
+        }
+
+        static bool __fastcall Hooked_EditorSaveDialog(
+            void* self, void*, char* filename, bool missionSave)
+        {
+            if (!g_OriginalEditorSaveDialog)
+                return false;
+            // This hook replaces only PromptSaveMission's GetSaveName call.
+            // The caller's false branch returns before SaveGame/SaveZoneFiles.
+            if (!g_OriginalEditorSaveDialog(self, filename, missionSave))
+                return false;
+            if (!missionSave || !BznSourceSaveEnabled())
+                return true;
+
+            try
+            {
+                constexpr size_t kEditorFilenameCapacity = 4096;
+                if (!filename || strnlen_s(filename, kEditorFilenameCapacity) == kEditorFilenameCapacity)
+                    return false;
+                const std::filesystem::path requested = ResolveAbsolutePathFromAnsi(filename);
+                if (!IsEditorSourcePath(requested))
+                    return true;
+                const auto source = LookupRememberedBznSource(requested);
+                const auto plan = BuildEditorSavePlan(
+                    ChooseBznSavePath(requested, source, GetRootAddonPath()));
+                // The native writer is ANSI and has a 4096-byte name buffer.
+                // Never show one destination and then silently save to another.
+                const auto converted = WidePathToAnsi(plan.target.wstring(), {});
+                if (converted.empty() || converted.size() >= kEditorFilenameCapacity)
+                {
+                    MessageBoxW(EditorDialogOwner(),
+                        L"This save path cannot be represented by the editor. Choose a shorter path or a different folder.",
+                        L"World Builder - Save cancelled", MB_OK | MB_ICONERROR);
+                    return false;
+                }
+                const bool approved = ApproveEditorSave(plan, InspectEditorSaveFile,
+                    [](const std::wstring& message)
+                    {
+                        return MessageBoxW(EditorDialogOwner(), message.c_str(),
+                            L"World Builder - Confirm save",
+                            MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2) == IDOK;
+                    },
+                    [](const std::filesystem::path& blocked)
+                    {
+                        const auto message = L"Cannot save to:\n" + blocked.wstring() +
+                            L"\n\nThe destination is read-only, inaccessible, or a directory. No files were saved.";
+                        MessageBoxW(EditorDialogOwner(), message.c_str(),
+                            L"World Builder - Save cancelled", MB_OK | MB_ICONERROR);
+                    });
+                if (!approved)
+                {
+                    Log(L"[BZN] Editor save cancelled before writes target=%ls\n", plan.target.c_str());
+                    return false;
+                }
+                // Change the buffer before native saving AND before the caller
+                // remembers the last save name. All native terrain siblings now
+                // derive from the confirmed destination in the same directory.
+                memcpy(filename, converted.c_str(), converted.size() + 1);
+                Log(L"[BZN] Editor save approved requested=%ls target=%ls redirected=%d\n",
+                    requested.c_str(), plan.target.c_str(), plan.redirected ? 1 : 0);
+                return true;
+            }
+            catch (...)
+            {
+                Log(L"[BZN] Editor save preparation failed; cancelled before writes\n");
                 return false;
             }
         }
@@ -522,9 +749,12 @@ namespace BZROpenShim
                 creationDisposition,
                 flagsAndAttributes,
                 templateFile);
+            const DWORD openError = GetLastError();
 
             if (!g_InTrnNormalization && handle != INVALID_HANDLE_VALUE)
                 MaybeTrackOpenedTrnHandle(handle, fileName ? fileName : L"", desiredAccess, creationDisposition);
+            if (handle != INVALID_HANDLE_VALUE && IsEditorSourcePath(routedPath))
+                RememberOpenedBznSource(handle, desiredAccess, creationDisposition);
             if (handle != INVALID_HANDLE_VALUE)
                 BznLoadTraceOnOpen(routedPath.c_str(), desiredAccess);
 
@@ -539,6 +769,7 @@ namespace BZROpenShim
                     UiPerf::RecordShaderCache(0, 0, 0.0); // marker: program open triggered cache
             }
 
+            SetLastError(openError);
             return handle;
         }
 
@@ -555,6 +786,7 @@ namespace BZROpenShim
                 return INVALID_HANDLE_VALUE;
 
             const std::string routedPath = RouteGameLogPath(fileName);
+            const std::wstring wideRequested = AnsiPathToWide(routedPath.c_str());
             const HANDLE handle = g_RealCreateFileA(
                 routedPath.c_str(),
                 desiredAccess,
@@ -563,9 +795,12 @@ namespace BZROpenShim
                 creationDisposition,
                 flagsAndAttributes,
                 templateFile);
+            const DWORD openError = GetLastError();
 
             if (!g_InTrnNormalization && handle != INVALID_HANDLE_VALUE)
                 MaybeTrackOpenedTrnHandle(handle, ResolveAbsolutePathFromAnsi(fileName), desiredAccess, creationDisposition);
+            if (handle != INVALID_HANDLE_VALUE && IsEditorSourcePath(wideRequested))
+                RememberOpenedBznSource(handle, desiredAccess, creationDisposition);
             if (handle != INVALID_HANDLE_VALUE)
                 BznLoadTraceOnOpenA(routedPath.c_str(), desiredAccess);
 
@@ -576,6 +811,7 @@ namespace BZROpenShim
                     UiPerf::RecordShaderCache(0, 0, 0.0);
             }
 
+            SetLastError(openError);
             return handle;
         }
 
@@ -658,6 +894,22 @@ namespace BZROpenShim
                 module);
             return patched;
         }
+    }
+
+    void* PrepareEditorSaveDialogHook(uint32_t callAddress)
+    {
+        if (!BznSourceSaveEnabled())
+            return nullptr;
+        void* original = HookEngine::ResolveRelCallTarget(callAddress);
+        const uint32_t expected = HookEngine::ResolveNamedAddress("WorldBuilder::GetSaveName");
+        if (!original || !expected || reinterpret_cast<uintptr_t>(original) != expected)
+        {
+            Log(L"[BZN] Editor dialog identity failed site=0x%08X original=%p expected=0x%08X\n",
+                callAddress, original, expected);
+            return nullptr;
+        }
+        g_OriginalEditorSaveDialog = reinterpret_cast<EditorSaveDialog>(original);
+        return reinterpret_cast<void*>(Hooked_EditorSaveDialog);
     }
 
     void ApplyEarlyGameLogHooks()
