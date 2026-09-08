@@ -766,6 +766,15 @@ TraceSunFlash = 0
 ; Legacy env alias: OPENSHIM_TRACE_BZN_LOAD
 TraceBznLoad = 0
 
+; Logs the render queue groups Ogre processes per frame, for a handful of
+; frames, then goes quiet. Used to find a compositor insertion point after
+; the opaque world and before the cockpit and HUD.
+TraceRenderQueues = 0
+
+; Suppresses one render queue group in the visible (non-shadow) pass, so
+; that what disappears identifies what the group draws. -1 disables.
+SkipRenderQueueGroup = -1
+
 ; Trace DX11 texture/SRV/backbuffer/color-space activity.
 ; Accepted: integer flag 0/1. Default: 0. Very noisy diagnostic.
 ; Legacy env alias: OPENSHIM_TRACE_DX11_COLORSPACE
@@ -1502,6 +1511,22 @@ AttackRevealPerceivedTeam = 1
 ; Legacy env aliases to force it off: OPENSHIM_DISABLE_SATELLITE_VISIBILITY_FIX,
 ;                                     BZR_DISABLE_SATELLITE_VISIBILITY_FIX
 SatelliteVisibilityFix = 1
+
+[Experimental]
+
+; ---------------------------------------------------------------------------
+; Interactive ground fog wakes
+; ---------------------------------------------------------------------------
+; Vehicles displace ground fog and leave a trail that recovers behind them.
+;
+; NOT FINISHED. This build implements the CPU clearance simulation and the
+; runtime that drives it from live hovercraft positions. There is no fog
+; rendering, no GPU resource, and no Lua API, so turning this on changes no
+; pixels; it only lets the simulation run so its behaviour can be observed and
+; qualified. It has not been validated in game on any platform.
+;
+; Default 0. See Docs/INTERACTIVE_FOG_WAKES.md for the remaining milestones.
+InteractiveFogWakes = 0
 
 [Environment]
 
