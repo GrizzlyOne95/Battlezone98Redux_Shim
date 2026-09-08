@@ -138,6 +138,24 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "General/SettingsUi",
     "General/CustomBindsUi",
 
+    # Read-only diagnostic. Unlike every other entry here it changes no
+    # behaviour at all: it patches nothing, only reads globals the shell
+    # already reads, and emits one line per readiness change. It ships ON
+    # because the stock UI cannot say why multiplayer is "Not Ready", so a
+    # player who hits it has no reason to report and a setting they would have
+    # had to enable beforehand would never be enabled in time to catch it.
+    "Diagnostics/LogMultiplayerReadiness",
+
+    # Display-only, and the shell already carries the machinery: it has
+    # always had a status line beside the multiplayer entry, but stock can
+    # never fill it because the readiness getter returns one bit. This ships
+    # ON for the same reason as the diagnostic above -- a tester who hits
+    # "Not Ready" has no reason to report, and a setting they would have had
+    # to enable beforehand would never be on in time to catch it. Changes no
+    # gameplay and no wire traffic: it is one string on the main menu, before
+    # any session exists, so it carries no mixed-client divergence.
+    "Fixes/ExplainMultiplayerNotReady",
+
     # Straight bug/stability fixes with no material mixed-client divergence.
     # MapRefreshFixes includes the multiplayer map-list refresh/jump and
     # selection-preservation repair and is deliberately part of the ON baseline.
