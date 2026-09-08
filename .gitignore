@@ -108,6 +108,7 @@ scripts/*
 !scripts/audit_chunk_payload_coverage.py
 !scripts/match_legacy_chunk_pieces.py
 !scripts/deploy_linux_proton.sh
+!scripts/pre-commit-secret-guard.sh
 !scripts/install_linux.sh
 !scripts/steam_game_paths.sh
 docs/*
@@ -120,6 +121,8 @@ docs/*
 !docs/OPENSHIM_RENDER_PROFILE_ARCHITECTURE.md
 !docs/RENDER_PROFILE_RUNTIME_QUALIFICATION_20260824.md
 !docs/NATIVE_EVENT_LAYER.md
+!docs/INTERACTIVE_FOG_WAKES.md
+!docs/FOG_COMPOSITOR_QUALIFICATION_20260908.md
 
 # Local third-party source/reference checkouts
 third_party/ogre-1.10.0-bzr/_work/
@@ -149,3 +152,6 @@ tmp/dx11-hardening-fxc/
 .nagatha/
 # Bilby mill scratch — never tracked
 .bilby/
+# Discord webhook lives only in a local upload.conf, never in the repo
+upload.conf
+**/upload.conf

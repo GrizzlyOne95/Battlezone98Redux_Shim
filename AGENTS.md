@@ -19,6 +19,11 @@ Cross-repo reading is encouraged to avoid duplicate APIs or repeated RE. Do not 
 ## Shared BZR Lua Reference
 Before writing, reviewing, or changing BZR Lua behavior—or adding Lua-facing native APIs—read `Docs/BZR_LUA_AGENT_REFERENCE.md`. This document is mirrored across the four core BZR repos and should remain byte-identical. Repo-specific `AGENTS.md`/architecture docs still govern implementation ownership. When the shared reference changes, mirror the same content to OpenShim, EXU, Campaign Reimagined, and bzfile in the same workstream.
 
+## Platform and Distribution Compatibility
+- Treat Windows/GOG, Windows/Steam, Linux/Steam via Proton, and Linux/GOG via a compatible Wine/Proton prefix as the supported runtime matrix. Read `Docs/BZR_PLATFORM_COMPATIBILITY.md` before changing native loading, paths, filesystem behavior, process launch, module/resource discovery, installers, deployment, packaging, or update behavior.
+- Compatibility is a standing review requirement. Do not infer Steam behavior from GOG alone or Proton/Wine behavior from native Windows alone; run the affected validation lanes, or explicitly record a lane as unverified and obtain tester validation before release.
+- `Docs/BZR_PLATFORM_COMPATIBILITY.md` is mirrored across OpenShim, EXU, Campaign Reimagined, and bzfile and should remain byte-identical. Update all four copies in the same workstream.
+
 Reference/tooling repos commonly available under `%USERPROFILE%\Documents\GIT` (reference, not default edit targets): `BZ98RBlenderToolKit`, `Battlezone98Redux_DedicatedServer`, `BZ1-GameWatcher`, `BZ1_Source`, `BZ2_Source`, `Battlezone_LobbyMonitor`, `BZNTools`, `Battlezone98Redux_AudioTool`, `Battlezone98Redux_WorldBuilder`, `Battlezone98Redux_ZFSSpecialist`. Rendering work may also consult local `ogre-1.10.0`.
 
 ## Architecture
@@ -44,6 +49,44 @@ Reference/tooling repos commonly available under `%USERPROFILE%\Documents\GIT` (
   agree. Read that line before trusting a new signature; a signature generated
   by a sigmaker such as Sigga is robust, not correct.
 - System DLLs such as `ws2_32.dll` and `gdiplus.dll` are delay-loaded for robustness.
+- Adding a patch takes **two** files, and one direction of forgetting is silent:
+  1. a signature in `scripts/patches.json` — `"patches"` for a scanned site,
+     `"globals"` for a direct address; and
+  2. an entry in the patch list in `include/patches.h`, which is what the
+     patcher actually walks.
+
+  A patch that needs a hook target also needs a `p.name == "..."` branch in
+  `src/engine/patcher.cpp`, and any `HookEngine::ResolveNamedAddress("Name")` it
+  calls needs a matching `"resolves"` entry.
+
+  Registered in `patches.json` but missing from `patches.h`, a patch is never
+  walked: no `[PATCH-SCAN]`, no `[OK]`, no `[SKIP]`, no `[STALE-CONFIG]` —
+  nothing at all, which reads exactly like a signature that failed to match.
+  The reverse (in `patches.h`, absent from `patches.json`) resolves to address 0
+  and is reported at runtime as `[STALE-CONFIG]`.
+  `tests/patch_registration_tests.cpp` fails the build on either direction, so
+  run the test suite after touching `patches.json` or `patches.h`.
+
+## Deploying a test build
+- `winmm.dll` carries no patch addresses of its own. Every patch takes its
+  address from `scripts/patches.json`, which is deployed **separately and by
+  hand**. Copy both, always. A `patches.json` older than the DLL silently skips
+  every patch added since, and says so in one `[STALE-CONFIG]` line among forty.
+- **The suite updater will revert both.** The Workshop mod ships its own copy of
+  the shim, and OpenShim promotes it into the game root: `openshim_suite_*` in
+  `mods/<workshop id>/` is staged over `winmm.dll`, `net.ini` and
+  `scripts/patches.json`. Watch `logs/openshim_update.log` for
+  `Validating staged payload:` followed by `Promoting suite payload to:`. It
+  refuses a genuine downgrade, but a dev build carries the same `version.rc`
+  version as the release, so it is not seen as newer and is overwritten anyway.
+  A test run after that point measures the mod's bundled build, not yours, with
+  no other symptom. Re-deploy after the game exits and confirm before trusting a
+  result, or bump `src/engine/version.rc` so the existing downgrade guard
+  protects the build on its own.
+- `verify_windows.ps1 -GamePath <install>` checks all of this: that
+  `scripts/patches.json` is present, that it matches the source tree byte for
+  byte, and that the last session logged no `[STALE-CONFIG]`. Run it before
+  reporting that a patch does or does not work.
 
 ## Git Workflow
 - Before editing, inspect `git status -sb` and the relevant diff; preserve pre-existing user changes.

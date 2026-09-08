@@ -5,7 +5,9 @@
   "patches": [
     {
       "name": "GameObject Handle Stale Slot Guard",
-      "platforms": ["gog"],
+      "platforms": [
+        "gog"
+      ],
       "pattern": "55 8B EC 51 8B 45 08 50 E8 ?? ?? ?? ?? 83 C4 04 89 45 FC 83 7D FC 00 75 04 33 C0 EB 16 8B 4D FC E8 ?? ?? ?? ?? 25 00 02 00 00 74 04 33 C0 EB 03 8B 45 FC 8B E5 5D C3",
       "offset": 0,
       "expected_size": 5,
@@ -14,7 +16,9 @@
     },
     {
       "name": "Map List Rewrite for Hop-Fix 1/3",
-      "platforms": ["steam"],
+      "platforms": [
+        "steam"
+      ],
       "pattern": "8B 45 FC 8B 88 38 01 00 00 E8 F3 89 E3 FF",
       "offset": 0,
       "expected_size": 5,
@@ -22,7 +26,9 @@
     },
     {
       "name": "Map List Rewrite for Hop-Fix 2/3",
-      "platforms": ["steam"],
+      "platforms": [
+        "steam"
+      ],
       "pattern": "6A 00 8B 85 5C FF FF FF 8B 88 7C 01 00 00 E8",
       "offset": 0,
       "expected_size": 5,
@@ -30,7 +36,9 @@
     },
     {
       "name": "Map List Rewrite for Hop-Fix 3/3",
-      "platforms": ["steam"],
+      "platforms": [
+        "steam"
+      ],
       "pattern": "FF D2 68 30 09 00 00",
       "offset": 0,
       "expected_size": 5,
@@ -81,6 +89,15 @@
       "expected_size": 4,
       "fallback": "0x0059D76D",
       "require_unique": true
+    },
+    {
+      "name": "Pilot Carrier Weapon Null Guard",
+      "pattern": "8B 85 F8 FD FF FF 50 8B 8D F4 FD FF FF 8B 89 A0 01 00 00 E8 ?? ?? ?? ?? 89 85 FC FD FF FF 83 BD FC FD FF FF 00",
+      "offset": 20,
+      "expected_size": 4,
+      "fallback": "0x005A1383",
+      "require_unique": true,
+      "identity": "Second null-carrier crash site, sibling of Pilot Carrier Null Guard. A five-slot loop (i < 5) loads Person+0x1A0 into ECX and calls Carrier::GetWeapon at 0x00417F60 without testing it, so a pilot whose ODF misplaces weaponHard1 outside [GameObjectClass] -- and therefore never allocated a Carrier -- faults at the callee's AND EAX,[ECX+0x2C]. Observed on GOG Redux 2.2.301 loading the Hell Gate II addon mission, whose sshg01.odf (unitName \"Player\") declares its hardpoints under [CraftClass]: EIP 0x00417F74, ECX=0, read=0x2C, return 0x005A1387, on the first simulation frame. The caller stores the result and immediately branches on null at 0x005A138D, so returning null is a path it already handles."
     },
     {
       "name": "Neutral Attack Order Target Hook",
@@ -141,6 +158,16 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "Carrier selected-mask getter called by Person::Simulate at 0x0059D76C in exact GOG Redux 2.2.301. The function is the complete 17-byte thiscall leaf that returns [this+0x30]. Five lcbench pilot-ordering dumps fault at its mov eax,[eax+0x30] when Person+0x1A0 is null; the caller independently identifies the selected-mask use before the five-slot SNIP scan."
+    },
+    {
+      "name": "Carrier::GetWeapon",
+      "pattern": "55 8B EC 51 89 4D FC B8 01 00 00 00 8B 4D 08 D3 E0 8B 4D FC 23 41 2C 74 0E 8B 55 08 8B 45 FC 8B 44 90 18 EB 04 EB 02 33 C0 8B E5 5D C2 04 00",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00417F60",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Complete 45-byte thiscall leaf: returns slots[index] at [this+0x18+i*4] when bit index of the hardpoint mask at [this+0x2C] is set, else null. One int argument and RET 4, matching Carrier::GetWeapon(int) in the advisory Redux PDB. Distinct from the adjacent Carrier::GetSelected at 0x00417F90, which is a 17-byte leaf returning [this+0x30]."
     },
     {
       "name": "Team::EnemyP(int)",

@@ -176,12 +176,28 @@ namespace
         }
         if (Equals(name, "OPENSHIM_TRACE_SUN_FLASH"))
             return TryReadMappedBool(mainIni, "Diagnostics", "TraceSunFlash", false, out);
+        if (Equals(name, "OPENSHIM_TRACE_BZN_LOAD"))
+            return TryReadMappedBool(mainIni, "Diagnostics", "TraceBznLoad", false, out);
+        if (Equals(name, "OPENSHIM_INTERACTIVE_FOG_WAKES"))
+            return TryReadMappedBool(mainIni, "Experimental", "InteractiveFogWakes", false, out);
+        if (Equals(name, "OPENSHIM_TRACE_RENDER_QUEUES"))
+            return TryReadMappedBool(mainIni, "Diagnostics", "TraceRenderQueues", false, out);
 
         // Working runtime features use positive INI keys; legacy DISABLE_*
         // environment names are inverted here so old call-site semantics remain
         // unchanged.
         if (Equals(name, "OPENSHIM_DISABLE_CHUNK_EXPERIMENTS") ||
             Equals(name, "BZR_DISABLE_CHUNK_EXPERIMENTS"))
+        {
+            return TryReadMappedBool(mainIni, "General", "ChunkMeshes", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_CHUNK_MESH_PROXY") ||
+            Equals(name, "BZR_DISABLE_CHUNK_MESH_PROXY"))
+        {
+            return TryReadMappedBool(mainIni, "General", "ChunkMeshes", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_GENERIC_CHUNK_BATCH") ||
+            Equals(name, "BZR_DISABLE_GENERIC_CHUNK_BATCH"))
         {
             return TryReadMappedBool(mainIni, "General", "ChunkMeshes", true, out);
         }
@@ -395,12 +411,13 @@ namespace
         if (Equals(name, "OPENSHIM_UI_PERFORMANCE_VERBOSE"))
             return TryReadIniValue(mainIni, "Diagnostics", "UiPerformanceVerbose", out);
 
-        if (Equals(name, "OPENSHIM_DISABLE_LIVE_NICKNAME"))
-            return TryReadMappedBool(mainIni, "Network", "LiveNicknameKeys", true, out);
-        if (Equals(name, "OPENSHIM_DISABLE_BZRNET_REAUTH"))
-            return TryReadMappedBool(mainIni, "Network", "ReauthOnNicknameChange", true, out);
         if (Equals(name, "OPENSHIM_DISABLE_LOBBY_READOUTS"))
             return TryReadMappedBool(mainIni, "Network", "LobbyReadouts", true, out);
+        if (Equals(name, "OPENSHIM_DISABLE_BZRNET_REAUTH") || Equals(name, "BZR_DISABLE_BZRNET_REAUTH"))
+            return TryReadMappedBool(mainIni, "Network", "ReauthOnNicknameChange", true, out);
+        if (Equals(name, "OPENSHIM_ENABLE_BZRNET_REAUTH") || Equals(name, "BZR_ENABLE_BZRNET_REAUTH") ||
+            Equals(name, "OPENSHIM_BZRNET_REAUTH") || Equals(name, "BZR_BZRNET_REAUTH"))
+            return TryReadMappedBool(mainIni, "Network", "ReauthOnNicknameChange", false, out);
         // Multiplayer starting-vehicle list: restore the 1.5 "Any Nation = OFF"
         // restricted pool. Positive key, default OFF, so absence is stock.
         if (Equals(name, "OPENSHIM_STOCK_FACTIONS_ONLY"))

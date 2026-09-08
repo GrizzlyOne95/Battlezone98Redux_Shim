@@ -129,6 +129,7 @@ jobs:
         New-Item -ItemType Directory -Path (Join-Path $suiteRoot "scripts") -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $suiteRoot "resources\renderer") -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $suiteRoot "resources\ui") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $suiteRoot "resources\openshim") -Force | Out-Null
         Copy-Item -LiteralPath "bin\Release\winmm.dll" -Destination (Join-Path $suiteRoot "bin\Release\winmm.dll") -Force
         Copy-Item -LiteralPath "scripts\patches.json" -Destination (Join-Path $suiteRoot "scripts\patches.json") -Force
         Copy-Item -LiteralPath "openshim.ini" -Destination (Join-Path $suiteRoot "openshim.ini") -Force
@@ -136,6 +137,7 @@ jobs:
         Copy-Item -LiteralPath "net.ini" -Destination (Join-Path $suiteRoot "net.ini") -Force
         Copy-Item -LiteralPath "resources\renderer\enhanced" -Destination (Join-Path $suiteRoot "resources\renderer\enhanced") -Recurse -Force
         Copy-Item -LiteralPath "resources\ui\custom_widgets" -Destination (Join-Path $suiteRoot "resources\ui\custom_widgets") -Recurse -Force
+        Copy-Item -LiteralPath "resources\openshim\OpenShimAssets.ini" -Destination (Join-Path $suiteRoot "resources\openshim\OpenShimAssets.ini") -Force
 
         # Record the exact source identity inside the archive so downstream
         # packagers can prove which qualified OpenShim commit they consumed.
