@@ -18,6 +18,7 @@
 
 #include "render_profile_runtime.h"
 #include "backend_selection.h"
+#include "openshim_assets.h"
 #include "render_profile_resources.h"
 #include "render_profile_request_tracker.h"
 #include "BZROpenShim.h"
@@ -1086,19 +1087,21 @@ namespace BZROpenShim::RenderProfiles
             }
 
             std::string problem;
-            if (!ValidateDeployedResourceSetAt(
-                    gameDir / kEnhancedResourceDirRel, problem))
+            std::filesystem::path resourceDir;
+            if (!Assets::ProbeEnhancedResourcesAt(
+                    gameDir, problem, &resourceDir))
             {
                 LogShimA(LogLevel::Warn, kLogTag,
-                         "Enhanced unavailable: %s (%s)",
-                         problem.c_str(), kEnhancedResourceDirRel);
+                         "Enhanced unavailable: %s",
+                         problem.c_str());
                 return false;
             }
 
             LogShimA(LogLevel::Info, kLogTag,
-                     "resource-version=%s resources compatible=yes (%zu files verified)",
+                     "resource-version=%s resources compatible=yes (%zu files verified root=%s)",
                      kEnhancedResourcesVersion,
-                     RequiredEnhancedResourceCount());
+                     RequiredEnhancedResourceCount(),
+                     resourceDir.string().c_str());
             return true;
         }
 

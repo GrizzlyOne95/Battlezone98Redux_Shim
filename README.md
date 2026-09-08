@@ -4,12 +4,17 @@ An open-source runtime patch and compatibility layer for **Battlezone 98 Redux v
 
 OpenShim provides engine-level bug fixes, quality-of-life improvements, restored legacy behavior, multiplayer fixes, modding extensions, and opt-in native features that cannot be implemented through normal Redux modding alone.
 
+<img width="2172" height="724" alt="1cfef10a-e840-44f1-9a8e-fb67ca4ae9da" src="https://github.com/user-attachments/assets/7da1eab5-50d1-417a-9d76-4004dcd11300" />
+
 Supported executables:
 
-- **GOG:** `BZR.exe`
+- **GOG:** `battlezone98redux.exe`
 - **Steam:** `battlezone98redux.exe`
 
-[<img width="1377" height="758" alt="Battlezone 98 Redux OpenShim" src="https://github.com/user-attachments/assets/b1f12ee2-5e57-46df-b467-1d5c69c6426e" />](https://images.steamusercontent.com/ugc/16933640577209196288/F91D1AEC284B96DA3C0DD6D1035F56C48903460C/?imw=5000&imh=5000&ima=fit&impolicy=Letterbox&imcolor=%23000000&letterbox=false)
+Windows/GOG, Windows/Steam, Linux/Steam via Proton, and Linux/GOG through a
+compatible Wine/Proton prefix are maintained together. See the shared
+[`BZR platform and distribution compatibility policy`](Docs/BZR_PLATFORM_COMPATIBILITY.md).
+
 
 ## Installation
 
@@ -23,6 +28,30 @@ irm https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/s
 ```
 
 That's it. No launch options needed — just start the game.
+
+<details>
+<summary>If the command fails with an "empty string" error</summary>
+
+`Cannot bind argument to parameter 'Command'` means `irm` downloaded nothing —
+something on your machine emptied the response (an ad-blocker or corporate
+DNS blackholing `raw.githubusercontent.com`, or antivirus HTTPS inspection).
+Download to a file first to see the real failure:
+
+```powershell
+$dst = "$env:TEMP\openshim_install.ps1"
+Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_windows.ps1' -OutFile $dst
+(Get-Item $dst).Length   # expect a few thousand bytes, not 0
+powershell -NoProfile -ExecutionPolicy Bypass -File $dst
+```
+</details>
+
+<details>
+<summary>If Defender flags <code>winmm.dll</code></summary>
+
+A known false positive — unsigned DLL proxies that hook the game are exactly
+the shape AV heuristics flag. Restore it from Protection History and add an
+exception for that one file. Don't disable AV globally.
+</details>
 
 Uninstall:
 
@@ -46,13 +75,7 @@ curl -fsSL https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim
 
 Then set launch options once (Steam → Battlezone 98 Redux → Properties → Launch Options).
 
-Native Steam or Flatpak:
-
-```text
-WINEDLLOVERRIDES="winmm=n,b;dsound=n,b" %command%
-```
-
-Snap Steam:
+Native Steam, Flatpak, or Snap:
 
 ```text
 WINEDLLOVERRIDES="winmm=n,b;dsound=n,b" %command%
@@ -63,6 +86,126 @@ Quotes are required; a bare `;` splits the command. Drop `dsound=n,b` if you are
 If you have both Steam flavours, paste both install commands and set the launch options in each Steam you actually launch from.
 
 Uninstall: remove `winmm.dll` from the game folder and clear the launch options.
+
+## Test crew: session logging (opt-in)
+
+**Before anything else:** playing Battlezone 98 multiplayer at all means
+**anyone in the game can see your public IP address.** That is how the
+engine's peer-to-peer networking works, it is true with or without OpenShim,
+and nothing here changes it. Session logging does not create that exposure —
+but it does write those addresses down, which is why bundles only ever go to
+a private channel.
+
+Logging is off unless you opt in. Members of the test crew can have each
+session's logs bundled and uploaded automatically to the private channel:
+
+1. Install with the pinned command from the private Discord channel (it's
+   the normal install command with the webhook included). That command is
+   deliberately not in this repository and never will be: GitHub's secret
+   scanning revokes Discord webhooks on push, so committing it would break
+   logging for the whole test crew. If you are not opting in to logging,
+   use the plain install commands above instead.
+2. Use the wrapper launch option instead of the plain one.
+
+Windows:
+
+```text
+cmd /c ""%LOCALAPPDATA%\openshim\openshim_wrap.bat" %command%"
+```
+
+Linux — native or Flatpak Steam:
+
+```text
+WINEDLLOVERRIDES="winmm=n,b;dsound=n,b" "${XDG_DATA_HOME:-$HOME/.local/share}/openshim/openshim_wrap.sh" %command%
+```
+
+Linux — Snap Steam:
+
+```text
+WINEDLLOVERRIDES="winmm=n,b;dsound=n,b" "$SNAP_USER_COMMON/.local/share/openshim/openshim_wrap.sh" %command%
+```
+
+The installer prints the right one for your machine on its last lines — copy
+that. Don't guess between them: the wrapper is the launch target, so a path
+that doesn't resolve inside the sandbox kills the launch instead of starting
+the game.
+
+A Windows console window stays open while the game runs. That is the wrapper
+waiting to bundle on exit. Closing it kills the upload, not the game.
+
+No wrapper in the launch options = nothing ever uploads. Bundles contain
+every peer's public IP, which is why the destination is a private channel.
+Details: [`upload/README.md`](upload/README.md).
+
+### Snap Steam
+
+Snap needs its own line because snapd remaps `HOME` into
+`~/snap/steam/common/` and its home interface hides the host's
+dot-directories, so the `XDG_DATA_HOME` path above can never exist inside
+the sandbox. `$SNAP_USER_COMMON` is guaranteed by snapd and points at the
+mirrored copy the installer places there.
+
+The Steam snap's runtime also ships neither `curl` nor `python3`, so nothing
+inside the sandbox can send a bundle. Sessions are parked in an outbox and a
+host-side systemd user unit drains them — the installer enables
+`openshim-retry.path` (fires within seconds of the game exiting) plus a
+10-minute timer as a backstop. Nothing to do; a parked bundle is not a lost
+one. If the installer says it couldn't enable those units, send by hand:
+
+```bash
+"$HOME/snap/steam/common/.local/share/openshim/openshim_wrap.sh" --retry
+```
+
+### Standalone (DLL-only) Operation
+
+OpenShim is intentionally supported as a **standalone DLL-only install** on top of a stock Battlezone 98 Redux 2.2.301 installation. The Campaign Reimagined / OpenShim asset pack (Steam Workshop item) is **not required** for native and networking fixes.
+
+```text
+OpenShim DLL only
+    │
+    ├── native engine fixes
+    ├── gameplay fixes
+    ├── multiplayer / network fixes
+    ├── native UI / configuration
+    ├── diagnostics
+    └── asset-backed features → safely unavailable
+
+OpenShim DLL + compatible assets
+    │
+    └── full supported feature set
+```
+
+* The DLL itself has no hard dependency on Workshop content. Placing only `winmm.dll` (and `openshim.ini`) into a stock install is a deliberately supported degraded configuration.
+* Asset-dependent features — such as `Death Chunk Meshes` (`chunkMeshes`), Enhanced renderer resources (`openshim/renderer/enhanced`), and other visual payloads — require the separate asset package. When those resources are absent, OpenShim suppresses the dependent feature, emits a single concise diagnostic, and continues running. No crash, no invalid Ogre/resource access, and no repeated per-frame load attempts occur.
+* A copied `openshim.ini` that enables an asset-backed feature (for example `ChunkMeshes=1`) cannot bypass this protection: the feature also requires verified asset availability and remains unavailable until compatible assets are detected.
+* The native **OpenShim Settings** page reports asset-pack status directly:
+
+```text
+OpenShim Status
+
+Runtime:       Active
+Version:      5
+Game:         Steam/GOG 2.2.301
+
+Asset Pack:    Detected
+```
+
+```text
+Asset Pack:    NOT DETECTED
+               Asset-dependent features are unavailable.
+```
+
+```text
+Asset Pack:    VERSION MISMATCH
+               Installed: 999
+               Expected:  1
+```
+
+Where practical, asset-dependent rows (for example `Death Chunk Meshes`, `DX11 FXAA`, `DX11 Local Lights`) remain visible but show `Unavailable — OpenShim asset pack not detected` (or a version-mismatch / partial-payload variant) and cannot be toggled while their resources are absent. The footer of the settings page always reflects the current asset-pack state so a DLL-only install is immediately recognizable.
+
+Partial or stale packs (for example a stale `resources.version` or a manifest that claims `ChunkMeshes=1` while the mesh files are missing) degrade the affected capability only; unrelated native fixes and netcode continue to operate.
+
+See `resources/openshim/OpenShimAssets.ini` (shipped with the asset pack) and `include/openshim_assets.h` for the capability / manifest design. The detection itself validates the deployed filesystem via the same resource-resolution mechanism the runtime uses (including `addon`, `mods`, `packaged_mods`, and `steamapps/workshop/content/301650` probing), not Workshop subscription state, so it remains compatible with Steam, GOG, Proton, and manual installs.
 
 ## What is OpenShim?
 
@@ -357,3 +500,12 @@ MIT — see [LICENSE](LICENSE).
 - **VTrider** — technical assistance and collaboration
 - **Business Lawyer** — technical assistance and collaboration
 - **Janne** — early work investigating DLL shimming and hooking in Battlezone 98 Redux
+
+  ### AI-Assisted Development
+
+OpenShim is developed with the assistance of AI coding tools for tasks such as code drafting, analysis, documentation, test construction, and navigating large reverse-engineering workloads.
+
+AI output is treated as an implementation aid, not as authoritative reverse-engineering evidence. Native behavior, addresses, ABI assumptions, patch sites, and compatibility claims are verified against the actual game binaries, runtime traces, tests, or other reproducible evidence before being treated as established.
+
+All changes remain maintainer-directed and are reviewed, tested, and integrated through the same validation process regardless of how the initial code or analysis was produced.
+

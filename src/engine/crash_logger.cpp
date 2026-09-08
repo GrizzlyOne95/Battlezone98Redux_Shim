@@ -147,7 +147,12 @@ namespace BZROpenShim
         void AppendExceptionHeader(char* buffer, size_t capacity, size_t& offset,
                                    const EXCEPTION_RECORD* record, const char* kind)
         {
-            AppendString(buffer, capacity, offset, "[CRASH] ");
+            // A vectored handler sees exceptions before the program's SEH
+            // handlers do. OpenShim deliberately uses SEH around a few
+            // best-effort engine/Ogre probes, so calling every first-chance AV
+            // a crash makes healthy sessions look fatal in support bundles.
+            AppendString(buffer, capacity, offset,
+                         kind && kind[0] == 'f' ? "[FIRST-CHANCE] " : "[CRASH] ");
             AppendTimestamp(buffer, capacity, offset);
             AppendString(buffer, capacity, offset, " ");
             AppendString(buffer, capacity, offset, kind);
@@ -347,6 +352,16 @@ namespace BZROpenShim
                 break;
             }
         }
+
+        // Keep the report scoped to this process. The ordinary shim log and
+        // support wrapper already preserve the previous launch; carrying this
+        // file forward made old handled exceptions appear to belong to a new
+        // Linux/Proton report.
+        HANDLE freshLog = CreateFileA(g_CrashLogPath, GENERIC_WRITE,
+                                      FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                      CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (freshLog != INVALID_HANDLE_VALUE)
+            CloseHandle(freshLog);
 
         HMODULE dbghelp = LoadLibraryA("dbghelp.dll");
         if (dbghelp)

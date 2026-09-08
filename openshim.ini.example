@@ -750,6 +750,31 @@ TraceArtilleryMask = 0
 ; Legacy env alias: OPENSHIM_TRACE_SUN_FLASH
 TraceSunFlash = 0
 
+; List every object in a mission .bzn as it is opened: index, ODF, label, team
+; and sequence number. The engine only logs an object's CLASS ("(Scrap) is
+; loading (obj #113)"), so when a mission dies with "failed to load game files"
+; there is otherwise no way to tell what the object it stopped on actually was.
+;
+; Structural checks on the file run whether or not this is on, and report under
+; the same [BZNLOAD] tag: mixed line endings (naming the GameObject the first
+; bare LF falls inside, which is the index the load will stop at), count fields
+; that disagree with the blocks they count, duplicate labels or sequence
+; numbers, and pointer ids that resolve to nothing. This key only adds the
+; per-object table, which is the large part of the output.
+;
+; Accepted: boolean. Default: OFF. A few hundred lines per mission load.
+; Legacy env alias: OPENSHIM_TRACE_BZN_LOAD
+TraceBznLoad = 0
+
+; Logs the render queue groups Ogre processes per frame, for a handful of
+; frames, then goes quiet. Used to find a compositor insertion point after
+; the opaque world and before the cockpit and HUD.
+TraceRenderQueues = 0
+
+; Suppresses one render queue group in the visible (non-shadow) pass, so
+; that what disappears identifies what the group draws. -1 disables.
+SkipRenderQueueGroup = -1
+
 ; Trace DX11 texture/SRV/backbuffer/color-space activity.
 ; Accepted: integer flag 0/1. Default: 0. Very noisy diagnostic.
 ; Legacy env alias: OPENSHIM_TRACE_DX11_COLORSPACE
@@ -958,6 +983,28 @@ UiPerformanceVerbose = 0
 ; Legacy env aliases: OPENSHIM_TRACE_DAMAGE_REVEAL, BZR_TRACE_DAMAGE_REVEAL
 TraceDamageReveal = 0
 
+; Multiplayer player-kill research trace.
+;
+; Redux records a multiplayer death against a team, not against the object
+; that fired, so "a player killed a player" and "a player killed somebody's
+; AI wingman" are indistinguishable to the scoreboard. This trace writes one
+; compact record per authoritative death carrying the candidate ownership
+; fields for both victim and killer, plus how confidently the death could be
+; correlated back to the last damage event.
+;
+; Read-only research instrumentation: it changes no scoring, no career
+; statistics and no simulation. The hooks are not installed at all unless
+; this is on. Budgeted (256 records) and OFF by default.
+;
+; The classification it prints is a hypothesis under test, not a verdict --
+; in particular an object is never called human merely because its team has
+; a network player, since AI wingmen share their owner's team.
+;
+; Accepted: boolean. Default: OFF.
+; Budget override: OPENSHIM_TRACE_PLAYER_KILLS_BUDGET (max 4096)
+; Legacy env aliases: OPENSHIM_TRACE_PLAYER_KILLS, BZR_TRACE_PLAYER_KILLS
+TracePlayerKills = 0
+
 [Network]
 
 ; OpenShim's socket layer as a whole. Off installs none of it: no winsock
@@ -1050,14 +1097,14 @@ UdpPort = 0
 ; Blank/absent = use the Steam/GOG account name.
 ; Nickname =
 
-; Publish nickname edits to the open BZRNet connection via live player-data keys.
-; Accepted: boolean. Default: ON.
-; Legacy env alias: OPENSHIM_DISABLE_LIVE_NICKNAME
-LiveNicknameKeys = 1
-
-; Re-authorise BZRNet after a nickname edit.
-; Accepted: boolean. Default: OFF. Experimental; use only for testing.
-; Legacy env alias: OPENSHIM_DISABLE_BZRNET_REAUTH
+; Experimental: queue a second BZRNet Authorization on the existing WebSocket after a nickname edit while in lounge/lobby (not in-match).
+; Accepted: boolean. Default: OFF.
+; When ON, /nickname or the lobby nickname widget updates 0x009453E0, persists openshim.ini, then calls SendAuthorization 0x006C6DF0 on the live BZRNet client.
+; The same stable Steam/GOG identity then re-appears with the new name to observers without restarting the process.
+; The generic SetPlayerData("name") path at 0x006C4F70/0x0074BF60 is intentionally not used — it completes on the wire but the Rebellion service ignores the post-auth name mutation (qualified 2026-09-04).
+; Requires a live lounge/lobby: the WebSocket must be connected and the lobby at 0x00945470 must be valid. Edits while in-match (netId!=0) are still reported as "saved for next connection" — leave the match/lobby and re-auth instead.
+; Leave this OFF for normal play until observer-proven re-auth stability is confirmed across Steam/GOG/Galaxy.
+; Legacy env aliases: OPENSHIM_DISABLE_BZRNET_REAUTH (inverted), OPENSHIM_ENABLE_BZRNET_REAUTH, BZR_ENABLE_BZRNET_REAUTH
 ReauthOnNicknameChange = 0
 
 ; Inject the native nickname and negotiated-route readouts into the MP lobby.
@@ -1348,6 +1395,64 @@ HeadlightColor = White
 ; Invalid/absent values fall back to Stock.
 HeadlightBeam = Wide
 
+; Flashlight on the player's own pilot while on foot.
+;
+; This is not a stock light being re-coloured. Stock BZR only builds a
+; spotlight for a mesh whose skeleton carries an `hlgt*` bone, and no pilot
+; skeleton has one, so a pilot on foot has never had a light. OpenShim builds
+; the same kind of light the engine builds for a craft -- SceneManager
+; spotlight, stock attenuation curve, shadow casting off -- and attaches it to
+; the pilot's own scene node. That node carries the player's look yaw and
+; pitch, so the beam follows the aim. The light is destroyed when the player
+; boards a craft, and dropped without being touched when the scene or mission
+; is torn down.
+;
+; Unlike the vehicle headlight keys above this does NOT stand down under EXU:
+; the light is created by the shim and no script or ODF can address it.
+; It does stand down for the duration of a network game.
+; Accepted: boolean. Default: OFF.
+PilotFlashlight = 0
+
+; Pilot flashlight color. Same palette as HeadlightColor:
+;   Stock, White, Red, Green, Blue, Yellow, Cyan, Magenta,
+;   Orange, Purple, Teal, Rainbow
+; Stock alias: Default. Custom RGB accepted as r,g,b, each 0..20.
+; Stock is the brightness the engine writes for a craft headlight (1,1,1);
+; the named presets use the brighter shim palette.
+; Invalid/absent values fall back to Stock.
+PilotFlashlightColor = White
+
+; Pilot flashlight beam shape. Stock, Focused (narrow) or Wide.
+; Slightly wider than a vehicle headlight in every mode, because a hand torch
+; has to light the ground you are walking on.
+; Invalid/absent values fall back to Stock.
+PilotFlashlightBeam = Stock
+
+; Extra node-local offset in metres, applied on top of the source bone's
+; position. Positive x is the pilot's right, positive y is up, negative z is
+; forward. Use it to move the light off the eye line -- e.g. 0.2,-0.15,0 reads
+; as a torch held in the right hand.
+; Accepted: three finite decimals. Default: 0,0,0.
+PilotFlashlightOffset = 0,0,0
+
+; Degrees above (+) or below (-) the aim line. Stock craft headlights tilt
+; down 5 degrees; a pilot torch reads better straight down the view, so the
+; default is 0. Accepted: -80..80.
+PilotFlashlightPitch = 0
+
+; Case-insensitive bone-name suffix the light's local position is taken from.
+; The first-person skeleton is searched first, then the world one. 11POV is
+; the stock pilots' eye bone (asp11POV / bsp11POV / ssp11POV / csp11POV),
+; measured at (-0.185, 1.685, -0.06) on the American pilot.
+;
+; Note the first-person gun bone (*21mg1) is deliberately NOT the default: it
+; sits at the skeleton origin -- ankle height -- with a fixed orientation, and
+; carries no aim at all. The aim lives in the scene node, so pointing this at
+; the gun bone only moves the light down to the pilot's feet.
+; Absent or unmatched falls back to eye height (0, 1.685, 0).
+PilotFlashlightBone = 11POV
+
+
 
 
 ; Reveal an attacker's perceived team when it engages you, not only when its
@@ -1406,6 +1511,22 @@ AttackRevealPerceivedTeam = 1
 ; Legacy env aliases to force it off: OPENSHIM_DISABLE_SATELLITE_VISIBILITY_FIX,
 ;                                     BZR_DISABLE_SATELLITE_VISIBILITY_FIX
 SatelliteVisibilityFix = 1
+
+[Experimental]
+
+; ---------------------------------------------------------------------------
+; Interactive ground fog wakes
+; ---------------------------------------------------------------------------
+; Vehicles displace ground fog and leave a trail that recovers behind them.
+;
+; NOT FINISHED. This build implements the CPU clearance simulation and the
+; runtime that drives it from live hovercraft positions. There is no fog
+; rendering, no GPU resource, and no Lua API, so turning this on changes no
+; pixels; it only lets the simulation run so its behaviour can be observed and
+; qualified. It has not been validated in game on any platform.
+;
+; Default 0. See Docs/INTERACTIVE_FOG_WAKES.md for the remaining milestones.
+InteractiveFogWakes = 0
 
 [Environment]
 

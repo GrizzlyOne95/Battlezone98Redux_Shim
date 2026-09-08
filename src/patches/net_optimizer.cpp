@@ -301,6 +301,7 @@ namespace
         int lastSendToError = 0;
         int lastRecvFromError = 0;
         std::string lastRouteKey;
+        uint32_t reorderBypassLogMask = 0;
     };
 
     using SocketFn = SOCKET (WSAAPI*)(int, int, int);
@@ -2051,12 +2052,17 @@ namespace
         return "opt";
     }
 
+    bool IsPacketLogSample(uint32_t packetCount)
+    {
+        return packetCount <= g_Config.packetLogLimit ||
+            (g_Config.packetLogInterval > 0 && (packetCount % g_Config.packetLogInterval) == 0);
+    }
+
     bool ShouldLogPacket(uint32_t packetCount)
     {
         if (!g_Config.logSocketPackets)
             return false;
-        return packetCount <= g_Config.packetLogLimit ||
-            (g_Config.packetLogInterval > 0 && (packetCount % g_Config.packetLogInterval) == 0);
+        return IsPacketLogSample(packetCount);
     }
 
     // Every datagram on the BZRNet endpoint-probe (1338) and UDP relay (1339)
@@ -2215,6 +2221,13 @@ namespace
 
         const bool changed = RememberRouteKey(s, routeKey, &snapshot);
         if (onlyOnChange && !changed)
+            return;
+
+        // A UDP socket rotates among several peer candidates. Comparing only
+        // with the immediately previous route therefore treated every packet
+        // in an A/B/A/B sequence as a route change and bypassed packet-log
+        // sampling. Retain early visibility, then use the configured interval.
+        if (onlyOnChange && success && !IsPacketLogSample(snapshot.packetsSent))
             return;
 
         RefreshSocketAddresses(s);
@@ -4047,6 +4060,22 @@ namespace
             payloadLength);
     }
 
+    bool MarkReorderBypassReasonForLog(SOCKET s, uint32_t reasonBit)
+    {
+        bool first = false;
+        AcquireSRWLockExclusive(&g_SocketLock);
+        SocketState& state = g_Sockets[s];
+        if (state.socketId == 0)
+            state.socketId = static_cast<uint32_t>(InterlockedIncrement(&g_NextSocketId));
+        if ((state.reorderBypassLogMask & reasonBit) == 0)
+        {
+            state.reorderBypassLogMask |= reasonBit;
+            first = true;
+        }
+        ReleaseSRWLockExclusive(&g_SocketLock);
+        return first;
+    }
+
     int WSAAPI Hook_WSARecvFrom(SOCKET s, LPWSABUF buffers, DWORD bufferCount, LPDWORD bytesRecv, LPDWORD flags, sockaddr* from, LPINT fromLen, LPWSAOVERLAPPED overlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE completionRoutine)
     {
         EnsureSocketOptions(s);
@@ -4063,19 +4092,38 @@ namespace
             if (g_Config.logPacketReorder)
             {
                 const char* reason = "unknown";
+                uint32_t reasonBit = 1u << 0;
                 if (!g_Config.enablePacketReorder)
+                {
                     reason = "disabled";
+                    reasonBit = 1u << 1;
+                }
                 else if (!IsUdpSocket(s))
+                {
                     reason = "not_udp";
+                    reasonBit = 1u << 2;
+                }
                 else if (overlapped != nullptr || completionRoutine != nullptr)
+                {
                     reason = "async";
+                    reasonBit = 1u << 3;
+                }
                 else if (buffers == nullptr || bufferCount == 0)
+                {
                     reason = "bad_args";
+                    reasonBit = 1u << 4;
+                }
 
-                LogReorderf("[OpenShimNet] sid=%u reorder bypass sock=0x%08X reason=%s",
-                    GetSocketId(s),
-                    static_cast<unsigned>(s),
-                    reason);
+                // A disabled reorder path is the normal default and can run
+                // hundreds of thousands of times per match. One line per
+                // socket/reason is enough to explain why it stood down.
+                if (MarkReorderBypassReasonForLog(s, reasonBit))
+                {
+                    LogReorderf("[OpenShimNet] sid=%u reorder bypass sock=0x%08X reason=%s",
+                        GetSocketId(s),
+                        static_cast<unsigned>(s),
+                        reason);
+                }
             }
 
             const bool pendingRegistered = RegisterPendingCaptureIo(
