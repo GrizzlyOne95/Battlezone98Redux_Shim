@@ -160,7 +160,7 @@ namespace HookEngine
         }
     }
 
-    void ScanForPatterns(const std::string& moduleName, std::vector<PatchDef>& patches, const std::vector<ScanTarget>& targets)
+    void ScanForPatterns(const std::string& moduleName, std::vector<PatchDef>& patches, const std::vector<ScanTarget>& targets, bool missesAreProvisional)
     {
         std::vector<std::pair<uint8_t*, size_t>> regions;
         uint8_t* base = nullptr;
@@ -242,12 +242,20 @@ namespace HookEngine
             }
             if (target.require_unique)
             {
+                // A provisional miss is expected bookkeeping, not a fault: the
+                // caller retries once the image settles. Only a miss with no
+                // retry left behind it is worth a warning.
+                const bool provisionalMiss = matchCount != 1 && missesAreProvisional;
                 BZROpenShim::LogShimA(
-                    matchCount == 1 ? BZROpenShim::LogLevel::Info : BZROpenShim::LogLevel::Warn,
+                    (matchCount == 1 || provisionalMiss)
+                        ? BZROpenShim::LogLevel::Info
+                        : BZROpenShim::LogLevel::Warn,
                     "patch-scan",
                     "[PATCH-SCAN] name=\"%s\" matches=%zu address=0x%08X state=%s",
                     target.name.c_str(), matchCount, matchedAddress,
-                    matchCount == 1 ? "unique" : "failed-closed");
+                    matchCount == 1
+                        ? "unique"
+                        : (provisionalMiss ? "pending-image-settle" : "failed-closed"));
             }
         }
     }

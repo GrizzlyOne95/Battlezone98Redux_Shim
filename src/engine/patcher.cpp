@@ -195,14 +195,55 @@ namespace BZROpenShim
         return s_cached != 0;
     }
 
+    // Reads [AutoSave] Enabled out of the openshim.ini next to the exe.
+    // Deliberately defaults to "off" rather than mirroring autosave.cpp's own
+    // default of 1: this is only used to make the autoload MORE conservative,
+    // and an unreadable ini must not silently change the stock startup path.
+    static bool AutoSaveEnabledForStartup() {
+        char exePath[MAX_PATH] = {};
+        const DWORD len = GetModuleFileNameA(nullptr, exePath, static_cast<DWORD>(sizeof(exePath)));
+        if (len == 0 || len >= sizeof(exePath)) return false;
+        char* const slash = strrchr(exePath, '\\');
+        if (!slash) return false;
+        slash[1] = '\0';
+        std::string ini(exePath);
+        ini += "openshim.ini";
+        return GetPrivateProfileIntA("AutoSave", "Enabled", 0, ini.c_str()) != 0;
+    }
+
+    // The stock startup shell will happily resume the most recent save, and
+    // OpenShim's AutoSave writes a rolling recovery slot that qualifies. The
+    // two together mean launching the bare exe drops the player straight back
+    // into the last autosaved mission instead of the main menu -- which is not
+    // what a recovery slot is for. Manual saves are the checkpoints.
+    //
+    // So AllowStartupAutoLoad=1 asks for the stock path, but AutoSave being on
+    // overrides it and keeps the autoload suppressed. A user who genuinely
+    // wants the bare exe to resume an autosave can still say so explicitly with
+    // OPENSHIM_FORCE_STARTUP_AUTOLOAD=1, which beats both.
     static bool ShouldSuppressStartupAutoLoad() {
         static int s_cached = -1;
-        if (s_cached < 0) {
-            char value[8] = {};
-            const DWORD allowLen = GetEnvironmentVariableA("OPENSHIM_ALLOW_STARTUP_AUTOLOAD", value, static_cast<DWORD>(sizeof(value)));
-            if (allowLen > 0 && allowLen < sizeof(value) && value[0] != '0') s_cached = 0;
-            else s_cached = 1;
+        if (s_cached >= 0) return s_cached != 0;
+
+        char value[8] = {};
+        const DWORD forceLen = GetEnvironmentVariableA("OPENSHIM_FORCE_STARTUP_AUTOLOAD", value, static_cast<DWORD>(sizeof(value)));
+        if (forceLen > 0 && forceLen < sizeof(value) && value[0] != '0') {
+            s_cached = 0;
+            return false;
         }
+
+        ZeroMemory(value, sizeof(value));
+        const DWORD allowLen = GetEnvironmentVariableA("OPENSHIM_ALLOW_STARTUP_AUTOLOAD", value, static_cast<DWORD>(sizeof(value)));
+        const bool allow = (allowLen > 0 && allowLen < sizeof(value) && value[0] != '0');
+        if (allow && AutoSaveEnabledForStartup()) {
+            Log(L"[STARTUP] AllowStartupAutoLoad is on but AutoSave is enabled; "
+                L"suppressing the shell autoload so the bare exe does not resume "
+                L"the rolling recovery save. Set OPENSHIM_FORCE_STARTUP_AUTOLOAD=1 to override.\n");
+            s_cached = 1;
+            return true;
+        }
+
+        s_cached = allow ? 0 : 1;
         return s_cached != 0;
     }
 
@@ -761,28 +802,46 @@ namespace BZROpenShim
             g_Config.GetStaticPointer("JoinerEventOriginal", 0x00742560));
     }
 
+    // Whether scripts/patches.json carries an entry for this name at all, which
+    // is what separates a stale deploy from a signature that did not match.
+    static bool PatchNameHasJsonEntry(const char* name) {
+        if (!name) return false;
+        try {
+            if (!g_Config.data.contains("patches")) return false;
+            for (const auto& p : g_Config.data["patches"]) {
+                if (p["name"].get<std::string>() == name) return true;
+            }
+        } catch (...) {}
+        return false;
+    }
+
+    // A retry pass re-scans only what is still unresolved. This used to be
+    // scoped to the Redux compatibility trio, which left every other
+    // require_unique signature with a single pre-settle attempt on Steam: they
+    // missed, took no fallback (require_unique never falls back), and ended at
+    // address 0 for the rest of the session.
     static void ScanForPatchAddresses(
         std::vector<HookEngine::PatchDef>& patches,
         bool isSteam,
-        bool compatibilityOnly = false) {
+        bool unresolvedOnly = false,
+        bool missesAreProvisional = false) {
         std::vector<HookEngine::ScanTarget> targets;
         try {
             if (g_Config.data.contains("patches")) {
                 for (const auto& p : g_Config.data["patches"]) {
                     const std::string name = p["name"].get<std::string>();
-                    // Two independent skips: the compatibility-only pass scans
-                    // just the Redux compatibility group, and no pass ever
-                    // scans a pattern whose patch the distribution/runtime
-                    // filters already dropped from the list.
-                    if (compatibilityOnly && !IsReduxCompatibilityPatchName(name.c_str())) continue;
-                    const bool active = std::any_of(patches.begin(), patches.end(), [&name](const HookEngine::PatchDef& patch) {
-                        return patch.name == name;
+                    // Two independent skips: a retry pass scans only patches
+                    // that are still unverified, and no pass ever scans a
+                    // pattern whose patch the distribution/runtime filters
+                    // already dropped from the list.
+                    const bool active = std::any_of(patches.begin(), patches.end(), [&name, unresolvedOnly](const HookEngine::PatchDef& patch) {
+                        return patch.name == name && (!unresolvedOnly || !patch.verified);
                     });
                     if (!active) continue;
                     HookEngine::ScanTarget t; t.name = name; t.ida_pattern = p["pattern"]; t.offset = p["offset"]; t.expected_size = p["expected_size"]; t.fallback_addr = std::stoul(p["fallback"].get<std::string>(), nullptr, 16); t.require_unique = p.value("require_unique", false); targets.push_back(t);
                 }
             }
-            if (!compatibilityOnly && g_Config.data.contains("globals")) {
+            if (!unresolvedOnly && g_Config.data.contains("globals")) {
                 for (const auto& g : g_Config.data["globals"]) {
                     uint32_t fb = 0; if (isSteam && g.contains("fallback_steam")) fb = std::stoul(g["fallback_steam"].get<std::string>(), nullptr, 16);
                     else if (!isSteam && g.contains("fallback_gog")) fb = std::stoul(g["fallback_gog"].get<std::string>(), nullptr, 16);
@@ -793,7 +852,7 @@ namespace BZROpenShim
                 }
             }
         } catch (...) {}
-        HookEngine::ScanForPatterns("", patches, targets);
+        HookEngine::ScanForPatterns("", patches, targets, missesAreProvisional);
         for (const auto& t : targets) {
             for (auto& p : patches) {
                 if (!p.verified && p.name == t.name && !t.require_unique) {
@@ -831,6 +890,10 @@ namespace BZROpenShim
                 void* orig = isSteam ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10) : HookEngine::ResolveRelCallTarget(p.address - 1);
                 if (!orig) continue; SetProducerBuildMenuOriginal(orig); target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ProducerBuildMenuCallHook));
             } else if (p.name == "Target Reticle Popup Recent-Hit Getter Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(TargetReticlePopupRecentHitGetterHook));
+            else if (p.name == "World Builder Save Destination Dialog") {
+                target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
+                    PrepareEditorSaveDialogHook(p.address - 1)));
+            }
             else if (p.name == "Pilot Carrier Weapon Null Guard") {
                 void* original = isSteam
                     ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
@@ -1052,21 +1115,43 @@ namespace BZROpenShim
         BZROpenShim::VerifyCliMultiParameterOptionFix();
         const ReduxCompatibilityGate compatibilityGate = PrepareReduxCompatibilityGate(isSteam);
         StartSoundChannelOverride(isSteam);
-        g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForDistribution(patches, distribution); FilterPatchesForRuntime(patches, distribution); ScanForPatchAddresses(patches, isSteam);
-        if (isSteam && compatibilityGate.supportedHash && compatibilityGate.settledBytes) {
-            const auto compatibilitySignaturesReady = [&patches]() {
+        g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForDistribution(patches, distribution); FilterPatchesForRuntime(patches, distribution);
+        // On Steam a first-pass miss is not yet a verdict: the retry loop below
+        // follows. Report it as pending rather than failed.
+        ScanForPatchAddresses(patches, isSteam, false, isSteam);
+        if (isSteam) {
+            const auto unresolvedCount = [&patches]() {
+                size_t count = 0;
                 for (const auto& patch : patches) {
-                    if (IsReduxCompatibilityPatchName(patch.name.c_str()) && !patch.verified)
-                        return false;
+                    if (!patch.verified) ++count;
                 }
-                return true;
+                return count;
             };
-            // SteamStub can rewrite one of these pages in the few milliseconds
-            // between the settlement sample and the unique scan. Retry only
-            // this three-signature group; no fallback address is ever enabled.
-            for (int attempt = 0; !compatibilitySignaturesReady() && attempt < 10; ++attempt) {
+            // SteamStub can still be rewriting pages in the milliseconds around
+            // the settlement sample, and a require_unique target never takes a
+            // fallback, so a single early attempt strands it at address 0 for
+            // the session. Retry every unresolved signature, not just the Redux
+            // compatibility trio.
+            //
+            // Stop on stall rather than always spending the full budget: a
+            // signature that is simply absent on this build would otherwise add
+            // a second to every launch. Settling resolves in bursts, so a
+            // couple of barren passes are tolerated before giving up, and the
+            // pass that concedes is the one that logs the verdict.
+            constexpr int kSettleAttempts = 10;
+            constexpr int kMaxBarrenPasses = 2;
+            int barren = 0;
+            for (int attempt = 0; attempt < kSettleAttempts; ++attempt) {
+                const size_t before = unresolvedCount();
+                if (before == 0) break;
+                const bool lastChance =
+                    attempt + 1 == kSettleAttempts || barren + 1 > kMaxBarrenPasses;
                 Sleep(100);
-                ScanForPatchAddresses(patches, isSteam, true);
+                ScanForPatchAddresses(patches, isSteam, true, !lastChance);
+                const size_t after = unresolvedCount();
+                if (after == 0) break;
+                barren = (after < before) ? 0 : barren + 1;
+                if (barren > kMaxBarrenPasses) break;
             }
         }
         auto findAddr = [&patches](const char* n) -> uint32_t { for (const auto& p : patches) { if (p.name == n) return p.address; } return 0; };
@@ -1093,24 +1178,38 @@ namespace BZROpenShim
             }
         }
         Log(L"[DONE] Applied=%d of %u\n", app, static_cast<unsigned>(patches.size()));
-        // A patch this build knows about but that resolved to address 0 was
-        // never looked up at all: its scripts/patches.json entry is missing.
-        // That is almost always a deploy where winmm.dll moved and patches.json
-        // did not, and the only prior symptom was one [SKIP] line among forty.
-        // Name them together so a stale json is obvious in the log.
+        // A patch this build knows about that still sits at address 0 either had
+        // no scripts/patches.json entry (a deploy where winmm.dll moved and the
+        // json did not) or had one whose require_unique signature never matched
+        // (that path takes no fallback, so it also lands on 0). Those are wholly
+        // different faults -- one is fixed by redeploying a file, the other by
+        // revisiting a signature -- and reporting both as a stale json sent
+        // readers to the wrong place. Separate them by whether an entry exists.
         {
-            std::string unresolved;
-            int unresolvedCount = 0;
+            std::string missingEntry, unmatched;
+            int missingEntryCount = 0, unmatchedCount = 0;
             for (const auto& p : patches) {
                 if (p.address != 0) continue;
-                if (!unresolved.empty()) unresolved += ", ";
-                unresolved += p.name;
-                ++unresolvedCount;
+                if (PatchNameHasJsonEntry(p.name.c_str())) {
+                    if (!unmatched.empty()) unmatched += ", ";
+                    unmatched += p.name;
+                    ++unmatchedCount;
+                } else {
+                    if (!missingEntry.empty()) missingEntry += ", ";
+                    missingEntry += p.name;
+                    ++missingEntryCount;
+                }
             }
-            if (unresolvedCount > 0) {
+            if (missingEntryCount > 0) {
                 Log(L"[STALE-CONFIG] %d patch(es) had no scripts/patches.json entry and were never "
                     L"attempted: %hs -- check that patches.json was deployed alongside winmm.dll\n",
-                    unresolvedCount, unresolved.c_str());
+                    missingEntryCount, missingEntry.c_str());
+            }
+            if (unmatchedCount > 0) {
+                Log(L"[SIGNATURE] %d patch(es) have a scripts/patches.json entry whose signature "
+                    L"never matched this image: %hs -- the entry is present; the pattern needs "
+                    L"revisiting for this build\n",
+                    unmatchedCount, unmatched.c_str());
             }
         }
         SetPatchingComplete(true); SetAppliedPatchCount(app);

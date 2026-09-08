@@ -140,6 +140,7 @@ namespace BZROpenShim
             // five-slot loop calls Carrier::GetWeapon without checking
             // Person+0x1A0, so guarding GetSelected alone left this live.
             { 0, HookEngine::PatchType::REL32, {}, "Pilot Carrier Weapon Null Guard", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "World Builder Save Destination Dialog", false, {} },
             // ControlPanel target-list EnemyP call: an opt-in local order
             // authoring relaxation. The global EnemyP implementation stays stock.
             { 0, HookEngine::PatchType::REL32, {}, "Neutral Attack Order Target Hook", false, {} },

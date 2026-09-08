@@ -5,9 +5,12 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include <cstdint>
 
 namespace BZROpenShim
 {
+    // Validates the original thiscall dialog target before a catalog CALL edit.
+    void* PrepareEditorSaveDialogHook(uint32_t callAddress);
     // Installs only the main-executable CreateFile hooks. Safe to call during
     // process attach before the game opens its stock logger files.
     void ApplyEarlyGameLogHooks();
