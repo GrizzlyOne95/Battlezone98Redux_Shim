@@ -764,12 +764,27 @@ namespace BZROpenShim
         // null getter as "scroll state unavailable" and retain the validated
         // HopFix3 frame delta, so fail closed until a Steam identity and ABI are
         // recovered independently.
-        g_EnableScrollRestore = !isSteam;
+        //
+        // The GOG side is now closed as well, for two independent reasons.
+        // The refresh that "jumps" the map list is Steam-only behaviour, so
+        // the capture buys a GOG player nothing; and measured on GOG/Redux
+        // 2.2.301 it never completed anyway. The frame walk reads [ebp-0xA4]
+        // for the list context and gets an unaligned non-null value, which
+        // passes its null check, so the following [ctx+0x17C] dereference
+        // faults into the helper's own __except -- one handled first-chance
+        // access violation per process, for a capture that cannot succeed.
+        // (Symbolized: SafeCapture_MapSorting, trampolines.cpp.)
+        //
+        // This gates only that frame walk. g_BZRFn_GetScrollState stays
+        // published on GOG, because the other consumers reach the same helper
+        // through *g_MapListObject rather than a stack-frame guess, and those
+        // are unaffected.
+        g_EnableScrollRestore = false;
         g_BZRFn_GetScrollState = isSteam
             ? nullptr
             : reinterpret_cast<uint32_t(*)()>(g_Config.GetStaticPointer("GetScrollState", 0x007D3360));
-        if (isSteam)
-            Log(L"[REFRESH] Steam scroll-state capture disabled; using HopFix3 frame delta\n");
+        Log(L"[REFRESH] %hs scroll-state frame probe disabled; using HopFix3 frame delta\n",
+            isSteam ? "Steam" : "GOG");
         g_BZRFn_ScrollUp = reinterpret_cast<void(*)()>(g_Config.GetStaticPointer("ScrollUp", 0x007CB500));
         g_BZRFn_ScrollDown = reinterpret_cast<void(*)()>(g_Config.GetStaticPointer("ScrollDown", 0x007CB540));
     }
