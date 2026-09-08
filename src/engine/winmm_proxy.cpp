@@ -226,6 +226,16 @@ extern "C" WINMMAPI BOOL WINAPI OpenShimSetSmartReticleRange(float range)
     return BZROpenShim::SetSmartReticleRangeFromBridge(range) ? TRUE : FALSE;
 }
 
+extern "C" WINMMAPI float WINAPI OpenShimGetRadarSizeScale()
+{
+    return BZROpenShim::GetRadarSizeScaleFromBridge();
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimSetRadarSizeScale(float scale)
+{
+    return BZROpenShim::SetRadarSizeScaleFromBridge(scale) ? TRUE : FALSE;
+}
+
 extern "C" WINMMAPI BOOL WINAPI OpenShimGetScrapPilotHudTopLefts(
     int* scrapLeft, int* scrapTop, int* pilotLeft, int* pilotTop)
 {
@@ -273,6 +283,11 @@ extern "C" WINMMAPI BOOL WINAPI OpenShimSetUnitTurbo(DWORD handle, BOOL enabled)
 extern "C" WINMMAPI BOOL WINAPI OpenShimResetMissionHookOverrides()
 {
     return BZROpenShim::ResetMissionHookOverridesFromBridge() ? TRUE : FALSE;
+}
+
+extern "C" WINMMAPI BOOL WINAPI OpenShimIsMissionSimulationActive()
+{
+    return BZROpenShim::IsMissionSimulationActiveFromBridge() ? TRUE : FALSE;
 }
 
 extern "C" WINMMAPI BOOL WINAPI OpenShimGetHudSpriteRect(LPCSTR name, int* x, int* y, int* w, int* h)
