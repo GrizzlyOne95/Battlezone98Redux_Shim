@@ -72,12 +72,17 @@ Reference/tooling repos commonly available under `%USERPROFILE%\Documents\GIT` (
   address from `scripts/patches.json`, which is deployed **separately and by
   hand**. Copy both, always. A `patches.json` older than the DLL silently skips
   every patch added since, and says so in one `[STALE-CONFIG]` line among forty.
-- **The in-game updater will revert both.** Opening the OpenShim settings page
-  triggers a suite update that promotes the released `winmm.dll`, `net.ini` and
-  `scripts/patches.json` over whatever is in the game folder — see
-  `logs/openshim_update.log` for `Promoting suite payload to:`. A test run after
-  that point measures the shipped build, not yours, with no other symptom.
-  Re-deploy after the game exits, and confirm before trusting a result.
+- **The suite updater will revert both.** The Workshop mod ships its own copy of
+  the shim, and OpenShim promotes it into the game root: `openshim_suite_*` in
+  `mods/<workshop id>/` is staged over `winmm.dll`, `net.ini` and
+  `scripts/patches.json`. Watch `logs/openshim_update.log` for
+  `Validating staged payload:` followed by `Promoting suite payload to:`. It
+  refuses a genuine downgrade, but a dev build carries the same `version.rc`
+  version as the release, so it is not seen as newer and is overwritten anyway.
+  A test run after that point measures the mod's bundled build, not yours, with
+  no other symptom. Re-deploy after the game exits and confirm before trusting a
+  result, or bump `src/engine/version.rc` so the existing downgrade guard
+  protects the build on its own.
 - `verify_windows.ps1 -GamePath <install>` checks all of this: that
   `scripts/patches.json` is present, that it matches the source tree byte for
   byte, and that the last session logged no `[STALE-CONFIG]`. Run it before
