@@ -38,8 +38,15 @@ namespace HookEngine
     bool WriteMemory(uint32_t address, const void* data, size_t len);
     bool ReadMemory(uint32_t address, void* buffer, size_t len);
 
-    // Pattern Scanning
-    void ScanForPatterns(const std::string& moduleName, std::vector<PatchDef>& patches, const std::vector<ScanTarget>& targets);
+    // Pattern Scanning.
+    //
+    // missesAreProvisional says a retry pass is still to come, so a
+    // require_unique target that finds nothing is reported as pending rather
+    // than failed. SteamStub leaves parts of .text unsettled for the first
+    // ~100ms after launch; a miss in that window means "too early", not
+    // "wrong signature", and logging it as a failure sends readers hunting
+    // for a build difference that is not there.
+    void ScanForPatterns(const std::string& moduleName, std::vector<PatchDef>& patches, const std::vector<ScanTarget>& targets, bool missesAreProvisional = false);
     std::vector<uint8_t> ParseHexPattern(const std::string& hex);
     std::vector<uint16_t> ParseIdaPattern(const std::string& hex);
 

@@ -802,28 +802,46 @@ namespace BZROpenShim
             g_Config.GetStaticPointer("JoinerEventOriginal", 0x00742560));
     }
 
+    // Whether scripts/patches.json carries an entry for this name at all, which
+    // is what separates a stale deploy from a signature that did not match.
+    static bool PatchNameHasJsonEntry(const char* name) {
+        if (!name) return false;
+        try {
+            if (!g_Config.data.contains("patches")) return false;
+            for (const auto& p : g_Config.data["patches"]) {
+                if (p["name"].get<std::string>() == name) return true;
+            }
+        } catch (...) {}
+        return false;
+    }
+
+    // A retry pass re-scans only what is still unresolved. This used to be
+    // scoped to the Redux compatibility trio, which left every other
+    // require_unique signature with a single pre-settle attempt on Steam: they
+    // missed, took no fallback (require_unique never falls back), and ended at
+    // address 0 for the rest of the session.
     static void ScanForPatchAddresses(
         std::vector<HookEngine::PatchDef>& patches,
         bool isSteam,
-        bool compatibilityOnly = false) {
+        bool unresolvedOnly = false,
+        bool missesAreProvisional = false) {
         std::vector<HookEngine::ScanTarget> targets;
         try {
             if (g_Config.data.contains("patches")) {
                 for (const auto& p : g_Config.data["patches"]) {
                     const std::string name = p["name"].get<std::string>();
-                    // Two independent skips: the compatibility-only pass scans
-                    // just the Redux compatibility group, and no pass ever
-                    // scans a pattern whose patch the distribution/runtime
-                    // filters already dropped from the list.
-                    if (compatibilityOnly && !IsReduxCompatibilityPatchName(name.c_str())) continue;
-                    const bool active = std::any_of(patches.begin(), patches.end(), [&name](const HookEngine::PatchDef& patch) {
-                        return patch.name == name;
+                    // Two independent skips: a retry pass scans only patches
+                    // that are still unverified, and no pass ever scans a
+                    // pattern whose patch the distribution/runtime filters
+                    // already dropped from the list.
+                    const bool active = std::any_of(patches.begin(), patches.end(), [&name, unresolvedOnly](const HookEngine::PatchDef& patch) {
+                        return patch.name == name && (!unresolvedOnly || !patch.verified);
                     });
                     if (!active) continue;
                     HookEngine::ScanTarget t; t.name = name; t.ida_pattern = p["pattern"]; t.offset = p["offset"]; t.expected_size = p["expected_size"]; t.fallback_addr = std::stoul(p["fallback"].get<std::string>(), nullptr, 16); t.require_unique = p.value("require_unique", false); targets.push_back(t);
                 }
             }
-            if (!compatibilityOnly && g_Config.data.contains("globals")) {
+            if (!unresolvedOnly && g_Config.data.contains("globals")) {
                 for (const auto& g : g_Config.data["globals"]) {
                     uint32_t fb = 0; if (isSteam && g.contains("fallback_steam")) fb = std::stoul(g["fallback_steam"].get<std::string>(), nullptr, 16);
                     else if (!isSteam && g.contains("fallback_gog")) fb = std::stoul(g["fallback_gog"].get<std::string>(), nullptr, 16);
@@ -834,7 +852,7 @@ namespace BZROpenShim
                 }
             }
         } catch (...) {}
-        HookEngine::ScanForPatterns("", patches, targets);
+        HookEngine::ScanForPatterns("", patches, targets, missesAreProvisional);
         for (const auto& t : targets) {
             for (auto& p : patches) {
                 if (!p.verified && p.name == t.name && !t.require_unique) {
@@ -1093,21 +1111,43 @@ namespace BZROpenShim
         BZROpenShim::VerifyCliMultiParameterOptionFix();
         const ReduxCompatibilityGate compatibilityGate = PrepareReduxCompatibilityGate(isSteam);
         StartSoundChannelOverride(isSteam);
-        g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForDistribution(patches, distribution); FilterPatchesForRuntime(patches, distribution); ScanForPatchAddresses(patches, isSteam);
-        if (isSteam && compatibilityGate.supportedHash && compatibilityGate.settledBytes) {
-            const auto compatibilitySignaturesReady = [&patches]() {
+        g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForDistribution(patches, distribution); FilterPatchesForRuntime(patches, distribution);
+        // On Steam a first-pass miss is not yet a verdict: the retry loop below
+        // follows. Report it as pending rather than failed.
+        ScanForPatchAddresses(patches, isSteam, false, isSteam);
+        if (isSteam) {
+            const auto unresolvedCount = [&patches]() {
+                size_t count = 0;
                 for (const auto& patch : patches) {
-                    if (IsReduxCompatibilityPatchName(patch.name.c_str()) && !patch.verified)
-                        return false;
+                    if (!patch.verified) ++count;
                 }
-                return true;
+                return count;
             };
-            // SteamStub can rewrite one of these pages in the few milliseconds
-            // between the settlement sample and the unique scan. Retry only
-            // this three-signature group; no fallback address is ever enabled.
-            for (int attempt = 0; !compatibilitySignaturesReady() && attempt < 10; ++attempt) {
+            // SteamStub can still be rewriting pages in the milliseconds around
+            // the settlement sample, and a require_unique target never takes a
+            // fallback, so a single early attempt strands it at address 0 for
+            // the session. Retry every unresolved signature, not just the Redux
+            // compatibility trio.
+            //
+            // Stop on stall rather than always spending the full budget: a
+            // signature that is simply absent on this build would otherwise add
+            // a second to every launch. Settling resolves in bursts, so a
+            // couple of barren passes are tolerated before giving up, and the
+            // pass that concedes is the one that logs the verdict.
+            constexpr int kSettleAttempts = 10;
+            constexpr int kMaxBarrenPasses = 2;
+            int barren = 0;
+            for (int attempt = 0; attempt < kSettleAttempts; ++attempt) {
+                const size_t before = unresolvedCount();
+                if (before == 0) break;
+                const bool lastChance =
+                    attempt + 1 == kSettleAttempts || barren + 1 > kMaxBarrenPasses;
                 Sleep(100);
-                ScanForPatchAddresses(patches, isSteam, true);
+                ScanForPatchAddresses(patches, isSteam, true, !lastChance);
+                const size_t after = unresolvedCount();
+                if (after == 0) break;
+                barren = (after < before) ? 0 : barren + 1;
+                if (barren > kMaxBarrenPasses) break;
             }
         }
         auto findAddr = [&patches](const char* n) -> uint32_t { for (const auto& p : patches) { if (p.name == n) return p.address; } return 0; };
@@ -1134,24 +1174,38 @@ namespace BZROpenShim
             }
         }
         Log(L"[DONE] Applied=%d of %u\n", app, static_cast<unsigned>(patches.size()));
-        // A patch this build knows about but that resolved to address 0 was
-        // never looked up at all: its scripts/patches.json entry is missing.
-        // That is almost always a deploy where winmm.dll moved and patches.json
-        // did not, and the only prior symptom was one [SKIP] line among forty.
-        // Name them together so a stale json is obvious in the log.
+        // A patch this build knows about that still sits at address 0 either had
+        // no scripts/patches.json entry (a deploy where winmm.dll moved and the
+        // json did not) or had one whose require_unique signature never matched
+        // (that path takes no fallback, so it also lands on 0). Those are wholly
+        // different faults -- one is fixed by redeploying a file, the other by
+        // revisiting a signature -- and reporting both as a stale json sent
+        // readers to the wrong place. Separate them by whether an entry exists.
         {
-            std::string unresolved;
-            int unresolvedCount = 0;
+            std::string missingEntry, unmatched;
+            int missingEntryCount = 0, unmatchedCount = 0;
             for (const auto& p : patches) {
                 if (p.address != 0) continue;
-                if (!unresolved.empty()) unresolved += ", ";
-                unresolved += p.name;
-                ++unresolvedCount;
+                if (PatchNameHasJsonEntry(p.name.c_str())) {
+                    if (!unmatched.empty()) unmatched += ", ";
+                    unmatched += p.name;
+                    ++unmatchedCount;
+                } else {
+                    if (!missingEntry.empty()) missingEntry += ", ";
+                    missingEntry += p.name;
+                    ++missingEntryCount;
+                }
             }
-            if (unresolvedCount > 0) {
+            if (missingEntryCount > 0) {
                 Log(L"[STALE-CONFIG] %d patch(es) had no scripts/patches.json entry and were never "
                     L"attempted: %hs -- check that patches.json was deployed alongside winmm.dll\n",
-                    unresolvedCount, unresolved.c_str());
+                    missingEntryCount, missingEntry.c_str());
+            }
+            if (unmatchedCount > 0) {
+                Log(L"[SIGNATURE] %d patch(es) have a scripts/patches.json entry whose signature "
+                    L"never matched this image: %hs -- the entry is present; the pattern needs "
+                    L"revisiting for this build\n",
+                    unmatchedCount, unmatched.c_str());
             }
         }
         SetPatchingComplete(true); SetAppliedPatchCount(app);
