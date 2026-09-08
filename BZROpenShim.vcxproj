@@ -168,6 +168,7 @@
     <ClCompile Include="src\patches\terrain_tile_blend.cpp" />
     <ClCompile Include="src\engine\crash_logger.cpp" />
     <ClCompile Include="src\engine\fog_wake.cpp" />
+    <ClCompile Include="src\engine\fog_wake_runtime.cpp" />
     <ClCompile Include="src\engine\shim_log.cpp" />
     <ClCompile Include="src\engine\enhanced_light_selection.cpp" />
     <ClCompile Include="src\engine\winmm_proxy.cpp" />
@@ -186,6 +187,7 @@
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
     <ClInclude Include="include\fog_wake.h" />
+    <ClInclude Include="include\fog_wake_runtime.h" />
     <ClInclude Include="include\lcbench_safety_policy.h" />
     <ClInclude Include="include\autosave.h" />
     <ClInclude Include="include\autosave_gate.h" />
