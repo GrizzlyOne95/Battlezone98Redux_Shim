@@ -88,6 +88,34 @@ Reference/tooling repos commonly available under `%USERPROFILE%\Documents\GIT` (
   byte, and that the last session logged no `[STALE-CONFIG]`. Run it before
   reporting that a patch does or does not work.
 
+## CI gates to run locally before pushing
+`.github/workflows/build-win32.yml` runs these *before* MSBuild, so a green
+local build proves nothing. Run the ones your change touches rather than
+discovering them on CI:
+
+| Change | Run |
+|---|---|
+| Any new/edited `openshim.ini` key | `./scripts/run_ini_tests.ps1` |
+| Anything under `src/patches/net_*`, `bzrnet_*`, `netcode_*` | `./tools/validate-network-baseline.ps1` |
+| Any new/edited test, or a change a test covers | `cmake -S tests -B build/tests -A Win32; cmake --build build/tests --config Release; ctest --test-dir build/tests -C Release --output-on-failure` |
+| `shaders/dx11_enhanced_fxaa.hlsl` | `fxc /T vs_5_0 /E VSMain` and `/T ps_5_0 /E PSMain` (see the workflow) |
+
+Two gates catch people repeatedly:
+
+- **`openshim.ini` ships conservative.** Every value that reads as enabled
+  (`1`, `true`, `on`, `yes`, `enabled`, `enhanced`, `auto`) fails the build
+  unless its `Section/Key` is in the allowlist at the top of
+  `scripts/run_ini_tests.ps1`. Default new settings to `0`. If a setting
+  genuinely must ship on, add it to that allowlist **with a comment saying
+  why** — the list is the record of those decisions, not a rubber stamp. The
+  same check requires `openshim.ini` and `openshim.ini.example` to stay in
+  sync, so edit both.
+- **Tests must be reproducible off this machine.** Anything touching real
+  paths must canonicalize them (`std::filesystem::canonical`): CI's `TEMP` is
+  an 8.3 short path, so `GetTempPathW` and `GetFinalPathNameByHandleW`
+  disagree there and nowhere locally. Reproduce by pointing `TEMP` at a short
+  path before blaming CI.
+
 ## Git Workflow
 - Before editing, inspect `git status -sb` and the relevant diff; preserve pre-existing user changes.
 - Normal work goes on a task branch, usually `agent/<short-description>`, never directly on the default/protected branch.
