@@ -6027,6 +6027,38 @@ namespace BZROpenShim
             }
         }
 
+        // Re-assert the closed page's hidden state.
+        //
+        // TickCareerUi runs only from the cUI_MainScreen ctor hook, so the hide
+        // it applies is the last word only for as long as construction lasts.
+        // The shell re-activates the overlay's children when it actually
+        // presents the screen -- which on a cold start is after the intro, long
+        // after the final ctor phase -- and the page came back with the plate
+        // (-200,-100,1840,1280, full-bleed by design) drawn over the closed
+        // menu. That reads as "the main menu lost its background", because the
+        // plate covers the stock buttons' frames while their captions still
+        // draw over it: text on this screen ignores the active flag, which is
+        // the same reason Back's caption stayed blank while its frame returned.
+        //
+        // Text blanking survives re-activation; the active flag does not. So it
+        // has to be re-applied from something the shell itself runs while the
+        // menu is up, not once at construction. Only the flag is touched here --
+        // re-running the text half would push "" through the label hooks every
+        // frame and churn the text memory Back restores from.
+        static void ReassertCareerUiHiddenState()
+        {
+            if (g_CareerUiPageActive || !g_CareerUiPlate)
+                return;
+
+            SetInputBindingUiViewActive(g_CareerUiPlate, false);
+            SetInputBindingUiViewActive(g_CareerUiTitleLabel, false);
+            SetInputBindingUiViewActive(g_CareerUiBackButton, false);
+            for (void* label : g_CareerUiCaptions)
+                SetInputBindingUiViewActive(label, false);
+            for (void* label : g_CareerUiValues)
+                SetInputBindingUiViewActive(label, false);
+        }
+
         static void OnCareerUiBackClicked();
 
         static bool EnsureCareerUiPageWidgets()
@@ -6718,6 +6750,14 @@ namespace BZROpenShim
         const bool hold = !g_CareerUiTextMemorySuppressed && IsCareerUiBlankedView(thisPtr);
         if (g_CareerUiSetTooltipOriginal)
             g_CareerUiSetTooltipOriginal(thisPtr, hold ? "" : text);
+
+        // The main menu's per-frame refresh blanks the MPStatus tooltip on
+        // every pass, so this hook is a path the shell drives continuously
+        // while the menu is up -- which is what the closed career page needs to
+        // stay hidden after the shell re-activates the overlay's children. It
+        // is a field write per widget and self-cancels the moment the page is
+        // opened, so no new detour is needed to carry it.
+        ReassertCareerUiHiddenState();
     }
 
     void __fastcall MainScreenCtorHook(void* thisPtr, void* /*edx*/, char phase)
