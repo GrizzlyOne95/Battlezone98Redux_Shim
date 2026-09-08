@@ -31,6 +31,7 @@
 #include "ui_performance_hooks.h"
 #include "ui_file_scan_hooks.h"
 #include "mp_faction_restrict.h"
+#include "mp_ready_diagnostic.h"
 #include "BZROpenShim.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -67,6 +68,12 @@ static unsigned __stdcall PatchThreadProc(void*)
     // inert until [Network] StockFactionsOnly is turned on, and the loader it
     // intercepts only runs when a multiplayer screen builds its vehicle list.
     BZROpenShim::MpFactionRestrict::InstallMpFactionRestrictIfPossible();
+
+    // Explains a "Not Ready" multiplayer entry on the main menu. Read-only: it
+    // reproduces the shell's own readiness decision from the same globals and
+    // logs which term failed, because the stock UI has no way to say. Its own
+    // worker waits for platform init, so ordering here is not significant.
+    BZROpenShim::InitializeMpReadyDiagnostic();
 
     // Shell profiler detours must not touch SteamStub-managed executable pages
     // before platform detection and code settlement. UiPerfHooks installs them
