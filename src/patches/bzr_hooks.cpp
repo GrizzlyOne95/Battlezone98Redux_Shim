@@ -420,6 +420,12 @@ namespace BZROpenShim
 
     static FnPersonSimulate g_BzrFn_PersonSimulate = nullptr;
     static FnCarrierGetSelectedMask g_BzrFn_CarrierGetSelectedMask = nullptr;
+
+    // Carrier::GetWeapon(int) at 0x00417F60 -- see FnCarrierGetWeapon above,
+    // and kCarrierGetWeaponAddr, which already names this function. Resolved by
+    // signature here rather than by literal address so the guard stands down
+    // instead of hooking the wrong bytes if the build moves.
+    static FnCarrierGetWeapon g_BzrFn_CarrierGetWeapon = nullptr;
     static FnTeamEnemyPInt g_BzrFn_ControlPanelEnemyP = nullptr;
     static std::unordered_set<uintptr_t> g_PilotCarrierNullLoggedObjects = {};
     static volatile long g_NeutralAttackOrderLogBudget = 16;
@@ -31648,6 +31654,11 @@ namespace BZROpenShim
         return false;
     }
 
+    void SetPersonCarrierGetWeaponOriginal(void* target)
+    {
+        g_BzrFn_CarrierGetWeapon = reinterpret_cast<FnCarrierGetWeapon>(target);
+    }
+
     void SetPersonCarrierGetSelectedOriginal(void* target)
     {
         g_BzrFn_CarrierGetSelectedMask =
@@ -32006,6 +32017,52 @@ namespace BZROpenShim
         }
 
         return LcbenchSafetyPolicy::SelectedMaskForMissingCarrier();
+    }
+
+    // Production patch: the SECOND null-carrier crash site.
+    //
+    // PersonCarrierGetSelectedGuard above covers Carrier::GetSelected, which
+    // Person::Simulate calls on Person+0x1A0. That is not the only accessor
+    // reached through that pointer. A five-slot loop at 0x005A1362 does
+    //
+    //     for (i = 0; i < 5; i++)
+    //         weapon = person->carrier->GetWeapon(i);   // carrier NOT checked
+    //
+    // and Carrier::GetWeapon (0x00417F60) faults on its own first instruction,
+    // AND EAX,[ECX+0x2C], when that carrier is null -- the same malformed-ODF
+    // state the sibling guard documents, on a different call site, so fixing
+    // one left the other live.
+    //
+    // Found loading the Hell Gate II addon mission on GOG Redux 2.2.301: its
+    // sshg01.odf is the player's own pilot and declares weaponHard1/weaponName1
+    // under [CraftClass] instead of [GameObjectClass], so GameObject::GameObject
+    // never allocates the Carrier. The mission reached "Playing" and died on the
+    // first simulation frame, which is why it presented as an instant crash.
+    //
+    // Returning null is not a substitute value invented here: it is what the
+    // callee itself returns for an empty hardpoint, and the caller stores the
+    // result and branches on null immediately afterwards at 0x005A138D. A pilot
+    // with no carrier genuinely has no weapon in any slot, so every slot reading
+    // empty is the accurate answer as well as the safe one.
+    void* __fastcall PersonCarrierGetWeaponGuard(void* carrier, void* /*edx*/, int slot)
+    {
+        if (carrier && g_BzrFn_CarrierGetWeapon)
+            return g_BzrFn_CarrierGetWeapon(carrier, slot);
+
+        if (!carrier)
+        {
+            const uintptr_t objectKey = reinterpret_cast<uintptr_t>(carrier);
+            if (g_PilotCarrierNullLoggedObjects.insert(objectKey ^ 0x1u).second)
+            {
+                Log(L"[PILOTSAFE] null carrier at +0x%X in the weapon-slot loop; "
+                    L"reporting slot %d empty and continuing. The pilot ODF most "
+                    L"likely declares weaponHard1 outside [GameObjectClass].\n",
+                    static_cast<unsigned>(kPersonCarrierOffset),
+                    slot);
+            }
+        }
+
+        return nullptr;
     }
 
     // Compatibility toggle: neutral-unit attack/order asymmetry.

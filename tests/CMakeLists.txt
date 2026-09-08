@@ -28,6 +28,13 @@ add_executable(trn_codec_tests
 target_include_directories(trn_codec_tests PRIVATE ../include)
 target_compile_features(trn_codec_tests PRIVATE cxx_std_20)
 
+add_executable(bzn_analysis_tests
+    bzn_analysis_tests.cpp
+)
+
+target_include_directories(bzn_analysis_tests PRIVATE ../include)
+target_compile_features(bzn_analysis_tests PRIVATE cxx_std_20)
+
 add_executable(numeric_locale_compat_tests
     numeric_locale_compat_tests.cpp
     ../src/patches/numeric_locale_compat.cpp
@@ -74,6 +81,19 @@ add_executable(resolve_table_tests
     resolve_table_tests.cpp
     ../src/engine/resolve_table.cpp
 )
+
+# Cross-checks that a patch is registered in every place it has to be. Pure
+# text over the repository's own sources, so it needs no engine code.
+add_executable(patch_registration_tests
+    patch_registration_tests.cpp
+)
+target_include_directories(patch_registration_tests PRIVATE ../include)
+target_compile_features(patch_registration_tests PRIVATE cxx_std_20)
+target_compile_definitions(patch_registration_tests PRIVATE
+    BZR_PATCHES_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patches.json"
+    BZR_PATCHES_H="${CMAKE_CURRENT_SOURCE_DIR}/../include/patches.h"
+    BZR_PATCHER_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/engine/patcher.cpp"
+    BZR_BZR_HOOKS_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/patches/bzr_hooks.cpp")
 
 add_executable(openshim_update_manifest_tests
     openshim_update_manifest_tests.cpp
@@ -150,6 +170,7 @@ if(MSVC)
     target_compile_options(bzrnet_protocol_tests PRIVATE /W4 /WX)
     target_compile_options(shim_log_tests PRIVATE /W4 /WX)
     target_compile_options(trn_codec_tests PRIVATE /W4 /WX)
+    target_compile_options(bzn_analysis_tests PRIVATE /W4 /WX)
     target_compile_options(numeric_locale_compat_tests PRIVATE /W4 /WX)
     target_compile_options(native_ui_validation_tests PRIVATE /W4 /WX)
     target_compile_options(enhanced_light_selection_tests PRIVATE /W4 /WX)
@@ -160,6 +181,7 @@ if(MSVC)
     target_compile_options(sun_flash_tests PRIVATE /W4 /WX)
     target_compile_options(terrain_tile_blend_tests PRIVATE /W4 /WX)
     target_compile_options(resolve_table_tests PRIVATE /W4 /WX)
+    target_compile_options(patch_registration_tests PRIVATE /W4 /WX)
     target_compile_options(openshim_update_manifest_tests PRIVATE /W4 /WX)
     target_compile_options(ai_range_policy_tests PRIVATE /W4 /WX)
     target_compile_options(lcbench_safety_policy_tests PRIVATE /W4 /WX)
@@ -168,6 +190,7 @@ else()
     target_compile_options(bzrnet_protocol_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(shim_log_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(trn_codec_tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(bzn_analysis_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(numeric_locale_compat_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(native_ui_validation_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(enhanced_light_selection_tests PRIVATE -Wall -Wextra -Werror)
@@ -178,6 +201,7 @@ else()
     target_compile_options(sun_flash_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(terrain_tile_blend_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(resolve_table_tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(patch_registration_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(openshim_update_manifest_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(ai_range_policy_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(lcbench_safety_policy_tests PRIVATE -Wall -Wextra -Werror)
@@ -187,6 +211,7 @@ endif()
 add_test(NAME bzrnet_protocol_tests COMMAND bzrnet_protocol_tests)
 add_test(NAME shim_log_tests COMMAND shim_log_tests)
 add_test(NAME trn_codec_tests COMMAND trn_codec_tests)
+add_test(NAME bzn_analysis_tests COMMAND bzn_analysis_tests)
 add_test(NAME numeric_locale_compat_tests COMMAND numeric_locale_compat_tests)
 add_test(NAME native_ui_validation_tests COMMAND native_ui_validation_tests)
 add_test(NAME enhanced_light_selection_tests COMMAND enhanced_light_selection_tests)
@@ -196,6 +221,7 @@ add_test(NAME chunk_batch_invalidation_tests COMMAND chunk_batch_invalidation_te
 add_test(NAME sun_flash_tests COMMAND sun_flash_tests)
 add_test(NAME terrain_tile_blend_tests COMMAND terrain_tile_blend_tests)
 add_test(NAME resolve_table_tests COMMAND resolve_table_tests)
+add_test(NAME patch_registration_tests COMMAND patch_registration_tests)
 add_test(NAME openshim_update_manifest_tests COMMAND openshim_update_manifest_tests)
 add_test(NAME ai_range_policy_tests COMMAND ai_range_policy_tests)
 add_test(NAME lcbench_safety_policy_tests COMMAND lcbench_safety_policy_tests)
