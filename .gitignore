@@ -1,69 +1,68 @@
-# Visual Studio
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
 [Bb]in/
 [Oo]bj/
 [Bb]uild/
 build-mingw/
 .vs/
 
-# Python virtual environments (machine-specific absolute paths; never tracked)
-.venv/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+
 *.user
 *.userosscache
 *.sln.docstates
+*.vsix
 
-# Memory Dumps
-*.DMP
-
-# Python scripts and artifacts
-*.py
-!reverse_engineering/locate_native_save.py
-!reverse_engineering/export_pdb_reference.py
-!reverse_engineering/export_ghidra_inventory.py
-!reverse_engineering/run_best_effort_pipeline.py
-!reverse_engineering/finalize_global_corpus.py
-!reverse_engineering/build_re_brief.py
-!resources/ui/custom_widgets/mkui.py
-!reverse_engineering/rank_private_pdb_matches.py
-!reverse_engineering/validate_semantic_apply.py
-!reverse_engineering/ghidra_scripts/
-!reverse_engineering/ghidra_scripts/ApplySemanticPdbHints.java
-!reverse_engineering/build_legacy_to_redux_symbol_map.py
-!reverse_engineering/export_existing_project_decomp.py
-!reverse_engineering/complete_cached_project_pipeline.py
-!reverse_engineering/capture_runtime_layout.py
-!reverse_engineering/probe_chunk_effect_runtime.py
-!reverse_engineering/audit_stock_assets.py
-!reverse_engineering/merge_asset_audit_runtime.py
-reverse_engineering/asset_audit/
-!reverse_engineering/build_netcode_index.py
-!reverse_engineering/analyze_bzrnet_capture.py
-!reverse_engineering/analyze_relay_capture.py
-!reverse_engineering/compare_craft_bounds_modes.py
-!reverse_engineering/analyze_headlight_terminator.py
-!reverse_engineering/analyze_chunk_batch_reuse.py
-!reverse_engineering/analyze_chunk_batch_presentmon.py
-!reverse_engineering/analyze_presentmon_runs.py
-!reverse_engineering/analyze_cpu_samples.py
-!reverse_engineering/analyze_fourteam_phase1.py
-!reverse_engineering/bzrnet_server/*.py
-!reverse_engineering/decompilation_from_1.5_exe-pdb/package_clean_pdb_c.py
-reverse_engineering/decompilation_from_1.5_exe-pdb/1.5_decompile.zip
-# Local Battlezone 1.5 decompiler corpus; retain for private analysis only.
-reverse_engineering/decompilation_from_1.5_exe-pdb/1.5/
-reverse_engineering/decompilation_from_1.5_exe-pdb/Redux/
-reverse_engineering/corpus_artifacts/legacy_15227_clean_pdb_c.zip
+# ---------------------------------------------------------------------------
+# Python generated/local state
+# Source .py files are tracked by default.
+# ---------------------------------------------------------------------------
+.venv/
+venv/
 __pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# Analysis results
-*.txt
-!CMakeLists.txt
-!reverse_engineering/bzrnet_server/requirements.txt
+# ---------------------------------------------------------------------------
+# Machine-local agent/developer configuration
+# ---------------------------------------------------------------------------
+.claude/settings.local.json
+WORKSTATION.local.md
+.vscode/settings.json
+
+# ---------------------------------------------------------------------------
+# Runtime / transient output
+# ---------------------------------------------------------------------------
+*.DMP
+*.dmp
 *.log
 *.pcap
 *.pcapng
 BZPLYR*.DEF
 save/
+nul
+
+# ---------------------------------------------------------------------------
+# Local game binaries / unpacked payloads
+# ---------------------------------------------------------------------------
+battlezone98redux.exe
+battlezone98redux.exe/
+battlezone98redux.exe.payload
+battlezone98redux.exe.unpacked.exe
+
+# ---------------------------------------------------------------------------
+# Reverse-engineering generated corpora and scratch output
+# Keep intentional repo_corpora/bzr_gog_best_effort content tracked.
+# ---------------------------------------------------------------------------
 architecture_reference.md
+reverse_engineering/asset_audit/
 reverse_engineering/latest
 reverse_engineering/workshop
 reverse_engineering/snapshots
@@ -72,86 +71,35 @@ reverse_engineering/bsim
 reverse_engineering/current_global_corpus/
 reverse_engineering/current_legacy_global_corpus/
 reverse_engineering/portable_corpora/
+reverse_engineering/decompilation_from_1.5_exe-pdb/1.5_decompile.zip
+reverse_engineering/decompilation_from_1.5_exe-pdb/1.5/
+reverse_engineering/decompilation_from_1.5_exe-pdb/Redux/
 reverse_engineering/decompilation_from_1.5_exe-pdb/clean_pdb_c/
 reverse_engineering/decompilation_from_1.5_exe-pdb/ghidra*/
 reverse_engineering/decompilation_from_1.5_exe-pdb/pdb/
 reverse_engineering/decompilation_from_1.5_exe-pdb/pe/
 reverse_engineering/decompilation_from_1.5_exe-pdb/*.java
+reverse_engineering/corpus_artifacts/legacy_15227_clean_pdb_c.zip
 reverse_engineering/bzr_audio_re*/
-.ghidra_tmp/
-battlezone98redux.exe/
 reverse_engineering/badlands/
-39024
-
-# Tools and references
-tools/*
-!tools/export-bz15-ui.py
-!tools/find-redux-ui-ctors.py
-ref/
-scripts/
-!scripts/
-scripts/*
-!scripts/Apply-StockDx11ShaderHardening.ps1
-!scripts/Test-TerrainSemanticParity.ps1
-!scripts/Compare-TerrainCaptures.ps1
-!scripts/New-TerrainHdSmokeTiles.ps1
-!scripts/run_ogre_profiler_tests.ps1
-!scripts/run_ini_tests.ps1
-!scripts/run_render_profile_tests.ps1
-!scripts/run_ui_decor_tests.ps1
-!scripts/Invoke-SunFlashTrace.ps1
-!scripts/render_profile_matrix.ps1
-!scripts/Deploy-OpenShim.ps1
-!scripts/install_windows.ps1
-!scripts/uninstall_windows.ps1
-!scripts/terrain_hd_tiles.example.json
-!scripts/audit_chunk_payload_coverage.py
-!scripts/match_legacy_chunk_pieces.py
-!scripts/deploy_linux_proton.sh
-!scripts/pre-commit-secret-guard.sh
-!scripts/install_linux.sh
-!scripts/steam_game_paths.sh
-docs/*
-!docs/terrain-render-path.md
-!docs/bz15-multiplayer-ui-port.md
-!docs/NETCODE_UPSTREAM_PARITY.md
-!docs/raw-mouse-input.md
-!docs/DX11_ENHANCED_DYNAMIC_LIGHT_AUDIT.md
-!docs/SATELLITE_VISIBILITY_FIX_PLAN.md
-!docs/OPENSHIM_RENDER_PROFILE_ARCHITECTURE.md
-!docs/RENDER_PROFILE_RUNTIME_QUALIFICATION_20260824.md
-!docs/NATIVE_EVENT_LAYER.md
-!docs/INTERACTIVE_FOG_WAKES.md
-!docs/FOG_COMPOSITOR_QUALIFICATION_20260908.md
-
-# Local third-party source/reference checkouts
-third_party/ogre-1.10.0-bzr/_work/
-
-# VS Extensions
-*.vsix
+.ghidra_tmp/
 .db/
 pyghidra_mcp_projects/
-battlezone98redux.exe
-battlezone98redux.exe.payload
-battlezone98redux.exe.unpacked.exe
-reverse_engineering/finalize_global_corpus.py
-reverse_engineering/repo_corpora/bzr_gog_best_effort/pipeline_manifest.json
-reverse_engineering/repo_corpora/bzr_gog_best_effort/merged/legacy_symbol_enriched_functions.json
-reverse_engineering/finalize_global_corpus.py
-reverse_engineering/repo_corpora/bzr_gog_best_effort/pipeline_manifest.json
-.vscode/settings.json
-nul
-tmp/dx11-hardening-fxc/
-!reverse_engineering/analyze_walker_jitter.py
-!reverse_engineering/analyze_walker_cadence.py
-!reverse_engineering/analyze_walker_matrix.py
+ref/
 
-# Skippy runtime bookkeeping — never tracked
+# ---------------------------------------------------------------------------
+# Third-party / tool scratch
+# Source under tools/, scripts/, Docs/, and reverse_engineering/ is tracked by
+# default; ignore generated output by specific directory instead of whitelists.
+# ---------------------------------------------------------------------------
+third_party/ogre-1.10.0-bzr/_work/
+tmp/dx11-hardening-fxc/
+
+# ---------------------------------------------------------------------------
+# Local OpenShim / agent bookkeeping
+# ---------------------------------------------------------------------------
 .skippy/
-# Nagatha audit/kit packets — never tracked
 .nagatha/
-# Bilby mill scratch — never tracked
 .bilby/
-# Discord webhook lives only in a local upload.conf, never in the repo
 upload.conf
 **/upload.conf
