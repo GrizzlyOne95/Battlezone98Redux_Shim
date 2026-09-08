@@ -76,6 +76,12 @@ namespace BZROpenShim
         constexpr uint32_t kSaveFlagFallbackOffset = 0xEC;
         constexpr uint32_t kSaveFlagMaxReasonableOffset = 0x400;
         constexpr ULONGLONG kSaveThrottleMs = 10000;
+        // Ogre 1.10's saveMicrocodeCache() is const and never clears
+        // mCacheDirty (only loadMicrocodeCache() does), so isCacheDirty()
+        // latches true for the rest of the process once any shader compiles.
+        // When we cannot clear it ourselves the throttle is the only bound on
+        // rewriting an unchanged cache, so it has to be a much coarser one.
+        constexpr ULONGLONG kSaveThrottleNoClearMs = 300000;
         constexpr uintmax_t kMaxReasonableCacheBytes = 256ull * 1024 * 1024;
         constexpr const char* kFingerprintVersion = "v1";
 
@@ -86,6 +92,9 @@ namespace BZROpenShim
         bool g_SaveFlagEnabled = false;
         ULONGLONG g_LastSaveAttemptTick = 0;
         uint64_t g_ShaderFingerprint = 0;
+        uint32_t g_DirtyFlagOffset = 0;
+        bool g_DirtyFlagUsable = false;
+        bool g_DirtyClearFailureLogged = false;
 
         void* g_Gpm = nullptr;
         void* g_Root = nullptr;
@@ -243,7 +252,12 @@ namespace BZROpenShim
         // 0xE06D7363, so one __except handler covers both. Frames below hold
         // no unwindable objects.
 
-        static bool SehParseSaveFlagOffset(const uint8_t* code, uint32_t* outOffset)
+        // Both members we need live behind trivial `return mFlag;` getters, so
+        // one parser serves getSaveMicrocodesToCache (mSaveMicrocodesToCache)
+        // and isCacheDirty (mCacheDirty). MSVC emits either `mov al,[ecx+off]`
+        // or `movzx eax,byte [ecx+off]` for a bool member depending on the
+        // return-value contract it picked; accept both, in imm8 and imm32.
+        static bool SehParseBoolGetterOffset(const uint8_t* code, uint32_t* outOffset)
         {
             __try
             {
@@ -259,6 +273,16 @@ namespace BZROpenShim
                     *outOffset = code[2];
                     return true;
                 }
+                if (code[0] == 0x0F && code[1] == 0xB6 && code[2] == 0x81 && code[7] == 0xC3)
+                {
+                    *outOffset = *reinterpret_cast<const uint32_t*>(code + 3);
+                    return true;
+                }
+                if (code[0] == 0x0F && code[1] == 0xB6 && code[2] == 0x41 && code[4] == 0xC3)
+                {
+                    *outOffset = code[3];
+                    return true;
+                }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -271,6 +295,19 @@ namespace BZROpenShim
             __try
             {
                 *static_cast<uint8_t*>(address) = value;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static bool SehReadByte(const void* address, uint8_t* outValue)
+        {
+            __try
+            {
+                *outValue = *static_cast<const uint8_t*>(address);
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -368,7 +405,7 @@ namespace BZROpenShim
             const auto* getterBytes =
                 reinterpret_cast<const uint8_t*>(g_FnGetSaveMicrocodesToCache);
             uint32_t parsed = 0;
-            if (SehParseSaveFlagOffset(getterBytes, &parsed) &&
+            if (SehParseBoolGetterOffset(getterBytes, &parsed) &&
                 parsed < kSaveFlagMaxReasonableOffset)
             {
                 offset = parsed;
@@ -396,6 +433,91 @@ namespace BZROpenShim
             LogShimA(LogLevel::Info, "shadercache",
                 "microcode save-to-cache enabled (gpm=0x%p flag=+0x%X)", g_Gpm, offset);
             return true;
+        }
+
+        // Locate mCacheDirty so TrySaveLocked can clear what the engine leaves
+        // latched. Verification is the point: the offset is only accepted if
+        // isCacheDirty() currently reports true and reports false after we
+        // write 0 -- a wrong offset either fails that check or, worse, silently
+        // corrupts an unrelated member, so the original byte is restored on any
+        // mismatch and the feature stands down.
+        static bool ResolveDirtyFlagOffset()
+        {
+            uint32_t offset = 0;
+            if (!SehParseBoolGetterOffset(
+                    reinterpret_cast<const uint8_t*>(g_FnIsCacheDirty), &offset) ||
+                offset >= kSaveFlagMaxReasonableOffset)
+            {
+                LogShimA(LogLevel::Warn, "shadercache",
+                    "isCacheDirty pattern parse failed; unchanged-cache rewrites "
+                    "bounded by the %llus throttle only",
+                    static_cast<unsigned long long>(kSaveThrottleNoClearMs / 1000));
+                return false;
+            }
+
+            uint8_t dirty = 0;
+            if (!SehCallBoolGetter(g_FnIsCacheDirty, g_Gpm, &dirty) || !dirty)
+                return false; // nothing latched yet; retry after the first save
+
+            uint8_t* const flag = static_cast<uint8_t*>(g_Gpm) + offset;
+            uint8_t original = 0;
+            if (!SehReadByte(flag, &original) || !SehWriteByte(flag, 0))
+                return false;
+
+            uint8_t verify = 1;
+            const bool observed =
+                SehCallBoolGetter(g_FnIsCacheDirty, g_Gpm, &verify) && !verify;
+
+            // Restore either way. Probing must not consume the dirty state that
+            // the caller is about to act on: only a confirmed save may clear it.
+            SehWriteByte(flag, original);
+            if (!observed)
+            {
+                LogShimA(LogLevel::Warn, "shadercache",
+                    "dirty-flag verification failed at gpm+0x%X; unchanged-cache "
+                    "rewrites bounded by the %llus throttle only",
+                    offset,
+                    static_cast<unsigned long long>(kSaveThrottleNoClearMs / 1000));
+                return false;
+            }
+
+            g_DirtyFlagOffset = offset;
+            LogShimA(LogLevel::Info, "shadercache",
+                "cache-dirty flag resolved (gpm=0x%p flag=+0x%X); saves now track "
+                "real cache changes", g_Gpm, offset);
+            return true;
+        }
+
+        // Ogre marks the cache dirty on every addMicrocodeToCache and clears it
+        // only in loadMicrocodeCache, so a save leaves the flag set and the next
+        // tick rewrites an identical file forever. Clearing it here restores the
+        // semantics saveMicrocodeCache was written to assume. A shader compiled
+        // in the window between the save and this clear loses only its place in
+        // *this* write -- the next addMicrocodeToCache re-latches the flag and
+        // the following tick persists it.
+        static void ClearDirtyFlagAfterSave()
+        {
+            if (!g_DirtyFlagUsable)
+                return;
+
+            uint8_t* const flag = static_cast<uint8_t*>(g_Gpm) + g_DirtyFlagOffset;
+            uint8_t verify = 1;
+            if (SehWriteByte(flag, 0) &&
+                SehCallBoolGetter(g_FnIsCacheDirty, g_Gpm, &verify) && !verify)
+            {
+                return;
+            }
+
+            g_DirtyFlagUsable = false;
+            if (!g_DirtyClearFailureLogged)
+            {
+                g_DirtyClearFailureLogged = true;
+                LogShimA(LogLevel::Warn, "shadercache",
+                    "cache-dirty flag no longer clears at gpm+0x%X; falling back "
+                    "to the %llus throttle",
+                    g_DirtyFlagOffset,
+                    static_cast<unsigned long long>(kSaveThrottleNoClearMs / 1000));
+            }
         }
 
         static void TryLoadCacheFile()
@@ -530,9 +652,11 @@ namespace BZROpenShim
             if (!g_InitDone.load(std::memory_order_relaxed) || !g_SaveFlagEnabled)
                 return;
 
+            const ULONGLONG throttleMs =
+                g_DirtyFlagUsable ? kSaveThrottleMs : kSaveThrottleNoClearMs;
             const ULONGLONG now = GetTickCount64();
             if (g_LastSaveAttemptTick != 0 &&
-                now - g_LastSaveAttemptTick < kSaveThrottleMs)
+                now - g_LastSaveAttemptTick < throttleMs)
             {
                 return;
             }
@@ -540,6 +664,17 @@ namespace BZROpenShim
             uint8_t dirty = 0;
             if (!SehCallBoolGetter(g_FnIsCacheDirty, g_Gpm, &dirty) || !dirty)
                 return;
+
+            // The flag latches on the first compile, so the offset can only be
+            // verified once something has set it. Init runs before any shader
+            // exists; this is the first moment the probe can succeed.
+            if (!g_DirtyFlagUsable && !g_DirtyClearFailureLogged)
+            {
+                g_DirtyFlagUsable = ResolveDirtyFlagOffset();
+                if (!g_DirtyFlagUsable)
+                    g_DirtyClearFailureLogged = true;
+            }
+
             g_LastSaveAttemptTick = now;
 
             const std::filesystem::path cachePath = GetCacheFilePath();
@@ -561,6 +696,7 @@ namespace BZROpenShim
                 return;
             }
             WriteStoredFingerprint(g_ShaderFingerprint);
+            ClearDirtyFlagAfterSave();
 
             std::error_code ec;
             const uintmax_t cacheSize = std::filesystem::file_size(cachePath, ec);
