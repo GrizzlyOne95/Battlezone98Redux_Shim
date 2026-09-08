@@ -1569,6 +1569,10 @@ SatelliteVisibilityFix = 1
 InteractiveFogWakes = 0
 
 [Environment]
+; BZN/TRN editor source-folder routing with actual-target overwrite confirmation.
+; Exact 1 enables; default 0. Restart required; use backed-up qualification maps.
+; See Docs/BZN_SAVE_SOURCE.md for scope and unresolved behavior.
+; BZR_BZN_SAVE_SOURCE=0
 
 ; ---------------------------------------------------------------------------
 ; Raw legacy / developer compatibility

@@ -18,6 +18,9 @@ compatible Wine/Proton prefix are maintained together. See the shared
 
 ## Installation
 
+Developer prototype: [World Builder source-folder saves](Docs/BZN_SAVE_SOURCE.md)
+is opt-in and awaiting editor qualification; it is not enabled by default.
+
 ### Windows
 
 Press Start, type `powershell`, Enter — the blue window, not Command Prompt.
