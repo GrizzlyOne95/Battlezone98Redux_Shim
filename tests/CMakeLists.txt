@@ -281,3 +281,16 @@ else()
     target_compile_options(player_kill_trace_tests PRIVATE -Wall -Wextra -Werror)
 endif()
 add_test(NAME player_kill_trace_tests COMMAND player_kill_trace_tests)
+
+add_executable(fog_wake_tests
+    fog_wake_tests.cpp
+    ../src/engine/fog_wake.cpp
+)
+target_compile_features(fog_wake_tests PRIVATE cxx_std_20)
+target_include_directories(fog_wake_tests PRIVATE ../include)
+if(MSVC)
+    target_compile_options(fog_wake_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(fog_wake_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME fog_wake_tests COMMAND fog_wake_tests)
