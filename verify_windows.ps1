@@ -113,6 +113,8 @@ if (-not $GamePath -or -not (Test-Path $GamePath)) {
 }
 
 $dllPath = Join-Path $GamePath "winmm.dll"
+$patchesPath = Join-Path $GamePath "scripts\patches.json"
+$repoPatchesPath = Join-Path $PSScriptRoot "scripts\patches.json"
 $logPath = Join-Path $GamePath "logs\openshim.log"
 $bzLoggerPath = Join-Path $GamePath "logs\BZLogger.txt"
 $bufferBinPath = Join-Path $GamePath "bz_buffer_log.bin"
@@ -130,6 +132,39 @@ if (Test-Path $dllPath) {
 } else {
     Write-Host "[FAIL] winmm.dll NOT found in game folder" -ForegroundColor Red
     $issues += "winmm.dll is missing from the game folder"
+    $pass = $false
+}
+
+# winmm.dll does not carry its own patch addresses: every patch takes its
+# address from scripts/patches.json, which is deployed separately and by hand.
+# A json older than the DLL silently skips every patch added since, so treat a
+# missing or mismatched config as a deployment failure rather than a detail.
+if (Test-Path $patchesPath) {
+    Write-Host "[PASS] scripts/patches.json present in game folder" -ForegroundColor Green
+
+    if (Test-Path $repoPatchesPath) {
+        $deployedHash = (Get-FileHash -Algorithm SHA256 -Path $patchesPath).Hash
+        $repoHash = (Get-FileHash -Algorithm SHA256 -Path $repoPatchesPath).Hash
+        if ($deployedHash -eq $repoHash) {
+            Write-Host "[PASS] deployed patches.json matches this source tree" -ForegroundColor Green
+        } else {
+            $deployedAge = (Get-Item $patchesPath).LastWriteTime
+            $dllAge = if (Test-Path $dllPath) { (Get-Item $dllPath).LastWriteTime } else { $null }
+            Write-Host "[FAIL] deployed patches.json differs from this source tree" -ForegroundColor Red
+            Write-Host "       deployed: $deployedAge" -ForegroundColor Red
+            if ($dllAge) { Write-Host "       winmm.dll: $dllAge" -ForegroundColor Red }
+            Write-Host "       copy scripts/patches.json alongside winmm.dll; a stale copy skips" -ForegroundColor Red
+            Write-Host "       every patch added since it was written" -ForegroundColor Red
+            $issues += "scripts/patches.json in the game folder does not match this source tree"
+            $pass = $false
+        }
+    } else {
+        Write-Host "[WARN] no scripts/patches.json in the source tree to compare against" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "[FAIL] scripts/patches.json NOT found in game folder" -ForegroundColor Red
+    Write-Host "       winmm.dll cannot resolve any patch address without it" -ForegroundColor Red
+    $issues += "scripts/patches.json is missing from the game folder"
     $pass = $false
 }
 
@@ -187,6 +222,19 @@ if (-not (Test-Path $logPath)) {
         Write-Host "[PASS] Real winmm.dll load confirmed" -ForegroundColor Green
     } else {
         Write-Host "[WARN] Could not confirm real winmm.dll load in latest session" -ForegroundColor Yellow
+    }
+
+    # The runtime's own name for a stale or missing config. It is one line among
+    # forty in the log, so surface it here rather than relying on someone reading
+    # past the [OK] wall.
+    if ($sessionLog -match "\[STALE-CONFIG\]") {
+        $staleLine = ($sessionLines | Where-Object { $_ -match "\[STALE-CONFIG\]" } | Select-Object -Last 1)
+        Write-Host "[FAIL] the last run reported stale patch config" -ForegroundColor Red
+        Write-Host "       $staleLine" -ForegroundColor Red
+        $issues += "the last session reported [STALE-CONFIG]: patches.json is out of date"
+        $pass = $false
+    } else {
+        Write-Host "[PASS] no stale patch config reported in the latest session" -ForegroundColor Green
     }
 
     if ($sessionLog -match "Initialization complete") {
