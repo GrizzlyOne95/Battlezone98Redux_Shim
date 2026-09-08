@@ -168,6 +168,31 @@ if (Test-Path $patchesPath) {
     $pass = $false
 }
 
+# The suite updater compares versions, not content. A dev build that carries the
+# same version as the copy the Workshop mod bundles is not seen as newer, so the
+# next promotion overwrites it -- after which a test run measures the mod's
+# build rather than the one under test. Check the relationship before that
+# happens instead of discovering it in openshim_update.log afterwards.
+$modShims = @(Get-ChildItem -Path (Join-Path $GamePath "mods") -Filter "winmm.dll" -Recurse -ErrorAction SilentlyContinue)
+if ($modShims.Count -gt 0 -and (Test-Path $dllPath)) {
+    $deployedVersion = [version](Get-Item $dllPath).VersionInfo.FileVersion
+    foreach ($modShim in $modShims) {
+        $bundledVersion = [version]$modShim.VersionInfo.FileVersion
+        $modLabel = Split-Path (Split-Path $modShim.FullName -Parent) -Leaf
+        if ($deployedVersion -gt $bundledVersion) {
+            Write-Host "[PASS] deployed shim $deployedVersion outranks mod $modLabel ($bundledVersion)" -ForegroundColor Green
+        } else {
+            Write-Host "[FAIL] deployed shim $deployedVersion does NOT outrank mod $modLabel ($bundledVersion)" -ForegroundColor Red
+            Write-Host "       the suite updater promotes on version, not content, so the mod's copy" -ForegroundColor Red
+            Write-Host "       will overwrite this build on the next promotion and the run after it" -ForegroundColor Red
+            Write-Host "       will measure the mod's build instead" -ForegroundColor Red
+            Write-Host "       bump src/engine/version.rc above $bundledVersion and rebuild" -ForegroundColor Red
+            $issues += "deployed shim $deployedVersion does not outrank the copy bundled by mod $modLabel ($bundledVersion)"
+            $pass = $false
+        }
+    }
+}
+
 if (Test-Path $bufferBinPath) {
     Write-Host "[INFO] buffer capture found: $bufferBinPath" -ForegroundColor Cyan
 } else {
