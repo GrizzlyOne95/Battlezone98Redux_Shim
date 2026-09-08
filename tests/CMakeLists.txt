@@ -82,6 +82,19 @@ add_executable(resolve_table_tests
     ../src/engine/resolve_table.cpp
 )
 
+# Cross-checks that a patch is registered in every place it has to be. Pure
+# text over the repository's own sources, so it needs no engine code.
+add_executable(patch_registration_tests
+    patch_registration_tests.cpp
+)
+target_include_directories(patch_registration_tests PRIVATE ../include)
+target_compile_features(patch_registration_tests PRIVATE cxx_std_20)
+target_compile_definitions(patch_registration_tests PRIVATE
+    BZR_PATCHES_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patches.json"
+    BZR_PATCHES_H="${CMAKE_CURRENT_SOURCE_DIR}/../include/patches.h"
+    BZR_PATCHER_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/engine/patcher.cpp"
+    BZR_BZR_HOOKS_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/patches/bzr_hooks.cpp")
+
 add_executable(openshim_update_manifest_tests
     openshim_update_manifest_tests.cpp
     ../src/patches/openshim_update_manifest.cpp
@@ -168,6 +181,7 @@ if(MSVC)
     target_compile_options(sun_flash_tests PRIVATE /W4 /WX)
     target_compile_options(terrain_tile_blend_tests PRIVATE /W4 /WX)
     target_compile_options(resolve_table_tests PRIVATE /W4 /WX)
+    target_compile_options(patch_registration_tests PRIVATE /W4 /WX)
     target_compile_options(openshim_update_manifest_tests PRIVATE /W4 /WX)
     target_compile_options(ai_range_policy_tests PRIVATE /W4 /WX)
     target_compile_options(lcbench_safety_policy_tests PRIVATE /W4 /WX)
@@ -187,6 +201,7 @@ else()
     target_compile_options(sun_flash_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(terrain_tile_blend_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(resolve_table_tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(patch_registration_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(openshim_update_manifest_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(ai_range_policy_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(lcbench_safety_policy_tests PRIVATE -Wall -Wextra -Werror)
@@ -206,6 +221,7 @@ add_test(NAME chunk_batch_invalidation_tests COMMAND chunk_batch_invalidation_te
 add_test(NAME sun_flash_tests COMMAND sun_flash_tests)
 add_test(NAME terrain_tile_blend_tests COMMAND terrain_tile_blend_tests)
 add_test(NAME resolve_table_tests COMMAND resolve_table_tests)
+add_test(NAME patch_registration_tests COMMAND patch_registration_tests)
 add_test(NAME openshim_update_manifest_tests COMMAND openshim_update_manifest_tests)
 add_test(NAME ai_range_policy_tests COMMAND ai_range_policy_tests)
 add_test(NAME lcbench_safety_policy_tests COMMAND lcbench_safety_policy_tests)
