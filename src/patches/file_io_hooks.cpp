@@ -5,6 +5,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "file_io_hooks.h"
+
+#include "bzn_load_trace.h"
 #include "patcher.h"
 #include "shim_log.h"
 #include "ogre_shader_cache.h"
@@ -523,6 +525,8 @@ namespace BZROpenShim
 
             if (!g_InTrnNormalization && handle != INVALID_HANDLE_VALUE)
                 MaybeTrackOpenedTrnHandle(handle, fileName ? fileName : L"", desiredAccess, creationDisposition);
+            if (handle != INVALID_HANDLE_VALUE)
+                BznLoadTraceOnOpen(routedPath.c_str(), desiredAccess);
 
             // Ogre parses the mod's *.program scripts (and then compiles the
             // enhanced-lighting shaders) right after this open succeeds. Prime
@@ -562,6 +566,8 @@ namespace BZROpenShim
 
             if (!g_InTrnNormalization && handle != INVALID_HANDLE_VALUE)
                 MaybeTrackOpenedTrnHandle(handle, ResolveAbsolutePathFromAnsi(fileName), desiredAccess, creationDisposition);
+            if (handle != INVALID_HANDLE_VALUE)
+                BznLoadTraceOnOpenA(routedPath.c_str(), desiredAccess);
 
             if (handle != INVALID_HANDLE_VALUE && PathEndsWithProgramA(fileName))
             {
