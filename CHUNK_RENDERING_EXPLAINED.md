@@ -118,50 +118,65 @@ always breaks apart the same way. Nothing ever silently fails to render.
 
 ---
 
-## What ships, and how it installs itself
+## What ships, and how it is installed now
 
-The mod distributes exactly three things:
+OpenShim is no longer installed by mission Lua. Runtime deployment and asset-backed
+features are deliberately separate:
 
-1. **`winmm.dll`** — the OpenShim shim itself. It must sit next to
-   `battlezone98redux.exe`. Windows loads it automatically at launch.
-2. **`scripts/patches.json`** — the list of code addresses OpenShim patches. Without
-   it, the whole shim quietly does nothing.
-3. **The mod folder** — the chunk mesh payloads plus `chunk_geo_manifest.txt`, a
-   plain-text list of piece names and hierarchy (no copyrighted geometry) that lets
-   OpenShim map chunks to meshes without shipping the game's original model files.
+1. **OpenShim runtime** — `winmm.dll`, `scripts/patches.json`, configuration, and
+   the release-bundled compatibility resources are installed by the supported
+   installer scripts. On Windows, `scripts/install_windows.ps1` downloads the
+   versioned `OpenShim-Suite.zip`, verifies its published SHA-256, detects supported
+   Steam/GOG installs, and deploys the suite beside the game. Linux/Proton uses the
+   corresponding Linux installer path documented in `README.md`.
+2. **Chunk mesh assets** — destruction meshes and their manifest are asset-backed
+   content. They are supplied by a compatible OpenShim/Campaign Reimagined asset
+   package rather than by the DLL-only runtime itself.
+3. **Capability detection** — OpenShim validates the installed asset pack through
+   `OpenShimAssets.ini` and resource probing. `ChunkMeshes=1` in configuration does
+   not force the feature on when compatible mesh resources are absent.
 
-### No manual file copying
+That separation is intentional. A stock 2.2.301 installation can run OpenShim as a
+DLL-only native patch and still receive engine, gameplay, multiplayer, UI, and
+diagnostic fixes. Death-chunk rendering becomes available only when the compatible
+chunk payload is detected.
 
-Users don't drag `winmm.dll` anywhere. The mod self-installs it. On every mission
-launch the mod's Lua (`PersistentConfig.Initialize` → `EnsureBundledOpenShimInstalled`)
-does this:
+### Windows install / uninstall
 
-1. Find the `winmm.dll` bundled inside the mod/workshop folder.
-2. Hash-compare it against the `winmm.dll` currently next to the game exe.
-3. If they match — do nothing.
-4. If the game copy is missing or out of date — copy the bundled one into place.
-5. If the copy can't happen because the DLL is in use (the game is running it right
-   now), **schedule the replacement for when the game exits** and show an on-screen
-   message telling the player to exit and relaunch.
+The supported Windows install command is:
 
-The player sees a short mission-briefing note describing what happened
-(`install.des` / `update.des` / `staged.des` / `nocopy.des`). Because a running DLL
-can't overwrite itself, a *first* install or an *update* always takes one restart to
-take effect — that's expected and the "staged" message says so.
+```powershell
+irm https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_windows.ps1 | iex
+```
 
-> **Maintenance note for developers:** the `winmm.dll` bundled *inside* the mod
-> folder is what gets staged to users. After every rebuild, refresh that bundled copy
-> so the self-installer stages the new build instead of an old one. (This is a
-> deployment step, not something the game or repo does automatically.)
+The supported Windows uninstall command is:
+
+```powershell
+irm https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/uninstall_windows.ps1 | iex
+```
+
+The uninstaller removes the deployed OpenShim proxy DLL and its co-deployed
+`patches.json`; it intentionally leaves user configuration and logs alone.
+
+There is no `PersistentConfig.Initialize -> EnsureBundledOpenShimInstalled` mission
+path anymore, and no mission restart is required just to stage a bundled DLL. The
+installer is the deployment authority; the runtime only validates what is present
+when the game starts.
+
+For current platform-specific commands and DLL-only/asset-pack behavior, treat
+`README.md` as the user-facing source of truth.
 
 ---
 
 ## Current status
 
-- Vehicles: working.
+- Vehicles: working when compatible chunk assets are detected.
 - Buildings: working, including the previously-broken faction-twin buildings
   (correct chunk shapes; twin *textures* are the documented limitation above).
 - Pilots: working for all four, via hand-named piece meshes.
-- Generic fallback: covers everything else so nothing renders blank.
-- Self-install: launching any modded mission stages `winmm.dll` to the game root with
-  no manual copying.
+- Generic fallback: covers remaining identified edge cases so chunk rendering does
+  not silently disappear when a specific source piece is unavailable.
+- DLL-only OpenShim: supported; chunk rendering remains safely unavailable without
+  the compatible asset pack while unrelated native fixes continue to operate.
+- Deployment: installer/uninstaller scripts are the supported installation path;
+  mission Lua no longer self-installs or stages `winmm.dll`.
