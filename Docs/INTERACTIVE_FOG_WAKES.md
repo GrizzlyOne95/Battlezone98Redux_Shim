@@ -1,8 +1,11 @@
 # Interactive ground fog wakes
 
-Status (2026-09-07): simulation foundation implemented. No live vehicle sampling,
-fog rendering, configuration toggle or EXU API is enabled yet. This is not a
-released or visually qualified feature.
+Status (2026-09-07): simulation foundation and its runtime implemented, gated
+off behind `[Experimental] InteractiveFogWakes`, and wired to live hovercraft
+positions. **Nothing is rendered.** There is no GPU resource, no fog compositor
+and no EXU API, so enabling the toggle changes no pixels; it exists so the
+simulation can be observed and qualified before any GPU work is attempted. Not
+released, and not visually qualified on any platform.
 
 ## First milestone
 
@@ -24,6 +27,60 @@ failure can throw and must be handled by the eventual runtime feature owner.
 `Clearance()` exposes row-major samples for a future texture upload. It is not
 a GPU texture or stable external ABI. All access must stay on one owner thread.
 `Reset()` discards all disturbances; `Configure()` creates an empty region.
+
+## Second milestone
+
+`include/fog_wake_runtime.h` and `src/engine/fog_wake_runtime.cpp` drive the
+field from emitter observations; `src/patches/fog_wake_feature.cpp` connects it
+to the engine. This covers items 1 to 3 of the runtime contract below. Items 4
+to 7 -- everything that puts a pixel on screen -- remain untouched.
+
+The design problem is that the engine reports emitter positions from hooks on
+the render path: any number of times per simulation step, once per camera, and
+not at all on a frame with no emission. Advancing the field on observation would
+make a wake's depth depend on frame rate and on how many cameras are active. So
+observation does not simulate. `Observe` records where an emitter is now;
+`AdvanceTo` takes a monotonic clock and steps a whole number of fixed ticks.
+Calling it once per camera, or twice with the same timestamp, is a no-op by
+construction rather than by the caller remembering a rule.
+
+Within a tick, recovery and wind transport run before that tick's sweeps, so a
+wake is written at full strength and decays from the following tick rather than
+being decayed on the tick that created it.
+
+The remaining behaviour is the failure modes item 2 calls for. A teleport is
+rejected *and* reseeds the emitter's origin, because rejecting without reseeding
+only delays the bogus streak by one tick. An emitter key is a raw engine pointer
+and the allocator reuses those, so handle reuse trips the same distance check
+and reads as a teleport. Emitters that stop reporting are dropped after a
+staleness window, and the ceiling on tracked emitters refuses a newcomer rather
+than evicting somebody else's history, since recycling a slot would attribute
+one vehicle's wake to another. A session boundary clears emitters, field and
+clock together. Pause absorbs wall-clock time without banking it; a long stall
+is clamped rather than repaid as a burst; a clock that runs backwards simulates
+nothing. `Configure` fails closed, including when the field configuration is
+rejected.
+
+### Engine wiring
+
+| Concern | Site |
+|---------|------|
+| Emitter positions | the hovercraft engine-flame emit hook, which already sees a live craft with its identity in hand; position comes from the qualified `TryGetGameObjectWorldPosition` |
+| Simulation cadence | the chunk-proxy render-queue submit, beside `TerrainProxyRenderFrameTick`. This runs **once per camera**, which is safe here only because `AdvanceTo` is idempotent within a tick |
+| Session boundaries | `BzrSetRunningHook`, beside the existing headlight and pilot-flashlight notifications |
+
+Hovercraft are the emitter set for now because that hook is the one place on the
+simulation path that already yields craft identity and a qualified position.
+Tracked vehicles that never emit engine flame therefore leave no wake. Widening
+the emitter set is emitter policy, and belongs with the strength/width/height
+gating in item 3.
+
+Two placeholders are deliberate and must be replaced before anything renders.
+The bank is latched to the **first emitter observed in a session** -- a region
+centred on the world origin would sit nowhere near where a mission is played --
+which satisfies "one fixed fog bank" but is not a considered placement. And no
+wind source is wired, so transport is still: `AdvanceTo` is passed a zero wind
+vector.
 
 ## Planned runtime contract
 
@@ -61,11 +118,29 @@ Recovery without wind is independent of timestep partition.
 `fog_wake_tests` covers continuous sweeps, soft edges, idempotent overlap,
 teleports, malformed inputs, invalid reconfiguration, exponential recovery,
 timestep partition without wind, wind direction, outflow, bounds and reset.
-It is registered in the shared CMake/CTest harness and the source is included in
-the Win32 DLL project.
 
-The simulation has no store, filesystem, loader, ABI or graphics dependency.
-Windows Win32 Release unit tests pass. In-game Windows/GOG, Windows/Steam,
-Linux/Steam Proton and Linux/GOG Wine/Proton rendering remain unverified. No
-game deployment has been performed. Runtime qualification and tester validation
-in affected lanes are required before release.
+`fog_wake_runtime_tests` covers the properties the runtime exists to guarantee:
+that observation never simulates and never stamps; that repeated and per-camera
+`AdvanceTo` calls do not multiply the simulation rate; that a partial tick is
+banked rather than dropped or rounded up; that a stall is clamped instead of
+replayed; that a backwards clock simulates nothing; that pause freezes
+simulation time and resuming discharges no backlog; that a sweep carves a
+continuous corridor between observations; that a teleport is rejected *and* its
+streak never appears one tick later; that a recycled handle draws no wake across
+the map; staleness eviction, the emitter ceiling, explicit destruction, session
+transitions, malformed input and shutdown.
+
+Both are registered in the shared CMake/CTest harness under the repo's `/W4 /WX`
+convention, and both sources plus `fog_wake_feature.cpp` are in the Win32 DLL
+project. The full suite is 26 tests and passes; the Win32 Release DLL builds
+with no new warnings.
+
+The simulation has no store, filesystem, loader, ABI or graphics dependency. The
+runtime adds only a monotonic clock. With the toggle off, every engine entry
+point is one relaxed atomic read.
+
+In-game behaviour is **unverified on every platform**: Windows/GOG,
+Windows/Steam, Linux/Steam Proton and Linux/GOG Wine/Proton. No game deployment
+has been performed, and nothing renders, so there is nothing yet for a tester to
+look at. Runtime qualification and tester validation in affected lanes are
+required before release.

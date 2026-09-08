@@ -8,6 +8,7 @@
 #include "bzr_options_ui.h"
 #include "patches.h"
 #include "patcher.h"
+#include "fog_wake_feature.h"
 #include "shim_log.h"
 #include "ogre_shader_cache.h"
 #include "ogre_enhanced_light_selection.h"
@@ -16279,10 +16280,12 @@ namespace BZROpenShim
                 DeactivateAllChunkProxySceneResources(L"left simulation");
                 HeadlightNotifyMissionRunStateChanged(false);
                 PilotFlashlightNotifyMissionRunStateChanged(false);
+                FogWakeNotifyMissionRunStateChanged(false);
             }
             else if (previous != kBzrRunStateStarted && current == kBzrRunStateStarted)
             {
                 HeadlightNotifyMissionRunStateChanged(true);
+                FogWakeNotifyMissionRunStateChanged(true);
                 PilotFlashlightNotifyMissionRunStateChanged(true);
                 ApplyTerrainTileBlendForCurrentMission();
             }
@@ -36676,6 +36679,18 @@ namespace BZROpenShim
             return;
 
         ApplyWeaponMaskCarrierBiasForCraft(craftPtr);
+
+        // Interactive fog wakes: a hovercraft under power is exactly the emitter
+        // that should carve ground fog. This only records a position -- the
+        // simulation is advanced on its own cadence -- so it is safe here even
+        // though this hook can run more than once per simulation step.
+        if (craftPtr && FogWakeFeatureEnabled())
+        {
+            float craftPosition[3] = { 0.0f, 0.0f, 0.0f };
+            if (TryGetGameObjectWorldPosition(craftPtr, craftPosition))
+                FogWakeObserveEmitter(craftPtr, craftPosition[0], craftPosition[2]);
+        }
+
         ObserveEngineFlameManager(managerPtr);
         EnsureEngineFlameVtableHooksInstalled(managerPtr);
 
@@ -36826,6 +36841,11 @@ namespace BZROpenShim
         // Opt-in Phase 3A parity capture. Inert unless a semantic frame
         // capture count is configured.
         TerrainProxyRenderFrameTick();
+
+        // This runs once per camera. The fog wake runtime steps a fixed cadence
+        // off a monotonic clock, so the extra calls cost a clock read rather
+        // than extra simulation.
+        FogWakeRenderFrameTick();
     }
 
     static volatile long g_ChunkGeomDumpFragmentBudget = 8;
