@@ -24,6 +24,10 @@ The general priority remains:
 
 [h2]High Priority[/h2]
 
+[h3]World Builder Source-Folder Saves[/h3]
+
+[b]Implemented - Qualification Pending (2026-09-07):[/b] Opt-in editor routing now supports BZN and TRN with an actual-destination overwrite prompt before saving. Cancel prevents all native writes; TRN/HG2/MAT companions derive from the confirmed folder. Duplicate source names disable routing. Win32 dialog/file integration tests pass and GOG hook-site bytes are live-verified. Full editor save/reload and supported-platform qualification remain open. Default remains off; this has not been released.
+
 [h3]GOG Workshop Compatibility[/h3]
 
 Steam users automatically download Workshop content required by multiplayer games. GOG users do not.
@@ -336,6 +340,8 @@ The Red Odyssey 1.3 comparison establishes Cloak and Portal plus a widened natio
 [h2]Possible Additions / Ideas[/h2]
 
 [h3]Terrain / Rendering[/h3]
+
+[b]Interactive ground fog wakes - Active / Open (2026-09-07):[/b] Started a bounded world-space simulation for vehicle-cleared corridors, wind drift and gradual refill, with native unit tests. Live vehicle tracking, depth-aware fog rendering and EXU controls remain to be implemented. No in-game effect is enabled or released yet.
 
 [list]
 [*] Center-based terrain tile scaling
