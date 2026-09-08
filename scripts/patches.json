@@ -4,6 +4,15 @@
   },
   "patches": [
     {
+      "name": "World Builder Save Destination Dialog",
+      "pattern": "0F B6 0D B7 73 91 00 51 8D 95 FC EF FF FF 52 8D 8D FB EF FF FF E8 23 EE 06 00 0F B6 C0 85 C0 75 20",
+      "offset": 22,
+      "expected_size": 4,
+      "fallback": "0x004FBEE9",
+      "require_unique": true,
+      "identity": "PromptSaveMission at 0x004FBE90 passes its 4096-byte filename buffer and missionSave=1 to the thiscall GetSaveName dialog at 0x0056AD10. AL=false branches to cleanup before SaveGame at 0x004FBF48. The dialog returns with RET 8. GOG PID 430832 live bytes matched on 2026-09-07. Hooking filename selection covers BZN and TRN before any terrain writes and preserves caller cancellation."
+    },
+    {
       "name": "GameObject Handle Stale Slot Guard",
       "platforms": [
         "gog"
@@ -149,6 +158,16 @@
     }
   ],
   "resolves": [
+    {
+      "name": "WorldBuilder::GetSaveName",
+      "pattern": "55 8B EC 6A FF 68 78 4A 84 00 64 A1 00 00 00 00 50 83 EC 30 A1 00 70 8E 00 33 C5 89 45 F0 50 8D 45 F4 64 A3 00 00 00 00 89 4D C4 68 D8 1A 8A 00 B9 28 8E 9C 00",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0056AD10",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Hash-matched GOG decompile constructs addon plus selected filename and copies into arg1. Independent PromptSaveMission caller 0x004FBEE8 supplies this in ECX, filename and missionSave on stack, tests AL, and calls SaveGame only on success. Body ends in RET 8 at 0x0056AE0B. Live GOG PID 430832 entry and epilogue bytes verified 2026-09-07."
+    },
     {
       "name": "Carrier::GetSelected",
       "pattern": "55 8B EC 51 89 4D FC 8B 45 FC 8B 40 30 8B E5 5D C3 CC CC CC CC",

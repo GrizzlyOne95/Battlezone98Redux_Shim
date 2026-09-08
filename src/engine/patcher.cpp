@@ -890,6 +890,10 @@ namespace BZROpenShim
                 void* orig = isSteam ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10) : HookEngine::ResolveRelCallTarget(p.address - 1);
                 if (!orig) continue; SetProducerBuildMenuOriginal(orig); target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ProducerBuildMenuCallHook));
             } else if (p.name == "Target Reticle Popup Recent-Hit Getter Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(TargetReticlePopupRecentHitGetterHook));
+            else if (p.name == "World Builder Save Destination Dialog") {
+                target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
+                    PrepareEditorSaveDialogHook(p.address - 1)));
+            }
             else if (p.name == "Pilot Carrier Weapon Null Guard") {
                 void* original = isSteam
                     ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)

@@ -35,6 +35,25 @@ add_executable(bzn_analysis_tests
 target_include_directories(bzn_analysis_tests PRIVATE ../include)
 target_compile_features(bzn_analysis_tests PRIVATE cxx_std_20)
 
+add_executable(bzn_save_path_tests
+    bzn_save_path_tests.cpp
+)
+
+target_include_directories(bzn_save_path_tests PRIVATE ../include)
+target_compile_features(bzn_save_path_tests PRIVATE cxx_std_20)
+
+if(WIN32 AND MSVC)
+    add_executable(editor_save_dialog_win32_tests
+        editor_save_dialog_win32_tests.cpp
+        ../src/patches/trn_codec.cpp)
+    target_include_directories(editor_save_dialog_win32_tests PRIVATE ../include)
+    target_compile_features(editor_save_dialog_win32_tests PRIVATE cxx_std_20)
+    target_compile_definitions(editor_save_dialog_win32_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(editor_save_dialog_win32_tests PRIVATE /W4 /WX)
+    target_link_libraries(editor_save_dialog_win32_tests PRIVATE user32)
+    add_test(NAME editor_save_dialog_win32_tests COMMAND editor_save_dialog_win32_tests)
+endif()
+
 add_executable(numeric_locale_compat_tests
     numeric_locale_compat_tests.cpp
     ../src/patches/numeric_locale_compat.cpp
@@ -170,6 +189,7 @@ if(MSVC)
     target_compile_options(bzrnet_protocol_tests PRIVATE /W4 /WX)
     target_compile_options(shim_log_tests PRIVATE /W4 /WX)
     target_compile_options(trn_codec_tests PRIVATE /W4 /WX)
+    target_compile_options(bzn_save_path_tests PRIVATE /W4 /WX)
     target_compile_options(bzn_analysis_tests PRIVATE /W4 /WX)
     target_compile_options(numeric_locale_compat_tests PRIVATE /W4 /WX)
     target_compile_options(native_ui_validation_tests PRIVATE /W4 /WX)
@@ -190,6 +210,7 @@ else()
     target_compile_options(bzrnet_protocol_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(shim_log_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(trn_codec_tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(bzn_save_path_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(bzn_analysis_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(numeric_locale_compat_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(native_ui_validation_tests PRIVATE -Wall -Wextra -Werror)
@@ -211,6 +232,7 @@ endif()
 add_test(NAME bzrnet_protocol_tests COMMAND bzrnet_protocol_tests)
 add_test(NAME shim_log_tests COMMAND shim_log_tests)
 add_test(NAME trn_codec_tests COMMAND trn_codec_tests)
+add_test(NAME bzn_save_path_tests COMMAND bzn_save_path_tests)
 add_test(NAME bzn_analysis_tests COMMAND bzn_analysis_tests)
 add_test(NAME numeric_locale_compat_tests COMMAND numeric_locale_compat_tests)
 add_test(NAME native_ui_validation_tests COMMAND native_ui_validation_tests)
