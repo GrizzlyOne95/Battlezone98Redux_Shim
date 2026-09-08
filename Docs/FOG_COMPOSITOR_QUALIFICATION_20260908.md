@@ -14,9 +14,9 @@ Target: GOG Battlezone 98 Redux 2.2.301, D3D11 backend, `RenderSystem_Direct3D11
 | # | Question | Verdict |
 |---|----------|---------|
 | 1 | Scene depth readable? | **No, as shipped.** Ogre creates no depth SRV when MSAA is on, and this install runs FSAA=8. Fixable, but it is a precondition, not a detail. |
-| 2 | Insertion point after opaque, before HUD? | **Yes — qualified.** A `RenderQueueListener` works on the shipped OgreMain and exposes boundaries at queue groups 60, 62, 95 and 100, all after MAIN (50). |
+| 2 | Insertion point after opaque, before HUD? | **No.** A `RenderQueueListener` works, but Ogre's queue carries only the movable objects. Terrain, cockpit and HUD are drawn outside it, so the boundary cannot be expressed there. |
 | 3 | Is stock fog already baked into source colour? | **Yes.** Applied per-pixel in the object shaders. A compositor cannot un-fog; the wake must be an additional near-ground layer. |
-| 4 | What breaks | Shadow passes re-enter the same listener and must be filtered — confirmed. Cockpit/transparent group membership **not identified** (blocked, see below). |
+| 4 | What breaks | Shadow passes re-enter the same listener and must be filtered — confirmed. Cockpit and HUD are outside the queue system entirely — confirmed by experiment. |
 | 5 | DX9 | **Out of scope.** Ogre 1.10's D3D9 backend has no depth-as-texture path at all. |
 
 ---
@@ -81,7 +81,7 @@ source path is confirmed present in the shipped binary and the MSAA count is
 confirmed from the engine's own log, so the conclusion follows, but the direct
 observation has not been made.
 
-## 2. Insertion point — qualified
+## 2. Insertion point — the Ogre queue is the wrong layer
 
 Neither render hook OpenShim already owns is usable:
 
@@ -113,13 +113,42 @@ preRenderQueues
 postRenderQueues
 ```
 
-So there are **four boundaries after the opaque world and before the overlay
-queue**. `renderQueueEnded(50)` is the natural candidate: opaque geometry is
-resolved, and groups 60/62/95/100 have not run.
+That looks like the answer, and it is not. `renderQueueStarted` also hands out
+`skipThisInvocation`, so the probe can suppress one group and photograph the
+result (`[Diagnostics] SkipRenderQueueGroup`). Suppressing each group in turn
+gives:
 
-`renderQueueStarted` also hands out `skipThisInvocation`, which makes it possible
-to suppress a group and see what disappears — the probe supports this via
-`[Diagnostics] SkipRenderQueueGroup`.
+| Group suppressed | What disappeared |
+|---|---|
+| 0 (BACKGROUND) | nothing visible |
+| **50 (MAIN)** | **the vehicles, and only the vehicles** |
+| 60 | nothing identifiable |
+| 62 | nothing identifiable |
+| 95 (SKIES_LATE) | nothing identifiable |
+| 100 (OVERLAY) | nothing — the HUD is still drawn |
+
+With MAIN suppressed the frame still has terrain, the cockpit hull, the sky and
+the complete HUD; the scavenger and the fighters are gone. So **Ogre's render
+queue carries the movable objects. Redux draws the terrain, the cockpit and the
+HUD through its own path**, which is consistent with the HUD surviving a
+suppressed overlay queue, and with EXU having had to install an `OverlaySystem`
+of its own at mission start rather than finding one.
+
+That makes `renderQueueEnded(50)` "after the units", not "after the opaque
+world". Fog composited there would be drawn under the terrain and would leave
+the cockpit interior fogged, because neither has been drawn yet at that point,
+and neither can be ordered against from inside the queue.
+
+**A RenderQueueListener cannot express the required boundary.** The listener is
+still useful — it is a working, ABI-qualified way to run code at known points
+inside Ogre's scene render, and it is how this was measured — but item 6's
+insertion point is not in this layer. It has to be a hook in Redux's own render
+path, or at the D3D11 context level, and neither has been qualified here.
+
+Note also that the group ids are Ogre's standard constants but the *contents* are
+not what those names imply, so reasoning from `RENDER_QUEUE_MAIN` /
+`RENDER_QUEUE_OVERLAY` semantics would have given the wrong answer. That is why
+this was measured rather than read.
 
 ## 3. Stock fog is already baked in
 
@@ -161,19 +190,21 @@ frame=2 step=4 queueStarted group=50 invocation=SHADOWS
 A pass that does not filter on invocation would composite into shadow render
 targets. The probe already filters, and any real pass must.
 
-**Cockpit and transparents: not identified.** The plan was to suppress groups 60,
-62, 95 and 100 in turn and photograph the result. Five runs were made and all
-five screenshots captured the Windows lock screen: the session was locked, so
-`GetForegroundWindow` returned `Windows Default Lock Screen` while the game
-window was up and rendering at (747,396)-(1828,1033). No pixels could be
-obtained. The probe and the `SkipRenderQueueGroup` key are in place, so this is
-one run on an unlocked session away from an answer.
+**Cockpit and HUD are outside the render queue.** Established by the suppression
+table in section 2: with every candidate group suppressed in turn, both are still
+drawn. The cockpit is still Ogre scene geometry — it hangs off `SceneRoot` as a
+sibling node — but it is not reached through the render-queue groups a listener
+sees, so a listener cannot order a pass against it.
 
-This matters because the cockpit is scene geometry, not an overlay — it hangs off
-`SceneRoot` as a sibling node — so it is drawn in one of these queue groups and
-would be fogged by a pass inserted before it. Which group it is decides whether
-`renderQueueEnded(50)` is actually the right boundary or whether the pass has to
-go later.
+An earlier attempt at this measurement produced five screenshots of the Windows
+lock screen: the session was locked, so `GetForegroundWindow` returned
+`Windows Default Lock Screen` while the game window was up and rendering at
+(747,396)-(1828,1033). Check the foreground window before trusting a capture; the
+run looks successful either way.
+
+The suppression run for group 5 (SKIES_EARLY) landed on the in-game pause menu
+and produced no usable frame. Group 5 is therefore untested, and is the one
+remaining candidate for the sky.
 
 **Alternate cameras** (satellite, sniper scope) were not exercised. The trace
 showed a single `preRenderQueues`/`postRenderQueues` pair per frame in normal
@@ -208,15 +239,24 @@ already requires.
 - **The world `_updateRenderQueue` hook.** Submission stage, before any draw.
 - **Removing fog from a later pass.** Impossible: the original un-fogged colour
   does not survive the object shaders.
+- **The Ogre render queue as the ordering layer.** Measured, not assumed: it
+  carries the movable objects only.
 
 ## Next step
 
-One run on an unlocked session with `[Diagnostics] TraceRenderQueues = 1` and
-`SkipRenderQueueGroup` set to 60, then 62, then 95, then 100, comparing frames.
-That identifies the cockpit's group and settles whether `renderQueueEnded(50)` is
-the boundary to use.
+Item 6 needs a different layer than the one it was looking in. Two candidates,
+neither qualified:
 
-After that, the decision to make is item 6's shape: a compositor layer that must
-solve the depth problem (section 1) and stack with baked fog (section 3), versus
-pushing clearance into the object shaders as a material parameter, which avoids
-both but touches every affected material.
+1. **A hook in Redux's own render path**, between its terrain/world draw and its
+   cockpit and HUD draw. Nothing in this repo currently identifies those call
+   sites; finding them is a decompilation job, not an Ogre one.
+2. **A D3D11 context-level hook** that detects the transition by what is being
+   drawn. Note the standing hazard that the DX11 context vtable is reverted
+   mid-frame, so a once-per-frame hook check loses draws in frame order.
+
+Weigh that against the alternative that avoids the insertion point entirely:
+pushing clearance into the object shaders as a material parameter. Given
+section 1 (no readable depth under MSAA) and section 3 (fog already baked
+per-pixel in those same shaders), the material route now avoids all three
+obstacles, at the cost of touching every affected material. On this evidence it
+is the more likely route to something that renders.
