@@ -2790,6 +2790,14 @@ namespace BZROpenShim
         static const char* const kShimSettingsTargetPolicyValues[] = { "Default", "NeutralOnly", "ExplicitOnly" };
         static const char* const kShimSettingsTargetPolicyLabels[] = { "Default", "Neutral Only", "Explicit Only" };
         static const char* const kShimSettingsScrapHudValues[] = { "Legacy", "Stock" };
+        static const char* const kShimSettingsRadarScaleValues[] =
+            { "1.0", "1.25", "1.5", "1.75", "2.0" };
+        static const char* const kShimSettingsRadarScaleLabels[] =
+            { "Stock", "125%", "150%", "175%", "200%" };
+        static const char* const kShimSettingsSatelliteValues[] =
+            { "1.0", "1.5", "2.0", "3.0" };
+        static const char* const kShimSettingsSatelliteLabels[] =
+            { "Stock", "1.5x", "2x", "3x" };
         static const char* const kShimSettingsHeadlightColorValues[] =
         {
             "Stock", "White", "Red", "Green", "Blue", "Yellow",
@@ -2859,10 +2867,36 @@ namespace BZROpenShim
               kShimSettingsScrapHudValues, kShimSettingsScrapHudValues, 2, 0,
               ShimSettingApplyGroup::GlobalImprovement,
               "Legacy BZ98-style scrap and pilot readout, or the stock Redux HUD." },
+            // Local HUD geometry, so this one is not single-player only.
+            { "Radar Size", "Display", "RadarSizeScale", nullptr, 0,
+              kShimSettingsRadarScaleValues, kShimSettingsRadarScaleLabels, 5, 0,
+              ShimSettingApplyGroup::GlobalImprovement,
+              "Scale the cockpit radar. The projection re-anchors to the backdrop so the "
+              "mesh and its underlay stay concentric." },
+            { "Satellite Zoom Out", "SinglePlayer", "SatelliteZoomOut", nullptr, 0,
+              kShimSettingsSatelliteValues, kShimSettingsSatelliteLabels, 4, 0,
+              ShimSettingApplyGroup::GlobalImprovement,
+              "How much further than stock the satellite view can pull out. Single player only." },
+            { "Satellite Pan Speed", "SinglePlayer", "SatellitePanSpeed", nullptr, 0,
+              kShimSettingsSatelliteValues, kShimSettingsSatelliteLabels, 4, 0,
+              ShimSettingApplyGroup::GlobalImprovement,
+              "Satellite view pan speed, as a multiple of stock. Single player only." },
             { "Jet Flames", "Display", "JetFlames", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
               ShimSettingApplyGroup::JetFlames,
               "Faction-colored engine flames on jets and thrusters." },
+            { "Empty Craft Lights", "Display", "EmptyCraftLights", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::LiveEngineToggle,
+              "Keep emissive running lights lit on craft that have no pilot." },
+            { "Emissive Pulse", "Display", "EmissivePulse", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::LiveEngineToggle,
+              "Vary occupied-craft emissive brightness with asynchronous organic pulses." },
+            { "Star Twinkle", "Display", "StarTwinkle", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::LiveEngineToggle,
+              "Animate brightness variation in compatible star-sky materials." },
             { "Unit Voices", "Display", "UnitVoFeedback", nullptr, 0,
               kShimSettingsUnitVoValues, kShimSettingsUnitVoValues, 3, 0,
               ShimSettingApplyGroup::UnitVo,
@@ -2942,6 +2976,37 @@ namespace BZROpenShim
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::GlobalImprovement,
               "Classic crouch while sniping mid-jump. Single player only." },
+            // Ships off, so the default index is "Off" (1) -- what an absent
+            // key does -- not what any preset happens to write.
+            { "Ordnance Velocity", "SinglePlayer", "OrdnanceVelocityInheritance", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::GlobalImprovement,
+              "Shots inherit the shooter's velocity, and cannon lead compensates for it. "
+              "Single player only." },
+            // AI behaviour switches that change stock content without any
+            // mission script, so they belong on the page rather than staying
+            // ini-only. Each default index is what an ABSENT key does, which
+            // is not the same as what a preset happens to ship.
+            { "Bomber AI Range", "SinglePlayer", "BomberAiRange", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::GlobalImprovement,
+              "Bombers engage at the range their own weapon ODFs declare. Single player only." },
+            { "AI Howitzer Volley", "SinglePlayer", "AiWeaponMaskArtillery", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::GlobalImprovement,
+              "Artillery AI fires every fitted hardpoint as one volley instead of the first. "
+              "A stock howitzer fires four rounds per cycle. Single player only." },
+            { "AI Mine Volley", "SinglePlayer", "AiWeaponMaskMinelayer", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::GlobalImprovement,
+              "Minelayer AI honours weaponMask instead of hard-coding hardpoint 0. "
+              "Single player only." },
+            // [Fixes] rather than [SinglePlayer], and it ships ON, so the
+            // default index is "On" (0).
+            { "AI Multi-Producer", "Fixes", "AiMultiProducerMakers", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::GlobalImprovement,
+              "A built class gets every producer that can make it, not just the first one found." },
             { "Neutral Attack Orders", "Gameplay", "AllowNeutralAttackOrders", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
               ShimSettingApplyGroup::GlobalImprovement,
@@ -6110,6 +6175,57 @@ namespace BZROpenShim
             g_CareerUiPageActive = false;
         }
 
+        // Is `child` still in `parent`'s child vector? The MainScreen singleton
+        // outlives its own menu: navigating to Options and back rebuilds the
+        // overlay's children while the screen pointer stays the same, so a
+        // cached widget pointer can survive the widget itself. Identity of the
+        // screen is not identity of what is on it.
+        static bool UiViewHasChild(void* parent, void* child)
+        {
+            if (!parent || !child)
+                return false;
+
+            __try
+            {
+                auto* const bytes = reinterpret_cast<uint8_t*>(parent);
+                void** const begin = *reinterpret_cast<void***>(bytes + kUiViewChildBeginOffset);
+                void** const end = *reinterpret_cast<void***>(bytes + kUiViewChildEndOffset);
+                if (!begin || !end || begin > end || (end - begin) >= 64)
+                    return false;
+
+                for (void** slot = begin; slot != end; ++slot)
+                {
+                    if (*slot == child)
+                        return true;
+                }
+                return false;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // Discard text records for controls that are no longer children of the
+        // live overlay. A title-menu rebuild can keep the MainScreen singleton
+        // (and sometimes the overlay) while replacing every button below it.
+        // Without compaction, dead controls eventually fill the fixed record
+        // table and later localized captions can no longer be restored.
+        static void PruneDetachedCareerUiTextRecords(void* overlay)
+        {
+            size_t out = 0;
+            for (size_t i = 0; i < g_CareerUiTextMemoryCount; ++i)
+            {
+                if (!UiViewHasChild(overlay, g_CareerUiTextMemory[i].view))
+                    continue;
+                if (out != i)
+                    g_CareerUiTextMemory[out] = g_CareerUiTextMemory[i];
+                ++out;
+            }
+            g_CareerUiTextMemoryCount = out;
+            g_CareerUiTextMemoryFull = false;
+        }
+
         static void EnsureCareerUiButton()
         {
             if (!g_CareerUiOverlay || g_CareerUiButton)
@@ -6158,11 +6274,13 @@ namespace BZROpenShim
                 return;
             }
 
-            if (mainScreen != g_CareerUiMainScreen)
+            // The singleton is longer-lived than the title menu below it.
+            // Resolve the named overlay on every constructor completion rather
+            // than using MainScreen identity as a proxy for child-tree identity.
+            void* const overlay = ResolveMainScreenOverlay(mainScreen);
+            if (!overlay)
             {
-                ResetCareerUiState();
-                void* const overlay = ResolveMainScreenOverlay(mainScreen);
-                if (!overlay)
+                if (mainScreen != g_CareerUiMainScreen)
                 {
                     // Expected on the splash pass. Deliberately does NOT cache
                     // the screen pointer: the same screen object builds its
@@ -6174,10 +6292,31 @@ namespace BZROpenShim
                         ++s_missingOverlayLogs;
                         Log(L"[CAREERUI] MainScreen_Overlay not present on this pass; waiting\n");
                     }
-                    return;
                 }
+                return;
+            }
+
+            const bool overlayChanged =
+                mainScreen != g_CareerUiMainScreen || overlay != g_CareerUiOverlay;
+            const bool childrenRebuilt =
+                !overlayChanged && g_CareerUiButton &&
+                !UiViewHasChild(overlay, g_CareerUiButton);
+            if (overlayChanged || childrenRebuilt)
+            {
+                if (childrenRebuilt)
+                {
+                    Log(L"[CAREERUI] button 0x%08X detached from overlay 0x%08X; rebuilding tree\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CareerUiButton)),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(overlay)));
+                }
+
+                // The old page controls belong to the old child tree. Clear
+                // them, then immediately adopt the live screen/overlay so this
+                // same setup pass can inject replacements.
+                ResetCareerUiState();
                 g_CareerUiMainScreen = mainScreen;
                 g_CareerUiOverlay = overlay;
+                PruneDetachedCareerUiTextRecords(overlay);
             }
 
             EnsureCareerUiButton();
