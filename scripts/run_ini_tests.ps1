@@ -273,6 +273,7 @@ $shippingPolicyChecks = @{
     "Network/GovernorTuning" = "OpenShim"
     "Network/ReauthOnNicknameChange" = "0"
     "Network/LobbyReadouts" = "0"
+    "Network/LobbyBanButton" = "0"
     "Career/StatsTracking" = "0"
     "SinglePlayer/JumpSnipeCrouch" = "1"
     "SinglePlayer/AttackRevealPerceivedTeam" = "0"

@@ -628,7 +628,9 @@ TargetPolicy = Default
 ; Master switch for the multiplayer vehicle-flag feature as a whole: the flag
 ; selection screen, the payload upload, and the Ogre renderer that draws flags
 ; over other players' craft in a match.
-; Accepted: boolean. Default: ON. Restart required.
+; Accepted: boolean. Default: OFF in the player preset (ON here as the
+; exhaustive reference). A missing key is OFF so BZP/BZP-T's faction-only
+; waiting room is not overwritten. Restart required.
 ; Latched at startup, because the renderer is a vtable write that is only
 ; attempted while the feature is on. Setting this OFF leaves stock Redux flag
 ; behaviour untouched -- it removes OpenShim's flag work, not Redux's.
@@ -1175,9 +1177,19 @@ UdpPort = 0
 ReauthOnNicknameChange = 0
 
 ; Inject the native nickname and negotiated-route readouts into the MP lobby.
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: OFF in the player preset (ON here as the
+; exhaustive reference). A missing key is OFF -- these widgets sit on the
+; waiting-room parent and overwrite BZP/BZP-T's faction-only picker.
 ; Legacy env alias: OPENSHIM_DISABLE_LOBBY_READOUTS
 LobbyReadouts = 1
+
+; Ban User button and label on the multiplayer waiting room.
+; Accepted: boolean. Default: OFF. Restart required.
+; `/ban` still works with this off. Leave it off for BZP/BZP-T.
+; Legacy env aliases: OPENSHIM_DISABLE_LOBBY_BAN_BUTTON (inverted),
+;                     OPENSHIM_ENABLE_LOBBY_BAN_BUTTON,
+;                     BZR_DISABLE_LOBBY_BAN_BUTTON, BZR_ENABLE_LOBBY_BAN_BUTTON
+LobbyBanButton = 1
 
 ; Native BZRNet lobby-integration patch gate.
 ; Canonical:
@@ -1296,6 +1308,9 @@ PlayerReticleConvergence = 1
 ; Smart-reticle targeting distance.
 ; Accepted: finite decimal; clamped to 1..10000.
 ; Default: 500. Redux stock value: 200.
+; OpenShim's own value is single-player only. EXU SetReticleRange (BZP/BZP-T,
+; Reloaded, mission Lua) is honored in network games and is not forced back
+; to stock 200 -- those mods apply a longer reticle on every matched peer.
 ; The OpenShim Settings page cycles Stock (200) / 300 / 400 / 500 and applies
 ; live; any other value set by hand here is honoured but clicking that row
 ; replaces it.
