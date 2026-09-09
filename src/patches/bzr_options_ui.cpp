@@ -6754,17 +6754,35 @@ namespace BZROpenShim
     // turns activation off, so nothing else on the screen is affected.
     void __fastcall CareerUiSetActiveHook(void* thisPtr, void* /*edx*/, uint8_t value)
     {
+        const bool isCareerPageWidget = IsCareerUiPageWidget(thisPtr);
         uint8_t out = value;
-        if (out && !g_CareerUiPageActive && IsCareerUiPageWidget(thisPtr))
+        if (out && !g_CareerUiPageActive && isCareerPageWidget)
             out = 0;
         if (!g_CareerUiSetActiveOriginal || !thisPtr)
             return;
+
+        // SetActive is hooked process-wide, so faults from stock views must
+        // remain loud. Only our cached page widgets can race title-screen
+        // teardown after the liveness check in ReassertCareerUiHiddenState.
+        if (!isCareerPageWidget)
+        {
+            g_CareerUiSetActiveOriginal(thisPtr, out);
+            return;
+        }
+
         __try
         {
             g_CareerUiSetActiveOriginal(thisPtr, out);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
+            static bool s_teardownFaultLogged = false;
+            if (!s_teardownFaultLogged)
+            {
+                s_teardownFaultLogged = true;
+                Log(L"[CAREERUI] ignored SetActive fault on a stale injected widget during title-screen teardown\n");
+            }
+            ResetCareerUiState();
         }
     }
 
