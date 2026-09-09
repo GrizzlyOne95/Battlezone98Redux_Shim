@@ -499,7 +499,6 @@ MIT — see [LICENSE](LICENSE).
 
 - **GrizzlyOne95** — primary implementation, reverse engineering, and maintenance
 - **Piercing** — multiplayer testing, network investigation, and technical collaboration
-- **Skippy-Agent** — Linux/Proton install path, CTest CI, and pasteable installers
 - **VTrider** — technical assistance and collaboration
 - **Business Lawyer** — technical assistance and collaboration
 - **Janne** — early work investigating DLL shimming and hooking in Battlezone 98 Redux
