@@ -18380,6 +18380,7 @@ namespace BZROpenShim
         static float g_HeadlightColourR = 5.0f;
         static float g_HeadlightColourG = 5.0f;
         static float g_HeadlightColourB = 5.0f;
+        static float g_HeadlightBrightness = 1.0f;
         static bool g_HeadlightRuntimeActive = false;
         static bool g_HeadlightLightTraceEnabled = false;
         // A/B switch for validation: restores the pre-repair constants
@@ -19252,7 +19253,8 @@ namespace BZROpenShim
             return g_HeadlightPlayerVisibleConfigured ||
                    g_HeadlightOtherVisibleConfigured ||
                    g_HeadlightColourMode != HeadlightColourMode::Stock ||
-                   g_HeadlightBeamMode != HeadlightBeamMode::Stock;
+                   g_HeadlightBeamMode != HeadlightBeamMode::Stock ||
+                   std::abs(g_HeadlightBrightness - 1.0f) > 0.001f;
         }
 
         // Lifecycle-seam hook: advances the headlight world generation from
@@ -19366,7 +19368,9 @@ namespace BZROpenShim
             std::unordered_set<void*> touched;
             size_t scannedObjects = 0;
             size_t lightsFound = 0;
-            const bool setPlayerColour = g_HeadlightColourMode != HeadlightColourMode::Stock;
+            const bool setPlayerColour =
+                g_HeadlightColourMode != HeadlightColourMode::Stock ||
+                std::abs(g_HeadlightBrightness - 1.0f) > 0.001f;
             const bool setPlayerBeam = g_HeadlightBeamMode != HeadlightBeamMode::Stock;
             auto applyObject = [&](void* object, bool isPlayer)
             {
@@ -19386,7 +19390,34 @@ namespace BZROpenShim
                                    g_HeadlightLightTraceCount < kHeadlightLightTraceLimit;
                 if (trace)
                     LogHeadlightLightParameters(light, isPlayer, L"before");
-                if (ApplyHeadlightState(light, setColour, colourR, colourG, colourB,
+                float objectR = colourR;
+                float objectG = colourG;
+                float objectB = colourB;
+                if (setColour && g_HeadlightColourMode == HeadlightColourMode::Stock)
+                {
+                    // Brightness-only mode scales the engine's actual stock
+                    // colour, not the White preset. Reuse the captured baseline
+                    // after the first refresh so the operation is idempotent.
+                    const auto original = g_HeadlightOriginalStates.find(light);
+                    const OgreColourValue* baseline =
+                        original != g_HeadlightOriginalStates.end() && original->second.hasColour &&
+                                original->second.worldGeneration == s_HeadlightWorldGeneration
+                            ? &original->second.diffuse
+                            : (GetHeadlightOgreApi().getDiffuse
+                                ? GetHeadlightOgreApi().getDiffuse(light) : nullptr);
+                    if (!baseline)
+                        return;
+                    objectR = baseline->r;
+                    objectG = baseline->g;
+                    objectB = baseline->b;
+                }
+                if (setColour)
+                {
+                    objectR *= g_HeadlightBrightness;
+                    objectG *= g_HeadlightBrightness;
+                    objectB *= g_HeadlightBrightness;
+                }
+                if (ApplyHeadlightState(light, setColour, objectR, objectG, objectB,
                                         setBeam, inner, outer,
                                         setVisible, visible))
                 {
@@ -19457,6 +19488,19 @@ namespace BZROpenShim
                 return;
             g_HeadlightConfigInitialized = true;
 
+            // Reapplication after a settings click must also honor keys that
+            // were removed by hand, so begin from the stock baseline each time.
+            g_HeadlightPlayerVisibleConfigured = false;
+            g_HeadlightPlayerVisible = true;
+            g_HeadlightOtherVisibleConfigured = false;
+            g_HeadlightOtherVisible = true;
+            g_HeadlightColourMode = HeadlightColourMode::Stock;
+            g_HeadlightBeamMode = HeadlightBeamMode::Stock;
+            g_HeadlightColourR = 5.0f;
+            g_HeadlightColourG = 5.0f;
+            g_HeadlightColourB = 5.0f;
+            g_HeadlightBrightness = 1.0f;
+
             bool boolValue = false;
             if (TryGetUserConfigBool("Diagnostics", "HeadlightLightTrace", boolValue))
                 g_HeadlightLightTraceEnabled = boolValue;
@@ -19491,6 +19535,17 @@ namespace BZROpenShim
             {
                 Log(L"[HEADLIGHT] Ignoring invalid HeadlightBeam=%hs\n", value.c_str());
             }
+            if (TryGetUserConfigString(kUserConfigSinglePlayerSection, "HeadlightBrightness", value))
+            {
+                char* end = nullptr;
+                const float parsed = std::strtof(value.c_str(), &end);
+                while (end && *end && std::isspace(static_cast<unsigned char>(*end)))
+                    ++end;
+                if (end != value.c_str() && end && *end == '\0' && std::isfinite(parsed))
+                    g_HeadlightBrightness = (std::max)(0.25f, (std::min)(2.0f, parsed));
+                else
+                    Log(L"[HEADLIGHT] Ignoring invalid HeadlightBrightness=%hs\n", value.c_str());
+            }
 
             const char* colourName =
                 g_HeadlightColourMode == HeadlightColourMode::Rainbow ? "rainbow" :
@@ -19498,7 +19553,7 @@ namespace BZROpenShim
             const char* beamName =
                 g_HeadlightBeamMode == HeadlightBeamMode::Focused ? "focused" :
                 (g_HeadlightBeamMode == HeadlightBeamMode::Wide ? "wide" : "stock");
-            Log(L"[HEADLIGHT] Baseline configured=%hs player=%hs other=%hs colour=%hs(%.2f,%.2f,%.2f) beam=%hs (SP-only; defers to EXU)\n",
+            Log(L"[HEADLIGHT] Baseline configured=%hs player=%hs other=%hs colour=%hs(%.2f,%.2f,%.2f) beam=%hs brightness=%.2f (SP-only; defers to EXU)\n",
                 IsHeadlightFeatureConfigured() ? "yes" : "no",
                 g_HeadlightPlayerVisibleConfigured ? (g_HeadlightPlayerVisible ? "on" : "off") : "stock",
                 g_HeadlightOtherVisibleConfigured ? (g_HeadlightOtherVisible ? "on" : "off") : "stock",
@@ -19506,7 +19561,8 @@ namespace BZROpenShim
                 static_cast<double>(g_HeadlightColourR),
                 static_cast<double>(g_HeadlightColourG),
                 static_cast<double>(g_HeadlightColourB),
-                beamName);
+                beamName,
+                static_cast<double>(g_HeadlightBrightness));
             RefreshHeadlightState();
         }
 
