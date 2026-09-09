@@ -28,6 +28,7 @@
 #include "ui_performance.h"
 #include "openshim_events.h"
 #include "player_kill_trace.h"
+#include "net_optimizer.h"
 #include "../engine/native_ui_validation.h"
 
 #include <Windows.h>
@@ -21202,38 +21203,33 @@ namespace BZROpenShim
                 return BzrNetNicknameResult::PersistenceFailed;
             }
 
-            // Lounge/lobby only. SendAuthorization 0x006C6DF0 does not emit a
-            // second Authorization on an already-authorized socket. Send the
-            // identity pair through lobby SetPlayerData (inline WS write) and
-            // also invoke the Authorization JSON builder 0x006C6E60 so the
-            // new 0x009453E0 `name` actually leaves the process.
+            // Lounge/lobby only. Closing the live TCP session to port 1337
+            // makes stock reconnect and SendAuthorization with the new
+            // 0x009453E0 name. Calling SendAuthorization on an already-
+            // authorized socket, SetPlayerData, and a mis-arity 0x006C6E60
+            // call all failed to put a ~650-byte Authorization on the wire.
             if (lobby || ReadLocalPlayerNetIdValue() != 0)
             {
                 if (lobby && lobbyValid && ReadLocalPlayerNetIdValue() == 0 &&
                     ShouldReauthOnNicknameChange())
                 {
                     Log(L"[BZRNET] NicknameNativeSendAttempt backend=%hs session=%hs stable=%hs "
-                        L"attempted=yes boundary=0x0074BF60,0x006C6E60 reason=live-rename source=%hs\n",
+                        L"attempted=yes boundary=closesocket:1337 reason=ws-recycle source=%hs\n",
                         backend, sessionState, stableIdentity.c_str(), operationSource);
 
-                    const bool dataSent = SendBzrNetNicknamePlayerData(lobby, nickname.c_str());
-                    void* const client = ResolveBzrNetClientChecked();
-                    const bool authSent = TrySendAuthorizationBody(client);
-
+                    const bool recycled = RecycleBzrNetWebSocket();
                     Log(L"[BZRNET] NicknameNativeSendCompleted backend=%hs session=%hs stable=%hs "
-                        L"entered=yes completed=%hs result=%hs playerData=%hs authBody=%hs\n",
+                        L"entered=yes completed=%hs result=%hs reason=ws-recycle\n",
                         backend, sessionState, stableIdentity.c_str(),
-                        (dataSent || authSent) ? "yes" : "no",
-                        (dataSent || authSent) ? "native-send-completed" : "live-send-unavailable",
-                        dataSent ? "sent" : "failed",
-                        authSent ? "sent" : "failed");
+                        recycled ? "yes" : "no",
+                        recycled ? "reauth-queued" : "recycle-failed");
 
-                    if (dataSent || authSent)
+                    if (recycled)
                     {
                         Log(L"[BZRNET] Nickname result=%hs (source=%hs)\n",
-                            BzrNetNicknameResultName(BzrNetNicknameResult::NativeSendCompleted),
+                            BzrNetNicknameResultName(BzrNetNicknameResult::ReauthQueued),
                             operationSource);
-                        return BzrNetNicknameResult::NativeSendCompleted;
+                        return BzrNetNicknameResult::ReauthQueued;
                     }
                 }
                 Log(L"[BZRNET] NicknameNativeSendAttempt backend=%hs session=%hs stable=%hs "
@@ -39108,7 +39104,7 @@ namespace BZROpenShim
             if (result == BzrNetNicknameResult::NativeSendCompleted)
                 outcome = "sent to the server; peers should see the new name shortly";
             else if (result == BzrNetNicknameResult::ReauthQueued)
-                outcome = "queued lounge re-auth; peers should see the new name shortly";
+                outcome = "reconnecting BZRNet; new name applies on the next Authorization";
             else if (result == BzrNetNicknameResult::LiveSendUnavailable)
                 outcome = "saved; live update unavailable until reconnect/rejoin";
             else if (result == BzrNetNicknameResult::UnsupportedBuild)

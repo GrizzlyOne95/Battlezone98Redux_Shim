@@ -4945,4 +4945,56 @@ namespace
             ReleaseSRWLockExclusive(&g_RelayControlLogLock);
         }
     }
+
+    bool RecycleBzrNetWebSocket()
+    {
+        if (!g_RealCloseSocket || !g_RealGetPeerName)
+            return false;
+
+        std::vector<SOCKET> candidates;
+        AcquireSRWLockShared(&g_SocketLock);
+        candidates.reserve(g_Sockets.size());
+        for (const auto& entry : g_Sockets)
+            candidates.push_back(entry.first);
+        ReleaseSRWLockShared(&g_SocketLock);
+
+        uint32_t closed = 0;
+        for (const SOCKET s : candidates)
+        {
+            sockaddr_storage peer = {};
+            int peerLen = static_cast<int>(sizeof(peer));
+            if (g_RealGetPeerName(s, reinterpret_cast<sockaddr*>(&peer), &peerLen) != 0)
+                continue;
+
+            uint16_t port = 0;
+            if (!TryGetSockaddrPort(reinterpret_cast<const sockaddr*>(&peer), peerLen, &port) ||
+                port != kBzrNetWebSocketPort)
+            {
+                continue;
+            }
+
+            Logf("[OpenShimNet] recycling bzrnet_ws sock=0x%08X sid=%u peer=%s",
+                static_cast<unsigned>(s),
+                GetSocketId(s),
+                FormatSockaddr(reinterpret_cast<const sockaddr*>(&peer), peerLen).c_str());
+
+            if (g_RealCloseSocket(s) != 0)
+            {
+                const int err = g_RealWSAGetLastError ? g_RealWSAGetLastError() : -1;
+                Logf("[OpenShimNet] recycle closesocket failed sock=0x%08X err=%d",
+                    static_cast<unsigned>(s), err);
+                continue;
+            }
+
+            PurgeWebSocketCaptureForSocket(s);
+            ClearReorderStateForSocket(s);
+            DupPurgeSocket(s);
+            LogSocketSummaryAndForget(s);
+            ++closed;
+        }
+
+        Logf("[OpenShimNet] RecycleBzrNetWebSocket closed=%u candidates=%u",
+            closed, static_cast<unsigned>(candidates.size()));
+        return closed > 0;
+    }
 }
