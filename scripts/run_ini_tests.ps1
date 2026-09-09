@@ -161,12 +161,6 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # the name field is the one lobby chrome that is allowed on.
     "Network/LobbyReadouts",
 
-    # Live lounge rename. The /nickname= buffer is only consumed at
-    # Authorization, so a waiting-room edit is otherwise restart-only.
-    # This queues a second Authorization on the existing WebSocket while
-    # still in lounge/lobby (netId == 0). In-match stays persist-only.
-    "Network/ReauthOnNicknameChange",
-
     # Straight bug/stability fixes with no material mixed-client divergence.
     # MapRefreshFixes includes the multiplayer map-list refresh/jump and
     # selection-preservation repair and is deliberately part of the ON baseline.
@@ -283,7 +277,7 @@ $shippingPolicyChecks = @{
     "Display/MultiplayerFlags" = "0"
     "Network/NetImprovements" = "1"
     "Network/GovernorTuning" = "OpenShim"
-    "Network/ReauthOnNicknameChange" = "1"
+    "Network/ReauthOnNicknameChange" = "0"
     "Network/LobbyReadouts" = "1"
     "Network/LobbyBanButton" = "0"
     "Career/StatsTracking" = "0"

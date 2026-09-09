@@ -2248,6 +2248,23 @@ namespace
             err);
     }
 
+    void LogSocketSummary(SOCKET s, const SocketState& snapshot)
+    {
+        if (!g_Config.logSocketLifecycle)
+            return;
+
+        Logf("[OpenShimNet] sid=%u sock=0x%08X %s close sentPackets=%u sentBytes=%llu recvPackets=%u recvBytes=%llu local=%s remote=%s",
+            snapshot.socketId,
+            static_cast<unsigned>(s),
+            SocketTypeLabel(snapshot.type, snapshot.protocol),
+            snapshot.packetsSent,
+            static_cast<unsigned long long>(snapshot.bytesSent),
+            snapshot.packetsRecv,
+            static_cast<unsigned long long>(snapshot.bytesRecv),
+            snapshot.localAddress.empty() ? "<unbound>" : snapshot.localAddress.c_str(),
+            snapshot.remoteAddress.empty() ? "<unknown>" : snapshot.remoteAddress.c_str());
+    }
+
     void LogSocketSummaryAndForget(SOCKET s)
     {
         SocketState snapshot = {};
@@ -2262,19 +2279,9 @@ namespace
         }
         ReleaseSRWLockExclusive(&g_SocketLock);
 
-        if (!found || !g_Config.logSocketLifecycle)
+        if (!found)
             return;
-
-        Logf("[OpenShimNet] sid=%u sock=0x%08X %s close sentPackets=%u sentBytes=%llu recvPackets=%u recvBytes=%llu local=%s remote=%s",
-            snapshot.socketId,
-            static_cast<unsigned>(s),
-            SocketTypeLabel(snapshot.type, snapshot.protocol),
-            snapshot.packetsSent,
-            static_cast<unsigned long long>(snapshot.bytesSent),
-            snapshot.packetsRecv,
-            static_cast<unsigned long long>(snapshot.bytesRecv),
-            snapshot.localAddress.empty() ? "<unbound>" : snapshot.localAddress.c_str(),
-            snapshot.remoteAddress.empty() ? "<unknown>" : snapshot.remoteAddress.c_str());
+        LogSocketSummary(s, snapshot);
     }
 
     void ResetPeerBuf(PeerBuf& peer)
@@ -4951,16 +4958,29 @@ namespace
         if (!g_RealCloseSocket || !g_RealGetPeerName)
             return false;
 
-        std::vector<SOCKET> candidates;
+        struct RecycleCandidate
+        {
+            SOCKET socket = INVALID_SOCKET;
+            uint32_t socketId = 0;
+        };
+
+        std::vector<RecycleCandidate> candidates;
         AcquireSRWLockShared(&g_SocketLock);
         candidates.reserve(g_Sockets.size());
         for (const auto& entry : g_Sockets)
-            candidates.push_back(entry.first);
+        {
+            // BZRNet control traffic is TCP. Requiring the tracked socket type
+            // prevents an unrelated socket using remote port 1337 from being
+            // selected solely by its endpoint.
+            if (entry.second.socketId != 0 && entry.second.type == SOCK_STREAM)
+                candidates.push_back({ entry.first, entry.second.socketId });
+        }
         ReleaseSRWLockShared(&g_SocketLock);
 
         uint32_t closed = 0;
-        for (const SOCKET s : candidates)
+        for (const RecycleCandidate& candidate : candidates)
         {
+            const SOCKET s = candidate.socket;
             sockaddr_storage peer = {};
             int peerLen = static_cast<int>(sizeof(peer));
             if (g_RealGetPeerName(s, reinterpret_cast<sockaddr*>(&peer), &peerLen) != 0)
@@ -4973,23 +4993,57 @@ namespace
                 continue;
             }
 
-            Logf("[OpenShimNet] recycling bzrnet_ws sock=0x%08X sid=%u peer=%s",
-                static_cast<unsigned>(s),
-                GetSocketId(s),
-                FormatSockaddr(reinterpret_cast<const sockaddr*>(&peer), peerLen).c_str());
+            SocketState closedState = {};
+            bool identityMatched = false;
+            int closeResult = SOCKET_ERROR;
+            int closeError = 0;
 
-            if (g_RealCloseSocket(s) != 0)
+            // SOCKET values can be reused. Re-check the monotonic identity and
+            // type immediately before closing, and keep the table locked until
+            // the old entry is erased so a newly created same-value handle
+            // cannot be mistaken for the connection we just closed.
+            AcquireSRWLockExclusive(&g_SocketLock);
+            const auto it = g_Sockets.find(s);
+            if (it != g_Sockets.end() &&
+                it->second.socketId == candidate.socketId &&
+                it->second.type == SOCK_STREAM)
             {
-                const int err = g_RealWSAGetLastError ? g_RealWSAGetLastError() : -1;
-                Logf("[OpenShimNet] recycle closesocket failed sock=0x%08X err=%d",
-                    static_cast<unsigned>(s), err);
+                identityMatched = true;
+                closeResult = g_RealCloseSocket(s);
+                if (closeResult == 0)
+                {
+                    closedState = it->second;
+                    g_Sockets.erase(it);
+                }
+                else
+                {
+                    closeError = g_RealWSAGetLastError ? g_RealWSAGetLastError() : -1;
+                }
+            }
+            ReleaseSRWLockExclusive(&g_SocketLock);
+
+            if (!identityMatched)
+            {
+                Logf("[OpenShimNet] recycle skipped reused socket sock=0x%08X expectedSid=%u",
+                    static_cast<unsigned>(s), candidate.socketId);
                 continue;
             }
 
+            if (closeResult != 0)
+            {
+                Logf("[OpenShimNet] recycle closesocket failed sock=0x%08X err=%d",
+                    static_cast<unsigned>(s), closeError);
+                continue;
+            }
+
+            Logf("[OpenShimNet] recycling bzrnet_ws sock=0x%08X sid=%u peer=%s",
+                static_cast<unsigned>(s),
+                candidate.socketId,
+                FormatSockaddr(reinterpret_cast<const sockaddr*>(&peer), peerLen).c_str());
             PurgeWebSocketCaptureForSocket(s);
             ClearReorderStateForSocket(s);
             DupPurgeSocket(s);
-            LogSocketSummaryAndForget(s);
+            LogSocketSummary(s, closedState);
             ++closed;
         }
 
