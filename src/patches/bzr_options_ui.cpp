@@ -2902,9 +2902,10 @@ namespace BZROpenShim
               ShimSettingApplyGroup::UnitVo,
               "Unit voice feedback: Normal, Reduced chatter, or None." },
             { "MP Vehicle Flags", "Display", "MultiplayerFlags", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
               ShimSettingApplyGroup::RestartRequired,
-              "Multiplayer vehicle flags: the selection screen and the in-match renderer. Restart required." },
+              "Multiplayer vehicle flags: the selection screen and the in-match renderer. "
+              "Leave off for BZP/BZP-T; their waiting room is faction-only. Restart required." },
             { "Show Own MP Flag", "Display", "MultiplayerFlagShowOwnCraft", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
               ShimSettingApplyGroup::RestartRequired,
@@ -2962,7 +2963,9 @@ namespace BZROpenShim
             { "Reticle Range", "SinglePlayer", "SmartReticleRange", nullptr, 0,
               kShimSettingsReticleRangeValues, kShimSettingsReticleRangeLabels, 4, 3,
               ShimSettingApplyGroup::GlobalImprovement,
-              "Smart-reticle targeting distance; Stock is Redux's 200. Single player only." },
+              "Smart-reticle targeting distance; Stock is Redux's 200. OpenShim's own "
+              "value is single-player only. A mission that calls EXU SetReticleRange "
+              "(BZP, Reloaded) is honored in network games too." },
             { "Smart Scavengers", "SinglePlayer", "SmartScavengerPathing",
               kShimSettingsScavengerAltKeys, 1,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
@@ -3104,6 +3107,16 @@ namespace BZROpenShim
               "Restrict multiplayer starting vehicles to NSDF and CCA, as 1.5 did with "
               "Any Nation off. Local only, and it never adds craft the map withheld. "
               "Applies next time a vehicle list loads." },
+            { "Lobby Ban Button", "Network", "LobbyBanButton", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::RestartRequired,
+              "Ban User button on the multiplayer waiting room. Off leaves BZP/BZP-T's "
+              "faction picker alone; /ban still works. Restart required." },
+            { "Lobby Readouts", "Network", "LobbyReadouts", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::RestartRequired,
+              "Nickname field and route readout on the waiting room. Off for BZP/BZP-T. "
+              "Restart required." },
             // defaultIndex 0 selects "1", which is what an absent key does: the
             // native tracker has always run, and turning the row off must be a
             // deliberate choice rather than the effect of a missing ini key.

@@ -422,6 +422,16 @@ namespace
 
         if (Equals(name, "OPENSHIM_DISABLE_LOBBY_READOUTS"))
             return TryReadMappedBool(mainIni, "Network", "LobbyReadouts", true, out);
+        if (Equals(name, "OPENSHIM_DISABLE_LOBBY_BAN_BUTTON") ||
+            Equals(name, "BZR_DISABLE_LOBBY_BAN_BUTTON"))
+        {
+            return TryReadMappedBool(mainIni, "Network", "LobbyBanButton", true, out);
+        }
+        if (Equals(name, "OPENSHIM_ENABLE_LOBBY_BAN_BUTTON") ||
+            Equals(name, "BZR_ENABLE_LOBBY_BAN_BUTTON"))
+        {
+            return TryReadMappedBool(mainIni, "Network", "LobbyBanButton", false, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_BZRNET_REAUTH") || Equals(name, "BZR_DISABLE_BZRNET_REAUTH"))
             return TryReadMappedBool(mainIni, "Network", "ReauthOnNicknameChange", true, out);
         if (Equals(name, "OPENSHIM_ENABLE_BZRNET_REAUTH") || Equals(name, "BZR_ENABLE_BZRNET_REAUTH") ||
