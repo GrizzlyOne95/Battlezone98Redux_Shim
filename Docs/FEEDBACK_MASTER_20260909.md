@@ -2,6 +2,23 @@
 
 This document consolidates the current live-playtest, UX, Campaign Reimagined, ExtraUtilities, and OpenShim feedback captured during the September 9 review pass. The OpenShim repository is the master tracking location even where implementation ownership belongs to Campaign Reimagined or ExtraUtilities.
 
+## Implementation update — 2026-09-09
+
+- OpenShim implementation is in #153: contextual value-action help, compact
+  runtime/asset status, an explicit restart note, and live player-headlight
+  brightness.
+- Campaign implementation is in
+  [Campaign Reimagined #57](https://github.com/GrizzlyOne95/Battlezone98Redux_CampaignReimagined/pull/57):
+  hotkey and settings-ownership cleanup, the eight-page PDA structure, named
+  semantic themes, staged Mission 02B fighters, and mission-specific turret
+  reaction tuning.
+- EXU requires no code change for the hotkey item. Its `GetGameKey` API only
+  reports key state; the interfering bindings were CR polling logic and were
+  removed in Campaign Reimagined #57.
+- Static validators and builds are complete on both implementation branches.
+  Runtime/playtest items remain open where called out in section 8 and in the
+  implementation PR descriptions.
+
 ## Status legend
 
 - **ACTION** — implementation work is expected.
