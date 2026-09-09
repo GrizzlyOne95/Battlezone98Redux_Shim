@@ -6058,9 +6058,25 @@ namespace BZROpenShim
         // menu is up, not once at construction. Only the flag is touched here --
         // re-running the text half would push "" through the label hooks every
         // frame and churn the text memory Back restores from.
+        static bool IsCareerUiTitleScreenLive()
+        {
+            void* const mainScreen = ReadMainScreenSingleton();
+            if (!mainScreen || !g_CareerUiOverlay)
+                return false;
+            return MainScreenViewNameMatches(mainScreen, "Top Screen") &&
+                   MainScreenViewNameMatches(g_CareerUiOverlay, "MainScreen_Overlay");
+        }
+
         static void ReassertCareerUiHiddenState()
         {
             if (g_CareerUiPageActive || !g_CareerUiPlate)
+                return;
+            // SetTooltip is a process-wide hook. After Click_MultiPlayer the
+            // shell still writes tooltips, and re-hiding career widgets then
+            // walks a plate whose Ogre element is already gone -- SetActive
+            // calls through nullptr (eip=0 at 0x007D3344). Only re-assert
+            // while the title screen is still the live singleton.
+            if (!IsCareerUiTitleScreenLive())
                 return;
 
             SetInputBindingUiViewActive(g_CareerUiPlate, false);
@@ -6741,8 +6757,15 @@ namespace BZROpenShim
         uint8_t out = value;
         if (out && !g_CareerUiPageActive && IsCareerUiPageWidget(thisPtr))
             out = 0;
-        if (g_CareerUiSetActiveOriginal)
+        if (!g_CareerUiSetActiveOriginal || !thisPtr)
+            return;
+        __try
+        {
             g_CareerUiSetActiveOriginal(thisPtr, out);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
     }
 
     // Both hooks record the incoming string and then, if the page is up and
