@@ -543,10 +543,24 @@ void __declspec(naked) __cdecl Trampoline_HopFix3()
 
 // -----------------------------------------------------------------------
 // Map List Fix Support 1/3
-// Site: 0x00799774
-// Purpose: restore the scroll position across a manual map-list refresh.
-// The helper consumes the saved row delta when possible; otherwise we fall
-// back to the original 0x007A3BD0 call using the outer frame context at [ebp].
+// Site: 0x00799774 inside FUN_00799770
+//
+// Stock is a thiscall wrapper:
+//   mov [ebp-4], ecx          ; list widget
+//   mov eax, [ebp+8]          ; signed wheel/key delta
+//   push eax
+//   mov ecx, [ebp-4]
+//   call FUN_007a3bd0         ; thiscall (ecx=list, stack=delta)
+//   return 1
+//
+// FUN_007a3bd0 steps the list by 120-unit notches via ScrollUp 0x007CB500
+// / ScrollDown 0x007CB540, both thiscalls that read [this+0x150].
+//
+// The previous reconstruction called ScrollUpdateHelper after overwriting
+// [ebp-4] with the delta, then invoked ScrollUp as a cdecl with leftover
+// ecx. That first-chance AV'd (esi=0) on every wheel tick and the fallback
+// used [[ebp]+0x1C8] (a stack frame, not the widget). Replay stock.
+// Hop-Fix 1/2/3 still save/restore the selection across list rebuilds.
 // -----------------------------------------------------------------------
 void __declspec(naked) __cdecl Trampoline_MapListFixSupport1()
 {
@@ -568,19 +582,8 @@ void __declspec(naked) __cdecl Trampoline_MapListFixSupport1()
         add  esp, 8
         popad
 
-        // Manual refresh does not appear to flow through HopFix1 on Steam, so
-        // capture the current selection/scroll state explicitly here.
         pushad
-        push ecx
-        call SaveMapListSelection
-        push dword ptr [esp]
-        call CaptureScrollStateFromContext
-        add  esp, 4
-        pop  ecx
-        popad
-
-        pushad
-        push -1
+        push 1
         push dword ptr [ebp + 8]
         push ecx
         push ebp
@@ -591,29 +594,10 @@ void __declspec(naked) __cdecl Trampoline_MapListFixSupport1()
 
         mov  [ebp - 4], ecx
         mov  eax, [ebp + 8]
-        mov  [ebp - 4], eax
         push eax
         mov  ecx, [ebp - 4]
-        call ScrollUpdateHelper
-        test eax, eax
-        jne  support1_handled
-
-        pushad
-        push eax
-        push dword ptr [ebp + 8]
-        push dword ptr [ebp - 4]
-        push ebp
-        push kRefreshSupportFallback
-        call TraceManualRefreshSupport
-        add  esp, 20
-        popad
-
-        mov  ecx, [ebp]
-        mov  ecx, [ecx + 0x1C8]
         call [g_BZRFn_MapListFixSupport1]
-        jmp  support1_done
 
-    support1_handled:
         pushad
         push eax
         push dword ptr [ebp + 8]
@@ -624,7 +608,6 @@ void __declspec(naked) __cdecl Trampoline_MapListFixSupport1()
         add  esp, 20
         popad
 
-    support1_done:
         jmp  [g_RetAddr_MapListFixSupport1]
     }
 }
