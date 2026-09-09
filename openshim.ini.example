@@ -1495,6 +1495,11 @@ HeadlightColor = White
 ; Invalid/absent values fall back to Stock.
 HeadlightBeam = Wide
 
+; Player-craft headlight intensity multiplier. Applies to the emitted Ogre
+; light and all player-headlight color/beam modes. Manual values are clamped
+; to 0.25..2.00; the native Settings page offers 50%..150% presets.
+HeadlightBrightness = 1.00
+
 ; Flashlight on the player's own pilot while on foot.
 ;
 ; This is not a stock light being re-coloured. Stock BZR only builds a

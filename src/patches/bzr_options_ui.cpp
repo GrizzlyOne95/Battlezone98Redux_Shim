@@ -2804,6 +2804,10 @@ namespace BZROpenShim
             "Cyan", "Magenta", "Orange", "Purple", "Teal", "Rainbow"
         };
         static const char* const kShimSettingsHeadlightBeamValues[] = { "Stock", "Focused", "Wide" };
+        static const char* const kShimSettingsHeadlightBrightnessValues[] =
+            { "0.50", "0.75", "1.00", "1.25", "1.50" };
+        static const char* const kShimSettingsHeadlightBrightnessLabels[] =
+            { "50%", "75%", "100%", "125%", "150%" };
         static const char* const kShimSettingsNetRouteValues[] = { "Stock", "Direct", "Relay" };
         static const char* const kShimSettingsGovernorTuningValues[] = { "OpenShim", "Stock" };
         static const char* const kShimSettingsNetRouteLabels[] = { "Stock", "Prefer Direct", "Force Relay" };
@@ -3027,6 +3031,10 @@ namespace BZROpenShim
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::Headlights,
               "Headlight on your vehicle. Single player only." },
+            { "Headlight Brightness", "SinglePlayer", "HeadlightBrightness", nullptr, 0,
+              kShimSettingsHeadlightBrightnessValues, kShimSettingsHeadlightBrightnessLabels, 5, 2,
+              ShimSettingApplyGroup::Headlights,
+              "Player-vehicle headlight intensity relative to stock. Applies live; single player only." },
             { "AI Headlights", "SinglePlayer", "OtherHeadlights", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
               ShimSettingApplyGroup::Headlights,
@@ -3335,17 +3343,16 @@ namespace BZROpenShim
                                              layout.headerTextWidth);
             if (g_ShimSettingsUiStatusText.empty())
             {
-                const auto caps = Assets::GetAssetCapabilities();
                 std::string runtimeStatus;
-                // Build concise runtime line: version + distribution + asset status
+                // Keep capability detail in the dedicated footer rather than
+                // repeating it in the runtime line.
                 const uint32_t shimVer = GetShimVersion();
                 const BZROpenShim::BzrDistribution dist = BZROpenShim::GetBzrDistribution();
                 const char* distName = (dist == BZROpenShim::BzrDistribution::Steam) ? "Steam"
                                      : (dist == BZROpenShim::BzrDistribution::GOG) ? "GOG"
                                                                                     : "Unknown";
-                runtimeStatus = "Runtime: Active  Version: " + std::to_string(shimVer) +
-                                "  Game: " + distName + " 2.2.301  " +
-                                Assets::FormatAssetStatusForUi(caps);
+                runtimeStatus = "Runtime: Active  OpenShim: " + std::to_string(shimVer) +
+                                "  Game: " + distName + " 2.2.301";
                 SetInputBindingUiWrappedLabelText(g_ShimSettingsUiStatusLabel,
                                                   g_ShimSettingsUiStatusDetailLabel,
                                                   runtimeStatus.c_str(),
@@ -3389,16 +3396,16 @@ namespace BZROpenShim
                     if (!caps.problem.empty() && caps.problem.find(v) == std::string::npos)
                         footerLine2 += " " + caps.problem;
                 }
-                else if (!caps.destructionChunks || !caps.enhancedResources || caps.terrainHd)
+                else if (!caps.destructionChunks || !caps.enhancedResources || !caps.terrainHd)
                 {
                     std::string detail = Assets::FormatAssetCapabilitiesDetail(caps);
                     if (!detail.empty() && detail != "Asset-dependent features are unavailable.")
                         footerLine2 = detail;
                     else
-                        footerLine2 = "Click a value to cycle it. * = after restart. (Some asset groups unavailable)";
+                        footerLine2 = "Click a value to cycle it. * Takes effect after restarting Battlezone.";
                 }
                 else
-                    footerLine2 = "Click a value to cycle it. Changes never apply in multiplayer. * = after restart.";
+                    footerLine2 = "Click a value to cycle it. * Takes effect after restarting Battlezone.";
                 // Use the two footer labels as two physical lines.
                 SetInputBindingUiLabelTextFitted(g_ShimSettingsUiFooterLabel,
                                                  footerLine1.c_str(),
@@ -3779,7 +3786,7 @@ namespace BZROpenShim
         // row behind the cursor. Resolve the row actually under the cursor by
         // reversing the UI transform: the 1440x1080 design space is uniformly
         // scaled by clientHeight/1080 and centered horizontally.
-        static bool TryResolveHoveredShimSettingsSlot(size_t* outSlot)
+        static bool TryResolveHoveredShimSettingsSlot(size_t* outSlot, bool* outValueCell)
         {
             HWND window = GetForegroundWindow();
             if (!window || !outSlot)
@@ -3832,6 +3839,11 @@ namespace BZROpenShim
                 return false;
 
             *outSlot = column * kShimSettingsUiRowsPerColumn + row;
+            if (outValueCell)
+            {
+                const float baseX = column == 0 ? layout.rowLeftX : layout.rowRightX;
+                *outValueCell = logicalX >= baseX + layout.rowValueOffsetX;
+            }
             return true;
         }
 
@@ -3845,8 +3857,15 @@ namespace BZROpenShim
                 return;
 
             size_t slot = rowIndex;
-            if (!TryResolveHoveredShimSettingsSlot(&slot))
-                slot = rowIndex; // cursor resolve unavailable: thunk index
+            bool overValueCell = true;
+            if (!TryResolveHoveredShimSettingsSlot(&slot, &overValueCell))
+            {
+                // The callback also fires as the cursor leaves a value button.
+                // Restore the durable page/click status instead of leaving the
+                // last hover help stranded on screen.
+                RefreshShimSettingsUiControls();
+                return;
+            }
 
             const size_t settingIndex = g_ShimSettingsUiPageStart + slot;
             if (settingIndex >= kShimSettingsRegistryCount)
@@ -3896,8 +3915,26 @@ namespace BZROpenShim
                     return;
                 }
             }
-            const char* description = setting.description;
-            if (description && *description)
+            std::string helpText;
+            if (overValueCell && !IsShimSettingActionRow(setting) && setting.valueCount > 0)
+            {
+                const size_t current = GetShimSettingCurrentIndex(setting);
+                const size_t next = (current + 1) % setting.valueCount;
+                helpText = "Click to change ";
+                helpText += setting.label;
+                helpText += " from ";
+                helpText += setting.valueLabels[current];
+                helpText += " to ";
+                helpText += setting.valueLabels[next];
+                helpText += ".";
+                if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
+                    helpText += " Takes effect after restarting Battlezone.";
+            }
+            else if (setting.description)
+            {
+                helpText = setting.description;
+            }
+            if (!helpText.empty())
             {
                 // Not a hand-picked width: the hover path used to fit to a flat
                 // 800 px on one line, which cut every description that the
@@ -3906,7 +3943,7 @@ namespace BZROpenShim
                     BuildUiOptionsPageLayout(kShimSettingsUiRowsPerColumn);
                 SetInputBindingUiWrappedLabelText(g_ShimSettingsUiStatusLabel,
                                                   g_ShimSettingsUiStatusDetailLabel,
-                                                  description,
+                                                  helpText.c_str(),
                                                   layout.headerTextWidth);
             }
         }
