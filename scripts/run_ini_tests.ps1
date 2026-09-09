@@ -156,6 +156,11 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # any session exists, so it carries no mixed-client divergence.
     "Fixes/ExplainMultiplayerNotReady",
 
+    # Nickname/route widgets sit in the empty left column of the waiting
+    # room, not on BZP's faction picker. Ban/Flags stay off for that reason;
+    # the name field is the one lobby chrome that is allowed on.
+    "Network/LobbyReadouts",
+
     # Straight bug/stability fixes with no material mixed-client divergence.
     # MapRefreshFixes includes the multiplayer map-list refresh/jump and
     # selection-preservation repair and is deliberately part of the ON baseline.
@@ -272,7 +277,7 @@ $shippingPolicyChecks = @{
     "Network/NetImprovements" = "1"
     "Network/GovernorTuning" = "OpenShim"
     "Network/ReauthOnNicknameChange" = "0"
-    "Network/LobbyReadouts" = "0"
+    "Network/LobbyReadouts" = "1"
     "Network/LobbyBanButton" = "0"
     "Career/StatsTracking" = "0"
     "SinglePlayer/JumpSnipeCrouch" = "1"

@@ -39946,18 +39946,18 @@ namespace BZROpenShim
         // Kill switch for the injected lobby readouts. They are the newest
         // children on that screen and the lobby crashes on teardown if any child
         // is bad, so there has to be a way to turn them off without a rebuild.
-        //   openshim.ini  [Network] LobbyReadouts = 0
+        //   openshim.ini  [Network] LobbyReadouts = 1
         //   environment   OPENSHIM_DISABLE_LOBBY_READOUTS=1
-        // Default OFF: a missing key must not grow widgets onto BZP/BZP-T's
-        // faction-only waiting room.
+        // Nickname/route sit in the empty left column. Missing key is ON so
+        // the name field stays available; Ban/Flags remain separately gated.
         static bool ShouldEnableLobbyReadouts()
         {
             if (EnvFlagEnabled("OPENSHIM_DISABLE_LOBBY_READOUTS"))
                 return false;
-            bool enabled = false;
+            bool enabled = true;
             if (TryGetUserConfigBool(kUserConfigNetworkSection, "LobbyReadouts", enabled))
                 return enabled;
-            return false;
+            return true;
         }
 
         // Ban User button + label on the waiting-room parent. Independent of

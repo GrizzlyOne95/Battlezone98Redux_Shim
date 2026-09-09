@@ -3113,10 +3113,10 @@ namespace BZROpenShim
               "Ban User button on the multiplayer waiting room. Off leaves BZP/BZP-T's "
               "faction picker alone; /ban still works. Restart required." },
             { "Lobby Readouts", "Network", "LobbyReadouts", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::RestartRequired,
-              "Nickname field and route readout on the waiting room. Off for BZP/BZP-T. "
-              "Restart required." },
+              "Nickname field and route readout in the waiting-room left column. "
+              "Does not cover BZP's faction picker. Restart required." },
             // defaultIndex 0 selects "1", which is what an absent key does: the
             // native tracker has always run, and turning the row off must be a
             // deliberate choice rather than the effect of a missing ini key.
