@@ -196,8 +196,8 @@ namespace BZROpenShim
     uint32_t __fastcall MapFilters6Rel32(void* thisPtr, void* edx);
     uint32_t __cdecl ChunkRenderResolveHook(void* objectPtr, uint32_t variant);
     void* __cdecl ProducerBuildMenuCallHook(void* producerPtr, int slot, int flags);
-    void __cdecl MapFilterOnScrollUp();
-    void __cdecl MapFilterOnScrollDown();
+    void __fastcall MapFilterOnScrollUp(void* thisPtr);
+    void __fastcall MapFilterOnScrollDown(void* thisPtr);
     void __cdecl MapFilters1Rebuild(void* listPtr);
     void __cdecl MapFilters2Filter(void* listPtr, BzrString* filter);
     void __cdecl ApplyWeaponMaskCarrierBiasForCraft(void* craft);
