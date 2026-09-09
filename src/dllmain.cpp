@@ -33,6 +33,7 @@
 #include "mp_faction_restrict.h"
 #include "mp_ready_diagnostic.h"
 #include "BZROpenShim.h"
+#include "bzloader_bootstrap.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -48,6 +49,10 @@ static unsigned __stdcall PatchThreadProc(void*)
 {
     BZROpenShim::UiPerf::Initialize();
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread started");
+    // This is the first existing OpenShim boundary known to be outside the
+    // loader lock. BZLoader performs all DLL discovery and plugin lifecycle
+    // work here; DllMain never loads bzloader.dll or a plugin.
+    BZROpenShim::InitializeBZLoader();
     // Start renderer diagnostics/features immediately so their workers can
     // observe Ogre/D3D11 module creation before the renderer creates devices,
     // swapchains, entities, or begins normal animation submission.
@@ -248,6 +253,7 @@ namespace BZROpenShim
         // it chains through, then let the existing optimizer flush its logs.
         BZROpenShim::ShutdownBzrNetInstrumentation();
         BZROpenShim::ShutdownNetworkOptimizer();
+        BZROpenShim::ShutdownBZLoader();
         FreeRealWinmm();
         BZROpenShim::ShutdownShimLogger();
     }

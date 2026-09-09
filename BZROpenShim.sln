@@ -7,6 +7,16 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BZROpenShim", "BZROpenShim.
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Plugin_OpenShimOgreProbe", "experiments\ogre_plugin_probe\Plugin_OpenShimOgreProbe.vcxproj", "{7E581C75-7D29-4F52-A94F-8AC43A0EEA12}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BZLoader", "BZLoader.vcxproj", "{73BC83C6-C400-4D4D-9E8D-381E594A7116}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Plugin_BZLoaderTest", "Plugin_BZLoaderTest.vcxproj", "{B86AE723-BE19-4C0E-B7A3-FAE86DBF7BE2}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BZLoaderHostTest", "BZLoaderHostTest.vcxproj", "{9649D3EF-8C24-4A67-8079-05DD51CC482B}"
+	ProjectSection(ProjectDependencies) = postProject
+		{73BC83C6-C400-4D4D-9E8D-381E594A7116} = {73BC83C6-C400-4D4D-9E8D-381E594A7116}
+		{B86AE723-BE19-4C0E-B7A3-FAE86DBF7BE2} = {B86AE723-BE19-4C0E-B7A3-FAE86DBF7BE2}
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -19,6 +29,18 @@ Global
 		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|Win32.Build.0 = Release|Win32
 		{7E581C75-7D29-4F52-A94F-8AC43A0EEA12}.Debug|Win32.ActiveCfg = Debug|Win32
 		{7E581C75-7D29-4F52-A94F-8AC43A0EEA12}.Release|Win32.ActiveCfg = Release|Win32
+		{73BC83C6-C400-4D4D-9E8D-381E594A7116}.Debug|Win32.ActiveCfg = Debug|Win32
+		{73BC83C6-C400-4D4D-9E8D-381E594A7116}.Debug|Win32.Build.0 = Debug|Win32
+		{73BC83C6-C400-4D4D-9E8D-381E594A7116}.Release|Win32.ActiveCfg = Release|Win32
+		{73BC83C6-C400-4D4D-9E8D-381E594A7116}.Release|Win32.Build.0 = Release|Win32
+		{B86AE723-BE19-4C0E-B7A3-FAE86DBF7BE2}.Debug|Win32.ActiveCfg = Debug|Win32
+		{B86AE723-BE19-4C0E-B7A3-FAE86DBF7BE2}.Debug|Win32.Build.0 = Debug|Win32
+		{B86AE723-BE19-4C0E-B7A3-FAE86DBF7BE2}.Release|Win32.ActiveCfg = Release|Win32
+		{B86AE723-BE19-4C0E-B7A3-FAE86DBF7BE2}.Release|Win32.Build.0 = Release|Win32
+		{9649D3EF-8C24-4A67-8079-05DD51CC482B}.Debug|Win32.ActiveCfg = Debug|Win32
+		{9649D3EF-8C24-4A67-8079-05DD51CC482B}.Debug|Win32.Build.0 = Debug|Win32
+		{9649D3EF-8C24-4A67-8079-05DD51CC482B}.Release|Win32.ActiveCfg = Release|Win32
+		{9649D3EF-8C24-4A67-8079-05DD51CC482B}.Release|Win32.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
