@@ -328,14 +328,16 @@ namespace BZROpenShim
     }
 
     // [Fixes] VehicleListModScoping. Forces mod-scoped asset resolution for the
-    // multiplayer vehicle list. Default on, but it is the one always-on fix that
-    // changes which assets a client resolves, so a modded lobby mixing shim and
-    // stock clients needs to be able to turn it off and compare.
+    // multiplayer vehicle list. Default off: it reloads that list and replaces
+    // BZP/BZP-T's faction-only waiting-room .vxt with stock ships. A modded
+    // lobby that needs the list to follow the selected workshop item can turn
+    // it on to compare.
     static bool ShouldEnableVehicleListModScoping() {
         static int s_cached = -1;
         if (s_cached >= 0) return s_cached != 0;
         if (EnvFlagEnabledByName("OPENSHIM_DISABLE_VEHICLE_LIST_MOD_SCOPING") || EnvFlagEnabledByName("BZR_DISABLE_VEHICLE_LIST_MOD_SCOPING")) { s_cached = 0; return false; }
-        s_cached = 1; return true;
+        if (EnvFlagEnabledByName("OPENSHIM_ENABLE_VEHICLE_LIST_MOD_SCOPING") || EnvFlagEnabledByName("BZR_ENABLE_VEHICLE_LIST_MOD_SCOPING")) { s_cached = 1; return true; }
+        s_cached = 0; return false;
     }
 
     static bool IsMapRefreshPatchName(const char* name) {
