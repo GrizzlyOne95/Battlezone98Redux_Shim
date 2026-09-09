@@ -257,6 +257,11 @@ namespace
         {
             return TryReadMappedBool(mainIni, "Fixes", "VehicleListModScoping", true, out);
         }
+        if (Equals(name, "OPENSHIM_ENABLE_VEHICLE_LIST_MOD_SCOPING") ||
+            Equals(name, "BZR_ENABLE_VEHICLE_LIST_MOD_SCOPING"))
+        {
+            return TryReadMappedBool(mainIni, "Fixes", "VehicleListModScoping", false, out);
+        }
         if (Equals(name, "OPENSHIM_ENABLE_OGRE_MATERIAL_COLLISION_GUARD") ||
             Equals(name, "BZR_ENABLE_OGRE_MATERIAL_COLLISION_GUARD"))
         {

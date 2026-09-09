@@ -333,9 +333,13 @@ ProducerScriptPredicates = 1
 
 ; Force mod-scoped asset resolution for the multiplayer vehicle list.
 ; NOTE: this is the fix most likely to matter in a modded lobby, because it
-; changes which assets a client resolves for multiplayer vehicles. If a modded
-; match shows different craft to different players, test with this off.
-; Accepted: boolean. Default: ON. Restart required after changing.
+; changes which assets a client resolves for multiplayer vehicles. It also
+; reloads that list and will replace BZP/BZP-T's faction-only waiting-room
+; .vxt (NSDF/CCA/BDOG/CRA/Observer) with stock ships. The player preset
+; therefore ships it OFF. Turn it on only when a workshop map needs the
+; vehicle list to follow the selected mod.
+; Accepted: boolean. Default: OFF in the player preset (ON here as the
+; exhaustive reference). Restart required after changing.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_VEHICLE_LIST_MOD_SCOPING
 VehicleListModScoping = 1
 
