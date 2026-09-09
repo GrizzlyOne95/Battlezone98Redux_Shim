@@ -236,6 +236,7 @@ $stockValueChecks = @{
     "Network/LobbyBzrnetIntegration" = "0"
     "SinglePlayer/HeadlightColor" = "Stock"
     "SinglePlayer/HeadlightBeam" = "Stock"
+    "SinglePlayer/HeadlightBrightness" = "1.00"
 }
 foreach ($entry in $stockValueChecks.GetEnumerator()) {
     if (-not $playerValues.ContainsKey($entry.Key) -or
