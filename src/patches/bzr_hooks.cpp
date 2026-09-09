@@ -149,7 +149,7 @@ namespace BZROpenShim
     using FnLoadScreenClearSelection = void(__cdecl*)(BzrString* text);
     using FnMapFilter6 = uint32_t(__thiscall*)(void* thisPtr);
     using FnChunkResolve = uint32_t(__cdecl*)(void* objectPtr, uint32_t variant);
-    using FnMapFilterScroll = void(__cdecl*)();
+    using FnMapFilterScroll = void(__thiscall*)(void* self);
     using FnGetLocalPlayerNetId = uint16_t(__cdecl*)();
     using FnNetPlayerSetData = void(__thiscall*)(void* thisPtr, uint32_t slot, uint8_t* data, uint32_t len);
     using FnNetPlayerSetFlagBuffer = void(__thiscall*)(void* thisPtr, const uint8_t* data, uint32_t len);
@@ -37151,28 +37151,32 @@ namespace BZROpenShim
         return resolved;
     }
 
-    void __cdecl MapFilterOnScrollUp()
+    void __fastcall MapFilterOnScrollUp(void* thisPtr)
     {
+        void* list = g_MapFilterListPtr ? g_MapFilterListPtr : thisPtr;
         if (EnvFlagEnabled("OPENSHIM_TRACE_MAP_REFRESH") ||
             EnvFlagEnabled("OPENSHIM_TRACE_STEAM_MAP_REFRESH"))
         {
-            Log(L"[MAPTRACE] MapFilterOnScrollUp list=0x%08X\n",
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_MapFilterListPtr)));
+            Log(L"[MAPTRACE] MapFilterOnScrollUp list=0x%08X this=0x%08X\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(list)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)));
         }
-        if (g_MapFilterListPtr && g_BzrFn_MapFilterScrollUp)
-            g_BzrFn_MapFilterScrollUp();
+        if (list && g_BzrFn_MapFilterScrollUp)
+            g_BzrFn_MapFilterScrollUp(list);
     }
 
-    void __cdecl MapFilterOnScrollDown()
+    void __fastcall MapFilterOnScrollDown(void* thisPtr)
     {
+        void* list = g_MapFilterListPtr ? g_MapFilterListPtr : thisPtr;
         if (EnvFlagEnabled("OPENSHIM_TRACE_MAP_REFRESH") ||
             EnvFlagEnabled("OPENSHIM_TRACE_STEAM_MAP_REFRESH"))
         {
-            Log(L"[MAPTRACE] MapFilterOnScrollDown list=0x%08X\n",
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_MapFilterListPtr)));
+            Log(L"[MAPTRACE] MapFilterOnScrollDown list=0x%08X this=0x%08X\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(list)),
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)));
         }
-        if (g_MapFilterListPtr && g_BzrFn_MapFilterScrollDown)
-            g_BzrFn_MapFilterScrollDown();
+        if (list && g_BzrFn_MapFilterScrollDown)
+            g_BzrFn_MapFilterScrollDown(list);
     }
 
     namespace
