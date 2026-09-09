@@ -583,6 +583,12 @@ namespace BZROpenShim
             return 0;
         }
 
+        if (!this_ptr)
+        {
+            Log(L"[WARN] ScrollUpdateHelper has no list widget this (delta=%d)\n", scroll_delta);
+            return 0;
+        }
+
         if (scroll_delta < 0)
         {
             int rows = ((-scroll_delta) - 1) / 120 + 1;
@@ -597,9 +603,15 @@ namespace BZROpenShim
             {
                 __try
                 {
-                    // Steam's UI scroll helpers behave like plain callbacks here;
-                    // forcing ECX causes an immediate fault in the manual-refresh path.
-                    fnUp();
+                    // ScrollUp (0x007CB500) is a thiscall; it reads [ecx+0x150].
+                    // Calling it as a cdecl leaves leftover ecx and first-chance
+                    // AV's (live 2026-09-08, esi=0).
+                    void* scrollThis = this_ptr;
+                    __asm
+                    {
+                        mov ecx, scrollThis
+                        call fnUp
+                    }
                     handled = true;
                 }
                 __except (EXCEPTION_EXECUTE_HANDLER)
@@ -624,7 +636,12 @@ namespace BZROpenShim
             {
                 __try
                 {
-                    fnDown();
+                    void* scrollThis = this_ptr;
+                    __asm
+                    {
+                        mov ecx, scrollThis
+                        call fnDown
+                    }
                     handled = true;
                 }
                 __except (EXCEPTION_EXECUTE_HANDLER)
