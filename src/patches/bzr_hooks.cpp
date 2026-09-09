@@ -533,7 +533,7 @@ namespace BZROpenShim
     {
         static bool IsWidgetLiveChildOfParent(void* parent, void* widget);
         static void InstallNicknameTextEntryInputHookIfPossible();
-        static void ShowNicknameApplyConfirmation(void* entry);
+        static void ShowNicknameApplyConfirmation(void* entry, BzrNetNicknameResult result);
         static void SyncNicknameEntriesFromAuthoritativeValue(const char* value);
 
         constexpr DWORD kDbgPrintExceptionAnsi = 0x40010006u;
@@ -2375,6 +2375,8 @@ namespace BZROpenShim
         static void* g_ActiveNicknameParent = nullptr;
         static void* g_NicknameEnterDispatchEntry = nullptr;
         static void* g_PendingNicknameConfirmationEntry = nullptr;
+        static BzrNetNicknameResult g_PendingNicknameConfirmationResult =
+            BzrNetNicknameResult::StoredForNextConnection;
         static bool g_ReplaceNicknameOnNextInput = false;
         static volatile long g_NicknameInputTraceBudget = 16;
         static bool g_CareerStatsMpHookInstalled = false;
@@ -20699,21 +20701,20 @@ namespace BZROpenShim
             return false;
         }
 
-        // Off by default: a second Authorization on an already-authorised
-        // socket is the most invasive of the options and nothing shows the
-        // protocol's state machine allows it, so it stays behind
-        // openshim.ini [Network] ReauthOnNicknameChange = 1 while the player
-        // data route is being measured. OPENSHIM_DISABLE_BZRNET_REAUTH=1
-        // overrides the file back to off.
+        // Default on: the /nickname= buffer is only read while building
+        // Authorization, so a live lounge/lobby rename has to queue a second
+        // SendAuthorization on the existing WebSocket. Set
+        // [Network] ReauthOnNicknameChange = 0 or OPENSHIM_DISABLE_BZRNET_REAUTH=1
+        // to persist only. In-match (netId != 0) never re-auths.
         static bool ShouldReauthOnNicknameChange()
         {
             if (EnvFlagEnabled("OPENSHIM_DISABLE_BZRNET_REAUTH"))
                 return false;
-            bool enabled = false;
+            bool enabled = true;
             if (TryGetUserConfigBool(
                     kUserConfigNetworkSection, "ReauthOnNicknameChange", enabled))
                 return enabled;
-            return false;
+            return true;
         }
 
         static bool ForceBzrNetReauth(const char* source)
@@ -21125,22 +21126,20 @@ namespace BZROpenShim
             // same stable identity retained its old name. Therefore the default
             // product path does not send this ineffective message.
             //
-            // Force branch: when [Network] ReauthOnNicknameChange=1 and a live
-            // lounge/lobby exists (not in-match), queue a second Authorization
-            // on the existing WebSocket via SendAuthorization 0x006C6DF0.
-            // This re-uses the current stable identity with the new
-            // 0x009453E0 buffer. In-match re-auth remains unavailable by design.
+            // Lounge/lobby (not in-match): queue a second Authorization on the
+            // existing WebSocket via SendAuthorization 0x006C6DF0 so the new
+            // 0x009453E0 buffer is what peers see. In-match re-auth stays off.
             if (lobby || ReadLocalPlayerNetIdValue() != 0)
             {
                 if (lobby && lobbyValid && ReadLocalPlayerNetIdValue() == 0 &&
                     ShouldReauthOnNicknameChange())
                 {
                     Log(L"[BZRNET] NicknameNativeSendAttempt backend=%hs session=%hs stable=%hs "
-                        L"attempted=yes boundary=0x006C6DF0 reason=force-reauth-experimental source=%hs\n",
+                        L"attempted=yes boundary=0x006C6DF0 reason=lounge-reauth source=%hs\n",
                         backend, sessionState, stableIdentity.c_str(), operationSource);
                     const bool reauthQueued = ForceBzrNetReauth(operationSource);
                     Log(L"[BZRNET] NicknameNativeSendCompleted backend=%hs session=%hs stable=%hs "
-                        L"entered=%hs completed=%hs result=%hs reason=force-reauth-experimental\n",
+                        L"entered=%hs completed=%hs result=%hs reason=lounge-reauth\n",
                         backend, sessionState, stableIdentity.c_str(),
                         reauthQueued ? "yes" : "no",
                         reauthQueued ? "yes" : "no",
@@ -30998,7 +30997,8 @@ namespace BZROpenShim
                     if (g_PendingNicknameConfirmationEntry == entry)
                     {
                         g_PendingNicknameConfirmationEntry = nullptr;
-                        ShowNicknameApplyConfirmation(entry);
+                        ShowNicknameApplyConfirmation(
+                            entry, g_PendingNicknameConfirmationResult);
                     }
                 }
                 return result;
@@ -39025,9 +39025,9 @@ namespace BZROpenShim
             SyncNicknameEntriesFromAuthoritativeValue(requested.c_str());
             const char* outcome = "saved for the next BZRNet connection";
             if (result == BzrNetNicknameResult::ReauthQueued)
-                outcome = "queued re-auth; new name will appear to peers shortly (experimental)";
+                outcome = "queued lounge re-auth; peers should see the new name shortly";
             else if (result == BzrNetNicknameResult::LiveSendUnavailable)
-                outcome = "saved; live update unavailable until reconnect/rejoin (enable [Network] ReauthOnNicknameChange=1 for lounge re-auth)";
+                outcome = "saved; live update unavailable until reconnect/rejoin";
             else if (result == BzrNetNicknameResult::UnsupportedBuild)
                 outcome = "saved; live rename unsupported on this build";
             else if (result == BzrNetNicknameResult::NativeStateInvalid)
@@ -40083,10 +40083,9 @@ namespace BZROpenShim
             g_ReplaceNicknameOnNextInput = false;
         }
 
-        // The field is only 15 visible characters. Qualification proved that
-        // persistence updates the next Authorization input, not the connected
-        // remote identity, so never imply a live apply here.
-        static void ShowNicknameApplyConfirmation(void* entry)
+        // The field is only 15 visible characters. Lounge re-auth is the live
+        // path; in-match and no-session applies still wait for the next connect.
+        static void ShowNicknameApplyConfirmation(void* entry, BzrNetNicknameResult result)
         {
             if (!entry || !g_BzrFn_SetTooltip)
                 return;
@@ -40096,7 +40095,10 @@ namespace BZROpenShim
                 IsWidgetLiveChildOfParent(g_ClientUiParent, entry);
             if (!hostLive && !clientLive)
                 return;
-            g_BzrFn_SetTooltip(entry, "Saved-next conn");
+            const char* text = (result == BzrNetNicknameResult::ReauthQueued)
+                ? "Reconnecting..."
+                : "Saved-next conn";
+            g_BzrFn_SetTooltip(entry, text);
         }
 
         // Refresh callers reach this from the chat command and the external
@@ -40164,10 +40166,10 @@ namespace BZROpenShim
         // Commit through the same authoritative operation used by chat and the
         // exported bridge. This is the UI's natural Apply/Enter event, so no
         // SetPlayerData traffic is generated for intermediate keystrokes.
-        static bool ApplyNicknameFromEntry(void* entry, const char* source)
+        static BzrNetNicknameResult ApplyNicknameFromEntry(void* entry, const char* source)
         {
             if (!entry)
-                return false;
+                return BzrNetNicknameResult::InvalidNickname;
 
             char text[192] = {};
             if (!ReadEngineStdString(
@@ -40175,22 +40177,22 @@ namespace BZROpenShim
                     text, sizeof(text)))
             {
                 Log(L"[BZRNET] Nickname entry unreadable (source=%hs)\n", source);
-                return false;
+                return BzrNetNicknameResult::InvalidNickname;
             }
 
             const std::string trimmed = TrimAsciiCopy(text);
             if (trimmed.empty() || trimmed == kNicknamePlaceholder)
-                return false;
+                return BzrNetNicknameResult::InvalidNickname;
 
             const BzrNetNicknameResult result = ApplyBzrNetNicknameAuthoritative(
                 trimmed.c_str(), source);
             if (!IsAcceptedBzrNetNicknameResult(result))
-                return false;
+                return result;
 
             SyncNicknameEntriesFromAuthoritativeValue(trimmed.c_str());
             Log(L"[BZRNET] Nickname UI apply result=%hs (source=%hs)\n",
                 BzrNetNicknameResultName(result), source);
-            return true;
+            return result;
         }
 
         // Redux's multiplayer panels are pre-rendered artwork rather than a
@@ -40283,17 +40285,20 @@ namespace BZROpenShim
             const char* source)
         {
             const bool host = entry == g_NicknameEntryHost;
-            const bool applied = ApplyNicknameFromEntry(entry, source);
+            const BzrNetNicknameResult result = ApplyNicknameFromEntry(entry, source);
             EndNicknameEdit(entry);
             if (CachedLobbyWidgetIsLive(host, routeLabel, "nickname_complete"))
                 UpdateNetRouteLabel(CachedLobbyOwner(host), routeLabel);
-            if (!applied)
+            if (!IsAcceptedBzrNetNicknameResult(result))
                 return;
 
             if (g_NicknameEnterDispatchEntry == entry)
+            {
                 g_PendingNicknameConfirmationEntry = entry;
+                g_PendingNicknameConfirmationResult = result;
+            }
             else
-                ShowNicknameApplyConfirmation(entry);
+                ShowNicknameApplyConfirmation(entry, result);
         }
 
         // A native cUI_TextEntry over the nickname buffer plus the route readout.
