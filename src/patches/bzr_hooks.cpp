@@ -20987,6 +20987,89 @@ namespace BZROpenShim
             return false;
         }
 
+        static bool SendOneBzrNetPlayerDataKey(FnBzrNetLobbySetPlayerData sender,
+                                               void* lobby,
+                                               const BzrNetNativeIdentity* identity,
+                                               const char* keyText,
+                                               const char* valueText)
+        {
+            BzrString key = {};
+            BzrString value = {};
+            bool sent = false;
+            if (TryConstructNativeBzrString(&key, keyText) &&
+                TryConstructNativeBzrString(&value, valueText))
+            {
+                sent = TrySendBzrNetNicknameNative(sender, lobby, identity, &key, &value);
+            }
+            DestroyNativeBzrStringNoThrow(&value);
+            DestroyNativeBzrStringNoThrow(&key);
+            return sent;
+        }
+
+        // Slot 7 sends inline on the calling thread (0x0074BFFB). Other BZRNet
+        // clients write name and playerName together as the identity pair.
+        static bool SendBzrNetNicknamePlayerData(void* lobby, const char* nickname)
+        {
+            auto sender = ResolveBzrNetSetPlayerData(lobby);
+            auto getter = ResolveBzrNetGetLocalIdentity(lobby);
+            if (!sender || !getter)
+                return false;
+
+            BzrNetNativeIdentity identity = {};
+            if (!TryGetBzrNetLocalIdentity(getter, lobby, &identity))
+                return false;
+
+            const bool sentName = SendOneBzrNetPlayerDataKey(
+                sender, lobby, &identity, "name", nickname);
+            const bool sentPlayerName = SendOneBzrNetPlayerDataKey(
+                sender, lobby, &identity, "playerName", nickname);
+            Log(L"[BZRNET] SetPlayerData name=%hs playerName=%hs\n",
+                sentName ? "sent" : "failed",
+                sentPlayerName ? "sent" : "failed");
+            return sentName || sentPlayerName;
+        }
+
+        // FUN_006c6e60 builds and sends the Authorization JSON, reading
+        // 0x009453E0 for `name`. SendAuthorization (0x006C6DF0) only posts
+        // FUN_006c83f0 as a connect-completion handler, so an already-
+        // authorized socket never emits a second Authorization (live
+        // 2026-09-09: reauth-queued, next WS send was 43 bytes eight
+        // seconds later, not the 649-byte auth frame).
+        static bool TrySendAuthorizationBody(void* client)
+        {
+            constexpr uintptr_t kBuildAuthAddr = 0x006C6E60;
+            constexpr uintptr_t kFlagAAddr = 0x0260B098;
+            constexpr uintptr_t kFlagBAddr = 0x0260B0CC;
+            if (!client || !IsExecutableGameImageAddress(kBuildAuthAddr))
+                return false;
+
+            uint32_t flagA = 0;
+            uint32_t flagB = 0;
+            __try
+            {
+                flagA = *reinterpret_cast<uint32_t*>(kFlagAAddr);
+                flagB = *reinterpret_cast<uint32_t*>(kFlagBAddr);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+
+            uint8_t sendFlag = 1;
+            using FnBuildAuth = void(__thiscall*)(void* self, uint32_t, uint32_t, uint8_t*);
+            __try
+            {
+                reinterpret_cast<FnBuildAuth>(kBuildAuthAddr)(client, flagA, flagB, &sendFlag);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[BZRNET] Authorization body send faulted code=0x%08X\n",
+                    static_cast<uint32_t>(GetExceptionCode()));
+            }
+            return false;
+        }
+
         static bool IsValidBzrNetNickname(const std::string& value)
         {
             if (value.empty() || value.size() >= kBzrNetNicknameCapacity)
@@ -21119,44 +21202,42 @@ namespace BZROpenShim
                 return BzrNetNicknameResult::PersistenceFailed;
             }
 
-            // Static tracing identifies the lowest useful generic metadata
-            // boundary as BZRNetClient::SetPlayerData at 0x006C4F70. Live Steam
-            // qualification entered and completed that path twice with a ready
-            // transport, yet the service emitted no OnUserDataChanged and the
-            // same stable identity retained its old name. Therefore the default
-            // product path does not send this ineffective message.
-            //
-            // Lounge/lobby (not in-match): queue a second Authorization on the
-            // existing WebSocket via SendAuthorization 0x006C6DF0 so the new
-            // 0x009453E0 buffer is what peers see. In-match re-auth stays off.
+            // Lounge/lobby only. SendAuthorization 0x006C6DF0 does not emit a
+            // second Authorization on an already-authorized socket. Send the
+            // identity pair through lobby SetPlayerData (inline WS write) and
+            // also invoke the Authorization JSON builder 0x006C6E60 so the
+            // new 0x009453E0 `name` actually leaves the process.
             if (lobby || ReadLocalPlayerNetIdValue() != 0)
             {
                 if (lobby && lobbyValid && ReadLocalPlayerNetIdValue() == 0 &&
                     ShouldReauthOnNicknameChange())
                 {
                     Log(L"[BZRNET] NicknameNativeSendAttempt backend=%hs session=%hs stable=%hs "
-                        L"attempted=yes boundary=0x006C6DF0 reason=lounge-reauth source=%hs\n",
+                        L"attempted=yes boundary=0x0074BF60,0x006C6E60 reason=live-rename source=%hs\n",
                         backend, sessionState, stableIdentity.c_str(), operationSource);
-                    const bool reauthQueued = ForceBzrNetReauth(operationSource);
+
+                    const bool dataSent = SendBzrNetNicknamePlayerData(lobby, nickname.c_str());
+                    void* const client = ResolveBzrNetClientChecked();
+                    const bool authSent = TrySendAuthorizationBody(client);
+
                     Log(L"[BZRNET] NicknameNativeSendCompleted backend=%hs session=%hs stable=%hs "
-                        L"entered=%hs completed=%hs result=%hs reason=lounge-reauth\n",
+                        L"entered=yes completed=%hs result=%hs playerData=%hs authBody=%hs\n",
                         backend, sessionState, stableIdentity.c_str(),
-                        reauthQueued ? "yes" : "no",
-                        reauthQueued ? "yes" : "no",
-                        reauthQueued ? "reauth-queued" : "reauth-failed");
-                    if (reauthQueued)
+                        (dataSent || authSent) ? "yes" : "no",
+                        (dataSent || authSent) ? "native-send-completed" : "live-send-unavailable",
+                        dataSent ? "sent" : "failed",
+                        authSent ? "sent" : "failed");
+
+                    if (dataSent || authSent)
                     {
                         Log(L"[BZRNET] Nickname result=%hs (source=%hs)\n",
-                            BzrNetNicknameResultName(BzrNetNicknameResult::ReauthQueued),
+                            BzrNetNicknameResultName(BzrNetNicknameResult::NativeSendCompleted),
                             operationSource);
-                        return BzrNetNicknameResult::ReauthQueued;
+                        return BzrNetNicknameResult::NativeSendCompleted;
                     }
-                    Log(L"[BZRNET] NicknameNativeSendAttempt backend=%hs session=%hs stable=%hs "
-                        L"attempted=no boundary=0x006C6DF0 reason=reauth-failed-fallback\n",
-                        backend, sessionState, stableIdentity.c_str());
                 }
                 Log(L"[BZRNET] NicknameNativeSendAttempt backend=%hs session=%hs stable=%hs "
-                    L"attempted=no boundary=0x006C4F70 reason=runtime-name-mutation-unsupported\n",
+                    L"attempted=no boundary=0x0074BF60 reason=runtime-name-mutation-unsupported\n",
                     backend, sessionState, stableIdentity.c_str());
                 Log(L"[BZRNET] NicknameNativeSendCompleted backend=%hs session=%hs stable=%hs "
                     L"entered=no completed=no result=not-sent "
@@ -39024,7 +39105,9 @@ namespace BZROpenShim
 
             SyncNicknameEntriesFromAuthoritativeValue(requested.c_str());
             const char* outcome = "saved for the next BZRNet connection";
-            if (result == BzrNetNicknameResult::ReauthQueued)
+            if (result == BzrNetNicknameResult::NativeSendCompleted)
+                outcome = "sent to the server; peers should see the new name shortly";
+            else if (result == BzrNetNicknameResult::ReauthQueued)
                 outcome = "queued lounge re-auth; peers should see the new name shortly";
             else if (result == BzrNetNicknameResult::LiveSendUnavailable)
                 outcome = "saved; live update unavailable until reconnect/rejoin";
@@ -40095,9 +40178,11 @@ namespace BZROpenShim
                 IsWidgetLiveChildOfParent(g_ClientUiParent, entry);
             if (!hostLive && !clientLive)
                 return;
-            const char* text = (result == BzrNetNicknameResult::ReauthQueued)
-                ? "Reconnecting..."
-                : "Saved-next conn";
+            const char* text = (result == BzrNetNicknameResult::NativeSendCompleted)
+                ? "Sent to server"
+                : (result == BzrNetNicknameResult::ReauthQueued)
+                    ? "Reconnecting..."
+                    : "Saved-next conn";
             g_BzrFn_SetTooltip(entry, text);
         }
 
