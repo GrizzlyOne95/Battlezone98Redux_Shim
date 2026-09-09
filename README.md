@@ -497,18 +497,19 @@ MIT — see [LICENSE](LICENSE).
 
 ## Credits
 
-- **GrizzlyOne95** — primary implementation, reverse engineering, and maintenance
-- **Piercing** — multiplayer testing, network investigation, and technical collaboration
-- **Skippy-Agent** — Linux/Proton install path, CTest CI, and pasteable installers
+- **GrizzlyOne95** — primary implementation, reverse engineering, maintenance, design
+- **Piercing** — multiplayer testing, network investigation, technical collaboration, acting as partner developer
+- **Kingfurykiller** - multiplayer/singleplayer testing, bug squashing, feedback, technical assistance and collaboration
 - **VTrider** — technical assistance and collaboration
 - **Business Lawyer** — technical assistance and collaboration
 - **Janne** — early work investigating DLL shimming and hooking in Battlezone 98 Redux
+- **GoombaBZ** - technical assistance and collaboration, assistance with reverse engineering and bug issues compiling, assistance with DLL shimming
 
-  ### AI-Assisted Development
+### AI-Assisted Development
 
-OpenShim is developed with the assistance of AI coding tools for tasks such as code drafting, analysis, documentation, test construction, and navigating large reverse-engineering workloads.
+OpenShim is developed with the assistance of AI coding tools for tasks such as code drafting, analysis, documentation, test construction, and navigating large reverse-engineering workloads. Examples include Claude Fable (Fable cracked the final destruction chunks blockers) / Opus, and Codex GPT 5.5/5.6 Sol.
 
 AI output is treated as an implementation aid, not as authoritative reverse-engineering evidence. Native behavior, addresses, ABI assumptions, patch sites, and compatibility claims are verified against the actual game binaries, runtime traces, tests, or other reproducible evidence before being treated as established.
 
-All changes remain maintainer-directed and are reviewed, tested, and integrated through the same validation process regardless of how the initial code or analysis was produced.
+All changes remain maintainer-directed and are reviewed, tested, and integrated through the same validation process regardless of how the initial code or analysis was produced. Multiplayer testing is all performed by active community members. 
 
