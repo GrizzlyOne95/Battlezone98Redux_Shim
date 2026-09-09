@@ -168,6 +168,8 @@ namespace BZROpenShim
         LiveEngineToggle,   // plain runtime flags (hop-out alert, satellite
                             // visibility, sun flashbang) that re-read with no
                             // patch site or hook install behind them
+        ReadOnNextUse,      // saved now; the feature reads the key when its
+                            // next user action occurs
         RestartRequired,    // no live path; takes effect next launch
         // Action rows. These have no ini key: clicking runs something instead
         // of cycling a value, and the row's two "values" are the unarmed and

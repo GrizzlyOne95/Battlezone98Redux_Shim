@@ -3125,6 +3125,14 @@ namespace BZROpenShim
               ShimSettingApplyGroup::RestartRequired,
               "Nickname field and route readout in the waiting-room left column. "
               "Does not cover BZP's faction picker. Restart required." },
+            // Re-read on every nickname apply; no process restart is required
+            // for the next OK / /nickname to take the new value.
+            { "Live Nickname", "Network", "ReauthOnNicknameChange", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::ReadOnNextUse,
+              "Experimental: recycle the lounge BZRNet connection after a nickname "
+              "edit so stock reconnects and authorizes the new name. Expect a brief "
+              "lounge drop / possible Not Ready flicker. In-match remains persist-only." },
             // defaultIndex 0 selects "1", which is what an absent key does: the
             // native tracker has always run, and turning the row off must be a
             // deliberate choice rather than the effect of a missing ini key.
@@ -3715,6 +3723,8 @@ namespace BZROpenShim
                 setting.valueLabels[nextIndex];
             if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
                 g_ShimSettingsUiStatusText += "  (takes effect after restart)";
+            else if (setting.applyGroup == ShimSettingApplyGroup::ReadOnNextUse)
+                g_ShimSettingsUiStatusText += "  (takes effect on the next nickname apply)";
             else if (!liveApplyOk)
                 g_ShimSettingsUiStatusText += "  (saved; runtime apply failed - see openshim.log)";
             else
