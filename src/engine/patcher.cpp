@@ -412,8 +412,9 @@ namespace BZROpenShim
 
     // 1/4, 2/4 and 4/4 reload the starting-vehicle pool from mod-scoped
     // assets. That is what replaces BZP's faction-only .vxt with stock ships.
-    // 3/4 is a one-byte "always update the select control" and is required for
-    // the map-list wheel path (ScrollUp 0x007CB500) to move the visible rows.
+    // 3/4 is a one-byte "always update the select control" on the vehicle
+    // picker. The map-list wheel is a different thiscall (ScrollUp 0x007CB500)
+    // and does not use this byte.
     static bool IsVehicleListAssetScopingPatchName(const char* name) {
         return name && strstr(name, "Force Mod-Scoped Assets") != nullptr;
     }
