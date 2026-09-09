@@ -20618,29 +20618,13 @@ namespace BZROpenShim
             return false;
         }
 
-        // ---- forcing a BZRNet re-authorisation ----
-        //
-        // The service is told the player's name exactly once per connection, in
-        // the Authorization message, so a rename needs a fresh authorisation.
-        // Leaving the multiplayer screen is not enough: the websocket lives for
-        // the whole process, which is why only a restart used to work.
-        //
-        // The client's own connected-handler does this at 0x0075E06A:
-        //     client = *(void**)(x + 0x78);  client->SendAuthorization();
-        // SendAuthorization (0x006C6DF0) sends nothing itself. It binds the
-        // authorisation body (0x006C83F0) together with two flag bytes read
-        // from 0x0260B0CC / 0x0260B098 and posts it to the client's io context
-        // at +0xC18 -- so calling it only enqueues work on the network thread,
-        // which is what makes it callable from a widget callback at all.
-        constexpr uintptr_t kBzrNetSendAuthorizationAddr = 0x006C6DF0;
-        // Holds the ADDRESS of a shared_ptr; the client is its first dword.
-        // 0x007656BA copies that same shared_ptr into every new lobby at +0xC8,
-        // which is the cross-check below -- the client class has no RTTI, so
-        // there is no vftable to validate it against.
-        constexpr uintptr_t kBzrNetClientHolderAddr = 0x00945484;
+        // The service receives the nickname in Authorization. Recycling the
+        // control connection lets Redux's qualified stock reconnect path build
+        // and send that message; no private BZRNet send ABI is called here.
         constexpr uintptr_t kBzrNetLobbyVftable = 0x0089ADDC;
         constexpr uintptr_t kBzrNetGetLobbyAddr = 0x00764760;
         constexpr size_t kBzrNetLobbyClientOffset = 0xC8;
+        constexpr size_t kBzrNetNativeClientBackPointerOffset = 0xC38;
 
         // `mov eax,[0x00945470]; ret` -- the global the lobby is published to on
         // construction and zeroed on teardown. Guarded on the instruction.
@@ -20656,189 +20640,17 @@ namespace BZROpenShim
             return reinterpret_cast<void* (__cdecl*)()>(kBzrNetGetLobbyAddr)();
         }
 
-        // Only hand back a client that the live lobby agrees with. A lobby
-        // exists exactly while the multiplayer screens do, which is also the
-        // only time a re-authorisation is wanted.
-        static void* ResolveBzrNetClientChecked()
-        {
-            __try
-            {
-                void* const holder =
-                    *reinterpret_cast<void**>(kBzrNetClientHolderAddr);
-                if (!holder)
-                    return nullptr;
-                void* const client = *reinterpret_cast<void**>(holder);
-                if (!client)
-                    return nullptr;
-
-                void* const lobby = TryGetStockBzrNetLobby();
-                if (!lobby ||
-                    *reinterpret_cast<uintptr_t*>(lobby) != kBzrNetLobbyVftable)
-                    return nullptr;
-                if (*reinterpret_cast<void**>(
-                        static_cast<uint8_t*>(lobby) + kBzrNetLobbyClientOffset) != client)
-                    return nullptr;
-                return client;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-            }
-            return nullptr;
-        }
-
-        static bool TryCallBzrNetSendAuthorization(void* client)
-        {
-            __try
-            {
-                reinterpret_cast<void(__thiscall*)(void*)>(
-                    kBzrNetSendAuthorizationAddr)(client);
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                Log(L"[BZRNET] SendAuthorization faulted code=0x%08X\n",
-                    static_cast<uint32_t>(GetExceptionCode()));
-            }
-            return false;
-        }
-
-        // Default on: the /nickname= buffer is only read while building
-        // Authorization, so a live lounge/lobby rename has to queue a second
-        // SendAuthorization on the existing WebSocket. Set
-        // [Network] ReauthOnNicknameChange = 0 or OPENSHIM_DISABLE_BZRNET_REAUTH=1
-        // to persist only. In-match (netId != 0) never re-auths.
+        // Experimental and default off until a two-client observer test proves
+        // that the service publishes the new identity after stock reconnects.
+        // In-match (netId != 0) never recycles the control connection.
         static bool ShouldReauthOnNicknameChange()
         {
             if (EnvFlagEnabled("OPENSHIM_DISABLE_BZRNET_REAUTH"))
                 return false;
-            bool enabled = true;
+            bool enabled = false;
             if (TryGetUserConfigBool(
                     kUserConfigNetworkSection, "ReauthOnNicknameChange", enabled))
                 return enabled;
-            return true;
-        }
-
-        static bool ForceBzrNetReauth(const char* source)
-        {
-            // push ebp; mov ebp,esp; sub esp,0x14; mov [ebp-4],ecx;
-            // mov eax,[0x0260B0CC]
-            static constexpr uint8_t kExpectedBytes[] =
-            {
-                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x14, 0x89, 0x4D, 0xFC,
-                0xA1, 0xCC, 0xB0, 0x60, 0x02
-            };
-            static bool s_MismatchLogged = false;
-
-            if (!ExpectedBytesMatchAt(
-                    kBzrNetSendAuthorizationAddr, kExpectedBytes, sizeof(kExpectedBytes)))
-            {
-                if (!s_MismatchLogged)
-                {
-                    s_MismatchLogged = true;
-                    Log(L"[BZRNET] SendAuthorization byte guard failed at 0x%08X; "
-                        L"nickname still applies on the next connect\n",
-                        static_cast<uint32_t>(kBzrNetSendAuthorizationAddr));
-                }
-                return false;
-            }
-
-            void* const client = ResolveBzrNetClientChecked();
-            if (!client)
-            {
-                Log(L"[BZRNET] No live BZRNet client to re-authorise (source=%hs); "
-                    L"nickname applies on the next connect\n",
-                    source);
-                return false;
-            }
-
-            if (!TryCallBzrNetSendAuthorization(client))
-                return false;
-
-            Log(L"[BZRNET] Queued BZRNet re-authorisation (source=%hs client=0x%08X)\n",
-                source, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(client)));
-            return true;
-        }
-
-        // ---- live rename through native BZRNetLobby user data ----
-        //
-        // Redux already exposes the exact live operation we need through
-        // BZRNetLobby. Slot 14 returns the local player's opaque 16-byte BZRNet
-        // identity and slot 7 consumes that identity plus native Redux strings
-        // for key/value. Slot 7 updates the lobby's local user-data cache and
-        // sends the stock SetPlayerData request. Keep the identity opaque: the
-        // field meanings are intentionally not guessed here.
-        //
-        // These 2.2.301 addresses are validation anchors, not unconditional call
-        // targets. Every invocation is derived from the live lobby vtable and
-        // must agree with the expected executable address before we cross the ABI.
-        struct BzrNetNativeIdentity
-        {
-            uint8_t bytes[16];
-        };
-        static_assert(sizeof(BzrNetNativeIdentity) == 0x10,
-                      "Redux BZRNet identity size changed");
-        static_assert(sizeof(BzrString) == 0x18,
-                      "Redux native string ABI must remain 24 bytes");
-
-        using FnBzrNetLobbyGetLocalIdentity = void(__thiscall*)(
-            void* lobby, BzrNetNativeIdentity* outIdentity);
-        using FnBzrNetLobbySetPlayerData = void(__thiscall*)(
-            void* lobby,
-            const BzrNetNativeIdentity* identity,
-            const BzrString* key,
-            const BzrString* value);
-
-        constexpr uintptr_t kBzrNetLobbySetPlayerDataAddr = 0x0074BF60;
-        constexpr size_t kBzrNetLobbySetPlayerDataSlot = 7;
-        constexpr uintptr_t kBzrNetLobbyGetLocalIdentityAddr = 0x0074B670;
-        constexpr size_t kBzrNetLobbyGetLocalIdentitySlot = 14;
-        constexpr size_t kBzrNetNativeClientBackPointerOffset = 0xC38;
-        constexpr uintptr_t kBzrNetNativeStringCtorAddr = 0x00416EF0;
-        constexpr uintptr_t kBzrNetNativeStringDtorAddr = 0x00416F30;
-
-        static bool IsExecutableGameImageAddress(uintptr_t address)
-        {
-            if (!address)
-                return false;
-            MEMORY_BASIC_INFORMATION mbi = {};
-            if (VirtualQuery(reinterpret_cast<const void*>(address), &mbi, sizeof(mbi)) != sizeof(mbi))
-                return false;
-            if (mbi.State != MEM_COMMIT || mbi.Type != MEM_IMAGE ||
-                mbi.AllocationBase != GetModuleHandleA(nullptr))
-                return false;
-            if ((mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0)
-                return false;
-            switch (mbi.Protect & 0xFFu)
-            {
-            case PAGE_EXECUTE:
-            case PAGE_EXECUTE_READ:
-            case PAGE_EXECUTE_READWRITE:
-            case PAGE_EXECUTE_WRITECOPY:
-                return true;
-            default:
-                return false;
-            }
-        }
-
-        static bool HasRet4Epilogue(uintptr_t address)
-        {
-            if (!IsExecutableGameImageAddress(address))
-                return false;
-            __try
-            {
-                const auto* bytes = reinterpret_cast<const uint8_t*>(address);
-                // Slot 14 is a compact accessor in 2.2.301. Qualify it by the
-                // observed callee-cleanup ABI without inventing undocumented
-                // prologue bytes that could make the resolver more brittle.
-                for (size_t i = 0; i + 2 < 0x80; ++i)
-                {
-                    if (bytes[i] == 0xC2 && bytes[i + 1] == 0x04 && bytes[i + 2] == 0x00)
-                        return true;
-                }
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-            }
             return false;
         }
 
@@ -20861,212 +20673,6 @@ namespace BZROpenShim
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-            }
-            return false;
-        }
-
-        // The SetPlayerData("name") machinery below is retained but no longer
-        // called. Qualification showed no observer-visible rename from it, but
-        // could not distinguish "the request never left the process" from "the
-        // service ignored it" -- and settling that needs exactly this ABI. It
-        // costs C4505 on an unreferenced static, as several other retained
-        // probes in this file already do.
-        static FnBzrNetLobbySetPlayerData ResolveBzrNetSetPlayerData(void* lobby)
-        {
-            __try
-            {
-                auto* const vtable = *reinterpret_cast<void***>(lobby);
-                const uintptr_t target = reinterpret_cast<uintptr_t>(
-                    vtable[kBzrNetLobbySetPlayerDataSlot]);
-                if (target != kBzrNetLobbySetPlayerDataAddr ||
-                    !IsExecutableGameImageAddress(target))
-                    return nullptr;
-                static constexpr uint8_t kExpectedBytes[] =
-                {
-                    0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x14, 0x89, 0x4D, 0xF4
-                };
-                if (!ExpectedBytesMatchAt(target, kExpectedBytes, sizeof(kExpectedBytes)))
-                    return nullptr;
-                return reinterpret_cast<FnBzrNetLobbySetPlayerData>(target);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-            }
-            return nullptr;
-        }
-
-        static FnBzrNetLobbyGetLocalIdentity ResolveBzrNetGetLocalIdentity(void* lobby)
-        {
-            __try
-            {
-                auto* const vtable = *reinterpret_cast<void***>(lobby);
-                const uintptr_t target = reinterpret_cast<uintptr_t>(
-                    vtable[kBzrNetLobbyGetLocalIdentitySlot]);
-                if (target != kBzrNetLobbyGetLocalIdentityAddr || !HasRet4Epilogue(target))
-                    return nullptr;
-                return reinterpret_cast<FnBzrNetLobbyGetLocalIdentity>(target);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-            }
-            return nullptr;
-        }
-
-        static bool TryGetBzrNetLocalIdentity(FnBzrNetLobbyGetLocalIdentity getter,
-                                               void* lobby,
-                                               BzrNetNativeIdentity* outIdentity)
-        {
-            if (!getter || !lobby || !outIdentity)
-                return false;
-            std::memset(outIdentity, 0, sizeof(*outIdentity));
-            __try
-            {
-                getter(lobby, outIdentity);
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                Log(L"[BZRNET] Native self-identity getter faulted code=0x%08X\n",
-                    static_cast<uint32_t>(GetExceptionCode()));
-            }
-            return false;
-        }
-
-        static bool TryConstructNativeBzrString(BzrString* out, const char* text)
-        {
-            if (!out || !text || !IsExecutableGameImageAddress(kBzrNetNativeStringCtorAddr))
-                return false;
-            std::memset(out, 0, sizeof(*out));
-            __try
-            {
-                reinterpret_cast<FnBzrStringCtorFromCStr>(
-                    kBzrNetNativeStringCtorAddr)(out, text);
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                Log(L"[BZRNET] Native string constructor faulted code=0x%08X\n",
-                    static_cast<uint32_t>(GetExceptionCode()));
-            }
-            return false;
-        }
-
-        static void DestroyNativeBzrStringNoThrow(BzrString* value)
-        {
-            if (!value || !IsExecutableGameImageAddress(kBzrNetNativeStringDtorAddr))
-                return;
-            __try
-            {
-                reinterpret_cast<FnBzrStringDtor>(kBzrNetNativeStringDtorAddr)(value);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                Log(L"[BZRNET] Native string destructor faulted code=0x%08X\n",
-                    static_cast<uint32_t>(GetExceptionCode()));
-            }
-        }
-
-        static bool TrySendBzrNetNicknameNative(FnBzrNetLobbySetPlayerData sender,
-                                                 void* lobby,
-                                                 const BzrNetNativeIdentity* identity,
-                                                 const BzrString* key,
-                                                 const BzrString* value)
-        {
-            if (!sender || !lobby || !identity || !key || !value)
-                return false;
-            __try
-            {
-                sender(lobby, identity, key, value);
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                Log(L"[BZRNET] SetPlayerData(name) faulted code=0x%08X; "
-                    L"persisted nickname is retained\n",
-                    static_cast<uint32_t>(GetExceptionCode()));
-            }
-            return false;
-        }
-
-        static bool SendOneBzrNetPlayerDataKey(FnBzrNetLobbySetPlayerData sender,
-                                               void* lobby,
-                                               const BzrNetNativeIdentity* identity,
-                                               const char* keyText,
-                                               const char* valueText)
-        {
-            BzrString key = {};
-            BzrString value = {};
-            bool sent = false;
-            if (TryConstructNativeBzrString(&key, keyText) &&
-                TryConstructNativeBzrString(&value, valueText))
-            {
-                sent = TrySendBzrNetNicknameNative(sender, lobby, identity, &key, &value);
-            }
-            DestroyNativeBzrStringNoThrow(&value);
-            DestroyNativeBzrStringNoThrow(&key);
-            return sent;
-        }
-
-        // Slot 7 sends inline on the calling thread (0x0074BFFB). Other BZRNet
-        // clients write name and playerName together as the identity pair.
-        static bool SendBzrNetNicknamePlayerData(void* lobby, const char* nickname)
-        {
-            auto sender = ResolveBzrNetSetPlayerData(lobby);
-            auto getter = ResolveBzrNetGetLocalIdentity(lobby);
-            if (!sender || !getter)
-                return false;
-
-            BzrNetNativeIdentity identity = {};
-            if (!TryGetBzrNetLocalIdentity(getter, lobby, &identity))
-                return false;
-
-            const bool sentName = SendOneBzrNetPlayerDataKey(
-                sender, lobby, &identity, "name", nickname);
-            const bool sentPlayerName = SendOneBzrNetPlayerDataKey(
-                sender, lobby, &identity, "playerName", nickname);
-            Log(L"[BZRNET] SetPlayerData name=%hs playerName=%hs\n",
-                sentName ? "sent" : "failed",
-                sentPlayerName ? "sent" : "failed");
-            return sentName || sentPlayerName;
-        }
-
-        // FUN_006c6e60 builds and sends the Authorization JSON, reading
-        // 0x009453E0 for `name`. SendAuthorization (0x006C6DF0) only posts
-        // FUN_006c83f0 as a connect-completion handler, so an already-
-        // authorized socket never emits a second Authorization (live
-        // 2026-09-09: reauth-queued, next WS send was 43 bytes eight
-        // seconds later, not the 649-byte auth frame).
-        static bool TrySendAuthorizationBody(void* client)
-        {
-            constexpr uintptr_t kBuildAuthAddr = 0x006C6E60;
-            constexpr uintptr_t kFlagAAddr = 0x0260B098;
-            constexpr uintptr_t kFlagBAddr = 0x0260B0CC;
-            if (!client || !IsExecutableGameImageAddress(kBuildAuthAddr))
-                return false;
-
-            uint32_t flagA = 0;
-            uint32_t flagB = 0;
-            __try
-            {
-                flagA = *reinterpret_cast<uint32_t*>(kFlagAAddr);
-                flagB = *reinterpret_cast<uint32_t*>(kFlagBAddr);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
-
-            uint8_t sendFlag = 1;
-            using FnBuildAuth = void(__thiscall*)(void* self, uint32_t, uint32_t, uint8_t*);
-            __try
-            {
-                reinterpret_cast<FnBuildAuth>(kBuildAuthAddr)(client, flagA, flagB, &sendFlag);
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                Log(L"[BZRNET] Authorization body send faulted code=0x%08X\n",
-                    static_cast<uint32_t>(GetExceptionCode()));
             }
             return false;
         }
@@ -33404,6 +33010,7 @@ namespace BZROpenShim
             InitializeSatelliteVisibilityFixConfig(false);
             SunFlash::ReloadConfig();
             break;
+        case ShimSettingApplyGroup::ReadOnNextUse:
         case ShimSettingApplyGroup::RestartRequired:
             break;
         }

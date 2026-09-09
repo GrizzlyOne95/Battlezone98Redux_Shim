@@ -14,7 +14,7 @@ namespace BZROpenShim
     // dynamically and intentionally do not link against OpenShim internals.
     enum class BzrNetNicknameResult : uint32_t
     {
-        // Lobby SetPlayerData and/or the Authorization JSON builder ran.
+        // Reserved for ABI compatibility with earlier experimental callers.
         NativeSendCompleted = 0,
         StoredForNextConnection = 1,
         InvalidNickname = 2,
@@ -22,8 +22,8 @@ namespace BZROpenShim
         NativeStateInvalid = 4,
         PersistenceFailed = 5,
         LiveSendUnavailable = 6,
-        // Lounge re-auth queued on the live WebSocket. The same Steam/GOG
-        // identity re-appears with the new name after Authorization.
+        // The lounge control connection was closed so stock can reconnect and
+        // send a fresh Authorization containing the persisted nickname.
         ReauthQueued = 7,
     };
 
