@@ -24,9 +24,8 @@ namespace BZROpenShim
         NativeStateInvalid = 4,
         PersistenceFailed = 5,
         LiveSendUnavailable = 6,
-        // Force branch: re-auth queued on live lounge WebSocket.
-        // The same stable Steam/GOG identity re-appears with new name
-        // after the service processes the second Authorization.
+        // Lounge re-auth queued on the live WebSocket. The same Steam/GOG
+        // identity re-appears with the new name after Authorization.
         ReauthQueued = 7,
     };
 

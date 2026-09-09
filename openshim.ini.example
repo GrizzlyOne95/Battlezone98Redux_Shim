@@ -1170,15 +1170,14 @@ UdpPort = 0
 ; Blank/absent = use the Steam/GOG account name.
 ; Nickname =
 
-; Experimental: queue a second BZRNet Authorization on the existing WebSocket after a nickname edit while in lounge/lobby (not in-match).
-; Accepted: boolean. Default: OFF.
+; Queue a second BZRNet Authorization on the existing WebSocket after a nickname edit while in lounge/lobby (not in-match).
+; Accepted: boolean. Default: ON.
 ; When ON, /nickname or the lobby nickname widget updates 0x009453E0, persists openshim.ini, then calls SendAuthorization 0x006C6DF0 on the live BZRNet client.
 ; The same stable Steam/GOG identity then re-appears with the new name to observers without restarting the process.
-; The generic SetPlayerData("name") path at 0x006C4F70/0x0074BF60 is intentionally not used — it completes on the wire but the Rebellion service ignores the post-auth name mutation (qualified 2026-09-04).
-; Requires a live lounge/lobby: the WebSocket must be connected and the lobby at 0x00945470 must be valid. Edits while in-match (netId!=0) are still reported as "saved for next connection" — leave the match/lobby and re-auth instead.
-; Leave this OFF for normal play until observer-proven re-auth stability is confirmed across Steam/GOG/Galaxy.
-; Legacy env aliases: OPENSHIM_DISABLE_BZRNET_REAUTH (inverted), OPENSHIM_ENABLE_BZRNET_REAUTH, BZR_ENABLE_BZRNET_REAUTH
-ReauthOnNicknameChange = 0
+; The generic SetPlayerData("name") path at 0x006C4F70/0x0074BF60 is intentionally not used — qualification showed no observer-visible rename from it.
+; Requires a live lounge/lobby: the WebSocket must be connected and the lobby at 0x00945470 must be valid. Edits while in-match (netId!=0) are still reported as "saved for next connection".
+; Set to 0 to persist only. Legacy env aliases: OPENSHIM_DISABLE_BZRNET_REAUTH (inverted), OPENSHIM_ENABLE_BZRNET_REAUTH, BZR_ENABLE_BZRNET_REAUTH
+ReauthOnNicknameChange = 1
 
 ; Inject the native nickname and negotiated-route readouts into the MP lobby.
 ; Accepted: boolean. Default: OFF in the player preset (ON here as the

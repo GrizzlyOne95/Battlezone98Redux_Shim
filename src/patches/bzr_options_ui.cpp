@@ -3117,6 +3117,14 @@ namespace BZROpenShim
               ShimSettingApplyGroup::RestartRequired,
               "Nickname field and route readout in the waiting-room left column. "
               "Does not cover BZP's faction picker. Restart required." },
+            // Re-read on every nickname apply; no process restart is required
+            // for the next OK / /nickname to take the new value.
+            { "Live Nickname", "Network", "ReauthOnNicknameChange", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Re-authorize the lounge WebSocket after a nickname edit so peers "
+              "see the new name without restarting. Off saves for the next connect. "
+              "Does not apply in a launched match." },
             // defaultIndex 0 selects "1", which is what an absent key does: the
             // native tracker has always run, and turning the row off must be a
             // deliberate choice rather than the effect of a missing ini key.
