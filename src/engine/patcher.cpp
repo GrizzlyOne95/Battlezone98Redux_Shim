@@ -328,14 +328,16 @@ namespace BZROpenShim
     }
 
     // [Fixes] VehicleListModScoping. Forces mod-scoped asset resolution for the
-    // multiplayer vehicle list. Default on, but it is the one always-on fix that
-    // changes which assets a client resolves, so a modded lobby mixing shim and
-    // stock clients needs to be able to turn it off and compare.
+    // multiplayer vehicle list. Default off: it reloads that list and replaces
+    // BZP/BZP-T's faction-only waiting-room .vxt with stock ships. A modded
+    // lobby that needs the list to follow the selected workshop item can turn
+    // it on to compare.
     static bool ShouldEnableVehicleListModScoping() {
         static int s_cached = -1;
         if (s_cached >= 0) return s_cached != 0;
         if (EnvFlagEnabledByName("OPENSHIM_DISABLE_VEHICLE_LIST_MOD_SCOPING") || EnvFlagEnabledByName("BZR_DISABLE_VEHICLE_LIST_MOD_SCOPING")) { s_cached = 0; return false; }
-        s_cached = 1; return true;
+        if (EnvFlagEnabledByName("OPENSHIM_ENABLE_VEHICLE_LIST_MOD_SCOPING") || EnvFlagEnabledByName("BZR_ENABLE_VEHICLE_LIST_MOD_SCOPING")) { s_cached = 1; return true; }
+        s_cached = 0; return false;
     }
 
     static bool IsMapRefreshPatchName(const char* name) {
@@ -408,6 +410,14 @@ namespace BZROpenShim
         return name && strncmp(name, "Vehicle List Mod Fix ", 21) == 0;
     }
 
+    // 1/4, 2/4 and 4/4 reload the starting-vehicle pool from mod-scoped
+    // assets. That is what replaces BZP's faction-only .vxt with stock ships.
+    // 3/4 is a one-byte "always update the select control" and is required for
+    // the map-list wheel path (ScrollUp 0x007CB500) to move the visible rows.
+    static bool IsVehicleListAssetScopingPatchName(const char* name) {
+        return name && strstr(name, "Force Mod-Scoped Assets") != nullptr;
+    }
+
     static const char* DistributionConfigKey(BzrDistribution distribution) {
         switch (distribution) {
         case BzrDistribution::GOG: return "gog";
@@ -475,7 +485,7 @@ namespace BZROpenShim
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsMapRefreshPatchName(p.name.c_str()); }), patches.end());
         }
         if (!ShouldEnableVehicleListModScoping()) {
-            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsVehicleListModFixPatchName(p.name.c_str()); }), patches.end());
+            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsVehicleListAssetScopingPatchName(p.name.c_str()); }), patches.end());
         }
         if (!ShouldEnableChunkExperiments()) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsChunkExperimentPatchName(p.name.c_str()); }), patches.end());

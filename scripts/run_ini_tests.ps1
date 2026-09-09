@@ -156,6 +156,11 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # any session exists, so it carries no mixed-client divergence.
     "Fixes/ExplainMultiplayerNotReady",
 
+    # Nickname/route widgets sit in the empty left column of the waiting
+    # room, not on BZP's faction picker. Ban/Flags stay off for that reason;
+    # the name field is the one lobby chrome that is allowed on.
+    "Network/LobbyReadouts",
+
     # Straight bug/stability fixes with no material mixed-client divergence.
     # MapRefreshFixes includes the multiplayer map-list refresh/jump and
     # selection-preservation repair and is deliberately part of the ON baseline.
@@ -165,15 +170,16 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "General/EditorOverheadPlacementOrder",
 
     # Qualified [Fixes] entries. The five simulation fixes below stand down in
-    # network games; MagnetZeroRangeGuard is defensive; VehicleListModScoping
-    # repairs asset lookup only; the CLI parser repair has no gameplay effect.
+    # network games; MagnetZeroRangeGuard is defensive; the CLI parser repair
+    # has no gameplay effect. VehicleListModScoping stays off in the player
+    # preset because it reloads the waiting-room vehicle list and replaces
+    # BZP's faction-only .vxt with stock ships.
     "Fixes/ApcAlliedTargetDeploy",
     "Fixes/SplinterUndead",
     "Fixes/HowitzerUndeployedRetaliation",
     "Fixes/TugCargoPostLoad",
     "Fixes/ConstructorRemoteBuild",
     "Fixes/MagnetZeroRangeGuard",
-    "Fixes/VehicleListModScoping",
     "Fixes/CliMultiParameterOptions",
 
     # Qualified socket/netcode baseline.
@@ -263,7 +269,7 @@ $shippingPolicyChecks = @{
     "Fixes/ConstructorRemoteBuild" = "1"
     "Fixes/MagnetZeroRangeGuard" = "1"
     "Fixes/ProducerScriptPredicates" = "0"
-    "Fixes/VehicleListModScoping" = "1"
+    "Fixes/VehicleListModScoping" = "0"
     "Fixes/CliMultiParameterOptions" = "1"
 
     "DX11Enhanced/FXAA" = "0"
@@ -272,7 +278,8 @@ $shippingPolicyChecks = @{
     "Network/NetImprovements" = "1"
     "Network/GovernorTuning" = "OpenShim"
     "Network/ReauthOnNicknameChange" = "0"
-    "Network/LobbyReadouts" = "0"
+    "Network/LobbyReadouts" = "1"
+    "Network/LobbyBanButton" = "0"
     "Career/StatsTracking" = "0"
     "SinglePlayer/JumpSnipeCrouch" = "1"
     "SinglePlayer/AttackRevealPerceivedTeam" = "0"

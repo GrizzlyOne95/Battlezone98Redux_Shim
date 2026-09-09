@@ -1815,6 +1815,11 @@ namespace BZROpenShim
         static float g_SmartReticleRangeCell = kSmartReticleRangeStock;
         static bool g_SmartReticleRangeRedirectActive = false;
         static bool g_SmartReticleRangeRedirectFaultLogged = false;
+        // EXU/Lua (BZP, Reloaded, etc.) own the range when they call the
+        // exported setter. The MP gate must not then force stock 200 over that
+        // value -- those mods apply the longer reticle in network games on
+        // purpose, and every peer in a matched lobby is doing the same.
+        static bool g_SmartReticleRangeOwnedByBridge = false;
         static bool g_SmartScavengerPathingEnabled = true;
         static bool g_TurretAimPitchBaselineEnabled = true;
         static bool g_ScrapPilotHudLegacyLayoutEnabled = true;
@@ -3151,8 +3156,9 @@ namespace BZROpenShim
 
         // Master switch for the whole multiplayer vehicle-flag feature: the
         // flag-selection UI, the payload upload and the Ogre renderer hook.
-        // [Display] MultiplayerFlags in openshim.ini, defaulting ON; the legacy
-        // disable variables remain an override for installs with no INI key.
+        // [Display] MultiplayerFlags in openshim.ini, defaulting OFF so a
+        // missing key does not grow widgets onto BZP/BZP-T's faction-only
+        // waiting room. The legacy disable variables remain an override.
         // Latched, because the renderer hook is a vtable write that is only
         // attempted while the feature is on.
         static bool ShouldEnableMultiplayerFlagUi()
@@ -3160,18 +3166,18 @@ namespace BZROpenShim
             static int s_cached = -1;
             if (s_cached < 0)
             {
-                bool enabled = true;
+                bool enabled = false;
                 bool iniValue = false;
-                if (TryGetUserConfigBool("Display", "MultiplayerFlags", iniValue))
-                {
-                    enabled = iniValue;
-                }
-                else if (EnvFlagEnabled("OPENSHIM_DISABLE_MP_FLAG_UI") ||
-                         EnvFlagEnabled("OPENSHIM_DISABLE_MULTIPLAYER_FLAG_UI") ||
-                         EnvFlagEnabled("OPENSHIM_DISABLE_MP_FLAGS") ||
-                         EnvFlagEnabled("BZR_DISABLE_MP_FLAG_UI"))
+                if (EnvFlagEnabled("OPENSHIM_DISABLE_MP_FLAG_UI") ||
+                    EnvFlagEnabled("OPENSHIM_DISABLE_MULTIPLAYER_FLAG_UI") ||
+                    EnvFlagEnabled("OPENSHIM_DISABLE_MP_FLAGS") ||
+                    EnvFlagEnabled("BZR_DISABLE_MP_FLAG_UI"))
                 {
                     enabled = false;
+                }
+                else if (TryGetUserConfigBool("Display", "MultiplayerFlags", iniValue))
+                {
+                    enabled = iniValue;
                 }
                 s_cached = enabled ? 1 : 0;
                 Log(L"[FLAG] multiplayer vehicle flags: %hs\n",
@@ -14470,6 +14476,49 @@ namespace BZROpenShim
             return true;
         }
 
+        // Put the five loads back on the pooled 200.0 literal. Used when
+        // OpenShim is not the authority for the range (network game with no
+        // EXU/Lua setter, or an explicit stock request) so a mod that writes
+        // the literal -- or simply wants Redux's own 200 -- is not stuck on
+        // OpenShim's cell.
+        static void RestoreSmartReticleRangeRedirect()
+        {
+            if (!g_SmartReticleRangeRedirectActive)
+                return;
+
+            const uint32_t pooled =
+                static_cast<uint32_t>(kSmartReticleRangePooledLiteralAddr);
+            size_t restored = 0;
+            for (const auto& site : kSmartReticleRangeSites)
+            {
+                if (!WritePatchBytes(
+                        site.instructionAddr + site.opcodeLen,
+                        reinterpret_cast<const uint8_t*>(&pooled),
+                        sizeof(pooled)))
+                {
+                    break;
+                }
+                ++restored;
+            }
+
+            if (restored != std::size(kSmartReticleRangeSites))
+            {
+                if (!g_SmartReticleRangeRedirectFaultLogged)
+                {
+                    Log(L"[RETICLE] Smart-reticle range restore failed (%zu of %zu sites)\n",
+                        restored,
+                        std::size(kSmartReticleRangeSites));
+                    g_SmartReticleRangeRedirectFaultLogged = true;
+                }
+                return;
+            }
+
+            g_SmartReticleRangeRedirectActive = false;
+            g_SmartReticleRangeCell = kSmartReticleRangeStock;
+            Log(L"[RETICLE] Smart-reticle range redirect restored to shared 200.0 literal at 0x%08X\n",
+                pooled);
+        }
+
         static bool TryReadSmartReticleRange(float& outRange)
         {
             if (!g_SmartReticleRangeRedirectActive)
@@ -14480,9 +14529,28 @@ namespace BZROpenShim
 
         static void RefreshSmartReticleRangeState()
         {
-            const float desired = ReadLocalPlayerNetIdValue() == 0
-                ? g_SmartReticleRange
-                : kSmartReticleRangeStock;
+            const bool networkGame = ReadLocalPlayerNetIdValue() != 0;
+            float desired = kSmartReticleRangeStock;
+            bool claimRange = false;
+
+            if (g_SmartReticleRangeOwnedByBridge)
+            {
+                // Matched-mod path (BZP/BZP-T, Reloaded, any EXU SetReticleRange
+                // caller). The setter is the authority in SP and MP.
+                desired = g_SmartReticleRange;
+                claimRange = true;
+            }
+            else if (!networkGame)
+            {
+                desired = g_SmartReticleRange;
+                claimRange = desired != kSmartReticleRangeStock;
+            }
+
+            if (!claimRange)
+            {
+                RestoreSmartReticleRangeRedirect();
+                return;
+            }
 
             // Without the redirect the only place left to put the value is the
             // shared literal, which is what this feature must not touch. Stand
@@ -14496,7 +14564,9 @@ namespace BZROpenShim
             g_SmartReticleRangeCell = desired;
             Log(L"[RETICLE] Smart-reticle range=%.3f (%hs)\n",
                 static_cast<double>(desired),
-                desired == kSmartReticleRangeStock ? "stock/network" : "single-player");
+                g_SmartReticleRangeOwnedByBridge
+                    ? "exu/lua"
+                    : (networkGame ? "stock/network" : "single-player"));
         }
 
         static bool TryReadScrapPilotHudLayout(std::array<int, kScrapPilotHudValueCount>& out)
@@ -15627,6 +15697,7 @@ namespace BZROpenShim
                         reticleRangeText.c_str());
                 }
             }
+            g_SmartReticleRangeOwnedByBridge = false;
             g_SmartReticleRange = g_SmartReticleRangeBaseline;
 
             g_SmartScavengerPathingEnabled = true;
@@ -17417,6 +17488,7 @@ namespace BZROpenShim
 
         static void RevertSmartReticleRangeToBaseline()
         {
+            g_SmartReticleRangeOwnedByBridge = false;
             g_SmartReticleRange = g_SmartReticleRangeBaseline;
             RefreshSmartReticleRangeState();
         }
@@ -35100,7 +35172,11 @@ namespace BZROpenShim
     float GetSmartReticleRangeFromBridge()
     {
         float range = 0.0f;
-        return TryReadSmartReticleRange(range) ? range : g_SmartReticleRange;
+        if (TryReadSmartReticleRange(range))
+            return range;
+        return g_SmartReticleRangeOwnedByBridge
+            ? g_SmartReticleRange
+            : kSmartReticleRangeStock;
     }
 
     bool SetSmartReticleRangeFromBridge(float range)
@@ -35109,14 +35185,14 @@ namespace BZROpenShim
             return false;
 
         const float clamped = ClampSmartReticleRange(range);
+        g_SmartReticleRangeOwnedByBridge = true;
         g_SmartReticleRange = clamped;
         RefreshSmartReticleRangeState();
-        Log(L"[MISSIONHOOK] smart-reticle range requested=%.3f applied=%.3f\n",
+        Log(L"[MISSIONHOOK] smart-reticle range requested=%.3f applied=%.3f (exu/lua, mp-honored)\n",
             static_cast<double>(range),
             static_cast<double>(clamped));
         float effective = 0.0f;
-        return ReadLocalPlayerNetIdValue() == 0 &&
-            TryReadSmartReticleRange(effective) && effective == clamped;
+        return TryReadSmartReticleRange(effective) && effective == clamped;
     }
 
     float GetRadarSizeScaleFromBridge()
@@ -39870,8 +39946,10 @@ namespace BZROpenShim
         // Kill switch for the injected lobby readouts. They are the newest
         // children on that screen and the lobby crashes on teardown if any child
         // is bad, so there has to be a way to turn them off without a rebuild.
-        //   openshim.ini  [Network] LobbyReadouts = 0
+        //   openshim.ini  [Network] LobbyReadouts = 1
         //   environment   OPENSHIM_DISABLE_LOBBY_READOUTS=1
+        // Nickname/route sit in the empty left column. Missing key is ON so
+        // the name field stays available; Ban/Flags remain separately gated.
         static bool ShouldEnableLobbyReadouts()
         {
             if (EnvFlagEnabled("OPENSHIM_DISABLE_LOBBY_READOUTS"))
@@ -39880,6 +39958,28 @@ namespace BZROpenShim
             if (TryGetUserConfigBool(kUserConfigNetworkSection, "LobbyReadouts", enabled))
                 return enabled;
             return true;
+        }
+
+        // Ban User button + label on the waiting-room parent. Independent of
+        // nickname/route readouts; `/ban` still works with this off. Default
+        // OFF so OpenShim does not overwrite BZP's faction picker.
+        //   openshim.ini  [Network] LobbyBanButton = 0
+        static bool ShouldEnableLobbyBanButton()
+        {
+            if (EnvFlagEnabled("OPENSHIM_DISABLE_LOBBY_BAN_BUTTON") ||
+                EnvFlagEnabled("BZR_DISABLE_LOBBY_BAN_BUTTON"))
+            {
+                return false;
+            }
+            if (EnvFlagEnabled("OPENSHIM_ENABLE_LOBBY_BAN_BUTTON") ||
+                EnvFlagEnabled("BZR_ENABLE_LOBBY_BAN_BUTTON"))
+            {
+                return true;
+            }
+            bool enabled = false;
+            if (TryGetUserConfigBool(kUserConfigNetworkSection, "LobbyBanButton", enabled))
+                return enabled;
+            return false;
         }
 
         // A plain cUI_View eats every click that lands on it. cUI_View::
@@ -40722,53 +40822,58 @@ namespace BZROpenShim
         void* parent = g_BanParentHost;
         EnsureUiCacheMatchesParent(parent, true);
 
-        void* buttonMem = ::operator new(0x1EC, std::nothrow);
-        if (!buttonMem)
-            return;
-        std::memset(buttonMem, 0, 0x1EC);
-        g_BanButtonHost = g_BzrFn_ButtonCtor(
-            buttonMem,
-            "Ban User",
-            g_BanX - 48.0f,
-            g_BanY + 96.0f,
-            48.0f,
-            48.0f,
-            0x20,
-            parent,
-            0,
-            0);
-
-        if (g_BanButtonHost)
+        if (ShouldEnableLobbyBanButton())
         {
-            if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(g_BanButtonHost, "MultiplayerModeButton_off.png");
-            if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(g_BanButtonHost, "MultiplayerModeButton_over.png");
-            if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(g_BanButtonHost, "MultiplayerModeButton_on.png");
-            if (g_BzrFn_SetButtonLabel) g_BzrFn_SetButtonLabel(g_BanButtonHost, "B");
-            if (g_BzrFn_SetOnClick) g_BzrFn_SetOnClick(g_BanButtonHost, reinterpret_cast<void*>(BanButtonOnClickHost));
-            if (g_BzrFn_SetOnHover) g_BzrFn_SetOnHover(g_BanButtonHost, reinterpret_cast<void*>(BanButtonOnHoverHost));
-            g_BzrFn_AddChild(parent, g_BanButtonHost, 0);
-        }
+            void* buttonMem = ::operator new(0x1EC, std::nothrow);
+            if (buttonMem)
+            {
+                std::memset(buttonMem, 0, 0x1EC);
+                g_BanButtonHost = g_BzrFn_ButtonCtor(
+                    buttonMem,
+                    "Ban User",
+                    g_BanX - 48.0f,
+                    g_BanY + 96.0f,
+                    48.0f,
+                    48.0f,
+                    0x20,
+                    parent,
+                    0,
+                    0);
 
-        void* labelMem = ::operator new(0x930, std::nothrow);
-        if (!labelMem)
-            return;
-        std::memset(labelMem, 0, 0x930);
-        g_BanLabelHost = g_BzrFn_LabelCtor(
-            labelMem,
-            "Lobby",
-            270.0f,
-            980.0f,
-            338.0f,
-            43.0f,
-            0x8020,
-            parent,
-            0);
+                if (g_BanButtonHost)
+                {
+                    if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(g_BanButtonHost, "MultiplayerModeButton_off.png");
+                    if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(g_BanButtonHost, "MultiplayerModeButton_over.png");
+                    if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(g_BanButtonHost, "MultiplayerModeButton_on.png");
+                    if (g_BzrFn_SetButtonLabel) g_BzrFn_SetButtonLabel(g_BanButtonHost, "B");
+                    if (g_BzrFn_SetOnClick) g_BzrFn_SetOnClick(g_BanButtonHost, reinterpret_cast<void*>(BanButtonOnClickHost));
+                    if (g_BzrFn_SetOnHover) g_BzrFn_SetOnHover(g_BanButtonHost, reinterpret_cast<void*>(BanButtonOnHoverHost));
+                    g_BzrFn_AddChild(parent, g_BanButtonHost, 0);
+                }
+            }
 
-        if (g_BanLabelHost)
-        {
-            if (g_BzrFn_SetTooltip) g_BzrFn_SetTooltip(g_BanLabelHost, "Ban highlighted player");
-            if (g_BzrFn_LabelState) g_BzrFn_LabelState(g_BanLabelHost, nullptr);
-            g_BzrFn_AddChild(parent, g_BanLabelHost, 0);
+            void* labelMem = ::operator new(0x930, std::nothrow);
+            if (labelMem)
+            {
+                std::memset(labelMem, 0, 0x930);
+                g_BanLabelHost = g_BzrFn_LabelCtor(
+                    labelMem,
+                    "Lobby",
+                    270.0f,
+                    980.0f,
+                    338.0f,
+                    43.0f,
+                    0x8020,
+                    parent,
+                    0);
+
+                if (g_BanLabelHost)
+                {
+                    if (g_BzrFn_SetTooltip) g_BzrFn_SetTooltip(g_BanLabelHost, "Ban highlighted player");
+                    if (g_BzrFn_LabelState) g_BzrFn_LabelState(g_BanLabelHost, nullptr);
+                    g_BzrFn_AddChild(parent, g_BanLabelHost, 0);
+                }
+            }
         }
 
         if (ShouldEnableMultiplayerFlagUi() &&
@@ -40834,53 +40939,58 @@ namespace BZROpenShim
         void* parent = g_BanParentClient;
         EnsureUiCacheMatchesParent(parent, false);
 
-        void* buttonMem = ::operator new(0x1EC, std::nothrow);
-        if (!buttonMem)
-            return;
-        std::memset(buttonMem, 0, 0x1EC);
-        g_BanButtonClient = g_BzrFn_ButtonCtor(
-            buttonMem,
-            "Ban User",
-            -33.0f,
-            942.0f,
-            48.0f,
-            48.0f,
-            0,
-            parent,
-            0,
-            0);
-
-        if (g_BanButtonClient)
+        if (ShouldEnableLobbyBanButton())
         {
-            if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(g_BanButtonClient, "MultiplayerModeButton_off.png");
-            if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(g_BanButtonClient, "MultiplayerModeButton_over.png");
-            if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(g_BanButtonClient, "MultiplayerModeButton_on.png");
-            if (g_BzrFn_SetButtonLabel) g_BzrFn_SetButtonLabel(g_BanButtonClient, "B");
-            if (g_BzrFn_SetOnClick) g_BzrFn_SetOnClick(g_BanButtonClient, reinterpret_cast<void*>(BanButtonOnClickClient));
-            if (g_BzrFn_SetOnHover) g_BzrFn_SetOnHover(g_BanButtonClient, reinterpret_cast<void*>(BanButtonOnHoverClient));
-            g_BzrFn_AddChild(parent, g_BanButtonClient, 0);
-        }
+            void* buttonMem = ::operator new(0x1EC, std::nothrow);
+            if (buttonMem)
+            {
+                std::memset(buttonMem, 0, 0x1EC);
+                g_BanButtonClient = g_BzrFn_ButtonCtor(
+                    buttonMem,
+                    "Ban User",
+                    -33.0f,
+                    942.0f,
+                    48.0f,
+                    48.0f,
+                    0,
+                    parent,
+                    0,
+                    0);
 
-        void* labelMem = ::operator new(0x930, std::nothrow);
-        if (!labelMem)
-            return;
-        std::memset(labelMem, 0, 0x930);
-        g_BanLabelClient = g_BzrFn_LabelCtor(
-            labelMem,
-            "Lobby",
-            270.0f,
-            1000.0f,
-            338.0f,
-            43.0f,
-            0x20,
-            parent,
-            0);
+                if (g_BanButtonClient)
+                {
+                    if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(g_BanButtonClient, "MultiplayerModeButton_off.png");
+                    if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(g_BanButtonClient, "MultiplayerModeButton_over.png");
+                    if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(g_BanButtonClient, "MultiplayerModeButton_on.png");
+                    if (g_BzrFn_SetButtonLabel) g_BzrFn_SetButtonLabel(g_BanButtonClient, "B");
+                    if (g_BzrFn_SetOnClick) g_BzrFn_SetOnClick(g_BanButtonClient, reinterpret_cast<void*>(BanButtonOnClickClient));
+                    if (g_BzrFn_SetOnHover) g_BzrFn_SetOnHover(g_BanButtonClient, reinterpret_cast<void*>(BanButtonOnHoverClient));
+                    g_BzrFn_AddChild(parent, g_BanButtonClient, 0);
+                }
+            }
 
-        if (g_BanLabelClient)
-        {
-            if (g_BzrFn_SetTooltip) g_BzrFn_SetTooltip(g_BanLabelClient, "Ban highlighted player");
-            if (g_BzrFn_LabelState) g_BzrFn_LabelState(g_BanLabelClient, nullptr);
-            g_BzrFn_AddChild(parent, g_BanLabelClient, 0);
+            void* labelMem = ::operator new(0x930, std::nothrow);
+            if (labelMem)
+            {
+                std::memset(labelMem, 0, 0x930);
+                g_BanLabelClient = g_BzrFn_LabelCtor(
+                    labelMem,
+                    "Lobby",
+                    270.0f,
+                    1000.0f,
+                    338.0f,
+                    43.0f,
+                    0x20,
+                    parent,
+                    0);
+
+                if (g_BanLabelClient)
+                {
+                    if (g_BzrFn_SetTooltip) g_BzrFn_SetTooltip(g_BanLabelClient, "Ban highlighted player");
+                    if (g_BzrFn_LabelState) g_BzrFn_LabelState(g_BanLabelClient, nullptr);
+                    g_BzrFn_AddChild(parent, g_BanLabelClient, 0);
+                }
+            }
         }
 
         if (ShouldEnableMultiplayerFlagUi() &&
