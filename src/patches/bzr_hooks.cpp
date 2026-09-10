@@ -11171,6 +11171,208 @@ namespace BZROpenShim
             return true;
         }
 
+        // ------------------------------------------------------------------
+        // Persistent per-player mute list (mutes.cfg). Mirrors the bans.cfg
+        // format: <stable_id> [display name]. Stable ids use the same
+        // G<uid>/S<uid> platform-identity model as bans, so a mute survives
+        // restarts, reconnects, lobby changes and nickname changes. Enforced
+        // purely by reapplying Redux's own PlayerList mute (via its native
+        // /mute command path); OpenShim adds no chat filtering of its own.
+        // ------------------------------------------------------------------
+        constexpr char kMutesConfigName[] = "mutes.cfg";
+
+        struct MuteRecord
+        {
+            std::string id;
+            std::string name;
+        };
+
+        static bool g_MutesConfigLoaded = false;
+        static std::vector<MuteRecord> g_MuteRecords;
+
+        static std::filesystem::path GetMutesConfigPath()
+        {
+            return GetConfigModuleDirectory() / kMutesConfigName;
+        }
+
+        static void EnsureMutesConfigLoaded()
+        {
+            if (g_MutesConfigLoaded)
+                return;
+
+            g_MutesConfigLoaded = true;
+            g_MuteRecords.clear();
+
+            const auto configPath = GetMutesConfigPath();
+            const std::string configPathString = configPath.string();
+            FILE* file = nullptr;
+            if (fopen_s(&file, configPathString.c_str(), "r") != 0 || !file)
+            {
+                Log(L"[MUTE] No mutes config found at path=%hs\n", configPathString.c_str());
+                return;
+            }
+
+            char line[512] = {};
+            while (std::fgets(line, static_cast<int>(sizeof(line)), file))
+            {
+                char* trimmed = TrimAsciiInPlace(line);
+                if (*trimmed == '\0' || *trimmed == '#' || *trimmed == ';')
+                    continue;
+
+                char* split = trimmed;
+                while (*split && !std::isspace(static_cast<unsigned char>(*split)))
+                    ++split;
+
+                char saved = *split;
+                *split = '\0';
+                std::string id = NormalizeBanId(trimmed);
+                *split = saved;
+                if (id.empty())
+                    continue;
+
+                char* name = (*split != '\0') ? TrimAsciiInPlace(split + 1) : split;
+                auto existing = std::find_if(
+                    g_MuteRecords.begin(),
+                    g_MuteRecords.end(),
+                    [&id](const MuteRecord& entry) { return entry.id == id; });
+                if (existing != g_MuteRecords.end())
+                {
+                    if (existing->name.empty() && name && *name)
+                        existing->name = name;
+                    continue;
+                }
+
+                MuteRecord entry = {};
+                entry.id = std::move(id);
+                if (name && *name)
+                    entry.name = name;
+                g_MuteRecords.push_back(std::move(entry));
+            }
+
+            std::fclose(file);
+            Log(L"[MUTE] Loaded mutes config path=%hs entries=%u\n",
+                configPathString.c_str(),
+                static_cast<unsigned>(g_MuteRecords.size()));
+        }
+
+        static bool SaveMutesConfig()
+        {
+            const auto configPath = GetMutesConfigPath();
+            const std::string configPathString = configPath.string();
+            FILE* file = nullptr;
+            if (fopen_s(&file, configPathString.c_str(), "w") != 0 || !file)
+            {
+                Log(L"[MUTE] Failed to write mutes config path=%hs\n", configPathString.c_str());
+                return false;
+            }
+
+            std::fprintf(file, "; OpenShim persistent mute list\n");
+            std::fprintf(file, "; Format: <stable_id> [last display name]\n");
+            for (const MuteRecord& entry : g_MuteRecords)
+            {
+                if (entry.name.empty())
+                    std::fprintf(file, "%s\n", entry.id.c_str());
+                else
+                    std::fprintf(file, "%s %s\n", entry.id.c_str(), entry.name.c_str());
+            }
+
+            std::fclose(file);
+            Log(L"[MUTE] Wrote mutes config path=%hs entries=%u\n",
+                configPathString.c_str(),
+                static_cast<unsigned>(g_MuteRecords.size()));
+            return true;
+        }
+
+        static bool IsMuteIdPersisted(const char* stableId)
+        {
+            if (!stableId || !*stableId)
+                return false;
+
+            EnsureMutesConfigLoaded();
+            const std::string normalized = NormalizeBanId(stableId);
+            return std::any_of(
+                g_MuteRecords.begin(),
+                g_MuteRecords.end(),
+                [&normalized](const MuteRecord& entry) { return entry.id == normalized; });
+        }
+
+        // Adds (or refreshes the display name of) a persistent mute entry.
+        // Returns true when the list changed and was saved.
+        static bool AddMuteConfigEntry(const char* stableId, const BzrString* name, const char* source)
+        {
+            const std::string normalized = NormalizeBanId(stableId);
+            if (normalized.empty())
+            {
+                Log(L"[MUTE] %hs rejected invalid stable id '%hs'\n",
+                    source ? source : "mute",
+                    stableId ? stableId : "");
+                return false;
+            }
+
+            EnsureMutesConfigLoaded();
+
+            const std::string displayName = BzrStringToStdString(name);
+            auto existing = std::find_if(
+                g_MuteRecords.begin(),
+                g_MuteRecords.end(),
+                [&normalized](const MuteRecord& entry) { return entry.id == normalized; });
+            if (existing != g_MuteRecords.end())
+            {
+                if (!displayName.empty() && existing->name != displayName)
+                {
+                    existing->name = displayName;
+                    SaveMutesConfig();
+                    Log(L"[MUTE] %hs refreshed entry stable=%hs name=%hs\n",
+                        source ? source : "mute",
+                        normalized.c_str(),
+                        displayName.c_str());
+                }
+                else
+                {
+                    Log(L"[MUTE] %hs entry already present stable=%hs name=%hs\n",
+                        source ? source : "mute",
+                        normalized.c_str(),
+                        existing->name.c_str());
+                }
+                return true;
+            }
+
+            MuteRecord entry = {};
+            entry.id = normalized;
+            entry.name = displayName;
+            g_MuteRecords.push_back(std::move(entry));
+            SaveMutesConfig();
+            Log(L"[MUTE] %hs added entry stable=%hs name=%hs\n",
+                source ? source : "mute",
+                normalized.c_str(),
+                displayName.c_str());
+            return true;
+        }
+
+        // Removes a persistent mute entry; returns true when an entry was
+        // removed and the list was saved.
+        static bool RemoveMuteConfigEntry(const char* stableId, const char* source)
+        {
+            const std::string normalized = NormalizeBanId(stableId);
+            if (normalized.empty())
+                return false;
+
+            EnsureMutesConfigLoaded();
+            auto existing = std::find_if(
+                g_MuteRecords.begin(),
+                g_MuteRecords.end(),
+                [&normalized](const MuteRecord& entry) { return entry.id == normalized; });
+            if (existing == g_MuteRecords.end())
+                return false;
+
+            g_MuteRecords.erase(existing);
+            SaveMutesConfig();
+            Log(L"[MUTE] %hs removed entry stable=%hs\n",
+                source ? source : "unmute",
+                normalized.c_str());
+            return true;
+        }
+
         static const char* UnderAttackAlertModeName(UnderAttackAlertMode mode)
         {
             switch (mode)
@@ -36719,6 +36921,59 @@ namespace BZROpenShim
                 kicks,
                 static_cast<unsigned>(g_BanRecords.size()));
         }
+
+        // Reapplies persisted mutes to the current session. Redux's mute state
+        // is per-process runtime state, so every membership change is a chance
+        // a persisted identity is (still) present with a fresh mute flag. The
+        // native /mute path does the actual work; the display name passed in
+        // the log is refreshed so mutes.cfg tracks the player's current name.
+        static void ReapplyPersistentMutes(const char* source, uint32_t lobby, uint32_t member, int changes)
+        {
+            EnsureMutesConfigLoaded();
+
+            if (g_MuteRecords.empty())
+                return;
+
+            if (g_BzrFn_CommandHandler && g_BzrFn_BanLookup)
+            {
+                int reapplied = 0;
+                for (uint16_t sessionId = 0; sessionId < kBanScanMaxSessionId; ++sessionId)
+                {
+                    BanLookupIdentity identity = {};
+                    if (!TryGetBanLookupIdentityForSessionId(sessionId, identity))
+                        continue;
+
+                    if (!IsMuteIdPersisted(identity.stableId))
+                        continue;
+
+                    const char* nameText =
+                        (identity.name && identity.name->size) ? BzrStringData(identity.name) : "";
+                    Log(L"[MUTE] %hs reapplying session=%u stable=%hs name=%hs lobby=0x%08X member=0x%08X changes=0x%08X\n",
+                        source ? source : "mute",
+                        sessionId,
+                        identity.stableId,
+                        nameText,
+                        lobby,
+                        member,
+                        static_cast<uint32_t>(changes));
+
+                    AddMuteConfigEntry(identity.stableId, identity.name, "reapply");
+                    g_BzrFn_CommandHandler(sessionId, "/mute");
+                    ++reapplied;
+                }
+
+                if (reapplied > 0)
+                {
+                    Log(L"[MUTE] %hs reapplied lobby=0x%08X member=0x%08X changes=0x%08X mutes=%d entries=%u\n",
+                        source ? source : "mute",
+                        lobby,
+                        member,
+                        static_cast<uint32_t>(changes),
+                        reapplied,
+                        static_cast<unsigned>(g_MuteRecords.size()));
+                }
+            }
+        }
     }
 
     void* __cdecl ProducerBuildMenuCallHook(void* producerPtr, int slot, int flags)
@@ -38821,6 +39076,63 @@ namespace BZROpenShim
             return true;
         }
 
+        // Persistent mute support. Redux's own command handler performs the
+        // native mute; we only record (or forget) the stable identity so the
+        // mute can be reapplied in later sessions. Returning false lets the
+        // stock handler run unchanged.
+        if (_stricmp(cmd, "/mute") == 0)
+        {
+            if (static_cast<int16_t>(id) < 0)
+            {
+                Log(L"[MUTE] /mute failed: invalid target id (id=%u)\n", id);
+                return false;
+            }
+            if (!g_BzrFn_BanLookup)
+            {
+                Log(L"[MUTE] /mute skipped: lookup unavailable (id=%u)\n", id);
+                return false;
+            }
+
+            BanLookupIdentity identity = {};
+            if (!TryGetBanLookupIdentityForSessionId(id, identity))
+            {
+                Log(L"[MUTE] /mute skipped: no stable identity for session=%u\n", id);
+                return false;
+            }
+
+            AddMuteConfigEntry(identity.stableId, identity.name, "/mute");
+            Log(L"[MUTE] /mute persisted session=%u stable=%hs name=%hs\n",
+                id,
+                identity.stableId,
+                (identity.name && identity.name->size) ? BzrStringData(identity.name) : "");
+            return false;
+        }
+
+        if (_stricmp(cmd, "/unmute") == 0)
+        {
+            if (static_cast<int16_t>(id) < 0)
+            {
+                Log(L"[MUTE] /unmute failed: invalid target id (id=%u)\n", id);
+                return false;
+            }
+            if (!g_BzrFn_BanLookup)
+            {
+                Log(L"[MUTE] /unmute skipped: lookup unavailable (id=%u)\n", id);
+                return false;
+            }
+
+            BanLookupIdentity identity = {};
+            if (!TryGetBanLookupIdentityForSessionId(id, identity))
+            {
+                Log(L"[MUTE] /unmute skipped: no stable identity for session=%u\n", id);
+                return false;
+            }
+
+            RemoveMuteConfigEntry(identity.stableId, "/unmute");
+            Log(L"[MUTE] /unmute cleared session=%u stable=%hs\n", id, identity.stableId);
+            return false;
+        }
+
         return false;
     }
 
@@ -38834,6 +39146,7 @@ namespace BZROpenShim
             static_cast<unsigned>(g_BanRecords.size()),
             (g_BzrFn_IsHost && g_BzrFn_IsHost() != 0) ? "yes" : "no");
         KickBannedPlayers("join_event", lobby, member, changes);
+        ReapplyPersistentMutes("join_event", lobby, member, changes);
     }
 
     namespace
