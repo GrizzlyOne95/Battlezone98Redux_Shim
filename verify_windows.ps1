@@ -290,15 +290,34 @@ if (-not (Test-Path $logPath)) {
         Write-Host "[WARN] auto-kick relax config was not observed in latest session log" -ForegroundColor Yellow
     }
 
+    # The floors the runtime actually applies come from net.ini when it declares
+    # SendBufferSize/ReceiveBufferSize; the code defaults (512 KB / 4 MB) only
+    # apply when net.ini is absent or silent. Assert against the configured
+    # floors -- a hardcoded expectation goes stale the moment net.ini retunes,
+    # and then a healthy session reads as a failure.
+    $expectedSend = 524288
+    $expectedRecv = 4194304
+    $netIniPath = Join-Path $GamePath "net.ini"
+    if (Test-Path $netIniPath) {
+        foreach ($line in (Get-Content $netIniPath)) {
+            if ($line -match '^\s*SendBufferSize\s*=\s*(\d+)') {
+                $expectedSend = [int]$Matches[1]
+            }
+            elseif ($line -match '^\s*ReceiveBufferSize\s*=\s*(\d+)') {
+                $expectedRecv = [int]$Matches[1]
+            }
+        }
+    }
+
     $sendPatterns = @(
-        "SO_SNDBUF .*-> 524288",
-        "opt=SO_SNDBUF\(\d+\) .*readback=524288",
-        "reasserted SO_SNDBUF floor.*finalReadback=524288"
+        "SO_SNDBUF .*-> $expectedSend",
+        "opt=SO_SNDBUF\(\d+\) .*readback=$expectedSend",
+        "reasserted SO_SNDBUF floor.*finalReadback=$expectedSend"
     )
     $recvPatterns = @(
-        "SO_RCVBUF .*-> 4194304",
-        "opt=SO_RCVBUF\(\d+\) .*readback=4194304",
-        "reasserted SO_RCVBUF floor.*finalReadback=4194304"
+        "SO_RCVBUF .*-> $expectedRecv",
+        "opt=SO_RCVBUF\(\d+\) .*readback=$expectedRecv",
+        "reasserted SO_RCVBUF floor.*finalReadback=$expectedRecv"
     )
 
     $sendMatch = $null
@@ -314,20 +333,20 @@ if (-not (Test-Path $logPath)) {
     }
 
     if ($sendMatch) {
-        Write-Host "[PASS] SO_SNDBUF readback reached 524288" -ForegroundColor Green
+        Write-Host "[PASS] SO_SNDBUF readback reached $expectedSend" -ForegroundColor Green
         Write-Host "       $sendMatch"
     } else {
-        Write-Host "[FAIL] No SO_SNDBUF readback reached 524288 in the latest session" -ForegroundColor Red
-        $issues += "No matching SO_SNDBUF readback line reached 524288 in openshim.log"
+        Write-Host "[FAIL] No SO_SNDBUF readback reached $expectedSend in the latest session" -ForegroundColor Red
+        $issues += "No matching SO_SNDBUF readback line reached $expectedSend in openshim.log"
         $pass = $false
     }
 
     if ($recvMatch) {
-        Write-Host "[PASS] SO_RCVBUF readback reached 4194304" -ForegroundColor Green
+        Write-Host "[PASS] SO_RCVBUF readback reached $expectedRecv" -ForegroundColor Green
         Write-Host "       $recvMatch"
     } else {
-        Write-Host "[FAIL] No SO_RCVBUF readback reached 4194304 in the latest session" -ForegroundColor Red
-        $issues += "No matching SO_RCVBUF readback line reached 4194304 in openshim.log"
+        Write-Host "[FAIL] No SO_RCVBUF readback reached $expectedRecv in the latest session" -ForegroundColor Red
+        $issues += "No matching SO_RCVBUF readback line reached $expectedRecv in openshim.log"
         $pass = $false
     }
 
