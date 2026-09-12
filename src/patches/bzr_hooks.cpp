@@ -683,7 +683,36 @@ namespace BZROpenShim
         constexpr size_t kOrdnanceSpeedOffset = 0x20;
         constexpr size_t kOrdnanceInvSpeedOffset = 0x24;
         constexpr size_t kOrdnanceVelocityOffset = 0x30;
-        constexpr size_t kOrdnanceOwnerObjOffset = 0xCC;
+        // Verified byte-for-byte against the shipped GOG v2.2.301 exe
+        // (ImageBase 0x00400000). Ordnance is the class in
+        // fun3d\OrdnanceClass.cpp: vtable 0x00884E60, with that source-path
+        // literal sitting immediately after it at 0x00884E84; an instance is
+        // 0xE0 bytes (its factory does `push 0xE0` at 0x00586F88), and the
+        // derived "bullet" ordnance (vtable 0x00876720, name string at
+        // 0x00876744) is 0xE8. Ordnance::Init is vtable slot 1 = 0x00584FE0,
+        // and stores its second argument -- the creator handle -- straight
+        // into this field:
+        //     0x00585289  mov edx, [ebp-0xA8]    ; edx = this
+        //     0x0058528F  mov eax, [ebp+0x0C]    ; eax = creator arg
+        //     0x00585292  mov [edx+0xD8], eax
+        // That argument is an obj76, not a GameObject: the same Init masks its
+        // +0x14 flags into the ordnance's OWN obj76 +0x14 (0x00585001 ..
+        // 0x00585016 -- same field at the same offset), and passes it to
+        // 0x0062CF50, which walks +0x7C/+0x80 sibling/child links, i.e. the
+        // obj76 node links TryReadChunkObjectLinks already reads. So
+        // kObj76GameObjectOffset is the correct second hop; the GameObject ctor
+        // writes that back-pointer at 0x004DA183 (`mov [obj76+0x8C], this`)
+        // right after storing the obj76 at GameObject+0xF4 (0x004DA14B).
+        // This constant was 0xCC, which is an unrelated scalar: the same Init
+        // zeroes it at 0x005854DC, wedged between an `fstp [this+0xC8]` and a
+        // zero store to [this+0xD0], and no ordnance code anywhere reads it.
+        // The bad read therefore always yielded 0, TryGetGameObjectFromObj76
+        // rejected the null, and TeamFilterShouldAffectOrdnance failed closed --
+        // a shield tower or magnet mine with a one-sided team filter silently
+        // skipped every ordnance in the list. It stayed invisible because
+        // TeamFilterConfig defaults affectAllies/affectEnemies both true, which
+        // short-circuits to true before the read is ever reached.
+        constexpr size_t kOrdnanceOwnerObjOffset = 0xD8;
         constexpr uintptr_t kOrdnanceListAddr = 0x0072665C;
         constexpr size_t kShieldTowerClassShieldMinXOffset = 0x160;
         constexpr size_t kShieldTowerClassShieldMaxXOffset = 0x16C;
