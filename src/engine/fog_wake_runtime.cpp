@@ -101,6 +101,11 @@ namespace BZROpenShim::FogWake
 
         if (Emitter* tracked = Find(emitter))
         {
+            if (nowSeconds < tracked->lastSeen)
+            {
+                ++stats_.rejected;
+                return false;
+            }
             tracked->latest = position;
             tracked->lastSeen = nowSeconds;
             return true;
@@ -120,6 +125,7 @@ namespace BZROpenShim::FogWake
         fresh.previous = position;
         fresh.latest = position;
         fresh.lastSeen = nowSeconds;
+        fresh.previousSeen = nowSeconds;
         // A brand new emitter has no history, so its first step stamps a point
         // rather than a streak from wherever it happened to be created.
         fresh.seeded = true;
@@ -175,11 +181,17 @@ namespace BZROpenShim::FogWake
         // than being decayed on the tick that created it.
         field_.Advance(stepSeconds_, wind);
 
-        const double teleportDistance = config_.maxSpeed * stepSeconds_;
         for (auto& emitter : emitters_)
         {
             const Point from = emitter.previous;
             const Point to = emitter.latest;
+            // Observation may run at 10 Hz while the field runs at 30 Hz. Test
+            // speed against the time between consumed observations, not one
+            // field tick, or ordinary motion at low FPS becomes a teleport.
+            const double observationSeconds = std::max(stepSeconds_,
+                emitter.lastSeen - emitter.previousSeen);
+            const double teleportDistance = config_.maxSpeed * observationSeconds;
+            emitter.previousSeen = emitter.lastSeen;
 
             if (!emitter.seeded || Distance(from, to) > teleportDistance)
             {
@@ -220,7 +232,13 @@ namespace BZROpenShim::FogWake
             return 0;
 
         // A clock that went backwards is a discontinuity, not negative time.
-        if (elapsed <= 0)
+        if (elapsed < 0)
+        {
+            // A save/load clock discontinuity invalidates all position history.
+            BeginSession(nowSeconds);
+            return 0;
+        }
+        if (elapsed == 0)
             return 0;
 
         accumulator_ += elapsed;
