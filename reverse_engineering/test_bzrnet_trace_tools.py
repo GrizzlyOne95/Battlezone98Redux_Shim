@@ -205,6 +205,67 @@ class BzrNetTraceToolTests(unittest.TestCase):
         self.assertTrue(permissive["valid"])
         self.assertTrue(permissive["warnings"])
 
+    def test_validator_accepts_complete_full_network_capture(self) -> None:
+        trace = self.write_trace([
+            self.traced(1, "BZR_TRACE_READY", {
+                "fullNetworkCapture": True,
+                "privateForensic": True,
+                "allUdp": True,
+                "queueRecords": 32768,
+            }),
+            self.traced(2, "UDP_WIRE_TX", {
+                "payloadLength": 3,
+                "capturedPayloadLength": 3,
+                "payloadTruncated": False,
+                "payloadPrefixHex": "aabbcc",
+            }),
+        ])
+        session = self.write_json({
+            "captureId": "capture-test",
+            "processId": 123,
+            "fullNetworkCapture": True,
+            "privateForensic": True,
+            "traceQueueCapacity": 32768,
+            "clockCalibration": {"qpc": 1000, "qpcFrequency": 10_000_000, "fileTimeUtc": 20_000_000_000},
+            "droppedEvents": 0,
+            "writerShutdownClean": True,
+            "exeSha256": "a" * 64,
+            "openShimSha256": "b" * 64,
+        })
+        report = validate_trace(trace, session)
+        self.assertTrue(report["valid"], report["errors"])
+        self.assertTrue(report["fullNetworkCapture"])
+
+    def test_validator_rejects_truncated_full_network_capture(self) -> None:
+        trace = self.write_trace([
+            self.traced(1, "BZR_TRACE_READY", {
+                "fullNetworkCapture": True,
+                "privateForensic": True,
+                "allUdp": True,
+            }),
+            self.traced(2, "UDP_WIRE_RX", {
+                "payloadLength": 4,
+                "capturedPayloadLength": 2,
+                "payloadTruncated": True,
+                "payloadPrefixHex": "aabb",
+            }),
+        ])
+        session = self.write_json({
+            "captureId": "capture-test",
+            "processId": 123,
+            "fullNetworkCapture": True,
+            "privateForensic": True,
+            "traceQueueCapacity": 32768,
+            "clockCalibration": {"qpc": 1000, "qpcFrequency": 10_000_000, "fileTimeUtc": 20_000_000_000},
+            "droppedEvents": 0,
+            "writerShutdownClean": True,
+            "exeSha256": "a" * 64,
+            "openShimSha256": "b" * 64,
+        })
+        report = validate_trace(trace, session)
+        self.assertFalse(report["valid"])
+        self.assertTrue(any("truncated UDP payload" in error for error in report["errors"]))
+
 
 if __name__ == "__main__":
     unittest.main()

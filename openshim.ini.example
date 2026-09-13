@@ -971,14 +971,23 @@ TerrainRenderProbeDumpJson = 1
 ; not just you. Keep them local, read them before sharing, and get the other
 ; participants' consent. All of it is OFF by default.
 
-; Master switch for BZRNet relay and control-plane logging.
+; Master switch for a full BZRNet/network forensic capture.
 ; Accepted: boolean. Default: OFF.
 ; Turning this on enables, together:
-;   - bz_relay_control.jsonl, the WebSocket control-plane message log
-;   - the structured BZRNet trace (socket lifecycle, WS frames, UDP)
-;   - the raw datagram ring the two are carried on
-; This is the one key to set when asked for relay logs. The individual
-; net.ini [OpenShimSocket] switches remain available for finer control.
+;   - every WebSocket control-plane message in bz_relay_control.jsonl
+;   - the structured BZRNet trace with real endpoints/identities and every UDP
+;     path, including dynamic direct-peer traffic as well as ports 1338/1339
+;   - full UDP payload hex in the structured trace (up to UDP's wire maximum)
+;   - unsampled relay/probe datagram lines and a 2048-byte raw datagram ring
+;   - a 32768-record minimum structured queue plus executable/OpenShim hashes
+; Authentication tickets and passwords remain redacted from the structured
+; trace. Raw/control logs and Wireshark captures still contain private data.
+; This is the one key to set when asked for complete network/relay evidence.
+; Logging does not force relay routing; set [Network] RoutePreference = Relay
+; on both clients when the test specifically needs UDP 1339.
+; It remains observational even if [Network] NetImprovements = 0.
+; The individual switches below and net.ini [OpenShimSocket] switches remain
+; available for narrower custom captures when RelayLogging is off.
 ; Legacy env aliases: OPENSHIM_RELAY_CAPTURE, BZ_RELAY_CAPTURE,
 ;                     OPENSHIM_BZRNET_TRACE, BZ_BZRNET_TRACE
 RelayLogging = 0
@@ -986,7 +995,8 @@ RelayLogging = 0
 ; Log every control-plane message instead of only the eight route-deciding
 ; ones (DoUpdateLAN/WAN, OnLAN/WANUpdated, DoP2PConnect,
 ; OnLobbyMemberP2PConnect, DoP2PRoute, OnP2PRoute).
-; Accepted: boolean. Default: OFF. Implies RelayLogging.
+; Accepted: boolean. Default: OFF. Starts a narrower capture when RelayLogging
+; is off; RelayLogging already enables this mode.
 ; Turn this on to capture the whole conversation a dedicated/replacement
 ; matchmaking service has to reproduce: Authorization, DoEnterLounge,
 ; DoJoinLobby, SetPlayerData, game creation, chat, member join/leave.
@@ -995,19 +1005,22 @@ RelayLogAllControl = 0
 
 ; Log every datagram on the BZRNet endpoint-probe (1338) and UDP relay (1339)
 ; ports, unsampled.
-; Accepted: boolean. Default: OFF. Implies RelayLogging.
+; Accepted: boolean. Default: OFF. Starts a narrower capture when RelayLogging
+; is off; RelayLogging already enables this mode.
 ; Ordinary packet logging is sampled by count, which can miss a whole sparse
 ; relay negotiation; this is the unsampled view of it. Per-packet volume.
 ; Legacy env alias: OPENSHIM_RELAY_LOG_DATAGRAMS
 RelayLogDatagrams = 0
 
-; Include full payloads and unredacted identity in the structured trace.
+; Include unredacted endpoints and identity in the structured trace.
 ; Accepted: boolean. Default: OFF. Forensic use only; review before sharing.
+; RelayLogging already enables this mode and full UDP payload capture.
 ; Legacy env aliases: OPENSHIM_BZRNET_TRACE_PRIVATE, BZ_BZRNET_TRACE_PRIVATE
 RelayLoggingPrivateForensic = 0
 
 ; Trace all UDP sockets, not only the BZRNet ports.
 ; Accepted: boolean. Default: OFF. High volume during a match.
+; RelayLogging already enables this mode.
 ; Legacy env aliases: OPENSHIM_BZRNET_TRACE_ALL_UDP, BZ_BZRNET_TRACE_ALL_UDP
 RelayLoggingAllUdp = 0
 

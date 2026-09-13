@@ -97,6 +97,7 @@ Implemented work includes:
 [*] Governor cold-start versus floor-collapse classification
 [*] Outbound packets/sec and bytes/sec burst telemetry
 [*] Receive-side packet reordering experiments and extensive BZRNet tracing
+[*] One-switch opt-in [code][Diagnostics] RelayLogging[/code] forensic profile: every BZRNet WebSocket message, unsampled 1338/1339 datagrams, full dynamic-UDP payloads/endpoints, capture health checks, and executable/OpenShim hashes for paired Wireshark correlation
 [*] [code][Network] GovernorTuning = OpenShim / Stock[/code]
 [*] [code][Network] NetImprovements[/code] as a master gate over the OpenShim socket layer
 [/list]

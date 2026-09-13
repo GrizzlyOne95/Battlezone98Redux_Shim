@@ -8,6 +8,7 @@ namespace BZROpenShim
     struct BzrNetTraceConfig
     {
         bool enabled = false;
+        bool fullNetworkCapture = false;
         bool privateForensic = false;
         uint32_t queueCapacity = 4096;
         uint32_t flushIntervalMs = 500;
