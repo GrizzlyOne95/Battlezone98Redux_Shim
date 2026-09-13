@@ -113,6 +113,8 @@ namespace BZROpenShim
     void __fastcall LegacyWorldUpdateRenderQueueHook(void* thisPtr, void* edx, void* renderQueue);
     void __cdecl HandleUnderAttackAlert(float currentTime);
     void __fastcall DamageRevealProbeHook(void* victim, void* edx, void* damage);
+    void SetSprayEmitterBuildOriginal(void* original);
+    void* SprayEmitterBuildOwnerHook();
     void PrimeUnderAttackAlertConfig();
     bool SetUnderAttackAlertModeFromBridge(int mode);
     bool SetBomberAiRangeEnabledFromBridge(bool enabled);
