@@ -3064,7 +3064,7 @@ namespace BZROpenShim
               kShimSettingsHeadlightBeamValues, kShimSettingsHeadlightBeamValues, 3, 0,
               ShimSettingApplyGroup::PilotFlashlight,
               "Pilot flashlight beam shape: Stock, Focused (narrow), or Wide." },
-            // [Fixes]: confirmed Redux engine defects. All five default ON and
+            // [Fixes]: confirmed Redux engine defects. All six default ON and
             // normal single-player play wants them on -- they are switches so a
             // suspected regression is bisectable. Each one changes simulation
             // behaviour and none is negotiated with peers, so all six stand
