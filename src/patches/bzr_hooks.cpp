@@ -20757,7 +20757,7 @@ namespace BZROpenShim
         // then restores the correct team by itself. No hook, no control-flow
         // surgery, and it is idempotent.
         //
-        // MEASURED 2026-09-13, AND THE HYPOTHESIS DID NOT SURVIVE.
+        // PARTLY MEASURED 2026-09-13. READ THE LIMIT BEFORE TRUSTING THIS.
         //
         // The [PILOTTEAM] lines below were added as the missing measurement,
         // and on lcbench with a scripted HopOut they report:
@@ -20772,13 +20772,27 @@ namespace BZROpenShim
         // writes). So Craft::BuildPilot DOES pass the correct team, the packed
         // field is not stale, and SetAsNotUser would restore team 1.
         //
-        // The repair below therefore never fires on that path, by construction:
-        // it writes only when the packed team reads 0. Treat this as the probe
-        // it turned out to be, not as a working fix. What is still untested is
-        // the operator's own route -- a hand-driven boarding on play01, where
-        // the player walks back into the craft rather than a script hopping
-        // them out -- and whether some other object, not the pilot, is the one
-        // the mine sees. Ships OFF.
+        // THE LIMIT: the pilot never boarded in that run. The fixture's
+        // boarding leg logged `BOARD ok=false via=no-exu` twenty times and every
+        // heartbeat through T+55 still read onFoot=true, so the transition this
+        // bug lives on was never observed. The sample above is the pilot
+        // standing around BEFORE boarding, and this probe only logs on the
+        // on-foot branch, which stops the instant boarding completes.
+        //
+        // So what is ruled out is narrow: the specific "pilot's packed nibble
+        // reads 0" variant, at the endpoint, by a sample plus the static
+        // argument that nothing in SetAsUser touches the person's nibble before
+        // SetAsNotUser reads it. Anything that goes wrong DURING the
+        // transition -- the live team, a null teamList, or the craft rather
+        // than the pilot -- this probe cannot see.
+        //
+        // To see it, the probe would have to keep sampling the previous pilot
+        // object for a few frames after it stops being the user object, so a
+        // team that flips to 0 inside SetAsNotUser is caught while the Person
+        // is still alive. It does not do that yet.
+        //
+        // The repair below writes only when the packed team reads 0, so on the
+        // sampled path it is inert. Ships OFF.
 
         // GameObject layout, all confirmed against the shipped GOG image rather
         // than the advisory PDB:
