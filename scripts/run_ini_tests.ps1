@@ -194,6 +194,16 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # without it, and a player who hits that has no setting to reach for.
     "Fixes/MpVehiclePreviewShadowScheme",
 
+    # Enhanced/Retro rewrite a viewport's scheme to the en-/og-
+    # technique family; content that does not declare those (any
+    # Workshop or converted legacy map inheriting stock
+    # BZTerrainBase) falls through to Ogre's first technique,
+    # `scheme high-pssm`, and renders black on DX11 from NaN shadow
+    # matrices. Ships ON because it restores stock-profile rendering
+    # for content that never opted into Enhanced, and off it there is
+    # no setting a mapmaker could reach for.
+    "Fixes/EnhancedSchemeFallback",
+
     # Qualified socket/netcode baseline.
     "Network/NetImprovements",
 
