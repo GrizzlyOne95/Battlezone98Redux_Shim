@@ -1,9 +1,9 @@
 # Constructor double-recycle leaves the losing rig permanently deployed
 
-Reproduced live on 2026-09-13 against the GOG Redux install, with controls.
-Root cause identified in the shipped-exe decompile: the unbuild state machine's
-only exit condition is never met when the target building disappears from under
-a second Constructor.
+Reproduced live on 2026-09-13 against the GOG Redux install, with controls,
+then fixed. The recycle teardown path cancels the unbuild but omits the
+undeploy that the completion path performs, so a Constructor whose target is
+removed by somebody else is left deployed for the rest of the mission.
 
 ## Reproduction
 
@@ -72,90 +72,116 @@ Two incidental findings fall out of the same table:
 
 ## Root cause
 
-From the shipped 1.5 exe decompile (`reverse_engineering/decompilation_from_1.5_exe-pdb/1.5`).
-The unbuild loop lives in `UnBuild::DoNear` (`0x0041060b`):
+Addresses below are the shipped GOG Redux 2.2.301 executable, read from its own
+decompile corpus and confirmed against the live binary.
+
+The only undeploy anywhere on the recycle path is in `UnBuild::DoNear`
+(`0x0049EC50`), in the branch it takes once `ConstructionRig::IsUnbuilding`
+goes false:
 
 ```c
-if (this->unbuildStage == 0) {
-    ConstructionRig::StartUnbuild(rig, target);
-    this->unbuildStage = 1;
-}
-if (this->unbuildStage == 1) {
-    ConstructionRig::UpdateUnbuild(rig, TimeStep());
-    if (((int *)rig)[0xd8] == 0) {      /* rig->unbuildHandle */
-        this->unbuildStage = 2;
-        (**(code **)(*(int *)rig + 0x60))();   /* undeploy */
-        ...
+if (rig->IsDeployed()) {
+    if (stage == 0) { ConstructionRig::StartUnbuild(rig, target); stage = 1; }
+    if (stage == 1) {
+        ConstructionRig::UpdateUnbuild(rig, TimeStep());   /* 0x0049CDF0 */
+        if (!ConstructionRig::IsUnbuilding(rig)) {
+            stage = 2;
+            rig->vtbl[0x64]();          /* Craft::Undeploy  -- 0x004AE330 */
+            ...
+        }
     }
 }
 ```
 
-`rig->unbuildHandle == 0` is the **only** way out of stage 1, and therefore the
-only thing that ever undeploys the rig.
+The winner reaches it: its countdown expires, `UpdateUnbuild` calls
+`FinishUnbuild` (`0x0049CEE0`), the unbuild handle is cleared, and the same
+frame asks for the undeploy.
 
-`ConstructionRig::UpdateUnbuild` (`0x0048566d`) has two ways to end:
+The loser never reaches it. On the next AI tick its task reports itself done,
+`RigProcess` leaves the unbuild state, and `RigProcess::CleanUState2`
+(`0x0049EE10`) destroys the `UnBuild` task before `DoNear` is ticked again:
 
 ```c
-local_8 = GameObjectHandle::GetObj(this->unbuildHandle);
-if (local_8 == (GameObject *)0x0) {
-    Producer::CancelBuild((Producer *)this);     /* <-- target vanished */
-}
-else {
-    ...
-    if (0.0 <= fVar1) { /* still counting down */ }
-    else { FinishUnbuild(this, local_8); }       /* <-- we finished it */
+void RigProcess::CleanUState2(RigProcess *this) {
+    ConstructionRig::CancelUnbuild(this->craft);   /* 0x0049CDB0 */
+    if (this->task) this->task->vtbl[0]( /*deleting*/ 1 );
+    this->task = 0;
 }
 ```
 
-- `FinishUnbuild` (`0x004853b0`) ends with `this->unbuildHandle = 0;` — the
-  winner's rig exits stage 1 and undeploys. That is rig1 at T+13.502.
-- The vanished-target branch calls `Producer::CancelBuild` (`0x004ab24f`), which
-  operates on the **build** path: it returns `false` immediately when
-  `buildClass == 0`, refunds build cost, and **never touches `unbuildHandle`**.
+`CancelUnbuild` zeroes the unbuild handle and timer, so the unbuild state is
+torn down correctly. **Nothing undeploys the craft.** The rig is left in deploy
+state 2 with no task, no unbuild, and no remaining code path that will ever ask
+it to stand up again.
 
-So the loser's `unbuildHandle` keeps pointing at the freed building forever.
-`ConstructionRig::IsUnbuilding` (`0x0041034c`) is literally
-`return this->unbuildHandle != 0;`, so the rig reports as unbuilding for the
-rest of the mission, `DoNear` re-enters `UpdateUnbuild` every frame, that call
-takes the null branch and no-ops every frame, and the undeploy at vtable `+0x60`
-is never reached.
+That is the whole defect: **the recycle teardown path cancels the unbuild but
+omits the undeploy that the completion path performs.**
 
-The function that was wanted is `ConstructionRig::CancelUnbuild` (`0x00485394`),
-sitting right next to it and doing exactly the one thing needed:
+### What the live trace showed, and what it ruled out
 
-```c
-bool ConstructionRig::CancelUnbuild(ConstructionRig *this) {
-    if (this->unbuildHandle == 0) return false;
-    this->unbuildHandle = 0;
-    this->_padding_ = 0;
-    return true;
-}
+An earlier reading of the BZ 1.5 decompile pointed at `UpdateUnbuild`'s
+vanished-target branch, which calls `Producer::CancelBuild` (`0x005AED80` in
+Redux) — the build-side cancel, which never touches `unbuildHandle`. A detour
+that cleared the handle there was built, shipped and measured, and **released
+nothing**: `staleHandlesReleased = 0` on every arm while the bug still
+reproduced. Redux's `CleanUState2` already calls `CancelUnbuild`, so the stale
+handle that theory depends on never exists.
+
+Instrumenting `DoNear` settled it. Both tasks tick in lockstep through deploy
+state 0 → 1 → 2 and stage 0 → 1, and then, on the frame the building dies:
+
+```
+[DONEAR] beat task=0x29811828 rig=0x02A0CF20 calls=3200 stage=1 deployState=2
+[DONEAR] beat task=0x29812BD8 rig=0x02A0CB20 calls=3200 stage=1 deployState=2
+[TRACE]  terminal rig=0x02A0CF20 handleBefore=0xFFE00002 handleAfter=0x00000000
 ```
 
-**The defect is a one-call substitution in `ConstructionRig::UpdateUnbuild`:
-the vanished-target branch calls `Producer::CancelBuild` where it must call
-`ConstructionRig::CancelUnbuild`.** The two are adjacent cancel routines for the
-producer's two modes, and the build-side one was used on the unbuild path.
+and nothing afterwards, for either task. `DoNear` stops being called for **both**
+rigs at once. The winner got its undeploy inside that terminal frame; the loser's
+task was gone before its next tick. No stale handle is ever observed, on either
+rig, at any point.
 
-This is stock BZ 1.5 code, not a Redux regression — the same substitution is
-present in the 1.5 decompile, and the live reproduction above is Redux
-inheriting it.
+This is why an arm has to report what the fix actually did and not just the
+mission outcome — see [[ab-arm-that-never-engaged-looks-like-a-null-result]].
+The first fix was installed, active, and running on every frame, and a summary
+that only showed `stuck=1` would have read as "the fix does not work" rather
+than "the fix never applied to anything".
 
-## Notes toward a fix
+## The fix
 
-The Redux addresses still need resolving; the legacy→Redux symbol map is not
-currently present in the tree (`reverse_engineering/workshop/symbol_transfer/`
-is gone), so the call site has to be located in the shipped Redux binary
-directly. The anchor is small and distinctive: a `GameObjectHandle::GetObj` on
-a field at rig `+0x360` (`[0xd8]` as dwords) whose null branch tail-calls the
-producer's cancel-build routine.
+`[Fixes] ConstructorRecycleStaleTarget`, default ON, MP-gated with the other
+simulation-affecting corrections.
 
-Per `[[byte-guard-anchor-instruction-not-operand]]`, guard on the instruction,
-not the operand. The minimal correction is to zero `unbuildHandle` on that
-branch — a detour on `UpdateUnbuild` that checks the target handle first and
-clears the field itself is enough, and does not require replacing the whole
-function.
+A detour on `RigProcess::CleanUState2` asks for the undeploy the completion
+branch would have asked for, through the same virtual (`Craft::Undeploy`, rig
+vtable +0x64, confirmed live as `0x004AE330`):
 
-Worth checking at the same time whether the AI-driven recycle path can put two
-of its own Constructors on one building, since the wedged rig is invisible to
-the player as a *failure* — it just sits there looking deployed.
+```c
+rig    = process->craft;              /* +0x34 */
+target = process->unbuildTarget;      /* +0x3C */
+if (rig && target && GameObjectHandle::GetObj(target) == nullptr &&
+    (rig->deployState == 2 || rig->deployState == 1))
+{
+    rig->vtbl[0x64](rig);             /* Craft::Undeploy */
+}
+/* then delegate to the original */
+```
+
+Two guards keep it to the defect and nothing else:
+
+- **The target must no longer resolve.** Finishing an unbuild normally, or the
+  player replacing the order, leaves this state with a live or absent target
+  handle and is untouched.
+- **The rig must be deployed (2) or still deploying (1).** A rig already
+  undeploying (3) is skipped, so the winner — which asked for its undeploy one
+  tick earlier — is never touched. `Craft::Undeploy` only sets the control
+  block's deploy request under the same two states, so even if the winner were
+  still at 2 the call would be the idempotent re-assert it already made.
+
+Byte-guarded on three instructions inside `CleanUState2` — the entry prologue,
+the load of the craft at `+0x34` feeding the `CancelUnbuild` call, and the load
+of the task pointer at `+0x38` — plus `GetObj`'s own prologue, since the fix
+calls it. A mismatch stands the fix down and logs one line.
+
+The same defect covers a rig whose recycle target is destroyed by enemy fire
+mid-recycle; that is the identical teardown path.
