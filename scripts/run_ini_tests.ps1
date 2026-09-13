@@ -169,13 +169,16 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "General/OgreMaterialCollisionGuard",
     "General/EditorOverheadPlacementOrder",
 
-    # Qualified [Fixes] entries. The five simulation fixes below stand down in
+    # Qualified [Fixes] entries. The six simulation fixes below stand down in
     # network games; MagnetZeroRangeGuard is defensive; the CLI parser repair
     # has no gameplay effect. VehicleListModScoping stays off in the player
     # preset because it reloads the waiting-room vehicle list and replaces
     # BZP's faction-only .vxt with stock ships.
     "Fixes/ApcAlliedTargetDeploy",
     "Fixes/SplinterUndead",
+    # Confirmed owner-attribution defect; the fix mutates perceivedTeam only in
+    # single player and restores the firing craft's reveal after a landed hit.
+    "Fixes/OwnedObjectReveal",
     "Fixes/HowitzerUndeployedRetaliation",
     "Fixes/TugCargoPostLoad",
     "Fixes/ConstructorRemoteBuild",
@@ -274,6 +277,7 @@ $shippingPolicyChecks = @{
     "Fixes/AiMultiProducerMakers" = "0"
     "Fixes/ApcAlliedTargetDeploy" = "1"
     "Fixes/SplinterUndead" = "1"
+    "Fixes/OwnedObjectReveal" = "1"
     "Fixes/HowitzerUndeployedRetaliation" = "1"
     "Fixes/TugCargoPostLoad" = "1"
     "Fixes/ConstructorRemoteBuild" = "1"

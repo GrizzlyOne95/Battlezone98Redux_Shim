@@ -241,7 +241,7 @@ ExplainMultiplayerNotReady = 1
 ; Everything in this section defaults to ON. These are bug fixes, not
 ; enhancements, and normal play wants them on.
 ;
-; The first five -- ApcAlliedTargetDeploy, SplinterUndead,
+; The first six -- ApcAlliedTargetDeploy, SplinterUndead, OwnedObjectReveal,
 ; HowitzerUndeployedRetaliation, TugCargoPostLoad and ConstructorRemoteBuild --
 ; change simulation behaviour, and none of them is negotiated with peers, so
 ; they are gated on the net id exactly the way [SinglePlayer] features are:
@@ -294,6 +294,17 @@ ApcAlliedTargetDeploy = 1
 ; Accepted: boolean. Default: ON. Stands down in a network game.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_SPLINTER_UNDEAD_FIX
 SplinterUndead = 1
+
+; Reveal the owning craft when a comet, deployed APC soldier, splinter payload
+; or another GameObject-owned child lands a damaging hit. Redux reveals only
+; the immediate damager in SetDamageFlags. Splinter also drops its owner while
+; creating the intermediate SprayBuilding, so OpenShim preserves that link at
+; the exact deployment call before applying the same general owner-chain rule.
+; Collisions, misses and ownerless objects remain stock.
+; Accepted: boolean. Default: ON. Stands down in a network game.
+; Trace: OPENSHIM_TRACE_OWNED_OBJECT_REVEAL=1
+; Legacy env alias to force it off: OPENSHIM_DISABLE_OWNED_OBJECT_REVEAL
+OwnedObjectReveal = 1
 
 ; Suppress a howitzer's recent-hit target override while it is undeployed, so
 ; an undeployed howitzer does not counter-snipe.
