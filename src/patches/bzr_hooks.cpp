@@ -10,6 +10,7 @@
 #include "patcher.h"
 #include "fog_wake_feature.h"
 #include "render_queue_trace.h"
+#include "mp_vehicle_preview_fix.h"
 #include "shim_log.h"
 #include "ogre_shader_cache.h"
 #include "ogre_enhanced_light_selection.h"
@@ -37952,6 +37953,11 @@ namespace BZROpenShim
         // frame a world is rendered, and is inert unless
         // [Diagnostics] TraceRenderQueues is set.
         RenderQueueTraceTick(GetOgreSceneManagerRuntime());
+
+        // Repairs the multiplayer Create Game vehicle preview, which renders
+        // black on DX11 because its viewport keeps Ogre's default scheme and
+        // falls back to a PSSM technique that reads NaN shadow matrices.
+        MpVehiclePreviewFixTick();
 
         static volatile long s_FiredLogBudget = 4;
         if (InterlockedDecrement(&s_FiredLogBudget) >= 0)

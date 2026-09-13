@@ -182,6 +182,15 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "Fixes/MagnetZeroRangeGuard",
     "Fixes/CliMultiParameterOptions",
 
+    # Menu-only rendering repair, no simulation or wire effect. The Create Game
+    # vehicle preview inherits a PSSM scheme on a viewport with shadows
+    # disabled; its shader then reads NaN texWorldViewProj matrices and writes
+    # NaN, which a UNORM target stores as black. Confirmed from a RenderDoc
+    # capture (pixel history: shaderOut = nan,nan,nan,0 with depth passed and
+    # nothing culled or discarded). Ships ON because the panel is simply empty
+    # without it, and a player who hits that has no setting to reach for.
+    "Fixes/MpVehiclePreviewShadowScheme",
+
     # Qualified socket/netcode baseline.
     "Network/NetImprovements",
 
