@@ -1576,6 +1576,50 @@ PilotFlashlightPitch = 0
 ; Absent or unmatched falls back to eye height (0, 1.685, 0).
 PilotFlashlightBone = 11POV
 
+; Keep your pilot on your own team while boarding a craft.
+;
+; UNPROVEN, and it ships OFF for that reason -- see the [PILOTTEAM] note below
+; before turning it on.
+;
+; Symptom: an Arc Mine on YOUR OWN team fires a gmbolt at you on the exact
+; frame you board a craft, and at the spot your pilot was standing. It never
+; happens on a hop-out and the craft takes no damage, because the thing being
+; shot at is the pilot, which is destroyed a moment later.
+;
+; Mechanism, read out of the shipped image. Boarding runs
+; GameObject::SetAsUser on the craft (0x004DB930), which first calls
+; SetAsNotUser on the object you were previously controlling -- your pilot --
+; and GameObject::SetAsNotUser (0x004DBA60) ends with
+;
+;     SetTeam( get_obj_team(this->obj) )
+;
+; where get_obj_team (0x0047E9A0) reads a 4-bit team packed into the low-level
+; object's flags. Your pilot's live team comes from userTeamNumber while you
+; are on foot, but boarding restores it from that packed field instead. A
+; pilot whose packed team reads 0 is therefore briefly on team 0, and
+; Team::FriendP rejects team 0 outright -- team 0 is nobody's friend, your own
+; mines included -- so a friendly weapon mine acquires it as a legitimate
+; target.
+;
+; This does not touch the boarding call. While you are on foot it repairs the
+; stale packed field to match your live team, so the engine's own restore then
+; produces the right answer. It is idempotent and it writes nothing until the
+; running build has confirmed both field offsets on a case that must agree
+; (a craft, where the packed and live team are the same number by
+; construction); an offset that is wrong on a future build stands the feature
+; down rather than corrupting an unrelated field.
+;
+; The mechanism has NOT been observed live. The decompilation cannot settle
+; what Craft::BuildPilot passes as the pilot's team, so the [PILOTTEAM] log
+; lines are the missing measurement: they report the packed and live team for
+; every pilot, and say "DISAGREE" when the two differ. If they never disagree
+; then this reading is wrong and the feature is inert.
+;
+; Stands down for the duration of a network game.
+; Accepted: boolean. Default: OFF.
+; Env override to enable: OPENSHIM_PILOT_TEAM_RESTORE
+PilotTeamRestore = 0
+
 
 
 

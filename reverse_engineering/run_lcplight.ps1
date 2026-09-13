@@ -95,8 +95,12 @@ $BurstWindows = @(
 # arm never inherits the previous arm's value by omission.
 $ArmMatrix = @{
     flashlight = [ordered]@{
-        on  = @{ PilotFlashlight = "1"; HeadlightFalloffRepair = "1"; Headlights = "1" }
-        off = @{ PilotFlashlight = "0"; HeadlightFalloffRepair = "1"; Headlights = "1" }
+        # PilotTeamRestore is held ON in both arms, not varied. It is only a
+        # passenger here: its [PILOTTEAM] lines report the pilot's packed and
+        # live team, and this fixture's hop-out is the only scripted way to put
+        # the PLAYER on foot, which is when those lines are emitted.
+        on  = @{ PilotFlashlight = "1"; HeadlightFalloffRepair = "1"; Headlights = "1"; PilotTeamRestore = "1" }
+        off = @{ PilotFlashlight = "0"; HeadlightFalloffRepair = "1"; Headlights = "1"; PilotTeamRestore = "1" }
     }
     headlight = [ordered]@{
         # Shipping behaviour: SolveInvisibleRange inflates the stock 600 m

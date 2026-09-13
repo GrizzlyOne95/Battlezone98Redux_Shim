@@ -20721,6 +20721,286 @@ namespace BZROpenShim
             RefreshPilotFlashlightState();
         }
 
+        // --- Pilot team restore on boarding (SinglePlayer tier) ---------------
+        //
+        // Symptom, from a 2026-09-13 play01.bzn capture with no mission script:
+        // an Arc Mine on the PLAYER'S OWN TEAM discharges a gmbolt at the
+        // player on the exact frame the player boards a craft -- capture frames
+        // 689 and 1565, the two frames the weapon panel switches to the craft
+        // loadout. Never on a hop-out. The craft takes no damage, because the
+        // thing being shot at is the pilot, which is destroyed moments later.
+        //
+        // Traced mechanism. Boarding runs GameObject::SetAsUser on the craft
+        // (Redux 0x004DB930, structurally identical to 1.5 0x00495468). Before
+        // it attaches the craft to userTeamNumber it calls SetAsNotUser on the
+        // object you were previously controlling -- your pilot -- and
+        // GameObject::SetAsNotUser (Redux 0x004DBA60) ends with
+        //
+        //     SetTeam( get_obj_team(this->obj) )
+        //
+        // where get_obj_team (Redux 0x0047E9A0) is
+        // `(*(uint*)(obj + 0x14) & 0xF0000) >> 16`: a 4-bit team packed into
+        // the low-level object's flags, written once by GameObjectClass::Build
+        // as `flags = team << 16`.
+        //
+        // So the pilot's live team comes from userTeamNumber while you are
+        // walking around, but boarding restores it from that packed nibble. A
+        // pilot whose nibble reads 0 is therefore momentarily on team 0, and
+        // Team::FriendP (Redux 0x005E1310) rejects team 0 outright --
+        // `n >= 1 && (dwAllies & (1 << n))` -- so team 0 is nobody's friend,
+        // including its own side's mines. WeaponMine::Simulate (0x00612950)
+        // then has a legitimate target standing exactly where the pilot is.
+        //
+        // The fix repairs the stale packed field rather than interfering with
+        // the restore: while the player is on foot, if the nibble reads 0 but
+        // the live team does not, write the live team into the nibble. Boarding
+        // then restores the correct team by itself. No hook, no control-flow
+        // surgery, and it is idempotent.
+        //
+        // IMPORTANT -- this ships OFF and is not yet proven. The mechanism is
+        // read out of the decompilation, not observed live: the corpus cannot
+        // settle what Craft::BuildPilot passes Build as the team, because
+        // Ghidra collapses several Craft members into one field there. The
+        // [PILOTTEAM] lines below are the missing measurement. If they never
+        // report a disagreement then this hypothesis is wrong and the feature
+        // is inert, which is the intended failure mode.
+
+        // GameObject layout, all confirmed against the shipped GOG image rather
+        // than the advisory PDB:
+        //   +0x0F4  _OBJ76* obj      (read by SetAsNotUser as this[0x3d])
+        //   +0x174  live team        (GameObject::GetTeam 0x00462450 returns
+        //                             subobject+0x15C, and the DistributedObject
+        //                             subobject sits at +0x18, so +0x174)
+        // and on the _OBJ76:
+        //   +0x014  flags, team in bits 16..19
+        static constexpr size_t kGameObjectLowLevelObjOffset = 0x0F4;
+        static constexpr size_t kGameObjectLiveTeamOffset = 0x174;
+        static constexpr size_t kLowLevelObjFlagsOffset = 0x014;
+        static constexpr uint32_t kLowLevelObjTeamMask = 0x000F0000u;
+        static constexpr int kLowLevelObjTeamShift = 16;
+        static constexpr int kMaxPackedTeam = 15;
+
+        static bool g_PilotTeamRestoreConfigInitialized = false;
+        static bool g_PilotTeamRestoreEnabled = false;
+        static bool g_PilotTeamRestoreRuntimeActive = false;
+        // The offsets above are only trusted once the running build has agreed
+        // with them on a case that MUST agree. While the player is in a craft
+        // the packed nibble and the live team are the same number by
+        // construction, so seeing them match proves both offsets on this image.
+        // Nothing is ever written before that. An offset that is wrong on some
+        // future build therefore stands the feature down instead of corrupting
+        // an unrelated field.
+        static bool g_PilotTeamLayoutVerified = false;
+        static uint32_t g_PilotTeamRepairs = 0;
+        static void* g_PilotTeamLastReported = nullptr;
+
+        struct PilotTeamSample
+        {
+            void* lowLevelObj = nullptr;
+            uint32_t flags = 0;
+            int packedTeam = -1;
+            int liveTeam = -1;
+        };
+
+        static bool TryReadPilotTeamSample(void* gameObject, PilotTeamSample& out)
+        {
+            out = {};
+            if (!gameObject)
+                return false;
+            __try
+            {
+                const auto* base = reinterpret_cast<const uint8_t*>(gameObject);
+                out.lowLevelObj = *reinterpret_cast<void* const*>(
+                    base + kGameObjectLowLevelObjOffset);
+                if (!out.lowLevelObj)
+                    return false;
+                out.liveTeam = *reinterpret_cast<const int32_t*>(
+                    base + kGameObjectLiveTeamOffset);
+                out.flags = *reinterpret_cast<const uint32_t*>(
+                    reinterpret_cast<const uint8_t*>(out.lowLevelObj) +
+                    kLowLevelObjFlagsOffset);
+                out.packedTeam =
+                    static_cast<int>((out.flags & kLowLevelObjTeamMask) >> kLowLevelObjTeamShift);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                out = {};
+                return false;
+            }
+        }
+
+        static bool TryWritePackedTeam(void* lowLevelObj, uint32_t flags, int team)
+        {
+            if (!lowLevelObj || team < 1 || team > kMaxPackedTeam)
+                return false;
+            const uint32_t repaired =
+                (flags & ~kLowLevelObjTeamMask) |
+                (static_cast<uint32_t>(team) << kLowLevelObjTeamShift);
+            __try
+            {
+                *reinterpret_cast<uint32_t*>(
+                    reinterpret_cast<uint8_t*>(lowLevelObj) + kLowLevelObjFlagsOffset) = repaired;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void InitializePilotTeamRestoreConfig()
+        {
+            if (g_PilotTeamRestoreConfigInitialized)
+                return;
+            g_PilotTeamRestoreConfigInitialized = true;
+
+            bool boolValue = false;
+            if (TryGetUserConfigBool(
+                    kUserConfigSinglePlayerSection, "PilotTeamRestore", boolValue))
+            {
+                g_PilotTeamRestoreEnabled = boolValue;
+            }
+            if (EnvFlagEnabled("OPENSHIM_PILOT_TEAM_RESTORE"))
+                g_PilotTeamRestoreEnabled = true;
+
+            Log(L"[PILOTTEAM] Baseline enabled=%hs (SP-only)\n",
+                g_PilotTeamRestoreEnabled ? "yes" : "no");
+        }
+
+        static void RefreshPilotTeamRestoreState()
+        {
+            InitializePilotTeamRestoreConfig();
+
+            const bool wantActive =
+                g_PilotTeamRestoreEnabled && ReadLocalPlayerNetIdValue() == 0;
+            if (!wantActive)
+            {
+                if (g_PilotTeamRestoreRuntimeActive)
+                {
+                    g_PilotTeamRestoreRuntimeActive = false;
+                    Log(L"[PILOTTEAM] Stood down (%hs)\n",
+                        g_PilotTeamRestoreEnabled ? "multiplayer" : "disabled");
+                }
+                return;
+            }
+            if (!g_PilotTeamRestoreRuntimeActive)
+            {
+                g_PilotTeamRestoreRuntimeActive = true;
+                Log(L"[PILOTTEAM] Pilot team restore active (SP-only)\n");
+            }
+
+            void* const player = TryGetHeadlightPlayerObject();
+            if (!player || !IsLiveHeadlightObjectSlot(player))
+                return;  // no world yet; silent by design, this runs per frame
+
+            // Every other bail-out below says so once. A feature that stands
+            // down without a word is indistinguishable from one that is broken,
+            // and a run spent discovering that is a run wasted.
+            PilotTeamSample sample = {};
+            if (!TryReadPilotTeamSample(player, sample))
+            {
+                static bool reported = false;
+                if (!reported)
+                {
+                    reported = true;
+                    Log(L"[PILOTTEAM] Stood down: cannot read the team fields on "
+                        L"player=0x%08X (obj +0x%X / team +0x%X). Wrong build layout.\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(player)),
+                        static_cast<unsigned>(kGameObjectLowLevelObjOffset),
+                        static_cast<unsigned>(kGameObjectLiveTeamOffset));
+                }
+                return;
+            }
+
+            const bool onFoot = IsPilotOnFoot(player);
+
+            if (!onFoot)
+            {
+                // Layout self-check. A craft's packed nibble and live team are
+                // the same number by construction, so agreement here proves
+                // both offsets on this image. Only then is a write allowed.
+                if (!g_PilotTeamLayoutVerified &&
+                    sample.liveTeam >= 1 && sample.liveTeam <= kMaxPackedTeam &&
+                    sample.packedTeam == sample.liveTeam)
+                {
+                    g_PilotTeamLayoutVerified = true;
+                    Log(L"[PILOTTEAM] Layout verified on a craft: packed=%d live=%d "
+                        L"(obj=0x%08X flags=0x%08X)\n",
+                        sample.packedTeam, sample.liveTeam,
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sample.lowLevelObj)),
+                        sample.flags);
+                }
+                g_PilotTeamLastReported = nullptr;
+                return;
+            }
+
+            // One line per distinct pilot object. This is the measurement the
+            // decompilation could not supply: whether the packed nibble and the
+            // live team actually disagree for a runtime-built pilot.
+            if (g_PilotTeamLastReported != player)
+            {
+                g_PilotTeamLastReported = player;
+                Log(L"[PILOTTEAM] Pilot on foot player=0x%08X packed=%d live=%d "
+                    L"verified=%hs%hs\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(player)),
+                    sample.packedTeam, sample.liveTeam,
+                    g_PilotTeamLayoutVerified ? "yes" : "no",
+                    (sample.packedTeam == sample.liveTeam)
+                        ? " (agree -- nothing to repair)"
+                        : " (DISAGREE)");
+            }
+
+            if (!g_PilotTeamLayoutVerified)
+            {
+                static bool reported = false;
+                if (!reported)
+                {
+                    reported = true;
+                    Log(L"[PILOTTEAM] Holding: the layout self-check has not passed "
+                        L"yet, so nothing will be written. It passes the first time "
+                        L"the player is in a craft whose packed and live team agree.\n");
+                }
+                return;
+            }
+            if (sample.packedTeam != 0)
+                return;  // nothing to repair; the per-pilot line above says so
+            if (sample.liveTeam < 1 || sample.liveTeam > kMaxPackedTeam)
+            {
+                static bool reported = false;
+                if (!reported)
+                {
+                    reported = true;
+                    Log(L"[PILOTTEAM] Not repairing: packed team is 0 but the live "
+                        L"team is %d, which is not a team this field can hold "
+                        L"(1..%d). Both readings are suspect; standing down.\n",
+                        sample.liveTeam, kMaxPackedTeam);
+                }
+                return;
+            }
+
+            if (TryWritePackedTeam(sample.lowLevelObj, sample.flags, sample.liveTeam))
+            {
+                ++g_PilotTeamRepairs;
+                Log(L"[PILOTTEAM] Repaired packed team 0 -> %d on pilot 0x%08X "
+                    L"(obj=0x%08X total=%u)\n",
+                    sample.liveTeam,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(player)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sample.lowLevelObj)),
+                    static_cast<unsigned>(g_PilotTeamRepairs));
+            }
+        }
+
+        static void RevertPilotTeamRestoreToBaseline()
+        {
+            // Nothing to undo: the only write repairs a field the engine itself
+            // owns, and it is already what the engine would have stored. Just
+            // re-read the setting and let the next tick decide.
+            g_PilotTeamRestoreConfigInitialized = false;
+            g_PilotTeamLastReported = nullptr;
+            InitializePilotTeamRestoreConfig();
+        }
+
         // --- BZRNet route preference and UDP port ------------------------------
         // Redux has no LAN browser, offline lobby, or direct-IP join: peers meet
         // in a BZRNet lobby over an authenticated WebSocket, the service hands
@@ -21350,6 +21630,8 @@ namespace BZROpenShim
               &RevertHeadlightsToBaseline, &RefreshHeadlightState },
             { "PilotFlashlight", FeatureTier::SinglePlayer,
               &RevertPilotFlashlightToBaseline, &RefreshPilotFlashlightState },
+            { "PilotTeamRestore", FeatureTier::SinglePlayer,
+              &RevertPilotTeamRestoreToBaseline, &RefreshPilotTeamRestoreState },
             { "AiWeaponMaskArtillery", FeatureTier::SinglePlayer,
               &RevertAiWeaponMaskArtilleryToBaseline, &RefreshAiWeaponMaskArtilleryState },
             { "AiWeaponMaskMinelayer", FeatureTier::SinglePlayer,
@@ -37934,6 +38216,12 @@ namespace BZROpenShim
         // destroyed here because this is the only callback guaranteed to run
         // while a world is rendered, on or off foot.
         RefreshPilotFlashlightState();
+
+        // Same driver again, and for the same reason: the packed team has to be
+        // repaired while the player is still on foot, because the value is read
+        // during the boarding call itself. Two field reads per frame when the
+        // feature is on, and an immediate return when it is off.
+        RefreshPilotTeamRestoreState();
 
         // For the same reason, this is the primary driver of the multiplayer
         // gate: every SinglePlayer-tier feature is reconciled here rather than
