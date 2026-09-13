@@ -1,6 +1,7 @@
 #include "bzrnet_instrumentation.h"
 #include "bzrnet_protocol.h"
 #include "bzrnet_trace.h"
+#include "net_optimizer.h"
 #include "shim_log.h"
 
 #include <winsock2.h>
@@ -26,10 +27,13 @@ namespace
     constexpr uint16_t kRelayPort = 1339;
     constexpr size_t kMaxWsBytes = 1024 * 1024;
     constexpr size_t kWirePrefixBytes = 96;
+    constexpr uint32_t kFullCaptureQueueRecords = 32768;
+    constexpr uint32_t kMaxUdpPayloadBytes = 65507;
 
     struct Config
     {
         bool enabled = false;
+        bool fullNetworkCapture = false;
         bool privateForensic = false;
         bool allUdp = false;
         uint32_t queueRecords = 4096;
@@ -49,7 +53,7 @@ namespace
         WsDirection inbound;
     };
 
-    enum class PendingKind : uint8_t { Stream, Datagram };
+    enum class PendingKind : uint8_t { Stream, Datagram, ConnectedDatagram };
     struct PendingIo
     {
         PendingKind kind = PendingKind::Stream;
@@ -57,6 +61,8 @@ namespace
         std::vector<WSABUF> buffers;
         sockaddr* from = nullptr;
         LPINT fromLen = nullptr;
+        sockaddr_storage connectedPeer = {};
+        int connectedPeerLen = 0;
         LPWSAOVERLAPPED_COMPLETION_ROUTINE originalCompletion = nullptr;
         bool capturedImmediate = false;
     };
@@ -77,6 +83,7 @@ namespace
     using WSARecvFromFn = int (WSAAPI*)(SOCKET, LPWSABUF, DWORD, LPDWORD, LPDWORD, sockaddr*, LPINT, LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
     using CloseSocketFn = int (WSAAPI*)(SOCKET);
     using GqcsFn = BOOL (WINAPI*)(HANDLE, LPDWORD, PULONG_PTR, LPOVERLAPPED*, DWORD);
+    using ExitFn = void (__cdecl*)(int);
 
     Config g_Config;
     INIT_ONCE g_InitOnce = INIT_ONCE_STATIC_INIT;
@@ -92,6 +99,8 @@ namespace
     WSARecvFromFn g_WSARecvFrom = nullptr;
     CloseSocketFn g_CloseSocket = nullptr;
     GqcsFn g_Gqcs = nullptr;
+    ExitFn g_Exit = nullptr;
+    volatile LONG g_ProcessExitShutdown = 0;
 
     SRWLOCK g_WsLock = SRWLOCK_INIT;
     std::unordered_map<SOCKET, WsState> g_Ws;
@@ -139,11 +148,22 @@ namespace
         cfg.allUdp = GetPrivateProfileIntA("OpenShimSocket", "BZRNetTraceAllUdp", 0, ini.c_str()) != 0;
         cfg.queueRecords = static_cast<uint32_t>(GetPrivateProfileIntA("OpenShimSocket", "BZRNetTraceQueueRecords", 4096, ini.c_str()));
         cfg.enabled = cfg.enabled || EnvBool("BZ_BZRNET_TRACE") || EnvBool("OPENSHIM_BZRNET_TRACE");
-        cfg.enabled = cfg.enabled || EnvBool("BZ_RELAY_CAPTURE") || EnvBool("OPENSHIM_RELAY_CAPTURE");
+        cfg.fullNetworkCapture = EnvBool("BZ_RELAY_CAPTURE") || EnvBool("OPENSHIM_RELAY_CAPTURE");
+        cfg.enabled = cfg.enabled || cfg.fullNetworkCapture;
         cfg.privateForensic = cfg.privateForensic || EnvBool("BZ_BZRNET_TRACE_PRIVATE") || EnvBool("OPENSHIM_BZRNET_TRACE_PRIVATE");
         cfg.allUdp = cfg.allUdp || EnvBool("BZ_BZRNET_TRACE_ALL_UDP") || EnvBool("OPENSHIM_BZRNET_TRACE_ALL_UDP");
         cfg.queueRecords = EnvUint("BZ_BZRNET_TRACE_QUEUE", cfg.queueRecords);
         cfg.queueRecords = EnvUint("OPENSHIM_BZRNET_TRACE_QUEUE", cfg.queueRecords);
+        if (cfg.fullNetworkCapture)
+        {
+            // The user-facing RelayLogging switch is the evidence-collection
+            // profile, not merely an alias for the basic structured trace.
+            // Preserve secrets redaction, but retain every endpoint/identity
+            // and every UDP path needed to correlate two clients with PCAPs.
+            cfg.privateForensic = true;
+            cfg.allUdp = true;
+            cfg.queueRecords = (std::max)(cfg.queueRecords, kFullCaptureQueueRecords);
+        }
         cfg.queueRecords = (std::max)(256u, (std::min)(cfg.queueRecords, 65536u));
         return cfg;
     }
@@ -222,6 +242,21 @@ namespace
         return PortOf(reinterpret_cast<const sockaddr*>(&peer), length) == kWsPort;
     }
 
+    bool IsUdpSocket(SOCKET s)
+    {
+        int type = 0;
+        int length = static_cast<int>(sizeof(type));
+        return getsockopt(s, SOL_SOCKET, SO_TYPE, reinterpret_cast<char*>(&type), &length) == 0 &&
+            type == SOCK_DGRAM;
+    }
+
+    bool TryGetConnectedPeer(SOCKET s, sockaddr_storage& peer, int& peerLen)
+    {
+        peer = {};
+        peerLen = static_cast<int>(sizeof(peer));
+        return getpeername(s, reinterpret_cast<sockaddr*>(&peer), &peerLen) == 0;
+    }
+
     std::string JsonEscape(const std::string& input)
     {
         std::string out;
@@ -248,10 +283,16 @@ namespace
         return hash;
     }
 
+    size_t WireCaptureBytes(size_t length)
+    {
+        const size_t limit = g_Config.fullNetworkCapture ? kMaxUdpPayloadBytes : kWirePrefixBytes;
+        return (std::min)(length, limit);
+    }
+
     std::string HexPrefix(const uint8_t* data, size_t length)
     {
         static const char hex[] = "0123456789abcdef";
-        const size_t count = (std::min)(length, kWirePrefixBytes);
+        const size_t count = WireCaptureBytes(length);
         std::string out(count * 2, '0');
         for (size_t i = 0; i < count; ++i)
         {
@@ -294,8 +335,11 @@ namespace
         _snprintf_s(hash, _TRUNCATE, "%016llx", static_cast<unsigned long long>(Fnv1a64(data, length)));
         BzrUdpControlInfo control = DecodeBzrUdpControl(data, length);
         if (!control.recognized && length >= 20) control = DecodeBzrUdpControl(data + 18, length - 18);
+        const size_t capturedLength = WireCaptureBytes(length);
         std::string details = "{\"transport\":\"udp\",\"port\":" + std::to_string(port) +
             ",\"endpoint\":\"" + JsonEscape(endpointText) + "\",\"payloadLength\":" + std::to_string(length) +
+            ",\"capturedPayloadLength\":" + std::to_string(capturedLength) +
+            ",\"payloadTruncated\":" + (capturedLength < length ? "true" : "false") +
             ",\"fnv1a64\":\"" + hash + "\",\"payloadPrefixHex\":\"" + HexPrefix(data, length) + "\",\"pending\":" +
             (pending ? "true" : "false");
         if (length >= 18) details += ",\"commonKind\":" + std::to_string(data[1] & 0x0f);
@@ -424,8 +468,12 @@ namespace
     {
         if (!overlapped || !buffers || !count || !IsBzrNetTraceEnabled()) return false;
         if (kind == PendingKind::Stream && !IsWsSocket(s)) return false;
+        if (kind == PendingKind::ConnectedDatagram &&
+            (!g_Config.allUdp || !IsUdpSocket(s))) return false;
         PendingIo io;
         io.kind = kind; io.socket = s; io.buffers.assign(buffers, buffers + count); io.from = from; io.fromLen = fromLen; io.originalCompletion = completion;
+        if (kind == PendingKind::ConnectedDatagram &&
+            !TryGetConnectedPeer(s, io.connectedPeer, io.connectedPeerLen)) return false;
         AcquireSRWLockExclusive(&g_PendingLock);
         g_Pending[overlapped] = std::move(io);
         ReleaseSRWLockExclusive(&g_PendingLock);
@@ -454,13 +502,26 @@ namespace
     void CapturePending(const PendingIo& io, DWORD transferred)
     {
         if (!transferred || io.buffers.empty()) return;
-        const uint32_t limit = io.kind == PendingKind::Stream ? static_cast<uint32_t>(kMaxWsBytes) : 2048u;
+        const uint32_t limit = io.kind == PendingKind::Stream
+            ? static_cast<uint32_t>(kMaxWsBytes)
+            : static_cast<uint32_t>(WireCaptureBytes(transferred));
         const uint32_t capacity = (std::min)(static_cast<uint32_t>(transferred), limit);
         std::vector<uint8_t> data(capacity);
         const uint32_t copied = Gather(const_cast<WSABUF*>(io.buffers.data()), static_cast<DWORD>(io.buffers.size()), data.data(), capacity);
         if (!copied) return;
-        if (io.kind == PendingKind::Stream) FeedWs(io.socket, false, data.data(), copied);
-        else TraceWire(io.socket, false, io.from, io.fromLen ? *io.fromLen : 0, data.data(), copied, false);
+        if (io.kind == PendingKind::Stream)
+        {
+            FeedWs(io.socket, false, data.data(), copied);
+        }
+        else if (io.kind == PendingKind::ConnectedDatagram)
+        {
+            TraceWire(io.socket, false, reinterpret_cast<const sockaddr*>(&io.connectedPeer),
+                io.connectedPeerLen, data.data(), copied, false);
+        }
+        else
+        {
+            TraceWire(io.socket, false, io.from, io.fromLen ? *io.fromLen : 0, data.data(), copied, false);
+        }
     }
 
     void CALLBACK CompletionThunk(DWORD error, DWORD transferred, LPWSAOVERLAPPED overlapped, DWORD flags)
@@ -474,14 +535,42 @@ namespace
     int WSAAPI HookSend(SOCKET s, const char* buffer, int length, int flags)
     {
         const int rc = g_Send ? g_Send(s, buffer, length, flags) : SOCKET_ERROR;
-        if (rc > 0 && buffer) FeedWs(s, true, reinterpret_cast<const uint8_t*>(buffer), static_cast<size_t>(rc));
+        if (rc > 0 && buffer)
+        {
+            if (IsWsSocket(s))
+            {
+                FeedWs(s, true, reinterpret_cast<const uint8_t*>(buffer), static_cast<size_t>(rc));
+            }
+            else if (g_Config.allUdp && IsUdpSocket(s))
+            {
+                sockaddr_storage peer = {};
+                int peerLen = 0;
+                if (TryGetConnectedPeer(s, peer, peerLen))
+                    TraceWire(s, true, reinterpret_cast<const sockaddr*>(&peer), peerLen,
+                        reinterpret_cast<const uint8_t*>(buffer), static_cast<size_t>(rc), false);
+            }
+        }
         return rc;
     }
 
     int WSAAPI HookRecv(SOCKET s, char* buffer, int length, int flags)
     {
         const int rc = g_Recv ? g_Recv(s, buffer, length, flags) : SOCKET_ERROR;
-        if (rc > 0 && buffer) FeedWs(s, false, reinterpret_cast<const uint8_t*>(buffer), static_cast<size_t>(rc));
+        if (rc > 0 && buffer)
+        {
+            if (IsWsSocket(s))
+            {
+                FeedWs(s, false, reinterpret_cast<const uint8_t*>(buffer), static_cast<size_t>(rc));
+            }
+            else if (g_Config.allUdp && IsUdpSocket(s))
+            {
+                sockaddr_storage peer = {};
+                int peerLen = 0;
+                if (TryGetConnectedPeer(s, peer, peerLen))
+                    TraceWire(s, false, reinterpret_cast<const sockaddr*>(&peer), peerLen,
+                        reinterpret_cast<const uint8_t*>(buffer), static_cast<size_t>(rc), false);
+            }
+        }
         return rc;
     }
 
@@ -510,7 +599,21 @@ namespace
             const uint32_t capacity = (std::min)(bytes, static_cast<uint32_t>(kMaxWsBytes));
             std::vector<uint8_t> data(capacity);
             const uint32_t copied = capacity ? Gather(buffers, count, data.data(), capacity) : 0;
-            if (copied) FeedWs(s, true, data.data(), copied);
+            if (copied)
+            {
+                if (IsWsSocket(s))
+                {
+                    FeedWs(s, true, data.data(), copied);
+                }
+                else if (g_Config.allUdp && IsUdpSocket(s))
+                {
+                    sockaddr_storage peer = {};
+                    int peerLen = 0;
+                    if (TryGetConnectedPeer(s, peer, peerLen))
+                        TraceWire(s, true, reinterpret_cast<const sockaddr*>(&peer), peerLen,
+                            data.data(), copied, err == WSA_IO_PENDING);
+                }
+            }
         }
         if (rc == SOCKET_ERROR) WSASetLastError(err);
         return rc;
@@ -519,7 +622,8 @@ namespace
     int WSAAPI HookWSARecv(SOCKET s, LPWSABUF buffers, DWORD count, LPDWORD bytesRecv, LPDWORD flags,
         LPWSAOVERLAPPED overlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE completion)
     {
-        const bool registered = RegisterPending(overlapped, PendingKind::Stream, s, buffers, count, nullptr, nullptr, completion);
+        const PendingKind kind = IsWsSocket(s) ? PendingKind::Stream : PendingKind::ConnectedDatagram;
+        const bool registered = RegisterPending(overlapped, kind, s, buffers, count, nullptr, nullptr, completion);
         const auto effective = registered && completion ? CompletionThunk : completion;
         const int rc = g_WSARecv ? g_WSARecv(s, buffers, count, bytesRecv, flags, overlapped, effective) : SOCKET_ERROR;
         const int err = rc == SOCKET_ERROR ? WSAGetLastError() : 0;
@@ -528,7 +632,21 @@ namespace
             const uint32_t capacity = (std::min)(*bytesRecv, static_cast<DWORD>(kMaxWsBytes));
             std::vector<uint8_t> data(capacity);
             const uint32_t copied = Gather(buffers, count, data.data(), capacity);
-            if (copied) FeedWs(s, false, data.data(), copied);
+            if (copied)
+            {
+                if (kind == PendingKind::Stream)
+                {
+                    FeedWs(s, false, data.data(), copied);
+                }
+                else if (g_Config.allUdp && IsUdpSocket(s))
+                {
+                    sockaddr_storage peer = {};
+                    int peerLen = 0;
+                    if (TryGetConnectedPeer(s, peer, peerLen))
+                        TraceWire(s, false, reinterpret_cast<const sockaddr*>(&peer), peerLen,
+                            data.data(), copied, false);
+                }
+            }
             if (registered) MarkImmediate(overlapped);
         }
         else if (registered && err != WSA_IO_PENDING) { PendingIo ignored; TakePending(overlapped, ignored, true); }
@@ -544,7 +662,7 @@ namespace
         if (rc == 0 || err == WSA_IO_PENDING)
         {
             const uint32_t bytes = rc == 0 && bytesSent ? *bytesSent : Requested(buffers, count);
-            const uint32_t capacity = (std::min)(bytes, 2048u);
+            const uint32_t capacity = static_cast<uint32_t>(WireCaptureBytes(bytes));
             std::vector<uint8_t> data(capacity);
             const uint32_t copied = capacity ? Gather(buffers, count, data.data(), capacity) : 0;
             if (copied) TraceWire(s, true, to, toLen, data.data(), copied, err == WSA_IO_PENDING);
@@ -562,7 +680,7 @@ namespace
         const int err = rc == SOCKET_ERROR ? WSAGetLastError() : 0;
         if (rc == 0 && bytesRecv && *bytesRecv)
         {
-            const uint32_t capacity = (std::min)(static_cast<uint32_t>(*bytesRecv), 2048u);
+            const uint32_t capacity = static_cast<uint32_t>(WireCaptureBytes(*bytesRecv));
             std::vector<uint8_t> data(capacity);
             const uint32_t copied = Gather(buffers, count, data.data(), capacity);
             if (copied) TraceWire(s, false, from, fromLen ? *fromLen : 0, data.data(), copied, false);
@@ -594,6 +712,22 @@ namespace
             if (TakePending(*overlapped, io, true) && ok && bytes && !io.capturedImmediate) CapturePending(io, *bytes);
         }
         return ok;
+    }
+
+    [[noreturn]] void __cdecl HookExit(int exitCode)
+    {
+        // Redux's normal CRT exit becomes DLL_PROCESS_DETACH with a non-null
+        // reserved value, where Windows has already killed worker threads and
+        // loader-lock rules prohibit joins or file flushing. Intercept exit in
+        // normal execution context so both capture writers can finish first.
+        if (InterlockedCompareExchange(&g_ProcessExitShutdown, 1, 0) == 0)
+        {
+            ShutdownBzrNetInstrumentation();
+            ShutdownNetworkOptimizer();
+        }
+        if (g_Exit)
+            g_Exit(exitCode);
+        ExitProcess(static_cast<UINT>(exitCode));
     }
 
     struct HookSpec { const char* name; WORD ordinal; FARPROC replacement; FARPROC* previous; };
@@ -678,6 +812,13 @@ namespace
         PatchImports(module, label, "ws2_32.dll", winsock, std::size(winsock));
         HookSpec kernel[] = {{"GetQueuedCompletionStatus", 0, reinterpret_cast<FARPROC>(HookGqcs), reinterpret_cast<FARPROC*>(&g_Gqcs)}};
         PatchImports(module, label, "kernel32.dll", kernel, std::size(kernel));
+        if (module == GetModuleHandleA(nullptr))
+        {
+            HookSpec runtime[] = {
+                {"exit", 0, reinterpret_cast<FARPROC>(HookExit), reinterpret_cast<FARPROC*>(&g_Exit)},
+            };
+            PatchImports(module, label, "msvcr120.dll", runtime, std::size(runtime));
+        }
     }
 
     BOOL CALLBACK InitializeOnce(PINIT_ONCE, PVOID, PVOID*)
@@ -687,14 +828,16 @@ namespace
         // and captured nothing are indistinguishable in a bug report otherwise.
         LogShimA(LogLevel::Info, "bzrnet",
             "[BZRNetTrace] relay logging %s (openshim.ini [Diagnostics] RelayLogging); "
-            "privateForensic=%d allUdp=%d queueRecords=%u",
+            "profile=%s privateForensic=%d allUdp=%d queueRecords=%u",
             g_Config.enabled ? "enabled" : "disabled",
+            g_Config.fullNetworkCapture ? "full" : "custom",
             g_Config.privateForensic ? 1 : 0,
             g_Config.allUdp ? 1 : 0,
             g_Config.queueRecords);
         if (!g_Config.enabled) return TRUE;
         BzrNetTraceConfig trace;
         trace.enabled = true;
+        trace.fullNetworkCapture = g_Config.fullNetworkCapture;
         trace.privateForensic = g_Config.privateForensic;
         trace.queueCapacity = g_Config.queueRecords;
         if (!InitializeBzrNetTrace(trace)) return TRUE;
@@ -708,7 +851,8 @@ namespace
         InstallFor(GetModuleHandleA("steam_api.dll"), "steam_api.dll");
         InterlockedExchange(&g_Shutdown, 0);
         EmitBzrNetTrace("config", "BZR_TRACE_READY", "internal", 0, 0, "",
-            std::string("{\"privateForensic\":") + (g_Config.privateForensic ? "true" : "false") +
+            std::string("{\"fullNetworkCapture\":") + (g_Config.fullNetworkCapture ? "true" : "false") +
+            ",\"privateForensic\":" + (g_Config.privateForensic ? "true" : "false") +
             ",\"allUdp\":" + (g_Config.allUdp ? "true" : "false") + ",\"queueRecords\":" + std::to_string(g_Config.queueRecords) + '}');
         return TRUE;
     }

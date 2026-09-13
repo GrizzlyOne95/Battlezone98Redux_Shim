@@ -6114,6 +6114,41 @@ namespace BZROpenShim
                    MainScreenViewNameMatches(g_CareerUiOverlay, "MainScreen_Overlay");
         }
 
+        // Is the cached page still part of the live child tree? The name check
+        // above proves the screen and the overlay are alive, but not the
+        // widgets under them: returning to the title from a game (FirstGAS)
+        // rebuilds the overlay's children while the overlay pointer and its
+        // name stay put. The cached plate is then a freed allocation.
+        //
+        // Deliberately not UiViewHasChild: that helper caps the vector at 64
+        // slots as a garbage guard, and this overlay legitimately carries more
+        // than that once the 20-row career page is built over the stock menu.
+        static bool IsCareerUiPlateAttached()
+        {
+            if (!g_CareerUiOverlay || !g_CareerUiPlate)
+                return false;
+
+            __try
+            {
+                auto* const bytes = reinterpret_cast<uint8_t*>(g_CareerUiOverlay);
+                void** const begin =
+                    *reinterpret_cast<void***>(bytes + kUiViewChildBeginOffset);
+                void** const end =
+                    *reinterpret_cast<void***>(bytes + kUiViewChildEndOffset);
+                if (!begin || !end || begin >= end || (end - begin) >= 256)
+                    return false;
+
+                for (void** slot = begin; slot != end; ++slot)
+                    if (*slot == g_CareerUiPlate)
+                        return true;
+                return false;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         static void ReassertCareerUiHiddenState()
         {
             if (g_CareerUiPageActive || !g_CareerUiPlate)
@@ -6125,6 +6160,24 @@ namespace BZROpenShim
             // while the title screen is still the live singleton.
             if (!IsCareerUiTitleScreenLive())
                 return;
+
+            // ...and only while the cached widgets still belong to the live
+            // tree. Without this the same call faults through a freed vtable
+            // instead (eip garbage at the same 0x007D3344 call site) in the
+            // window between the menu rebuild and the next TickCareerUi, which
+            // is what CareerUiSetActiveHook's __except was left to absorb.
+            if (!IsCareerUiPlateAttached())
+            {
+                static bool s_detachedLogged = false;
+                if (!s_detachedLogged)
+                {
+                    s_detachedLogged = true;
+                    Log(L"[CAREERUI] page widgets detached from overlay 0x%08X; "
+                        L"skipping hidden-state reassert until reinjection\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CareerUiOverlay)));
+                }
+                return;
+            }
 
             SetInputBindingUiViewActive(g_CareerUiPlate, false);
             SetInputBindingUiViewActive(g_CareerUiTitleLabel, false);

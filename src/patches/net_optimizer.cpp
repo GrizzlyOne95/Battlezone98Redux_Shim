@@ -1168,10 +1168,12 @@ namespace
         // one toggle a tester is told about reaches every part of this: the
         // relay-control JSONL, the WebSocket control-plane capture, and the raw
         // buffer ring the two are carried on.
+        bool fullNetworkCapture = false;
         if (TryReadEnvValue("BZ_RELAY_CAPTURE", envValue, static_cast<DWORD>(sizeof(envValue))) ||
             TryReadEnvValue("OPENSHIM_RELAY_CAPTURE", envValue, static_cast<DWORD>(sizeof(envValue))))
         {
-            g_Config.enableRelayCapture = EnvValueEnabled(envValue);
+            fullNetworkCapture = EnvValueEnabled(envValue);
+            g_Config.enableRelayCapture = fullNetworkCapture;
         }
 
         if (TryReadEnvValue("OPENSHIM_RELAY_LOG_ALL_CONTROL", envValue, static_cast<DWORD>(sizeof(envValue))))
@@ -1183,6 +1185,21 @@ namespace
         // sets one and not the master toggle would otherwise get silence.
         if (g_Config.relayLogAllControl || g_Config.relayLogDatagrams)
             g_Config.enableRelayCapture = true;
+
+        if (fullNetworkCapture)
+        {
+            // RelayLogging is the one-switch forensic profile. The narrower
+            // net.ini switches remain available for custom low-volume runs,
+            // but the user-facing master must not silently omit the messages
+            // or sparse datagrams needed by a two-client relay capture.
+            g_Config.relayLogAllControl = true;
+            g_Config.relayLogDatagrams = true;
+            g_Config.logging = true;
+            g_Config.logSocketErrors = true;
+            g_Config.logSocketLifecycle = true;
+            g_Config.logSocketPackets = true;
+            g_Config.logSockOptCalls = true;
+        }
 
         if (g_Config.enableRelayCapture)
         {
@@ -4781,10 +4798,41 @@ namespace
         if (FileExists(JoinPath(GetGameDir(), "netcode_manifest.json")))
             LogShimA(LogLevel::Info, "net", "[OpenShimNet] netcode_manifest.json detected; runtime buffer minimums aligned to manifest profile");
 
-        if (!g_Config.enabled)
+        const bool observationOnly = !g_Config.enabled &&
+            (g_Config.enableRelayCapture || g_Config.enableBufferLog);
+        if (!g_Config.enabled && !observationOnly)
         {
             LogShimA(LogLevel::Info, "net", "[OpenShimNet] Socket optimizer disabled by configuration");
             return TRUE;
+        }
+
+        if (observationOnly)
+        {
+            // A capture request must still work when the player has selected
+            // stock networking. Keep the IAT layer strictly observational by
+            // standing down every packet/socket/global mutation while leaving
+            // the lifecycle, control-plane, and raw-buffer recorders active.
+            g_Config.tcpNoDelay = false;
+            g_Config.keepAlive = false;
+            g_Config.disableUdpConnReset = false;
+            g_Config.applySocketBuffers = false;
+            g_Config.dscp = 0;
+            g_Config.enablePacketReorder = false;
+            g_Config.sendDup = false;
+            g_Config.govStart = 0;
+            g_Config.govScan = false;
+            g_Config.autoKickStart = 0;
+            g_Config.autoKickPing = 0;
+            g_Config.autoKickLoss = 0;
+            g_Config.autoKickTime = 0;
+            g_Config.netMinBandwidth = 0;
+            g_Config.netMaxBandwidth = 0;
+            g_Config.netUpCount = 0;
+            g_Config.netDownCount = 0;
+            g_Config.netMaxPing = 0;
+            g_Config.netMaxPingsLost = 0;
+            LogShimA(LogLevel::Info, "net",
+                "[OpenShimNet] Socket optimizer disabled; installing observational capture hooks only");
         }
 
         if (g_Config.enablePacketReorder)

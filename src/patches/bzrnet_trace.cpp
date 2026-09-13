@@ -1,5 +1,6 @@
 #include "bzrnet_trace.h"
 #include "bzrnet_protocol.h"
+#include "openshim_preset_migration.h"
 #include "shim_log.h"
 
 #include <Windows.h>
@@ -7,6 +8,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <deque>
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -48,6 +50,8 @@ namespace
     std::string g_TracePath;
     std::string g_SessionPath;
     std::string g_CaptureId;
+    std::string g_ExeSha256;
+    std::string g_OpenShimSha256;
 
     SRWLOCK g_SocketGenerationLock = SRWLOCK_INIT;
     std::unordered_map<uintptr_t, uint32_t> g_SocketGenerations;
@@ -234,11 +238,14 @@ namespace
         if (!file)
             return;
         const std::string endText = finalState ? std::to_string(g_StopFileTime) : "null";
+        const std::string exeHash = g_ExeSha256.empty() ? "null" : "\"" + g_ExeSha256 + "\"";
+        const std::string shimHash = g_OpenShimSha256.empty() ? "null" : "\"" + g_OpenShimSha256 + "\"";
         std::fprintf(file,
             "{\n"
-            "  \"captureFormatVersion\": 1,\n"
+            "  \"captureFormatVersion\": 2,\n"
             "  \"captureId\": \"%s\",\n"
             "  \"processId\": %lu,\n"
+            "  \"fullNetworkCapture\": %s,\n"
             "  \"privateForensic\": %s,\n"
             "  \"captureStartFileTimeUtc\": %llu,\n"
             "  \"captureEndFileTimeUtc\": %s,\n"
@@ -247,11 +254,13 @@ namespace
             "  \"traceQueueHighWater\": %ld,\n"
             "  \"droppedEvents\": %lld,\n"
             "  \"writerShutdownClean\": %s,\n"
-            "  \"exeSha256\": null,\n"
+            "  \"exeSha256\": %s,\n"
+            "  \"openShimSha256\": %s,\n"
             "  \"hookSummary\": []\n"
             "}\n",
             g_CaptureId.c_str(),
             static_cast<unsigned long>(GetCurrentProcessId()),
+            g_Config.fullNetworkCapture ? "true" : "false",
             g_Config.privateForensic ? "true" : "false",
             static_cast<unsigned long long>(g_StartFileTime),
             endText.c_str(),
@@ -262,8 +271,29 @@ namespace
             g_Config.queueCapacity,
             static_cast<long>(InterlockedCompareExchange(&g_HighWater, 0, 0)),
             static_cast<long long>(InterlockedCompareExchange64(&g_DroppedTotal, 0, 0)),
-            InterlockedCompareExchange(&g_WriterShutdownClean, 0, 0) ? "true" : "false");
+            InterlockedCompareExchange(&g_WriterShutdownClean, 0, 0) ? "true" : "false",
+            exeHash.c_str(),
+            shimHash.c_str());
         std::fclose(file);
+    }
+
+    void CaptureBuildHashes()
+    {
+        char path[MAX_PATH] = {};
+        const DWORD exeLength = GetModuleFileNameA(nullptr, path, static_cast<DWORD>(sizeof(path)));
+        if (exeLength && exeLength < sizeof(path))
+            TryComputeFileSha256Hex(std::filesystem::path(std::string(path, exeLength)), g_ExeSha256);
+
+        HMODULE shim = nullptr;
+        if (GetModuleHandleExA(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCSTR>(&g_CaptureId),
+                &shim))
+        {
+            const DWORD shimLength = GetModuleFileNameA(shim, path, static_cast<DWORD>(sizeof(path)));
+            if (shimLength && shimLength < sizeof(path))
+                TryComputeFileSha256Hex(std::filesystem::path(std::string(path, shimLength)), g_OpenShimSha256);
+        }
     }
 }
 
@@ -293,6 +323,9 @@ bool InitializeBzrNetTrace(const BzrNetTraceConfig& config)
     QueryPerformanceCounter(&g_StartQpc);
     g_StartTickMs = GetTickCount64();
     g_StartFileTime = FileTimeNow();
+    g_ExeSha256.clear();
+    g_OpenShimSha256.clear();
+    CaptureBuildHashes();
     ResetBzrNetSanitizationAliases();
 
     char capture[128] = {};

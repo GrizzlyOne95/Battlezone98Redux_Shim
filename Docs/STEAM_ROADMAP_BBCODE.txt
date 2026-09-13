@@ -97,6 +97,7 @@ Implemented work includes:
 [*] Governor cold-start versus floor-collapse classification
 [*] Outbound packets/sec and bytes/sec burst telemetry
 [*] Receive-side packet reordering experiments and extensive BZRNet tracing
+[*] One-switch opt-in [code][Diagnostics] RelayLogging[/code] forensic profile: every BZRNet WebSocket message, unsampled 1338/1339 datagrams, full dynamic-UDP payloads/endpoints, capture health checks, and executable/OpenShim hashes for paired Wireshark correlation
 [*] [code][Network] GovernorTuning = OpenShim / Stock[/code]
 [*] [code][Network] NetImprovements[/code] as a master gate over the OpenShim socket layer
 [/list]
@@ -148,6 +149,8 @@ These items have working code but still have a meaningful acceptance gate.
 [*] [b]Enhanced lighting art-direction corrections[/b] - double-encoded fog and the neutral terrain IBL floor are corrected and automated checks pass; locked-camera art-direction recapture remains the release gate.
 [*] [b]PSSM shadow-far-distance override[/b] - the 128m receiver cutoff root cause is mapped and a narrow override exists. Final policy still needs visual/quality qualification.
 [*] [b]Legacy scrap/pilot HUD reconstruction[/b] - BZ 1.5 layout, black backplates, colors, and command-menu-relative placement are reconstructed. Continue normal gameplay/resolution acceptance.
+[*] [b]Persistent player mutes[/b] - a mute applied in the multiplayer player list now survives leaving and rejoining, and survives a restart. Mutes are keyed on the same stable Steam/GOG platform identity as bans and stored beside them in [code]mutes.cfg[/code], so a peer who reconnects on a new session or changes their display name stays muted. OpenShim adds no chat filtering of its own - it reapplies Redux's own player-list mute through the native path, so muted behavior is exactly stock. Always on; there is no setting to disable it. Remaining gate: two-client qualification that a mute set in one session is still in effect after both peers restart, on Steam and on GOG.
+[*] [b]Multiplayer Create Game vehicle preview on DX11[/b] - the starting-vehicle preview rendered solid black under the DX11 backend while every submission, face and draw-call counter looked healthy. The preview viewport has shadows disabled but was falling back to the material's first (PSSM) technique, so the shader sampled uninitialized shadow matrices and produced NaN. The viewport is now pinned to the matching no-shadow scheme. Verified from a RenderDoc capture. Remaining gate: live confirmation across DX9, DX11 and OpenGL, and in exclusive fullscreen as well as windowed.
 [/list]
 
 [h2]Extra Utilities / Modding API[/h2]
@@ -239,7 +242,7 @@ Keep the newer shared measured layout, stock-derived framing, wrapped help text,
 
 [list]
 [*] [b]Shift-F9 editor task-mode crash[/b] - selecting a unit whose classLabel and AI process do not match can crash the editor.
-[*] [b]Second-session editor corruption/crash[/b] - after returning to menu and loading another mission in the same process, the minimap can be empty and changing terrain can crash. Strong mission-lifetime/state-reset candidate.
+[*] [b]Second-session editor corruption/crash[/b] - [b]Implemented - Qualification Pending (2026-09-13):[/b] mission cleanup releases the editor world-map texture and material but leaves its initialized latch set. A later editor session therefore skips resource reconstruction, shows an empty lower-right map, and crashes when terrain painting refreshes the null texture. OpenShim now makes the existing initialization branch test the texture resource itself. The GOG 2.2.301 dump and exact hook-site bytes are verified; live repeat-session and Steam qualification remain open.
 [*] [b]DX11 / renderer lifetime instability[/b] - continue tracking remaining texture/fullscreen/Alt+Tab/Alt+Enter/shutdown crashes by individual signature instead of one generic random-DX11 bucket.
 [/list]
 
@@ -386,6 +389,13 @@ The Red Odyssey 1.3 comparison establishes Cloak and Portal plus a widened natio
 [*] Safe shell/UI/cursor/loading-screen replacement scoped to selected content
 [*] Mod dependency resolver
 [*] GOG Workshop download/staging bridge
+[/list]
+
+[h3]HUD / Cockpit / Presentation[/h3]
+
+[list]
+[*] [b]Classic pre-release cockpit HUD restoration[/b] - recreate the iconic prerelease/intro cockpit as an optional low-profile screen-space bezel around the existing live HUD rather than baking fake status information into a static texture. A current proof of concept can hijack the compass N sprite to draw a large cockpit overlay, but a proper OpenShim implementation should provide a dedicated cockpit/HUD render layer with transparent gameplay openings, aspect-aware scaling and optional per-vehicle skins.
+[*] [b]Relocatable native HUD elements[/b] - trace and expose the screen-space placement/size of the real hull, ammo and related HUD meters so cockpit assets can place the live engine-driven bars inside authored instrument slots. Prefer moving the existing dynamic displays over replacing them with static artwork; radar and other stock HUD elements should remain usable in the same composition.
 [/list]
 
 [h3]Lua / EXU / Scripting[/h3]

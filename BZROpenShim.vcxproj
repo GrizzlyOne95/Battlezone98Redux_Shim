@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -172,6 +172,7 @@
     <ClCompile Include="src\engine\fog_wake_runtime.cpp" />
     <ClCompile Include="src\patches\fog_wake_feature.cpp" />
     <ClCompile Include="src\patches\render_queue_trace.cpp" />
+    <ClCompile Include="src\patches\mp_vehicle_preview_fix.cpp" />
     <ClCompile Include="src\engine\shim_log.cpp" />
     <ClCompile Include="src\engine\enhanced_light_selection.cpp" />
     <ClCompile Include="src\engine\winmm_proxy.cpp" />
@@ -193,6 +194,7 @@
     <ClInclude Include="include\fog_wake_runtime.h" />
     <ClInclude Include="include\fog_wake_feature.h" />
     <ClInclude Include="include\render_queue_trace.h" />
+    <ClInclude Include="include\mp_vehicle_preview_fix.h" />
     <ClInclude Include="include\bzn_save_path.h" />
     <ClInclude Include="include\lcbench_safety_policy.h" />
     <ClInclude Include="include\autosave.h" />
