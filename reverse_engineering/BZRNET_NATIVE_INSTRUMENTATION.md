@@ -164,7 +164,10 @@ UDP_WIRE_RX
 
 Each highlight includes a bounded payload prefix, stable FNV-1a diagnostic hash, payload length, sanitized endpoint, and the observed common-header kind nibble when enough bytes are present.
 
-The existing `bz_buffer_log.bin` remains the lossless/high-volume binary capture path. The new JSONL trace is not intended to replace it.
+The existing `bz_buffer_log.bin` remains the high-volume binary correlation
+path. Its retained payload length is configurable and the relay profile keeps
+the first 2048 bytes. The full `RelayLogging` profile records the complete UDP
+payload in JSONL; Wireshark remains the independent wire record.
 
 `BZRNetTraceAllUdp=1` expands semantic wire highlights to other UDP endpoints when a targeted experiment requires dynamic direct-peer traffic.
 
@@ -218,7 +221,25 @@ BZ_BZRNET_TRACE_QUEUE=4096
 OPENSHIM_BZRNET_TRACE_QUEUE=4096
 ```
 
-`BZ_RELAY_CAPTURE=1` / `OPENSHIM_RELAY_CAPTURE=1` imply BZRNet tracing.
+The preferred user-facing switch is:
+
+```ini
+[Diagnostics]
+RelayLogging=1
+```
+
+It enables the complete two-client forensic profile: every WebSocket control
+message, unsampled relay/probe datagrams, all UDP endpoints, private endpoint
+and identity correlation fields, full UDP payload hex, a larger trace queue,
+the raw UDP ring, and executable/OpenShim hashes in `bzrnet_session.json`.
+Tickets and passwords remain redacted from the structured trace. Logging does
+not force a network route; set `[Network] RoutePreference = Relay` on both
+clients for the UDP 1339 experiment. If `NetImprovements=0`, the capture hooks
+still install but all socket, packet, governor, and auto-kick mutations remain
+disabled.
+
+`BZ_RELAY_CAPTURE=1` / `OPENSHIM_RELAY_CAPTURE=1` remain legacy aliases for
+the same complete profile.
 
 Queue capacity is clamped to `256..65536` records.
 
