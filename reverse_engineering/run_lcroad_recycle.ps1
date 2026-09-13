@@ -108,6 +108,18 @@ building = "$BuildingOdf"
                     ForEach-Object { $_.Line })
             }
 
+            # Shim-side evidence. An arm where the fix never engaged is not a
+            # pass, it is an arm that did not run the fix -- record the count of
+            # stale handles it actually released, not just the mission outcome.
+            $shimMarkers = @()
+            $shimPath = Join-Path $runRoot "openshim.log"
+            if (Test-Path -LiteralPath $shimPath) {
+                $shimMarkers = @(Select-String -LiteralPath $shimPath -Pattern "\[RIGRECYCLE\]" |
+                    ForEach-Object { $_.Line })
+            }
+            $fixInstalled = [bool](@($shimMarkers | Where-Object { $_ -match "Installed constructor recycle" }).Count)
+            $undeployedByFix = @($shimMarkers | Where-Object { $_ -match "Undeployed constructor whose recycle target vanished" }).Count
+
             $complete = @($markers | Where-Object { $_ -match " COMPLETE " })
             $deployed = -1; $moved = -1; $stuck = -1; $targetDownAt = [double]::NaN
             if ($complete.Count -gt 0) {
@@ -140,7 +152,10 @@ building = "$BuildingOdf"
                 movedAfterPoke = $moved
                 stuckRigs = $stuck
                 targetDownAt = $targetDownAt
+                fixInstalled = $fixInstalled
+                rigsUndeployedByFix = $undeployedByFix
                 markers = $markers
+                shimMarkers = $shimMarkers
             }
             $manifest | ConvertTo-Json -Depth 5 |
                 Set-Content -LiteralPath (Join-Path $runRoot "manifest.json") -Encoding UTF8
@@ -165,7 +180,7 @@ building = "$BuildingOdf"
 }
 
 $runs | Select-Object case, repeat, sawStart, sawIssue, sawTargetDown, sawResult,
-    deployedAtEnd, movedAfterPoke, stuckRigs, targetDownAt |
+    deployedAtEnd, movedAfterPoke, stuckRigs, targetDownAt, fixInstalled, rigsUndeployedByFix |
     Export-Csv -LiteralPath (Join-Path $OutputRoot "summary.csv") -NoTypeInformation
 Write-Host "Evidence: $OutputRoot"
-$runs | Format-Table case, repeat, sawResult, deployedAtEnd, movedAfterPoke, stuckRigs, targetDownAt
+$runs | Format-Table case, repeat, sawResult, deployedAtEnd, movedAfterPoke, stuckRigs, targetDownAt, fixInstalled, rigsUndeployedByFix

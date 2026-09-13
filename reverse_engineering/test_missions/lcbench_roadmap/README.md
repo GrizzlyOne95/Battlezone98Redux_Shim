@@ -78,10 +78,20 @@ pwsh -NoProfile -Command "& './reverse_engineering/run_lcroad_recycle.ps1' -Case
 The runner installs the `lcbench` world assets if they are missing and removes
 them again afterwards, so it does not need a pre-existing lcbench install.
 
-Read `stuck=` in the `COMPLETE` line. Both contention arms leave exactly one
-rig permanently deployed, with `travelled=0.00` after the poke, while both
-controls leave none. Root cause and addresses are in
-`../../constructor_double_recycle_stale_deploy_20260913.md`.
+Read `stuck=` in the `COMPLETE` line, and `rigsUndeployedByFix` in the manifest.
+Before the fix, both contention arms left exactly one rig permanently deployed
+with `travelled=0.00` after the poke, while both controls left none. With
+`[Fixes] ConstructorRecycleStaleTarget` on, all four arms come back
+`stuck=0 deployed=0`, and the shim log shows the fix firing exactly once per
+contention arm and never in a control.
+
+`rigsUndeployedByFix` is not decoration. The first attempt at this fix was
+installed and running on every frame and released nothing, because it corrected
+a cause that does not exist in this build; the mission-level `stuck=1` alone
+would have read as "the fix does not work" rather than "the fix never applied".
+Always check that an arm's fix actually engaged -- see
+`../../constructor_double_recycle_stale_deploy_20260913.md` for the root cause,
+the addresses, and what the live trace ruled out.
 
 ## AIP mixed stock/custom producer matrix
 
