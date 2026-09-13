@@ -176,6 +176,34 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "GameObjectClass::Build on exact GOG Redux 2.2.301, identified independently by FUN_004E1190's allocation/initialization semantics and the corresponding BZ 1.5 GameObjectClass::Build call in SprayBomb::Hit. This anchor is the unique SprayBomb deployment call: ECX is the payload GameObjectClass, the five stack arguments are transform, team, independent, sequence and existing object, and EAX is retained as the deployed SprayBuilding."
+      "name": "GameObjectClass::Find class-label comparison",
+      "pattern": "83 7A 18 00 74 ?? 8D 45 D0 50 8B 4D C8 8B 51 18 52 FF 15 ?? ?? ?? ?? 83 C4 08 85 C0 75 ??",
+      "offset": 17,
+      "mode": "address",
+      "fallback": "0x004E1109",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The sole class-descriptor label comparison inside GameObjectClass::Find on exact GOG Redux 2.2.301. The enclosing function opens %.8s.odf, reads [GameObjectClass] classLabel with ParameterDB hashes 0xD3DD9CEC/0x92D04727, walks the registered descriptor vector, compares descriptor+0x18 to that label through this FF 15 _stricmp call, then immediately invokes matchingDescriptor->BuildClass through vtable slot +8. This call-site-only hook aliases pond to i76building without changing any other engine string comparison. Cross-checked against BzE 1.34 PondClass construction at 0x004BE1B0 and its Drive-shipped water ODFs."
+    },
+    {
+      "name": "BuildingClass::BuildClass",
+      "pattern": "55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00 50 83 EC 10 A1 ?? ?? ?? ?? 33 C5 50 8D 45 F4 64 A3 00 00 00 00 89 4D E8 68 60 01 00 00 FF 15 ?? ?? ?? ?? 83 C4 04 89 45 F0 C7 45 FC 00 00 00 00 83 7D F0 00 74 19 8B 45 0C 50 8B 4D 08 51 8B 55 E8 52 8B 4D F0 E8 66 FE FF FF",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00480110",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "BuildingClass virtual BuildClass on exact GOG Redux 2.2.301. It is vtable slot +8 in the BuildingClass descriptor vtable at 0x008766EC, allocates exactly 0x160 bytes, and calls the BuildingClass ODF constructor at 0x0047FFD0 with the two packed ODF-name arguments. GameObjectClass::Find calls this slot immediately after matching classLabel i76building. The pond adapter lets this stock constructor parse all BuildingClass fields, including soundAmbient, before applying BzE's POND identity fields."
+    },
+    {
+      "name": "Building::GetRank",
+      "pattern": "55 8B EC 83 EC 10 89 4D FC 8B 45 FC F3 0F 10 40 6C 0F 2F 45 08 76 0D 8B 4D FC F3 0F 10 45 08 F3 0F 11 41 6C",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0047FB80",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Building::GetRank(float,float) on exact GOG Redux 2.2.301. It is slot 6 of Building's secondary GameObject-class-interface vtable at 0x00876694, reached with this=Building+0x18, and computes a terrain/foundation rank from the cached height at this+0x6C plus the primary object's virtual height result. BzE 1.34 replaces only this virtual for Pond with a leaf returning -1.0f at 0x004BE170; the OpenShim detour preserves stock behavior for every non-POND class."
     },
     {
       "name": "WorldBuilder::GetSaveName",
