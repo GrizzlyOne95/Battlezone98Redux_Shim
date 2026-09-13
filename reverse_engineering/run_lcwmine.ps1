@@ -187,16 +187,16 @@ if ($zeros.Count -eq 0) {
 }
 
 Write-Host ""
-Write-Host "[lcwmine] ===== ticks around BOARD ====="
+Write-Host "[lcwmine] ===== ticks around GET_IN ====="
 $boardIndex = -1
 for ($i = 0; $i -lt $ticks.Count; $i++) {
     if ($ticks[$i] -match "T\+([0-9.]+)") {
-        if ([double]$Matches[1] -ge 24.0) { $boardIndex = $i; break }
+        if ([double]$Matches[1] -ge 14.0) { $boardIndex = $i; break }
     }
 }
 if ($boardIndex -ge 0) {
-    $from = [math]::Max(0, $boardIndex - 6)
-    $to = [math]::Min($ticks.Count - 1, $boardIndex + 10)
+    $from = [math]::Max(0, $boardIndex - 4)
+    $to = [math]::Min($ticks.Count - 1, $boardIndex + 60)
     for ($i = $from; $i -le $to; $i++) { Write-Host "  $($ticks[$i])" }
 }
 

@@ -74,10 +74,21 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 # analysis find a luma step that is not accompanied by a geometry change.
 $BurstHz = 4.0
 $BurstWindows = @(
+    # FIRST STYLING. The capture's dark transition lands 0.16 s after boarding,
+    # which is one `RefreshHeadlightState` tick (kHeadlightRefreshMs = 200): the
+    # scene steps when the shim applies its state to a headlight for the first
+    # time, not when the craft is entered. A fixture that starts the player
+    # already in a craft only ever reaches that moment at mission start, so this
+    # window has to straddle it. Start() runs about 13 s after launch.
+    @{ Name = "styling"; From = 11.0; To = 21.0 },
     # The fixture hops out at mission T+8, i.e. about t+21 after launch.
-    @{ Name = "hopout"; From = 17.0; To = 27.0 },
-    # ...and boards again at mission T+26, i.e. about t+39.
-    @{ Name = "board";  From = 35.0; To = 45.0 }
+    @{ Name = "hopout";  From = 21.0; To = 29.0 },
+    # ...and would board again at mission T+26, about t+39, if anything on this
+    # map could drive boarding. Nothing can: `input.map` has no enter-vehicle
+    # action (an on-foot pilot boards by walking into the craft) and
+    # `exu.SetAsUser` is unreachable from an addon mission chunk. Kept so the
+    # window is sampled if that ever changes.
+    @{ Name = "board";   From = 35.0; To = 43.0 }
 )
 
 # Per-arm ini overrides. Every arm writes every key the scenario varies, so an
@@ -371,8 +382,11 @@ try {
                 $engaged = switch ($arm) {
                     "repair"  { $observedRange -ne $null -and $observedRange -gt 601 }
                     "stock"   { $observedRange -ne $null -and $observedRange -le 601 }
-                    "nolight" { $true }
-                    default   { $true }
+                    # No headlight policy means no probe line to check, so the
+                    # only thing that can be verified is that frames were taken
+                    # at all. A zero-frame arm is not a null result.
+                    "nolight" { $samples.Count -gt 0 }
+                    default   { $samples.Count -gt 0 }
                 }
             }
         }

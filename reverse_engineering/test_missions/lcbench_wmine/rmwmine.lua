@@ -7,14 +7,14 @@
 -- What this reproduces
 -- --------------------
 -- A 2026-09-13 play01.bzn capture (no mission script, so engine behaviour only)
--- showed an allied Arc Mine field discharging a gmbolt at the player, on the
--- exact frame the player boarded a craft -- twice, at capture frames 689 and
--- 1565, the same frames the weapon panel switched from the pilot loadout to the
--- craft loadout. No discharge on either hop-out. The craft took no damage: the
--- hull bar is flat across the whole capture.
+-- showed an Arc Mine belonging to the player's OWN team discharging a gmbolt at
+-- the player on the exact frame the player boarded a craft -- twice, at capture
+-- frames 689 and 1565, the same frames the weapon panel switched from the pilot
+-- loadout to the craft loadout. No discharge on either hop-out. The craft took
+-- no damage.
 --
 -- Traced predicate (1.5 `WeaponMine::Simulate` 0x0053F9CF, Redux 0x00612950;
--- semantically identical, see weaponmine_hop_friendly_fire_root_cause_20260817.md):
+-- semantically identical -- see scene_light_flip_and_arc_mine_boarding_20260913.md):
 --
 --   for craft in Craft::craftList:
 --       if GameObject::FriendP(mine, craft):  continue        -- friendly, skip
@@ -22,56 +22,77 @@
 --   GameObject::SetTarget(mine, best)
 --   if best and (not losFlag or not MayHitFriends(mine, d, 0.3, 1.0)): FIRE
 --
---   GameObject::FriendP(GameObject*)  -> target->vtbl[1]() == ACTUAL team
---   GameObject::FriendP(int n)        -> n >= 0 and Team::FriendP(teamList, n)
---   Team::FriendP(n)                  -> n >= 1 and (dwAllies & (1 << n))
+--   GameObject::FriendP(GameObject* o) -> o->vtbl[1]()   == ACTUAL team
+--   Team::FriendP(n)                   -> n >= 1 and (dwAllies & (1 << n))
 --
--- So `Team::FriendP` rejects team 0 outright: **any object whose actual team
--- reads 0 is hostile to every weapon mine, including its own side's mines.**
--- `Person` is a `Craft` subclass (`Craft::BuildPilot` returns `Craft *`), so
--- pilots on foot are in `craftList` and are themselves candidate targets.
+-- The mine in the capture was team 1, the same team as the player. For a team-1
+-- mine to target a team-1 object, `FriendP` has to come back false, and the only
+-- way that happens is if the TARGET's team reads something team 1 is not allied
+-- with. `Team::FriendP` rejects `n < 1` outright, so a team that reads **0** for
+-- even one tick is hostile to its own side's mines. That is what "the weapon
+-- mine neutral bug" is naming.
 --
--- The open question this fixture answers is *which* object reads team 0 during
--- the boarding transition -- the pilot being destroyed, or the craft being
--- taken over -- and whether the friendly mine is the shooter at all.
+-- `Person` is a `Craft` subclass (`Craft::BuildPilot` is declared
+-- `Craft * BuildPilot(Craft *, GameObjectClass *)`), so a pilot on foot is in
+-- `craftList` and is a candidate target in its own right. Either the pilot
+-- being destroyed or the craft being taken over could be the object that reads
+-- 0; this fixture is built to say which.
 --
 -- Arc Mine is `boltmine.odf`: classLabel "weaponmine", weaponName "gmbolt",
--- searchRadius 100.0, heightScale 2.0. That is the object the player's own
--- slot-3 "Arc Mine" lays, and gmbolt is the vertical lightning the capture shows.
+-- searchRadius 100.0, heightScale 2.0, maxAmmo 100. That is what the player's
+-- own slot-3 "Arc Mine" lays, and gmbolt is the vertical lightning in the clip.
 --
--- Timeline
---   T+2    lay a friendly (team 1) Arc Mine ~30 m off, inside searchRadius
---   T+4    lay a team-0 Arc Mine beside it: control for "a neutral mine is
---          hostile to everyone", which the predicate above predicts outright
---   T+10   HOP_OUT
---   T+24   BOARD via exu.SetAsUser -- the transition under test
---   every tick: TEAMS line with the player's actual team, whether it is a
---          Person, and both mines' teams, so a one-tick team-0 read is visible
---          in the log rather than inferred
+-- How the boarding transition is driven
+-- -------------------------------------
+-- Plain BZ has no Lua API for boarding, `input.map` has no "enter vehicle"
+-- action at all (an on-foot pilot boards by walking into the craft), and
+-- `exu.SetAsUser` is NOT reachable from an addon mission chunk -- exu.dll loads
+-- but a sibling run logged `BOARD ok=false via=no-exu` on twenty consecutive
+-- attempts. So the transition is driven through the AI instead:
+--
+--   spawn an AI craft -> HopOut(craft) -> the engine runs Craft::AbandonPilot,
+--   which builds an AI pilot and leaves the craft unoccupied -> GetIn(pilot,
+--   craft) issues CMD_GET_IN and the AI pilot walks over and boards.
+--
+-- That is the same `AbandonPilot`/board pair the player performs, minus the
+-- userObject swap. `PersonGetIn::DoStateProlog` requires the target craft to
+-- have no AI process, which is exactly what AbandonPilot leaves behind.
+--
+-- The player's own craft is left alone as a control: if only the AI boarding
+-- fires the mine, the userObject swap is not required; if neither fires it,
+-- the repro is not on this map.
+--
+-- Ammo is the witness. maxAmmo = 100 and the discharge is a weapon shot, so a
+-- drop in `GetAmmo` names which mine fired on which tick -- a number, not a
+-- sprite in a screenshot.
 --
 -- Lua 5.1 (no goto, no io/os/debug).
 
 local MINE_ODF = "boltmine"
-local FRIENDLY_TEAM = 1
+local CRAFT_ODF = "avtank"
+local MY_TEAM = 1
 local NEUTRAL_TEAM = 0
 
+local SPAWN_CRAFT_AT = 2.0
+local LAY_MINES_AT = 5.0
+local HOP_AT = 9.0
+local GETIN_AT = 14.0
+local FAIL_AT = 52.0
+
 local elapsed = 0.0
-local craft = nil
+local aiCraft = nil
+local aiPilot = nil
 local mineFriendly = nil
 local mineNeutral = nil
-local laidFriendly = false
-local laidNeutral = false
+local spawnedCraft = false
+local laidMines = false
 local hopped = false
 local hopAttempts = 0
-local pilotReady = false
-local boarded = false
-local boardAttempts = 0
+local orderedGetIn = false
+local boardedSeen = false
+local failed = false
 local nextHeartbeat = 0.0
-
-local LAY_FRIENDLY_AT = 2.0
-local LAY_NEUTRAL_AT = 4.0
-local HOP_AT = 10.0
-local BOARD_AT = 24.0
+local watchForPilot = false
 
 local function Marker(text)
     print(string.format("[WMINE] T+%.2f %s", elapsed, text))
@@ -85,10 +106,9 @@ local function SafeTeam(handle)
     return team
 end
 
--- boltmine.odf has maxAmmo = 100 and the discharge is a weapon shot, so ammo
--- is a numeric, frame-accurate witness that the mine actually fired. That
--- removes any need to recognise the gmbolt sprite in a screenshot, and it is
--- the difference between "a bolt appeared somewhere" and "this mine fired".
+-- boltmine.odf has maxAmmo = 100 and the discharge is a weapon shot, so ammo is
+-- a numeric, frame-accurate witness that a specific mine actually fired. That
+-- is the difference between "a bolt appeared somewhere" and "this mine fired".
 local function SafeAmmo(handle)
     local ammo = -1
     if handle ~= nil and IsValid(handle) then
@@ -105,144 +125,147 @@ local function IsPilot(handle)
     return result
 end
 
--- ExtraUtilities exposes GameObject::SetAsUser as exu.SetAsUser
--- (src/luaexport.cpp:673). Plain BZ has no Lua API for boarding a craft, so
--- this is the only scripted route into the transition under test.
-local function TrySetAsUser(handle)
-    local mod = rawget(_G, "exu")
-    if mod == nil then
-        local ok, required = pcall(require, "exu")
-        if ok then mod = required end
-    end
-    if mod == nil or mod.SetAsUser == nil then
-        return false, "no-exu"
-    end
-    local ok = pcall(mod.SetAsUser, handle)
-    return ok, "exu.SetAsUser"
-end
-
-local function LayMine(team, distance, label)
+local function Spawn(odf, team, distance, label)
     local anchor = GetPlayerHandle()
     if anchor == nil or not IsValid(anchor) then return nil end
     local where = nil
     local ok = pcall(function() where = GetPositionNear(anchor, distance, distance + 4) end)
     if not ok or where == nil then
-        Marker(string.format("LAY_%s failed: no position", label))
+        Marker(string.format("SPAWN_%s FAILED: no position", label))
         return nil
     end
     local handle = nil
-    ok = pcall(function() handle = BuildObject(MINE_ODF, team, where) end)
+    ok = pcall(function() handle = BuildObject(odf, team, where) end)
     if not ok or handle == nil or not IsValid(handle) then
-        Marker(string.format("LAY_%s failed: BuildObject(%s, %d) returned nothing",
-            label, MINE_ODF, team))
+        Marker(string.format("SPAWN_%s FAILED: BuildObject(%s, %d) returned nothing",
+            label, odf, team))
         return nil
     end
-    Marker(string.format("LAY_%s odf=%s askedTeam=%d actualTeam=%d dist=%.1f",
-        label, MINE_ODF, team, SafeTeam(handle), distance))
+    Marker(string.format("SPAWN_%s odf=%s askedTeam=%d actualTeam=%d ammo=%d dist=%.1f",
+        label, odf, team, SafeTeam(handle), SafeAmmo(handle), distance))
     return handle
 end
 
 function Start()
     elapsed = 0.0
-    craft = nil
+    aiCraft = nil
+    aiPilot = nil
     mineFriendly = nil
     mineNeutral = nil
-    laidFriendly = false
-    laidNeutral = false
+    spawnedCraft = false
+    laidMines = false
     hopped = false
     hopAttempts = 0
-    pilotReady = false
-    boarded = false
-    boardAttempts = 0
+    orderedGetIn = false
+    boardedSeen = false
+    failed = false
     nextHeartbeat = 0.0
+    watchForPilot = false
     Marker("START weaponmine boarding fixture")
 end
 
 function Update(dt)
     elapsed = elapsed + (dt or 0.0)
 
-    if craft == nil and not hopped then
-        local h = GetPlayerHandle()
-        if h ~= nil and IsValid(h) and not IsPilot(h) then
-            craft = h
-            Marker(string.format("CRAFT_CAPTURED team=%d", SafeTeam(h)))
-        end
+    if not spawnedCraft and elapsed >= SPAWN_CRAFT_AT then
+        spawnedCraft = true
+        aiCraft = Spawn(CRAFT_ODF, MY_TEAM, 40.0, "AICRAFT")
     end
 
-    if not laidFriendly and elapsed >= LAY_FRIENDLY_AT then
-        laidFriendly = true
-        mineFriendly = LayMine(FRIENDLY_TEAM, 30.0, "FRIENDLY")
+    if not laidMines and elapsed >= LAY_MINES_AT then
+        laidMines = true
+        -- Same team as the player and as the AI craft. This is the mine the
+        -- capture shows firing, so it is the one under test.
+        mineFriendly = Spawn(MINE_ODF, MY_TEAM, 26.0, "MINE_TEAM1")
+        -- Control. Team::FriendP rejects team 0, so a team-0 mine should be
+        -- hostile to everything by construction and fire without any
+        -- transition at all. If it never fires, the predicate reading is wrong.
+        mineNeutral = Spawn(MINE_ODF, NEUTRAL_TEAM, 32.0, "MINE_TEAM0")
     end
 
-    if not laidNeutral and elapsed >= LAY_NEUTRAL_AT then
-        laidNeutral = true
-        mineNeutral = LayMine(NEUTRAL_TEAM, 34.0, "NEUTRAL")
-    end
-
-    if not hopped and elapsed >= HOP_AT and hopAttempts < 20 then
-        local h = GetPlayerHandle()
-        if h ~= nil and IsValid(h) then
+    if laidMines and not hopped and elapsed >= HOP_AT and hopAttempts < 20 then
+        if aiCraft ~= nil and IsValid(aiCraft) then
             hopAttempts = hopAttempts + 1
-            local ok = pcall(HopOut, h)
-            Marker(string.format("HOP_OUT attempt=%d ok=%s", hopAttempts, tostring(ok)))
+            watchForPilot = true
+            local ok = pcall(HopOut, aiCraft)
+            Marker(string.format("AI_HOP_OUT attempt=%d ok=%s craftTeam=%d",
+                hopAttempts, tostring(ok), SafeTeam(aiCraft)))
             hopped = ok
-        end
-    end
-
-    if hopped and not pilotReady then
-        local h = GetPlayerHandle()
-        if IsPilot(h) then
-            pilotReady = true
-            Marker(string.format("PILOT_READY team=%d", SafeTeam(h)))
-        end
-    end
-
-    if pilotReady and not boarded and elapsed >= BOARD_AT and boardAttempts < 20 then
-        boardAttempts = boardAttempts + 1
-        if craft ~= nil and IsValid(craft) then
-            Marker(string.format("PRE_BOARD pilotTeam=%d craftTeam=%d",
-                SafeTeam(GetPlayerHandle()), SafeTeam(craft)))
-            local ok, how = TrySetAsUser(craft)
-            Marker(string.format("BOARD attempt=%d ok=%s via=%s", boardAttempts, tostring(ok), how))
-            if ok then boarded = true end
         else
-            Marker("BOARD skipped: craft handle is gone")
-            boarded = true
+            Marker("AI_HOP_OUT skipped: no AI craft")
+            hopped = true
         end
     end
 
-    -- Per-tick, not per-heartbeat: the discharge lands on a single frame, so a
-    -- 5 s sample would miss the one tick where a team reads 0.
-    local player = GetPlayerHandle()
+    if hopped and not orderedGetIn and elapsed >= GETIN_AT then
+        orderedGetIn = true
+        local api = rawget(_G, "GetIn")
+        if api == nil then
+            Marker("GET_IN unavailable: no GetIn in _G")
+        elseif aiPilot == nil or not IsValid(aiPilot) then
+            Marker("GET_IN skipped: the AbandonPilot pilot was never seen by CreateObject")
+        elseif aiCraft == nil or not IsValid(aiCraft) then
+            Marker("GET_IN skipped: the AI craft is gone")
+        else
+            local ok = pcall(api, aiPilot, aiCraft, 1)
+            Marker(string.format("GET_IN ok=%s pilotTeam=%d craftTeam=%d",
+                tostring(ok), SafeTeam(aiPilot), SafeTeam(aiCraft)))
+        end
+    end
+
+    if orderedGetIn and not boardedSeen and aiPilot ~= nil then
+        if not IsValid(aiPilot) then
+            boardedSeen = true
+            Marker("BOARD_DETECTED the AI pilot object is gone -- it boarded")
+        end
+    end
+
+    if not failed and elapsed >= FAIL_AT then
+        failed = true
+        Marker("FAIL_MISSION -- teardown")
+        pcall(FailMission, GetTime() + 1.0)
+    end
+
+    -- Per tick, not per heartbeat: the discharge lands on a single frame, so a
+    -- 5 s sample would step straight over the tick that carries the evidence.
     print(string.format(
-        "[WMINE-T] T+%.3f onFoot=%s pTeam=%d craftTeam=%d fTeam=%d fAmmo=%d nTeam=%d nAmmo=%d",
-        elapsed, tostring(IsPilot(player)),
-        SafeTeam(player), SafeTeam(craft),
+        "[WMINE-T] T+%.3f pilot=%s pTeam=%d craftTeam=%d fTeam=%d fAmmo=%d nTeam=%d nAmmo=%d",
+        elapsed, tostring(aiPilot ~= nil and IsValid(aiPilot)),
+        SafeTeam(aiPilot), SafeTeam(aiCraft),
         SafeTeam(mineFriendly), SafeAmmo(mineFriendly),
         SafeTeam(mineNeutral), SafeAmmo(mineNeutral)))
 
     if elapsed >= nextHeartbeat then
         nextHeartbeat = elapsed + 5.0
-        Marker(string.format("HEARTBEAT hopped=%s boarded=%s fMine=%s nMine=%s",
-            tostring(hopped), tostring(boarded),
-            tostring(mineFriendly ~= nil and IsValid(mineFriendly)),
-            tostring(mineNeutral ~= nil and IsValid(mineNeutral))))
+        Marker(string.format("HEARTBEAT hopped=%s ordered=%s boarded=%s pilot=%s",
+            tostring(hopped), tostring(orderedGetIn), tostring(boardedSeen),
+            tostring(aiPilot ~= nil and IsValid(aiPilot))))
     end
 end
 
-function CreateObject(h) end
+-- Craft::AbandonPilot builds the pilot, so the only way to learn its handle is
+-- the engine's own creation callback. Claim the first Person that appears after
+-- the hop-out is ordered.
+function CreateObject(h)
+    if watchForPilot and aiPilot == nil and h ~= nil and IsValid(h) and IsPilot(h) then
+        aiPilot = h
+        watchForPilot = false
+        Marker(string.format("AI_PILOT_SEEN team=%d", SafeTeam(h)))
+    end
+end
+
 function AddObject(h) end
 function DeleteObject(h) end
 
 function Save()
-    return elapsed, hopped, pilotReady, boarded, laidFriendly, laidNeutral
+    return elapsed, spawnedCraft, laidMines, hopped, orderedGetIn, boardedSeen
 end
 
 function Load(a, b, c, d, e, f)
     elapsed = a or 0.0
-    hopped = b or false
-    pilotReady = c or false
-    boarded = d or false
-    laidFriendly = e or false
-    laidNeutral = f or false
+    spawnedCraft = b or false
+    laidMines = c or false
+    hopped = d or false
+    orderedGetIn = e or false
+    boardedSeen = f or false
 end
