@@ -147,11 +147,40 @@ Two further things the runs did establish:
   hop-out 100 ms and 83 ms). The scene steps when the shim styles a headlight,
   not when the craft is entered.
 
-**What would settle it**, given the capture limitation: instrument the shim to
-log the scene's light state each refresh rather than photographing the window,
-or have an operator run `play01.bzn` by hand with `[SinglePlayer] Headlights = 0`
-and report whether the flip survives. The second is two minutes of work and
-answers "is this ours at all" outright.
+### Operator A/B: it is ours (2026-09-13)
+
+`[SinglePlayer] Headlights = 0` on `play01.bzn`, run by hand:
+
+> No headlights, it doesn't break anything.
+
+So the flip is caused by the shim's headlight policy, not by stock Redux. With
+`Headlights = 0` the policy sets the player's headlight **invisible**
+(`g_HeadlightPlayerVisibleConfigured` true, `g_HeadlightPlayerVisible` false),
+so there is no shim-styled headlight in the scene and no step.
+
+That confirms ownership but does not yet isolate *which* property. Four
+candidates remain, and they are separable with three more manual runs:
+
+| `Headlights` | `HeadlightColor` | `HeadlightBeam` | `HeadlightFalloffRepair` | isolates |
+|---|---|---|---|---|
+| 1 | Stock | Stock | 0 | the light existing at all, engine-stock 10/20 deg, diffuse 1.0, range 600 |
+| 1 | White | Stock | 0 | the x4 intensity alone |
+| 1 | Stock | Wide | 0 | the 63/86 degree cone alone |
+| 1 | Stock | Stock | 1 | the solved 2239.8 m range alone |
+
+With `HeadlightColor = Stock` and `HeadlightBrightness = 1.00`, `setPlayerColour`
+is false; with `HeadlightBeam = Stock`, `setPlayerBeam` is false. Row one
+therefore applies visibility only and leaves the engine's own light untouched,
+which makes it the row that matters: if the flip returns there, no shim property
+is responsible and the mechanism is that a visible headlight exists at all.
+
+The operator also reports the capture was taken in **SHIFT+F4 (`TRACK_VIEW`)**,
+not cockpit view. Whether the active view changes the result is untested and
+should be held fixed across the table above rather than assumed irrelevant.
+
+Screen capture cannot run this table -- see the frozen-burst limitation above --
+so it is either operator-run or it needs the shim instrumented to log the scene
+light state each refresh.
 
 Do not patch `kMaxRange` on the strength of the hypothesis alone. The range
 inflation exists to remove a visible cone terminator, and trading a real fix for
@@ -290,13 +319,94 @@ A Lua-visible team is also not the same thing as the team the predicate reads:
 `FriendP` resolves through `o->vtbl[1]()`, and if a class overrides that slot
 the Lua accessor and the engine can disagree for exactly the tick that matters.
 
-### What is NOT yet established
+### Operator repro (2026-09-13)
 
-Which object reads team 0, and whether a friendly mine can be made to fire at
-all in a fixture. Before the next attempt the witness has to be fixed: either a
-frame capture that catches the gmbolt, or a native hook on
-`WeaponMine::Simulate` logging the chosen target and both teams at the fire
-call. No patch until one of those exists. The previous WeaponMine patch in this
+> Team 1 Arc Mine near your tank. Hop out, re-enter the tank. The mine will
+> fire briefly.
+
+So it is the **player's** boarding, not an AI pilot's, and the mine is on the
+player's own team. The AI fixture above exercised the wrong actor.
+
+### The line that resets the team on boarding
+
+Boarding runs `GameObject::SetAsUser` on the craft (1.5 `0x00495468`):
+
+```c
+pAVar1 = this->aiProcess;
+if (pAVar1) { destroy(pAVar1); this->aiProcess = 0; }
+(**(code **)(this->_padding_ + 8))();             // detach from current team
+pGVar2 = userObject;
+Set_User_Entity(this->ent);
+userObject = this;
+if (pGVar2) { (**(code **)(pGVar2->_padding_ + 0x10))(); }   // SetAsNotUser(old user)
+(**(code **)(this->_padding_ + 4))(userTeamNumber);          // attach craft to userTeamNumber
+UserProcess::UserProcess(...);
+```
+
+The old user object is **your pilot**, and `GameObject::SetAsNotUser`
+(`0x004954D7`) ends with:
+
+```c
+(**(code **)(this->_padding_ + 4))(*(ushort *)((int)&this->obj->flags + 2) & 0xf);
+```
+
+which is `SetTeam( (obj->flags >> 16) & 0xF )` -- the pilot's team is **reset
+from a 4-bit field packed in the low-level object's flags**, the same field
+`get_obj_team` (`0x00482BD4`) reads and that `Craft::Init` / `Person::Init` use
+to seed a BZN-loaded object's team.
+
+The slot pairing is confirmed by `GameObject::SetTeam` (`0x004952FA`), which is
+exactly `[slot +8, no args]` then `[slot +4, team]` -- so +8 detaches from the
+current team list and +4 attaches to team n.
+
+`GameObjectClass::Build` (`0x00498D9C`) is where that nibble is written:
+
+```c
+(local_a8.entObj)->flags = param_2 << 0x10;      // param_2 is the team
+if (param_3 != 0) { flags |= 0x10; }             // 0x10 marks the user object
+```
+
+and the constructor seeds the user globals from the same nibble, gated on that
+flag:
+
+```c
+if ((this->obj->flags & 0x10) != 0) {
+    userTeamNumber = (obj->flags >> 16) & 0xf;
+    userObject = this;
+    userTeamList = Team::GetTeam(userTeamNumber);
+}
+```
+
+`Craft::BuildPilot` builds the pilot with `param_3 = 0`, so a runtime-built
+pilot is correctly *not* flagged as the user object -- `SetAsUser` is called on
+it separately, and that call sets its live team to `userTeamNumber`.
+
+**Hypothesis, sharp enough to test:** the pilot's live team comes from
+`userTeamNumber` while you control it, but boarding restores it from the packed
+nibble. For a pilot built at runtime those two can disagree, and `Team::FriendP`
+rejects team 0 outright, so a pilot whose nibble reads 0 is hostile to its own
+side's mines for as long as the Person survives -- which is exactly where the
+bolt lands.
+
+This is not yet proven. The decompilation cannot settle what `BuildPilot`
+actually passes as `param_2`: Ghidra collapses several distinct `Craft` members
+into one `_padding_` in that function, and `GameObject::GetTeam` decompiles to
+a nonsense field read, so the live team's storage is unresolved in this corpus.
+
+### The one runtime check that settles it
+
+Log, for the player's pilot across the boarding frame:
+
+* `get_obj_team(person)` -- the packed nibble at `obj->flags + 2` masked 0xF;
+* the live team the predicate actually reads, i.e. `person->vtbl[1]()`.
+
+If they disagree at the boarding frame, the patch site is
+`GameObject::SetAsNotUser`'s team restore and the fix is to leave a live team
+alone rather than re-derive it from the nibble. A Lua `GetTeamNum` probe cannot
+do this: `FriendP` resolves through the vtable and a class override would make
+the two disagree for exactly the tick in question.
+
+No patch until that check exists. The previous WeaponMine patch in this
 repository was premised on a mechanism that turned out to be wrong, shipped, and
 had to be removed.
 
