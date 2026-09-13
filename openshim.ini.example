@@ -1586,6 +1586,66 @@ PilotFlashlightPitch = 0
 ; Absent or unmatched falls back to eye height (0, 1.685, 0).
 PilotFlashlightBone = 11POV
 
+; Keep your pilot on your own team while boarding a craft.
+;
+; UNPROVEN, and it ships OFF for that reason -- see the [PILOTTEAM] note below
+; before turning it on.
+;
+; Symptom: an Arc Mine on YOUR OWN team fires a gmbolt at you on the exact
+; frame you board a craft, and at the spot your pilot was standing. It never
+; happens on a hop-out and the craft takes no damage, because the thing being
+; shot at is the pilot, which is destroyed a moment later.
+;
+; Mechanism, read out of the shipped image. Boarding runs
+; GameObject::SetAsUser on the craft (0x004DB930), which first calls
+; SetAsNotUser on the object you were previously controlling -- your pilot --
+; and GameObject::SetAsNotUser (0x004DBA60) ends with
+;
+;     SetTeam( get_obj_team(this->obj) )
+;
+; where get_obj_team (0x0047E9A0) reads a 4-bit team packed into the low-level
+; object's flags. Your pilot's live team comes from userTeamNumber while you
+; are on foot, but boarding restores it from that packed field instead. A
+; pilot whose packed team reads 0 is therefore briefly on team 0, and
+; Team::FriendP rejects team 0 outright -- team 0 is nobody's friend, your own
+; mines included -- so a friendly weapon mine acquires it as a legitimate
+; target.
+;
+; This does not touch the boarding call. While you are on foot it repairs the
+; stale packed field to match your live team, so the engine's own restore then
+; produces the right answer. It is idempotent and it writes nothing until the
+; running build has confirmed both field offsets on a case that must agree
+; (a craft, where the packed and live team are the same number by
+; construction); an offset that is wrong on a future build stands the feature
+; down rather than corrupting an unrelated field.
+;
+; CONFIRMED LIVE 2026-09-13, and the sentinel is -1, not 0. One run, the whole
+; chain, with the boarding driven by pushing the craft into the pilot:
+;
+;   Pilot on foot   packed=1 live=1  (agree)
+;   BOARD_RESULT    BOARDED
+;   CAUGHT: pilot reads team -1 after boarding (packed=1, tick 1 of 90)
+;   Restored live team -1 -> 1
+;
+; So the pilot is on team 1 while on foot and reads -1 on the very FIRST frame
+; after boarding, with its packed team still 1. -1 is what the GameObject
+; constructor initialises teamNumber to, i.e. "attached to no team", and it is
+; the live field GetTeam returns -- the one FriendP consumes.
+;
+; Two earlier readings of this were wrong, recorded so nobody re-derives them.
+; The sentinel is not 0: the first version of this feature repaired a packed
+; team of 0 and never fired, because the packed team is always correct. And the
+; operative guard is not Team::FriendP's `n < 1`; it is the `-1 < param_2` test
+; one level up in GameObject::FriendP(int), which -1 fails outright.
+;
+; Confirmed on the scripted test route, not yet on a hand-driven boarding, and
+; it writes to engine state -- so it still ships OFF.
+;
+; Stands down for the duration of a network game.
+; Accepted: boolean. Default: OFF.
+; Env override to enable: OPENSHIM_PILOT_TEAM_RESTORE
+PilotTeamRestore = 0
+
 
 
 
