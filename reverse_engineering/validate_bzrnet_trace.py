@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +66,7 @@ def validate_trace(trace_path: Path, session_path: Path | None, allow_drops: boo
         session = parsed
 
     private_forensic = bool(session.get("privateForensic", False))
+    full_network_capture = bool(session.get("fullNetworkCapture", False))
     errors: list[str] = []
     warnings: list[str] = []
     capture_ids: set[str] = set()
@@ -73,6 +75,7 @@ def validate_trace(trace_path: Path, session_path: Path | None, allow_drops: boo
     dropped_total = 0
     websocket_messages = 0
     unknown_messages = 0
+    full_profile_ready = False
 
     for index, event in enumerate(events, 1):
         seq = event.get("seq")
@@ -101,6 +104,17 @@ def validate_trace(trace_path: Path, session_path: Path | None, allow_drops: boo
             errors.append(f"seq {seq}: invalid QPC clock fields")
 
         d = details(event)
+        if event.get("event") == "BZR_TRACE_READY" and d.get("fullNetworkCapture") is True:
+            full_profile_ready = d.get("privateForensic") is True and d.get("allUdp") is True
+
+        if full_network_capture and event.get("event") in {"UDP_WIRE_TX", "UDP_WIRE_RX"}:
+            payload_length = d.get("payloadLength")
+            captured_length = d.get("capturedPayloadLength")
+            payload_hex = d.get("payloadPrefixHex")
+            if d.get("payloadTruncated") is not False or captured_length != payload_length:
+                errors.append(f"seq {seq}: full capture contains a truncated UDP payload")
+            if not isinstance(payload_length, int) or not isinstance(payload_hex, str) or len(payload_hex) != payload_length * 2:
+                errors.append(f"seq {seq}: full capture UDP payload hex length is inconsistent")
         if event.get("event") == "TRACE_DROPPED_EVENTS":
             delta = d.get("droppedSinceLastReport", 0)
             if isinstance(delta, int) and delta > 0:
@@ -142,6 +156,18 @@ def validate_trace(trace_path: Path, session_path: Path | None, allow_drops: boo
         if isinstance(session_drops, int):
             dropped_total = max(dropped_total, session_drops)
 
+        if full_network_capture:
+            if not private_forensic:
+                errors.append("full capture session did not retain forensic endpoint/identity fields")
+            if int(session.get("traceQueueCapacity", 0) or 0) < 32768:
+                errors.append("full capture session queue is below 32768 records")
+            if not full_profile_ready:
+                errors.append("full capture trace is missing a fully enabled BZR_TRACE_READY record")
+            for field in ("exeSha256", "openShimSha256"):
+                value = session.get(field)
+                if not isinstance(value, str) or re.fullmatch(r"[0-9a-fA-F]{64}", value) is None:
+                    errors.append(f"full capture session has no valid {field}")
+
     if dropped_total:
         message = f"trace reports {dropped_total} dropped event(s)"
         if allow_drops:
@@ -161,6 +187,7 @@ def validate_trace(trace_path: Path, session_path: Path | None, allow_drops: boo
         "unknownMessages": unknown_messages,
         "droppedEvents": dropped_total,
         "privateForensic": private_forensic,
+        "fullNetworkCapture": full_network_capture,
         "errors": errors,
         "warnings": warnings,
     }
