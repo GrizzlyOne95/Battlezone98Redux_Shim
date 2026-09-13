@@ -109,20 +109,29 @@ def main():
         # window that surface stops changing. A run of bit-identical frames is
         # a capture artefact, not a still scene, and a single-frame step inside
         # it was never sampled. Say so instead of reporting "no step found".
-        identical = 0
+        # "Frozen" is a shade wider than bit-identical: a stale surface can still
+        # differ by a HUD pixel or two while the 3D scene has not advanced at
+        # all. Either way nothing new was sampled.
+        frozen = 0
+        pairs = 0
         previous_image = None
         for index, at, path in frames:
             if not os.path.isfile(path):
                 continue
             image = load_scene(path)
-            if previous_image is not None and np.array_equal(image, previous_image):
-                identical += 1
+            if previous_image is not None:
+                pairs += 1
+                ratio, geometry = score_pair(previous_image, image)
+                if abs(ratio - 1.0) < 1e-3 and geometry < 1e-3:
+                    frozen += 1
             previous_image = image
-        if identical:
-            share = identical / max(len(frames) - 1, 1)
-            print(f"  WARNING: {identical} of {len(frames) - 1} consecutive pairs are "
-                  f"bit-identical ({share:.0%}). PrintWindow is handing back a stale "
-                  f"surface, so this burst is NO MEASUREMENT, not a null result.")
+        if frozen:
+            share = frozen / max(pairs, 1)
+            print(f"  WARNING: {frozen} of {pairs} consecutive pairs are frozen "
+                  f"({share:.0%}) -- the 3D scene did not advance between them. "
+                  f"PrintWindow hands back the last presented surface, and behind "
+                  f"another window that surface stops changing, so this burst is "
+                  f"NO MEASUREMENT rather than a null result.")
 
         if steps:
             print("  LIGHT STEPS (scene scaled, geometry unchanged):")
