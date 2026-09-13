@@ -23,15 +23,17 @@
 -- Timeline
 --   T+0    START        -- in a craft, craft headlight owns the scene
 --   T+8    HOP_OUT      -- on foot; the shim creates the pilot flashlight
---   T+26   BOARD        -- back in the craft via exu.SetAsUser, if EXU is
---                          present; the flashlight is retired
+--   T+26   BOARD        -- the craft is parked in front of the pilot and
+--                          driven into them with SetVelocity until they board
 --   forever HEARTBEAT   -- never fails the mission, so the runner owns the
 --                          process lifetime and can stop it cleanly
 --
--- The board leg is a bonus, not a gate. Plain BZ has no Lua API for entering a
--- craft, so it is pcall-guarded through ExtraUtilities and the fixture still
--- produces a usable A/B when EXU is absent -- the hop-out leg alone changes the
--- flashlight's existence, which is the variable under test.
+-- The board leg matters as much as the hop-out: the shim's [PILOTTEAM] probe
+-- watches the pilot object ACROSS the boarding call, which is the only moment
+-- GameObject::SetAsNotUser can be caught resetting the pilot's team. An earlier
+-- revision tried to board through exu.SetAsUser, which is not reachable from an
+-- addon mission chunk, so the leg silently never ran and the probe only ever
+-- sampled the pilot standing around. See the boarding helpers below.
 --
 -- Lua 5.1 (no goto, no io/os/debug). Markers use print(), like the sibling
 -- harnesses in this folder.
@@ -43,6 +45,7 @@ local hopAttempts = 0
 local pilotReady = false
 local boarded = false
 local boardAttempts = 0
+local parked = false
 local nextHeartbeat = 0.0
 
 local HOP_AT = 8.0
@@ -52,20 +55,56 @@ local function Marker(text)
     print(string.format("[PLIGHT] T+%.2f %s", elapsed, text))
 end
 
--- ExtraUtilities exposes GameObject::SetAsUser as exu.SetAsUser
--- (src/luaexport.cpp:673). It is the only scripted route back into a craft.
--- Resolved lazily: `exu` may be registered after this chunk runs.
-local function TrySetAsUser(handle)
-    local mod = rawget(_G, "exu")
-    if mod == nil then
-        local ok, required = pcall(require, "exu")
-        if ok then mod = required end
-    end
-    if mod == nil or mod.SetAsUser == nil then
-        return false, "no-exu"
-    end
-    local ok = pcall(mod.SetAsUser, handle)
-    return ok, "exu.SetAsUser"
+-- Boarding, without any API for boarding.
+--
+-- `exu.SetAsUser` is NOT reachable from an addon mission chunk: exu.dll loads
+-- but this fixture logged `BOARD ok=false via=no-exu` on twenty consecutive
+-- attempts, and every heartbeat afterwards still read onFoot=true. `input.map`
+-- has no enter-vehicle action either -- an on-foot pilot boards by walking into
+-- the craft. So the boarding leg used to be a no-op, which is why the first
+-- [PILOTTEAM] run measured the pilot standing around and never the transition.
+--
+-- Instead: park the player's own abandoned craft just in front of the pilot and
+-- drive it into them with SetVelocity. The collision is the same one walking
+-- into it produces, and the craft is genuinely empty because the player just
+-- hopped out of it -- which also means it is carrying the perceivedTeam = 0
+-- that Craft::AbandonPilot writes, exactly as in the reported repro.
+--
+-- Speed is deliberately low. Craft::ExplodePilot exists and plays squish.wav,
+-- so a tank driven hard into a pilot may kill them rather than be boarded; the
+-- outcome check below tells the two apart instead of assuming.
+local NUDGE_SPEED = 4.0
+local PARK_DISTANCE = 8.0
+
+local function Vec(x, y, z)
+    local v = nil
+    pcall(function() v = SetVector(x, y, z) end)
+    return v
+end
+
+-- Push `craftHandle` toward `targetHandle` at NUDGE_SPEED. Returns the
+-- separation so the caller can log the approach.
+local function NudgeToward(craftHandle, targetHandle)
+    local cp, tp = nil, nil
+    if not pcall(function() cp = GetPosition(craftHandle) end) or cp == nil then return nil end
+    if not pcall(function() tp = GetPosition(targetHandle) end) or tp == nil then return nil end
+    local dx, dz = tp.x - cp.x, tp.z - cp.z
+    local flat = math.sqrt(dx * dx + dz * dz)
+    if flat < 0.001 then return flat end
+    local v = Vec(dx / flat * NUDGE_SPEED, 0.0, dz / flat * NUDGE_SPEED)
+    if v ~= nil then pcall(SetVelocity, craftHandle, v) end
+    return flat
+end
+
+-- Put the craft a short way in front of the pilot before nudging, so the run
+-- does not depend on wherever HopOut happened to leave it.
+local function ParkInFrontOf(craftHandle, targetHandle)
+    local tp = nil
+    if not pcall(function() tp = GetPosition(targetHandle) end) or tp == nil then return false end
+    local where = Vec(tp.x + PARK_DISTANCE, tp.y, tp.z)
+    if where == nil then return false end
+    local ok = pcall(SetPosition, craftHandle, where)
+    return ok
 end
 
 local function IsPilot(handle)
@@ -84,6 +123,7 @@ function Start()
     pilotReady = false
     boarded = false
     boardAttempts = 0
+    parked = false
     nextHeartbeat = 0.0
     Marker("START pilot-flashlight scene-light fixture")
 end
@@ -118,17 +158,36 @@ function Update(dt)
         end
     end
 
-    if pilotReady and not boarded and elapsed >= BOARD_AT and boardAttempts < 20 then
-        boardAttempts = boardAttempts + 1
-        if craft ~= nil and IsValid(craft) then
-            local ok, how = TrySetAsUser(craft)
-            Marker(string.format("BOARD attempt=%d ok=%s via=%s",
-                boardAttempts, tostring(ok), how))
-            if ok then boarded = true end
-        else
-            Marker(string.format("BOARD attempt=%d skipped: craft handle is gone",
-                boardAttempts))
+    if pilotReady and not boarded and elapsed >= BOARD_AT then
+        local pilot = GetPlayerHandle()
+        if craft == nil or not IsValid(craft) then
+            Marker("BOARD abandoned: the craft handle is gone")
             boarded = true
+        elseif pilot == nil or not IsValid(pilot) or not IsPilot(pilot) then
+            -- The player stopped being a Person: either they boarded, or the
+            -- craft squashed them. Craft::ExplodePilot plays squish.wav, so
+            -- these are genuinely different outcomes and the run must say which.
+            boarded = true
+            local nowCraft = (pilot ~= nil and IsValid(pilot))
+            Marker(string.format("BOARD_RESULT playerValid=%s -> %s",
+                tostring(nowCraft),
+                nowCraft and "BOARDED (player object is a craft again)"
+                          or "PILOT GONE (killed, not boarded)"))
+        else
+            if not parked then
+                parked = true
+                Marker(string.format("PARK ok=%s -- craft placed %.1f m from the pilot",
+                    tostring(ParkInFrontOf(craft, pilot)), PARK_DISTANCE))
+            end
+            local gap = NudgeToward(craft, pilot)
+            boardAttempts = boardAttempts + 1
+            if gap ~= nil and boardAttempts % 15 == 1 then
+                Marker(string.format("NUDGE attempt=%d gap=%.2f m", boardAttempts, gap))
+            end
+            if boardAttempts > 900 then
+                boarded = true
+                Marker("BOARD gave up: the craft never reached the pilot")
+            end
         end
     end
 

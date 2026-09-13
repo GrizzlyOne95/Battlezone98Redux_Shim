@@ -1609,19 +1609,27 @@ PilotFlashlightBone = 11POV
 ; construction); an offset that is wrong on a future build stands the feature
 ; down rather than corrupting an unrelated field.
 ;
-; PARTLY MEASURED 2026-09-13. On a scripted hop-out the [PILOTTEAM] lines
-; report "Layout verified on a craft: packed=1 live=1" and then "Pilot on foot
-; packed=1 live=1 (agree)", sampled 15 ms after the hop-out on the real pilot.
+; CONFIRMED LIVE 2026-09-13, and the sentinel is -1, not 0. One run, the whole
+; chain, with the boarding driven by pushing the craft into the pilot:
 ;
-; BUT THE PILOT NEVER BOARDED in that run -- the fixture has no way to drive a
-; boarding, and every heartbeat to the end read onFoot=true. The sample is the
-; pilot standing around BEFORE boarding, and this probe only logs while on
-; foot, so it stops exactly when the interesting thing happens. What is ruled
-; out is therefore narrow: the "packed nibble reads 0" variant, at the
-; endpoint. Anything that goes wrong DURING the transition -- the live team, a
-; null teamList, or the craft rather than the pilot -- it cannot see.
+;   Pilot on foot   packed=1 live=1  (agree)
+;   BOARD_RESULT    BOARDED
+;   CAUGHT: pilot reads team -1 after boarding (packed=1, tick 1 of 90)
+;   Restored live team -1 -> 1
 ;
-; Leave this OFF. It is a probe, not a working fix for the Arc Mine symptom.
+; So the pilot is on team 1 while on foot and reads -1 on the very FIRST frame
+; after boarding, with its packed team still 1. -1 is what the GameObject
+; constructor initialises teamNumber to, i.e. "attached to no team", and it is
+; the live field GetTeam returns -- the one FriendP consumes.
+;
+; Two earlier readings of this were wrong, recorded so nobody re-derives them.
+; The sentinel is not 0: the first version of this feature repaired a packed
+; team of 0 and never fired, because the packed team is always correct. And the
+; operative guard is not Team::FriendP's `n < 1`; it is the `-1 < param_2` test
+; one level up in GameObject::FriendP(int), which -1 fails outright.
+;
+; Confirmed on the scripted test route, not yet on a hand-driven boarding, and
+; it writes to engine state -- so it still ships OFF.
 ;
 ; Stands down for the duration of a network game.
 ; Accepted: boolean. Default: OFF.
