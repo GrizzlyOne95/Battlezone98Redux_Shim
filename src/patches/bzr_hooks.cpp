@@ -30,6 +30,7 @@
 #include "openshim_events.h"
 #include "player_kill_trace.h"
 #include "net_optimizer.h"
+#include "pond_class_label.h"
 #include "../engine/native_ui_validation.h"
 
 #include <Windows.h>
@@ -35234,6 +35235,7 @@ namespace BZROpenShim
 
     void RetryDeferredRuntimeHooks()
     {
+        InstallPondClassLabelSupportIfPossible();
         InstallEnhancedLightSelectionIfPossible();
         InstallShadowFarOverrideIfPossible();
         InstallJumpSnipingProbeIfRequested();
@@ -35276,7 +35278,8 @@ namespace BZROpenShim
             !g_SplinterUndeadFixEnabled || g_SprayBuildingSimulateHookInstalled;
         const bool constructorReady =
             !g_ConstructorRemoteBuildFixEnabled || g_ConstructorRemoteBuildFixInstalled;
-        return splinterReady && constructorReady;
+        return splinterReady && constructorReady &&
+            IsPondClassLabelSupportInstalled();
     }
 
     void InitBzrHookStrings()
