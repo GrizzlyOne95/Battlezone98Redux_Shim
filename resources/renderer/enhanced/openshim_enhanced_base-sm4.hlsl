@@ -1,7 +1,7 @@
-// DX11 SM4 shader path for Campaign Reimagined.
+// DX11 SM4 shader path for the OpenShim canonical Enhanced renderer.
 // Enhanced mode uses the experimental legacy-compatible GGX direct-lighting model.
 // IBL_ENABLED layers static split-sum image-based lighting onto that DX11 path.
-// Keep this file synchronized with OSE_terrain-sm4.hlsl for shared PBR helpers.
+// Keep this file synchronized with openshim_enhanced_terrain-sm4.hlsl for shared PBR helpers.
 
 // Force OG retro mode to ignore modern map contributions even if a program
 // variant accidentally leaves those feature defines enabled.
@@ -50,7 +50,7 @@
 // -----------------------------------------------------------------------------
 // Radial smooth fog (DX11 Enhanced only)
 // -----------------------------------------------------------------------------
-// Keep this block synchronized with OSE_terrain-sm4.hlsl.
+// Keep this block synchronized with openshim_enhanced_terrain-sm4.hlsl.
 //
 // 0 = unchanged baseline: the exponential optical-depth model.
 // 1 = the fog factor is derived from true radial view-space distance with a
@@ -71,6 +71,37 @@
 #ifndef OSE_RADIAL_FOG
 #define OSE_RADIAL_FOG 0
 #endif
+
+// DX11 Enhanced PSSM v2. The program/material pair enables this only for the
+// en-high-pssm scheme; Classic, DX9 and non-PSSM variants retain the original
+// receiver path. Values are named here so visual tuning cannot become a set of
+// unrelated literals spread through the shader.
+#ifndef OSE_ENHANCED_PSSM_V2
+#define OSE_ENHANCED_PSSM_V2 0
+#endif
+
+#if defined(ENHANCED_MODE) && defined(SHADOWRECEIVER) \
+ && defined(PSSM_ENABLED) && (OSE_ENHANCED_PSSM_V2 != 0)
+#define OSE_ENHANCED_PSSM_V2_ACTIVE 1
+#else
+#define OSE_ENHANCED_PSSM_V2_ACTIVE 0
+#endif
+
+// Ogre PSSM expands adjacent split cameras by one world unit on each side.
+// Blend across exactly that overlap, so two cascades are sampled only where
+// both projections are valid.
+#define OSE_PSSM_CASCADE_BLEND_HALF_WIDTH 1.0
+
+// Fade only the last 24 units of the 256-unit PSSM range. The fade is applied
+// to shadow contribution, and geometry beyond the range performs no lookup.
+#define OSE_PSSM_FAR_FADE_WIDTH 24.0
+
+// Conservative BZR-scale adaptation of BZCC's distance-growing normal offset.
+// BZCC ships 0.2 + 0.001 * depth; these smaller, bounded values reduce acne
+// without importing its scene-scale assumptions or a large contact offset.
+#define OSE_PSSM_NORMAL_OFFSET_BASE 0.04
+#define OSE_PSSM_NORMAL_OFFSET_PER_DEPTH 0.0002
+#define OSE_PSSM_NORMAL_OFFSET_MAX 0.10
 
 // Scoped exactly like Stage A: the Enhanced per-pixel path only. The legacy
 // fog in the #else branch of the fragment shaders is depth-based and stays
@@ -98,11 +129,74 @@
 #endif
 
 #if defined(SHADOWRECEIVER)
+// -----------------------------------------------------------------------------
+// Shadow depth bias
+// -----------------------------------------------------------------------------
+// The caster writes raw post-projection depth and this receiver compared it raw:
+// no constant bias, no slope-scaled term, no normal offset. A surface then
+// shadows itself wherever its own interpolated depth quantises to just behind
+// the depth stored in the map.
+//
+// The error scales with how far the receiver's depth travels across one shadow
+// texel, which is proportional to tan(angle between surface normal and light) --
+// hence a constant floor plus a slope-scaled term. tan grows without bound at
+// grazing incidence, so the slope is clamped; unclamped it produces the opposite
+// artefact, shadows visibly detaching from their casters.
+//
+// Units are post-projection depth, where a cascade spans 0..1, so these are
+// deliberately small. NOT VALIDATED IN GAME: this profile runs the
+// 'high-noshadow' viewport scheme, so PCF_Filter never executes and there was no
+// acne to photograph. Treat the defaults as a starting point -- raise
+// OSE_SHADOW_CONSTANT_BIAS if acne survives, lower it if shadows detach from
+// their casters at contact points.
+static const float OSE_SHADOW_CONSTANT_BIAS = 0.0015;
+static const float OSE_SHADOW_SLOPE_BIAS    = 0.0035;
+static const float OSE_SHADOW_MAX_SLOPE     = 4.0;
+
+// Takes the GEOMETRIC surface-to-light cosine, not a normal-mapped one: biasing
+// by a perturbed normal would make the bias swing with texture detail and
+// reintroduce acne along normal-map edges.
+float shadow_depth_bias(float NdotL)
+{
+    float cosine = max(NdotL, 0.05);
+    float slope  = sqrt(saturate(1.0 - cosine * cosine)) / cosine;
+    return OSE_SHADOW_CONSTANT_BIAS
+         + OSE_SHADOW_SLOPE_BIAS * min(slope, OSE_SHADOW_MAX_SLOPE);
+}
+
+#if OSE_ENHANCED_PSSM_V2_ACTIVE
+float PCF_Filter(
+    in Texture2D map,
+    in SamplerComparisonState sam,
+    in float4 uv,
+    in float2 invMapSize,
+    in float depthBias)
+{
+    if (abs(uv.w) <= 1e-6)
+        return 1.0;
+
+    uv.xyz *= rcp(uv.w);
+    uv.z = min(uv.z - depthBias, 1.0);
+    invMapSize = max(invMapSize, float2(1e-8, 1e-8));
+
+    // Four bilinear comparison taps provide a compact 3x3-equivalent tent
+    // footprint. BZCC uses the same four-tap hardware-PCF strategy; symmetric
+    // half-texel offsets fit Ogre's projected-coordinate convention.
+    float2 halfTexel = invMapSize * 0.5;
+    float result = 0.0;
+    result += map.SampleCmpLevelZero(sam, uv.xy + float2(-halfTexel.x, -halfTexel.y), uv.z);
+    result += map.SampleCmpLevelZero(sam, uv.xy + float2( halfTexel.x, -halfTexel.y), uv.z);
+    result += map.SampleCmpLevelZero(sam, uv.xy + float2(-halfTexel.x,  halfTexel.y), uv.z);
+    result += map.SampleCmpLevelZero(sam, uv.xy + float2( halfTexel.x,  halfTexel.y), uv.z);
+    return result * 0.25;
+}
+#else
 float PCF_Filter(
     in Texture2D map,
     in SamplerState sam,
     in float4 uv,
-    in float2 invMapSize)
+    in float2 invMapSize,
+    in float depthBias)
 {
     // Invalid projected coordinates can otherwise create INF/NaN values on DX11.
     if (abs(uv.w) <= 1e-6)
@@ -110,7 +204,7 @@ float PCF_Filter(
 
     uv.xyz *= rcp(uv.w);
     uv.w = 1.0;
-    uv.z = min(uv.z, 1.0);
+    uv.z = min(uv.z - depthBias, 1.0);
     invMapSize = max(invMapSize, float2(1e-8, 1e-8));
 
 #if PCF_SIZE > 1
@@ -148,6 +242,7 @@ float PCF_Filter(
     return step(uv.z, map.Sample(sam, uv.xy).x);
 #endif
 }
+#endif
 #endif
 
 #if defined(NORMALMAP_ENABLED) && !defined(VERTEX_TANGENTS)
@@ -307,7 +402,7 @@ float compute_distance_optical_depth(float viewDistance, float4 fogParams)
     return min(scaledTravel * scaledTravel, OSE_ATMOS_MAX_OPTICAL_DEPTH) * configured;
 }
 
-// Radial view-space fog factor. Shared verbatim with OSE_terrain-sm4.hlsl.
+// Radial view-space fog factor. Shared verbatim with openshim_enhanced_terrain-sm4.hlsl.
 //
 // The legacy fog in the non-Enhanced branch uses vDepth, which is clip-space z
 // and therefore measures distance along the view axis only. Fog computed that
@@ -578,21 +673,39 @@ void evaluate_legacy_pbr(
     diffuseWeight = float3(0.0, 0.0, 0.0);
     specularBRDF = float3(0.0, 0.0, 0.0);
 
-    if (NdotL <= 0.0 || NdotV <= 0.0)
+    // Lambertian diffuse has no view term: it is albedo/PI * N.L, and nothing in
+    // it depends on where the surface is being looked at from. The N.V test
+    // below belongs to the SPECULAR branch only -- the microfacet denominator
+    // divides by N.V, so that term genuinely has to bail. Testing both outputs
+    // against it meant any texel whose normal tipped even slightly away from the
+    // camera lost ALL of its direct light in one step and dropped to the ambient
+    // floor, producing hard-edged near-black patches with flat interiors that
+    // slid across the surface as the camera moved.
+    //
+    // This is the same defect that produced the terrain "black water"; see the
+    // longer note in openshim_enhanced_terrain-sm4.hlsl. It shows on models wherever a
+    // normal-mapped surface is seen near edge-on -- hull flanks, tracks, and the
+    // curved shoulders of buildings.
+    if (NdotL <= 0.0)
         return;
 
     float3 H = safe_normalize(V + L);
     float NdotH = saturate(dot(N, H));
     float VdotH = saturate(dot(V, H));
 
-    float D = distribution_ggx(NdotH, roughness);
-    float G = geometry_smith(NdotV, NdotL, roughness);
+    // VdotH is well defined whatever N.V does, so the diffuse/specular energy
+    // split stays valid here.
     float3 F = fresnel_schlick(VdotH, F0);
-
-    specularBRDF = (D * G * F) / max(4.0 * NdotV * NdotL, 1e-5);
     // No aggressive metallic inference in this milestone: diffuse remains present
     // and is reduced only by Fresnel energy sharing.
     diffuseWeight = (1.0 - F) * (OSE_PBR_DIFFUSE_COMPENSATION / OSE_PI);
+
+    if (NdotV <= 0.0)
+        return;
+
+    float D = distribution_ggx(NdotH, roughness);
+    float G = geometry_smith(NdotV, NdotL, roughness);
+    specularBRDF = (D * G * F) / max(4.0 * NdotV * NdotL, 1e-5);
 }
 #endif
 
@@ -684,10 +797,22 @@ void base_vertex(
     vDepth = oPosition.z;
 
 #if defined(SHADOWRECEIVER)
-    vLightSpacePos1 = mul(texWorldViewProj1, iPosition);
+    float4 shadowPosition = iPosition;
+#if OSE_ENHANCED_PSSM_V2_ACTIVE
+    float normalLengthSq = dot(iNormal, iNormal);
+    if (normalLengthSq > 1e-8)
+    {
+        float receiverOffset = min(
+            OSE_PSSM_NORMAL_OFFSET_BASE
+                + OSE_PSSM_NORMAL_OFFSET_PER_DEPTH * max(vDepth, 0.0),
+            OSE_PSSM_NORMAL_OFFSET_MAX);
+        shadowPosition.xyz += iNormal * rsqrt(normalLengthSq) * receiverOffset;
+    }
+#endif
+    vLightSpacePos1 = mul(texWorldViewProj1, shadowPosition);
 #if defined(PSSM_ENABLED)
-    vLightSpacePos2 = mul(texWorldViewProj2, iPosition);
-    vLightSpacePos3 = mul(texWorldViewProj3, iPosition);
+    vLightSpacePos2 = mul(texWorldViewProj2, shadowPosition);
+    vLightSpacePos3 = mul(texWorldViewProj3, shadowPosition);
 #endif
 #endif
 
@@ -731,12 +856,24 @@ void base_fragment(
 #endif
 #if defined(SHADOWRECEIVER)
     uniform Texture2D shadowMap1 : register(t4),
+#if OSE_ENHANCED_PSSM_V2_ACTIVE
+    uniform SamplerComparisonState shadowSam1 : register(s4),
+#else
     uniform SamplerState shadowSam1 : register(s4),
+#endif
 #if defined(PSSM_ENABLED)
     uniform Texture2D shadowMap2 : register(t5),
+#if OSE_ENHANCED_PSSM_V2_ACTIVE
+    uniform SamplerComparisonState shadowSam2 : register(s5),
+#else
     uniform SamplerState shadowSam2 : register(s5),
+#endif
     uniform Texture2D shadowMap3 : register(t6),
+#if OSE_ENHANCED_PSSM_V2_ACTIVE
+    uniform SamplerComparisonState shadowSam3 : register(s6),
+#else
     uniform SamplerState shadowSam3 : register(s6),
+#endif
 #endif
 
     uniform float4 invShadowMapSize1,
@@ -823,22 +960,77 @@ void base_fragment(
 )
 {
 #if defined(SHADOWRECEIVER)
+    // Geometric cosine for the slope term. VERTEX_LIGHTING permutations carry no
+    // interpolated normal, so they fall back to the constant floor.
+    float shadowNdotL = 1.0;
+#if !defined(VERTEX_LIGHTING)
+    if (lightCount > 0.0)
+    {
+        float3 shadowToLight = lightPosition[0].xyz
+                             - (vViewPosition.xyz * lightPosition[0].w);
+        shadowNdotL = saturate(dot(safe_normalize(vViewNormal),
+                                   safe_normalize(shadowToLight)));
+    }
+#endif
+    float shadowBias = shadow_depth_bias(shadowNdotL);
+
     float shadow;
 #if defined(PSSM_ENABLED)
-    if (vDepth <= pssmSplitPoints.y)
+#if OSE_ENHANCED_PSSM_V2_ACTIVE
+    float split1 = pssmSplitPoints.y;
+    float split2 = pssmSplitPoints.z;
+    float splitEnd = pssmSplitPoints.w;
+    float blendWidth = OSE_PSSM_CASCADE_BLEND_HALF_WIDTH;
+
+    [branch] if (vDepth < split1 - blendWidth)
     {
-#endif
-        shadow = PCF_Filter(shadowMap1, shadowSam1, vLightSpacePos1, invShadowMapSize1.xy);
-#if defined(PSSM_ENABLED)
+        shadow = PCF_Filter(shadowMap1, shadowSam1, vLightSpacePos1, invShadowMapSize1.xy, shadowBias);
     }
-    else if (vDepth <= pssmSplitPoints.z)
+    else if (vDepth <= split1 + blendWidth)
     {
-        shadow = PCF_Filter(shadowMap2, shadowSam2, vLightSpacePos2, invShadowMapSize2.xy);
+        float shadow1 = PCF_Filter(shadowMap1, shadowSam1, vLightSpacePos1, invShadowMapSize1.xy, shadowBias);
+        float shadow2 = PCF_Filter(shadowMap2, shadowSam2, vLightSpacePos2, invShadowMapSize2.xy, shadowBias);
+        float blend = smoothstep(split1 - blendWidth, split1 + blendWidth, vDepth);
+        shadow = lerp(shadow1, shadow2, blend);
+    }
+    else if (vDepth < split2 - blendWidth)
+    {
+        shadow = PCF_Filter(shadowMap2, shadowSam2, vLightSpacePos2, invShadowMapSize2.xy, shadowBias);
+    }
+    else if (vDepth <= split2 + blendWidth)
+    {
+        float shadow2 = PCF_Filter(shadowMap2, shadowSam2, vLightSpacePos2, invShadowMapSize2.xy, shadowBias);
+        float shadow3 = PCF_Filter(shadowMap3, shadowSam3, vLightSpacePos3, invShadowMapSize3.xy, shadowBias);
+        float blend = smoothstep(split2 - blendWidth, split2 + blendWidth, vDepth);
+        shadow = lerp(shadow2, shadow3, blend);
+    }
+    else if (vDepth <= splitEnd)
+    {
+        shadow = PCF_Filter(shadowMap3, shadowSam3, vLightSpacePos3, invShadowMapSize3.xy, shadowBias);
+        float fadeStart = max(split2 + blendWidth, splitEnd - OSE_PSSM_FAR_FADE_WIDTH);
+        float farFade = smoothstep(fadeStart, splitEnd, vDepth);
+        shadow = lerp(shadow, 1.0, farFade);
     }
     else
     {
-        shadow = PCF_Filter(shadowMap3, shadowSam3, vLightSpacePos3, invShadowMapSize3.xy);
+        shadow = 1.0;
     }
+#else
+    if (vDepth <= pssmSplitPoints.y)
+    {
+        shadow = PCF_Filter(shadowMap1, shadowSam1, vLightSpacePos1, invShadowMapSize1.xy, shadowBias);
+    }
+    else if (vDepth <= pssmSplitPoints.z)
+    {
+        shadow = PCF_Filter(shadowMap2, shadowSam2, vLightSpacePos2, invShadowMapSize2.xy, shadowBias);
+    }
+    else
+    {
+        shadow = PCF_Filter(shadowMap3, shadowSam3, vLightSpacePos3, invShadowMapSize3.xy, shadowBias);
+    }
+#endif
+#else
+    shadow = PCF_Filter(shadowMap1, shadowSam1, vLightSpacePos1, invShadowMapSize1.xy, shadowBias);
 #endif
 #if defined(ENHANCED_MODE)
     shadow = shadow * 0.78 + 0.22;
