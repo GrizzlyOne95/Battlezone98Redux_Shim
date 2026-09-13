@@ -55,21 +55,32 @@ pool is a completely different finding from one that changes the whole map:
 - `offbeam` — upper right hillside, which no player light points at;
 - `beam` — lower centre right, where a torch or headlight pool lands.
 
-## Result, 2026-09-13, `-Scenario flashlight`
+## Why this measures a step and not two stills
+
+The first pass compared one still per arm and read 25.8 vs 35.1 off a hillside
+rectangle with `PilotFlashlight` on vs off. **That difference was camera pose,
+not light.** The pilot's facing after `HopOut` is not reproducible run to run,
+so the same screen rectangle landed on lit hillside in one arm and partly on
+black sky in the other. Cross-arm absolute luma is therefore not reported.
+
+What the original capture actually proves is a step *within* one run: frames
+707 and 708 are consecutive, the camera has already settled after the boarding
+move, and the scene drops 2.4x between them. So the harness captures a burst at
+4 Hz across each transition and reports the largest frame-to-frame step inside
+each burst. A step between two consecutive frames of one run is a claim this
+method can support; a difference between two runs is not.
+
+The one cross-arm number that does survive is the light's own pool, because it
+is an order-of-magnitude effect rather than a percentage: with
+`PilotFlashlight = 1` the beam rectangle read 110.0 against 46.7 with it off,
+and the `[PILOTLIGHT] created` line proves the arm engaged. The flashlight does
+light its cone.
+
+## Live light parameters, 2026-09-13
 
 GOG Redux 2.2.301, installed `winmm.dll` SHA-256 `55C4D20F…B9FA9BAB`, windowed.
-Both arms engaged (`on`: one `[PILOTLIGHT] created`; `off`: none).
-
-| region | PilotFlashlight=1 | PilotFlashlight=0 | ratio |
-|---|---:|---:|---:|
-| beam (its own pool) | 110.0 | 46.7 | **2.36** |
-| offbeam (upper right hill) | 25.8 | 35.1 | **0.74** |
-| far right edge | 36.7 | 44.3 | 0.83 |
-
-The flashlight lights its cone **and darkens everything outside it by 17-26%**.
-
-The live `[HEADLIGHT-PROBE]` line in the same runs shows what the craft light
-looks like under the shipped preset (`HeadlightColor=White`, `HeadlightBeam=Wide`):
+The `[HEADLIGHT-PROBE]` line shows what the craft light looks like under the
+shipped preset (`HeadlightColor=White`, `HeadlightBeam=Wide`):
 
 ```text
 type=2 diffuse=(4.000,4.000,4.000) range=2239.8
@@ -105,11 +116,15 @@ pwsh -File reverse_engineering/run_lcplight.ps1 -Scenario headlight
 pwsh -File reverse_engineering/run_lcplight.ps1 -Scenario headlight -Arms repair,stock
 ```
 
-Sample times are seconds after **process launch**, not mission time: the engine
+Burst windows are seconds after **process launch**, not mission time: the engine
 spends roughly 13 s on the loading screen before `Start()` runs, and a frame
 captured during the load is the same bitmap in every arm. The first attempt at
 this fixture sampled at t+6 and t+13 and produced two byte-identical 1257577-byte
 PNGs with identical luma, which is not a null result — it is not a measurement.
+
+Each run writes `luma.csv` (arm, window, frame index, timestamp, both rectangles,
+PNG path) next to the frames, so the series can be re-analysed without re-running
+the game.
 
 The runner refuses to launch while another `battlezone98redux.exe` is running.
 This repository's working tree is shared with parallel agents and the game

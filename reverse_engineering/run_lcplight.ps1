@@ -55,15 +55,29 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
-# Sample times are seconds after PROCESS LAUNCH, not mission time: the engine
-# spends roughly 13 s on the loading screen before Start() runs, and a frame
-# captured during the load is the same bitmap in every arm (observed: identical
-# 1257577-byte PNGs and identical luma, which is not a null result, it is not a
-# measurement at all). The fixture hops out at mission T+8, i.e. about t+21.
-$SampleSchedule = @(
-    @{ Name = "craft";      At = 18.0 },
-    @{ Name = "foot";       At = 30.0 },
-    @{ Name = "foot_late";  At = 40.0 }
+# Capture a BURST, not three scheduled stills.
+#
+# Two things make a still-vs-still comparison across arms worthless here:
+#   * the engine spends roughly 13 s on the loading screen before Start() runs,
+#     so an early sample photographs the loading screen in every arm (observed:
+#     identical 1257577-byte PNGs with identical luma, which is not a null
+#     result, it is not a measurement);
+#   * the pilot's spawn facing after HopOut is not reproducible run to run, so
+#     the "same" rectangle lands on different geometry in different arms. A
+#     first pass read 25.8 vs 35.1 off a hillside rectangle and that difference
+#     was camera pose, not light.
+#
+# What IS trustworthy is a step WITHIN one run between two frames whose geometry
+# is otherwise unchanged -- exactly the evidence the original capture gives at
+# frames 707/708, where the light drops 2.4x one frame after the boarding camera
+# move has already settled. So sample densely across the transition and let the
+# analysis find a luma step that is not accompanied by a geometry change.
+$BurstHz = 4.0
+$BurstWindows = @(
+    # The fixture hops out at mission T+8, i.e. about t+21 after launch.
+    @{ Name = "hopout"; From = 17.0; To = 27.0 },
+    # ...and boards again at mission T+26, i.e. about t+39.
+    @{ Name = "board";  From = 35.0; To = 45.0 }
 )
 
 # Per-arm ini overrides. Every arm writes every key the scenario varies, so an
@@ -287,30 +301,32 @@ try {
 
         $samples = @()
         try {
-            foreach ($slot in $SampleSchedule) {
-                $due = $launchedAt.AddSeconds($slot.At)
+            foreach ($window in $BurstWindows) {
+                $frameIndex = 0
+                $due = $launchedAt.AddSeconds($window.From)
                 while ((Get-Date) -lt $due) {
-                    Start-Sleep -Milliseconds 250
+                    Start-Sleep -Milliseconds 200
                     $proc.Refresh()
                     if ($proc.HasExited) { break }
                 }
-                $proc.Refresh()
-                if ($proc.HasExited) {
-                    Write-Warning "[lcplight] arm '$arm' exited before $($slot.Name)"
-                    break
-                }
-                $shot = Join-Path $armDir ("{0}.png" -f $slot.Name)
-                if (Save-WindowFrame -Proc $proc -Path $shot) {
-                    $luma = Measure-TerrainLuma -Path $shot
-                    $samples += [pscustomobject]@{
-                        Arm = $arm; Slot = $slot.Name; At = $slot.At
-                        OffBeam = $luma.offbeam; Beam = $luma.beam
+                $stop = $launchedAt.AddSeconds($window.To)
+                while ((Get-Date) -lt $stop) {
+                    $proc.Refresh()
+                    if ($proc.HasExited) { break }
+                    $at = [math]::Round(((Get-Date) - $launchedAt).TotalSeconds, 2)
+                    $shot = Join-Path $armDir ("{0}_{1:D3}.png" -f $window.Name, $frameIndex)
+                    if (Save-WindowFrame -Proc $proc -Path $shot) {
+                        $luma = Measure-TerrainLuma -Path $shot
+                        $samples += [pscustomobject]@{
+                            Arm = $arm; Window = $window.Name; Index = $frameIndex; At = $at
+                            OffBeam = $luma.offbeam; Beam = $luma.beam
+                            Path = $shot
+                        }
+                        $frameIndex++
                     }
-                    Write-Host ("[lcplight]   {0,-11} t+{1,-5} offbeam={2,-7} beam={3}" -f `
-                        $slot.Name, $slot.At, $luma.offbeam, $luma.beam)
-                } else {
-                    Write-Warning "[lcplight] arm '$arm': frame capture failed for $($slot.Name)"
+                    Start-Sleep -Milliseconds ([int](1000.0 / $BurstHz))
                 }
+                Write-Host ("[lcplight]   burst '{0}': {1} frames" -f $window.Name, $frameIndex)
             }
             $tail = $launchedAt.AddSeconds($RunSeconds)
             while ((Get-Date) -lt $tail) {
@@ -413,25 +429,43 @@ finally {
     }
 }
 
+$csv = Join-Path $OutputRoot "luma.csv"
+$results | ForEach-Object { $_.Samples } | Select-Object Arm, Window, Index, At, OffBeam, Beam, Path |
+    Export-Csv -LiteralPath $csv -NoTypeInformation
 Write-Host ""
-Write-Host "[lcplight] ===== mean luma, scenario '$Scenario' ====="
-Write-Host "[lcplight] offbeam = upper right hillside, no player light points at it"
-Write-Host "[lcplight] beam    = lower centre right, where a torch or headlight pool lands"
-$slots = $SampleSchedule | ForEach-Object { $_.Name }
-foreach ($region in @("offbeam", "beam")) {
-    Write-Host ""
-    Write-Host ("  [{0}]" -f $region)
-    $header = "  {0,-12}" -f "slot"
-    foreach ($r in $results) { $header += ("{0,12}" -f ("arm=" + $r.Arm)) }
-    Write-Host $header
-    foreach ($slot in $slots) {
-        $row = "  {0,-12}" -f $slot
-        foreach ($r in $results) {
-            $s = $r.Samples | Where-Object { $_.Slot -eq $slot } | Select-Object -First 1
-            $v = if ($s) { if ($region -eq "offbeam") { $s.OffBeam } else { $s.Beam } } else { "-" }
-            $row += ("{0,12}" -f $v)
+Write-Host "[lcplight] per-frame luma written to $csv"
+
+# Report the largest frame-to-frame step INSIDE each burst. A cross-arm
+# comparison of absolute luma is not reported on purpose: the pilot's facing
+# after HopOut is not reproducible, so the same rectangle photographs different
+# geometry in different runs. A step between two consecutive frames of one run
+# is the claim this harness can actually support.
+Write-Host "[lcplight] ===== largest within-run luma step per burst, scenario '$Scenario' ====="
+Write-Host "[lcplight] offbeam = upper right hillside; beam = where a torch or headlight pool lands"
+foreach ($r in $results) {
+    foreach ($windowName in ($BurstWindows | ForEach-Object { $_.Name })) {
+        $series = @($r.Samples | Where-Object { $_.Window -eq $windowName } | Sort-Object Index)
+        if ($series.Count -lt 2) {
+            Write-Host ("  arm={0,-8} burst={1,-7} (only {2} frame(s) -- no step measurable)" -f `
+                $r.Arm, $windowName, $series.Count)
+            continue
         }
-        Write-Host $row
+        $bestDelta = 0.0
+        $bestAt = $null
+        $bestFrom = 0.0
+        $bestTo = 0.0
+        for ($i = 1; $i -lt $series.Count; $i++) {
+            $d = [math]::Abs($series[$i].OffBeam - $series[$i - 1].OffBeam)
+            if ($d -gt $bestDelta) {
+                $bestDelta = $d
+                $bestAt = $series[$i].At
+                $bestFrom = $series[$i - 1].OffBeam
+                $bestTo = $series[$i].OffBeam
+            }
+        }
+        $ratio = if ($bestFrom -gt 0.01) { [math]::Round($bestTo / $bestFrom, 3) } else { "n/a" }
+        Write-Host ("  arm={0,-8} burst={1,-7} biggest offbeam step at t+{2}: {3} -> {4} (x{5})" -f `
+            $r.Arm, $windowName, $bestAt, $bestFrom, $bestTo, $ratio)
     }
 }
 Write-Host ""
