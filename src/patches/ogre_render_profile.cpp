@@ -38,6 +38,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 namespace BZROpenShim::RenderProfiles
 {
@@ -92,6 +93,9 @@ namespace BZROpenShim::RenderProfiles
         // reverse_engineering/renderer_startup_backend_selection_20260825.md.
         BackendSelection::BootRequest s_bootRequest {};
         bool s_backendTransportEnabled = true;
+        // Read on the render thread by the scheme hook, written under
+        // s_stateLock by LoadConfigLocked; atomic so the two never tear.
+        std::atomic<bool> s_enhancedSchemeFallbackEnabled { true };
         bool s_transportWrittenThisBoot = false;
         Profile s_userProfile = Profile::Redux;
         ContentRequest s_contentRequest = ContentRequest::Inherit;
@@ -216,6 +220,16 @@ namespace BZROpenShim::RenderProfiles
                 s_backendTransportEnabled =
                     BackendSelection::ParseTransportEnabled(
                         TrimAsciiCopy(value));
+            }
+            // Defaults ON: without it, content that lacks enhanced
+            // techniques renders black under Enhanced on DX11.
+            if (TryGetUserConfigString("Fixes", "EnhancedSchemeFallback",
+                                       value))
+            {
+                s_enhancedSchemeFallbackEnabled.store(
+                    BackendSelection::ParseTransportEnabled(
+                        TrimAsciiCopy(value)),
+                    std::memory_order_release);
             }
         }
 
@@ -1507,11 +1521,256 @@ namespace BZROpenShim::RenderProfiles
             }
         }
 
+
+        // ---- enhanced-scheme fallback ---------------------------------------
+        //
+        // The takeover above is viewport-global: it rewrites the engine's
+        // scheme ("high-noshadow") to "en-high-noshadow" for everything drawn
+        // through that viewport. Only materials that declare the enhanced
+        // technique family can satisfy it -- in practice CR_BZTerrainBase,
+        // CR_BZBase, and the materials that inherit them.
+        //
+        // A Workshop or converted legacy map whose terrain material inherits
+        // stock BZTerrainBase has no "en-" technique at all. Ogre's default
+        // answer to "no technique for the active scheme" is to fall back to the
+        // material's FIRST technique, and BZTerrainBase opens with
+        // `scheme high-pssm`. That pass consumes texWorldViewProj1..3; on a
+        // viewport whose shadow setup never ran those arrive NaN, the sm4 pixel
+        // shader writes NaN, and a UNORM target stores NaN as 0. The terrain
+        // renders black -- on DX11 only, because only the sm4 path produces the
+        // NaN. Same defect shape as [Fixes] MpVehiclePreviewShadowScheme,
+        // reached through a different door.
+        //
+        // handleSchemeNotFound is Ogre's designed hook for exactly this case.
+        // Strip our own prefix and hand back the material's own technique for
+        // the base scheme, so unenhanced content renders the way it does under
+        // the stock profile instead of falling through to PSSM.
+
+        using FnMaterialManagerGetSingletonPtr = void* (*)();
+        using FnMaterialManagerAddListener =
+            void(__thiscall*)(void*, void*, const std::string&);
+        using FnMaterialGetNumTechniques = unsigned short(__thiscall*)(const void*);
+        using FnMaterialGetTechnique = void* (__thiscall*)(void*, unsigned short);
+        using FnTechniqueGetSchemeName =
+            const std::string& (__thiscall*)(const void*);
+        using FnTechniqueGetLodIndex = unsigned short(__thiscall*)(const void*);
+        using FnTechniqueIsSupported = bool(__thiscall*)(const void*);
+
+        struct OgreTechniqueApi
+        {
+            FnMaterialGetNumTechniques getNumTechniques = nullptr;
+            FnMaterialGetTechnique getTechnique = nullptr;
+            FnTechniqueGetSchemeName getSchemeName = nullptr;
+            FnTechniqueGetLodIndex getLodIndex = nullptr;
+            FnTechniqueIsSupported isSupported = nullptr;
+
+            bool Valid() const
+            {
+                return getNumTechniques != nullptr && getTechnique != nullptr &&
+                       getSchemeName != nullptr && getLodIndex != nullptr &&
+                       isSupported != nullptr;
+            }
+        };
+
+        const OgreTechniqueApi& TechniqueApi()
+        {
+            static const OgreTechniqueApi api = [] {
+                OgreTechniqueApi resolved;
+                resolved.getNumTechniques =
+                    ResolveOgreExport<FnMaterialGetNumTechniques>(
+                        "?getNumTechniques@Material@Ogre@@QBEGXZ");
+                resolved.getTechnique =
+                    ResolveOgreExport<FnMaterialGetTechnique>(
+                        "?getTechnique@Material@Ogre@@QAEPAVTechnique@2@G@Z");
+                resolved.getSchemeName =
+                    ResolveOgreExport<FnTechniqueGetSchemeName>(
+                        "?getSchemeName@Technique@Ogre@@QBEABV?$basic_string@DU?"
+                        "$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
+                resolved.getLodIndex =
+                    ResolveOgreExport<FnTechniqueGetLodIndex>(
+                        "?getLodIndex@Technique@Ogre@@QBEGXZ");
+                resolved.isSupported =
+                    ResolveOgreExport<FnTechniqueIsSupported>(
+                        "?isSupported@Technique@Ogre@@QBE_NXZ");
+                return resolved;
+            }();
+            return api;
+        }
+
+        void* ResolveBaseSchemeTechnique(const std::string& schemeName,
+                                         void* material,
+                                         unsigned short lodIndex)
+        {
+            if (material == nullptr)
+            {
+                return nullptr;
+            }
+
+            const std::string_view name(schemeName);
+            if (!name.starts_with("en-") && !name.starts_with("og-"))
+            {
+                // Not a scheme this layer invents. Anything else is the
+                // engine's or a mod's business, so leave Ogre's answer alone.
+                return nullptr;
+            }
+            const std::string_view base = name.substr(3);
+            if (base.empty())
+            {
+                return nullptr;
+            }
+
+            const OgreTechniqueApi& api = TechniqueApi();
+            if (!api.Valid())
+            {
+                return nullptr;
+            }
+
+            void* schemeMatch = nullptr;
+            const unsigned short count = api.getNumTechniques(material);
+            for (unsigned short i = 0; i < count; ++i)
+            {
+                void* technique = api.getTechnique(material, i);
+                if (technique == nullptr)
+                {
+                    continue;
+                }
+                // Ogre requires a technique that is supported on this hardware;
+                // returning an unsupported one fails later and less visibly.
+                if (!api.isSupported(technique))
+                {
+                    continue;
+                }
+                if (std::string_view(api.getSchemeName(technique)) != base)
+                {
+                    continue;
+                }
+                if (api.getLodIndex(technique) == lodIndex)
+                {
+                    return technique;
+                }
+                if (schemeMatch == nullptr)
+                {
+                    schemeMatch = technique;
+                }
+            }
+            // Prefer the exact LOD; otherwise any supported technique in the
+            // base scheme still beats technique 0 from a foreign scheme.
+            return schemeMatch;
+        }
+
+        class EnhancedSchemeFallbackListener
+        {
+        public:
+            // Ogre::MaterialManager::Listener vtable order in 1.10: virtual
+            // destructor, handleSchemeNotFound, afterIlluminationPassesCreated,
+            // beforeIlluminationPassesCleared. Both illumination hooks return
+            // bool ("notification handled") in 1.10, not void; declaring them
+            // keeps this object's vtable the right shape even though Ogre only
+            // calls them for runtime-generated techniques.
+            virtual ~EnhancedSchemeFallbackListener() {}
+
+            virtual void* handleSchemeNotFound(unsigned short /*schemeIndex*/,
+                                               const std::string& schemeName,
+                                               void* originalMaterial,
+                                               unsigned short lodIndex,
+                                               const void* /*renderable*/)
+            {
+                return ResolveBaseSchemeTechnique(schemeName, originalMaterial,
+                                                  lodIndex);
+            }
+
+            virtual bool afterIlluminationPassesCreated(void* /*technique*/)
+            {
+                return false;
+            }
+
+            virtual bool beforeIlluminationPassesCleared(void* /*technique*/)
+            {
+                return false;
+            }
+        };
+
+        bool InstallEnhancedSchemeFallbackListener()
+        {
+            const FnMaterialManagerGetSingletonPtr getMaterialManager =
+                ResolveOgreExport<FnMaterialManagerGetSingletonPtr>(
+                    "?getSingletonPtr@MaterialManager@Ogre@@SAPAV12@XZ");
+            const FnMaterialManagerAddListener addListener =
+                ResolveOgreExport<FnMaterialManagerAddListener>(
+                    "?addListener@MaterialManager@Ogre@@UAEXPAVListener@12@ABV?"
+                    "$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            if (getMaterialManager == nullptr || addListener == nullptr ||
+                !TechniqueApi().Valid())
+            {
+                return false;
+            }
+
+            void* const materialManager = getMaterialManager();
+            if (materialManager == nullptr)
+            {
+                return false;
+            }
+
+            static EnhancedSchemeFallbackListener s_listener;
+            // A blank scheme name registers a GENERIC listener. Ogre consults
+            // scheme-specific listeners first, then the generic list, taking the
+            // first non-null technique -- so this adds to the chain rather than
+            // displacing anything the game or a mod installed.
+            const std::string anyScheme;
+            addListener(materialManager, &s_listener, anyScheme);
+            return true;
+        }
+
+        void EnsureEnhancedSchemeFallbackInstalled()
+        {
+            static bool s_settled = false;
+            if (s_settled)
+            {
+                return;
+            }
+
+            if (!s_enhancedSchemeFallbackEnabled.load(std::memory_order_acquire))
+            {
+                s_settled = true;
+                LogShimA(LogLevel::Info, kLogTag,
+                         "enhanced scheme fallback disabled by configuration");
+                return;
+            }
+
+            // Bounded retry, then settle for good. This runs from the engine's
+            // ~1 Hz settings-reassert loop; a resolve-if-null retry with no
+            // latch would re-probe a bad export name for the life of the
+            // process. The budget only covers the window where Ogre's
+            // MaterialManager singleton might not exist yet.
+            static int s_attemptsLeft = 16;
+            if (InstallEnhancedSchemeFallbackListener())
+            {
+                s_settled = true;
+                LogShimA(LogLevel::Info, kLogTag,
+                         "enhanced scheme fallback installed "
+                         "(en-/og- scheme miss resolves to the base technique)");
+                return;
+            }
+
+            if (--s_attemptsLeft <= 0)
+            {
+                s_settled = true;
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "enhanced scheme fallback unavailable; materials without "
+                         "enhanced techniques keep Ogre's first-technique fallback");
+            }
+        }
+
         void __fastcall ViewportSetMaterialSchemeHookImpl(void* viewport,
                                                           void* /*edx*/,
                                                           const std::string* scheme)
         {
             const FnViewportSetMaterialScheme original = OriginalSetMaterialSchemeFromIat();
+
+            // The engine calls this from its own render thread, both on
+            // viewport creation and on the ~1 Hz reassert loop, which is
+            // exactly where Ogre state may be touched safely.
+            EnsureEnhancedSchemeFallbackInstalled();
 
             const char* incomingRaw = (scheme != nullptr) ? scheme->c_str() : "";
             const std::string_view incoming(incomingRaw);
