@@ -1,0 +1,444 @@
+<#
+.SYNOPSIS
+A/B repro for the pilot-flashlight scene-light flip.
+
+.DESCRIPTION
+Runs the lcbench pilot-flashlight fixture twice with everything held constant
+except [SinglePlayer] PilotFlashlight, captures the same frames in both arms,
+and prints the mean terrain luma per frame so the two arms can be compared
+numerically.
+
+Background: a 2026-09-13 play01.bzn capture showed the whole 3D scene stepping
+between two light levels, co-timed to the frame with boarding and leaving a
+craft (70.0 vs 39.3 of 255 on a fixed terrain patch, ~2.4x). Shading contrast,
+hue and pure black were preserved and the sky dome was bit-identical, so it is
+a scene light level and not a post-process. The only thing whose lifetime
+matches every transition is the shim's own pilot flashlight.
+
+Read the result like this:
+  on-foot luma(arm=on) >> on-foot luma(arm=off)  -> the flashlight floods the
+      scene and owns the bug.
+  on-foot luma(arm=on) ~= on-foot luma(arm=off)  -> the flashlight is innocent;
+      look at the craft headlight and at scheme/technique selection instead.
+
+Both arms report what they actually did ([PILOTLIGHT] created / Stood down).
+An arm that never engaged is reported as NOT ENGAGED rather than being averaged
+into the comparison, because a dead arm otherwise reads exactly like a null
+result.
+
+Windowed is mandatory: an exclusive-fullscreen DXGI swapchain hands back black
+to a screen grab, so a fullscreen run cannot produce visual evidence.
+
+.EXAMPLE
+pwsh -File reverse_engineering/run_lcplight.ps1
+pwsh -File reverse_engineering/run_lcplight.ps1 -Arms on -RunSeconds 40
+#>
+param(
+    [string]$GameRoot = "C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux",
+    # flashlight: does the shim's pilot flashlight change the scene? (arms on/off)
+    # headlight:  does the craft headlight's solved attenuation range change it?
+    #             (arms repair/stock/nolight, pilot flashlight off throughout)
+    [ValidateSet("flashlight", "headlight")]
+    [string]$Scenario = "headlight",
+    [string[]]$Arms = @(),
+    [ValidateRange(30, 300)]
+    [int]$RunSeconds = 52,
+    [string]$Color = "White",
+    [string]$Beam = "Focused",
+    [string]$OutputRoot = "",
+    # Deploy bin\Release\winmm.dll over the installed shim. Off by default:
+    # the reported capture was produced by whatever is already installed, and
+    # swapping the binary changes the thing under test.
+    [switch]$DeployDll
+)
+
+$ErrorActionPreference = "Stop"
+$repoRoot = Split-Path -Parent $PSScriptRoot
+
+# Sample times are seconds after PROCESS LAUNCH, not mission time: the engine
+# spends roughly 13 s on the loading screen before Start() runs, and a frame
+# captured during the load is the same bitmap in every arm (observed: identical
+# 1257577-byte PNGs and identical luma, which is not a null result, it is not a
+# measurement at all). The fixture hops out at mission T+8, i.e. about t+21.
+$SampleSchedule = @(
+    @{ Name = "craft";      At = 18.0 },
+    @{ Name = "foot";       At = 30.0 },
+    @{ Name = "foot_late";  At = 40.0 }
+)
+
+# Per-arm ini overrides. Every arm writes every key the scenario varies, so an
+# arm never inherits the previous arm's value by omission.
+$ArmMatrix = @{
+    flashlight = [ordered]@{
+        on  = @{ PilotFlashlight = "1"; HeadlightFalloffRepair = "1"; Headlights = "1" }
+        off = @{ PilotFlashlight = "0"; HeadlightFalloffRepair = "1"; Headlights = "1" }
+    }
+    headlight = [ordered]@{
+        # Shipping behaviour: SolveInvisibleRange inflates the stock 600 m
+        # attenuation range so the cone terminator falls below the 8-bit floor.
+        repair  = @{ PilotFlashlight = "0"; HeadlightFalloffRepair = "1"; Headlights = "1" }
+        # Same light, stock 600 m range. If the scene brightens here, the
+        # inflated range is what is evicting lights map-wide.
+        stock   = @{ PilotFlashlight = "0"; HeadlightFalloffRepair = "0"; Headlights = "1" }
+        # No shim headlight policy at all: the floor of the comparison.
+        nolight = @{ PilotFlashlight = "0"; HeadlightFalloffRepair = "0"; Headlights = "0" }
+    }
+}
+if (-not $Arms -or $Arms.Count -eq 0) {
+    $Arms = @($ArmMatrix[$Scenario].Keys)
+}
+foreach ($a in $Arms) {
+    if (-not $ArmMatrix[$Scenario].Contains($a)) {
+        throw "scenario '$Scenario' has no arm '$a'; valid: $($ArmMatrix[$Scenario].Keys -join ', ')"
+    }
+}
+
+$stamp = Get-Date -Format "yyyyMMdd_HHmmss"
+if (-not $OutputRoot) {
+    $OutputRoot = Join-Path $env:TEMP "bzr-lcplight-$stamp"
+}
+New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
+
+$gameExe = Join-Path $GameRoot "battlezone98redux.exe"
+$installedIni = Join-Path $GameRoot "openshim.ini"
+$missionRoot = Join-Path $GameRoot "addon\lcbench"
+$worldSource = Join-Path $repoRoot "reverse_engineering\test_missions\live_combat_scaling"
+$fixture = Join-Path $repoRoot "reverse_engineering\test_missions\lcbench_pilotlight\rmplight.lua"
+$builtDll = Join-Path $repoRoot "bin\Release\winmm.dll"
+
+foreach ($p in @($gameExe, $installedIni, $worldSource, $fixture)) {
+    if (-not (Test-Path -LiteralPath $p)) { throw "missing: $p" }
+}
+Get-Process battlezone98redux -ErrorAction SilentlyContinue | ForEach-Object {
+    throw "the game is already running (PID $($_.Id)); close it first"
+}
+
+Add-Type -AssemblyName System.Drawing
+
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class LcpWin {
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+    // PW_RENDERFULLCONTENT (2) asks the window to redraw into a DC, which works
+    // for a windowed DXGI swapchain without owning the foreground. A plain
+    // CopyFromScreen behind another window captures the desktop, which reads
+    // exactly like "the feature does nothing".
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
+}
+"@
+
+# Sets a key inside an existing section, or appends it to that section.
+function Set-IniKey {
+    param([string[]]$Lines, [string]$Section, [string]$Key, [string]$Value)
+    $out = New-Object System.Collections.Generic.List[string]
+    $inSection = $false
+    $written = $false
+    $lastSectionLine = -1
+    for ($i = 0; $i -lt $Lines.Count; $i++) {
+        $line = $Lines[$i]
+        if ($line -match '^\s*\[(.+?)\]\s*$') {
+            if ($inSection -and -not $written) {
+                $out.Insert($lastSectionLine + 1, "$Key = $Value")
+                $written = $true
+            }
+            $inSection = ($Matches[1] -eq $Section)
+            $out.Add($line) | Out-Null
+            if ($inSection) { $lastSectionLine = $out.Count - 1 }
+            continue
+        }
+        if ($inSection -and -not $written -and $line -match "^\s*$([regex]::Escape($Key))\s*=") {
+            $out.Add("$Key = $Value") | Out-Null
+            $written = $true
+            continue
+        }
+        $out.Add($line) | Out-Null
+    }
+    if (-not $written -and $lastSectionLine -ge 0) {
+        $out.Insert($lastSectionLine + 1, "$Key = $Value")
+    }
+    return $out.ToArray()
+}
+
+# Two rectangles, because a light that only changes its own pool is a very
+# different finding from one that changes the whole map. "offbeam" is the upper
+# right hillside, which no player light points at and which no HUD panel covers;
+# "beam" is the lower centre right, where a pilot torch or headlight pool lands.
+# Measuring only the second is how a local pool gets mistaken for a scene-wide
+# step. Subsampled: this is a ratio test, not photometry.
+$LumaRegions = [ordered]@{
+    offbeam = @{ X0 = 0.62; X1 = 0.95; Y0 = 0.10; Y1 = 0.42 }
+    beam    = @{ X0 = 0.62; X1 = 0.82; Y0 = 0.62; Y1 = 0.85 }
+}
+
+function Measure-TerrainLuma {
+    param([string]$Path)
+    $bmp = New-Object System.Drawing.Bitmap $Path
+    try {
+        $out = [ordered]@{}
+        foreach ($name in $LumaRegions.Keys) {
+            $r = $LumaRegions[$name]
+            $x0 = [int]($bmp.Width * $r.X0)
+            $x1 = [int]($bmp.Width * $r.X1)
+            $y0 = [int]($bmp.Height * $r.Y0)
+            $y1 = [int]($bmp.Height * $r.Y1)
+            $sum = 0.0
+            $n = 0
+            for ($y = $y0; $y -lt $y1; $y += 3) {
+                for ($x = $x0; $x -lt $x1; $x += 3) {
+                    $c = $bmp.GetPixel($x, $y)
+                    $sum += (0.299 * $c.R + 0.587 * $c.G + 0.114 * $c.B)
+                    $n++
+                }
+            }
+            $out[$name] = if ($n -eq 0) { 0.0 } else { [math]::Round($sum / $n, 2) }
+        }
+        return $out
+    }
+    finally { $bmp.Dispose() }
+}
+
+function Save-WindowFrame {
+    param([System.Diagnostics.Process]$Proc, [string]$Path)
+    $hwnd = $Proc.MainWindowHandle
+    if ($hwnd -eq [IntPtr]::Zero) { return $false }
+    $rect = New-Object LcpWin+RECT
+    if (-not [LcpWin]::GetWindowRect($hwnd, [ref]$rect)) { return $false }
+    $w = $rect.R - $rect.L
+    $h = $rect.B - $rect.T
+    if ($w -le 0 -or $h -le 0) { return $false }
+    $bmp = New-Object System.Drawing.Bitmap $w, $h
+    $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+    $ok = $false
+    try {
+        $hdc = $gfx.GetHdc()
+        try { $ok = [LcpWin]::PrintWindow($hwnd, $hdc, 2) } finally { $gfx.ReleaseHdc($hdc) }
+        if ($ok) { $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png) }
+    }
+    finally { $gfx.Dispose(); $bmp.Dispose() }
+    return $ok
+}
+
+# --- world deployment -------------------------------------------------------
+# The runner owns addon\lcbench only when it had to create it. If a baseline is
+# already installed, its files are backed up and restored instead.
+$createdMissionRoot = $false
+$missionBackup = Join-Path $OutputRoot "pre_live"
+$deployedNames = @()
+
+$env:BZR_FORCE_WINDOWED = "1"
+. (Join-Path $repoRoot "reverse_engineering\BZRHarness.ps1")
+
+$iniBackup = Join-Path $OutputRoot "openshim.ini.orig"
+Copy-Item -LiteralPath $installedIni -Destination $iniBackup -Force
+$iniHash = (Get-FileHash -LiteralPath $installedIni -Algorithm SHA256).Hash
+
+$results = @()
+
+try {
+    if (-not (Test-Path -LiteralPath $missionRoot)) {
+        New-Item -ItemType Directory -Force -Path $missionRoot | Out-Null
+        $createdMissionRoot = $true
+        Write-Host "[lcplight] created $missionRoot"
+    }
+    New-Item -ItemType Directory -Force -Path $missionBackup | Out-Null
+    foreach ($src in (Get-ChildItem -LiteralPath $worldSource -File)) {
+        $live = Join-Path $missionRoot $src.Name
+        if (Test-Path -LiteralPath $live) {
+            Copy-Item -LiteralPath $live -Destination (Join-Path $missionBackup $src.Name) -Force
+        }
+        Copy-Item -LiteralPath $src.FullName -Destination $live -Force
+        $deployedNames += $src.Name
+    }
+    $liveLua = Join-Path $missionRoot "lcbench.lua"
+    Copy-Item -LiteralPath $fixture -Destination $liveLua -Force
+    Write-Host "[lcplight] deployed lcbench world + rmplight.lua fixture"
+
+    if ($DeployDll) {
+        if (-not (Test-Path -LiteralPath $builtDll)) { throw "build first: $builtDll" }
+        Copy-Item -LiteralPath $builtDll -Destination (Join-Path $GameRoot "winmm.dll") -Force
+        Write-Host "[lcplight] deployed winmm.dll $((Get-FileHash -LiteralPath $builtDll -Algorithm SHA256).Hash)"
+    }
+    $shimHash = (Get-FileHash -LiteralPath (Join-Path $GameRoot "winmm.dll") -Algorithm SHA256).Hash
+    Write-Host "[lcplight] shim under test: $shimHash"
+
+    foreach ($arm in $Arms) {
+        $armDir = Join-Path $OutputRoot "arm_$arm"
+        New-Item -ItemType Directory -Force -Path $armDir | Out-Null
+
+        $overrides = $ArmMatrix[$Scenario][$arm]
+        $lines = Get-Content -LiteralPath $iniBackup
+        foreach ($key in $overrides.Keys) {
+            $lines = Set-IniKey $lines "SinglePlayer" $key $overrides[$key]
+        }
+        $lines = Set-IniKey $lines "SinglePlayer" "PilotFlashlightColor" $Color
+        $lines = Set-IniKey $lines "SinglePlayer" "PilotFlashlightBeam" $Beam
+        $lines = Set-IniKey $lines "Diagnostics" "PilotFlashlightTrace" "1"
+        $lines = Set-IniKey $lines "Diagnostics" "HeadlightLightTrace" "1"
+        Set-Content -LiteralPath $installedIni -Value $lines -Encoding ASCII
+        $desc = ($overrides.Keys | ForEach-Object { "$_=$($overrides[$_])" }) -join " "
+        Write-Host "[lcplight] --- $Scenario arm '$arm': $desc ---"
+
+        $proc = Start-Process -FilePath $gameExe -ArgumentList "lcbench.bzn" `
+            -WorkingDirectory $GameRoot -PassThru
+        $launchedAt = Get-Date
+        Write-Host "[lcplight] launched PID=$($proc.Id)"
+
+        $samples = @()
+        try {
+            foreach ($slot in $SampleSchedule) {
+                $due = $launchedAt.AddSeconds($slot.At)
+                while ((Get-Date) -lt $due) {
+                    Start-Sleep -Milliseconds 250
+                    $proc.Refresh()
+                    if ($proc.HasExited) { break }
+                }
+                $proc.Refresh()
+                if ($proc.HasExited) {
+                    Write-Warning "[lcplight] arm '$arm' exited before $($slot.Name)"
+                    break
+                }
+                $shot = Join-Path $armDir ("{0}.png" -f $slot.Name)
+                if (Save-WindowFrame -Proc $proc -Path $shot) {
+                    $luma = Measure-TerrainLuma -Path $shot
+                    $samples += [pscustomobject]@{
+                        Arm = $arm; Slot = $slot.Name; At = $slot.At
+                        OffBeam = $luma.offbeam; Beam = $luma.beam
+                    }
+                    Write-Host ("[lcplight]   {0,-11} t+{1,-5} offbeam={2,-7} beam={3}" -f `
+                        $slot.Name, $slot.At, $luma.offbeam, $luma.beam)
+                } else {
+                    Write-Warning "[lcplight] arm '$arm': frame capture failed for $($slot.Name)"
+                }
+            }
+            $tail = $launchedAt.AddSeconds($RunSeconds)
+            while ((Get-Date) -lt $tail) {
+                Start-Sleep -Milliseconds 500
+                $proc.Refresh()
+                if ($proc.HasExited) { break }
+            }
+        }
+        finally {
+            try { Stop-BZRGame -Id $proc.Id } catch { Write-Warning "Stop-BZRGame: $_" }
+        }
+
+        foreach ($log in @("openshim.log", "BZLogger.txt", "BZOgreLogfile.log")) {
+            $src = Join-Path $GameRoot "logs\$log"
+            if (Test-Path -LiteralPath $src) {
+                Copy-Item -LiteralPath $src -Destination (Join-Path $armDir $log) -Force
+            }
+        }
+
+        # An arm that never engaged is not a null result -- it is not a result.
+        # Prove engagement from the arm's own log, from the value the arm was
+        # supposed to change, before the numbers are allowed to mean anything.
+        $armLog = Join-Path $armDir "openshim.log"
+        $created = 0
+        $ranges = @()
+        $lightLines = @()
+        if (Test-Path -LiteralPath $armLog) {
+            $lightLines = @(Select-String -LiteralPath $armLog -Pattern "PILOTLIGHT|HEADLIGHT" |
+                ForEach-Object { $_.Line })
+            $created = @($lightLines | Where-Object { $_ -match "\[PILOTLIGHT\] created" }).Count
+            foreach ($line in $lightLines) {
+                if ($line -match "range=([0-9]+(?:\.[0-9]+)?)") { $ranges += [double]$Matches[1] }
+            }
+        }
+        $observedRange = if ($ranges.Count) { ($ranges | Select-Object -Last 1) } else { $null }
+        switch ($Scenario) {
+            "flashlight" {
+                $engaged = if ($arm -eq "on") { $created -gt 0 } else { $created -eq 0 }
+            }
+            "headlight" {
+                # The whole point of the repair arm is a range above stock 600.
+                $engaged = switch ($arm) {
+                    "repair"  { $observedRange -ne $null -and $observedRange -gt 601 }
+                    "stock"   { $observedRange -ne $null -and $observedRange -le 601 }
+                    "nolight" { $true }
+                    default   { $true }
+                }
+            }
+        }
+        Write-Host ("[lcplight] arm '{0}': pilotLightsCreated={1} headlightRange={2} engaged={3}" -f `
+            $arm, $created, $(if ($observedRange -ne $null) { $observedRange } else { "n/a" }), $engaged)
+        if (-not $engaged) {
+            Write-Warning "[lcplight] arm '$arm' NOT ENGAGED -- its numbers prove nothing"
+        }
+        $lightLines | Where-Object { $_ -notmatch "HEADLIGHT-PROBE" } |
+            Select-Object -Last 12 | ForEach-Object { Write-Host "    $_" }
+        $lightLines | Where-Object { $_ -match "HEADLIGHT-PROBE" } |
+            Select-Object -Last 1 | ForEach-Object { Write-Host "    $_" }
+
+        $results += [pscustomobject]@{
+            Arm = $arm; Engaged = $engaged; Created = $created; Range = $observedRange
+            Samples = $samples
+        }
+    }
+}
+finally {
+    Copy-Item -LiteralPath $iniBackup -Destination $installedIni -Force
+    $iniNow = (Get-FileHash -LiteralPath $installedIni -Algorithm SHA256).Hash
+    if ($iniNow -ne $iniHash) { throw "openshim.ini restore mismatch" }
+    Write-Host "[lcplight] openshim.ini restored"
+
+    foreach ($name in $deployedNames) {
+        $live = Join-Path $missionRoot $name
+        $saved = Join-Path $missionBackup $name
+        if (Test-Path -LiteralPath $saved) {
+            Copy-Item -LiteralPath $saved -Destination $live -Force
+        } elseif (Test-Path -LiteralPath $live) {
+            Remove-Item -LiteralPath $live -Force
+        }
+    }
+    $liveLua = Join-Path $missionRoot "lcbench.lua"
+    $savedLua = Join-Path $missionBackup "lcbench.lua"
+    if (Test-Path -LiteralPath $savedLua) {
+        Copy-Item -LiteralPath $savedLua -Destination $liveLua -Force
+    } elseif (Test-Path -LiteralPath $liveLua) {
+        Remove-Item -LiteralPath $liveLua -Force
+    }
+    if ($createdMissionRoot -and (Test-Path -LiteralPath $missionRoot)) {
+        if (-not (Get-ChildItem -LiteralPath $missionRoot -Force)) {
+            Remove-Item -LiteralPath $missionRoot -Force
+        }
+    }
+    Write-Host "[lcplight] addon\lcbench restored"
+
+    $ogreBackup = Join-Path $GameRoot "ogre.cfg.bzrharness-backup"
+    if (Test-Path -LiteralPath $ogreBackup) {
+        Copy-Item -LiteralPath $ogreBackup -Destination (Join-Path $GameRoot "ogre.cfg") -Force
+        Remove-Item -LiteralPath $ogreBackup -Force
+        Write-Host "[lcplight] ogre.cfg restored"
+    }
+}
+
+Write-Host ""
+Write-Host "[lcplight] ===== mean luma, scenario '$Scenario' ====="
+Write-Host "[lcplight] offbeam = upper right hillside, no player light points at it"
+Write-Host "[lcplight] beam    = lower centre right, where a torch or headlight pool lands"
+$slots = $SampleSchedule | ForEach-Object { $_.Name }
+foreach ($region in @("offbeam", "beam")) {
+    Write-Host ""
+    Write-Host ("  [{0}]" -f $region)
+    $header = "  {0,-12}" -f "slot"
+    foreach ($r in $results) { $header += ("{0,12}" -f ("arm=" + $r.Arm)) }
+    Write-Host $header
+    foreach ($slot in $slots) {
+        $row = "  {0,-12}" -f $slot
+        foreach ($r in $results) {
+            $s = $r.Samples | Where-Object { $_.Slot -eq $slot } | Select-Object -First 1
+            $v = if ($s) { if ($region -eq "offbeam") { $s.OffBeam } else { $s.Beam } } else { "-" }
+            $row += ("{0,12}" -f $v)
+        }
+        Write-Host $row
+    }
+}
+Write-Host ""
+foreach ($r in $results) {
+    if (-not $r.Engaged) {
+        Write-Host ("[lcplight] arm '{0}' NOT ENGAGED (pilotLights={1} range={2}) -- excluded from any conclusion" -f `
+            $r.Arm, $r.Created, $(if ($r.Range -ne $null) { $r.Range } else { "n/a" }))
+    }
+}
+Write-Host "[lcplight] artifacts in $OutputRoot"
