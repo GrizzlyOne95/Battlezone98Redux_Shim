@@ -393,7 +393,7 @@ actually passes as `param_2`: Ghidra collapses several distinct `Craft` members
 into one `_padding_` in that function, and `GameObject::GetTeam` decompiles to
 a nonsense field read, so the live team's storage is unresolved in this corpus.
 
-### The check was run, and the hypothesis did not survive
+### The check was run only half way: the pilot never boarded
 
 `[SinglePlayer] PilotTeamRestore` was implemented as that probe (see
 `src/patches/bzr_hooks.cpp`, "Pilot team restore on boarding"). On lcbench with
@@ -411,9 +411,21 @@ The self-check passing proves both field offsets on this image: `flags` reads
 `0x00010010`, which is the team nibble at bits 16-19 holding 1 plus `0x10`
 marking the user object -- exactly what `GameObjectClass::Build` writes.
 
-**So `Craft::BuildPilot` does pass the correct team, the packed field is not
-stale, and `SetAsNotUser` would restore team 1.** The pilot is not the object
-that reads 0, and the repair never fires on this path by construction.
+**THE LIMIT, and it matters: the pilot never boarded in that run.** The
+fixture's boarding leg logged `BOARD ok=false via=no-exu` twenty times and every
+heartbeat through T+55 still read `onFoot=true`. The sample above is the pilot
+standing around *before* boarding, and the probe only logs on the on-foot
+branch, which stops the instant boarding completes. The transition this bug
+lives on was never observed.
+
+What is ruled out is therefore narrow: the **"pilot's packed nibble reads 0"**
+variant, at the endpoint, supported by that sample plus the static argument that
+nothing in `SetAsUser` touches the person's nibble before `SetAsNotUser` reads
+it (destroy craft aiProcess -> craft `vtbl+8` detach -> `Set_User_Entity` ->
+`userObject = craft`). On that reading `SetAsNotUser` would restore team 1.
+
+Anything that goes wrong *during* the transition -- the live team, a null
+`teamList`, or the craft rather than the pilot -- this probe cannot see.
 
 The feature is kept, OFF, as the instrument rather than as a fix. Its
 `[PILOTTEAM]` lines report both teams for every pilot and say `DISAGREE` if some
@@ -421,9 +433,15 @@ other route ever produces the disagreement it was built for.
 
 ### What is still open
 
-* The operator's route is a **hand-driven** boarding on `play01.bzn` -- walking
-  the pilot back into the craft -- not a scripted hop-out on lcbench. That path
-  is untested and may differ.
+* **The boarding transition itself, which is the whole event.** Two ways to
+  reach it. (a) Make the probe keep sampling the previous pilot object for a few
+  frames after it stops being the user object, so a team that flips to 0 inside
+  `SetAsNotUser` is caught while the `Person` is still alive -- a small change to
+  the existing feature and it needs no input injection. (b) Drive the boarding
+  for real: `input.map` has no enter-vehicle action, so the pilot boards by
+  walking into the craft, which means throttle-forward via `SendInput` using the
+  scan-code harness already proven in `run_lcwalk_drive.ps1`. (a) is cheaper and
+  strictly more informative; (b) is what reproduces the operator's own route.
 * The mine's target may not be the pilot at all. `GameObject::SetAsUser` detaches
   the craft from its team list (`vtbl+8`) near the start and only re-attaches it
   to `userTeamNumber` (`vtbl+4`) at the end, so the **craft** is teamless across

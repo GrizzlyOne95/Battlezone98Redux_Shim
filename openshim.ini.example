@@ -1609,17 +1609,19 @@ PilotFlashlightBone = 11POV
 ; construction); an offset that is wrong on a future build stands the feature
 ; down rather than corrupting an unrelated field.
 ;
-; MEASURED 2026-09-13, AND THE READING DID NOT SURVIVE. On a scripted hop-out
-; the [PILOTTEAM] lines report "Layout verified on a craft: packed=1 live=1"
-; and then "Pilot on foot packed=1 live=1 (agree)", sampled 15 ms after the
-; hop-out on the real pilot. So Craft::BuildPilot does pass the correct team,
-; the packed field is not stale, and the repair below never fires on that path
-; -- it only writes when the packed team reads 0.
+; PARTLY MEASURED 2026-09-13. On a scripted hop-out the [PILOTTEAM] lines
+; report "Layout verified on a craft: packed=1 live=1" and then "Pilot on foot
+; packed=1 live=1 (agree)", sampled 15 ms after the hop-out on the real pilot.
 ;
-; Leave this OFF. It is useful as a probe: turn it on and its [PILOTTEAM] lines
-; will tell you the packed and live team for every pilot, and say "DISAGREE" if
-; a route ever produces the disagreement this was built for. It is not a
-; working fix for the Arc Mine symptom.
+; BUT THE PILOT NEVER BOARDED in that run -- the fixture has no way to drive a
+; boarding, and every heartbeat to the end read onFoot=true. The sample is the
+; pilot standing around BEFORE boarding, and this probe only logs while on
+; foot, so it stops exactly when the interesting thing happens. What is ruled
+; out is therefore narrow: the "packed nibble reads 0" variant, at the
+; endpoint. Anything that goes wrong DURING the transition -- the live team, a
+; null teamList, or the craft rather than the pilot -- it cannot see.
+;
+; Leave this OFF. It is a probe, not a working fix for the Arc Mine symptom.
 ;
 ; Stands down for the duration of a network game.
 ; Accepted: boolean. Default: OFF.
