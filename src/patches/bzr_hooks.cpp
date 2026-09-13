@@ -20757,13 +20757,28 @@ namespace BZROpenShim
         // then restores the correct team by itself. No hook, no control-flow
         // surgery, and it is idempotent.
         //
-        // IMPORTANT -- this ships OFF and is not yet proven. The mechanism is
-        // read out of the decompilation, not observed live: the corpus cannot
-        // settle what Craft::BuildPilot passes Build as the team, because
-        // Ghidra collapses several Craft members into one field there. The
-        // [PILOTTEAM] lines below are the missing measurement. If they never
-        // report a disagreement then this hypothesis is wrong and the feature
-        // is inert, which is the intended failure mode.
+        // MEASURED 2026-09-13, AND THE HYPOTHESIS DID NOT SURVIVE.
+        //
+        // The [PILOTTEAM] lines below were added as the missing measurement,
+        // and on lcbench with a scripted HopOut they report:
+        //
+        //   Layout verified on a craft: packed=1 live=1 (flags=0x00010010)
+        //   Pilot on foot player=0x02A0D320 packed=1 live=1 (agree)
+        //
+        // sampled 15 ms after the hop-out, i.e. on the real freshly built
+        // pilot. The self-check passing proves both offsets on this image
+        // (flags 0x00010010 is the team nibble at bits 16..19 reading 1, plus
+        // 0x10 marking the user object -- exactly what GameObjectClass::Build
+        // writes). So Craft::BuildPilot DOES pass the correct team, the packed
+        // field is not stale, and SetAsNotUser would restore team 1.
+        //
+        // The repair below therefore never fires on that path, by construction:
+        // it writes only when the packed team reads 0. Treat this as the probe
+        // it turned out to be, not as a working fix. What is still untested is
+        // the operator's own route -- a hand-driven boarding on play01, where
+        // the player walks back into the craft rather than a script hopping
+        // them out -- and whether some other object, not the pilot, is the one
+        // the mine sees. Ships OFF.
 
         // GameObject layout, all confirmed against the shipped GOG image rather
         // than the advisory PDB:

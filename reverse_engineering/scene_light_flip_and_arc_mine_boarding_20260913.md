@@ -393,7 +393,51 @@ actually passes as `param_2`: Ghidra collapses several distinct `Craft` members
 into one `_padding_` in that function, and `GameObject::GetTeam` decompiles to
 a nonsense field read, so the live team's storage is unresolved in this corpus.
 
-### The one runtime check that settles it
+### The check was run, and the hypothesis did not survive
+
+`[SinglePlayer] PilotTeamRestore` was implemented as that probe (see
+`src/patches/bzr_hooks.cpp`, "Pilot team restore on boarding"). On lcbench with
+a scripted `HopOut`:
+
+```text
+[PILOTTEAM] Layout verified on a craft: packed=1 live=1 (obj=0x25BF95A8 flags=0x00010010)
+[PILOTTEAM] Pilot on foot player=0x02A0D320 packed=1 live=1 verified=yes (agree -- nothing to repair)
+```
+
+sampled 15 ms after `[PLIGHT] T+8.00 HOP_OUT attempt=1 ok=true`, i.e. on the
+real freshly built pilot.
+
+The self-check passing proves both field offsets on this image: `flags` reads
+`0x00010010`, which is the team nibble at bits 16-19 holding 1 plus `0x10`
+marking the user object -- exactly what `GameObjectClass::Build` writes.
+
+**So `Craft::BuildPilot` does pass the correct team, the packed field is not
+stale, and `SetAsNotUser` would restore team 1.** The pilot is not the object
+that reads 0, and the repair never fires on this path by construction.
+
+The feature is kept, OFF, as the instrument rather than as a fix. Its
+`[PILOTTEAM]` lines report both teams for every pilot and say `DISAGREE` if some
+other route ever produces the disagreement it was built for.
+
+### What is still open
+
+* The operator's route is a **hand-driven** boarding on `play01.bzn` -- walking
+  the pilot back into the craft -- not a scripted hop-out on lcbench. That path
+  is untested and may differ.
+* The mine's target may not be the pilot at all. `GameObject::SetAsUser` detaches
+  the craft from its team list (`vtbl+8`) near the start and only re-attaches it
+  to `userTeamNumber` (`vtbl+4`) at the end, so the **craft** is teamless across
+  the middle of that call. Whether a simulation tick can observe that window is
+  not established and cannot be, from a decompilation alone.
+* `GameObject::FriendP(int)` also requires a non-null `teamList`; a detached
+  object failing that test reaches the same "not a friend" answer without its
+  team ever reading 0.
+
+Any of those needs a hook on `WeaponMine::Simulate` itself, logging the chosen
+target, its class, and both team readings at the fire call. That is the next
+instrument, and it answers the question regardless of which object is at fault.
+
+### The original runtime check, for the record
 
 Log, for the player's pilot across the boarding frame:
 

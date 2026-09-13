@@ -1609,11 +1609,17 @@ PilotFlashlightBone = 11POV
 ; construction); an offset that is wrong on a future build stands the feature
 ; down rather than corrupting an unrelated field.
 ;
-; The mechanism has NOT been observed live. The decompilation cannot settle
-; what Craft::BuildPilot passes as the pilot's team, so the [PILOTTEAM] log
-; lines are the missing measurement: they report the packed and live team for
-; every pilot, and say "DISAGREE" when the two differ. If they never disagree
-; then this reading is wrong and the feature is inert.
+; MEASURED 2026-09-13, AND THE READING DID NOT SURVIVE. On a scripted hop-out
+; the [PILOTTEAM] lines report "Layout verified on a craft: packed=1 live=1"
+; and then "Pilot on foot packed=1 live=1 (agree)", sampled 15 ms after the
+; hop-out on the real pilot. So Craft::BuildPilot does pass the correct team,
+; the packed field is not stale, and the repair below never fires on that path
+; -- it only writes when the packed team reads 0.
+;
+; Leave this OFF. It is useful as a probe: turn it on and its [PILOTTEAM] lines
+; will tell you the packed and live team for every pilot, and say "DISAGREE" if
+; a route ever produces the disagreement this was built for. It is not a
+; working fix for the Arc Mine symptom.
 ;
 ; Stands down for the duration of a network game.
 ; Accepted: boolean. Default: OFF.
