@@ -356,6 +356,12 @@ VehicleListModScoping = 1
 ; spaces. Set to 0 for stock tokenising.
 ; Accepted: boolean. Default: ON. Restart required after changing.
 CliMultiParameterOptions = 1
+; The multiplayer Create Game vehicle preview inherits a PSSM material scheme
+; on a viewport that has shadows disabled, so its shader reads NaN shadow
+; matrices and the craft renders as NaN - black - with every submission,
+; face and draw-call counter looking healthy. Pins that viewport to the
+; matching -noshadow scheme. Verified from a RenderDoc capture.
+MpVehiclePreviewShadowScheme = 1
 
 [Startup]
 
