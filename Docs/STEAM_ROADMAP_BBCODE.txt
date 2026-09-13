@@ -242,7 +242,7 @@ Keep the newer shared measured layout, stock-derived framing, wrapped help text,
 
 [list]
 [*] [b]Shift-F9 editor task-mode crash[/b] - selecting a unit whose classLabel and AI process do not match can crash the editor.
-[*] [b]Second-session editor corruption/crash[/b] - after returning to menu and loading another mission in the same process, the minimap can be empty and changing terrain can crash. Strong mission-lifetime/state-reset candidate.
+[*] [b]Second-session editor corruption/crash[/b] - [b]Implemented - Qualification Pending (2026-09-13):[/b] mission cleanup releases the editor world-map texture and material but leaves its initialized latch set. A later editor session therefore skips resource reconstruction, shows an empty lower-right map, and crashes when terrain painting refreshes the null texture. OpenShim now makes the existing initialization branch test the texture resource itself. The GOG 2.2.301 dump and exact hook-site bytes are verified; live repeat-session and Steam qualification remain open.
 [*] [b]DX11 / renderer lifetime instability[/b] - continue tracking remaining texture/fullscreen/Alt+Tab/Alt+Enter/shutdown crashes by individual signature instead of one generic random-DX11 bucket.
 [/list]
 
