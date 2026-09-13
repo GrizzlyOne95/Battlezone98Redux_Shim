@@ -268,7 +268,7 @@ static const float OSE_IBL_SPECULAR_INTENSITY = 0.82;
 #endif
 static const float OSE_IBL_LEGACY_AMBIENT_RETAIN = 0.20;
 static const float OSE_IBL_SCENE_TINT_STRENGTH = 0.18;
-// cr_ibl_neutral_prefilter.dds is authored at 128px with mips 0..7.
+// openshim_ibl_neutral_prefilter.dds is authored at 128px with mips 0..7.
 static const float OSE_IBL_MAX_SPECULAR_MIP = 7.0;
 
 // -----------------------------------------------------------------------------
