@@ -391,6 +391,13 @@ The Red Odyssey 1.3 comparison establishes Cloak and Portal plus a widened natio
 [*] GOG Workshop download/staging bridge
 [/list]
 
+[h3]HUD / Cockpit / Presentation[/h3]
+
+[list]
+[*] [b]Classic pre-release cockpit HUD restoration[/b] - recreate the iconic prerelease/intro cockpit as an optional low-profile screen-space bezel around the existing live HUD rather than baking fake status information into a static texture. A current proof of concept can hijack the compass N sprite to draw a large cockpit overlay, but a proper OpenShim implementation should provide a dedicated cockpit/HUD render layer with transparent gameplay openings, aspect-aware scaling and optional per-vehicle skins.
+[*] [b]Relocatable native HUD elements[/b] - trace and expose the screen-space placement/size of the real hull, ammo and related HUD meters so cockpit assets can place the live engine-driven bars inside authored instrument slots. Prefer moving the existing dynamic displays over replacing them with static artwork; radar and other stock HUD elements should remain usable in the same composition.
+[/list]
+
 [h3]Lua / EXU / Scripting[/h3]
 
 [list]
