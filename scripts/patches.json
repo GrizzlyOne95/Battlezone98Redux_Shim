@@ -24,6 +24,15 @@
       "require_unique": true
     },
     {
+      "name": "Editor World Map Resource Lifetime Guard",
+      "pattern": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 D0 00 00 00 00 75 10 8B 4D FC E8 ?? ?? ?? ?? 8B 4D FC E8 ?? ?? ?? ?? 8B 4D FC 8B 55 08 89 91 D0 00 00 00",
+      "offset": 10,
+      "expected_size": 7,
+      "fallback": "0x004C1C1A",
+      "require_unique": true,
+      "identity": "EditTerrain's world-map activation method in GOG Redux 2.2.301. The function checks the +0xD0 initialized latch, calls the adjacent Ogre texture/material constructor at 0x004C1A00 and world-map rebuild at 0x004C1C50 when false, then stores its boolean argument back to +0xD0. The mission cleanup path at 0x004C1BE0 releases the SharedPtr fields at +0xC4 and +0xBC but does not clear +0xD0. In crash dump battlezone98redux.exe.18520.dmp, the persistent EditTerrain object at 0x00992368 had +0xBC=0, +0xC4=0, and +0xD0=1; a later terrain edit reached 0x004C1C9E and dereferenced the null texture. The patch changes only the CMP displacement so reconstruction is gated by the texture resource at +0xBC rather than the stale latch."
+    },
+    {
       "name": "Map List Rewrite for Hop-Fix 1/3",
       "platforms": [
         "steam"
