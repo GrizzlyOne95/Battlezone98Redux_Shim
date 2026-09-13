@@ -20757,42 +20757,44 @@ namespace BZROpenShim
         // then restores the correct team by itself. No hook, no control-flow
         // surgery, and it is idempotent.
         //
-        // PARTLY MEASURED 2026-09-13. READ THE LIMIT BEFORE TRUSTING THIS.
+        // CONFIRMED LIVE 2026-09-13. The sentinel is -1, not 0.
         //
-        // The [PILOTTEAM] lines below were added as the missing measurement,
-        // and on lcbench with a scripted HopOut they report:
+        // Measured on lcbench, one run, the whole chain:
         //
-        //   Layout verified on a craft: packed=1 live=1 (flags=0x00010010)
-        //   Pilot on foot player=0x02A0D320 packed=1 live=1 (agree)
+        //   15:24:39.118  Pilot on foot   packed=1 live=1  (agree)
+        //   15:24:58.369  BOARD_RESULT    BOARDED
+        //   15:24:58.371  CAUGHT: pilot reads team -1 after boarding
+        //                 (packed=1, tick 1 of 90)
+        //   15:24:58.371  Restored live team -1 -> 1
         //
-        // sampled 15 ms after the hop-out, i.e. on the real freshly built
-        // pilot. The self-check passing proves both offsets on this image
-        // (flags 0x00010010 is the team nibble at bits 16..19 reading 1, plus
-        // 0x10 marking the user object -- exactly what GameObjectClass::Build
-        // writes). So Craft::BuildPilot DOES pass the correct team, the packed
-        // field is not stale, and SetAsNotUser would restore team 1.
+        // So the pilot is on team 1 while on foot and reads **-1** on the very
+        // first frame after boarding, with its packed team still 1. -1 is what
+        // GameObject::GameObject initialises teamNumber to, i.e. "attached to
+        // no team", and it is the live field that GetTeam returns -- the one
+        // FriendP consumes -- not the packed one.
         //
-        // THE LIMIT: the pilot never boarded in that run. The fixture's
-        // boarding leg logged `BOARD ok=false via=no-exu` twenty times and every
-        // heartbeat through T+55 still read onFoot=true, so the transition this
-        // bug lives on was never observed. The sample above is the pilot
-        // standing around BEFORE boarding, and this probe only logs on the
-        // on-foot branch, which stops the instant boarding completes.
+        // Two earlier readings of this were wrong and are worth recording so
+        // nobody re-derives them:
         //
-        // So what is ruled out is narrow: the specific "pilot's packed nibble
-        // reads 0" variant, at the endpoint, by a sample plus the static
-        // argument that nothing in SetAsUser touches the person's nibble before
-        // SetAsNotUser reads it. Anything that goes wrong DURING the
-        // transition -- the live team, a null teamList, or the craft rather
-        // than the pilot -- this probe cannot see.
+        //  * the sentinel is NOT 0. The first version of this feature repaired
+        //    a packed team of 0 and never fired, because the packed team is
+        //    always correct. The damage is to the live team.
+        //  * the operative guard is NOT Team::FriendP's `n < 1`. It is the
+        //    `-1 < param_2` test one level up in GameObject::FriendP(int)
+        //    (Redux 0x004DB560), which -1 fails outright:
         //
-        // To see it, the probe would have to keep sampling the previous pilot
-        // object for a few frames after it stops being the user object, so a
-        // team that flips to 0 inside SetAsNotUser is caught while the Person
-        // is still alive. It does not do that yet.
+        //      if (((teamList != 0) && (-1 < param_2)) && Team::FriendP(param_2))
+        //          return 1;
+        //      return 0;
         //
-        // The repair below writes only when the packed team reads 0, so on the
-        // sampled path it is inert. Ships OFF.
+        // A pilot reading -1 is therefore nobody's friend, and
+        // WeaponMine::Simulate accepts it as a legitimate target while it is
+        // still reachable -- an Arc Mine on the player's OWN team firing at the
+        // spot they just boarded from, doing no damage to the craft because the
+        // thing it is shooting is the dying Person.
+        //
+        // Still ships OFF: this is confirmed on the scripted lcbench route, not
+        // yet on a hand-driven boarding, and it writes to engine state.
 
         // GameObject layout, all confirmed against the shipped GOG image rather
         // than the advisory PDB:
@@ -20822,6 +20824,26 @@ namespace BZROpenShim
         static bool g_PilotTeamLayoutVerified = false;
         static uint32_t g_PilotTeamRepairs = 0;
         static void* g_PilotTeamLastReported = nullptr;
+
+        // Watching the pilot ACROSS the boarding call.
+        //
+        // The on-foot sample below is taken before boarding, so on its own it
+        // cannot see what SetAsNotUser does. SetAsNotUser runs inside
+        // GameObject::SetAsUser and the Person survives for a short while
+        // afterwards, so the way to catch a team being reset to 0 is to keep
+        // reading the object after it has stopped being userObject.
+        //
+        // Reading an object the engine may be tearing down is only safe because
+        // IsLiveHeadlightObjectSlot rejects anything whose primary vtable is not
+        // inside the exe's code region: a freed-and-reused slot fails that test
+        // rather than yielding plausible garbage. The watch is also hard-bounded
+        // in ticks so a pointer that gets recycled into another live GameObject
+        // cannot be mistaken for the pilot indefinitely.
+        static void* g_PilotTeamWatchObject = nullptr;
+        static int g_PilotTeamWatchTicks = 0;
+        static int g_PilotTeamWatchLogged = 0;
+        static constexpr int kPilotTeamWatchTicks = 90;
+        static constexpr int kPilotTeamWatchLogLimit = 30;
 
         struct PilotTeamSample
         {
@@ -20878,6 +20900,23 @@ namespace BZROpenShim
             }
         }
 
+        static bool TryWriteLiveTeam(void* gameObject, int team)
+        {
+            if (!gameObject || team < 1 || team > kMaxPackedTeam)
+                return false;
+            __try
+            {
+                *reinterpret_cast<int32_t*>(
+                    reinterpret_cast<uint8_t*>(gameObject) +
+                    kGameObjectLiveTeamOffset) = team;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         static void InitializePilotTeamRestoreConfig()
         {
             if (g_PilotTeamRestoreConfigInitialized)
@@ -20920,6 +20959,93 @@ namespace BZROpenShim
             }
 
             void* const player = TryGetHeadlightPlayerObject();
+
+            // The boarding window. Runs before anything else can return early,
+            // because this is the only moment the defect can actually be seen.
+            if (g_PilotTeamWatchObject && g_PilotTeamWatchObject != player &&
+                g_PilotTeamWatchTicks > 0)
+            {
+                --g_PilotTeamWatchTicks;
+                PilotTeamSample after = {};
+                const bool live = IsLiveHeadlightObjectSlot(g_PilotTeamWatchObject) &&
+                                  TryReadPilotTeamSample(g_PilotTeamWatchObject, after);
+                if (!live)
+                {
+                    Log(L"[PILOTTEAM] Boarding watch ended: pilot 0x%08X is gone "
+                        L"after %d ticks\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_PilotTeamWatchObject)),
+                        kPilotTeamWatchTicks - g_PilotTeamWatchTicks);
+                    g_PilotTeamWatchObject = nullptr;
+                    g_PilotTeamWatchTicks = 0;
+                }
+                else
+                {
+                    // Anything below 1 defeats the friend test, so that is the
+                    // predicate. An earlier revision tested `== 0` and printed
+                    // "nothing caught" while its own per-tick lines were already
+                    // showing live=-1. Too narrow a predicate is how an
+                    // instrument lies to you.
+                    //
+                    // MEASURED 2026-09-13: on foot the pilot reads live=1, and
+                    // 2 ms after boarding it reads live=-1 with packed still 1,
+                    // and stays there for the whole watch. -1 is what
+                    // GameObject::GameObject initialises teamNumber to, i.e.
+                    // "attached to no team".
+                    if (after.liveTeam < 1)
+                    {
+                        Log(L"[PILOTTEAM] *** CAUGHT: pilot 0x%08X reads team %d after "
+                            L"boarding (packed=%d flags=0x%08X, tick %d of %d). "
+                            L"GameObject::FriendP(int) guards on `-1 < team`, so this "
+                            L"object is nobody's friend and a weapon mine on the "
+                            L"player's own team will accept it as a target. ***\n",
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_PilotTeamWatchObject)),
+                            after.liveTeam, after.packedTeam, after.flags,
+                            kPilotTeamWatchTicks - g_PilotTeamWatchTicks,
+                            kPilotTeamWatchTicks);
+
+                        // Close the window. The packed team is the value the
+                        // engine itself would restore, so writing it back puts
+                        // the pilot on a real team for the few frames it is
+                        // still reachable. One int, on an object whose vtable
+                        // was validated on this same tick.
+                        if (g_PilotTeamLayoutVerified &&
+                            after.packedTeam >= 1 && after.packedTeam <= kMaxPackedTeam &&
+                            TryWriteLiveTeam(g_PilotTeamWatchObject, after.packedTeam))
+                        {
+                            ++g_PilotTeamRepairs;
+                            Log(L"[PILOTTEAM] Restored live team %d -> %d on pilot "
+                                L"0x%08X (total=%u)\n",
+                                after.liveTeam, after.packedTeam,
+                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_PilotTeamWatchObject)),
+                                static_cast<unsigned>(g_PilotTeamRepairs));
+                        }
+                        g_PilotTeamWatchObject = nullptr;
+                        g_PilotTeamWatchTicks = 0;
+                    }
+                    else if (g_PilotTeamWatchLogged < kPilotTeamWatchLogLimit)
+                    {
+                        ++g_PilotTeamWatchLogged;
+                        Log(L"[PILOTTEAM] Boarding watch tick %d of %d: pilot 0x%08X "
+                            L"packed=%d live=%d\n",
+                            kPilotTeamWatchTicks - g_PilotTeamWatchTicks,
+                            kPilotTeamWatchTicks,
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_PilotTeamWatchObject)),
+                            after.packedTeam, after.liveTeam);
+                    }
+                    // Only an expiry with the watch still armed is a real "nothing
+                    // caught". The catch branch above clears the counter itself,
+                    // so without this guard a successful catch was immediately
+                    // followed by a line claiming the opposite.
+                    if (g_PilotTeamWatchObject && g_PilotTeamWatchTicks == 0)
+                    {
+                        Log(L"[PILOTTEAM] Boarding watch expired after %d ticks with "
+                            L"the pilot still on a real team -- nothing caught\n",
+                            kPilotTeamWatchTicks);
+                        g_PilotTeamWatchObject = nullptr;
+                    }
+                }
+            }
+
             if (!player || !IsLiveHeadlightObjectSlot(player))
                 return;  // no world yet; silent by design, this runs per frame
 
@@ -20967,6 +21093,15 @@ namespace BZROpenShim
             // One line per distinct pilot object. This is the measurement the
             // decompilation could not supply: whether the packed nibble and the
             // live team actually disagree for a runtime-built pilot.
+            // Arm the boarding watch on every frame the player is on foot, so
+            // it is live no matter which frame the boarding lands on.
+            if (g_PilotTeamWatchObject != player)
+            {
+                g_PilotTeamWatchLogged = 0;
+                g_PilotTeamWatchObject = player;
+            }
+            g_PilotTeamWatchTicks = kPilotTeamWatchTicks;
+
             if (g_PilotTeamLastReported != player)
             {
                 g_PilotTeamLastReported = player;
