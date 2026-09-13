@@ -241,8 +241,9 @@ ExplainMultiplayerNotReady = 1
 ; Everything in this section defaults to ON. These are bug fixes, not
 ; enhancements, and normal play wants them on.
 ;
-; The first five -- ApcAlliedTargetDeploy, SplinterUndead,
-; HowitzerUndeployedRetaliation, TugCargoPostLoad and ConstructorRemoteBuild --
+; The first six -- ApcAlliedTargetDeploy, SplinterUndead,
+; HowitzerUndeployedRetaliation, TugCargoPostLoad, ConstructorRemoteBuild and
+; ConstructorRecycleStaleTarget --
 ; change simulation behaviour, and none of them is negotiated with peers, so
 ; they are gated on the net id exactly the way [SinglePlayer] features are:
 ; they stand down for the duration of a network game and a lobby that mixes
@@ -259,7 +260,7 @@ ExplainMultiplayerNotReady = 1
 ; responsible, turning one of these off is the fastest way to find out.
 ;
 ; Every key in this section is read once during startup patching, so restart the
-; game after changing any of them. The first five are also on the OpenShim
+; game after changing any of them. The first six are also on the OpenShim
 ; Settings page. Each has a legacy environment alias, listed with it.
 
 ; Give a buildable class every producer that can make it, not just the first
@@ -313,6 +314,14 @@ TugCargoPostLoad = 1
 ; Accepted: boolean. Default: ON. Stands down in a network game.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX
 ConstructorRemoteBuild = 1
+
+; Release a constructor from its deployed state when another constructor
+; finishes recycling the same target first. Stock leaves the losing
+; constructor's stale unbuild handle set forever, so it accepts orders but can
+; no longer move or build.
+; Accepted: boolean. Default: ON. Stands down in a network game.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_CONSTRUCTOR_RECYCLE_FIX
+ConstructorRecycleStaleTarget = 1
 
 ; Skip magnet-mine attraction when the ODF declares a non-finite or
 ; non-positive range, which otherwise faults. Base Mine::Simulate still runs,
