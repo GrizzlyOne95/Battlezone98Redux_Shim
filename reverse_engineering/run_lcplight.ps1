@@ -224,6 +224,22 @@ function Measure-TerrainLuma {
     finally { $bmp.Dispose() }
 }
 
+# KNOWN LIMITATION -- read this before trusting a burst.
+#
+# PrintWindow against this game's windowed DXGI swapchain returns the LAST
+# PRESENTED surface, and while the window is not in the foreground that surface
+# stops changing. A burst captured behind another window therefore comes back as
+# a run of bit-identical PNGs: a 2026-09-13 run produced styling_002..024 all at
+# exactly 60.94 and every board frame at exactly 35.31, geometry difference
+# 0.000. The simulation was live throughout (BZLogger kept growing), so this is
+# a capture artefact, not a still scene.
+#
+# Bit-identical consecutive frames are the tell. They are not evidence that the
+# scene held steady, and a single-frame light step inside such a run is simply
+# not sampled. Until this is solved -- by fronting the window per shot, which
+# costs about 900 ms and caps the rate near 1 Hz, or by instrumenting the shim
+# instead of photographing it -- treat a burst with repeated identical frames as
+# NO MEASUREMENT rather than as a null result.
 function Save-WindowFrame {
     param([System.Diagnostics.Process]$Proc, [string]$Path)
     $hwnd = $Proc.MainWindowHandle
@@ -311,6 +327,7 @@ try {
         Write-Host "[lcplight] launched PID=$($proc.Id)"
 
         $samples = @()
+        $pending = @()
         try {
             foreach ($window in $BurstWindows) {
                 $frameIndex = 0
@@ -326,11 +343,13 @@ try {
                     if ($proc.HasExited) { break }
                     $at = [math]::Round(((Get-Date) - $launchedAt).TotalSeconds, 2)
                     $shot = Join-Path $armDir ("{0}_{1:D3}.png" -f $window.Name, $frameIndex)
+                    # Capture only. Measuring here costs thousands of GetPixel
+                    # P/Invokes per frame and drops the real sample rate to
+                    # about 1 Hz, which is how a single-frame step gets stepped
+                    # over. Luma is computed after the arm ends.
                     if (Save-WindowFrame -Proc $proc -Path $shot) {
-                        $luma = Measure-TerrainLuma -Path $shot
-                        $samples += [pscustomobject]@{
+                        $pending += [pscustomobject]@{
                             Arm = $arm; Window = $window.Name; Index = $frameIndex; At = $at
-                            OffBeam = $luma.offbeam; Beam = $luma.beam
                             Path = $shot
                         }
                         $frameIndex++
@@ -349,6 +368,25 @@ try {
         finally {
             try { Stop-BZRGame -Id $proc.Id } catch { Write-Warning "Stop-BZRGame: $_" }
         }
+
+        # Measure now that nothing is racing the capture rate.
+        foreach ($frame in $pending) {
+            $luma = Measure-TerrainLuma -Path $frame.Path
+            $samples += [pscustomobject]@{
+                Arm = $frame.Arm; Window = $frame.Window; Index = $frame.Index; At = $frame.At
+                OffBeam = $luma.offbeam; Beam = $luma.beam; Path = $frame.Path
+            }
+        }
+        $rates = $pending | Group-Object Window | ForEach-Object {
+            $w = $_.Group | Sort-Object Index
+            if ($w.Count -ge 2) {
+                $span = [double]$w[-1].At - [double]$w[0].At
+                if ($span -gt 0) {
+                    "{0}={1:F1}Hz" -f $_.Name, (($w.Count - 1) / $span)
+                } else { "{0}=n/a" -f $_.Name }
+            } else { "{0}=n/a" -f $_.Name }
+        }
+        Write-Host ("[lcplight]   effective capture rate: {0}" -f ($rates -join " "))
 
         foreach ($log in @("openshim.log", "BZLogger.txt", "BZOgreLogfile.log")) {
             $src = Join-Path $GameRoot "logs\$log"
