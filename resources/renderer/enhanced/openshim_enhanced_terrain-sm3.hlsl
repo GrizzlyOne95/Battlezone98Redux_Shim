@@ -86,6 +86,26 @@ float3 sharpen_normal_map(float3 normalTex)
 }
 #endif
 
+// The detail map is modulation, not colour: the "* 2" makes a stored 0.5 the
+// neutral 1.0 multiplier. But mn_detail.dds is a photographic regolith scan
+// whose dark tail runs all the way to 0.0, and 0.0 * 2 is a multiplier of
+// EXACTLY ZERO -- the terrain colour is annihilated rather than darkened.
+// Measured on the shipped 2048x2048 map: 3.83% of texels darken by more than
+// half, 0.40% by more than three quarters, 0.007% force pure black. Tiled at 8x
+// the map is magnified hard in the near field, so that tail stops being grain
+// and becomes contiguous black pools in front of the cockpit.
+//
+// Compressing toward neutral keeps the grain and drops the annihilation: at
+// 0.55 the worst texel darkens to 0.45x instead of 0.0x. Keep this value in
+// sync with OSE_TERRAIN_DETAIL_CONTRAST in openshim_enhanced_terrain-sm4.hlsl so DX9 and DX11
+// render the same ground.
+static const float OSE_TERRAIN_DETAIL_CONTRAST = 0.55;
+
+float3 detail_modulation(float3 rawDetail)
+{
+	return 1.0 + (rawDetail * 2.0 - 1.0) * OSE_TERRAIN_DETAIL_CONTRAST;
+}
+
 void ComputeSpotlightTerms(
 	float3 pixelToLight,
 	float3 lightDir,
@@ -519,14 +539,14 @@ void terrain_fragment(
 
 #if defined(DETAILMAP_ENABLED)
 	// detail texture
-	float3 detailTex = tex2D(detailMap, frac(vTexCoord * 8)).xyz * 2;
+	float3 detailTex = detail_modulation(tex2D(detailMap, vTexCoord * 8).xyz);
 	float3 fullbrightDetail = float3(1, 1, 1);
 #if defined(ENHANCED_MODE)
 	// keep the base detail octave alive further out, and layer a tighter
 	// second octave close to the camera for crisper ground under the craft
 	float detailDistance = saturate(vDepth * 0.015);
 	float3 detailColor = lerp(detailTex, fullbrightDetail, detailDistance);
-	float3 detailTexNear = tex2D(detailMap, frac(vTexCoord * 32.0)).xyz * 2.0;
+	float3 detailTexNear = detail_modulation(tex2D(detailMap, vTexCoord * 32.0).xyz);
 	float detailNearFade = saturate(vDepth * 0.08);
 	detailColor *= lerp(lerp(detailTexNear, fullbrightDetail, 0.5), fullbrightDetail, detailNearFade);
 #else
