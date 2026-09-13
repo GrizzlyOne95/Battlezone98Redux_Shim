@@ -116,6 +116,14 @@ namespace BZROpenShim
         {
             { 0, HookEngine::PatchType::JMP5, {}, "Map Sorting", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "GameObject Handle Stale Slot Guard", false, {} },
+            // EditTerrain keeps a mission-owned Ogre texture at +0xBC and an
+            // independent "map initialized" latch at +0xD0. Mission cleanup
+            // releases the texture but leaves the latch set, so entering the
+            // editor in a later mission skips reconstruction. The next terrain
+            // edit then dereferences the null texture while refreshing the
+            // lower-right world map. Test the resource itself instead; this is
+            // the same seven-byte CMP with only its field displacement changed.
+            { 0, HookEngine::PatchType::BYTES, { 0x83, 0xB8, 0xBC, 0x00, 0x00, 0x00, 0x00 }, "Editor World Map Resource Lifetime Guard", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Map List Rewrite for Hop-Fix 1/3", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Map List Rewrite for Hop-Fix 2/3", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Map List Rewrite for Hop-Fix 3/3", false, {} },
