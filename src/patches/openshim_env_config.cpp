@@ -482,6 +482,27 @@ DWORD WINAPI OpenShimGetEnvironmentVariableA(LPCSTR name, LPSTR buffer, DWORD si
     if (!name || !*name)
         return ::GetEnvironmentVariableA(name, buffer, size);
 
+    // Capture wrappers need to override the shipped OFF defaults without
+    // rewriting a player's persistent INI. Honor these short-lived diagnostic
+    // variables first; the INI remains authoritative when no override exists.
+    if (Equals(name, "BZ_RELAY_CAPTURE") ||
+        Equals(name, "OPENSHIM_RELAY_CAPTURE") ||
+        Equals(name, "BZ_BZRNET_TRACE") ||
+        Equals(name, "OPENSHIM_BZRNET_TRACE") ||
+        Equals(name, "BZ_BZRNET_TRACE_PRIVATE") ||
+        Equals(name, "OPENSHIM_BZRNET_TRACE_PRIVATE") ||
+        Equals(name, "BZ_BZRNET_TRACE_ALL_UDP") ||
+        Equals(name, "OPENSHIM_BZRNET_TRACE_ALL_UDP") ||
+        Equals(name, "BZ_BZRNET_TRACE_QUEUE") ||
+        Equals(name, "OPENSHIM_BZRNET_TRACE_QUEUE") ||
+        Equals(name, "OPENSHIM_RELAY_LOG_ALL_CONTROL") ||
+        Equals(name, "OPENSHIM_RELAY_LOG_DATAGRAMS"))
+    {
+        const DWORD overrideLength = ::GetEnvironmentVariableA(name, buffer, size);
+        if (overrideLength != 0)
+            return overrideLength;
+    }
+
     const auto moduleDir = GetModuleDirectory();
     if (!moduleDir.empty())
     {

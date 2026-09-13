@@ -107,7 +107,9 @@ def summarize_binary(bin_path: Path, meta_path: Path) -> None:
             wire_counts[(name, header[1], transferred)] += 1
         else:
             wire_counts[(name, -1, transferred)] += 1
-        if transferred > payload_length:
+        # The ioctl records reuse transferredLength for the FIONBIO mode value;
+        # it is not a byte count and must not be reported as payload truncation.
+        if event_type not in {3, 4} and transferred > payload_length:
             truncated += 1
         first_tick = tick_ms if first_tick is None else min(first_tick, tick_ms)
         last_tick = tick_ms if last_tick is None else max(last_tick, tick_ms)
