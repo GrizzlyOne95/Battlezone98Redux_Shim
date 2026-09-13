@@ -168,6 +168,16 @@
   ],
   "resolves": [
     {
+      "name": "GameObjectClass::Build",
+      "pattern": "6A 00 6A FF 6A 00 8B 85 ?? ?? ?? ?? 8B 48 14 51 E8 ?? ?? ?? ?? 83 C4 04 50 8D 95 ?? ?? ?? ?? 52 8B 8D ?? ?? ?? ?? E8 ?? ?? ?? ?? 89 85 ?? ?? ?? ??",
+      "offset": 38,
+      "mode": "rel32_target",
+      "fallback": "0x004E1190",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GameObjectClass::Build on exact GOG Redux 2.2.301, identified independently by FUN_004E1190's allocation/initialization semantics and the corresponding BZ 1.5 GameObjectClass::Build call in SprayBomb::Hit. This anchor is the unique SprayBomb deployment call: ECX is the payload GameObjectClass, the five stack arguments are transform, team, independent, sequence and existing object, and EAX is retained as the deployed SprayBuilding."
+    },
+    {
       "name": "WorldBuilder::GetSaveName",
       "pattern": "55 8B EC 6A FF 68 78 4A 84 00 64 A1 00 00 00 00 50 83 EC 30 A1 00 70 8E 00 33 C5 89 45 F0 50 8D 45 F4 64 A3 00 00 00 00 89 4D C4 68 D8 1A 8A 00 B9 28 8E 9C 00",
       "offset": 0,
@@ -470,6 +480,16 @@
       "name": "Damage Reveal Probe 4/4",
       "fallback": "0x005AA372",
       "expected_original": "BA 1D F3 FF"
+    },
+    {
+      "name": "Splinter Emitter Owner Propagation",
+      "pattern": "6A 00 6A FF 6A 00 8B 85 ?? ?? ?? ?? 8B 48 14 51 E8 ?? ?? ?? ?? 83 C4 04 50 8D 95 ?? ?? ?? ?? 52 8B 8D ?? ?? ?? ?? E8 ?? ?? ?? ?? 89 85 ?? ?? ?? ??",
+      "offset": 39,
+      "expected_size": 4,
+      "fallback": "0x005DB380",
+      "expected_original": "0C 5E F0 FF",
+      "require_unique": true,
+      "identity": "The rel32 operand belongs to the sole GameObjectClass::Build call in SprayBomb::Hit on exact GOG Redux 2.2.301. The call receives the emitter transform and the SprayBomb owner's team, returns the deployed SprayBuilding at caller local -0x1D0, and is immediately followed by its class-signature branch. Redux FUN_005DB080 and BZ 1.5 SprayBomb::Hit independently show this creation path omits GameObject::SetOwner, while Ordnance::Init stores the firing creator at SprayBomb+0xD8."
     },
     {
       "name": "Engine Flame Control VTable Hook",
