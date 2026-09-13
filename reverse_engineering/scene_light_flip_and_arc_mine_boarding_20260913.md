@@ -113,13 +113,45 @@ range puts the spot in every renderable's candidate list, and whatever Redux's
 terrain pass does with a full list then costs the surfaces the spot does not
 actually illuminate. That is a hypothesis, not a finding.
 
-**The measurement that would settle it** is `run_lcplight.ps1 -Scenario headlight`,
-which holds everything else constant and varies only `HeadlightFalloffRepair`
-(2239.8 m vs stock 600 m) and `Headlights` (policy off entirely), reporting the
-largest within-run luma step across the boarding transition in each arm. If the
-step survives at 600 m, the range is not the mechanism and the beam width or the
-intensity is. **This run has not been made: the game install is a single shared
-resource and another agent's session has been running it continuously.**
+### The A/B was run and produced NO MEASUREMENT
+
+`run_lcplight.ps1 -Scenario headlight` was run on 2026-09-13 across three arms.
+Both instrumented arms engaged, verified from their own probe lines:
+
+| arm | `[HEADLIGHT-PROBE]` |
+|---|---|
+| repair | `range=2239.8 falloff=2.000 edgeIntensityAtRange=0.00392 (below 8-bit floor)` |
+| stock | `range=600.0 falloff=0.350 edgeIntensityAtRange=0.05181 (VISIBLE STEP AT RANGE)` |
+
+and the analysis found zero light steps in either. **That is not a null result.**
+The frames are bit-identical for long stretches — `styling_002` through
+`styling_024` all at exactly 60.94, every `board_*` frame at exactly 35.31,
+frame-to-frame geometry difference 0.000 — while BZLogger kept growing at the
+per-tick rate. `PrintWindow` against the windowed DXGI swapchain hands back the
+**last presented surface**, and behind another window that surface stops
+changing. The burst photographed a stale buffer, so a single-frame step inside
+it was never sampled.
+
+`analyze_lcplight_burst.py` now warns when consecutive frames are bit-identical,
+and `run_lcplight.ps1` carries the limitation next to `Save-WindowFrame`.
+
+Two further things the runs did establish:
+
+- the `stock` arm is **not stock**. With `HeadlightFalloffRepair = 0` the shim
+  still writes the Wide 63/86-degree cone, diffuse 4.0, and `falloff = 0.35`
+  (`kHeadlightPreRepairSpotFalloff`), which `headlight_falloff.h` itself
+  describes as "a step, not a gradient". Only `Headlights = 0` is stock, and
+  that arm captured no frames at all;
+- every transition in the capture lands within one `kHeadlightRefreshMs = 200`
+  tick of the shim applying its headlight state (boarding 158 ms and 167 ms;
+  hop-out 100 ms and 83 ms). The scene steps when the shim styles a headlight,
+  not when the craft is entered.
+
+**What would settle it**, given the capture limitation: instrument the shim to
+log the scene's light state each refresh rather than photographing the window,
+or have an operator run `play01.bzn` by hand with `[SinglePlayer] Headlights = 0`
+and report whether the flip survives. The second is two minutes of work and
+answers "is this ours at all" outright.
 
 Do not patch `kMaxRange` on the strength of the hypothesis alone. The range
 inflation exists to remove a visible cone terminator, and trading a real fix for
@@ -211,21 +243,60 @@ removed.
 This is the **boarding** direction, which that report did not examine. Nothing
 in it is contradicted.
 
+### Which side of the predicate is broken
+
+The mine in the capture was **team 1, the same team as the player** (reported by
+the operator). For a team-1 mine to target a team-1 object, `FriendP` has to
+come back false, and the only route to that is the **target's** team reading
+something team 1 is not allied with. `Team::FriendP` rejects `n < 1` outright,
+so a team that reads **0** for even one tick is hostile to its own side's mines.
+That is what "the weapon mine neutral bug" names: the thing being boarded, or
+the pilot being destroyed, goes neutral, not the mine.
+
+So the mine's own team is not the defect and no mine-side guard is warranted.
+
+### The fixture ran and did not reproduce
+
+`run_lcwmine.ps1`, 2026-09-13. Everything spawned and the transition happened:
+
+```text
+T+2.00  SPAWN_AICRAFT    odf=avtank   askedTeam=1 actualTeam=1 dist=40.0
+T+5.00  SPAWN_MINE_TEAM1 odf=boltmine askedTeam=1 actualTeam=1 dist=26.0
+T+5.00  SPAWN_MINE_TEAM0 odf=boltmine askedTeam=0 actualTeam=0 dist=32.0
+T+9.00  AI_HOP_OUT ok=true craftTeam=1
+T+9.00  AI_PILOT_SEEN team=1
+T+14.00 BOARD_DETECTED the AI pilot object is gone -- it boarded
+```
+
+The AI pilot boarded on its own about a second after the hop-out, so no
+`GetIn` order was even needed. Across 15,563 logged ticks:
+
+- **zero ammo drops** on either mine;
+- **zero ticks** where the pilot's or the craft's team read 0;
+- the pilot read team 1 for all 303 ticks it existed.
+
+Two readings, and the second is more likely:
+
+1. the defect needs the player's own `userObject` swap, which an AI boarding
+   does not perform; or
+2. **the ammo witness is blind.** The team-0 mine also never fired, and by the
+   predicate a team-0 mine should be hostile to everything and fire without any
+   transition at all. A control that fails to fire indicts the instrument
+   before it indicts the theory. `GetAmmo` reported 1 on a freshly built mine
+   whose ODF says `maxAmmo = 100`, so it is returning something other than the
+   shot count the weapon consumes.
+
+A Lua-visible team is also not the same thing as the team the predicate reads:
+`FriendP` resolves through `o->vtbl[1]()`, and if a class overrides that slot
+the Lua accessor and the engine can disagree for exactly the tick that matters.
+
 ### What is NOT yet established
 
-Which object reads team 0 during the boarding transition -- the pilot being
-destroyed, or the craft being taken over -- and whether the red mine in the
-field is a team-0 mine that is hostile to everything by construction.
-
-`reverse_engineering/test_missions/lcbench_wmine/rmwmine.lua` +
-`run_lcwmine.ps1` answer exactly that: they lay a friendly (team 1) and a
-team-0 Arc Mine inside `searchRadius`, hop out, board again through
-`exu.SetAsUser`, and log every team per tick together with each mine's ammo.
-`maxAmmo = 100` and the discharge is a weapon shot, so a drop in `GetAmmo`
-names which mine fired on which tick -- a number, not a sprite in a screenshot.
-**This run has not been made, for the same shared-install reason.**
-
-No patch should be written before it is. The previous WeaponMine patch in this
+Which object reads team 0, and whether a friendly mine can be made to fire at
+all in a fixture. Before the next attempt the witness has to be fixed: either a
+frame capture that catches the gmbolt, or a native hook on
+`WeaponMine::Simulate` logging the chosen target and both teams at the fire
+call. No patch until one of those exists. The previous WeaponMine patch in this
 repository was premised on a mechanism that turned out to be wrong, shipped, and
 had to be removed.
 

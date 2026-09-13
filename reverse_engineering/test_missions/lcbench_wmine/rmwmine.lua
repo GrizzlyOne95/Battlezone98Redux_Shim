@@ -125,9 +125,29 @@ local function IsPilot(handle)
     return result
 end
 
+-- GetPositionNear takes a POSITION, not a handle. Passing the handle straight
+-- in fails silently and every spawn in the run reports "no position", which
+-- reads exactly like the mission never started. Match the sibling harnesses:
+-- GetPosition(handle) first, SetVector(0,0,0) as the floor.
+local function AnchorPosition()
+    local player = GetPlayerHandle()
+    if player ~= nil and IsValid(player) then
+        local where = nil
+        if pcall(function() where = GetPosition(player) end) and where ~= nil then
+            return where
+        end
+    end
+    local origin = nil
+    pcall(function() origin = SetVector(0, 0, 0) end)
+    return origin
+end
+
 local function Spawn(odf, team, distance, label)
-    local anchor = GetPlayerHandle()
-    if anchor == nil or not IsValid(anchor) then return nil end
+    local anchor = AnchorPosition()
+    if anchor == nil then
+        Marker(string.format("SPAWN_%s FAILED: no anchor position", label))
+        return nil
+    end
     local where = nil
     local ok = pcall(function() where = GetPositionNear(anchor, distance, distance + 4) end)
     if not ok or where == nil then

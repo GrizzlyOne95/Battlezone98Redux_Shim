@@ -105,6 +105,25 @@ def main():
                         moves.append(record)
             previous_image = image
 
+        # PrintWindow returns the last presented surface, and behind another
+        # window that surface stops changing. A run of bit-identical frames is
+        # a capture artefact, not a still scene, and a single-frame step inside
+        # it was never sampled. Say so instead of reporting "no step found".
+        identical = 0
+        previous_image = None
+        for index, at, path in frames:
+            if not os.path.isfile(path):
+                continue
+            image = load_scene(path)
+            if previous_image is not None and np.array_equal(image, previous_image):
+                identical += 1
+            previous_image = image
+        if identical:
+            share = identical / max(len(frames) - 1, 1)
+            print(f"  WARNING: {identical} of {len(frames) - 1} consecutive pairs are "
+                  f"bit-identical ({share:.0%}). PrintWindow is handing back a stale "
+                  f"surface, so this burst is NO MEASUREMENT, not a null result.")
+
         if steps:
             print("  LIGHT STEPS (scene scaled, geometry unchanged):")
             for at, ratio, geometry, before, after in steps:
