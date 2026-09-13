@@ -176,6 +176,7 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::REL32, {}, "Damage Reveal Probe 2/4", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Damage Reveal Probe 3/4", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Damage Reveal Probe 4/4", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "Splinter Emitter Owner Propagation", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "HoverCraft Engine Flame Emit Hook 1/2", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "HoverCraft Engine Flame Emit Hook 2/2", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Decoded Weapon Mask Carrier Bias Hook", false, {} },
