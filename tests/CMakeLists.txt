@@ -330,3 +330,17 @@ else()
     target_compile_options(fog_wake_runtime_tests PRIVATE -Wall -Wextra -Werror)
 endif()
 add_test(NAME fog_wake_runtime_tests COMMAND fog_wake_runtime_tests)
+
+add_executable(odf_compat_tests
+    odf_compat_tests.cpp
+    ../src/patches/odf_compat.cpp
+)
+target_compile_features(odf_compat_tests PRIVATE cxx_std_20)
+target_include_directories(odf_compat_tests PRIVATE ../include)
+if(MSVC)
+    target_compile_options(odf_compat_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(odf_compat_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME odf_compat_tests COMMAND odf_compat_tests)
+
