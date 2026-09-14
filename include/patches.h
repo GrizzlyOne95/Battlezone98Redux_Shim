@@ -116,6 +116,14 @@ namespace BZROpenShim
         {
             { 0, HookEngine::PatchType::JMP5, {}, "Map Sorting", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "GameObject Handle Stale Slot Guard", false, {} },
+            // ODF legacy-section compatibility (odf_item_hooks.cpp): JMP5
+            // detours on the engine UseItem/GetItemSize/UnlockItem trio so
+            // ODF text is normalized before the ParameterDB parser runs.
+            // Each site re-verifies its prologue and builds an original-call
+            // trampoline at install; any failure keeps stock behavior.
+            { 0, HookEngine::PatchType::JMP5, {}, "ODF UseItem Hook", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "ODF GetItemSize Hook", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "ODF UnlockItem Hook", false, {} },
             // EditTerrain keeps a mission-owned Ogre texture at +0xBC and an
             // independent "map initialized" latch at +0xD0. Mission cleanup
             // releases the texture but leaves the latch set, so entering the

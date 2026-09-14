@@ -147,6 +147,8 @@
     <ClCompile Include="src\patches\native_cpu_sampler.cpp" />
     <ClCompile Include="src\patches\mp_faction_restrict.cpp" />
     <ClCompile Include="src\patches\mp_ready_diagnostic.cpp" />
+    <ClCompile Include="src\patches\odf_compat.cpp" />
+    <ClCompile Include="src\patches\odf_item_hooks.cpp" />
     <ClCompile Include="src\patches\net_optimizer.cpp" />
      <ClCompile Include="src\patches\openshim_ini.cpp" />
     <ClCompile Include="src\patches\openshim_preset_migration.cpp" />
@@ -245,6 +247,8 @@
     <ClInclude Include="include\iat_patch.h" />
     <ClInclude Include="include\mp_faction_restrict.h" />
     <ClInclude Include="include\mp_ready_diagnostic.h" />
+    <ClInclude Include="include\odf_compat.h" />
+    <ClInclude Include="include\odf_item_hooks.h" />
     <ClInclude Include="include\BZROpenShim.h" />
     <ClInclude Include="include\openshim_events.h" />
     <ClInclude Include="include\openshim_sdk_v2.h" />
