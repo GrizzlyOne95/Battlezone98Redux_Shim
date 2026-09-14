@@ -161,6 +161,13 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # the name field is the one lobby chrome that is allowed on.
     "Network/LobbyReadouts",
 
+    # Purely local presentation: nothing is sent to the host or the muted
+    # player, and it changes no simulation or wire traffic. It ships ON only
+    # because persistence has been the shipped behaviour since 1.0.0.28 --
+    # defaulting the new key to OFF would silently stop honouring mutes.cfg
+    # files players already have. Set it to 0 for stock session-only mutes.
+    "Network/PersistentPlayerMute",
+
     # Straight bug/stability fixes with no material mixed-client divergence.
     # MapRefreshFixes includes the multiplayer map-list refresh/jump and
     # selection-preservation repair and is deliberately part of the ON baseline.
