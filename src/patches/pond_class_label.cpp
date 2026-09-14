@@ -3,6 +3,7 @@
 #include "bzr_options_ui.h"
 #include "hook_engine.h"
 #include "shim_log.h"
+#include "legacy_tug_odf.inl"
 
 #include <Windows.h>
 #include <cstddef>
@@ -190,6 +191,11 @@ namespace BZROpenShim
 
     void InstallPondClassLabelSupportIfPossible()
     {
+        // The same deferred retry point also owns legacy ODF compatibility
+        // hooks that must not run under DllMain. Keep this independent of
+        // whether pond support has already finished installing.
+        InstallTugOdfToggleIfPossible();
+
         if (IsPondClassLabelSupportInstalled())
             return;
 
