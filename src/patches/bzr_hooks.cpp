@@ -11278,8 +11278,37 @@ namespace BZROpenShim
         // restarts, reconnects, lobby changes and nickname changes. Enforced
         // purely by reapplying Redux's own PlayerList mute (via its native
         // /mute command path); OpenShim adds no chat filtering of its own.
+        //
+        // Persistence is the part that is optional, not the mute itself. With
+        // it off, /mute and the lobby button still mute -- Redux's own
+        // per-process state does that -- the mute simply stops outliving the
+        // process, which is what the stock game does.
+        //   openshim.ini  [Network] PersistentPlayerMute = 1
+        //   environment   OPENSHIM_DISABLE_PERSISTENT_PLAYER_MUTE=1
         // ------------------------------------------------------------------
         constexpr char kMutesConfigName[] = "mutes.cfg";
+
+        // Deliberately unlatched: every caller is a lobby event or a typed
+        // command, never a hot path, and nothing here is a patch site, so a
+        // player who flips the setting gets the new answer at the next mute
+        // instead of at the next restart.
+        static bool IsPersistentPlayerMuteEnabled()
+        {
+            if (EnvFlagEnabled("OPENSHIM_DISABLE_PERSISTENT_PLAYER_MUTE") ||
+                EnvFlagEnabled("BZR_DISABLE_PERSISTENT_PLAYER_MUTE"))
+            {
+                return false;
+            }
+            if (EnvFlagEnabled("OPENSHIM_ENABLE_PERSISTENT_PLAYER_MUTE") ||
+                EnvFlagEnabled("BZR_ENABLE_PERSISTENT_PLAYER_MUTE"))
+            {
+                return true;
+            }
+            bool enabled = true;
+            if (TryGetUserConfigBool("Network", "PersistentPlayerMute", enabled))
+                return enabled;
+            return true;
+        }
 
         struct MuteRecord
         {
@@ -11400,6 +11429,16 @@ namespace BZROpenShim
         // Returns true when the list changed and was saved.
         static bool AddMuteConfigEntry(const char* stableId, const BzrString* name, const char* source)
         {
+            // Session-only mode never grows the list. Removals are still let
+            // through below, so /unmute always means unmute -- including any
+            // entry a previous persistent session left behind.
+            if (!IsPersistentPlayerMuteEnabled())
+            {
+                Log(L"[MUTE] %hs not persisted: PersistentPlayerMute is off (session-only)\n",
+                    source ? source : "mute");
+                return false;
+            }
+
             const std::string normalized = NormalizeBanId(stableId);
             if (normalized.empty())
             {
@@ -37946,6 +37985,12 @@ namespace BZROpenShim
         // the log is refreshed so mutes.cfg tracks the player's current name.
         static void ReapplyPersistentMutes(const char* source, uint32_t lobby, uint32_t member, int changes)
         {
+            // This is the half that makes a mute permanent, so it is the half
+            // that has to stand down. Checked before the load so session-only
+            // mode never even opens mutes.cfg.
+            if (!IsPersistentPlayerMuteEnabled())
+                return;
+
             EnsureMutesConfigLoaded();
 
             if (g_MuteRecords.empty())
@@ -40110,6 +40155,11 @@ namespace BZROpenShim
         // stock handler run unchanged.
         if (_stricmp(cmd, "/mute") == 0)
         {
+            // Session-only mode has nothing to record, and the stock handler
+            // still does the muting, so leave before spending a lookup on it.
+            if (!IsPersistentPlayerMuteEnabled())
+                return false;
+
             if (static_cast<int16_t>(id) < 0)
             {
                 Log(L"[MUTE] /mute failed: invalid target id (id=%u)\n", id);

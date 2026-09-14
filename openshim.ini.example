@@ -1242,6 +1242,22 @@ LobbyReadouts = 1
 ;                     BZR_DISABLE_LOBBY_BAN_BUTTON, BZR_ENABLE_LOBBY_BAN_BUTTON
 LobbyBanButton = 1
 
+; Remember muted players across sessions.
+; Accepted: boolean. Default: ON. No restart required.
+; ON  = a mute is written to mutes.cfg beside the shim, keyed by the same
+;       G<uid>/S<uid> stable identity bans use, and reapplied whenever that
+;       player is seen again -- through reconnects, lobby changes and renames.
+; OFF = session only. /mute and the lobby button still mute, because Redux's
+;       own per-process mute does that; it just stops outliving the process,
+;       which is what stock does. An existing mutes.cfg is left on disk and
+;       starts being honoured again the moment this goes back ON.
+; /unmute always clears the stored entry too, in either mode.
+; Local presentation only: nothing is sent to the host or the other player.
+; Legacy env aliases: OPENSHIM_DISABLE_PERSISTENT_PLAYER_MUTE (inverted),
+;                     OPENSHIM_ENABLE_PERSISTENT_PLAYER_MUTE,
+;                     BZR_DISABLE_PERSISTENT_PLAYER_MUTE, BZR_ENABLE_PERSISTENT_PLAYER_MUTE
+PersistentPlayerMute = 1
+
 ; Native BZRNet lobby-integration patch gate.
 ; Canonical:
 ;   Auto = preserve current platform default (GOG ON, Steam OFF)
