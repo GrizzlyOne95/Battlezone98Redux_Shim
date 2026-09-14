@@ -7,7 +7,7 @@
 
 vertex_program OSE_BaseLowestNoShadow_vertexGLSLES glsles
 {
-	source openshim_enhanced_base-vertex.glsles
+	source base-vertex.glsles
 	syntax glsles
 	entry_point main
 
@@ -16,7 +16,7 @@ vertex_program OSE_BaseLowestNoShadow_vertexGLSLES glsles
 
 vertex_program OSE_BaseLowestShadow_vertexGLSLES glsles
 {
-	source openshim_enhanced_base-vertex.glsles
+	source base-vertex.glsles
 	syntax glsles
 	entry_point main
 
@@ -25,7 +25,7 @@ vertex_program OSE_BaseLowestShadow_vertexGLSLES glsles
 
 vertex_program OSE_BaseLowestPSSM_vertexGLSLES glsles
 {
-	source openshim_enhanced_base-vertex.glsles
+	source base-vertex.glsles
 	syntax glsles
 	entry_point main
 
@@ -36,7 +36,7 @@ vertex_program OSE_BaseLowestPSSM_vertexGLSLES glsles
 
 vertex_program OSE_BaseLowNoShadow_vertexGLSLES glsles
 {
-	source openshim_enhanced_base-vertex.glsles
+	source base-vertex.glsles
 	syntax glsles
 	entry_point main
 
@@ -45,7 +45,7 @@ vertex_program OSE_BaseLowNoShadow_vertexGLSLES glsles
 
 vertex_program OSE_BaseLowShadow_vertexGLSLES glsles
 {
-	source openshim_enhanced_base-vertex.glsles
+	source base-vertex.glsles
 	syntax glsles
 	entry_point main
 
@@ -54,7 +54,7 @@ vertex_program OSE_BaseLowShadow_vertexGLSLES glsles
 
 vertex_program OSE_BaseLowPSSM_vertexGLSLES glsles
 {
-	source openshim_enhanced_base-vertex.glsles
+	source base-vertex.glsles
 	syntax glsles
 	entry_point main
 
@@ -65,7 +65,7 @@ vertex_program OSE_BaseLowPSSM_vertexGLSLES glsles
 
 vertex_program OSE_BaseMediumNoShadow_vertexGLSLES glsles
 {
-	source openshim_enhanced_base-vertex.glsles
+	source base-vertex.glsles
 	syntax glsles
 	entry_point main
 
@@ -74,7 +74,7 @@ vertex_program OSE_BaseMediumNoShadow_vertexGLSLES glsles
 
 vertex_program OSE_BaseMediumShadow_vertexGLSLES glsles
 {
-	source openshim_enhanced_base-vertex.glsles
+	source base-vertex.glsles
 	syntax glsles
 	entry_point main
 
@@ -83,7 +83,7 @@ vertex_program OSE_BaseMediumShadow_vertexGLSLES glsles
 
 vertex_program OSE_BaseMediumPSSM_vertexGLSLES glsles
 {
-	source openshim_enhanced_base-vertex.glsles
+	source base-vertex.glsles
 	syntax glsles
 	entry_point main
 
@@ -94,7 +94,7 @@ vertex_program OSE_BaseMediumPSSM_vertexGLSLES glsles
 
 vertex_program OSE_BaseHighNoShadow_vertexGLSLES glsles
 {
-	source openshim_enhanced_base-vertex.glsles
+	source base-vertex.glsles
 	syntax glsles
 	entry_point main
 
@@ -103,7 +103,7 @@ vertex_program OSE_BaseHighNoShadow_vertexGLSLES glsles
 
 vertex_program OSE_BaseHighShadow_vertexGLSLES glsles
 {
-	source openshim_enhanced_base-vertex.glsles
+	source base-vertex.glsles
 	syntax glsles
 	entry_point main
 
@@ -113,7 +113,7 @@ vertex_program OSE_BaseHighShadow_vertexGLSLES glsles
 
 vertex_program OSE_BaseHighPSSM_vertexGLSLES glsles
 {
-	source openshim_enhanced_base-vertex.glsles
+	source base-vertex.glsles
 	syntax glsles
 	entry_point main
 
@@ -359,6 +359,16 @@ vertex_program OSE_BaseHighPSSM_vertexHLSL4 hlsl
 	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PSSM_ENABLED=1,NORMALMAP_ENABLED=1
 }
 
+// Enhanced-only PSSM v2 vertex path. The classic program remains unchanged.
+vertex_program OSE_BaseENHighPSSMV2_vertexHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target vs_4_0
+	entry_point base_vertex
+
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PSSM_ENABLED=1,NORMALMAP_ENABLED=1,ENHANCED_MODE=1,OSE_ENHANCED_PSSM_V2=1
+}
+
 
 //HLSL SHADER MODEL 3 VERSIONS
 
@@ -491,7 +501,7 @@ vertex_program OSE_BaseHighPSSM_vertexHLSL hlsl
 
 fragment_program OSE_BaseLowestNoShadow_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -505,7 +515,7 @@ fragment_program OSE_BaseLowestNoShadow_fragmentGLSLES glsles
 
 fragment_program OSE_BaseLowestShadow_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -520,7 +530,7 @@ fragment_program OSE_BaseLowestShadow_fragmentGLSLES glsles
 
 fragment_program OSE_BaseLowestPSSM_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -539,7 +549,7 @@ fragment_program OSE_BaseLowestPSSM_fragmentGLSLES glsles
 
 fragment_program OSE_BaseLowNoShadow_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -554,7 +564,7 @@ fragment_program OSE_BaseLowNoShadow_fragmentGLSLES glsles
 
 fragment_program OSE_BaseLowShadow_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -571,7 +581,7 @@ fragment_program OSE_BaseLowShadow_fragmentGLSLES glsles
 
 fragment_program OSE_BaseLowPSSM_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -592,7 +602,7 @@ fragment_program OSE_BaseLowPSSM_fragmentGLSLES glsles
 
 fragment_program OSE_BaseMediumNoShadow_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -608,7 +618,7 @@ fragment_program OSE_BaseMediumNoShadow_fragmentGLSLES glsles
 
 fragment_program OSE_BaseMediumShadow_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -625,7 +635,7 @@ fragment_program OSE_BaseMediumShadow_fragmentGLSLES glsles
 
 fragment_program OSE_BaseMediumPSSM_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -646,7 +656,7 @@ fragment_program OSE_BaseMediumPSSM_fragmentGLSLES glsles
 
 fragment_program OSE_BaseHighNoShadow_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -662,7 +672,7 @@ fragment_program OSE_BaseHighNoShadow_fragmentGLSLES glsles
 
 fragment_program OSE_BaseHighShadow_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -679,7 +689,7 @@ fragment_program OSE_BaseHighShadow_fragmentGLSLES glsles
 
 fragment_program OSE_BaseHighPSSM_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -700,7 +710,7 @@ fragment_program OSE_BaseHighPSSM_fragmentGLSLES glsles
 
 fragment_program OSE_BaseOGLowestNoShadow_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -713,7 +723,7 @@ fragment_program OSE_BaseOGLowestNoShadow_fragmentGLSLES glsles
 
 fragment_program OSE_BaseOGLowestShadow_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -727,7 +737,7 @@ fragment_program OSE_BaseOGLowestShadow_fragmentGLSLES glsles
 
 fragment_program OSE_BaseOGLowestPSSM_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -743,7 +753,7 @@ fragment_program OSE_BaseOGLowestPSSM_fragmentGLSLES glsles
 
 fragment_program OSE_BaseOGLowNoShadow_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -756,7 +766,7 @@ fragment_program OSE_BaseOGLowNoShadow_fragmentGLSLES glsles
 
 fragment_program OSE_BaseOGLowShadow_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -770,7 +780,7 @@ fragment_program OSE_BaseOGLowShadow_fragmentGLSLES glsles
 
 fragment_program OSE_BaseOGLowPSSM_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -786,7 +796,7 @@ fragment_program OSE_BaseOGLowPSSM_fragmentGLSLES glsles
 
 fragment_program OSE_BaseOGMediumNoShadow_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -799,7 +809,7 @@ fragment_program OSE_BaseOGMediumNoShadow_fragmentGLSLES glsles
 
 fragment_program OSE_BaseOGMediumShadow_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -813,7 +823,7 @@ fragment_program OSE_BaseOGMediumShadow_fragmentGLSLES glsles
 
 fragment_program OSE_BaseOGMediumPSSM_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -829,7 +839,7 @@ fragment_program OSE_BaseOGMediumPSSM_fragmentGLSLES glsles
 
 fragment_program OSE_BaseOGHighNoShadow_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -842,7 +852,7 @@ fragment_program OSE_BaseOGHighNoShadow_fragmentGLSLES glsles
 
 fragment_program OSE_BaseOGHighShadow_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -856,7 +866,7 @@ fragment_program OSE_BaseOGHighShadow_fragmentGLSLES glsles
 
 fragment_program OSE_BaseOGHighPSSM_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -1923,6 +1933,19 @@ vertex_program OSE_BaseHighPSSM_vertex unified
 	}
 }
 
+vertex_program OSE_BaseENHighPSSMV2_vertex unified
+{
+	delegate OSE_BaseENHighPSSMV2_vertexHLSL4
+	default_params
+	{
+		param_named_auto wvpMat worldviewproj_matrix
+		param_named_auto worldViewMat worldview_matrix
+		param_named_auto texWorldViewProj1 texture_worldviewproj_matrix 0
+		param_named_auto texWorldViewProj2 texture_worldviewproj_matrix 1
+		param_named_auto texWorldViewProj3 texture_worldviewproj_matrix 2
+	}
+}
+
 //FRAGMENT
 
 //LOWEST
@@ -2434,7 +2457,7 @@ fragment_program OSE_BaseOGHighPSSM_fragment unified
 
 fragment_program OSE_BaseENHighNoShadow_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -2450,7 +2473,7 @@ fragment_program OSE_BaseENHighNoShadow_fragmentGLSLES glsles
 
 fragment_program OSE_BaseENHighShadow_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -2467,7 +2490,7 @@ fragment_program OSE_BaseENHighShadow_fragmentGLSLES glsles
 
 fragment_program OSE_BaseENHighPSSM_fragmentGLSLES glsles
 {
-	source openshim_enhanced_base-fragment.glsles
+	source base-fragment.glsles
 	syntax glsles
 	entry_point main
 
@@ -2557,7 +2580,7 @@ fragment_program OSE_BaseENHighPSSM_fragmentHLSL4 hlsl
 	source openshim_enhanced_base-sm4.hlsl
 	target ps_4_0
 	entry_point base_fragment
-	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=4,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=4,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_PSSM_V2=1
 }
 
 fragment_program OSE_BaseENHighNoShadow_fragmentHLSL hlsl
@@ -2641,7 +2664,7 @@ fragment_program OSE_BaseENLowNoShadow_fragment unified
 {
 	delegate OSE_BaseLowNoShadow_fragmentGLSLES
 	delegate OSE_BaseLowNoShadow_fragmentGLSL
-	delegate OSE_BaseLowNoShadow_fragmentHLSL4
+	delegate OSE_BaseENLowNoShadow_fragmentHLSL4
 	delegate OSE_BaseLowNoShadow_fragmentHLSL
 	default_params
 	{
@@ -2664,7 +2687,7 @@ fragment_program OSE_BaseENLowShadow_fragment unified
 {
 	delegate OSE_BaseLowShadow_fragmentGLSLES
 	delegate OSE_BaseLowShadow_fragmentGLSL
-	delegate OSE_BaseLowShadow_fragmentHLSL4
+	delegate OSE_BaseENLowShadow_fragmentHLSL4
 	delegate OSE_BaseLowShadow_fragmentHLSL
 	default_params
 	{
@@ -2688,7 +2711,7 @@ fragment_program OSE_BaseENLowPSSM_fragment unified
 {
 	delegate OSE_BaseLowPSSM_fragmentGLSLES
 	delegate OSE_BaseLowPSSM_fragmentGLSL
-	delegate OSE_BaseLowPSSM_fragmentHLSL4
+	delegate OSE_BaseENLowPSSM_fragmentHLSL4
 	delegate OSE_BaseLowPSSM_fragmentHLSL
 	default_params
 	{
@@ -2715,7 +2738,7 @@ fragment_program OSE_BaseENMediumNoShadow_fragment unified
 {
 	delegate OSE_BaseMediumNoShadow_fragmentGLSLES
 	delegate OSE_BaseMediumNoShadow_fragmentGLSL
-	delegate OSE_BaseMediumNoShadow_fragmentHLSL4
+	delegate OSE_BaseENMediumNoShadow_fragmentHLSL4
 	delegate OSE_BaseMediumNoShadow_fragmentHLSL
 	default_params
 	{
@@ -2739,7 +2762,7 @@ fragment_program OSE_BaseENMediumShadow_fragment unified
 {
 	delegate OSE_BaseMediumShadow_fragmentGLSLES
 	delegate OSE_BaseMediumShadow_fragmentGLSL
-	delegate OSE_BaseMediumShadow_fragmentHLSL4
+	delegate OSE_BaseENMediumShadow_fragmentHLSL4
 	delegate OSE_BaseMediumShadow_fragmentHLSL
 	default_params
 	{
@@ -2764,7 +2787,7 @@ fragment_program OSE_BaseENMediumPSSM_fragment unified
 {
 	delegate OSE_BaseMediumPSSM_fragmentGLSLES
 	delegate OSE_BaseMediumPSSM_fragmentGLSL
-	delegate OSE_BaseMediumPSSM_fragmentHLSL4
+	delegate OSE_BaseENMediumPSSM_fragmentHLSL4
 	delegate OSE_BaseMediumPSSM_fragmentHLSL
 	default_params
 	{
@@ -2868,7 +2891,72 @@ fragment_program OSE_BaseENHighPSSM_fragment unified
 	}
 }
 
+// -----------------------------------------------------------------------------
+// Enhanced Medium and Low tiers
+// -----------------------------------------------------------------------------
+// These exist because the EN tiers below High used to be names for the legacy
+// programs, so Enhanced shading ended at the first LOD boundary instead of
+// simplifying across it. Each one is the LEGACY tier's defines verbatim plus
+// the Enhanced set: the pass that binds it was built for the legacy program,
+// so its texture registers, sampler slots and light-array size are what the
+// fragment has to expect. In particular the bound vertex program declares no
+// NORMALMAP_ENABLED, so there is no tangent frame to read.
+//
+// Only the HLSL4 delegate of the matching unified program is repointed at
+// these. GLSL, GLSLES and HLSL keep their legacy delegates, so DX9 and GL are
+// untouched.
+// -----------------------------------------------------------------------------
 
+fragment_program OSE_BaseENMediumNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
 
+	preprocessor_defines MAX_LIGHTS=8,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=1
+}
 
+fragment_program OSE_BaseENMediumShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
 
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=1
+}
+
+fragment_program OSE_BaseENMediumPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=1
+}
+
+fragment_program OSE_BaseENLowNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=2
+}
+
+fragment_program OSE_BaseENLowShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=2
+}
+
+fragment_program OSE_BaseENLowPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=2
+}

@@ -1,6 +1,15 @@
 param(
     [string]$GameRoot = "C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux",
     [string]$MissionArgs = "lcbench.bzn",
+    # Runs the same benchmark on one of the per-world renderer maps instead of
+    # lcbench itself. They are lcbench -- same heightfield, material grid,
+    # lightmap, script and spawn -- with only the planet's .trn swapped, so a
+    # difference between two worlds is the planet and not the terrain. Install
+    # them first with scripts\Install-RenderWorldMaps.ps1; this script will not
+    # compose them, because deciding the sun angle belongs to the install.
+    [ValidateSet("moon", "mars", "venus", "titan", "achilles", "io", "europa",
+                 "ganymede", "elysium")]
+    [string]$World = "",
     [ValidateSet("DX11", "DX9")]
     [string[]]$Renderer = @("DX11"),
     [ValidateSet(
@@ -67,17 +76,73 @@ $missionConfig = Join-Path $missionRoot "lcbcfg.odf"
 $sourceMissionConfig = Join-Path $missionSourceRoot "lcbcfg.odf"
 $presentMonExe = "C:\Program Files\AMD\CNext\CNext\PresentMon-x64.exe"
 
-foreach ($required in @(
-    $gameExe,
-    $ogreConfig,
-    (Join-Path $missionSourceRoot "lcbench.ini"),
-    (Join-Path $missionSourceRoot "lcbench.bzn"),
-    (Join-Path $missionSourceRoot "lcbench.trn"),
-    (Join-Path $missionSourceRoot "lcbench.lua"),
-    $sourceMissionConfig)) {
+# A world run reads an already-installed package rather than staging one, so
+# that whatever sun angle the install chose is the sun angle the capture gets.
+$worldBasename = @{
+    moon = "lcbmoon"; mars = "lcbmars"; venus = "lcbvenus"; titan = "lcbtitan"
+    achilles = "lcbachil"; io = "lcbio"; europa = "lcbeurop"
+    ganymede = "lcbganym"; elysium = "lcbelys"
+}
+$missionBasename = "lcbench"
+if ($World) {
+    $missionBasename = $worldBasename[$World]
+    $missionRoot = Join-Path $GameRoot "addon\lcbworld"
+    $missionConfig = Join-Path $missionRoot "lcbcfg.odf"
+    $MissionArgs = "$missionBasename.bzn"
+}
+
+$requiredInputs = @($gameExe, $ogreConfig, $sourceMissionConfig)
+if ($World) {
+    $requiredInputs += @("ini", "bzn", "trn", "lua", "hg2", "mat", "lgt") |
+        ForEach-Object { Join-Path $missionRoot "$missionBasename.$_" }
+} else {
+    $requiredInputs += @("ini", "bzn", "trn", "lua") |
+        ForEach-Object { Join-Path $missionSourceRoot "lcbench.$_" }
+}
+foreach ($required in $requiredInputs) {
     if (-not (Test-Path -LiteralPath $required)) {
+        if ($World) {
+            throw ("World '$World' is not installed ($required). Run " +
+                   "scripts\Install-RenderWorldMaps.ps1 -World $World first.")
+        }
         throw "Required benchmark input not found: $required"
     }
+}
+
+# Launch the game OUTSIDE this script's job object.
+#
+# Start-Process makes the game a child of whatever launched this script. When
+# that is an agent session, the session's job object has
+# JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, so the game is torn down partway through
+# the run -- observed at 7-28 seconds, arriving as an orderly WM_CLOSE. The run
+# therefore looks like a short session that quit by itself rather than a killed
+# one, and the captured frames are whatever happened to land first. Creating the
+# process through WMI gives it no parent job, so it lives for the whole run.
+function Start-BenchmarkGame {
+    param(
+        [Parameter(Mandatory)] [string]$Exe,
+        [string]$Arguments = "",
+        [Parameter(Mandatory)] [string]$WorkingDirectory
+    )
+
+    $commandLine = if ($Arguments) { "`"$Exe`" $Arguments" } else { "`"$Exe`"" }
+    $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create `
+        -Arguments @{ CommandLine = $commandLine; CurrentDirectory = $WorkingDirectory }
+
+    if ($result.ReturnValue -ne 0 -or -not $result.ProcessId) {
+        throw "WMI process create failed (ReturnValue=$($result.ReturnValue)) for $commandLine"
+    }
+
+    # Win32_Process.Create returns as soon as the pid exists, so the handle can
+    # briefly be unavailable. Everything downstream needs a real Process object.
+    $deadline = (Get-Date).AddSeconds(10)
+    do {
+        $proc = Get-Process -Id $result.ProcessId -ErrorAction SilentlyContinue
+        if ($proc) { return $proc }
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+
+    throw "Game process $($result.ProcessId) started but could not be opened"
 }
 
 if ($Count | Where-Object { $_ -lt 0 -or $_ -gt 200 }) {
@@ -260,8 +325,10 @@ try {
     # Deploy the complete IA package before launch. lcbench.bzn embeds both
     # msn_filename=lcbench.bzn and TerrainName=lcbench, matching its companions.
     New-Item -ItemType Directory -Path $missionRoot -Force | Out-Null
-    Copy-Item -Path (Join-Path $missionSourceRoot "*") `
-        -Destination $missionRoot -Force
+    if (-not $World) {
+        Copy-Item -Path (Join-Path $missionSourceRoot "*") `
+            -Destination $missionRoot -Force
+    }
     [Environment]::SetEnvironmentVariable(
         "OPENSHIM_PROFILE_OGRE_ANIMATION",
         $(if ($ProfilerDisabled) { "0" } else { "1" }),
@@ -336,9 +403,8 @@ try {
                         }
                         Write-Host "Starting $runId"
                         $startedAt = Get-Date
-                        $process = Start-Process -FilePath $gameExe `
-                            -ArgumentList $MissionArgs `
-                            -WorkingDirectory $GameRoot -PassThru
+                        $process = Start-BenchmarkGame -Exe $gameExe `
+                            -Arguments $MissionArgs -WorkingDirectory $GameRoot
                         $deadline = (Get-Date).AddSeconds($RunTimeoutSeconds)
                         $completed = $false
                         $nextLoadSkip = Get-Date
@@ -454,6 +520,8 @@ try {
                         $metadata = [ordered]@{
                             run_id = $runId
                             renderer = $rendererName
+                            world = $(if ($World) { $World } else { "lcbench" })
+                            mission = $MissionArgs
                             unit_odf = $unitOdfName
                             scenario = $scenarioName
                             count = $population

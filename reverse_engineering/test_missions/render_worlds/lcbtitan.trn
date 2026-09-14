@@ -1,0 +1,154 @@
+[Size]
+MinX=0
+MinZ=0
+Width=5120
+Depth=5120
+Height=0.000000
+
+[NormalView]
+Time=1100
+FogStart=100
+FogEnd=250
+FogBreak=60
+VisibilityRange=250
+Intensity=40
+Ambient=0
+FlatRange=250
+ShadowLuma=0
+
+[Atlases]
+MaterialName	= ti_detail_atlas
+
+[Sky]
+SunTexture= sun.0
+SkyType= 0
+SkyHeight = 150
+SkyTexture= titan.map
+
+BackdropDistance= 400
+BackdropWidth   = 800
+BackdropHeight  = 100
+
+[Clouds]
+Count    = 6
+Type     = 1
+TileSize = 1000
+
+Texture0 = acloud2.map
+Size0    = 500
+Height0  = 140
+
+Texture1 = acloud2.map
+Size1    = 500
+Height1  = 130
+
+Texture2 = acloud2.map
+Size2    = 500
+Height2  = 120
+
+[Stars]
+Radius      = 300
+
+Texture00   = saturn.map
+Size00      = 200
+Azimuth00   = 180
+Elevation00 = 15
+Roll00      = 0
+
+[StarList]
+
+Solid       = 0
+LayerHeight = 15
+Texture     = stars.map
+Radius      = 1000
+
+Start0      = 235
+End0        = 510
+Size0       = 350
+Count0      = 12
+
+Start1      = 235
+End1        = 510
+Size1       = 350
+Count1      = 9
+
+Start2      = 0
+End2        = 360
+Size2       = 350
+Count2      = 11
+
+[Color]
+Palette=TITAN.ACT
+Luma=TITAN.LUM
+Translucency=TITAN.TBL
+Alpha=TITAN.ALB
+
+[World]
+MusicTrack=2
+
+[TextureType0]
+SolidA0        = ti00sa0.map
+SolidA1        = ti00sa1.map
+SolidA2        = ti00sa2.map
+SolidA3        = ti00sa3.map
+
+SolidB0        = ti00sb0.map
+SolidB1        = ti00sb1.map
+SolidB2        = ti00sb2.map
+SolidB3        = ti00sb3.map
+
+CapTo3_A0      = ti03ca0.map
+CapTo3_A1      = ti03ca1.map
+CapTo3_A2      = ti03ca2.map
+CapTo3_A3      = ti03ca3.map
+
+DiagonalTo3_A0 = ti03da0.map
+DiagonalTo3_A1 = ti03da1.map
+DiagonalTo3_A2 = ti03da2.map
+DiagonalTo3_A3 = ti03da3.map
+
+CapTo4_A0      = ti01ca0.map
+CapTo4_A1      = ti01ca1.map
+CapTo4_A2      = ti01ca2.map
+CapTo4_A3      = ti01ca3.map
+
+DiagonalTo4_A0 = ti01da0.map
+DiagonalTo4_A1 = ti01da1.map
+DiagonalTo4_A2 = ti01da2.map
+DiagonalTo4_A3 = ti01da3.map
+
+[TextureType3]
+SolidA0        = ti33sa0.map
+SolidA1        = ti33sa1.map
+SolidA2        = ti33sa2.map
+SolidA3        = ti33sa3.map
+SolidB0        = ti33sb0.map
+SolidB1        = ti33sb1.map
+SolidB2        = ti33sb2.map
+SolidB3        = ti33sb3.map
+
+[TextureType4]
+SolidA0        = ti00sa0.map
+SolidA1        = ti00sa1.map
+SolidA2        = ti00sa2.map
+SolidA3        = ti00sa3.map
+SolidB0        = ti00sb0.map
+SolidB1        = ti00sb1.map
+SolidB2        = ti00sb2.map
+SolidB3        = ti00sb3.map
+
+[TextureType5]
+SolidA0        = ti11sa0.map
+SolidA1        = ti11sa1.map
+SolidA2        = ti11sa2.map
+SolidA3        = ti11sa3.map
+SolidB0        = ti11sb0.map
+SolidB1        = ti11sb1.map
+SolidB2        = ti11sb2.map
+SolidB3        = ti11sb3.map
+
+[TextureType6]
+SolidB0        = ti33sb0.map
+SolidB1        = ti33sb1.map
+SolidB2        = ti33sb2.map
+SolidB3        = ti33sb3.map
