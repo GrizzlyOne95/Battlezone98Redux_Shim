@@ -22,8 +22,10 @@
 param(
     [string]$GameRoot = "C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux",
 
-    [ValidateSet("moon", "mars", "venus", "titan")]
-    [string[]]$World = @("moon", "mars", "venus", "titan"),
+    [ValidateSet("moon", "mars", "venus", "titan", "achilles", "io", "europa",
+                 "ganymede", "elysium")]
+    [string[]]$World = @("moon", "mars", "venus", "titan", "achilles", "io",
+                         "europa", "ganymede", "elysium"),
 
     # Overrides [NormalView] Time in every installed .trn. BZ reads it as a
     # HHMM clock and places the sun from it, so this is the grazing-angle
@@ -54,10 +56,15 @@ $renamedPayload = @("hg2", "mat", "lgt", "lua", "ini", "bzn")
 $sharedPayload = @("lcbcfg.odf", "wrbase.odf", "wreng.odf", "wrmin.odf", "wrturr.odf")
 
 $worldBasename = @{
-    moon  = "lcbmoon"
-    mars  = "lcbmars"
-    venus = "lcbvenus"
-    titan = "lcbtitan"
+    moon     = "lcbmoon"
+    mars     = "lcbmars"
+    venus    = "lcbvenus"
+    titan    = "lcbtitan"
+    achilles = "lcbachil"
+    io       = "lcbio"
+    europa   = "lcbeurop"
+    ganymede = "lcbganym"
+    elysium  = "lcbelys"
 }
 
 function Fail([string]$message, [int]$code = 1) {

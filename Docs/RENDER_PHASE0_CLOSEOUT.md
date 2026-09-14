@@ -232,18 +232,34 @@ release.
 
 ---
 
-## 4. The four-world benchmark set
+## 4. The world benchmark set
 
 The roadmap asks the benchmark for fixed scenes on Moon, Mars, Venus and
-Titan. They are installed as `addon\lcbworld\` and are **lcbench**: the same
-heightfield, material grid, lightmap, mission script and spawn point, with
-only the `.trn` swapped.
+Titan. The set covers all nine worlds the game ships — those four plus
+Achilles, Io, Europa, Ganymede and Elysium. They install as `addon\lcbworld\`
+and are **lcbench**: the same heightfield, material grid, lightmap, mission
+script and spawn point, with only the `.trn` swapped.
 
 Holding the geometry fixed is the point. The same ridge and the same tank
-formation appear in all four captures, so a difference between two of them is
+formation appear in all nine captures, so a difference between two of them is
 the planet — its atlas, palette, sky, fog and sun — and not the terrain under
-it. Building four unrelated scenes would have made the set prettier and
+it. Building nine unrelated scenes would have made the set prettier and
 useless for attribution.
+
+Three of the five added worlds pull their weight beyond coverage. Io sets
+`Lava=1` and `wave=1` and carries by far the brightest emissive in the set, so
+it is the glow path's stress case. Europa is near-white high-albedo ice at a
+1500 sun, the lowest angle of the nine, which is where highlight clipping and
+shadow contrast surface first. Achilles is the only vegetated world, and green
+albedo under an overcast sky is where a colour-space error is most visible.
+
+**Ganymede and Elysium need Campaign Reimagined installed.** Stock ships their
+atlas CSV and atlas DDS but no `ga_detail_atlas.material` /
+`el_detail_atlas.material` to bind them — so the stock `evolve_*` maps naming
+those atlases have nothing to resolve either. That is a gap in the stock
+install rather than something these fixtures introduce.
+`Test-RenderWorldMaps.ps1` reports each world's atlas material as `stock`,
+`mod` or `ABSENT` instead of failing on it.
 
 ```
 powershell -ExecutionPolicy Bypass -File scripts\Install-RenderWorldMaps.ps1
@@ -268,7 +284,7 @@ Two things about these files fail **silently**, so both are checked by
   CSV (`ma03ca0.map`), so "a stock map uses it" proves nothing. Seeded exactly
   that substitution to confirm the check names the offender and exits non-zero.
 
-All four were launched on the GOG install under DX11 Enhanced and render their
+All nine were launched on the GOG install under DX11 Enhanced and render their
 own planet, with `Get-RenderEvidence.ps1` reporting a coherent capture and no
 missing material or texture in the Ogre log.
 
@@ -286,11 +302,24 @@ when a capture is specifically about that effect.
 | Close out terrain/lighting work | Code side done and shipping; **visual sign-off given 2026-09-13** |
 | Terrain dark-region / cotangent frame | Not pursued: the dark regions did not survive the two fixes, so the §3.4 debug modes were never needed. `BASIS_MODE` stays 0. |
 | Renderer ownership migration | Payload canonical, parity gate automated and passing |
-| Remove CR/OpenShim duplication | **Unblocked** — binary parity proven, visual parity signed off. Not yet executed; it is a change to CR's repo. |
-| Repeatable visual benchmark | Evidence/labelling, launch reliability and the four-world fixture set all done (§5) |
+| Remove CR/OpenShim duplication | **Done** — CR PR #65 deletes the 14 duplicated files, repoints its materials at `OSE_*`, and moves the shader toolchain with them |
+| Repeatable visual benchmark | Evidence/labelling, launch reliability and the nine-world fixture set all done (§4) |
 | Dense base battle fixture | Not built — `fourteam` is the nearest existing scene (§2) |
 | DXBC-identical for unchanged paths | Not attempted this pass — the payload deliberately changed |
 
-The two items still genuinely open after this pass are the CR duplicate
-removal and the Steam / Proton-Wine lanes (§3.6). Everything else in Phase 0
-is closed.
+The one item still genuinely open after this pass is the Steam / Proton-Wine
+lanes (§3.6). Everything else in Phase 0 is closed.
+
+The CR-side removal is
+[CampaignReimagined#65](https://github.com/GrizzlyOne95/Battlezone98Redux_CampaignReimagined/pull/65).
+It deletes the 14 duplicated files, repoints CR's two big materials and its
+static-IBL wrapper at `OSE_*`, and moves CR's DX11 shader toolchain onto the
+payload rather than deleting 1400 lines of guards along with their subject. A
+new `Tools/Test-ProgramReferences.ps1` resolves all 1021 owned program
+references against the union of CR's and the payload's declarations, because
+Ogre does not error on a material naming a program nothing declares — it drops
+the technique and the map renders anyway, darker or unlit or stock.
+
+One ordering constraint for whoever publishes CR next: staging copies the
+payload out of `BZR_OPENSHIM_REPO` on every publish, so the build must be
+staged against OpenShim at `main` or later.

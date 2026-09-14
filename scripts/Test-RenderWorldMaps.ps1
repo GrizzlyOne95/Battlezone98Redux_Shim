@@ -38,11 +38,21 @@ $materialRoot = Join-Path $GameRoot "BZ_ASSETS\pc\materials"
 # contract every world in the matrix has to meet -- not a stylistic choice.
 $requiredTypes = @(0, 3, 4, 5, 6)
 
+# Elysium and Ganymede are marked CrOnlyAtlas: stock ships their atlas CSV and
+# their atlas DDS but no <xx>_detail_atlas.material to bind them, so the stock
+# evolve_* maps that name those atlases have nothing to resolve. Campaign
+# Reimagined adds both materials. That is a genuine gap in the stock install,
+# not something these fixtures introduce, so it is reported rather than failed.
 $worlds = @(
-    @{ Name = "moon";  Trn = "lcbmoon.trn";  Prefix = "mn" }
-    @{ Name = "mars";  Trn = "lcbmars.trn";  Prefix = "ma" }
-    @{ Name = "venus"; Trn = "lcbvenus.trn"; Prefix = "ve" }
-    @{ Name = "titan"; Trn = "lcbtitan.trn"; Prefix = "ti" }
+    @{ Name = "moon";     Trn = "lcbmoon.trn";   Prefix = "mn" }
+    @{ Name = "mars";     Trn = "lcbmars.trn";   Prefix = "ma" }
+    @{ Name = "venus";    Trn = "lcbvenus.trn";  Prefix = "ve" }
+    @{ Name = "titan";    Trn = "lcbtitan.trn";  Prefix = "ti" }
+    @{ Name = "achilles"; Trn = "lcbachil.trn";  Prefix = "ac" }
+    @{ Name = "io";       Trn = "lcbio.trn";     Prefix = "io" }
+    @{ Name = "europa";   Trn = "lcbeurop.trn";  Prefix = "eu" }
+    @{ Name = "ganymede"; Trn = "lcbganym.trn";  Prefix = "ga"; CrOnlyAtlas = $true }
+    @{ Name = "elysium";  Trn = "lcbelys.trn";   Prefix = "el"; CrOnlyAtlas = $true }
 )
 
 foreach ($required in @($trnSource, $csvRoot)) {
@@ -121,10 +131,26 @@ foreach ($world in $worlds) {
     } elseif ($atlasName -ne "$($world.Prefix)_detail_atlas") {
         $findings += "$($world.Name): [Atlases] names $atlasName, expected $($world.Prefix)_detail_atlas"
     }
+    $atlasSource = "stock"
     if ($atlasName -and (Test-Path -LiteralPath $materialRoot)) {
         $material = Join-Path $materialRoot "$atlasName.material"
         if (-not (Test-Path -LiteralPath $material)) {
-            $findings += "$($world.Name): atlas material not installed: $material"
+            # Look for a mod that supplies it before calling it absent -- CR
+            # ships the two the stock install is missing.
+            $modRoot = Join-Path $GameRoot "mods"
+            $fromMod = @()
+            if (Test-Path -LiteralPath $modRoot) {
+                $fromMod = @(Get-ChildItem -LiteralPath $modRoot -Recurse -File `
+                    -Filter "$atlasName.material" -ErrorAction SilentlyContinue)
+            }
+            if ($fromMod.Count -gt 0) {
+                $atlasSource = "mod"
+            } elseif ($world.CrOnlyAtlas) {
+                $atlasSource = "ABSENT"
+            } else {
+                $findings += "$($world.Name): atlas material not installed: $material"
+                $atlasSource = "ABSENT"
+            }
         }
     }
 
@@ -165,6 +191,7 @@ foreach ($world in $worlds) {
         Tiles      = @($tiles | Sort-Object -Unique).Count
         Unresolved = $unresolved.Count
         Atlas      = $atlasName
+        AtlasFrom  = $atlasSource
         SunTime    = $sunTime
     }
 
@@ -174,6 +201,14 @@ foreach ($world in $worlds) {
 }
 
 $summary | Format-Table -AutoSize | Out-String | Write-Host
+
+$absent = @($summary | Where-Object { $_.AtlasFrom -eq 'ABSENT' })
+if ($absent.Count -gt 0) {
+    Write-Host ("NOTE: {0} resolve their atlas material from no installed source. " -f
+        (($absent | ForEach-Object { $_.World }) -join ' and ')) -NoNewline
+    Write-Host "Stock ships the CSV and the atlas DDS but no material to bind them; Campaign Reimagined adds both. These worlds need CR installed to render their own terrain." -ForegroundColor Yellow
+    Write-Host ""
+}
 
 if ($findings.Count -gt 0) {
     foreach ($f in $findings) { Write-Host "FINDING: $f" -ForegroundColor Red }

@@ -7,7 +7,8 @@ param(
     # difference between two worlds is the planet and not the terrain. Install
     # them first with scripts\Install-RenderWorldMaps.ps1; this script will not
     # compose them, because deciding the sun angle belongs to the install.
-    [ValidateSet("moon", "mars", "venus", "titan")]
+    [ValidateSet("moon", "mars", "venus", "titan", "achilles", "io", "europa",
+                 "ganymede", "elysium")]
     [string]$World = "",
     [ValidateSet("DX11", "DX9")]
     [string[]]$Renderer = @("DX11"),
@@ -77,7 +78,11 @@ $presentMonExe = "C:\Program Files\AMD\CNext\CNext\PresentMon-x64.exe"
 
 # A world run reads an already-installed package rather than staging one, so
 # that whatever sun angle the install chose is the sun angle the capture gets.
-$worldBasename = @{ moon = "lcbmoon"; mars = "lcbmars"; venus = "lcbvenus"; titan = "lcbtitan" }
+$worldBasename = @{
+    moon = "lcbmoon"; mars = "lcbmars"; venus = "lcbvenus"; titan = "lcbtitan"
+    achilles = "lcbachil"; io = "lcbio"; europa = "lcbeurop"
+    ganymede = "lcbganym"; elysium = "lcbelys"
+}
 $missionBasename = "lcbench"
 if ($World) {
     $missionBasename = $worldBasename[$World]
