@@ -45,7 +45,8 @@ target_compile_features(bzn_save_path_tests PRIVATE cxx_std_20)
 if(WIN32 AND MSVC)
     add_executable(editor_save_dialog_win32_tests
         editor_save_dialog_win32_tests.cpp
-        ../src/patches/trn_codec.cpp)
+        ../src/patches/trn_codec.cpp
+        ../src/patches/terrain_atlas_rect_repair.cpp)
     target_include_directories(editor_save_dialog_win32_tests PRIVATE ../include)
     target_compile_features(editor_save_dialog_win32_tests PRIVATE cxx_std_20)
     target_compile_definitions(editor_save_dialog_win32_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -98,6 +99,11 @@ add_executable(sun_flash_tests
 
 add_executable(terrain_tile_blend_tests
     terrain_tile_blend_tests.cpp
+)
+
+add_executable(terrain_atlas_rect_repair_tests
+    terrain_atlas_rect_repair_tests.cpp
+    ../src/patches/terrain_atlas_rect_repair.cpp
 )
 
 add_executable(resolve_table_tests
@@ -175,6 +181,8 @@ target_include_directories(sun_flash_tests PRIVATE ../include)
 target_compile_features(sun_flash_tests PRIVATE cxx_std_20)
 target_include_directories(terrain_tile_blend_tests PRIVATE ../include)
 target_compile_features(terrain_tile_blend_tests PRIVATE cxx_std_20)
+target_include_directories(terrain_atlas_rect_repair_tests PRIVATE ../include)
+target_compile_features(terrain_atlas_rect_repair_tests PRIVATE cxx_std_20)
 target_include_directories(resolve_table_tests PRIVATE ../include ../third_party)
 target_compile_features(resolve_table_tests PRIVATE cxx_std_20)
 target_include_directories(openshim_update_manifest_tests PRIVATE ../include)
@@ -207,6 +215,7 @@ if(MSVC)
     target_compile_options(chunk_batch_invalidation_tests PRIVATE /W4 /WX)
     target_compile_options(sun_flash_tests PRIVATE /W4 /WX)
     target_compile_options(terrain_tile_blend_tests PRIVATE /W4 /WX)
+    target_compile_options(terrain_atlas_rect_repair_tests PRIVATE /W4 /WX)
     target_compile_options(resolve_table_tests PRIVATE /W4 /WX)
     target_compile_options(patch_registration_tests PRIVATE /W4 /WX)
     target_compile_options(openshim_update_manifest_tests PRIVATE /W4 /WX)
@@ -228,6 +237,7 @@ else()
     target_compile_options(chunk_batch_invalidation_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(sun_flash_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(terrain_tile_blend_tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(terrain_atlas_rect_repair_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(resolve_table_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(patch_registration_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(openshim_update_manifest_tests PRIVATE -Wall -Wextra -Werror)
@@ -250,6 +260,7 @@ add_test(NAME headlight_falloff_tests COMMAND headlight_falloff_tests)
 add_test(NAME chunk_batch_invalidation_tests COMMAND chunk_batch_invalidation_tests)
 add_test(NAME sun_flash_tests COMMAND sun_flash_tests)
 add_test(NAME terrain_tile_blend_tests COMMAND terrain_tile_blend_tests)
+add_test(NAME terrain_atlas_rect_repair_tests COMMAND terrain_atlas_rect_repair_tests)
 add_test(NAME resolve_table_tests COMMAND resolve_table_tests)
 add_test(NAME patch_registration_tests COMMAND patch_registration_tests)
 add_test(NAME openshim_update_manifest_tests COMMAND openshim_update_manifest_tests)

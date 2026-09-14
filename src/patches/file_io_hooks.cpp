@@ -14,6 +14,7 @@
 #include "ogre_shader_cache.h"
 #include "ui_performance.h"
 #include "trn_codec.h"
+#include "terrain_atlas_rect_repair.h"
 
 #include <Windows.h>
 
@@ -25,6 +26,7 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -179,6 +181,221 @@ namespace BZROpenShim
             MultiByteToWideChar(CP_UTF8, 0, routed.c_str(), -1, wide.data(), wideCount);
             wide.pop_back();
             return wide;
+        }
+
+        // ------------------------------------------------------------------
+        // Terrain detail-atlas rect repair.
+        //
+        // Two of Redux's eleven `<xx>_detail_atlas.csv` files place a tile
+        // rectangle off the atlas grid (0.825 where every sibling row uses
+        // 0.875), so that tile samples across a cell boundary and renders half
+        // of the wrong texture. See terrain_atlas_rect_repair.h for the
+        // evidence and the conditions under which a file is touched at all.
+        //
+        // The correction happens here, at the open, rather than by patching the
+        // parsed rect table: the atlas parser is a private native method that
+        // would need an address, a byte guard and a layout assumption, whereas
+        // the file open is a public ABI already hooked for TRN normalization.
+        // Redux is handed a path to a corrected copy under the shim's own
+        // directory; the shipped file is never written to.
+        // ------------------------------------------------------------------
+        static thread_local bool g_InAtlasRepair = false;
+
+        // Read through GetEnvironmentVariableA rather than EnvFlagEnabled, as
+        // BznSourceSaveEnabled above does: openshim_env_config.h is force
+        // included, so this name already resolves the [Fixes] key first, and
+        // it keeps this TU free of the hook module that EnvFlagEnabled lives
+        // in -- which editor_save_dialog_win32_tests compiles without.
+        static bool TerrainAtlasRectRepairEnabled()
+        {
+            static const bool enabled = []
+            {
+                char value[8] = {};
+                for (const char* name : { "OPENSHIM_TERRAIN_ATLAS_RECT_REPAIR",
+                                          "BZR_TERRAIN_ATLAS_RECT_REPAIR" })
+                {
+                    if (GetEnvironmentVariableA(name, value, static_cast<DWORD>(sizeof(value))) == 1 &&
+                        value[0] == '1')
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }();
+            return enabled;
+        }
+
+        static std::filesystem::path GetRepairedAtlasDirectory()
+        {
+            static const std::filesystem::path dir = []
+            {
+                std::vector<wchar_t> modulePath(32768, L'\0');
+                const DWORD written = GetModuleFileNameW(
+                    nullptr, modulePath.data(), static_cast<DWORD>(modulePath.size()));
+                if (written == 0 || written >= modulePath.size())
+                    return std::filesystem::path{};
+                return std::filesystem::path(
+                           std::wstring(modulePath.data(), modulePath.data() + written))
+                           .parent_path() / L"openshim" / L"_generated" / L"atlas";
+            }();
+            return dir;
+        }
+
+        // Writes are never redirected, and neither is anything but a plain
+        // open of an existing file: a create/truncate of one of these names is
+        // somebody authoring an atlas, and must reach the real path.
+        static bool IsPlainReadOpen(DWORD desiredAccess, DWORD creationDisposition)
+        {
+            constexpr DWORD kWriteBits =
+                GENERIC_WRITE | GENERIC_ALL | FILE_WRITE_DATA | FILE_APPEND_DATA;
+            if ((desiredAccess & kWriteBits) != 0)
+                return false;
+            return creationDisposition == OPEN_EXISTING;
+        }
+
+        static std::wstring RepairedAtlasPathFor(const std::wstring& requested)
+        {
+            static std::mutex mutex;
+            static std::unordered_map<std::wstring, std::wstring> cache;
+
+            const std::wstring key = ToLowerWide(requested);
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                const auto found = cache.find(key);
+                if (found != cache.end())
+                    return found->second;  // empty means "use the original"
+            }
+
+            std::wstring replacement;  // stays empty on every failure path
+            {
+                // Our own read and write go back through these hooks; without
+                // this the first open would recurse into itself.
+                g_InAtlasRepair = true;
+
+                std::string text;
+                {
+                    std::ifstream in(requested, std::ios::binary);
+                    if (in)
+                    {
+                        std::ostringstream buffer;
+                        buffer << in.rdbuf();
+                        text = buffer.str();
+                    }
+                }
+
+                TerrainAtlas::RepairReport report;
+                std::string repaired;
+                const bool changed =
+                    !text.empty() && TerrainAtlas::RepairAtlasCsv(text, repaired, report);
+
+                if (changed)
+                {
+                    const std::filesystem::path dir = GetRepairedAtlasDirectory();
+                    std::error_code ec;
+                    if (!dir.empty())
+                        std::filesystem::create_directories(dir, ec);
+                    if (!dir.empty() && !ec)
+                    {
+                        const std::filesystem::path out =
+                            dir / std::filesystem::path(requested).filename();
+                        std::ofstream stream(out, std::ios::binary | std::ios::trunc);
+                        if (stream)
+                        {
+                            stream.write(repaired.data(),
+                                         static_cast<std::streamsize>(repaired.size()));
+                            if (stream.good())
+                                replacement = out.wstring();
+                        }
+                    }
+                }
+
+                Log(L"[ATLASFIX] %ls outcome=%hs rows=%u offGrid=%u redirected=%hs\n",
+                    requested.c_str(),
+                    TerrainAtlas::RepairOutcomeName(report.outcome),
+                    static_cast<unsigned>(report.dataRows),
+                    static_cast<unsigned>(report.offGridRows),
+                    replacement.empty() ? "no" : "yes");
+                for (const TerrainAtlas::RepairedRow& row : report.repairs)
+                {
+                    Log(L"[ATLASFIX]   line %u %hs %c %.4f -> %.4f\n",
+                        static_cast<unsigned>(row.lineNumber),
+                        row.name.empty() ? "<unnamed>" : row.name.c_str(),
+                        row.axis,
+                        row.from,
+                        row.to);
+                }
+
+                g_InAtlasRepair = false;
+            }
+
+            std::lock_guard<std::mutex> lock(mutex);
+            cache[key] = replacement;
+            return replacement;
+        }
+
+        static std::wstring RouteTerrainAtlasPath(const std::wstring& requested,
+                                                  DWORD desiredAccess,
+                                                  DWORD creationDisposition)
+        {
+            if (requested.empty() || g_InAtlasRepair || !TerrainAtlasRectRepairEnabled())
+                return requested;
+            if (!IsPlainReadOpen(desiredAccess, creationDisposition))
+                return requested;
+
+            // The name test is ASCII-only, so narrow it here rather than via
+            // path::string(), which can throw on a path the active codepage
+            // cannot represent. Any non-ASCII unit becomes '?' and simply
+            // fails to match.
+            const std::wstring wideLeaf = std::filesystem::path(requested).filename().wstring();
+            std::string leaf;
+            leaf.reserve(wideLeaf.size());
+            for (wchar_t ch : wideLeaf)
+                leaf.push_back(ch < 128 ? static_cast<char>(ch) : '?');
+            if (!TerrainAtlas::IsDetailAtlasCsvName(leaf))
+                return requested;
+
+            const std::wstring replacement = RepairedAtlasPathFor(requested);
+            return replacement.empty() ? requested : replacement;
+        }
+
+        // ANSI callers get the same treatment. The replacement always lives
+        // under the game directory, so it normally round-trips through the
+        // active codepage; if it cannot, the original path is used and the
+        // only cost is that this one open is not corrected.
+        static std::string RouteTerrainAtlasPath(const std::string& requested,
+                                                 DWORD desiredAccess,
+                                                 DWORD creationDisposition)
+        {
+            if (requested.empty() || g_InAtlasRepair || !TerrainAtlasRectRepairEnabled())
+                return requested;
+            if (!IsPlainReadOpen(desiredAccess, creationDisposition))
+                return requested;
+
+            const int wideCount =
+                MultiByteToWideChar(CP_ACP, 0, requested.c_str(), -1, nullptr, 0);
+            if (wideCount <= 1)
+                return requested;
+            std::wstring wide(static_cast<size_t>(wideCount), L'\0');
+            MultiByteToWideChar(CP_ACP, 0, requested.c_str(), -1, wide.data(), wideCount);
+            wide.pop_back();
+
+            const std::wstring routed =
+                RouteTerrainAtlasPath(wide, desiredAccess, creationDisposition);
+            if (routed == wide)
+                return requested;
+
+            BOOL unconvertible = FALSE;
+            const int byteCount = WideCharToMultiByte(
+                CP_ACP, 0, routed.c_str(), -1, nullptr, 0, nullptr, nullptr);
+            if (byteCount <= 1)
+                return requested;
+            std::string narrow(static_cast<size_t>(byteCount), '\0');
+            WideCharToMultiByte(CP_ACP, 0, routed.c_str(), -1, narrow.data(), byteCount,
+                                nullptr, &unconvertible);
+            if (unconvertible)
+                return requested;
+            narrow.pop_back();
+            return narrow;
         }
 
         class ScopedNormalizationGuard
@@ -740,7 +957,8 @@ namespace BZROpenShim
             if (!g_RealCreateFileW)
                 return INVALID_HANDLE_VALUE;
 
-            const std::wstring routedPath = RouteGameLogPath(fileName);
+            const std::wstring routedPath = RouteTerrainAtlasPath(
+                RouteGameLogPath(fileName), desiredAccess, creationDisposition);
             const HANDLE handle = g_RealCreateFileW(
                 routedPath.c_str(),
                 desiredAccess,
@@ -785,7 +1003,8 @@ namespace BZROpenShim
             if (!g_RealCreateFileA)
                 return INVALID_HANDLE_VALUE;
 
-            const std::string routedPath = RouteGameLogPath(fileName);
+            const std::string routedPath = RouteTerrainAtlasPath(
+                RouteGameLogPath(fileName), desiredAccess, creationDisposition);
             const std::wstring wideRequested = AnsiPathToWide(routedPath.c_str());
             const HANDLE handle = g_RealCreateFileA(
                 routedPath.c_str(),
