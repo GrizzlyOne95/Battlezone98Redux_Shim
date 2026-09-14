@@ -84,6 +84,10 @@ add_executable(headlight_falloff_tests
     headlight_falloff_tests.cpp
 )
 
+add_executable(shadow_far_distance_tests
+    shadow_far_distance_tests.cpp
+)
+
 add_executable(chunk_batch_invalidation_tests
     chunk_batch_invalidation_tests.cpp
 )
@@ -163,6 +167,8 @@ target_include_directories(weapon_convergence_tests PRIVATE ../include)
 target_compile_features(weapon_convergence_tests PRIVATE cxx_std_20)
 target_include_directories(headlight_falloff_tests PRIVATE ../include)
 target_compile_features(headlight_falloff_tests PRIVATE cxx_std_20)
+target_include_directories(shadow_far_distance_tests PRIVATE ../include)
+target_compile_features(shadow_far_distance_tests PRIVATE cxx_std_20)
 target_include_directories(chunk_batch_invalidation_tests PRIVATE ../include)
 target_compile_features(chunk_batch_invalidation_tests PRIVATE cxx_std_20)
 target_include_directories(sun_flash_tests PRIVATE ../include)
@@ -197,6 +203,7 @@ if(MSVC)
     target_compile_options(enhanced_light_selection_bench PRIVATE /W4 /WX)
     target_compile_options(weapon_convergence_tests PRIVATE /W4 /WX)
     target_compile_options(headlight_falloff_tests PRIVATE /W4 /WX)
+    target_compile_options(shadow_far_distance_tests PRIVATE /W4 /WX)
     target_compile_options(chunk_batch_invalidation_tests PRIVATE /W4 /WX)
     target_compile_options(sun_flash_tests PRIVATE /W4 /WX)
     target_compile_options(terrain_tile_blend_tests PRIVATE /W4 /WX)
@@ -231,6 +238,7 @@ endif()
 
 add_test(NAME bzrnet_protocol_tests COMMAND bzrnet_protocol_tests)
 add_test(NAME shim_log_tests COMMAND shim_log_tests)
+add_test(NAME shadow_far_distance_tests COMMAND shadow_far_distance_tests)
 add_test(NAME trn_codec_tests COMMAND trn_codec_tests)
 add_test(NAME bzn_save_path_tests COMMAND bzn_save_path_tests)
 add_test(NAME bzn_analysis_tests COMMAND bzn_analysis_tests)
