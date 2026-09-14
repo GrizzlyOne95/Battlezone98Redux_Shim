@@ -20,6 +20,13 @@ add_executable(shim_log_tests
     ../src/engine/shim_log.cpp
 )
 
+add_executable(bzloader_catalog_tests
+    bzloader_catalog_tests.cpp
+    ../src/loader/bzloader_catalog.cpp
+)
+target_include_directories(bzloader_catalog_tests PRIVATE ../include)
+target_compile_features(bzloader_catalog_tests PRIVATE cxx_std_20)
+
 add_executable(trn_codec_tests
     trn_codec_tests.cpp
     ../src/patches/trn_codec.cpp
@@ -188,6 +195,7 @@ target_compile_definitions(resolve_table_tests PRIVATE
 if(MSVC)
     target_compile_options(bzrnet_protocol_tests PRIVATE /W4 /WX)
     target_compile_options(shim_log_tests PRIVATE /W4 /WX)
+    target_compile_options(bzloader_catalog_tests PRIVATE /W4 /WX)
     target_compile_options(trn_codec_tests PRIVATE /W4 /WX)
     target_compile_options(bzn_save_path_tests PRIVATE /W4 /WX)
     target_compile_options(bzn_analysis_tests PRIVATE /W4 /WX)
@@ -209,6 +217,7 @@ if(MSVC)
 else()
     target_compile_options(bzrnet_protocol_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(shim_log_tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(bzloader_catalog_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(trn_codec_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(bzn_save_path_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(bzn_analysis_tests PRIVATE -Wall -Wextra -Werror)
@@ -231,6 +240,7 @@ endif()
 
 add_test(NAME bzrnet_protocol_tests COMMAND bzrnet_protocol_tests)
 add_test(NAME shim_log_tests COMMAND shim_log_tests)
+add_test(NAME bzloader_catalog_tests COMMAND bzloader_catalog_tests)
 add_test(NAME trn_codec_tests COMMAND trn_codec_tests)
 add_test(NAME bzn_save_path_tests COMMAND bzn_save_path_tests)
 add_test(NAME bzn_analysis_tests COMMAND bzn_analysis_tests)
