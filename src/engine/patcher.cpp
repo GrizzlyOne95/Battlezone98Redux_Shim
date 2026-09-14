@@ -1034,6 +1034,22 @@ namespace BZROpenShim
                 target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(SunFlash::ThunkAddress()));
             }
             else if (p.name.find("Damage Reveal Probe") != std::string::npos) target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(DamageRevealProbeHook));
+            else if (p.name == "Splinter Emitter Owner Propagation") {
+                void* original = isSteam
+                    ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
+                    : HookEngine::ResolveRelCallTarget(p.address - 1);
+                const uint32_t expected =
+                    HookEngine::ResolveNamedAddress("GameObjectClass::Build");
+                if (!original || expected == 0 ||
+                    reinterpret_cast<uintptr_t>(original) != expected) {
+                    Log(L"[OWNREVEAL] splinter build identity failed site=0x%08X original=%p expected=0x%08X; leaving stock call\n",
+                        p.address - 1, original, expected);
+                    continue;
+                }
+                SetSprayEmitterBuildOriginal(original);
+                target = static_cast<uint32_t>(
+                    reinterpret_cast<uintptr_t>(SprayEmitterBuildOwnerHook));
+            }
             else if (p.name.find("HoverCraft Engine Flame Emit Hook") != std::string::npos) target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_EngineFlameHoverCraftEmit));
             else if (p.name == "Artillery Weapon Mask Select Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_ArtilleryWeaponSelect));
             else if (p.name == "LayMines Weapon Mask Select Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_LayMinesWeaponSelect));
