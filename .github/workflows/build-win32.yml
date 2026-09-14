@@ -81,6 +81,15 @@ jobs:
 
           "FXAA 3.11 HLSL5 validation passed using $($fxc.FullName)"
 
+      # The FXAA step above validates one shader. This validates the canonical
+      # Enhanced payload -- every HLSL variant its .program scripts declare, at
+      # the exact defines Ogre will compile them with. A broken OSE_* variant is
+      # invisible on a Campaign Reimagined install, because CR's own programs are
+      # what the scheme resolves to there; it reaches users without CR installed.
+      - name: Validate Enhanced payload shader variants
+        shell: pwsh
+        run: ./scripts/Test-EnhancedShaderCompile.ps1
+
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
