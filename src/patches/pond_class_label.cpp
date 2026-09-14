@@ -23,21 +23,22 @@ namespace BZROpenShim
         constexpr size_t kBuildClassDetourLength = 5;
         constexpr size_t kBuildingGetRankDetourLength = 6;
 
-        // Redux 2.2.301 Building compatibility anchors. These are deliberately
-        // fail-closed below: both constructor entry points must still have the
-        // settled MSVC SEH prologue, and ParameterDB::Get(int) must still have
-        // a normal function prologue, before any tuggability hook is installed.
+        // Redux 2.2.301 Building compatibility anchors. The string16 helper is
+        // called by BuildingClass while its ParameterDB scope is live, making
+        // it the safe point to query an additional BuildingClass key.
+        constexpr uintptr_t kBuildingClassString16Address = 0x0047B6C0u;
         constexpr uintptr_t kBuildingCtorAddress = 0x0047E9C0u;
-        constexpr uintptr_t kBuildingClassCtorAddress = 0x0047FFD0u;
         constexpr uintptr_t kParameterDbGetIntAddress = 0x005896C0u;
+        constexpr size_t kBuildingString16DetourLength = 6;
         constexpr size_t kTuggableCtorDetourLength = 5;
 
-        // ParameterDB hashes are FNV-1a/32 over lowercase names. BuildingClass
-        // is already proven in the shipped constructor as 0x91E9360F.
+        // ParameterDB hashes are FNV-1a/32 over lowercase names.
         constexpr uint32_t kBuildingClassSectionHash = 0x91E9360Fu;
+        constexpr uint32_t kBuildingSoundAmbientKeyHash = 0xF1AAD7DCu;
         constexpr uint32_t kTuggableKeyHash = 0x93392C60u; // "tuggable"
 
         constexpr size_t kGameObjectClassPackedNameOffset = 0x30;
+        constexpr size_t kBuildingClassSoundAmbientOffset = 0x150;
         constexpr size_t kGameObjectHandleOffset = 0xDC;
         constexpr size_t kBuildingTuggableHandleOffset = 0x220;
 
@@ -49,27 +50,26 @@ namespace BZROpenShim
         using FnBuildingGetRank = float (__thiscall*)(void*, float, float);
         using FnGetObjectClass = void* (__thiscall*)(void*);
         using FnParameterDbGetInt = int (__cdecl*)(uint32_t, uint32_t, int*, int);
-        using FnBuildingClassCtor = void* (__thiscall*)(void*, void*, uint32_t, uint32_t);
+        using FnBuildingClassString16 = void (__cdecl*)(uint32_t, uint32_t, void*, void*);
         using FnBuildingCtor = void* (__thiscall*)(void*, void*, void*);
 
         InlineDetour32 g_BuildClassDetour;
         InlineDetour32 g_GetRankDetour;
-        InlineDetour32 g_BuildingClassCtorDetour;
+        InlineDetour32 g_BuildingClassString16Detour;
         InlineDetour32 g_BuildingCtorDetour;
         FnStricmp g_OriginalStricmp = nullptr;
         FnBuildingBuildClass g_OriginalBuildClass = nullptr;
         FnBuildingGetRank g_OriginalGetRank = nullptr;
         FnParameterDbGetInt g_ParameterDbGetInt = nullptr;
-        FnBuildingClassCtor g_OriginalBuildingClassCtor = nullptr;
+        FnBuildingClassString16 g_OriginalBuildingClassString16 = nullptr;
         FnBuildingCtor g_OriginalBuildingCtor = nullptr;
         bool g_LabelCompareCallPatched = false;
         bool g_InstallFailureLogged = false;
         bool g_TuggableInstallLogged = false;
 
-        // The class cache is keyed by the engine's own packed eight-character
-        // ODF name rather than native class pointers. That avoids retaining a
-        // stale pointer across mission teardown and exactly matches the name
-        // identity Redux uses for the legacy `abstor` special case.
+        // The cache is keyed by Redux's own packed eight-character ODF name.
+        // That avoids retaining class pointers across mission teardown and
+        // mirrors the identity stock uses for its hardcoded `abstor` check.
         SRWLOCK g_TuggableNamesLock = SRWLOCK_INIT;
         std::unordered_set<uint64_t> g_TuggableBuildingNames;
 
@@ -84,6 +84,32 @@ namespace BZROpenShim
             std::memset(out, 0, sizeof(out));
             std::memcpy(out, &lo, sizeof(lo));
             std::memcpy(out + sizeof(lo), &hi, sizeof(hi));
+        }
+
+        bool TryReadPackedOdfName(const void* objectClass,
+                                  uint32_t& lo,
+                                  uint32_t& hi)
+        {
+            if (!objectClass)
+                return false;
+
+            __try
+            {
+                const auto* bytes = reinterpret_cast<const uint8_t*>(objectClass);
+                std::memcpy(&lo,
+                            bytes + kGameObjectClassPackedNameOffset,
+                            sizeof(lo));
+                std::memcpy(&hi,
+                            bytes + kGameObjectClassPackedNameOffset + 4,
+                            sizeof(hi));
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                lo = 0;
+                hi = 0;
+                return false;
+            }
         }
 
         void SetOdfTuggable(uint32_t lo, uint32_t hi, bool enabled)
@@ -107,48 +133,75 @@ namespace BZROpenShim
             return found;
         }
 
-        // The class constructor runs while Redux's ParameterDB still points at
-        // the ODF being built. Reading the key here therefore inherits the
-        // engine's own addon search, section hashing, and baseName resolution
-        // instead of opening the file a second time in OpenShim.
-        void* __fastcall TuggableBuildingClassCtorHook(void* thisPtr,
-                                                       void* /*edx*/,
-                                                       void* parentClass,
-                                                       uint32_t odfNameLo,
-                                                       uint32_t odfNameHi)
+        // BuildingClass::BuildingClass opens its ODF, then calls this shared
+        // string16 reader for soundAmbient with:
+        //   section=BuildingClass, key=soundAmbient,
+        //   out=this+0x150, default=parent+0x150.
+        // Intercepting only that exact call lets OpenShim query `tuggable`
+        // while Redux's own ParameterDB scope is definitely active. Deriving
+        // current/parent class pointers from those two field addresses also
+        // gives the new key normal baseName-style inheritance without adding
+        // storage to the native class object.
+        void __cdecl TuggableBuildingClassString16Hook(uint32_t sectionHash,
+                                                       uint32_t keyHash,
+                                                       void* outValue,
+                                                       void* defaultValue)
         {
-            int enabled = 0;
-            const bool found = g_ParameterDbGetInt &&
-                g_ParameterDbGetInt(kBuildingClassSectionHash,
-                                    kTuggableKeyHash,
-                                    &enabled,
-                                    0) != 0;
-
-            void* result = g_OriginalBuildingClassCtor
-                ? g_OriginalBuildingClassCtor(thisPtr, parentClass,
-                                              odfNameLo, odfNameHi)
-                : nullptr;
-
-            // Missing/zero removes any stale process-lifetime name entry. This
-            // matters when two addons shadow the same ODF name in successive
-            // missions with different tuggability settings.
-            SetOdfTuggable(odfNameLo, odfNameHi, found && enabled != 0);
-
-            if (found && enabled != 0)
+            if (sectionHash == kBuildingClassSectionHash &&
+                keyHash == kBuildingSoundAmbientKeyHash &&
+                outValue && g_ParameterDbGetInt)
             {
-                char odfName[9] = {};
-                FormatPackedOdfName(odfNameLo, odfNameHi, odfName);
-                LogShimA(LogLevel::Info, "TUGODF",
-                    "ODF %.8s opted into Building tugging", odfName);
+                auto* objectClass = reinterpret_cast<uint8_t*>(outValue) -
+                    kBuildingClassSoundAmbientOffset;
+
+                uint32_t odfNameLo = 0;
+                uint32_t odfNameHi = 0;
+                if (TryReadPackedOdfName(objectClass, odfNameLo, odfNameHi))
+                {
+                    int inherited = 0;
+                    if (defaultValue)
+                    {
+                        auto* parentClass = reinterpret_cast<uint8_t*>(defaultValue) -
+                            kBuildingClassSoundAmbientOffset;
+                        uint32_t parentNameLo = 0;
+                        uint32_t parentNameHi = 0;
+                        if (TryReadPackedOdfName(parentClass,
+                                                 parentNameLo,
+                                                 parentNameHi) &&
+                            IsOdfTuggable(parentNameLo, parentNameHi))
+                        {
+                            inherited = 1;
+                        }
+                    }
+
+                    int enabled = inherited;
+                    const bool explicitKey =
+                        g_ParameterDbGetInt(kBuildingClassSectionHash,
+                                            kTuggableKeyHash,
+                                            &enabled,
+                                            inherited) != 0;
+                    SetOdfTuggable(odfNameLo, odfNameHi, enabled != 0);
+
+                    if (explicitKey)
+                    {
+                        char odfName[9] = {};
+                        FormatPackedOdfName(odfNameLo, odfNameHi, odfName);
+                        LogShimA(LogLevel::Info, "TUGODF",
+                            "ODF %.8s BuildingClass tuggable=%d",
+                            odfName, enabled != 0 ? 1 : 0);
+                    }
+                }
             }
 
-            return result;
+            if (g_OriginalBuildingClassString16)
+                g_OriginalBuildingClassString16(sectionHash, keyHash,
+                                                outValue, defaultValue);
         }
 
         // Stock Building::Building sets +0x220 to GetHandle() only when the
         // packed class name is exactly `abstor`. For opted-in ODFs, reproduce
         // that one assignment after the stock constructor has initialized the
-        // handle at +0xDC. Tug's existing dying/attached checks remain stock.
+        // object. Tug's existing dying/attached checks remain stock.
         void* __fastcall TuggableBuildingCtorHook(void* thisPtr,
                                                   void* /*edx*/,
                                                   void* objectArg,
@@ -160,27 +213,21 @@ namespace BZROpenShim
             if (!result || !objectClass)
                 return result;
 
+            uint32_t odfNameLo = 0;
+            uint32_t odfNameHi = 0;
+            if (!TryReadPackedOdfName(objectClass, odfNameLo, odfNameHi) ||
+                !IsOdfTuggable(odfNameLo, odfNameHi))
+            {
+                return result;
+            }
+
             __try
             {
-                const auto* classBytes =
-                    reinterpret_cast<const uint8_t*>(objectClass);
-                uint32_t odfNameLo = 0;
-                uint32_t odfNameHi = 0;
-                std::memcpy(&odfNameLo,
-                            classBytes + kGameObjectClassPackedNameOffset,
-                            sizeof(odfNameLo));
-                std::memcpy(&odfNameHi,
-                            classBytes + kGameObjectClassPackedNameOffset + 4,
-                            sizeof(odfNameHi));
-
-                if (IsOdfTuggable(odfNameLo, odfNameHi))
-                {
-                    auto* objectBytes = reinterpret_cast<uint8_t*>(result);
-                    const uint32_t handle = *reinterpret_cast<const uint32_t*>(
-                        objectBytes + kGameObjectHandleOffset);
-                    *reinterpret_cast<uint32_t*>(
-                        objectBytes + kBuildingTuggableHandleOffset) = handle;
-                }
+                auto* objectBytes = reinterpret_cast<uint8_t*>(result);
+                const uint32_t handle = *reinterpret_cast<const uint32_t*>(
+                    objectBytes + kGameObjectHandleOffset);
+                *reinterpret_cast<uint32_t*>(
+                    objectBytes + kBuildingTuggableHandleOffset) = handle;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -193,12 +240,14 @@ namespace BZROpenShim
 
         bool InstallTuggableBuildingSupportIfPossible()
         {
-            if (g_BuildingClassCtorDetour.trampoline &&
+            if (g_BuildingClassString16Detour.trampoline &&
                 g_BuildingCtorDetour.trampoline)
             {
                 return true;
             }
 
+            static const uint8_t string16Prologue[kBuildingString16DetourLength] =
+                { 0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x14 };
             static const uint8_t ctorPrologue[kTuggableCtorDetourLength] =
                 { 0x55, 0x8B, 0xEC, 0x6A, 0xFF };
             static const uint8_t parameterDbPrologue[] =
@@ -216,19 +265,20 @@ namespace BZROpenShim
             g_ParameterDbGetInt = reinterpret_cast<FnParameterDbGetInt>(
                 kParameterDbGetIntAddress);
 
-            if (!g_BuildingClassCtorDetour.trampoline &&
+            if (!g_BuildingClassString16Detour.trampoline &&
                 !InstallInlineDetour32(
-                    g_BuildingClassCtorDetour,
-                    kBuildingClassCtorAddress,
-                    reinterpret_cast<void*>(&TuggableBuildingClassCtorHook),
-                    kTuggableCtorDetourLength,
-                    ctorPrologue,
-                    sizeof(ctorPrologue)))
+                    g_BuildingClassString16Detour,
+                    kBuildingClassString16Address,
+                    reinterpret_cast<void*>(&TuggableBuildingClassString16Hook),
+                    kBuildingString16DetourLength,
+                    string16Prologue,
+                    sizeof(string16Prologue)))
             {
                 return false;
             }
-            g_OriginalBuildingClassCtor = reinterpret_cast<FnBuildingClassCtor>(
-                g_BuildingClassCtorDetour.trampoline);
+            g_OriginalBuildingClassString16 =
+                reinterpret_cast<FnBuildingClassString16>(
+                    g_BuildingClassString16Detour.trampoline);
 
             if (!g_BuildingCtorDetour.trampoline &&
                 !InstallInlineDetour32(
@@ -406,10 +456,8 @@ namespace BZROpenShim
 
     void InstallPondClassLabelSupportIfPossible()
     {
-        // This module already owns the shared Building compatibility seam, so
-        // install the independent tuggable-building extension from the same
-        // deferred retry path. It remains useful even when pond itself cannot
-        // be installed on a future executable build.
+        // The tuggability extension shares the same Building compatibility
+        // module and deferred retry path, but remains independent of pond.
         InstallTuggableBuildingSupportIfPossible();
 
         if (IsPondClassLabelSupportInstalled())
