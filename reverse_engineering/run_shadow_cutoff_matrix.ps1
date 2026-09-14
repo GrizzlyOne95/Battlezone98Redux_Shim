@@ -20,10 +20,10 @@ param(
     # Comma-separated headlight arms: "off,on" (default), or a single state.
     [ValidateSet("off", "on", "off,on")]
     [string]$Headlights = "off,on",
-    # Comma-separated shadow-far arms for the quarantined shim override
-    # (OPENSHIM_SHADOW_FAR_DISTANCE): "stock" runs with the env var unset.
-    # Example: "stock,256,384,512".
-    [string]$ShadowFarDistances = "stock",
+    # Comma-separated shadow-far arms (OPENSHIM_SHADOW_FAR_DISTANCE). "stock"
+    # is passed through literally, which the shim reads as an opt-out back to
+    # the 128 m clip; the shipped default is 256. Example: "stock,256,384".
+    [string]$ShadowFarDistances = "stock,256",
     # Shadow quality byte persisted into BZPLYR.DEF for the duration of the
     # run (3 = PSSM/2048, high detail). The original file bytes are restored
     # in finally. The workstation's stored value is -1 (shadows disabled),
@@ -37,7 +37,21 @@ param(
     # distance and station count (25 m spacing, 3 craft per station).
     [int]$Stations = 28,
     [double]$FirstStation = 25.0,
-    [double]$WarmupSeconds = 8.0,
+    # The player craft keeps drifting for ~20 s after Game Simulation
+    # Initialized. Capturing before it settles gives each arm a different
+    # camera position, and a frame-to-frame A/B of two different viewpoints
+    # measures the viewpoint. 26 s is past the settle.
+    [double]$WarmupSeconds = 26.0,
+    # [NormalView] Time written into the fixture terrain, as HHMM.
+    #
+    # This used to be hard-coded to 1200. Noon puts the sun overhead, which is
+    # the shortest shadow the scene can cast -- so the fixture that exists to
+    # find where sun shadows terminate was being run under the lighting least
+    # able to show one. A grazing sun is the point: long shadows across the
+    # station line make the cascade-3 coverage edge visible as a boundary
+    # rather than as a subtle change in ground tone.
+    [ValidatePattern('^\d{3,4}$')]
+    [string]$SunTime = "0700",
     [int]$Frames = 6,
     [int]$FrameIntervalMs = 1500,
     # Enable the Ogre contributor profiler for this run so caster/technique
@@ -87,6 +101,7 @@ public static class BzShadowWin {
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
 }
@@ -102,6 +117,38 @@ $originalMissionConfig = if (Test-Path -LiteralPath $missionConfig) {
 
 $renderers = if ($Renderer -eq "both") { @("DX11", "DX9") } else { @($Renderer) }
 $states = $Headlights -split ","
+
+# Creates the game OUTSIDE this shell's job object. A Start-Process child is
+# inside it, and an agent session's job carries
+# JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE -- the game then dies partway through the
+# run as a clean WM_CLOSE, which reads as the game quitting rather than as a
+# killed capture.
+function Start-ShadowMatrixGame {
+    param([Parameter(Mandatory)][string]$Exe,
+          [string]$Arguments = "",
+          [Parameter(Mandatory)][string]$WorkingDirectory)
+
+    $commandLine = if ($Arguments) { "`"$Exe`" $Arguments" } else { "`"$Exe`"" }
+    $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create `
+        -Arguments @{ CommandLine = $commandLine; CurrentDirectory = $WorkingDirectory }
+    if ($result.ReturnValue -ne 0 -or -not $result.ProcessId) {
+        throw "WMI process create failed (ReturnValue=$($result.ReturnValue)) for $commandLine"
+    }
+    $deadline = (Get-Date).AddSeconds(10)
+    do {
+        $proc = Get-Process -Id $result.ProcessId -ErrorAction SilentlyContinue
+        if ($proc) { return $proc }
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+    throw "Game process $($result.ProcessId) started but could not be opened"
+}
+
+# PowerShell is a virtualised DPI client by default: ClientToScreen would hand
+# back logical coordinates while CopyFromScreen reads physical ones, so every
+# frame would be grabbed up and left of the window. That reads as a cropped or
+# occluded capture rather than as a measurement taken from the wrong place.
+[void][BzShadowWin]::SetProcessDPIAware()
+
 $fars = $ShadowFarDistances -split ","
 
 # BZPLYR.DEF layout (FUN_008205e0): 'PLYR' magic + version dword, then 0x50
@@ -171,12 +218,6 @@ function Invoke-Arm {
     # the PSSM branch exactly once, with the stock scheme from the start.
     Set-ShadowQualityByte -Quality $ShadowQuality
 
-    # Quarantined shim override: environment-variable-only. "stock" unsets it.
-    if ($ShadowFar -eq "stock") {
-        Remove-Item Env:OPENSHIM_SHADOW_FAR_DISTANCE -ErrorAction SilentlyContinue
-    } else {
-        $env:OPENSHIM_SHADOW_FAR_DISTANCE = $ShadowFar
-    }
 
     # Renderer/window config (same constraints as capture_headlight_falloff).
     $renderSystem = if ($RendererName -eq "DX9") {
@@ -194,6 +235,16 @@ function Invoke-Arm {
     # Minimal shim config: stock headlight visibility control only, plus the
     # light-parameter trace that documents what Ogre actually had each frame.
     $headlightsValue = if ($HeadlightState -eq "on") { 1 } else { 0 }
+    # The shadow-far arm rides in this same write. It cannot be a separate one:
+    # this rewrites openshim.ini wholesale, so anything written earlier is
+    # gone. And it cannot be a process environment variable either, because the
+    # game is created through WMI (so it lands outside this shell's job object)
+    # and a WMI-created process inherits none of our environment. The shim
+    # reads this section before the real environment.
+    #
+    # "stock" is passed through literally rather than omitted: the correction
+    # is on by default now, so an ABSENT setting means 256, and a stock arm
+    # that said nothing would silently measure the fix and label it baseline.
     [System.IO.File]::WriteAllText($shimIni, @"
 [SinglePlayer]
 Headlights = $headlightsValue
@@ -202,6 +253,9 @@ OtherHeadlights = 0
 [Diagnostics]
 HeadlightLightTrace = 1
 $(if ($WithProfiler) { "ProfileOgreAnimation = 1" } else { "" })
+
+[Environment]
+OPENSHIM_SHADOW_FAR_DISTANCE=$ShadowFar
 "@)
 
     # Deploy the fixture package FIRST, then write the arm's mission config —
@@ -212,15 +266,22 @@ $(if ($WithProfiler) { "ProfileOgreAnimation = 1" } else { "" })
     Copy-Item -Path (Join-Path $missionSourceRoot "*") -Destination $missionRoot -Force
 
     if ($DayLight) {
-        # Same-length in-place edits on the deployed copy only. The fixture's
-        # night TIME would otherwise mask everything past 175-250 m, which is
-        # exactly the region the shadow-cutoff question is about. Note the
-        # black starry sky in captures is correct: this is the moon map, the
-        # [Color] palette (MOON.ACT) is its brightest available palette, and
-        # noon sun on grey regolith gives the strongest shadow contrast.
+        # Edits on the deployed copy only. The fixture's night TIME and its
+        # 175-250 m fog would otherwise mask the 128-256 m band, which is
+        # exactly the region the shadow-cutoff question is about. The black
+        # starry sky in captures is correct: this is the moon map and MOON.ACT
+        # is its brightest available palette.
+        #
+        # -SunTime governs the rest. This block used to force noon, on the
+        # reasoning that it gives the strongest ground contrast -- but an
+        # overhead sun gives the SHORTEST cast shadows, so it suppressed the
+        # very feature the fixture exists to locate. A grazing sun lays long
+        # shadows down the station line instead, and the cascade-3 coverage
+        # edge shows up as those shadows ending rather than as a shift in
+        # ground tone.
         $trnPath = Join-Path $missionRoot "lcbench.trn"
         $trn = [System.IO.File]::ReadAllText($trnPath)
-        $trn = $trn -replace 'Time=0300', 'Time=1200'
+        $trn = $trn -replace 'Time=0300', "Time=$SunTime"
         $trn = $trn -replace 'FogStart=175', 'FogStart=999'
         $trn = $trn -replace 'FogEnd=250', 'FogEnd=999'
         $trn = $trn -replace 'VisibilityRange=250', 'VisibilityRange=999'
@@ -256,8 +317,8 @@ $stationLine
         try { Remove-Item -LiteralPath $shimLog -Force -ErrorAction Stop } catch { Start-Sleep -Seconds 3; try { Remove-Item -LiteralPath $shimLog -Force -ErrorAction Stop } catch { } }
     }
 
-    $process = Start-Process -FilePath $gameExe -ArgumentList "lcbench.bzn" `
-        -WorkingDirectory $GameRoot -PassThru
+    $process = Start-ShadowMatrixGame -Exe $gameExe -Arguments "lcbench.bzn" `
+        -WorkingDirectory $GameRoot
 
     $handle = [IntPtr]::Zero
     $deadline = (Get-Date).AddSeconds(90)

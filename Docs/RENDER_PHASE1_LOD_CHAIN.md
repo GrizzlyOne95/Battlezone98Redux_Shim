@@ -4,8 +4,9 @@ Roadmap item 1.1 asks for "dedicated DX11 Enhanced Medium and Low delegates
 that retain the same material interpretation as High", to kill the lighting
 and reflection pop at the ~250/300-unit LOD boundaries.
 
-This records what the pop actually is, where the fix belongs, and what
-constrains it. No implementation yet.
+This records what the pop actually is, where the fix belongs, what constrains
+it, and what was built. Sections 1-3 are the diagnosis; section 4 is the
+implementation and its evidence.
 
 ---
 
