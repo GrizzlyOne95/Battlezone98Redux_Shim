@@ -442,6 +442,20 @@ namespace
         {
             return TryReadMappedBool(mainIni, "Network", "LobbyBanButton", false, out);
         }
+        // Persistent per-player mute. Positive key, default ON, so absence keeps
+        // the shipped behaviour: a mute is written to mutes.cfg and reapplied on
+        // later sessions. Off leaves Redux's own per-process mute alone, which is
+        // session-only -- it does not delete an existing mutes.cfg.
+        if (Equals(name, "OPENSHIM_DISABLE_PERSISTENT_PLAYER_MUTE") ||
+            Equals(name, "BZR_DISABLE_PERSISTENT_PLAYER_MUTE"))
+        {
+            return TryReadMappedBool(mainIni, "Network", "PersistentPlayerMute", true, out);
+        }
+        if (Equals(name, "OPENSHIM_ENABLE_PERSISTENT_PLAYER_MUTE") ||
+            Equals(name, "BZR_ENABLE_PERSISTENT_PLAYER_MUTE"))
+        {
+            return TryReadMappedBool(mainIni, "Network", "PersistentPlayerMute", false, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_BZRNET_REAUTH") || Equals(name, "BZR_DISABLE_BZRNET_REAUTH"))
             return TryReadMappedBool(mainIni, "Network", "ReauthOnNicknameChange", true, out);
         if (Equals(name, "OPENSHIM_ENABLE_BZRNET_REAUTH") || Equals(name, "BZR_ENABLE_BZRNET_REAUTH") ||
