@@ -1,7 +1,7 @@
-// DX11 SM4 terrain shader path for Campaign Reimagined.
+// DX11 SM4 terrain shader path for the OpenShim canonical Enhanced renderer.
 // Enhanced mode uses the experimental legacy-compatible GGX direct-lighting model.
 // IBL_ENABLED layers static split-sum image-based lighting onto that DX11 path.
-// Keep shared PBR helpers synchronized with OSE_base-sm4.hlsl.
+// Keep shared PBR helpers synchronized with openshim_enhanced_base-sm4.hlsl.
 
 // Force OG retro mode to ignore modern map contributions even if a program
 // variant accidentally leaves those feature defines enabled.
@@ -16,7 +16,7 @@
 // -----------------------------------------------------------------------------
 // Stage A linear-light experiment (DX11 Enhanced only)
 // -----------------------------------------------------------------------------
-// Keep this block synchronized with OSE_base-sm4.hlsl.
+// Keep this block synchronized with openshim_enhanced_base-sm4.hlsl.
 //
 // 0 = unchanged baseline. This is the default and the compatibility path.
 // 1 = experimental. Artist-authored COLOR textures are decoded sRGB -> linear at
@@ -96,7 +96,7 @@
 // -----------------------------------------------------------------------------
 // Radial smooth fog (DX11 Enhanced only)
 // -----------------------------------------------------------------------------
-// Keep this block synchronized with OSE_base-sm4.hlsl.
+// Keep this block synchronized with openshim_enhanced_base-sm4.hlsl.
 //
 // 0 = unchanged baseline: the exponential optical-depth model.
 // 1 = the fog factor is derived from true radial view-space distance with a
@@ -117,6 +117,24 @@
 #ifndef OSE_RADIAL_FOG
 #define OSE_RADIAL_FOG 0
 #endif
+
+// DX11 Enhanced PSSM v2. Keep this block synchronized with openshim_enhanced_base-sm4.hlsl.
+#ifndef OSE_ENHANCED_PSSM_V2
+#define OSE_ENHANCED_PSSM_V2 0
+#endif
+
+#if defined(ENHANCED_MODE) && defined(SHADOWRECEIVER) \
+ && defined(PSSM_ENABLED) && (OSE_ENHANCED_PSSM_V2 != 0)
+#define OSE_ENHANCED_PSSM_V2_ACTIVE 1
+#else
+#define OSE_ENHANCED_PSSM_V2_ACTIVE 0
+#endif
+
+#define OSE_PSSM_CASCADE_BLEND_HALF_WIDTH 1.0
+#define OSE_PSSM_FAR_FADE_WIDTH 24.0
+#define OSE_PSSM_NORMAL_OFFSET_BASE 0.04
+#define OSE_PSSM_NORMAL_OFFSET_PER_DEPTH 0.0002
+#define OSE_PSSM_NORMAL_OFFSET_MAX 0.10
 
 // Scoped exactly like Stage A: the Enhanced per-pixel path only. The legacy
 // fog in the #else branch of the fragment shaders is depth-based and stays
@@ -144,18 +162,80 @@
 #endif
 
 #if defined(SHADOWRECEIVER)
+// -----------------------------------------------------------------------------
+// Shadow depth bias
+// -----------------------------------------------------------------------------
+// The caster writes raw post-projection depth and this receiver compared it raw,
+// with no constant bias, no slope-scaled term and no normal offset. A surface
+// then shadows itself wherever its own interpolated depth quantises to just
+// behind the depth stored in the map.
+//
+// The error scales with how far the receiver's depth travels across one shadow
+// texel, which is proportional to tan(angle between the surface normal and the
+// light). Hence a constant floor plus a slope-scaled term. tan grows without
+// bound at grazing incidence, so the slope is clamped -- unclamped it produces
+// the opposite artefact, shadows visibly detaching from their casters.
+//
+// These are in post-projection depth units, where the whole cascade spans
+// 0..1, so they are deliberately small. NOT VALIDATED IN GAME: this profile
+// runs the 'high-noshadow' viewport scheme, so PCF_Filter never executes and
+// there was no acne to photograph. Treat the defaults as a starting point --
+// raise OSE_SHADOW_CONSTANT_BIAS if acne survives, lower it if shadows detach
+// from their casters near contact points.
+static const float OSE_SHADOW_CONSTANT_BIAS = 0.0015;
+static const float OSE_SHADOW_SLOPE_BIAS    = 0.0035;
+static const float OSE_SHADOW_MAX_SLOPE     = 4.0;
+
+// NdotL is the geometric surface-to-light cosine, not the normal-mapped one:
+// biasing by a perturbed normal would make the bias vary with texture detail
+// and reintroduce acne along normal-map edges.
+float shadow_depth_bias(float NdotL)
+{
+    float cosine = max(NdotL, 0.05);
+    float slope  = sqrt(saturate(1.0 - cosine * cosine)) / cosine;
+    return OSE_SHADOW_CONSTANT_BIAS
+         + OSE_SHADOW_SLOPE_BIAS * min(slope, OSE_SHADOW_MAX_SLOPE);
+}
+
+#if OSE_ENHANCED_PSSM_V2_ACTIVE
+float PCF_Filter(
+    in Texture2D map,
+    in SamplerComparisonState sam,
+    in float4 uv,
+    in float2 invMapSize,
+    in float depthBias)
+{
+    if (abs(uv.w) <= 1e-6)
+        return 1.0;
+
+    uv.xyz *= rcp(uv.w);
+    // Bias after the perspective divide, so it is applied in the same
+    // normalised depth space the shadow map stores.
+    uv.z = min(uv.z - depthBias, 1.0);
+    invMapSize = max(invMapSize, float2(1e-8, 1e-8));
+
+    float2 halfTexel = invMapSize * 0.5;
+    float result = 0.0;
+    result += map.SampleCmpLevelZero(sam, uv.xy + float2(-halfTexel.x, -halfTexel.y), uv.z);
+    result += map.SampleCmpLevelZero(sam, uv.xy + float2( halfTexel.x, -halfTexel.y), uv.z);
+    result += map.SampleCmpLevelZero(sam, uv.xy + float2(-halfTexel.x,  halfTexel.y), uv.z);
+    result += map.SampleCmpLevelZero(sam, uv.xy + float2( halfTexel.x,  halfTexel.y), uv.z);
+    return result * 0.25;
+}
+#else
 float PCF_Filter(
     in Texture2D map,
     in SamplerState sam,
     in float4 uv,
-    in float2 invMapSize)
+    in float2 invMapSize,
+    in float depthBias)
 {
     if (abs(uv.w) <= 1e-6)
         return 1.0;
 
     uv.xyz *= rcp(uv.w);
     uv.w = 1.0;
-    uv.z = min(uv.z, 1.0);
+    uv.z = min(uv.z - depthBias, 1.0);
     invMapSize = max(invMapSize, float2(1e-8, 1e-8));
 
 #if PCF_SIZE > 1
@@ -193,6 +273,7 @@ float PCF_Filter(
     return step(uv.z, map.Sample(sam, uv.xy).x);
 #endif
 }
+#endif
 #endif
 
 #if defined(NORMALMAP_ENABLED) && !defined(VERTEX_TANGENTS)
@@ -247,9 +328,60 @@ float luminance_legacy(float3 c)
     return dot(c, float3(0.299, 0.587, 0.114));
 }
 
+// -----------------------------------------------------------------------------
+// Detail normals
+// -----------------------------------------------------------------------------
+// The terrain normal atlas is sampled at 1x UV across an entire map. A few
+// metres from the ground it is magnified enormously and contributes no relief at
+// all, which is why the near field reads smeared and flat while the mid-range --
+// where the atlas still has texel density -- reads well. The detail map is
+// already tiled at 8x and 32x for brightness, so deriving a normal from its
+// luminance gradient puts high-frequency relief exactly where the atlas has
+// none. Every shipped *_detail.dds is 2048x2048 DXT1, so one texel constant
+// covers all of them and no new asset or material edit is needed.
+//
+// Luminance is a height PROXY, not a height map: on a photographic regolith scan
+// that holds up at this scale, but a dark patch is not necessarily a pit, so the
+// strengths are deliberately conservative. A negative strength inverts the
+// relief (bumps become pits) if the interpretation reads backwards.
+//
+// No distance fade. Mip-mapping already collapses the gradient toward zero as
+// the sampling footprint grows, which is the correct LOD behaviour and needs no
+// help. A hand-rolled depth fade here would be a camera term on a surface
+// normal, which is exactly what made the shading swim over static ground before.
+static const float OSE_TERRAIN_DETAIL_TEXEL = 1.0 / 2048.0;
+static const float OSE_TERRAIN_DETAIL_NORMAL_STRENGTH = 2.2;
+// The 32x layer resolves finer features, so the same luminance delta implies a
+// steeper slope; it is scaled back so the near field gains texture without the
+// ground turning to gravel.
+static const float OSE_TERRAIN_DETAIL_NORMAL_NEAR_SCALE = 0.55;
+
+float3 detail_normal_from_luminance(Texture2D tex, SamplerState sam,
+                                    float2 uv, float strength)
+{
+    float2 e = float2(OSE_TERRAIN_DETAIL_TEXEL, 0.0);
+    float hl = luminance_legacy(tex.Sample(sam, uv - e.xy).xyz);
+    float hr = luminance_legacy(tex.Sample(sam, uv + e.xy).xyz);
+    float hd = luminance_legacy(tex.Sample(sam, uv - e.yx).xyz);
+    float hu = luminance_legacy(tex.Sample(sam, uv + e.yx).xyz);
+    // Central differences give the surface gradient. Scaling xy rather than the
+    // whole vector scales the SLOPE and keeps the result a unit normal, the same
+    // reason sharpen_terrain_normal divides z instead of multiplying xy.
+    return safe_normalize(float3((hl - hr) * strength, (hd - hu) * strength, 1.0));
+}
+
+// Whiteout blend: sums surface gradients rather than the vectors themselves, so
+// the base shape survives instead of being averaged toward flat. Adding and
+// renormalising two normals destroys exactly the relief this is meant to add.
+float3 blend_detail_normal(float3 base, float3 detail)
+{
+    return safe_normalize(float3(base.xy * detail.z + detail.xy * base.z,
+                                 base.z * detail.z));
+}
+
 #if OSE_LINEAR_LIGHT_ACTIVE
 // Piecewise IEC 61966-2-1 sRGB transfer functions. Keep identical to
-// OSE_base-sm4.hlsl. These are deliberately the real piecewise curves, not
+// openshim_enhanced_base-sm4.hlsl. These are deliberately the real piecewise curves, not
 // pow(x, 2.2) / pow(x, 1/2.2) approximations, so the A/B experiment measures a
 // correct decode rather than an approximation error.
 //
@@ -294,9 +426,37 @@ float3 unpack_terrain_normal(float4 packedNormal)
     return normal;
 }
 
+// -----------------------------------------------------------------------------
+// Detail-map modulation range
+// -----------------------------------------------------------------------------
+// The detail map is modulation, not colour: the "* 2.0" makes a stored 0.5 the
+// neutral 1.0 multiplier. But mn_detail.dds is a photographic regolith scan
+// whose dark tail runs all the way to 0.0, and 0.0 * 2.0 is a multiplier of
+// EXACTLY ZERO -- the terrain colour is annihilated, not darkened. Measured on
+// the shipped 2048x2048 map: 3.83% of texels darken by more than half, 0.40% by
+// more than three quarters, and 0.007% force pure black.
+//
+// Tiled at 8x it is magnified hard in the near field, so that tail stops being
+// per-texel grain and becomes contiguous black pools several hundred pixels
+// across -- the "black water" on the ground in front of the cockpit. It is
+// backend-independent (DX9 shows it identically) and predates the sharpening
+// work; sharpening only raised surrounding contrast so it read louder.
+//
+// Compressing the modulation toward neutral keeps the grain and removes the
+// annihilation: at 0.55 the worst texel darkens to 0.45x instead of 0.0x, and
+// the bright tail is pulled in from 2.0x to 1.55x by the same amount. Raise
+// toward 1.0 to restore the original (broken) range.
+static const float OSE_TERRAIN_DETAIL_CONTRAST = 0.55;
+
+// Takes the raw sampled detail texel; returns the brightness multiplier.
+float3 detail_modulation(float3 rawDetail)
+{
+    return 1.0 + (rawDetail * 2.0 - 1.0) * OSE_TERRAIN_DETAIL_CONTRAST;
+}
+
 #if defined(ENHANCED_MODE)
 // -----------------------------------------------------------------------------
-// Legacy-PBR calibration. Keep synchronized with OSE_base-sm4.hlsl.
+// Legacy-PBR calibration. Keep synchronized with openshim_enhanced_base-sm4.hlsl.
 // -----------------------------------------------------------------------------
 static const float OSE_PI = 3.14159265359;
 static const float OSE_PBR_MIN_ROUGHNESS = 0.12;
@@ -305,12 +465,51 @@ static const float OSE_PBR_SHININESS_SCALE = 1.00;
 static const float OSE_PBR_SPECULAR_ROUGHNESS_INFLUENCE = 0.10;
 static const float OSE_PBR_NORMAL_VARIANCE_SCALE = 0.30;
 static const float OSE_PBR_MAX_VARIANCE_ROUGHNESS = 0.35;
+// -----------------------------------------------------------------------------
+// Enhanced LOD tier
+// -----------------------------------------------------------------------------
+// Enhanced shading used to end at the first LOD boundary rather than simplify
+// across it: every EN tier below High resolved to the legacy program, so
+// crossing 250 units swapped Cook-Torrance for Blinn-Phong in one step. The
+// lower tiers run this shader now, and this define is the only thing that
+// distinguishes them from High besides MAX_LIGHTS, PCF_SIZE and the absent
+// normal map.
+//
+// 0 = High, 1 = Medium, 2 = Low. Lowest is deliberately absent: it is bound to
+// a VERTEX_LIGHTING program, so there is no per-pixel lighting there to make
+// physically based.
+#if !defined(OSE_ENHANCED_LOD_TIER)
+#define OSE_ENHANCED_LOD_TIER 0
+#endif
+
+#if OSE_ENHANCED_LOD_TIER > 0
+// The tiers below High are bound to vertex programs declared without
+// NORMALMAP_ENABLED, so no tangent frame reaches the fragment stage and
+// filter_roughness_from_normal_variance() -- the specular antialiasing on the
+// High path -- has nothing to measure: ddx/ddy of a smoothly interpolated
+// geometric normal is near zero. A low-roughness surface therefore keeps a
+// hard highlight with none of the high-frequency normal detail that justified
+// it, and that highlight crawls as the object moves.
+//
+// This floor replaces the variance filter with the same correction applied
+// open-loop. The values are stated against OSE_PBR_MAX_VARIANCE_ROUGHNESS
+// (0.35), which is the most the filter is ever allowed to add on the High
+// path: Low sits just under that ceiling, Medium about half way to it. They
+// are a starting calibration and want a visual pass at the 250 and 300
+// boundaries, not a proof.
+#if OSE_ENHANCED_LOD_TIER >= 2
+static const float OSE_LOD_MIN_ROUGHNESS = 0.30;
+#else
+static const float OSE_LOD_MIN_ROUGHNESS = 0.18;
+#endif
+#endif
+
 static const float OSE_PBR_DEFAULT_F0 = 0.04;
 static const float OSE_PBR_MAX_LEGACY_F0 = 0.45;
 static const float OSE_PBR_DIFFUSE_COMPENSATION = 2.70;
 static const float OSE_PBR_SPECULAR_COMPENSATION = 1.00;
 
-// Static IBL calibration. Keep synchronized with OSE_base-sm4.hlsl, including the
+// Static IBL calibration. Keep synchronized with openshim_enhanced_base-sm4.hlsl, including the
 // OSE_LINEAR_LIGHT_ACTIVE split: the intensities are transfer-function dependent
 // and are not interchangeable between the two paths.
 #if OSE_LINEAR_LIGHT_ACTIVE
@@ -365,7 +564,7 @@ float compute_distance_optical_depth(float viewDistance, float4 fogParams)
     return min(scaledTravel * scaledTravel, OSE_ATMOS_MAX_OPTICAL_DEPTH) * configured;
 }
 
-// Radial view-space fog factor. Shared verbatim with OSE_base-sm4.hlsl.
+// Radial view-space fog factor. Shared verbatim with openshim_enhanced_base-sm4.hlsl.
 //
 // The legacy fog in the non-Enhanced branch uses vDepth, which is clip-space z
 // and therefore measures distance along the view axis only. Fog computed that
@@ -528,11 +727,73 @@ void compute_enhanced_atmosphere(
 }
 
 // Terrain-specific legacy calibration. Vehicle/building materials keep the
-// broader object ranges in OSE_base-sm4.hlsl; terrain is predominantly dusty
+// broader object ranges in openshim_enhanced_base-sm4.hlsl; terrain is predominantly dusty
 // rock/soil and should remain a rough dielectric rather than reading as wet.
 static const float OSE_TERRAIN_PBR_MIN_ROUGHNESS = 0.56;
 static const float OSE_TERRAIN_PBR_MAX_F0 = 0.12;
 static const float OSE_TERRAIN_IBL_SPECULAR_SCALE = 0.72;
+
+// -----------------------------------------------------------------------------
+// Terrain normal sharpening
+// -----------------------------------------------------------------------------
+// The gain divides Z instead of multiplying XY. Multiplying XY needs a slope
+// ceiling to stay on the unit sphere, and that ceiling plateaus: every input
+// past ~30 degrees lands on one output angle, flattening the crater rims that
+// carry the relief into a single tone. Dividing Z gives exactly
+// tan(out) = gain * tan(in) - monotonic over the whole range, asymptotic at 90
+// degrees, no clamp needed, and scale-invariant, so the non-unit RGB that BC1
+// quantization produces sharpens identically to a unit normal.
+//
+// The gain is a CONSTANT, deliberately. An earlier version faded it by view
+// distance, by N.V and by texel footprint. Every one of those is a function of
+// the camera, so the gain on a patch of ground changed as the camera
+// approached it and the shading crawled over static ground. A surface normal
+// must depend on the surface, not on where it is viewed from. Minification is
+// handled where it belongs: the normal atlas is mip-mapped, so distant samples
+// are already averaged toward flat, and filter_roughness_from_normal_variance()
+// widens roughness where the shaded normal varies fast in screen space.
+// Measured two ways, and the second overruled the first.
+//
+// OFFLINE, against the shipped MOON_ATLAS_N.dds (median texel tilt 2.2 deg, p90
+// 19.3 deg) swept over sun elevations 10-30 deg on flat ground, the gain looked
+// expensive: 2.10 manufactured shadow -- texels pushed past N.L <= 0 that were
+// lit at gain 1.0 -- across 4.14% of the ground, against 2.51% at 1.60, for 11%
+// more relief. On that basis this constant was dropped to 1.60.
+//
+// IN GAME, on play01 with the camera at rest and the same frame captured under
+// each variant (8 frames per run, cross-run camera agreement tighter than the
+// frame-to-frame noise floor), the drop from 2.10 to 1.60 turned out to be
+// close to a wash:
+//
+//     dark speckle (% of ground below half its local mean)   -2%
+//     relative contrast on the lit surface                   -1.3%
+//     high-frequency surface detail (RMS vs a 9px blur)      -4.1%
+//
+// Against that, repairing the N.V gate in evaluate_legacy_pbr removed 28% of
+// the speckle on its own. The gate was doing essentially all the damage; the
+// gain was never the problem, so it is back at 2.10 where the mid- and
+// long-range relief reads best.
+//
+// Caveat on scope: that capture is a third-person view of open ground at one
+// sun angle. The offline sweep says the gain matters considerably more when the
+// sun is low, where 2.10 manufactures shadow over 4.9% of flat ground against
+// 2.8% at 1.60. If a low-sun map shows hard dark patches on flat ground again,
+// lower this first -- the table above is the map, and nothing else depends on
+// the value.
+//
+// A tilt-dependent roll-off was also tested as an alternative shaping function
+// and beat a flat gain by only 3-6% at matched cost, which does not justify a
+// second tunable.
+static const float OSE_TERRAIN_NORMAL_SHARPEN_GAIN = 2.10;
+
+// Scale-invariant and view-independent: depends only on the sampled texel.
+float3 sharpen_terrain_normal(float3 normalTex)
+{
+    return safe_normalize(float3(normalTex.xy,
+                                 normalTex.z / OSE_TERRAIN_NORMAL_SHARPEN_GAIN));
+}
+
+
 
 float legacy_shininess_to_roughness(float shininess)
 {
@@ -637,19 +898,47 @@ void evaluate_legacy_pbr(
     diffuseWeight = float3(0.0, 0.0, 0.0);
     specularBRDF = float3(0.0, 0.0, 0.0);
 
-    if (NdotL <= 0.0 || NdotV <= 0.0)
+    // Lambertian diffuse has no view term: it is albedo/PI * N.L, and nothing
+    // in it depends on where the surface is being looked at from. The N.V test
+    // below belongs to the SPECULAR branch only -- the microfacet denominator
+    // divides by N.V, so that term genuinely has to bail. Testing both outputs
+    // against it meant any texel whose normal tipped even slightly away from
+    // the camera lost ALL of its direct light in one step and dropped to the
+    // ambient floor.
+    //
+    // On terrain that is severe. Ground seen from a cockpit is viewed at a
+    // grazing angle, so N.V hovers near zero across the whole near field, and
+    // normal-map detail -- especially once sharpened -- pushes large patches of
+    // it past the threshold. The result was hard-edged pools of near-black with
+    // flat interiors (the interior is the ambient floor, which is spatially
+    // constant) that slid across static ground as the camera moved, because
+    // N.V is a function of the camera. Two earlier diagnoses missed this: a
+    // Lambert terminator cannot explain motion, and removing the view-dependent
+    // weighting from the normal sharpening did not help because the view
+    // dependence was never in the sharpening -- it was here.
+    //
+    // It bites hardest on airless maps, where terrain_ibl_diffuse_strength()
+    // floors the IBL contribution at OSE_TERRAIN_IBL_AIRLESS_FLOOR and only
+    // OSE_IBL_LEGACY_AMBIENT_RETAIN of the scene ambient survives, so "no direct
+    // light" is a much deeper hole than it is under an atmosphere.
+    if (NdotL <= 0.0)
         return;
 
     float3 H = safe_normalize(V + L);
     float NdotH = saturate(dot(N, H));
     float VdotH = saturate(dot(V, H));
 
+    // VdotH is well defined whatever N.V does, so the diffuse/specular energy
+    // split stays valid here.
+    float3 F = fresnel_schlick(VdotH, F0);
+    diffuseWeight = (1.0 - F) * (OSE_PBR_DIFFUSE_COMPENSATION / OSE_PI);
+
+    if (NdotV <= 0.0)
+        return;
+
     float D = distribution_ggx(NdotH, roughness);
     float G = geometry_smith(NdotV, NdotL, roughness);
-    float3 F = fresnel_schlick(VdotH, F0);
-
     specularBRDF = (D * G * F) / max(4.0 * NdotV * NdotL, 1e-5);
-    diffuseWeight = (1.0 - F) * (OSE_PBR_DIFFUSE_COMPENSATION / OSE_PI);
 }
 #endif
 
@@ -746,10 +1035,22 @@ void terrain_vertex(
     vColor = iColor.bgra;
 
 #if defined(SHADOWRECEIVER)
-    vLightSpacePos1 = mul(texWorldViewProj1, iPosition);
+    float4 shadowPosition = iPosition;
+#if OSE_ENHANCED_PSSM_V2_ACTIVE
+    float normalLengthSq = dot(iNormal, iNormal);
+    if (normalLengthSq > 1e-8)
+    {
+        float receiverOffset = min(
+            OSE_PSSM_NORMAL_OFFSET_BASE
+                + OSE_PSSM_NORMAL_OFFSET_PER_DEPTH * max(vDepth, 0.0),
+            OSE_PSSM_NORMAL_OFFSET_MAX);
+        shadowPosition.xyz += iNormal * rsqrt(normalLengthSq) * receiverOffset;
+    }
+#endif
+    vLightSpacePos1 = mul(texWorldViewProj1, shadowPosition);
 #if defined(PSSM_ENABLED)
-    vLightSpacePos2 = mul(texWorldViewProj2, iPosition);
-    vLightSpacePos3 = mul(texWorldViewProj3, iPosition);
+    vLightSpacePos2 = mul(texWorldViewProj2, shadowPosition);
+    vLightSpacePos3 = mul(texWorldViewProj3, shadowPosition);
 #endif
 #endif
 
@@ -792,12 +1093,24 @@ void terrain_fragment(
 #endif
 #if defined(SHADOWRECEIVER)
     uniform Texture2D shadowMap1 : register(t5),
+#if OSE_ENHANCED_PSSM_V2_ACTIVE
+    uniform SamplerComparisonState shadowSam1 : register(s5),
+#else
     uniform SamplerState shadowSam1 : register(s5),
+#endif
 #if defined(PSSM_ENABLED)
     uniform Texture2D shadowMap2 : register(t6),
+#if OSE_ENHANCED_PSSM_V2_ACTIVE
+    uniform SamplerComparisonState shadowSam2 : register(s6),
+#else
     uniform SamplerState shadowSam2 : register(s6),
+#endif
     uniform Texture2D shadowMap3 : register(t7),
+#if OSE_ENHANCED_PSSM_V2_ACTIVE
+    uniform SamplerComparisonState shadowSam3 : register(s7),
+#else
     uniform SamplerState shadowSam3 : register(s7),
+#endif
 #endif
 
     uniform float4 invShadowMapSize1,
@@ -883,22 +1196,77 @@ void terrain_fragment(
 )
 {
 #if defined(SHADOWRECEIVER)
+    // Geometric cosine for the slope term. VERTEX_LIGHTING permutations carry
+    // no interpolated normal, so they fall back to the constant floor.
+    float shadowNdotL = 1.0;
+#if !defined(VERTEX_LIGHTING)
+    if (lightCount > 0.0)
+    {
+        float3 shadowToLight = lightPosition[0].xyz
+                             - (vViewPosition.xyz * lightPosition[0].w);
+        shadowNdotL = saturate(dot(safe_normalize(vViewNormal),
+                                   safe_normalize(shadowToLight)));
+    }
+#endif
+    float shadowBias = shadow_depth_bias(shadowNdotL);
+
     float shadow;
 #if defined(PSSM_ENABLED)
-    if (vDepth <= pssmSplitPoints.y)
+#if OSE_ENHANCED_PSSM_V2_ACTIVE
+    float split1 = pssmSplitPoints.y;
+    float split2 = pssmSplitPoints.z;
+    float splitEnd = pssmSplitPoints.w;
+    float blendWidth = OSE_PSSM_CASCADE_BLEND_HALF_WIDTH;
+
+    [branch] if (vDepth < split1 - blendWidth)
     {
-#endif
-        shadow = PCF_Filter(shadowMap1, shadowSam1, vLightSpacePos1, invShadowMapSize1.xy);
-#if defined(PSSM_ENABLED)
+        shadow = PCF_Filter(shadowMap1, shadowSam1, vLightSpacePos1, invShadowMapSize1.xy, shadowBias);
     }
-    else if (vDepth <= pssmSplitPoints.z)
+    else if (vDepth <= split1 + blendWidth)
     {
-        shadow = PCF_Filter(shadowMap2, shadowSam2, vLightSpacePos2, invShadowMapSize2.xy);
+        float shadow1 = PCF_Filter(shadowMap1, shadowSam1, vLightSpacePos1, invShadowMapSize1.xy, shadowBias);
+        float shadow2 = PCF_Filter(shadowMap2, shadowSam2, vLightSpacePos2, invShadowMapSize2.xy, shadowBias);
+        float blend = smoothstep(split1 - blendWidth, split1 + blendWidth, vDepth);
+        shadow = lerp(shadow1, shadow2, blend);
+    }
+    else if (vDepth < split2 - blendWidth)
+    {
+        shadow = PCF_Filter(shadowMap2, shadowSam2, vLightSpacePos2, invShadowMapSize2.xy, shadowBias);
+    }
+    else if (vDepth <= split2 + blendWidth)
+    {
+        float shadow2 = PCF_Filter(shadowMap2, shadowSam2, vLightSpacePos2, invShadowMapSize2.xy, shadowBias);
+        float shadow3 = PCF_Filter(shadowMap3, shadowSam3, vLightSpacePos3, invShadowMapSize3.xy, shadowBias);
+        float blend = smoothstep(split2 - blendWidth, split2 + blendWidth, vDepth);
+        shadow = lerp(shadow2, shadow3, blend);
+    }
+    else if (vDepth <= splitEnd)
+    {
+        shadow = PCF_Filter(shadowMap3, shadowSam3, vLightSpacePos3, invShadowMapSize3.xy, shadowBias);
+        float fadeStart = max(split2 + blendWidth, splitEnd - OSE_PSSM_FAR_FADE_WIDTH);
+        float farFade = smoothstep(fadeStart, splitEnd, vDepth);
+        shadow = lerp(shadow, 1.0, farFade);
     }
     else
     {
-        shadow = PCF_Filter(shadowMap3, shadowSam3, vLightSpacePos3, invShadowMapSize3.xy);
+        shadow = 1.0;
     }
+#else
+    if (vDepth <= pssmSplitPoints.y)
+    {
+        shadow = PCF_Filter(shadowMap1, shadowSam1, vLightSpacePos1, invShadowMapSize1.xy, shadowBias);
+    }
+    else if (vDepth <= pssmSplitPoints.z)
+    {
+        shadow = PCF_Filter(shadowMap2, shadowSam2, vLightSpacePos2, invShadowMapSize2.xy, shadowBias);
+    }
+    else
+    {
+        shadow = PCF_Filter(shadowMap3, shadowSam3, vLightSpacePos3, invShadowMapSize3.xy, shadowBias);
+    }
+#endif
+#else
+    shadow = PCF_Filter(shadowMap1, shadowSam1, vLightSpacePos1, invShadowMapSize1.xy, shadowBias);
 #endif
 #if defined(ENHANCED_MODE)
     shadow = shadow * 0.78 + 0.22;
@@ -960,7 +1328,34 @@ void terrain_fragment(
     // conventions on the live misn04 terrain before changing production math.
     float4 normalSample = normalMap.Sample(normalSam, vTexCoord);
     float3 normalTex = unpack_terrain_normal(normalSample);
-    float3 mappedViewNormal = safe_normalize(mul(normalTex, tbn));
+
+    // normalTex stays the raw unpack so DEBUG_MODE 3 remains a packing
+    // diagnostic; the sharpened copy is what the lighting consumes. This runs
+    // upstream of the TBN transform, so the extra variance it introduces is
+    // picked up by ddx/ddy in filter_roughness_from_normal_variance() below
+    // and fed back into roughness rather than aliasing the specular lobe.
+    float3 shapedNormalTex = normalTex;
+#if defined(ENHANCED_MODE)
+    shapedNormalTex = sharpen_terrain_normal(normalTex);
+#if defined(DETAILMAP_ENABLED)
+    // Detail relief is blended in AFTER sharpening, deliberately. The sharpen
+    // gain is calibrated against the atlas's own slope distribution; applying it
+    // to the detail gradient as well would steepen normals the calibration never
+    // accounted for and re-manufacture the terminator shadow it was tuned to
+    // avoid.
+    shapedNormalTex = blend_detail_normal(
+        shapedNormalTex,
+        detail_normal_from_luminance(detailMap, detailSam, vTexCoord * 8.0,
+                                     OSE_TERRAIN_DETAIL_NORMAL_STRENGTH));
+    shapedNormalTex = blend_detail_normal(
+        shapedNormalTex,
+        detail_normal_from_luminance(detailMap, detailSam, vTexCoord * 32.0,
+                                     OSE_TERRAIN_DETAIL_NORMAL_STRENGTH
+                                         * OSE_TERRAIN_DETAIL_NORMAL_NEAR_SCALE));
+#endif
+#endif
+
+    float3 mappedViewNormal = safe_normalize(mul(shapedNormalTex, tbn));
 #if OSE_TERRAIN_NORMAL_BASIS_MODE == 3
     float3 viewNormal = geometryNormal;
 #elif OSE_TERRAIN_NORMAL_BASIS_MODE == 4
@@ -1045,6 +1440,9 @@ void terrain_fragment(
         OSE_TERRAIN_PBR_MIN_ROUGHNESS);
 #if defined(NORMALMAP_ENABLED)
     surfaceRoughness = filter_roughness_from_normal_variance(viewNormal, surfaceRoughness);
+#endif
+#if OSE_ENHANCED_LOD_TIER > 0
+    surfaceRoughness = max(surfaceRoughness, OSE_LOD_MIN_ROUGHNESS);
 #endif
     surfaceRoughness = max(surfaceRoughness, OSE_TERRAIN_PBR_MIN_ROUGHNESS);
 #endif
@@ -1281,12 +1679,12 @@ void terrain_fragment(
     // decode would turn 0.5 into ~0.214, so the neutral point would become
     // ~0.43 and the whole terrain would darken by more than half. Treat the
     // detail texture as numerical modulation and leave it alone.
-    float3 detailTex = detailMap.Sample(detailSam, frac(vTexCoord * 8.0)).xyz * 2.0;
+    float3 detailTex = detail_modulation(detailMap.Sample(detailSam, vTexCoord * 8.0).xyz);
     float3 fullbrightDetail = float3(1.0, 1.0, 1.0);
 #if defined(ENHANCED_MODE)
     float detailDistance = saturate(vDepth * 0.015);
     float3 detailColor = lerp(detailTex, fullbrightDetail, detailDistance);
-    float3 detailTexNear = detailMap.Sample(detailSam, frac(vTexCoord * 32.0)).xyz * 2.0;
+    float3 detailTexNear = detail_modulation(detailMap.Sample(detailSam, vTexCoord * 32.0).xyz);
     float detailNearFade = saturate(vDepth * 0.08);
     detailColor *= lerp(lerp(detailTexNear, fullbrightDetail, 0.5), fullbrightDetail, detailNearFade);
 #else

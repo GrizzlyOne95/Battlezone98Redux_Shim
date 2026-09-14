@@ -120,6 +120,7 @@
     <ClCompile Include="src\dllmain.cpp" />
     <ClCompile Include="src\patches\autosave.cpp" />
     <ClCompile Include="src\patches\bzr_hooks.cpp" />
+    <ClCompile Include="src\patches\pond_class_label.cpp" />
     <ClCompile Include="src\patches\bzrnet_protocol.cpp" />
     <ClCompile Include="src\patches\bzrnet_trace.cpp" />
     <ClCompile Include="src\patches\bzrnet_instrumentation.cpp" />
@@ -200,6 +201,7 @@
     <ClInclude Include="include\autosave.h" />
     <ClInclude Include="include\autosave_gate.h" />
     <ClInclude Include="include\bzr_hooks.h" />
+    <ClInclude Include="include\pond_class_label.h" />
     <ClInclude Include="include\bzr_options_ui.h" />
     <ClInclude Include="include\cli_multiparam_parser.h" />
     <ClInclude Include="include\terrain_tile_blend.h" />

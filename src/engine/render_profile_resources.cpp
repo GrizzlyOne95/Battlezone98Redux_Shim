@@ -38,6 +38,18 @@ namespace BZROpenShim::RenderProfiles
         };
     }
 
+    bool VersionMarkerMatches(const char* marker, const size_t markerLength,
+                              const char* expected)
+    {
+        if (marker == nullptr || expected == nullptr)
+        {
+            return false;
+        }
+        const size_t expectedLength = strlen(expected);
+        return markerLength == expectedLength &&
+               memcmp(marker, expected, expectedLength) == 0;
+    }
+
     size_t RequiredEnhancedResourceCount()
     {
         return sizeof(kRequiredEnhancedResources) /
@@ -84,8 +96,8 @@ namespace BZROpenShim::RenderProfiles
             return false;
         }
 
-        const size_t readSize = static_cast<size_t>(read);
-        if (strncmp(actual, kEnhancedResourcesVersion, readSize) != 0)
+        if (!VersionMarkerMatches(actual, static_cast<size_t>(read),
+                                  kEnhancedResourcesVersion))
         {
             outProblem = "resources.version mismatch";
             return false;

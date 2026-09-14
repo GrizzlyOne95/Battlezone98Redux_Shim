@@ -15,12 +15,23 @@ namespace BZROpenShim::RenderProfiles
     // Compiled expectation for the deployed renderer-resource set. Bump
     // whenever resources/renderer/** changes in a way that must not pair with
     // an older DLL (winmm.dll+patches.json rule, extended to renderer assets).
-    constexpr char kEnhancedResourcesVersion[] = "1";
+    // 2: Enhanced payload became canonical (PSSM v2, the N.V diffuse repair,
+    //    detail-map modulation, detail-derived normals). A v1 deployment next
+    //    to a v2 DLL renders the superseded lighting, so the pairing must fail.
+    constexpr char kEnhancedResourcesVersion[] = "2";
 
     // Repository-relative name of the mandatory resource directory, as laid
     // out under the game install.
     constexpr const char* kEnhancedResourceDirRel = "openshim\\renderer\\enhanced";
     constexpr const char* kEnhancedResourceVersionFile = "resources.version";
+
+    // True when `marker` (the raw bytes of resources.version, no trimming)
+    // is exactly `expected`. Exposed so the comparison can be tested with
+    // multi-character versions: a length-insensitive compare accepts any
+    // marker that is a prefix of the expectation, which would let a stale
+    // "1" deployment validate against a "12" DLL.
+    bool VersionMarkerMatches(const char* marker, size_t markerLength,
+                              const char* expected);
 
     // Number of mandatory payload files verified by ValidateDeployedResourceSetAt.
     size_t RequiredEnhancedResourceCount();
