@@ -42,6 +42,16 @@ param(
     # camera position, and a frame-to-frame A/B of two different viewpoints
     # measures the viewpoint. 26 s is past the settle.
     [double]$WarmupSeconds = 26.0,
+    # [NormalView] Time written into the fixture terrain, as HHMM.
+    #
+    # This used to be hard-coded to 1200. Noon puts the sun overhead, which is
+    # the shortest shadow the scene can cast -- so the fixture that exists to
+    # find where sun shadows terminate was being run under the lighting least
+    # able to show one. A grazing sun is the point: long shadows across the
+    # station line make the cascade-3 coverage edge visible as a boundary
+    # rather than as a subtle change in ground tone.
+    [ValidatePattern('^\d{3,4}$')]
+    [string]$SunTime = "0700",
     [int]$Frames = 6,
     [int]$FrameIntervalMs = 1500,
     # Enable the Ogre contributor profiler for this run so caster/technique
@@ -256,15 +266,22 @@ OPENSHIM_SHADOW_FAR_DISTANCE=$ShadowFar
     Copy-Item -Path (Join-Path $missionSourceRoot "*") -Destination $missionRoot -Force
 
     if ($DayLight) {
-        # Same-length in-place edits on the deployed copy only. The fixture's
-        # night TIME would otherwise mask everything past 175-250 m, which is
-        # exactly the region the shadow-cutoff question is about. Note the
-        # black starry sky in captures is correct: this is the moon map, the
-        # [Color] palette (MOON.ACT) is its brightest available palette, and
-        # noon sun on grey regolith gives the strongest shadow contrast.
+        # Edits on the deployed copy only. The fixture's night TIME and its
+        # 175-250 m fog would otherwise mask the 128-256 m band, which is
+        # exactly the region the shadow-cutoff question is about. The black
+        # starry sky in captures is correct: this is the moon map and MOON.ACT
+        # is its brightest available palette.
+        #
+        # -SunTime governs the rest. This block used to force noon, on the
+        # reasoning that it gives the strongest ground contrast -- but an
+        # overhead sun gives the SHORTEST cast shadows, so it suppressed the
+        # very feature the fixture exists to locate. A grazing sun lays long
+        # shadows down the station line instead, and the cascade-3 coverage
+        # edge shows up as those shadows ending rather than as a shift in
+        # ground tone.
         $trnPath = Join-Path $missionRoot "lcbench.trn"
         $trn = [System.IO.File]::ReadAllText($trnPath)
-        $trn = $trn -replace 'Time=0300', 'Time=1200'
+        $trn = $trn -replace 'Time=0300', "Time=$SunTime"
         $trn = $trn -replace 'FogStart=175', 'FogStart=999'
         $trn = $trn -replace 'FogEnd=250', 'FogEnd=999'
         $trn = $trn -replace 'VisibilityRange=250', 'VisibilityRange=999'
