@@ -134,11 +134,45 @@ void TestVersionMarkerContract()
         ExpectContains(problem, "version", "problem mentions version");
     }
     {
+        // The shipped expectation, as a longer marker. A stale deployment can
+        // differ from the DLL by a trailing digit as easily as by a leading one.
+        const std::string expected(kEnhancedResourcesVersion);
+        std::ofstream longer(dir / kEnhancedResourceVersionFile,
+                             std::ios::binary | std::ios::trunc);
+        longer << expected << "0";
+        longer.close();
+        std::string problem;
+        ExpectTrue(!Validate(dir, problem), "superstring-of-version rejected");
+    }
+    {
         std::filesystem::remove(dir / kEnhancedResourceVersionFile, g_errc);
         std::string problem;
         ExpectTrue(!Validate(dir, problem), "missing marker rejected");
     }
     std::filesystem::remove_all(dir, g_errc);
+}
+
+void TestVersionMarkerComparison()
+{
+    std::printf("TestVersionMarkerComparison\n");
+
+    ExpectTrue(VersionMarkerMatches("2", 1, "2"), "exact single-char matches");
+    ExpectTrue(VersionMarkerMatches("12", 2, "12"), "exact multi-char matches");
+
+    // The regression this comparison exists for: a marker that is a strict
+    // prefix of the expectation. A compare limited to the marker's own length
+    // reports a match here, so a v1 payload would validate against a v12 DLL.
+    ExpectTrue(!VersionMarkerMatches("1", 1, "12"), "prefix marker rejected");
+    ExpectTrue(!VersionMarkerMatches("12", 2, "123"), "longer prefix rejected");
+
+    // And the mirror: the expectation as a prefix of the marker.
+    ExpectTrue(!VersionMarkerMatches("12", 2, "1"), "superstring marker rejected");
+
+    ExpectTrue(!VersionMarkerMatches("", 0, "2"), "empty marker rejected");
+    ExpectTrue(!VersionMarkerMatches(nullptr, 0, "2"), "null marker rejected");
+
+    // The marker is raw bytes: trailing whitespace is a different version.
+    ExpectTrue(!VersionMarkerMatches("2\n", 2, "2"), "trailing newline rejected");
 }
 
 void TestAbsentDirectoryFails()
@@ -157,6 +191,7 @@ int main()
     TestSingleRemovedMandatoryFileFails();
     TestEmptiedMandatoryFileFails();
     TestVersionMarkerContract();
+    TestVersionMarkerComparison();
     TestAbsentDirectoryFails();
 
     if (g_failures != 0)

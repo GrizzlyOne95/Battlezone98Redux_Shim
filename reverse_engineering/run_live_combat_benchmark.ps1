@@ -80,6 +80,42 @@ foreach ($required in @(
     }
 }
 
+# Launch the game OUTSIDE this script's job object.
+#
+# Start-Process makes the game a child of whatever launched this script. When
+# that is an agent session, the session's job object has
+# JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, so the game is torn down partway through
+# the run -- observed at 7-28 seconds, arriving as an orderly WM_CLOSE. The run
+# therefore looks like a short session that quit by itself rather than a killed
+# one, and the captured frames are whatever happened to land first. Creating the
+# process through WMI gives it no parent job, so it lives for the whole run.
+function Start-BenchmarkGame {
+    param(
+        [Parameter(Mandatory)] [string]$Exe,
+        [string]$Arguments = "",
+        [Parameter(Mandatory)] [string]$WorkingDirectory
+    )
+
+    $commandLine = if ($Arguments) { "`"$Exe`" $Arguments" } else { "`"$Exe`"" }
+    $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create `
+        -Arguments @{ CommandLine = $commandLine; CurrentDirectory = $WorkingDirectory }
+
+    if ($result.ReturnValue -ne 0 -or -not $result.ProcessId) {
+        throw "WMI process create failed (ReturnValue=$($result.ReturnValue)) for $commandLine"
+    }
+
+    # Win32_Process.Create returns as soon as the pid exists, so the handle can
+    # briefly be unavailable. Everything downstream needs a real Process object.
+    $deadline = (Get-Date).AddSeconds(10)
+    do {
+        $proc = Get-Process -Id $result.ProcessId -ErrorAction SilentlyContinue
+        if ($proc) { return $proc }
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+
+    throw "Game process $($result.ProcessId) started but could not be opened"
+}
+
 if ($Count | Where-Object { $_ -lt 0 -or $_ -gt 200 }) {
     throw "Count values must be within 0..200"
 }
@@ -336,9 +372,8 @@ try {
                         }
                         Write-Host "Starting $runId"
                         $startedAt = Get-Date
-                        $process = Start-Process -FilePath $gameExe `
-                            -ArgumentList $MissionArgs `
-                            -WorkingDirectory $GameRoot -PassThru
+                        $process = Start-BenchmarkGame -Exe $gameExe `
+                            -Arguments $MissionArgs -WorkingDirectory $GameRoot
                         $deadline = (Get-Date).AddSeconds($RunTimeoutSeconds)
                         $completed = $false
                         $nextLoadSkip = Get-Date
