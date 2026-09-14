@@ -2635,7 +2635,7 @@ fragment_program OSE_TerrainENLowPSSM_fragment unified
 {
 	delegate OSE_TerrainLowPSSM_fragmentGLSLES
 	delegate OSE_TerrainLowPSSM_fragmentGLSL
-	delegate OSE_TerrainLowPSSM_fragmentHLSL4
+	delegate OSE_TerrainENLowPSSM_fragmentHLSL4
 	delegate OSE_TerrainLowPSSM_fragmentHLSL
 
 	default_params
@@ -2659,7 +2659,7 @@ fragment_program OSE_TerrainENLowShadow_fragment unified
 {
 	delegate OSE_TerrainLowShadow_fragmentGLSLES
 	delegate OSE_TerrainLowShadow_fragmentGLSL
-	delegate OSE_TerrainLowShadow_fragmentHLSL4
+	delegate OSE_TerrainENLowShadow_fragmentHLSL4
 	delegate OSE_TerrainLowShadow_fragmentHLSL
 
 	default_params
@@ -2680,7 +2680,7 @@ fragment_program OSE_TerrainENLowNoShadow_fragment unified
 {
 	delegate OSE_TerrainLowNoShadow_fragmentGLSLES
 	delegate OSE_TerrainLowNoShadow_fragmentGLSL
-	delegate OSE_TerrainLowNoShadow_fragmentHLSL4
+	delegate OSE_TerrainENLowNoShadow_fragmentHLSL4
 	delegate OSE_TerrainLowNoShadow_fragmentHLSL
 
 	default_params
@@ -2700,7 +2700,7 @@ fragment_program OSE_TerrainENMediumNoShadow_fragment unified
 {
 	delegate OSE_TerrainMediumNoShadow_fragmentGLSLES
 	delegate OSE_TerrainMediumNoShadow_fragmentGLSL
-	delegate OSE_TerrainMediumNoShadow_fragmentHLSL4
+	delegate OSE_TerrainENMediumNoShadow_fragmentHLSL4
 	delegate OSE_TerrainMediumNoShadow_fragmentHLSL
 
 	default_params
@@ -2721,7 +2721,7 @@ fragment_program OSE_TerrainENMediumShadow_fragment unified
 {
 	delegate OSE_TerrainMediumShadow_fragmentGLSLES
 	delegate OSE_TerrainMediumShadow_fragmentGLSL
-	delegate OSE_TerrainMediumShadow_fragmentHLSL4
+	delegate OSE_TerrainENMediumShadow_fragmentHLSL4
 	delegate OSE_TerrainMediumShadow_fragmentHLSL
 
 	default_params
@@ -2743,7 +2743,7 @@ fragment_program OSE_TerrainENMediumPSSM_fragment unified
 {
 	delegate OSE_TerrainMediumPSSM_fragmentGLSLES
 	delegate OSE_TerrainMediumPSSM_fragmentGLSL
-	delegate OSE_TerrainMediumPSSM_fragmentHLSL4
+	delegate OSE_TerrainENMediumPSSM_fragmentHLSL4
 	delegate OSE_TerrainMediumPSSM_fragmentHLSL
 
 	default_params
@@ -2838,7 +2838,72 @@ fragment_program OSE_TerrainENHighPSSM_fragment unified
 	}
 }
 
+// -----------------------------------------------------------------------------
+// Enhanced Medium and Low tiers
+// -----------------------------------------------------------------------------
+// These exist because the EN tiers below High used to be names for the legacy
+// programs, so Enhanced shading ended at the first LOD boundary instead of
+// simplifying across it. Each one is the LEGACY tier's defines verbatim plus
+// the Enhanced set: the pass that binds it was built for the legacy program,
+// so its texture registers, sampler slots and light-array size are what the
+// fragment has to expect. In particular the bound vertex program declares no
+// NORMALMAP_ENABLED, so there is no tangent frame to read.
+//
+// Only the HLSL4 delegate of the matching unified program is repointed at
+// these. GLSL, GLSLES and HLSL keep their legacy delegates, so DX9 and GL are
+// untouched.
+// -----------------------------------------------------------------------------
 
+fragment_program OSE_TerrainENMediumNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
 
+	preprocessor_defines MAX_LIGHTS=8,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=1
+}
 
+fragment_program OSE_TerrainENMediumShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
 
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=2,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=1
+}
+
+fragment_program OSE_TerrainENMediumPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=2,PSSM_ENABLED,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=1
+}
+
+fragment_program OSE_TerrainENLowNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=2
+}
+
+fragment_program OSE_TerrainENLowShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=2
+}
+
+fragment_program OSE_TerrainENLowPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_terrain-sm4.hlsl
+	target ps_4_0
+	entry_point terrain_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,PSSM_ENABLED,EMISSIVEMAP_ENABLED,DETAILMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=2
+}
