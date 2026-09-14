@@ -1786,3 +1786,18 @@ InteractiveFogWakes = 0
 ;
 ; Existing real process environment variables remain a final backward-
 ; compatibility fallback when no friendly/raw INI value supplies that name.
+[ODF]
+; Battlezone 98 Redux reads ODF keys only under exact section names, while
+; 1.5 tolerated legacy spellings ([MagnetClass], [FlareBuildingClass],
+; [ScavengerCraftClass], [SprayBuildngClass], bare [GameObject]/[SprayBomb]).
+; LegacySectionRemap renames those headers to canonical form as ODFs load so
+; legacy mods resolve again. Off by default: stock behavior is Redux-strict.
+LegacySectionRemap = 0
+; LogUnknownOdfSections reports section headers seen in neither the loader
+; set nor the retail corpus (once per file+section). Diagnostic only.
+LogUnknownOdfSections = 0
+; CrashValueGuards clamps ODF values verified to crash engine code
+; (MagnetMine fieldRadius 0, negative ChargeGun ordnanceCount / Launcher
+; targetCount) and reports FlareMine/SprayBuilding sections missing
+; payloadName. Off by default.
+CrashValueGuards = 0
