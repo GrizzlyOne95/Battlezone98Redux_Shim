@@ -815,12 +815,16 @@ namespace BZROpenShim
         {
             const std::string lower = LowerCopy(debugName);
 
-            if (lower.find("cr_ibl_neutral_irradiance") != std::string::npos)
-                return "CR static irradiance cubemap (generated linear numeric data)";
-            if (lower.find("cr_ibl_neutral_prefilter") != std::string::npos)
-                return "CR static prefiltered environment cubemap (generated linear numeric data)";
-            if (lower.find("cr_ibl_brdf_lut") != std::string::npos)
-                return "CR BRDF LUT (linear data)";
+            // Matched on the unprefixed stem so both the shim-owned
+            // openshim_ibl_* payload and any legacy cr_ibl_* copy classify the
+            // same. CR binds these by their path inside the Enhanced payload,
+            // so the debug name carries a directory prefix as well.
+            if (lower.find("_ibl_neutral_irradiance") != std::string::npos)
+                return "static irradiance cubemap (generated linear numeric data)";
+            if (lower.find("_ibl_neutral_prefilter") != std::string::npos)
+                return "static prefiltered environment cubemap (generated linear numeric data)";
+            if (lower.find("_ibl_brdf_lut") != std::string::npos)
+                return "BRDF LUT (linear data)";
             if (lower.find("flat_n") != std::string::npos)
                 return "normal-map fallback (linear data)";
 
