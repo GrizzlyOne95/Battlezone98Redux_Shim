@@ -97,10 +97,10 @@ almost entirely inert, because `VERTEX_LIGHTING` short-circuits the lighting
 loop before any of it runs. Lowest should stay as it is, and the reason should
 be written down rather than rediscovered.
 
-## 3. Feasibility, established before building anything
+## 3. Feasibility is proven
 
-Every permutation the fix needs compiled against the payload as it stood,
-before a line of it was written:
+Every permutation the fix needs compiles today, against the payload as it
+stands, with no shader edit:
 
 ```
 fxc /T ps_4_0 /E base_fragment    ... ENHANCED_MODE, OSE_LINEAR_LIGHT=1, OSE_RADIAL_FOG=1
@@ -132,104 +132,16 @@ powershell -ExecutionPolicy Bypass -File reverse_engineering\run_live_combat_ben
     -World moon -Scenario fourteam -Count 80
 ```
 
-## 4. Implemented
+## 4. Plan
 
-Twelve HLSL4 fragment programs — Medium and Low, NoShadow/Shadow/PSSM, base
-and terrain. Each one's defines are the **legacy tier's, verbatim**, plus
-`ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=n`.
-
-Starting from the legacy defines rather than from High's is the whole safety
-argument. The pass that binds these was built for the legacy program, so its
-texture registers, sampler slots and light-array size are what the fragment
-has to expect. Copying High's defines would enable a normal map whose tangent
-frame the bound vertex program never emits, and (on terrain) a specular map
-some passes do not bind.
-
-Only the **HLSL4** delegate of each unified `EN` program is repointed. GLSL,
-GLSLES and HLSL keep their legacy delegates, so DX9 and GL are untouched and
-fail back exactly as before.
-
-`OSE_ENHANCED_LOD_TIER` is the one knob that distinguishes the tiers beyond
-`MAX_LIGHTS`, `PCF_SIZE` and the absent normal map. It applies a roughness
-floor, because the tiers below High lose the thing that was doing specular
-antialiasing: `filter_roughness_from_normal_variance()` measures `ddx/ddy` of
-the shading normal, and with no normal map that is a smoothly interpolated
-geometric normal whose derivatives are near zero. A low-roughness surface
-therefore keeps a hard highlight with none of the high-frequency detail that
-justified it, and the highlight crawls as the object moves. The floor is the
-same correction applied open-loop: 0.18 at Medium, 0.30 at Low, against the
-0.35 ceiling the variance filter is allowed on the High path. **Those two
-numbers are a starting calibration, not a result** — they want a visual pass.
-
-### Verified
-
-`scripts/Test-EnhancedLodPermutations.ps1` reads the permutations out of the
-`.program` scripts rather than restating them, compiles every one, and
-compares the High bytecode against a baseline compiled from git:
-
-```
-18 Enhanced permutations compile
-6 High permutations DXBC-identical to the merge-base
-```
-
-That second line is the roadmap's "preserve unaffected paths DXBC-identically"
-contract, proven rather than asserted. The check is negative-tested: seeding a
-one-digit change to `OSE_PBR_MAX_VARIANCE_ROUGHNESS` makes it report the three
-base High permutations as `CHANGED` and leaves terrain `identical`, which is
-exactly the blast radius of that seed.
-
-The tier knob is also proven not to be inert — the same Medium permutation
-compiled at tier 0, 1 and 2 produces three distinct DXBC hashes. A define that
-changes nothing would look identical to one that works.
-
-CR's three gates pass against the updated payload, and their counters moved
-the way they should: 595 -> 607 declared program names (+12), and the Enhanced
-program-boundary guard now sees **24** Enhanced SM4 fragment programs opted
-into the Enhanced-only flags rather than 12, with the 64 Default/Retro
-programs still held on the legacy path.
-
-### Still outstanding
-
-**The visual pass at the boundary.** A test deployment put the new payload and
-CR's dedup materials on the GOG install and confirmed the package loads and
-90 of the 92 `OSE_` program references in `CR_BZBase.material` resolve. It did
-not exercise the boundary: `lcbench` spawns its units at 50 units, which is
-LOD 0, so Medium and Low never rendered. The real check is a capture with
-units at ~240 and ~320 units, before and after:
-
-```
-powershell -ExecutionPolicy Bypass -File reverse_engineering\run_live_combat_benchmark.ps1 `
-    -World moon -Scenario idle -Distance 240,320
-```
-
-**Frame cost at distance.** Enhanced Medium is ~2.1x the bytecode of the
-legacy Medium it replaces. Bytecode is not frame time, but the direction is
-not in doubt and the number has to be measured before this ships.
-
-## 5. An unrelated defect this surfaced
-
-The two remaining unresolved references are `OSE_BaseENHighPSSMV2_vertex` and
-`OSE_TerrainENHighPSSMV2_vertex`, and they are **pre-existing, not caused by
-this work or by CR's dedup**. CR's own `CR_BaseENHighPSSMV2_vertex` has the
-identical shape — a unified program with a single HLSL4 delegate — and every
-other unified vertex program in the file has four. Ogre reports
-`reference to a non existing object` for the single-delegate ones and resolves
-the other twelve.
-
-CR's material already carries a comment acknowledging the HLSL4-only vertex
-program and a duplicate "renderer fallback" technique immediately after the v2
-pass, so the fallback is intended. What is worth checking separately is
-whether the v2 pass is being rejected on **DX11 as well**, in which case PSSM
-v2 is not actually running anywhere and the architecture doc's claim about it
-needs the same correction the payload snapshot needed in Phase 0.
-
-## 6. Plan
-
-1. ~~Add real HLSL4 Enhanced fragment programs for Medium and Low.~~ Done (§4).
-2. ~~Repoint only the HLSL4 delegate of each unified EN program.~~ Done (§4).
-3. ~~Leave Lowest alone and document it.~~ Done (§2).
-4. ~~Introduce `OSE_ENHANCED_LOD_TIER`.~~ Done (§4). It currently carries the
-   roughness floor only; further cost shedding by tier — fewer IBL specular samples, one detail-normal octave
+1. Add real HLSL4 Enhanced fragment programs for the Medium and Low tiers in
+   both families, with the defines §2 allows.
+2. Repoint only the **HLSL4** delegate of each `OSE_*EN{Medium,Low}*_fragment`
+   unified program. GLSL, GLSLES and HLSL keep today's legacy delegates, so
+   DX9 and GL fail back cleanly and unchanged.
+3. Leave Lowest alone and document it (§2).
+4. Introduce a single `OSE_ENHANCED_LOD_TIER` define so the shared shader can
+   shed cost by tier — fewer IBL specular samples, one detail-normal octave
    instead of two, reduced PCF — without branching on tier in more than one
    place.
 5. Measure LOD 0/1/2 frame time per world before and after, on the Phase 0
