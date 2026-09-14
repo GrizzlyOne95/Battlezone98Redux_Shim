@@ -1,0 +1,101 @@
+[Size]
+MinX=0
+MinZ=0
+Width=5120
+Depth=5120
+Height=0.000000
+
+[NormalView]
+Time=1200
+FogStart=30
+FogEnd=100
+FogBreak=30
+VisibilityRange=100
+Intensity=40
+Ambient=0
+FlatRange=250
+ShadowLuma=0
+FogDirection=1
+TerrainShadowLuma=30
+CarAmbient=20
+
+[Atlases]
+MaterialName	= ve_detail_atlas
+
+[Sky]
+SunTexture=sun.0
+SkyType=0
+SkyHeight = 110
+SkyTexture= venus.map
+
+BackdropDistance= 400
+BackdropWidth   = 800
+BackdropHeight  = 100
+
+[Color]
+Palette=VENUS.ACT
+Luma=VENUS.LUM
+Translucency=VENUS.TBL
+Alpha=VENUS.ALB
+
+[World]
+MusicTrack=10
+
+[TextureType0] // Sulphur deposits
+FlatColor= 124
+SolidA0        = ve00sa0.map
+SolidA1        = ve00sa1.map
+SolidA2        = ve00sa2.map
+SolidA3        = ve00sa3.map
+
+CapTo3_A0      = ve03ca0.map
+CapTo3_A1      = ve03ca1.map
+CapTo3_A2      = ve03ca2.map
+CapTo3_A3      = ve03ca3.map
+
+DiagonalTo3_A0 = ve03da0.map
+DiagonalTo3_A1 = ve03da1.map
+DiagonalTo3_A2 = ve03da2.map
+DiagonalTo3_A3 = ve03da3.map
+
+CapTo4_A0      = ve01ca0.map
+CapTo4_A1      = ve01ca1.map
+CapTo4_A2      = ve01ca2.map
+CapTo4_A3      = ve01ca3.map
+
+DiagonalTo4_A0 = ve01da0.map
+DiagonalTo4_A1 = ve01da1.map
+DiagonalTo4_A2 = ve01da2.map
+DiagonalTo4_A3 = ve01da3.map
+
+[TextureType3] // Hardened sulphur
+FlatColor= 203
+SolidA0        = ve33sa0.map
+SolidA1        = ve33sa1.map
+SolidA2        = ve33sa2.map
+SolidA3        = ve33sa3.map
+
+[TextureType4] // Base
+FlatColor= 167
+SolidA0        = ve22sa0.map
+SolidA1        = ve22sa1.map
+SolidA2        = ve22sa2.map
+SolidA3        = ve22sa3.map
+SolidB0        = ve22sb0.map
+SolidB1        = ve22sb1.map
+SolidB2        = ve22sb2.map
+SolidB3        = ve22sb3.map
+
+[TextureType5] // Liquid sulphur
+FlatColor= 96
+SolidA0        = ve11sa0.map
+SolidA1        = ve11sa1.map
+SolidA2        = ve11sa2.map
+SolidA3        = ve11sa3.map
+
+[TextureType6] // Geyser
+FlatColor= 207
+SolidA0        = ve44sa0.map
+SolidA1        = ve44sa1.map
+SolidA2        = ve44sa2.map
+SolidA3        = ve44sa3.map
