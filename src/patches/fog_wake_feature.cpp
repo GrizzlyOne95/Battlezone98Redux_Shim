@@ -1,144 +1,159 @@
 #include "fog_wake_feature.h"
-
-#include "bzr_options_ui.h"
+#include "fog_wake_api.h"
+#include "fog_wake_renderer.h"
 #include "fog_wake_runtime.h"
+#include "bzr_options_ui.h"
 #include "shim_log.h"
-
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 
-namespace BZROpenShim
-{
-    namespace
-    {
-        using FogWake::Point;
-        using FogWake::Runtime;
-        using FogWake::RuntimeConfig;
-
-        constexpr const char* kComponent = "fogwake";
-
-        // One fixed bank, per the milestone plan: a wake must not move because
-        // the camera did. The bank is latched to the first emitter observed in a
-        // session, because a region centred on the world origin would sit
-        // nowhere near where a Battlezone mission is actually played.
-        constexpr double kBankCells = 256;
-        constexpr double kBankCellSize = 2;   // 512 m square.
-
-        std::atomic<bool> g_Enabled{false};
-        std::atomic<bool> g_ConfigLoaded{false};
-
-        // Owned by the render thread: every entry point below is called from it.
-        Runtime g_Runtime;
-        bool g_BankPlaced = false;
-        bool g_Running = false;
-
-        bool ReadEnabledSetting()
-        {
-            bool enabled = false;
-            if (TryGetUserConfigBool("Experimental", "InteractiveFogWakes", enabled) && enabled)
-                return true;
-            return EnvFlagEnabled("OPENSHIM_INTERACTIVE_FOG_WAKES");
-        }
-
-        void EnsureConfigLoaded()
-        {
-            if (g_ConfigLoaded.load(std::memory_order_acquire))
-                return;
-            g_Enabled.store(ReadEnabledSetting(), std::memory_order_relaxed);
-            g_ConfigLoaded.store(true, std::memory_order_release);
-            if (g_Enabled.load(std::memory_order_relaxed))
-            {
-                LogShimA(LogLevel::Info, kComponent,
-                    "[FOGWAKE] simulation enabled; no rendering in this build");
-            }
-        }
-
-        double NowSeconds()
-        {
-            using namespace std::chrono;
-            const auto now = steady_clock::now().time_since_epoch();
-            return duration<double>(now).count();
-        }
-
-        // Places the bank around the first emitter of the session and configures
-        // the runtime. Failure latches the feature off rather than retrying every
-        // frame with the same rejected numbers.
-        bool PlaceBank(Point around)
-        {
-            RuntimeConfig config;
-            config.field.width = static_cast<std::size_t>(kBankCells);
-            config.field.height = static_cast<std::size_t>(kBankCells);
-            config.field.cellSize = kBankCellSize;
-            const double half = kBankCells * kBankCellSize * 0.5;
-            config.field.origin = { around.x - half, around.z - half };
-
-            if (!g_Runtime.Configure(config))
-            {
-                g_Enabled.store(false, std::memory_order_relaxed);
-                LogShimA(LogLevel::Warn, kComponent,
-                    "[FOGWAKE] configuration rejected; feature stood down");
-                return false;
-            }
-
-            g_Runtime.BeginSession(NowSeconds());
-            LogShimA(LogLevel::Info, kComponent,
-                "[FOGWAKE] bank placed origin=(%.1f, %.1f) size=%.0fm cell=%.1fm",
-                config.field.origin.x, config.field.origin.z,
-                kBankCells * kBankCellSize, kBankCellSize);
-            return true;
-        }
+namespace BZROpenShim {
+namespace {
+    FogWake::Runtime runtime;
+    FogWakeApi::Config config;
+    std::atomic<bool> enabled{false};
+    bool configLoaded=false, bankPlaced=false, scriptOwned=false;
+    bool renderReady=false, resetRenderer=false, haveClock=false;
+    double scriptClock=0;
+    // Lua Update and the world render hook run on the game's main thread.
+    double Now() {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
     }
-
-    bool FogWakeFeatureEnabled()
-    {
-        EnsureConfigLoaded();
-        return g_Enabled.load(std::memory_order_relaxed);
+    bool Range(float v,float lo,float hi) { return std::isfinite(v)&&v>=lo&&v<=hi; }
+    bool Valid(const FogWakeApi::Config& c) {
+        return c.size==sizeof(c)&&c.version==FogWakeApi::Version
+            &&Range(c.centerX,-1e6f,1e6f)&&Range(c.centerZ,-1e6f,1e6f)&&Range(c.baseY,-1e5f,1e5f)
+            &&Range(c.width,32,1024)&&Range(c.cellSize,1,16)&&c.width/c.cellSize<=256
+            &&Range(c.height,1,64)&&Range(c.wakeRadius,1,64)&&Range(c.recoverySeconds,.1f,300)
+            &&Range(c.density,0,1)&&Range(c.windX,-100,100)&&Range(c.windZ,-100,100)
+            &&Range(c.colorR,0,1)&&Range(c.colorG,0,1)&&Range(c.colorB,0,1);
     }
-
-    void FogWakeNotifyMissionRunStateChanged(bool running)
-    {
-        if (!FogWakeFeatureEnabled())
-            return;
-
-        g_Running = running;
-        if (running)
-        {
-            // The next emitter re-places the bank: a new mission is a new world.
-            g_BankPlaced = false;
-            return;
+    bool Configure(const FogWakeApi::Config& c,bool scripted) {
+        if (!Valid(c)) return false;
+        FogWake::RuntimeConfig rc;
+        rc.field.width=rc.field.height=static_cast<std::size_t>(std::ceil(c.width/c.cellSize));
+        rc.field.cellSize=c.cellSize;
+        const double half=rc.field.width*rc.field.cellSize*.5;
+        rc.field.origin={c.centerX-half,c.centerZ-half};
+        rc.field.recoverySeconds=c.recoverySeconds;
+        rc.field.maxSegmentLength=64;
+        rc.radius=c.wakeRadius;
+        rc.simulationHz=20;
+        rc.maxSpeed=160;
+        rc.forgetAfterSeconds=.5;
+        if (!runtime.Configure(rc)) return false;
+        config=c; scriptOwned=scripted; haveClock=false;
+        if (!scripted) runtime.BeginSession(Now());
+        resetRenderer=true; renderReady=false; bankPlaced=true; enabled.store(true);
+        LogShimA(LogLevel::Info,"fogwake",
+            "[FOGWAKE] bank configured owner=%s center=(%.1f,%.1f,%.1f) width=%.1f height=%.1f",
+            scripted?"mission":"ini",c.centerX,c.baseY,c.centerZ,c.width,c.height);
+        return true;
+    }
+    void Disable() {
+        runtime.Shutdown(); bankPlaced=false; scriptOwned=false; haveClock=false;
+        renderReady=false; resetRenderer=true; enabled.store(false);
+    }
+}
+bool FogWakeFeatureEnabled() {
+    if (!configLoaded) {
+        bool v=false;
+        const bool found=TryGetUserConfigBool("Experimental","InteractiveFogWakes",v);
+        enabled.store(found?v:EnvFlagEnabled("OPENSHIM_INTERACTIVE_FOG_WAKES"));
+        configLoaded=true;
+    }
+    return enabled.load(std::memory_order_relaxed);
+}
+void FogWakeNotifyMissionRunStateChanged(bool running,void* sceneManager) {
+    if (!running) { Disable(); ResetFogWakeRenderer(sceneManager); resetRenderer=false; }
+    // Lua Init/Start/Load owns reconfiguration; do not re-enable across missions.
+}
+void FogWakeObserveEmitter(const void* emitter,float x,float z) {
+    if (!FogWakeFeatureEnabled()||scriptOwned||!emitter||!std::isfinite(x)||!std::isfinite(z)) return;
+    try {
+        if (!bankPlaced) {
+            FogWakeApi::Config c; c.centerX=x; c.centerZ=z;
+            if (!Configure(c,false)) return;
         }
-
-        g_Runtime.Shutdown();
-        g_BankPlaced = false;
-    }
-
-    void FogWakeObserveEmitter(const void* emitter, float worldX, float worldZ)
-    {
-        if (!FogWakeFeatureEnabled() || emitter == nullptr)
-            return;
-        if (!std::isfinite(worldX) || !std::isfinite(worldZ))
-            return;
-
-        const Point position{ static_cast<double>(worldX), static_cast<double>(worldZ) };
-        if (!g_BankPlaced)
-        {
-            if (!PlaceBank(position))
-                return;
-            g_BankPlaced = true;
+        runtime.Observe(emitter,{x,z},Now());
+    } catch (...) { Disable(); }
+}
+void FogWakeRenderFrameTick(void* sceneManager) {
+    if (resetRenderer) { ResetFogWakeRenderer(sceneManager); resetRenderer=false; }
+    if (!enabled.load(std::memory_order_relaxed)||!bankPlaced) return;
+    try {
+        if (!scriptOwned) {
+            runtime.AdvanceTo(Now(),{config.windX,config.windZ});
+            return; // INI has no ground plane; only mission-configured banks render.
         }
-
-        g_Runtime.Observe(emitter, position, NowSeconds());
+        const auto& field=runtime.GetField();
+        const auto& s=field.Settings();
+        FogWake::RendererSnapshot snapshot;
+        snapshot.clearance=field.Clearance().data();
+        snapshot.width=static_cast<unsigned>(s.width);
+        snapshot.height=static_cast<unsigned>(s.height);
+        snapshot.cellSize=static_cast<float>(s.cellSize);
+        snapshot.originX=static_cast<float>(s.origin.x);
+        snapshot.originZ=static_cast<float>(s.origin.z);
+        FogWake::RendererConfig draw;
+        draw.groundY=config.baseY; draw.height=config.height; draw.density=config.density;
+        draw.red=config.colorR; draw.green=config.colorG; draw.blue=config.colorB;
+        renderReady=UpdateFogWakeRenderer(sceneManager,snapshot,draw);
+    } catch (...) {
+        Disable();
+        LogShimA(LogLevel::Warn,"fogwake","[FOGWAKE] runtime exception; disabled");
     }
-
-    void FogWakeRenderFrameTick()
-    {
-        if (!FogWakeFeatureEnabled() || !g_BankPlaced)
-            return;
-
-        // Called once per camera. The runtime steps a fixed cadence off this
-        // clock, so the extra calls are no-ops rather than extra simulation.
-        // No wind source is wired yet; transport is deliberately still.
-        g_Runtime.AdvanceTo(NowSeconds(), Point{});
+}
+std::int32_t ConfigureFogWakeApi(const FogWakeApi::Config* c) {
+    configLoaded=true; // Mission intent must not be replaced by lazy INI init.
+    return c&&Configure(*c,true)?1:0;
+}
+std::int32_t UpdateFogWakeApi(double now) {
+    if (!scriptOwned||!bankPlaced||!std::isfinite(now)) return 0;
+    if (!haveClock) { runtime.BeginSession(now); haveClock=true; }
+    scriptClock=now;
+    runtime.AdvanceTo(now,{config.windX,config.windZ});
+    return 1;
+}
+std::int32_t ObserveFogWakeApi(std::uint32_t id,float x,float y,float z) {
+    if (!scriptOwned||!haveClock||!id||!Range(x,-1e6f,1e6f)||!Range(z,-1e6f,1e6f)||!Range(y,-1e5f,1e5f)) return 0;
+    const auto key=reinterpret_cast<const void*>(static_cast<std::uintptr_t>(id));
+    if (y<config.baseY-4||y>config.baseY+config.height+4) { runtime.Forget(key); return 1; }
+    return runtime.Observe(key,{x,z},scriptClock)?1:0;
+}
+std::int32_t RemoveFogWakeApi(std::uint32_t id) {
+    if (!scriptOwned||!id) return 0;
+    runtime.Forget(reinterpret_cast<const void*>(static_cast<std::uintptr_t>(id)));
+    return 1;
+}
+std::int32_t ResetFogWakeApi() { configLoaded=true; Disable(); return 1; }
+std::int32_t GetFogWakeStatusApi(FogWakeApi::Status* s) {
+    if (!s||s->size!=sizeof(*s)||s->version!=FogWakeApi::Version) return 0;
+    *s=FogWakeApi::Status{};
+    s->supported=1; s->configured=scriptOwned&&bankPlaced?1:0; s->renderReady=renderReady?1:0;
+    s->emitterCount=static_cast<std::uint32_t>(runtime.TrackedEmitters());
+    for (float v:runtime.GetField().Clearance()) {
+        if (v>.01f) ++s->activeCells;
+        s->maxClearance=std::max(s->maxClearance,v);
     }
+    return 1;
+}
+}
+// Optional value-only C ABI. Never throw across the companion DLL boundary.
+extern "C" {
+__declspec(dllexport) std::int32_t __cdecl OpenShimConfigureFogWake(const FogWakeApi::Config* c)
+{ try { return BZROpenShim::ConfigureFogWakeApi(c); } catch (...) { BZROpenShim::ResetFogWakeApi(); return 0; } }
+__declspec(dllexport) std::int32_t __cdecl OpenShimUpdateFogWake(double now)
+{ try { return BZROpenShim::UpdateFogWakeApi(now); } catch (...) { BZROpenShim::ResetFogWakeApi(); return 0; } }
+__declspec(dllexport) std::int32_t __cdecl OpenShimObserveFogWake(std::uint32_t id,float x,float y,float z)
+{ try { return BZROpenShim::ObserveFogWakeApi(id,x,y,z); } catch (...) { BZROpenShim::ResetFogWakeApi(); return 0; } }
+__declspec(dllexport) std::int32_t __cdecl OpenShimRemoveFogWakeEmitter(std::uint32_t id)
+{ return BZROpenShim::RemoveFogWakeApi(id); }
+__declspec(dllexport) std::int32_t __cdecl OpenShimResetFogWake()
+{ return BZROpenShim::ResetFogWakeApi(); }
+__declspec(dllexport) std::int32_t __cdecl OpenShimGetFogWakeStatus(FogWakeApi::Status* s)
+{ return BZROpenShim::GetFogWakeStatusApi(s); }
 }
