@@ -7,6 +7,8 @@ stock-material retrofit is scaffolded but runtime validation pending. See
 
 Related work orders: canonical Enhanced renderer ownership migration
 (this document); PSSM terrain cutoff investigation (next dedicated task).
+Long-term DX11 Enhanced pipeline direction and sequencing:
+[`DX11_ENHANCED_RENDERING_ROADMAP.md`](DX11_ENHANCED_RENDERING_ROADMAP.md).
 
 ---
 
