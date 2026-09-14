@@ -1,6 +1,7 @@
 # OpenShim Render Profile Architecture
 
 Status: implemented (state model, policy, EXU bridge, resource ownership);
+the Enhanced payload is now canonical rather than a snapshot (§12);
 stock-material retrofit is scaffolded but runtime validation pending. See
 "Known limitations / future work".
 
@@ -302,3 +303,52 @@ transition matrix, restart persistence through the actual UI.
 5. **CR duplicate removal** (Phase 14) happens in the CR repo only after
    parity validation above; both implementations coexist harmlessly meanwhile
    (disjoint program namespaces).
+
+---
+
+## 12. Canonical payload and the parity gate (2026-09-13)
+
+The shipped payload had drifted into a snapshot: every terrain and lighting
+fix of the preceding weeks landed on the `CR_*` fork only, so the generic
+Enhanced renderer OpenShim deployed still carried the N.V gate on diffuse
+(the confirmed cause of the black pools on grazing terrain), the unclamped
+detail-map multiply, unbiased PCF without a comparison sampler, and no
+detail-derived normals. §3 above described modern PSSM behaviour that the
+payload did not implement. Anyone running Enhanced without CR installed got
+the superseded renderer.
+
+CR's authored sources are now ported across mechanically — file references
+map to their payload names, every remaining `CR_` identifier becomes `OSE_`,
+bytes otherwise untouched — so the OpenShim payload is the canonical
+implementation and §3's description is true of it.
+
+**The parity gate.** `scripts/Compare-EnhancedShaderParity.ps1` re-namespaces
+every CR source and compares byte-for-byte against the deployed OpenShim file.
+It is the binary half of the Phase 14 precondition: drift cannot hide behind
+the prefix, and a divergence is named with its line. The only tolerated
+non-namespace difference is the attribution line at the top of each SM4
+source, carried as two exact whole-line mappings rather than a pattern. All
+14 files pass today. **Run it before any Enhanced shader change lands on
+either side**; visual parity still needs eyes, and that half is not automated.
+
+**Which implementation actually renders.** Both payloads load — that is what
+the disjoint namespaces are for — but CR ships the `en-*`/`og-*` techniques on
+the stock-named materials, so wherever CR is installed its programs are what
+the scheme resolves to and the `OSE_` programs are compiled and then
+referenced by no material. An edit to the OpenShim copy therefore changes
+nothing on a CR install until the stock-material retrofit lands.
+`scripts/Get-RenderEvidence.ps1` reports parsed and rendering as separate
+fields for exactly this reason.
+
+**Retrofit contract.** PSSM v2 samples through `SamplerComparisonState`, so
+any pass bound to an `OSE_*ENHighPSSMV2_*` program must declare
+`compare_test on` / `compare_func greater_equal` the way `CR_BZBase.material`
+and `CR_BZTerrainBase.material` do. A retrofit that injects the technique
+without the pass state will not shadow correctly.
+
+**Deployment.** `resources.version` is now `2`. The marker is compared in
+full rather than over the bytes read, so a payload that is a prefix of the
+expectation can no longer validate — a v1 deployment beside a v2 DLL fails
+the pairing instead of rendering the superseded lighting with
+`resources.compatible=yes`. winmm.dll, patches.json and the renderer payload
+continue to move as one unit.
