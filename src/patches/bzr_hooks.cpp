@@ -832,10 +832,24 @@ namespace BZROpenShim
         // See reverse_engineering/bmp_thumbnail_crash_20260824.md.
         constexpr uintptr_t kGogThumbnailMaterialApplySiteAddr = 0x007D3FF0;
         constexpr size_t kThumbnailMaterialApplyDetourLen = 5;
-        // Safe substitute name for the swallow path below: passing "UI" makes
-        // the stock body take its material-already-exists branch, which hands
-        // back the loaded base material without touching any texture.
+        // Last-resort substitute name for the swallow path below: passing "UI"
+        // makes the stock body take its material-already-exists branch, which
+        // hands back the loaded base material without touching any texture.
+        // It is only ever reached if the generated placeholder below could not
+        // be produced -- "UI" is the stock chrome material, so an entry that
+        // falls back to it shows button art in the thumbnail slot.
         static const char kUiMaterialSubstituteName[] = "UI";
+        // Preferred substitute: a generated "preview unavailable" plate, so a
+        // thumbnail that cannot be decoded reads as a deliberate placeholder
+        // rather than as stray UI artwork. The stock body treats its name
+        // argument as both the material name and the texture name, so this is
+        // the bare filename written into the generated-UI resource location.
+        static const char kInvalidThumbnailTextureName[] = "openshim_invalid_thumbnail.png";
+        // 4:3, matching the shape of the stock map/campaign preview slots. The
+        // material is stretched to whatever widget receives it, so this only
+        // decides the rendered text's proportions, not its placement.
+        constexpr int kInvalidThumbnailWidth = 256;
+        constexpr int kInvalidThumbnailHeight = 192;
         // Splinter (spraybomb) undead bug (#46). SprayBuilding::Simulate keeps
         // spinning its payload fire loop after the deployed splinter is damaged
         // below zero because it overrides Building::Simulate without preserving
@@ -11278,8 +11292,37 @@ namespace BZROpenShim
         // restarts, reconnects, lobby changes and nickname changes. Enforced
         // purely by reapplying Redux's own PlayerList mute (via its native
         // /mute command path); OpenShim adds no chat filtering of its own.
+        //
+        // Persistence is the part that is optional, not the mute itself. With
+        // it off, /mute and the lobby button still mute -- Redux's own
+        // per-process state does that -- the mute simply stops outliving the
+        // process, which is what the stock game does.
+        //   openshim.ini  [Network] PersistentPlayerMute = 1
+        //   environment   OPENSHIM_DISABLE_PERSISTENT_PLAYER_MUTE=1
         // ------------------------------------------------------------------
         constexpr char kMutesConfigName[] = "mutes.cfg";
+
+        // Deliberately unlatched: every caller is a lobby event or a typed
+        // command, never a hot path, and nothing here is a patch site, so a
+        // player who flips the setting gets the new answer at the next mute
+        // instead of at the next restart.
+        static bool IsPersistentPlayerMuteEnabled()
+        {
+            if (EnvFlagEnabled("OPENSHIM_DISABLE_PERSISTENT_PLAYER_MUTE") ||
+                EnvFlagEnabled("BZR_DISABLE_PERSISTENT_PLAYER_MUTE"))
+            {
+                return false;
+            }
+            if (EnvFlagEnabled("OPENSHIM_ENABLE_PERSISTENT_PLAYER_MUTE") ||
+                EnvFlagEnabled("BZR_ENABLE_PERSISTENT_PLAYER_MUTE"))
+            {
+                return true;
+            }
+            bool enabled = true;
+            if (TryGetUserConfigBool("Network", "PersistentPlayerMute", enabled))
+                return enabled;
+            return true;
+        }
 
         struct MuteRecord
         {
@@ -11400,6 +11443,16 @@ namespace BZROpenShim
         // Returns true when the list changed and was saved.
         static bool AddMuteConfigEntry(const char* stableId, const BzrString* name, const char* source)
         {
+            // Session-only mode never grows the list. Removals are still let
+            // through below, so /unmute always means unmute -- including any
+            // entry a previous persistent session left behind.
+            if (!IsPersistentPlayerMuteEnabled())
+            {
+                Log(L"[MUTE] %hs not persisted: PersistentPlayerMute is off (session-only)\n",
+                    source ? source : "mute");
+                return false;
+            }
+
             const std::string normalized = NormalizeBanId(stableId);
             if (normalized.empty())
             {
@@ -24789,31 +24842,45 @@ namespace BZROpenShim
             }
         }
 
-        // Fill the caller's SharedPtr<Material> slot with the stock "UI"
-        // material by re-running the guarded body under the substitute name.
-        // Some callers - notably the campaign preview builder FUN_007D2B70 -
-        // dereference the material without a null check, so a cleared slot is
-        // not survivable everywhere; the stock exists-branch returns the
-        // loaded base material without touching any texture and cannot throw.
+        // Writes the "preview unavailable" plate into the generated-UI resource
+        // location on first use and returns its bare texture name, or nullptr
+        // if it could not be produced. Defined further down, beside the other
+        // GDI+/Ogre resource-location helpers it depends on.
+        static const char* EnsureInvalidThumbnailTextureName();
+
+        // Fill the caller's SharedPtr<Material> slot by re-running the guarded
+        // body under a substitute name. Some callers - notably the campaign
+        // preview builder FUN_007D2B70 - dereference the material without a
+        // null check, so a cleared slot is not survivable everywhere.
+        //
+        // Two names are used, in order: the generated placeholder texture, and
+        // failing that "UI", whose exists-branch returns the loaded base
+        // material without touching any texture and cannot throw.
         //
         // The handler is deliberately the same narrow C++-exception-only
-        // filter as the outer guard: with name="UI" the stock body takes its
-        // exists-branch, so any exception here means something genuinely
-        // unexpected. An access violation or other hardware fault inside the
-        // retry propagates out of this function (and out of the enclosing
-        // __except handler, which cannot re-catch it) and crashes loudly
-        // instead of being silently converted into the UI fallback.
-        static bool ThumbnailGuardRetryWithUiMaterial(void* self,
-                                                      void* outMaterialSlot)
+        // filter as the outer guard. For "UI" the stock body takes its
+        // exists-branch, so any exception there means something genuinely
+        // unexpected; for the placeholder a throw is expected-ish (the file or
+        // the resource location may not be reachable yet) and is what makes
+        // the caller fall through to "UI". An access violation or other
+        // hardware fault inside the retry propagates out of this function (and
+        // out of the enclosing __except handler, which cannot re-catch it) and
+        // crashes loudly instead of being silently converted into a fallback.
+        static bool ThumbnailGuardRetryWithName(void* self,
+                                                void* outMaterialSlot,
+                                                const char* substituteName)
         {
-            if (!outMaterialSlot || !g_BzrFn_ThumbnailMaterialApplyOriginal)
+            if (!outMaterialSlot || !substituteName || !*substituteName ||
+                !g_BzrFn_ThumbnailMaterialApplyOriginal)
+            {
                 return false;
+            }
 
             bool recovered = false;
             __try
             {
                 g_BzrFn_ThumbnailMaterialApplyOriginal(
-                    self, outMaterialSlot, kUiMaterialSubstituteName);
+                    self, outMaterialSlot, substituteName);
                 recovered = true;
             }
             __except (ThumbnailBmpGuardFilter(GetExceptionCode()))
@@ -24839,12 +24906,40 @@ namespace BZROpenShim
             __except (ThumbnailBmpGuardFilter(GetExceptionCode()))
             {
                 // The stock body threw while decoding/loading the thumbnail
-                // image. Re-run it under "UI" so every consumer - including
-                // ones that never null-check, like the campaign preview
-                // builder - receives a valid loaded material; visually the
-                // entry shows the plain UI look instead of a thumbnail.
-                const bool substituted =
-                    ThumbnailGuardRetryWithUiMaterial(self, outMaterialSlot);
+                // image. Re-run it under a substitute name so every consumer -
+                // including ones that never null-check, like the campaign
+                // preview builder - receives a valid loaded material.
+                //
+                // The generated placeholder is tried first: it says "preview
+                // unavailable" in the slot, which is what the entry actually
+                // means. "UI" remains the fall-through, but it is the stock
+                // chrome material and can read as a stray corner button, so it
+                // is a fail-safe rather than the intended look.
+                const char* placeholder = EnsureInvalidThumbnailTextureName();
+                const char* substituteUsed = nullptr;
+                bool substituted = false;
+                if (placeholder)
+                {
+                    substituted = ThumbnailGuardRetryWithName(
+                        self, outMaterialSlot, placeholder);
+                    if (substituted)
+                        substituteUsed = placeholder;
+                    else
+                    {
+                        // A failed placeholder attempt leaves its own
+                        // half-created clone registered, exactly as the
+                        // original attempt did; drop it so the next failure
+                        // retries cleanly instead of inheriting it.
+                        RemoveHalfCreatedThumbnailMaterial(placeholder);
+                    }
+                }
+                if (!substituted)
+                {
+                    substituted = ThumbnailGuardRetryWithName(
+                        self, outMaterialSlot, kUiMaterialSubstituteName);
+                    if (substituted)
+                        substituteUsed = kUiMaterialSubstituteName;
+                }
                 if (!substituted)
                 {
                     // Deliberately unguarded: the slot was already validated
@@ -24869,9 +24964,9 @@ namespace BZROpenShim
                 const long remaining = InterlockedDecrement(&g_ThumbnailBmpGuardLogBudget);
                 if (remaining >= 0)
                 {
-                    Log(L"[BMPFIX] Rejected undecodable thumbnail image; %hs (self=0x%08X name-arg=0x%08X remaining=%ld)\n",
-                        substituted ? "substituted stock UI material"
-                                    : "material cleared to blank",
+                    Log(L"[BMPFIX] Rejected undecodable thumbnail image; substitute=%hs (self=0x%08X name-arg=0x%08X remaining=%ld)\n",
+                        substituteUsed ? substituteUsed
+                                       : "none, material cleared to blank",
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(self)),
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(nameArg)),
                         remaining);
@@ -37946,6 +38041,12 @@ namespace BZROpenShim
         // the log is refreshed so mutes.cfg tracks the player's current name.
         static void ReapplyPersistentMutes(const char* source, uint32_t lobby, uint32_t member, int changes)
         {
+            // This is the half that makes a mute permanent, so it is the half
+            // that has to stand down. Checked before the load so session-only
+            // mode never even opens mutes.cfg.
+            if (!IsPersistentPlayerMuteEnabled())
+                return;
+
             EnsureMutesConfigLoaded();
 
             if (g_MuteRecords.empty())
@@ -40110,6 +40211,11 @@ namespace BZROpenShim
         // stock handler run unchanged.
         if (_stricmp(cmd, "/mute") == 0)
         {
+            // Session-only mode has nothing to record, and the stock handler
+            // still does the muting, so leave before spending a lookup on it.
+            if (!IsPersistentPlayerMuteEnabled())
+                return false;
+
             if (static_cast<int16_t>(id) < 0)
             {
                 Log(L"[MUTE] /mute failed: invalid target id (id=%u)\n", id);
@@ -40683,6 +40789,139 @@ namespace BZROpenShim
                 }
             }
             return false;
+        }
+
+        // Draw the "preview unavailable" plate the thumbnail guard substitutes
+        // for an image the shipped FreeImage cannot decode. Deliberately looks
+        // like a message rather than art: a flat dark field, the same green
+        // chrome edge the injected lobby panel uses, and two lines of text.
+        static bool WriteInvalidThumbnailPng(const std::filesystem::path& outPath)
+        {
+            std::string gdiplusError;
+            if (!EnsureGdiplusInitialized(gdiplusError))
+            {
+                Log(L"[BMPFIX] placeholder GDI+ init failed: %hs\n", gdiplusError.c_str());
+                return false;
+            }
+
+            Gdiplus::Bitmap bitmap(kInvalidThumbnailWidth,
+                                   kInvalidThumbnailHeight,
+                                   PixelFormat32bppARGB);
+            if (bitmap.GetLastStatus() != Gdiplus::Ok)
+                return false;
+
+            {
+                Gdiplus::Graphics gfx(&bitmap);
+                gfx.SetSmoothingMode(Gdiplus::SmoothingModeNone);
+                gfx.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+                gfx.SetTextRenderingHint(Gdiplus::TextRenderingHintSingleBitPerPixelGridFit);
+
+                Gdiplus::SolidBrush edgeDark(Gdiplus::Color(255, 0, 42, 0));
+                Gdiplus::SolidBrush edgeMid(Gdiplus::Color(255, 0, 84, 0));
+                Gdiplus::SolidBrush field(Gdiplus::Color(255, 8, 10, 8));
+
+                gfx.FillRectangle(&edgeDark, 0, 0, kInvalidThumbnailWidth, kInvalidThumbnailHeight);
+                gfx.FillRectangle(&edgeMid, 2, 2,
+                                  kInvalidThumbnailWidth - 4, kInvalidThumbnailHeight - 4);
+                gfx.FillRectangle(&field, 5, 5,
+                                  kInvalidThumbnailWidth - 10, kInvalidThumbnailHeight - 10);
+
+                Gdiplus::StringFormat format;
+                format.SetAlignment(Gdiplus::StringAlignmentCenter);
+                format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+                format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+
+                const auto textWidth = static_cast<float>(kInvalidThumbnailWidth - 20);
+                Gdiplus::Font headline(L"Lucida Console", 18.0f,
+                                       Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+                Gdiplus::SolidBrush headlineBrush(Gdiplus::Color(255, 64, 220, 64));
+                const Gdiplus::RectF headlineBox(
+                    10.0f,
+                    static_cast<float>(kInvalidThumbnailHeight) * 0.34f,
+                    textWidth,
+                    26.0f);
+                gfx.DrawString(L"PREVIEW", -1, &headline, headlineBox, &format, &headlineBrush);
+                const Gdiplus::RectF headlineBox2(
+                    10.0f,
+                    static_cast<float>(kInvalidThumbnailHeight) * 0.34f + 22.0f,
+                    textWidth,
+                    26.0f);
+                gfx.DrawString(L"UNAVAILABLE", -1, &headline, headlineBox2, &format, &headlineBrush);
+
+                // Says why, so an author who supplied the image knows it is
+                // their file and not a missing one.
+                Gdiplus::Font detail(L"Lucida Console", 11.0f,
+                                     Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+                Gdiplus::SolidBrush detailBrush(Gdiplus::Color(255, 0, 140, 0));
+                const Gdiplus::RectF detailBox(
+                    10.0f,
+                    static_cast<float>(kInvalidThumbnailHeight) * 0.34f + 52.0f,
+                    textWidth,
+                    18.0f);
+                gfx.DrawString(L"invalid image format", -1, &detail, detailBox, &format, &detailBrush);
+            }
+
+            CLSID pngClsid = {};
+            if (!GetPngEncoderClsid(pngClsid))
+                return false;
+            std::error_code ec;
+            std::filesystem::create_directories(outPath.parent_path(), ec);
+            const Gdiplus::Status saved =
+                bitmap.Save(outPath.wstring().c_str(), &pngClsid, nullptr);
+            if (saved != Gdiplus::Ok)
+            {
+                Log(L"[BMPFIX] placeholder PNG save failed path=%hs status=%d\n",
+                    outPath.string().c_str(), static_cast<int>(saved));
+                return false;
+            }
+            return true;
+        }
+
+        // Forward-declared up beside the thumbnail guard, which is the only
+        // caller. Answers with the bare texture name once the plate exists in
+        // a resource location the UI texture loader searches.
+        //
+        // The generated-flags directory is reused as that location: it is the
+        // one OpenShim-owned FileSystem location already registered into the
+        // UI texture group, and duplicating that registration is the fragile
+        // part (it resolves Ogre exports across a toolset boundary), not the
+        // directory choice. Nothing here depends on the flags feature being
+        // enabled -- the registration helper creates the directory itself.
+        //
+        // Best-effort by construction: every failure returns nullptr and the
+        // guard falls through to its original "UI" substitute, so a missing
+        // placeholder is cosmetic and never reintroduces the crash.
+        static const char* EnsureInvalidThumbnailTextureName()
+        {
+            static bool s_Attempted = false;
+            static bool s_Available = false;
+
+            if (s_Attempted)
+                return s_Available ? kInvalidThumbnailTextureName : nullptr;
+            s_Attempted = true;
+
+            EnsureFlagPreviewResourceLocationRegistered();
+
+            // Rewritten once per process rather than kept if present, so a
+            // plate generated by an older build cannot outlive its art. If the
+            // write fails but a readable plate is already there, that one is
+            // still better than falling through to the stock UI material.
+            const std::filesystem::path outPath =
+                GetFlagPreviewUiDirectory() / kInvalidThumbnailTextureName;
+            if (!WriteInvalidThumbnailPng(outPath))
+            {
+                std::error_code ec;
+                if (!std::filesystem::exists(outPath, ec))
+                    return nullptr;
+                Log(L"[BMPFIX] placeholder regeneration failed; reusing existing plate path=%hs\n",
+                    outPath.string().c_str());
+            }
+
+            s_Available = true;
+            Log(L"[BMPFIX] placeholder thumbnail ready name=%hs path=%hs\n",
+                kInvalidThumbnailTextureName,
+                outPath.string().c_str());
+            return kInvalidThumbnailTextureName;
         }
 
         // Render the packed 64x32 1-bpp flag mask into a PNG the lobby widget
