@@ -21,6 +21,7 @@
 #include "ogre_profiler_algorithms.h"
 #include "weapon_convergence.h"
 #include "headlight_falloff.h"
+#include "shadow_far_distance.h"
 #include "sun_flash.h"
 #include "chunk_batch_invalidation.h"
 #include "ai_range_policy.h"
@@ -35217,8 +35218,8 @@ namespace BZROpenShim
         }
     }
 
-    // --- Experimental shadow-far-distance override -------------------------
-    // (OPENSHIM_SHADOW_FAR_DISTANCE, environment-variable-only experiment)
+    // --- Shadow far distance correction ------------------------------------
+    // (on by default; OPENSHIM_SHADOW_FAR_DISTANCE=stock opts out)
     //
     // Root cause (reverse_engineering/shadow_cutoff_root_cause_20260825.md):
     // FUN_00680fe0 writes SceneManager::setShadowFarDistance(128.0) for every
@@ -35229,10 +35230,13 @@ namespace BZROpenShim
     // shadow map (white border = fully lit). That is the reported hard shadow
     // terminator.
     //
-    // This experiment detours the game's own shadow-apply routine and, after
-    // every stock apply, re-issues the game's own virtual setter with the
-    // requested distance. It is deliberately narrow:
-    //   - dormant unless OPENSHIM_SHADOW_FAR_DISTANCE is set (stock-exact);
+    // This detours the game's own shadow-apply routine and, after every stock
+    // apply, re-issues the game's own virtual setter with the corrected
+    // distance. It is deliberately narrow:
+    //   - defaults to the 256 m outer split; OPENSHIM_SHADOW_FAR_DISTANCE
+    //     accepts another distance, or "stock"/"off"/"128" to opt out
+    //     entirely, in which case nothing is installed and the game runs
+    //     stock-exact;
     //   - applies only when the settings say PSSM and the stock value was
     //     observed (fail closed otherwise);
     //   - touches no material LOD, shader, split distance, or headlight state.
@@ -35268,28 +35272,52 @@ namespace BZROpenShim
         bool g_InstallAttempted = false;
         int g_TelemetryLines = 0;
 
+        // The Win32 half only. What the string means lives in
+        // include/shadow_far_distance.h, where it is unit-tested -- including
+        // the case that matters most, which is what an absent setting does.
         float ReadOverrideDistance()
         {
             char buffer[32] = {};
             const DWORD length = GetEnvironmentVariableA(
                 "OPENSHIM_SHADOW_FAR_DISTANCE", buffer, sizeof(buffer));
-            if (length == 0 || length >= sizeof(buffer))
-                return 0.0f;
-            char* end = nullptr;
-            const float value = std::strtof(buffer, &end);
-            if (end == buffer || !std::isfinite(value))
-                return 0.0f;
-            // 128 is the stock value; anything outside 16-4096 cannot be a
-            // meaningful shadow distance for this engine's scale.
-            if (value < 16.0f || value > 4096.0f || value == kStockFarDistance)
+            const bool overlong = (length >= sizeof(buffer));
+            const char* configured = (length == 0 || overlong) ? nullptr : buffer;
+
+            const openshim::shadow::FarDistanceDecision decision =
+                openshim::shadow::DecideFarDistance(configured);
+
+            if (overlong || decision.source == openshim::shadow::FarDistanceSource::Rejected)
             {
+                // Fail closed to stock rather than to the default: quietly
+                // applying the fix after refusing what was asked for would
+                // make the refusal invisible.
                 LogShimA(LogLevel::Warn, "SHADOWFAR",
-                    "rejected OPENSHIM_SHADOW_FAR_DISTANCE=%hs (must be a "
-                    "finite distance in [16, 4096] other than 128)",
-                    buffer);
+                    "rejected OPENSHIM_SHADOW_FAR_DISTANCE=%hs (want a finite "
+                    "distance in [%.0f, %.0f], or stock/off to keep the stock "
+                    "%.0f m clip); leaving shadow far distance alone",
+                    overlong ? "<too long>" : buffer,
+                    static_cast<double>(openshim::shadow::kMinFarDistance),
+                    static_cast<double>(openshim::shadow::kMaxFarDistance),
+                    static_cast<double>(kStockFarDistance));
                 return 0.0f;
             }
-            return value;
+
+            if (decision.source == openshim::shadow::FarDistanceSource::OptedOut)
+            {
+                LogShimA(LogLevel::Info, "SHADOWFAR",
+                    "opted out; keeping the stock %.0f m shadow far distance",
+                    static_cast<double>(kStockFarDistance));
+                return 0.0f;
+            }
+
+            LogShimA(LogLevel::Info, "SHADOWFAR",
+                "shadow far distance %.1f m (%hs); stock clips the cascade fit "
+                "at %.0f m while the receiver selects cascade 3 to %.0f m",
+                static_cast<double>(decision.distance),
+                openshim::shadow::SourceName(decision.source),
+                static_cast<double>(kStockFarDistance),
+                static_cast<double>(openshim::shadow::kOuterSplitDistance));
+            return decision.distance;
         }
 
         bool ModuleIdentityMatches(HMODULE module,
@@ -35485,8 +35513,9 @@ namespace BZROpenShim
         if (g_InstallAttempted)
             return;
 
-        // Environment-variable-only experiment: with the variable unset this
-        // stays completely dormant and the game runs stock-exact.
+        // On by default. ReadOverrideDistance returns 0 only when the user
+        // opted out or asked for something unusable, and 0 leaves the stock
+        // clip and installs no detour at all.
         g_OverrideDistance = ReadOverrideDistance();
         g_InstallAttempted = true;
         if (g_OverrideDistance <= 0.0f)

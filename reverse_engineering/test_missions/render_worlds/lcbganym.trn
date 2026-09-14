@@ -1,0 +1,162 @@
+[Size]
+MinX=0
+MinZ=0
+Width=5120
+Depth=5120
+Height=0.000000
+
+[NormalView]
+Time=900
+FogStart=175
+FogEnd=250
+FogBreak=60
+VisibilityRange=250
+Intensity=90
+Ambient=0
+FlatRange=250
+ShadowLuma=0
+FogDirection=0
+TerrainShadowLuma=40
+CarAmbient=30
+
+[Atlases]
+MaterialName	= ga_detail_atlas
+
+[Sky]
+SunTexture= sun.0
+SkyType= 0
+SkyHeight = 130
+SkyTexture=
+
+BackdropDistance= 400
+BackdropWidth   = 800
+BackdropHeight  = 100
+
+[Stars]
+Radius      = 401
+
+Texture00   = ganyjup.map
+Alpha00     = 0
+Size00      = 150
+Azimuth00   = 180
+Elevation00 = 25
+Roll00      = 0
+
+[StarList]
+
+Solid       = 0
+LayerHeight = 15
+Texture     = stars.map
+Radius      = 1000
+
+Start0      = 235
+End0        = 510
+Size0       = 350
+Count0      = 12
+
+Start1      = 235
+End1        = 510
+Size1       = 350
+Count1      = 9
+
+Start2      = 0
+End2        = 360
+Size2       = 350
+Count2      = 11
+
+[Color]
+Palette=GANYMEDE.ACT
+Luma=GANYMEDE.LUM
+Translucency=GANYMEDE.TBL
+Alpha=GANYMEDE.ALB
+
+[World]
+MusicTrack=17
+
+[TextureType0] // Dark rock
+FlatColor= 201
+SolidA0        = ga00sa0.map
+SolidA1        = ga00sa1.map
+SolidA2        = ga00sa2.map
+SolidA3        = ga00sa3.map
+SolidB0        = ga00sb0.map
+SolidB1        = ga00sb1.map
+SolidB2        = ga00sb2.map
+SolidB3        = ga00sb3.map
+SolidC0        = ga00sc0.map
+SolidC1        = ga00sc1.map
+SolidC2        = ga00sc2.map
+SolidC3        = ga00sc3.map
+SolidD0        = ga00sa0.map
+SolidD1        = ga00sa1.map
+SolidD2        = ga00sa2.map
+SolidD3        = ga00sa3.map
+
+CapTo3_A0      = ga01ca0.map
+CapTo3_A1      = ga01ca1.map
+CapTo3_A2      = ga01ca2.map
+CapTo3_A3      = ga01ca3.map
+
+DiagonalTo3_A0 = ga01da0.map
+DiagonalTo3_A1 = ga01da1.map
+DiagonalTo3_A2 = ga01da2.map
+DiagonalTo3_A3 = ga01da3.map
+
+CapTo4_A0      = ga04ca0.map
+CapTo4_A1      = ga04ca1.map
+CapTo4_A2      = ga04ca2.map
+CapTo4_A3      = ga04ca3.map
+
+DiagonalTo4_A0 = ga04da0.map
+DiagonalTo4_A1 = ga04da1.map
+DiagonalTo4_A2 = ga04da2.map
+DiagonalTo4_A3 = ga04da3.map
+
+[TextureType3] // Light rock
+FlatColor= 131
+SolidA0        = ga11sa0.map
+SolidA1        = ga11sa1.map
+SolidA2        = ga11sa2.map
+SolidA3        = ga11sa3.map
+SolidB0        = ga11sb0.map
+SolidB1        = ga11sb1.map
+SolidB2        = ga11sb2.map
+SolidB3        = ga11sb3.map
+
+[TextureType4] // Base
+FlatColor= 201
+SolidA0        = ga44sa0.map
+SolidA1        = ga44sa1.map
+SolidA2        = ga44sa2.map
+SolidA3        = ga44sa3.map
+SolidB0        = ga44sb0.map
+SolidB1        = ga44sb1.map
+SolidB2        = ga44sb2.map
+SolidB3        = ga44sb3.map
+
+[TextureType5] // Ice
+FlatColor= 131
+SolidA0        = ga22sa0.map
+SolidA1        = ga22sa1.map
+SolidA2        = ga22sa2.map
+SolidA3        = ga22sa3.map
+SolidB0        = ga22sb0.map
+SolidB1        = ga22sb1.map
+SolidB2        = ga22sb2.map
+SolidB3        = ga22sb3.map
+SolidC0        = ga22sc0.map
+SolidC1        = ga22sc1.map
+SolidC2        = ga22sc2.map
+SolidC3        = ga22sc3.map
+
+[TextureType6] // Geyser
+FlatColor= 201
+SolidA0        = ga33sa0.map
+SolidA1        = ga33sa1.map
+SolidA2        = ga33sa2.map
+SolidA3        = ga33sa3.map
+SolidB0        = ga33sb0.map
+SolidB1        = ga33sb1.map
+SolidB2        = ga33sb2.map
+SolidB3        = ga33sb3.map
+
