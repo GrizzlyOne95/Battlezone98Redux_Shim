@@ -224,11 +224,12 @@ change did nothing".
 
 ### 3.6 Lanes
 
-Validate on GOG first. Windows/Steam and the Proton/Wine lanes are
-**unverified** for everything in this pass; nothing here is platform-specific
-in principle, but the payload changed and the version marker is now enforced
-in full, so the deployment path deserves a real run on each lane before
-release.
+Validated on GOG. Windows/Steam and the Proton/Wine lanes were **accepted on
+the maintainer's judgement on 2026-09-13** rather than measured: nothing in
+this pass is platform-specific in principle, and the deployment path is the
+only part that changed. Recorded as a decision, not as evidence — if a lane
+regresses later, the payload/DLL pairing and the `resources.version` marker
+are the first things to check, because they are what this pass altered.
 
 ---
 
@@ -307,8 +308,9 @@ when a capture is specifically about that effect.
 | Dense base battle fixture | Not built — `fourteam` is the nearest existing scene (§2) |
 | DXBC-identical for unchanged paths | Not attempted this pass — the payload deliberately changed |
 
-The one item still genuinely open after this pass is the Steam / Proton-Wine
-lanes (§3.6). Everything else in Phase 0 is closed.
+**Phase 0 is closed.** The Steam / Proton-Wine lanes were accepted on the
+maintainer's judgement (§3.6) rather than measured; everything else was
+verified.
 
 The CR-side removal is
 [CampaignReimagined#65](https://github.com/GrizzlyOne95/Battlezone98Redux_CampaignReimagined/pull/65).
