@@ -105,14 +105,17 @@ and rendering are therefore separate fields in the record.
 N·V diffuse correction, detail-normal derivation, and shadow bias changes" and
 "resolve the remaining terrain dark-region/cotangent-frame question". Those are
 judgements about what the screen looks like; automating around them would
-produce confident-looking evidence of nothing. The checklist is §3.
+produce confident-looking evidence of nothing. The checklist is §3, and it was
+**signed off on 2026-09-13**. The cotangent-frame question in §3.4 was
+therefore never opened: the dark regions did not survive the two lighting
+fixes, so there was nothing left for the debug modes to attribute.
+`OSE_TERRAIN_NORMAL_BASIS_MODE` stays at 0.
 
-**The full planet benchmark matrix.** Fixed saves and camera positions on
-Moon, Mars, Venus and Titan need per-planet fixtures (`.trn`/`.lgt`/`.mat`)
-that cannot be authored without running the maps. The existing
-`lcbench` fixture already supplies a deterministic scene and a `shadowline`
-scenario; the renderer-arm dimension on top of it is a thin wrapper once the
-scenes exist.
+**A dense-base-battle fixture.** The roadmap's fifth scene is not one of the
+four worlds and is not built here. `lcbench`'s `fourteam` scenarios already
+put two opposing fronts of up to 80 craft in a single frustum, which is the
+closest existing thing; a real base battle needs buildings and production,
+which is a content fixture rather than a terrain one.
 
 **Deployment.** `resources.version` is now `2`, so the payload and the DLL
 must be deployed **together** — a v2 payload beside the installed v1-expecting
@@ -123,6 +126,10 @@ runs `resources.version=1`.
 ---
 
 ## 3. Manual verification
+
+**Status: passed 2026-09-13.** Kept here as the procedure to re-run against
+any future change to the terrain or lighting path, not as an open action.
+§3.6 is the exception — the Steam and Proton/Wine lanes are still unverified.
 
 ### 3.1 Before anything else — deploy both halves together
 
@@ -225,13 +232,65 @@ release.
 
 ---
 
-## 4. State
+## 4. The four-world benchmark set
+
+The roadmap asks the benchmark for fixed scenes on Moon, Mars, Venus and
+Titan. They are installed as `addon\lcbworld\` and are **lcbench**: the same
+heightfield, material grid, lightmap, mission script and spawn point, with
+only the `.trn` swapped.
+
+Holding the geometry fixed is the point. The same ridge and the same tank
+formation appear in all four captures, so a difference between two of them is
+the planet — its atlas, palette, sky, fog and sun — and not the terrain under
+it. Building four unrelated scenes would have made the set prettier and
+useless for attribution.
+
+```
+powershell -ExecutionPolicy Bypass -File scripts\Install-RenderWorldMaps.ps1
+powershell -ExecutionPolicy Bypass -File reverse_engineering\run_live_combat_benchmark.ps1 -World venus
+```
+
+`-World` is recorded in each run's `metadata.json`. `-SunTime 0300` at install
+time rewrites the sun in every world to the grazing angle the `N.V` repair and
+the shadow bias were fixed for; without it each world keeps its own authored
+time (Moon 0900, Mars 0900, Venus 1200, Titan 1100).
+
+Two things about these files fail **silently**, so both are checked by
+`scripts\Test-RenderWorldMaps.ps1` rather than left to review:
+
+- The texture-type index set has to be `{0,3,4,5,6}`, because `lcbench.mat` is
+  a Moon-authored grid and names exactly those. Mars, Venus and Titan re-map
+  their own tiles onto Moon's indices instead of using their stock sets.
+- Every `.map` name has to appear in that world's `<xx>_detail_atlas.csv`. The
+  name is a key into the atlas, not a file on disk, so a name outside the CSV
+  resolves to the default tile and the terrain renders — wrong, and only where
+  that tile was used. Some names in stock `.trn` files are not in the matching
+  CSV (`ma03ca0.map`), so "a stock map uses it" proves nothing. Seeded exactly
+  that substitution to confirm the check names the offender and exits non-zero.
+
+All four were launched on the GOG install under DX11 Enhanced and render their
+own planet, with `Get-RenderEvidence.ps1` reporting a coherent capture and no
+missing material or texture in the Ogre log.
+
+Venus's stock `[LightningBolt]` block is deliberately omitted: it fires on a
+random 5-30 s timer and adds a dynamic light, which is authentic Venus and
+poison for a frame-time capture. It is one paste from `Edit\trn\venus.trn`
+when a capture is specifically about that effect.
+
+---
+
+## 5. State
 
 | Phase 0 item | State |
 | --- | --- |
-| Close out terrain/lighting work | Code side done and shipping; **visual sign-off outstanding (§3.3)** |
-| Terrain dark-region / cotangent frame | Instrumentation and procedure ready (§3.4); needs eyes |
+| Close out terrain/lighting work | Code side done and shipping; **visual sign-off given 2026-09-13** |
+| Terrain dark-region / cotangent frame | Not pursued: the dark regions did not survive the two fixes, so the §3.4 debug modes were never needed. `BASIS_MODE` stays 0. |
 | Renderer ownership migration | Payload canonical, parity gate automated and passing |
-| Remove CR/OpenShim duplication | **Blocked on visual parity only** — binary parity is proven |
-| Repeatable visual benchmark | Evidence/labelling and launch reliability done; per-planet scene fixtures outstanding |
+| Remove CR/OpenShim duplication | **Unblocked** — binary parity proven, visual parity signed off. Not yet executed; it is a change to CR's repo. |
+| Repeatable visual benchmark | Evidence/labelling, launch reliability and the four-world fixture set all done (§5) |
+| Dense base battle fixture | Not built — `fourteam` is the nearest existing scene (§2) |
 | DXBC-identical for unchanged paths | Not attempted this pass — the payload deliberately changed |
+
+The two items still genuinely open after this pass are the CR duplicate
+removal and the Steam / Proton-Wine lanes (§3.6). Everything else in Phase 0
+is closed.
