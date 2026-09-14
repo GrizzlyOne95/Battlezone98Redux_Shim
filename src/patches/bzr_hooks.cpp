@@ -187,6 +187,15 @@ namespace BZROpenShim
     using FnProximityMineSimulate = void(__thiscall*)(void* thisPtr, float dt);
 	using FnSprayBuildingSimulate = void(__thiscall*)(void* thisPtr, float dt);
 	using FnTugPostLoad = bool(__thiscall*)(void* thisPtr);
+	using FnRigProcessCleanUState2 = void(__thiscall*)(void* process);
+	using FnGameObjectHandleGetObj = void*(__cdecl*)(uint32_t handle);
+	using FnCraftUndeploy = void(__fastcall*)(void* craft);
+    using FnGameObjectClassBuild = void*(__thiscall*)(void* objectClass,
+                                                      void* transform,
+                                                      int team,
+                                                      int independent,
+                                                      int seqNo,
+                                                      void* existingObject);
     using FnScriptProducerPredicate = bool(__cdecl*)(int handle);
     using FnProducerPredicate = bool(__thiscall*)(void* thisPtr);
     using FnShieldTowerPowerUpdate = void(__fastcall*)(void* thisPtr);
@@ -469,6 +478,9 @@ namespace BZROpenShim
     static FnProximityMineSimulate g_BzrFn_MineSimulate = nullptr;
 	static FnSprayBuildingSimulate g_BzrFn_SprayBuildingSimulateOriginal = nullptr;
 	static FnTugPostLoad g_BzrFn_TugPostLoadOriginal = nullptr;
+	static FnRigProcessCleanUState2 g_BzrFn_RigProcessCleanUState2Original = nullptr;
+	static FnGameObjectHandleGetObj g_BzrFn_GameObjectHandleGetObj = nullptr;
+    static FnGameObjectClassBuild g_BzrFn_SprayEmitterBuildOriginal = nullptr;
     static FnShieldTowerPowerUpdate g_BzrFn_ShieldTowerPowerUpdate = nullptr;
     using FnResolveObj76GameObject = void*(__cdecl*)(void*);
     static FnResolveObj76GameObject g_BzrFn_ResolveObj76GameObject =
@@ -879,6 +891,41 @@ namespace BZROpenShim
 		constexpr size_t kTugControlBlockOffset = 0x230;
 		constexpr size_t kTugControlDeployOffset = 0xE0;
 		constexpr size_t kTugCargoOffset = 0x300;
+		// Constructor recycle leaves the losing rig permanently deployed. Two
+		// Constructors ordered onto the same building each run their own unbuild
+		// countdown; the first to expire deletes the building, and the other is
+		// left deployed for the rest of the mission, accepting orders it can never
+		// act on.
+		//
+		// The only undeploy on the recycle path is in UnBuild::DoNear's completion
+		// branch (0x0049EC50), reached when ConstructionRig::IsUnbuilding goes
+		// false. A rig whose target died first never reaches it: the task reports
+		// itself done on the next AI tick, RigProcess leaves the unbuild state, and
+		// RigProcess::CleanUState2 (0x0049EE10) destroys the task before DoNear is
+		// ticked again. CleanUState2 calls ConstructionRig::CancelUnbuild
+		// (0x0049CDB0), so the unbuild handle is cleared correctly -- but nothing
+		// undeploys the craft.
+		//
+		// The detour asks for the undeploy that the completion branch would have
+		// asked for, and only when the recycle target no longer resolves, so every
+		// other way of leaving this state stays stock.
+		//
+		// Reproduced with controls by reverse_engineering/run_lcroad_recycle.ps1.
+		constexpr uintptr_t kGogRigProcessCleanUState2Addr = 0x0049EE10;
+		constexpr uintptr_t kGogGameObjectHandleGetObjAddr = 0x00462630;
+		constexpr size_t kRigProcessCleanUState2DetourLen = 6;
+		constexpr size_t kRigProcessCraftOffset = 0x34;
+		constexpr size_t kRigProcessUnbuildTargetHandleOffset = 0x3C;
+		// Craft deploy state, same field as kCraftDeployStateOffset further down
+		// this file; declared here because this fix sits above that declaration.
+		constexpr size_t kCraftDeployStateOffsetEarly = 0x228;
+		constexpr uint32_t kCraftDeployStateUndeployed = 0;
+		constexpr uint32_t kCraftDeployStateDeploying = 1;
+		constexpr uint32_t kCraftDeployStateDeployed = 2;
+		// Craft::Undeploy, vtable byte offset 0x64 (index 25). Confirmed live: the
+		// slot resolves to 0x004AE330, which asks the control block for an undeploy
+		// only while the craft is deployed (2) or still deploying (1).
+		constexpr size_t kCraftUndeployVtableIndex = 0x64 / sizeof(void*);
 		// Earthquake/dayquake save replay bug (#57). Quake ordnance (QuakeBlast,
 		// the "dayquake"/quake-weapon effects) drives the global EarthQuake
 		// object: Init starts it, Simulate decays it, Cleanup stops it.
@@ -1189,10 +1236,8 @@ namespace BZROpenShim
         constexpr long kCannonLeadThisFrameOffset = -0x20;
         constexpr long kCannonLeadVelocityFrameOffset = -0x1C;
 
-        // Distinct from kOrdnanceOwnerObjOffset (0xCC) above: that one is what
-        // TryGetOrdnanceOwner has always read, this one is the field the
-        // ordnance code itself walks. See the neighbourhood scan noted above.
-        constexpr size_t kOrdnanceShooterObjOffset = 0xD8;
+        // Ordnance::Init stores its creator obj76 at +0xD8; both the team-filter
+        // and velocity-inheritance paths use the shared constant above.
         // Unlike the ordnance chain, this offset could NOT be corroborated
         // statically -- the only +0x18 dereferences in the lead function are on
         // an argument ([ebp+0x0C]), and every +0x8C access in
@@ -2435,6 +2480,7 @@ namespace BZROpenShim
         static bool g_RetargetPeriodHooksInstalled = false;
         static volatile long g_AttackRevealTraceBudget = 64;
         static InlineDetour32 g_AIUnitRemoveDetour = {};
+        static InlineDetour32 g_RigProcessCleanUState2Detour = {};
         static InlineDetour32 g_DynamicGeometryPrepareDetour = {};
         static InlineDetour32 g_DynamicGeometrySetSquaredViewDepthDetour = {};
         static bool g_DynamicAlphaDepthBatchingEnabled = true;
@@ -2513,6 +2559,10 @@ namespace BZROpenShim
 		static volatile long g_TugCargoPostLoadLogBudget = 16;
 		static bool g_ApcAlliedTargetDeployFixInstalled = false;
 		static bool g_ApcAlliedTargetDeployFixEnabled = true;
+		static bool g_ConstructorRecycleStaleTargetFixInstalled = false;
+		static bool g_ConstructorRecycleStaleTargetFixEnabled = true;
+		static bool g_ConstructorRecycleStaleTargetMismatchLogged = false;
+		static volatile long g_ConstructorRecycleStaleTargetLogBudget = 16;
         static bool g_SplinterUndeadFixEnabled = kSplinterUndeadFixEnabledDefault;
         static volatile long g_SplinterUndeadTraceBudget = kSplinterUndeadTraceBudgetDefault;
         static bool g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
@@ -2539,8 +2589,8 @@ namespace BZROpenShim
         static std::unordered_map<uint32_t, int> g_MpauthSplHitCounts = {};
         static volatile long g_MpauthSplHitMapLogBudget = 8;
 
-        // [Fixes] multiplayer gate. Each of these five corrects a confirmed
-        // Redux defect, but all five change simulation behaviour, and none of
+        // [Fixes] multiplayer gate. Each of these seven corrects a confirmed
+        // Redux defect, but all seven change simulation behaviour, and none of
         // them is negotiated with peers -- so in a lobby that mixes OpenShim and
         // stock clients the two machines would run different code for the same
         // object. The `Enabled` flag above stays the user's openshim.ini answer
@@ -2550,6 +2600,7 @@ namespace BZROpenShim
         // is deliberately NOT gated on Active: the hook has to already be in
         // place when a mission goes from single-player to a network game.
         static bool g_TugCargoPostLoadFixActive = true;
+        static bool g_ConstructorRecycleStaleTargetFixActive = true;
         static bool g_ApcAlliedTargetDeployPatchActive = false;
         static bool g_SplinterUndeadFixActive = kSplinterUndeadFixEnabledDefault;
         static bool g_ConstructorRemoteBuildFixActive = kConstructorRemoteBuildFixEnabledDefault;
@@ -2680,6 +2731,12 @@ namespace BZROpenShim
         static constexpr bool kBomberAiRangeEnabledDefault = false;
         static constexpr bool kHowitzerVolleyEnabledDefault = false;
         static constexpr bool kHowitzerUndeployedRetaliationFixEnabledDefault = true;
+        // Confirmed Redux defect: damage from a GameObject-owned child reveals
+        // only that immediate child, leaving its owning craft disguised.
+        // This restores the ownership walk for landed hits. It is gated out of
+        // network games because perceivedTeam participates in simulation.
+        static constexpr bool kOwnedObjectRevealFixEnabledDefault = true;
+        static constexpr long kOwnedObjectRevealTraceBudgetDefault = 96;
         static constexpr bool kWeaponMaskCarrierBiasEnabledDefault = false;
         // Makes artillery / lay-mines AI honour weaponMask, firing every
         // fitted hardpoint the mask names as one synchronized volley.
@@ -2742,6 +2799,12 @@ namespace BZROpenShim
         // See the [Fixes] multiplayer gate note above.
         static bool g_HowitzerUndeployedRetaliationFixActive =
             kHowitzerUndeployedRetaliationFixEnabledDefault;
+        static bool g_OwnedObjectRevealFixEnabled =
+            kOwnedObjectRevealFixEnabledDefault;
+        static bool g_OwnedObjectRevealFixActive =
+            kOwnedObjectRevealFixEnabledDefault;
+        static volatile long g_OwnedObjectRevealTraceBudget =
+            kOwnedObjectRevealTraceBudgetDefault;
         static bool g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
         static bool g_AiWeaponMaskArtilleryEnabled = kAiWeaponMaskArtilleryEnabledDefault;
         static bool g_AiWeaponMaskMinelayerEnabled = kAiWeaponMaskMinelayerEnabledDefault;
@@ -2800,6 +2863,11 @@ namespace BZROpenShim
         //     +0x10C / +0x110, and the walker records "pos" size=12 at +0x108.
         static constexpr size_t kGameObjectActualTeamOffset = 0x174;
         static constexpr size_t kGameObjectPerceivedTeamOffset = 0x180;
+        // GameObject::SetOwner/GetOwner use this handle field. Redux's
+        // constructor zeros +0x21C/+0x220/+0x224; 0x00462610 resolves +0x21C
+        // as targetHandle, while owner writers at 0x004A8255 and 0x004AB3E1
+        // store GetHandle results at +0x220. This is complete-object relative.
+        static constexpr size_t kGameObjectOwnerHandleOffset = 0x220;
         static constexpr int kGameTeamMin = 0;
         static constexpr int kGameTeamMax = 15;
         static constexpr size_t kProcessOwnerObjectOffset = 0x34;
@@ -15836,7 +15904,7 @@ namespace BZROpenShim
         }
 
         // --- [Fixes] multiplayer gate reconcilers ------------------------------
-        // Four of the five are plain flag tests inside an already-installed
+        // Six of the seven are plain flag tests inside an already-installed
         // hook, so reconciling them is just the net-id AND. The APC fix rewrites
         // two branch displacements and needs its bytes put back, so it gets its
         // own reconciler next to the writer (declared below, defined with the
@@ -15853,10 +15921,22 @@ namespace BZROpenShim
                 g_TugCargoPostLoadFixEnabled && IsSinglePlayerSession();
         }
 
+        static void RefreshConstructorRecycleStaleTargetFixState()
+        {
+            g_ConstructorRecycleStaleTargetFixActive =
+                g_ConstructorRecycleStaleTargetFixEnabled && IsSinglePlayerSession();
+        }
+
         static void RefreshHowitzerUndeployedRetaliationFixState()
         {
             g_HowitzerUndeployedRetaliationFixActive =
                 g_HowitzerUndeployedRetaliationFixEnabled && IsSinglePlayerSession();
+        }
+
+        static void RefreshOwnedObjectRevealFixState()
+        {
+            g_OwnedObjectRevealFixActive =
+                g_OwnedObjectRevealFixEnabled && IsSinglePlayerSession();
         }
 
         static void RefreshConstructorRemoteBuildFixState()
@@ -15866,6 +15946,11 @@ namespace BZROpenShim
         }
 
         static const char* BoolText(bool value);
+        static bool ShouldTraceOwnedObjectReveal()
+        {
+            return EnvFlagEnabled("OPENSHIM_TRACE_OWNED_OBJECT_REVEAL") ||
+                   EnvFlagEnabled("BZR_TRACE_OWNED_OBJECT_REVEAL");
+        }
         static void RefreshJumpSnipeCrouchPatchState();
         static void RefreshOrdnanceVelocityInheritanceState();
         static void RefreshApcAlliedTargetDeployFixState();
@@ -17474,7 +17559,7 @@ namespace BZROpenShim
                     return;
 
                 void* shooterObj76 = *reinterpret_cast<void* const*>(
-                    reinterpret_cast<const uint8_t*>(ordnance) + kOrdnanceShooterObjOffset);
+                    reinterpret_cast<const uint8_t*>(ordnance) + kOrdnanceOwnerObjOffset);
                 void* shooter = nullptr;
                 if (!TryGetGameObjectFromObj76(shooterObj76, shooter))
                     return;
@@ -21858,8 +21943,12 @@ namespace BZROpenShim
               nullptr, &RefreshSplinterUndeadFixState },
             { "HowitzerUndeployedRetaliation", FeatureTier::SinglePlayer,
               nullptr, &RefreshHowitzerUndeployedRetaliationFixState },
+            { "OwnedObjectReveal", FeatureTier::SinglePlayer,
+              nullptr, &RefreshOwnedObjectRevealFixState },
             { "TugCargoPostLoad", FeatureTier::SinglePlayer,
               nullptr, &RefreshTugCargoPostLoadFixState },
+            { "ConstructorRecycleStaleTarget", FeatureTier::SinglePlayer,
+              nullptr, &RefreshConstructorRecycleStaleTargetFixState },
             { "ConstructorRemoteBuild", FeatureTier::SinglePlayer,
               nullptr, &RefreshConstructorRemoteBuildFixState },
         };
@@ -25987,6 +26076,154 @@ namespace BZROpenShim
 			}
 
 			return loaded;
+		}
+
+		// RigProcess::CleanUState2. Runs whenever the constructor leaves its
+		// unbuild state. Stock cancels the unbuild here but never undeploys, and
+		// the only undeploy on the recycle path lives in UnBuild::DoNear's
+		// completion branch -- which a rig whose target died first never reaches,
+		// because this teardown removes its task before it is ticked again.
+		//
+		// Scoped deliberately to the one case that is broken: the recycle target
+		// no longer resolves. Every other way of leaving this state -- finishing
+		// the unbuild, or the player replacing the order -- is left stock.
+		void __fastcall RigProcessCleanUState2FixHook(void* process)
+		{
+			bool undeployed = false;
+			uint32_t targetHandle = 0;
+			void* rig = nullptr;
+
+			if (g_ConstructorRecycleStaleTargetFixActive && process &&
+				g_BzrFn_GameObjectHandleGetObj)
+			{
+				__try
+				{
+					auto* bytes = static_cast<uint8_t*>(process);
+					rig = *reinterpret_cast<void**>(bytes + kRigProcessCraftOffset);
+					targetHandle = *reinterpret_cast<uint32_t*>(
+						bytes + kRigProcessUnbuildTargetHandleOffset);
+
+					if (rig && targetHandle != 0 &&
+						g_BzrFn_GameObjectHandleGetObj(targetHandle) == nullptr)
+					{
+						const uint32_t deployState = *reinterpret_cast<uint32_t*>(
+							static_cast<uint8_t*>(rig) + kCraftDeployStateOffsetEarly);
+
+						// Only a rig that is deployed or still deploying has an
+						// undeploy to ask for. One already undeploying (3) or
+						// undeployed (0) is left alone, so the rig that finished
+						// its unbuild normally is never touched.
+						if (deployState == kCraftDeployStateDeployed ||
+							deployState == kCraftDeployStateDeploying)
+						{
+							auto** vtable = *reinterpret_cast<void***>(rig);
+							auto undeploy = reinterpret_cast<FnCraftUndeploy>(
+								vtable[kCraftUndeployVtableIndex]);
+							undeploy(rig);
+							undeployed = true;
+						}
+					}
+				}
+				__except (EXCEPTION_EXECUTE_HANDLER)
+				{
+					undeployed = false;
+				}
+			}
+
+			if (g_BzrFn_RigProcessCleanUState2Original)
+				g_BzrFn_RigProcessCleanUState2Original(process);
+
+			if (undeployed)
+			{
+				const long remaining =
+					InterlockedDecrement(&g_ConstructorRecycleStaleTargetLogBudget);
+				if (remaining >= 0)
+					Log(L"[RIGRECYCLE] Undeployed constructor whose recycle target vanished remaining=%ld process=0x%08X rig=0x%08X handle=0x%08X\n",
+						remaining,
+						static_cast<uint32_t>(reinterpret_cast<uintptr_t>(process)),
+						static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rig)),
+						targetHandle);
+			}
+		}
+
+		static void InstallConstructorRecycleStaleTargetFixIfPossible()
+		{
+			if (!g_ConstructorRecycleStaleTargetFixEnabled ||
+				g_ConstructorRecycleStaleTargetFixInstalled)
+				return;
+
+			// Guard on instructions, not on the operands they carry. The entry
+			// prologue alone is shared by thousands of functions, so identity
+			// comes from the body: the load of the craft at +0x34 feeding the
+			// call to ConstructionRig::CancelUnbuild, and the load of the task
+			// pointer at +0x38 that this function exists to destroy.
+			static const uint8_t kExpectedEntryBytes[kRigProcessCleanUState2DetourLen] =
+			{
+				0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x10
+			};
+			// mov ecx,[eax+0x34] ; call ConstructionRig::CancelUnbuild (0x0049CDB0)
+			static const uint8_t kExpectedCancelUnbuildCallBytes[] =
+			{
+				0x8B, 0x48, 0x34, 0xE8, 0x8C, 0xDF, 0xFF, 0xFF
+			};
+			// mov edx,[ecx+0x38]  -- the UnBuild task about to be deleted
+			static const uint8_t kExpectedTaskLoadBytes[] =
+			{
+				0x8B, 0x51, 0x38
+			};
+			// GameObjectHandle::GetObj prologue: push ebp; mov ebp,esp; push ecx;
+			// mov eax,[ebp+8]; push eax  -- __cdecl, one stack argument.
+			static const uint8_t kExpectedGetObjBytes[] =
+			{
+				0x55, 0x8B, 0xEC, 0x51, 0x8B, 0x45, 0x08, 0x50
+			};
+
+			const uintptr_t entry = kGogRigProcessCleanUState2Addr;
+			if (!ExpectedBytesMatchAt(entry, kExpectedEntryBytes, sizeof(kExpectedEntryBytes)) ||
+				!ExpectedBytesMatchAt(entry + 0x0C, kExpectedCancelUnbuildCallBytes, sizeof(kExpectedCancelUnbuildCallBytes)) ||
+				!ExpectedBytesMatchAt(entry + 0x17, kExpectedTaskLoadBytes, sizeof(kExpectedTaskLoadBytes)) ||
+				!ExpectedBytesMatchAt(kGogGameObjectHandleGetObjAddr, kExpectedGetObjBytes, sizeof(kExpectedGetObjBytes)))
+			{
+				if (!g_ConstructorRecycleStaleTargetMismatchLogged)
+				{
+					Log(L"[RIGRECYCLE] RigProcess::CleanUState2 bytes not settled at 0x%08X; deferring recycle undeploy fix\n",
+						static_cast<uint32_t>(entry));
+					g_ConstructorRecycleStaleTargetMismatchLogged = true;
+				}
+				return;
+			}
+
+			if (!g_BzrFn_GameObjectHandleGetObj)
+				g_BzrFn_GameObjectHandleGetObj =
+					reinterpret_cast<FnGameObjectHandleGetObj>(kGogGameObjectHandleGetObjAddr);
+
+			if (!InstallInlineDetour32(g_RigProcessCleanUState2Detour,
+									   entry,
+									   reinterpret_cast<void*>(RigProcessCleanUState2FixHook),
+									   kRigProcessCleanUState2DetourLen,
+									   kExpectedEntryBytes,
+									   sizeof(kExpectedEntryBytes)))
+			{
+				Log(L"[RIGRECYCLE] Failed installing RigProcess::CleanUState2 detour at 0x%08X\n",
+					static_cast<uint32_t>(entry));
+				return;
+			}
+
+			g_BzrFn_RigProcessCleanUState2Original =
+				reinterpret_cast<FnRigProcessCleanUState2>(
+					g_RigProcessCleanUState2Detour.trampoline);
+			g_ConstructorRecycleStaleTargetFixInstalled =
+				(g_BzrFn_RigProcessCleanUState2Original != nullptr);
+
+			if (g_ConstructorRecycleStaleTargetFixInstalled)
+			{
+				g_ConstructorRecycleStaleTargetMismatchLogged = false;
+				Log(L"[RIGRECYCLE] Installed constructor recycle undeploy fix entry=0x%08X trampoline=0x%08X getObj=0x%08X\n",
+					static_cast<uint32_t>(entry),
+					static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
+						g_RigProcessCleanUState2Detour.trampoline)),
+					static_cast<uint32_t>(kGogGameObjectHandleGetObjAddr));
+			}
 		}
 
 		static void InstallTugCargoPostLoadFixIfPossible()
@@ -33918,8 +34155,12 @@ namespace BZROpenShim
 		g_CinematicSatelliteZoomFixInstalled = false;
 		g_CinematicSatelliteZoomLogBudget = 8;
 		g_SprayBuildingSimulateHookInstalled = false;
+		g_BzrFn_SprayEmitterBuildOriginal = nullptr;
 		g_TugCargoPostLoadFixInstalled = false;
 		g_TugCargoPostLoadLogBudget = 16;
+		g_ConstructorRecycleStaleTargetFixInstalled = false;
+		g_ConstructorRecycleStaleTargetMismatchLogged = false;
+		g_ConstructorRecycleStaleTargetLogBudget = 16;
 		g_ApcAlliedTargetDeployFixInstalled = false;
         g_AttackRevealTraceBudget = kAttackRevealTraceBudgetDefault;
         g_PilotCarrierNullLoggedObjects.clear();
@@ -33947,6 +34188,9 @@ namespace BZROpenShim
             !(EnvFlagEnabled("OPENSHIM_DISABLE_HOWITZER_DEPLOY_FIX") ||
               EnvFlagEnabled("BZR_DISABLE_HOWITZER_DEPLOY_FIX"));
         RefreshHowitzerUndeployedRetaliationFixState();
+        g_OwnedObjectRevealFixEnabled = kOwnedObjectRevealFixEnabledDefault;
+        RefreshOwnedObjectRevealFixState();
+        g_OwnedObjectRevealTraceBudget = kOwnedObjectRevealTraceBudgetDefault;
         g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
         g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
         g_AttackRevealEnabled = kAttackRevealEnabledDefault;
@@ -34273,10 +34517,30 @@ namespace BZROpenShim
 			!(EnvFlagEnabled("OPENSHIM_DISABLE_TUG_CARGO_FIX") ||
 			  EnvFlagEnabled("BZR_DISABLE_TUG_CARGO_FIX"));
 		RefreshTugCargoPostLoadFixState();
+		g_ConstructorRecycleStaleTargetFixEnabled =
+			!(EnvFlagEnabled("OPENSHIM_DISABLE_CONSTRUCTOR_RECYCLE_FIX") ||
+			  EnvFlagEnabled("BZR_DISABLE_CONSTRUCTOR_RECYCLE_FIX"));
+		RefreshConstructorRecycleStaleTargetFixState();
 		g_ApcAlliedTargetDeployFixEnabled =
 			!(EnvFlagEnabled("OPENSHIM_DISABLE_APC_DEPLOY_FIX") ||
 			  EnvFlagEnabled("BZR_DISABLE_APC_DEPLOY_FIX"));
 		RefreshApcAlliedTargetDeployFixState();
+
+        g_OwnedObjectRevealFixEnabled = kOwnedObjectRevealFixEnabledDefault;
+        bool ownedObjectRevealConfig = kOwnedObjectRevealFixEnabledDefault;
+        if (TryGetUserConfigBool(kUserConfigFixesSection,
+                                 "OwnedObjectReveal",
+                                 ownedObjectRevealConfig))
+        {
+            g_OwnedObjectRevealFixEnabled = ownedObjectRevealConfig;
+        }
+        if (EnvFlagEnabled("OPENSHIM_DISABLE_OWNED_OBJECT_REVEAL") ||
+            EnvFlagEnabled("BZR_DISABLE_OWNED_OBJECT_REVEAL"))
+        {
+            g_OwnedObjectRevealFixEnabled = false;
+        }
+        RefreshOwnedObjectRevealFixState();
+        g_OwnedObjectRevealTraceBudget = kOwnedObjectRevealTraceBudgetDefault;
 		g_QuakeReplayFadeEnabled =
 			!(EnvFlagEnabled("OPENSHIM_DISABLE_QUAKE_FADE") ||
 			  EnvFlagEnabled("BZR_DISABLE_QUAKE_FADE"));
@@ -34304,6 +34568,7 @@ namespace BZROpenShim
 		InstallSplinterUndeadFixIfPossible();
 		InstallMpauthHooksIfPossible();
 		InstallTugCargoPostLoadFixIfPossible();
+		InstallConstructorRecycleStaleTargetFixIfPossible();
 		InstallApcAlliedTargetDeployFixIfPossible();
 		InstallQuakeReplayFadeIfPossible();
 		InstallTargetCamSatelliteFixIfPossible();
@@ -34912,6 +35177,11 @@ namespace BZROpenShim
             g_AttackRevealEnabled ? "enabled" : "disabled",
             ShouldTraceAttackReveal() ? "enabled" : "disabled",
             g_AttackRevealTraceBudget);
+        Log(L"[OWNREVEAL] owned-object reveal fix: configured=%hs active=%hs trace=%hs budget=%ld\n",
+            BoolText(g_OwnedObjectRevealFixEnabled),
+            BoolText(g_OwnedObjectRevealFixActive),
+            BoolText(ShouldTraceOwnedObjectReveal()),
+            g_OwnedObjectRevealTraceBudget);
         InitializeUnderAttackAlertConfig();
         InitializeTargetReticlePopupConfig();
         InitializeGlobalTurboConfig();
@@ -35289,6 +35559,7 @@ namespace BZROpenShim
 		InstallThumbnailBmpGuardIfPossible();
 		InstallSplinterUndeadFixIfPossible();
 		InstallTugCargoPostLoadFixIfPossible();
+		InstallConstructorRecycleStaleTargetFixIfPossible();
 		InstallApcAlliedTargetDeployFixIfPossible();
 		InstallQuakeReplayFadeIfPossible();
 		InstallTargetCamSatelliteFixIfPossible();
@@ -36221,7 +36492,9 @@ namespace BZROpenShim
 
     // Redirected from all four GameObject::SetDamageFlags call sites (the
     // *::DamageAlloc family). Read-only: it records state, calls the stock
-    // function, and records state again. Nothing is altered.
+    // function, and records state again. The confirmed owned-object fix now
+    // also runs here after stock: direct hits remain stock, while a damager's
+    // GameObject owner chain is revealed after the hit has actually landed.
     //
     // The question this exists to answer: when a disguised captured craft lands
     // a shot, which object does the reveal tail actually operate on? 1.5's
@@ -36233,6 +36506,240 @@ namespace BZROpenShim
     //
     // The class names come from RTTI, so the log says Craft vs Explosion vs
     // Ordnance outright rather than leaving it to be inferred from an address.
+    static void TraceOwnedObjectReveal(const wchar_t* action,
+                                       const wchar_t* kind,
+                                       void* child,
+                                       void* owner,
+                                       int ownerHandle,
+                                       int previousPerceivedTeam,
+                                       int actualTeam,
+                                       int depth)
+    {
+        if (!ShouldTraceOwnedObjectReveal())
+            return;
+        const long remaining = InterlockedDecrement(&g_OwnedObjectRevealTraceBudget);
+        if (remaining < 0)
+            return;
+        Log(L"[OWNREVEAL] action=%ls kind=%ls child=0x%08X owner=0x%08X handle=0x%08X depth=%d pt=%d->%d active=%hs remaining=%ld\n",
+            action ? action : L"unknown",
+            kind ? kind : L"unknown",
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(child)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(owner)),
+            static_cast<uint32_t>(ownerHandle),
+            depth,
+            previousPerceivedTeam,
+            actualTeam,
+            BoolText(g_OwnedObjectRevealFixActive),
+            remaining);
+    }
+
+    // Stock SetDamageFlags reveals only damage.damager. For a comet, deployed
+    // soldier, mine or another owned GameObject, that is the child object, not
+    // the craft whose GameObject::ownerHandle it carries. Walk the bounded,
+    // validated handle chain and apply the same stock reveal operation to each
+    // owner. This runs only for the non-collision branch stock treats as a shot.
+    static void RevealOwnedObjectChainAfterDamage(void* victim, void* damage)
+    {
+        if (!g_OwnedObjectRevealFixActive || !victim || !damage)
+            return;
+
+        void* damagerObj76 = nullptr;
+        void* sourceObj76 = nullptr;
+        __try
+        {
+            auto* fields = reinterpret_cast<void* const*>(damage);
+            damagerObj76 = fields[0];
+            sourceObj76 = fields[1];
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return;
+        }
+
+        // Mirrors SetDamageFlags: equal non-null values are collision damage;
+        // a null source is its no-source timing path. Neither reveals an owner.
+        if (!damagerObj76 || !sourceObj76 || damagerObj76 == sourceObj76 ||
+            !g_BzrFn_ResolveObj76GameObject)
+            return;
+
+        void* child = nullptr;
+        __try
+        {
+            child = g_BzrFn_ResolveObj76GameObject(damagerObj76);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            child = nullptr;
+        }
+        if (!child || child == victim)
+            return;
+
+        // Eight levels is far beyond every stock ownership topology while
+        // bounding corrupt/cyclic custom content. Each handle is generation-
+        // checked by GameObjectFromHandleGog before any object field is read.
+        void* visited[8] = {};
+        size_t visitedCount = 0;
+        void* current = child;
+        for (int depth = 1; depth <= 8; ++depth)
+        {
+            uint8_t* currentBytes = nullptr;
+            if (!TryGetGameObjectFieldBase(current, currentBytes))
+                return;
+
+            int ownerHandle = 0;
+            __try
+            {
+                ownerHandle = *reinterpret_cast<const int*>(
+                    currentBytes + kGameObjectOwnerHandleOffset);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return;
+            }
+            if (ownerHandle == 0)
+                return;
+
+            void* owner = GameObjectFromHandleGog(ownerHandle);
+            if (!owner || owner == current || owner == victim)
+                return;
+            for (size_t i = 0; i < visitedCount; ++i)
+            {
+                if (visited[i] == owner)
+                    return;
+            }
+            visited[visitedCount++] = owner;
+
+            uint8_t* ownerBytes = nullptr;
+            if (!TryGetGameObjectFieldBase(owner, ownerBytes))
+                return;
+
+            __try
+            {
+                const int actualTeam = *reinterpret_cast<const int*>(
+                    ownerBytes + kGameObjectActualTeamOffset);
+                if (actualTeam < kGameTeamMin || actualTeam > kGameTeamMax)
+                    return;
+                int& perceivedTeam = *reinterpret_cast<int*>(
+                    ownerBytes + kGameObjectPerceivedTeamOffset);
+                const int previous = perceivedTeam;
+                if (previous != actualTeam)
+                {
+                    perceivedTeam = actualTeam;
+                    TraceOwnedObjectReveal(L"write", L"damage-owner", child,
+                                           owner, ownerHandle, previous,
+                                           actualTeam, depth);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return;
+            }
+
+            current = owner;
+        }
+    }
+
+    // SprayBomb::Hit's class-build call at 0x005DB37F creates the deployed
+    // SprayBuilding with ownerHandle=0. Its payload later records that emitter
+    // as damage.damager, so the otherwise-general owner walk stops there. The
+    // call-site wrapper below preserves the SprayBomb's verified +0xD8 creator
+    // on the returned emitter. callerFrame is SprayBomb::Hit's EBP; its
+    // local_1B0 is the live SprayBomb pointer in exact Redux 2.2.301.
+    static void* __cdecl PreserveSprayEmitterOwner(void* deployedEmitter,
+                                                   void* callerFrame)
+    {
+        if (!g_OwnedObjectRevealFixActive || !deployedEmitter || !callerFrame ||
+            !g_BzrFn_ResolveObj76GameObject)
+            return deployedEmitter;
+
+        void* sprayBomb = nullptr;
+        void* creatorObj76 = nullptr;
+        void* owner = nullptr;
+        int ownerHandle = 0;
+        int previousOwnerHandle = 0;
+        __try
+        {
+            sprayBomb = *reinterpret_cast<void**>(
+                reinterpret_cast<uint8_t*>(callerFrame) - 0x1B0);
+            if (!sprayBomb)
+                return deployedEmitter;
+            creatorObj76 = *reinterpret_cast<void**>(
+                reinterpret_cast<uint8_t*>(sprayBomb) + kOrdnanceOwnerObjOffset);
+            if (!creatorObj76)
+                return deployedEmitter;
+            owner = g_BzrFn_ResolveObj76GameObject(creatorObj76);
+            if (!owner || owner == deployedEmitter)
+                return deployedEmitter;
+            previousOwnerHandle = *reinterpret_cast<const int*>(
+                reinterpret_cast<const uint8_t*>(deployedEmitter) +
+                kGameObjectOwnerHandleOffset);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return deployedEmitter;
+        }
+
+        if (previousOwnerHandle != 0 ||
+            !TryGetGameObjectHandleValue(owner, ownerHandle))
+            return deployedEmitter;
+
+        __try
+        {
+            *reinterpret_cast<int*>(
+                reinterpret_cast<uint8_t*>(deployedEmitter) +
+                kGameObjectOwnerHandleOffset) = ownerHandle;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return deployedEmitter;
+        }
+
+        TraceOwnedObjectReveal(L"link", L"splinter-emitter", deployedEmitter,
+                               owner, ownerHandle, 0, 0, 0);
+        return deployedEmitter;
+    }
+
+    void SetSprayEmitterBuildOriginal(void* original)
+    {
+        g_BzrFn_SprayEmitterBuildOriginal =
+            reinterpret_cast<FnGameObjectClassBuild>(original);
+    }
+
+#if defined(_M_IX86)
+    __declspec(naked) void* SprayEmitterBuildOwnerHook()
+    {
+        __asm
+        {
+            // Rebuild the original thiscall using copies of its five stack
+            // arguments. Saving EBP exposes SprayBomb::Hit's frame to the
+            // post-call helper without changing the game's caller frame.
+            push ebp
+            mov  ebp, esp
+            sub  esp, 4
+            mov  dword ptr [ebp - 4], ecx
+            push dword ptr [ebp + 0x18]
+            push dword ptr [ebp + 0x14]
+            push dword ptr [ebp + 0x10]
+            push dword ptr [ebp + 0x0C]
+            push dword ptr [ebp + 0x08]
+            mov  ecx, dword ptr [ebp - 4]
+            call dword ptr [g_BzrFn_SprayEmitterBuildOriginal]
+            push dword ptr [ebp]
+            push eax
+            call PreserveSprayEmitterOwner
+            add  esp, 8
+            mov  esp, ebp
+            pop  ebp
+            ret  0x14
+        }
+    }
+#else
+    void* SprayEmitterBuildOwnerHook()
+    {
+        return nullptr;
+    }
+#endif
+
     void __fastcall DamageRevealProbeHook(void* victim, void* /*edx*/, void* damage)
     {
         using FnSetDamageFlags = void(__fastcall*)(void*, void*, void*);
@@ -36248,6 +36755,7 @@ namespace BZROpenShim
         if (!g_TraceDamageReveal || InterlockedDecrement(&g_DamageRevealTraceBudget) < 0)
         {
             if (stock) stock(victim, nullptr, damage);
+            RevealOwnedObjectChainAfterDamage(victim, damage);
             return;
         }
 
@@ -36286,6 +36794,7 @@ namespace BZROpenShim
 
         if (stock)
             stock(victim, nullptr, damage);
+        RevealOwnedObjectChainAfterDamage(victim, damage);
 
         DamageRevealSnapshot victimAfter = {}, damagerAfter = {}, sourceAfter = {};
         CaptureDamageRevealSnapshot(victim, victimAfter);

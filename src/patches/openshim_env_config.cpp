@@ -236,6 +236,11 @@ namespace
         {
             return TryReadMappedBool(mainIni, "Fixes", "TugCargoPostLoad", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_CONSTRUCTOR_RECYCLE_FIX") ||
+            Equals(name, "BZR_DISABLE_CONSTRUCTOR_RECYCLE_FIX"))
+        {
+            return TryReadMappedBool(mainIni, "Fixes", "ConstructorRecycleStaleTarget", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX") ||
             Equals(name, "BZR_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX"))
         {
