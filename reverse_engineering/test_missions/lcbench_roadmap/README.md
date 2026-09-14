@@ -50,6 +50,49 @@ pwsh -File reverse_engineering/run_lcroad_neutral.ps1
 This qualifies the Lua/native AI command route. A human-issued UI Attack order
 is intentionally documented as a separate manual evidence gate.
 
+## Constructor double-recycle matrix
+
+`rmrcyc.lua` puts Constructors on a building and orders them to recycle it,
+then — ten seconds after the building dies — pokes every survivor with a
+`Goto`. The poke is the whole point: it separates a rig that is *wedged* from
+one that is merely idle and deployed.
+
+| Case | Rigs | Buildings | Asks |
+|---|---|---|---|
+| `solo` | 1 | 1 | CONTROL: does a single rig finish clean? |
+| `pair` | 2 | 2, one each | CONTROL: do two rigs finish clean when they don't contend? |
+| `same` | 2 | 1, shared | both orders on the same frame |
+| `stag` | 2 | 1, shared | second order four seconds late |
+
+```powershell
+pwsh -File reverse_engineering/run_lcroad_recycle.ps1
+```
+
+Pass arms as an array, not a comma string — `pwsh -File ... -Cases same,stag`
+hands `ValidateSet` one string and fails:
+
+```powershell
+pwsh -NoProfile -Command "& './reverse_engineering/run_lcroad_recycle.ps1' -Cases @('same') -Repeats 3"
+```
+
+The runner installs the `lcbench` world assets if they are missing and removes
+them again afterwards, so it does not need a pre-existing lcbench install.
+
+Read `stuck=` in the `COMPLETE` line, and `rigsUndeployedByFix` in the manifest.
+Before the fix, both contention arms left exactly one rig permanently deployed
+with `travelled=0.00` after the poke, while both controls left none. With
+`[Fixes] ConstructorRecycleStaleTarget` on, all four arms come back
+`stuck=0 deployed=0`, and the shim log shows the fix firing exactly once per
+contention arm and never in a control.
+
+`rigsUndeployedByFix` is not decoration. The first attempt at this fix was
+installed and running on every frame and released nothing, because it corrected
+a cause that does not exist in this build; the mission-level `stuck=1` alone
+would have read as "the fix does not work" rather than "the fix never applied".
+Always check that an arm's fix actually engaged -- see
+`../../constructor_double_recycle_stale_deploy_20260913.md` for the root cause,
+the addresses, and what the live trace ruled out.
+
 ## AIP mixed stock/custom producer matrix
 
 `rmaip.lua` builds an AI base for team 2, installs one arm's `.aip`, and counts
