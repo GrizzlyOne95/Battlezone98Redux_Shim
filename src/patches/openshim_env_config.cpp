@@ -463,6 +463,15 @@ namespace
             return TryReadMappedBool(mainIni, "Network", "ReauthOnNicknameChange", false, out);
         // Multiplayer starting-vehicle list: restore the 1.5 "Any Nation = OFF"
         // restricted pool. Positive key, default OFF, so absence is stock.
+        // Terrain detail-atlas rect repair. Positive key, default OFF: the
+        // correction itself is proven against all eleven shipped atlases, but
+        // the open-redirect that delivers it to Redux has not been confirmed
+        // on a live run yet.
+        if (Equals(name, "OPENSHIM_TERRAIN_ATLAS_RECT_REPAIR") ||
+            Equals(name, "BZR_TERRAIN_ATLAS_RECT_REPAIR"))
+        {
+            return TryReadMappedBool(mainIni, "Fixes", "TerrainAtlasRectRepair", false, out);
+        }
         if (Equals(name, "OPENSHIM_STOCK_FACTIONS_ONLY"))
             return TryReadMappedBool(mainIni, "Network", "StockFactionsOnly", false, out);
         if (Equals(name, "OPENSHIM_STOCK_FACTION_SET"))
