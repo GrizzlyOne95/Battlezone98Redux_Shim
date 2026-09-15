@@ -1,0 +1,144 @@
+[Size]
+MinX=0
+MinZ=0
+Width=5120
+Depth=5120
+Height=0.000000
+
+[NormalView]
+Time=900
+FogStart=150
+FogEnd=250
+FogBreak=60
+VisibilityRange=250
+Intensity=40
+Ambient=0
+FlatRange=250
+ShadowLuma=0
+FogDirection=1
+TerrainShadowLuma=20
+CarAmbient=20
+
+[Atlases]
+MaterialName	= ac_detail_atlas
+
+[Sky]
+SunTexture= sun.0
+SkyType= 0
+SkyHeight = 210
+SkyTexture= achilles.map
+
+BackdropTexture =
+BackdropDistance= 400
+BackdropWidth   = 800
+BackdropHeight  = 100
+
+[Clouds]
+Count    = 8
+Type     = 0
+TileSize = 1000
+
+Texture0 = acloud2.map
+Size0    = 500
+Height0  = 200
+
+Texture1 = acloud.map
+Size1    = 500
+Height1  = 190
+
+Texture2 = acloud2.map
+Size2    = 500
+Height2  = 180
+
+[Color]
+Palette=ACHILLES.ACT
+Luma=ACHILLES.LUM
+Translucency=ACHILLES.TBL
+Alpha=ACHILLES.ALB
+
+[World]
+MusicTrack=5
+
+[TextureType0] // grass
+FlatColor= 128
+SolidA0        = ac00sa0.map
+SolidA1        = ac00sa1.map
+SolidA2        = ac00sa2.map
+SolidA3        = ac00sa3.map
+SolidB0        = ac00sa0.map
+SolidB1        = ac00sa1.map
+SolidB2        = ac00sa2.map
+SolidB3        = ac00sa3.map
+SolidC0        = ac00sa0.map
+SolidC1        = ac00sa1.map
+SolidC2        = ac00sa2.map
+SolidC3        = ac00sa3.map
+SolidD0        = ac00sb0.map
+SolidD1        = ac00sb1.map
+SolidD2        = ac00sb2.map
+SolidD3        = ac00sb3.map
+
+CapTo3_A0      = ac01ca0.map
+CapTo3_A1      = ac01ca1.map
+CapTo3_A2      = ac01ca2.map
+CapTo3_A3      = ac01ca3.map
+
+DiagonalTo3_A0 = ac01da0.map
+DiagonalTo3_A1 = ac01da1.map
+DiagonalTo3_A2 = ac01da2.map
+DiagonalTo3_A3 = ac01da3.map
+
+CapTo4_A0      = ac05ca0.map
+CapTo4_A1      = ac05ca1.map
+CapTo4_A2      = ac05ca2.map
+CapTo4_A3      = ac05ca3.map
+
+DiagonalTo4_A0 = ac05da0.map
+DiagonalTo4_A1 = ac05da1.map
+DiagonalTo4_A2 = ac05da2.map
+DiagonalTo4_A3 = ac05da3.map
+
+[TextureType3] // rocky rock
+FlatColor= 112
+SolidA0        = ac22sa0.map
+SolidA1        = ac22sa1.map
+SolidA2        = ac22sa2.map
+SolidA3        = ac22sa3.map
+
+[TextureType4] // base
+FlatColor= 103
+SolidA0        = ac55sa0.map
+SolidA1        = ac55sa1.map
+SolidA2        = ac55sa2.map
+SolidA3        = ac55sa3.map
+SolidB0        = ac55sb0.map
+SolidB1        = ac55sb1.map
+SolidB2        = ac55sb2.map
+SolidB3        = ac55sb3.map
+
+[TextureType5] // trees
+FlatColor= 192
+SolidA0        = ac11sa0.map
+SolidA1        = ac11sa1.map
+SolidA2        = ac11sa2.map
+SolidA3        = ac11sa3.map
+
+[TextureType6] // river
+FlatColor= 122
+SolidA0        = ac00sc0.map
+SolidA1        = ac00sc1.map
+SolidA2        = ac00sc2.map
+SolidA3        = ac00sc3.map
+SolidB0        = ac00sd0.map
+SolidB1        = ac00sd1.map
+SolidB2        = ac00sd2.map
+SolidB3        = ac00sd3.map
+SolidC0        = ac00se0.map
+SolidC1        = ac00se1.map
+SolidC2        = ac00se2.map
+SolidC3        = ac00se3.map
+SolidD0        = ac00sg0.map
+SolidD1        = ac00sg1.map
+SolidD2        = ac00sg2.map
+SolidD3        = ac00sg3.map
+

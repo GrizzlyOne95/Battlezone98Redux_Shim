@@ -77,7 +77,15 @@ On every wrapped exit it zips (Windows) or xz-compresses (Linux) and POSTs:
 - `winmm_proxy.log` / `dsound_proxy.log` when present
 - `multi.ini`
 - session-fresh buffer-capture files and `openshim_crash_*.dmp` minidumps
-- `meta.txt` (UTC time, hostname, player name, exit code, wrapper version)
+- `openshim_wrap.log.tail.txt` (the last 200 wrapper diagnostics)
+- `meta.txt` (UTC time, hostname, player name, exit code, termination kind,
+  exception-evidence flag, wrapper version)
+
+The upload headline distinguishes a clean exit, a handled exception, a
+signal/console interruption or termination, an unexplained abrupt exit, and a
+crash with non-empty OpenShim exception evidence. `openshim_crash.log` is
+created empty at every OpenShim startup; an empty file is therefore not treated
+as a crash.
 
 A bundle over the ~10 MB webhook cap is split; reassemble with
 `cat *.part* > bundle.tar.xz` or `copy /b` on Windows.
