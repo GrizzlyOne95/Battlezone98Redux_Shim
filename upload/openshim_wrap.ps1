@@ -49,7 +49,7 @@ $Work     = Join-Path $DataDir "work"
 # predicted: on 2026-08-15 both testers uploaded bundles stamped
 # V4.91-harvest while this repo shipped V4.92-arms, and the drift was only
 # visible after reading a bundle's meta.txt.
-$WrapperVersion = "OpenShim-upload-20260904"
+$WrapperVersion = "OpenShim-upload-20260914"
 
 # Discord's webhook attachment cap is ~10 MB unboosted. Leave room for the
 # multipart envelope.
@@ -250,6 +250,27 @@ function Test-Crashed {
     return -not ($tail -match 'Exiting Game With Return Code')
 }
 
+# Separate a missing clean-exit marker from actual exception evidence. The
+# crash logger creates a fresh, empty openshim_crash.log on every launch, so
+# existence and mtime alone are not evidence that an exception occurred.
+function Get-TerminationKind {
+    param(
+        [string]$LogPath,
+        [int]$ExitCode,
+        [bool]$HasExceptionEvidence
+    )
+
+    if (-not (Test-Crashed $LogPath)) {
+        if ($HasExceptionEvidence) { return "clean-with-exception" }
+        return "clean"
+    }
+
+    if ($HasExceptionEvidence) { return "crash-with-exception" }
+    if ($ExitCode -eq 130) { return "interrupted-sigint" }
+    if ($ExitCode -eq -1073741510) { return "interrupted-console-control" }
+    return "abrupt-exit"
+}
+
 function Get-MapName {
     param([string]$LogPath)
     if (-not (Test-Path $LogPath)) { return "unknown" }
@@ -445,16 +466,17 @@ function New-BundleAndUpload {
         Copy-Item -Force -LiteralPath $src -Destination (Join-Path $bundle $f)
     }
     $logDir = Join-Path $GameDir "logs"
+    $hasFreshDump = $false
     if (Test-Path -LiteralPath $logDir) {
-        Get-ChildItem -LiteralPath $logDir -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -like "openshim_crash_*.dmp" } |
-            ForEach-Object {
-                if ($_.LastWriteTimeUtc -lt $SessionStart) {
-                    Write-WrapLog "skipping stale $($_.Name) (predates this session)"
-                    return
-                }
-                Copy-Item -Force -LiteralPath $_.FullName -Destination (Join-Path $bundle $_.Name)
+        foreach ($dump in (Get-ChildItem -LiteralPath $logDir -File -ErrorAction SilentlyContinue |
+                           Where-Object { $_.Name -like "openshim_crash_*.dmp" })) {
+            if ($dump.LastWriteTimeUtc -lt $SessionStart) {
+                Write-WrapLog "skipping stale $($dump.Name) (predates this session)"
+                continue
             }
+            Copy-Item -Force -LiteralPath $dump.FullName -Destination (Join-Path $bundle $dump.Name)
+            $hasFreshDump = $true
+        }
     }
 
     # The wrapper's own log tail rides along so that a bundle that arrives
@@ -465,28 +487,43 @@ function New-BundleAndUpload {
             Out-File -FilePath (Join-Path $bundle "openshim_wrap.log.tail.txt") -Encoding utf8
     }
 
-    $crashFlag = ""
-    if (Test-Crashed (Join-Path $bundle "BZLogger.txt")) {
-        $crashFlag = " **CRASH** (no ``Exiting Game With Return Code``)"
-    } else {
-        $shimCrash = Join-Path $bundle "openshim_crash.log"
-        if ((Test-Path $shimCrash) -and
-            ((Get-Item $shimCrash).LastWriteTimeUtc -ge $SessionStart)) {
-            $crashFlag = " **CRASH** (openshim_crash.log this session)"
-        }
+    $shimCrashSource = Resolve-HarvestedPath -GameDir $GameDir -Name "openshim_crash.log"
+    $hasFreshCrashLog = $false
+    if ($shimCrashSource) {
+        $shimCrashInfo = Get-Item -LiteralPath $shimCrashSource
+        $hasFreshCrashLog = $shimCrashInfo.Length -gt 0 -and
+                            $shimCrashInfo.LastWriteTimeUtc -ge $SessionStart
+    }
+    $hasExceptionEvidence = $hasFreshCrashLog -or $hasFreshDump
+    $terminationKind = Get-TerminationKind `
+        -LogPath (Join-Path $bundle "BZLogger.txt") `
+        -ExitCode $ExitCode `
+        -HasExceptionEvidence $hasExceptionEvidence
+    @(
+        "termination_kind=$terminationKind"
+        "exception_evidence=$([int]$hasExceptionEvidence)"
+    ) | Add-Content -LiteralPath (Join-Path $bundle "meta.txt") -Encoding utf8
+
+    $statusFlag = switch ($terminationKind) {
+        "clean"                { "" }
+        "clean-with-exception" { " **EXCEPTION** (handled; game logged a clean exit)" }
+        "crash-with-exception" { " **CRASH** (non-empty OpenShim crash evidence)" }
+        "interrupted-sigint"   { " **INTERRUPTED** (SIGINT)" }
+        "interrupted-console-control" { " **INTERRUPTED** (console control event)" }
+        default                { " **ABRUPT EXIT** (no clean-exit marker or crash evidence)" }
     }
     $map = Get-MapName (Join-Path $bundle "BZLogger.txt")
 
     # Menu-only sessions (no network game, no crash) teach nothing about the
     # netcode; a crash without a map line still goes.
-    if ($map -eq "unknown" -and -not $crashFlag -and -not $conf.UploadMenu) {
+    if ($map -eq "unknown" -and -not $statusFlag -and -not $conf.UploadMenu) {
         Write-WrapLog "no network game this session and no crash; OPENSHIM_UPLOAD_MENU=0 is set, skipping upload"
         Remove-Item -Recurse -Force $bundle
         return
     }
 
     $minutes = [int](((Get-Date).ToUniversalTime() - [datetime]::Parse($StartUtc).ToUniversalTime()).TotalMinutes)
-    $message = "**$player** - map ``$map``, $minutes min, exit $ExitCode$crashFlag"
+    $message = "**$player** - map ``$map``, $minutes min, exit $ExitCode$statusFlag"
 
     # Compress-Archive is Deflate, not xz -- less effective on a 31 MB
     # BZLogger, but it is in the box on every supported Windows.

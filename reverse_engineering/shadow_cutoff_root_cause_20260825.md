@@ -11,6 +11,18 @@ Evidence labels follow the repo convention: **CONFIRMED** (decompilation,
 shipped asset, or runtime observation), **HIGH** (multiple direct facts, one
 link not observed live), **MEDIUM** (bounded inference).
 
+**Status: fixed 2026-09-14.** Section 8A shipped as the default rather than as an
+environment-variable experiment. `SceneManager::setShadowFarDistance` is re-issued
+at the 256 m outer split after every stock apply; `OPENSHIM_SHADOW_FAR_DISTANCE`
+still accepts another distance, or `stock`/`off`/`128` to restore the stock clip.
+The decision moved to `include/shadow_far_distance.h` so it could be tested on the
+host -- `tests/shadow_far_distance_tests.cpp` pins what an *absent* setting does,
+because that is the half an experiment-shaped test would never have exercised.
+
+The known cost stands and is unmeasured: cascade 3 now fits twice the ground at the
+same texel budget, so its effective resolution halves. Section 9 is still the
+benchmark to run.
+
 ---
 
 ## 1. Executive verdict

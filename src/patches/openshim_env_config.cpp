@@ -442,6 +442,20 @@ namespace
         {
             return TryReadMappedBool(mainIni, "Network", "LobbyBanButton", false, out);
         }
+        // Persistent per-player mute. Positive key, default ON, so absence keeps
+        // the shipped behaviour: a mute is written to mutes.cfg and reapplied on
+        // later sessions. Off leaves Redux's own per-process mute alone, which is
+        // session-only -- it does not delete an existing mutes.cfg.
+        if (Equals(name, "OPENSHIM_DISABLE_PERSISTENT_PLAYER_MUTE") ||
+            Equals(name, "BZR_DISABLE_PERSISTENT_PLAYER_MUTE"))
+        {
+            return TryReadMappedBool(mainIni, "Network", "PersistentPlayerMute", true, out);
+        }
+        if (Equals(name, "OPENSHIM_ENABLE_PERSISTENT_PLAYER_MUTE") ||
+            Equals(name, "BZR_ENABLE_PERSISTENT_PLAYER_MUTE"))
+        {
+            return TryReadMappedBool(mainIni, "Network", "PersistentPlayerMute", false, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_BZRNET_REAUTH") || Equals(name, "BZR_DISABLE_BZRNET_REAUTH"))
             return TryReadMappedBool(mainIni, "Network", "ReauthOnNicknameChange", true, out);
         if (Equals(name, "OPENSHIM_ENABLE_BZRNET_REAUTH") || Equals(name, "BZR_ENABLE_BZRNET_REAUTH") ||
@@ -449,6 +463,15 @@ namespace
             return TryReadMappedBool(mainIni, "Network", "ReauthOnNicknameChange", false, out);
         // Multiplayer starting-vehicle list: restore the 1.5 "Any Nation = OFF"
         // restricted pool. Positive key, default OFF, so absence is stock.
+        // Terrain detail-atlas rect repair. Positive key, default OFF: the
+        // correction itself is proven against all eleven shipped atlases, but
+        // the open-redirect that delivers it to Redux has not been confirmed
+        // on a live run yet.
+        if (Equals(name, "OPENSHIM_TERRAIN_ATLAS_RECT_REPAIR") ||
+            Equals(name, "BZR_TERRAIN_ATLAS_RECT_REPAIR"))
+        {
+            return TryReadMappedBool(mainIni, "Fixes", "TerrainAtlasRectRepair", false, out);
+        }
         if (Equals(name, "OPENSHIM_STOCK_FACTIONS_ONLY"))
             return TryReadMappedBool(mainIni, "Network", "StockFactionsOnly", false, out);
         if (Equals(name, "OPENSHIM_STOCK_FACTION_SET"))
