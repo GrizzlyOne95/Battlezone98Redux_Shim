@@ -465,6 +465,45 @@ static const float OSE_PBR_SHININESS_SCALE = 1.00;
 static const float OSE_PBR_SPECULAR_ROUGHNESS_INFLUENCE = 0.10;
 static const float OSE_PBR_NORMAL_VARIANCE_SCALE = 0.30;
 static const float OSE_PBR_MAX_VARIANCE_ROUGHNESS = 0.35;
+// -----------------------------------------------------------------------------
+// Enhanced LOD tier
+// -----------------------------------------------------------------------------
+// Enhanced shading used to end at the first LOD boundary rather than simplify
+// across it: every EN tier below High resolved to the legacy program, so
+// crossing 250 units swapped Cook-Torrance for Blinn-Phong in one step. The
+// lower tiers run this shader now, and this define is the only thing that
+// distinguishes them from High besides MAX_LIGHTS, PCF_SIZE and the absent
+// normal map.
+//
+// 0 = High, 1 = Medium, 2 = Low. Lowest is deliberately absent: it is bound to
+// a VERTEX_LIGHTING program, so there is no per-pixel lighting there to make
+// physically based.
+#if !defined(OSE_ENHANCED_LOD_TIER)
+#define OSE_ENHANCED_LOD_TIER 0
+#endif
+
+#if OSE_ENHANCED_LOD_TIER > 0
+// The tiers below High are bound to vertex programs declared without
+// NORMALMAP_ENABLED, so no tangent frame reaches the fragment stage and
+// filter_roughness_from_normal_variance() -- the specular antialiasing on the
+// High path -- has nothing to measure: ddx/ddy of a smoothly interpolated
+// geometric normal is near zero. A low-roughness surface therefore keeps a
+// hard highlight with none of the high-frequency normal detail that justified
+// it, and that highlight crawls as the object moves.
+//
+// This floor replaces the variance filter with the same correction applied
+// open-loop. The values are stated against OSE_PBR_MAX_VARIANCE_ROUGHNESS
+// (0.35), which is the most the filter is ever allowed to add on the High
+// path: Low sits just under that ceiling, Medium about half way to it. They
+// are a starting calibration and want a visual pass at the 250 and 300
+// boundaries, not a proof.
+#if OSE_ENHANCED_LOD_TIER >= 2
+static const float OSE_LOD_MIN_ROUGHNESS = 0.30;
+#else
+static const float OSE_LOD_MIN_ROUGHNESS = 0.18;
+#endif
+#endif
+
 static const float OSE_PBR_DEFAULT_F0 = 0.04;
 static const float OSE_PBR_MAX_LEGACY_F0 = 0.45;
 static const float OSE_PBR_DIFFUSE_COMPENSATION = 2.70;
@@ -1401,6 +1440,9 @@ void terrain_fragment(
         OSE_TERRAIN_PBR_MIN_ROUGHNESS);
 #if defined(NORMALMAP_ENABLED)
     surfaceRoughness = filter_roughness_from_normal_variance(viewNormal, surfaceRoughness);
+#endif
+#if OSE_ENHANCED_LOD_TIER > 0
+    surfaceRoughness = max(surfaceRoughness, OSE_LOD_MIN_ROUGHNESS);
 #endif
     surfaceRoughness = max(surfaceRoughness, OSE_TERRAIN_PBR_MIN_ROUGHNESS);
 #endif
