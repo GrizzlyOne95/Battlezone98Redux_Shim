@@ -68,7 +68,7 @@ const char* const kKnownSections[] = {
     "scrapsiloclass", "seismicwaveclass", "shieldtowerclass", "shockblastclass",
     "smoke", "smoke2", "smokecenter", "smokeeffect", "smokeemit", "smokeemitter",
     "snipergunclass", "snipershellclass", "spawnbuoyclass", "specialitemclass",
-    "spark", "sparkemitter", "spraybombclass", "spraybuildingclass", "steam1",
+    "spark", "sparkemitter", "sphere", "spraybombclass", "spraybuildingclass", "steam1",
     "steam2", "supplydepotclass", "targetinggunclass", "teamswitcherclass",
     "terrainexposeclass", "thermallauncherclass", "thermalmissileclass",
     "torpedoclass", "tracerclass", "trail", "tugclass", "turretcraftclass",
