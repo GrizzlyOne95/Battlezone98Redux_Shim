@@ -54,6 +54,7 @@ int main()
     CHECK(IsKnownSection("GameObjectClass"));
     CHECK(IsKnownSection("Explosion"));
     CHECK(IsKnownSection("Render"));
+    CHECK(IsKnownSection("Sphere"));
     CHECK(IsKnownSection("smokecenter"));
     CHECK(IsKnownSection("MineLayerClass")); // spelling variant, same hash
     CHECK(!IsKnownSection("FlareBuildingClass"));
