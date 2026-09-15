@@ -1,0 +1,247 @@
+[Size]
+MinX=0
+MinZ=0
+Width=5120
+Depth=5120
+Height=0.000000
+
+[NormalView]
+Time=1200
+Lava=1
+FogStart=175
+FogEnd=250
+FogBreak=50
+VisibilityRange=250
+Intensity=90
+Ambient=10
+FlatRange=250
+ShadowLuma=0
+FogDirection=0
+TerrainShadowLuma=20
+CarAmbient=30
+wave=1
+
+[Atlases]
+MaterialName	= io_detail_atlas
+
+[Sky]
+SunTexture=
+SkyType= 1
+SkyHeight = 200
+SkyTexture= jupiter.map
+
+BackdropDistance= 400
+BackdropWidth   = 800
+BackdropHeight  = 100
+
+[Stars]
+Radius		= 500
+
+Texture00   = stars.map
+Size00      = 100
+Azimuth00   = 0
+Elevation00 = 5
+
+Texture01   = stars.map
+Size01      = 100
+Azimuth01   = 15
+Elevation01 = 5
+
+Texture02   = stars.map
+Size02      = 100
+Azimuth02   = 30
+Elevation02 = 5
+
+Texture03   = stars.map
+Size03      = 100
+Azimuth03   = 45
+Elevation03 = 5
+
+Texture04   = stars.map
+Size04      = 100
+Azimuth04   = 60
+Elevation04 = 5
+
+Texture05   = stars.map
+Size05      = 100
+Azimuth05   = 75
+Elevation05 = 5
+
+Texture06   = stars.map
+Size06      = 100
+Azimuth06   = 90
+Elevation06 = 5
+
+Texture07   = stars.map
+Size07      = 100
+Azimuth07   = 105
+Elevation07 = 5
+
+Texture08   = stars.map
+Size08      = 100
+Azimuth08   = 120
+Elevation08 = 5
+
+Texture09   = stars.map
+Size09      = 100
+Azimuth09   = 135
+Elevation09 = 5
+
+Texture10   = stars.map
+Size10      = 100
+Azimuth10   = 150
+Elevation10 = 5
+
+Texture11   = stars.map
+Size11      = 100
+Azimuth11   = 165
+Elevation11 = 5
+
+Texture12   = stars.map
+Size12      = 100
+Azimuth12   = 180
+Elevation12 = 5
+
+Texture13   = stars.map
+Size13      = 100
+Azimuth13   = 195
+Elevation13 = 5
+
+Texture14   = stars.map
+Size14      = 100
+Azimuth14   = 210
+Elevation14 = 5
+
+Texture15   = stars.map
+Size15      = 100
+Azimuth15   = 225
+Elevation15 = 5
+
+Texture16   = stars.map
+Size16      = 100
+Azimuth16   = 240
+Elevation16 = 5
+
+Texture17   = stars.map
+Size17      = 100
+Azimuth17   = 255
+Elevation17 = 5
+
+Texture18   = stars.map
+Size18      = 100
+Azimuth18   = 270
+Elevation18 = 5
+
+Texture19   = stars.map
+Size19      = 100
+Azimuth19   = 285
+Elevation19 = 5
+
+Texture20   = stars.map
+Size20      = 100
+Azimuth20   = 300
+Elevation20 = 5
+
+Texture21   = stars.map
+Size21      = 100
+Azimuth21   = 315
+Elevation21 = 5
+
+Texture22   = stars.map
+Size22      = 100
+Azimuth22   = 330
+Elevation22 = 5
+
+Texture23   = stars.map
+Size23      = 100
+Azimuth23   = 345
+Elevation23 = 5
+
+[Color]
+Palette=IO.ACT
+Luma=IO.LUM
+Translucency=IO.TBL
+Alpha=IO.ALB
+
+[World]
+MusicTrack=8
+
+[TextureType0] // Lava
+FlatColor= 134
+SolidA0        = io00sa0.map
+SolidA1        = io00sa1.map
+SolidA2        = io00sa2.map
+SolidA3        = io00sa3.map
+SolidB0        = io00sa0.map
+SolidB1        = io00sa1.map
+SolidB2        = io00sa2.map
+SolidB3        = io00sa3.map
+SolidC0        = io00sb0.map
+SolidC1        = io00sb1.map
+SolidC2        = io00sb2.map
+SolidC3        = io00sb3.map
+SolidD0        = io00sc0.map
+SolidD1        = io00sc1.map
+SolidD2        = io00sc2.map
+SolidD3        = io00sc3.map
+
+CapTo3_A0      = io03ca0.map
+CapTo3_A1      = io03ca1.map
+CapTo3_A2      = io03ca2.map
+CapTo3_A3      = io03ca3.map
+
+DiagonalTo3_A0 = io03da0.map
+DiagonalTo3_A1 = io03da1.map
+DiagonalTo3_A2 = io03da2.map
+DiagonalTo3_A3 = io03da3.map
+
+CapTo4_A0      = io01ca0.map
+CapTo4_A1      = io01ca1.map
+CapTo4_A2      = io01ca2.map
+CapTo4_A3      = io01ca3.map
+
+DiagonalTo4_A0 = io01da0.map
+DiagonalTo4_A1 = io01da1.map
+DiagonalTo4_A2 = io01da2.map
+DiagonalTo4_A3 = io01da3.map
+
+[TextureType3] // Sulphur deposits
+FlatColor= 112
+SolidA0        = io33sa0.map
+SolidA1        = io33sa1.map
+SolidA2        = io33sa2.map
+SolidA3        = io33sa3.map
+SolidB0        = io33sb0.map
+SolidB1        = io33sb1.map
+SolidB2        = io33sb2.map
+SolidB3        = io33sb3.map
+
+[TextureType4] // Base
+FlatColor= 4
+SolidA0        = io55sa0.map
+SolidA1        = io55sa1.map
+SolidA2        = io55sa2.map
+SolidA3        = io55sa3.map
+SolidB0        = io55sb0.map
+SolidB1        = io55sb1.map
+SolidB2        = io55sb2.map
+SolidB3        = io55sb3.map
+SolidC0        = io55sc0.map
+SolidC1        = io55sc1.map
+SolidC2        = io55sc2.map
+SolidC3        = io55sc3.map
+
+[TextureType5] // Hardened lava
+FlatColor= 208
+SolidA0        = io44sa0.map
+SolidA1        = io44sa1.map
+SolidA2        = io44sa2.map
+SolidA3        = io44sa3.map
+
+[TextureType6] // Lava pool
+FlatColor= 96
+SolidA0        = io11sa0.map
+SolidA1        = io11sa1.map
+SolidA2        = io11sa2.map
+SolidA3        = io11sa3.map
+
