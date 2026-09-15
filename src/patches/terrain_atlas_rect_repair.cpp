@@ -100,7 +100,6 @@ namespace BZROpenShim::TerrainAtlas
 
         std::string FormatWithDecimals(double value, int decimals)
         {
-            char buffer[64] = {};
             // %.*f is locale-sensitive for the decimal point, so format the
             // integer and fractional halves separately and join with a literal
             // '.'. Values here are in 0..1 with at most a handful of places.
@@ -115,16 +114,21 @@ namespace BZROpenShim::TerrainAtlas
             const long long whole = decimals > 0 ? rounded / static_cast<long long>(scale) : rounded;
             const long long frac = decimals > 0 ? rounded % static_cast<long long>(scale) : 0;
 
+            std::string result;
+            if (negative)
+                result.push_back('-');
+            result += std::to_string(whole);
+
             if (decimals > 0)
             {
-                std::snprintf(buffer, sizeof(buffer), "%s%lld.%0*lld",
-                              negative ? "-" : "", whole, decimals, frac);
+                result.push_back('.');
+                const std::string fraction = std::to_string(frac);
+                const std::size_t width = static_cast<std::size_t>(decimals);
+                if (fraction.size() < width)
+                    result.append(width - fraction.size(), '0');
+                result += fraction;
             }
-            else
-            {
-                std::snprintf(buffer, sizeof(buffer), "%s%lld", negative ? "-" : "", whole);
-            }
-            return std::string(buffer);
+            return result;
         }
 
         bool IsOnGrid(double coordinate, double cell)
