@@ -3124,6 +3124,14 @@ namespace BZROpenShim
               ShimSettingApplyGroup::RestartRequired,
               "Ban User button on the multiplayer waiting room. Off leaves BZP/BZP-T's "
               "faction picker alone; /ban still works. Restart required." },
+            // defaultIndex 0 selects "1": an absent key persists, which is what
+            // the feature did before it had a key at all.
+            { "Persistent Mutes", "Network", "PersistentPlayerMute", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::ReadOnNextUse,
+              "Remember muted players across sessions, by stable identity, so a rename "
+              "or reconnect does not undo it. Off is stock: the mute lasts the session. "
+              "Local only; /mute works either way and your mute list is kept." },
             { "Lobby Readouts", "Network", "LobbyReadouts", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::RestartRequired,

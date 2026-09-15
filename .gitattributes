@@ -4,3 +4,8 @@ reverse_engineering/corpus_artifacts/*.zip filter=lfs diff=lfs merge=lfs -text
 # argument -- the pre-commit secret guard printed its refusal and then exited
 # 0, allowing the very commit it had just rejected. Verified 2026-09-05.
 *.sh text eol=lf
+
+# BZ terrain configs are CRLF and are read by the same ANSI parser as the
+# ASCII BZN. A single normalised line ending kills the parse, so preserve the
+# bytes exactly rather than trusting each checkout's core.autocrlf.
+*.trn -text

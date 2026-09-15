@@ -56,7 +56,7 @@ CONF_FILE="$CONF_DIR/upload.conf"
 # check.  It was previously inlined in the meta.txt heredoc only, which is why
 # a tester running V4.91-harvest against a V4.92-arms repo went unnoticed until
 # somebody read a bundle's meta.txt after the fact (2026-08-12).
-WRAPPER_VERSION="OpenShim-upload-20260904"
+WRAPPER_VERSION="OpenShim-upload-20260914"
 
 # Discord's webhook attachment cap is ~10 MB for an unboosted server. Stay
 # under it with room for the multipart envelope.
@@ -423,6 +423,36 @@ detect_crash() {
     return 0
 }
 
+# Describe how the wrapped command ended without promoting every abrupt stop
+# to a game crash. In particular, bash reports SIGINT as 128 + 2 = 130; that
+# is what a terminal Ctrl+C produced in PiercingXX's 2026-09-13 bundle while
+# the game was still writing normal lobby telemetry. A non-empty, session-fresh
+# OpenShim crash report is independent evidence and gets its own classification.
+classify_termination() {
+    local exit_code="$1" logfile="$2" exception_evidence="$3"
+
+    if ! detect_crash "$logfile"; then
+        if [[ "$exception_evidence" == "1" ]]; then
+            echo "clean-with-exception"
+        else
+            echo "clean"
+        fi
+        return 0
+    fi
+
+    if [[ "$exception_evidence" == "1" ]]; then
+        echo "crash-with-exception"
+        return 0
+    fi
+
+    case "$exit_code" in
+        130) echo "interrupted-sigint" ;;
+        143) echo "terminated-sigterm" ;;
+        137) echo "killed-sigkill" ;;
+        *)   echo "abrupt-exit" ;;
+    esac
+}
+
 session_summary() {
     local logfile="$1"
     local map="unknown"
@@ -604,6 +634,12 @@ collect_and_upload() {
              openshim.log openshim_crash.log; do
         harvest_copy "$game_dir" "$f" "$bundle" || true
     done
+    # Windows bundles already carry this. Keep Linux equivalent so a signal,
+    # parking decision, or launch-chain failure can be distinguished from a
+    # game exception without asking the tester for another file.
+    if [[ -f "$LOG_FILE" ]]; then
+        tail -n 200 "$LOG_FILE" >"$bundle/openshim_wrap.log.tail.txt" 2>/dev/null || true
+    fi
     # Capture files persist after the capture that made them, so with logging
     # off a bundle would ship YESTERDAY'S ring looking current (happened
     # 2026-08-03). Only take them if written during this session. Same rule
@@ -618,6 +654,7 @@ collect_and_upload() {
         fi
         cp -f "$src" "$bundle/$f"
     done
+    local fresh_dump_count=0
     if [[ -d "$game_dir/logs" ]]; then
         local dump
         for dump in "$game_dir/logs"/openshim_crash_*.dmp; do
@@ -628,6 +665,7 @@ collect_and_upload() {
                 continue
             fi
             cp -f "$dump" "$bundle/"
+            fresh_dump_count=$((fresh_dump_count + 1))
         done
     fi
 
@@ -637,14 +675,38 @@ collect_and_upload() {
         done
     fi
 
-    # Headline for the Discord message.
-    local crash_flag="" map duration
-    if detect_crash "$bundle/BZLogger.txt"; then
-        crash_flag=" **CRASH** (no \`Exiting Game With Return Code\`)"
-    elif [[ -f "$bundle/openshim_crash.log" && -n "${start_epoch:-}" ]] && \
-         (( $(stat -c %Y "$bundle/openshim_crash.log" 2>/dev/null || echo 0) >= start_epoch )); then
-        crash_flag=" **CRASH** (openshim_crash.log this session)"
+    # InstallCrashLogger creates/truncates openshim_crash.log on every launch.
+    # Existence and a fresh mtime therefore prove only that OpenShim started;
+    # require content (or a fresh dump) before calling it exception evidence.
+    # Check the source because cp gives the bundled copy a current timestamp.
+    local exception_evidence=0 crash_log_source
+    crash_log_source="$(harvested_path "$game_dir" "openshim_crash.log" || true)"
+    if [[ -n "$crash_log_source" && -s "$crash_log_source" && -n "${start_epoch:-}" ]] && \
+       (( $(stat -c %Y "$crash_log_source" 2>/dev/null || echo 0) >= start_epoch )); then
+        exception_evidence=1
     fi
+    (( fresh_dump_count > 0 )) && exception_evidence=1
+
+    local termination_kind status_flag="" map duration
+    termination_kind="$(classify_termination "$exit_code" "$bundle/BZLogger.txt" "$exception_evidence")"
+    echo "termination_kind=$termination_kind" >>"$bundle/meta.txt"
+    echo "exception_evidence=$exception_evidence" >>"$bundle/meta.txt"
+
+    case "$termination_kind" in
+        clean) ;;
+        clean-with-exception)
+            status_flag=" **EXCEPTION** (handled; game logged a clean exit)" ;;
+        interrupted-sigint)
+            status_flag=" **INTERRUPTED** (SIGINT)" ;;
+        terminated-sigterm)
+            status_flag=" **TERMINATED** (SIGTERM)" ;;
+        killed-sigkill)
+            status_flag=" **KILLED** (SIGKILL; crash/OOM/manual kill undetermined)" ;;
+        crash-with-exception)
+            status_flag=" **CRASH** (non-empty OpenShim crash evidence)" ;;
+        *)
+            status_flag=" **ABRUPT EXIT** (no clean-exit marker or crash evidence)" ;;
+    esac
     map="$(session_summary "$bundle/BZLogger.txt")"
     duration="$(( $(date -u +%s) - $(date -u -d "$start_utc" +%s 2>/dev/null || date -u +%s) ))"
 
@@ -653,7 +715,7 @@ collect_and_upload() {
     # sent unless the user opted out with OPENSHIM_UPLOAD_MENU=0. A crash without a
     # map line always goes: dying before the map loads is exactly what needs
     # evidence.
-    if [[ "$map" == "unknown" && -z "$crash_flag" && "${OPENSHIM_UPLOAD_MENU:-1}" == "0" ]]; then
+    if [[ "$map" == "unknown" && -z "$status_flag" && "${OPENSHIM_UPLOAD_MENU:-1}" == "0" ]]; then
         log "no network game this session and no crash; OPENSHIM_UPLOAD_MENU=0 is set, skipping upload"
         rm -rf "$bundle"
         return 0
@@ -661,7 +723,7 @@ collect_and_upload() {
 
     local message
     message="$(printf '%s' "\
-**$player** on \`$host\` — map \`$map\`, $((duration / 60)) min, exit $exit_code$crash_flag")"
+**$player** on \`$host\` — map \`$map\`, $((duration / 60)) min, exit $exit_code$status_flag")"
 
     local tarball="$WORK/$(basename "$bundle").tar.xz"
     # xz because BZLogger runs to tens of megabytes and compresses far under

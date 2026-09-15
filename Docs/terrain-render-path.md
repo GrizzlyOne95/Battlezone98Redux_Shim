@@ -266,6 +266,49 @@ name to a rect, and fills a 256-entry logical-index vector from the global
 16-byte texture-name records. Missing names are logged. If no atlas definition
 is available, it constructs the 8-by-8 fallback.
 
+### Two shipped atlases place four rects off the grid
+
+The definitions are `BZ_ASSETS\common\materials\<xx>_detail_atlas.csv`. Nine of
+the eleven shipped files lay every tile on an exact grid. Two do not:
+
+```
+ac row7 : AC05CB0.MAP,0.875,0.000,0.125,0.125    on-grid
+io row7 : IO01DA0.MAP,0.875,0.000,0.125,0.125    on-grid
+ma row7 : MA01DA0.MAP,0.875,0.000,0.125,0.125    on-grid
+el row7 : EL01DA0.MAP,0.825,0,0.125,0.125        off-grid
+ga row7 : GA04DA0.MAP,0.825,0,0.125,0.125        off-grid
+```
+
+`0.825` is a typo for `0.875`, on rows 7 and 15 of both `el_detail_atlas.csv`
+and `ga_detail_atlas.csv` — four rects. At width `0.125` the rect spans
+`0.825..0.950`, straddling the cell boundary at `0.875`, so the tile samples the
+right 40% of one atlas cell and the left 60% of the next. That matches the
+"only the right/top half of the texture is wrong" shape reported in
+BlackDragonN001/BZ98ReduxBugTracker#52.
+
+The identical bytes are present in the macOS Steam depot under
+`BZR64_RESEARCH/`, so this is upstream in Redux rather than a local corruption.
+These are the two atlases whose materials ship under `materials/TRO/`.
+
+Note this is **not** the 1/160 quantization path: `0.825 * 160 = 132` and
+`0.95 * 160 = 152` are both exact, so the rect quantizes evenly and still
+lands in the wrong place. The two defects are independent.
+
+`src/patches/terrain_atlas_rect_repair.cpp` corrects this at the file open
+rather than by patching the parsed rect table, because the open is a public ABI
+already hooked for TRN normalization while the parser is a private native
+method. Redux is handed a corrected copy under `openshim\_generated\atlas\`;
+the shipped file is never written. It is gated behind `[Fixes]
+TerrainAtlasRectRepair`, default off, and reports every decision under
+`[ATLASFIX]`.
+
+Only a file that is demonstrably a uniform grid everywhere else is touched, and
+only a coordinate with a single strictly-nearest cell is moved, so a
+deliberately packed atlas — which this format allows — is left as authored.
+Running the correction over all eleven shipped CSVs repairs `el` and `ga` at
+lines 8 and 16 with the byte length unchanged, and reports `already-correct` for
+the other nine.
+
 ### Recovering `tileIndex + localUV`
 
 Before packing, the exact future representation is already available:
