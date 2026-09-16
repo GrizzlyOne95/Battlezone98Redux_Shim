@@ -33,7 +33,7 @@
       "expected_size": 5,
       "fallback": "0x00000000",
       "require_unique": true,
-      "identity": "Engine UseItem(name) thunk at 0x00481AF0 in GOG battlezone98redux.exe SHA256 8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413. FileData ctor 0x588E00 calls it at 0x588E72 and uses the result as the ODF parse source; call sites clean one pushed argument (add esp,4): __cdecl(const char*). Worker body at 0x481B10 is unique via the B9 01000000 / 6B D100 / 6A04 loader sequence. Verified unique single-match by whole-image scan on 2026-09-14; live [RESOLVE] confirmation via a harness run is still pending, so there is deliberately no fallback: a miss keeps stock behavior."
+      "identity": "Engine UseItem(name) thunk at 0x00481AF0 in GOG battlezone98redux.exe SHA256 8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413. FileData ctor 0x588E00 calls it at 0x588E72 and uses the result as the ODF parse source; call sites clean one pushed argument (add esp,4): __cdecl(const char*). Worker body at 0x481B10 is unique via the B9 01000000 / 6B D100 / 6A04 loader sequence. Verified unique single-match by whole-image scan on 2026-09-14; live bytes confirmed via Frida read on GOG 8D71F56C (ImageBase 0x400000, no ASLR) during a harness-gated windowed run on 2026-09-15 (entry bytes match exactly; FileData filename hook also installed cleanly): a miss keeps stock behavior."
     },
     {
       "name": "ODF GetItemSize Hook",
@@ -45,7 +45,7 @@
       "expected_size": 5,
       "fallback": "0x00000000",
       "require_unique": true,
-      "identity": "Engine GetItemSize(name) thunk at 0x00481A60 in the same GOG build. FileData ctor 0x588E00 calls it at 0x588E60 and feeds the result to malloc for the parse buffer. Same thunk shape as UseItem; disambiguated by the worker prologue (83 EC 0C) and the EB 33 tail sequence. Verified unique single-match by whole-image scan on 2026-09-14; no fallback (fail closed), live [RESOLVE] confirmation pending."
+      "identity": "Engine GetItemSize(name) thunk at 0x00481A60 in the same GOG build. FileData ctor 0x588E00 calls it at 0x588E60 and feeds the result to malloc for the parse buffer. Same thunk shape as UseItem; disambiguated by the worker prologue (83 EC 0C) and the EB 33 tail sequence. Verified unique single-match by whole-image scan on 2026-09-14; live bytes confirmed via Frida read on GOG 8D71F56C during a harness-gated windowed run on 2026-09-15; no fallback (fail closed), FileData filename hook installed cleanly in the same session."
     },
     {
       "name": "ODF UnlockItem Hook",
@@ -57,7 +57,7 @@
       "expected_size": 5,
       "fallback": "0x00000000",
       "require_unique": true,
-      "identity": "Engine UnlockItem(name) thunk at 0x00481990 in the same GOG build. FileData ctor 0x588E00 calls it at 0x5893B4 after parsing. Disambiguated by the worker prologue (55 8B EC 51) and the short call-plus-epilogue tail. Verified unique single-match by whole-image scan on 2026-09-14; no fallback (fail closed), live [RESOLVE] confirmation pending."
+      "identity": "Engine UnlockItem(name) thunk at 0x00481990 in the same GOG build. FileData ctor 0x588E00 calls it at 0x5893B4 after parsing. Disambiguated by the worker prologue (55 8B EC 51) and the short call-plus-epilogue tail. Verified unique single-match by whole-image scan on 2026-09-14; live bytes confirmed via Frida read on GOG 8D71F56C during a harness-gated windowed run on 2026-09-15; no fallback (fail closed), FileData filename hook installed cleanly in the same session."
     },
     {
       "name": "Editor World Map Resource Lifetime Guard",
