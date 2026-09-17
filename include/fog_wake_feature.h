@@ -16,7 +16,7 @@ namespace BZROpenShim
 
     // Mission run-state transitions. Emitter identity is a raw engine pointer,
     // so a session boundary must discard tracking as well as the field.
-    void FogWakeNotifyMissionRunStateChanged(bool running);
+    void FogWakeNotifyMissionRunStateChanged(bool running, void* sceneManager);
 
     // Reports where an emitter is now, in world XZ. Never simulates: safe from a
     // hook that runs more than once per simulation step.
@@ -25,5 +25,5 @@ namespace BZROpenShim
     // Advances the simulation to the current time. Safe to call once per camera:
     // the runtime steps a fixed cadence off a monotonic clock, so extra calls
     // within one tick do nothing.
-    void FogWakeRenderFrameTick();
+    void FogWakeRenderFrameTick(void* sceneManager);
 }
