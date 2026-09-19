@@ -897,6 +897,26 @@ namespace BZROpenShim
         };
         for (auto& p : patches) {
             if (p.type != HookEngine::PatchType::JMP5 || !p.verified) continue;
+            // The ODF item detours cannot serve a request without a trampoline
+            // back to the engine loader: with no original they answer null/0 for
+            // EVERY item, not just ODFs, which takes the sprite and font tables
+            // with it. Resolve the original here, where the patch is actually
+            // processed, and stand the hook down if that fails so the detour is
+            // never written. (These installs used to live in FillRel32Payloads,
+            // which skips them - they are JMP5 - so the originals stayed null
+            // and every item load returned null.)
+            if (p.name.rfind("ODF ", 0) == 0) {
+                const bool installed =
+                    (p.name == "ODF UseItem Hook")     ? OdfInstallUseItemHook(p.address) :
+                    (p.name == "ODF GetItemSize Hook") ? OdfInstallGetItemSizeHook(p.address) :
+                    (p.name == "ODF UnlockItem Hook")  ? OdfInstallUnlockItemHook(p.address) : true;
+                if (!installed) {
+                    Log(L"[ODF] %hs: original-call trampoline unavailable at 0x%08X; leaving stock loader\n",
+                        p.name.c_str(), p.address);
+                    p.verified = false;
+                    continue;
+                }
+            }
             for (auto& x : m) {
                 if (p.name == x.n) {
                     size_t l = (p.name.find("Turret") != std::string::npos && p.name.find("Pitch") != std::string::npos) ? 8 : (p.name.find("Reveal") != std::string::npos ? 12 : (p.name.find("Volley") != std::string::npos ? 6 : (p.name.find("Attack Alert") != std::string::npos ? 52 : 5)));
@@ -1033,19 +1053,6 @@ namespace BZROpenShim
                 if (!SunFlash::VerifyCallSite(isSteam ? 300 : 1, 10)) { Log(L"[SUNFLASH] call site verify failed at 0x%08X; leaving stock flash in place\n", p.address); continue; }
                 SunFlash::LoadConfig();
                 target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(SunFlash::ThunkAddress()));
-            }
-            else if (p.name == "ODF UseItem Hook") {
-                // Build the original-call trampoline from pristine bytes now;
-                // the generic JMP5 writer redirects the site afterwards via
-                // FillJmp5Payloads. Any failure stands the hook down here so
-                // a half-installed detour can never serve stock bytes.
-                if (!OdfInstallUseItemHook(p.address)) { Log(L"[ODF] UseItem site 0x%08X failed verification; leaving stock loader\n", p.address); p.address = 0; p.verified = false; continue; }
-            }
-            else if (p.name == "ODF GetItemSize Hook") {
-                if (!OdfInstallGetItemSizeHook(p.address)) { Log(L"[ODF] GetItemSize site 0x%08X failed verification; leaving stock loader\n", p.address); p.address = 0; p.verified = false; continue; }
-            }
-            else if (p.name == "ODF UnlockItem Hook") {
-                if (!OdfInstallUnlockItemHook(p.address)) { Log(L"[ODF] UnlockItem site 0x%08X failed verification; leaving stock loader\n", p.address); p.address = 0; p.verified = false; continue; }
             }
             else if (p.name.find("Damage Reveal Probe") != std::string::npos) target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(DamageRevealProbeHook));
             else if (p.name == "Splinter Emitter Owner Propagation") {

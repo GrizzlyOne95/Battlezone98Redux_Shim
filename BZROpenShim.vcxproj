@@ -251,6 +251,7 @@
     <ClInclude Include="include\mp_ready_diagnostic.h" />
     <ClInclude Include="include\odf_compat.h" />
     <ClInclude Include="include\odf_item_hooks.h" />
+    <ClInclude Include="include\odf_item_prologue.h" />
     <ClInclude Include="include\BZROpenShim.h" />
     <ClInclude Include="include\openshim_events.h" />
     <ClInclude Include="include\openshim_sdk_v2.h" />
