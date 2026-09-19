@@ -160,8 +160,10 @@
     <ClCompile Include="src\patches\ogre_shader_cache.cpp" />
     <ClCompile Include="src\patches\ogre_enhanced_light_selection.cpp" />
     <ClCompile Include="src\patches\ogre_render_profile.cpp" />
+    <ClCompile Include="src\patches\render_effect_intent_exports.cpp" />
     <ClCompile Include="src\engine\fog_wake.cpp" />
     <ClCompile Include="src\engine\render_profile.cpp" />
+    <ClCompile Include="src\engine\render_effect_intent.cpp" />
     <ClCompile Include="src\engine\backend_selection.cpp" />
     <ClCompile Include="src\engine\render_profile_resources.cpp" />
     <ClCompile Include="src\engine\openshim_assets.cpp" />
@@ -194,6 +196,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
+    <ClInclude Include="include\render_effect_intent.h" />
     <ClInclude Include="include\fog_wake.h" />
     <ClInclude Include="include\fog_wake_runtime.h" />
     <ClInclude Include="include\fog_wake_feature.h" />
