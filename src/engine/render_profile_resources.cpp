@@ -32,6 +32,8 @@ namespace BZROpenShim::RenderProfiles
             "openshim_enhanced_terrain_glow-fragment.glsl",
             "openshim_enhanced_terrain_glow-sm3.hlsl",
             "openshim_enhanced_terrain_glow-sm4.hlsl",
+            "openshim_dx11_fixedfunc.program",
+            "openshim_dx11_fixedfunc-sm4.hlsl",
             "openshim_ibl_brdf_lut.dds",
             "openshim_ibl_neutral_irradiance.dds",
             "openshim_ibl_neutral_prefilter.dds",

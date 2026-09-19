@@ -155,6 +155,11 @@ add_executable(render_profile_resources_tests
     ../src/engine/render_profile_resources.cpp
 )
 
+add_executable(dx11_legacy_material_compat_tests
+    dx11_legacy_material_compat_tests.cpp
+    ../src/engine/dx11_legacy_material_compat.cpp
+)
+
 add_executable(openshim_assets_tests
     openshim_assets_tests.cpp
     ../src/engine/openshim_assets.cpp
@@ -274,6 +279,8 @@ target_include_directories(request_apply_tracker_tests PRIVATE ../include)
 target_compile_features(request_apply_tracker_tests PRIVATE cxx_std_20)
 target_include_directories(render_profile_resources_tests PRIVATE ../include)
 target_compile_features(render_profile_resources_tests PRIVATE cxx_std_20)
+target_include_directories(dx11_legacy_material_compat_tests PRIVATE ../include)
+target_compile_features(dx11_legacy_material_compat_tests PRIVATE cxx_std_20)
 target_include_directories(openshim_assets_tests PRIVATE ../include)
 target_compile_features(openshim_assets_tests PRIVATE cxx_std_20)
 
@@ -281,17 +288,20 @@ if(MSVC)
     target_compile_options(render_profile_tests PRIVATE /W4 /WX)
     target_compile_options(request_apply_tracker_tests PRIVATE /W4 /WX)
     target_compile_options(render_profile_resources_tests PRIVATE /W4 /WX)
+    target_compile_options(dx11_legacy_material_compat_tests PRIVATE /W4 /WX)
     target_compile_options(openshim_assets_tests PRIVATE /W4 /WX)
 else()
     target_compile_options(render_profile_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(request_apply_tracker_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(render_profile_resources_tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(dx11_legacy_material_compat_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(openshim_assets_tests PRIVATE -Wall -Wextra -Werror)
 endif()
 
 add_test(NAME render_profile_tests COMMAND render_profile_tests)
 add_test(NAME request_apply_tracker_tests COMMAND request_apply_tracker_tests)
 add_test(NAME render_profile_resources_tests COMMAND render_profile_resources_tests)
+add_test(NAME dx11_legacy_material_compat_tests COMMAND dx11_legacy_material_compat_tests)
 add_test(NAME openshim_assets_tests COMMAND openshim_assets_tests)
 
 # CLI parser parity defect model (PR #69). This test is engine-independent:
