@@ -2664,7 +2664,7 @@ fragment_program OSE_BaseENLowNoShadow_fragment unified
 {
 	delegate OSE_BaseLowNoShadow_fragmentGLSLES
 	delegate OSE_BaseLowNoShadow_fragmentGLSL
-	delegate OSE_BaseLowNoShadow_fragmentHLSL4
+	delegate OSE_BaseENLowNoShadow_fragmentHLSL4
 	delegate OSE_BaseLowNoShadow_fragmentHLSL
 	default_params
 	{
@@ -2687,7 +2687,7 @@ fragment_program OSE_BaseENLowShadow_fragment unified
 {
 	delegate OSE_BaseLowShadow_fragmentGLSLES
 	delegate OSE_BaseLowShadow_fragmentGLSL
-	delegate OSE_BaseLowShadow_fragmentHLSL4
+	delegate OSE_BaseENLowShadow_fragmentHLSL4
 	delegate OSE_BaseLowShadow_fragmentHLSL
 	default_params
 	{
@@ -2711,7 +2711,7 @@ fragment_program OSE_BaseENLowPSSM_fragment unified
 {
 	delegate OSE_BaseLowPSSM_fragmentGLSLES
 	delegate OSE_BaseLowPSSM_fragmentGLSL
-	delegate OSE_BaseLowPSSM_fragmentHLSL4
+	delegate OSE_BaseENLowPSSM_fragmentHLSL4
 	delegate OSE_BaseLowPSSM_fragmentHLSL
 	default_params
 	{
@@ -2738,7 +2738,7 @@ fragment_program OSE_BaseENMediumNoShadow_fragment unified
 {
 	delegate OSE_BaseMediumNoShadow_fragmentGLSLES
 	delegate OSE_BaseMediumNoShadow_fragmentGLSL
-	delegate OSE_BaseMediumNoShadow_fragmentHLSL4
+	delegate OSE_BaseENMediumNoShadow_fragmentHLSL4
 	delegate OSE_BaseMediumNoShadow_fragmentHLSL
 	default_params
 	{
@@ -2762,7 +2762,7 @@ fragment_program OSE_BaseENMediumShadow_fragment unified
 {
 	delegate OSE_BaseMediumShadow_fragmentGLSLES
 	delegate OSE_BaseMediumShadow_fragmentGLSL
-	delegate OSE_BaseMediumShadow_fragmentHLSL4
+	delegate OSE_BaseENMediumShadow_fragmentHLSL4
 	delegate OSE_BaseMediumShadow_fragmentHLSL
 	default_params
 	{
@@ -2787,7 +2787,7 @@ fragment_program OSE_BaseENMediumPSSM_fragment unified
 {
 	delegate OSE_BaseMediumPSSM_fragmentGLSLES
 	delegate OSE_BaseMediumPSSM_fragmentGLSL
-	delegate OSE_BaseMediumPSSM_fragmentHLSL4
+	delegate OSE_BaseENMediumPSSM_fragmentHLSL4
 	delegate OSE_BaseMediumPSSM_fragmentHLSL
 	default_params
 	{
@@ -2891,7 +2891,72 @@ fragment_program OSE_BaseENHighPSSM_fragment unified
 	}
 }
 
+// -----------------------------------------------------------------------------
+// Enhanced Medium and Low tiers
+// -----------------------------------------------------------------------------
+// These exist because the EN tiers below High used to be names for the legacy
+// programs, so Enhanced shading ended at the first LOD boundary instead of
+// simplifying across it. Each one is the LEGACY tier's defines verbatim plus
+// the Enhanced set: the pass that binds it was built for the legacy program,
+// so its texture registers, sampler slots and light-array size are what the
+// fragment has to expect. In particular the bound vertex program declares no
+// NORMALMAP_ENABLED, so there is no tangent frame to read.
+//
+// Only the HLSL4 delegate of the matching unified program is repointed at
+// these. GLSL, GLSLES and HLSL keep their legacy delegates, so DX9 and GL are
+// untouched.
+// -----------------------------------------------------------------------------
 
+fragment_program OSE_BaseENMediumNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
 
+	preprocessor_defines MAX_LIGHTS=8,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=1
+}
 
+fragment_program OSE_BaseENMediumShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
 
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=1
+}
+
+fragment_program OSE_BaseENMediumPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=1
+}
+
+fragment_program OSE_BaseENLowNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=2
+}
+
+fragment_program OSE_BaseENLowShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=2
+}
+
+fragment_program OSE_BaseENLowPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+
+	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=2
+}
