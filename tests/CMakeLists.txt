@@ -373,3 +373,16 @@ else()
 endif()
 add_test(NAME odf_compat_tests COMMAND odf_compat_tests)
 
+add_executable(enhanced_resource_bootstrap_tests
+    enhanced_resource_bootstrap_tests.cpp
+    ../src/engine/enhanced_resource_bootstrap.cpp
+)
+
+target_include_directories(enhanced_resource_bootstrap_tests PRIVATE ../include)
+target_compile_features(enhanced_resource_bootstrap_tests PRIVATE cxx_std_20)
+if(MSVC)
+    target_compile_options(enhanced_resource_bootstrap_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(enhanced_resource_bootstrap_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME enhanced_resource_bootstrap_tests COMMAND enhanced_resource_bootstrap_tests)

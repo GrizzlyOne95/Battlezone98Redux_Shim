@@ -19,6 +19,7 @@
 #include "render_profile_runtime.h"
 #include "backend_selection.h"
 #include "dx11_legacy_material_compat.h"
+#include "enhanced_resource_bootstrap.h"
 #include "openshim_assets.h"
 #include "render_profile_resources.h"
 #include "render_profile_request_tracker.h"
@@ -2133,6 +2134,216 @@ namespace BZROpenShim::RenderProfiles
             }
         }
 
+        // ---- OpenShim-owned Enhanced resource bootstrap ---------------------
+        //
+        // OpenShim ships the Enhanced payload but nothing ever registered it
+        // with Ogre: bz_resources.cfg names only ./BZ_ASSETS and
+        // ./BZ_ASSETS_CORE, so on an install without Campaign Reimagined the
+        // OSE_* .program declarations sit on disk unparsed and every OSE_*
+        // name is absent at runtime. A live DX11 run proved it -- all 81
+        // synthesis attempts declined with reason=program-absent while all 26
+        // payload files were present on disk. CR's own resource config is
+        // what pulled the directory in, which is precisely the dependency
+        // Docs/ENHANCED_RENDERER_MATERIAL_OWNERSHIP.md forbids.
+        //
+        // The directory is never hardcoded. Assets::ProbeEnhancedResourcesAt
+        // already searches the game-root developer deployment, addon/, mods/,
+        // packaged_mods/ and Steam Workshop content and returns whichever one
+        // validated; this registers exactly that.
+        //
+        // The group is private on purpose. The game clears and re-initialises
+        // "Modable" on every mod staging cycle (see
+        // reverse_engineering/standalone_enhanced_resource_bootstrap_20260825.md
+        // section 2.2), which would drop OpenShim's payload mid-session.
+
+        namespace Boot = EnhancedBootstrap;
+
+        // Defined with the synthesis refusal policy below; the
+        // bootstrap needs it to verify the payload really parsed.
+        bool GuardedProgramExists(const std::string* name);
+
+        using FnRgmGetSingletonPtr = void* (*)();
+        using FnRgmGroupExists = bool(__thiscall*)(void*, const std::string&);
+        using FnRgmCreateGroup =
+            void(__thiscall*)(void*, const std::string&, bool);
+        using FnRgmAddLocation = void(__thiscall*)(void*, const std::string&,
+                                                   const std::string&,
+                                                   const std::string&, bool,
+                                                   bool);
+        using FnRgmInitialiseGroup =
+            void(__thiscall*)(void*, const std::string&);
+
+        struct OgreResourceGroupApi
+        {
+            FnRgmGetSingletonPtr getSingleton = nullptr;
+            FnRgmGroupExists groupExists = nullptr;
+            FnRgmCreateGroup createGroup = nullptr;
+            FnRgmAddLocation addLocation = nullptr;
+            FnRgmInitialiseGroup initialiseGroup = nullptr;
+
+            bool Valid() const
+            {
+                return getSingleton != nullptr && groupExists != nullptr &&
+                       createGroup != nullptr && addLocation != nullptr &&
+                       initialiseGroup != nullptr;
+            }
+        };
+
+        // Same export names bzr_hooks.cpp already uses for the chunk payload
+        // roots; this deliberately reuses that proven surface rather than
+        // introducing a second ABI wrapper for the same manager.
+        const OgreResourceGroupApi& ResourceGroupApi()
+        {
+            static const OgreResourceGroupApi api = [] {
+                OgreResourceGroupApi resolved;
+                resolved.getSingleton =
+                    ResolveOgreExport<FnRgmGetSingletonPtr>(
+                        "?getSingletonPtr@ResourceGroupManager@Ogre@@SAPAV12@XZ");
+                resolved.groupExists = ResolveOgreExport<FnRgmGroupExists>(
+                    "?resourceGroupExists@ResourceGroupManager@Ogre@@QAE_NABV?$"
+                    "basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+                resolved.createGroup = ResolveOgreExport<FnRgmCreateGroup>(
+                    "?createResourceGroup@ResourceGroupManager@Ogre@@QAEXABV?$"
+                    "basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@_N@Z");
+                resolved.addLocation = ResolveOgreExport<FnRgmAddLocation>(
+                    "?addResourceLocation@ResourceGroupManager@Ogre@@QAEXABV?$"
+                    "basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@00_N1@Z");
+                resolved.initialiseGroup =
+                    ResolveOgreExport<FnRgmInitialiseGroup>(
+                        "?initialiseResourceGroup@ResourceGroupManager@Ogre@@QAEXABV?$"
+                        "basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+                return resolved;
+            }();
+            return api;
+        }
+
+        std::atomic<int> s_enhancedBootstrapState {
+            static_cast<int>(Boot::BootstrapState::NotAttempted) };
+
+        bool RegisterEnhancedResourceGroup(const std::string& resourceDir,
+                                           std::string& outDetail)
+        {
+            const OgreResourceGroupApi& api = ResourceGroupApi();
+            void* manager = api.getSingleton();
+            if (manager == nullptr)
+            {
+                outDetail = "ResourceGroupManager singleton not up yet";
+                return false;
+            }
+            const std::string group = Boot::ResourceGroupName();
+            const std::string type = Boot::ResourceLocationType();
+            try
+            {
+                if (!api.groupExists(manager, group))
+                {
+                    api.createGroup(manager, group, false);
+                }
+                // recursive=true so the payload's subdirectories are indexed;
+                // readOnly=true because OpenShim never writes into it.
+                api.addLocation(manager, resourceDir, type, group, true, true);
+                api.initialiseGroup(manager, group);
+                return true;
+            }
+            catch (...)
+            {
+                outDetail = "exception while registering the resource location";
+                return false;
+            }
+        }
+
+        // Idempotent. Runs at most once per process: a failure is as final as
+        // a success, so nothing here can repeat per draw or per material.
+        Boot::BootstrapState EnsureEnhancedResourceGroup()
+        {
+            int expected = static_cast<int>(Boot::BootstrapState::NotAttempted);
+            if (!s_enhancedBootstrapState.compare_exchange_strong(
+                    expected,
+                    static_cast<int>(Boot::BootstrapState::Attempting),
+                    std::memory_order_acq_rel,
+                    std::memory_order_acquire))
+            {
+                return static_cast<Boot::BootstrapState>(expected);
+            }
+
+            Boot::BootstrapObservations obs;
+            std::string detail;
+            std::string resolvedDir;
+
+            const std::filesystem::path gameDir = GetMainModuleDirectory();
+            if (gameDir.empty())
+            {
+                detail = "main module directory unknown";
+            }
+            else
+            {
+                std::string problem;
+                std::filesystem::path resourceDir;
+                if (Assets::ProbeEnhancedResourcesAt(gameDir, problem,
+                                                     &resourceDir) &&
+                    !resourceDir.empty())
+                {
+                    obs.probeResolvedDirectory = true;
+                    resolvedDir = resourceDir.string();
+                }
+                else
+                {
+                    detail = problem.empty() ? "no OpenShim asset package found"
+                                             : problem;
+                }
+            }
+
+            if (obs.probeResolvedDirectory)
+            {
+                obs.ogreApiResolved = ResourceGroupApi().Valid();
+                if (!obs.ogreApiResolved)
+                {
+                    detail = "ResourceGroupManager exports unavailable";
+                }
+                else
+                {
+                    obs.groupRegistered =
+                        RegisterEnhancedResourceGroup(resolvedDir, detail);
+                }
+            }
+
+            if (obs.groupRegistered)
+            {
+                // Creating and initialising a group succeeds just as happily
+                // for an empty or wrong directory, so prove one real program
+                // is actually there before claiming the capability.
+                const std::string canonical = Boot::CanonicalProbeProgram();
+                obs.canonicalProgramResolved = GuardedProgramExists(&canonical);
+                if (!obs.canonicalProgramResolved)
+                {
+                    detail = "payload parsed no OSE programs";
+                }
+            }
+
+            const Boot::BootstrapState decided = Boot::DecideBootstrapState(obs);
+            s_enhancedBootstrapState.store(static_cast<int>(decided),
+                                           std::memory_order_release);
+            if (decided == Boot::BootstrapState::Ready)
+            {
+                LogShimA(LogLevel::Info, kLogTag, "%s",
+                         Boot::FormatBootstrapReadyLog(resolvedDir).c_str());
+            }
+            else
+            {
+                // One concise diagnostic; the dependent path stays disabled and
+                // the game continues normally.
+                LogShimA(LogLevel::Warn, kLogTag, "%s",
+                         Boot::FormatBootstrapFailedLog(obs, detail).c_str());
+            }
+            return decided;
+        }
+
+        bool EnhancedResourcesAvailable()
+        {
+            return Boot::IsEnhancedCapabilityAvailable(
+                static_cast<Boot::BootstrapState>(
+                    s_enhancedBootstrapState.load(std::memory_order_acquire)));
+        }
+
         // ---- synthesis refusal policy and diagnostics ----------------------
 
         // Sentinel for a material whose Resource::getName could not be read.
@@ -2200,17 +2411,19 @@ namespace BZROpenShim::RenderProfiles
 
         // Does a GPU program of this name actually exist?
         //
-        // Pass::setVertexProgram resolves the name through GpuProgramManager
-        // and throws ItemIdentityException on a miss. Catching that after the
-        // fact is not good enough -- Ogre has already allocated a
-        // GpuProgramUsage on the pass, leaving the material half-mutated.
-        using FnGpuProgramManagerGetSingletonPtr = void* (*)();
+        // Pass::setVertexProgram resolves the name through GpuProgramManager,
+        // which checks HighLevelGpuProgramManager first for the hlsl/glsl/
+        // unified declarations loaded from .program scripts, and throws
+        // ItemIdentityException on a miss. Catching that after the fact is not
+        // good enough -- Ogre has already allocated a GpuProgramUsage on the
+        // pass, leaving the material half-mutated.
+        using FnHighLevelGpuProgramManagerGetSingletonPtr = void* (*)();
         using FnResourceManagerResourceExists =
             bool(__thiscall*)(void*, const std::string&);
 
         struct OgreProgramLookupApi
         {
-            FnGpuProgramManagerGetSingletonPtr getManager = nullptr;
+            FnHighLevelGpuProgramManagerGetSingletonPtr getManager = nullptr;
             FnResourceManagerResourceExists resourceExists = nullptr;
 
             bool Valid() const
@@ -2226,9 +2439,16 @@ namespace BZROpenShim::RenderProfiles
         {
             static const OgreProgramLookupApi api = [] {
                 OgreProgramLookupApi resolved;
+                // .program declarations create HighLevelGpuProgram resources
+                // (hlsl/glsl/unified). GpuProgramManager::getByName delegates
+                // to this manager, but ResourceManager::resourceExists called
+                // on GpuProgramManager only inspects its low-level map. Using
+                // the low-level singleton here therefore reported every parsed
+                // OSE program absent even though Pass::setProgramName could
+                // resolve it through the high-level manager.
                 resolved.getManager =
-                    ResolveOgreExport<FnGpuProgramManagerGetSingletonPtr>(
-                        "?getSingletonPtr@GpuProgramManager@Ogre@@SAPAV12@XZ");
+                    ResolveOgreExport<FnHighLevelGpuProgramManagerGetSingletonPtr>(
+                        "?getSingletonPtr@HighLevelGpuProgramManager@Ogre@@SAPAV12@XZ");
                 // "UAE": resourceExists is virtual and non-const in 1.10.
                 resolved.resourceExists =
                     ResolveOgreExport<FnResourceManagerResourceExists>(
@@ -2319,7 +2539,7 @@ namespace BZROpenShim::RenderProfiles
             if (!GuardedProgramExists(&targetVs) ||
                 !GuardedProgramExists(&targetPs))
             {
-                // Ask GpuProgramManager rather than letting
+                // Ask HighLevelGpuProgramManager rather than letting
                 // Pass::setVertexProgram throw: by the time it throws, Ogre
                 // has already allocated a GpuProgramUsage on the pass, so
                 // the material is left half-mutated. On an install without
@@ -2419,15 +2639,23 @@ namespace BZROpenShim::RenderProfiles
             {
                 return nullptr;
             }
-            if (!s_resourcesValidAtomic.load(std::memory_order_acquire))
+            const bool filesValid =
+                s_resourcesValidAtomic.load(std::memory_order_acquire);
+            const bool bootstrapReady = EnhancedResourcesAvailable();
+            if (!filesValid || !bootstrapReady)
             {
                 CompatProbeState& state = ProbeState();
                 if (!state.resourcesWarned.exchange(true,
                                                     std::memory_order_acq_rel))
                 {
                     LogShimA(LogLevel::Warn, kLogTag,
-                             "[DX11COMPAT] probe disabled: renderer resources "
-                             "invalid; failing closed to stock fallback");
+                             "[DX11COMPAT] probe disabled: renderer files=%s "
+                             "OSE-bootstrap=%s; failing closed to stock fallback",
+                             filesValid ? "valid" : "invalid",
+                             Boot::BootstrapStateName(
+                                 static_cast<Boot::BootstrapState>(
+                                     s_enhancedBootstrapState.load(
+                                         std::memory_order_acquire))));
                 }
                 return nullptr;
             }
@@ -2704,6 +2932,12 @@ namespace BZROpenShim::RenderProfiles
             // displacing anything the game or a mod installed.
             const std::string anyScheme;
             addListener(materialManager, &s_listener, anyScheme);
+
+            // Ogre's Root and ResourceGroupManager are definitely up by
+            // the time MaterialManager hands out a singleton, so this is
+            // the earliest safe point to register OpenShim's own payload.
+            // Idempotent: it runs at most once per process.
+            EnsureEnhancedResourceGroup();
             return true;
         }
 
