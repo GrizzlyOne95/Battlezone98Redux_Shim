@@ -1,0 +1,355 @@
+// OpenShim DX11 fixed-function compatibility programs (SM4-only).
+// Ships for Docs/DX11_LEGACY_MATERIAL_COMPATIBILITY.md Levels 1-2.
+//
+// OSE_FixedFunc_* emulate the bounded fixed-function support set (0 units;
+// 1 unit with modulate/replace/add/alpha_blend, texture matrix, fog, alpha).
+// OSE_Compat_* are the known legacy BZR/SM2/3 family adapters (Effect,
+// Textured, Untextured, Sky, Base, SimpleOneTex, Ui, Terrain). They share the
+// fixed-function SM4 implementation with a COMPAT_FAMILY define recording
+// which legacy family selected them, so per-family tuning lands here without
+// touching the resolver or rewriting mod files on disk.
+//
+// DX9 never loads this file: the runtime probe is DX11-gated and stock DX9
+// keeps its fixed pipeline. Uniform names must match
+// openshim_dx11_fixedfunc-sm4.hlsl exactly; Ogre binds them through the
+// default_params auto constants below.
+
+// ---------------------------------------------------------------------------
+// Core fixed-function SM4 programs
+// ---------------------------------------------------------------------------
+
+vertex_program OSE_FixedFunc_Textured_vertex hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target vs_4_0
+    entry_point fixedfunc_vertex
+    default_params
+    {
+        param_named_auto wvpMat worldviewproj_matrix
+        param_named_auto texMatrix texture_matrix 0
+        param_named_auto diffuseColor surface_diffuse_colour
+    }
+}
+
+fragment_program OSE_FixedFunc_Textured_fragment hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc_fragment
+    default_params
+    {
+        param_named diffuseMap int 0
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+    }
+}
+
+fragment_program OSE_FixedFunc_Textured_fragment_replace hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc_fragment
+
+    preprocessor_defines COMPAT_OP_REPLACE
+    default_params
+    {
+        param_named diffuseMap int 0
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+    }
+}
+
+fragment_program OSE_FixedFunc_Textured_fragment_add hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc_fragment
+
+    preprocessor_defines COMPAT_OP_ADD
+    default_params
+    {
+        param_named diffuseMap int 0
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+    }
+}
+
+vertex_program OSE_FixedFunc_Untextured_vertex hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target vs_4_0
+    entry_point fixedfunc_untextured_vertex
+    default_params
+    {
+        param_named_auto wvpMat worldviewproj_matrix
+        param_named_auto diffuseColor surface_diffuse_colour
+    }
+}
+
+fragment_program OSE_FixedFunc_Untextured_fragment hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc_untextured_fragment
+    default_params
+    {
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Known legacy family adapters (all SM4, all DX11-only).
+// Each carries its family name so diagnostics stay attributable while the
+// implementation is shared until corpus telemetry justifies divergence.
+// ---------------------------------------------------------------------------
+
+vertex_program OSE_Compat_Effect_vertex hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target vs_4_0
+    entry_point fixedfunc_vertex
+
+    preprocessor_defines COMPAT_FAMILY_EFFECT
+    default_params
+    {
+        param_named_auto wvpMat worldviewproj_matrix
+        param_named_auto texMatrix texture_matrix 0
+        param_named_auto diffuseColor surface_diffuse_colour
+    }
+}
+
+fragment_program OSE_Compat_Effect_fragment hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc_fragment
+
+    preprocessor_defines COMPAT_FAMILY_EFFECT
+    default_params
+    {
+        param_named diffuseMap int 0
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+    }
+}
+
+vertex_program OSE_Compat_Textured_vertex hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target vs_4_0
+    entry_point fixedfunc_vertex
+
+    preprocessor_defines COMPAT_FAMILY_TEXTURED
+    default_params
+    {
+        param_named_auto wvpMat worldviewproj_matrix
+        param_named_auto texMatrix texture_matrix 0
+        param_named_auto diffuseColor surface_diffuse_colour
+    }
+}
+
+fragment_program OSE_Compat_Textured_fragment hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc_fragment
+
+    preprocessor_defines COMPAT_FAMILY_TEXTURED
+    default_params
+    {
+        param_named diffuseMap int 0
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+    }
+}
+
+vertex_program OSE_Compat_Untextured_vertex hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target vs_4_0
+    entry_point fixedfunc_untextured_vertex
+
+    preprocessor_defines COMPAT_FAMILY_UNTEXTURED
+    default_params
+    {
+        param_named_auto wvpMat worldviewproj_matrix
+        param_named_auto diffuseColor surface_diffuse_colour
+    }
+}
+
+fragment_program OSE_Compat_Untextured_fragment hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc_untextured_fragment
+
+    preprocessor_defines COMPAT_FAMILY_UNTEXTURED
+    default_params
+    {
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+    }
+}
+
+vertex_program OSE_Compat_Sky_vertex hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target vs_4_0
+    entry_point fixedfunc_vertex
+
+    preprocessor_defines COMPAT_FAMILY_SKY
+    default_params
+    {
+        param_named_auto wvpMat worldviewproj_matrix
+        param_named_auto texMatrix texture_matrix 0
+        param_named_auto diffuseColor surface_diffuse_colour
+    }
+}
+
+fragment_program OSE_Compat_Sky_fragment hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc_fragment
+
+    preprocessor_defines COMPAT_FAMILY_SKY
+    default_params
+    {
+        param_named diffuseMap int 0
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+    }
+}
+
+vertex_program OSE_Compat_Base_vertex hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target vs_4_0
+    entry_point fixedfunc_vertex
+
+    preprocessor_defines COMPAT_FAMILY_BASE
+    default_params
+    {
+        param_named_auto wvpMat worldviewproj_matrix
+        param_named_auto texMatrix texture_matrix 0
+        param_named_auto diffuseColor surface_diffuse_colour
+    }
+}
+
+fragment_program OSE_Compat_Base_fragment hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc_fragment
+
+    preprocessor_defines COMPAT_FAMILY_BASE
+    default_params
+    {
+        param_named diffuseMap int 0
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+    }
+}
+
+vertex_program OSE_Compat_SimpleOneTex_vertex hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target vs_4_0
+    entry_point fixedfunc_vertex
+
+    preprocessor_defines COMPAT_FAMILY_SIMPLEONETEX
+    default_params
+    {
+        param_named_auto wvpMat worldviewproj_matrix
+        param_named_auto texMatrix texture_matrix 0
+        param_named_auto diffuseColor surface_diffuse_colour
+    }
+}
+
+fragment_program OSE_Compat_SimpleOneTex_fragment hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc_fragment
+
+    preprocessor_defines COMPAT_FAMILY_SIMPLEONETEX
+    default_params
+    {
+        param_named diffuseMap int 0
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+    }
+}
+
+vertex_program OSE_Compat_Ui_vertex hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target vs_4_0
+    entry_point fixedfunc_vertex
+
+    preprocessor_defines COMPAT_FAMILY_UI
+    default_params
+    {
+        param_named_auto wvpMat worldviewproj_matrix
+        param_named_auto texMatrix texture_matrix 0
+        param_named_auto diffuseColor surface_diffuse_colour
+    }
+}
+
+fragment_program OSE_Compat_Ui_fragment hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc_fragment
+
+    preprocessor_defines COMPAT_FAMILY_UI
+    default_params
+    {
+        param_named diffuseMap int 0
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+    }
+}
+
+vertex_program OSE_Compat_Terrain_vertex hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target vs_4_0
+    entry_point fixedfunc_vertex
+
+    preprocessor_defines COMPAT_FAMILY_TERRAIN
+    default_params
+    {
+        param_named_auto wvpMat worldviewproj_matrix
+        param_named_auto texMatrix texture_matrix 0
+        param_named_auto diffuseColor surface_diffuse_colour
+    }
+}
+
+fragment_program OSE_Compat_Terrain_fragment hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc_fragment
+
+    preprocessor_defines COMPAT_FAMILY_TERRAIN
+    default_params
+    {
+        param_named diffuseMap int 0
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+    }
+}

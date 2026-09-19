@@ -214,6 +214,14 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # no setting a mapmaker could reach for.
     "Fixes/EnhancedSchemeFallback",
 
+    # DX11 shaderless-draw guard: no pixels change, it only converts
+    # per-draw D3D11 exceptions into once-only [DX11COMPAT] diagnostics
+    # plus counters. Ships ON so one bad mod material cannot spam
+    # thousands of render exceptions. Compat itself (technique
+    # generation) stays OFF in the player preset until the live DX11
+    # mod corpus qualifies it, so it needs no allowlist entry.
+    "Fixes/DX11ShaderlessDrawGuard",
+
     # Qualified socket/netcode baseline.
     "Network/NetImprovements",
 
@@ -306,6 +314,9 @@ $shippingPolicyChecks = @{
     "Fixes/ProducerScriptPredicates" = "0"
     "Fixes/VehicleListModScoping" = "0"
     "Fixes/CliMultiParameterOptions" = "1"
+    "Fixes/DX11LegacyMaterialCompat" = "0"
+    "Fixes/DX11ShaderlessDrawGuard" = "1"
+    "Fixes/DX11LegacyMaterialAggressive" = "0"
 
     "DX11Enhanced/FXAA" = "0"
     "DX11Enhanced/EnhancedLightSelectionV2" = "0"
