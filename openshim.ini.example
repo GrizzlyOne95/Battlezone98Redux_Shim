@@ -376,6 +376,28 @@ VehicleListModScoping = 1
 ; spaces. Set to 0 for stock tokenising.
 ; Accepted: boolean. Default: ON. Restart required after changing.
 CliMultiParameterOptions = 1
+; Correct off-grid tile rectangles in the terrain detail-atlas tables.
+; Each BZ_ASSETS\common\materials\<xx>_detail_atlas.csv maps a terrain .MAP
+; name to a rectangle in that world's atlas texture. Nine of the eleven
+; shipped files lay every tile on an exact grid. el_detail_atlas.csv and
+; ga_detail_atlas.csv each carry 0.825 where every sibling row uses 0.875,
+; on rows 7 and 15 -- four rects in total. At width 0.125 that spans
+; 0.825..0.950, straddling the cell boundary at 0.875, so the tile renders
+; the right 40% of one atlas cell and the left 60% of the next. The same
+; bytes are in the macOS Steam depot, so this is upstream in Redux. Those
+; are the two atlases whose materials ship under materials\TRO\.
+; OpenShim does not write to the shipped file: it hands Redux a corrected
+; copy under openshim\_generated\atlas\ when the CSV is opened for reading.
+; Only a file that is demonstrably a uniform grid everywhere else is
+; touched, and only a coordinate with a single strictly-nearest cell is
+; moved, so a deliberately packed atlas is left exactly as authored. Every
+; decision is reported in the log under [ATLASFIX].
+; Accepted: boolean. Default: OFF. Restart required.
+; Off until a live run confirms the redirect reaches Redux's atlas parser;
+; the correction itself is verified against all eleven shipped CSVs.
+; Legacy env aliases: OPENSHIM_TERRAIN_ATLAS_RECT_REPAIR,
+;                     BZR_TERRAIN_ATLAS_RECT_REPAIR
+TerrainAtlasRectRepair = 1
 ; The multiplayer Create Game vehicle preview inherits a PSSM material scheme
 ; on a viewport that has shadows disabled, so its shader reads NaN shadow
 ; matrices and the craft renders as NaN - black - with every submission,
@@ -1241,6 +1263,22 @@ LobbyReadouts = 1
 ;                     OPENSHIM_ENABLE_LOBBY_BAN_BUTTON,
 ;                     BZR_DISABLE_LOBBY_BAN_BUTTON, BZR_ENABLE_LOBBY_BAN_BUTTON
 LobbyBanButton = 1
+
+; Remember muted players across sessions.
+; Accepted: boolean. Default: ON. No restart required.
+; ON  = a mute is written to mutes.cfg beside the shim, keyed by the same
+;       G<uid>/S<uid> stable identity bans use, and reapplied whenever that
+;       player is seen again -- through reconnects, lobby changes and renames.
+; OFF = session only. /mute and the lobby button still mute, because Redux's
+;       own per-process mute does that; it just stops outliving the process,
+;       which is what stock does. An existing mutes.cfg is left on disk and
+;       starts being honoured again the moment this goes back ON.
+; /unmute always clears the stored entry too, in either mode.
+; Local presentation only: nothing is sent to the host or the other player.
+; Legacy env aliases: OPENSHIM_DISABLE_PERSISTENT_PLAYER_MUTE (inverted),
+;                     OPENSHIM_ENABLE_PERSISTENT_PLAYER_MUTE,
+;                     BZR_DISABLE_PERSISTENT_PLAYER_MUTE, BZR_ENABLE_PERSISTENT_PLAYER_MUTE
+PersistentPlayerMute = 1
 
 ; Native BZRNet lobby-integration patch gate.
 ; Canonical:
