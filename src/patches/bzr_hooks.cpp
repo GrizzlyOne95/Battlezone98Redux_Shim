@@ -2937,8 +2937,8 @@ namespace BZROpenShim
                           ObjectLayout::kGameObjectOwnerHandle,
                       "owner handle offset disagrees with bzr_object_layout.h");
         static_assert(kGameObjectOwnerHandleOffset !=
-                          ObjectLayout::kGameObjectTugCargoClaim,
-                      "owner handle must not alias the tug/cargo claim field");
+                          ObjectLayout::kGameObjectHitch,
+                      "owner handle must not alias the hitch field");
 
         static constexpr int kGameTeamMin = 0;
         static constexpr int kGameTeamMax = 15;
@@ -2974,11 +2974,38 @@ namespace BZROpenShim
         static constexpr size_t kGameObjectIsSelectedOffset = 0x18A;
         static constexpr size_t kGameObjectIsVisibleOffset = 0x18C;
         static constexpr size_t kGameObjectSeenOffset = 0x190;
-        // UNVERIFIED: not derived from the save walker, so it was never subject
-        // to the -0xC error above and has been left alone. Treat the `target`
-        // column as advisory until it is pinned the same way the fields above
-        // now are.
-        static constexpr size_t kGameObjectTargetHandleOffset = 0x214;
+        // CORRECTED 2026-09-19, and no longer advisory. This was 0x214, which
+        // is where BZ 1.5 keeps targetHandle -- the Redux shift was never
+        // applied. In Redux 0x214 is maxAmmo, stored XOR-obfuscated with
+        // 0x33333333 (GameObject::GetMaxAmmo 0x0046D060 reads [this+0x214] and
+        // unscrambles it), so the [SATVIS] `target` column has been printing a
+        // scrambled ammo count for its whole life. Every value it recorded
+        // before this commit should be discarded rather than reinterpreted.
+        //
+        // The real field comes from the engine's own accessor pair, the same
+        // way the owner handle below it does:
+        //   GameObject::SetTarget 0x0049F450 -- 0x0049F479 `mov [eax+0x21C],ecx`
+        //   GameObject::GetTarget 0x00462610 -- 0x0046261A `mov ecx,[eax+0x21C]`
+        //                                       then GetObj 0x004DA060
+        // reached from the Lua bindings at .rdata 0x0087C4CC "SetTarget" /
+        // 0x0087C4D8 "GetTarget" (table slots 0x00871D18 / 0x00871D20, the two
+        // immediately above SetOwner).
+        //
+        // Complete-object relative and non-virtual, so it shares a base with
+        // the fields above: the call site at 0x005AA94E does `sub ecx,0x18`
+        // before calling GetTarget and re-adds 0x18 to the result, and neither
+        // accessor appears anywhere in .rdata.
+        //
+        // BZ 1.5's PDB struct corroborates the ordering: targetHandle 0x214,
+        // hitch 0x218, ownerHandle 0x21C -- the same three fields adjacent in
+        // the same order, uniformly +0x8 here.
+        static constexpr size_t kGameObjectTargetHandleOffset = 0x21C;
+        static_assert(kGameObjectTargetHandleOffset ==
+                          ObjectLayout::kGameObjectTargetHandle,
+                      "target handle offset disagrees with bzr_object_layout.h");
+        static_assert(kGameObjectTargetHandleOffset !=
+                          ObjectLayout::kGameObjectMaxAmmoObfuscated,
+                      "target handle must not alias obfuscated maxAmmo");
         static constexpr long kCameraTypeOverView = 3;
         static constexpr float kSuppressedRecentHitTime = -1.0e30f;
         static DWORD g_ChunkProxyLastRetryTick = 0;

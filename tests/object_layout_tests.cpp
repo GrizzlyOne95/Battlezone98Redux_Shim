@@ -57,11 +57,15 @@ int main()
                 "GameObject ctor store 0x004DA14B; SprayBuilding::Simulate "
                 "load 0x005DAB62");
     CheckOffset("kGameObjectTargetHandle", kGameObjectTargetHandle, 0x21C,
-                "resolver 0x00462610 `mov ecx,[eax+0x21C]` then GetObj "
-                "0x004DA060");
-    CheckOffset("kGameObjectTugCargoClaim", kGameObjectTugCargoClaim, 0x220,
+                "GameObject::SetTarget 0x0049F450 `mov [eax+0x21C],ecx` and "
+                "GetTarget 0x00462610 `mov ecx,[eax+0x21C]`");
+    CheckOffset("kGameObjectHitch", kGameObjectHitch, 0x220,
                 "zero test 0x004A8229, self-handle fill 0x004A8255, "
-                "'TUG ' clear 0x004A828A");
+                "'TUG ' clear 0x004A828A; BZ 1.5 PDB names it hitch");
+    CheckOffset("kGameObjectMaxAmmoObfuscated", kGameObjectMaxAmmoObfuscated,
+                0x214,
+                "GameObject::GetMaxAmmo 0x0046D060 `mov eax,[eax+0x214]` then "
+                "`xor eax,0x33333333`");
     CheckOffset("kGameObjectOwnerHandle", kGameObjectOwnerHandle, 0x224,
                 "GameObject::SetOwner 0x0046FC40 `mov [ecx+0x224],eax` and "
                 "GetOwner 0x004B0400 `mov ecx,[eax+0x224]`");
@@ -72,14 +76,28 @@ int main()
     CheckOffset("kObj76GameObject", kObj76GameObject, 0x8C,
                 "GameObject ctor back-pointer store 0x004DA183");
 
-    // The defect itself, stated as an invariant rather than as two literals:
+    // The defects themselves, stated as invariants rather than as literals:
     // these are adjacent fields and confusing them is silent at runtime.
-    Check(kGameObjectOwnerHandle != kGameObjectTugCargoClaim,
-          "owner handle must not alias the tug/cargo claim field");
+    // Both wrong values landed on a real, populated neighbour, which is why
+    // each read as plausible data for months instead of crashing.
+    //
+    //   ownerHandle  was 0x220 -- hitch, an adjacent field that looked like it.
+    //   targetHandle was 0x214 -- the BZ 1.5 offset, Redux shift never applied,
+    //                             which in Redux is obfuscated maxAmmo.
+    Check(kGameObjectOwnerHandle != kGameObjectHitch,
+          "owner handle must not alias the hitch field");
     Check(kGameObjectOwnerHandle != kGameObjectTargetHandle,
           "owner handle must not alias the target handle");
-    Check(kGameObjectOwnerHandle == kGameObjectTugCargoClaim + 4,
-          "owner handle sits one dword above the tug/cargo claim field");
+    Check(kGameObjectOwnerHandle == kGameObjectHitch + 4,
+          "owner handle sits one dword above hitch");
+    Check(kGameObjectHitch == kGameObjectTargetHandle + 4,
+          "hitch sits one dword above the target handle");
+    Check(kGameObjectTargetHandle != kGameObjectMaxAmmoObfuscated,
+          "target handle must not alias obfuscated maxAmmo (the 1.5 offset)");
+    Check(kGameObjectTargetHandle == kGameObjectMaxAmmoObfuscated + 8,
+          "target handle sits two dwords above maxAmmo");
+    Check(kGameObjectAmmoObfuscationKey == 0x33333333u,
+          "ammo obfuscation key is 0x33333333");
 
     // Perceived and actual team are distinct fields 0xC apart. Collapsing them
     // is what made the earlier attack-reveal helper a permanent no-op: it read
