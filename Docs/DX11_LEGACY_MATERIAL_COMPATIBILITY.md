@@ -2,8 +2,9 @@
 
 Date: 2026-09-16
 
-Status: implemented (Phase 1 probe + policy/resources; technique
-instantiation fails closed pending live ABI proof)
+Status: implemented through the first bounded instantiation slice
+(one-pass known-family and fixed-function techniques; multi-pass/aggressive
+paths still fail closed pending qualification)
 
 Branch: `agent/dx11-fixedfunc-fallback`
 
@@ -21,14 +22,21 @@ The runtime probe is wired into `EnhancedSchemeFallbackListener::
 handleSchemeNotFound` in `src/patches/ogre_render_profile.cpp`: after the
 existing supported-technique ladder misses, it selects the best semantic
 source technique, inspects the first pass through a narrow defensive Ogre
-ABI, classifies it (fixed-function vs known legacy family vs unknown
-custom), logs once, bumps counters, and fails closed to `nullptr`. Cached
-technique instantiation (clone source technique, swap in `OSE_Compat_*` /
-`OSE_FixedFunc_*` SM4 programs, cache by `BuildCompatCacheKey`) is the
-defined next step once the createTechnique/createPass/setProgram ABI is
-proven against the shipped game binary; until then the probe converts
-exception floods into bounded diagnostics and records which ladder rung
-each miss needs.
+ABI, and classifies it (fixed-function vs known legacy family vs unknown
+custom). For a one-pass known-family or supported fixed-function source it
+now clones the source with Ogre's exported `Technique::operator=`, assigns
+the requested scheme/LOD, swaps only the VS/PS references to
+`OSE_Compat_*` / `OSE_FixedFunc_*`, then calls exported
+`Resource::load(false)` on the parent material. That reload is intentional:
+the retarget marks the material for recompilation, so Ogre rebuilds its
+supported-technique scheme/LOD table and loads the SM4 programs before the
+listener returns the generated technique. The cache key is reserved before
+mutation so a failed conversion cannot synthesize one technique per draw.
+
+The initial mutation slice intentionally refuses multi-pass techniques and
+the aggressive unknown-custom path. Those continue to fail closed until
+per-pass classification/retargeting is implemented and live DX11
+qualification proves the one-pass path.
 
 Phase 2/3 resources ship on this branch:
 `resources/renderer/enhanced/openshim_dx11_fixedfunc.program` +
