@@ -14,6 +14,7 @@
 #include "shim_log.h"
 #include "ogre_shader_cache.h"
 #include "ogre_enhanced_light_selection.h"
+#include "render_effect_intent.h"
 #include "render_profile_runtime.h"
 #include "native_ui.h"
 #include "../engine/native_ui_validation.h"
@@ -36176,6 +36177,12 @@ namespace BZROpenShim
         // authoritative lifecycle seam clears them so an EXU override from one
         // mission can never leak into the shell or unrelated content.
         RenderProfiles::ClearContentRenderProfileOverride("mission reset");
+        // Renderer-effect intent is mission scoped for the same reason:
+        // a mission that asked for SSAO must not leave it asked-for in the
+        // shell or in whatever loads next. Clearing here rather than
+        // relying on the companion means a script that crashes or forgets
+        // to tear down still cannot leak a request.
+        RenderEffects::Reset();
         g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
         g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
         g_AttackRevealEnabled = kAttackRevealEnabledDefault;
