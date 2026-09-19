@@ -111,6 +111,12 @@ add_executable(resolve_table_tests
     ../src/engine/resolve_table.cpp
 )
 
+# Pins the GameObject/Ordnance field offsets that the runtime hooks read. Pure
+# header constants, so it needs no engine code and runs on the Linux host lane.
+add_executable(object_layout_tests
+    object_layout_tests.cpp
+)
+
 # Cross-checks that a patch is registered in every place it has to be. Pure
 # text over the repository's own sources, so it needs no engine code.
 add_executable(patch_registration_tests
@@ -190,6 +196,8 @@ target_include_directories(terrain_atlas_rect_repair_tests PRIVATE ../include)
 target_compile_features(terrain_atlas_rect_repair_tests PRIVATE cxx_std_20)
 target_include_directories(resolve_table_tests PRIVATE ../include ../third_party)
 target_compile_features(resolve_table_tests PRIVATE cxx_std_20)
+target_include_directories(object_layout_tests PRIVATE ../include)
+target_compile_features(object_layout_tests PRIVATE cxx_std_20)
 target_include_directories(openshim_update_manifest_tests PRIVATE ../include)
 target_compile_features(openshim_update_manifest_tests PRIVATE cxx_std_20)
 target_include_directories(ai_range_policy_tests PRIVATE ../include)
@@ -222,6 +230,7 @@ if(MSVC)
     target_compile_options(terrain_tile_blend_tests PRIVATE /W4 /WX)
     target_compile_options(terrain_atlas_rect_repair_tests PRIVATE /W4 /WX)
     target_compile_options(resolve_table_tests PRIVATE /W4 /WX)
+    target_compile_options(object_layout_tests PRIVATE /W4 /WX)
     target_compile_options(patch_registration_tests PRIVATE /W4 /WX)
     target_compile_options(openshim_update_manifest_tests PRIVATE /W4 /WX)
     target_compile_options(ai_range_policy_tests PRIVATE /W4 /WX)
@@ -244,6 +253,7 @@ else()
     target_compile_options(terrain_tile_blend_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(terrain_atlas_rect_repair_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(resolve_table_tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(object_layout_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(patch_registration_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(openshim_update_manifest_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(ai_range_policy_tests PRIVATE -Wall -Wextra -Werror)
@@ -267,6 +277,7 @@ add_test(NAME sun_flash_tests COMMAND sun_flash_tests)
 add_test(NAME terrain_tile_blend_tests COMMAND terrain_tile_blend_tests)
 add_test(NAME terrain_atlas_rect_repair_tests COMMAND terrain_atlas_rect_repair_tests)
 add_test(NAME resolve_table_tests COMMAND resolve_table_tests)
+add_test(NAME object_layout_tests COMMAND object_layout_tests)
 add_test(NAME patch_registration_tests COMMAND patch_registration_tests)
 add_test(NAME openshim_update_manifest_tests COMMAND openshim_update_manifest_tests)
 add_test(NAME ai_range_policy_tests COMMAND ai_range_policy_tests)
