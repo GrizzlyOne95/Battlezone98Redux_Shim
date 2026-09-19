@@ -307,6 +307,60 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         return LookupFamily(lower, vs, ps);
     }
 
+    bool MapLegacyFamilyProgramForStage(std::string_view legacyName,
+                                        bool wantVertex,
+                                        std::string& outCompat)
+    {
+        outCompat.clear();
+        const std::string lower = ToLowerCopy(TrimAscii(legacyName));
+        if (lower.empty() || IsNativeProgramName(lower))
+        {
+            return false;
+        }
+        const char* vs = nullptr;
+        const char* ps = nullptr;
+        if (!LookupFamily(lower, vs, ps))
+        {
+            return false;
+        }
+        outCompat.assign(wantVertex ? vs : ps);
+        return true;
+    }
+
+    bool IsExcludedFromSynthesis(std::string_view materialName,
+                                 const LegacyPassDesc& desc) noexcept
+    {
+        // Screen-space and interface surfaces. These are drawn through paths
+        // that assume their own material state, they are reached during
+        // startup before the scene exists, and nothing in the Enhanced or
+        // fixed-function ladder is meant for them.
+        static constexpr const char* kExcluded[] = {
+            "ui_", "/ui", "ui/", "uitexmat", "overlay", "cursor", "font",
+            "hud", "minimap", "radar", "scope", "cockpit", "stdquad",
+            "compositor", "rtt", "shadowcaster", "sprite",
+        };
+
+        auto hits = [](std::string_view text) noexcept {
+            if (text.empty())
+            {
+                return false;
+            }
+            for (const char* needle : kExcluded)
+            {
+                if (ContainsLower(text, needle))
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        const std::string material = ToLowerCopy(TrimAscii(materialName));
+        const std::string vs = ToLowerCopy(TrimAscii(desc.vertexProgram));
+        const std::string ps = ToLowerCopy(TrimAscii(desc.fragmentProgram));
+        return hits(material) || hits(vs) || hits(ps);
+    }
+
     const char* FixedFuncTexturedVertex() noexcept
     {
         return "OSE_FixedFunc_Textured_vertex";
@@ -325,6 +379,78 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
     const char* FixedFuncUntexturedFragment() noexcept
     {
         return "OSE_FixedFunc_Untextured_fragment";
+    }
+
+    bool ResolveCompatPrograms(CompatPath path,
+                               const LegacyPassDesc& desc,
+                               std::string& outVertex,
+                               std::string& outFragment)
+    {
+        outVertex.clear();
+        outFragment.clear();
+
+        // Texturing decides which fixed-function adapter fills a stage the
+        // family table cannot. A true fixed-function pass reports its unit
+        // count directly; a programmable pass that lost one stage keeps
+        // whatever units it declared, so the same test holds for both.
+        const bool textured = desc.textureUnits > 0;
+        const char* const ffVertex = textured ? FixedFuncTexturedVertex()
+                                              : FixedFuncUntexturedVertex();
+        const char* const ffFragment = textured ? FixedFuncTexturedFragment()
+                                                : FixedFuncUntexturedFragment();
+
+        switch (path)
+        {
+        case CompatPath::FamilyRemap:
+            // Own name first. Failing that, the other stage's name still
+            // identifies the family, and the adapters are authored as pairs --
+            // OSE_Compat_Effect_vertex belongs with OSE_Compat_Effect_fragment
+            // far more than a generic fixed-function vertex does. Only when
+            // neither stage names a known family does the generic adapter
+            // stand in.
+            if (!(desc.hasVertexRef &&
+                  MapLegacyFamilyProgramForStage(desc.vertexProgram, true,
+                                                 outVertex)) &&
+                !(desc.hasFragmentRef &&
+                  MapLegacyFamilyProgramForStage(desc.fragmentProgram, true,
+                                                 outVertex)))
+            {
+                outVertex.assign(ffVertex);
+            }
+            if (!(desc.hasFragmentRef &&
+                  MapLegacyFamilyProgramForStage(desc.fragmentProgram, false,
+                                                 outFragment)) &&
+                !(desc.hasVertexRef &&
+                  MapLegacyFamilyProgramForStage(desc.vertexProgram, false,
+                                                 outFragment)))
+            {
+                outFragment.assign(ffFragment);
+            }
+            return true;
+
+        case CompatPath::FixedFuncTextured:
+            outVertex.assign(FixedFuncTexturedVertex());
+            outFragment.assign(FixedFuncTexturedFragment());
+            return true;
+
+        case CompatPath::FixedFuncUntextured:
+            outVertex.assign(FixedFuncUntexturedVertex());
+            outFragment.assign(FixedFuncUntexturedFragment());
+            return true;
+
+        case CompatPath::AggressiveGeneric:
+            // Unknown custom semantics: the generic adapter is an explicit
+            // approximation, so it follows the observed texturing rather than
+            // any name.
+            outVertex.assign(ffVertex);
+            outFragment.assign(ffFragment);
+            return true;
+
+        case CompatPath::KeepNative:
+        case CompatPath::SkipShaderless:
+        default:
+            return false;
+        }
     }
 
     LegacyPassKind ClassifyLegacyPass(const LegacyPassDesc& desc) noexcept
@@ -719,14 +845,16 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
     {
         char buf[512] = {};
         std::snprintf(buf, sizeof(buf),
-                      "[DX11COMPAT] summary native=%llu family=%llu fixedfunc=%llu rtss=%llu aggressive=%llu unsupported=%llu skipped=%llu",
+                      "[DX11COMPAT] summary native=%llu family=%llu fixedfunc=%llu rtss=%llu aggressive=%llu unsupported=%llu skipped=%llu instantiated=%llu instantiate-failed=%llu",
                       static_cast<unsigned long long>(counters.nativeSupported),
                       static_cast<unsigned long long>(counters.familyRemaps),
                       static_cast<unsigned long long>(counters.fixedFuncGenerated),
                       static_cast<unsigned long long>(counters.rtssGenerated),
                       static_cast<unsigned long long>(counters.aggressiveFallbacks),
                       static_cast<unsigned long long>(counters.unsupportedCustom),
-                      static_cast<unsigned long long>(counters.shaderlessSkipped));
+                      static_cast<unsigned long long>(counters.shaderlessSkipped),
+                      static_cast<unsigned long long>(counters.techniquesInstantiated),
+                      static_cast<unsigned long long>(counters.instantiationFailures));
         return std::string(buf);
     }
 } // namespace BZROpenShim::RenderProfiles::Dx11Compat

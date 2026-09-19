@@ -1805,7 +1805,15 @@ namespace BZROpenShim::RenderProfiles
                         "?getNumTextureUnitStates@Pass@Ogre@@QBEGXZ");
                 resolved.getResourceName =
                     ResolveOgreExport<FnResourceGetName>(
-                        "?getName@Resource@Ogre@@QBEABV?$basic_string@DU?"
+                        // "UBE", not "QBE": Resource::getName is VIRTUAL and
+                        // decorates differently. The non-virtual spelling
+                        // resolves to nothing, GetProcAddress returns null,
+                        // and every material silently reports "<unknown>" --
+                        // which is exactly what a live DX11 run showed for
+                        // every material in the log. Calling the exported
+                        // address directly stays correct because Material
+                        // does not override getName.
+                        "?getName@Resource@Ogre@@UBEABV?$basic_string@DU?"
                         "$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
                 return resolved;
             }();
@@ -2125,13 +2133,142 @@ namespace BZROpenShim::RenderProfiles
             }
         }
 
+        // ---- synthesis refusal policy and diagnostics ----------------------
+
+        // Sentinel for a material whose Resource::getName could not be read.
+        // Not cosmetic: on the live DX11 run the one material that took the
+        // process down logged exactly this, and a pointer whose name cannot be
+        // read is a pointer that must not be mutated.
+        constexpr const char* kUnknownMaterial = "<unknown>";
+
+        // How far a synthesis attempt got. A single opaque "failed" line hid
+        // the real cause for several live runs; naming the last completed
+        // mutation step is what identified it.
+        enum SynthStage : int
+        {
+            kStageEntry = 0,
+            kStageCreated,
+            kStageAssigned,
+            kStageSchemed,
+            kStageLodSet,
+            kStagePassFetched,
+            kStagePrograms,
+            kStageReloaded,
+            kStageDone,
+        };
+
+        const char* SynthStageName(int stage)
+        {
+            switch (stage)
+            {
+            case kStageEntry: return "entry";
+            case kStageCreated: return "createTechnique";
+            case kStageAssigned: return "technique-assign";
+            case kStageSchemed: return "setSchemeName";
+            case kStageLodSet: return "setLodIndex";
+            case kStagePassFetched: return "getPass";
+            case kStagePrograms: return "setProgram";
+            case kStageReloaded: return "material-reload";
+            case kStageDone: return "done";
+            default: return "unknown";
+            }
+        }
+
+        // Refuse a material this layer cannot identify or must not touch.
+        bool IsSynthesisTarget(const std::string& materialName,
+                               const Dx11Compat::LegacyPassDesc& desc,
+                               const char* pathLabel)
+        {
+            if (materialName.empty() || materialName == kUnknownMaterial)
+            {
+                LogCompatOnce(std::string("[DX11COMPAT] ") + pathLabel +
+                                  " declined: material name unreadable; "
+                                  "refusing to mutate an unidentified material",
+                              LogLevel::Warn);
+                return false;
+            }
+            if (Dx11Compat::IsExcludedFromSynthesis(materialName, desc))
+            {
+                LogCompatOnce(std::string("[DX11COMPAT] ") + pathLabel +
+                                  " declined material=" + materialName +
+                                  " reason=excluded-class",
+                              LogLevel::Info);
+                return false;
+            }
+            return true;
+        }
+
+        // Does a GPU program of this name actually exist?
+        //
+        // Pass::setVertexProgram resolves the name through GpuProgramManager
+        // and throws ItemIdentityException on a miss. Catching that after the
+        // fact is not good enough -- Ogre has already allocated a
+        // GpuProgramUsage on the pass, leaving the material half-mutated.
+        using FnGpuProgramManagerGetSingletonPtr = void* (*)();
+        using FnResourceManagerResourceExists =
+            bool(__thiscall*)(void*, const std::string&);
+
+        struct OgreProgramLookupApi
+        {
+            FnGpuProgramManagerGetSingletonPtr getManager = nullptr;
+            FnResourceManagerResourceExists resourceExists = nullptr;
+
+            bool Valid() const
+            {
+                return getManager != nullptr && resourceExists != nullptr;
+            }
+        };
+
+        // Resolved outside any guarded core: a function-local static carries a
+        // thread-safe initialization guard, which counts as object unwinding
+        // and __try forbids it (C2712).
+        const OgreProgramLookupApi& ProgramLookupApi()
+        {
+            static const OgreProgramLookupApi api = [] {
+                OgreProgramLookupApi resolved;
+                resolved.getManager =
+                    ResolveOgreExport<FnGpuProgramManagerGetSingletonPtr>(
+                        "?getSingletonPtr@GpuProgramManager@Ogre@@SAPAV12@XZ");
+                // "UAE": resourceExists is virtual and non-const in 1.10.
+                resolved.resourceExists =
+                    ResolveOgreExport<FnResourceManagerResourceExists>(
+                        "?resourceExists@ResourceManager@Ogre@@UAE_NABV?$basic_"
+                        "string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+                return resolved;
+            }();
+            return api;
+        }
+
+        bool GuardedProgramExists(const std::string* name)
+        {
+            const OgreProgramLookupApi& api = ProgramLookupApi();
+            if (name == nullptr || name->empty() || !api.Valid())
+            {
+                return false;
+            }
+            try
+            {
+                void* manager = api.getManager();
+                if (manager == nullptr)
+                {
+                    return false;
+                }
+                return api.resourceExists(manager, *name);
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
         void* InstantiateDx11CompatTechnique(
             void* material,
             void* sourceTechnique,
             const std::string& schemeName,
             unsigned short lodIndex,
             Dx11Compat::CompatPath path,
-            const Dx11Compat::LegacyPassDesc& desc)
+            const Dx11Compat::LegacyPassDesc& desc,
+            const std::string& materialName)
         {
             if (material == nullptr || sourceTechnique == nullptr)
             {
@@ -2158,32 +2295,46 @@ namespace BZROpenShim::RenderProfiles
 
             std::string targetVs;
             std::string targetPs;
-            switch (path)
+            // ResolveCompatPrograms is stage-explicit. The older
+            // MapLegacyFamilyProgram infers vertex-vs-fragment from the
+            // spelling, which is right for "Effect_vertexHLSL" and wrong
+            // for a stage-agnostic family name -- there it falls through to
+            // the fragment adapter, and binding a fragment adapter as a
+            // vertex program is silently fatal on D3D11. It also guarantees
+            // both stages are filled, since a pass with one stage bound and
+            // the other empty is the shaderless draw this ladder exists to
+            // remove.
+            if (!Dx11Compat::ResolveCompatPrograms(path, desc, targetVs,
+                                                   targetPs))
             {
-            case Dx11Compat::CompatPath::FamilyRemap:
-                if (!desc.hasVertexRef || !desc.hasFragmentRef ||
-                    !Dx11Compat::MapLegacyFamilyProgram(desc.vertexProgram,
-                                                        targetVs) ||
-                    !Dx11Compat::MapLegacyFamilyProgram(desc.fragmentProgram,
-                                                        targetPs))
-                {
-                    return nullptr;
-                }
-                break;
-            case Dx11Compat::CompatPath::FixedFuncTextured:
-                targetVs = Dx11Compat::FixedFuncTexturedVertex();
-                targetPs = Dx11Compat::FixedFuncTexturedFragment();
-                break;
-            case Dx11Compat::CompatPath::FixedFuncUntextured:
-                targetVs = Dx11Compat::FixedFuncUntexturedVertex();
-                targetPs = Dx11Compat::FixedFuncUntexturedFragment();
-                break;
-            default:
+                return nullptr;
+            }
+
+            // Everything below this point mutates a live material, so every
+            // refusal belongs above it.
+            if (!IsSynthesisTarget(materialName, desc, "instantiate"))
+            {
+                return nullptr;
+            }
+            if (!GuardedProgramExists(&targetVs) ||
+                !GuardedProgramExists(&targetPs))
+            {
+                // Ask GpuProgramManager rather than letting
+                // Pass::setVertexProgram throw: by the time it throws, Ogre
+                // has already allocated a GpuProgramUsage on the pass, so
+                // the material is left half-mutated. On an install without
+                // the OpenShim asset package NONE of the OSE_* programs
+                // resolve, so this is the common case, not the edge case.
+                LogCompatOnce("[DX11COMPAT] instantiate declined material=" +
+                                  materialName + " reason=program-absent vs=" +
+                                  targetVs + " ps=" + targetPs,
+                              LogLevel::Warn);
                 return nullptr;
             }
 
             const unsigned short createdIndex = techApi.getNumTechniques(material);
             void* generated = nullptr;
+            int stage = kStageEntry;
             try
             {
                 generated = mutate.createTechnique(material);
@@ -2191,14 +2342,18 @@ namespace BZROpenShim::RenderProfiles
                 {
                     return nullptr;
                 }
+                stage = kStageCreated;
 
                 // Ogre 1.10's own RTSS uses this exact construction pattern:
                 // createTechnique(); *dst = *src; then retarget the clone.
                 // Technique::operator= deep-copies every Pass and each Pass
                 // deep-copies its TextureUnitStates and render state.
                 mutate.assignTechnique(generated, sourceTechnique);
+                stage = kStageAssigned;
                 mutate.setSchemeName(generated, schemeName);
+                stage = kStageSchemed;
                 mutate.setLodIndex(generated, lodIndex);
+                stage = kStageLodSet;
 
                 void* pass = GuardedGetPass(inspect.getPass, generated, 0);
                 if (pass == nullptr)
@@ -2207,8 +2362,10 @@ namespace BZROpenShim::RenderProfiles
                     return nullptr;
                 }
 
+                stage = kStagePassFetched;
                 mutate.setVertexProgram(pass, targetVs, true);
                 mutate.setFragmentProgram(pass, targetPs, true);
+                stage = kStagePrograms;
 
                 // setSchemeName/setProgram call _notifyNeedsRecompile(), which
                 // unloads a loaded Material. Resource::load(false) is therefore
@@ -2217,12 +2374,19 @@ namespace BZROpenShim::RenderProfiles
                 // loads the newly referenced SM4 programs before we hand Ogre the
                 // generated Technique from handleSchemeNotFound.
                 mutate.loadResource(material, false);
+                stage = kStageReloaded;
 
                 if (!techApi.isSupported(generated))
                 {
                     RestoreMaterialAfterCompatFailure(material, createdIndex);
+                    LogCompatOnce("[DX11COMPAT] instantiate failed material=" +
+                                      materialName + " scheme=" + schemeName +
+                                      " lastStage=" + SynthStageName(stage) +
+                                      " reason=unsupported-after-reload",
+                                  LogLevel::Warn);
                     return nullptr;
                 }
+                stage = kStageDone;
                 return generated;
             }
             catch (...)
@@ -2231,6 +2395,12 @@ namespace BZROpenShim::RenderProfiles
                 {
                     RestoreMaterialAfterCompatFailure(material, createdIndex);
                 }
+                // One opaque "failed" line is what hid the real cause for
+                // several live runs; naming the stage is what pinned it.
+                LogCompatOnce("[DX11COMPAT] instantiate failed material=" +
+                                  materialName + " scheme=" + schemeName +
+                                  " lastStage=" + SynthStageName(stage),
+                              LogLevel::Warn);
                 return nullptr;
             }
         }
@@ -2279,7 +2449,7 @@ namespace BZROpenShim::RenderProfiles
                 return nullptr;
             }
 
-            std::string materialName("<unknown>");
+            std::string materialName(kUnknownMaterial);
             {
                 std::string probed;
                 if (GuardedCopyResourceName(material, &probed) && !probed.empty())
@@ -2383,7 +2553,8 @@ namespace BZROpenShim::RenderProfiles
                                   desc.fragmentProgram),
                               LogLevel::Info);
                 void* generated = InstantiateDx11CompatTechnique(
-                    material, sourceTechnique, schemeName, lodIndex, path, desc);
+                    material, sourceTechnique, schemeName, lodIndex, path, desc,
+                    materialName);
                 if (generated != nullptr)
                 {
                     LogCompatOnce(Dx11Compat::FormatCompatAppliedLog(
@@ -2402,7 +2573,8 @@ namespace BZROpenShim::RenderProfiles
             {
                 state.fixedFunc.fetch_add(1, std::memory_order_relaxed);
                 void* generated = InstantiateDx11CompatTechnique(
-                    material, sourceTechnique, schemeName, lodIndex, path, desc);
+                    material, sourceTechnique, schemeName, lodIndex, path, desc,
+                    materialName);
                 if (generated != nullptr)
                 {
                     LogCompatOnce(Dx11Compat::FormatCompatAppliedLog(

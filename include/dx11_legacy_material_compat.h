@@ -103,6 +103,38 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
                                 std::string& outCompat);
     bool IsKnownLegacyFamilyProgram(std::string_view legacyName) noexcept;
 
+    // Stage-explicit form of the above. MapLegacyFamilyProgram infers the
+    // stage from the spelling, which is right for "Effect_vertexHLSL" and
+    // wrong for stage-agnostic family names such as "simple_one_tex" -- there
+    // the heuristic falls through to the fragment adapter, and binding a
+    // fragment adapter as a vertex program is silently fatal on D3D11. The
+    // runtime always knows which stage it is filling, so it asks for it.
+    bool MapLegacyFamilyProgramForStage(std::string_view legacyName,
+                                        bool wantVertex,
+                                        std::string& outCompat);
+
+    // Material classes this layer must never synthesize onto, however the
+    // ladder classified them.
+    //
+    // Found the hard way on a live DX11 run (2026-09-19): the resolver
+    // reached a UI material through the en-high-pssm scheme miss, remapped
+    // the UI_vertex/UI_fragment family, and synthesized onto it. The process
+    // did not survive. Two separate guards were missing and both are here
+    // now, because either alone would have prevented it:
+    //
+    //   1. The material's own name could not be read -- it logged as
+    //      "<unknown>". A pointer this layer cannot even get Resource::getName
+    //      off is not a pointer it should be calling createTechnique on.
+    //      That check lives at the call site, since it needs the live ABI.
+    //   2. UI, overlay, cursor, font, HUD and cockpit surfaces are listed as
+    //      out of scope in Docs/DX11_LEGACY_MATERIAL_COMPATIBILITY.md, and
+    //      that exclusion was never implemented. This is it.
+    //
+    // Matched case-insensitively against the material name and against both
+    // program names, because either can identify the class.
+    bool IsExcludedFromSynthesis(std::string_view materialName,
+                                 const LegacyPassDesc& desc) noexcept;
+
     // Compat program names owned by openshim_dx11_fixedfunc.program.
     const char* FixedFuncTexturedVertex() noexcept;
     const char* FixedFuncTexturedFragment() noexcept;
@@ -117,6 +149,22 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
     // combine ops return false so the caller logs once instead of guessing.
     bool IsSupportedFixedFuncCombo(int textureUnits,
                                    std::string_view colorOp0) noexcept;
+
+    // The program pair a synthesized compatibility technique must bind for a
+    // chosen path. Returns false for the paths that synthesize nothing
+    // (KeepNative, SkipShaderless): the runtime must not mutate the material
+    // in those cases.
+    //
+    // Both stages are always filled on success, because a D3D11 pass with one
+    // stage bound and the other empty is exactly the shaderless-draw failure
+    // this ladder exists to remove -- half a remap is worse than none. A pass
+    // that names a family on only one stage takes that family's adapter for
+    // both (they are authored as pairs); the generic fixed-function adapter
+    // of the matching texturing stands in only when neither stage resolves.
+    bool ResolveCompatPrograms(CompatPath path,
+                               const LegacyPassDesc& desc,
+                               std::string& outVertex,
+                               std::string& outFragment);
 
     // Pure policy: which resolver path a classified pass takes.
     // resourcesAvailable=false forces SkipShaderless for every non-native
@@ -187,6 +235,11 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         uint64_t aggressiveFallbacks = 0;
         uint64_t unsupportedCustom = 0;
         uint64_t shaderlessSkipped = 0;
+        // Techniques actually synthesized onto a live material, and attempts
+        // that failed and were negative-cached. Distinct from the path
+        // counters above, which count decisions rather than mutations.
+        uint64_t techniquesInstantiated = 0;
+        uint64_t instantiationFailures = 0;
     };
 
     std::string FormatCompatSummary(const CompatCounters& counters);
