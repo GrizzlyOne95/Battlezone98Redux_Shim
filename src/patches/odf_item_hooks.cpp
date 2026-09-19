@@ -17,6 +17,7 @@
 
 #include "bzr_options_ui.h"
 #include "odf_compat.h"
+#include "odf_item_prologue.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -45,10 +46,11 @@ OdfUseItemFn g_OriginalUseItem = nullptr;
 OdfGetItemSizeFn g_OriginalGetItemSize = nullptr;
 OdfUnlockItemFn g_OriginalUnlockItem = nullptr;
 
-// First five bytes every site must still hold (55 8B EC 8B 45:
-// push ebp / mov ebp,esp / mov eax,[ebp+8]). Anything else aborts the install.
-constexpr uint8_t kPrologue[5] = {0x55, 0x8B, 0xEC, 0x8B, 0x45};
-constexpr size_t kDetourSize = 5;
+// The prologue every site must still hold, and how much of it the trampoline
+// has to relocate. The detour overwrites five bytes but the fifth lands inside
+// `mov eax,[ebp+8]`, so the trampoline must replay six - see
+// include/odf_item_prologue.h for why relocating five breaks the return jump.
+constexpr size_t kMaxPrologueBytes = OdfPrologue::kExpectedPrologueSize;
 constexpr size_t kMaxPatchedBytes = 8u * 1024u * 1024u; // ODFs are kilobytes
 
 struct ItemRecord
@@ -174,18 +176,24 @@ void* SafeCopyEngineBytes(const void* src, size_t n)
 
 void* BuildTrampoline(uint32_t site, const char* hookName)
 {
-    uint8_t prologue[kDetourSize] = {};
-    if (!SafeReadEngineBytes(reinterpret_cast<void*>(site), prologue, kDetourSize))
+    uint8_t prologue[kMaxPrologueBytes] = {};
+    if (!SafeReadEngineBytes(reinterpret_cast<void*>(site), prologue, kMaxPrologueBytes))
     {
         LogShimA(LogLevel::Error, "odf", "%s: unreadable site 0x%08X; hook skipped", hookName, site);
         return nullptr;
     }
-    if (std::memcmp(prologue, kPrologue, kDetourSize) != 0)
+
+    // How many bytes end on an instruction boundary at or after the detour.
+    // Relocating fewer would split `mov eax,[ebp+8]` and leave the trampoline
+    // swallowing its own return jump.
+    const size_t relocate = OdfPrologue::TrampolineCopyLength(prologue, kMaxPrologueBytes);
+    if (relocate == 0)
     {
         LogShimA(LogLevel::Error, "odf", "%s: prologue mismatch at 0x%08X; hook skipped", hookName,
                   site);
         return nullptr;
     }
+
     uint8_t* tramp = static_cast<uint8_t*>(
         VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
     if (!tramp)
@@ -193,12 +201,14 @@ void* BuildTrampoline(uint32_t site, const char* hookName)
         LogShimA(LogLevel::Error, "odf", "%s: trampoline alloc failed; hook skipped", hookName);
         return nullptr;
     }
-    std::memcpy(tramp, prologue, kDetourSize);
-    tramp[kDetourSize] = 0xE9; // jmp site+5
-    const int32_t rel = static_cast<int32_t>(site + kDetourSize) -
-                        static_cast<int32_t>(reinterpret_cast<uintptr_t>(tramp) + kDetourSize + 5);
-    std::memcpy(tramp + kDetourSize + 1, &rel, sizeof(rel));
-    FlushInstructionCache(GetCurrentProcess(), tramp, kDetourSize + 5);
+    std::memcpy(tramp, prologue, relocate);
+    tramp[relocate] = 0xE9; // jmp site+relocate
+    const int32_t rel = static_cast<int32_t>(site + relocate) -
+                        static_cast<int32_t>(reinterpret_cast<uintptr_t>(tramp) + relocate + 5);
+    std::memcpy(tramp + relocate + 1, &rel, sizeof(rel));
+    FlushInstructionCache(GetCurrentProcess(), tramp, relocate + 5);
+    LogShimA(LogLevel::Info, "odf", "%s: trampoline relocated %zu prologue bytes, resumes at 0x%08X",
+              hookName, relocate, static_cast<unsigned>(site + relocate));
     return tramp;
 }
 
@@ -274,8 +284,31 @@ bool OdfInstallUnlockItemHook(uint32_t siteAddress)
 
 void* __cdecl OdfUseItemDetour(const char* name)
 {
-    if (!name || !OdfCompat::IsOdfFileName(name) || !OdfFeaturesArmed() || !g_OriginalUseItem)
-        return g_OriginalUseItem ? g_OriginalUseItem(name) : nullptr;
+    // Without a trampoline there is no such thing as failing closed here: the
+    // engine's loader has already been redirected, so returning null does not
+    // mean "stock behaviour", it means EVERY item in the game fails to load -
+    // sprite tables and fonts included. The install is supposed to prevent the
+    // detour ever being written in that state; if we are somehow reached
+    // anyway, say so once rather than silently emptying the asset system.
+    if (!g_OriginalUseItem)
+    {
+        static bool warned = false;
+        if (!warned)
+        {
+            warned = true;
+            LogShimA(LogLevel::Error, "odf",
+                      "UseItem detour reached with no original-call trampoline; every item load "
+                      "will fail. This is an install-order bug, not a content problem.");
+        }
+        return nullptr;
+    }
+
+    if (!name || !OdfCompat::IsOdfFileName(name) || !OdfFeaturesArmed())
+    {
+        bool faulted = false;
+        void* stock = SafeCallUseItem(name, faulted);
+        return faulted ? nullptr : stock;
+    }
 
     std::lock_guard<std::recursive_mutex> lock(g_OdfMutex);
     const std::string key = LowerName(name);
@@ -343,7 +376,21 @@ void* __cdecl OdfUseItemDetour(const char* name)
 
 size_t __cdecl OdfGetItemSizeDetour(const char* name)
 {
-    if (!name || !g_OriginalGetItemSize)
+    // Same reasoning as UseItem: with no trampoline, 0 is not a safe default,
+    // it is "every item is empty".
+    if (!g_OriginalGetItemSize)
+    {
+        static bool warned = false;
+        if (!warned)
+        {
+            warned = true;
+            LogShimA(LogLevel::Error, "odf",
+                      "GetItemSize detour reached with no original-call trampoline; every item "
+                      "will report size 0. This is an install-order bug.");
+        }
+        return 0;
+    }
+    if (!name)
         return 0;
     bool faulted = false;
     const size_t stock = SafeCallGetItemSize(name, faulted);
